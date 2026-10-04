@@ -700,6 +700,14 @@ fn jet_rust_emit_binary(ctx: &JetRustEmitContext, function: MIRFunction, op: MIR
         return jet_rust_emit_primitive_binary(&ctx, op, "(*{left_text})", "(*{right_text})")
     }
     if jet_rust_emit_exact_int_binary(&ctx, function, op, left, right, location) == .Val(exact) -> return exact
+    // An exact Int comparison only inspects its operands: it compares them in
+    // place through their references, never copies.
+    exact_comparison :: op == MIRBinaryOp.Eq || op == MIRBinaryOp.Ne || op == MIRBinaryOp.Lt || op == MIRBinaryOp.Gt || op == MIRBinaryOp.Le || op == MIRBinaryOp.Ge
+    if exact_comparison && jet_rust_emit_exact_int_carrier(left_ty) && jet_rust_emit_exact_int_carrier(right_ty) {
+        left_ref :: jet_rust_emit_value_reference(ctx, left, false)
+        right_ref :: jet_rust_emit_value_reference(ctx, right, false)
+        return jet_rust_emit_primitive_binary(&ctx, op, "(*{left_ref})", "(*{right_ref})")
+    }
     if op == MIRBinaryOp.Compare {
         left_ref :: jet_rust_emit_value_reference(ctx, left, false)
         right_ref :: jet_rust_emit_value_reference(ctx, right, false)
@@ -2732,8 +2740,9 @@ fn jet_rust_emit_slice(ctx: &JetRustEmitContext, function: MIRFunction, call: MI
         range_text :: if mask.len() > 1 && mask[1] -> jet_rust_emit_value_borrow(ctx, range_value) else -> jet_rust_emit_value_owned(ctx, function, range_value)
         return jet_rust_emit_prelude_args_exact(&ctx, function, call, [String]{base_text, range_text, file, line})
     }
-    start_text :: jet_rust_emit_value_owned(ctx, function, start)
-    end_text :: jet_rust_emit_value_owned(ctx, function, end)
+    // The host-word bounds read their exact Int operands in place.
+    start_text :: "(*{jet_rust_emit_value_reference(ctx, start, false)})"
+    end_text :: "(*{jet_rust_emit_value_reference(ctx, end, false)})"
     args :: [String]{base_text, jet_rust_emit_native_int_argument(&ctx, start_text, Val(location)), jet_rust_emit_native_int_argument(&ctx, end_text, Val(location)), file, line}
     jet_rust_emit_prelude_args_exact(&ctx, function, call, args)
 }
@@ -3997,6 +4006,9 @@ fn jet_rust_emit_drop_value(ctx: &JetRustEmitContext, function: MIRFunction, val
     // MIRRust drop_expression (#4318 §8): an inspected-only transfer of a
     // stable read was never made; there is nothing to release.
     if jet_rust_emit_inspected_transfer(&ctx, function, value) -> return "()"
+    // MIRRust direct_borrow_only: a binding names its place; it owns nothing
+    // to release (jet_rust_emit_place_bindings, jet_rust_emit_read_bindings).
+    if ctx.body_index.bindings.get(value.value) != None -> return "()"
     if jet_rust_emit_partial_drop_value(&ctx, function, value) == .Val(partial) -> return partial
     if jet_rust_emit_uninit_fixed_drop_value(ctx, function, value) == .Val(uninit) -> return uninit
     // MIRRust drop_expression: a borrowed parameter/capture binding is not
@@ -4992,8 +5004,9 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
         .Index(call, base, index, kind, access, panic_location, context) -> return jet_rust_emit_index(&ctx, function, call, base, index, kind, access, panic_location, context)
         .Slice(call, base, start, end, range, panic_location) -> return jet_rust_emit_slice(&ctx, function, call, base, start, end, range, panic_location)
         .Range(start, end, exclusive) -> {
-            start_text :: jet_rust_emit_value_owned(ctx, function, start)
-            end_text :: jet_rust_emit_value_owned(ctx, function, end)
+            // The host-word bounds read their exact Int operands in place.
+            start_text :: "(*{jet_rust_emit_value_reference(ctx, start, false)})"
+            end_text :: "(*{jet_rust_emit_value_reference(ctx, end, false)})"
             return "{jet_rust_emit_native_int_argument(&ctx, start_text, None)}{if exclusive -> ".." else -> "..="}{jet_rust_emit_native_int_argument(&ctx, end_text, None)}"
         }
         .Field(base, field) -> return jet_rust_emit_field_read(&ctx, function, base, field)

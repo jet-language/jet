@@ -2163,6 +2163,10 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     ctx.current_generic_params = jet_rust_emit_merge_generic_params(function_scope, function.generic_params)
     ref_bindings :: jet_rust_emit_ref_bindings(&ctx, function)
     ctx.ref_bindings = ref_bindings
+    // Reads that only feed borrows name their place; they read the ref
+    // binding rows above.
+    read_bindings :: jet_rust_emit_read_bindings(&ctx, function)
+    ctx.body_index.bindings = read_bindings
     lines := [String]{jet_rust_emit_function_signature(&ctx, function)}
     partial_lines :: jet_rust_emit_partial_declarations(&ctx, function)
     loop line in partial_lines -> &lines.push("    {line}")

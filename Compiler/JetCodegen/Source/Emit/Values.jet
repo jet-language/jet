@@ -591,9 +591,9 @@ fn jet_rust_emit_capture_access(function: MIRFunction, slot: Int) -> MIRAccess N
     panic("Jet Rust emitter reached a MIR capture without a checked capture row")
 }
 
-// MIRRust value_slot_reference: a borrowed Parameter/Capture binding lends
-// the place it names (only a Write binding lends it mutably); any other value
-// lends its slot.
+// MIRRust value_slot_reference: a binding (a borrowed Parameter/Capture, or a
+// read that only feeds borrows) lends the place it names (only a Write
+// binding lends it mutably); any other value lends its slot.
 fn jet_rust_emit_value_reference(ctx: JetRustEmitContext, value: MIRValueID, mutable: Bool) -> String Never! {
     if ctx.body_index.bindings.get(value.value) == .Val(binding) {
         if !mutable -> return "&({binding.read})"
@@ -690,12 +690,12 @@ fn jet_rust_emit_binding_uses_move_slot(ctx: JetRustEmitContext, function: MIRFu
 
 // MIRRust history_binding: a Parameter/Capture result names the retained
 // place, so MIRRust never stores it at entry; its users borrow or copy that
-// place where they read it. A binding of jet_rust_emit_place_bindings has no
-// slot: every operand use renders its place. Any other borrowed (non-Move)
-// binding still stores its slot, except when nothing reads that slot: every
-// operand use is the drop that releases nothing (jet_rust_emit_drop_value),
-// and nothing moves out of a place rooted at the binding
-// (jet_rust_emit_place_move, partial moves).
+// place where they read it. A binding of jet_rust_emit_place_bindings or
+// jet_rust_emit_read_bindings has no slot: every operand use renders its
+// place. Any other borrowed (non-Move) binding still stores its slot, except
+// when nothing reads that slot: every operand use is the drop that releases
+// nothing (jet_rust_emit_drop_value), and nothing moves out of a place rooted
+// at the binding (jet_rust_emit_place_move, partial moves).
 fn jet_rust_emit_unread_binding(ctx: &JetRustEmitContext, function: MIRFunction, instruction: MIRInstruction, value: MIRValueID) -> Bool Never! {
     if ctx.body_index.function != (Val(function.id)) -> return false
     if ctx.body_index.bindings.get(value.value) != None -> return true
@@ -767,6 +767,136 @@ fn jet_rust_emit_place_bindings(ctx: JetRustEmitContext, function: MIRFunction) 
         }
     }
     bindings
+}
+
+// MIRRust direct_borrow_projection / direct_borrow_only: the bindings of
+// jet_rust_emit_place_bindings plus every `ReadPlace` of a read parameter's
+// place whose users never need it stored (jet_rust_emit_place_read_use),
+// keyed by value id. Such a read is never made: its users read the parameter
+// place itself through jet_rust_emit_value_reference (display holes,
+// operator and index operands, borrowed arguments, inspected subjects), so
+// the function never copies a borrowed argument just to read it. A read
+// parameter's place cannot change while the function runs
+// (jet_rust_emit_immutable_read_place), so the place read at a use holds
+// exactly what the copy would. The place projects only fields and payloads:
+// an index projection would move its bounds check from the read to each use.
+// A generator keeps its copies: its `move` stream task owns everything its
+// body reads.
+fn jet_rust_emit_read_bindings(ctx: &JetRustEmitContext, function: MIRFunction) -> [U64:JetRustEmitPlaceBinding] Never! {
+    bindings := ctx.body_index.bindings
+    if function.generator != None -> return bindings
+    // Values named as an index inside a place projection: the place renders
+    // them through jet_rust_emit_index_operand or the value borrow. A range
+    // projection keeps its operand's slot.
+    projected := [U64:Bool]{}
+    loop row in function.places {
+        loop projection in row.projections {
+            if projection == {
+                .Index(_, index, _, _, _, _, _) -> { if projected.get(index.value) == None -> projected[index.value] = true }
+                .Range(range, _, _) -> projected[range.value] = false
+                else -> {}
+            }
+        }
+    }
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            value :: instruction.result ?? next
+            if instruction.operation == .ReadPlace(place) {
+                if bindings.get(value.value) == None {
+                    if jet_rust_emit_read_binding_place(&ctx, function, value, place, projected) == .Val(read) -> bindings[value.value] = JetRustEmitPlaceBinding{read: read, write: None, bitwise: jet_rust_emit_copy_carrier(ctx, jet_rust_emit_value_type(ctx, function, value))}
+                }
+            }
+        }
+    }
+    bindings
+}
+
+// The place expression a jet_rust_emit_read_bindings read names, or None when
+// the read must be stored.
+fn jet_rust_emit_read_binding_place(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID, place: MIRPlaceID, projected: [U64:Bool]) -> String? Never! {
+    if ctx.ref_bindings.payloads.get(value.value) != None || ctx.ref_bindings.collections.get(value.value) != None || ctx.ref_bindings.cursors.get(value.value) != None -> return None
+    if jet_rust_emit_immutable_read_place(&ctx, function, value) != (Val(place)) -> return None
+    row :: ctx.body_index.place_rows.get(place.value) ?? return None
+    shape :: function.places[row]
+    root := MIRValueID?{None}
+    if shape.base == .Parameter(base) -> root = Val(base)
+    parameter :: root ?? return None
+    if jet_rust_emit_parameter_access(ctx, function, parameter) != (Val(MIRAccess.Read)) -> return None
+    definition :: jet_rust_emit_find_value_instruction(ctx, function, parameter) ?? return None
+    if definition.operation == .Parameter(index, _) {
+        if jet_rust_emit_window_param(ctx, function.id, index) -> return None
+    }
+    loop projection in shape.projections {
+        if projection == {
+            .Field(_, _) | .Payload(_, _) -> {}
+            else -> return None
+        }
+    }
+    // Nothing moves out of the parameter (a moved place takes its slot), and
+    // the read is the place itself, not a widened native Int.
+    loop other in function.places {
+        if other.base == .Parameter(base) {
+            if base == parameter && ctx.body_index.moved_places.get(other.id.value) != None -> return None
+        }
+    }
+    if jet_rust_emit_partial_root_has(ctx, function, shape.base) || jet_rust_emit_native_place_int_type(&ctx, function, place) != None -> return None
+    // A place projecting from the read's own slot reads that slot.
+    if jet_rust_emit_value_slot_read(ctx, function, value) -> return None
+    if projected.get(value.value) == (Val(false)) -> return None
+    used := projected.get(value.value) != None
+    loop user in jet_rust_emit_value_users(ctx, function, value) {
+        if user.instruction < 0 {
+            if !jet_rust_emit_switch_subject_use(function, user, value) -> return None
+        } else {
+            if !jet_rust_emit_place_read_use(&ctx, function, function.blocks[user.block].instructions[user.instruction], value) -> return None
+        }
+        used = true
+    }
+    if !used -> return None
+    Val(jet_rust_emit_place(&ctx, function, place, false))
+}
+
+// A consumer of a jet_rust_emit_read_bindings read that never needs the read
+// stored: it renders the read through jet_rust_emit_value_reference (an owned
+// operand copies the place there, through jet_rust_emit_value_owned or
+// jet_rust_emit_value_move, instead of taking a copy made at the read), or
+// borrows the place the read's definition names
+// (jet_rust_emit_place_borrowing_use, a builtin receiver place), or inspects
+// a transfer of it that is never made, or drops it (the read was never made,
+// so nothing is released). No consumer borrows the read mutably.
+fn jet_rust_emit_place_read_use(ctx: &JetRustEmitContext, function: MIRFunction, instruction: MIRInstruction, value: MIRValueID) -> Bool Never! {
+    operation :: instruction.operation
+    if instruction.result == .Val(transfer) {
+        if jet_rust_emit_transparent_read(ctx, function, transfer) == (Val(value)) && jet_rust_emit_inspected_transfer(&ctx, function, transfer) -> return true
+    }
+    if operation == {
+        // An index operand renders through jet_rust_emit_index_operand; a
+        // base is borrowed for a read.
+        .Index(_, base, _, _, access, _, _) -> return base != value || access == MIRAccess.Read
+        .BuildString(_) | .Binary(_, _, _, _, _) | .Unary(_, _) | .LoopRangeInit(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _) -> return true
+        .EnumIs(_, _, _) | .EnumPayload(_, _, _, _) | .OptionIsSome(_) | .OptionValue(_) | .ResultIsOk(_) | .ResultValue(_, _) -> return true
+        .Drop(_, kind) -> return kind != MIRDropKind.ForeignHandle && !jet_rust_emit_is_stm_type(jet_rust_emit_value_type(ctx, function, value))
+        // A Core call renders each argument through
+        // jet_rust_emit_call_arg_with_borrow; a Write argument would lend the
+        // read parameter's place mutably.
+        .CoreCall(_, _, args, _, _, _) -> {
+            loop arg in args {
+                if arg.value == value && arg.access == MIRAccess.Write -> return false
+            }
+            return true
+        }
+        .Semantic(semantic) -> {
+            if semantic == {
+                .Print(_, _) -> return true
+                // A static Prelude call renders exactly as a Prelude call
+                // (jet_rust_emit_prelude_call).
+                .StaticPreludeCall(call, args, _, _) -> return jet_rust_emit_direct_borrow_call(&ctx, function, MIRCallee.Prelude{call: call}, args, value)
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    jet_rust_emit_builtin_place_receiver(operation, value) || jet_rust_emit_place_borrowing_use(&ctx, function, operation, value)
 }
 
 fn jet_rust_emit_parameter_place(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID, mutable: Bool) -> String Never! {
