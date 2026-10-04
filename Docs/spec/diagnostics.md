@@ -124,6 +124,9 @@ constant and owning decision appear only with `--verbose`.
 4. Run the focused snapshot and coverage checks, then check
    `jet explain <CODE>`. Test rendered behavior where applicable; do not add a
    persistent Markdown mirror.
+   Parser parity proofs also compare byte spans, secondary labels, edits, and
+   their applicability and safety grades in `tests/selfhost_parser.rs`; matching
+   prose alone does not prove that a machine fix edits the right source.
 
 Coverage checks both directions: each emitted code has one registered row and
 snapshot, and each row is emitted or explicitly marked retired or reserved in

@@ -75,6 +75,13 @@ fn selfhost_parser_expr(facts: &[Int], expression: Expr) {
             loop argument in args -> selfhost_parser_call_arg(&facts, argument)
             selfhost_parser_expr(&facts, receiver)
         }
+        .MethodCall(receiver, method, _, _, _, args, _, _, _, _) -> {
+            &facts.push(7)
+            selfhost_parser_text(&facts, method)
+            &facts.push(args.len())
+            loop argument in args -> selfhost_parser_call_arg(&facts, argument)
+            selfhost_parser_expr(&facts, receiver)
+        }
         else -> &facts.push(0)
     }
 }
@@ -135,6 +142,21 @@ fn selfhost_parser_diagnostic(facts: &[Int], diagnostic: Diagnostic) {
         }
         .None -> &facts.push(0)
     }
+    applicability := 0
+    if diagnostic.applicability == .Val(value) {
+        if value == DiagnosticFixApplicability.Safe -> applicability = 1
+        if value == DiagnosticFixApplicability.Suggested -> applicability = 2
+    }
+    &facts.push(applicability)
+    safety := 0
+    if diagnostic.safety == .Val(value) {
+        if value == DiagnosticFixSafety.Formatting -> safety = 1
+        if value == DiagnosticFixSafety.BehaviorPreserving -> safety = 2
+        if value == DiagnosticFixSafety.APIChanging -> safety = 3
+        if value == DiagnosticFixSafety.TargetChanging -> safety = 4
+        if value == DiagnosticFixSafety.NeedsReview -> safety = 5
+    }
+    &facts.push(safety)
     &facts.push(diagnostic.labels.len())
     loop label in diagnostic.labels {
         &facts.push(label.span.start)
@@ -228,6 +250,12 @@ const CASES: &[(&str, &str)] = &[
     ("statement-marker-use-label", "#Off(use: x) {}"),
     ("optional-method-call", "f(a?.m(x))"),
     ("optional-method-chain", "f(a?.b?.m())"),
+    // L0507 (#3681): exact diagnostic, source span, edit and refusal parity.
+    ("arm-table-braced", "fn show(score: Int) {\n    if score >= 90 {\n        print(\"a\")\n    } else if score >= 80 {\n        print(\"b\")\n    } else {\n        print(\"c\")\n    }\n    print(\"done\")\n}\n"),
+    ("arm-table-arrow", "fn run() {\n    if false -> print(\"a\") else if true -> print(\"b\") else -> print(\"c\")\n}\n"),
+    ("arm-table-value", "fn run() {\n    answer :: if true -> {\n        value :: 40 + 2\n        value\n    } else -> 0\n    print(answer)\n}\n"),
+    ("arm-table-nested", "fn run(a: Bool, b: Bool) {\n    if a {\n        if b {\n            print(\"1\")\n        } else if a {\n            print(\"2\")\n        }\n    } else if b {\n        print(\"3\")\n    }\n}\n"),
+    ("arm-table-comment-refusal", "fn run(a: Bool) {\n    if a {\n        print(\"x\")\n    } /* keep */ else if !a {\n        print(\"y\")\n    }\n}\n"),
     // E0082 (#3725): `&&` and `||` mixed without parentheses.
     ("logic-or-then-and", "f(a || b && c)"),
     ("logic-and-then-or", "f(a && b || c)"),
@@ -240,6 +268,19 @@ const CASES: &[(&str, &str)] = &[
     // E0160 (#3727): `++` and `--` are retired.
     ("retired-step-statement", "count++"),
     ("retired-step-double-minus", "f(a--b)"),
+    ("retired-step-prefix-increment", "++count"),
+    ("retired-step-postfix-decrement", "count--"),
+    ("retired-step-prefix-decrement", "--count"),
+    ("retired-step-call-argument", "print(n++)"),
+    ("retired-step-loop-condition", "loop --lives > 0 { print(lives) }"),
+    // D-TYPE-SUFFIX1 (#3687): all prefix positions, with exact safe edits.
+    ("type-prefix-list-element", "struct Entry { tags: [?String] }"),
+    ("type-prefix-optional-result", "fn find(id: Int) -> ?Entry { return None }"),
+    ("type-prefix-optional-literal", "limit :: ?Int{None}"),
+    ("type-prefix-unit-contract", "fn save(id: Int) !SaveError {}"),
+    ("type-prefix-value-contract", "fn load() -> Int !SaveError { return Ok(1) }"),
+    ("type-prefix-union-contract", "fn load() -> Int !(SaveError | LoadError) { return Ok(1) }"),
+    ("bracket-range-access-marks", "f(values[0..1], &values[0..1], ~values[0..1])"),
     // E0393 (#3743): the retired `name: Type :: value` binding.
     ("retired-typed-binding", "fn run() {\n    limit: U8 :: 250\n    print(limit)\n}\n"),
 ];
@@ -431,6 +472,19 @@ fn push_diagnostic(facts: &mut Vec<i64>, diagnostic: &Diagnostic) {
     } else {
         facts.push(0);
     }
+    facts.push(match diagnostic.applicability {
+        None => 0,
+        Some(jet::Diagnostics::FixApplicability::Safe) => 1,
+        Some(jet::Diagnostics::FixApplicability::Suggested) => 2,
+    });
+    facts.push(match diagnostic.safety {
+        None => 0,
+        Some(jet::Diagnostics::FixSafety::Formatting) => 1,
+        Some(jet::Diagnostics::FixSafety::BehaviorPreserving) => 2,
+        Some(jet::Diagnostics::FixSafety::ApiChanging) => 3,
+        Some(jet::Diagnostics::FixSafety::TargetChanging) => 4,
+        Some(jet::Diagnostics::FixSafety::NeedsReview) => 5,
+    });
     facts.push(diagnostic.labels.len() as i64);
     for label in &diagnostic.labels {
         facts.extend([label.span.start as i64, label.span.end as i64]);
@@ -497,6 +551,15 @@ fn push_expr(facts: &mut Vec<i64>, expression: &Expr) {
                 push_call_arg(facts, argument);
             }
             push_expr(facts, base);
+        }
+        Expr::MethodCall { receiver, method, args, .. } => {
+            facts.push(7);
+            push_text(facts, method);
+            facts.push(args.len() as i64);
+            for argument in args {
+                push_call_arg(facts, argument);
+            }
+            push_expr(facts, receiver);
         }
         _ => facts.push(0),
     }
@@ -608,9 +671,9 @@ fn native_facts(source: &str) -> Vec<i64> {
     facts
 }
 
-/// Every human-readable string (what, why, fix, edit text, label message) in
-/// the diagnostic prefix of a parser fact vector.
-fn diagnostic_texts(facts: &[i64]) -> Vec<String> {
+/// Decode the diagnostic prefix produced by the Jet parser, retaining the
+/// source locations and machine-fix grades for the shared UI renderer.
+fn diagnostics_from_facts(facts: &[i64]) -> Vec<Diagnostic> {
     let mut cursor = 0usize;
     let mut next = || {
         cursor += 1;
@@ -622,26 +685,49 @@ fn diagnostic_texts(facts: &[i64]) -> Vec<String> {
         String::from_utf8(bytes).expect("diagnostic text is UTF-8")
     }
     let mut out = Vec::new();
+    fn span(next: &mut impl FnMut() -> i64) -> jet::Diagnostics::Span {
+        jet::Diagnostics::Span::new(next() as usize, next() as usize)
+    }
     for _ in 0..next() {
-        text(&mut next);
-        next();
-        for _ in 0..3 {
-            out.push(text(&mut next));
-        }
-        if next() == 1 {
-            next();
-            next();
-        }
-        if next() == 1 {
-            next();
-            next();
-            out.push(text(&mut next));
-        }
+        let code = text(&mut next);
+        let severity = next();
+        let what = text(&mut next);
+        let why = text(&mut next);
+        let fix = text(&mut next);
+        let primary = if next() == 1 { Some(span(&mut next)) } else { None };
+        let mut diagnostic = Diagnostic::error(code, what, why, fix, primary);
+        diagnostic.severity = match severity {
+            1 => Severity::Error,
+            2 => Severity::Lint,
+            value => panic!("unknown Jet diagnostic severity: {value}"),
+        };
+        diagnostic.edit = if next() == 1 {
+            Some(jet::Diagnostics::TextEdit { span: span(&mut next), new_text: text(&mut next) })
+        } else {
+            None
+        };
+        diagnostic.applicability = match next() {
+            0 => None,
+            1 => Some(jet::Diagnostics::FixApplicability::Safe),
+            2 => Some(jet::Diagnostics::FixApplicability::Suggested),
+            value => panic!("unknown Jet fix applicability: {value}"),
+        };
+        diagnostic.safety = match next() {
+            0 => None,
+            1 => Some(jet::Diagnostics::FixSafety::Formatting),
+            2 => Some(jet::Diagnostics::FixSafety::BehaviorPreserving),
+            3 => Some(jet::Diagnostics::FixSafety::ApiChanging),
+            4 => Some(jet::Diagnostics::FixSafety::TargetChanging),
+            5 => Some(jet::Diagnostics::FixSafety::NeedsReview),
+            value => panic!("unknown Jet fix safety: {value}"),
+        };
         for _ in 0..next() {
-            next();
-            next();
-            out.push(text(&mut next));
+            diagnostic.labels.push(jet::Diagnostics::DiagnosticLabel {
+                span: span(&mut next),
+                message: text(&mut next),
+            });
         }
+        out.push(diagnostic);
     }
     out
 }
@@ -657,14 +743,56 @@ fn generated_jet_call_arguments_match_native_parser_contract() {
         CASES.iter().map(|(_, source)| pass.evaluate(source)).collect::<Vec<_>>()
     });
     for ((name, source), actual) in CASES.iter().zip(candidate_facts) {
+        if name.starts_with("unclosed-") || name.starts_with("retired-step-") {
+            assert_eq!(actual[0], 1, "{name}: exactly one teaching diagnostic");
+        }
         // #3719: the lexer's synthetic line terminator is never shown to a
         // reader as `;`; a source without a `;` must never have one named.
         if !source.contains(';') {
-            for text in diagnostic_texts(&actual) {
-                assert!(!text.contains("`;`"), "{name}: Jet parser diagnostic names the synthetic terminator: {text}");
-            }
+            let rendered = jet::Diagnostics::render_all(name, source, &diagnostics_from_facts(&actual));
+            assert!(!rendered.contains("`;`"), "{name}: Jet parser diagnostic names the synthetic terminator: {rendered}");
         }
         assert_eq!(actual, native_facts(source), "{name}: generated Jet parser parity");
+    }
+
+    // #3391: the frozen native parser still splits this retired alias into
+    // two bounds. Jet must retain one ordinary range argument for sema's
+    // E0214 report instead. This expected tree deliberately isn't native parity.
+    let actual = jet::run_compiler_work(|| pass.evaluate("f(values.view(0..1))"));
+    let mut expected = vec![0, 1, 1, 0, 2, 19, 0, 0, 7];
+    push_text(&mut expected, "view");
+    expected.extend([1, 0, 14, 18, 0, 0, 0, 1]);
+    push_text(&mut expected, "values");
+    expected.extend([2, 8]);
+    assert_eq!(actual, expected, "retired view retains one ordinary range argument");
+
+    // Render diagnostics actually produced by Jet, not reports from a frozen
+    // CLI. These existing UI snapshots remain the one wording contract.
+    for stem in [
+        "unclosed_paren_call",
+        "unclosed_bracket_list",
+        "unclosed_brace_block",
+        "unclosed_brace_interpolation",
+        "logic_mix_or_then_and",
+        "logic_mix_and_then_or",
+        "incr_retired_statement",
+        "incr_retired_expression",
+        "incr_retired_double_minus",
+        "type_mark_prefix_optional_retired",
+    ] {
+        let file = format!("tests/ui/{stem}.jet");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let source = fs::read_to_string(root.join(&file)).expect("teaching UI fixture");
+        let actual = jet::run_compiler_work(|| pass.evaluate(&source));
+        let diagnostics = diagnostics_from_facts(&actual);
+        if stem.starts_with("unclosed_") {
+            assert_eq!(diagnostics.len(), 1, "{file}: exactly one report");
+        }
+        let rendered = jet::Diagnostics::render_all(&file, &source, &diagnostics);
+        assert!(!rendered.contains("found `;`"), "{file}: synthetic terminator wording: {rendered}");
+        let expected = fs::read_to_string(root.join(format!("tests/ui/{stem}.stderr")))
+            .expect("teaching UI snapshot");
+        assert_eq!(rendered.trim_end(), expected.trim_end(), "{file}: Jet-produced UI snapshot");
     }
 
     assert!(tir_support::have_rustc(), "AOT and awaited-Wasm proof is required, never skipped");
