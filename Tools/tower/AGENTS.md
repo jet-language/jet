@@ -299,16 +299,24 @@ blocks the same as an unfinished card.
 ## Concurrency
 
 - Writes are serialized by a lock and applied atomically; concurrent agents
-  are safe.
-- For read-modify-write races: pass `--expect-rev N` (from `tower state`'s
-  `meta.rev`). Exit code 2 = conflict → re-read, retry.
+  are safe. Every write is field-level: it re-reads the board under the lock
+  and changes only the fields it names, so an unrelated agent write never
+  rejects or overwrites it. `tower serve` waits for the lock without
+  blocking its readers.
+- For read-modify-write races on the same field: pass `--expect-rev N` (from
+  `tower state`'s `meta.rev`). Exit code 2 = conflict → re-read, retry.
 - `tower card claim` prevents two agents double-working a card while its
   24-hour renewable lease is active. An expired lease is never a blocker.
 
 ## HTTP API (when `tower serve` is up, default :7878)
 
 ```
-GET  /api/state                     full projected state
+GET  /api/state                     board index (card summaries; ETag/304)
+GET  /api/card?id=&live=0|1         one full card; live=1 answers from memory
+GET  /api/closed                    done + archived card summaries
+GET  /api/stream?rev=&boot=         SSE: `state` (full index), then `delta`
+                                     patches per change; a client already at
+                                     rev gets `hello` and only later deltas
 GET  /api/next?agent=me&limit=5     canonical work picker
 GET  /api/lint?docs=0|1             durability sweeper findings (#457)
 GET  /api/brief?card=&agent=&claim=0|1   one-shot work packet (#462); no

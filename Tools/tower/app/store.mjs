@@ -20,7 +20,7 @@ import {
   backupRequiredAt, dataFile, historyFile, projectRoot,
   readJSON, withDirectoryAuthority, writeJSON, newId, today, now,
 } from './paths.mjs';
-import { withLock } from './lock.mjs';
+import { withLock, withLockAsync } from './lock.mjs';
 import { loadConfig, publicConfig } from './config.mjs';
 import { migrateRecommendationLosses } from './migrate.mjs';
 import {
@@ -255,7 +255,7 @@ export function openStore(dataDir) {
 
   // Read-modify-write under the cross-process lock; rev bumps on every write.
   // `expectRev` (optional) enables optimistic concurrency for API callers.
-  const mutate = (fn, { expectRev } = {}) => withLock(file, () => {
+  const mutateLocked = (fn, { expectRev } = {}) => {
     recoverPendingRepairLocked(dataDir);
     return withStorePairTransaction(dataDir, file, config, (root, pair) => {
       const s = pair.state;
@@ -275,7 +275,11 @@ export function openStore(dataDir) {
       writeJSONHeld(root, 'tower.json', s);
       return { result, state: s };
     }, preparedPairAt);
-  });
+  };
+  const mutate = (fn, options) => withLock(file, () => mutateLocked(fn, options));
+  // Same write, but waits for the lock without blocking the event loop
+  // (`tower serve`), and long enough that busy agents never reject it.
+  const mutateAsync = (fn, options) => withLockAsync(file, () => mutateLocked(fn, options));
 
   // Replace the whole state (undo). Guarded by expectRev so an interleaved
   // write from another agent can never be silently reverted. Undo touches
@@ -319,7 +323,7 @@ export function openStore(dataDir) {
   });
 
   return {
-    file, dataDir, config, load, loadLive, loadPair, mutate, restore, restoreArchived, loadHistory,
+    file, dataDir, config, load, loadLive, loadPair, mutate, mutateAsync, restore, restoreArchived, loadHistory,
     project: () => { const pair = loadPair(); return project(pair.state, config, pair.history); },
   };
 }
@@ -540,7 +544,9 @@ export function validateStoredHistory(history, source = 'history store') {
   return history;
 }
 
-function loadHistoryRaw(dataDir) {
+// One read of history.json alone (no live-board pair check). Read-only
+// archive views use this; writes go through the locked pair transaction.
+export function loadHistoryRaw(dataDir) {
   const raw = readJSON(historyFile(dataDir), null);
   if (raw == null) return emptyHistory();
   validateStoredHistory(raw);
@@ -956,22 +962,47 @@ export function radarData(s, historyCards = []) {
   });
 }
 
-function projectCardRecord(c, decisions, cards, questions) {
-  const clearance = clearanceOf(c, decisions);
-  const linkedDecisions = decisions.filter(d => d.cardId === c.id);
-  const linkedQuestions = questions.filter(q => q.cardId === c.id);
+// Group records by their cardId once, so projecting many cards does not
+// rescan every decision and question per card.
+function byCardId(list) {
+  const groups = new Map();
+  for (const item of list) {
+    let group = groups.get(item.cardId);
+    if (!group) groups.set(item.cardId, group = []);
+    group.push(item);
+  }
+  return groups;
+}
+
+function projectCardRecord(c, decisions, cards, questions, groups = null) {
+  const linkedDecisions = groups?.decisions ? (groups.decisions.get(c.id) || []) : decisions.filter(d => d.cardId === c.id);
+  const linkedQuestions = groups?.questions ? (groups.questions.get(c.id) || []) : questions.filter(q => q.cardId === c.id);
+  const clearance = clearanceOf(c, linkedDecisions);
   const openQ = linkedQuestions.filter(q => q.kind !== 'message' && q.status === 'open').length;
   return { ...c, clearance, decisions: linkedDecisions, questions: linkedQuestions, openQ, lane: laneOf(c, decisions, cards) };
 }
 
+// Board index milestones: navigation and progress only. Criteria evidence,
+// verification, and closeout records stay in the store and CLI.
+function projectMilestoneSummary(m, progress) {
+  const criteria = m.criteria || [];
+  return {
+    id: m.id, epochId: m.epochId, title: m.title, goal: m.goal, status: m.status,
+    archived: m.archived, created: m.created, metAt: m.metAt, progress,
+    criteriaCount: { total: criteria.length, settled: criteria.filter(i => i.status === 'met' || i.status === 'verified').length },
+  };
+}
+
+// One board row. Question threads live once in the index's top-level
+// `questions`; refs, probes, and blockers (already reflected in `lane`) load
+// with the full card.
 function projectCardSummary(c) {
   const summary = {
     id: c.id, num: c.num, title: c.title, kind: c.kind, track: c.track,
     epoch: c.epoch, milestoneId: c.milestoneId, phase: c.phase,
     priority: c.priority, workOrder: c.workOrder, assignee: c.assignee,
-    needsAcceptance: c.needsAcceptance, visualMedia: c.visualMedia || [], probe: c.probe || null, updated: c.updated, created: c.created,
-    completedAt: c.completedAt, blockedBy: c.blockedBy, refs: c.refs,
-    lane: c.lane, openQ: c.openQ, questions: c.questions,
+    needsAcceptance: c.needsAcceptance, visualMedia: c.visualMedia || [], updated: c.updated, created: c.created,
+    completedAt: c.completedAt, lane: c.lane, openQ: c.openQ,
   };
   if (c.hardeningDedupKey) {
     summary.hardeningDedupKey = c.hardeningDedupKey;
@@ -1039,8 +1070,9 @@ export function projectBoard(s, config = null) {
   validateProjectedPhases(s);
   const active = s.cards.filter(c => c.phase !== 'done');
   const activeIds = new Set(active.map(c => c.id));
-  const cards = active.map(c => projectCardSummary(projectCardRecord(c, s.decisions, s.cards, s.questions)));
-  const milestones = s.milestones.map(m => ({ ...m, progress: milestoneProgress(m, s.cards) }));
+  const groups = { decisions: byCardId(s.decisions), questions: byCardId(s.questions) };
+  const cards = active.map(c => projectCardSummary(projectCardRecord(c, s.decisions, s.cards, s.questions, groups)));
+  const milestones = s.milestones.map(m => projectMilestoneSummary(m, milestoneProgress(m, s.cards)));
   const inLane = (lane) => cards.filter(c => c.lane.lane === lane);
   const openDecisions = s.decisions.filter(d => isBlocking(d) && !d.draft);
   const genericDecisions = openDecisions.filter(d => d.group !== 'acceptance');
@@ -1077,17 +1109,22 @@ export function projectBoard(s, config = null) {
   };
 }
 
+// Closed cards for the board's "Show closed" list: the same summary rows as
+// the active board (no bodies, logs, or criteria). One card's full record
+// comes from projectCard() when it is opened.
 export function projectClosed(s, config = null, history = null) {
   validateProjectedPhases(s, history);
   const h = history || emptyHistory();
+  const liveGroups = { decisions: byCardId(s.decisions), questions: byCardId(s.questions) };
   const liveDone = s.cards.filter(c => c.phase === 'done')
-    .map(c => projectCardRecord(c, s.decisions, s.cards, s.questions));
+    .map(c => projectCardSummary(projectCardRecord(c, s.decisions, s.cards, s.questions, liveGroups)));
+  const archiveGroups = { decisions: byCardId(h.decisions) };
   const archived = h.cards.map(c => ({
     // Keep archive origin explicit for client cache/debugging. It is not used
     // for lane or board semantics.
-    ...projectCardRecord(c, h.decisions, h.cards, c.questions || []), archived: true,
+    ...projectCardSummary(projectCardRecord(c, h.decisions, h.cards, c.questions || [], archiveGroups)), archived: true,
   }));
-  const milestones = s.milestones.map(m => ({ ...m, progress: milestoneProgress(m, s.cards, h.cards) }));
+  const milestones = s.milestones.map(m => projectMilestoneSummary(m, milestoneProgress(m, s.cards, h.cards)));
   return {
     rev: s.meta.rev, cards: [...liveDone, ...archived],
     counts: { done: liveDone.length, archived: archived.length },

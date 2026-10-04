@@ -6,8 +6,9 @@
 // State-changing requests also need browser same-origin evidence or the
 // explicit non-browser `X-Tower-Client: cli` channel.
 //
-// Live: every mutation broadcasts the projected state over /api/stream
-// (SSE). Web push / VAPID removed (owner D-VERDICT-460-1, 2026-07-14).
+// Live: the board stays parsed in memory (app/live.mjs); every change goes
+// out over /api/stream (SSE) as an index delta. Web push / VAPID removed
+// (owner D-VERDICT-460-1, 2026-07-14).
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
@@ -22,6 +23,7 @@ import { TowerError } from './store.mjs';
 import { lint } from './lint.mjs';
 import { computeVersion } from './version.mjs';
 import * as docs from './docs.mjs';
+import { createLiveBoard } from './live.mjs';
 
 const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 const MEDIA_MIME = {
@@ -94,31 +96,24 @@ const TOWER_BIN = join(TOWER_ROOT, 'tower.mjs');
 // process — one the self-restart watcher failed to swap out — is visible
 // to the owner instead of silently 404ing new routes.
 const START_VERSION = computeVersion(TOWER_ROOT);
-// #1738 — the highest store rev this process has served to its clients,
-// tracked on the store handle (per data dir, survives a reopen). Every
-// write route compares a fresh on-disk read against it and refuses with a
-// conflict when another writer (CLI, other agent) advanced the store past
-// what this server last saw — surfaced, never overwritten.
-const noteSeen = (store, rev) => { if (rev != null && rev > (store.serveSeenRev ?? 0)) store.serveSeenRev = rev; };
-const projectedStates = new WeakMap();
-const projectState = (store, state) => {
-  const cached = projectedStates.get(state);
-  if (cached) return cached;
-  const p = { ...db.projectBoard(state, store.config), boot: BOOT, cli: `node ${TOWER_BIN}` };
-  noteSeen(store, p.meta?.rev);
-  projectedStates.set(state, p);
-  return p;
-};
-const projected = (store) => projectState(store, store.loadLive());
-const closedProjected = (store) => {
-  const pair = store.loadPair();
-  return db.projectClosed(pair.state, store.config, pair.history);
-};
-const sseClients = new Set();
-function broadcast(store, state = null) {
-  if (!sseClients.size) return;
-  const data = `data: ${JSON.stringify(state ? projectState(store, state) : projected(store))}\n\n`;
-  for (const res of [...sseClients]) { try { res.write(`event: state\n${data}`); } catch { sseClients.delete(res); } }
+// The live board (app/live.mjs) keeps the parsed board and its projected
+// index in memory, reloads only when a file changes, and turns each new
+// revision into an index delta for SSE clients.
+const decorateIndex = (index) => ({ ...index, boot: BOOT, cli: `node ${TOWER_BIN}` });
+
+function sendBody(req, res, encoded, contentType = 'application/json') {
+  const common = { 'content-type': contentType, etag: encoded.etag, 'cache-control': 'private, no-cache', vary: 'Accept-Encoding' };
+  const supplied = String(req?.headers?.['if-none-match'] || '');
+  if (supplied.split(',').map(x => x.trim()).includes(encoded.etag)) {
+    res.writeHead(304, common);
+    return res.end();
+  }
+  const acceptsGzip = /\bgzip\b/i.test(String(req?.headers?.['accept-encoding'] || ''));
+  const bytes = acceptsGzip ? encoded.gzip() : encoded.raw;
+  if (acceptsGzip) common['content-encoding'] = 'gzip';
+  common['content-length'] = bytes.length;
+  res.writeHead(200, common);
+  res.end(bytes);
 }
 
 // route → (state, payload, config) mutation. Same verbs as the CLI.
@@ -295,14 +290,6 @@ function csrfAllowed(req, res, url) {
   return false;
 }
 
-function auditAcceptanceReject(store, decisionId, route, reason, by, ownerAuthenticated = false) {
-  // Rejected owner-verification requests are still audit mutations. Do not let
-  // an unauthenticated payload forge the actor on that event.
-  const auditBy = by === 'owner' && !ownerAuthenticated ? undefined : by;
-  store.mutate((s) => db.auditAcceptanceRejection(s, decisionId, route, reason, auditBy));
-  broadcast(store);
-}
-
 async function serveStatic(req, res) {
   let p = req.url.split('?')[0];
   if (p === '/') p = '/index.html';
@@ -351,21 +338,26 @@ async function serveMedia(req, res, store, url) {
 }
 
 export function serve(store, port = 7878, open = false) {
-  // #1738 criterion 1: re-read the store before every board write; if the
-  // on-disk rev moved past what this process last served, refuse with 409,
-  // note the fresh rev, and broadcast so every client catches up — the
-  // caller retries against current state instead of silently overwriting.
-  const guardWrite = (res) => {
-    const diskRev = store.loadLive().meta.rev;
-    if (diskRev > (store.serveSeenRev ?? 0)) {
-      noteSeen(store, diskRev);
-      broadcast(store);
-      send(res, 409, { error: 'E_CONFLICT', message: `another writer advanced the board to rev ${diskRev} — state refreshed, re-read and retry` });
-      return false;
-    }
-    return true;
+  const live = createLiveBoard(store, { decorate: decorateIndex });
+  const sseClients = new Set();
+  let unsubscribe = null;
+  const pushFrame = (entry) => {
+    const frame = `event: delta\ndata: ${entry.text}\n\n`;
+    for (const res of [...sseClients]) { try { res.write(frame); } catch { sseClients.delete(res); } }
   };
-  noteSeen(store, store.loadLive().meta.rev);
+  // Writes are field-level: each route patches only the fields it names on
+  // the freshly locked store, so a write never needs the caller to have seen
+  // every other agent's change first (owner direction 2026-10-04 supersedes
+  // the #1738 whole-board rev refusal). Whole-board replaces (undo) still
+  // require expectRev, enforced by store.restore.
+  const commit = (state) => live.adopt(state).value;
+  const auditAcceptanceReject = async (decisionId, route, reason, by, ownerAuthenticated = false) => {
+    // Rejected owner-verification requests are still audit mutations. Do not let
+    // an unauthenticated payload forge the actor on that event.
+    const auditBy = by === 'owner' && !ownerAuthenticated ? undefined : by;
+    const { state } = await store.mutateAsync((s) => db.auditAcceptanceRejection(s, decisionId, route, reason, auditBy));
+    commit(state);
+  };
 
   const server = createServer(async (req, res) => {
     res.__towerReq = req;
@@ -387,7 +379,7 @@ export function serve(store, port = 7878, open = false) {
       if (url.pathname.startsWith('/media/')) return serveMedia(req, res, store, url);
 
       // ---- reads ----
-      if (req.method === 'GET' && url.pathname === '/api/state') return send(res, 200, projected(store));
+      if (req.method === 'GET' && url.pathname === '/api/state') return sendBody(req, res, live.index().body);
       if (req.method === 'GET' && url.pathname === '/api/gauntlet') {
         const root = projectRoot(store.dataDir);
         const file = root && join(root, 'Tools', 'gauntlet', 'status.json');
@@ -408,14 +400,20 @@ export function serve(store, port = 7878, open = false) {
         }
       }
       if (req.method === 'GET' && url.pathname === '/api/card') {
-        const pair = store.loadPair();
-        const s = pair.state;
-        const card = db.projectCard(s, url.searchParams.get('id') || url.searchParams.get('card'), pair.history);
-        if (!card) return send(res, 404, { error: 'E_NOT_FOUND', message: `no card ${url.searchParams.get('id') || url.searchParams.get('card')}` });
+        const ref = url.searchParams.get('id') || url.searchParams.get('card');
+        // ?live=1 (the browser modal): answer from memory now; the UI
+        // refetches the open card on the next delta anyway. A card the
+        // in-memory board does not know yet waits for the fresh read.
+        let s = url.searchParams.get('live') === '1' ? live.peek() : live.state();
+        let card = db.projectCard(s, ref);
+        if (!card && s !== live.state()) { s = live.state(); card = db.projectCard(s, ref); }
+        // Archived cards only: the live board answers without touching history.
+        card ||= db.projectCard(s, ref, live.archive());
+        if (!card) return send(res, 404, { error: 'E_NOT_FOUND', message: `no card ${ref}` });
         return send(res, 200, { rev: s.meta.rev, card }, { revision: s.meta.rev });
       }
       if (req.method === 'GET' && url.pathname === '/api/closed') {
-        return send(res, 200, closedProjected(store));
+        return sendBody(req, res, live.closed().body);
       }
       // #522 — belt+braces to the self-restart watcher: `start` is what
       // THIS process loaded at boot; `current` is a fresh read of what's on
@@ -425,32 +423,47 @@ export function serve(store, port = 7878, open = false) {
         return send(res, 200, { start: START_VERSION, current, stale: current !== START_VERSION });
       }
       if (req.method === 'GET' && url.pathname === '/api/events') {
-        const s = store.loadLive();
+        const s = live.state();
         return send(res, 200, s.events.slice(0, Number(url.searchParams.get('limit') || 50)), { revision: s.meta.rev });
       }
       if (req.method === 'GET' && url.pathname === '/api/messages') {
-        const s = store.loadLive();
+        const s = live.state();
         return send(res, 200, db.listMessages(s, {
           cardId: url.searchParams.get('card') || undefined,
           status: url.searchParams.has('status') ? url.searchParams.get('status') : 'open',
         }), { revision: s.meta.rev });
       }
       if (req.method === 'GET' && url.pathname === '/api/stream') {
+        // ?rev=&boot= lets a client that already holds the index resume
+        // with only the deltas it missed; otherwise it gets the full index.
+        const index = live.index();
+        const known = url.searchParams.get('boot') === BOOT && url.searchParams.has('rev')
+          ? live.since(Number(url.searchParams.get('rev'))) : null;
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
-        res.write(`event: state\ndata: ${JSON.stringify(projected(store))}\n\n`);
+        if (known) {
+          for (const entry of known) res.write(`event: delta\ndata: ${entry.text}\n\n`);
+          res.write(`event: hello\ndata: ${JSON.stringify({ boot: BOOT, rev: index.rev })}\n\n`);
+        } else {
+          res.write(`event: state\ndata: ${index.body.raw.toString('utf8')}\n\n`);
+        }
         sseClients.add(res);
+        unsubscribe ??= live.subscribe(pushFrame);
         const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* closed */ } }, 20_000);
-        req.on('close', () => { clearInterval(ping); sseClients.delete(res); });
+        req.on('close', () => {
+          clearInterval(ping);
+          sseClients.delete(res);
+          if (!sseClients.size && unsubscribe) { unsubscribe(); unsubscribe = null; }
+        });
         return;
       }
       if (req.method === 'GET' && url.pathname === '/api/history') {
         // #461: archived (retired) cards, optionally filtered by epoch —
         // the Board UI's done-subgroup uses this for a lazy archived count.
         const epoch = url.searchParams.get('epoch');
-        const pair = store.loadPair();
-        const h = pair.history;
+        const s = live.state();
+        const h = live.archive();
         const cards = epoch ? h.cards.filter(c => c.epoch === epoch) : h.cards;
-        const revision = pair.state.meta.rev;
+        const revision = s.meta.rev;
         if (url.searchParams.get('count') === '1') return send(res, 200, { count: cards.length }, { revision });
         return send(res, 200, { cards, count: cards.length }, { revision });
       }
@@ -460,7 +473,7 @@ export function serve(store, port = 7878, open = false) {
           : q.get('burndown') === '1' || q.get('scope') === 'burndown' ? 'burndown'
           : undefined;
         const limit = Number(q.get('limit') || (scope === 'ready-across' ? 50 : 5));
-        const s = store.loadLive();
+        const s = live.state();
         return send(res, 200, db.nextCards(s, { epoch: q.get('epoch') || undefined, track: q.get('track') || undefined, agent: q.get('agent') || undefined, limit, scope }), { revision: s.meta.rev });
       }
       // Docs — durable markdown under Docs/ + pinned scratchpad.
@@ -489,9 +502,8 @@ export function serve(store, port = 7878, open = false) {
       // #457 — durability sweeper, same rules as `tower lint`.
       if (req.method === 'GET' && url.pathname === '/api/lint') {
         const q = url.searchParams;
-        const pair = store.loadPair();
-        const s = pair.state;
-        const history = pair.history;
+        const s = live.state();
+        const history = live.archive();
         const docsRoot = join(projectRoot(store.dataDir), DOCS_DIR);
         return send(res, 200, lint(s, history, { docs: q.get('docs') === '1', docsRoot }), { revision: s.meta.rev });
       }
@@ -501,7 +513,7 @@ export function serve(store, port = 7878, open = false) {
         const q = url.searchParams;
         const agent = q.get('agent') || undefined;
         const cardRef = q.get('card') || undefined;
-        let s = store.loadLive();
+        let s = live.state();
         let card = cardRef ? db.findCard(s, cardRef) : null;
         if (cardRef && !card) return send(res, 404, { error: 'E_NOT_FOUND', message: `no card ${cardRef}` });
         if (!card) {
@@ -510,11 +522,10 @@ export function serve(store, port = 7878, open = false) {
           if (!card) return send(res, 404, { error: 'E_NOT_FOUND', message: 'nothing agent-workable — board is either empty, blocked on the owner, or done' });
         }
         if (agent && q.get('claim') === '1') {
-          if (!guardWrite(res)) return;
-          const { state } = store.mutate((s2) => db.claimCard(s2, card.id, agent));
+          const { state } = await store.mutateAsync((s2) => db.claimCard(s2, card.id, agent));
           s = state;
           card = db.findCard(s, card.id);
-          broadcast(store, state);
+          commit(state);
         }
         return send(res, 200, db.buildBrief(s, card.id), { revision: s.meta.rev });
       }
@@ -528,19 +539,18 @@ export function serve(store, port = 7878, open = false) {
         // #1738: a whole-board replace must prove which rev it thinks it is
         // undoing — an expectRev-less undo from a stale tab is an overwrite.
         if (p.expectRev == null) return send(res, 400, { error: 'E_USAGE', message: 'undo requires expectRev — read /api/state and pass its meta.rev' });
-        if (!guardWrite(res)) return;
+        // store.restore refuses unless expectRev is the board's current rev.
         const bdir = join(store.dataDir, 'backups');
         const prev = readLatestJSON(bdir, 'tower-', null);
         if (prev === null) return send(res, 400, { error: 'E_INVALID', message: 'nothing to undo (no backups yet)' });
         const { state } = store.restore(prev, { expectRev: p.expectRev });
-        broadcast(store, state);
-        return send(res, 200, { ok: true, state: projectState(store, state) });
+        return send(res, 200, { ok: true, state: commit(state) });
       }
       if (req.method === 'POST' && (url.pathname === '/api/acceptance/challenge' || url.pathname === '/api/acceptance/resolve')) {
         const p = await jsonBody(req);
         const route = url.pathname.slice(5);
-        const reject = (message) => {
-          auditAcceptanceReject(store, p.decisionId, route, message, 'owner-ui-rejected');
+        const reject = async (message) => {
+          await auditAcceptanceReject(p.decisionId, route, message, 'owner-ui-rejected');
           return send(res, 403, { error: 'E_ACCEPTANCE_OWNER_UI', message });
         };
         // Host trust is enforced once for every request above. The dedicated
@@ -550,7 +560,7 @@ export function serve(store, port = 7878, open = false) {
         if (!session) return reject('missing or expired owner UI session');
 
         if (url.pathname.endsWith('/challenge')) {
-          const s = store.loadLive();
+          const s = live.state();
           const d = s.decisions.find(x => x.id === p.decisionId);
           if (!d || d.status === 'ratified' || d.group !== 'acceptance' || !d.id.startsWith('D-ACCEPT-'))
             return reject('decision is not a live owner-verification ballot');
@@ -572,10 +582,8 @@ export function serve(store, port = 7878, open = false) {
         if (challenge.outcome !== p.outcome) return reject('owner-verification challenge is bound to another outcome');
         const provenance = { kind: 'owner-ui', session: session.auditId, challenge: challenge.challengeAudit,
           issuedFor: challenge.decisionId, outcome: challenge.outcome, resolvedAt: new Date().toISOString() };
-        if (!guardWrite(res)) return;
-        const { result, state } = store.mutate((s) => resolveAcceptance(s, p.decisionId, p.outcome, p.comment, provenance));
-        broadcast(store, state);
-        return send(res, 200, { ok: true, result, state: projectState(store, state) });
+        const { result, state } = await store.mutateAsync((s) => resolveAcceptance(s, p.decisionId, p.outcome, p.comment, provenance));
+        return send(res, 200, { ok: true, result, state: commit(state) });
       }
       if (req.method === 'POST' && url.pathname.startsWith('/api/')) {
         const name = url.pathname.slice(5);
@@ -584,31 +592,29 @@ export function serve(store, port = 7878, open = false) {
         const p = await jsonBody(req);
         if (name === 'clearance' || name === 'clearance/batch') {
           const ids = name === 'clearance' ? [p.decisionId] : (p.decisions || []).map(d => d.decisionId);
-          const s = store.loadLive();
+          const s = live.state();
           const acceptance = ids.filter(id => {
             const d = s.decisions.find(x => x.id === id);
             return d && (d.group === 'acceptance' || d.id.startsWith('D-ACCEPT-'));
           });
           if (acceptance.length) {
-            for (const id of acceptance) auditAcceptanceReject(store, id, name, 'generic clearance cannot resolve owner verification', p.by, ownerSessionTrusted(req));
+            for (const id of acceptance) await auditAcceptanceReject(id, name, 'generic clearance cannot resolve owner verification', p.by, ownerSessionTrusted(req));
             return send(res, 403, { error: 'E_ACCEPTANCE_OWNER_UI', message: 'owner-verification ballots require the dedicated owner UI action' });
           }
         }
         if (name === 'card/update') {
-          const s = store.loadLive();
+          const s = live.state();
           const c = db.findCard(s, p.id);
           const ballot = c && s.decisions.find(d => d.cardId === c.id && d.group === 'acceptance' && d.status !== 'ratified');
           const clearsFlag = 'needsAcceptance' in p && !(p.needsAcceptance === true || p.needsAcceptance === 'true');
           if ((c?.needsAcceptance && p.phase === 'done' && p.by === 'owner') || (ballot && clearsFlag)) {
             const id = ballot?.id || `D-ACCEPT-${c.num}`;
-            auditAcceptanceReject(store, id, name, 'caller-supplied by:owner or flag clearing cannot bypass owner verification', p.by, ownerSessionTrusted(req));
+            await auditAcceptanceReject(id, name, 'caller-supplied by:owner or flag clearing cannot bypass owner verification', p.by, ownerSessionTrusted(req));
             return send(res, 403, { error: 'E_ACCEPTANCE_OWNER_UI', message: 'owner verification requires the dedicated owner UI action' });
           }
         }
-        if (!guardWrite(res)) return;
-        const { result, state } = store.mutate((s, cfg, history) => fn(s, p, cfg, history), { expectRev: p.expectRev });
-        broadcast(store, state);
-        return send(res, 200, { ok: true, result, state: projectState(store, state) });
+        const { result, state } = await store.mutateAsync((s, cfg, history) => fn(s, p, cfg, history), { expectRev: p.expectRev });
+        return send(res, 200, { ok: true, result, state: commit(state) });
       }
       if (req.method === 'GET') return serveStatic(req, res);
       res.writeHead(405); res.end();
@@ -618,21 +624,13 @@ export function serve(store, port = 7878, open = false) {
       send(res, 500, { error: 'E_INTERNAL', message: String(e.message || e) });
     }
   });
-  // CLI report posts use the same file store, not this process's HTTP routes.
-  // Keep connected Now pages current without requiring a manual reload.
-  let streamRev = store.loadLive().meta.rev;
-  const reportPoll = setInterval(() => {
-    if (!sseClients.size) return;
-    try {
-      const state = store.loadLive();
-      if (state.meta.rev > streamRev) {
-        broadcast(store, state);
-        streamRev = state.meta.rev;
-      }
-    } catch (error) { console.error('tower: cannot refresh live state', error); }
-  }, 2000);
-  reportPoll.unref();
-  server.on('close', () => clearInterval(reportPoll));
+  // CLI and agent writes land in the files directly; live.mjs notices them
+  // (fs.watch + stat poll) and pushes the delta to connected clients.
+  server.on('close', () => {
+    live.close();
+    for (const res of [...sseClients]) { try { res.end(); } catch { /* closed */ } }
+    sseClients.clear();
+  });
   server.on('error', (e) => {
     if (e.code === 'EADDRINUSE') {
       console.error(`tower: port ${port} is already in use (another Tower or app?) — try --port ${port + 1}`);

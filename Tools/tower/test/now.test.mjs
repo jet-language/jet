@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import * as db from '../app/store.mjs';
 import { DEFAULTS } from '../app/config.mjs';
 import { serve } from '../app/server.mjs';
-import { buildOwnerActions, renderNowReports } from '../app/ui/now.js';
+import { buildOwnerActions, renderNowReports, relativeTime } from '../app/ui/now.js';
 
 const towerRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const tower = join(towerRoot, 'tower.mjs');
@@ -23,12 +23,15 @@ const invalid = fn => assert.throws(fn, error => error.code === 'E_INVALID');
 function board() {
   const s = db.empty('Now');
   const card = db.addCard(s, { title: 'Report work', by: 'Pip' }, DEFAULTS);
-  // Projection fixtures: open, ratified, draft and owner-acceptance decisions.
+  // Projection fixtures: open, ratified, draft and owner-acceptance decisions;
+  // D-WAIT is a visual check still waiting for its screen capture.
   s.decisions.push(
     { id: 'D-OPEN', cardId: card.id, title: 'Pick behavior', status: 'open' },
     { id: 'D-DONE', cardId: card.id, title: 'Already voted', status: 'ratified' },
     { id: 'D-DRAFT', cardId: card.id, title: 'Not ready', status: 'open', draft: true },
-    { id: 'D-CHECK', cardId: card.id, title: 'Check presentation', status: 'open', group: 'acceptance' },
+    { id: 'D-CHECK', cardId: card.id, title: 'Check presentation', status: 'open', group: 'acceptance',
+      visualMedia: [{ kind: 'image', path: 'docs/proposals/visual-acceptance/media/now/screen.png', alt: 'Now page briefing', caption: 'after' }] },
+    { id: 'D-WAIT', cardId: card.id, title: 'Capture missing', status: 'open', group: 'acceptance' },
   );
   return { s: db.normalize(s), card };
 }
@@ -98,8 +101,8 @@ test('Now renders latest briefing expanded, collapsed history, metrics, workers 
   assert.match(html, /<h1 class="md__h md__h1">Progress<\/h1>/);
   assert.match(html, /<strong>Verified<\/strong>/);
   assert.doesNotMatch(html, /<script>/);
-  assert.match(html, /<details class="report__history"><summary>Briefing history · 1/);
-  assert.match(html, /<details class="report__past"><summary>Old/);
+  assert.match(html, /<details class="report__history" data-report="briefing-history"><summary>Briefing history · 1/);
+  assert.match(html, /<details class="report__past" data-report="briefing:[^"]+"><summary>Old/);
   assert.match(html, /<progress max="100" value="75"/);
   assert.match(html, /Active workers:<\/b> Pip/);
   assert.match(html, /Waiting for integration/);
@@ -110,6 +113,33 @@ test('Now renders latest briefing expanded, collapsed history, metrics, workers 
   assert.match(empty, /No briefing posted yet/);
   assert.match(empty, /No status snapshot posted yet/);
   assert.match(empty, /Vote: Pick behavior/);
+});
+
+test('Now reports fold to a one-line summary with title and update time, honoring saved choices', () => {
+  const { s } = board();
+  db.postBriefing(s, { title: 'Morning', body: 'Shipped.', by: 'Pip' });
+  db.postStatus(s, { snapshot: { ...snapshot(), summary: 'Port is 80% done' }, by: 'Pip' });
+  const projected = db.projectBoard(s);
+  const open = renderNowReports(projected);
+  for (const key of ['briefing', 'status', 'actions']) assert.match(open, new RegExp(`<details class="report [^"]*" data-report="${key}" open>`));
+  const folded = renderNowReports(projected, { isOpen: (key) => key !== 'status' });
+  assert.match(folded, /data-report="status">\s*<summary class="report__summary">/, 'status folds when the owner closed it');
+  const summary = /data-report="status">\s*<summary class="report__summary">([\s\S]*?)<\/summary>/.exec(folded)[1];
+  assert.match(summary, /Status board/);
+  assert.match(summary, /Port is 80% done/);
+  assert.match(summary, /Updated <time datetime="[^"]+"[^>]*data-rel>just now<\/time>/);
+  const briefSummary = /data-report="briefing" open>\s*<summary class="report__summary">([\s\S]*?)<\/summary>/.exec(folded)[1];
+  assert.match(briefSummary, /Morning/);
+  assert.match(briefSummary, /<time datetime=/);
+});
+
+test('relative report times', () => {
+  const now = Date.parse('2026-10-04T12:00:00Z');
+  assert.equal(relativeTime('2026-10-04T11:59:40Z', now), 'just now');
+  assert.equal(relativeTime('2026-10-04T11:48:00Z', now), '12 min ago');
+  assert.equal(relativeTime('2026-10-04T07:00:00Z', now), '5 h ago');
+  assert.match(relativeTime('2026-09-20T07:00:00Z', now), /2026/);
+  assert.equal(relativeTime('not a date', now), 'not a date');
 });
 
 test('CLI posts persist with history/list/show, rev guards, help and live HTTP/SSE projection', { timeout: 15000 }, async t => {
