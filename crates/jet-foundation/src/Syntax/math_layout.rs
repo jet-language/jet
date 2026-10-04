@@ -826,12 +826,6 @@ pub const KW_JOB: &str = "Job";
 /// D-JOB-SUBCMD1=C: the closed scope menu accepted by `#Job(<scope>)`.
 pub const JOB_SCOPE_VARIANTS: &[&str] = &["Dev", "Ship", "Internal"];
 
-/// D-JOB-NAMES1=A (amends D-JOB-SUBCMD1=C): the only names a `#Job fn` cannot
-/// take. `run`, `dev`, `build`, and `test` are Jet's lifecycle entries
-/// (D-JPK-TASKRUN1=A); a built program's own argument parser answers `help`
-/// and `version`. Jobs run under `jet jobs <name>` (D-JOB-ARGV1=A), so every
-/// other Jet command word is an ordinary job name. Sema rejects these as E0928.
-pub const JOB_RESERVED_NAMES: &[&str] = &["run", "dev", "build", "test", "help", "version"];
 
 /// D-SCHEDULE1: `#Every(…)` — a declarative schedule marker on a `#Job fn`.
 /// Legal only alongside `#Job` (E0925 otherwise).

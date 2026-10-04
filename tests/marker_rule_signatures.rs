@@ -84,15 +84,14 @@ fn run() {
 
 #[test]
 fn job_scope_and_reserved_names_use_the_job_diagnostic() {
-    // D-JOB-NAMES1=A: Jet command words such as `output`, `serve`, and `lint`
-    // are ordinary job names; only the lifecycle entries, `help`, and
-    // `version` are reserved.
+    // D-JET-VERBS1=A: every registered top-level command is reserved.
+    // Retired words and nested-only words are not reserved.
     let valid = codes(
-        "#Job(.Ship) fn ship() {}\n#Job(.Internal) fn inspect_job() {}\n#Job fn output() {}\n#Job fn serve() {}\n#Job fn lint() {}\nfn run() {}",
+        "#Job(.Ship) fn ship() {}\n#Job(.Internal) fn inspect_job() {}\n#Job fn output() {}\n#Job fn serve() {}\nfn run() {}",
     );
     assert!(valid.is_empty(), "{valid:?}");
 
-    for reserved in ["run", "dev", "build", "test", "help", "version"] {
+    for reserved in ["run", "dev", "build", "test", "help", "version", "lint", "fmt", "check", "clean", "inspect"] {
         let diagnostics = codes(&format!("#Job fn {reserved}() {{}}\nfn main() {{}}"));
         assert!(
             diagnostics.iter().any(|code| code == "E0928"),

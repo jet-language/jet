@@ -9,17 +9,14 @@ if [[ "$cur" == -* ]]; then
 COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
 return 0
 fi
-if [[ $COMP_CWORD -eq 1 ]]; then
+    local job_names
+job_names="$(jet --json jobs 2>/dev/null | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')"
+cmds="$cmds $job_names"
+    if [[ $COMP_CWORD -eq 1 ]]; then
 COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
 return 0
 fi
-    if [[ $COMP_CWORD -eq 2 && "${COMP_WORDS[1]}" == "jobs" ]]; then
-local job_names
-job_names="$(jet --json jobs 2>/dev/null | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')"
-COMPREPLY=( $(compgen -W "$job_names" -- "$cur") )
-return 0
-fi
-    if [[ $COMP_CWORD -eq 2 ]]; then
+if [[ $COMP_CWORD -eq 2 ]]; then
 case "${COMP_WORDS[1]}" in
         registry) COMPREPLY=( $(compgen -W "publish yank keygen key vendor" -- "$cur") ); return 0 ;;
         db) COMPREPLY=( $(compgen -W "migrate" -- "$cur") ); return 0 ;;

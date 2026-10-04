@@ -8,12 +8,10 @@ param($wordToComplete,$commandAst,$cursorPosition)
 $words = @($commandAst.CommandElements | ForEach-Object { $_.Extent.Text })
 $choices = if ($wordToComplete.StartsWith('-')) {
 $JetFlags
-} elseif ($words.Count -ge 2 -and $words[1] -eq 'jobs') {
-$JetJobs
 } elseif ($words.Count -ge 2 -and $JetGroups.ContainsKey($words[1])) {
 $JetGroups[$words[1]]
 } else {
-$JetCommands
+$JetCommands + $JetJobs
 }
 $choices | Where-Object { $_ -like "$wordToComplete*" } |
 ForEach-Object { [System.Management.Automation.CompletionResult]::new($_,$_,"ParameterValue",$_) }
