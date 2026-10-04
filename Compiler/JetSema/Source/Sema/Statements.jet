@@ -1164,6 +1164,114 @@ fn sema_stmt_for_in_body_mentions(state: SemaOwnershipState, references_before: 
     false
 }
 
+// True when the checked loop body names the definition `key` on any path,
+// as Rust's syntactic test does (`block_free_var_reads(body)` in
+// crates/jet-codegen/src/Codegen/TIR/lower/statements.rs). The ownership
+// references above miss an arm that does not fall through, whose branch
+// state is dropped: `loop x in s.xs { if c { f(&s, x); return } }` looked
+// stable, lowered an in-place walk, and rustc rejected the `&mut s` call
+// that also borrows `s.xs[i]` (E0502).
+fn sema_stmt_for_in_tir_mentions(statements: [TStmt], key: String) -> Bool {
+    if sema_stmt_for_in_tir_assigns(statements, key) -> return true
+    loop statement in statements {
+        loop child in tir_stmt_children(statement) {
+            if sema_stmt_for_in_tir_expr_names(child, key) -> return true
+        }
+    }
+    false
+}
+
+fn sema_stmt_for_in_tir_local_is(local: TLocal, key: String) -> Bool Never! {
+    symbol :: local.symbol_id ?? return false
+    symbol.key == key
+}
+
+// A local read, an address of the whole local, or a lambda capture of it;
+// `tir_expr_children` covers every nested expression.
+fn sema_stmt_for_in_tir_expr_names(value: TExpr, key: String) -> Bool {
+    if value.kind == {
+        .Local(local) -> return sema_stmt_for_in_tir_local_is(local, key)
+        .AddressOf(place, _, _) | .RawAddressOf(place) -> {
+            if place == .Local(local) -> return sema_stmt_for_in_tir_local_is(local, key)
+        }
+        .Lambda(lambda) | .LambdaValue(lambda) -> {
+            loop capture in lambda.captures {
+                if sema_stmt_for_in_tir_local_is(capture.local, key) -> return true
+            }
+        }
+        .InlineBlock(body) -> {
+            if sema_stmt_for_in_tir_assigns(body, key) -> return true
+        }
+        else -> {}
+    }
+    loop child in tir_expr_children(value) {
+        if sema_stmt_for_in_tir_expr_names(child, key) -> return true
+    }
+    false
+}
+
+// A whole-local assignment `key = …` at any depth: its place is not an
+// expression child (`tir_stmt_children`).
+fn sema_stmt_for_in_tir_assigns(statements: [TStmt], key: String) -> Bool Never! {
+    loop statement in statements {
+        if statement == {
+            .Assign(place, _, _, _, _, _) -> {
+                if place == .Local(local) {
+                    if sema_stmt_for_in_tir_local_is(local, key) -> return true
+                }
+            }
+            .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) -> {
+                if sema_stmt_for_in_tir_assigns(body, key) -> return true
+            }
+            .RefutableBind(_, _, fallback, _) -> {
+                if sema_stmt_for_in_tir_assigns(fallback, key) -> return true
+            }
+            .CountedLoop(_, init, _, step, _, body, _) -> {
+                if sema_stmt_for_in_tir_assigns([TStmt]{init}, key) || sema_stmt_for_in_tir_assigns(body, key) -> return true
+                if step == .Val(nested) {
+                    if sema_stmt_for_in_tir_assigns([TStmt]{nested}, key) -> return true
+                }
+            }
+            .If(_, then_body, else_body, _, _) -> {
+                if sema_stmt_for_in_tir_assigns(then_body, key) -> return true
+                if else_body == .Val(else_statements) {
+                    if sema_stmt_for_in_tir_assigns(else_statements, key) -> return true
+                }
+            }
+            .Match(_, arms, _, _) -> loop arm in arms {
+                if sema_stmt_for_in_tir_assigns(arm.body, key) -> return true
+            }
+            .EnumMatch(_, _, arms, else_body, _, _) -> {
+                loop arm in arms {
+                    if sema_stmt_for_in_tir_assigns(arm.body, key) -> return true
+                }
+                if else_body == .Val(else_statements) {
+                    if sema_stmt_for_in_tir_assigns(else_statements, key) -> return true
+                }
+            }
+            .RangeSwitch(_, arms, else_body, _) -> {
+                loop arm in arms {
+                    if sema_stmt_for_in_tir_assigns(arm.body, key) -> return true
+                }
+                if sema_stmt_for_in_tir_assigns(else_body, key) -> return true
+            }
+            .MixedSwitch(_, _, arms, else_body, _) -> {
+                loop arm in arms {
+                    if sema_stmt_for_in_tir_assigns(arm.body, key) -> return true
+                }
+                if else_body == .Val(else_statements) {
+                    if sema_stmt_for_in_tir_assigns(else_statements, key) -> return true
+                }
+            }
+            .GCEdit(_, _, _, _, _, edited, _) -> {
+                if sema_stmt_for_in_tir_assigns([TStmt]{edited}, key) -> return true
+            }
+            else -> {}
+        }
+    }
+    false
+}
+
 fn sema_stmt_for_in_stable_list(collection_type: Type) -> Bool Never! {
     if sema_expr_unwrap_tag(collection_type) == {
         .List(_) -> true
@@ -4671,7 +4779,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                         if bindingless && !nested_bindingless -> context.implicit_loop_subject_depth += 1
                         nested := sema_check_statements(body, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth + 1)
                         if bindingless && !nested_bindingless -> context.implicit_loop_subject_depth -= 1
-                        source_stable := stable_root_key != None && !sema_stmt_for_in_body_mentions(state, references_before, stable_root_key ?? "")
+                        source_stable := stable_root_key != None && !sema_stmt_for_in_body_mentions(state, references_before, stable_root_key ?? "") && !sema_stmt_for_in_tir_mentions(nested.value, stable_root_key ?? "")
                         loop context.iter_borrowed.len() > iter_borrowed_depth -> _ := &context.iter_borrowed.pop()
                         context.arrow_loop_body = previous_arrow_loop_body
                         if !nested.complete -> valid = false

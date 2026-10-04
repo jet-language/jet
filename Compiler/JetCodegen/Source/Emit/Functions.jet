@@ -290,10 +290,21 @@ fn jet_rust_emit_fold_numbered(text: String, prefix: String, suffix: String) -> 
     jet_rust_emit_fold_digits(~(bytes[start..<end]))
 }
 
+// MIRRust parameter_binding excludes `src_`, the module prefix of the Rust
+// emitter's item paths (`__jet_src_c_c…`). This emitter's item paths are the
+// generated paths of checked keys: `module:<n>:…` for types, traits and
+// constants and `function:module:<n>:…` for functions. Counting those as
+// bindings made every closure carrier whose consumer repeats its parameter
+// type look like a conflict, so no borrowing closure ever folded and its
+// `&mut` capture lived to the function end (rustc E0499).
+fn jet_rust_emit_fold_item_path(text: String) -> Bool Never! {
+    text.starts_with("__jet_src_") || text.starts_with("__jet_module_c") || text.starts_with("__jet_function_cmodule_c")
+}
+
 // MIRRust parameter_binding: a mangled parameter (`__jet_<name>`), not a slot
 // or a symbol.
 fn jet_rust_emit_fold_parameter(text: String) -> Bool Never! {
-    if !text.starts_with("__jet_") -> return false
+    if !text.starts_with("__jet_") || jet_rust_emit_fold_item_path(text) -> return false
     bytes :: text.bytes()
     if bytes.len() <= 6 -> return false
     first :: Int.from_u8(bytes[6])
@@ -302,7 +313,7 @@ fn jet_rust_emit_fold_parameter(text: String) -> Bool Never! {
         if !jet_rust_emit_identifier_byte(byte) -> return false
     }
     name :: String.from_bytes(~(bytes[6..<bytes.len()])) ?? ""
-    !name.starts_with("src_") && !jet_rust_emit_fold_numbered(name, "l_", "") && !jet_rust_emit_fold_numbered(name, "v_", "") && name != "string"
+    !jet_rust_emit_fold_numbered(name, "l_", "") && !jet_rust_emit_fold_numbered(name, "v_", "") && name != "string"
 }
 
 // First offset at or after `from` where `pattern` occurs in `bytes`, or -1.
@@ -387,7 +398,7 @@ fn jet_rust_emit_fold_pure(expression: String) -> Bool Never! {
         }
         return true
     }
-    if text.starts_with("__jet_src_") && text.contains("::__jet_") {
+    if jet_rust_emit_fold_item_path(text) && text.contains("::__jet_") {
         symbol := true
         loop byte in text.bytes() {
             if !jet_rust_emit_identifier_byte(byte) && Int.from_u8(byte) != 58 -> symbol = false
