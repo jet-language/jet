@@ -115,6 +115,36 @@ test('Now renders latest briefing expanded, collapsed history, metrics, workers 
   assert.match(empty, /Vote: Pick behavior/);
 });
 
+test('Now shows markdown context and Done only for pending snapshot actions, leaving ballots linked', () => {
+  const { s } = board();
+  const status = db.postStatus(s, { by: 'Pip', snapshot: { ...snapshot(), ownerActions: [
+    { id: 'review-layout', text: 'Inspect <layout>', details: '**Compare** layouts.\n\n<script>bad()</script>',
+      links: [{ decision: 'D-OPEN' }] },
+    { text: 'Another action', details: 'Use `preview`.' },
+  ] } });
+  const html = renderNowReports(db.projectBoard(s));
+  assert.equal((html.match(/data-report-action-done=/g) || []).length, 2);
+  assert.match(html, /data-report-action-done="review-layout"/);
+  assert.ok(html.includes(`data-report-snapshot="${status.id}"`));
+  assert.match(html, /aria-label="Done: Inspect &lt;layout&gt;"/);
+  assert.match(html, /<strong>Compare<\/strong>/);
+  assert.match(html, /&lt;script&gt;bad\(\)&lt;\/script&gt;/);
+  assert.match(html, /<code class="md__code">preview<\/code>/);
+  assert.doesNotMatch(html, /<script>/);
+  const vote = /<li><span>Vote: Pick behavior<\/span>(.*?)<\/li>/s.exec(html)[1];
+  assert.match(vote, /data-report-decision="D-OPEN"/);
+  assert.doesNotMatch(vote, /data-report-action-done/);
+  db.doneOwnerAction(s, status.id, 'review-layout', 'owner');
+  const updated = renderNowReports(db.projectBoard(db.normalize(JSON.parse(JSON.stringify(s)))));
+  assert.doesNotMatch(updated, /Inspect &lt;layout&gt;|<strong>Compare<\/strong>|review-layout/);
+  assert.equal((updated.match(/data-report-action-done=/g) || []).length, 1);
+  assert.match(updated, /Vote: Pick behavior/);
+  assert.equal(buildOwnerActions(db.projectBoard(s)).length, 3);
+  for (const action of status.ownerActions) db.doneOwnerAction(s, status.id, action.id, 'owner');
+  s.decisions = [];
+  assert.match(renderNowReports(db.projectBoard(s)), /No open ballots or reported actions/);
+});
+
 test('Now reports fold to a one-line summary with title and update time, honoring saved choices', () => {
   const { s } = board();
   db.postBriefing(s, { title: 'Morning', body: 'Shipped.', by: 'Pip' });
@@ -204,5 +234,52 @@ test('CLI posts persist with history/list/show, rev guards, help and live HTTP/S
   const httpStatus = await fetch(`${url}/api/status/post`, { method: 'POST',
     headers: { 'content-type': 'application/json', 'x-tower-client': 'cli' }, body: JSON.stringify({ by: 'Pip', snapshot: snapshot() }) });
   assert.equal(httpStatus.status, 200);
-  assert.equal((await httpStatus.json()).state.statusSnapshot.workstreams[0].title, 'Compiler');
+  const statusReply = await httpStatus.json();
+  assert.equal(statusReply.state.statusSnapshot.workstreams[0].title, 'Compiler');
+  const current = statusReply.result;
+  const actionId = current.ownerActions[0].id;
+  const payload = { snapshotId: current.id, id: actionId, by: 'owner' };
+  const complete = (headers, body = payload) => fetch(`${url}/api/status/action-done`, { method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
+  const cliRejected = await complete({ 'x-tower-client': 'cli' });
+  assert.equal(cliRejected.status, 403);
+  assert.equal((await cliRejected.json()).error, 'E_OWNER_ONLY');
+  const forged = await complete({ origin: url, cookie: 'tower-owner-session=forged', 'x-tower-owner-action': 'done' });
+  assert.equal(forged.status, 403);
+  const page = await fetch(url);
+  const cookie = page.headers.get('set-cookie').split(';', 1)[0];
+  const headers = { origin: url, cookie, 'x-tower-owner-action': 'done' };
+  const csrf = await complete({ ...headers, origin: 'https://evil.example' });
+  assert.equal(csrf.status, 403);
+  assert.equal((await csrf.json()).error, 'E_CSRF');
+  const noMarker = await complete({ origin: url, cookie });
+  assert.equal(noMarker.status, 403);
+  const missing = await complete(headers, { ...payload, id: 'missing' });
+  assert.equal(missing.status, 404);
+  const stale = await complete(headers, { ...payload, snapshotId: status.id });
+  assert.equal(stale.status, 404);
+  const observer = new AbortController();
+  t.after(() => observer.abort());
+  const updates = await fetch(`${url}/api/stream`, { signal: observer.signal });
+  const updatesReader = updates.body.getReader();
+  await updatesReader.read(); // initial state
+  const completed = await complete(headers, { ...payload, by: 'Pip' });
+  assert.equal(completed.status, 200);
+  const completedReply = await completed.json();
+  assert.equal(completedReply.result.doneBy, 'owner', 'server assigns owner attribution from the session');
+  assert.ok(completedReply.result.doneAt);
+  assert.doesNotMatch(renderNowReports(completedReply.state), /Inspect layout/);
+  let updateText = '';
+  while (!updateText.includes('"doneBy":"owner"')) {
+    const chunk = await updatesReader.read();
+    assert.equal(chunk.done, false);
+    updateText += new TextDecoder().decode(chunk.value);
+  }
+  observer.abort();
+  const otherDevice = await (await fetch(`${url}/api/state`)).json();
+  assert.equal(otherDevice.statusSnapshot.ownerActions[0].doneAt, completedReply.result.doneAt);
+  assert.doesNotMatch(renderNowReports(otherDevice), /Inspect layout/);
+  const disk = db.openStore(join(cwd, '.tower')).load();
+  assert.equal(disk.statusSnapshot.ownerActions[0].doneBy, 'owner');
+  assert.equal(disk.events[0].action, 'status.action.done');
 });

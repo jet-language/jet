@@ -120,6 +120,7 @@ function sendBody(req, res, encoded, contentType = 'application/json') {
 const routes = {
   'briefing/post':   (s, p) => db.postBriefing(s, p),
   'status/post':     (s, p) => db.postStatus(s, p),
+  'status/action-done': (s, p) => db.doneOwnerAction(s, p.snapshotId, p.id, p.by),
   'card/add':        (s, p, cfg) => db.addCard(s, p, cfg),
   'card/update':     (s, p, cfg) => db.updateCard(s, p.id, p, cfg),
   'card/claim':      (s, p) => db.claimCard(s, p.id, p.by),
@@ -590,6 +591,11 @@ export function serve(store, port = 7878, open = false) {
         const fn = routes[name];
         if (!fn) return send(res, 404, { error: 'E_USAGE', message: `unknown route ${name}` });
         const p = await jsonBody(req);
+        if (name === 'status/action-done') {
+          if (!sameOrigin(req) || !ownerSession(req) || req.headers['x-tower-owner-action'] !== 'done')
+            return send(res, 403, { error: 'E_OWNER_ONLY', message: 'snapshot action completion requires the owner UI session' });
+          p.by = 'owner';
+        }
         if (name === 'clearance' || name === 'clearance/batch') {
           const ids = name === 'clearance' ? [p.decisionId] : (p.decisions || []).map(d => d.decisionId);
           const s = live.state();

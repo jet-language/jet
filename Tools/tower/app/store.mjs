@@ -708,6 +708,11 @@ export function normalize(s, historyCards = null, sync = true) {
   delete s.meta.digestCursor;
   for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'papercuts', 'events', 'briefings']) s[k] ||= [];
   s.statusSnapshot ??= null;
+  // Existing snapshots get deterministic ids until the next normal mutation
+  // persists them; repeated reads must identify the same owner action.
+  s.statusSnapshot?.ownerActions.forEach((action, index) => {
+    action.id ??= `${s.statusSnapshot.id}:action:${index + 1}`;
+  });
   delete s.messages;   // messaging was removed; drop the legacy key on next write
   // D-TWR-OPS1=A: active epoch is derived solely from epoch.status === 'active'.
   // One-time reconcile of the retired meta.currentEpoch pointer, then drop it so
@@ -2785,8 +2790,22 @@ function validateStatusSnapshot(record) {
     if (stream.updatedAt !== undefined) reportTime(stream.updatedAt, 'workstream.updatedAt');
     reportLinks(stream.links);
   }
+  const actionIds = new Set();
   for (const action of reportArray(record.ownerActions, 'status.ownerActions')) {
     if (!plainObject(action)) fail('E_INVALID', 'owner action must be an object');
+    if (action.id !== undefined) {
+      reportText(action.id, 'owner action id');
+      if (actionIds.has(action.id)) fail('E_INVALID', `duplicate owner action id ${action.id}`);
+      actionIds.add(action.id);
+    }
+    if (action.details !== undefined && typeof action.details !== 'string')
+      fail('E_INVALID', 'owner action details must be markdown text');
+    if (action.doneAt !== undefined) {
+      reportTime(action.doneAt, 'owner action doneAt');
+      if (action.doneBy !== 'owner') fail('E_INVALID', 'owner action doneBy must be owner');
+    } else if (action.doneBy !== undefined) {
+      fail('E_INVALID', 'owner action doneBy needs doneAt');
+    }
     reportText(action.text, 'owner action text');
     reportLinks(action.links);
   }
@@ -2817,6 +2836,13 @@ export function postBriefing(s, p) {
 export function postStatus(s, p) {
   if (!plainObject(p.snapshot)) fail('E_INVALID', 'status post needs a JSON snapshot object');
   const { summary, updatedAt, milestones, workstreams, ownerActions = [] } = structuredClone(p.snapshot);
+  for (const action of reportArray(ownerActions, 'status.ownerActions')) {
+    if (!plainObject(action)) fail('E_INVALID', 'owner action must be an object');
+    if (action.id === undefined) action.id = newId('owner-action');
+    // Posting a report cannot impersonate an owner completion.
+    delete action.doneAt;
+    delete action.doneBy;
+  }
   const record = { id: newId('status'), by: p.by, created: now(),
     ...(summary !== undefined ? { summary } : {}), ...(updatedAt !== undefined ? { updatedAt } : {}),
     milestones, workstreams, ownerActions };
@@ -2825,6 +2851,19 @@ export function postStatus(s, p) {
   s.statusSnapshot = record;
   logEvent(s, { by: record.by, action: 'status.post', ref: record.id, note: record.summary || '' });
   return record;
+}
+
+export function doneOwnerAction(s, snapshotId, id, by) {
+  if (by !== 'owner') fail('E_OWNER_ONLY', 'snapshot action completion is owner-only');
+  const snapshot = s.statusSnapshot;
+  if (!snapshot || snapshot.id !== snapshotId) fail('E_NOT_FOUND', `no status snapshot ${snapshotId}`);
+  const action = snapshot.ownerActions.find(action => action.id === id)
+    || fail('E_NOT_FOUND', `no owner action ${id}`);
+  if (action.doneAt) return action;
+  action.doneAt = now();
+  action.doneBy = by;
+  logEvent(s, { by, action: 'status.action.done', ref: id, note: snapshot.id });
+  return action;
 }
 
 // ---- mutations: ideas ------------------------------------------------------
