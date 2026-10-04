@@ -22,6 +22,121 @@ use std::fmt::Write as _;
 pub const PLUGIN_MAX_PARAMS: usize = 1024;
 const PLUGIN_MAX_VALUE_DEPTH: usize = 64;
 
+// D-PLUGIN-FAILURE1=A: the transport preserves the public failure domain.
+pub const PLUGIN_MAX_FRAMES: usize = 32;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginFrame {
+    pub function: String,
+    pub module: String,
+    pub offset: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginFault {
+    pub export: String,
+    pub message: String,
+    pub frames: Vec<PluginFrame>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginLimit { Fuel, Memory, Table, Time, Wire }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginError {
+    Guest(PluginFault),
+    Denied(PluginFault),
+    Budget { limit: PluginLimit, fault: PluginFault },
+    Defect(PluginFault),
+}
+
+impl PluginError {
+    pub fn fault(&self) -> &PluginFault {
+        match self {
+            Self::Guest(fault) | Self::Denied(fault) | Self::Budget { fault, .. } | Self::Defect(fault) => fault,
+        }
+    }
+
+    pub fn defect(export: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::Defect(PluginFault { export: export.into(), message: message.into(), frames: Vec::new() })
+    }
+}
+
+impl std::fmt::Display for PluginError {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        out.write_str(&self.fault().message)
+    }
+}
+
+impl std::error::Error for PluginError {}
+
+pub fn plugin_encode_error(error: &PluginError) -> String {
+    let mut out = String::from("E:");
+    let (kind, limit) = match error {
+        PluginError::Guest(_) => ('G', None),
+        PluginError::Denied(_) => ('D', None),
+        PluginError::Budget { limit, .. } => ('B', Some(limit)),
+        PluginError::Defect(_) => ('X', None),
+    };
+    out.push(kind);
+    if let Some(limit) = limit {
+        out.push(match limit {
+            PluginLimit::Fuel => 'F', PluginLimit::Memory => 'M', PluginLimit::Table => 'T',
+            PluginLimit::Time => 'C', PluginLimit::Wire => 'W',
+        });
+    }
+    let fault = error.fault();
+    plugin_write_tagged(&mut out, 'T', &fault.export);
+    plugin_write_tagged(&mut out, 'T', &fault.message);
+    let frames = &fault.frames[..fault.frames.len().min(PLUGIN_MAX_FRAMES)];
+    let _ = write!(out, "{}:", frames.len());
+    for frame in frames {
+        plugin_write_tagged(&mut out, 'T', &frame.function);
+        plugin_write_tagged(&mut out, 'T', &frame.module);
+        plugin_write_tagged(&mut out, 'I', &frame.offset.to_string());
+    }
+    out
+}
+
+fn plugin_read_text(bytes: &[u8], pos: &mut usize, tag: u8) -> Option<String> {
+    if bytes.get(*pos) != Some(&tag) { return None; }
+    *pos += 1;
+    Some(plugin_read_payload(bytes, pos)?.to_owned())
+}
+
+fn plugin_read_error(bytes: &[u8]) -> Option<PluginError> {
+    let kind = *bytes.first()?;
+    let mut pos = 1;
+    let limit = if kind == b'B' {
+        let limit = match bytes.get(pos)? {
+            b'F' => PluginLimit::Fuel, b'M' => PluginLimit::Memory, b'T' => PluginLimit::Table,
+            b'C' => PluginLimit::Time, b'W' => PluginLimit::Wire, _ => return None,
+        };
+        pos += 1;
+        Some(limit)
+    } else { None };
+    let export = plugin_read_text(bytes, &mut pos, b'T')?;
+    let message = plugin_read_text(bytes, &mut pos, b'T')?;
+    let count = plugin_read_number(bytes, &mut pos)?;
+    if count > PLUGIN_MAX_FRAMES { return None; }
+    let mut frames = Vec::with_capacity(count);
+    for _ in 0..count {
+        let function = plugin_read_text(bytes, &mut pos, b'T')?;
+        let module = plugin_read_text(bytes, &mut pos, b'T')?;
+        if bytes.get(pos) != Some(&b'I') { return None; }
+        pos += 1;
+        let offset = plugin_read_payload(bytes, &mut pos)?.parse().ok()?;
+        frames.push(PluginFrame { function, module, offset });
+    }
+    if pos != bytes.len() { return None; }
+    let fault = PluginFault { export, message, frames };
+    Some(match kind {
+        b'G' => PluginError::Guest(fault), b'D' => PluginError::Denied(fault),
+        b'B' => PluginError::Budget { limit: limit?, fault }, b'X' => PluginError::Defect(fault),
+        _ => return None,
+    })
+}
+
 fn plugin_write_tagged(out: &mut String, tag: char, payload: &str) {
     let _ = write!(out, "{tag}{}:", payload.len());
     out.push_str(payload);
@@ -85,14 +200,15 @@ pub fn plugin_encode_params(values: &[PluginValue]) -> String {
     out
 }
 
-pub fn plugin_decode_result(wire: &str) -> Result<PluginValue, String> {
-    if let Some(message) = wire.strip_prefix("E:") {
-        return Err(message.to_owned());
+pub fn plugin_decode_result(wire: &str) -> Result<PluginValue, PluginError> {
+    if let Some(body) = wire.strip_prefix("E:") {
+        return Err(plugin_read_error(body.as_bytes())
+            .unwrap_or_else(|| PluginError::defect("", "plugin returned malformed failure")));
     }
     let body = wire.strip_prefix("O:")
-        .ok_or_else(|| "plugin returned malformed component value".to_owned())?;
+        .ok_or_else(|| PluginError::defect("", "plugin returned malformed component value"))?;
     plugin_decode_value(body.as_bytes())
-        .map_err(|_| "plugin returned malformed component value".to_owned())
+        .map_err(|_| PluginError::defect("", "plugin returned malformed component value"))
 }
 
 fn plugin_read_number(bytes: &[u8], pos: &mut usize) -> Option<usize> {

@@ -2,7 +2,7 @@ package {
     name: "core.plugin"
     version: "0.0.1"
     edition: "2026"
-    description: "Load a native plugin from disk."
+    description: "Load and call a sandboxed WASM Component."
     license: "MIT"
     outputs: {
         plugin: .Library{ entry: plugin }
@@ -15,3 +15,32 @@ package {
 // intrinsic.  The intrinsic requires a literal artifact so sema can attach its
 // frozen Component interface; source must not project a generic or fake
 // handle, and the provider retains authority and error checks.
+
+// D-PLUGIN-FAILURE1=A. The shared host returns these carriers on every call.
+pub struct PluginFrame {
+    pub function: String
+    pub module: String
+    pub offset: Int
+}
+
+pub struct PluginFault {
+    pub export: String
+    pub message: String
+    pub frames: [PluginFrame]
+}
+
+pub enum PluginLimit {
+    Fuel
+    Memory
+    Table
+    Time
+    Wire
+}
+
+#Error
+pub enum PluginError {
+    Guest(PluginFault)
+    Denied(PluginFault)
+    Budget(limit: PluginLimit, fault: PluginFault)
+    Defect(PluginFault)
+}

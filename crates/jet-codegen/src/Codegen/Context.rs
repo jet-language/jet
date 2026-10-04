@@ -957,6 +957,10 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-DBDRIVER1: the tagged SQL parameter/column value + its error type.
         "DBValue" => Some("DBValue"),
         "DBError" => Some("DBError"),
+        "PluginFrame" => Some("PluginFrame"),
+        "PluginFault" => Some("PluginFault"),
+        "PluginLimit" => Some("PluginLimit"),
+        "PluginError" => Some("PluginError"),
         // D-RAYLIB1=A: display-gated graphics bridge types.
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
@@ -1743,6 +1747,10 @@ impl Cx {
             (Some("core.email"), "RecipientReport") => Some("RecipientReport"),
             (Some("core.email"), "SendReport") => Some("SendReport"),
             (Some("core.email"), "EmailError") => Some("EmailError"),
+            (Some("core.plugin"), "PluginFrame") => Some("PluginFrame"),
+            (Some("core.plugin"), "PluginFault") => Some("PluginFault"),
+            (Some("core.plugin"), "PluginLimit") => Some("PluginLimit"),
+            (Some("core.plugin"), "PluginError") => Some("PluginError"),
             (Some("core.email"), "SMTPAuth") => Some("SMTPAuth"),
             (Some("core.email"), "TLSTrust") => Some("TLSTrust"),
             (Some("core.email"), "SMTPConfig") => Some("SMTPConfig"),

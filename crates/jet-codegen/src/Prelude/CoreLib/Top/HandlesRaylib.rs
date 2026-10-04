@@ -343,6 +343,9 @@ macro_rules! jet_plugin_bridge {
                 }
             }
         }
+        fn jet_plugin_call(handle: u64, name: &str, params: &str) -> String {
+            $bridge::jet_plugin_call(handle, name, params)
+        }
     };
 }
 

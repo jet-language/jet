@@ -27716,8 +27716,8 @@ impl<'a> RustEmitter<'a> {
         let MirTypeKind::Result { ok, err } = result_ty.kind() else {
             panic!("MIR plugin export `{export_name}` result is not a checked Result")
         };
-        if !matches!(self.plugin_unwrap_type(err).kind(), MirTypeKind::String) {
-            panic!("MIR plugin export `{export_name}` result error is not checked String")
+        if !matches!(self.plugin_unwrap_type(err).kind(), MirTypeKind::Apply { name, .. } if crate::Codegen::core_rust_type_name(&name.name) == Some("PluginError")) {
+            panic!("MIR plugin export `{export_name}` result error is not checked PluginError")
         }
         let params = signature
             .params
@@ -27754,7 +27754,7 @@ impl<'a> RustEmitter<'a> {
              Ok(__jet_plugin_result_value) => \
              (|__jet_plugin_result_value: {wire}PluginValue| -> Result<{result_type}, String> {{ \
              {decoded} \
-             }})(__jet_plugin_result_value), \
+             }})(__jet_plugin_result_value).map_err(|message| {wire}PluginError::defect({export_name:?}, message)), \
              Err(__jet_plugin_error) => Err(__jet_plugin_error), \
              }} \
              }}"

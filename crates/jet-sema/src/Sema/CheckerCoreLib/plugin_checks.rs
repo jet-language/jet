@@ -142,24 +142,24 @@ impl<'a> Checker<'a> {
                 Some(span),
             ));
             self.infer_plugin_args(args);
-            return Some(Some(result_ty(Type::String, Type::String)));
+            return Some(Some(result_ty(Type::String, Type::Named("PluginError".to_string()))));
         }
 
         let Some(interface) = interface else {
             self.plugin_method_diagnostic(method, None, span);
             self.infer_plugin_args(args);
-            return Some(Some(result_ty(Type::String, Type::String)));
+            return Some(Some(result_ty(Type::String, Type::Named("PluginError".to_string()))));
         };
         let Some(export) = interface.exports.get(method) else {
             self.plugin_method_diagnostic(method, Some(interface), span);
             self.infer_plugin_args(args);
-            return Some(Some(result_ty(Type::String, Type::String)));
+            return Some(Some(result_ty(Type::String, Type::Named("PluginError".to_string()))));
         };
 
         let result = self.check_plugin_export(export, args, span);
         let result = result.map(|ty| self.resolve_type(ty)).unwrap_or_else(|| {
             Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())
         });
-        Some(Some(result_ty(result, Type::String)))
+        Some(Some(result_ty(result, Type::Named("PluginError".to_string()))))
     }
 }

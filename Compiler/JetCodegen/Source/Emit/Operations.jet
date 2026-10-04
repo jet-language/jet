@@ -5148,11 +5148,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                     return emitted
                 }
                 .HostBorrowCallback(callable, params) -> return jet_rust_emit_host_callback(&ctx, function, callable, params, true, false)
-                .PluginInvoke(call, handle, _, _, args) -> {
-                    values := [MIRValueID]{handle}
-                    loop arg in args -> &values.push(arg)
-                    return jet_rust_emit_semantic_values(&ctx, function, call, values)
-                }
+                .PluginInvoke(call, handle, export_name, signature, args) -> return jet_rust_emit_plugin_invoke(&ctx, function, call, handle, export_name, signature, args, result)
                 .HTTPRouterRegister(call, receiver, path, handler, method, handler_param_names, contract, http_location) -> return jet_rust_emit_http_router_register(&ctx, function, call, receiver, path, handler, method, handler_param_names, contract, http_location)
                 .TextPatternMatch(call, subject, parts) -> return jet_rust_emit_text_pattern_match(&ctx, function, call, subject, parts, result)
                 .BinaryPatternMatch(call, subject, parts) -> return jet_rust_emit_binary_pattern_match(&ctx, function, call, subject, parts, result)

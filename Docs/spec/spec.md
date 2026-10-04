@@ -4019,6 +4019,12 @@ empty capability set, never an ambient fallback. Registered imports re-check
 the same typed decision at the call edge and retain resource scope. Failure is a
 clean `Err`, not a host crash. Guest-local `Mem` effects support Component text
 ABI values but do not grant host capabilities.
+Each export call returns `T PluginError!` (D-PLUGIN-FAILURE1=A). Match `Guest`,
+`Denied`, `Budget(limit, fault)`, or `Defect` rather than reading the display text.
+The `PluginFault` retains the export, message, and bounded guest frames; `?`
+retains the host call line through the ordinary failure journey. Loading a
+malformed Component does not stop the host: its first call reports `Guest` with
+export `load` and no frames.
 
 The manifest `export:` target names the interface and defaults to the package
 name. The frozen public interface is keyed as `plugin__<export>` in
