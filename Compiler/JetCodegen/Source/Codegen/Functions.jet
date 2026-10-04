@@ -1695,6 +1695,7 @@ fn jet_codegen_lower_function(builder: &JetCodegenBuilder, function: TFunc, stat
     // #3740: lower against the executable signature; a plain-return function
     // (`T Never!`) returns its success value directly.
     jet_codegen_begin_function(&builder, jet_codegen_executable_function(function))
+    builder.stable_element_lets = jet_codegen_stable_element_lets(statements, expression)
     if lambda != None {
         value := lambda
         jet_codegen_validate_lambda_metadata(value)

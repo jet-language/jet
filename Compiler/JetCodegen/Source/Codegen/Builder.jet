@@ -369,6 +369,10 @@ struct JetCodegenBuilder {
     // a read window binding names another value's slot, so a consuming use
     // copies it instead of moving the slot out of its owner.
     pub read_alias_places: [U64:Bool]
+    // D-MEM-COPYSEM1: the immutable place bindings of the function whose root
+    // their scope leaves alone (jet_codegen_stable_element_lets), by
+    // jet_codegen_element_let_key.
+    pub stable_element_lets: [String:Bool]
     // #3740: the plain-return call a propagating `Try` consumes directly
     // (`jet_codegen_plain_try_identity`), and whether that call took it.
     pub plain_try_operand: String?
@@ -772,6 +776,7 @@ fn jet_codegen_new_builder(function: TFunc, function_index: ^JetCodegenFunctionI
         window_aliases: [String]{},
         read_windows: [U64:Bool]{},
         read_alias_places: [U64:Bool]{},
+        stable_element_lets: [String:Bool]{},
         plain_try_operand: None,
         plain_try_taken: false,
     }
@@ -830,6 +835,7 @@ struct JetCodegenFunctionState {
     pub window_aliases: [String]
     pub read_windows: [U64:Bool]
     pub read_alias_places: [U64:Bool]
+    pub stable_element_lets: [String:Bool]
     pub plain_try_operand: String?
     pub plain_try_taken: Bool
 }
@@ -897,6 +903,7 @@ fn jet_codegen_begin_function(builder: &JetCodegenBuilder, function: TFunc) Neve
         window_aliases: [String]{},
         read_windows: [U64:Bool]{},
         read_alias_places: [U64:Bool]{},
+        stable_element_lets: [String:Bool]{},
         plain_try_operand: None,
         plain_try_taken: false,
     })
@@ -954,6 +961,7 @@ fn jet_codegen_function_state(builder: JetCodegenBuilder) -> JetCodegenFunctionS
         window_aliases: builder.window_aliases,
         read_windows: builder.read_windows,
         read_alias_places: builder.read_alias_places,
+        stable_element_lets: builder.stable_element_lets,
         plain_try_operand: builder.plain_try_operand,
         plain_try_taken: builder.plain_try_taken,
     }
@@ -1004,6 +1012,7 @@ fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, state: ^JetCo
     builder.window_aliases = state.window_aliases
     builder.read_windows = state.read_windows
     builder.read_alias_places = state.read_alias_places
+    builder.stable_element_lets = state.stable_element_lets
     builder.plain_try_operand = state.plain_try_operand
     builder.plain_try_taken = state.plain_try_taken
 }
@@ -1048,11 +1057,13 @@ fn jet_codegen_terminate(builder: &JetCodegenBuilder, terminator: MIRTerminator)
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::emit
 fn jet_codegen_emit(builder: &JetCodegenBuilder, span: Span, ty: Type?, requested: MIROperation) -> MIRValueID? {
-    // D-MEM-COPYSEM1: a read parameter's place has no storage to give up.
-    // Consuming a read alias of it (a read window or a read-place binding)
-    // copies the place, exactly as consuming the copy it stands for would.
+    // D-MEM-COPYSEM1: a read parameter's place has no storage to give up,
+    // and neither has an element of a container (Rust `lower_receiver_place`
+    // never moves an index place). Consuming a read alias of one (a read
+    // window or a read-place binding) copies the place, exactly as consuming
+    // the copy it stands for would.
     operation := requested
-    if requested == .MovePlace(moved) && jet_codegen_read_parameter_place(builder, moved) -> operation = MIROperation.ReadPlace{place: moved}
+    if requested == .MovePlace(moved) && jet_codegen_unmovable_place(builder, moved) -> operation = MIROperation.ReadPlace{place: moved}
     operation = jet_codegen_scalar_copy_fact(builder, operation)
     role := "operation"
     identity := jet_codegen_identity(&builder, "operation", span, role, "")
