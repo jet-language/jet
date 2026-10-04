@@ -53,7 +53,15 @@ const COMMAND_FLAGS = {
   init: { flags: ['name', 'dir'] },
   import: { flags: ['dir', 'name', 'force'] },
   serve: { flags: ['port', 'open', 'noWatch'] },
-  status: { flags: ['days', 'window', 'color'] },
+  status: { flags: ['days', 'window', 'color'], verbs: {
+    post: payload('expectRev'),
+    show: [],
+  }},
+  briefing: { verbs: {
+    post: by('file', 'title', 'sections', 'expectRev'),
+    list: [],
+    show: [],
+  }},
   state: { flags: [] },
   help: { flags: ['check'] },
   card: { verbs: {
@@ -77,9 +85,9 @@ const COMMAND_FLAGS = {
     list: ['open', 'card'],
     show: [],
     scaffold: ['id', 'out'],
-    add: payload('id', 'card', 'title', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec',
+    add: payload('id', 'card', 'title', 'situation', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec',
       'group', 'ballotMode', 'shortAuthorizedBy', 'draft'),
-    update: payload('title', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group',
+    update: payload('title', 'situation', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group',
       'ballotMode', 'shortAuthorizedBy', 'ready'),
     ratify: by('outcome', 'comment', 'quote', 'expectRev'),
     reopen: by(),
@@ -151,7 +159,7 @@ const commandFlags = (cmd, verb) => {
   const spec = COMMAND_FLAGS[cmd];
   if (!spec) return null;
   if (!spec.verbs) return spec.flags;
-  return spec.verbs[verb || (cmd === 'githook' ? 'install' : verb)];
+  return verb ? spec.verbs[verb] : spec.flags || spec.verbs[cmd === 'githook' ? 'install' : verb];
 };
 
 function checkFlags(cmd, verb, flags) {
@@ -172,6 +180,7 @@ function checkFlags(cmd, verb, flags) {
 const FLAG_VALUE = {
   add: '"text"', meet: 'n', verify: 'n', reopen: 'n', reason: '"…"', evidence: '"…"',
   by: 'X', file: 'FILE', stdin: null, color: '=auto|always|never',
+  sections: 'FILE',
   title: '"…"', body: '"…"', text: '"…"', path: 'PATH', section: 'SECTION',
   id: 'ID', card: 'REF', decision: 'ID', epoch: 'E', milestone: 'M',
   phase: 'P', track: 'T', kind: 'K', priority: 'P', plan: '"…"', checkSteps: '"…"', probe: '"jet run …"', lane: 'L',
@@ -208,6 +217,7 @@ const helpLine = (path, flags) => {
 const HELP_ENTRIES = Object.entries(COMMAND_FLAGS).flatMap(([cmd, spec]) => {
   if (!spec.verbs) return [helpLine(cmd, spec.flags)];
   return [
+    ...(spec.flags ? [helpLine(cmd, spec.flags)] : []),
     `  tower ${cmd}     ${Object.keys(spec.verbs).join('|')}`,
     ...Object.entries(spec.verbs).map(([verb, flags]) => helpLine(`${cmd} ${verb}`, flags)),
   ];
@@ -352,6 +362,44 @@ function cmdStatus(store, { flags }) {
   show('AGENT — review', 'verify'); show('AGENT — building', 'building');
   show('AGENT — implement', 'implement'); show('AGENT — plan', 'plan');
   console.log('');
+}
+
+function cmdBriefing(store, { pos, flags }) {
+  const [verb, id] = pos;
+  if (verb === 'post') {
+    if (typeof flags.file !== 'string') throw new TowerError('E_USAGE', 'briefing post requires --file FILE (markdown)');
+    const body = readFileSync(flags.file === '-' ? 0 : flags.file, 'utf8');
+    const sections = flags.sections ? JSON.parse(readFileSync(flags.sections, 'utf8')) : [];
+    const { result } = store.mutate(s => db.postBriefing(s, {
+      title: flags.title, body, sections, by: flags.by,
+    }), { expectRev: flags.expectRev });
+    return out(flags, `posted briefing ${result.id} — ${result.title}`, result);
+  }
+  const records = store.loadLive().briefings || [];
+  if (verb === 'list') {
+    if (flags.json) return out(flags, null, records);
+    for (const record of records) console.log(`${record.id}  ${record.created}  [${record.by}] ${record.title}`);
+    if (!records.length) console.log('(no briefings)');
+    return;
+  }
+  if (verb === 'show') {
+    const record = id ? records.find(r => r.id === id) : records[0];
+    if (!record) throw new TowerError('E_NOT_FOUND', `no briefing ${id || '(latest)'}`);
+    return out(flags, null, record);
+  }
+  throw new TowerError('E_USAGE', 'briefing requires post/list/show');
+}
+
+function cmdStatusReport(store, { pos, flags }) {
+  if (pos[0] === 'post') {
+    const snapshot = readPayload(flags);
+    const { result } = store.mutate(s => db.postStatus(s, { snapshot, by: flags.by }),
+      { expectRev: flags.expectRev });
+    return out(flags, `posted status ${result.id}`, result);
+  }
+  const record = store.loadLive().statusSnapshot;
+  if (!record) throw new TowerError('E_NOT_FOUND', 'no status snapshot posted');
+  return out(flags, null, record);
 }
 
 const HARDENING_CARD_FLAGS = [
@@ -575,10 +623,11 @@ function scaffoldDecision(store, ref, flags) {
   const currentCode = runCardProbe(card, root);
   const wildCode = citedEvidence(card, root);
   const emptyRecommendation = () => ({ rec: '', why: '', gains: [], losses: [], whyNot: [], tradeoff: '' });
+  // Start loss-free; add only negligible remaining costs as { loss, mitigation }.
   const draft = {
     id, cardId: card.id, title: card.title, group: 'other', ballotMode: 'full',
     shortAuthorizedBy: null, ballotProcessVersion: 4, draft: true, status: 'open',
-    gist: '', lesson: '', explainer: '', story: '', inWild: '', detail: '', rec: '',
+    situation: '', gist: '', lesson: '', explainer: '', story: '', inWild: '', detail: '', rec: '',
     options: [], comparisons: [], recommendation: emptyRecommendation(), hybrid: null,
     reviewPasses: { beginner: '', adversarial: '' }, checkInstructions: null,
     surface: {
@@ -599,7 +648,7 @@ function scaffoldDecision(store, ref, flags) {
     throw new TowerError('E_USAGE', 'decision scaffold cannot overwrite tower.json');
   mkdirSync(dirname(outputPath), { recursive: true, mode: 0o700 });
   writeFileSync(outputPath, `${JSON.stringify(draft, null, 2)}\n`, { mode: 0o600 });
-  return out(flags, `scaffolded ballot ${id} → ${outputPath}`, draft);
+  return out(flags, `scaffolded ballot ${id} → ${outputPath}\nKeep recommendation.losses empty, or add {loss, mitigation} with a concrete way to reduce each cost.`, draft);
 }
 
 function cmdDecision(store, { pos, flags }) {
@@ -630,7 +679,7 @@ function cmdDecision(store, { pos, flags }) {
     case 'add': {
       const p = readPayload(flags) || {};
       const payload = { ...p, by };
-      for (const f of ['id', 'cardId', 'title', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group', 'ballotMode', 'shortAuthorizedBy'])
+      for (const f of ['id', 'cardId', 'title', 'situation', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group', 'ballotMode', 'shortAuthorizedBy'])
         if (flags[f] !== undefined) payload[f] = flags[f];
       if (flags.card !== undefined) payload.cardId = flags.card;
       if (flags.draft !== undefined) payload.draft = flags.draft === true || flags.draft === 'true';
@@ -639,7 +688,7 @@ function cmdDecision(store, { pos, flags }) {
     }
     case 'update': {
       const p = readPayload(flags) || {};
-      for (const f of ['title', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group', 'ballotMode', 'shortAuthorizedBy'])
+      for (const f of ['title', 'situation', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group', 'ballotMode', 'shortAuthorizedBy'])
         if (flags[f] !== undefined) p[f] = flags[f];
       if (flags.ready !== undefined) p.ready = flags.ready === true || flags.ready === 'true';
       const { result } = store.mutate((s) => db.updateDecision(s, id, p, by));
@@ -1030,6 +1079,7 @@ function renderBrief(p, t) {
     for (const d of p.decisions) {
       const decisionState = (d.status === 'ratified' ? t.success : t.warn)(`[${d.status}${d.draft ? ' draft' : ''}]`);
       L.push(`  ${d.id} ${decisionState} ${d.title}`);
+      if (d.situation) L.push(`    ${d.situation}`);
       if (d.gist) L.push(`    ${d.gist}`);
       if (d.status === 'ratified') {
         L.push(`    ${t.success('→')} ${d.outcome}${d.comment ? `  ${t.border('—')} ${d.comment}` : ''}`);
@@ -1049,6 +1099,10 @@ function renderBrief(p, t) {
         ]) if (d.reviewPasses?.[key]) L.push(`    ${t.dim(`${label}:`)} ${d.reviewPasses[key]}`);
         if (d.rec) L.push(`    ${t.warn('rec:')} ${d.rec}`);
         if (d.recommendation?.why) L.push(`    ${t.dim('why:')} ${d.recommendation.why}`);
+        for (const loss of d.recommendation?.losses || []) {
+          L.push(`    ${t.dim('remaining cost:')} ${typeof loss === 'string' ? loss : loss.loss}`);
+          if (loss?.mitigation) L.push(`    ${t.dim('how we reduce it:')} ${loss.mitigation}`);
+        }
         for (const rejected of d.recommendation?.whyNot || []) L.push(`    ${t.dim(`why not ${rejected.key}:`)} ${rejected.reason}`);
         if (d.recommendation?.tradeoff) L.push(`    ${t.dim('accepted tradeoff:')} ${d.recommendation.tradeoff}`);
         if (!d.reviewPasses && d.hybrid?.synthesis) L.push(`    ${t.dim(`◇ hybrid result ${d.hybrid.result}:`)} ${d.hybrid.synthesis}`);
@@ -1314,7 +1368,8 @@ export async function run(argv) {
         }
         return server;
       }
-      case 'status':    return cmdStatus(store, sub);
+      case 'status':    return sub.pos.length ? cmdStatusReport(store, sub) : cmdStatus(store, sub);
+      case 'briefing':  return cmdBriefing(store, sub);
       case 'state':     return console.log(JSON.stringify(store.project(), null, 2));
       case 'card':      return cmdCard(store, sub);
       case 'decision':  return cmdDecision(store, sub);

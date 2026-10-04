@@ -38,14 +38,20 @@ const surface = () => ({
     { key: 'A', name: 'Option A', gist: 'Explicit call.', gains: ['Behavior stays visible'], losses: ['One more step'], proposed: { code: 'a()' } },
     { key: 'B', name: 'Option B', gist: 'Short call.', gains: ['Shortest first script'], losses: ['Loses the needed guarantee'], proposed: { code: 'b()' } },
   ],
-  recommendation: { rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.' },
+  recommendation: { rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: [{ loss: 'One more step', mitigation: 'Provide a short example to copy.' }], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.' },
 });
 
+const SITUATION = 'Tower is the shared project board, and a ballot is the page where the owner picks one option. '
+  + 'Today a ballot opens with a list of facts, so a reader must piece the story together. '
+  + 'For example, a new reader sees file names before learning what problem exists. '
+  + 'That slows every vote and invites mistakes from beginners and experts alike. '
+  + 'You are deciding which option this card should use. We recommend option A because it keeps behavior visible.';
+
 const ballot = (extra = {}) => ({
-  ballotMode: 'full', reviewPasses: reviewPasses(), surface: surface(),
+  ballotMode: 'full', reviewPasses: reviewPasses(), surface: surface(), situation: SITUATION,
   gist: 'a plain sentence', lesson: 'This short paragraph explains the situation and stakes.', story: 'Dana hits this while shipping X.', inWild: 'real code here', rec: 'A',
   options: [{ key: 'A', name: 'Option A', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'Option B', detail: 'B is brief.', code: 'b()' }],
-  recommendation: { why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step, which keeps behavior visible.' },
+  recommendation: { why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: [{ loss: 'One more step', mitigation: 'Provide a short example to copy.' }], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step, which keeps behavior visible.' },
   hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
   ...extra,
 });
@@ -108,7 +114,7 @@ test('addDecision refuses an incomplete ballot with E_BALLOT naming the gaps', (
   assert.throws(
     () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one' })),
     (e) => e instanceof TowerError && e.code === 'E_BALLOT'
-      && /gist/.test(e.message) && /lesson/.test(e.message) && /story/.test(e.message) && /inWild/.test(e.message)
+      && /situation/.test(e.message) && /gist/.test(e.message) && /lesson/.test(e.message) && /story/.test(e.message) && /inWild/.test(e.message)
       && /options/.test(e.message) && /rec/.test(e.message) && /recommendation/.test(e.message)
       && /reviewPasses/.test(e.message) && !/hybrid metadata/.test(e.message));
 });
@@ -302,6 +308,77 @@ test('Learn this first is one paragraph at most', () => {
     (e) => e.code === 'E_BALLOT' && /lesson.*one paragraph/.test(e.message));
 });
 
+// ---- situation summary (owner ballot standard, 2026-10-04) -----------------
+
+test('full ballots require a situation summary of 300-1200 characters', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'No situation', ...ballot({ situation: undefined }) })),
+    (e) => e.code === 'E_BALLOT' && /missing: situation \(pass --draft/.test(e.message));
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Short situation', ...ballot({ situation: 'Too short to explain anything.' }) })),
+    (e) => e.code === 'E_BALLOT' && /situation has 30 characters \(need 300-1200\)/.test(e.message));
+  const long = Array.from({ length: 30 }, () => 'This sentence adds plain words to make the summary far too long.').join(' ');
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Long situation', ...ballot({ situation: long }) })),
+    (e) => e.code === 'E_BALLOT' && /situation has \d+ characters \(need 300-1200\)/.test(e.message));
+  const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-SIT', title: 'Good situation', ...ballot() }));
+  assert.equal(result.situation, SITUATION);
+  assert.equal(st.load().decisions.find(d => d.id === 'D-SIT').situation, SITUATION);
+});
+
+test('the situation summary is plain prose, not a list', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  const sentences = SITUATION.split(/(?<=\.) /);
+  for (const [shape, situation, gap] of [
+    ['bullets', sentences.map(x => `- ${x}`).join('\n'), /situation \(plain prose, not a bullet list\)/],
+    ['numbered', sentences.map((x, i) => `${i + 1}. ${x}`).join('\n'), /situation \(plain prose, not a bullet list\)/],
+    ['heading', `## Situation\n${SITUATION}`, /situation \(plain prose, no headings\)/],
+    ['code', `${SITUATION}\n\`\`\`\nrun()\n\`\`\``, /situation \(plain prose, no code blocks\)/],
+    ['dense', `${SITUATION} ${Array.from({ length: 33 }, (_, i) => `word${i}`).join(' ')}.`, /situation sentence 7 has 33 words \(max 32\)/],
+  ]) {
+    assert.throws(
+      () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: `Situation ${shape}`, ...ballot({ situation }) })),
+      (e) => e.code === 'E_BALLOT' && gap.test(e.message), shape);
+  }
+  const twoParagraphs = sentences.slice(0, 3).join(' ') + '\n\n' + sentences.slice(3).join(' ');
+  const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Two paragraphs', ...ballot({ situation: twoParagraphs }) }));
+  assert.equal(result.situation, twoParagraphs);
+});
+
+test('short ballots may omit the situation but a given one is validated; non-strings are refused', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  const short = ballot({ ballotMode: 'short', reviewPasses: undefined, situation: undefined });
+  const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Short choice', ...short }));
+  assert.equal(result.situation, '');
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Short bad', ...short, situation: 'Too short.' })),
+    (e) => e.code === 'E_BALLOT' && /situation has 10 characters/.test(e.message));
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Not text', ...ballot({ situation: ['a', 'list'] }) })),
+    (e) => e.code === 'E_INVALID' && /situation must be a string/.test(e.message));
+  assert.throws(
+    () => st.mutate((s) => db.updateDecision(s, result.id, { situation: 42 }, 'agent')),
+    (e) => e.code === 'E_INVALID' && /situation must be a string/.test(e.message));
+});
+
+test('editing an open full ballot keeps the situation gate', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-SIT2', title: 'Ready ballot', ...ballot() }));
+  assert.throws(
+    () => st.mutate((s) => db.updateDecision(s, 'D-SIT2', { situation: '' }, 'agent')),
+    (e) => e.code === 'E_BALLOT' && /missing: situation$/.test(e.message));
+  const revised = `${SITUATION} The fix also helps the owner vote faster.`;
+  st.mutate((s) => db.updateDecision(s, 'D-SIT2', { situation: revised }, 'agent'));
+  assert.equal(st.load().decisions[0].situation, revised);
+  assert.deepEqual(db.ballotGaps({ ...ballot(), situation: undefined, ballotProcessVersion: 4 }), ['situation'],
+    'open full ballots that predate the field report exactly the missing situation');
+});
+
 test('addDecision rejects dense plain-language prose', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
@@ -336,17 +413,55 @@ test('recommendation must explain every losing option', () => {
     () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ recommendation: { why: 'A wins.', whyNot: [], tradeoff: 'A costs one step.' } }) })),
     (e) => e.code === 'E_BALLOT' && /recommendation\.whyNot\[B\]/.test(e.message));
 });
-test('new recommendation losses require an unavoidable reason', () => {
+test('new recommendation losses require a mitigation', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   const bad = ballot();
   bad.recommendation.losses = [{ loss: 'One more step' }];
   bad.surface.recommendation.losses = [{ loss: 'One more step' }];
   assert.throws(
-    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Missing loss reason', ...bad })),
-    (e) => e.code === 'E_BALLOT' && /recommendation\.losses\[1\].*whyUnavoidable/.test(e.message));
-  const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-LOSS', title: 'Reasoned loss', ...ballot() }));
-  assert.equal(result.recommendation.losses[0].whyUnavoidable, 'The explicit step keeps behavior visible.');
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Missing mitigation', ...bad })),
+    (e) => e.code === 'E_BALLOT' && /recommendation\.losses\[1\].*mitigation/.test(e.message));
+  const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-LOSS', title: 'Mitigated loss', ...ballot() }));
+  assert.equal(result.recommendation.losses[0].mitigation, 'Provide a short example to copy.');
+});
+
+test('new losses reject obsolete reasons, non-string mitigation, and non-prose mitigation', () => {
+  for (const loss of [
+    'One more step',
+    { loss: 'One more step', whyUnavoidable: 'An old reason.' },
+    { loss: 'One more step', mitigation: 'Copy an example.', whyUnavoidable: 'An old reason.' },
+    { loss: 'One more step', mitigation: '   ' },
+    { loss: 'One more step', mitigation: 42 },
+    { loss: 'One more step', mitigation: '- Copy an example.' },
+    { loss: 'One more step', mitigation: '# Copy an example.' },
+    { loss: 'One more step', mitigation: '```text\nCopy an example.\n```' },
+  ]) {
+    const p = { ...ballot(), ballotProcessVersion: 4 };
+    p.recommendation.losses = [loss];
+    p.surface.recommendation.losses = [loss];
+    const gaps = db.ballotGaps(p);
+    assert.ok(gaps.some(gap => gap.startsWith('recommendation.losses[1]')), JSON.stringify(loss));
+    assert.ok(gaps.some(gap => gap.startsWith('surface.recommendation.losses[1]')), JSON.stringify(loss));
+  }
+});
+
+test('mitigation keeps the surface word cap and long-form plain-language limits', () => {
+  const p = { ...ballot(), ballotProcessVersion: 4 };
+  const mitigation = count => Array.from({ length: count }, () => 'word').join(' ') + '.';
+  p.surface.recommendation.losses[0].mitigation = mitigation(23);
+  assert.deepEqual(db.surfaceGaps(p), []);
+  p.surface.recommendation.losses[0].mitigation = mitigation(24);
+  assert.ok(db.surfaceGaps(p).some(gap => /mitigation has 24 words \(under 24 words\)/.test(gap)));
+  p.recommendation.losses[0].mitigation = mitigation(33);
+  assert.ok(db.plainLanguageGaps(p).some(gap => /recommendation loss 1 mitigation.*33 words/.test(gap)));
+});
+
+test('a recommendation with no remaining losses needs no mitigation', () => {
+  const p = { ...ballot(), ballotProcessVersion: 4 };
+  p.recommendation.losses = [];
+  p.surface.recommendation.losses = [];
+  assert.deepEqual(db.ballotGaps(p), []);
 });
 
 test('hybrid metadata is optional and does not gate a ballot', () => {

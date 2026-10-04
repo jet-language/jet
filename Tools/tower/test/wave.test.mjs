@@ -114,18 +114,24 @@ test('retired routes are gone: files, agents, messages', async () => {
   assert.equal(r3.status, 404);
 });
 
+const SITUATION = 'Tower is the shared project board, and a ballot is the page where the owner picks one option. '
+  + 'Today a ballot opens with a list of facts, so a reader must piece the story together. '
+  + 'For example, a new reader sees file names before learning what problem exists. '
+  + 'That slows every vote and invites mistakes from beginners and experts alike. '
+  + 'You are deciding which option this card should use. We recommend option A because it keeps behavior visible.';
+
 test('clearance batch ratifies without agent notifications', async () => {
   const { json: cardR } = await post('/api/card/add', { title: 'ballot host' });
   const cid = cardR.result.id;
   for (const n of [1, 2, 3]) await post('/api/decision/add', { cardId: cid, id: 'D-W' + n, title: 'w' + n,
-    ballotMode: 'full', reviewPasses: {
+    ballotMode: 'full', situation: SITUATION, reviewPasses: {
       beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
       adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
     },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
     recommendation: {
       why: 'A wins here.', gains: ['Behavior stays visible'],
-      losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }],
+      losses: [{ loss: 'One more step', mitigation: 'Provide a short example to copy.' }],
       whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.',
     },
     hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Borrow its clear names.' }, { key: 'B', aspect: 'B is brief.', use: 'Keep it.' }] },
@@ -139,7 +145,7 @@ test('clearance batch ratifies without agent notifications', async () => {
       ],
       recommendation: {
         rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'],
-        losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }],
+        losses: [{ loss: 'One more step', mitigation: 'Provide a short example to copy.' }],
         whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.',
       },
     },

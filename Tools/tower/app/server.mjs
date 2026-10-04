@@ -123,6 +123,8 @@ function broadcast(store, state = null) {
 
 // route → (state, payload, config) mutation. Same verbs as the CLI.
 const routes = {
+  'briefing/post':   (s, p) => db.postBriefing(s, p),
+  'status/post':     (s, p) => db.postStatus(s, p),
   'card/add':        (s, p, cfg) => db.addCard(s, p, cfg),
   'card/update':     (s, p, cfg) => db.updateCard(s, p.id, p, cfg),
   'card/claim':      (s, p) => db.claimCard(s, p.id, p.by),
@@ -616,6 +618,21 @@ export function serve(store, port = 7878, open = false) {
       send(res, 500, { error: 'E_INTERNAL', message: String(e.message || e) });
     }
   });
+  // CLI report posts use the same file store, not this process's HTTP routes.
+  // Keep connected Now pages current without requiring a manual reload.
+  let streamRev = store.loadLive().meta.rev;
+  const reportPoll = setInterval(() => {
+    if (!sseClients.size) return;
+    try {
+      const state = store.loadLive();
+      if (state.meta.rev > streamRev) {
+        broadcast(store, state);
+        streamRev = state.meta.rev;
+      }
+    } catch (error) { console.error('tower: cannot refresh live state', error); }
+  }, 2000);
+  reportPoll.unref();
+  server.on('close', () => clearInterval(reportPoll));
   server.on('error', (e) => {
     if (e.code === 'EADDRINUSE') {
       console.error(`tower: port ${port} is already in use (another Tower or app?) — try --port ${port + 1}`);

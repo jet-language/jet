@@ -27,6 +27,12 @@ test('a legacy triage-phase card (pre-#516 data) is treated as planning by lane 
   assert.equal(laneOf(c, [], [c]).lane, 'plan');
 });
 
+const SITUATION = 'Tower is the shared project board, and a ballot is the page where the owner picks one option. '
+  + 'Today a ballot opens with a list of facts, so a reader must piece the story together. '
+  + 'For example, a new reader sees file names before learning what problem exists. '
+  + 'That slows every vote and invites mistakes from beginners and experts alike. '
+  + 'You are deciding which option this card should use. We recommend option A because it keeps behavior visible.';
+
 test('lane derivation follows phases and decisions', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
@@ -34,14 +40,14 @@ test('lane derivation follows phases and decisions', () => {
   assert.equal(db.laneOf(db.findCard(s, '#1'), s.decisions, s.cards).lane, 'plan');
 
   st.mutate((s2) => db.addDecision(s2, { cardId: '#1', id: 'D-T1', title: 'Pick one',
-    ballotMode: 'full', reviewPasses: {
+    ballotMode: 'full', situation: SITUATION, reviewPasses: {
       beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
       adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
     },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
     recommendation: {
       why: 'A wins here.', gains: ['Behavior stays visible'],
-      losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }],
+      losses: [{ loss: 'One more step', mitigation: 'Provide a short example to copy.' }],
       whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.',
     },
     hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Borrow its clear names.' }, { key: 'B', aspect: 'B is brief.', use: 'Keep it.' }] },
@@ -55,7 +61,7 @@ test('lane derivation follows phases and decisions', () => {
       ],
       recommendation: {
         rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'],
-        losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }],
+        losses: [{ loss: 'One more step', mitigation: 'Provide a short example to copy.' }],
         whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.',
       },
     },
@@ -77,14 +83,14 @@ test('deciding card auto-advances when last decision ratifies', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', phase: 'deciding', plan: 'plan' }, cfg));
   st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-X', title: 't',
-    ballotMode: 'full', reviewPasses: {
+    ballotMode: 'full', situation: SITUATION, reviewPasses: {
       beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
       adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
     },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
     recommendation: {
       why: 'A wins here.', gains: ['Behavior stays visible'],
-      losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }],
+      losses: [{ loss: 'One more step', mitigation: 'Provide a short example to copy.' }],
       whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.',
     },
     hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Borrow its clear names.' }, { key: 'B', aspect: 'B is brief.', use: 'Keep it.' }] },
@@ -98,7 +104,7 @@ test('deciding card auto-advances when last decision ratifies', () => {
       ],
       recommendation: {
         rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'],
-        losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }],
+        losses: [{ loss: 'One more step', mitigation: 'Provide a short example to copy.' }],
         whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.',
       },
     },
@@ -433,4 +439,30 @@ test('card parentId links children; rejects self-parent and missing parent', () 
     () => st.mutate((s, cfg) => db.addCard(s, { title: 'orphan', parent: '#999' }, cfg)),
     (e) => e instanceof TowerError && e.code === 'E_NOT_FOUND',
   );
+});
+
+test('stored recommendation losses migrate on live and history reads, then persist through Tower', () => {
+  const st = fresh();
+  const oldDecision = id => ({
+    id, status: 'open',
+    recommendation: { losses: [{ loss: 'One more step.', whyUnavoidable: 'Mitigation: Copy the short example.' }] },
+    surface: { recommendation: { losses: [{ loss: 'One more step.', whyUnavoidable: 'Copy the short example.' }] } },
+  });
+  const state = empty('Test');
+  state.decisions.push(oldDecision('D-LIVE'));
+  writeJSON(st.file, state);
+  const historyFile = join(st.dataDir, 'history.json');
+  writeJSON(historyFile, { version: 1, cards: [], decisions: [oldDecision('D-HISTORY')], events: [] });
+  const assertMigrated = decision => {
+    for (const recommendation of [decision.recommendation, decision.surface.recommendation]) {
+      assert.deepEqual(recommendation.losses,
+        [{ loss: 'One more step.', mitigation: 'Copy the short example.' }]);
+    }
+  };
+  assertMigrated(st.loadLive().decisions[0]);
+  assertMigrated(st.load().decisions[0]);
+  assertMigrated(st.loadHistory().decisions[0]);
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Persist the migration' }, cfg));
+  assertMigrated(JSON.parse(readFileSync(st.file, 'utf8')).decisions[0]);
+  assertMigrated(JSON.parse(readFileSync(historyFile, 'utf8')).decisions[0]);
 });

@@ -16,6 +16,12 @@ const run = (cwd, args, ok = true) => {
   }
 };
 
+const SITUATION = 'Tower is the shared project board, and a ballot is the page where the owner picks one option. '
+  + 'Today a ballot opens with a list of facts, so a reader must piece the story together. '
+  + 'For example, a new reader sees file names before learning what problem exists. '
+  + 'That slows every vote and invites mistakes from beginners and experts alike. '
+  + 'You are deciding which option this card should use. We recommend option A because it keeps behavior visible.';
+
 test('cli end-to-end: init → epoch → milestone → card → decision → next', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'tower-cli-'));
   run(cwd, ['init', '--name', 'CLI Test']);
@@ -30,7 +36,7 @@ test('cli end-to-end: init → epoch → milestone → card → decision → nex
 
   // decision via stdin-less file
   const ballot = JSON.stringify({
-    cardId: '#1', id: 'D-CLI1', title: 'Choose', ballotMode: 'full',
+    cardId: '#1', id: 'D-CLI1', title: 'Choose', ballotMode: 'full', situation: SITUATION,
     reviewPasses: {
       beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
       adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
@@ -38,7 +44,7 @@ test('cli end-to-end: init → epoch → milestone → card → decision → nex
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
     recommendation: {
       why: 'A wins here.', gains: ['Behavior stays visible'],
-      losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }],
+      losses: [{ loss: 'One more step', mitigation: 'Provide a short example to copy.' }],
       whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.',
     },
     hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
@@ -52,7 +58,7 @@ test('cli end-to-end: init → epoch → milestone → card → decision → nex
       ],
       recommendation: {
         rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'],
-        losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }],
+        losses: [{ loss: 'One more step', mitigation: 'Provide a short example to copy.' }],
         whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'B adds one explicit step.',
       },
     },
@@ -63,9 +69,19 @@ test('cli end-to-end: init → epoch → milestone → card → decision → nex
   const saved = JSON.parse(run(cwd, ['decision', 'show', 'D-CLI1', '--json']).out);
   assert.equal(saved.ballotMode, 'full');
   assert.equal(saved.ballotProcessVersion, 4);
+  assert.equal(saved.recommendation.losses[0].mitigation, 'Provide a short example to copy.');
+  assert.equal(saved.surface.recommendation.losses[0].mitigation, 'Provide a short example to copy.');
   assert.equal(saved.reviewPasses.adversarial, 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.');
+  assert.equal(saved.situation, SITUATION, '--file JSON carries the situation summary');
+  const revised = `${SITUATION} The owner votes faster as a result.`;
+  run(cwd, ['decision', 'update', 'D-CLI1', '--situation', revised, '--by', 'tester']);
+  assert.equal(JSON.parse(run(cwd, ['decision', 'show', 'D-CLI1', '--json']).out).situation, revised, '--situation updates the summary');
+  const tooShort = run(cwd, ['decision', 'update', 'D-CLI1', '--situation', 'Too short.', '--by', 'tester'], false);
+  assert.equal(tooShort.code, 1);
+  assert.match(tooShort.out, /situation has 10 characters \(need 300-1200\)/);
   const brief = run(cwd, ['brief', '#1', '--color=never']).out;
-  const ordered = ['beginner pass:', 'adversarial pass:', 'rec:'];
+  assert.ok(brief.includes(revised), 'brief prints the situation summary');
+  const ordered = [revised, 'beginner pass:', 'adversarial pass:', 'rec:'];
   for (let i = 1; i < ordered.length; i++)
     assert.ok(brief.indexOf(ordered[i - 1]) < brief.indexOf(ordered[i]), `${ordered[i - 1]} must precede ${ordered[i]}`);
 
@@ -116,6 +132,8 @@ test('decision scaffold captures probe and cited evidence without touching tower
   assert.equal(draft.surface.trio.current.code, 'current-probe');
   assert.equal(draft.surface.trio.wild.code, 'wild evidence from the cited tool');
   assert.deepEqual(Object.keys(draft.reviewPasses), ['beginner', 'adversarial']);
+  assert.deepEqual(draft.recommendation.losses, []);
+  assert.deepEqual(draft.surface.recommendation.losses, []);
   assert.deepEqual(readFileSync(towerFile), before);
 });
 

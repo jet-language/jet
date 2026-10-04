@@ -190,13 +190,20 @@ check that the source tree still matches it. Milestone verify requires every
 linked card `done`, every milestone criterion `verified`, and the token.
 Reopening a linked card or milestone criterion clears the token and signoff.
 
-Ballot-ready decisions carry: `gist` (one plain sentence), `lesson` (a few
+Ballot-ready decisions carry: `situation` (the headline summary every ballot
+view shows first: 4–7 plain sentences on what the thing is, what goes wrong
+today with one concrete example, who it matters to, what is being decided, and
+the recommendation; 300–1200 characters of prose, no lists, headings, or code;
+required for full ballots), `gist` (one plain sentence), `lesson` (a few
 plain sentences in one short paragraph that explain only the situation and
 stakes), `story` (a named person, why this exists), `inWild`
 (realistic code where the choice bites),
 `options[]` each with plain `{key,name,detail,code}` worked examples and optional
 hidden `technical` law, `comparisons[]` when relevant, `rec`, and structured
-`recommendation:{why,whyNot,tradeoff}`. `whyNot` covers every losing option.
+`recommendation:{why,gains,losses[{loss,mitigation}],whyNot,tradeoff}`.
+Remove recommended downsides or reduce them to negligible costs with a concrete
+plain-prose `mitigation` for each (under 24 words on the surface).
+`whyNot` covers every losing option.
 The `simple` skill applies to every user-visible field. A new full ballot
 records one- or two-sentence summaries from two fresh readers: first RLI5
 beginner, then adversarial. Neither reader helped author the ballot, and the
@@ -206,7 +213,8 @@ A short ballot is the complete base draft with no reviews and is the default
 for one mechanism with at most three options. New syntax, invariant changes,
 and owner-tagged full cards require the full profile. Plain prose uses one idea per sentence, defines
 jargon, expands acronyms, and leads with user impact. Write-time density limits
-are 32 words per sentence and 90 per paragraph. The owner decides from the ballot
+are 32 words per sentence and 90 per paragraph (`situation` takes only the
+sentence limit). The owner decides from the ballot
 alone — if they'd need to ask you something to decide, it isn't ready.
 
 ### Archive (#461) — history is separate from live

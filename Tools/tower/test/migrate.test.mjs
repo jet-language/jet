@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { migrate } from '../app/migrate.mjs';
+import { migrate, migrateRecommendationLosses } from '../app/migrate.mjs';
 import { project, laneOf, findCard, normalize, updateEpoch, activeEpoch, setCurrentEpoch } from '../app/store.mjs';
 
 const V3 = {
@@ -65,4 +65,33 @@ test('OPS1: activating a second epoch is rejected', () => {
   assert.equal(activeEpoch(s), null);
   updateEpoch(s, 'e4', { status: 'active' });   // now it is free to activate
   assert.equal(activeEpoch(s), 'e4');
+});
+
+test('imports and normalization rename recommendation losses in both layers', () => {
+  for (const convert of [migrate, normalize]) {
+    const decision = {
+      id: 'D-OLD-LOSS', status: 'open',
+      recommendation: { losses: [{ loss: 'One more step.', whyUnavoidable: 'Mitigation: Copy the short example.', evidence: 'kept' }] },
+      surface: { recommendation: { losses: [{ loss: 'One more step.', whyUnavoidable: 'Copy the short example.' }] } },
+    };
+    const s = convert({ decisions: [decision] });
+    assert.deepEqual(s.decisions[0].recommendation.losses,
+      [{ loss: 'One more step.', mitigation: 'Copy the short example.', evidence: 'kept' }]);
+    assert.deepEqual(s.decisions[0].surface.recommendation.losses,
+      [{ loss: 'One more step.', mitigation: 'Copy the short example.' }]);
+    assert.equal(migrateRecommendationLosses(s.decisions[0]), false, 'migration is idempotent');
+  }
+});
+
+test('migration preserves a current mitigation and removes the obsolete field', () => {
+  const decision = { recommendation: { losses: [
+    { loss: 'One more step.', whyUnavoidable: 'Old reason.', mitigation: 'Mitigation: Copy the short example.' },
+    'An alternative cost.', { loss: 'Needs an author fix.' },
+  ] } };
+  assert.equal(migrateRecommendationLosses(decision), true);
+  assert.deepEqual(decision.recommendation.losses, [
+    { loss: 'One more step.', mitigation: 'Copy the short example.' },
+    'An alternative cost.', { loss: 'Needs an author fix.' },
+  ]);
+  assert.equal(migrateRecommendationLosses(decision), false);
 });

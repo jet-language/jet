@@ -74,6 +74,8 @@ export function ruleMissingAttribution(s) {
 // today — i.e. slipped in before the gate existed, or hand-restored.
 // Acceptance ballots are system-generated evidence, not narrative ballots
 // (same exemption addDecision itself makes) — excluded here too.
+// The shared validator also enforces {loss, mitigation} in both recommendation
+// layers; lint must not maintain a second loss schema.
 export function ruleBallotGaps(s) {
   const findings = [];
   for (const d of s.decisions) {

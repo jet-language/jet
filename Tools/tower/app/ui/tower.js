@@ -3,6 +3,8 @@ import {
 } from './board-state.js';
 import { renderMarkdown, splitBlocks } from './markdown.js';
 import { buildDoneMessageQueue, renderDoneMessageQueue } from './done-messages.js';
+import { renderNowReports } from './now.js';
+import { renderBallotIntro, lossText } from './ballot.js';
 
 import { projectGauntletMatrix, buildGauntletTooltip, formatPair, formatRatio, formatStamp } from './gauntlet.js';
 // Tower client. Vanilla JS, no framework, no build.
@@ -368,6 +370,17 @@ function viewNow() {
     <span class="viewhead__sub">${waiting ? `${waiting} waiting on you` : 'no decisions or checks waiting on you'}</span>
     ${openGenericDecisions().length ? `<div class="viewhead__actions"><button class="btn btn--red" id="focus-all">Decide all →</button></div>` : ''}</div>`;
   $('#focus-all')?.addEventListener('click', () => focusAll(openGenericDecisions()[0].id));
+
+  const reports = el(`<div class="now-reports">${renderNowReports(S)}</div>`);
+  reports.querySelectorAll('[data-report-card], [data-report-decision]').forEach(button => {
+    button.addEventListener('click', () => {
+      const decision = S.decisions.find(d => d.id === button.dataset.reportDecision);
+      if (decision && decision.group !== 'acceptance') return focusAll(decision.id);
+      const cardId = decision?.cardId || button.dataset.reportCard;
+      if (cardId) showDetail(cardId);
+    });
+  });
+  v.appendChild(reports);
 
   const queue = doneMessageBlock();
   if (queue) v.appendChild(queue);
@@ -1306,11 +1319,6 @@ const CURRENT_REVIEW_STAGES = [
 ];
 const reviewStagesFor = (d) => Number(d.ballotProcessVersion || 0) >= 4
   ? CURRENT_REVIEW_STAGES : REVIEW_STAGES;
-function lossText(item) {
-  if (!item || typeof item !== 'object') return item;
-  return [item.loss, item.whyUnavoidable ? `Why unavoidable: ${item.whyUnavoidable}` : '']
-    .filter(Boolean).join(' — ');
-}
 function reviewPassesBody(d) {
   if (!d.reviewPasses) {
     return d.hybrid?.synthesis ? `<div class="hybrid"><b>◇ Hybrid pass — ${esc(d.hybrid.result)}:</b> ${esc(d.hybrid.synthesis)}
@@ -1467,11 +1475,7 @@ function renderFocus() {
       </div>
     </div>
     <div class="focusscroll"><div class="fdeck${d.surface ? ' fdeck--surface' : ''}">
-      <div class="fdeck__head"><span class="fdeck__id">${esc(d.id)}</span>
-        <span class="fdeck__for">card ${c ? ticket(c) : '—'}${c ? ' · ' + esc(c.title) : ''}</span>
-        ${d.surface && d.status ? `<span class="chip">${esc(d.status)}</span>` : ''}
-        ${qState(d) ? `<span class="qchip qchip--${qState(d)}">${qState(d) === 'open' ? '✎ awaiting answer' : '✓ question answered'}</span>` : ''}
-        ${d.rec ? `<span class="fdeck__rec">rec ${esc(d.rec)}</span>` : ''}</div>
+      ${renderBallotIntro(d, c, qState(d))}
       ${d.surface ? surfaceHtml : `
       <div class="fdeck__gist">${esc(d.gist || d.title)}</div>
       ${d.gist ? `<div class="fdeck__title">${esc(d.title)}</div>` : ''}

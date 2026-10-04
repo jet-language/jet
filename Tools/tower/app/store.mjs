@@ -7,6 +7,8 @@
 //   decisions   — ballot-ready choices blocking a card, owner-only to ratify
 //   questions   — owner ⇄ agent notes/questions on a card
 //   ideas       — lightweight capture; promotable to cards
+//   briefings   — attributed markdown reports, newest first
+//   statusSnapshot — latest posted progress report (not a card/closure gate)
 //   events      — append-only audit trail of every mutation
 //
 // Lane state is DERIVED on every read (never stored), so a card and its
@@ -20,6 +22,7 @@ import {
 } from './paths.mjs';
 import { withLock } from './lock.mjs';
 import { loadConfig, publicConfig } from './config.mjs';
+import { migrateRecommendationLosses } from './migrate.mjs';
 import {
   HardeningInputError, hardeningFixtureIssue, hasHardeningPayload,
   formatHardeningEvidence, normalizeHardeningFixture, prepareHardening,
@@ -117,6 +120,7 @@ export const empty = (project = 'Project') => ({
   meta: { version: VERSION, project, currentEpoch: null, nextNum: 1, rev: 0, ui: { toggled: [] } },
   epochs: [{ id: 'e1', name: 'Epoch 1', goal: '', status: 'active' }],
   milestones: [], cards: [], decisions: [], questions: [], ideas: [], papercuts: [], events: [],
+  briefings: [], statusSnapshot: null,
 });
 
 // ---- store handle ---------------------------------------------------------
@@ -164,9 +168,13 @@ export function openStore(dataDir) {
     if (pair.pending) fail('E_CONFLICT', 'repair transaction is still pending; retry the operation');
     validateStoredState(pair.live.value, 'live store');
     validateStoredHistory(pair.history.value, 'history store');
+    const history = { ...emptyHistory(), ...pair.history.value };
+    let historyMigrated = false;
+    for (const decision of history.decisions)
+      historyMigrated = migrateRecommendationLosses(decision) || historyMigrated;
     return {
       state: normalize(pair.live.value, pair.history.value.cards),
-      history: { ...emptyHistory(), ...pair.history.value },
+      history, historyMigrated,
     };
   };
   let liveCache = null;
@@ -196,6 +204,8 @@ export function openStore(dataDir) {
         continue;
       validateStoredState(first.live.value, 'live store');
       validateStoredHistory(first.history.value, 'history store');
+      for (const decision of first.history.value.decisions || [])
+        migrateRecommendationLosses(decision);
       const state = normalize(first.live.value, first.history.value.cards);
       liveCache = { bytes: first.live.bytes, state };
       return {
@@ -254,7 +264,7 @@ export function openStore(dataDir) {
       const history = pair.history;
       const historyBefore = JSON.stringify(history);
       const result = fn(s, config, history);
-      if (JSON.stringify(history) !== historyBefore) writeJSONHeld(root, 'history.json', history);
+      if (pair.historyMigrated || JSON.stringify(history) !== historyBefore) writeJSONHeld(root, 'history.json', history);
       // #461: single chokepoint — every write gets a chance to retire aged-out
       // cards/decisions/events to history.json before tower.json is persisted.
       syncMilestones(s, undefined, history.cards);
@@ -475,6 +485,7 @@ function validateStoredDecision(decision, index, source) {
   if (decision.status !== undefined && !DECISION_STATUSES.has(decision.status))
     fail('E_INVALID', `${label}.status is not a canonical decision status`);
   if (decision.visualMedia !== undefined) normalizeVisualMedia(decision.visualMedia, `${label}.visualMedia`);
+  validateStoredString(decision.situation, `${label}.situation`);
   if (decision.options !== undefined) {
     if (!Array.isArray(decision.options)) fail('E_INVALID', `${label}.options must be an array`);
     for (const [optionIndex, option] of decision.options.entries()) {
@@ -503,7 +514,7 @@ export function validateStoredState(state, source = 'live store') {
     validateStoredNumber(state.meta.nextNum, `${source}.meta.nextNum`, { integer: true, min: 1 });
     validateStoredNumber(state.meta.rev, `${source}.meta.rev`, { integer: true, min: 0 });
   }
-  for (const key of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'papercuts', 'events']) {
+  for (const key of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'papercuts', 'events', 'briefings']) {
     if (state[key] !== undefined && !Array.isArray(state[key])) fail('E_INVALID', `${source}.${key} must be an array`);
   }
   const seenNums = new Set();
@@ -512,6 +523,8 @@ export function validateStoredState(state, source = 'live store') {
   (state.milestones || []).forEach((milestone, index) => validateStoredMilestone(milestone, index, source));
   (state.cards || []).forEach((card, index) => validateStoredCard(card, index, source, seenNums, seenIds));
   (state.decisions || []).forEach((decision, index) => validateStoredDecision(decision, index, source));
+  (state.briefings || []).forEach(validateBriefing);
+  if (state.statusSnapshot != null) validateStatusSnapshot(state.statusSnapshot);
   return state;
 }
 
@@ -531,6 +544,7 @@ function loadHistoryRaw(dataDir) {
   const raw = readJSON(historyFile(dataDir), null);
   if (raw == null) return emptyHistory();
   validateStoredHistory(raw);
+  for (const decision of raw.decisions || []) migrateRecommendationLosses(decision);
   return { ...emptyHistory(), ...raw };
 }
 
@@ -686,7 +700,8 @@ export function normalize(s, historyCards = null, sync = true) {
   if (s.meta.completionCursor == null && s.meta.digestCursor != null)
     s.meta.completionCursor = s.meta.digestCursor;
   delete s.meta.digestCursor;
-  for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'papercuts', 'events']) s[k] ||= [];
+  for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'papercuts', 'events', 'briefings']) s[k] ||= [];
+  s.statusSnapshot ??= null;
   delete s.messages;   // messaging was removed; drop the legacy key on next write
   // D-TWR-OPS1=A: active epoch is derived solely from epoch.status === 'active'.
   // One-time reconcile of the retired meta.currentEpoch pointer, then drop it so
@@ -726,6 +741,7 @@ export function normalize(s, historyCards = null, sync = true) {
     }
   }
   for (const d of s.decisions) {
+    migrateRecommendationLosses(d);
     d.draft = !!d.draft;
     if (d.visualMedia !== undefined) d.visualMedia = normalizeVisualMedia(d.visualMedia);
   }
@@ -1056,6 +1072,7 @@ export function projectBoard(s, config = null) {
     phases: PHASES, lanes: LANES, cards, decisions: openDecisions,
     questions: s.questions.filter(q => activeIds.has(q.cardId)), ideas: s.ideas,
     papercuts: s.papercuts, events: s.events.slice(0, 300), counts, recentlyDecided,
+    briefings: s.briefings || [], statusSnapshot: s.statusSnapshot || null,
     notices: { cards: noticeCards, messages: noticeMessages }, radar: radarData(s),
   };
 }
@@ -1987,6 +2004,16 @@ function proseDensityGaps(label, text) {
   return gaps;
 }
 
+function mitigationGaps(label, item) {
+  const gaps = [];
+  if (Object.hasOwn(item, 'whyUnavoidable'))
+    gaps.push(`${label} (use mitigation, not whyUnavoidable)`);
+  if (typeof item.mitigation === 'string'
+      && /^\s*(?:[-*+•]\s|\d+[.)]\s|#{1,6}\s|`{3,}|~{3,})/m.test(item.mitigation))
+    gaps.push(`${label}.mitigation (plain prose, no lists, headings, or code blocks)`);
+  return gaps;
+}
+
 function exampleProseDensityGaps(label, text) {
   if (!text || !String(text).trim()) return [];
   const gaps = [];
@@ -2024,9 +2051,9 @@ export function plainLanguageGaps(p) {
     gaps.push(...proseDensityGaps(`recommendation why not ${rejected?.key || '?'}`, rejected?.reason));
   for (const [i, item] of (Array.isArray(recommendation.losses) ? recommendation.losses : []).entries()) {
     const loss = plainObject(item) ? item.loss : item;
-    const why = plainObject(item) ? item.whyUnavoidable : '';
+    const mitigation = plainObject(item) ? item.mitigation : '';
     gaps.push(...proseDensityGaps(`recommendation loss ${i + 1}`, loss));
-    gaps.push(...proseDensityGaps(`recommendation loss ${i + 1} whyUnavoidable`, why));
+    gaps.push(...proseDensityGaps(`recommendation loss ${i + 1} mitigation`, mitigation));
   }
   gaps.push(...proseDensityGaps('hybrid synthesis', p.hybrid?.synthesis));
   for (const item of p.hybrid?.harvest || []) {
@@ -2045,7 +2072,7 @@ export function plainLanguageGaps(p) {
 // in-the-wild code trio, real gains and losses per option (never padded), why-not
 // for every losing option, no project jargon, and the recommended option is
 // always A, listed first, so it sits next to the current and in-the-wild code.
-const SURFACE_WHY_UNAVOIDABLE_WORDS = 24;
+const SURFACE_MITIGATION_WORDS = 24;
 const SURFACE_GIST_WORDS = 22;
 const SURFACE_LESSON_WORDS = 70;
 const SURFACE_WHY_WORDS = 40;
@@ -2112,22 +2139,23 @@ export function surfaceGaps(p, { requireRecFirst = false } = {}) {
       const label = `recommendation.${list}[${i + 1}]`;
       if (structuredLosses && list === 'losses') {
         const loss = text(item?.loss);
-        const why = text(item?.whyUnavoidable);
+        const mitigation = text(item?.mitigation);
         if (!plainObject(item)) {
           const shown = text(item);
-          gaps.push(`surface.${label}${shown ? ` "${shown}"` : ''} (must include whyUnavoidable)`);
+          gaps.push(`surface.${label}${shown ? ` "${shown}"` : ''} (must include mitigation)`);
         } else {
+          gaps.push(...mitigationGaps(`surface.${label}`, item));
           if (!loss) gaps.push(`surface.${label}.loss (required)`);
           else {
             prose.push([`${label}.loss`, loss]);
             if (count(loss) >= SURFACE_BULLET_WORDS)
               gaps.push(`surface.${label}.loss has ${count(loss)} words (under ${SURFACE_BULLET_WORDS} words)`);
           }
-          if (!why) gaps.push(`surface.${label}.whyUnavoidable (required for "${loss || '?'}")`);
+          if (!mitigation) gaps.push(`surface.${label}.mitigation (required for "${loss || '?'}")`);
           else {
-            prose.push([`${label}.whyUnavoidable`, why]);
-            if (count(why) >= SURFACE_WHY_UNAVOIDABLE_WORDS)
-              gaps.push(`surface.${label}.whyUnavoidable has ${count(why)} words (under ${SURFACE_WHY_UNAVOIDABLE_WORDS} words)`);
+            prose.push([`${label}.mitigation`, mitigation]);
+            if (count(mitigation) >= SURFACE_MITIGATION_WORDS)
+              gaps.push(`surface.${label}.mitigation has ${count(mitigation)} words (under ${SURFACE_MITIGATION_WORDS} words)`);
           }
         }
       } else {
@@ -2182,6 +2210,28 @@ function shortBallotGaps(p, card, processVersion) {
   return gaps;
 }
 
+// The situation summary is the first thing every ballot shows (owner ballot
+// standard, 2026-10-04): 4-7 plain sentences saying what the thing is, what
+// goes wrong today with one concrete example, why it matters and to whom, what
+// is being decided, and the recommendation in one sentence. It is prose, never
+// a list of facts, files, or IDs.
+const SITUATION_MIN_CHARS = 300;
+const SITUATION_MAX_CHARS = 1200;
+function situationGaps(situation) {
+  const text = typeof situation === 'string' ? situation.trim() : '';
+  if (!text) return ['situation'];
+  const gaps = [];
+  if (text.length < SITUATION_MIN_CHARS || text.length > SITUATION_MAX_CHARS)
+    gaps.push(`situation has ${text.length} characters (need ${SITUATION_MIN_CHARS}-${SITUATION_MAX_CHARS})`);
+  if (/^\s*(?:[-*+•]|\d+[.)])\s/m.test(text)) gaps.push('situation (plain prose, not a bullet list)');
+  if (/^\s*#{1,6}\s/m.test(text)) gaps.push('situation (plain prose, no headings)');
+  if (/^\s*(?:`{3,}|~{3,})/m.test(text)) gaps.push('situation (plain prose, no code blocks)');
+  for (const [i, sentence] of sentences(text).entries())
+    if (words(sentence).length > PLAIN_SENTENCE_WORDS)
+      gaps.push(`situation sentence ${i + 1} has ${words(sentence).length} words (max ${PLAIN_SENTENCE_WORDS})`);
+  return gaps;
+}
+
 export function ballotGaps(p, {
   requireBeginner = Number(p.ballotProcessVersion || 0) >= BEGINNER_PROCESS_VERSION,
   requireSurface = Number(p.ballotProcessVersion || 0) >= SURFACE_PROCESS_VERSION,
@@ -2193,6 +2243,8 @@ export function ballotGaps(p, {
   if (p.surface != null || requireSurface) missing.push(...surfaceGaps(p, { requireRecFirst }));
   const ballotMode = p.ballotMode || 'full';
   if (!['full', 'short'].includes(ballotMode)) missing.push('ballotMode (full or short)');
+  if (ballotMode === 'full' || (typeof p.situation === 'string' && p.situation.trim()))
+    missing.push(...situationGaps(p.situation));
   if (!p.gist || !String(p.gist).trim()) missing.push('gist');
   if (!p.lesson || !String(p.lesson).trim()) missing.push('lesson');
   else if (String(p.lesson).trim().split(/\n\s*\n/).length > 1) missing.push('lesson (one paragraph maximum)');
@@ -2230,12 +2282,13 @@ export function ballotGaps(p, {
     if (processVersion >= BALLOT_PROCESS_VERSION) {
       recommendationLosses.forEach((item, i) => {
         const loss = typeof item?.loss === 'string' ? item.loss.trim() : '';
-        const why = typeof item?.whyUnavoidable === 'string' ? item.whyUnavoidable.trim() : '';
+        const mitigation = typeof item?.mitigation === 'string' ? item.mitigation.trim() : '';
         if (!plainObject(item))
-          missing.push(`recommendation.losses[${i + 1}] "${String(item || '').trim()}" (must include whyUnavoidable)`);
+          missing.push(`recommendation.losses[${i + 1}] "${String(item || '').trim()}" (must include mitigation)`);
         else {
+          missing.push(...mitigationGaps(`recommendation.losses[${i + 1}]`, item));
           if (!loss) missing.push(`recommendation.losses[${i + 1}].loss (required)`);
-          if (!why) missing.push(`recommendation.losses[${i + 1}].whyUnavoidable (required for "${loss || '?'}")`);
+          if (!mitigation) missing.push(`recommendation.losses[${i + 1}].mitigation (required for "${loss || '?'}")`);
         }
       });
     }
@@ -2285,6 +2338,7 @@ export function addDecision(s, p) {
   const systemAcceptance = p[SYSTEM_ACCEPTANCE] === true;
   if (!systemAcceptance && (p.group === 'acceptance' || String(p.id || '').startsWith('D-ACCEPT-')))
     fail('E_INVALID', 'acceptance ballots are system-generated; use the card acceptance workflow');
+  if (p.situation != null && typeof p.situation !== 'string') fail('E_INVALID', 'decision situation must be a string');
   // Every newly authored narrative ballot is process 4. Historical process 2/3
   // records enter through the store and keep their stored version unchanged.
   const candidate = systemAcceptance ? p : { ...p, status: 'open', ballotProcessVersion: BALLOT_PROCESS_VERSION };
@@ -2304,7 +2358,7 @@ export function addDecision(s, p) {
   const supersededBy = verdictSupersededBy(s, candidate);
   const ballotMode = candidate.group === 'acceptance' ? null : (candidate.ballotMode || 'full');
   const d = { id: candidate.id || newId('D-'), cardId: card.id, group: candidate.group || 'other',
-    title: String(candidate.title).trim(), gist: candidate.gist || '', lesson: candidate.lesson || '', explainer: candidate.explainer || '', story: candidate.story || '',
+    title: String(candidate.title).trim(), situation: candidate.situation || '', gist: candidate.gist || '', lesson: candidate.lesson || '', explainer: candidate.explainer || '', story: candidate.story || '',
     inWild: candidate.inWild || '', detail: candidate.detail || '', options: candidate.options || [], comparisons: candidate.comparisons || [],
     rec: candidate.rec || null, recommendation: candidate.recommendation || null, hybrid: candidate.hybrid || null,
     ballotMode, shortAuthorizedBy: ballotMode === 'short' ? (candidate.shortAuthorizedBy || null) : null,
@@ -2422,9 +2476,10 @@ export function updateDecision(s, id, patch, by) {
     fail('E_INVALID', 'acceptance ballots are system-generated and cannot use decision update');
   if (d.status === 'ratified' && by !== 'owner')
     fail('E_OWNER_ONLY', 'updating a ratified decision is owner-only');
+  if (patch.situation != null && typeof patch.situation !== 'string') fail('E_INVALID', 'decision situation must be a string');
   const card = s.cards.find(c => c.id === d.cardId);
   const storedVersion = Number(d.ballotProcessVersion || 0);
-  for (const k of ['title', 'gist', 'lesson', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'recommendation', 'hybrid', 'checkInstructions', 'group', 'ballotMode', 'shortAuthorizedBy', 'reviewPasses', 'supersededBy', 'surface', 'designAway'])
+  for (const k of ['title', 'situation', 'gist', 'lesson', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'recommendation', 'hybrid', 'checkInstructions', 'group', 'ballotMode', 'shortAuthorizedBy', 'reviewPasses', 'supersededBy', 'surface', 'designAway'])
     if (k in patch) d[k] = patch[k];
   const supersededBy = verdictSupersededBy(s, d);
   if (supersededBy) d.supersededBy = supersededBy;
@@ -2476,7 +2531,7 @@ export function mintVerdict(s, ref, outcome, title, by, supersedes) {
   const supersededBy = verdictSupersededBy(s, { group: 'verdict', id, supersededBy: supersedes });
   const d = { id, cardId: c.id, group: 'verdict',
     title: title || `Verdict on #${c.num} — ${c.title}`,
-    gist: '', lesson: '', explainer: '', story: '', inWild: '', detail: '', options: [], comparisons: [],
+    situation: '', gist: '', lesson: '', explainer: '', story: '', inWild: '', detail: '', options: [], comparisons: [],
     rec: null, recommendation: null, hybrid: null, ballotMode: null, shortAuthorizedBy: null, reviewPasses: null,
     draft: false, status: 'ratified', outcome, comment: outcome, supersededBy,
     created: now(), ratifiedAt: today() };
@@ -2624,6 +2679,115 @@ export function resolvePapercut(s, id, by) {
   pc.resolvedBy = by;
   logEvent(s, { by, action: 'papercut.resolve', ref: id });
   return pc;
+}
+
+// ---- Now reports ----------------------------------------------------------
+// Reports describe progress; posting one never changes a card, milestone gate,
+// or ballot. Attribution/time are assigned here, not trusted from a file.
+function reportText(value, label) {
+  if (typeof value !== 'string' || !value.trim()) fail('E_INVALID', `${label} needs nonempty text`);
+  return value;
+}
+
+function reportArray(value, label) {
+  if (!Array.isArray(value)) fail('E_INVALID', `${label} must be an array`);
+  return value;
+}
+
+function reportTime(value, label) {
+  reportText(value, label);
+  if (!/^\d{4}-\d\d-\d\dT/.test(value) || !Number.isFinite(Date.parse(value)))
+    fail('E_INVALID', `${label} must be an ISO timestamp`);
+}
+
+function reportLinks(links = []) {
+  for (const link of reportArray(links, 'links')) {
+    if (!plainObject(link) || (link.card !== undefined) === (link.decision !== undefined))
+      fail('E_INVALID', 'each link needs exactly one card or decision reference');
+    reportText(link.card !== undefined ? link.card : link.decision, 'link reference');
+    if (link.label !== undefined) reportText(link.label, 'link label');
+  }
+}
+
+function validateBriefing(record) {
+  if (!plainObject(record)) fail('E_INVALID', 'briefing must be an object');
+  for (const key of ['id', 'title', 'body', 'by']) reportText(record[key], `briefing.${key}`);
+  reportTime(record.created, 'briefing.created');
+  for (const section of reportArray(record.sections, 'briefing.sections')) {
+    if (!plainObject(section)) fail('E_INVALID', 'briefing section must be an object');
+    reportText(section.title, 'section.title');
+    reportText(section.body, 'section.body');
+    reportLinks(section.links);
+  }
+}
+
+function validateStatusSnapshot(record) {
+  if (!plainObject(record)) fail('E_INVALID', 'status snapshot must be an object');
+  for (const key of ['id', 'by']) reportText(record[key], `status.${key}`);
+  reportTime(record.created, 'status.created');
+  if (record.updatedAt !== undefined) reportTime(record.updatedAt, 'status.updatedAt');
+  if (record.summary !== undefined) reportText(record.summary, 'status.summary');
+  for (const milestone of reportArray(record.milestones, 'status.milestones')) {
+    if (!plainObject(milestone)) fail('E_INVALID', 'milestone must be an object');
+    reportText(milestone.title, 'milestone.title');
+    reportText(milestone.state, 'milestone.state');
+    if (!plainObject(milestone.progress)) fail('E_INVALID', 'milestone.progress must map labels to percentages');
+    for (const [label, percent] of Object.entries(milestone.progress)) {
+      reportText(label, 'progress label');
+      if (typeof percent !== 'number' || !Number.isFinite(percent) || percent < 0 || percent > 100)
+        fail('E_INVALID', 'progress percentages must be numbers from 0 to 100');
+    }
+    reportLinks(milestone.links);
+  }
+  for (const stream of reportArray(record.workstreams, 'status.workstreams')) {
+    if (!plainObject(stream)) fail('E_INVALID', 'workstream must be an object');
+    reportText(stream.title, 'workstream.title');
+    reportText(stream.state, 'workstream.state');
+    for (const worker of reportArray(stream.workers, 'workstream.workers')) reportText(worker, 'worker');
+    for (const blocker of reportArray(stream.blockers, 'workstream.blockers')) reportText(blocker, 'blocker');
+    if (stream.updatedAt !== undefined) reportTime(stream.updatedAt, 'workstream.updatedAt');
+    reportLinks(stream.links);
+  }
+  for (const action of reportArray(record.ownerActions, 'status.ownerActions')) {
+    if (!plainObject(action)) fail('E_INVALID', 'owner action must be an object');
+    reportText(action.text, 'owner action text');
+    reportLinks(action.links);
+  }
+}
+
+function resolveReportLinks(s, items) {
+  for (const item of items) {
+    item.links = (item.links || []).map(link => {
+      if (link.card !== undefined) return { ...link, card: mustCard(s, link.card).id };
+      const decision = s.decisions.find(d => d.id === link.decision)
+        || fail('E_NOT_FOUND', `no decision ${link.decision}`);
+      return { ...link, cardId: decision.cardId };
+    });
+  }
+}
+
+export function postBriefing(s, p) {
+  const record = { id: newId('briefing'), title: p.title, body: p.body, by: p.by,
+    created: now(), sections: structuredClone(p.sections ?? []) };
+  validateBriefing(record);
+  resolveReportLinks(s, record.sections);
+  s.briefings ||= [];
+  s.briefings.unshift(record);
+  logEvent(s, { by: record.by, action: 'briefing.post', ref: record.id, note: record.title });
+  return record;
+}
+
+export function postStatus(s, p) {
+  if (!plainObject(p.snapshot)) fail('E_INVALID', 'status post needs a JSON snapshot object');
+  const { summary, updatedAt, milestones, workstreams, ownerActions = [] } = structuredClone(p.snapshot);
+  const record = { id: newId('status'), by: p.by, created: now(),
+    ...(summary !== undefined ? { summary } : {}), ...(updatedAt !== undefined ? { updatedAt } : {}),
+    milestones, workstreams, ownerActions };
+  validateStatusSnapshot(record);
+  resolveReportLinks(s, [...record.milestones, ...record.workstreams, ...record.ownerActions]);
+  s.statusSnapshot = record;
+  logEvent(s, { by: record.by, action: 'status.post', ref: record.id, note: record.summary || '' });
+  return record;
 }
 
 // ---- mutations: ideas ------------------------------------------------------
@@ -2920,7 +3084,7 @@ function decisionForBrief(d) {
     visualMedia: d.visualMedia || [],
     outcome: d.outcome ?? null, comment: d.comment ?? '', ratifiedAt: d.ratifiedAt ?? null };
   if (d.status === 'ratified') return base;
-  return { ...base, lesson: d.lesson, story: d.story, explainer: d.explainer, inWild: d.inWild, detail: d.detail, rec: d.rec,
+  return { ...base, situation: d.situation ?? '', lesson: d.lesson, story: d.story, explainer: d.explainer, inWild: d.inWild, detail: d.detail, rec: d.rec,
     recommendation: d.recommendation, hybrid: d.hybrid, reviewPasses: d.reviewPasses,
     options: d.options || [], comparisons: d.comparisons || [] };
 }

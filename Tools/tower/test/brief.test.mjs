@@ -21,15 +21,21 @@ const fresh = () => {
   return openStore(dir);
 };
 
+const SITUATION = 'Tower is the shared project board, and a ballot is the page where the owner picks one option. '
+  + 'Today a ballot opens with a list of facts, so a reader must piece the story together. '
+  + 'For example, a new reader sees file names before learning what problem exists. '
+  + 'That slows every vote and invites mistakes from beginners and experts alike. '
+  + 'You are deciding which option this card should use. We recommend option A because it keeps behavior visible.';
+
 const ballot = (extra = {}) => ({
-  ballotMode: 'full',
+  ballotMode: 'full', situation: SITUATION,
   reviewPasses: {
     beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
     adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
   },
   gist: 'a plain sentence', lesson: 'Concept, mechanics, terms, and stakes.', story: 'Dana hits this while shipping X.', inWild: 'real code in Source/foo.rs',
   rec: 'A', options: [{ key: 'A', name: 'Option A', detail: 'does A', code: 'a()' }, { key: 'B', name: 'Option B', detail: 'does B', code: 'b()' }],
-  recommendation: { why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one visible step.' },
+  recommendation: { why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: [{ loss: 'One more step', mitigation: 'Provide a short example to copy.' }], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one visible step.' },
   hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Borrow its clear names.' }, { key: 'B', aspect: 'B is brief.', use: 'Keep it.' }] },
   surface: {
     gist: 'Which option should Jet ship?',
@@ -39,7 +45,7 @@ const ballot = (extra = {}) => ({
       { key: 'A', name: 'Option A', gist: 'Explicit call.', gains: ['Behavior stays visible'], losses: ['One more step'], proposed: { code: 'a()' } },
       { key: 'B', name: 'Option B', gist: 'Short call.', gains: ['Shortest first script'], losses: ['Loses the needed guarantee'], proposed: { code: 'b()' } },
     ],
-    recommendation: { rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.' },
+    recommendation: { rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: [{ loss: 'One more step', mitigation: 'Provide a short example to copy.' }], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.' },
   },
   ...extra,
 });
@@ -152,6 +158,7 @@ test('an open decision carries its full options text verbatim (owner decides fro
   assert.equal(d.ballotProcessVersion, 4);
   assert.equal(d.reviewPasses.beginner, 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.');
   assert.equal(d.rec, 'A');
+  assert.equal(d.situation, SITUATION, 'open decisions carry the situation summary verbatim');
   assert.equal(d.ballotMode, 'full');
   assert.equal(d.recommendation.whyNot[0].key, 'B');
   assert.equal(d.hybrid.result, 'A');
