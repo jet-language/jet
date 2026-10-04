@@ -53,6 +53,31 @@ The [execution seam](../../crates/jet-foundation/src/JitBackend.rs) instead
 passes canonical MIR and an artifact identity to the resident backends.
 These are consumers of one checked meaning, not separate front ends.
 
+### Native representation boundaries
+
+The [Jet x86-64 selector](../../Compiler/JetBackend/Source/X64/Select.jet)
+normalizes incoming and returned `Bool` values from the low System V ABI byte;
+unspecified upper register or stack-slot bits must not change Jet truth.
+Image origins preserve the linker's relative alignment: relocatable read-only
+sections advertise and use their maximum datum alignment, and static ELF text
+starts after header padding to the maximum function/data alignment.
+The [ABI fixtures](../../Compiler/JetBackend/Tests/AbiFixtures.jet) exercise
+dirty upper bits and aligned data addresses, including a system-linked object.
+
+Runtime representation is not the checked field type. In particular, default
+`Err.cause` value and place reads use the shared
+[cause projection](../../crates/jet-foundation/src/Outcome.rs) to expose
+`Err?`, not the runtime's boxed recursive storage. The
+[default error example](../../Examples/features/errors/default_err_value.jet)
+covers present, absent and repeated cause reads.
+Returned `View` and `ViewMut` signatures retain the checked owner provenance:
+both Rust emitters attach an explicit lifetime to the returned reference and
+its owner parameter, not to unrelated borrowed parameters. Static-only views
+use `'static`. The [borrowed view example](../../Examples/features/memory/borrowed_view_len.jet)
+covers a multi-parameter return, chained and stored length reads, indexing,
+and iteration without converting the borrowed slice to a list.
+
+
 ### One reflection model
 
 `StructDef::reflection_fields()` is the declaration-owned stored-field-row source for
