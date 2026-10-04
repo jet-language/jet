@@ -5,6 +5,7 @@ use jet::Codegen::MIREval::{evaluate_mir_function_with_config, MirEvalConfig, Mi
 use jet::Diagnostics::{Diagnostic, Severity};
 use jet::AST::{AccessConvention, CallArg, Expr, Item, Marker, MarkerCallArg, Program, Stmt};
 use jet_foundation::MIR::{MirArtifactBuildMode, MirArtifactKind, MirArtifactRequest, MirArtifactTarget, MirFunctionId, MirProgram};
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -104,7 +105,7 @@ fn selfhost_parser_marker(facts: &[Int], marker: Marker) {
     &facts.push(marker.args.len())
     index := 0
     loop index < marker.args.len() {
-        label := None
+        label := CallLabel?{None}
         if index < marker.arg_labels.len() -> label = marker.arg_labels[index]
         selfhost_parser_label(&facts, label)
         if marker.args[index] == {
@@ -327,40 +328,63 @@ fn expected_tier_stdout() -> String {
     output
 }
 
-fn parser_source(root: &Path) -> (String, usize) {
+/// #4555: the parity source is the jet_parser package plus every package its
+/// `package.jet` `deps` name, transitively, in `sources.list` order. A
+/// hand-picked file slice drifted each time a parser input gained a
+/// dependency; the package graph is the closure the parser itself builds with.
+fn parser_packages(root: &Path) -> Vec<String> {
+    let mut packages = vec![String::from("Compiler/JetParser")];
+    let mut index = 0;
+    while index < packages.len() {
+        let manifest = fs::read_to_string(root.join(&packages[index]).join("package.jet"))
+            .expect("parser package manifest");
+        for row in manifest.lines() {
+            // A dependency row reads `jet_lexer: ../JetLexer,`.
+            if let Some((_, directory)) = row.trim().trim_end_matches(',').split_once(": ../") {
+                let package = format!("Compiler/{directory}");
+                if !packages.contains(&package) {
+                    packages.push(package);
+                }
+            }
+        }
+        index += 1;
+    }
+    packages
+}
+
+fn parser_source(root: &Path) -> String {
+    let packages = parser_packages(root);
+    let mut core_imports = HashSet::new();
     let mut source = String::new();
-    let mut source_file_count = 0;
     for row in SOURCE_MANIFEST.lines() {
         let path = row.trim();
         if path.is_empty() || path.starts_with('#') {
             continue;
         }
-        let parser_input = path.starts_with("Compiler/JetLexer/Source/Lexer/")
-            || path == "Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet"
-            || path == "Compiler/JetFoundation/Source/Types/Types.jet"
-            || path == "Compiler/JetFoundation/Source/Registry/Diagnostics.jet"
-            || path == "Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet"
-            || path.starts_with("Compiler/JetFoundation/Source/AST/")
-            || path.starts_with("Compiler/JetParser/Source/Parser/");
+        let parser_input = packages.iter().any(|package| {
+            path.strip_prefix(package.as_str()).is_some_and(|rest| rest.starts_with("/Source/"))
+        });
         if parser_input {
-            source_file_count += 1;
             source.push_str("// [selfhost parser parity source: ");
             source.push_str(path);
             source.push_str("]\n");
             let text = fs::read_to_string(root.join(path)).expect("canonical parser source");
-            source.push_str(&without_package_imports(&text));
+            source.push_str(&without_package_imports(&text, &mut core_imports));
             source.push('\n');
         }
     }
     source.push_str(PROBE_SOURCE);
     source.push_str(&tier_run_source());
-    (source, source_file_count)
+    source
 }
 
 /// D-MOD-CYCLE1=A: Compiler/ files import their dependency packages with
 /// `use jet_<package>.[names]`; the concatenated parity source is one
-/// namespace, so those import blocks are dropped.
-fn without_package_imports(text: &str) -> String {
+/// namespace, so those import blocks are dropped. Files may also repeat one
+/// single-line Core import (`use core.text as unicode`); inside one unit the
+/// repeat is a duplicate import name (E0105), so only the first is kept, as
+/// Compiler/Bootstrap/assemble.mjs does.
+fn without_package_imports(text: &str, core_imports: &mut HashSet<String>) -> String {
     let mut kept = String::with_capacity(text.len());
     let mut in_import = false;
     for line in text.split_inclusive('\n') {
@@ -374,6 +398,9 @@ fn without_package_imports(text: &str) -> String {
             in_import = !line.contains(']');
             continue;
         }
+        if line.starts_with("use core.") && !line.contains('[') && !core_imports.insert(line.trim_end().to_string()) {
+            continue;
+        }
         kept.push_str(line);
     }
     kept
@@ -383,7 +410,6 @@ struct Pass {
     mir: MirProgram,
     function: MirFunctionId,
     source: String,
-    source_file_count: usize,
 }
 
 fn lower_bundle(bundle: &mut jet::AST::ProgramBundle, context: &str) -> MirProgram {
@@ -405,14 +431,14 @@ fn bootstrap() -> Arc<Pass> {
         let scratch = common::Scratch::new("selfhost_parser_bootstrap");
         tir_support::write_test_package(&scratch.path, tir_support::TIR_TEST_PACKAGE);
         let path = scratch.path.join("parser.jet");
-        let (source, source_file_count) = parser_source(Path::new(env!("CARGO_MANIFEST_DIR")));
+        let source = parser_source(Path::new(env!("CARGO_MANIFEST_DIR")));
         fs::write(&path, &source).unwrap();
         let mut bundle = jet::Loader::load_entry(path.to_str().unwrap())
             .expect("Rust reference bootstraps the Jet parser source");
         let mir = lower_bundle(&mut bundle, "generated Jet parser");
         let function = mir.functions.iter().find(|row| row.name == "selfhost_parser_probe")
             .expect("compiled parser probe entry").id;
-        Arc::new(Pass { mir, function, source, source_file_count })
+        Arc::new(Pass { mir, function, source })
     })
 }
 
@@ -735,10 +761,6 @@ fn diagnostics_from_facts(facts: &[i64]) -> Vec<Diagnostic> {
 #[test]
 fn generated_jet_call_arguments_match_native_parser_contract() {
     let pass = pass();
-    assert_eq!(
-        pass.source_file_count, 35,
-        "source slice is 1 foundation-diagnostics + 4 lexer + 1 foundation-types + 2 diagnostic-registry + 5 AST + 22 parser files"
-    );
     let candidate_facts = jet::run_compiler_work(|| {
         CASES.iter().map(|(_, source)| pass.evaluate(source)).collect::<Vec<_>>()
     });

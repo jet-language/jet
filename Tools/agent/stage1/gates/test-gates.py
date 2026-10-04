@@ -33,6 +33,14 @@ with tempfile.TemporaryDirectory(prefix='gate-contract-',dir=out) as temp:
         d=temp/name;ladder(d,tk,rk);p=run(name,[here/'growth-gate.sh',d],{code})
         if code: assert 'SUPERLINEAR parse '+('rss' if name.startswith('rss') else 'seconds') in p.stdout
     d=temp/'missing-rung';ladder(d);shutil.rmtree(d/'L3');run('missing-rung',[here/'growth-gate.sh',d],{2})
+    # Only trap-free runs are fitted: a failed keep-going rung reran parse seven
+    # times (7 x 40 s); fitting it would report false superlinear growth.
+    d=temp/'trapped-rung';ladder(d)
+    (d/'L3'/'result.env').write_text('status=failed\nrc=0\nwall_ms=280000\n')
+    events=[e for i in range(7) for e in ({'name':'parse','cat':'parse','tid':1,'ph':'B','ts':i*40_000_000},{'name':'parse','cat':'parse','tid':1,'ph':'E','ts':(i+1)*40_000_000,'args':{'rss_kb':4000,'peak_rss_kb':4000}})]
+    (d/'L3'/'trace.json').write_text('[\n'+',\n'.join(json.dumps(e) for e in events)+'\n]\n')
+    p=run('trapped-rung-excluded',[here/'growth-gate.sh',d],{2})
+    assert 'EXCLUDED L3 parse seconds=280.000000' in p.stdout and 'SUPERLINEAR' not in p.stdout
     d=temp/'exclusive-growth';ladder(d)
     for n in (1,2,3):
         scale=2**(n-1);phase_seconds=1000+10*scale**2
@@ -105,7 +113,7 @@ fn bad(rows: [Int], graph: Graph) {
                 origins.append({'path':str(src/filename),'sha256':hashlib.sha256((src/filename).read_bytes()).hexdigest()})
         (merged/'evidence-origin.json').write_text(json.dumps(origins,indent=2)+'\n')
         run(candidate+'-combined-growth',[here/'growth-gate.sh',merged],{1,2})
-    run('cand9-growth',[here/'growth-gate.sh',home/'.cache/jet-dev/scratch/ladder/run-cand9'],{1})
+    run('cand9-growth',[here/'growth-gate.sh',home/'.cache/jet-dev/scratch/ladder/run-cand9'],{2})
     profile=home/'.cache/jet-dev/scratch/PerfAudit-1/regression-runs/c25f-L5'
     run('cand25f-profile-replay',[here/'phase-profile.sh',home/'.cache/jet-dev/cand25f/jetc0',home/'.cache/jet-dev/scratch/ladder/L5/project'],{1},{'PHASE_PROFILE_REPLAY':str(profile),'PHASE_PROFILE_OUT':str(out/'phase-replay')})
     capped=home/'.cache/jet-dev/cand25f/phase-profile-gate-test/run-1791077897315783862'

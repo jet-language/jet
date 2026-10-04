@@ -3396,6 +3396,11 @@ struct RustEmitter<'a> {
     /// Lowest `visiting` index a cycle assumption reached in the current
     /// `type_derive_capability` frame (`usize::MAX` when none).
     derive_capability_cycle_floor: std::cell::Cell<usize>,
+    /// Closed rows found capable only under a cycle assumption on a frame
+    /// still open; each is cached once that frame settles capable, and
+    /// dropped when it settles incapable. Every entry belongs to the current
+    /// top-level query's trait (a depth-0 frame always settles them).
+    derive_capability_pending: std::cell::RefCell<Vec<MirTypeId>>,
     history_callback_lifetime: std::cell::Cell<&'static str>,
     partial_moves: BTreeMap<MirFunctionId, Vec<PartialMoveRoot>>,
     shared_capture_locals: BTreeMap<MirFunctionId, BTreeSet<MirLocalId>>,
@@ -3587,6 +3592,7 @@ impl<'a> RustEmitter<'a> {
             history_runtime_metadata: std::cell::OnceCell::new(),
             derive_capability_cache: std::cell::RefCell::new(BTreeMap::new()),
             derive_capability_cycle_floor: std::cell::Cell::new(usize::MAX),
+            derive_capability_pending: std::cell::RefCell::new(Vec::new()),
             history_callback_lifetime: std::cell::Cell::new("'static"),
             partial_moves: BTreeMap::new(),
             shared_capture_locals: BTreeMap::new(),
@@ -8000,7 +8006,13 @@ impl<'a> RustEmitter<'a> {
                 }
                 // A closed row's answer depends on the row alone: `false` means
                 // an incapable leaf is reachable, and `true` is final once no
-                // cycle assumption above this frame was used.
+                // cycle assumption above this frame was used. A `true` that
+                // used such an assumption waits in `derive_capability_pending`
+                // until the frame it assumed settles: every frame between
+                // returned `true`, so a capable settled frame proves them all
+                // (a greatest fixed point); an incapable one drops them.
+                // Without this, every row of a recursive type family
+                // re-expanded the whole family per query.
                 let cacheable = args.is_empty()
                     && def.generic_params.is_empty()
                     && bindings.is_empty()
@@ -8016,6 +8028,7 @@ impl<'a> RustEmitter<'a> {
                     }
                 }
                 let depth = visiting.len();
+                let pending_start = self.derive_capability_pending.borrow().len();
                 let outer_floor = self.derive_capability_cycle_floor.replace(usize::MAX);
                 let mut next_bindings = bindings.clone();
                 let mut next_generic_params = generic_params.clone();
@@ -8094,6 +8107,20 @@ impl<'a> RustEmitter<'a> {
                         .entry(trait_name.to_string())
                         .or_default()
                         .insert(def.id, result);
+                }
+                let mut pending = self.derive_capability_pending.borrow_mut();
+                if !result {
+                    pending.truncate(pending_start);
+                } else if floor >= depth {
+                    if pending.len() > pending_start {
+                        let mut cache = self.derive_capability_cache.borrow_mut();
+                        let rows = cache.entry(trait_name.to_string()).or_default();
+                        for settled in pending.drain(pending_start..) {
+                            rows.insert(settled, true);
+                        }
+                    }
+                } else if cacheable {
+                    pending.push(def.id);
                 }
                 result
             }
