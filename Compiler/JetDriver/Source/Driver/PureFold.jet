@@ -96,8 +96,7 @@ fn jet_driver_pure_fold_rounds(program: ^MIRProgram, declined: &[String:Bool], r
     base_len :: folding.functions.len()
     loop synthetic in candidates.functions -> &folding.functions.push(synthetic)
     synthetic_ids := (loop site in candidates.sites -> site.synthetic)
-    values := [TComptimeValue?]{}
-    result := jet_eval_pure_functions(^folding, synthetic_ids, jet_eval_default_config(), &values)
+    (result, values) := jet_eval_pure_functions(^folding, synthetic_ids, jet_eval_default_config())
     loop result.functions.len() > base_len -> _ := &result.functions.pop()
     changed := false
     loop (index, site) in candidates.sites {
