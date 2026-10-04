@@ -1,0 +1,168 @@
+// Original Sign.rs tests are retained, including provider-gated native cases.
+// Pure codec/env/frame proof does not claim entropy or protected publication.
+
+#Test("publication sign hex_roundtrips") {
+    data :: [U8]{0, 1, 2, 250, 255, 16, 128}
+    encoded :: hex.encode(data)
+    assert_eq(encoded, "000102faff1080")
+    assert_eq(publication_sign_hex_decode(encoded) ?? panic("hex"), data)
+}
+#Test("publication sign base64_roundtrips_all_pad_lengths") {
+    loop input in ([String]{"", "f", "fo", "foo", "foob", "fooba", "foobar"}) {
+        encoded :: base64.encode(input.bytes())
+        assert_eq(publication_sign_base64_decode(encoded) ?? panic("base64"), input.bytes())
+    }
+    assert_eq(base64.encode("foobar".bytes()), "Zm9vYmFy")
+}
+// #4427: Core sys.set claims Never!/unit, but its runtime returns
+// Result<(),EnvError>; the original environment override test stays intact.
+#Test("publication sign keys_dir_honors_env_override") {
+    previous :: sys.get("JET_KEYS_DIR")
+    sys.set("JET_KEYS_DIR", "/tmp/jet_keys_test_dir")
+    actual :: publication_keys_dir()
+    if previous == {
+        .Val(value) -> sys.set("JET_KEYS_DIR", value)
+        .None -> { _ :: sys.unset("JET_KEYS_DIR") ?? panic("restore env") }
+    }
+    assert_eq(actual, "/tmp/jet_keys_test_dir")
+}
+#Test("publication sign e1292_command_frame_is_exact") {
+    // Original acceptance retained pending Main's canonical-renderer fixture
+    // rebless (Rust hand frame was a defect), not a local lowercase prose fork.
+    golden :: files.read("tests/fixtures/jetpack-diagnostics/keygen_entropy_unavailable.stderr") ?? panic("original fixture")
+    assert_eq(diagnostic_render(publication_e1292(), "", "", false), golden)
+    assert_eq(publication_e1292().code, "E1292")
+}
+#Test("publication sign entropy diagnostic uses canonical registry and renderer") {
+    row :: diagnostic_registry_row("E1292") ?? panic("E1292 registry row")
+    diagnostic :: publication_e1292()
+    assert_eq(diagnostic.what, row.what)
+    assert_eq(diagnostic.why, row.why)
+    assert_eq(diagnostic.fix, row.fix)
+    assert_eq(diagnostic_render(diagnostic, "", "", false), "Error [E1292]: Jet could not create the package-signing key.\n Why: The operating system could not provide cryptographic randomness.\n Fix: Retry as a new operation on a supported host; no key files were created.\nMore: jet-lang.dev/e/E1292\n")
+}
+#Test("publication sign encodings reject malformed and noncanonical wire") {
+    if publication_sign_hex_decode("a") == {
+        .Err(error) -> assert_eq(error.message, "odd-length hex string")
+        .Ok(_) -> panic("odd hex accepted")
+    }
+    if publication_sign_hex_decode("gg") == {
+        .Err(error) -> assert_eq(error.message, "invalid hex digit")
+        .Ok(_) -> panic("invalid hex accepted")
+    }
+    assert_eq(publication_sign_hex_decode(" \tFaFF\n") ?? panic("trimmed mixed-case hex"), [U8]{250, 255})
+}
+
+#Test("publication sign base64 rejects malformed and noncanonical signatures") {
+    loop text in ([String]{"Zg=", "Zg==\n", "Zg__", "Zh==", "Zg===", "====", "=m9v", "Zm=v", "Zg==Zg=="}) {
+        assert(publication_sign_base64_decode(text) == .Err(_), "malformed signature wire must be refused")
+    }
+}
+
+fn publication_sign_test_seed(byte: Int) -> [U8] Never! {
+    seed := [U8]{}
+    loop _ in 0..<32 -> &seed.push(U8{byte})
+    seed
+}
+#Test("publication sign real Ed25519 roundtrip tamper and wrong key") {
+    seed :: publication_sign_test_seed(7)
+    key :: crypto.SigningKey.from_bytes(seed) ?? panic("seed")
+    public :: hex.encode(key.public_key().bytes)
+    message :: "sha256-0011223344556677"
+    signature :: publication_sign_bytes(seed, message) ?? panic("sign")
+    assert_eq((publication_sign_base64_decode(signature) ?? panic("signature wire")).len(), 64)
+    assert(publication_verify(public, message, signature) ?? panic("verify"))
+    assert(!(publication_verify(public, "sha256-tampered", signature) ?? panic("verify tamper")))
+    other :: crypto.SigningKey.from_bytes(publication_sign_test_seed(8)) ?? panic("other seed")
+    assert(!(publication_verify(hex.encode(other.public_key().bytes), message, signature) ?? panic("wrong key")))
+    close(^key)
+    close(^other)
+}
+#Test("publication sign RFC8032 empty message wire") {
+    seed :: publication_sign_hex_decode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60") ?? panic("seed vector")
+    signature :: publication_sign_bytes(seed, "") ?? panic("RFC signing")
+    expected :: publication_sign_hex_decode("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b") ?? panic("signature vector")
+    assert_eq(publication_sign_base64_decode(signature) ?? panic("wire"), expected)
+    assert(publication_verify(" d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a ", "", signature) ?? panic("RFC verify"))
+}
+#Test("publication sign malformed author keys and signatures never verify") {
+    zeros := [U8]{}
+    loop _ in 0..<64 -> &zeros.push(U8{0})
+    loop key in ([String]{"", "gg", "00", "01".repeat(32), "00".repeat(32)}) {
+        assert(!(publication_verify(key, "sha256-x", base64.encode(zeros)) ?? panic("invalid key")))
+    }
+    public :: "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+    loop signature in ([String]{"", "Zg=", "Zh==", "====", "_w==", "AAAA\n"}) {
+        assert(!(publication_verify(public, "", signature) ?? panic("malformed signature")))
+    }
+    assert(!(publication_verify(public, "", base64.encode(zeros)) ?? panic("invalid point")))
+}
+#Test("publication sign e1248 keeps orphaned TOFU refusal") {
+    diagnostic :: publication_e1248("/keys/jet.ed25519")
+    assert_eq(diagnostic.code, "E1248")
+    assert(diagnostic.what.contains("`/keys/jet.ed25519`"))
+    assert(diagnostic.why.contains("TOFU"))
+    assert(diagnostic.fix.contains("--force"))
+}
+
+fn publication_sign_test_root(label: String) -[FS, Env]> String Never! {
+    home :: sys.get("HOME") ?? panic("signing fixtures require HOME")
+    root :: files.join(home, ".cache/jet-test-scratch/jet-sign-{label}-{sys.pid()}")
+    files.remove_all(root).drop("stale fixture may be absent")
+    files.create_dir_all(root) ?? panic("create fixture")
+    root
+}
+// Original Sign.rs :507. #3593: canonical protected publication needs force
+// replacement of the symlink BINDING, never following its attacker target.
+#Test("publication sign force_keygen_replaces_a_symlink_without_following_it") {
+    root :: publication_sign_test_root("seed")
+    target :: files.join(root, "attacker-target")
+    path :: files.join(root, "key.ed25519")
+    files.write(target, "sentinel") ?? panic("sentinel")
+    files.symlink(target, path) ?? panic("symlink")
+    seed :: publication_sign_test_seed(90)
+    publication_write_private_seed(path, seed, true) ?? panic("protected force seed")
+    assert_eq(files.read(target) ?? panic("sentinel read"), "sentinel")
+    assert_eq(files.read_bytes(path) ?? panic("seed read"), seed)
+    assert_eq((files.stat(path) ?? panic("seed stat")).mode & 4095, 384)
+    files.remove_all(root) ?? panic("cleanup")
+}
+// Original tests/pkg.rs :9148. Entropy #3597 and exact held-directory
+// create-new/0600/0644/force contracts #3593; no cargo-existence skip.
+#Test("publication sign keygen_refuses_existing_key_e1248") {
+    root :: publication_sign_test_root("keygen")
+    previous :: sys.get("JET_KEYS_DIR")
+    sys.set("JET_KEYS_DIR", files.join(root, "keys"))
+    first :: publication_keygen("jet", false) ?? panic("first keygen")
+    assert_eq((files.stat(first.seed_path) ?? panic("private mode")).mode & 4095, 384)
+    assert_eq((files.stat(first.public_key_path) ?? panic("public mode")).mode & 4095, 420)
+    if publication_keygen("jet", false) == {
+        .Err(error) -> assert_eq(error.diagnostic.code, "E1248")
+        .Ok(_) -> panic("existing key overwritten")
+    }
+    replacement :: publication_keygen("jet", true) ?? panic("force keygen")
+    assert(replacement.public_key_hex != first.public_key_hex)
+    assert_eq(publication_read_public_key("jet"), Val(replacement.public_key_hex))
+    if previous == {
+        .Val(value) -> sys.set("JET_KEYS_DIR", value)
+        .None -> { _ :: sys.unset("JET_KEYS_DIR") ?? panic("restore env") }
+    }
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+// Original Sign.rs :499, retained behind Core #3597. The existing consuming
+// Close wipe cannot be observed through a moved owner. Core must provide the
+// audited in-place volatile wipe contract for this assertion; assignments of
+// zero bytes in Jet would not prove the optimizer-resistant secret erase.
+#Test("publication sign secret_temporary_zeroization_clears_every_byte") {
+    secret := [U8]{}
+    expected := [U8]{}
+    loop _ in 0..<96 {
+        &secret.push(U8{165})
+        &expected.push(U8{0})
+    }
+    #Unsafe("original signing secret-erasure acceptance requires the Core volatile in-place wipe provider (#3597)") {
+        publication_sign_expert.zeroize(&secret)
+    }
+    assert_eq(secret, expected)
+}

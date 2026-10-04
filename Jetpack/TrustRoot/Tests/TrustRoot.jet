@@ -1,7 +1,7 @@
 // Claims ported from crates/jetpack/src/TrustRoot.rs #[cfg(test)]. Scratch
 // roots come from `files.temp_dir` instead of the Rust per-process counter.
 
-@TRUST_TEST_NOW :: 1700000000
+TRUST_TEST_NOW :: prep { 1700000000 }
 
 fn trust_test_scratch(label: String) -> String {
     scratch :: files.temp_dir("jet-trustroot-{label}") ?? panic("scratch directory")
@@ -18,7 +18,7 @@ fn trust_test_policy_at(now: Int) -> TrustRootPolicy {
     policy
 }
 
-fn trust_test_sign_root(root: TufRootMetadata, keys: [TrustKey]) -> SignedMetadata<TufRootMetadata> {
+fn trust_test_sign_root(root: TUFRootMetadata, keys: [TrustKey]) -> SignedMetadata<TUFRootMetadata> {
     trust_sign_root(root, keys) ?? panic("sign root")
 }
 
@@ -86,7 +86,7 @@ fn trust_test_tamper(sig_hex: String) -> String {
 }
 
 #Test("bootstrap pins digest and rejects mismatch") {
-    now :: @TRUST_TEST_NOW
+    now :: TRUST_TEST_NOW
     fixture :: trust_test_fixture(1, now + 3600)
     signed :: trust_test_sign_root(fixture.root, [TrustKey]{fixture.keys[0], fixture.keys[1]})
     digest :: crypto.sha256(trust_canonical_root(fixture.root).bytes()).hex()
@@ -105,7 +105,7 @@ fn trust_test_tamper(sig_hex: String) -> String {
 }
 
 #Test("signature stripping rejected") {
-    now :: @TRUST_TEST_NOW
+    now :: TRUST_TEST_NOW
     fixture :: trust_test_fixture(1, now + 3600)
     signed := trust_test_sign_root(fixture.root, [TrustKey]{fixture.keys[0], fixture.keys[1]})
     signed.signatures = [TrustSignature]{}
@@ -122,7 +122,7 @@ fn trust_test_tamper(sig_hex: String) -> String {
 }
 
 #Test("threshold minus one cannot bootstrap or rotate") {
-    now :: @TRUST_TEST_NOW
+    now :: TRUST_TEST_NOW
     boot :: trust_test_boot(now)
     new_fixture :: trust_test_fixture(2, now + 7200)
     new_root := new_fixture.root
@@ -147,7 +147,7 @@ fn trust_test_tamper(sig_hex: String) -> String {
 }
 
 #Test("root rotation with threshold succeeds and rollback fails") {
-    now :: @TRUST_TEST_NOW
+    now :: TRUST_TEST_NOW
     boot :: trust_test_boot(now)
     engine := boot.engine
     new_fixture :: trust_test_fixture(2, now + 7200)
@@ -176,7 +176,7 @@ fn trust_test_tamper(sig_hex: String) -> String {
 }
 
 #Test("delegation path bounds and consistent snapshot") {
-    now :: @TRUST_TEST_NOW
+    now :: TRUST_TEST_NOW
     boot :: trust_test_boot(now)
     engine := boot.engine
     targets_key :: boot.keys[3]
@@ -220,7 +220,7 @@ fn trust_test_tamper(sig_hex: String) -> String {
 }
 
 #Test("bad clock expiry and size limits") {
-    now :: @TRUST_TEST_NOW
+    now :: TRUST_TEST_NOW
     fixture :: trust_test_fixture(1, now + 3600)
     signed :: trust_test_sign_root(fixture.root, [TrustKey]{fixture.keys[0], fixture.keys[1]})
 
@@ -263,7 +263,7 @@ fn trust_test_tamper(sig_hex: String) -> String {
 }
 
 #Test("hybrid publisher identities are distinct domains") {
-    now :: @TRUST_TEST_NOW
+    now :: TRUST_TEST_NOW
     boot :: trust_test_boot(now)
     engine := boot.engine
     &engine.bind_identity(BoundIdentity.registry("jet-lang.dev")) ?? panic("bind registry")
@@ -272,7 +272,7 @@ fn trust_test_tamper(sig_hex: String) -> String {
     offline :: PublisherIdentity.OfflineEd25519{public_key_hex: "11".repeat(32), key_id: "pub1"}
     &engine.bind_identity(BoundIdentity.publisher("alice", offline)) ?? panic("bind publisher")
     sigstore :: PublisherIdentity.Sigstore{identity: "alice@jet-lang.dev", issuer: "https://accounts.google.com", checkpoint_digest: "aa".repeat(32), bundle_digest: "bb".repeat(32)}
-    mismatch :: if &engine.bind_identity(BoundIdentity{kind: IdentityKind.Registry, name: "other", publisher: Val(sigstore)}) == {
+    mismatch :: if &engine.bind_identity(BoundIdentity{kind: IdentityKind.Registry, name: "other", proof: Val(sigstore)}) == {
         .Ok(_) -> false
         .Err(error) -> {
             if error == {
@@ -284,9 +284,9 @@ fn trust_test_tamper(sig_hex: String) -> String {
     assert(mismatch, "a Sigstore proof cannot sit on a registry identity")
     refreshed := engine.clone_for_drill()
     &refreshed.bind_identity(BoundIdentity.publisher("alice", sigstore)) ?? panic("rebind the same publisher name")
-    kms :: PublisherIdentity.KmsHsm{key_uri: "kms:projects/p/locations/l/keyRings/r/cryptoKeys/k", public_key_hex: "cc".repeat(32), key_id: "kms1"}
+    kms :: PublisherIdentity.KMSHSM{key_uri: "kms:projects/p/locations/l/keyRings/r/cryptoKeys/k", public_key_hex: "cc".repeat(32), key_id: "kms1"}
     kms.validate() ?? panic("a kms: key URI validates")
-    evil :: PublisherIdentity.KmsHsm{key_uri: "http://evil", public_key_hex: "cc".repeat(32), key_id: "kms1"}
+    evil :: PublisherIdentity.KMSHSM{key_uri: "http://evil", public_key_hex: "cc".repeat(32), key_id: "kms1"}
     evil_rejected :: if evil.validate() == {
         .Ok(_) -> false
         .Err(_) -> true
@@ -295,7 +295,7 @@ fn trust_test_tamper(sig_hex: String) -> String {
 }
 
 #Test("bootstrap file round trip") {
-    now :: @TRUST_TEST_NOW
+    now :: TRUST_TEST_NOW
     boot :: trust_test_boot(now)
     pin :: RootBootstrap.load(boot.dir) ?? panic("load pin")
     assert_eq(pin.pin_digest, boot.engine.root_digest)

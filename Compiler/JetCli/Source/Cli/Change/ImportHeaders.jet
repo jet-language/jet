@@ -1,0 +1,255 @@
+// Pure source importer declarations and scalar signatures (Source/CmdImport.rs).
+// Rust `Function` (415-421). Names remain foreign here; rendering canonicalizes them.
+pub struct JetCLIImportFunction {
+    pub name: String
+    pub params: [(name: String, ty: String)]
+    pub result: String
+    pub body: [JetCLIImportBodyLine]
+}
+
+// One Rust Function.body (usize, String) row, with source-owned line attribution.
+// #4357 family: tuple lacks JetShow in Rust emit.
+pub struct JetCLIImportBodyLine {
+    pub line: Int
+    pub text: String
+}
+
+// Rust `Todo` fields (32-40); IM01 owns diagnostic projection.
+pub struct JetCLIImportTodo {
+    pub what: String
+    pub why: String
+    pub fix: String
+    pub source: String
+    pub target: String
+    pub status: String
+}
+
+// Rust `ForeignHeader` (832-835).
+pub struct JetCLIImportForeignHeader {
+    pub function: JetCLIImportFunction
+    pub expression_body: String?
+}
+
+#Error
+pub struct JetCLIImportTextError { pub message: String }
+fn jet_cli_import_text_error(message: String) -> JetCLIImportTextError Never! {
+    JetCLIImportTextError{message: message}
+}
+
+// Rust `foreign_comment_line`.
+pub fn jet_cli_import_foreign_comment_line(line: String) -> Bool Never! {
+    if line.starts_with("//") || line.starts_with("*") || line.starts_with("<!--") || line.starts_with("*/") -> return true
+    if !line.starts_with("/*") -> return false
+    end :: jet_cli_import_find_bytes(line.bytes(), "*/", false)
+    if end == .Val(at) -> return jet_cli_import_byte_slice(line.bytes(), at + 2, line.bytes().len()).trim() == ""
+    true
+}
+
+// Rust `foreign_function_candidate`.
+pub fn jet_cli_import_foreign_function_candidate(language: String, line: String) -> Bool Never! {
+    if language == "java" || language == "csharp" {
+        if !line.contains("(") -> return false
+        excluded :: [String]{"if ", "if(", "for ", "for(", "while ", "while(", "switch ", "switch(", "catch ", "catch("}
+        loop prefix in excluded { if line.starts_with(prefix) -> return false }
+        return true
+    }
+    if language == "ts" || language == "js" -> return line.contains("function") || line.contains("=>")
+    language == "go" && line.starts_with("func ")
+}
+
+// Rust `parse_foreign_header`. All offsets from searches are bytes, not String indices.
+pub fn jet_cli_import_parse_foreign_header(language: String, line: String) -> JetCLIImportForeignHeader JetCLIImportTextError! {
+    bytes :: line.bytes()
+    open :: jet_cli_import_find_bytes(bytes, "(", false) ?? return Err(jet_cli_import_text_error("function declaration has no parameter list"))
+    close :: jet_cli_import_find_bytes(bytes, ")", true) ?? return Err(jet_cli_import_text_error("function declaration has no complete parameter list"))
+    if close < open -> return Err(jet_cli_import_text_error("function declaration has no complete parameter list"))
+    prefix :: ~jet_cli_import_byte_slice(bytes, 0, open).trim()
+    suffix :: ~jet_cli_import_byte_slice(bytes, close + 1, bytes.len()).trim()
+    arrow :: (language == "ts" || language == "js") && line.contains("=>")
+    name := ""
+    result_text := ""
+    require_static := false
+    if language == "java" || language == "csharp" {
+        tokens :: jet_cli_import_words(prefix)
+        if tokens.is_empty() -> return Err(jet_cli_import_text_error("function declaration has no name"))
+        name = ~tokens[tokens.len() - 1]
+        if !jet_cli_import_identifier(name) -> return Err(jet_cli_import_text_error("function name `{name}` is not a safe Jet identifier"))
+        if tokens.contains("async") -> return Err(jet_cli_import_text_error("async methods need an explicit migration adapter"))
+        if !tokens.contains("public") -> return Err(jet_cli_import_text_error("only public static methods have a proven source-to-Jet mapping"))
+        modifiers :: [String]{"abstract", "extern", "in", "out", "override", "ref", "synchronized", "unsafe", "virtual"}
+        loop token in tokens {
+            if modifiers.contains(token) -> return Err(jet_cli_import_text_error("method modifiers or exception contracts need an explicit migration adapter"))
+        }
+        if suffix.starts_with("throws ") || suffix.contains(" where ") -> return Err(jet_cli_import_text_error("method modifiers or exception contracts need an explicit migration adapter"))
+        // Rust saturating_sub(2) selects token zero even for a one-token prefix.
+        result_text = ~tokens[if tokens.len() >= 2 -> tokens.len() - 2 else -> 0]
+        require_static = true
+    } else {
+        if arrow {
+            if prefix.contains("async") -> return Err(jet_cli_import_text_error("async arrow functions need an explicit migration adapter"))
+            equals :: jet_cli_import_find_bytes(prefix.bytes(), "=", true) ?? return Err(jet_cli_import_text_error("arrow function has no bound name"))
+            tokens :: jet_cli_import_words(jet_cli_import_byte_slice(prefix.bytes(), 0, equals))
+            if tokens.is_empty() -> return Err(jet_cli_import_text_error("arrow function has no bound name"))
+            name = ~tokens[tokens.len() - 1]
+            if !jet_cli_import_identifier(name) -> return Err(jet_cli_import_text_error("function name `{name}` is not a safe Jet identifier"))
+            if suffix.starts_with(":") {
+                annotation :: jet_cli_import_byte_slice(suffix.bytes(), 1, suffix.bytes().len())
+                marker :: jet_cli_import_find_bytes(annotation.bytes(), "=>", false) ?? return Err(jet_cli_import_text_error("arrow function has no complete return annotation"))
+                result_text = ~jet_cli_import_byte_slice(annotation.bytes(), 0, marker).trim()
+                if result_text.is_empty() -> return Err(jet_cli_import_text_error("arrow function has no complete return annotation"))
+            } else {
+                if language == "ts" -> return Err(jet_cli_import_text_error("TypeScript arrow function needs a return type"))
+                result_text = "__js__"
+            }
+        } else {
+            if language == "ts" || language == "js" {
+                marker :: jet_cli_import_find_bytes(prefix.bytes(), "function", true) ?? return Err(jet_cli_import_text_error("function declaration has no function keyword"))
+                before :: ~jet_cli_import_byte_slice(prefix.bytes(), 0, marker).trim()
+                if jet_cli_import_words(before).contains("async") -> return Err(jet_cli_import_text_error("async functions need an explicit migration adapter"))
+                after :: ~jet_cli_import_byte_slice(prefix.bytes(), marker + 8, prefix.bytes().len()).trim()
+                if after.starts_with("*") -> return Err(jet_cli_import_text_error("generator functions need an explicit migration adapter"))
+                tokens :: jet_cli_import_words(after)
+                if tokens.is_empty() -> return Err(jet_cli_import_text_error("function declaration has no name"))
+                name = ~tokens[0]
+                if !jet_cli_import_identifier(name) -> return Err(jet_cli_import_text_error("function name `{name}` is not a safe Jet identifier"))
+                if suffix.starts_with(":") {
+                    annotation :: jet_cli_import_byte_slice(suffix.bytes(), 1, suffix.bytes().len())
+                    result_text = ~jet_cli_import_before(jet_cli_import_before(annotation, "{{"), "=>").trim()
+                } else {
+                    if language == "ts" -> return Err(jet_cli_import_text_error("TypeScript function needs a return type"))
+                    result_text = "__js__"
+                }
+            } else {
+                if language != "go" -> return Err(jet_cli_import_text_error("no source importer for {language}"))
+                if !prefix.starts_with("func") -> return Err(jet_cli_import_text_error("Go function needs `func`"))
+                after :: ~jet_cli_import_byte_slice(prefix.bytes(), 4, prefix.bytes().len()).trim()
+                if after.starts_with("(") -> return Err(jet_cli_import_text_error("Go methods with receivers need an explicit migration adapter"))
+                tokens :: jet_cli_import_words(after)
+                if tokens.is_empty() -> return Err(jet_cli_import_text_error("Go function declaration has no name"))
+                name = ~tokens[0]
+                if !jet_cli_import_identifier(name) -> return Err(jet_cli_import_text_error("function name `{name}` is not a safe Jet identifier"))
+                result_text = ~jet_cli_import_before(suffix, "{{").trim()
+            }
+        }
+    }
+    if require_static && !jet_cli_import_words(prefix).contains("static") -> return Err(jet_cli_import_text_error("only static Java/C# methods have a proven source-to-Jet mapping"))
+    if prefix.contains("<") || prefix.contains(">") -> return Err(jet_cli_import_text_error("generic functions need an explicit migration adapter"))
+    params :: jet_cli_import_parse_foreign_params(language, jet_cli_import_byte_slice(bytes, open + 1, close))
+    result :: if result_text.is_empty() -> "()" else -> jet_cli_import_map_foreign_type(language, result_text)
+    expression_body := String?{None}
+    if arrow {
+        if jet_cli_import_find_bytes(suffix.bytes(), "=>", false) == .Val(marker) {
+            expression :: ~jet_cli_import_byte_slice(suffix.bytes(), marker + 2, suffix.bytes().len()).trim()
+            if !expression.is_empty() && !expression.starts_with("{{") -> expression_body = Val(jet_cli_import_trim_suffix(expression, ";"))
+        }
+    } else {
+        if suffix.starts_with("=>") {
+            expression :: ~jet_cli_import_byte_slice(suffix.bytes(), 2, suffix.bytes().len()).trim()
+            expression_body = Val(jet_cli_import_trim_suffix(expression, ";"))
+        }
+    }
+    if expression_body == None && !suffix.contains("{{") -> return Err(jet_cli_import_text_error("function declaration needs a body"))
+    if name == "main" && params.is_empty() && result == "()" -> name = "run"
+    Ok(JetCLIImportForeignHeader{function: JetCLIImportFunction{name: name, params: params, result: result, body: []}, expression_body: expression_body})
+}
+
+// Rust `parse_foreign_params`.
+pub fn jet_cli_import_parse_foreign_params(language: String, raw: String) -> [(name: String, ty: String)] JetCLIImportTextError! {
+    if raw.trim().is_empty() -> return Ok([])
+    if language == "go" -> return Ok(jet_cli_import_parse_go_params(raw))
+    output := [(name: String, ty: String)]{}
+    loop raw_part in jet_cli_import_split_commas(raw) {
+        part :: ~raw_part.trim()
+        if part.contains("...") || part.contains("?") || part.contains("=") -> return Err(jet_cli_import_text_error("optional, default, or variadic parameters need an explicit migration adapter"))
+        if language == "ts" {
+            colon :: jet_cli_import_find_bytes(part.bytes(), ":", false) ?? return Err(jet_cli_import_text_error("TypeScript parameter needs a type"))
+            name :: ~jet_cli_import_byte_slice(part.bytes(), 0, colon).trim()
+            if !jet_cli_import_identifier(name) -> return Err(jet_cli_import_text_error("parameter `{name}` is not a safe Jet identifier"))
+            ty :: ~jet_cli_import_byte_slice(part.bytes(), colon + 1, part.bytes().len()).trim()
+            &output.push((name: name, ty: jet_cli_import_map_foreign_type(language, ty)))
+        } else {
+            if language == "js" {
+                if !jet_cli_import_identifier(part) -> return Err(jet_cli_import_text_error("parameter `{part}` is not a safe Jet identifier"))
+                &output.push((name: part, ty: "__js__"))
+            } else {
+                tokens :: jet_cli_import_words(part)
+                if tokens.len() < 2 -> return Err(jet_cli_import_text_error("Java/C# parameters must use one scalar type and one name"))
+                name :: ~tokens[tokens.len() - 1]
+                unsafe_parameter := !jet_cli_import_identifier(name)
+                loop at in 0..<tokens.len() - 1 {
+                    if tokens[at] == "ref" || tokens[at] == "out" || tokens[at] == "in" -> unsafe_parameter = true
+                }
+                if unsafe_parameter -> return Err(jet_cli_import_text_error("parameter `{name}` has no safe scalar mapping"))
+                &output.push((name: name, ty: jet_cli_import_map_foreign_type(language, tokens[tokens.len() - 2])))
+            }
+        }
+    }
+    Ok(output)
+}
+
+// Rust `parse_go_params`: grouped names drain once, duplicate lookup is hash-backed.
+pub fn jet_cli_import_parse_go_params(raw: String) -> [(name: String, ty: String)] JetCLIImportTextError! {
+    pending := [String]{}
+    params := [(name: String, ty: String)]{}
+    // #4366: Set.add Bool result missing in Rust emit. Membership only, never iterated.
+    names := [String:Bool]{}
+    loop part in jet_cli_import_split_commas(raw) {
+        tokens :: jet_cli_import_words(part)
+        if tokens.len() == 1 && jet_cli_import_identifier(tokens[0]) {
+            &pending.push(~tokens[0])
+        } else {
+            if tokens.len() != 2 || !jet_cli_import_identifier(tokens[0]) -> return Err(jet_cli_import_text_error("Go parameters must use one or more names followed by one scalar type"))
+            mapped :: jet_cli_import_map_foreign_type("go", tokens[1])
+            &pending.push(~tokens[0])
+            loop name in pending {
+                if names.has_key(name) -> return Err(jet_cli_import_text_error("duplicate Go parameter `{name}`"))
+                &names.add(~name, true).drop("duplicate Go names were refused")
+                &params.push((name: ~name, ty: ~mapped))
+            }
+            pending = []
+        }
+    }
+    if !pending.is_empty() -> return Err(jet_cli_import_text_error("Go parameter names need a scalar type"))
+    Ok(params)
+}
+
+// Rust `map_foreign_type`; qualification stripping applies in every language.
+pub fn jet_cli_import_map_foreign_type(language: String, raw: String) -> String JetCLIImportTextError! {
+    ty := jet_cli_import_trim_suffix(~raw.trim(), ";")
+    if ty.starts_with("java.lang.") -> ty = jet_cli_import_byte_slice(ty.bytes(), 10, ty.bytes().len())
+    if ty.starts_with("System.") -> ty = jet_cli_import_byte_slice(ty.bytes(), 7, ty.bytes().len())
+    if ty.contains("[") || ty.contains("*") || ty.contains("&") -> return Err(jet_cli_import_text_error("foreign type `{raw}` is outside the scalar importer subset"))
+    if language == "js" -> return Ok("__js__")
+    if language == "java" {
+        if ty == "byte" || ty == "short" || ty == "int" || ty == "long" -> return Ok("Int")
+        if ty == "float" || ty == "double" -> return Ok("Float")
+        if ty == "boolean" -> return Ok("Bool")
+        if ty == "String" -> return Ok("String")
+        if ty == "void" -> return Ok("()")
+        return Err(jet_cli_import_text_error("Java type `{raw}` has no proven Jet mapping"))
+    }
+    if language == "csharp" {
+        if ty == "byte" || ty == "short" || ty == "int" || ty == "long" || ty == "Int32" || ty == "Int64" -> return Ok("Int")
+        if ty == "float" || ty == "double" || ty == "Single" || ty == "Double" -> return Ok("Float")
+        if ty == "bool" || ty == "Boolean" -> return Ok("Bool")
+        if ty == "string" || ty == "String" -> return Ok("String")
+        if ty == "void" -> return Ok("()")
+        return Err(jet_cli_import_text_error("C# type `{raw}` has no proven Jet mapping"))
+    }
+    if language == "ts" {
+        if ty == "number" -> return Ok("Float")
+        if ty == "boolean" -> return Ok("Bool")
+        if ty == "string" -> return Ok("String")
+        if ty == "void" -> return Ok("()")
+        return Err(jet_cli_import_text_error("TypeScript type `{raw}` has no proven Jet mapping"))
+    }
+    if language == "go" {
+        integers :: [String]{"int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64"}
+        if integers.contains(ty) -> return Ok("Int")
+        if ty == "float32" || ty == "float64" -> return Ok("Float")
+        if ty == "bool" -> return Ok("Bool")
+        if ty == "string" -> return Ok("String")
+        return Err(jet_cli_import_text_error("Go type `{raw}` has no proven Jet mapping"))
+    }
+    Err(jet_cli_import_text_error("no scalar type mapping for {language}"))
+}

@@ -1,0 +1,1781 @@
+// PORT-PENDING 0691 source-cmdinspect-slice-459: Source/CmdInspect.rs:459-2235
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS 
+//RS /// D4: a library package has no program entry, so a project check validates
+//RS /// it in Check mode and never demands `fn run`. A package is a library when
+//RS /// every declared output is `.Library`, or when it declares no output and no
+//RS /// file of the package defines a top-level `fn run` (one `fn run` per package).
+//RS fn package_is_library_only(entry: &Path) -> bool {
+//RS     let Some(facts) = jet::Loader::package_facts_for_entry(entry).ok().flatten() else {
+//RS         return false;
+//RS     };
+//RS     if !facts.outputs.is_empty() {
+//RS         return facts
+//RS             .outputs
+//RS             .values()
+//RS             .all(|output| output.kind == jet::Package::PackageOutputKind::Library);
+//RS     }
+//RS     let folder = entry
+//RS         .parent()
+//RS         .filter(|parent| !parent.as_os_str().is_empty())
+//RS         .unwrap_or_else(|| Path::new("."));
+//RS     let Some(root) = jet::Loader::find_manifest_root(folder) else {
+//RS         return false;
+//RS     };
+//RS     jet::Loader::package_run_member(&root).is_none()
+//RS }
+//RS 
+//RS pub(crate) fn missing_project_context_diagnostic(path: &Path) -> Option<Diagnostic> {
+//RS     let parent = path
+//RS         .parent()
+//RS         .filter(|parent| !parent.as_os_str().is_empty())
+//RS         .unwrap_or_else(|| Path::new("."));
+//RS     if jet::Loader::find_package_root_checked(parent)
+//RS         .ok()
+//RS         .flatten()
+//RS         .is_some()
+//RS         || jet::Loader::package_facts_for_entry(path)
+//RS             .ok()
+//RS             .flatten()
+//RS             .is_some()
+//RS         || jet::Loader::find_workspace_root_checked(parent)
+//RS             .ok()
+//RS             .flatten()
+//RS             .is_some()
+//RS     {
+//RS         return None;
+//RS     }
+//RS     let source = fs::read_to_string(path).ok()?;
+//RS     let source_for_parse = jet::Package::mask_inline_package_source(&source).ok()?.0;
+//RS     let (tokens, lex_diagnostics) = jet::Lexer::lex(&source_for_parse);
+//RS     if !lex_diagnostics.is_empty() {
+//RS         return None;
+//RS     }
+//RS     let parsed_span = jet::Parser::parse_with_source(&tokens, &source_for_parse)
+//RS         .ok()
+//RS         .and_then(|program| {
+//RS             program
+//RS                 .imports
+//RS                 .iter()
+//RS                 .find_map(|import| match &import.kind {
+//RS                     jet::AST::ImportKind::Module(name, span)
+//RS                         if name.starts_with(jet::Syntax::PROJECT_IMPORT_PREFIX) =>
+//RS                     {
+//RS                         Some(*span)
+//RS                     }
+//RS                     jet::AST::ImportKind::Unqualified {
+//RS                         module_alias, span, ..
+//RS                     } if module_alias.starts_with(jet::Syntax::PROJECT_IMPORT_PREFIX) => {
+//RS                         Some(*span)
+//RS                     }
+//RS                     _ => None,
+//RS                 })
+//RS         });
+//RS     let lexical_span = tokens.windows(4).find_map(|window| {
+//RS         match (
+//RS             &window[0].kind,
+//RS             &window[1].kind,
+//RS             &window[2].kind,
+//RS             &window[3].kind,
+//RS         ) {
+//RS             (
+//RS                 jet::Lexer::TokKind::KwUse,
+//RS                 jet::Lexer::TokKind::Ident(project),
+//RS                 jet::Lexer::TokKind::Dot,
+//RS                 jet::Lexer::TokKind::Ident(_),
+//RS             ) if project == jet::Syntax::PROJECT_IMPORT_ROOT => Some(jet::Diagnostics::Span::new(
+//RS                 window[1].span.start,
+//RS                 window[3].span.end,
+//RS             )),
+//RS             _ => None,
+//RS         }
+//RS     });
+//RS     let span = parsed_span.or(lexical_span)?;
+//RS     Some(Diagnostic::from_row(
+//RS         "E2393",
+//RS         &[("import", "use project.<module>")],
+//RS         Some(span),
+//RS     ))
+//RS }
+//RS 
+//RS fn explicit_file_proof_rows() -> Vec<CheckProofRow> {
+//RS     [
+//RS         (
+//RS             "entry resolution",
+//RS             "explicit-file checks resolve only the named source file",
+//RS             "E2389",
+//RS         ),
+//RS         (
+//RS             "module graph",
+//RS             "explicit-file checks keep semantic scope and do not promise a project graph",
+//RS             "E2390",
+//RS         ),
+//RS         (
+//RS             "Core closure",
+//RS             "explicit-file checks keep semantic scope and do not promise project Core closure",
+//RS             "E2391",
+//RS         ),
+//RS         (
+//RS             "tier lowering",
+//RS             "explicit-file checks keep semantic scope and do not promise project tier lowering",
+//RS             "E2392",
+//RS         ),
+//RS     ]
+//RS     .into_iter()
+//RS     .map(|(name, detail, diagnostic)| CheckProofRow {
+//RS         output: "not-applicable".to_string(),
+//RS         name: name.to_string(),
+//RS         status: "not applicable".to_string(),
+//RS         detail: detail.to_string(),
+//RS         diagnostic: diagnostic.to_string(),
+//RS     })
+//RS     .collect()
+//RS }
+//RS 
+//RS fn is_project_runnable_output(kind: jet::AST::OutputKind) -> bool {
+//RS     matches!(
+//RS         kind,
+//RS         jet::AST::OutputKind::Executable | jet::AST::OutputKind::Service
+//RS     )
+//RS }
+//RS 
+//RS fn normalize_output_path(path: &Path) -> PathBuf {
+//RS     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+//RS }
+//RS 
+//RS fn source_line(source: &str, offset: usize) -> usize {
+//RS     let end = offset.min(source.len());
+//RS     1 + source
+//RS         .get(..end)
+//RS         .unwrap_or_default()
+//RS         .bytes()
+//RS         .filter(|byte| *byte == b'\n')
+//RS         .count()
+//RS }
+//RS 
+//RS fn project_output_specs(
+//RS     bundle: &jet::AST::ProgramBundle,
+//RS     package_facts: Option<&jet::Package::PackageFacts>,
+//RS ) -> (Vec<ProjectOutputSpec>, Vec<Diagnostic>) {
+//RS     let mut specs = std::collections::BTreeMap::<String, ProjectOutputSpec>::new();
+//RS     let mut diagnostics = Vec::new();
+//RS 
+//RS     if let Some(package_facts) = package_facts {
+//RS         for (address, output) in &package_facts.outputs {
+//RS             if !output.kind.is_runnable() {
+//RS                 continue;
+//RS             }
+//RS             let path = match package_facts.entry_path(&bundle.project_root, output) {
+//RS                 Ok(path) => path.map(|path| normalize_output_path(&path)),
+//RS                 Err(error) => {
+//RS                     diagnostics.push(Diagnostic::from_row(
+//RS                         "E2389",
+//RS                         &[(
+//RS                             "detail",
+//RS                             &format!("output `{address}` entry resolution failed: {error}"),
+//RS                         )],
+//RS                         None,
+//RS                     ));
+//RS                     None
+//RS                 }
+//RS             };
+//RS             specs.insert(
+//RS                 address.clone(),
+//RS                 ProjectOutputSpec {
+//RS                     address: address.clone(),
+//RS                     name: output.name.clone(),
+//RS                     path,
+//RS                 },
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     for module in &bundle.modules {
+//RS         for item in &module.items {
+//RS             let jet::AST::Item::Const(constant) = item else {
+//RS                 continue;
+//RS             };
+//RS             let Some(output) = constant
+//RS                 .resolved_output
+//RS                 .as_ref()
+//RS                 .filter(|output| is_project_runnable_output(output.kind))
+//RS             else {
+//RS                 continue;
+//RS             };
+//RS             let module_path = normalize_output_path(&module.path);
+//RS             specs
+//RS                 .entry(output.address.clone())
+//RS                 .and_modify(|spec| {
+//RS                     if spec.path.is_none() {
+//RS                         spec.path = Some(module_path.clone());
+//RS                     }
+//RS                     if spec.name.is_empty() {
+//RS                         spec.name = output.output_name.clone();
+//RS                     }
+//RS                 })
+//RS                 .or_insert_with(|| ProjectOutputSpec {
+//RS                     address: output.address.clone(),
+//RS                     name: output.output_name.clone(),
+//RS                     path: Some(module_path.clone()),
+//RS                 });
+//RS         }
+//RS     }
+//RS 
+//RS     if specs.is_empty() {
+//RS         let entry_module = bundle.modules.get(bundle.entry);
+//RS         let entry_path = entry_module.map(|module| normalize_output_path(&module.path));
+//RS         let has_run = entry_module.is_some_and(|module| {
+//RS             module.items.iter().any(|item| {
+//RS                 matches!(
+//RS                     item,
+//RS                     jet::AST::Item::Func(function)
+//RS                         if function.name == "run"
+//RS                 )
+//RS             })
+//RS         });
+//RS         specs.insert(
+//RS             if has_run {
+//RS                 "run".to_string()
+//RS             } else {
+//RS                 "default".to_string()
+//RS             },
+//RS             ProjectOutputSpec {
+//RS                 address: if has_run {
+//RS                     "run".to_string()
+//RS                 } else {
+//RS                     "default".to_string()
+//RS                 },
+//RS                 name: "run".to_string(),
+//RS                 path: entry_path,
+//RS             },
+//RS         );
+//RS     }
+//RS 
+//RS     (specs.into_values().collect(), diagnostics)
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct ProjectBundleProof {
+//RS     module_status: &'static str,
+//RS     module_detail: String,
+//RS     core_status: &'static str,
+//RS     core_detail: String,
+//RS     tier_status: &'static str,
+//RS     tier_detail: String,
+//RS     mir_digest: String,
+//RS }
+//RS 
+//RS impl ProjectBundleProof {
+//RS     fn from_bundle(
+//RS         bundle: &jet::AST::ProgramBundle,
+//RS         _facts: &jet::Sema::SemIndexEffectFacts,
+//RS         target: Option<&str>,
+//RS         profile: &str,
+//RS         library: bool,
+//RS     ) -> Self {
+//RS         let import_edges = bundle
+//RS             .modules
+//RS             .iter()
+//RS             .map(|module| module.imports.len())
+//RS             .sum::<usize>();
+//RS         let module_status = (!bundle.modules.is_empty())
+//RS             .then_some("proven")
+//RS             .unwrap_or("compiler defect");
+//RS         let module_detail = format!(
+//RS             "{} loaded module(s), {} resolved import edge(s); project root {}",
+//RS             bundle.modules.len(),
+//RS             import_edges,
+//RS             bundle.project_root.display(),
+//RS         );
+//RS 
+//RS         // #2517 S2: when dependency packages were sealed from their check
+//RS         // records, their bodies were not checked in this run, so the program
+//RS         // cannot be lowered here. Each sealed package was lowered by the run
+//RS         // that checked it; per-package lowering records arrive with the build
+//RS         // lenses (design stage S4).
+//RS         let sealed = jet::Sema::sealed_package_count();
+//RS         if sealed > 0 {
+//RS             let detail = format!(
+//RS                 "{sealed} dependency package(s) reused from check records; the whole-program MIR proof runs when every package is checked"
+//RS             );
+//RS             return Self {
+//RS                 module_status,
+//RS                 module_detail,
+//RS                 core_status: "reused",
+//RS                 core_detail: detail.clone(),
+//RS                 tier_status: "reused",
+//RS                 tier_detail: detail,
+//RS                 mir_digest: "reused".to_string(),
+//RS             };
+//RS         }
+//RS         let core = jet::Codegen::core_closure_proof(bundle, false);
+//RS         let used_core = if core.used_calls.is_empty() {
+//RS             "none".to_string()
+//RS         } else {
+//RS             core.used_calls.join(",")
+//RS         };
+//RS         let synthesized_core = if core.synthesized_calls.is_empty() {
+//RS             "none".to_string()
+//RS         } else {
+//RS             core.synthesized_calls.join(",")
+//RS         };
+//RS         let core_detail = format!(
+//RS             "used=[{used_core}] synthesized=[{synthesized_core}] routes=[{}] fingerprint={}",
+//RS             core.adapter_routes.join(","),
+//RS             core.fingerprint,
+//RS         );
+//RS 
+//RS         let artifact_target = if target == Some(jet::Syntax::BUILD_TARGET_WEB) {
+//RS             jet_foundation::MIR::MirArtifactTarget::Web
+//RS         } else {
+//RS             jet_foundation::MIR::MirArtifactTarget::Cranelift
+//RS         };
+//RS         // D4: a `.Library` output has no runnable entry, so its proof lowers
+//RS         // the library artifact kind instead of an executable.
+//RS         let artifact_kind = if artifact_target == jet_foundation::MIR::MirArtifactTarget::Web {
+//RS             jet_foundation::MIR::MirArtifactKind::WebApplication
+//RS         } else if library {
+//RS             jet_foundation::MIR::MirArtifactKind::NativeLibrary
+//RS         } else {
+//RS             jet_foundation::MIR::MirArtifactKind::NativeExecutable
+//RS         };
+//RS         let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
+//RS             bundle,
+//RS             jet_foundation::MIR::MirArtifactRequest::new(
+//RS                 artifact_target,
+//RS                 artifact_kind,
+//RS                 jet_foundation::MIR::MirArtifactBuildMode::Dev,
+//RS             ),
+//RS         );
+//RS         let mir_identity = mir
+//RS             .artifact_identity(artifact)
+//RS             .unwrap_or_else(|error| {
+//RS                 jet_foundation::ice!(None, "canonical MIR identity failed: {error}")
+//RS             })
+//RS             .program_identity;
+//RS         let mir_detail = format!("mir-v1={}", mir_identity.canonical_json());
+//RS         let (tier_status, mut tier_detail) = if target == Some(jet::Syntax::BUILD_TARGET_WEB) {
+//RS             let web_target = jet::Codegen::MIRWeb::MirWebTarget {
+//RS                 layout: if bundle.build_facts.target_triple.is_empty() {
+//RS                     jet_foundation::Layout::TargetLayout::host()
+//RS                 } else {
+//RS                     jet_foundation::Layout::TargetLayout::from_triple(
+//RS                         bundle.build_facts.target_triple.clone(),
+//RS                     )
+//RS                 },
+//RS                 assets: jet::Codegen::MIRWeb::MirWebAssets::with_default_shell(),
+//RS                 semantic_digest: jet_foundation::MIR::mir_program_digest(&mir),
+//RS                 artifact,
+//RS                 release_devtools_policy: jet::Driver::release_devtools_policy_for_bundle(
+//RS                     bundle, profile,
+//RS                 ),
+//RS             };
+//RS             match jet::Codegen::MIRWeb::emit_web(&mir, &web_target) {
+//RS                 Ok(_) => ("proven", "web=proven; checked MIR Web artifact".to_string()),
+//RS                 Err(error) => ("compiler defect", format!("web=compiler defect; {error}")),
+//RS             }
+//RS         } else {
+//RS             let detail_prefix = target
+//RS                 .map(|target| format!("target={target}; "))
+//RS                 .unwrap_or_default();
+//RS             let jit_detail = jet_jit::resident_jit_safe_program_detail(&mir);
+//RS             if jit_detail.is_empty() {
+//RS                 (
+//RS                     "proven",
+//RS                     format!(
+//RS                         "{detail_prefix}AOT=proven; JIT=proven; interpreter=shared checked MIR route"
+//RS                     ),
+//RS                 )
+//RS             } else {
+//RS                 (
+//RS                     "compiler defect",
+//RS                     format!("{detail_prefix}JIT=compiler defect; {jit_detail}"),
+//RS                 )
+//RS             }
+//RS         };
+//RS         tier_detail.push(' ');
+//RS         tier_detail.push_str(&mir_detail);
+//RS         Self {
+//RS             module_status,
+//RS             module_detail,
+//RS             core_status: "proven",
+//RS             core_detail: format!("{core_detail} {mir_detail}"),
+//RS             tier_status,
+//RS             tier_detail,
+//RS             mir_digest: mir_identity.identity_digest(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn project_output_location(
+//RS     bundle: &jet::AST::ProgramBundle,
+//RS     output: &jet::AST::ResolvedOutput,
+//RS ) -> Option<String> {
+//RS     let module = bundle.modules.get(output.module)?;
+//RS     Some(format!(
+//RS         "{}:{}",
+//RS         module.display,
+//RS         source_line(&module.source, output.definition.start)
+//RS     ))
+//RS }
+//RS 
+//RS fn legacy_entry_location(bundle: &jet::AST::ProgramBundle) -> Option<String> {
+//RS     let module = bundle.modules.get(bundle.entry)?;
+//RS     let function = module.items.iter().find_map(|item| match item {
+//RS         jet::AST::Item::Func(function) if function.name == "run" => Some(function),
+//RS         _ => None,
+//RS     })?;
+//RS     Some(format!(
+//RS         "{}:{}",
+//RS         module.display,
+//RS         source_line(&module.source, function.span.start)
+//RS     ))
+//RS }
+//RS 
+//RS fn output_proof_rows(
+//RS     bundle: &jet::AST::ProgramBundle,
+//RS     spec: &ProjectOutputSpec,
+//RS     entry_fn: Option<&str>,
+//RS     shared: &ProjectBundleProof,
+//RS     library: bool,
+//RS     diagnostics: &mut Vec<Diagnostic>,
+//RS ) -> Vec<CheckProofRow> {
+//RS     let resolved = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .flat_map(|module| &module.items)
+//RS         .find_map(|item| {
+//RS             let jet::AST::Item::Const(constant) = item else {
+//RS                 return None;
+//RS             };
+//RS             constant.resolved_output.as_ref().filter(|output| {
+//RS                 output.address == spec.address && is_project_runnable_output(output.kind)
+//RS             })
+//RS         });
+//RS     let location = resolved
+//RS         .and_then(|output| project_output_location(bundle, output))
+//RS         .or_else(|| {
+//RS             if matches!(spec.address.as_str(), "run" | "default") {
+//RS                 legacy_entry_location(bundle)
+//RS             } else {
+//RS                 None
+//RS             }
+//RS         })
+//RS         // D4: a library has no entry function; its proof anchors at the
+//RS         // checked entry module itself.
+//RS         .or_else(|| {
+//RS             library
+//RS                 .then(|| bundle.modules.get(bundle.entry))
+//RS                 .flatten()
+//RS                 .map(|module| format!("{}:1", module.display))
+//RS         });
+//RS     let output_name = if spec.name.is_empty() {
+//RS         spec.address.as_str()
+//RS     } else {
+//RS         spec.name.as_str()
+//RS     };
+//RS     let output_label = format!("{} `{}`", spec.address, output_name);
+//RS     let entry_detail = match location.as_deref() {
+//RS         Some(location) => {
+//RS             let requested = entry_fn
+//RS                 .filter(|name| *name != "run")
+//RS                 .map(|name| format!("; requested `{name}`"))
+//RS                 .unwrap_or_default();
+//RS             format!("{output_label} resolved at {location}{requested}")
+//RS         }
+//RS         None => format!(
+//RS             "{output_label} is absent from the checked module graph ({}:1)",
+//RS             spec.path
+//RS                 .as_deref()
+//RS                 .map(|path| path.display().to_string())
+//RS                 .unwrap_or_else(|| "<unknown>".to_string())
+//RS         ),
+//RS     };
+//RS     let mut rows = Vec::new();
+//RS     let Some(location) = location else {
+//RS         for (name, diagnostic, detail) in [
+//RS             ("entry resolution", "E2389", entry_detail.clone()),
+//RS             (
+//RS                 "module graph",
+//RS                 "E2390",
+//RS                 format!("{output_label} has no resolved source location"),
+//RS             ),
+//RS             (
+//RS                 "Core closure",
+//RS                 "E2391",
+//RS                 format!("{output_label} has no resolved source location"),
+//RS             ),
+//RS             (
+//RS                 "tier lowering",
+//RS                 "E2392",
+//RS                 format!("{output_label} has no resolved source location"),
+//RS             ),
+//RS         ] {
+//RS             push_proof_row(
+//RS                 &mut rows,
+//RS                 diagnostics,
+//RS                 &spec.address,
+//RS                 name,
+//RS                 "compiler defect",
+//RS                 detail,
+//RS                 diagnostic,
+//RS             );
+//RS         }
+//RS         return rows;
+//RS     };
+//RS 
+//RS     push_proof_row(
+//RS         &mut rows,
+//RS         diagnostics,
+//RS         &spec.address,
+//RS         "entry resolution",
+//RS         "proven",
+//RS         entry_detail,
+//RS         "E2389",
+//RS     );
+//RS     push_proof_row(
+//RS         &mut rows,
+//RS         diagnostics,
+//RS         &spec.address,
+//RS         "module graph",
+//RS         shared.module_status,
+//RS         format!(
+//RS             "{}; entry={location}; mir_identity_digest={}",
+//RS             shared.module_detail,
+//RS             shared.mir_digest
+//RS         ),
+//RS         "E2390",
+//RS     );
+//RS     push_proof_row(
+//RS         &mut rows,
+//RS         diagnostics,
+//RS         &spec.address,
+//RS         "Core closure",
+//RS         shared.core_status,
+//RS         format!("{}; entry={location}", shared.core_detail),
+//RS         "E2391",
+//RS     );
+//RS     push_proof_row(
+//RS         &mut rows,
+//RS         diagnostics,
+//RS         &spec.address,
+//RS         "tier lowering",
+//RS         shared.tier_status,
+//RS         format!("{}; entry={location}", shared.tier_detail),
+//RS         "E2392",
+//RS     );
+//RS     rows
+//RS }
+//RS 
+//RS fn failed_output_rows(
+//RS     spec: &ProjectOutputSpec,
+//RS     reason: &str,
+//RS ) -> (Vec<CheckProofRow>, Vec<Diagnostic>) {
+//RS     let location = spec
+//RS         .path
+//RS         .as_deref()
+//RS         .map(|path| format!("{}:1", path.display()))
+//RS         .unwrap_or_else(|| "<unknown>:1".to_string());
+//RS     let detail = format!(
+//RS         "output `{}` could not be checked at {location}: {reason}",
+//RS         spec.address
+//RS     );
+//RS     let mut rows = Vec::new();
+//RS     let mut diagnostics = Vec::new();
+//RS     for (name, diagnostic) in [
+//RS         ("entry resolution", "E2389"),
+//RS         ("module graph", "E2390"),
+//RS         ("Core closure", "E2391"),
+//RS         ("tier lowering", "E2392"),
+//RS     ] {
+//RS         push_proof_row(
+//RS             &mut rows,
+//RS             &mut diagnostics,
+//RS             &spec.address,
+//RS             name,
+//RS             "compiler defect",
+//RS             detail.clone(),
+//RS             diagnostic,
+//RS         );
+//RS     }
+//RS     (rows, diagnostics)
+//RS }
+//RS 
+//RS fn project_proof_rows(
+//RS     bundle: &jet::AST::ProgramBundle,
+//RS     facts: &jet::Sema::SemIndexEffectFacts,
+//RS     package_facts: Option<&jet::Package::PackageFacts>,
+//RS     entry_fn: Option<&str>,
+//RS     target: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &std::collections::BTreeMap<String, String>,
+//RS ) -> (Vec<CheckProofRow>, Vec<Diagnostic>) {
+//RS     let (specs, mut diagnostics) = project_output_specs(bundle, package_facts);
+//RS     let mut rows = Vec::new();
+//RS 
+//RS     for spec in &specs {
+//RS         let declared_output = package_facts
+//RS             .is_some_and(|facts| facts.outputs.contains_key(&spec.address))
+//RS             || bundle.modules.iter().any(|module| {
+//RS                 module.items.iter().any(|item| {
+//RS                     let jet::AST::Item::Const(constant) = item else {
+//RS                         return false;
+//RS                     };
+//RS                     constant
+//RS                         .resolved_output
+//RS                         .as_ref()
+//RS                         .is_some_and(|output| output.address == spec.address)
+//RS                 })
+//RS             });
+//RS         let checked_bundle_storage = declared_output.then(|| {
+//RS             spec.path.as_deref().and_then(|path| {
+//RS                 let path = path.to_string_lossy().into_owned();
+//RS                 let (check_diagnostics, checked_bundle, checked_facts) =
+//RS                     jet::Driver::check_file_with_effect_facts_for_output(
+//RS                         &path,
+//RS                         &spec.address,
+//RS                         profile,
+//RS                         setting_overrides,
+//RS                     );
+//RS                 diagnostics.extend(check_diagnostics);
+//RS                 checked_bundle.map(|bundle| (bundle, checked_facts))
+//RS             })
+//RS         });
+//RS         let checked = if declared_output {
+//RS             checked_bundle_storage
+//RS                 .as_ref()
+//RS                 .and_then(Option::as_ref)
+//RS                 .map(|(bundle, facts)| (bundle, facts))
+//RS         } else {
+//RS             Some((bundle, facts))
+//RS         };
+//RS 
+//RS         let Some((checked_bundle, checked_facts)) = checked else {
+//RS             let reason = if spec.path.is_some() {
+//RS                 "the output entry check returned no bundle"
+//RS             } else {
+//RS                 "the manifest entry could not be resolved"
+//RS             };
+//RS             let (failed, failed_diagnostics) = failed_output_rows(spec, reason);
+//RS             rows.extend(failed);
+//RS             diagnostics.extend(failed_diagnostics);
+//RS             continue;
+//RS         };
+//RS 
+//RS         // D4: a `.Library` output, or the fallback spec of an entry with no
+//RS         // `fn run` and no declared output, has no runnable entry to lower.
+//RS         let library = spec.address == "default"
+//RS             || package_facts
+//RS                 .and_then(|facts| facts.outputs.get(&spec.address))
+//RS                 .is_some_and(|output| output.kind == jet::Package::PackageOutputKind::Library);
+//RS         let shared = ProjectBundleProof::from_bundle(
+//RS             checked_bundle,
+//RS             checked_facts,
+//RS             target,
+//RS             profile,
+//RS             library,
+//RS         );
+//RS         rows.extend(output_proof_rows(
+//RS             checked_bundle,
+//RS             spec,
+//RS             entry_fn,
+//RS             &shared,
+//RS             library,
+//RS             &mut diagnostics,
+//RS         ));
+//RS     }
+//RS     (rows, diagnostics)
+//RS }
+//RS 
+//RS fn push_proof_row(
+//RS     rows: &mut Vec<CheckProofRow>,
+//RS     diagnostics: &mut Vec<Diagnostic>,
+//RS     output: &str,
+//RS     name: &'static str,
+//RS     status: &'static str,
+//RS     detail: String,
+//RS     diagnostic: &'static str,
+//RS ) {
+//RS     let row = CheckProofRow {
+//RS         output: output.to_string(),
+//RS         name: name.to_string(),
+//RS         status: status.to_string(),
+//RS         detail,
+//RS         diagnostic: diagnostic.to_string(),
+//RS     };
+//RS     if !matches!(row.status.as_str(), "proven" | "not applicable" | "reused") {
+//RS         diagnostics.push(Diagnostic::from_row(
+//RS             row.diagnostic.as_str(),
+//RS             &[("detail", row.detail.as_str())],
+//RS             None,
+//RS         ));
+//RS     }
+//RS     rows.push(row);
+//RS }
+//RS 
+//RS /// Project one check result into the typed carrier used by status consumers.
+//RS pub(crate) fn check_result_value(check: &CheckResult) -> StatusValue {
+//RS     let rows = StatusValue::array(check.proof_rows.iter().map(|row| {
+//RS         StatusValue::object(
+//RS             StatusFields::new()
+//RS                 .with("output", row.output.as_str())
+//RS                 .with("name", row.name.as_str())
+//RS                 .with("status", row.status.as_str())
+//RS                 .with("detail", row.detail.as_str())
+//RS                 .with("diagnostic", row.diagnostic.as_str()),
+//RS         )
+//RS     }));
+//RS     StatusValue::object(
+//RS         StatusFields::new()
+//RS             .with("status", "passed")
+//RS             .with("contract", CHECK_RESULT_CONTRACT)
+//RS             .with("schema_version", CHECK_RESULT_SCHEMA_VERSION)
+//RS             .with("scope", scope_name(check.scope))
+//RS             .with("elapsed_ms", check.elapsed_ms)
+//RS             .with(
+//RS                 "provenance",
+//RS                 StatusValue::object(
+//RS                     StatusFields::new()
+//RS                         .with("source", check.source.as_str())
+//RS                         .with("profile", check.profile.as_str())
+//RS                         .with("front_end", check.front_end.as_str())
+//RS                         .with("programmable_build", check.programmable_build.as_str())
+//RS                         .with("diagnostics", check.diagnostics),
+//RS                 ),
+//RS             )
+//RS             .with("rows", rows),
+//RS     )
+//RS }
+//RS 
+//RS /// Emit the versioned machine contract for `jet check --json`.
+//RS ///
+//RS /// `contract` identifies the result shape and `rows` contains one deterministic
+//RS /// row per selected output and proof class. `elapsed_ms` measures the complete
+//RS /// check projection, including the proof rows.
+//RS pub(crate) fn check_result_json(check: &CheckResult) -> String {
+//RS     let rows = check
+//RS         .proof_rows
+//RS         .iter()
+//RS         .map(|row| {
+//RS             format!(
+//RS                 "{{\"output\":\"{}\",\"name\":\"{}\",\"status\":\"{}\",\"detail\":\"{}\",\"diagnostic\":\"{}\"}}",
+//RS                 json_escape(&row.output),
+//RS                 json_escape(&row.name),
+//RS                 json_escape(&row.status),
+//RS                 json_escape(&row.detail),
+//RS                 json_escape(&row.diagnostic),
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!(
+//RS         "{{\"status\":\"passed\",\"contract\":\"{}\",\"schema_version\":{},\"scope\":\"{}\",\"elapsed_ms\":{},\"provenance\":{{\"source\":\"{}\",\"profile\":\"{}\",\"front_end\":\"{}\",\"programmable_build\":\"{}\",\"diagnostics\":{}}},\"rows\":[{}]}}",
+//RS         CHECK_RESULT_CONTRACT,
+//RS         CHECK_RESULT_SCHEMA_VERSION,
+//RS         scope_name(check.scope),
+//RS         check.elapsed_ms,
+//RS         json_escape(&check.source),
+//RS         json_escape(&check.profile),
+//RS         json_escape(&check.front_end),
+//RS         json_escape(&check.programmable_build),
+//RS         check.diagnostics,
+//RS         rows,
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn check_result_text(check: &CheckResult) -> String {
+//RS     let mut text = format!(
+//RS         "check: passed (source={}, profile={}, scope={}, schema_version={}, elapsed_ms={}, front_end={}, programmable_build={}, diagnostics={})\n",
+//RS         check.source,
+//RS         check.profile,
+//RS         scope_name(check.scope),
+//RS         CHECK_RESULT_SCHEMA_VERSION,
+//RS         check.elapsed_ms,
+//RS         check.front_end,
+//RS         check.programmable_build,
+//RS         check.diagnostics,
+//RS     );
+//RS     for row in &check.proof_rows {
+//RS         let _ = writeln!(
+//RS             text,
+//RS             "proof: output={} {} [{}] {} (diagnostic={})",
+//RS             row.output, row.name, row.status, row.detail, row.diagnostic,
+//RS         );
+//RS     }
+//RS     text
+//RS }
+//RS 
+//RS /// D-BUILD-NOCHANGE1=A: the typed check result a Receipt replays. Elapsed
+//RS /// time is not recorded; a replay reports its own.
+//RS pub(crate) fn check_result_record(check: &CheckResult) -> String {
+//RS     let rows = check
+//RS         .proof_rows
+//RS         .iter()
+//RS         .map(|row| {
+//RS             format!(
+//RS                 "{{\"output\":\"{}\",\"name\":\"{}\",\"status\":\"{}\",\"detail\":\"{}\",\"diagnostic\":\"{}\"}}",
+//RS                 json_escape(&row.output),
+//RS                 json_escape(&row.name),
+//RS                 json_escape(&row.status),
+//RS                 json_escape(&row.detail),
+//RS                 json_escape(&row.diagnostic),
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!(
+//RS         "{{\"source\":\"{}\",\"profile\":\"{}\",\"front_end\":\"{}\",\"programmable_build\":\"{}\",\"diagnostics\":{},\"scope\":\"{}\",\"rows\":[{}]}}",
+//RS         json_escape(&check.source),
+//RS         json_escape(&check.profile),
+//RS         json_escape(&check.front_end),
+//RS         json_escape(&check.programmable_build),
+//RS         check.diagnostics,
+//RS         scope_name(check.scope),
+//RS         rows,
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn check_result_from_record(record: &str, elapsed_ms: u64) -> Option<CheckResult> {
+//RS     let value = jet_foundation::JSON::parse_json(record).ok()?;
+//RS     let object = value.as_object().ok()?;
+//RS     fn text(fields: &[(String, jet_foundation::DataTree::DataTree)], name: &str) -> Option<String> {
+//RS         fields
+//RS             .iter()
+//RS             .find(|(key, _)| key == name)
+//RS             .and_then(|(_, value)| value.as_str().ok())
+//RS             .map(str::to_string)
+//RS     }
+//RS     let diagnostics = object
+//RS         .iter()
+//RS         .find(|(key, _)| key == "diagnostics")
+//RS         .and_then(|(_, value)| match value {
+//RS             jet_foundation::DataTree::DataTree::Int(count) => usize::try_from(*count).ok(),
+//RS             _ => None,
+//RS         })?;
+//RS     let scope = match text(object, "scope")?.as_str() {
+//RS         "project" => CheckScope::Project,
+//RS         "explicit-file" => CheckScope::ExplicitFile,
+//RS         _ => return None,
+//RS     };
+//RS     let mut proof_rows = Vec::new();
+//RS     for row in object
+//RS         .iter()
+//RS         .find(|(key, _)| key == "rows")?
+//RS         .1
+//RS         .as_array()
+//RS         .ok()?
+//RS     {
+//RS         let row = row.as_object().ok()?;
+//RS         proof_rows.push(CheckProofRow {
+//RS             output: text(row, "output")?,
+//RS             name: text(row, "name")?,
+//RS             status: text(row, "status")?,
+//RS             detail: text(row, "detail")?,
+//RS             diagnostic: text(row, "diagnostic")?,
+//RS         });
+//RS     }
+//RS     Some(CheckResult {
+//RS         source: text(object, "source")?,
+//RS         profile: text(object, "profile")?,
+//RS         front_end: text(object, "front_end")?,
+//RS         programmable_build: text(object, "programmable_build")?,
+//RS         diagnostics,
+//RS         scope,
+//RS         elapsed_ms,
+//RS         proof_rows,
+//RS     })
+//RS }
+//RS 
+//RS /// A project check that ran a programmable build read inputs outside the
+//RS /// Receipt closure (its actions), so it is never recorded.
+//RS pub(crate) fn check_result_ran_programmable_build(check: &CheckResult) -> bool {
+//RS     check.programmable_build != "not-selected"
+//RS }
+//RS 
+//RS pub(crate) fn render_check_failure(
+//RS     path: &Path,
+//RS     diagnostics: &[Diagnostic],
+//RS     json: bool,
+//RS     color: bool,
+//RS ) -> ! {
+//RS     let entry = path.display().to_string();
+//RS     let source = fs::read_to_string(path).unwrap_or_default();
+//RS     if json {
+//RS         let machine_file = crate::machine_report_path_for_process(&entry);
+//RS         let clears = jet::Diagnostics::report_clear_counts(diagnostics);
+//RS         let reports = diagnostics.iter().zip(clears).map(|(diagnostic, clears)| {
+//RS             diagnostic.to_report_with_clears(&machine_file, &source, clears)
+//RS         });
+//RS         let rendered = render_status_with_reports("inspect", false, reports, StatusFields::new());
+//RS         print!("{rendered}\n");
+//RS     } else {
+//RS         eprint!(
+//RS             "{}",
+//RS             jet::render_all_colored(&entry, &source, diagnostics, color)
+//RS         );
+//RS     }
+//RS     exit(jet::ExitCodes::USER_ERROR);
+//RS }
+//RS 
+//RS /// `jet inspect digest` — emit the one-file language surface used by agents.
+//RS /// Every registry-shaped section is projected from the same typed rows used by
+//RS /// the compiler's introspection and report surfaces.
+//RS pub(crate) fn run_digest(args: &[String], json: bool) {
+//RS     let (topic, list_topics) = parse_digest_args(args);
+//RS     if !list_topics && topic.is_none() {
+//RS         emit_digest(&llm_digest(), json);
+//RS         return;
+//RS     }
+//RS     let slices = digest_slices();
+//RS     if list_topics {
+//RS         if topic.is_some() {
+//RS             crate::cli_error!(
+//RS                 @fix "E2104",
+//RS                 "`--list-topics` cannot be combined with `--topic`",
+//RS                 "use `jet inspect digest --list-topics` or `jet inspect digest --topic <name>`"
+//RS             );
+//RS             exit(jet::ExitCodes::USAGE);
+//RS         }
+//RS         if json {
+//RS             let topics = StatusValue::array(
+//RS                 slices
+//RS                     .iter()
+//RS                     .map(|slice| StatusValue::from(slice.topic.as_str())),
+//RS             );
+//RS             let payload = render_status(
+//RS                 "inspect.digest",
+//RS                 true,
+//RS                 StatusFields::new().with(
+//RS                     "digest",
+//RS                     StatusValue::object(StatusFields::new().with("topics", topics)),
+//RS                 ),
+//RS             );
+//RS             println!("{payload}");
+//RS         } else {
+//RS             for slice in &slices {
+//RS                 println!("{}", slice.topic);
+//RS             }
+//RS         }
+//RS         return;
+//RS     }
+//RS 
+//RS     let digest = match topic {
+//RS         Some(topic) => match slices
+//RS             .iter()
+//RS             .find(|slice| slice.topic.as_str() == topic.as_str())
+//RS         {
+//RS             Some(slice) => slice.bytes.clone(),
+//RS             None => {
+//RS                 let closest = slices
+//RS                     .iter()
+//RS                     .min_by_key(|slice| {
+//RS                         (
+//RS                             jet::Syntax::edit_distance(&topic, &slice.topic),
+//RS                             &slice.topic,
+//RS                         )
+//RS                     })
+//RS                     .map(|slice| slice.topic.as_str())
+//RS                     .unwrap_or("first-program");
+//RS                 crate::cli_error!(
+//RS                     @fix "E2104",
+//RS                     format!("unknown digest topic `{topic}`"),
+//RS                     format!("use `--topic {closest}`, or list topics with `jet inspect digest --list-topics`")
+//RS                 );
+//RS                 exit(jet::ExitCodes::USAGE);
+//RS             }
+//RS         },
+//RS         None => llm_digest(),
+//RS     };
+//RS     emit_digest(&digest, json);
+//RS }
+//RS 
+//RS /// `jet inspect output <file.jet> [<address>]` — report one sema-selected
+//RS /// Output and its checked callable facts.
+//RS pub(crate) fn run_output(args: &[String], json: bool) {
+//RS     let positionals = args
+//RS         .iter()
+//RS         .filter(|arg| !arg.starts_with('-'))
+//RS         .collect::<Vec<_>>();
+//RS     let Some(file) = positionals.first() else {
+//RS         crate::cli_error!(
+//RS             @fix "E2104",
+//RS             "`jet inspect output` needs an entry file",
+//RS             "run `jet inspect output Examples/features/tooling/output_callable.jet`"
+//RS         );
+//RS         exit(jet::ExitCodes::USAGE);
+//RS     };
+//RS     let requested = positionals.get(1).map(|value| value.as_str());
+//RS     let path = Path::new(file.as_str());
+//RS     let projection = match requested {
+//RS         Some(address) => {
+//RS             check_projection_for_output_effects(path, address, "dev", &BTreeMap::new())
+//RS         }
+//RS         None => check_projection_for_run(path, "dev", &BTreeMap::new()),
+//RS     }
+//RS     .unwrap_or_else(|diagnostics| render_check_failure(path, &diagnostics, json, false));
+//RS 
+//RS     let selected = projection
+//RS         .bundle
+//RS         .modules
+//RS         .iter()
+//RS         .flat_map(|module| module.items.iter())
+//RS         .find_map(|item| {
+//RS             let jet::AST::Item::Const(value) = item else {
+//RS                 return None;
+//RS             };
+//RS             let output = value.resolved_output.as_ref()?;
+//RS             output.selected.then_some((value.name.as_str(), output))
+//RS         });
+//RS     let Some((binding, output)) = selected else {
+//RS         crate::cli_error!(
+//RS             @fix "E2104",
+//RS             "the checked source has no selected Output",
+//RS             "declare one Executable Output or select one by address"
+//RS         );
+//RS         exit(jet::ExitCodes::USER_ERROR);
+//RS     };
+//RS     let module = &projection.bundle.modules[output.module];
+//RS     let callable_identity = format!("{}::{}", module.alias, output.semantic_name);
+//RS     let failure = output.failure_contract();
+//RS     let failure_contract = failure.effective_type().name();
+//RS     let failure_source = failure.source();
+//RS     let mut effects = output.effects.clone();
+//RS     effects.sort();
+//RS     let required_effects = effects.iter().cloned().collect::<jet::Sema::EffectSet>();
+//RS     let manifest = match jet::Loader::package_facts_for_bundle(&projection.bundle) {
+//RS         Ok(manifest) => manifest,
+//RS         Err(diagnostics) => render_check_failure(path, &diagnostics, json, false),
+//RS     };
+//RS     let authority =
+//RS         jet::EffectBudget::project_application_effects(&required_effects, manifest.as_ref());
+//RS 
+//RS     if json {
+//RS         let output_value = StatusValue::object(
+//RS             StatusFields::new()
+//RS                 .with("binding", binding)
+//RS                 .with("kind", output.kind.as_str())
+//RS                 .with("name", output.output_name.as_str())
+//RS                 .with("entry", output.source_name.as_str())
+//RS                 .with("source_path", output.source_path.as_str())
+//RS                 .with("callable_identity", callable_identity.as_str())
+//RS                 .with("failure_contract", failure_contract.clone())
+//RS                 .with("failure_source", failure_source.clone())
+//RS                 .with(
+//RS                     "effects",
+//RS                     StatusValue::array(
+//RS                         effects
+//RS                             .iter()
+//RS                             .map(|effect| StatusValue::from(effect.as_str())),
+//RS                     ),
+//RS                 )
+//RS                 .with(
+//RS                     "required_effects",
+//RS                     StatusValue::array(
+//RS                         effects
+//RS                             .iter()
+//RS                             .map(|effect| StatusValue::from(effect.as_str())),
+//RS                     ),
+//RS                 )
+//RS                 .with(
+//RS                     "granted_effects",
+//RS                     StatusValue::array(
+//RS                         authority
+//RS                             .granted_effects
+//RS                             .iter()
+//RS                             .map(|effect| StatusValue::from(effect.as_str())),
+//RS                     ),
+//RS                 )
+//RS                 .with(
+//RS                     "denied_effects",
+//RS                     StatusValue::array(
+//RS                         authority
+//RS                             .denied_effects
+//RS                             .iter()
+//RS                             .map(|effect| StatusValue::from(effect.as_str())),
+//RS                     ),
+//RS                 )
+//RS                 .with("authority", authority.authority.as_str())
+//RS                 .with("selection_reason", output.selection_reason.as_str()),
+//RS         );
+//RS         let payload = render_status(
+//RS             "inspect.output",
+//RS             true,
+//RS             StatusFields::new().with("output", output_value),
+//RS         );
+//RS         println!("{payload}");
+//RS     } else {
+//RS         println!(
+//RS             "selected: {} \"{}\"",
+//RS             output.kind.as_str(),
+//RS             output.output_name
+//RS         );
+//RS         println!("entry: {}", output.source_name);
+//RS         println!("source path: {}", output.source_path);
+//RS         println!("callable identity: {callable_identity}");
+//RS         println!(
+//RS             "failure contract: {} ({})",
+//RS             failure_contract, failure_source
+//RS         );
+//RS         println!(
+//RS             "required effects: {}",
+//RS             if effects.is_empty() {
+//RS                 "none".to_string()
+//RS             } else {
+//RS                 effects.join(", ")
+//RS             }
+//RS         );
+//RS         println!(
+//RS             "granted effects: {}",
+//RS             if authority.granted_effects.is_empty() {
+//RS                 "none".to_string()
+//RS             } else {
+//RS                 authority
+//RS                     .granted_effects
+//RS                     .iter()
+//RS                     .cloned()
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(", ")
+//RS             }
+//RS         );
+//RS         println!(
+//RS             "denied effects: {}",
+//RS             if authority.denied_effects.is_empty() {
+//RS                 "none".to_string()
+//RS             } else {
+//RS                 authority
+//RS                     .denied_effects
+//RS                     .iter()
+//RS                     .cloned()
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(", ")
+//RS             }
+//RS         );
+//RS         println!("authority: {}", authority.authority);
+//RS         println!("selection reason: {}", output.selection_reason);
+//RS     }
+//RS }
+//RS 
+//RS /// `jet inspect env [<env.jet|config.jet>]` — evaluate a config surface and
+//RS /// project the typed `$NAME` reads without exposing their values.
+//RS pub(crate) fn run_env(args: &[String], json: bool) {
+//RS     let file = entry_file(args).unwrap_or_else(|| {
+//RS         if Path::new(jet::Syntax::ENV_FILE).is_file() {
+//RS             jet::Syntax::ENV_FILE.to_string()
+//RS         } else {
+//RS             jet::Syntax::CONFIG_FILE.to_string()
+//RS         }
+//RS     });
+//RS     let source = match fs::read_to_string(&file) {
+//RS         Ok(source) => source,
+//RS         Err(error) => {
+//RS             crate::cli_error!(
+//RS                 @fix "E2105",
+//RS                 format!("can't read config surface `{file}`: {error}"),
+//RS                 "pass a readable `env.jet` or `config.jet` file"
+//RS             );
+//RS             exit(jet::ExitCodes::USER_ERROR);
+//RS         }
+//RS     };
+//RS     let path = Path::new(&file);
+//RS     let base_dir = path
+//RS         .parent()
+//RS         .filter(|parent| !parent.as_os_str().is_empty())
+//RS         .unwrap_or_else(|| Path::new("."));
+//RS     let plan = match jet_env_model::ModuleEval::evaluate_env(&source, base_dir) {
+//RS         Ok(plan) => plan,
+//RS         Err(diagnostic) => {
+//RS             if json {
+//RS                 let machine_file = crate::machine_report_path_for_process(&file);
+//RS                 let report = diagnostic.to_report(&machine_file, &source);
+//RS                 let rendered = render_status_with_reports(
+//RS                     "inspect.env",
+//RS                     false,
+//RS                     std::iter::once(report),
+//RS                     StatusFields::new(),
+//RS                 );
+//RS                 print!("{rendered}\n");
+//RS             } else {
+//RS                 eprint!(
+//RS                     "{}",
+//RS                     jet::render_diagnostics(&file, &source, std::slice::from_ref(&diagnostic))
+//RS                 );
+//RS             }
+//RS             exit(jet::ExitCodes::USER_ERROR);
+//RS         }
+//RS     };
+//RS     if json {
+//RS         let reads = StatusValue::array(plan.environment_reads.iter().map(|read| {
+//RS             StatusValue::object(
+//RS                 StatusFields::new()
+//RS                     .with("name", read.name.as_str())
+//RS                     .with("type", read.ty.as_str()),
+//RS             )
+//RS         }));
+//RS         let payload = render_status(
+//RS             "inspect.env",
+//RS             true,
+//RS             StatusFields::new().with(
+//RS                 "env",
+//RS                 StatusValue::object(
+//RS                     StatusFields::new()
+//RS                         .with("file", file.as_str())
+//RS                         .with("reads", reads),
+//RS                 ),
+//RS             ),
+//RS         );
+//RS         println!("{payload}");
+//RS     } else {
+//RS         println!("environment");
+//RS         println!("file: {file}");
+//RS         if plan.environment_reads.is_empty() {
+//RS             println!("reads: none");
+//RS         } else {
+//RS             println!("reads:");
+//RS             for read in &plan.environment_reads {
+//RS                 println!("  {}: {}", read.name, read.ty);
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn emit_digest(digest: &str, json: bool) {
+//RS     if json {
+//RS         let payload = render_status(
+//RS             "inspect.digest",
+//RS             true,
+//RS             StatusFields::new().with(
+//RS                 "digest",
+//RS                 StatusValue::object(StatusFields::new().with("value", digest)),
+//RS             ),
+//RS         );
+//RS         println!("{payload}");
+//RS     } else {
+//RS         print!("{digest}");
+//RS     }
+//RS }
+//RS 
+//RS struct DigestSlice {
+//RS     topic: String,
+//RS     bytes: String,
+//RS }
+//RS 
+//RS fn parse_digest_args(args: &[String]) -> (Option<String>, bool) {
+//RS     let mut topic = None;
+//RS     let mut list_topics = false;
+//RS     let mut index = 0;
+//RS     while index < args.len() {
+//RS         let arg = &args[index];
+//RS         if arg == jet::CLI::MACHINE_OUTPUT_FLAG {
+//RS             index += 1;
+//RS             continue;
+//RS         }
+//RS         if arg == "--list-topics" {
+//RS             list_topics = true;
+//RS         } else if let Some(value) = arg.strip_prefix("--topic=") {
+//RS             topic = Some(value.to_string());
+//RS         } else if arg == "--topic" {
+//RS             let Some(value) = args.get(index + 1).filter(|value| !value.starts_with('-')) else {
+//RS                 crate::cli_error!(
+//RS                     @fix "E2104",
+//RS                     "`--topic` needs a value",
+//RS                     "write `--topic <name>`; use `--list-topics` to discover names"
+//RS                 );
+//RS                 exit(jet::ExitCodes::USAGE);
+//RS             };
+//RS             topic = Some(value.clone());
+//RS             index += 1;
+//RS         }
+//RS         index += 1;
+//RS     }
+//RS     (topic, list_topics)
+//RS }
+//RS 
+//RS /// Split the one rendered digest into byte-exact topic slices. The full digest
+//RS /// remains the only source: slices are ranges of its output, so concatenating
+//RS /// the listed slices reproduces the whole file exactly.
+//RS fn digest_slices() -> Vec<DigestSlice> {
+//RS     let digest = llm_digest();
+//RS     let headings = [
+//RS         ("first-program", "## First program"),
+//RS         ("core.source-rules", "## Core source rules"),
+//RS         ("idioms", "## Canonical idiom suites"),
+//RS         ("syntax.keywords", "## Keywords"),
+//RS         ("syntax.types", "## Built-in type names"),
+//RS         ("syntax.reserved", "## Reserved first-party names"),
+//RS         ("markers", "## Markers"),
+//RS         ("core", "## Core module index"),
+//RS         ("diagnostics", "## Diagnostics"),
+//RS     ];
+//RS     let starts = headings
+//RS         .iter()
+//RS         .map(|(_, heading)| digest.find(heading).expect("digest heading disappeared"))
+//RS         .collect::<Vec<_>>();
+//RS     let mut slices = Vec::new();
+//RS     for (index, (topic, _)) in headings.iter().enumerate() {
+//RS         let start = if index == 0 { 0 } else { starts[index] };
+//RS         let end = starts.get(index + 1).copied().unwrap_or(digest.len());
+//RS         if *topic != "core" {
+//RS             slices.push(DigestSlice {
+//RS                 topic: (*topic).to_string(),
+//RS                 bytes: digest[start..end].to_string(),
+//RS             });
+//RS             continue;
+//RS         }
+//RS 
+//RS         let header_end = digest[start..end]
+//RS             .find("module\titems\n")
+//RS             .map(|offset| start + offset + "module\titems\n".len())
+//RS             .expect("core digest header disappeared");
+//RS         let rows = digest[header_end..end]
+//RS             .split_inclusive('\n')
+//RS             .scan(header_end, |offset, line| {
+//RS                 let start = *offset;
+//RS                 *offset += line.len();
+//RS                 Some((start, *offset, line.starts_with("core.")))
+//RS             })
+//RS             .filter_map(|(start, end, is_module)| is_module.then_some((start, end)))
+//RS             .collect::<Vec<_>>();
+//RS         for (row_index, (row_start, row_end)) in rows.iter().enumerate() {
+//RS             let topic = digest[*row_start..*row_end]
+//RS                 .split_once('\t')
+//RS                 .map(|(module, _)| module)
+//RS                 .expect("core digest row lost module name");
+//RS             let slice_start = if row_index == 0 { start } else { *row_start };
+//RS             let slice_end = rows
+//RS                 .get(row_index + 1)
+//RS                 .map(|(next_start, _)| *next_start)
+//RS                 .unwrap_or(end);
+//RS             slices.push(DigestSlice {
+//RS                 topic: topic.to_string(),
+//RS                 bytes: digest[slice_start..slice_end].to_string(),
+//RS             });
+//RS         }
+//RS     }
+//RS     slices
+//RS }
+//RS 
+//RS fn llm_digest() -> String {
+//RS     let marker_text = digest_marker_text();
+//RS     let diagnostic_text = digest_diagnostic_text();
+//RS     let core_text = digest_core_module_text();
+//RS     let idiom_suites_body = [
+//RS         "Each idiom has one executable, golden-backed source of truth under `Examples/suites/`.",
+//RS         "",
+//RS         "- Dispatch: `Examples/suites/dispatch.jet` — ordered dispatch tables and grouped aliases.",
+//RS         "- Failure: `Examples/suites/failure.jet` — implicit failure flow, typed expert contracts, and one conversion rail.",
+//RS         "- Finite state: `Examples/suites/finite_state.jet` — enums, variant groups, tags, and typestate transitions.",
+//RS         "- Ownership: `Examples/suites/ownership.jet` — reused views, explicit `~` boundaries, and cost visibility.",
+//RS         "- Wire output: `Examples/suites/wire_output.jet` — canonical JSON writer bytes and a `#Codable` round trip.",
+//RS     ]
+//RS     .join("\n");
+//RS 
+//RS     let first_program_body = [
+//RS         "A source file ends with one `fn run()` entry. `print` is a built-in.",
+//RS         "",
+//RS         "```jet",
+//RS         "fn run() {",
+//RS         "    greeting :: \"Hello, Jet\"",
+//RS         "    print(greeting)",
+//RS         "}",
+//RS         "```",
+//RS         "",
+//RS         "No semicolons. Comments start with `//`. Strings use double quotes and interpolate `{name}`.",
+//RS     ]
+//RS     .join("\n");
+//RS     let core_rules_body = [
+//RS         "Bindings: `name :: value` is immutable; `name := value` is mutable; `name = value` reassigns a mutable binding.",
+//RS         "Functions: `fn name(parameter: Type) -> Return { ... }`; an effect ceiling splits the arrow: `fn name(parameter: Type) -[Effects]> Return { ... }`, and `-[]>` declares a pure function.",
+//RS         "Visibility: declarations are private by default; prefix an item with `pub` for package use.",
+//RS         "Types: `Int`, `Float`, `Bool`, `String`, `Char`; lists use `[T]`; optional values use `T?`; failures use `T E!`.",
+//RS         "Errors: failures propagate implicitly; handle `T?` or `T E!` with `?? fallback` or a pattern test. Use `Ok(value)`, `Err(error)`, `Val(value)`, and `None`.",
+//RS         "Control: `if condition { ... } else { ... }`; loops use `loop name in source { ... }`, and a collecting loop yields a list with `loop name in source -> value`; exit with `break` and advance with `next`.",
+//RS         "Construction: use `Type{ field: value }`; list literals use `[T]{ value1, value2 }`.",
+//RS         "Calls and member access use `name(args)` and `value.member(args)`. Core imports use `use core.module as alias`.",
+//RS         "Ownership is safe by default. `&T` writes, `^T` moves, and `~value` copies. Expert unsafe code needs `#Unsafe(\"reason\")`.",
+//RS     ]
+//RS     .join("\n");
+//RS     let marker_body = format!(
+//RS         "User marker spelling is `#Name(arguments)`; rows below are registry declarations.\n\n```text\n{marker_text}\n```"
+//RS     );
+//RS     let core_body = format!(
+//RS         "Use a module alias, then call an indexed item: `use core.term as term`; `term.print(\"hi\")`.\n\n```text\n{core_text}\n```"
+//RS     );
+//RS     let diagnostic_body = format!(
+//RS         "Diagnostic rows use current registry meaning. Match code first; follow `fix`. Rows marked retired or reserved are not current syntax.\n\n```text\n{diagnostic_text}\n```"
+//RS     );
+//RS 
+//RS     let out = [
+//RS         "# Jet LLM surface digest".to_string(),
+//RS         String::new(),
+//RS         "Generated. Current compiler registries own markers, diagnostics, syntax names, and Core items.".to_string(),
+//RS         "Read on demand with `jet inspect digest`; do not maintain a checked-in copy.".to_string(),
+//RS         "Use active rows only. Retired rows teach replacement; they are not valid current source.".to_string(),
+//RS         "Write one current program. Do not invent aliases, legacy spellings, or library namespaces.".to_string(),
+//RS         String::new(),
+//RS         digest_section("First program", &first_program_body),
+//RS         digest_section("Core source rules", &core_rules_body),
+//RS         digest_section("Canonical idiom suites", &idiom_suites_body),
+//RS         digest_section("Keywords", &digest_list(jet::Syntax::JET_KEYWORD_LIST)),
+//RS         digest_section("Built-in type names", &digest_list(jet::Syntax::JET_TYPE_LIST)),
+//RS         digest_section(
+//RS             "Reserved first-party names",
+//RS             &digest_list(jet::Syntax::FIRST_PARTY_RESERVED),
+//RS         ),
+//RS         digest_section("Markers", &marker_body),
+//RS         digest_section("Core module index", &core_body),
+//RS         digest_section("Diagnostics", &diagnostic_body),
+//RS     ]
+//RS     .join("\n");
+//RS     format!("{}\n", out.trim_end())
+//RS }
+//RS 
+//RS fn digest_section(title: &str, body: &str) -> String {
+//RS     format!("## {title}\n\n{}\n", body.trim())
+//RS }
+//RS 
+//RS fn digest_list(values: &[&str]) -> String {
+//RS     let mut unique = Vec::new();
+//RS     for value in values {
+//RS         if !unique.iter().any(|seen| seen == value) {
+//RS             unique.push(*value);
+//RS         }
+//RS     }
+//RS     unique
+//RS         .into_iter()
+//RS         .map(|value| format!("- {value}"))
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n")
+//RS }
+//RS 
+//RS fn digest_marker_text() -> String {
+//RS     let mut out = String::from("status\tname\tregistered declaration");
+//RS     for row in Registry::marker_rows() {
+//RS         let rule = row
+//RS             .rule
+//RS             .expect("every marker registry row has an applied rule");
+//RS         let status = match rule.status {
+//RS             RuleStatus::Active => "active",
+//RS             RuleStatus::Retired { .. } => "retired",
+//RS         };
+//RS         let _ = write!(
+//RS             out,
+//RS             "\n{}\t{}\t{}",
+//RS             status,
+//RS             row.name,
+//RS             digest_marker_declaration(rule)
+//RS         );
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn digest_marker_declaration(rule: &AppliedRule) -> String {
+//RS     let mut fields = rule
+//RS         .signature
+//RS         .params
+//RS         .iter()
+//RS         .map(|param| {
+//RS             let default = param
+//RS                 .default
+//RS                 .map_or(String::new(), |value| format!("{{{value}}}"));
+//RS             format!("{}: {}{default}", param.name, param.source_type)
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     if let Some(source_type) = rule.signature.variadic_source_type {
+//RS         fields.push(format!("{source_type}..."));
+//RS     }
+//RS     fields.push(format!(
+//RS         "@sites: [{}]",
+//RS         rule.sites
+//RS             .iter()
+//RS             .map(|site| format!(".{}", site.name()))
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ")
+//RS     ));
+//RS     if rule.repeatable {
+//RS         fields.push("@repeatable: true".to_string());
+//RS     }
+//RS     if rule.owns_menu {
+//RS         fields.push("@owns_menu: true".to_string());
+//RS     }
+//RS     if rule.inherits {
+//RS         fields.push("@inherits: true".to_string());
+//RS     }
+//RS     if rule.resolution != RuleResolution::SiteBound {
+//RS         fields.push(format!(
+//RS             "@resolution: .{}",
+//RS             digest_resolution_name(rule.resolution)
+//RS         ));
+//RS     }
+//RS     if !rule.policy_scopes.is_empty() {
+//RS         fields.push(format!(
+//RS             "@scopes: [{}]",
+//RS             rule.policy_scopes
+//RS                 .iter()
+//RS                 .map(|scope| format!(".{}", digest_scope_name(*scope)))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ")
+//RS         ));
+//RS     }
+//RS     if let Some(companion) = rule.companion_site {
+//RS         fields.push(format!(
+//RS             "@companion: [{}, .{}]",
+//RS             companion.rule,
+//RS             companion.site.name()
+//RS         ));
+//RS     }
+//RS     if let RuleStatus::Retired { replacement } = rule.status {
+//RS         fields.push(format!("@retired: \"{}\"", digest_quote(replacement)));
+//RS     }
+//RS     format!("marker {}({})", rule.name, fields.join(", "))
+//RS }
+//RS 
+//RS fn digest_scope_name(scope: PolicyScope) -> &'static str {
+//RS     match scope {
+//RS         PolicyScope::Organization => "Organization",
+//RS         PolicyScope::Package => "Package",
+//RS         PolicyScope::Module => "Module",
+//RS         PolicyScope::Function => "Function",
+//RS         PolicyScope::Block => "Block",
+//RS     }
+//RS }
+//RS 
+//RS fn digest_resolution_name(resolution: RuleResolution) -> &'static str {
+//RS     match resolution {
+//RS         RuleResolution::SiteBound => "SiteBound",
+//RS         RuleResolution::Override => "Override",
+//RS         RuleResolution::Merge => "Merge",
+//RS         RuleResolution::Tighten => "Tighten",
+//RS     }
+//RS }
+//RS 
+//RS fn digest_quote(value: &str) -> String {
+//RS     value.replace('\\', "\\\\").replace('"', "\\\"")
+//RS }
+//RS 
+//RS fn digest_diagnostic_text() -> String {
+//RS     let mut out = String::from(
+//RS         "code\tstatus\tstage\tseverity\tmoment\tmeaning\twhat\twhy\tfix\tdetail\tstructured-fix",
+//RS     );
+//RS     for row in Registry::diagnostic_rows() {
+//RS         let severity = match row.severity {
+//RS             jet_foundation::Diagnostics::Severity::Error => "error",
+//RS             jet_foundation::Diagnostics::Severity::Lint => "lint",
+//RS         };
+//RS         let structured_fix = row
+//RS             .structured_fix
+//RS             .map_or_else(|| "-".to_string(), |fix| fix.source_marker());
+//RS         let _ = write!(
+//RS             out,
+//RS             "\n{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+//RS             row.code,
+//RS             row.status.name(),
+//RS             row.stage,
+//RS             severity,
+//RS             row.moment.as_str(),
+//RS             digest_one_line(row.meaning),
+//RS             digest_one_line(row.what),
+//RS             digest_one_line(row.why),
+//RS             digest_one_line(row.fix),
+//RS             row.detail,
+//RS             structured_fix,
+//RS         );
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn digest_one_line(value: &str) -> String {
+//RS     value.split_whitespace().collect::<Vec<_>>().join(" ")
+//RS }
+//RS 
+//RS fn digest_core_module_text() -> String {
+//RS     let mut out = String::from("module\titems");
+//RS     for &module in jet::Syntax::KNOWN_CORE_MODULES {
+//RS         let items = jet::Sema::core_module_items(module);
+//RS         let rendered = digest_core_items(&items);
+//RS         let _ = write!(out, "\n{module}\t{rendered}");
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn digest_core_items(items: &[String]) -> String {
+//RS     let mut unique = Vec::new();
+//RS     for item in items {
+//RS         if !unique.iter().any(|seen| seen == item) {
+//RS             unique.push(item.clone());
+//RS         }
+//RS     }
+//RS     if unique.is_empty() {
+//RS         "(no indexed item)".to_string()
+//RS     } else {
+//RS         unique.join(", ")
+//RS     }
+//RS }
+//RS 
+//RS /// `jet inspect provenance [<dependency>]` — read the one lock-backed
+//RS /// dependency provenance record. Verification stays on existing resolver and
+//RS /// E1204 paths; this command only projects their recorded facts.
+//RS pub(crate) fn run_provenance(args: &[String], json: bool) {
+//RS     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+//RS     let root = crate::require_manifest_root(
+//RS         &cwd,
+//RS         "error: no package.jet found — run `jet inspect provenance` inside a project",
+//RS     );
+//RS     let lock = match jet::Lock::load(&root) {
+//RS         Some(lock) => lock,
+//RS         None => {
+//RS             crate::cli_error!("E1202", "no lockfile found — run `jet fetch` first");
+//RS             exit(jet::ExitCodes::USER_ERROR);
+//RS         }
+//RS     };
+//RS     let entry = crate::find_project_entry(&root);
+//RS     let package = match jet::Loader::package_facts_for_entry(&entry) {
+//RS         Ok(Some(package)) => package,
+//RS         Ok(None) => {
+//RS             crate::cli_error!("E2105", "the project has no package facts");
+//RS             exit(jet::ExitCodes::USER_ERROR);
+//RS         }
+//RS         Err(diagnostics) => {
+//RS             let source = fs::read_to_string(&entry).unwrap_or_default();
+//RS             let file = entry.display().to_string();
+//RS             if json {
+//RS                 let machine_file = crate::machine_report_path_for_process(&file);
+//RS                 let clears = jet::Diagnostics::report_clear_counts(&diagnostics);
+//RS                 let reports = diagnostics.iter().zip(clears).map(|(diagnostic, clears)| {
+//RS                     diagnostic.to_report_with_clears(&machine_file, &source, clears)
+//RS                 });
+//RS                 let rendered = render_status_with_reports(
+//RS                     "inspect.provenance",
+//RS                     false,
+//RS                     reports,
+//RS                     StatusFields::new(),
+//RS                 );
+//RS                 print!("{rendered}\n");
+//RS             } else {
+//RS                 eprint!("{}", jet::render_diagnostics(&file, &source, &diagnostics));
+//RS             }
+//RS             exit(jet::ExitCodes::USER_ERROR);
+//RS         }
+//RS     };
+//RS     let requirement = package
+//RS         .authority
+//RS         .trust
+//RS         .as_ref()
+//RS         .and_then(|trust| trust.require)
+//RS         .unwrap_or(jet::Package::ProvenanceRequirement::None);
+//RS     let target = provenance_target(args);
+//RS     let mut reports = lock
+//RS         .packages
+//RS         .iter()
+//RS         .filter(|package| !matches!(&package.source, jet::Lock::LockSource::Root))
+//RS         .filter(|package| target.is_none() || target.as_deref() == Some(package.name.as_str()))
+//RS         .map(jet::Lock::LockedPackage::provenance_report)
+//RS         .collect::<Vec<_>>();
+//RS     reports.sort_by(|left, right| {
+//RS         left.name
+//RS             .cmp(&right.name)
+//RS             .then(left.version.cmp(&right.version))
+//RS     });
+//RS     if let Some(target) = target {
+//RS         if reports.is_empty() {
+//RS             crate::cli_error!(
+//RS                 @fix "E2104",
+//RS                 format!("dependency `{target}` is not present in the lockfile"),
+//RS                 "use `jet inspect provenance` to list locked dependencies"
+//RS             );
+//RS             exit(jet::ExitCodes::USER_ERROR);
+//RS         }
+//RS     }
+//RS     if json {
+//RS         render_provenance_json(requirement, &reports);
+//RS     } else {
+//RS         render_provenance_text(requirement, &reports);
+//RS     }
+//RS }
+//RS 
+//RS fn provenance_target(args: &[String]) -> Option<String> {
+//RS     args.iter()
+//RS         .find(|argument| !argument.starts_with('-'))
+//RS         .cloned()
+//RS }
+//RS 
+//RS fn render_provenance_text(
+//RS     requirement: jet::Package::ProvenanceRequirement,
+//RS     reports: &[jet::Lock::DependencyProvenanceReport],
+//RS ) {
+//RS     println!("provenance");
+//RS     println!("require: {}", requirement.label());
+//RS     for (index, report) in reports.iter().enumerate() {
+//RS         if index > 0 {
+//RS             println!();
+//RS         }
+//RS         println!("{} {}", report.name, report.version);
+//RS         let evidence = matches!(
+//RS             report.integrity.status,
+//RS             jet::Lock::ProvenanceStatus::Enforced
+//RS         )
+//RS         .then_some(", E1204")
+//RS         .unwrap_or("");
+//RS         println!(
+//RS             "  {:<12} {} — matches .jet/lock ({}{evidence})",
+//RS             "integrity",
+//RS             report.integrity.value,
+//RS             report.integrity.status.label()
+//RS         );
+//RS         render_provenance_field("transparency", &report.transparency);
+//RS         render_provenance_field("publisher", &report.publisher);
+//RS         render_provenance_field("build", &report.build);
+//RS         render_effect_provenance_text(report);
+//RS     }
+//RS }
+//RS 
+//RS fn render_provenance_field(label: &str, field: &jet::Lock::ProvenanceField) {
+//RS     println!("  {label:<12} {} ({})", field.value, field.status.label());
+//RS }
+//RS 
+//RS fn render_effect_provenance_text(report: &jet::Lock::DependencyProvenanceReport) {
+//RS     println!("  effect roles");
+//RS     println!(
+//RS         "    required effects: {}",
+//RS         effect_names(&report.required_effects)
+//RS     );
+//RS     println!(
+//RS         "    granted effects: {}",
+//RS         effect_names(&report.granted_effects)
+//RS     );
+//RS     println!(
+//RS         "    denied effects: {}",
+//RS         effect_names(&report.denied_effects)
+//RS     );
+//RS     println!("    authority: {}", report.authority);
+//RS }
+//RS 
+//RS fn effect_names(effects: &[String]) -> String {
+//RS     if effects.is_empty() {
+//RS         "none".to_string()
+//RS     } else {
+//RS         effects.join(", ")
+//RS     }
+//RS }
+//RS 
+//RS fn render_provenance_json(
+//RS     requirement: jet::Package::ProvenanceRequirement,
+//RS     reports: &[jet::Lock::DependencyProvenanceReport],
+//RS ) {
+//RS     let packages = StatusValue::array(reports.iter().map(render_provenance_json_package));
+//RS     let payload = render_status(
+//RS         "inspect.provenance",
+//RS         true,
+//RS         StatusFields::new().with(
+//RS             "provenance",
+//RS             StatusValue::object(
+//RS                 StatusFields::new()
+//RS                     .with("require", requirement.label())
+//RS                     .with("packages", packages),
+//RS             ),
+//RS         ),
+//RS     );
+//RS     println!("{payload}");
+//RS }
+//RS 
+// END-PORT-PENDING 0691 Source/CmdInspect.rs:459-2235
+

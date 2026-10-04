@@ -1,0 +1,753 @@
+use jet.AST.[Marker, Expr, StrPart, EveryMarker, EveryArg, Item, JobScope]
+use jet.Diagnostics.[Diagnostic]
+use jet.Syntax as Syntax
+use jet.Package as Package
+use jet.Lexer as Lexer
+use jet.Parser as Parser
+use jet.Loader as Loader
+use jet.Lock as Lock
+use jet.Publish as Publish
+use jet.Formatter as Formatter
+use jet.LSP as LSP
+use jet.SHA256 as SHA256
+use jet.CmdCodemod as CmdCodemod
+use jet_foundation.Evidence.*
+use std.collections.[BTreeSet]
+use std.fs as fs
+use std.env as env
+use std.io as io
+// GATE #4494: native path, filesystem, environment mutation and durable publication seams.
+
+// Rust: Source/CmdCompile.rs:5109
+fn marker_string(marker: &Marker) -> String? {
+    if marker.expr_arg(0) == {
+        .Val(.Str(parts, _)) -> {
+            if parts.len() != 1 -> return None
+            if parts[0] == { .Lit(value) -> Val(value), else -> None }
+        }
+        else -> None
+    }
+}
+// Rust: Source/CmdCompile.rs:5119
+fn schedule_text(marker: &EveryMarker) -> String? {
+    if marker.arg == {
+        .Duration(int, float, suffix, _) -> {
+            number :: int.map(fn(value) { value.to_string() }) ?? float.map(fn(value) { value.to_string() }) ?? ""
+            Val("{number}{suffix}")
+        }
+        .WallClock(text, _) -> Val("day {text}")
+        .Expression(_) -> None
+    }
+}
+// Rust: Source/CmdCompile.rs:5137
+// One lex+parse source for E1294 and `jet jobs`, retaining source order and metadata.
+fn list_job_names(src: String) -> [JobListing] [Diagnostic]! {
+    source :: Package.mask_inline_package_source(src) ?? return Err([err.diagnostic()])
+    (toks, lex_diags) :: Lexer.lex(source.0)
+    if !lex_diags.is_empty() -> return Err(lex_diags)
+    prog :: Parser.parse_with_source(toks, source.0)
+    jobs := [JobListing]{}
+    loop item in prog.items {
+        if item == {
+            .Func(f) -> {
+                if !f.is_job -> continue
+                doc :: prog.applied_rules.iter().find(fn(application) { application.target == Val(f.span) && application.marker.name == Syntax.MARKER_DOC }).and_then(fn(application) { marker_string(application.marker) })
+                &jobs.push(JobListing{name: f.name, doc: doc, schedule: f.every.and_then(schedule_text), metadata: f.job_metadata})
+            }
+            else -> {}
+        }
+    }
+    Ok(^jobs)
+}
+// Rust: Source/CmdCompile.rs:5175
+fn print_release_job_summary(src: String, release: Bool, mode: OutputMode) {
+    if !release || mode.quiet || mode.json -> return
+    jobs :: list_job_names(src) ?? return
+    stripped :: jobs.iter().filter(fn(job) { job.metadata.map(fn(metadata) { metadata.scope != JobScope.Ship }) ?? true }).map(fn(job) { job.name }).to_list()
+    if !stripped.is_empty() -> write_mode_status(mode, "stripped {stripped.len()} dev job(s): {stripped.join(", ")} (mark #Job(.Ship) to include)\n")
+}
+// Rust: Source/CmdCompile.rs:5210
+fn write_sbom_for_build(file: String, bin: OSPath, mode: OutputMode) {
+    file_path :: OSPath.from_text(file)
+    search_from :: file_path.parent() ?? OSPath.from_text(".")
+    (name, version, maybe_lock) :: if Loader.package_facts_for_entry(file_path) == {
+        .Ok(Val(facts)) -> {
+            root :: Loader.find_manifest_root(search_from) ?? search_from
+            (facts.name, facts.version ?? "0.0.0", Lock.load(root))
+        }
+        else -> (stem(file), "0.0.0", None)
+    }
+    lock :: maybe_lock ?? Lock.LockFile{version: 1, packages: [], root_dependencies: [], authority: None, workspace_members: [], workspace_source_digest: None, workspace_overlay_policy: Default.default(), comptime_inputs: [], toolchains: [], browsers: [], source_channels: [], build_stamp: None, build_contributions: []}
+    sbom :: Publish.emit_spdx(lock, name, version)
+    out :: bin.with_extension("spdx")
+    if fs.write(out, sbom) == {
+        .Ok(_) -> { if !mode.quiet && !mode.json -> write_mode_status(mode, "sbom: {out.display()}\n") }
+        .Err(e) -> write_mode_diagnostic(mode, "warning: couldn't write SBOM to {out.display()}: {e}\n")
+    }
+}
+// Rust: Source/CmdCompile.rs:5260
+struct FixPlan { before: String, staged: String, edits: Int, skipped_suggestions: Int }
+// Rust: Source/CmdCompile.rs:5273
+pub fn run_fix(file: String, dry_run: Bool, edition: String?, all: Bool, mode: OutputMode) {
+    status :: fn(text: String) { write_mode_status(mode, "{text}\n") }
+    src :: fs.read_to_string(OSPath.from_text(file)) ?? { cli_error("E2105", "can't find the file `{file}`"); exit(ExitCodes.USER_ERROR) }
+    edition_migrated :: if edition == Val("2027") -> apply_edition_2027_encoding_fixes(src) else -> src
+    (migrated, retired_target_count) :: rewrite_retired_package_targets(edition_migrated, file)
+    if edition == Val("2027") { loop note in edition_2027_encoding_audit(src, edition_migrated) -> status("{file}: edition 2027 migration: {note}") }
+    retired_selector_count :: Formatter.retired_interpolation_selector_edits(migrated).len()
+    retired_print_count :: Formatter.retired_print_family_edits(migrated).len()
+    retired_type_count :: Formatter.retired_type_edits(migrated).len()
+    fixes :: LSP.collect_fixes(file, migrated)
+    select :: fn(fixes: [LSP.Fix]) { if all -> fixes else -> LSP.safe_fixes(fixes) }
+    selected_fixes :: select(fixes)
+    skipped_suggestions :: fixes.len().saturating_sub(selected_fixes.len())
+    FIX_ROUNDS :: 16
+    (fixed, applied, deferred) := LSP.apply_non_overlapping(migrated, selected_fixes)
+    round := 1
+    loop deferred > 0 && round < FIX_ROUNDS {
+        next_fixes :: select(LSP.collect_fixes(file, fixed))
+        (next, count, next_deferred) :: LSP.apply_non_overlapping(fixed, next_fixes)
+        if next == fixed -> break
+        fixed = next
+        applied += count
+        deferred = next_deferred
+        round += 1
+    }
+    plan :: FixPlan{before: src, staged: ^fixed, edits: applied, skipped_suggestions: skipped_suggestions}
+    if plan.staged == plan.before {
+        if plan.skipped_suggestions == 0 -> status("{file}: no changes made")
+        else {
+            suffix :: if plan.skipped_suggestions == 1 -> "" else -> "s"
+            status("{file}: no changes made ({plan.skipped_suggestions} suggestion{suffix} need review)")
+        }
+        return
+    }
+    n :: plan.edits
+    if dry_run {
+        write_mode_renderable(mode, Formatter.unified_diff(file, plan.before, plan.staged))
+        if n == 0 && retired_target_count == 0 && retired_selector_count == 0 && retired_print_count == 0 && retired_type_count == 0 -> status("{file}: would apply edition migration (dry run; nothing written)")
+        else if n > 0 {
+            suffix :: if n == 1 -> "" else -> "es"
+            status("{file}: would apply {n} fix{suffix} (dry run; nothing written)")
+        }
+        if retired_target_count > 0 {
+            suffix :: if retired_target_count == 1 -> "" else -> "s"
+            status("{file}: rewrote {retired_target_count} retired target spelling{suffix} from `plugin` to `sandbox` (D-ONCE-SANDBOX1=A)")
+        }
+        if retired_selector_count > 0 {
+            suffix :: if retired_selector_count == 1 -> "" else -> "s"
+            status("{file}: rewrote {retired_selector_count} retired interpolation selector{suffix} from `#` to `:` (D-ONCE-HASH1)")
+        }
+        if retired_print_count > 0 {
+            suffix :: if retired_print_count == 1 -> "" else -> "s"
+            status("{file}: rewrote {retired_print_count} retired print-family spelling{suffix} (D-ONCE-PRINT1=A)")
+        }
+        if retired_type_count > 0 {
+            suffix :: if retired_type_count == 1 -> "" else -> "s"
+            status("{file}: rewrote {retired_type_count} retired Core container name{suffix} (D-COLLNAME1=A)")
+        }
+        if plan.skipped_suggestions > 0 {
+            suffix :: if plan.skipped_suggestions == 1 -> "" else -> "s"
+            status("{file}: skipped {plan.skipped_suggestions} suggestion{suffix} for review (dry run)")
+        }
+        return
+    }
+    log :: CmdCodemod.commit_fix(OSPath.from_text(file), plan.before.bytes().to_list(), plan.staged.bytes().to_list())
+    if n == 0 && retired_target_count == 0 && retired_selector_count == 0 && retired_print_count == 0 && retired_type_count == 0 -> status("{file}: applied edition migration")
+    else if n > 0 { suffix :: if n == 1 -> "" else -> "es"; status("{file}: applied {n} fix{suffix}") }
+    if plan.skipped_suggestions > 0 {
+        suffix :: if plan.skipped_suggestions == 1 -> "" else -> "s"
+        status("{file}: skipped {plan.skipped_suggestions} suggestion{suffix} for review")
+    }
+    status("  log: {log.display()}")
+    if retired_target_count > 0 {
+        suffix :: if retired_target_count == 1 -> "" else -> "s"
+        status("{file}: rewrote {retired_target_count} retired target spelling{suffix} from `plugin` to `sandbox` (D-ONCE-SANDBOX1=A)")
+    }
+    if retired_selector_count > 0 {
+        suffix :: if retired_selector_count == 1 -> "" else -> "s"
+        status("{file}: rewrote {retired_selector_count} retired interpolation selector{suffix} from `#` to `:` (D-ONCE-HASH1)")
+    }
+    if retired_print_count > 0 {
+        suffix :: if retired_print_count == 1 -> "" else -> "s"
+        status("{file}: rewrote {retired_print_count} retired print-family spelling{suffix} (D-ONCE-PRINT1=A)")
+    }
+    if retired_type_count > 0 {
+        suffix :: if retired_type_count == 1 -> "" else -> "s"
+        status("{file}: rewrote {retired_type_count} retired Core container name{suffix} (D-COLLNAME1=A)")
+    }
+}
+// Rust: Source/CmdCompile.rs:5496
+fn apply_edition_2027_encoding_fixes(src: String) -> String {
+    out := replace_untyped_call(src, "cbor.encode(", "cbor.to_bytes(")
+    out = replace_untyped_call(out, "cbor.decode(", "cbor.parse(")
+    rewrite_json_canonical_calls(out)
+}
+// Rust: Source/CmdCompile.rs:5504
+fn rewrite_json_canonical_calls(src: String) -> String {
+    needle :: "json.canonical("
+    out := String.with_capacity(src.len())
+    base := 0
+    rest := src
+    loop {
+        rel :: rest.find(needle) ?? break
+        index :: base + rel
+        &out.push_str(rest[..rel])
+        after :: rest[rel + needle.len()..]
+        end :: find_matching_paren(after) ?? {
+            &out.push_str(needle)
+            base = index + needle.len()
+            rest = after
+            continue
+        }
+        call :: "{needle}{after[..=end]}"
+        trailing :: after[end + 1..]
+        trimmed := trailing.trim_start() // #4303
+        already :: trimmed.starts_with("?")
+        if already || enclosing_fn_is_fallible(src, index) -> &out.push_str(call)
+        else -> &out.push_str("{call} ?? panic(\"value is not canonical JSON\")")
+        base = index + call.len()
+        rest = trailing
+    }
+    &out.push_str(rest)
+    ^out
+}
+// Rust: Source/CmdCompile.rs:5550
+fn enclosing_fn_is_fallible(src: String, at: Int) -> Bool {
+    scan_from := at
+    loop {
+        open :: innermost_open_brace(src, scan_from) ?? break
+        if fn_header_before(src, open) == { .Val(sig_start) -> return !src[sig_start..open].contains("Never!"), .None -> {} }
+        scan_from = open
+    }
+    false
+}
+// Rust: Source/CmdCompile.rs:5564
+fn innermost_open_brace(src: String, before: Int) -> Int? {
+    bytes :: src.bytes()
+    depth := 0
+    idx := before
+    loop idx > 0 {
+        idx -= 1
+        if bytes[idx] == {
+            125 -> { depth += 1 }
+            123 -> { if depth == 0 -> return Val(idx); depth -= 1 }
+            else -> {}
+        }
+    }
+    None
+}
+// Rust: Source/CmdCompile.rs:5587
+fn fn_header_before(src: String, open: Int) -> Int? {
+    prefix :: src[..open]
+    search_end := prefix.len()
+    loop {
+        fn_at :: prefix[..search_end].rfind("fn ") ?? return None
+        boundary_ok :: fn_at == 0 || !(prefix.bytes()[fn_at - 1].is_ascii_alphanumeric() || prefix.bytes()[fn_at - 1] == 95)
+        if boundary_ok {
+            after_fn :: prefix[fn_at + 3..]
+            if after_fn.find("(") == {
+                .Val(paren) -> {
+                    if find_matching_paren(after_fn[paren + 1..]) == {
+                        .Val(close_rel) -> {
+                            close_abs :: fn_at + 3 + paren + 1 + close_rel + 1
+                            tail := prefix[close_abs..].trim() // #4303
+                            if !tail.contains("{") && !tail.contains("}") && !tail.contains(";") -> return Val(fn_at)
+                        }
+                        .None -> {}
+                    }
+                }
+                .None -> {}
+            }
+        }
+        search_end = fn_at
+    }
+}
+// Rust: Source/CmdCompile.rs:5615
+fn find_matching_paren(after_open: String) -> Int? {
+    depth := 1
+    in_string := false
+    escape := false
+    loop (index, ch) in after_open.char_indices() {
+        if in_string {
+            if escape -> escape = false
+            else if ch == '\\' -> escape = true
+            else if ch == '"' -> in_string = false
+            continue
+        }
+        if ch == {
+            '"' -> { in_string = true }
+            '(' -> { depth += 1 }
+            ')' -> { depth -= 1; if depth == 0 -> return Val(index) }
+            else -> {}
+        }
+    }
+    None
+}
+// Rust: Source/CmdCompile.rs:5645
+fn replace_untyped_call(src: String, from: String, to: String) -> String {
+    out := String.with_capacity(src.len())
+    rest := src
+    loop {
+        index :: rest.find(from) ?? break
+        &out.push_str(rest[..index])
+        after :: rest[index + from.len()..]
+        &out.push_str(if after.starts_with("<") -> from else -> to)
+        rest = after
+    }
+    &out.push_str(rest)
+    ^out
+}
+// Rust: Source/CmdCompile.rs:5662
+fn edition_2027_encoding_audit(before: String, after: String) -> [String] {
+    notes := [String]{}
+    if before.contains("json.canonical(") {
+        if after.contains("?? panic(\"value is not canonical JSON\")") || (after.contains("json.canonical(") && after != before) -> &notes.push("rewrote `json.canonical(...)` to fallible form; review hashing/signing fixtures")
+        else -> &notes.push("review every `json.canonical(...)` call — edition 2027 requires fallible `json.canonical(data, limits)?` (or an explicit panic fallback)")
+    }
+    if before != after && (before.contains("cbor.encode(") || before.contains("cbor.decode(")) -> &notes.push("rewrote deprecated CBOR forwarding calls (`encode`/`decode`)")
+    if notes.is_empty() -> &notes.push("no encoding forwarding calls found")
+    ^notes
+}
+// Rust: Source/CmdCompile.rs:5689
+// Canonical 1:1 owner: Compile/Scaffold.jet:65 jet_cli_scaffold_browser_tests.
+// Rust: Source/CmdCompile.rs:5737
+// Canonical type: Compile/Scaffold.jet:98 JetCLINewTemplate.
+// Rust: Source/CmdCompile.rs:5749
+// Canonical constant: Compile/Scaffold.jet:110 JET_CLI_NEW_TEMPLATE_NAMES.
+// Rust: Source/CmdCompile.rs:5751
+// Canonical parser: Compile/Scaffold.jet:113 jet_cli_new_template_parse.
+// Rust: Source/CmdCompile.rs:5761
+// Canonical source dispatch: Compile/Scaffold.jet:145 jet_cli_new_run_source.
+// Rust: Source/CmdCompile.rs:5771
+// Canonical holds: Compile/Scaffold.jet:159 jet_cli_new_holds.
+// Rust: Source/CmdCompile.rs:5787
+// Canonical asset: Compile/Scaffold.jet:124 JET_CLI_NEW_PRINT_RUN.
+// Rust: Source/CmdCompile.rs:5789
+// Canonical asset: Compile/Scaffold.jet:125 JET_CLI_NEW_CLI_RUN.
+// Rust: Source/CmdCompile.rs:5791
+// Canonical asset: Compile/Scaffold.jet:126 JET_CLI_NEW_UI_RUN.
+// Rust: Source/CmdCompile.rs:5793
+// Canonical asset: Compile/Scaffold.jet:127 JET_CLI_NEW_WEB_RUN.
+// Rust: Source/CmdCompile.rs:5796
+// Canonical homes: Compile/Scaffold.jet:130-133,172 jet_cli_new_command_homes.
+// Rust: Source/CmdCompile.rs:5815
+// Canonical command: Compile/Scaffold.jet:189 jet_cli_run_new.
+// Rust: Source/CmdCompile.rs:5924
+pub enum TestCapturePolicy { Failed, All, None }
+// Rust: Source/CmdCompile.rs:5932
+fn TestCapturePolicy.as_str(self: TestCapturePolicy) -> String {
+    if self == { .Failed -> "failed", .All -> "all", .None -> "none" }
+}
+// Rust: Source/CmdCompile.rs:5941
+pub fn parse_test_capture(value: String, _mode: OutputMode) -> TestCapturePolicy {
+    trimmed := value.trim() // #4303
+    if trimmed.to_ascii_lowercase() == {
+        "failed" | "failure" | "failures" -> .Failed
+        "all" -> .All
+        "none" | "off" -> .None
+        else -> { cli_error("E2104", "invalid --capture value `{value}` (expected failed, all, or none)"); exit(ExitCodes.USER_ERROR) }
+    }
+}
+// Rust: Source/CmdCompile.rs:5961
+struct TestWhereClause { field: String, value: String }
+// Rust: Source/CmdCompile.rs:5966
+fn split_test_where_terms(expression: String) -> [String] Err! {
+    bytes :: expression.bytes()
+    terms := [String]{}
+    start := 0
+    quote := U8?{None}
+    index := 0
+    loop index < bytes.len() {
+        byte :: bytes[index]
+        if quote == {
+            .Val(mark) -> {
+                if byte == 92 { index = index.saturating_add(2); continue }
+                if byte == mark -> quote = None
+                index += 1
+                continue
+            }
+            .None -> {}
+        }
+        if byte == 39 || byte == 34 { quote = Val(byte); index += 1; continue }
+        if index + 3 <= bytes.len() && (bytes[index] == 97 || bytes[index] == 65) && (bytes[index + 1] == 110 || bytes[index + 1] == 78) && (bytes[index + 2] == 100 || bytes[index + 2] == 68) && (index == 0 || bytes[index - 1].is_ascii_whitespace()) && (index + 3 == bytes.len() || bytes[index + 3].is_ascii_whitespace()) {
+            term := expression[start..index].trim() // #4303
+            if term.is_empty() -> return Err("empty predicate before `and`")
+            &terms.push(term)
+            index += 3
+            start = index
+            continue
+        }
+        index += 1
+    }
+    if quote.is_some() -> return Err("unterminated quote in --where expression")
+    term := expression[start..].trim() // #4303
+    if term.is_empty() -> return Err("empty predicate in --where expression")
+    &terms.push(term)
+    Ok(^terms)
+}
+// Rust: Source/CmdCompile.rs:6019
+fn parse_test_where(expression: String) -> [TestWhereClause] Err! {
+    clauses := [TestWhereClause]{}
+    trimmed := expression.trim() // #4303
+    loop term in split_test_where_terms(trimmed) {
+        (field, raw_value) :: term.split_once("=") ?? return Err("predicate `{term}` needs `field=value`")
+        field_trimmed := field.trim() // #4303
+        field :: field_trimmed.to_ascii_lowercase()
+        if field != "package" && field != "dep" && field != "dependency" && field != "path" && field != "tag" && field != "status" -> return Err("unknown --where field `{field}` (expected package, dep, path, tag, or status)")
+        raw_value := raw_value.trim() // #4303
+        if raw_value.is_empty() -> return Err("empty value for --where field `{field}`")
+        first :: raw_value.bytes().first() ?? return Err("empty value for --where field `{field}`")
+        value :: if first == 39 || first == 34 {
+            if raw_value.len() < 2 || raw_value.bytes().last() != Val(first) -> return Err("unterminated quote for --where field `{field}`")
+            raw_value[1..raw_value.len() - 1]
+        } else {
+            if raw_value.bytes().any(fn(byte) { byte.is_ascii_whitespace() }) -> return Err("unquoted --where value `{raw_value}` contains whitespace")
+            raw_value
+        }
+        &clauses.push(TestWhereClause{field: if field == "dependency" -> "dep" else -> field, value: value})
+    }
+    Ok(^clauses)
+}
+// Rust: Source/CmdCompile.rs:6067
+struct TestTargetFacts { package: String{""}, deps: BTreeSet[String]{BTreeSet.new()}, path: String{""}, tags: BTreeSet[String]{BTreeSet.new()}, status: String?{None} }
+// Rust: Source/CmdCompile.rs:6075
+fn source_hash_tags(source: String) -> BTreeSet[String] {
+    tags := BTreeSet.new()
+    loop line in source.lines() {
+        marker := line.trim_start() // #4303
+        marker :: marker.strip_prefix("#") ?? continue
+        end :: marker.char_indices().find_map(fn(pair) { if !pair.1.is_ascii_alphanumeric() && pair.1 != '_' -> Val(pair.0) else -> None }) ?? marker.len()
+        if end != 0 -> _ :: tags.insert(marker[..end])
+    }
+    ^tags
+}
+// Rust: Source/CmdCompile.rs:6093
+fn test_target_facts(path: OSPath, source: String, opts: &TestRunOpts, package: Bool) -> TestTargetFacts {
+    shown :: path.to_string_lossy()
+    facts := TestTargetFacts{package: path.file_stem().and_then(fn(name) { name.to_str() }) ?? "package", path: shown, tags: source_hash_tags(source)}
+    if Loader.package_facts_for_entry(path) == {
+        .Ok(Val(package_facts)) -> { facts.package = package_facts.name; &facts.deps.extend(package_facts.deps.keys()) }
+        else -> {}
+    }
+    entry :: path.to_string_lossy()
+    (bundle, _) :: Loader.load_entry_with_overlays_and_dependencies(entry, [], false)
+    if bundle == {
+        .Ok(bundle) -> {
+            &facts.deps.extend(bundle.package_guarantees.dependency_names)
+            &facts.deps.extend(bundle.dep_roots.keys())
+            &facts.deps.extend(bundle.dep_roots.values().filter_map(fn(root) { root.file_name().and_then(fn(name) { name.to_str() }) }))
+        }
+        .Err(_) -> {}
+    }
+    if !opts.fresh && env.var_os("JET_RECEIPT_BYPASS").is_none() {
+        if test_result_cache_read(path, opts, package) == { .Val(cached) -> { facts.status = Val(if cached.ok -> "pass" else -> "fail") }, .None -> {} }
+    }
+    ^facts
+}
+// Rust: Source/CmdCompile.rs:6137
+fn test_where_matches(expression: String, facts: &TestTargetFacts) -> Bool {
+    clauses :: parse_test_where(expression) ?? return false
+    clauses.iter().all(fn(clause) {
+        if clause.field == {
+            "package" -> facts.package == clause.value
+            "dep" -> facts.deps.iter().any(fn(dep) { dep == clause.value || dep.strip_prefix(clause.value).is_some_and(fn(tail) { tail.starts_with(".") }) })
+            "path" -> facts.path == clause.value || facts.path.ends_with("/{clause.value}") || facts.path.contains(clause.value)
+            "tag" -> facts.tags.contains(clause.value)
+            "status" -> {
+                lowered :: clause.value.to_ascii_lowercase()
+                wanted :: if lowered == { "passed" | "success" | "ok" -> "pass", "failed" | "failure" | "error" -> "fail", else -> lowered }
+                facts.status == Val(wanted)
+            }
+            else -> false
+        }
+    })
+}
+// Rust: Source/CmdCompile.rs:6169
+struct TestResultCache { ok: Bool, stdout: String, stderr: String }
+// Rust: Source/CmdCompile.rs:6175
+fn append_test_cache_field(bytes: &[U8], value: View[U8]) {
+    &bytes.extend_from_slice((value.len() as U64).to_be_bytes())
+    &bytes.extend_from_slice(value)
+}
+// Rust: Source/CmdCompile.rs:6180
+fn test_result_cache_key(path: OSPath, opts: &TestRunOpts, package: Bool) -> String? {
+    identity := [U8]{}
+    append_test_cache_field(&identity, "jet-test-result-v2".bytes())
+    canonical :: fs.canonicalize(path).unwrap_or_else(fn(_) { path })
+    append_test_cache_field(&identity, canonical.to_string_lossy().bytes())
+    append_test_cache_field(&identity, (if package -> "package" else -> "file").bytes())
+    entry :: path.to_string_lossy()
+    (bundle, dependencies) :: Loader.load_entry_with_overlays_and_dependencies(entry, [], false)
+    inputs := BTreeSet.new()
+    if path.parent().and_then(Loader.find_manifest_root) == { .Val(root) -> _ :: inputs.insert(root.join(Syntax.PACKAGE_FILE)), .None -> {} }
+    _ :: inputs.insert(path)
+    &inputs.extend(dependencies)
+    if bundle == {
+        .Ok(bundle) -> {
+            loop input in bundle.comptime_inputs {
+                append_test_cache_field(&identity, "comptime-input".bytes())
+                append_test_cache_field(&identity, input.path.bytes())
+                append_test_cache_field(&identity, input.hash.bytes())
+            }
+            &inputs.extend(bundle.modules.iter().map(fn(module) { module.path }))
+        }
+        .Err(_) -> {}
+    }
+    loop input in inputs {
+        append_test_cache_field(&identity, input.to_string_lossy().bytes())
+        if fs.read(input) == { .Ok(contents) -> append_test_cache_field(&identity, contents), .Err(_) -> append_test_cache_field(&identity, "<missing>".bytes()) }
+    }
+    profile :: opts.profile ?? (if opts.release || opts.measure -> Syntax.BUILD_PROFILE_RELEASE else -> "dev")
+    profile_tag :: "{profile};{setting_overrides_tag(opts.setting_overrides)};aot-target=native"
+    mode_tag :: if opts.coverage -> "testcov" else -> "test"
+    native_identity :: native_cache_key(entry, profile, profile_tag, mode_tag, None) ?? return None
+    append_test_cache_field(&identity, "native-identity".bytes())
+    append_test_cache_field(&identity, native_identity.bytes())
+    options :: "show_default={opts.show_default};coverage={opts.coverage};release={opts.release};profile={opts.profile:?};trace_tiers={opts.trace_tiers};filter={opts.filter:?};shuffle={opts.shuffle_seed:?};serial={opts.serial};measure={opts.measure};docs={opts.docs};browser={opts.browser_engines:?};browser_retries={opts.browser_retries:?};browser_reporter={opts.browser_reporter:?};browser_ui={opts.browser_ui};browser_visual={opts.browser_visual};browser_trace={opts.browser_trace};"
+    append_test_cache_field(&identity, options.bytes())
+    Val(SHA256.sha256_hex(identity))
+}
+// Rust: Source/CmdCompile.rs:6260
+fn test_result_cache_path(path: OSPath, opts: &TestRunOpts, package: Bool) -> OSPath? {
+    root :: jet.build_project_root(path.to_string_lossy()).unwrap_or_else(fn(_) { path.parent() ?? OSPath.from_text(".") })
+    key :: test_result_cache_key(path, opts, package) ?? return None
+    Val(root.join(".jet").join("test-results").join("{key}.cache"))
+}
+// Rust: Source/CmdCompile.rs:6273
+fn read_test_cache_line(bytes: View[U8], cursor: &Int) -> View[U8]? {
+    start :: cursor
+    rest :: bytes.get(start..) ?? return None
+    end :: (rest.iter().position(fn(byte) { byte == 10 }) ?? return None) + start
+    cursor = end + 1
+    Val(bytes[start..end])
+}
+// Rust: Source/CmdCompile.rs:6280
+fn test_result_cache_read(path: OSPath, opts: &TestRunOpts, package: Bool) -> TestResultCache? {
+    destination :: test_result_cache_path(path, opts, package) ?? return None
+    bytes :: fs.read(destination).ok() ?? return None
+    cursor := 0
+    if (read_test_cache_line(bytes, &cursor) ?? return None) != "JET_TEST_RESULT_V2".bytes() -> return None
+    ok :: (read_test_cache_line(bytes, &cursor) ?? return None) == "1".bytes()
+    stdout_len :: String.from_utf8(read_test_cache_line(bytes, &cursor) ?? return None).ok().and_then(fn(text) { text.parse[Int]().ok() }) ?? return None
+    stderr_len :: String.from_utf8(read_test_cache_line(bytes, &cursor) ?? return None).ok().and_then(fn(text) { text.parse[Int]().ok() }) ?? return None
+    stdout_end :: cursor.checked_add(stdout_len) ?? return None
+    stderr_end :: stdout_end.checked_add(stderr_len) ?? return None
+    stdout :: String.from_utf8((bytes.get(cursor..stdout_end) ?? return None).to_list()).ok() ?? return None
+    stderr :: String.from_utf8((bytes.get(stdout_end..stderr_end) ?? return None).to_list()).ok() ?? return None
+    Val(TestResultCache{ok: ok, stdout: stdout, stderr: stderr})
+}
+// Rust: Source/CmdCompile.rs:6306
+fn test_result_cache_write(path: OSPath, opts: &TestRunOpts, package: Bool, result: &TestResultCache) {
+    destination :: test_result_cache_path(path, opts, package) ?? return
+    if destination.parent() == { .Val(parent) -> _ :: fs.create_dir_all(parent), .None -> {} }
+    bytes := "JET_TEST_RESULT_V2\n".bytes().to_list()
+    &bytes.extend_from_slice((if result.ok -> "1\n" else -> "0\n").bytes())
+    &bytes.extend_from_slice(result.stdout.len().to_string().bytes())
+    &bytes.extend_from_slice(result.stderr.len().to_string().bytes())
+    &bytes.push(10)
+    &bytes.extend_from_slice(result.stdout.bytes())
+    &bytes.extend_from_slice(result.stderr.bytes())
+    _ :: fs.write(destination, bytes)
+}
+// Rust: Source/CmdCompile.rs:6328
+fn test_result_cache_write_allowed(opts: &TestRunOpts) -> Bool {
+    !opts.docs && !opts.coverage && !opts.measure && !opts.update_snapshots && opts.record.is_none() && env.var_os("JET_RECEIPT_BYPASS").is_none()
+}
+// Rust: Source/CmdCompile.rs:6338
+fn emit_test_capture(result: &TestResultCache, policy: TestCapturePolicy, mode: OutputMode) {
+    if mode.json {
+        document :: canonical_test_json(result.stdout).or_else(fn() { canonical_status_json(result.stdout) })
+        if document == {
+            .Val(document) -> write_mode_machine(mode, "{document}\n")
+            .None -> { if !result.stdout.is_empty() -> eprint(result.stdout); if !result.stderr.is_empty() -> eprint(result.stderr) }
+        }
+        return
+    }
+    show :: policy == TestCapturePolicy.All || (!result.ok && policy == TestCapturePolicy.Failed)
+    if !show -> return
+    if !result.stdout.is_empty() -> print(result.stdout)
+    if !result.stderr.is_empty() -> eprint(result.stderr)
+}
+// Rust: Source/CmdCompile.rs:6370
+struct HarnessTestCase { name: String, ok: Bool, expected_failure: Bool, skipped: Bool, message: String }
+// Rust: Source/CmdCompile.rs:6383
+fn harness_test_state(case: &HarnessTestCase) -> U8 {
+    if case.skipped -> 2 else if case.ok == case.expected_failure -> 1 else -> 0
+}
+// Rust: Source/CmdCompile.rs:6393
+fn host_target_triple() -> String { "{core.sys.target.selected_arch()}-{core.sys.target.selected_os()}" }
+// Rust: Source/CmdCompile.rs:6397
+fn with_test_evidence_environment[R](report_path: OSPath, report_id: String, toolchain: String, target: String, profile: String, source_revision: String, build_revision: String, revision: String, operation: fn() -> R) -> R {
+    values :: [(EVIDENCE_REPORT_ENV, report_path.to_string_lossy()), (EVIDENCE_REPORT_ID_ENV, report_id), (EVIDENCE_TOOLCHAIN_ENV, toolchain), (EVIDENCE_TARGET_ENV, target), (EVIDENCE_PROFILE_ENV, profile), (EVIDENCE_SOURCE_REVISION_ENV, source_revision), (EVIDENCE_BUILD_REVISION_ENV, build_revision), (EVIDENCE_REVISION_ENV, revision)]
+    previous :: values.iter().map(fn(pair) { (pair.0, env.var_os(pair.0)) }).to_list()
+    loop (name, value) in values -> env.set_var(name, value)
+    result :: operation()
+    loop (name, value) in previous {
+        if value == { .Val(value) -> env.set_var(name, value), .None -> env.remove_var(name) }
+    }
+    result
+}
+// Rust: Source/CmdCompile.rs:6460
+fn harness_test_cases(stdout: String) -> [HarnessTestCase]? Err! {
+    if canonical_test_json(stdout) == {
+        .Val(document) -> {
+            value :: parse_json(document) ?? return Err("the test harness emitted an invalid canonical JSON report")
+            tests_value :: value.get("tests") ?? return Err("the test harness report is missing `tests`: {err}")
+            tests :: tests_value.as_array() ?? return Err("the test harness report has invalid `tests`: {err}")
+            cases := [HarnessTestCase]{}
+            loop test in tests {
+                name_value :: test.get("name") ?? return Err("the test harness report has an invalid name: {err}")
+                name :: name_value.as_str() ?? return Err("the test harness report has an invalid name: {err}")
+                ok_value :: test.get("ok") ?? return Err("test `{name}` has no result: {err}")
+                ok :: if ok_value == { .Bool(ok) -> ok, else -> return Err("test `{name}` has a non-boolean result") }
+                expected_failure :: if test.get_opt("expectedFailure") == { .Val(.Bool(value)) -> value, .None -> false, else -> return Err("test `{name}` has a non-boolean expectation") }
+                skipped :: if test.get_opt("skipped") == { .Val(.Bool(value)) -> value, .None -> false, else -> return Err("test `{name}` has a non-boolean skip flag") }
+                stderr :: test.get_opt("stderr").and_then(fn(value) { value.as_str().ok() }) ?? ""
+                message :: if stderr.is_empty() && !ok -> "test failed" else -> stderr
+                &cases.push(HarnessTestCase{name: name, ok: ok, expected_failure: expected_failure, skipped: skipped, message: message})
+            }
+            return Ok(Val(^cases))
+        }
+        .None -> {}
+    }
+    cases := [HarnessTestCase]{}
+    loop line in stdout.lines() {
+        (name, status) :: line.rsplit_once(": ") ?? continue
+        (ok, expected_failure, skipped) :: if status == {
+            "pass" -> (true, false, false)
+            "expected-fail" -> (true, true, false)
+            "skip" -> (true, false, true)
+            "FAIL" -> (false, false, false)
+            "UNEXPECTED-PASS (remove expected_fail: true)" -> (false, true, false)
+            else -> continue
+        }
+        name := name.trim() // #4303
+        if name.is_empty() -> continue
+        &cases.push(HarnessTestCase{name: name, ok: ok, expected_failure: expected_failure, skipped: skipped, message: if ok -> "" else -> status})
+    }
+    Ok(if cases.is_empty() -> None else -> Val(^cases))
+}
+// Rust: Source/CmdCompile.rs:6541
+fn append_harness_test_evidence(report: &EvidenceReport, stdout: String, file: String, report_id: String, build: &EvidenceBuild, revision: &EvidenceRevision, child_ok: Bool) Err! {
+    canonicalize_test_report_identity(&report, report_id)
+    cases :: harness_test_cases(stdout)
+    if cases == {
+        .None -> {
+            if child_ok -> return Ok(())
+            name :: "{file}:harness"
+            record := EvidenceRecord.from_test_codes(0, 3, name, "producer unavailable", file, 0).with_report_id(report_id)
+            record.build = build
+            record.revision = revision
+            derivation :: record.checked_derivation()
+            report.add_record_with_derivation(^record, derivation) ?? return Err(err.to_string())
+            return Ok(())
+        }
+        .Val(cases) -> {
+            terminal_claims := BTreeSet.new()
+            loop record in report.records {
+                if record.kind == EvidenceKind.Unit || record.kind == EvidenceKind.Property || record.kind == EvidenceKind.Doctest -> _ :: terminal_claims.insert(record.identity.claim_id)
+            }
+            loop case in cases {
+                if terminal_claims.contains(case.name) -> continue
+                record := EvidenceRecord.from_test_codes(0, harness_test_state(case), case.name, case.message, file, 0).with_report_id(report_id)
+                if case.expected_failure && !case.skipped -> record.set_expectation(EvidenceExpectation.ExpectedFailure) ?? return Err(err.to_string())
+                record.build = build
+                record.revision = revision
+                derivation :: record.checked_derivation()
+                report.add_record_with_derivation(^record, derivation) ?? return Err(err.to_string())
+                _ :: terminal_claims.insert(case.name)
+            }
+        }
+    }
+    Ok(())
+}
+// Rust: Source/CmdCompile.rs:6616
+fn canonicalize_test_report_identity(report: &EvidenceReport, report_id: String) {
+    report.identity.report_id = report_id
+    &report.identity.claim_id.clear()
+    &report.identity.evidence_id.clear()
+}
+// Rust: Source/CmdCompile.rs:6631
+fn read_or_create_test_evidence_report(path: OSPath, report_id: String, file: String, toolchain: String, target: String, profile: String, source_revision: String, build_revision: String, revision: String) -> EvidenceReport Err! {
+    report := if EvidenceReport.read(path) == {
+        .Ok(report) -> report
+        .Err(error) -> {
+            if !path.exists() -> fresh_test_evidence_report(report_id, file, toolchain, target, profile, source_revision, build_revision, revision)
+            else -> return Err("could not read test evidence report `{path.display()}`: {error}")
+        }
+    }
+    canonicalize_test_report_identity(&report, report_id)
+    Ok(^report)
+}
+// Rust: Source/CmdCompile.rs:6665
+fn fresh_test_evidence_report(report_id: String, file: String, toolchain: String, target: String, profile: String, source_revision: String, build_revision: String, revision: String) -> EvidenceReport {
+    report := EvidenceReport.new(report_id, EvidenceProducerKind.Test, EvidenceSource.new(file, 0, 1), EvidenceBuild.new(toolchain, target, profile), EvidenceRevision.new(source_revision, build_revision, revision))
+    canonicalize_test_report_identity(&report, report_id)
+    ^report
+}
+// Rust: Source/CmdCompile.rs:6686
+fn write_test_evidence_bytes(path: OSPath, bytes: View[U8]) -> U64 Err! {
+    parent :: path.parent() ?? return Err("test evidence report has no parent directory")
+    current := if parent.is_absolute() -> OSPath.from_text(std.path.MAIN_SEPARATOR.to_string()) else -> OSPath.from_text(".")
+    loop component in parent.components() {
+        name :: if component == { .Normal(name) -> name, else -> continue }
+        &current.push(name)
+        if fs.symlink_metadata(current) == {
+            .Ok(metadata) -> {
+                if metadata.file_type().is_symlink() -> return Err("test evidence parent is a symlink: {current.display()}")
+                if !metadata.is_dir() -> return Err("test evidence parent is not a directory: {current.display()}")
+            }
+            .Err(error) -> {
+                if error.kind() != io.ErrorKind.NotFound -> return Err(error.to_string())
+                fs.create_dir(current) ?? return Err(err.to_string())
+                if core.sys.target.selected_family() == "unix" -> fs.set_permissions(current, fs.Permissions.from_mode(0o700)) ?? return Err(err.to_string())
+            }
+        }
+    }
+    if fs.symlink_metadata(path) == {
+        .Ok(metadata) -> {
+            if metadata.file_type().is_symlink() || !metadata.is_file() -> return Err("final test evidence path is not a regular file: {path.display()}")
+            existing :: fs.read(path) ?? return Err(err.to_string())
+            if existing == bytes -> return Ok(U64.try_from(existing.len()) ?? return Err("test evidence report is too large"))
+            return Err("refusing to overwrite differing test evidence report at {path.display()}")
+        }
+        .Err(_) -> {}
+    }
+    short_hash :: SHA256.sha256_hex(bytes).get(..8) ?? "00000000"
+    temporary :: path.with_extension("json.tmp.{std.process.id()}.{short_hash}")
+    write_result :: (fn() Err! {
+        file := fs.OpenOptions.new().write(true).create_new(true).open(temporary) ?? return Err(err.to_string())
+        if core.sys.target.selected_family() == "unix" -> file.set_permissions(fs.Permissions.from_mode(0o600)) ?? return Err(err.to_string())
+        file.write_all(bytes) ?? return Err(err.to_string())
+        file.sync_all() ?? return Err(err.to_string())
+        fs.hard_link(temporary, path) ?? return Err(err.to_string())
+        fs.remove_file(temporary) ?? return Err(err.to_string())
+        if core.sys.target.selected_family() == "unix" {
+            directory :: fs.File.open(parent) ?? return Err(err.to_string())
+            directory.sync_all() ?? return Err(err.to_string())
+        }
+        Ok(())
+    })()
+    if write_result == { .Err(error) -> { _ :: fs.remove_file(temporary); return Err(error) }, .Ok(_) -> {} }
+    Ok(U64.try_from(bytes.len()) ?? return Err("test evidence report is too large"))
+}
+// Rust: Source/CmdCompile.rs:6780
+pub fn persist_evidence_report(report: &EvidenceReport) Err! { persist_evidence_report_for_inputs(report, report.revision.source) }
+// Rust: Source/CmdCompile.rs:6786
+pub fn persist_evidence_report_for_inputs(report: &EvidenceReport, target_inputs_sha256: String) Err! { persist_evidence_report_for_inputs_with_retention(report, target_inputs_sha256, true) }
+// Rust: Source/CmdCompile.rs:6793
+fn persist_optional_evidence_report_for_inputs(report: &EvidenceReport, target_inputs_sha256: String) Err! { persist_evidence_report_for_inputs_with_retention(report, target_inputs_sha256, false) }
+// Rust: Source/CmdCompile.rs:6800
+fn persist_evidence_report_for_inputs_with_retention(report: &EvidenceReport, target_inputs_sha256: String, protected: Bool) Err! {
+    report_id :: report.identity.report_id
+    if report_id.is_empty() || report_id.contains("/") || report_id.contains("\\") || report_id == "." || report_id == ".." -> return Err("evidence report has an unsafe id `{report_id}`")
+    cwd :: env.current_dir() ?? return Err("could not read the current directory: {err}")
+    project_root :: Loader.selected_project_root(cwd) ?? return Err("could not resolve evidence project root: {err:?}")
+    path :: project_root.join(".jet/evidence").join("{report_id}.json")
+    bytes :: report.encode()
+    size :: write_test_evidence_bytes(path, bytes)
+    identity :: RecordIdentity.new(target_inputs_sha256, report.build.toolchain, report.producer.as_str())
+    index_compile_artifact_at(project_root, identity, RecordKind.Evidence, report_id, path, size, RecordCapture.Safe, [], [], protected)
+    Ok(())
+}

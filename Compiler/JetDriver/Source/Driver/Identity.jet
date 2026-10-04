@@ -1,6 +1,7 @@
 // Source, module, and package identities remain separate at the driver boundary.
 use jet_foundation.[
     Diagnostic,
+    FoundationEmbeddedCore,
     JetReleaseDevtoolsPolicy,
     MIRAllocatorPolicy,
     MIRArtifactBuildMode,
@@ -89,6 +90,19 @@ pub struct JetDriverCoreSource {
     pub owner: String
     pub owned_members: [String]
     pub source: String
+}
+
+// Convert Foundation's canonical payload to the existing native request ABI.
+// No host reads, empty rows or second metadata/source table.
+pub fn jet_driver_embedded_core_sources(core: FoundationEmbeddedCore) -> [JetDriverCoreSource] Never! {
+    sources := [JetDriverCoreSource]{}
+    loop row in core.public_sources() {
+        &sources.push(JetDriverCoreSource{module_name: ^row.module_name, alias: ^row.alias, path: ^row.path, owner: ^row.owner, owned_members: ^row.owned_members, source: ^row.source})
+    }
+    loop row in core.private_sources() {
+        &sources.push(JetDriverCoreSource{module_name: ^row.module_name, alias: ^row.alias, path: ^row.path, owner: ^row.owner, owned_members: ^row.owned_members, source: ^row.source})
+    }
+    sources
 }
 
 pub struct JetDriverCompileRequest {

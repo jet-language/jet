@@ -1,0 +1,19 @@
+// Shared binder identifier tests, used by COM provenance and foreign binders.
+pub fn pkg_binder_is_ident(value: String) -> Bool Never! {
+    raw :: value.bytes()
+    if raw.len() == 0 -> return false
+    first :: Int.from_u8(raw[0])
+    if !pkg_binder_is_ascii_alpha(first) && first != 95 -> return false
+    loop byte in raw {
+        if !pkg_bytes_is_word(Int.from_u8(byte)) -> return false
+    }
+    true
+}
+
+pub fn pkg_binder_is_ascii_alpha(code: Int) -> Bool Never! {
+    (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+}
+
+pub fn pkg_binder_is_ascii_digit(code: Int) -> Bool Never! {
+    code >= 48 && code <= 57
+}

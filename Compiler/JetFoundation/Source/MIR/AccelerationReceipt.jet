@@ -1,0 +1,224 @@
+// Runtime acceleration decision schema/codec, not the D-ACCEL1 evaluator.
+// Rust MIROptimization/Acceleration.rs:9-21,174-187,238-538.
+pub MIR_ACCELERATION_RECEIPT_TYPE_NAME :: "AccelerationDecision"
+pub MIR_ACCELERATION_RECEIPT_SECTION_PREFIX :: "jet.acceleration."
+pub MIR_ACCELERATION_RECEIPT_SCHEMA :: prep { mir_acceleration_receipt_schema() }
+fn mir_acceleration_receipt_schema() -> String Never! {
+    nul :: String.from_bytes([U8]{U8{0}}) ?? panic("NUL is UTF-8")
+    "AccelerationDecision{nul}decision:(measurement: (bandwidth_floor_nanos: Int, floor_nanos: Int, items: Int, projected_serial_nanos: Int?, required_serial_nanos: Int?, sample_items: Int, sample_nanos: Int, spawn_nanos: Int), pin: String?, status: String, transform: String);function:String;loop_header:Int;source:(end: Int, start: Int);"
+}
+pub MIR_ACCELERATION_RECEIPT_SCHEMA_DIGEST :: "20e12f682eae102174b015d816a7170a9c6042b87ec67722cbee3bf3f0eae388"
+pub enum MIRAccelerationPin { Scalar Local }
+pub enum MIRAccelerationGateStatus {
+    BelowStaticFloor
+    Pinned(MIRAccelerationPin)
+    NotReleaseBuild
+    CrossModeParityMissing
+    ColumnCopyNotApplicable
+    ProofIncomplete
+    SampleNotTimed
+    SpawnCostNotMeasured
+    BandwidthFloorNotMeasured
+    InvalidMeasurement
+    ProjectedGainBelowThreshold
+    Selected
+}
+pub struct MIRAccelerationMeasurement {
+    pub items: Int
+    pub sample_items: Int
+    pub sample_nanos: Int
+    pub spawn_nanos: Int
+    pub bandwidth_floor_nanos: Int
+    pub floor_nanos: Int
+    pub projected_serial_nanos: Int?
+    pub required_serial_nanos: Int?
+}
+pub struct MIRAccelerationDecision {
+    pub transform: MIRAccelerationTransform
+    pub status: MIRAccelerationGateStatus
+    pub measurement: MIRAccelerationMeasurement
+}
+#Error
+pub struct MIRAccelerationReceiptError { pub message: String }
+fn mir_acceleration_receipt_error(message: String) -> MIRAccelerationReceiptError Never! { MIRAccelerationReceiptError{message: message} }
+// Rust AccelerationTransform::as_str / AccelerationPin::as_str.
+pub fn mir_acceleration_transform_name(transform: MIRAccelerationTransform) -> String Never! {
+    if transform == {
+        .TransientColumnCopy -> "column-copy"
+        .PooledParallelChunks -> "parallel"
+    }
+}
+pub fn mir_acceleration_pin_name(pin: MIRAccelerationPin) -> String Never! {
+    if pin == {
+        .Scalar -> "#Scalar"
+        .Local -> "#Local"
+    }
+}
+// Rust AccelerationGateStatus::as_str / is_selected; AccelerationDecision::selected.
+pub fn mir_acceleration_status_name(status: MIRAccelerationGateStatus) -> String Never! {
+    if status == {
+        .BelowStaticFloor -> "below-static-floor"
+        .Pinned(_) -> "pinned"
+        .NotReleaseBuild -> "not-release-build"
+        .CrossModeParityMissing -> "cross-mode-parity-missing"
+        .ColumnCopyNotApplicable -> "column-copy-not-applicable"
+        .ProofIncomplete -> "proof-incomplete"
+        .SampleNotTimed -> "sample-not-timed"
+        .SpawnCostNotMeasured -> "spawn-cost-not-measured"
+        .BandwidthFloorNotMeasured -> "bandwidth-floor-not-measured"
+        .InvalidMeasurement -> "invalid-measurement"
+        .ProjectedGainBelowThreshold -> "projected-gain-below-threshold"
+        .Selected -> "selected"
+    }
+}
+pub fn mir_acceleration_decision_selected(decision: MIRAccelerationDecision) -> Bool Never! { decision.status == .Selected }
+// Rust AccelerationDecision::to_canonical_json (Acceleration.rs:308-360).
+pub fn mir_acceleration_decision_to_json(decision: MIRAccelerationDecision) -> CanonicalJSON Never! {
+    m :: decision.measurement
+    measurement :: CanonicalJSON.Object([CanonicalJSONField]{
+        CanonicalJSONField{key: "bandwidth_floor_nanos", value: CanonicalJSON.Integer("{m.bandwidth_floor_nanos}")},
+        CanonicalJSONField{key: "floor_nanos", value: CanonicalJSON.Integer("{m.floor_nanos}")},
+        CanonicalJSONField{key: "items", value: CanonicalJSON.Integer("{m.items}")},
+        CanonicalJSONField{key: "projected_serial_nanos", value: mir_acceleration_optional_integer(m.projected_serial_nanos)},
+        CanonicalJSONField{key: "required_serial_nanos", value: mir_acceleration_optional_integer(m.required_serial_nanos)},
+        CanonicalJSONField{key: "sample_items", value: CanonicalJSON.Integer("{m.sample_items}")},
+        CanonicalJSONField{key: "sample_nanos", value: CanonicalJSON.Integer("{m.sample_nanos}")},
+        CanonicalJSONField{key: "spawn_nanos", value: CanonicalJSON.Integer("{m.spawn_nanos}")},
+    })
+    pin :: if decision.status == {
+        .Pinned(value) -> CanonicalJSON.String(mir_acceleration_pin_name(value))
+        else -> CanonicalJSON.Null
+    }
+    CanonicalJSON.Object([CanonicalJSONField]{
+        CanonicalJSONField{key: "measurement", value: measurement},
+        CanonicalJSONField{key: "pin", value: pin},
+        CanonicalJSONField{key: "status", value: CanonicalJSON.String(mir_acceleration_status_name(decision.status))},
+        CanonicalJSONField{key: "transform", value: CanonicalJSON.String(mir_acceleration_transform_name(decision.transform))},
+    })
+}
+// Rust acceleration_optional_integer.
+fn mir_acceleration_optional_integer(value: Int?) -> CanonicalJSON Never! {
+    if value == {
+        .Val(number) -> CanonicalJSON.Integer("{number}")
+        None -> CanonicalJSON.Null
+    }
+}
+// Rust acceleration_object / acceleration_require_fields. Check in place;
+// field access below borrows the canonical object rather than cloning its tree.
+fn mir_acceleration_require_object(value: CanonicalJSON, label: String, keys: [String]) MIRAccelerationReceiptError! {
+    if value == .Object(fields) {
+        if fields.len() != keys.len() -> return Err(mir_acceleration_receipt_error("{label} has missing or unknown fields"))
+        loop key in keys {
+            found := false
+            loop field in fields { if field.key == key -> found = true }
+            if !found -> return Err(mir_acceleration_receipt_error("{label} has missing or unknown fields"))
+        }
+        return
+    }
+    return Err(mir_acceleration_receipt_error("{label} must be a canonical object"))
+}
+fn mir_acceleration_field_index(fields: [CanonicalJSONField], key: String) -> Int MIRAccelerationReceiptError! {
+    loop (index, field) in fields { if field.key == key -> return Ok(index) }
+    Err(mir_acceleration_receipt_error("acceleration field `{key}` is missing"))
+}
+// Rust acceleration_string.
+fn mir_acceleration_string(value: CanonicalJSON, key: String) -> String MIRAccelerationReceiptError! {
+    if value == .Object(fields) {
+        index :: mir_acceleration_field_index(fields, key)
+        if fields[index].value == .String(text) -> return Ok(~text)
+    }
+    Err(mir_acceleration_receipt_error("acceleration field `{key}` must be a string"))
+}
+// Rust acceleration_u64 / acceleration_usize (64-bit platform).
+fn mir_acceleration_unsigned(text: String, key: String) -> Int MIRAccelerationReceiptError! {
+    // Rust unsigned parse permits '+' but not '-', including '-0'.
+    bytes :: text.bytes()
+    start :: if bytes.len() > 0 && bytes[0] == (U8{43}) -> 1 else -> 0
+    if start == bytes.len() -> return Err(mir_acceleration_receipt_error("acceleration field `{key}` is out of range"))
+    number := 0
+    loop index in start..<bytes.len() {
+        digit :: Int.from_u8(bytes[index]) - 48
+        if digit < 0 || digit > 9 -> return Err(mir_acceleration_receipt_error("acceleration field `{key}` is out of range"))
+        number = number * 10 + digit
+        if number > 18446744073709551615 -> return Err(mir_acceleration_receipt_error("acceleration field `{key}` is out of range"))
+    }
+    Ok(number)
+}
+fn mir_acceleration_u64(value: CanonicalJSON, key: String) -> Int MIRAccelerationReceiptError! {
+    if value == .Object(fields) {
+        index :: mir_acceleration_field_index(fields, key)
+        if fields[index].value == .Integer(text) -> return mir_acceleration_unsigned(text, key)
+    }
+    Err(mir_acceleration_receipt_error("acceleration field `{key}` must be an integer"))
+}
+// Rust acceleration_optional_u64.
+fn mir_acceleration_optional_u64(value: CanonicalJSON, key: String) -> Int? MIRAccelerationReceiptError! {
+    if value == .Object(fields) {
+        index :: mir_acceleration_field_index(fields, key)
+        if fields[index].value == {
+            .Null -> return Ok(None)
+            .Integer(text) -> return Ok(Val(mir_acceleration_unsigned(text, key)))
+            else -> {}
+        }
+    }
+    Err(mir_acceleration_receipt_error("acceleration field `{key}` must be an integer or null"))
+}
+// Rust acceleration_pin.
+fn mir_acceleration_pin(value: CanonicalJSON) -> MIRAccelerationPin MIRAccelerationReceiptError! {
+    if value == {
+        .Null -> Err(mir_acceleration_receipt_error("pinned acceleration decision is missing pin"))
+        .String(text) -> if text == {
+            "#Scalar" -> Ok(.Scalar)
+            "#Local" -> Ok(.Local)
+            else -> Err(mir_acceleration_receipt_error("unknown acceleration pin `{text}`"))
+        }
+        else -> Err(mir_acceleration_receipt_error("acceleration field `pin` must be a string or null"))
+    }
+}
+// Rust AccelerationDecision::from_canonical_json (Acceleration.rs:363-443).
+pub fn mir_acceleration_decision_from_json(value: CanonicalJSON) -> MIRAccelerationDecision MIRAccelerationReceiptError! {
+    mir_acceleration_require_object(value, "acceleration decision", [String]{"measurement", "pin", "status", "transform"})
+    if value == .Object(fields) -> return mir_acceleration_decision_from_fields(value, fields)
+    panic("validated acceleration object")
+}
+fn mir_acceleration_decision_from_fields(value: CanonicalJSON, fields: [CanonicalJSONField]) -> MIRAccelerationDecision MIRAccelerationReceiptError! {
+    transform_name :: mir_acceleration_string(value, "transform")
+    transform :: if transform_name == {
+        "column-copy" -> MIRAccelerationTransform.TransientColumnCopy
+        "parallel" -> MIRAccelerationTransform.PooledParallelChunks
+        else -> { return Err(mir_acceleration_receipt_error("unknown acceleration transform `{transform_name}`")) }
+    }
+    pin_index :: mir_acceleration_field_index(fields, "pin")
+    raw_pin :: fields[pin_index].value
+    pin :: if raw_pin == .Null -> None else -> Val(mir_acceleration_pin(raw_pin))
+    status_name :: mir_acceleration_string(value, "status")
+    status :: if status_name == {
+        "below-static-floor" -> MIRAccelerationGateStatus.BelowStaticFloor
+        "pinned" -> MIRAccelerationGateStatus.Pinned(pin ?? return Err(mir_acceleration_receipt_error("pinned acceleration decision is missing pin")))
+        "not-release-build" -> MIRAccelerationGateStatus.NotReleaseBuild
+        "cross-mode-parity-missing" -> MIRAccelerationGateStatus.CrossModeParityMissing
+        "column-copy-not-applicable" -> MIRAccelerationGateStatus.ColumnCopyNotApplicable
+        "proof-incomplete" -> MIRAccelerationGateStatus.ProofIncomplete
+        "sample-not-timed" -> MIRAccelerationGateStatus.SampleNotTimed
+        "spawn-cost-not-measured" -> MIRAccelerationGateStatus.SpawnCostNotMeasured
+        "bandwidth-floor-not-measured" -> MIRAccelerationGateStatus.BandwidthFloorNotMeasured
+        "invalid-measurement" -> MIRAccelerationGateStatus.InvalidMeasurement
+        "projected-gain-below-threshold" -> MIRAccelerationGateStatus.ProjectedGainBelowThreshold
+        "selected" -> MIRAccelerationGateStatus.Selected
+        else -> { return Err(mir_acceleration_receipt_error("unknown acceleration gate status `{status_name}`")) }
+    }
+    if pin != None && status_name != "pinned" -> return Err(mir_acceleration_receipt_error("un-pinned acceleration decision carries a pin"))
+    measurement_index :: mir_acceleration_field_index(fields, "measurement")
+    measurement :: fields[measurement_index].value
+    mir_acceleration_require_object(measurement, "acceleration measurement", [String]{"bandwidth_floor_nanos", "floor_nanos", "items", "projected_serial_nanos", "required_serial_nanos", "sample_items", "sample_nanos", "spawn_nanos"})
+    // Keep Rust's field evaluation / first-error order.
+    bandwidth :: mir_acceleration_u64(measurement, "bandwidth_floor_nanos")
+    floor :: mir_acceleration_u64(measurement, "floor_nanos")
+    items :: mir_acceleration_u64(measurement, "items")
+    projected :: mir_acceleration_optional_u64(measurement, "projected_serial_nanos")
+    required :: mir_acceleration_optional_u64(measurement, "required_serial_nanos")
+    sample_items :: mir_acceleration_u64(measurement, "sample_items")
+    sample :: mir_acceleration_u64(measurement, "sample_nanos")
+    spawn :: mir_acceleration_u64(measurement, "spawn_nanos")
+    Ok(MIRAccelerationDecision{transform: transform, status: status, measurement: MIRAccelerationMeasurement{items: items, sample_items: sample_items, sample_nanos: sample, spawn_nanos: spawn, bandwidth_floor_nanos: bandwidth, floor_nanos: floor, projected_serial_nanos: projected, required_serial_nanos: required}})
+}

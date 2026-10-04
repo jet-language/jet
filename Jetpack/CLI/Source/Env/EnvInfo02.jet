@@ -1,0 +1,1848 @@
+// PORT-PENDING 0851 crates-jetpack-src-cli-run-enter-dev-slice-1775: crates/jetpack/src/CLI/run_enter_dev.rs:1775-3618
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
+//RS     // D-ENVHOOK1=A: `jet env hook <shell>` / `jet env export <shell>` route
+//RS     // through `jetpack env` (D-JPK-DISPATCH1) as reserved first-positional
+//RS     // subverbs of `jet env`. The bare `jet env` shell-entry (no positional, or
+//RS     // a `-p`/`--flake`/`-- cmd` form) is untouched.
+//RS     match parsed.positional.first().map(String::as_str) {
+//RS         Some(v) if v == Syntax::ENV_HOOK_VERB => return cmd_env_hook(theme, parsed),
+//RS         Some(v) if v == Syntax::ENV_EXPORT_VERB => return cmd_env_export(theme, parsed),
+//RS         Some(v) if v == Syntax::ENV_TEST_VERB => return cmd_env_test(theme, parsed),
+//RS         Some(v) if v == Syntax::ENV_SYNC_VERB => return cmd_env_sync(theme, parsed),
+//RS         Some(v) if v == Syntax::ENV_INFO_VERB => return cmd_env_info(theme, parsed),
+//RS         _ => {}
+//RS     }
+//RS 
+//RS     let ready_started = Instant::now();
+//RS     let cwd = std::env::current_dir().unwrap_or_default();
+//RS     let project_dir = project_env_root(&cwd);
+//RS 
+//RS     // U16: a project's own `env.*` always wins; the foreign-flake fallback
+//RS     // only kicks in when it declares none, or when `--flake` forces it. An
+//RS     // explicit `-p` request is an active signal of intent and must never be
+//RS     // silently discarded by the passive auto-detect fallback — only
+//RS     // `--flake` (an equally explicit signal) can still force the foreign
+//RS     // shell over ad-hoc packages.
+//RS     let foreign = foreign_flake_path(&project_dir);
+//RS     let auto_detect_wants_foreign = foreign.is_some()
+//RS         && !project_declares_env(&project_dir)
+//RS         && parsed.flags.packages.is_empty();
+//RS     if parsed.flags.flake || auto_detect_wants_foreign {
+//RS         let Some(flake_path) = foreign else {
+//RS             theme.error(
+//RS                 "no foreign flake here",
+//RS                 &format!(
+//RS                     "`--flake` was passed but no {}/{} was found in this directory.",
+//RS                     Syntax::FOREIGN_FLAKE_FILE,
+//RS                     Syntax::FOREIGN_DEVENV_FILE
+//RS                 ),
+//RS                 "remove --flake to use the project's own env.*, or add a flake.nix.",
+//RS             );
+//RS             return 2;
+//RS         };
+//RS         return enter_foreign_flake(theme, &project_dir, &flake_path, parsed);
+//RS     }
+//RS 
+//RS     let roots = Store::resolve();
+//RS     if roots.dev_mode {
+//RS         theme.detail(&theme.gray(&format!(
+//RS             "user-owned hangar: using {}",
+//RS             roots.root.display()
+//RS         )));
+//RS     }
+//RS     // JETPACK_TIMING=1 prints one line per entry phase. Warm entry must be
+//RS     // dominated by nothing: a 100 percent cache hit has no work to do beyond
+//RS     // reading the stamp and projecting the closure.
+//RS     let timing = std::env::var_os("JETPACK_TIMING").is_some();
+//RS     let mark = |label: &str| {
+//RS         if timing {
+//RS             eprintln!("TIMING {label}: {:?}", ready_started.elapsed());
+//RS         }
+//RS     };
+//RS     mark("roots");
+//RS 
+//RS     let mut flags = parsed.flags.clone();
+//RS 
+//RS     // U16: `-p` needs no manifest at all — a project with no `env.jet` and at
+//RS     // least one ad-hoc package still gets a (package-only) shell instead of
+//RS     // the usual "nothing to do" refusal, which only applies when neither is
+//RS     // present.
+//RS     let has_env_file = EnvFile::path_in(&project_dir).is_file();
+//RS     let mut plan = if has_env_file || parsed.flags.packages.is_empty() {
+//RS         match load_project_plan_with_selections(
+//RS             theme,
+//RS             parsed.flags.preset.as_deref(),
+//RS             parsed.flags.environment.as_deref(),
+//RS         ) {
+//RS             Ok(plan) => plan,
+//RS             Err(code) => return code,
+//RS         }
+//RS     } else {
+//RS         RunPlan {
+//RS             project_root: project_dir.clone(),
+//RS             refs: Vec::new(),
+//RS             adapters: Vec::new(),
+//RS             table: builtin_table(),
+//RS             label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
+//RS             prompt_path: ModuleEval::PromptPathMode::default(),
+//RS             prompt_strip: ModuleEval::PromptStripMode::default(),
+//RS             dev_services: Vec::new(),
+//RS             secrets: Vec::new(),
+//RS             environment: ModuleEval::EnvironmentFacts::default(),
+//RS         }
+//RS     };
+//RS     mark("plan-loaded");
+//RS 
+//RS     // U16: ad-hoc `-p` packages become ordinary Jetpack `RefSpec`s, folded
+//RS     // into the same plan as any manifest-declared package — same realize
+//RS     // path, same trust gate, no separate machinery.
+//RS     for name in &parsed.flags.packages {
+//RS         plan.refs.push(RefSpec::RefSpec {
+//RS             source: RefSpec::Source::Jetpack,
+//RS             package: name.clone(),
+//RS             raw: format!(
+//RS                 "{}{}{}",
+//RS                 name,
+//RS                 Syntax::REF_PROVIDER_AT,
+//RS                 Syntax::REF_SOURCE_JETPACK
+//RS             ),
+//RS         });
+//RS     }
+//RS     if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table, &flags) {
+//RS         return code;
+//RS     }
+//RS 
+//RS     // U19: `jet env` never runs a project function (the invariant this card
+//RS     // confirms), but it DOES realize the project's own declared packages —
+//RS     // first entry to a repo whose env is trust-sensitive gates on it.
+//RS     if let Err(code) = Trust::gate_with_environment(
+//RS         theme,
+//RS         &Trust::store_path(),
+//RS         &project_dir,
+//RS         &plan.refs,
+//RS         &plan.table,
+//RS         &plan.secrets,
+//RS         &plan.environment,
+//RS         flags.trust,
+//RS     ) {
+//RS         return code;
+//RS     }
+//RS     mark("trust-gate");
+//RS 
+//RS     let previous_receipt = read_env_entry_receipt(&project_dir);
+//RS     let secret_identity = Secrets::validation_identity(
+//RS         &project_dir,
+//RS         &plan.secrets,
+//RS         plan.environment.active_environment.as_deref(),
+//RS     )
+//RS     .ok()
+//RS     .flatten();
+//RS     let reuse_verified_store = previous_receipt.as_ref().is_some_and(|receipt| {
+//RS         secret_identity.as_deref().is_some_and(|identity| {
+//RS             !receipt.secret_identity.is_empty() && receipt.secret_identity == identity
+//RS         })
+//RS     });
+//RS     if let Err(code) = validate_declared_secrets_with_reuse(
+//RS         theme,
+//RS         &project_dir,
+//RS         &plan.secrets,
+//RS         plan.environment.active_environment.as_deref(),
+//RS         reuse_verified_store,
+//RS     ) {
+//RS         return code;
+//RS     }
+//RS     mark("secrets-validated");
+//RS     let (definition_fingerprint, hook_fingerprint) = environment_entry_definition_fingerprint(
+//RS         &project_dir,
+//RS         parsed.flags.preset.as_deref(),
+//RS         parsed.flags.environment.as_deref(),
+//RS         &plan,
+//RS         secret_identity.as_deref(),
+//RS     );
+//RS     let inherited_loader_path = std::env::var("LD_LIBRARY_PATH").ok();
+//RS     let receipt_matches_plan = previous_receipt
+//RS         .as_ref()
+//RS         .is_some_and(|receipt| env_entry_matches_plan(receipt, &plan));
+//RS     let mut warm = if flags.prep {
+//RS         None
+//RS     } else {
+//RS         previous_receipt.as_ref().and_then(|receipt| {
+//RS             if !receipt_matches_plan {
+//RS                 return None;
+//RS             }
+//RS             Store::reuse_verified_environment(
+//RS                 &roots,
+//RS                 &receipt.stamp,
+//RS                 &project_dir,
+//RS                 &definition_fingerprint,
+//RS                 inherited_loader_path.as_deref(),
+//RS                 &receipt.packages,
+//RS                 flags.local_nix_catalog.is_some(),
+//RS             )
+//RS             .ok()
+//RS             .flatten()
+//RS         })
+//RS     };
+//RS     if warm.is_none() && !flags.prep && receipt_matches_plan {
+//RS         if let Some(receipt) = previous_receipt.as_ref() {
+//RS             let expectations =
+//RS                 environment_member_expectations(&roots, &project_dir, &flags, &plan);
+//RS             warm = Store::reuse_verified_environment_members(
+//RS                 &roots,
+//RS                 &receipt.packages,
+//RS                 &expectations,
+//RS                 flags.local_nix_catalog.is_some(),
+//RS             )
+//RS             .ok()
+//RS             .flatten();
+//RS         }
+//RS     }
+//RS     let warm_complete = warm_realizations_complete(&plan, &warm);
+//RS     let warm_reused = warm_complete;
+//RS     // An exact environment receipt can reuse its checked leases directly.
+//RS     // Otherwise use the same authenticated Store boundary as every package
+//RS     // consumer, and forward its leases into composition without re-verification.
+//RS     let locked_nix_replayed = if warm_reused {
+//RS         false
+//RS     } else {
+//RS         match replay_locked_nix(
+//RS             &theme,
+//RS             &roots,
+//RS             &project_dir,
+//RS             &plan.refs,
+//RS             &plan.table,
+//RS             flags.offline,
+//RS             flags.local_nix_catalog.is_some(),
+//RS             &mut warm,
+//RS         ) {
+//RS             Ok(replayed) => replayed,
+//RS             Err(error) => {
+//RS                 theme.error_coded(
+//RS                     "E1350",
+//RS                     "locked Nix closure could not be replayed",
+//RS                     &error,
+//RS                     "restore the lock and matching verified Hangar admission; portable bytes cannot establish signed index authority",
+//RS                 );
+//RS                 return 1;
+//RS             }
+//RS         }
+//RS     };
+//RS     // A verified warm receipt already binds the package selections, store
+//RS     // journal, sealed manifests, and environment definition. Package catalog
+//RS     // policy is needed only to realize a miss; consulting it before this point
+//RS     // made a cache hit depend on an unrelated catalog and cost the full cold
+//RS     // setup path.
+//RS     if !warm_reused && !locked_nix_replayed {
+//RS         if let Err(code) = configure_project_catalog(theme, &roots, &project_dir, &plan, &mut flags)
+//RS         {
+//RS             return code;
+//RS         }
+//RS     }
+//RS     mark("catalog-configured");
+//RS 
+//RS     let (mut env, ready_stats) = match compose_env_scoped_with_warm(
+//RS         theme,
+//RS         &roots,
+//RS         &flags,
+//RS         &plan,
+//RS         RealizeScope::Project,
+//RS         true,
+//RS         warm,
+//RS         !warm_reused,
+//RS     ) {
+//RS         Ok(result) => result,
+//RS         Err(code) => return code,
+//RS     };
+//RS     if let Some(hash) = hook_fingerprint {
+//RS         env.vars
+//RS             .insert(Syntax::ENV_HOOK_ACTIVE_HASH_VAR.to_string(), hash);
+//RS     }
+//RS 
+//RS     mark("env-composed");
+//RS     if flags.prep {
+//RS         auto_clean_after_success(theme, &roots);
+//RS         if let Err(error) = record_env_entry_receipt(
+//RS             theme,
+//RS             &project_dir,
+//RS             &roots,
+//RS             &definition_fingerprint,
+//RS             inherited_loader_path.as_deref(),
+//RS             secret_identity.as_deref().unwrap_or_default(),
+//RS             &ready_stats,
+//RS         ) {
+//RS             theme.detail(&format!("couldn't record env entry: {error}"));
+//RS         }
+//RS         return 0;
+//RS     }
+//RS     let entry = find_project_entry(&project_dir);
+//RS     if let Err(code) = run_lifecycle_hooks(
+//RS         theme,
+//RS         parsed,
+//RS         &roots,
+//RS         &project_dir,
+//RS         &entry,
+//RS         &env,
+//RS         &plan.environment.lifecycle.on_enter,
+//RS         "on_enter",
+//RS     ) {
+//RS         return code;
+//RS     }
+//RS     mark("lifecycle-hooks");
+//RS 
+//RS     if let Err(error) = announce_env_ready(
+//RS         theme,
+//RS         &project_dir,
+//RS         &roots,
+//RS         warm_reused,
+//RS         ready_started.elapsed(),
+//RS         &definition_fingerprint,
+//RS         inherited_loader_path.as_deref(),
+//RS         secret_identity.as_deref().unwrap_or_default(),
+//RS         &ready_stats,
+//RS     ) {
+//RS         theme.detail(&format!("couldn't record env entry: {error}"));
+//RS     }
+//RS     mark("announced");
+//RS 
+//RS     let code = match &parsed.command {
+//RS         Some(cmd) if !cmd.is_empty() && warm_reused => Shell::exec_command(&env, cmd),
+//RS         Some(cmd) if !cmd.is_empty() => Shell::run_command(&env, cmd),
+//RS         _ => Shell::enter(theme, &env, ShellKind::detect()),
+//RS     };
+//RS     if code == 0 {
+//RS         auto_clean_after_success(theme, &roots);
+//RS         if let Err(error) = record_env_entry_receipt(
+//RS             theme,
+//RS             &project_dir,
+//RS             &roots,
+//RS             &definition_fingerprint,
+//RS             inherited_loader_path.as_deref(),
+//RS             secret_identity.as_deref().unwrap_or_default(),
+//RS             &ready_stats,
+//RS         ) {
+//RS             theme.detail(&format!("couldn't refresh env entry: {error}"));
+//RS         }
+//RS     }
+//RS     code
+//RS }
+//RS 
+//RS const ENV_ENTRY_RECEIPT_HEADER: &str = "jetpack-env-entry-v4";
+//RS const ENV_ENTRY_RECEIPT_NAME: &str = "env-entry";
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS struct EnvEntryReceipt {
+//RS     stamp: String,
+//RS     secret_identity: String,
+//RS     packages: Vec<Store::EnvironmentSelection>,
+//RS }
+//RS 
+//RS fn env_entry_receipt_path(project_dir: &Path) -> PathBuf {
+//RS     project_dir
+//RS         .join(".jet")
+//RS         .join("receipts")
+//RS         .join(ENV_ENTRY_RECEIPT_NAME)
+//RS }
+//RS 
+//RS fn canonical_env_entry(
+//RS     packages: &[Store::EnvironmentSelection],
+//RS ) -> Vec<Store::EnvironmentSelection> {
+//RS     let mut packages = packages.to_vec();
+//RS     packages.sort();
+//RS     packages
+//RS }
+//RS 
+//RS fn read_env_entry_receipt(project_dir: &Path) -> Option<EnvEntryReceipt> {
+//RS     let contents = std::fs::read_to_string(env_entry_receipt_path(project_dir)).ok()?;
+//RS     let mut lines = contents.lines();
+//RS     if lines.next() != Some(ENV_ENTRY_RECEIPT_HEADER) {
+//RS         return None;
+//RS     }
+//RS     let (kind, stamp) = lines.next()?.split_once('\t')?;
+//RS     if kind != "stamp" || stamp.is_empty() {
+//RS         return None;
+//RS     }
+//RS     let secret_identity = match lines.clone().next() {
+//RS         Some(line) => {
+//RS             let (kind, identity) = line.split_once('\t')?;
+//RS             if kind != "secrets" {
+//RS                 String::new()
+//RS             } else {
+//RS                 lines.next();
+//RS                 if identity.is_empty() {
+//RS                     return None;
+//RS                 }
+//RS                 identity.to_string()
+//RS             }
+//RS         }
+//RS         None => String::new(),
+//RS     };
+//RS     let mut packages = Vec::new();
+//RS     for line in lines {
+//RS         let mut fields = line.split('\t');
+//RS         let reference = fields.next()?;
+//RS         let name = fields.next()?;
+//RS         let version = fields.next()?;
+//RS         let output = fields.next()?;
+//RS         let metadata = fields.next()?;
+//RS         if fields.next().is_some()
+//RS             || reference.is_empty()
+//RS             || name.is_empty()
+//RS             || output.is_empty()
+//RS             || metadata.is_empty()
+//RS         {
+//RS             return None;
+//RS         }
+//RS         packages.push((
+//RS             reference.to_string(),
+//RS             name.to_string(),
+//RS             version.to_string(),
+//RS             output.to_string(),
+//RS             metadata.to_string(),
+//RS         ));
+//RS     }
+//RS     Some(EnvEntryReceipt {
+//RS         stamp: stamp.to_string(),
+//RS         secret_identity,
+//RS         packages: canonical_env_entry(&packages),
+//RS     })
+//RS }
+//RS 
+//RS fn write_env_entry_receipt(
+//RS     project_dir: &Path,
+//RS     stamp: &str,
+//RS     secret_identity: &str,
+//RS     packages: &[Store::EnvironmentSelection],
+//RS ) -> std::io::Result<()> {
+//RS     if stamp.is_empty()
+//RS         || stamp
+//RS             .chars()
+//RS             .any(|character| matches!(character, '\t' | '\n' | '\r'))
+//RS         || secret_identity.is_empty()
+//RS         || secret_identity
+//RS             .chars()
+//RS             .any(|character| matches!(character, '\t' | '\n' | '\r'))
+//RS     {
+//RS         return Err(std::io::Error::new(
+//RS             std::io::ErrorKind::InvalidInput,
+//RS             "environment entry identity cannot contain line separators",
+//RS         ));
+//RS     }
+//RS     for package in packages {
+//RS         if [
+//RS             package.0.as_str(),
+//RS             package.1.as_str(),
+//RS             package.2.as_str(),
+//RS             package.3.as_str(),
+//RS             package.4.as_str(),
+//RS         ]
+//RS         .iter()
+//RS         .any(|field| {
+//RS             field
+//RS                 .chars()
+//RS                 .any(|character| matches!(character, '\t' | '\n' | '\r'))
+//RS         }) {
+//RS             return Err(std::io::Error::new(
+//RS                 std::io::ErrorKind::InvalidInput,
+//RS                 "environment entry package fields cannot contain line separators",
+//RS             ));
+//RS         }
+//RS     }
+//RS     let path = env_entry_receipt_path(project_dir);
+//RS     let parent = path
+//RS         .parent()
+//RS         .expect("environment entry receipt has a parent");
+//RS     std::fs::create_dir_all(parent)?;
+//RS     let nonce = SystemTime::now()
+//RS         .duration_since(UNIX_EPOCH)
+//RS         .map_or(0, |duration| duration.as_nanos());
+//RS     let temporary = parent.join(format!(
+//RS         ".{ENV_ENTRY_RECEIPT_NAME}.{}.{}.tmp",
+//RS         std::process::id(),
+//RS         nonce
+//RS     ));
+//RS     let result = (|| {
+//RS         let mut file = std::fs::OpenOptions::new()
+//RS             .create_new(true)
+//RS             .write(true)
+//RS             .open(&temporary)?;
+//RS         writeln!(file, "{ENV_ENTRY_RECEIPT_HEADER}")?;
+//RS         writeln!(file, "stamp\t{stamp}")?;
+//RS         writeln!(file, "secrets\t{secret_identity}")?;
+//RS         for (reference, name, version, output, metadata) in canonical_env_entry(packages) {
+//RS             writeln!(file, "{reference}\t{name}\t{version}\t{output}\t{metadata}")?;
+//RS         }
+//RS         file.sync_all()?;
+//RS         std::fs::rename(&temporary, path)
+//RS     })();
+//RS     if result.is_err() {
+//RS         let _ = std::fs::remove_file(&temporary);
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn environment_entry_definition_fingerprint(
+//RS     project_dir: &Path,
+//RS     requested_preset: Option<&str>,
+//RS     requested_environment: Option<&str>,
+//RS     plan: &RunPlan,
+//RS     secret_identity: Option<&str>,
+//RS ) -> (String, Option<String>) {
+//RS     // Typed plans already carry the exact source graph and lifecycle facts
+//RS     // used by the activation fingerprint. Reuse them instead of evaluating
+//RS     // env.jet a second time; legacy pkg.* plans keep the parser-backed path.
+//RS     let hook_fingerprint = if plan.environment.source_files.is_empty() {
+//RS         EnvHook::definition_fingerprint_with_selections(
+//RS             project_dir,
+//RS             requested_preset,
+//RS             requested_environment,
+//RS         )
+//RS     } else {
+//RS         EnvHook::definition_fingerprint_from_facts(
+//RS             project_dir,
+//RS             requested_preset,
+//RS             requested_environment,
+//RS             &plan.environment,
+//RS         )
+//RS     };
+//RS     environment_entry_definition_fingerprint_with_hook(
+//RS         requested_preset,
+//RS         requested_environment,
+//RS         plan,
+//RS         secret_identity,
+//RS         hook_fingerprint.as_deref(),
+//RS     )
+//RS }
+//RS 
+//RS fn environment_entry_definition_fingerprint_with_hook(
+//RS     requested_preset: Option<&str>,
+//RS     requested_environment: Option<&str>,
+//RS     plan: &RunPlan,
+//RS     secret_identity: Option<&str>,
+//RS     hook_fingerprint: Option<&str>,
+//RS ) -> (String, Option<String>) {
+//RS     let semantic_fingerprint = Trust::environment_definition_hash(
+//RS         &plan.refs,
+//RS         &plan.table,
+//RS         &plan.secrets,
+//RS         &plan.environment,
+//RS     );
+//RS     let target = std::env::var("JET_TARGET").unwrap_or_default();
+//RS     let mut canonical = b"jetpack-env-definition-v3\0".to_vec();
+//RS     for field in [
+//RS         hook_fingerprint.unwrap_or_default(),
+//RS         semantic_fingerprint.as_str(),
+//RS         requested_preset.unwrap_or_default(),
+//RS         requested_environment.unwrap_or_default(),
+//RS         target.as_str(),
+//RS         secret_identity.unwrap_or_default(),
+//RS     ] {
+//RS         canonical.extend_from_slice(&(field.len() as u64).to_le_bytes());
+//RS         canonical.extend_from_slice(field.as_bytes());
+//RS     }
+//RS     (
+//RS         crate::SHA256::sha256_hex(&canonical),
+//RS         hook_fingerprint.map(str::to_owned),
+//RS     )
+//RS }
+//RS 
+//RS fn environment_member_expectations(
+//RS     roots: &Store::Roots,
+//RS     project_dir: &Path,
+//RS     flags: &Flags,
+//RS     plan: &RunPlan,
+//RS ) -> BTreeMap<String, Store::CacheExpectation> {
+//RS     let fixtures = if flags.offline {
+//RS         fixtures_for(flags)
+//RS     } else {
+//RS         flags.fixtures.clone()
+//RS     };
+//RS     let store_dir = roots.hangar_dir();
+//RS     let context = Provider::Ctx {
+//RS         fixtures: fixtures.as_deref(),
+//RS         store_dir: &store_dir,
+//RS         offline: flags.offline,
+//RS         project_dir: Some(project_dir),
+//RS         nix_index: None,
+//RS         nix_roots: Some(roots),
+//RS         allow_local_nix_catalog: flags.local_nix_catalog.is_some(),
+//RS     };
+//RS 
+//RS     let mut expectations = BTreeMap::new();
+//RS     for spec in &plan.refs {
+//RS         if let Some(expectation) = Provider::cache_expectation(spec, &plan.table, &context) {
+//RS             expectations.insert(spec.raw.clone(), expectation);
+//RS         }
+//RS     }
+//RS     for adapter in &plan.adapters {
+//RS         let reference = format!("adapt:{}:{}", adapter.name, adapter.source);
+//RS         if let Ok(expectation) =
+//RS             Provider::adapter_cache_expectation(adapter, &plan.table, &context)
+//RS         {
+//RS             expectations.insert(reference, expectation);
+//RS         }
+//RS     }
+//RS     expectations
+//RS }
+//RS fn warm_realizations_complete(
+//RS     plan: &RunPlan,
+//RS     warm: &Option<Vec<Store::VerifiedRealization>>,
+//RS ) -> bool {
+//RS     let Some(realized) = warm else {
+//RS         return false;
+//RS     };
+//RS     let mut available = BTreeMap::<&str, usize>::new();
+//RS     for entry in realized {
+//RS         *available.entry(entry.original_reference()).or_default() += 1;
+//RS     }
+//RS     let mut required = BTreeMap::<String, usize>::new();
+//RS     for spec in &plan.refs {
+//RS         *required.entry(spec.raw.clone()).or_default() += 1;
+//RS     }
+//RS     for adapter in &plan.adapters {
+//RS         let reference = format!("adapt:{}:{}", adapter.name, adapter.source);
+//RS         *required.entry(reference).or_default() += 1;
+//RS     }
+//RS     required.into_iter().all(|(reference, count)| {
+//RS         available
+//RS             .get(reference.as_str())
+//RS             .is_some_and(|available| *available >= count)
+//RS     })
+//RS }
+//RS 
+//RS fn env_entry_plan_references(plan: &RunPlan) -> Vec<String> {
+//RS     let mut references = plan
+//RS         .refs
+//RS         .iter()
+//RS         .map(|spec| spec.raw.clone())
+//RS         .chain(
+//RS             plan.adapters
+//RS                 .iter()
+//RS                 .map(|adapter| format!("adapt:{}:{}", adapter.name, adapter.source)),
+//RS         )
+//RS         .collect::<Vec<_>>();
+//RS     references.sort();
+//RS     references
+//RS }
+//RS 
+//RS fn env_entry_matches_plan(receipt: &EnvEntryReceipt, plan: &RunPlan) -> bool {
+//RS     let mut references = receipt
+//RS         .packages
+//RS         .iter()
+//RS         .map(|selection| selection.0.clone())
+//RS         .collect::<Vec<_>>();
+//RS     references.sort();
+//RS     references == env_entry_plan_references(plan)
+//RS }
+//RS 
+//RS fn format_env_ready(elapsed: Duration, cache_hit_percent: usize) -> String {
+//RS     format!(
+//RS         "env ready in {:.1}s (cache hit {cache_hit_percent} percent)",
+//RS         elapsed.as_secs_f64()
+//RS     )
+//RS }
+//RS 
+//RS fn package_label(name: &str, version: &str) -> String {
+//RS     if version.is_empty() {
+//RS         name.to_string()
+//RS     } else {
+//RS         format!("{name} {version}")
+//RS     }
+//RS }
+//RS 
+//RS fn format_env_changes(
+//RS     previous: &[(String, String)],
+//RS     current: &[(String, String)],
+//RS ) -> Option<String> {
+//RS     let previous = previous.iter().cloned().collect::<BTreeMap<_, _>>();
+//RS     let current = current.iter().cloned().collect::<BTreeMap<_, _>>();
+//RS     let names = previous
+//RS         .keys()
+//RS         .chain(current.keys())
+//RS         .cloned()
+//RS         .collect::<BTreeSet<_>>();
+//RS     let mut updated = Vec::new();
+//RS     let mut added = Vec::new();
+//RS     let mut removed = Vec::new();
+//RS     for name in names {
+//RS         match (previous.get(&name), current.get(&name)) {
+//RS             (Some(old), Some(new)) if old != new => {
+//RS                 updated.push((name, old.clone(), new.clone()));
+//RS             }
+//RS             (None, Some(version)) => added.push((name, version.clone())),
+//RS             (Some(version), None) => removed.push((name, version.clone())),
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     let mut parts = Vec::new();
+//RS     if let Some((name, old, new)) = updated.first() {
+//RS         let detail = if old.is_empty() || new.is_empty() {
+//RS             format!("{name} updated")
+//RS         } else {
+//RS             format!("{name} {old} to {new}")
+//RS         };
+//RS         parts.push(detail);
+//RS         if updated.len() > 1 {
+//RS             parts.push(format!("{} tools updated", updated.len()));
+//RS         }
+//RS     }
+//RS     if let Some((name, version)) = added.first() {
+//RS         parts.push(format!("{} added", package_label(name, version)));
+//RS         if added.len() > 1 {
+//RS             parts.push(format!("{} tools added", added.len()));
+//RS         }
+//RS     }
+//RS     if let Some((name, version)) = removed.first() {
+//RS         parts.push(format!("{} removed", package_label(name, version)));
+//RS         if removed.len() > 1 {
+//RS             parts.push(format!("{} tools removed", removed.len()));
+//RS         }
+//RS     }
+//RS     (!parts.is_empty()).then(|| parts.join(", "))
+//RS }
+//RS fn announce_env_ready(
+//RS     theme: &Theme,
+//RS     project_dir: &Path,
+//RS     roots: &Store::Roots,
+//RS     warm_reused: bool,
+//RS     elapsed: Duration,
+//RS     definition_fingerprint: &str,
+//RS     inherited_loader_path: Option<&str>,
+//RS     secret_identity: &str,
+//RS     stats: &super::trust_env_build::EnvReadyStats,
+//RS ) -> std::io::Result<()> {
+//RS     theme.status(&format_env_ready(elapsed, stats.cache_hit_percent()));
+//RS     if warm_reused {
+//RS         return Ok(());
+//RS     }
+//RS     record_env_entry_receipt(
+//RS         theme,
+//RS         project_dir,
+//RS         roots,
+//RS         definition_fingerprint,
+//RS         inherited_loader_path,
+//RS         secret_identity,
+//RS         stats,
+//RS     )
+//RS }
+//RS 
+//RS fn record_env_entry_receipt(
+//RS     theme: &Theme,
+//RS     project_dir: &Path,
+//RS     roots: &Store::Roots,
+//RS     definition_fingerprint: &str,
+//RS     inherited_loader_path: Option<&str>,
+//RS     secret_identity: &str,
+//RS     stats: &super::trust_env_build::EnvReadyStats,
+//RS ) -> std::io::Result<()> {
+//RS     let current = stats.realized_set();
+//RS     let selections = stats.realized_entries();
+//RS     let stamp = Store::environment_entry_stamp(
+//RS         roots,
+//RS         project_dir,
+//RS         definition_fingerprint,
+//RS         inherited_loader_path,
+//RS         &selections,
+//RS     )?;
+//RS     if let Some(previous) = read_env_entry_receipt(project_dir) {
+//RS         let previous_display = previous
+//RS             .packages
+//RS             .iter()
+//RS             .map(|(_, name, version, output, _)| {
+//RS                 let version = if version.is_empty() {
+//RS                     super::realize::version_from_out(name, output).unwrap_or_default()
+//RS                 } else {
+//RS                     version.clone()
+//RS                 };
+//RS                 (name.clone(), version)
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         if let Some(changes) = format_env_changes(&previous_display, &current) {
+//RS             theme.status(&format!("what changed: {changes}"));
+//RS         }
+//RS         if previous.stamp == stamp
+//RS             && previous.secret_identity == secret_identity
+//RS             && previous.packages == selections
+//RS         {
+//RS             return Ok(());
+//RS         }
+//RS     }
+//RS     write_env_entry_receipt(project_dir, &stamp, secret_identity, &selections)
+//RS }
+//RS 
+//RS /// `jetpack use <package>... [-- cmd]` — realize exactly the named refs in the
+//RS /// user profile. This path deliberately has no project source table or project
+//RS /// lock context; a user tool is independent of the directory where it runs.
+//RS pub(super) fn cmd_use(theme: &Theme, parsed: &Parsed) -> i32 {
+//RS     if parsed.positional.is_empty() {
+//RS         theme.error_coded(
+//RS             "E1340",
+//RS             "`jetpack use` needs at least one package",
+//RS             "the `use` verb builds an ephemeral shell from exactly the packages named after it",
+//RS             "try `jetpack use ripgrep`, or add `--` followed by a command",
+//RS         );
+//RS         return 2;
+//RS     }
+//RS     // `use` can verify many packages that share one Hangar closure. Keep the
+//RS     // same per-command seal view as `env`, without weakening cross-command
+//RS     // invalidation.
+//RS     Store::arm_command_memo();
+//RS 
+//RS     let table = builtin_table();
+//RS     let mut refs = Vec::with_capacity(parsed.positional.len());
+//RS     for raw in &parsed.positional {
+//RS         if let Some(code) = reject_unavailable_provider(theme, raw) {
+//RS             return code;
+//RS         }
+//RS         let canonical = RefSpec::with_default_source(raw);
+//RS         match RefSpec::classify_in(&canonical, &table) {
+//RS             Ok(spec) => refs.push(spec),
+//RS             Err(error) => {
+//RS                 crate::Output::ref_error(theme, &error);
+//RS                 return 2;
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     let roots = Store::resolve();
+//RS     let plan = RunPlan {
+//RS         project_root: std::env::current_dir().unwrap_or_default(),
+//RS         refs,
+//RS         adapters: Vec::new(),
+//RS         table,
+//RS         label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
+//RS         prompt_path: ModuleEval::PromptPathMode::default(),
+//RS         prompt_strip: ModuleEval::PromptStripMode::default(),
+//RS         dev_services: Vec::new(),
+//RS         secrets: Vec::new(),
+//RS         environment: ModuleEval::EnvironmentFacts::default(),
+//RS     };
+//RS     let warm_references = plan
+//RS         .refs
+//RS         .iter()
+//RS         .map(|spec| spec.raw.clone())
+//RS         .collect::<Vec<_>>();
+//RS     let warm = Store::reuse_verified_user_profile_batch(
+//RS         &roots,
+//RS         &warm_references,
+//RS         parsed.flags.local_nix_catalog.is_some(),
+//RS     );
+//RS     let warm_reused = warm_realizations_complete(&plan, &warm);
+//RS     let env = match compose_env_scoped_with_warm(
+//RS         theme,
+//RS         &roots,
+//RS         &parsed.flags,
+//RS         &plan,
+//RS         RealizeScope::Use,
+//RS         true,
+//RS         warm,
+//RS         false,
+//RS     )
+//RS     {
+//RS         Ok((env, _)) => env,
+//RS         Err(code) => return code,
+//RS     };
+//RS     if parsed.flags.prep {
+//RS         auto_clean_after_success(theme, &roots);
+//RS         return 0;
+//RS     }
+//RS     let code = match &parsed.command {
+//RS         Some(command) if !command.is_empty() && warm_reused => Shell::exec_command(&env, command),
+//RS         Some(command) if !command.is_empty() => Shell::run_command(&env, command),
+//RS         _ => Shell::enter(theme, &env, ShellKind::detect()),
+//RS     };
+//RS     if code == 0 {
+//RS         auto_clean_after_success(theme, &roots);
+//RS     }
+//RS     code
+//RS }
+//RS 
+//RS /// `jet env test [-- command]`: run lifecycle hooks and checks with a clean
+//RS /// child environment. A command is optional; without one the declared checks
+//RS /// are the complete operation.
+//RS fn cmd_env_test(theme: &Theme, parsed: &Parsed) -> i32 {
+//RS     let cwd = std::env::current_dir().unwrap_or_default();
+//RS     let project_dir = project_env_root(&cwd);
+//RS     let roots = Store::resolve();
+//RS     let mut plan = match load_project_plan_with_selections(
+//RS         theme,
+//RS         parsed.flags.preset.as_deref(),
+//RS         parsed.flags.environment.as_deref(),
+//RS     ) {
+//RS         Ok(plan) => plan,
+//RS         Err(code) => return code,
+//RS     };
+//RS     if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table, &parsed.flags) {
+//RS         return code;
+//RS     }
+//RS     if let Err(code) = Trust::gate_with_environment(
+//RS         theme,
+//RS         &Trust::store_path(),
+//RS         &project_dir,
+//RS         &plan.refs,
+//RS         &plan.table,
+//RS         &plan.secrets,
+//RS         &plan.environment,
+//RS         parsed.flags.trust,
+//RS     ) {
+//RS         return code;
+//RS     }
+//RS     if let Err(code) = validate_declared_secrets(
+//RS         theme,
+//RS         &project_dir,
+//RS         &plan.secrets,
+//RS         plan.environment.active_environment.as_deref(),
+//RS     ) {
+//RS         return code;
+//RS     }
+//RS     let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
+//RS         Ok(env) => env,
+//RS         Err(code) => return code,
+//RS     };
+//RS     let entry = find_project_entry(&project_dir);
+//RS     if let Err(code) = run_lifecycle_hooks_clean(
+//RS         theme,
+//RS         parsed,
+//RS         &roots,
+//RS         &project_dir,
+//RS         &entry,
+//RS         &env,
+//RS         &plan.environment.lifecycle.on_enter,
+//RS         "on_enter",
+//RS     ) {
+//RS         return code;
+//RS     }
+//RS     if let Err(code) = run_lifecycle_hooks_clean(
+//RS         theme,
+//RS         parsed,
+//RS         &roots,
+//RS         &project_dir,
+//RS         &entry,
+//RS         &env,
+//RS         &plan.environment.lifecycle.checks,
+//RS         "check",
+//RS     ) {
+//RS         return code;
+//RS     }
+//RS     if let Some(command) = parsed
+//RS         .command
+//RS         .as_ref()
+//RS         .filter(|command| !command.is_empty())
+//RS     {
+//RS         return Shell::run_clean_command(&env, command);
+//RS     }
+//RS     theme.ok("environment checks passed in a clean process");
+//RS     0
+//RS }
+//RS 
+//RS /// `jet env sync`: show and optionally apply the complete managed-file plan.
+//RS fn cmd_env_sync(theme: &Theme, parsed: &Parsed) -> i32 {
+//RS     let cwd = std::env::current_dir().unwrap_or_default();
+//RS     let project_dir = project_env_root(&cwd);
+//RS     let mut plan = match load_project_plan_with_selections(
+//RS         theme,
+//RS         parsed.flags.preset.as_deref(),
+//RS         parsed.flags.environment.as_deref(),
+//RS     ) {
+//RS         Ok(plan) => plan,
+//RS         Err(code) => return code,
+//RS     };
+//RS     if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table, &parsed.flags) {
+//RS         return code;
+//RS     }
+//RS     let file_plan = match EnvFiles::plan(&project_dir, &plan.environment.files) {
+//RS         Ok(plan) => plan,
+//RS         Err(error) => {
+//RS             theme.error(
+//RS                 "couldn't plan managed environment files",
+//RS                 &error,
+//RS                 "resolve the reported path or ownership conflict, then run `jet env sync` again.",
+//RS             );
+//RS             return 2;
+//RS         }
+//RS     };
+//RS     let source_snapshot =
+//RS         (!plan.environment.files.is_empty()).then(|| file_plan.source_snapshot_hash());
+//RS     if let Err(code) = Trust::gate_with_environment_and_snapshot(
+//RS         theme,
+//RS         &Trust::store_path(),
+//RS         &project_dir,
+//RS         &plan.refs,
+//RS         &plan.table,
+//RS         &plan.secrets,
+//RS         &plan.environment,
+//RS         source_snapshot.as_deref(),
+//RS         parsed.flags.trust,
+//RS     ) {
+//RS         return code;
+//RS     }
+//RS     if let Err(code) = validate_declared_secrets(
+//RS         theme,
+//RS         &project_dir,
+//RS         &plan.secrets,
+//RS         plan.environment.active_environment.as_deref(),
+//RS     ) {
+//RS         return code;
+//RS     }
+//RS     for action in &file_plan.actions {
+//RS         let verb = match action.kind {
+//RS             EnvFiles::FileActionKind::Create => "create",
+//RS             EnvFiles::FileActionKind::ReplaceOwned => "update",
+//RS             EnvFiles::FileActionKind::Preserve => "preserve",
+//RS             EnvFiles::FileActionKind::Unchanged => "unchanged",
+//RS         };
+//RS         let detail = if action.sensitive { " sensitive" } else { "" };
+//RS         theme.status(&format!(
+//RS             "{verb} {} ({}, sha256={}){detail}",
+//RS             action.destination,
+//RS             action.mode.as_str(),
+//RS             action.digest
+//RS         ));
+//RS     }
+//RS     if !file_plan.has_changes() {
+//RS         theme.ok("managed environment files are up to date");
+//RS         return 0;
+//RS     }
+//RS     if !theme.confirm_apply(parsed.flags.assume_yes) {
+//RS         return 0;
+//RS     }
+//RS     match file_plan.apply() {
+//RS         Ok(report) => {
+//RS             theme.ok(&format!(
+//RS                 "managed environment files synced ({} applied, {} preserved)",
+//RS                 report.applied, report.preserved
+//RS             ));
+//RS             0
+//RS         }
+//RS         Err(error) => {
+//RS             theme.error(
+//RS                 "managed environment file sync failed",
+//RS                 &error,
+//RS                 "no partial file change was retained.",
+//RS             );
+//RS             2
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn env_info_service_summary(service: &ModuleEval::DevServicePlan) -> String {
+//RS     let mut facts = vec![if service.enable {
+//RS         "enabled".to_string()
+//RS     } else {
+//RS         "disabled".to_string()
+//RS     }];
+//RS     if !service.ports.is_empty() {
+//RS         facts.push(format!(
+//RS             "ports={}",
+//RS             service
+//RS                 .ports
+//RS                 .iter()
+//RS                 .map(ToString::to_string)
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",")
+//RS         ));
+//RS     }
+//RS     if let Some(run) = &service.run {
+//RS         facts.push(format!("run={}", run.join(" ")));
+//RS     }
+//RS     if let Some(shutdown) = &service.shutdown {
+//RS         let value = match shutdown {
+//RS             ModuleEval::ShutdownPolicy::Kill => "kill".to_string(),
+//RS             ModuleEval::ShutdownPolicy::Term { grace_ms } => {
+//RS                 format!("term:{grace_ms}ms")
+//RS             }
+//RS         };
+//RS         facts.push(format!("shutdown={value}"));
+//RS     }
+//RS     if let Some(data_dir) = &service.data_dir {
+//RS         facts.push(format!("data_dir={data_dir}"));
+//RS     }
+//RS     if let Some(ready) = &service.ready {
+//RS         facts.push(format!("ready={ready}"));
+//RS     }
+//RS     if let Some(probe) = &service.ready_probe {
+//RS         let value = match probe {
+//RS             ModuleEval::ReadyProbe::Exec(command) => format!("exec:{command}"),
+//RS             ModuleEval::ReadyProbe::Http { url, status } => match status {
+//RS                 Some(status) => format!("http:{url}:{status}"),
+//RS                 None => format!("http:{url}"),
+//RS             },
+//RS             ModuleEval::ReadyProbe::Notify { path } => format!("notify:{path}"),
+//RS             ModuleEval::ReadyProbe::Tcp { host, port } => format!("tcp:{host}:{port}"),
+//RS         };
+//RS         facts.push(format!("ready_probe={value}"));
+//RS     }
+//RS     let readiness = if service.ready.is_some() {
+//RS         "command".to_string()
+//RS     } else if service.ready_probe.is_some() {
+//RS         "probe".to_string()
+//RS     } else if let Some(port) = service.ports.first() {
+//RS         format!("tcp:{port}")
+//RS     } else {
+//RS         "process".to_string()
+//RS     };
+//RS     facts.push(format!("readiness={readiness}"));
+//RS     if let Some(restart) = &service.restart {
+//RS         let value = match restart {
+//RS             ModuleEval::RestartPolicy::Never => "never".to_string(),
+//RS             ModuleEval::RestartPolicy::OnFailure {
+//RS                 max,
+//RS                 backoff_ms,
+//RS                 exponential,
+//RS             } => format!("on_failure:max={max},backoff_ms={backoff_ms},exponential={exponential}"),
+//RS             ModuleEval::RestartPolicy::Always {
+//RS                 max,
+//RS                 backoff_ms,
+//RS                 exponential,
+//RS             } => format!("always:max={max},backoff_ms={backoff_ms},exponential={exponential}"),
+//RS         };
+//RS         facts.push(format!("restart={value}"));
+//RS     }
+//RS     for (label, values) in [
+//RS         ("watch", &service.watch),
+//RS         ("after", &service.after),
+//RS         ("before_start", &service.before_start),
+//RS         ("sockets", &service.sockets),
+//RS     ] {
+//RS         if !values.is_empty() {
+//RS             facts.push(format!("{label}={}", values.join(",")));
+//RS         }
+//RS     }
+//RS     for (name, value) in &service.extra {
+//RS         facts.push(format!("extra={name}:{value}"));
+//RS     }
+//RS     format!("{} ({})", service.name, facts.join("; "))
+//RS }
+//RS 
+//RS /// `jet env info`: disclose the selected preset and the typed environment
+//RS /// facts without realizing packages or executing lifecycle commands.
+//RS fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
+//RS     let plan = match load_project_plan_with_selections(
+//RS         theme,
+//RS         parsed.flags.preset.as_deref(),
+//RS         parsed.flags.environment.as_deref(),
+//RS     ) {
+//RS         Ok(plan) => plan,
+//RS         Err(code) => return code,
+//RS     };
+//RS     if let Err(error) = validate_integration_facts(&plan) {
+//RS         theme.error_coded(
+//RS             "E1335",
+//RS             "environment integration facts are not executable",
+//RS             &error,
+//RS             "use the supported integration preset and keep its typed package, host, task, and grant facts intact",
+//RS         );
+//RS         return 2;
+//RS     }
+//RS     let preset = plan
+//RS         .environment
+//RS         .selected_preset
+//RS         .as_ref()
+//RS         .map(|preset| preset.name.as_str())
+//RS         .unwrap_or("<none>");
+//RS     let selected_presets = plan
+//RS         .environment
+//RS         .selected_preset
+//RS         .as_ref()
+//RS         .map(|preset| preset.selected_presets.clone())
+//RS         .unwrap_or_default();
+//RS     let applied_presets = plan
+//RS         .environment
+//RS         .selected_preset
+//RS         .as_ref()
+//RS         .map(|preset| preset.applied.clone())
+//RS         .unwrap_or_default();
+//RS     let packages = plan
+//RS         .refs
+//RS         .iter()
+//RS         .map(|reference| reference.raw.as_str())
+//RS         .collect::<Vec<_>>();
+//RS     // D-JOB-NAME2=B (card #1448): the report used to print one `tasks` list
+//RS     // holding two different kinds of thing, so a reader could not tell an entry
+//RS     // they wrote from an entry the environment supplied. Split it by author.
+//RS     //
+//RS     // `jobs` is the project's own work: the `#Job fn` entries in the project
+//RS     // file, plus the ones an `env.jet` lifecycle hook names. A `HookAction::Task`
+//RS     // always names a checked `#Job fn`, so those names are the reader's own and
+//RS     // dedup into the same list — `jobs` therefore holds exactly what the old
+//RS     // merged list held, under the word the rest of the job surface uses.
+//RS     //
+//RS     // `checks` is what the environment model supplies: the `checks:` hook
+//RS     // records in `env.jet`, the trust-gated command form (a vault check, an
+//RS     // Android SDK check). These are named by the hook, not by a `#Job`, so they
+//RS     // could never appear in `jobs` — which is why they get their own heading.
+//RS     let entry = find_project_entry(&plan.project_root);
+//RS     let mut jobs = list_project_jobs(&entry);
+//RS     for hook in plan
+//RS         .environment
+//RS         .lifecycle
+//RS         .on_enter
+//RS         .iter()
+//RS         .chain(plan.environment.lifecycle.checks.iter())
+//RS     {
+//RS         if let ModuleEval::HookAction::Task(name) = &hook.action {
+//RS             jobs.push(name.clone());
+//RS         }
+//RS     }
+//RS     jobs.sort();
+//RS     jobs.dedup();
+//RS     let mut checks = plan
+//RS         .environment
+//RS         .lifecycle
+//RS         .checks
+//RS         .iter()
+//RS         .filter(|hook| matches!(hook.action, ModuleEval::HookAction::Command(_)))
+//RS         .map(|hook| hook.name.clone())
+//RS         .collect::<Vec<_>>();
+//RS     checks.sort();
+//RS     checks.dedup();
+//RS     let mut variable_sources: BTreeMap<String, Vec<String>> = BTreeMap::new();
+//RS     let mut add_variable = |name: &str, source: String| {
+//RS         let sources = variable_sources.entry(name.to_string()).or_default();
+//RS         if !sources.iter().any(|existing| existing == &source) {
+//RS             sources.push(source);
+//RS         }
+//RS     };
+//RS     if let Some(preset) = &plan.environment.selected_preset {
+//RS         for name in preset.variables.keys() {
+//RS             add_variable(name, "preset".to_string());
+//RS         }
+//RS     }
+//RS     for name in plan.environment.language_expansion.variables.keys() {
+//RS         add_variable(name, "language".to_string());
+//RS     }
+//RS     for dotenv in &plan.environment.lifecycle.dotenv {
+//RS         for name in &dotenv.allow {
+//RS             add_variable(name, format!("dotenv:{}", dotenv.file));
+//RS         }
+//RS         for name in &dotenv.secrets {
+//RS             add_variable(name, format!("dotenv-secret:{}", dotenv.file));
+//RS         }
+//RS     }
+//RS     for name in &plan.environment.lifecycle.unset {
+//RS         add_variable(name, "unset".to_string());
+//RS     }
+//RS     // Environment reads are already typed by the evaluator. Keep the `$`
+//RS     // spelling out of the report's variable names, which otherwise use the
+//RS     // shell-visible name (`HOME`, not `$HOME`).
+//RS     for read in &plan.environment.environment_reads {
+//RS         let name = read.name.strip_prefix('$').unwrap_or(&read.name);
+//RS         add_variable(name, "environment".to_string());
+//RS     }
+//RS     if parsed.flags.json {
+//RS         let quote_list = |values: &[&str]| {
+//RS             values
+//RS                 .iter()
+//RS                 .map(|value| crate::JSON::quote(value))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",")
+//RS         };
+//RS         let quote_strings = |values: &[String]| {
+//RS             values
+//RS                 .iter()
+//RS                 .map(|value| crate::JSON::quote(value))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",")
+//RS         };
+//RS         let files = plan
+//RS             .environment
+//RS             .files
+//RS             .iter()
+//RS             .map(|file| file.destination.as_str())
+//RS             .collect::<Vec<_>>();
+//RS         let dotenv = plan
+//RS             .environment
+//RS             .lifecycle
+//RS             .dotenv
+//RS             .iter()
+//RS             .map(|item| {
+//RS                 format!(
+//RS                     "{{\"file\":{},\"allow\":[{}],\"secrets\":[{}]}}",
+//RS                     crate::JSON::quote(&item.file),
+//RS                     item.allow
+//RS                         .iter()
+//RS                         .map(|name| crate::JSON::quote(name))
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(","),
+//RS                     item.secrets
+//RS                         .iter()
+//RS                         .map(|name| crate::JSON::quote(name))
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(","),
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         let git_hooks_path = plan
+//RS             .environment
+//RS             .lifecycle
+//RS             .git_hooks_path
+//RS             .as_deref()
+//RS             .map(crate::JSON::quote)
+//RS             .unwrap_or_else(|| "null".to_string());
+//RS         let languages = plan
+//RS             .environment
+//RS             .languages
+//RS             .iter()
+//RS             .map(|language| {
+//RS                 let extras = language
+//RS                     .extra_packages
+//RS                     .iter()
+//RS                     .map(|package| crate::JSON::quote(package))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",");
+//RS                 format!(
+//RS                     "{{\"name\":{},\"enable\":{},\"version\":{},\"channel\":{},\"venv\":{},\"extra\":[{}]}}",
+//RS                     crate::JSON::quote(&language.name),
+//RS                     language.enable,
+//RS                     language
+//RS                         .version
+//RS                         .as_deref()
+//RS                         .map(|value| crate::JSON::quote(value))
+//RS                         .unwrap_or_else(|| "null".to_string()),
+//RS                     language
+//RS                         .channel
+//RS                         .as_deref()
+//RS                         .map(|value| crate::JSON::quote(value))
+//RS                         .unwrap_or_else(|| "null".to_string()),
+//RS                     language.venv,
+//RS                     extras,
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         let catalog = ModuleEval::LanguagePackCatalog::builtin();
+//RS         let language_catalog = catalog
+//RS             .names()
+//RS             .into_iter()
+//RS             .filter_map(|name| {
+//RS                 let pack = catalog.get(&name)?.clone();
+//RS                 Some(format!(
+//RS                     "{{\"name\":{},\"fingerprint\":{}}}",
+//RS                     crate::JSON::quote(&pack.name),
+//RS                     crate::JSON::quote(&pack.fingerprint()),
+//RS                 ))
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let language_packs = plan
+//RS             .environment
+//RS             .language_packs
+//RS             .iter()
+//RS             .map(|pack| {
+//RS                 format!(
+//RS                     "{{\"name\":{},\"fingerprint\":{},\"packages\":[{}],\"venv_packages\":[{}],\"host\":{},\"platforms\":[{}],\"license\":{},\"required_tools\":[{}]}}",
+//RS                     crate::JSON::quote(&pack.name),
+//RS                     crate::JSON::quote(&pack.fingerprint()),
+//RS                     quote_strings(&pack.packages),
+//RS                     quote_strings(&pack.venv_packages),
+//RS                     crate::JSON::quote(&pack.host),
+//RS                     quote_strings(&pack.platforms),
+//RS                     crate::JSON::quote(&pack.license),
+//RS                     quote_strings(&pack.required_tools),
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let language_projections = plan
+//RS             .environment
+//RS             .language_projections
+//RS             .iter()
+//RS             .map(|projection| {
+//RS                 let selection = &projection.selection;
+//RS                 let version = selection
+//RS                     .version
+//RS                     .as_deref()
+//RS                     .map(crate::JSON::quote)
+//RS                     .unwrap_or_else(|| "null".to_string());
+//RS                 let channel = selection
+//RS                     .channel
+//RS                     .as_deref()
+//RS                     .map(crate::JSON::quote)
+//RS                     .unwrap_or_else(|| "null".to_string());
+//RS                 format!(
+//RS                     "{{\"name\":{},\"enable\":{},\"version\":{},\"channel\":{},\"venv\":{},\"pack_fingerprint\":{},\"host\":{},\"platform\":{},\"license\":{},\"missing_tools\":[{}],\"included\":[{}],\"omitted\":[{}],\"changed\":[{}]}}",
+//RS                     crate::JSON::quote(&selection.name),
+//RS                     selection.enable,
+//RS                     version,
+//RS                     channel,
+//RS                     selection.venv,
+//RS                     crate::JSON::quote(&projection.pack.fingerprint()),
+//RS                     crate::JSON::quote(&projection.host),
+//RS                     crate::JSON::quote(&projection.platform),
+//RS                     crate::JSON::quote(&projection.license),
+//RS                     quote_strings(&projection.missing_tools),
+//RS                     quote_strings(&projection.included),
+//RS                     quote_strings(&projection.omitted),
+//RS                     quote_strings(&projection.changed),
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let integrations = plan
+//RS             .environment
+//RS             .integrations
+//RS             .iter()
+//RS             .map(|integration| {
+//RS                 let option_keys = integration
+//RS                     .options
+//RS                     .keys()
+//RS                     .map(|key| crate::JSON::quote(key))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",");
+//RS                 let packages = integration
+//RS                     .packages
+//RS                     .iter()
+//RS                     .map(|value| crate::JSON::quote(value))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",");
+//RS                 let files = integration
+//RS                     .files
+//RS                     .iter()
+//RS                     .map(|file| crate::JSON::quote(&file.destination))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",");
+//RS                 let strings = |values: &[String]| {
+//RS                     values
+//RS                         .iter()
+//RS                         .map(|value| crate::JSON::quote(value))
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(",")
+//RS                 };
+//RS                 format!(
+//RS                     "{{\"kind\":{},\"name\":{},\"preset\":{},\"option_keys\":[{}],\"packages\":[{}],\"files\":[{}],\"tasks\":[{}],\"providers\":[{}],\"host_checks\":[{}],\"secrets\":[{}],\"grants\":[{}],\"losses\":[{}]}}",
+//RS                     crate::JSON::quote(integration.kind.as_str()),
+//RS                     crate::JSON::quote(&integration.name),
+//RS                     crate::JSON::quote(&integration.preset),
+//RS                     option_keys,
+//RS                     packages,
+//RS                     files,
+//RS                     strings(&integration.tasks),
+//RS                     strings(&integration.providers),
+//RS                     strings(&integration.host_checks),
+//RS                     strings(&integration.secrets),
+//RS                     strings(&integration.grants),
+//RS                     strings(&integration.losses),
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         let package_profiles = plan
+//RS             .environment
+//RS             .package_profiles
+//RS             .iter()
+//RS             .map(|profile| {
+//RS                 let collisions = profile
+//RS                     .collisions
+//RS                     .iter()
+//RS                     .map(|(path, provider)| {
+//RS                         format!("{}:{}", crate::JSON::quote(path), crate::JSON::quote(provider))
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",");
+//RS                 format!(
+//RS                     "{{\"name\":{},\"extends\":[{}],\"packages\":[{}],\"collisions\":{{{}}},\"sources\":[{}]}}",
+//RS                     crate::JSON::quote(&profile.name),
+//RS                     quote_list(&profile.extends.iter().map(String::as_str).collect::<Vec<_>>()),
+//RS                     quote_list(&profile.packages.iter().map(String::as_str).collect::<Vec<_>>()),
+//RS                     collisions,
+//RS                     quote_list(&profile.sources.iter().map(String::as_str).collect::<Vec<_>>()),
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         let services = plan
+//RS             .dev_services
+//RS             .iter()
+//RS             .map(|service| {
+//RS                 let ports = service
+//RS                     .ports
+//RS                     .iter()
+//RS                     .map(ToString::to_string)
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",");
+//RS                 let after = service
+//RS                     .after
+//RS                     .iter()
+//RS                     .map(|name| crate::JSON::quote(name))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",");
+//RS                 let run = service
+//RS                     .run
+//RS                     .as_ref()
+//RS                     .map(|run| format!("[{}]", quote_strings(run)))
+//RS                     .unwrap_or_else(|| "null".to_string());
+//RS                 let shutdown = match service.shutdown.as_ref() {
+//RS                     None => "null".to_string(),
+//RS                     Some(ModuleEval::ShutdownPolicy::Kill) =>
+//RS                         "{\"kind\":\"kill\"}".to_string(),
+//RS                     Some(ModuleEval::ShutdownPolicy::Term { grace_ms }) => {
+//RS                         format!("{{\"kind\":\"term\",\"grace_ms\":{grace_ms}}}")
+//RS                     }
+//RS                 };
+//RS                 let data_dir = service
+//RS                     .data_dir
+//RS                     .as_deref()
+//RS                     .map(crate::JSON::quote)
+//RS                     .unwrap_or_else(|| "null".to_string());
+//RS                 let ready = service
+//RS                     .ready
+//RS                     .as_deref()
+//RS                     .map(crate::JSON::quote)
+//RS                     .unwrap_or_else(|| "null".to_string());
+//RS                 let ready_probe = match service.ready_probe.as_ref() {
+//RS                     None => "null".to_string(),
+//RS                     Some(ModuleEval::ReadyProbe::Exec(command)) => format!(
+//RS                         "{{\"kind\":\"exec\",\"command\":{}}}",
+//RS                         crate::JSON::quote(command)
+//RS                     ),
+//RS                     Some(ModuleEval::ReadyProbe::Http { url, status }) => format!(
+//RS                         "{{\"kind\":\"http\",\"url\":{},\"status\":{}}}",
+//RS                         crate::JSON::quote(url),
+//RS                         status
+//RS                             .as_ref()
+//RS                             .map(|value| value.to_string())
+//RS                             .unwrap_or_else(|| "null".to_string())
+//RS                     ),
+//RS                     Some(ModuleEval::ReadyProbe::Notify { path }) => format!(
+//RS                         "{{\"kind\":\"notify\",\"path\":{}}}",
+//RS                         crate::JSON::quote(path)
+//RS                     ),
+//RS                     Some(ModuleEval::ReadyProbe::Tcp { host, port }) => format!(
+//RS                         "{{\"kind\":\"tcp\",\"host\":{},\"port\":{port}}}",
+//RS                         crate::JSON::quote(host)
+//RS                     ),
+//RS                 };
+//RS                 let restart = match service.restart.as_ref() {
+//RS                     None => "null".to_string(),
+//RS                     Some(ModuleEval::RestartPolicy::Never) =>
+//RS                         "{\"kind\":\"never\"}".to_string(),
+//RS                     Some(ModuleEval::RestartPolicy::OnFailure {
+//RS                         max,
+//RS                         backoff_ms,
+//RS                         exponential,
+//RS                     }) => format!(
+//RS                         "{{\"kind\":\"on_failure\",\"max\":{max},\"backoff_ms\":{backoff_ms},\"exponential\":{exponential}}}"
+//RS                     ),
+//RS                     Some(ModuleEval::RestartPolicy::Always {
+//RS                         max,
+//RS                         backoff_ms,
+//RS                         exponential,
+//RS                     }) => format!(
+//RS                         "{{\"kind\":\"always\",\"max\":{max},\"backoff_ms\":{backoff_ms},\"exponential\":{exponential}}}"
+//RS                     ),
+//RS                 };
+//RS                 let extra = service
+//RS                     .extra
+//RS                     .iter()
+//RS                     .map(|(name, value)| {
+//RS                         format!(
+//RS                             "{{\"name\":{},\"value\":{}}}",
+//RS                             crate::JSON::quote(name),
+//RS                             crate::JSON::quote(value),
+//RS                         )
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",");
+//RS                 let readiness = service.ready.is_some()
+//RS                     || service.ready_probe.is_some()
+//RS                     || !service.ports.is_empty();
+//RS                 format!(
+//RS                     "{{\"name\":{},\"enabled\":{},\"ports\":[{}],\"readiness\":{},\"after\":[{}],\"run\":{},\"shutdown\":{},\"data_dir\":{},\"ready\":{},\"ready_probe\":{},\"restart\":{},\"watch\":[{}],\"before_start\":[{}],\"sockets\":[{}],\"extra\":[{}]}}",
+//RS                     crate::JSON::quote(&service.name),
+//RS                     service.enable,
+//RS                     ports,
+//RS                     readiness,
+//RS                     after,
+//RS                     run,
+//RS                     shutdown,
+//RS                     data_dir,
+//RS                     ready,
+//RS                     ready_probe,
+//RS                     restart,
+//RS                     quote_strings(&service.watch),
+//RS                     quote_strings(&service.before_start),
+//RS                     quote_strings(&service.sockets),
+//RS                     extra,
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let variables = variable_sources
+//RS             .iter()
+//RS             .map(|(name, sources)| {
+//RS                 format!(
+//RS                     "{{\"name\":{},\"sources\":[{}]}}",
+//RS                     crate::JSON::quote(name),
+//RS                     sources
+//RS                         .iter()
+//RS                         .map(|source| crate::JSON::quote(source))
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(","),
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let formatter = plan
+//RS             .environment
+//RS             .lifecycle
+//RS             .formatter
+//RS             .as_ref()
+//RS             .map(|formatter| crate::JSON::quote(&formatter.package))
+//RS             .unwrap_or_else(|| "null".to_string());
+//RS         println!(
+//RS             "{{\"preset\":{},\"selected_presets\":[{}],\"applied_presets\":[{}],\"presets\":[{}],\"package_profiles\":[{}],\"environments\":[{}],\"active_environment\":{},\"active_environment_provenance\":[{}],\"sources\":[{}],\"language_catalog\":{{\"source\":\"jet-env-model builtin\",\"fingerprint\":{},\"packs\":[{}]}},\"languages\":[{}],\"language_packs\":[{}],\"language_projections\":[{}],\"packages\":[{}],\"formatter\":{},\"services\":[{}],\"{}\":[{}],\"{}\":[{}],\"variables\":[{}],\"files\":[{}],\"dotenv\":[{}],\"git_hooks_path\":{},\"integrations\":[{}]}}",
+//RS             crate::JSON::quote(preset),
+//RS             quote_list(&selected_presets.iter().map(String::as_str).collect::<Vec<_>>()),
+//RS             quote_list(&applied_presets.iter().map(String::as_str).collect::<Vec<_>>()),
+//RS             quote_list(&plan.environment.presets.iter().map(|item| item.name.as_str()).collect::<Vec<_>>()),
+//RS             package_profiles.join(","),
+//RS             quote_list(&plan.environment.environment_names.iter().map(String::as_str).collect::<Vec<_>>()),
+//RS             plan.environment
+//RS                 .active_environment
+//RS                 .as_deref()
+//RS                 .map(crate::JSON::quote)
+//RS                 .unwrap_or_else(|| "null".to_string()),
+//RS             quote_list(
+//RS                 &plan
+//RS                     .environment
+//RS                     .active_environment_provenance
+//RS                     .iter()
+//RS                     .map(String::as_str)
+//RS                     .collect::<Vec<_>>(),
+//RS             ),
+//RS             quote_list(&plan.environment.source_files.iter().map(String::as_str).collect::<Vec<_>>()),
+//RS             crate::JSON::quote(&catalog.fingerprint()),
+//RS             language_catalog,
+//RS             languages.join(","),
+//RS             language_packs,
+//RS             language_projections,
+//RS             quote_list(&packages),
+//RS             formatter,
+//RS             services,
+//RS             // D-JOB-NAME2=B: both keys always appear, so a consumer reads the
+//RS             // one it means instead of guessing from a merged list. The key text
+//RS             // comes from `Syntax`, the same constant the human heading uses.
+//RS             Syntax::ENV_REPORT_CHECKS_KEY,
+//RS             quote_list(&checks.iter().map(String::as_str).collect::<Vec<_>>()),
+//RS             Syntax::ENV_REPORT_JOBS_KEY,
+//RS             quote_list(&jobs.iter().map(String::as_str).collect::<Vec<_>>()),
+//RS             variables,
+//RS             quote_list(&files),
+//RS             dotenv.join(","),
+//RS             git_hooks_path,
+//RS             integrations.join(","),
+//RS         );
+//RS         return 0;
+//RS     }
+//RS     theme.status(&format!("preset: {preset}"));
+//RS     let applied = plan
+//RS         .environment
+//RS         .selected_preset
+//RS         .as_ref()
+//RS         .map(|preset| preset.applied.join(" -> "))
+//RS         .unwrap_or_else(|| "<none>".to_string());
+//RS     let selected = if selected_presets.is_empty() {
+//RS         "<none>".to_string()
+//RS     } else {
+//RS         selected_presets.join(", ")
+//RS     };
+//RS     theme.detail(&format!("selected presets: {selected}"));
+//RS     theme.detail(&format!("presets: {applied}"));
+//RS     theme.detail(&format!(
+//RS         "package generations: {}",
+//RS         if plan.environment.package_profiles.is_empty() {
+//RS             "<none>".to_string()
+//RS         } else {
+//RS             plan.environment
+//RS                 .package_profiles
+//RS                 .iter()
+//RS                 .map(|profile| profile.name.as_str())
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ")
+//RS         }
+//RS     ));
+//RS     theme.detail(&format!(
+//RS         "active environment: {} (from {})",
+//RS         plan.environment
+//RS             .active_environment
+//RS             .as_deref()
+//RS             .unwrap_or("<none>"),
+//RS         if plan.environment.active_environment_provenance.is_empty() {
+//RS             "<none>".to_string()
+//RS         } else {
+//RS             plan.environment.active_environment_provenance.join(", ")
+//RS         }
+//RS     ));
+//RS     let languages = plan
+//RS         .environment
+//RS         .languages
+//RS         .iter()
+//RS         .map(|language| {
+//RS             let mut label = language.name.clone();
+//RS             if !language.enable {
+//RS                 label.push_str(" (disabled)");
+//RS             }
+//RS             if let Some(version) = &language.version {
+//RS                 label.push_str(&format!("@{version}"));
+//RS             }
+//RS             if let Some(channel) = &language.channel {
+//RS                 label.push_str(&format!(" [{channel}]"));
+//RS             }
+//RS             if language.venv {
+//RS                 label.push_str(" +venv");
+//RS             }
+//RS             label
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     let catalog = ModuleEval::LanguagePackCatalog::builtin();
+//RS     theme.detail(&format!(
+//RS         "language catalog: {} ({})",
+//RS         catalog.names().join(", "),
+//RS         catalog.fingerprint()
+//RS     ));
+//RS     theme.detail(&format!(
+//RS         "languages: {}",
+//RS         if languages.is_empty() {
+//RS             "<none>".to_string()
+//RS         } else {
+//RS             languages.join(", ")
+//RS         }
+//RS     ));
+//RS     let expanded = plan
+//RS         .environment
+//RS         .language_projections
+//RS         .iter()
+//RS         .map(|projection| {
+//RS             format!(
+//RS                 "{}: +{} -{}",
+//RS                 projection.selection.name,
+//RS                 if projection.included.is_empty() {
+//RS                     "<none>".to_string()
+//RS                 } else {
+//RS                     projection.included.join(",")
+//RS                 },
+//RS                 if projection.omitted.is_empty() {
+//RS                     "<none>".to_string()
+//RS                 } else {
+//RS                     projection.omitted.join(",")
+//RS                 },
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     theme.detail(&format!(
+//RS         "language projections: {}",
+//RS         if expanded.is_empty() {
+//RS             "<none>".to_string()
+//RS         } else {
+//RS             expanded.join("; ")
+//RS         }
+//RS     ));
+//RS     theme.detail(&format!(
+//RS         "packages: {}",
+//RS         if packages.is_empty() {
+//RS             "<none>".to_string()
+//RS         } else {
+//RS             packages.join(", ")
+//RS         }
+//RS     ));
+//RS     theme.detail(&format!(
+//RS         "formatter: {}",
+//RS         plan.environment
+//RS             .lifecycle
+//RS             .formatter
+//RS             .as_ref()
+//RS             .map(|formatter| formatter.package.as_str())
+//RS             .unwrap_or("<none>")
+//RS     ));
+//RS     let services = plan
+//RS         .dev_services
+//RS         .iter()
+//RS         .map(env_info_service_summary)
+//RS         .collect::<Vec<_>>();
+//RS     theme.detail(&format!(
+//RS         "services: {}",
+//RS         if services.is_empty() {
+//RS             "<none>".to_string()
+//RS         } else {
+//RS             services.join(", ")
+//RS         }
+//RS     ));
+//RS     // D-JOB-NAME2=B: two headings, each reading the same `Syntax` constant the
+//RS     // machine key reads, so the human and machine renderings carry one split.
+//RS     theme.detail(&format!(
+//RS         "{}: {}",
+//RS         Syntax::ENV_REPORT_CHECKS_KEY,
+//RS         if checks.is_empty() {
+//RS             "<none>".to_string()
+//RS         } else {
+//RS             checks.join(", ")
+//RS         }
+//RS     ));
+//RS     theme.detail(&format!(
+//RS         "{}: {}",
+//RS         Syntax::ENV_REPORT_JOBS_KEY,
+//RS         if jobs.is_empty() {
+//RS             "<none>".to_string()
+//RS         } else {
+//RS             jobs.join(", ")
+//RS         }
+//RS     ));
+//RS     let variables = variable_sources
+//RS         .iter()
+//RS         .map(|(name, sources)| format!("{} [{}]", name, sources.join(",")))
+//RS         .collect::<Vec<_>>();
+//RS     theme.detail(&format!(
+//RS         "variables: {}",
+//RS         if variables.is_empty() {
+//RS             "<none>".to_string()
+//RS         } else {
+//RS             variables.join(", ")
+//RS         }
+//RS     ));
+//RS     theme.detail(&format!(
+//RS         "managed files: {}",
+//RS         if plan.environment.files.is_empty() {
+//RS             "<none>".to_string()
+//RS         } else {
+//RS             plan.environment
+//RS                 .files
+//RS                 .iter()
+//RS                 .map(|file| file.destination.as_str())
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ")
+//RS         }
+//RS     ));
+//RS     theme.detail(&format!(
+//RS         "git hooks path: {}",
+//RS         plan.environment
+//RS             .lifecycle
+//RS             .git_hooks_path
+//RS             .as_deref()
+//RS             .unwrap_or("<none>")
+//RS     ));
+//RS     let integrations = plan
+//RS         .environment
+//RS         .integrations
+//RS         .iter()
+//RS         .map(|integration| {
+//RS             if integration.name.is_empty() {
+//RS                 integration.kind.as_str().to_string()
+//RS             } else {
+//RS                 format!("{} ({})", integration.name, integration.kind.as_str())
+//RS             }
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     theme.detail(&format!(
+//RS         "integrations: {}",
+//RS         if integrations.is_empty() {
+//RS             "<none>".to_string()
+//RS         } else {
+//RS             integrations.join(", ")
+//RS         }
+//RS     ));
+//RS     0
+//RS }
+//RS 
+//RS /// D-ENVHOOK1=A: `jet env hook <shell>` — print the opt-in shell hook the user
+//RS /// installs once. Pure text (no realize, no trust): installing the hook is a
+//RS /// safe editor action; the trust gate only fires later, on the first activation
+//RS /// of an untrusted env.
+// END-PORT-PENDING 0851 crates/jetpack/src/CLI/run_enter_dev.rs:1775-3618
+

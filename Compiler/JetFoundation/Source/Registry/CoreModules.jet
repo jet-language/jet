@@ -38,60 +38,21 @@ pub struct CoreModuleRetirement {
     pub decision: String
 }
 
-fn core_module_retirement_row(retired: String, canonical: String) -> CoreModuleRetirement Never! {
-    CoreModuleRetirement{retired: retired, canonical: canonical, decision: "D-CORE-TREE1=A"}
-}
-
 pub fn core_module_retirements() -> [CoreModuleRetirement] Never! {
-    [CoreModuleRetirement]{
-        CoreModuleRetirement{retired: "core.path.join/parent/extension/normalize", canonical: "Path.from(value).join(part), .parent(), .extension(), .normalize()", decision: "D-CORE-PATH1"},
-        core_module_retirement_row("core.io", "core.term, core.process, or the prelude"),
-        core_module_retirement_row("core.path", "core.files"),
-        core_module_retirement_row("core.time.date", "core.time"),
-        core_module_retirement_row("core.time.datetime", "core.time"),
-        core_module_retirement_row("core.text.unicode", "core.text"),
-        core_module_retirement_row("core.fmt", "core.text.fmt"),
-        core_module_retirement_row("core.random", "core.math.random"),
-        core_module_retirement_row("core.env", "core.sys"),
-        core_module_retirement_row("core.os", "core.sys"),
-        core_module_retirement_row("core.tls", "core.net.tls"),
-        core_module_retirement_row("core.ws", "core.net.ws"),
-        core_module_retirement_row("core.url", "core.net.url"),
-        core_module_retirement_row("core.mime", "core.net.mime"),
-        core_module_retirement_row("core.uuid", "core.crypto.uuid"),
-        core_module_retirement_row("core.vault", "core.crypto.vault"),
-        core_module_retirement_row("core.raylib", "core.game.raylib"),
-        core_module_retirement_row("core.browser", "core.web.browser"),
-        core_module_retirement_row("core.solve", "core.compute.solve"),
-        core_module_retirement_row("core.sketch", "core.data.sketch.*"),
-        core_module_retirement_row("core.sketch.hll", "core.data.sketch.hll"),
-        core_module_retirement_row("core.sketch.tdigest", "core.data.sketch.tdigest"),
-        core_module_retirement_row("core.sketch.reservoir", "core.data.sketch.reservoir"),
-        core_module_retirement_row("core.sketch.cms", "core.data.sketch.cms"),
-        core_module_retirement_row("core.compress", "core.archive.gzip or core.archive.zstd"),
-        core_module_retirement_row("core.compress.gzip", "core.archive.gzip"),
-        core_module_retirement_row("core.compress.zstd", "core.archive.zstd"),
-        core_module_retirement_row("core.science.measurement", "core.units"),
-        core_module_retirement_row("core.mem.alloc", "core.mem"),
-        core_module_retirement_row("core.scope", "core.mem.scope"),
-        core_module_retirement_row("core.lang", "core.compiler.lang"),
-        core_module_retirement_row("core.binary", "core.encoding and core.term.Reader"),
+    rows := [CoreModuleRetirement]{}
+    loop row in SYNTAX_RETIREMENTS {
+        if row.kind == SyntaxRetirementKind.Semantic && row.code == (Val("E1001")) {
+            &rows.push(CoreModuleRetirement{retired: row.retired, canonical: row.canonical, decision: row.decision})
+        }
     }
+    rows
 }
 
 // Rust `retired_core_module`: the longest retired namespace that is `name`
 // itself or a dotted prefix of it.
 pub fn core_module_retirement(name: String) -> CoreModuleRetirement? {
-    found := CoreModuleRetirement?{None}
-    best := -1
-    loop row in core_module_retirements() {
-        if row.retired != name && !name.starts_with("{row.retired}.") -> next
-        if row.retired.len() >= best {
-            best = row.retired.len()
-            found = Val(row)
-        }
-    }
-    found
+    row :: syntax_retired_core_module(name) ?? return None
+    Val(CoreModuleRetirement{retired: row.retired, canonical: row.canonical, decision: row.decision})
 }
 
 pub fn core_module_export_has_name(names: [String], name: String) -> Bool Never! {
@@ -129,8 +90,8 @@ pub fn core_module_type_leaf(name: String) -> String Never! {
         }
     }
     if {
-        namespace_separator >= 0 -> String.from_bytes(bytes[namespace_separator + 2..bytes.len()]) ?? name
-        module_separator >= 0 -> String.from_bytes(bytes[module_separator + 1..bytes.len()]) ?? name
+        namespace_separator >= 0 -> String.from_bytes(bytes[namespace_separator + 2..<bytes.len()]) ?? name
+        module_separator >= 0 -> String.from_bytes(bytes[module_separator + 1..<bytes.len()]) ?? name
         else -> name
     }
 }
@@ -143,6 +104,16 @@ pub fn core_type_modules(name: String) -> [String] Never! {
     }
     modules
 }
+
+// Rust `CoreModuleExports::core_enum_variants`: the canonical variant names of
+// a Core enum leaf. Payload shape stays with the checked source declaration.
+pub fn core_enum_variants(name: String) -> [String]? {
+    loop row in CORE_ENUM_ROWS {
+        if row.name != name -> next
+        if row.kind == .Enum(variants) -> return Val(variants)
+    }
+    None
+}
 fn core_module_source_declaration_line(source_text: String, module_name: String) -> String? {
     prefix := "module {module_name} "
     source_bytes := source_text.bytes()
@@ -150,7 +121,7 @@ fn core_module_source_declaration_line(source_text: String, module_name: String)
     loop line_start < source_bytes.len() {
         line_end := line_start
         loop line_end < source_bytes.len() && source_bytes[line_end] != (U8{10}) -> line_end += 1
-        line :: String.from_bytes(source_bytes[line_start..line_end]) ?? return None
+        line :: String.from_bytes(source_bytes[line_start..<line_end]) ?? return None
         trimmed := line.trim()
         if trimmed.starts_with(prefix) -> return Val(trimmed)
         line_start = line_end + 1
@@ -166,7 +137,7 @@ fn core_module_source_brace_clause(line: String, name: String) -> String? {
     end := 0
     loop end < bytes.len() {
         if bytes[end] == (U8{125}) {
-            return Val(String.from_bytes(bytes[0..end]) ?? "")
+            return Val(String.from_bytes(bytes[0..<end]) ?? "")
         }
         end += 1
     }
@@ -181,7 +152,7 @@ fn core_module_source_bracket_clause(line: String, name: String) -> String? {
     end := 0
     loop end < bytes.len() {
         if bytes[end] == (U8{93}) {
-            return Val(String.from_bytes(bytes[0..end]) ?? "")
+            return Val(String.from_bytes(bytes[0..<end]) ?? "")
         }
         end += 1
     }
@@ -212,7 +183,7 @@ fn core_module_source_leaf_kind(text: String) -> CoreLeafKind? {
     if value == "crypto_nominal" -> return Val(CoreLeafKind.CryptoNominal)
     if value.starts_with("plain(") && value.ends_with(")") {
         bytes := value.bytes()
-        variants_text :: String.from_bytes(bytes[6..bytes.len() - 1]) ?? return None
+        variants_text :: String.from_bytes(bytes[6..<bytes.len() - 1]) ?? return None
         variants := [String]{}
         if variants_text.trim() != "" {
             loop variant in variants_text.split("|") {
@@ -225,7 +196,7 @@ fn core_module_source_leaf_kind(text: String) -> CoreLeafKind? {
     }
     if value.starts_with("generic(") && value.ends_with(")") {
         bytes := value.bytes()
-        arity_text :: String.from_bytes(bytes[8..bytes.len() - 1]) ?? return None
+        arity_text :: String.from_bytes(bytes[8..<bytes.len() - 1]) ?? return None
         arity :: Int.parse(arity_text.trim()) ?? return None
         if arity < 0 -> return None
         return Val(CoreLeafKind.Generic{arity: arity})

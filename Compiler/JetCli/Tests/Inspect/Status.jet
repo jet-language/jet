@@ -1,0 +1,183 @@
+// Original policy-domain observations only, NOT receipt self-authentication or
+// native Store success. These host tests remain outside the portable proof.
+// No test producer exists on the status-host interface.
+struct JetCLIStatusTestHost {
+    receipts: [JetCLIReceipt]
+    current: [String:Bool]
+    failed_current: [String]
+    unreadable: Bool
+    calls: [String]
+    impl JetCLIStatusHost {
+        fn cwd(&self) -> status_paths.Path Never! { status_paths.of("/project") }
+        fn default_target(&self, cwd: status_paths.Path) -> String Never! {
+            &self.calls.push("default")
+            "main.jet"
+        }
+        fn receipt_root(&self, verb: String, arguments: [String], cwd: status_paths.Path) -> status_paths.Path Never! {
+            assert_eq(verb, "prove")
+            assert_eq(arguments[0], "prove")
+            &self.calls.push("root")
+            status_paths.of("/project/.jet/receipts")
+        }
+        fn list(&self, root: status_paths.Path) -> [JetCLIReceipt] JetCLIStatusError! {
+            &self.calls.push("list")
+            if self.unreadable -> return Err(JetCLIStatusError{message: "unreadable"})
+            Ok(~self.receipts)
+        }
+        fn is_current(&self, root: status_paths.Path, receipt: &JetCLIReceipt) -> Bool JetCLIStatusError! {
+            &self.calls.push("current {receipt.claim.key}")
+            if self.failed_current.contains(receipt.claim.key) -> return Err(JetCLIStatusError{message: "invalid input closure"})
+            Ok(self.current.get(receipt.claim.key) ?? false)
+        }
+        fn sections(&self, root: status_paths.Path, receipt: &JetCLIReceipt) -> StatusValue JetCLIStatusError! {
+            &self.calls.push("sections {receipt.claim.key}")
+            Ok(StatusValue.object(StatusFields.new().with("proof", StatusValue.String{value: "authenticated"})))
+        }
+        fn canonicalize(&self, path: status_paths.Path) -> status_paths.Path? Never! { Val(path) }
+        fn is_directory(&self, path: status_paths.Path) -> Bool Never! { path.raw == "/project" }
+    }
+}
+fn jet_cli_status_test_receipt(verb: String, key: String, path: String, status: Int) -> JetCLIReceipt Never! {
+    receipt := receipt_test_empty()
+    receipt.claim.verb = verb
+    receipt.claim.key = key
+    receipt.claim.inputs = [JetCLIReceiptInput]{JetCLIReceiptInput{path: status_paths.of(path), digest: "source-hash"}}
+    receipt.status = I32{status}
+    receipt
+}
+#Test("status target parser preserves color-value swallowing and exact refusals") {
+    // #4376: inspect the Result first; its success payload is still optional.
+    if jet_cli_status_target_argument([String]{"--json", "--color", "always", "main.jet"}) == {
+        .Ok(value) -> assert_eq(value, Val("main.jet"))
+        .Err(_) -> panic("valid status argv refused")
+    }
+    if jet_cli_status_target_argument([String]{"--color"}) == {
+        .Ok(value) -> assert_eq(value, None)
+        .Err(_) -> panic("bare color flag refused")
+    }
+    arguments :: [[String]]{[String]{"--wat"}, [String]{"a.jet", "b.jet"}}
+    messages :: [String]{"unknown `jet status` flag `--wat`", "`jet status` accepts at most one target"}
+    loop (index, args) in arguments {
+        if jet_cli_status_target_argument(args) == {
+            .Ok(_) -> panic("invalid status argv accepted")
+            .Err(error) -> assert_eq(error.message, messages[index])
+        }
+    }
+}
+
+#Test("status target parser preserves first-error order and UTF8 target bytes") {
+    if jet_cli_status_target_argument([String]{"é/main.jet", "--quiet", "--no-color", "--color=invalid", "--json"}) == {
+        .Ok(value) -> assert_eq(value, Val("é/main.jet"))
+        .Err(_) -> panic("output policy or UTF8 target changed")
+    }
+    arguments :: [[String]]{[String]{"--bad", "a.jet", "b.jet"}, [String]{"a.jet", "b.jet", "--bad"}, [String]{"--color", "--bad", "é.jet"}}
+    loop (index, args) in arguments {
+        if jet_cli_status_target_argument(args) == {
+            .Ok(value) -> {
+                assert_eq(index, 2)
+                assert_eq(value, Val("é.jet"))
+            }
+            .Err(error) -> {
+                assert(index < 2)
+                assert_eq(error.message, if index == 0 -> "unknown `jet status` flag `--bad`" else -> "`jet status` accepts at most one target")
+            }
+        }
+    }
+}
+#Test("status matches path components and never sibling text prefixes") {
+    assert(jet_cli_status_path_prefix("/project/main.jet", "/project"))
+    assert(jet_cli_status_path_prefix("/project//./main.jet", "/project/"))
+    assert(!jet_cli_status_path_prefix("/project2/main.jet", "/project"))
+    assert(!jet_cli_status_path_prefix("project/main.jet", "/project"))
+    assert(!jet_cli_status_path_prefix("/project", "/project/main.jet"))
+    assert(jet_cli_status_path_matches("/project//./é.jet", "/project/é.jet", false))
+    assert(jet_cli_status_path_matches("./é.jet", "./é.jet", false))
+    assert(jet_cli_status_path_matches("/project/é.jet", "/project", true))
+    assert(!jet_cli_status_path_matches("/project/é.jet", "/project", false))
+    assert(!jet_cli_status_path_matches("/project2/é.jet", "/project", true))
+    assert(!jet_cli_status_path_matches("/project/../é.jet", "/é.jet", false))
+    assert(!jet_cli_status_path_matches("./é.jet", "é.jet", false))
+    assert(jet_cli_status_path_matches("////", "/", false))
+    assert(jet_cli_status_path_matches("/project/", "/project", false))
+    assert(!jet_cli_status_path_matches("project", "/project", false))
+}
+#Test("status verdict text and receipt padding are exact and contain no producer output") {
+    rows :: [JetCLIStatusClaim]{
+        JetCLIStatusClaim{name: "check", action: "jet check main.jet", state: JetCLIStatusState.Proven, receipt: Val("aaaaaaaaaaaa"), sections: StatusValue.Null, reason: "current receipt records success"},
+        JetCLIStatusClaim{name: "test", action: "jet test main.jet", state: JetCLIStatusState.Unproven, receipt: None, sections: StatusValue.Null, reason: "no receipt proves this claim"},
+        JetCLIStatusClaim{name: "prove", action: "jet prove main.jet", state: JetCLIStatusState.Stale, receipt: Val("bbbbbbbbbbbb"), sections: StatusValue.Null, reason: "receipt input closure changed"},
+    }
+    output :: jet_cli_status_render("main.jet", rows, "", false)
+    assert_eq(output.stdout, "target  main.jet\ncheck    proven    receipt aaaaaaaaaaaa\ntest     unproven  receipt none · act: jet test main.jet · no receipt proves this claim\nprove    stale     receipt bbbbbbbbbbbb · act: jet prove main.jet · receipt input closure changed\n")
+    assert_eq(output.stderr, "")
+    assert_eq(output.exit_code, 0)
+}
+// #4381: canonical Core Path identity remains required on native/full-unit proof.
+#Test("status current failure outranks success and stale, authenticated errors fail closed") {
+    receipts :: [JetCLIReceipt]{
+        jet_cli_status_test_receipt("test", "c".repeat(64), "/project/main.jet", 0),
+        jet_cli_status_test_receipt("check", "a".repeat(64), "/project/main.jet", 0),
+        jet_cli_status_test_receipt("test", "d".repeat(64), "/project/main.jet", 1),
+        jet_cli_status_test_receipt("test", "e".repeat(64), "/project/main.jet", 0),
+        jet_cli_status_test_receipt("prove", "f".repeat(64), "/project/main.jet", 0),
+        jet_cli_status_test_receipt("unrelated", "0".repeat(64), "/project2/main.jet", 0),
+    }
+    host := JetCLIStatusTestHost{receipts: receipts, current: [String:Bool]{"a".repeat(64): true, "c".repeat(64): true, "d".repeat(64): true, "e".repeat(64): false}, failed_current: [String]{"f".repeat(64)}, unreadable: false, calls: [String]{}}
+    output :: jet_cli_run_status<JetCLIStatusTestHost>(&host, [String]{"/project"}, false)
+    assert(output.stdout.contains("check    proven    receipt aaaaaaaaaaaa"))
+    assert(output.stdout.contains("test     unproven  receipt dddddddddddd"))
+    assert(output.stdout.contains("prove    unproven  receipt ffffffffffff"))
+    assert(!output.stdout.contains("unrelated"))
+    assert(!host.calls.contains("default"))
+    assert_eq(output.exit_code, 0)
+}
+// #4381: canonical Core Path host methods must preserve one nominal identity.
+#Test("status unreadable store returns truthful empty report without freshness queries") {
+    host := JetCLIStatusTestHost{receipts: [JetCLIReceipt]{}, current: [String:Bool]{}, failed_current: [String]{}, unreadable: true, calls: [String]{}}
+    output :: jet_cli_run_status<JetCLIStatusTestHost>(&host, [String]{}, false)
+    assert_eq(output.stdout, "target  main.jet\n")
+    assert_eq(output.exit_code, 0)
+    assert_eq(host.calls, [String]{"default", "root", "list"})
+}
+// Original #4306 witness retained in predecessor scratch. The canonical typed
+// Report ABI now owns ordering; keep the original Rust bytes unchanged.
+#Test("status unreadable machine report preserves exact error and no fabricated claims") {
+    output :: jet_cli_status_render("main.jet", [JetCLIStatusClaim]{}, "receipt store is unreadable: unreadable", true)
+    assert_eq(output.stdout, "{{\"schema\":\"jet.status/v1\",\"action\":\"status\",\"ok\":true,\"reports\":[],\"claims\":[],\"error\":\"receipt store is unreadable: unreadable\",\"target\":\"main.jet\"}}\n")
+}
+
+#Test("status typed machine claims retain field order sections nulls and UTF8") {
+    // Rendering a ClaimRow is not receipt authentication or a store success.
+    sections :: StatusValue.object(StatusFields.new().with("z", StatusValue.Integer{value: 7}).with("a", StatusValue.String{value: "é"}))
+    row :: JetCLIStatusClaim{name: "test", action: "jet test é.jet", state: JetCLIStatusState.Stale, receipt: Val("abcdef012345"), sections: sections, reason: "receipt input closure changed"}
+    output :: jet_cli_status_render("é.jet", [JetCLIStatusClaim]{row}, "", true)
+    assert_eq(output.stdout, "{{\"schema\":\"jet.status/v1\",\"action\":\"status\",\"ok\":true,\"reports\":[],\"claims\":[{{\"action\":\"jet test é.jet\",\"claim\":\"test\",\"reason\":\"receipt input closure changed\",\"receipt\":\"abcdef012345\",\"sections\":{{\"z\":7,\"a\":\"é\"}},\"state\":\"stale\"}}],\"error\":null,\"target\":\"é.jet\"}}\n")
+    assert_eq(output.stderr, "")
+    assert_eq(output.exit_code, 0)
+    assert_eq(jet_cli_status_state_name(JetCLIStatusState.Proven), "proven")
+    assert_eq(jet_cli_status_state_name(JetCLIStatusState.Unproven), "unproven")
+    assert_eq(jet_cli_status_state_name(JetCLIStatusState.Stale), "stale")
+}
+
+// #4427: real Front sys.set Unit/native Result mismatch; original full closure retained.
+#Test("Front routes status argv and machine policy to the authenticated store journey") {
+    facts :: output_adapter_test_facts()
+    plan :: jet_cli_front([String]{"status", "main.jet", "--json", "--color=never"}, facts)
+    if plan == {
+        .Status(arguments, json) -> {
+            assert_eq(arguments, [String]{"main.jet", "--json", "--color=never"})
+            assert(json)
+        }
+        else -> panic("Front refused the status command")
+    }
+}
+
+// #4427 Front env boundary; #4381 canonical Path host identity remains separate.
+#Test("status dispatch runs the existing read-only store host without a producer") {
+    host := JetCLIStatusTestHost{receipts: [JetCLIReceipt]{}, current: [String:Bool]{}, failed_current: [String]{}, unreadable: true, calls: [String]{}}
+    output :: jet_cli_dispatch_with_status<JetCLIStatusTestHost>([String]{"status", "main.jet"}, output_adapter_test_facts(), &host)
+    assert_eq(output.stdout, "target  main.jet\n")
+    assert_eq(output.stderr, "")
+    assert_eq(output.exit_code, 0)
+    assert_eq(host.calls, [String]{"root", "list"})
+}

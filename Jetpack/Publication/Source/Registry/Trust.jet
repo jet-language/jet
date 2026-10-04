@@ -1,0 +1,124 @@
+// Source/Publish/Registry.rs:437-662. Pins are HOST state, never repository
+// inputs. Publication may establish a pin; resolution only reads an installed
+// one. Foundation owns held no-follow reads/publication. Native gates #3593,
+// typed InvalidData #4409; signed/TUF composition and entropy #3597/#4262.
+
+pub fn publication_registry_root_key_path(registry_name: String) -[Env]> String Never! {
+    publication_registry_trust_path(publication_keys_dir(), registry_name, "registry-roots", "pub")
+}
+pub fn publication_registry_checkpoint_path(registry_name: String) -[Env]> String Never! {
+    publication_registry_trust_path(publication_keys_dir(), registry_name, "registry-checkpoints", "state")
+}
+// Rust Path::parent of a root has no value; a single relative component has
+// the EMPTY parent, not '.'. Preserve that distinction.
+pub fn publication_registry_trust_path(keys_dir: String, registry_name: String, directory: String, extension: String) -> String Never! {
+    base :: if keys_dir == "/" || keys_dir == "" -> "." else -> files.dirname(keys_dir)
+    files.join(files.join(base, directory), "{pkg_sha256_hex(registry_name.bytes())}.{extension}")
+}
+fn publication_configured_registry_root_key_path(registry_name: String) -[Env]> String Never! {
+    configured :: sys.get("JET_REGISTRY_ROOT_KEY") ?? ""
+    if configured != "" -> configured else -> publication_registry_root_key_path(registry_name)
+}
+pub fn publication_registry_root_key_is_hex(public_key: String) -> Bool Never! {
+    bytes :: public_key.bytes()
+    if bytes.len() != 64 -> return false
+    loop byte in bytes {
+        code :: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) -> return false
+    }
+    true
+}
+fn publication_registry_trust_context(path: String, detail: String) -> IOContext Never! {
+    IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val(detail)}
+}
+// A held authority refuses symlinks, hard links and swaps of the held chain.
+// Rust read_registry_file_nofollow opens the path with O_NOFOLLOW: the OS
+// resolves symlinked ancestors, only the key itself must not be a link. Do not
+// fall back to files.read after its security refusal.
+fn publication_read_registry_root_key_at(path: String) -[FS, Env]> String IOError! {
+    resolved :: foundation_resolve_path_ancestors(path)
+    held :: foundation_open_file_authority(files.dirname(resolved), files.basename(resolved))
+    bytes :: held.read_bounded(4096)
+    text :: String.from_bytes(bytes) ?? return Err(IOError.InvalidData(publication_registry_trust_context(path, "registry root key is not UTF-8")))
+    held.revalidate()
+    Ok(text.trim())
+}
+fn publication_check_registry_root_pin(path: String, public_key: String) -[FS, Env]> Bool IOError! {
+    info :: if files.stat(path) == {
+        .Ok(metadata) -> metadata
+        .Err(_) -> { return Ok(false) }
+    }
+    if info.is_symlink || !info.is_file -> return Err(IOError.InvalidData(publication_registry_trust_context(path, "registry root key is not a regular file")))
+    existing :: publication_read_registry_root_key_at(path)
+    if existing != public_key -> return Err(IOError.PermissionDenied(publication_registry_trust_context(path, "registry root key pin changed")))
+    Ok(true)
+}
+pub fn publication_ensure_registry_root_key(registry_name: String, public_key: String) -[FS, Env, Time, Time.Wait]> String IOError! {
+    if !publication_registry_root_key_is_hex(public_key) -> return Err(IOError.InvalidData(publication_registry_trust_context(registry_name, "registry root key is not a 32-byte hexadecimal public key")))
+    path :: publication_configured_registry_root_key_path(registry_name)
+    if publication_check_registry_root_pin(path, public_key) -> return Ok(path)
+    if (sys.get("JET_REGISTRY_ROOT_KEY") ?? "") != "" -> return Err(IOError.NotFound(publication_registry_trust_context(path, "configured registry root key is unavailable at {path}")))
+    parent :: files.dirname(path)
+    if parent == "" -> return Err(IOError.InvalidInput(publication_registry_trust_context(path, "registry root key has no parent")))
+    // Rust create_dir_all(parent) + ensure_real_directory(parent): symlinked
+    // ancestors (HOME, tmp) and normalized spellings follow the OS; only the
+    // root-key directory itself must be a real directory. create_dir_all
+    // accepts a link to a directory, which the real-directory check refuses;
+    // a missing directory is created and any other object fails creation with
+    // its own OS error. Lock, pin and write all use this one resolved directory.
+    directory :: foundation_resolve_path_ancestors(parent, true)
+    if files.stat(directory) == {
+        .Ok(info) -> if info.is_symlink && files.is_dir(directory) -> return Err(IOError.InvalidData(publication_registry_trust_context(parent, "registry root-key directory is not a real directory")))
+        .Err(error) -> if error == {
+            .NotFound(_) -> {}
+            else -> { return Err(error) }
+        }
+    }
+    authority :: foundation_open_directory_authority(directory, true)
+    lock_name :: "{files.basename(path).removesuffix(".pub")}.lock"
+    lock :: publication_acquire_registry_lock(directory, lock_name, 20, "registry root-key pin is busy")
+    // Recheck under the lock: the final key is never an empty create-new file.
+    if publication_install_registry_root_pin(path, directory, public_key) == {
+        .Ok(installed) -> {
+            close(^lock)
+            authority.revalidate()
+            Ok(installed)
+        }
+        .Err(error) -> {
+            close(^lock)
+            Err(error)
+        }
+    }
+}
+fn publication_install_registry_root_pin(path: String, directory: String, public_key: String) -[FS, Env, Time]> String IOError! {
+    if publication_check_registry_root_pin(path, public_key) -> return Ok(path)
+    policy :: FoundationPublicationPolicy{mode: 384, create: .CreateNew, destination_links: .Refuse, create_root: false}
+    foundation_write_file_nofollow_at_root(directory, files.basename(path), "{public_key}\n".bytes(), None, policy)
+    Ok(path)
+}
+pub fn publication_read_registry_root_key(registry_name: String) -[FS, Env]> String IOError! {
+    path :: publication_configured_registry_root_key_path(registry_name)
+    info :: files.stat(path) ?? return Err(publication_registry_root_key_read_error(path, err))
+    if info.is_symlink || !info.is_file -> return Err(IOError.InvalidData(publication_registry_trust_context(path, "registry root key is not a regular file")))
+    key :: publication_read_registry_root_key_at(path)
+    if !publication_registry_root_key_is_hex(key) -> return Err(IOError.InvalidData(publication_registry_trust_context(path, "registry root key is malformed")))
+    Ok(key)
+}
+fn publication_registry_root_key_read_error(path: String, error: IOError) -> IOError Never! {
+    context :: publication_registry_trust_context(path, "registry root key is not installed at {path}: {error}")
+    if error == {
+        .NotFound(_) -> IOError.NotFound(context)
+        .PermissionDenied(_) -> IOError.PermissionDenied(context)
+        .InvalidInput(_) -> IOError.InvalidInput(context)
+        .InvalidData(_) -> IOError.InvalidData(context)
+        .AlreadyExists(_) -> IOError.AlreadyExists(context)
+        .TimedOut(_) -> IOError.TimedOut(context)
+        .Cancelled(_) -> IOError.Cancelled(context)
+        .Closed(_) -> IOError.Closed(context)
+        .Protocol(_) -> IOError.Protocol(context)
+        .Other(_) -> IOError.Other(context)
+        // ResourceLimit carries no IOContext in canonical Core. Preserve its
+        // typed identity; metadata's OS-kind/context closure stays #3593.
+        .ResourceLimit(_) -> error
+    }
+}

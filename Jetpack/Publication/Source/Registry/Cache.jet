@@ -1,0 +1,221 @@
+// Source/Publish/Registry.rs:664-938. A cache is a privately cloned sibling,
+// never an in-place fetch/reset of the previously verified checkout.
+// Native closure: held directory authority #3593, DNS pins #3595, process
+// #3594; the complete signed/offline Fetch journey remains #4262/#3597.
+
+pub fn publication_registry_cache_component(name: String) -> String Never! {
+    safe := name != "" && name != "." && name != ".."
+    loop byte in name.bytes() {
+        code :: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95 || code == 46) -> safe = false
+    }
+    if safe -> ~name else -> "registry-{pkg_sha256_hex(name.bytes())}"
+}
+pub fn publication_index_repo_path(registry: PublicationRegistryConfig) -[Env]> String Never! {
+    configured :: sys.get("JET_REGISTRY_CACHE_DIR") ?? ""
+    base :: if configured != "" -> configured else -> files.join(files.join(sys.get("HOME") ?? ".", ".jet"), "registry-index")
+    files.join(base, publication_registry_cache_component(registry.name))
+}
+pub fn publication_registry_cache_lock_name(name: String) -> String Never! {
+    ".{publication_registry_cache_component(name)}.cache-lock"
+}
+pub fn publication_registry_clone_stage_name(name: String, kind: String, suffix: String) -> String Never! {
+    ".{publication_registry_cache_component(name)}.{kind}-{suffix}"
+}
+pub fn publication_registry_unique_suffix() -[Env, Time]> String Never! {
+    nanos :: time.unix_ns()
+    "{sys.pid()}-{if nanos < 0 -> 0 else -> nanos}"
+}
+fn publication_registry_cache_error(registry: PublicationRegistryConfig, detail: String) -> PublicationDiagnosticError Never! {
+    PublicationDiagnosticError{diagnostic: publication_e1235(registry.url, detail)}
+}
+// The expected identity is the ORIGINAL configured URL, not the transport's
+// IP-substituted URL. A failed git command never supplies a trustworthy origin.
+pub fn publication_registry_origin_matches(url: String, success: Bool, origin: String) -> Bool Never! {
+    success && origin.trim() == url
+}
+// Main's Registry.rs tandem correction: pin Git's NETWORK request using a
+// per-command rewrite, but record the configured URL as the clone's origin.
+// HTTP/SSH already pin through the hardened transport ProcessSpec.
+pub fn publication_registry_clone_arguments(url: String, pinned: String, path: String) -> [String] Never! {
+    args := [String]{}
+    if pinned != url -> &args.push("-c")
+    if pinned != url -> &args.push("url.{pinned}.insteadOf={url}")
+    &args.push("clone")
+    &args.push("--")
+    &args.push(~url)
+    &args.push(~path)
+    args
+}
+
+// Rust RegistryRootKeyLock/RegistryCacheLock share marker acquisition, but
+// retain different names, waits and diagnostics. Foundation retains the held
+// chain; closing this owner removes only its own marker, including action Err.
+struct PublicationRegistryMarkerLock {
+    authority: FoundationDirectoryAuthority
+    name: String
+}
+impl PublicationRegistryMarkerLock.Close {
+    fn close(^self) -[FS]> {
+        self.authority.remove(self.name).drop("release the owned registry marker on every result")
+    }
+}
+// `parent` is the caller's foundation_resolve_path_ancestors directory, so the
+// marker lives in the same held directory as the pin or clone it guards.
+fn publication_acquire_registry_lock(parent: String, name: String, delay_ms: Int, busy: String) -[FS, Env, Time, Time.Wait]> PublicationRegistryMarkerLock IOError! {
+    authority :: foundation_open_directory_authority(parent)
+    path :: files.join(parent, name)
+    loop _ in 0..<100 {
+        writer :: authority.create_exclusive(name, 384) ?? {
+            if err == {
+                .AlreadyExists(_) -> {}
+                else -> return Err(err)
+            }
+            if files.stat(path) == .Ok(info) {
+                if time.unix_ns() - info.modified.unix_ns > 300000000000 {
+                    authority.remove(name).drop("best-effort stale registry marker reclamation")
+                    next
+                }
+            }
+            time.sleep(time.duration_ms(delay_ms))
+            next
+        }
+        if writer.fsync() == .Err(error) {
+            close(^writer)
+            authority.remove(name).drop("remove a marker whose initial fsync failed")
+            return Err(error)
+        }
+        close(^writer)
+        return Ok(PublicationRegistryMarkerLock{authority: authority, name: name})
+    }
+    Err(IOError.TimedOut(publication_registry_trust_context(path, busy)))
+}
+
+fn publication_validate_existing_index_clone(registry: PublicationRegistryConfig, dir: String, transport: PublicationRegistryTransport) -[FS, Env, Exec, Time.Wait]> Bool PublicationDiagnosticError! {
+    info :: if files.stat(dir) == {
+        .Ok(info) -> info
+        .Err(error) -> if error == {
+            .NotFound(_) -> { return Ok(false) }
+            else -> { return Err(publication_registry_cache_error(registry, "{error}")) }
+        }
+    }
+    if info.is_symlink || !info.is_dir -> return Err(publication_registry_cache_error(registry, "the local registry cache path is not a real directory"))
+    git_dir :: files.join(dir, ".git")
+    git_info :: if files.stat(git_dir) == {
+        .Ok(metadata) -> metadata
+        .Err(error) -> if error == {
+            .NotFound(_) -> { return Err(publication_registry_cache_error(registry, "the local registry cache is not a git repository")) }
+            else -> { return Err(publication_registry_cache_error(registry, "{error}")) }
+        }
+    }
+    if git_info.is_symlink || !git_info.is_dir -> return Err(publication_registry_cache_error(registry, "the local registry cache has an invalid git directory"))
+    // dir and .git were checked no-follow above; their ancestors (a symlinked
+    // HOME or cache root) resolve as the OS resolves them, as in Rust.
+    resolved_git_dir :: foundation_resolve_path_ancestors(git_dir) ?? return Err(publication_registry_cache_error(registry, "{err}"))
+    authority :: foundation_open_directory_authority(resolved_git_dir) ?? return Err(publication_registry_cache_error(registry, "{err}"))
+    command :: publication_registry_git_command(transport) ?? return Err(publication_registry_cache_error(registry, "{err}"))
+    origin :: command.args_extend([String]{"remote", "get-url", "origin"}).cwd(dir).run() ?? return Err(publication_registry_cache_error(registry, "{err}"))
+    if !publication_registry_origin_matches(registry.url, origin.success, origin.output) -> return Err(publication_registry_cache_error(registry, "the local registry cache belongs to a different remote"))
+    authority.revalidate() ?? return Err(publication_registry_cache_error(registry, "{err}"))
+    Ok(true)
+}
+
+// Foundation retains the ancestor chain for every mutation and delegates to
+// its ONE descriptor-relative remover (moved from Provider); no path rollback.
+fn publication_registry_clone_cleanup(parent: FoundationDirectoryAuthority, name: String) IOError! -[FS]> {
+    parent.remove_tree(name)
+}
+fn publication_registry_attach_clone_cleanup(primary: PublicationDiagnosticError, path: String, cleanup: IOError) -> PublicationDiagnosticError Never! {
+    diagnostic := primary.diagnostic
+    existing :: diagnostic.detail ?? ""
+    separator :: if existing != "" && !existing.ends_with("\n") -> "\n" else -> ""
+    diagnostic.detail = Val("{existing}{separator}cleanup failed: couldn't remove registry checkout `{path}`: {cleanup}")
+    PublicationDiagnosticError{diagnostic: diagnostic}
+}
+fn publication_registry_clone_failure(registry: PublicationRegistryConfig, parent: FoundationDirectoryAuthority, path: String, detail: String) -[FS]> PublicationDiagnosticError Never! {
+    primary :: publication_registry_cache_error(registry, detail)
+    if publication_registry_clone_cleanup(parent, files.basename(path)) == {
+        .Ok(_) -> primary
+        .Err(error) -> publication_registry_attach_clone_cleanup(primary, path, error)
+    }
+}
+fn publication_clone_registry_to(registry: PublicationRegistryConfig, parent: FoundationDirectoryAuthority, path: String, transport: PublicationRegistryTransport) PublicationDiagnosticError! -[FS, Env, Exec, Time.Wait]> {
+    command :: publication_registry_git_command(transport) ?? return Err(publication_registry_clone_failure(registry, parent, path, "{err}"))
+    output :: command.args_extend(publication_registry_clone_arguments(registry.url, transport.remote(registry.url), path)).run() ?? return Err(publication_registry_clone_failure(registry, parent, path, "{err}"))
+    if !output.success -> return Err(publication_registry_clone_failure(registry, parent, path, "git clone exited with {output.code}"))
+}
+fn publication_install_registry_clone(registry: PublicationRegistryConfig, dir: String, parent: FoundationDirectoryAuthority, partial_path: String, replace_existing: Bool) -[FS, Env, Time]> String PublicationDiagnosticError! {
+    name :: files.basename(dir)
+    partial :: files.basename(partial_path)
+    parent.revalidate() ?? return Err(publication_registry_clone_failure(registry, parent, partial_path, "{err}"))
+    if !replace_existing {
+        if parent.rename(partial, name) == {
+            .Ok(_) -> { return Ok(dir) }
+            .Err(error) -> if error == {
+                .AlreadyExists(_) -> {
+                    cleanup :: if publication_registry_clone_cleanup(parent, partial) == {
+                        .Ok(_) -> None
+                        .Err(cleanup_error) -> Val(cleanup_error)
+                    }
+                    if !files.is_dir(files.join(dir, ".git")) -> return Err(publication_registry_cache_error(registry, "a concurrent registry cache winner is incomplete"))
+                    if cleanup == .Val(cleanup_failure) -> return Err(publication_registry_attach_clone_cleanup(publication_registry_cache_error(registry, "couldn't remove the losing partial registry clone"), partial_path, cleanup_failure))
+                    return Ok(dir)
+                }
+                else -> { return Err(publication_registry_clone_failure(registry, parent, partial_path, "{error}")) }
+            }
+        }
+    }
+    backup :: publication_registry_clone_stage_name(registry.name, "backup", publication_registry_unique_suffix())
+    parent.rename(name, backup) ?? return Err(publication_registry_clone_failure(registry, parent, partial_path, "couldn't stage the existing registry cache: {err}"))
+    if parent.rename(partial, name) == .Err(error) {
+        detail :: if parent.rename(backup, name) == {
+            .Ok(_) -> "couldn't install the refreshed registry cache: {error}"
+            .Err(restore_error) -> "couldn't install the refreshed registry cache: {error}; restoring the previous cache failed: {restore_error}"
+        }
+        return Err(publication_registry_clone_failure(registry, parent, partial_path, detail))
+    }
+    publication_registry_clone_cleanup(parent, backup) ?? return Err(publication_registry_cache_error(registry, "refreshed registry cache installed but old-cache cleanup failed: {err}"))
+    Ok(dir)
+}
+fn publication_ensure_index_clone_locked(registry: PublicationRegistryConfig, dir: String, parent: FoundationDirectoryAuthority, parent_path: String, transport: PublicationRegistryTransport) -[FS, Env, Time, Exec, Time.Wait]> String PublicationDiagnosticError! {
+    existing :: publication_validate_existing_index_clone(registry, dir, transport)
+    partial :: publication_registry_clone_stage_name(registry.name, "partial", publication_registry_unique_suffix())
+    if parent.entry_stat(partial) == .Ok(_) -> return Err(publication_registry_cache_error(registry, "registry cache has a colliding partial clone"))
+    // Clone into the same resolved directory the held parent names.
+    path :: files.join(parent_path, partial)
+    publication_clone_registry_to(registry, parent, path, transport)
+    publication_install_registry_clone(registry, dir, parent, path, existing)
+}
+pub fn publication_ensure_index_clone(registry: PublicationRegistryConfig) -[FS, Env, Time, Time.Wait, Exec, Net]> String PublicationDiagnosticError! {
+    // Required validated transport: pre-DNS Endpoint is NOT an authority.
+    // Canonical transport closure is intentionally gated #3595, never faked.
+    transport :: publication_validate_registry_transport(registry)
+    dir :: publication_index_repo_path(registry)
+    parent_path :: files.dirname(dir)
+    if parent_path == "" -> return Err(publication_registry_cache_error(registry, "registry cache path has no parent"))
+    // Rust create_dir_all(parent) then path-relative lock/clone/rename: the
+    // cache root and its ancestors (a symlinked HOME/tmp or configured
+    // JET_REGISTRY_CACHE_DIR link) follow the OS. The held parent, lock and
+    // staged clone all use that one resolved directory; only the cache entry
+    // itself is checked no-follow.
+    resolved_dir :: foundation_resolve_path_ancestors(dir, true) ?? return Err(publication_registry_cache_error(registry, "{err}"))
+    resolved_parent :: files.dirname(resolved_dir)
+    authority :: foundation_open_directory_authority(resolved_parent) ?? return Err(publication_registry_cache_error(registry, "{err}"))
+    lock :: publication_acquire_registry_lock(resolved_parent, publication_registry_cache_lock_name(registry.name), 50, "registry cache refresh is busy") ?? return Err(publication_registry_cache_error(registry, "{err}"))
+    if publication_ensure_index_clone_locked(registry, dir, authority, resolved_parent, transport) == {
+        .Ok(path) -> {
+            close(^lock)
+            Ok(path)
+        }
+        .Err(error) -> {
+            close(^lock)
+            Err(error)
+        }
+    }
+}
+pub fn publication_ensure_local_index_clone(registry: PublicationRegistryConfig) -[FS, Env, Exec, Net, Time.Wait]> String PublicationDiagnosticError! {
+    transport :: publication_validate_registry_transport(registry)
+    dir :: publication_index_repo_path(registry)
+    if !publication_validate_existing_index_clone(registry, dir, transport) -> return Err(publication_registry_cache_error(registry, "the local registry cache is unavailable; locked mode never downloads a new index"))
+    Ok(dir)
+}

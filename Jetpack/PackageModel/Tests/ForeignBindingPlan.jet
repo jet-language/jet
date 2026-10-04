@@ -30,12 +30,11 @@ fn pkg_test_plan_externs(source: String, markers: [String], view_only: Bool) -> 
 // the first line holding only `}`.
 fn pkg_test_plan_wrapper_body(source: String, name: String, generic: Bool) -> String Never! {
     bytes :: source.bytes()
-    start := pkg_cbind_find(bytes, "pub fn {name}(", 0)
-    if start < 0 && generic -> start = pkg_cbind_find(bytes, "pub fn {name}<", 0)
+    start := pkg_binder_find(source, "pub fn {name}(", 0)
+    if start < 0 && generic -> start = pkg_binder_find(source, "pub fn {name}<", 0)
     if start < 0 -> panic("every response extern has a generated wrapper")
     tail :: pkg_bytes_text(bytes, start, bytes.len())
-    tail_bytes :: tail.bytes()
-    end :: pkg_cbind_find(tail_bytes, "\n}}\n", 0)
+    end :: pkg_binder_find(tail, "\n}}\n", 0)
     if end < 0 -> return tail
     pkg_bytes_text(tail_bytes, 0, end)
 }
@@ -52,7 +51,7 @@ fn pkg_test_plan_source_parses(source: String) -> Bool Never! {
 }
 
 #Test("binding plan registry covers each message renderer once") {
-    registry :: @PKG_GENERATOR_REGISTRY
+    registry :: PKG_GENERATOR_REGISTRY
     registered := 0
     loop renderer in registry {
         if pkg_renderer_canonical_for(renderer) != None -> registered += 1
@@ -73,7 +72,7 @@ fn pkg_test_plan_source_parses(source: String) -> Bool Never! {
     }
 
     loop renderer in registry {
-        found := None
+        found := BinderDescriptor?{None}
         loop descriptor in binders {
             if descriptor.language == renderer.language {
                 found = Val(descriptor)
@@ -119,7 +118,7 @@ fn pkg_test_plan_source_parses(source: String) -> Bool Never! {
                 assert_eq(pkg_test_plan_count(source, "response.field(\"ok\")"), 1)
                 assert(!source.contains("decode_status("))
             }
-            .LuaRawJson -> {
+            .LuaRawJSON -> {
                 assert_eq(pkg_test_plan_count(source, "response.field(\"ok\")"), 0)
                 assert_eq(pkg_test_plan_count(source, "fn decode_status("), 1)
                 assert(source.contains("if code == 4 -> return Err(LuaError.CommandFailed)"))

@@ -1,0 +1,916 @@
+// Executable command metadata, Rust crates/jet-foundation/src/CLISchema.rs.
+// TIR owns checked inputs/commands. Records deliberately omit callable keys,
+// receivers, and input variadic (decoded false); schema derivation belongs to sema.
+pub CLI_RECORD_MAGIC :: prep { String.from_bytes([U8]{U8{74}, U8{69}, U8{84}, U8{67}, U8{77}, U8{68}, U8{0}, U8{0}}) ?? panic("command record magic") }
+pub CLI_RECORD_VERSION :: 8
+pub CLI_ELF_SECTION :: ".jet_command"
+pub CLI_PE_SECTION :: ".jetcmd"
+pub CLI_MACH_SECTION :: "__jetcmd"
+pub CLI_WASM_SECTION :: "jet.command"
+CLI_MAX_RECORD_BYTES :: 1048576
+CLI_MAX_INPUTS :: 4096
+CLI_MAX_JOBS :: 4096
+CLI_MAX_STRING_BYTES :: 65536
+CLI_USIZE_MAX :: prep { 18446744073709551615 }
+
+pub struct CLIRecordJob {
+    pub name: String
+    pub scope: JobScope
+    pub doc: String?
+    pub arguments: [TJobArgumentFact]
+    pub after: [String]
+    pub packages: [String]
+    pub cwd: String?
+    pub inputs: [String]
+    pub outputs: [String]
+    pub skip: JobSkip?
+    pub cache: JobCachePolicy
+    pub parallel: Int
+    pub limits: [String:String]
+    pub schedule: String?
+}
+pub struct CLICommandSchema {
+    pub entry_type: String
+    pub description: String?
+    pub inputs: [TCLIInput]
+    pub commands: [TCLICommand]
+    pub jobs: [CLIRecordJob]
+    pub standard: Bool
+    pub version: String?
+}
+#Error
+pub enum CLIMetadataError {
+    UnknownFormat
+    Missing
+    Duplicate
+    Malformed(String)
+    UnsupportedVersion(Int)
+}
+#Error
+pub struct CLIJobGraphError { pub message: String }
+
+// Rust MetadataError::fmt.
+pub fn cli_metadata_error_message(error: CLIMetadataError) -> String Never! {
+    if error == {
+        .UnknownFormat -> "the file is not an ELF, PE, Mach-O, or Wasm executable"
+        .Missing -> "the executable has no JetCommandSchema metadata"
+        .Duplicate -> "the executable contains more than one JetCommandSchema record"
+        .Malformed(why) -> "the JetCommandSchema record is malformed ({why})"
+        .UnsupportedVersion(version) -> "JetCommandSchema version {version} is not supported"
+    }
+}
+// Rust CLIValueKind::as_str.
+pub fn cli_value_kind_name(kind: TCLIValueKind) -> String Never! {
+    if kind == {
+        .Bool -> "Bool"
+        .Int -> "Int"
+        .Float -> "Float"
+        .String -> "String"
+        .Path -> "Path"
+    }
+}
+// Rust CLIInputSchema::required.
+pub fn cli_input_required(input: TCLIInput) -> Bool Never! {
+    if input.shape == {
+        .Flag -> false
+        .Value(_, optional, default) -> !optional && default == None
+    }
+}
+// Rust CLIInputSchema::value_kind.
+pub fn cli_input_value_kind(input: TCLIInput) -> TCLIValueKind Never! {
+    if input.shape == {
+        .Flag -> TCLIValueKind.Bool
+        .Value(kind, _, _) -> kind
+    }
+}
+// Rust JobArgumentSchema::display.
+pub fn cli_job_argument_display(argument: TJobArgumentFact) -> String Never! {
+    variadic :: if argument.variadic -> "..." else -> ""
+    "{argument.label}: {variadic}{argument.ty}"
+}
+// Rust CLIDefault::display; checked CLI defaults have scalar carriers only.
+pub fn cli_schema_default_display(value: TCLIDefault) -> String Never! {
+    if value == {
+        .TypeDefault -> "type default"
+        .Recorded(text) -> ~text
+        .Value(scalar) -> cli_default_display(scalar)
+    }
+}
+fn cli_default_display(value: TComptimeValue) -> String Never! {
+    if value == {
+        .Int(number) -> "{number}"
+        .Float(number, bits) -> {
+            if bits == 32 {
+                narrow :: F32.from_float(number) ?? panic("CLI F32 default is outside F32")
+                return "{narrow:Debug}"
+            }
+            "{number:Debug}"
+        }
+        .Bool(flag) -> if flag -> "true" else -> "false"
+        .String(text) -> ~text
+        else -> panic("CLI default is not a checked scalar value")
+    }
+}
+// Rust CLIInputSchema::default_display.
+pub fn cli_input_default_display(input: TCLIInput) -> String? Never! {
+    if input.shape == {
+        .Flag -> Val("false")
+        .Value(_, _, default) -> if default == {
+            None -> None
+            .Val(value) -> Val(cli_schema_default_display(value))
+        }
+    }
+}
+// Rust JobRegistry::{append,into_jobs}; ownership transfer needs no row copies.
+pub fn cli_job_registry_append(jobs: &[CLIRecordJob], other: ^[CLIRecordJob]) Never! { &jobs.extend(^other) }
+pub fn cli_job_registry_into_jobs(jobs: ^[CLIRecordJob]) -> [CLIRecordJob] Never! { ^jobs }
+// Rust JobRegistry::{jobs,visible_jobs,find,find_visible}: row indexes are
+// borrowed-row handles, avoiding copies of argument/path collections per job.
+pub fn cli_job_registry_jobs(jobs: [CLIRecordJob]) -> [Int] Never! { loop index in 0..<jobs.len() -> index }
+pub fn cli_job_registry_visible_jobs(jobs: [CLIRecordJob]) -> [Int] Never! {
+    result := [Int]{}
+    loop (index, job) in jobs { if job.scope != JobScope.Internal -> &result.push(index) }
+    result
+}
+pub fn cli_job_registry_find(jobs: [CLIRecordJob], name: String) -> Int? Never! {
+    loop (index, job) in jobs { if job.name == name -> return Val(index) }
+    None
+}
+pub fn cli_job_registry_find_visible(jobs: [CLIRecordJob], name: String) -> Int? Never! {
+    loop (index, job) in jobs { if job.name == name && job.scope != JobScope.Internal -> return Val(index) }
+    None
+}
+// Rust JobRegistry::dependency_closure::visit.
+fn cli_job_graph_visit(jobs: [CLIRecordJob], name: String, state: &[String:Int], stack: &[String], order: &[Int]) CLIJobGraphError! {
+    mark :: state.get(name) ?? 0
+    if mark == 2 -> return
+    if mark == 1 {
+        start := 0
+        loop (index, candidate) in stack {
+            if candidate == name {
+                start = index
+                break
+            }
+        }
+        cycle := ~stack[start..<stack.len()]
+        &cycle.push(~name)
+        return Err(CLIJobGraphError{message: "job graph contains a cycle: {cycle.join(" -> ")}"})
+    }
+    candidate := Int?{None}
+    loop (index, job) in jobs {
+        if job.name == name {
+            if candidate != None -> return Err(CLIJobGraphError{message: "job `{name}` has an ambiguous declaration"})
+            candidate = Val(index)
+        }
+    }
+    index :: candidate ?? return Err(CLIJobGraphError{message: "job graph references unknown job `{name}`"})
+    if jobs[index].parallel == 0 -> return Err(CLIJobGraphError{message: "job `{name}` declares a zero parallel bound"})
+    state[name] = 1
+    &stack.push(~name)
+    loop dependency in jobs[index].after -> cli_job_graph_visit(jobs, dependency, &state, &stack, &order)
+    _ :: &stack.pop()
+    state[name] = 2
+    &order.push(index)
+}
+// Rust JobRegistry::dependency_closure.
+pub fn cli_job_registry_dependency_closure(jobs: [CLIRecordJob], root: String) -> [Int] CLIJobGraphError! {
+    state := [String:Int]{}
+    stack := [String]{}
+    order := [Int]{}
+    cli_job_graph_visit(jobs, root, &state, &stack, &order)
+    Ok(order)
+}
+// Rust JobRegistry::validate_graph (sorted distinct root names).
+pub fn cli_job_registry_validate_graph(jobs: [CLIRecordJob]) CLIJobGraphError! {
+    names := [String]{}
+    loop job in jobs -> &names.push(~job.name)
+    &names.sort()
+    previous := String?{None}
+    loop name in names {
+        if previous == (Val(name)) -> next
+        _ :: cli_job_registry_dependency_closure(jobs, name)
+        previous = Val(~name)
+    }
+}
+// Rust JobRegistry::completion_words and completion_words.
+pub fn cli_job_registry_completion_words(jobs: [CLIRecordJob]) -> [String] Never! {
+    words := [String]{}
+    seen := [String:Bool]{}
+    loop job in jobs {
+        if job.scope == JobScope.Internal || seen.get(job.name) != None -> next
+        seen[job.name] = true
+        &words.push(~job.name)
+    }
+    words
+}
+// Rust put_u32, put_string, put_optional_string.
+fn cli_record_put_u32(out: &[U8], value: Int) Never! {
+    loop shift in 0..<4 -> &out.push(U8{(value >> (shift * 8)) & 255})
+}
+fn cli_record_put_string(out: &[U8], value: String) Never! {
+    bytes :: value.bytes()
+    cli_record_put_u32(&out, bytes.len())
+    &out.extend(bytes)
+}
+fn cli_record_put_optional_string(out: &[U8], value: String?) Never! {
+    if value == {
+        None -> &out.push(U8{0})
+        .Val(text) -> {
+            &out.push(U8{1})
+            cli_record_put_string(&out, text)
+        }
+    }
+}
+// Rust finish_record.
+fn cli_record_finish(payload: [U8]) -> [U8] Never! {
+    record := CLI_RECORD_MAGIC.bytes()
+    &record.push(U8{CLI_RECORD_VERSION})
+    &record.push(U8{0})
+    cli_record_put_u32(&record, payload.len())
+    &record.extend(mir_sha256_bytes(payload))
+    &record.extend(payload)
+    record
+}
+// Rust encode_record.
+pub fn cli_schema_encode_record(schema: CLICommandSchema) -> [U8] Never! {
+    payload := [U8]{}
+    cli_record_put_string(&payload, schema.entry_type)
+    cli_record_put_optional_string(&payload, schema.description)
+    &payload.push(U8{if schema.standard -> 1 else -> 0})
+    cli_record_put_optional_string(&payload, schema.version)
+    cli_record_put_u32(&payload, schema.inputs.len())
+    loop input in schema.inputs -> cli_record_encode_input(&payload, input)
+    cli_record_put_u32(&payload, schema.commands.len())
+    loop command in schema.commands {
+        cli_record_put_string(&payload, command.name)
+        cli_record_put_optional_string(&payload, command.description)
+        cli_record_put_u32(&payload, command.inputs.len())
+        loop input in command.inputs -> cli_record_encode_input(&payload, input)
+    }
+    cli_record_put_u32(&payload, schema.jobs.len())
+    loop job in schema.jobs -> cli_record_encode_job(&payload, job)
+    cli_record_finish(payload)
+}
+// Rust encode_input.
+fn cli_record_encode_input(out: &[U8], input: TCLIInput) Never! {
+    cli_record_put_string(&out, input.field)
+    cli_record_put_string(&out, input.flag)
+    cli_record_put_optional_string(&out, input.short)
+    cli_record_put_optional_string(&out, input.env)
+    cli_record_put_string(&out, input.help)
+    cli_record_put_optional_string(&out, input.metavar)
+    if input.shape == {
+        .Flag -> &out.push(U8{0})
+        .Value(kind, optional, default) -> {
+            &out.push(U8{1})
+            value_tag :: if kind == {
+                .Bool -> 0
+                .Int -> 1
+                .Float -> 2
+                .String -> 3
+                .Path -> 4
+            }
+            &out.push(U8{value_tag})
+            &out.push(U8{if optional -> 1 else -> 0})
+            if default == {
+                None -> &out.push(U8{0})
+                .Val(value) -> if value == {
+                    .TypeDefault -> &out.push(U8{1})
+                    else -> {
+                        &out.push(U8{2})
+                        cli_record_put_string(&out, cli_schema_default_display(value))
+                    }
+                }
+            }
+        }
+    }
+    if input.positional == {
+        None -> &out.push(U8{0})
+        .Val(order) -> {
+            &out.push(U8{1})
+            cli_record_put_u32(&out, order)
+        }
+    }
+}
+// Rust encode_job_skip.
+fn cli_record_encode_job_skip(out: &[U8], skip: JobSkip?) Never! {
+    if skip == {
+        None -> &out.push(U8{0})
+        .Val(rule) -> if rule == {
+            .Always(reason) -> {
+                &out.push(U8{1})
+                cli_record_put_string(&out, reason)
+            }
+            .UnlessPlatform(platform) -> {
+                &out.push(U8{2})
+                cli_record_put_string(&out, platform)
+            }
+        }
+    }
+}
+// Rust encode_job.
+fn cli_record_encode_job(out: &[U8], job: CLIRecordJob) Never! {
+    cli_record_put_string(&out, job.name)
+    value_tag :: if job.scope == {
+        .Dev -> 0
+        .Ship -> 1
+        .Internal -> 2
+    }
+    &out.push(U8{value_tag})
+    cli_record_put_optional_string(&out, job.doc)
+    cli_record_put_optional_string(&out, job.schedule)
+    cli_record_put_strings(&out, job.after)
+    cli_record_put_strings(&out, job.inputs)
+    cli_record_put_strings(&out, job.outputs)
+    cli_record_put_u32(&out, job.parallel)
+    cli_record_put_u32(&out, job.arguments.len())
+    loop argument in job.arguments {
+        cli_record_put_string(&out, argument.name)
+        cli_record_put_string(&out, argument.label)
+        cli_record_put_string(&out, argument.ty)
+        &out.push(U8{if argument.required -> 1 else -> 0})
+        cli_record_put_optional_string(&out, argument.default)
+        &out.push(U8{if argument.variadic -> 1 else -> 0})
+        zone :: if argument.zone == {
+            .PositionalOnly -> 0
+            .Either -> 1
+            .LabelOnly -> 2
+        }
+        &out.push(U8{zone})
+    }
+    cli_record_put_strings(&out, job.packages)
+    cli_record_put_optional_string(&out, job.cwd)
+    cli_record_encode_job_skip(&out, job.skip)
+    cache :: if job.cache == {
+        .Uncached -> 0
+        .Local -> 1
+        .Shared -> 2
+    }
+    &out.push(U8{cache})
+    keys := job.limits.keys().to_list()
+    &keys.sort()
+    cli_record_put_u32(&out, keys.len())
+    loop key in keys {
+        cli_record_put_string(&out, key)
+        cli_record_put_string(&out, job.limits[key])
+    }
+}
+fn cli_record_put_strings(out: &[U8], values: [String]) Never! {
+    cli_record_put_u32(&out, values.len())
+    loop value in values -> cli_record_put_string(&out, value)
+}
+// Rust Cursor: bytes are supplied separately, so advancing never copies payload.
+struct CLIRecordCursor { at: Int }
+fn cli_record_byte(bytes: [U8], cursor: &CLIRecordCursor) -> Int CLIMetadataError! {
+    if cursor.at >= bytes.len() -> return Err(CLIMetadataError.Malformed("truncated payload"))
+    value :: Int.from_u8(bytes[cursor.at])
+    cursor.at += 1
+    Ok(value)
+}
+fn cli_record_u32(bytes: [U8], cursor: &CLIRecordCursor) -> Int CLIMetadataError! {
+    end :: cli_record_checked_add(cursor.at, 4, "length overflow")
+    if end > bytes.len() -> return Err(CLIMetadataError.Malformed("truncated payload"))
+    value := 0
+    loop index in 0..<4 -> value = value | (Int.from_u8(bytes[cursor.at + index]) << (index * 8))
+    cursor.at = end
+    Ok(value)
+}
+fn cli_record_string(bytes: [U8], cursor: &CLIRecordCursor) -> String CLIMetadataError! {
+    len :: cli_record_u32(bytes, &cursor)
+    if len > CLI_MAX_STRING_BYTES -> return Err(CLIMetadataError.Malformed("string too long"))
+    end :: cli_record_checked_add(cursor.at, len, "length overflow")
+    if end > bytes.len() -> return Err(CLIMetadataError.Malformed("truncated string"))
+    start :: cursor.at
+    cursor.at = end
+    Ok(String.from_bytes(~bytes[start..<end]) ?? return Err(CLIMetadataError.Malformed("string is not UTF-8")))
+}
+fn cli_record_optional_string(bytes: [U8], cursor: &CLIRecordCursor) -> String? CLIMetadataError! {
+    value_tag :: cli_record_byte(bytes, &cursor)
+    if value_tag == {
+        0 -> Ok(None)
+        1 -> Ok(Val(cli_record_string(bytes, &cursor)))
+        else -> Err(CLIMetadataError.Malformed("invalid optional string bit"))
+    }
+}
+fn cli_record_bit(bytes: [U8], cursor: &CLIRecordCursor, why: String) -> Bool CLIMetadataError! {
+    value_tag :: cli_record_byte(bytes, &cursor)
+    if value_tag == {
+        0 -> Ok(false)
+        1 -> Ok(true)
+        else -> Err(CLIMetadataError.Malformed(why))
+    }
+}
+fn cli_record_strings(bytes: [U8], cursor: &CLIRecordCursor, max: Int, why: String) -> [String] CLIMetadataError! {
+    count :: cli_record_u32(bytes, &cursor)
+    if count > max -> return Err(CLIMetadataError.Malformed(why))
+    values := [String]{}
+    loop _ in 0..<count -> &values.push(cli_record_string(bytes, &cursor))
+    Ok(values)
+}
+// Rust decode_input.
+fn cli_record_decode_input(bytes: [U8], cursor: &CLIRecordCursor) -> TCLIInput CLIMetadataError! {
+    field :: cli_record_string(bytes, &cursor)
+    flag :: cli_record_string(bytes, &cursor)
+    short :: cli_record_optional_string(bytes, &cursor)
+    env :: cli_record_optional_string(bytes, &cursor)
+    help :: cli_record_string(bytes, &cursor)
+    metavar :: cli_record_optional_string(bytes, &cursor)
+    value_tag :: cli_record_byte(bytes, &cursor)
+    shape :: if value_tag == {
+        0 -> TCLIInputShape.Flag
+        1 -> {
+            kind_tag :: cli_record_byte(bytes, &cursor)
+            kind :: if kind_tag == {
+                0 -> TCLIValueKind.Bool
+                1 -> TCLIValueKind.Int
+                2 -> TCLIValueKind.Float
+                3 -> TCLIValueKind.String
+                4 -> TCLIValueKind.Path
+                else -> { return Err(CLIMetadataError.Malformed("unknown input kind")) }
+            }
+            optional :: cli_record_bit(bytes, &cursor, "invalid optional bit")
+            default_tag :: cli_record_byte(bytes, &cursor)
+            default :: if default_tag == {
+                0 -> None
+                1 -> Val(TCLIDefault.TypeDefault)
+                2 -> Val(TCLIDefault.Recorded{value: cli_record_string(bytes, &cursor)})
+                else -> { return Err(CLIMetadataError.Malformed("unknown default kind")) }
+            }
+            TCLIInputShape.Value{kind: kind, optional: optional, default: default}
+        }
+        else -> { return Err(CLIMetadataError.Malformed("unknown input shape")) }
+    }
+    positional_tag :: cli_record_byte(bytes, &cursor)
+    positional :: if positional_tag == {
+        0 -> None
+        1 -> {
+            order :: cli_record_u32(bytes, &cursor)
+            if order > 65535 -> return Err(CLIMetadataError.Malformed("positional order out of range"))
+            Val(order)
+        }
+        else -> { return Err(CLIMetadataError.Malformed("invalid positional bit")) }
+    }
+    Ok(TCLIInput{field: field, flag: flag, short: short, env: env, help: help, metavar: metavar, shape: shape, positional: positional, variadic: false})
+}
+// Rust decode_job_skip.
+fn cli_record_decode_job_skip(bytes: [U8], cursor: &CLIRecordCursor) -> JobSkip? CLIMetadataError! {
+    value_tag :: cli_record_byte(bytes, &cursor)
+    if value_tag == {
+        0 -> Ok(None)
+        1 -> Ok(Val(JobSkip.Always{reason: cli_record_string(bytes, &cursor)}))
+        2 -> Ok(Val(JobSkip.UnlessPlatform{platform: cli_record_string(bytes, &cursor)}))
+        else -> Err(CLIMetadataError.Malformed("unknown job skip rule"))
+    }
+}
+// Rust decode_job.
+fn cli_record_decode_job(bytes: [U8], cursor: &CLIRecordCursor) -> CLIRecordJob CLIMetadataError! {
+    name :: cli_record_string(bytes, &cursor)
+    scope_tag :: cli_record_byte(bytes, &cursor)
+    scope :: if scope_tag == {
+        0 -> JobScope.Dev
+        1 -> JobScope.Ship
+        2 -> JobScope.Internal
+        else -> { return Err(CLIMetadataError.Malformed("unknown job scope")) }
+    }
+    doc :: cli_record_optional_string(bytes, &cursor)
+    schedule :: cli_record_optional_string(bytes, &cursor)
+    after :: cli_record_strings(bytes, &cursor, CLI_MAX_JOBS, "too many job dependencies")
+    inputs :: cli_record_strings(bytes, &cursor, CLI_MAX_INPUTS, "too many job inputs")
+    outputs :: cli_record_strings(bytes, &cursor, CLI_MAX_INPUTS, "too many job outputs")
+    parallel :: cli_record_u32(bytes, &cursor)
+    if parallel == 0 -> return Err(CLIMetadataError.Malformed("job parallel bound must be positive"))
+    count :: cli_record_u32(bytes, &cursor)
+    if count > CLI_MAX_INPUTS -> return Err(CLIMetadataError.Malformed("too many job arguments"))
+    arguments := [TJobArgumentFact]{}
+    loop _ in 0..<count {
+        argument_name :: cli_record_string(bytes, &cursor)
+        label :: cli_record_string(bytes, &cursor)
+        ty :: cli_record_string(bytes, &cursor)
+        required :: cli_record_bit(bytes, &cursor, "invalid job argument required bit")
+        default :: cli_record_optional_string(bytes, &cursor)
+        variadic :: cli_record_bit(bytes, &cursor, "invalid job argument variadic bit")
+        zone_tag :: cli_record_byte(bytes, &cursor)
+        zone :: if zone_tag == {
+            0 -> ParamZone.PositionalOnly
+            1 -> ParamZone.Either
+            2 -> ParamZone.LabelOnly
+            else -> { return Err(CLIMetadataError.Malformed("unknown job argument zone")) }
+        }
+        &arguments.push(TJobArgumentFact{name: argument_name, label: label, ty: ty, required: required, default: default, variadic: variadic, zone: zone})
+    }
+    packages :: cli_record_strings(bytes, &cursor, CLI_MAX_INPUTS, "too many job packages")
+    cwd :: cli_record_optional_string(bytes, &cursor)
+    skip :: cli_record_decode_job_skip(bytes, &cursor)
+    cache_tag :: cli_record_byte(bytes, &cursor)
+    cache :: if cache_tag == {
+        0 -> JobCachePolicy.Uncached
+        1 -> JobCachePolicy.Local
+        2 -> JobCachePolicy.Shared
+        else -> { return Err(CLIMetadataError.Malformed("unknown job cache policy")) }
+    }
+    limit_count :: cli_record_u32(bytes, &cursor)
+    if limit_count > CLI_MAX_INPUTS -> return Err(CLIMetadataError.Malformed("too many job limits"))
+    limits := [String:String]{}
+    loop _ in 0..<limit_count {
+        key :: cli_record_string(bytes, &cursor)
+        limits[key] = cli_record_string(bytes, &cursor)
+    }
+    Ok(CLIRecordJob{name: name, scope: scope, doc: doc, arguments: arguments, after: after, packages: packages, cwd: cwd, inputs: inputs, outputs: outputs, skip: skip, cache: cache, parallel: parallel, limits: limits, schedule: schedule})
+}
+// Rust decode_record.
+pub fn cli_schema_decode_record(record: [U8]) -> CLICommandSchema CLIMetadataError! {
+    cli_record_validate_header(record, CLIRecordSection{at: 0, len: record.len()})
+    cli_record_decode_checked_record(record)
+}
+// Validate the window before materializing the bounded record for owning APIs.
+// Rust decode_record's header/version/length checks, in the same precedence.
+fn cli_record_validate_header(bytes: [U8], section: CLIRecordSection) CLIMetadataError! {
+    if section.len < 46 || !cli_record_starts_with_at(bytes, section.at, section.at + section.len, CLI_RECORD_MAGIC.bytes()) -> return Err(CLIMetadataError.Malformed("bad record header"))
+    record_version :: cli_record_read_num(bytes, section.at + 8, 2, true)
+    if record_version != CLI_RECORD_VERSION -> return Err(CLIMetadataError.UnsupportedVersion(record_version))
+    len :: cli_record_read_num(bytes, section.at + 10, 4, true)
+    if len > CLI_MAX_RECORD_BYTES || 46 + len != section.len -> return Err(CLIMetadataError.Malformed("invalid record length"))
+}
+fn cli_record_decode_checked_record(record: [U8]) -> CLICommandSchema CLIMetadataError! {
+    if mir_sha256_bytes(~record[46..<record.len()]) != record[14..<46] -> return Err(CLIMetadataError.Malformed("digest mismatch"))
+    cursor := CLIRecordCursor{at: 46}
+    entry_type :: cli_record_string(record, &cursor)
+    description :: cli_record_optional_string(record, &cursor)
+    standard :: cli_record_bit(record, &cursor, "invalid standard bit")
+    version :: cli_record_optional_string(record, &cursor)
+    count :: cli_record_u32(record, &cursor)
+    if count > CLI_MAX_INPUTS -> return Err(CLIMetadataError.Malformed("too many inputs"))
+    inputs := [TCLIInput]{}
+    loop _ in 0..<count -> &inputs.push(cli_record_decode_input(record, &cursor))
+    command_count :: cli_record_u32(record, &cursor)
+    if command_count > CLI_MAX_INPUTS -> return Err(CLIMetadataError.Malformed("too many commands"))
+    commands := [TCLICommand]{}
+    loop _ in 0..<command_count {
+        name :: cli_record_string(record, &cursor)
+        command_description :: cli_record_optional_string(record, &cursor)
+        input_count :: cli_record_u32(record, &cursor)
+        if input_count > CLI_MAX_INPUTS -> return Err(CLIMetadataError.Malformed("too many command inputs"))
+        command_inputs := [TCLIInput]{}
+        loop _ in 0..<input_count -> &command_inputs.push(cli_record_decode_input(record, &cursor))
+        &commands.push(TCLICommand{name: name, description: command_description, inputs: command_inputs, function: None, receiver: None})
+    }
+    job_count :: cli_record_u32(record, &cursor)
+    if job_count > CLI_MAX_JOBS -> return Err(CLIMetadataError.Malformed("too many jobs"))
+    jobs := [CLIRecordJob]{}
+    loop _ in 0..<job_count -> &jobs.push(cli_record_decode_job(record, &cursor))
+    if cursor.at != record.len() -> return Err(CLIMetadataError.Malformed("trailing payload bytes"))
+    Ok(CLICommandSchema{entry_type: entry_type, description: description, inputs: inputs, commands: commands, jobs: jobs, standard: standard, version: version})
+}
+// Rust bounds/read_num/usize_num/c_name. Int is exact; retain the x64 Rust
+// usize checked-operation boundary before touching a byte range.
+fn cli_record_checked_add(a: Int, b: Int, why: String) -> Int CLIMetadataError! {
+    value :: a + b
+    if value > CLI_USIZE_MAX -> return Err(CLIMetadataError.Malformed(why))
+    Ok(value)
+}
+fn cli_record_checked_mul(a: Int, b: Int, why: String) -> Int CLIMetadataError! {
+    value :: a * b
+    if value > CLI_USIZE_MAX -> return Err(CLIMetadataError.Malformed(why))
+    Ok(value)
+}
+fn cli_record_bounds(bytes: [U8], at: Int, len: Int) CLIMetadataError! {
+    end :: cli_record_checked_add(at, len, "section range overflow")
+    if at < 0 || len < 0 || end > bytes.len() -> return Err(CLIMetadataError.Malformed("section outside file"))
+}
+fn cli_record_read_num(bytes: [U8], at: Int, width: Int, little: Bool) -> Int CLIMetadataError! {
+    cli_record_bounds(bytes, at, width)
+    if width != 2 && width != 4 && width != 8 -> return Err(CLIMetadataError.Malformed("invalid integer width"))
+    value := 0
+    loop index in 0..<width {
+        shift :: if little -> index * 8 else -> (width - index - 1) * 8
+        value = value | (Int.from_u8(bytes[at + index]) << shift)
+    }
+    Ok(value)
+}
+fn cli_record_usize_num(value: Int) -> Int CLIMetadataError! {
+    if value < 0 || value > CLI_USIZE_MAX -> return Err(CLIMetadataError.Malformed("file offset overflow"))
+    Ok(value)
+}
+fn cli_record_c_name(bytes: [U8]) -> String CLIMetadataError! { cli_record_c_name_at(bytes, 0, bytes.len()) }
+fn cli_record_c_name_at(bytes: [U8], at: Int, len: Int) -> String CLIMetadataError! {
+    end := at + len
+    loop index in at..<end {
+        if bytes[index] == (U8{0}) {
+            end = index
+            break
+        }
+    }
+    Ok(String.from_bytes(~bytes[at..<end]) ?? return Err(CLIMetadataError.Malformed("section name is not UTF-8")))
+}
+// Sections are ranges into the original borrowed executable, not copied payloads.
+struct CLIRecordSection { at: Int, len: Int }
+struct CLIELFLayout { header: Int, shoff: Int, entsize: Int, count: Int, names: Int, shoff_width: Int, offset: Int, size: Int, value_width: Int }
+struct CLIELFSection { name: Int, offset: Int, size: Int }
+fn cli_record_elf_section(bytes: [U8], layout: CLIELFLayout, shoff: Int, entsize: Int, index: Int, little: Bool) -> CLIELFSection CLIMetadataError! {
+    delta :: cli_record_checked_mul(index, entsize, "ELF section offset overflow")
+    base :: cli_record_checked_add(shoff, delta, "ELF section offset overflow")
+    name :: cli_record_usize_num(cli_record_read_num(bytes, base, 4, little))
+    offset :: cli_record_usize_num(cli_record_read_num(bytes, base + layout.offset, layout.value_width, little))
+    size :: cli_record_usize_num(cli_record_read_num(bytes, base + layout.size, layout.value_width, little))
+    Ok(CLIELFSection{name: name, offset: offset, size: size})
+}
+// Rust elf_sections.
+fn cli_record_elf_sections(bytes: [U8]) -> [CLIRecordSection] CLIMetadataError! {
+    if bytes.len() <= 4 -> return Err(CLIMetadataError.Malformed("truncated ELF header"))
+    class :: Int.from_u8(bytes[4])
+    if bytes.len() <= 5 -> return Err(CLIMetadataError.Malformed("invalid ELF byte order"))
+    byte_order :: Int.from_u8(bytes[5])
+    little :: if byte_order == {
+        1 -> true
+        2 -> false
+        else -> { return Err(CLIMetadataError.Malformed("invalid ELF byte order")) }
+    }
+    layout :: if class == {
+        1 -> CLIELFLayout{header: 52, shoff: 32, entsize: 46, count: 48, names: 50, shoff_width: 4, offset: 16, size: 20, value_width: 4}
+        2 -> CLIELFLayout{header: 64, shoff: 40, entsize: 58, count: 60, names: 62, shoff_width: 8, offset: 24, size: 32, value_width: 8}
+        else -> { return Err(CLIMetadataError.Malformed("unsupported ELF class")) }
+    }
+    cli_record_bounds(bytes, 0, layout.header)
+    shoff :: cli_record_usize_num(cli_record_read_num(bytes, layout.shoff, layout.shoff_width, little))
+    entsize :: cli_record_usize_num(cli_record_read_num(bytes, layout.entsize, 2, little))
+    count :: cli_record_usize_num(cli_record_read_num(bytes, layout.count, 2, little))
+    names_index :: cli_record_usize_num(cli_record_read_num(bytes, layout.names, 2, little))
+    if count == 0 || entsize < layout.size + layout.value_width || names_index >= count -> return Err(CLIMetadataError.Malformed("invalid ELF section table"))
+    table_len :: cli_record_checked_mul(entsize, count, "ELF section count overflow")
+    cli_record_bounds(bytes, shoff, table_len)
+    names_section :: cli_record_elf_section(bytes, layout, shoff, entsize, names_index, little)
+    cli_record_bounds(bytes, names_section.offset, names_section.size)
+    found := [CLIRecordSection]{}
+    loop index in 0..<count {
+        section :: cli_record_elf_section(bytes, layout, shoff, entsize, index, little)
+        if section.name > names_section.size -> return Err(CLIMetadataError.Malformed("ELF section name outside string table"))
+        if cli_record_c_name_at(bytes, names_section.offset + section.name, names_section.size - section.name) == CLI_ELF_SECTION {
+            cli_record_bounds(bytes, section.offset, section.size)
+            &found.push(CLIRecordSection{at: section.offset, len: section.size})
+        }
+    }
+    Ok(found)
+}
+// Rust pe_sections.
+fn cli_record_pe_sections(bytes: [U8]) -> [CLIRecordSection] CLIMetadataError! {
+    pe :: cli_record_usize_num(cli_record_read_num(bytes, 60, 4, true))
+    cli_record_bounds(bytes, pe, 4)
+    if bytes[pe..<pe + 4] != ([U8]{U8{80}, U8{69}, U8{0}, U8{0}}) -> return Err(CLIMetadataError.Malformed("bad PE signature"))
+    count :: cli_record_usize_num(cli_record_read_num(bytes, pe + 6, 2, true))
+    optional :: cli_record_usize_num(cli_record_read_num(bytes, pe + 20, 2, true))
+    table_base :: cli_record_checked_add(pe, 24, "PE section table overflow")
+    table :: cli_record_checked_add(table_base, optional, "PE section table overflow")
+    table_len :: cli_record_checked_mul(count, 40, "PE section count overflow")
+    cli_record_bounds(bytes, table, table_len)
+    found := [CLIRecordSection]{}
+    loop index in 0..<count {
+        base :: table + index * 40
+        if cli_record_c_name_at(bytes, base, 8) == CLI_PE_SECTION {
+            size :: cli_record_usize_num(cli_record_read_num(bytes, base + 16, 4, true))
+            offset :: cli_record_usize_num(cli_record_read_num(bytes, base + 20, 4, true))
+            cli_record_bounds(bytes, offset, size)
+            if size < 14 -> return Err(CLIMetadataError.Malformed("truncated PE metadata section"))
+            record_len :: cli_record_checked_add(46, cli_record_read_num(bytes, offset + 10, 4, true), "record length overflow")
+            if record_len > size -> return Err(CLIMetadataError.Malformed("section outside file"))
+            trailing_at :: offset + record_len
+            if cli_record_starts_with_at(bytes, trailing_at, offset + size, CLI_RECORD_MAGIC.bytes()) -> return Err(CLIMetadataError.Duplicate)
+            loop trailing_index in trailing_at..<offset + size { if bytes[trailing_index] != (U8{0}) -> return Err(CLIMetadataError.Malformed("nonzero bytes after PE metadata record")) }
+            &found.push(CLIRecordSection{at: offset, len: record_len})
+        }
+    }
+    Ok(found)
+}
+fn cli_record_starts_with(bytes: [U8], prefix: [U8]) -> Bool Never! {
+    cli_record_starts_with_at(bytes, 0, bytes.len(), prefix)
+}
+fn cli_record_starts_with_at(bytes: [U8], at: Int, end: Int, prefix: [U8]) -> Bool Never! {
+    if end - at < prefix.len() -> return false
+    loop (index, byte) in prefix { if bytes[at + index] != byte -> return false }
+    true
+}
+// Rust is_mach/is_fat_mach.
+fn cli_record_is_fat_mach(bytes: [U8]) -> Bool Never! {
+    cli_record_is_fat_mach_at(bytes, 0, bytes.len())
+}
+fn cli_record_is_fat_mach_at(bytes: [U8], at: Int, end: Int) -> Bool Never! {
+    cli_record_starts_with_at(bytes, at, end, [U8]{202, 254, 186, 190}) ||
+    cli_record_starts_with_at(bytes, at, end, [U8]{202, 254, 186, 191}) ||
+    cli_record_starts_with_at(bytes, at, end, [U8]{190, 186, 254, 202}) ||
+    cli_record_starts_with_at(bytes, at, end, [U8]{191, 186, 254, 202})
+}
+fn cli_record_is_mach(bytes: [U8]) -> Bool Never! {
+    cli_record_is_fat_mach(bytes) || cli_record_starts_with(bytes, [U8]{206, 250, 237, 254}) || cli_record_starts_with(bytes, [U8]{207, 250, 237, 254})
+}
+// Rust mach_sections.
+fn cli_record_mach_sections(bytes: [U8]) -> [CLIRecordSection] CLIMetadataError! {
+    if cli_record_is_fat_mach(bytes) -> return cli_record_fat_mach_sections(bytes)
+    cli_record_mach_sections_at(bytes, CLIRecordSection{at: 0, len: bytes.len()})
+}
+fn cli_record_window_bounds(window: CLIRecordSection, at: Int, len: Int) CLIMetadataError! {
+    end :: cli_record_checked_add(at, len, "section range overflow")
+    if at < 0 || len < 0 || end > window.len -> return Err(CLIMetadataError.Malformed("section outside file"))
+}
+fn cli_record_window_num(bytes: [U8], window: CLIRecordSection, at: Int, width: Int, little: Bool) -> Int CLIMetadataError! {
+    cli_record_window_bounds(window, at, width)
+    cli_record_read_num(bytes, window.at + at, width, little)
+}
+fn cli_record_mach_sections_at(bytes: [U8], window: CLIRecordSection) -> [CLIRecordSection] CLIMetadataError! {
+    wide :: cli_record_starts_with_at(bytes, window.at, window.at + window.len, [U8]{207, 250, 237, 254})
+    header :: if wide -> 32 else -> 28
+    cli_record_window_bounds(window, 0, header)
+    count :: cli_record_usize_num(cli_record_window_num(bytes, window, 16, 4, true))
+    command := header
+    found := [CLIRecordSection]{}
+    loop _ in 0..<count {
+        kind :: cli_record_window_num(bytes, window, command, 4, true)
+        size :: cli_record_usize_num(cli_record_window_num(bytes, window, command + 4, 4, true))
+        if size < 8 -> return Err(CLIMetadataError.Malformed("invalid Mach-O load command size"))
+        cli_record_window_bounds(window, command, size)
+        segment_kind :: if wide -> 25 else -> 1
+        if kind == segment_kind {
+            nsects_at :: if wide -> 64 else -> 48
+            sections_at :: if wide -> 72 else -> 56
+            section_size :: if wide -> 80 else -> 68
+            file_offset_at :: if wide -> 48 else -> 40
+            section_len_at :: if wide -> 40 else -> 36
+            section_len_width :: if wide -> 8 else -> 4
+            nsects :: cli_record_usize_num(cli_record_window_num(bytes, window, command + nsects_at, 4, true))
+            entries_len :: cli_record_checked_mul(nsects, section_size, "Mach-O section count overflow")
+            needed :: cli_record_checked_add(sections_at, entries_len, "Mach-O section count overflow")
+            if needed > size -> return Err(CLIMetadataError.Malformed("Mach-O sections outside load command"))
+            loop index in 0..<nsects {
+                section :: command + sections_at + index * section_size
+                if cli_record_c_name_at(bytes, window.at + section, 16) == CLI_MACH_SECTION {
+                    offset :: cli_record_usize_num(cli_record_window_num(bytes, window, section + file_offset_at, 4, true))
+                    len :: cli_record_usize_num(cli_record_window_num(bytes, window, section + section_len_at, section_len_width, true))
+                    cli_record_window_bounds(window, offset, len)
+                    &found.push(CLIRecordSection{at: window.at + offset, len: len})
+                }
+            }
+        }
+        command = cli_record_checked_add(command, size, "Mach-O load command overflow")
+    }
+    Ok(found)
+}
+// Rust fat_mach_sections: require one identical canonical record per slice.
+fn cli_record_fat_mach_sections(bytes: [U8]) -> [CLIRecordSection] CLIMetadataError! {
+    cli_record_bounds(bytes, 0, 4)
+    little :: cli_record_starts_with(bytes, [U8]{190, 186, 254, 202}) || cli_record_starts_with(bytes, [U8]{191, 186, 254, 202})
+    wide :: cli_record_starts_with(bytes, [U8]{202, 254, 186, 191}) || cli_record_starts_with(bytes, [U8]{191, 186, 254, 202})
+    count :: cli_record_usize_num(cli_record_read_num(bytes, 4, 4, little))
+    if count == 0 || count > 64 -> return Err(CLIMetadataError.Malformed("invalid universal Mach-O architecture count"))
+    entry_size :: if wide -> 32 else -> 20
+    table_len :: cli_record_checked_mul(count, entry_size, "universal Mach-O table overflow")
+    cli_record_bounds(bytes, 8, table_len)
+    canonical := CLIRecordSection?{None}
+    loop index in 0..<count {
+        arch :: 8 + index * entry_size
+        width :: if wide -> 8 else -> 4
+        offset :: cli_record_usize_num(cli_record_read_num(bytes, arch + 8, width, little))
+        size :: cli_record_usize_num(cli_record_read_num(bytes, arch + 8 + width, width, little))
+        cli_record_bounds(bytes, offset, size)
+        if cli_record_is_fat_mach_at(bytes, offset, offset + size) -> return Err(CLIMetadataError.Malformed("nested universal Mach-O slice"))
+        sections :: cli_record_mach_sections_at(bytes, CLIRecordSection{at: offset, len: size})
+        if sections.len() == 0 -> return Err(CLIMetadataError.Missing)
+        if sections.len() != 1 -> return Err(CLIMetadataError.Duplicate)
+        current :: sections[0]
+        if canonical == {
+            None -> canonical = Val(current)
+            .Val(previous) -> {
+                if bytes[previous.at..<previous.at + previous.len] != bytes[current.at..<current.at + current.len] -> return Err(CLIMetadataError.Malformed("universal Mach-O slices disagree"))
+            }
+        }
+    }
+    result := [CLIRecordSection]{}
+    &result.push(canonical ?? panic("validated Mach-O architecture count is nonzero"))
+    Ok(result)
+}
+// Rust wasm_leb (including its accepted non-minimal/35-bit encodings).
+fn cli_record_wasm_leb(bytes: [U8], cursor: &CLIRecordCursor) -> Int CLIMetadataError! {
+    cli_record_wasm_leb_limit(bytes, &cursor, bytes.len())
+}
+fn cli_record_wasm_leb_limit(bytes: [U8], cursor: &CLIRecordCursor, end: Int) -> Int CLIMetadataError! {
+    value := 0
+    loop index in 0..<5 {
+        if cursor.at >= end -> return Err(CLIMetadataError.Malformed("truncated Wasm LEB"))
+        byte :: Int.from_u8(bytes[cursor.at])
+        cursor.at += 1
+        shifted :: (byte & 127) << (index * 7)
+        if shifted > CLI_USIZE_MAX -> return Err(CLIMetadataError.Malformed("Wasm LEB overflow"))
+        value = value | shifted
+        if byte & 128 == 0 -> return Ok(value)
+    }
+    Err(CLIMetadataError.Malformed("Wasm LEB too long"))
+}
+// Rust wasm_sections.
+fn cli_record_wasm_sections(bytes: [U8]) -> [CLIRecordSection] CLIMetadataError! {
+    cli_record_bounds(bytes, 0, 8)
+    if bytes[0..<8] != ([U8]{0, 97, 115, 109, 1, 0, 0, 0}) -> return Err(CLIMetadataError.Malformed("unsupported Wasm header"))
+    cursor := CLIRecordCursor{at: 8}
+    found := [CLIRecordSection]{}
+    loop cursor.at < bytes.len() {
+        id :: Int.from_u8(bytes[cursor.at])
+        cursor.at += 1
+        size :: cli_record_wasm_leb(bytes, &cursor)
+        cli_record_bounds(bytes, cursor.at, size)
+        payload_at :: cursor.at
+        cursor.at += size
+        if id == 0 {
+            name_cursor := CLIRecordCursor{at: payload_at}
+            name_len :: cli_record_wasm_leb_limit(bytes, &name_cursor, cursor.at)
+            if name_len > cursor.at - name_cursor.at -> return Err(CLIMetadataError.Malformed("section outside file"))
+            name_matches :: cli_record_starts_with_at(bytes, name_cursor.at, name_cursor.at + name_len, CLI_WASM_SECTION.bytes()) && name_len == CLI_WASM_SECTION.bytes().len()
+            name_cursor.at += name_len
+            if name_matches -> &found.push(CLIRecordSection{at: name_cursor.at, len: cursor.at - name_cursor.at})
+        }
+    }
+    Ok(found)
+}
+// Rust put_wasm_leb.
+fn cli_record_put_wasm_leb(out: &[U8], input: Int) Never! {
+    value := input
+    loop {
+        byte := value & 127
+        value = value >> 7
+        if value != 0 -> byte = byte | 128
+        &out.push(U8{byte})
+        if value == 0 -> break
+    }
+}
+// Rust embed_wasm_record: validate framing before mutating the artifact.
+pub fn cli_schema_embed_wasm_record(wasm: &[U8], record: [U8]) CLIMetadataError! {
+    _ :: cli_record_wasm_sections(wasm)
+    payload := [U8]{}
+    cli_record_put_wasm_leb(&payload, CLI_WASM_SECTION.bytes().len())
+    &payload.extend(CLI_WASM_SECTION.bytes())
+    &payload.extend(record)
+    &wasm.push(U8{0})
+    cli_record_put_wasm_leb(&wasm, payload.len())
+    &wasm.extend(payload)
+}
+// Rust read_executable.
+pub fn cli_schema_read_executable(bytes: [U8]) -> CLICommandSchema CLIMetadataError! {
+    sections :: if {
+        cli_record_starts_with(bytes, [U8]{127, 69, 76, 70}) -> cli_record_elf_sections(bytes)
+        cli_record_starts_with(bytes, "MZ".bytes()) -> cli_record_pe_sections(bytes)
+        cli_record_starts_with(bytes, [U8]{0, 97, 115, 109}) -> cli_record_wasm_sections(bytes)
+        cli_record_is_mach(bytes) -> cli_record_mach_sections(bytes)
+        else -> { return Err(CLIMetadataError.UnknownFormat) }
+    }
+    if sections.len() == 0 -> return Err(CLIMetadataError.Missing)
+    if sections.len() != 1 -> return Err(CLIMetadataError.Duplicate)
+    section :: sections[0]
+    cli_record_validate_header(bytes, section)
+    cli_record_decode_checked_record(~bytes[section.at..<section.at + section.len])
+}
+// Rust CLICommandSchema::standard_completion_words.
+pub fn cli_schema_standard_completion_words(schema: CLICommandSchema) -> [String] Never! {
+    words := [String]{}
+    if schema.standard {
+        words = [String]{"--verbose", "-v", "--quiet", "-q", "--color"}
+        if schema.version != None -> &words.push("--version")
+    }
+    words
+}
+// Rust CLICommandSchema::input_words. Sort (order,index) to keep stable ties.
+fn cli_schema_input_words(inputs: [TCLIInput]) -> [String] Never! {
+    positionals := [Int]{}
+    loop (index, input) in inputs { if input.positional != None -> &positionals.push(index) }
+    &positionals.sort_by((left: Int, right: Int) -> {
+        a :: inputs[left].positional ?? 0
+        b :: inputs[right].positional ?? 0
+        if a == b -> left <=> right else -> a <=> b
+    })
+    words := [String]{}
+    loop index in positionals -> &words.push(~inputs[index].flag)
+    loop input in inputs -> &words.push("--{input.flag}")
+    loop input in inputs { if input.short == .Val(short) -> &words.push("-{short}") }
+    words
+}
+// Rust CLICommandSchema::{command_inputs,command_completion_words}.
+pub fn cli_schema_command_inputs(command: TCLICommand) -> [TCLIInput] Never! { ~command.inputs }
+pub fn cli_schema_command_completion_words(command: TCLICommand) -> [String] Never! {
+    words := [String]{"--help"}
+    &words.extend(cli_schema_input_words(command.inputs))
+    words
+}
+// Rust CLICommandSchema::{job_completion_words,job}.
+pub fn cli_schema_job_completion_words(schema: CLICommandSchema) -> [String] Never! {
+    words := [String]{}
+    loop job in schema.jobs { if job.scope != JobScope.Internal -> &words.push(~job.name) }
+    words
+}
+pub fn cli_schema_job(schema: CLICommandSchema, name: String) -> Int? Never! { cli_job_registry_find_visible(schema.jobs, name) }
+// Rust CLICommandSchema::{root_completion_words,completion_words}.
+pub fn cli_schema_root_completion_words(schema: CLICommandSchema) -> [String] Never! {
+    words := [String]{"--help"}
+    &words.extend(cli_schema_standard_completion_words(schema))
+    &words.extend(cli_schema_input_words(schema.inputs))
+    words
+}
+pub fn cli_schema_completion_words(schema: CLICommandSchema) -> [String] Never! {
+    words := cli_schema_root_completion_words(schema)
+    loop command in schema.commands -> &words.push(~command.name)
+    &words.extend(cli_schema_job_completion_words(schema))
+    words
+}

@@ -1,0 +1,321 @@
+// CmdNotebook.rs pure assertions and existing controlled host-seam regressions.
+// These hosts never replace production TCP/clock/CSPRNG/browser acceptance.
+// Native originals :850,896,935,961 and Drop :815 retain explicit source gates
+// at the NotebookHttp source owner; their real providers are not yet available.
+NOTEBOOK_HTTP_TEST_USIZE64_MAX :: U64{18446744073709551615}
+NOTEBOOK_HTTP_TEST_CR :: prep { String.from_bytes([U8]{U8{13}}) ?? panic("CR") }
+NOTEBOOK_HTTP_TEST_DEL :: prep { String.from_bytes([U8]{U8{127}}) ?? panic("DEL") }
+struct NotebookHTTPTestHost {
+    chunks: [[U8]]
+    next_chunk: Int
+    clock_ns: Int
+    advance_ns: Int
+    deadlines: [Int]
+    output: [U8]
+    read_error: String
+    write_error: String
+    timeout: Bool
+    random_calls: Int
+    random_error: String
+    impl JetCLINotebookHTTPHost {
+        fn now(&self) -[Time]> Int Never! { self.clock_ns }
+        fn read_until(&self, deadline_ns: Int, max_bytes: Int) -[Net, Time]> JetCLINotebookRead Err! {
+            assert_eq(max_bytes, 4096)
+            &self.deadlines.push(deadline_ns)
+            self.clock_ns += self.advance_ns
+            if self.read_error != "" -> return Err(~self.read_error)
+            if self.timeout -> return Ok(JetCLINotebookRead.Timeout("native read timed out"))
+            if self.next_chunk >= self.chunks.len() -> return Ok(JetCLINotebookRead.Closed)
+            chunk :: ~self.chunks[self.next_chunk]
+            self.next_chunk += 1
+            assert(chunk.len() <= max_bytes)
+            if chunk.is_empty() -> return Ok(JetCLINotebookRead.Closed)
+            Ok(JetCLINotebookRead.Bytes(chunk))
+        }
+        fn write_all(&self, bytes: [U8]) Err! -[Net]> {
+            if self.write_error != "" -> return Err(~self.write_error)
+            loop byte in bytes -> &self.output.push(byte)
+        }
+    }
+    impl JetCLINotebookRandomHost {
+        fn random_16(&self) -[Rand]> [U8] Err! {
+            if self.random_error != "" -> return Err(~self.random_error)
+            self.random_calls += 1
+            bytes := [U8]{}
+            loop index in 0..<16 -> &bytes.push(U8{index + self.random_calls})
+            Ok(bytes)
+        }
+    }
+}
+fn notebook_http_test_host(chunks: [[U8]]) -> NotebookHTTPTestHost {
+    NotebookHTTPTestHost{chunks: chunks, next_chunk: 0, clock_ns: 0, advance_ns: 0, deadlines: [Int]{}, output: [U8]{}, read_error: "", write_error: "", timeout: false, random_calls: 0, random_error: ""}
+}
+fn notebook_http_test_chunks(text: String) -> [[U8]] {
+    raw :: text.bytes()
+    out := [[U8]]{}
+    at := 0
+    loop at < raw.len() {
+        end :: if at + 4096 < raw.len() -> at + 4096 else -> raw.len()
+        &out.push(~raw[at..<end])
+        at = end
+    }
+    out
+}
+fn notebook_http_test_read_error(host: &NotebookHTTPTestHost, deadline_ns: Int) -[Net, Time]> String {
+    if jet_cli_notebook_read_request_until(&host, deadline_ns, NOTEBOOK_HTTP_TEST_USIZE64_MAX) == {
+        .Err(error) -> ~error.message
+        .Ok(_) -> panic("request unexpectedly accepted")
+    }
+}
+fn notebook_http_test_decode_error(text: String) -> String {
+    if jet_cli_notebook_decode_component(text) == {
+        .Err(error) -> ~error.message
+        .Ok(_) -> panic("component unexpectedly decoded")
+    }
+}
+fn notebook_http_test_request(headers: [String:String], target: String) -> JetCLINotebookRequest {
+    JetCLINotebookRequest{method: "POST", target: target, headers: headers, body: ""}
+}
+#Test("listener_notice_withholds_the_bearer_token") {
+    notice :: jet_cli_notebook_listener_notice("127.0.0.1:43127")
+    assert_eq(notice, "jet notebook listening on http://127.0.0.1:43127/ (authentication token withheld)")
+    assert(!notice.contains("#token="))
+}
+// Rust :839-847 preserves both absolute-URL and relative-fragment assertions.
+#Test("redirect_location_keeps_authentication_in_the_fragment") {
+    location :: jet_cli_notebook_redirect_location("a&b")
+    assert_eq("http://127.0.0.1:43127{location}", "http://127.0.0.1:43127/#token=a%26b")
+    assert_eq(location, "/#token=a%26b")
+    assert(!jet_cli_notebook_listener_notice("127.0.0.1:43127").contains("a&b"))
+    assert_eq(jet_cli_notebook_fragment_component("AZaz09-._~ é😀&+"), "AZaz09-._~%20%C3%A9%F0%9F%98%80%26%2B")
+}
+#Test("notebook browser URL carries only bootstrap nonce") {
+    url :: jet_cli_notebook_bootstrap_url("127.0.0.1:43127", "0123456789abcdef0123456789abcdef")
+    assert_eq(url, "http://127.0.0.1:43127/__jet_notebook_bootstrap?nonce=0123456789abcdef0123456789abcdef")
+    assert(!url.contains("browser-bearer"))
+    assert(!url.contains("#token="))
+    assert_eq(jet_cli_notebook_bootstrap_url("[::1]:80", "a&b"), "http://[::1]:80/__jet_notebook_bootstrap?nonce=a%26b")
+}
+#Test("bootstrap_nonce_is_single_use_and_not_a_bearer") {
+    nonce :: "0123456789abcdef0123456789abcdef"
+    grant := Val(JetCLINotebookBootstrapGrant{nonce: nonce, expires_at_ns: 30})
+    assert(!jet_cli_notebook_consume_bootstrap_at(&grant, "wrong-nonce", 0))
+    assert(grant != None)
+    assert(jet_cli_notebook_consume_bootstrap_at(&grant, nonce, 29))
+    assert(grant == None)
+    assert(!jet_cli_notebook_consume_bootstrap_at(&grant, nonce, 29))
+    request :: notebook_http_test_request([String:String]{"authorization": "Bearer {nonce}"}, "/api/state")
+    assert(!jet_cli_notebook_authorized(request, "actual-bearer"))
+}
+// Rust :885-892: equality with expiration removes the grant, even on refusal.
+#Test("bootstrap_nonce_expires_and_is_removed") {
+    grant := Val(JetCLINotebookBootstrapGrant{nonce: "expired-nonce", expires_at_ns: 0})
+    assert(!jet_cli_notebook_consume_bootstrap_at(&grant, "expired-nonce", 0))
+    assert(grant == None)
+    grant = Val(JetCLINotebookBootstrapGrant{nonce: "expired-nonce", expires_at_ns: 30})
+    assert(!jet_cli_notebook_consume_bootstrap_at(&grant, "wrong-nonce", 30))
+    assert(grant == None)
+    grant = Val(JetCLINotebookBootstrapGrant{nonce: "expired-nonce", expires_at_ns: 30})
+    assert(!jet_cli_notebook_consume_bootstrap_at(&grant, "expired-nonce", 31))
+    assert(grant == None)
+}
+#Test("notebook_auth_ignores_query_tokens_and_compares_the_bearer_header") {
+    request := notebook_http_test_request([String:String]{"authorization": "Bearer local-secret"}, "/api/state?token=attacker-query")
+    assert(jet_cli_notebook_authorized(request, "local-secret"))
+    request.headers = [String:String]{}
+    assert(!jet_cli_notebook_authorized(request, "local-secret"))
+    request.headers = [String:String]{"authorization": "Bearer local-secrex"}
+    assert(!jet_cli_notebook_authorized(request, "local-secret"))
+    request.headers = [String:String]{"authorization": "bearer local-secret"}
+    assert(!jet_cli_notebook_authorized(request, "local-secret"))
+    assert(jet_cli_notebook_constant_time_eq([U8]{}, [U8]{}))
+    assert(!jet_cli_notebook_constant_time_eq([U8]{}, [U8]{U8{0}}))
+    assert(!jet_cli_notebook_constant_time_eq("secret".bytes(), "secre".bytes()))
+    assert(!jet_cli_notebook_constant_time_eq("secre".bytes(), "secret".bytes()))
+}
+#Test("notebook entropy seam uses fresh 16 bytes and propagates failure without fallback") {
+    host := notebook_http_test_host([[U8]]{})
+    first :: jet_cli_notebook_mint_token(&host) ?? panic(err.message)
+    second :: jet_cli_notebook_mint_token(&host) ?? panic(err.message)
+    assert_eq(first, "0102030405060708090a0b0c0d0e0f10")
+    assert_eq(second, "02030405060708090a0b0c0d0e0f1011")
+    assert_eq(first.len(), 32)
+    assert(first != second)
+    host.random_error = "entropy unavailable"
+    if jet_cli_notebook_mint_token(&host) == {
+        .Err(error) -> assert_eq(error.message, "entropy unavailable")
+        .Ok(_) -> panic("entropy failure substituted a token")
+    }
+    assert_eq(host.random_calls, 2)
+}
+#Test("notebook partial headers and body cannot extend absolute request deadline") {
+    chunks :: [[U8]]{"G".bytes(), "G".bytes(), "G".bytes(), "G".bytes(), "G".bytes()}
+    host := notebook_http_test_host(chunks)
+    host.advance_ns = 20
+    assert_eq(notebook_http_test_read_error(&host, 80), "request deadline exceeded")
+    assert_eq(host.clock_ns, 80)
+    assert_eq(host.deadlines, [Int]{80, 80, 80, 80})
+    body_host := notebook_http_test_host([[U8]]{"POST / HTTP/1.1{NOTEBOOK_HTTP_TEST_CR}\nContent-Length: 4{NOTEBOOK_HTTP_TEST_CR}\n{NOTEBOOK_HTTP_TEST_CR}\na".bytes(), "b".bytes(), "c".bytes(), "d".bytes()})
+    body_host.advance_ns = 20
+    assert_eq(notebook_http_test_read_error(&body_host, 60), "request deadline exceeded")
+    assert_eq(body_host.deadlines, [Int]{60, 60, 60})
+    expired := notebook_http_test_host([[U8]]{})
+    assert_eq(notebook_http_test_read_error(&expired, 0), "request deadline exceeded")
+    assert(expired.deadlines.is_empty())
+}
+#Test("notebook request chunk-boundary UTF8 header normalization and last header wins") {
+    host := notebook_http_test_host([[U8]]{"POST /api/state?x=y HTTP/1.1{NOTEBOOK_HTTP_TEST_CR}\nAuThorIZation: wrong{NOTEBOOK_HTTP_TEST_CR}\nAuthorization:  Bearer secret {NOTEBOOK_HTTP_TEST_CR}\nContent-Length: 3{NOTEBOOK_HTTP_TEST_CR}\nignored{NOTEBOOK_HTTP_TEST_CR}".bytes(), "\n{NOTEBOOK_HTTP_TEST_CR}".bytes(), "\né".bytes(), "!extra".bytes()})
+    request :: jet_cli_notebook_read_request(&host, NOTEBOOK_HTTP_TEST_USIZE64_MAX) ?? panic(err.message)
+    assert_eq(request.method, "POST")
+    assert_eq(request.target, "/api/state?x=y")
+    assert_eq(request.body, "é!")
+    assert(jet_cli_notebook_authorized(request, "secret"))
+    assert_eq(host.deadlines, [Int]{10000000000, 10000000000, 10000000000, 10000000000})
+    bare := notebook_http_test_host([[U8]]{"{NOTEBOOK_HTTP_TEST_CR}\n{NOTEBOOK_HTTP_TEST_CR}\nignored".bytes()})
+    empty :: jet_cli_notebook_read_request(&bare, NOTEBOOK_HTTP_TEST_USIZE64_MAX) ?? panic(err.message)
+    assert_eq(empty.method, "")
+    assert_eq(empty.target, "")
+    assert_eq(empty.body, "")
+}
+#Test("notebook request EOF native IO and timeout text is preserved") {
+    host := notebook_http_test_host([[U8]]{})
+    assert_eq(notebook_http_test_read_error(&host, 1), "request ended before headers")
+    body := notebook_http_test_host([[U8]]{"POST / HTTP/1.1{NOTEBOOK_HTTP_TEST_CR}\nContent-Length: 1{NOTEBOOK_HTTP_TEST_CR}\n{NOTEBOOK_HTTP_TEST_CR}\n".bytes()})
+    assert_eq(notebook_http_test_read_error(&body, 1), "request ended before body")
+    host.read_error = "native timeout setup failure"
+    assert_eq(notebook_http_test_read_error(&host, 1), "native timeout setup failure")
+    host.read_error = ""
+    host.timeout = true
+    assert_eq(notebook_http_test_read_error(&host, 1), "native read timed out")
+    bad_header := notebook_http_test_host([[U8]]{[U8]{U8{255}, U8{13}, U8{10}, U8{13}, U8{10}}})
+    assert_eq(notebook_http_test_read_error(&bad_header, 1), "headers are not UTF-8")
+    bad_body := notebook_http_test_host([[U8]]{"POST / HTTP/1.1{NOTEBOOK_HTTP_TEST_CR}\nContent-Length: 1{NOTEBOOK_HTTP_TEST_CR}\n{NOTEBOOK_HTTP_TEST_CR}\n".bytes(), [U8]{U8{255}}})
+    assert_eq(notebook_http_test_read_error(&bad_body, 1), "request body is not UTF-8")
+}
+#Test("notebook exact 64KiB header limit includes initial body bytes like Rust") {
+    valid :: "GET / HTTP/1.1{NOTEBOOK_HTTP_TEST_CR}\nX: {"a".repeat(65513)}{NOTEBOOK_HTTP_TEST_CR}\n{NOTEBOOK_HTTP_TEST_CR}\n"
+    assert_eq(valid.bytes().len(), 65536)
+    host := notebook_http_test_host(notebook_http_test_chunks(valid))
+    request :: jet_cli_notebook_read_request(&host, NOTEBOOK_HTTP_TEST_USIZE64_MAX) ?? panic(err.message)
+    assert_eq(request.method, "GET")
+    overflow := notebook_http_test_host(notebook_http_test_chunks("{valid}x"))
+    // The terminator is already found in the 64KiB chunk, so later bytes are ignored.
+    accepted :: jet_cli_notebook_read_request(&overflow, NOTEBOOK_HTTP_TEST_USIZE64_MAX) ?? panic(err.message)
+    assert_eq(accepted.body, "")
+    too_big := notebook_http_test_host(notebook_http_test_chunks("GET / HTTP/1.1{NOTEBOOK_HTTP_TEST_CR}\nX: {"a".repeat(65514)}{NOTEBOOK_HTTP_TEST_CR}\n{NOTEBOOK_HTTP_TEST_CR}\n"))
+    assert_eq(notebook_http_test_read_error(&too_big, 1), "request headers exceed 64 KiB")
+    unfinished := notebook_http_test_host(notebook_http_test_chunks("a".repeat(65537)))
+    assert_eq(notebook_http_test_read_error(&unfinished, 1), "request headers exceed 64 KiB")
+    // Body bytes received in the chunk that completes headers count against 64KiB.
+    prefix :: "GET / HTTP/1.1{NOTEBOOK_HTTP_TEST_CR}\nX: {"a".repeat(65512)}{NOTEBOOK_HTTP_TEST_CR}"
+    body_chunks := notebook_http_test_chunks(prefix)
+    &body_chunks.push("\n{NOTEBOOK_HTTP_TEST_CR}\nbody".bytes())
+    preloaded := notebook_http_test_host(body_chunks)
+    assert_eq(notebook_http_test_read_error(&preloaded, 1), "request headers exceed 64 KiB")
+}
+#Test("notebook content length usize grammar overflow and 8MiB boundary") {
+    invalid :: [String]{"", "-1", "1x", "1 2", "+", "18446744073709551616"}
+    loop value in invalid {
+        host := notebook_http_test_host([[U8]]{"POST / HTTP/1.1{NOTEBOOK_HTTP_TEST_CR}\nContent-Length: {value}{NOTEBOOK_HTTP_TEST_CR}\n{NOTEBOOK_HTTP_TEST_CR}\n".bytes()})
+        assert_eq(notebook_http_test_read_error(&host, 1), "invalid content length")
+    }
+    large :: [String]{"8388609", "18446744073709551615"}
+    loop value in large {
+        host := notebook_http_test_host([[U8]]{"POST / HTTP/1.1{NOTEBOOK_HTTP_TEST_CR}\nContent-Length: {value}{NOTEBOOK_HTTP_TEST_CR}\n{NOTEBOOK_HTTP_TEST_CR}\n".bytes()})
+        assert_eq(notebook_http_test_read_error(&host, 1), "request body exceeds 8 MiB")
+    }
+    host := notebook_http_test_host([[U8]]{"POST / HTTP/1.1{NOTEBOOK_HTTP_TEST_CR}\nContent-Length: +0003{NOTEBOOK_HTTP_TEST_CR}\n{NOTEBOOK_HTTP_TEST_CR}\nabcignored".bytes()})
+    assert_eq((jet_cli_notebook_read_request(&host, NOTEBOOK_HTTP_TEST_USIZE64_MAX) ?? panic(err.message)).body, "abc")
+    boundary := notebook_http_test_host([[U8]]{"POST / HTTP/1.1{NOTEBOOK_HTTP_TEST_CR}\nContent-Length: 8388608{NOTEBOOK_HTTP_TEST_CR}\n{NOTEBOOK_HTTP_TEST_CR}\n".bytes()})
+    assert_eq(notebook_http_test_read_error(&boundary, 1), "request ended before body")
+    complete_chunks := [[U8]]{"POST / HTTP/1.1{NOTEBOOK_HTTP_TEST_CR}\nContent-Length: 8388608{NOTEBOOK_HTTP_TEST_CR}\n{NOTEBOOK_HTTP_TEST_CR}\n".bytes()}
+    full_chunk :: "a".repeat(4096).bytes()
+    loop index in 0..<2048 -> &complete_chunks.push(~full_chunk)
+    complete := notebook_http_test_host(complete_chunks)
+    full :: jet_cli_notebook_read_request(&complete, NOTEBOOK_HTTP_TEST_USIZE64_MAX) ?? panic(err.message)
+    assert_eq(full.body.bytes().len(), 8388608)
+}
+#Test("notebook form decoding malformed pairs first valid occurrence and byte UTF8") {
+    assert_eq(jet_cli_notebook_decode_component("caf%C3%A9+%26%2b") ?? panic(err.message), "café &+")
+    assert_eq(jet_cli_notebook_decode_component("%+A") ?? panic(err.message), "\n")
+    assert_eq(notebook_http_test_decode_error("%"), "incomplete percent escape")
+    assert_eq(notebook_http_test_decode_error("%A"), "incomplete percent escape")
+    assert_eq(notebook_http_test_decode_error("%GG"), "invalid percent escape")
+    assert_eq(notebook_http_test_decode_error("%é"), "invalid percent escape")
+    assert_eq(notebook_http_test_decode_error("%FF"), "form value is not UTF-8")
+    assert_eq(jet_cli_notebook_form_value("missing&%GG=x&name=%FF&na%6De=first&name=last", "name") ?? panic("form"), "first")
+    assert_eq(jet_cli_notebook_form_value("name=a=b", "name") ?? panic("form"), "a=b")
+    assert_eq(jet_cli_notebook_form_value("name=", "name") ?? panic("form"), "")
+    assert(jet_cli_notebook_form_value("x=y", "name") == None)
+    parts :: jet_cli_notebook_split_target("/api?x?y")
+    assert_eq(parts.route, "/api")
+    assert_eq(parts.query, "x?y")
+    assert_eq(jet_cli_notebook_split_target("/").query, "")
+}
+#Test("notebook byte exact HTTP response redirect JSON and write failures") {
+    host := notebook_http_test_host([[U8]]{})
+    jet_cli_notebook_write_response(&host, "200 OK", "text/plain", "é😀") ?? panic(err.message)
+    assert_eq(host.output, "HTTP/1.1 200 OK{NOTEBOOK_HTTP_TEST_CR}\nContent-Type: text/plain{NOTEBOOK_HTTP_TEST_CR}\nContent-Length: 6{NOTEBOOK_HTTP_TEST_CR}\nConnection: close{NOTEBOOK_HTTP_TEST_CR}\n{NOTEBOOK_HTTP_TEST_CR}\né😀".bytes())
+    host.output = [U8]{}
+    jet_cli_notebook_write_redirect(&host, "a&b") ?? panic(err.message)
+    assert_eq(host.output, "HTTP/1.1 303 See Other{NOTEBOOK_HTTP_TEST_CR}\nLocation: /#token=a%26b{NOTEBOOK_HTTP_TEST_CR}\nCache-Control: no-store{NOTEBOOK_HTTP_TEST_CR}\nReferrer-Policy: no-referrer{NOTEBOOK_HTTP_TEST_CR}\nContent-Length: 0{NOTEBOOK_HTTP_TEST_CR}\nConnection: close{NOTEBOOK_HTTP_TEST_CR}\n{NOTEBOOK_HTTP_TEST_CR}\n".bytes())
+    assert_eq(jet_cli_notebook_json_error("bad\"\\\n\t{NOTEBOOK_HTTP_TEST_DEL}"), "{{\"ok\":false,\"error\":\"bad\\\"\\\\\\n\\t\\u007f\"}}")
+    host.write_error = "native broken pipe"
+    if jet_cli_notebook_write_response(&host, "200 OK", "text/plain", "") == {
+        .Err(error) -> assert_eq(error.message, "native broken pipe")
+        .Ok(_) -> panic("write failure lost")
+    }
+    if jet_cli_notebook_write_redirect(&host, "token") == {
+        .Err(error) -> assert_eq(error.message, "native broken pipe")
+        .Ok(_) -> panic("redirect failure lost")
+    }
+}
+#Test("notebook flag precedence positional path lexical loopback and client aliases") {
+    raw :: [String]{"jet", "notebook", "--bind", "localhost:80", "--token", "secret", "--headless", "path.jetnb", "--bind=127.0.0.1:9"}
+    assert_eq(jet_cli_notebook_flag_value(raw, "--bind") ?? panic("flag"), "127.0.0.1:9")
+    assert_eq(jet_cli_notebook_path(raw) ?? panic("path"), "path.jetnb")
+    assert_eq(jet_cli_notebook_flag_value([String]{"--token", "--next"}, "--token") ?? panic("flag"), "--next")
+    assert(jet_cli_notebook_flag_value([String]{"--token"}, "--token") == None)
+    assert(jet_cli_notebook_path([String]{"notebook", "--token", "file.jetnb"}) == None)
+    assert(jet_cli_notebook_path([String]{"file.jetnb"}) == None)
+    assert_eq(jet_cli_notebook_path([String]{"notebook", "--bind=x", "--", "./a.jetnb"}) ?? panic("path"), "./a.jetnb")
+    yes :: [String]{"127.anything", "localhost:80", "localhost", "[::1]:80", "[::1]", "::1:80", "::1"}
+    loop addr in yes -> assert(jet_cli_notebook_is_loopback(addr))
+    no :: [String]{"0.0.0.0:80", "LOCALHOST:80", "localhost.evil:80", "128.0.0.1:80", "[::2]", ""}
+    loop addr in no -> assert(!jet_cli_notebook_is_loopback(addr))
+    first :: [String]{"", "first", "first-party"}
+    loop name in first -> assert((jet_cli_notebook_parse_client(name) ?? panic(err.message)) == JetCLINotebookClientKind.FirstParty)
+    canvas :: [String]{"canvas", "lens"}
+    loop name in canvas -> assert((jet_cli_notebook_parse_client(name) ?? panic(err.message)) == JetCLINotebookClientKind.CanvasLens)
+    jupyter :: [String]{"jupyter", "jp"}
+    loop name in jupyter -> assert((jet_cli_notebook_parse_client(name) ?? panic(err.message)) == JetCLINotebookClientKind.JupyterAdapter)
+    if jet_cli_notebook_parse_client("unknown") == {
+        .Err(error) -> assert_eq(error.message, "unknown client `unknown`")
+        .Ok(_) -> panic("unknown client accepted")
+    }
+}
+
+#Test("notebook selected usize overflow precedes the 8MiB policy limit") {
+    max32 :: U64{4294967295}
+    assert_eq(jet_cli_notebook_content_length("4294967295", max32) ?? panic(err.message), 8388609)
+    if jet_cli_notebook_content_length("4294967296", max32) == {
+        .Err(error) -> assert_eq(error.message, "invalid content length")
+        .Ok(_) -> panic("32-bit usize overflow accepted")
+    }
+    assert_eq(jet_cli_notebook_content_length("4294967296", NOTEBOOK_HTTP_TEST_USIZE64_MAX) ?? panic(err.message), 8388609)
+    // Continue validating digits even when the body limit has already been crossed.
+    if jet_cli_notebook_content_length("8388609x", NOTEBOOK_HTTP_TEST_USIZE64_MAX) == {
+        .Err(error) -> assert_eq(error.message, "invalid content length")
+        .Ok(_) -> panic("invalid trailing digit hidden by body limit")
+    }
+}
+#Test("notebook Report exports retain field order and escaped text") {
+    assert_eq(jet_cli_notebook_export_message("notebook.jet", "é\n\"x\"", "a\nb"), "{{\"ok\":true,\"filename\":\"notebook.jet\",\"content\":\"é\\n\\\"x\\\"\",\"loss\":\"a\\nb\"}}")
+    state := StatusFields.new()
+    state = ^state.with("cells", StatusValue.Integer{value: 2})
+    response :: jet_cli_notebook_state_message_value("edited", StatusValue.object(^state))
+    assert_eq(response.json(), "{{\"ok\":true,\"message\":\"edited\",\"state\":{{\"cells\":2}}}}")
+    assert(jet_cli_notebook_nonempty_path_value("path=", "path") == None)
+    assert(jet_cli_notebook_nonempty_path_value("x=y", "path") == None)
+    assert_eq(jet_cli_notebook_nonempty_path_value("path=.%2Fdoc.jetnb", "path") ?? panic("path"), "./doc.jetnb")
+}

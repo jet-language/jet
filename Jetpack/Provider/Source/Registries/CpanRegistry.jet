@@ -33,7 +33,7 @@ fn provider_cpan_parse_search(repository: String, distribution: String, raw: Str
     }
     hits :: provider_script_json_get(value, "hits") ?? return Err(RegistryError.Reason("invalid MetaCPAN release search: {err.message()}"))
     inner :: provider_script_json_get(hits, "hits") ?? return Err(RegistryError.Reason("invalid MetaCPAN release search: {err.message()}"))
-    releases :: pkg_json_array(inner) ?? return Err(RegistryError.Reason("invalid MetaCPAN release search: {@PKG_JSON_NOT_ARRAY}"))
+    releases :: pkg_json_array(inner) ?? return Err(RegistryError.Reason("invalid MetaCPAN release search: {PKG_JSON_NOT_ARRAY}"))
     out := [RegistryPackage]{}
     loop hit in releases {
         release :: provider_script_json_get(hit, "_source") ?? return Err(RegistryError.Reason("invalid MetaCPAN release hit: {err.message()}"))
@@ -81,7 +81,7 @@ fn provider_cpan_parse_release(repository: String, value: DataTree) -> RegistryP
         name: package_name,
         version,
         url: provider_script_absolutize(repository, url),
-        integrity: RegistryIntegrity.Sha256(pkg_ascii_lower(checksum)),
+        integrity: RegistryIntegrity.SHA256(pkg_ascii_lower(checksum)),
         dependencies,
         psr4: [String: [String]]{},
     })

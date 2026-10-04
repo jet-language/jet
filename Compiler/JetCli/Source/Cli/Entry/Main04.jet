@@ -1,0 +1,1804 @@
+// PORT-PENDING 2032 source-main-slice-5401: Source/main.rs:5401-7200
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS 
+//RS fn job_cache_name(cache: jet::AST::JobCachePolicy) -> &'static str {
+//RS     match cache {
+//RS         jet::AST::JobCachePolicy::Uncached => "uncached",
+//RS         jet::AST::JobCachePolicy::Local => "local",
+//RS         jet::AST::JobCachePolicy::Shared => "shared",
+//RS     }
+//RS }
+//RS 
+//RS fn job_skip_label(skip: &jet::AST::JobSkip) -> String {
+//RS     match skip {
+//RS         jet::AST::JobSkip::Always(reason) => format!("always ({reason})"),
+//RS         jet::AST::JobSkip::UnlessPlatform { platform } => {
+//RS             format!("unless platform is {platform}")
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn render_job_registry(
+//RS     registry: &jet_foundation::CLISchema::JobRegistry,
+//RS     profile: jet_cli::OutputProfile::OutputProfile,
+//RS ) {
+//RS     let jobs = registry.visible_jobs();
+//RS     if profile.machine_enabled() {
+//RS         let jobs_value = StatusValue::array(jobs.iter().map(|job| {
+//RS             StatusValue::object(
+//RS                 StatusFields::new()
+//RS                     .with("name", job.name.as_str())
+//RS                     .with("scope", job.scope_name())
+//RS                     .with("doc", job_status_optional_string(job.doc.as_deref()))
+//RS                     .with(
+//RS                         "arguments",
+//RS                         StatusValue::array(job.arguments.iter().map(job_status_argument)),
+//RS                     )
+//RS                     .with(
+//RS                         "schedule",
+//RS                         job_status_optional_string(job.schedule.as_deref()),
+//RS                     )
+//RS                     .with("after", job_status_string_array(&job.after))
+//RS                     .with("inputs", job_status_string_array(&job.inputs))
+//RS                     .with("outputs", job_status_string_array(&job.outputs))
+//RS                     .with("packages", job_status_string_array(&job.packages))
+//RS                     .with("cwd", job_status_optional_string(job.cwd.as_deref()))
+//RS                     .with("skip", job_status_skip(job.skip.as_ref()))
+//RS                     .with("cache", job_cache_name(job.cache))
+//RS                     .with("limits", job_status_limits(&job.limits))
+//RS                     .with("parallel", job.parallel),
+//RS             )
+//RS         }));
+//RS         let payload = render_status("jobs", true, StatusFields::new().with("jobs", jobs_value));
+//RS         write_machine(profile, &format!("{payload}\n"));
+//RS         return;
+//RS     }
+//RS     if jobs.is_empty() {
+//RS         write_renderable(profile, "No jobs declared.\n");
+//RS         return;
+//RS     }
+//RS     let columns = vec![
+//RS         jet_cli::AdaptiveTable::TableColumn::new(
+//RS             "Name",
+//RS             jet_cli::AdaptiveTable::TableCellKind::Text,
+//RS         ),
+//RS         jet_cli::AdaptiveTable::TableColumn::new(
+//RS             "Scope",
+//RS             jet_cli::AdaptiveTable::TableCellKind::Text,
+//RS         ),
+//RS         jet_cli::AdaptiveTable::TableColumn::new(
+//RS             "Details",
+//RS             jet_cli::AdaptiveTable::TableCellKind::Text,
+//RS         ),
+//RS     ];
+//RS     let rows = jobs
+//RS         .iter()
+//RS         .map(|job| {
+//RS             let arguments = job
+//RS                 .arguments
+//RS                 .iter()
+//RS                 .map(jet_foundation::CLISchema::JobArgumentSchema::display)
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ");
+//RS             let mut detail = if arguments.is_empty() {
+//RS                 String::new()
+//RS             } else {
+//RS                 format!("({arguments})")
+//RS             };
+//RS             if let Some(doc) = job.doc.as_deref().filter(|doc| !doc.is_empty()) {
+//RS                 if !detail.is_empty() {
+//RS                     detail.push(' ');
+//RS                 }
+//RS                 detail.push_str(&doc.replace('\n', " "));
+//RS             }
+//RS             if let Some(schedule) = job.schedule.as_deref() {
+//RS                 if !detail.is_empty() {
+//RS                     detail.push(' ');
+//RS                 }
+//RS                 detail.push_str(&format!("(every {schedule})"));
+//RS             }
+//RS             if !job.after.is_empty() {
+//RS                 if !detail.is_empty() {
+//RS                     detail.push(' ');
+//RS                 }
+//RS                 detail.push_str(&format!("(after {})", job.after.join(", ")));
+//RS             }
+//RS             if !job.inputs.is_empty() {
+//RS                 if !detail.is_empty() {
+//RS                     detail.push(' ');
+//RS                 }
+//RS                 detail.push_str(&format!("(inputs {})", job.inputs.join(", ")));
+//RS             }
+//RS             if !job.outputs.is_empty() {
+//RS                 if !detail.is_empty() {
+//RS                     detail.push(' ');
+//RS                 }
+//RS                 detail.push_str(&format!("(outputs {})", job.outputs.join(", ")));
+//RS             }
+//RS             if !job.packages.is_empty() {
+//RS                 if !detail.is_empty() {
+//RS                     detail.push(' ');
+//RS                 }
+//RS                 detail.push_str(&format!("(packages {})", job.packages.join(", ")));
+//RS             }
+//RS             if let Some(cwd) = job.cwd.as_deref() {
+//RS                 if !detail.is_empty() {
+//RS                     detail.push(' ');
+//RS                 }
+//RS                 detail.push_str(&format!("(cwd {cwd})"));
+//RS             }
+//RS             if let Some(skip) = job.skip.as_ref() {
+//RS                 if !detail.is_empty() {
+//RS                     detail.push(' ');
+//RS                 }
+//RS                 detail.push_str(&format!("(skip {})", job_skip_label(skip)));
+//RS             }
+//RS             if job.cache != jet::AST::JobCachePolicy::Uncached {
+//RS                 if !detail.is_empty() {
+//RS                     detail.push(' ');
+//RS                 }
+//RS                 detail.push_str(&format!("(cache {})", job_cache_name(job.cache)));
+//RS             }
+//RS             if !job.limits.is_empty() {
+//RS                 detail.push(' ');
+//RS                 let limits = job
+//RS                     .limits
+//RS                     .iter()
+//RS                     .map(|(name, value)| format!("{name}={value}"))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(", ");
+//RS                 detail.push_str(&format!("(limits {limits})"));
+//RS             }
+//RS             if !detail.is_empty() {
+//RS                 detail.push(' ');
+//RS             }
+//RS             detail.push_str(&format!("(parallel {})", job.parallel));
+//RS             jet_cli::AdaptiveTable::TableRow::new(vec![
+//RS                 jet_cli::AdaptiveTable::TableCell::text(job.name.clone()),
+//RS                 jet_cli::AdaptiveTable::TableCell::text(job.scope_name()),
+//RS                 jet_cli::AdaptiveTable::TableCell::text(detail),
+//RS             ])
+//RS         })
+//RS         .collect();
+//RS     let table = jet_cli::AdaptiveTable::AdaptiveTable::new(columns, rows);
+//RS     if let Some(rendered) = table.layout(&profile).render() {
+//RS         write_renderable(profile, &format!("{rendered}\n"));
+//RS     }
+//RS }
+//RS fn render_job_inspection(
+//RS     entry: &Path,
+//RS     registry: &jet_foundation::CLISchema::JobRegistry,
+//RS     profile: jet_cli::OutputProfile::OutputProfile,
+//RS     requested: Option<&str>,
+//RS     graph: bool,
+//RS     status: bool,
+//RS     explain: bool,
+//RS ) {
+//RS     let jobs = registry.visible_jobs();
+//RS     let selected = match requested {
+//RS         Some(name) => {
+//RS             let Some(job) = registry.find_visible(name) else {
+//RS                 crate::emit_cli_report(
+//RS                     "E1294",
+//RS                     format!("No job named `{name}`."),
+//RS                     "`jet jobs` inspection uses the same visible checked job namespace as invocation"
+//RS                         .to_string(),
+//RS                     format!(
+//RS                         "check the spelling; declared jobs: {}",
+//RS                         registry.completion_words().join(", ")
+//RS                     ),
+//RS                     profile.machine_enabled(),
+//RS                 );
+//RS                 exit(ExitCodes::USER_ERROR);
+//RS             };
+//RS             vec![job]
+//RS         }
+//RS         None => jobs,
+//RS     };
+//RS     if profile.machine_enabled() {
+//RS         let jobs_value = StatusValue::array(selected.iter().map(|job| {
+//RS             let (fresh, reason) = job_graph_freshness(entry, registry, job);
+//RS             StatusValue::object(
+//RS                 StatusFields::new()
+//RS                     .with("name", job.name.as_str())
+//RS                     .with("scope", job.scope_name())
+//RS                     .with("after", job_status_string_array(&job.after))
+//RS                     .with("inputs", job_status_string_array(&job.inputs))
+//RS                     .with("outputs", job_status_string_array(&job.outputs))
+//RS                     .with("packages", job_status_string_array(&job.packages))
+//RS                     .with("cwd", job_status_optional_string(job.cwd.as_deref()))
+//RS                     .with("skip", job_status_skip(job.skip.as_ref()))
+//RS                     .with("cache", job_cache_name(job.cache))
+//RS                     .with("limits", job_status_limits(&job.limits))
+//RS                     .with("parallel", job.parallel)
+//RS                     .with("fresh", fresh)
+//RS                     .with("reason", reason),
+//RS             )
+//RS         }));
+//RS         let view = if graph {
+//RS             "graph"
+//RS         } else if status {
+//RS             "status"
+//RS         } else if explain {
+//RS             "explain"
+//RS         } else {
+//RS             "inspect"
+//RS         };
+//RS         let payload = render_status(
+//RS             format!("jobs.{view}"),
+//RS             true,
+//RS             StatusFields::new()
+//RS                 .with("entry", entry.display().to_string())
+//RS                 .with("jobs", jobs_value),
+//RS         );
+//RS         write_machine(profile, &format!("{payload}\n"));
+//RS         return;
+//RS     }
+//RS     if selected.is_empty() {
+//RS         write_renderable(profile, "No jobs declared.\n");
+//RS         return;
+//RS     }
+//RS     let mut rendered = String::new();
+//RS     if graph {
+//RS         rendered.push_str("Job graph\n");
+//RS         for job in &selected {
+//RS             let predecessors = if job.after.is_empty() {
+//RS                 "—".to_string()
+//RS             } else {
+//RS                 job.after.join(", ")
+//RS             };
+//RS             rendered.push_str(&format!("  {} <- {}\n", job.name, predecessors));
+//RS         }
+//RS     } else if status {
+//RS         rendered.push_str("Job status\n");
+//RS         for job in &selected {
+//RS             let (fresh, reason) = job_graph_freshness(entry, registry, job);
+//RS             let state = if fresh { "fresh" } else { "stale" };
+//RS             rendered.push_str(&format!("  {:<24} {:<6} {}\n", job.name, state, reason));
+//RS         }
+//RS     } else {
+//RS         rendered.push_str("Job details\n");
+//RS         for job in &selected {
+//RS             let (fresh, reason) = job_graph_freshness(entry, registry, job);
+//RS             rendered.push_str(&format!("  {}\n", job.name));
+//RS             rendered.push_str(&format!("    scope: {}\n", job.scope_name()));
+//RS             rendered.push_str(&format!(
+//RS                 "    after: {}\n",
+//RS                 if job.after.is_empty() {
+//RS                     "—".to_string()
+//RS                 } else {
+//RS                     job.after.join(", ")
+//RS                 }
+//RS             ));
+//RS             rendered.push_str(&format!(
+//RS                 "    inputs: {}\n",
+//RS                 if job.inputs.is_empty() {
+//RS                     "—".to_string()
+//RS                 } else {
+//RS                     job.inputs.join(", ")
+//RS                 }
+//RS             ));
+//RS             rendered.push_str(&format!(
+//RS                 "    outputs: {}\n",
+//RS                 if job.outputs.is_empty() {
+//RS                     "—".to_string()
+//RS                 } else {
+//RS                     job.outputs.join(", ")
+//RS                 }
+//RS             ));
+//RS             rendered.push_str(&format!(
+//RS                 "    packages: {}\n",
+//RS                 if job.packages.is_empty() {
+//RS                     "—".to_string()
+//RS                 } else {
+//RS                     job.packages.join(", ")
+//RS                 }
+//RS             ));
+//RS             rendered.push_str(&format!(
+//RS                 "    cwd: {}\n",
+//RS                 job.cwd.as_deref().unwrap_or("project root")
+//RS             ));
+//RS             rendered.push_str(&format!(
+//RS                 "    skip: {}\n",
+//RS                 job.skip
+//RS                     .as_ref()
+//RS                     .map(job_skip_label)
+//RS                     .unwrap_or_else(|| "never".to_string())
+//RS             ));
+//RS             rendered.push_str(&format!("    cache: {}\n", job_cache_name(job.cache)));
+//RS             rendered.push_str(&format!(
+//RS                 "    limits: {}\n",
+//RS                 if job.limits.is_empty() {
+//RS                     "—".to_string()
+//RS                 } else {
+//RS                     job.limits
+//RS                         .iter()
+//RS                         .map(|(name, value)| format!("{name}={value}"))
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(", ")
+//RS                 }
+//RS             ));
+//RS             rendered.push_str(&format!("    parallel: {}\n", job.parallel));
+//RS             rendered.push_str(&format!(
+//RS                 "    freshness: {} ({reason})\n",
+//RS                 if fresh { "fresh" } else { "stale" }
+//RS             ));
+//RS         }
+//RS     }
+//RS     write_renderable(profile, &rendered);
+//RS }
+//RS 
+//RS fn job_freshness(entry: &Path, job: &jet_foundation::CLISchema::JobFact) -> (bool, String) {
+//RS     if matches!(job.cache, jet::AST::JobCachePolicy::Uncached) {
+//RS         return (false, "cache policy is uncached".to_string());
+//RS     }
+//RS     let base = job_base_directory(entry, job);
+//RS     let mut missing_input = None;
+//RS     let mut missing_output = None;
+//RS     let mut newest_input: Option<std::time::SystemTime> = None;
+//RS     let mut newest_output: Option<std::time::SystemTime> = None;
+//RS     for pattern in &job.inputs {
+//RS         let paths = job_declared_paths(&base, pattern);
+//RS         if paths.is_empty() {
+//RS             missing_input = Some(pattern.clone());
+//RS         }
+//RS         for path in paths {
+//RS             if !path.exists() {
+//RS                 missing_input = Some(pattern.clone());
+//RS             }
+//RS             if let Some(modified) = job_latest_modified(&path) {
+//RS                 newest_input = Some(newest_input.map_or(modified, |current| current.max(modified)));
+//RS             }
+//RS         }
+//RS     }
+//RS     for pattern in &job.outputs {
+//RS         let paths = job_declared_paths(&base, pattern);
+//RS         if paths.is_empty() {
+//RS             missing_output = Some(pattern.clone());
+//RS         }
+//RS         for path in paths {
+//RS             if !path.exists() {
+//RS                 missing_output = Some(pattern.clone());
+//RS             }
+//RS             if let Some(modified) = job_latest_modified(&path) {
+//RS                 newest_output =
+//RS                     Some(newest_output.map_or(modified, |current| current.max(modified)));
+//RS             }
+//RS         }
+//RS     }
+//RS     if job.outputs.is_empty() {
+//RS         return (false, "no declared outputs".to_string());
+//RS     }
+//RS     if let Some(path) = missing_output {
+//RS         return (false, format!("output `{path}` is missing"));
+//RS     }
+//RS     if let Some(path) = missing_input {
+//RS         return (false, format!("input `{path}` is missing"));
+//RS     }
+//RS     if newest_input > newest_output {
+//RS         return (
+//RS             false,
+//RS             "an input is newer than the declared outputs".to_string(),
+//RS         );
+//RS     }
+//RS     (
+//RS         true,
+//RS         "all declared outputs are newer than declared inputs".to_string(),
+//RS     )
+//RS }
+//RS 
+//RS fn job_graph_freshness(
+//RS     entry: &Path,
+//RS     registry: &jet_foundation::CLISchema::JobRegistry,
+//RS     job: &jet_foundation::CLISchema::JobFact,
+//RS ) -> (bool, String) {
+//RS     let own = job_freshness(entry, job);
+//RS     if !own.0 {
+//RS         return own;
+//RS     }
+//RS     let mut seen = BTreeSet::new();
+//RS     if job_graph_is_stale(entry, registry, job, &mut seen) {
+//RS         return (false, "a declared dependency is stale".to_string());
+//RS     }
+//RS     own
+//RS }
+//RS 
+//RS fn job_glob_match(pattern: &str, value: &str) -> bool {
+//RS     let pattern = pattern.as_bytes();
+//RS     let value = value.as_bytes();
+//RS     let mut row = vec![false; value.len() + 1];
+//RS     row[0] = true;
+//RS     for &token in pattern {
+//RS         let mut next = vec![false; value.len() + 1];
+//RS         if token == b'*' {
+//RS             next[0] = row[0];
+//RS             for index in 1..=value.len() {
+//RS                 next[index] = row[index] || next[index - 1];
+//RS             }
+//RS         } else {
+//RS             for index in 1..=value.len() {
+//RS                 if token == b'?' || token == value[index - 1] {
+//RS                     next[index] = row[index - 1];
+//RS                 }
+//RS             }
+//RS         }
+//RS         row = next;
+//RS     }
+//RS     row[value.len()]
+//RS }
+//RS 
+//RS fn job_declared_paths(base: &Path, pattern: &str) -> Vec<PathBuf> {
+//RS     let normalized = pattern.replace('\\', "/");
+//RS     if !normalized.contains('*') && !normalized.contains('?') {
+//RS         return vec![base.join(pattern)];
+//RS     }
+//RS     let mut pending = vec![base.to_path_buf()];
+//RS     let mut paths = Vec::new();
+//RS     while let Some(directory) = pending.pop() {
+//RS         let Ok(entries) = fs::read_dir(&directory) else {
+//RS             continue;
+//RS         };
+//RS         let mut entries = entries.filter_map(Result::ok).collect::<Vec<_>>();
+//RS         entries.sort_by_key(|entry| entry.path());
+//RS         for entry in entries {
+//RS             let path = entry.path();
+//RS             let Ok(file_type) = entry.file_type() else {
+//RS                 continue;
+//RS             };
+//RS             if file_type.is_dir() {
+//RS                 pending.push(path.clone());
+//RS             }
+//RS             let Ok(relative) = path.strip_prefix(base) else {
+//RS                 continue;
+//RS             };
+//RS             let relative = relative.to_string_lossy().replace('\\', "/");
+//RS             if job_glob_match(&normalized, &relative) {
+//RS                 paths.push(path);
+//RS             }
+//RS         }
+//RS     }
+//RS     paths.sort();
+//RS     paths.dedup();
+//RS     paths
+//RS }
+//RS 
+//RS fn job_latest_modified(path: &Path) -> Option<std::time::SystemTime> {
+//RS     let metadata = fs::symlink_metadata(path).ok()?;
+//RS     let mut latest = metadata.modified().ok();
+//RS     if metadata.is_dir() {
+//RS         let mut entries = fs::read_dir(path)
+//RS             .ok()?
+//RS             .filter_map(Result::ok)
+//RS             .map(|entry| entry.path())
+//RS             .collect::<Vec<_>>();
+//RS         entries.sort();
+//RS         for child in entries {
+//RS             if let Some(modified) = job_latest_modified(&child) {
+//RS                 latest = Some(latest.map_or(modified, |current| current.max(modified)));
+//RS             }
+//RS         }
+//RS     }
+//RS     latest
+//RS }
+//RS 
+//RS fn collect_job_graph_jobs<'a>(
+//RS     registry: &'a jet_foundation::CLISchema::JobRegistry,
+//RS     job: &'a jet_foundation::CLISchema::JobFact,
+//RS     out: &mut Vec<&'a jet_foundation::CLISchema::JobFact>,
+//RS     seen: &mut BTreeSet<String>,
+//RS ) -> Result<(), String> {
+//RS     if !seen.insert(job.name.clone()) {
+//RS         return Ok(());
+//RS     }
+//RS     for dependency in &job.after {
+//RS         let dependency_job = registry
+//RS             .find(dependency)
+//RS             .ok_or_else(|| format!("job graph references unknown job `{dependency}`"))?;
+//RS         collect_job_graph_jobs(registry, dependency_job, out, seen)?;
+//RS     }
+//RS     out.push(job);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn job_graph_is_stale(
+//RS     entry: &Path,
+//RS     registry: &jet_foundation::CLISchema::JobRegistry,
+//RS     job: &jet_foundation::CLISchema::JobFact,
+//RS     seen: &mut BTreeSet<String>,
+//RS ) -> bool {
+//RS     if !seen.insert(job.name.clone()) {
+//RS         return false;
+//RS     }
+//RS     !job_freshness(entry, job).0
+//RS         || job.after.iter().any(|dependency| {
+//RS             registry.find(dependency).is_some_and(|dependency_job| {
+//RS                 job_graph_is_stale(entry, registry, dependency_job, seen)
+//RS             })
+//RS         })
+//RS }
+//RS 
+//RS fn job_depends_on(
+//RS     registry: &jet_foundation::CLISchema::JobRegistry,
+//RS     job: &jet_foundation::CLISchema::JobFact,
+//RS     target: &str,
+//RS     seen: &mut BTreeSet<String>,
+//RS ) -> bool {
+//RS     if !seen.insert(job.name.clone()) {
+//RS         return false;
+//RS     }
+//RS     job.after.iter().any(|dependency| {
+//RS         dependency == target
+//RS             || registry.find(dependency).is_some_and(|dependency_job| {
+//RS                 job_depends_on(registry, dependency_job, target, seen)
+//RS             })
+//RS     })
+//RS }
+//RS 
+//RS fn retain_outermost_stale_jobs(
+//RS     registry: &jet_foundation::CLISchema::JobRegistry,
+//RS     jobs: &mut Vec<&jet_foundation::CLISchema::JobFact>,
+//RS ) {
+//RS     let names = jobs
+//RS         .iter()
+//RS         .map(|job| job.name.clone())
+//RS         .collect::<BTreeSet<_>>();
+//RS     jobs.retain(|job| {
+//RS         !names.iter().any(|candidate| {
+//RS             candidate != &job.name
+//RS                 && registry.find(candidate).is_some_and(|candidate_job| {
+//RS                     job_depends_on(registry, candidate_job, &job.name, &mut BTreeSet::new())
+//RS                 })
+//RS         })
+//RS     });
+//RS }
+//RS 
+//RS fn run_job_watch(
+//RS     entry: &Path,
+//RS     registry: &jet_foundation::CLISchema::JobRegistry,
+//RS     requested: Option<&str>,
+//RS     raw: &[String],
+//RS     job_args: &[String],
+//RS     mode: OutputMode,
+//RS     profile: jet_cli::OutputProfile::OutputProfile,
+//RS ) -> ! {
+//RS     let jobs = registry.visible_jobs();
+//RS     let selected = match requested {
+//RS         Some(name) => {
+//RS             let Some(job) = registry.find_visible(name) else {
+//RS                 crate::emit_cli_report(
+//RS                     "E1294",
+//RS                     format!("No job named `{name}`."),
+//RS                     "`jet jobs --watch` uses the same visible checked job namespace as invocation"
+//RS                         .to_string(),
+//RS                     format!(
+//RS                         "check the spelling; declared jobs: {}",
+//RS                         registry.completion_words().join(", ")
+//RS                     ),
+//RS                     mode.json,
+//RS                 );
+//RS                 exit(ExitCodes::USER_ERROR);
+//RS             };
+//RS             vec![job]
+//RS         }
+//RS         None => jobs,
+//RS     };
+//RS     if selected.is_empty() {
+//RS         write_renderable(profile, "No jobs declared.\n");
+//RS         exit(ExitCodes::OK);
+//RS     }
+//RS     let mut watch_jobs = Vec::new();
+//RS     let mut seen = BTreeSet::new();
+//RS     for job in &selected {
+//RS         if let Err(reason) = collect_job_graph_jobs(registry, job, &mut watch_jobs, &mut seen) {
+//RS             reject_job_graph(entry, reason, mode);
+//RS         }
+//RS     }
+//RS     let mut graph = jet_devserver::WatchGraph::new();
+//RS     graph.set_entry(entry.to_path_buf());
+//RS     for job in &watch_jobs {
+//RS         let job_base = job_base_directory(entry, job);
+//RS         for pattern in &job.inputs {
+//RS             for path in job_declared_paths(&job_base, pattern) {
+//RS                 graph.upsert(path, jet_devserver::WatchService::RootKind::BuildInput);
+//RS             }
+//RS             if pattern.contains('*') || pattern.contains('?') {
+//RS                 let prefix = pattern
+//RS                     .split(|character| character == '*' || character == '?')
+//RS                     .next()
+//RS                     .unwrap_or("")
+//RS                     .rsplit_once('/')
+//RS                     .map(|(parent, _)| parent)
+//RS                     .unwrap_or("");
+//RS                 graph.upsert(
+//RS                     job_base.join(prefix),
+//RS                     jet_devserver::WatchService::RootKind::BuildInput,
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS     let mut watch = jet_devserver::WatchSession::from_graph(graph);
+//RS     write_mode_status(mode, "watching declared job inputs … (Ctrl-C to stop)\n");
+//RS     run_stale_jobs(entry, registry, &selected, raw, job_args, mode);
+//RS     loop {
+//RS         std::thread::sleep(std::time::Duration::from_millis(
+//RS             jet_devserver::WATCH_POLL_INTERVAL_MS,
+//RS         ));
+//RS         if watch.poll().is_some() {
+//RS             run_stale_jobs(entry, registry, &selected, raw, job_args, mode);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn job_option_takes_value(argument: &str) -> bool {
+//RS     matches!(
+//RS         argument,
+//RS         "--profile"
+//RS             | "--target"
+//RS             | "--allow"
+//RS             | "--deny"
+//RS             | "--gate"
+//RS             | "--set"
+//RS             | "--builder"
+//RS             | "--record"
+//RS     )
+//RS }
+//RS 
+//RS fn append_job_run_options(command: &mut Command, raw: &[String]) {
+//RS     let mut index = 0;
+//RS     while index < raw.len() {
+//RS         let argument = raw[index].as_str();
+//RS         if argument == "--" {
+//RS             break;
+//RS         }
+//RS         if argument == jet::CLI::JOBS_COMMAND || !argument.starts_with('-') {
+//RS             index += 1;
+//RS             continue;
+//RS         }
+//RS         if argument == "-p" {
+//RS             index += 1;
+//RS             if raw.get(index).is_some_and(|value| !value.starts_with('-')) {
+//RS                 index += 1;
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if argument == "--json"
+//RS             || argument == "--watch"
+//RS             || argument.starts_with("--watch=")
+//RS             || matches!(argument, "--graph" | "--status" | "--explain")
+//RS         {
+//RS             index += 1;
+//RS             continue;
+//RS         }
+//RS         command.arg(argument);
+//RS         if job_option_takes_value(argument) && !argument.contains('=') {
+//RS             if let Some(value) = raw.get(index + 1).filter(|value| !value.starts_with('-')) {
+//RS                 command.arg(value);
+//RS                 index += 1;
+//RS             }
+//RS         }
+//RS         index += 1;
+//RS     }
+//RS }
+//RS 
+//RS fn run_stale_jobs(
+//RS     entry: &Path,
+//RS     registry: &jet_foundation::CLISchema::JobRegistry,
+//RS     jobs: &[&jet_foundation::CLISchema::JobFact],
+//RS     raw: &[String],
+//RS     job_args: &[String],
+//RS     mode: OutputMode,
+//RS ) {
+//RS     let mut stale = jobs
+//RS         .iter()
+//RS         .copied()
+//RS         .filter(|job| {
+//RS             let mut seen = BTreeSet::new();
+//RS             job_graph_is_stale(entry, registry, job, &mut seen)
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     stale.sort_by(|left, right| left.name.cmp(&right.name));
+//RS     retain_outermost_stale_jobs(registry, &mut stale);
+//RS     for job in stale {
+//RS         let mut command = Command::new(
+//RS             std::env::current_exe().unwrap_or_else(|_| PathBuf::from(jet::Syntax::BINARY_NAME)),
+//RS         );
+//RS         if mode.json {
+//RS             command.arg("--json");
+//RS         }
+//RS         append_job_run_options(&mut command, raw);
+//RS         command.arg("run").arg(entry).arg("--").arg(&job.name);
+//RS         command.args(job_args);
+//RS         let status = command.status();
+//RS         if mode.quiet {
+//RS             continue;
+//RS         }
+//RS         match status {
+//RS             Ok(status) if status.success() => {
+//RS                 write_mode_status(mode, &format!("job {} completed\n", job.name));
+//RS             }
+//RS             Ok(status) => {
+//RS                 write_mode_status(mode, &format!("job {} exited with {}\n", job.name, status));
+//RS             }
+//RS             Err(error) => {
+//RS                 write_mode_status(
+//RS                     mode,
+//RS                     &format!("job {} could not start: {}\n", job.name, error),
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn report_command_resolution_error(command: &str, error: &str, mode: OutputMode) -> ! {
+//RS     if error.contains("command overrides for the package") {
+//RS         let prefix = format!("two `{command}` command overrides for the package: ");
+//RS         let locations = error.strip_prefix(&prefix).unwrap_or(error);
+//RS         crate::emit_cli_row_with_detail(
+//RS             "E3540",
+//RS             &[("command", command), ("locations", locations)],
+//RS             format!(
+//RS                 "pin the chosen `{command}` entry with `jet fix`, or remove every other override"
+//RS             ),
+//RS             mode.json,
+//RS         );
+//RS     } else {
+//RS         crate::cli_error!(
+//RS             @full "E2105",
+//RS             error,
+//RS             "command resolution uses the checked package source tree",
+//RS             "repair the package source and run the command again"
+//RS         );
+//RS     }
+//RS     exit(ExitCodes::USER_ERROR);
+//RS }
+//RS 
+//RS /// Resolve one package-scoped command-function override. A package without a
+//RS /// manifest still has a single-file/package root for command discovery; the
+//RS /// checked Package resolver owns role, root, and `src/` precedence.
+//RS pub(crate) fn resolve_package_command_override(
+//RS     root: &Path,
+//RS     command: &str,
+//RS     mode: OutputMode,
+//RS ) -> Option<PathBuf> {
+//RS     let resolver = match jet::Authority::AuthorityResolver::open(root) {
+//RS         Ok(resolver) => resolver,
+//RS         Err(error) => report_entry_authority_error(error),
+//RS     };
+//RS     let package = match jet::Loader::package_facts_for_root(root) {
+//RS         Ok(Some(package)) => package,
+//RS         Ok(None) => jet::Package::PackageFacts::default(),
+//RS         Err(diagnostics) => {
+//RS             let rendered = jet::render_diagnostics(&root.display().to_string(), "", &diagnostics);
+//RS             write_mode_diagnostic(mode, &rendered);
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS     };
+//RS     match package.resolve_command_entry_checked(&resolver, command) {
+//RS         Ok(Some(entry)) => Some(entry.path),
+//RS         Ok(None) => None,
+//RS         Err(error) => report_command_resolution_error(command, &error, mode),
+//RS     }
+//RS }
+//RS 
+//RS /// Resolve a command target through the shared bare-entry rule when it names a
+//RS /// project directory. Explicit files keep the ordinary path resolver, so a
+//RS /// directory target and a bare command have one workspace/member decision.
+//RS fn resolve_command_target(
+//RS     cmd: &str,
+//RS     raw: &str,
+//RS     member_flag: Option<&str>,
+//RS     mode: OutputMode,
+//RS     use_override: bool,
+//RS ) -> ResolvedEntry {
+//RS     if Path::new(raw).is_dir() {
+//RS         if let Some(entry) =
+//RS             resolve_bare_entry(cmd, Path::new(raw), member_flag, mode, use_override)
+//RS         {
+//RS             if checked_explicit_file(&entry.path).is_some() {
+//RS                 return entry;
+//RS             }
+//RS         }
+//RS     }
+//RS     ResolvedEntry::file(PathBuf::from(resolve_source_path(raw)))
+//RS }
+//RS 
+//RS pub(crate) fn resolve_source_path(raw: &str) -> String {
+//RS     let path = Path::new(raw);
+//RS     // A directory argument is a project root: resolve its canonical entry.
+//RS     // `jet run <dir>` just works.
+//RS     match jet::Authority::AuthorityResolver::open(path) {
+//RS         Ok(resolver) => {
+//RS             let entry = find_project_entry(resolver.root());
+//RS             if let Ok(relative) = entry.strip_prefix(resolver.root()) {
+//RS                 match resolver.checked_file(relative) {
+//RS                     Ok(file) => {
+//RS                         resolver
+//RS                             .revalidate_file(&file)
+//RS                             .unwrap_or_else(|diagnostic| report_entry_authority_error(diagnostic));
+//RS                         return file.path.to_string_lossy().into_owned();
+//RS                     }
+//RS                     Err(error) if error.is_missing() => {}
+//RS                     Err(error) => report_entry_authority_error(error),
+//RS                 }
+//RS             }
+//RS             let has_package = match resolver.checked_manifest(Path::new(".")) {
+//RS                 Ok(_) => true,
+//RS                 Err(error) if error.is_missing() => false,
+//RS                 Err(error) => report_entry_authority_error(error),
+//RS             };
+//RS             if !has_package {
+//RS                 crate::cli_error!(
+//RS                     "E2105",
+//RS                     "no `{}` entry in `{}`",
+//RS                     jet::Syntax::DEFAULT_ENTRY_FILE,
+//RS                     raw
+//RS                 );
+//RS                 exit(ExitCodes::USER_ERROR);
+//RS             }
+//RS             return entry.to_string_lossy().into_owned();
+//RS         }
+//RS         Err(error) if error.is_missing() => {}
+//RS         Err(error) if matches!(error, jet::Authority::AuthorityError::WrongKind { .. }) => {}
+//RS         Err(error) => report_entry_authority_error(error),
+//RS     }
+//RS     if let Some(checked) = checked_explicit_file(path) {
+//RS         return keep_typed_spelling(raw, &checked);
+//RS     }
+//RS     let with_ext = format!("{}.{}", raw, jet::Syntax::FILE_EXT);
+//RS     if let Some(checked) = checked_explicit_file(Path::new(&with_ext)) {
+//RS         return keep_typed_spelling(&with_ext, &checked);
+//RS     }
+//RS     raw.to_string()
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct ResolvedEntry {
+//RS     path: PathBuf,
+//RS     callable: Option<String>,
+//RS }
+//RS 
+//RS impl ResolvedEntry {
+//RS     fn file(path: PathBuf) -> Self {
+//RS         Self {
+//RS             path,
+//RS             callable: None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Keep the spelling the caller typed when it names the same file the authority
+//RS /// check validated.
+//RS ///
+//RS /// The point of `checked_explicit_file` is the authority check; its canonical
+//RS /// absolute path is not. Returning that path made every human diagnostic
+//RS /// locator carry the checkout location (`--> /home/…/tests/ui/x.jet:6:4`) and
+//RS /// disagree with `jet dev`, which never resolves and so renders the argument as
+//RS /// typed — two verbs, two locators, one diagnostic. The absolute form stays the
+//RS /// *machine* representation, which `machine_report_path_for_process` builds on
+//RS /// its own for `--json`.
+//RS ///
+//RS /// A relative entry runs the whole pipeline: `jet dev` already hands its raw
+//RS /// argument to the loader, sema, the JIT, the watcher, and the cache, and
+//RS /// `find_manifest_root` canonicalizes its start before walking up.
+//RS ///
+//RS /// The canonical-equality guard is what makes this safe rather than merely
+//RS /// shorter: it proves the typed spelling and the validated path name the same
+//RS /// file. A spelling that reaches the file through a symlink or `..` — or an
+//RS /// argument the caller already wrote absolute — keeps the validated path, so
+//RS /// nothing downstream is ever pointed at a spelling the resolver did not check.
+//RS fn keep_typed_spelling(typed: &str, checked: &Path) -> String {
+//RS     let path = Path::new(typed);
+//RS     if !path.is_absolute() && fs::canonicalize(path).is_ok_and(|resolved| resolved == checked) {
+//RS         return typed.to_string();
+//RS     }
+//RS     checked.to_string_lossy().into_owned()
+//RS }
+//RS 
+//RS fn checked_explicit_file(path: &Path) -> Option<PathBuf> {
+//RS     let parent = path.parent().unwrap_or(Path::new("."));
+//RS     let resolver = match jet::Authority::AuthorityResolver::open(parent) {
+//RS         Ok(resolver) => resolver,
+//RS         Err(error) if error.is_missing() => return None,
+//RS         Err(error) => report_entry_authority_error(error),
+//RS     };
+//RS     let name = path.file_name()?;
+//RS     match resolver.checked_file(Path::new(name)) {
+//RS         Ok(file) => Some(file.path),
+//RS         Err(error) if error.is_missing() => None,
+//RS         Err(error) => report_entry_authority_error(error),
+//RS     }
+//RS }
+//RS 
+//RS /// Find the stock entry `.jet` file for a project rooted at `root` (D-ILE1,
+//RS /// amended by D-ROLEFILE1). `run.jet` is the ordinary zero-ceremony fallback,
+//RS /// followed by `src/run.jet` and `<package>.jet`; command homes are selected by
+//RS /// the command resolver before this stock fallback is used.
+//RS pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
+//RS     find_project_entry_with_callable(root).path
+//RS }
+//RS 
+//RS /// Resolve a command-line path against the current directory (`.` when the
+//RS /// current directory is unavailable).
+//RS pub(crate) fn absolutize(path: &str) -> PathBuf {
+//RS     let path = Path::new(path);
+//RS     if path.is_absolute() {
+//RS         path.to_path_buf()
+//RS     } else {
+//RS         std::env::current_dir()
+//RS             .unwrap_or_else(|_| PathBuf::from("."))
+//RS             .join(path)
+//RS     }
+//RS }
+//RS 
+//RS fn find_project_entry_with_callable(root: &Path) -> ResolvedEntry {
+//RS     let resolver = match jet::Authority::AuthorityResolver::open(root) {
+//RS         Ok(resolver) => resolver,
+//RS         Err(error) => report_entry_authority_error(error),
+//RS     };
+//RS     let package = match resolver.checked_package(Path::new(".")) {
+//RS         Ok(package) => Some(package),
+//RS         Err(error) if error.is_missing() => None,
+//RS         Err(error) => report_entry_authority_error(error),
+//RS     };
+//RS     if let Some(package) = &package {
+//RS         match package.facts.resolve_run_entry_checked(&resolver) {
+//RS             Ok(Some(entry)) => {
+//RS                 return ResolvedEntry {
+//RS                     path: entry.file.path,
+//RS                     callable: Some(entry.callable),
+//RS                 }
+//RS             }
+//RS             Ok(None) => {}
+//RS             Err(error) => {
+//RS                 crate::cli_error!(@fix "E2105", error, "repair the typed Package output or point at a `.jet` file directly");
+//RS                 exit(ExitCodes::USER_ERROR);
+//RS             }
+//RS         }
+//RS     }
+//RS     match jet::Loader::find_inline_package_root_checked(root) {
+//RS         Ok(Some(inline_root)) if inline_root == resolver.root() => {
+//RS             match jet::Loader::package_facts_for_root(&inline_root) {
+//RS                 Ok(Some(facts)) => match facts.resolve_run_entry_checked(&resolver) {
+//RS                     Ok(Some(entry)) => {
+//RS                         return ResolvedEntry {
+//RS                             path: entry.file.path,
+//RS                             callable: Some(entry.callable),
+//RS                         };
+//RS                     }
+//RS                     Ok(None) => {}
+//RS                     Err(error) => {
+//RS                         crate::cli_error!(
+//RS                             @fix "E2105",
+//RS                             error,
+//RS                             "repair the typed inline Package output or point at a `.jet` file directly"
+//RS                         );
+//RS                         exit(ExitCodes::USER_ERROR);
+//RS                     }
+//RS                 },
+//RS                 Ok(None) => {}
+//RS                 Err(diagnostics) => {
+//RS                     let entry = inline_root.display().to_string();
+//RS                     emit_cli_diagnostics(&entry, "", &diagnostics);
+//RS                     exit(ExitCodes::USER_ERROR);
+//RS                 }
+//RS             }
+//RS         }
+//RS         Ok(Some(_)) | Ok(None) => {}
+//RS         Err(diagnostic) => report_entry_diagnostic(diagnostic),
+//RS     }
+//RS     match jet::Package::PackageFacts::default().resolve_run_entry_checked(&resolver) {
+//RS         Ok(Some(entry)) => {
+//RS             return ResolvedEntry {
+//RS                 path: entry.file.path,
+//RS                 callable: Some(entry.callable),
+//RS             };
+//RS         }
+//RS         Ok(None) => {}
+//RS         Err(error) => {
+//RS             crate::cli_error!(
+//RS                 @fix "E2105",
+//RS                 error,
+//RS                 "keep one project entry, using `run.jet`, or point at a `.jet` file directly"
+//RS             );
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS     }
+//RS     if let Some(manifest) = package.as_ref().map(|package| &package.facts) {
+//RS         let named = resolver
+//RS             .root()
+//RS             .join(format!("{}.{}", manifest.name, jet::Syntax::FILE_EXT));
+//RS         if let Ok(relative) = named.strip_prefix(resolver.root()) {
+//RS             if let Some(entry) = checked_project_entry(&resolver, relative) {
+//RS                 return ResolvedEntry::file(entry);
+//RS             }
+//RS         }
+//RS         // D-MOD-CYCLE1=A: a package is one namespace, so any member file
+//RS         // loads all of it. Without `run.jet`, the member that declares the
+//RS         // package's one `fn run` is the entry; a library package has none,
+//RS         // and its first source file stands for the package.
+//RS         if !resolver.root().join(jet::Syntax::DEFAULT_ENTRY_FILE).is_file() {
+//RS             if let Some(entry) = jet::Loader::package_run_member(resolver.root()) {
+//RS                 return ResolvedEntry::file(entry);
+//RS             }
+//RS             if let Ok(files) = resolver.discover_source_files() {
+//RS                 if let Some(first) = files.into_iter().find(|file| {
+//RS                     file.relative.file_name().and_then(|name| name.to_str())
+//RS                         != Some(jet::Syntax::PACKAGE_FILE)
+//RS                 }) {
+//RS                     return ResolvedEntry::file(first.path);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     ResolvedEntry::file(resolver.root().join(jet::Syntax::DEFAULT_ENTRY_FILE))
+//RS }
+//RS 
+//RS fn command_override_entry(root: &Path, command: &str, mode: OutputMode) -> Option<ResolvedEntry> {
+//RS     if !matches!(command, "run" | "dev" | "build" | "test") {
+//RS         return None;
+//RS     }
+//RS     resolve_package_command_override(root, command, mode).map(|path| ResolvedEntry {
+//RS         path,
+//RS         callable: Some(command.to_string()),
+//RS     })
+//RS }
+//RS 
+//RS fn find_command_entry_with_callable(
+//RS     root: &Path,
+//RS     command: &str,
+//RS     mode: OutputMode,
+//RS     use_override: bool,
+//RS ) -> ResolvedEntry {
+//RS     let stock = find_project_entry_with_callable(root);
+//RS     if use_override {
+//RS         command_override_entry(root, command, mode).unwrap_or(stock)
+//RS     } else {
+//RS         stock
+//RS     }
+//RS }
+//RS 
+//RS fn checked_project_entry(
+//RS     resolver: &jet::Authority::AuthorityResolver,
+//RS     relative: &Path,
+//RS ) -> Option<PathBuf> {
+//RS     match resolver.checked_file(relative) {
+//RS         Ok(file) => {
+//RS             if let Err(error) = resolver.revalidate_file(&file) {
+//RS                 report_entry_authority_error(error);
+//RS             }
+//RS             Some(file.path)
+//RS         }
+//RS         Err(error) if error.is_missing() => None,
+//RS         Err(error) => report_entry_authority_error(error),
+//RS     }
+//RS }
+//RS 
+//RS fn report_entry_authority_error(error: jet::Authority::AuthorityError) -> ! {
+//RS     let diagnostic = error.diagnostic();
+//RS     emit_cli_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic]);
+//RS     exit(ExitCodes::USER_ERROR)
+//RS }
+//RS fn report_entry_diagnostics(path: &Path, diagnostics: &[Diagnostic]) -> ! {
+//RS     let entry = path.display().to_string();
+//RS     let source = fs::read_to_string(path).unwrap_or_default();
+//RS     emit_cli_diagnostics(&entry, &source, diagnostics);
+//RS     exit(ExitCodes::USER_ERROR)
+//RS }
+//RS 
+//RS fn report_build_resolution_error(error: String) -> ! {
+//RS     if error.contains("two build entries for the package:") {
+//RS         crate::cli_error!(@full "E3520", error, "one package has exactly one build entry so policy and provenance have one auditable home", "keep one `fn build` and remove every other entry");
+//RS     } else {
+//RS         crate::cli_error!(@fix "E1334", error, "repair the package source and try the build again");
+//RS     }
+//RS     exit(ExitCodes::USER_ERROR)
+//RS }
+//RS 
+//RS /// Resolve positional `jet build <member>` against only declared depth-one
+//RS /// workspace members. This chooses the member; the normal PackageFacts/Driver
+//RS /// path still chooses and executes its one build entry.
+//RS fn resolve_named_build_member(cwd: &Path, wanted: &str) -> Result<Option<ResolvedEntry>, String> {
+//RS     let Ok(resolver) = jet::Authority::AuthorityResolver::open(cwd) else {
+//RS         return Ok(None);
+//RS     };
+//RS     let Some(source) = resolver.resolve_workspace_source().ok().flatten() else {
+//RS         return Ok(None);
+//RS     };
+//RS     if source.role != jetpack::WorkspaceFile::WorkspaceSourceRole::Index {
+//RS         return Ok(None);
+//RS     }
+//RS     let Ok(plan) = jetpack::WorkspaceFile::evaluate_checked_source(&source, &resolver) else {
+//RS         return Ok(None);
+//RS     };
+//RS     let Some(member) = plan.members.iter().find(|member| member.name == wanted) else {
+//RS         return Ok(None);
+//RS     };
+//RS     resolve_member_build_entry(&cwd.join(&member.path))
+//RS }
+//RS 
+//RS fn resolve_member_build_entry(root: &Path) -> Result<Option<ResolvedEntry>, String> {
+//RS     let member_resolver =
+//RS         jet::Authority::AuthorityResolver::open(&root).map_err(|error| error.to_string())?;
+//RS     let checked = member_resolver
+//RS         .checked_manifest(Path::new("."))
+//RS         .map_err(|error| error.to_string())?;
+//RS     let Some(entry) = checked
+//RS         .facts
+//RS         .resolve_build_entry_checked(&member_resolver)
+//RS         .map_err(|error| error.to_string())?
+//RS     else {
+//RS         return Ok(None);
+//RS     };
+//RS     Ok(Some(ResolvedEntry::file(entry.path)))
+//RS }
+//RS 
+//RS /// D-CLI-BARE1=A: shared bare-entry resolver for `run`/`dev`/`debug`/`check`/
+//RS /// `build` inside a package — the one rule all five share instead of
+//RS /// each hand-rolling its own "no file given" fallback.
+//RS ///
+//RS /// A workspace member list (D-JPK-WORKSPACE, `jetpack::WorkspaceFile`)
+//RS /// with more than one runnable member (a member whose own entry resolves to a
+//RS /// real file, D-ILE1) is an ambiguity naming every member; `-p <member>`
+//RS /// picks one explicitly, or the caller can always name a file directly. A
+//RS /// plain project (no workspace, or a workspace with exactly zero or one
+//RS /// runnable member) resolves exactly like `find_project_entry` always has —
+//RS /// no behavior change for the overwhelmingly common single-package case.
+//RS ///
+//RS /// A declaration-resolved workspace source (D-JPK-WORKSPACE2) is checked at
+//RS /// `cwd` directly first —
+//RS /// `jetpack::WorkspaceFile::load` never walks upward, matching every
+//RS /// other workspace-aware call site — because a monorepo workspace root often
+//RS /// carries no `package.jet` of its own (Package facts live entirely in member
+//RS /// directories). Only when there's no workspace, or it has zero/one runnable
+//RS /// member, does resolution fall back to the ordinary `find_manifest_root` +
+//RS /// `find_project_entry` single-package convention (unchanged from before
+//RS /// D-CLI-BARE1). Returns `None` outside any package or workspace — the
+//RS /// caller keeps today's "no file given" usage error verbatim.
+//RS fn resolve_bare_entry(
+//RS     cmd: &str,
+//RS     cwd: &Path,
+//RS     member_flag: Option<&str>,
+//RS     mode: OutputMode,
+//RS     use_override: bool,
+//RS ) -> Option<ResolvedEntry> {
+//RS     let workspace_resolver = match jet::Authority::AuthorityResolver::open(cwd) {
+//RS         Ok(resolver) => Some(resolver),
+//RS         Err(error) if error.is_missing() => None,
+//RS         Err(error) => report_entry_authority_error(error),
+//RS     };
+//RS     // A workspace lock is a checked member index, not an optional cache. If
+//RS     // its source identity is stale while the workspace source is absent, do
+//RS     // not fall through to an ordinary package entry and run the wrong file.
+//RS     let workspace_source = workspace_resolver.as_ref().and_then(|resolver| {
+//RS         match resolver.resolve_workspace_source() {
+//RS             Ok(source) => Some(Ok(source)),
+//RS             Err(error) => Some(Err(error.workspace_diagnostic())),
+//RS         }
+//RS     });
+//RS     if matches!(workspace_source.as_ref(), None | Some(Ok(None))) {
+//RS         let stale_workspace_lock = match workspace_resolver.as_ref() {
+//RS             Some(resolver) => {
+//RS                 match resolver.checked_file(Path::new(jet::Syntax::UNIFIED_LOCK_FILE)) {
+//RS                     Ok(lock_file) => {
+//RS                         let source = match lock_file.text() {
+//RS                             Ok(source) => source,
+//RS                             Err(error) => report_entry_authority_error(error),
+//RS                         };
+//RS                         if let Err(error) = resolver.revalidate_file(&lock_file) {
+//RS                             report_entry_authority_error(error);
+//RS                         }
+//RS                         jetpack::WorkspaceLock::load_checked_file(resolver, lock_file).is_none()
+//RS                             && jetpack::Lock::looks_like_workspace_lock(&source)
+//RS                     }
+//RS                     Err(error) if error.is_missing() => false,
+//RS                     Err(error) => report_entry_authority_error(error),
+//RS                 }
+//RS             }
+//RS             None => false,
+//RS         };
+//RS         if stale_workspace_lock {
+//RS             let lock_path = cwd.join(jet::Syntax::UNIFIED_LOCK_FILE);
+//RS             let diagnostic = jetpack::Lock::e1202_workspace(&lock_path.display().to_string());
+//RS             emit_cli_diagnostics(jet::Syntax::WORKSPACE_FILE, "", &[diagnostic]);
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS     }
+//RS     // D-BUILDSCOPE1: the workspace source is the build authority even when it
+//RS     // has no `fn build`; the ordinary batteries still build the root after
+//RS     // members. Member selection (`-p`) remains an explicit escape.
+//RS     if cmd == "build" && member_flag.is_none() {
+//RS         if let Some(Ok(Some(source))) = workspace_source.as_ref() {
+//RS             if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index {
+//RS                 return Some(ResolvedEntry::file(source.path.clone()));
+//RS             }
+//RS         }
+//RS     }
+//RS     let workspace = match (workspace_resolver.as_ref(), workspace_source.as_ref()) {
+//RS         (Some(resolver), Some(Ok(Some(source))))
+//RS             if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index =>
+//RS         {
+//RS             Some(jetpack::WorkspaceFile::evaluate_checked_source(
+//RS                 source, resolver,
+//RS             ))
+//RS         }
+//RS         (_, Some(Err(diagnostic))) => Some(Err(diagnostic.clone())),
+//RS         _ => None,
+//RS     };
+//RS     let canonical_workspace = workspace_source.as_ref().is_some_and(|source| {
+//RS         matches!(
+//RS             source,
+//RS             Ok(Some(source))
+//RS                 if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index
+//RS         )
+//RS     });
+//RS     if canonical_workspace && workspace.is_none() {
+//RS         let diagnostic = Diagnostic::error(
+//RS             "E3503",
+//RS             format!("workspace source in `{}` disappeared", cwd.display()),
+//RS             "workspace authority changed while the entry was being selected".to_string(),
+//RS             "restore the workspace declaration before running the command".to_string(),
+//RS             None,
+//RS         );
+//RS         emit_cli_diagnostics(jet::Syntax::WORKSPACE_FILE, "", &[diagnostic]);
+//RS         exit(ExitCodes::USER_ERROR);
+//RS     }
+//RS     if let Some(workspace) = workspace {
+//RS         let plan = match workspace {
+//RS             Ok(plan) => plan,
+//RS             Err(diagnostic) => {
+//RS                 if cmd == "build" && member_flag.is_none() {
+//RS                     if let Some(Ok(Some(source))) = workspace_source.as_ref() {
+//RS                         if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index {
+//RS                             return Some(ResolvedEntry::file(source.path.clone()));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 emit_cli_diagnostics(jet::Syntax::WORKSPACE_FILE, "", &[diagnostic]);
+//RS                 exit(ExitCodes::USER_ERROR);
+//RS             }
+//RS         };
+//RS         let runnable: Vec<(String, ResolvedEntry)> = plan
+//RS             .members
+//RS             .iter()
+//RS             .filter_map(|m| {
+//RS                 let root = cwd.join(&m.path);
+//RS                 let stock = if cmd == "build" {
+//RS                     match resolve_member_build_entry(&root) {
+//RS                         Ok(entry) => entry,
+//RS                         Err(error) => report_build_resolution_error(error),
+//RS                     }
+//RS                 } else {
+//RS                     let entry = find_project_entry_with_callable(&root);
+//RS                     checked_explicit_file(&entry.path).map(|_| entry)
+//RS                 };
+//RS                 let entry = if use_override {
+//RS                     command_override_entry(&root, cmd, mode).or(stock)
+//RS                 } else {
+//RS                     stock
+//RS                 }?;
+//RS                 Some((m.name.clone(), entry))
+//RS             })
+//RS             .collect();
+//RS         if let Some(want) = member_flag {
+//RS             return match runnable.iter().find(|(name, _)| name == want) {
+//RS                 Some((_, entry)) => Some(entry.clone()),
+//RS                 None => {
+//RS                     let names: Vec<&str> = plan.members.iter().map(|m| m.name.as_str()).collect();
+//RS                     if cmd == "jobs" {
+//RS                         crate::cli_error!(@fix "E2104", format!("no workspace member named `{want}`"), format!("list jobs for one of: {}", names.join(", ")));
+//RS                     } else {
+//RS                         crate::cli_error!(@fix "E2104", format!("no workspace member named `{want}`"), format!("pick one of: {}", names.join(", ")));
+//RS                     }
+//RS                     exit(ExitCodes::USAGE);
+//RS                 }
+//RS             };
+//RS         }
+//RS         match runnable.len() {
+//RS             1 => return Some(runnable.into_iter().next().unwrap().1),
+//RS             n if n >= 2 => {
+//RS                 let names: Vec<&str> = runnable.iter().map(|(n, _)| n.as_str()).collect();
+//RS                 if cmd == "jobs" {
+//RS                     crate::cli_error!(@full "E2104", format!("`jet jobs` is ambiguous — this workspace has {} members with entry files", names.len()), format!("jobs are listed for one member at a time: {}", names.join(", ")), "pick one with `jet jobs -p <member>`");
+//RS                     exit(ExitCodes::USAGE);
+//RS                 }
+//RS                 crate::cli_error!(@full "E2104", format!("`jet {cmd}` is ambiguous — {} workspace members can run", names.len()), format!("this workspace declares multiple runnable members: {}", names.join(", ")), format!("pick one with `jet {cmd} -p <member>`, or run its file directly"));
+//RS                 exit(ExitCodes::USAGE);
+//RS             }
+//RS             _ => {} // no runnable member — fall through to the single-project convention
+//RS         }
+//RS     }
+//RS     match jet::Loader::find_package_root_checked(cwd) {
+//RS         Ok(Some(root)) => Some(find_command_entry_with_callable(
+//RS             &root,
+//RS             cmd,
+//RS             mode,
+//RS             use_override,
+//RS         )),
+//RS         Ok(None) => None,
+//RS         Err(diagnostic) => report_entry_diagnostic(diagnostic),
+//RS     }
+//RS }
+//RS 
+//RS fn report_entry_diagnostic(diagnostic: Diagnostic) -> ! {
+//RS     emit_cli_diagnostics(jet::Syntax::WORKSPACE_FILE, "", &[diagnostic]);
+//RS     exit(ExitCodes::USER_ERROR)
+//RS }
+//RS 
+//RS fn missing_bare_entry(cmd: &str, cwd: &Path, mode: OutputMode) -> ! {
+//RS     // D-JPK-FILENAME2=B (A2): a retired manifest filename in place of
+//RS     // `pkg.jet` gets the E1226 teaching diagnostic.
+//RS     if let Some(msg) = jet::Loader::stale_manifest_name_message(cwd) {
+//RS         write_mode_diagnostic(mode, &msg);
+//RS         exit(ExitCodes::USAGE);
+//RS     }
+//RS     crate::cli_error!(@fix "E2104", "no file given and no `package.jet` found in this directory or above", format!("run `jet {} <file.{}>` or cd into a project", cmd, jet::Syntax::FILE_EXT));
+//RS     exit(ExitCodes::USAGE);
+//RS }
+//RS 
+//RS fn run_version(profile: jet_cli::OutputProfile::OutputProfile) {
+//RS     write_renderable(profile, &jet::Manifest::version_banner());
+//RS }
+//RS 
+//RS /// Self update verifies the signed channel manifest and selected platform
+//RS /// artifact. An explicit `--allow-unofficial` selects only a local keyless
+//RS /// fixture; the endpoint is host-owned so local staging and HTTPS use one
+//RS /// verifier. Apply is exact-host only; cross-platform selection is dry-run
+//RS /// verification.
+//RS fn run_self_update(raw: &[String], mode: OutputMode) -> ! {
+//RS     let roots = jetpack::Store::resolve();
+//RS     let endpoint = self_update_option(raw, "--endpoint")
+//RS         .or_else(|| {
+//RS             match jetpack::ToolchainUpdate::configured_endpoint(&roots.root) {
+//RS                 Ok(endpoint) => endpoint,
+//RS                 Err(error) => {
+//RS                     emit_cli_report(
+//RS                         "E2105",
+//RS                         format!("could not read the Jet toolchain endpoint: {error}"),
+//RS                         "self-update needs a readable host-owned endpoint configuration"
+//RS                             .to_string(),
+//RS                         "fix or remove JETPACK_ROOT/config/toolchain-v1.endpoint, or pass --endpoint <url>"
+//RS                             .to_string(),
+//RS                         mode.json,
+//RS                     );
+//RS                     exit(ExitCodes::USER_ERROR);
+//RS                 }
+//RS             }
+//RS         })
+//RS         .unwrap_or_else(|| jetpack::ToolchainUpdate::DEFAULT_ENDPOINT.to_string());
+//RS     let channel = self_update_option(raw, "--channel")
+//RS         .unwrap_or_else(|| jetpack::ToolchainUpdate::DEFAULT_CHANNEL.to_string());
+//RS     let platform = self_update_option(raw, "--platform")
+//RS         .unwrap_or_else(jetpack::ToolchainUpdate::default_target);
+//RS     let state_key =
+//RS         jet::SHA256::sha256_hex(format!("toolchain-update-v1\n{channel}\n{platform}").as_bytes());
+//RS     let state_path = roots
+//RS         .root
+//RS         .join("config/toolchain-v1")
+//RS         .join(format!("{state_key}.state"));
+//RS     let trust_key = self_update_option(raw, "--trust-key")
+//RS         .map(PathBuf::from)
+//RS         .unwrap_or_else(|| roots.root.join("trust/toolchain-v1.ed25519.pub"));
+//RS     let dry_run = raw.iter().any(|arg| arg == "--dry-run");
+//RS     let apply = raw.iter().any(|arg| arg == "--apply");
+//RS     let allow_unofficial = raw.iter().any(|arg| arg == "--allow-unofficial");
+//RS     let options = jetpack::ToolchainUpdate::UpdateOptions {
+//RS         endpoint,
+//RS         channel,
+//RS         platform,
+//RS         trust_key,
+//RS         dry_run,
+//RS         apply,
+//RS         allow_unofficial,
+//RS         running_version: jet::Manifest::COMPILER_VERSION.to_string(),
+//RS         state_path,
+//RS     };
+//RS     let current_exe = apply.then(|| std::env::current_exe().ok()).flatten();
+//RS     match jetpack::ToolchainUpdate::run(&options, current_exe.as_deref()) {
+//RS         Ok(result) => {
+//RS             if mode.json {
+//RS                 let trust = match result.plan.trust {
+//RS                     jetpack::ToolchainUpdate::UpdateTrust::Signed => "signed",
+//RS                     jetpack::ToolchainUpdate::UpdateTrust::UnofficialKeyless => {
+//RS                         "unofficial-keyless"
+//RS                     }
+//RS                 };
+//RS                 let key_id = result
+//RS                     .plan
+//RS                     .key_id
+//RS                     .as_deref()
+//RS                     .map(StatusValue::from)
+//RS                     .unwrap_or(StatusValue::Null);
+//RS                 let payload = render_status(
+//RS                     "self-update",
+//RS                     true,
+//RS                     StatusFields::new()
+//RS                         .with("channel", result.plan.channel.as_str())
+//RS                         .with("version", result.plan.version.as_str())
+//RS                         .with("platform", result.plan.platform.as_str())
+//RS                         .with("artifact", result.plan.artifact_url.as_str())
+//RS                         .with("sha256", result.plan.sha256.as_str())
+//RS                         .with("size", result.plan.size)
+//RS                         .with("key_id", key_id)
+//RS                         .with("trust", trust)
+//RS                         .with("sequence", result.plan.sequence)
+//RS                         .with("published_at", result.plan.published_at)
+//RS                         .with("expires_at", result.plan.expires_at)
+//RS                         .with("min_version", result.plan.min_version.as_str())
+//RS                         .with("applied", result.applied)
+//RS                         .with("deferred", result.deferred),
+//RS                 );
+//RS                 write_mode_machine(mode, &format!("{payload}\n"));
+//RS             } else if result.deferred {
+//RS                 write_mode_status(
+//RS                     mode,
+//RS                     &format!(
+//RS                         "staged {} {} for {}; Windows will restart it after this process exits{}",
+//RS                         jet::Syntax::BINARY_NAME,
+//RS                         result.plan.version,
+//RS                         result.plan.platform,
+//RS                         match result.plan.trust {
+//RS                             jetpack::ToolchainUpdate::UpdateTrust::Signed => "",
+//RS                             jetpack::ToolchainUpdate::UpdateTrust::UnofficialKeyless => {
+//RS                                 " [unofficial keyless source]"
+//RS                             }
+//RS                         }
+//RS                     ),
+//RS                 );
+//RS             } else if result.applied {
+//RS                 write_mode_status(
+//RS                     mode,
+//RS                     &format!(
+//RS                         "updated {} to {} ({}){}",
+//RS                         jet::Syntax::BINARY_NAME,
+//RS                         result.plan.version,
+//RS                         result.plan.platform,
+//RS                         match result.plan.trust {
+//RS                             jetpack::ToolchainUpdate::UpdateTrust::Signed => "",
+//RS                             jetpack::ToolchainUpdate::UpdateTrust::UnofficialKeyless => {
+//RS                                 " [unofficial keyless source]"
+//RS                             }
+//RS                         }
+//RS                     ),
+//RS                 );
+//RS             } else {
+//RS                 write_mode_status(
+//RS                     mode,
+//RS                     &format!(
+//RS                         "verified {} {} for {} from {}{}",
+//RS                         jet::Syntax::BINARY_NAME,
+//RS                         result.plan.version,
+//RS                         result.plan.platform,
+//RS                         result.plan.artifact_url,
+//RS                         match result.plan.trust {
+//RS                             jetpack::ToolchainUpdate::UpdateTrust::Signed => "",
+//RS                             jetpack::ToolchainUpdate::UpdateTrust::UnofficialKeyless => {
+//RS                                 " [unofficial keyless source]"
+//RS                             }
+//RS                         }
+//RS                     ),
+//RS                 );
+//RS             }
+//RS             exit(ExitCodes::OK);
+//RS         }
+//RS         Err(error) => {
+//RS             emit_cli_report(
+//RS                 "E2105",
+//RS                 format!("could not update {}: {error}", jet::Syntax::BINARY_NAME),
+//RS                 "self-update accepts a signed channel manifest and matching signed artifact; local keyless sources are a separate explicit tier"
+//RS                     .to_string(),
+//RS                 "check the endpoint, public trust key, channel, and platform; use --dry-run to verify without installing, or --allow-unofficial only with a local file:// source"
+//RS                     .to_string(),
+//RS                 mode.json,
+//RS             );
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn self_update_option(raw: &[String], name: &str) -> Option<String> {
+//RS     raw.iter()
+//RS         .find_map(|arg| arg.strip_prefix(&format!("{name}=")).map(str::to_string))
+//RS         .or_else(|| {
+//RS             raw.iter()
+//RS                 .position(|arg| arg == name)
+//RS                 .and_then(|index| raw.get(index + 1))
+//RS                 .filter(|value| !value.starts_with('-'))
+//RS                 .cloned()
+//RS         })
+//RS }
+//RS 
+//RS fn is_diagnostic_code(s: &str) -> bool {
+//RS     let bytes = s.as_bytes();
+//RS     (bytes.len() == 5
+//RS         && matches!(bytes[0], b'E' | b'L')
+//RS         && bytes[1..].iter().all(|byte| byte.is_ascii_digit()))
+//RS         || (bytes.len() == 6
+//RS             && bytes[..2] == *b"JT"
+//RS             && bytes[2..].iter().all(|byte| byte.is_ascii_digit()))
+//RS }
+//RS 
+//RS /// Print front-end problems in the active output mode, with the trailing
+//RS /// "N problems found" count and (in human mode) one quiet `jet explain`
+//RS /// pointer naming the first code. Suppressed entirely in `--json`, where the
+//RS /// code is already structured.
+//RS pub(crate) fn report_problems(
+//RS     mode: OutputMode,
+//RS     file: &str,
+//RS     src: &str,
+//RS     diags: &[jet::Diagnostics::Diagnostic],
+//RS ) {
+//RS     report_problems_with_summary(mode, file, src, diags, |n| {
+//RS         format!("{} problem{} found", n, if n == 1 { "" } else { "s" })
+//RS     });
+//RS }
+//RS 
+//RS /// `report_problems` with a caller-owned human summary line in place of the
+//RS /// "N problems found" count. `jet check` uses it so a warnings-only check ends
+//RS /// in one line that states the verdict.
+//RS pub(crate) fn report_problems_with_summary(
+//RS     mode: OutputMode,
+//RS     file: &str,
+//RS     src: &str,
+//RS     diags: &[jet::Diagnostics::Diagnostic],
+//RS     summary: impl FnOnce(usize) -> String,
+//RS ) {
+//RS     // D-LINT-VISIBILITY2=A: run/dev/test keep ordinary lints in the checked
+//RS     // set for enforcement, but omit them only at this shared presentation
+//RS     // boundary unless the host saw --verbose/-v before `--`.
+//RS     let hide_advisories = !advisory_lints_visible();
+//RS     if hide_advisories
+//RS         && !diags
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.severity != Severity::Lint)
+//RS     {
+//RS         return;
+//RS     }
+//RS     let filtered = hide_advisories.then(|| {
+//RS         diags
+//RS             .iter()
+//RS             .filter(|diagnostic| diagnostic.severity != Severity::Lint)
+//RS             .cloned()
+//RS             .collect::<Vec<_>>()
+//RS     });
+//RS     let diags = filtered.as_deref().unwrap_or(diags);
+//RS     if diags.is_empty() {
+//RS         return;
+//RS     }
+//RS     if mode.json {
+//RS         let machine_file = machine_report_path_for_process(file);
+//RS         let clears = jet::Diagnostics::report_clear_counts(diags);
+//RS         let reports = diags.iter().zip(clears).map(|(diagnostic, clears)| {
+//RS             diagnostic.to_report_with_clears(&machine_file, src, clears)
+//RS         });
+//RS         // Advisories alone never fail a report: `ok` matches the exit status,
+//RS         // which only an error (including a policy-denied lint) turns nonzero.
+//RS         let ok = diags
+//RS             .iter()
+//RS             .all(|diagnostic| diagnostic.severity == Severity::Lint);
+//RS         let rendered = render_status_with_reports("diagnostics", ok, reports, StatusFields::new());
+//RS         write_mode_machine(mode, &format!("{rendered}\n"));
+//RS         return;
+//RS     }
+//RS     let rendered = jet::render_all_linked(
+//RS         file,
+//RS         src,
+//RS         diags,
+//RS         mode.color_stderr(),
+//RS         mode.hyperlinks_stderr(),
+//RS     );
+//RS     write_mode_diagnostic(mode, &rendered);
+//RS     write_mode_diagnostic(mode, &format!("\n{}\n", summary(diags.len())));
+//RS     if let Some(first) = diags.first() {
+//RS         write_mode_diagnostic(
+//RS             mode,
+//RS             &format!(
+//RS                 "{}\n",
+//RS                 jet::Explain::pointer_line(&first.code, mode.color_stderr())
+//RS             ),
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS /// Return the one physical path representation used by CLI machine reports.
+//RS ///
+//RS /// Disk-backed source labels are absolute, so an agent can open them without
+//RS /// guessing the package root. Synthetic labels stay labels: they do not name
+//RS /// files and must not become host-specific paths in stable output.
+//RS pub(crate) fn machine_report_path_for_process(file: &str) -> ReportPath {
+//RS     ReportPath::from_process(file)
+//RS }
+//RS 
+//RS /// Resolve a loader display label against the entry's package/workspace root.
+//RS /// Loader displays are intentionally human-friendly and root-relative; JSON
+//RS /// reports need the corresponding physical path instead.
+//RS pub(crate) fn machine_report_path_for_entry(entry_file: &str, display: &str) -> ReportPath {
+//RS     if display.is_empty() || display.starts_with('<') || Path::new(display).is_absolute() {
+//RS         return ReportPath::from_process(display);
+//RS     }
+//RS     let entry = machine_report_path_from_path(Path::new(entry_file));
+//RS     let entry = Path::new(entry.as_str());
+//RS     let base = entry.parent().unwrap_or_else(|| Path::new("."));
+//RS     let root = jet::Loader::find_manifest_root(base).unwrap_or_else(|| base.to_path_buf());
+//RS     machine_report_path_from_path(&root.join(display))
+//RS }
+//RS 
+//RS /// Map a loaded module's display label back to its physical source path.
+//RS /// Human renderers keep the display label; only JSON report construction uses
+//RS /// this mapping.
+//RS pub(crate) fn machine_report_path_for_bundle(
+//RS     bundle: &jet::AST::ProgramBundle,
+//RS     display: &str,
+//RS ) -> ReportPath {
+//RS     if display.is_empty() || display.starts_with('<') || Path::new(display).is_absolute() {
+//RS         return ReportPath::from_process(display);
+//RS     }
+//RS     let path = bundle
+//RS         .modules
+//RS         .iter()
+//RS         .find(|module| module.display == display)
+//RS         .map(|module| module.path.clone())
+//RS         .unwrap_or_else(|| bundle.project_root.join(display));
+//RS     machine_report_path_from_path(&path)
+//RS }
+//RS 
+//RS fn machine_report_path_from_path(path: &Path) -> ReportPath {
+//RS     ReportPath::from_path(path)
+//RS }
+//RS 
+//RS /// Render a `jet`-owned toolchain diagnostic (E1249–E1252) in the standard
+//RS /// teaching voice (Docs/spec/diagnostics.md), matching the engine-dispatch
+//RS /// diagnostics. These carry no source span, so the full linked renderer isn't
+//RS /// used.
+//RS fn print_toolchain_diag(d: &jet::Diagnostics::Diagnostic, mode: OutputMode) {
+//RS     write_mode_diagnostic(mode, &d.render("", ""));
+//RS }
+//RS 
+//RS /// D-JPK-TOOLCHAIN1=A (#179): hand off to the project's pinned `jet` toolchain
+//RS /// when the running compiler doesn't satisfy the pin. Returns normally when the
+//RS /// running `jet` should run the verb itself (unpinned, in-channel, or already
+//RS /// the exec'd pinned child).
+//RS fn maybe_dispatch_pinned_toolchain(raw: &[String], mode: OutputMode) {
+//RS     use jetpack::JetPin::{decide, handoff_line, PinDecision};
+//RS     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+//RS     let Some(root) = jet::Loader::find_manifest_root(&cwd) else {
+//RS         return;
+//RS     };
+//RS     // `--offline`/`--locked` forbid resolving an unlocked channel (E1250).
+//RS     let offline = raw.iter().any(|a| a == "--offline" || a == "--locked");
+//RS     let running = env!("CARGO_PKG_VERSION");
+//RS     match decide(&root, running, offline) {
+//RS         PinDecision::RunNative => {}
+//RS         PinDecision::Report(d) => {
+//RS             print_toolchain_diag(&d, mode);
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS         PinDecision::ReExec {
+//RS             binary,
+//RS             channel,
+//RS             version,
+//RS         } => {
+//RS             write_mode_status(
+//RS                 mode,
+//RS                 &format!("{}\n", handoff_line(&channel, &version, running)),
+//RS             );
+//RS             let status = Command::new(&binary)
+//RS                 .args(raw.iter().map(|s| s.as_str()))
+//RS                 .env(jet::Syntax::TOOLCHAIN_EXEC_MARKER_ENV, &version)
+//RS                 .status()
+//RS                 .unwrap_or_else(|e| {
+//RS                     crate::cli_error!(
+//RS                         "E2105",
+//RS                         "couldn't exec the pinned toolchain `{}`: {}",
+//RS                         binary.display(),
+//RS                         e
+//RS                     );
+//RS                     exit(ExitCodes::USER_ERROR);
+//RS                 });
+//RS             exit(status.code().unwrap_or(ExitCodes::USER_ERROR));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// `jet self toolchain` — print the project's pin, locked version, object id, and
+//RS /// realized state (read-only, D-JPK-TOOLCHAIN1=A #179).
+//RS fn run_toolchain(mode: OutputMode) -> ! {
+//RS     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+//RS     let root = require_manifest_root(
+//RS         &cwd,
+//RS         "error: `jet self toolchain` needs a project — no `package.jet` found here or above",
+//RS     );
+//RS     write_mode_renderable(mode, &jetpack::JetPin::report_pin(&root));
+//RS     exit(ExitCodes::OK);
+//RS }
+//RS 
+//RS /// `jet init` — write a `package.jet` here, pinning the running toolchain's channel
+//RS /// (D-JPK-TOOLCHAIN1=A #179, U11 lift).
+//RS /// `jet init [<script.jet>]` — U11 (D-JPK-SCRIPTDEP1=A): when a manifest-less
+//RS /// script is named, its inline `use pkg#version;` refs are lifted into the
+//RS /// freshly written `package.jet`'s `deps: {}` block (D-JPK-SCRIPTDEP1=A).
+//RS /// Lifting is best-effort: a lex/
+//RS /// parse problem in the script is silently skipped here (`jet check`/`jet
+//RS /// run` on the script itself is where that's diagnosed) so `jet init` never
+//RS /// fails just because the *lift* half had nothing to do.
+//RS fn run_split(args: &[&String], raw: &[String], mode: OutputMode) -> ! {
+//RS     let target = match args.get(1).map(|value| value.as_str()) {
+//RS         Some("env") => jetpack::Transition::SplitTarget::Environment,
+//RS         Some("package") => {
+//RS             let Some(name) = args.get(2) else {
+//RS                 crate::cli_error!("E2104", "jet split package needs a Package name");
+//RS                 exit(ExitCodes::USAGE);
+//RS             };
+//RS             jetpack::Transition::SplitTarget::Package {
+//RS                 name: (*name).clone(),
+//RS             }
+//RS         }
+//RS         Some("hosts") => {
+//RS             let Some(name) = args.get(2) else {
+//RS                 crate::cli_error!("E2104", "jet split hosts needs a host name");
+//RS                 exit(ExitCodes::USAGE);
+//RS             };
+//RS             jetpack::Transition::SplitTarget::Hosts {
+//RS                 name: (*name).clone(),
+//RS             }
+//RS         }
+//RS         Some(other) => {
+//RS             crate::cli_error!(@fix "E2101", format!("unknown split target {other}"), "use jet split env, jet split package <name>, or jet split hosts <name>");
+//RS             exit(ExitCodes::USAGE);
+//RS         }
+//RS         None => {
+//RS             crate::cli_error!("E2104", "jet split needs a target");
+//RS             exit(ExitCodes::USAGE);
+//RS         }
+//RS     };
+//RS     let check_only = raw.iter().any(|arg| arg == "--check");
+//RS     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+//RS     match jetpack::Transition::split(&cwd, target, check_only) {
+//RS         Ok(result) => print_transition_result(&result, check_only, mode),
+//RS         Err(error) => report_transition_error(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn run_fold(args: &[&String], raw: &[String], mode: OutputMode) -> ! {
+//RS     let Some(path) = args.get(1) else {
+//RS         crate::cli_error!(@fix "E2104", "jet fold needs a generated transition path", "use jet fold package/env.jet or jet fold packages/name/package.jet");
+//RS         exit(ExitCodes::USAGE);
+//RS     };
+//RS     let check_only = raw.iter().any(|arg| arg == "--check");
+//RS     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+//RS     match jetpack::Transition::fold(&cwd, Path::new(path), check_only) {
+//RS         Ok(result) => print_transition_result(&result, check_only, mode),
+//RS         Err(error) => report_transition_error(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn print_transition_result(
+//RS     result: &jetpack::Transition::TransitionResult,
+//RS     check_only: bool,
+//RS     mode: OutputMode,
+//RS ) -> ! {
+//RS     if mode.json {
+//RS         let changes = StatusValue::array(result.summary.changes.iter().map(|change| {
+//RS             StatusValue::object(
+//RS                 StatusFields::new()
+//RS                     .with("path", change.path.to_string_lossy().to_string())
+//RS                     .with("action", change.action),
+//RS             )
+//RS         }));
+//RS         let payload = render_status(
+//RS             "fold",
+//RS             true,
+//RS             StatusFields::new()
+//RS                 .with("operation", result.summary.operation.as_str())
+//RS                 .with("check", check_only)
+//RS                 .with("before", result.summary.before_fingerprint.as_str())
+//RS                 .with("after", result.summary.after_fingerprint.as_str())
+//RS                 .with(
+//RS                     "journal",
+//RS                     result.summary.journal.to_string_lossy().to_string(),
+//RS                 )
+//RS                 .with("changes", changes),
+//RS         );
+//RS         write_mode_machine(mode, &format!("{payload}\n"));
+//RS     } else {
+// END-PORT-PENDING 2032 Source/main.rs:5401-7200
+

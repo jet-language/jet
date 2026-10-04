@@ -1,0 +1,451 @@
+// Original assertions tests/jetpack_jetos.rs:2126-2308 and
+// tests/jetpack_studio.rs:16-199. Source-only tests are NOT exercised parity.
+// Native producer is exclusively RtW35; manifest at end names missing inputs.
+// All CLI/HTTP assertions below consume REAL owner results; no local fake
+// evaluator/service/transaction/authentication engine belongs to this packet.
+
+fn jetos_sp_empty_system() -> SystemPlan Never! {
+    SystemPlan{name: "halcyon", target: "linux.x64", packages: [Pkg]{}, services: [ServicePlan]{}, options: [OptionPlan]{}}
+}
+fn jetos_sp_read(root: String, relative: String) -[FS]> String Never! {
+    files.read(files.join(root, relative)) ?? panic("read {relative}")
+}
+fn jetos_sp_published(text: String) -> studio_path.OsPath Never! {
+    studio_path.from_text(text, studio_path.PathPlatform.Unix)
+}
+
+// Independent expectation, transcribed from original STUDIO_PAGES :84-175,
+// NOT generated from JETOS_STUDIO_PAGES or jetos_studio_pages_json.
+fn jetos_sp_registry_expected() -> String Never! {
+    [String]{
+        "{{\"id\":\"dashboard\",\"title\":\"Dashboard\",\"group\":\"operations\",\"renderer\":\"dashboard\",\"controller\":\"read-only\",\"model_contract\":\"system_plan,proof_state\",\"read_only\":true,\"data_needs\":\"dashboard,services,artifacts\"}}",
+        "{{\"id\":\"settings\",\"title\":\"Settings\",\"group\":\"settings\",\"renderer\":\"settings\",\"controller\":\"studio-actions\",\"model_contract\":\"system_plan.options,changeset\",\"read_only\":false,\"data_needs\":\"options,source\"}}",
+        "{{\"id\":\"monitoring\",\"title\":\"Monitoring\",\"group\":\"operations\",\"renderer\":\"monitoring\",\"controller\":\"read-only\",\"model_contract\":\"system_plan.services,proof_state\",\"read_only\":true,\"data_needs\":\"services,artifacts\"}}",
+        "{{\"id\":\"services\",\"title\":\"Services\",\"group\":\"operations\",\"renderer\":\"services\",\"controller\":\"read-only\",\"model_contract\":\"system_plan.services\",\"read_only\":true,\"data_needs\":\"services\"}}",
+        "{{\"id\":\"packages\",\"title\":\"Packages\",\"group\":\"inventory\",\"renderer\":\"packages\",\"controller\":\"read-only\",\"model_contract\":\"system_plan.packages\",\"read_only\":true,\"data_needs\":\"packages\"}}",
+        "{{\"id\":\"secrets\",\"title\":\"Secrets\",\"group\":\"settings\",\"renderer\":\"secrets\",\"controller\":\"read-only\",\"model_contract\":\"system_plan.options\",\"read_only\":true,\"data_needs\":\"options\"}}",
+        "{{\"id\":\"fleet\",\"title\":\"Fleet\",\"group\":\"operations\",\"renderer\":\"fleet\",\"controller\":\"read-only\",\"model_contract\":\"proof_state\",\"read_only\":true,\"data_needs\":\"fleet,proof\"}}",
+        "{{\"id\":\"generations\",\"title\":\"Generations\",\"group\":\"operations\",\"renderer\":\"generations\",\"controller\":\"studio-actions\",\"model_contract\":\"generations,changeset\",\"read_only\":false,\"data_needs\":\"artifacts\"}}",
+        "{{\"id\":\"changeset\",\"title\":\"Changeset\",\"group\":\"review\",\"renderer\":\"changeset\",\"controller\":\"studio-actions\",\"model_contract\":\"changeset\",\"read_only\":false,\"data_needs\":\"source,diff,impact\"}}",
+        "{{\"id\":\"proof-provenance\",\"title\":\"Proof/Provenance\",\"group\":\"audit\",\"renderer\":\"proof-provenance\",\"controller\":\"studio-actions\",\"model_contract\":\"system_plan,proof_state,generations\",\"read_only\":false,\"data_needs\":\"artifacts,run\"}}"
+    }.join(",")
+}
+
+#Test("JetOS Studio all ten exact ordered registry contracts") {
+    assert_eq(jetos_studio_pages_json(), jetos_sp_registry_expected())
+}
+
+#Test("JetOS Studio HTML exact escaping amp first quotes Unicode controls apostrophe") {
+    assert_eq(jetos_studio_html_escape(""), "")
+    assert_eq(jetos_studio_html_escape("&<>\"'雪\n\t\r"), "&amp;&lt;&gt;&quot;'雪\n\t\r")
+    assert_eq(jetos_studio_html_escape("&lt; &amp; &quot;"), "&amp;lt; &amp;amp; &amp;quot;")
+}
+
+#Test("JetOS Studio generation actual final filename only and UTF8 refusal") {
+    loop case in ([(path: String, expected: String)]{
+        (path: "/systems/generations/final", expected: "final"),
+        (path: "/systems/generations/final///", expected: "final"),
+        (path: "/systems/generations/final/.", expected: "final"),
+        (path: "final", expected: "final"),
+        (path: "", expected: "unrecorded"), (path: "/", expected: "unrecorded"),
+        (path: ".", expected: "unrecorded"), (path: "..", expected: "unrecorded"),
+        (path: "/systems/..", expected: "unrecorded"),
+        (path: "staging/雪'\"", expected: "雪'\"")
+    }) -> assert_eq(jetos_studio_generation(jetos_sp_published(case.path)), case.expected)
+    // Invalid prefix does NOT poison a valid actual filename. Decode only tail.
+    prefix :: studio_path.from_encoded([U8]{U8{255}, U8{47}, U8{111}, U8{107}}, studio_path.PathPlatform.Unix)
+    assert_eq(jetos_studio_generation(prefix), "ok")
+    invalid :: studio_path.from_encoded([U8]{U8{47}, U8{255}}, studio_path.PathPlatform.Unix)
+    assert_eq(jetos_studio_generation(invalid), "unrecorded")
+    win :: studio_path.from_text("C:\\generations\\published\\", studio_path.PathPlatform.Windows)
+    assert_eq(jetos_studio_generation(win), "published")
+    win_root :: studio_path.from_text("C:\\", studio_path.PathPlatform.Windows)
+    assert_eq(jetos_studio_generation(win_root), "unrecorded")
+    surrogate :: studio_path.from_encoded([U8]{U8{67}, U8{58}, U8{92}, U8{237}, U8{160}, U8{128}}, studio_path.PathPlatform.Windows)
+    assert_eq(jetos_studio_generation(surrogate), "unrecorded")
+}
+
+#Test("JetOS Studio entire original HTML golden not production-derived expectation") {
+    html :: jetos_studio_render_index_html("published", jetos_sp_empty_system(), false)
+    // Original Rust :356-790 format literal decoded with Rust escapes and
+    // original :791-819 bindings (halcyon/linux.x64/published, empty rows,
+    // no proof). Reference-only SHA256, derived 2026-10-03; not Jet output.
+    assert_eq(html.bytes().len(), 24771)
+    assert_eq(crypto.sha256(html.bytes()).hex(), "0c9f8f529b8ade77a0eabdf1b7d352bd170e5ed9232d96cd32286b0cfaa3c23b")
+    assert(html.contains("No settings projected."))
+    assert(html.contains("<tr><td>none</td><td></td><td></td></tr>"))
+    assert(html.contains("<tr><td>none</td><td></td></tr>"))
+    assert(html.contains("`proof: ${{state.state}}\nsource revision: ${{state.source_revision || 'none'}}`"))
+}
+
+#Test("JetOS Studio JSON nonempty packages duplicates fields disabled services raw options") {
+    root :: files.tmpdir("jetos-studio-data-") ?? panic("data scratch")
+    system := jetos_sp_empty_system()
+    system.packages = [Pkg]{Pkg{source: "", name: "same"}, Pkg{source: "z'雪", name: "same"}, Pkg{source: "", name: "A\"\n"}}
+    system.services = [ServicePlan]{
+        ServicePlan{name: "off", enable: false, extra: [ServicePlanExtra]{}},
+        ServicePlan{name: "on", enable: true, extra: [ServicePlanExtra]{ServicePlanExtra{key: "k", value: "first"}, ServicePlanExtra{key: "k", value: "last\"\n"}}},
+        ServicePlan{name: "off", enable: false, extra: [ServicePlanExtra]{}}
+    }
+    system.options = [OptionPlan]{OptionPlan{key: "k", value: " raw "}, OptionPlan{key: "k", value: "\"last\""}, OptionPlan{key: "k.tier", value: ".Force"}}
+    data :: jetos_studio_data_json(jetos_sp_published(root), "published", system)
+    assert(data.contains("\"service_configuration\":\"1/3 enabled\""))
+    assert(data.contains("\"page_registry\":[{jetos_sp_registry_expected()}]"))
+    assert(data.contains("\"packages\":[{{\n  \"name\": \"same\",\n  \"source\": \"default\"\n}},{{\n  \"name\": \"same\",\n  \"source\": \"z'雪\"\n}},{{\n  \"name\": \"A\\\"\\n\",\n  \"source\": \"default\"\n}}]"))
+    assert(data.contains("\"services\":[{{\"name\":\"off\",\"enable\":false,\"fields\":[]}},{{\"name\":\"on\",\"enable\":true,\"fields\":[{{\n  \"key\": \"k\",\n  \"value\": \"first\"\n}},{{\n  \"key\": \"k\",\n  \"value\": \"last\\\"\\n\"\n}}]}},{{\"name\":\"off\",\"enable\":false,\"fields\":[]}}]"))
+    assert(data.contains("\"options\":[{{\n  \"key\": \"k\",\n  \"value\": \" raw \"\n}},{{\n  \"key\": \"k\",\n  \"value\": \"\\\"last\\\"\"\n}},{{\n  \"key\": \"k.tier\",\n  \"value\": \".Force\"\n}}]"))
+    html :: jetos_studio_index_html(jetos_sp_published(root), "published", system)
+    assert(html.contains("<tr><td>on</td><td>enabled</td><td>k: first, k: last&quot;\n</td></tr>"))
+    assert(html.contains("<tr><td>off</td><td>disabled</td><td></td></tr>"))
+    assert(html.contains("<tr><td>same</td><td>default</td></tr>"))
+    assert(html.contains("data-live-count=\"services\">1/3"))
+    assert(html.contains("data-live-count=\"packages\">3"))
+    assert(html.contains("data-live-count=\"options\">3"))
+    // Second independent whole-template golden: original same rows, proof
+    // present. This reaches EVERY original CSS/JS byte with nonempty bindings.
+    proof_html :: jetos_studio_render_index_html("published", system, true)
+    assert_eq(proof_html.bytes().len(), 26108)
+    assert_eq(crypto.sha256(proof_html.bytes()).hex(), "ee2b245e2ddc760f71c1ac896c8ab49e39027854d8fdafb2c0abf6ea7b4d78c1")
+    files.remove_all(root) ?? panic("data cleanup")
+}
+
+#Test("JetOS Studio HTML all dynamic text and setting attribute sites use exact escape") {
+    root :: files.tmpdir("jetos-studio-escape-") ?? panic("escape scratch")
+    raw :: "&<>\"'雪\n\t"
+    escaped :: "&amp;&lt;&gt;&quot;'雪\n\t"
+    system := jetos_sp_empty_system()
+    system.name = raw
+    system.target = raw
+    system.packages = [Pkg]{Pkg{name: raw, source: raw}}
+    system.services = [ServicePlan]{ServicePlan{name: raw, enable: false, extra: [ServicePlanExtra]{ServicePlanExtra{key: raw, value: raw}}}}
+    system.options = [OptionPlan]{OptionPlan{key: raw, value: raw}}
+    html :: jetos_studio_render_index_html(raw, system, false)
+    loop expected in ([String]{
+        "<title>Jetos Studio - {escaped}</title>", "data-host=\"{escaped}\"",
+        "<span>{escaped}</span>", "<span><small>Generation</small>{escaped}</span>",
+        "<tr><td>{escaped}</td><td>{escaped}</td></tr>",
+        "<tr><td>{escaped}</td><td>disabled</td><td>{escaped}: {escaped}</td></tr>",
+        "<span>{escaped}</span><input data-setting-key=\"{escaped}\" value=\"{escaped}\">",
+        "data-stage-setting=\"{escaped}\"", "<label>Value<input id=\"tx-value\" value=\"{escaped}\">"
+    }) -> assert(html.contains(expected), "missing escaped site: {expected}")
+    assert(!html.contains(raw))
+    files.remove_all(root) ?? panic("escape cleanup")
+}
+
+#Test("JetOS Studio artifacts missing file directory and proof health existence distinctions") {
+    root :: files.tmpdir("jetos-studio-artifacts-") ?? panic("artifact scratch")
+    system :: jetos_sp_empty_system()
+    assert_eq(jetos_studio_artifact_json(jetos_sp_published(root), "proof.txt"), "{{\"path\":\"../proof.txt\",\"present\":false}}")
+    first :: jetos_studio_first_boot_json(jetos_sp_published(root), "published", system)
+    assert(first.contains("\"proof_visible\":false,\"health_visible\":false"))
+    assert_eq(first, "{{\"kind\":\"jetos.studio.first-boot\",\"role\":\"os-control-center\",\"host\":\"halcyon\",\"generation\":\"published\",\"surfaces\":[\"host\",\"generation\",\"source\",\"proof\",\"update\",\"rollback\",\"health\"],\"source_truth\":\"jet-source-only\",\"proof_visible\":false,\"health_visible\":false,\"update_path\":\"jet os switch\",\"rollback_path\":\"jet os rollback\",\"canvas\":{{\"mode\":\"separate-app-deeplink\",\"path\":\"/canvas\",\"from\":\"source-spans-only\",\"first_surface\":false}},\"autostart\":\"share/xdg/autostart/jetos-studio-first-boot.desktop\",\"proof\":\"first-boot-control-center-ready\"}}")
+    files.create_dir_all(files.join(root, "proof.txt")) ?? panic("proof directory")
+    files.create_dir_all(files.join(root, "health")) ?? panic("health directory")
+    assert_eq(jetos_studio_artifact_json(jetos_sp_published(root), "proof.txt"), "{{\"path\":\"../proof.txt\",\"present\":false}}")
+    assert(jetos_studio_first_boot_json(jetos_sp_published(root), "published", system).contains("\"proof_visible\":false,\"health_visible\":true"))
+    files.remove_all(files.join(root, "proof.txt")) ?? panic("remove proof directory")
+    files.remove_all(files.join(root, "health")) ?? panic("remove health directory")
+    files.write(files.join(root, "proof.txt"), "proof\n") ?? panic("proof file")
+    files.write(files.join(root, "acceptance"), "") ?? panic("acceptance file")
+    assert_eq(jetos_studio_artifact_json(jetos_sp_published(root), "proof.txt"), "{{\"path\":\"../proof.txt\",\"present\":true}}")
+    assert(jetos_studio_first_boot_json(jetos_sp_published(root), "published", system).contains("\"proof_visible\":true,\"health_visible\":true"))
+    assert(jetos_studio_index_html(jetos_sp_published(root), "published", system).contains("status: proof artifact present"))
+    files.remove_all(root) ?? panic("artifact cleanup")
+}
+
+// Original :2126-2308 ALL local installed projection assertions. The two root
+// assertions are a separate real-root consumer below, not copied root logic.
+fn jetos_sp_assert_installed(generation: String) -[FS]> Never! {
+    assert(files.is_file(files.join(generation, "sw/bin/jetos-studio")), "expected installed jetos Studio launcher")
+    assert(files.is_file(files.join(generation, "share/applications/jetos-studio.desktop")), "expected desktop app entry")
+    studio :: jetos_sp_read(generation, "studio/app.json")
+    assert(studio.contains("\"runtime\": \"jetos-system-app\""), "studio: {studio}")
+    assert(studio.contains("\"browser_fallback\": \"true\""), "studio: {studio}")
+    assert(!studio.contains("Canvas"), "studio app projection must stay separate from Canvas: {studio}")
+    assert_eq(studio, "{{\n  \"kind\": \"jetos-studio-app\",\n  \"host\": \"halcyon\",\n  \"runtime\": \"jetos-system-app\",\n  \"protocol\": \"local-projection-service\",\n  \"source_truth\": \"jet-source-transactions\",\n  \"semantic_state\": \"jet-source-only\",\n  \"browser_fallback\": \"true\",\n  \"canvas_coupled\": \"false\",\n  \"first_boot_role\": \"os-control-center\"\n}}")
+    data :: jetos_sp_read(generation, "studio/data.json")
+    assert(data.contains("\"kind\":\"jetos-studio-projection\""), "studio data: {data}")
+    assert(data.contains("\"artifacts\""), "studio data: {data}")
+    assert(data.contains("\"dashboard\"") && data.contains("\"selected_host\":\"halcyon\""), "studio data: {data}")
+    assert(data.contains("\"page_registry\"") && data.contains("\"id\":\"changeset\""), "studio data: {data}")
+    assert(data.contains("\"controller\":\"studio-actions\"") && data.contains("\"model_contract\":") && data.contains("\"read_only\":"), "Studio page registry must own render and action contracts: {data}")
+    assert(data.contains("\"apply_gate\":\"single-source-transaction\""), "studio data: {data}")
+    assert(data.contains("\"secret_policy\"") && data.contains("\"plaintext_in_projection\":false"), "studio data: {data}")
+    assert(data.contains("\"fleet\"") && data.contains("\"mode\":\"adaptive\""), "studio data: {data}")
+    assert(data.contains("\"canvas_bridge\"") && data.contains("\"mode\":\"separate-app-deeplink\""), "studio data: {data}")
+    assert(data.contains("\"first_boot\"") && data.contains("\"role\":\"os-control-center\"") && data.contains("\"canvas_first_surface\":false"), "first-boot control center must own Studio, not Canvas: {data}")
+    assert(data.contains("\"openssh\""), "studio data: {data}")
+    assert(files.is_file(files.join(generation, "studio/first-boot.json")), "expected Studio first-boot control-center projection")
+    first :: jetos_sp_read(generation, "studio/first-boot.json")
+    assert(first.contains("\"role\":\"os-control-center\"") && first.contains("\"proof\":\"first-boot-control-center-ready\"") && first.contains("\"first_surface\":false"), "first-boot: {first}")
+    assert(files.is_file(files.join(generation, "share/xdg/autostart/jetos-studio-first-boot.desktop")), "expected first-boot Studio autostart desktop entry")
+    assert(files.is_file(files.join(generation, "sw/bin/jetos-studio-first-boot")), "expected first-boot Studio launcher")
+    assert(files.is_file(files.join(generation, "studio/first-boot.pending")), "expected first-boot pending marker")
+    html :: jetos_sp_read(generation, "studio/index.html")
+    assert(html.contains("Jetos Studio"), "studio: {html}")
+    assert(html.contains("data-page-registry=\"studio-pages\""), "studio: {html}")
+    assert(html.contains("data-page-kind=\"dashboard\"") && html.contains("Service Configuration") && html.contains("Proof/Rollback Status"), "studio: {html}")
+    assert(html.contains("data-page-kind=\"settings\"") && html.contains("data-stage-setting=\"network.hostName\""), "studio: {html}")
+    assert(html.contains("data-page-kind=\"changeset\"") && html.contains("data-apply-gate=\"single-source-transaction\"") && html.contains("data-changeset-action=\"apply\"") && html.contains("data-changeset-action=\"discard\"") && html.contains("Impact Ledger") && html.contains("Build Only"), "studio: {html}")
+    assert(html.contains("data-changeset-tray=\"true\""), "studio: {html}")
+    assert(html.contains("data-secret-policy=\"no-plaintext\"") && html.contains("plaintext: never projected"), "studio: {html}")
+    assert(html.contains("data-page-kind=\"fleet\"") && html.contains("data-fleet-mode=\"adaptive\"") && html.contains("proof-before-switch"), "studio: {html}")
+    assert(html.contains("openssh"), "studio: {html}")
+    assert(html.contains("network.hostName"), "studio: {html}")
+    assert(html.contains("data-stage-source=\"true\"") && html.contains("data-pipeline=\"build-switch\""), "studio: {html}")
+    assert(html.contains("data-run=\"proof\""), "studio: {html}")
+    assert(html.contains("const PAGE_CONTROLLERS") && html.contains("synthetic-registered-page") && html.contains("resolvePageBinding") && !html.contains("renderMissing"), "synthetic registry entry must resolve renderer, controller, and model contract: {html}")
+    assert(html.contains("data-open-canvas=\"source\"") && html.contains("Open Canvas") && html.contains("Jetos Studio"), "Studio may deep-link to Canvas while remaining a separate app: {html}")
+}
+
+// Original :2226-2237 belongs to REAL RootProjection native composition.
+fn jetos_sp_assert_root_projection(generation: String) -[FS]> Never! {
+    assert(files.is_file(files.join(generation, "root/run/current-system/studio/app.json")), "expected Studio app in root current-system projection")
+    assert(files.is_file(files.join(generation, "root/run/current-system/studio/data.json")), "expected Studio data in root current-system projection")
+}
+
+#Test("JetOS Studio original installed app projection real canonical system evaluator") {
+    root :: files.tmpdir("jetos-studio-original-") ?? panic("Studio scratch")
+    cwd :: files.cwd() ?? panic("repository cwd")
+    config :: files.join(cwd, "tests/fixtures/jetpack-config/config.jet")
+    source :: files.read(config) ?? panic("entire original fixture")
+    plan :: envmodel_evaluate_env(source, files.dirname(config)) ?? panic(err.diagnostic.what)
+    system := SystemPlan?{None}
+    loop candidate in plan.systems { if candidate.name == "halcyon" -> system = Val(candidate) }
+    generation :: files.join(root, "staging")
+    jetos_write_studio_app_projection(jetos_sp_published(generation), jetos_sp_published("/systems/generations/final-published"), system ?? panic("original halcyon")) ?? panic("Studio writer")
+    jetos_sp_assert_installed(generation)
+    assert(jetos_sp_read(generation, "studio/data.json").contains("\"generation\":\"final-published\""))
+    assert(!jetos_sp_read(generation, "studio/data.json").contains("\"generation\":\"staging\""))
+    assert_eq(jetos_sp_read(generation, "studio/first-boot.pending"), "1\n")
+    assert_eq(jetos_sp_read(generation, "share/applications/jetos-studio.desktop"), "[Desktop Entry]\nName=Jetos Studio\nComment=Edit jetos system source\nExec=/run/current-system/sw/bin/jetos-studio\nType=Application\nCategories=System;Settings;\n")
+    assert_eq(jetos_sp_read(generation, "share/xdg/autostart/jetos-studio-first-boot.desktop"), "[Desktop Entry]\nName=Jetos Studio First Boot\nComment=Open the jetos control center on first boot\nExec=/run/current-system/sw/bin/jetos-studio-first-boot\nType=Application\nX-GNOME-Autostart-enabled=true\nX-KDE-autostart-condition=true\nOnlyShowIn=GNOME;KDE;XFCE;Hyprland;niri;\n")
+    assert_eq(jetos_sp_read(generation, "sw/bin/jetos-studio"), "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_STUDIO_ROOT:-/run/current-system}}\npage=\"$root/studio/index.html\"\nif command -v jetos >/dev/null 2>&1; then\n  exec jetos studio \"$@\"\nfi\nif command -v xdg-open >/dev/null 2>&1; then\n  exec xdg-open \"$page\"\nfi\nprintf '%s\\n' \"$page\"\n")
+    assert_eq(jetos_sp_read(generation, "sw/bin/jetos-studio-first-boot"), "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_STUDIO_ROOT:-/run/current-system}}\nmarker=${{JETOS_FIRST_BOOT_MARKER:-$root/studio/first-boot.pending}}\nif [ ! -f \"$marker\" ]; then\n  exit 0\nfi\nif command -v jetos-studio >/dev/null 2>&1; then\n  jetos-studio --first-boot || true\nelif [ -x \"$root/sw/bin/jetos-studio\" ]; then\n  \"$root/sw/bin/jetos-studio\" --first-boot || true\nfi\nrm -f \"$marker\"\n")
+    files.remove_all(root) ?? panic("Studio cleanup")
+}
+
+// Native launcher PATH fixtures: real executable provider, actual OS processes.
+#Test("JetOS Studio native launcher jetos before xdg-open and print fallback argv bytes") {
+    root :: files.tmpdir("jetos-studio-launcher-") ?? panic("launcher scratch")
+    jetos_write_studio_app_projection(jetos_sp_published(root), jetos_sp_published("published"), jetos_sp_empty_system()) ?? panic("launcher writer")
+    bin :: files.join(root, "path-bin")
+    files.create_dir_all(bin) ?? panic("PATH fixture")
+    log :: files.join(root, "argv.log")
+    jetos :: files.join(bin, "jetos")
+    xdg :: files.join(bin, "xdg-open")
+    files.write(jetos, "#!/bin/sh\nprintf '%s\\n' jetos \"$#\" \"$@\" > \"$ARGV_LOG\"\nexit 7\n") ?? panic("jetos fixture")
+    files.write(xdg, "#!/bin/sh\nprintf '%s\\n' xdg-open \"$#\" \"$@\" > \"$ARGV_LOG\"\n") ?? panic("xdg fixture")
+    jetos_make_executable(jetos_sp_published(jetos)) ?? panic("real native jetos mode")
+    jetos_make_executable(jetos_sp_published(xdg)) ?? panic("real native xdg mode")
+    launcher :: files.join(root, "sw/bin/jetos-studio")
+    hostile :: "value ' ; $() \" % 雪\nnext"
+    run :: process.cmd([String]{"/bin/sh", launcher, hostile, ""}).env("PATH", bin).env("ARGV_LOG", log).env("JETOS_STUDIO_ROOT", root).stdout(.Capture).stderr(.Capture).run() ?? panic("jetos branch")
+    assert_eq(run.code, 7)
+    assert_eq(jetos_sp_read(root, "argv.log"), "jetos\n3\nstudio\n{hostile}\n\n")
+    files.remove(jetos) ?? panic("remove jetos fixture")
+    open :: process.cmd([String]{"/bin/sh", launcher, hostile}).env("PATH", bin).env("ARGV_LOG", log).env("JETOS_STUDIO_ROOT", root).stdout(.Capture).stderr(.Capture).run() ?? panic("xdg branch")
+    assert(open.success, open.errors)
+    assert_eq(jetos_sp_read(root, "argv.log"), "xdg-open\n1\n{root}/studio/index.html\n")
+    files.remove(xdg) ?? panic("remove xdg fixture")
+    printed :: process.cmd([String]{"/bin/sh", launcher}).env("PATH", bin).env("JETOS_STUDIO_ROOT", root).stdout(.Capture).stderr(.Capture).run() ?? panic("print branch")
+    assert(printed.success, printed.errors)
+    assert_eq(printed.output, "{root}/studio/index.html\n")
+    files.remove_all(root) ?? panic("launcher cleanup")
+}
+
+#Test("JetOS Studio native firstboot marker consumed once even failing launcher PATH and root fallback") {
+    root :: files.tmpdir("jetos-studio-firstboot-") ?? panic("firstboot scratch")
+    jetos_write_studio_app_projection(jetos_sp_published(root), jetos_sp_published("published"), jetos_sp_empty_system()) ?? panic("firstboot writer")
+    bin :: files.join(root, "path-bin")
+    files.create_dir_all(bin) ?? panic("firstboot PATH")
+    files.symlink("/bin/rm", files.join(bin, "rm")) ?? panic("real rm in isolated PATH")
+    // rm remains real /bin/rm; wrapper below only records app failure/argv.
+    app :: files.join(bin, "jetos-studio")
+    log :: files.join(root, "firstboot.log")
+    files.write(app, "#!/bin/sh\nprintf '%s\\n' \"$1\" >> \"$FIRSTBOOT_LOG\"\nexit 9\n") ?? panic("failing app")
+    jetos_make_executable(jetos_sp_published(app)) ?? panic("real firstboot app mode")
+    firstboot :: files.join(root, "sw/bin/jetos-studio-first-boot")
+    marker :: files.join(root, "private pending ' 雪")
+    files.write(marker, "1\n") ?? panic("override marker")
+    first :: process.cmd([String]{"/bin/sh", firstboot}).env("PATH", bin).env("JETOS_STUDIO_ROOT", root).env("JETOS_FIRST_BOOT_MARKER", marker).env("FIRSTBOOT_LOG", log).stdout(.Capture).stderr(.Capture).run() ?? panic("firstboot first")
+    assert(first.success, first.errors)
+    assert(!files.exists(marker))
+    assert_eq(jetos_sp_read(root, "firstboot.log"), "--first-boot\n")
+    second :: process.cmd([String]{"/bin/sh", firstboot}).env("PATH", bin).env("JETOS_STUDIO_ROOT", root).env("JETOS_FIRST_BOOT_MARKER", marker).env("FIRSTBOOT_LOG", log).stdout(.Capture).stderr(.Capture).run() ?? panic("firstboot second")
+    assert(second.success, second.errors)
+    assert_eq(jetos_sp_read(root, "firstboot.log"), "--first-boot\n")
+    // No PATH app: exact native root executable branch; default pending marker.
+    files.remove(app) ?? panic("remove PATH app")
+    files.write(files.join(root, "sw/bin/jetos-studio"), "#!/bin/sh\nprintf '%s\\n' root-fallback \"$1\" >> \"$FIRSTBOOT_LOG\"\nexit 8\n") ?? panic("root failure fixture")
+    fallback :: process.cmd([String]{"/bin/sh", firstboot}).env("PATH", bin).env("JETOS_STUDIO_ROOT", root).env("FIRSTBOOT_LOG", log).stdout(.Capture).stderr(.Capture).run() ?? panic("root firstboot fallback")
+    assert(fallback.success, fallback.errors)
+    assert(!files.exists(files.join(root, "studio/first-boot.pending")))
+    assert_eq(jetos_sp_read(root, "firstboot.log"), "--first-boot\nroot-fallback\n--first-boot\n")
+    files.remove(files.join(root, "sw/bin/jetos-studio")) ?? panic("no app fixture")
+    files.write(marker, "1\n") ?? panic("no app marker")
+    no_app :: process.cmd([String]{"/bin/sh", firstboot}).env("PATH", bin).env("JETOS_STUDIO_ROOT", root).env("JETOS_FIRST_BOOT_MARKER", marker).env("FIRSTBOOT_LOG", log).stdout(.Capture).stderr(.Capture).run() ?? panic("firstboot without launcher")
+    assert(no_app.success, no_app.errors)
+    assert(!files.exists(marker))
+    assert_eq(jetos_sp_read(root, "firstboot.log"), "--first-boot\nroot-fallback\n--first-boot\n")
+    files.remove_all(root) ?? panic("firstboot cleanup")
+}
+
+// Real CLI owner composes original switch -> headless -> serve/spawn/HTTP ->
+// kill/wait. These assertion functions preserve ALL original expected results;
+// no hardcoded response is ever supplied by this packet.
+fn jetos_sp_assert_headless(switch_success: Bool, switch_stderr: String, headless_success: Bool, headless_stderr: String, headless_stdout: String, page: String) Never! {
+    assert(switch_success, "stderr: {switch_stderr}")
+    assert(headless_success, "stderr: {headless_stderr}")
+    assert(headless_stdout.contains("studio/index.html"), "stdout should print app path: {headless_stdout}")
+    assert(page.contains("data-page-kind=\"dashboard\""), "page: {page}")
+}
+fn jetos_sp_assert_serve(switch_success: Bool, switch_stderr: String, unauth_data: String, unauth_source: String, unauth_write: String, csrf: String, data: String, page: String, cookie_data: String) Never! {
+    assert(switch_success, "stderr: {switch_stderr}")
+    assert(unauth_data.contains("401 Unauthorized"), "response: {unauth_data}")
+    assert(unauth_source.contains("401 Unauthorized"), "source disclosure response: {unauth_source}")
+    assert(unauth_write.contains("401 Unauthorized"), "write response: {unauth_write}")
+    assert(csrf.contains("401 Unauthorized"), "CSRF response: {csrf}")
+    assert(data.contains("200 OK"), "response: {data}")
+    assert(data.contains("jetos-studio-projection"), "response: {data}")
+    assert(data.contains("openssh"), "response: {data}")
+    assert(page.contains("200 OK"), "page: {page}")
+    assert(page.contains("Set-Cookie: jetos_studio="), "Studio bootstrap must establish an HttpOnly session cookie: {page}")
+    assert(cookie_data.contains("200 OK"), "same-origin Studio cookie request failed: {cookie_data}")
+    assert(page.contains("data-page-kind=\"dashboard\"") && page.contains("data-page-registry=\"studio-pages\"") && page.contains("data-page-kind=\"changeset\""), "served Studio must be dashboard/sidebar/Changeset app: {page}")
+    assert(page.contains("data-changeset-action=\"apply\"") && page.contains("data-changeset-action=\"discard\""), "served Studio must expose one Changeset apply path: {page}")
+}
+
+// Required original CLI inputs + exact actual HTTP bytes for the real owner.
+// Returned requests are test INPUTS, never fake service results. Session token
+// must be parsed from actual spawned stdout; empty/missing token is refusal.
+fn jetos_sp_serve_requests(connect_addr: String, token: String) -> [String] Never! {
+    assert(!token.is_empty(), "Studio service URL must carry its session token")
+    [String]{
+        "GET /studio/data.json HTTP/1.1\r\nHost: {connect_addr}\r\nConnection: close\r\n\r\n",
+        "GET /studio/source HTTP/1.1\r\nHost: {connect_addr}\r\nConnection: close\r\n\r\n",
+        "POST /studio/transaction HTTP/1.1\r\nHost: {connect_addr}\r\nOrigin: http://{connect_addr}\r\nContent-Type: application/json\r\nContent-Length: 16\r\nConnection: close\r\n\r\n{{\"op\":\"session\"}}",
+        "POST /studio/run HTTP/1.1\r\nHost: {connect_addr}\r\nOrigin: http://evil.test\r\nCookie: jetos_studio={token}\r\nContent-Type: application/json\r\nContent-Length: 16\r\nConnection: close\r\n\r\n{{\"action\":\"run\"}}",
+        "GET /studio/data.json HTTP/1.1\r\nHost: {connect_addr}\r\nCookie: jetos_studio={token}\r\nSec-Fetch-Site: same-origin\r\nConnection: close\r\n\r\n"
+    }
+}
+
+// Explicit UNAVAILABLE native/integration manifest; NOT proof and NOT callable
+// declarations. No metadata/chmod/native cfg substitutes may satisfy these.
+JETOS_STUDIO_UNAVAILABLE_INPUTS :: prep { [String]{
+    "RtW35: followed metadata(OsPath)->DescriptorStat native Unix mode, then set_permissions(original OsPath, mode|0o111); preserve every original bit/error ordering; nonUnix exact selected cfg Ok()",
+    "Native permissions inputs: nonexec0640->0751; mixed0504->0515; sticky01640->01751; setuid04640->04751; setgid02640->02751; symlink follows target bits with link untouched; missing/dangling metadata error means NO setter; metadata success then denied setter propagates actual error; nonUnix no metadata/setter at all",
+    "RtW35 raw create_dir_all/write(OsPath,[U8])/exists/metadata/is_file/set_permissions authoritative RETAINED-DESCRIPTOR-ABI.md:161-181, zero callable bodies delivered; RtW33 OsPath joining, original raw path ingress and true selected target family; #4494 #4392 #4483 #4409",
+    "Artifact native followed symlink fixtures: real target file=true; real target directory=false; dangling/missing=false; proof and health/acceptance differ is_file versus exists law",
+    "RootProjection consumer original jetpack_jetos.rs2226-2237: jetos_sp_assert_root_projection actual installed root; distinct enable_unit_link Unix symlink/nonUnix copy and root copier gates, NOT Studio chmod",
+    "CLI original headless16-81: jet os switch halcyon --name studio-app --no-color --offline; original config_example_dir, JETPACK_ROOT scratch, PATH=/usr/bin:/bin; jetos studio --headless --no-color JETOS_STUDIO_ROOT generation; actual xdg-open fixture; jetos studio --no-color spawned stdout first line studio_addr; real GET /studio/; kill/wait",
+    "CLI original serve83-199: switch name studio-serve; jetos studio --serve 127.0.0.1:0 --no-color; actual first stdout URL session token; original raw requests above plus authenticated studio_http GET data and page; then kill/wait; real transaction/service/auth owners compose assertion helpers, never a local fake",
+    "Proof admission: Main fresh OPEN + lead finite JP token; laneS/safe-jet 3G no swap flock -o jetpack-writer.lock >=15GiB pre/postlock candidate guards; original green -> deliberately wrong ORIGINAL runtime/app assertion E3001 -> exact restored source hash green. No checks or control attempted by writer"
+} }
+
+#Test("JetOS Studio empty data exact complete ordered JSON schema") {
+    root :: files.tmpdir("jetos-studio-empty-data-") ?? panic("empty data scratch")
+    data :: jetos_studio_data_json(jetos_sp_published(root), "published", jetos_sp_empty_system())
+    assert_eq(data, "{{\"kind\":\"jetos-studio-projection\",\"host\":\"halcyon\",\"target\":\"linux.x64\",\"dashboard\":{{\"selected_host\":\"halcyon\",\"generation\":\"published\",\"service_configuration\":\"0/0 enabled\",\"runtime_health\":\"not-projected\",\"alerts\":[],\"last_run\":\"generation-built\",\"rollback_status\":\"not-evaluated\"}},\"page_registry\":[{jetos_sp_registry_expected()}],\"packages\":[],\"services\":[],\"options\":[],\"changeset\":{{\"state\":\"empty\",\"apply_gate\":\"single-source-transaction\",\"proof_required\":[\"check\",\"plan\",\"build\",\"proof\"]}},\"secret_policy\":{{\"plaintext_in_projection\":false,\"visible_fields\":[\"name\",\"source\",\"runtime_path\",\"provenance\"],\"transaction\":\"audited-secret-rekey\"}},\"fleet\":{{\"mode\":\"adaptive\",\"single_host_default\":true,\"rollout_gate\":\"proof-before-switch\"}},\"first_boot\":{{\"role\":\"os-control-center\",\"autostart\":true,\"surfaces\":[\"host\",\"generation\",\"source\",\"proof\",\"update\",\"rollback\",\"health\"],\"canvas_first_surface\":false}},\"canvas_bridge\":{{\"mode\":\"separate-app-deeplink\",\"target\":\"/canvas\",\"shared_state\":\"source-only\",\"from\":\"source-spans-only\"}},\"artifacts\":{{\"plan\":{{\"path\":\"../plan.json\",\"present\":false}},\"proof\":{{\"path\":\"../proof.txt\",\"present\":false}},\"provenance\":{{\"path\":\"../provenance.json\",\"present\":false}},\"vm_proof\":{{\"path\":\"../vm-proof.txt\",\"present\":false}}}}}")
+    files.remove_all(root) ?? panic("empty data cleanup")
+}
+
+#Test("JetOS Studio firstboot host generation and artifact path JSON quotes exact") {
+    root :: files.tmpdir("jetos-studio-json-quote-") ?? panic("quote scratch")
+    system := jetos_sp_empty_system()
+    system.name = "H\"\n'雪"
+    first :: jetos_studio_first_boot_json(jetos_sp_published(root), "G\\\t'雪", system)
+    assert(first.contains("\"host\":\"H\\\"\\n'雪\",\"generation\":\"G\\\\\\t'雪\""))
+    assert_eq(jetos_studio_artifact_json(jetos_sp_published(root), "A\"\n'雪"), "{{\"path\":\"../A\\\"\\n'雪\",\"present\":false}}")
+    files.remove_all(root) ?? panic("quote cleanup")
+}
+
+#Test("JetOS Studio native artifact symlinks follow file directory and dangling targets") {
+    root :: files.tmpdir("jetos-studio-follow-") ?? panic("follow scratch")
+    files.write(files.join(root, "target-file"), "proof\n") ?? panic("file target")
+    files.create_dir_all(files.join(root, "target-directory")) ?? panic("directory target")
+    files.symlink("target-file", files.join(root, "proof.txt")) ?? panic("proof symlink")
+    files.symlink("target-directory", files.join(root, "plan.json")) ?? panic("plan symlink")
+    files.symlink("missing-target", files.join(root, "vm-proof.txt")) ?? panic("dangling artifact")
+    path :: jetos_sp_published(root)
+    assert_eq(jetos_studio_artifact_json(path, "proof.txt"), "{{\"path\":\"../proof.txt\",\"present\":true}}")
+    assert_eq(jetos_studio_artifact_json(path, "plan.json"), "{{\"path\":\"../plan.json\",\"present\":false}}")
+    assert_eq(jetos_studio_artifact_json(path, "vm-proof.txt"), "{{\"path\":\"../vm-proof.txt\",\"present\":false}}")
+    assert(jetos_studio_first_boot_json(path, "published", jetos_sp_empty_system()).contains("\"proof_visible\":true,\"health_visible\":false"))
+    files.symlink("target-directory", files.join(root, "health")) ?? panic("health symlink")
+    assert(jetos_studio_first_boot_json(path, "published", jetos_sp_empty_system()).contains("\"proof_visible\":true,\"health_visible\":true"))
+    files.remove_all(root) ?? panic("follow cleanup")
+}
+
+// Unix-only real-provider witness. Main's actual selected-target corpus calls
+// this, NEVER a runtime lexical-path/platform guess. All observations and
+// setters use RtW35's same provider, no files.stat/set_mode substitutions.
+fn jetos_sp_unix_mode(path: studio_path.OsPath) -> U32 IOError! -[FS]> {
+    stat :: retained_descriptor.metadata(path)
+    if stat.native == {
+        .Unix(mode, _) -> mode
+        .Windows(_, _) -> panic("Unix witness must be selected by genuine native cfg")
+    }
+}
+fn jetos_sp_assert_unix_permissions(root: String) -[FS]> Never! {
+    file :: jetos_sp_published(files.join(root, "mode-target"))
+    retained_descriptor.write(file, "mode witness\n".bytes()) ?? panic("native mode fixture")
+    loop bits in ([U32]{U32{0o640}, U32{0o504}, U32{0o1640}, U32{0o4640}, U32{0o2640}}) {
+        retained_descriptor.set_permissions(file, bits) ?? panic("native fixture mode")
+        before :: jetos_sp_unix_mode(file) ?? panic("followed fixture metadata")
+        jetos_make_executable(file) ?? panic("canonical executable helper")
+        after :: jetos_sp_unix_mode(file) ?? panic("followed executable metadata")
+        assert_eq(after, before | U32{0o111})
+    }
+    link_text :: files.join(root, "mode-link")
+    files.symlink("mode-target", link_text) ?? panic("real native symlink fixture")
+    link :: jetos_sp_published(link_text)
+    retained_descriptor.set_permissions(file, U32{0o1640}) ?? panic("reset target mode")
+    before_link_target :: jetos_sp_unix_mode(file) ?? panic("target before symlink call")
+    link_before :: retained_descriptor.symlink_metadata(link) ?? panic("link metadata before")
+    assert(link_before.is_symlink)
+    jetos_make_executable(link) ?? panic("symlink follows target")
+    assert_eq(jetos_sp_unix_mode(file) ?? panic("target after symlink call"), before_link_target | U32{0o111})
+    assert_eq(files.read_link(link_text) ?? panic("link retained"), "mode-target")
+    link_after :: retained_descriptor.symlink_metadata(link) ?? panic("link metadata after")
+    assert(link_after.is_symlink)
+    assert_eq(link_after.file_id.device, link_before.file_id.device)
+    assert_eq(link_after.file_id.inode, link_before.file_id.inode)
+    assert(link_after.native == link_before.native, "executable helper must not alter link permissions")
+    missing :: jetos_sp_published(files.join(root, "missing-mode-target"))
+    metadata_error :: if retained_descriptor.metadata(missing) == {
+        .Err(error) -> error
+        .Ok(_) -> panic("missing mode fixture unexpectedly exists")
+    }
+    if jetos_make_executable(missing) == {
+        .Err(error) -> assert_eq(error, metadata_error)
+        .Ok(_) -> panic("missing followed metadata must fail before setter")
+    }
+    files.symlink("missing-mode-target", files.join(root, "dangling-mode-link")) ?? panic("dangling mode fixture")
+    dangling :: jetos_sp_published(files.join(root, "dangling-mode-link"))
+    if jetos_make_executable(dangling) == {
+        .Err(_) -> {}
+        .Ok(_) -> panic("dangling followed metadata must fail")
+    }
+}
+
+// Caller supplies a REAL OS fixture with successful followed metadata and
+// denied chmod. Actual operation/error stamp distinguishes metadata vs setter;
+// no injected callback, mock, or provider replacement may satisfy this input.
+fn jetos_sp_assert_setter_failure(path: studio_path.OsPath) -[FS]> Never! {
+    before :: jetos_sp_unix_mode(path) ?? panic("setter-failure fixture must have successful metadata")
+    expected :: if retained_descriptor.set_permissions(path, before | U32{0o111}) == {
+        .Err(error) -> error
+        .Ok(_) -> panic("setter-failure fixture must deny native setter")
+    }
+    if jetos_make_executable(path) == {
+        .Err(error) -> assert_eq(error, expected)
+        .Ok(_) -> panic("native setter failure must propagate")
+    }
+}
+
+// True nonUnix corpus supplies a nonexistent native path. Original law must
+// succeed without even metadata; this is source-only on Linux, not a fallback.
+fn jetos_sp_assert_nonunix_permissions(missing: studio_path.OsPath) -[FS]> Never! {
+    jetos_make_executable(missing) ?? panic("nonUnix original make_executable is Ok()")
+}

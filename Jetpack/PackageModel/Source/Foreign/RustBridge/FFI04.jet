@@ -1,0 +1,1804 @@
+// PORT-PENDING 2037 crates-jet-pkg-model-src-ffi-slice-5401: crates/jet-pkg-model/src/FFI.rs:5401-7200
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS                 out.push_str(UNICODE_TABLES_RUNTIME);
+//RS                 out.push('\n');
+//RS                 out.push_str(VAULT_NFC_RUNTIME);
+//RS                 out.push('\n');
+//RS                 out.push_str(SECRETS_RUNTIME);
+//RS                 out.push('\n');
+//RS                 out.push_str(VAULT_KEY_WRAP_RUNTIME);
+//RS                 out.push('\n');
+//RS             }
+//RS         });
+//RS     }
+//RS     if needs_plugin {
+//RS         // D-DEP-WASM1=A: application `core.plugin` host (wasmtime Component Model).
+//RS         // Compiler-extension host is a separate runtime (`COMPILER_EXTENSION_RUNTIME`).
+//RS         push_runtime_mod(&mut out, "__jet_plugin", |out| {
+//RS             out.push_str(PLUGIN_RUNTIME);
+//RS             out.push('\n');
+//RS         });
+//RS     }
+//RS     let mut names: HashSet<String> = HashSet::new();
+//RS     for e in entries {
+//RS         names.insert(e.jet_name.clone());
+//RS     }
+//RS     if entries
+//RS         .iter()
+//RS         .any(|e| emit_cabi_trampoline(e, handle_names, record_defs).is_some())
+//RS     {
+//RS         out.push_str(
+//RS             "#[no_mangle]\npub unsafe extern \"C\" fn jet_ffi_cabi_free(ptr: *mut u8, len: usize) {\n    if ptr.is_null() { return; }\n    let _ = Vec::from_raw_parts(ptr, len, len);\n}\n\n",
+//RS         );
+//RS     }
+//RS     for e in entries {
+//RS         let has_list = e
+//RS             .params
+//RS             .iter()
+//RS             .any(|(_, ty)| matches!(ty, Type::List(_)))
+//RS             || e
+//RS                 .return_type
+//RS                 .as_ref()
+//RS                 .is_some_and(|ty| matches!(ty, Type::List(_)));
+//RS         if let Some(inline) = &e.inline {
+//RS             out.push_str(&emit_inline_wrapper_fn(e, inline));
+//RS         } else if e.c_abi
+//RS             && !has_list
+//RS             && !e
+//RS                 .params
+//RS                 .iter()
+//RS                 .any(|(convention, _)| *convention == AccessConvention::Write)
+//RS         {
+//RS             out.push_str(&emit_c_wrapper_fn(e, &names, record_defs));
+//RS         } else if !e.c_abi {
+//RS             out.push_str(&emit_wrapper_fn(e, &names));
+//RS         }
+//RS         if let Some(cabi) = emit_cabi_trampoline(e, handle_names, record_defs) {
+//RS             out.push_str(&cabi);
+//RS             out.push('\n');
+//RS         }
+//RS         out.push('\n');
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn emit_c_wrapper_fn(
+//RS     entry: &ExternEntry,
+//RS     user_types: &HashSet<String>,
+//RS     record_defs: &CRecordDefinitions,
+//RS ) -> String {
+//RS     fn callback_payload(ty: &Type) -> Option<&Type> {
+//RS         let Type::Apply { name, args } = ty else {
+//RS             return None;
+//RS         };
+//RS         (name == "FfiCallbackEvent" && args.len() == 1).then(|| &args[0])
+//RS     }
+//RS 
+//RS     fn managed_native_start(entry: &ExternEntry) -> Option<&Type> {
+//RS         if !entry.generated
+//RS             || !entry.jet_name.starts_with("__jet_native_")
+//RS             || entry.params.len() != 1
+//RS         {
+//RS             return None;
+//RS         }
+//RS         let (_, Type::Fn { params, ret, .. }) = &entry.params[0] else {
+//RS             return None;
+//RS         };
+//RS         if ret.is_some() || params.len() != 1 {
+//RS             return None;
+//RS         }
+//RS         callback_payload(&params[0])
+//RS     }
+//RS 
+//RS     if let Some(payload) = managed_native_start(entry) {
+//RS         if !matches!(payload, Type::Int) {
+//RS             return String::new();
+//RS         }
+//RS         let native_ident = format!("{}_native", entry.wrapper_name);
+//RS         let native_symbol = format!("{:?}", entry.rust_path);
+//RS         let callback_type = "Option<unsafe extern \"C\" fn(*mut std::os::raw::c_void, i64)>";
+//RS         return format!(
+//RS             "unsafe extern \"C\" {{\n    #[link_name = {native_symbol}]\n    fn {native_ident}(callback: {callback_type}, ctx: *mut std::os::raw::c_void) -> *mut std::os::raw::c_void;\n}}\n\n#[no_mangle]\npub unsafe extern \"C\" fn {wrapper}_callback_start(callback: {callback_type}, ctx: *mut std::os::raw::c_void) -> *mut std::os::raw::c_void {{\n    {native_ident}(callback, ctx)\n}}\n",
+//RS             wrapper = entry.wrapper_name,
+//RS         );
+//RS     }
+//RS 
+//RS     fn bridge_type(
+//RS         ty: &Type,
+//RS         user_types: &HashSet<String>,
+//RS         record_defs: &CRecordDefinitions,
+//RS     ) -> String {
+//RS         match ty {
+//RS             // Checked C records use their generated `#[repr(C)]` declaration.
+//RS             // Unclassified nominal values retain the opaque-handle pointer ABI.
+//RS             Type::Named(_) => record_defs
+//RS                 .rust_type(ty)
+//RS                 .unwrap_or_else(|| "*mut std::os::raw::c_void".to_string()),
+//RS             Type::Fn { params, ret, .. } => {
+//RS                 let params = params
+//RS                     .iter()
+//RS                     .map(|param| rust_type(param, user_types))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(", ");
+//RS                 let ret = ret
+//RS                     .as_ref()
+//RS                     .map(|ret| format!(" -> {}", rust_type(ret, user_types)))
+//RS                     .unwrap_or_default();
+//RS                 format!("extern \"C\" fn({params}){ret}")
+//RS             }
+//RS             _ => rust_type(ty, user_types),
+//RS         }
+//RS     }
+//RS     fn raw_type(
+//RS         ty: &Type,
+//RS         user_types: &HashSet<String>,
+//RS         record_defs: &CRecordDefinitions,
+//RS     ) -> String {
+//RS         match ty {
+//RS             Type::String => "*const std::os::raw::c_char".to_string(),
+//RS             Type::Char => "u32".to_string(),
+//RS             _ => bridge_type(ty, user_types, record_defs),
+//RS         }
+//RS     }
+//RS 
+//RS     let params = entry
+//RS         .params
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(index, (_, ty))| {
+//RS             format!(
+//RS                 "p{index}: {}",
+//RS                 bridge_type(ty, user_types, record_defs)
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     let raw_params = entry
+//RS         .params
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(index, (_, ty))| {
+//RS             format!(
+//RS                 "p{index}: {}",
+//RS                 raw_type(ty, user_types, record_defs)
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     let raw_ret = entry
+//RS         .return_type
+//RS         .as_ref()
+//RS         .map(|ty| format!(" -> {}", raw_type(ty, user_types, record_defs)))
+//RS         .unwrap_or_default();
+//RS     let ret = entry
+//RS         .return_type
+//RS         .as_ref()
+//RS         .map(|ty| format!(" -> {}", bridge_type(ty, user_types, record_defs)))
+//RS         .unwrap_or_default();
+//RS     let mut setup = Vec::new();
+//RS     let mut call_args = Vec::new();
+//RS     for (index, (_, ty)) in entry.params.iter().enumerate() {
+//RS         match ty {
+//RS             Type::String => {
+//RS                 setup.push(format!(
+//RS                     "    let c{index} = std::ffi::CString::new(p{index}).unwrap_or_else(|_| ffi_panic());"
+//RS                 ));
+//RS                 call_args.push(format!("c{index}.as_ptr()"));
+//RS             }
+//RS             Type::Char => call_args.push(format!("p{index} as u32")),
+//RS             _ => call_args.push(format!("p{index}")),
+//RS         }
+//RS     }
+//RS     // Native symbols are data, not Rust identifiers. The generated identifier
+//RS     // stays in the compiler-owned lane; `link_name` carries the exact symbol.
+//RS     let native_ident = format!("{}_native", entry.wrapper_name);
+//RS     let native_symbol = format!("{:?}", entry.rust_path);
+//RS     let raw_call = format!("unsafe {{ {}({}) }}", native_ident, call_args.join(", "));
+//RS     let call = match &entry.return_type {
+//RS         Some(Type::String) => format!(
+//RS             "    let ptr = {raw_call};\n    if ptr.is_null() {{ ffi_panic(); }}\n    unsafe {{ std::ffi::CStr::from_ptr(ptr) }}.to_str().unwrap_or_else(|_| ffi_panic()).to_owned()"
+//RS         ),
+//RS         Some(Type::Char) => format!(
+//RS             "    char::from_u32({raw_call}).unwrap_or_else(|| ffi_panic())"
+//RS         ),
+//RS         Some(_) => format!("    {raw_call}"),
+//RS         None => format!("    {raw_call};"),
+//RS     };
+//RS     let body = if setup.is_empty() {
+//RS         call
+//RS     } else {
+//RS         format!("{}\n{call}", setup.join("\n"))
+//RS     };
+//RS     format!(
+//RS         "unsafe extern \"C\" {{\n    #[link_name = {}]\n    fn {}({}){};\n}}\n\npub fn {}({}){} {{\n{}\n}}\n",
+//RS         native_symbol,
+//RS         native_ident,
+//RS         raw_params.join(", "),
+//RS         raw_ret,
+//RS         entry.wrapper_name,
+//RS         params.join(", "),
+//RS         ret,
+//RS         body
+//RS     )
+//RS }
+//RS 
+//RS fn emit_inline_wrapper_fn(entry: &ExternEntry, inline: &InlineEntry) -> String {
+//RS     if inline.lang == "asm" {
+//RS         return emit_asm_wrapper(entry, inline);
+//RS     }
+//RS     let params = entry
+//RS         .params
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(i, (convention, ty))| format!("p{i}: {}", inline_rust_param_type(*convention, ty)))
+//RS         .collect::<Vec<_>>();
+//RS     let abi_params = entry
+//RS         .params
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(i, (convention, ty))| {
+//RS             let base = inline_rust_type(ty);
+//RS             let abi_ty = match *convention {
+//RS                 AccessConvention::Write => format!("*mut {base}"),
+//RS                 AccessConvention::Read | AccessConvention::Move => base,
+//RS             };
+//RS             format!("p{i}: {abi_ty}")
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     let ret = entry
+//RS         .return_type
+//RS         .as_ref()
+//RS         .map(inline_rust_type)
+//RS         .unwrap_or_else(|| "()".to_string());
+//RS     let symbol = format!("jet_inline_{}", entry.wrapper_name);
+//RS     let args = (0..entry.params.len())
+//RS         .map(|i| match entry.params[i].0 {
+//RS             AccessConvention::Write => format!("p{i} as *mut _"),
+//RS             AccessConvention::Read | AccessConvention::Move => format!("p{i}"),
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ");
+//RS     let ret_decl = if ret == "()" {
+//RS         String::new()
+//RS     } else {
+//RS         format!(" -> {ret}")
+//RS     };
+//RS     format!(
+//RS         "extern \"C\" {{ #[link_name = \"{symbol}\"] fn {symbol}({}){ret_decl}; }}\npub fn {}({}){ret_decl} {{ unsafe {{ {symbol}({args}) }} }}\n",
+//RS         abi_params.join(", "), entry.wrapper_name, params.join(", ")
+//RS     )
+//RS }
+//RS 
+//RS fn emit_asm_wrapper(entry: &ExternEntry, inline: &InlineEntry) -> String {
+//RS     let Some(contract) = inline.asm_contract.as_ref() else {
+//RS         return String::new();
+//RS     };
+//RS     if inline.param_names != entry.param_names
+//RS         || inline.param_names.len() != entry.params.len()
+//RS     {
+//RS         return String::new();
+//RS     }
+//RS     let params = entry
+//RS         .params
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(i, (convention, ty))| format!("p{i}: {}", inline_rust_param_type(*convention, ty)))
+//RS         .collect::<Vec<_>>();
+//RS     let ret = entry
+//RS         .return_type
+//RS         .as_ref()
+//RS         .map(inline_rust_type)
+//RS         .unwrap_or_else(|| "()".to_string());
+//RS     let normalize_register = |register: &str| {
+//RS         register
+//RS             .strip_prefix('%')
+//RS             .unwrap_or(register)
+//RS             .to_ascii_lowercase()
+//RS     };
+//RS     let (output_param, return_reg) = match contract.output.as_ref() {
+//RS         Some(InlineAsmOutput::Parameter(index)) => (Some(*index), None),
+//RS         Some(InlineAsmOutput::Register(register)) => (None, Some(normalize_register(register))),
+//RS         None => (None, None),
+//RS     };
+//RS     if (ret == "()") != contract.output.is_none()
+//RS         || output_param.is_some_and(|index| {
+//RS             index >= entry.params.len()
+//RS                 || inline.param_names.get(index) != entry.param_names.get(index)
+//RS         })
+//RS     {
+//RS         return String::new();
+//RS     }
+//RS 
+//RS     let instructions = inline
+//RS         .source
+//RS         .lines()
+//RS         .map(str::trim)
+//RS         .filter(|line| !line.is_empty())
+//RS         .filter(|line| !line.starts_with("; clobbers "))
+//RS         .map(|line| line.replace("; -> return", "").trim().to_string())
+//RS         .collect::<Vec<_>>();
+//RS     let mut operands = Vec::new();
+//RS     let mut result_expr = "()".to_string();
+//RS     if ret != "()" {
+//RS         if let Some(index) = output_param {
+//RS             operands.push(format!(
+//RS                 "{} = inout(reg) p{index}",
+//RS                 inline.param_names[index]
+//RS             ));
+//RS             result_expr = format!("p{index}");
+//RS         } else if let Some(reg) = return_reg.as_deref() {
+//RS             // The body may write a fixed result register before consuming all
+//RS             // named inputs, so keep it early-clobber-safe.
+//RS             operands.push(format!("out(\"{reg}\") __jet_result"));
+//RS             result_expr = "__jet_result".to_string();
+//RS         }
+//RS     }
+//RS     for (index, name) in inline.param_names.iter().enumerate() {
+//RS         if Some(index) != output_param {
+//RS             operands.push(format!("{name} = in(reg) p{index}"));
+//RS         }
+//RS     }
+//RS     let mut seen_clobbers = HashSet::new();
+//RS     for reg in &contract.clobbers {
+//RS         let reg = normalize_register(reg);
+//RS         if return_reg.as_deref() != Some(reg.as_str()) && seen_clobbers.insert(reg.clone()) {
+//RS             operands.push(format!("out(\"{reg}\") _"));
+//RS         }
+//RS     }
+//RS     let templates = instructions
+//RS         .iter()
+//RS         .map(|line| format!("\"{}\"", rust_string(line)))
+//RS         .collect::<Vec<_>>();
+//RS     let mut declarations = String::new();
+//RS     if ret != "()" && output_param.is_none() {
+//RS         declarations.push_str(&format!("    let __jet_result: {ret};\n"));
+//RS     } else if let Some(index) = output_param {
+//RS         declarations.push_str(&format!("    let mut p{index} = p{index};\n"));
+//RS     }
+//RS     let all_args = templates
+//RS         .into_iter()
+//RS         .chain(operands)
+//RS         .collect::<Vec<_>>()
+//RS         .join(",\n            ");
+//RS     let symbol = format!("jet_inline_{}", entry.wrapper_name);
+//RS     let args = (0..entry.params.len())
+//RS         .map(|i| format!("p{i}"))
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ");
+//RS     let ret_decl = if ret == "()" {
+//RS         String::new()
+//RS     } else {
+//RS         format!(" -> {ret}")
+//RS     };
+//RS     format!(
+//RS         "#[no_mangle]\npub unsafe extern \"C\" fn {symbol}({}){ret_decl} {{\n{declarations}    unsafe {{ core::arch::asm!(\n            {all_args}\n        ); }}\n    {result_expr}\n}}\npub fn {}({}){ret_decl} {{ unsafe {{ {symbol}({args}) }} }}\n",
+//RS         params.join(", "),
+//RS         entry.wrapper_name,
+//RS         params.join(", "),
+//RS     )
+//RS }
+//RS 
+//RS fn rust_string(value: &str) -> String {
+//RS     value.replace('\\', "\\\\").replace('"', "\\\"")
+//RS }
+//RS 
+//RS fn inline_rust_type(ty: &Type) -> String {
+//RS     match ty {
+//RS         Type::Int => "i64".to_string(),
+//RS         Type::Float => "f64".to_string(),
+//RS         Type::IntN { signed, bits } => format!("{}{}", if *signed { 'i' } else { 'u' }, bits),
+//RS         Type::InlineRange { base, .. } => inline_rust_type(base),
+//RS         Type::Float32 => "f32".to_string(),
+//RS         Type::Bool => "bool".to_string(),
+//RS         _ => "()".to_string(),
+//RS     }
+//RS }
+//RS 
+//RS /// D-FFI-CAP1: inline C/C++/asm wrappers preserve the same capability shape as
+//RS /// `extern rust`; an exclusive lend is a pointer to the live Jet slot, never a
+//RS /// read-only reference or copied temporary. Move keeps the value consuming.
+//RS fn inline_rust_param_type(convention: AccessConvention, ty: &Type) -> String {
+//RS     let base = inline_rust_type(ty);
+//RS     match convention {
+//RS         AccessConvention::Write => format!("&mut {base}"),
+//RS         AccessConvention::Read | AccessConvention::Move => base,
+//RS     }
+//RS }
+//RS 
+//RS fn inline_c_type(ty: &Type, cpp: bool) -> &'static str {
+//RS     match ty {
+//RS         Type::Int => "int64_t",
+//RS         Type::Float => "double",
+//RS         Type::IntN {
+//RS             signed: true,
+//RS             bits: 8,
+//RS         } => "int8_t",
+//RS         Type::IntN {
+//RS             signed: false,
+//RS             bits: 8,
+//RS         } => "uint8_t",
+//RS         Type::IntN {
+//RS             signed: true,
+//RS             bits: 16,
+//RS         } => "int16_t",
+//RS         Type::IntN {
+//RS             signed: false,
+//RS             bits: 16,
+//RS         } => "uint16_t",
+//RS         Type::IntN {
+//RS             signed: true,
+//RS             bits: 32,
+//RS         } => "int32_t",
+//RS         Type::IntN {
+//RS             signed: false,
+//RS             bits: 32,
+//RS         } => "uint32_t",
+//RS         Type::IntN {
+//RS             signed: true,
+//RS             bits: 64,
+//RS         } => "int64_t",
+//RS         Type::IntN {
+//RS             signed: false,
+//RS             bits: 64,
+//RS         } => "uint64_t",
+//RS         Type::InlineRange { base, .. } => inline_c_type(base, cpp),
+//RS         Type::Float32 => "float",
+//RS         Type::Bool if cpp => "bool",
+//RS         Type::Bool => "_Bool",
+//RS         _ => "void",
+//RS     }
+//RS }
+//RS 
+//RS fn inline_c_param_type(convention: AccessConvention, ty: &Type, cpp: bool) -> String {
+//RS     let base = inline_c_type(ty, cpp);
+//RS     match convention {
+//RS         AccessConvention::Write => format!("{base}*"),
+//RS         AccessConvention::Read | AccessConvention::Move => base.to_string(),
+//RS     }
+//RS }
+//RS 
+//RS fn emit_native_inline_source(entry: &ExternEntry, index: usize) -> String {
+//RS     let inline = entry.inline.as_ref().expect("native inline entry");
+//RS     let cpp = inline.lang == "cpp";
+//RS     let ret = entry
+//RS         .return_type
+//RS         .as_ref()
+//RS         .map(|t| inline_c_type(t, cpp))
+//RS         .unwrap_or("void");
+//RS     let typed = entry
+//RS         .params
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(i, (convention, ty))| format!("{} p{i}", inline_c_param_type(*convention, ty, cpp)))
+//RS         .collect::<Vec<_>>();
+//RS     let types = entry
+//RS         .params
+//RS         .iter()
+//RS         .map(|(convention, ty)| inline_c_param_type(*convention, ty, cpp))
+//RS         .collect::<Vec<_>>();
+//RS     let args = (0..entry.params.len())
+//RS         .map(|i| format!("p{i}"))
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ");
+//RS     let symbol = format!("jet_inline_{}", entry.wrapper_name);
+//RS     let call = if ret == "void" {
+//RS         format!("{}({args});", entry.jet_name)
+//RS     } else {
+//RS         format!("return {}({args});", entry.jet_name)
+//RS     };
+//RS     let linkage = if cpp { "extern \"C\" " } else { "" };
+//RS     format!(
+//RS         "/* Jet #FFI provenance: entry {index}, language {}. */\n#include <stdint.h>\n#include <stdbool.h>\n{ret} {}({});\n{}\n{linkage}{ret} {symbol}({}) {{ {call} }}\n",
+//RS         inline.lang,
+//RS         entry.jet_name,
+//RS         if types.is_empty() { "void".to_string() } else { types.join(", ") },
+//RS         inline.source,
+//RS         if typed.is_empty() { "void".to_string() } else { typed.join(", ") },
+//RS     )
+//RS }
+//RS 
+//RS fn emit_inline_build_rs(entries: &[ExternEntry], toolchain: &InlineNativeToolchain) -> String {
+//RS     let mut files = Vec::new();
+//RS     let mut has_cpp = false;
+//RS     for (index, entry) in entries.iter().enumerate() {
+//RS         let Some(inline) = &entry.inline else {
+//RS             continue;
+//RS         };
+//RS         match inline.lang.as_str() {
+//RS             "c" => {
+//RS                 let tool = toolchain.cc.as_ref().expect("C entry has a C compiler");
+//RS                 files.push(format!(
+//RS                     "({:?}, {:?}, false, {:?})",
+//RS                     format!("inline_{index}.c"),
+//RS                     tool.path.to_string_lossy(),
+//RS                     tool.target_arg.as_deref().unwrap_or("")
+//RS                 ));
+//RS             }
+//RS             "cpp" => {
+//RS                 has_cpp = true;
+//RS                 let tool = toolchain
+//RS                     .cxx
+//RS                     .as_ref()
+//RS                     .expect("C++ entry has a C++ compiler");
+//RS                 files.push(format!(
+//RS                     "({:?}, {:?}, true, {:?})",
+//RS                     format!("inline_{index}.cpp"),
+//RS                     tool.path.to_string_lossy(),
+//RS                     tool.target_arg.as_deref().unwrap_or("")
+//RS                 ));
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     format!(
+//RS         r#"use std::{{env, path::PathBuf, process::Command}};
+//RS 
+//RS fn checked(command: &mut Command) {{
+//RS     let status = command.status().expect("foreign compiler is unavailable");
+//RS     if !status.success() {{ panic!("foreign compiler rejected the declared Jet ABI"); }}
+//RS }}
+//RS 
+//RS fn main() {{
+//RS     const TARGET: &str = {target:?};
+//RS     const PROOF_SUFFIX: &str = {proof_suffix:?};
+//RS     const UNDEFINED_SYMBOLS: &str = {undefined:?};
+//RS     const ARCHIVER: &str = {archiver:?};
+//RS     let cargo_target = env::var("TARGET").expect("Cargo omitted TARGET for a selected target");
+//RS     assert_eq!(cargo_target, TARGET, "Cargo TARGET differs from Jet's selected target");
+//RS     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+//RS     let mut objects = Vec::new();
+//RS     for (index, (source, compiler, cpp, target_arg)) in [{files}].iter().enumerate() {{
+//RS         println!("cargo:rerun-if-changed={{source}}");
+//RS         let object = out.join(format!("inline_{{index}}.o"));
+//RS         let mut compile = Command::new(compiler);
+//RS         if !target_arg.is_empty() {{ compile.arg(target_arg); }}
+//RS         if *cpp {{ compile.arg("-std=c++17"); }}
+//RS         compile.args(["-fPIC", "-c", source, "-o"]).arg(&object);
+//RS         checked(&mut compile);
+//RS         let proof = out.join(format!("inline_{{index}}.{{PROOF_SUFFIX}}"));
+//RS         let mut link = Command::new(compiler);
+//RS         if !target_arg.is_empty() {{ link.arg(target_arg); }}
+//RS         link.args(["-shared", UNDEFINED_SYMBOLS]).arg(&object).arg("-o").arg(&proof);
+//RS         checked(&mut link);
+//RS         objects.push(object);
+//RS     }}
+//RS     let archive = out.join("libjet_inline_native.a");
+//RS     let mut ar = Command::new(ARCHIVER);
+//RS     ar.arg("rcs").arg(&archive);
+//RS     for object in &objects {{ ar.arg(object); }}
+//RS     checked(&mut ar);
+//RS     println!("cargo:rustc-link-search=native={{}}", out.display());
+//RS     println!("cargo:rustc-link-lib=static=jet_inline_native");
+//RS     {runtime}
+//RS }}
+//RS "#,
+//RS         target = toolchain.target,
+//RS         proof_suffix = proof_suffix_for_target(&toolchain.target),
+//RS         undefined = undefined_symbol_flag_for_target(&toolchain.target),
+//RS         archiver = toolchain.ar.path.to_string_lossy(),
+//RS         files = files.join(", "),
+//RS         runtime = if has_cpp {
+//RS             format!(
+//RS                 "println!(\"cargo:rustc-link-lib=dylib={}\");",
+//RS                 cxx_runtime_for_target(&toolchain.target)
+//RS             )
+//RS         } else {
+//RS             String::new()
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn emit_wrapper_fn(entry: &ExternEntry, user_types: &HashSet<String>) -> String {
+//RS     let params: Vec<String> = entry
+//RS         .params
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(i, (convention, ty))| {
+//RS             format!(
+//RS                 "p{i}: {}",
+//RS                 foreign_rust_param_type(*convention, ty, user_types)
+//RS             )
+//RS         })
+//RS         .collect();
+//RS     let ret = entry
+//RS         .return_type
+//RS         .as_ref()
+//RS         .map(|t| rust_type(t, user_types))
+//RS         .unwrap_or_else(|| "()".to_string());
+//RS     let call_args: Vec<String> = (0..entry.params.len()).map(|i| format!("p{i}")).collect();
+//RS     let rust_call = if ret == "()" {
+//RS         format!("{}({});", entry.rust_path, call_args.join(", "))
+//RS     } else {
+//RS         format!("{}({})", entry.rust_path, call_args.join(", "))
+//RS     };
+//RS     let body = if ret == "()" {
+//RS         format!(
+//RS             "match ffi_catch_unwind(|| {{\n        {rust_call}\n    }}) {{\n        Ok(()) => (),\n        Err(_) => ffi_panic(),\n    }}"
+//RS         )
+//RS     } else {
+//RS         format!(
+//RS             "match ffi_catch_unwind(|| {rust_call}) {{\n        Ok(v) => v,\n        Err(_) => ffi_panic(),\n    }}"
+//RS         )
+//RS     };
+//RS     format!(
+//RS         "pub fn {}({}){} {{\n    {body}\n}}\n",
+//RS         entry.wrapper_name,
+//RS         params.join(", "),
+//RS         if ret == "()" {
+//RS             String::new()
+//RS         } else {
+//RS             format!(" -> {ret}")
+//RS         }
+//RS     )
+//RS }
+//RS 
+//RS /// D-FFI-CAP1: the hidden Rust bridge preserves the declaration's ownership
+//RS /// contract at its safe wrapper edge. Read and move remain ordinary Rust
+//RS /// values; `&` is the one exclusive borrow that lasts for this call only.
+//RS fn foreign_rust_param_type(
+//RS     convention: AccessConvention,
+//RS     ty: &Type,
+//RS     user_types: &HashSet<String>,
+//RS ) -> String {
+//RS     let base = rust_type(ty, user_types);
+//RS     match convention {
+//RS         AccessConvention::Write => format!("&mut {base}"),
+//RS         AccessConvention::Read | AccessConvention::Move => base,
+//RS     }
+//RS }
+//RS 
+//RS /// Cranelift-callable C ABI twin of a Rust-ABI wrapper. Scalars pass as i64/f64;
+//RS /// `String` uses `(ptr,len)` in and `(out_ptr,out_len)` heap buffers the JIT frees
+//RS /// via `jet_ffi_cabi_free`.
+//RS fn emit_cabi_trampoline(
+//RS     entry: &ExternEntry,
+//RS     handle_names: &HashSet<String>,
+//RS     record_defs: &CRecordDefinitions,
+//RS ) -> Option<String> {
+//RS     fn scalar_type(ty: &Type) -> Option<String> {
+//RS         match ty {
+//RS             Type::Int => Some("i64".to_string()),
+//RS             Type::IntN { signed, bits } => {
+//RS                 matches!(bits, 8 | 16 | 32 | 64).then(|| {
+//RS                     format!("{}{}", if *signed { 'i' } else { 'u' }, bits)
+//RS                 })
+//RS             }
+//RS             Type::Float => Some("f64".to_string()),
+//RS             Type::Float32 => Some("f32".to_string()),
+//RS             Type::Bool => Some("bool".to_string()),
+//RS             Type::Char => Some("u32".to_string()),
+//RS             Type::InlineRange { base, .. }
+//RS             | Type::Tagged { inner: base, .. }
+//RS             | Type::Quantity { base, .. } => scalar_type(base),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS     fn record_type(
+//RS         ty: &Type,
+//RS         handle_names: &HashSet<String>,
+//RS         record_defs: &CRecordDefinitions,
+//RS     ) -> bool {
+//RS         matches!(ty, Type::Named(name)
+//RS             if !handle_names.contains(name) && record_defs.is_record_type(ty))
+//RS     }
+//RS 
+//RS     // Native pointer representation is reserved for checked opaque-handle
+//RS     // facts; nominal records use their separate typed CModule path.
+//RS     fn native_type(
+//RS         ty: &Type,
+//RS         convention: AccessConvention,
+//RS         handle_names: &HashSet<String>,
+//RS         record_defs: &CRecordDefinitions,
+//RS     ) -> Option<String> {
+//RS         if convention == AccessConvention::Write {
+//RS             return Some(match ty {
+//RS                 Type::List(_) => "*mut std::os::raw::c_void".to_string(),
+//RS                 Type::String => "*mut std::os::raw::c_char".to_string(),
+//RS                 Type::Named(name) if handle_names.contains(name) => {
+//RS                     "*mut std::os::raw::c_void".to_string()
+//RS                 }
+//RS                 Type::Named(_) => format!("*mut {}", record_defs.rust_type(ty)?),
+//RS                 _ => format!(
+//RS                     "*mut {}",
+//RS                     scalar_type(ty).unwrap_or_else(|| "std::os::raw::c_void".to_string())
+//RS                 ),
+//RS             });
+//RS         }
+//RS         Some(match ty {
+//RS             Type::List(_) => "*const std::os::raw::c_void".to_string(),
+//RS             Type::String => "*const std::os::raw::c_char".to_string(),
+//RS             Type::Named(name) if handle_names.contains(name) => {
+//RS                 "*mut std::os::raw::c_void".to_string()
+//RS             }
+//RS             Type::Named(_) => record_defs.rust_type(ty)?,
+//RS             _ => scalar_type(ty)?,
+//RS         })
+//RS     }
+//RS 
+//RS     fn return_native_type(
+//RS         ty: &Type,
+//RS         handle_names: &HashSet<String>,
+//RS         record_defs: &CRecordDefinitions,
+//RS     ) -> Option<String> {
+//RS         Some(match ty {
+//RS             Type::List(_) => "*const std::os::raw::c_void".to_string(),
+//RS             Type::String => "*const std::os::raw::c_char".to_string(),
+//RS             Type::Named(name) if handle_names.contains(name) => {
+//RS                 "*mut std::os::raw::c_void".to_string()
+//RS             }
+//RS             Type::Named(_) => record_defs.rust_type(ty)?,
+//RS             _ => scalar_type(ty)?,
+//RS         })
+//RS     }
+//RS 
+//RS 
+//RS     fn integer(ty: &Type) -> bool {
+//RS         matches!(ty, Type::Int | Type::IntN { .. })
+//RS             || matches!(
+//RS                 ty,
+//RS                 Type::InlineRange { base, .. }
+//RS                     | Type::Tagged { inner: base, .. }
+//RS                     | Type::Quantity { base, .. }
+//RS                     if integer(base)
+//RS             )
+//RS     }
+//RS 
+//RS     fn signed_integer(ty: &Type) -> bool {
+//RS         match ty {
+//RS             Type::Int => true,
+//RS             Type::IntN { signed, .. } => *signed,
+//RS             Type::InlineRange { base, .. }
+//RS             | Type::Tagged { inner: base, .. }
+//RS             | Type::Quantity { base, .. } => signed_integer(base),
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS 
+//RS     fn length_name(name: &str) -> bool {
+//RS         let lower = name.to_ascii_lowercase();
+//RS         matches!(
+//RS             lower.as_str(),
+//RS             "n" | "len" | "length" | "count" | "size" | "num" | "number"
+//RS         ) || [
+//RS             "_len", "_length", "_count", "_size", "_num", "_number",
+//RS         ]
+//RS         .iter()
+//RS         .any(|suffix| lower.ends_with(suffix))
+//RS             || [
+//RS                 "len_", "length_", "count_", "size_", "num_", "number_",
+//RS             ]
+//RS             .iter()
+//RS             .any(|prefix| lower.starts_with(prefix))
+//RS     }
+//RS 
+//RS     let has_list = entry
+//RS         .params
+//RS         .iter()
+//RS         .any(|(_, ty)| matches!(ty, Type::List(_)))
+//RS         || entry
+//RS             .return_type
+//RS             .as_ref()
+//RS             .is_some_and(|ty| matches!(ty, Type::List(_)));
+//RS     let has_write = entry
+//RS         .params
+//RS         .iter()
+//RS         .any(|(convention, _)| *convention == AccessConvention::Write);
+//RS     let direct_native = (entry.c_abi && has_list)
+//RS         || (has_write && (entry.c_abi || entry.inline.is_some()));
+//RS     if !direct_native {
+//RS         if entry.params.iter().any(|(convention, ty)| {
+//RS             *convention != AccessConvention::Read
+//RS                 && !(*convention == AccessConvention::Move
+//RS                     && entry.c_abi
+//RS                     && (matches!(ty, Type::Named(name) if handle_names.contains(name))
+//RS                         || record_type(ty, handle_names, record_defs)))
+//RS                 && !(*convention == AccessConvention::Write
+//RS                     && entry.c_abi
+//RS                     && (matches!(ty, Type::Named(name) if handle_names.contains(name))
+//RS                         || record_type(ty, handle_names, record_defs)))
+//RS         }) || entry
+//RS             .params
+//RS             .iter()
+//RS             .any(|(_, ty)| matches!(ty, Type::List(_)))
+//RS         {
+//RS             return None;
+//RS         }
+//RS     }
+//RS     if entry.params.iter().any(|(_, ty)| {
+//RS         !matches!(ty, Type::List(_))
+//RS             && scalar_type(ty).is_none()
+//RS             && !matches!(ty, Type::String)
+//RS             && !matches!(ty, Type::Named(name) if handle_names.contains(name))
+//RS             && !record_type(ty, handle_names, record_defs)
+//RS     }) {
+//RS         return None;
+//RS     }
+//RS     if let Some(ret) = &entry.return_type {
+//RS         if !matches!(ret, Type::List(_) | Type::String)
+//RS             && scalar_type(ret).is_none()
+//RS             && !matches!(ret, Type::Named(name) if handle_names.contains(name))
+//RS             && !record_type(ret, handle_names, record_defs)
+//RS         {
+//RS             return None;
+//RS         }
+//RS     }
+//RS     if direct_native {
+//RS         for (convention, ty) in &entry.params {
+//RS             native_type(ty, *convention, handle_names, record_defs)?;
+//RS         }
+//RS     }
+//RS 
+//RS     let return_count = entry
+//RS         .return_type
+//RS         .as_ref()
+//RS         .filter(|ty| matches!(ty, Type::List(_)))
+//RS         .and_then(|_| {
+//RS             entry.params.iter().enumerate().find_map(|(index, (convention, ty))| {
+//RS                 (*convention == AccessConvention::Write
+//RS                     && integer(ty)
+//RS                     && entry
+//RS                         .param_names
+//RS                         .get(index)
+//RS                         .is_some_and(|name| length_name(name)))
+//RS                 .then_some(index)
+//RS             })
+//RS         });
+//RS     if matches!(entry.return_type, Some(Type::List(_))) && return_count.is_none() {
+//RS         return None;
+//RS     }
+//RS 
+//RS     let mut params = Vec::new();
+//RS     let mut setup = Vec::new();
+//RS     let mut call_args = Vec::new();
+//RS     for (index, (convention, ty)) in entry.params.iter().enumerate() {
+//RS         if direct_native {
+//RS             let native_ty = native_type(ty, *convention, handle_names, record_defs)?;
+//RS             params.push(format!("p{index}: {native_ty}"));
+//RS             let expr = match ty {
+//RS                 Type::String if *convention == AccessConvention::Write => {
+//RS                     setup.push(format!(
+//RS                         "    let p{index}_ptr = args[{index}].ptr;\n\
+//RS                          if p{index}_ptr.is_null() {{ ffi_panic(); }}"
+//RS                     ));
+//RS                     format!("p{index}_ptr as {native_ty}")
+//RS                 }
+//RS                 Type::String => {
+//RS                     setup.push(format!(
+//RS                         "    let p{index}_ptr = args[{index}].ptr;\n\
+//RS                              let p{index}_bytes = if args[{index}].len == 0 {{ Vec::new() }} \
+//RS                          else if p{index}_ptr.is_null() {{ ffi_panic(); }} else {{ \
+//RS                          unsafe {{ std::slice::from_raw_parts(p{index}_ptr, args[{index}].len).to_vec() }} }};\n\
+//RS                          let p{index}_text = String::from_utf8(p{index}_bytes).unwrap_or_else(|_| ffi_panic());\n\
+//RS                          let p{index}_cstring = std::ffi::CString::new(p{index}_text).unwrap_or_else(|_| ffi_panic());"
+//RS                     ));
+//RS                     format!("p{index}_cstring.as_ptr()")
+//RS                 }
+//RS                 Type::List(_) => {
+//RS                     setup.push(format!(
+//RS                         "    let p{index}_ptr = args[{index}].ptr;\n\
+//RS                          if p{index}_ptr.is_null() && args[{index}].len != 0 {{ ffi_panic(); }}"
+//RS                     ));
+//RS                     format!("p{index}_ptr as {native_ty}")
+//RS                 }
+//RS                 Type::Named(_)
+//RS                     if *convention == AccessConvention::Write
+//RS                         && record_type(ty, handle_names, record_defs) =>
+//RS                 {
+//RS                     setup.push(format!(
+//RS                         "    let p{index}_ptr = args[{index}].ptr;\n\
+//RS                          if p{index}_ptr.is_null() {{ ffi_panic(); }}"
+//RS                     ));
+//RS                     format!("p{index}_ptr as {native_ty}")
+//RS                 }
+//RS                 Type::Named(_)
+//RS                     if record_type(ty, handle_names, record_defs) =>
+//RS                 {
+//RS                     let record_ty = record_defs.rust_type(ty)?;
+//RS                     setup.push(format!(
+//RS                         "    let p{index}_ptr = args[{index}].ptr;\n\
+//RS                          if p{index}_ptr.is_null() {{ ffi_panic(); }}"
+//RS                     ));
+//RS                     format!(
+//RS                         "unsafe {{ std::ptr::read(p{index}_ptr as *const {record_ty}) }}"
+//RS                     )
+//RS                 }
+//RS                 Type::Named(_) => {
+//RS                     format!("args[{index}].value as usize as *mut std::os::raw::c_void")
+//RS                 }
+//RS                 _ if *convention == AccessConvention::Write => {
+//RS                     setup.push(format!(
+//RS                         "    let p{index}_ptr = args[{index}].ptr;\n\
+//RS                          if p{index}_ptr.is_null() {{ ffi_panic(); }}"
+//RS                     ));
+//RS                     format!("p{index}_ptr as {native_ty}")
+//RS                 }
+//RS                 Type::Float => format!("f64::from_bits(args[{index}].value)"),
+//RS                 Type::Float32 => format!("f32::from_bits(args[{index}].value as u32)"),
+//RS                 Type::Bool => format!("args[{index}].value != 0"),
+//RS                 Type::Char => format!("args[{index}].value as u32"),
+//RS                 _ => format!("args[{index}].value as {native_ty}"),
+//RS             };
+//RS             call_args.push(expr);
+//RS         } else {
+//RS             let expected = foreign_rust_param_type(*convention, ty, handle_names);
+//RS             let expr = match ty {
+//RS                 Type::String => {
+//RS                     setup.push(format!(
+//RS                         "    let p{index}_ptr = args[{index}].ptr;\n\
+//RS                          let p{index}_bytes = if args[{index}].len == 0 {{ Vec::new() }} \
+//RS                          else if p{index}_ptr.is_null() {{ ffi_panic(); }} else {{ \
+//RS                          unsafe {{ std::slice::from_raw_parts(p{index}_ptr, args[{index}].len).to_vec() }} }};\n\
+//RS                          let p{index} = String::from_utf8(p{index}_bytes).unwrap_or_else(|_| ffi_panic());"
+//RS                     ));
+//RS                     format!("p{index}")
+//RS                 }
+//RS                 Type::Named(_)
+//RS                     if record_type(ty, handle_names, record_defs) =>
+//RS                 {
+//RS                     let record_ty = record_defs.rust_type(ty)?;
+//RS                     setup.push(format!(
+//RS                         "    let p{index}_ptr = args[{index}].ptr;\n\
+//RS                          if p{index}_ptr.is_null() {{ ffi_panic(); }}"
+//RS                     ));
+//RS                     format!(
+//RS                         "unsafe {{ std::ptr::read(p{index}_ptr as *const {record_ty}) }}"
+//RS                     )
+//RS                 }
+//RS                 Type::Named(_) if entry.c_abi => {
+//RS                     // CBind handles are native pointers in the C wrapper
+//RS                     // crate, even though their checked Jet surface is nominal.
+//RS                     format!(
+//RS                         "args[{index}].value as usize as *mut std::os::raw::c_void"
+//RS                     )
+//RS                 }
+//RS                 Type::Named(_) => {
+//RS                     format!(
+//RS                         "args[{index}].value as usize as {}",
+//RS                         expected.trim_start_matches("&mut ")
+//RS                     )
+//RS                 }
+//RS                 Type::Float => format!("f64::from_bits(args[{index}].value)"),
+//RS                 Type::Float32 => format!("f32::from_bits(args[{index}].value as u32)"),
+//RS                 Type::Bool => format!("args[{index}].value != 0"),
+//RS                 Type::Char => {
+//RS                     format!(
+//RS                         "char::from_u32(args[{index}].value as u32).unwrap_or_else(|| ffi_panic())"
+//RS                     )
+//RS                 }
+//RS                 _ => format!("args[{index}].value as {expected}"),
+//RS             };
+//RS             params.push(format!(
+//RS                 "p{index}: {}",
+//RS                 native_type(ty, *convention, handle_names, record_defs)?
+//RS             ));
+//RS             call_args.push(expr);
+//RS         }
+//RS     }
+//RS 
+//RS     let cabi = format!("{}_cabi", entry.wrapper_name);
+//RS     let native_ident = format!("{}_native", entry.wrapper_name);
+//RS     let call = if direct_native {
+//RS         format!("unsafe {{ {native_ident}({}) }}", call_args.join(", "))
+//RS     } else {
+//RS         format!("{}({})", entry.wrapper_name, call_args.join(", "))
+//RS     };
+//RS     let native_decl = if direct_native {
+//RS         let native_symbol = entry
+//RS             .inline
+//RS             .as_ref()
+//RS             .map(|_| format!("jet_inline_{}", entry.wrapper_name))
+//RS             .unwrap_or_else(|| entry.rust_path.clone());
+//RS         let raw_ret = match entry.return_type.as_ref() {
+//RS             Some(ty) => format!(" -> {}", return_native_type(ty, handle_names, record_defs)?),
+//RS             None => String::new(),
+//RS         };
+//RS         format!(
+//RS             "unsafe extern \"C\" {{\n    #[link_name = {:?}]\n    fn {native_ident}({}){raw_ret};\n}}\n\n",
+//RS             native_symbol,
+//RS             params.join(", "),
+//RS         )
+//RS     } else {
+//RS         String::new()
+//RS     };
+//RS 
+//RS     let mut body = String::new();
+//RS     body.push_str("    if argc != ");
+//RS     body.push_str(&entry.params.len().to_string());
+//RS     body.push_str(" || args.is_null() || out.is_null() {\n        ffi_host_fault();\n        return 1;\n    }\n");
+//RS     body.push_str("    let args = unsafe { std::slice::from_raw_parts(args, argc) };\n");
+//RS     body.push_str("    let out = unsafe { &mut *out };\n");
+//RS     body.push_str("    out.value = 0;\n    out.ptr = std::ptr::null_mut();\n    out.len = 0;\n");
+//RS     body.push_str(&setup.join("\n"));
+//RS     if !setup.is_empty() {
+//RS         body.push('\n');
+//RS     }
+//RS 
+//RS     match &entry.return_type {
+//RS         None => {
+//RS             body.push_str("    let _ = ");
+//RS             body.push_str(&call);
+//RS             body.push_str(";\n");
+//RS         }
+//RS         Some(Type::List(_)) if direct_native => {
+//RS             body.push_str("    let result = ");
+//RS             body.push_str(&call);
+//RS             body.push_str(";\n");
+//RS             let count = return_count.expect("validated returned-list count");
+//RS             let count_ty = scalar_type(&entry.params[count].1)?;
+//RS             body.push_str(&format!(
+//RS                 "    let raw_len = unsafe {{ *(args[{count}].ptr as *const {count_ty}) }};\n"
+//RS             ));
+//RS             if signed_integer(&entry.params[count].1) {
+//RS                 body.push_str("    if raw_len < 0 { ffi_panic(); }\n");
+//RS             }
+//RS             body.push_str("    let len = raw_len as usize;\n");
+//RS             body.push_str(
+//RS                 "    if result.is_null() && len != 0 { ffi_panic(); }\n\
+//RS                      out.ptr = result as *mut u8;\n\
+//RS                      out.len = len;\n",
+//RS             );
+//RS         }
+//RS         Some(Type::String) => {
+//RS             body.push_str("    let result = ");
+//RS             body.push_str(&call);
+//RS             body.push_str(";\n");
+//RS             if direct_native {
+//RS                 body.push_str(
+//RS                     "    if result.is_null() { ffi_panic(); }\n\
+//RS                          let bytes = unsafe { std::ffi::CStr::from_ptr(result) }.to_bytes().to_vec();\n",
+//RS                 );
+//RS             } else {
+//RS                 body.push_str("    let bytes = result.into_bytes();\n");
+//RS             }
+//RS             body.push_str(
+//RS                 "    let boxed = bytes.into_boxed_slice();\n\
+//RS                      out.len = boxed.len();\n\
+//RS                      out.ptr = Box::into_raw(boxed) as *mut u8;\n",
+//RS             );
+//RS         }
+//RS         Some(Type::Float) => {
+//RS             body.push_str(&format!("    out.value = ({call}).to_bits();\n"));
+//RS         }
+//RS         Some(Type::Float32) => {
+//RS             body.push_str(&format!("    out.value = ({call}).to_bits() as u64;\n"));
+//RS         }
+//RS         Some(Type::Bool) => {
+//RS             body.push_str(&format!("    out.value = u64::from({call});\n"));
+//RS         }
+//RS         Some(Type::Char) => {
+//RS             body.push_str(&format!("    out.value = ({call}) as u32 as u64;\n"));
+//RS         }
+//RS         Some(ty @ Type::Named(_))
+//RS             if record_type(ty, handle_names, record_defs) =>
+//RS         {
+//RS             let record_ty = record_defs.rust_type(ty)?;
+//RS             body.push_str(&format!(
+//RS                 "    let result = {call};\n\
+//RS                  let bytes = unsafe {{ std::slice::from_raw_parts(\n\
+//RS                      (&result as *const {record_ty}).cast::<u8>(),\n\
+//RS                      std::mem::size_of::<{record_ty}>(),\n\
+//RS                  ) }}.to_vec().into_boxed_slice();\n\
+//RS                  out.len = bytes.len();\n\
+//RS                  out.ptr = Box::into_raw(bytes) as *mut u8;\n"
+//RS             ));
+//RS         }
+//RS         Some(Type::Named(_)) => {
+//RS             body.push_str(&format!(
+//RS                 "    out.value = ({call}) as usize as u64;\n"
+//RS             ));
+//RS         }
+//RS         Some(Type::Int)
+//RS         | Some(Type::IntN { .. })
+//RS         | Some(Type::InlineRange { .. })
+//RS         | Some(Type::Tagged { .. })
+//RS         | Some(Type::Quantity { .. }) => {
+//RS             body.push_str(&format!("    out.value = ({call}) as u64;\n"));
+//RS         }
+//RS         Some(Type::List(_)) => return None,
+//RS         Some(_) => return None,
+//RS     }
+//RS     body.push_str("    0\n");
+//RS 
+//RS     Some(format!(
+//RS         "{native_decl}#[no_mangle]\npub unsafe extern \"C\" fn {cabi}(args: *const JetFfiSlot, argc: usize, out: *mut JetFfiSlot) -> i32 {{\n    match ffi_catch_unwind(|| {{\n{body}    }}) {{\n        Ok(code) => code,\n        Err(_) => {{ ffi_host_fault(); 1 }},\n    }}\n}}\n"
+//RS     ))
+//RS }
+//RS 
+//RS fn rust_type(ty: &Type, user_types: &HashSet<String>) -> String {
+//RS     match ty {
+//RS         Type::Int => "i64".to_string(),
+//RS         Type::Float => "f64".to_string(),
+//RS         Type::IntN { signed, bits } => format!("{}{}", if *signed { 'i' } else { 'u' }, bits),
+//RS         Type::InlineRange { base, .. } => rust_type(base, user_types),
+//RS         Type::Float32 => "f32".to_string(),
+//RS         Type::Bool => "bool".to_string(),
+//RS         Type::String => "String".to_string(),
+//RS         Type::Char => "char".to_string(),
+//RS         Type::List(inner) => format!("Vec<{}>", rust_type(inner, user_types)),
+//RS         Type::Map { key, value, .. } => format!(
+//RS             "std::collections::BTreeMap<{}, {}>",
+//RS             rust_type(key, user_types),
+//RS             rust_type(value, user_types)
+//RS         ),
+//RS         // D-MEM1 S6: the main codegen path (Codegen/Context.rs) now renders
+//RS         // `Type::Shared` as `jet_std::JetShared<T>` (`Arc<RwLock<T>>`), not a
+//RS         // bare `Arc<T>` — this C-FFI bridge type table is untested for
+//RS         // `Shared<T>` crossing the boundary (no test exercises it; a
+//RS         // concurrency handle in a C-ABI signature is not a realistic shape),
+//RS         // left as the pre-S6 mapping rather than guessed at.
+//RS         Type::Shared(inner) => format!("std::sync::Arc<{}>", rust_type(inner, user_types)),
+//RS         Type::Option(inner) => format!("Option<{}>", rust_type(inner, user_types)),
+//RS         Type::Result { ok, err } => format!(
+//RS             "Result<{}, {}>",
+//RS             rust_type(ok, user_types),
+//RS             rust_type(err, user_types)
+//RS         ),
+//RS         Type::Fn { .. } => "Box<dyn std::any::Any>".to_string(),
+//RS         Type::Named(name) if name == "Error" => "String".to_string(),
+//RS         Type::Named(name) if user_types.contains(name) => crate::AST::mangle_path(name),
+//RS         Type::Named(name) => name.clone(),
+//RS         Type::Apply { name, args } if user_types.contains(name) => format!(
+//RS             "{}<{}>",
+//RS             crate::AST::mangle_path(name),
+//RS             args.iter()
+//RS                 .map(|a| rust_type(a, user_types))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ")
+//RS         ),
+//RS         Type::Apply { .. } | Type::TraitObject(_) | Type::Tuple(_) => {
+//RS             "Box<dyn std::any::Any>".to_string()
+//RS         }
+//RS         // D-FIXARR1: [T#N] lowers to a real Rust array [T; N] in FFI too.
+//RS         Type::FixedList { elem, len, .. } => format!("[{}; {}]", rust_type(elem, user_types), len),
+//RS         Type::Tagged { inner, .. } => rust_type(inner, user_types),
+//RS         // D-UNIONTYPE1=A: anonymous unions are not a C-FFI surface type.
+//RS         Type::Union(_) => unreachable!("anonymous unions are rejected by FFI sema"),
+//RS         // Runtime values carry no dimension metadata (I3): a quantity crosses
+//RS         // the C ABI as its erased base numeric type.
+//RS         Type::Quantity { base, .. } => rust_type(base, user_types),
+//RS         // A compile-time measure only ever appears as a `Vec`/`Matrix`
+//RS         // shape arg, never as its own C-FFI-crossing type.
+//RS         Type::Measure(_) => unreachable!("type measure is not a C-FFI surface type"),
+//RS     }
+//RS }
+//RS 
+//RS fn looks_like_signature_mismatch(stderr: &str) -> bool {
+//RS     stderr.contains("E0308")
+//RS         || stderr.contains("E0277")
+//RS         || stderr.contains("E0061")
+//RS         || stderr.contains("E0425")
+//RS         || stderr.contains("cannot find")
+//RS         || stderr.contains("mismatched types")
+//RS         || stderr.contains("arguments to this function")
+//RS }
+//RS 
+//RS fn indent_block(s: &str) -> String {
+//RS     s.lines()
+//RS         .map(|line| {
+//RS             if line.is_empty() {
+//RS                 String::new()
+//RS             } else {
+//RS                 format!("    {line}")
+//RS             }
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n")
+//RS }
+//RS 
+//RS /// Keep cargo output stable for ui snapshots — drop fetch noise and parallel-build chatter.
+//RS fn stable_cargo_detail(stderr: &str) -> String {
+//RS     let kept: Vec<String> = stderr
+//RS         .lines()
+//RS         .filter(|line| {
+//RS             let t = line.trim();
+//RS             !t.is_empty()
+//RS                 && !t.starts_with("Updating crates.io")
+//RS                 && !t.starts_with("Locking ")
+//RS                 && !t.starts_with("Adding ")
+//RS                 && !t.contains("waiting for other jobs")
+//RS                 && !(t.starts_with("Compiling ") && !t.contains("jet_ffi_"))
+//RS         })
+//RS         .map(|line| {
+//RS             normalize_ffi_generated_source_line(&normalize_ffi_crate_name(
+//RS                 &normalize_ffi_cache_path(line),
+//RS             ))
+//RS         })
+//RS         .collect();
+//RS     indent_block(&kept.join("\n"))
+//RS }
+//RS 
+//RS fn normalize_ffi_generated_source_line(line: &str) -> String {
+//RS     let marker = ["match std::panic::catch_unwind(", "match ffi_catch_unwind("]
+//RS         .into_iter()
+//RS         .find_map(|marker| line.find(marker).map(|start| (marker, start)));
+//RS     let Some((marker, start)) = marker else {
+//RS         return line.to_string();
+//RS     };
+//RS     format!("{}{}<generated wrapper>)", &line[..start], marker)
+//RS }
+//RS 
+//RS fn normalize_ffi_crate_name(line: &str) -> String {
+//RS     let marker = "jet_ffi_";
+//RS     let mut out = String::new();
+//RS     let mut rest = line;
+//RS     while let Some(idx) = rest.find(marker) {
+//RS         out.push_str(&rest[..idx]);
+//RS         let after = &rest[idx + marker.len()..];
+//RS         let hash_len = after.chars().take_while(|c| c.is_ascii_hexdigit()).count();
+//RS         if hash_len == 16 {
+//RS             out.push_str("jet_ffi_<hash>");
+//RS             rest = &after[hash_len..];
+//RS         } else {
+//RS             out.push_str(marker);
+//RS             rest = after;
+//RS         }
+//RS     }
+//RS     out.push_str(rest);
+//RS     out
+//RS }
+//RS 
+//RS /// Keep ui snapshots stable across machines (`/home/…/.cache/jet/ffi/…` →
+//RS /// `~/.cache/jet/ffi/…`), for both roots under it: the per-key input dir
+//RS /// `<hash>/` and the shared Cargo target dir `deps/<hash>/` (#2075).
+//RS fn normalize_ffi_cache_path(line: &str) -> String {
+//RS     let marker = ".cache/jet/ffi/";
+//RS     let Some(idx) = line.find(marker) else {
+//RS         return line.to_string();
+//RS     };
+//RS     let path_start = line[..idx]
+//RS         .rfind('/')
+//RS         .and_then(|slash| {
+//RS             let pre = &line[..slash];
+//RS             pre.rfind(|c| c == '(' || c == ' ')
+//RS                 .map(|j| j + 1)
+//RS                 .or(Some(0))
+//RS         })
+//RS         .unwrap_or(idx);
+//RS     let rest = &line[idx + marker.len()..];
+//RS     let (shared, rest) = match rest.strip_prefix("deps/") {
+//RS         Some(rest) => ("deps/", rest),
+//RS         None => ("", rest),
+//RS     };
+//RS     let hash_len = rest.chars().take_while(|c| c.is_ascii_hexdigit()).count();
+//RS     if hash_len != 16 {
+//RS         return line.to_string();
+//RS     }
+//RS     let suffix = &rest[hash_len..];
+//RS     format!(
+//RS         "{}~/.cache/jet/ffi/{shared}<hash>{suffix}",
+//RS         &line[..path_start]
+//RS     )
+//RS }
+//RS 
+//RS fn tool_error(msg: &str) -> Vec<Diagnostic> {
+//RS     vec![Diagnostic::error(
+//RS         "E0704",
+//RS         msg.to_string(),
+//RS         "building the foreign crate bridge failed".to_string(),
+//RS         "check disk permissions and try again".to_string(),
+//RS         None,
+//RS     )]
+//RS }
+//RS 
+//RS // c43: U32/IntN FFI type-mapping tests.
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS     use crate::AST::{AccessConvention, Type};
+//RS     use std::collections::HashSet;
+//RS 
+//RS     #[test]
+//RS     fn data_provider_requires_direct_call_not_dependency_closure() {
+//RS         assert!(!needs_parquet_provider("core.data"));
+//RS         assert!(!needs_parquet_provider("__core_data"));
+//RS         assert!(!needs_parquet_provider("core.sync::map_merge"));
+//RS         assert!(needs_parquet_provider("core.data::read_parquet"));
+//RS         assert!(needs_parquet_provider("core.data.arrow::from_parquet"));
+//RS     }
+//RS     #[test]
+//RS     fn cargo_metadata_detects_transitive_compile_time_targets() {
+//RS         let root_only =
+//RS             r#"{"packages":[{"name":"jet_ffi_root","targets":[{"kind":["custom-build"]}]}]}"#;
+//RS         assert!(!cargo_metadata_has_compile_time_code(root_only, "jet_ffi_root").unwrap());
+//RS 
+//RS         let transitive_build = r#"{"packages":[{"name":"jet_ffi_root","targets":[{"kind":["lib"]}]},{"name":"arrayref","targets":[{"kind":["custom-build"]}]}]}"#;
+//RS         assert!(cargo_metadata_has_compile_time_code(transitive_build, "jet_ffi_root").unwrap());
+//RS 
+//RS         let transitive_proc_macro = r#"{"packages":[{"name":"jet_ffi_root","targets":[{"kind":["lib"]}]},{"name":"derive_helper","targets":[{"kind":["proc-macro"]}]}]}"#;
+//RS         assert!(
+//RS             cargo_metadata_has_compile_time_code(transitive_proc_macro, "jet_ffi_root").unwrap()
+//RS         );
+//RS     }
+//RS     #[test]
+//RS     fn cargo_lock_bridge_records_resolved_registry_versions() {
+//RS         let raw = r#"
+//RS version = 4
+//RS 
+//RS [[package]]
+//RS name = "base64"
+//RS version = "0.22.1"
+//RS source = "registry+https://github.com/rust-lang/crates.io-index"
+//RS checksum = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+//RS dependencies = [
+//RS  "serde",
+//RS ]
+//RS 
+//RS [[package]]
+//RS name = "jet_ffi_bridge"
+//RS version = "0.1.0"
+//RS dependencies = [
+//RS  "base64",
+//RS ]
+//RS "#;
+//RS         let packages = cargo_lock_bridge_packages(raw, "bridge-key", "sha256-artifact").unwrap();
+//RS         assert_eq!(packages.len(), 1);
+//RS         let package = &packages[0];
+//RS         assert_eq!(package.name, "base64");
+//RS         assert_eq!(package.version, "0.22.1");
+//RS         assert_eq!(package.dependencies, vec!["serde"]);
+//RS         assert_eq!(
+//RS             package.content_hash.as_deref(),
+//RS             Some("sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+//RS         );
+//RS         assert!(matches!(
+//RS             &package.source,
+//RS             crate::Lock::LockSource::Foreign {
+//RS                 language: ForeignLanguage::Rust,
+//RS                 reference,
+//RS                 output,
+//RS             } if reference == "base64@0.22.1" && output == "sha256-artifact"
+//RS         ));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn tampered_bridge_artifact_reports_e2604() {
+//RS         let root = std::env::var_os("HOME")
+//RS             .map(PathBuf::from)
+//RS             .unwrap_or_else(|| PathBuf::from("."))
+//RS             .join(".cache")
+//RS             .join("jet-test-scratch")
+//RS             .join("ExternRust2432")
+//RS             .join("scratch")
+//RS             .join(format!("ffi-integrity-{}", std::process::id()));
+//RS         let target = root.join("target");
+//RS         let artifact = target.join("libbridge.rlib");
+//RS         let _ = fs::remove_dir_all(&root);
+//RS         fs::create_dir_all(&target).unwrap();
+//RS         let original = b"bridge artifact";
+//RS         fs::write(&artifact, original).unwrap();
+//RS         let digest = crate::SHA256::sha256_hex(original);
+//RS         fs::write(
+//RS             target.join("bridge.sha256"),
+//RS             format!("{BRIDGE_ARTIFACTS_SCHEMA}\n{digest} libbridge.rlib\n"),
+//RS         )
+//RS         .unwrap();
+//RS         let tampered = b"tampered bridge artifact";
+//RS         fs::write(&artifact, tampered).unwrap();
+//RS         let deps = BTreeMap::from([("base64".to_string(), "0.22".to_string())]);
+//RS         let diagnostic =
+//RS             bridge_artifact_integrity_diagnostic(&target, "bridge", &deps, &[artifact.clone()])
+//RS                 .unwrap();
+//RS         assert_eq!(diagnostic.code, "E2604");
+//RS         assert_eq!(
+//RS             diagnostic.what,
+//RS             format!(
+//RS                 "Integrity check failed for `base64` `0.22` — expected `sha256-{digest}`, got `sha256-{}`.",
+//RS                 crate::SHA256::sha256_hex(tampered)
+//RS             )
+//RS         );
+//RS         assert!(diagnostic.why.contains("changed after it was locked"));
+//RS         assert!(diagnostic.fix.contains("`jet clean`"));
+//RS 
+//RS         fs::write(&artifact, original).unwrap();
+//RS         assert!(
+//RS             bridge_artifact_integrity_diagnostic(&target, "bridge", &deps, &[artifact]).is_none(),
+//RS             "an artifact matching its locked digest must pass"
+//RS         );
+//RS         let _ = fs::remove_dir_all(root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn generated_rust_bridge_carries_the_canonical_descriptor_stamp() {
+//RS         let entry = ExternEntry {
+//RS             jet_name: "rust_max".into(),
+//RS             rust_path: "std::cmp::max".into(),
+//RS             wrapper_name: "jet_ffi_rust_max".into(),
+//RS             params: vec![(AccessConvention::Read, Type::Int)],
+//RS             param_names: vec!["value".into()],
+//RS             return_type: Some(Type::Int),
+//RS             crate_spec: "std".into(),
+//RS             line_hint: "extern rust rust_max".into(),
+//RS             inline: None,
+//RS             c_abi: false,
+//RS             generated: false,
+//RS             c_module: false,
+//RS             close: None,
+//RS         };
+//RS         let source = emit_wrapper_lib(
+//RS             &[entry],
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS         );
+//RS         let stamp = foreign_descriptor_stamp(ForeignLanguage::Rust);
+//RS         assert!(source.contains(&format!("// jet-ffi-descriptor={stamp}")));
+//RS     }
+//RS     #[test]
+//RS     fn generated_cargo_manifest_builds_when_nested_in_workspace() {
+//RS         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS             .join(".tmp")
+//RS             .join("jet-test-scratch")
+//RS             .join(format!(
+//RS                 "ffi-manifest-{}-{}",
+//RS                 std::process::id(),
+//RS                 std::time::SystemTime::now()
+//RS                     .duration_since(std::time::UNIX_EPOCH)
+//RS                     .expect("system clock is after the Unix epoch")
+//RS                     .as_nanos()
+//RS             ));
+//RS         let target = root
+//RS             .parent()
+//RS             .expect("manifest scratch root has a parent")
+//RS             .join(format!("ffi-manifest-target-{}", std::process::id()));
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS         let _ = std::fs::remove_dir_all(&target);
+//RS         std::fs::create_dir_all(root.join("src")).expect("create nested manifest source");
+//RS         std::fs::write(
+//RS             root.join("Cargo.toml"),
+//RS             emit_cargo_toml("nested_ffi_probe", &BTreeMap::new(), false),
+//RS         )
+//RS         .expect("write generated nested manifest");
+//RS         std::fs::write(root.join("src/lib.rs"), "pub fn probe() -> i64 { 7 }\n")
+//RS             .expect("write generated nested source");
+//RS 
+//RS         let output = Command::new("cargo")
+//RS             .args(["build", "--offline", "--manifest-path"])
+//RS             .arg(root.join("Cargo.toml"))
+//RS             .arg("--target-dir")
+//RS             .arg(&target)
+//RS             .output()
+//RS             .expect("run cargo for generated nested manifest");
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS         let _ = std::fs::remove_dir_all(&target);
+//RS         assert!(
+//RS             output.status.success(),
+//RS             "generated nested manifest must build: {}",
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn generated_com_bridge_carries_the_com_descriptor_stamp() {
+//RS         let entry = ExternEntry {
+//RS             jet_name: "open".into(),
+//RS             rust_path: "jet_com_office_open".into(),
+//RS             wrapper_name: "jet_ffi_open".into(),
+//RS             params: Vec::new(),
+//RS             param_names: Vec::new(),
+//RS             return_type: Some(Type::Int),
+//RS             crate_spec: "std".into(),
+//RS             line_hint: "`open` in COM module `jet_com_office`".into(),
+//RS             inline: None,
+//RS             c_abi: true,
+//RS             generated: false,
+//RS             c_module: true,
+//RS             close: None,
+//RS         };
+//RS         let source = emit_wrapper_lib(
+//RS             &[entry],
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS         );
+//RS         let stamp = foreign_descriptor_stamp(ForeignLanguage::Com);
+//RS         assert!(source.contains(&format!("// jet-ffi-descriptor={stamp}")));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn generated_bridge_reports_through_host_callback() {
+//RS         let source = emit_wrapper_lib(
+//RS             &[],
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS         );
+//RS         assert!(source.contains("pub extern \"C\" fn jet_ffi_set_reporter"));
+//RS         assert!(source.contains("pub extern \"C\" fn jet_ffi_clear_panic_hook"));
+//RS         assert!(source.contains("pub extern \"C\" fn jet_ffi_take_failure"));
+//RS         assert!(source.contains("fn ffi_host_fault()"));
+//RS         assert!(source.contains("reporter(MESSAGE.as_ptr(), MESSAGE.len())"));
+//RS         assert!(source.contains("__jet_ffi_runtime__: {MESSAGE}"));
+//RS         assert!(source.contains("std::panic::resume_unwind"));
+//RS         assert!(source.contains("fn ffi_catch_unwind"));
+//RS         assert!(!source.contains("fn jet_ffi_catch_unwind"));
+//RS         assert!(source.contains("let private_marker = info"));
+//RS         assert!(source.contains("message.starts_with(\"__jet_ffi_runtime__: \")"));
+//RS         assert!(source.contains("JET_FFI_PANIC_BOUNDARY_DEPTH"));
+//RS         assert!(!source.contains("std::process::exit"));
+//RS         assert!(!source.contains("eprintln!(\"panic: a foreign function panicked\")"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn cabi_trampoline_validates_text_and_preserves_capability_boundaries() {
+//RS         let value_entry = ExternEntry {
+//RS             jet_name: "echo".into(),
+//RS             rust_path: "std::convert::identity".into(),
+//RS             wrapper_name: "jet_ffi_echo".into(),
+//RS             params: vec![(AccessConvention::Read, Type::String)],
+//RS             param_names: vec!["value".into()],
+//RS             return_type: Some(Type::String),
+//RS             crate_spec: "std".into(),
+//RS             line_hint: "extern rust echo".into(),
+//RS             inline: None,
+//RS             c_abi: false,
+//RS             generated: false,
+//RS             c_module: false,
+//RS             close: None,
+//RS         };
+//RS         let source = emit_cabi_trampoline(
+//RS             &value_entry,
+//RS             &HashSet::new(),
+//RS             &CRecordDefinitions::default(),
+//RS         )
+//RS         .unwrap();
+//RS         assert!(source.contains("String::from_utf8(p0_bytes)"), "{source}");
+//RS         assert!(source.contains("p0_ptr.is_null()"), "{source}");
+//RS         assert!(source.contains("ffi_catch_unwind"), "{source}");
+//RS         assert!(source.contains("ffi_host_fault(); 1"), "{source}");
+//RS         assert!(source.contains("out.ptr"), "{source}");
+//RS         assert!(!source.contains("from_utf8_unchecked"), "{source}");
+//RS 
+//RS         let capability_entry = ExternEntry {
+//RS             params: vec![(AccessConvention::Write, Type::String)],
+//RS             ..value_entry
+//RS         };
+//RS         assert!(
+//RS             emit_cabi_trampoline(
+//RS                 &capability_entry,
+//RS                 &HashSet::new(),
+//RS                 &CRecordDefinitions::default(),
+//RS             )
+//RS             .is_none()
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn inline_capability_wrapper_keeps_exclusive_pointer_shape() {
+//RS         let entry = ExternEntry {
+//RS             jet_name: "edit".into(),
+//RS             rust_path: String::new(),
+//RS             wrapper_name: "jet_ffi_edit".into(),
+//RS             params: vec![(AccessConvention::Write, Type::Int)],
+//RS             param_names: vec!["value".into()],
+//RS             return_type: None,
+//RS             crate_spec: "std".into(),
+//RS             line_hint: "#FFI(c) edit".into(),
+//RS             inline: Some(InlineEntry {
+//RS                 lang: "c".into(),
+//RS                 source: "void edit(int64_t* value) { *value += 1; }".into(),
+//RS                 param_names: vec!["value".into()],
+//RS                 asm_contract: None,
+//RS             }),
+//RS             c_abi: false,
+//RS             generated: false,
+//RS             c_module: false,
+//RS             close: None,
+//RS         };
+//RS         let inline = entry.inline.as_ref().unwrap();
+//RS         let wrapper = emit_inline_wrapper_fn(&entry, inline);
+//RS         assert!(wrapper.contains("p0: *mut i64"), "{wrapper}");
+//RS         assert!(
+//RS             wrapper.contains("pub fn jet_ffi_edit(p0: &mut i64)"),
+//RS             "{wrapper}"
+//RS         );
+//RS 
+//RS         let native = emit_native_inline_source(&entry, 0);
+//RS         assert!(native.contains("void edit(int64_t* value)"), "{native}");
+//RS         assert!(
+//RS             native.contains("jet_inline_jet_ffi_edit(int64_t* p0)"),
+//RS             "{native}"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn crypto_bridge_projects_outcome_without_host_runtime_stop_adapter() {
+//RS         let source = emit_wrapper_lib(
+//RS             &[],
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             true,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS         );
+//RS 
+//RS         assert!(source.contains("pub type JetOutcome<T, E> = Result<T, E>;"));
+//RS         assert!(source.contains("pub struct JetAbsent;"));
+//RS         assert!(source.contains("pub fn jet_present<T, E>(value: T)"));
+//RS         assert!(source.contains("pub fn jet_render_runtime_stop_from_row("));
+//RS         assert!(source.contains("mod jet_encoding_errors {"));
+//RS         assert!(source.contains("mod jet_json_number {"));
+//RS         assert!(source.contains("mod EncodingJson {"));
+//RS         assert!(!source.contains("crate::Registry::active_runtime_diagnostic"));
+//RS         assert!(!source.contains("JET_HOST_RUNTIME_STOP_BEGIN"));
+//RS         assert!(!source.contains("JET_HOST_RUNTIME_STOP_END"));
+//RS         assert!(!source.contains("pub fn jet_render_runtime_stop("));
+//RS         assert!(!source.contains("JET_HOST_RUNTIME_SENTRY_BEGIN"));
+//RS         assert!(!source.contains("JET_HOST_RUNTIME_SENTRY_END"));
+//RS         assert!(!source.contains("pub fn jet_render_runtime_sentry("));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn generated_wrapper_excerpt_is_width_independent() {
+//RS         let full = "    10 |     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| call())) {";
+//RS         let short = "    10 |     match std::panic::catch_unwind(s...";
+//RS         let expected = "    10 |     match std::panic::catch_unwind(<generated wrapper>)";
+//RS         assert_eq!(normalize_ffi_generated_source_line(full), expected);
+//RS         assert_eq!(normalize_ffi_generated_source_line(short), expected);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn intn_u32_maps_to_rust_u32() {
+//RS         // c43: `Type::IntN { signed: false, bits: 32 }` (Jet `U32`) must lower
+//RS         // to Rust `u32` in the FFI bridge — not `i64` or any other type.
+//RS         let empty = HashSet::new();
+//RS         assert_eq!(
+//RS             rust_type(
+//RS                 &Type::IntN {
+//RS                     signed: false,
+//RS                     bits: 32
+//RS                 },
+//RS                 &empty
+//RS             ),
+//RS             "u32",
+//RS             "U32 must map to Rust u32 in FFI"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn intn_i32_maps_to_rust_i32() {
+//RS         // c43: signed 32-bit maps to Rust i32 (S44 signed-integer subset).
+//RS         let empty = HashSet::new();
+//RS         assert_eq!(
+//RS             rust_type(
+//RS                 &Type::IntN {
+//RS                     signed: true,
+//RS                     bits: 32
+//RS                 },
+//RS                 &empty
+//RS             ),
+//RS             "i32",
+//RS             "I32 must map to Rust i32 in FFI"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn intn_width_family_round_trip() {
+//RS         // c43: verify all supported fixed-width integer types map correctly.
+//RS         let empty = HashSet::new();
+//RS         for &(signed, bits, expected) in &[
+//RS             (false, 8_u8, "u8"),
+//RS             (true, 8, "i8"),
+//RS             (false, 16, "u16"),
+//RS             (true, 16, "i16"),
+//RS             (false, 32, "u32"),
+//RS             (true, 32, "i32"),
+//RS             (false, 64, "u64"),
+//RS             (true, 64, "i64"),
+//RS         ] {
+//RS             assert_eq!(
+//RS                 rust_type(&Type::IntN { signed, bits }, &empty),
+//RS                 expected,
+//RS                 "IntN {{ signed:{}, bits:{} }} should map to {}",
+//RS                 signed,
+//RS                 bits,
+//RS                 expected
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn int_maps_to_i64_and_float_maps_to_f64() {
+//RS         // Regression guard: base types haven't drifted.
+//RS         let empty = HashSet::new();
+//RS         assert_eq!(rust_type(&Type::Int, &empty), "i64");
+//RS         assert_eq!(rust_type(&Type::Float, &empty), "f64");
+//RS         assert_eq!(rust_type(&Type::Float32, &empty), "f32");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn inline_build_script_has_no_ambient_host_tool_literals() {
+//RS         let entry = ExternEntry {
+//RS             jet_name: "probe".into(),
+//RS             rust_path: String::new(),
+//RS             wrapper_name: "jet_ffi_probe".into(),
+//RS             params: vec![(AccessConvention::Read, Type::Int)],
+//RS             param_names: vec!["value".into()],
+//RS             return_type: Some(Type::Int),
+//RS             crate_spec: "std".into(),
+//RS             line_hint: "`#FFI(c) fn probe`".into(),
+//RS             inline: Some(InlineEntry {
+//RS                 lang: "c".into(),
+//RS                 source: "int64_t probe(int64_t value) { return value; }".into(),
+//RS                 param_names: vec!["value".into()],
+//RS                 asm_contract: None,
+//RS             }),
+//RS             c_abi: false,
+//RS             generated: false,
+//RS             c_module: false,
+//RS             close: None,
+//RS         };
+//RS         let mut cpp_entry = entry.clone();
+//RS         cpp_entry.jet_name = "cpp_probe".into();
+//RS         cpp_entry.inline.as_mut().unwrap().lang = "cpp".into();
+//RS         let entries = [entry, cpp_entry];
+//RS         let toolchain = InlineNativeToolchain {
+//RS             target: "aarch64-apple-darwin".into(),
+//RS             cc: Some(NativeTool {
+//RS                 path: "/audited/clang".into(),
+//RS                 identity: "/audited/clang\nfake clang 1".into(),
+//RS                 target_arg: Some("--target=aarch64-apple-darwin".into()),
+//RS             }),
+//RS             cxx: Some(NativeTool {
+//RS                 path: "/audited/clang++".into(),
+//RS                 identity: "/audited/clang++\nfake clang 1".into(),
+//RS                 target_arg: Some("--target=aarch64-apple-darwin".into()),
+//RS             }),
+//RS             ar: NativeTool {
+//RS                 path: "/audited/llvm-ar".into(),
+//RS                 identity: "/audited/llvm-ar\nfake ar 1".into(),
+//RS                 target_arg: None,
+//RS             },
+//RS         };
+//RS         let generated = emit_inline_build_rs(&entries, &toolchain);
+//RS         assert!(generated.contains("TARGET"));
+//RS         assert!(generated.contains("a selected target"));
+//RS         assert!(generated.contains("aarch64-apple-darwin"));
+//RS         assert!(generated.contains("/audited/clang\""));
+//RS         assert!(generated.contains("/audited/clang++"));
+//RS         assert!(generated.contains("/audited/llvm-ar"));
+//RS         assert!(generated.contains("cargo:rustc-link-lib=dylib=c++"));
+//RS         assert!(!generated.contains("Command::new(\"cc\")"));
+//RS         assert!(!generated.contains("Command::new(\"ar\")"));
+//RS 
+//RS         let key = |toolchain: &InlineNativeToolchain| {
+//RS             cache_key_full(
+//RS                 &entries,
+//RS                 &BTreeMap::new(),
+//RS                 false,
+//RS                 false,
+//RS                 false,
+//RS                 false,
+//RS                 false,
+//RS                 false,
+//RS                 false,
+//RS                 false,
+// END-PORT-PENDING 2037 crates/jet-pkg-model/src/FFI.rs:5401-7200
+

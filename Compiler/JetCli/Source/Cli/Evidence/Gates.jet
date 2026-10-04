@@ -1,0 +1,174 @@
+// Compile-time gate projection helpers, Source/CmdGates.rs (D-FACT-GATE1=A).
+// GateKind/GateEntry/GateOperation: sole Foundation Authority.rs owner.
+// GateLedger::collect/push/sort/entries/diagnostics: Sema packet 0428.
+// Their publication, plus loaded ProgramBundle/module diagnostics and the
+// actual lock/trust native readers, gates the dependent CLI command bodies.
+// No second ledger, carrier, authority policy, loader or filesystem is supplied.
+use jet_foundation.[Span, StatusValue, StatusFields, diagnostic_line_at, diagnostic_column_at,
+    AUTHORITY_TRUST_DECISION_ALLOW, AUTHORITY_TRUST_DECISION_PROMPT, AUTHORITY_TRUST_DECISION_DENY,
+    GateKind, GateEntry, GateOperation]
+use jet_pkg_model.[TrustDecision]
+
+// Rust LARGE_KIND_THRESHOLD (10); security kinds are never collapsed.
+pub JET_CLI_GATES_LARGE_KIND_THRESHOLD :: 16
+
+// Rust entry_file (84–106): only these three options consume a following word.
+// In particular an option-looking value is still skipped; no '--' end marker.
+pub fn jet_cli_gates_entry_file(args: [String]) -> String? Never! {
+    skip_value := false
+    loop argument in args {
+        if skip_value {
+            skip_value = false
+            next
+        }
+        if argument == "--scope" || argument == "--kind" || argument == "--gate" {
+            skip_value = true
+            next
+        }
+        if argument.starts_with("--scope=") || argument.starts_with("--kind=") || argument.starts_with("--gate=") -> next
+        if !argument.starts_with("-") -> return Val(argument)
+    }
+    None
+}
+
+// Rust option_value (108–119) maps directly to jet_cli_args_option_value in
+// Cli/Args.jet (83–89); first inline/separate occurrence, including empty text.
+// No compatibility alias or second parser is needed.
+
+// Rust parse_kind (121–123). Explicit publication gate: Foundation Authority
+// GateKind, also re-exported by Sema packet 0428. No local enum/parser table.
+pub fn jet_cli_gates_parse_kind(value: String) -> GateKind Err! {
+    kind :: GateKind.parse(value) ?? return Err("unknown gate kind `{value}`")
+    Ok(kind)
+}
+// Rust kind_matches (125–130): authority filtering runs before kind matching.
+pub fn jet_cli_gates_kind_matches(entry: GateEntry, kind: GateKind?, authority_only: Bool) -> Bool Never! {
+    if authority_only && !entry.kind.is_rights_kind() -> return false
+    if kind == { Val(wanted) -> entry.kind == wanted; None -> true }
+}
+// Rust scope_matches (132–138): only lowercase literal 'all' is a wildcard;
+// caller run lowercases --scope, while individual facts compare ASCII-only.
+pub fn jet_cli_gates_scope_matches(entry: GateEntry, scope: String?) -> Bool Never! {
+    wanted :: scope ?? return true
+    wanted == "all" || jet_cli_gates_ascii_equal(entry.scope, wanted)
+        || jet_cli_gates_ascii_equal(entry.domain, wanted)
+        || jet_cli_gates_ascii_equal(entry.source, wanted)
+}
+
+// The Rust eq_ignore_ascii_case comparison scans borrowed UTF-8 bytes once;
+// it does not allocate lowercase copies or perform Unicode case folding.
+fn jet_cli_gates_ascii_equal(left: String, right: String) -> Bool Never! {
+    a :: left.bytes()
+    b :: right.bytes()
+    if a.len() != b.len() -> return false
+    loop index in 0..<a.len() {
+        x :: Int.from_u8(a[index])
+        y :: Int.from_u8(b[index])
+        folded_x :: if x >= 65 && x <= 90 -> x + 32 else -> x
+        folded_y :: if y >= 65 && y <= 90 -> y + 32 else -> y
+        if folded_x != folded_y -> return false
+    }
+    true
+}
+
+// Rust external_entry (495–517): construction is a projection, not ledger
+// insertion. The sole ledger owner keeps its provenance-on-push law.
+pub fn jet_cli_gates_external_entry(kind: GateKind, domain: String, scope: String,
+    source: String, subject: String, detail: String, provenance: [String]) -> GateEntry Never! {
+    GateEntry{kind: kind, domain: domain, scope: scope, source: source, span: None,
+        subject: subject, reason: None, status: Val("recorded"), detail: detail,
+        provenance: provenance, operations: [GateOperation]{}}
+}
+
+// Rust trust_decision_label (256–262); reuse the registered spellings and the
+// canonical PackageAuthority TrustDecision, not a CLI string-backed enum.
+pub fn jet_cli_gates_trust_decision_label(decision: TrustDecision) -> String Never! {
+    if decision == {
+        .Allow -> AUTHORITY_TRUST_DECISION_ALLOW
+        .Prompt -> AUTHORITY_TRUST_DECISION_PROMPT
+        .Deny -> AUTHORITY_TRUST_DECISION_DENY
+    }
+}
+
+// Rust effect_names (411–422). Preserve input order and duplicates, prefer a
+// non-empty primary, and join with comma WITHOUT whitespace or normalization.
+pub fn jet_cli_gates_effect_names(primary: [String], fallback: [String]) -> String Never! {
+    effects :: if primary.len() == 0 -> fallback else -> primary
+    if effects.len() == 0 -> "none" else -> effects.join(",")
+}
+
+// Rust status_location_value (738–760): byte offsets, 1-based scalar columns,
+// clamped exactly by the sole Foundation diagnostic coordinate primitives.
+// Linear consuming builders are required by CP-REPORT-LINEAR-BUILDERS.
+pub fn jet_cli_gates_status_location_value(source: String, span: Span) -> StatusValue Never! {
+    start := StatusFields.new()
+    start = ^start.with("line", StatusValue.Integer{value: diagnostic_line_at(source, span.start)})
+    start = ^start.with("column", StatusValue.Integer{value: diagnostic_column_at(source, span.start)})
+    end := StatusFields.new()
+    end = ^end.with("line", StatusValue.Integer{value: diagnostic_line_at(source, span.end)})
+    end = ^end.with("column", StatusValue.Integer{value: diagnostic_column_at(source, span.end)})
+    fields := StatusFields.new()
+    fields = ^fields.with("start", StatusValue.object(^start))
+    fields = ^fields.with("end", StatusValue.object(^end))
+    StatusValue.object(^fields)
+}
+
+// Rust location (772–775); display path is presentation, not native authority.
+pub fn jet_cli_gates_location(source_path: String, source: String, span: Span) -> String Never! {
+    line :: diagnostic_line_at(source, span.start)
+    column :: diagnostic_column_at(source, span.start)
+    "{source_path}:{line}:{column}"
+}
+
+fn jet_cli_gates_status_texts(values: [String]) -> StatusValue Never! {
+    out := [StatusValue]{}
+    loop value in values -> &out.push(StatusValue.String{value: ~value})
+    StatusValue.array(^out)
+}
+fn jet_cli_gates_status_optional_text(value: String?) -> StatusValue Never! {
+    if value == { Val(text) -> StatusValue.String{value: ~text}; None -> StatusValue.Null }
+}
+fn jet_cli_gates_status_span(span: Span) -> StatusValue Never! {
+    fields := StatusFields.new()
+    fields = ^fields.with("start", StatusValue.Integer{value: span.start})
+    fields = ^fields.with("end", StatusValue.Integer{value: span.end})
+    StatusValue.object(^fields)
+}
+
+// Rust status_entry_value (655–736). Its module_source lookup is performed by
+// the loaded-bundle caller, then the original source owner is borrowed here.
+// This avoids copying an entire module source just to project its coordinates.
+// Packet 0428/Foundation Gate carriers remain explicit publication gates.
+pub fn jet_cli_gates_status_entry_value(entry: GateEntry, source: String) -> StatusValue Never! {
+    span_value := StatusValue.Null
+    location_value := StatusValue.Null
+    if entry.span == Val(span) {
+        span_value = jet_cli_gates_status_span(span)
+        location_value = jet_cli_gates_status_location_value(source, span)
+    }
+    operations := [StatusValue]{}
+    loop operation in entry.operations {
+        fields := StatusFields.new()
+        fields = ^fields.with("kind", StatusValue.String{value: ~operation.kind})
+        fields = ^fields.with("span", jet_cli_gates_status_span(operation.span))
+        fields = ^fields.with("location", jet_cli_gates_status_location_value(source, operation.span))
+        fields = ^fields.with("required", jet_cli_gates_status_texts(operation.required))
+        fields = ^fields.with("asserted", jet_cli_gates_status_texts(operation.asserted))
+        fields = ^fields.with("discharged", StatusValue.Bool{value: operation.discharged})
+        &operations.push(StatusValue.object(^fields))
+    }
+    fields := StatusFields.new()
+    fields = ^fields.with("kind", StatusValue.String{value: entry.kind.name()})
+    fields = ^fields.with("domain", StatusValue.String{value: ~entry.domain})
+    fields = ^fields.with("scope", StatusValue.String{value: ~entry.scope})
+    fields = ^fields.with("source", StatusValue.String{value: ~entry.source})
+    fields = ^fields.with("span", ^span_value)
+    fields = ^fields.with("location", ^location_value)
+    fields = ^fields.with("subject", StatusValue.String{value: ~entry.subject})
+    fields = ^fields.with("reason", jet_cli_gates_status_optional_text(entry.reason))
+    fields = ^fields.with("status", jet_cli_gates_status_optional_text(entry.status))
+    fields = ^fields.with("detail", StatusValue.String{value: ~entry.detail})
+    fields = ^fields.with("provenance", jet_cli_gates_status_texts(entry.provenance))
+    fields = ^fields.with("operations", StatusValue.array(^operations))
+    StatusValue.object(^fields)
+}

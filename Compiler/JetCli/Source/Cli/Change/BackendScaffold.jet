@@ -1,0 +1,92 @@
+// Deterministic backend source bodies from Source/CmdBackendScaffold.rs.
+// These pure renderers preserve the Rust templates, including old generated
+// syntax. Command validation, registration and publication have other owners.
+
+// Rust valid_identifier (1773-1777): ASCII only, including the first scalar.
+fn jet_cli_backend_valid_identifier(value: String) -> Bool Never! {
+    bytes :: value.bytes()
+    if bytes.is_empty() -> return false
+    first :: Int.from_u8(bytes[0])
+    if first != 95 && !(first >= 65 && first <= 90) && !(first >= 97 && first <= 122) -> return false
+    loop byte in bytes {
+        code :: Int.from_u8(byte)
+        if code != 95 && !(code >= 65 && code <= 90) && !(code >= 97 && code <= 122) && !(code >= 48 && code <= 57) -> return false
+    }
+    true
+}
+
+// Rust slugify (1894-1913). Every byte of a non-ASCII UTF-8 scalar is
+// nonalphanumeric: separator coalescing makes the byte walk identical to chars,
+// including previous-state updates ONLY when an underscore is appended.
+fn jet_cli_backend_slugify(value: String) -> String Never! {
+    slug := [U8]{}
+    previous_lower := false
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        upper :: code >= 65 && code <= 90
+        lower :: code >= 97 && code <= 122
+        digit :: code >= 48 && code <= 57
+        if upper || lower || digit {
+            if upper && previous_lower && (slug.is_empty() || slug[slug.len() - 1] != (U8{95})) -> &slug.push(U8{95})
+            &slug.push(if upper -> U8.from_int(code + 32) ?? panic("ASCII lowercase byte") else -> byte)
+            previous_lower = lower
+        } else {
+            if slug.is_empty() || slug[slug.len() - 1] != (U8{95}) {
+                &slug.push(U8{95})
+                previous_lower = false
+            }
+        }
+    }
+    loop !slug.is_empty() && slug[slug.len() - 1] == (U8{95}) { _ := &slug.pop() }
+    String.from_bytes(slug) ?? panic("backend slug is ASCII")
+}
+
+// Rust service_source (1915-1934): parameter text is inserted verbatim.
+fn jet_cli_backend_service_source(name: String, slug: String) -> String Never! {
+    "use core.service as service\nuse job_{slug} as job\n\nfn {slug}_worker() {{\n    job.enqueue(\"{name} job\")\n}}\n\npub fn run() {{\n    tree := service.tree(\"{slug}\")\n    tree.set_delivery(service.delivery_durable()) ?? panic(\"delivery\")\n    endpoint :: tree.worker(\"{slug}\", {slug}_worker, capacity: 1) ?? panic(\"worker\")\n    tree.start() ?? panic(\"start\")\n    print(tree.show())\n    tree.stop() ?? panic(\"stop\")\n}}\n"
+}
+
+// Rust route_source (1936-1940).
+fn jet_cli_backend_route_source(name: String, route: String) -> String Never! {
+    "use core.web as web\n\nfn page() -> WebPage -> web.page(\"{name}\", \"<main><h1>{name}</h1></main>\")\n\n// route: {route}\n"
+}
+
+// Rust job_source (1943-1966), using the same shipping model_name below.
+fn jet_cli_backend_job_source(name: String, slug: String) -> String Never! {
+    payload :: "{jet_cli_backend_model_name(name)}JobPayload"
+    "use core.jobs as jobs\n\n#Codable\npub struct {payload} {{\n    message: String\n}}\n\n#Job\npub fn {slug}_job(payload: {payload}) {{\n    print(payload.message)\n}}\n\npub fn enqueue(message: String) {{\n    queue := jobs.queue() ?? panic(\"queue\")\n    payload :: {payload}{{message: message}}\n    receipt :: queue.enqueue({slug}_job, payload) ?? panic(\"enqueue\")\n    print(receipt)\n}}\n"
+}
+
+// Rust model_name (1967-1989). Non-ASCII UTF-8 bytes all reset upper, just
+// like the one scalar; only ASCII is emitted, so length/suffix units coincide.
+fn jet_cli_backend_model_name(name: String) -> String Never! {
+    model := [U8]{}
+    upper := true
+    loop byte in name.bytes() {
+        code :: Int.from_u8(byte)
+        lower :: code >= 97 && code <= 122
+        if lower || (code >= 65 && code <= 90) || (code >= 48 && code <= 57) {
+            &model.push(if upper && lower -> U8.from_int(code - 32) ?? panic("ASCII uppercase byte") else -> byte)
+            upper = false
+        } else { upper = true }
+    }
+    count :: model.len()
+    if count > 3 && model[count - 3] == (U8{105}) && model[count - 2] == (U8{101}) && model[count - 1] == (U8{115}) {
+        loop _ in 0..<3 { _ := &model.pop() }
+        &model.push(U8{121})
+    } else {
+        if count > 1 && model[count - 1] == (U8{115}) && model[count - 2] != (U8{115}) { _ := &model.pop() }
+    }
+    String.from_bytes(model) ?? panic("backend model is ASCII")
+}
+
+// Rust model_source (1991-1993).
+fn jet_cli_backend_model_source(model: String) -> String Never! {
+    "#Codable\npub struct {model} {{\n    pub id: Int\n}}\n"
+}
+
+// Rust test_source (1995-1998), using the same shipping slugify above.
+fn jet_cli_backend_test_source(name: String, model: String) -> String Never! {
+    model_module :: "model_{jet_cli_backend_slugify(model)}"
+    "use {model_module} as model\n\n#Test(\"{name} model\") {{\n    value := model.{model}{{id: 1}}\n    assert_eq(value.id, 1)\n}}\n"
+}

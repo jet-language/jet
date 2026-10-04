@@ -7,19 +7,19 @@
 // Signatures are checked with Core `crypto.verify` under the ratified strict
 // accept rule (D-CORE-ED25519VERIFY1=A).
 
-@TOOLCHAIN_DEFAULT_ENDPOINT :: "https://dl.jet-lang.dev"
-@TOOLCHAIN_DEFAULT_CHANNEL :: "stable"
-@TOOLCHAIN_ENDPOINT_ENV :: "JET_TOOLCHAIN_ENDPOINT"
-@TOOLCHAIN_MANIFEST_DOMAIN :: "jet-toolchain-channel-v1\n"
-@TOOLCHAIN_ARTIFACT_DOMAIN :: "jet-toolchain-artifact-v1\n"
+TOOLCHAIN_DEFAULT_ENDPOINT :: prep { "https://dl.jet-lang.dev" }
+TOOLCHAIN_DEFAULT_CHANNEL :: prep { "stable" }
+TOOLCHAIN_ENDPOINT_ENV :: prep { "JET_TOOLCHAIN_ENDPOINT" }
+TOOLCHAIN_MANIFEST_DOMAIN :: prep { "jet-toolchain-channel-v1\n" }
+TOOLCHAIN_ARTIFACT_DOMAIN :: prep { "jet-toolchain-artifact-v1\n" }
 
-@TOOLCHAIN_MAX_MANIFEST_BYTES :: 1048576
-@TOOLCHAIN_MAX_SIGNATURE_BYTES :: 16384
-@TOOLCHAIN_MAX_ARTIFACT_BYTES :: 536870912
-@TOOLCHAIN_MAX_STATE_BYTES :: 16384
-@TOOLCHAIN_MAX_ARTIFACTS :: 64
-@TOOLCHAIN_MAX_CLOCK_SKEW_SECONDS :: 300
-@TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS :: 2592000
+TOOLCHAIN_MAX_MANIFEST_BYTES :: prep { 1048576 }
+TOOLCHAIN_MAX_SIGNATURE_BYTES :: prep { 16384 }
+TOOLCHAIN_MAX_ARTIFACT_BYTES :: prep { 536870912 }
+TOOLCHAIN_MAX_STATE_BYTES :: prep { 16384 }
+TOOLCHAIN_MAX_ARTIFACTS :: prep { 64 }
+TOOLCHAIN_MAX_CLOCK_SKEW_SECONDS :: prep { 300 }
+TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS :: prep { 2592000 }
 
 // What one `jet self update` invocation asks for.
 pub struct ToolchainUpdateOptions {
@@ -106,7 +106,7 @@ struct ToolchainChannelManifest {
         SemanticVersion.parse(manifest.min_version, "manifest minimum version")
         if manifest.sequence == 0 -> return Err(RecipeError.Update("toolchain channel manifest sequence must be positive"))
         if manifest.artifacts.len() == 0 -> return Err(RecipeError.Update("toolchain channel manifest has no artifacts"))
-        if manifest.artifacts.len() > @TOOLCHAIN_MAX_ARTIFACTS -> return Err(RecipeError.Update("toolchain channel manifest has too many artifacts"))
+        if manifest.artifacts.len() > TOOLCHAIN_MAX_ARTIFACTS -> return Err(RecipeError.Update("toolchain channel manifest has too many artifacts"))
         loop index in 1..<manifest.artifacts.len() {
             if manifest.artifacts[index - 1].target >= manifest.artifacts[index].target {
                 return Err(RecipeError.Update("toolchain channel artifacts are not sorted by target"))
@@ -124,7 +124,7 @@ struct ToolchainChannelManifest {
             recipe_update_validate_relative_path(artifact.path)
             recipe_update_validate_relative_path(artifact.signature)
             recipe_update_validate_digest(artifact.sha256, "toolchain artifact digest")
-            if artifact.size == 0 || artifact.size > @TOOLCHAIN_MAX_ARTIFACT_BYTES {
+            if artifact.size == 0 || artifact.size > TOOLCHAIN_MAX_ARTIFACT_BYTES {
                 return Err(RecipeError.Update("toolchain artifact size is outside the channel bound"))
             }
         }
@@ -413,17 +413,17 @@ fn recipe_update_validate_release_policy(version: String, min_version: String, p
     }
     if expires_at <= published_at -> return Err(RecipeError.Update("toolchain channel manifest expiry must be after publication"))
     if published_at == 0 || expires_at == 0 -> return Err(RecipeError.Update("toolchain channel manifest timestamps must be positive"))
-    if expires_at - published_at > @TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS -> return Err(RecipeError.Update("toolchain channel manifest validity exceeds the freshness window"))
-    if published_at > now + @TOOLCHAIN_MAX_CLOCK_SKEW_SECONDS -> return Err(RecipeError.Update("toolchain channel manifest publication time is too far in the future"))
+    if expires_at - published_at > TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS -> return Err(RecipeError.Update("toolchain channel manifest validity exceeds the freshness window"))
+    if published_at > now + TOOLCHAIN_MAX_CLOCK_SKEW_SECONDS -> return Err(RecipeError.Update("toolchain channel manifest publication time is too far in the future"))
     if expires_at <= now -> return Err(RecipeError.Update("toolchain channel manifest has expired"))
     age :: if now > published_at -> now - published_at else -> 0
-    if age > @TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS -> return Err(RecipeError.Update("toolchain channel manifest is older than the freshness window"))
+    if age > TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS -> return Err(RecipeError.Update("toolchain channel manifest is older than the freshness window"))
 }
 
 // A new accepted state must stay on the same channel and platform, advance
 // the sequence, and never move the version backwards.
 fn recipe_update_validate_state_transition(previous: ToolchainUpdateState?, channel: String, platform: String, sequence: Int, version: String) RecipeError! {
-    accepted :: previous ?? return Ok()
+    accepted :: previous ?? return
     if accepted.channel != channel || accepted.platform != platform {
         return Err(RecipeError.Update("toolchain update state does not match the requested channel and platform"))
     }

@@ -1,0 +1,772 @@
+// JP-PUBLISH: SHA256.rs rooted_authority::write (340-462, 713-755) and
+// Authority (468-644), CmdPkg.rs write_package_source (107-162), and Store.rs
+// replacement (868-964). Checked edits validate through the ORIGINAL held
+// FoundationFileAuthority, which also refuses a source renamed away or
+// replaced at its path (Authority.rs revalidate_file checks the handle only).
+// These are native behavioral cases, retained for Core #3593: no pathname
+// publication fallback and no fake Directory/FileWriter provider.
+
+fn foundation_publication_test_root(label: String) -[FS, Env]> String Never! {
+    home :: sys.get("HOME") ?? panic("publication fixtures require HOME")
+    root :: files.join(home, ".cache/jet-test-scratch/jet-foundation-publication-{label}-{sys.pid()}")
+    files.remove_all(root).drop("a stale publication fixture may be absent")
+    files.create_dir_all(root) ?? panic("create publication fixture")
+    root
+}
+
+fn foundation_publication_test_no_temporary(parent: String) Never! -[FS]> {
+    entries :: files.list_dir(parent) ?? panic("list publication parent")
+    loop entry in entries -> assert(!entry.name.starts_with(".jet-lock-"), "temporary leaked: {entry.path}")
+}
+
+fn foundation_publication_test_reject(root: String, relative: String, validate: (fn() IOError! -[FS, Env]>)?) Never! -[FS, Env, Time]> {
+    if foundation_write_file_nofollow_at_root(root, relative, "edited".bytes(), validate) == {
+        .Ok(_) -> panic("unsafe publication succeeded")
+        .Err(_) -> {}
+    }
+}
+
+fn foundation_publication_test_staged(root: String, expected: String) Never! -[FS]> {
+    entries :: files.list_dir(root) ?? panic("list stage")
+    stages := 0
+    loop entry in entries {
+        if entry.name.starts_with(".jet-lock-") {
+            stages += 1
+            assert_eq(files.read(entry.path) ?? panic("read staged bytes"), expected)
+            info :: files.stat(entry.path) ?? panic("stat stage")
+            assert(info.is_file && !info.is_symlink)
+            assert_eq(info.links, 1)
+            assert_eq(info.mode & 0o777, 0o600)
+        }
+    }
+    assert_eq(stages, 1, "validation must run after a complete stage exists")
+}
+
+#Test("publication creates parents and atomically replaces an ordinary file without a validator") {
+    root :: foundation_publication_test_root("ordinary")
+    foundation_write_file_nofollow_at_root(root, "nested/deeper/input.jet", "original".bytes(), None) ?? panic("initial publish")
+    path :: files.join(root, "nested/deeper/input.jet")
+    original :: files.stat(path) ?? panic("stat original")
+    foundation_write_file_nofollow_at_root(root, "nested/deeper/input.jet", "replacement".bytes(), None) ?? panic("replace")
+    published :: files.stat(path) ?? panic("stat published")
+    assert(original.id != published.id)
+    assert_eq(files.read(path) ?? panic("read published"), "replacement")
+    assert_eq(published.links, 1)
+    assert_eq(published.mode & 0o777, 0o600)
+    assert_eq((files.stat(files.join(root, "nested")) ?? panic("stat parent")).mode & 0o777, 0o700)
+    foundation_publication_test_no_temporary(files.join(root, "nested/deeper"))
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication validates the originally held source after staging and then publishes") {
+    root :: foundation_publication_test_root("held-success")
+    path :: files.join(root, "input.jet")
+    files.write(path, "original") ?? panic("write original")
+    original :: files.stat(path) ?? panic("stat original")
+    source :: foundation_open_file_authority(root, "input.jet") ?? panic("hold source")
+    assert_eq(source.read_bounded(MAX_TREE_FILE_BYTES) ?? panic("read held source"), "original".bytes())
+    validate :: () -> {
+        foundation_publication_test_staged(root, "edited")
+        assert_eq(files.read(path) ?? panic("read pre-rename source"), "original")
+        source.revalidate()
+    }
+    foundation_write_file_nofollow_at_root(root, "input.jet", "edited".bytes(), Val(validate)) ?? panic("checked publish")
+    assert_eq(files.read(path) ?? panic("read published"), "edited")
+    assert((files.stat(path) ?? panic("stat published")).id != original.id)
+    foundation_publication_test_no_temporary(root)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("rooted bounded reads retain exact InvalidInput refusal") {
+    root :: foundation_publication_test_root("rooted-bound-kind")
+    path :: files.join(root, "input.jet")
+    files.write(path, "original") ?? panic("write input")
+    source :: foundation_open_file_authority(root, "input.jet") ?? panic("hold input")
+    if source.read_bounded(7) == {
+        .Ok(_) -> panic("oversize rooted read must refuse")
+        .Err(error) -> assert_eq(error, IOError.InvalidInput(foundation_io_context(.Read, "input.jet", "file exceeds its read bound")))
+    }
+    assert_eq(source.read_bounded(8) ?? panic("rooted exact-bound read"), "original".bytes())
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication validation failure retains the old destination identity and cleans the stage") {
+    root :: foundation_publication_test_root("validation-failure")
+    path :: files.join(root, "input.jet")
+    files.write(path, "original") ?? panic("write original")
+    expected :: files.stat(path) ?? panic("stat original")
+    validate :: () -> {
+        foundation_publication_test_staged(root, "edited")
+        return Err(IOError.Other(foundation_io_context(.Write, path, "held source rejected")))
+    }
+    if foundation_write_file_nofollow_at_root(root, "input.jet", "edited".bytes(), Val(validate)) == {
+        .Ok(_) -> panic("validation refusal must prevent rename")
+        .Err(error) -> assert_eq(error, IOError.Other(foundation_io_context(.Write, path, "held source rejected")))
+    }
+    assert_eq(files.read(path) ?? panic("read original"), "original")
+    assert_eq((files.stat(path) ?? panic("stat original after refusal")).id, expected.id)
+    foundation_publication_test_no_temporary(root)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication validation failure leaves an absent destination absent") {
+    root :: foundation_publication_test_root("absent-refusal")
+    validate :: () -> {
+        foundation_publication_test_staged(root, "edited")
+        return Err(IOError.Other(foundation_io_context(.Write, root, "held source rejected")))
+    }
+    foundation_publication_test_reject(root, "input.jet", Val(validate))
+    assert(!files.exists(files.join(root, "input.jet")))
+    foundation_publication_test_no_temporary(root)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication reservation failure does not validate or replace the destination") {
+    if !sys.is_unix() -> return
+    root :: foundation_publication_test_root("stage-reservation-failure")
+    path :: files.join(root, "input.jet")
+    files.write(path, "original") ?? panic("write original")
+    expected :: files.stat(path) ?? panic("stat original")
+    files.set_mode(root, 0o500) ?? panic("deny stage creation")
+    validate :: () -> { panic("validation must not run when staging fails") }
+    foundation_publication_test_reject(root, "input.jet", Val(validate))
+    files.set_mode(root, 0o700) ?? panic("restore fixture permissions")
+    assert_eq(files.read(path) ?? panic("read original"), "original")
+    assert_eq((files.stat(path) ?? panic("stat original after staging failure")).id, expected.id)
+    foundation_publication_test_no_temporary(root)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication stage write and fsync failures precede validation and rename") {
+    if !sys.is_linux() -> return
+    root :: foundation_publication_test_root("stage-write-failure")
+    path :: files.join(root, "input.jet")
+    files.write(path, "original") ?? panic("write original")
+    expected :: files.stat(path) ?? panic("stat original")
+    directories :: foundation_open_root_directories(root) ?? panic("hold parent")
+    parent :: directories[directories.len() - 1].handle
+    // Real kernel errors: /dev/full fails write_all; /dev/null accepts bytes
+    // but refuses fsync. No fake Directory/FileWriter or error injection.
+    devices :: [String]{"/dev/full", "/dev/null"}
+    loop device in devices {
+        writer :: files.create(device) ?? panic("open kernel device")
+        validate :: () -> { panic("validation must not run after a stage failure") }
+        if foundation_stage_and_rename(directories, parent, writer, ".jet-lock-write-failure", "input.jet", "edited".bytes(), Val(expected.id), Val(validate)) == {
+            .Ok(_) -> panic("a failed stage must not reach rename")
+            .Err(_) -> {}
+        }
+    }
+    assert_eq(files.read(path) ?? panic("read original"), "original")
+    assert_eq((files.stat(path) ?? panic("stat original after failed write")).id, expected.id)
+    foundation_publication_test_no_temporary(root)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+// The concurrent edit writes into the held inode itself (no rename), so only
+// the original handle's identity can reveal it; the longer text changes its
+// length even within one mtime tick.
+#Test("publication refuses original source content mutation after staging") {
+    root :: foundation_publication_test_root("content-mutation")
+    path :: files.join(root, "input.jet")
+    files.write(path, "original") ?? panic("write original")
+    original :: files.stat(path) ?? panic("stat original")
+    source :: foundation_open_file_authority(root, "input.jet") ?? panic("hold original")
+    validate :: () -> {
+        foundation_publication_test_staged(root, "edited")
+        files.write_at(path, 0, "concurrent unrelated source edit".bytes())
+        source.revalidate()
+    }
+    if foundation_write_file_nofollow_at_root(root, "input.jet", "edited".bytes(), Val(validate)) == {
+        .Ok(_) -> panic("a mutated held source must not publish")
+        .Err(error) -> assert_eq(error, IOError.Other(foundation_io_context(.Read, path, "file authority input changed while it was held")))
+    }
+    assert_eq(files.read(path) ?? panic("read concurrent edit"), "concurrent unrelated source edit")
+    assert_eq((files.stat(path) ?? panic("stat mutated source")).id, original.id)
+    foundation_publication_test_no_temporary(root)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication does not replace original checked source validation with a fresh open") {
+    root :: foundation_publication_test_root("held-not-reopened")
+    source_path :: files.join(root, "source.jet")
+    destination :: files.join(root, "input.jet")
+    replacement :: files.join(root, "replacement.jet")
+    files.write(source_path, "original source") ?? panic("write source")
+    files.write(destination, "old destination") ?? panic("write destination")
+    files.write(replacement, "original source") ?? panic("write same-byte replacement")
+    source :: foundation_open_file_authority(root, "source.jet") ?? panic("hold original source")
+    validate :: () -> {
+        foundation_publication_test_staged(root, "edited")
+        files.rename(replacement, source_path)
+        source.revalidate()
+    }
+    if foundation_write_file_nofollow_at_root(root, "input.jet", "edited".bytes(), Val(validate)) == {
+        .Ok(_) -> panic("a replaced source must not approve publication")
+        .Err(error) -> assert_eq(error, IOError.Other(foundation_io_context(.Read, source_path, "file authority input moved while it was held")))
+    }
+    assert_eq(files.read(destination) ?? panic("read old destination"), "old destination")
+    foundation_publication_test_no_temporary(root)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+// Source and destination are the same path, and the swap happens before the
+// publication starts: the destination check then expects the swapped state,
+// so only the held source's path binding refuses it.
+#Test("publication refuses a held source renamed to a backup before publication") {
+    root :: foundation_publication_test_root("held-renamed-backup")
+    path :: files.join(root, "input.jet")
+    backup :: files.join(root, "input.jet.bak")
+    files.write(path, "original") ?? panic("write original")
+    original :: files.stat(path) ?? panic("stat original")
+    source :: foundation_open_file_authority(root, "input.jet") ?? panic("hold original")
+    files.rename(path, backup) ?? panic("move source to backup")
+    assert_eq((files.stat(backup) ?? panic("stat backup")).id, original.id)
+    if foundation_write_file_nofollow_at_root(root, "input.jet", "edited".bytes(), Val(() -> source.revalidate())) == {
+        .Ok(_) -> panic("a source renamed away must not publish at its old path")
+        .Err(error) -> if error == {
+            .NotFound(_) -> {}
+            else -> panic("the renamed-away source path must be refused as missing: {error}")
+        }
+    }
+    assert(!files.exists(path))
+    assert_eq(files.read(backup) ?? panic("read backup"), "original")
+    foundation_publication_test_no_temporary(root)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication refuses a replacement bound at the held source path before publication") {
+    root :: foundation_publication_test_root("held-replaced")
+    path :: files.join(root, "input.jet")
+    backup :: files.join(root, "input.jet.bak")
+    files.write(path, "original") ?? panic("write original")
+    original :: files.stat(path) ?? panic("stat original")
+    source :: foundation_open_file_authority(root, "input.jet") ?? panic("hold original")
+    files.rename(path, backup) ?? panic("move source to backup")
+    files.write(path, "original") ?? panic("write same-byte replacement")
+    if foundation_write_file_nofollow_at_root(root, "input.jet", "edited".bytes(), Val(() -> source.revalidate())) == {
+        .Ok(_) -> panic("a replacement at the source path must not publish")
+        .Err(error) -> assert_eq(error, IOError.Other(foundation_io_context(.Read, path, "file authority input moved while it was held")))
+    }
+    assert_eq(files.read(path) ?? panic("read replacement"), "original")
+    assert((files.stat(path) ?? panic("stat replacement")).id != original.id)
+    assert_eq(files.read(backup) ?? panic("read backup"), "original")
+    foundation_publication_test_no_temporary(root)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication refuses a destination swap after staging even when validation succeeds") {
+    root :: foundation_publication_test_root("destination-swap")
+    path :: files.join(root, "input.jet")
+    replacement :: files.join(root, "replacement.jet")
+    files.write(path, "original") ?? panic("write original")
+    files.write(replacement, "concurrent replacement") ?? panic("write replacement")
+    validate :: () -> { files.rename(replacement, path) }
+    foundation_publication_test_reject(root, "input.jet", Val(validate))
+    assert_eq(files.read(path) ?? panic("read replacement"), "concurrent replacement")
+    foundation_publication_test_no_temporary(root)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication refuses a nested parent swap and cleans through its held parent") {
+    if !sys.is_unix() -> return
+    root :: foundation_publication_test_root("parent-swap")
+    nested :: files.join(root, "nested")
+    moved :: files.join(root, "nested-old")
+    outside :: files.join(root, "outside")
+    files.create_dir_all(nested) ?? panic("create nested")
+    files.create_dir_all(outside) ?? panic("create outside")
+    files.write(files.join(nested, "input.jet"), "original") ?? panic("write original")
+    files.write(files.join(outside, "input.jet"), "outside") ?? panic("write outside")
+    validate :: () -> {
+        foundation_publication_test_staged(nested, "edited")
+        files.rename(nested, moved)
+        files.symlink(outside, nested)
+    }
+    foundation_publication_test_reject(root, "nested/input.jet", Val(validate))
+    assert_eq(files.read(files.join(moved, "input.jet")) ?? panic("read moved original"), "original")
+    assert_eq(files.read(files.join(outside, "input.jet")) ?? panic("read outside"), "outside")
+    foundation_publication_test_no_temporary(moved)
+    foundation_publication_test_no_temporary(outside)
+    files.remove(nested) ?? panic("unlink swapped parent")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication refuses a root swap to another real directory") {
+    parent :: foundation_publication_test_root("root-swap")
+    root :: files.join(parent, "project")
+    moved :: files.join(parent, "project-old")
+    replacement :: files.join(parent, "replacement")
+    files.create_dir_all(root) ?? panic("create root")
+    files.create_dir_all(replacement) ?? panic("create replacement")
+    files.write(files.join(root, "input.jet"), "original") ?? panic("write original")
+    files.write(files.join(replacement, "input.jet"), "other project") ?? panic("write replacement")
+    validate :: () -> {
+        foundation_publication_test_staged(root, "edited")
+        files.rename(root, moved)
+        files.rename(replacement, root)
+    }
+    foundation_publication_test_reject(root, "input.jet", Val(validate))
+    assert_eq(files.read(files.join(moved, "input.jet")) ?? panic("read moved original"), "original")
+    assert_eq(files.read(files.join(root, "input.jet")) ?? panic("read other project"), "other project")
+    foundation_publication_test_no_temporary(moved)
+    foundation_publication_test_no_temporary(root)
+    files.remove_all(parent) ?? panic("cleanup")
+}
+
+#Test("publication refuses a swapped ancestor above its root and cleans the detached stage") {
+    if !sys.is_unix() -> return
+    fixture :: foundation_publication_test_root("above-root-swap")
+    ancestor :: files.join(fixture, "container")
+    root :: files.join(ancestor, "project")
+    moved :: files.join(fixture, "container-old")
+    outside :: files.join(fixture, "outside")
+    files.create_dir_all(root) ?? panic("create project")
+    files.create_dir_all(files.join(outside, "project")) ?? panic("create outside project")
+    files.write(files.join(root, "input.jet"), "original") ?? panic("write original")
+    files.write(files.join(outside, "project/input.jet"), "outside") ?? panic("write outside")
+    validate :: () -> {
+        foundation_publication_test_staged(root, "edited")
+        files.rename(ancestor, moved)
+        files.symlink(outside, ancestor)
+    }
+    foundation_publication_test_reject(root, "input.jet", Val(validate))
+    assert_eq(files.read(files.join(moved, "project/input.jet")) ?? panic("read moved source"), "original")
+    assert_eq(files.read(files.join(outside, "project/input.jet")) ?? panic("read outside source"), "outside")
+    foundation_publication_test_no_temporary(files.join(moved, "project"))
+    foundation_publication_test_no_temporary(files.join(outside, "project"))
+    files.remove(ancestor) ?? panic("unlink ancestor")
+    files.remove_all(fixture) ?? panic("cleanup")
+}
+
+#Test("publication stage refuses multiply linked temporary before validation and rename") {
+    if !sys.is_unix() -> return
+    root :: foundation_publication_test_root("hardlinked-stage")
+    path :: files.join(root, "input.jet")
+    files.write(path, "original") ?? panic("write original")
+    expected :: files.stat(path) ?? panic("stat original")
+    directories :: foundation_open_root_directories(root) ?? panic("hold parent")
+    parent :: directories[directories.len() - 1].handle
+    writer :: parent.create(".jet-lock-hardlinked-stage", if_exists: .Refuse, mode: Val(384)) ?? panic("create stage")
+    files.hard_link(files.join(root, ".jet-lock-hardlinked-stage"), files.join(root, "stage-alias")) ?? panic("link stage")
+    validate :: () -> { panic("hardlinked stage must be refused before validation") }
+    if foundation_stage_and_rename(directories, parent, writer, ".jet-lock-hardlinked-stage", "input.jet", "edited".bytes(), Val(expected.id), Val(validate)) == {
+        .Ok(_) -> panic("hardlinked stage must not publish")
+        .Err(error) -> assert_eq(error, IOError.PermissionDenied(foundation_io_context(.Write, ".jet-lock-hardlinked-stage", "file authority temporary has multiple hard links")))
+    }
+    assert_eq(files.read(path) ?? panic("read original"), "original")
+    assert_eq((files.stat(path) ?? panic("stat original after refusal")).id, expected.id)
+    parent.remove(".jet-lock-hardlinked-stage") ?? panic("remove unpublished stage")
+    foundation_publication_test_no_temporary(root)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication refuses symlink destinations parents and roots without following them") {
+    if !sys.is_unix() -> return
+    root :: foundation_publication_test_root("nofollow")
+    outside :: files.join(root, "outside")
+    files.create_dir_all(outside) ?? panic("create outside")
+    target :: files.join(outside, "input.jet")
+    files.write(target, "outside") ?? panic("write outside")
+    link :: files.join(root, "input.jet")
+    linked_parent :: files.join(root, "linked")
+    files.symlink(target, link) ?? panic("link destination")
+    files.symlink(outside, linked_parent) ?? panic("link parent")
+    validate :: () -> { panic("no-follow refusal must precede validation") }
+    foundation_publication_test_reject(root, "input.jet", Val(validate))
+    foundation_publication_test_reject(root, "linked/input.jet", Val(validate))
+    foundation_publication_test_reject(linked_parent, "input.jet", Val(validate))
+    assert_eq(files.read(target) ?? panic("read outside"), "outside")
+    assert((files.stat(link) ?? panic("stat link")).is_symlink)
+    foundation_publication_test_no_temporary(root)
+    foundation_publication_test_no_temporary(outside)
+    files.remove(link) ?? panic("unlink destination")
+    files.remove(linked_parent) ?? panic("unlink parent")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication refuses hardlinked and nonregular destinations") {
+    if !sys.is_unix() -> return
+    root :: foundation_publication_test_root("hardlink")
+    original :: files.join(root, "original.jet")
+    path :: files.join(root, "input.jet")
+    files.write(original, "shared original") ?? panic("write original")
+    files.hard_link(original, path) ?? panic("hardlink destination")
+    validate :: () -> { panic("hardlink refusal must precede validation") }
+    foundation_publication_test_reject(root, "input.jet", Val(validate))
+    assert_eq(files.read(original) ?? panic("read shared original"), "shared original")
+    assert_eq((files.stat(path) ?? panic("stat hardlink")).links, 2)
+    files.remove(path) ?? panic("remove hardlink")
+    files.create_dir(path) ?? panic("directory destination")
+    foundation_publication_test_reject(root, "input.jet", Val(validate))
+    assert((files.stat(path) ?? panic("stat directory")).is_dir)
+    foundation_publication_test_no_temporary(root)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication refuses empty absolute and escaping relative paths before validation") {
+    root :: foundation_publication_test_root("invalid-path")
+    validate :: () -> { panic("invalid path must not validate") }
+    relatives :: [String]{"", "/input.jet", "../input.jet", "nested/../../input.jet"}
+    loop relative in relatives {
+        foundation_publication_test_reject(root, relative, Val(validate))
+    }
+    assert_eq((files.list_dir(root) ?? panic("list empty root")).len(), 0)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+// SHA256.rs rooted_read_rejects_final_path_swap: the held file is no longer
+// the object bound at its path once a link replaces it.
+#Test("rooted read rejects final path swap") {
+    if !sys.is_unix() -> return
+    fixture :: foundation_publication_test_root("rooted-read-final-swap")
+    root :: files.join(fixture, "root")
+    outside :: files.join(fixture, "outside")
+    payload :: files.join(root, "payload.txt")
+    files.create_dir_all(root) ?? panic("create root")
+    files.write(payload, "inside\n") ?? panic("write payload")
+    files.write(outside, "outside\n") ?? panic("write outside")
+    authority :: foundation_open_file_authority(root, "payload.txt") ?? panic("open payload authority")
+    files.remove(payload) ?? panic("remove payload")
+    files.symlink(outside, payload) ?? panic("link payload outside")
+    if authority.read_bounded(MAX_TREE_FILE_BYTES) == {
+        .Ok(_) -> panic("a swapped final component must not be read")
+        .Err(_) -> {}
+    }
+    files.remove(payload) ?? panic("unlink payload")
+    files.remove_all(fixture) ?? panic("cleanup")
+}
+
+// SHA256.rs rooted_read_rejects_ancestor_path_swap.
+#Test("rooted read rejects ancestor path swap") {
+    if !sys.is_unix() -> return
+    fixture :: foundation_publication_test_root("rooted-read-ancestor-swap")
+    root :: files.join(fixture, "root")
+    outside :: files.join(fixture, "outside")
+    nested :: files.join(root, "nested")
+    files.create_dir_all(nested) ?? panic("create nested")
+    files.create_dir_all(outside) ?? panic("create outside")
+    files.write(files.join(nested, "payload.txt"), "inside\n") ?? panic("write payload")
+    files.write(files.join(outside, "payload.txt"), "outside\n") ?? panic("write outside")
+    authority :: foundation_open_file_authority(root, "nested/payload.txt") ?? panic("open nested authority")
+    files.rename(nested, files.join(root, "nested-old")) ?? panic("move nested")
+    files.symlink(outside, nested) ?? panic("link nested outside")
+    if authority.read_bounded(MAX_TREE_FILE_BYTES) == {
+        .Ok(_) -> panic("a swapped ancestor must not be read")
+        .Err(_) -> {}
+    }
+    files.remove(nested) ?? panic("unlink nested")
+    files.remove_all(fixture) ?? panic("cleanup")
+}
+
+// SHA256.rs rooted_read_rejects_multiply_linked_input.
+#Test("rooted read rejects multiply linked input") {
+    if !sys.is_unix() -> return
+    fixture :: foundation_publication_test_root("rooted-read-hardlink")
+    root :: files.join(fixture, "root")
+    outside :: files.join(fixture, "outside")
+    files.create_dir_all(root) ?? panic("create root")
+    files.write(outside, "outside\n") ?? panic("write outside")
+    files.hard_link(outside, files.join(root, "payload.txt")) ?? panic("hardlink payload")
+    if foundation_open_file_authority(root, "payload.txt") == {
+        .Ok(_) -> panic("a multiply linked input must not open")
+        .Err(_) -> {}
+    }
+    files.remove_all(fixture) ?? panic("cleanup")
+}
+
+// Signing's typed policy remains the same staging/rename mechanism (#3593).
+#Test("publication policy defaults preserve existing protected publication") {
+    policy :: FoundationPublicationPolicy{}
+    assert_eq(policy.mode, 384)
+    assert_eq(policy.create, FoundationPublicationCreate.Replace)
+    assert_eq(policy.destination_links, FoundationPublicationLinks.Refuse)
+    assert(!policy.create_root)
+}
+#Test("publication create-new never overwrites an existing destination") {
+    root :: foundation_publication_test_root("create-new")
+    path :: files.join(root, "seed")
+    files.write(path, "old") ?? panic("old seed")
+    policy :: FoundationPublicationPolicy{create: .CreateNew}
+    if foundation_write_file_nofollow_at_root(root, "seed", "new".bytes(), None, policy) == {
+        .Err(error) -> assert(error == .AlreadyExists(_))
+        .Ok(_) -> panic("create-new clobbered old seed")
+    }
+    assert_eq(files.read(path) ?? panic("old seed read"), "old")
+    foundation_publication_test_no_temporary(root)
+    files.remove_all(root) ?? panic("cleanup")
+}
+#Test("publication public mode is set on staged descriptor before validation") {
+    root :: foundation_publication_test_root("public-mode")
+    policy :: FoundationPublicationPolicy{mode: 420}
+    validate :: () -> {
+        entries :: files.list_dir(root) ?? panic("list stage")
+        stages := 0
+        loop entry in entries {
+            if entry.name.starts_with(".jet-lock-") {
+                stages += 1
+                assert_eq((files.stat(entry.path) ?? panic("staged mode")).mode & 4095, 420)
+            }
+        }
+        assert_eq(stages, 1)
+    }
+    foundation_write_file_nofollow_at_root(root, "key.pub", "public".bytes(), Val(validate), policy) ?? panic("public publish")
+    assert_eq((files.stat(files.join(root, "key.pub")) ?? panic("public mode")).mode & 4095, 420)
+    foundation_publication_test_no_temporary(root)
+    files.remove_all(root) ?? panic("cleanup")
+}
+#Test("publication force policy replaces link binding without following target") {
+    root :: foundation_publication_test_root("replace-link")
+    target :: files.join(root, "target")
+    files.write(target, "sentinel") ?? panic("sentinel")
+    files.symlink(target, files.join(root, "seed")) ?? panic("symlink")
+    policy :: FoundationPublicationPolicy{destination_links: .ReplaceBinding}
+    foundation_write_file_nofollow_at_root(root, "seed", "seed".bytes(), None, policy) ?? panic("force publish")
+    assert_eq(files.read(target) ?? panic("target read"), "sentinel")
+    assert_eq(files.read(files.join(root, "seed")) ?? panic("seed read"), "seed")
+    assert(!(files.stat(files.join(root, "seed")) ?? panic("seed stat")).is_symlink)
+    foundation_publication_test_no_temporary(root)
+    files.remove_all(root) ?? panic("cleanup")
+}
+#Test("publication create-new refuses competing destination made after staging") {
+    root :: foundation_publication_test_root("create-new-race")
+    path :: files.join(root, "seed")
+    validate :: () -> { files.write(path, "competitor") }
+    policy :: FoundationPublicationPolicy{create: .CreateNew}
+    if foundation_write_file_nofollow_at_root(root, "seed", "new".bytes(), Val(validate), policy) == {
+        .Err(_) -> {}
+        .Ok(_) -> panic("create-new clobbered a competing publication")
+    }
+    assert_eq(files.read(path) ?? panic("competitor read"), "competitor")
+    foundation_publication_test_no_temporary(root)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("file authority removal deletes only its revalidated own binding") {
+    root :: foundation_publication_test_root("remove-own")
+    path :: files.join(root, "input")
+    files.write(path, "original") ?? panic("input")
+    files.write(files.join(root, "sibling"), "keep") ?? panic("sibling")
+    authority :: foundation_open_file_authority(root, "input") ?? panic("hold input")
+    if authority.remove("sibling") == {
+        .Err(_) -> {}
+        .Ok(_) -> panic("file authority deleted a sibling")
+    }
+    authority.remove("input") ?? panic("remove own input")
+    assert(!files.exists(path))
+    assert_eq(files.read(files.join(root, "sibling")) ?? panic("sibling read"), "keep")
+    files.remove_all(root) ?? panic("cleanup")
+}
+#Test("file authority removal refuses replaced held source") {
+    root :: foundation_publication_test_root("remove-replaced")
+    path :: files.join(root, "input")
+    files.write(path, "original") ?? panic("input")
+    authority :: foundation_open_file_authority(root, "input") ?? panic("hold input")
+    files.rename(path, files.join(root, "old")) ?? panic("move input")
+    files.write(path, "replacement") ?? panic("replacement")
+    if authority.remove("input") == {
+        .Err(_) -> {}
+        .Ok(_) -> panic("file authority deleted a replacement")
+    }
+    assert_eq(files.read(path) ?? panic("replacement read"), "replacement")
+    files.remove_all(root) ?? panic("cleanup")
+}
+#Test("directory authority creates missing root with one protected chain and reserves exclusive locks") {
+    fixture :: foundation_publication_test_root("directory-lock")
+    root :: files.join(fixture, "new/nested")
+    authority :: foundation_open_directory_authority(root, true) ?? panic("hold created chain")
+    writer :: authority.create_exclusive("checkpoint.lock", 384) ?? panic("create lock")
+    writer.write_all("lock".bytes()) ?? panic("write lock")
+    writer.fsync() ?? panic("fsync lock")
+    if authority.create_exclusive("checkpoint.lock", 384) == {
+        .Err(error) -> assert(error == .AlreadyExists(_))
+        .Ok(_) -> panic("exclusive lock replaced")
+    }
+    authority.remove("checkpoint.lock") ?? panic("remove lock")
+    assert(!files.exists(files.join(root, "checkpoint.lock")))
+    files.remove_all(fixture) ?? panic("cleanup")
+}
+#Test("directory authority refuses moved ancestors before removing a lock") {
+    fixture :: foundation_publication_test_root("directory-moved")
+    root :: files.join(fixture, "root")
+    files.create_dir_all(root) ?? panic("create root")
+    files.write(files.join(root, "checkpoint.lock"), "held") ?? panic("write lock")
+    authority :: foundation_open_directory_authority(root) ?? panic("hold chain")
+    files.rename(root, files.join(fixture, "old")) ?? panic("move root")
+    files.create_dir_all(root) ?? panic("replace root")
+    files.write(files.join(root, "checkpoint.lock"), "replacement") ?? panic("write replacement")
+    if authority.remove("checkpoint.lock") == {
+        .Err(_) -> {}
+        .Ok(_) -> panic("moved chain removed a lock")
+    }
+    assert_eq(files.read(files.join(root, "checkpoint.lock")) ?? panic("replacement read"), "replacement")
+    assert_eq(files.read(files.join(fixture, "old/checkpoint.lock")) ?? panic("held read"), "held")
+    files.remove_all(fixture) ?? panic("cleanup")
+}
+
+// Authority sourcefix: grow each original descriptor vector beyond its initial
+// capacity. Parent projections must end before push; no cloned chain or walker.
+#Test("authority chains survive growth in root publication and held file walks") {
+    fixture :: foundation_publication_test_root("authority-chain-growth")
+    root := fixture
+    loop index in 0..<24 -> root = files.join(root, "root-{index}")
+    authority :: foundation_open_directory_authority(root, true) ?? panic("create deep held root")
+    authority.revalidate() ?? panic("retain every root descriptor")
+    relative := "payload"
+    loop index in 0..<24 -> relative = "parent-{index}/{relative}"
+    foundation_write_file_nofollow_at_root(root, relative, "owned chain".bytes(), None) ?? panic("publish through growing chain")
+    source :: foundation_open_file_authority(root, relative) ?? panic("retain growing file chain")
+    assert_eq(source.read_bounded(11) ?? panic("read through all retained descriptors"), "owned chain".bytes())
+    source.revalidate() ?? panic("held file chain survives vector growth")
+    authority.revalidate() ?? panic("original root authority still valid")
+    foundation_publication_test_no_temporary(files.dirname(files.join(root, relative)))
+    files.remove_all(fixture) ?? panic("cleanup")
+}
+
+#Test("open or create authority preserves existing modes and refuses links and files") {
+    root :: foundation_publication_test_root("authority-open-create")
+    parent :: files.open_directory(root) ?? panic("hold parent")
+    existing :: files.join(root, "existing")
+    files.create_dir_all(existing) ?? panic("existing directory")
+    files.set_mode(existing, 0o750) ?? panic("existing mode")
+    held :: foundation_open_or_create_directory(parent, "existing") ?? panic("open existing")
+    assert_eq((held.stat() ?? panic("existing held metadata")).mode & 0o777, 0o750)
+    created :: foundation_open_or_create_directory(parent, "created") ?? panic("create protected child")
+    assert_eq((created.stat() ?? panic("created held metadata")).mode & 0o777, 0o700)
+    assert_eq((created.stat() ?? panic("created identity")).id, (files.stat(files.join(root, "created")) ?? panic("bound identity")).id)
+    files.write(files.join(root, "ordinary"), "sentinel") ?? panic("ordinary collision")
+    files.symlink(existing, files.join(root, "linked")) ?? panic("link collision")
+    collisions :: [String]{"ordinary", "linked"}
+    loop name in collisions {
+        if foundation_open_or_create_directory(parent, name) == {
+            .Ok(_) -> panic("non-directory or link opened as authority")
+            .Err(_) -> {}
+        }
+    }
+    assert_eq(files.read(files.join(root, "ordinary")) ?? panic("collision preserved"), "sentinel")
+    assert((files.stat(files.join(root, "linked")) ?? panic("link preserved")).is_symlink)
+    assert_eq((files.stat(existing) ?? panic("referent mode")).mode & 0o777, 0o750)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication cleanup failure preserves the exact primary validation error") {
+    root :: foundation_publication_test_root("authority-cleanup-error")
+    path :: files.join(root, "input")
+    files.write(path, "original") ?? panic("original")
+    original :: files.stat(path) ?? panic("original identity")
+    primary :: IOError.Other(foundation_io_context(.Write, path, "primary validation refusal"))
+    validate :: () -> {
+        foundation_publication_test_staged(root, "edited")
+        entries :: files.list_dir(root)
+        loop entry in entries {
+            if entry.name.starts_with(".jet-lock-") {
+                files.remove(entry.path)
+                // unlink of this directory must fail, not replace `primary`.
+                files.create_dir_all(entry.path)
+            }
+        }
+        return Err(primary)
+    }
+    if foundation_write_file_nofollow_at_root(root, "input", "edited".bytes(), Val(validate)) == {
+        .Ok(_) -> panic("validation failure published")
+        .Err(error) -> assert_eq(error, primary)
+    }
+    assert_eq(files.read(path) ?? panic("original bytes"), "original")
+    assert_eq((files.stat(path) ?? panic("original retained")).id, original.id)
+    stages := 0
+    cleanup_entries :: files.list_dir(root) ?? panic("inspect failed cleanup")
+    loop entry in cleanup_entries {
+        if entry.name.starts_with(".jet-lock-") {
+            stages += 1
+            assert((files.stat(entry.path) ?? panic("replacement stage")).is_dir)
+        }
+    }
+    assert(stages == 1, "failed best-effort cleanup must preserve the primary error")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("publication cleanup of an already removed stage preserves the primary error") {
+    root :: foundation_publication_test_root("authority-cleanup-missing")
+    primary :: IOError.Other(foundation_io_context(.Write, root, "primary missing-stage refusal"))
+    validate :: () -> {
+        foundation_publication_test_staged(root, "edited")
+        entries :: files.list_dir(root)
+        loop entry in entries {
+            if entry.name.starts_with(".jet-lock-") -> files.remove(entry.path)
+        }
+        return Err(primary)
+    }
+    if foundation_write_file_nofollow_at_root(root, "input", "edited".bytes(), Val(validate)) == {
+        .Ok(_) -> panic("validation failure published")
+        .Err(error) -> assert_eq(error, primary)
+    }
+    assert(!files.exists(files.join(root, "input")))
+    foundation_publication_test_no_temporary(root)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("held tree cleanup removes files directories and link bindings but tolerates absence") {
+    root :: foundation_publication_test_root("authority-held-tree-cleanup")
+    parent :: files.open_directory(root) ?? panic("hold cleanup parent")
+    files.create_dir_all(files.join(root, "tree/nested")) ?? panic("nested tree")
+    files.write(files.join(root, "tree/nested/payload"), "remove") ?? panic("nested payload")
+    files.write(files.join(root, "outside"), "sentinel") ?? panic("outside sentinel")
+    files.symlink(files.join(root, "outside"), files.join(root, "tree/link")) ?? panic("tree link")
+    foundation_remove_held_tree(parent, "tree") ?? panic("remove real held tree")
+    foundation_remove_held_tree(parent, "tree") ?? panic("missing tree is success")
+    foundation_remove_held_tree(parent, "absent") ?? panic("missing child is success")
+    assert(!files.exists(files.join(root, "tree")))
+    assert_eq(files.read(files.join(root, "outside")) ?? panic("link referent preserved"), "sentinel")
+    files.write(files.join(root, "ordinary"), "remove") ?? panic("ordinary child")
+    foundation_remove_held_tree(parent, "ordinary") ?? panic("remove ordinary binding")
+    assert(!files.exists(files.join(root, "ordinary")))
+    files.symlink(files.join(root, "outside"), files.join(root, "linked")) ?? panic("final link")
+    foundation_remove_held_tree(parent, "linked") ?? panic("remove final link binding")
+    assert(!files.exists(files.join(root, "linked")))
+    assert_eq(files.read(files.join(root, "outside")) ?? panic("final referent preserved"), "sentinel")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+// Pure streaming cases use the same canonical SHA compression as rooted IO.
+// Native publication/authority cases above remain provider-gated, not mocked.
+#Test("streaming SHA256 preserves standard empty abc and two-block vectors") {
+    inputs :: [String]{"", "abc", "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"}
+    expected :: [String]{
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+    }
+    loop index in 0..<inputs.len() {
+        hasher := StreamingSHA256.new()
+        &hasher.update(inputs[index].bytes())
+        assert_eq(hasher.finalize_hex(), expected[index])
+    }
+}
+
+#Test("streaming SHA256 preserves digest across padding and chunk boundaries") {
+    lengths :: [Int]{55, 56, 63, 64, 65, 119, 120, 127, 128, 129}
+    chunk_sizes :: [Int]{1, 7, 63, 64, 65}
+    loop length in lengths {
+        bytes :: loop index in 0..<length -> U8{index % 251}
+        expected :: mir_sha256_hex_bytes(mir_sha256_bytes(bytes))
+        loop chunk_size in chunk_sizes {
+            hasher := StreamingSHA256.new()
+            offset := 0
+            loop offset < bytes.len() {
+                end :: if offset + chunk_size < bytes.len() -> offset + chunk_size else -> bytes.len()
+                chunk :: loop index in offset..<end -> bytes[index]
+                &hasher.update(chunk)
+                offset = end
+            }
+            assert_eq(hasher.finalize_hex(), expected)
+        }
+    }
+}
+
+#Test("streaming SHA256 emits the same raw bytes through empty updates") {
+    hasher := StreamingSHA256.new()
+    &hasher.update([U8]{})
+    &hasher.update([U8]{97})
+    &hasher.update([U8]{})
+    &hasher.update([U8]{98, 99})
+    assert_eq(hasher.finalize(), mir_sha256_bytes("abc".bytes()))
+}

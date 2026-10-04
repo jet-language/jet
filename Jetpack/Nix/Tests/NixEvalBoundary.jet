@@ -4,7 +4,7 @@
 // `nix` executable reachable.
 
 // tests/fixtures/nix-compat/stage-a-derivation.json
-@NIX_TEST_STAGE_A_DERIVATION_JSON :: ``{
+NIX_TEST_STAGE_A_DERIVATION_JSON :: prep { ``{
   "schema": 1,
   "oracle": {
     "nix_version": "2.34.8",
@@ -91,10 +91,10 @@
     }
   ]
 }
-``
+`` }
 
 // tests/fixtures/nix-compat/breadth.json
-@NIX_TEST_BREADTH_JSON :: ``{
+NIX_TEST_BREADTH_JSON :: prep { ``{
   "schema": 1,
   "oracle": {
     "nix_version": "2.34.8",
@@ -292,25 +292,25 @@
     "latency_micros": 1000000
   }
 }
-``
+`` }
 
 fn nix_test_boundary() -> NixNativeBoundary {
     NixNativeBoundary.embedded() ?? panic("committed manifest must validate")
 }
 
-fn nix_test_json(text: String) -> NixEvalJson {
-    NixEvalJson.parse(text) ?? panic("fixture JSON must parse")
+fn nix_test_json(text: String) -> NixEvalJSON {
+    NixEvalJSON.parse(text) ?? panic("fixture JSON must parse")
 }
 
-fn nix_test_object(document: NixEvalJson, index: Int) -> [String: Int] {
+fn nix_test_object(document: NixEvalJSON, index: Int) -> [String: Int] {
     document.object(index) ?? panic("expected a JSON object")
 }
 
-fn nix_test_array(document: NixEvalJson, index: Int) -> [Int] {
+fn nix_test_array(document: NixEvalJSON, index: Int) -> [Int] {
     document.array(index) ?? panic("expected a JSON array")
 }
 
-fn nix_test_string(document: NixEvalJson, index: Int) -> String {
+fn nix_test_string(document: NixEvalJSON, index: Int) -> String {
     document.string(index) ?? panic("expected a JSON string")
 }
 
@@ -318,11 +318,11 @@ fn nix_test_get(fields: [String: Int], key: String) -> Int {
     fields.get(key) ?? panic("missing fixture field {key}")
 }
 
-fn nix_test_text(document: NixEvalJson, fields: [String: Int], key: String) -> String {
+fn nix_test_text(document: NixEvalJSON, fields: [String: Int], key: String) -> String {
     nix_test_string(document, nix_test_get(fields, key))
 }
 
-fn nix_test_strings(document: NixEvalJson, index: Int) -> [String] {
+fn nix_test_strings(document: NixEvalJSON, index: Int) -> [String] {
     strings := [String]{}
     loop item in nix_test_array(document, index) -> &strings.push(nix_test_string(document, item))
     strings
@@ -371,7 +371,7 @@ fn nix_test_derivation(source: String) -> NixNativeDerivation {
 }
 
 #Test("nix private derivation materializer matches pinned fixture and errors") {
-    document :: nix_test_json(@NIX_TEST_STAGE_A_DERIVATION_JSON)
+    document :: nix_test_json(NIX_TEST_STAGE_A_DERIVATION_JSON)
     root :: nix_test_object(document, document.root)
     loop value_index in nix_test_array(document, nix_test_get(root, "values")) {
         fixture :: nix_test_object(document, value_index)
@@ -406,7 +406,7 @@ fn nix_test_derivation(source: String) -> NixNativeDerivation {
 }
 
 #Test("nix private integration matches pinned breadth fixture") {
-    document :: nix_test_json(@NIX_TEST_BREADTH_JSON)
+    document :: nix_test_json(NIX_TEST_BREADTH_JSON)
     root :: nix_test_object(document, document.root)
     boundary :: nix_test_boundary()
     loop value_index in nix_test_array(document, nix_test_get(root, "values")) {

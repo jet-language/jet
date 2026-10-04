@@ -1,0 +1,23 @@
+// Canonical byte-offset UTF-8 text primitives shared by source scanners.
+// Callers cut at whole Unicode scalars (usually ASCII delimiters).
+
+// The UTF-8 text of `raw[start..<end]`.
+pub fn pkg_bytes_text(raw: [U8], start: Int, end: Int) -> String Never! {
+    if end <= start -> return ""
+    String.from_bytes(raw[start..<end]) ?? ""
+}
+
+// The byte at `at` as an Int, or -1 past either end.
+pub fn pkg_bytes_code(raw: [U8], at: Int) -> Int Never! {
+    if at < 0 || at >= raw.len() -> return -1
+    Int.from_u8(raw[at])
+}
+
+// Whether `raw[at..]` begins with `prefix`.
+pub fn pkg_bytes_starts_with(raw: [U8], at: Int, prefix: [U8]) -> Bool Never! {
+    if at < 0 || at + prefix.len() > raw.len() -> return false
+    loop offset in 0..<prefix.len() {
+        if raw[at + offset] != prefix[offset] -> return false
+    }
+    true
+}

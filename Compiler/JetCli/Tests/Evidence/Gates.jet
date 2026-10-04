@@ -1,0 +1,125 @@
+// Behavioral controls for Source/CmdGates.rs; no inline Rust tests.
+// Canonical Foundation coordinate and Report models are exercised directly.
+
+#Test("gates entry file skips only scope kind and gate values") {
+    assert(jet_cli_gates_entry_file([String]{"--scope", "package", "--kind=unsafe", "--gate", "FFI", "entry.jet", "later.jet"}) == Val("entry.jet"))
+    assert(jet_cli_gates_entry_file([String]{"--scope=all", "--kind", "unsafe", "--gate=FS.Read", "entry.jet"}) == Val("entry.jet"))
+    assert(jet_cli_gates_entry_file([String]{"--scope", "--kind", "entry.jet"}) == Val("entry.jet"))
+    assert(jet_cli_gates_entry_file([String]{"--unknown", "its-value", "entry.jet"}) == Val("its-value"))
+    assert(jet_cli_gates_entry_file([String]{"--scope-extra", "not-skipped"}) == Val("not-skipped"))
+}
+
+#Test("gates entry file preserves empty positional and has no terminator rule") {
+    assert(jet_cli_gates_entry_file([String]{}) == None)
+    assert(jet_cli_gates_entry_file([String]{"--scope"}) == None)
+    assert(jet_cli_gates_entry_file([String]{"--kind=", "--gate=", "--scope="}) == None)
+    assert(jet_cli_gates_entry_file([String]{"--", "-entry.jet"}) == None)
+    assert(jet_cli_gates_entry_file([String]{"--", "entry.jet"}) == Val("entry.jet"))
+    assert(jet_cli_gates_entry_file([String]{""}) == Val(""))
+}
+
+#Test("gates option lookup reuses canonical first-occurrence Args parser") {
+    assert(jet_cli_args_option_value([String]{"--kind=unsafe", "--kind", "impure"}, "--kind") == Val("unsafe"))
+    assert(jet_cli_args_option_value([String]{"--kind", "--scope", "--kind=unsafe"}, "--kind") == Val("--scope"))
+    assert(jet_cli_args_option_value([String]{"--kind=", "--kind=unsafe"}, "--kind") == Val(""))
+    assert(jet_cli_args_option_value([String]{"--kind=a=b"}, "--kind") == Val("a=b"))
+    assert(jet_cli_args_option_value([String]{"--kind"}, "--kind") == None)
+    assert(jet_cli_args_option_value([String]{"--kinds=unsafe"}, "--kind") == None)
+}
+
+#Test("gates trust labels use canonical manifest decision spellings") {
+    assert_eq(jet_cli_gates_trust_decision_label(TrustDecision.Allow), "allow")
+    assert_eq(jet_cli_gates_trust_decision_label(TrustDecision.Prompt), "prompt")
+    assert_eq(jet_cli_gates_trust_decision_label(TrustDecision.Deny), "deny")
+    assert_eq(JET_CLI_GATES_LARGE_KIND_THRESHOLD, 16)
+}
+
+#Test("gates effect names prefer primary preserve order duplicates and empty names") {
+    assert_eq(jet_cli_gates_effect_names([String]{}, [String]{}), "none")
+    assert_eq(jet_cli_gates_effect_names([String]{}, [String]{"FS.Read", "DB"}), "FS.Read,DB")
+    assert_eq(jet_cli_gates_effect_names([String]{"DB", "FS.Read", "DB"}, [String]{"ignored"}), "DB,FS.Read,DB")
+    assert_eq(jet_cli_gates_effect_names([String]{""}, [String]{"ignored"}), "")
+}
+
+#Test("gates status coordinates retain byte offsets with scalar columns") {
+    source :: "éx\n中z"
+    span :: Span{start: 1, end: 7}
+    assert_eq(jet_cli_gates_location("source.jet", source, span), "source.jet:1:2")
+    assert_eq(jet_cli_gates_status_location_value(source, span).json(), "{{\"start\":{{\"line\":1,\"column\":2}},\"end\":{{\"line\":2,\"column\":2}}}}")
+    assert_eq(jet_cli_gates_location("other.jet", source, Span{start: 4, end: 4}), "other.jet:2:1")
+    assert_eq(jet_cli_gates_location("other.jet", source, Span{start: 100, end: 100}), "other.jet:2:3")
+}
+
+#Test("gates status coordinates clamp EOF and preserve CRLF character counts") {
+    assert_eq(jet_cli_gates_status_location_value("", Span{start: 0, end: 100}).json(), "{{\"start\":{{\"line\":1,\"column\":1}},\"end\":{{\"line\":1,\"column\":1}}}}")
+    cr :: String.from_bytes([U8]{U8{13}}) ?? panic("CR")
+    source :: "a{cr}\nb\n"
+    assert_eq(jet_cli_gates_location("a:b.jet", source, Span{start: 2, end: 2}), "a:b.jet:1:3")
+    assert_eq(jet_cli_gates_location("a:b.jet", source, Span{start: 3, end: 3}), "a:b.jet:2:1")
+    assert_eq(jet_cli_gates_location("a:b.jet", source, Span{start: 5, end: 5}), "a:b.jet:3:1")
+}
+
+// Foundation GateKind/GateEntry/GateOperation publication and Sema packet 0428
+// are explicit dependencies of these controls, not local test-only carriers.
+#Test("gates kind parser delegates aliases and retains unknown error text") {
+    assert((jet_cli_gates_parse_kind(" UNSAFE ") ?? panic("kind")) == GateKind.Unsafe)
+    assert((jet_cli_gates_parse_kind("unsafe_region") ?? panic("alias")) == GateKind.Unsafe)
+    if jet_cli_gates_parse_kind("not-a-kind") == {
+        .Err(error) -> assert_eq(error.message, "unknown gate kind `not-a-kind`")
+        .Ok(_) -> panic("unknown kind accepted")
+    }
+}
+
+#Test("gates external entry preserves fields and recorded defaults") {
+    entry :: jet_cli_gates_external_entry(GateKind.TrustGrant, "security", "package",
+        "package.jet", "dependency", "host detail", [String]{"origin:a", "origin:b"})
+    assert_eq(entry.domain, "security")
+    assert_eq(entry.scope, "package")
+    assert_eq(entry.source, "package.jet")
+    assert_eq(entry.subject, "dependency")
+    assert_eq(entry.detail, "host detail")
+    assert(entry.reason == None)
+    assert(entry.span == None)
+    assert(entry.status == Val("recorded"))
+    assert_eq(entry.provenance, [String]{"origin:a", "origin:b"})
+    assert_eq(entry.operations.len(), 0)
+    assert(jet_cli_gates_kind_matches(entry, None, true))
+    assert(jet_cli_gates_kind_matches(entry, Val(GateKind.TrustGrant), true))
+    assert(!jet_cli_gates_kind_matches(entry, Val(GateKind.Unsafe), true))
+    assert(jet_cli_gates_scope_matches(entry, None))
+    assert(jet_cli_gates_scope_matches(entry, Val("all")))
+    assert(jet_cli_gates_scope_matches(entry, Val("PACKAGE")))
+    assert(jet_cli_gates_scope_matches(entry, Val("SECURITY")))
+    assert(jet_cli_gates_scope_matches(entry, Val("PACKAGE.JET")))
+    assert(!jet_cli_gates_scope_matches(entry, Val("ALL")))
+    assert(!jet_cli_gates_scope_matches(entry, Val("package ")))
+}
+
+#Test("gates authority filtering rejects nonrights before a matching kind") {
+    entry :: jet_cli_gates_external_entry(GateKind.Structure, "structure", "source",
+        "é.jet", "shape", "", [String]{})
+    assert(!jet_cli_gates_kind_matches(entry, None, true))
+    assert(!jet_cli_gates_kind_matches(entry, Val(GateKind.Structure), true))
+    assert(jet_cli_gates_kind_matches(entry, Val(GateKind.Structure), false))
+    assert(jet_cli_gates_scope_matches(entry, Val("é.JET")))
+    assert(!jet_cli_gates_scope_matches(entry, Val("É.jet")))
+}
+
+#Test("gates status entry uses canonical Report field order and nullable projections") {
+    entry :: jet_cli_gates_external_entry(GateKind.TrustGrant, "security", "package",
+        "package.jet", "dep", "detail", [String]{"package.jet:trust"})
+    expected :: "{{\"kind\":\"trust_grant\",\"domain\":\"security\",\"scope\":\"package\",\"source\":\"package.jet\",\"span\":null,\"location\":null,\"subject\":\"dep\",\"reason\":null,\"status\":\"recorded\",\"detail\":\"detail\",\"provenance\":[\"package.jet:trust\"],\"operations\":[]}}"
+    assert_eq(jet_cli_gates_status_entry_value(entry, "").json(), expected)
+}
+
+#Test("gates status operations preserve byte spans and asserted required ordering") {
+    entry := jet_cli_gates_external_entry(GateKind.Unsafe, "security", "source",
+        "run.jet", "call", "", [String]{})
+    entry.span = Val(Span{start: 0, end: 2})
+    entry.reason = Val("audit")
+    entry.status = None
+    &entry.operations.push(GateOperation{kind: "load", span: Span{start: 1, end: 3},
+        required: [String]{"FFI", "Mem", "FFI"}, asserted: [String]{"Mem"}, discharged: false})
+    expected :: "{{\"kind\":\"unsafe\",\"domain\":\"security\",\"scope\":\"source\",\"source\":\"run.jet\",\"span\":{{\"start\":0,\"end\":2}},\"location\":{{\"start\":{{\"line\":1,\"column\":1}},\"end\":{{\"line\":1,\"column\":2}}}},\"subject\":\"call\",\"reason\":\"audit\",\"status\":null,\"detail\":\"\",\"provenance\":[],\"operations\":[{{\"kind\":\"load\",\"span\":{{\"start\":1,\"end\":3}},\"location\":{{\"start\":{{\"line\":1,\"column\":2}},\"end\":{{\"line\":1,\"column\":3}}}},\"required\":[\"FFI\",\"Mem\",\"FFI\"],\"asserted\":[\"Mem\"],\"discharged\":false}}]}}"
+    assert_eq(jet_cli_gates_status_entry_value(entry, "éx").json(), expected)
+}

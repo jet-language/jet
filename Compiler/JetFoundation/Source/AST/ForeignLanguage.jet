@@ -1,0 +1,152 @@
+// Canonical source-level foreign language vocabulary (AST/program_imports.rs and AST/ffi.rs).
+// D-FFI-UNIFY1: registered foreign language roots.
+pub enum ForeignLanguage {
+    C
+    Cpp
+    Rust
+    Py
+    JS
+    Swift
+    Go
+    Java
+    DotNet
+    Tcl
+    Lua
+    Fortran
+    Cobol
+    Ada
+    Pascal
+    Dart
+    PowerShell
+    Perl
+    Ruby
+    Php
+    R
+    Octave
+    Com
+
+    // Every registered language in declaration order (`ForeignLanguage::ALL`).
+    pub fn all() -> [ForeignLanguage] Never! {
+        [ForeignLanguage]{
+            ForeignLanguage.C, ForeignLanguage.Cpp, ForeignLanguage.Rust, ForeignLanguage.Py,
+            ForeignLanguage.JS, ForeignLanguage.Swift, ForeignLanguage.Go, ForeignLanguage.Java,
+            ForeignLanguage.DotNet, ForeignLanguage.Tcl, ForeignLanguage.Lua, ForeignLanguage.Fortran,
+            ForeignLanguage.Cobol, ForeignLanguage.Ada, ForeignLanguage.Pascal, ForeignLanguage.Dart,
+            ForeignLanguage.PowerShell, ForeignLanguage.Perl, ForeignLanguage.Ruby, ForeignLanguage.Php,
+            ForeignLanguage.R, ForeignLanguage.Octave, ForeignLanguage.Com
+        }
+    }
+
+    // The Rust `Debug` spelling of the variant; descriptor stamps embed it.
+    pub fn debug_name(self) -> String Never! {
+        if self == {
+            .C -> "C"
+            .Cpp -> "Cpp"
+            .Rust -> "Rust"
+            .Py -> "Py"
+            .JS -> "JS"
+            .Swift -> "Swift"
+            .Go -> "Go"
+            .Java -> "Java"
+            .DotNet -> "DotNet"
+            .Tcl -> "Tcl"
+            .Lua -> "Lua"
+            .Fortran -> "Fortran"
+            .Cobol -> "Cobol"
+            .Ada -> "Ada"
+            .Pascal -> "Pascal"
+            .Dart -> "Dart"
+            .PowerShell -> "PowerShell"
+            .Perl -> "Perl"
+            .Ruby -> "Ruby"
+            .Php -> "Php"
+            .R -> "R"
+            .Octave -> "Octave"
+            .Com -> "Com"
+        }
+    }
+
+    // The `<lang>` mount root of `<lang>.<lib>`.
+    pub fn root(self) -> String Never! {
+        if self == {
+            .C -> C_MODULE_ROOT
+            .Cpp -> CPP_MODULE_ROOT
+            .Rust -> KW_RUST
+            .Py -> PY_MODULE_ROOT
+            .JS -> JS_MODULE_ROOT
+            .Swift -> SWIFT_MODULE_ROOT
+            .Go -> GO_MODULE_ROOT
+            .Java -> JAVA_MODULE_ROOT
+            .DotNet -> CS_MODULE_ROOT
+            .Tcl -> TCL_MODULE_ROOT
+            .Lua -> LUA_MODULE_ROOT
+            .Fortran -> FORTRAN_MODULE_ROOT
+            .Cobol -> COBOL_MODULE_ROOT
+            .Ada -> ADA_MODULE_ROOT
+            .Pascal -> PASCAL_MODULE_ROOT
+            .Dart -> DART_MODULE_ROOT
+            .PowerShell -> PWSH_MODULE_ROOT
+            .Perl -> PERL_MODULE_ROOT
+            .Ruby -> RUBY_MODULE_ROOT
+            .Php -> PHP_MODULE_ROOT
+            .R -> R_MODULE_ROOT
+            .Octave -> OCTAVE_MODULE_ROOT
+            .Com -> COM_MODULE_ROOT
+        }
+    }
+
+    // The language whose mount root is `root`.
+    pub fn from_root(root: String) -> ForeignLanguage? Never! {
+        loop language in ForeignLanguage.all() {
+            if language.root() == root -> return Val(language)
+        }
+        None
+    }
+
+    pub fn bindings_subdir(self) -> String Never! {
+        "{BINDINGS_ROOT_SUBDIR}/{self.root()}"
+    }
+
+    // Prefix used by generated bridge symbols. It lives beside the descriptor
+    // table so the loader cannot grow a second language map.
+    pub fn bridge_prefix(self) -> String Never! {
+        if self == {
+            .C -> ""
+            .Cpp -> "jet_cpp_"
+            .Rust -> "jet_rust_"
+            .Py -> "jet_py_"
+            .JS -> "jet_js_"
+            .Swift -> "jet_swift_"
+            .Go -> "jet_go_"
+            .Java -> "jet_java_"
+            .DotNet -> "jet_cs_"
+            .Tcl -> "jet_tcl_"
+            .Lua -> "jet_lua_"
+            .Fortran -> "jet_fortran_"
+            .Cobol -> "jet_cobol_"
+            .Ada -> "jet_ada_"
+            .Pascal -> "jet_pascal_"
+            .Dart -> "jet_dart_"
+            .PowerShell -> "jet_pwsh_"
+            .Perl -> "jet_perl_"
+            .Ruby -> "jet_ruby_"
+            .Php -> "jet_php_"
+            .R -> "jet_r_"
+            .Octave -> "jet_octave_"
+            .Com -> "jet_com_"
+        }
+    }
+
+}
+
+// AST/program_imports.rs: source-language ABI choice is distinct from the
+// descriptor's C++ opaque-handle contract.
+impl ForeignLanguage {
+    pub fn abi_contract(self) -> ForeignAbiContract Never! {
+        if self == {
+            .C | .Cpp | .Swift | .Go | .Fortran | .Cobol | .Ada | .Pascal -> ForeignAbiContract.c()
+            .Rust -> ForeignAbiContract.native()
+            else -> ForeignAbiContract.message()
+        }
+    }
+}

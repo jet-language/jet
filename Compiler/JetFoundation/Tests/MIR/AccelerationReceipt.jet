@@ -1,0 +1,81 @@
+// Behavioral codec tests for Acceleration.rs:308-538 (no inline tests there).
+fn acceleration_receipt_test_decision(status: MIRAccelerationGateStatus) -> MIRAccelerationDecision Never! {
+    MIRAccelerationDecision{transform: .PooledParallelChunks, status: status, measurement: MIRAccelerationMeasurement{items: 18446744073709551615, sample_items: 1024, sample_nanos: 40, spawn_nanos: 5, bandwidth_floor_nanos: 20, floor_nanos: 25, projected_serial_nanos: Val(80), required_serial_nanos: None}}
+}
+fn acceleration_receipt_test_replace(value: CanonicalJSON, key: String, replacement: CanonicalJSON) -> CanonicalJSON Never! {
+    if value == .Object(fields) {
+        result := ~fields
+        loop index in 0..<result.len() { if result[index].key == key -> result[index].value = replacement }
+        return CanonicalJSON.Object(result)
+    }
+    panic("test object required")
+}
+fn acceleration_receipt_test_refuses(value: CanonicalJSON, message: String) Never! {
+    if mir_acceleration_decision_from_json(value) == {
+        .Ok(_) -> panic("invalid acceleration accepted")
+        .Err(error) -> assert_eq(error.message, message)
+    }
+}
+#Test("acceleration decision roundtrip every status transform and pin") {
+    statuses :: [MIRAccelerationGateStatus]{.BelowStaticFloor, .Pinned(.Scalar), .Pinned(.Local), .NotReleaseBuild, .CrossModeParityMissing, .ColumnCopyNotApplicable, .ProofIncomplete, .SampleNotTimed, .SpawnCostNotMeasured, .BandwidthFloorNotMeasured, .InvalidMeasurement, .ProjectedGainBelowThreshold, .Selected}
+    transforms :: [MIRAccelerationTransform]{.TransientColumnCopy, .PooledParallelChunks}
+    loop status in statuses {
+        loop transform in transforms {
+            decision := acceleration_receipt_test_decision(status)
+            decision.transform = transform
+            value :: mir_acceleration_decision_to_json(decision)
+            parsed :: canonical_json_parse(canonical_json_bytes(value)) ?? panic("canonical parse")
+            decoded :: mir_acceleration_decision_from_json(parsed) ?? panic("decision parse: {err.message}")
+            assert(decoded == decision)
+            assert_eq(mir_acceleration_decision_selected(decoded), status == .Selected)
+        }
+    }
+    assert_eq(mir_sha256_hex(MIR_ACCELERATION_RECEIPT_SCHEMA), MIR_ACCELERATION_RECEIPT_SCHEMA_DIGEST)
+}
+#Test("acceleration decision exact structure transform status pin errors and precedence") {
+    base :: mir_acceleration_decision_to_json(acceleration_receipt_test_decision(.Selected))
+    acceleration_receipt_test_refuses(CanonicalJSON.Null, "acceleration decision must be a canonical object")
+    acceleration_receipt_test_refuses(CanonicalJSON.Object([CanonicalJSONField]{}), "acceleration decision has missing or unknown fields")
+    acceleration_receipt_test_refuses(acceleration_receipt_test_replace(base, "transform", CanonicalJSON.Null), "acceleration field `transform` must be a string")
+    acceleration_receipt_test_refuses(acceleration_receipt_test_replace(base, "transform", CanonicalJSON.String("unknown")), "unknown acceleration transform `unknown`")
+    acceleration_receipt_test_refuses(acceleration_receipt_test_replace(base, "status", CanonicalJSON.Null), "acceleration field `status` must be a string")
+    acceleration_receipt_test_refuses(acceleration_receipt_test_replace(base, "status", CanonicalJSON.String("unknown")), "unknown acceleration gate status `unknown`")
+    acceleration_receipt_test_refuses(acceleration_receipt_test_replace(base, "status", CanonicalJSON.String("pinned")), "pinned acceleration decision is missing pin")
+    acceleration_receipt_test_refuses(acceleration_receipt_test_replace(base, "pin", CanonicalJSON.Bool(true)), "acceleration field `pin` must be a string or null")
+    acceleration_receipt_test_refuses(acceleration_receipt_test_replace(base, "pin", CanonicalJSON.String("#Other")), "unknown acceleration pin `#Other`")
+    acceleration_receipt_test_refuses(acceleration_receipt_test_replace(base, "pin", CanonicalJSON.String("#Scalar")), "un-pinned acceleration decision carries a pin")
+    acceleration_receipt_test_refuses(acceleration_receipt_test_replace(base, "measurement", CanonicalJSON.Null), "acceleration measurement must be a canonical object")
+    acceleration_receipt_test_refuses(acceleration_receipt_test_replace(base, "measurement", CanonicalJSON.Object([CanonicalJSONField]{})), "acceleration measurement has missing or unknown fields")
+    if mir_acceleration_string(CanonicalJSON.Object([CanonicalJSONField]{}), "missing") == {
+        .Ok(_) -> panic("missing accepted")
+        .Err(error) -> assert_eq(error.message, "acceleration field `missing` is missing")
+    }
+    if mir_acceleration_pin(CanonicalJSON.Null) == {
+        .Ok(_) -> panic("null pin accepted")
+        .Err(error) -> assert_eq(error.message, "pinned acceleration decision is missing pin")
+    }
+}
+#Test("acceleration decision measurement unsigned bounds and nullable kinds") {
+    base :: mir_acceleration_decision_to_json(acceleration_receipt_test_decision(.Selected))
+    measurement :: mir_acceleration_decision_to_json(acceleration_receipt_test_decision(.Selected))
+    if measurement == .Object(fields) {
+        m :: fields[0].value
+        required_keys :: [String]{"bandwidth_floor_nanos", "floor_nanos", "items", "sample_items", "sample_nanos", "spawn_nanos"}
+        loop key in required_keys {
+            acceleration_receipt_test_refuses(acceleration_receipt_test_replace(base, "measurement", acceleration_receipt_test_replace(m, key, CanonicalJSON.Null)), "acceleration field `{key}` must be an integer")
+            invalid :: [String]{"-1", "-0", "18446744073709551616", "", "+", "1x"}
+            loop text in invalid {
+                acceleration_receipt_test_refuses(acceleration_receipt_test_replace(base, "measurement", acceleration_receipt_test_replace(m, key, CanonicalJSON.Integer(text))), "acceleration field `{key}` is out of range")
+            }
+        }
+        optional_keys :: [String]{"projected_serial_nanos", "required_serial_nanos"}
+        loop key in optional_keys {
+            acceleration_receipt_test_refuses(acceleration_receipt_test_replace(base, "measurement", acceleration_receipt_test_replace(m, key, CanonicalJSON.Bool(false))), "acceleration field `{key}` must be an integer or null")
+            acceleration_receipt_test_refuses(acceleration_receipt_test_replace(base, "measurement", acceleration_receipt_test_replace(m, key, CanonicalJSON.Integer("-1"))), "acceleration field `{key}` is out of range")
+            decoded :: mir_acceleration_decision_from_json(acceleration_receipt_test_replace(base, "measurement", acceleration_receipt_test_replace(m, key, CanonicalJSON.Integer("18446744073709551615")))) ?? panic("u64 max refused")
+            assert_eq(decoded.measurement.items, 18446744073709551615)
+        }
+        decoded :: mir_acceleration_decision_from_json(acceleration_receipt_test_replace(base, "measurement", acceleration_receipt_test_replace(m, "items", CanonicalJSON.Integer("+001")))) ?? panic("Rust unsigned plus refused")
+        assert_eq(decoded.measurement.items, 1)
+    }
+}

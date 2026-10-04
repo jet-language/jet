@@ -62,7 +62,6 @@ use jet_foundation.[
     MIRStringFormat,
     MIRTaskGroupKind,
     MIRTerminator,
-    MIRTraitDef,
     MIRTraitMethod,
     MIRTraitMethodID,
     MIRTraitRef,
@@ -95,6 +94,7 @@ use jet_foundation.[
     mir_type_with_identity,
     mir_view_copy_kind,
     mir_view_copy_target_matches,
+    tir_comptime_key_value,
 ]
 
 enum JetEvalStep { Continue Return(value: JetEvalRuntimeValue) }
@@ -140,7 +140,8 @@ fn jet_eval_machine(program: ^MIRProgram, config: ^JetEvalConfig) -> JetEvalMach
     active_config := jet_eval_new_session_config(^config)
     registry := jet_eval_registry_new()
     identity := jet_eval_registry_machine_identity(registry)
-    JetEvalMachine{program: program, config: active_config, registry: registry, identity: identity, frames: [JetEvalFrame]{}, callback_roots: [Int:JetEvalCallbackRoot]{}, entry_access: None, entry_shared_loans: [JetEvalSharedEntryLoan]{}, steps: 0, stdout: "", stderr: "", soft_stop: false, exit_code: None, failure: None, internal_problem: None}
+    rows := jet_eval_program_rows(program)
+    JetEvalMachine{program: program, rows: rows, config: active_config, registry: registry, identity: identity, frames: [JetEvalFrame]{}, callback_roots: [Int:JetEvalCallbackRoot]{}, entry_access: None, entry_shared_loans: [JetEvalSharedEntryLoan]{}, steps: 0, stdout: "", stderr: "", soft_stop: false, exit_code: None, failure: None, internal_problem: None}
 }
 pub fn jet_eval_owned_root(machine: JetEvalMachine) -> JetEvalOwnedRoot Never! {
     config := JetEvalConfig{
@@ -188,8 +189,10 @@ fn jet_eval_owned_root_machine(root: JetEvalOwnedRoot, adapter: JetEvalHostAdapt
     root_config.host_adapter = Val(adapter)
     active_config := jet_eval_new_session_config(^root_config)
     identity := jet_eval_registry_machine_identity(root.registry)
+    rows := jet_eval_program_rows(root.program)
     JetEvalMachine{
         program: root.program,
+        rows: rows,
         config: active_config,
         registry: root.registry,
         identity: identity,
@@ -514,7 +517,7 @@ pub fn jet_eval_drop_value(machine: &JetEvalMachine, value: JetEvalRuntimeValue,
 }
 // Abort every Transaction scope still active in a frame that is leaving
 // without its ScopeExit (failure, unwind, or callback abandonment).
-fn jet_eval_abort_frame_scopes(machine: &JetEvalMachine, frame_index: Int, function: MIRFunction, span: Span) -> Bool {
+fn jet_eval_abort_frame_scopes(machine: &JetEvalMachine, frame_index: Int, function: Int, span: Span) -> Bool {
     ok := true
     scopes := machine.frames[frame_index].scopes
     machine.frames[frame_index].scopes = [MIRScopeID]{}
@@ -522,7 +525,7 @@ fn jet_eval_abort_frame_scopes(machine: &JetEvalMachine, frame_index: Int, funct
     loop index > 0 {
         index -= 1
         scope := scopes[index]
-        scope_row :: jet_eval_scope_row(function, scope) ?? {
+        scope_row :: jet_eval_function_scope(machine, function, scope) ?? {
             jet_eval_compiler_fail(&machine, span, "MIR frame cleanup references an unavailable scope")
             ok = false
             next
@@ -537,22 +540,25 @@ fn jet_eval_abort_frame_scopes(machine: &JetEvalMachine, frame_index: Int, funct
 // Discharge every owned value exactly once. Borrowed SSA/local slots leave
 // their caller-owned resources untouched; entry loans end after frame values.
 fn jet_eval_cleanup_frame(machine: &JetEvalMachine, frame_index: Int, span: Span) -> Bool {
-    function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? {
+    function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR cleanup frame function is unavailable")
         return false
     }
     ok := jet_eval_abort_frame_scopes(&machine, frame_index, function, span)
-    loop local in function.locals {
-        removed := &machine.frames[frame_index].locals.remove(local.id.value)
+    loop index in 0..<machine.program.functions[function].locals.len() {
+        local_id :: machine.program.functions[function].locals[index].id.value
+        ownership_mode :: machine.program.functions[function].locals[index].ownership.mode
+        removed := &machine.frames[frame_index].locals.remove(local_id)
         if removed != None {
             value :: removed ?? next
-            if local.ownership.mode != MIROwnershipMode.ReadBorrow && local.ownership.mode != MIROwnershipMode.WriteBorrow
+            if ownership_mode != MIROwnershipMode.ReadBorrow && ownership_mode != MIROwnershipMode.WriteBorrow
                 && !jet_eval_drop_value(&machine, value, span) -> ok = false
         }
     }
-    loop fact in function.values {
-        removed := &machine.frames[frame_index].values.remove(fact.id.value)
-        borrowed := &machine.frames[frame_index].borrowed_values.remove(fact.id.value) == (Val(true))
+    loop index in 0..<machine.program.functions[function].values.len() {
+        value_id :: machine.program.functions[function].values[index].id.value
+        removed := &machine.frames[frame_index].values.remove(value_id)
+        borrowed := &machine.frames[frame_index].borrowed_values.remove(value_id) == (Val(true))
         if removed != None {
             value :: removed ?? next
             if !borrowed && !jet_eval_drop_value(&machine, value, span) -> ok = false
@@ -567,7 +573,7 @@ fn jet_eval_cleanup_frame(machine: &JetEvalMachine, frame_index: Int, span: Span
     machine.frames[frame_index].captures = [JetEvalRuntimeValue]{}
     machine.frames[frame_index].entry_shared_loans = [JetEvalSharedEntryLoan]{}
     loop index in 0..<params.len() {
-        if index < function.params.len() && function.params[index].access == MIRAccess.Read {
+        if index < machine.program.functions[function].params.len() && machine.program.functions[function].params[index].access == MIRAccess.Read {
             if index < entry_accesses.len() && entry_accesses[index] == MIRAccess.Read {
                 if !jet_eval_drop_borrowed_value(machine, params[index], span) -> ok = false
             }
@@ -692,7 +698,7 @@ pub fn jet_eval_comptime_value(result: &JetEvalResult, span: Span) -> TComptimeV
 
 pub fn jet_eval_function(program: ^MIRProgram, function_id: MIRFunctionID, args: [TComptimeValue], config: ^JetEvalConfig) -> JetEvalResult {
     machine := jet_eval_machine(^program, ^config)
-    function :: jet_eval_find_function(machine.program, function_id) ?? {
+    function :: jet_eval_find_function(machine, function_id) ?? {
         jet_eval_compiler_fail(&machine, jet_eval_empty_span(), "requested MIR function is unavailable")
         return jet_eval_result(^machine, None, false)
     }
@@ -746,7 +752,7 @@ pub fn jet_eval_pure_function(program: ^MIRProgram, function_id: MIRFunctionID, 
     span := jet_eval_empty_span()
     machine := jet_eval_machine(^program, ^config)
     data := TComptimeValue?{None}
-    if jet_eval_find_function(machine.program, function_id) == .Val(function) {
+    if jet_eval_find_function(machine, function_id) == .Val(function) {
         if function.target_applicability.interpreter {
             if jet_eval_invoke(&machine, function_id, [JetEvalRuntimeValue]{}, [JetEvalRuntimeValue]{}, function.span) == .Val(value) {
                 if !jet_eval_has_failure(machine) && !machine.soft_stop -> data = jet_eval_data(value, &machine, span)
@@ -766,8 +772,10 @@ pub fn jet_eval_resume(request: ^JetEvalResumeRequest) -> JetEvalResult {
     target_depth := request.target_depth
 
     identity := jet_eval_registry_machine_identity(request.registry)
+    rows := jet_eval_program_rows(request.program)
     machine := JetEvalMachine{
         program: request.program,
+        rows: rows,
         config: request.config,
         registry: request.registry,
         identity: identity,
@@ -854,7 +862,7 @@ fn jet_eval_validate_deopt(machine: &JetEvalMachine, deopt: JetEvalDeoptRequest,
         jet_eval_internal_problem(&machine, span, "native deopt function identity does not match the existing Source-MIR frame")
         return false
     }
-    function :: jet_eval_find_function(machine.program, deopt.function) ?? {
+    function :: jet_eval_find_function(machine, deopt.function) ?? {
         jet_eval_internal_problem(&machine, span, "native deopt function is missing from the checked Source-MIR program")
         return false
     }
@@ -877,8 +885,10 @@ pub fn jet_eval_resume_deopt(request: ^JetEvalResumeRequest, deopt: JetEvalDeopt
     target_depth := request.target_depth
 
     identity := jet_eval_registry_machine_identity(request.registry)
+    rows := jet_eval_program_rows(request.program)
     machine := JetEvalMachine{
         program: request.program,
+        rows: rows,
         config: request.config,
         registry: request.registry,
         identity: identity,
@@ -895,7 +905,7 @@ pub fn jet_eval_resume_deopt(request: ^JetEvalResumeRequest, deopt: JetEvalDeopt
         internal_problem: request.internal_problem,
     }
     deopt_span := Span?{None}
-    function := jet_eval_find_function(machine.program, deopt.function)
+    function := jet_eval_find_function(machine, deopt.function)
     if function != None {
         found :: function ?? {
             jet_eval_internal_problem(&machine, None, "native deopt function lookup lost its checked function row")
@@ -923,7 +933,7 @@ pub fn jet_eval_start_deopt(program: ^MIRProgram, entry_config: ^JetEvalConfig, 
     config := entry_config
     config.runtime_execution = true
     machine := jet_eval_machine(^program, ^config)
-    function :: jet_eval_find_function(machine.program, function_id) ?? {
+    function :: jet_eval_find_function(machine, function_id) ?? {
         jet_eval_internal_problem(&machine, None, "native deopt entry function is missing from the checked Source-MIR program")
         return jet_eval_result(^machine, None, false)
     }
@@ -998,7 +1008,7 @@ fn jet_eval_session_entry_writebacks(session: &JetEvalRuntimeSession, function_i
         return None
     }
     if session.machine.frames.len() == 0 -> return Val(JetEvalEntryWritebackBatch{installed: false, writebacks: [JetEvalEntryWriteback]{}})
-    function :: jet_eval_find_function(session.machine.program, function_id) ?? {
+    function :: jet_eval_find_function(session.machine, function_id) ?? {
         jet_eval_internal_problem(&session.machine, Val(span), "entry writeback function is missing from the checked Source-MIR program")
         return None
     }
@@ -1098,7 +1108,7 @@ fn jet_eval_drop_invoke_inputs(machine: &JetEvalMachine, function: MIRFunction, 
 }
 
 fn jet_eval_invoke_with_borrowed_captures(machine: &JetEvalMachine, function_id: MIRFunctionID, args: [JetEvalRuntimeValue], captures: [JetEvalRuntimeValue], captures_borrowed: Bool, span: Span) -> JetEvalRuntimeValue? {
-    function :: jet_eval_find_function(machine.program, function_id) ?? {
+    function :: jet_eval_find_function(machine, function_id) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR call target is unavailable")
         return None
     }
@@ -1155,7 +1165,7 @@ fn jet_eval_callback_unwind(machine: &JetEvalMachine, depth: Int, span: Span) ->
 
 fn jet_eval_callback_validate_root(machine: &JetEvalMachine, value: JetEvalRuntimeValue, reusable: Bool, span: Span) -> Bool {
     if value == .Closure(function, captures) {
-        function_row :: jet_eval_find_function(machine.program, function) ?? {
+        function_row :: jet_eval_find_function(machine, function) ?? {
             jet_eval_compiler_fail(&machine, span, "native callback closure has no checked function facts")
             return false
         }
@@ -1343,8 +1353,10 @@ fn jet_eval_task_machine(root: ^JetEvalTaskRoot, config: ^JetEvalConfig) -> JetE
     }
     session_config := jet_eval_new_session_config(^active_config)
     identity := jet_eval_registry_machine_identity(registry)
+    rows := jet_eval_program_rows(program)
     machine := JetEvalMachine{
         program: program,
+        rows: rows,
         config: session_config,
         registry: registry,
         identity: identity,
@@ -1476,7 +1488,7 @@ pub fn jet_eval_task_start(root: ^JetEvalTaskRoot, config: ^JetEvalConfig, args:
     }
     if callback_root.value == {
         .Closure(function, _) -> {
-            function_row :: jet_eval_find_function(machine.program, function) ?? {
+            function_row :: jet_eval_find_function(machine, function) ?? {
                 loop arg in args -> jet_eval_drop_value(&machine, arg, span)
                 jet_eval_internal_problem(&machine, Val(span), "native task callback function disappeared from its checked program")
                 return jet_eval_result(^machine, None, false)
@@ -1594,20 +1606,22 @@ fn jet_eval_step(machine: &JetEvalMachine) -> JetEvalStep? {
         return None
     }
     frame_index := machine.frames.len() - 1
-    function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? {
+    function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? {
         jet_eval_compiler_fail(&machine, jet_eval_empty_span(), "MIR evaluator frame function is unavailable")
         return None
     }
-    block :: jet_eval_block(function, machine.frames[frame_index].block) ?? {
+    block :: jet_eval_function_block_row(machine, function, machine.frames[frame_index].block) ?? {
         jet_eval_compiler_fail(&machine, jet_eval_empty_span(), "MIR evaluator block is unavailable")
         return None
     }
-    if machine.frames[frame_index].ip < block.instructions.len() {
-        instruction := block.instructions[machine.frames[frame_index].ip]
+    ip :: machine.frames[frame_index].ip
+    if ip < machine.program.functions[function].blocks[block].instructions.len() {
+        instruction := machine.program.functions[function].blocks[block].instructions[ip]
         machine.frames[frame_index].ip += 1
         return jet_eval_instruction(&machine, frame_index, instruction)
     }
-    jet_eval_terminator(&machine, frame_index, block.terminator)
+    terminator := machine.program.functions[function].blocks[block].terminator
+    jet_eval_terminator(&machine, frame_index, terminator)
 }
 
 fn jet_eval_mir_ownership_is_borrowed(ownership: MIROwnership) -> Bool Never! {
@@ -1617,13 +1631,13 @@ fn jet_eval_mir_ownership_is_borrowed(ownership: MIROwnership) -> Bool Never! {
 fn jet_eval_store(machine: &JetEvalMachine, frame_index: Int, result: MIRValueID?, value: JetEvalRuntimeValue, operation: MIROperation, span: Span) -> Bool {
     if result == None -> return true
     id :: result
-    function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? {
+    function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR result function is unavailable")
         return false
     }
     borrowed := false
-    loop fact in function.values {
-        if fact.id == id -> borrowed = jet_eval_mir_ownership_is_borrowed(fact.ownership)
+    loop index in 0..<machine.program.functions[function].values.len() {
+        if machine.program.functions[function].values[index].id == id -> borrowed = jet_eval_mir_ownership_is_borrowed(machine.program.functions[function].values[index].ownership)
     }
     if operation == {
         .Parameter(index, _) -> {
@@ -1673,12 +1687,12 @@ fn jet_eval_parameter(machine: &JetEvalMachine, frame_index: Int, index: Int, sp
         jet_eval_compiler_fail(&machine, span, "MIR parameter index is outside the call argument list")
         return None
     }
-    function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? return None
-    if index >= function.params.len() {
+    function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? return None
+    if index >= machine.program.functions[function].params.len() {
         jet_eval_compiler_fail(&machine, span, "MIR parameter metadata is unavailable")
         return None
     }
-    if function.params[index].access == MIRAccess.Read {
+    if machine.program.functions[function].params[index].access == MIRAccess.Read {
         value := machine.frames[frame_index].params[index]
         return jet_eval_borrow_value(value, &machine, span)
     }
@@ -1692,12 +1706,12 @@ fn jet_eval_capture(machine: &JetEvalMachine, frame_index: Int, slot: Int, span:
         jet_eval_compiler_fail(&machine, span, "MIR capture slot is outside the closure capture list")
         return None
     }
-    function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? return None
-    if slot >= function.capture_params.len() {
+    function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? return None
+    if slot >= machine.program.functions[function].capture_params.len() {
         jet_eval_compiler_fail(&machine, span, "MIR capture metadata is unavailable")
         return None
     }
-    access := function.capture_params[slot].access
+    access := machine.program.functions[function].capture_params[slot].access
     if machine.frames[frame_index].captures_borrowed {
         if access == MIRAccess.Move {
             jet_eval_ownership_fail(&machine, span, "MIR cannot move a capture from a borrowed closure")
@@ -1728,35 +1742,25 @@ fn jet_eval_phi(machine: &JetEvalMachine, frame_index: Int, incoming: [MIRPhiInc
 }
 
 fn jet_eval_type_name(machine: &JetEvalMachine, id: MIRTypeID, span: Span) -> String? {
-    loop ty in machine.program.type_instances {
-        if ty.identity == (Val(id)) {
-            return Val(mir_type_display_name(ty))
-        }
+    instances :: machine.rows.type_instances.get(id.value) ?? [Int]{}
+    if instances.len() > 0 -> return Val(mir_type_display_name(machine.program.type_instances[instances[0]]))
+    row :: machine.rows.types.get(id.value) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR aggregate type identity is unavailable")
+        return None
     }
-    loop definition in machine.program.types {
-        if definition.id == id {
-            return Val(definition.name)
-        }
-    }
-    jet_eval_compiler_fail(&machine, span, "MIR aggregate type identity is unavailable")
-
-    None
+    Val(machine.program.types[row].name)
 }
 fn jet_eval_trait_box_target(machine: &JetEvalMachine, target: MIRTypeID, result_ty: MIRType?, span: Span) -> Bool Never! {
-    target_ty := MIRType?{None}
-    loop candidate in machine.program.type_instances {
-        if candidate.identity == (Val(target)) {
-            if target_ty != None {
-                jet_eval_compiler_fail(&machine, span, "MIR trait boxing target identity is ambiguous")
-                return false
-            }
-            target_ty = Val(candidate)
-        }
+    instances :: machine.rows.type_instances.get(target.value) ?? [Int]{}
+    if instances.len() > 1 {
+        jet_eval_compiler_fail(&machine, span, "MIR trait boxing target identity is ambiguous")
+        return false
     }
-    checked :: target_ty ?? {
+    if instances.len() == 0 {
         jet_eval_compiler_fail(&machine, span, "MIR trait boxing target type is unavailable")
         return false
     }
+    checked :: machine.program.type_instances[instances[0]]
     if checked.kind == {.TraitObject(bounds) -> {
         if bounds.len() != 1 {
             jet_eval_compiler_fail(&machine, span, "MIR trait boxing target must name exactly one trait")
@@ -1781,7 +1785,7 @@ fn jet_eval_enum_args(machine: &JetEvalMachine, args: [MIREnumArg], frame_index:
     loop arg in args {
         value :: jet_eval_value(&machine, frame_index, arg.value, span) ?? return None
         data :: jet_eval_data(value, &machine, span) ?? return None
-        name := if arg.field == None -> None else -> Val(jet_eval_field_name(machine.program, arg.field ?? MIRFieldID{value: 0}) ?? "")
+        name := if arg.field == None -> None else -> Val(jet_eval_field_name(machine, arg.field ?? MIRFieldID{value: 0}) ?? "")
         &output.push(TComptimeEnumArg{name: name, value: data})
     }
     output
@@ -1790,7 +1794,7 @@ fn jet_eval_enum_args(machine: &JetEvalMachine, args: [MIREnumArg], frame_index:
 fn jet_eval_fields(machine: &JetEvalMachine, fields: [MIRFieldValue], frame_index: Int, span: Span) -> [TComptimeField]? {
     output := [TComptimeField]{}
     loop field in fields {
-        name :: jet_eval_field_name(machine.program, field.field) ?? return None
+        name :: jet_eval_field_name(machine, field.field) ?? return None
         value :: jet_eval_value(&machine, frame_index, field.value, span) ?? return None
         data :: jet_eval_data(value, &machine, span) ?? return None
         &output.push(TComptimeField{name: name, value: data})
@@ -1956,17 +1960,13 @@ fn jet_eval_native_interface_binding(machine: &JetEvalMachine, receiver: JetEval
             return None
         }
     }
-    trait_row := MIRTraitDef?{None}
-    loop candidate in machine.program.traits {
-        if candidate.id == trait_ref.id -> trait_row = Val(candidate)
-    }
-    trait_fact :: trait_row ?? {
+    trait_fact :: machine.rows.traits.get(trait_ref.id.value) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR native interface call references a missing trait")
         return None
     }
     method_row := MIRTraitMethod?{None}
-    loop candidate in trait_fact.methods {
-        if candidate.id == method_id -> method_row = Val(candidate)
+    loop index in 0..<machine.program.traits[trait_fact].methods.len() {
+        if machine.program.traits[trait_fact].methods[index].id == method_id -> method_row = Val(machine.program.traits[trait_fact].methods[index])
     }
     method :: method_row ?? {
         jet_eval_compiler_fail(&machine, span, "MIR native interface call references a missing method")
@@ -2063,19 +2063,14 @@ fn jet_eval_trait_method_function(machine: &JetEvalMachine, values: [JetEvalRunt
                 return None
             }
         }
-        loop ty in machine.program.type_instances {
-            if ty.kind == {
-                .Apply(_, _) -> {
-                    if mir_type_display_name(ty) == concrete_name {
-                        if concrete_type != None {
-                            if temporary -> jet_eval_drop_value(&machine, receiver, span)
-                            jet_eval_compiler_fail(&machine, span, "MIR trait method receiver `{concrete_name}` has an ambiguous canonical nominal type")
-                            return None
-                        }
-                        concrete_type = Val(ty)
-                    }
+        loop index in 0..<machine.program.type_instances.len() {
+            if machine.program.type_instances[index].kind == .Apply(_, _) && mir_type_display_name(machine.program.type_instances[index]) == concrete_name {
+                if concrete_type != None {
+                    if temporary -> jet_eval_drop_value(&machine, receiver, span)
+                    jet_eval_compiler_fail(&machine, span, "MIR trait method receiver `{concrete_name}` has an ambiguous canonical nominal type")
+                    return None
                 }
-                else -> {}
+                concrete_type = Val(machine.program.type_instances[index])
             }
         }
     }
@@ -2086,33 +2081,29 @@ fn jet_eval_trait_method_function(machine: &JetEvalMachine, values: [JetEvalRunt
         return None
     }
     if concrete_name == "" -> concrete_name = mir_type_display_name(nominal)
-    trait_row := MIRTraitDef?{None}
-    loop row in machine.program.traits {
-        if row.id == trait_ref.id -> trait_row = Val(row)
-    }
-    trait_fact :: trait_row ?? {
+    trait_fact :: machine.rows.traits.get(trait_ref.id.value) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR trait method references a missing trait")
         return None
     }
     method_row := MIRTraitMethod?{None}
-    loop row in trait_fact.methods {
-        if row.id == method_id -> method_row = Val(row)
+    loop index in 0..<machine.program.traits[trait_fact].methods.len() {
+        if machine.program.traits[trait_fact].methods[index].id == method_id -> method_row = Val(machine.program.traits[trait_fact].methods[index])
     }
     method :: method_row ?? {
         jet_eval_compiler_fail(&machine, span, "MIR trait method references a missing method")
         return None
     }
     candidates := [MIRFunctionID]{}
-    loop impl_row in machine.program.impls {
-        impl_trait :: impl_row.trait_ref ?? next
-        if impl_trait.id != trait_ref.id || !mir_type_same_checked_type(impl_row.self_type, nominal) -> next
-        loop function_id in impl_row.methods {
-            function :: jet_eval_find_function(machine.program, function_id) ?? {
+    impl_rows :: machine.rows.impls_by_trait.get(trait_ref.id.value) ?? [Int]{}
+    loop impl_index in impl_rows {
+        if !mir_type_same_checked_type(machine.program.impls[impl_index].self_type, nominal) -> next
+        loop function_id in machine.program.impls[impl_index].methods {
+            function :: jet_eval_function_row(machine, function_id) ?? {
                 jet_eval_compiler_fail(&machine, span, "MIR trait implementation references a missing function")
                 return None
             }
-            if function.name != method.name -> next
-            if function.form == {
+            if machine.program.functions[function].name != method.name -> next
+            if machine.program.functions[function].form == {
                 .TraitMethod(_, function_trait, _, _) -> {
                     if function_trait.id == trait_ref.id {
                         duplicate := false
@@ -2132,7 +2123,7 @@ fn jet_eval_trait_method_function(machine: &JetEvalMachine, values: [JetEvalRunt
             jet_eval_compiler_fail(&machine, span, "MIR trait method `{method.name}` has no implementation for `{concrete_name}`")
             return None
         }
-        if jet_eval_find_function(machine.program, default) == None {
+        if jet_eval_function_row(machine, default) == None {
             jet_eval_compiler_fail(&machine, span, "MIR trait method default implementation is missing")
             return None
         }
@@ -2379,25 +2370,6 @@ fn jet_eval_initialize_range(machine: &JetEvalMachine, frame_index: Int, start_i
     Val(JetEvalRuntimeValue.RangeCursor{start: start, end: end, current: start, step: step, exclusive: exclusive})
 }
 
-fn jet_eval_iterator_key_value(key: TComptimeKey) -> TComptimeValue Never! {
-    if key == {
-        .Int(value) -> return TComptimeValue.Int{value: value}
-        .String(value) -> return TComptimeValue.String{value: value}
-        .Bool(value) -> return TComptimeValue.Bool{value: value}
-        .Char(value) -> return TComptimeValue.Char{value: value}
-        .Tuple(fields) -> {
-            output := [TComptimeField]{}
-            loop field in fields -> &output.push(TComptimeField{name: field.name, value: jet_eval_iterator_key_value(field.key)})
-            return TComptimeValue.Struct{type_name: "Tuple", fields: output}
-        }
-        .Struct(type_name, fields) -> {
-            output := [TComptimeField]{}
-            loop field in fields -> &output.push(TComptimeField{name: field.name, value: jet_eval_iterator_key_value(field.key)})
-            return TComptimeValue.Struct{type_name: type_name, fields: output}
-        }
-        .Enum(type_name, variant) -> return TComptimeValue.Enum{type_name: type_name, variant: variant, args: [TComptimeEnumArg]{}}
-    }
-}
 
 fn jet_eval_loop_source_wire(source_kind: MIRLoopSourceKind) -> String Never! {
     if source_kind == MIRLoopSourceKind.Plain -> return "plain"
@@ -2413,11 +2385,11 @@ fn jet_eval_loop_source_wire(source_kind: MIRLoopSourceKind) -> String Never! {
 
 fn jet_eval_loop_prelude_row(machine: &JetEvalMachine, member: String, span: Span) -> MIRPreludeCall? {
     expected_symbol :: "jet_{member}"
-    loop row in machine.program.prelude_calls {
-        if row.module_name == "core.prelude" && row.member == member {
-            if row.symbol == {
+    loop index in 0..<machine.program.prelude_calls.len() {
+        if machine.program.prelude_calls[index].module_name == "core.prelude" && machine.program.prelude_calls[index].member == member {
+            if machine.program.prelude_calls[index].symbol == {
                 .Prelude(symbol) -> {
-                    if symbol == expected_symbol -> return Val(row)
+                    if symbol == expected_symbol -> return Val(machine.program.prelude_calls[index])
                 }
                 else -> {}
             }
@@ -2564,7 +2536,7 @@ fn jet_eval_initialize_iterator_from(machine: &JetEvalMachine, frame_index: Int,
         values := [JetEvalRuntimeValue]{}
         loop entry in entries {
             pair := TComptimeValue.Struct{type_name: "Tuple", fields: [TComptimeField]{
-                TComptimeField{name: "key", value: jet_eval_iterator_key_value(entry.key)},
+                TComptimeField{name: "key", value: tir_comptime_key_value(entry.key)},
                 TComptimeField{name: "value", value: entry.value},
             }}
             &values.push(JetEvalRuntimeValue.Data{value: pair})
@@ -2576,8 +2548,8 @@ fn jet_eval_initialize_iterator_from(machine: &JetEvalMachine, frame_index: Int,
 }
 
 fn jet_eval_uninitialized_value(machine: &JetEvalMachine, frame_index: Int, place_id: MIRPlaceID, span: Span) -> JetEvalRuntimeValue? {
-    function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? return None
-    place :: jet_eval_place(function, place_id) ?? {
+    function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? return None
+    place :: jet_eval_function_place(machine, function, place_id) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR uninitialized write targets an unavailable place")
         return None
     }
@@ -2588,8 +2560,8 @@ fn jet_eval_uninitialized_value(machine: &JetEvalMachine, frame_index: Int, plac
     if place.base == {
         .Local(local_id) -> {
             local := MIRLocal?{None}
-            loop candidate in function.locals {
-                if candidate.id == local_id -> local = Val(candidate)
+            loop index in 0..<machine.program.functions[function].locals.len() {
+                if machine.program.functions[function].locals[index].id == local_id -> local = Val(machine.program.functions[function].locals[index])
             }
             row :: local ?? {
                 jet_eval_compiler_fail(&machine, span, "MIR uninitialized root has no local facts")
@@ -2641,22 +2613,22 @@ fn jet_eval_instruction(machine: &JetEvalMachine, frame_index: Int, instruction:
 }
 
 fn jet_eval_closure_captures(machine: &JetEvalMachine, frame_index: Int, function_id: MIRFunctionID, operands: [MIRCaptureOperand], span: Span) -> [JetEvalRuntimeValue]? {
-    target :: jet_eval_find_function(machine.program, function_id) ?? {
+    target :: jet_eval_function_row(machine, function_id) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR closure target is unavailable")
         return None
     }
-    source :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? {
+    source :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR closure source is unavailable")
         return None
     }
-    if operands.len() != target.capture_params.len() {
+    if operands.len() != machine.program.functions[target].capture_params.len() {
         jet_eval_compiler_fail(&machine, span, "MIR closure capture count disagrees with its target")
         return None
     }
     output := [JetEvalRuntimeValue]{}
     index := 0
     loop index < operands.len() {
-        parameter :: target.capture_params[index]
+        parameter :: ~machine.program.functions[target].capture_params[index]
         operand := operands[index]
         if operand == {
             .Value(value) -> {
@@ -2706,7 +2678,7 @@ fn jet_eval_closure_captures(machine: &JetEvalMachine, frame_index: Int, functio
                     jet_eval_drop_values(&machine, output, span)
                     return None
                 }
-                if jet_eval_place(source, place) == None {
+                if jet_eval_function_place(machine, source, place) == None {
                     jet_eval_compiler_fail(&machine, span, "MIR closure capture place is unavailable")
                     jet_eval_drop_values(&machine, output, span)
                     return None
@@ -2730,7 +2702,7 @@ fn jet_eval_host_shape_key(ty: MIRType) -> String? {
     None
 }
 
-fn jet_eval_host_shape_node_from_program(program: &MIRProgram, ty: MIRType, nodes: &[JetEvalHostTypeNode], seen: &[String:Int]) -> Int? {
+fn jet_eval_host_shape_node_from_program(program: MIRProgram, rows: JetEvalProgramRows, ty: MIRType, nodes: &[JetEvalHostTypeNode], seen: &[String:Int]) -> Int? {
     if ty.kind == {
         .Apply(name, args) -> {
             key := jet_eval_host_shape_key(ty)
@@ -2738,7 +2710,7 @@ fn jet_eval_host_shape_node_from_program(program: &MIRProgram, ty: MIRType, node
                 cached :: seen.get(key ?? "")
                 if cached != None -> return cached
             }
-            if jet_eval_core_owner_check(&program, ty) == {
+            if jet_eval_core_owner_check(program, rows, ty) == {
                 .Valid(owner) -> {
                     index := nodes.len()
                     &nodes.push(JetEvalHostTypeNode.Handle{ty: ty, owner: JetEvalHostOwner.Core{owner: JetEvalHostCoreOwner{fact: owner, ty: ty}}})
@@ -2753,21 +2725,17 @@ fn jet_eval_host_shape_node_from_program(program: &MIRProgram, ty: MIRType, node
             if key != None -> seen[key ?? ""] = index
             arg_nodes := [Int]{}
             loop arg in args {
-                &arg_nodes.push(jet_eval_host_shape_node_from_program(&program, arg, &nodes, &seen) ?? return None)
+                &arg_nodes.push(jet_eval_host_shape_node_from_program(program, rows, arg, &nodes, &seen) ?? return None)
             }
-            definition := MIRTypeDef?{None}
-            loop candidate in program.types {
-                if candidate.id == name.id -> definition = Val(candidate)
-            }
-            if definition == None -> return Val(index)
-            owner :: definition ?? return None
+            definition :: rows.types.get(name.id.value) ?? return Val(index)
+            owner :: program.types[definition]
             if owner.kind == {
                 .Struct(fields, _) -> {
                     output := [JetEvalHostTypeFieldShape]{}
                     loop field in fields {
                         field_ty := field.ty
                         if args.len() > 0 -> field_ty = jet_eval_host_substitute_type(field_ty, owner.generic_params, args)
-                        field_node :: jet_eval_host_shape_node_from_program(&program, field_ty, &nodes, &seen) ?? return None
+                        field_node :: jet_eval_host_shape_node_from_program(program, rows, field_ty, &nodes, &seen) ?? return None
                         &output.push(JetEvalHostTypeFieldShape{name: field.name, node: field_node})
                     }
                     nodes[index] = JetEvalHostTypeNode.Struct{type_id: name.id, type_name: name.name, args: arg_nodes, fields: output}
@@ -2779,14 +2747,14 @@ fn jet_eval_host_shape_node_from_program(program: &MIRProgram, ty: MIRType, node
                         if variant.payload == .Single(inner) {
                             single_ty := inner
                             if args.len() > 0 -> single_ty = jet_eval_host_substitute_type(single_ty, owner.generic_params, args)
-                            single_node :: jet_eval_host_shape_node_from_program(&program, single_ty, &nodes, &seen) ?? return None
+                            single_node :: jet_eval_host_shape_node_from_program(program, rows, single_ty, &nodes, &seen) ?? return None
                             &variant_args.push(JetEvalHostTypeArgShape{name: None, node: single_node})
                         }
                         if variant.payload == .Named(fields) {
                             loop field in fields {
                                 field_ty := field.ty
                                 if args.len() > 0 -> field_ty = jet_eval_host_substitute_type(field_ty, owner.generic_params, args)
-                                field_node :: jet_eval_host_shape_node_from_program(&program, field_ty, &nodes, &seen) ?? return None
+                                field_node :: jet_eval_host_shape_node_from_program(program, rows, field_ty, &nodes, &seen) ?? return None
                                 &variant_args.push(JetEvalHostTypeArgShape{name: Val(field.name), node: field_node})
                             }
                         }
@@ -2799,27 +2767,27 @@ fn jet_eval_host_shape_node_from_program(program: &MIRProgram, ty: MIRType, node
             return Val(index)
         }
         .Option(inner) -> {
-            child :: jet_eval_host_shape_node_from_program(&program, inner, &nodes, &seen) ?? return None
+            child :: jet_eval_host_shape_node_from_program(program, rows, inner, &nodes, &seen) ?? return None
             index := nodes.len()
             &nodes.push(JetEvalHostTypeNode.Option{inner: child})
             return Val(index)
         }
         .Result(ok, error) -> {
-            ok_node :: jet_eval_host_shape_node_from_program(&program, ok, &nodes, &seen) ?? return None
-            error_node :: jet_eval_host_shape_node_from_program(&program, error, &nodes, &seen) ?? return None
+            ok_node :: jet_eval_host_shape_node_from_program(program, rows, ok, &nodes, &seen) ?? return None
+            error_node :: jet_eval_host_shape_node_from_program(program, rows, error, &nodes, &seen) ?? return None
             index := nodes.len()
             &nodes.push(JetEvalHostTypeNode.Result{ok: ok_node, error: error_node})
             return Val(index)
         }
         .List(inner) | .FixedList(inner, _) -> {
-            child :: jet_eval_host_shape_node_from_program(&program, inner, &nodes, &seen) ?? return None
+            child :: jet_eval_host_shape_node_from_program(program, rows, inner, &nodes, &seen) ?? return None
             index := nodes.len()
             &nodes.push(JetEvalHostTypeNode.List{inner: child})
             return Val(index)
         }
         .Map(key, value) -> {
-            key_node :: jet_eval_host_shape_node_from_program(&program, key, &nodes, &seen) ?? return None
-            value_node :: jet_eval_host_shape_node_from_program(&program, value, &nodes, &seen) ?? return None
+            key_node :: jet_eval_host_shape_node_from_program(program, rows, key, &nodes, &seen) ?? return None
+            value_node :: jet_eval_host_shape_node_from_program(program, rows, value, &nodes, &seen) ?? return None
             index := nodes.len()
             &nodes.push(JetEvalHostTypeNode.Map{key: key_node, value: value_node})
             return Val(index)
@@ -2827,7 +2795,7 @@ fn jet_eval_host_shape_node_from_program(program: &MIRProgram, ty: MIRType, node
         .Tuple(fields) -> {
             output := [JetEvalHostTypeFieldShape]{}
             loop field in fields {
-                field_node :: jet_eval_host_shape_node_from_program(&program, field.ty, &nodes, &seen) ?? return None
+                field_node :: jet_eval_host_shape_node_from_program(program, rows, field.ty, &nodes, &seen) ?? return None
                 &output.push(JetEvalHostTypeFieldShape{name: field.name, node: field_node})
             }
             index := nodes.len()
@@ -2843,21 +2811,27 @@ fn jet_eval_host_shape_node_from_program(program: &MIRProgram, ty: MIRType, node
 }
 
 fn jet_eval_host_shape_node(machine: &JetEvalMachine, ty: MIRType, nodes: &[JetEvalHostTypeNode], seen: &[String:Int], span: Span) -> Int? {
-    node := jet_eval_host_shape_node_from_program(&machine.program, ty, &nodes, &seen)
+    node := jet_eval_host_shape_node_from_program(machine.program, machine.rows, ty, &nodes, &seen)
     if node == None -> jet_eval_compiler_fail(&machine, span, "checked MIR type cannot be represented by the canonical Source host shape")
     node
 }
 
+// The native host entry has no machine, so it indexes the program per query.
 pub fn jet_eval_host_type_shape_from_program(program: &MIRProgram, checked_type: MIRType, span: Span) -> JetEvalHostTypeShape? {
+    rows :: jet_eval_program_rows(program)
+    jet_eval_host_type_shape_from_rows(program, rows, checked_type)
+}
+
+fn jet_eval_host_type_shape_from_rows(program: MIRProgram, rows: JetEvalProgramRows, checked_type: MIRType) -> JetEvalHostTypeShape? {
     nodes := [JetEvalHostTypeNode]{}
     seen := [String:Int]{}
-    root :: jet_eval_host_shape_node_from_program(&program, checked_type, &nodes, &seen) ?? return None
+    root :: jet_eval_host_shape_node_from_program(program, rows, checked_type, &nodes, &seen) ?? return None
     Val(JetEvalHostTypeShape{root: root, nodes: nodes})
 }
 
 fn jet_eval_host_type_shape(machine: &JetEvalMachine, ty: MIRType?, span: Span) -> JetEvalHostTypeShape? {
     expected :: ty ?? return None
-    jet_eval_host_type_shape_from_program(&machine.program, expected, span) ?? {
+    jet_eval_host_type_shape_from_rows(machine.program, machine.rows, expected) ?? {
         jet_eval_compiler_fail(&machine, span, "checked MIR type cannot be represented by the canonical Source host shape")
         return None
     }
@@ -2907,12 +2881,8 @@ fn jet_eval_host_data_matches_type(machine: &JetEvalMachine, data: TComptimeValu
             if name.name == "Bytes" {
                 if data == .Bytes(_) -> return true
             }
-            definition := MIRTypeDef?{None}
-            loop candidate in machine.program.types {
-                if candidate.id == name.id -> definition = Val(candidate)
-            }
-            if definition == None -> return true
-            owner :: definition ?? return false
+            definition :: machine.rows.types.get(name.id.value) ?? return true
+            owner :: ~machine.program.types[definition]
             if owner.kind == {
                 .Struct(fields, _) -> {
                     if data == {
@@ -3071,7 +3041,7 @@ fn jet_eval_host_value_preflight(machine: &JetEvalMachine, row: MIRPreludeCall?,
             return true
         }
         .Closure(function, captures) -> {
-            function_row :: jet_eval_find_function(machine.program, function) ?? {
+            function_row :: jet_eval_find_function(machine, function) ?? {
                 jet_eval_compiler_fail(&machine, span, "native host closure has no checked function facts")
                 return false
             }
@@ -3432,7 +3402,7 @@ fn jet_eval_host_value_adopt_mode(machine: &JetEvalMachine, row: MIRPreludeCall?
             return Val(JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.Enum{type_name: type_name, variant: variant, args: output}})
         }
         .Closure(function, captures) -> {
-            function_row := jet_eval_find_function(machine.program, function)
+            function_row := jet_eval_find_function(machine, function)
             if function_row == None {
                 jet_eval_compiler_fail(&machine, span, "native host closure has no checked function facts")
                 if cleanup -> loop capture in captures -> jet_eval_owned_host_value_discard(&machine, capture, span)
@@ -3964,9 +3934,9 @@ fn jet_eval_result_host_closure_transfer_validate(machine: &JetEvalMachine, sour
 
 fn jet_eval_callback_closure_reusable(machine: JetEvalMachine, closure: JetEvalRuntimeValue) -> Bool Never! {
     if closure == .Closure(function, captures) {
-        function_row :: jet_eval_find_function(machine.program, function) ?? return false
+        function_row :: jet_eval_function_row(machine, function) ?? return false
         if captures.len() == 0 -> return true
-        facts :: function_row.captures ?? return false
+        facts :: machine.program.functions[function_row].captures ?? return false
         return facts.moved.len() == 0
     }
     false
@@ -4650,7 +4620,7 @@ fn jet_eval_result_host_callable_signature_matches(machine: &JetEvalMachine, fun
 }
 
 fn jet_eval_result_host_closure_shape_node(machine: &JetEvalMachine, ty: MIRType, function_id: MIRFunctionID, captures: [JetEvalRuntimeValue], nodes: &[JetEvalHostTypeNode], seen: &[String:Int], span: Span) -> Int? {
-    function :: jet_eval_find_function(machine.program, function_id) ?? {
+    function :: jet_eval_find_function(machine, function_id) ?? {
         jet_eval_compiler_fail(&machine, span, "Source result closure has no live checked guest function")
         return None
     }
@@ -5027,11 +4997,11 @@ fn jet_eval_host_substitute_type(ty: MIRType, params: [MIRGenericParam], args: [
 fn jet_eval_host_nominal_definition(machine: &JetEvalMachine, ty: MIRType, span: Span) -> MIRTypeDef? {
     id := if ty.kind == {.Apply(name, _) -> Val(name.id) else -> ty.identity}
     nominal_id :: id ?? return None
-    loop definition in machine.program.types {
-        if definition.id == nominal_id -> return Val(definition)
+    row :: machine.rows.types.get(nominal_id.value) ?? {
+        jet_eval_compiler_fail(&machine, span, "native host aggregate type has no checked nominal definition")
+        return None
     }
-    jet_eval_compiler_fail(&machine, span, "native host aggregate type has no checked nominal definition")
-    None
+    Val(machine.program.types[row])
 }
 
 fn jet_eval_host_struct_field_type(machine: &JetEvalMachine, ty: MIRType?, name: String, span: Span) -> MIRType? {
@@ -5122,24 +5092,17 @@ fn jet_eval_host_enum_arg_type(machine: &JetEvalMachine, ty: MIRType?, variant_n
 }
 
 
-fn jet_eval_core_owner_check(program: &MIRProgram, ty: MIRType) -> JetEvalHostCoreOwnerCheck Never! {
+fn jet_eval_core_owner_check(program: MIRProgram, rows: JetEvalProgramRows, ty: MIRType) -> JetEvalHostCoreOwnerCheck Never! {
     nominal :: if ty.kind == {
         .Apply(name, _) -> Val(name)
         else -> None
     }
     name :: nominal ?? return JetEvalHostCoreOwnerCheck.Missing
     nominal_id := name.id
-    fact := MIRCoreOwner?{None}
-    matches := 0
-    loop candidate in program.core_owners {
-        if candidate.nominal_id == nominal_id {
-            matches += 1
-            fact = Val(candidate)
-        }
-    }
-    if matches == 0 -> return JetEvalHostCoreOwnerCheck.Missing
-    if matches > 1 -> return JetEvalHostCoreOwnerCheck.Invalid{message: "native Core owner registration is ambiguous"}
-    owner :: fact ?? return JetEvalHostCoreOwnerCheck.Invalid{message: "native Core owner registration is missing"}
+    matches :: rows.core_owners_by_nominal.get(nominal_id.value) ?? [Int]{}
+    if matches.len() == 0 -> return JetEvalHostCoreOwnerCheck.Missing
+    if matches.len() > 1 -> return JetEvalHostCoreOwnerCheck.Invalid{message: "native Core owner registration is ambiguous"}
+    owner :: program.core_owners[matches[0]]
     if owner.id.value == 0 || owner.nominal_id.value == 0 {
         return JetEvalHostCoreOwnerCheck.Invalid{message: "native Core owner registration has a zero identity"}
     }
@@ -5149,47 +5112,38 @@ fn jet_eval_core_owner_check(program: &MIRProgram, ty: MIRType) -> JetEvalHostCo
     if owner.id != mir_type_id(owner.key) {
         return JetEvalHostCoreOwnerCheck.Invalid{message: "native Core owner fact ID disagrees with its checked key"}
     }
-    registered_matches := 0
-    loop candidate in program.core_owners {
-        if candidate.id == owner.id -> registered_matches += 1
-    }
-    if registered_matches != 1 {
+    registered_matches :: rows.core_owners_by_id.get(owner.id.value) ?? [Int]{}
+    if registered_matches.len() != 1 {
         return JetEvalHostCoreOwnerCheck.Invalid{message: "native Core owner registered ID is ambiguous"}
     }
     if owner.ownership != MIROwnershipMode.Owned && owner.ownership != MIROwnershipMode.Move {
         return JetEvalHostCoreOwnerCheck.Invalid{message: "native Core owner fact is not an owned nominal"}
     }
-    definition := MIRTypeDef?{None}
-    loop candidate in program.types {
-        if candidate.id == owner.id -> definition = Val(candidate)
-    }
-    if definition != None {
-        checked_definition :: definition ?? return JetEvalHostCoreOwnerCheck.Invalid{message: "native Core owner checked type definition is missing"}
-        if checked_definition.key != owner.key || checked_definition.name != owner.name || (checked_definition.ownership != MIROwnershipMode.Owned && checked_definition.ownership != MIROwnershipMode.Move) {
+    if rows.types.get(owner.id.value) == .Val(checked_definition) {
+        if program.types[checked_definition].key != owner.key || program.types[checked_definition].name != owner.name || (program.types[checked_definition].ownership != MIROwnershipMode.Owned && program.types[checked_definition].ownership != MIROwnershipMode.Move) {
             return JetEvalHostCoreOwnerCheck.Invalid{message: "native Core owner fact disagrees with its checked type definition"}
         }
-        if owner.module_id != (Val(checked_definition.module_id)) {
+        if owner.module_id != (Val(program.types[checked_definition].module_id)) {
             return JetEvalHostCoreOwnerCheck.Invalid{message: "native Core owner fact module disagrees with its checked type definition"}
         }
     }
     if owner.module_id != None {
         module_id :: owner.module_id ?? return JetEvalHostCoreOwnerCheck.Invalid{message: "native Core owner fact has an invalid source module"}
-        found_module := false
-        loop candidate in program.modules {
-            if candidate.id == module_id -> found_module = true
-        }
-        if !found_module -> return JetEvalHostCoreOwnerCheck.Invalid{message: "native Core owner fact has no checked source module"}
+        if rows.modules.get(module_id.value) == None -> return JetEvalHostCoreOwnerCheck.Invalid{message: "native Core owner fact has no checked source module"}
     }
     lifecycle_found := false
-    loop lifecycle in program.handles {
-        if lifecycle.ownership == MIRHandleOwnership.Owned && mir_type_same_checked_type(lifecycle.ty, ty) -> lifecycle_found = true
+    loop index in 0..<program.handles.len() {
+        if program.handles[index].ownership == MIRHandleOwnership.Owned && mir_type_same_checked_type(program.handles[index].ty, ty) {
+            lifecycle_found = true
+            break
+        }
     }
     if !lifecycle_found -> return JetEvalHostCoreOwnerCheck.Invalid{message: "native Core owner has no exact registered owned lifecycle"}
     JetEvalHostCoreOwnerCheck.Valid{owner: owner}
 }
 
 fn jet_eval_core_owner_fact(machine: &JetEvalMachine, ty: MIRType, span: Span) -> MIRCoreOwner? {
-    if jet_eval_core_owner_check(&machine.program, ty) == {
+    if jet_eval_core_owner_check(machine.program, machine.rows, ty) == {
         .Missing -> return None
         .Valid(owner) -> return Val(owner)
         .Invalid(message) -> {
@@ -5256,8 +5210,11 @@ fn jet_eval_host_handle_validate(machine: &JetEvalMachine, row: MIRPreludeCall?,
                         }
                     }
                     checked_type := false
-                    loop candidate in machine.program.type_instances {
-                        if mir_type_same_checked_type(candidate, receiver_type) -> checked_type = true
+                    loop index in 0..<machine.program.type_instances.len() {
+                        if mir_type_same_checked_type(machine.program.type_instances[index], receiver_type) {
+                            checked_type = true
+                            break
+                        }
                     }
                     if !checked_type {
                         jet_eval_compiler_fail(&machine, span, "native interface carrier type is not present in the checked program")
@@ -5272,10 +5229,7 @@ fn jet_eval_host_handle_validate(machine: &JetEvalMachine, row: MIRPreludeCall?,
             return true
         }
         .Declared(declared_ty) -> {
-            lifecycle := MIRHandleLifecycle?{None}
-            loop candidate in machine.program.handles {
-                if candidate.id == handle -> lifecycle = Val(candidate)
-            }
+            lifecycle := jet_eval_handle_lifecycle(machine, handle)
             lifecycle_row :: lifecycle ?? {
                 jet_eval_compiler_fail(&machine, span, "native declared handle has no canonical lifecycle row")
                 return false
@@ -5790,11 +5744,16 @@ fn jet_eval_host_row(machine: &JetEvalMachine, row: MIRPreludeCall, args: [JetEv
     jet_eval_host_row_with_moves(&machine, row, args, result_ty, [Bool]{}, span)
 }
 fn jet_eval_foreign_row(machine: &JetEvalMachine, id: MIRForeignID, span: Span) -> MIRForeign? {
-    loop row in machine.program.foreign {
-        if row.id == id -> return Val(row)
+    row :: machine.rows.foreign.get(id.value) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR foreign call ID has no canonical foreign row")
+        return None
     }
-    jet_eval_compiler_fail(&machine, span, "MIR foreign call ID has no canonical foreign row")
-    None
+    Val(machine.program.foreign[row])
+}
+
+fn jet_eval_handle_lifecycle(machine: JetEvalMachine, handle: MIRHandleID) -> MIRHandleLifecycle? {
+    row :: machine.rows.handles.get(handle.value) ?? return None
+    Val(machine.program.handles[row])
 }
 
 fn jet_eval_foreign_return_value(machine: &JetEvalMachine, row: MIRForeign, value: JetEvalRuntimeValue, span: Span) -> JetEvalRuntimeValue? {
@@ -5811,14 +5770,11 @@ fn jet_eval_foreign_return_value(machine: &JetEvalMachine, row: MIRForeign, valu
     }
     handle :: row.handle ?? return None
     return_ty :: row.return_type ?? return None
-    lifecycle_ty := MIRType?{None}
-    loop lifecycle in machine.program.handles {
-        if lifecycle.id == handle -> lifecycle_ty = Val(lifecycle.ty)
-    }
-    lifecycle :: lifecycle_ty ?? {
+    lifecycle_row :: machine.rows.handles.get(handle.value) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR foreign handle return row references a missing lifecycle")
         return None
     }
+    lifecycle :: machine.program.handles[lifecycle_row].ty
     if !mir_type_same_checked_type(lifecycle, return_ty) {
         jet_eval_compiler_fail(&machine, span, "MIR foreign handle return type disagrees with its lifecycle")
         return None
@@ -6293,10 +6249,7 @@ fn jet_eval_close_foreign_value(machine: &JetEvalMachine, value: JetEvalRuntimeV
                     physical_ok = jet_eval_resource_release(&machine, handle, raw, token, span)
                 }
                 else -> {
-                    lifecycle := MIRHandleLifecycle?{None}
-                    loop candidate in machine.program.handles {
-                        if candidate.id == handle -> lifecycle = Val(candidate)
-                    }
+                    lifecycle := jet_eval_handle_lifecycle(machine, handle)
                     physical_ok = jet_eval_close_foreign_lifecycle(&machine, lifecycle, token_kind, handle, raw, token, span)
                 }
             }
@@ -6314,15 +6267,14 @@ fn jet_eval_close_foreign_value(machine: &JetEvalMachine, value: JetEvalRuntimeV
 // call boundary discharges it.
 fn jet_eval_retire_foreign_close_result(machine: &JetEvalMachine, row: MIRForeign, args: [JetEvalRuntimeValue], span: Span) -> Bool {
     ok := true
-    loop lifecycle in machine.program.handles {
-        if lifecycle.close_foreign != None {
-            close_id :: lifecycle.close_foreign ?? next
-            if close_id != row.id -> next
-            loop value in args {
-                if value == .ForeignHandle(handle, _, token) {
-                    if handle == lifecycle.id {
-                        if !jet_eval_foreign_handle_transfer_retire(&machine, token, span) -> ok = false
-                    }
+    loop index in 0..<machine.program.handles.len() {
+        close_id :: machine.program.handles[index].close_foreign ?? next
+        if close_id != row.id -> next
+        lifecycle_id :: machine.program.handles[index].id
+        loop value in args {
+            if value == .ForeignHandle(handle, _, token) {
+                if handle == lifecycle_id {
+                    if !jet_eval_foreign_handle_transfer_retire(&machine, token, span) -> ok = false
                 }
             }
         }
@@ -6604,7 +6556,7 @@ fn jet_eval_host_call(machine: &JetEvalMachine, frame_index: Int, call: MIRPrelu
     row :: jet_eval_route_prelude_row(&machine, call, span) ?? return None
     prepared :: jet_eval_call_arguments(&machine, frame_index, args, span) ?? return None
     values := prepared.values
-    function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? {
+    function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR host call frame function is unavailable")
         jet_eval_drop_call_values(&machine, values, prepared.move_permissions, span)
         return None
@@ -6613,8 +6565,8 @@ fn jet_eval_host_call(machine: &JetEvalMachine, frame_index: Int, call: MIRPrelu
     move_permissions := prepared.move_permissions
     loop call_arg in args {
         fact := MIRType?{None}
-        loop candidate in function.values {
-            if candidate.id == call_arg.value -> fact = Val(candidate.ty)
+        loop index in 0..<machine.program.functions[function].values.len() {
+            if machine.program.functions[function].values[index].id == call_arg.value -> fact = Val(machine.program.functions[function].values[index].ty)
         }
         argument_ty :: fact ?? {
             jet_eval_compiler_fail(&machine, span, "MIR host call argument has no checked type fact")
@@ -6767,11 +6719,11 @@ fn jet_eval_host_take_pattern(
     span: Span,
 ) -> JetEvalRuntimeValue? {
     if !jet_eval_take_pattern_result_shape_valid(&machine, result_ty, span) -> return None
-    function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? {
+    function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR take-pattern frame function is unavailable")
         return None
     }
-    place :: jet_eval_place(function, receiver_place) ?? {
+    place :: jet_eval_function_place(machine, function, receiver_place) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR take-pattern receiver place is unavailable")
         return None
     }
@@ -6817,12 +6769,8 @@ fn jet_eval_host_component_unwrap_type(machine: JetEvalMachine, ty: MIRType, spa
     if ty.kind == {
         .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return jet_eval_host_component_unwrap_type(machine, inner, span)
         .Apply(name, _) -> {
-            loop definition in machine.program.types {
-                if definition.id == name.id {
-                    if definition.kind == .Alias(target) -> return jet_eval_host_component_unwrap_type(machine, target, span)
-                    return Val(ty)
-                }
-            }
+            row :: machine.rows.types.get(name.id.value) ?? return Val(ty)
+            if machine.program.types[row].kind == .Alias(target) -> return jet_eval_host_component_unwrap_type(machine, target, span)
             return Val(ty)
         }
         else -> return Val(ty)
@@ -7273,11 +7221,11 @@ fn jet_eval_host_fixed_backing_request(machine: &JetEvalMachine, frame_index: In
         jet_eval_compiler_fail(&machine, span, "MIR Fixed.over argument did not preserve its checked writable place")
         return None
     }
-    function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? {
+    function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR Fixed.over frame function is unavailable")
         return None
     }
-    place :: jet_eval_place(function, place_id) ?? {
+    place :: jet_eval_function_place(machine, function, place_id) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR Fixed.over root place is unavailable")
         return None
     }
@@ -7290,8 +7238,8 @@ fn jet_eval_host_fixed_backing_request(machine: &JetEvalMachine, frame_index: In
         return None
     }
     local := MIRLocal?{None}
-    loop candidate in function.locals {
-        if candidate.id == local_id -> local = Val(candidate)
+    loop index in 0..<machine.program.functions[function].locals.len() {
+        if machine.program.functions[function].locals[index].id == local_id -> local = Val(machine.program.functions[function].locals[index])
     }
     local_row :: local ?? {
         jet_eval_compiler_fail(&machine, span, "MIR Fixed.over root local has no checked local row")
@@ -7377,7 +7325,7 @@ fn jet_eval_host_fixed_backing_request(machine: &JetEvalMachine, frame_index: In
         key: JetEvalHostFixedBackingKey{
             machine_identity: machine.identity,
             frame: frame_index,
-            function: function.id,
+            function: machine.program.functions[function].id,
             local: local_id,
             place: place_id,
         },
@@ -8099,7 +8047,7 @@ fn jet_eval_columnar_read(machine: &JetEvalMachine, frame_index: Int, base: MIRV
         jet_eval_compiler_fail(&machine, span, "MIR columnar read index is outside the checked row range")
         return None
     }
-    field_name :: jet_eval_field_name(machine.program, column) ?? {
+    field_name :: jet_eval_field_name(machine, column) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR columnar field ID is missing")
         return None
     }
@@ -8259,7 +8207,7 @@ fn jet_eval_semantic_unavailable_args(machine: &JetEvalMachine, frame_index: Int
 fn jet_eval_semantic_fields(machine: &JetEvalMachine, frame_index: Int, fields: [MIRFieldValue], span: Span) -> [TComptimeField]? {
     output := [TComptimeField]{}
     loop field in fields {
-        name :: jet_eval_field_name(machine.program, field.field) ?? {
+        name :: jet_eval_field_name(machine, field.field) ?? {
             jet_eval_compiler_fail(&machine, span, "MIR semantic struct field identity is unavailable")
             return None
         }
@@ -8308,16 +8256,16 @@ fn jet_eval_semantic_debug(machine: &JetEvalMachine, frame_index: Int, value: MI
 }
 
 fn jet_eval_require_locals(machine: &JetEvalMachine, frame_index: Int, context: MIRPanicContext, span: Span) -> String? {
-    function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? {
+    function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR RequireStop context has no owning function")
         return None
     }
     output := [String]{}
     loop local in context.locals {
         definition := MIRLocal?{None}
-        loop candidate in function.locals {
-            if candidate.id == local.local {
-                definition = Val(candidate)
+        loop index in 0..<machine.program.functions[function].locals.len() {
+            if machine.program.functions[function].locals[index].id == local.local {
+                definition = Val(machine.program.functions[function].locals[index])
                 break
             }
         }
@@ -8790,7 +8738,7 @@ fn jet_eval_semantic(machine: &JetEvalMachine, frame_index: Int, operation: MIRS
                 jet_eval_compiler_fail(&machine, span, "MIR carrier fact route has unsupported ABI")
                 return None
             }
-            field_name :: jet_eval_field_name(machine.program, field) ?? {
+            field_name :: jet_eval_field_name(machine, field) ?? {
                 jet_eval_compiler_fail(&machine, span, "MIR carrier fact field ID is missing")
                 return None
             }
@@ -8861,9 +8809,9 @@ fn jet_eval_semantic(machine: &JetEvalMachine, frame_index: Int, operation: MIRS
                 return None
             }
             adapter_value := MIRCallbackAdapter?{None}
-            loop candidate in machine.program.callbacks {
-                if candidate.id == callback {
-                    adapter_value = Val(candidate)
+            loop index in 0..<machine.program.callbacks.len() {
+                if machine.program.callbacks[index].id == callback {
+                    adapter_value = Val(machine.program.callbacks[index])
                     break
                 }
             }
@@ -8894,7 +8842,7 @@ fn jet_eval_semantic(machine: &JetEvalMachine, frame_index: Int, operation: MIRS
             }
             prepared :: prepared_result ?? return None
             if closure == .Closure(function_id, captures) {
-                function :: jet_eval_find_function(machine.program, function_id) ?? {
+                function :: jet_eval_function_row(machine, function_id) ?? {
                     if !closure_borrowed -> jet_eval_drop_value(&machine, closure, span)
                     jet_eval_drop_call_values(&machine, prepared.values, prepared.owned, span)
                     jet_eval_compiler_fail(&machine, span, "MIR policy/interrupt function is unavailable")
@@ -8902,7 +8850,7 @@ fn jet_eval_semantic(machine: &JetEvalMachine, frame_index: Int, operation: MIRS
                 }
                 read_temporaries := [Bool]{}
                 loop index in 0..<prepared.values.len() {
-                    is_read := index < function.params.len() && function.params[index].access == MIRAccess.Read
+                    is_read := index < machine.program.functions[function].params.len() && machine.program.functions[function].params[index].access == MIRAccess.Read
                     &read_temporaries.push(is_read && prepared.owned[index])
                 }
                 invoked := jet_eval_invoke_with_borrowed_captures(&machine, function_id, prepared.values, captures, closure_borrowed, span)
@@ -9374,11 +9322,11 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
         }
         .LoopIterInit(call, collection, step, by_value, source_kind) -> return jet_eval_initialize_iterator(&machine, frame_index, call, collection, step, by_value, source_kind, span)
         .ScopeEnter(scope, test_member) -> {
-            function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? {
+            function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? {
                 jet_eval_compiler_fail(&machine, span, "MIR scope enter has no owning function")
                 return None
             }
-            scope_row :: jet_eval_scope_row(function, scope) ?? {
+            scope_row :: jet_eval_function_scope(machine, function, scope) ?? {
                 jet_eval_compiler_fail(&machine, span, "MIR scope enter references an unavailable scope")
                 return None
             }
@@ -9393,11 +9341,11 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
             return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
         }
         .ScopeExit(scope) -> {
-            function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? {
+            function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? {
                 jet_eval_compiler_fail(&machine, span, "MIR scope exit has no owning function")
                 return None
             }
-            scope_row :: jet_eval_scope_row(function, scope) ?? {
+            scope_row :: jet_eval_function_scope(machine, function, scope) ?? {
                 jet_eval_compiler_fail(&machine, span, "MIR scope exit references an unavailable scope")
                 return None
             }
@@ -9429,11 +9377,9 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
     }
 }
 
-fn jet_eval_scope_row(function: MIRFunction, id: MIRScopeID) -> MIRScope? {
-    loop scope in function.scopes {
-        if scope.id == id {
-            return Val(scope)
-        }
+fn jet_eval_function_scope(machine: JetEvalMachine, function: Int, id: MIRScopeID) -> MIRScope? {
+    loop index in 0..<machine.program.functions[function].scopes.len() {
+        if machine.program.functions[function].scopes[index].id == id -> return Val(machine.program.functions[function].scopes[index])
     }
     None
 }
@@ -9458,11 +9404,11 @@ fn jet_eval_drop_edge_matches(action: MIRDropEdge, edge: MIRDropEdge) -> Bool Ne
 }
 
 fn jet_eval_drop_place(machine: &JetEvalMachine, frame_index: Int, place_id: MIRPlaceID, span: Span) -> Bool {
-    function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? {
+    function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR drop frame function is unavailable")
         return false
     }
-    place :: jet_eval_place(function, place_id) ?? {
+    place :: jet_eval_function_place(machine, function, place_id) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR drop targets an unavailable place")
         return false
     }
@@ -9482,13 +9428,14 @@ fn jet_eval_drop_place(machine: &JetEvalMachine, frame_index: Int, place_id: MIR
 }
 
 fn jet_eval_run_drops(machine: &JetEvalMachine, frame_index: Int, edge: MIRDropEdge, span: Span) -> Bool {
-    function :: jet_eval_find_function(machine.program, machine.frames[frame_index].function) ?? {
+    function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR drop frame function is unavailable")
         return false
     }
-    loop action in function.drops {
-        if jet_eval_drop_edge_matches(action.edge, edge) {
-            if !jet_eval_drop_place(&machine, frame_index, action.place, span) -> return false
+    loop index in 0..<machine.program.functions[function].drops.len() {
+        if jet_eval_drop_edge_matches(machine.program.functions[function].drops[index].edge, edge) {
+            place :: machine.program.functions[function].drops[index].place
+            if !jet_eval_drop_place(&machine, frame_index, place, span) -> return false
         }
     }
     !jet_eval_has_failure(machine)

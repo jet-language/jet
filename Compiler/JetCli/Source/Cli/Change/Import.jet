@@ -1,0 +1,107 @@
+// CLI-56 preview ONLY (Source/CmdImport.rs). No publication, evidence attachment,
+// comparison acceptance, or persistence is reachable from this entry.
+
+// Rust Todo::diagnostic; the real registry owns wording and metadata.
+pub fn jet_cli_import_todo_diagnostic(todo: JetCLIImportTodo) -> Diagnostic Never! {
+    row :: diagnostic_registry_row("JT0101") ?? panic("JT0101 is not registered")
+    what :: row.what.replace("{{construct}}", todo.what).replace("{{source}}", todo.source)
+    why :: row.why.replace("{{reason}}", todo.why)
+    fix :: row.fix.replace("{{fix}}", todo.fix).replace("{{target}}", todo.target)
+    diagnostic_from_registry("JT0101", None, what, why, fix)
+}
+// Rust migration_source_conversion / migration_mode.
+pub fn jet_cli_import_migration_source_conversion(boundary: ForeignBoundaryContract) -> String Never! {
+    if boundary.source_import -> "narrow-checked-subset" else -> "unavailable"
+}
+pub fn jet_cli_import_migration_mode(boundary: ForeignBoundaryContract) -> String Never! {
+    if {
+        boundary.disposition == ForeignBoundaryDisposition.BinderOnly -> "manual"
+        boundary.source_import -> "conversion"
+        else -> "binder"
+    }
+}
+// Rust migration_projection_value (mandatory completed plan).
+pub fn jet_cli_import_migration_projection_value(plan: JetCLIImportPlan) -> DataTree Never! {
+    report_status_object(StatusFields.new().with("disposition", DataTree.Text(plan.boundary.disposition.as_str())).with("source_conversion", DataTree.Text(jet_cli_import_migration_source_conversion(plan.boundary))).with("mode", DataTree.Text(jet_cli_import_migration_mode(plan.boundary))).with("source_authority", DataTree.Text(plan.boundary.source_authority.as_str())))
+}
+// Rust boundary_projection_value; canonical provenance, not a private seal.
+pub fn jet_cli_import_boundary_projection_value(plan: JetCLIImportPlan) -> DataTree Never! {
+    rows := [DataTree]{}
+    loop field in plan.boundary.provenance_fields() -> &rows.push(report_status_object(StatusFields.new().with("name", DataTree.Text(field.name)).with("value", DataTree.Text(field.value))))
+    DataTree.Array(rows)
+}
+// Rust report_value. Preserve insertion order in the shared Report/DataTree.
+pub fn jet_cli_import_report_value(plan: JetCLIImportPlan) -> DataTree Never! {
+    omissions := [DataTree]{}
+    loop todo in plan.todos {
+        diagnostic :: jet_cli_import_todo_diagnostic(todo)
+        &omissions.push(report_status_object(StatusFields.new().with("code", DataTree.Text(diagnostic.code)).with("what", DataTree.Text(diagnostic.what)).with("why", DataTree.Text(diagnostic.why)).with("fix", DataTree.Text(diagnostic.fix)).with("source", DataTree.Text(todo.source)).with("source_span", DataTree.Text(todo.source)).with("generated_target", DataTree.Text(todo.target)).with("provenance", DataTree.Text("D-MIGRATE-SRC1")).with("migration_status", DataTree.Text(todo.status))))
+    }
+    provenance :: report_status_object(StatusFields.new().with("source_root", DataTree.Text(~plan.source.raw)).with("generated_root", DataTree.Text(~plan.target.raw)).with("boundary", jet_cli_import_boundary_projection_value(plan)))
+    summary :: report_status_object(StatusFields.new().with("files", DataTree.Int(plan.generated.len())).with("translated_functions", DataTree.Int(plan.functions)).with("carried_tests", DataTree.Int(plan.tests)).with("omissions", DataTree.Int(plan.todos.len())))
+    report_status_object(StatusFields.new().with("schema", DataTree.Text("jet.source-import.v1")).with("law", DataTree.Text("D-MIGRATE-SRC1")).with("language", DataTree.Text(~plan.language)).with("source", DataTree.Text(~plan.source.raw)).with("target", DataTree.Text(~plan.target.raw)).with("migration", jet_cli_import_migration_projection_value(plan)).with("provenance", provenance).with("summary", summary).with("omissions", DataTree.Array(omissions)))
+}
+// Rust report / migration_projection_json / boundary_projection_json: shared
+// JSON renders the same finite ordered values, without serialize/reparse.
+pub fn jet_cli_import_report(plan: JetCLIImportPlan) -> String Never! { "{report_json(jet_cli_import_report_value(plan))}\n" }
+pub fn jet_cli_import_migration_projection_json(plan: JetCLIImportPlan) -> String Never! { report_json(jet_cli_import_migration_projection_value(plan)) }
+pub fn jet_cli_import_boundary_projection_json(plan: JetCLIImportPlan) -> String Never! { report_json(jet_cli_import_boundary_projection_value(plan)) }
+
+// Rust usage_error. The preview-specific entry rejects publication requests;
+// it is not the full CmdImport::run and must not be wired as Create/Update.
+pub fn jet_cli_import_usage_error(what: String, fix: String, json: Bool) -> JetDriverVerbOutput Never! {
+    why :: "D-MIGRATE-SRC1 keeps source import arguments explicit"
+    if json -> return JetDriverVerbOutput{stdout: StatusEnvelope.new("import", false).with_report(ReportEnvelope.new("tool", "error", "E2102", what, why, fix)).json_line(), stderr: "", exit_code: 2}
+    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", what, why, fix, false), exit_code: 2}
+}
+// Rust operation_error (JT0198).
+pub fn jet_cli_import_operation_error(what: String, why: String, json: Bool) -> JetDriverVerbOutput Never! {
+    row :: diagnostic_registry_row("JT0198") ?? panic("JT0198 is not registered")
+    diagnostic :: diagnostic_from_registry("JT0198", None, row.what.replace("{{operation}}", what), row.why.replace("{{reason}}", why), row.fix)
+    if json -> return JetDriverVerbOutput{stdout: StatusEnvelope.new("import", false).with_report(ReportEnvelope.new("tool", "error", diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)).json_line(), stderr: "", exit_code: 1}
+    JetDriverVerbOutput{stdout: "", stderr: "error[{diagnostic.code}]: {diagnostic.what}\n  why: {diagnostic.why}\n  fix: {diagnostic.fix}\n", exit_code: 1}
+}
+// Rust apply_plan's genuine Mode::DryRun path (3031-3210). Target and baseline
+// reads MUST still happen; errors from those reads are discarded by Rust .ok().
+// The host cannot attach evidence, write files, persist reports, or accept a
+// comparison: none of those operations exist on this typed read-only seam.
+pub fn jet_cli_import_preview_plan<H: JetCLIImportPlanHost>(plan: JetCLIImportPlan, json: Bool, host: &H) -> JetDriverVerbOutput Never! {
+    report :: jet_cli_import_report(plan)
+    baseline_root :: import_paths.join(plan.target, ".jet-import/baseline")
+    loop generated in plan.generated {
+        _ :: &host.read_text(import_paths.join_path(plan.target, generated.relative)) ?? ""
+        _ :: &host.read_text(import_paths.join_path(baseline_root, generated.relative)) ?? ""
+    }
+    _ :: &host.read_text(import_paths.join(plan.target, "import-report.json")) ?? ""
+    _ :: &host.read_text(import_paths.join(baseline_root, "import-report.json")) ?? ""
+    if json -> return JetDriverVerbOutput{stdout: StatusEnvelope.new("import", true).with_field("import", jet_cli_import_report_value(plan)).json_line(), stderr: "", exit_code: 0}
+    output := [U8]{}
+    jet_cli_import_files_append(&output, "would import {plan.source.raw} -> {plan.target.raw}\n  {plan.functions} functions, {plan.tests} carried tests, {plan.todos.len()} TODO diagnostics\n  migration: {plan.boundary.disposition.as_str()} (mode: {jet_cli_import_migration_mode(plan.boundary)}; source conversion: {jet_cli_import_migration_source_conversion(plan.boundary)}; source authority: {plan.boundary.source_authority.as_str()})\n")
+    loop todo in plan.todos {
+        diagnostic :: jet_cli_import_todo_diagnostic(todo)
+        jet_cli_import_files_append(&output, "  {diagnostic.code} {diagnostic.what}\n    why: {diagnostic.why}\n    fix: {diagnostic.fix}\n    target: {todo.target}  status: {todo.status}\n")
+    }
+    JetDriverVerbOutput{stdout: String.from_bytes(output) ?? panic("import preview UTF-8"), stderr: "", exit_code: 0}
+}
+// Rust run preparation/error precedence (77-137), restricted public preview.
+pub fn jet_cli_run_import_preview<H: JetCLIImportPlanHost>(raw: [String], json: Bool, host: &H) -> JetDriverVerbOutput Never! {
+    args :: jet_cli_import_parse_args(raw) ?? return jet_cli_import_usage_error(err.what, err.fix, json)
+    language :: jet_cli_import_canonical_language(args.language)
+    if language == "c" || language == "cpp" {
+        foreign :: jet_cli_import_foreign_language(language) ?? panic("C/C++ mapped")
+        capability :: pkg_foreign_boundary_capability(foreign)
+        return jet_cli_import_usage_error("source conversion for '{language}' is unavailable", "{capability.reason}; use {language}.<lib> for call-in-place binding and a checked #Extern overlay", json)
+    }
+    installed :: [String]{"py", "pascal", "ada", "java", "csharp", "ts", "js", "go"}
+    if !installed.contains(language) -> return jet_cli_import_usage_error("source importer '{language}' is not installed", "use jet import py|java|csharp|ts|js|go <dir> for narrow conversion; Ada/Pascal are binder-only/manual; C/C++ use their binder plus checked overlays", json)
+    if args.mode != JetCLIImportMode.DryRun -> return jet_cli_import_usage_error("source import preview requires --dry-run", "use jet import <lang> <dir> --dry-run", json)
+    cwd :: &host.cwd() ?? return jet_cli_import_operation_error("read current directory", err.message, json)
+    absolute :: if import_paths.is_absolute(args.source) -> args.source else -> import_paths.join_path(cwd, args.source)
+    source :: &host.canonicalize(absolute) ?? return jet_cli_import_operation_error("import {language} source", err.message, json)
+    if !&host.is_dir(source) -> return jet_cli_import_operation_error("import {language} source", "source is not a directory", json)
+    leaf :: import_paths.name(source)
+    name :: if leaf.is_empty() || leaf == "/" -> "imported" else -> leaf
+    target :: import_paths.join(import_paths.join(cwd, "jet"), name)
+    plan :: jet_cli_import_build_plan<H>(source, target, language, &host) ?? return jet_cli_import_operation_error("import {language} source", err.message, json)
+    jet_cli_import_preview_plan<H>(plan, json, &host)
+}

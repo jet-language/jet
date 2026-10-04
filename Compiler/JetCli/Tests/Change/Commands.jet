@@ -1,0 +1,209 @@
+// Source/CmdCodemod.rs has no inline tests. These behavioral controls cover
+// its private policy using the real canonical codecs/lexer/parser/AST walk.
+// Native apply/undo journeys require the SAME retained providers, not mocks.
+
+fn codemod_test_json(text: String) -> JetCLICodemodJSONValue Never! {
+    jet_cli_codemod_json_parse(text) ?? panic("codemod JSON fixture: {err.message}")
+}
+fn codemod_test_template(text: String) -> JetCLICodemodTemplate Never! {
+    jet_cli_codemod_parse_template(text) ?? panic("template fixture: {err.message}")
+}
+fn codemod_test_path(text: String) -> codemod_paths.OSPath Never! {
+    codemod_paths.from_text(text, codemod_paths.PathPlatform.Unix)
+}
+fn codemod_test_matches(pattern_text: String, candidate_text: String) -> [JetCLICodemodFound] Never! {
+    template :: codemod_test_template(pattern_text)
+    pattern :: jet_cli_codemod_parse_pattern_tree(template, "expr") ?? panic("compiler pattern: {err.message}")
+    source :: "fn run() {{ print({candidate_text}) }}\n"
+    lexed :: lex_generated(source.bytes())
+    assert_eq(lexed.diagnostics.len(), 0)
+    parsed :: parse_for_check_with_source(lexed.tokens, source.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    program :: parsed.program ?? panic("fixture must parse")
+    nodes :: semindex_structural_nodes_from_parsed(program, "<codemod-test>", source)
+    forest :: jet_cli_codemod_typed_forest(nodes, source) ?? panic("typed forest: {err.message}")
+    found := [JetCLICodemodFound]{}
+    loop at in 0..<forest.trees.len() {
+        tree :: forest.trees[at]
+        if tree.class != "expr" -> next
+        captures := [String:JetCLICodemodCapturedTree]{}
+        inserted := [String]{}
+        if jet_cli_codemod_match_typed_tree(pattern, forest, at, source, &captures, &inserted) {
+            texts := [String:String]{}
+            loop field in captures -> texts[field.key] = ^field.value.text
+            &found.push(JetCLICodemodFound{start: tree.span.start, end: tree.span.end, captures: ^texts})
+        }
+    }
+    ^found
+}
+
+#Test("codemod retired command precedence and dry-run/apply controls") {
+    retired :: jet_cli_codemod_command_parse([String]{"dry-run", "p.json", "--dry-run"})
+    if retired == {
+        .Err(error) -> assert_eq(error.message, "`jet inspect codemod dry-run` is retired; use `jet inspect codemod <plan.json> --dry-run`")
+        else -> panic("retired spelling accepted")
+    }
+    command :: jet_cli_codemod_command_parse([String]{"--unknown", "p.json", "--dry-run", "--yes"}) ?? panic("dry run")
+    if command == { .Object(path, apply, yes) -> { assert_eq(path, "p.json"); assert(!apply); assert(yes) } else -> panic("wrong command") }
+    applied :: jet_cli_codemod_command_parse([String]{"apply", "p.json", "--yes"}) ?? panic("apply")
+    if applied == { .Object(_, apply, yes) -> { assert(apply); assert(yes) } else -> panic("wrong apply") }
+    if jet_cli_codemod_command_parse([String]{"undo", "p.json", "--dry-run"}) == { .Err(_) -> {} else -> panic("dry-run undo accepted") }
+}
+
+#Test("codemod unsigned version decoding and unsupported version") {
+    assert_eq(jet_cli_codemod_object_version(codemod_test_json("{}")) ?? panic("default version"), U64{1})
+    assert_eq(jet_cli_codemod_object_version(codemod_test_json("{\"version\":2}")) ?? panic("batch version"), U64{2})
+    if jet_cli_codemod_object_version(codemod_test_json("{\"version\":18446744073709551615}")) == {
+        .Err(error) -> assert_eq(error.message, "unsupported codemod version 18446744073709551615; expected 1 or 2")
+        else -> panic("unsupported unsigned version accepted")
+    }
+    if jet_cli_codemod_object_version(codemod_test_json("{\"version\":true}")) == {
+        .Err(error) -> assert_eq(error.message, "`version` must be a non-negative integer")
+        else -> panic("boolean version accepted")
+    }
+}
+
+#Test("codemod JSON extraction preserves unsigned width and exact errors") {
+    fields := jet_cli_codemod_object(codemod_test_json("{\"n\":18446744073709551615,\"name\":\"hello\",\"bad\":false}")) ?? panic("object")
+    assert_eq(jet_cli_codemod_take_number(&fields, "n") ?? panic("u64 number"), U64{18446744073709551615})
+    assert_eq(jet_cli_codemod_take_string(&fields, "name") ?? panic("name"), "hello")
+    if jet_cli_codemod_take_string(&fields, "bad") == { .Err(error) -> assert_eq(error.message, "`bad` must be text") else -> panic("bad field accepted") }
+    if jet_cli_codemod_take_number(&fields, "missing") == { .Err(error) -> assert_eq(error.message, "codemod object missing `missing`") else -> panic("missing number accepted") }
+    assert_eq(jet_cli_codemod_take_bool_default(&fields, "default", true) ?? panic("default"), true)
+    assert(jet_cli_codemod_take_object_opt(&fields, "absent") ?? panic("optional") == None)
+}
+
+#Test("codemod unknown fields use Rust sorted key order") {
+    fields :: jet_cli_codemod_object(codemod_test_json("{\"z\":0,\"a\":0,\"middle\":0}")) ?? panic("object")
+    if jet_cli_codemod_reject_unknown(fields, "root") == {
+        .Err(error) -> assert_eq(error.message, "unknown field(s) in root: a, middle, z")
+        else -> panic("unknown fields accepted")
+    }
+}
+
+#Test("codemod V1 parse defaults relative paths and validation precedence") {
+    plan :: jet_cli_codemod_parse_v1(codemod_test_json("{\"entry\":\"Examples/a.jet\",\"operation\":\"rename\",\"from\":\"old\",\"to\":\"new\"}"), codemod_test_path("/p/plan.json")) ?? panic("V1")
+    assert_eq(plan.name, "Codemod")
+    assert_eq(codemod_paths.display(plan.entry), "/p/Examples/a.jet")
+    invalid :: codemod_test_json("{\"entry\":\"a.jet\",\"operation\":\"rename\",\"from\":\"1invalid\",\"to\":\"valid\",\"unexpected\":true}")
+    if jet_cli_codemod_parse_v1(invalid, codemod_test_path("/p/plan.json")) == {
+        .Err(error) -> assert_eq(error.message, "unknown field(s) in version 1 codemod: unexpected")
+        else -> panic("unknown V1 field accepted")
+    }
+}
+
+#Test("codemod nested comments captures and compiler-independent template tokens") {
+    template :: codemod_test_template("/* outer /* nested */ end */ f($head, $rest...) // tail\n")
+    assert_eq(jet_cli_codemod_template_text(template), "f ( $head , $rest... )")
+    if jet_cli_codemod_parse_template("/* not closed") == {
+        .Err(error) -> assert_eq(error.message, "unterminated comment at byte 0")
+        else -> panic("unterminated comment accepted")
+    }
+    if jet_cli_codemod_parse_template("$") == { .Err(error) -> assert_eq(error.message, "capture needs a name") else -> panic("nameless capture accepted") }
+    if jet_cli_codemod_parse_template("// only comment") == { .Err(error) -> assert_eq(error.message, "AST template cannot be empty") else -> panic("empty template accepted") }
+}
+
+#Test("codemod capture declaration and unused controls") {
+    pattern :: codemod_test_template("f($x, $y)")
+    if jet_cli_codemod_validate_templates("r", pattern, codemod_test_template("g($z)")) == {
+        .Err(error) -> assert_eq(error.message, "rule `r` replacement uses undeclared capture `$z`")
+        else -> panic("undeclared capture accepted")
+    }
+    if jet_cli_codemod_validate_templates("r", pattern, codemod_test_template("f($x)")) == {
+        .Err(error) -> assert_eq(error.message, "rule `r` capture `$y` is unused")
+        else -> panic("unused capture accepted")
+    }
+    jet_cli_codemod_validate_templates("r", pattern, codemod_test_template("f($y, $x)")) ?? panic("all captures used")
+}
+
+#Test("codemod replacement spacing tracks last Unicode scalar without rescanning output") {
+    template :: codemod_test_template("f($x, $y)")
+    captures :: [String:String]{"x": "alpha", "y": "βeta"}
+    assert_eq(jet_cli_codemod_render_replacement(template, captures), "f(alpha, βeta)")
+    adjacent :: codemod_test_template("$x $y")
+    assert_eq(jet_cli_codemod_render_replacement(adjacent, captures), "alpha βeta")
+    empty :: [String:String]{"x": "", "y": ""}
+    assert_eq(jet_cli_codemod_render_replacement(adjacent, empty), "")
+}
+
+#Test("codemod repeated capture compares typed structure not spelling span") {
+    matching :: codemod_test_matches("$x + $x", "a + a")
+    assert_eq(matching.len(), 1)
+    assert_eq(matching[0].captures["x"], "a")
+    assert_eq(codemod_test_matches("$x + $x", "a + b").len(), 0)
+    assert_eq(codemod_test_matches("$x + $x", "a + (a)").len(), 0)
+}
+
+#Test("codemod list capture supports greedy sequence and empty list") {
+    found :: codemod_test_matches("f($args...)", "f(a, b)")
+    assert_eq(found.len(), 1)
+    assert_eq(found[0].captures["args"], "a, b")
+    empty :: codemod_test_matches("f($args...)", "f()")
+    assert_eq(empty.len(), 1)
+    assert_eq(empty[0].captures["args"], "")
+}
+
+#Test("codemod capture rollback never changes an existing binding") {
+    captures := [String:JetCLICodemodCapturedTree]{}
+    inserted := [String]{}
+    assert(jet_cli_codemod_bind_capture("first", "a", "same", &captures, &inserted))
+    checkpoint :: inserted.len()
+    assert(jet_cli_codemod_bind_capture("second", "b", "different", &captures, &inserted))
+    assert(!jet_cli_codemod_bind_capture("first", "not-a", "wrong", &captures, &inserted))
+    jet_cli_codemod_rollback(&captures, &inserted, checkpoint)
+    assert_eq(captures.len(), 1)
+    assert_eq(captures["first"].text, "a")
+    assert_eq(inserted.len(), checkpoint)
+}
+
+#Test("codemod anchor relation uses identity when both present and exact fallback otherwise") {
+    anchors := JetCLICodemodAnchors{exact: [:], identities: [:], absent: [:], all: [:]}
+    anchor :: DefinitionAnchor{module_path: "/a.jet", kind: "function", def_span: SourceSpan{start: 1, end: 2}, semantic_identity: Val("resolved")}
+    assert(jet_cli_codemod_select_anchor(&anchors, anchor))
+    assert(!jet_cli_codemod_select_anchor(&anchors, anchor))
+    assert(jet_cli_codemod_anchors_match_definition(anchors, DefinitionAnchor{module_path: "/other.jet", kind: "const", def_span: SourceSpan{start: 90, end: 91}, semantic_identity: Val("resolved")}))
+    assert(!jet_cli_codemod_anchors_match_definition(anchors, DefinitionAnchor{module_path: "/a.jet", kind: "function", def_span: SourceSpan{start: 1, end: 2}, semantic_identity: Val("unrelated")}))
+    assert(jet_cli_codemod_anchors_match_definition(anchors, jet_cli_codemod_anchor_fallback(anchor)))
+}
+
+#Test("codemod changed region preserves Rust UTF8 byte boundaries") {
+    region :: jet_cli_codemod_changed_region("abc OLD xyz", "abc NEW xyz")
+    assert_eq(region.before.start, 4)
+    assert_eq(region.before.end, 7)
+    assert_eq(region.after.start, 4)
+    assert_eq(region.after.end, 7)
+    unicode :: jet_cli_codemod_changed_region("aéz", "aĩz")
+    assert_eq(unicode.before.start, 1)
+    assert_eq(unicode.before.end, 1)
+    assert_eq(unicode.after.start, 1)
+    assert_eq(unicode.after.end, 1)
+    // Both differing scalars share the suffix continuation byte; the original
+    // independent suffix boundary rollback deliberately ends at their starts.
+    assert(jet_cli_codemod_fix_rewrite_op("same".bytes(), "same".bytes()) == None)
+    assert(jet_cli_codemod_fix_rewrite_op([U8]{U8{255}}, "text".bytes()) == None)
+}
+
+#Test("codemod replay hex and digest exactness") {
+    assert_eq(jet_cli_codemod_unhex("00aAFF") ?? panic("hex"), [U8]{U8{0}, U8{170}, U8{255}})
+    if jet_cli_codemod_unhex("0") == { .Err(error) -> assert_eq(error.message, "invalid byte encoding in replay log") else -> panic("odd hex accepted") }
+    if jet_cli_codemod_unhex("gg") == { .Err(error) -> assert_eq(error.message, "invalid byte encoding in replay log") else -> panic("invalid hex accepted") }
+    assert_eq(jet_cli_codemod_hash_bytes("abc".bytes()), "sha256-ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+}
+
+#Test("codemod diff follows Rust CRLF and missing terminal LF rules") {
+    assert_eq(jet_cli_codemod_print_simple_diff("a\r\nb".bytes(), "c\n".bytes()), "@@ -1,2 +1,1 @@\n-a\n-b\n\\ No newline at end of file\n+c\n")
+    assert_eq(jet_cli_codemod_print_simple_diff([U8]{}, [U8]{}), "@@ -1,0 +1,0 @@\n")
+    assert_eq(jet_cli_codemod_diff_lines("\n".bytes()), [String]{""})
+    assert_eq(jet_cli_codemod_diff_lines("a\r".bytes()), [String]{"a\r"})
+}
+
+#Test("codemod path restrictions use real selected native component law") {
+    jet_cli_codemod_reject_parent_or_absolute("Examples/a.jet", "root path", codemod_paths.PathPlatform.Unix) ?? panic("relative path")
+    jet_cli_codemod_reject_parent_or_absolute("Examples//./a.jet", "root path", codemod_paths.PathPlatform.Unix) ?? panic("interior dot follows Rust components")
+    loop raw in [String]{"../x.jet", "./Examples/a.jet", "/Examples/a.jet"} {
+        if jet_cli_codemod_reject_parent_or_absolute(raw, "root path", codemod_paths.PathPlatform.Unix) == { .Err(error) -> assert_eq(error.message, "root path `{raw}` must be a relative path without `..`") else -> panic("forbidden path accepted") }
+    }
+    assert_eq(jet_cli_codemod_sanitize_file_name("a/b-β_1"), "a_b-β_1")
+    assert_eq(jet_cli_codemod_sanitize_file_name(""), "codemod")
+    assert_eq(codemod_paths.display(jet_cli_codemod_log_path(codemod_test_path("/p"), "A/B")), "/p/.jet/codemods/A_B.log.json")
+}

@@ -1,0 +1,506 @@
+// PORT-PENDING 0868 crates-jetpack-src-jetos-entry-module-group: crates/jetpack/src/JetOS/generation.rs:1-502
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::generation_files::{
+//RS     generation_dir, sync_generation_tree, validate_generation_root_proof, write_generation_files,
+//RS     write_generation_root_proof, write_generation_source_proof, GenerationRootProof,
+//RS };
+//RS use super::generations_activation::{append_generation, generation_ledger_timestamp, now_secs};
+//RS use super::kernel_bootstrap::{run_kernel_bootstrap_builder, validate_boot_payloads};
+//RS use super::options_rendering::boot_profile;
+//RS use super::store_realize::{
+//RS     desktop_default_required_packages, first_party_package_ref, jetos_runtime_package_ref,
+//RS     realize_ref, try_realize_ref, RealizeRefError,
+//RS };
+//RS use super::types::{Generation, OSFlags, CACHYOS_KERNEL_PACKAGE, SYSTEMD_INIT_PACKAGE};
+//RS use crate::Output::Theme;
+//RS use crate::RefSpec;
+//RS use crate::Store;
+//RS use jet_env_model::ModuleEval::{EnvPlan, SystemPlan};
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::sync::atomic::{AtomicU64, Ordering};
+//RS 
+//RS static GENERATION_STAGING_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+//RS 
+//RS pub(super) fn build_generation(
+//RS     theme: &Theme,
+//RS     plan: &EnvPlan,
+//RS     system: &SystemPlan,
+//RS     flags: &OSFlags,
+//RS     source_config: &Path,
+//RS ) -> Option<Generation> {
+//RS     let roots = Store::resolve();
+//RS     let project_dir = source_config
+//RS         .parent()
+//RS         .filter(|path| !path.as_os_str().is_empty())
+//RS         .unwrap_or_else(|| Path::new("."));
+//RS     let final_dir = generation_dir(system, flags.name.as_deref());
+//RS     let generation_name = final_dir.file_name()?.to_string_lossy().into_owned();
+//RS     let published_proof = if final_dir.exists() {
+//RS         match validate_generation_root_proof(
+//RS             &final_dir,
+//RS             &system.name,
+//RS             &generation_name,
+//RS             source_config,
+//RS             &roots,
+//RS             flags,
+//RS         ) {
+//RS             Ok(proof) => Some(proof),
+//RS             Err(error) => {
+//RS                 immutable_generation_error(theme, &final_dir, &error);
+//RS                 return None;
+//RS             }
+//RS         }
+//RS     } else {
+//RS         None
+//RS     };
+//RS     if let Some(proof) = published_proof.as_ref() {
+//RS         // A valid named generation is immutable. Reusing it must not rebuild
+//RS         // a staging tree: writers such as activation-diff intentionally see
+//RS         // the published generation on a retry and would otherwise produce a
+//RS         // different sealed manifest for the same request.
+//RS         return publish_generation(
+//RS             theme,
+//RS             &roots,
+//RS             &system.name,
+//RS             generation_name,
+//RS             final_dir,
+//RS             proof.clone(),
+//RS         );
+//RS     }
+//RS     let dir = generation_staging_dir(&final_dir);
+//RS     fs::create_dir_all(dir.join("packages")).ok()?;
+//RS     let name_w = system
+//RS         .packages
+//RS         .iter()
+//RS         .map(|p| p.name.len())
+//RS         .max()
+//RS         .unwrap_or(1);
+//RS     // D-FE-CLI1: build the real package-edge count up front so both the TTY
+//RS     // region and plain transcript report an honest denominator. Runtime
+//RS     // packages already named explicitly are not counted twice.
+//RS     let explicit_names: std::collections::BTreeSet<&str> =
+//RS         system.packages.iter().map(|p| p.name.as_str()).collect();
+//RS     let explicit_total = system.packages.len();
+//RS     let boot_for_progress = boot_profile(system);
+//RS     let implicit_systemd =
+//RS         boot_for_progress.init == "/sbin/init" && !explicit_names.contains(SYSTEMD_INIT_PACKAGE);
+//RS     let implicit_desktop = desktop_default_required_packages(system)
+//RS         .iter()
+//RS         .filter(|name| !explicit_names.contains(*name))
+//RS         .count();
+//RS     let implicit_cachyos =
+//RS         boot_for_progress.kernel == "CachyOS" && !explicit_names.contains(CACHYOS_KERNEL_PACKAGE);
+//RS     let progress_total = explicit_total
+//RS         + usize::from(implicit_cachyos)
+//RS         + usize::from(implicit_systemd)
+//RS         + implicit_desktop;
+//RS     let mut progress_step = 0usize;
+//RS     let mut live = theme.live_region();
+//RS     let mut realized = Vec::new();
+//RS     for pkg in &system.packages {
+//RS         let raw = if pkg.source.is_empty() {
+//RS             pkg.name.clone()
+//RS         } else {
+//RS             format!("{}@{}", pkg.name, pkg.source)
+//RS         };
+//RS         let spec = match RefSpec::classify_in(&raw, &plan.table) {
+//RS             Ok(spec) => spec,
+//RS             Err(err) => {
+//RS                 crate::Output::ref_error(theme, &err);
+//RS                 return None;
+//RS             }
+//RS         };
+//RS         progress_step += 1;
+//RS         let entry = match realize_ref(
+//RS             theme,
+//RS             &roots,
+//RS             flags,
+//RS             &plan.table,
+//RS             &spec,
+//RS             project_dir,
+//RS             name_w,
+//RS             Some((&mut live, progress_step - 1, progress_total)),
+//RS         ) {
+//RS             Some(entry) => entry,
+//RS             None => return None,
+//RS         };
+//RS         realized.push(entry);
+//RS     }
+//RS     let boot = boot_profile(system);
+//RS     if boot.kernel == "CachyOS"
+//RS         && !realized
+//RS             .iter()
+//RS             .any(|entry| entry.name == CACHYOS_KERNEL_PACKAGE)
+//RS     {
+//RS         let Some(raw) = first_party_package_ref(&plan.table, CACHYOS_KERNEL_PACKAGE) else {
+//RS             theme.error_coded(
+//RS                 "E1280",
+//RS                 "jetos CachyOS kernel package is missing",
+//RS                 "D-JOS-KERNELSRC1=A: `.CachyOS` resolves to a first-party `cachyos-kernel` package with boot artifacts and provenance.",
+//RS                 "declare a first-party source that provides `cachyos-kernel`, or select a different ratified kernel.",
+//RS             );
+//RS             return None;
+//RS         };
+//RS         let spec = match RefSpec::classify_in(&raw, &plan.table) {
+//RS             Ok(spec) => spec,
+//RS             Err(err) => {
+//RS                 crate::Output::ref_error(theme, &err);
+//RS                 return None;
+//RS             }
+//RS         };
+//RS         progress_step += 1;
+//RS         let entry = match try_realize_ref(
+//RS             theme,
+//RS             &roots,
+//RS             flags,
+//RS             &plan.table,
+//RS             &spec,
+//RS             project_dir,
+//RS             name_w.max(CACHYOS_KERNEL_PACKAGE.len()),
+//RS             Some((&mut live, progress_step - 1, progress_total)),
+//RS         ) {
+//RS             Ok(entry) => entry,
+//RS             Err(RealizeRefError::BuildRejected) => return None,
+//RS             Err(RealizeRefError::Provider(_)) => {
+//RS                 theme.error_coded(
+//RS                     "E1280",
+//RS                     "jetos CachyOS kernel package is missing",
+//RS                     "D-JOS-KERNELSRC1=A: `.CachyOS` resolves to a first-party `cachyos-kernel` package with boot artifacts and provenance.",
+//RS                     "declare a first-party source that provides `cachyos-kernel`, or select a different ratified kernel.",
+//RS                 );
+//RS                 return None;
+//RS             }
+//RS         };
+//RS         realized.push(entry);
+//RS     }
+//RS     if boot.init == "/sbin/init"
+//RS         && !realized
+//RS             .iter()
+//RS             .any(|entry| entry.name == SYSTEMD_INIT_PACKAGE)
+//RS     {
+//RS         let Some(raw) = jetos_runtime_package_ref(&plan.table, SYSTEMD_INIT_PACKAGE, flags.offline)
+//RS         else {
+//RS             theme.error_coded(
+//RS                 "E1281",
+//RS                 "jetos systemd init package is missing",
+//RS                 "D-JPK-OSINIT1=A: the default jetos init path is systemd, so the generation needs a first-party `systemd` package with bootable init artifacts.",
+//RS                 "declare a first-party source that provides `systemd`, or select a ratified init override.",
+//RS             );
+//RS             return None;
+//RS         };
+//RS         let spec = match RefSpec::classify_in(&raw, &plan.table) {
+//RS             Ok(spec) => spec,
+//RS             Err(err) => {
+//RS                 crate::Output::ref_error(theme, &err);
+//RS                 return None;
+//RS             }
+//RS         };
+//RS         progress_step += 1;
+//RS         let entry = match try_realize_ref(
+//RS             theme,
+//RS             &roots,
+//RS             flags,
+//RS             &plan.table,
+//RS             &spec,
+//RS             project_dir,
+//RS             name_w.max(SYSTEMD_INIT_PACKAGE.len()),
+//RS             Some((&mut live, progress_step - 1, progress_total)),
+//RS         ) {
+//RS             Ok(entry) => entry,
+//RS             Err(RealizeRefError::BuildRejected) => return None,
+//RS             Err(RealizeRefError::Provider(_)) => {
+//RS                 theme.error_coded(
+//RS                     "E1281",
+//RS                     "jetos systemd init package is missing",
+//RS                     "D-JPK-OSINIT1=A: the default jetos init path is systemd, so the generation needs a first-party `systemd` package with bootable init artifacts.",
+//RS                     "declare a first-party source that provides `systemd`, or select a ratified init override.",
+//RS                 );
+//RS                 return None;
+//RS             }
+//RS         };
+//RS         realized.push(entry);
+//RS     }
+//RS     for package in desktop_default_required_packages(system) {
+//RS         if realized.iter().any(|entry| entry.name == *package) {
+//RS             continue;
+//RS         }
+//RS         let Some(raw) = jetos_runtime_package_ref(&plan.table, package, flags.offline) else {
+//RS             theme.error_coded(
+//RS                 "E1288",
+//RS                 "jetos GNOME desktop package is missing",
+//RS                 "the default jetos desktop profile needs first-party GNOME session packages in the system closure.",
+//RS                 "declare first-party packages for gdm, gnome-session, and gnome-shell, or select a ratified non-GNOME desktop profile.",
+//RS             );
+//RS             return None;
+//RS         };
+//RS         let spec = match RefSpec::classify_in(&raw, &plan.table) {
+//RS             Ok(spec) => spec,
+//RS             Err(err) => {
+//RS                 crate::Output::ref_error(theme, &err);
+//RS                 return None;
+//RS             }
+//RS         };
+//RS         progress_step += 1;
+//RS         let entry = match try_realize_ref(
+//RS             theme,
+//RS             &roots,
+//RS             flags,
+//RS             &plan.table,
+//RS             &spec,
+//RS             project_dir,
+//RS             name_w.max(package.len()),
+//RS             Some((&mut live, progress_step - 1, progress_total)),
+//RS         ) {
+//RS             Ok(entry) => entry,
+//RS             Err(RealizeRefError::BuildRejected) => return None,
+//RS             Err(RealizeRefError::Provider(_)) => {
+//RS                 theme.error_coded(
+//RS                     "E1288",
+//RS                     "jetos GNOME desktop package is missing",
+//RS                     "the default jetos desktop profile needs first-party GNOME session packages in the system closure.",
+//RS                     "declare first-party packages for gdm, gnome-session, and gnome-shell, or select a ratified non-GNOME desktop profile.",
+//RS                 );
+//RS                 return None;
+//RS             }
+//RS         };
+//RS         realized.push(entry);
+//RS     }
+//RS     if !run_kernel_bootstrap_builder(theme, &boot, &mut realized, !flags.offline, &dir) {
+//RS         return None;
+//RS     }
+//RS     if !validate_boot_payloads(theme, &boot, &realized) {
+//RS         return None;
+//RS     }
+//RS     if let Err(e) = write_generation_files(&dir, &final_dir, system, &realized, plan) {
+//RS         theme.error(
+//RS             "could not write the jetos generation",
+//RS             &format!("writing `{}` failed: {e}.", dir.display()),
+//RS             "check permissions on the Jetpack root, or set JETPACK_ROOT.",
+//RS         );
+//RS         return None;
+//RS     }
+//RS     if let Err(e) = write_generation_source_proof(&dir, source_config, flags) {
+//RS         theme.error_coded(
+//RS             "E1278",
+//RS             "jetos generation source proof is incomplete",
+//RS             &format!("binding source and plan hashes failed: {e}"),
+//RS             "check generation storage permissions, then rebuild the generation.",
+//RS         );
+//RS         return None;
+//RS     }
+//RS     let root_proof = match write_generation_root_proof(
+//RS         &dir,
+//RS         &system.name,
+//RS         &generation_name,
+//RS         &realized,
+//RS         &roots,
+//RS     ) {
+//RS         Ok(proof) => proof,
+//RS         Err(e) => {
+//RS             theme.error(
+//RS                 "could not seal the jetos generation",
+//RS                 &format!("writing the complete files/output proof failed: {e}."),
+//RS                 "rebuild the generation after checking Hangar and generation storage integrity.",
+//RS             );
+//RS             return None;
+//RS         }
+//RS     };
+//RS     if let Err(e) = sync_generation_tree(&dir) {
+//RS         theme.error(
+//RS             "could not seal the jetos generation",
+//RS             &format!("durably syncing the complete generation failed: {e}."),
+//RS             "check generation storage integrity, then retry with the same generation name.",
+//RS         );
+//RS         return None;
+//RS     }
+//RS     let parent = final_dir.parent()?;
+//RS     if let Err(e) = fs::rename(&dir, &final_dir) {
+//RS         if !final_dir.is_dir() {
+//RS             theme.error(
+//RS                 "could not publish the jetos generation",
+//RS                 &format!(
+//RS                     "atomically installing `{}` failed: {e}.",
+//RS                     final_dir.display()
+//RS                 ),
+//RS                 "check generation storage permissions, then retry with the same name.",
+//RS             );
+//RS             return None;
+//RS         }
+//RS         let _ = fs::remove_dir_all(&dir);
+//RS         let existing = match validate_generation_root_proof(
+//RS             &final_dir,
+//RS             &system.name,
+//RS             &generation_name,
+//RS             source_config,
+//RS             &roots,
+//RS             flags,
+//RS         ) {
+//RS             Ok(proof) => proof,
+//RS             Err(error) => {
+//RS                 immutable_generation_error(theme, &final_dir, &error);
+//RS                 return None;
+//RS             }
+//RS         };
+//RS         if existing != root_proof {
+//RS             immutable_generation_error(
+//RS                 theme,
+//RS                 &final_dir,
+//RS                 &std::io::Error::other("concurrent publication has a different witness"),
+//RS             );
+//RS             return None;
+//RS         }
+//RS     } else if let Err(e) = Store::sync_store_node(parent, true) {
+//RS         theme.error(
+//RS             "could not publish the jetos generation",
+//RS             &format!("syncing the generation directory after atomic publication failed: {e}."),
+//RS             "check generation storage integrity, then retry with the same generation name.",
+//RS         );
+//RS         return None;
+//RS     }
+//RS     let gen = publish_generation(
+//RS         theme,
+//RS         &roots,
+//RS         &system.name,
+//RS         generation_name,
+//RS         final_dir,
+//RS         root_proof,
+//RS     )?;
+//RS     // Tier 2 close: erase any leftover pinned status and leave one ledger
+//RS     // summary, matching jetpack realization's region→ledger settle (D-FE-CLI1).
+//RS     live.collapse(&format!(
+//RS         "Generation Ready · {} package(s) {}",
+//RS         realized.len(),
+//RS         theme.green("✓")
+//RS     ));
+//RS     Some(gen)
+//RS }
+//RS 
+//RS fn publish_generation(
+//RS     theme: &Theme,
+//RS     roots: &Store::Roots,
+//RS     host: &str,
+//RS     name: String,
+//RS     path: PathBuf,
+//RS     root_proof: GenerationRootProof,
+//RS ) -> Option<Generation> {
+//RS     let created_at = now_secs();
+//RS     let mut gen = Generation {
+//RS         name,
+//RS         host: host.to_string(),
+//RS         path,
+//RS         created_at,
+//RS     };
+//RS     let ledger_at = match generation_ledger_timestamp(&gen, &root_proof.witness) {
+//RS         Ok(timestamp) => timestamp,
+//RS         Err(error) => {
+//RS             immutable_generation_error(theme, &gen.path, &error);
+//RS             return None;
+//RS         }
+//RS     };
+//RS     let has_hangar_targets = !root_proof.output_digests.is_empty();
+//RS     let prepared = if !has_hangar_targets {
+//RS         None
+//RS     } else {
+//RS         match Store::reconcile_external_consumer_root(
+//RS             roots,
+//RS             "jetos-generation",
+//RS             &format!("{}\0{}", gen.host, gen.name),
+//RS             &root_proof.witness,
+//RS             root_proof.output_digests,
+//RS             created_at,
+//RS         ) {
+//RS             Ok(prepared) => prepared,
+//RS             Err(e) => {
+//RS                 theme.error(
+//RS                     "could not prepare the jetos generation root",
+//RS                     &format!("recording its Hangar output roots failed: {e}."),
+//RS                     "verify the Hangar, then retry the exact published generation.",
+//RS                 );
+//RS                 return None;
+//RS             }
+//RS         }
+//RS     };
+//RS     if prepared.is_none() && has_hangar_targets && ledger_at.is_none() {
+//RS         immutable_generation_error(
+//RS             theme,
+//RS             &gen.path,
+//RS             &std::io::Error::other("committed lifecycle root has no generation ledger entry"),
+//RS         );
+//RS         return None;
+//RS     }
+//RS     if generation_failpoint("after-root-prepare") {
+//RS         theme.error(
+//RS             "jetos generation test failpoint stopped publication",
+//RS             "the immutable generation is durable and its external-consumer root is prepared.",
+//RS             "rerun the same build without JET_TEST_GENERATION_FAILPOINT to exercise recovery.",
+//RS         );
+//RS         return None;
+//RS     }
+//RS     gen.created_at = match append_generation(&gen, &root_proof.witness) {
+//RS         Ok(created_at) => created_at,
+//RS         Err(e) => {
+//RS             theme.error(
+//RS                 "could not record the jetos generation",
+//RS                 &format!("writing the generation ledger failed: {e}."),
+//RS                 "retry the exact published generation; partial ledger writes are recovered.",
+//RS             );
+//RS             return None;
+//RS         }
+//RS     };
+//RS     if generation_failpoint("after-ledger") {
+//RS         theme.error(
+//RS             "jetos generation test failpoint stopped publication",
+//RS             "the generation ledger is durable and the external-consumer root remains prepared.",
+//RS             "rerun the same build without JET_TEST_GENERATION_FAILPOINT to exercise recovery.",
+//RS         );
+//RS         return None;
+//RS     }
+//RS     if let Some(prepared) = prepared {
+//RS         if let Err(e) = Store::commit_external_consumer_root(&roots, &prepared, now_secs()) {
+//RS             theme.error(
+//RS                 "could not commit the jetos generation root",
+//RS                 &format!("the generation ledger is durable, but its Hangar root commit failed: {e}."),
+//RS                 "rerun the same build; Jetpack will recover the exact prepared root and ledger entry.",
+//RS             );
+//RS             return None;
+//RS         }
+//RS     }
+//RS     if generation_failpoint("after-commit") {
+//RS         theme.error(
+//RS             "jetos generation test failpoint stopped publication",
+//RS             "the immutable generation, ledger, and external-consumer root are committed.",
+//RS             "rerun the same build without JET_TEST_GENERATION_FAILPOINT to exercise recovery.",
+//RS         );
+//RS         return None;
+//RS     }
+//RS     Some(gen)
+//RS }
+//RS 
+//RS fn generation_staging_dir(final_dir: &Path) -> PathBuf {
+//RS     let sequence = GENERATION_STAGING_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+//RS     let name = final_dir.file_name().unwrap_or_default().to_string_lossy();
+//RS     final_dir.with_file_name(format!(
+//RS         ".{name}.{}.{}.partial",
+//RS         std::process::id(),
+//RS         sequence
+//RS     ))
+//RS }
+//RS 
+//RS fn generation_failpoint(name: &str) -> bool {
+//RS     cfg!(debug_assertions) && std::env::var("JET_TEST_GENERATION_FAILPOINT").as_deref() == Ok(name)
+//RS }
+//RS 
+//RS fn immutable_generation_error(theme: &Theme, dir: &Path, error: &std::io::Error) {
+//RS     theme.error_coded(
+//RS         "E1278",
+//RS         "jetos generation name is already published",
+//RS         &format!(
+//RS             "immutable generation `{}` cannot be reused: {error}.",
+//RS             dir.display()
+//RS         ),
+//RS         "choose a new generation name, or restore the exact sealed generation and retry.",
+//RS     );
+//RS }
+// END-PORT-PENDING 0868 crates/jetpack/src/JetOS/generation.rs:1-502
+

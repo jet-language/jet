@@ -1,0 +1,598 @@
+// Pure foreign body conversion and the shared scalar expression engine.
+// Source/CmdImport.rs; no filesystem, source execution, or guessed adapters.
+#Error
+pub struct JetCLIImportBodyError { pub line: Int, pub message: String }
+
+// Shared byte slicing: Rust str search/char_indices offsets must not reach String.slice.
+fn jet_cli_import_byte_slice(bytes: [U8], start: Int, end: Int) -> String Never! {
+    String.from_bytes(bytes[start..<end]) ?? panic("import text slice is not UTF-8")
+}
+fn jet_cli_import_byte_match(bytes: [U8], at: Int, needle: [U8]) -> Bool Never! {
+    if at + needle.len() > bytes.len() -> return false
+    loop index in 0..<needle.len() { if bytes[at + index] != needle[index] -> return false }
+    true
+}
+fn jet_cli_import_find_bytes(bytes: [U8], needle: String, last: Bool) -> Int? Never! {
+    wanted :: needle.bytes()
+    found := Int?{None}
+    loop at in 0..<bytes.len() + 1 {
+        if jet_cli_import_byte_match(bytes, at, wanted) {
+            if !last -> return Val(at)
+            found = Val(at)
+        }
+    }
+    found
+}
+fn jet_cli_import_before(text: String, needle: String) -> String Never! {
+    at :: jet_cli_import_find_bytes(text.bytes(), needle, false) ?? return ~text
+    jet_cli_import_byte_slice(text.bytes(), 0, at)
+}
+fn jet_cli_import_trim_suffix(text: String, suffix: String) -> String Never! {
+    bytes :: text.bytes()
+    wanted :: suffix.bytes()
+    end := bytes.len()
+    loop end >= wanted.len() && jet_cli_import_byte_match(bytes, end - wanted.len(), wanted) { end -= wanted.len() }
+    jet_cli_import_byte_slice(bytes, 0, end)
+}
+fn jet_cli_import_utf8_width(byte: U8) -> Int Never! {
+    if byte < (U8{128}) -> return 1
+    if byte < (U8{224}) -> return 2
+    if byte < (U8{240}) -> return 3
+    4
+}
+// Rust char::is_whitespace (used by split_whitespace). No allocation per scalar.
+fn jet_cli_import_space_at(bytes: [U8], at: Int, width: Int) -> Bool Never! {
+    lead :: Int.from_u8(bytes[at])
+    point := if width == 1 -> lead else -> lead % (2 ^ (7 - width))
+    loop index in 1..<width -> point = point * 64 + Int.from_u8(bytes[at + index]) % 64
+    point == 32 || (point >= 9 && point <= 13) || point == 133 || point == 160 || point == 5760 || (point >= 8192 && point <= 8202) || point == 8232 || point == 8233 || point == 8239 || point == 8287 || point == 12288
+}
+// Rust split_whitespace: Unicode whitespace, scanned once without character-index slicing.
+fn jet_cli_import_words(text: String) -> [String] Never! {
+    bytes :: text.bytes()
+    out := [String]{}
+    start := 0
+    at := 0
+    loop at < bytes.len() {
+        width :: jet_cli_import_utf8_width(bytes[at])
+        if jet_cli_import_space_at(bytes, at, width) {
+            if start < at -> &out.push(jet_cli_import_byte_slice(bytes, start, at))
+            start = at + width
+        }
+        at += width
+    }
+    if start < at -> &out.push(jet_cli_import_byte_slice(bytes, start, at))
+    out
+}
+fn jet_cli_import_alpha(byte: U8) -> Bool Never! {
+    (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122}))
+}
+fn jet_cli_import_digit(byte: U8) -> Bool Never! { byte >= (U8{48}) && byte <= (U8{57}) }
+
+// Rust `identifier` (3460-3464).
+pub fn jet_cli_import_identifier(value: String) -> Bool Never! {
+    bytes :: value.bytes()
+    if bytes.is_empty() || (!jet_cli_import_alpha(bytes[0]) && bytes[0] != (U8{95})) -> return false
+    loop byte in bytes { if !jet_cli_import_alpha(byte) && !jet_cli_import_digit(byte) && byte != (U8{95}) -> return false }
+    true
+}
+// Rust `canonical_identifier` (3436-3458). ASCII boundaries; non-ASCII is retained byte-exact.
+pub fn jet_cli_import_canonical_identifier(value: String) -> String Never! {
+    bytes :: value.bytes()
+    output := [U8]{}
+    loop at in 0..<bytes.len() {
+        byte :: bytes[at]
+        if byte >= (U8{65}) && byte <= (U8{90}) {
+            boundary := false
+            if at > 0 {
+                previous :: bytes[at - 1]
+                lower :: previous >= (U8{97}) && previous <= (U8{122})
+                next_lower :: at + 1 < bytes.len() && bytes[at + 1] >= (U8{97}) && bytes[at + 1] <= (U8{122})
+                boundary = lower || jet_cli_import_digit(previous) || (previous >= (U8{65}) && previous <= (U8{90}) && next_lower)
+            }
+            if boundary && (output.is_empty() || output[output.len() - 1] != (U8{95})) -> &output.push(U8{95})
+            &output.push(U8.from_int(Int.from_u8(byte) + 32) ?? panic("ASCII lower byte"))
+        } else { &output.push(byte) }
+    }
+    String.from_bytes(output) ?? panic("canonical identifier UTF-8")
+}
+// Rust `split_commas` (2060-2077), deliberately not quote-aware.
+pub fn jet_cli_import_split_commas(raw: String) -> [String] Never! {
+    bytes :: raw.bytes()
+    out := [String]{}
+    start := 0
+    depth := 0
+    loop at in 0..<bytes.len() {
+        byte :: bytes[at]
+        if byte == (U8{40}) || byte == (U8{91}) -> depth += 1
+        if byte == (U8{41}) || byte == (U8{93}) -> depth -= 1
+        if byte == (U8{44}) && depth == 0 {
+            &out.push(~jet_cli_import_byte_slice(bytes, start, at).trim())
+            start = at + 1
+        }
+    }
+    &out.push(~jet_cli_import_byte_slice(bytes, start, bytes.len()).trim())
+    out
+}
+// Rust `split_top` (3402-3430); unlike foreign quote scanners, no backtick quote.
+pub fn jet_cli_import_split_top(raw: String, needle: String) -> (left: String, right: String)? Never! {
+    bytes :: raw.bytes()
+    wanted :: needle.bytes()
+    depth := 0
+    quote := U8{0}
+    at := 0
+    loop at + wanted.len() <= bytes.len() {
+        if quote != (U8{0}) {
+            if bytes[at] == quote -> quote = U8{0}
+            else { if bytes[at] == (U8{92}) -> at += 1 }
+            at += 1
+            next
+        }
+        byte :: bytes[at]
+        if byte == (U8{39}) || byte == (U8{34}) -> quote = byte
+        if byte == (U8{40}) || byte == (U8{91}) -> depth += 1
+        if byte == (U8{41}) || byte == (U8{93}) -> depth -= 1
+        if depth == 0 && jet_cli_import_byte_match(bytes, at, wanted) -> return Val((left: jet_cli_import_byte_slice(bytes, 0, at), right: jet_cli_import_byte_slice(bytes, at + wanted.len(), bytes.len())))
+        at += 1
+    }
+    None
+}
+
+// Rust `translate_foreign_body` (1195-1330).
+pub fn jet_cli_import_translate_foreign_body(language: String, function: JetCLIImportFunction, float_literals: Bool, expression_body: Bool) -> [String] JetCLIImportBodyError! {
+    if function.body.is_empty() {
+        if function.result == "()" -> return Ok([])
+        return Err(JetCLIImportBodyError{line: 1, message: "a value-returning function has an empty body"})
+    }
+    // #4366: Set.add Bool result missing in Rust emit. Membership only, never iterated.
+    bindings := [String:Bool]{}
+    output := [String]{}
+    returned := false
+    loop row in function.body {
+        loop statement in jet_cli_import_split_foreign_statements(row.text) {
+            uncommented :: ~jet_cli_import_strip_foreign_line_comment(statement).trim()
+            line :: ~jet_cli_import_trim_suffix(uncommented, ";").trim()
+            if line.is_empty() -> next
+            if jet_cli_import_foreign_control_statement(line) -> return Err(JetCLIImportBodyError{line: row.line, message: "control flow, exceptions, and foreign runtime operations have no proven mapping in this importer"})
+            if line == "return" {
+                returned = true
+                if function.result == "()" {
+                    &output.push("return")
+                    next
+                }
+                return Err(JetCLIImportBodyError{line: row.line, message: "value-returning function has no return value"})
+            }
+            if line.starts_with("return ") {
+                returned = true
+                if function.result == "()" -> return Err(JetCLIImportBodyError{line: row.line, message: "unit function cannot return a value"})
+                value :: jet_cli_import_byte_slice(line.bytes(), 7, line.bytes().len())
+                converted :: jet_cli_import_foreign_expression(language, value, float_literals) ?? return Err(JetCLIImportBodyError{line: row.line, message: ~err.message})
+                materialized :: jet_cli_import_materialize_borrowed_string(function, value, converted)
+                &output.push("return {materialized}")
+                next
+            }
+            if line.starts_with("assert ") {
+                value :: jet_cli_import_byte_slice(line.bytes(), 7, line.bytes().len())
+                pair :: jet_cli_import_split_top(value, "==") ?? return Err(JetCLIImportBodyError{line: row.line, message: "only equality assertions have a proven Jet mapping"})
+                left :: jet_cli_import_foreign_expression(language, pair.left, float_literals) ?? return Err(JetCLIImportBodyError{line: row.line, message: ~err.message})
+                right :: jet_cli_import_foreign_expression(language, pair.right, float_literals) ?? return Err(JetCLIImportBodyError{line: row.line, message: ~err.message})
+                &output.push("assert_eq({left}, {right})")
+                next
+            }
+            short :: jet_cli_import_split_top(line, ":=")
+            assignment :: if short == .Val(pair) -> Val(pair) else -> jet_cli_import_split_top(line, "=")
+            if assignment == .Val(pair) {
+                left :: ~pair.left.trim()
+                name := ""
+                if short != None {
+                    name = jet_cli_import_canonical_identifier(left)
+                    if !jet_cli_import_identifier(name) || name == "_" -> return Err(JetCLIImportBodyError{line: row.line, message: "binding target is not a safe Jet identifier"})
+                } else {
+                    local :: jet_cli_import_foreign_local_name(language, left)
+                    if local == .Val(local_name) -> name = ~local_name
+                    else {
+                        if !jet_cli_import_identifier(left) -> return Err(JetCLIImportBodyError{line: row.line, message: "assignment or declaration has no safe scalar mapping"})
+                        name = ~left
+                    }
+                }
+                converted :: jet_cli_import_foreign_expression(language, pair.right, float_literals) ?? return Err(JetCLIImportBodyError{line: row.line, message: ~err.message})
+                value :: jet_cli_import_materialize_borrowed_string(function, pair.right, converted)
+                operator :: if bindings.has_key(name) -> "=" else -> ":="
+                &bindings.add(~name, true).drop("only membership matters for binding operators")
+                &output.push("{name} {operator} {value}")
+                next
+            }
+            converted :: jet_cli_import_foreign_expression(language, line, float_literals) ?? return Err(JetCLIImportBodyError{line: row.line, message: ~err.message})
+            &output.push(converted)
+        }
+    }
+    if function.result != "()" && !expression_body && !returned -> return Err(JetCLIImportBodyError{line: function.body[function.body.len() - 1].line, message: "value-returning function has no return statement"})
+    Ok(output)
+}
+
+// Rust `split_foreign_statements` (1332-1364).
+pub fn jet_cli_import_split_foreign_statements(raw: String) -> [String] Never! {
+    bytes :: raw.bytes()
+    statements := [String]{}
+    start := 0
+    depth := 0
+    quote := U8{0}
+    escaped := false
+    loop at in 0..<bytes.len() {
+        byte :: bytes[at]
+        if quote != (U8{0}) {
+            if escaped -> escaped = false
+            else { if byte == (U8{92}) -> escaped = true else { if byte == quote -> quote = U8{0} } }
+            next
+        }
+        if jet_cli_import_quote(byte) -> quote = byte
+        else {
+            if byte == (U8{40}) || byte == (U8{91}) -> depth += 1
+            if byte == (U8{41}) || byte == (U8{93}) -> depth -= 1
+            if byte == (U8{59}) && depth == 0 {
+                &statements.push(jet_cli_import_byte_slice(bytes, start, at))
+                start = at + 1
+            }
+        }
+    }
+    if start < bytes.len() -> &statements.push(jet_cli_import_byte_slice(bytes, start, bytes.len()))
+    statements
+}
+// Rust `foreign_control_statement` (1366-1375).
+pub fn jet_cli_import_foreign_control_statement(line: String) -> Bool Never! {
+    prefixes :: [String]{"if ", "if(", "for ", "for(", "while ", "while(", "switch ", "switch(", "try", "catch", "finally", "throw ", "defer ", "go ", "select", "else", "case ", "default:"}
+    loop prefix in prefixes { if line.starts_with(prefix) -> return true }
+    line.contains("++") || line.contains("--")
+}
+// Rust `foreign_local_name` (1377-1399).
+pub fn jet_cli_import_foreign_local_name(language: String, left: String) -> String? Never! {
+    tokens :: jet_cli_import_words(left)
+    name := ""
+    if language == "ts" || language == "js" {
+        if tokens.len() < 2 || (tokens[0] != "const" && tokens[0] != "let" && tokens[0] != "var") -> return None
+        name = jet_cli_import_trim_suffix(tokens[1], ":")
+    } else {
+        if language == "go" {
+            if tokens.len() < 2 || tokens[0] != "var" -> return None
+            name = ~tokens[1]
+        } else {
+            if (language != "java" && language != "csharp") || tokens.len() < 2 -> return None
+            has_var := false
+            loop at in 0..<tokens.len() - 1 { if tokens[at] == "var" -> has_var = true }
+            if !has_var {
+                if jet_cli_import_map_foreign_type(language, tokens[tokens.len() - 2]) == .Err(_) -> return None
+            }
+            name = ~tokens[tokens.len() - 1]
+        }
+    }
+    if !jet_cli_import_identifier(name) -> return None
+    Val(jet_cli_import_canonical_identifier(name))
+}
+// Rust `foreign_expression` (1401-1432).
+pub fn jet_cli_import_foreign_expression(language: String, raw: String, float_literals: Bool) -> String JetCLIImportTextError! {
+    expression := ~jet_cli_import_trim_suffix(~raw.trim(), ";").trim()
+    if expression.contains("`") -> return Err(jet_cli_import_text_error("raw/template strings need an explicit migration adapter"))
+    scalar_language :: language == "java" || language == "csharp" || language == "ts" || language == "js" || language == "go"
+    if scalar_language && (jet_cli_import_has_unquoted_char(expression, "/") || jet_cli_import_has_unquoted_char(expression, "%")) -> return Err(jet_cli_import_text_error("foreign division or remainder semantics need an explicit migration adapter"))
+    if (language == "java" || language == "csharp" || language == "go") && jet_cli_import_has_unquoted_single_quote(expression) -> return Err(jet_cli_import_text_error("foreign character literals need an explicit migration adapter"))
+    if language == "ts" || language == "js" -> expression = expression.replace("!==", "!=").replace("===", "==")
+    replacements :: [(foreign: String, jet: String)]{
+        (foreign: "System.out.println(", jet: "print("), (foreign: "System.Console.WriteLine(", jet: "print("),
+        (foreign: "Console.WriteLine(", jet: "print("), (foreign: "fmt.Println(", jet: "print("),
+        (foreign: "println(", jet: "print("), (foreign: "console.log(", jet: "print(")
+    }
+    loop pair in replacements -> expression = jet_cli_import_replace_unquoted(expression, pair.foreign, pair.jet)
+    Ok(jet_cli_import_parse_expression_with_float(expression, float_literals))
+}
+// Rust `materialize_borrowed_string` (1434-1444).
+pub fn jet_cli_import_materialize_borrowed_string(function: JetCLIImportFunction, source: String, expression: String) -> String Never! {
+    trimmed :: ~jet_cli_import_trim_suffix(~source.trim(), ";").trim()
+    canonical :: jet_cli_import_canonical_identifier(trimmed)
+    loop param in function.params {
+        if param.ty == "String" && jet_cli_import_canonical_identifier(param.name) == canonical {
+            if !expression.starts_with("~") && !expression.starts_with("^") -> return "~{expression}"
+            break
+        }
+    }
+    ~expression
+}
+fn jet_cli_import_quote(byte: U8) -> Bool Never! { byte == (U8{39}) || byte == (U8{34}) || byte == (U8{96}) }
+// Rust `strip_foreign_line_comment` (1446-1466).
+pub fn jet_cli_import_strip_foreign_line_comment(raw: String) -> String Never! {
+    bytes :: raw.bytes()
+    quote := U8{0}
+    escaped := false
+    loop at in 0..<bytes.len() {
+        byte :: bytes[at]
+        if quote != (U8{0}) {
+            if escaped -> escaped = false
+            else { if byte == (U8{92}) -> escaped = true else { if byte == quote -> quote = U8{0} } }
+        } else {
+            if jet_cli_import_quote(byte) -> quote = byte
+            else { if byte == (U8{47}) && at + 1 < bytes.len() && bytes[at + 1] == (U8{47}) -> return jet_cli_import_byte_slice(bytes, 0, at) }
+        }
+    }
+    ~raw
+}
+// Rust `replace_unquoted` (1468-1502). Byte buffer: linear, no repeated tail-string copies.
+pub fn jet_cli_import_replace_unquoted(text: String, needle: String, replacement: String) -> String Never! {
+    bytes :: text.bytes()
+    wanted :: needle.bytes()
+    inserted :: replacement.bytes()
+    output := [U8]{}
+    quote := U8{0}
+    escaped := false
+    at := 0
+    loop at < bytes.len() {
+        byte :: bytes[at]
+        if quote != (U8{0}) {
+            &output.push(byte)
+            if escaped -> escaped = false
+            else { if byte == (U8{92}) -> escaped = true else { if byte == quote -> quote = U8{0} } }
+            at += 1
+        } else {
+            if jet_cli_import_quote(byte) {
+                quote = byte
+                &output.push(byte)
+                at += 1
+            } else {
+                if jet_cli_import_byte_match(bytes, at, wanted) {
+                    loop item in inserted -> &output.push(item)
+                    at += wanted.len()
+                } else {
+                    &output.push(byte)
+                    at += 1
+                }
+            }
+        }
+    }
+    String.from_bytes(output) ?? panic("unquoted replacement UTF-8")
+}
+// Rust `has_unquoted_char` (1504-1506).
+pub fn jet_cli_import_has_unquoted_char(text: String, needle: String) -> Bool Never! { jet_cli_import_find_unquoted(text, needle) != None }
+// Rust `has_unquoted_single_quote` (1508-1527).
+pub fn jet_cli_import_has_unquoted_single_quote(text: String) -> Bool Never! {
+    quote := U8{0}
+    escaped := false
+    loop byte in text.bytes() {
+        if quote != (U8{0}) {
+            if escaped -> escaped = false
+            else { if byte == (U8{92}) -> escaped = true else { if byte == quote -> quote = U8{0} } }
+        } else {
+            if byte == (U8{39}) -> return true
+            if byte == (U8{34}) || byte == (U8{96}) -> quote = byte
+        }
+    }
+    false
+}
+// Rust `find_unquoted` (1570-1589). Returns a BYTE offset; wanted is one scalar.
+pub fn jet_cli_import_find_unquoted(line: String, wanted: String) -> Int? Never! {
+    bytes :: line.bytes()
+    target :: wanted.bytes()
+    quote := U8{0}
+    escaped := false
+    at := 0
+    loop at < bytes.len() {
+        byte :: bytes[at]
+        if quote != (U8{0}) {
+            if escaped -> escaped = false
+            else { if byte == (U8{92}) -> escaped = true else { if byte == quote -> quote = U8{0} } }
+        } else {
+            if jet_cli_import_quote(byte) -> quote = byte
+            else { if jet_cli_import_byte_match(bytes, at, target) -> return Val(at) }
+        }
+        at += jet_cli_import_utf8_width(byte)
+    }
+    None
+}
+// Rust `brace_delta` (1591-1613).
+pub fn jet_cli_import_brace_delta(line: String) -> Int Never! {
+    quote := U8{0}
+    escaped := false
+    delta := 0
+    loop byte in line.bytes() {
+        if quote != (U8{0}) {
+            if escaped -> escaped = false
+            else { if byte == (U8{92}) -> escaped = true else { if byte == quote -> quote = U8{0} } }
+        } else {
+            if jet_cli_import_quote(byte) -> quote = byte
+            else {
+                if byte == (U8{123}) -> delta += 1
+                if byte == (U8{125}) -> delta -= 1
+            }
+        }
+    }
+    delta
+}
+// Rust `strip_unquoted_braces` (1615-1637).
+pub fn jet_cli_import_strip_unquoted_braces(line: String) -> String Never! {
+    output := [U8]{}
+    quote := U8{0}
+    escaped := false
+    loop byte in line.bytes() {
+        if quote != (U8{0}) {
+            &output.push(byte)
+            if escaped -> escaped = false
+            else { if byte == (U8{92}) -> escaped = true else { if byte == quote -> quote = U8{0} } }
+        } else {
+            if jet_cli_import_quote(byte) {
+                quote = byte
+                &output.push(byte)
+            } else {
+                if byte != (U8{123}) && byte != (U8{125}) -> &output.push(byte)
+            }
+        }
+    }
+    String.from_bytes(output) ?? panic("brace stripping UTF-8")
+}
+
+// Rust `Token` (2163-2171).
+pub enum JetCLIImportToken {
+    Word(String)
+    Number(String)
+    Text(String)
+    Op(String)
+    Open
+    Close
+    Comma
+}
+// Rust `parse_expression` (2173-2175).
+pub fn jet_cli_import_parse_expression(raw: String) -> String JetCLIImportTextError! { Ok(jet_cli_import_parse_expression_with_float(raw, false)) }
+// Rust `parse_expression_with_float` (2177-2257).
+pub fn jet_cli_import_parse_expression_with_float(raw: String, float_literals: Bool) -> String JetCLIImportTextError! {
+    tokens :: jet_cli_import_lex(raw)
+    if tokens.is_empty() -> return Err(jet_cli_import_text_error("empty expression"))
+    depth := 0
+    expect_value := true
+    output := [U8]{}
+    loop token in tokens {
+        if token == {
+            .Word(word) -> {
+                if !expect_value && word != "and" && word != "or" -> return Err(jet_cli_import_text_error("unsupported expression near {word}"))
+                if word == "None" -> return Err(jet_cli_import_text_error("None needs an explicit Option mapping"))
+                dynamic_values :: [String]{"null", "nil", "undefined", "new", "this"}
+                if dynamic_values.contains(word) -> return Err(jet_cli_import_text_error("dynamic or reference value has no proven scalar mapping"))
+                mapped :: if word == {
+                    "True" | "true" -> "true"
+                    "False" | "false" -> "false"
+                    "and" -> "&&"
+                    "or" -> "||"
+                    else -> jet_cli_import_canonical_identifier(word)
+                }
+                jet_cli_import_push_piece(&output, mapped)
+                expect_value = mapped == "&&" || mapped == "||"
+            }
+            .Number(value) -> {
+                if !expect_value -> return Err(jet_cli_import_text_error("two adjacent expression values"))
+                mapped :: if float_literals && !value.contains(".") -> "{value}.0" else -> ~value
+                jet_cli_import_push_piece(&output, mapped)
+                expect_value = false
+            }
+            .Text(value) -> {
+                if !expect_value -> return Err(jet_cli_import_text_error("two adjacent expression values"))
+                jet_cli_import_push_piece(&output, value)
+                expect_value = false
+            }
+            .Op(op) -> {
+                if expect_value && op != "-" && op != "!" -> return Err(jet_cli_import_text_error("operator {op} needs a left operand"))
+                jet_cli_import_push_piece(&output, op)
+                expect_value = true
+            }
+            .Open -> {
+                &output.push(U8{40})
+                depth += 1
+                expect_value = true
+            }
+            .Close -> {
+                if depth == 0 || expect_value -> return Err(jet_cli_import_text_error("unbalanced expression parentheses"))
+                &output.push(U8{41})
+                depth -= 1
+                expect_value = false
+            }
+            .Comma -> {
+                if depth == 0 || expect_value -> return Err(jet_cli_import_text_error("comma outside a call"))
+                &output.push(U8{44})
+                &output.push(U8{32})
+                expect_value = true
+            }
+        }
+    }
+    if depth != 0 || expect_value -> return Err(jet_cli_import_text_error("incomplete expression"))
+    Ok(String.from_bytes(output) ?? panic("expression output UTF-8"))
+}
+// Rust `lex` (2259-2324); even non-ASCII token failures retain Rust's byte-as-char display.
+pub fn jet_cli_import_lex(raw: String) -> [JetCLIImportToken] JetCLIImportTextError! {
+    bytes :: raw.bytes()
+    out := [JetCLIImportToken]{}
+    at := 0
+    loop at < bytes.len() {
+        byte :: bytes[at]
+        if byte == (U8{32}) || byte == (U8{9}) || byte == (U8{10}) || byte == (U8{12}) || byte == (U8{13}) {
+            at += 1
+            next
+        }
+        start :: at
+        if jet_cli_import_alpha(byte) || byte == (U8{95}) {
+            at += 1
+            loop at < bytes.len() && (jet_cli_import_alpha(bytes[at]) || jet_cli_import_digit(bytes[at]) || bytes[at] == (U8{95})) { at += 1 }
+            &out.push(JetCLIImportToken.Word(jet_cli_import_byte_slice(bytes, start, at)))
+        } else {
+            if jet_cli_import_digit(byte) {
+                at += 1
+                dots := 0
+                loop at < bytes.len() && (jet_cli_import_digit(bytes[at]) || bytes[at] == (U8{46})) {
+                    if bytes[at] == (U8{46}) -> dots += 1
+                    at += 1
+                }
+                value :: jet_cli_import_byte_slice(bytes, start, at)
+                if dots > 1 || value.ends_with(".") -> return Err(jet_cli_import_text_error("malformed numeric literal"))
+                &out.push(JetCLIImportToken.Number(value))
+            } else {
+                if byte == (U8{39}) || byte == (U8{34}) {
+                    quote :: byte
+                    at += 1
+                    content :: at
+                    loop at < bytes.len() && bytes[at] != quote {
+                        if bytes[at] == (U8{92}) -> at += 1
+                        at += 1
+                    }
+                    if at >= bytes.len() -> return Err(jet_cli_import_text_error("unterminated Python string"))
+                    value :: jet_cli_import_byte_slice(bytes, content, at).replace("\"", "\\\"")
+                    at += 1
+                    &out.push(JetCLIImportToken.Text("\"{value}\""))
+                } else {
+                    matched := false
+                    operators :: [String]{"==", "!=", "<=", ">=", "&&", "||"}
+                    loop op in operators {
+                        if jet_cli_import_byte_match(bytes, at, op.bytes()) {
+                            &out.push(JetCLIImportToken.Op(~op))
+                            at += 2
+                            matched = true
+                            break
+                        }
+                    }
+                    if matched -> next
+                    if byte == (U8{40}) -> &out.push(JetCLIImportToken.Open)
+                    else {
+                        if byte == (U8{41}) -> &out.push(JetCLIImportToken.Close)
+                        else {
+                            if byte == (U8{44}) -> &out.push(JetCLIImportToken.Comma)
+                            else {
+                                other :: jet_cli_import_latin1_byte(byte)
+                                singles :: [String]{"+", "-", "*", "/", "%", "<", ">", "!"}
+                                if singles.contains(other) -> &out.push(JetCLIImportToken.Op(other))
+                                else -> return Err(jet_cli_import_text_error("unsupported Python expression token {other}"))
+                            }
+                        }
+                    }
+                    at += 1
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+fn jet_cli_import_latin1_byte(byte: U8) -> String Never! {
+    if byte < (U8{128}) -> return String.from_bytes([U8]{byte}) ?? panic("ASCII token")
+    value :: Int.from_u8(byte)
+    String.from_bytes([U8]{U8.from_int(192 + value /% 64) ?? panic("Latin-1 lead"), U8.from_int(128 + value % 64) ?? panic("Latin-1 trail")}) ?? panic("Latin-1 token")
+}
+// Rust `push_piece` (2326-2331).
+pub fn jet_cli_import_push_piece(output: &[U8], piece: String) Never! {
+    if !output.is_empty() && output[output.len() - 1] != (U8{40}) && output[output.len() - 1] != (U8{32}) -> &output.push(U8{32})
+    loop byte in piece.bytes() -> &output.push(byte)
+}
+
+// Rust `assignment` (CmdImport.rs:3394-3400).
+pub fn jet_cli_import_assignment(line: String) -> (left: String, right: String)? Never! {
+    pair :: jet_cli_import_split_top(line, "=") ?? return None
+    if pair.right.starts_with("=") || pair.left.ends_with("!") || pair.left.ends_with("<") || pair.left.ends_with(">") -> return None
+    Val((left: ~pair.left.trim(), right: ~pair.right.trim()))
+}
+// Rust `indentation` (CmdImport.rs:3432-3434), spaces/tabs only, measured in bytes.
+pub fn jet_cli_import_indentation(line: String) -> Int Never! {
+    at := 0
+    bytes :: line.bytes()
+    loop at < bytes.len() && (bytes[at] == (U8{32}) || bytes[at] == (U8{9})) -> at += 1
+    at
+}

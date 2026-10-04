@@ -1,0 +1,446 @@
+// Pure budget manifest policy (Source/BudgetStore.rs). Durable storage is C-FS.
+// Collection projections return indices/validate in place, never copy report trees.
+use core.text as budget_manifest_text
+
+// Rust UpdateKind / UpdatePlan / AppliedUpdate / HistoryQuery / HistorySelection / GcResult (17-75).
+pub enum JetCLIBudgetUpdateKind {
+    Pass
+    Bootstrap(String)
+    AcceptRegression(String)
+}
+pub struct JetCLIBudgetUpdatePlan {
+    pub baseline: String
+    pub report_id: String
+    pub report_bytes: [U8]
+    pub prior_manifest_id: String?
+    pub prior_head_report_id: String?
+    pub accepted_at: String
+    pub kind: JetCLIBudgetUpdateKind
+}
+// Rust UpdatePlan accessors: public fields are the canonical Jet projection.
+pub struct JetCLIBudgetAppliedUpdate { pub report_id: String, pub manifest_id: String, pub object_created: Bool }
+pub struct JetCLIBudgetHistoryQuery { pub budget_id: String, pub budget_spec_sha256: String, pub context_key: String, pub at: String }
+pub struct JetCLIBudgetHistorySelection { pub report_ids: [String], pub state_id: String, pub stale: Bool, pub newest_age_seconds: Int?, pub stale_after_seconds: Int }
+pub struct JetCLIBudgetGCResult { pub removed: [String], pub retained: [String] }
+#Error
+pub struct JetCLIBudgetManifestError { pub message: String }
+fn jet_cli_budget_manifest_error(message: String) -> JetCLIBudgetManifestError Never! { JetCLIBudgetManifestError{message: message} }
+fn jet_cli_budget_manifest_object_new(fields: [CanonicalJSONField]) -> CanonicalJSON Never! { canonical_json_object(fields) ?? panic(err.message) }
+fn jet_cli_budget_manifest_find(fields: [CanonicalJSONField], key: String) -> Int? Never! {
+    loop (index, field) in fields { if field.key == key -> return Val(index) }
+    None
+}
+fn jet_cli_budget_manifest_index(fields: [CanonicalJSONField], key: String) -> Int Never! { jet_cli_budget_manifest_find(fields, key) ?? panic("validated object key is absent") }
+// Rust object / exact_object (1374-1394): validate borrowed values in place.
+pub fn jet_cli_budget_manifest_object(value: CanonicalJSON, name: String) JetCLIBudgetManifestError! {
+    if !(value == .Object(_)) -> return Err(jet_cli_budget_manifest_error("{name} is not an object"))
+}
+pub fn jet_cli_budget_manifest_exact_object(value: CanonicalJSON, name: String, keys: [String]) JetCLIBudgetManifestError! {
+    jet_cli_budget_manifest_object(value, name)
+    if value == .Object(fields) {
+        if fields.len() != keys.len() -> return Err(jet_cli_budget_manifest_error("{name} has missing or unknown fields"))
+        loop key in keys { if jet_cli_budget_manifest_find(fields, key) == None -> return Err(jet_cli_budget_manifest_error("{name} has missing or unknown fields")) }
+    }
+}
+// Rust array / text / integer / boolean / nullable_text (1395-1428).
+pub fn jet_cli_budget_manifest_array(value: CanonicalJSON, name: String) JetCLIBudgetManifestError! {
+    if !(value == .Array(_)) -> return Err(jet_cli_budget_manifest_error("{name} is not an array"))
+}
+pub fn jet_cli_budget_manifest_text(value: CanonicalJSON, name: String) -> String JetCLIBudgetManifestError! {
+    if value == .String(v) -> return Ok(~v)
+    Err(jet_cli_budget_manifest_error("{name} is not text"))
+}
+pub fn jet_cli_budget_manifest_integer(value: CanonicalJSON, name: String) -> String JetCLIBudgetManifestError! {
+    if value == .Integer(v) -> return Ok(~v)
+    Err(jet_cli_budget_manifest_error("{name} is not integer"))
+}
+pub fn jet_cli_budget_manifest_boolean(value: CanonicalJSON, name: String) -> Bool JetCLIBudgetManifestError! {
+    if value == .Bool(v) -> return Ok(v)
+    Err(jet_cli_budget_manifest_error("{name} is not boolean"))
+}
+pub fn jet_cli_budget_manifest_nullable_text(value: CanonicalJSON, name: String) -> String? JetCLIBudgetManifestError! {
+    if value == {
+        .Null -> Ok(None)
+        .String(v) -> Ok(Val(~v))
+        else -> Err(jet_cli_budget_manifest_error("{name} is not text or null"))
+    }
+}
+fn jet_cli_budget_manifest_text_field(fields: [CanonicalJSONField], key: String, name: String) -> String JetCLIBudgetManifestError! {
+    index :: jet_cli_budget_manifest_find(fields, key) ?? return Err(jet_cli_budget_manifest_error("{name} is not text"))
+    jet_cli_budget_manifest_text(fields[index].value, name)
+}
+fn jet_cli_budget_manifest_integer_field(fields: [CanonicalJSONField], key: String, name: String) -> String JetCLIBudgetManifestError! {
+    index :: jet_cli_budget_manifest_find(fields, key) ?? return Err(jet_cli_budget_manifest_error("{name} is not integer"))
+    jet_cli_budget_manifest_integer(fields[index].value, name)
+}
+fn jet_cli_budget_manifest_array_index(fields: [CanonicalJSONField], key: String, name: String) -> Int JetCLIBudgetManifestError! {
+    index :: jet_cli_budget_manifest_find(fields, key) ?? return Err(jet_cli_budget_manifest_error("{name} is not an array"))
+    jet_cli_budget_manifest_array(fields[index].value, name)
+    Ok(index)
+}
+// Rust require_text (1429-1439).
+pub fn jet_cli_budget_manifest_require_text(fields: [CanonicalJSONField], key: String, expected: String) JetCLIBudgetManifestError! {
+    if jet_cli_budget_manifest_text_field(fields, key, key) != expected -> return Err(jet_cli_budget_manifest_error("{key} mismatch"))
+}
+// Rust is_hex64 (1368-1373).
+pub fn jet_cli_budget_manifest_is_hex64(value: String) -> Bool Never! {
+    bytes :: value.bytes()
+    if bytes.len() != 64 -> return false
+    loop byte in bytes {
+        n :: Int.from_u8(byte)
+        if !((n >= 48 && n <= 57) || (n >= 97 && n <= 102)) -> return false
+    }
+    true
+}
+// Rust rational (636-647).
+pub fn jet_cli_budget_manifest_rational(value: CanonicalJSON) -> PerfRational JetCLIBudgetManifestError! {
+    jet_cli_budget_manifest_object(value, "rational")
+    if value == .Object(fields) {
+        n :: jet_cli_budget_manifest_find(fields, "num") ?? return Err(jet_cli_budget_manifest_error("rational.num is not an integer"))
+        if !(fields[n].value == .Integer(_)) -> return Err(jet_cli_budget_manifest_error("rational.num is not an integer"))
+        d :: jet_cli_budget_manifest_find(fields, "den") ?? return Err(jet_cli_budget_manifest_error("rational.den is not an integer"))
+        if !(fields[d].value == .Integer(_)) -> return Err(jet_cli_budget_manifest_error("rational.den is not an integer"))
+        return Ok(perf_rational_parse(jet_cli_budget_manifest_integer(fields[n].value, "num"), jet_cli_budget_manifest_integer(fields[d].value, "den")) ?? return Err(jet_cli_budget_manifest_error(err.message)))
+    }
+    panic("validated rational object")
+}
+// Rust compatible (789-821); indices preserve Option equality for missing fields.
+fn jet_cli_budget_manifest_field_equal(a: [CanonicalJSONField], b: [CanonicalJSONField], key: String) -> Bool Never! {
+    left :: jet_cli_budget_manifest_find(a, key)
+    right :: jet_cli_budget_manifest_find(b, key)
+    if left == .Val(i) {
+        if right == .Val(j) -> return a[i].value == b[j].value
+        return false
+    }
+    right == None
+}
+fn jet_cli_budget_manifest_subject_equal(a: [CanonicalJSONField], b: [CanonicalJSONField], key: String) -> Bool Never! {
+    ai :: jet_cli_budget_manifest_find(a, "subject")
+    bi :: jet_cli_budget_manifest_find(b, "subject")
+    if ai == .Val(i) {
+        if a[i].value == .Object(af) {
+            if bi == .Val(j) { if b[j].value == .Object(bf) -> return jet_cli_budget_manifest_field_equal(af, bf, key) }
+            return jet_cli_budget_manifest_find(af, key) == None
+        }
+    }
+    if bi == .Val(j) { if b[j].value == .Object(bf) -> return jet_cli_budget_manifest_find(bf, key) == None }
+    true
+}
+pub fn jet_cli_budget_manifest_compatible(a_content: [CanonicalJSONField], a: [CanonicalJSONField], b_content: [CanonicalJSONField], b: [CanonicalJSONField]) -> Bool Never! {
+    keys :: [String]{"budget_spec_sha256", "metric", "unit", "direction", "comparison", "target_class", "provider", "context_key"}
+    loop key in keys { if !jet_cli_budget_manifest_field_equal(a, b, key) -> return false }
+    content_keys :: [String]{"toolchain", "privacy"}
+    loop key in content_keys { if !jet_cli_budget_manifest_field_equal(a_content, b_content, key) -> return false }
+    subject_keys :: [String]{"target_triple", "target_class", "profile"}
+    loop key in subject_keys { if !jet_cli_budget_manifest_subject_equal(a_content, b_content, key) -> return false }
+    true
+}
+// Rust report_id / manifest_id (1037-1039,1047-1049).
+pub fn jet_cli_budget_manifest_report_id(value: CanonicalJSON) -> String JetCLIBudgetManifestError! {
+    jet_cli_budget_manifest_object(value, "report")
+    if value == .Object(f) -> return jet_cli_budget_manifest_text_field(f, "report_id", "report_id")
+    panic("validated report")
+}
+pub fn jet_cli_budget_manifest_id(value: CanonicalJSON) -> String JetCLIBudgetManifestError! {
+    jet_cli_budget_manifest_object(value, "manifest")
+    if value == .Object(f) -> return jet_cli_budget_manifest_text_field(f, "manifest_id", "manifest_id")
+    panic("validated manifest")
+}
+// Rust report_content / manifest_content (1040-1055): borrowed-tree index projection.
+pub fn jet_cli_budget_manifest_content_index(value: CanonicalJSON, report: Bool) -> Int JetCLIBudgetManifestError! {
+    name :: if report -> "report" else -> "manifest"
+    jet_cli_budget_manifest_object(value, name)
+    if value == .Object(f) {
+        index :: jet_cli_budget_manifest_index(f, "content")
+        jet_cli_budget_manifest_object(f[index].value, "{name} content")
+        return Ok(index)
+    }
+    panic("validated wrapper")
+}
+// Rust head_id / generations (1056-1065).
+pub fn jet_cli_budget_manifest_head_id(value: CanonicalJSON) -> String JetCLIBudgetManifestError! {
+    index :: jet_cli_budget_manifest_content_index(value, false)
+    if value == .Object(f) { if f[index].value == .Object(content) -> return jet_cli_budget_manifest_text_field(content, "head_report_id", "head_report_id") }
+    panic("validated content")
+}
+pub fn jet_cli_budget_manifest_generations_index(content: [CanonicalJSONField]) -> Int JetCLIBudgetManifestError! {
+    jet_cli_budget_manifest_array_index(content, "generations", "generations")
+}
+// Rust measurement (1067-1081): return index into borrowed measurements.
+pub fn jet_cli_budget_manifest_measurement_index(content: [CanonicalJSONField], budget_id: String) -> Int JetCLIBudgetManifestError! {
+    index :: jet_cli_budget_manifest_array_index(content, "measurements", "measurements")
+    found := Int?{None}
+    if content[index].value == .Array(values) {
+        loop (i, value) in values {
+            jet_cli_budget_manifest_object(value, "measurement")
+            if value == .Object(fields) {
+                if jet_cli_budget_manifest_text_field(fields, "budget_id", "budget_id") == budget_id {
+                    if found != None -> return Err(jet_cli_budget_manifest_error("duplicate budget_id `{budget_id}`"))
+                    found = Val(i)
+                }
+            }
+        }
+    }
+    Ok(found ?? return Err(jet_cli_budget_manifest_error("measurement `{budget_id}` is absent")))
+}
+// Rust next_manifest (823-916). Only the append owns a copy of the prior generations.
+pub fn jet_cli_budget_manifest_next(current: CanonicalJSON?, plan: JetCLIBudgetUpdatePlan) -> CanonicalJSON JetCLIBudgetManifestError! {
+    kind := "pass"
+    reason := CanonicalJSON.Null
+    bootstrap := false
+    accept := false
+    if plan.kind == {
+        .Pass -> {}
+        .Bootstrap(v) -> {
+            kind = "bootstrap"
+            reason = CanonicalJSON.String(jet_cli_budget_manifest_normalize_reason(v))
+            bootstrap = true
+        }
+        .AcceptRegression(v) -> {
+            kind = "exception"
+            reason = CanonicalJSON.String(jet_cli_budget_manifest_normalize_reason(v))
+            accept = true
+        }
+    }
+    prior_head :: if plan.prior_head_report_id == {
+        .Val(v) -> CanonicalJSON.String(~v)
+        None -> CanonicalJSON.Null
+    }
+    prior_state :: if plan.prior_manifest_id == {
+        .Val(v) -> CanonicalJSON.String(~v)
+        None -> CanonicalJSON.Null
+    }
+    body :: jet_cli_budget_manifest_object_new([CanonicalJSONField]{
+        CanonicalJSONField{key: "accepted_at", value: CanonicalJSON.String(~plan.accepted_at)},
+        CanonicalJSONField{key: "actor_label", value: CanonicalJSON.String("local")},
+        CanonicalJSONField{key: "flags", value: jet_cli_budget_manifest_object_new([CanonicalJSONField]{CanonicalJSONField{key: "accept_regression", value: CanonicalJSON.Bool(accept)}, CanonicalJSONField{key: "bootstrap", value: CanonicalJSON.Bool(bootstrap)}})},
+        CanonicalJSONField{key: "kind", value: CanonicalJSON.String(kind)},
+        CanonicalJSONField{key: "prior_head_report_id", value: prior_head},
+        CanonicalJSONField{key: "prior_state_id", value: prior_state},
+        CanonicalJSONField{key: "reason", value: reason},
+        CanonicalJSONField{key: "report_id", value: CanonicalJSON.String(~plan.report_id)},
+    })
+    audit_fields := [CanonicalJSONField]{}
+    if body == .Object(fields) -> audit_fields = ~fields
+    &audit_fields.push(CanonicalJSONField{key: "audit_id", value: CanonicalJSON.String(perf_stable_id(body))})
+    generations := [CanonicalJSON]{}
+    if current == .Val(value) {
+        ci :: jet_cli_budget_manifest_content_index(value, false)
+        if value == .Object(wrapper) { if wrapper[ci].value == .Object(content) {
+            gi :: jet_cli_budget_manifest_generations_index(content)
+            if content[gi].value == .Array(values) -> generations = ~values
+        } }
+    }
+    &generations.push(jet_cli_budget_manifest_object_new([CanonicalJSONField]{CanonicalJSONField{key: "audit", value: jet_cli_budget_manifest_object_new(audit_fields)}, CanonicalJSONField{key: "report_id", value: CanonicalJSON.String(~plan.report_id)}}))
+    content :: jet_cli_budget_manifest_object_new([CanonicalJSONField]{CanonicalJSONField{key: "generations", value: CanonicalJSON.Array(generations)}, CanonicalJSONField{key: "head_report_id", value: CanonicalJSON.String(~plan.report_id)}, CanonicalJSONField{key: "name", value: CanonicalJSON.String(~plan.baseline)}})
+    id :: perf_stable_id(content)
+    Ok(jet_cli_budget_manifest_object_new([CanonicalJSONField]{CanonicalJSONField{key: "content", value: content}, CanonicalJSONField{key: "manifest_id", value: CanonicalJSON.String(id)}, CanonicalJSONField{key: "schema", value: CanonicalJSON.String("jet.budget-manifest")}, CanonicalJSONField{key: "version", value: CanonicalJSON.Integer("1")}}))
+}
+// Rust verify_manifest (918-1035), same validation order, including CAS before audit hash.
+pub fn jet_cli_budget_manifest_verify(bytes: [U8], expected_name: String) -> CanonicalJSON JetCLIBudgetManifestError! {
+    value :: canonical_json_parse(bytes) ?? return Err(jet_cli_budget_manifest_error("invalid manifest: {err.message}"))
+    jet_cli_budget_manifest_exact_object(value, "manifest", [String]{"content", "manifest_id", "schema", "version"})
+    if value == .Object(wrapper) {
+        jet_cli_budget_manifest_require_text(wrapper, "schema", "jet.budget-manifest")
+        if jet_cli_budget_manifest_integer_field(wrapper, "version", "version") != "1" -> return Err(jet_cli_budget_manifest_error("manifest version is not 1"))
+        cv :: wrapper[jet_cli_budget_manifest_index(wrapper, "content")].value
+        jet_cli_budget_manifest_exact_object(cv, "manifest content", [String]{"generations", "head_report_id", "name"})
+        if cv == .Object(content) {
+            jet_cli_budget_manifest_require_text(content, "name", expected_name)
+            id :: jet_cli_budget_manifest_text_field(wrapper, "manifest_id", "manifest_id")
+            if !jet_cli_budget_manifest_is_hex64(id) || perf_stable_id(cv) != id -> return Err(jet_cli_budget_manifest_error("manifest_id mismatch"))
+            gi :: jet_cli_budget_manifest_generations_index(content)
+            if content[gi].value == .Array(generations) {
+                if generations.is_empty() -> return Err(jet_cli_budget_manifest_error("manifest has no generations"))
+                prior_accepted := String?{None}
+                loop (index, generation) in generations {
+                    jet_cli_budget_manifest_exact_object(generation, "generation", [String]{"audit", "report_id"})
+                    if generation == .Object(g) {
+                        report :: jet_cli_budget_manifest_text_field(g, "report_id", "generation.report_id")
+                        if !jet_cli_budget_manifest_is_hex64(report) -> return Err(jet_cli_budget_manifest_error("generation report_id is not lowercase Hex64"))
+                        av :: g[jet_cli_budget_manifest_index(g, "audit")].value
+                        jet_cli_budget_manifest_exact_object(av, "audit", [String]{"accepted_at", "actor_label", "audit_id", "flags", "kind", "prior_head_report_id", "prior_state_id", "reason", "report_id"})
+                        if av == .Object(audit) {
+                            jet_cli_budget_manifest_require_text(audit, "actor_label", "local")
+                            jet_cli_budget_manifest_require_text(audit, "report_id", report)
+                            accepted :: jet_cli_budget_manifest_text_field(audit, "accepted_at", "accepted_at")
+                            jet_cli_budget_manifest_validate_timestamp(accepted)
+                            if prior_accepted == .Val(prior) { if prior > accepted -> return Err(jet_cli_budget_manifest_error("manifest generations are not ordered by accepted_at")) }
+                            prior_accepted = Val(accepted)
+                            fv :: audit[jet_cli_budget_manifest_index(audit, "flags")].value
+                            jet_cli_budget_manifest_exact_object(fv, "audit flags", [String]{"accept_regression", "bootstrap"})
+                            if fv == .Object(flags) {
+                                bootstrap :: jet_cli_budget_manifest_boolean(flags[jet_cli_budget_manifest_index(flags, "bootstrap")].value, "flags.bootstrap")
+                                accept :: jet_cli_budget_manifest_boolean(flags[jet_cli_budget_manifest_index(flags, "accept_regression")].value, "flags.accept_regression")
+                                kind :: jet_cli_budget_manifest_text_field(audit, "kind", "audit.kind")
+                                reason :: jet_cli_budget_manifest_nullable_text(audit[jet_cli_budget_manifest_index(audit, "reason")].value, "audit.reason")
+                                agrees := kind == "pass" && !bootstrap && !accept && reason == None
+                                if reason == .Val(r) {
+                                    if (kind == "bootstrap" && bootstrap && !accept) || (kind == "exception" && !bootstrap && accept) {
+                                        _ :: jet_cli_budget_manifest_normalize_reason(r)
+                                        agrees = true
+                                    }
+                                }
+                                if !agrees -> return Err(jet_cli_budget_manifest_error("audit kind, flags, and reason disagree"))
+                                prior_state :: jet_cli_budget_manifest_nullable_text(audit[jet_cli_budget_manifest_index(audit, "prior_state_id")].value, "prior_state_id")
+                                prior_head :: jet_cli_budget_manifest_nullable_text(audit[jet_cli_budget_manifest_index(audit, "prior_head_report_id")].value, "prior_head_report_id")
+                                if index == 0 {
+                                    if prior_state != None || prior_head != None -> return Err(jet_cli_budget_manifest_error("first generation has prior CAS links"))
+                                    if kind != "bootstrap" -> return Err(jet_cli_budget_manifest_error("first generation is not a bootstrap audit"))
+                                } else {
+                                    previous :: generations[index - 1]
+                                    jet_cli_budget_manifest_object(previous, "generation")
+                                    if previous == .Object(p) {
+                                        head :: jet_cli_budget_manifest_text_field(p, "report_id", "report_id")
+                                        prefix :: jet_cli_budget_manifest_object_new([CanonicalJSONField]{CanonicalJSONField{key: "generations", value: CanonicalJSON.Array(~generations[0..<index])}, CanonicalJSONField{key: "head_report_id", value: CanonicalJSON.String(~head)}, CanonicalJSONField{key: "name", value: CanonicalJSON.String(~expected_name)}})
+                                        if prior_state != Val(perf_stable_id(prefix)) || prior_head != Val(head) -> return Err(jet_cli_budget_manifest_error("manifest generation CAS chain is broken"))
+                                    }
+                                }
+                                body := [CanonicalJSONField]{}
+                                loop field in audit { if field.key != "audit_id" -> &body.push(~field) }
+                                audit_id :: jet_cli_budget_manifest_text_field(audit, "audit_id", "audit_id")
+                                if !jet_cli_budget_manifest_is_hex64(audit_id) || perf_stable_id(CanonicalJSON.Object(body)) != audit_id -> return Err(jet_cli_budget_manifest_error("audit_id mismatch"))
+                            }
+                        }
+                    }
+                }
+                last :: generations[generations.len() - 1]
+                jet_cli_budget_manifest_object(last, "generation")
+                if last == .Object(g) { if jet_cli_budget_manifest_head_id(value) != jet_cli_budget_manifest_text_field(g, "report_id", "report_id") -> return Err(jet_cli_budget_manifest_error("manifest head is not newest generation")) }
+            }
+        }
+    }
+    Ok(value)
+}
+// Rust validate_baseline_name (1083-1100).
+pub fn jet_cli_budget_manifest_validate_baseline_name(value: String) JetCLIBudgetManifestError! {
+    if value.is_empty() || value.starts_with("/") || value.ends_with("/") -> return Err(jet_cli_budget_manifest_error("invalid BaselineName"))
+    loop segment in value.split("/") {
+        if segment.is_empty() || segment.starts_with("-") || segment.ends_with("-") || segment.contains("--") -> return Err(jet_cli_budget_manifest_error("invalid BaselineName"))
+        loop byte in segment.bytes() {
+            n :: Int.from_u8(byte)
+            if !((n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 45) -> return Err(jet_cli_budget_manifest_error("invalid BaselineName"))
+        }
+    }
+}
+// Rust validate_kind / normalize_reason (1102-1122); one normalizer, Core NFC.
+pub fn jet_cli_budget_manifest_validate_kind(kind: JetCLIBudgetUpdateKind) JetCLIBudgetManifestError! {
+    if kind == {
+        .Pass -> {}
+        .Bootstrap(r) | .AcceptRegression(r) -> { _ :: jet_cli_budget_manifest_normalize_reason(r) }
+    }
+}
+pub fn jet_cli_budget_manifest_normalize_reason(value: String) -> String JetCLIBudgetManifestError! {
+    control := false
+    bytes :: value.bytes()
+    loop (i, byte) in bytes {
+        n :: Int.from_u8(byte)
+        if n < 32 || n == 127 -> control = true
+        if n == 194 && i + 1 < bytes.len() {
+            next_byte :: Int.from_u8(bytes[i + 1])
+            if next_byte >= 128 && next_byte <= 159 -> control = true
+        }
+    }
+    if value.is_empty() || value.trim() != value || value.len() > 512 || control -> return Err(jet_cli_budget_manifest_error("acceptance reason must be trimmed, control-free, and 1..=512 scalars"))
+    if budget_manifest_text.nfc(value) != value -> return Err(jet_cli_budget_manifest_error("acceptance reason must be NFC"))
+    Ok(~value)
+}
+// Rust validate_update_evidence (1123-1160).
+pub fn jet_cli_budget_manifest_validate_update_evidence(report: CanonicalJSON, kind: JetCLIBudgetUpdateKind) JetCLIBudgetManifestError! {
+    ci :: jet_cli_budget_manifest_content_index(report, true)
+    regressed := false
+    if report == .Object(wrapper) { if wrapper[ci].value == .Object(content) {
+        mi :: jet_cli_budget_manifest_array_index(content, "measurements", "measurements")
+        if content[mi].value == .Array(measurements) {
+            if measurements.is_empty() -> return Err(jet_cli_budget_manifest_error("update report has no measurements"))
+            loop measurement in measurements {
+                jet_cli_budget_manifest_object(measurement, "measurement")
+                if measurement == .Object(m) {
+                    di :: jet_cli_budget_manifest_find(m, "decision") ?? return Err(jet_cli_budget_manifest_error("measurement decision is absent"))
+                    jet_cli_budget_manifest_object(m[di].value, "decision")
+                    if m[di].value == .Object(decision) {
+                        evidence :: jet_cli_budget_manifest_text_field(decision, "evidence", "decision.evidence")
+                        if kind == {
+                            .Pass -> { if evidence != "pass" -> return Err(jet_cli_budget_manifest_error("plain update requires every measurement to pass")) }
+                            .Bootstrap(_) -> { if evidence != "pass" && evidence != "unavailable" -> return Err(jet_cli_budget_manifest_error("bootstrap rejects regression and inconclusive evidence")) }
+                            .AcceptRegression(_) -> { if evidence != "pass" && evidence != "regression" && evidence != "inconclusive" -> return Err(jet_cli_budget_manifest_error("accept-regression rejects unavailable evidence")) }
+                        }
+                        if evidence == "regression" || evidence == "inconclusive" -> regressed = true
+                    }
+                }
+            }
+        }
+    } }
+    if kind == .AcceptRegression(_) { if !regressed -> return Err(jet_cli_budget_manifest_error("accept-regression requires regression or inconclusive evidence")) }
+}
+// Rust timestamp_parts (1164-1220); named fields avoid tuple Debug defect #4357.
+pub struct JetCLIBudgetTimestampParts { pub year: Int, pub month: Int, pub day: Int, pub hour: Int, pub minute: Int, pub second: Int }
+pub fn jet_cli_budget_manifest_timestamp_parts(value: String) -> JetCLIBudgetTimestampParts JetCLIBudgetManifestError! {
+    b :: value.bytes()
+    shape_error :: "accepted_at is not RFC3339UTC with nine fractional digits"
+    if b.len() != 30 -> return Err(jet_cli_budget_manifest_error(shape_error))
+    punctuation :: [Int:Int]{4: 45, 7: 45, 10: 84, 13: 58, 16: 58, 19: 46, 29: 90}
+    loop (i, byte) in b {
+        n :: Int.from_u8(byte)
+        if punctuation.has_key(i) {
+            if n != punctuation[i] -> return Err(jet_cli_budget_manifest_error(shape_error))
+        } else {
+            if n < 48 || n > 57 -> return Err(jet_cli_budget_manifest_error(shape_error))
+        }
+    }
+    year :: jet_cli_budget_manifest_digits(b, 0, 4)
+    month :: jet_cli_budget_manifest_digits(b, 5, 7)
+    day :: jet_cli_budget_manifest_digits(b, 8, 10)
+    hour :: jet_cli_budget_manifest_digits(b, 11, 13)
+    minute :: jet_cli_budget_manifest_digits(b, 14, 16)
+    second :: jet_cli_budget_manifest_digits(b, 17, 19)
+    leap :: year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+    feb :: if leap -> 29 else -> 28
+    days :: [Int]{31, feb, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+    if month < 1 || month > 12 || day == 0 || day > days[month - 1] || hour > 23 || minute > 59 || second > 59 -> return Err(jet_cli_budget_manifest_error("accepted_at contains an out-of-range UTC field"))
+    Ok(JetCLIBudgetTimestampParts{year: year, month: month, day: day, hour: hour, minute: minute, second: second})
+}
+fn jet_cli_budget_manifest_digits(bytes: [U8], start: Int, end: Int) -> Int Never! {
+    value := 0
+    loop i in start..<end -> value = value * 10 + Int.from_u8(bytes[i]) - 48
+    value
+}
+// Rust validate_timestamp / timestamp_seconds (1161-1163,1221-1234).
+pub fn jet_cli_budget_manifest_validate_timestamp(value: String) JetCLIBudgetManifestError! { _ :: jet_cli_budget_manifest_timestamp_parts(value) }
+pub fn jet_cli_budget_manifest_timestamp_seconds(value: String) -> Int JetCLIBudgetManifestError! {
+    p :: jet_cli_budget_manifest_timestamp_parts(value)
+    if p.year < 1970 -> return Err(jet_cli_budget_manifest_error("accepted_at predates Unix epoch"))
+    y :: p.year - if p.month <= 2 -> 1 else -> 0
+    era :: y /% 400
+    yoe :: y - era * 400
+    m :: p.month + if p.month > 2 -> -3 else -> 9
+    doy :: (153 * m + 2) /% 5 + p.day - 1
+    doe :: yoe * 365 + yoe /% 4 - yoe /% 100 + doy
+    days :: era * 146097 + doe - 719468
+    Ok(days * 86400 + p.hour * 3600 + p.minute * 60 + p.second)
+}
+// Rust stale_after_seconds / history_window (1235-1258); u64/usize limits on 64-bit host.
+fn jet_cli_budget_manifest_policy_integer(measurement: [CanonicalJSONField], key: String, fallback: Int, error: String) -> Int JetCLIBudgetManifestError! {
+    pi :: jet_cli_budget_manifest_find(measurement, "policy") ?? return Err(jet_cli_budget_manifest_error("measurement policy is invalid"))
+    if measurement[pi].value == {
+        .Null -> Ok(fallback)
+        .Object(policy) -> {
+            text :: jet_cli_budget_manifest_integer_field(policy, key, "policy.{key}")
+            digits :: text.bytes()
+            at := 0
+            if digits.len() > 0 && digits[0] == (U8{43}) -> at = 1
+            if at == digits.len() -> return Err(jet_cli_budget_manifest_error(error))
+            value := 0
+            loop i in at..<digits.len() {
+                n :: Int.from_u8(digits[i])
+                if n < 48 || n > 57 -> return Err(jet_cli_budget_manifest_error(error))
+                value = value * 10 + n - 48
+                if value > 18446744073709551615 -> return Err(jet_cli_budget_manifest_error(error))
+            }
+            Ok(value)
+        }
+        else -> Err(jet_cli_budget_manifest_error("measurement policy is invalid"))
+    }
+}
+pub fn jet_cli_budget_manifest_stale_after_seconds(measurement: [CanonicalJSONField]) -> Int JetCLIBudgetManifestError! { jet_cli_budget_manifest_policy_integer(measurement, "stale_after_seconds", 2592000, "stale_after_seconds exceeds u64") }
+pub fn jet_cli_budget_manifest_history_window(measurement: [CanonicalJSONField]) -> Int JetCLIBudgetManifestError! { jet_cli_budget_manifest_policy_integer(measurement, "baseline_generations", 5, "baseline_generations exceeds usize") }

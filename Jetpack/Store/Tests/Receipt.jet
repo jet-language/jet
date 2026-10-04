@@ -1,0 +1,165 @@
+// Rust receipt.rs::receipt_round_trips_typed_diagnostics_through_the_store.
+// Uses the canonical diagnostic rich fixture, actual CAS and workspace state.
+// Native closure remains gated by #3593 and #3598, never stubbed.
+#Test("receipt round trips typed diagnostics through the store") {
+    root :: store_artifact_test_root("receipt-round-trip")
+    workspace :: store_artifact_test_root("receipt-workspace")
+    defer store_artifact_test_cleanup(root)
+    defer store_artifact_test_cleanup(workspace)
+    store :: store_artifact_test_store(root, 1_000_000)
+    source :: "fn run() {{\n    x := 1\n}}\n"
+    origin :: store_diagnostic_test_origin("main.jet", "/p/main.jet", source)
+    core :: store_diagnostic_test_origin("math", "<corelib>/math", "pub fn one() {{}}\n")
+    record :: ReceiptRecord.new("check", record_blob_key("closure".bytes()), [ReceiptInput{path: "main.jet", digest: origin.revision}], [ReceiptInput]{}, [store_diagnostic_test_rich(origin, core)], [String: String]{"goal_report": "goal: main.jet:2\n"})
+    store.publish_receipt(workspace, record) ?? panic("publish")
+    resolve :: (revision: String) -> if revision == origin.revision -> Val(source) else -> None
+    loaded :: store.receipt(workspace, record.closure, resolve) ?? panic("lookup") ?? panic("hit")
+    payload :: record.to_bytes() ?? panic("encode")
+    assert_eq(loaded.to_bytes() ?? panic("encode loaded"), payload)
+    assert_eq(loaded.diagnostics[0].origin, Val(origin))
+    assert_eq(loaded.diagnostics[0].cause[0].origin, Val(core))
+    // The ONE compiler binary record reader proves sources are elided/embedded.
+    reader :: record_open_schema(payload, "jet.receipt/v1").reader ?? panic("record")
+    origins :: store_receipt_elements(reader, 4) ?? panic("origins")
+    assert_eq(store_diagnostic_optional_text(origins[0], "source") ?? panic("core source"), Val(core.source))
+    assert_eq(store_diagnostic_optional_text(origins[1], "source") ?? panic("module source"), None)
+    assert_eq(store.receipt(workspace, record.closure, (revision: String) -> None) ?? panic("unresolved"), None)
+    assert_eq(files.exists(store_receipt_pointer_path(workspace, record.closure)) ?? panic("pointer exists"), false)
+}
+
+#Test("receipt inputs sort and deduplicate on path then digest") {
+    a :: ReceiptInput{path: "a", digest: "2"}
+    b :: ReceiptInput{path: "a", digest: "1"}
+    c :: ReceiptInput{path: "b", digest: "0"}
+    assert_eq(store_receipt_sorted_inputs([c, a, b, a, c]), [b, a, c])
+    values :: store_receipt_encode_inputs([c, a, a])
+    decoded :: store_receipt_decode_inputs(values) ?? panic("decode inputs")
+    // The decoder intentionally preserves wire order and duplicates.
+    assert_eq(decoded, [c, a, a])
+    if store_receipt_decode_inputs([RecordValue.Null]) == {
+        .Ok(_) -> panic("malformed input accepted")
+        .Err(error) -> assert_eq(error.message, "record is malformed: expected map, found null")
+    }
+}
+
+#Test("receipt canonical sections facts order schema and module input normalization") {
+    a :: ReceiptInput{path: "main.jet", digest: "2"}
+    b :: ReceiptInput{path: "main.jet", digest: "1"}
+    record :: ReceiptRecord.new("check", "closure", [a, b, a], [a, a], [Diagnostic]{}, [String: String]{"z": "last", "a": "first"})
+    assert_eq(record.schema, "jet.receipt/v1")
+    assert_eq(record.modules, [b, a])
+    assert_eq(record.inputs, [a])
+    bytes :: record.to_bytes() ?? panic("encode")
+    decoded :: ReceiptRecord.from_bytes(bytes, (revision: String) -> None) ?? panic("decode")
+    assert_eq(decoded, record)
+    reader :: record_open_schema(bytes, "jet.receipt/v1").reader ?? panic("reader")
+    loop tag in 1..=6 -> assert(record_element_count(reader, tag) != None)
+    facts :: store_receipt_elements(reader, 6) ?? panic("facts")
+    assert_eq(store_receipt_text(facts[0], "name") ?? panic("name"), "a")
+    assert_eq(store_receipt_text(facts[1], "name") ?? panic("name"), "z")
+    if ReceiptRecord.from_bytes("bad".bytes(), (revision: String) -> None) == {
+        .Ok(_) -> panic("bad record accepted")
+        .Err(error) -> assert_eq(error.message, "record is truncated")
+    }
+}
+
+#Test("receipt newest pointer preserves immutable blobs and real discovered input freshness") {
+    root :: store_artifact_test_root("receipt-newest")
+    workspace :: store_artifact_test_root("receipt-freshness")
+    defer store_artifact_test_cleanup(root)
+    defer store_artifact_test_cleanup(workspace)
+    store :: store_artifact_test_store(root, 1_000_000)
+    files.create_dir_all(workspace) ?? panic("workspace")
+    input :: files.join(workspace, "data")
+    files.write(input, "one") ?? panic("input")
+    table := StampTable.load(workspace)
+    digest :: &table.file_digest(input) ?? panic("digest")
+    first :: ReceiptRecord.new("check", "same-closure", [ReceiptInput]{}, [ReceiptInput{path: "data", digest: digest}], [Diagnostic]{}, [String: String]{"result": "first"})
+    assert_eq(store.receipt(workspace, first.closure, (revision: String) -> None) ?? panic("missing"), None)
+    store.publish_receipt(workspace, first) ?? panic("first publish")
+    first_pointer :: files.read_bytes(store_receipt_pointer_path(workspace, first.closure)) ?? panic("pointer")
+    first_object :: store.read_build_pointer(store_receipt_pointer_path(workspace, first.closure)) ?? panic("pointer") ?? panic("object")
+    hit :: store.receipt(workspace, first.closure, (revision: String) -> None) ?? panic("lookup") ?? panic("hit")
+    assert_eq(hit.inputs[0].digest, &table.file_digest(input) ?? panic("current digest"))
+    files.write(input, "changed") ?? panic("rewrite discovered input")
+    current :: &table.file_digest(input) ?? panic("rehash")
+    assert(hit.inputs[0].digest != current)
+    // Freshness belongs to the verb consumer; a changed discovered leaf
+    // triggers rechecking, then replaces ONLY the pointer for this closure.
+    newest :: ReceiptRecord.new("check", first.closure, [ReceiptInput]{}, [ReceiptInput{path: "data", digest: current}], [Diagnostic]{}, [String: String]{"result": "newest"})
+    store.publish_receipt(workspace, newest) ?? panic("newest publish")
+    assert(files.read_bytes(store_receipt_pointer_path(workspace, first.closure)) ?? panic("new pointer") != first_pointer)
+    loaded :: store.receipt(workspace, first.closure, (revision: String) -> None) ?? panic("newest lookup") ?? panic("newest hit")
+    assert_eq(loaded, newest)
+    assert_eq(store.get_blob(first_object) ?? panic("old blob"), Val(first.to_bytes() ?? panic("old bytes")))
+}
+
+#Test("receipt missing corrupt wrong closure and missing blob paths are misses") {
+    root :: store_artifact_test_root("receipt-corrupt")
+    workspace :: store_artifact_test_root("receipt-corrupt-workspace")
+    defer store_artifact_test_cleanup(root)
+    defer store_artifact_test_cleanup(workspace)
+    store :: store_artifact_test_store(root, 1_000_000)
+    pointer :: store_receipt_pointer_path(workspace, "closure")
+    files.create_dir_all(files.dirname(pointer)) ?? panic("pointer directory")
+    files.write(pointer, "bad pointer") ?? panic("bad pointer")
+    assert_eq(store.receipt(workspace, "closure", (revision: String) -> None) ?? panic("corrupt pointer"), None)
+    assert_eq(files.exists(pointer) ?? panic("removed pointer"), false)
+    bad :: store.publish_blob("not a record".bytes()) ?? panic("bad record blob")
+    store_artifact_replace_unsynced(pointer, bad.text().bytes()) ?? panic("bad record pointer")
+    assert_eq(store.receipt(workspace, "closure", (revision: String) -> None) ?? panic("corrupt record"), None)
+    assert_eq(files.exists(pointer) ?? panic("removed record pointer"), false)
+    other :: ReceiptRecord.new("check", "other-closure", [ReceiptInput]{}, [ReceiptInput]{}, [Diagnostic]{}, [String: String]{})
+    store.publish_receipt(workspace, other) ?? panic("other")
+    object :: store.read_build_pointer(store_receipt_pointer_path(workspace, other.closure)) ?? panic("other pointer") ?? panic("other object")
+    store_artifact_replace_unsynced(pointer, object.text().bytes()) ?? panic("wrong closure pointer")
+    assert_eq(store.receipt(workspace, "closure", (revision: String) -> None) ?? panic("wrong closure"), None)
+    assert_eq(files.exists(pointer) ?? panic("removed wrong closure"), false)
+    missing :: ObjectHandle.from_bytes("unpublished".bytes())
+    store_artifact_replace_unsynced(pointer, missing.text().bytes()) ?? panic("missing blob pointer")
+    assert_eq(store.receipt(workspace, "closure", (revision: String) -> None) ?? panic("missing blob"), None)
+    // Rust keeps a valid pointer whose blob is missing (unlike decode failure).
+    assert_eq(files.exists(pointer) ?? panic("kept missing blob pointer"), true)
+}
+
+#Test("receipt encoding embeds the complete canonical BuildError wire") {
+    report :: store_diagnostic_test_build_report()
+    diagnostic :: Diagnostic{severity: DIAGNOSTIC_ERROR, code: "E3502", what: "what", why: "why", fix: "fix", structured: Val(DiagnosticStructured.BuildError{report: report})}
+    record :: ReceiptRecord.new("check", "closure", [ReceiptInput]{}, [ReceiptInput]{}, [diagnostic], [String: String]{})
+    reader :: record_open_schema(record.to_bytes() ?? panic("encode receipt"), "jet.receipt/v1").reader ?? panic("record")
+    diagnostics :: store_receipt_elements(reader, 5) ?? panic("diagnostics")
+    assert_eq(diagnostics.len(), 1)
+    structured :: store_diagnostic_field(diagnostics[0], "structured") ?? panic("structured")
+    assert_eq(store_diagnostic_text(structured, "report") ?? panic("report"), report.to_json())
+}
+
+// #3598: receipt reads use the sole canonical Outcome/Core JSON parser.
+#Test("receipt retains structured BuildError report through canonical outcome wire") {
+    plain :: JetErrorReport{code: Val("E3502"), message: "duplicate target", causes: [JetErrorReport{message: "inner"}]}
+    loop report in [plain, store_diagnostic_test_build_report()] {
+        diagnostic :: Diagnostic{severity: DIAGNOSTIC_ERROR, code: "E3502", what: "what", why: "why", fix: "fix", structured: Val(DiagnosticStructured.BuildError{report: report})}
+        record :: ReceiptRecord.new("check", "closure", [ReceiptInput]{}, [ReceiptInput]{}, [diagnostic], [String: String]{})
+        decoded :: ReceiptRecord.from_bytes(record.to_bytes() ?? panic("encode"), (revision: String) -> None) ?? panic("decode")
+        assert_eq(decoded.diagnostics, [diagnostic])
+        assert_eq(decoded.to_bytes() ?? panic("re-encode"), record.to_bytes() ?? panic("original bytes"))
+    }
+}
+
+#Test("receipt blob IO failures propagate rather than becoming cache misses") {
+    root :: store_artifact_test_root("receipt-io")
+    workspace :: store_artifact_test_root("receipt-io-workspace")
+    defer store_artifact_test_cleanup(root)
+    defer store_artifact_test_cleanup(workspace)
+    store :: store_artifact_test_store(root, 1_000_000)
+    record :: ReceiptRecord.new("check", "closure", [ReceiptInput]{}, [ReceiptInput]{}, [Diagnostic]{}, [String: String]{})
+    store.publish_receipt(workspace, record) ?? panic("publish")
+    // Removing read/search permission from CAS makes stat/open fail with
+    // permission denied on an unprivileged native host, not NotFound.
+    cas :: files.join(root, "cas")
+    files.set_mode(cas, 0) ?? panic("deny CAS")
+    defer files.set_mode(cas, 0o755).drop("restore permissions")
+    if store.receipt(workspace, "closure", (revision: String) -> None) == {
+        .Ok(_) -> panic("blob IO failure was swallowed")
+        .Err(error) -> assert_eq(store_artifact_test_kind(error), "io")
+    }
+}

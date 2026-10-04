@@ -18,10 +18,10 @@ pub fn store_publish_local(cache: String, info: NarInfo, nar: [U8], key: TrustKe
 // Substitute a local NAR only after narinfo trust and byte identity checks.
 // A corrupt or conflicting destination is never overwritten.
 pub fn store_substitute_local(nar_path: String, info_path: String, destination: String, key: TrustKey) -> NarStats StoreError! {
-    info_text :: String.from_bytes(store_nar_read_bounded(info_path, @STORE_NAR_MAX_INFO_BYTES)) ?? return Err(store_nar_invalid("narinfo is not UTF-8"))
+    info_text :: String.from_bytes(store_nar_read_bounded(info_path, STORE_NAR_MAX_INFO_BYTES)) ?? return Err(store_nar_invalid("narinfo is not UTF-8"))
     info :: NarInfo.parse(info_text)
     info.verify(key)
-    nar :: store_nar_read_bounded(nar_path, @STORE_MAX_NAR_BYTES)
+    nar :: store_nar_read_bounded(nar_path, STORE_MAX_NAR_BYTES)
     store_verify_nar_info_bytes(info, nar)
     store_read_nar(nar, destination)
 }
@@ -45,7 +45,7 @@ fn store_nar_write_or_match(path: String, bytes: [U8]) StoreError! {
     store_nar_validate_destination_parent(parent)
     if files.is_symlink(path) -> return Err(store_nar_invalid("binary-cache destination cannot be a symlink"))
     if files.is_file(path) {
-        if store_nar_read_bounded(path, bytes.len()) == bytes -> return Ok()
+        if store_nar_read_bounded(path, bytes.len()) == bytes -> return
         return Err(store_nar_invalid("binary-cache destination already has conflicting bytes"))
     }
     if files.exists(path) -> return Err(store_nar_invalid("binary-cache destination is not a regular file"))

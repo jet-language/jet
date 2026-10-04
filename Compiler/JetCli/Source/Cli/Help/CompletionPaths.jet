@@ -1,0 +1,265 @@
+// Native Rust filesystem projection (DynamicCompletions.rs:451-554,1183-1464).
+use core.files.runtime.kernel_path_components as completion_paths
+use core.files.runtime.kernel_path_traits as completion_path_order
+use core.files.host.retained_descriptor as completion_fs
+use core.files.runtime.descriptor_metadata as completion_metadata
+use core.sys.target as completion_target
+use core.files.runtime.kernel_path_components.[OSPath]
+
+// #4483: selected compiler target, never runtime host or lexical platform guessing.
+fn jet_cli_completion_path_platform() -> completion_paths.PathPlatform Never! {
+    if completion_target.selected_os() == completion_target.NativeTargetOS.Windows -> return completion_paths.PathPlatform.Windows
+    completion_paths.PathPlatform.Unix
+}
+fn jet_cli_completion_main_separator() -> U8 Never! {
+    if completion_target.selected_os() == completion_target.NativeTargetOS.Windows -> return U8{92}
+    U8{47}
+}
+pub struct JetCLIPathAuthority { roots: [OSPath] }
+#Error
+pub enum JetCLIPathAuthorityError {
+    Empty
+    RelativeRoot(OSPath)
+    InvalidRoot(path: OSPath, reason: String)
+    TooManyRoots(Int)
+    MissingRoot(OSPath)
+    NotDirectory(OSPath)
+    SymlinkRoot(OSPath)
+    IO(path: OSPath, error: String)
+}
+// Rust PathAuthorityError::fmt.
+pub fn jet_cli_path_authority_error_message(error: JetCLIPathAuthorityError) -> String Never! {
+    if error == {
+        .Empty -> "path authority needs at least one root"
+        .RelativeRoot(path) -> "path authority root is not absolute: {completion_paths.display(path)}"
+        .InvalidRoot(path, reason) -> "path authority root is invalid ({completion_paths.display(path)}): {reason}"
+        .TooManyRoots(limit) -> "path authority has more than {limit} roots"
+        .MissingRoot(path) -> "path authority root does not exist: {completion_paths.display(path)}"
+        .NotDirectory(path) -> "path authority root is not a directory: {completion_paths.display(path)}"
+        .SymlinkRoot(path) -> "path authority root is a symbolic link: {completion_paths.display(path)}"
+        .IO(path, message) -> "could not inspect path authority root {completion_paths.display(path)}: {message}"
+    }
+}
+// Rust lexical normalization uses the sole native component cursor/push/pop.
+// Result<_, String> preserves exact Rust text on Err!, not a custom error carrier.
+fn jet_cli_completion_normalize_lexical_path(path: OSPath) -> OSPath Err! {
+    normalized := completion_paths.from_encoded(^[U8]{}, path.platform)
+    absolute :: completion_paths.is_absolute(path)
+    cursor := completion_paths.components(path)
+    loop {
+        component :: completion_paths.next(path, &cursor) ?? break
+        if component.kind == {
+            .CurDir -> {}
+            .ParentDir -> {
+                if !completion_paths.pop(&normalized) && !absolute -> return Err("parent traversal escapes the authority root")
+            }
+            else -> completion_paths.push_component(&normalized, path, component)
+        }
+    }
+    Ok(normalized)
+}
+fn jet_cli_completion_normalize_absolute_path(path: OSPath) -> OSPath Err! {
+    if !completion_paths.is_absolute(path) -> return Err("path is not absolute")
+    jet_cli_completion_normalize_lexical_path(path)
+}
+enum JetCLICompletionSafeMetadata {
+    Present(completion_metadata.DescriptorStat)
+    Missing
+    Symlink
+}
+// #4494/#4392: real retained_descriptor producer; no String host or fake facts.
+fn jet_cli_completion_metadata(path: OSPath) -[FS.Read]> JetCLICompletionSafeMetadata IOError! {
+    if completion_fs.symlink_metadata(path) == {
+        .Ok(metadata) -> {
+            if metadata.is_symlink -> return Ok(JetCLICompletionSafeMetadata.Symlink)
+            Ok(JetCLICompletionSafeMetadata.Present(metadata))
+        }
+        .Err(error) -> if error == {
+            .NotFound(_) -> Ok(JetCLICompletionSafeMetadata.Missing)
+            else -> Err(error)
+        }
+    }
+}
+fn jet_cli_completion_safe_metadata(path: OSPath) -[FS.Read]> JetCLICompletionSafeMetadata IOError! {
+    current := completion_paths.from_encoded(^[U8]{}, path.platform)
+    cursor := completion_paths.components(path)
+    loop {
+        component :: completion_paths.next(path, &cursor) ?? break
+        completion_paths.push_component(&current, path, component)
+        metadata :: jet_cli_completion_metadata(current)
+        if metadata == {
+            .Present(_) -> {}
+            else -> return Ok(metadata)
+        }
+    }
+    jet_cli_completion_metadata(path)
+}
+pub fn jet_cli_path_authority_new(roots: [OSPath]) -[FS.Read]> JetCLIPathAuthority JetCLIPathAuthorityError! {
+    normalized := [OSPath]{}
+    loop root in roots {
+        if !completion_paths.is_absolute(root) -> return Err(JetCLIPathAuthorityError.RelativeRoot(~root))
+        path :: jet_cli_completion_normalize_absolute_path(root) ?? return Err(JetCLIPathAuthorityError.InvalidRoot{path: ~root, reason: ~err.message})
+        &normalized.push(path)
+    }
+    if normalized.is_empty() -> return Err(JetCLIPathAuthorityError.Empty)
+    if normalized.len() > JET_CLI_MAX_AUTHORITY_ROOTS -> return Err(JetCLIPathAuthorityError.TooManyRoots(JET_CLI_MAX_AUTHORITY_ROOTS))
+    &normalized.sort_by((left: OSPath, right: OSPath) -> completion_path_order.compare(left, right))
+    unique := [OSPath]{}
+    loop root in normalized {
+        if !unique.is_empty() && completion_paths.equals(unique[unique.len() - 1], root) -> next
+        metadata :: jet_cli_completion_safe_metadata(root) ?? return Err(JetCLIPathAuthorityError.IO{path: ~root, error: ~err.message})
+        if metadata == {
+            .Present(stat) -> { if !stat.is_dir -> return Err(JetCLIPathAuthorityError.NotDirectory(~root)) }
+            .Missing -> return Err(JetCLIPathAuthorityError.MissingRoot(~root))
+            .Symlink -> return Err(JetCLIPathAuthorityError.SymlinkRoot(~root))
+        }
+        &unique.push(~root)
+    }
+    Ok(JetCLIPathAuthority{roots: unique})
+}
+pub fn jet_cli_path_authority_roots(authority: JetCLIPathAuthority) -> View<OSPath> from authority { authority.roots[0..<authority.roots.len()] }
+pub struct JetCLICompletionPathProjection { pub candidates: [JetCLICompletionCandidate], pub truncated: Bool }
+struct JetCLICompletionPathEntry { label: String, detail: String, rank: U32, is_dir: Bool }
+struct JetCLICompletionDirectoryRows { entries: [String:Bool], truncated: Bool }
+// Rust path_entry_order.
+fn jet_cli_completion_path_entry_order(left: JetCLICompletionPathEntry, right: JetCLICompletionPathEntry) -> Ordering Never! {
+    rank :: left.rank <=> right.rank
+    if rank != Ordering.Equal -> return rank
+    directory :: right.is_dir <=> left.is_dir
+    if directory != Ordering.Equal -> return directory
+    label :: left.label <=> right.label
+    if label != Ordering.Equal -> return label
+    left.detail <=> right.detail
+}
+// Rust replacement_label.
+fn jet_cli_completion_replacement_label(parent: String, name: String, is_dir: Bool) -> String Never! {
+    label := [U8]{}
+    &label.extend(parent.bytes())
+    &label.extend(name.bytes())
+    if is_dir -> &label.push(jet_cli_completion_main_separator())
+    String.from_bytes(label) ?? panic("completion path label UTF-8")
+}
+// Rust read_directory. Keep the lexically smallest limit names, independent of
+// native enumeration order. A max-heap gives O(log limit) bounded insertion.
+fn jet_cli_completion_heap_push(heap: &[String], name: String) Never! {
+    &heap.push(name)
+    index := heap.len() - 1
+    loop index > 0 {
+        parent :: (index - 1) /% 2
+        if heap[parent] >= heap[index] -> break
+        saved :: ~heap[parent]
+        heap[parent] = ~heap[index]
+        heap[index] = saved
+        index = parent
+    }
+}
+fn jet_cli_completion_heap_replace(heap: &[String], name: String) Never! {
+    heap[0] = name
+    index := 0
+    loop {
+        left :: index * 2 + 1
+        if left >= heap.len() -> break
+        right :: left + 1
+        child :: if right < heap.len() && heap[right] > heap[left] -> right else -> left
+        if heap[index] >= heap[child] -> break
+        saved :: ~heap[index]
+        heap[index] = ~heap[child]
+        heap[child] = saved
+        index = child
+    }
+}
+fn jet_cli_completion_read_entries(directory: OSPath, limit: Int, stream: &completion_fs.DirectoryEntries) -[FS.Read]> JetCLICompletionDirectoryRows JetCLICompletionError! {
+    entries := [String:Bool]{}
+    heap := [String]{}
+    truncated := false
+    loop {
+        item :: &stream.next() ?? return Err(JetCLICompletionError.Filesystem{path: ~directory, error: ~err.message})
+        row :: item ?? break
+        // Only candidate labels require text; native roots/names remain lossless.
+        name :: completion_paths.to_str(row.file_name()) ?? next
+        metadata :: completion_fs.symlink_metadata(row.path()) ?? next
+        if metadata.is_symlink || (!metadata.is_dir && !metadata.is_file) -> next
+        is_dir :: metadata.is_dir
+        if entries.get(name) != None {
+            entries[name] = is_dir
+            next
+        }
+        if heap.len() >= limit {
+            truncated = true
+            if name >= heap[0] -> next
+            _ :: &entries.remove(heap[0])
+            jet_cli_completion_heap_replace(&heap, ~name)
+        } else { jet_cli_completion_heap_push(&heap, ~name) }
+        entries[name] = is_dir
+    }
+    Ok(JetCLICompletionDirectoryRows{entries: entries, truncated: truncated})
+}
+fn jet_cli_completion_read_directory(directory: OSPath, limit: Int) -[FS.Read]> JetCLICompletionDirectoryRows? JetCLICompletionError! {
+    metadata :: jet_cli_completion_safe_metadata(directory) ?? return Err(JetCLICompletionError.Filesystem{path: ~directory, error: ~err.message})
+    if metadata == {
+        .Present(stat) -> { if !stat.is_dir -> return Ok(None) }
+        else -> return Ok(None)
+    }
+    // #4494: the sole retained stream implements Rust fs::read_dir directly.
+    stream := completion_fs.read_dir(directory) ?? return Err(JetCLICompletionError.Filesystem{path: ~directory, error: ~err.message})
+    rows :: jet_cli_completion_read_entries(directory, limit, &stream) ?? {
+        failure :: err
+        _ :: ^stream.close() ?? {}
+        return Err(failure)
+    }
+    // Rust ReadDir Drop ignores native close errors; consuming release is once.
+    _ :: ^stream.close() ?? {}
+    Ok(Val(rows))
+}
+pub fn jet_cli_completion_path_candidates(authority: JetCLIPathAuthority, prefix: String, span: Span, limits: JetCLICompletionLimits) -[FS.Read]> JetCLICompletionPathProjection JetCLICompletionError! {
+    if jet_cli_completion_has_control(prefix) -> return Err(JetCLICompletionError.PathOutsideAuthority(~prefix))
+    path :: completion_paths.from_text(prefix, jet_cli_completion_path_platform())
+    normalized :: jet_cli_completion_normalize_lexical_path(path) ?? return Err(JetCLICompletionError.PathOutsideAuthority(~prefix))
+    depth := 0
+    cursor := completion_paths.components(normalized)
+    loop {
+        _ :: completion_paths.next(normalized, &cursor) ?? break
+        depth += 1
+    }
+    if depth > limits.max_path_depth -> return Err(JetCLICompletionError.PathDepthExceeded{path: ~prefix, limit: limits.max_path_depth})
+    separator :: jet_cli_completion_main_separator()
+    bytes :: prefix.bytes()
+    trailing :: !bytes.is_empty() && bytes[bytes.len() - 1] == separator
+    last := -1
+    loop (index, byte) in bytes { if byte == separator -> last = index }
+    parent_prefix :: if trailing -> ~prefix else -> jet_cli_completion_slice(prefix, 0, last + 1)
+    filter :: if trailing -> "" else -> jet_cli_completion_slice(prefix, last + 1, bytes.len())
+    parent :: if trailing -> ~normalized else -> if completion_paths.parent_span(normalized) == {
+        .Val(extent) -> completion_paths.owned_span(normalized, extent)
+        None -> completion_paths.from_encoded(^[U8]{}, path.platform)
+    }
+    absolute :: completion_paths.is_absolute(parent)
+    matches := [Int]{}
+    loop (index, root) in authority.roots {
+        if !absolute || completion_paths.starts_with(parent, root) -> &matches.push(index)
+    }
+    if absolute && matches.is_empty() -> return Err(JetCLICompletionError.PathOutsideAuthority(~prefix))
+    entries := [String:JetCLICompletionPathEntry]{}
+    truncated := false
+    loop (rank, root_index) in matches {
+        root :: authority.roots[root_index]
+        directory := if absolute -> ~parent else -> ~root
+        if !absolute -> completion_paths.push(&directory, parent)
+        selected :: jet_cli_completion_read_directory(directory, limits.max_directory_entries)
+        rows :: selected ?? next
+        truncated = truncated || rows.truncated
+        loop (name, is_dir) in rows.entries {
+            if !name.starts_with(filter) -> next
+            label :: jet_cli_completion_replacement_label(parent_prefix, name, is_dir)
+            candidate :: JetCLICompletionPathEntry{label: ~label, detail: if is_dir -> "directory" else -> "file", rank: U32{rank}, is_dir: is_dir}
+            if entries.get(label) == {
+                .Val(current) -> { if jet_cli_completion_path_entry_order(candidate, current) == Ordering.Less -> entries[label] = candidate }
+                None -> entries[label] = candidate
+            }
+        }
+    }
+    candidates := [JetCLICompletionCandidate]{}
+    loop (_, entry) in entries -> &candidates.push(jet_cli_completion_candidate(~entry.label, JetCLICompletionKind.Path, ~entry.detail, span, "filesystem", Int.from_u32(entry.rank)))
+    &candidates.sort_by((left: JetCLICompletionCandidate, right: JetCLICompletionCandidate) -> jet_cli_completion_candidate_order(left, right))
+    Ok(JetCLICompletionPathProjection{candidates: candidates, truncated: truncated})
+}

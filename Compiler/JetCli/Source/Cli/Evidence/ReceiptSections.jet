@@ -1,0 +1,424 @@
+// Bounded canonical typed receipt sections (Source/ReceiptSections.rs).
+// A-canonical JSON is deliberately not RFC8785: exact arbitrary integers,
+// UTF-8 key ordering, and one trailing LF are part of the receipt identity.
+
+pub JET_CLI_RECEIPT_SECTION_WIRE_MAGIC :: [U8]{
+    U8{106}, U8{101}, U8{116}, U8{45}, U8{114}, U8{101}, U8{99}, U8{101}, U8{105}, U8{112}, U8{116}, U8{45},
+    U8{115}, U8{101}, U8{99}, U8{116}, U8{105}, U8{111}, U8{110}, U8{115}, U8{45}, U8{118}, U8{49}, U8{0},
+}
+pub JET_CLI_RECEIPT_SECTION_RECORD_WIRE_MAGIC :: [U8]{
+    U8{106}, U8{101}, U8{116}, U8{45}, U8{114}, U8{101}, U8{99}, U8{101}, U8{105}, U8{112}, U8{116}, U8{45},
+    U8{115}, U8{101}, U8{99}, U8{116}, U8{105}, U8{111}, U8{110}, U8{45}, U8{114}, U8{101}, U8{99}, U8{111}, U8{114}, U8{100}, U8{45}, U8{118}, U8{49}, U8{0},
+}
+pub JET_CLI_RECEIPT_SECTION_RECORD_ID_MAGIC :: [U8]{
+    U8{106}, U8{101}, U8{116}, U8{45}, U8{114}, U8{101}, U8{99}, U8{101}, U8{105}, U8{112}, U8{116}, U8{45},
+    U8{115}, U8{101}, U8{99}, U8{116}, U8{105}, U8{111}, U8{110}, U8{45}, U8{105}, U8{100}, U8{45}, U8{118}, U8{49}, U8{0},
+}
+pub JET_CLI_MAX_RECEIPT_SECTIONS :: 256
+pub JET_CLI_MAX_RECEIPT_SECTION_NAME_BYTES :: 128
+pub JET_CLI_MAX_RECEIPT_SECTION_TYPE_BYTES :: 256
+pub JET_CLI_MAX_RECEIPT_SECTION_BYTES :: 67108864
+pub JET_CLI_MAX_RECEIPT_SECTION_BYTES_TOTAL :: 67108864
+pub JET_CLI_MAX_RECEIPT_SECTION_RECORD_BYTES :: 67112960
+
+pub struct JetCLIReceiptSection {
+    pub name: String
+    pub type_name: String
+    pub schema_digest: String
+    pub payload_digest: String
+    pub bytes: [U8]
+}
+pub struct JetCLIReceiptSectionRecord {
+    pub claim_key: String
+    pub parent_digest: String
+    pub section: JetCLIReceiptSection
+}
+pub struct JetCLIReceiptFieldDiff {
+    pub section: String
+    pub field: String
+    pub before: CanonicalJSON?
+    pub after: CanonicalJSON?
+}
+#Error
+pub struct JetCLIReceiptSectionError { pub message: String }
+fn jet_cli_receipt_section_error(message: String) -> JetCLIReceiptSectionError Never! {
+    JetCLIReceiptSectionError{message: message}
+}
+
+// Rust ReceiptSection::new (ReceiptSections.rs:79-91).
+pub fn jet_cli_receipt_section_new(name: String, type_name: String, bytes: [U8]) -> JetCLIReceiptSection JetCLIReceiptSectionError! {
+    jet_cli_receipt_section_new_with_schema_digest(name, type_name, jet_cli_receipt_schema_digest_for_type(type_name), bytes)
+}
+// Rust ReceiptSection::new_with_schema_digest (ReceiptSections.rs:94-108).
+pub fn jet_cli_receipt_section_new_with_schema_digest(name: String, type_name: String, schema_digest: String, bytes: [U8]) -> JetCLIReceiptSection JetCLIReceiptSectionError! {
+    jet_cli_receipt_section_new_with_digests(name, type_name, schema_digest, jet_cli_receipt_payload_digest(bytes), bytes)
+}
+// Rust ReceiptSection::new_with_digests (ReceiptSections.rs:111-127).
+pub fn jet_cli_receipt_section_new_with_digests(name: String, type_name: String, schema_digest: String, payload_digest: String, bytes: [U8]) -> JetCLIReceiptSection JetCLIReceiptSectionError! {
+    section :: JetCLIReceiptSection{name: name, type_name: type_name, schema_digest: schema_digest, payload_digest: payload_digest, bytes: bytes}
+    jet_cli_receipt_validate_section(section)
+    Ok(section)
+}
+// Rust ReceiptSection::from_json (ReceiptSections.rs:139-145).
+pub fn jet_cli_receipt_section_from_json(name: String, type_name: String, value: CanonicalJSON) -> JetCLIReceiptSection JetCLIReceiptSectionError! {
+    jet_cli_receipt_section_new(name, type_name, canonical_json_bytes(value))
+}
+// Rust ReceiptSection::value (ReceiptSections.rs:148-150). No redundant json/from_bytes aliases.
+pub fn jet_cli_receipt_section_value(section: JetCLIReceiptSection) -> CanonicalJSON JetCLIReceiptSectionError! {
+    jet_cli_receipt_canonical_object(section.bytes)
+}
+// Rust ReceiptSectionRecord::new (ReceiptSections.rs:159-171).
+pub fn jet_cli_receipt_section_record_new(claim_key: String, parent_digest: String, section: JetCLIReceiptSection) -> JetCLIReceiptSectionRecord JetCLIReceiptSectionError! {
+    record :: JetCLIReceiptSectionRecord{claim_key: claim_key, parent_digest: parent_digest, section: section}
+    jet_cli_receipt_validate_section_record(record)
+    Ok(record)
+}
+// Rust schema_digest_for_type (ReceiptSections.rs:176-178).
+pub fn jet_cli_receipt_schema_digest_for_type(type_name: String) -> String Never! {
+    mir_sha256_hex_bytes(mir_sha256_bytes(type_name.bytes()))
+}
+// Rust payload_digest (ReceiptSections.rs:181-183).
+pub fn jet_cli_receipt_payload_digest(bytes: [U8]) -> String Never! {
+    mir_sha256_hex_bytes(mir_sha256_bytes(bytes))
+}
+// Rust section_record_identity (ReceiptSections.rs:186-196).
+pub fn jet_cli_receipt_section_record_identity(record: JetCLIReceiptSectionRecord) -> String Never! {
+    identity := ~JET_CLI_RECEIPT_SECTION_RECORD_ID_MAGIC
+    jet_cli_receipt_record_metadata(&identity, record)
+    jet_cli_receipt_payload_digest(identity)
+}
+fn jet_cli_receipt_record_metadata(out: &[U8], record: JetCLIReceiptSectionRecord) Never! {
+    jet_cli_receipt_record_frame(&out, record.claim_key.bytes())
+    jet_cli_receipt_record_frame(&out, record.parent_digest.bytes())
+    jet_cli_receipt_record_frame(&out, record.section.name.bytes())
+    jet_cli_receipt_record_frame(&out, record.section.type_name.bytes())
+    jet_cli_receipt_record_frame(&out, record.section.schema_digest.bytes())
+    jet_cli_receipt_record_frame(&out, record.section.payload_digest.bytes())
+}
+// Rust encode_section_record (ReceiptSections.rs:199-217).
+pub fn jet_cli_receipt_encode_section_record(record: JetCLIReceiptSectionRecord) -> [U8] JetCLIReceiptSectionError! {
+    jet_cli_receipt_validate_section_record(record)
+    bytes := ~JET_CLI_RECEIPT_SECTION_RECORD_WIRE_MAGIC
+    jet_cli_receipt_record_metadata(&bytes, record)
+    jet_cli_receipt_record_frame(&bytes, record.section.bytes)
+    if bytes.len() > JET_CLI_MAX_RECEIPT_SECTION_RECORD_BYTES -> return Err(jet_cli_receipt_section_error("receipt section record is too large (maximum {JET_CLI_MAX_RECEIPT_SECTION_RECORD_BYTES} bytes)"))
+    Ok(bytes)
+}
+// Rust decode_section_record (ReceiptSections.rs:220-255).
+pub fn jet_cli_receipt_decode_section_record(bytes: [U8]) -> JetCLIReceiptSectionRecord JetCLIReceiptSectionError! {
+    if bytes.len() > JET_CLI_MAX_RECEIPT_SECTION_RECORD_BYTES -> return Err(jet_cli_receipt_section_error("receipt section record is too large"))
+    magic :: JET_CLI_RECEIPT_SECTION_RECORD_WIRE_MAGIC
+    if bytes.len() < magic.len() -> return Err(jet_cli_receipt_section_error("receipt section record magic is invalid"))
+    loop index in 0..<magic.len() {
+        if bytes[index] != magic[index] -> return Err(jet_cli_receipt_section_error("receipt section record magic is invalid"))
+    }
+    cursor := magic.len()
+    claim :: jet_cli_receipt_record_take_text(bytes, &cursor, "claim key")
+    parent :: jet_cli_receipt_record_take_text(bytes, &cursor, "parent digest")
+    name :: jet_cli_receipt_record_take_text(bytes, &cursor, "name")
+    type_name :: jet_cli_receipt_record_take_text(bytes, &cursor, "type name")
+    schema :: jet_cli_receipt_record_take_text(bytes, &cursor, "schema digest")
+    payload :: jet_cli_receipt_record_take_text(bytes, &cursor, "payload digest")
+    value :: jet_cli_receipt_record_take_frame(bytes, &cursor)
+    if cursor != bytes.len() -> return Err(jet_cli_receipt_section_error("receipt section record has trailing bytes"))
+    section :: jet_cli_receipt_section_new_with_digests(name, type_name, schema, payload, value)
+    jet_cli_receipt_section_record_new(claim, parent, section)
+}
+fn jet_cli_receipt_record_take_text(bytes: [U8], cursor: &Int, label: String) -> String JetCLIReceiptSectionError! {
+    raw :: jet_cli_receipt_record_take_frame(bytes, &cursor)
+    Ok(String.from_bytes(raw) ?? return Err(jet_cli_receipt_section_error("receipt section {label} is not UTF-8")))
+}
+// Rust record_frame (ReceiptSections.rs:682-685).
+fn jet_cli_receipt_record_frame(out: &[U8], value: [U8]) Never! {
+    loop index in 0..<8 -> &out.push(U8{(value.len() >> ((7 - index) * 8)) & 255})
+    loop byte in value -> &out.push(byte)
+}
+// Rust record_take_frame (ReceiptSections.rs:687-712). Int is arbitrary precision;
+// the record cap rejects every out-of-usize wire length before slicing.
+fn jet_cli_receipt_record_take_frame(bytes: [U8], cursor: &Int) -> [U8] JetCLIReceiptSectionError! {
+    header_end :: cursor + 8
+    if header_end > bytes.len() -> return Err(jet_cli_receipt_section_error("receipt section record frame length is truncated"))
+    length := 0
+    loop index in cursor..<header_end -> length = (length << 8) | Int.from_u8(bytes[index])
+    cursor = header_end
+    if length > JET_CLI_MAX_RECEIPT_SECTION_RECORD_BYTES -> return Err(jet_cli_receipt_section_error("receipt section record frame is too large"))
+    end :: cursor + length
+    if end > bytes.len() -> return Err(jet_cli_receipt_section_error("receipt section record frame is truncated"))
+    value :: ~bytes[cursor..<end]
+    cursor = end
+    Ok(value)
+}
+
+// Rust ReceiptFieldDiff::path (ReceiptSections.rs:270-278).
+pub fn jet_cli_receipt_field_diff_path(diff: JetCLIReceiptFieldDiff) -> String Never! {
+    if diff.field == "$" -> return ~diff.section
+    "{diff.section}.{diff.field}"
+}
+// Rust ReceiptFieldDiff::to_json (ReceiptSections.rs:280-294).
+pub fn jet_cli_receipt_field_diff_to_json(diff: JetCLIReceiptFieldDiff) -> CanonicalJSON Never! {
+    CanonicalJSON.Object([CanonicalJSONField]{
+        CanonicalJSONField{key: "after", value: diff.after ?? CanonicalJSON.Null},
+        CanonicalJSONField{key: "before", value: diff.before ?? CanonicalJSON.Null},
+        CanonicalJSONField{key: "field", value: CanonicalJSON.String(~diff.field)},
+        CanonicalJSONField{key: "section", value: CanonicalJSON.String(~diff.section)},
+    })
+}
+// Rust ReceiptFieldDiff::render (ReceiptSections.rs:297-304).
+pub fn jet_cli_receipt_field_diff_render(diff: JetCLIReceiptFieldDiff) -> String Never! {
+    before :: jet_cli_receipt_render_value(diff.before)
+    after :: jet_cli_receipt_render_value(diff.after)
+    "{jet_cli_receipt_field_diff_path(diff)}: {before} -> {after}"
+}
+// Rust render_value (ReceiptSections.rs:674-681).
+fn jet_cli_receipt_render_value(value: CanonicalJSON?) -> String Never! {
+    if value == {
+        .Val(child) -> {
+            bytes :: canonical_json_bytes(child)
+            String.from_bytes(~bytes[0..<bytes.len() - 1]) ?? "<invalid>"
+        }
+        None -> "<missing>"
+    }
+}
+// Rust normalized_sections validation (ReceiptSections.rs:308-341).
+// Borrowed validation lets whole-receipt encoding avoid cloning payloads.
+pub fn jet_cli_receipt_validate_sections(sections: [JetCLIReceiptSection]) JetCLIReceiptSectionError! {
+    if sections.len() > JET_CLI_MAX_RECEIPT_SECTIONS -> return Err(jet_cli_receipt_section_error("receipt has too many sections (maximum {JET_CLI_MAX_RECEIPT_SECTIONS})"))
+    total := 0
+    loop section in sections {
+        jet_cli_receipt_validate_section(section)
+        total += section.bytes.len()
+    }
+    if total > JET_CLI_MAX_RECEIPT_SECTION_BYTES_TOTAL -> return Err(jet_cli_receipt_section_error("receipt sections are too large (maximum {JET_CLI_MAX_RECEIPT_SECTION_BYTES_TOTAL} bytes)"))
+    names := [String:Bool]{}
+    duplicate := ""
+    loop section in sections {
+        if names.has_key(section.name) {
+            if duplicate == "" || section.name < duplicate -> duplicate = ~section.name
+        } else {
+            names[section.name] = true
+        }
+    }
+    if duplicate != "" -> return Err(jet_cli_receipt_section_error("receipt section `{duplicate}` is duplicated"))
+}
+// Normalize newly owned decode rows without copying section payloads.
+pub fn jet_cli_receipt_normalize_sections(sections: &[JetCLIReceiptSection]) JetCLIReceiptSectionError! {
+    jet_cli_receipt_validate_sections(sections)
+    jet_cli_receipt_sort_sections(&sections)
+}
+fn jet_cli_receipt_sort_sections(sections: &[JetCLIReceiptSection]) Never! {
+    &sections.sort_by((left: JetCLIReceiptSection, right: JetCLIReceiptSection) -> {
+        if {
+            left.name != right.name -> left.name <=> right.name
+            left.type_name != right.type_name -> left.type_name <=> right.type_name
+            else -> left.bytes <=> right.bytes
+        }
+    })
+}
+// Rust normalized_sections (ReceiptSections.rs:308-341).
+pub fn jet_cli_receipt_normalized_sections(sections: [JetCLIReceiptSection]) -> [JetCLIReceiptSection] JetCLIReceiptSectionError! {
+    jet_cli_receipt_validate_sections(sections)
+    normalized := ~sections
+    jet_cli_receipt_sort_sections(&normalized)
+    Ok(normalized)
+}
+// Rust query_sections (ReceiptSections.rs:346-375).
+pub fn jet_cli_receipt_query_sections(sections: [JetCLIReceiptSection], names: [String]?) -> CanonicalJSON JetCLIReceiptSectionError! {
+    normalized :: jet_cli_receipt_normalized_sections(sections)
+    requested := [String:Bool]{}
+    if names == .Val(selection) {
+        loop name in selection {
+            jet_cli_receipt_validate_section_name(name)
+            if requested.has_key(name) -> return Err(jet_cli_receipt_section_error("receipt section `{name}` is duplicated in query"))
+            requested[name] = true
+        }
+    }
+    values := [CanonicalJSONField]{}
+    loop section in normalized {
+        if requested.len() == 0 || requested.has_key(section.name) -> &values.push(CanonicalJSONField{key: ~section.name, value: jet_cli_receipt_section_value(section)})
+    }
+    Ok(CanonicalJSON.Object(values))
+}
+// Rust diff_sections (ReceiptSections.rs:378-432): merge the sorted section
+// lists instead of copying their payloads into a second pair of maps.
+pub fn jet_cli_receipt_diff_sections(before: [JetCLIReceiptSection], after: [JetCLIReceiptSection]) -> [JetCLIReceiptFieldDiff] JetCLIReceiptSectionError! {
+    left :: jet_cli_receipt_normalized_sections(before)
+    right :: jet_cli_receipt_normalized_sections(after)
+    diffs := [JetCLIReceiptFieldDiff]{}
+    i := 0
+    j := 0
+    loop i < left.len() || j < right.len() {
+        if j == right.len() || (i < left.len() && left[i].name < right[j].name) {
+            jet_cli_receipt_diff_missing_section(left[i].name, jet_cli_receipt_section_value(left[i]), true, &diffs)
+            i += 1
+            next
+        }
+        if i == left.len() || right[j].name < left[i].name {
+            jet_cli_receipt_diff_missing_section(right[j].name, jet_cli_receipt_section_value(right[j]), false, &diffs)
+            j += 1
+            next
+        }
+        if left[i].type_name != right[j].type_name {
+            &diffs.push(JetCLIReceiptFieldDiff{section: ~left[i].name, field: "@type", before: Val(CanonicalJSON.String(~left[i].type_name)), after: Val(CanonicalJSON.String(~right[j].type_name))})
+        }
+        jet_cli_receipt_diff_object_fields(left[i].name, "", jet_cli_receipt_section_value(left[i]), jet_cli_receipt_section_value(right[j]), &diffs)
+        i += 1
+        j += 1
+    }
+    Ok(diffs)
+}
+// Rust diff_projection (ReceiptSections.rs:435-437).
+pub fn jet_cli_receipt_diff_projection(diffs: [JetCLIReceiptFieldDiff]) -> CanonicalJSON Never! {
+    values :: loop diff in diffs -> jet_cli_receipt_field_diff_to_json(diff)
+    CanonicalJSON.Array(values)
+}
+
+// Rust validate_section (ReceiptSections.rs:440-464).
+fn jet_cli_receipt_validate_section(section: JetCLIReceiptSection) JetCLIReceiptSectionError! {
+    jet_cli_receipt_validate_section_name(section.name)
+    jet_cli_receipt_validate_type_name(section.type_name)
+    jet_cli_receipt_validate_digest(section.schema_digest, "schema")
+    jet_cli_receipt_validate_digest(section.payload_digest, "payload")
+    if section.bytes.len() > JET_CLI_MAX_RECEIPT_SECTION_BYTES -> return Err(jet_cli_receipt_section_error("receipt section `{section.name}` is too large (maximum {JET_CLI_MAX_RECEIPT_SECTION_BYTES} bytes)"))
+    if section.payload_digest != jet_cli_receipt_payload_digest(section.bytes) -> return Err(jet_cli_receipt_section_error("receipt section `{section.name}` payload digest does not match its bytes"))
+    _ :: jet_cli_receipt_canonical_object(section.bytes) ?? return Err(jet_cli_receipt_section_error("receipt section `{section.name}` has an invalid schema: {err.message}"))
+}
+// Rust validate_section_record (ReceiptSections.rs:466-472).
+fn jet_cli_receipt_validate_section_record(record: JetCLIReceiptSectionRecord) JetCLIReceiptSectionError! {
+    jet_cli_receipt_validate_digest(record.claim_key, "claim")
+    if record.parent_digest != "" -> jet_cli_receipt_validate_digest(record.parent_digest, "parent")
+    jet_cli_receipt_validate_section(record.section)
+}
+// Rust validate_digest (ReceiptSections.rs:474-483).
+fn jet_cli_receipt_validate_digest(value: String, label: String) JetCLIReceiptSectionError! {
+    if value.bytes().len() != 64 -> return Err(jet_cli_receipt_section_error("receipt section {label} digest is malformed"))
+    loop byte in value.bytes() {
+        if !((byte >= U8{48} && byte <= U8{57}) || (byte >= U8{97} && byte <= U8{102})) -> return Err(jet_cli_receipt_section_error("receipt section {label} digest is malformed"))
+    }
+}
+fn jet_cli_receipt_has_control(value: String) -> Bool Never! {
+    bytes :: value.bytes()
+    loop index in 0..<bytes.len() {
+        byte :: Int.from_u8(bytes[index])
+        if byte < 32 || byte == 127 -> return true
+        if byte == 194 && index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) >= 128 && Int.from_u8(bytes[index + 1]) <= 159 -> return true
+    }
+    false
+}
+// Rust validate_section_name (ReceiptSections.rs:485-502).
+fn jet_cli_receipt_validate_section_name(name: String) JetCLIReceiptSectionError! {
+    if name == "" -> return Err(jet_cli_receipt_section_error("receipt section name is empty"))
+    if name.bytes().len() > JET_CLI_MAX_RECEIPT_SECTION_NAME_BYTES -> return Err(jet_cli_receipt_section_error("receipt section name is too long (maximum {JET_CLI_MAX_RECEIPT_SECTION_NAME_BYTES} bytes)"))
+    if jet_cli_receipt_has_control(name) || name.contains("/") || name.contains("\\") -> return Err(jet_cli_receipt_section_error("receipt section name `{name}` is invalid"))
+}
+// Rust validate_type_name (ReceiptSections.rs:504-518).
+fn jet_cli_receipt_validate_type_name(type_name: String) JetCLIReceiptSectionError! {
+    if type_name == "" -> return Err(jet_cli_receipt_section_error("receipt section type name is empty"))
+    if type_name.bytes().len() > JET_CLI_MAX_RECEIPT_SECTION_TYPE_BYTES -> return Err(jet_cli_receipt_section_error("receipt section type name is too long (maximum {JET_CLI_MAX_RECEIPT_SECTION_TYPE_BYTES} bytes)"))
+    if jet_cli_receipt_has_control(type_name) -> return Err(jet_cli_receipt_section_error("receipt section type name is invalid"))
+}
+// Rust canonical_object (ReceiptSections.rs:520-527).
+fn jet_cli_receipt_canonical_object(bytes: [U8]) -> CanonicalJSON JetCLIReceiptSectionError! {
+    value :: canonical_json_parse(bytes) ?? return Err(jet_cli_receipt_section_error("canonical JSON is invalid: {err.message}"))
+    if value == .Object(_) -> return Ok(value)
+    Err(jet_cli_receipt_section_error("typed section value must be a canonical JSON object"))
+}
+fn jet_cli_receipt_push_diff(section: String, field: String, before: CanonicalJSON?, after: CanonicalJSON?, diffs: &[JetCLIReceiptFieldDiff]) Never! {
+    &diffs.push(JetCLIReceiptFieldDiff{section: ~section, field: ~field, before: before, after: after})
+}
+// Rust diff_missing_section (ReceiptSections.rs:529-575).
+fn jet_cli_receipt_diff_missing_section(section: String, value: CanonicalJSON, removed: Bool, diffs: &[JetCLIReceiptFieldDiff]) Never! {
+    if value == .Object(fields) {
+        if fields.len() > 0 {
+            jet_cli_receipt_diff_missing_object_fields(section, "", fields, removed, &diffs)
+            return
+        }
+    }
+    old :: if {
+        removed -> Val(value)
+        else -> None
+    }
+    new :: if {
+        removed -> None
+        else -> Val(value)
+    }
+    jet_cli_receipt_push_diff(section, "$", old, new, &diffs)
+}
+// Rust diff_missing_object_fields (ReceiptSections.rs:577-606).
+fn jet_cli_receipt_diff_missing_object_fields(section: String, prefix: String, fields: [CanonicalJSONField], removed: Bool, diffs: &[JetCLIReceiptFieldDiff]) Never! {
+    loop field in fields {
+        child :: field.value
+        path :: if {
+            prefix == "" -> ~field.key
+            else -> "{prefix}.{field.key}"
+        }
+        if child == .Object(children) {
+            if children.len() > 0 {
+                jet_cli_receipt_diff_missing_object_fields(section, path, children, removed, &diffs)
+                next
+            }
+        }
+        old :: if {
+            removed -> Val(child)
+            else -> None
+        }
+        new :: if {
+            removed -> None
+            else -> Val(child)
+        }
+        jet_cli_receipt_push_diff(section, path, old, new, &diffs)
+    }
+}
+// Rust diff_object_fields (ReceiptSections.rs:608-672).
+fn jet_cli_receipt_diff_object_fields(section: String, prefix: String, before: CanonicalJSON, after: CanonicalJSON, diffs: &[JetCLIReceiptFieldDiff]) Never! {
+    if before == .Object(left) {
+        if after == .Object(right) {
+            i := 0
+            j := 0
+            loop i < left.len() || j < right.len() {
+                if j == right.len() || (i < left.len() && left[i].key < right[j].key) {
+                    path :: if {
+                        prefix == "" -> ~left[i].key
+                        else -> "{prefix}.{left[i].key}"
+                    }
+                    jet_cli_receipt_push_diff(section, path, Val(left[i].value), None, &diffs)
+                    i += 1
+                    next
+                }
+                if i == left.len() || right[j].key < left[i].key {
+                    path :: if {
+                        prefix == "" -> ~right[j].key
+                        else -> "{prefix}.{right[j].key}"
+                    }
+                    jet_cli_receipt_push_diff(section, path, None, Val(right[j].value), &diffs)
+                    j += 1
+                    next
+                }
+                path :: if {
+                    prefix == "" -> ~left[i].key
+                    else -> "{prefix}.{left[i].key}"
+                }
+                jet_cli_receipt_diff_object_fields(section, path, left[i].value, right[j].value, &diffs)
+                i += 1
+                j += 1
+            }
+            return
+        }
+    }
+    if before != after {
+        path :: if {
+            prefix == "" -> "$"
+            else -> ~prefix
+        }
+        jet_cli_receipt_push_diff(section, path, Val(before), Val(after), &diffs)
+    }
+}
+
+// Rust Debug implementations (ReceiptSections.rs:53-75): payload bytes never render.
+pub fn jet_cli_receipt_section_debug(section: JetCLIReceiptSection) -> String Never! {
+    "ReceiptSection {{ name: {jet_cli_receipt_debug_quote(section.name)}, type_name: {jet_cli_receipt_debug_quote(section.type_name)}, schema_digest: {jet_cli_receipt_debug_quote(section.schema_digest)}, payload_digest: {jet_cli_receipt_debug_quote(section.payload_digest)}, bytes: \"<redacted>\" }}"
+}
+pub fn jet_cli_receipt_section_record_debug(record: JetCLIReceiptSectionRecord) -> String Never! {
+    "ReceiptSectionRecord {{ claim_key: {jet_cli_receipt_debug_quote(record.claim_key)}, parent_digest: {jet_cli_receipt_debug_quote(record.parent_digest)}, section: {jet_cli_receipt_section_debug(record.section)} }}"
+}
+fn jet_cli_receipt_debug_quote(value: String) -> String Never! { jet_cli_debug_quote(value) }
+

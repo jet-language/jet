@@ -1,0 +1,718 @@
+// Source/RecordIndex.rs RI02 cases (1552-1971) plus coordinator boundaries.
+// QUALIFIED: these drive the canonical coordinator through a scripted transport
+// for the held native seam (#3593/#3598). They cover load/find/sequence/update/
+// supersede/lock/stage/rename/cleanup policy and exact messages, NOT native
+// exclusive create, held-handle fsync, no-follow safety or real parallel lock
+// contention (concurrent_update_and_store's Barrier threads stay native-gated;
+// its stale-snapshot merge is exercised sequentially below).
+// #4381: canonical Core Path/Stat results remain intact, no nominal rewrap.
+// The canonical reader's same-file replacement/growth controls and typed
+// during-read 256 MiB refusal stay native/JP-FOUNDATION-TYPED-BOUND-FAILURE gates.
+struct RecordIndexTestNode {
+    kind: String
+    bytes: [U8]
+    size: Int
+    mode: Int
+    modified_ms: Int
+    modified_elapsed_ns: Int?
+    target: String
+}
+fn record_index_test_node(kind: String, bytes: [U8]) -> RecordIndexTestNode Never! {
+    RecordIndexTestNode{kind: kind, bytes: bytes, size: -1, mode: 0, modified_ms: 1, modified_elapsed_ns: None, target: ""}
+}
+fn record_index_test_stat(node: RecordIndexTestNode) -> record_index_files.Stat Never! {
+    size :: if node.size >= 0 -> node.size else -> node.bytes.len()
+    record_index_files.Stat{size: size, modified_ms: node.modified_ms, created_ms: 0, readonly: false, is_file: node.kind == "file", is_dir: node.kind == "dir", is_symlink: node.kind == "symlink", kind: ~node.kind, mode: node.mode}
+}
+fn record_index_test_missing() -> JetCLIRecordIndexIOError Never! { JetCLIRecordIndexIOError.NotFound("No such file or directory (os error 2)") }
+// Scripted lookup; `follow` resolves one symlink like Rust fs::metadata.
+fn record_index_test_lookup(nodes: [String:RecordIndexTestNode], path: String, follow: Bool) -> RecordIndexTestNode JetCLIRecordIndexIOError! {
+    node :: nodes.get(path) ?? return Err(record_index_test_missing())
+    if follow && node.kind == "symlink" {
+        target :: nodes.get(node.target) ?? return Err(record_index_test_missing())
+        return Ok(target)
+    }
+    Ok(node)
+}
+// Scripted transport only: every policy decision stays in RecordIndex.jet.
+struct RecordIndexTestHost {
+    nodes: [String:RecordIndexTestNode]
+    handles: [Int:String]
+    next_handle: Int
+    temporary: Int
+    calls: [String]
+    fail: [String:String]
+    impl JetCLIRecordIndexFileHost {
+        fn next_temporary_id(&self) -[]> Int Never! {
+            id :: self.temporary
+            self.temporary = id + 1
+            id
+        }
+        fn canonicalize(&self, path: record_index_paths.Path) -[FS.Read]> record_index_paths.Path JetCLIRecordIndexIOError! {
+            if !self.nodes.has_key(path.raw) -> return Err(record_index_test_missing())
+            Ok(~path)
+        }
+        fn metadata(&self, path: record_index_paths.Path) -[FS.Read]> record_index_files.Stat JetCLIRecordIndexIOError! {
+            node :: record_index_test_lookup(self.nodes, path.raw, true)
+            metadata :: record_index_test_stat(node)
+            Ok(metadata)
+        }
+        fn symlink_metadata(&self, path: record_index_paths.Path) -[FS.Read]> record_index_files.Stat JetCLIRecordIndexIOError! {
+            if self.fail.has_key("symlink_metadata") -> return Err(.Other(~self.fail["symlink_metadata"]))
+            node :: record_index_test_lookup(self.nodes, path.raw, false)
+            metadata :: record_index_test_stat(node)
+            Ok(metadata)
+        }
+        fn lock_metadata(&self, path: record_index_paths.Path) -[FS.Read, Time]> JetCLIRecordIndexLockMetadata JetCLIRecordIndexIOError! {
+            node :: record_index_test_lookup(self.nodes, path.raw, false)
+            metadata :: record_index_test_stat(node)
+            Ok(JetCLIRecordIndexLockMetadata{metadata: metadata, modified_elapsed_ns: node.modified_elapsed_ns})
+        }
+        // Authorized transport fixture, NOT a native no-follow implementation.
+        // Native same-file/held-read tests must exercise TreeHash's one reader.
+        fn read_nofollow(&self, path: record_index_paths.Path, max_bytes: Int) -[FS.Read]> [U8] JetCLIRecordIndexIOError! {
+            if self.fail.has_key("read") -> return Err(.Other(~self.fail["read"]))
+            node :: self.nodes.get(path.raw) ?? return Err(record_index_test_missing())
+            assert(node.bytes.len() <= max_bytes)
+            Ok(~node.bytes)
+        }
+        fn create_directory(&self, path: record_index_paths.Path) JetCLIRecordIndexIOError! -[FS.Write]> {
+            &self.calls.push("mkdir {path.raw}")
+            if self.nodes.has_key(path.raw) -> return Err(.AlreadyExists("File exists (os error 17)"))
+            self.nodes[path.raw] = record_index_test_node("dir", [U8]{})
+        }
+        fn create_directory_all(&self, path: record_index_paths.Path) JetCLIRecordIndexIOError! -[FS.Write]> {
+            if !self.nodes.has_key(path.raw) -> self.nodes[path.raw] = record_index_test_node("dir", [U8]{})
+        }
+        fn set_mode(&self, path: record_index_paths.Path, mode: Int) JetCLIRecordIndexIOError! -[FS.Write]> {
+            node := self.nodes.get(path.raw) ?? return Err(record_index_test_missing())
+            node.mode = mode
+            self.nodes[path.raw] = ^node
+        }
+        fn create_new(&self, path: record_index_paths.Path) -[FS.Write]> Int JetCLIRecordIndexIOError! {
+            &self.calls.push("create_new {path.raw}")
+            if self.nodes.has_key(path.raw) -> return Err(.AlreadyExists("File exists (os error 17)"))
+            if self.fail.has_key("create_new") -> return Err(.Other(~self.fail["create_new"]))
+            self.nodes[path.raw] = record_index_test_node("file", [U8]{})
+            handle :: self.next_handle
+            self.next_handle = handle + 1
+            self.handles[handle] = ~path.raw
+            Ok(handle)
+        }
+        fn set_handle_mode(&self, handle: Int, mode: Int) JetCLIRecordIndexIOError! -[FS.Write]> {
+            if self.fail.has_key("set_handle_mode") -> return Err(.Other(~self.fail["set_handle_mode"]))
+            path :: self.handles[handle]
+            if path.contains("/.index.jsonl.") && self.fail.has_key("stage_mode") -> return Err(.Other(~self.fail["stage_mode"]))
+            node := ~self.nodes[path]
+            node.mode = mode
+            self.nodes[path] = ^node
+        }
+        fn write_all(&self, handle: Int, bytes: [U8]) JetCLIRecordIndexIOError! -[FS.Write]> {
+            if self.fail.has_key("write_all") -> return Err(.Other(~self.fail["write_all"]))
+            path :: self.handles[handle]
+            if path.contains("/.index.jsonl.") && self.fail.has_key("stage_write") -> return Err(.Other(~self.fail["stage_write"]))
+            node := ~self.nodes[path]
+            loop byte in bytes -> &node.bytes.push(byte)
+            self.nodes[path] = ^node
+        }
+        fn sync_all(&self, handle: Int) JetCLIRecordIndexIOError! -[FS.Write]> {
+            path :: self.handles[handle]
+            &self.calls.push("sync_all {path}")
+            if self.fail.has_key("sync_all") -> return Err(.Other(~self.fail["sync_all"]))
+        }
+        fn close(&self, handle: Int) Never! -[FS.Write]> {
+            path :: self.handles[handle]
+            &self.calls.push("close {path}")
+            _ :: &self.handles.remove(handle)
+        }
+        fn rename(&self, from: record_index_paths.Path, to: record_index_paths.Path) JetCLIRecordIndexIOError! -[FS.Write]> {
+            &self.calls.push("rename {from.raw} {to.raw}")
+            if self.fail.has_key("rename") -> return Err(.Other(~self.fail["rename"]))
+            node :: self.nodes.get(from.raw) ?? return Err(record_index_test_missing())
+            _ :: &self.nodes.remove(from.raw)
+            self.nodes[to.raw] = ~node
+        }
+        fn hard_link(&self, original: record_index_paths.Path, link: record_index_paths.Path) JetCLIRecordIndexIOError! -[FS.Write]> {
+            if self.nodes.has_key(link.raw) -> return Err(.AlreadyExists("File exists (os error 17)"))
+            node :: self.nodes.get(original.raw) ?? return Err(record_index_test_missing())
+            self.nodes[link.raw] = ~node
+        }
+        fn remove_file(&self, path: record_index_paths.Path) JetCLIRecordIndexIOError! -[FS.Write]> {
+            &self.calls.push("remove {path.raw}")
+            if !self.nodes.has_key(path.raw) -> return Err(record_index_test_missing())
+            _ :: &self.nodes.remove(path.raw)
+        }
+        fn remove_directory(&self, path: record_index_paths.Path) JetCLIRecordIndexIOError! -[FS.Write]> {
+            if !self.nodes.has_key(path.raw) -> return Err(record_index_test_missing())
+            _ :: &self.nodes.remove(path.raw)
+        }
+        fn sync_directory(&self, path: record_index_paths.Path) JetCLIRecordIndexIOError! -[FS.Write]> {
+            &self.calls.push("sync_directory {path.raw}")
+            if self.fail.has_key("sync_directory") -> return Err(.Other(~self.fail["sync_directory"]))
+        }
+    }
+}
+// Scripted artifact transport for the existing RecordRetention removal seam.
+struct RecordIndexTestArtifacts {
+    files: [String:JetCLIRecordArtifactMetadata]
+    impl JetCLIRecordRetentionHost {
+        fn symlink_metadata(&self, path: String) -[FS.Read]> JetCLIRecordArtifactMetadata JetCLIRecordRetentionIOError! {
+            Ok(self.files.get(path) ?? JetCLIRecordArtifactMetadata.Missing)
+        }
+        fn remove_file(&self, path: String) JetCLIRecordRetentionIOError! -[FS.Write]> {
+            if !self.files.has_key(path) -> return Err(.NotFound)
+            _ :: &self.files.remove(path)
+        }
+    }
+}
+// Rust temp_project (RecordIndex.rs:1560-1569): project/.jet/records exists.
+fn record_index_test_host() -> RecordIndexTestHost Never! {
+    host := RecordIndexTestHost{nodes: [String:RecordIndexTestNode]{}, handles: [Int:String]{}, next_handle: 3, temporary: 0, calls: [String]{}, fail: [String:String]{}}
+    directories :: [String]{"/", "/project", "/project/.jet", "/project/.jet/records"}
+    loop directory in directories -> host.nodes[directory] = record_index_test_node("dir", [U8]{})
+    ^host
+}
+fn record_index_test_root() -> record_index_paths.Path Never! { record_index_paths.path("/project/.jet/records") }
+// Rust artifact (RecordIndex.rs:1590-1595).
+fn record_index_test_artifacts(relative: [String]) -> RecordIndexTestArtifacts Never! {
+    artifacts := RecordIndexTestArtifacts{files: [String:JetCLIRecordArtifactMetadata]{}}
+    loop path in relative -> artifacts.files["/project/{path}"] = .Regular
+    ^artifacts
+}
+fn record_index_test_exists(artifacts: RecordIndexTestArtifacts, relative: String) -> Bool Never! {
+    wanted :: "/project/{relative}"
+    artifacts.files.has_key(wanted)
+}
+// Rust identity / entry (RecordIndex.rs:1571-1588).
+fn record_index_test_identity() -> JetCLIRecordIdentity Never! {
+    jet_cli_record_identity_new("a".repeat(64), "test-toolchain", "test-engine") ?? panic(err.message)
+}
+fn record_index_test_entry(kind: JetCLIRecordKind, id: String, path: String, size: Int, sequence: Int, saved: Bool) -> JetCLIRecordIndexEntry Never! {
+    entry := jet_cli_record_entry_new(record_index_test_identity(), kind, id, path) ?? panic(err.message)
+    jet_cli_record_entry_with_size(&entry, size) ?? panic(err.message)
+    jet_cli_record_entry_with_recorded_sequence(&entry, sequence) ?? panic(err.message)
+    jet_cli_record_entry_with_saved(&entry, saved)
+    ^entry
+}
+fn record_index_test_receipt(id: String, size: Int, sequence: Int) -> JetCLIRecordIndexEntry Never! {
+    record_index_test_entry(.Receipt, id, ".jet/receipts/{id}", size, sequence, false)
+}
+fn record_index_test_budget(bytes: Int) -> JetCLIRecordBudget Never! { jet_cli_record_budget_new(bytes) ?? panic(err.message) }
+fn record_index_test_link(kind: JetCLIRecordKind, id: String) -> JetCLIRecordLink Never! { jet_cli_record_link_new(kind, id) ?? panic(err.message) }
+fn record_index_test_error(result: () JetCLIRecordError!, message: String) Never! {
+    if result == {
+        .Ok(_) -> panic("expected record index error: {message}")
+        .Err(error) -> assert_eq(error.message, message)
+    }
+}
+fn record_index_test_load_error(result: JetCLIRecordIndex JetCLIRecordError!, message: String) Never! {
+    if result == {
+        .Ok(_) -> panic("expected record index load error: {message}")
+        .Err(error) -> assert_eq(error.message, message)
+    }
+}
+fn record_index_test_load(host: &RecordIndexTestHost, budget: JetCLIRecordBudget) -[FS.Read]> JetCLIRecordIndex Never! {
+    jet_cli_record_index_load_with_budget(record_index_test_root(), budget, &host) ?? panic(err.message)
+}
+fn record_index_test_ids(index: JetCLIRecordIndex) -> [String] Never! {
+    ids := [String]{}
+    loop entry in jet_cli_record_index_query(index, true) -> &ids.push(~entry.artifact_id)
+    ids
+}
+
+// Rust restart_eviction_removes_the_old_disposable_artifact (RecordIndex.rs:1597-1637).
+#Test("record index restart eviction removes the old disposable artifact") {
+    host := record_index_test_host()
+    artifacts := record_index_test_artifacts([String]{".jet/receipts/old", ".jet/receipts/new"})
+    budget :: record_index_test_budget(5)
+    index := jet_cli_record_index_new(record_index_test_root())
+    jet_cli_record_index_set_budget(&index, budget) ?? panic(err.message)
+    jet_cli_record_index_update(&index, record_index_test_receipt("old", 5, 1)) ?? panic(err.message)
+    jet_cli_record_index_store(index, &host, &artifacts) ?? panic(err.message)
+    restarted := record_index_test_load(&host, budget)
+    jet_cli_record_index_update_and_store(&restarted, record_index_test_receipt("new", 5, 2), &host, &artifacts) ?? panic(err.message)
+    assert(!record_index_test_exists(artifacts, ".jet/receipts/old"))
+    assert(record_index_test_exists(artifacts, ".jet/receipts/new"))
+    assert_eq(jet_cli_record_index_find(record_index_test_load(&host, budget), .Receipt, "old", true), None)
+}
+// Rust saved_history_survives_disposable_eviction_after_restart (RecordIndex.rs:1639-1689).
+#Test("record index saved history survives disposable eviction after restart") {
+    host := record_index_test_host()
+    artifacts := record_index_test_artifacts([String]{".jet/replays/saved", ".jet/receipts/old", ".jet/receipts/new"})
+    budget :: record_index_test_budget(4)
+    index := jet_cli_record_index_new(record_index_test_root())
+    jet_cli_record_index_set_budget(&index, budget) ?? panic(err.message)
+    jet_cli_record_index_update(&index, record_index_test_entry(.Replay, "saved", ".jet/replays/saved", 100, 1, true)) ?? panic(err.message)
+    jet_cli_record_index_update(&index, record_index_test_receipt("old", 4, 2)) ?? panic(err.message)
+    jet_cli_record_index_store(index, &host, &artifacts) ?? panic(err.message)
+    restarted := record_index_test_load(&host, budget)
+    jet_cli_record_index_update_and_store(&restarted, record_index_test_receipt("new", 4, 3), &host, &artifacts) ?? panic(err.message)
+    loaded :: record_index_test_load(&host, budget)
+    assert(jet_cli_record_index_find(loaded, .Replay, "saved", true) != None)
+    assert(record_index_test_exists(artifacts, ".jet/replays/saved"))
+    assert(!record_index_test_exists(artifacts, ".jet/receipts/old"))
+    assert(record_index_test_exists(artifacts, ".jet/receipts/new"))
+}
+// Rust concurrent_update_and_store_preserves_each_row (RecordIndex.rs:1691-1727):
+// four stale empty snapshots publish in reverse order; each re-reads under the
+// lock, so every row survives and stale sequences are reallocated.
+#Test("record index stale snapshots publish under the lock and preserve each row") {
+    host := record_index_test_host()
+    artifacts := record_index_test_artifacts([String]{})
+    workers := [JetCLIRecordIndex]{}
+    loop _ in 0..<4 -> &workers.push(jet_cli_record_index_new(record_index_test_root()))
+    worker := 3
+    loop worker >= 0 {
+        jet_cli_record_index_update_and_store(&workers[worker], record_index_test_receipt("receipt-{worker}", 1, worker + 1), &host, &artifacts) ?? panic(err.message)
+        worker -= 1
+    }
+    loaded :: jet_cli_record_index_load(record_index_test_root(), &host) ?? panic(err.message)
+    assert_eq(jet_cli_record_index_query(loaded, true).len(), 4)
+    loop id in 0..<4 {
+        assert(jet_cli_record_index_find(loaded, .Receipt, "receipt-{id}", true) != None)
+    }
+    first :: jet_cli_record_index_find(loaded, .Receipt, "receipt-3", true) ?? panic("receipt-3")
+    assert_eq(first.recorded_sequence, 4)
+    last :: jet_cli_record_index_find(loaded, .Receipt, "receipt-0", true) ?? panic("receipt-0")
+    assert_eq(last.recorded_sequence, 7)
+    assert(!host.nodes.has_key("/project/.jet/records/.index.lock"))
+}
+// Rust oversized_disposable_update_does_not_corrupt_the_previous_index (RecordIndex.rs:1729-1768).
+#Test("record index oversized disposable update does not corrupt the previous index") {
+    host := record_index_test_host()
+    artifacts := record_index_test_artifacts([String]{".jet/receipts/old", ".jet/receipts/too-large"})
+    budget :: record_index_test_budget(1)
+    index := jet_cli_record_index_new(record_index_test_root())
+    jet_cli_record_index_set_budget(&index, budget) ?? panic(err.message)
+    jet_cli_record_index_update_and_store(&index, record_index_test_receipt("old", 1, 1), &host, &artifacts) ?? panic(err.message)
+    oversized := jet_cli_record_index_new(record_index_test_root())
+    jet_cli_record_index_set_budget(&oversized, budget) ?? panic(err.message)
+    too_large :: record_index_test_receipt("too-large", 2, 2)
+    record_index_test_error(jet_cli_record_index_update_and_store(&oversized, too_large, &host, &artifacts), "disposable record `receipt/too-large` exceeds the byte budget and was not retained")
+    loaded :: record_index_test_load(&host, budget)
+    assert(jet_cli_record_index_find(loaded, .Receipt, "old", true) != None)
+    assert(record_index_test_exists(artifacts, ".jet/receipts/old"))
+    assert(record_index_test_exists(artifacts, ".jet/receipts/too-large"))
+    assert(!host.nodes.has_key("/project/.jet/records/.index.lock"))
+}
+// Rust default_budget_retains_many_run_build_test_and_replay_rows_without_count_cap (RecordIndex.rs:1769-1810).
+#Test("record index default budget retains 320 rows without a count cap") {
+    host := record_index_test_host()
+    artifacts := record_index_test_artifacts([String]{})
+    index := jet_cli_record_index_new(record_index_test_root())
+    assert_eq(index.budget.max_bytes, 256 * 1024 * 1024)
+    sequence := 1
+    labels :: [String]{"run", "build", "test", "replay"}
+    loop label in labels {
+        kind :: if label == "replay" -> JetCLIRecordKind.Replay else -> JetCLIRecordKind.Receipt
+        prefix :: if label == "replay" -> ".jet/replays" else -> ".jet/receipts"
+        loop offset in 0..<80 {
+            jet_cli_record_index_update(&index, record_index_test_entry(kind, "{label}-{offset}", "{prefix}/{label}-{offset}", 1, sequence, false)) ?? panic(err.message)
+            sequence += 1
+        }
+    }
+    assert_eq(jet_cli_record_index_query(index, true).len(), 320)
+    jet_cli_record_index_store(index, &host, &artifacts) ?? panic(err.message)
+    loaded :: jet_cli_record_index_load(record_index_test_root(), &host) ?? panic(err.message)
+    assert_eq(jet_cli_record_index_query(loaded, true).len(), 320)
+}
+// Rust protected_sensitive_saved_and_linked_rows_survive_selective_eviction_and_failed_publish
+// (RecordIndex.rs:1812-1970).
+#Test("record index protected rows survive selective eviction and failed publish") {
+    host := record_index_test_host()
+    artifacts := record_index_test_artifacts([String]{".jet/receipts/linked", ".jet/receipts/old", ".jet/receipts/sensitive", ".jet/replays/saved", ".jet/proofs/audit", ".jet/trust/audit", ".jet/evidence/mandatory", ".jet/receipts/new", ".jet/receipts/oversized"})
+    budget :: record_index_test_budget(2)
+    linked :: record_index_test_receipt("linked", 1, 1)
+    old :: record_index_test_receipt("old", 1, 2)
+    sensitive := record_index_test_receipt("sensitive", 8, 3)
+    jet_cli_record_entry_with_capture(&sensitive, .Sensitive)
+    saved :: record_index_test_entry(.Replay, "saved", ".jet/replays/saved", 32, 4, true)
+    proof := record_index_test_entry(.Proof, "audit-proof", ".jet/proofs/audit", 32, 5, false)
+    jet_cli_record_entry_with_links(&proof, [JetCLIRecordLink]{record_index_test_link(.Receipt, "linked")}, [JetCLIRecordLink]{}) ?? panic(err.message)
+    trust := record_index_test_entry(.Trust, "audit-trust", ".jet/trust/audit", 32, 6, false)
+    jet_cli_record_entry_with_links(&trust, [JetCLIRecordLink]{}, [JetCLIRecordLink]{record_index_test_link(.Receipt, "sensitive")}) ?? panic(err.message)
+    evidence := record_index_test_entry(.Evidence, "mandatory", ".jet/evidence/mandatory", 32, 7, false)
+    jet_cli_record_entry_with_capture(&evidence, .Sensitive)
+    index := jet_cli_record_index_new(record_index_test_root())
+    jet_cli_record_index_set_budget(&index, budget) ?? panic(err.message)
+    rows :: [JetCLIRecordIndexEntry]{linked, old, sensitive, saved, proof, trust, evidence}
+    loop row in rows -> jet_cli_record_index_update(&index, row) ?? panic(err.message)
+    jet_cli_record_index_store(index, &host, &artifacts) ?? panic(err.message)
+
+    restarted := record_index_test_load(&host, budget)
+    jet_cli_record_index_update_and_store(&restarted, record_index_test_receipt("new", 1, 8), &host, &artifacts) ?? panic(err.message)
+    loaded :: record_index_test_load(&host, budget)
+    assert(!record_index_test_exists(artifacts, ".jet/receipts/old"))
+    assert(record_index_test_exists(artifacts, ".jet/receipts/new"))
+    assert(record_index_test_exists(artifacts, ".jet/receipts/linked"))
+    assert(record_index_test_exists(artifacts, ".jet/replays/saved"))
+    assert(record_index_test_exists(artifacts, ".jet/receipts/sensitive"))
+    assert(record_index_test_exists(artifacts, ".jet/proofs/audit"))
+    assert(record_index_test_exists(artifacts, ".jet/trust/audit"))
+    assert(record_index_test_exists(artifacts, ".jet/evidence/mandatory"))
+    assert_eq(jet_cli_record_index_find(loaded, .Receipt, "old", true), None)
+    assert(jet_cli_record_index_find(loaded, .Receipt, "new", true) != None)
+    assert_eq(jet_cli_record_index_find(loaded, .Receipt, "sensitive", false), None)
+    assert(jet_cli_record_index_find(loaded, .Receipt, "sensitive", true) != None)
+    visible_trust :: jet_cli_record_index_find(loaded, .Trust, "audit-trust", false) ?? panic("visible trust")
+    assert_eq(visible_trust.produced.len(), 0)
+    authenticated_trust :: jet_cli_record_index_find(loaded, .Trust, "audit-trust", true) ?? panic("authenticated trust")
+    assert_eq(authenticated_trust.produced.len(), 1)
+
+    // A failed publication must not replace the last valid index or remove protected data.
+    failed := record_index_test_load(&host, budget)
+    oversized :: record_index_test_receipt("oversized", 3, 9)
+    record_index_test_error(jet_cli_record_index_update_and_store(&failed, oversized, &host, &artifacts), "disposable record `receipt/oversized` exceeds the byte budget and was not retained")
+    after_failure :: record_index_test_load(&host, budget)
+    assert(jet_cli_record_index_find(after_failure, .Receipt, "new", true) != None)
+    assert(jet_cli_record_index_find(after_failure, .Replay, "saved", true) != None)
+    assert(jet_cli_record_index_find(after_failure, .Proof, "audit-proof", true) != None)
+    assert(record_index_test_exists(artifacts, ".jet/replays/saved"))
+    assert(record_index_test_exists(artifacts, ".jet/proofs/audit"))
+    assert(record_index_test_exists(artifacts, ".jet/receipts/oversized"))
+
+    // An interrupted staging file is ignored; the published JSONL stays authoritative.
+    host.nodes["/project/.jet/records/.index.jsonl.interrupted"] = record_index_test_node("file", "partial".bytes())
+    after_interruption :: record_index_test_load(&host, budget)
+    assert(jet_cli_record_index_find(after_interruption, .Trust, "audit-trust", true) != None)
+}
+
+#Test("record index publication stages secures syncs renames and unlocks in Rust order") {
+    host := record_index_test_host()
+    artifacts := record_index_test_artifacts([String]{})
+    index := jet_cli_record_index_new(record_index_test_root())
+    jet_cli_record_index_update_and_store(&index, record_index_test_receipt("one", 1, 1), &host, &artifacts) ?? panic(err.message)
+    pid :: record_index_sys.pid()
+    temp :: "/project/.jet/records/.index.jsonl.{pid}.0"
+    expected :: [String]{"create_new /project/.jet/records/.index.lock", "close /project/.jet/records/.index.lock", "create_new {temp}", "sync_all {temp}", "rename {temp} /project/.jet/records/index.jsonl", "sync_directory /project/.jet/records", "close {temp}", "remove /project/.jet/records/.index.lock"}
+    assert_eq(host.calls, expected)
+    published :: host.nodes["/project/.jet/records/index.jsonl"]
+    row :: jet_cli_record_entry_to_jsonl(record_index_test_receipt("one", 1, 1)) ?? panic(err.message)
+    assert_eq(published.bytes, "{row}\n".bytes())
+    if record_index_sys.is_unix() -> assert_eq(published.mode, 0o600)
+    assert(!host.nodes.has_key("/project/.jet/records/.index.lock"))
+}
+#Test("record index failed publication removes staging and keeps the previous index") {
+    failures :: [String]{"set_handle_mode", "write_all", "sync_all", "rename", "sync_directory"}
+    messages :: [String]{"could not secure record index: denied", "could not write record index: denied", "could not flush record index: denied", "could not publish record index: denied", "could not flush record index directory: denied"}
+    loop (position, failure) in failures {
+        if failure == "set_handle_mode" && !record_index_sys.is_unix() -> next
+        host := record_index_test_host()
+        artifacts := record_index_test_artifacts([String]{})
+        index := jet_cli_record_index_new(record_index_test_root())
+        jet_cli_record_index_update_and_store(&index, record_index_test_receipt("kept", 1, 1), &host, &artifacts) ?? panic(err.message)
+        before :: ~host.nodes["/project/.jet/records/index.jsonl"].bytes
+        host.fail[failure] = "denied"
+        next_row :: record_index_test_receipt("next", 1, 2)
+        // A lock write uses the same handle seam; the lock is created before staging.
+        if failure == "set_handle_mode" || failure == "write_all" {
+            lock_message :: if failure == "write_all" -> "could not write record index lock: denied" else -> "could not secure record index lock: denied"
+            record_index_test_error(jet_cli_record_index_update_and_store(&index, next_row, &host, &artifacts), lock_message)
+        } else {
+            record_index_test_error(jet_cli_record_index_update_and_store(&index, next_row, &host, &artifacts), messages[position])
+        }
+        assert_eq(host.nodes["/project/.jet/records/index.jsonl"].bytes == before, failure != "sync_directory")
+        assert(!host.nodes.has_key("/project/.jet/records/.index.lock"))
+        temporaries := 0
+        loop key in host.nodes.keys() {
+            if key.starts_with("/project/.jet/records/.index.jsonl.") -> temporaries += 1
+        }
+        assert_eq(temporaries, 0)
+        assert_eq(jet_cli_record_index_query(index, true).len(), 1)
+    }
+    // A lock creation failure other than AlreadyExists is reported, never retried.
+    host := record_index_test_host()
+    artifacts := record_index_test_artifacts([String]{})
+    index := jet_cli_record_index_new(record_index_test_root())
+    host.fail["create_new"] = "quota"
+    one :: record_index_test_receipt("one", 1, 1)
+    record_index_test_error(jet_cli_record_index_update_and_store(&index, one, &host, &artifacts), "could not create record index lock: quota")
+}
+#Test("record index staged mode and write failures close and remove only staging") {
+    failures :: [String]{"stage_mode", "stage_write"}
+    messages :: [String]{"could not secure record index: denied", "could not write record index: denied"}
+    loop (position, failure) in failures {
+        if failure == "stage_mode" && !record_index_sys.is_unix() -> next
+        host := record_index_test_host()
+        artifacts := record_index_test_artifacts([String]{".jet/receipts/kept", ".jet/receipts/next"})
+        index := jet_cli_record_index_new(record_index_test_root())
+        jet_cli_record_index_update_and_store(&index, record_index_test_receipt("kept", 1, 1), &host, &artifacts) ?? panic(err.message)
+        before :: ~host.nodes["/project/.jet/records/index.jsonl"].bytes
+        host.fail[failure] = "denied"
+        row :: record_index_test_receipt("next", 1, 2)
+        record_index_test_error(jet_cli_record_index_update_and_store(&index, row, &host, &artifacts), messages[position])
+        assert_eq(host.nodes["/project/.jet/records/index.jsonl"].bytes, before)
+        assert_eq(host.handles.len(), 0)
+        assert(!host.nodes.has_key("/project/.jet/records/.index.lock"))
+        loop key in host.nodes.keys() -> assert(!key.starts_with("/project/.jet/records/.index.jsonl."))
+        assert(record_index_test_exists(artifacts, ".jet/receipts/kept"))
+        assert(record_index_test_exists(artifacts, ".jet/receipts/next"))
+        assert_eq(record_index_test_ids(index), [String]{"kept"})
+    }
+}
+#Test("record index lock removes only stale regular locks and releases on every result") {
+    host := record_index_test_host()
+    artifacts := record_index_test_artifacts([String]{})
+    stale := record_index_test_node("file", "999".bytes())
+    // Epoch zero is a valid stale timestamp, not the absence of an mtime.
+    stale.modified_ms = 0
+    stale.modified_elapsed_ns = Val(61000000000)
+    host.nodes["/project/.jet/records/.index.lock"] = ^stale
+    index := jet_cli_record_index_new(record_index_test_root())
+    jet_cli_record_index_update_and_store(&index, record_index_test_receipt("one", 1, 1), &host, &artifacts) ?? panic(err.message)
+    assert_eq(host.calls[0], "create_new /project/.jet/records/.index.lock")
+    assert_eq(host.calls[1], "remove /project/.jet/records/.index.lock")
+    assert_eq(host.calls[2], "create_new /project/.jet/records/.index.lock")
+    assert(!host.nodes.has_key("/project/.jet/records/.index.lock"))
+}
+#Test("record index secure directories refuse symlinks files and parent components") {
+    host := record_index_test_host()
+    jet_cli_record_index_secure_create_dir(record_index_paths.path("/project/./.jet//records/new/deeper"), &host) ?? panic(err.message)
+    assert_eq(host.nodes["/project/.jet/records/new"].kind, "dir")
+    if record_index_sys.is_unix() -> assert_eq(host.nodes["/project/.jet/records/new/deeper"].mode, 0o700)
+    assert_eq(host.calls, [String]{"mkdir /project/.jet/records/new", "mkdir /project/.jet/records/new/deeper"})
+    link := record_index_test_node("symlink", [U8]{})
+    link.target = "/project"
+    host.nodes["/project/link"] = ^link
+    link_path :: record_index_paths.path("/project/link/records")
+    record_index_test_error(jet_cli_record_index_secure_create_dir(link_path, &host), "record index directory is a symlink: /project/link")
+    host.nodes["/project/file"] = record_index_test_node("file", [U8]{})
+    file_path :: record_index_paths.path("/project/file/records")
+    record_index_test_error(jet_cli_record_index_secure_create_dir(file_path, &host), "record index directory is not a directory: /project/file")
+    parent_path :: record_index_paths.path("/project/../records")
+    record_index_test_error(jet_cli_record_index_secure_create_dir(parent_path, &host), "record index directory contains an unsafe component")
+    host.fail["symlink_metadata"] = "denied"
+    project_path :: record_index_paths.path("/project")
+    record_index_test_error(jet_cli_record_index_secure_create_dir(project_path, &host), "could not inspect record index directory: denied")
+}
+#Test("record index load rejects unsafe oversized unreadable and invalid indexes exactly") {
+    host := record_index_test_host()
+    root :: record_index_test_root()
+    empty :: jet_cli_record_index_load(root, &host) ?? panic(err.message)
+    assert_eq(jet_cli_record_index_query(empty, true).len(), 0)
+    link := record_index_test_node("symlink", [U8]{})
+    link.target = "/project/real"
+    host.nodes["/project/real"] = record_index_test_node("file", [U8]{})
+    host.nodes["/project/.jet/records/index.jsonl"] = ^link
+    record_index_test_load_error(jet_cli_record_index_load(root, &host), "record index is not a regular file: /project/.jet/records/index.jsonl")
+    huge := record_index_test_node("file", [U8]{})
+    huge.size = JET_CLI_MAX_INDEX_BYTES + 1
+    host.nodes["/project/.jet/records/index.jsonl"] = ^huge
+    record_index_test_load_error(jet_cli_record_index_load(root, &host), "record index exceeds the 256 MiB limit")
+    host.nodes["/project/.jet/records/index.jsonl"] = record_index_test_node("file", [U8]{})
+    host.fail["read"] = "Permission denied (os error 13)"
+    record_index_test_load_error(jet_cli_record_index_load(root, &host), "could not read record index /project/.jet/records/index.jsonl: Permission denied (os error 13)")
+    host.fail = [String:String]{}
+    host.fail["symlink_metadata"] = "Input/output error (os error 5)"
+    record_index_test_load_error(jet_cli_record_index_load(root, &host), "could not inspect record index /project/.jet/records/index.jsonl: Input/output error (os error 5)")
+}
+#Test("record index decode follows str lines whitespace and line numbering") {
+    root :: record_index_test_root()
+    budget :: jet_cli_record_budget_default()
+    first :: jet_cli_record_entry_to_jsonl(record_index_test_receipt("first", 1, 1)) ?? panic(err.message)
+    second :: jet_cli_record_entry_to_jsonl(record_index_test_receipt("second", 1, 2)) ?? panic(err.message)
+    cr :: String.from_bytes([U8]{U8{13}}) ?? panic("CR is UTF-8")
+    text :: "\n \t　{cr}\n{first}{cr}\n\n{second}"
+    decoded :: jet_cli_record_index_decode(root, text.bytes(), budget) ?? panic(err.message)
+    assert_eq(record_index_test_ids(decoded), [String]{"first", "second"})
+    record_index_test_load_error(jet_cli_record_index_decode(root, "\n\n{{}}\n".bytes(), budget), "record index line 3 is invalid: record index is missing `version`")
+    invalid := "{first}\n".bytes()
+    &invalid.push(U8{255})
+    record_index_test_load_error(jet_cli_record_index_decode(root, invalid, budget), "record index is not valid UTF-8")
+    long := [U8]{}
+    loop _ in 0..<JET_CLI_MAX_INDEX_LINE_BYTES -> &long.push(U8{32})
+    &long.push(U8{120})
+    record_index_test_load_error(jet_cli_record_index_decode(root, long, budget), "record index line 1 exceeds the 1 MiB limit")
+    // A whitespace-only line beyond the limit is skipped like Rust's trim check.
+    &long.pop().drop("last byte was appended above")
+    &long.push(U8{32})
+    assert_eq(jet_cli_record_index_query(jet_cli_record_index_decode(root, long, budget) ?? panic(err.message), true).len(), 0)
+    record_index_test_load_error(jet_cli_record_index_decode(root, "{second}\n{first}".bytes(), budget), "recorded_sequence values must be unique and strictly increasing")
+}
+#Test("record index update replace and supersede preserve key identity and sequence") {
+    host := record_index_test_host()
+    artifacts := record_index_test_artifacts([String]{})
+    index := jet_cli_record_index_new(record_index_test_root())
+    row :: record_index_test_receipt("row", 1, 1)
+    jet_cli_record_index_update(&index, row) ?? panic(err.message)
+    jet_cli_record_index_update(&index, row) ?? panic("equal duplicate is idempotent")
+    changed := ~row
+    changed.size = 2
+    record_index_test_error(jet_cli_record_index_update(&index, changed), "record `receipt/row` conflicts with an existing identity")
+    jet_cli_record_index_replace(&index, changed) ?? panic(err.message)
+    assert_eq((jet_cli_record_index_find(index, .Receipt, "row", true) ?? panic("row")).size, 2)
+    missing_row :: record_index_test_receipt("missing", 1, 2)
+    record_index_test_error(jet_cli_record_index_replace(&index, missing_row), "record `receipt/missing` does not exist")
+    other := ~row
+    other.identity = jet_cli_record_identity_new("b".repeat(64), "test-toolchain", "test-engine") ?? panic(err.message)
+    record_index_test_error(jet_cli_record_index_replace(&index, other), "record `receipt/row` conflicts with an existing identity")
+    jet_cli_record_index_store(index, &host, &artifacts) ?? panic(err.message)
+    record_index_test_error(jet_cli_record_index_update_and_store(&index, other, &host, &artifacts), "record `receipt/row` conflicts with an existing identity")
+    // Production receipts supersede the row whatever its identity; sequence 0
+    // is not newer than the current maximum, so a fresh sequence is allocated.
+    other.recorded_sequence = 0
+    jet_cli_record_index_supersede_and_store(&index, other, &host, &artifacts) ?? panic(err.message)
+    superseded :: jet_cli_record_index_find(jet_cli_record_index_load(record_index_test_root(), &host) ?? panic(err.message), .Receipt, "row", true) ?? panic("superseded")
+    assert_eq(superseded.identity.target_inputs_sha256, "b".repeat(64))
+    assert_eq(superseded.recorded_sequence, 1)
+    assert_eq(jet_cli_record_index_next_recorded_sequence(index) ?? panic("sequence"), 2)
+    assert_eq(jet_cli_record_index_next_recorded_sequence(jet_cli_record_index_new(record_index_test_root())) ?? panic("empty"), 1)
+    maximum := jet_cli_record_index_new(record_index_test_root())
+    jet_cli_record_index_update(&maximum, record_index_test_receipt("max", 0, 18446744073709551615)) ?? panic(err.message)
+    if jet_cli_record_index_next_recorded_sequence(maximum) == {
+        .Ok(_) -> panic("u64 sequence wrapped")
+        .Err(error) -> assert_eq(jet_cli_record_index_error_message(error), "recorded_sequence exhausted")
+    }
+    sequence_host := record_index_test_host()
+    after :: record_index_test_receipt("after", 0, 0)
+    record_index_test_error(jet_cli_record_index_update_and_store(&maximum, after, &sequence_host, &artifacts), "could not allocate record sequence: recorded_sequence exhausted")
+}
+#Test("record index upsert many replaces existing rows and allocates new sequences") {
+    host := record_index_test_host()
+    artifacts := record_index_test_artifacts([String]{})
+    index := jet_cli_record_index_new(record_index_test_root())
+    jet_cli_record_index_update_and_store(&index, record_index_test_receipt("receipt", 1, 5), &host, &artifacts) ?? panic(err.message)
+    replaced := record_index_test_receipt("receipt", 3, 5)
+    comparison := record_index_test_entry(.Comparison, "cmp", ".jet/receipts/cmp", 1, 1, false)
+    jet_cli_record_entry_with_links(&comparison, [JetCLIRecordLink]{record_index_test_link(.Receipt, "receipt")}, [JetCLIRecordLink]{}) ?? panic(err.message)
+    stale := jet_cli_record_index_new(record_index_test_root())
+    jet_cli_record_index_upsert_many_and_store(&stale, [JetCLIRecordIndexEntry]{replaced, comparison}, &host, &artifacts) ?? panic(err.message)
+    loaded :: jet_cli_record_index_load(record_index_test_root(), &host) ?? panic(err.message)
+    assert_eq((jet_cli_record_index_find(loaded, .Receipt, "receipt", true) ?? panic("receipt")).size, 3)
+    assert_eq((jet_cli_record_index_find(loaded, .Comparison, "cmp", true) ?? panic("cmp")).recorded_sequence, 6)
+    assert_eq(jet_cli_record_index_query_kind(loaded, .Comparison, true).len(), 1)
+    assert_eq(record_index_test_ids(stale), [String]{"receipt", "cmp"})
+}
+#Test("record index saved replays save order and removal keep referential integrity") {
+    host := record_index_test_host()
+    artifacts := record_index_test_artifacts([String]{".jet/replays/b", ".jet/replays/a"})
+    index := jet_cli_record_index_new(record_index_test_root())
+    jet_cli_record_index_update(&index, record_index_test_entry(.Replay, "b", ".jet/replays/b", 1, 1, false)) ?? panic(err.message)
+    jet_cli_record_index_update(&index, record_index_test_entry(.Replay, "a", ".jet/replays/a", 1, 2, false)) ?? panic(err.message)
+    jet_cli_record_index_store(index, &host, &artifacts) ?? panic(err.message)
+    other :: jet_cli_record_identity_new("c".repeat(64), "test-toolchain", "test-engine") ?? panic(err.message)
+    if jet_cli_record_index_save_replay_and_store(&index, "a", other, ".jet/saved/a", 9, &host, &artifacts) == {
+        .Ok(_) -> panic("identity mismatch saved")
+        .Err(error) -> assert_eq(error.message, "replay `a` conflicts with the current target identity")
+    }
+    if jet_cli_record_index_save_replay(&index, "missing", record_index_test_identity(), ".jet/saved/m", 1) == {
+        .Ok(_) -> panic("missing replay saved")
+        .Err(error) -> assert_eq(error.message, "replay `missing` is not indexed")
+    }
+    saved_a :: jet_cli_record_index_save_replay_and_store(&index, "a", record_index_test_identity(), ".jet/saved/a", 9, &host, &artifacts) ?? panic(err.message)
+    assert(saved_a.saved)
+    assert_eq(saved_a.recorded_sequence, 2)
+    jet_cli_record_index_save_replay_and_store(&index, "b", record_index_test_identity(), ".jet/saved/b", 9, &host, &artifacts) ?? panic(err.message)
+    // The superseded disposable replay bytes are evicted once the saved path owns the row.
+    assert(!record_index_test_exists(artifacts, ".jet/replays/a"))
+    ordered :: jet_cli_record_index_saved_replays(index, record_index_test_identity())
+    assert_eq(ordered.len(), 2)
+    assert_eq(ordered[0].artifact_id, "b")
+    assert_eq(ordered[1].artifact_id, "a")
+    assert_eq(jet_cli_record_index_saved_replays(index, other).len(), 0)
+    proof := record_index_test_entry(.Proof, "proof", ".jet/proofs/p", 1, 3, false)
+    jet_cli_record_entry_with_links(&proof, [JetCLIRecordLink]{record_index_test_link(.Replay, "a")}, [JetCLIRecordLink]{}) ?? panic(err.message)
+    jet_cli_record_index_update_and_store(&index, proof, &host, &artifacts) ?? panic(err.message)
+    if jet_cli_record_index_remove_replay_and_store(&index, "a", &host, &artifacts) == {
+        .Ok(_) -> panic("linked replay removed")
+        .Err(error) -> assert_eq(error.message, "record `proof/proof` links to missing `replay/a`")
+    }
+    removed :: jet_cli_record_index_remove_replay_and_store(&index, "b", &host, &artifacts) ?? panic(err.message)
+    assert_eq(removed.artifact_id, "b")
+    if jet_cli_record_index_remove_replay(&index, "b") == {
+        .Ok(_) -> panic("removed twice")
+        .Err(error) -> assert_eq(error.message, "replay `b` is not indexed")
+    }
+    assert_eq(record_index_test_ids(jet_cli_record_index_load(record_index_test_root(), &host) ?? panic(err.message)), [String]{"a", "proof"})
+}
+#Test("record index for project canonicalizes and stores under .jet records") {
+    host := record_index_test_host()
+    index :: jet_cli_record_index_for_project(record_index_paths.path("/project"), &host)
+    assert_eq(index.root.raw, "/project/.jet/records")
+    missing :: jet_cli_record_index_for_project(record_index_paths.path("relative"), &host)
+    assert_eq(missing.root.raw, "relative/.jet/records")
+    loaded :: jet_cli_record_index_load_for_project(record_index_paths.path("/project"), &host) ?? panic(err.message)
+    assert_eq(jet_cli_record_index_path(loaded.root).raw, "/project/.jet/records/index.jsonl")
+    assert_eq(loaded.budget, jet_cli_record_budget_default())
+}
+
+// Independent canonical pure closure; these do not replace the original
+// load/publication/retention-transport tests above when #4381 is held.
+#Test("record index pure codec round trip preserves saved and authenticated history") {
+    root :: record_index_test_root()
+    index := jet_cli_record_index_new(root)
+    saved :: record_index_test_entry(.Replay, "saved", ".jet/replays/saved", 100, 1, true)
+    sensitive := record_index_test_receipt("secret", 9, 2)
+    jet_cli_record_entry_with_capture(&sensitive, .Sensitive)
+    trust := record_index_test_entry(.Trust, "trust", ".jet/trust/audit", 32, 3, false)
+    jet_cli_record_entry_with_links(&trust, [JetCLIRecordLink]{}, [JetCLIRecordLink]{record_index_test_link(.Receipt, "secret")}) ?? panic(err.message)
+    rows :: [JetCLIRecordIndexEntry]{saved, sensitive, trust}
+    loop row in rows -> jet_cli_record_index_update(&index, row) ?? panic(err.message)
+    // Query order is NOT capture order: persistence uses capture order.
+    capture_bytes :: jet_cli_record_index_encode(rows) ?? panic(err.message)
+    decoded :: jet_cli_record_index_decode(root, capture_bytes, index.budget) ?? panic(err.message)
+    assert_eq(jet_cli_record_index_query(decoded, true), jet_cli_record_index_query(index, true))
+    assert_eq(jet_cli_record_index_find(decoded, .Receipt, "secret", false), None)
+    visible :: jet_cli_record_index_find(decoded, .Trust, "trust", false) ?? panic("trust")
+    assert_eq(visible.produced.len(), 0)
+    assert_eq(jet_cli_record_index_query(decoded, false).len(), 2)
+    assert_eq(jet_cli_record_index_query_kind(decoded, .Replay, false).len(), 1)
+    assert_eq(jet_cli_record_index_saved_replays(decoded, record_index_test_identity()), [JetCLIRecordIndexEntry]{saved})
+    assert_eq(jet_cli_record_index_next_recorded_sequence(decoded) ?? panic("sequence"), 4)
+}
+#Test("record index pure update eviction and rejected replacement are transactional") {
+    index := jet_cli_record_index_new(record_index_test_root())
+    jet_cli_record_index_set_budget(&index, record_index_test_budget(1)) ?? panic(err.message)
+    old :: record_index_test_receipt("old", 1, 1)
+    jet_cli_record_index_update(&index, old) ?? panic(err.message)
+    jet_cli_record_index_update(&index, old) ?? panic("equal duplicate")
+    changed := ~old
+    changed.size = 2
+    record_index_test_error(jet_cli_record_index_update(&index, changed), "record `receipt/old` conflicts with an existing identity")
+    record_index_test_error(jet_cli_record_index_replace(&index, changed), "disposable record `receipt/old` exceeds the byte budget and was not retained")
+    assert_eq(jet_cli_record_index_query(index, true), [JetCLIRecordIndexEntry]{old})
+    new :: record_index_test_receipt("new", 1, 2)
+    jet_cli_record_index_update(&index, new) ?? panic(err.message)
+    assert_eq(jet_cli_record_index_find(index, .Receipt, "old", true), None)
+    assert_eq(jet_cli_record_index_query(index, true), [JetCLIRecordIndexEntry]{new})
+    too_large :: record_index_test_receipt("too-large", 2, 3)
+    record_index_test_error(jet_cli_record_index_update(&index, too_large), "disposable record `receipt/too-large` exceeds the byte budget and was not retained")
+    assert_eq(jet_cli_record_index_query(index, true), [JetCLIRecordIndexEntry]{new})
+    maximum := jet_cli_record_index_new(record_index_test_root())
+    jet_cli_record_index_update(&maximum, record_index_test_receipt("max", 0, 18446744073709551615)) ?? panic(err.message)
+    if jet_cli_record_index_next_recorded_sequence(maximum) == {
+        .Ok(_) -> panic("u64 sequence wrapped")
+        .Err(error) -> assert_eq(jet_cli_record_index_error_message(error), "recorded_sequence exhausted")
+    }
+}
+#Test("record index pure replay transitions preserve identity sequence and link integrity") {
+    index := jet_cli_record_index_new(record_index_test_root())
+    replay :: record_index_test_entry(.Replay, "replay", ".jet/replays/replay", 1, 1, false)
+    jet_cli_record_index_update(&index, replay) ?? panic(err.message)
+    saved :: jet_cli_record_index_save_replay(&index, "replay", record_index_test_identity(), ".jet/saved/replay", 8) ?? panic(err.message)
+    assert(saved.saved)
+    assert_eq(saved.recorded_sequence, replay.recorded_sequence)
+    assert_eq(saved.identity, replay.identity)
+    proof := record_index_test_entry(.Proof, "proof", ".jet/proofs/proof", 1, 2, false)
+    jet_cli_record_entry_with_links(&proof, [JetCLIRecordLink]{record_index_test_link(.Replay, "replay")}, [JetCLIRecordLink]{}) ?? panic(err.message)
+    jet_cli_record_index_update(&index, proof) ?? panic(err.message)
+    if jet_cli_record_index_remove_replay(&index, "replay") == {
+        .Ok(_) -> panic("linked replay removed")
+        .Err(error) -> assert_eq(error.message, "record `proof/proof` links to missing `replay/replay`")
+    }
+    assert_eq(jet_cli_record_index_saved_replays(index, record_index_test_identity()), [JetCLIRecordIndexEntry]{saved})
+    unlinked := jet_cli_record_index_new(record_index_test_root())
+    jet_cli_record_index_update(&unlinked, replay) ?? panic(err.message)
+    removed :: jet_cli_record_index_remove_replay(&unlinked, "replay") ?? panic(err.message)
+    assert_eq(removed, replay)
+    assert_eq(jet_cli_record_index_query(unlinked, true).len(), 0)
+}
+#Test("record index optional elapsed age uses the exact strict stale boundary") {
+    // Native unavailable/future/error mtime observations each produce None.
+    assert(!jet_cli_record_index_lock_stale(None))
+    assert(!jet_cli_record_index_lock_stale(Val(0)))
+    assert(!jet_cli_record_index_lock_stale(Val(59999999999)))
+    assert(!jet_cli_record_index_lock_stale(Val(60000000000)))
+    assert(jet_cli_record_index_lock_stale(Val(60000000001)))
+    assert(jet_cli_record_index_lock_stale(Val(61000000000)))
+}

@@ -1,0 +1,1826 @@
+// PORT-PENDING 1130 tests-pkg-slice-1803: tests/pkg.rs:1803-3624
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn denied_import_boundary_fact_reaches_structure_inspection() {
+//RS     let root = tmp_dir("import_boundary_denied_structure_fact");
+//RS     write(
+//RS         &root,
+//RS         "package.jet",
+//RS         &(min_manifest("app", "0.1.0")
+//RS             + "boundaries: { deny: [{ from: \"app.ui\", to: \"app.db\" }] }\n"),
+//RS     );
+//RS     write(&root, "ui.jet", "use db\nfn run() { }\n");
+//RS     write(&root, "db.jet", "pub fn value() -> Int -> 1\n");
+//RS     let entry = root.join("ui.jet");
+//RS     let shown = entry.to_str().unwrap();
+//RS 
+//RS     let diagnostics = jet::Loader::load_entry_with_diagnostics(shown)
+//RS         .expect_err("denied edge must retain its loader fact");
+//RS     let fact = diagnostics
+//RS         .iter()
+//RS         .find_map(|entry| entry.structure_fact.as_ref())
+//RS         .expect("denied edge structure fact");
+//RS     assert_eq!(fact.subject, "app.ui -> app.db");
+//RS     assert_eq!(fact.status, "denied");
+//RS     assert_eq!(fact.gate.as_deref(), Some("manifest rule edit"));
+//RS 
+//RS     let inspected = Command::new(jet_bin())
+//RS         .current_dir(&root)
+//RS         .args(["inspect", "structure", shown])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("inspect structure must run");
+//RS     assert!(!inspected.status.success(), "denied inspection must fail");
+//RS     let stdout = String::from_utf8(inspected.stdout).expect("inspection is UTF-8");
+//RS     assert!(stdout.contains("Structure.ImportEdge"));
+//RS     assert!(stdout.contains("app.ui -> app.db"));
+//RS     assert!(stdout.contains("denied"));
+//RS     assert!(stdout.contains("manifest rule edit"));
+//RS     let stderr = String::from_utf8(inspected.stderr).expect("diagnostics are UTF-8");
+//RS     assert!(
+//RS         stderr.contains("E0619"),
+//RS         "missing denied-edge diagnostic: {stderr}"
+//RS     );
+//RS 
+//RS     fs::remove_dir_all(&root).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_parse_dep_path() {
+//RS     let raw = manifest_with_deps("root", "0.1.0", "    helpers: ../helpers,");
+//RS     let mf =
+//RS         jet::Manifest::parse(&PathBuf::from("package.jet"), &raw).expect("path dep should parse");
+//RS     let dep = mf.dependencies.get("helpers").expect("missing helpers dep");
+//RS     assert!(matches!(dep, jet::Manifest::DepSpec::Path { path } if path == "../helpers"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_rejects_traversal_dependency_name() {
+//RS     let raw = manifest_with_deps("root", "0.1.0", "    ../escape: \"1.0.0\",");
+//RS     let error = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
+//RS         .expect_err("dependency names must not become path components");
+//RS     assert_eq!(error.code, "E1206", "{} {}", error.code, error.what);
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_parse_dep_git_tag() {
+//RS     let raw = manifest_with_deps(
+//RS         "root",
+//RS         "0.1.0",
+//RS         "    parsekit: { git: \"https://github.com/acme/parsekit\", tag: \"v0.4.1\" },",
+//RS     );
+//RS     let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
+//RS         .expect("git tag dep should parse");
+//RS     let dep = mf.dependencies.get("parsekit").expect("missing parsekit");
+//RS     assert!(matches!(
+//RS         dep,
+//RS         jet::Manifest::DepSpec::Git {
+//RS             url,
+//RS             selector: jet::Manifest::GitSelector::Tag(t)
+//RS         } if url.contains("parsekit") && t == "v0.4.1"
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_parse_foreign_package_dep() {
+//RS     let raw = manifest_with_deps(
+//RS         "root",
+//RS         "0.1.0",
+//RS         "    plotly: js@\"plotly#version=2.35.0@npm\",",
+//RS     );
+//RS     let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
+//RS         .expect("foreign package dep should parse");
+//RS     assert!(matches!(
+//RS         mf.dependencies.get("plotly"),
+//RS         Some(jet::Manifest::DepSpec::Foreign {
+//RS             language: jet::AST::ForeignLanguage::JS,
+//RS             reference,
+//RS         }) if reference == "plotly#version=2.35.0@npm"
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn foreign_package_provider_fetch_lock_and_locked_round_trip() {
+//RS     let _guard = STORE_LOCK.lock().unwrap();
+//RS     let project = Scratch::new("foreign_provider_project");
+//RS     let stale_project = Scratch::new("foreign_provider_stale");
+//RS     let failed_project = Scratch::new("foreign_provider_failure");
+//RS     let fixtures = Scratch::new("foreign_provider_fixtures");
+//RS     let store = Scratch::new("foreign_provider_store");
+//RS     let artifact =
+//RS         fixtures.join("foreign/npm/plotly-plotly_version_2_35_0/.jet/bindings/js/plotly.jet");
+//RS     fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+//RS     let descriptor = jet::AST::binder_descriptor(jet::AST::ForeignLanguage::JS)
+//RS         .unwrap()
+//RS         .stamp();
+//RS     fs::write(
+//RS         &artifact,
+//RS         format!(
+//RS             "// jet-ffi-descriptor={descriptor}\npub fn scatter() -> Int {{\n    return 7\n}}\n"
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     let manifest_text = manifest_with_deps(
+//RS         "consumer",
+//RS         "0.1.0",
+//RS         "    plotly: js@\"plotly#version=2.35.0@npm\",",
+//RS     );
+//RS     // Keep the provider fixture identity and the package declaration identical
+//RS     // in both success and fail-closed cases.
+//RS     for root in [&project.path, &failed_project.path] {
+//RS         fs::write(root.join("package.jet"), &manifest_text).unwrap();
+//RS     }
+//RS     let main = project.join("main.jet");
+//RS     fs::write(
+//RS         &main,
+//RS         "use js.plotly as plot\nfn run() {\n    print(plot.scatter())\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let manifest = jet::Manifest::parse(&project.join("package.jet"), &manifest_text).unwrap();
+//RS 
+//RS     let old_root = std::env::var_os("JETPACK_ROOT");
+//RS     let old_fixtures = std::env::var_os("JETPACK_FIXTURES");
+//RS     std::env::set_var("JETPACK_ROOT", &store.path);
+//RS     std::env::set_var("JETPACK_FIXTURES", &fixtures.path);
+//RS     fs::write(stale_project.join("package.jet"), &manifest_text).unwrap();
+//RS     fs::write(
+//RS         &artifact,
+//RS         "// jet-ffi-descriptor=stale\npub fn scatter() -> Int {\n    return 7\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let stale_manifest =
+//RS         jet::Manifest::parse(&stale_project.join("package.jet"), &manifest_text).unwrap();
+//RS     let stale = jet::Fetch::fetch(
+//RS         &stale_project.path,
+//RS         &stale_manifest,
+//RS         None,
+//RS         &jet::Fetch::FetchOptions {
+//RS             locked: false,
+//RS             update: false,
+//RS             update_dep: None,
+//RS             resolution: jet::Publish::ResolveMode::Conservative,
+//RS         },
+//RS     )
+//RS     .expect_err("stale provider binding must fail before ingestion");
+//RS     assert!(stale.iter().any(|diagnostic| diagnostic.code == "E1256"));
+//RS     fs::write(
+//RS         &artifact,
+//RS         format!(
+//RS             "// jet-ffi-descriptor={descriptor}\npub fn scatter() -> Int {{\n    return 7\n}}\n"
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     let fetched = jet::Fetch::fetch(
+//RS         &project.path,
+//RS         &manifest,
+//RS         None,
+//RS         &jet::Fetch::FetchOptions {
+//RS             locked: false,
+//RS             update: false,
+//RS             update_dep: None,
+//RS             resolution: jet::Publish::ResolveMode::Conservative,
+//RS         },
+//RS     );
+//RS     let (lock, dep_dirs) = fetched.expect("foreign provider fetch should realize the package");
+//RS     assert!(dep_dirs.get("plotly").is_some_and(|path| path.is_dir()));
+//RS     assert!(jetpack::Foreign::project_binding_path(
+//RS         &project.path,
+//RS         jet::AST::ForeignLanguage::JS,
+//RS         "plotly"
+//RS     )
+//RS     .is_file());
+//RS     let foreign = lock
+//RS         .packages
+//RS         .iter()
+//RS         .find(|package| package.name == "plotly")
+//RS         .expect("foreign package must be in lock");
+//RS     assert!(matches!(
+//RS         &foreign.source,
+//RS         jet::Lock::LockSource::Foreign {
+//RS             language: jet::AST::ForeignLanguage::JS,
+//RS             reference,
+//RS             output,
+//RS         } if reference == "plotly#version=2.35.0@npm" && !output.is_empty()
+//RS     ));
+//RS     assert!(foreign
+//RS         .envelope
+//RS         .as_ref()
+//RS         .is_some_and(|envelope| !envelope.output_hash.is_empty()));
+//RS     let lock_text = fs::read_to_string(project.join(".jet/lock")).unwrap();
+//RS     let round_trip = jet::Lock::parse(&lock_text).expect("foreign lock should parse back");
+//RS     assert_eq!(round_trip.packages, lock.packages);
+//RS     let source = fs::read_to_string(&main).unwrap();
+//RS     jet::compile_with_path(&source, &main.to_string_lossy())
+//RS         .expect("compiler must consume the provider-projected binding");
+//RS 
+//RS     let locked = jet::Fetch::fetch(
+//RS         &project.path,
+//RS         &manifest,
+//RS         Some(&lock),
+//RS         &jet::Fetch::FetchOptions {
+//RS             locked: true,
+//RS             update: false,
+//RS             update_dep: None,
+//RS             resolution: jet::Publish::ResolveMode::Conservative,
+//RS         },
+//RS     )
+//RS     .expect("locked foreign provider round-trip should verify");
+//RS     assert_eq!(locked.0.packages, lock.packages);
+//RS 
+//RS     fs::remove_dir_all(fixtures.join("foreign/npm")).unwrap();
+//RS     let failed_manifest =
+//RS         jet::Manifest::parse(&failed_project.join("package.jet"), &manifest_text).unwrap();
+//RS     let failure = jet::Fetch::fetch(
+//RS         &failed_project.path,
+//RS         &failed_manifest,
+//RS         None,
+//RS         &jet::Fetch::FetchOptions {
+//RS             locked: false,
+//RS             update: false,
+//RS             update_dep: None,
+//RS             resolution: jet::Publish::ResolveMode::Conservative,
+//RS         },
+//RS     )
+//RS     .expect_err("missing provider artifact must fail before foreign fetch succeeds");
+//RS     assert!(failure.iter().any(|diagnostic| diagnostic.code == "E1256"));
+//RS     assert!(!failed_project.join(".jet/lock").exists());
+//RS 
+//RS     match old_root {
+//RS         Some(value) => std::env::set_var("JETPACK_ROOT", value),
+//RS         None => std::env::remove_var("JETPACK_ROOT"),
+//RS     }
+//RS     match old_fixtures {
+//RS         Some(value) => std::env::set_var("JETPACK_FIXTURES", value),
+//RS         None => std::env::remove_var("JETPACK_FIXTURES"),
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_parse_e1206_missing_required_field() {
+//RS     // No `name:` at all is a shape error (E1206, D-CONF-NAME1: bare `name`/
+//RS     // `version`, `version:` alone is optional).
+//RS     let raw = "version: \"0.1.0\"\n";
+//RS     let err = jet::Manifest::parse(&PathBuf::from("package.jet"), raw)
+//RS         .expect_err("missing name should fail");
+//RS     assert_eq!(err.code, "E1206");
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_parse_e1206_unknown_field() {
+//RS     // The retired `payload:` wrapper is now a normal unknown-field error
+//RS     // (D-CONF-PLANE1/D-CONF-NAME1).
+//RS     let raw = include_str!("ui/manifest_unknown_field/package.jet");
+//RS     let err = jet::Manifest::parse(&PathBuf::from("package.jet"), raw)
+//RS         .expect_err("payload: wrapper should fail");
+//RS     assert_eq!(err.code, "E1206");
+//RS     assert!(err.what.contains("payload"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_parse_e1209_reserved_nonempty() {
+//RS     let raw = min_manifest("myapp", "0.1.0") + "\ndev_deps: {\n    testlib: ../testlib,\n}\n";
+//RS     let err = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
+//RS         .expect_err("non-empty dev_deps should fail E1209");
+//RS     assert_eq!(err.code, "E1209");
+//RS }
+//RS 
+//RS // ─────────────────────────────────────────────
+//RS // D-EFFBUDGET1: package effect budget manifest parsing
+//RS // ─────────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn manifest_parse_effects_block() {
+//RS     let raw = min_manifest("app", "0.1.0")
+//RS         + "\nauthority: {\n    holds: { allow: [FS, Time], deny: [Net, Panic] },\n}\n";
+//RS     let pm =
+//RS         jetpack::Package::PackageFacts::parse(&raw, "test").expect("authority holds should parse");
+//RS     assert!(pm.effects_enabled);
+//RS     assert_eq!(
+//RS         pm.effects_allow,
+//RS         Some(vec!["FS".to_string(), "Time".to_string()])
+//RS     );
+//RS     assert_eq!(
+//RS         pm.effects_deny,
+//RS         Some(vec!["Net".to_string(), "Panic".to_string()])
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_panic_budget_names_the_dependency_stop_site() {
+//RS     let raw = min_manifest("app", "0.1.0") + "\nauthority: { holds: { deny: [Panic] } }\n";
+//RS     let manifest = jetpack::Package::PackageFacts::parse(&raw, "test")
+//RS         .expect("Panic should be a manifest effect root");
+//RS     let entries = [jetpack::EffectBudget::PackageEffects {
+//RS         name: "panicdep".to_string(),
+//RS         effects: jet::Sema::EffectSet::from(["Panic".to_string()]),
+//RS         effect_sites: std::collections::BTreeMap::new(),
+//RS         panic_sites: vec!["panicdep::parse_port".to_string()],
+//RS         boundary_span: Some(jet::Diagnostics::Span::new(4, 12)),
+//RS     }];
+//RS     let diagnostics = jetpack::EffectBudget::enforce(&entries, &manifest);
+//RS     assert_eq!(diagnostics.len(), 1);
+//RS     assert_eq!(diagnostics[0].code, "E1220");
+//RS     assert!(diagnostics[0].what.contains("panicdep"));
+//RS     assert!(diagnostics[0].what.contains("parse_port"));
+//RS     assert!(diagnostics[0].fix.contains("fallible result"));
+//RS     assert!(diagnostics[0].fix.contains("#Pre"));
+//RS     assert_eq!(
+//RS         diagnostics[0].span,
+//RS         Some(jet::Diagnostics::Span::new(4, 12))
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_parse_grants_block() {
+//RS     let raw = min_manifest("app", "0.1.0") + "\nauthority: { grants: { \"pdf-lib\": [Net] } }\n";
+//RS     let pm =
+//RS         jetpack::Package::PackageFacts::parse(&raw, "test").expect("grants block should parse");
+//RS     assert_eq!(
+//RS         pm.grants,
+//RS         vec![("pdf-lib".to_string(), vec!["Net".to_string()])]
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_parse_authority_block_holds_grants_trust_and_providers() {
+//RS     let raw = min_manifest("app", "0.1.0")
+//RS         + r#"
+//RS authority: {
+//RS     holds: { allow: [Net, DB.Read], deny: [Exec] },
+//RS     grants: { "image-codec": [FS.Read] },
+//RS     trust: { default: prompt, ci: { prompt: deny }, services: { stripe: allow } },
+//RS     providers: { nix: { registry: "nixpkgs", deny: ["openssl-1.0"] } },
+//RS }
+//RS "#;
+//RS     let pm = jetpack::Package::PackageFacts::parse(&raw, "test")
+//RS         .expect("one authority block should parse");
+//RS     assert_eq!(
+//RS         pm.authority.holds.allow,
+//RS         Some(vec!["Net".to_string(), "DB.Read".to_string()])
+//RS     );
+//RS     assert_eq!(pm.authority.holds.deny, Some(vec!["Exec".to_string()]));
+//RS     assert_eq!(
+//RS         pm.authority.grants,
+//RS         vec![("image-codec".to_string(), vec!["FS.Read".to_string()])]
+//RS     );
+//RS     assert_eq!(pm.grants, pm.authority.grants);
+//RS     assert_eq!(pm.effects_allow, pm.authority.holds.allow);
+//RS     assert_eq!(pm.effects_deny, pm.authority.holds.deny);
+//RS     assert_eq!(
+//RS         pm.authority.trust.as_ref().and_then(|trust| trust.default),
+//RS         Some(jetpack::Package::TrustDecision::Prompt)
+//RS     );
+//RS     assert_eq!(pm.authority.providers.len(), 1);
+//RS     assert_eq!(pm.authority.providers[0].provider, "nix");
+//RS     assert_eq!(pm.authority.providers[0].registry, "nixpkgs");
+//RS     assert_eq!(
+//RS         pm.authority.providers[0].deny,
+//RS         vec!["openssl-1.0".to_string()]
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_parse_authority_trust_block() {
+//RS     let raw = min_manifest("app", "0.1.0")
+//RS         + "\nauthority: { trust: { default: prompt, ci: { prompt: deny }, services: { postgres: prompt }, require: attested } }\n";
+//RS     let pm = jetpack::Package::PackageFacts::parse(&raw, "test")
+//RS         .expect("authority.trust block should parse");
+//RS     let policy = pm
+//RS         .authority
+//RS         .trust
+//RS         .expect("authority trust policy should be stored");
+//RS     assert_eq!(
+//RS         policy.default,
+//RS         Some(jetpack::Package::TrustDecision::Prompt)
+//RS     );
+//RS     assert_eq!(
+//RS         policy.ci_prompt,
+//RS         Some(jetpack::Package::TrustDecision::Deny)
+//RS     );
+//RS     assert_eq!(
+//RS         policy.services,
+//RS         vec![(
+//RS             "postgres".to_string(),
+//RS             jetpack::Package::TrustDecision::Prompt
+//RS         )]
+//RS     );
+//RS     assert_eq!(
+//RS         policy.require,
+//RS         Some(jetpack::Package::ProvenanceRequirement::Attested)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_authority_trust_rejects_unknown_decision() {
+//RS     let raw = min_manifest("app", "0.1.0") + "\nauthority: { trust: { default: maybe } }\n";
+//RS     let err = jetpack::Package::PackageFacts::parse(&raw, "test")
+//RS         .expect_err("unknown trust decision should fail");
+//RS     assert!(matches!(
+//RS         err,
+//RS         jetpack::Package::PackageParseError::BadEffectsBlock(_)
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_no_effects_block_disables_enforcement() {
+//RS     let raw = min_manifest("app", "0.1.0");
+//RS     let pm =
+//RS         jetpack::Package::PackageFacts::parse(&raw, "test").expect("valid manifest should parse");
+//RS     assert!(!pm.effects_enabled);
+//RS     assert_eq!(pm.effects_allow, None);
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_parse_effects_e1221_unknown_effect() {
+//RS     let raw = min_manifest("app", "0.1.0") + "\nauthority: { holds: { allow: [NotAnEffect] } }\n";
+//RS     let err = jetpack::Package::PackageFacts::parse(&raw, "test")
+//RS         .expect_err("unknown effect name should fail E1221");
+//RS     let diag = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
+//RS         .expect_err("should surface through Manifest::parse too");
+//RS     assert_eq!(diag.code, "E1221");
+//RS     assert!(matches!(
+//RS         err,
+//RS         jetpack::Package::PackageParseError::BadEffectsBlock { .. }
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_parse_effects_e1221_unknown_field() {
+//RS     let raw = min_manifest("app", "0.1.0") + "\nauthority: { holds: { nope: [FS] } }\n";
+//RS     let diag = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
+//RS         .expect_err("unknown effects field should fail E1221");
+//RS     assert_eq!(diag.code, "E1221");
+//RS }
+//RS 
+//RS #[test]
+//RS fn effect_budget_load_ok_reports_via_compile_with_path() {
+//RS     // A project with a well-formed `authority.holds` block and no dependencies
+//RS     // reaching a disallowed effect should compile fine end to end — the
+//RS     // manifest gate (Loader/Manifest::parse) never rejects a valid budget.
+//RS     let tmp = tmp_dir("effbudget_ok");
+//RS     write(
+//RS         &tmp,
+//RS         "package.jet",
+//RS         &(min_manifest("app", "0.1.0") + "\nauthority: { holds: { allow: [IO] } }\n"),
+//RS     );
+//RS     let entry = tmp.join("run.jet");
+//RS     fs::write(&entry, "fn run() { print(\"hi\") }\n").unwrap();
+//RS 
+//RS     let result = jet::compile_with_path("", &entry.to_string_lossy());
+//RS     assert!(
+//RS         result.is_ok(),
+//RS         "a well-formed authority.holds budget should not block compilation:\n{}",
+//RS         result
+//RS             .err()
+//RS             .map(|d| jet::render_diagnostics("run.jet", "", &d))
+//RS             .unwrap_or_default()
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cli_build_prints_effect_summary() {
+//RS     // D-EFFBUDGET1: every `jet build` prints a one-line effect summary, with
+//RS     // zero config — no package.jet needed.
+//RS     if !jet_bin().is_file() {
+//RS         eprintln!("note: skipping cli_build_prints_effect_summary (run `cargo build` first)");
+//RS         return;
+//RS     }
+//RS     let tmp = tmp_dir("effbudget_summary");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS     write(
+//RS         &tmp,
+//RS         "hello.jet",
+//RS         "use core.files as fs\nfn run() { fs.write(\"/tmp/jet_effbudget_test.txt\", \"x\") ?? panic(\"e\") }\n",
+//RS     );
+//RS 
+//RS     let out = jet_cmd(&["build", "hello.jet"], &tmp, &store);
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "jet build failed:\n{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     // The summary goes to stderr so program/tool stdout stays clean
+//RS     // (U7 / D-DEVMODE1 byte-identity).
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("effects:") && stderr.contains("FS"),
+//RS         "expected an effect summary naming FS on stderr, got:\n{stderr}"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cli_build_enforces_effect_budget_e1220() {
+//RS     // A dependency that reaches `Net` while the root's budget only allows
+//RS     // `FS` must fail the build naming the dependency (E1220).
+//RS     if !jet_bin().is_file() {
+//RS         eprintln!(
+//RS             "note: skipping cli_build_enforces_effect_budget_e1220 (run `cargo build` first)"
+//RS         );
+//RS         return;
+//RS     }
+//RS     let tmp = tmp_dir("effbudget_deny");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     write(&tmp, "netdep/package.jet", &min_manifest("netdep", "0.1.0"));
+//RS     write(
+//RS         &tmp,
+//RS         "netdep/netdep.jet",
+//RS         "use core.net as net\npub fn ping() { net.tcp_connect(\"127.0.0.1:1\") ?? panic(\"e\") }\n",
+//RS     );
+//RS 
+//RS     write(
+//RS         &tmp,
+//RS         "package.jet",
+//RS         &(manifest_with_deps("app", "0.1.0", "    netdep: ./netdep,")
+//RS             + "\nauthority: { holds: { allow: [FS] } }\n"),
+//RS     );
+//RS     write(
+//RS         &tmp,
+//RS         "run.jet",
+//RS         "use netdep\nfn run() { netdep.ping() }\n",
+//RS     );
+//RS 
+//RS     let out = jet_cmd(&["build", "run.jet"], &tmp, &store);
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         !out.status.success(),
+//RS         "expected build to fail on an out-of-budget effect, stderr:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("E1220") && stderr.contains("netdep"),
+//RS         "expected E1220 naming `netdep`, got:\n{stderr}"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cli_build_rejects_undeclared_effect_budget_leaf() {
+//RS     if !jet_bin().is_file() {
+//RS         eprintln!(
+//RS             "note: skipping cli_build_rejects_undeclared_effect_budget_leaf (run `cargo build` first)"
+//RS         );
+//RS         return;
+//RS     }
+//RS     let tmp = tmp_dir("effbudget_leaf_typo");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS     write(
+//RS         &tmp,
+//RS         "package.jet",
+//RS         &(min_manifest("app", "0.1.0") + "\nauthority: { holds: { allow: [FS.Raed] } }\n"),
+//RS     );
+//RS     write(&tmp, "run.jet", "fn run() {}\n");
+//RS 
+//RS     let out = jet_cmd(&["build", "run.jet"], &tmp, &store);
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(!out.status.success(), "{stderr}");
+//RS     assert!(
+//RS         stderr.contains("E0750") && stderr.contains("FS.Read"),
+//RS         "budget typo should resolve against Prelude effect leaves:\n{stderr}"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cli_build_lint_never_blocks_by_default() {
+//RS     // D-LINTPOLICY1=A (the override law, card #505): warnings never fail a
+//RS     // build by default. A money-named `Float` field fires lint L0504, but
+//RS     // with no `policy.lints` block in `package.jet` the build still succeeds.
+//RS     if !jet_bin().is_file() {
+//RS         eprintln!(
+//RS             "note: skipping cli_build_lint_never_blocks_by_default (run `cargo build` first)"
+//RS         );
+//RS         return;
+//RS     }
+//RS     let tmp = tmp_dir("lintpolicy_default");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     write(&tmp, "package.jet", &min_manifest("app", "0.1.0"));
+//RS     write(
+//RS         &tmp,
+//RS         "run.jet",
+//RS         "struct Invoice { price: Float }\nfn run() { print(\"hi\") }\n",
+//RS     );
+//RS 
+//RS     let out = jet_cmd(&["build", "run.jet"], &tmp, &store);
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     // A denied lint would fail *before* the effect summary prints (see
+//RS     // `cli_build_enforces_lint_policy_e1293`); reaching the summary with no
+//RS     // `E1293` proves the L0504 warning never blocked. Asserted this way
+//RS     // rather than on overall `jet build` success because the rustc stage has
+//RS     // an unrelated pre-existing failure in this environment
+//RS     // (`jet_std_env_init`) that would otherwise mask what this test checks.
+//RS     assert!(
+//RS         stderr.contains("L0504"),
+//RS         "expected the L0504 lint to still print as a warning, got:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("effects:"),
+//RS         "expected the build to proceed past the lint gate to the effect summary, got:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         !stderr.contains("E1293"),
+//RS         "no `policy.lints` block was declared — E1293 must never fire, got:\n{stderr}"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cli_build_enforces_lint_policy_e1293() {
+//RS     // D-LINTPOLICY1=A: a team's own `policy: { lints: { deny: [float_money] } }`
+//RS     // in `package.jet` turns that same warning into a build failure (E1293),
+//RS     // naming the denied lint. No other `package.jet` gets this behavior — the
+//RS     // wall is opt-in, per team (the override law's third clause).
+//RS     if !jet_bin().is_file() {
+//RS         eprintln!("note: skipping cli_build_enforces_lint_policy_e1293 (run `cargo build` first)");
+//RS         return;
+//RS     }
+//RS     let tmp = tmp_dir("lintpolicy_deny");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     write(
+//RS         &tmp,
+//RS         "package.jet",
+//RS         &(min_manifest("app", "0.1.0") + "\npolicy: {\n    lints: { deny: [float_money] },\n}\n"),
+//RS     );
+//RS     write(
+//RS         &tmp,
+//RS         "run.jet",
+//RS         "struct Invoice { price: Float }\nfn run() { print(\"hi\") }\n",
+//RS     );
+//RS 
+//RS     let out = jet_cmd(&["build", "run.jet"], &tmp, &store);
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         !out.status.success(),
+//RS         "expected the build to fail once policy.lints denies float_money, stderr:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("E1293") && stderr.contains("L0504"),
+//RS         "expected E1293 naming float_money/L0504, got:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         !stderr.contains("Warning [L0504]"),
+//RS         "a denied lint must not also be printed as a plain warning:\n{stderr}"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cli_build_unused_lint_warns_by_default_and_denies_by_policy() {
+//RS     if !jet_bin().is_file() {
+//RS         eprintln!(
+//RS             "note: skipping cli_build_unused_lint_warns_by_default_and_denies_by_policy (run `cargo build` first)"
+//RS         );
+//RS         return;
+//RS     }
+//RS     let tmp = tmp_dir("lintpolicy_unused");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS     write(&tmp, "package.jet", &min_manifest("app", "0.1.0"));
+//RS     write(
+//RS         &tmp,
+//RS         "run.jet",
+//RS         "fn run() {\n    unused_binding :: 1\n    print(\"hi\")\n}\n",
+//RS     );
+//RS 
+//RS     let warning = jet_cmd(&["build", "run.jet"], &tmp, &store);
+//RS     let warning_stderr = String::from_utf8_lossy(&warning.stderr);
+//RS     assert!(
+//RS         warning.status.success(),
+//RS         "default warning must not block the build:\n{warning_stderr}"
+//RS     );
+//RS     assert!(
+//RS         warning_stderr.contains("L0101"),
+//RS         "expected unused-local warning:\n{warning_stderr}"
+//RS     );
+//RS     assert!(
+//RS         warning_stderr.contains("effects:"),
+//RS         "default build did not pass the lint gate:\n{warning_stderr}"
+//RS     );
+//RS     assert!(
+//RS         !warning_stderr.contains("E1293"),
+//RS         "default warning must not be denied:\n{warning_stderr}"
+//RS     );
+//RS 
+//RS     write(
+//RS         &tmp,
+//RS         "package.jet",
+//RS         &(min_manifest("app", "0.1.0")
+//RS             + "\npolicy: {\n    lints: { deny: [unused_local_binding] },\n}\n"),
+//RS     );
+//RS     let denied = jet_cmd(&["build", "run.jet"], &tmp, &store);
+//RS     let denied_stderr = String::from_utf8_lossy(&denied.stderr);
+//RS     assert!(
+//RS         !denied.status.success(),
+//RS         "denied lint must fail:\n{denied_stderr}"
+//RS     );
+//RS     assert!(
+//RS         denied_stderr.contains("E1293") && denied_stderr.contains("L0101"),
+//RS         "expected E1293 to name unused_local_binding/L0101:\n{denied_stderr}"
+//RS     );
+//RS     assert!(
+//RS         !denied_stderr.contains("Warning [L0101]"),
+//RS         "denied lint must not remain a plain warning:\n{denied_stderr}"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cli_build_rejects_lint_code_policy_value_with_complete_diagnostic() {
+//RS     if !jet_bin().is_file() {
+//RS         eprintln!(
+//RS             "note: skipping cli_build_rejects_lint_code_policy_value_with_complete_diagnostic (run `cargo build` first)"
+//RS         );
+//RS         return;
+//RS     }
+//RS     let tmp = tmp_dir("lintpolicy_code_value");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     write(
+//RS         &tmp,
+//RS         "package.jet",
+//RS         include_str!("ui/lint_policy_code_name.jet")
+//RS             .lines()
+//RS             .find_map(|line| line.strip_prefix("// @lint_policy_config "))
+//RS             .expect("lint policy code fixture must carry a manifest sample"),
+//RS     );
+//RS     write(&tmp, "run.jet", "fn run() { print(\"hi\") }\n");
+//RS 
+//RS     let out = jet_cmd(&["build", "run.jet"], &tmp, &store);
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         !out.status.success(),
+//RS         "a lint code is not a policy value:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("Error [E1206]: `package.jet` has a manifest shape error."),
+//RS         "missing diagnostic what:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains(
+//RS             "Why: A manifest field, value, or policy form is outside the current `package.jet` grammar."
+//RS         ),
+//RS         "missing diagnostic why:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains(
+//RS             "Fix: For a lint selector, use `same_enum_guard_table` in `policy.lints.deny` instead of diagnostic code `L0302`; otherwise use the current `package.jet` grammar."
+//RS         ),
+//RS         "missing diagnostic fix:\n{stderr}"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_toolchain_ok() {
+//RS     let raw = min_manifest("myapp", "0.1.0");
+//RS     let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw).unwrap();
+//RS     assert!(jet::Manifest::check_toolchain(&mf, "package.jet").is_ok());
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_toolchain_e1208_future_version() {
+//RS     let raw = "name: \"myapp\"\nversion: \"0.1.0\"\njet: \">=99.0.0\"\n";
+//RS     let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), raw).unwrap();
+//RS     let err = jet::Manifest::check_toolchain(&mf, "package.jet").expect_err("E1208");
+//RS     assert_eq!(err.code, "E1208");
+//RS }
+//RS 
+//RS // ─────────────────────────────────────────────
+//RS // Template generation (jet new)
+//RS // ─────────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn manifest_template_plain_parses() {
+//RS     let raw = jet::Manifest::new_template("myapp", false);
+//RS     let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
+//RS         .expect("plain template should parse");
+//RS     assert_eq!(mf.package.name, "myapp");
+//RS     assert_eq!(mf.package.version, "0.1.0");
+//RS     assert!(
+//RS         mf.package.jet_constraint.is_some(),
+//RS         "plain template needs jet constraint"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_template_annotated_has_dep_comments() {
+//RS     let raw = jet::Manifest::new_template("myapp", true);
+//RS     assert!(
+//RS         raw.contains("// Jet package dependencies:"),
+//RS         "annotated template should have dep comment block: {}",
+//RS         raw
+//RS     );
+//RS     // Must still parse cleanly.
+//RS     jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
+//RS         .expect("annotated template should parse");
+//RS }
+//RS 
+//RS // ─────────────────────────────────────────────
+//RS // Comment-preserving edit helpers
+//RS // ─────────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn manifest_add_dep_inserts_in_existing_table() {
+//RS     let raw = min_manifest("root", "0.1.0") + "\ndeps: {\n}\n";
+//RS     let updated = jet::Manifest::add_dependency(
+//RS         &raw,
+//RS         "helpers",
+//RS         &jet::Manifest::DepSpec::Path {
+//RS             path: "../helpers".to_string(),
+//RS         },
+//RS     );
+//RS     let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &updated).expect("should reparse");
+//RS     assert!(matches!(
+//RS         mf.dependencies.get("helpers"),
+//RS         Some(jet::Manifest::DepSpec::Path { path }) if path == "../helpers"
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_add_dep_creates_table_when_absent() {
+//RS     let raw = min_manifest("root", "0.1.0");
+//RS     let updated = jet::Manifest::add_dependency(
+//RS         &raw,
+//RS         "helpers",
+//RS         &jet::Manifest::DepSpec::Path {
+//RS             path: "../helpers".to_string(),
+//RS         },
+//RS     );
+//RS     assert!(updated.contains("deps:"), "should create deps: block");
+//RS     let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &updated).expect("should reparse");
+//RS     assert!(matches!(
+//RS         mf.dependencies.get("helpers"),
+//RS         Some(jet::Manifest::DepSpec::Path { path }) if path == "../helpers"
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_add_dep_expands_inline_empty_table() {
+//RS     let raw = min_manifest("root", "0.1.0") + "\ndeps: {}\n";
+//RS     let updated = jet::Manifest::add_dependency(
+//RS         &raw,
+//RS         "helpers",
+//RS         &jet::Manifest::DepSpec::Path {
+//RS             path: "../helpers".to_string(),
+//RS         },
+//RS     );
+//RS     let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &updated)
+//RS         .expect("inline empty deps table should stay parseable");
+//RS     assert!(matches!(
+//RS         mf.dependencies.get("helpers"),
+//RS         Some(jet::Manifest::DepSpec::Path { path }) if path == "../helpers"
+//RS     ));
+//RS     assert!(updated.contains("deps: {\n    helpers: ../helpers,\n}\n"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_remove_dep_removes_correct_entry() {
+//RS     let raw = min_manifest("root", "0.1.0")
+//RS         + "\ndeps: {\n    helpers: ../helpers,\n    other: ../other,\n}\n";
+//RS     let updated = jet::Manifest::remove_dependency(&raw, "helpers");
+//RS     let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &updated).expect("should reparse");
+//RS     assert!(
+//RS         mf.dependencies.get("helpers").is_none(),
+//RS         "helpers should be removed"
+//RS     );
+//RS     assert!(
+//RS         mf.dependencies.get("other").is_some(),
+//RS         "other should remain"
+//RS     );
+//RS }
+//RS 
+//RS // ─────────────────────────────────────────────
+//RS // SHA-256 (cross-check against implementation's own known vectors)
+//RS // ─────────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn sha256_empty_vector() {
+//RS     // SHA-256 of the empty string — matches FIPS 180-4 test vector.
+//RS     let hash = jet::SHA256::sha256_hex(b"");
+//RS     assert_eq!(
+//RS         hash,
+//RS         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn sha256_known_vector_matches_self() {
+//RS     // The internal sha256.rs unit test asserts a specific hash for "abc".
+//RS     // Cross-check here to catch any accidental changes to the implementation.
+//RS     let hash = jet::SHA256::sha256_hex(b"abc");
+//RS     assert_eq!(hash.len(), 64, "sha256 hex must be exactly 64 chars");
+//RS     // NIST FIPS 180-4 first 16 hex chars of SHA-256("abc").
+//RS     assert!(
+//RS         hash.starts_with("ba7816bf8f01cfea"),
+//RS         "sha256(abc) prefix mismatch"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn tree_hash_deterministic() {
+//RS     let tmp = tmp_dir("tree_hash_det");
+//RS     write(&tmp, "a.jet", "fn foo() {}");
+//RS     write(&tmp, "b.jet", "fn bar() {}");
+//RS 
+//RS     let h1 = jet::SHA256::tree_hash(&tmp);
+//RS     let h2 = jet::SHA256::tree_hash(&tmp);
+//RS     assert_eq!(h1, h2, "tree hash must be deterministic");
+//RS     assert!(
+//RS         h1.starts_with("sha256-"),
+//RS         "tree hash must have sha256- prefix"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn tree_hash_changes_on_content_change() {
+//RS     let tmp = tmp_dir("tree_hash_chg");
+//RS     write(&tmp, "a.jet", "fn foo() {}");
+//RS     let h1 = jet::SHA256::tree_hash(&tmp);
+//RS 
+//RS     write(&tmp, "a.jet", "fn foo() { print(\"hello\") }");
+//RS     let h2 = jet::SHA256::tree_hash(&tmp);
+//RS     assert_ne!(h1, h2, "tree hash must change when file content changes");
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS // ─────────────────────────────────────────────
+//RS // Lock fingerprinting
+//RS // ─────────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn fingerprint_is_deterministic() {
+//RS     let fp1 = jet::Lock::compute_fingerprint("sha256-aabbcc", &["sha256-ddeeff"], "");
+//RS     let fp2 = jet::Lock::compute_fingerprint("sha256-aabbcc", &["sha256-ddeeff"], "");
+//RS     assert_eq!(fp1, fp2);
+//RS     assert!(fp1.starts_with("sha256-"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn fingerprint_changes_with_deps() {
+//RS     let fp1 = jet::Lock::compute_fingerprint("sha256-aabbcc", &[], "");
+//RS     let fp2 = jet::Lock::compute_fingerprint("sha256-aabbcc", &["sha256-ddeeff"], "");
+//RS     assert_ne!(
+//RS         fp1, fp2,
+//RS         "fingerprint must change when dep fingerprints differ"
+//RS     );
+//RS }
+//RS 
+//RS // c129: the frozen capability contract is part of the pin — changing a public
+//RS // param's resolved capability (read → &/^) must shift the fingerprint even when
+//RS // the source tree hash and deps are identical.
+//RS #[test]
+//RS fn fingerprint_changes_with_capability_digest() {
+//RS     let fp_read = jet::Lock::compute_fingerprint("sha256-aabbcc", &[], "pkg\nfn scale(v: Vec3)");
+//RS     let fp_write = jet::Lock::compute_fingerprint("sha256-aabbcc", &[], "pkg\nfn scale(v: &Vec3)");
+//RS     assert_ne!(
+//RS         fp_read, fp_write,
+//RS         "fingerprint must change when a public capability changes"
+//RS     );
+//RS     // An empty digest skips the cap block entirely, so a package with no frozen
+//RS     // surface fingerprints identically regardless of the (empty) digest argument.
+//RS     let fp_none_a = jet::Lock::compute_fingerprint("sha256-aabbcc", &["sha256-x"], "");
+//RS     let fp_none_b = jet::Lock::compute_fingerprint("sha256-aabbcc", &["sha256-x"], "");
+//RS     assert_eq!(fp_none_a, fp_none_b);
+//RS     assert_ne!(fp_none_a, fp_read, "a frozen digest must differ from none");
+//RS }
+//RS 
+//RS // ─────────────────────────────────────────────
+//RS // Store path format
+//RS // ─────────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn store_path_format_name_version_fp() {
+//RS     let p = jet::Store::store_path("mylib", "1.0.0", "sha256-deadbeef");
+//RS     let name = p.file_name().unwrap().to_str().unwrap();
+//RS     assert_eq!(
+//RS         name, "mylib-1.0.0-deadbeef",
+//RS         "store entry: <name>-<version>-<fp_no_prefix>"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn store_path_strips_sha256_prefix() {
+//RS     let tmp = tmp_dir("store_path_idem");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS     with_store(&store, || {
+//RS         let with_pfx = jet::Store::store_path("mylib", "1.0.0", "sha256-deadbeef");
+//RS         let without = jet::Store::store_path("mylib", "1.0.0", "deadbeef");
+//RS         assert_eq!(with_pfx, without);
+//RS     });
+//RS }
+//RS 
+//RS // ─────────────────────────────────────────────
+//RS // Store operations (redirect HOME to temp dir)
+//RS // ─────────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn store_ensure_path_dep_creates_entry() {
+//RS     let tmp = tmp_dir("store_ensure");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     let src = tmp.join("mylib_src");
+//RS     write(
+//RS         &src,
+//RS         "mylib.jet",
+//RS         "pub fn hello() -> String { return \"hi\" }\n",
+//RS     );
+//RS     write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
+//RS 
+//RS     let fp = "sha256-0000000000000000000000000000000000000000000000000000000000000000";
+//RS 
+//RS     let (entry, _hash) = with_store(&store, || {
+//RS         jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src)
+//RS             .expect("ensure_path_dep should succeed")
+//RS     });
+//RS 
+//RS     assert!(entry.is_dir(), "store entry dir must exist");
+//RS     assert!(
+//RS         entry.join("mylib.jet").is_file(),
+//RS         "source file must be in store"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn store_ensure_is_idempotent() {
+//RS     let tmp = tmp_dir("store_idem");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     let src = tmp.join("mylib_src");
+//RS     write(&src, "mylib.jet", "pub fn x() {}\n");
+//RS     write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
+//RS 
+//RS     let fp = "sha256-1111111111111111111111111111111111111111111111111111111111111111";
+//RS 
+//RS     let (p1, p2) = with_store(&store, || {
+//RS         let (a, _) = jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
+//RS         let (b, _) = jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
+//RS         (a, b)
+//RS     });
+//RS 
+//RS     assert_eq!(p1, p2, "second call must return the same store path");
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn store_install_rejects_source_and_destination_symlinks() {
+//RS     use std::os::unix::fs::symlink;
+//RS 
+//RS     let tmp = tmp_dir("store_symlink_boundary");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS     let outside = tmp.join("outside");
+//RS     fs::write(&outside, "must survive\n").unwrap();
+//RS     let source = tmp.join("source");
+//RS     fs::create_dir_all(&source).unwrap();
+//RS     fs::write(source.join("package.jet"), "name: \"safe\"\n").unwrap();
+//RS 
+//RS     let outcomes = with_store(&store, || {
+//RS         let entry = jet::Store::store_path("safe", "0.1.0", "sha256-safe");
+//RS         symlink(&outside, &entry).unwrap();
+//RS         let destination = jet::Store::ensure_path_dep("safe", "0.1.0", "sha256-safe", &source);
+//RS         fs::remove_file(&entry).unwrap();
+//RS 
+//RS         symlink(&outside, source.join("leak")).unwrap();
+//RS         let source_result = jet::Store::ensure_path_dep("safe", "0.1.0", "sha256-source", &source);
+//RS         (destination, source_result)
+//RS     });
+//RS 
+//RS     assert!(outcomes.0.is_err(), "store entry symlink must be refused");
+//RS     assert!(outcomes.1.is_err(), "source tree symlink must be refused");
+//RS     assert_eq!(fs::read_to_string(&outside).unwrap(), "must survive\n");
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[cfg(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios"
+//RS ))]
+//RS #[test]
+//RS fn store_snapshot_install_and_vendor_reject_multiply_linked_source() {
+//RS     use std::collections::HashMap;
+//RS 
+//RS     let scratch = Scratch::new("store_vendor_hardlink");
+//RS     let store = scratch.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS     let source = scratch.join("source");
+//RS     write(&source, "package.jet", &min_manifest("dep", "0.1.0"));
+//RS     let outside = scratch.join("outside.bin");
+//RS     fs::write(&outside, b"must remain outside\n").unwrap();
+//RS     fs::hard_link(&outside, source.join("linked.bin")).unwrap();
+//RS 
+//RS     let snapshot = with_store(&store, || jet::Store::snapshot_tree(&source));
+//RS     assert!(
+//RS         snapshot.is_err(),
+//RS         "snapshot_tree must reject multiply-linked source files"
+//RS     );
+//RS 
+//RS     let ensured = with_store(&store, || {
+//RS         jet::Store::ensure_path_dep("dep", "0.1.0", "sha256-hardlink", &source)
+//RS     });
+//RS     assert!(
+//RS         ensured.is_err(),
+//RS         "ensure_path_dep must reject multiply-linked source files"
+//RS     );
+//RS 
+//RS     let mut dep_dirs = HashMap::new();
+//RS     dep_dirs.insert("dep".to_string(), source.clone());
+//RS     let vendor_dir = scratch.join("vendor");
+//RS     let vendored = jet::Publish::vendor(
+//RS         &scratch.path,
+//RS         &make_test_lock("dep", "0.1.0", "sha256-hardlink"),
+//RS         &dep_dirs,
+//RS         &vendor_dir,
+//RS     );
+//RS     assert!(
+//RS         vendored.is_err(),
+//RS         "Publish::vendor must reject multiply-linked source files"
+//RS     );
+//RS     assert!(
+//RS         !vendor_dir.join("dep").exists(),
+//RS         "failed vendor must not publish a dependency directory"
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read(&outside).unwrap(),
+//RS         b"must remain outside\n",
+//RS         "hardlinked source bytes must remain unchanged"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn source_snapshot_keeps_verified_bytes_after_source_mutation() {
+//RS     let tmp = tmp_dir("source_snapshot_mutation");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS     let source = tmp.join("source");
+//RS     write(&source, "package.jet", &min_manifest("safe", "0.1.0"));
+//RS     write(&source, "lib.jet", "pub fn trusted() {}\n");
+//RS 
+//RS     let (snapshot, verified_hash) = with_store(&store, || {
+//RS         let snapshot = jet::Store::snapshot_tree(&source).expect("snapshot must verify");
+//RS         let verified_hash = snapshot.content_hash().to_string();
+//RS         (snapshot, verified_hash)
+//RS     });
+//RS 
+//RS     fs::write(source.join("lib.jet"), "pub fn hostile() {}\n").unwrap();
+//RS     assert_eq!(
+//RS         fs::read_to_string(snapshot.path().join("lib.jet")).unwrap(),
+//RS         "pub fn trusted() {}\n",
+//RS         "consumers must keep using the verified snapshot after the source changes"
+//RS     );
+//RS     assert_eq!(snapshot.content_hash(), verified_hash);
+//RS     assert_eq!(
+//RS         jet::SHA256::try_tree_hash(snapshot.path()).unwrap(),
+//RS         verified_hash
+//RS     );
+//RS 
+//RS     drop(snapshot);
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS // ─────────────────────────────────────────────
+//RS // Store verify / tamper detection (E1204)
+//RS // ─────────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn store_tamper_detected_e1204() {
+//RS     let tmp = tmp_dir("tamper");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     let src = tmp.join("mylib_src");
+//RS     write(&src, "mylib.jet", "pub fn ok() {}\n");
+//RS     write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
+//RS 
+//RS     let fp = "sha256-2222222222222222222222222222222222222222222222222222222222222222";
+//RS 
+//RS     let (entry, genuine_hash) = with_store(&store, || {
+//RS         let (e, h) = jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
+//RS         (e, h)
+//RS     });
+//RS 
+//RS     // Tamper: modify the stored file outside the locked section.
+//RS     fs::write(
+//RS         entry.join("mylib.jet"),
+//RS         "pub fn evil() { /* tampered */ }\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let result = jet::Store::verify_entry("mylib", &entry, &genuine_hash);
+//RS     let diag = result.expect_err("verify_entry must return E1204 after tampering");
+//RS     assert_eq!(diag.code, "E1204");
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS // ─────────────────────────────────────────────
+//RS // D-CASTORE1=A: content-addressed store identity
+//RS // ─────────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn content_hash_recorded_at_install() {
+//RS     let tmp = tmp_dir("castore_record");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     let src = tmp.join("src");
+//RS     write(&src, "lib.jet", "pub fn x() {}\n");
+//RS     write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
+//RS 
+//RS     let fp = "sha256-aaaa0000000000000000000000000000000000000000000000000000000000aa";
+//RS 
+//RS     let (entry, hash) = with_store(&store, || {
+//RS         jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap()
+//RS     });
+//RS 
+//RS     assert!(entry.is_dir());
+//RS     // Hash is a non-empty sha256-prefixed string.
+//RS     assert!(
+//RS         hash.starts_with("sha256-"),
+//RS         "content hash must be sha256-prefixed"
+//RS     );
+//RS     // verify_content_hash succeeds with the correct hash.
+//RS     jet::Store::verify_content_hash("mylib", &entry, &hash).expect("fresh install must verify");
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn content_hash_mismatch_after_tamper() {
+//RS     let tmp = tmp_dir("castore_tamper");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     let src = tmp.join("src");
+//RS     write(&src, "lib.jet", "pub fn x() {}\n");
+//RS     write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
+//RS 
+//RS     let fp = "sha256-bbbb0000000000000000000000000000000000000000000000000000000000bb";
+//RS 
+//RS     let (entry, original_hash) = with_store(&store, || {
+//RS         jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap()
+//RS     });
+//RS 
+//RS     // Tamper with the store entry.
+//RS     fs::write(entry.join("lib.jet"), "pub fn evil() {}\n").unwrap();
+//RS 
+//RS     let result = jet::Store::verify_content_hash("mylib", &entry, &original_hash);
+//RS     let diag = result.expect_err("tampered entry must fail verify_content_hash");
+//RS     assert_eq!(diag.code, "E1204");
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn content_hash_covers_non_jet_files_copied_into_store() {
+//RS     let tmp = tmp_dir("castore_non_jet_tamper");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     let src = tmp.join("src");
+//RS     write(&src, "lib.jet", "pub fn x() {}\n");
+//RS     write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
+//RS     fs::write(src.join("runtime.data"), b"trusted bytes\n").unwrap();
+//RS 
+//RS     let source_hash = jet::SHA256::tree_hash(&src);
+//RS     fs::write(src.join("runtime.data"), b"hostile bytes\n").unwrap();
+//RS     assert_ne!(
+//RS         source_hash,
+//RS         jet::SHA256::tree_hash(&src),
+//RS         "copied non-.jet files must be part of the source identity"
+//RS     );
+//RS 
+//RS     fs::write(src.join("runtime.data"), b"trusted bytes\n").unwrap();
+//RS     let fp = "sha256-cccc0000000000000000000000000000000000000000000000000000000000cc";
+//RS     let (entry, original_hash) = with_store(&store, || {
+//RS         jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap()
+//RS     });
+//RS     fs::write(entry.join("runtime.data"), b"tampered bytes\n").unwrap();
+//RS 
+//RS     let error = jet::Store::verify_content_hash("mylib", &entry, &original_hash)
+//RS         .expect_err("tampering a copied non-.jet file must fail verification");
+//RS     assert_eq!(error.code, "E1204");
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn lock_file_content_hash_roundtrip() {
+//RS     use jet::Lock::{LockFile, LockSource, LockedPackage, LockedWorkspaceMember};
+//RS     let pkg = LockedPackage {
+//RS         name: "foo".into(),
+//RS         version: "1.0.0".into(),
+//RS         source: LockSource::Path("../foo".into()),
+//RS         nix_closure: None,
+//RS 
+//RS         locked: None,
+//RS         fingerprint: "sha256-cccc".into(),
+//RS         content_hash: Some("sha256-deadbeef".into()),
+//RS         dependencies: vec![],
+//RS         layer: Some(jet::Syntax::RuntimeLayer::Core),
+//RS         inferred_layer: Some(jet::Syntax::RuntimeLayer::Std),
+//RS 
+//RS         effects: vec![],
+//RS 
+//RS         effect_grants: vec![],
+//RS         required_effects: vec![],
+//RS         granted_effects: vec![],
+//RS         denied_effects: vec![],
+//RS         effect_authority: None,
+//RS         envelope: None,
+//RS         receipt: None,
+//RS         provenance: None,
+//RS     };
+//RS     let lock = LockFile {
+//RS         version: 1,
+//RS         packages: vec![pkg],
+//RS         root_dependencies: vec!["foo".into()],
+//RS         authority: None,
+//RS         workspace_members: vec![LockedWorkspaceMember {
+//RS             name: "hello".into(),
+//RS             path: "packages/hello".into(),
+//RS             source_digest: "no-workspace-source".into(),
+//RS             canonical_path: "/workspace/packages/hello".into(),
+//RS             package_digest: "sha256-package".into(),
+//RS         }],
+//RS         comptime_inputs: vec![],
+//RS         workspace_source_digest: None,
+//RS         workspace_overlay_policy: Default::default(),
+//RS         toolchains: Vec::new(),
+//RS         browsers: Vec::new(),
+//RS         source_channels: Vec::new(),
+//RS         build_stamp: None,
+//RS         build_contributions: Vec::new(),
+//RS     };
+//RS     let serialized = jet::Lock::write(&lock);
+//RS     assert!(
+//RS         serialized.contains("content-hash = \"sha256-deadbeef\""),
+//RS         "content-hash must appear in lockfile"
+//RS     );
+//RS     assert!(serialized.contains("layer = \"core\""));
+//RS     assert!(serialized.contains("inferred-layer = \"hosted\""));
+//RS     let parsed = jet::Lock::parse(&serialized).expect("must parse back");
+//RS     assert_eq!(
+//RS         parsed.packages[0].content_hash,
+//RS         Some("sha256-deadbeef".into())
+//RS     );
+//RS     assert_eq!(
+//RS         parsed.packages[0].layer,
+//RS         Some(jet::Syntax::RuntimeLayer::Core)
+//RS     );
+//RS     assert_eq!(
+//RS         parsed.packages[0].inferred_layer,
+//RS         Some(jet::Syntax::RuntimeLayer::Std)
+//RS     );
+//RS     assert_eq!(parsed.workspace_members[0].name, "hello");
+//RS     assert_eq!(parsed.workspace_members[0].path, "packages/hello");
+//RS }
+//RS 
+//RS // ─────────────────────────────────────────────
+//RS // Hardlink: two projects share one store inode
+//RS // ─────────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn hardlink_projects_share_store_inode() {
+//RS     let tmp = tmp_dir("hardlink");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     let src = tmp.join("mylib_src");
+//RS     write(&src, "mylib.jet", "pub fn hi() {}\n");
+//RS     write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
+//RS 
+//RS     let fp = "sha256-3333333333333333333333333333333333333333333333333333333333333333";
+//RS 
+//RS     // link_root must NOT pre-exist — link_into_project checks that.
+//RS     let link1 = tmp.join("proj1/deps/mylib");
+//RS     let link2 = tmp.join("proj2/deps/mylib");
+//RS 
+//RS     let store_entry = with_store(&store, || {
+//RS         let (e, _) = jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
+//RS         jet::Store::link_into_project(&e, &link1).unwrap();
+//RS         jet::Store::link_into_project(&e, &link2).unwrap();
+//RS         e
+//RS     });
+//RS 
+//RS     // Both link dirs and the store entry must share inodes (hardlinks).
+//RS     use std::os::unix::fs::MetadataExt;
+//RS     let store_ino = fs::metadata(store_entry.join("mylib.jet")).unwrap().ino();
+//RS     let link1_ino = fs::metadata(link1.join("mylib.jet")).unwrap().ino();
+//RS     let link2_ino = fs::metadata(link2.join("mylib.jet")).unwrap().ino();
+//RS 
+//RS     assert_eq!(store_ino, link1_ino, "link1 must share inode with store");
+//RS     assert_eq!(store_ino, link2_ino, "link2 must share inode with store");
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS // ─────────────────────────────────────────────
+//RS // Path-dep compilation (full front-end integration)
+//RS // ─────────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn path_dep_compiles_ok() {
+//RS     let tmp = tmp_dir("pd_compile");
+//RS 
+//RS     // Greeter library.
+//RS     write(
+//RS         &tmp,
+//RS         "greeter/package.jet",
+//RS         &min_manifest("greeter", "0.1.0"),
+//RS     );
+//RS     write(
+//RS         &tmp,
+//RS         "greeter/greeter.jet",
+//RS         "pub fn greet() -> String { return \"hello!\" }\n",
+//RS     );
+//RS 
+//RS     // Root project with path dep.
+//RS     write(
+//RS         &tmp,
+//RS         "package.jet",
+//RS         &manifest_with_deps("myapp", "0.1.0", "    greeter: ./greeter,"),
+//RS     );
+//RS     let entry = tmp.join("run.jet");
+//RS     fs::write(
+//RS         &entry,
+//RS         "use greeter\nfn run() { print(greeter.greet()) }\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let result = jet::compile_with_path("", &entry.to_string_lossy());
+//RS     assert!(
+//RS         result.is_ok(),
+//RS         "path dep project should compile:\n{}",
+//RS         result
+//RS             .err()
+//RS             .map(|d| jet::render_diagnostics("run.jet", "", &d))
+//RS             .unwrap_or_default()
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn transitive_path_dependency_cannot_escape_declaring_package() {
+//RS     let tmp = tmp_dir("transitive_path_escape");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     write(
+//RS         &tmp,
+//RS         "outer/package.jet",
+//RS         &manifest_with_deps("outer", "0.1.0", "    escape: ../outside,"),
+//RS     );
+//RS     write(&tmp, "outer/outer.jet", "pub fn outer() {}\n");
+//RS     write(
+//RS         &tmp,
+//RS         "outside/package.jet",
+//RS         &min_manifest("outside", "0.1.0"),
+//RS     );
+//RS     write(&tmp, "outside/outside.jet", "pub fn hostile() {}\n");
+//RS     let raw = manifest_with_deps("app", "0.1.0", "    outer: ./outer,");
+//RS     write(&tmp, "package.jet", &raw);
+//RS     let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
+//RS     let options = jet::Fetch::FetchOptions {
+//RS         locked: false,
+//RS         update: false,
+//RS         update_dep: None,
+//RS         resolution: jet::Publish::ResolveMode::Conservative,
+//RS     };
+//RS 
+//RS     let error = with_store(&store, || {
+//RS         jet::Fetch::fetch(&tmp, &manifest, None, &options)
+//RS             .expect_err("a transitive path escape must be rejected")
+//RS     });
+//RS     assert_eq!(first_diag_code(&error), "E1206");
+//RS     assert!(error[0].what.contains("escapes"));
+//RS     assert!(
+//RS         !store.join("outside").exists(),
+//RS         "escaped package was ingested"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn transitive_path_dependency_cannot_escape_via_symlinked_directory() {
+//RS     use std::os::unix::fs::symlink;
+//RS 
+//RS     let tmp = tmp_dir("transitive_path_symlink_escape");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     write(
+//RS         &tmp,
+//RS         "outer/package.jet",
+//RS         &manifest_with_deps("outer", "0.1.0", "    escape: ./link/escape,"),
+//RS     );
+//RS     write(&tmp, "outer/outer.jet", "pub fn outer() {}\n");
+//RS     write(
+//RS         &tmp,
+//RS         "outside/escape/package.jet",
+//RS         &min_manifest("escape", "0.1.0"),
+//RS     );
+//RS     write(&tmp, "outside/escape/escape.jet", "pub fn hostile() {}\n");
+//RS     symlink(tmp.join("outside"), tmp.join("outer/link")).unwrap();
+//RS 
+//RS     let raw = manifest_with_deps("app", "0.1.0", "    outer: ./outer,");
+//RS     write(&tmp, "package.jet", &raw);
+//RS     let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
+//RS     let options = jet::Fetch::FetchOptions {
+//RS         locked: false,
+//RS         update: false,
+//RS         update_dep: None,
+//RS         resolution: jet::Publish::ResolveMode::Conservative,
+//RS     };
+//RS 
+//RS     let error = with_store(&store, || {
+//RS         jet::Fetch::fetch(&tmp, &manifest, None, &options)
+//RS             .expect_err("a symlinked transitive path must be rejected")
+//RS     });
+//RS     assert_eq!(first_diag_code(&error), "E1206");
+//RS     assert!(
+//RS         !store.join("escape").exists(),
+//RS         "escaped package was ingested"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn version_conflict_emits_e1201() {
+//RS     let tmp = tmp_dir("ver_conflict");
+//RS 
+//RS     write(&tmp, "liba/package.jet", &min_manifest("mylib", "1.0.0"));
+//RS     write(&tmp, "liba/mylib.jet", "pub fn v1() {}\n");
+//RS 
+//RS     write(&tmp, "libb/package.jet", &min_manifest("mylib", "2.0.0"));
+//RS     write(&tmp, "libb/mylib.jet", "pub fn v2() {}\n");
+//RS 
+//RS     write(
+//RS         &tmp,
+//RS         "package.jet",
+//RS         &manifest_with_deps(
+//RS             "conflict_app",
+//RS             "0.1.0",
+//RS             "    liba: ./liba,\n    libb: ./libb,",
+//RS         ),
+//RS     );
+//RS     let entry = tmp.join("run.jet");
+//RS     fs::write(&entry, "fn run() {}\n").unwrap();
+//RS 
+//RS     let diags = jet::compile_with_path("", &entry.to_string_lossy())
+//RS         .expect_err("version conflict must fail with E1201");
+//RS     assert_eq!(first_diag_code(&diags), "E1201");
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn toolchain_only_lock_keeps_declared_path_unlocked() {
+//RS     let tmp = tmp_dir("toolchain_only_lock");
+//RS 
+//RS     write(
+//RS         &tmp,
+//RS         "greeter/package.jet",
+//RS         &min_manifest("greeter", "0.1.0"),
+//RS     );
+//RS     write(
+//RS         &tmp,
+//RS         "greeter/greeter.jet",
+//RS         "pub fn greet() -> String { return \"hi\" }\n",
+//RS     );
+//RS     let manifest_text =
+//RS         manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
+//RS     write(&tmp, "package.jet", &manifest_text);
+//RS     // A toolchain/build-fact lock has no dependency record. It must not turn
+//RS     // this ordinary declared path into an implicit locked realization.
+//RS     write(
+//RS         &tmp,
+//RS         ".jet/lock",
+//RS         "version = 1\n\n[[package]]\nname = \"app\"\nsource = { root = \".\" }\n\n[root]\ndependencies = []\n",
+//RS     );
+//RS 
+//RS     let entry = tmp.join("run.jet");
+//RS     fs::write(&entry, "fn run() {}\n").unwrap();
+//RS     let ordinary = jet::compile_with_path("", &entry.to_string_lossy());
+//RS     assert!(
+//RS         ordinary.is_ok(),
+//RS         "toolchain-only lock must not block declared path loading: {:?}",
+//RS         ordinary.err()
+//RS     );
+//RS 
+//RS     let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &manifest_text).unwrap();
+//RS     let lock = jet::Lock::parse(&fs::read_to_string(tmp.join(".jet/lock")).unwrap()).unwrap();
+//RS     let locked = jet::Fetch::FetchOptions {
+//RS         locked: true,
+//RS         update: false,
+//RS         update_dep: None,
+//RS         resolution: jet::Publish::ResolveMode::Conservative,
+//RS     };
+//RS     let error = jet::Fetch::fetch(&tmp, &manifest, Some(&lock), &locked)
+//RS         .expect_err("strict locked resolution must reject missing dependency facts");
+//RS     assert_eq!(first_diag_code(&error), "E1217");
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn toolchain_mismatch_emits_e1208() {
+//RS     let tmp = tmp_dir("tc_mismatch");
+//RS 
+//RS     write(
+//RS         &tmp,
+//RS         "package.jet",
+//RS         "name: \"app\"\nversion: \"0.1.0\"\njet: \">=99.0.0\"\n",
+//RS     );
+//RS     let entry = tmp.join("run.jet");
+//RS     fs::write(&entry, "fn run() { print(\"hi\") }\n").unwrap();
+//RS 
+//RS     let diags = jet::compile_with_path("", &entry.to_string_lossy())
+//RS         .expect_err("toolchain mismatch must fail with E1208");
+//RS     assert_eq!(first_diag_code(&diags), "E1208");
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn reserved_section_emits_e1209() {
+//RS     let tmp = tmp_dir("reserved_sec");
+//RS 
+//RS     write(
+//RS         &tmp,
+//RS         "package.jet",
+//RS         &(min_manifest("app", "0.1.0") + "\ndev_deps: {\n    testlib: ../testlib,\n}\n"),
+//RS     );
+//RS     let entry = tmp.join("run.jet");
+//RS     fs::write(&entry, "fn run() {}\n").unwrap();
+//RS 
+//RS     let diags = jet::compile_with_path("", &entry.to_string_lossy())
+//RS         .expect_err("reserved section must fail with E1209");
+//RS     assert_eq!(first_diag_code(&diags), "E1209");
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS // ─────────────────────────────────────────────
+//RS // --locked CI mode (via fetch API)
+//RS // ─────────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn fetch_locked_rejects_missing_lock() {
+//RS     let tmp = tmp_dir("locked_no_lock");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     let raw = manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
+//RS     write(&tmp, "package.jet", &raw);
+//RS 
+//RS     let mf = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
+//RS     let opts = jet::Fetch::FetchOptions {
+//RS         locked: true,
+//RS         update: false,
+//RS         update_dep: None,
+//RS         resolution: jet::Publish::ResolveMode::Conservative,
+//RS     };
+//RS 
+//RS     let result = with_store(&store, || jet::Fetch::fetch(&tmp, &mf, None, &opts));
+//RS     let diags = result.expect_err("--locked with no lock file should fail");
+//RS     assert_eq!(first_diag_code(&diags), "E1202");
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn compiler_rejects_transitive_path_dependency_escape() {
+//RS     let tmp = tmp_dir("compiler_transitive_path_escape");
+//RS     let outer = tmp.join("outer");
+//RS     let outside = tmp.join("outside");
+//RS     write(
+//RS         &outer,
+//RS         "package.jet",
+//RS         &(min_manifest("outer", "0.1.0") + "\ndeps: { escape: ../outside }\n"),
+//RS     );
+//RS     write(&outer, "outer.jet", "pub fn value() {}\n");
+//RS     write(&outside, "package.jet", &min_manifest("outside", "0.1.0"));
+//RS     write(&outside, "outside.jet", "pub fn value() {}\n");
+//RS     let raw = manifest_with_deps("app", "0.1.0", "    outer: ./outer,");
+//RS     write(&tmp, "package.jet", &raw);
+//RS     write(&tmp, "run.jet", "fn run() {}\n");
+//RS 
+//RS     let entry = tmp.join("run.jet");
+//RS     let errors = jet::Driver::compile_bundle_path_build(
+//RS         entry.to_str().unwrap(),
+//RS         jet::Driver::BuildRunOptions::default(),
+//RS     )
+//RS     .expect_err("the compiler must not read a transitive manifest outside its package");
+//RS     assert_eq!(first_diag_code(&errors), "E1206");
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn compiler_accepts_transitive_path_dependency_the_root_declares() {
+//RS     // D-MOD-CYCLE1=A sibling packages: a transitive path may leave its
+//RS     // declaring package only to reach a directory the root also declares.
+//RS     let tmp = tmp_dir("compiler_transitive_path_root_declared");
+//RS     let outer = tmp.join("outer");
+//RS     let shared = tmp.join("shared");
+//RS     write(
+//RS         &outer,
+//RS         "package.jet",
+//RS         &(min_manifest("outer", "0.1.0") + "\ndeps: { shared: ../shared }\n"),
+//RS     );
+//RS     write(&outer, "outer.jet", "pub fn value() {}\n");
+//RS     write(&shared, "package.jet", &min_manifest("shared", "0.1.0"));
+//RS     write(&shared, "shared.jet", "pub fn value() {}\n");
+//RS     let raw = manifest_with_deps("app", "0.1.0", "    outer: ./outer,\n    shared: ./shared,");
+//RS     write(&tmp, "package.jet", &raw);
+//RS     write(&tmp, "run.jet", "fn run() {}\n");
+//RS 
+//RS     let entry = tmp.join("run.jet");
+//RS     let result = jet::Driver::compile_bundle_path_build(
+//RS         entry.to_str().unwrap(),
+//RS         jet::Driver::BuildRunOptions::default(),
+//RS     );
+//RS     assert!(
+//RS         result.as_ref().err().map_or(true, |errors| errors.iter().all(|d| d.code != "E1206")),
+//RS         "a path the root declares is not an escape: {:?}",
+//RS         result.err().map(|errors| errors.iter().map(|d| d.code.clone()).collect::<Vec<_>>())
+//RS     );
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn fetch_locked_rejects_tampered_path_dependency_store_entry() {
+//RS     let tmp = tmp_dir("locked_path_tamper");
+//RS     let store = tmp.join("store");
+//RS     let dependency = tmp.join("greeter");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS     write(
+//RS         &dependency,
+//RS         "package.jet",
+//RS         &min_manifest("greeter", "0.1.0"),
+//RS     );
+//RS     write(&dependency, "greeter.jet", "pub fn greet() {}\n");
+//RS     let raw = manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
+//RS     write(&tmp, "package.jet", &raw);
+//RS     let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
+//RS     let unlocked = jet::Fetch::FetchOptions {
+//RS         locked: false,
+//RS         update: false,
+//RS         update_dep: None,
+//RS         resolution: jet::Publish::ResolveMode::Conservative,
+//RS     };
+//RS     let (lock, _) = with_store(&store, || {
+//RS         jet::Fetch::fetch(&tmp, &manifest, None, &unlocked)
+//RS             .expect("initial path fetch should create a content hash")
+//RS     });
+//RS 
+//RS     let locked = jet::Fetch::FetchOptions {
+//RS         locked: true,
+//RS         update: false,
+//RS         update_dep: None,
+//RS         resolution: jet::Publish::ResolveMode::Conservative,
+//RS     };
+//RS     let error = with_store(&store, || {
+//RS         let package = lock
+//RS             .packages
+//RS             .iter()
+//RS             .find(|package| package.name == "greeter")
+//RS             .expect("path dependency must be recorded in the lock");
+//RS         let store_entry =
+//RS             jet::Store::store_path(&package.name, &package.version, &package.fingerprint);
+//RS         fs::write(store_entry.join("greeter.jet"), "pub fn compromised() {}\n").unwrap();
+//RS         jet::Fetch::fetch(&tmp, &manifest, Some(&lock), &locked)
+//RS             .expect_err("locked fetch must reject a changed store entry")
+//RS     });
+//RS     assert_eq!(first_diag_code(&error), "E1204");
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+// END-PORT-PENDING 1130 tests/pkg.rs:1803-3624
+

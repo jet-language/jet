@@ -26,7 +26,7 @@ pub fn pkg_remove_dep(raw: String, name: String) -> String Never! {
 // Add one effect root to `authority.holds.allow`.
 pub fn pkg_add_authority_hold(raw: String, input: String) -> String Never! {
     right :: input.trim()
-    if right == "" -> return raw
+    if right == "" -> return ~raw
     lines :: pkg_binder_lines(raw)
     authority_line := -1
     loop index in 0..<lines.len() {
@@ -107,11 +107,6 @@ fn pkg_edit_body_indent(lines: [String], start: Int, end: Int, header: String) -
     "{pkg_edit_leading_whitespace(header)}    "
 }
 
-// A `[start, end)` byte range.
-struct EditSpan {
-    start: Int
-    end: Int
-}
 
 fn pkg_edit_inline_block_bounds(line: String, key: String) -> EditSpan? Never! {
     marker :: "{key}:"
@@ -199,7 +194,7 @@ fn pkg_edit_insert_or_replace_in_block(raw: String, key: String, name: String, n
         }
     }
     if empty_inline >= 0 {
-        out[empty_inline] = "{pkg_edit_leading_whitespace(lines[empty_inline])}{key}: .{{"
+        out[empty_inline] = "{pkg_edit_leading_whitespace(lines[empty_inline])}{key}: {{"
         out = pkg_edit_insert_line(out, empty_inline + 1, new_line)
         out = pkg_edit_insert_line(out, empty_inline + 2, "}}")
     } else if pkg_edit_block_line_range(lines, key) == .Val(block) {
@@ -220,7 +215,7 @@ fn pkg_edit_insert_or_replace_in_block(raw: String, key: String, name: String, n
     } else {
         if raw != "" && !raw.ends_with("\n") -> &out.push("")
         &out.push("")
-        &out.push("{key}: .{{")
+        &out.push("{key}: {{")
         &out.push(new_line)
         &out.push("}}")
     }

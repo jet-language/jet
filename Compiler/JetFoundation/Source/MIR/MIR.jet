@@ -71,13 +71,13 @@ pub struct MIRSiteID { pub value: Int }
 // Stable FNV-1a over namespace, NUL, and canonical identity; IDs never depend
 // on process hash seeds, allocation order, or a backend's naming scheme.
 pub fn stable_id(namespace: String, identity: String) -> Int Never! {
-    mask :: 0xffffffffffffffff
-    hash := 0xcbf29ce484222325
-    loop byte in namespace.bytes() -> hash = ((hash ^ Int.from_u8(byte)) * 0x100000001b3) & mask
-    hash = (hash * 0x100000001b3) & mask
-    loop byte in identity.bytes() -> hash = ((hash ^ Int.from_u8(byte)) * 0x100000001b3) & mask
+    prime :: U64{0x100000001b3}
+    hash := U64{0xcbf29ce484222325}
+    loop byte in namespace.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
+    hash = hash.wrapping_mul(prime)
+    loop byte in identity.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
     if hash == 0 -> return 1
-    hash
+    Int.from_u64(hash)
 }
 
 pub fn mir_function_id(identity: String) -> MIRFunctionID Never! { MIRFunctionID{value: stable_id("mir-function", identity)} }
@@ -3366,6 +3366,100 @@ pub struct MIRTargetMachine {
     pub hardware: MIRTargetHardwareFacts
     pub programmers: [MIRTargetProgrammerFacts]
     pub audit: MIRAuditPolicy
+}
+
+// Rust TargetMachine.rs:3199-3386, 2428-2436.
+pub enum MIRTargetCapability {
+    Allocator Atomic64 MMIO Hardware TimeWall TimeMonotonic TimeZoneData
+    TimeSleep Entropy Scheduler IORead IOWrite PanicReport Startup
+}
+pub struct MIRTargetUnsafeGate { pub reason: String }
+pub struct MIRMMIOAccess {
+    pub address: Int
+    pub size: MIRByteSize
+    pub unsafe_gate: MIRTargetUnsafeGate?
+}
+pub struct MIRTargetMachineUse {
+    pub stack_bytes: Int
+    pub static_ram_bytes: Int
+    pub heap_required: Bool
+    pub core_apis: [String]
+    pub mmio: [MIRMMIOAccess]
+    pub required_capabilities: [MIRTargetCapability]
+}
+pub struct MIRSizeBudgetReport {
+    pub artifact_bytes: Int
+    pub flash_bytes: Int
+    pub flash_ok: Bool
+    pub ram_bytes: Int
+    pub ram_used_bytes: Int
+    pub ram_ok: Bool
+}
+
+// Rust TargetMachineError (TargetMachine.rs:3388-3586).
+#Error
+pub enum MIRTargetMachineError {
+    MissingTargetTriple
+    MissingMemoryKind(kind: MIRMemoryKind)
+    DuplicateMemoryRegion(name: String)
+    EmptyMemoryRegion(name: String)
+    MemoryAddressOverflow(name: String)
+    OverlappingMemoryRegions(first: String, second: String)
+    MissingLinkerInput
+    LinkerFileMissingPath
+    LinkerFileMissingHash(path: String)
+    MissingAllocatorPolicy
+    AllocatorRegionUnknown(region: String)
+    AllocatorRegionNotRam(region: String)
+    AllocatorRegionTooSmall(region: String, requested_bytes: Int, available_bytes: Int)
+    HostedAllocatorRequiresOS
+    MissingPanicPolicy
+    MissingTargetCapability(capability: String)
+    HostedCapabilityRequiresOS(capability: String)
+    InvalidProviderContract(capability: String, provider: String, sha256: String)
+    RamOverflow(used_bytes: Int, ram_bytes: Int)
+    HeapRequiresAllocator
+    CoreAPIUnavailable(api: String, required: MIRRuntimeLayer, available: MIRRuntimeLayer)
+    MMIOOutsideRegion(address: Int, size_bytes: Int)
+    MMIOMissingUnsafeGate(address: Int)
+    MMIOEmptyUnsafeReason(address: Int)
+    HostedHasNoLinkerScript
+    HostedHasNoStartup
+    UnsupportedStartupTriple(triple: String)
+    ExecutionTierUnsupported(tier: String, machine: String)
+    FirmwareToolchainMissing(tool: String)
+    FirmwareBuildFailed(detail: String)
+    SizeBudgetExceeded(report: MIRSizeBudgetReport)
+    HardwareFactsMissingSVD
+    InvalidHardwareSVD(source: String, sha256: String)
+    HardwareFactEmptyName(kind: String)
+    DuplicateRegisterBlock(name: String)
+    RegisterBlockEmpty(name: String)
+    RegisterBlockAddressOverflow(name: String)
+    RegisterBlockOutsideRegion(name: String, address: Int, size_bytes: Int)
+    DuplicateRegister(block: String, register: String)
+    RegisterAddressOverflow(block: String, register: String)
+    RegisterOutsideBlock(block: String, register: String)
+    UnknownRegisterBlock(block: String)
+    UnknownRegister(block: String, register: String)
+    RegisterWidthMismatch(block: String, register: String, expected: MIRRegisterWidth, actual: MIRRegisterWidth)
+    RegisterReadDenied(block: String, register: String)
+    RegisterWriteDenied(block: String, register: String)
+    DuplicateInterrupt(name: String)
+    DuplicateInterruptVector(vector: Int)
+    InvalidInterruptEffect(interrupt: String, effect_name: String)
+    UnknownInterrupt(interrupt: String)
+    InterruptEffectForbidden(interrupt: String, handler: String, effect_name: String)
+    InterruptHandlerUnbounded(interrupt: String, handler: String)
+    DuplicateDMAChannel(name: String)
+    DuplicateDMAChannelNumber(channel: Int)
+    DMATransferSizeZero(channel: String)
+    UnknownDMAChannel(channel: String)
+    DMAOwnershipMismatch(channel: String, buffer: String, expected: MIRTargetDMAOwner, actual: MIRTargetDMAOwner)
+    DMAStartWhileInFlight(channel: String, buffer: String)
+    DMAWaitWithoutTransfer(channel: String, buffer: String)
+    DMABufferUnavailable(channel: String, buffer: String)
+    DMAWaitChannelMismatch(channel: String, buffer: String)
 }
 
 pub enum MIRRuntimeLayer { Core Alloc Std }

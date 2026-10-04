@@ -1,0 +1,54 @@
+// In-process console host policy, Source/CmdConsoleHost.rs.
+// Canonical ConsoleError/validation: JetRepl Console/Validation.jet (port-tools).
+// Main publishes those public imports; the visibility hunks are in Tools' inbox.
+// The sole scalar-control implementation remains gated by #4437 there.
+// Console data carriers belong to packets 0797/0798, not this CLI module.
+// Resident HTTP/SQLite ownership, cancellation, retained transactions and
+// resource attachment require the actual #4494 provider; no provider is faked.
+use jet_repl.[ConsoleError, validate_token, console_scalar_is_control]
+use jet_foundation.[authority_ascii_lower]
+use core.text as console_host_text
+
+// Rust BUILTIN_READ_OPERATIONS (21). Canonical order is significant to lookup.
+pub JET_CLI_CONSOLE_BUILTIN_READ_OPERATIONS :: [String]{"tables", "schema", "count", "describe"}
+
+// Rust ConsoleDbStatement (26–29) and new (32–45): SQL is host-owned text,
+// never derived from a console command. Token failure precedes SQL failure.
+pub struct ConsoleDbStatement {
+    pub operation: String
+    pub sql: String
+    pub fn new(operation: ^String, sql: ^String) -> ConsoleDbStatement ConsoleError! {
+        validate_token("database operation", operation) ?? return Err(err)
+        if sql.trim() == "" -> return Err(ConsoleError.InvalidInput{reason: "database statement SQL must be non-empty text"})
+        loop scalar in console_host_text.scalars(sql) {
+            if console_scalar_is_control(scalar) -> return Err(ConsoleError.InvalidInput{reason: "database statement SQL must be non-empty text"})
+        }
+        Ok(ConsoleDbStatement{operation: ^operation, sql: ^sql})
+    }
+}
+
+// Rust ConsoleDbBackend::builtin_sql (344–359). max(1) applies to the query
+// limit, not the caller's limit or the SQL of an explicitly checked statement.
+pub fn jet_cli_console_builtin_sql(operation: String, limit: Int) -> String? Never! {
+    bounded :: if limit < 1 -> 1 else -> limit
+    lowered :: authority_ascii_lower(operation)
+    if lowered == {
+        "tables" -> Val("SELECT name, type FROM sqlite_master WHERE type IN ('table','view') ORDER BY name LIMIT {bounded}")
+        "schema" | "describe" -> Val("SELECT name, type, sql FROM sqlite_master WHERE type IN ('table','view') ORDER BY name LIMIT {bounded}")
+        "count" -> Val("SELECT COUNT(*) AS count FROM sqlite_master WHERE type IN ('table','view')")
+        else -> None
+    }
+}
+
+// Rust validate_token (631–643) maps to jet_repl.validate_token exactly,
+// including the 256-byte bound and Unicode Cc/White_Space policy. No alias.
+// Rust is_checked_read/write (617–629) map to JetRepl's identical private
+// is_checked_read_operation/is_checked_write_operation (packets 0797/0798);
+// their canonical publication is gated, never copied into this owner.
+
+// Rust console_http_error (645–651): ONLY this exact provider error denotes
+// cancellation. Substrings, casing and every other failure remain Backend.
+pub fn jet_cli_console_http_error(error: ^String) -> ConsoleError Never! {
+    if error == "HTTP operation cancelled" -> ConsoleError.Cancelled
+    else -> ConsoleError.Backend{reason: ^error}
+}

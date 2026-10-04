@@ -22,7 +22,7 @@ fn store_artifact_record_magic() -> [U8] Never! {
 
 fn store_artifact_magic(label: String) -> [U8] Never! {
     out := [U8]{}
-    &out.extend(@STORE_ARTIFACT_VERSION.bytes())
+    &out.extend(STORE_ARTIFACT_VERSION.bytes())
     &out.push(U8{0})
     &out.extend(label.bytes())
     &out.push(U8{0})
@@ -152,12 +152,13 @@ enum ArtifactRawRead {
 
 // Read a regular store file, refusing links, special files, and a file that
 // was replaced while it was opened or read.
+// #3593: FileReader.stat/read and Stat.id must preserve held-file verification.
 fn store_artifact_read_file(path: String) -[FS]> ArtifactRawRead ArtifactStoreError! {
     metadata :: if files.stat(path) == {
         .Ok(info) -> info
         .Err(error) -> {
             if store_artifact_io_missing(error) -> return Ok(ArtifactRawRead.Missing)
-            return Err(ArtifactStoreError.Io(error))
+            return Err(ArtifactStoreError.IO(error))
         }
     }
     if metadata.is_symlink || !metadata.is_file -> return Ok(ArtifactRawRead.Corrupt("entry is not a regular file"))
@@ -165,7 +166,7 @@ fn store_artifact_read_file(path: String) -[FS]> ArtifactRawRead ArtifactStoreEr
         .Ok(opened) -> opened
         .Err(error) -> {
             if store_artifact_io_missing(error) -> return Ok(ArtifactRawRead.Corrupt("entry disappeared while opening"))
-            return Err(ArtifactStoreError.Io(error))
+            return Err(ArtifactStoreError.IO(error))
         }
     }
     held :: reader.stat()
@@ -193,35 +194,45 @@ fn store_artifact_same_file(left: files.Stat, right: files.Stat) -> Bool Never! 
 // renamed over the target, then the directory synced. The temporary file is
 // removed when any step fails.
 fn store_artifact_atomic_write(path: String, bytes: [U8]) ArtifactStoreError! -[FS, Env, Rand]> {
+    store_artifact_replace(path, bytes, true)
+}
+
+// Rust replace_unsynced: recomputable cache writes still rename atomically.
+fn store_artifact_replace_unsynced(path: String, bytes: [U8]) ArtifactStoreError! -[FS, Env, Rand]> {
+    store_artifact_replace(path, bytes, false)
+}
+
+fn store_artifact_replace(path: String, bytes: [U8], durable: Bool) ArtifactStoreError! -[FS, Env, Rand]> {
     parent :: files.dirname(path)
     file_name :: files.basename(path)
     if path == "" || path == "/" -> return Err(ArtifactStoreError.Config("store path has no parent: {path}"))
     if file_name == "" -> return Err(ArtifactStoreError.InvalidKey(path))
     store_artifact_ensure_dir(parent)
     temporary :: files.join(parent, ".{file_name}.tmp-{sys.pid()}-{store_artifact_unique_token()}")
-    if store_artifact_replace_with(temporary, path, parent, bytes) == {
-        .Ok(_) -> Ok()
+    if store_artifact_replace_with(temporary, path, parent, bytes, durable) == {
+        .Ok(_) -> {}
         .Err(error) -> {
             files.remove(temporary).drop("the failed write is reported; the temporary file may already be gone")
-            Err(error)
+            return Err(error)
         }
     }
 }
 
-fn store_artifact_replace_with(temporary: String, path: String, parent: String, bytes: [U8]) ArtifactStoreError! -[FS]> {
+// #3593: exclusive create Refuse and FileWriter.write_all/fsync are provider gates.
+fn store_artifact_replace_with(temporary: String, path: String, parent: String, bytes: [U8], durable: Bool) ArtifactStoreError! -[FS]> {
     writer :: files.create(temporary, if_exists: .Refuse)
     writer.write_all(bytes)
-    writer.fsync()
+    if durable -> writer.fsync()
     close(^writer)
     files.rename(temporary, path)
-    store_artifact_sync_dir(parent)
+    if durable -> store_artifact_sync_dir(parent)
 }
 
 fn store_artifact_set_executable(path: String, executable: Bool) ArtifactStoreError! -[FS]> {
     info :: files.stat(path)
     mode :: info.mode
-    next :: if executable -> mode | 0o111 else -> mode - (mode & 0o111)
-    files.set_mode(path, next)
+    updated_mode :: if executable -> mode | 0o111 else -> mode - (mode & 0o111)
+    files.set_mode(path, updated_mode)
 }
 
 // Create `path`, refusing an existing one, and sync its bytes.
@@ -229,6 +240,7 @@ fn store_artifact_create_new_synced(path: String, bytes: [U8]) ArtifactStoreErro
     writer :: files.create(path, if_exists: .Refuse)
     writer.write_all(bytes)
     writer.fsync()
+    close(^writer)
 }
 
 // Append one synced record to a regular file (the journal).
@@ -241,7 +253,7 @@ fn store_artifact_append_synced(path: String, bytes: [U8]) ArtifactStoreError! -
         }
         else -> {}
     }
-    writer :: &files.append(path)
+    writer :: files.append(path)
     writer.write_all(bytes)
     writer.fsync()
     close(^writer)
@@ -254,11 +266,11 @@ fn store_artifact_ensure_dir(path: String) ArtifactStoreError! -[FS]> {
     if files.stat(path) == {
         .Ok(info) -> {
             if info.is_symlink -> return Err(ArtifactStoreError.Config("store directory is a symlink: {path}"))
-            if info.is_dir -> return Ok()
-            Err(ArtifactStoreError.Config("store path is not a directory: {path}"))
+            if info.is_dir -> return
+            return Err(ArtifactStoreError.Config("store path is not a directory: {path}"))
         }
         .Err(error) -> {
-            if !store_artifact_io_missing(error) -> return Err(ArtifactStoreError.Io(error))
+            if !store_artifact_io_missing(error) -> return Err(ArtifactStoreError.IO(error))
             files.create_dir(path)
             store_artifact_sync_dir(files.dirname(path))
         }
@@ -269,10 +281,10 @@ fn store_artifact_ensure_dir(path: String) ArtifactStoreError! -[FS]> {
 // cannot sync a directory reports InvalidInput, which is not a failure.
 fn store_artifact_sync_dir(path: String) ArtifactStoreError! -[FS]> {
     if files.fsync(path) == {
-        .Ok(_) -> Ok()
+        .Ok(_) -> {}
         .Err(error) -> {
-            if store_artifact_io_invalid(error) -> return Ok()
-            Err(ArtifactStoreError.Io(error))
+            if store_artifact_io_invalid(error) -> return
+            return Err(ArtifactStoreError.IO(error))
         }
     }
 }
@@ -298,6 +310,7 @@ struct ArtifactDiskStats {
 }
 
 // POSIX `df -Pk` of `path`; None when df fails or reports an unexpected row.
+// #3594: the process/filesystem statistics provider remains required.
 fn store_artifact_filesystem_stats(path: String) -[Exec, Time]> ArtifactDiskStats? Never! {
     spec :: process.cmd([String]{"df", "-Pk", path}).env("LC_ALL", "C").stdout(.Capture).stderr(.Capture)
     receipt :: process.run_spec(spec) ?? return None
@@ -311,14 +324,17 @@ fn store_artifact_filesystem_stats(path: String) -[Exec, Time]> ArtifactDiskStat
     if fields.len() < 5 -> return None
     total :: store_artifact_parse_count(fields[1]) ?? return None
     available :: store_artifact_parse_count(fields[3]) ?? return None
-    if total > @STORE_ARTIFACT_INT_MAX /% 1024 || available > @STORE_ARTIFACT_INT_MAX /% 1024 -> return None
+    if total > STORE_ARTIFACT_U64_MAX /% 1024 || available > STORE_ARTIFACT_U64_MAX /% 1024 -> return None
     Val(ArtifactDiskStats{total_bytes: total * 1024, available_bytes: available * 1024})
 }
 
-// A non-negative decimal count (`u64::from_str`), or None.
+// A non-negative decimal count (`u64::from_str`), or None. Like Rust, a count
+// above the u64 ceiling is refused, not accepted as a wider Jet Int.
 fn store_artifact_parse_count(text: String) -> Int? Never! {
     if text == "" || !store_artifact_all_digits(text) -> return None
-    Int.parse(text) ?? return None
+    count :: Int.parse(text) ?? return None
+    if count > STORE_ARTIFACT_U64_MAX -> return None
+    Val(count)
 }
 
 // `str::split_whitespace` over ASCII whitespace.

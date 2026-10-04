@@ -1,0 +1,305 @@
+// Whole receipt wire codec and byte-preserving redaction (ReceiptStore.rs).
+// No filesystem, subprocess, environment capture, or store policy here.
+
+// Rust frame / take_frame (ReceiptStore.rs:3277-3306).
+fn jet_cli_receipt_frame(out: &[U8], value: [U8]) Never! {
+    jet_cli_receipt_put_be(&out, value.len(), 8)
+    &out.extend(value)
+}
+fn jet_cli_receipt_put_be(out: &[U8], value: Int, width: Int) Never! {
+    loop index in 0..<width -> &out.push(U8{(value >> ((width - 1 - index) * 8)) & 255})
+}
+fn jet_cli_receipt_be(value: Int, width: Int) -> [U8] Never! {
+    out := [U8]{}
+    jet_cli_receipt_put_be(&out, value, width)
+    out
+}
+fn jet_cli_receipt_read_be(bytes: [U8]) -> Int Never! {
+    value := 0
+    loop byte in bytes -> value = (value << 8) | Int.from_u8(byte)
+    value
+}
+fn jet_cli_receipt_take_frame(bytes: [U8], cursor: &Int) -> [U8] JetCLIReceiptError! {
+    end :: cursor + 8
+    if end > 18446744073709551615 -> return Err(jet_cli_receipt_error("receipt frame length overflows"))
+    if end > bytes.len() -> return Err(jet_cli_receipt_error("receipt frame length is truncated"))
+    length :: jet_cli_receipt_read_be(bytes[cursor..<end])
+    cursor = end
+    if length > JET_CLI_RECEIPT_MAX_FIELD -> return Err(jet_cli_receipt_error("receipt frame is too large"))
+    finish :: cursor + length
+    if finish > 18446744073709551615 -> return Err(jet_cli_receipt_error("receipt frame end overflows"))
+    if finish > bytes.len() -> return Err(jet_cli_receipt_error("receipt frame is truncated"))
+    value :: ~bytes[cursor..<finish]
+    cursor = finish
+    Ok(value)
+}
+fn jet_cli_receipt_take_text(bytes: [U8], cursor: &Int, label: String) -> String JetCLIReceiptError! {
+    value :: jet_cli_receipt_take_frame(bytes, &cursor)
+    Ok(String.from_bytes(value) ?? return Err(jet_cli_receipt_error("receipt {label} is not UTF-8")))
+}
+fn jet_cli_receipt_take_count(bytes: [U8], cursor: &Int, label: String) -> Int JetCLIReceiptError! {
+    value :: jet_cli_receipt_take_frame(bytes, &cursor)
+    if value.len() != 8 -> return Err(jet_cli_receipt_error("receipt {label} is malformed"))
+    Ok(jet_cli_receipt_read_be(value))
+}
+
+// Rust encode_receipt (ReceiptStore.rs:3308-3323).
+pub fn jet_cli_receipt_encode(receipt: JetCLIReceipt) -> [U8] JetCLIReceiptError! {
+    jet_cli_receipt_validate_sections(receipt.sections) ?? return Err(jet_cli_receipt_error(err.message))
+    jet_cli_receipt_validate_links(receipt.consumed, "consumed")
+    jet_cli_receipt_validate_links(receipt.produced, "produced")
+    out := jet_cli_receipt_encode_body(receipt)
+    jet_cli_receipt_frame(&out, receipt.digest.bytes())
+    if out.len() > JET_CLI_MAX_RECEIPT_BYTES -> return Err(jet_cli_receipt_error("receipt is too large (maximum {JET_CLI_MAX_RECEIPT_BYTES} bytes)"))
+    Ok(out)
+}
+// Rust encode_receipt_body (ReceiptStore.rs:3325-3361). Sort indices instead
+// of cloning section payloads solely to decide their canonical wire order.
+pub fn jet_cli_receipt_encode_body(receipt: JetCLIReceipt) -> [U8] Never! {
+    out := ~JET_CLI_RECEIPT_MAGIC
+    jet_cli_receipt_frame(&out, receipt.claim.verb.bytes())
+    jet_cli_receipt_frame(&out, receipt.claim.key.bytes())
+    jet_cli_receipt_frame(&out, jet_cli_receipt_be(Int.from_i32(receipt.status), 4))
+    jet_cli_receipt_frame(&out, jet_cli_receipt_be(receipt.claim.inputs.len(), 8))
+    loop input in receipt.claim.inputs {
+        jet_cli_receipt_frame(&out, input.path.raw.bytes())
+        jet_cli_receipt_frame(&out, input.digest.bytes())
+    }
+    jet_cli_receipt_frame(&out, receipt.stdout)
+    jet_cli_receipt_frame(&out, receipt.stderr)
+    if receipt.sections.len() > 0 {
+        order := [Int]{}
+        loop index in 0..<receipt.sections.len() -> &order.push(index)
+        &order.sort_by((left: Int, right: Int) -> {
+            a :: receipt.sections[left]
+            b :: receipt.sections[right]
+            if {
+                a.name != b.name -> a.name <=> b.name
+                a.type_name != b.type_name -> a.type_name <=> b.type_name
+                else -> a.bytes <=> b.bytes
+            }
+        })
+        jet_cli_receipt_frame(&out, JET_CLI_RECEIPT_SECTION_WIRE_MAGIC)
+        jet_cli_receipt_frame(&out, jet_cli_receipt_be(order.len(), 8))
+        loop index in order {
+            section :: receipt.sections[index]
+            jet_cli_receipt_frame(&out, section.name.bytes())
+            jet_cli_receipt_frame(&out, section.type_name.bytes())
+            jet_cli_receipt_frame(&out, section.bytes)
+        }
+    }
+    if receipt.consumed.len() > 0 || receipt.produced.len() > 0 {
+        jet_cli_receipt_frame(&out, JET_CLI_RECEIPT_LINK_WIRE_MAGIC)
+        jet_cli_receipt_frame(&out, jet_cli_receipt_be(JET_CLI_RECEIPT_LINK_VERSION, 8))
+        jet_cli_receipt_encode_links(&out, receipt.consumed)
+        jet_cli_receipt_encode_links(&out, receipt.produced)
+    }
+    out
+}
+// Rust decode_receipt (ReceiptStore.rs:3363-3464).
+pub fn jet_cli_receipt_decode(bytes: [U8]) -> JetCLIReceipt JetCLIReceiptError! {
+    if bytes.len() > JET_CLI_MAX_RECEIPT_BYTES -> return Err(jet_cli_receipt_error("receipt is too large"))
+    if bytes.len() < JET_CLI_RECEIPT_MAGIC.len() -> return Err(jet_cli_receipt_error("receipt magic is invalid"))
+    if bytes[0..<JET_CLI_RECEIPT_MAGIC.len()] != JET_CLI_RECEIPT_MAGIC -> return Err(jet_cli_receipt_error("receipt magic is invalid"))
+    cursor := JET_CLI_RECEIPT_MAGIC.len()
+    verb :: jet_cli_receipt_take_text(bytes, &cursor, "verb")
+    key :: jet_cli_receipt_take_text(bytes, &cursor, "key")
+    raw_status :: jet_cli_receipt_take_frame(bytes, &cursor)
+    if raw_status.len() != 4 -> return Err(jet_cli_receipt_error("receipt status is malformed"))
+    unsigned :: jet_cli_receipt_read_be(raw_status)
+    status :: I32{if unsigned >= 2147483648 -> unsigned - 4294967296 else -> unsigned}
+    count :: jet_cli_receipt_take_count(bytes, &cursor, "input count")
+    if count > 100000 -> return Err(jet_cli_receipt_error("receipt has too many inputs"))
+    inputs := [JetCLIReceiptInput]{}
+    loop _ in 0..<count {
+        path :: jet_cli_receipt_take_text(bytes, &cursor, "input path")
+        digest :: jet_cli_receipt_take_text(bytes, &cursor, "input digest")
+        if !jet_cli_receipt_is_digest(digest) -> return Err(jet_cli_receipt_error("receipt input digest is malformed"))
+        &inputs.push(JetCLIReceiptInput{path: receipt_paths.path(path), digest: digest})
+    }
+    stdout :: jet_cli_receipt_take_frame(bytes, &cursor)
+    stderr :: jet_cli_receipt_take_frame(bytes, &cursor)
+    digest_bytes := jet_cli_receipt_take_frame(bytes, &cursor)
+    sections := [JetCLIReceiptSection]{}
+    consumed := [JetCLIRecordLink]{}
+    produced := [JetCLIRecordLink]{}
+    if digest_bytes == JET_CLI_RECEIPT_SECTION_WIRE_MAGIC {
+        section_count :: jet_cli_receipt_take_count(bytes, &cursor, "section count")
+        if section_count > JET_CLI_MAX_RECEIPT_SECTIONS -> return Err(jet_cli_receipt_error("receipt has too many sections (maximum {JET_CLI_MAX_RECEIPT_SECTIONS})"))
+        loop _ in 0..<section_count {
+            name :: jet_cli_receipt_take_text(bytes, &cursor, "section name")
+            type_name :: jet_cli_receipt_take_text(bytes, &cursor, "section type name")
+            value :: jet_cli_receipt_take_frame(bytes, &cursor)
+            section :: jet_cli_receipt_section_new(name, type_name, value) ?? return Err(jet_cli_receipt_error("receipt section schema is invalid: {err.message}"))
+            &sections.push(section)
+        }
+        jet_cli_receipt_normalize_sections(&sections) ?? return Err(jet_cli_receipt_error(err.message))
+        digest_bytes = jet_cli_receipt_take_frame(bytes, &cursor)
+    }
+    if digest_bytes == JET_CLI_RECEIPT_LINK_WIRE_MAGIC {
+        version :: jet_cli_receipt_take_count(bytes, &cursor, "links version")
+        if version != JET_CLI_RECEIPT_LINK_VERSION -> return Err(jet_cli_receipt_error("unsupported receipt links version {version}"))
+        consumed = jet_cli_receipt_decode_links(bytes, &cursor, "consumed")
+        produced = jet_cli_receipt_decode_links(bytes, &cursor, "produced")
+        digest_bytes = jet_cli_receipt_take_frame(bytes, &cursor)
+    }
+    digest :: String.from_bytes(digest_bytes) ?? return Err(jet_cli_receipt_error("receipt digest is not UTF-8"))
+    if cursor != bytes.len() || !jet_cli_receipt_is_digest(key) || !jet_cli_receipt_is_digest(digest) -> return Err(jet_cli_receipt_error("receipt has trailing bytes or malformed digest"))
+    Ok(JetCLIReceipt{claim: JetCLIReceiptClaim{verb: verb, key: key, inputs: inputs}, status: status, stdout: stdout, stderr: stderr, sections: sections, consumed: consumed, produced: produced, digest: digest})
+}
+// Rust decode_bytes (ReceiptStore.rs:340-347). The authenticated command entry.
+pub fn jet_cli_receipt_decode_bytes(bytes: [U8]) -> JetCLIReceipt JetCLIReceiptError! {
+    receipt :: jet_cli_receipt_decode(bytes)
+    if receipt.digest != jet_cli_receipt_digest(receipt) -> return Err(jet_cli_receipt_error("receipt digest does not authenticate its body"))
+    Ok(receipt)
+}
+// Rust normalized_links (ReceiptStore.rs:3466-3482).
+pub fn jet_cli_receipt_normalized_links(links: [JetCLIRecordLink], label: String) -> [JetCLIRecordLink] JetCLIReceiptError! {
+    if links.len() > JET_CLI_MAX_RECEIPT_LINKS -> return Err(jet_cli_receipt_error("receipt has too many {label} links (maximum {JET_CLI_MAX_RECEIPT_LINKS})"))
+    normalized := ~links
+    loop link in normalized {
+        jet_cli_record_link_validate(link) ?? return Err(jet_cli_receipt_error("receipt {label} link is invalid: {err.message}"))
+    }
+    jet_cli_receipt_sort_links(&normalized)
+    jet_cli_receipt_reject_duplicate_links(normalized, label)
+    Ok(normalized)
+}
+fn jet_cli_receipt_reject_duplicate_links(sorted: [JetCLIRecordLink], label: String) JetCLIReceiptError! {
+    loop index in 1..<sorted.len() {
+        if sorted[index - 1] == sorted[index] -> return Err(jet_cli_receipt_error("receipt {label} links contain a duplicate"))
+    }
+}
+// Validation-only wire boundary: preserve validation-before-duplicate ordering
+// without cloning links just to discard a sorted list.
+fn jet_cli_receipt_validate_links(links: [JetCLIRecordLink], label: String) JetCLIReceiptError! {
+    if links.len() > JET_CLI_MAX_RECEIPT_LINKS -> return Err(jet_cli_receipt_error("receipt has too many {label} links (maximum {JET_CLI_MAX_RECEIPT_LINKS})"))
+    loop link in links { jet_cli_record_link_validate(link) ?? return Err(jet_cli_receipt_error("receipt {label} link is invalid: {err.message}")) }
+    seen := [String:Bool]{}
+    loop link in links {
+        key :: "{jet_cli_record_kind_rank(link.kind)}:{link.artifact_id}"
+        if seen.has_key(key) -> return Err(jet_cli_receipt_error("receipt {label} links contain a duplicate"))
+        seen[key] = true
+    }
+}
+fn jet_cli_receipt_sort_links(links: &[JetCLIRecordLink]) Never! {
+    &links.sort_by((a: JetCLIRecordLink, b: JetCLIRecordLink) -> {
+        if a.kind != b.kind -> jet_cli_record_kind_rank(a.kind) <=> jet_cli_record_kind_rank(b.kind) else -> a.artifact_id <=> b.artifact_id
+    })
+}
+// Rust encode_links / decode_links (ReceiptStore.rs:3484-3523).
+fn jet_cli_receipt_encode_links(out: &[U8], links: [JetCLIRecordLink]) Never! {
+    order := [Int]{}
+    loop index in 0..<links.len() -> &order.push(index)
+    &order.sort_by((a: Int, b: Int) -> {
+        if links[a].kind != links[b].kind -> jet_cli_record_kind_rank(links[a].kind) <=> jet_cli_record_kind_rank(links[b].kind) else -> links[a].artifact_id <=> links[b].artifact_id
+    })
+    jet_cli_receipt_frame(&out, jet_cli_receipt_be(order.len(), 8))
+    loop index in order {
+        link :: links[index]
+        jet_cli_receipt_frame(&out, jet_cli_record_kind_name(link.kind).bytes())
+        jet_cli_receipt_frame(&out, link.artifact_id.bytes())
+    }
+}
+fn jet_cli_receipt_decode_links(bytes: [U8], cursor: &Int, label: String) -> [JetCLIRecordLink] JetCLIReceiptError! {
+    count :: jet_cli_receipt_take_count(bytes, &cursor, "{label} link count")
+    if count > JET_CLI_MAX_RECEIPT_LINKS -> return Err(jet_cli_receipt_error("receipt has too many {label} links (maximum {JET_CLI_MAX_RECEIPT_LINKS})"))
+    links := [JetCLIRecordLink]{}
+    loop _ in 0..<count {
+        name :: jet_cli_receipt_take_text(bytes, &cursor, "{label} link kind")
+        kind :: jet_cli_record_kind_parse(name) ?? return Err(jet_cli_receipt_error("receipt {label} link kind is invalid: {err.message}"))
+        id :: jet_cli_receipt_take_text(bytes, &cursor, "{label} link artifact_id")
+        link :: jet_cli_record_link_new(kind, id) ?? return Err(jet_cli_receipt_error("receipt {label} link is invalid: {err.message}"))
+        &links.push(link)
+    }
+    jet_cli_receipt_sort_links(&links)
+    jet_cli_receipt_reject_duplicate_links(links, label)
+    Ok(links)
+}
+// Rust receipt_digest / is_digest (ReceiptStore.rs:3525-3527,3545-3550).
+pub fn jet_cli_receipt_digest(receipt: JetCLIReceipt) -> String Never! { mir_sha256_hex_bytes(mir_sha256_bytes(jet_cli_receipt_encode_body(receipt))) }
+pub fn jet_cli_receipt_is_digest(value: String) -> Bool Never! {
+    bytes :: value.bytes()
+    if bytes.len() != JET_CLI_RECEIPT_DIGEST_LEN -> return false
+    loop byte in bytes {
+        b :: Int.from_u8(byte)
+        if !(b >= 48 && b <= 57) && !(b >= 97 && b <= 102) -> return false
+    }
+    true
+}
+
+// Rust is_secret_name / is_secret_component (ReceiptStore.rs:3720-3758).
+// Only ASCII participates in words; every non-ASCII scalar is a separator.
+pub fn jet_cli_receipt_is_secret_name(name: String) -> Bool Never! {
+    bytes :: name.bytes()
+    component := [U8]{}
+    loop index in 0..<bytes.len() {
+        character :: Int.from_u8(bytes[index])
+        upper :: character >= 65 && character <= 90
+        alnum :: upper || (character >= 97 && character <= 122) || (character >= 48 && character <= 57)
+        previous :: if index > 0 -> Int.from_u8(bytes[index - 1]) else -> 0
+        next_byte :: if index + 1 < bytes.len() -> Int.from_u8(bytes[index + 1]) else -> 0
+        camel :: upper && ((previous >= 97 && previous <= 122) || (previous >= 48 && previous <= 57) || (previous >= 65 && previous <= 90 && next_byte >= 97 && next_byte <= 122))
+        if !alnum || camel {
+            if jet_cli_receipt_is_secret_component(String.from_bytes(component) ?? panic("ASCII component")) -> return true
+            component = [U8]{}
+            if !alnum -> next
+        }
+        &component.push(U8{if upper -> character + 32 else -> character})
+    }
+    jet_cli_receipt_is_secret_component(String.from_bytes(component) ?? panic("ASCII component"))
+}
+pub fn jet_cli_receipt_is_secret_component(component: String) -> Bool Never! {
+    bytes :: component.bytes()
+    end := bytes.len()
+    loop end > 0 && Int.from_u8(bytes[end - 1]) >= 48 && Int.from_u8(bytes[end - 1]) <= 57 -> end -= 1
+    loop part in JET_CLI_RECEIPT_SECRET_NAME_PARTS { if bytes[0..<end] == part.bytes() -> return true }
+    false
+}
+// Rust is_secret_environment_name (ReceiptStore.rs:3759-3765).
+pub fn jet_cli_receipt_is_secret_environment_name(name: String) -> Bool Never! {
+    if jet_cli_receipt_is_secret_name(name) -> return true
+    lowered := [U8]{}
+    loop byte in name.bytes() {
+        b :: Int.from_u8(byte)
+        &lowered.push(U8{if b >= 65 && b <= 90 -> b + 32 else -> b})
+    }
+    normalized :: String.from_bytes(lowered) ?? panic("ASCII lowering preserves UTF-8")
+    loop part in JET_CLI_RECEIPT_SECRET_NAME_PARTS { if normalized.contains(part) -> return true }
+    false
+}
+// Rust redact_bytes / bounded_redact_bytes (ReceiptStore.rs:3767-3782).
+pub fn jet_cli_receipt_redact_bytes(bytes: [U8], secret_values: [String]) -> [U8] Never! {
+    redacted := ~bytes
+    loop value in secret_values -> redacted = jet_cli_receipt_replace_bytes(redacted, value.bytes())
+    redacted
+}
+pub fn jet_cli_receipt_bounded_redact_bytes(bytes: [U8], secret_values: [String]) -> [U8] JetCLIReceiptError! {
+    if bytes.len() > JET_CLI_RECEIPT_MAX_FIELD -> return Err(jet_cli_receipt_error("receipt output exceeds its size limit"))
+    redacted :: jet_cli_receipt_redact_bytes(bytes, secret_values)
+    if redacted.len() > JET_CLI_RECEIPT_MAX_FIELD -> return Err(jet_cli_receipt_error("redacted receipt output exceeds its size limit"))
+    Ok(redacted)
+}
+// Rust replace_bytes (ReceiptStore.rs:3784-3801).
+fn jet_cli_receipt_replace_bytes(bytes: [U8], needle: [U8]) -> [U8] Never! {
+    if needle.len() == 0 || needle.len() > bytes.len() -> return ~bytes
+    output := [U8]{}
+    index := 0
+    loop index <= bytes.len() - needle.len() {
+        matches := true
+        loop offset in 0..<needle.len() {
+            if bytes[index + offset] != needle[offset] {
+                matches = false
+                break
+            }
+        }
+        if matches {
+            &output.extend(JET_CLI_RECEIPT_REDACTION_MARKER)
+            index += needle.len()
+        } else {
+            &output.push(bytes[index])
+            index += 1
+        }
+    }
+    &output.extend(bytes[index..<bytes.len()])
+    output
+}

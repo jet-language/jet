@@ -1,0 +1,255 @@
+// Outcome.rs err_tests::default_error_has_ratified_fields_and_report and
+// default_report_keeps_structured_error_and_source_facts: report facts are
+// supplied directly; private TLS journey execution/terminal rendering is not
+// Foundation's portable wire policy.
+fn outcome_test_report() -> JetErrorReport Never! {
+    JetErrorReport{
+        code: Val("CFG404"), message: "loading config", typed_identity: Val("IoError"),
+        causes: [JetErrorReport]{JetErrorReport{code: Val("IO001"), message: "disk offline", typed_identity: Val("IoError")}},
+        context_frames: [JetErrorContextFrame]{JetErrorContextFrame{text: "while loading app.toml", file: "config.jet", line: 42}},
+        origin: Val(JetErrorJourneyFrame{fn_name: "load", file: "config.jet", line: 40, column: 12, note: "", hops: 1}),
+        source_journey: [JetErrorJourneyFrame]{JetErrorJourneyFrame{fn_name: "run", file: "config.jet", line: 42, column: 5, note: "", hops: 1}},
+        conversion_history: [JetErrorConversion]{JetErrorConversion{source: "IoError", target: "ConfigError"}},
+    }
+}
+fn outcome_test_wire() -> String Never! {
+    "{{\"schema\":\"jet.err/v1\",\"message\":\"loading config\",\"code\":\"CFG404\",\"cause\":{{\"schema\":\"jet.err/v1\",\"message\":\"disk offline\",\"code\":\"IO001\",\"cause\":null,\"typed_identity\":\"IoError\"}},\"typed_identity\":\"IoError\",\"context_frames\":[{{\"text\":\"while loading app.toml\",\"file\":\"config.jet\",\"line\":42}}],\"origin\":{{\"fn_name\":\"load\",\"file\":\"config.jet\",\"line\":40,\"column\":12,\"note\":\"\",\"hops\":1}},\"source_journey\":[{{\"fn_name\":\"run\",\"file\":\"config.jet\",\"line\":42,\"column\":5,\"note\":\"\",\"hops\":1}}],\"conversion_history\":[{{\"source\":\"IoError\",\"target\":\"ConfigError\"}}]}}"
+}
+fn outcome_test_tree() -> DataTree Never! {
+    DataTree.Object([String:DataTree]{"schema": DataTree.Text("jet.err/v1"), "message": DataTree.Text("plain"), "code": DataTree.Null, "cause": DataTree.Null})
+}
+fn outcome_test_decode_refusal(tree: DataTree, expected: String) Never! {
+    actual :: if jet_error_report_from_json(tree) == {
+        .Ok(_) -> panic("invalid report accepted")
+        .Err(error) -> error.message
+    }
+    assert(actual == expected)
+}
+fn outcome_test_wire_refusal(wire: String, expected: String) Never! {
+    actual :: if JetErrorReport.from_json(wire) == {
+        .Ok(_) -> panic("invalid report wire accepted")
+        .Err(error) -> error.message
+    }
+    assert(actual == expected)
+}
+
+#Test("default_error_has_ratified_fields_and_report wire facts") {
+    cause :: JetErrorReport{message: "unexpected token at line 3"}
+    report :: JetErrorReport{code: Val("CFG404"), message: "parse failed", causes: [JetErrorReport]{cause}}
+    assert(report.message == "parse failed")
+    assert((report.code ?? panic("code missing")) == "CFG404")
+    assert(report.causes[0].message == "unexpected token at line 3")
+    assert(report.to_json() == "{{\"schema\":\"jet.err/v1\",\"message\":\"parse failed\",\"code\":\"CFG404\",\"cause\":{{\"schema\":\"jet.err/v1\",\"message\":\"unexpected token at line 3\",\"code\":null,\"cause\":null}}}}")
+}
+#Test("default_report_keeps_structured_error_and_source_facts") {
+    report :: outcome_test_report()
+    assert((report.code ?? panic("code missing")) == "CFG404")
+    assert(report.message == "loading config")
+    assert((report.typed_identity ?? panic("identity missing")) == "IoError")
+    assert(report.causes.len() == 1)
+    assert(report.causes[0].message == "disk offline")
+    assert((report.causes[0].typed_identity ?? panic("cause identity missing")) == "IoError")
+    assert(report.context_frames.len() == 1)
+    assert(report.context_frames[0].file == "config.jet")
+    assert(report.context_frames[0].line == 42)
+    origin :: report.origin ?? panic("origin missing")
+    assert(origin.fn_name == "load" && origin.file == "config.jet" && origin.line == 40 && origin.column == 12)
+    assert(report.source_journey.len() == 1)
+    assert(report.source_journey[0].fn_name == "run" && report.source_journey[0].file == "config.jet")
+    assert(report.source_journey[0].line == 42 && report.source_journey[0].column == 5)
+    assert(report.conversion_history.len() == 1)
+    assert(report.conversion_history[0].source == "IoError" && report.conversion_history[0].target == "ConfigError")
+    assert(report.to_json() == outcome_test_wire())
+}
+#Test("error report causes null object array and optional omission") {
+    plain :: JetErrorReport{message: "plain"}
+    assert(plain.to_json() == "{{\"schema\":\"jet.err/v1\",\"message\":\"plain\",\"code\":null,\"cause\":null}}")
+    one :: JetErrorReport{message: "one", causes: [JetErrorReport]{plain}}
+    two :: JetErrorReport{message: "two", causes: [JetErrorReport]{one, plain}}
+    assert(two.to_json() == "{{\"schema\":\"jet.err/v1\",\"message\":\"two\",\"code\":null,\"cause\":[{{\"schema\":\"jet.err/v1\",\"message\":\"one\",\"code\":null,\"cause\":{{\"schema\":\"jet.err/v1\",\"message\":\"plain\",\"code\":null,\"cause\":null}}}},{{\"schema\":\"jet.err/v1\",\"message\":\"plain\",\"code\":null,\"cause\":null}}]}}")
+    empty_identity :: JetErrorReport{message: "", code: Val(""), typed_identity: Val("")}
+    assert(empty_identity.to_json() == "{{\"schema\":\"jet.err/v1\",\"message\":\"\",\"code\":\"\",\"cause\":null,\"typed_identity\":\"\"}}")
+}
+#Test("error report raw details preserve order typed values and usize writer") {
+    details :: JetErrorDetails{variant: "DuplicateTargetName", fields: [JetErrorField]{JetErrorField{name: "name", value: "\"app\""}, JetErrorField{name: "typed", value: "{{\"z\":[null,true,9223372036854775808],\"a\":1.25}}"}}, source_span: Val(JetErrorSpan{start: 18446744073709551615, end: 0})}
+    assert(details.to_json() == "{{\"variant\":\"DuplicateTargetName\",\"fields\":{{\"name\":\"app\",\"typed\":{{\"z\":[null,true,9223372036854775808],\"a\":1.25}}}},\"source_span\":{{\"start\":18446744073709551615,\"end\":0}}}}")
+    absent :: JetErrorDetails{variant: "Empty", fields: [JetErrorField]{}}
+    assert(absent.to_json() == "{{\"variant\":\"Empty\",\"fields\":{{}},\"source_span\":null}}")
+    assert(jet_error_json_encode_value(DataTree.Float(1e20)) == "100000000000000000000")
+    assert(jet_error_json_encode_value(DataTree.Float(1e-7)) == "0.0000001")
+    assert(jet_error_json_encode_value(DataTree.Float(-0.0)) == "-0")
+}
+
+// #4306/#4456: Core DataTree.Object currently lowers its ordered wire object
+// through a key-sorted map; preserve Rust's exact order, never bless sorting.
+#Test("error report object wire order matches Rust") {
+    tree :: DataTree.Object([String:DataTree]{"z": DataTree.Array([DataTree]{DataTree.Null, DataTree.Bool(true), DataTree.Int(9223372036854775808)}), "a": DataTree.Float(1.25)})
+    assert_eq(jet_error_json_encode_value(tree), "{{\"z\":[null,true,9223372036854775808],\"a\":1.25}}")
+}
+#Test("error report protocol quote matches Unicode control policy") {
+    controls :: String.from_bytes([U8]{U8{8}, U8{12}, U8{127}, U8{194}, U8{128}}) ?? panic("bad fixture")
+    report :: JetErrorReport{message: "a\"b\\c\n\t{controls}é🚀"}
+    assert(report.to_json() == "{{\"schema\":\"jet.err/v1\",\"message\":\"a\\\"b\\\\c\\n\\t\\u0008\\u000c\\u007f\\u0080é🚀\",\"code\":null,\"cause\":null}}")
+    assert(jet_error_json_encode_value(DataTree.Text(controls)) == "\"\\u0008\\u000c\\u007f\\u0080\"")
+}
+#Test("error report typed tree decode preserves all carrier facts") {
+    root := [String:DataTree]{"schema": DataTree.Text("jet.err/v1"), "message": DataTree.Text("typed"), "code": DataTree.Text("E3502"), "cause": DataTree.Array([DataTree]{outcome_test_tree(), outcome_test_tree()}), "typed_identity": DataTree.Text("BuildError::DuplicateTargetName")}
+    frame :: DataTree.Object([String:DataTree]{"fn_name": DataTree.Text("build"), "file": DataTree.Text("package.jet"), "line": DataTree.Int(4294967295), "column": DataTree.Int(4294967295), "note": DataTree.Text("origin"), "hops": DataTree.Int(4294967295)})
+    root["origin"] = frame
+    root["source_journey"] = DataTree.Array([DataTree]{frame, frame})
+    root["context_frames"] = DataTree.Array([DataTree]{DataTree.Object([String:DataTree]{"text": DataTree.Text("context"), "file": DataTree.Text("package.jet"), "line": DataTree.Int(4294967295)})})
+    root["conversion_history"] = DataTree.Array([DataTree]{DataTree.Object([String:DataTree]{"source": DataTree.Text("BuildError"), "target": DataTree.Text("Err")})})
+    root["details"] = DataTree.Object([String:DataTree]{"variant": DataTree.Text("DuplicateTargetName"), "fields": DataTree.Object([String:DataTree]{"name": DataTree.Text("app"), "nested": DataTree.Array([DataTree]{DataTree.Bool(false), DataTree.Int(-9223372036854775808)})}), "source_span": DataTree.Object([String:DataTree]{"start": DataTree.Int(4294967295), "end": DataTree.Int(0)})})
+    report :: jet_error_report_from_json(DataTree.Object(root)) ?? panic("typed tree rejected")
+    assert(report.causes.len() == 2 && report.context_frames[0].line == 4294967295)
+    origin :: report.origin ?? panic("lost origin")
+    assert(origin.column == 4294967295 && origin.hops == 4294967295)
+    assert(report.source_journey.len() == 2 && report.source_journey[1].note == "origin")
+    assert(report.conversion_history[0].target == "Err")
+    details :: report.details ?? panic("lost details")
+    assert(details.fields[0].name == "name" && details.fields[0].value == "\"app\"")
+    assert(details.fields[1].value == "[false,-9223372036854775808]")
+    span :: details.source_span ?? panic("lost span")
+    assert(span.start == 4294967295 && span.end == 0)
+}
+#Test("error report exact typed decoder refusals and precedence") {
+    outcome_test_decode_refusal(DataTree.Null, "error report report is not an object")
+    outcome_test_decode_refusal(DataTree.Object([String:DataTree]{}), "error report lacks schema")
+    outcome_test_decode_refusal(DataTree.Object([String:DataTree]{"schema": DataTree.Int(1)}), "error report schema is not text")
+    outcome_test_decode_refusal(DataTree.Object([String:DataTree]{"schema": DataTree.Text("jet.err/v0")}), "unsupported error report schema")
+    outcome_test_decode_refusal(DataTree.Object([String:DataTree]{"schema": DataTree.Text("jet.err/v1")}), "error report lacks message")
+    base :: [String:DataTree]{"schema": DataTree.Text("jet.err/v1"), "message": DataTree.Text("plain"), "code": DataTree.Null, "cause": DataTree.Null}
+    changes :: [String]{"message", "code", "cause", "typed_identity", "context_frames", "origin", "source_journey", "conversion_history", "details"}
+    expected :: [String]{"error report message is not text", "error report code is not text", "error report cause is not null, an object, or an array", "error report typed_identity is not text", "error report context_frames is not an array", "error report journey frame is not an object", "error report source_journey is not an array", "error report conversion_history is not an array", "error report details is not an object"}
+    loop index in 0..<changes.len() {
+        fields := ~base
+        fields[changes[index]] = DataTree.Int(1)
+        outcome_test_decode_refusal(DataTree.Object(fields), expected[index])
+    }
+    out_of_range :: [Int]{-1, 4294967296}
+    loop number in out_of_range {
+        message :: if jet_error_json_u32(DataTree.Int(number), "journey column") == {
+            .Ok(_) -> panic("u32 overflow accepted")
+            .Err(error) -> error.message
+        }
+        assert(message == "error report journey column is not a u32")
+    }
+    non_integers :: [DataTree]{DataTree.Float(1.0), DataTree.Int(9223372036854775808), DataTree.Text("1")}
+    loop value in non_integers {
+        message :: if jet_error_json_u32(value, "span start") == {
+            .Ok(_) -> panic("non-integer accepted")
+            .Err(error) -> error.message
+        }
+        assert(message == "error report span start is not an integer")
+    }
+}
+
+// #3598 original wire read witnesses remain exact, never a fallback parser.
+#Test("error report protocol original structured roundtrip") {
+    report :: JetErrorReport.from_json(outcome_test_wire()) ?? panic("original wire refused")
+    assert(report == outcome_test_report())
+}
+#Test("error report protocol canonical equality and duplicate refusal") {
+    wire :: JetErrorReport{message: "plain"}.to_json()
+    assert((JetErrorReport.from_json(wire) ?? panic("canonical wire rejected")).to_json() == wire)
+    bad :: [String]{" {wire}", "{wire}\n", "{{\"message\":\"plain\",\"schema\":\"jet.err/v1\",\"code\":null,\"cause\":null}}", "{{\"schema\":\"jet.err/v1\",\"message\":\"plain\",\"code\":null,\"cause\":[]}}", "{{\"schema\":\"jet.err/v1\",\"message\":\"plain\",\"code\":null,\"cause\":null,\"context_frames\":[]}}", "{{\"schema\":\"jet.err/v1\",\"message\":\"plain\",\"code\":null,\"cause\":null,\"unknown\":true}}"}
+    loop text in bad -> outcome_test_wire_refusal(text, "error report is not canonical")
+    outcome_test_wire_refusal("{{\"schema\":\"jet.err/v1\",\"message\":\"plain\",\"code\":null,\"cause\":null,\"message\":\"other\"}}", "invalid error report: duplicate object key `message`")
+    outcome_test_wire_refusal("", "invalid error report: expected a JSON value")
+    outcome_test_wire_refusal("{{\"schema\":\"jet.err/v1\",\"message\":\"plain\",\"code\":null,\"cause\":1}}", "error report cause is not null, an object, or an array")
+}
+#Test("error report protocol nested causes raw details and max u32 roundtrip") {
+    report := outcome_test_report()
+    report.causes = [JetErrorReport]{outcome_test_report(), JetErrorReport{message: "second"}}
+    report.details = Val(JetErrorDetails{variant: "Typed", fields: [JetErrorField]{JetErrorField{name: "ordered", value: "{{\"z\":null,\"a\":[false,1.25,9223372036854775808]}}"}}, source_span: Val(JetErrorSpan{start: 4294967295, end: 0})})
+    report.origin = Val(JetErrorJourneyFrame{fn_name: "max", file: "max.jet", line: 4294967295, column: 4294967295, note: "note", hops: 4294967295})
+    wire :: report.to_json()
+    restored :: JetErrorReport.from_json(wire) ?? panic("rich canonical report rejected")
+    assert(restored == report)
+    fields := [String:DataTree]{"variant": DataTree.Text("Typed"), "fields": DataTree.Object([String:DataTree]{}), "source_span": DataTree.Object([String:DataTree]{"start": DataTree.Int(4294967296), "end": DataTree.Int(0)})}
+    message :: if jet_error_details_from_json(DataTree.Object(fields)) == {
+        .Ok(_) -> panic("u32 span overflow accepted")
+        .Err(error) -> error.message
+    }
+    assert(message == "error report span start is not a u32")
+}
+
+#Test("diagnostic BuildError projects the canonical error report extension") {
+    diagnostic := Diagnostic{severity: DIAGNOSTIC_ERROR, code: "E3502", what: "build failed", why: "duplicate target", fix: "rename target"}
+    error := outcome_test_report()
+    error.details = Val(JetErrorDetails{variant: "DuplicateTargetName", fields: [JetErrorField]{JetErrorField{name: "name", value: "\"app\""}}, source_span: Val(JetErrorSpan{start: 3, end: 8})})
+    diagnostic.structured = Val(DiagnosticStructured.BuildError{report: error})
+    projected :: diagnostic_to_report(diagnostic, ReportPath.from_process(""), "")
+    extension :: projected.extension ?? panic("build report extension missing")
+    wire :: if extension == {
+        .BuildError(report) -> report
+        else -> panic("wrong report extension")
+    }
+    assert(wire == error.to_json())
+    assert(projected.json().contains(",\"build_error\":{wire}"))
+}
+
+#Test("error report subobject shape and field refusals match reference") {
+    bad_context :: [DataTree]{DataTree.Null, DataTree.Object([String:DataTree]{}), DataTree.Object([String:DataTree]{"text": DataTree.Null}), DataTree.Object([String:DataTree]{"text": DataTree.Text(""), "file": DataTree.Null}), DataTree.Object([String:DataTree]{"text": DataTree.Text(""), "file": DataTree.Text(""), "line": DataTree.Int(-1)})}
+    expected_context :: [String]{"error report context frame is not an object", "error report lacks text", "error report context text is not text", "error report context file is not text", "error report context line is not a u32"}
+    loop index in 0..<bad_context.len() {
+        reason :: if jet_error_context_from_json(bad_context[index]) == {
+            .Ok(_) -> panic("bad context accepted")
+            .Err(error) -> error.message
+        }
+        assert(reason == expected_context[index])
+    }
+    journey :: [String:DataTree]{"fn_name": DataTree.Text(""), "file": DataTree.Text(""), "line": DataTree.Int(0), "column": DataTree.Int(0), "note": DataTree.Text(""), "hops": DataTree.Int(0)}
+    keys :: [String]{"fn_name", "file", "line", "column", "note", "hops"}
+    reasons :: [String]{"journey function is not text", "journey file is not text", "journey line is not an integer", "journey column is not an integer", "journey note is not text", "journey hops is not an integer"}
+    loop index in 0..<keys.len() {
+        fields := ~journey
+        fields[keys[index]] = DataTree.Null
+        reason :: if jet_error_journey_from_json(DataTree.Object(fields)) == {
+            .Ok(_) -> panic("bad journey accepted")
+            .Err(error) -> error.message
+        }
+        assert(reason == "error report {reasons[index]}")
+    }
+    conversion :: if jet_error_conversion_from_json(DataTree.Object([String:DataTree]{"source": DataTree.Text(""), "target": DataTree.Int(1)})) == {
+        .Ok(_) -> panic("bad conversion accepted")
+        .Err(error) -> error.message
+    }
+    assert(conversion == "error report conversion target is not text")
+    bad_details :: [DataTree]{DataTree.Object([String:DataTree]{"fields": DataTree.Null}), DataTree.Object([String:DataTree]{"fields": DataTree.Object([String:DataTree]{}), "source_span": DataTree.Int(1)}), DataTree.Object([String:DataTree]{"fields": DataTree.Object([String:DataTree]{}), "source_span": DataTree.Object([String:DataTree]{})}), DataTree.Object([String:DataTree]{"fields": DataTree.Object([String:DataTree]{}), "source_span": DataTree.Null, "variant": DataTree.Int(1)})}
+    expected_details :: [String]{"error report detail fields is not an object", "error report source span is not an object", "error report lacks start", "error report detail variant is not text"}
+    loop index in 0..<bad_details.len() {
+        reason :: if jet_error_details_from_json(bad_details[index]) == {
+            .Ok(_) -> panic("bad details accepted")
+            .Err(error) -> error.message
+        }
+        assert(reason == expected_details[index])
+    }
+}
+
+#Test("error report protocol nested equality empty option and raw detail rejection") {
+    plain :: JetErrorReport{message: "plain"}.to_json()
+    outcome_test_wire_refusal("{{\"schema\":\"jet.err/v1\",\"message\":\"root\",\"code\":null,\"cause\":[{plain}]}}", "error report is not canonical")
+    outcome_test_wire_refusal("{{\"schema\":\"jet.err/v1\",\"message\":\"root\",\"code\":null,\"cause\":{{\"schema\":\"jet.err/v1\",\"message\":\"plain\",\"code\":null,\"cause\":null,\"extra\":1}}}}", "error report is not canonical")
+    outcome_test_wire_refusal("{{\"schema\":\"jet.err/v1\",\"message\":\"root\",\"code\":null,\"cause\":null,\"details\":{{\"variant\":\"Typed\",\"fields\":{{\"number\":1.0}},\"source_span\":null}}}}", "error report is not canonical")
+    outcome_test_wire_refusal("{{\"schema\":\"jet.err/v1\",\"message\":\"root\",\"code\":null,\"cause\":null,\"origin\":null}}", "error report journey frame is not an object")
+    outcome_test_wire_refusal("{{\"schema\":\"jet.err/v1\",\"message\":\"root\",\"code\":null,\"cause\":null,\"typed_identity\":null}}", "error report typed_identity is not text")
+    report :: JetErrorReport{message: "root", details: Val(JetErrorDetails{variant: "Large", fields: [JetErrorField]{}, source_span: Val(JetErrorSpan{start: 18446744073709551615, end: 0})})}
+    outcome_test_wire_refusal(report.to_json(), "error report span start is not an integer")
+}
+
+#Test("error report protocol depth64 strict syntax and no protocol byte ceiling") {
+    nested := [U8]{}
+    loop _ in 0..<65 -> &nested.push(U8{91})
+    &nested.push(U8{48})
+    loop _ in 0..<65 -> &nested.push(U8{93})
+    hostile :: String.from_bytes(nested) ?? panic("bad depth fixture")
+    outcome_test_wire_refusal(hostile, "invalid error report: JSON value is nested too deeply")
+    text := [U8]{}
+    loop _ in 0..<1048577 -> &text.push(U8{120})
+    message :: String.from_bytes(text) ?? panic("bad long fixture")
+    report :: JetErrorReport{message: message}
+    wire :: report.to_json()
+    assert((JetErrorReport.from_json(wire) ?? panic("Outcome acquired a protocol byte ceiling")).to_json() == wire)
+    outcome_test_wire_refusal("{{\"schema\":\"jet.err/v1\",\"message\":\"\\u0070lain\",\"code\":null,\"cause\":null}}", "error report is not canonical")
+}

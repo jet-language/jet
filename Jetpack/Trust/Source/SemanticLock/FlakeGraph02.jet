@@ -1,0 +1,772 @@
+// PORT-PENDING 0918 crates-jetpack-src-semanticlock-slice-3606: crates/jetpack/src/SemanticLock.rs:3606-4373
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS pub fn overlay_invalidations(
+//RS     before_fingerprints: &BTreeMap<(String, String), String>,
+//RS     after_fingerprints: &BTreeMap<(String, String), String>,
+//RS     actions_by_package: &BTreeMap<String, Vec<String>>,
+//RS ) -> Vec<OverlayInvalidation> {
+//RS     let mut keys: BTreeSet<(String, String)> = BTreeSet::new();
+//RS     keys.extend(before_fingerprints.keys().cloned());
+//RS     keys.extend(after_fingerprints.keys().cloned());
+//RS     let mut out = Vec::new();
+//RS     for (overlay, package) in keys {
+//RS         let before = before_fingerprints
+//RS             .get(&(overlay.clone(), package.clone()))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let after = after_fingerprints
+//RS             .get(&(overlay.clone(), package.clone()))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         if before == after {
+//RS             continue;
+//RS         }
+//RS         let affected = actions_by_package
+//RS             .get(&package)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| vec![format!("action:{package}")]);
+//RS         let reason = if before.is_empty() {
+//RS             format!("overlay `{overlay}` added package `{package}`")
+//RS         } else if after.is_empty() {
+//RS             format!("overlay `{overlay}` removed package `{package}`")
+//RS         } else {
+//RS             format!("overlay `{overlay}` changed package `{package}` policy ({before} → {after})")
+//RS         };
+//RS         out.push(OverlayInvalidation {
+//RS             overlay,
+//RS             package,
+//RS             policy_fingerprint_before: before,
+//RS             policy_fingerprint_after: after,
+//RS             affected_action_keys: affected,
+//RS             reason,
+//RS         });
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS /// Apply overlay invalidations: drop stale overlay records; clear hashes of
+//RS /// affected packages so offline realize fails until rebuild.
+//RS pub fn apply_overlay_invalidations(
+//RS     lock: &mut SemanticLockFile,
+//RS     invalidations: &[OverlayInvalidation],
+//RS ) {
+//RS     for inv in invalidations {
+//RS         let overlay_key = format!("{}:{}", inv.overlay, inv.package);
+//RS         lock.records.retain(|r| {
+//RS             !(r.identity.kind == LockRecordKind::PackageOverlay && r.identity.key == overlay_key)
+//RS         });
+//RS         for rec in &mut lock.records {
+//RS             if rec.identity.key == inv.package
+//RS                 || inv.affected_action_keys.iter().any(|a| {
+//RS                     a == &rec.identity.key || a.ends_with(&format!(":{}", rec.identity.key))
+//RS                 })
+//RS             {
+//RS                 rec.identity.hash.clear();
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Project lock path (`.jet/lock`).
+//RS pub fn live_path(project: &Path) -> PathBuf {
+//RS     crate::Store::lock_path(project)
+//RS }
+//RS 
+//RS /// Load semantic sections from the live unified lock (ignores machine-only
+//RS /// `[[package]]` / `[[toolchain]]` blocks — Lock::parse still owns those).
+//RS pub fn load(project: &Path) -> Option<SemanticLockFile> {
+//RS     let raw = std::fs::read_to_string(live_path(project)).ok()?;
+//RS     let lock = parse(&raw);
+//RS     if lock.records.is_empty() && lock.inputs.is_empty() && lock.source_maps.is_empty() {
+//RS         // Distinguish "no semantic content" from "file missing".
+//RS         if raw.contains("[[semantic_record]]")
+//RS             || raw.contains("[[lock_input]]")
+//RS             || raw.contains("[[source_map]]")
+//RS             || raw.contains("semantic-lock-version")
+//RS         {
+//RS             return Some(lock);
+//RS         }
+//RS         return Some(SemanticLockFile::default());
+//RS     }
+//RS     Some(lock)
+//RS }
+//RS 
+//RS /// Strip semantic sections so machine Lock::parse/write keep their bytes.
+//RS pub fn strip_semantic_sections(raw: &str) -> String {
+//RS     let mut out = String::new();
+//RS     let mut skipping = false;
+//RS     for line in raw.lines() {
+//RS         let trimmed = line.trim();
+//RS         if trimmed.starts_with('[') {
+//RS             skipping = matches!(
+//RS                 trimmed,
+//RS                 "[[semantic_record]]"
+//RS                     | "[[semantic_record.rationale]]"
+//RS                     | "[[lock_input]]"
+//RS                     | "[[source_map]]"
+//RS             );
+//RS             if skipping {
+//RS                 continue;
+//RS             }
+//RS         }
+//RS         if skipping {
+//RS             continue;
+//RS         }
+//RS         if trimmed.starts_with("semantic-lock-version") {
+//RS             continue;
+//RS         }
+//RS         out.push_str(line);
+//RS         out.push('\n');
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS /// Merge three-way, revalidate, then atomically write into `.jet/lock`.
+//RS pub fn merge_revalidate_commit(
+//RS     project: &Path,
+//RS     base: &SemanticLockFile,
+//RS     left: &SemanticLockFile,
+//RS     right: &SemanticLockFile,
+//RS ) -> Result<SemanticLockFile, LockCommitError> {
+//RS     let outcome = merge(base, left, right);
+//RS     if !outcome.conflicts.is_empty() {
+//RS         return Err(LockCommitError {
+//RS             issues: outcome
+//RS                 .conflicts
+//RS                 .iter()
+//RS                 .map(|c| ValidationIssue::DomainConflict {
+//RS                     key: c.semantic_key.clone(),
+//RS                     left: c.left_identity.clone(),
+//RS                     right: c.right_identity.clone(),
+//RS                 })
+//RS                 .collect(),
+//RS             io: None,
+//RS         });
+//RS     }
+//RS     atomic_commit(project, &outcome.merged)?;
+//RS     Ok(outcome.merged)
+//RS }
+//RS 
+//RS /// Revalidate then atomically splice semantic sections into `.jet/lock`.
+//RS pub fn atomic_commit(project: &Path, lock: &SemanticLockFile) -> Result<(), LockCommitError> {
+//RS     if let Err(issues) = revalidate(lock) {
+//RS         return Err(LockCommitError { issues, io: None });
+//RS     }
+//RS     let path = live_path(project);
+//RS     let project = project.to_path_buf();
+//RS     let lock = lock.clone();
+//RS     crate::RuntimePolicy::with_project_lock(&project, "semantic-lock", || {
+//RS         let existing = std::fs::read_to_string(&path).unwrap_or_default();
+//RS         let machine = strip_semantic_sections(&existing);
+//RS         // Machine half must remain Lock-parseable when present.
+//RS         let machine = if machine.trim().is_empty() {
+//RS             let mut lock = crate::Lock::parse("version = 1\n").map_err(std::io::Error::other)?;
+//RS             crate::Lock::ensure_build_stamp(&project, &mut lock);
+//RS             crate::Lock::write(&lock)
+//RS         } else {
+//RS             let mut lock = crate::Lock::parse(&machine).map_err(std::io::Error::other)?;
+//RS             if lock.build_stamp.is_none() {
+//RS                 crate::Lock::ensure_build_stamp(&project, &mut lock);
+//RS                 crate::Lock::write(&lock)
+//RS             } else {
+//RS                 machine
+//RS             }
+//RS         };
+//RS         let semantic = write(&lock);
+//RS         let body = if machine.trim().is_empty() {
+//RS             format!("version = 1\n\n{semantic}")
+//RS         } else {
+//RS             format!("{}\n\n{semantic}", machine.trim_end())
+//RS         };
+//RS         crate::Lock::write_lock_atomically(&project, body.as_bytes())
+//RS             .map_err(std::io::Error::other)?;
+//RS         Ok(())
+//RS     })
+//RS     .map_err(|e| LockCommitError {
+//RS         issues: Vec::new(),
+//RS         io: Some(e.to_string()),
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod flake_tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn parses_follows_outputs_and_round_trips_through_semantic_lock() {
+//RS         let source = r#"
+//RS {
+//RS   inputs = {
+//RS     nixpkgs.url = "github:NixOS/nixpkgs?rev=0123456789abcdef0123456789abcdef01234567";
+//RS     tools.url = "github:example/tools?rev=89abcdef0123456789abcdef0123456789abcdef";
+//RS     tools.follows = "nixpkgs";
+//RS   };
+//RS   outputs = { self, nixpkgs, ... }: {
+//RS     packages.x86_64-linux.app = 1;
+//RS     devShells.x86_64-linux.default = 2;
+//RS   };
+//RS }
+//RS "#;
+//RS         let graph = FlakeGraph::parse("flake.nix", source).unwrap();
+//RS         assert_eq!(graph.inputs.len(), 2);
+//RS         assert_eq!(graph.inputs[1].follows, "nixpkgs");
+//RS         assert_eq!(graph.inputs[1].revision, graph.inputs[0].revision);
+//RS         assert_eq!(graph.named_dev_shells().len(), 1);
+//RS 
+//RS         let lock = graph.semantic_lock();
+//RS         let restored = FlakeGraph::from_semantic_lock(".jet/lock", &lock).unwrap();
+//RS         assert_eq!(restored.inputs, graph.inputs);
+//RS         assert_eq!(restored.outputs, graph.outputs);
+//RS         assert_eq!(restored.semantic_lock_text(), graph.semantic_lock_text());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn ignores_nested_package_references_when_pinning_outputs() {
+//RS         let source = r#"
+//RS {
+//RS   devShells.x86_64-linux.default = {
+//RS     packages = [ (builtins.getFlake "path:./dep").packages.x86_64-linux.default ];
+//RS   };
+//RS   packages.x86_64-linux.fetched = pkgs.fd;
+//RS }
+//RS "#;
+//RS         let graph = FlakeGraph::parse("flake.nix", source).unwrap();
+//RS         let package_outputs = graph
+//RS             .outputs
+//RS             .iter()
+//RS             .filter(|output| output.kind == FlakeOutputKind::Package)
+//RS             .map(|output| output.attribute.as_str())
+//RS             .collect::<Vec<_>>();
+//RS         assert_eq!(package_outputs, vec!["fetched"]);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn pinned_flake_lock_fixture_preserves_nodes_edges_and_registry_resolution() {
+//RS         let source = include_str!("../../../tests/fixtures/nix-compat/stage-a-flake.nix");
+//RS         let lock = include_str!("../../../tests/fixtures/nix-compat/stage-a-flake.lock");
+//RS         let expected = crate::JSON::parse(include_str!(
+//RS             "../../../tests/fixtures/nix-compat/stage-a-flake.expected.json"
+//RS         ))
+//RS         .unwrap();
+//RS         let expected = expected.as_object().unwrap();
+//RS         let graph = FlakeGraph::parse_with_lock(
+//RS             "tests/fixtures/nix-compat/stage-a-flake.nix".to_string(),
+//RS             source,
+//RS             Some(lock),
+//RS             true,
+//RS         )
+//RS         .unwrap();
+//RS 
+//RS         let expected_revisions = data_field(expected, "input_revisions")
+//RS             .unwrap()
+//RS             .as_object()
+//RS             .unwrap();
+//RS         for input in &graph.inputs {
+//RS             assert_eq!(
+//RS                 input.revision,
+//RS                 data_field(expected_revisions, &input.name)
+//RS                     .unwrap()
+//RS                     .as_str()
+//RS                     .unwrap()
+//RS             );
+//RS         }
+//RS         let expected_nodes = data_field(expected, "lock_nodes")
+//RS             .unwrap()
+//RS             .as_array()
+//RS             .unwrap()
+//RS             .iter()
+//RS             .map(|value| value.as_str().unwrap())
+//RS             .collect::<Vec<_>>();
+//RS         assert_eq!(
+//RS             graph
+//RS                 .lock_nodes
+//RS                 .iter()
+//RS                 .map(|node| node.name.as_str())
+//RS                 .collect::<Vec<_>>(),
+//RS             expected_nodes
+//RS         );
+//RS         let systems = graph
+//RS             .lock_nodes
+//RS             .iter()
+//RS             .find(|node| node.name == "flake-utils")
+//RS             .unwrap()
+//RS             .inputs
+//RS             .first()
+//RS             .unwrap();
+//RS         assert_eq!(systems.name, "systems");
+//RS         assert_eq!(systems.target, "[\"systems\"]");
+//RS 
+//RS         let registry = graph.registries.first().unwrap();
+//RS         let expected_registry = data_field(expected, "registry").unwrap().as_object().unwrap();
+//RS         assert_eq!(
+//RS             registry.alias,
+//RS             data_field(expected_registry, "alias").unwrap().as_str().unwrap()
+//RS         );
+//RS         assert_eq!(
+//RS             registry.node,
+//RS             data_field(expected_registry, "node").unwrap().as_str().unwrap()
+//RS         );
+//RS         let locked = crate::JSON::parse(&registry.locked).unwrap();
+//RS         let locked = locked.as_object().unwrap();
+//RS         for field in ["type", "owner", "repo"] {
+//RS             assert_eq!(
+//RS                 data_field(locked, field).unwrap().as_str().unwrap(),
+//RS                 data_field(expected_registry, &format!("locked_{field}"))
+//RS                     .unwrap()
+//RS                     .as_str()
+//RS                     .unwrap()
+//RS             );
+//RS         }
+//RS 
+//RS         let restored = FlakeGraph::from_semantic_lock(".jet/lock", &graph.semantic_lock()).unwrap();
+//RS         assert_eq!(restored, graph);
+//RS         assert_eq!(restored.semantic_lock_text(), graph.semantic_lock_text());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn transitive_indirect_registry_resolution_round_trips() {
+//RS         let source = r#"
+//RS {
+//RS   inputs.tools.url = "github:example/tools?rev=0123456789abcdef0123456789abcdef01234567";
+//RS   outputs = { tools, ... }: {
+//RS     packages.x86_64-linux.default = tools;
+//RS   };
+//RS }
+//RS "#;
+//RS         let lock = r#"
+//RS {
+//RS   "nodes": {
+//RS     "root": { "inputs": { "tools": "tools" } },
+//RS     "tools": {
+//RS       "inputs": { "nixpkgs": "nixpkgs" },
+//RS       "locked": { "owner": "example", "repo": "tools", "rev": "0123456789abcdef0123456789abcdef01234567", "type": "github" },
+//RS       "original": { "owner": "example", "repo": "tools", "type": "github" }
+//RS     },
+//RS     "nixpkgs": {
+//RS       "locked": { "owner": "NixOS", "repo": "nixpkgs", "rev": "89abcdef0123456789abcdef0123456789abcdef", "type": "github" },
+//RS       "original": { "id": "nixpkgs", "type": "indirect" }
+//RS     }
+//RS   }
+//RS }
+//RS "#;
+//RS         let graph =
+//RS             FlakeGraph::parse_with_lock("flake.nix".to_string(), source, Some(lock), true).unwrap();
+//RS         let registry = graph
+//RS             .registries
+//RS             .iter()
+//RS             .find(|entry| entry.alias == "nixpkgs")
+//RS             .unwrap();
+//RS         assert_eq!(registry.node, "nixpkgs");
+//RS         assert!(registry.locked.contains("\"rev\":\"89abcdef"));
+//RS 
+//RS         let restored = FlakeGraph::from_semantic_lock(".jet/lock", &graph.semantic_lock()).unwrap();
+//RS         assert_eq!(restored.registries, graph.registries);
+//RS         assert_eq!(restored.lock_nodes, graph.lock_nodes);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn indirect_registry_alias_ref_and_query_identity_round_trips_and_rejects_drift() {
+//RS         let source =
+//RS             r#"{ inputs.nixpkgs.url = "nixpkgs/nixos-unstable?ref=nixos-unstable&dir=lib"; }"#;
+//RS         let lock = r#"
+//RS {
+//RS   "nodes": {
+//RS     "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+//RS     "nixpkgs": {
+//RS       "locked": {
+//RS         "owner": "NixOS",
+//RS         "repo": "nixpkgs",
+//RS         "rev": "0123456789abcdef0123456789abcdef01234567",
+//RS         "type": "github"
+//RS       },
+//RS       "original": {
+//RS         "dir": "lib",
+//RS         "id": "nixpkgs",
+//RS         "ref": "nixos-unstable",
+//RS         "type": "indirect"
+//RS       }
+//RS     }
+//RS   }
+//RS }
+//RS "#;
+//RS         let graph =
+//RS             FlakeGraph::parse_with_lock("flake.nix".to_string(), source, Some(lock), true).unwrap();
+//RS         assert_eq!(
+//RS             graph.inputs[0].revision,
+//RS             "0123456789abcdef0123456789abcdef01234567"
+//RS         );
+//RS         let registry = graph.registries.first().unwrap();
+//RS         assert_eq!(registry.alias, "nixpkgs");
+//RS         assert_eq!(registry.node, "nixpkgs");
+//RS 
+//RS         let restored = FlakeGraph::from_semantic_lock(".jet/lock", &graph.semantic_lock()).unwrap();
+//RS         assert_eq!(restored, graph);
+//RS 
+//RS         let wrong_ref = lock.replace("\"ref\": \"nixos-unstable\"", "\"ref\": \"nixos-24.11\"");
+//RS         let error =
+//RS             FlakeGraph::parse_with_lock("flake.nix".to_string(), source, Some(&wrong_ref), true)
+//RS                 .unwrap_err();
+//RS         assert!(
+//RS             matches!(error, FlakeGraphError::Io(reason) if reason.contains("different source URL"))
+//RS         );
+//RS 
+//RS         let wrong_query = lock.replace("\"dir\": \"lib\"", "\"dir\": \"share\"");
+//RS         let error =
+//RS             FlakeGraph::parse_with_lock("flake.nix".to_string(), source, Some(&wrong_query), true)
+//RS                 .unwrap_err();
+//RS         assert!(
+//RS             matches!(error, FlakeGraphError::Io(reason) if reason.contains("different source URL"))
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn flake_lock_follow_paths_resolve_to_terminal_node() {
+//RS         let nodes = crate::JSON::parse(
+//RS             r#"{
+//RS   "root": { "inputs": { "flake-utils": "flake-utils" } },
+//RS   "flake-utils": { "inputs": { "systems": "systems" } },
+//RS   "systems": { "inputs": {} }
+//RS }"#,
+//RS         )
+//RS         .unwrap()
+//RS         .as_object()
+//RS         .unwrap()
+//RS         .iter()
+//RS         .cloned()
+//RS         .collect::<BTreeMap<_, _>>();
+//RS         let reference = crate::JSON::parse(r#"["flake-utils", "systems"]"#).unwrap();
+//RS         assert_eq!(
+//RS             lock_node_name(Some(&reference), &nodes, "root").unwrap(),
+//RS             Some("systems".to_string())
+//RS         );
+//RS         let reference = crate::JSON::parse(r#"["systems"]"#).unwrap();
+//RS         assert_eq!(
+//RS             lock_node_name(Some(&reference), &nodes, "flake-utils").unwrap(),
+//RS             Some("systems".to_string())
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn flake_lock_revision_drift_fails_closed() {
+//RS         let source = "{ inputs.nixpkgs.url = \"github:NixOS/nixpkgs?rev=aaaaaaaa\"; }";
+//RS         let lock = r#"
+//RS {
+//RS   "nodes": {
+//RS     "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+//RS     "nixpkgs": {
+//RS       "locked": { "rev": "bbbbbbbb" },
+//RS       "original": { "type": "github", "owner": "NixOS", "repo": "nixpkgs" }
+//RS     }
+//RS   }
+//RS }
+//RS "#;
+//RS         let error = FlakeGraph::parse_with_lock("flake.nix".to_string(), source, Some(lock), true)
+//RS             .unwrap_err();
+//RS         assert!(matches!(
+//RS             error,
+//RS             FlakeGraphError::ConflictingInput { input, field }
+//RS                 if input == "nixpkgs" && field == "revision"
+//RS         ));
+//RS 
+//RS         let wrong_repo = r#"
+//RS {
+//RS   "nodes": {
+//RS     "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+//RS     "nixpkgs": {
+//RS       "locked": { "rev": "aaaaaaaa" },
+//RS       "original": { "type": "github", "owner": "other", "repo": "repo" }
+//RS     }
+//RS   }
+//RS }
+//RS "#;
+//RS         let error = FlakeGraph::parse_with_lock(
+//RS             "flake.nix".to_string(),
+//RS             "{ inputs.nixpkgs.url = \"github:NixOS/nixpkgs?rev=aaaaaaaa\"; }",
+//RS             Some(wrong_repo),
+//RS             true,
+//RS         )
+//RS         .unwrap_err();
+//RS         assert!(
+//RS             matches!(error, FlakeGraphError::Io(reason) if reason.contains("different source URL"))
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn flake_lock_metadata_and_indirect_alias_fail_closed() {
+//RS         let source = "{ inputs.nixpkgs.url = \"nixpkgs\"; }";
+//RS         let missing_original = r#"
+//RS {
+//RS   "nodes": {
+//RS     "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+//RS     "nixpkgs": { "locked": { "rev": "aaaaaaaa" } }
+//RS   }
+//RS }
+//RS "#;
+//RS         let error = FlakeGraph::parse_with_lock(
+//RS             "flake.nix".to_string(),
+//RS             source,
+//RS             Some(missing_original),
+//RS             true,
+//RS         )
+//RS         .unwrap_err();
+//RS         assert!(
+//RS             matches!(error, FlakeGraphError::Io(reason) if reason.contains("missing `original`"))
+//RS         );
+//RS 
+//RS         let root_metadata = r#"
+//RS {
+//RS   "nodes": {
+//RS     "root": {
+//RS       "inputs": { "nixpkgs": "nixpkgs" },
+//RS       "original": { "type": "github" }
+//RS     },
+//RS     "nixpkgs": {
+//RS       "locked": { "rev": "aaaaaaaa" },
+//RS       "original": { "type": "github", "owner": "NixOS", "repo": "nixpkgs" }
+//RS     }
+//RS   }
+//RS }
+//RS "#;
+//RS         let error =
+//RS             FlakeGraph::parse_with_lock("flake.nix".to_string(), source, Some(root_metadata), true)
+//RS                 .unwrap_err();
+//RS         assert!(
+//RS             matches!(error, FlakeGraphError::Io(reason) if reason.contains("root node must not carry"))
+//RS         );
+//RS 
+//RS         let empty_node_name = r#"
+//RS {
+//RS   "nodes": {
+//RS     "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+//RS     "": {
+//RS       "locked": { "rev": "aaaaaaaa" },
+//RS       "original": { "type": "github", "owner": "NixOS", "repo": "nixpkgs" }
+//RS     },
+//RS     "nixpkgs": {
+//RS       "locked": { "rev": "aaaaaaaa" },
+//RS       "original": { "type": "github", "owner": "NixOS", "repo": "nixpkgs" }
+//RS     }
+//RS   }
+//RS }
+//RS "#;
+//RS         let error = FlakeGraph::parse_with_lock(
+//RS             "flake.nix".to_string(),
+//RS             source,
+//RS             Some(empty_node_name),
+//RS             true,
+//RS         )
+//RS         .unwrap_err();
+//RS         assert!(
+//RS             matches!(error, FlakeGraphError::Io(reason) if reason.contains("node name is empty"))
+//RS         );
+//RS 
+//RS         let malformed_indirect = r#"
+//RS {
+//RS   "nodes": {
+//RS     "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+//RS     "nixpkgs": {
+//RS       "locked": { "rev": "aaaaaaaa" },
+//RS       "original": { "type": "indirect" }
+//RS     }
+//RS   }
+//RS }
+//RS "#;
+//RS         let error = FlakeGraph::parse_with_lock(
+//RS             "flake.nix".to_string(),
+//RS             source,
+//RS             Some(malformed_indirect),
+//RS             true,
+//RS         )
+//RS         .unwrap_err();
+//RS         assert!(
+//RS             matches!(error, FlakeGraphError::Io(reason) if reason.contains("indirect input has no id"))
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn floating_or_conflicting_foreign_inputs_fail_closed() {
+//RS         let floating = FlakeGraph::parse(
+//RS             "flake.nix",
+//RS             "{ inputs.nixpkgs.url = \"github:NixOS/nixpkgs\"; }",
+//RS         )
+//RS         .unwrap_err();
+//RS         assert!(matches!(floating, FlakeGraphError::MissingRevision { .. }));
+//RS 
+//RS         let conflicting = FlakeGraph::parse(
+//RS             "flake.nix",
+//RS             "{ inputs.nixpkgs.url = \"github:NixOS/nixpkgs?rev=aaaaaaa\"; inputs.nixpkgs.url = \"github:NixOS/nixpkgs?rev=bbbbbbb\"; }",
+//RS         )
+//RS         .unwrap_err();
+//RS         assert!(matches!(
+//RS             conflicting,
+//RS             FlakeGraphError::ConflictingInput { .. }
+//RS         ));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn lock_input_without_revision_is_not_promoted_from_nar_hash() {
+//RS         let source = "{ inputs.nixpkgs.url = \"github:NixOS/nixpkgs\"; }";
+//RS         let lock = r#"
+//RS {
+//RS   "nodes": {
+//RS     "root": { "inputs": { "nixpkgs": "nixpkgs" } },
+//RS     "nixpkgs": {
+//RS       "locked": { "narHash": "sha256-deadbeef" },
+//RS       "original": { "type": "github", "owner": "NixOS", "repo": "nixpkgs" }
+//RS     }
+//RS   }
+//RS }
+//RS "#;
+//RS         let error = FlakeGraph::parse_with_lock("flake.nix".to_string(), source, Some(lock), true)
+//RS             .expect_err("narHash is not an exact source revision");
+//RS         assert!(matches!(error, FlakeGraphError::MissingRevision { input } if input == "nixpkgs"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn semantic_lock_requires_every_flake_input_record() {
+//RS         let lock = SemanticLockFile {
+//RS             inputs: vec![LockInput {
+//RS                 name: "nixpkgs".to_string(),
+//RS                 url: "github:NixOS/nixpkgs".to_string(),
+//RS                 follows: String::new(),
+//RS             }],
+//RS             ..SemanticLockFile::default()
+//RS         };
+//RS         let error = FlakeGraph::from_semantic_lock("flake.nix", &lock).unwrap_err();
+//RS         assert!(matches!(error, FlakeGraphError::MissingRevision { input } if input == "nixpkgs"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn loading_a_changed_flake_rejects_a_stale_semantic_lock() {
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-flake-stale-{}-{}",
+//RS             std::process::id(),
+//RS             std::time::SystemTime::now()
+//RS                 .duration_since(std::time::UNIX_EPOCH)
+//RS                 .unwrap()
+//RS                 .as_nanos()
+//RS         ));
+//RS         std::fs::create_dir_all(root.join(".jet")).unwrap();
+//RS         let flake = root.join("flake.nix");
+//RS         let source = "{ inputs.nixpkgs.url = \"github:NixOS/nixpkgs?rev=0123456789abcdef0123456789abcdef01234567\"; }";
+//RS         std::fs::write(&flake, source).unwrap();
+//RS         let graph = FlakeGraph::parse(flake.display().to_string(), source).unwrap();
+//RS         let lock_body = write(&graph.semantic_lock());
+//RS         std::fs::write(live_path(&root), &lock_body).unwrap();
+//RS 
+//RS         assert!(FlakeGraph::load(&flake).is_ok());
+//RS         std::fs::write(&flake, format!("{source}\n# changed\n")).unwrap();
+//RS         let error = FlakeGraph::load(&flake).unwrap_err();
+//RS         assert!(
+//RS             matches!(error, FlakeGraphError::StaleSemanticLock(_)),
+//RS             "{error}"
+//RS         );
+//RS         assert_eq!(
+//RS             std::fs::read(live_path(&root)).unwrap(),
+//RS             lock_body.as_bytes()
+//RS         );
+//RS         let prior = FlakeGraph::from_semantic_lock("flake.nix", &parse(&lock_body))
+//RS             .expect("the previous semantic plan must remain readable after source drift");
+//RS         assert_eq!(prior.source_fingerprint, graph.source_fingerprint);
+//RS 
+//RS         let _ = std::fs::remove_dir_all(root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn flake_parts_composition_is_graph_data_and_round_trips() {
+//RS         let source = r#"
+//RS {
+//RS   inputs = {
+//RS     flake-parts.url = "github:hercules-ci/flake-parts?rev=0123456789abcdef0123456789abcdef01234567";
+//RS     nixpkgs.url = "github:NixOS/nixpkgs?rev=89abcdef0123456789abcdef0123456789abcdef";
+//RS   };
+//RS   outputs = inputs@{ flake-parts, ... }:
+//RS     flake-parts.lib.mkFlake { inherit inputs; } {
+//RS       imports = [ ./parts/dev.nix ];
+//RS       systems = [ "x86_64-linux" "aarch64-darwin" ];
+//RS       perSystem = { pkgs, ... }: {
+//RS         packages.default = pkgs.hello;
+//RS         devShells.default = pkgs.mkShell { };
+//RS       };
+//RS     };
+//RS }
+//RS "#;
+//RS         let graph = FlakeGraph::parse("flake.nix", source).unwrap();
+//RS         assert_eq!(
+//RS             graph.composition,
+//RS             Some(FlakeComposition {
+//RS                 framework: "flake-parts".to_string(),
+//RS                 modules: vec!["./parts/dev.nix".to_string()],
+//RS                 module_sources: Vec::new(),
+//RS                 systems: vec!["aarch64-darwin".to_string(), "x86_64-linux".to_string()],
+//RS                 per_system: true,
+//RS             })
+//RS         );
+//RS         assert!(!graph.unsupported.iter().any(|item| item == "flake-parts"));
+//RS         assert!(!graph.unsupported.iter().any(|item| item == "perSystem"));
+//RS         let restored = FlakeGraph::from_semantic_lock(".jet/lock", &graph.semantic_lock()).unwrap();
+//RS         assert_eq!(restored.composition, graph.composition);
+//RS         assert_eq!(restored.stable_json(), graph.stable_json());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn loaded_flake_parts_modules_are_fingerprinted_in_the_same_lock() {
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-flake-parts-source-{}-{}",
+//RS             std::process::id(),
+//RS             std::time::SystemTime::now()
+//RS                 .duration_since(std::time::UNIX_EPOCH)
+//RS                 .unwrap()
+//RS                 .as_nanos()
+//RS         ));
+//RS         std::fs::create_dir_all(root.join(".jet")).unwrap();
+//RS         std::fs::create_dir_all(root.join("parts")).unwrap();
+//RS         let flake = root.join("flake.nix");
+//RS         let module = root.join("parts/dev.nix");
+//RS         let shared = root.join("shared.nix");
+//RS         let source = r#"
+//RS {
+//RS   inputs.flake-parts.url = "github:hercules-ci/flake-parts?rev=0123456789abcdef0123456789abcdef01234567";
+//RS   outputs = inputs@{ flake-parts, ... }:
+//RS     flake-parts.lib.mkFlake { inherit inputs; } {
+//RS       imports = [ ./parts/dev.nix ];
+//RS       systems = [ "x86_64-linux" ];
+//RS       perSystem = { pkgs, ... }: { devShells.default = pkgs.mkShell { }; };
+//RS     };
+//RS }
+//RS "#;
+//RS         let module_source =
+//RS             "{ imports = [ ../shared.nix ]; perSystem = { pkgs, ... }: { devShells.default = pkgs.mkShell { }; }; }\n";
+//RS         let shared_source = "{ perSystem = { pkgs, ... }: { packages.default = pkgs.hello; }; }\n";
+//RS         std::fs::write(&flake, source).unwrap();
+//RS         std::fs::write(&module, module_source).unwrap();
+//RS         std::fs::write(&shared, shared_source).unwrap();
+//RS 
+//RS         let graph = FlakeGraph::load(&flake).unwrap();
+//RS         let module_sources = &graph.composition.as_ref().unwrap().module_sources;
+//RS         assert_eq!(
+//RS             module_sources,
+//RS             &vec![
+//RS                 format!(
+//RS                     "./parts/dev.nix\t{}",
+//RS                     crate::SHA256::sha256_hex(module_source.as_bytes())
+//RS                 ),
+//RS                 format!(
+//RS                     "./shared.nix\t{}",
+//RS                     crate::SHA256::sha256_hex(shared_source.as_bytes())
+//RS                 ),
+//RS             ]
+//RS         );
+//RS         std::fs::write(live_path(&root), write(&graph.semantic_lock())).unwrap();
+//RS         assert_eq!(FlakeGraph::load(&flake).unwrap(), graph);
+//RS 
+//RS         std::fs::write(&shared, "{ perSystem = { }; }\n").unwrap();
+//RS         let error = FlakeGraph::load(&flake).unwrap_err();
+//RS         assert!(
+//RS             matches!(error, FlakeGraphError::StaleSemanticLock(reason) if reason.contains("composition"))
+//RS         );
+//RS         let _ = std::fs::remove_dir_all(root);
+//RS     }
+//RS }
+// END-PORT-PENDING 0918 crates/jetpack/src/SemanticLock.rs:3606-4373
+

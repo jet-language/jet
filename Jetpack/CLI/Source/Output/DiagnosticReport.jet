@@ -18,12 +18,7 @@ pub fn cli_diagnostic_to_report(diagnostic: Diagnostic, file: ReportPath) -> Rep
     }
     severity :: if diagnostic.severity == DIAGNOSTIC_ERROR -> "error" else -> "warning"
     report := ReportEnvelope.new(moment, severity, diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
-    if diagnostic.applicability == .Val(applicability) {
-        report.applicability = Val(if applicability == {
-            .Safe -> FixApplicability.Safe
-            .Suggested -> FixApplicability.Suggested
-        })
-    }
+    report.applicability = diagnostic.applicability
     report.denial_kind = diagnostic.denial_kind
     report.call_chain = diagnostic.call_chain
     report.scope_chain = diagnostic.scope_chain
@@ -32,15 +27,10 @@ pub fn cli_diagnostic_to_report(diagnostic: Diagnostic, file: ReportPath) -> Rep
     if !file.is_empty() -> report.file = Val(file)
     if diagnostic.edit == .Val(edit) {
         safety :: diagnostic.safety ?? panic("diagnostic `{diagnostic.code}` has an edit without a safety grade")
-        &report.push_fix_edit(ReportEdit.new(file, ReportSpan.new(edit.span.start, edit.span.end), edit.new_text, cli_report_fix_safety(safety))) ?? panic("a registry edit is valid for its report")
+        &report.push_fix_edit(ReportEdit.new(file, ReportSpan.new(edit.span.start, edit.span.end), edit.new_text, safety)) ?? panic("a registry edit is valid for its report")
     }
     if diagnostic.no_fix_reason == .Val(reason) {
-        kind :: if reason.kind == {
-            .Behavior -> NoFixReasonKind.Behavior
-            .Design -> NoFixReasonKind.Design
-            .Ambiguous -> NoFixReasonKind.Ambiguous
-        }
-        &report.set_no_fix_reason(NoFixReason.new(kind, reason.next)) ?? panic("a registry no-fix reason is valid for its report")
+        &report.set_no_fix_reason(reason) ?? panic("a registry no-fix reason is valid for its report")
     }
     loop cause in diagnostic.cause {
         projected := ReportCause.new(cause.code)
@@ -48,14 +38,4 @@ pub fn cli_diagnostic_to_report(diagnostic: Diagnostic, file: ReportPath) -> Rep
         &report.cause.push(projected)
     }
     report
-}
-
-fn cli_report_fix_safety(safety: DiagnosticFixSafety) -> FixSafety Never! {
-    if safety == {
-        .Formatting -> FixSafety.Formatting
-        .BehaviorPreserving -> FixSafety.BehaviorPreserving
-        .ApiChanging -> FixSafety.ApiChanging
-        .TargetChanging -> FixSafety.TargetChanging
-        .NeedsReview -> FixSafety.NeedsReview
-    }
 }

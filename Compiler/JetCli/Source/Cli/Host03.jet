@@ -1,0 +1,606 @@
+// Private fragment of the canonical Cli.Host owner.
+use jet_driver as Driver
+use jet_foundation.[Diagnostic, Severity, ExitCodes, Syntax, JobMetadata]
+use jet as jet
+use jet_cli.[Store, CheckReceipt, CmdInspect, CmdDevTools, CmdFill, CmdBudget, ProductionReceipt, ProveReplay, DevAot]
+// GATE #4494: process, monotonic clock, environment and filesystem primitives.
+use std.process.[Command, exit, id]
+use std.time.Instant
+use std.env as env
+use std.fs as fs
+use std.sync.Arc
+
+// Rust: Source/CmdCompile.rs:3306
+fn run_native_execution_inner(request: NativeExecutionRequest) {
+    cmd :: request.command
+    file :: request.file
+    emit_rust :: request.emit_rust
+    emit_generated :: request.emit_generated
+    library_flag :: request.library
+    small :: request.small
+    no_os :: request.no_os
+    gates :: request.gates
+    build_grants :: request.build_grants
+    invocation_authority :: request.invocation_authority
+    remote_builder :: request.remote_builder
+    locked :: request.locked
+    cross_target :: request.target
+    target_machine :: request.target_machine
+    explain_partition :: request.explain_partition
+    verbose :: request.verbose
+    sbom :: request.sbom
+    release :: request.release
+    profile_name :: request.profile
+    setting_overrides :: request.setting_overrides
+    output_name :: request.output
+    program_args :: request.program_args
+    mode :: request.mode
+    output_profile :: request.output_profile
+    record_name :: request.record
+    force_interpreter :: request.interpret
+    entry_fn :: request.entry_fn
+    check_project_scope :: request.check_project_scope
+    package_scope :: request.package_scope
+    build_override :: request.build_override
+    source_overlay :: request.source_overlay
+    require_project_environment(cmd, OSPath.new(file), mode)
+    profile :: select_native_profile(cmd, file, no_os, small, release, profile_name, mode)
+    release_profile :: profile.is_release()
+    progress := BuildProgress.new(cmd, emit_rust, verbose, mode, output_profile)
+    &progress.major("Reading", file)
+    &progress.minor("profile", profile.budget_name())
+    source_snapshot: AuthorityFileSnapshot? := .None
+    src := ""
+    if source_overlay == {
+        .Val((_, source)) -> src = source
+        .None -> {
+            snapshot :: Store.read_authority_file(OSPath.new(file)) ?? {
+                path :: OSPath.new(file)
+                fix := "fix the source authority and retry: {err}"
+                // GATE #4409: preserve NotFound rather than collapsing IO kinds.
+                if err.kind() == .NotFound {
+                    default_entry_fix :: path.file_name().and_then(fn(name) { name.to_str() }) == .Val(Syntax.DEFAULT_ENTRY_FILE) && path.parent().is_some_and(fn(parent) { jet.Loader.find_manifest_root(parent).is_some() })
+                    if default_entry_fix {
+                        fix = "create `{Syntax.DEFAULT_ENTRY_FILE}` in the project, or run `{Syntax.BINARY_NAME} {cmd} <file.{Syntax.FILE_EXT}>`"
+                    } else {
+                        fix = "check the spelling, or run {Syntax.BINARY_NAME} from the folder that contains it"
+                    }
+                }
+                cli_error_fix("E2105", "can't securely read the file `{file}`", fix)
+                exit(ExitCodes.USER_ERROR)
+            }
+            src = snapshot.text() ?? {
+                cli_error_fix("E2105", "can't read the source `{file}`", "fix the source encoding and retry: {err}")
+                exit(ExitCodes.USER_ERROR)
+            }
+            source_snapshot = .Val(^snapshot)
+        }
+    }
+    project_root :: jet.build_project_root(file) ?? {
+        report_problems(mode, file, src, err)
+        exit(ExitCodes.USER_ERROR)
+    }
+    &progress.minor("source", "{src.len()} bytes")
+    if cmd == "check" && !check_project_scope {
+        if CmdInspect.missing_project_context_diagnostic(OSPath.new(file)) == .Val(diagnostic) {
+            report_problems(mode, file, src, [diagnostic])
+            exit(ExitCodes.USER_ERROR)
+        }
+    }
+    source_identity :: source_overlay.map(fn((path, _)) { path }).or_else(fn() { source_snapshot.map(fn(snapshot) { snapshot.path() }) }).unwrap_or(OSPath.new(file))
+    source_closure :: Driver.load_immutable_source_closure(file, [(source_identity, src)]) ?? {
+        report_problems(mode, file, src, err)
+        exit(ExitCodes.USER_ERROR)
+    }
+    if cmd == "run" && cross_target == .Val(Syntax.BUILD_TARGET_WEB) && !source_entry_returns_app(src) {
+        diagnostic :: Diagnostic.error("E2102", "`jet run` cannot execute a web-targeted program natively", "the web target produces browser artifacts, not a native console executable", "use `jet dev <file.jet>` for the browser development loop, or `jet build --target=web <file.jet>` for web artifacts", .None)
+        report_problems(mode, file, src, [diagnostic])
+        exit(ExitCodes.USER_ERROR)
+    }
+    record := .None
+    if cmd == "run" {
+        record = record_name.map(fn(name) {
+            ProveReplay.begin_named_capture(file, name, profile.budget_name(), setting_overrides, mode.json) ?? exit(err)
+        })
+    }
+    if remote_builder.is_some() && cmd != "build" {
+        diagnostic :: Diagnostic.error("E2102", "`--builder` is only valid with `jet build`", "remote execution is selected at the programmable build boundary", "run `jet build --builder=<name> <file.jet>`", .None)
+        report_problems(mode, file, src, [diagnostic])
+        exit(ExitCodes.USAGE)
+    }
+    if cmd == "check" {
+        check_started :: Instant.now()
+        receipt_store :: Store.from_env().ok()
+        receipt :: CheckReceipt.ReceiptClosure.new("check", file, project_root, build_record_program(file), source_closure, [
+            ("profile", profile.budget_name()), ("settings", setting_overrides_tag(setting_overrides)),
+            ("gates", "{gates:?}"), ("scope", if check_project_scope { "project" } else { "explicit-file" }),
+            ("entry", entry_fn.unwrap_or("")), ("target", cross_target.unwrap_or("")),
+        ])
+        audited := .None
+        if receipt_store == .Val(store) {
+            if receipt.lookup(store) == .Val(saved) {
+                if CheckReceipt.audit_requested() {
+                    audited = .Val(saved)
+                } else {
+                    receipt.log_nodes(store, true, 0.0, [], [], [])
+                    check :: saved.facts.get("check_result").and_then(fn(text) { CmdInspect.check_result_from_record(text, check_started.elapsed().as_millis().to_u64()) })
+                    emit_check_outcome(mode, file, src, verbose, saved.diagnostics, check, saved.facts.get("goal_report"))
+                    return
+                }
+            }
+        }
+        check_projection :: fn() {
+            jet.with_compiler_stack(fn() {
+                CmdInspect.check_projection_for_command(OSPath.new(file), gates, profile.budget_name(), setting_overrides, if check_project_scope { .Project } else { .ExplicitFile }, entry_fn, cross_target)
+            })
+        }
+        (checked_result, package_reuse) :: if receipt_store == .Val(store) {
+            jet.Sema.with_package_records(Arc.new(CheckReceipt.PackageRecords.new(store.clone())), check_projection)
+        } else { (check_projection(), []) }
+        if receipt_store == .Val(store) {
+            packages :: if package_reuse.is_empty() { checked_result.as_ref().map(fn(projection) { CheckReceipt.PackageRow.from_bundle(projection.bundle) }).unwrap_or([]) } else { [] }
+            receipt.log_nodes(store, false, check_started.elapsed().as_secs_f64() * 1000.0, [], packages, package_reuse)
+        }
+        checked := if checked_result == {
+            .Ok(value) -> .Val(^value)
+            .Err(diagnostics) -> {
+                errors :: diagnostics.filter(fn(d) { d.severity == .Error })
+                if !errors.is_empty() {
+                    report_problems(mode, file, src, errors)
+                    exit(ExitCodes.USER_ERROR)
+                }
+                .None
+            }
+        }
+        all_diags := checked.map(fn(projection) { projection.diagnostics.clone() }).unwrap_or([])
+        if checked == .Val(projection) {
+            CmdDevTools.merge_cost_diagnostics(projection.bundle, &all_diags) ?? CmdDevTools.exit_cost_projection_error(file, err)
+        }
+        has_errors :: all_diags.any(fn(d) { d.severity == .Error })
+        goal_report :: if has_errors { .None } else { checked.and_then(fn(&projection) { CmdFill.render_goal_report(&projection, .None, .None, false, false) }) }
+        if receipt_store == .Val(store) && checked == .Val(projection) {
+            sealed :: gates.is_empty() && !CmdInspect.check_result_ran_programmable_build(projection.check)
+            inputs :: if sealed { receipt.sealed_inputs(projection.bundle) } else { .None }
+            if audited == .Val(saved) {
+                undeclared :: CheckReceipt.ReceiptClosure.undeclared_reads(saved, inputs)
+                if !undeclared.is_empty() -> emit_internal_fault("", "check read audit: the recorded check does not declare {undeclared.join(", ")}", mode)
+            }
+            if inputs == .Val(sealed_inputs) {
+                facts := [String:String]{"check_result": CmdInspect.check_result_record(projection.check)}
+                if goal_report == .Val(report) -> &facts.insert("goal_report", report)
+                receipt.publish(store, sealed_inputs, all_diags.clone(), facts)
+            }
+        }
+        emit_check_outcome(mode, file, src, verbose, all_diags, checked.map(fn(projection) { projection.check }), goal_report)
+        return
+    }
+    if cross_target == .Val(triple) -> validate_target(triple, mode)
+    is_web :: cross_target == .Val(Syntax.BUILD_TARGET_WEB)
+    is_plugin :: cross_target == .Val(Syntax.TARGET_SANDBOX)
+    production_receipt :: if cmd == "run" && !is_web && !is_plugin && cross_target.is_none() { .Val(ProductionReceipt.prepare(file, src, program_args)) } else { .None }
+    if production_receipt == .Val(context) -> context.install()
+    if explain_partition && !is_web {
+        diag :: Diagnostic.error("E2102", "`--explain-partition` requires `--target=web`", "the partition report is only meaningful for the web backend", "run `jet build --target={Syntax.BUILD_TARGET_WEB} --explain-partition <file>`", .None)
+        report_problems(mode, file, src, [diag])
+        exit(ExitCodes.USAGE)
+    }
+    package_manifest := load_pkg_manifest(file)
+    selects_build_entry :: cmd == "run" && Driver.selects_build_entry(src, package_manifest.map(fn((root, _)) { root }))
+    tier :: select_native_tier(cmd, file, mode, force_interpreter, cross_target, output_name, remote_builder, emit_rust, emit_generated, small, no_os, sbom, profile, selects_build_entry, is_web, is_plugin, src)
+    if tier.is_engine() {
+        run_native_lens(tier, file, src, gates, setting_overrides, profile, entry_fn, program_args, mode, record, record_name, production_receipt, &package_manifest, source_closure, source_snapshot, invocation_authority)
+    }
+    profile_tag :: profile.cache_tag()
+    mode_tag :: if no_os { "no-os" } else if !gates.is_empty() { "gated" } else { "run" }
+    cranelift_dev :: profile.cranelift_backend() && !no_os && gates.is_empty()
+    backend :: if cranelift_dev { "cranelift" } else { "rustc" }
+    cache_profile_tag :: "{profile_tag};{setting_overrides_tag(setting_overrides)};aot-target=native;backend={backend}"
+    native_key := if output_name.is_none() && !is_web && cross_target.is_none() && cmd == "run" && !selects_build_entry {
+        native_cache_key_with_source_closure(file, source_closure, profile.budget_name(), cache_profile_tag, mode_tag, NativeKeyBackend.for_build(cranelift_dev), invocation_authority)
+    } else { .None }
+    native_store :: Store.from_env().ok()
+    cwd :: env.current_dir().map(fn(path) { path.display().to_string() }).unwrap_or("")
+    store_dir :: native_store.map(fn(store) { store.root() })
+    debug_native_cache_event("compile pid={id()} cmd={cmd} file={file} profile={cache_profile_tag} mode={mode_tag} key={native_key:?} cwd={cwd} store_dir={store_dir:?}")
+    if cmd == "run" && mode_tag == "run" && !emit_rust && !selects_build_entry && entry_fn.is_none() && !src.contains("core.game") {
+        if native_key == .Val(key) {
+            out :: bin_path(project_root, file)
+            if native_store.is_some_and(fn(store) { restore_native_artifact(store, key, out, cranelift_dev) }) {
+                _application_authority :: resolve_run_authority_before_execution(file, src, mode, profile.budget_name(), setting_overrides, entry_fn, &package_manifest, source_closure, source_snapshot, invocation_authority)
+                if verbose -> write_mode_status(mode, "[build] cache hit -> reused cached binary (front end skipped)\n")
+                run_cmd := Command.new(out)
+                loop arg in program_args -> &run_cmd.arg(arg)
+                status :: &run_cmd.status() ?? finish_native_run(file, src, mode, record, record_name, production_receipt, [], .LaunchError(err.to_string()))
+                finish_native_run(file, src, mode, record, record_name, production_receipt, [], .Child(status))
+            }
+        }
+    }
+    library_output_names :: if cmd == "build" && !is_web && !is_plugin { load_pkg_library_output_names(file) } else { .None }
+    library_output :: if cmd == "build" && !is_web && !is_plugin && (library_flag || output_name.is_none()) {
+        output_name.or_else(fn() { library_output_names.and_then(fn(names) { if names.len() == 1 { .Val(names[0]) } else { .None } }) })
+    } else { .None }
+    is_library :: library_flag || library_output.is_some()
+    if is_library && cross_target == .Val(target) {
+        diagnostic :: Diagnostic.error("E1341", "a Library output cannot select target `{target}`", "native Library artifacts use the host ABI and do not have a cross-target projection", "remove `--target`; build the Library for the host ABI", .None)
+        report_problems(mode, file, src, [diagnostic])
+        exit(ExitCodes.USER_ERROR)
+    }
+    build_receipt :: if cmd == "build" && !is_library && output_name.is_none() && !is_web && !is_plugin && cross_target.is_none() && target_machine.is_none() && remote_builder.is_none() && !emit_rust && !emit_generated && !sbom && !explain_partition && gates.is_empty() && OSPath.new(file).file_name().and_then(fn(name) { name.to_str() }) != .Val(Syntax.WORKSPACE_FILE) {
+        .Val(CheckReceipt.ReceiptClosure.new("build", file, project_root, build_record_program(file), source_closure, [
+            ("profile", cache_profile_tag), ("mode", mode_tag), ("locked", locked.to_string()),
+            ("entry", entry_fn.unwrap_or("")), ("package_scope", package_scope.to_string()),
+            ("build_override", build_override.to_string()), ("authority", "{invocation_authority:?}"), ("grants", "{build_grants:?}"),
+        ]))
+    } else { .None }
+    if build_receipt == .Val(receipt) && native_store == .Val(store) {
+        if receipt.lookup(store) == .Val(saved) {
+            if replay_build_receipt(receipt, saved, store, file, src, project_root, profile, mode, &progress) -> return
+        }
+    }
+    &progress.major("Checking", "program and build plan")
+    build_front_end := .None
+    if !is_library && output_name.is_none() && (cmd == "build" || selects_build_entry) {
+        prepared :: jet.prepare_programmable_build_front_end_scoped_with_entry_with_source_closure(file, locked, is_web, is_plugin, cross_target, profile.budget_name(), setting_overrides, package_scope, build_override, entry_fn, cmd == "build", source_closure) ?? {
+            report_problems(mode, file, src, err)
+            exit(ExitCodes.USER_ERROR)
+        }
+        build_front_end = .Val(^prepared)
+    }
+    &progress.minor("front end", if build_front_end.is_some() { "checked" } else { "using direct compilation" })
+    if cmd == "build" && output_name.is_none() && !is_library && !is_web && cross_target.is_none() {
+        native_key = native_cache_key_for_prepared_build(file, build_front_end, cache_profile_tag, mode_tag, NativeKeyBackend.for_build(cranelift_dev), invocation_authority)
+    }
+    reused_package_effects :: build_front_end.and_then(fn(prepared) {
+        program :: prepared.emitted_program() ?? return .None
+        facts :: prepared.effect_facts()
+        (projection, delegations) :: native_effect_projection(program, facts.summaries, entry_fn, package_manifest.map(fn((_, manifest)) { manifest }))
+        .Val((jet.EffectBudget.compute_package_effects(program, facts.solved, facts.summaries), facts.fact_registry.clone(), jet.EffectBudget.summary_line_for_program_with_authority(program, facts.summaries, entry_fn.unwrap_or("run"), package_manifest.map(fn((_, manifest)) { manifest })), jet.EffectBudget.summary_json_for_program_with_authority(program, facts.summaries, entry_fn.unwrap_or("run"), package_manifest.map(fn((_, manifest)) { manifest })), projection, delegations))
+    })
+    reused_clinks :: build_front_end.and_then(fn(prepared) { prepared.emitted_program() }).map(fn(program) { jet.resolve_c_links_for_bundle(program, cross_target) })
+    native_cache_hit :: cmd == "build" && !emit_rust && !emit_generated && !is_library && output_name.is_none() && !is_web && !is_plugin && cross_target.is_none() && OSPath.new(file).file_name().and_then(fn(name) { name.to_str() }) != .Val(Syntax.WORKSPACE_FILE) && native_key.is_some() && reused_clinks.is_some_and(fn(result) { if result == .Ok(args) { args.is_empty() } else { false } }) && !src.contains("core.game") && !build_front_end.and_then(fn(prepared) { prepared.emitted_program() }).is_some_and(program_uses_game_runtime) && build_front_end.and_then(fn(prepared) { prepared.emitted_program() }).is_some_and(native_cacheable_program) && native_key.is_some_and(fn(key) { native_store.is_some_and(fn(store) { restore_native_artifact(store, key, bin_path(project_root, file), cranelift_dev) }) })
+    visible_lints: [Diagnostic] := []
+    execution_lints: [Diagnostic] := []
+    checked_runtime: jet.AST.ProgramBundle? := .None
+    programmable_build_target: String? := .None
+    &progress.major("Generating", "native code")
+    compile_result :: if target_machine.is_some() && output_name.is_none() && !is_library && !selects_build_entry {
+        machine :: target_machine.expect("target machine checked above")
+        if Driver.compile_bundle_path_with_target_machine_and_profile_and_settings_with_source_closure_and_runtime(file, .Run, machine, gates, profile.budget_name(), locked, setting_overrides, source_closure, invocation_authority) == {
+            .Ok((output, runtime)) -> {
+                if !emit_rust -> checked_runtime = .Val(^runtime)
+                Ok(^output)
+            }
+            .Err(.Diagnostics(diags)) -> Err(^diags)
+            .Err(.Machine(errors)) -> Err([Diagnostic.error("E3302", "target machine validation failed", "typed target facts rejected: {errors:?}", "select a target with matching providers and memory facts", .None)])
+        }
+    } else if is_library {
+        Driver.compile_bundle_path_opts_with_source_closure(file, .Check, false, gates, false, false, true, false, .None, library_output, profile.budget_name(), setting_overrides, locked, .None, source_closure)
+    } else if output_name == .Val(output) {
+        if !is_web && !is_plugin {
+            if Driver.compile_bundle_path_opts_with_source_closure_and_runtime(file, .Run, no_os, gates, false, false, false, false, cross_target, .Val(output), profile.budget_name(), setting_overrides, false, .None, source_closure, invocation_authority) == {
+                .Ok((compiled, runtime)) -> {
+                    if !emit_rust -> checked_runtime = .Val(^runtime)
+                    Ok(^compiled)
+                }
+                .Err(diags) -> Err(^diags)
+            }
+        } else {
+            Driver.compile_bundle_path_opts_with_source_closure(file, .Run, no_os, gates, is_web, is_plugin, false, false, cross_target, .Val(output), profile.budget_name(), setting_overrides, false, .None, source_closure)
+        }
+    } else if cmd == "build" && emit_generated {
+        if jet.compile_programmable_build_output_with_builder_and_profile_and_settings_scoped_with_entry_and_authority(file, build_grants, no_os, gates, locked, is_web, is_plugin, cross_target, true, remote_builder, profile.budget_name(), setting_overrides, &build_front_end.take(), package_scope, build_override, entry_fn, false, invocation_authority, cmd == "build") == {
+            .Ok(output) -> {
+                programmable_build_target = programmable_build_target_name(output)
+                if !emit_rust -> checked_runtime = ^output.runtime
+                Ok(^output.compile)
+            }
+            .Err(diags) -> Err(^diags)
+        }
+    } else if native_cache_hit {
+        if jet.compile_programmable_build_output_with_builder_and_profile_and_settings_scoped_with_entry_and_authority(file, build_grants, no_os, gates, locked, is_web, is_plugin, cross_target, false, remote_builder, profile.budget_name(), setting_overrides, &build_front_end.take(), package_scope, build_override, entry_fn, true, invocation_authority, cmd == "build") == {
+            .Ok(output) -> {
+                programmable_build_target = programmable_build_target_name(output)
+                if !emit_rust -> checked_runtime = ^output.runtime
+                Ok(^output.compile)
+            }
+            .Err(diags) -> Err(^diags)
+        }
+    } else if cmd == "build" || selects_build_entry {
+        if jet.compile_programmable_build_output_with_builder_and_profile_and_settings_scoped_with_entry_and_authority(file, build_grants, no_os, gates, locked, is_web, is_plugin, cross_target, false, remote_builder, profile.budget_name(), setting_overrides, &build_front_end.take(), package_scope, build_override, entry_fn, cmd == "build" && cranelift_dev && !emit_rust && !selects_build_entry && target_machine.is_none(), invocation_authority, cmd == "build") == {
+            .Ok(output) -> {
+                programmable_build_target = programmable_build_target_name(output)
+                if !emit_rust -> checked_runtime = ^output.runtime
+                Ok(^output.compile)
+            }
+            .Err(diags) -> Err(^diags)
+        }
+    } else if cmd == "run" && !is_web && !is_plugin {
+        if Driver.compile_bundle_path_opts_with_source_closure_and_runtime(file, .Run, no_os, gates, false, false, false, false, cross_target, .None, profile.budget_name(), setting_overrides, false, entry_fn, source_closure, invocation_authority) == {
+            .Ok((output, runtime)) -> {
+                if !emit_rust -> checked_runtime = .Val(^runtime)
+                Ok(^output)
+            }
+            .Err(diags) -> Err(^diags)
+        }
+    } else {
+        compile_mode :: if is_plugin { .Check } else { .Run }
+        compile_target :: if is_web { .None } else if is_plugin { .Val(Syntax.TARGET_SANDBOX) } else { cross_target }
+        Driver.compile_bundle_path_opts_with_source_closure(file, compile_mode, no_os, gates, is_web, is_plugin, false, false, compile_target, .None, profile.budget_name(), setting_overrides, false, entry_fn, source_closure)
+    }
+    out :: compile_result ?? {
+        report_problems(mode, file, src, err)
+        exit(ExitCodes.USER_ERROR)
+    }
+    lints :: CmdDevTools.visible_lints(out.lints)
+    visible_lints = lints.clone()
+    warning_lints :: package_manifest.map(fn((_, manifest)) { jet.LintPolicy.non_denied(lints, manifest) }).unwrap_or_else(fn() { lints.clone() })
+    if cmd == "build" -> render_native_lints(file, src, mode, warning_lints)
+    execution_lints = ^warning_lints
+    clinks :: reused_clinks.unwrap_or_else(fn() { jet.resolve_c_links_for_target_with_source_closure(file, cross_target, source_closure) }) ?? {
+        report_problems(mode, file, src, err)
+        exit(ExitCodes.USER_ERROR)
+    }
+    rust_code := out.library.map(fn(library) { library.rust.clone() }).unwrap_or(out.rust)
+    ffi_link :: out.ffi
+    web_out :: out.web
+    web_partition_report :: out.web_partition_report
+    plugin_out :: out.plugin
+    library_out :: out.library
+    library_config :: out.library_config
+    game_runtime :: checked_runtime.is_some_and(program_uses_game_runtime) || src.contains("core.game")
+    if checked_runtime == .Val(bundle) -> tier.project(&bundle.build_facts, profile)
+    inject_game_crash_reporter_bootstrap(&rust_code, game_runtime)
+    &progress.minor("generated Rust", "{rust_code.len()} bytes")
+    if emit_rust -> write_mode_renderable(mode, rust_code)
+    build_effect_json: String? := .None
+    recorded_effects: (String, String)? := .None
+    if cmd == "build" || cmd == "run" {
+        effect_view :: reused_package_effects.or_else(fn() {
+            checked :: if is_library {
+                Driver.check_file_with_effect_facts_profile_and_settings_with_source_closure(file, source_closure, profile.budget_name(), setting_overrides)
+            } else if output_name == .Val(output) {
+                Driver.check_file_with_effect_facts_for_output_with_source_closure(file, output, source_closure, profile.budget_name(), setting_overrides)
+            } else {
+                Driver.check_file_with_effect_facts_for_run_and_entry_with_source_closure(file, source_closure, profile.budget_name(), setting_overrides, entry_fn)
+            }
+            (diagnostics, maybe_bundle, facts) :: checked
+            if diagnostics.any(fn(diagnostic) { diagnostic.severity == .Error }) {
+                report_problems(mode, file, src, diagnostics)
+                exit(ExitCodes.USER_ERROR)
+            }
+            bundle :: maybe_bundle ?? {
+                diagnostic :: Diagnostic.error("E2105", "could not obtain the checked effect view", "effect enforcement must use the same immutable source checked for compilation", "retry after fixing the source authority", .None)
+                report_problems(mode, file, src, [diagnostic])
+                exit(ExitCodes.USER_ERROR)
+            }
+            (projection, delegations) :: native_effect_projection(bundle, facts.summaries, entry_fn, package_manifest.map(fn((_, manifest)) { manifest }))
+            .Val((jet.EffectBudget.compute_package_effects(bundle, facts.solved, facts.summaries), facts.fact_registry.clone(), jet.EffectBudget.summary_line_for_program_with_authority(bundle, facts.summaries, entry_fn.unwrap_or("run"), package_manifest.map(fn((_, manifest)) { manifest })), jet.EffectBudget.summary_json_for_program_with_authority(bundle, facts.summaries, entry_fn.unwrap_or("run"), package_manifest.map(fn((_, manifest)) { manifest })), projection, delegations))
+        })
+        if effect_view == .Val((entries, fact_registry, _effect_summary, _effect_json, projection, delegations)) {
+            application_authority :: apply_native_effect_policy(cmd, file, src, mode, is_plugin, visible_lints, entries, fact_registry, &projection, &package_manifest, delegations, source_snapshot, invocation_authority)
+            if checked_runtime == .Val(bundle) && application_authority == .Val(authority) {
+                required_effects :: bundle.package_guarantees.application_authority.required_effects.clone()
+                applied := authority.clone()
+                applied.required_effects = ^required_effects
+                bundle.package_guarantees.application_authority = ^applied
+            }
+            effect_summary :: jet.EffectBudget.render_effect_projection_line(projection)
+            if cmd == "build" {
+                effect_json :: jet.EffectBudget.render_effect_projection_json(projection)
+                if mode.json { build_effect_json = .Val(effect_json.clone()) } else { write_mode_status(mode, effect_summary) }
+                recorded_effects = .Val((effect_summary, effect_json))
+            }
+        }
+    }
+    if cmd == {
+        "build" -> {
+            &progress.major("Building", "backend artifacts")
+            if is_library {
+                library :: library_out ?? {
+                    write_mode_diagnostic(mode, jet.Diagnostics.render_ice_report("missing Library codegen output", "", false))
+                    exit(ExitCodes.ICE)
+                }
+                config :: library_config ?? {
+                    write_mode_diagnostic(mode, jet.Diagnostics.render_ice_report("missing Library output configuration", "", false))
+                    exit(ExitCodes.ICE)
+                }
+                paths :: build_library(project_root, rust_code, library, config, profile, ffi_link, verbose, mode) ?? {
+                    if err == {
+                        .GeneratedCode(stderr) -> {
+                            write_mode_diagnostic(mode, jet.Diagnostics.render_ice_report("rustc rejected generated Library code", stderr, true))
+                            exit(ExitCodes.ICE)
+                        }
+                        error -> {
+                            cli_error("E2105", "couldn't publish the Library output: {error}")
+                            exit(ExitCodes.USER_ERROR)
+                        }
+                    }
+                }
+                if !mode.quiet && !mode.json {
+                    if paths.shared == .Val(shared) -> write_mode_renderable(mode, "built: {shared.display()}\n")
+                    if paths.staticlib == .Val(staticlib) -> write_mode_renderable(mode, "built: {staticlib.display()}\n")
+                    if paths.header == .Val(header) -> write_mode_renderable(mode, "built: {header.display()}\n")
+                    if paths.loadable == .Val(loadable) -> write_mode_renderable(mode, "built: {loadable.display()}\n")
+                    loop binding in paths.bindings -> write_mode_renderable(mode, "built: {binding.display()}\n")
+                }
+                &progress.finish("library artifacts")
+                if mode.json -> write_mode_machine(mode, "{build_effect_json.unwrap_or("{\"effects\":[]}")}\n")
+                return
+            }
+            artifact_path :: if is_web || is_plugin { bin_path(project_root, file) } else { build_artifact_path(project_root, file, programmable_build_target) }
+            budget_profile :: profile.budget_name()
+            hardened_profile :: profile == .Hardened
+            build_target_machine(file, rust_code, checked_runtime, artifact_path.clone(), profile, ffi_link, clinks, verbose, cross_target, web_out, plugin_out, mode, native_cache_hit, native_key.clone(), target_machine, cranelift_dev)
+            print_release_job_summary(src, release_profile, mode)
+            &progress.major("Verifying", "build budgets")
+            budget_target :: if is_web { "web" } else if is_plugin { "sandbox" } else { "native" }
+            build_gated :: checked_runtime.map(fn(bundle) { CmdBudget.has_build_gates(bundle, budget_target, budget_profile) }).unwrap_or(true)
+            if build_gated && CmdBudget.run_build_gates(file, artifact_path, budget_target, budget_profile) != 0 -> exit(ExitCodes.USER_ERROR)
+            if build_receipt == .Val(receipt) && native_store == .Val(store) && native_key == .Val(key) && checked_runtime == .Val(bundle) {
+                plain :: programmable_build_target.is_none() && clinks.is_empty() && !Driver.selects_build_entry(src, package_manifest.map(fn((root, _)) { root }))
+                if plain {
+                    if receipt.sealed_inputs(bundle) == .Val(inputs) {
+                        facts := [String:String]{}
+                        if DevAot.output_identity(artifact_path) == {
+                            .Val(identity) -> {
+                                &facts.insert("native_key", key.clone())
+                                &facts.insert("dev_output", identity)
+                            }
+                            .None -> {
+                                artifact_key :: if cranelift_dev { rustc_fallback_cache_key(key) } else { key.clone() }
+                                &facts.insert("native_key", artifact_key)
+                                rust :: fs.read(generated_rust_path(artifact_path, file)).unwrap_or([])
+                                &facts.insert("rust_sha256", jet.SHA256.sha256_hex(rust))
+                            }
+                        }
+                        if !build_gated -> &facts.insert("build_gates", "none")
+                        if recorded_effects == .Val((line, json)) {
+                            &facts.insert("effect_line", line.clone())
+                            &facts.insert("effect_json", json.clone())
+                        }
+                        receipt.publish(store, inputs, execution_lints.clone(), facts)
+                    }
+                }
+            }
+            if !mode.quiet && !mode.json {
+                artifact := if is_web {
+                    "{build_output_root(project_root).join("app.wasm").display()} + {build_output_root(project_root).join("app.js").display()}"
+                } else if is_plugin {
+                    "{build_output_root(project_root).join("{stem(file)}.wasm").display()} (sandbox)"
+                } else { artifact_path.display().to_string() }
+                if hardened_profile -> artifact = "{artifact} (hardened; foreign dependencies fenced)"
+                if progress.enabled { &progress.finish(artifact) } else { write_mode_renderable(mode, "built: {artifact}\n") }
+            }
+            if explain_partition && !mode.json && web_partition_report == .Val(report) -> write_mode_renderable(mode, "{report}\n")
+            if cross_target == .Val(triple) && !mode.quiet && !mode.json -> write_mode_status(mode, "target: {triple}\n")
+            if sbom -> write_sbom_for_build(file, artifact_path, mode)
+            if mode.json -> write_mode_machine(mode, "{build_effect_json.unwrap_or("{\"effects\":[]}")}\n")
+        }
+        "run" -> {
+            binary :: if is_web || is_plugin { bin_path(project_root, file) } else { build_artifact_path(project_root, file, programmable_build_target) }
+            build_target_machine(file, rust_code, checked_runtime, binary.clone(), profile, ffi_link, clinks, verbose, cross_target, web_out, plugin_out, mode, false, native_key.clone(), target_machine, cranelift_dev)
+            print_release_job_summary(src, release_profile, mode)
+            if cross_target.is_some() {
+                write_mode_status(mode, "note: cross-compiled binary cannot run on this host — use emulation (see docs/embedded.md)\n")
+                finish_native_run(file, src, mode, record, record_name, production_receipt, [], .Exit(ExitCodes.OK))
+            }
+            run_cmd := Command.new(binary)
+            loop arg in program_args -> &run_cmd.arg(arg)
+            status :: &run_cmd.status() ?? finish_native_run(file, src, mode, record, record_name, production_receipt, [], .LaunchError(err.to_string()))
+            finish_native_run(file, src, mode, record, record_name, production_receipt, [], .Child(status))
+        }
+        other -> {
+            cli_error("E2101", "`{other}` isn't a {Syntax.BINARY_NAME} command")
+            write_mode_diagnostic(mode, usage())
+            exit(ExitCodes.USAGE)
+        }
+    }
+}
+
+// Rust: Source/CmdCompile.rs:4893
+// User-authored dev() remains the program's ordinary native entry.
+pub fn run_dev_entry(file: String, profile: BuildProfile, mode: OutputMode, setting_overrides: [String:String], program_args: [String], record_name: String?) {
+    src :: fs.read_to_string(OSPath.new(file)) ?? {
+        cli_error_fix("E2105", "can't find the file `{file}`", "check the spelling, or run {Syntax.BINARY_NAME} from the folder that contains it")
+        exit(ExitCodes.USER_ERROR)
+    }
+    project_root :: jet.build_project_root(file) ?? {
+        report_problems(mode, file, src, err)
+        exit(ExitCodes.USER_ERROR)
+    }
+    production_receipt :: ProductionReceipt.prepare(file, src, program_args)
+    production_receipt.install()
+    record :: record_name.map(fn(name) { ProveReplay.begin_named_capture(file, name, profile.budget_name(), setting_overrides, mode.json) ?? exit(err) })
+    out :: jet.compile_with_entry_and_settings(file, "dev", profile.budget_name(), setting_overrides) ?? {
+        report_problems(mode, file, src, err)
+        exit(ExitCodes.USER_ERROR)
+    }
+    CmdDevTools.render_lints(file, mode, out.lints)
+    clinks :: jet.resolve_c_links(file) ?? {
+        report_problems(mode, file, src, err)
+        exit(ExitCodes.USER_ERROR)
+    }
+    bin :: bin_path(project_root, file)
+    dev_profile_name :: if profile == {
+        .Named(name, _) -> .Val(name)
+        .Release -> .Val("release")
+        .Hardened -> .Val("hardened")
+        .Debug -> .Val("debug")
+        .Ci -> .Val("ci")
+        .Default, .Fast, .Small, .NoOs -> .None
+    }
+    dev_small_profile :: profile == .Small
+    build(file, out.rust, .None, bin.clone(), profile, out.ffi, clinks, false, .None, .None, .None, mode, false, .None)
+    dev_file :: fs.canonicalize(OSPath.new(file)).map(fn(path) { path.display().to_string() }).unwrap_or(file)
+    jet_bin :: env.current_exe().map(fn(path) { path.display().to_string() }).unwrap_or(Syntax.BINARY_NAME)
+    command := Command.new(bin)
+    &command.args(program_args)
+    &command.env("JET_DEV_FILE", dev_file)
+    &command.env("JET_BIN", jet_bin)
+    &command.env("JET_PROJECT_ROOT", project_root)
+    &command.env("JET_DEV_SETTING_COUNT", setting_overrides.len().to_string())
+    if dev_profile_name == .Val(name) { &command.env("JET_DEV_PROFILE", name) } else { &command.env_remove("JET_DEV_PROFILE") }
+    if dev_small_profile { &command.env("JET_DEV_SMALL", "1") } else { &command.env_remove("JET_DEV_SMALL") }
+    // Rust BTreeMap iteration is lexically sorted, including numbered env keys.
+    keys := setting_overrides.keys().collect()
+    &keys.sort()
+    loop (index, key) in keys.enumerate() {
+        &command.env("JET_DEV_SETTING_{index}_KEY", key)
+        &command.env("JET_DEV_SETTING_{index}_VALUE", setting_overrides[key])
+    }
+    status :: &command.status() ?? {
+        cli_error("E2105", "couldn't run the built program: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    exit_code :: child_exit_code(status)
+    finish_recorded_artifacts(record, record_name, .Val(production_receipt), exit_code, mode)
+    exit(exit_code)
+}
+
+// Rust: Source/CmdCompile.rs:5036
+pub fn run_web_app_dev_entry(file: String, mode: OutputMode, port: U16?, profile: &BuildProfile, setting_overrides: [String:String], record_name: String?, passthrough: [String]) {
+    _src :: fs.read_to_string(OSPath.new(file)) ?? {
+        cli_error("E2105", "can't find the file `{file}`")
+        exit(ExitCodes.USER_ERROR)
+    }
+    record :: record_name.map(fn(name) { ProveReplay.begin_named_capture(file, name, profile.budget_name(), setting_overrides, mode.json) ?? exit(err) })
+    dev_file :: fs.canonicalize(OSPath.new(file)).map(fn(path) { path.display().to_string() }).unwrap_or(file)
+    jet_bin :: env.current_exe() ?? {
+        cli_error("E2105", "couldn't locate the running Jet executable")
+        exit(ExitCodes.USER_ERROR)
+    }
+    command := Command.new(jet_bin)
+    &command.arg("run")
+    &command.arg(file)
+    if profile == {
+        .Default, .Fast -> {}
+        .Small -> &command.arg("--small")
+        .NoOs -> {}
+        _ -> &command.arg("--profile={profile.budget_name()}")
+    }
+    keys := setting_overrides.keys().collect()
+    &keys.sort()
+    loop key in keys -> &command.arg("--set={key}={setting_overrides[key]}")
+    if !passthrough.is_empty() {
+        &command.arg("--")
+        &command.args(passthrough)
+    }
+    &command.env("JET_APP_DEV", "1")
+    &command.env("JET_DEV_FILE", dev_file)
+    if port == .Val(value) -> &command.env("JET_APP_PORT", value.to_string())
+    status :: &command.status() ?? {
+        cli_error("E2105", "couldn't run the web app: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    exit_code :: child_exit_code(status)
+    finish_recorded_artifacts(record, record_name, .None, exit_code, mode)
+    exit(exit_code)
+}
+
+// Rust: Source/CmdCompile.rs:5102
+struct JobListing {
+    name: String
+    doc: String?
+    schedule: String?
+    metadata: JobMetadata?
+}

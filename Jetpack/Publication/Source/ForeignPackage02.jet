@@ -1,0 +1,719 @@
+// PORT-PENDING 0819 source-publish-foreignpackage-module-group-slice-1811: Source/Publish/ForeignPackage.rs:1811-2525
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn build_java_classes(
+//RS     input: &LibraryInput,
+//RS     package: &str,
+//RS     class_name: &str,
+//RS     jni_name: &str,
+//RS ) -> Result<Vec<u8>, String> {
+//RS     let work = work_dir(input, "java-classes")?;
+//RS     let result = (|| {
+//RS         let source = render_java(input, package, class_name, jni_name);
+//RS         let source_path = work.join(format!("{class_name}.java"));
+//RS         fs::write(&source_path, source.as_bytes())
+//RS             .map_err(|error| format!("could not write the Java wrapper: {error}"))?;
+//RS         let classes = work.join("classes");
+//RS         fs::create_dir(&classes)
+//RS             .map_err(|error| format!("could not create Java class directory: {error}"))?;
+//RS         let mut command = Command::new("javac");
+//RS         command
+//RS             .args(["-encoding", "UTF-8", "-d"])
+//RS             .arg(&classes)
+//RS             .arg(&source_path);
+//RS         run_host_tool(&mut command, "javac")?;
+//RS         let class_path = classes
+//RS             .join(package.replace('.', "/"))
+//RS             .join(format!("{class_name}.class"));
+//RS         read_regular_file(&class_path, "JVM wrapper class")
+//RS     })();
+//RS     cleanup_work(&work);
+//RS     result
+//RS }
+//RS 
+//RS fn render_java(input: &LibraryInput, package: &str, class_name: &str, jni_name: &str) -> String {
+//RS     let platform = shared_platform();
+//RS     let mut output = format!(
+//RS         "package {package};\n\n\
+//RS          import java.io.IOException;\n\
+//RS          import java.io.InputStream;\n\
+//RS          import java.nio.file.Files;\n\
+//RS          import java.nio.file.Path;\n\
+//RS          import java.nio.file.StandardCopyOption;\n\n\
+//RS          public final class {class_name} {{\n\
+//RS              private static final String PLATFORM = \"{platform}\";\n\
+//RS              private static final String JNI_NAME = \"{jni_name}\";\n\
+//RS              private static final String RUNTIME_NAME = \"{runtime}\";\n\
+//RS              static {{ loadNative(); }}\n\
+//RS              private {class_name}() {{}}\n\
+//RS              private static void loadNative() {{\n\
+//RS                  try {{\n\
+//RS                      Path directory = Files.createTempDirectory(\"jet-native-\");\n\
+//RS                      copyResource(\"/META-INF/native/\" + PLATFORM + \"/\" + JNI_NAME, directory.resolve(JNI_NAME));\n\
+//RS                      copyResource(\"/META-INF/native/\" + PLATFORM + \"/\" + RUNTIME_NAME, directory.resolve(RUNTIME_NAME));\n\
+//RS                      System.load(directory.resolve(JNI_NAME).toString());\n\
+//RS                  }} catch (IOException error) {{\n\
+//RS                      throw new ExceptionInInitializerError(error);\n\
+//RS                  }}\n\
+//RS              }}\n\
+//RS              private static void copyResource(String resource, Path destination) throws IOException {{\n\
+//RS                  try (InputStream input = {class_name}.class.getResourceAsStream(resource)) {{\n\
+//RS                      if (input == null) throw new IOException(\"missing bundled Jet native runtime\");\n\
+//RS                      Files.copy(input, destination, StandardCopyOption.REPLACE_EXISTING);\n\
+//RS                  }}\n\
+//RS              }}\n",
+//RS         runtime = input.runtime_name
+//RS     );
+//RS     for (index, export) in input.stamp.exports.iter().enumerate() {
+//RS         let ty = java_type(export.scalar);
+//RS         let args = (0..export.params)
+//RS             .map(|param| format!("{ty} p{param}"))
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         let call_args = (0..export.params)
+//RS             .map(|param| format!("p{param}"))
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         let public_name = java_public_name(&export.name);
+//RS         let _ = writeln!(
+//RS             output,
+//RS             "             private static native {ty} jetCall{index}({args});\n\
+//RS              public static {ty} {public_name}({args}) {{ return jetCall{index}({call_args}); }}",
+//RS         );
+//RS     }
+//RS     output.push_str("}\n");
+//RS     output
+//RS }
+//RS 
+//RS fn java_type(value: JetLibScalar) -> &'static str {
+//RS     match value {
+//RS         JetLibScalar::Int => "long",
+//RS         JetLibScalar::Float => "double",
+//RS         JetLibScalar::Bool => "boolean",
+//RS         JetLibScalar::Text => "String",
+//RS     }
+//RS }
+//RS 
+//RS fn java_public_name(value: &str) -> String {
+//RS     let name = normalized_component(value, false);
+//RS     if [
+//RS         "abstract",
+//RS         "assert",
+//RS         "boolean",
+//RS         "break",
+//RS         "byte",
+//RS         "case",
+//RS         "catch",
+//RS         "char",
+//RS         "class",
+//RS         "const",
+//RS         "continue",
+//RS         "default",
+//RS         "do",
+//RS         "double",
+//RS         "else",
+//RS         "enum",
+//RS         "extends",
+//RS         "final",
+//RS         "finally",
+//RS         "float",
+//RS         "for",
+//RS         "goto",
+//RS         "if",
+//RS         "implements",
+//RS         "import",
+//RS         "instanceof",
+//RS         "int",
+//RS         "interface",
+//RS         "long",
+//RS         "native",
+//RS         "new",
+//RS         "package",
+//RS         "private",
+//RS         "protected",
+//RS         "public",
+//RS         "return",
+//RS         "short",
+//RS         "static",
+//RS         "strictfp",
+//RS         "super",
+//RS         "switch",
+//RS         "synchronized",
+//RS         "this",
+//RS         "throw",
+//RS         "throws",
+//RS         "transient",
+//RS         "try",
+//RS         "void",
+//RS         "volatile",
+//RS         "while",
+//RS     ]
+//RS     .contains(&name.as_str())
+//RS     {
+//RS         format!("jet_{name}")
+//RS     } else {
+//RS         name
+//RS     }
+//RS }
+//RS 
+//RS fn build_jni_bridge(
+//RS     input: &LibraryInput,
+//RS     package: &str,
+//RS     class_name: &str,
+//RS     jni_name: &str,
+//RS ) -> Result<Vec<u8>, String> {
+//RS     if cfg!(target_os = "windows") {
+//RS         return Err("JVM packaging is not supported for the Windows target yet".to_string());
+//RS     }
+//RS     let home = java_home()?;
+//RS     let work = work_dir(input, "jni")?;
+//RS     let result = (|| {
+//RS         fs::write(work.join(&input.runtime_name), &input.runtime)
+//RS             .map_err(|error| format!("could not stage the JVM runtime: {error}"))?;
+//RS         fs::write(work.join("api.h"), &input.header)
+//RS             .map_err(|error| format!("could not stage the C ABI header: {error}"))?;
+//RS         let source = render_jni_bridge(input, package, class_name);
+//RS         let source_path = work.join("jni.c");
+//RS         fs::write(&source_path, source.as_bytes())
+//RS             .map_err(|error| format!("could not write the JNI bridge: {error}"))?;
+//RS         let output = work.join(jni_name);
+//RS         let mut command = Command::new("cc");
+//RS         command
+//RS             .args(["-std=c11", "-shared", "-fPIC", "-I"])
+//RS             .arg(home.join("include"))
+//RS             .arg("-I")
+//RS             .arg(home.join("include").join(jni_include_dir()))
+//RS             .arg(&source_path)
+//RS             .arg("-I")
+//RS             .arg(&work);
+//RS         link_runtime_args(&mut command, &work, &input.runtime_name);
+//RS         command.arg("-o").arg(&output);
+//RS         run_host_tool(&mut command, "cc")?;
+//RS         read_regular_file(&output, "JNI bridge")
+//RS     })();
+//RS     cleanup_work(&work);
+//RS     result
+//RS }
+//RS 
+//RS fn jni_include_dir() -> &'static str {
+//RS     if cfg!(target_os = "macos") {
+//RS         "darwin"
+//RS     } else {
+//RS         "linux"
+//RS     }
+//RS }
+//RS 
+//RS fn jni_mangle(value: &str) -> String {
+//RS     let mut output = String::new();
+//RS     for ch in value.chars() {
+//RS         match ch {
+//RS             'a'..='z' | 'A'..='Z' | '0'..='9' => output.push(ch),
+//RS             '_' => output.push_str("_1"),
+//RS             ';' => output.push_str("_2"),
+//RS             '[' => output.push_str("_3"),
+//RS             ch => {
+//RS                 let _ = write!(output, "_0{:04x}", ch as u32);
+//RS             }
+//RS         }
+//RS     }
+//RS     output
+//RS }
+//RS 
+//RS fn render_jni_bridge(input: &LibraryInput, package: &str, class_name: &str) -> String {
+//RS     let prefix = format!("Java_{}_{}_", jni_mangle(package), jni_mangle(class_name));
+//RS     let has_text = input
+//RS         .stamp
+//RS         .exports
+//RS         .iter()
+//RS         .any(|export| export.scalar == JetLibScalar::Text);
+//RS     let mut output = String::from(
+//RS         "#include <jni.h>\n#include <stdbool.h>\n#include <stddef.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n#include \"api.h\"\n\
+//RS          static void jet_jni_throw(JNIEnv *env, const char *message) {\n\
+//RS              jclass type = (*env)->FindClass(env, \"java/lang/IllegalStateException\");\n\
+//RS              if (type != NULL) { (*env)->ThrowNew(env, type, message); (*env)->DeleteLocalRef(env, type); }\n\
+//RS          }\n",
+//RS     );
+//RS     if !has_text {
+//RS         output.push('\n');
+//RS     }
+//RS     for (index, export) in input.stamp.exports.iter().enumerate() {
+//RS         let result_type = jni_type(export.scalar);
+//RS         let _ = write!(
+//RS             output,
+//RS             "\nJNIEXPORT {result_type} JNICALL {prefix}jetCall{index}(JNIEnv *env, jclass ignored",
+//RS         );
+//RS         for param in 0..export.params {
+//RS             let _ = write!(output, ", {} arg{param}", jni_type(export.scalar));
+//RS         }
+//RS         output.push_str(") {\n    (void)ignored;\n");
+//RS         let params = usize::try_from(export.params).unwrap_or(0);
+//RS         if export.scalar == JetLibScalar::Text {
+//RS             for param in 0..params {
+//RS                 let _ = writeln!(
+//RS                     output,
+//RS                     "    const char *raw{param} = (*env)->GetStringUTFChars(env, arg{param}, NULL); if (raw{param} == NULL) {{ jet_jni_throw(env, \"could not read UTF-8 argument\");"
+//RS                 );
+//RS                 for prior in 0..param {
+//RS                     let _ = writeln!(
+//RS                         output,
+//RS                         "        (*env)->ReleaseStringUTFChars(env, arg{prior}, raw{prior});"
+//RS                     );
+//RS                 }
+//RS                 output.push_str("        return NULL; }\n");
+//RS                 let _ = writeln!(
+//RS                     output,
+//RS                     "    JetText value{param} = {{ (const uint8_t *)raw{param}, (size_t)(*env)->GetStringUTFLength(env, arg{param}) }};"
+//RS                 );
+//RS             }
+//RS             let args = (0..params)
+//RS                 .map(|param| format!("value{param}"))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ");
+//RS             let _ = writeln!(output, "    JetText result = {}({args});", export.symbol);
+//RS             for param in 0..params {
+//RS                 let _ = writeln!(
+//RS                     output,
+//RS                     "    (*env)->ReleaseStringUTFChars(env, arg{param}, raw{param});"
+//RS                 );
+//RS             }
+//RS             output.push_str("    if (result.len != 0 && result.ptr == NULL) { jet_jni_throw(env, \"JetText result has an invalid pointer\"); return NULL; }\n");
+//RS             output.push_str("    if (result.len > (size_t)-1 - 1) { jet_jni_throw(env, \"JetText result is too large\"); return NULL; }\n");
+//RS             output.push_str("    char *copy = (char *)malloc(result.len + 1); if (copy == NULL) { jet_jni_throw(env, \"could not allocate text result\"); return NULL; } if (result.len != 0) memcpy(copy, result.ptr, result.len); copy[result.len] = 0; jstring value = (*env)->NewStringUTF(env, copy); free(copy); jet_text_free(result); if (value == NULL) { jet_jni_throw(env, \"could not create text result\"); return NULL; } return value;\n");
+//RS         } else {
+//RS             let args = (0..params)
+//RS                 .map(|param| format!("arg{param}"))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ");
+//RS             let _ = writeln!(
+//RS                 output,
+//RS                 "    return ({}){}({args});",
+//RS                 result_type, export.symbol
+//RS             );
+//RS         }
+//RS         output.push_str("}\n");
+//RS     }
+//RS     output
+//RS }
+//RS 
+//RS fn jni_type(value: JetLibScalar) -> &'static str {
+//RS     match value {
+//RS         JetLibScalar::Int => "jlong",
+//RS         JetLibScalar::Float => "jdouble",
+//RS         JetLibScalar::Bool => "jboolean",
+//RS         JetLibScalar::Text => "jstring",
+//RS     }
+//RS }
+//RS 
+//RS fn build_dotnet_assembly(input: &LibraryInput, package: &str) -> Result<Vec<u8>, String> {
+//RS     let work = work_dir(input, "dotnet")?;
+//RS     let result = (|| {
+//RS         let project = format!(
+//RS             "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net8.0</TargetFramework><OutputType>Library</OutputType><AssemblyName>{}</AssemblyName><RootNamespace>Jet</RootNamespace><ImplicitUsings>disable</ImplicitUsings><Nullable>enable</Nullable><RestoreIgnoreFailedSources>true</RestoreIgnoreFailedSources></PropertyGroup></Project>",
+//RS             xml_string(package)
+//RS         );
+//RS         fs::write(work.join("Library.csproj"), project.as_bytes())
+//RS             .map_err(|error| format!("could not write the .NET project: {error}"))?;
+//RS         fs::write(
+//RS             work.join("Library.cs"),
+//RS             render_csharp(input, package).as_bytes(),
+//RS         )
+//RS         .map_err(|error| format!("could not write the C# wrapper: {error}"))?;
+//RS         let mut command = Command::new("dotnet");
+//RS         command.arg("build").arg(work.join("Library.csproj")).args([
+//RS             "-c",
+//RS             "Release",
+//RS             "--nologo",
+//RS             "-v:q",
+//RS             "--disable-build-servers",
+//RS             "-p:RestoreIgnoreFailedSources=true",
+//RS         ]);
+//RS         run_host_tool(&mut command, "dotnet")?;
+//RS         read_regular_file(
+//RS             &work
+//RS                 .join("bin")
+//RS                 .join("Release")
+//RS                 .join("net8.0")
+//RS                 .join(format!("{package}.dll")),
+//RS             ".NET wrapper assembly",
+//RS         )
+//RS     })();
+//RS     cleanup_work(&work);
+//RS     result
+//RS }
+//RS 
+//RS fn render_csharp(input: &LibraryInput, _package: &str) -> String {
+//RS     let namespace = format!("Jet.{}", normalized_component(&input.package_name, false));
+//RS     let mut output = format!(
+//RS         "using System;\nusing System.Runtime.InteropServices;\nusing System.Text;\n\nnamespace {namespace} {{\n\
+//RS          public sealed class JetCallException : Exception {{ public JetCallException(string message, Exception? inner = null) : base(message, inner) {{ }} }}\n\
+//RS          public static class Library {{\n\
+//RS              [StructLayout(LayoutKind.Sequential)] private struct JetText {{ public IntPtr Ptr; public UIntPtr Len; }}\n\
+//RS              private static class Native {{\n",
+//RS     );
+//RS     for (index, export) in input.stamp.exports.iter().enumerate() {
+//RS         let ty = csharp_type(export.scalar);
+//RS         let args = (0..export.params)
+//RS             .map(|param| format!("{} arg{param}", ty))
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         if export.scalar == JetLibScalar::Bool {
+//RS             let _ = writeln!(
+//RS                 output,
+//RS                 "                 [return: MarshalAs(UnmanagedType.I1)] [DllImport(\"{}\", EntryPoint = \"{}\", CallingConvention = CallingConvention.Cdecl)] internal static extern bool Call{index}({});",
+//RS                 input.runtime_name,
+//RS                 export.symbol,
+//RS                 args.replace("bool ", "[MarshalAs(UnmanagedType.I1)] bool ")
+//RS             );
+//RS         } else {
+//RS             let _ = writeln!(
+//RS                 output,
+//RS                 "                 [DllImport(\"{}\", EntryPoint = \"{}\", CallingConvention = CallingConvention.Cdecl)] internal static extern {} Call{index}({});",
+//RS                 input.runtime_name,
+//RS                 export.symbol,
+//RS                 ty,
+//RS                 args
+//RS             );
+//RS         }
+//RS     }
+//RS     if input
+//RS         .stamp
+//RS         .exports
+//RS         .iter()
+//RS         .any(|export| export.scalar == JetLibScalar::Text)
+//RS     {
+//RS         let _ = writeln!(
+//RS             output,
+//RS             "                 [DllImport(\"{}\", EntryPoint = \"jet_text_free\", CallingConvention = CallingConvention.Cdecl)] internal static extern void Free(JetText value);",
+//RS             input.runtime_name
+//RS         );
+//RS     }
+//RS     output.push_str("             }\n");
+//RS     for (index, export) in input.stamp.exports.iter().enumerate() {
+//RS         let ty = csharp_type(export.scalar);
+//RS         let args = (0..export.params)
+//RS             .map(|param| format!("{ty} arg{param}"))
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         let names = (0..export.params)
+//RS             .map(|param| format!("arg{param}"))
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         let public_name = csharp_public_name(&export.name);
+//RS         if export.scalar == JetLibScalar::Text {
+//RS             output.push_str(&format!(
+//RS                 "             public static string {public_name}({args}) {{\n"
+//RS             ));
+//RS             for param in 0..export.params {
+//RS                 let _ = writeln!(
+//RS                     output,
+//RS                     "                 using var text{param} = TextArgument.Create(arg{param});"
+//RS                 );
+//RS             }
+//RS             let call_args = (0..export.params)
+//RS                 .map(|param| format!("text{param}.Value"))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ");
+//RS             let _ = writeln!(
+//RS                 output,
+//RS                 "                 return ReadText(Native.Call{index}({call_args}));\n             }}"
+//RS             );
+//RS         } else {
+//RS             let _ = writeln!(
+//RS                 output,
+//RS                 "             public static {ty} {public_name}({args}) => Native.Call{index}({names});"
+//RS             );
+//RS         }
+//RS     }
+//RS     if input
+//RS         .stamp
+//RS         .exports
+//RS         .iter()
+//RS         .any(|export| export.scalar == JetLibScalar::Text)
+//RS     {
+//RS         output.push_str(
+//RS             "             private static string ReadText(JetText value) {\n\
+//RS                  try {\n\
+//RS                      ulong length = value.Len.ToUInt64();\n\
+//RS                      if (length > int.MaxValue) throw new JetCallException(\"JetText result is too large\");\n\
+//RS                      if (length != 0 && value.Ptr == IntPtr.Zero) throw new JetCallException(\"JetText result has an invalid pointer\");\n\
+//RS                      if (length == 0) return string.Empty;\n\
+//RS                      byte[] bytes = new byte[(int)length]; Marshal.Copy(value.Ptr, bytes, 0, bytes.Length);\n\
+//RS                      return new UTF8Encoding(false, true).GetString(bytes);\n\
+//RS                  } catch (DecoderFallbackException error) {\n\
+//RS                      throw new JetCallException(\"JetText contains invalid UTF-8\", error);\n\
+//RS                  } finally { Native.Free(value); }\n\
+//RS              }\n\
+//RS              private sealed class TextArgument : IDisposable {\n\
+//RS                  private readonly IntPtr pointer; public JetText Value { get; }\n\
+//RS                  private TextArgument(IntPtr pointer, UIntPtr length) { this.pointer = pointer; Value = new JetText { Ptr = pointer, Len = length }; }\n\
+//RS                  public static TextArgument Create(string value) {\n\
+//RS                      if (value is null) throw new JetCallException(\"text argument cannot be null\");\n\
+//RS                      byte[] bytes = Encoding.UTF8.GetBytes(value); IntPtr pointer = Marshal.AllocHGlobal(Math.Max(1, bytes.Length));\n\
+//RS                      if (bytes.Length != 0) Marshal.Copy(bytes, 0, pointer, bytes.Length);\n\
+//RS                      return new TextArgument(pointer, new UIntPtr((ulong)bytes.Length));\n\
+//RS                  }\n\
+//RS                  public void Dispose() { if (pointer != IntPtr.Zero) Marshal.FreeHGlobal(pointer); }\n\
+//RS              }\n",
+//RS         );
+//RS     }
+//RS     output.push_str("         }\n}\n");
+//RS     output
+//RS }
+//RS 
+//RS fn csharp_type(value: JetLibScalar) -> &'static str {
+//RS     match value {
+//RS         JetLibScalar::Int => "long",
+//RS         JetLibScalar::Float => "double",
+//RS         JetLibScalar::Bool => "bool",
+//RS         JetLibScalar::Text => "JetText",
+//RS     }
+//RS }
+//RS 
+//RS fn csharp_public_name(value: &str) -> String {
+//RS     let name = normalized_component(value, false);
+//RS     if [
+//RS         "abstract",
+//RS         "as",
+//RS         "base",
+//RS         "bool",
+//RS         "break",
+//RS         "byte",
+//RS         "case",
+//RS         "catch",
+//RS         "char",
+//RS         "checked",
+//RS         "class",
+//RS         "const",
+//RS         "continue",
+//RS         "decimal",
+//RS         "default",
+//RS         "delegate",
+//RS         "do",
+//RS         "double",
+//RS         "else",
+//RS         "enum",
+//RS         "event",
+//RS         "explicit",
+//RS         "extern",
+//RS         "false",
+//RS         "finally",
+//RS         "fixed",
+//RS         "float",
+//RS         "for",
+//RS         "foreach",
+//RS         "goto",
+//RS         "if",
+//RS         "implicit",
+//RS         "in",
+//RS         "int",
+//RS         "interface",
+//RS         "internal",
+//RS         "is",
+//RS         "lock",
+//RS         "long",
+//RS         "namespace",
+//RS         "new",
+//RS         "null",
+//RS         "object",
+//RS         "operator",
+//RS         "out",
+//RS         "override",
+//RS         "params",
+//RS         "private",
+//RS         "protected",
+//RS         "public",
+//RS         "readonly",
+//RS         "ref",
+//RS         "return",
+//RS         "sbyte",
+//RS         "sealed",
+//RS         "short",
+//RS         "sizeof",
+//RS         "stackalloc",
+//RS         "static",
+//RS         "string",
+//RS         "struct",
+//RS         "switch",
+//RS         "this",
+//RS         "throw",
+//RS         "true",
+//RS         "try",
+//RS         "typeof",
+//RS         "uint",
+//RS         "ulong",
+//RS         "unchecked",
+//RS         "unsafe",
+//RS         "ushort",
+//RS         "using",
+//RS         "virtual",
+//RS         "void",
+//RS         "volatile",
+//RS         "while",
+//RS         "yield",
+//RS     ]
+//RS     .contains(&name.as_str())
+//RS     {
+//RS         format!("Jet_{name}")
+//RS     } else {
+//RS         name
+//RS     }
+//RS }
+//RS 
+//RS fn render_pom(input: &LibraryInput, artifact: &str) -> String {
+//RS     format!(
+//RS         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:schemaLocation=\"http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd\">\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>dev.jet</groupId>\n  <artifactId>{}</artifactId>\n  <version>{}</version>\n  <packaging>jar</packaging>\n  <name>Jet native library {}</name>\n  <licenses><license><name>{}</name><distribution>repo</distribution></license></licenses>\n  <properties><jet.releaseIdentity>{}</jet.releaseIdentity><jet.sourceIdentity>{}</jet.sourceIdentity><jet.abiDigest>{}</jet.abiDigest></properties>\n</project>\n",
+//RS         xml_string(artifact),
+//RS         xml_string(&input.version),
+//RS         xml_string(&input.library_name),
+//RS         xml_string(&input.license),
+//RS         xml_string(&input.release_identity),
+//RS         xml_string(&input.source_identity),
+//RS         xml_string(&input.abi_digest),
+//RS     )
+//RS }
+//RS 
+//RS fn render_nuspec(input: &LibraryInput, package: &str) -> String {
+//RS     format!(
+//RS         "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd\">\n  <metadata>\n    <id>{}</id><version>{}</version><authors>Jet package publisher</authors><owners>Jet</owners>\n    <description>Typed native bindings for Jet library {}</description>\n    <license type=\"expression\">{}</license>\n    <repository type=\"git\" url=\"https://jet-lang.dev/source/{}\" />\n    <tags>jet native ffi abi</tags>\n    <dependencies />\n  </metadata>\n</package>\n",
+//RS         xml_string(package),
+//RS         xml_string(&input.version),
+//RS         xml_string(&input.library_name),
+//RS         xml_string(&input.license),
+//RS         xml_string(&input.source_identity),
+//RS     )
+//RS }
+//RS 
+//RS fn registry_endpoint(registry: ForeignRegistry) -> Result<String, String> {
+//RS     let specific = match registry {
+//RS         ForeignRegistry::PyPi => "JET_PYPI_URL",
+//RS         ForeignRegistry::Npm => "JET_NPM_REGISTRY",
+//RS         ForeignRegistry::Maven => "JET_MAVEN_URL",
+//RS         ForeignRegistry::NuGet => "JET_NUGET_SOURCE",
+//RS     };
+//RS     let endpoint = env::var(specific)
+//RS         .ok()
+//RS         .filter(|value| !value.trim().is_empty())
+//RS         .or_else(|| {
+//RS             env::var("JET_FOREIGN_REGISTRY_URL")
+//RS                 .ok()
+//RS                 .filter(|value| !value.trim().is_empty())
+//RS         })
+//RS         .ok_or_else(|| {
+//RS             format!(
+//RS                 "foreign {} publication needs {specific} or JET_FOREIGN_REGISTRY_URL; use file:///absolute/path for offline publication",
+//RS                 registry.as_str()
+//RS             )
+//RS         })?;
+//RS     if endpoint
+//RS         .chars()
+//RS         .any(|ch| ch.is_control() || ch.is_whitespace())
+//RS     {
+//RS         return Err(
+//RS             "foreign registry endpoint contains whitespace or control characters".to_string(),
+//RS         );
+//RS     }
+//RS     if endpoint.contains('@') {
+//RS         return Err(
+//RS             "foreign registry endpoint must not contain embedded credentials; use the registry credential helper"
+//RS                 .to_string(),
+//RS         );
+//RS     }
+//RS     if let Some(path) = endpoint.strip_prefix("file://") {
+//RS         if path.is_empty() || !Path::new(path).is_absolute() {
+//RS             return Err("file registry endpoint must name an absolute path".to_string());
+//RS         }
+//RS         return Ok(endpoint);
+//RS     }
+//RS     if endpoint.starts_with("https://") || endpoint.starts_with("http://") {
+//RS         return Ok(endpoint);
+//RS     }
+//RS     Err("foreign registry endpoint must use http(s):// or file://".to_string())
+//RS }
+//RS 
+//RS fn publish_archive(
+//RS     registry: ForeignRegistry,
+//RS     endpoint: &str,
+//RS     report: &ForeignPublishReport,
+//RS ) -> Result<(), String> {
+//RS     let bytes = read_regular_file(&report.artifact, "foreign package")?;
+//RS     let digest = format!("sha256-{}", crate::SHA256::sha256_hex(&bytes));
+//RS     if digest != report.artifact_digest {
+//RS         return Err("foreign package changed after validation; refusing publication".to_string());
+//RS     }
+//RS     if let Some(directory) = endpoint.strip_prefix("file://") {
+//RS         return publish_to_file_registry(directory, &report.artifact, &bytes);
+//RS     }
+//RS     let mut command = match registry {
+//RS         ForeignRegistry::PyPi => {
+//RS             let mut command = Command::new("twine");
+//RS             command.args(["upload", "--repository-url", endpoint]);
+//RS             command.arg(&report.artifact);
+//RS             command
+//RS         }
+//RS         ForeignRegistry::Npm => {
+//RS             let mut command = Command::new("npm");
+//RS             command.args(["publish", "--registry", endpoint, "--ignore-scripts"]);
+//RS             command.arg(&report.artifact);
+//RS             command
+//RS         }
+//RS         ForeignRegistry::Maven => {
+//RS             let mut command = Command::new("mvn");
+//RS             let artifact_id = report
+//RS                 .artifact
+//RS                 .file_name()
+//RS                 .and_then(|value| value.to_str())
+//RS                 .unwrap_or("jet-library")
+//RS                 .strip_suffix(".jar")
+//RS                 .unwrap_or("jet-library");
+//RS             command.args([
+//RS                 "deploy:deploy-file",
+//RS                 "-B",
+//RS                 "-DgeneratePom=false",
+//RS                 "-DrepositoryId=jet",
+//RS             ]);
+//RS             command.arg(format!("-Durl={endpoint}"));
+//RS             command.arg(format!("-Dfile={}", report.artifact.display()));
+//RS             command.arg(format!("-DartifactId={artifact_id}"));
+//RS             command.arg("-DgroupId=dev.jet");
+//RS             command
+//RS         }
+//RS         ForeignRegistry::NuGet => {
+//RS             let mut command = Command::new("dotnet");
+//RS             command.args(["nuget", "push", "--source", endpoint]);
+//RS             command.arg(&report.artifact);
+//RS             command
+//RS         }
+//RS     };
+//RS     run_host_tool(&mut command, registry.as_str())
+//RS }
+//RS 
+//RS fn publish_to_file_registry(directory: &str, artifact: &Path, bytes: &[u8]) -> Result<(), String> {
+//RS     let root = Path::new(directory);
+//RS     if let Ok(metadata) = fs::symlink_metadata(root) {
+//RS         if metadata.file_type().is_symlink() || !metadata.is_dir() {
+//RS             return Err(format!(
+//RS                 "file registry '{}' is not a real directory",
+//RS                 root.display()
+//RS             ));
+//RS         }
+//RS     } else {
+//RS         fs::create_dir_all(root).map_err(|error| {
+//RS             format!(
+//RS                 "could not create file registry '{}': {error}",
+//RS                 root.display()
+//RS             )
+//RS         })?;
+//RS     }
+//RS     let name = artifact
+//RS         .file_name()
+//RS         .ok_or_else(|| "foreign artifact has no file name".to_string())?;
+//RS     let destination = root.join(name);
+//RS     if fs::symlink_metadata(&destination).is_ok() {
+//RS         return Err(format!(
+//RS             "foreign registry already contains version artifact '{}'",
+//RS             name.to_string_lossy()
+//RS         ));
+//RS     }
+//RS     write_atomic(&destination, bytes)
+//RS }
+// END-PORT-PENDING 0819 Source/Publish/ForeignPackage.rs:1811-2525
+

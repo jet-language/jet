@@ -1,0 +1,1808 @@
+// PORT-PENDING 0701 source-cmdperf-slice-1: Source/CmdPerf.rs:1-1804
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-PERFSESSION1=D: `jet perf` family over one versioned `.jettrace` truth.
+//RS //!
+//RS //! `run`/`test` spawn the exact base-intent driver (`jet run|test …`).
+//RS //! with observe enabled, poll live facts while the child runs, then write one
+//RS //! `.jettrace` with wall/alloc/tasks/locks/io/native/task-observation spans before
+//RS //! exiting with the child's code.
+//RS //! `attach`/`view`/`compare`/`export` share the same artifact verify seam.
+//RS //! Capture reuses the observe live snapshot (D-OBSERVE-LIVE1) attributed to a
+//RS //! Jet source symbol.
+//RS 
+//RS use jet_foundation::Devtools::JetDevtoolsEventBody;
+//RS use jet_foundation::ExitCodes;
+//RS use jet_foundation::JetTrace::{
+//RS     artifact_extension, build_skeleton_bytes, project_game_devtools_bodies, trace_id,
+//RS     verify_jettrace, CapturePolicy,
+//RS     JetSymbolRef, SourceIdentity, TraceAllocation, TraceBrowser, TraceGameDrawEvent,
+//RS     TraceGameFrame, TraceHardware, TraceIo, TraceLock, TraceNative, TraceProfile,
+//RS     TraceProfileRow, TraceProfileSource, TraceReceiptSection, TraceSample, TraceSkeleton,
+//RS     TraceSourceMap, TraceSpan, TraceTask, TraceToolchain, DEFAULT_EXCLUSIONS,
+//RS     TRACE_IO_ROW_LIMIT, TRACE_PROFILE_SAMPLE_LIMIT, TRACE_SCHEMA, TRACE_SPAN_ROW_LIMIT,
+//RS     TRACE_TASK_ROW_LIMIT, TRACE_VERSION,
+//RS };
+//RS use jet_foundation::PerformanceBudget::CanonicalJson;
+//RS use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
+//RS use jet_foundation::Syntax::ARTIFACT_EXT_TRACE;
+//RS use jet_foundation::SHA256;
+//RS use std::collections::{BTreeMap, BTreeSet};
+//RS use std::fs;
+//RS use std::io::Write;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::{Command, Stdio};
+//RS use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+//RS 
+//RS pub(crate) enum Outcome {
+//RS     Exit(i32),
+//RS }
+//RS 
+//RS fn perf_error(what: impl Into<String>) {
+//RS     crate::emit_cli_diagnostic("E2102", what.into());
+//RS }
+//RS 
+//RS fn perf_error_with_fix(what: impl Into<String>, fix: impl Into<String>) {
+//RS     crate::emit_cli_diagnostic_with_fix("E2102", what.into(), fix.into());
+//RS }
+//RS struct CaptureBundle {
+//RS     samples: Vec<TraceSample>,
+//RS     profile: TraceProfile,
+//RS     allocations: Vec<TraceAllocation>,
+//RS     browser: Vec<TraceBrowser>,
+//RS     browser_rows_truncated: bool,
+//RS     game_frames: Vec<TraceGameFrame>,
+//RS     game_draw_events: Vec<TraceGameDrawEvent>,
+//RS     tasks: Vec<TraceTask>,
+//RS     locks: Vec<TraceLock>,
+//RS     io: Vec<TraceIo>,
+//RS     io_rows_truncated: bool,
+//RS     native: Vec<TraceNative>,
+//RS     native_rows_truncated: bool,
+//RS     spans: Vec<TraceSpan>,
+//RS     span_rows_truncated: bool,
+//RS     source_identity: Vec<SourceIdentity>,
+//RS     source_maps: Vec<TraceSourceMap>,
+//RS     task_rows_truncated: bool,
+//RS }
+//RS 
+//RS impl CaptureBundle {
+//RS     fn empty() -> Self {
+//RS         Self {
+//RS             samples: Vec::new(),
+//RS             profile: TraceProfile::unsupported("source sampling requires a source capture"),
+//RS             allocations: Vec::new(),
+//RS             browser: Vec::new(),
+//RS             browser_rows_truncated: false,
+//RS             game_frames: Vec::new(),
+//RS             game_draw_events: Vec::new(),
+//RS             tasks: Vec::new(),
+//RS             locks: Vec::new(),
+//RS             io: Vec::new(),
+//RS             io_rows_truncated: false,
+//RS             native: Vec::new(),
+//RS             native_rows_truncated: false,
+//RS             spans: Vec::new(),
+//RS             span_rows_truncated: false,
+//RS             source_identity: Vec::new(),
+//RS             source_maps: Vec::new(),
+//RS             task_rows_truncated: false,
+//RS         }
+//RS     }
+//RS }
+//RS impl CaptureBundle {
+//RS     fn add_game_devtools_bodies(
+//RS         &mut self,
+//RS         bodies: &[JetDevtoolsEventBody],
+//RS     ) -> Result<(), String> {
+//RS         let (frames, draws) = project_game_devtools_bodies(bodies)?;
+//RS         self.game_frames.extend(frames);
+//RS         self.game_draw_events.extend(draws);
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS pub(crate) fn run(raw: &[String]) -> Outcome {
+//RS     let action = raw.get(1).map(String::as_str);
+//RS     // #1659 criterion 2: `jet perf` / `jet perf help` / `jet perf --help` /
+//RS     // `-h` all show the group's action table, rendered from the one
+//RS     // `jet::CLI::COMMAND_GROUPS` entry — retires the E2101/E2102 that used
+//RS     // to fire here for a bare or `--help` invocation.
+//RS     if matches!(action, None | Some("help")) || action.is_some_and(jet::CLI::is_help_flag) {
+//RS         if let Some(group) = jet::CLI::command_group("perf") {
+//RS             println!("jet perf — {}", group.summary);
+//RS         }
+//RS         println!();
+//RS         print!("{}", jet::CLI::command_group_usage("perf"));
+//RS         return Outcome::Exit(ExitCodes::OK);
+//RS     }
+//RS     let action = action.unwrap();
+//RS     let mut rest: Vec<String> = raw[2..].to_vec();
+//RS     // #1659 c2/c3: every perf sub-verb answers `--help`/`-h` with its row from
+//RS     // the one table, and accepts `--quiet`. Perf's only non-error status line
+//RS     // is the `trace:` path note in a session run; product output (view,
+//RS     // compare, export payloads) is never suppressed.
+//RS     if rest.iter().any(|arg| jet::CLI::is_help_flag(arg)) {
+//RS         let spec = jet::CLI::command_group("perf")
+//RS             .and_then(|group| group.actions.iter().find(|nested| nested.name == action));
+//RS         match spec {
+//RS             Some(spec) => {
+//RS                 println!("jet perf {} — {}", spec.name, spec.summary);
+//RS                 println!("usage: {}", spec.usage);
+//RS             }
+//RS             None => print!("{}", jet::CLI::command_group_usage("perf")),
+//RS         }
+//RS         return Outcome::Exit(ExitCodes::OK);
+//RS     }
+//RS     let quiet = rest.iter().any(|arg| arg == "--quiet");
+//RS     rest.retain(|arg| arg != "--quiet");
+//RS     match action {
+//RS         "run" | "test" => Outcome::Exit(run_session(action, &rest, quiet)),
+//RS         "attach" => Outcome::Exit(attach(&rest)),
+//RS         "view" => Outcome::Exit(view(&rest)),
+//RS         "compare" => Outcome::Exit(compare(&rest)),
+//RS         "export" => Outcome::Exit(export(&rest)),
+//RS         other => {
+//RS             crate::emit_cli_report(
+//RS                 "E2101",
+//RS                 format!("`{other}` isn't a jet perf command."),
+//RS                 "jet perf accepts only commands in its named area.".to_string(),
+//RS                 "run `jet perf help`.".to_string(),
+//RS                 false,
+//RS             );
+//RS             Outcome::Exit(ExitCodes::USAGE)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Spawn exact base intent with observe, capture while live, write `.jettrace`.
+//RS fn run_session(action: &str, args: &[String], quiet: bool) -> i32 {
+//RS     let parsed = match parse_session_args(args) {
+//RS         Ok(parsed) => parsed,
+//RS         Err(message) => {
+//RS             perf_error_with_fix(
+//RS                 message,
+//RS                 format!("run `jet perf {action} <file.jet> [--out <path.jettrace>]`"),
+//RS             );
+//RS             return ExitCodes::USAGE;
+//RS         }
+//RS     };
+//RS     let exe = match std::env::current_exe() {
+//RS         Ok(path) => path,
+//RS         Err(error) => {
+//RS             perf_error(format!("cannot resolve jet executable: {error}"));
+//RS             return ExitCodes::USAGE;
+//RS         }
+//RS     };
+//RS     let mut child_argv = vec![action.to_string()];
+//RS     child_argv.extend(parsed.child_args.iter().cloned());
+//RS     let relay_nonce = SystemTime::now()
+//RS         .duration_since(UNIX_EPOCH)
+//RS         .unwrap_or_default()
+//RS         .as_nanos();
+//RS     let relay_path = std::env::temp_dir().join(format!(
+//RS         "jet-perf-devtools-{}-{relay_nonce}.ring",
+//RS         std::process::id()
+//RS     ));
+//RS     let relay_session_id = format!("jet-perf-{}-{relay_nonce}", std::process::id());
+//RS     let mut child_command = Command::new(&exe);
+//RS     child_command
+//RS         .args(&child_argv)
+//RS         .env("JET_OBSERVE", "1")
+//RS         .env("JET_DEVTOOLS_RELAY_PATH", &relay_path)
+//RS         .env("JET_DEVTOOLS_RELAY_SESSION_ID", &relay_session_id)
+//RS         .env(
+//RS             "JET_DEVTOOLS_RELAY_SOURCE_ID",
+//RS             parsed.source.as_deref().unwrap_or(""),
+//RS         )
+//RS         .env("JET_DEVTOOLS_RELAY_BUILD_ID", "runtime")
+//RS         .env("JET_DEVTOOLS_RELAY_REVISION", "runtime")
+//RS         .env("JET_DEVTOOLS_RELAY_WORLD_ID", "game")
+//RS         .stdin(Stdio::inherit())
+//RS         .stdout(Stdio::inherit())
+//RS         .stderr(Stdio::inherit());
+//RS     let mut child = match child_command.spawn()
+//RS     {
+//RS         Ok(child) => child,
+//RS         Err(error) => {
+//RS             perf_error(format!("cannot start `jet {action}`: {error}"));
+//RS             return ExitCodes::USAGE;
+//RS         }
+//RS     };
+//RS     let pid = child.id();
+//RS     let started = Instant::now();
+//RS     let mut last_snapshot = None;
+//RS     let mut io_timeline = IOTimeline::default();
+//RS     let mut native_timing = NativeTimingInput::unavailable(0);
+//RS     let mut observe = || {
+//RS         // Observe publishes under the program PID, not the jet host.
+//RS         if let Some(snapshot) = poll_observe_snapshot(pid) {
+//RS             let observed_at_ns = elapsed_ns(started);
+//RS             io_timeline.observe(
+//RS                 &snapshot.tasks,
+//RS                 observed_at_ns,
+//RS                 snapshot.process_cpu_ns.is_some(),
+//RS             );
+//RS             native_timing = snapshot
+//RS                 .process_cpu_ns
+//RS                 .map(|duration_ns| NativeTimingInput::Captured {
+//RS                     duration_ns,
+//RS                     observed_at_ns,
+//RS                     process_id: snapshot.process_id,
+//RS                 })
+//RS                 .unwrap_or_else(|| NativeTimingInput::unavailable(observed_at_ns));
+//RS             last_snapshot = Some(snapshot.text);
+//RS         }
+//RS     };
+//RS     loop {
+//RS         match child_exited(&mut child) {
+//RS             Ok(true) => break,
+//RS             Ok(false) => {
+//RS                 if parsed.source.is_some() {
+//RS                     observe();
+//RS                 }
+//RS                 std::thread::sleep(Duration::from_millis(25));
+//RS             }
+//RS             Err(error) => {
+//RS                 perf_error(format!("cannot wait for `jet {action}`: {error}"));
+//RS                 let _ = child.kill();
+//RS                 let _ = child.wait();
+//RS                 return ExitCodes::USAGE;
+//RS             }
+//RS         }
+//RS     }
+//RS     // The exited child is not reaped yet, so the runtime's exit publication is
+//RS     // still readable under its pid: every completed run gets its final
+//RS     // observation, however short it was.
+//RS     if parsed.source.is_some() {
+//RS         observe();
+//RS     }
+//RS     let status = match child.wait() {
+//RS         Ok(status) => status,
+//RS         Err(error) => {
+//RS             perf_error(format!("cannot wait for `jet {action}`: {error}"));
+//RS             return ExitCodes::USAGE;
+//RS         }
+//RS     };
+//RS     let game_bodies = match jet::DevServer::LiveInspect::read_devtools_relay_path_with_identity(
+//RS         &relay_path,
+//RS         Some(&relay_session_id),
+//RS         parsed.source.as_deref(),
+//RS         Some("runtime"),
+//RS         Some("runtime"),
+//RS         Some("game"),
+//RS     ) {
+//RS         Ok(envelope) => envelope.game_trace_bodies(),
+//RS         Err(_) if !relay_path.exists() => Vec::new(),
+//RS         Err(message) => {
+//RS             let _ = fs::remove_file(&relay_path);
+//RS             perf_error(message);
+//RS             return ExitCodes::USAGE;
+//RS         }
+//RS     };
+//RS     let wall_ns = started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
+//RS     io_timeline.finish(wall_ns);
+//RS     let capture = match &parsed.source {
+//RS         Some(source) => match capture_from_source(
+//RS             source,
+//RS             last_snapshot.as_deref(),
+//RS             wall_ns,
+//RS             native_timing.duration_ns(),
+//RS             Some(&io_timeline),
+//RS             Some(&native_timing),
+//RS         ) {
+//RS             Ok(bundle) => bundle,
+//RS             // Missing/unreadable source still gets a schema-valid skeleton.
+//RS             Err(_) => CaptureBundle::empty(),
+//RS         },
+//RS         None => CaptureBundle::empty(),
+//RS     };
+//RS     let mut argv = vec![action.to_string()];
+//RS     argv.extend(args.iter().cloned());
+//RS     let receipt_sections = match receipt_sections_for_command(action, &child_argv) {
+//RS         Ok(sections) => sections,
+//RS         Err(message) => {
+//RS             perf_error(format!("receipt sections: {message}"));
+//RS             return ExitCodes::USAGE;
+//RS         }
+//RS     };
+//RS     let trace_result = write_session_trace(
+//RS         action,
+//RS         &argv,
+//RS         parsed.out.as_deref(),
+//RS         capture,
+//RS         &game_bodies,
+//RS         &parsed.capture_allowlist,
+//RS         receipt_sections,
+//RS     );
+//RS     let _ = fs::remove_file(&relay_path);
+//RS     match trace_result {
+//RS         Ok(path) => {
+//RS             if !quiet {
+//RS                 eprintln!("trace: {}", path.display());
+//RS             }
+//RS         }
+//RS         Err(message) => {
+//RS             perf_error(message);
+//RS             return ExitCodes::USAGE;
+//RS         }
+//RS     }
+//RS     status.code().unwrap_or(1)
+//RS }
+//RS 
+//RS struct SessionArgs {
+//RS     out: Option<String>,
+//RS     source: Option<String>,
+//RS     /// Expert `--capture` allowlist (subset of D-PERFSESSION1 default exclusions).
+//RS     capture_allowlist: Vec<String>,
+//RS     /// Base-intent argv after the action name (perf-only flags stripped).
+//RS     child_args: Vec<String>,
+//RS }
+//RS 
+//RS fn parse_session_args(args: &[String]) -> Result<SessionArgs, String> {
+//RS     let mut out = None;
+//RS     let mut source = None;
+//RS     let mut capture_allowlist = Vec::new();
+//RS     let mut child_args = Vec::new();
+//RS     let mut i = 0usize;
+//RS     let mut passthrough = false;
+//RS     while i < args.len() {
+//RS         let arg = args[i].as_str();
+//RS         if passthrough {
+//RS             child_args.push(args[i].clone());
+//RS             i += 1;
+//RS             continue;
+//RS         }
+//RS         if arg == "--" {
+//RS             passthrough = true;
+//RS             child_args.push(args[i].clone());
+//RS             i += 1;
+//RS             continue;
+//RS         }
+//RS         if let Some(value) = arg.strip_prefix("--out=") {
+//RS             out = Some(value.to_string());
+//RS             i += 1;
+//RS             continue;
+//RS         }
+//RS         if arg == "--out" {
+//RS             let Some(value) = args.get(i + 1) else {
+//RS                 return Err("`--out` needs a path".into());
+//RS             };
+//RS             out = Some(value.clone());
+//RS             i += 2;
+//RS             continue;
+//RS         }
+//RS         if let Some(value) = arg.strip_prefix("--capture=") {
+//RS             capture_allowlist = parse_capture_allowlist(value)?;
+//RS             i += 1;
+//RS             continue;
+//RS         }
+//RS         if arg == "--capture" {
+//RS             let Some(value) = args.get(i + 1) else {
+//RS                 return Err("`--capture` needs a comma-separated allowlist".into());
+//RS             };
+//RS             capture_allowlist = parse_capture_allowlist(value)?;
+//RS             i += 2;
+//RS             continue;
+//RS         }
+//RS         if arg.starts_with('-') {
+//RS             child_args.push(args[i].clone());
+//RS             i += 1;
+//RS             continue;
+//RS         }
+//RS         if source.is_none()
+//RS             && (arg.ends_with(".jet")
+//RS                 || Path::new(arg).extension().and_then(|e| e.to_str()) == Some("jet"))
+//RS         {
+//RS             source = Some(arg.to_string());
+//RS         }
+//RS         child_args.push(args[i].clone());
+//RS         i += 1;
+//RS     }
+//RS     Ok(SessionArgs {
+//RS         out,
+//RS         source,
+//RS         capture_allowlist,
+//RS         child_args,
+//RS     })
+//RS }
+//RS 
+//RS fn parse_capture_allowlist(raw: &str) -> Result<Vec<String>, String> {
+//RS     let mut items = Vec::new();
+//RS     for part in raw.split(',') {
+//RS         let item = part.trim();
+//RS         if item.is_empty() {
+//RS             continue;
+//RS         }
+//RS         if !DEFAULT_EXCLUSIONS.contains(&item) {
+//RS             return Err(format!(
+//RS                 "`--capture` item `{item}` is not a D-PERFSESSION1 privacy field; allowed: {}",
+//RS                 DEFAULT_EXCLUSIONS.join(", ")
+//RS             ));
+//RS         }
+//RS         items.push(item.to_string());
+//RS     }
+//RS     if items.is_empty() {
+//RS         return Err("`--capture` needs at least one privacy field".into());
+//RS     }
+//RS     items.sort();
+//RS     items.dedup();
+//RS     Ok(items)
+//RS }
+//RS 
+//RS fn attach(args: &[String]) -> i32 {
+//RS     let mut pid = None;
+//RS     let mut out = None;
+//RS     let mut source = None;
+//RS     let mut capture_allowlist = Vec::new();
+//RS     let mut i = 0usize;
+//RS     while i < args.len() {
+//RS         let arg = args[i].as_str();
+//RS         if let Some(value) = arg.strip_prefix("--out=") {
+//RS             out = Some(value.to_string());
+//RS             i += 1;
+//RS             continue;
+//RS         }
+//RS         if arg == "--out" {
+//RS             let Some(value) = args.get(i + 1) else {
+//RS                 perf_error("`--out` needs a path");
+//RS                 return ExitCodes::USAGE;
+//RS             };
+//RS             out = Some(value.clone());
+//RS             i += 2;
+//RS             continue;
+//RS         }
+//RS         if let Some(value) = arg.strip_prefix("--source=") {
+//RS             source = Some(value.to_string());
+//RS             i += 1;
+//RS             continue;
+//RS         }
+//RS         if arg == "--source" {
+//RS             let Some(value) = args.get(i + 1) else {
+//RS                 perf_error("`--source` needs a `.jet` path");
+//RS                 return ExitCodes::USAGE;
+//RS             };
+//RS             source = Some(value.clone());
+//RS             i += 2;
+//RS             continue;
+//RS         }
+//RS         if let Some(value) = arg.strip_prefix("--capture=") {
+//RS             match parse_capture_allowlist(value) {
+//RS                 Ok(items) => capture_allowlist = items,
+//RS                 Err(message) => {
+//RS                     perf_error(message);
+//RS                     return ExitCodes::USAGE;
+//RS                 }
+//RS             }
+//RS             i += 1;
+//RS             continue;
+//RS         }
+//RS         if arg == "--capture" {
+//RS             let Some(value) = args.get(i + 1) else {
+//RS                 perf_error("`--capture` needs a comma-separated allowlist");
+//RS                 return ExitCodes::USAGE;
+//RS             };
+//RS             match parse_capture_allowlist(value) {
+//RS                 Ok(items) => capture_allowlist = items,
+//RS                 Err(message) => {
+//RS                     perf_error(message);
+//RS                     return ExitCodes::USAGE;
+//RS                 }
+//RS             }
+//RS             i += 2;
+//RS             continue;
+//RS         }
+//RS         if arg.starts_with('-') {
+//RS             perf_error(format!("unknown `jet perf attach` flag `{arg}`"));
+//RS             return ExitCodes::USAGE;
+//RS         }
+//RS         if pid.is_some() {
+//RS             perf_error("`jet perf attach` takes one process id");
+//RS             return ExitCodes::USAGE;
+//RS         }
+//RS         let Ok(value) = arg.parse::<u32>() else {
+//RS             perf_error(format!("`{arg}` isn't a process id"));
+//RS             return ExitCodes::USAGE;
+//RS         };
+//RS         pid = Some(value);
+//RS         i += 1;
+//RS     }
+//RS     let Some(pid) = pid else {
+//RS         perf_error_with_fix(
+//RS             "`jet perf attach` needs a process id",
+//RS             "run `jet perf attach <pid> --source <file.jet>`",
+//RS         );
+//RS         return ExitCodes::USAGE;
+//RS     };
+//RS     if !process_exists(pid) {
+//RS         perf_error_with_fix(
+//RS             format!("process {pid} is not running or not visible to this user"),
+//RS             "start the program with `jet run --observe`, then attach to that pid",
+//RS         );
+//RS         return ExitCodes::USAGE;
+//RS     }
+//RS     let relay_path = jet::DevServer::LiveInspect::devtools_relay_path(pid);
+//RS     let game_bodies = match jet::DevServer::LiveInspect::read_devtools_relay_path_with_identity(
+//RS         &relay_path,
+//RS         None,
+//RS         source.as_deref(),
+//RS         None,
+//RS         None,
+//RS         None,
+//RS     ) {
+//RS         Ok(envelope) => envelope.game_trace_bodies(),
+//RS         Err(_) if !jet::DevServer::LiveInspect::devtools_relay_path(pid).exists() => {
+//RS             Vec::new()
+//RS         }
+//RS         Err(message) => {
+//RS             perf_error(message);
+//RS             return ExitCodes::USAGE;
+//RS         }
+//RS     };
+//RS 
+//RS     let browser_capture = match read_browser_capture(pid, source.is_none()) {
+//RS         Ok(capture) => Some(capture),
+//RS         Err(_) if !jet::DevServer::BrowserTrace::relay_path(pid).exists() => None,
+//RS         Err(message) => {
+//RS             perf_error(message);
+//RS             return ExitCodes::USAGE;
+//RS         }
+//RS     };
+//RS     let capture = if let Some(browser_capture) = browser_capture {
+//RS         if source.as_deref().is_some_and(|path| {
+//RS             !browser_capture
+//RS                 .sources
+//RS                 .iter()
+//RS                 .any(|source| source.path == path)
+//RS         }) {
+//RS             perf_error("`--source` does not match the devserver browser session");
+//RS             return ExitCodes::USAGE;
+//RS         }
+//RS         let browser = match capture_browser(browser_capture) {
+//RS             Ok(bundle) => bundle,
+//RS             Err(message) => {
+//RS                 perf_error(message);
+//RS                 return ExitCodes::USAGE;
+//RS             }
+//RS         };
+//RS         // D-PERF-BROWSER-TRANSPORT1=A: one artifact merges host + browser facts.
+//RS         match merge_host_onto_browser(pid, source.as_deref(), browser) {
+//RS             Ok(bundle) => bundle,
+//RS             Err(message) => {
+//RS                 perf_error(message);
+//RS                 return ExitCodes::USAGE;
+//RS             }
+//RS         }
+//RS     } else {
+//RS         match (source.as_deref(), jet::DevServer::LiveInspect::read(pid)) {
+//RS             (Some(path), Ok(snapshot)) => {
+//RS                 let timing = process_times(pid);
+//RS                 let wall_ns = timing.map(|(wall_ns, _)| wall_ns).unwrap_or(0);
+//RS                 let cpu_ns = timing.map(|(_, cpu_ns)| cpu_ns);
+//RS                 let native_timing = timing
+//RS                     .map(|(_, duration_ns)| NativeTimingInput::Captured {
+//RS                         duration_ns,
+//RS                         // Attach is a point capture: trace-session origin is now.
+//RS                         observed_at_ns: 0,
+//RS                         process_id: pid,
+//RS                     })
+//RS                     .unwrap_or_else(|| NativeTimingInput::unavailable(wall_ns));
+//RS                 match capture_from_source(
+//RS                     path,
+//RS                     Some(&snapshot),
+//RS                     wall_ns,
+//RS                     cpu_ns,
+//RS                     None,
+//RS                     Some(&native_timing),
+//RS                 ) {
+//RS                     Ok(bundle) => bundle,
+//RS                     Err(message) => {
+//RS                         perf_error(message);
+//RS                         return ExitCodes::USAGE;
+//RS                     }
+//RS                 }
+//RS             }
+//RS             (Some(_), Err(message)) => {
+//RS                 perf_error_with_fix(
+//RS                     message,
+//RS                     "start the program with `jet run --observe`, then attach",
+//RS                 );
+//RS                 return ExitCodes::USAGE;
+//RS             }
+//RS             (None, Ok(_)) => {
+//RS                 crate::emit_cli_report(
+//RS                     "E2102",
+//RS                     "live observe snapshot found, but `--source` is required".to_string(),
+//RS                     "domain capture must attribute facts to a Jet symbol identity".to_string(),
+//RS                     format!("run `jet perf attach {pid} --source <file.jet>`"),
+//RS                     false,
+//RS                 );
+//RS                 return ExitCodes::USAGE;
+//RS             }
+//RS             (None, Err(_)) => CaptureBundle::empty(),
+//RS         }
+//RS     };
+//RS 
+//RS     let mut argv = vec!["attach".into(), pid.to_string()];
+//RS     if let Some(path) = &source {
+//RS         argv.push("--source".into());
+//RS         argv.push(path.clone());
+//RS     }
+//RS     if !capture_allowlist.is_empty() {
+//RS         argv.push("--capture".into());
+//RS         argv.push(capture_allowlist.join(","));
+//RS     }
+//RS     match write_session_trace(
+//RS         "attach",
+//RS         &argv,
+//RS         out.as_deref(),
+//RS         capture,
+//RS         &game_bodies,
+//RS         &capture_allowlist,
+//RS         Vec::new(),
+//RS     ) {
+//RS         Ok(path) => {
+//RS             eprintln!("trace: {}", path.display());
+//RS             ExitCodes::OK
+//RS         }
+//RS         Err(message) => {
+//RS             perf_error(message);
+//RS             ExitCodes::USAGE
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn read_browser_capture(
+//RS     pid: u32,
+//RS     activate: bool,
+//RS ) -> Result<jet::DevServer::BrowserTrace::Capture, String> {
+//RS     match jet::DevServer::BrowserTrace::read(pid) {
+//RS         Ok(capture) => return Ok(capture),
+//RS         Err(error) if jet::DevServer::BrowserTrace::relay_path(pid).exists() || !activate => {
+//RS             return Err(error)
+//RS         }
+//RS         Err(_) => {}
+//RS     }
+//RS     jet::DevServer::BrowserTrace::request(pid)?;
+//RS     let deadline = Instant::now() + Duration::from_secs(2);
+//RS     while Instant::now() < deadline {
+//RS         if jet::DevServer::BrowserTrace::relay_path(pid).exists() {
+//RS             std::thread::sleep(Duration::from_millis(1600));
+//RS             return jet::DevServer::BrowserTrace::read(pid);
+//RS         }
+//RS         std::thread::sleep(Duration::from_millis(25));
+//RS     }
+//RS     jet::DevServer::BrowserTrace::cancel_request(pid);
+//RS     Err(format!("process {pid} has no browser trace relay"))
+//RS }
+//RS 
+//RS fn capture_browser(
+//RS     capture: jet::DevServer::BrowserTrace::Capture,
+//RS ) -> Result<CaptureBundle, String> {
+//RS     let mut bundle = CaptureBundle::empty();
+//RS     bundle.source_identity = capture
+//RS         .sources
+//RS         .iter()
+//RS         .map(|source| SourceIdentity {
+//RS             path: source.path.clone(),
+//RS             sha256: source.sha256.clone(),
+//RS             symbols: source.symbols.clone(),
+//RS         })
+//RS         .collect();
+//RS     if let Some(map) = &capture.source_map {
+//RS         bundle
+//RS             .source_maps
+//RS             .push(TraceSourceMap::from_map_bytes("js", "app.js", map));
+//RS     }
+//RS     let symbols = capture
+//RS         .sources
+//RS         .iter()
+//RS         .flat_map(|source| {
+//RS             source
+//RS                 .symbols
+//RS                 .iter()
+//RS                 .map(move |(name, _)| (name.as_str(), source.path.as_str()))
+//RS         })
+//RS         .collect::<BTreeMap<_, _>>();
+//RS     for row in capture.rows {
+//RS         let path = symbols.get(row.symbol.as_str()).ok_or_else(|| {
+//RS             format!(
+//RS                 "browser trace named unknown compiler symbol `{}`",
+//RS                 row.symbol
+//RS             )
+//RS         })?;
+//RS         bundle.browser.push(TraceBrowser {
+//RS             class: row.class,
+//RS             duration_ns: row.duration_ns,
+//RS             start_ns: row.start_ns,
+//RS             symbol: JetSymbolRef {
+//RS                 path: (*path).to_string(),
+//RS                 name: row.symbol,
+//RS             },
+//RS         });
+//RS     }
+//RS     bundle.browser_rows_truncated = capture.truncated;
+//RS     Ok(bundle)
+//RS }
+//RS 
+//RS /// Join host observe/native facts onto a browser capture without rereading
+//RS /// compiler source identities from disk (D-PERF-BROWSER-TRANSPORT1=A).
+//RS fn merge_host_onto_browser(
+//RS     pid: u32,
+//RS     source: Option<&str>,
+//RS     mut browser: CaptureBundle,
+//RS ) -> Result<CaptureBundle, String> {
+//RS     let symbol = attribution_symbol(&browser.source_identity, source).ok_or_else(|| {
+//RS         "browser capture has no Jet symbol identity for host attribution".to_string()
+//RS     })?;
+//RS     let timing = process_times(pid);
+//RS     let wall_ns = timing.map(|(wall_ns, _)| wall_ns).unwrap_or(0);
+//RS     let cpu_ns = timing.map(|(_, cpu_ns)| cpu_ns);
+//RS     if wall_ns > 0 {
+//RS         browser.samples.push(TraceSample {
+//RS             domain: "wall".into(),
+//RS             duration_ns: wall_ns,
+//RS             symbol: symbol.clone(),
+//RS         });
+//RS     }
+//RS     if let Some(cpu_ns) = cpu_ns.filter(|ns| *ns > 0) {
+//RS         browser.samples.push(TraceSample {
+//RS             domain: "cpu".into(),
+//RS             duration_ns: cpu_ns,
+//RS             symbol: symbol.clone(),
+//RS         });
+//RS     }
+//RS     let native_timing = timing
+//RS         .map(|(_, duration_ns)| NativeTimingInput::Captured {
+//RS             duration_ns,
+//RS             observed_at_ns: 0,
+//RS             process_id: pid,
+//RS         })
+//RS         .unwrap_or_else(|| NativeTimingInput::unavailable(wall_ns));
+//RS     let snapshot = jet::DevServer::LiveInspect::read(pid).ok();
+//RS     let snapshot_tasks = snapshot
+//RS         .as_deref()
+//RS         .and_then(|snapshot| {
+//RS             let process_id = u32::try_from(json_u64(snapshot, "pid")?).ok()?;
+//RS             Some(observe_tasks(snapshot, process_id))
+//RS         })
+//RS         .unwrap_or_default();
+//RS     if let Some(snapshot) = snapshot.as_deref() {
+//RS         let (alloc_count, alloc_bytes) = observe_arena_resources(snapshot);
+//RS         if alloc_count > 0 || alloc_bytes > 0 {
+//RS             browser.allocations.push(TraceAllocation {
+//RS                 count: alloc_count,
+//RS                 bytes: alloc_bytes,
+//RS                 symbol: symbol.clone(),
+//RS             });
+//RS         }
+//RS         for observed in observe_locks(snapshot) {
+//RS             browser.locks.push(TraceLock {
+//RS                 kind: "channel".into(),
+//RS                 id: observed.id,
+//RS                 depth: observed.depth,
+//RS                 capacity: observed.capacity,
+//RS                 send_waiters: observed.send_waiters,
+//RS                 recv_waiters: observed.recv_waiters,
+//RS                 closed: observed.closed,
+//RS                 symbol: symbol.clone(),
+//RS             });
+//RS         }
+//RS     }
+//RS     let mut observed_tasks = snapshot_tasks.rows.clone();
+//RS     observed_tasks.sort_by_key(ObservedTask::key);
+//RS     let trace_task_ids = trace_task_id_map(&observed_tasks);
+//RS     for observed in &observed_tasks {
+//RS         let id = trace_task_ids[&observed.key()];
+//RS         let parent = if observed.parent == 0 {
+//RS             0
+//RS         } else {
+//RS             *trace_task_ids
+//RS                 .get(&(observed.process_id, observed.parent))
+//RS                 .ok_or_else(|| {
+//RS                     format!(
+//RS                         "observed task {} in process {} has missing parent {}",
+//RS                         observed.id, observed.process_id, observed.parent
+//RS                     )
+//RS                 })?
+//RS         };
+//RS         browser.tasks.push(TraceTask {
+//RS             id,
+//RS             parent,
+//RS             state: observed.state.clone(),
+//RS             wait: observed.wait.clone(),
+//RS             cancelled: observed.cancelled,
+//RS             symbol: symbol.clone(),
+//RS         });
+//RS     }
+//RS     browser.task_rows_truncated = snapshot_tasks.truncated;
+//RS     for observed in observe_io(&snapshot_tasks.rows) {
+//RS         let Some(task_id) = trace_task_ids.get(&observed.task).copied() else {
+//RS             continue;
+//RS         };
+//RS         browser.io.push(TraceIo {
+//RS             end_ns: wall_ns,
+//RS             kind: observed.kind,
+//RS             start_ns: wall_ns,
+//RS             task_id,
+//RS             wait: observed.wait,
+//RS             symbol: symbol.clone(),
+//RS         });
+//RS     }
+//RS     let root_task_id = match &native_timing {
+//RS         NativeTimingInput::Captured { process_id, .. } => observed_tasks
+//RS             .iter()
+//RS             .find(|task| task.process_id == *process_id && task.parent == 0)
+//RS             .and_then(|task| trace_task_ids.get(&task.key()))
+//RS             .copied(),
+//RS         NativeTimingInput::Unavailable { .. } => None,
+//RS     };
+//RS     browser.native.push(match (&native_timing, root_task_id) {
+//RS         (
+//RS             NativeTimingInput::Captured {
+//RS                 duration_ns,
+//RS                 observed_at_ns,
+//RS                 ..
+//RS             },
+//RS             Some(task_id),
+//RS         ) => TraceNative {
+//RS             clock: "process_cpu".into(),
+//RS             duration_ns: Some(*duration_ns),
+//RS             observed_at_ns: *observed_at_ns,
+//RS             reason: String::new(),
+//RS             status: "captured".into(),
+//RS             symbol: symbol.clone(),
+//RS             target: env!("JET_BUILD_TARGET").into(),
+//RS             task_id: Some(task_id),
+//RS         },
+//RS         (NativeTimingInput::Captured { observed_at_ns, .. }, None) => TraceNative {
+//RS             clock: "process_cpu".into(),
+//RS             duration_ns: None,
+//RS             observed_at_ns: *observed_at_ns,
+//RS             reason: "root task causality was not observable".into(),
+//RS             status: "unavailable".into(),
+//RS             symbol: symbol.clone(),
+//RS             target: env!("JET_BUILD_TARGET").into(),
+//RS             task_id: None,
+//RS         },
+//RS         (
+//RS             NativeTimingInput::Unavailable {
+//RS                 observed_at_ns,
+//RS                 reason,
+//RS             },
+//RS             _,
+//RS         ) => TraceNative {
+//RS             clock: "process_cpu".into(),
+//RS             duration_ns: None,
+//RS             observed_at_ns: *observed_at_ns,
+//RS             reason: reason.clone(),
+//RS             status: "unavailable".into(),
+//RS             symbol: symbol.clone(),
+//RS             target: env!("JET_BUILD_TARGET").into(),
+//RS             task_id: None,
+//RS         },
+//RS     });
+//RS     Ok(browser)
+//RS }
+//RS 
+//RS fn attribution_symbol(
+//RS     sources: &[SourceIdentity],
+//RS     preferred_path: Option<&str>,
+//RS ) -> Option<JetSymbolRef> {
+//RS     let source = preferred_path
+//RS         .and_then(|path| sources.iter().find(|source| source.path == path))
+//RS         .or_else(|| sources.first())?;
+//RS     let name = source
+//RS         .symbols
+//RS         .iter()
+//RS         .find(|(name, kind)| kind == "fn" && name == "run")
+//RS         .or_else(|| source.symbols.iter().find(|(_, kind)| kind == "fn"))
+//RS         .or_else(|| source.symbols.first())
+//RS         .map(|(name, _)| name.clone())?;
+//RS     Some(JetSymbolRef {
+//RS         path: source.path.clone(),
+//RS         name,
+//RS     })
+//RS }
+//RS /// A top-level function as the canonical parser sees it. `span` is the
+//RS /// parser-owned declaration boundary: `fn` through the closing brace.
+//RS struct SourceFunction {
+//RS     name: String,
+//RS     span: jet::Diagnostics::Span,
+//RS }
+//RS 
+//RS /// Top-level functions from the canonical lexer and parser, in source order.
+//RS /// Comments, strings, and bodies are the parser's business, so a `fn run`
+//RS /// spelled inside a comment is never an attribution target. A source that does
+//RS /// not parse yields `None`: capture then names no location rather than guess.
+//RS fn source_functions(src: &str) -> Option<Vec<SourceFunction>> {
+//RS     let source_for_parse = jet::Package::mask_inline_package_source(src).ok()?.0;
+//RS     let (tokens, lex_diagnostics) = jet::Lexer::lex(&source_for_parse);
+//RS     if !lex_diagnostics.is_empty() {
+//RS         return None;
+//RS     }
+//RS     let program = jet::Parser::parse_with_source(&tokens, &source_for_parse).ok()?;
+//RS     Some(
+//RS         program
+//RS             .items
+//RS             .iter()
+//RS             .filter_map(|item| match item {
+//RS                 jet::AST::Item::Func(function) => Some(SourceFunction {
+//RS                     name: function.name.clone(),
+//RS                     span: function.span,
+//RS                 }),
+//RS                 _ => None,
+//RS             })
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS /// 1-based line and character column of a byte offset into `src`.
+//RS fn source_line_column(src: &str, offset: usize) -> (u64, u64) {
+//RS     let before = src.get(..offset).unwrap_or(src);
+//RS     let line_start = before.rfind('\n').map_or(0, |newline| newline + 1);
+//RS     (
+//RS         before.matches('\n').count() as u64 + 1,
+//RS         before[line_start..].chars().count() as u64 + 1,
+//RS     )
+//RS }
+//RS 
+//RS fn sampled_source_profile(
+//RS     source_path: &str,
+//RS     source_sha256: &str,
+//RS     source: &str,
+//RS     functions: Option<&[SourceFunction]>,
+//RS     wall_samples: u64,
+//RS     cpu_samples: u64,
+//RS     samples_truncated: bool,
+//RS ) -> TraceProfile {
+//RS     let Some(functions) = functions else {
+//RS         return TraceProfile::unsupported("source does not parse; no function location is attributable");
+//RS     };
+//RS     let Some(entry) = functions.iter().find(|function| function.name == "run") else {
+//RS         return TraceProfile::unsupported("source has no `fn run` entrypoint");
+//RS     };
+//RS     let retained_wall = wall_samples.min(TRACE_PROFILE_SAMPLE_LIMIT);
+//RS     let retained_cpu = cpu_samples.min(TRACE_PROFILE_SAMPLE_LIMIT);
+//RS     let (start_line, start_column) = source_line_column(source, entry.span.start);
+//RS     let (end_line, end_column) = source_line_column(source, entry.span.end);
+//RS     let source_for_row = || TraceProfileSource {
+//RS         path: source_path.into(),
+//RS         sha256: source_sha256.into(),
+//RS         start_line,
+//RS         start_column,
+//RS         end_line,
+//RS         end_column,
+//RS     };
+//RS     let symbol = JetSymbolRef {
+//RS         path: source_path.into(),
+//RS         name: entry.name.clone(),
+//RS     };
+//RS     let mut rows = Vec::new();
+//RS     if retained_wall > 0 {
+//RS         rows.push(TraceProfileRow {
+//RS             clock: "wall".into(),
+//RS             execution_count: None,
+//RS             sample_count: retained_wall,
+//RS             sample_weight: retained_wall,
+//RS             source: source_for_row(),
+//RS             symbol: symbol.clone(),
+//RS         });
+//RS     }
+//RS     if retained_cpu > 0 {
+//RS         rows.push(TraceProfileRow {
+//RS             clock: "cpu".into(),
+//RS             execution_count: None,
+//RS             sample_count: retained_cpu,
+//RS             sample_weight: retained_cpu,
+//RS             source: source_for_row(),
+//RS             symbol,
+//RS         });
+//RS     }
+//RS     let truncated = samples_truncated
+//RS         || wall_samples > TRACE_PROFILE_SAMPLE_LIMIT
+//RS         || cpu_samples > TRACE_PROFILE_SAMPLE_LIMIT;
+//RS     let (status, coverage, reason) = if truncated {
+//RS         (
+//RS             "truncated",
+//RS             "partial",
+//RS             "sampling observations exceeded the bounded profile sample limit",
+//RS         )
+//RS     } else if rows.is_empty() {
+//RS         (
+//RS             "no_samples",
+//RS             "none",
+//RS             "the observe channel produced no source-attributed samples",
+//RS         )
+//RS     } else {
+//RS         (
+//RS             "captured",
+//RS             "partial",
+//RS             "sampling is attributed to the observed entrypoint; execution counts are not inferred",
+//RS         )
+//RS     };
+//RS     TraceProfile {
+//RS         method: "sampling".into(),
+//RS         status: status.into(),
+//RS         coverage: coverage.into(),
+//RS         rows,
+//RS         row_limit: TRACE_PROFILE_SAMPLE_LIMIT,
+//RS         rows_truncated: truncated,
+//RS         overhead_ns: None,
+//RS         overhead_status: "not_measured".into(),
+//RS         overhead_reason: "no matched non-profiled run was captured".into(),
+//RS         reason: reason.into(),
+//RS         window_status: "unavailable".into(),
+//RS         window_wall_ns: None,
+//RS         window_cpu_ns: None,
+//RS         window_reason: "the runtime published no run window".into(),
+//RS     }
+//RS }
+//RS 
+//RS /// Record the runtime's own run window from the captured snapshot: wall time
+//RS /// and process CPU since the Jet runtime started, which excludes any
+//RS /// in-process compile that the session samples include.
+//RS fn record_run_window(profile: &mut TraceProfile, snapshot: Option<&str>) {
+//RS     let Some(window) = snapshot
+//RS         .and_then(|snapshot| jet::DevServer::LiveInspect::runtime_window(snapshot).ok())
+//RS         .flatten()
+//RS     else {
+//RS         return;
+//RS     };
+//RS     profile.window_status = if window.exit { "exit" } else { "live" }.into();
+//RS     profile.window_wall_ns = Some(window.elapsed_ns);
+//RS     profile.window_cpu_ns = window.cpu_ns;
+//RS     profile.window_reason = match (window.exit, window.cpu_ns) {
+//RS         (_, None) => "the runtime has no process CPU clock on this target",
+//RS         (true, Some(_)) => "published by the runtime at its exit seam",
+//RS         (false, Some(_)) => "the last live publication; the run had not exited",
+//RS     }
+//RS     .into();
+//RS }
+//RS 
+//RS fn capture_from_source(
+//RS     source_path: &str,
+//RS     snapshot: Option<&str>,
+//RS     wall_ns: u64,
+//RS     cpu_ns: Option<u64>,
+//RS     io_timeline: Option<&IOTimeline>,
+//RS     native_timing: Option<&NativeTimingInput>,
+//RS ) -> Result<CaptureBundle, String> {
+//RS     let path = PathBuf::from(source_path);
+//RS     if path.extension().and_then(|e| e.to_str()) != Some("jet") {
+//RS         return Err(format!(
+//RS             "source path must be a `.jet` file, got `{source_path}`"
+//RS         ));
+//RS     }
+//RS     let bytes = fs::read(&path).map_err(|e| format!("cannot read source {source_path}: {e}"))?;
+//RS     let src = String::from_utf8_lossy(&bytes);
+//RS     let sha256 = SHA256::sha256_hex(&bytes);
+//RS     let path_text = source_path.to_string();
+//RS     let functions = source_functions(&src);
+//RS     let entry = functions
+//RS         .as_deref()
+//RS         .and_then(|functions| functions.iter().find(|function| function.name == "run"));
+//RS     let symbol = entry.map(|function| JetSymbolRef {
+//RS         path: path_text.clone(),
+//RS         name: function.name.clone(),
+//RS     });
+//RS     let profile_wall_samples = io_timeline
+//RS         .map(IOTimeline::profile_samples)
+//RS         .unwrap_or_else(|| u64::from(snapshot.is_some()));
+//RS     let profile_cpu_samples = io_timeline
+//RS         .map(IOTimeline::profile_cpu_samples)
+//RS         .unwrap_or_else(|| u64::from(snapshot.is_some() && cpu_ns.is_some()));
+//RS     let profile_truncated = io_timeline
+//RS         .map(IOTimeline::profile_samples_truncated)
+//RS         .unwrap_or(false);
+//RS     let mut profile = sampled_source_profile(
+//RS         &path_text,
+//RS         &sha256,
+//RS         &src,
+//RS         functions.as_deref(),
+//RS         profile_wall_samples,
+//RS         profile_cpu_samples,
+//RS         profile_truncated,
+//RS     );
+//RS     record_run_window(&mut profile, snapshot);
+//RS     let snapshot_tasks = snapshot
+//RS         .and_then(|snapshot| {
+//RS             let process_id = u32::try_from(json_u64(snapshot, "pid")?).ok()?;
+//RS             Some(observe_tasks(snapshot, process_id))
+//RS         })
+//RS         .unwrap_or_default();
+//RS     let mut samples = Vec::new();
+//RS     // Honest wall: omit when zero; never invent 1ns via max(1).
+//RS     if let (Some(symbol), true) = (symbol.as_ref(), wall_ns > 0) {
+//RS         samples.push(TraceSample {
+//RS             domain: "wall".into(),
+//RS             duration_ns: wall_ns,
+//RS             symbol: symbol.clone(),
+//RS         });
+//RS     }
+//RS     if let (Some(symbol), Some(cpu_ns)) = (symbol.as_ref(), cpu_ns.filter(|ns| *ns > 0)) {
+//RS         samples.push(TraceSample {
+//RS             domain: "cpu".into(),
+//RS             duration_ns: cpu_ns,
+//RS             symbol: symbol.clone(),
+//RS         });
+//RS     }
+//RS     let mut allocations = Vec::new();
+//RS     // Only record alloc facts when observe shows activity — never a zero scrape-success.
+//RS     if let (Some(symbol), Some(snapshot)) = (symbol.as_ref(), snapshot) {
+//RS         let (alloc_count, alloc_bytes) = observe_arena_resources(snapshot);
+//RS         if alloc_count > 0 || alloc_bytes > 0 {
+//RS             allocations.push(TraceAllocation {
+//RS                 count: alloc_count,
+//RS                 bytes: alloc_bytes,
+//RS                 symbol: symbol.clone(),
+//RS             });
+//RS         }
+//RS     }
+//RS     // Tasks: only rows observe published. Never invent ids/parents/states.
+//RS     let mut observed_tasks = io_timeline
+//RS         .map(IOTimeline::tasks)
+//RS         .unwrap_or_else(|| snapshot_tasks.rows.clone());
+//RS     observed_tasks.sort_by_key(ObservedTask::key);
+//RS     let trace_task_ids = trace_task_id_map(&observed_tasks);
+//RS     let mut tasks = Vec::new();
+//RS     if let Some(symbol) = symbol.as_ref() {
+//RS         for observed in &observed_tasks {
+//RS             let id = trace_task_ids[&observed.key()];
+//RS             let parent = if observed.parent == 0 {
+//RS                 0
+//RS             } else {
+//RS                 *trace_task_ids
+//RS                     .get(&(observed.process_id, observed.parent))
+//RS                     .ok_or_else(|| {
+//RS                         format!(
+//RS                             "observed task {} in process {} has missing parent {}",
+//RS                             observed.id, observed.process_id, observed.parent
+//RS                         )
+//RS                     })?
+//RS             };
+//RS             tasks.push(TraceTask {
+//RS                 id,
+//RS                 parent,
+//RS                 state: observed.state.clone(),
+//RS                 wait: observed.wait.clone(),
+//RS                 cancelled: observed.cancelled,
+//RS                 symbol: symbol.clone(),
+//RS             });
+//RS         }
+//RS     }
+//RS     // Locks: only contended observe channels (waiters > 0). Idle scrape omitted.
+//RS     let mut locks = Vec::new();
+//RS     if let (Some(symbol), Some(snapshot)) = (symbol.as_ref(), snapshot) {
+//RS         for observed in observe_locks(snapshot) {
+//RS             locks.push(TraceLock {
+//RS                 kind: "channel".into(),
+//RS                 id: observed.id,
+//RS                 depth: observed.depth,
+//RS                 capacity: observed.capacity,
+//RS                 send_waiters: observed.send_waiters,
+//RS                 recv_waiters: observed.recv_waiters,
+//RS                 closed: observed.closed,
+//RS                 symbol: symbol.clone(),
+//RS             });
+//RS         }
+//RS     }
+//RS     // I/O: only blocked observe waits matching the live io classifier.
+//RS     let mut io = Vec::new();
+//RS     if let Some(symbol) = symbol.as_ref() {
+//RS         let observed = io_timeline
+//RS             .map(|timeline| timeline.completed.clone())
+//RS             .unwrap_or_else(|| {
+//RS                 observe_io(&snapshot_tasks.rows)
+//RS                     .into_iter()
+//RS                     .map(|io| ObservedIoSpan {
+//RS                         end_ns: wall_ns,
+//RS                         kind: io.kind,
+//RS                         start_ns: wall_ns,
+//RS                         task: io.task,
+//RS                         wait: io.wait,
+//RS                     })
+//RS                     .collect()
+//RS             });
+//RS         for observed in observed {
+//RS             let Some(task_id) = trace_task_ids.get(&observed.task).copied() else {
+//RS                 continue;
+//RS             };
+//RS             io.push(TraceIo {
+//RS                 end_ns: observed.end_ns,
+//RS                 kind: observed.kind,
+//RS                 start_ns: observed.start_ns,
+//RS                 task_id,
+//RS                 wait: observed.wait,
+//RS                 symbol: symbol.clone(),
+//RS             });
+//RS         }
+//RS     }
+//RS     let mut native = Vec::new();
+//RS     if let (Some(symbol), Some(timing)) = (symbol.as_ref(), native_timing) {
+//RS         let root_task_id = match timing {
+//RS             NativeTimingInput::Captured { process_id, .. } => observed_tasks
+//RS                 .iter()
+//RS                 .find(|task| task.process_id == *process_id && task.parent == 0)
+//RS                 .and_then(|task| trace_task_ids.get(&task.key()))
+//RS                 .copied(),
+//RS             NativeTimingInput::Unavailable { .. } => None,
+//RS         };
+//RS         native.push(match (timing, root_task_id) {
+//RS             (
+//RS                 NativeTimingInput::Captured {
+//RS                     duration_ns,
+//RS                     observed_at_ns,
+//RS                     ..
+//RS                 },
+//RS                 Some(task_id),
+//RS             ) => TraceNative {
+//RS                 clock: "process_cpu".into(),
+//RS                 duration_ns: Some(*duration_ns),
+//RS                 observed_at_ns: *observed_at_ns,
+//RS                 reason: String::new(),
+//RS                 status: "captured".into(),
+//RS                 symbol: symbol.clone(),
+//RS                 target: env!("JET_BUILD_TARGET").into(),
+//RS                 task_id: Some(task_id),
+//RS             },
+//RS             (NativeTimingInput::Captured { observed_at_ns, .. }, None) => TraceNative {
+//RS                 clock: "process_cpu".into(),
+//RS                 duration_ns: None,
+//RS                 observed_at_ns: *observed_at_ns,
+//RS                 reason: "root task causality was not observable".into(),
+//RS                 status: "unavailable".into(),
+//RS                 symbol: symbol.clone(),
+//RS                 target: env!("JET_BUILD_TARGET").into(),
+//RS                 task_id: None,
+//RS             },
+//RS             (
+//RS                 NativeTimingInput::Unavailable {
+//RS                     observed_at_ns,
+//RS                     reason,
+//RS                 },
+//RS                 _,
+//RS             ) => TraceNative {
+//RS                 clock: "process_cpu".into(),
+//RS                 duration_ns: None,
+//RS                 observed_at_ns: *observed_at_ns,
+//RS                 reason: reason.clone(),
+//RS                 status: "unavailable".into(),
+//RS                 symbol: symbol.clone(),
+//RS                 target: env!("JET_BUILD_TARGET").into(),
+//RS                 task_id: None,
+//RS             },
+//RS         });
+//RS     }
+//RS     let mut spans = Vec::new();
+//RS     if let Some(symbol) = symbol.as_ref() {
+//RS         match io_timeline {
+//RS             Some(timeline) if !timeline.task_spans.is_empty() => {
+//RS                 for observed in timeline.spans() {
+//RS                     let Some(task_id) = trace_task_ids.get(&observed.task).copied() else {
+//RS                         continue;
+//RS                     };
+//RS                     let parent_task_id = if observed.parent_task_id == 0 {
+//RS                         None
+//RS                     } else {
+//RS                         Some(
+//RS                             *trace_task_ids
+//RS                                 .get(&(observed.task.0, observed.parent_task_id))
+//RS                                 .ok_or_else(|| {
+//RS                                     format!(
+//RS                                         "observed span task {} in process {} has missing parent {}",
+//RS                                         observed.task.1, observed.task.0, observed.parent_task_id
+//RS                                     )
+//RS                                 })?,
+//RS                         )
+//RS                     };
+//RS                     spans.push(TraceSpan {
+//RS                         clock: "monotonic".into(),
+//RS                         end_ns: Some(observed.end_ns),
+//RS                         kind: "task_observed".into(),
+//RS                         parent_task_id,
+//RS                         reason: String::new(),
+//RS                         start_ns: Some(observed.start_ns),
+//RS                         status: "captured".into(),
+//RS                         symbol: symbol.clone(),
+//RS                         task_id: Some(task_id),
+//RS                     });
+//RS                 }
+//RS             }
+//RS             Some(_) => spans.push(TraceSpan {
+//RS                 clock: "monotonic".into(),
+//RS                 end_ns: None,
+//RS                 kind: "task_observed".into(),
+//RS                 parent_task_id: None,
+//RS                 reason: "task presence was not observable".into(),
+//RS                 start_ns: None,
+//RS                 status: "unavailable".into(),
+//RS                 symbol: symbol.clone(),
+//RS                 task_id: None,
+//RS             }),
+//RS             None => spans.push(TraceSpan {
+//RS                 clock: "monotonic".into(),
+//RS                 end_ns: None,
+//RS                 kind: "task_observed".into(),
+//RS                 parent_task_id: None,
+//RS                 reason: "task span requires multiple live observations".into(),
+//RS                 start_ns: None,
+//RS                 status: "unavailable".into(),
+//RS                 symbol: symbol.clone(),
+//RS                 task_id: None,
+//RS             }),
+//RS         }
+//RS     }
+//RS     Ok(CaptureBundle {
+//RS         samples,
+//RS         profile,
+//RS         allocations,
+//RS         browser: Vec::new(),
+//RS         browser_rows_truncated: false,
+//RS         game_frames: Vec::new(),
+//RS         game_draw_events: Vec::new(),
+//RS         tasks,
+//RS         locks,
+//RS         io,
+//RS         io_rows_truncated: io_timeline
+//RS             .map(|timeline| timeline.io_rows_truncated)
+//RS             .unwrap_or(snapshot_tasks.truncated),
+//RS         native,
+//RS         native_rows_truncated: false,
+//RS         spans,
+//RS         span_rows_truncated: io_timeline
+//RS             .map(|timeline| timeline.span_rows_truncated)
+//RS             .unwrap_or(false),
+//RS         source_identity: vec![SourceIdentity {
+//RS             path: path_text.clone(),
+//RS             sha256,
+//RS             symbols: functions
+//RS                 .iter()
+//RS                 .flatten()
+//RS                 .map(|function| (function.name.clone(), "fn".into()))
+//RS                 .collect(),
+//RS         }],
+//RS         source_maps: vec![TraceSourceMap::jet_with_source(&path_text, &src)],
+//RS         task_rows_truncated: io_timeline
+//RS             .map(|timeline| timeline.task_rows_truncated)
+//RS             .unwrap_or(snapshot_tasks.truncated),
+//RS     })
+//RS }
+//RS 
+//RS enum NativeTimingInput {
+//RS     Captured {
+//RS         duration_ns: u64,
+//RS         observed_at_ns: u64,
+//RS         process_id: u32,
+//RS     },
+//RS     Unavailable {
+//RS         observed_at_ns: u64,
+//RS         reason: String,
+//RS     },
+//RS }
+//RS 
+//RS impl NativeTimingInput {
+//RS     fn unavailable(observed_at_ns: u64) -> Self {
+//RS         Self::Unavailable {
+//RS             observed_at_ns,
+//RS             reason: native_unavailable_reason(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn duration_ns(&self) -> Option<u64> {
+//RS         match self {
+//RS             Self::Captured { duration_ns, .. } => Some(*duration_ns),
+//RS             Self::Unavailable { .. } => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn native_unavailable_reason() -> String {
+//RS     native_unavailable_reason_for(std::env::consts::OS, env!("JET_BUILD_TARGET"))
+//RS }
+//RS 
+//RS fn native_unavailable_reason_for(os: &str, target: &str) -> String {
+//RS     if native_process_cpu_supported(os) {
+//RS         "process CPU timing was not observable".into()
+//RS     } else {
+//RS         format!("process CPU timing is unavailable on target {target}")
+//RS     }
+//RS }
+//RS 
+//RS fn native_process_cpu_supported(os: &str) -> bool {
+//RS     matches!(os, "linux" | "android")
+//RS }
+//RS 
+//RS fn observe_arena_resources(snapshot: &str) -> (u64, u64) {
+//RS     let resources = snapshot
+//RS         .split_once("\"resources\":")
+//RS         .map(|(_, tail)| tail)
+//RS         .unwrap_or("");
+//RS     let count = json_u64(resources, "arena_allocations").unwrap_or(0);
+//RS     let bytes = json_u64(resources, "arena_bytes").unwrap_or(0);
+//RS     (count, bytes)
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct ObservedTask {
+//RS     process_id: u32,
+//RS     id: u64,
+//RS     parent: u64,
+//RS     state: String,
+//RS     wait: String,
+//RS     cancelled: bool,
+//RS }
+//RS 
+//RS type ObservedTaskKey = (u32, u64);
+//RS 
+//RS impl ObservedTask {
+//RS     fn key(&self) -> ObservedTaskKey {
+//RS         (self.process_id, self.id)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Default)]
+//RS struct ObservedTasks {
+//RS     process_id: u32,
+//RS     rows: Vec<ObservedTask>,
+//RS     truncated: bool,
+//RS }
+//RS 
+//RS /// Parse at most the artifact policy's task-row cap, in id order.
+//RS fn observe_tasks(snapshot: &str, process_id: u32) -> ObservedTasks {
+//RS     let Some(inner) = json_array_inner(snapshot, "tasks") else {
+//RS         return ObservedTasks {
+//RS             process_id,
+//RS             ..ObservedTasks::default()
+//RS         };
+//RS     };
+//RS     if inner.is_empty() {
+//RS         return ObservedTasks {
+//RS             process_id,
+//RS             ..ObservedTasks::default()
+//RS         };
+//RS     }
+//RS     let mut out = Vec::new();
+//RS     let (objects, truncated) = split_json_objects(inner, TRACE_TASK_ROW_LIMIT as usize);
+//RS     for object in objects {
+//RS         let Some(id) = json_u64(object, "id") else {
+//RS             continue;
+//RS         };
+//RS         let Some(parent) = json_u64(object, "parent") else {
+//RS             continue;
+//RS         };
+//RS         let Some(state) = json_string(object, "state") else {
+//RS             continue;
+//RS         };
+//RS         if !matches!(state.as_str(), "running" | "queued" | "blocked" | "done") {
+//RS             continue;
+//RS         }
+//RS         let wait = json_string(object, "wait").unwrap_or_default();
+//RS         let cancelled = object.contains("\"cancelled\":true");
+//RS         out.push(ObservedTask {
+//RS             process_id,
+//RS             id,
+//RS             parent,
+//RS             state,
+//RS             wait,
+//RS             cancelled,
+//RS         });
+//RS     }
+//RS     out.sort_by_key(|task| task.id);
+//RS     ObservedTasks {
+//RS         process_id,
+//RS         rows: out,
+//RS         truncated,
+//RS     }
+//RS }
+//RS 
+//RS fn trace_task_id_map(tasks: &[ObservedTask]) -> BTreeMap<ObservedTaskKey, u64> {
+//RS     tasks
+//RS         .iter()
+//RS         .map(ObservedTask::key)
+//RS         .collect::<BTreeSet<_>>()
+//RS         .into_iter()
+//RS         .enumerate()
+//RS         .map(|(index, key)| (key, index as u64 + 1))
+//RS         .collect()
+//RS }
+//RS 
+//RS struct ObservedLock {
+//RS     id: u64,
+//RS     depth: u64,
+//RS     capacity: Option<u64>,
+//RS     send_waiters: u64,
+//RS     recv_waiters: u64,
+//RS     closed: bool,
+//RS }
+//RS 
+//RS /// Contended observe channels only. Idle depth/capacity scrapes are not locks.
+//RS fn observe_locks(snapshot: &str) -> Vec<ObservedLock> {
+//RS     let Some(inner) = json_array_inner(snapshot, "channels") else {
+//RS         return Vec::new();
+//RS     };
+//RS     if inner.is_empty() {
+//RS         return Vec::new();
+//RS     }
+//RS     let mut out = Vec::new();
+//RS     for object in split_json_objects(inner, TRACE_TASK_ROW_LIMIT as usize).0 {
+//RS         let Some(id) = json_u64(object, "id") else {
+//RS             continue;
+//RS         };
+//RS         let Some(depth) = json_u64(object, "depth") else {
+//RS             continue;
+//RS         };
+//RS         let Some(send_waiters) = json_u64(object, "send_waiters") else {
+//RS             continue;
+//RS         };
+//RS         let Some(recv_waiters) = json_u64(object, "recv_waiters") else {
+//RS             continue;
+//RS         };
+//RS         if send_waiters == 0 && recv_waiters == 0 {
+//RS             continue;
+//RS         }
+//RS         let capacity = if object.contains("\"capacity\":null") {
+//RS             None
+//RS         } else {
+//RS             json_u64(object, "capacity")
+//RS         };
+//RS         let closed = object.contains("\"closed\":true");
+//RS         out.push(ObservedLock {
+//RS             id,
+//RS             depth,
+//RS             capacity,
+//RS             send_waiters,
+//RS             recv_waiters,
+//RS             closed,
+//RS         });
+//RS     }
+//RS     out.sort_by_key(|lock| lock.id);
+//RS     out
+//RS }
+//RS 
+//RS struct ObservedIo {
+//RS     kind: String,
+//RS     task: ObservedTaskKey,
+//RS     wait: String,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct ObservedIoSpan {
+//RS     end_ns: u64,
+//RS     kind: String,
+//RS     start_ns: u64,
+//RS     task: ObservedTaskKey,
+//RS     wait: String,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct ObservedTaskSpan {
+//RS     end_ns: u64,
+//RS     parent_task_id: u64,
+//RS     start_ns: u64,
+//RS     task: ObservedTaskKey,
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct IOTimeline {
+//RS     active: BTreeMap<(ObservedTaskKey, String), (String, u64)>,
+//RS     completed: Vec<ObservedIoSpan>,
+//RS     io_rows_truncated: bool,
+//RS     process_last_seen: BTreeMap<u32, u64>,
+//RS     profile_samples: u64,
+//RS     profile_cpu_samples: u64,
+//RS     profile_samples_truncated: bool,
+//RS     span_rows_truncated: bool,
+//RS     task_spans: BTreeMap<ObservedTaskKey, ObservedTaskSpan>,
+//RS     task_rows_truncated: bool,
+//RS     tasks: BTreeMap<ObservedTaskKey, ObservedTask>,
+//RS }
+//RS 
+//RS impl IOTimeline {
+//RS     fn observe(
+//RS         &mut self,
+//RS         observed_tasks: &ObservedTasks,
+//RS         now_ns: u64,
+//RS         cpu_observed: bool,
+//RS     ) {
+//RS         if self.profile_samples < TRACE_PROFILE_SAMPLE_LIMIT {
+//RS             self.profile_samples += 1;
+//RS         } else {
+//RS             self.profile_samples_truncated = true;
+//RS         }
+//RS         if cpu_observed {
+//RS             if self.profile_cpu_samples < TRACE_PROFILE_SAMPLE_LIMIT {
+//RS                 self.profile_cpu_samples += 1;
+//RS             } else {
+//RS                 self.profile_samples_truncated = true;
+//RS             }
+//RS         }
+//RS         self.task_rows_truncated |= observed_tasks.truncated;
+//RS         self.io_rows_truncated |= observed_tasks.truncated;
+//RS         self.span_rows_truncated |= observed_tasks.truncated;
+//RS         self.process_last_seen
+//RS             .insert(observed_tasks.process_id, now_ns);
+//RS         let current_ids = observed_tasks
+//RS             .rows
+//RS             .iter()
+//RS             .map(ObservedTask::key)
+//RS             .collect::<BTreeSet<_>>();
+//RS         for task in self.tasks.values_mut() {
+//RS             if task.process_id == observed_tasks.process_id && !current_ids.contains(&task.key()) {
+//RS                 task.state = "done".into();
+//RS                 task.wait.clear();
+//RS             }
+//RS         }
+//RS         for task in &observed_tasks.rows {
+//RS             let key = task.key();
+//RS             if self.tasks.contains_key(&key) || self.tasks.len() < TRACE_TASK_ROW_LIMIT as usize {
+//RS                 self.tasks.insert(key, task.clone());
+//RS             } else {
+//RS                 self.task_rows_truncated = true;
+//RS             }
+//RS             if self.task_spans.contains_key(&key) {
+//RS                 if let Some(span) = self.task_spans.get_mut(&key) {
+//RS                     span.end_ns = now_ns.max(span.start_ns);
+//RS                 }
+//RS             } else if self.task_spans.len() < TRACE_SPAN_ROW_LIMIT as usize {
+//RS                 self.task_spans.insert(
+//RS                     key,
+//RS                     ObservedTaskSpan {
+//RS                         end_ns: now_ns,
+//RS                         parent_task_id: task.parent,
+//RS                         start_ns: now_ns,
+//RS                         task: key,
+//RS                     },
+//RS                 );
+//RS             } else {
+//RS                 self.span_rows_truncated = true;
+//RS             }
+//RS         }
+//RS         let observed_io = observe_io(&observed_tasks.rows);
+//RS         let current = observed_io
+//RS             .iter()
+//RS             .map(|row| (row.task, row.wait.clone()))
+//RS             .collect::<BTreeSet<_>>();
+//RS         let ended = self
+//RS             .active
+//RS             .keys()
+//RS             .filter(|key| key.0 .0 == observed_tasks.process_id && !current.contains(*key))
+//RS             .cloned()
+//RS             .collect::<Vec<_>>();
+//RS         for (task, wait) in ended {
+//RS             if let Some((kind, start_ns)) = self.active.remove(&(task, wait.clone())) {
+//RS                 self.push(ObservedIoSpan {
+//RS                     end_ns: now_ns.max(start_ns),
+//RS                     kind,
+//RS                     start_ns,
+//RS                     task,
+//RS                     wait,
+//RS                 });
+//RS             }
+//RS         }
+//RS         for row in observed_io {
+//RS             let key = (row.task, row.wait);
+//RS             if !self.tasks.contains_key(&row.task) {
+//RS                 self.io_rows_truncated = true;
+//RS             } else if self.active.contains_key(&key) {
+//RS                 continue;
+//RS             } else if self.active.len() + self.completed.len() < TRACE_IO_ROW_LIMIT as usize {
+//RS                 self.active.insert(key, (row.kind, now_ns));
+//RS             } else {
+//RS                 self.io_rows_truncated = true;
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn finish(&mut self, now_ns: u64) {
+//RS         for task in self.tasks.values_mut() {
+//RS             task.state = "done".into();
+//RS             task.wait.clear();
+//RS         }
+//RS         let active = std::mem::take(&mut self.active);
+//RS         for ((task, wait), (kind, start_ns)) in active {
+//RS             let end_ns = self
+//RS                 .process_last_seen
+//RS                 .get(&task.0)
+//RS                 .copied()
+//RS                 .unwrap_or(now_ns)
+//RS                 .max(start_ns);
+//RS             self.push(ObservedIoSpan {
+//RS                 end_ns,
+//RS                 kind,
+//RS                 start_ns,
+//RS                 task,
+//RS                 wait,
+//RS             });
+//RS         }
+//RS     }
+//RS 
+//RS     fn push(&mut self, span: ObservedIoSpan) {
+//RS         if self.completed.len() < TRACE_IO_ROW_LIMIT as usize {
+//RS             self.completed.push(span);
+//RS         } else {
+//RS             self.io_rows_truncated = true;
+//RS         }
+//RS     }
+//RS     fn profile_samples(&self) -> u64 {
+//RS         self.profile_samples
+//RS     }
+//RS 
+//RS     fn profile_cpu_samples(&self) -> u64 {
+//RS         self.profile_cpu_samples
+//RS     }
+//RS 
+//RS     fn profile_samples_truncated(&self) -> bool {
+//RS         self.profile_samples_truncated
+//RS     }
+//RS 
+//RS 
+//RS     fn tasks(&self) -> Vec<ObservedTask> {
+//RS         self.tasks.values().cloned().collect()
+//RS     }
+//RS 
+//RS     fn spans(&self) -> Vec<ObservedTaskSpan> {
+//RS         self.task_spans.values().cloned().collect()
+//RS     }
+//RS }
+//RS 
+//RS fn elapsed_ns(started: Instant) -> u64 {
+//RS     started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64
+//RS }
+//RS 
+//RS /// Blocked observe tasks with real I/O waits only. Idle/time/channel scrapes omitted.
+//RS fn observe_io(tasks: &[ObservedTask]) -> Vec<ObservedIo> {
+//RS     let mut out = Vec::new();
+//RS     for task in tasks {
+//RS         if task.state != "blocked" {
+//RS             continue;
+//RS         }
+//RS         let Some(kind) = TraceIo::kind_for_wait(&task.wait) else {
+//RS             continue;
+//RS         };
+//RS         out.push(ObservedIo {
+//RS             kind: kind.into(),
+//RS             task: task.key(),
+//RS             wait: task.wait.clone(),
+//RS         });
+//RS     }
+//RS     out.sort_by_key(|row| row.task);
+//RS     out
+//RS }
+//RS 
+//RS fn json_array_inner<'a>(snapshot: &'a str, key: &str) -> Option<&'a str> {
+//RS     let tail = snapshot.split_once(&format!("\"{key}\":["))?.1;
+//RS     let mut depth = 1usize;
+//RS     let mut i = 0usize;
+//RS     let bytes = tail.as_bytes();
+//RS     while i < bytes.len() {
+//RS         match bytes[i] {
+//RS             b'[' => depth += 1,
+//RS             b']' => {
+//RS                 depth -= 1;
+//RS                 if depth == 0 {
+//RS                     return Some(&tail[..i]);
+//RS                 }
+//RS             }
+//RS             b'"' => {
+//RS                 i += 1;
+//RS                 while i < bytes.len() {
+//RS                     if bytes[i] == b'\\' {
+//RS                         i += 2;
+//RS                         continue;
+//RS                     }
+//RS                     if bytes[i] == b'"' {
+//RS                         break;
+//RS                     }
+//RS                     i += 1;
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS         i += 1;
+//RS     }
+//RS     None
+//RS }
+//RS 
+// END-PORT-PENDING 0701 Source/CmdPerf.rs:1-1804
+

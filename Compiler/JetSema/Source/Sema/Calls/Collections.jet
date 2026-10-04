@@ -54,13 +54,17 @@ fn sema_call_collections_success_type(ty: Type) -> Type Never! {
     }
 }
 
+// Rust builtin-method argument inference (builtin_methods.rs): every argument is inferred under its
+// contract parameter type, so leading-dot variants and anonymous records
+// (`&rows.push(.Ready)`, `&map.add(key, {x: 1})`) take their type from it.
 fn sema_call_collections_check_argument(argument: CallArg, required: Type, callback: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     checked := if {
         callback -> {
-            sema_check_expression_with_lambda_escapes(argument.expr, Val(required), environment, &scopes, &state, &tail_store, &context, Val(false), &diagnostics)
+            // An open callback result is adopted here and checked below.
+            sema_expression_lambda_collection_callback(argument.expr, Val(required), environment, &scopes, &state, &tail_store, &context, &diagnostics)
         }
         else -> {
-            sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            sema_check_expression(argument.expr, Val(required), environment, &scopes, &state, &tail_store, &context, &diagnostics)
         }
     }
     value :: checked ?? return None

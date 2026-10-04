@@ -1,0 +1,810 @@
+// PORT-PENDING 0874 crates-jetpack-src-jetos-nixos-import-live: crates/jetpack/src/JetOS/nixos_import_live.rs:1-806
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Live semantic tier for `jet os import` (D-JOS-NIXIMPORT1=C): when the
+//RS // source is a flake root with no `jetos-import-facts.json`, evaluate the
+//RS // host's NixOS configuration through `nix eval --json … --apply` and build
+//RS // the import plan from real option values. Facts a jetos option cannot
+//RS // express become explicit omissions — never silent drops.
+//RS 
+//RS /// The `--apply` extractor. Runs over the evaluated NixOS `config` with
+//RS /// builtins only (`lib` is not in scope under `--apply`); every optional
+//RS /// path is `or`-guarded so hosts without a subsystem still evaluate.
+//RS use super::nixos_import::{
+//RS     import_is_ident, import_json_array, import_json_string, import_json_string_array,
+//RS     import_json_value, import_package_list, import_render_string, scan_first_nixos_host,
+//RS     NixosImportArgs, NixosImportPlan, NixosImportUser,
+//RS };
+//RS use crate::JSON;
+//RS use jet_foundation::DataTree::DataTree;
+//RS use std::collections::BTreeSet;
+//RS use std::fs;
+//RS use std::path::Path;
+//RS use std::process::Command;
+//RS 
+//RS const NIXOS_LIVE_EXTRACTOR: &str = r#"c: {
+//RS   host = c.networking.hostName;
+//RS   stateVersion = c.system.stateVersion;
+//RS   tz = c.time.timeZone;
+//RS   locale = c.i18n.defaultLocale;
+//RS   keyboard = c.services.xserver.xkb.layout or "us";
+//RS   desktopGnome = c.services.desktopManager.gnome.enable or false;
+//RS   desktopPlasma = c.services.desktopManager.plasma6.enable or false;
+//RS   dmGdm = c.services.displayManager.gdm.enable or false;
+//RS   dmSddm = c.services.displayManager.sddm.enable or false;
+//RS   loaderLimine = c.boot.loader.limine.enable or false;
+//RS   loaderSystemdBoot = c.boot.loader.systemd-boot.enable or false;
+//RS   efiTouch = c.boot.loader.efi.canTouchEfiVariables or false;
+//RS   kernelName = c.boot.kernelPackages.kernel.pname or "?";
+//RS   kernelParams = c.boot.kernelParams or [];
+//RS   sysctl = c.boot.kernel.sysctl or {};
+//RS   firewallTcp = c.networking.firewall.allowedTCPPorts or [];
+//RS   firewallUdp = c.networking.firewall.allowedUDPPorts or [];
+//RS   nameservers = c.networking.nameservers or [];
+//RS   networkmanager = c.networking.networkmanager.enable or false;
+//RS   zramEnable = c.zramSwap.enable or false;
+//RS   zramPercent = c.zramSwap.memoryPercent or 50;
+//RS   svcOpenssh = c.services.openssh.enable or false;
+//RS   svcPipewire = c.services.pipewire.enable or false;
+//RS   svcRtkit = c.security.rtkit.enable or false;
+//RS   svcTailscale = c.services.tailscale.enable or false;
+//RS   svcLibvirtd = c.virtualisation.libvirtd.enable or false;
+//RS   svcDocker = c.virtualisation.docker.enable or false;
+//RS   svcFlatpak = c.services.flatpak.enable or false;
+//RS   svcSteam = c.programs.steam.enable or false;
+//RS   svcGamemode = c.programs.gamemode.enable or false;
+//RS   svcPcscd = c.services.pcscd.enable or false;
+//RS   svcBluetooth = c.hardware.bluetooth.enable or false;
+//RS   stylix = c.stylix.enable or false;
+//RS   packages = map (p: p.pname or p.name or "?") c.environment.systemPackages;
+//RS   users = map (n: {
+//RS     name = n;
+//RS     home = c.users.users.${n}.home or "/home/${n}";
+//RS     groups = c.users.users.${n}.extraGroups or [];
+//RS     shell = c.users.users.${n}.shell.pname or "";
+//RS   }) (builtins.filter (n: (c.users.users.${n}.isNormalUser or false))
+//RS        (builtins.attrNames c.users.users));
+//RS   hm = map (n: {
+//RS     name = n;
+//RS     packages = map (p: p.pname or p.name or "?")
+//RS       (c.home-manager.users.${n}.home.packages or []);
+//RS     programs = builtins.filter
+//RS       (p: (c.home-manager.users.${n}.programs.${p}.enable or false))
+//RS       ["git" "fish" "starship" "helix" "ghostty" "vscode"];
+//RS   }) (builtins.attrNames (c.home-manager.users or {}));
+//RS }"#;
+//RS 
+//RS /// Attempt the live semantic tier. `Ok(None)` means the source is not a
+//RS /// flake root, so the caller falls back to the audited scan draft. Eval
+//RS /// failures are hard errors (surfaced as E1289) — a broken flake must not
+//RS /// silently degrade into a scan.
+//RS pub(super) fn live_import_plan(args: &NixosImportArgs) -> Result<Option<NixosImportPlan>, String> {
+//RS     if !args.source.is_dir() || !args.source.join("flake.nix").is_file() {
+//RS         return Ok(None);
+//RS     }
+//RS     let flake_text = fs::read_to_string(args.source.join("flake.nix")).unwrap_or_default();
+//RS     let Some(host) = args
+//RS         .host
+//RS         .clone()
+//RS         .or_else(|| scan_first_nixos_host(&flake_text))
+//RS     else {
+//RS         return Err(
+//RS             "the flake declares no discoverable nixosConfigurations host; pass `--host <name>`."
+//RS                 .to_string(),
+//RS         );
+//RS     };
+//RS     let facts = run_live_extractor(&args.source, &host)?;
+//RS     let root = facts
+//RS         .as_object()
+//RS         .map_err(|e| format!("live eval result: {e}"))?;
+//RS     Ok(Some(plan_from_live_facts(args, &host, root)?))
+//RS }
+//RS 
+//RS fn run_live_extractor(source: &Path, host: &str) -> Result<DataTree, String> {
+//RS     let attr = format!("{}#nixosConfigurations.{}.config", source.display(), host);
+//RS     let output = Command::new("nix")
+//RS         .args(["eval", "--json", &attr, "--apply", NIXOS_LIVE_EXTRACTOR])
+//RS         .output()
+//RS         .map_err(|e| format!("running `nix eval` failed: {e}; is `nix` on PATH?"))?;
+//RS     if !output.status.success() {
+//RS         let stderr = String::from_utf8_lossy(&output.stderr);
+//RS         let decisive = stderr
+//RS             .lines()
+//RS             .rev()
+//RS             .map(str::trim)
+//RS             .find(|line| !line.is_empty())
+//RS             .unwrap_or("nix eval failed with no diagnostic output");
+//RS         let excerpt: String = decisive.chars().take(240).collect();
+//RS         return Err(format!(
+//RS             "evaluating `nixosConfigurations.{host}` failed: {excerpt}"
+//RS         ));
+//RS     }
+//RS     let text = String::from_utf8_lossy(&output.stdout);
+//RS     JSON::parse(&text).map_err(|e| format!("parsing `nix eval` output failed: {e}"))
+//RS }
+//RS 
+//RS fn live_str(root: &[(String, DataTree)], key: &str) -> String {
+//RS     import_json_string(root, key).unwrap_or_default()
+//RS }
+//RS 
+//RS fn live_bool(root: &[(String, DataTree)], key: &str) -> bool {
+//RS     matches!(import_json_value(root, key), Some(DataTree::Bool(true)))
+//RS }
+//RS 
+//RS fn live_num(root: &[(String, DataTree)], key: &str) -> Option<f64> {
+//RS     match import_json_value(root, key) {
+//RS         Some(DataTree::Int(n)) => Some(*n as f64),
+//RS         Some(DataTree::Float(n)) => Some(*n),
+//RS         Some(DataTree::Number(n)) => n.parse::<f64>().ok(),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn live_num_list(root: &[(String, DataTree)], key: &str) -> Vec<i64> {
+//RS     import_json_value(root, key)
+//RS         .and_then(|value| value.as_array().ok())
+//RS         .map(|values| {
+//RS             values
+//RS                 .iter()
+//RS                 .filter_map(|value| match value {
+//RS                     DataTree::Int(n) => Some(*n),
+//RS                     DataTree::Float(n) => Some(*n as i64),
+//RS                     DataTree::Number(n) => n.parse::<i64>().ok(),
+//RS                     _ => None,
+//RS                 })
+//RS                 .collect()
+//RS         })
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn dedup_preserving_order(values: Vec<String>) -> Vec<String> {
+//RS     let mut seen = BTreeSet::new();
+//RS     values
+//RS         .into_iter()
+//RS         .filter(|value| seen.insert(value.clone()))
+//RS         .collect()
+//RS }
+//RS 
+//RS /// Which of `names` the real-tier backend cannot resolve against the pinned
+//RS /// nixpkgs (same fallback chain as the generated `jetosPkg` resolver:
+//RS /// direct, underscored, kdePackages, gnomeExtensions). Packages from other
+//RS /// flake inputs land here — they become explicit audit omissions instead of
+//RS /// entries that break the build.
+//RS fn probe_unresolvable_packages(nixpkgs_ref: &str, names: &[String]) -> Result<Vec<String>, String> {
+//RS     if names.is_empty() {
+//RS         return Ok(Vec::new());
+//RS     }
+//RS     let flake_ref = nixpkgs_ref
+//RS         .strip_suffix("@github")
+//RS         .map(|rest| format!("github:{rest}"))
+//RS         .ok_or_else(|| format!("nixpkgs ref `{nixpkgs_ref}` is not a github pin"))?;
+//RS     let name_list = names
+//RS         .iter()
+//RS         .map(|n| JSON::quote(n))
+//RS         .collect::<Vec<_>>()
+//RS         .join(" ");
+//RS     // Probe against the same pkgs the generated configuration will see:
+//RS     // allowUnfree on, so unfree packages (steam, discord, …) don't read as
+//RS     // "missing" when their license gate throws under tryEval.
+//RS     let expr = format!(
+//RS         r#"let
+//RS   flake = builtins.getFlake "{flake_ref}";
+//RS   pkgs = import flake {{ system = "x86_64-linux"; config.allowUnfree = true; }};
+//RS   resolves = name: let
+//RS     underscored = builtins.replaceStrings ["-"] ["_"] name;
+//RS     extension = if builtins.substring 0 22 name == "gnome-shell-extension-"
+//RS       then builtins.substring 22 (builtins.stringLength name) name else name;
+//RS     ok = attrs: n: (attrs ? ${{n}}) && (builtins.tryEval attrs.${{n}}).success;
+//RS   in (ok pkgs name) || (ok pkgs underscored)
+//RS     || (ok (pkgs.kdePackages or {{}}) name)
+//RS     || (ok (pkgs.gnomeExtensions or {{}}) extension);
+//RS in builtins.filter (n: !(resolves n)) [ {name_list} ]"#
+//RS     );
+//RS     let output = Command::new("nix")
+//RS         .args(["eval", "--json", "--expr", &expr])
+//RS         .output()
+//RS         .map_err(|e| format!("running the package resolvability probe failed: {e}"))?;
+//RS     if !output.status.success() {
+//RS         let stderr = String::from_utf8_lossy(&output.stderr);
+//RS         let line = stderr
+//RS             .lines()
+//RS             .rev()
+//RS             .map(str::trim)
+//RS             .find(|l| !l.is_empty())
+//RS             .unwrap_or("no diagnostic output");
+//RS         let excerpt: String = line.chars().take(240).collect();
+//RS         return Err(format!("package resolvability probe failed: {excerpt}"));
+//RS     }
+//RS     let json = JSON::parse(&String::from_utf8_lossy(&output.stdout))
+//RS         .map_err(|e| format!("parsing probe output failed: {e}"))?;
+//RS     Ok(json
+//RS         .as_array()
+//RS         .map_err(|e| format!("probe output: {e}"))?
+//RS         .iter()
+//RS         .filter_map(|v| v.as_str().ok().map(str::to_string))
+//RS         .collect())
+//RS }
+//RS 
+//RS /// Home Manager's own plumbing derivations surface in `home.packages` but are
+//RS /// implementation details, not configuration intent — importing them would
+//RS /// only make the generated config unbuildable.
+//RS fn is_hm_plumbing_package(name: &str) -> bool {
+//RS     name == "?"
+//RS         || name.starts_with("dummy-")
+//RS         || name.starts_with("hm-session-vars")
+//RS         || name.ends_with(".desktop")
+//RS         || name.ends_with("-manpage")
+//RS }
+//RS 
+//RS fn render_live_number(n: f64) -> String {
+//RS     if n.fract() == 0.0 {
+//RS         format!("{}", n as i64)
+//RS     } else {
+//RS         format!("{n}")
+//RS     }
+//RS }
+//RS 
+//RS fn render_live_int_list(values: &[i64]) -> String {
+//RS     let parts = values
+//RS         .iter()
+//RS         .map(|v| v.to_string())
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ");
+//RS     format!("[{parts}]")
+//RS }
+//RS 
+//RS /// The nixpkgs pin from the source's `flake.lock`, in the `owner/repo/rev@github`
+//RS /// source spelling the generated `config.jet` needs for the real tier. A
+//RS /// tarball-type lock (channels.nixos.org) still carries the github rev, so it
+//RS /// pins to `NixOS/nixpkgs` at that rev.
+//RS fn live_nixpkgs_ref(source: &Path) -> Option<String> {
+//RS     let text = fs::read_to_string(source.join("flake.lock")).ok()?;
+//RS     let lock = JSON::parse(&text).ok()?;
+//RS     let locked = lock
+//RS         .get("nodes")
+//RS         .ok()?
+//RS         .get("nixpkgs")
+//RS         .ok()?
+//RS         .get("locked")
+//RS         .ok()?;
+//RS     let locked = locked.as_object().ok()?;
+//RS     let rev = import_json_string(locked, "rev")?;
+//RS     let owner = import_json_string(locked, "owner").unwrap_or_else(|| "NixOS".to_string());
+//RS     let repo = import_json_string(locked, "repo").unwrap_or_else(|| "nixpkgs".to_string());
+//RS     Some(format!("{owner}/{repo}/{rev}@github"))
+//RS }
+//RS 
+//RS /// A locked github input's `owner/repo/rev@github` ref from the source's
+//RS /// `flake.lock`, looked up by node name.
+//RS fn live_locked_github_ref(source: &Path, node: &str) -> Option<String> {
+//RS     let text = fs::read_to_string(source.join("flake.lock")).ok()?;
+//RS     let lock = JSON::parse(&text).ok()?;
+//RS     let locked = lock.get("nodes").ok()?.get(node).ok()?.get("locked").ok()?;
+//RS     let locked = locked.as_object().ok()?;
+//RS     let owner = import_json_string(locked, "owner")?;
+//RS     let repo = import_json_string(locked, "repo")?;
+//RS     let rev = import_json_string(locked, "rev")?;
+//RS     Some(format!("{owner}/{repo}/{rev}@github"))
+//RS }
+//RS 
+//RS /// Locked github flake inputs other than `nixpkgs` / `root`, as
+//RS /// `(jet_source_label, owner/repo/rev@github)`. Labels are sanitized to Jet
+//RS /// idents so they can appear in `sources:` and `label.pkg` refs.
+//RS fn live_external_github_inputs(source: &Path) -> Vec<(String, String)> {
+//RS     let Ok(text) = fs::read_to_string(source.join("flake.lock")) else {
+//RS         return Vec::new();
+//RS     };
+//RS     let Ok(lock) = JSON::parse(&text) else {
+//RS         return Vec::new();
+//RS     };
+//RS     let Ok(nodes_json) = lock.get("nodes") else {
+//RS         return Vec::new();
+//RS     };
+//RS     let Ok(nodes) = nodes_json.as_object() else {
+//RS         return Vec::new();
+//RS     };
+//RS     let mut out = Vec::new();
+//RS     let mut seen_labels = BTreeSet::new();
+//RS     for (node, value) in nodes {
+//RS         if node == "root" || node == "nixpkgs" {
+//RS             continue;
+//RS         }
+//RS         let Ok(obj) = value.as_object() else {
+//RS             continue;
+//RS         };
+//RS         let Some(locked) = import_json_value(obj, "locked").and_then(|v| v.as_object().ok()) else {
+//RS             continue;
+//RS         };
+//RS         let Some(owner) = import_json_string(locked, "owner") else {
+//RS             continue;
+//RS         };
+//RS         let Some(repo) = import_json_string(locked, "repo") else {
+//RS             continue;
+//RS         };
+//RS         let Some(rev) = import_json_string(locked, "rev") else {
+//RS             continue;
+//RS         };
+//RS         let label = sanitize_source_label(node);
+//RS         if !seen_labels.insert(label.clone()) {
+//RS             continue;
+//RS         }
+//RS         out.push((label, format!("{owner}/{repo}/{rev}@github")));
+//RS     }
+//RS     out.sort_by(|a, b| a.0.cmp(&b.0));
+//RS     out
+//RS }
+//RS 
+//RS fn sanitize_source_label(raw: &str) -> String {
+//RS     let mut out = String::new();
+//RS     for ch in raw.chars() {
+//RS         if ch.is_ascii_alphanumeric() || ch == '_' {
+//RS             out.push(ch);
+//RS         } else if ch == '-' {
+//RS             out.push('_');
+//RS         }
+//RS     }
+//RS     if out.is_empty() || out.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+//RS         format!("src_{out}")
+//RS     } else {
+//RS         out
+//RS     }
+//RS }
+//RS 
+//RS /// Probe each non-nixpkgs flake input for packages the nixpkgs probe rejected.
+//RS /// Returns `(recovered_by_source, still_missing)`.
+//RS fn recover_package_provenance(
+//RS     source: &Path,
+//RS     missing: &[String],
+//RS ) -> Result<(Vec<(String, Vec<String>)>, Vec<String>), String> {
+//RS     if missing.is_empty() {
+//RS         return Ok((Vec::new(), Vec::new()));
+//RS     }
+//RS     let inputs = live_external_github_inputs(source);
+//RS     if inputs.is_empty() {
+//RS         return Ok((Vec::new(), missing.to_vec()));
+//RS     }
+//RS     let mut remaining: BTreeSet<String> = missing.iter().cloned().collect();
+//RS     let mut recovered: Vec<(String, Vec<String>)> = Vec::new();
+//RS     for (label, github_ref) in inputs {
+//RS         if remaining.is_empty() {
+//RS             break;
+//RS         }
+//RS         let candidates: Vec<String> = remaining.iter().cloned().collect();
+//RS         // Reuse the nixpkgs probe against this input's package set.
+//RS         match probe_unresolvable_packages(&github_ref, &candidates) {
+//RS             Ok(still_bad) => {
+//RS                 let still_bad: BTreeSet<String> = still_bad.into_iter().collect();
+//RS                 let found: Vec<String> = candidates
+//RS                     .into_iter()
+//RS                     .filter(|n| !still_bad.contains(n))
+//RS                     .collect();
+//RS                 if !found.is_empty() {
+//RS                     for name in &found {
+//RS                         remaining.remove(name);
+//RS                     }
+//RS                     recovered.push((label, found));
+//RS                 }
+//RS             }
+//RS             Err(_) => {
+//RS                 // A single input probe failure is not fatal — keep trying others.
+//RS                 continue;
+//RS             }
+//RS         }
+//RS     }
+//RS     let still: Vec<String> = remaining.into_iter().collect();
+//RS     Ok((recovered, still))
+//RS }
+//RS 
+//RS fn merge_sourced_packages(
+//RS     existing: &mut Vec<(String, Vec<String>)>,
+//RS     incoming: Vec<(String, Vec<String>)>,
+//RS ) {
+//RS     for (label, pkgs) in incoming {
+//RS         if let Some((_, slot)) = existing.iter_mut().find(|(l, _)| l == &label) {
+//RS             for p in pkgs {
+//RS                 if !slot.contains(&p) {
+//RS                     slot.push(p);
+//RS                 }
+//RS             }
+//RS         } else {
+//RS             existing.push((label, pkgs));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn plan_from_live_facts(
+//RS     args: &NixosImportArgs,
+//RS     host: &str,
+//RS     root: &[(String, DataTree)],
+//RS ) -> Result<NixosImportPlan, String> {
+//RS     let mut options: Vec<(String, String)> = Vec::new();
+//RS     let mut services: Vec<String> = Vec::new();
+//RS     let mut omissions: Vec<String> = Vec::new();
+//RS 
+//RS     let host_fact = import_json_string(root, "host").unwrap_or_else(|| host.to_string());
+//RS     options.push((
+//RS         "network.hostName".to_string(),
+//RS         import_render_string(&host_fact),
+//RS     ));
+//RS     if live_bool(root, "networkmanager") {
+//RS         options.push((
+//RS             "network.networkmanager.enable".to_string(),
+//RS             "true".to_string(),
+//RS         ));
+//RS     }
+//RS     let tcp = live_num_list(root, "firewallTcp");
+//RS     if !tcp.is_empty() {
+//RS         options.push((
+//RS             "network.firewall.allowedTcpPorts".to_string(),
+//RS             render_live_int_list(&tcp),
+//RS         ));
+//RS     }
+//RS     let udp = live_num_list(root, "firewallUdp");
+//RS     if !udp.is_empty() {
+//RS         options.push((
+//RS             "network.firewall.allowedUdpPorts".to_string(),
+//RS             render_live_int_list(&udp),
+//RS         ));
+//RS     }
+//RS     let dns = import_json_string_array(root, "nameservers");
+//RS     if !dns.is_empty() {
+//RS         options.push(("network.dns".to_string(), import_json_array(&dns)));
+//RS     }
+//RS     for (fact, option) in [
+//RS         ("tz", "filesystem.timeZone"),
+//RS         ("locale", "services.localization.locale"),
+//RS         ("keyboard", "services.localization.keyboardLayout"),
+//RS     ] {
+//RS         let value = live_str(root, fact);
+//RS         if !value.is_empty() {
+//RS             options.push((option.to_string(), import_render_string(&value)));
+//RS         }
+//RS     }
+//RS 
+//RS     if live_bool(root, "loaderLimine") {
+//RS         options.push(("boot.loader".to_string(), ".Limine".to_string()));
+//RS     } else if live_bool(root, "loaderSystemdBoot") {
+//RS         options.push(("boot.loader".to_string(), ".SystemdBoot".to_string()));
+//RS     }
+//RS     options.push((
+//RS         "boot.loader.efi.canTouchVariables".to_string(),
+//RS         live_bool(root, "efiTouch").to_string(),
+//RS     ));
+//RS     let params = import_json_string_array(root, "kernelParams");
+//RS     if !params.is_empty() {
+//RS         options.push(("boot.kernel.params".to_string(), import_json_array(&params)));
+//RS     }
+//RS     let kernel = live_str(root, "kernelName");
+//RS     let mut extra_sources: Vec<(String, String)> = Vec::new();
+//RS     if kernel.to_ascii_lowercase().contains("cachyos") {
+//RS         options.push(("boot.kernel".to_string(), ".CachyOS".to_string()));
+//RS         match live_locked_github_ref(&args.source, "nix-cachyos-kernel") {
+//RS             Some(pin) => extra_sources.push(("cachyos".to_string(), pin)),
+//RS             None => omissions.push(
+//RS                 "boot.kernel .CachyOS: the source flake.lock has no `nix-cachyos-kernel` pin; \
+//RS                  declare an `<owner>/nix-cachyos-kernel/<rev>@github` source before the real tier can build"
+//RS                     .to_string(),
+//RS             ),
+//RS         }
+//RS     }
+//RS     if live_bool(root, "stylix") {
+//RS         omissions.push(
+//RS             "stylix theming is enabled upstream and has no jetos realization yet (theme.* options are declarative only)"
+//RS                 .to_string(),
+//RS         );
+//RS     }
+//RS     if let Some(DataTree::Object(sysctl)) = import_json_value(root, "sysctl") {
+//RS         for (key, value) in sysctl {
+//RS             // Values embedding store paths are NixOS machinery echoes (e.g.
+//RS             // `kernel.poweroff_cmd` from shutdown.nix), not configuration
+//RS             // intent — the target system regenerates them itself, and
+//RS             // re-declaring them collides with the module that owns them.
+//RS             if matches!(
+//RS                 value,
+//RS                 DataTree::Text(s) | DataTree::TypedText(s) if s.contains("/nix/store/")
+//RS             ) {
+//RS                 continue;
+//RS             }
+//RS             let rendered = match value {
+//RS                 DataTree::Int(n) => render_live_number(*n as f64),
+//RS                 DataTree::Float(n) => render_live_number(*n),
+//RS                 DataTree::Number(n) => n.clone(),
+//RS                 DataTree::Bool(b) => b.to_string(),
+//RS                 DataTree::Text(s) | DataTree::TypedText(s) => import_render_string(s),
+//RS                 other => {
+//RS                     omissions.push(format!(
+//RS                         "boot.kernel.sysctl.{key} has a shape jetos cannot encode yet: {other:?}"
+//RS                     ));
+//RS                     continue;
+//RS                 }
+//RS             };
+//RS             options.push((format!("performance.sysctl.{key}"), rendered));
+//RS         }
+//RS     }
+//RS     if live_bool(root, "zramEnable") {
+//RS         let percent = live_num(root, "zramPercent").unwrap_or(50.0);
+//RS         options.push((
+//RS             "performance.zram.memoryPercent".to_string(),
+//RS             render_live_number(percent),
+//RS         ));
+//RS     }
+//RS 
+//RS     let gnome = live_bool(root, "desktopGnome") || live_bool(root, "dmGdm");
+//RS     let plasma = live_bool(root, "desktopPlasma") || live_bool(root, "dmSddm");
+//RS     if gnome {
+//RS         options.push((
+//RS             "services.desktop.profile".to_string(),
+//RS             ".Default".to_string(),
+//RS         ));
+//RS         options.push(("services.displayManager".to_string(), "\"gdm\"".to_string()));
+//RS     } else if plasma {
+//RS         options.push((
+//RS             "services.desktop.plasma.enable".to_string(),
+//RS             "true".to_string(),
+//RS         ));
+//RS         options.push((
+//RS             "services.displayManager".to_string(),
+//RS             "\"sddm\"".to_string(),
+//RS         ));
+//RS     }
+//RS     if live_bool(root, "svcPipewire") {
+//RS         options.push((
+//RS             "services.audio.pipewire.enable".to_string(),
+//RS             "true".to_string(),
+//RS         ));
+//RS     }
+//RS     if live_bool(root, "svcRtkit") {
+//RS         options.push((
+//RS             "services.audio.rtkit.enable".to_string(),
+//RS             "true".to_string(),
+//RS         ));
+//RS     }
+//RS     if live_bool(root, "svcLibvirtd") {
+//RS         options.push((
+//RS             "services.virtualization.libvirtd.enable".to_string(),
+//RS             "true".to_string(),
+//RS         ));
+//RS     }
+//RS     if live_bool(root, "svcSteam") {
+//RS         options.push((
+//RS             "services.gaming.steam.enable".to_string(),
+//RS             "true".to_string(),
+//RS         ));
+//RS     }
+//RS     if live_bool(root, "svcGamemode") {
+//RS         options.push((
+//RS             "services.gaming.gamemode.enable".to_string(),
+//RS             "true".to_string(),
+//RS         ));
+//RS     }
+//RS     if live_bool(root, "svcPcscd") {
+//RS         options.push((
+//RS             "services.smartcard.pcscd.enable".to_string(),
+//RS             "true".to_string(),
+//RS         ));
+//RS     }
+//RS     for (fact, service) in [("svcOpenssh", "openssh"), ("svcTailscale", "tailscale")] {
+//RS         if live_bool(root, fact) {
+//RS             services.push(service.to_string());
+//RS         }
+//RS     }
+//RS     if live_bool(root, "svcDocker") {
+//RS         options.push((
+//RS             "services.virtualization.docker.enable".to_string(),
+//RS             "true".to_string(),
+//RS         ));
+//RS     }
+//RS     if live_bool(root, "svcFlatpak") {
+//RS         options.push(("apps.flatpak.enable".to_string(), "true".to_string()));
+//RS     }
+//RS     if live_bool(root, "svcBluetooth") {
+//RS         options.push(("hardware.bluetooth.enable".to_string(), "true".to_string()));
+//RS     }
+//RS 
+//RS     let (packages, omitted_packages) = {
+//RS         let (kept, omitted) = import_package_list(root, "packages");
+//RS         (
+//RS             dedup_preserving_order(kept),
+//RS             dedup_preserving_order(omitted),
+//RS         )
+//RS     };
+//RS 
+//RS     let mut hm_by_user: std::collections::BTreeMap<
+//RS         String,
+//RS         (Vec<String>, Vec<String>, Vec<String>),
+//RS     > = std::collections::BTreeMap::new();
+//RS     if let Some(hm_json) = import_json_value(root, "hm") {
+//RS         for entry in hm_json.as_array().map_err(|e| format!("hm: {e}"))? {
+//RS             let entry = entry.as_object().map_err(|e| format!("hm entry: {e}"))?;
+//RS             let Some(name) = import_json_string(entry, "name") else {
+//RS                 continue;
+//RS             };
+//RS             let (kept, omitted) = import_package_list(entry, "packages");
+//RS             let programs = import_json_string_array(entry, "programs");
+//RS             hm_by_user.insert(name, (kept, omitted, programs));
+//RS         }
+//RS     }
+//RS 
+//RS     let mut users = Vec::new();
+//RS     if let Some(users_json) = import_json_value(root, "users") {
+//RS         for user_json in users_json.as_array().map_err(|e| format!("users: {e}"))? {
+//RS             let user = user_json
+//RS                 .as_object()
+//RS                 .map_err(|e| format!("user entry: {e}"))?;
+//RS             let Some(name) = import_json_string(user, "name") else {
+//RS                 continue;
+//RS             };
+//RS             if !args.users.is_empty() && !args.users.iter().any(|wanted| wanted == &name) {
+//RS                 continue;
+//RS             }
+//RS             let shell = live_str(user, "shell");
+//RS             if !shell.is_empty() && import_is_ident(&shell) {
+//RS                 options.push((format!("users.{name}.shell"), format!("nixpkgs.{shell}")));
+//RS             }
+//RS             let has_home_manager = hm_by_user.contains_key(&name);
+//RS             let (hm_packages, hm_omitted, hm_programs) =
+//RS                 hm_by_user.remove(&name).unwrap_or_default();
+//RS             let hm_packages = dedup_preserving_order(hm_packages)
+//RS                 .into_iter()
+//RS                 .filter(|p| !is_hm_plumbing_package(p))
+//RS                 .collect::<Vec<_>>();
+//RS             let hm_omitted = dedup_preserving_order(hm_omitted)
+//RS                 .into_iter()
+//RS                 .filter(|p| !is_hm_plumbing_package(p))
+//RS                 .collect::<Vec<_>>();
+//RS             for program in &hm_programs {
+//RS                 match importable_hm_program(program) {
+//RS                     Some(key) => options.push((key, "true".to_string())),
+//RS                     None => omissions.push(format!(
+//RS                         "Home Manager program `{program}` for user `{name}` needs manual conversion"
+//RS                     )),
+//RS                 }
+//RS             }
+//RS             if has_home_manager {
+//RS                 options.push((format!("user.{name}.homeManager"), "true".to_string()));
+//RS             }
+//RS             users.push(NixosImportUser {
+//RS                 name: name.clone(),
+//RS                 home: import_json_string(user, "home"),
+//RS                 groups: import_json_string_array(user, "groups"),
+//RS                 packages: hm_packages,
+//RS                 sourced_packages: Vec::new(),
+//RS                 omitted_packages: hm_omitted,
+//RS                 home_manager: has_home_manager,
+//RS             });
+//RS         }
+//RS     }
+//RS 
+//RS     omissions.extend(
+//RS         omitted_packages
+//RS             .iter()
+//RS             .map(|p| format!("package `{p}` uses a Nix attr path JetOS cannot encode yet")),
+//RS     );
+//RS     for user in &users {
+//RS         omissions.extend(user.omitted_packages.iter().map(|p| {
+//RS             format!(
+//RS                 "Home Manager package `{p}` for user `{}` uses a Nix attr path JetOS cannot encode yet",
+//RS                 user.name
+//RS             )
+//RS         }));
+//RS     }
+//RS 
+//RS     let nixpkgs_ref =
+//RS         live_nixpkgs_ref(&args.source).unwrap_or_else(|| "nixpkgs-unstable@nixpkgs".to_string());
+//RS 
+//RS     // Snapshot ownership before the nixpkgs probe strips external packages.
+//RS     let system_before: BTreeSet<String> = packages.iter().cloned().collect();
+//RS     let user_before: Vec<(String, BTreeSet<String>)> = users
+//RS         .iter()
+//RS         .map(|u| (u.name.clone(), u.packages.iter().cloned().collect()))
+//RS         .collect();
+//RS 
+//RS     // Packages that only exist in the source's other flake inputs would break
+//RS     // the real-tier build against nixpkgs alone. Recover them via package-
+//RS     // provenance import (map each name to the providing flake input); anything
+//RS     // still unresolvable stays an explicit audit omission.
+//RS     let mut probe_names: Vec<String> = packages.clone();
+//RS     for user in &users {
+//RS         probe_names.extend(user.packages.iter().cloned());
+//RS     }
+//RS     probe_names = dedup_preserving_order(probe_names);
+//RS     let mut packages = packages;
+//RS     let mut users = users;
+//RS     let mut sourced_packages: Vec<(String, Vec<String>)> = Vec::new();
+//RS     match probe_unresolvable_packages(&nixpkgs_ref, &probe_names) {
+//RS         Ok(unresolvable) if !unresolvable.is_empty() => {
+//RS             let external: BTreeSet<String> = unresolvable.into_iter().collect();
+//RS             packages.retain(|p| !external.contains(p));
+//RS             for user in &mut users {
+//RS                 user.packages.retain(|p| !external.contains(p));
+//RS             }
+//RS             let missing: Vec<String> = external.into_iter().collect();
+//RS             let input_pins = live_external_github_inputs(&args.source);
+//RS             match recover_package_provenance(&args.source, &missing) {
+//RS                 Ok((recovered, still_missing)) => {
+//RS                     for (label, pkgs) in recovered {
+//RS                         if let Some((_, pin)) = input_pins.iter().find(|(l, _)| l == &label) {
+//RS                             if !extra_sources.iter().any(|(n, _)| n == &label) {
+//RS                                 extra_sources.push((label.clone(), pin.clone()));
+//RS                             }
+//RS                         }
+//RS                         let mut system_pkgs = Vec::new();
+//RS                         for pkg in &pkgs {
+//RS                             if system_before.contains(pkg) {
+//RS                                 system_pkgs.push(pkg.clone());
+//RS                             }
+//RS                             for (uname, upkgs) in &user_before {
+//RS                                 if upkgs.contains(pkg) {
+//RS                                     if let Some(user) = users.iter_mut().find(|u| u.name == *uname)
+//RS                                     {
+//RS                                         merge_sourced_packages(
+//RS                                             &mut user.sourced_packages,
+//RS                                             vec![(label.clone(), vec![pkg.clone()])],
+//RS                                         );
+//RS                                     }
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                         if !system_pkgs.is_empty() {
+//RS                             merge_sourced_packages(
+//RS                                 &mut sourced_packages,
+//RS                                 vec![(label, system_pkgs)],
+//RS                             );
+//RS                         }
+//RS                     }
+//RS                     for name in still_missing {
+//RS                         omissions.push(format!(
+//RS                             "package `{name}` comes from another flake input (not the pinned nixpkgs) \
+//RS                              and no locked github input resolves it"
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 Err(e) => {
+//RS                     for name in missing {
+//RS                         omissions.push(format!(
+//RS                             "package `{name}` comes from another flake input (not the pinned nixpkgs); \
+//RS                              provenance recovery failed ({e})"
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         Ok(_) => {}
+//RS         Err(e) => {
+//RS             omissions.push(format!(
+//RS                 "package resolvability probe failed ({e}); non-nixpkgs packages may break the real-tier build"
+//RS             ));
+//RS         }
+//RS     }
+//RS 
+//RS     Ok(NixosImportPlan {
+//RS         source: args.source.clone(),
+//RS         mode: "semantic-eval",
+//RS         host: host.to_string(),
+//RS         target: "linux.x64".to_string(),
+//RS         nixpkgs_ref,
+//RS         extra_sources,
+//RS         packages,
+//RS         sourced_packages,
+//RS         omitted_packages,
+//RS         services,
+//RS         options,
+//RS         users,
+//RS         modules: Vec::new(),
+//RS         home_modules: Vec::new(),
+//RS         omissions,
+//RS     })
+//RS }
+//RS 
+//RS /// HM `programs.<name>.enable` values that jetos already owns as
+//RS /// `apps.program.<name>.enable` (see `write_app_module_facts`). Anything
+//RS /// outside this set stays a loud audit omission — never a silent drop.
+//RS fn importable_hm_program(program: &str) -> Option<String> {
+//RS     match program {
+//RS         "git" | "fish" | "starship" | "helix" | "ghostty" | "vscode" => {
+//RS             Some(format!("apps.program.{program}.enable"))
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+// END-PORT-PENDING 0874 crates/jetpack/src/JetOS/nixos_import_live.rs:1-806
+

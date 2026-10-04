@@ -1,0 +1,1804 @@
+// PORT-PENDING 2094 crates-jet-pkg-model-src-authority-slice-1: crates/jet-pkg-model/src/Authority.rs:1-1800
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Checked filesystem authority for package and workspace metadata.
+//RS //!
+//RS //! Every authority-sensitive reader goes through this module.  The resolver
+//RS //! opens the root once, walks descendants without following links, keeps the
+//RS //! opened object and its identity in the returned snapshot, and checks the
+//RS //! pathname again before a caller uses the snapshot.
+//RS 
+//RS use crate::Diagnostics::Diagnostic;
+//RS use crate::Package::{PackageAuthority, PackageFacts};
+//RS use crate::Syntax;
+//RS use jet_foundation::Authority::{
+//RS     covers, Authority as CanonicalAuthority, HostImportFact, Holds, TightenError, Verdict,
+//RS };
+//RS use std::collections::HashMap;
+//RS use std::ffi::OsString;
+//RS use std::fs::{self, File, Metadata};
+//RS use std::io::{self, Read};
+//RS use std::path::{Component, Path, PathBuf};
+//RS use std::sync::{Arc, LazyLock, Mutex};
+//RS use std::time::{SystemTime, UNIX_EPOCH};
+//RS 
+//RS const KIND_FILE: &str = "regular file";
+//RS const HARDLINK_DETAIL: &str = "authority file must have exactly one hard link";
+//RS 
+//RS const KIND_DIRECTORY: &str = "directory";
+//RS 
+//RS /// The kind proven by a checked open.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS 
+//RS pub enum AuthorityKind {
+//RS     File,
+//RS     Directory,
+//RS }
+//RS /// One physical path root held without following links. The resolver remains
+//RS /// the sole source of filesystem identity; this wrapper only associates its
+//RS /// checked root with the canonical rights-tree entry.
+//RS #[derive(Debug, Clone)]
+//RS pub struct NoFollowRoot {
+//RS     right: String,
+//RS     resolver: AuthorityResolver,
+//RS }
+//RS 
+//RS impl NoFollowRoot {
+//RS     pub fn new(
+//RS         right: impl Into<String>,
+//RS         resolver: AuthorityResolver,
+//RS     ) -> Result<Self, SandboxAuthorityError> {
+//RS         let right = right.into();
+//RS         let right = jet_foundation::Authority::parse_right(&right)
+//RS             .ok_or_else(|| SandboxAuthorityError::InvalidRight(right.clone()))?;
+//RS         Ok(Self { right, resolver })
+//RS     }
+//RS 
+//RS     pub fn right(&self) -> &str {
+//RS         &self.right
+//RS     }
+//RS 
+//RS     pub fn root(&self) -> &Path {
+//RS         self.resolver.root()
+//RS     }
+//RS 
+//RS     pub fn checked_file(&self, path: &Path) -> Result<CheckedFile, SandboxAuthorityError> {
+//RS         self.resolver
+//RS             .checked_file(path)
+//RS             .map_err(SandboxAuthorityError::NoFollow)
+//RS     }
+//RS }
+//RS 
+//RS /// Failure while projecting a host authority into a sandbox guest.
+//RS #[derive(Debug, Clone)]
+//RS pub enum SandboxAuthorityError {
+//RS     InvalidRight(String),
+//RS     Widened(TightenError),
+//RS     UndeclaredRight(String),
+//RS     MissingNeed(String),
+//RS     MissingRoot(String),
+//RS     NoFollow(AuthorityError),
+//RS }
+//RS 
+//RS impl std::fmt::Display for SandboxAuthorityError {
+//RS     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//RS         match self {
+//RS             Self::InvalidRight(right) => write!(f, "unknown authority right `{right}`"),
+//RS             Self::Widened(error) => error.fmt(f),
+//RS             Self::UndeclaredRight(right) => {
+//RS                 write!(f, "sandbox authority grants undeclared right `{right}`")
+//RS             }
+//RS             Self::MissingNeed(need) => {
+//RS                 write!(f, "sandbox authority does not satisfy declared need `{need}`")
+//RS             }
+//RS             Self::MissingRoot(right) => {
+//RS                 write!(f, "sandbox authority has no no-follow root for `{right}`")
+//RS             }
+//RS             Self::NoFollow(error) => error.fmt(f),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::error::Error for SandboxAuthorityError {}
+//RS 
+//RS /// Backend-neutral guest authority projection. `authority` is the one
+//RS /// canonical rights carrier; `needs` is copied declaration data used to
+//RS /// prevent a host from lending unrelated capability.
+//RS #[derive(Debug, Clone)]
+//RS pub struct SandboxAuthority {
+//RS     authority: CanonicalAuthority,
+//RS     needs: Holds,
+//RS     roots: Vec<NoFollowRoot>,
+//RS }
+//RS 
+//RS impl SandboxAuthority {
+//RS     /// Lend a host scope to a guest. Every requested right must be a
+//RS     /// tighten-only child of the host and must satisfy a declared need.
+//RS     pub fn lend(
+//RS         package: &PackageAuthority,
+//RS         host: &CanonicalAuthority,
+//RS         requested: Holds,
+//RS         roots: Vec<NoFollowRoot>,
+//RS     ) -> Result<Self, SandboxAuthorityError> {
+//RS         let needs = package
+//RS             .needs
+//RS             .iter()
+//RS             .map(|right| {
+//RS                 jet_foundation::Authority::parse_right(right)
+//RS                     .ok_or_else(|| SandboxAuthorityError::InvalidRight(right.clone()))
+//RS             })
+//RS             .collect::<Result<Holds, _>>()?;
+//RS         let authority = host.tighten(&requested).map_err(SandboxAuthorityError::Widened)?;
+//RS         for right in authority.holds() {
+//RS             if !needs.iter().any(|need| covers(need, right)) {
+//RS                 return Err(SandboxAuthorityError::UndeclaredRight(right.clone()));
+//RS             }
+//RS         }
+//RS         for root in &roots {
+//RS             if !authority.allows(root.right()) {
+//RS                 return Err(SandboxAuthorityError::MissingRoot(root.right.clone()));
+//RS             }
+//RS         }
+//RS         Ok(Self {
+//RS             authority,
+//RS             needs,
+//RS             roots,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn authority(&self) -> &CanonicalAuthority {
+//RS         &self.authority
+//RS     }
+//RS     pub fn verdict(&self, right: &str) -> Verdict {
+//RS         if self.authority.allows(right) {
+//RS             Verdict::Allowed
+//RS         } else {
+//RS             Verdict::Missing
+//RS         }
+//RS     }
+//RS 
+//RS 
+//RS     pub fn needs(&self) -> impl Iterator<Item = &str> {
+//RS         self.needs.iter().map(String::as_str)
+//RS     }
+//RS 
+//RS     pub fn roots(&self) -> impl Iterator<Item = &NoFollowRoot> {
+//RS         self.roots.iter()
+//RS     }
+//RS 
+//RS     /// Check the exact right requested by one host import fact.  The
+//RS     /// foundation authority computes the verdict; this wrapper only maps a
+//RS     /// denied verdict to the package-facing error and verifies that the
+//RS     /// guest declared the same operation.
+//RS     pub fn authorize_import(
+//RS         &self,
+//RS         import: &HostImportFact,
+//RS     ) -> Result<(), SandboxAuthorityError> {
+//RS         if self.authority.decide_import(import) != Verdict::Allowed {
+//RS             return Err(SandboxAuthorityError::MissingNeed(
+//RS                 import.required_grant().to_string(),
+//RS             ));
+//RS         }
+//RS         if !self
+//RS             .needs
+//RS             .iter()
+//RS             .any(|need| covers(need, import.required_grant()))
+//RS         {
+//RS             return Err(SandboxAuthorityError::UndeclaredRight(
+//RS                 import.required_grant().to_string(),
+//RS             ));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Return the canonical typed decision for a host import.  Adapters use
+//RS     /// this row directly instead of reconstructing a policy from `needs` or
+//RS     /// from a resource path.
+//RS     pub fn import_decision(
+//RS         &self,
+//RS         import: HostImportFact,
+//RS     ) -> jet_foundation::Authority::HostImportDecision {
+//RS         import.decision(&self.authority)
+//RS     }
+//RS 
+//RS     /// Authorize and open a file import through a matching no-follow root.
+//RS     pub fn checked_file(
+//RS         &self,
+//RS         import: &HostImportFact,
+//RS         path: &Path,
+//RS     ) -> Result<CheckedFile, SandboxAuthorityError> {
+//RS         self.authorize_import(import)?;
+//RS         let root = self
+//RS             .roots
+//RS             .iter()
+//RS             .find(|root| {
+//RS                 covers(root.right(), import.required_grant())
+//RS                     || covers(import.required_grant(), root.right())
+//RS             })
+//RS             .ok_or_else(|| SandboxAuthorityError::MissingRoot(import.required_grant().to_string()))?;
+//RS         root.checked_file(path)
+//RS     }
+//RS }
+//RS 
+//RS /// Stable identity of the object that was opened.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct FileIdentity {
+//RS     pub kind: AuthorityKind,
+//RS     pub length: u64,
+//RS     pub modified_ns: Option<u128>,
+//RS     pub device: Option<u64>,
+//RS     pub inode: Option<u64>,
+//RS }
+//RS 
+//RS impl FileIdentity {
+//RS     /// A regular file's identity includes its length and mtime: its bytes were
+//RS     /// read from the opened handle, so drift in either means the snapshot no
+//RS     /// longer describes what was read.
+//RS     ///
+//RS     /// A directory's length and mtime are *not* its identity. Both change
+//RS     /// whenever any entry is created or removed inside it, which is exactly
+//RS     /// what legitimate writers do below an authority root: the running command
+//RS     /// creating `build/` or `.jet/perf/reports/`, a sibling process working in
+//RS     /// a shared parent directory. A durability check that cannot tell this
+//RS     /// process from an attacker is not a durability check, so a directory is
+//RS     /// identified by the object itself — kind plus device and inode.
+//RS     ///
+//RS     /// That keeps the attack this resolver exists to stop. [`AuthorityResolver::open`]
+//RS     /// compares an identity taken by path against one taken from the
+//RS     /// `O_NOFOLLOW` handle; a path swapped between those two observations
+//RS     /// yields a different inode and is still refused. What is lost is only a
+//RS     /// "the entry list moved" signal that never was a guarantee — mtime has
+//RS     /// coarse granularity and misses replace-in-place entirely. A caller that
+//RS     /// genuinely needs it must compare entry sets explicitly.
+//RS     ///
+//RS     /// Where no stable device/inode is available the content fields stay in
+//RS     /// place, because then they are the only identity there is.
+//RS     fn from_metadata(metadata: &Metadata, kind: AuthorityKind) -> Self {
+//RS         #[cfg(unix)]
+//RS         let (device, inode) = {
+//RS             use std::os::unix::fs::MetadataExt;
+//RS             (Some(metadata.dev()), Some(metadata.ino()))
+//RS         };
+//RS         #[cfg(not(unix))]
+//RS         let (device, inode) = (None, None);
+//RS         let pinned_by_object =
+//RS             kind == AuthorityKind::Directory && device.is_some() && inode.is_some();
+//RS         let modified_ns = if pinned_by_object {
+//RS             None
+//RS         } else {
+//RS             metadata
+//RS                 .modified()
+//RS                 .ok()
+//RS                 .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+//RS                 .map(|duration| duration.as_nanos())
+//RS         };
+//RS         Self {
+//RS             kind,
+//RS             length: if pinned_by_object { 0 } else { metadata.len() },
+//RS             modified_ns,
+//RS             device,
+//RS             inode,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// One no-follow opened file and the bytes read from that same handle.
+//RS #[derive(Debug, Clone)]
+//RS pub struct CheckedFile {
+//RS     pub path: PathBuf,
+//RS     pub relative: PathBuf,
+//RS     pub identity: FileIdentity,
+//RS     pub handle: Arc<File>,
+//RS     pub bytes: Vec<u8>,
+//RS }
+//RS 
+//RS impl CheckedFile {
+//RS     /// Decode the bytes that were read from the opened object.
+//RS     pub fn text(&self) -> Result<String, AuthorityError> {
+//RS         String::from_utf8(self.bytes.clone()).map_err(|error| AuthorityError::Invalid {
+//RS             path: self.path.clone(),
+//RS             detail: format!("authority file is not valid UTF-8: {error}"),
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS /// One no-follow opened directory.
+//RS #[derive(Debug, Clone)]
+//RS pub struct CheckedDirectory {
+//RS     pub path: PathBuf,
+//RS     pub relative: PathBuf,
+//RS     pub identity: FileIdentity,
+//RS     pub handle: Arc<File>,
+//RS     allow_hardlinks: bool,
+//RS }
+//RS /// A parsed canonical `package.jet` plus the opened manifest snapshot.
+//RS #[derive(Debug, Clone)]
+//RS pub struct CheckedManifest {
+//RS     pub file: CheckedFile,
+//RS     pub facts: PackageFacts,
+//RS }
+//RS 
+//RS /// A checked member directory and its canonical manifest.
+//RS #[derive(Debug, Clone)]
+//RS pub struct CheckedMember {
+//RS     pub directory: CheckedDirectory,
+//RS     pub manifest: CheckedManifest,
+//RS }
+//RS 
+//RS /// A member snapshot after checked Config composition and member validation.
+//RS #[derive(Debug, Clone)]
+//RS pub struct CheckedPackage {
+//RS     pub member: CheckedMember,
+//RS     pub facts: PackageFacts,
+//RS }
+//RS 
+//RS /// Failure from the shared authority resolver.
+//RS #[derive(Debug, Clone)]
+//RS pub enum AuthorityError {
+//RS     Missing(PathBuf),
+//RS     /// `package.jet` parsed as text but violates the manifest vocabulary.
+//RS     /// Kept typed so the registered manifest diagnostics (E1206/E1208/E1209/…)
+//RS     /// reach the user instead of a generic E1334 wrapper.
+//RS     ManifestParse {
+//RS         path: PathBuf,
+//RS         error: crate::Package::PackageParseError,
+//RS     },
+//RS     Io {
+//RS         path: PathBuf,
+//RS         operation: &'static str,
+//RS         detail: String,
+//RS     },
+//RS     Symlink(PathBuf),
+//RS     WrongKind {
+//RS         path: PathBuf,
+//RS         expected: &'static str,
+//RS         actual: &'static str,
+//RS     },
+//RS     Escapes(PathBuf),
+//RS     AmbiguousManifest(PathBuf),
+//RS     RetiredManifest(PathBuf),
+//RS     WorkspaceAmbiguous(Vec<PathBuf>),
+//RS     WorkspaceNoModule,
+//RS     NestedMembers {
+//RS         root: PathBuf,
+//RS         member: PathBuf,
+//RS     },
+//RS     Invalid {
+//RS         path: PathBuf,
+//RS         detail: String,
+//RS     },
+//RS     Changed(PathBuf),
+//RS     Unsupported(String),
+//RS }
+//RS 
+//RS impl AuthorityError {
+//RS     pub fn is_missing(&self) -> bool {
+//RS         matches!(self, Self::Missing(_))
+//RS     }
+//RS 
+//RS     pub fn diagnostic(&self) -> Diagnostic {
+//RS         match self {
+//RS             Self::AmbiguousManifest(_path) => Diagnostic::error(
+//RS                 "E1206",
+//RS                 "the package has two manifest roots".to_string(),
+//RS                 format!(
+//RS                     "`{}` and `{}` both exist; choosing one would make package identity ambiguous",
+//RS                     Syntax::PACKAGE_FILE,
+//RS                     Syntax::PAYLOAD_FILE,
+//RS                 ),
+//RS                 format!(
+//RS                     "remove `{}` or migrate it into `{}`",
+//RS                     Syntax::PAYLOAD_FILE,
+//RS                     Syntax::PACKAGE_FILE,
+//RS                 ),
+//RS                 None,
+//RS             ),
+//RS             Self::RetiredManifest(path) => Diagnostic::error(
+//RS                 "E1226",
+//RS                 format!("retired manifest `{}` is not a Package root", path.display()),
+//RS                 format!(
+//RS                     "`{}` is retired; Package identity is read only from `{}`",
+//RS                     Syntax::PAYLOAD_FILE,
+//RS                     Syntax::PACKAGE_FILE,
+//RS                 ),
+//RS                 format!("rename `{}` to `{}`", Syntax::PAYLOAD_FILE, Syntax::PACKAGE_FILE),
+//RS                 None,
+//RS             ),
+//RS             Self::WorkspaceAmbiguous(paths) => {
+//RS                 let refs = paths.iter().map(PathBuf::as_path).collect::<Vec<_>>();
+//RS                 crate::WorkspacePlan::e1239_ambiguous_workspace(&refs)
+//RS             }
+//RS             Self::WorkspaceNoModule => crate::WorkspacePlan::e0995_no_workspace_module(),
+//RS             Self::NestedMembers { root, member } => Diagnostic::error(
+//RS                 "E1323",
+//RS                 format!("member Package `{}` declares `members`", member.display()),
+//RS                 format!(
+//RS                     "Package membership has depth cap one: `{}` owns the member list, but `{}` declares another one",
+//RS                     root.display(),
+//RS                     member.display()
+//RS                 ),
+//RS                 format!(
+//RS                     "remove `members:` from `{}` and lift its references into `{}`",
+//RS                     member.display(),
+//RS                     root.display()
+//RS                 ),
+//RS                 None,
+//RS             ),
+//RS             Self::ManifestParse { path, error } => {
+//RS                 crate::Manifest::manifest_parse_diagnostic(path, error)
+//RS             }
+//RS             Self::Missing(path) => Diagnostic::error(
+//RS                 "E1334",
+//RS                 format!("authority file `{}` is missing", path.display()),
+//RS                 "authority metadata must exist before it can be used".to_string(),
+//RS                 "restore the required metadata and try again".to_string(),
+//RS                 None,
+//RS             ),
+//RS             Self::Symlink(path) => Diagnostic::error(
+//RS                 "E1334",
+//RS                 format!("authority path `{}` is a symlink", path.display()),
+//RS                 "authority metadata is opened without following links".to_string(),
+//RS                 "replace the symlink with the expected regular file or directory".to_string(),
+//RS                 None,
+//RS             ),
+//RS             Self::WrongKind {
+//RS                 path,
+//RS                 expected,
+//RS                 actual,
+//RS             } => Diagnostic::error(
+//RS                 "E1334",
+//RS                 format!("authority path `{}` is not a {expected}", path.display()),
+//RS                 format!("the opened object is a {actual}, not the required {expected}"),
+//RS                 format!("replace `{}` with a {expected}", path.display()),
+//RS                 None,
+//RS             ),
+//RS             Self::Escapes(path) => Diagnostic::error(
+//RS                 "E1322",
+//RS                 format!("authority path `{}` escapes its root", path.display()),
+//RS                 "authority identity is physical and cannot cross the checked root".to_string(),
+//RS                 "use a relative path below the authority root".to_string(),
+//RS                 None,
+//RS             ),
+//RS             Self::Invalid { path, detail } => Diagnostic::error(
+//RS                 "E1334",
+//RS                 format!("authority metadata `{}` is invalid", path.display()),
+//RS                 detail.clone(),
+//RS                 "fix the metadata fields and try again".to_string(),
+//RS                 None,
+//RS             ),
+//RS             Self::Changed(path) => Diagnostic::error(
+//RS                 "E1334",
+//RS                 format!("authority object `{}` changed during resolution", path.display()),
+//RS                 "the opened authority snapshot no longer matches the object at its path".to_string(),
+//RS                 "restore the authority input and retry the operation".to_string(),
+//RS                 None,
+//RS             ),
+//RS             Self::Io {
+//RS                 path,
+//RS                 operation,
+//RS                 detail,
+//RS             } => Diagnostic::error(
+//RS                 "E1334",
+//RS                 format!("couldn't {operation} authority `{}`", path.display()),
+//RS                 detail.clone(),
+//RS                 "restore access to the authority metadata and try again".to_string(),
+//RS                 None,
+//RS             ),
+//RS             Self::Unsupported(detail) => Diagnostic::error(
+//RS                 "E1334",
+//RS                 "authority resolution is unavailable on this platform".to_string(),
+//RS                 detail.clone(),
+//RS                 "use a platform with descriptor-relative no-follow filesystem access".to_string(),
+//RS                 None,
+//RS             ),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn workspace_diagnostic(&self) -> Diagnostic {
+//RS         match self {
+//RS             Self::ManifestParse { path, error } => {
+//RS                 crate::Manifest::manifest_parse_diagnostic(path, error)
+//RS             }
+//RS             Self::WorkspaceAmbiguous(paths) => {
+//RS                 let refs = paths.iter().map(PathBuf::as_path).collect::<Vec<_>>();
+//RS                 crate::WorkspacePlan::e1239_ambiguous_workspace(&refs)
+//RS             }
+//RS             Self::WorkspaceNoModule => crate::WorkspacePlan::e0995_no_workspace_module(),
+//RS             Self::Symlink(_) | Self::Unsupported(_) => self.diagnostic(),
+//RS             other => Diagnostic::error(
+//RS                 "E1239",
+//RS                 "couldn't inspect workspace sources".to_string(),
+//RS                 other.to_string(),
+//RS                 "restore the workspace metadata and try again".to_string(),
+//RS                 None,
+//RS             ),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::fmt::Display for AuthorityError {
+//RS     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//RS         match self {
+//RS             Self::Missing(path) => write!(f, "authority path `{}` is missing", path.display()),
+//RS             Self::Io {
+//RS                 path,
+//RS                 operation,
+//RS                 detail,
+//RS             } => write!(f, "couldn't {operation} `{}`: {detail}", path.display()),
+//RS             Self::Symlink(path) => write!(f, "authority path `{}` is a symlink", path.display()),
+//RS             Self::WrongKind {
+//RS                 path,
+//RS                 expected,
+//RS                 actual,
+//RS             } => write!(
+//RS                 f,
+//RS                 "authority path `{}` is a {actual}, expected a {expected}",
+//RS                 path.display()
+//RS             ),
+//RS             Self::Escapes(path) => {
+//RS                 write!(f, "authority path `{}` escapes its root", path.display())
+//RS             }
+//RS             Self::AmbiguousManifest(path) => write!(
+//RS                 f,
+//RS                 "both `{}` and `{}` exist in `{}`",
+//RS                 Syntax::PACKAGE_FILE,
+//RS                 Syntax::PAYLOAD_FILE,
+//RS                 path.display()
+//RS             ),
+//RS             Self::RetiredManifest(path) => {
+//RS                 write!(f, "retired manifest `{}` is not accepted", path.display())
+//RS             }
+//RS             Self::WorkspaceAmbiguous(paths) => write!(
+//RS                 f,
+//RS                 "workspace authority is declared in {} files",
+//RS                 paths.len()
+//RS             ),
+//RS             Self::WorkspaceNoModule => {
+//RS                 f.write_str("canonical workspace source has no workspace module")
+//RS             }
+//RS             Self::NestedMembers { root, member } => write!(
+//RS                 f,
+//RS                 "Package root `{}` cannot contain member Package `{}` with its own members",
+//RS                 root.display(),
+//RS                 member.display()
+//RS             ),
+//RS             Self::Invalid { path, detail } => {
+//RS                 write!(f, "invalid authority `{}`: {detail}", path.display())
+//RS             }
+//RS             Self::ManifestParse { path, error } => {
+//RS                 write!(f, "invalid manifest `{}`: {error}", path.display())
+//RS             }
+//RS             Self::Changed(path) => write!(
+//RS                 f,
+//RS                 "authority object `{}` changed during resolution",
+//RS                 path.display()
+//RS             ),
+//RS             Self::Unsupported(detail) => f.write_str(detail),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::error::Error for AuthorityError {}
+//RS 
+//RS /// One checked authority root.  Descendant paths are opened relative to the
+//RS /// held root descriptor on supported platforms.
+//RS #[derive(Debug, Clone)]
+//RS pub struct AuthorityResolver {
+//RS     root: PathBuf,
+//RS     root_identity: FileIdentity,
+//RS     root_handle: Arc<File>,
+//RS     allow_hardlinks: bool,
+//RS }
+//RS 
+//RS impl AuthorityResolver {
+//RS     /// Open a directory only when it can be a project/workspace authority.
+//RS     ///
+//RS     /// Upward discovery crosses unrelated parent directories. They are
+//RS     /// discovery space, not authority objects: pinning them makes shared
+//RS     /// directories such as `/tmp` fail closed on harmless metadata changes.
+//RS     pub fn open_for_authority_walk(root: &Path) -> Result<Option<Self>, AuthorityError> {
+//RS         let root = Self::effective_root(root);
+//RS         let metadata = Self::inspect_root(root)?;
+//RS         if is_shared_directory(&metadata) || !has_authority_candidate(root)? {
+//RS             return Ok(None);
+//RS         }
+//RS         Self::open(root).map(Some)
+//RS     }
+//RS 
+//RS     /// Validate and canonicalize a walk start without pinning it. The caller
+//RS     /// pins only a directory that proves it contains authority metadata.
+//RS     pub fn authority_walk_root(root: &Path) -> Result<PathBuf, AuthorityError> {
+//RS         let root = Self::effective_root(root);
+//RS         Self::inspect_root(root)?;
+//RS         Self::canonicalize_root(root)
+//RS     }
+//RS 
+//RS     /// Return the next parent that may participate in authority discovery.
+//RS     /// Shared directories are never authority roots.
+//RS     pub fn authority_walk_parent(path: &Path) -> Option<PathBuf> {
+//RS         if is_shared_directory_path(path) {
+//RS             return None;
+//RS         }
+//RS         let parent = path.parent()?;
+//RS         if parent == path || is_shared_directory_path(parent) {
+//RS             None
+//RS         } else {
+//RS             Some(parent.to_path_buf())
+//RS         }
+//RS     }
+//RS 
+//RS     /// Open and pin a regular authority root directory.
+//RS     pub fn open(root: &Path) -> Result<Self, AuthorityError> {
+//RS         Self::open_with_hardlink_policy(root, false)
+//RS     }
+//RS 
+//RS     /// Open an immutable store object whose payload files may be shared by
+//RS     /// hardlink. The caller must have verified the store object before using
+//RS     /// this resolver; ordinary project authority stays single-link only.
+//RS     pub fn open_store(root: &Path) -> Result<Self, AuthorityError> {
+//RS         Self::open_with_hardlink_policy(root, true)
+//RS     }
+//RS 
+//RS     fn open_with_hardlink_policy(
+//RS         root: &Path,
+//RS         allow_hardlinks: bool,
+//RS     ) -> Result<Self, AuthorityError> {
+//RS         let root = Self::effective_root(root);
+//RS         let metadata = Self::inspect_root(root)?;
+//RS         let expected_root_identity =
+//RS             FileIdentity::from_metadata(&metadata, AuthorityKind::Directory);
+//RS         let canonical = Self::canonicalize_root(root)?;
+//RS         let final_metadata = fs::symlink_metadata(root).map_err(|error| AuthorityError::Io {
+//RS             path: root.to_path_buf(),
+//RS             operation: "revalidate",
+//RS             detail: error.to_string(),
+//RS         })?;
+//RS         if final_metadata.file_type().is_symlink() {
+//RS             return Err(AuthorityError::Symlink(root.to_path_buf()));
+//RS         }
+//RS         if !final_metadata.is_dir()
+//RS             || FileIdentity::from_metadata(&final_metadata, AuthorityKind::Directory)
+//RS                 != expected_root_identity
+//RS         {
+//RS             return Err(AuthorityError::Changed(root.to_path_buf()));
+//RS         }
+//RS         let handle = platform::open_root(&canonical)
+//RS             .map_err(|error| Self::map_io(&canonical, error, true))?;
+//RS         let metadata = handle.metadata().map_err(|error| AuthorityError::Io {
+//RS             path: canonical.clone(),
+//RS             operation: "inspect",
+//RS             detail: error.to_string(),
+//RS         })?;
+//RS         if !metadata.is_dir() {
+//RS             return Err(AuthorityError::WrongKind {
+//RS                 path: canonical,
+//RS                 expected: KIND_DIRECTORY,
+//RS                 actual: KIND_FILE,
+//RS             });
+//RS         }
+//RS         let root_identity = FileIdentity::from_metadata(&metadata, AuthorityKind::Directory);
+//RS         if root_identity != expected_root_identity {
+//RS             return Err(AuthorityError::Changed(root.to_path_buf()));
+//RS         }
+//RS         Ok(Self {
+//RS             root: canonical,
+//RS             root_identity,
+//RS             root_handle: Arc::new(handle),
+//RS             allow_hardlinks,
+//RS         })
+//RS     }
+//RS 
+//RS 
+//RS     /// `Path::parent()` of a bare relative name yields `Some("")`, which the
+//RS     /// OS rejects outright. Callers that walk up from an entry file mean the
+//RS     /// current directory; normalize once here so every authority entry point
+//RS     /// agrees.
+//RS     fn effective_root(root: &Path) -> &Path {
+//RS         if root.as_os_str().is_empty() {
+//RS             Path::new(".")
+//RS         } else {
+//RS             root
+//RS         }
+//RS     }
+//RS 
+//RS     fn inspect_root(root: &Path) -> Result<Metadata, AuthorityError> {
+//RS         let root = Self::effective_root(root);
+//RS         let metadata = fs::symlink_metadata(root).map_err(|error| {
+//RS             if error.kind() == io::ErrorKind::NotFound {
+//RS                 AuthorityError::Missing(root.to_path_buf())
+//RS             } else {
+//RS                 AuthorityError::Io {
+//RS                     path: root.to_path_buf(),
+//RS                     operation: "inspect",
+//RS                     detail: error.to_string(),
+//RS                 }
+//RS             }
+//RS         })?;
+//RS         if metadata.file_type().is_symlink() {
+//RS             return Err(AuthorityError::Symlink(root.to_path_buf()));
+//RS         }
+//RS         if !metadata.is_dir() {
+//RS             return Err(AuthorityError::WrongKind {
+//RS                 path: root.to_path_buf(),
+//RS                 expected: KIND_DIRECTORY,
+//RS                 actual: kind_name(&metadata),
+//RS             });
+//RS         }
+//RS         Ok(metadata)
+//RS     }
+//RS 
+//RS     fn canonicalize_root(root: &Path) -> Result<PathBuf, AuthorityError> {
+//RS         let root = Self::effective_root(root);
+//RS         fs::canonicalize(root).map_err(|error| {
+//RS             if error.kind() == io::ErrorKind::NotFound {
+//RS                 AuthorityError::Missing(root.to_path_buf())
+//RS             } else {
+//RS                 AuthorityError::Io {
+//RS                     path: root.to_path_buf(),
+//RS                     operation: "resolve",
+//RS                     detail: error.to_string(),
+//RS                 }
+//RS             }
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn root(&self) -> &Path {
+//RS         &self.root
+//RS     }
+//RS 
+//RS     /// Scope a resolver to an already-open checked directory. This carries
+//RS     /// the directory handle and identity forward without reopening its path.
+//RS     pub fn from_checked_directory(directory: &CheckedDirectory) -> Self {
+//RS         Self {
+//RS             root: directory.path.clone(),
+//RS             root_identity: directory.identity.clone(),
+//RS             root_handle: Arc::clone(&directory.handle),
+//RS             allow_hardlinks: directory.allow_hardlinks,
+//RS         }
+//RS     }
+//RS 
+//RS     /// Open one regular file below the pinned root and read its bytes from the
+//RS     /// same opened object.
+//RS     pub fn checked_file(&self, path: &Path) -> Result<CheckedFile, AuthorityError> {
+//RS         let relative = self.relative_path(path)?;
+//RS         let full = self.root.join(&relative);
+//RS         let mut handle = platform::open_relative(&self.root_handle, &relative, false)
+//RS             .map_err(|error| Self::map_io(&full, error, false))?;
+//RS         let metadata = handle.metadata().map_err(|error| AuthorityError::Io {
+//RS             path: full.clone(),
+//RS             operation: "inspect",
+//RS             detail: error.to_string(),
+//RS         })?;
+//RS         if !metadata.is_file() {
+//RS             return Err(AuthorityError::WrongKind {
+//RS                 path: full,
+//RS                 expected: KIND_FILE,
+//RS                 actual: kind_name(&metadata),
+//RS             });
+//RS         }
+//RS         self.check_file_links(&full, &metadata)?;
+//RS         let identity = FileIdentity::from_metadata(&metadata, AuthorityKind::File);
+//RS         if metadata.len() > crate::SHA256::MAX_TREE_FILE_BYTES {
+//RS             return Err(authority_limit_error(
+//RS                 &full,
+//RS                 format!(
+//RS                     "authority file exceeds the {}-byte read bound",
+//RS                     crate::SHA256::MAX_TREE_FILE_BYTES
+//RS                 ),
+//RS             ));
+//RS         }
+//RS         let capacity = usize::try_from(metadata.len())
+//RS             .unwrap_or(usize::MAX)
+//RS             .min(64 * 1024);
+//RS         let mut bytes = Vec::with_capacity(capacity);
+//RS         let mut limited = (&mut handle).take(crate::SHA256::MAX_TREE_FILE_BYTES.saturating_add(1));
+//RS         limited
+//RS             .read_to_end(&mut bytes)
+//RS             .map_err(|error| AuthorityError::Io {
+//RS                 path: full.clone(),
+//RS                 operation: "read",
+//RS                 detail: error.to_string(),
+//RS             })?;
+//RS         if bytes.len() as u64 > crate::SHA256::MAX_TREE_FILE_BYTES {
+//RS             return Err(authority_limit_error(
+//RS                 &full,
+//RS                 format!(
+//RS                     "authority file exceeds the {}-byte read bound",
+//RS                     crate::SHA256::MAX_TREE_FILE_BYTES
+//RS                 ),
+//RS             ));
+//RS         }
+//RS         let final_metadata = handle.metadata().map_err(|error| AuthorityError::Io {
+//RS             path: full.clone(),
+//RS             operation: "revalidate",
+//RS             detail: error.to_string(),
+//RS         })?;
+//RS         if !final_metadata.is_file()
+//RS             || FileIdentity::from_metadata(&final_metadata, AuthorityKind::File) != identity
+//RS         {
+//RS             return Err(AuthorityError::Changed(full));
+//RS         }
+//RS         self.check_file_links(&full, &final_metadata)?;
+//RS         let checked = CheckedFile {
+//RS             path: full,
+//RS             relative,
+//RS             identity,
+//RS             handle: Arc::new(handle),
+//RS             bytes,
+//RS         };
+//RS         self.revalidate_file(&checked)?;
+//RS         Ok(checked)
+//RS     }
+//RS 
+//RS     /// Open one directory below the pinned root without following links.
+//RS     pub fn checked_directory(&self, path: &Path) -> Result<CheckedDirectory, AuthorityError> {
+//RS         let relative = self.relative_path(path)?;
+//RS         let full = self.root.join(&relative);
+//RS         let handle = platform::open_relative(&self.root_handle, &relative, true)
+//RS             .map_err(|error| Self::map_io(&full, error, true))?;
+//RS         let metadata = handle.metadata().map_err(|error| AuthorityError::Io {
+//RS             path: full.clone(),
+//RS             operation: "inspect",
+//RS             detail: error.to_string(),
+//RS         })?;
+//RS         if !metadata.is_dir() {
+//RS             return Err(AuthorityError::WrongKind {
+//RS                 path: full,
+//RS                 expected: KIND_DIRECTORY,
+//RS                 actual: kind_name(&metadata),
+//RS             });
+//RS         }
+//RS         let identity = FileIdentity::from_metadata(&metadata, AuthorityKind::Directory);
+//RS         let checked = CheckedDirectory {
+//RS             path: full,
+//RS             relative,
+//RS             identity,
+//RS             handle: Arc::new(handle),
+//RS             allow_hardlinks: self.allow_hardlinks,
+//RS         };
+//RS         self.revalidate_directory(&checked)?;
+//RS         Ok(checked)
+//RS     }
+//RS 
+//RS     /// Open and parse the only accepted manifest, `package.jet`.
+//RS     pub fn checked_manifest(&self, directory: &Path) -> Result<CheckedManifest, AuthorityError> {
+//RS         let directory = self.relative_path(directory)?;
+//RS         let canonical = self.probe_file(&directory.join(Syntax::PACKAGE_FILE))?;
+//RS         let retired = self.probe_file(&directory.join(Syntax::PAYLOAD_FILE))?;
+//RS         if canonical.is_some() && retired.is_some() {
+//RS             return Err(AuthorityError::AmbiguousManifest(
+//RS                 self.root.join(&directory),
+//RS             ));
+//RS         }
+//RS         let Some(file) = canonical else {
+//RS             if let Some(file) = retired {
+//RS                 return Err(AuthorityError::RetiredManifest(file.path));
+//RS             }
+//RS             return Err(AuthorityError::Missing(
+//RS                 self.root.join(directory).join(Syntax::PACKAGE_FILE),
+//RS             ));
+//RS         };
+//RS         let text = file.text()?;
+//RS         let facts = PackageFacts::parse_uncomposed(&text, file.path.display().to_string())
+//RS             .map_err(|error| AuthorityError::ManifestParse {
+//RS                 path: file.path.clone(),
+//RS                 error,
+//RS             })?;
+//RS         self.revalidate_file(&file)?;
+//RS         self.revalidate_root()?;
+//RS         Ok(CheckedManifest { file, facts })
+//RS     }
+//RS 
+//RS     /// Open and parse one package member directory.
+//RS     pub fn checked_member(&self, path: &Path) -> Result<CheckedMember, AuthorityError> {
+//RS         let directory = self.checked_directory(path)?;
+//RS         let manifest = self.checked_manifest(&directory.relative)?;
+//RS         let member = CheckedMember {
+//RS             directory,
+//RS             manifest,
+//RS         };
+//RS         self.revalidate_member(&member)?;
+//RS         Ok(member)
+//RS     }
+//RS 
+//RS     /// Compose one checked Package without reopening its authority paths.
+//RS     pub fn checked_package(&self, path: &Path) -> Result<CheckedPackage, AuthorityError> {
+//RS         let member = self.checked_member(path)?;
+//RS         self.complete_checked_package(member)
+//RS     }
+//RS 
+//RS     /// Compose only the package rooted at this resolver. Unlike
+//RS     /// [`Self::checked_package`], this deliberately does not walk `members:`
+//RS     /// or inspect any sibling package. Compiler/tool views use this boundary:
+//RS     /// their authority is the pinned package root, not the workspace graph.
+//RS     pub fn checked_root_package(&self) -> Result<CheckedPackage, AuthorityError> {
+//RS         let member = self.checked_member(Path::new("."))?;
+//RS         let package_resolver = Self::from_checked_directory(&member.directory);
+//RS         let mut facts = member.manifest.facts.clone();
+//RS         facts
+//RS             .compose_configs_checked(&package_resolver)
+//RS             .map_err(|error| AuthorityError::Invalid {
+//RS                 path: member.manifest.file.path.clone(),
+//RS                 detail: error.to_string(),
+//RS             })?;
+//RS         facts
+//RS             .validate_guarantees()
+//RS             .map_err(|error| AuthorityError::Invalid {
+//RS                 path: member.manifest.file.path.clone(),
+//RS                 detail: error.to_string(),
+//RS             })?;
+//RS         facts
+//RS             .validate_defaults()
+//RS             .map_err(|error| AuthorityError::Invalid {
+//RS                 path: member.manifest.file.path.clone(),
+//RS                 detail: error.to_string(),
+//RS             })?;
+//RS         self.revalidate_member(&member)?;
+//RS         Ok(CheckedPackage { member, facts })
+//RS     }
+//RS 
+//RS     /// Complete a member from an already-open checked directory and manifest.
+//RS     /// The caller transfers the snapshot; this method composes Config files and
+//RS     /// validates the resulting facts without reopening the manifest path.
+//RS     pub fn complete_checked_package(
+//RS         &self,
+//RS         member: CheckedMember,
+//RS     ) -> Result<CheckedPackage, AuthorityError> {
+//RS         // Config paths and a Package's own membership are relative to that
+//RS         // Package root, not to the enclosing workspace. The checked directory
+//RS         // already carries the opened handle, so scoping here does not reopen
+//RS         // or weaken the parent authority proof.
+//RS         let package_resolver = Self::from_checked_directory(&member.directory);
+//RS         let mut facts = member.manifest.facts.clone();
+//RS         facts
+//RS             .compose_configs_checked(&package_resolver)
+//RS             .map_err(|error| AuthorityError::Invalid {
+//RS                 path: member.manifest.file.path.clone(),
+//RS                 detail: error.to_string(),
+//RS             })?;
+//RS         facts
+//RS             .validate_defaults()
+//RS             .map_err(|error| AuthorityError::Invalid {
+//RS                 path: member.manifest.file.path.clone(),
+//RS                 detail: error.to_string(),
+//RS             })?;
+//RS         facts.checked_members_in(&package_resolver)?;
+//RS         self.revalidate_member(&member)?;
+//RS         Ok(CheckedPackage { member, facts })
+//RS     }
+//RS 
+//RS     /// Discover immediate package member directories. Symlink entries are
+//RS     /// rejected, even when their target would otherwise be inside the root.
+//RS     pub fn discover_members(&self, path: &Path) -> Result<Vec<CheckedMember>, AuthorityError> {
+//RS         let scan = self.checked_directory(path)?;
+//RS         let mut budget = WalkBudget::default();
+//RS         let entries = self.read_sorted_entries(&scan.path, &mut budget)?;
+//RS         let mut members = Vec::new();
+//RS         for entry in entries {
+//RS             let file_type = entry.file_type().map_err(|error| AuthorityError::Io {
+//RS                 path: entry.path(),
+//RS                 operation: "inspect",
+//RS                 detail: error.to_string(),
+//RS             })?;
+//RS             if file_type.is_symlink() {
+//RS                 return Err(AuthorityError::Symlink(entry.path()));
+//RS             }
+//RS             if !file_type.is_dir() {
+//RS                 continue;
+//RS             }
+//RS             let relative = scan.relative.join(entry.file_name());
+//RS             match self.checked_member(&relative) {
+//RS                 Ok(member) => {
+//RS                     self.revalidate_member(&member)?;
+//RS                     members.push(member);
+//RS                 }
+//RS                 Err(error) if error.is_missing() => {}
+//RS                 Err(error) => return Err(error),
+//RS             }
+//RS         }
+//RS         self.revalidate_directory(&scan)?;
+//RS         Ok(members)
+//RS     }
+//RS 
+//RS     /// Discover regular files in one checked directory without following
+//RS     /// candidate links. Every returned file is opened and revalidated through
+//RS     /// this resolver before it leaves the authority seam.
+//RS     pub fn discover_files(
+//RS         &self,
+//RS         path: &Path,
+//RS         extension: Option<&str>,
+//RS     ) -> Result<Vec<CheckedFile>, AuthorityError> {
+//RS         let scan = self.checked_directory(path)?;
+//RS         let mut budget = WalkBudget::default();
+//RS         let entries = self.read_sorted_entries(&scan.path, &mut budget)?;
+//RS         let mut files = Vec::new();
+//RS         for entry in entries {
+//RS             let name = entry.file_name();
+//RS             let file_type = entry.file_type().map_err(|error| AuthorityError::Io {
+//RS                 path: entry.path(),
+//RS                 operation: "inspect",
+//RS                 detail: error.to_string(),
+//RS             })?;
+//RS             let relative = scan.relative.join(&name);
+//RS             if file_type.is_symlink() {
+//RS                 return Err(AuthorityError::Symlink(self.root.join(relative)));
+//RS             }
+//RS             let matches_extension = extension.is_none_or(|extension| {
+//RS                 Path::new(&name)
+//RS                     .extension()
+//RS                     .and_then(|extension| extension.to_str())
+//RS                     == Some(extension)
+//RS             });
+//RS             if !matches_extension {
+//RS                 continue;
+//RS             }
+//RS             if !file_type.is_file() {
+//RS                 return Err(AuthorityError::WrongKind {
+//RS                     path: self.root.join(&relative),
+//RS                     expected: KIND_FILE,
+//RS                     actual: kind_name_from_file_type(&file_type),
+//RS                 });
+//RS             }
+//RS             let file = self.checked_file(&relative)?;
+//RS             self.revalidate_file(&file)?;
+//RS             budget.record_file(&file.path, file.bytes.len())?;
+//RS             files.push(file);
+//RS         }
+//RS         self.revalidate_directory(&scan)?;
+//RS         Ok(files)
+//RS 
+//RS     }
+//RS     /// Discover source files below the pinned root. Directory traversal and
+//RS     /// every returned file stay inside the same descriptor-relative resolver.
+//RS     pub fn discover_source_files(&self) -> Result<Vec<CheckedFile>, AuthorityError> {
+//RS         let mut files = Vec::new();
+//RS         let mut budget = WalkBudget::default();
+//RS         self.discover_source_files_from(Path::new("."), &mut files, &mut budget, 0)?;
+//RS         files.sort_by(|left, right| left.relative.cmp(&right.relative));
+//RS         self.revalidate_root()?;
+//RS         Ok(files)
+//RS     }
+//RS 
+//RS     /// Hash every checked `.jet` file below one checked directory using the
+//RS     /// same path/content shape as the package tree identity.
+//RS     pub fn source_tree_hash(&self, directory: &CheckedDirectory) -> Result<String, AuthorityError> {
+//RS         self.revalidate_directory(directory)?;
+//RS         let mut files = Vec::new();
+//RS         let mut budget = WalkBudget::default();
+//RS         self.discover_source_files_from(&directory.relative, &mut files, &mut budget, 0)?;
+//RS         files.sort_by(|left, right| left.relative.cmp(&right.relative));
+//RS         let mut hasher = crate::SHA256::StreamingSha256::new();
+//RS         for file in files {
+//RS             let relative = if directory.relative.as_os_str().is_empty() {
+//RS                 file.relative.clone()
+//RS             } else {
+//RS                 file.relative
+//RS                     .strip_prefix(&directory.relative)
+//RS                     .map_err(|_| AuthorityError::Escapes(file.path.clone()))?
+//RS                     .to_path_buf()
+//RS             };
+//RS             let relative = relative.to_string_lossy().replace('\\', "/");
+//RS             hasher.update(relative.as_bytes());
+//RS             hasher.update(&[0]);
+//RS             hasher.update(&(file.bytes.len() as u64).to_be_bytes());
+//RS             hasher.update(&file.bytes);
+//RS             self.revalidate_file(&file)?;
+//RS         }
+//RS         self.revalidate_directory(directory)?;
+//RS         let digest = hasher.finalize();
+//RS         let mut hex = String::with_capacity(digest.len() * 2);
+//RS         for byte in digest {
+//RS             use std::fmt::Write as _;
+//RS             write!(&mut hex, "{byte:02x}").expect("writing to String cannot fail");
+//RS         }
+//RS         Ok(format!("sha256-{hex}"))
+//RS     }
+//RS 
+//RS     /// Resolve workspace authority from checked top-level source snapshots.
+//RS     pub fn resolve_workspace_source(
+//RS         &self,
+//RS     ) -> Result<Option<crate::WorkspacePlan::WorkspaceSource>, AuthorityError> {
+//RS         self.revalidate_root()?;
+//RS 
+//RS         // D-ECO-FILEROOT1/D-ECO-GRAPH1: a Package root owns membership. The
+//RS         // old declaration-resolved workspace source remains below only while
+//RS         // a Package root is still waiting for its membership list to be
+//RS         // folded into package.jet.
+//RS         match self.checked_manifest(Path::new(".")) {
+//RS             Ok(manifest) => {
+//RS                 if !manifest.facts.members.is_empty() {
+//RS                     let source = crate::WorkspacePlan::WorkspaceSource {
+//RS                         path: manifest.file.path.clone(),
+//RS                         source: manifest.file.text()?,
+//RS                         role: crate::WorkspacePlan::WorkspaceSourceRole::Index,
+//RS                         checked: manifest.file,
+//RS                     };
+//RS                     self.revalidate_source(&source)?;
+//RS                     return Ok(Some(source));
+//RS                 }
+//RS             }
+//RS             Err(error)
+//RS                 if error.is_missing() || matches!(&error, AuthorityError::RetiredManifest(_)) => {}
+//RS             Err(error) => return Err(error),
+//RS         }
+//RS 
+//RS         let mut budget = WalkBudget::default();
+//RS         let listing = source_listing(&self.root, |error| AuthorityError::Io {
+//RS             path: self.root.clone(),
+//RS             operation: "read",
+//RS             detail: error.to_string(),
+//RS         })?;
+//RS         budget.note_entries(&self.root, listing.entries)?;
+//RS 
+//RS         let mut canonical = None;
+//RS         let mut authorities = Vec::new();
+//RS         let mut malformed_canonical = false;
+//RS         for name in &listing.sources {
+//RS             let relative = PathBuf::from(name);
+//RS             let file = self.checked_file(&relative)?;
+//RS             budget.record_file(&file.path, file.bytes.len())?;
+//RS             let source = file.text()?;
+//RS             if crate::WorkspacePlan::declares_workspace_module(&source) {
+//RS                 let role = if name.to_str() == Some(crate::Syntax::WORKSPACE_FILE)
+//RS                     || crate::WorkspacePlan::declares_workspace_members(&source)
+//RS                 {
+//RS                     crate::WorkspacePlan::WorkspaceSourceRole::Index
+//RS                 } else {
+//RS                     crate::WorkspacePlan::WorkspaceSourceRole::Authority
+//RS                 };
+//RS                 let candidate = crate::WorkspacePlan::WorkspaceSource {
+//RS                     path: file.path.clone(),
+//RS                     source,
+//RS                     role,
+//RS                     checked: file,
+//RS                 };
+//RS                 self.revalidate_source(&candidate)?;
+//RS                 if role == crate::WorkspacePlan::WorkspaceSourceRole::Index {
+//RS                     canonical = Some(candidate);
+//RS                 } else {
+//RS                     authorities.push(candidate);
+//RS                 }
+//RS             } else if name.to_str() == Some(crate::Syntax::WORKSPACE_FILE) {
+//RS                 malformed_canonical = true;
+//RS             }
+//RS         }
+//RS 
+//RS         self.revalidate_root()?;
+//RS 
+//RS         if malformed_canonical && canonical.is_none() {
+//RS             return Err(AuthorityError::WorkspaceNoModule);
+//RS         }
+//RS         if let Some(canonical) = canonical {
+//RS             if authorities.is_empty() {
+//RS                 return Ok(Some(canonical));
+//RS             }
+//RS             let mut paths = vec![canonical.path];
+//RS             paths.extend(authorities.iter().map(|source| source.path.clone()));
+//RS             return Err(AuthorityError::WorkspaceAmbiguous(paths));
+//RS         }
+//RS         match authorities.len() {
+//RS             0 => Ok(None),
+//RS             1 => Ok(authorities.pop()),
+//RS             _ => Err(AuthorityError::WorkspaceAmbiguous(
+//RS                 authorities.into_iter().map(|source| source.path).collect(),
+//RS             )),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Revalidate the root and one checked file before using its bytes.
+//RS     pub fn revalidate_file(&self, file: &CheckedFile) -> Result<(), AuthorityError> {
+//RS         self.validate_checked_path(&file.path, &file.relative)?;
+//RS         self.revalidate_root()?;
+//RS         self.revalidate_handle(
+//RS             &file.path,
+//RS             AuthorityKind::File,
+//RS             &file.identity,
+//RS             &file.handle,
+//RS         )?;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Revalidate the root and one checked directory before using it.
+//RS     pub fn revalidate_directory(&self, directory: &CheckedDirectory) -> Result<(), AuthorityError> {
+//RS         self.validate_checked_path(&directory.path, &directory.relative)?;
+//RS         self.revalidate_root()?;
+//RS         self.revalidate_handle(
+//RS             &directory.path,
+//RS             AuthorityKind::Directory,
+//RS             &directory.identity,
+//RS             &directory.handle,
+//RS         )?;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Revalidate a complete member snapshot before realizing it.
+//RS     pub fn revalidate_member(&self, member: &CheckedMember) -> Result<(), AuthorityError> {
+//RS         self.revalidate_directory(&member.directory)?;
+//RS         self.revalidate_file(&member.manifest.file)?;
+//RS         self.revalidate_root()
+//RS     }
+//RS 
+//RS     /// Revalidate a workspace source snapshot before realizing it.
+//RS     pub fn revalidate_source(
+//RS         &self,
+//RS         source: &crate::WorkspacePlan::WorkspaceSource,
+//RS     ) -> Result<(), AuthorityError> {
+//RS         if source.path != source.checked.path
+//RS             || source.source.as_bytes() != source.checked.bytes.as_slice()
+//RS         {
+//RS             return Err(AuthorityError::Changed(source.path.clone()));
+//RS         }
+//RS         self.revalidate_file(&source.checked)
+//RS     }
+//RS 
+//RS     /// Return the checkout-relative physical identity for a checked path.
+//RS     pub fn relative_identity(
+//RS         &self,
+//RS         directory: &CheckedDirectory,
+//RS     ) -> Result<String, AuthorityError> {
+//RS         self.revalidate_directory(directory)?;
+//RS         let canonical = self.root.join(&directory.relative);
+//RS         if !canonical.starts_with(&self.root) {
+//RS             return Err(AuthorityError::Escapes(directory.path.clone()));
+//RS         }
+//RS         let relative = match canonical.strip_prefix(&self.root) {
+//RS             Ok(relative) => relative
+//RS                 .to_string_lossy()
+//RS                 .replace(std::path::MAIN_SEPARATOR, "/"),
+//RS             Err(_) => return Err(AuthorityError::Escapes(canonical)),
+//RS         };
+//RS         Ok(if relative.is_empty() {
+//RS             ".".to_string()
+//RS         } else {
+//RS             relative
+//RS         })
+//RS     }
+//RS 
+//RS     fn has_nested_project_boundary(&self, relative: &Path) -> Result<bool, AuthorityError> {
+//RS         for candidate in [
+//RS             Syntax::PACKAGE_FILE,
+//RS             Syntax::PAYLOAD_FILE,
+//RS             Syntax::WORKSPACE_FILE,
+//RS             Syntax::UNIFIED_LOCK_FILE,
+//RS         ] {
+//RS             match self.probe_file(&relative.join(candidate)) {
+//RS                 Ok(Some(_)) => return Ok(true),
+//RS                 Ok(None) => {}
+//RS                 // A symlinked marker still identifies a nested project. Do
+//RS                 // not follow it or let its contents poison the parent scan.
+//RS                 Err(AuthorityError::Symlink(_)) => return Ok(true),
+//RS                 Err(error) => return Err(error),
+//RS             }
+//RS         }
+//RS         Ok(false)
+//RS     }
+//RS 
+//RS     fn discover_source_files_from(
+//RS         &self,
+//RS         path: &Path,
+//RS         files: &mut Vec<CheckedFile>,
+//RS         budget: &mut WalkBudget,
+//RS         depth: usize,
+//RS     ) -> Result<(), AuthorityError> {
+//RS         if depth > crate::SHA256::MAX_TREE_DEPTH {
+//RS             return Err(authority_limit_error(
+//RS                 &self.root.join(path),
+//RS                 format!(
+//RS                     "authority source walk exceeds the {}-level depth bound",
+//RS                     crate::SHA256::MAX_TREE_DEPTH
+//RS                 ),
+//RS             ));
+//RS         }
+//RS         let scan = self.checked_directory(path)?;
+//RS         let entries = self.read_sorted_entries(&scan.path, budget)?;
+//RS         for entry in entries {
+//RS             let name = entry.file_name();
+//RS             let file_type = entry.file_type().map_err(|error| AuthorityError::Io {
+//RS                 path: entry.path(),
+//RS                 operation: "inspect",
+//RS                 detail: error.to_string(),
+//RS             })?;
+//RS             let relative = scan.relative.join(&name);
+//RS             if file_type.is_symlink() {
+//RS                 let target_is_directory = match fs::metadata(entry.path()) {
+//RS                     Ok(metadata) => metadata.is_dir(),
+//RS                     Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+//RS                     Err(error) => {
+//RS                         return Err(AuthorityError::Io {
+//RS                             path: entry.path(),
+//RS                             operation: "inspect",
+//RS                             detail: error.to_string(),
+//RS                         });
+//RS                     }
+//RS                 };
+//RS                 if target_is_directory {
+//RS                     continue;
+//RS                 }
+//RS                 return Err(AuthorityError::Symlink(self.root.join(relative)));
+//RS             }
+//RS             let name_text = name.to_string_lossy();
+//RS             if name_text.starts_with('.')
+//RS                 || matches!(
+//RS                     name_text.as_ref(),
+//RS                     "target" | "build" | "node_modules" | "bin"
+//RS                 )
+//RS             {
+//RS                 continue;
+//RS             }
+//RS             if file_type.is_dir() {
+//RS                 if self.has_nested_project_boundary(&relative)? {
+//RS                     continue;
+//RS                 }
+//RS                 if depth >= crate::SHA256::MAX_TREE_DEPTH {
+//RS                     return Err(authority_limit_error(
+//RS                         &self.root.join(&relative),
+//RS                         format!(
+//RS                             "authority source walk exceeds the {}-level depth bound",
+//RS                             crate::SHA256::MAX_TREE_DEPTH
+//RS                         ),
+//RS                     ));
+//RS                 }
+//RS                 self.discover_source_files_from(&relative, files, budget, depth + 1)?;
+//RS             } else if Path::new(&name)
+//RS                 .extension()
+//RS                 .and_then(|extension| extension.to_str())
+//RS                 == Some(crate::Syntax::FILE_EXT)
+//RS             {
+//RS                 if !file_type.is_file() {
+//RS                     return Err(AuthorityError::WrongKind {
+//RS                         path: self.root.join(&relative),
+//RS                         expected: KIND_FILE,
+//RS                         actual: kind_name_from_file_type(&file_type),
+//RS                     });
+//RS                 }
+//RS                 let metadata = entry.metadata().map_err(|error| AuthorityError::Io {
+//RS                     path: entry.path(),
+//RS                     operation: "inspect",
+//RS                     detail: error.to_string(),
+//RS                 })?;
+//RS                 budget.ensure_file(&self.root.join(&relative), metadata.len())?;
+//RS                 let file = self.checked_file(&relative)?;
+//RS                 self.revalidate_file(&file)?;
+//RS                 budget.record_file(&file.path, file.bytes.len())?;
+//RS                 files.push(file);
+//RS             }
+//RS         }
+//RS         self.revalidate_directory(&scan)
+//RS     }
+//RS 
+//RS     fn read_sorted_entries(
+//RS         &self,
+//RS         path: &Path,
+//RS         budget: &mut WalkBudget,
+//RS     ) -> Result<Vec<fs::DirEntry>, AuthorityError> {
+//RS         let read_dir = fs::read_dir(path).map_err(|error| AuthorityError::Io {
+//RS             path: path.to_path_buf(),
+//RS             operation: "read",
+//RS             detail: error.to_string(),
+//RS         })?;
+//RS         let mut entries = Vec::new();
+//RS         for entry in read_dir {
+//RS             let entry = entry.map_err(|error| AuthorityError::Io {
+//RS                 path: path.to_path_buf(),
+//RS                 operation: "inspect",
+//RS                 detail: error.to_string(),
+//RS             })?;
+//RS             budget.note_entry(path)?;
+//RS             entries.push(entry);
+//RS         }
+//RS         entries.sort_by_key(|entry| entry.file_name());
+//RS         Ok(entries)
+//RS     }
+//RS 
+//RS     fn probe_file(&self, path: &Path) -> Result<Option<CheckedFile>, AuthorityError> {
+//RS         match self.checked_file(path) {
+//RS             Ok(file) => Ok(Some(file)),
+//RS             Err(error) if error.is_missing() => Ok(None),
+//RS             Err(error) => Err(error),
+//RS         }
+//RS     }
+//RS 
+//RS     fn relative_path(&self, path: &Path) -> Result<PathBuf, AuthorityError> {
+//RS         let relative = if path.is_absolute() {
+//RS             path.strip_prefix(&self.root)
+//RS                 .map_err(|_| AuthorityError::Escapes(path.to_path_buf()))?
+//RS                 .to_path_buf()
+//RS         } else {
+//RS             path.to_path_buf()
+//RS         };
+//RS         let mut normalized = PathBuf::new();
+//RS         for component in relative.components() {
+//RS             match component {
+//RS                 Component::Normal(name) => normalized.push(name),
+//RS                 Component::CurDir => {}
+//RS                 Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+//RS                     return Err(AuthorityError::Escapes(path.to_path_buf()))
+//RS                 }
+//RS             }
+//RS         }
+//RS         Ok(normalized)
+//RS     }
+//RS 
+//RS     pub fn revalidate_root(&self) -> Result<(), AuthorityError> {
+//RS         self.revalidate_handle(
+//RS             &self.root,
+//RS             AuthorityKind::Directory,
+//RS             &self.root_identity,
+//RS             &self.root_handle,
+//RS         )
+//RS     }
+//RS 
+//RS     fn revalidate_handle(
+//RS         &self,
+//RS         path: &Path,
+//RS         kind: AuthorityKind,
+//RS         expected: &FileIdentity,
+//RS         handle: &File,
+//RS     ) -> Result<(), AuthorityError> {
+//RS         let metadata = handle.metadata().map_err(|error| AuthorityError::Io {
+//RS             path: path.to_path_buf(),
+//RS             operation: "revalidate",
+//RS             detail: error.to_string(),
+//RS         })?;
+//RS         let actual_kind = if metadata.is_dir() {
+//RS             AuthorityKind::Directory
+//RS         } else if metadata.is_file() {
+//RS             AuthorityKind::File
+//RS         } else {
+//RS             return Err(AuthorityError::WrongKind {
+//RS                 path: path.to_path_buf(),
+//RS                 expected: kind_name_for(kind),
+//RS                 actual: kind_name(&metadata),
+//RS             });
+//RS         };
+//RS         if actual_kind != kind || FileIdentity::from_metadata(&metadata, actual_kind) != *expected {
+//RS             return Err(AuthorityError::Changed(path.to_path_buf()));
+//RS         }
+//RS         if kind == AuthorityKind::File {
+//RS             self.check_file_links(path, &metadata)?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn check_file_links(
+//RS         &self,
+//RS         path: &Path,
+//RS         metadata: &Metadata,
+//RS     ) -> Result<(), AuthorityError> {
+//RS         if self.allow_hardlinks {
+//RS             Ok(())
+//RS         } else {
+//RS             require_single_link_file(path, metadata)
+//RS         }
+//RS     }
+//RS 
+//RS     fn validate_checked_path(&self, path: &Path, relative: &Path) -> Result<(), AuthorityError> {
+//RS         let expected = self.root.join(relative);
+//RS         if !relative.is_relative() || path != expected || !path.starts_with(&self.root) {
+//RS             return Err(AuthorityError::Escapes(path.to_path_buf()));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn map_io(path: &Path, error: io::Error, directory: bool) -> AuthorityError {
+//RS         if error.kind() == io::ErrorKind::NotFound {
+//RS             return AuthorityError::Missing(path.to_path_buf());
+//RS         }
+//RS         if is_symlink_error(&error) {
+//RS             return AuthorityError::Symlink(path.to_path_buf());
+//RS         }
+//RS         if directory && error.kind() == io::ErrorKind::NotADirectory {
+//RS             return AuthorityError::WrongKind {
+//RS                 path: path.to_path_buf(),
+//RS                 expected: KIND_DIRECTORY,
+//RS                 actual: KIND_FILE,
+//RS             };
+//RS         }
+//RS         AuthorityError::Io {
+//RS             path: path.to_path_buf(),
+//RS             operation: if directory {
+//RS                 "open directory"
+//RS             } else {
+//RS                 "open file"
+//RS             },
+//RS             detail: error.to_string(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn authority_limit_error(path: &Path, detail: String) -> AuthorityError {
+//RS     AuthorityError::Invalid {
+//RS         path: path.to_path_buf(),
+//RS         detail,
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct WalkBudget {
+//RS     entries: usize,
+//RS     files: usize,
+//RS     bytes: u64,
+//RS }
+//RS 
+//RS impl WalkBudget {
+//RS     fn note_entry(&mut self, path: &Path) -> Result<(), AuthorityError> {
+//RS         if self.entries >= crate::SHA256::MAX_TREE_FILES {
+//RS             return Err(authority_limit_error(
+//RS                 path,
+//RS                 format!(
+//RS                     "authority directory walk exceeds the {}-entry bound",
+//RS                     crate::SHA256::MAX_TREE_FILES
+//RS                 ),
+//RS             ));
+//RS         }
+//RS         self.entries += 1;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn note_entries(&mut self, path: &Path, count: usize) -> Result<(), AuthorityError> {
+//RS         if self.entries.saturating_add(count) > crate::SHA256::MAX_TREE_FILES {
+//RS             return Err(authority_limit_error(
+//RS                 path,
+//RS                 format!(
+//RS                     "authority directory walk exceeds the {}-entry bound",
+//RS                     crate::SHA256::MAX_TREE_FILES
+//RS                 ),
+//RS             ));
+//RS         }
+//RS         self.entries += count;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn ensure_file(&self, path: &Path, length: u64) -> Result<(), AuthorityError> {
+//RS         if length > crate::SHA256::MAX_TREE_FILE_BYTES {
+//RS             return Err(authority_limit_error(
+//RS                 path,
+//RS                 format!(
+//RS                     "authority file exceeds the {}-byte read bound",
+//RS                     crate::SHA256::MAX_TREE_FILE_BYTES
+//RS                 ),
+//RS             ));
+//RS         }
+//RS         if self.files >= crate::SHA256::MAX_TREE_FILES {
+//RS             return Err(authority_limit_error(
+//RS                 path,
+//RS                 format!(
+//RS                     "authority source walk exceeds the {}-file bound",
+//RS                     crate::SHA256::MAX_TREE_FILES
+//RS                 ),
+//RS             ));
+//RS         }
+//RS         if self
+//RS             .bytes
+//RS             .checked_add(length)
+//RS             .is_none_or(|total| total > crate::SHA256::MAX_TREE_TOTAL_BYTES)
+//RS         {
+//RS             return Err(authority_limit_error(
+//RS                 path,
+//RS                 format!(
+//RS                     "authority source walk exceeds the {}-byte total bound",
+//RS                     crate::SHA256::MAX_TREE_TOTAL_BYTES
+//RS                 ),
+//RS             ));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn record_file(&mut self, path: &Path, length: usize) -> Result<(), AuthorityError> {
+//RS         let length = u64::try_from(length).unwrap_or(u64::MAX);
+//RS         self.ensure_file(path, length)?;
+//RS         self.files += 1;
+//RS         self.bytes += length;
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS /// One directory's authority-relevant names, read once: the sorted `*.jet`
+//RS /// names, whether a stale manifest name is present, and the total entry
+//RS /// count the walk budget charges for reading it.
+//RS struct SourceListing {
+//RS     entries: usize,
+//RS     sources: Vec<OsString>,
+//RS     stale_manifest: bool,
+//RS }
+//RS 
+//RS /// How long after its last change a directory's listing may be memoized.
+//RS /// Past its filesystem's timestamp granularity, any later entry change
+//RS /// records a later mtime. Nanosecond filesystems stamp from the kernel's
+//RS /// coarse clock (one tick, at most 10 ms); a whole-second mtime marks a
+//RS /// coarse filesystem (FAT, HFS+), which needs up to two seconds.
+//RS const LISTING_SETTLE_FINE_NS: u128 = 50_000_000;
+//RS const LISTING_SETTLE_COARSE_NS: u128 = 2_000_000_000;
+//RS 
+//RS /// Memoized listings by directory object (device, inode) and mtime.
+//RS static SOURCE_LISTINGS: LazyLock<Mutex<HashMap<(u64, u64), (u128, Arc<SourceListing>)>>> =
+//RS     LazyLock::new(|| Mutex::new(HashMap::new()));
+//RS 
+//RS /// Device, inode and mtime of a directory, where the platform has them.
+//RS fn listing_stamp(dir: &Path) -> Option<(u64, u64, u128)> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::MetadataExt;
+//RS         let metadata = fs::metadata(dir).ok()?;
+//RS         let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
+//RS         Some((metadata.dev(), metadata.ino(), modified.as_nanos()))
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = dir;
+//RS         None
+//RS     }
+//RS }
+//RS 
+//RS /// The authority-relevant listing of `dir`, read at most once per process
+//RS /// while the directory is unchanged.
+//RS ///
+//RS /// Upward discovery visits the same ancestors from several resolvers per
+//RS /// command, and an ancestor can be huge (a home, download or scratch
+//RS /// directory with 100k entries). The listing is memoized per directory
+//RS /// object and mtime: creating, removing or renaming an entry moves the mtime
+//RS /// and relists. A listing is memoized only when the mtime was unchanged
+//RS /// across the read and already older than its filesystem's granularity, so
+//RS /// no later change can share the recorded mtime. File contents are never
+//RS /// memoized: callers still open and read every listed source. `map_read`
+//RS /// shapes the error for a directory that cannot be opened.
+//RS fn source_listing(
+//RS     dir: &Path,
+//RS     map_read: impl FnOnce(io::Error) -> AuthorityError,
+//RS ) -> Result<Arc<SourceListing>, AuthorityError> {
+//RS     let before = listing_stamp(dir);
+//RS     if let Some((device, inode, modified)) = before {
+//RS         let memoized = SOURCE_LISTINGS.lock().ok().and_then(|memo| {
+//RS             memo.get(&(device, inode))
+//RS                 .filter(|(stamp, _)| *stamp == modified)
+//RS                 .map(|(_, listing)| Arc::clone(listing))
+//RS         });
+//RS         if let Some(listing) = memoized {
+//RS             return Ok(listing);
+//RS         }
+//RS     }
+//RS     let read_dir = fs::read_dir(dir).map_err(map_read)?;
+//RS     let mut entries = 0;
+//RS     let mut sources = Vec::new();
+//RS     let mut stale_manifest = false;
+//RS     for entry in read_dir {
+//RS         let entry = entry.map_err(|error| AuthorityError::Io {
+//RS             path: dir.to_path_buf(),
+//RS             operation: "inspect",
+//RS             detail: error.to_string(),
+//RS         })?;
+//RS         entries += 1;
+//RS         let name = entry.file_name();
+//RS         if Path::new(&name).extension().and_then(|extension| extension.to_str())
+//RS             == Some(Syntax::FILE_EXT)
+//RS         {
+//RS             sources.push(name);
+//RS         } else if Syntax::STALE_MANIFEST_NAMES
+//RS             .iter()
+//RS             .any(|candidate| name.to_str() == Some(*candidate))
+//RS         {
+//RS             stale_manifest = true;
+//RS         }
+//RS     }
+//RS     sources.sort();
+//RS     let listing = Arc::new(SourceListing {
+//RS         entries,
+//RS         sources,
+//RS         stale_manifest,
+//RS     });
+//RS     if let (Some((device, inode, modified)), Some(after)) = (before, listing_stamp(dir)) {
+//RS         let settle = if modified % 1_000_000_000 == 0 {
+//RS             LISTING_SETTLE_COARSE_NS
+//RS         } else {
+//RS             LISTING_SETTLE_FINE_NS
+//RS         };
+//RS         let settled = SystemTime::now()
+//RS             .duration_since(UNIX_EPOCH)
+//RS             .is_ok_and(|now| now.as_nanos().saturating_sub(modified) > settle);
+//RS         if after == (device, inode, modified) && settled {
+//RS             if let Ok(mut memo) = SOURCE_LISTINGS.lock() {
+//RS                 memo.insert((device, inode), (modified, Arc::clone(&listing)));
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(listing)
+//RS }
+//RS 
+//RS fn has_authority_candidate(root: &Path) -> Result<bool, AuthorityError> {
+//RS     let listing = source_listing(root, |error| AuthorityResolver::map_io(root, error, true))?;
+//RS     Ok(!listing.sources.is_empty() || listing.stale_manifest)
+//RS }
+//RS 
+//RS fn is_shared_directory_path(path: &Path) -> bool {
+//RS     fs::symlink_metadata(path)
+//RS         .map(|metadata| is_shared_directory(&metadata))
+//RS         .unwrap_or(false)
+//RS }
+//RS 
+//RS fn is_shared_directory(metadata: &Metadata) -> bool {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::PermissionsExt;
+//RS         metadata.permissions().mode() & 0o002 != 0
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = metadata;
+//RS         false
+//RS     }
+//RS }
+//RS 
+//RS fn kind_name(metadata: &Metadata) -> &'static str {
+//RS     if metadata.is_dir() {
+//RS         KIND_DIRECTORY
+//RS     } else if metadata.is_file() {
+//RS         KIND_FILE
+//RS     } else {
+//RS         "special file"
+//RS     }
+//RS }
+//RS 
+//RS fn is_single_link_file(metadata: &Metadata) -> bool {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::MetadataExt;
+//RS         return metadata.nlink() == 1;
+//RS     }
+//RS     #[cfg(windows)]
+//RS     {
+//RS         use std::os::windows::fs::MetadataExt;
+//RS         return metadata.number_of_links() == 1;
+//RS     }
+//RS     #[cfg(not(any(unix, windows)))]
+//RS     {
+//RS         let _ = metadata;
+//RS         false
+//RS     }
+//RS }
+//RS 
+//RS fn require_single_link_file(path: &Path, metadata: &Metadata) -> Result<(), AuthorityError> {
+//RS     if is_single_link_file(metadata) {
+//RS         Ok(())
+//RS     } else {
+//RS         Err(AuthorityError::Invalid {
+//RS             path: path.to_path_buf(),
+//RS             detail: HARDLINK_DETAIL.to_string(),
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn kind_name_from_file_type(file_type: &std::fs::FileType) -> &'static str {
+//RS     if file_type.is_dir() {
+//RS         KIND_DIRECTORY
+//RS     } else if file_type.is_file() {
+//RS         KIND_FILE
+//RS     } else if file_type.is_symlink() {
+//RS         "symlink"
+//RS     } else {
+//RS         "special file"
+//RS     }
+//RS }
+//RS 
+//RS fn kind_name_for(kind: AuthorityKind) -> &'static str {
+//RS     match kind {
+//RS         AuthorityKind::File => KIND_FILE,
+//RS         AuthorityKind::Directory => KIND_DIRECTORY,
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios"
+//RS ))]
+//RS mod platform {
+//RS     use super::*;
+//RS     use std::ffi::{c_char, CString};
+//RS     use std::fs::OpenOptions;
+//RS     use std::os::fd::{AsRawFd, FromRawFd};
+//RS     use std::os::unix::ffi::OsStrExt;
+//RS     use std::os::unix::fs::OpenOptionsExt;
+//RS 
+// END-PORT-PENDING 2094 crates/jet-pkg-model/src/Authority.rs:1-1800
+

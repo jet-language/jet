@@ -5,7 +5,7 @@
 // every source-built hangar object. Each realized tree is copied into
 // `<dir>/<name>/` and `<dir>/<name>.sha256` records its A4 output hash, so a
 // later build is reproducible offline from pinned sources.
-pub fn cli_cmd_vendor(theme: Theme, parsed: CliParsed) -[IO, FS, Env]> Int Never! {
+pub fn cli_cmd_vendor(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time.Wait]> Int Never! {
     roots :: pkg_resolve_roots()
     cwd :: cli_current_dir()
     vendor_dir := files.join(cwd, "vendor")
@@ -14,16 +14,16 @@ pub fn cli_cmd_vendor(theme: Theme, parsed: CliParsed) -[IO, FS, Env]> Int Never
         vendor_dir = if files.is_abs(requested) -> requested else -> files.join(cwd, requested)
     }
     built := [StoreEntry]{}
-    loop entry in store_list(roots) {
+    loop entry in store_list(&verification, roots) {
         if entry.envelope.provenance.contains("core-") -> &built.push(entry)
     }
     if built.len() == 0 {
         theme.status("nothing to vendor: no source-built packages in the hangar.")
-        return @EXIT_OK
+        return EXIT_OK
     }
     files.create_dir_all(vendor_dir) ?? {
         theme.error("could not create the vendor directory", vendor_dir, "check write permissions here.")
-        return @EXIT_USER_ERROR
+        return EXIT_USER_ERROR
     }
     count := 0
     loop entry in built {
@@ -31,7 +31,7 @@ pub fn cli_cmd_vendor(theme: Theme, parsed: CliParsed) -[IO, FS, Env]> Int Never
         files.remove_all(dest).drop("a missing previous vendor copy needs no removal")
         cli_vendor_copy_dir(entry.out, dest) ?? {
             theme.error("could not vendor a package", "copying {entry.out} failed", "check disk space and permissions.")
-            return @EXIT_USER_ERROR
+            return EXIT_USER_ERROR
         }
         // Hash-pin: the A4 output hash is the reproducibility anchor.
         files.write(files.join(vendor_dir, "{entry.name}.sha256"), "{entry.envelope.output_hash}\n").drop("the hash pin is best effort, as in the Rust vendor")
@@ -39,7 +39,7 @@ pub fn cli_cmd_vendor(theme: Theme, parsed: CliParsed) -[IO, FS, Env]> Int Never
         count += 1
     }
     theme.status("vendored {count} source-built package(s) with pinned hashes.")
-    @EXIT_OK
+    EXIT_OK
 }
 
 // Recursively copy a directory tree, preserving Unix modes. Like the Rust
@@ -55,17 +55,16 @@ fn cli_vendor_copy_dir(src: String, dst: String) IOError! -[FS]> {
             files.set_mode(to, files.stat(item.path).mode)
         }
     }
-    Ok()
 }
 
 // `jetpack audit` — read the build provenance of every realized object
 // (D-BUILDSCOPE1 audit contract, T4): source ref and recipe/action identity,
 // output hash, platform, closure, and signed producer facts. It executes
 // nothing, so it is safe to run against untrusted builds.
-pub fn cli_cmd_audit(theme: Theme) -[IO, FS, Env]> Int Never! {
-    snapshot :: store_audit_read_only(pkg_resolve_roots()) ?? {
+pub fn cli_cmd_audit(verification: &StoreVerification, theme: Theme) -[IO, FS, Env, Time.Wait]> Int Never! {
+    snapshot :: store_audit_read_only(&verification, pkg_resolve_roots()) ?? {
         theme.error("could not read Hangar provenance", err.message(), "repair the Hangar journal or metadata, then retry audit.")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     leases :: snapshot.leases
     theme.detail("  Leases:      {leases.active} active, {leases.stale} stale")
@@ -73,7 +72,7 @@ pub fn cli_cmd_audit(theme: Theme) -[IO, FS, Env]> Int Never! {
     entries :: snapshot.entries
     if entries.len() == 0 {
         theme.status("Audit: hangar is empty, nothing to read.")
-        return @EXIT_OK
+        return EXIT_OK
     }
     theme.status("Audit: {entries.len()} realized object(s) (read-only, no build ran):")
     unverified_catalog := [String]{}
@@ -126,5 +125,5 @@ pub fn cli_cmd_audit(theme: Theme) -[IO, FS, Env]> Int Never! {
         theme.status("Audit: objects without a Nix index signature chain:")
         loop id in unverified_catalog -> theme.detail("  {id}")
     }
-    @EXIT_OK
+    EXIT_OK
 }

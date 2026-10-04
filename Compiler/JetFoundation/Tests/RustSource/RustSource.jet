@@ -1,0 +1,71 @@
+// RustSource.rs:366-414 original byte goldens, plus lexer offset witnesses.
+#Test("strip_test_items_removes_test_items_with_their_docs_and_attributes") {
+    source :: "fn kept() {{}}\n/// Helper docs.\n#[allow(dead_code)]\n#[cfg(test)]\nfn helper() -> [u8; 2] {{ [0; 2] }}\n#[cfg(test)]\nmod tests {{\n    #[test]\n    fn inner() {{ let _ = \"}}\"; }}\n}}\n#[cfg(test)]\nconst TABLE: Pair = Pair {{ a: 1 }};\n#[cfg(test)]\npub(crate) use std::fmt;\n#[cfg(not(test))]\nfn production() {{}}\n"
+    assert_eq(strip_test_items(source), "fn kept() {{}}\n#[cfg(not(test))]\nfn production() {{}}\n")
+}
+
+#Test("strip_test_items_reads_braces_in_generic_headers_as_header") {
+    source :: "#[cfg(test)]\nfn sized<const N: usize = {{ 2 + 1 }}>() -> [u8; N] where Pad<{{ N }}>: Fill {{\n    [0; N]\n}}\n#[cfg(test)]\nimpl<T: Into<u8>> Probe<{{ 3 }}> for T where T: Fn() -> u8 {{\n    fn run(&self) {{}}\n}}\n#[cfg(test)]\nstruct Pair<T>(T, [u8; 2]);\n#[cfg(test)]\nconst SMALL: bool = 1 < 2;\nfn kept() {{}}\n"
+    assert_eq(strip_test_items(source), "fn kept() {{}}\n")
+}
+
+#Test("strip_test_items_keeps_what_it_cannot_remove_safely") {
+    source :: "fn f() {{\n    #[cfg(test)]\n    let x = 1;\n}}\nstruct S {{\n    #[cfg(test)]\n    field: u8,\n}}\nenum E {{\n    #[cfg(test)]\n    Variant,\n}}\nconst TEXT: &str = \"\n#[cfg(test)]\nfn fake() {{}}\n\";\n// #[cfg(test)]\n#[derive(\n    Debug,\n)]\n#[cfg(test)]\nstruct T;\n"
+    assert_eq(strip_test_items(source), source)
+}
+
+#Test("rust mask preserves UTF8 code lifetimes and exact byte positions") {
+    source :: "fn café<'a>(x: &'a str) {{\n    let c = 'é'; // }}\n}}\n"
+    expected :: "fn café<'a>(x: &'a str) {{\n    let c =     ;     \n}}\n"
+    mask :: rust_code_mask(source)
+    assert_eq(mask, expected)
+    assert_eq(mask.bytes().len(), source.bytes().len())
+    loop index in 0..<source.bytes().len() {
+        assert_eq(pkg_bytes_code(mask.bytes(), index) == 10, pkg_bytes_code(source.bytes(), index) == 10)
+    }
+}
+
+#Test("rust mask nested comments and escaped multiline string byte goldens") {
+    assert_eq(rust_code_mask("a/* outer\n/* inner */ end */b"), "a        \n                  b")
+    assert_eq(rust_code_mask("a\"hi\\\"}}\nx\"b"), "a      \n  b")
+    assert_eq(rust_code_mask("a'\\''b'\\n'c"), "a    b    c")
+}
+
+#Test("rust mask byte raw strings hashes chars and labels byte goldens") {
+    assert_eq(rust_code_mask("b\"é\" r#\"é\n\"# br##\"q\"## r\"x\""), "           \n                 ")
+    assert_eq(rust_code_mask("'é' '🦀' b'k' 'a 'label: &str"), "            b    'a 'label: &str")
+    assert_eq(rust_code_mask("r##\"x\"# still\nunterminated"), "             \n            ")
+}
+
+#Test("stripping semicolon items retains production and malformed extents") {
+    source :: "#[test]\nstatic VALUE: Pair = Pair {{ a: 1 }};\n#[cfg(test)]\ntype Alias = [u8; 2];\n#[test]\nuse path::{{a, b}};\n#[cfg(test)]\nstruct Unit;\n#[cfg(not(test))]\nfn production() {{}}\n#[test]\nfn incomplete<T>() {{\n"
+    assert_eq(strip_test_items(source), "#[cfg(not(test))]\nfn production() {{}}\n#[test]\nfn incomplete<T>() {{\n")
+}
+
+#Test("stripping preserves inline trailing code and repeated unsafe attributes") {
+    assert_eq(strip_test_items("#[test]\nfn one() {{}} #[test]\nfn two() {{}}\nfn kept() {{}}\n"), "fn kept() {{}}\n")
+    source :: "#[derive(\n    Debug,\n)]\n#[cfg(test)]\n#[test]\n#[allow(dead_code)]\nstruct Keep;\n"
+    assert_eq(strip_test_items(source), source)
+    assert_eq(strip_test_items("#[test]\nfn bad<T>>() {{}}\nfn kept() {{}}\n"), "#[test]\nfn bad<T>>() {{}}\nfn kept() {{}}\n")
+}
+
+#Test("mask and stripping retain long malformed probes and refused attribute chains") {
+    loop count in [Int]{64, 1024} {
+        quotes := [String]{}
+        attributes := [String]{"#[derive(\n    Debug,\n)]\n"}
+        headers := [String]{}
+        loop _ in 0..<count {
+            &quotes.push("'\\")
+            &attributes.push("#[cfg(test)]\n")
+            &headers.push("#[test]\nfn incomplete\n")
+        }
+        &quotes.push("\n")
+        &attributes.push("struct Keep;\n")
+        quote_source :: quotes.join("")
+        attribute_source :: attributes.join("")
+        header_source :: headers.join("")
+        assert_eq(rust_code_mask(quote_source), quote_source)
+        assert_eq(strip_test_items(attribute_source), attribute_source)
+        assert_eq(strip_test_items(header_source), header_source)
+    }
+}

@@ -1,0 +1,301 @@
+// Rust system_facts.rs has no embedded tests. These port the repository
+// journey tests/jetpack_jetos.rs::os_switch_activates_and_sets_current
+// (tests/fixtures/jetpack-config/config.jet `halcyon`) assertions on the
+// network, init, unit, timer/socket, secret and hardware outputs, strengthened
+// to exact bytes, plus default/boundary regressions.
+//
+// GATED tests (marked below) reach the withheld #3593 native copy seam
+// (jetos_copy_file_replace, jetos_link_or_copy_unit, jetos_enable_unit_link)
+// or the not-yet-landed Studio jetos_make_executable; they stay mandatory.
+
+fn jetos_system_facts_test_service(name: String, enable: Bool, extra: [ServicePlanExtra]) -> ServicePlan Never! {
+    ServicePlan{name: name, enable: enable, extra: extra}
+}
+
+// The halcyon facts consumed by these writers, in config.jet source order.
+fn jetos_system_facts_test_halcyon() -> SystemPlan Never! {
+    services :: [ServicePlan]{
+        jetos_system_facts_test_service("openssh", true, [ServicePlanExtra]{ServicePlanExtra{key: "ports", value: "[22]"}, ServicePlanExtra{key: "hardening", value: "\"network-service\""}, ServicePlanExtra{key: "journal", value: "\"persistent\""}}),
+        jetos_system_facts_test_service("backup", true, [ServicePlanExtra]{ServicePlanExtra{key: "exec", value: "\"/run/current-system/sw/bin/hello\""}, ServicePlanExtra{key: "timer", value: "\"daily\""}, ServicePlanExtra{key: "tmpfiles", value: "\"d /var/lib/backup 0750 root root -\""}}),
+        jetos_system_facts_test_service("metrics", true, [ServicePlanExtra]{ServicePlanExtra{key: "exec", value: "\"/run/current-system/sw/bin/btop\""}, ServicePlanExtra{key: "socket", value: "\"127.0.0.1:9999\""}})
+    }
+    options :: [OptionPlan]{
+        OptionPlan{key: "network.hostName", value: "halcyon"},
+        OptionPlan{key: "network.interface", value: "\"enp0s1\""},
+        OptionPlan{key: "network.address", value: "\"192.0.2.10/24\""},
+        OptionPlan{key: "network.gateway", value: "\"192.0.2.1\""},
+        OptionPlan{key: "network.dns", value: "[\"1.1.1.1\", \"8.8.8.8\"]"},
+        OptionPlan{key: "network.firewall.allowedTcpPorts", value: "[22, 443]"},
+        OptionPlan{key: "network.wireless.ssid", value: "\"JetLab\""},
+        OptionPlan{key: "secrets.wifi.source", value: "\"secrets/wifi.age\""},
+        OptionPlan{key: "kernel.firmware", value: "[\"iwlwifi\"]"},
+        OptionPlan{key: "kernel.drivers", value: "[\"amdgpu\", \"nvme\"]"},
+        OptionPlan{key: "hardware.halcyon.profile", value: "\"framework-13-amd\""},
+        OptionPlan{key: "hardware.halcyon.specialisation.plasmaBeta", value: "true"},
+        OptionPlan{key: "init.defaultTarget", value: "\"graphical.target\""}
+    }
+    SystemPlan{name: "halcyon", target: "linux.x64", packages: [Pkg]{}, services: services, options: options}
+}
+
+fn jetos_system_facts_test_plain(options: [OptionPlan]) -> SystemPlan Never! {
+    SystemPlan{name: "halcyon", target: "linux.x64", packages: [Pkg]{}, services: [ServicePlan]{}, options: options}
+}
+
+fn jetos_system_facts_test_read(root: String, relative: String) -[FS]> String Never! {
+    files.read(files.join(root, relative)) ?? panic("read {relative}")
+}
+
+#Test("JetOS network facts render declared networkd nftables and wireless facts") {
+    root :: files.tmpdir("jetos-network-") ?? panic("network scratch")
+    jetos_write_network_facts(root, jetos_system_facts_test_halcyon()) ?? panic("write network facts")
+    assert_eq(jetos_system_facts_test_read(root, "etc/systemd/network/10-jetos.network"), "[Match]\nName=enp0s1\n\n[Network]\nAddress=192.0.2.10/24\nGateway=192.0.2.1\nDNS=1.1.1.1\nDNS=8.8.8.8\n")
+    assert_eq(jetos_system_facts_test_read(root, "etc/nftables/jetos-firewall.nft"), "table inet jetos {{\n  chain input {{\n    type filter hook input priority 0;\n    tcp dport {{ 22, 443 }} accept\n  }}\n}}\n")
+    assert_eq(jetos_system_facts_test_read(root, "network/facts.json"), "{{\"backend\":\"systemd-networkd\",\"interface\":\"enp0s1\",\"dns\":[\"1.1.1.1\",\"8.8.8.8\"],\"firewall_allowed_tcp_ports\":[\"22\",\"443\"],\"wireless\":{{\n  \"ssid\": \"JetLab\",\n  \"secret\": \"/run/jetos-secrets/wifi\"\n}}}}")
+    files.remove_all(root) ?? panic("remove network scratch")
+}
+
+#Test("JetOS network facts default to DHCP closed firewall and null wireless") {
+    root :: files.tmpdir("jetos-network-default-") ?? panic("network scratch")
+    jetos_write_network_facts(root, jetos_system_facts_test_plain([OptionPlan]{OptionPlan{key: "network.ssid", value: "\"not-wireless\""}})) ?? panic("write default network facts")
+    assert_eq(jetos_system_facts_test_read(root, "etc/systemd/network/10-jetos.network"), "[Match]\nName=eth0\n\n[Network]\nDHCP=yes\n")
+    assert_eq(jetos_system_facts_test_read(root, "etc/nftables/jetos-firewall.nft"), "table inet jetos {{\n  chain input {{\n    type filter hook input priority 0;\n    drop\n  }}\n}}\n")
+    assert_eq(jetos_system_facts_test_read(root, "network/facts.json"), "{{\"backend\":\"systemd-networkd\",\"interface\":\"eth0\",\"dns\":[],\"firewall_allowed_tcp_ports\":[],\"wireless\":null}}")
+    files.remove_all(root) ?? panic("remove network scratch")
+}
+
+#Test("JetOS network facts escape wire values and keep gateway without address") {
+    root :: files.tmpdir("jetos-network-escape-") ?? panic("network scratch")
+    system :: jetos_system_facts_test_plain([OptionPlan]{
+        OptionPlan{key: "network.interface", value: "\"wl\\\"an0\""},
+        OptionPlan{key: "network.gateway", value: "\"10.0.0.1\""},
+        OptionPlan{key: "network.firewall.allowedTcpPorts", value: "[8080]"},
+        OptionPlan{key: "network.wireless.ssid", value: "\"Café \\\\ Net\""}
+    })
+    jetos_write_network_facts(root, system) ?? panic("write escaped network facts")
+    assert_eq(jetos_system_facts_test_read(root, "etc/systemd/network/10-jetos.network"), "[Match]\nName=wl\\\"an0\n\n[Network]\nDHCP=yes\nGateway=10.0.0.1\n")
+    assert_eq(jetos_system_facts_test_read(root, "etc/nftables/jetos-firewall.nft"), "table inet jetos {{\n  chain input {{\n    type filter hook input priority 0;\n    tcp dport {{ 8080 }} accept\n  }}\n}}\n")
+    assert_eq(jetos_system_facts_test_read(root, "network/facts.json"), "{{\"backend\":\"systemd-networkd\",\"interface\":\"wl\\\\\\\"an0\",\"dns\":[],\"firewall_allowed_tcp_ports\":[\"8080\"],\"wireless\":{{\n  \"ssid\": \"Café \\\\\\\\ Net\",\n  \"secret\": \"/run/jetos-secrets/wifi\"\n}}}}")
+    files.remove_all(root) ?? panic("remove network scratch")
+}
+
+#Test("JetOS secret manifest keeps ciphertext sources and tmpfs paths") {
+    root :: files.tmpdir("jetos-secrets-") ?? panic("secrets scratch")
+    // The writer, like Rust fs::write, requires an existing generation directory.
+    files.create_dir_all(root) ?? panic("secret fixture directory")
+    jetos_write_secret_manifest(root, jetos_system_facts_test_halcyon()) ?? panic("write secrets")
+    assert_eq(jetos_system_facts_test_read(root, "secrets.tmpfs.manifest"), "repo ciphertext + host key; activation decrypts into tmpfs only\nwifi\tsecrets/wifi.age\t/run/jetos-secrets/wifi\n")
+    sorted :: jetos_system_facts_test_plain([OptionPlan]{OptionPlan{key: "secrets.zeta.owner", value: "\"root\""}, OptionPlan{key: "secrets.alpha.source", value: "\"vault/alpha.age\""}})
+    jetos_write_secret_manifest(root, sorted) ?? panic("rewrite secrets")
+    assert_eq(jetos_system_facts_test_read(root, "secrets.tmpfs.manifest"), "repo ciphertext + host key; activation decrypts into tmpfs only\nalpha\tvault/alpha.age\t/run/jetos-secrets/alpha\nzeta\tsecrets/zeta.age\t/run/jetos-secrets/zeta\n")
+    jetos_write_secret_manifest(root, jetos_system_facts_test_plain([OptionPlan]{})) ?? panic("rewrite empty secrets")
+    assert_eq(jetos_system_facts_test_read(root, "secrets.tmpfs.manifest"), "repo ciphertext + host key; activation decrypts into tmpfs only\n")
+    files.remove_all(root) ?? panic("remove secrets scratch")
+}
+
+#Test("JetOS minimal systemd units write every exact base target") {
+    root :: files.tmpdir("jetos-units-") ?? panic("units scratch")
+    unit_dir :: files.join(root, "usr/lib/systemd/system")
+    jetos_write_minimal_systemd_units(unit_dir) ?? panic("write units")
+    expected :: [(name: String, body: String)]{
+        (name: "basic.target", body: "[Unit]\nDescription=JetOS basic system\nRequires=sysinit.target\nWants=sockets.target timers.target paths.target slices.target\nAfter=sysinit.target sockets.target paths.target slices.target\n"),
+        (name: "emergency.target", body: "[Unit]\nDescription=JetOS emergency mode\nAllowIsolate=yes\n"),
+        (name: "getty.target", body: "[Unit]\nDescription=JetOS login prompts\n"),
+        (name: "graphical.target", body: "[Unit]\nDescription=JetOS graphical interface\nRequires=multi-user.target\nWants=display-manager.service\nAfter=multi-user.target display-manager.service\nAllowIsolate=yes\n"),
+        (name: "local-fs.target", body: "[Unit]\nDescription=JetOS local filesystems\nDefaultDependencies=no\n"),
+        (name: "multi-user.target", body: "[Unit]\nDescription=JetOS multi-user system\nRequires=basic.target\nAfter=basic.target\nAllowIsolate=yes\n"),
+        (name: "paths.target", body: "[Unit]\nDescription=JetOS paths\n"),
+        (name: "rescue.target", body: "[Unit]\nDescription=JetOS rescue mode\nRequires=sysinit.target\nAfter=sysinit.target\nAllowIsolate=yes\n"),
+        (name: "slices.target", body: "[Unit]\nDescription=JetOS slices\n"),
+        (name: "sockets.target", body: "[Unit]\nDescription=JetOS sockets\n"),
+        (name: "swap.target", body: "[Unit]\nDescription=JetOS swap\n"),
+        (name: "sysinit.target", body: "[Unit]\nDescription=JetOS system initialization\nWants=local-fs.target swap.target\nAfter=local-fs.target swap.target\n"),
+        (name: "timers.target", body: "[Unit]\nDescription=JetOS timers\n")
+    }
+    entries :: files.list_dir(unit_dir) ?? panic("list units")
+    assert_eq(entries.len(), expected.len())
+    loop index in 0..<expected.len() {
+        assert_eq(entries[index].name, expected[index].name)
+        assert_eq(jetos_system_facts_test_read(unit_dir, expected[index].name), expected[index].body)
+    }
+    // Rewriting replaces stale bodies rather than appending.
+    files.write(files.join(unit_dir, "swap.target"), "stale") ?? panic("stale unit")
+    jetos_write_minimal_systemd_units(unit_dir) ?? panic("rewrite units")
+    assert_eq(jetos_system_facts_test_read(unit_dir, "swap.target"), "[Unit]\nDescription=JetOS swap\n")
+    files.remove_all(root) ?? panic("remove units scratch")
+}
+
+#Test("JetOS hardware scanner shell-quotes host and doctor keeps its literal script") {
+    scanner :: jetos_hardware_scanner_script(jetos_system_facts_test_plain([OptionPlan]{}))
+    assert(scanner.starts_with("#!/usr/bin/env sh\nset -eu\nhost=${{1:-'halcyon'}}\nscan_root=${{JETOS_HW_ROOT:-/}}\nout=${{JETOS_HARDWARE_OUT:-$PWD/hardware-$host.jet}}\n"))
+    assert(scanner.contains("  mods=$(awk '{{print $1}}' \"$scan_root/proc/modules\" | sort -u | paste -sd, -)\n"))
+    assert(scanner.contains("-printf '%f\\n' | sort | paste -sd, -)\n"))
+    assert(scanner.ends_with("printf '{{\"kind\":\"jetos.hardware-scan\",\"host\":\"%s\",\"out\":\"%s\",\"modules\":\"%s\",\"block_devices\":\"%s\",\"gpus\":\"%s\"}}\\n' \"$host\" \"$out\" \"$mods\" \"$blocks\" \"$gpus\"\n"))
+    quoted :: jetos_hardware_scanner_script(SystemPlan{name: "o'brien", target: "linux.x64", packages: [Pkg]{}, services: [ServicePlan]{}, options: [OptionPlan]{}})
+    assert(quoted.contains("\nhost=${{1:-'o'\\''brien'}}\n"))
+    doctor :: jetos_hardware_doctor_script()
+    assert(doctor.starts_with("#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\n"))
+    assert(doctor.contains("  while IFS='\t' read -r driver _state; do\n"))
+    assert(doctor.contains("\"${{missing# }}\" > \"$report\"\ncat \"$report\"\n"))
+    assert(!doctor.contains("halcyon"))
+}
+
+// GATED #3593 (jetos_enable_unit -> withheld jetos_enable_unit_link).
+#Test("JetOS enabled services get wanted timers and sockets") {
+    root :: files.tmpdir("jetos-timers-") ?? panic("timer scratch")
+    system := jetos_system_facts_test_halcyon()
+    &system.services.push(jetos_system_facts_test_service("disabled", false, [ServicePlanExtra]{ServicePlanExtra{key: "schedule", value: "\"hourly\""}, ServicePlanExtra{key: "listen", value: "\"/run/disabled.sock\""}}))
+    jetos_write_systemd_timer_socket_units(root, system) ?? panic("write timer and socket units")
+    unit_dir :: files.join(root, "etc/systemd/system")
+    assert_eq(jetos_system_facts_test_read(unit_dir, "backup.timer"), "[Unit]\nDescription=jetos timer for backup\n\n[Timer]\nOnCalendar=daily\nUnit=backup.service\n\n[Install]\nWantedBy=timers.target\n")
+    assert_eq(jetos_system_facts_test_read(unit_dir, "metrics.socket"), "[Unit]\nDescription=jetos socket for metrics\n\n[Socket]\nListenStream=127.0.0.1:9999\n\n[Install]\nWantedBy=sockets.target\n")
+    assert(files.lexists(files.join(unit_dir, "timers.target.wants/backup.timer")))
+    assert(files.lexists(files.join(unit_dir, "sockets.target.wants/metrics.socket")))
+    if sys.family() == "unix" {
+        assert_eq(files.read_link(files.join(unit_dir, "timers.target.wants/backup.timer")) ?? panic("timer link"), "../backup.timer")
+        assert_eq(files.read_link(files.join(unit_dir, "sockets.target.wants/metrics.socket")) ?? panic("socket link"), "../metrics.socket")
+    }
+    assert(!files.exists(files.join(unit_dir, "openssh.timer")) && !files.exists(files.join(unit_dir, "backup.socket")))
+    assert(!files.exists(files.join(unit_dir, "disabled.timer")) && !files.exists(files.join(unit_dir, "disabled.socket")))
+    // Rerunning replaces existing wanted entries instead of failing.
+    jetos_write_systemd_timer_socket_units(root, system) ?? panic("rewrite timer and socket units")
+    assert_eq(jetos_system_facts_test_read(unit_dir, "timers.target.wants/backup.timer"), jetos_system_facts_test_read(unit_dir, "backup.timer"))
+    files.remove_all(root) ?? panic("remove timer scratch")
+}
+
+// GATED #3593 (jetos_copy_file_replace, jetos_link_or_copy_unit). Uses the
+// real Store snapshot lease helper from Tests/EtcBootFacts.jet.
+#Test("JetOS init facts project systemd init units and default target") {
+    verification := StoreVerification.new()
+    root :: files.tmpdir("jetos-init-") ?? panic("init scratch")
+    projection :: files.join(root, "projection")
+    generation :: files.join(root, "generation")
+    files.create_dir_all(files.join(projection, "lib/systemd")) ?? panic("systemd source")
+    files.create_dir_all(generation) ?? panic("generation")
+    files.write(files.join(projection, "lib/systemd/systemd"), "systemd-binary") ?? panic("systemd binary")
+    package := jetos_identity_test_realized(&verification, root, JETOS_SYSTEMD_INIT_PACKAGE, files.join(root, "durable"), Val(projection))
+    packages := [JetOSRealizedPackage]{package}
+    system :: jetos_system_facts_test_halcyon()
+    jetos_write_init_facts(generation, system, packages) ?? panic("write init facts")
+    assert_eq(jetos_system_facts_test_read(generation, "sbin/init"), "systemd-binary")
+    assert_eq(jetos_system_facts_test_read(generation, "systemd/lib/systemd/systemd"), "systemd-binary")
+    unit_roots :: [String]{"etc/systemd/system", "usr/lib/systemd/system", "lib/systemd/system", "systemd/lib/systemd/system"}
+    loop unit_root in unit_roots {
+        assert(files.is_file(files.join(generation, "{unit_root}/graphical.target")))
+        assert(files.is_file(files.join(generation, "{unit_root}/rescue.target")))
+    }
+    assert_eq(jetos_system_facts_test_read(generation, "etc/systemd/system/default.target"), jetos_system_facts_test_read(generation, "etc/systemd/system/graphical.target"))
+    if sys.family() == "unix" -> assert_eq(files.read_link(files.join(generation, "etc/systemd/system/default.target")) ?? panic("default target link"), "graphical.target")
+    init :: jetos_system_facts_test_read(generation, "init/systemd.json")
+    assert_eq(init, "{{\"init\":\"systemd\",\"default_target\":\"graphical.target\",\"unit_dir\":\"etc/systemd/system\",\"init_package\":{jetos_kernel_package_json(packages[0])}}}")
+    ^packages[0].lease.release()
+    files.remove_all(root) ?? panic("remove init scratch")
+}
+
+// GATED #3593: same writer; no systemd package means no /sbin/init and a null
+// init package with the multi-user default.
+#Test("JetOS init facts without systemd keep null package and default target") {
+    root :: files.tmpdir("jetos-init-none-") ?? panic("init scratch")
+    jetos_write_init_facts(root, jetos_system_facts_test_plain([OptionPlan]{}), [JetOSRealizedPackage]{}) ?? panic("write init facts")
+    assert_eq(jetos_system_facts_test_read(root, "init/systemd.json"), "{{\"init\":\"systemd\",\"default_target\":\"multi-user.target\",\"unit_dir\":\"etc/systemd/system\",\"init_package\":null}}")
+    assert(!files.exists(files.join(root, "sbin")))
+    assert(!files.exists(files.join(root, "etc/systemd/system")))
+    files.remove_all(root) ?? panic("remove init scratch")
+}
+
+// GATED (Studio jetos_make_executable not yet landed). Mirrors the original
+// hardware journey: exact facts, generated source, profiles, specialisation
+// boot entry, then the executable scanner and doctor against a fake root.
+#Test("JetOS hardware facts scanner and doctor match the declared host") {
+    root :: files.tmpdir("jetos-hardware-") ?? panic("hardware scratch")
+    generation :: files.join(root, "generation")
+    files.create_dir_all(generation) ?? panic("generation")
+    jetos_write_hardware_facts(generation, jetos_system_facts_test_halcyon()) ?? panic("write hardware facts")
+    specialisation :: "{{\n  \"name\": \"plasmaBeta\",\n  \"enabled\": \"true\",\n  \"boot_entry\": \"boot/specialisations/plasmaBeta.conf\"\n}}"
+    assert_eq(jetos_system_facts_test_read(generation, "hardware/facts.json"), "{{\"kind\":\"jetos.hardware\",\"host\":\"halcyon\",\"firmware\":[\"iwlwifi\"],\"drivers\":[\"amdgpu\",\"nvme\"],\"profiles\":[\"framework-13-amd\"],\"specialisations\":[{specialisation}],\"scan_source\":\"hardware/halcyon.jet\",\"doctor\":\"sw/bin/jetos-hardware-doctor\",\"audit\":\"declared hardware facts enter generation proof before activation\"}}")
+    assert_eq(jetos_system_facts_test_read(generation, "hardware/firmware.manifest"), "iwlwifi\tdeclared\n")
+    assert_eq(jetos_system_facts_test_read(generation, "hardware/drivers.manifest"), "amdgpu\tdeclared\nnvme\tdeclared\n")
+    assert_eq(jetos_system_facts_test_read(generation, "hardware/profiles.manifest"), "framework-13-amd\tdeclared\n")
+    assert_eq(jetos_system_facts_test_read(generation, "hardware/profile-framework-13-amd.json"), "{{\"kind\":\"jetos.hardware-profile\",\"name\":\"framework-13-amd\",\"source\":\"first-party hardware profile\",\"applies_to\":\"halcyon\",\"drivers\":[\"amdgpu\",\"nvme\"],\"firmware\":[\"iwlwifi\"],\"proof\":\"profile-applied\"}}")
+    assert_eq(jetos_system_facts_test_read(generation, "hardware/halcyon.jet"), "// generated by jetos-hardware-scan; canonical source may be copied into config.jet\nmodule hardware_halcyon {{\n    hardware.halcyon.scan.generated: true\n    hardware.halcyon.driver.amdgpu: true\n    hardware.halcyon.driver.nvme: true\n    hardware.halcyon.firmware.iwlwifi: true\n    hardware.halcyon.profile: \"framework-13-amd\"\n}}\n")
+    assert_eq(jetos_system_facts_test_read(generation, "hardware/declared-options.json"), "{{\"kind\":\"jetos.hardware-options\",\"options\":[{{\n  \"key\": \"halcyon.profile\",\n  \"value\": \"framework-13-amd\"\n}},{{\n  \"key\": \"halcyon.specialisation.plasmaBeta\",\n  \"value\": \"true\"\n}}]}}")
+    assert_eq(jetos_system_facts_test_read(generation, "hardware/specialisations.json"), "{{\"kind\":\"jetos.hardware-specialisations\",\"host\":\"halcyon\",\"items\":[{specialisation}],\"proof\":\"boot-selectable-variants\"}}")
+    assert_eq(jetos_system_facts_test_read(generation, "boot/specialisations/plasmaBeta.conf"), "title jetos 26.10 (Apex) — halcyon (plasmaBeta)\nhost halcyon\nenabled true\ngeneration /run/current-system\nproof hardware-specialisation\n")
+    scanner :: files.join(generation, "sw/bin/jetos-hardware-scan")
+    doctor :: files.join(generation, "sw/bin/jetos-hardware-doctor")
+    assert_eq(jetos_system_facts_test_read(generation, "sw/bin/jetos-hardware-scan"), jetos_hardware_scanner_script(jetos_system_facts_test_halcyon()))
+    assert_eq(jetos_system_facts_test_read(generation, "sw/bin/jetos-hardware-doctor"), jetos_hardware_doctor_script())
+    if sys.family() != "unix" {
+        files.remove_all(root) ?? panic("remove hardware scratch")
+        return
+    }
+    assert((files.stat(scanner) ?? panic("scanner mode")).mode & 73 == 73)
+    assert((files.stat(doctor) ?? panic("doctor mode")).mode & 73 == 73)
+    hardware_root :: files.join(root, "fake-hardware")
+    files.create_dir_all(files.join(hardware_root, "proc")) ?? panic("fake proc")
+    files.create_dir_all(files.join(hardware_root, "sys/class/block/nvme0n1")) ?? panic("fake block")
+    files.create_dir_all(files.join(hardware_root, "sys/class/drm/card0")) ?? panic("fake drm")
+    files.write(files.join(hardware_root, "proc/modules"), "amdgpu 1 0 - Live 0\nnvme 1 0 - Live 0\n") ?? panic("fake modules")
+    scan_out :: files.join(root, "halcyon-scan.jet")
+    scan :: process.cmd([String]{scanner, "halcyon"}).env("JETOS_HW_ROOT", hardware_root).env("JETOS_HARDWARE_OUT", scan_out).stdout(.Capture).stderr(.Capture).run() ?? panic("start hardware scanner")
+    assert(scan.success, "scanner failed: {scan.errors}")
+    scanned :: files.read(scan_out) ?? panic("scanned source")
+    assert(scanned.contains("hardware.halcyon.scan.modules") && scanned.contains("amdgpu,nvme") && scanned.contains("nvme0n1"))
+    checked :: process.cmd([String]{doctor}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_HW_ROOT", hardware_root).stdout(.Capture).stderr(.Capture).run() ?? panic("start hardware doctor")
+    assert(checked.success, "doctor failed: {checked.errors}")
+    assert(checked.output.contains("\"state\":\"match\"") && checked.output.contains("hardware-drift-checked"))
+    files.remove_all(root) ?? panic("remove hardware scratch")
+}
+
+// GATED (Studio jetos_make_executable): undeclared hardware falls back to the
+// generic profile with empty manifests and no boot variants.
+#Test("JetOS hardware facts default to generic profile without declarations") {
+    root :: files.tmpdir("jetos-hardware-default-") ?? panic("hardware scratch")
+    jetos_write_hardware_facts(root, jetos_system_facts_test_plain([OptionPlan]{OptionPlan{key: "hardware.profile", value: "[]"}})) ?? panic("write default hardware facts")
+    assert_eq(jetos_system_facts_test_read(root, "hardware/facts.json"), "{{\"kind\":\"jetos.hardware\",\"host\":\"halcyon\",\"firmware\":[],\"drivers\":[],\"profiles\":[\"generic-pc\"],\"specialisations\":[],\"scan_source\":\"hardware/halcyon.jet\",\"doctor\":\"sw/bin/jetos-hardware-doctor\",\"audit\":\"declared hardware facts enter generation proof before activation\"}}")
+    assert_eq(jetos_system_facts_test_read(root, "hardware/firmware.manifest"), "")
+    assert_eq(jetos_system_facts_test_read(root, "hardware/drivers.manifest"), "")
+    assert_eq(jetos_system_facts_test_read(root, "hardware/profiles.manifest"), "generic-pc\tdeclared\n")
+    assert(files.is_file(files.join(root, "hardware/profile-generic-pc.json")))
+    assert_eq(jetos_system_facts_test_read(root, "hardware/declared-options.json"), "{{\"kind\":\"jetos.hardware-options\",\"options\":[{{\n  \"key\": \"profile\",\n  \"value\": \"[]\"\n}}]}}")
+    assert_eq((files.list_dir(files.join(root, "boot/specialisations")) ?? panic("specialisations")).len(), 0)
+    files.remove_all(root) ?? panic("remove hardware scratch")
+}
+
+// GATED (Studio jetos_make_executable). Host-specific profile lookup precedes
+// the global key even when its list is empty; empty selection means generic.
+#Test("JetOS hardware profile precedence keeps host selection and empty fallback") {
+    root :: files.tmpdir("jetos-hardware-precedence-") ?? panic("hardware scratch")
+    selected :: jetos_system_facts_test_plain([OptionPlan]{
+        OptionPlan{key: "hardware.profile", value: "[\"global-profile\"]"},
+        OptionPlan{key: "hardware.halcyon.profile", value: "[\"host-z\", \"host-a\"]"}
+    })
+    jetos_write_hardware_facts(root, selected) ?? panic("host hardware profile")
+    assert_eq(jetos_system_facts_test_read(root, "hardware/profiles.manifest"), "host-z\tdeclared\nhost-a\tdeclared\n")
+    empty :: jetos_system_facts_test_plain([OptionPlan]{
+        OptionPlan{key: "hardware.profile", value: "[\"global-profile\"]"},
+        OptionPlan{key: "hardware.halcyon.profile", value: "[]"}
+    })
+    jetos_write_hardware_facts(root, empty) ?? panic("empty host hardware profile")
+    assert_eq(jetos_system_facts_test_read(root, "hardware/profiles.manifest"), "generic-pc\tdeclared\n")
+    jetos_write_hardware_facts(root, jetos_system_facts_test_plain([OptionPlan]{OptionPlan{key: "hardware.profile", value: "\"global-profile\""}})) ?? panic("global hardware profile")
+    assert_eq(jetos_system_facts_test_read(root, "hardware/profiles.manifest"), "global-profile\tdeclared\n")
+    files.remove_all(root) ?? panic("remove hardware scratch")
+}
+
+// #3593: native copy-with-permissions seam
+// GATED (jetos_enable_unit_link). Rust service_extra picks the first matching
+// extra in source order, not the first requested alias.
+#Test("JetOS timer socket aliases respect service extra source order") {
+    root :: files.tmpdir("jetos-unit-precedence-") ?? panic("unit scratch")
+    service :: jetos_system_facts_test_service("job", true, [ServicePlanExtra]{
+        ServicePlanExtra{key: "schedule", value: "\"hourly\""},
+        ServicePlanExtra{key: "timer", value: "\"daily\""},
+        ServicePlanExtra{key: "listen", value: "\"/run/job.sock\""},
+        ServicePlanExtra{key: "socket", value: "\"127.0.0.1:9000\""}
+    })
+    system :: SystemPlan{name: "halcyon", target: "linux.x64", packages: [Pkg]{}, services: [ServicePlan]{service}, options: [OptionPlan]{}}
+    jetos_write_systemd_timer_socket_units(root, system) ?? panic("alias units")
+    assert_eq(jetos_system_facts_test_read(root, "etc/systemd/system/job.timer"), "[Unit]\nDescription=jetos timer for job\n\n[Timer]\nOnCalendar=hourly\nUnit=job.service\n\n[Install]\nWantedBy=timers.target\n")
+    assert_eq(jetos_system_facts_test_read(root, "etc/systemd/system/job.socket"), "[Unit]\nDescription=jetos socket for job\n\n[Socket]\nListenStream=/run/job.sock\n\n[Install]\nWantedBy=sockets.target\n")
+    files.remove_all(root) ?? panic("remove unit scratch")
+}

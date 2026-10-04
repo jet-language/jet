@@ -1,0 +1,1264 @@
+// PORT-PENDING 1137 tests-prove: tests/prove.rs:1-1260
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::io::Write;
+//RS use std::path::PathBuf;
+//RS use std::process::Command;
+//RS 
+//RS fn jet() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS fn workspace(name: &str) -> PathBuf {
+//RS     let path = std::env::temp_dir().join(format!("jet_prove_{name}_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&path);
+//RS     fs::create_dir_all(&path).unwrap();
+//RS     fs::write(
+//RS         path.join("package.jet"),
+//RS         "name: \"test-fixture\"\nversion: \"0.1.0\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     path
+//RS }
+//RS 
+//RS fn budget_workspace(name: &str) -> PathBuf {
+//RS     let root = workspace(name);
+//RS     fs::create_dir_all(root.join("src")).unwrap();
+//RS     // Bare `jet budget check` resolves the canonical `run.jet` entry
+//RS     // (D-VERDICT-678-1); retired `main.jet` is not a discovery fallback.
+//RS     fs::write(
+//RS         root.join("src/run.jet"),
+//RS         r#"package {
+//RS     name: "app"
+//RS }
+//RS 
+//RS module perf.package {
+//RS     budgets: [Budget{
+//RS         name: "public-api",
+//RS         scope: .Package,
+//RS         metric: .PublicApiItems,
+//RS         comparison: .Absolute,
+//RS         limit: .AtMost(10),
+//RS     }],
+//RS }
+//RS pub fn api() {}
+//RS fn run() {}
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     root
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_projects_compatible_canonical_budget_identity_without_measuring() {
+//RS     let root = budget_workspace("budget_projection");
+//RS     let checked = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["budget", "check", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         checked.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&checked.stderr)
+//RS     );
+//RS     let command = String::from_utf8(checked.stdout).unwrap();
+//RS     let report_id = command
+//RS         .split("\"report_id\":\"")
+//RS         .nth(1)
+//RS         .unwrap()
+//RS         .split('"')
+//RS         .next()
+//RS         .unwrap()
+//RS         .to_string();
+//RS     let before = fs::read_dir(root.join(".jet/perf/reports"))
+//RS         .unwrap()
+//RS         .count();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "src/run.jet", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let proof = String::from_utf8(out.stdout).unwrap();
+//RS     assert!(proof.contains("\"producer\":\"jet-budget\""), "{proof}");
+//RS     assert!(
+//RS         proof.contains("\"budgetId\":\"package:public-api\""),
+//RS         "{proof}"
+//RS     );
+//RS     assert!(
+//RS         proof.contains(&format!("\"reportId\":\"{report_id}\"")),
+//RS         "{proof}"
+//RS     );
+//RS     assert!(
+//RS         proof.contains("\"deterministicBudget\":{\"failed\":0,\"met\":1,\"selected\":1"),
+//RS         "{proof}"
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_dir(root.join(".jet/perf/reports"))
+//RS             .unwrap()
+//RS             .count(),
+//RS         before,
+//RS         "prove measured or wrote a report"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_json_is_derived_from_real_front_end_and_sorted_target() {
+//RS     let root = workspace("report");
+//RS     fs::write(root.join("b.jet"), "fn b() -[]> Int { return 2 }\n").unwrap();
+//RS     fs::write(root.join("a.jet"), "fn a() -[]> Int { return 1 }\n").unwrap();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", ".", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let report = String::from_utf8(out.stdout).unwrap();
+//RS     assert!(report.contains("\"kind\":\"workspace\""), "{report}");
+//RS     assert!(
+//RS         report.find("a.jet").unwrap() < report.find("b.jet").unwrap(),
+//RS         "{report}"
+//RS     );
+//RS     assert!(report.contains("\"producer\":\"jet-sema\""), "{report}");
+//RS     assert!(
+//RS         report.contains("\"frontEnd\":{\"failed\":0,\"proved\":2,\"selected\":2"),
+//RS         "{report}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_front_end_failure_is_typed_evidence_and_exit_one() {
+//RS     let root = workspace("failure");
+//RS     fs::write(root.join("bad.jet"), "fn run() { missing() }\n").unwrap();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "bad.jet", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     assert!(
+//RS         out.stderr.is_empty(),
+//RS         "JSON mode leaked stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let report = String::from_utf8(out.stdout).unwrap();
+//RS     assert!(report.contains("\"result\":\"fail\""), "{report}");
+//RS     assert!(report.contains("\"outcome\":\"failed\""), "{report}");
+//RS     assert!(report.contains("\"diagnosticIndexes\":[0]"), "{report}");
+//RS     assert!(report.contains("\"code\":\"E0102\""), "{report}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_usage_and_missing_target_have_exact_exit_classes() {
+//RS     let root = workspace("usage");
+//RS     let usage = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .arg("prove")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(usage.status.code(), Some(2));
+//RS     let missing = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "missing.jet"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(missing.status.code(), Some(1));
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_uses_canonical_package_marker_in_target_identity() {
+//RS     let root = workspace("canonical_package");
+//RS     fs::write(
+//RS         root.join("package.jet"),
+//RS         "name: \"demo\"\nversion: \"0.1.0\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", ".", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let report = String::from_utf8(out.stdout).unwrap();
+//RS     assert!(report.contains("\"kind\":\"package\""), "{report}");
+//RS     assert!(
+//RS         report.contains("package.jet"),
+//RS         "canonical marker missing from identity: {report}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_capture_replay_round_trip_and_corruption_fail_closed() {
+//RS     let root = workspace("replay_round_trip");
+//RS     let store = root.join("store");
+//RS     fs::write(
+//RS         root.join("main.jet"),
+//RS         "use core.time as time\n#Test(\"recorded time\") { observed :: time.now() }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let artifact = root.join("capture.jetproof-replay");
+//RS     let artifact_arg = artifact.file_name().unwrap().to_string_lossy().to_string();
+//RS     let captured = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args([
+//RS             "prove",
+//RS             "main.jet",
+//RS             &format!("--capture={artifact_arg}"),
+//RS             "--json",
+//RS         ])
+//RS         .env("JET_STORE_DIR", &store)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         captured.status.code(),
+//RS         Some(0),
+//RS         "stderr={} stdout={} artifact={}",
+//RS         String::from_utf8_lossy(&captured.stderr),
+//RS         String::from_utf8_lossy(&captured.stdout),
+//RS         artifact.display()
+//RS     );
+//RS     assert!(artifact.is_file());
+//RS     assert!(
+//RS         captured.stderr.is_empty(),
+//RS         "JSON capture leaked stderr: {}",
+//RS         String::from_utf8_lossy(&captured.stderr)
+//RS     );
+//RS     let captured_report = String::from_utf8_lossy(&captured.stdout);
+//RS     assert!(
+//RS         captured_report.contains("\"inputSha256\":\""),
+//RS         "capture report lost target input hash: {captured_report}"
+//RS     );
+//RS     assert!(
+//RS         captured_report.contains("\"targetTriple\":\""),
+//RS         "capture report lost target triple: {captured_report}"
+//RS     );
+//RS     let artifact_bytes = fs::read(&artifact).unwrap();
+//RS     assert!(artifact_bytes.starts_with(b"JREPLAY\0"));
+//RS     let artifact_text = String::from_utf8_lossy(&artifact_bytes);
+//RS     assert!(artifact_text.contains("\"roots\":[\"Time\"]"));
+//RS     assert!(artifact_text.contains("\"time_site_id\":"));
+//RS     let build_digest = artifact_text
+//RS         .split("\"build_digest\":\"")
+//RS         .nth(1)
+//RS         .and_then(|tail| tail.split('"').next())
+//RS         .expect("replay identity build digest");
+//RS     assert!(
+//RS         build_digest.len() == 64 && build_digest.bytes().all(|byte| byte.is_ascii_hexdigit()),
+//RS         "replay identity build digest is not a SHA-256 hash: {build_digest}"
+//RS     );
+//RS     assert!(artifact_text.contains("\"source_digest\":\""));
+//RS     assert!(artifact_text.contains("\"semantic_mir_hash\":\""));
+//RS     assert!(artifact_text.contains("\"optimized_mir_hash\":\""));
+//RS     assert!(artifact_text.contains("\"mir_schema\":\"mir-v1\""));
+//RS 
+//RS     let replayed = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "main.jet", "--replay", &artifact_arg, "--json"])
+//RS         .env("JET_STORE_DIR", &store)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         replayed.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&replayed.stderr)
+//RS     );
+//RS     assert!(
+//RS         replayed.stderr.is_empty(),
+//RS         "JSON replay leaked stderr: {}",
+//RS         String::from_utf8_lossy(&replayed.stderr)
+//RS     );
+//RS     let report = String::from_utf8(replayed.stdout).unwrap();
+//RS     assert!(report.contains("\"facet\":\"replay\""), "{report}");
+//RS     assert!(
+//RS         report.contains("\"reason\":\"parity_not_available\""),
+//RS         "{report}"
+//RS     );
+//RS 
+//RS     let mut corrupt = fs::read(&artifact).unwrap();
+//RS     let middle = corrupt.len() / 2;
+//RS     corrupt[middle] ^= 1;
+//RS     fs::write(&artifact, corrupt).unwrap();
+//RS     let rejected = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "main.jet", "--replay", &artifact_arg])
+//RS         .env("JET_STORE_DIR", &store)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(rejected.status.code(), Some(1));
+//RS     assert!(String::from_utf8_lossy(&rejected.stderr).contains("Error [E3622]"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn run_recorded_alias_time_receipt_replays_without_execution() {
+//RS     let root = workspace("recorded_debug_queries");
+//RS     fs::write(
+//RS         root.join("package.jet"),
+//RS         "name: \"recorded-time\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Time, Exec] } }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         root.join("main.jet"),
+//RS         "use core.time as time\nuse core.process as process\nfn run() {\n    observed :: time.now()\n    argument :: process.args()[0]\n    marker :: \"recorded-{observed}\"\n    print(marker)\n    print(argument)\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let recorded = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["run", "main.jet", "--record=causal", "--", "recorded-arg"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         recorded.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&recorded.stderr)
+//RS     );
+//RS     let recorded_stdout = String::from_utf8_lossy(&recorded.stdout);
+//RS     let recorded_value = recorded_stdout
+//RS         .lines()
+//RS         .find_map(|line| line.strip_prefix("recorded-"))
+//RS         .expect("recorded run must print the captured time")
+//RS         .to_string();
+//RS     assert!(
+//RS         recorded_value.parse::<i64>().is_ok(),
+//RS         "captured time is not an integer: {recorded_value}"
+//RS     );
+//RS     assert!(recorded_stdout.lines().any(|line| line == "recorded-arg"));
+//RS     let artifact = root.join(".jet/replays/causal.jetproof-replay");
+//RS     assert!(artifact.is_file());
+//RS 
+//RS     let mut debug = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["debug", "main.jet", "--replay=causal"])
+//RS         .stdin(std::process::Stdio::piped())
+//RS         .stdout(std::process::Stdio::piped())
+//RS         .stderr(std::process::Stdio::piped())
+//RS         .spawn()
+//RS         .unwrap();
+//RS     debug
+//RS         .stdin
+//RS         .take()
+//RS         .unwrap()
+//RS         .write_all(format!("why observed == {recorded_value}\nwhen observed\nc\n").as_bytes())
+//RS         .unwrap();
+//RS     let output = debug.wait_with_output().unwrap();
+//RS     assert_eq!(
+//RS         output.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         stdout.contains(&format!("observed = {recorded_value} because act")),
+//RS         "{stdout}"
+//RS     );
+//RS     assert!(stdout.contains("last change:"), "{stdout}");
+//RS     assert!(
+//RS         !stdout.contains(&format!("recorded-{recorded_value}")),
+//RS         "receipt replay re-executed program output: {stdout}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_replay_rejects_source_identity_divergence_before_execution() {
+//RS     let root = workspace("replay_identity_divergence");
+//RS     fs::write(
+//RS         root.join("main.jet"),
+//RS         "use core.time as time\nfn run() { observed :: time.now() }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let artifact = root.join("capture.jetproof-replay");
+//RS     let captured = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "main.jet", "--capture=capture.jetproof-replay"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         captured.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&captured.stderr)
+//RS     );
+//RS     assert!(artifact.is_file());
+//RS 
+//RS     fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+//RS     let replayed = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args([
+//RS             "prove",
+//RS             "main.jet",
+//RS             "--replay=capture.jetproof-replay",
+//RS             "--json",
+//RS         ])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(replayed.status.code(), Some(1));
+//RS     assert!(
+//RS         replayed.stderr.is_empty(),
+//RS         "JSON identity refusal leaked stderr: {}",
+//RS         String::from_utf8_lossy(&replayed.stderr)
+//RS     );
+//RS     assert!(String::from_utf8_lossy(&replayed.stdout).contains("\"code\":\"E3621\""));
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_lens_union_is_canonical_and_keeps_the_complete_report() {
+//RS     let root = workspace("lens_union");
+//RS     fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+//RS     let baseline = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "main.jet", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         baseline.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&baseline.stderr)
+//RS     );
+//RS     let selected = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args([
+//RS             "prove", "main.jet", "--lens", "budgets", "--lens", "tests", "--lens", "budgets",
+//RS             "--json",
+//RS         ])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         selected.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&selected.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         baseline.stdout, selected.stdout,
+//RS         "presentation lenses changed ProofReport"
+//RS     );
+//RS 
+//RS     let human = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args([
+//RS             "prove", "main.jet", "--lens", "budgets", "--lens", "tests", "--lens", "budgets",
+//RS         ])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         human.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&human.stderr)
+//RS     );
+//RS     assert!(String::from_utf8_lossy(&human.stdout).contains("LENSES   tests, budgets"));
+//RS 
+//RS     let absorbed = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "main.jet", "--lens", "all", "--lens", "tests"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         absorbed.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&absorbed.stderr)
+//RS     );
+//RS     let absorbed_stdout = String::from_utf8_lossy(&absorbed.stdout);
+//RS     assert!(absorbed_stdout.contains("LENSES   all"));
+//RS     assert!(!absorbed_stdout.contains("LENSES   all, tests"));
+//RS 
+//RS     let all = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "main.jet", "--lens", "all", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         all.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&all.stderr)
+//RS     );
+//RS     assert!(!String::from_utf8_lossy(&all.stdout).contains("\"facet\":\"solver\""));
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_rejected_budget_reports_are_unavailable_and_counted() {
+//RS     let root = budget_workspace("budget_rejected_equation");
+//RS     fs::create_dir_all(root.join(".jet/perf/reports")).unwrap();
+//RS     fs::write(
+//RS         root.join(".jet/perf/reports/broken.json"),
+//RS         "not canonical budget JSON\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "src/run.jet", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let report = String::from_utf8(out.stdout).unwrap();
+//RS     assert!(
+//RS         report.contains("\"result\":\"pass_incomplete\""),
+//RS         "{report}"
+//RS     );
+//RS     assert!(report.contains("\"deterministicBudget\":{\"failed\":0,\"met\":0,\"selected\":1,\"skipped\":0,\"unavailable\":1}"), "{report}");
+//RS     assert!(report.contains("\"facet\":\"budgets\""), "{report}");
+//RS     assert!(report.contains("\"outcome\":\"unavailable\""), "{report}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_rejects_capture_path_escape_before_writing_an_artifact() {
+//RS     let root = workspace("capture_escape");
+//RS     fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "main.jet", "--capture=../escape.jetproof-replay"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     assert!(String::from_utf8_lossy(&out.stderr).contains("Error [E3629]"));
+//RS     assert!(!root
+//RS         .parent()
+//RS         .unwrap()
+//RS         .join("escape.jetproof-replay")
+//RS         .exists());
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_capture_does_not_finalize_after_front_end_failure() {
+//RS     let root = workspace("capture_front_end_failure");
+//RS     fs::write(root.join("bad.jet"), "fn run() { missing() }\n").unwrap();
+//RS     let artifact = root.join("failed.jetproof-replay");
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "bad.jet", "--capture=failed.jetproof-replay"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     assert!(
+//RS         !artifact.exists(),
+//RS         "front-end failure must not leave a replay artifact"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_capture_refuses_reachable_io_before_the_child_runs() {
+//RS     let root = workspace("capture_io_preflight");
+//RS     fs::write(
+//RS         root.join("main.jet"),
+//RS         "fn run() { print(\"not captured\") }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let artifact = root.join("io.jetproof-replay");
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "main.jet", "--capture=io.jetproof-replay"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     assert!(String::from_utf8_lossy(&out.stderr).contains("Error [E3627]"));
+//RS     assert!(
+//RS         !artifact.exists(),
+//RS         "preflight refusal must happen before artifact creation"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_capture_refuses_an_opaque_callable_before_the_child_runs() {
+//RS     let root = workspace("capture_opaque_preflight");
+//RS     fs::write(root.join("main.jet"), "fn run() { provider_call() }\n").unwrap();
+//RS     let artifact = root.join("opaque.jetproof-replay");
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "main.jet", "--capture=opaque.jetproof-replay"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     assert!(String::from_utf8_lossy(&out.stderr).contains("Error [E3625]"));
+//RS     assert!(
+//RS         !artifact.exists(),
+//RS         "opaque call must be refused before artifact creation"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_capture_refuses_an_unrecorded_time_operation_before_the_child_runs() {
+//RS     let root = workspace("capture_time_sleep_preflight");
+//RS     fs::write(
+//RS         root.join("main.jet"),
+//RS         "use core.time as time\nfn run() { time.sleep(1ms) }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let artifact = root.join("sleep.jetproof-replay");
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "main.jet", "--capture=sleep.jetproof-replay"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     assert!(String::from_utf8_lossy(&out.stderr).contains("Error [E3625]"));
+//RS     assert!(
+//RS         !artifact.exists(),
+//RS         "unsupported Time must be refused before artifact creation"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_capture_refuses_multiple_time_sites_for_the_single_record_adapter() {
+//RS     let root = workspace("capture_multiple_time_preflight");
+//RS     fs::write(
+//RS         root.join("main.jet"),
+//RS         "use core.time as time\nfn run() {\n    first :: time.now()\n    second :: time.now()\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let artifact = root.join("multiple.jetproof-replay");
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "main.jet", "--capture=multiple.jetproof-replay"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     assert!(String::from_utf8_lossy(&out.stderr).contains("Error [E3625]"));
+//RS     assert!(
+//RS         !artifact.exists(),
+//RS         "multiple Time sites must be refused before artifact creation"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_replay_rejects_unsafe_artifact_path_before_reading() {
+//RS     let root = workspace("replay_path");
+//RS     fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args([
+//RS             "prove",
+//RS             "main.jet",
+//RS             "--replay=../outside.jetproof-replay",
+//RS             "--json",
+//RS         ])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     assert!(
+//RS         out.stderr.is_empty(),
+//RS         "JSON path refusal leaked stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert!(String::from_utf8_lossy(&out.stdout).contains("\"code\":\"E3622\""));
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_replay_refuses_unrecorded_io_before_opening_an_artifact() {
+//RS     let root = workspace("replay_io");
+//RS     fs::write(
+//RS         root.join("main.jet"),
+//RS         "fn run() { print(\"not replayed\") }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args([
+//RS             "prove",
+//RS             "main.jet",
+//RS             "--replay=missing.jetproof-replay",
+//RS             "--json",
+//RS         ])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     assert!(
+//RS         out.stderr.is_empty(),
+//RS         "JSON authority refusal leaked stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert!(String::from_utf8_lossy(&out.stdout).contains("\"code\":\"E3623\""));
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_replay_refuses_unrecorded_time_sleep_before_opening_an_artifact() {
+//RS     let root = workspace("replay_time_sleep");
+//RS     fs::write(
+//RS         root.join("main.jet"),
+//RS         "use core.time as time\nfn run() { time.sleep(1ms) }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args([
+//RS             "prove",
+//RS             "main.jet",
+//RS             "--replay=missing.jetproof-replay",
+//RS             "--json",
+//RS         ])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     assert!(
+//RS         out.stderr.is_empty(),
+//RS         "JSON authority refusal leaked stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert!(String::from_utf8_lossy(&out.stdout).contains("\"code\":\"E3623\""));
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn prove_rejects_a_symlink_target() {
+//RS     use std::os::unix::fs::symlink;
+//RS 
+//RS     let root = workspace("symlink_target");
+//RS     fs::write(root.join("real.jet"), "fn run() {}\n").unwrap();
+//RS     symlink(root.join("real.jet"), root.join("link.jet")).unwrap();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "link.jet"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     assert!(String::from_utf8_lossy(&out.stderr).contains("must not be a symlink"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_uses_structured_test_evidence_and_continues_after_failure() {
+//RS     let root = workspace("test_continuation");
+//RS     fs::write(
+//RS         root.join("a_fail.jet"),
+//RS         "#Test(\"first fails\") {\n    assert(false, \"intentional\")\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         root.join("b_pass.jet"),
+//RS         "#Test(\"later passes\") {\n    assert(true)\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", ".", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(1),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let report = String::from_utf8(out.stdout).unwrap();
+//RS     assert!(
+//RS         report.contains("\"unit\":{\"failed\":1,\"passed\":1,\"selected\":2"),
+//RS         "{report}"
+//RS     );
+//RS     assert!(report.contains("\"schema\":\"jet.report/v1\""), "{report}");
+//RS     assert!(
+//RS         report.contains("\"outcome\":\"failed\",\"producer\":\"jet-test\""),
+//RS         "{report}"
+//RS     );
+//RS     assert!(
+//RS         report.contains("\"outcome\":\"passed\",\"producer\":\"jet-test\""),
+//RS         "{report}"
+//RS     );
+//RS 
+//RS     let human = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "."])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         human.status.code(),
+//RS         Some(1),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&human.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&human.stdout)
+//RS             .contains("TESTS    unit: 1 passed, 1 failed, 0 skipped"),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&human.stdout)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&human.stderr).contains("Stop [E3001]"),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&human.stderr)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_captures_contract_results_and_runtime_panics_structurally() {
+//RS     let root = workspace("contract_runtime");
+//RS     fs::write(
+//RS         root.join("a_contract_pass.jet"),
+//RS         "#Pre(value > 0, \"positive\") fn checked(value: Int) -[]> Int { return value }\n#Test(\"contract pass\") { assert_eq(checked(1), 1) }\n",
+//RS     ).unwrap();
+//RS     fs::write(
+//RS         root.join("b_contract_fail.jet"),
+//RS         "#Pre(value > 0, \"positive\") fn checked(value: Int) -[]> Int { return value }\n#Test(\"contract fail\") { checked(0) }\n",
+//RS     ).unwrap();
+//RS     fs::write(
+//RS         root.join("c_panic.jet"),
+//RS         "#Test(\"runtime panic\") { panic(\"structured boom\") }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         root.join("d_later.jet"),
+//RS         "#Test(\"later still runs\") { assert(true) }\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", ".", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(70),
+//RS         "stderr={} stdout={}",
+//RS         String::from_utf8_lossy(&out.stderr),
+//RS         String::from_utf8_lossy(&out.stdout)
+//RS     );
+//RS     assert!(
+//RS         out.stderr.is_empty(),
+//RS         "JSON prove parsed/leaked terminal stderr"
+//RS     );
+//RS     let report = String::from_utf8(out.stdout).unwrap();
+//RS     assert!(
+//RS         report.contains("\"kind\":\"contract\",\"outcome\":\"passed\""),
+//RS         "{report}"
+//RS     );
+//RS     assert!(
+//RS         report.contains("\"kind\":\"contract\",\"outcome\":\"failed\""),
+//RS         "{report}"
+//RS     );
+//RS     assert!(report.contains("\"code\":\"E3005\""), "{report}");
+//RS     assert!(report.contains("\"code\":\"E3001\""), "{report}");
+//RS     assert!(report.contains("structured boom"), "{report}");
+//RS     assert!(
+//RS         report.contains("\"kind\":\"unit\",\"outcome\":\"failed\",\"producer\":\"jet-test\""),
+//RS         "panic was not unit evidence: {report}"
+//RS     );
+//RS     assert!(
+//RS         report.contains("\"unit\":{\"failed\":1"),
+//RS         "panic was not counted in unit summary: {report}"
+//RS     );
+//RS     assert!(
+//RS         report.contains("\"path\":\"./d_later.jet\""),
+//RS         "later producer did not continue: {report}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_reports_real_property_cases_shrinks_and_continues() {
+//RS     let root = workspace("properties");
+//RS     fs::write(
+//RS         root.join("a_pass.jet"),
+//RS         "#Test fn identity(n: Int) { assert_eq(n, n) }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         root.join("b_shrink.jet"),
+//RS         "#Test fn always_small(n: Int) { assert(n < 50) }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         root.join("c_later.jet"),
+//RS         "#Test(\"later unit\") { assert(true) }\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", ".", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(1),
+//RS         "stderr={} stdout={}",
+//RS         String::from_utf8_lossy(&out.stderr),
+//RS         String::from_utf8_lossy(&out.stdout)
+//RS     );
+//RS     assert!(out.stderr.is_empty());
+//RS     let report = String::from_utf8(out.stdout).unwrap();
+//RS     assert!(
+//RS         report.contains("\"kind\":\"property\",\"outcome\":\"passed\""),
+//RS         "{report}"
+//RS     );
+//RS     assert!(
+//RS         report.contains("\"kind\":\"property\",\"outcome\":\"failed\""),
+//RS         "{report}"
+//RS     );
+//RS     assert!(
+//RS         report.contains("\"generatedCases\":200"),
+//RS         "passing property did not execute 200 cases: {report}"
+//RS     );
+//RS     assert!(
+//RS         report.contains("\"shrinkTrace\":[{\"name\":\"minimized_inputs\",\"value\":\"n = 50\"}]"),
+//RS         "{report}"
+//RS     );
+//RS     assert!(
+//RS         report.contains("\"path\":\"./c_later.jet\""),
+//RS         "later producer did not continue: {report}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_reports_real_doctests_and_continues() {
+//RS     let root = workspace("doctests");
+//RS     fs::write(
+//RS         root.join("a_pass.jet"),
+//RS         "/// ```jet\n/// 2 + 2 // => 4\n/// ```\nfn value() -[]> Int { return 4 }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         root.join("b_fail.jet"),
+//RS         "/// ```jet\n/// 2 + 2 // => 5\n/// ```\nfn value() -[]> Int { return 4 }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         root.join("c_later.jet"),
+//RS         "#Test(\"later unit\") { assert(true) }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", ".", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(1),
+//RS         "stderr={} stdout={}",
+//RS         String::from_utf8_lossy(&out.stderr),
+//RS         String::from_utf8_lossy(&out.stdout)
+//RS     );
+//RS     assert!(out.stderr.is_empty());
+//RS     let report = String::from_utf8(out.stdout).unwrap();
+//RS     assert!(
+//RS         report.contains("\"kind\":\"doctest\",\"outcome\":\"passed\""),
+//RS         "{report}"
+//RS     );
+//RS     assert!(
+//RS         report.contains("\"kind\":\"doctest\",\"outcome\":\"failed\""),
+//RS         "{report}"
+//RS     );
+//RS     assert!(
+//RS         report.contains("\"doctest\":{\"failed\":1,\"passed\":1,\"selected\":2"),
+//RS         "{report}"
+//RS     );
+//RS     assert!(
+//RS         report.contains("\"path\":\"./c_later.jet\""),
+//RS         "later producer did not continue: {report}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn mandatory_env_init_does_not_pull_optional_core_env_surface() {
+//RS     let root = workspace("env_prelude");
+//RS     fs::write(root.join("plain.jet"), "fn run() {}\n").unwrap();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["emit", "--rust", "plain.jet"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let rust = String::from_utf8(out.stdout).unwrap();
+//RS     assert!(rust.contains("fn jet_std_env_init()"), "{rust}");
+//RS     assert!(
+//RS         rust.contains("fn main() {\n    jet_std_env_init();"),
+//RS         "{rust}"
+//RS     );
+//RS     assert!(
+//RS         !rust.contains("fn jet_std_env_get("),
+//RS         "optional Core env accessors leaked into plain program"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn unknown_lens_is_exact_e2941_in_human_and_json_modes() {
+//RS     let root = workspace("bad_lens");
+//RS     fs::write(root.join("plain.jet"), "fn run() {}\n").unwrap();
+//RS     let human = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "plain.jet", "--lens", "test"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(human.status.code(), Some(2));
+//RS     assert!(human.stdout.is_empty());
+//RS     assert_eq!(
+//RS         String::from_utf8(human.stderr).unwrap(),
+//RS         "Error [E2941]: Unknown proof lens `test`\n Why: `jet prove` accepts all, refinements, effects, taint, contracts, tests, budgets, replay, solver\n Fix: Try `jet prove plain.jet --lens tests`\nMore: jet-lang.dev/e/E2941\n"
+//RS     );
+//RS 
+//RS     let machine = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "plain.jet", "--lens=test", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(machine.status.code(), Some(2));
+//RS     assert!(machine.stderr.is_empty());
+//RS     let json = String::from_utf8(machine.stdout).unwrap();
+//RS     assert!(json.contains("\"code\":\"E2941\""), "{json}");
+//RS     assert!(
+//RS         !json.contains("\"evidence\""),
+//RS         "malformed CLI emitted a ProofReport: {json}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_lens_shows_failed_unselected_evidence() {
+//RS     let root = workspace("lens_projection");
+//RS     fs::write(
+//RS         root.join("main.jet"),
+//RS         "#Test(\"outside\") { assert(false, \"lens failure\") }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "main.jet", "--lens", "contracts"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     let stdout = String::from_utf8(out.stdout).unwrap();
+//RS     assert!(stdout.contains("OUTSIDE SELECTED LENSES"), "{stdout}");
+//RS     assert!(stdout.contains("unit outside"), "{stdout}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_solver_lens_emits_checked_certificate_evidence() {
+//RS     let root = workspace("solver_lens");
+//RS     fs::write(
+//RS         root.join("checked.jet"),
+//RS         "#[Pre(value > 0, \"positive\"), Post(result == value, \"unchanged\")] fn checked(value: Int) -[]> Int { return value }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "checked.jet", "--lens", "solver", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(0),
+//RS         "stderr={} stdout={}",
+//RS         String::from_utf8_lossy(&out.stderr),
+//RS         String::from_utf8_lossy(&out.stdout)
+//RS     );
+//RS     let report = String::from_utf8(out.stdout.clone()).unwrap();
+//RS     assert!(report.contains("\"facet\":\"solver\""), "{report}");
+//RS     assert!(report.contains("\"status\":\"proved\""), "{report}");
+//RS     assert!(report.contains("\"certificateSha256\":"), "{report}");
+//RS     assert!(
+//RS         report.contains("\"backend\":\"native-presburger\""),
+//RS         "{report}"
+//RS     );
+//RS     assert!(
+//RS         report.contains("\"solver\":{\"disproved\":0,\"proved\":1"),
+//RS         "{report}"
+//RS     );
+//RS 
+//RS     let repeated = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "checked.jet", "--lens", "solver", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(repeated.status.code(), Some(0));
+//RS     assert_eq!(
+//RS         out.stdout, repeated.stdout,
+//RS         "solver certificate output is not deterministic"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_solver_counterexample_is_checked_producer_evidence() {
+//RS     let root = workspace("solver_counterexample_producer");
+//RS     fs::write(
+//RS         root.join("bad.jet"),
+//RS         "#[Pre(value > 0, \"positive\"), Post(result > value, \"fee grows\")] fn add_fee(value: Int) -[]> Int { return value }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "bad.jet", "--lens", "solver", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(1),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let report = String::from_utf8(out.stdout).unwrap();
+//RS     assert!(report.contains("\"code\":\"E2950\""), "{report}");
+//RS     assert!(report.contains("\"outcome\":\"disproved\""), "{report}");
+//RS     assert!(report.contains("\"counterexample\":["), "{report}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_capture_sensitive_refuses_without_tty_and_leaves_no_artifact() {
+//RS     let root = workspace("capture_sensitive_non_tty");
+//RS     fs::write(
+//RS         root.join("main.jet"),
+//RS         "use core.time as time\n#Test { observed :: time.now() }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args([
+//RS             "prove",
+//RS             "main.jet",
+//RS             "--capture-sensitive=sensitive.jetproof-replay",
+//RS         ])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     assert!(String::from_utf8_lossy(&out.stderr).contains("Error [E3627]"));
+//RS     assert!(!root.join("sensitive.jetproof-replay").exists());
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_capture_rejects_multi_member_targets_before_authority_or_artifact() {
+//RS     let root = workspace("replay_cardinality");
+//RS     fs::write(root.join("a.jet"), "fn a() {}\n").unwrap();
+//RS     fs::write(root.join("b.jet"), "fn b() {}\n").unwrap();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", ".", "--capture=multi.jetproof-replay"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     assert!(String::from_utf8_lossy(&out.stderr).contains("Error [E3624]"));
+//RS     assert!(!root.join("multi.jetproof-replay").exists());
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_sensitive_capture_json_is_a_single_stdout_diagnostic() {
+//RS     let root = workspace("replay_sensitive_json");
+//RS     fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "main.jet", "--capture-sensitive", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     assert!(out.stderr.is_empty(), "JSON capture leaked stderr");
+//RS     let stdout = String::from_utf8(out.stdout).unwrap();
+//RS     assert!(stdout.contains("\"code\":\"E3627\""), "{stdout}");
+//RS     assert!(!root.join(".jetproof-replay").exists());
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_replay_rejects_schema_and_identity_changes_as_typed_failures() {
+//RS     let root = workspace("replay_identity_schema");
+//RS     fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+//RS     let artifact = "capture.jetproof-replay";
+//RS     let captured = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args([
+//RS             "prove",
+//RS             "main.jet",
+//RS             &format!("--capture={artifact}"),
+//RS             "--json",
+//RS         ])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(captured.status.code(), Some(0));
+//RS 
+//RS     let artifact_path = root.join(artifact);
+//RS     let original = fs::read(&artifact_path).unwrap();
+//RS     let mut incompatible = original.clone();
+//RS     incompatible[10] = 1;
+//RS     fs::write(&artifact_path, incompatible).unwrap();
+//RS     let schema = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "main.jet", "--replay", artifact, "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(schema.status.code(), Some(1));
+//RS     assert!(schema.stderr.is_empty());
+//RS     assert!(String::from_utf8_lossy(&schema.stdout).contains("\"code\":\"E3620\""));
+//RS 
+//RS     fs::write(&artifact_path, original).unwrap();
+//RS     fs::write(root.join("main.jet"), "fn run() { assert(false) }\n").unwrap();
+//RS     let identity = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "main.jet", "--replay", artifact, "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(identity.status.code(), Some(1));
+//RS     assert!(identity.stderr.is_empty());
+//RS     assert!(String::from_utf8_lossy(&identity.stdout).contains("\"code\":\"E3621\""));
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_presentation_lenses_keep_the_complete_json_report_unchanged() {
+//RS     let root = workspace("lens_report_identity");
+//RS     fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+//RS     let full = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "main.jet", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     let contracts = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "main.jet", "--lens", "contracts", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(full.status.code(), Some(0));
+//RS     assert_eq!(contracts.status.code(), Some(0));
+//RS     assert_eq!(full.stdout, contracts.stdout);
+//RS }
+//RS 
+//RS #[test]
+//RS fn prove_solver_lens_reports_a_verified_counterexample() {
+//RS     let root = workspace("solver_counterexample");
+//RS     fs::write(
+//RS         root.join("bad.jet"),
+//RS         "#Post(result > value, \"grows\") fn unchanged(value: Int) -[]> Int { return value }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jet())
+//RS         .current_dir(&root)
+//RS         .args(["prove", "bad.jet", "--lens", "solver", "--json"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(1),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let report = String::from_utf8(out.stdout).unwrap();
+//RS     assert!(report.contains("\"code\":\"E2950\""), "{report}");
+//RS     assert!(report.contains("\"status\":\"disproved\""), "{report}");
+//RS }
+// END-PORT-PENDING 1137 tests/prove.rs:1-1260
+

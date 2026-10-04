@@ -1,0 +1,369 @@
+use core.files.runtime.kernel_path_components as path_components
+use core.files.runtime.kernel_path_components.[OSPath]
+use jet_foundation.[Span, Diagnostic, AuthorityVerdict, AUTHORITY_PANIC_ROOT, authority_holds, authority_covers, authority_covers_any, authority_root, authority_parse_rights, authority_answer, diagnostic_from_registry]
+
+// Shared whole-program package effect budget; lock mutation is outward.
+// D-EFFBUDGET1 (ratified 2026-07-01): the package effect budget
+// (jet-pkg-model EffectBudget.rs).
+//
+// Zero-config: every `jet build` prints a one-line summary of the effects the
+// dependency graph uses, and per-dependency provenance is recorded in the
+// lockfile. An `authority: { holds: { allow: […], deny: […] } }` block enforces
+// the whole graph (E1220); `authority.grants` is the audited per-dependency
+// escape, also recorded in the lockfile.
+//
+// Attribution walks sema's solved per-function effect fixpoint from the
+// driver's selected entry, then attributes only reached functions to the
+// package (root or a dependency) whose module defines them, matching each
+// module's on-disk path against the loader's dependency roots.
+
+pub EFFECT_ROOT_PACKAGE :: prep { "root" }
+pub EFFECT_PANIC_EDGE :: prep { "__jet_panic__" }
+pub EFFECT_BUILD_ENTRY :: prep { "build" }
+
+// Sema's per-function effect summary (Rust `Sema::EffectSummary`): the
+// directly performed effects, the static call edges, and whether an open
+// callee makes the function conservatively maximal.
+pub struct PackageEffectSummary {
+    pub direct: [String]
+    pub edges: [String]
+    pub maximal: Bool
+}
+
+// A dependency import of the entry module and the root-side span where it
+// crosses the budget boundary (`ImportKind::Module` name span, or the
+// module-alias span of an unqualified import).
+pub struct EffectBudgetImport {
+    pub name: String
+    pub span: Span
+}
+
+// The selected runnable output of the entry module (`ConstDef.resolved_output`
+// with `selected`): its defining module and semantic name.
+pub struct EffectBudgetOutput {
+    pub module_index: Int
+    pub semantic_name: String
+}
+
+// One loaded module as the budget reads it (Rust `LoadedModule`).
+pub struct EffectBudgetModule {
+    pub path: OSPath
+    pub alias: String
+    // `Sema::effect_key` of every function, method, and trait-impl method the
+    // module defines, in item order.
+    pub function_keys: [String]
+    pub imports: [EffectBudgetImport]
+    // Whether the module declares the `build(BuildContext)` entry.
+    pub has_build_entry: Bool
+}
+
+// The checked program as the budget reads it (Rust `ProgramBundle`).
+pub struct EffectBudgetProgram {
+    pub entry: Int
+    pub modules: [EffectBudgetModule]
+    // Dependency name -> its source root (`deps:` and hangar-realized `use`).
+    pub dep_roots: [String: OSPath]
+    pub selected_output: EffectBudgetOutput?
+}
+
+// One package's (root, or a dependency) aggregated effects.
+pub struct PackageEffects {
+    // `root` for the building package itself, else the dependency name.
+    pub name: String
+    pub effects: [String]
+    // One deterministic function identity reaching each effect (E1220).
+    pub effect_sites: [String: String]
+    // Function identities where a deniable Panic stop enters the graph.
+    pub panic_sites: [String]
+    // Root-side source location where a dependency crosses the boundary.
+    pub boundary_span: Span?
+}
+
+// `Sema::effect_key`: `Type::name` for methods, the bare name otherwise.
+pub fn pkg_effect_key(owner_type: String?, name: String) -> String Never! {
+    owner :: owner_type ?? return name
+    "{owner}::{name}"
+}
+
+// `Sema::memory_allocation_bound(name).is_some()` or `Mem.Rc`: memory rights
+// are governed elsewhere and never budgeted here.
+pub fn pkg_effect_is_memory_right(name: String) -> Bool Never! {
+    if name == "Mem.Rc" || name == "Mem.Alloc" -> return true
+    if !name.starts_with("Mem.Alloc(") || !name.ends_with(")") -> return false
+    args :: name.removeprefix("Mem.Alloc(").removesuffix(")").trim()
+    if !args.starts_with("above:") -> return false
+    digits :: args.removeprefix("above:").trim()
+    if digits == "" -> return false
+    loop byte in digits.bytes() {
+        code :: Int.from_u8(byte)
+        if code < 48 || code > 57 -> return false
+    }
+    bytes :: Int.parse(digits) ?? return false
+    bytes > 0
+}
+
+pub fn pkg_dependency_boundary_span(program: EffectBudgetProgram, dependency: String) -> Span? Never! {
+    if program.entry < 0 || program.entry >= program.modules.len() -> return None
+    loop import in program.modules[program.entry].imports {
+        if import.name == dependency -> return Val(import.span)
+    }
+    None
+}
+
+// The package owning a module path: the first dependency (in name order)
+// whose source root contains it, else `root`.
+pub fn pkg_effect_module_owner(program: EffectBudgetProgram, path: OSPath) -> String Never! {
+    names := program.dep_roots.keys().to_list()
+    &names.sort()
+    loop name in names {
+        if path_components.starts_with(path, program.dep_roots[name]) -> return name
+    }
+    EFFECT_ROOT_PACKAGE
+}
+
+// Attribute only functions reachable from the selected entry to the package
+// whose module defines them. Loaded helpers the selected driver never calls
+// must not become application provenance; functions with no solved entry
+// contribute nothing.
+pub fn pkg_compute_package_effects(program: EffectBudgetProgram, solved: [String: [String]], summaries: [String: PackageEffectSummary]) -> [PackageEffects] Never! {
+    reachable :: pkg_effect_entry_reachable_keys(program, summaries, "run")
+    by_package := [String: PackageEffects]{}
+    loop loaded in program.modules {
+        owner :: pkg_effect_module_owner(program, loaded.path)
+        aggregate := by_package.get(owner) ?? PackageEffects{name: owner, effects: [String]{}, effect_sites: [String: String]{}, panic_sites: [String]{}, boundary_span: None}
+        if aggregate.boundary_span == None && owner != EFFECT_ROOT_PACKAGE {
+            aggregate.boundary_span = pkg_dependency_boundary_span(program, owner)
+        }
+        loop function_key in loaded.function_keys {
+            pkg_collect_effects_for_key("{loaded.alias}::{function_key}", reachable, solved, summaries, &aggregate)
+        }
+        by_package[owner] = aggregate
+    }
+    names := by_package.keys().to_list()
+    &names.sort()
+    out := [PackageEffects]{}
+    loop name in names {
+        entry := by_package[name]
+        entry.effects = authority_holds(entry.effects)
+        entry.panic_sites = authority_holds(entry.panic_sites)
+        &out.push(entry)
+    }
+    out
+}
+
+// The semantic roots the driver can select: a selected runnable output, else
+// the canonical `run` wrapper, else (for `run` only) the compiler-host
+// `build` entry so its pre-runtime budget is not silently dropped. The
+// qualified spelling wins over the short one.
+pub fn pkg_effect_entry_candidates(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String) -> [String] Never! {
+    if program.selected_output == {
+        .Val(output) -> {
+            if output.module_index >= 0 && output.module_index < program.modules.len() {
+                alias :: program.modules[output.module_index].alias
+                candidate_values :: [String]{"{alias}::{output.semantic_name}", output.semantic_name}
+                loop candidate in candidate_values {
+                    if summaries.has_key(candidate) -> return [String]{candidate}
+                }
+                return [String]{}
+            }
+        }
+        .None -> {}
+    }
+    if program.entry < 0 || program.entry >= program.modules.len() {
+        if summaries.has_key(default_entry) -> return [String]{default_entry}
+        return [String]{}
+    }
+    entry_module :: program.modules[program.entry]
+    candidates := [String]{"{entry_module.alias}::{default_entry}", default_entry}
+    if default_entry == "run" && entry_module.has_build_entry {
+        &candidates.push("{entry_module.alias}::{EFFECT_BUILD_ENTRY}")
+        &candidates.push(EFFECT_BUILD_ENTRY)
+    }
+    loop candidate in candidates {
+        if summaries.has_key(candidate) -> return [String]{candidate}
+    }
+    [String]{}
+}
+
+pub fn pkg_effect_entry_reachable_keys(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String) -> [String: Bool] Never! {
+    pending := pkg_effect_entry_candidates(program, summaries, default_entry)
+    reachable := [String: Bool]{}
+    loop pending.len() > 0 {
+        key :: &pending.pop() ?? break
+        summary :: summaries.get(key) ?? next
+        if reachable.has_key(key) -> next
+        reachable[key] = true
+        loop edge in summary.edges -> &pending.push(edge)
+    }
+    reachable
+}
+
+pub fn pkg_effect_key_is_reachable(key: String, reachable: [String: Bool]) -> Bool Never! {
+    if reachable.has_key(key) -> return true
+    parts :: key.split("::").to_list()
+    if parts.len() < 2 -> return false
+    reachable.has_key(parts[parts.len() - 1])
+}
+
+pub fn pkg_collect_effects_for_key(key: String, reachable: [String: Bool], solved: [String: [String]], summaries: [String: PackageEffectSummary], aggregate: &PackageEffects) {
+    if !pkg_effect_key_is_reachable(key, reachable) -> return
+    set :: solved.get(key) ?? return
+    loop effect_name in set {
+        &aggregate.effects.push(effect_name)
+        if !aggregate.effect_sites.has_key(effect_name) {
+            seen := [String: Bool]{}
+            aggregate.effect_sites[effect_name] = pkg_effect_site(key, effect_name, solved, summaries, &seen)
+        }
+    }
+    seen := [String: Bool]{}
+    site :: pkg_panic_site(key, summaries, &seen) ?? return
+    &aggregate.panic_sites.push(site)
+}
+
+// The deepest function on a static path from `key` that directly performs
+// (or maximally may perform) `effect`.
+pub fn pkg_effect_site(key: String, effect_name: String, solved: [String: [String]], summaries: [String: PackageEffectSummary], seen: &[String: Bool]) -> String Never! {
+    if seen.has_key(key) -> return ~key
+    seen[key] = true
+    summary :: summaries.get(key) ?? return ~key
+    if summary.maximal -> return ~key
+    loop direct in summary.direct {
+        if authority_covers(direct, effect_name) -> return ~key
+    }
+    loop callee in authority_holds(summary.edges) {
+        effects :: solved.get(callee) ?? next
+        if authority_covers_any(effects, effect_name) || pkg_effect_any_covers(effects, effect_name) {
+            return pkg_effect_site(callee, effect_name, solved, summaries, &seen)
+        }
+    }
+    ~key
+}
+
+// Whether any candidate effect covers `effect` (`effect_covers(candidate, effect)`).
+pub fn pkg_effect_any_covers(candidates: [String], effect_name: String) -> Bool Never! {
+    loop candidate in candidates {
+        if authority_covers(candidate, effect_name) -> return true
+    }
+    false
+}
+
+// The first function on a static path from `key` where a deniable Panic stop
+// enters the graph.
+pub fn pkg_panic_site(key: String, summaries: [String: PackageEffectSummary], seen: &[String: Bool]) -> String? Never! {
+    if seen.has_key(key) -> return None
+    seen[key] = true
+    summary :: summaries.get(key) ?? return None
+    if summary.maximal || summary.edges.contains(EFFECT_PANIC_EDGE) -> return Val(key)
+    loop direct in summary.direct {
+        if authority_root(direct) == AUTHORITY_PANIC_ROOT -> return Val(key)
+    }
+    loop callee in authority_holds(summary.edges) {
+        site :: pkg_panic_site(callee, summaries, &seen) ?? next
+        return Val(site)
+    }
+    None
+}
+
+// The always-on one-line `jet build` summary.
+pub fn pkg_effect_summary_line(entries: [PackageEffects]) -> String Never! {
+    all := [String]{}
+    loop entry in entries {
+        loop effect_name in entry.effects -> &all.push(effect_name)
+    }
+    all = authority_holds(all)
+    if all.len() == 0 -> return "effects: none"
+    dependency_count := 0
+    loop entry in entries {
+        if entry.name != EFFECT_ROOT_PACKAGE && entry.effects.len() > 0 -> dependency_count += 1
+    }
+    if dependency_count == 0 -> return "effects: {all.join(", ")}"
+    suffix :: if dependency_count == 1 -> "y" else -> "ies"
+    "effects: {all.join(", ")} (across root + {dependency_count} dependenc{suffix})"
+}
+
+// Per-package effect names, sorted, for lockfile provenance.
+pub fn pkg_effect_provenance_for(entries: [PackageEffects], name: String) -> [String] Never! {
+    loop entry in entries {
+        if entry.name == name -> return entry.effects
+    }
+    [String]{}
+}
+
+// Rights of one budget row, dropping memory rights and unknown spellings.
+pub fn pkg_effect_budget_rights(names: [String]) -> [String] Never! {
+    kept := [String]{}
+    loop name in names {
+        if !pkg_effect_is_memory_right(name) -> &kept.push(name)
+    }
+    authority_parse_rights(kept)
+}
+
+// D-EFFBUDGET1 whole-graph enforcement: with `authority.holds` declared,
+// every package (root or dependency) reaching an effect outside `allow` or
+// inside `deny` fails with E1220, unless `authority.grants` covers it for
+// that dependency. D-EFFTREE1: rows may be ancestor roots; the substrate
+// verdict decides. D-PANICROOT1: Panic is deny-only.
+pub fn pkg_effect_enforce(entries: [PackageEffects], manifest: PackageFacts) -> [Diagnostic] Never! {
+    if !manifest.effects_enabled -> return [Diagnostic]{}
+    allow :: if manifest.authority.holds.allow == {
+        .Val(names) -> Val(pkg_effect_budget_rights(names))
+        .None -> None
+    }
+    deny :: pkg_effect_budget_rights(manifest.authority.holds.deny ?? [String]{})
+    empty :: [String]{}
+    diagnostics := [Diagnostic]{}
+    loop package in entries {
+        granted :: pkg_effect_grant_for(manifest, package.name)
+        loop effect_name in package.effects {
+            if authority_root(effect_name) == "Mem" -> next
+            is_panic :: authority_root(effect_name) == AUTHORITY_PANIC_ROOT
+            if !is_panic && granted != None && authority_answer(granted, empty, effect_name) == AuthorityVerdict.Allowed -> next
+            outside_allow :: if allow == {
+                .Val(rights) -> !is_panic && authority_answer(rights, empty, effect_name) != AuthorityVerdict.Allowed
+                .None -> false
+            }
+            inside_deny :: authority_answer(empty, deny, effect_name) == AuthorityVerdict.Denied
+            if !outside_allow && !inside_deny -> next
+            if is_panic {
+                site :: if package.panic_sites.len() > 0 -> package.panic_sites[0] else -> "a reachable dependency function"
+                &diagnostics.push(pkg_e1220_panic(package.name, site, package.boundary_span))
+            } else {
+                &diagnostics.push(pkg_e1220_at(package.name, effect_name, package.effect_sites.get(effect_name)))
+            }
+        }
+    }
+    diagnostics
+}
+
+// The parsed `authority.grants` row of one dependency, if any.
+pub fn pkg_effect_grant_for(manifest: PackageFacts, dependency: String) -> [String]? Never! {
+    loop grant in manifest.authority.grants {
+        if grant.package == dependency -> return Val(pkg_effect_budget_rights(grant.rights))
+    }
+    None
+}
+// E1220: a package reaches an effect outside this package's budget.
+pub fn pkg_e1220(dependency: String, effect_name: String) -> Diagnostic Never! {
+    pkg_e1220_at(dependency, effect_name, None)
+}
+
+pub fn pkg_e1220_at(dependency: String, effect_name: String, site: String?) -> Diagnostic Never! {
+    location :: if site == {
+        .Val(function) -> " function `{function}`"
+        .None -> ""
+    }
+    fix :: if dependency == EFFECT_ROOT_PACKAGE -> "add `{effect_name}` to `authority.holds.allow` or remove the code that reaches it" else -> "add `{effect_name}` to `authority.holds.allow`, grant it to `{dependency}` in `authority.grants`, or drop the dependency"
+    diagnostic_from_registry("E1220", None,
+        "`{dependency}`{location} uses the `{effect_name}` effect, which this package's budget doesn't allow",
+        "an `authority.holds` budget fails the build when package code or any dependency reaches an effect you didn't list — supply-chain review as a compile error",
+        fix)
+}
+
+// E1220 / D-NOPANIC1=D: a package denial keeps the panic provenance visible
+// and offers the same exits as function-scope prohibition.
+pub fn pkg_e1220_panic(dependency: String, panic_site: String, span: Span?) -> Diagnostic Never! {
+    diagnostic_from_registry("E1220", span,
+        "`{dependency}` uses the `Panic` effect at `{panic_site}`, which this package's budget doesn't allow",
+        "the package denies stops from `{panic_site}`; a dependency that can stop cannot cross this budget boundary",
+        "return a fallible result for expected failure, or add facts or a `#Pre`/refinement proof for a programmer-error stop; `Panic` is deny-only and cannot be allowed or granted")
+}

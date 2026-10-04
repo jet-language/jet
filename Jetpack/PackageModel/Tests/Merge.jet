@@ -57,26 +57,26 @@
 }
 
 fn pkg_merge_test_writer(key: String, value: String, layer: ContributionLayer, source: String) -> FactContribution {
-    FactContribution.new(key, FactValue.Text(value), SourceScope.Package, layer, source)
+    fact_contribution_new(key, FactValue.Text{value: value}, SourceScope.Package, layer, source)
 }
 
 #Test("fact law resolves layers and force without a second priority table") {
-    resolved :: pkg_fact_resolve(FactKey.new("k"), [FactContribution]{
+    resolved :: fact_resolve(fact_key_new("k"), [FactContribution]{
         pkg_merge_test_writer("k", "default", ContributionLayer.Declaration, "package.jet"),
         pkg_merge_test_writer("k", "bundle", ContributionLayer.OptimizationBundle, "release"),
         pkg_merge_test_writer("k", "cli", ContributionLayer.CommandLine, "command line")
-    }) ?? panic("layers resolve")
-    assert_eq((resolved ?? panic("a writer decides")).value, FactValue.Text("cli"))
-    pinned :: pkg_fact_resolve(FactKey.new("k"), [FactContribution]{
+    }) ?? panic("layers resolve to a deciding writer")
+    assert_eq(resolved.value, FactValue.Text{value: "cli"})
+    pinned :: fact_resolve(fact_key_new("k"), [FactContribution]{
         pkg_merge_test_writer("k", "bundle", ContributionLayer.OptimizationBundle, "release"),
-        pkg_merge_test_writer("k", "fleet", ContributionLayer.Fleet, "fleet.jet").forced(),
+        fact_contribution_force(pkg_merge_test_writer("k", "fleet", ContributionLayer.Fleet, "fleet.jet")),
         pkg_merge_test_writer("k", "cli", ContributionLayer.CommandLine, "command line")
-    }) ?? panic("a fleet pin resolves")
-    assert_eq((pinned ?? panic("a writer decides")).value, FactValue.Text("fleet"))
+    }) ?? panic("a fleet pin resolves to a deciding writer")
+    assert_eq(pinned.value, FactValue.Text{value: "fleet"})
 }
 
 #Test("fact law conflict keeps both writers") {
-    if pkg_fact_resolve(FactKey.new("k"), [FactContribution]{pkg_merge_test_writer("k", "a", ContributionLayer.Environment, "env-a"), pkg_merge_test_writer("k", "b", ContributionLayer.Environment, "env-b")}) == {
+    if fact_resolve(fact_key_new("k"), [FactContribution]{pkg_merge_test_writer("k", "a", ContributionLayer.Environment, "env-a"), pkg_merge_test_writer("k", "b", ContributionLayer.Environment, "env-b")}) == {
         .Ok(_) -> panic("expected a conflict")
         .Err(error) -> {
             if error == {
@@ -116,4 +116,22 @@ fn pkg_merge_test_writer(key: String, value: String, layer: ContributionLayer, s
             }
         }
     }
+}
+
+#Test("locked fact values keep Rust tuple debug spelling") {
+    assert_eq(fact_value_debug_text(FactValue.Bool{value: true}), "Bool(true)")
+    assert_eq(fact_value_debug_text(FactValue.Int{value: 42}), "Int(42)")
+    assert_eq(fact_value_debug_text(FactValue.Char{value: '\n'}), "Char('\\n')")
+    assert_eq(fact_value_debug_text(FactValue.Text{value: "quoted \"text\"\n"}), "Text(\"quoted \\\"text\\\"\\n\")")
+    assert_eq(fact_value_debug_text(FactValue.Enum{variant: "Fast"}), "Enum(\"Fast\")")
+    assert_eq(fact_value_debug_text(FactValue.OptionalText{value: Val("x")}), "OptionalText(Some(\"x\"))")
+    assert_eq(fact_value_debug_text(FactValue.OptionalText{value: None}), "OptionalText(None)")
+    assert_eq(fact_value_debug_text(FactValue.Policy{value: PolicyValue.Limit{value: 7}}), "Policy(Limit(7))")
+    assert_eq(fact_value_debug_text(FactValue.Policy{value: PolicyValue.Forbid}), "Policy(Forbid)")
+}
+
+#Test("entry ignores an unwritten fact with no default") {
+    contribution :: EntryContribution{settings: [String: [FactContribution]]{"absent": [FactContribution]{}}}
+    merged :: pkg_merge_entry([EntryContribution]{contribution}) ?? panic("empty fact contributions merge")
+    assert(!merged.settings.has_key("absent"))
 }

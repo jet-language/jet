@@ -1,0 +1,367 @@
+// Rust CLISchema.rs:2452-2649 fixtures and all three tests, plus codec bounds.
+fn cli_schema_test_schema() -> CLICommandSchema Never! {
+    CLICommandSchema{entry_type: "Options", description: None, inputs: [TCLIInput]{
+        TCLIInput{field: "output_file", flag: "output-file", short: Val("o"), env: Val("OUTPUT_FILE"), help: "destination", metavar: Val("OUTPUT_FILE"), shape: TCLIInputShape.Value{kind: TCLIValueKind.Path, optional: false, default: None}, positional: Val(0), variadic: false}
+    }, commands: [TCLICommand]{}, jobs: [CLIRecordJob]{}, standard: false, version: None}
+}
+fn cli_schema_test_zeroes(count: Int) -> [U8] Never! { loop _ in 0..<count -> U8{0} }
+fn cli_schema_test_put(bytes: &[U8], at: Int, value: [U8]) Never! {
+    loop (index, byte) in value -> bytes[at + index] = byte
+}
+fn cli_schema_test_num(bytes: &[U8], at: Int, value: Int, width: Int, little: Bool) Never! {
+    loop index in 0..<width {
+        shift :: if little -> index * 8 else -> (width - 1 - index) * 8
+        bytes[at + index] = U8{(value >> shift) & 255}
+    }
+}
+// Rust tests::elf.
+fn cli_schema_test_elf(record: [U8]) -> [U8] Never! {
+    names := [U8]{U8{0}}
+    &names.extend(".shstrtab".bytes())
+    &names.push(U8{0})
+    &names.extend(".jet_command".bytes())
+    &names.push(U8{0})
+    names_at :: 64
+    record_at :: names_at + names.len()
+    sections_at :: record_at + record.len()
+    bytes := cli_schema_test_zeroes(sections_at + 192)
+    cli_schema_test_put(&bytes, 0, [U8]{127, 69, 76, 70})
+    bytes[4] = U8{2}
+    bytes[5] = U8{1}
+    cli_schema_test_num(&bytes, 40, sections_at, 8, true)
+    cli_schema_test_num(&bytes, 58, 64, 2, true)
+    cli_schema_test_num(&bytes, 60, 3, 2, true)
+    cli_schema_test_num(&bytes, 62, 1, 2, true)
+    cli_schema_test_put(&bytes, names_at, names)
+    cli_schema_test_put(&bytes, record_at, record)
+    strings :: sections_at + 64
+    cli_schema_test_num(&bytes, strings, 1, 4, true)
+    cli_schema_test_num(&bytes, strings + 24, names_at, 8, true)
+    cli_schema_test_num(&bytes, strings + 32, names.len(), 8, true)
+    metadata :: sections_at + 128
+    cli_schema_test_num(&bytes, metadata, 11, 4, true)
+    cli_schema_test_num(&bytes, metadata + 24, record_at, 8, true)
+    cli_schema_test_num(&bytes, metadata + 32, record.len(), 8, true)
+    bytes
+}
+// Rust tests::pe/pe_with_trailing.
+fn cli_schema_test_pe(record: [U8], duplicate: Bool) -> [U8] Never! {
+    pe :: 128
+    count :: if duplicate -> 2 else -> 1
+    table :: pe + 24
+    raw_at :: table + count * 40
+    bytes := cli_schema_test_zeroes(raw_at + count * record.len())
+    cli_schema_test_put(&bytes, 0, "MZ".bytes())
+    cli_schema_test_num(&bytes, 60, pe, 4, true)
+    cli_schema_test_put(&bytes, pe, [U8]{U8{80}, U8{69}, U8{0}, U8{0}})
+    cli_schema_test_num(&bytes, pe + 6, count, 2, true)
+    loop index in 0..<count {
+        section :: table + index * 40
+        cli_schema_test_put(&bytes, section, ".jetcmd".bytes())
+        cli_schema_test_num(&bytes, section + 16, record.len(), 4, true)
+        offset :: raw_at + index * record.len()
+        cli_schema_test_num(&bytes, section + 20, offset, 4, true)
+        cli_schema_test_put(&bytes, offset, record)
+    }
+    bytes
+}
+fn cli_schema_test_pe_trailing(record: [U8], trailing: [U8]) -> [U8] Never! {
+    bytes := cli_schema_test_pe(record, false)
+    cli_schema_test_num(&bytes, 168, record.len() + trailing.len(), 4, true)
+    &bytes.extend(trailing)
+    bytes
+}
+// Rust tests::mach.
+fn cli_schema_test_mach(record: [U8]) -> [U8] Never! {
+    command_size :: 152
+    record_at :: 184
+    bytes := cli_schema_test_zeroes(record_at + record.len())
+    cli_schema_test_put(&bytes, 0, [U8]{207, 250, 237, 254})
+    cli_schema_test_num(&bytes, 16, 1, 4, true)
+    cli_schema_test_num(&bytes, 20, command_size, 4, true)
+    cli_schema_test_num(&bytes, 32, 25, 4, true)
+    cli_schema_test_num(&bytes, 36, command_size, 4, true)
+    cli_schema_test_num(&bytes, 96, 1, 4, true)
+    cli_schema_test_put(&bytes, 104, "__jetcmd".bytes())
+    cli_schema_test_num(&bytes, 144, record.len(), 8, true)
+    cli_schema_test_num(&bytes, 152, record_at, 4, true)
+    cli_schema_test_put(&bytes, record_at, record)
+    bytes
+}
+// Rust tests::fat_mach/nested_fat_mach.
+fn cli_schema_test_fat_mach(record: [U8]) -> [U8] Never! {
+    first :: cli_schema_test_mach(record)
+    second :: cli_schema_test_mach(record)
+    second_at :: 48 + first.len()
+    bytes := cli_schema_test_zeroes(second_at + second.len())
+    cli_schema_test_put(&bytes, 0, [U8]{202, 254, 186, 190})
+    cli_schema_test_num(&bytes, 4, 2, 4, false)
+    cli_schema_test_num(&bytes, 16, 48, 4, false)
+    cli_schema_test_num(&bytes, 20, first.len(), 4, false)
+    cli_schema_test_num(&bytes, 36, second_at, 4, false)
+    cli_schema_test_num(&bytes, 40, second.len(), 4, false)
+    cli_schema_test_put(&bytes, 48, first)
+    cli_schema_test_put(&bytes, second_at, second)
+    bytes
+}
+fn cli_schema_test_nested_fat_mach(record: [U8]) -> [U8] Never! {
+    inner :: cli_schema_test_fat_mach(record)
+    bytes := cli_schema_test_zeroes(28 + inner.len())
+    cli_schema_test_put(&bytes, 0, [U8]{202, 254, 186, 190})
+    cli_schema_test_num(&bytes, 4, 1, 4, false)
+    cli_schema_test_num(&bytes, 16, 28, 4, false)
+    cli_schema_test_num(&bytes, 20, inner.len(), 4, false)
+    cli_schema_test_put(&bytes, 28, inner)
+    bytes
+}
+fn cli_schema_test_decode(record: [U8]) -> CLICommandSchema Never! {
+    cli_schema_decode_record(record) ?? panic("metadata decode failed: {cli_metadata_error_message(err)}")
+}
+fn cli_schema_test_read(bytes: [U8]) -> CLICommandSchema Never! {
+    cli_schema_read_executable(bytes) ?? panic("executable decode failed: {cli_metadata_error_message(err)}")
+}
+fn cli_schema_test_error(bytes: [U8], expected: CLIMetadataError, executable: Bool) Never! {
+    if executable {
+        if cli_schema_read_executable(bytes) == {
+            .Ok(_) -> panic("hostile executable accepted")
+            .Err(error) -> assert(error == expected)
+        }
+    } else {
+        if cli_schema_decode_record(bytes) == {
+            .Ok(_) -> panic("hostile record accepted")
+            .Err(error) -> assert(error == expected)
+        }
+    }
+}
+#Test("canonical_record_round_trips") {
+    schema :: cli_schema_test_schema()
+    assert(cli_schema_test_decode(cli_schema_encode_record(schema)) == schema)
+}
+#Test("reads_cross_format_section_fixtures") {
+    schema :: cli_schema_test_schema()
+    record :: cli_schema_encode_record(schema)
+    assert(cli_schema_test_read(cli_schema_test_elf(record)) == schema)
+    assert(cli_schema_test_read(cli_schema_test_pe(record, false)) == schema)
+    assert(cli_schema_test_read(cli_schema_test_mach(record)) == schema)
+    assert(cli_schema_test_read(cli_schema_test_fat_mach(record)) == schema)
+    wasm := [U8]{0, 97, 115, 109, 1, 0, 0, 0}
+    cli_schema_embed_wasm_record(&wasm, record) ?? panic("Wasm embedding failed")
+    assert(cli_schema_test_read(wasm) == schema)
+}
+#Test("hostile_records_fail_closed") {
+    record :: cli_schema_encode_record(cli_schema_test_schema())
+    cli_schema_test_error("not executable".bytes(), CLIMetadataError.UnknownFormat, true)
+    cli_schema_test_error([U8]{0, 97, 115, 109, 1, 0, 0, 0}, CLIMetadataError.Missing, true)
+    cli_schema_test_error(cli_schema_test_pe(record, true), CLIMetadataError.Duplicate, true)
+    cli_schema_test_error(cli_schema_test_pe_trailing(record, record), CLIMetadataError.Duplicate, true)
+    cli_schema_test_error(cli_schema_test_pe_trailing(record, [U8]{0, 7}), CLIMetadataError.Malformed("nonzero bytes after PE metadata record"), true)
+    assert(cli_schema_test_read(cli_schema_test_pe_trailing(record, cli_schema_test_zeroes(16))) == cli_schema_test_schema())
+    cli_schema_test_error(cli_schema_test_nested_fat_mach(record), CLIMetadataError.Malformed("nested universal Mach-O slice"), true)
+    unsupported := ~record
+    cli_schema_test_num(&unsupported, 8, 6, 2, true)
+    cli_schema_test_error(unsupported, CLIMetadataError.UnsupportedVersion(6), false)
+    corrupt := ~record
+    corrupt[corrupt.len() - 1] = U8{Int.from_u8(corrupt[corrupt.len() - 1]) ~| 1}
+    cli_schema_test_error(corrupt, CLIMetadataError.Malformed("digest mismatch"), false)
+}
+fn cli_schema_test_job(name: String, scope: JobScope, after: [String]) -> CLIRecordJob Never! {
+    CLIRecordJob{name: name, scope: scope, doc: None, arguments: [TJobArgumentFact]{}, after: after, packages: [String]{}, cwd: None, inputs: [String]{}, outputs: [String]{}, skip: None, cache: JobCachePolicy.Uncached, parallel: 1, limits: [String:String]{}, schedule: None}
+}
+#Test("record preserves complete job policy and decoded callable omissions") {
+    schema := cli_schema_test_schema()
+    schema.standard = true
+    schema.version = Val("1.2.3")
+    schema.description = Val("用途")
+    schema.inputs[0].variadic = true
+    schema.inputs[0].shape = TCLIInputShape.Value{kind: TCLIValueKind.Int, optional: true, default: Val(TCLIDefault.Value{value: TComptimeValue.Int{value: 12}})}
+    &schema.commands.push(TCLICommand{name: "build", description: Val("builder"), inputs: [TCLIInput]{}, function: None, receiver: None})
+    job := cli_schema_test_job("build", JobScope.Ship, [String]{"prepare"})
+    job.doc = Val("build project")
+    job.schedule = Val("2h")
+    job.parallel = 8
+    job.cwd = Val("src")
+    job.skip = Val(JobSkip.UnlessPlatform{platform: "linux"})
+    job.cache = JobCachePolicy.Shared
+    job.inputs = [String]{"in.jet"}
+    job.outputs = [String]{"out"}
+    job.packages = [String]{"tool"}
+    job.limits["z"] = "9"
+    job.limits["a"] = "2"
+    &job.arguments.push(TJobArgumentFact{name: "file", label: "path", ty: "Path", required: true, default: None, variadic: true, zone: ParamZone.LabelOnly})
+    &schema.jobs.push(job)
+    record :: cli_schema_encode_record(schema)
+    decoded :: cli_schema_test_decode(record)
+    assert_eq(cli_schema_encode_record(decoded), record)
+    assert(!decoded.inputs[0].variadic)
+    assert(decoded.commands[0].function == None && decoded.commands[0].receiver == None)
+    assert(decoded.jobs == schema.jobs)
+    assert(cli_input_default_display(decoded.inputs[0]) == (Val("12")))
+    assert_eq(cli_job_argument_display(decoded.jobs[0].arguments[0]), "path: ...Path")
+}
+#Test("checked scalar defaults retain Rust float debug text") {
+    assert_eq(cli_schema_default_display(TCLIDefault.TypeDefault), "type default")
+    assert_eq(cli_schema_default_display(TCLIDefault.Recorded{value: "recorded"}), "recorded")
+    assert_eq(cli_default_display(TComptimeValue.String{value: "é"}), "é")
+    assert_eq(cli_default_display(TComptimeValue.Int{value: -7}), "-7")
+    assert_eq(cli_default_display(TComptimeValue.Bool{value: true}), "true")
+    assert_eq(cli_default_display(TComptimeValue.Float{value: 1.0, bits: 64}), "1.0")
+    assert_eq(cli_default_display(TComptimeValue.Float{value: -0.0, bits: 64}), "-0.0")
+    assert_eq(cli_default_display(TComptimeValue.Float{value: 0.1, bits: 32}), "0.1")
+    assert_eq(cli_default_display(TComptimeValue.Float{value: 1.234567890123, bits: 32}), "1.2345679")
+    assert_eq(cli_default_display(TComptimeValue.Float{value: 1.0e20, bits: 64}), "1e20")
+}
+#Test("job graph dependency order visibility and fail closed policy") {
+    jobs := [CLIRecordJob]{cli_schema_test_job("root", JobScope.Dev, [String]{"left", "right"}), cli_schema_test_job("left", JobScope.Dev, [String]{"leaf"}), cli_schema_test_job("right", JobScope.Ship, [String]{"leaf"}), cli_schema_test_job("leaf", JobScope.Internal, [String]{})}
+    assert((cli_job_registry_dependency_closure(jobs, "root") ?? panic("valid graph failed")) == [Int]{3, 1, 2, 0})
+    cli_job_registry_validate_graph(jobs) ?? panic("valid graph failed validation")
+    assert(cli_job_registry_visible_jobs(jobs) == [Int]{0, 1, 2})
+    assert(cli_job_registry_find(jobs, "leaf") == (Val(3)))
+    assert(cli_job_registry_find_visible(jobs, "leaf") == None)
+    assert(cli_job_registry_completion_words(jobs) == [String]{"root", "left", "right"})
+    jobs[3].after = [String]{"root"}
+    if cli_job_registry_dependency_closure(jobs, "root") == {
+        .Ok(_) -> panic("cycle accepted")
+        .Err(error) -> assert_eq(error.message, "job graph contains a cycle: root -> left -> leaf -> root")
+    }
+    jobs[3].after = [String]{"missing"}
+    if cli_job_registry_validate_graph(jobs) == {
+        .Ok(_) -> panic("missing dependency accepted")
+        .Err(error) -> assert_eq(error.message, "job graph references unknown job `missing`")
+    }
+    jobs[3].after = [String]{}
+    jobs[3].parallel = 0
+    if cli_job_registry_validate_graph(jobs) == {
+        .Ok(_) -> panic("zero bound accepted")
+        .Err(error) -> assert_eq(error.message, "job `leaf` declares a zero parallel bound")
+    }
+    jobs[3].parallel = 1
+    &jobs.push(cli_schema_test_job("root", JobScope.Dev, [String]{}))
+    if cli_job_registry_validate_graph(jobs) == {
+        .Ok(_) -> panic("duplicate name accepted")
+        .Err(error) -> assert_eq(error.message, "job `root` has an ambiguous declaration")
+    }
+}
+#Test("completion scopes preserve positions short aliases and duplicate job names") {
+    schema := cli_schema_test_schema()
+    schema.standard = true
+    schema.version = Val("1")
+    &schema.commands.push(TCLICommand{name: "build", description: None, inputs: [TCLIInput]{}, function: None, receiver: None})
+    &schema.jobs.push(cli_schema_test_job("job", JobScope.Dev, [String]{}))
+    &schema.jobs.push(cli_schema_test_job("job", JobScope.Ship, [String]{}))
+    &schema.jobs.push(cli_schema_test_job("hidden", JobScope.Internal, [String]{}))
+    assert(cli_schema_completion_words(schema) == [String]{"--help", "--verbose", "-v", "--quiet", "-q", "--color", "--version", "output-file", "--output-file", "-o", "build", "job", "job"})
+    assert(cli_schema_command_completion_words(schema.commands[0]) == [String]{"--help"})
+    assert(cli_schema_job(schema, "hidden") == None)
+    assert(cli_job_registry_completion_words(schema.jobs) == [String]{"job"})
+    assert(cli_input_required(schema.inputs[0]))
+    assert(cli_input_value_kind(schema.inputs[0]) == TCLIValueKind.Path)
+    assert(cli_input_default_display(schema.inputs[0]) == None)
+}
+#Test("cursor and container arithmetic reject hostile boundaries") {
+    cursor := CLIRecordCursor{at: 0}
+    if cli_record_string([U8]{1, 0, 0, 0, 255}, &cursor) == {
+        .Ok(_) -> panic("invalid UTF8 accepted")
+        .Err(error) -> assert(error == CLIMetadataError.Malformed("string is not UTF-8"))
+    }
+    cursor.at = 0
+    if cli_record_string([U8]{1, 0, 1, 0}, &cursor) == {
+        .Ok(_) -> panic("oversized string accepted")
+        .Err(error) -> assert(error == CLIMetadataError.Malformed("string too long"))
+    }
+    if cli_record_bounds([U8]{}, CLI_USIZE_MAX, 1) == {
+        .Ok(_) -> panic("overflow accepted")
+        .Err(error) -> assert(error == CLIMetadataError.Malformed("section range overflow"))
+    }
+    cursor.at = 0
+    if cli_record_wasm_leb([U8]{128, 128, 128, 128, 128}, &cursor) == {
+        .Ok(_) -> panic("long LEB accepted")
+        .Err(error) -> assert(error == CLIMetadataError.Malformed("Wasm LEB too long"))
+    }
+    record :: cli_schema_encode_record(cli_schema_test_schema())
+    disagree := cli_schema_test_fat_mach(record)
+    disagree[disagree.len() - 1] = U8{1}
+    cli_schema_test_error(disagree, CLIMetadataError.Malformed("universal Mach-O slices disagree"), true)
+    too_large := ~record
+    cli_schema_test_num(&too_large, 10, 1048577, 4, true)
+    cli_schema_test_error(too_large, CLIMetadataError.Malformed("invalid record length"), false)
+    payload := ~record[46..<record.len()]
+    &payload.push(U8{0})
+    cli_schema_test_error(cli_record_finish(payload), CLIMetadataError.Malformed("trailing payload bytes"), false)
+}
+fn cli_schema_test_input_error(bytes: [U8], expected: String) Never! {
+    cursor := CLIRecordCursor{at: 0}
+    if cli_record_decode_input(bytes, &cursor) == {
+        .Ok(_) -> panic("invalid input accepted")
+        .Err(error) -> assert(error == CLIMetadataError.Malformed(expected))
+    }
+}
+#Test("input tags and counts are strict before allocating rows") {
+    empty := TCLIInput{field: "", flag: "", short: None, env: None, help: "", metavar: None, shape: TCLIInputShape.Flag, positional: None, variadic: false}
+    prefix := [U8]{}
+    cli_record_put_string(&prefix, empty.field)
+    cli_record_put_string(&prefix, empty.flag)
+    cli_record_put_optional_string(&prefix, empty.short)
+    cli_record_put_optional_string(&prefix, empty.env)
+    cli_record_put_string(&prefix, empty.help)
+    cli_record_put_optional_string(&prefix, empty.metavar)
+    bad_shape := ~prefix
+    &bad_shape.push(U8{7})
+    cli_schema_test_input_error(bad_shape, "unknown input shape")
+    bad_kind := ~prefix
+    &bad_kind.extend([U8]{1, 5})
+    cli_schema_test_input_error(bad_kind, "unknown input kind")
+    bad_optional := ~prefix
+    &bad_optional.extend([U8]{1, 0, 2})
+    cli_schema_test_input_error(bad_optional, "invalid optional bit")
+    bad_default := ~prefix
+    &bad_default.extend([U8]{1, 0, 0, 3})
+    cli_schema_test_input_error(bad_default, "unknown default kind")
+    bad_position := ~prefix
+    &bad_position.extend([U8]{0, 2})
+    cli_schema_test_input_error(bad_position, "invalid positional bit")
+    big_position := ~prefix
+    &big_position.extend([U8]{0, 1, 0, 0, 1, 0})
+    cli_schema_test_input_error(big_position, "positional order out of range")
+    cursor := CLIRecordCursor{at: 0}
+    empty_bytes := [U8]{}
+    cli_record_encode_input(&empty_bytes, empty)
+    decoded :: cli_record_decode_input(empty_bytes, &cursor) ?? panic("flag input failed")
+    assert(cli_input_default_display(decoded) == (Val("false")))
+    assert(!cli_input_required(decoded) && cli_input_value_kind(decoded) == TCLIValueKind.Bool)
+    payload := [U8]{}
+    cli_record_put_string(&payload, "")
+    cli_record_put_optional_string(&payload, None)
+    &payload.push(U8{0})
+    cli_record_put_optional_string(&payload, None)
+    cli_record_put_u32(&payload, 4097)
+    cli_schema_test_error(cli_record_finish(payload), CLIMetadataError.Malformed("too many inputs"), false)
+    cli_schema_test_num(&payload, 7, 0, 4, true)
+    cli_record_put_u32(&payload, 4097)
+    cli_schema_test_error(cli_record_finish(payload), CLIMetadataError.Malformed("too many commands"), false)
+    cli_schema_test_num(&payload, 11, 0, 4, true)
+    cli_record_put_u32(&payload, 4097)
+    cli_schema_test_error(cli_record_finish(payload), CLIMetadataError.Malformed("too many jobs"), false)
+}
+#Test("job skip variants cache scopes and parameter zones round trip") {
+    schema := cli_schema_test_schema()
+    scopes :: [JobScope]{JobScope.Dev, JobScope.Ship, JobScope.Internal}
+    caches :: [JobCachePolicy]{JobCachePolicy.Uncached, JobCachePolicy.Local, JobCachePolicy.Shared}
+    zones :: [ParamZone]{ParamZone.PositionalOnly, ParamZone.Either, ParamZone.LabelOnly}
+    skips :: [JobSkip?]{None, Val(JobSkip.Always{reason: "skip"}), Val(JobSkip.UnlessPlatform{platform: "linux"})}
+    loop index in 0..<3 {
+        job := cli_schema_test_job("job{index}", scopes[index], [String]{})
+        job.cache = caches[index]
+        job.skip = skips[index]
+        &job.arguments.push(TJobArgumentFact{name: "x", label: "x", ty: "Int", required: false, default: Val("1"), variadic: false, zone: zones[index]})
+        &schema.jobs.push(job)
+    }
+    assert(cli_schema_test_decode(cli_schema_encode_record(schema)) == schema)
+}
+#Test("record header byte layout is Rust version eight with little endian lengths") {
+    record :: cli_schema_encode_record(cli_schema_test_schema())
+    assert_eq(record.len(), 164)
+    assert(record[0..<14] == [U8]{74, 69, 84, 67, 77, 68, 0, 0, 8, 0, 118, 0, 0, 0})
+    assert(record[46..<57] == [U8]{7, 0, 0, 0, 79, 112, 116, 105, 111, 110, 115})
+    assert(record[14..<46] == mir_sha256_bytes(record[46..<record.len()]))
+    assert_eq(cli_metadata_error_message(CLIMetadataError.UnsupportedVersion(6)), "JetCommandSchema version 6 is not supported")
+}

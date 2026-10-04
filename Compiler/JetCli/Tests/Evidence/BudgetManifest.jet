@@ -1,0 +1,393 @@
+// Pure assertions reachable from Source/BudgetStore.rs:2149-2160,2237-2364.
+fn bm_f(key: String, value: CanonicalJSON) -> CanonicalJSONField Never! { CanonicalJSONField{key: key, value: value} }
+fn bm_o(fields: [CanonicalJSONField]) -> CanonicalJSON Never! { jet_cli_budget_manifest_object_new(fields) }
+fn bm_s(value: String) -> CanonicalJSON Never! { CanonicalJSON.String(value) }
+fn bm_get(value: CanonicalJSON, key: String) -> CanonicalJSON Never! {
+    if value == .Object(f) -> return ~f[jet_cli_budget_manifest_index(f, key)].value
+    panic("test object required")
+}
+fn bm_set(value: CanonicalJSON, key: String, replacement: CanonicalJSON) -> CanonicalJSON Never! {
+    if value == .Object(fields) {
+        out := [CanonicalJSONField]{}
+        loop field in fields { if field.key != key -> &out.push(~field) }
+        &out.push(bm_f(key, replacement))
+        return bm_o(out)
+    }
+    panic("test object required")
+}
+fn bm_remove(value: CanonicalJSON, key: String) -> CanonicalJSON Never! {
+    if value == .Object(fields) {
+        out := [CanonicalJSONField]{}
+        loop f in fields { if f.key != key -> &out.push(~f) }
+        return bm_o(out)
+    }
+    panic("test object required")
+}
+fn bm_error(result: () JetCLIBudgetManifestError!, message: String) Never! {
+    if result == {
+        .Ok(_) -> panic("expected manifest error")
+        .Err(e) -> assert_eq(e.message, message)
+    }
+}
+fn bm_verify_error(value: CanonicalJSON, message: String) Never! {
+    if jet_cli_budget_manifest_verify(canonical_json_bytes(value), "release/linux") == {
+        .Ok(_) -> panic("expected manifest rejection")
+        .Err(e) -> assert_eq(e.message, message)
+    }
+}
+fn bm_reason_error(value: String, message: String) Never! {
+    if jet_cli_budget_manifest_normalize_reason(value) == {
+        .Ok(_) -> panic("expected reason rejection")
+        .Err(e) -> assert_eq(e.message, message)
+    }
+}
+fn bm_plan() -> JetCLIBudgetUpdatePlan Never! {
+    JetCLIBudgetUpdatePlan{baseline: "release/linux", report_id: "1".repeat(64), report_bytes: [U8]{}, prior_manifest_id: None, prior_head_report_id: None, accepted_at: "2026-07-13T12:00:00.000000000Z", kind: .Bootstrap("initial baseline")}
+}
+fn bm_first() -> CanonicalJSON Never! { jet_cli_budget_manifest_next(None, bm_plan()) ?? panic(err.message) }
+fn bm_second_plan(first: CanonicalJSON) -> JetCLIBudgetUpdatePlan Never! {
+    p := bm_plan()
+    p.report_id = "2".repeat(64)
+    p.prior_manifest_id = Val(jet_cli_budget_manifest_id(first) ?? panic(err.message))
+    p.prior_head_report_id = Val("1".repeat(64))
+    p.accepted_at = "2026-07-13T13:00:00.000000000Z"
+    p.kind = .Pass
+    p
+}
+fn bm_second() -> CanonicalJSON Never! {
+    first :: bm_first()
+    jet_cli_budget_manifest_next(Val(first), bm_second_plan(first)) ?? panic(err.message)
+}
+fn bm_rehash(value: CanonicalJSON) -> CanonicalJSON Never! { bm_set(value, "manifest_id", bm_s(perf_stable_id(bm_get(value, "content")))) }
+fn bm_content(value: CanonicalJSON, key: String, replacement: CanonicalJSON) -> CanonicalJSON Never! { bm_rehash(bm_set(value, "content", bm_set(bm_get(value, "content"), key, replacement))) }
+fn bm_generation(value: CanonicalJSON, index: Int, key: String, replacement: CanonicalJSON) -> CanonicalJSON Never! {
+    content :: bm_get(value, "content")
+    if bm_get(content, "generations") == .Array(g) {
+        out := ~g
+        out[index] = bm_set(out[index], key, replacement)
+        return bm_content(value, "generations", CanonicalJSON.Array(out))
+    }
+    panic("test generations required")
+}
+fn bm_audit(value: CanonicalJSON, index: Int) -> CanonicalJSON Never! {
+    if bm_get(bm_get(value, "content"), "generations") == .Array(g) -> return bm_get(g[index], "audit")
+    panic("test generations required")
+}
+fn bm_audit_set(value: CanonicalJSON, index: Int, key: String, replacement: CanonicalJSON, rehash: Bool) -> CanonicalJSON Never! {
+    audit := bm_set(bm_audit(value, index), key, replacement)
+    if rehash -> audit = bm_set(audit, "audit_id", bm_s(perf_stable_id(bm_remove(audit, "audit_id"))))
+    bm_generation(value, index, "audit", audit)
+}
+fn bm_report(evidence: [String]) -> CanonicalJSON Never! {
+    values := [CanonicalJSON]{}
+    loop e in evidence -> &values.push(bm_o([CanonicalJSONField]{bm_f("decision", bm_o([CanonicalJSONField]{bm_f("evidence", bm_s(e))}))}))
+    bm_o([CanonicalJSONField]{bm_f("content", bm_o([CanonicalJSONField]{bm_f("measurements", CanonicalJSON.Array(values))}))})
+}
+
+// Rust baseline_names_and_reasons_are_closed (2149-2160).
+#Test("budget manifest closed baseline names") {
+    jet_cli_budget_manifest_validate_baseline_name("release/x86-linux") ?? panic(err.message)
+    good :: [String]{"x", "0", "a-0/b2", "release/linux"}
+    loop name in good { jet_cli_budget_manifest_validate_baseline_name(name) ?? panic(err.message) }
+    bad :: [String]{"", "/x", "x/", "x//y", "X", "x_", "x/../y", "x--y", "-x", "x-", "é", "a\n"}
+    loop name in bad -> bm_error(jet_cli_budget_manifest_validate_baseline_name(name), "invalid BaselineName")
+}
+#Test("budget manifest trimmed control free bounded NFC reasons") {
+    c85 :: String.from_bytes([U8]{U8{194}, U8{133}, U8{120}}) ?? panic("control UTF-8")
+    c7f :: String.from_bytes([U8]{U8{120}, U8{127}}) ?? panic("control UTF-8")
+    c9f :: String.from_bytes([U8]{U8{120}, U8{194}, U8{159}}) ?? panic("control UTF-8")
+    bad :: [String]{"", " reviewed regression ", "x\n", "x\t", c85, c7f, c9f, " x", "x".repeat(513)}
+    loop reason in bad -> bm_reason_error(reason, "acceptance reason must be trimmed, control-free, and 1..=512 scalars")
+    bm_reason_error("é", "acceptance reason must be NFC")
+    assert_eq(jet_cli_budget_manifest_normalize_reason("é") ?? panic(err.message), "é")
+    assert_eq(jet_cli_budget_manifest_normalize_reason("é".repeat(512)) ?? panic(err.message), "é".repeat(512))
+    assert_eq(jet_cli_budget_manifest_normalize_reason("reviewed regression") ?? panic(err.message), "reviewed regression")
+    jet_cli_budget_manifest_validate_kind(.Pass) ?? panic(err.message)
+    bm_error(jet_cli_budget_manifest_validate_kind(.Bootstrap(" ")), "acceptance reason must be trimmed, control-free, and 1..=512 scalars")
+    bm_error(jet_cli_budget_manifest_validate_kind(.AcceptRegression("é")), "acceptance reason must be NFC")
+}
+// Rust nfc oracle, extracted BudgetStore.rs:1259-1367 with jet_unicode tables.
+#Test("budget manifest NFC agrees for inline Rust cases and Hangul combining sample") {
+    assert_eq(budget_manifest_text.nfc("reviewed regression"), "reviewed regression")
+    assert_eq(budget_manifest_text.nfc("é"), "é")
+    assert_eq(budget_manifest_text.nfc("é"), "é")
+    assert_eq(budget_manifest_text.nfc("각́"), "각́")
+}
+// Rust jet_unicode singleton and non-Latin-1 canonical composition parity.
+#Test("budget manifest Unicode NFC rejects noncanonical acceptance reasons") {
+    assert_eq(budget_manifest_text.nfc("Å"), "Å")
+    assert_eq(budget_manifest_text.nfc("ś"), "ś")
+    bm_reason_error("Å", "acceptance reason must be NFC")
+    bm_reason_error("ś", "acceptance reason must be NFC")
+}
+#Test("budget manifest timestamps exact shape and UTC ranges") {
+    shape :: [String]{"", "2026-07-13T12:00:00Z", "2026-07-13T12:00:00.00000000Z", "2026-07-13t12:00:00.000000000Z", "2026-07-13T12:00:00.000000000+00:00", "2026-07-13T12:00:00.00000000é", "2026-07-13T12:00:00.00000000xZ"}
+    loop v in shape -> bm_error(jet_cli_budget_manifest_validate_timestamp(v), "accepted_at is not RFC3339UTC with nine fractional digits")
+    range :: [String]{"2026-02-31T12:00:00.000000000Z", "1900-02-29T12:00:00.000000000Z", "2026-00-01T12:00:00.000000000Z", "2026-13-01T12:00:00.000000000Z", "2026-01-00T12:00:00.000000000Z", "2026-04-31T12:00:00.000000000Z", "2026-01-01T24:00:00.000000000Z", "2026-01-01T00:60:00.000000000Z", "2026-01-01T00:00:60.000000000Z"}
+    loop v in range -> bm_error(jet_cli_budget_manifest_validate_timestamp(v), "accepted_at contains an out-of-range UTC field")
+    good :: [String]{"2024-02-29T12:00:00.000000000Z", "2000-02-29T23:59:59.999999999Z", "0000-02-29T00:00:00.000000000Z", "9999-12-31T23:59:59.999999999Z"}
+    loop v in good { jet_cli_budget_manifest_validate_timestamp(v) ?? panic(err.message) }
+}
+#Test("budget manifest days from civil and fractional seconds discarded") {
+    assert_eq(jet_cli_budget_manifest_timestamp_seconds("1970-01-01T00:00:00.000000000Z") ?? panic(err.message), 0)
+    assert_eq(jet_cli_budget_manifest_timestamp_seconds("1970-01-02T00:00:00.999999999Z") ?? panic(err.message), 86400)
+    assert_eq(jet_cli_budget_manifest_timestamp_seconds("2000-02-29T12:34:56.123456789Z") ?? panic(err.message), 951827696)
+    assert_eq(jet_cli_budget_manifest_timestamp_seconds("9999-12-31T23:59:59.999999999Z") ?? panic(err.message), 253402300799)
+    if jet_cli_budget_manifest_timestamp_seconds("1969-12-31T23:59:59.000000000Z") == {
+        .Ok(_) -> panic("pre epoch accepted")
+        .Err(e) -> assert_eq(e.message, "accepted_at predates Unix epoch")
+    }
+}
+// Rust manifests_hash_audits_and_enforce_cas_chain (2237-2311).
+// Oracles: original Rust next_manifest/verify_manifest + CanonicalJson bytes + SHA256,
+// extracted unchanged into ~/.cache/jet-test-scratch/PortW10-CLI-38/CLI-38/oracle.rs.
+#Test("budget manifest next bytes and IDs equal Rust bootstrap and pass fixtures") {
+    one :: "1".repeat(64)
+    two :: "2".repeat(64)
+    audit1 :: "{{\"accepted_at\":\"2026-07-13T12:00:00.000000000Z\",\"actor_label\":\"local\",\"audit_id\":\"9c7087572c2b3273a8459f92c22c237d9d23390e37643ae4110ce0b07bc2409b\",\"flags\":{{\"accept_regression\":false,\"bootstrap\":true}},\"kind\":\"bootstrap\",\"prior_head_report_id\":null,\"prior_state_id\":null,\"reason\":\"initial baseline\",\"report_id\":\"{one}\"}}"
+    gen1 :: "{{\"audit\":{audit1},\"report_id\":\"{one}\"}}"
+    id1 :: "1ec984214c7cb1c36e119e27af6be61313d0d930d39bb09ffd352acbccd182ef"
+    audit2 :: "{{\"accepted_at\":\"2026-07-13T13:00:00.000000000Z\",\"actor_label\":\"local\",\"audit_id\":\"b6b3be7de99d85d0c385016cdd442f3bb8dcd77fd0d1aa21ef09de96a1e12acb\",\"flags\":{{\"accept_regression\":false,\"bootstrap\":false}},\"kind\":\"pass\",\"prior_head_report_id\":\"{one}\",\"prior_state_id\":\"{id1}\",\"reason\":null,\"report_id\":\"{two}\"}}"
+    gen2 :: "{{\"audit\":{audit2},\"report_id\":\"{two}\"}}"
+    id2 :: "a99e7a5dfa723e9b3556f235785d54c42f40bab8b72351200e3f3ad47ed22625"
+    bytes1 :: "{{\"content\":{{\"generations\":[{gen1}],\"head_report_id\":\"{one}\",\"name\":\"release/linux\"}},\"manifest_id\":\"{id1}\",\"schema\":\"jet.budget-manifest\",\"version\":1}}\n"
+    bytes2 :: "{{\"content\":{{\"generations\":[{gen1},{gen2}],\"head_report_id\":\"{two}\",\"name\":\"release/linux\"}},\"manifest_id\":\"{id2}\",\"schema\":\"jet.budget-manifest\",\"version\":1}}\n"
+    first :: bm_first()
+    second :: bm_second()
+    assert_eq(canonical_json_bytes(first), bytes1.bytes())
+    assert_eq(canonical_json_bytes(second), bytes2.bytes())
+    assert_eq(jet_cli_budget_manifest_id(first) ?? panic(err.message), id1)
+    assert_eq(jet_cli_budget_manifest_id(second) ?? panic(err.message), id2)
+    assert_eq(jet_cli_budget_manifest_head_id(second) ?? panic(err.message), two)
+    assert_eq(jet_cli_budget_manifest_verify(bytes1.bytes(), "release/linux") ?? panic(err.message), first)
+    assert_eq(jet_cli_budget_manifest_verify(bytes2.bytes(), "release/linux") ?? panic(err.message), second)
+    bad := bm_plan()
+    bad.kind = .Pass
+    bm_verify_error(jet_cli_budget_manifest_next(None, bad) ?? panic(err.message), "first generation is not a bootstrap audit")
+    bm_verify_error(bm_audit_set(second, 1, "prior_state_id", bm_s("f".repeat(64)), true), "manifest generation CAS chain is broken")
+}
+#Test("budget manifest wrapper validation order and canonical parse errors") {
+    if jet_cli_budget_manifest_verify("{{}}".bytes(), "release/linux") == {
+        .Ok(_) -> panic("missing LF accepted")
+        .Err(e) -> assert_eq(e.message, "invalid manifest: canonical JSON must end in exactly one LF")
+    }
+    first :: bm_first()
+    bm_verify_error(CanonicalJSON.Null, "manifest is not an object")
+    bm_verify_error(bm_remove(first, "schema"), "manifest has missing or unknown fields")
+    bm_verify_error(bm_set(first, "extra", CanonicalJSON.Null), "manifest has missing or unknown fields")
+    bm_verify_error(bm_set(first, "schema", CanonicalJSON.Null), "schema is not text")
+    bm_verify_error(bm_set(first, "schema", bm_s("wrong")), "schema mismatch")
+    bm_verify_error(bm_set(first, "version", bm_s("1")), "version is not integer")
+    bm_verify_error(bm_set(first, "version", CanonicalJSON.Integer("2")), "manifest version is not 1")
+    bm_verify_error(bm_set(first, "content", CanonicalJSON.Null), "manifest content is not an object")
+    bm_verify_error(bm_set(first, "content", bm_o([CanonicalJSONField]{})), "manifest content has missing or unknown fields")
+    bm_verify_error(bm_content(first, "name", bm_s("wrong")), "name mismatch")
+    bm_verify_error(bm_set(first, "manifest_id", CanonicalJSON.Null), "manifest_id is not text")
+    bm_verify_error(bm_set(first, "manifest_id", bm_s("F".repeat(64))), "manifest_id mismatch")
+    bm_verify_error(bm_set(first, "manifest_id", bm_s("f".repeat(64))), "manifest_id mismatch")
+    bm_verify_error(bm_content(first, "generations", CanonicalJSON.Null), "generations is not an array")
+    bm_verify_error(bm_content(first, "generations", CanonicalJSON.Array([CanonicalJSON]{})), "manifest has no generations")
+}
+#Test("budget manifest generation and audit structural errors") {
+    first :: bm_first()
+    bm_verify_error(bm_content(first, "generations", CanonicalJSON.Array([CanonicalJSON]{CanonicalJSON.Null})), "generation is not an object")
+    bm_verify_error(bm_generation(first, 0, "extra", CanonicalJSON.Null), "generation has missing or unknown fields")
+    bm_verify_error(bm_generation(first, 0, "report_id", CanonicalJSON.Null), "generation.report_id is not text")
+    bm_verify_error(bm_generation(first, 0, "report_id", bm_s("F".repeat(64))), "generation report_id is not lowercase Hex64")
+    bm_verify_error(bm_generation(first, 0, "audit", CanonicalJSON.Null), "audit is not an object")
+    bm_verify_error(bm_audit_set(first, 0, "extra", CanonicalJSON.Null, false), "audit has missing or unknown fields")
+    bm_verify_error(bm_audit_set(first, 0, "actor_label", bm_s("remote"), false), "actor_label mismatch")
+    bm_verify_error(bm_audit_set(first, 0, "report_id", bm_s("2".repeat(64)), false), "report_id mismatch")
+    bm_verify_error(bm_audit_set(first, 0, "accepted_at", CanonicalJSON.Null, false), "accepted_at is not text")
+    bm_verify_error(bm_audit_set(first, 0, "flags", CanonicalJSON.Null, false), "audit flags is not an object")
+    bm_verify_error(bm_audit_set(first, 0, "flags", bm_o([CanonicalJSONField]{}), false), "audit flags has missing or unknown fields")
+    flags :: bm_get(bm_audit(first, 0), "flags")
+    bm_verify_error(bm_audit_set(first, 0, "flags", bm_set(flags, "bootstrap", CanonicalJSON.Null), false), "flags.bootstrap is not boolean")
+    bm_verify_error(bm_audit_set(first, 0, "flags", bm_set(flags, "accept_regression", CanonicalJSON.Null), false), "flags.accept_regression is not boolean")
+    bm_verify_error(bm_audit_set(first, 0, "kind", CanonicalJSON.Null, false), "audit.kind is not text")
+    bm_verify_error(bm_audit_set(first, 0, "reason", CanonicalJSON.Bool(false), false), "audit.reason is not text or null")
+}
+#Test("budget manifest audit semantic hashes links ordering and head errors") {
+    first :: bm_first()
+    second :: bm_second()
+    bm_verify_error(bm_audit_set(first, 0, "kind", bm_s("exception"), false), "audit kind, flags, and reason disagree")
+    bm_verify_error(bm_audit_set(first, 0, "reason", bm_s(" "), false), "acceptance reason must be trimmed, control-free, and 1..=512 scalars")
+    bm_verify_error(bm_audit_set(first, 0, "reason", bm_s("é"), false), "acceptance reason must be NFC")
+    bm_verify_error(bm_audit_set(first, 0, "prior_state_id", CanonicalJSON.Bool(false), false), "prior_state_id is not text or null")
+    bm_verify_error(bm_audit_set(first, 0, "prior_head_report_id", CanonicalJSON.Bool(false), false), "prior_head_report_id is not text or null")
+    bm_verify_error(bm_audit_set(first, 0, "prior_state_id", bm_s("f".repeat(64)), true), "first generation has prior CAS links")
+    bm_verify_error(bm_audit_set(first, 0, "prior_head_report_id", bm_s("f".repeat(64)), true), "first generation has prior CAS links")
+    bm_verify_error(bm_audit_set(second, 1, "prior_head_report_id", bm_s("f".repeat(64)), true), "manifest generation CAS chain is broken")
+    bm_verify_error(bm_audit_set(second, 1, "accepted_at", bm_s("2026-07-13T11:00:00.000000000Z"), true), "manifest generations are not ordered by accepted_at")
+    bm_verify_error(bm_audit_set(first, 0, "audit_id", CanonicalJSON.Null, false), "audit_id is not text")
+    bm_verify_error(bm_audit_set(first, 0, "audit_id", bm_s("F".repeat(64)), false), "audit_id mismatch")
+    bm_verify_error(bm_audit_set(first, 0, "audit_id", bm_s("f".repeat(64)), false), "audit_id mismatch")
+    bm_verify_error(bm_content(second, "head_report_id", bm_s("1".repeat(64))), "manifest head is not newest generation")
+    equal_time := bm_second_plan(first)
+    equal_time.accepted_at = bm_plan().accepted_at
+    _ :: jet_cli_budget_manifest_verify(canonical_json_bytes(jet_cli_budget_manifest_next(Val(first), equal_time) ?? panic(err.message)), "release/linux") ?? panic(err.message)
+    exception := bm_second_plan(first)
+    exception.kind = .AcceptRegression("reviewed")
+    _ :: jet_cli_budget_manifest_verify(canonical_json_bytes(jet_cli_budget_manifest_next(Val(first), exception) ?? panic(err.message)), "release/linux") ?? panic(err.message)
+}
+// Rust update_kinds_reject_wrong_evidence_before_mutation (2314-2364), plus every branch.
+#Test("budget manifest update evidence kinds reject before mutation") {
+    pass :: JetCLIBudgetUpdateKind.Pass
+    bootstrap :: JetCLIBudgetUpdateKind.Bootstrap("initial")
+    accept :: JetCLIBudgetUpdateKind.AcceptRegression("reviewed")
+    jet_cli_budget_manifest_validate_update_evidence(bm_report([String]{"pass"}), pass) ?? panic(err.message)
+    jet_cli_budget_manifest_validate_update_evidence(bm_report([String]{"pass", "unavailable"}), bootstrap) ?? panic(err.message)
+    jet_cli_budget_manifest_validate_update_evidence(bm_report([String]{"pass", "regression"}), accept) ?? panic(err.message)
+    jet_cli_budget_manifest_validate_update_evidence(bm_report([String]{"inconclusive"}), accept) ?? panic(err.message)
+    wrong :: [String]{"regression", "inconclusive", "unavailable", "unknown"}
+    loop e in wrong -> bm_error(jet_cli_budget_manifest_validate_update_evidence(bm_report([String]{e}), pass), "plain update requires every measurement to pass")
+    wrong_bootstrap :: [String]{"regression", "inconclusive", "unknown"}
+    loop e in wrong_bootstrap -> bm_error(jet_cli_budget_manifest_validate_update_evidence(bm_report([String]{e}), bootstrap), "bootstrap rejects regression and inconclusive evidence")
+    wrong_accept :: [String]{"unavailable", "unknown"}
+    loop e in wrong_accept -> bm_error(jet_cli_budget_manifest_validate_update_evidence(bm_report([String]{e}), accept), "accept-regression rejects unavailable evidence")
+    bm_error(jet_cli_budget_manifest_validate_update_evidence(bm_report([String]{"pass"}), accept), "accept-regression requires regression or inconclusive evidence")
+    bm_error(jet_cli_budget_manifest_validate_update_evidence(bm_report([String]{}), pass), "update report has no measurements")
+    missing :: bm_o([CanonicalJSONField]{bm_f("content", bm_o([CanonicalJSONField]{bm_f("measurements", CanonicalJSON.Array([CanonicalJSON]{bm_o([CanonicalJSONField]{})}))}))})
+    bm_error(jet_cli_budget_manifest_validate_update_evidence(missing, pass), "measurement decision is absent")
+    bad_decision :: bm_o([CanonicalJSONField]{bm_f("content", bm_o([CanonicalJSONField]{bm_f("measurements", CanonicalJSON.Array([CanonicalJSON]{bm_o([CanonicalJSONField]{bm_f("decision", CanonicalJSON.Null)})}))}))})
+    bm_error(jet_cli_budget_manifest_validate_update_evidence(bad_decision, pass), "decision is not an object")
+}
+#Test("budget manifest policy defaults and exact unsigned boundaries") {
+    defaults :: [CanonicalJSONField]{bm_f("policy", CanonicalJSON.Null)}
+    assert_eq(jet_cli_budget_manifest_stale_after_seconds(defaults) ?? panic(err.message), 2592000)
+    assert_eq(jet_cli_budget_manifest_history_window(defaults) ?? panic(err.message), 5)
+    valid :: [String]{"0", "18446744073709551615", "+1"}
+    loop v in valid {
+        fields :: [CanonicalJSONField]{bm_f("policy", bm_o([CanonicalJSONField]{bm_f("stale_after_seconds", CanonicalJSON.Integer(v)), bm_f("baseline_generations", CanonicalJSON.Integer(v))}))}
+        expected :: if v == "+1" -> 1 else -> Int.parse(v) ?? panic("integer")
+        assert_eq(jet_cli_budget_manifest_stale_after_seconds(fields) ?? panic(err.message), expected)
+        assert_eq(jet_cli_budget_manifest_history_window(fields) ?? panic(err.message), expected)
+    }
+    bad :: [String]{"-1", "18446744073709551616", "", "+", "1x"}
+    loop v in bad {
+        fields :: [CanonicalJSONField]{bm_f("policy", bm_o([CanonicalJSONField]{bm_f("stale_after_seconds", CanonicalJSON.Integer(v)), bm_f("baseline_generations", CanonicalJSON.Integer(v))}))}
+        if jet_cli_budget_manifest_stale_after_seconds(fields) == {
+            .Ok(_) -> panic("bad u64")
+            .Err(e) -> assert_eq(e.message, "stale_after_seconds exceeds u64")
+        }
+        if jet_cli_budget_manifest_history_window(fields) == {
+            .Ok(_) -> panic("bad usize")
+            .Err(e) -> assert_eq(e.message, "baseline_generations exceeds usize")
+        }
+    }
+    if jet_cli_budget_manifest_stale_after_seconds([CanonicalJSONField]{}) == {
+        .Ok(_) -> panic("missing policy")
+        .Err(e) -> assert_eq(e.message, "measurement policy is invalid")
+    }
+    if jet_cli_budget_manifest_history_window([CanonicalJSONField]{bm_f("policy", CanonicalJSON.Bool(false))}) == {
+        .Ok(_) -> panic("bad policy")
+        .Err(e) -> assert_eq(e.message, "measurement policy is invalid")
+    }
+    if jet_cli_budget_manifest_stale_after_seconds([CanonicalJSONField]{bm_f("policy", bm_o([CanonicalJSONField]{}))}) == {
+        .Ok(_) -> panic("missing stale field")
+        .Err(e) -> assert_eq(e.message, "policy.stale_after_seconds is not integer")
+    }
+    if jet_cli_budget_manifest_history_window([CanonicalJSONField]{bm_f("policy", bm_o([CanonicalJSONField]{bm_f("baseline_generations", CanonicalJSON.Null)}))}) == {
+        .Ok(_) -> panic("null window")
+        .Err(e) -> assert_eq(e.message, "policy.baseline_generations is not integer")
+    }
+}
+#Test("budget manifest rational and scalar accessors preserve errors") {
+    q :: jet_cli_budget_manifest_rational(bm_o([CanonicalJSONField]{bm_f("num", CanonicalJSON.Integer("6")), bm_f("den", CanonicalJSON.Integer("-8"))})) ?? panic(err.message)
+    assert_eq(q.num, -3)
+    assert_eq(q.den, 4)
+    if jet_cli_budget_manifest_rational(bm_o([CanonicalJSONField]{})) == {
+        .Ok(_) -> panic("missing num")
+        .Err(e) -> assert_eq(e.message, "rational.num is not an integer")
+    }
+    if jet_cli_budget_manifest_rational(bm_o([CanonicalJSONField]{bm_f("num", CanonicalJSON.Integer("1"))})) == {
+        .Ok(_) -> panic("missing den")
+        .Err(e) -> assert_eq(e.message, "rational.den is not an integer")
+    }
+    if jet_cli_budget_manifest_rational(bm_o([CanonicalJSONField]{bm_f("num", CanonicalJSON.Integer("1")), bm_f("den", CanonicalJSON.Integer("0"))})) == {
+        .Ok(_) -> panic("zero den")
+        .Err(e) -> assert_eq(e.message, "rational denominator is zero")
+    }
+    bm_error(jet_cli_budget_manifest_object(CanonicalJSON.Null, "x"), "x is not an object")
+    bm_error(jet_cli_budget_manifest_array(CanonicalJSON.Null, "x"), "x is not an array")
+    if jet_cli_budget_manifest_report_id(CanonicalJSON.Null) == {
+        .Ok(_) -> panic("null report")
+        .Err(e) -> assert_eq(e.message, "report is not an object")
+    }
+    if jet_cli_budget_manifest_report_id(bm_o([CanonicalJSONField]{})) == {
+        .Ok(_) -> panic("missing id")
+        .Err(e) -> assert_eq(e.message, "report_id is not text")
+    }
+    if jet_cli_budget_manifest_text(CanonicalJSON.Null, "x") == {
+        .Ok(_) -> panic("null text")
+        .Err(e) -> assert_eq(e.message, "x is not text")
+    }
+    if jet_cli_budget_manifest_integer(CanonicalJSON.Null, "x") == {
+        .Ok(_) -> panic("null integer")
+        .Err(e) -> assert_eq(e.message, "x is not integer")
+    }
+    if jet_cli_budget_manifest_boolean(CanonicalJSON.Null, "x") == {
+        .Ok(_) -> panic("null bool")
+        .Err(e) -> assert_eq(e.message, "x is not boolean")
+    }
+    if jet_cli_budget_manifest_nullable_text(CanonicalJSON.Bool(true), "x") == {
+        .Ok(_) -> panic("bool nullable")
+        .Err(e) -> assert_eq(e.message, "x is not text or null")
+    }
+    // #4376: optional-return ?? owner ICE; consume the same optional via result match.
+    if jet_cli_budget_manifest_nullable_text(CanonicalJSON.Null, "x") == {
+        .Ok(v) -> assert(v == None)
+        .Err(e) -> panic(e.message)
+    }
+    assert(jet_cli_budget_manifest_is_hex64("a".repeat(64)))
+    assert(!jet_cli_budget_manifest_is_hex64("A".repeat(64)))
+    assert(!jet_cli_budget_manifest_is_hex64("g".repeat(64)))
+    assert(!jet_cli_budget_manifest_is_hex64("0".repeat(63)))
+    assert(!jet_cli_budget_manifest_is_hex64("é".repeat(32)))
+}
+#Test("budget manifest measurement identity is unique and required") {
+    rows :: CanonicalJSON.Array([CanonicalJSON]{bm_o([CanonicalJSONField]{bm_f("budget_id", bm_s("one"))}), bm_o([CanonicalJSONField]{bm_f("budget_id", bm_s("two"))})})
+    content :: [CanonicalJSONField]{bm_f("measurements", rows)}
+    assert_eq(jet_cli_budget_manifest_measurement_index(content, "two") ?? panic(err.message), 1)
+    if jet_cli_budget_manifest_measurement_index(content, "absent") == {
+        .Ok(_) -> panic("absent measurement")
+        .Err(e) -> assert_eq(e.message, "measurement `absent` is absent")
+    }
+    dup :: [CanonicalJSONField]{bm_f("measurements", CanonicalJSON.Array([CanonicalJSON]{bm_o([CanonicalJSONField]{bm_f("budget_id", bm_s("one"))}), bm_o([CanonicalJSONField]{bm_f("budget_id", bm_s("one"))})}))}
+    if jet_cli_budget_manifest_measurement_index(dup, "one") == {
+        .Ok(_) -> panic("duplicate measurement")
+        .Err(e) -> assert_eq(e.message, "duplicate budget_id `one`")
+    }
+    if jet_cli_budget_manifest_measurement_index([CanonicalJSONField]{}, "one") == {
+        .Ok(_) -> panic("missing measurements")
+        .Err(e) -> assert_eq(e.message, "measurements is not an array")
+    }
+}
+#Test("budget manifest compatibility every ratified field and missing subject equality") {
+    empty :: [CanonicalJSONField]{}
+    assert(jet_cli_budget_manifest_compatible(empty, empty, empty, empty))
+    keys :: [String]{"budget_spec_sha256", "metric", "unit", "direction", "comparison", "target_class", "provider", "context_key"}
+    loop key in keys {
+        a :: [CanonicalJSONField]{bm_f(key, bm_s("a"))}
+        b :: [CanonicalJSONField]{bm_f(key, bm_s("b"))}
+        assert(!jet_cli_budget_manifest_compatible(empty, a, empty, b))
+        assert(!jet_cli_budget_manifest_compatible(empty, a, empty, empty))
+        assert(jet_cli_budget_manifest_compatible(empty, a, empty, a))
+    }
+    content_keys :: [String]{"toolchain", "privacy"}
+    loop key in content_keys {
+        a :: [CanonicalJSONField]{bm_f(key, bm_s("a"))}
+        b :: [CanonicalJSONField]{bm_f(key, bm_s("b"))}
+        assert(!jet_cli_budget_manifest_compatible(a, empty, b, empty))
+    }
+    subject_keys :: [String]{"target_triple", "target_class", "profile"}
+    loop key in subject_keys {
+        a :: [CanonicalJSONField]{bm_f("subject", bm_o([CanonicalJSONField]{bm_f(key, bm_s("a"))}))}
+        b :: [CanonicalJSONField]{bm_f("subject", bm_o([CanonicalJSONField]{bm_f(key, bm_s("b"))}))}
+        assert(!jet_cli_budget_manifest_compatible(a, empty, b, empty))
+        assert(!jet_cli_budget_manifest_compatible(empty, empty, a, empty))
+    }
+    null_subject :: [CanonicalJSONField]{bm_f("subject", CanonicalJSON.Null)}
+    empty_subject :: [CanonicalJSONField]{bm_f("subject", bm_o(empty))}
+    assert(jet_cli_budget_manifest_compatible(null_subject, empty, empty_subject, empty))
+}

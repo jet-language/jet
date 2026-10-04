@@ -1,0 +1,275 @@
+// Rust os_switch_activates_and_sets_current :1630-1668, with the Main-ratified
+// compact :1632 expectation. Original inputs are read from the entire committed
+// tests/fixtures/jetpack-config/config.jet (especially :132-150), evaluated by
+// the real EnvModel producer. This packet exercises artifact writing/launching,
+// not generation composition or the CLI switch engine. Native proofs require
+// Studio executable permissions #4479/#3593 and process #3594, without substitutes.
+
+fn jetos_ff_read(root: String, relative: String) -[FS]> String Never! {
+    files.read(files.join(root, relative)) ?? panic("read {relative}")
+}
+
+fn jetos_ff_plan(root: String, source: String) -[FS, Env]> EnvPlan Never! {
+    files.write(files.join(root, "config.jet"), source) ?? panic("write config input")
+    envmodel_evaluate_env(source, root) ?? panic(err.diagnostic.what)
+}
+
+fn jetos_ff_source() -> String Never! {
+    "module system.halcyon {{ target: linux.x64 }}\nmodule fleet.home {{ hosts: {{ halcyon: system.halcyon }} }}\n"
+}
+
+fn jetos_ff_system(options: [OptionPlan]) -> SystemPlan Never! {
+    SystemPlan{name: "halcyon", target: "linux.x64", packages: [Pkg]{}, services: [ServicePlan]{}, options: options}
+}
+
+fn jetos_ff_row(fleet: String, host: String, target: String, health: String) -> String Never! {
+    "{{\"fleet\":{foundation_json_quote(fleet)},\"host\":{foundation_json_quote(host)},\"system\":\"halcyon\",\"target\":{foundation_json_quote(target)},\"policy\":\"staged-proof-gated-rollback-stop\",\"health\":{foundation_json_quote(health)},\"script\":{foundation_json_quote("fleet/deploy-{host}.sh")}}}"
+}
+
+fn jetos_ff_expected(graph: String, rows: [String]) -> String Never! {
+    "{{\"kind\":\"jetos.fleet-deploy\",\"host\":\"halcyon\",\"graph_identity\":{graph},\"hosts\":[{rows.join(",")}],\"proofs\":[\"build-closure\",\"ssh-push\",\"remote-proof-before-switch\",\"health-window\",\"rollback-on-fail\"]}}"
+}
+
+fn jetos_ff_commands(health: String) -> [OptionPlan] Never! {
+    [OptionPlan]{
+        OptionPlan{key: "deploy.host.halcyon.pushCommand", value: "echo push >> \"$JETOS_DEPLOY_LOG\""},
+        OptionPlan{key: "deploy.host.halcyon.proofCommand", value: "echo proof >> \"$JETOS_DEPLOY_LOG\""},
+        OptionPlan{key: "deploy.host.halcyon.switchCommand", value: "echo switch >> \"$JETOS_DEPLOY_LOG\""},
+        OptionPlan{key: "deploy.host.halcyon.healthCommand", value: health},
+        OptionPlan{key: "deploy.host.halcyon.rollbackCommand", value: "echo rollback >> \"$JETOS_DEPLOY_LOG\""}
+    }
+}
+
+#Test("JetOS Fleet compact ordered string schema duplicate and escaping bytes") {
+    assert_eq(jetos_fleet_compact_object([(key: String, value: String)]{}), "{{}}")
+    assert_eq(jetos_fleet_compact_object([(key: String, value: String)]{(key: "z", value: "true"), (key: "z", value: ""), (key: "a\"\n", value: "'%;λ\\")}), "{{\"z\":\"true\",\"z\":\"\",\"a\\\"\\n\":\"'%;λ\\\\\"}}")
+}
+
+#Test("JetOS Fleet original compact plan real launcher log and deploy proof") {
+    root :: files.tmpdir("jetos-fleet-facts-original-") ?? panic("Fleet scratch")
+    cwd :: files.cwd() ?? panic("repository cwd")
+    config :: files.join(cwd, "tests/fixtures/jetpack-config/config.jet")
+    source :: files.read(config) ?? panic("read entire original config.jet fixture")
+    plan :: envmodel_evaluate_env(source, files.dirname(config)) ?? panic(err.diagnostic.what)
+    assert_eq(plan.fleets[0].name, "home")
+    assert_eq(plan.fleets[0].hosts[0].name, "halcyon")
+    assert_eq(plan.fleets[0].hosts[0].system, "halcyon")
+    generation :: files.join(root, "generation")
+    jetos_write_fleet_deploy_facts(generation, plan.systems[0], plan) ?? panic("original Fleet writer")
+    files.write(files.join(generation, "generation.txt"), "known-good\n") ?? panic("generation name")
+    fleet :: jetos_ff_read(generation, "fleet/deploy-plan.json")
+    // Original :1632; this original expectation is the deliberate proof control.
+    assert(fleet.contains("staged-proof-gated-rollback-stop") && fleet.contains("\"fleet\":\"home\""))
+    assert_eq(fleet, jetos_ff_expected("null", [String]{jetos_ff_row("home", "halcyon", "halcyon@halcyon", "system-health")}))
+    assert(files.is_file(files.join(generation, "sw/bin/jetos-fleet-deploy")))
+    log :: files.join(root, "deploy.log")
+    proofs :: files.join(root, "deploy-proofs")
+    files.create_dir_all(proofs) ?? panic("deploy proofs")
+    deploy :: process.cmd([String]{files.join(generation, "sw/bin/jetos-fleet-deploy"), "halcyon"}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_DEPLOY_PROOF_DIR", proofs).env("JETOS_DEPLOY_LOG", log).stdout(.Capture).stderr(.Capture).run() ?? panic("original Fleet launcher")
+    assert(deploy.success, "stdout: {deploy.output}\nstderr: {deploy.errors}")
+    steps :: files.read(log) ?? panic("deploy log")
+    assert(steps.contains("push") && steps.contains("proof") && steps.contains("switch") && steps.contains("health"))
+    assert_eq(steps, "push\nproof\nswitch\nhealth\n")
+    proof :: jetos_ff_read(proofs, "home-halcyon.json")
+    assert(proof.contains("\"state\":\"deployed\"") && proof.contains("remote-proof-before-switch"))
+    assert_eq(proof, "{{\"state\":\"deployed\",\"fleet\":\"home\",\"host\":\"halcyon\",\"system\":\"halcyon\",\"target\":\"halcyon@halcyon\",\"graph_identity\":null,\"generation\":\"known-good\",\"proofs\":[\"push\",\"remote-proof-before-switch\",\"health-window\"]}}\n")
+    files.remove_all(root) ?? panic("original cleanup")
+}
+
+#Test("JetOS Fleet no fleets and no matching systems retain empty plan usage") {
+    root :: files.tmpdir("jetos-fleet-empty-") ?? panic("scratch")
+    sources :: [String]{"module system.halcyon {{ target: linux.x64 }}", "module system.halcyon {{ target: linux.x64 }} module system.other {{ target: linux.arm64 }} module fleet.away {{ hosts: {{ other: system.other }} }}"}
+    loop source in sources {
+        plan :: jetos_ff_plan(root, source)
+        generation :: files.join(root, "generation")
+        jetos_write_fleet_deploy_facts(generation, plan.systems[0], plan) ?? panic("empty Fleet writer")
+        assert_eq(jetos_ff_read(generation, "fleet/deploy-plan.json"), jetos_ff_expected("null", [String]{}))
+        launcher :: files.join(generation, "sw/bin/jetos-fleet-deploy")
+        usage :: process.cmd([String]{launcher}).env("JETOS_SYSTEM_ROOT", generation).stdout(.Capture).stderr(.Capture).run() ?? panic("empty launcher")
+        assert_eq(usage.code, 2)
+        assert_eq(usage.errors, "usage: jetos-fleet-deploy <host>\n")
+        unknown :: process.cmd([String]{launcher, "absent"}).env("JETOS_SYSTEM_ROOT", generation).stdout(.Capture).stderr(.Capture).run() ?? panic("unknown launcher")
+        assert_eq(unknown.code, 2)
+        assert_eq(unknown.errors, "jetos fleet deploy: unknown host absent\n")
+        files.write(files.join(generation, "fleet/deploy-refused.sh"), "#!/bin/sh\nexit 99\n") ?? panic("non executable fixture")
+        refused :: process.cmd([String]{launcher, "refused"}).env("JETOS_SYSTEM_ROOT", generation).stdout(.Capture).stderr(.Capture).run() ?? panic("not executable")
+        assert_eq(refused.code, 2)
+        assert_eq(refused.errors, "jetos fleet deploy: unknown host refused\n")
+    }
+    files.remove_all(root) ?? panic("empty cleanup")
+}
+
+#Test("JetOS Fleet filter first host graph null empty quoted duplicate overwrite exact plan") {
+    root :: files.tmpdir("jetos-fleet-order-") ?? panic("scratch")
+    source :: "module system.halcyon {{ target: linux.x64 }} module system.other {{ target: linux.arm64 }} module fleet.first {{ hosts: {{ skipped: system.other, zfirst: system.halcyon.{{ region: \"west\" }}, halcyon: system.halcyon }} }} module fleet.last {{ hosts: {{ halcyon: system.halcyon }} }}"
+    plan := jetos_ff_plan(root, source)
+    assert(plan.fleets[0].hosts[1].overrides != None)
+    assert(plan.fleets[0].hosts[1].override_source != None)
+    graphs :: [String?]{None, Val(""), Val("graph'\"\n%;λ")}
+    loop graph in graphs {
+        plan.graph_identity = graph
+        generation :: files.join(root, "generation")
+        jetos_write_fleet_deploy_facts(generation, plan.systems[0], plan) ?? panic("ordered writer")
+        graph_json :: if graph == { .Val(value) -> foundation_json_quote(value); .None -> "null" }
+        assert_eq(jetos_ff_read(generation, "fleet/deploy-plan.json"), jetos_ff_expected(graph_json, [String]{jetos_ff_row("first", "zfirst", "zfirst@zfirst", "system-health"), jetos_ff_row("first", "halcyon", "halcyon@halcyon", "system-health"), jetos_ff_row("last", "halcyon", "halcyon@halcyon", "system-health")}))
+        assert(!files.exists(files.join(generation, "fleet/deploy-skipped.sh")))
+        overwritten :: jetos_ff_read(generation, "fleet/deploy-halcyon.sh")
+        assert(overwritten.contains("proof_name='last-halcyon.json'"))
+        assert(!overwritten.contains("proof_name='first-halcyon.json'"))
+        launcher :: files.join(generation, "sw/bin/jetos-fleet-deploy")
+        assert(jetos_ff_read(generation, "sw/bin/jetos-fleet-deploy").contains("host=${{1:-'zfirst'}}"))
+        proofs :: files.join(root, "proofs")
+        first :: process.cmd([String]{launcher}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_DEPLOY_PROOF_DIR", proofs).env("JETOS_FLEET_DRY_RUN", "1").stdout(.Capture).stderr(.Capture).run() ?? panic("first default host")
+        assert(first.success, first.errors)
+        assert(jetos_ff_read(proofs, "first-zfirst.json").contains("\"host\":\"zfirst\""))
+        explicit :: process.cmd([String]{launcher, "halcyon"}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_DEPLOY_PROOF_DIR", proofs).env("JETOS_FLEET_DRY_RUN", "1").stdout(.Capture).stderr(.Capture).run() ?? panic("explicit duplicate host")
+        assert(explicit.success, explicit.errors)
+        assert(jetos_ff_read(proofs, "last-halcyon.json").contains("\"fleet\":\"last\""))
+    }
+    files.remove_all(root) ?? panic("order cleanup")
+}
+
+#Test("JetOS Fleet actual writer stage dryrun rollback and empty verbatim overrides") {
+    root :: files.tmpdir("jetos-fleet-modes-") ?? panic("scratch")
+    plan :: jetos_ff_plan(root, jetos_ff_source())
+    generation :: files.join(root, "generation")
+    log :: files.join(root, "deploy.log")
+    proofs :: files.join(root, "proofs")
+    system := jetos_ff_system(jetos_ff_commands("echo health >> \"$JETOS_DEPLOY_LOG\""))
+    jetos_write_fleet_deploy_facts(generation, system, plan) ?? panic("mode writer")
+    files.write(files.join(generation, "generation.txt"), "known-good\n") ?? panic("generation")
+    modes :: [String]{"deployed", "staged", "dry-run", "rolled-back"}
+    loop mode in modes {
+        if mode == "rolled-back" {
+            system.options = jetos_ff_commands("echo health >> \"$JETOS_DEPLOY_LOG\"; false")
+            jetos_write_fleet_deploy_facts(generation, system, plan) ?? panic("rollback writer")
+        }
+        files.write(log, "") ?? panic("reset log")
+        run :: process.cmd([String]{files.join(generation, "sw/bin/jetos-fleet-deploy")}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_DEPLOY_PROOF_DIR", proofs).env("JETOS_DEPLOY_LOG", log).env("JETOS_FLEET_STAGE_ONLY", if mode == "staged" -> "1" else -> "").env("JETOS_FLEET_DRY_RUN", if mode == "dry-run" -> "1" else -> "").stdout(.Capture).stderr(.Capture).run() ?? panic("mode launcher")
+        assert_eq(run.code, if mode == "rolled-back" -> 2 else -> 0)
+        expected_steps :: if mode == { "deployed" -> "push\nproof\nswitch\nhealth\n"; "staged" -> "push\nproof\n"; "dry-run" -> ""; else -> "push\nproof\nswitch\nhealth\nrollback\n" }
+        assert_eq(files.read(log) ?? panic("mode steps"), expected_steps)
+        suffix :: if mode == "deployed" -> ",\"proofs\":[\"push\",\"remote-proof-before-switch\",\"health-window\"]" else -> ""
+        assert_eq(jetos_ff_read(proofs, "home-halcyon.json"), "{{\"state\":\"{mode}\",\"fleet\":\"home\",\"host\":\"halcyon\",\"system\":\"halcyon\",\"target\":\"halcyon@halcyon\",\"graph_identity\":null,\"generation\":\"known-good\"{suffix}}}\n")
+    }
+    empty := [OptionPlan]{OptionPlan{key: "deploy.host.halcyon.target", value: "\"\""}, OptionPlan{key: "deploy.host.halcyon.health", value: "\"\""}}
+    steps :: [String]{"push", "proof", "switch", "health", "rollback"}
+    loop step in steps -> &empty.push(OptionPlan{key: "deploy.host.halcyon.{step}Command", value: "\"\""})
+    jetos_write_fleet_deploy_facts(generation, jetos_ff_system(empty), plan) ?? panic("empty overrides writer")
+    assert_eq(jetos_ff_read(generation, "fleet/deploy-plan.json"), jetos_ff_expected("null", [String]{jetos_ff_row("home", "halcyon", "", "")}))
+    script :: jetos_ff_read(generation, "fleet/deploy-halcyon.sh")
+    assert(!script.contains("ssh "))
+    assert(script.contains("push_cmd=''\n") && script.contains("proof_cmd=''\n") && script.contains("switch_cmd=''\n") && script.contains("health_cmd=''\n") && script.contains("rollback_cmd=''\n"))
+    run :: process.cmd([String]{files.join(generation, "sw/bin/jetos-fleet-deploy")}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_DEPLOY_PROOF_DIR", proofs).stdout(.Capture).stderr(.Capture).run() ?? panic("empty commands")
+    assert(run.success, run.errors)
+    files.remove_all(root) ?? panic("mode cleanup")
+}
+
+#Test("JetOS Fleet FIVE implicit SSH argv benign hostile restored real tar and remote readlink") {
+    root :: files.tmpdir("jetos-fleet-default-ssh-") ?? panic("SSH scratch")
+    plan :: jetos_ff_plan(root, jetos_ff_source())
+    bin :: files.join(root, "bin")
+    files.create_dir_all(bin) ?? panic("SSH fixture bin")
+    ssh :: files.join(bin, "ssh")
+    // Actual executable records the two SSH operands; push drains the REAL tar
+    // stream into a disk file, not a renderer-only or mock process witness.
+    files.write(ssh, "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$#\" \"$1\" \"$2\" >> \"$ARGV_LOG\"\ncase \"$2\" in\n  'mkdir -p '*) cat > \"$TAR_LOG\" ;;\n  'test -f ~/.jetos/current/health-checks.txt') if [ \"$FAIL_HEALTH\" = 1 ]; then exit 3; fi ;;\nesac\n") ?? panic("SSH recorder")
+    jetos_make_executable(ssh) ?? panic("real SSH fixture executable provider")
+    readlink :: files.join(bin, "readlink")
+    files.write(readlink, "#!/bin/sh\nprintf '%s\\n' local-readlink >> \"$LOCAL_READLINK_MARKER\"\nprintf '%s\\n' incorrect-local-link\n") ?? panic("readlink recorder")
+    jetos_make_executable(readlink) ?? panic("real readlink fixture executable provider")
+    marker :: files.join(root, "injection-marker")
+    readlink_marker :: files.join(root, "local-readlink-marker")
+    // Positive recorder control: prove this executable and marker are observable
+    // before asserting that rollback never expands readlink on the local host.
+    local_control :: process.cmd([String]{readlink, "ignored"}).env("LOCAL_READLINK_MARKER", readlink_marker).stdout(.Capture).stderr(.Capture).run() ?? panic("readlink positive control")
+    assert(local_control.success, local_control.errors)
+    assert_eq(files.read(readlink_marker) ?? panic("positive readlink marker"), "local-readlink\n")
+    files.remove(readlink_marker) ?? panic("restore absent local readlink marker")
+    argv :: files.join(root, "argv.log")
+    archive_path :: files.join(root, "pushed.tar")
+    proofs :: files.join(root, "proofs")
+    generation :: files.join(root, "generation ' % λ\nroot")
+    hostile :: "name'; touch \"$MARKER\"; #\"\n%λ$(touch \"$MARKER\")"
+    targets :: [String]{"halcyon@halcyon", hostile, "halcyon@halcyon"}
+    health_modes :: [String]{"0", "1"}
+    loop target in targets {
+        system :: jetos_ff_system([OptionPlan]{OptionPlan{key: "deploy.host.halcyon.target", value: target}})
+        jetos_write_fleet_deploy_facts(generation, system, plan) ?? panic("default SSH artifact writer")
+        files.write(files.join(generation, "generation.txt"), "known-good\n") ?? panic("derived generation")
+        payload :: "real pushed root bytes '% λ\n"
+        files.write(files.join(generation, "payload.bin"), payload) ?? panic("real tar root fixture")
+        loop fail in health_modes {
+            files.write(argv, "") ?? panic("argv reset")
+            // Deliberately NO env(root, ...) or env(generation, ...): the actual
+            // renderer exports its derived values to each default command.
+            run :: process.cmd([String]{files.join(generation, "sw/bin/jetos-fleet-deploy")}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_DEPLOY_PROOF_DIR", proofs).env("PATH", "{bin}:/usr/bin:/bin").env("ARGV_LOG", argv).env("TAR_LOG", archive_path).env("FAIL_HEALTH", fail).env("MARKER", marker).env("LOCAL_READLINK_MARKER", readlink_marker).stdout(.Capture).stderr(.Capture).run() ?? panic("real default SSH launcher")
+            assert_eq(run.code, if fail == "1" -> 2 else -> 0)
+            remote :: [String]{
+                "mkdir -p ~/.jetos/generations/known-good && tar -C ~/.jetos/generations/known-good -xf -",
+                "test -f ~/.jetos/generations/known-good/proof.txt && test -f ~/.jetos/generations/known-good/activation-diff.txt",
+                "ln -sfn ~/.jetos/generations/known-good ~/.jetos/current",
+                "test -f ~/.jetos/current/health-checks.txt"
+            }
+            expected := [String]{}
+            loop command in remote -> &expected.push("2\n{target}\n{command}\n")
+            if fail == "1" -> &expected.push("2\n{target}\ntest -L ~/.jetos/previous && ln -sfn $(readlink ~/.jetos/previous) ~/.jetos/current || true\n")
+            assert_eq(files.read(argv) ?? panic("actual SSH argv"), expected.join(""))
+            assert(!files.exists(marker))
+            assert(!files.exists(readlink_marker))
+            extract :: process.cmd([String]{"/usr/bin/tar", "-xOf", archive_path, "./payload.bin"}).stdout(.Capture).stderr(.Capture).run() ?? panic("real pushed tar bytes")
+            assert(extract.success, extract.errors)
+            assert_eq(extract.output, payload)
+            state :: if fail == "1" -> "rolled-back" else -> "deployed"
+            assert(jetos_ff_read(proofs, "home-halcyon.json").contains("\"state\":\"{state}\""))
+        }
+        files.write(argv, "") ?? panic("dry argv reset")
+        dry :: process.cmd([String]{files.join(generation, "sw/bin/jetos-fleet-deploy")}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_DEPLOY_PROOF_DIR", proofs).env("JETOS_FLEET_DRY_RUN", "1").env("PATH", "{bin}:/usr/bin:/bin").env("ARGV_LOG", argv).env("MARKER", marker).env("LOCAL_READLINK_MARKER", readlink_marker).stdout(.Capture).stderr(.Capture).run() ?? panic("default dryrun")
+        assert(dry.success, dry.errors)
+        assert_eq(files.read(argv) ?? panic("dry argv"), "")
+        assert(!files.exists(marker) && !files.exists(readlink_marker))
+    }
+    files.remove_all(root) ?? panic("SSH cleanup")
+}
+
+#Test("JetOS Fleet explicit command override stays executable verbatim user source") {
+    root :: files.tmpdir("jetos-fleet-verbatim-") ?? panic("override scratch")
+    plan :: jetos_ff_plan(root, jetos_ff_source())
+    marker :: files.join(root, "explicit-marker")
+    command :: "printf '%s\\n' 'explicit λ%; apostrophe' > {jetos_shell_single_quote(marker)}; : 'second command'"
+    options := jetos_ff_commands("true")
+    &options.push(OptionPlan{key: "deploy.host.halcyon.pushCommand", value: command})
+    generation :: files.join(root, "generation")
+    jetos_write_fleet_deploy_facts(generation, jetos_ff_system(options), plan) ?? panic("verbatim writer")
+    assert(jetos_ff_read(generation, "fleet/deploy-halcyon.sh").contains("push_cmd={jetos_shell_single_quote(command)}\n"))
+    run :: process.cmd([String]{files.join(generation, "sw/bin/jetos-fleet-deploy")}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_DEPLOY_LOG", files.join(root, "deploy.log")).stdout(.Capture).stderr(.Capture).run() ?? panic("verbatim launcher")
+    assert(run.success, run.errors)
+    assert_eq(files.read(marker) ?? panic("user command marker"), "explicit λ%; apostrophe\n")
+    files.remove_all(root) ?? panic("override cleanup")
+}
+
+#Test("JetOS Fleet artifact writer propagates directory and output file refusals") {
+    root :: files.tmpdir("jetos-fleet-io-refusal-") ?? panic("refusal scratch")
+    plan :: jetos_ff_plan(root, jetos_ff_source())
+    blocked :: files.join(root, "blocked")
+    files.create_dir_all(blocked) ?? panic("blocked root")
+    files.write(files.join(blocked, "fleet"), "not a directory") ?? panic("fleet directory blocker")
+    refused :: if jetos_write_fleet_deploy_facts(blocked, plan.systems[0], plan) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+    assert(refused)
+    assert(!files.exists(files.join(blocked, "sw/bin/jetos-fleet-deploy")))
+    output_blocked :: files.join(root, "output-blocked")
+    files.create_dir_all(files.join(output_blocked, "fleet/deploy-plan.json")) ?? panic("plan output blocker")
+    refused_output :: if jetos_write_fleet_deploy_facts(output_blocked, plan.systems[0], plan) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+    assert(refused_output)
+    // Rust writes/chmods each selected host before writing the plan, and must
+    // not create the launcher after the plan write fails.
+    assert(files.is_file(files.join(output_blocked, "fleet/deploy-halcyon.sh")))
+    assert(!files.exists(files.join(output_blocked, "sw/bin/jetos-fleet-deploy")))
+    files.remove_all(root) ?? panic("refusal cleanup")
+}

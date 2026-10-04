@@ -1,0 +1,176 @@
+// Source/CheckReceipt.rs has no inline tests (spec CR01). The closure-key
+// digest below is an independent Python hashlib oracle over the Rust
+// ReceiptClosure::new framing; host-observed authority probes are supplied as
+// the probe strings Rust records.
+
+fn check_receipt_test_build() -> JetCLICheckReceiptBuild Never! {
+    JetCLICheckReceiptBuild{compiler_build_id: "compiler-1", stdlib_build_id: "core-1", build_target: "x86_64-unknown-linux-gnu"}
+}
+
+fn check_receipt_test_module(path: String, source: String) -> MIRSourceFile Never! {
+    MIRSourceFile{id: mir_source_file_id(path), path: path, source: source}
+}
+
+#Test("check receipt labels strip the project root and normalize separators") {
+    root :: receipt_paths.path("/p")
+    assert_eq(jet_cli_check_receipt_label(root, receipt_paths.path("/p/src/main.jet")), "src/main.jet")
+    assert_eq(jet_cli_check_receipt_label(root, receipt_paths.path("/p//src/./a\\b.jet")), "src/./a/b.jet")
+    assert_eq(jet_cli_check_receipt_label(root, receipt_paths.path("/p")), "")
+    assert_eq(jet_cli_check_receipt_label(root, receipt_paths.path("/pq/x.jet")), "/pq/x.jet")
+    assert_eq(jet_cli_check_receipt_label(root, receipt_paths.path("<corelib>/Core/x.jet")), "<corelib>/Core/x.jet")
+}
+
+#Test("check receipt read labels persist project relative and resolve back") {
+    root :: receipt_paths.path("/p")
+    assert_eq(jet_cli_check_receipt_persisted_label(root, "file:/p/assets/data.json"), "file:assets/data.json")
+    assert_eq(jet_cli_check_receipt_persisted_label(root, "dir:/p/assets"), "dir:assets")
+    assert_eq(jet_cli_check_receipt_persisted_label(root, "file:/elsewhere/x"), "file:/elsewhere/x")
+    assert_eq(jet_cli_check_receipt_persisted_label(root, "env:HOME"), "env:HOME")
+    assert_eq(jet_cli_check_receipt_current_label(root, "file:assets/data.json"), "file:/p/assets/data.json")
+    assert_eq(jet_cli_check_receipt_current_label(root, "dir:assets"), "dir:/p/assets")
+    assert_eq(jet_cli_check_receipt_current_label(root, "file:/elsewhere/x"), "file:/elsewhere/x")
+    assert_eq(jet_cli_check_receipt_current_label(root, "env:HOME"), "env:HOME")
+}
+
+#Test("check receipt invocation framing sorts options by name then value") {
+    key := [U8]{}
+    options :: [JetCLICheckReceiptOption]{
+        JetCLICheckReceiptOption{name: "target", value: ""},
+        JetCLICheckReceiptOption{name: "entry", value: "run"},
+        JetCLICheckReceiptOption{name: "entry", value: ""},
+    }
+    jet_cli_check_receipt_frame_invocation(&key, "check", check_receipt_test_build(), receipt_paths.path("/p"), receipt_paths.path("/p/src/main.jet"), options)
+    expected := [U8]{}
+    rows :: [String]{"jet.receipt-closure/v1", "check", "compiler-1", "core-1", "x86_64-unknown-linux-gnu", "root", "/p", "entry", "src/main.jet", "option", "entry", "", "option", "entry", "run", "option", "target", ""}
+    loop row in rows -> jet_cli_receipt_frame(&expected, row.bytes())
+    assert_eq(key, expected)
+}
+
+#Test("check receipt module rows sort by label and digest and deduplicate") {
+    root :: receipt_paths.path("/p")
+    key := [U8]{}
+    closure :: [MIRSourceFile]{
+        check_receipt_test_module("/p/src/main.jet", "b"),
+        check_receipt_test_module("/p/lib/b.jet", "b"),
+        check_receipt_test_module("/p/src/main.jet", "b"),
+        check_receipt_test_module("/p/src/main.jet", "a"),
+    }
+    jet_cli_check_receipt_frame_modules(&key, root, closure)
+    pairs :: [String]{"lib/b.jet", mir_sha256_hex("b"), "src/main.jet", mir_sha256_hex("b"), "src/main.jet", mir_sha256_hex("a")}
+    // sha256("b") = 3e23e816... sorts before sha256("a") = ca978112...
+    order :: [Int]{2, 4}
+    expected := [U8]{}
+    jet_cli_receipt_frame(&expected, "module".bytes())
+    jet_cli_receipt_frame(&expected, pairs[0].bytes())
+    jet_cli_receipt_frame(&expected, pairs[1].bytes())
+    loop index in order {
+        jet_cli_receipt_frame(&expected, "module".bytes())
+        jet_cli_receipt_frame(&expected, pairs[index].bytes())
+        jet_cli_receipt_frame(&expected, pairs[index + 1].bytes())
+    }
+    assert_eq(key, expected)
+}
+
+#Test("check receipt closure key matches the Rust framing oracle") {
+    root :: receipt_paths.path("/p")
+    key := [U8]{}
+    options :: [JetCLICheckReceiptOption]{
+        JetCLICheckReceiptOption{name: "target", value: ""},
+        JetCLICheckReceiptOption{name: "entry", value: "run"},
+        JetCLICheckReceiptOption{name: "entry", value: ""},
+    }
+    jet_cli_check_receipt_frame_invocation(&key, "check", check_receipt_test_build(), root, receipt_paths.path("/p/src/main.jet"), options)
+    closure :: [MIRSourceFile]{
+        check_receipt_test_module("/p/src/main.jet", "a"),
+        check_receipt_test_module("<corelib>/Core/x.jet", "core"),
+        check_receipt_test_module("/p/lib/b.jet", "b"),
+        check_receipt_test_module("/p/src/main.jet", "a"),
+    }
+    jet_cli_check_receipt_frame_modules(&key, root, closure)
+    jet_cli_check_receipt_frame_authority(&key, root, receipt_paths.path("/p/package.jet"), "missing")
+    jet_cli_check_receipt_frame_authority(&key, root, receipt_paths.path("/q/workspace.jet"), "directory")
+    assert_eq(jet_cli_check_receipt_key_digest(key), "90b10de2471d6a02419d5d9e9f9c1fcd41d0114a2d81bb66b6547f01e2905914")
+}
+
+#Test("check receipt authority files and compiler identity keep Rust spellings") {
+    assert_eq(JET_CLI_CHECK_RECEIPT_AUTHORITY_FILES, [String]{"package.jet", "pkg.jet", "workspace.jet", "build.jet", ".jet/lock"})
+    assert_eq(JET_CLI_CHECK_RECEIPT_CLOSURE_SCHEMA, "jet.receipt-closure/v1")
+    assert_eq(JET_CLI_CHECK_RECEIPT_AUDIT_ENV, "JET_CHECK_READS_AUDIT")
+    assert_eq(jet_cli_check_receipt_compiler_identity(check_receipt_test_build()), "compiler-1+core-1")
+}
+
+#Test("check receipt why ran distinguishes reuse first run bundle and input") {
+    nodes :: [BuildNodeRecord]{
+        BuildNodeRecord{kind: "check", key: "k1", subject: "main.jet", duration_ms: 1.0, why_ran: "first-run", inputs: [String]{}},
+        BuildNodeRecord{kind: "compile", key: "k2", subject: "app", duration_ms: 1.0, why_ran: "first-run", inputs: [String]{}},
+    }
+    previous :: BuildRecord?{Val(BuildRecord{schema: "jet.build-record/v1", program: "prog", nodes: nodes})}
+    assert_eq(jet_cli_check_receipt_why_ran(true, previous, "check", "main.jet", "other"), "reused")
+    assert_eq(jet_cli_check_receipt_why_ran(false, None, "check", "main.jet", "k1"), "first-run")
+    assert_eq(jet_cli_check_receipt_why_ran(false, previous, "check", "main.jet", "k1"), "bundle")
+    assert_eq(jet_cli_check_receipt_why_ran(false, previous, "check", "main.jet", "k9"), "input:main.jet")
+    assert_eq(jet_cli_check_receipt_why_ran(false, previous, "link", "app", "k2"), "input:app")
+    assert_eq(jet_cli_check_receipt_why_ran(false, previous, "check", "new.jet", "k1"), "input:new.jet")
+}
+
+#Test("check receipt frames count UTF-8 bytes and preserve empty values") {
+    framed := [U8]{}
+    jet_cli_receipt_frame(&framed, "é".bytes())
+    jet_cli_receipt_frame(&framed, [U8]{})
+    assert_eq(framed, [U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{2}, U8{195}, U8{169}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}})
+}
+
+#Test("check receipt invocation identity changes for each checked fact") {
+    root :: receipt_paths.path("/p")
+    entry :: receipt_paths.path("/p/main.jet")
+    build :: check_receipt_test_build()
+    base := [U8]{}
+    jet_cli_check_receipt_frame_invocation(&base, "check", build, root, entry, [JetCLICheckReceiptOption]{})
+    changed_verb := [U8]{}
+    jet_cli_check_receipt_frame_invocation(&changed_verb, "build", build, root, entry, [JetCLICheckReceiptOption]{})
+    assert(changed_verb != base)
+    changed_root := [U8]{}
+    jet_cli_check_receipt_frame_invocation(&changed_root, "check", build, receipt_paths.path("/q"), receipt_paths.path("/q/main.jet"), [JetCLICheckReceiptOption]{})
+    assert(changed_root != base)
+    changed_entry := [U8]{}
+    jet_cli_check_receipt_frame_invocation(&changed_entry, "check", build, root, receipt_paths.path("/p/other.jet"), [JetCLICheckReceiptOption]{})
+    assert(changed_entry != base)
+    compiler := ~build
+    compiler.compiler_build_id = "compiler-2"
+    core := ~build
+    core.stdlib_build_id = "core-2"
+    target := ~build
+    target.build_target = "aarch64-unknown-linux-gnu"
+    builds :: [JetCLICheckReceiptBuild]{compiler, core, target}
+    loop changed in builds {
+        key := [U8]{}
+        jet_cli_check_receipt_frame_invocation(&key, "check", changed, root, entry, [JetCLICheckReceiptOption]{})
+        assert(key != base)
+    }
+    option := [U8]{}
+    jet_cli_check_receipt_frame_invocation(&option, "check", build, root, entry, [JetCLICheckReceiptOption]{JetCLICheckReceiptOption{name: "entry", value: ""}})
+    assert(option != base)
+}
+
+#Test("check receipt module and authority bytes change the closure key") {
+    root :: receipt_paths.path("/p")
+    before := [U8]{}
+    after := [U8]{}
+    jet_cli_check_receipt_frame_modules(&before, root, [MIRSourceFile]{check_receipt_test_module("/p/é.jet", "a")})
+    jet_cli_check_receipt_frame_modules(&after, root, [MIRSourceFile]{check_receipt_test_module("/p/é.jet", "b")})
+    assert(jet_cli_check_receipt_key_digest(before) != jet_cli_check_receipt_key_digest(after))
+    absent := [U8]{}
+    present := [U8]{}
+    jet_cli_check_receipt_frame_authority(&absent, root, receipt_paths.path("/p/package.jet"), "missing")
+    jet_cli_check_receipt_frame_authority(&present, root, receipt_paths.path("/p/package.jet"), mir_sha256_hex(""))
+    assert(jet_cli_check_receipt_key_digest(absent) != jet_cli_check_receipt_key_digest(present))
+}
+
+#Test("check receipt why ran uses the first matching kind and subject") {
+    previous :: BuildRecord?{Val(BuildRecord{schema: "jet.build-record/v1", program: "prog", nodes: [BuildNodeRecord]{
+        BuildNodeRecord{kind: "compile", key: "wanted", subject: "main.jet", duration_ms: 1.0, why_ran: "", inputs: [String]{}},
+        BuildNodeRecord{kind: "check", key: "first", subject: "main.jet", duration_ms: 1.0, why_ran: "", inputs: [String]{}},
+        BuildNodeRecord{kind: "check", key: "wanted", subject: "main.jet", duration_ms: 1.0, why_ran: "", inputs: [String]{}},
+    }})}
+    assert_eq(jet_cli_check_receipt_why_ran(false, previous, "check", "main.jet", "wanted"), "input:main.jet")
+}

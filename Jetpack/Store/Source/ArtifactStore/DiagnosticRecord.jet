@@ -1,0 +1,328 @@
+// crates/jet-store/src/diagnostic_record.rs: typed diagnostic record sections.
+// Origins are interned by their entire canonical value, never by path alone.
+// BuildError delegates to the canonical Outcome codec. Its ReportError crosses
+// this Store boundary explicitly, retaining the original diagnostic message.
+use core.text.parse as store_diagnostic_numeric
+
+#Error
+pub struct DiagnosticRecordError {
+    pub message: String
+}
+
+pub struct DiagnosticSections {
+    pub origins: [RecordValue]
+    pub diagnostics: [RecordValue]
+}
+
+fn store_diagnostic_map(fields: [RecordField]) -> RecordValue Never! {
+    RecordValue.Map{fields: fields}
+}
+
+fn store_diagnostic_field(value: RecordValue, name: String) -> RecordValue DiagnosticRecordError! {
+    result :: record_value_field(value, name)
+    Ok(result.value ?? return Err(DiagnosticRecordError{message: result.problem ?? ""}))
+}
+
+fn store_diagnostic_text(value: RecordValue, name: String) -> String DiagnosticRecordError! {
+    result :: record_value_as_str(store_diagnostic_field(value, name))
+    Ok(result.value ?? return Err(DiagnosticRecordError{message: result.problem ?? ""}))
+}
+
+fn store_diagnostic_optional_text(value: RecordValue, name: String) -> String? DiagnosticRecordError! {
+    result :: record_value_as_optional_str(store_diagnostic_field(value, name))
+    if result.problem == {
+        .Val(problem) -> return Err(DiagnosticRecordError{message: problem})
+        .None -> {}
+    }
+    Ok(result.value)
+}
+
+fn store_diagnostic_list(value: RecordValue, name: String) -> [RecordValue] DiagnosticRecordError! {
+    result :: record_value_as_list(store_diagnostic_field(value, name))
+    Ok(result.value ?? return Err(DiagnosticRecordError{message: result.problem ?? ""}))
+}
+
+fn store_diagnostic_offset(value: RecordValue) -> Int DiagnosticRecordError! {
+    result :: record_value_as_usize(value)
+    Ok(result.value ?? return Err(DiagnosticRecordError{message: result.problem ?? ""}))
+}
+
+fn store_diagnostic_strings(value: RecordValue, name: String) -> [String] DiagnosticRecordError! {
+    result :: record_value_str_list(store_diagnostic_field(value, name))
+    Ok(result.value ?? return Err(DiagnosticRecordError{message: result.problem ?? ""}))
+}
+
+fn store_diagnostic_span(span: Span) -> RecordValue Never! {
+    RecordValue.List{values: [RecordValue.Int{value: span.start}, RecordValue.Int{value: span.end}]}
+}
+
+fn store_diagnostic_optional_span(span: Span?) -> RecordValue Never! {
+    if span == {
+        .Val(value) -> store_diagnostic_span(value)
+        .None -> RecordValue.Null
+    }
+}
+
+fn store_diagnostic_origin_index(origin: DiagnosticOrigin?, table: &[DiagnosticOrigin]) -> RecordValue Never! {
+    value :: origin ?? return RecordValue.Null
+    loop index in 0..<table.len() {
+        if table[index] == value -> return RecordValue.Int{value: index}
+    }
+    &table.push(value)
+    RecordValue.Int{value: table.len() - 1}
+}
+
+fn store_diagnostic_edit(edit: TextEdit) -> RecordValue Never! {
+    store_diagnostic_map([RecordField{name: "span", value: store_diagnostic_span(edit.span)}, RecordField{name: "text", value: RecordValue.Str{value: edit.new_text}}])
+}
+
+fn store_diagnostic_structured(value: DiagnosticStructured) -> RecordValue Never! {
+    if value == {
+        .SuggestedEdits(edits) -> {
+            encoded := [RecordValue]{}
+            loop edit in edits -> &encoded.push(store_diagnostic_edit(edit))
+            store_diagnostic_map([RecordField{name: "kind", value: RecordValue.Str{value: "suggested_edits"}}, RecordField{name: "edits", value: RecordValue.List{values: encoded}}])
+        }
+        .CryptoMisuse(reason, operation, expected, actual) -> {
+            actual_text :: if actual == {
+                .Val(number) -> Val("{number}")
+                .None -> None
+            }
+            store_diagnostic_map([RecordField{name: "kind", value: RecordValue.Str{value: "crypto_misuse"}}, RecordField{name: "reason", value: RecordValue.Str{value: reason.as_str()}}, RecordField{name: "operation", value: RecordValue.Str{value: operation}}, RecordField{name: "expected", value: record_value_optional_str(expected)}, RecordField{name: "actual", value: record_value_optional_str(actual_text)}])
+        }
+        .BuildError(report) -> store_diagnostic_map([RecordField{name: "kind", value: RecordValue.Str{value: "build_error"}}, RecordField{name: "report", value: RecordValue.Str{value: report.to_json()}}])
+        .RuntimeHostFault(stdout) -> store_diagnostic_map([RecordField{name: "kind", value: RecordValue.Str{value: "runtime_host_fault"}}, RecordField{name: "stdout", value: RecordValue.Str{value: stdout}}])
+    }
+}
+
+fn store_diagnostic_encode(diagnostic: Diagnostic, origins: &[DiagnosticOrigin]) -> RecordValue DiagnosticRecordError! {
+    if diagnostic.decision_row != None -> return Err(DiagnosticRecordError{message: "diagnostic `{diagnostic.code}` carries a decision row"})
+    // Ruling A: Rust has no aggregate-source wire fields. Do not silently lose them.
+    if diagnostic.source_path != None || diagnostic.source_offset != None || diagnostic.source_start != None -> return Err(DiagnosticRecordError{message: "diagnostic `{diagnostic.code}` carries aggregate source mapping"})
+    labels := [RecordValue]{}
+    loop label in diagnostic.labels -> &labels.push(RecordValue.List{values: [RecordValue.Int{value: label.span.start}, RecordValue.Int{value: label.span.end}, RecordValue.Str{value: label.message}]})
+    causes := [RecordValue]{}
+    loop cause in diagnostic.cause -> &causes.push(store_diagnostic_map([RecordField{name: "code", value: RecordValue.Str{value: cause.code}}, RecordField{name: "span", value: store_diagnostic_optional_span(cause.span)}, RecordField{name: "origin", value: store_diagnostic_origin_index(cause.origin, &origins)}]))
+    no_fix :: if diagnostic.no_fix_reason == {
+        .Val(reason) -> store_diagnostic_map([RecordField{name: "kind", value: RecordValue.Str{value: reason.kind.as_str()}}, RecordField{name: "next", value: RecordValue.Str{value: reason.next}}])
+        .None -> RecordValue.Null
+    }
+    edit :: if diagnostic.edit == {
+        .Val(value) -> store_diagnostic_edit(value)
+        .None -> RecordValue.Null
+    }
+    structured :: if diagnostic.structured == {
+        .Val(value) -> store_diagnostic_structured(value)
+        .None -> RecordValue.Null
+    }
+    applicability :: if diagnostic.applicability == {
+        .Val(value) -> Val(value.as_str())
+        .None -> None
+    }
+    safety :: if diagnostic.safety == {
+        .Val(value) -> Val(value.as_str())
+        .None -> None
+    }
+    severity :: if diagnostic.severity == DIAGNOSTIC_ERROR -> "error" else -> "lint"
+    Ok(store_diagnostic_map([
+        RecordField{name: "moment", value: RecordValue.Str{value: diagnostic.moment.as_str()}},
+        RecordField{name: "severity", value: RecordValue.Str{value: severity}},
+        RecordField{name: "code", value: RecordValue.Str{value: diagnostic.code}},
+        RecordField{name: "what", value: RecordValue.Str{value: diagnostic.what}},
+        RecordField{name: "why", value: RecordValue.Str{value: diagnostic.why}},
+        RecordField{name: "fix", value: RecordValue.Str{value: diagnostic.fix}},
+        RecordField{name: "span", value: store_diagnostic_optional_span(diagnostic.span)},
+        RecordField{name: "origin", value: store_diagnostic_origin_index(diagnostic.origin, &origins)},
+        RecordField{name: "labels", value: RecordValue.List{values: labels}},
+        RecordField{name: "cause", value: RecordValue.List{values: causes}},
+        RecordField{name: "edit", value: edit},
+        RecordField{name: "applicability", value: record_value_optional_str(applicability)},
+        RecordField{name: "safety", value: record_value_optional_str(safety)},
+        RecordField{name: "no_fix", value: no_fix},
+        RecordField{name: "detail", value: record_value_optional_str(diagnostic.detail)},
+        RecordField{name: "structured", value: structured},
+        RecordField{name: "denial_kind", value: record_value_optional_str(diagnostic.denial_kind)},
+        RecordField{name: "call_chain", value: record_value_list_of_str(diagnostic.call_chain)},
+        RecordField{name: "scope_chain", value: record_value_list_of_str(diagnostic.scope_chain)},
+        RecordField{name: "nearest_granting_scope", value: record_value_optional_str(diagnostic.nearest_granting_scope)},
+    ]))
+}
+
+pub fn store_encode_diagnostics(diagnostics: [Diagnostic], closure_revisions: [String]) -> DiagnosticSections DiagnosticRecordError! {
+    origins := [DiagnosticOrigin]{}
+    encoded := [RecordValue]{}
+    loop diagnostic in diagnostics -> &encoded.push(store_diagnostic_encode(diagnostic, &origins))
+    table := [RecordValue]{}
+    loop origin in origins {
+        source := RecordValue.Str{value: origin.source}
+        loop revision in closure_revisions {
+            if revision == origin.revision -> source = RecordValue.Null
+        }
+        &table.push(store_diagnostic_map([RecordField{name: "display", value: RecordValue.Str{value: origin.display}}, RecordField{name: "path", value: RecordValue.Str{value: origin.path}}, RecordField{name: "revision", value: RecordValue.Str{value: origin.revision}}, RecordField{name: "source", value: source}]))
+    }
+    Ok(DiagnosticSections{origins: table, diagnostics: encoded})
+}
+
+fn store_diagnostic_decode_span(value: RecordValue) -> Span DiagnosticRecordError! {
+    result :: record_value_as_list(value)
+    pair :: result.value ?? return Err(DiagnosticRecordError{message: result.problem ?? ""})
+    if pair.len() != 2 -> return Err(DiagnosticRecordError{message: "diagnostic span must be a [start, end] pair"})
+    Ok(Span{start: store_diagnostic_offset(pair[0]), end: store_diagnostic_offset(pair[1])})
+}
+
+fn store_diagnostic_decode_optional_span(value: RecordValue) -> Span? DiagnosticRecordError! {
+    if value == .Null -> return Ok(None)
+    Ok(Val(store_diagnostic_decode_span(value)))
+}
+
+fn store_diagnostic_decode_origin(value: RecordValue, origins: [DiagnosticOrigin]) -> DiagnosticOrigin? DiagnosticRecordError! {
+    if value == .Null -> return Ok(None)
+    index :: store_diagnostic_offset(value)
+    if index >= origins.len() -> return Err(DiagnosticRecordError{message: "diagnostic origin index is out of range"})
+    Ok(Val(origins[index]))
+}
+
+fn store_diagnostic_decode_edit(value: RecordValue) -> TextEdit DiagnosticRecordError! {
+    Ok(TextEdit{span: store_diagnostic_decode_span(store_diagnostic_field(value, "span")), new_text: store_diagnostic_text(value, "text")})
+}
+
+fn store_diagnostic_parse_moment(value: String) -> DiagnosticMoment DiagnosticRecordError! {
+    if value == {
+        "compile" -> Ok(DiagnosticMoment.Compile)
+        "run" -> Ok(DiagnosticMoment.Run)
+        "test" -> Ok(DiagnosticMoment.Test)
+        "tool" -> Ok(DiagnosticMoment.Tool)
+        else -> Err(DiagnosticRecordError{message: "unknown report moment `{value}`"})
+    }
+}
+
+fn store_diagnostic_parse_severity(value: String) -> Int DiagnosticRecordError! {
+    if value == {
+        "error" -> Ok(DIAGNOSTIC_ERROR)
+        "lint" -> Ok(DIAGNOSTIC_LINT)
+        else -> Err(DiagnosticRecordError{message: "unknown severity `{value}`"})
+    }
+}
+
+fn store_diagnostic_parse_applicability(value: String) -> FixApplicability DiagnosticRecordError! {
+    if value == {
+        "safe" -> Ok(FixApplicability.Safe)
+        "suggested" -> Ok(FixApplicability.Suggested)
+        else -> Err(DiagnosticRecordError{message: "unknown fix applicability `{value}`"})
+    }
+}
+
+fn store_diagnostic_parse_safety(value: String) -> FixSafety DiagnosticRecordError! {
+    loop safety in [FixSafety.Formatting, FixSafety.BehaviorPreserving, FixSafety.APIChanging, FixSafety.TargetChanging, FixSafety.NeedsReview] {
+        if safety.as_str() == value -> return Ok(safety)
+    }
+    Err(DiagnosticRecordError{message: "unknown fix safety `{value}`"})
+}
+
+fn store_diagnostic_parse_crypto(value: String) -> DiagnosticCryptoMisuseReason DiagnosticRecordError! {
+    loop reason in [DiagnosticCryptoMisuseReason.InvalidLength, DiagnosticCryptoMisuseReason.NonceLength, DiagnosticCryptoMisuseReason.OutputLength, DiagnosticCryptoMisuseReason.SaltLength, DiagnosticCryptoMisuseReason.MemoryCost, DiagnosticCryptoMisuseReason.IterationCount, DiagnosticCryptoMisuseReason.LaneCount, DiagnosticCryptoMisuseReason.MemoryTimeCost, DiagnosticCryptoMisuseReason.RawNonce, DiagnosticCryptoMisuseReason.RawAlgorithm, DiagnosticCryptoMisuseReason.DeterministicEntropy] {
+        if reason.as_str() == value -> return Ok(reason)
+    }
+    Err(DiagnosticRecordError{message: "unknown crypto misuse reason `{value}`"})
+}
+
+fn store_diagnostic_decode_structured(value: RecordValue) -> DiagnosticStructured DiagnosticRecordError! {
+    kind :: store_diagnostic_text(value, "kind")
+    if kind == {
+        "suggested_edits" -> {
+            edits := [TextEdit]{}
+            loop edit in store_diagnostic_list(value, "edits") -> &edits.push(store_diagnostic_decode_edit(edit))
+            Ok(DiagnosticStructured.SuggestedEdits{edits: edits})
+        }
+        "crypto_misuse" -> {
+            actual_text :: store_diagnostic_optional_text(value, "actual")
+            actual := Int?{None}
+            if actual_text == {
+                .Val(text) -> {
+                    number :: store_diagnostic_numeric.parse(text) ?? return Err(DiagnosticRecordError{message: "invalid crypto misuse value `{text}`"})
+                    if number < -170141183460469231731687303715884105728 || number > 170141183460469231731687303715884105727 -> return Err(DiagnosticRecordError{message: "invalid crypto misuse value `{text}`"})
+                    actual = Val(number)
+                }
+                .None -> {}
+            }
+            Ok(DiagnosticStructured.CryptoMisuse{reason: store_diagnostic_parse_crypto(store_diagnostic_text(value, "reason")), operation: store_diagnostic_text(value, "operation"), expected: store_diagnostic_optional_text(value, "expected"), actual: actual})
+        }
+        "build_error" -> {
+            text :: store_diagnostic_text(value, "report")
+            report :: if JetErrorReport.from_json(text) == {
+                .Ok(report) -> report
+                .Err(error) -> {
+                    return Err(DiagnosticRecordError{message: error.message})
+                }
+            }
+            Ok(DiagnosticStructured.BuildError{report: report})
+        }
+        "runtime_host_fault" -> Ok(DiagnosticStructured.RuntimeHostFault{stdout: store_diagnostic_text(value, "stdout")})
+        else -> Err(DiagnosticRecordError{message: "unknown structured diagnostic `{kind}`"})
+    }
+}
+
+fn store_diagnostic_decode(value: RecordValue, origins: [DiagnosticOrigin]) -> Diagnostic DiagnosticRecordError! {
+    labels := [DiagnosticLabel]{}
+    loop label in store_diagnostic_list(value, "labels") {
+        result :: record_value_as_list(label)
+        parts :: result.value ?? return Err(DiagnosticRecordError{message: result.problem ?? ""})
+        if parts.len() != 3 -> return Err(DiagnosticRecordError{message: "diagnostic label must be [start, end, message]"})
+        message :: record_value_as_str(parts[2])
+        &labels.push(DiagnosticLabel{span: Span{start: store_diagnostic_offset(parts[0]), end: store_diagnostic_offset(parts[1])}, message: message.value ?? return Err(DiagnosticRecordError{message: message.problem ?? ""})})
+    }
+    causes := [DiagnosticCause]{}
+    loop cause in store_diagnostic_list(value, "cause") -> &causes.push(DiagnosticCause{code: store_diagnostic_text(cause, "code"), span: store_diagnostic_decode_optional_span(store_diagnostic_field(cause, "span")), origin: store_diagnostic_decode_origin(store_diagnostic_field(cause, "origin"), origins)})
+    edit_value :: store_diagnostic_field(value, "edit")
+    edit :: if edit_value == .Null -> None else -> Val(store_diagnostic_decode_edit(edit_value))
+    reason_value :: store_diagnostic_field(value, "no_fix")
+    no_fix := NoFixReason?{None}
+    if reason_value != RecordValue.Null {
+        kind_text :: store_diagnostic_text(reason_value, "kind")
+        kind :: if NoFixReasonKind.parse(kind_text) == {
+            .Ok(parsed) -> parsed
+            .Err(error) -> {
+                return Err(DiagnosticRecordError{message: error.message})
+            }
+        }
+        if NoFixReason.try_new(kind, store_diagnostic_text(reason_value, "next")) == {
+            .Ok(reason) -> no_fix = Val(reason)
+            .Err(error) -> return Err(DiagnosticRecordError{message: error.message})
+        }
+    }
+    structured_value :: store_diagnostic_field(value, "structured")
+    structured :: if structured_value == .Null -> None else -> Val(store_diagnostic_decode_structured(structured_value))
+    applicability_text :: store_diagnostic_optional_text(value, "applicability")
+    applicability :: if applicability_text == {
+        .Val(text) -> Val(store_diagnostic_parse_applicability(text))
+        .None -> None
+    }
+    safety_text :: store_diagnostic_optional_text(value, "safety")
+    safety :: if safety_text == {
+        .Val(text) -> Val(store_diagnostic_parse_safety(text))
+        .None -> None
+    }
+    Ok(Diagnostic{moment: store_diagnostic_parse_moment(store_diagnostic_text(value, "moment")), severity: store_diagnostic_parse_severity(store_diagnostic_text(value, "severity")), code: store_diagnostic_text(value, "code"), what: store_diagnostic_text(value, "what"), why: store_diagnostic_text(value, "why"), fix: store_diagnostic_text(value, "fix"), span: store_diagnostic_decode_optional_span(store_diagnostic_field(value, "span")), origin: store_diagnostic_decode_origin(store_diagnostic_field(value, "origin"), origins), labels: labels, cause: causes, edit: edit, applicability: applicability, safety: safety, no_fix_reason: no_fix, detail: store_diagnostic_optional_text(value, "detail"), structured: structured, decision_row: None, denial_kind: store_diagnostic_optional_text(value, "denial_kind"), call_chain: store_diagnostic_strings(value, "call_chain"), scope_chain: store_diagnostic_strings(value, "scope_chain"), nearest_granting_scope: store_diagnostic_optional_text(value, "nearest_granting_scope")})
+}
+
+pub fn store_decode_diagnostics(origins: [RecordValue], diagnostics: [RecordValue], source_for_revision: fn(String) -> String? Never!) -> [Diagnostic] DiagnosticRecordError! {
+    table := [DiagnosticOrigin]{}
+    loop origin in origins {
+        display :: store_diagnostic_text(origin, "display")
+        path :: store_diagnostic_text(origin, "path")
+        revision :: store_diagnostic_text(origin, "revision")
+        embedded :: store_diagnostic_optional_text(origin, "source")
+        source :: if embedded == {
+            .Val(value) -> value
+            .None -> {
+                resolved :: source_for_revision(revision) ?? return Err(DiagnosticRecordError{message: "diagnostic origin `{path}` is not in the closure"})
+                resolved
+            }
+        }
+        if record_blob_key(source.bytes()) != revision -> return Err(DiagnosticRecordError{message: "diagnostic origin `{path}` revision mismatch"})
+        &table.push(DiagnosticOrigin{display: display, path: path, revision: revision, source: source})
+    }
+    decoded := [Diagnostic]{}
+    loop diagnostic in diagnostics -> &decoded.push(store_diagnostic_decode(diagnostic, table))
+    Ok(decoded)
+}

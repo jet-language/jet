@@ -29,7 +29,7 @@ pub fn envmodel_extract_packages(value: Expr, src: String) -> ExtractedPackages 
     loop piece in envmodel_sugar_split_top_level(body) {
         item :: piece.trim()
         if item == "" -> next
-        if item.starts_with(@PKG_ADAPT) {
+        if item.starts_with(PKG_ADAPT) {
             &out.adapters.push(envmodel_parse_adapter(item))
         } else {
             &plain.push(item)
@@ -77,14 +77,14 @@ fn envmodel_sugar_split_top_level(body: String) -> [String] Never! {
 }
 
 fn envmodel_parse_adapter(item: String) -> AdapterPlan EnvModelEvalError! {
-    args :: envmodel_sugar_call_args(item, @PKG_ADAPT) ?? return Err(envmodel_adapter_shape())
-    envmodel_sugar_validate_fields(args, [String]{@ADAPTER_FIELD_NAME, @ADAPTER_FIELD_SOURCE, @ADAPTER_FIELD_DEPS, @ADAPTER_FIELD_RECIPE})
-    name :: envmodel_sugar_named_string(args, @ADAPTER_FIELD_NAME) ?? return Err(envmodel_adapter_shape())
-    written_source :: envmodel_sugar_named_raw(args, @ADAPTER_FIELD_SOURCE) ?? return Err(envmodel_adapter_shape())
+    args :: envmodel_sugar_call_args(item, PKG_ADAPT) ?? return Err(envmodel_adapter_shape())
+    envmodel_sugar_validate_fields(args, [String]{ADAPTER_FIELD_NAME, ADAPTER_FIELD_SOURCE, ADAPTER_FIELD_DEPS, ADAPTER_FIELD_RECIPE})
+    name :: envmodel_sugar_named_string(args, ADAPTER_FIELD_NAME) ?? return Err(envmodel_adapter_shape())
+    written_source :: envmodel_sugar_named_raw(args, ADAPTER_FIELD_SOURCE) ?? return Err(envmodel_adapter_shape())
     source :: envmodel_sugar_unquote(written_source.trim()) ?? written_source
     ProviderRef.classify(source) ?? return Err(envmodel_adapter_shape())
     deps := [Pkg]{}
-    if envmodel_sugar_named_raw(args, @ADAPTER_FIELD_DEPS) == {
+    if envmodel_sugar_named_raw(args, ADAPTER_FIELD_DEPS) == {
         .Val(raw) -> {
             trimmed :: raw.trim()
             body :: if trimmed.starts_with("[") && trimmed.ends_with("]") -> trimmed.removeprefix("[").removesuffix("]") else -> trimmed
@@ -92,32 +92,32 @@ fn envmodel_parse_adapter(item: String) -> AdapterPlan EnvModelEvalError! {
         }
         .None -> {}
     }
-    recipe_raw :: envmodel_sugar_named_raw(args, @ADAPTER_FIELD_RECIPE) ?? return Err(envmodel_adapter_shape())
+    recipe_raw :: envmodel_sugar_named_raw(args, ADAPTER_FIELD_RECIPE) ?? return Err(envmodel_adapter_shape())
     Ok(AdapterPlan{name: name, source: source, deps: deps, recipe: envmodel_parse_recipe(recipe_raw)})
 }
 
 fn envmodel_parse_recipe(written: String) -> AdapterRecipe EnvModelEvalError! {
     raw :: written.trim()
-    if envmodel_sugar_call_args(raw, @RECIPE_BUILD) == {
+    if envmodel_sugar_call_args(raw, RECIPE_BUILD) == {
         .Val(args) -> {
-            envmodel_sugar_validate_fields(args, [String]{@RECIPE_FIELD_STEPS})
-            return Ok(AdapterRecipe.Build(BuildRecipe{steps: envmodel_parse_build_steps(args)}))
+            envmodel_sugar_validate_fields(args, [String]{RECIPE_FIELD_STEPS})
+            return Ok(AdapterRecipe.Build{recipe: BuildRecipe{steps: envmodel_parse_build_steps(args)}})
         }
         .None -> {}
     }
-    if envmodel_sugar_call_args(raw, @RECIPE_COPY) == {
+    if envmodel_sugar_call_args(raw, RECIPE_COPY) == {
         .Val(args) -> {
             if args.trim() == "" -> return Ok(AdapterRecipe.Copy)
             return Err(envmodel_adapter_shape())
         }
         .None -> {}
     }
-    if envmodel_sugar_call_args(raw, @RECIPE_PREBUILT) == {
+    if envmodel_sugar_call_args(raw, RECIPE_PREBUILT) == {
         .Val(args) -> {
             if args.trim() == "" -> return Err(envmodel_adapter_shape())
-            envmodel_sugar_validate_fields(args, [String]{@RECIPE_FIELD_BIN, @RECIPE_FIELD_AS, @RECIPE_FIELD_AS_NAME})
-            bin :: envmodel_sugar_named_string(args, @RECIPE_FIELD_BIN) ?? return Err(envmodel_adapter_shape())
-            as_name :: envmodel_sugar_named_string(args, @RECIPE_FIELD_AS) ?? envmodel_sugar_named_string(args, @RECIPE_FIELD_AS_NAME) ?? envmodel_sugar_file_name(bin)
+            envmodel_sugar_validate_fields(args, [String]{RECIPE_FIELD_BIN, RECIPE_FIELD_AS, RECIPE_FIELD_AS_NAME})
+            bin :: envmodel_sugar_named_string(args, RECIPE_FIELD_BIN) ?? return Err(envmodel_adapter_shape())
+            as_name :: envmodel_sugar_named_string(args, RECIPE_FIELD_AS) ?? envmodel_sugar_named_string(args, RECIPE_FIELD_AS_NAME) ?? envmodel_sugar_file_name(bin)
             return Ok(AdapterRecipe.Prebuilt{bin: bin, as_name: as_name})
         }
         .None -> {}
@@ -133,7 +133,7 @@ fn envmodel_sugar_file_name(path: String) -> String Never! {
 }
 
 fn envmodel_parse_build_steps(args: String) -> [BuildStep] EnvModelEvalError! {
-    raw :: envmodel_sugar_named_field(args, @RECIPE_FIELD_STEPS) ?? return Err(envmodel_adapter_shape())
+    raw :: envmodel_sugar_named_field(args, RECIPE_FIELD_STEPS) ?? return Err(envmodel_adapter_shape())
     trimmed :: raw.trim()
     if !trimmed.starts_with("[") || !trimmed.ends_with("]") -> return Err(envmodel_adapter_shape())
     body :: trimmed.removeprefix("[").removesuffix("]")
@@ -148,31 +148,31 @@ fn envmodel_parse_build_steps(args: String) -> [BuildStep] EnvModelEvalError! {
 }
 
 fn envmodel_parse_build_step(raw: String) -> BuildStep EnvModelEvalError! {
-    if envmodel_sugar_call_args(raw, @RECIPE_STEP_FETCH) == {
+    if envmodel_sugar_call_args(raw, RECIPE_STEP_FETCH) == {
         .Val(args) -> {
-            envmodel_sugar_validate_fields(args, [String]{@RECIPE_STEP_FIELD_URL, @RECIPE_STEP_FIELD_SHA256})
-            return Ok(BuildStep.Fetch{url: envmodel_sugar_required_string(args, @RECIPE_STEP_FIELD_URL), sha256: envmodel_sugar_required_string(args, @RECIPE_STEP_FIELD_SHA256)})
+            envmodel_sugar_validate_fields(args, [String]{RECIPE_STEP_FIELD_URL, RECIPE_STEP_FIELD_SHA256})
+            return Ok(BuildStep.Fetch{url: envmodel_sugar_required_string(args, RECIPE_STEP_FIELD_URL), sha256: envmodel_sugar_required_string(args, RECIPE_STEP_FIELD_SHA256)})
         }
         .None -> {}
     }
-    if envmodel_sugar_call_args(raw, @RECIPE_STEP_EXEC) == {
+    if envmodel_sugar_call_args(raw, RECIPE_STEP_EXEC) == {
         .Val(args) -> {
-            envmodel_sugar_validate_fields(args, [String]{@RECIPE_STEP_FIELD_TOOL, @RECIPE_STEP_FIELD_ARGS})
-            return Ok(BuildStep.Exec{tool: envmodel_sugar_required_string(args, @RECIPE_STEP_FIELD_TOOL), args: envmodel_sugar_required_strings(args, @RECIPE_STEP_FIELD_ARGS)})
+            envmodel_sugar_validate_fields(args, [String]{RECIPE_STEP_FIELD_TOOL, RECIPE_STEP_FIELD_ARGS})
+            return Ok(BuildStep.Exec{tool: envmodel_sugar_required_string(args, RECIPE_STEP_FIELD_TOOL), args: envmodel_sugar_required_strings(args, RECIPE_STEP_FIELD_ARGS)})
         }
         .None -> {}
     }
-    if envmodel_sugar_call_args(raw, @RECIPE_STEP_INSTALL) == {
+    if envmodel_sugar_call_args(raw, RECIPE_STEP_INSTALL) == {
         .Val(args) -> {
-            envmodel_sugar_validate_fields(args, [String]{@RECIPE_STEP_FIELD_SRC, @RECIPE_STEP_FIELD_DEST})
-            return Ok(BuildStep.Install{src: envmodel_sugar_required_string(args, @RECIPE_STEP_FIELD_SRC), dest: envmodel_sugar_required_string(args, @RECIPE_STEP_FIELD_DEST)})
+            envmodel_sugar_validate_fields(args, [String]{RECIPE_STEP_FIELD_SRC, RECIPE_STEP_FIELD_DEST})
+            return Ok(BuildStep.Install{src: envmodel_sugar_required_string(args, RECIPE_STEP_FIELD_SRC), dest: envmodel_sugar_required_string(args, RECIPE_STEP_FIELD_DEST)})
         }
         .None -> {}
     }
-    if envmodel_sugar_call_args(raw, @RECIPE_STEP_INSTALL_TREE) == {
+    if envmodel_sugar_call_args(raw, RECIPE_STEP_INSTALL_TREE) == {
         .Val(args) -> {
-            envmodel_sugar_validate_fields(args, [String]{@RECIPE_STEP_FIELD_SRC, @RECIPE_STEP_FIELD_DEST})
-            return Ok(BuildStep.InstallTree{src: envmodel_sugar_required_string(args, @RECIPE_STEP_FIELD_SRC), dest: envmodel_sugar_required_string(args, @RECIPE_STEP_FIELD_DEST)})
+            envmodel_sugar_validate_fields(args, [String]{RECIPE_STEP_FIELD_SRC, RECIPE_STEP_FIELD_DEST})
+            return Ok(BuildStep.InstallTree{src: envmodel_sugar_required_string(args, RECIPE_STEP_FIELD_SRC), dest: envmodel_sugar_required_string(args, RECIPE_STEP_FIELD_DEST)})
         }
         .None -> {}
     }
@@ -183,7 +183,7 @@ fn envmodel_parse_build_step(raw: String) -> BuildStep EnvModelEvalError! {
 // any argument is not a `name: value` pair.
 fn envmodel_sugar_named_field(args: String, key: String) -> String? Never! {
     fields :: envmodel_sugar_named_fields(args) ?? return None
-    found := None
+    found := String?{None}
     loop field in fields {
         if field.name == key {
             if found != None -> return None
@@ -278,8 +278,8 @@ fn envmodel_sugar_unquote(raw: String) -> String? Never! {
             if index >= characters.len() -> return None
             marker :: "{characters[index]}"
             index += 1
-            decoded := None
-            loop escape in @ESCAPES {
+            decoded := String?{None}
+            loop escape in ESCAPES {
                 if escape.marker == marker {
                     decoded = Val(escape.decoded)
                     break

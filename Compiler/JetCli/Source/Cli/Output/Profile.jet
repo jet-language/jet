@@ -1,0 +1,214 @@
+// Deterministic CLI output capabilities and channel routing
+// (crates/jet-cli/src/OutputProfile.rs). The host collects the process facts
+// (terminal state and environment policy) and passes them here; selection
+// reads no environment and probes no stream, so it is deterministic.
+
+// The color policy requested by the caller (Rust `ColorRequest`).
+pub enum JetCLIColorRequest {
+    // Enable color when the resolved precedence permits it.
+    Auto
+    // Enable ANSI styling unless machine mode forbids it.
+    Always
+    // Never emit ANSI styling.
+    Never
+}
+
+// Why explicit output facts could not form a profile (Rust `OutputProfileError`).
+#Error
+pub enum JetCLIOutputProfileError {
+    // The color request was not one of `auto`, `always`, or `never`.
+    InvalidColorRequest(String)
+    // `TERM` was empty or contained a control character.
+    InvalidTerm(String)
+    // A supplied width was zero.
+    InvalidWidth(Int)
+}
+
+// Rust `impl Display for OutputProfileError`; `{:?}` of a value is
+// `jet_cli_debug_quote` (Front.jet).
+pub fn jet_cli_output_profile_error_message(error: JetCLIOutputProfileError) -> String Never! {
+    if error == {
+        .InvalidColorRequest(value) -> "invalid color request {jet_cli_debug_quote(value)}; expected auto, always, or never"
+        .InvalidTerm(value) -> "invalid TERM value {jet_cli_debug_quote(value)}"
+        .InvalidWidth(width) -> "output width must be greater than zero: {width}"
+    }
+}
+
+// Rust `ColorRequest::parse`: the exact command-line spellings.
+pub fn jet_cli_color_request_parse(value: String) -> JetCLIColorRequest JetCLIOutputProfileError! {
+    if value == {
+        "auto" -> Ok(JetCLIColorRequest.Auto)
+        "always" -> Ok(JetCLIColorRequest.Always)
+        "never" -> Ok(JetCLIColorRequest.Never)
+        else -> Err(JetCLIOutputProfileError.InvalidColorRequest(value))
+    }
+}
+
+// Rust `impl Display for ColorRequest`.
+pub fn jet_cli_color_request_name(request: JetCLIColorRequest) -> String Never! {
+    if request == {
+        .Auto -> "auto"
+        .Always -> "always"
+        .Never -> "never"
+    }
+}
+
+// Facts supplied by the process boundary to `jet_cli_output_profile_select`
+// (Rust `OutputFacts`). `term`, `no_color`, and `force_color` are values the
+// caller already read.
+pub struct JetCLIOutputFacts {
+    // Whether the primary human output stream is a terminal.
+    pub tty: Bool
+    // The `TERM` value, if the host supplied one.
+    pub term: String?
+    // Whether the `NO_COLOR` presence policy was observed.
+    pub no_color: Bool
+    // Whether the `FORCE_COLOR` presence policy was observed.
+    pub force_color: Bool
+    // The explicit color request (`auto`, `always`, or `never`).
+    pub requested_color: JetCLIColorRequest
+    // Whether the command requested structured machine output.
+    pub json: Bool
+    // An optional terminal column budget; None means the canonical 80 columns.
+    pub width: Int?
+    // Whether the output encoding supports Unicode glyphs.
+    pub unicode: Bool
+}
+
+// Rust `impl Default for OutputFacts`.
+pub fn jet_cli_output_facts_default() -> JetCLIOutputFacts Never! {
+    JetCLIOutputFacts{
+        tty: false,
+        term: None,
+        no_color: false,
+        force_color: false,
+        requested_color: JetCLIColorRequest.Auto,
+        json: false,
+        width: None,
+        unicode: true,
+    }
+}
+
+// The semantic output stream selected for one output kind (Rust `OutputChannel`).
+pub enum JetCLIOutputChannel {
+    // Human-readable primary content on stdout.
+    HumanStdout
+    // Human-readable status, log, or progress content on stderr.
+    HumanStderr
+    // Structured machine records on stdout.
+    MachineStdout
+    // This output kind is not emitted for the selected profile.
+    Hidden
+}
+
+pub fn jet_cli_output_channel_is_human(channel: JetCLIOutputChannel) -> Bool Never! {
+    channel == JetCLIOutputChannel.HumanStdout || channel == JetCLIOutputChannel.HumanStderr
+}
+
+pub fn jet_cli_output_channel_is_machine(channel: JetCLIOutputChannel) -> Bool Never! {
+    channel == JetCLIOutputChannel.MachineStdout
+}
+
+pub fn jet_cli_output_channel_is_hidden(channel: JetCLIOutputChannel) -> Bool Never! {
+    channel == JetCLIOutputChannel.Hidden
+}
+
+// The semantic output kind whose channel is requested (Rust `OutputKind`).
+pub enum JetCLIOutputKind {
+    // Tables, explanations, and other primary human content.
+    Renderable
+    // A human status line or status block.
+    Status
+    // A human diagnostic or informational log line.
+    Log
+    // Ephemeral progress output.
+    Progress
+    // A structured machine record.
+    Machine
+}
+
+JET_CLI_DEFAULT_WIDTH :: 80
+
+// The one resolved output policy for a command invocation (Rust `OutputProfile`).
+pub struct JetCLIOutputProfile {
+    pub width: Int
+    pub ansi_enabled: Bool
+    pub unicode_enabled: Bool
+    pub progress_enabled: Bool
+    pub human_enabled: Bool
+    pub machine_enabled: Bool
+    pub renderable: JetCLIOutputChannel
+    pub status: JetCLIOutputChannel
+    pub log: JetCLIOutputChannel
+    pub progress: JetCLIOutputChannel
+    pub machine: JetCLIOutputChannel
+}
+
+// Rust `char::is_control` over every scalar: C0, DEL, or C1 (U+0080..U+009F,
+// encoded 0xC2 0x80..0x9F).
+fn jet_cli_has_control(value: String) -> Bool Never! {
+    raw :: value.bytes()
+    loop index in 0..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if code < 32 || code == 127 -> return true
+        if code == 0xC2 && index + 1 < raw.len() {
+            next_code :: Int.from_u8(raw[index + 1])
+            if next_code >= 0x80 && next_code <= 0x9F -> return true
+        }
+    }
+    false
+}
+
+// Rust `OutputProfile::select`: resolve every capability and channel.
+pub fn jet_cli_output_profile_select(facts: JetCLIOutputFacts) -> JetCLIOutputProfile JetCLIOutputProfileError! {
+    if facts.term == .Val(term) {
+        if term == "" || jet_cli_has_control(term) -> return Err(JetCLIOutputProfileError.InvalidTerm(term))
+    }
+    width := JET_CLI_DEFAULT_WIDTH
+    if facts.width == .Val(requested) {
+        if requested == 0 -> return Err(JetCLIOutputProfileError.InvalidWidth(0))
+        width = requested
+    }
+    // Some("") was refused above, so an absent TERM never reads as dumb.
+    term_is_dumb :: (facts.term ?? "") == "dumb"
+    human_enabled :: !facts.json
+    machine_enabled :: facts.json
+    // Explicit choice > NO_COLOR > FORCE_COLOR > TTY. `TERM=dumb` constrains
+    // decorations and progress, not the canonical color precedence; an
+    // explicit force stays explicit.
+    requested_ansi :: if facts.requested_color == {
+        .Always -> true
+        .Never -> false
+        .Auto -> if {
+            facts.no_color -> false
+            facts.force_color -> true
+            else -> facts.tty
+        }
+    }
+    hidden :: JetCLIOutputChannel.Hidden
+    human_stderr :: JetCLIOutputChannel.HumanStderr
+    Ok(JetCLIOutputProfile{
+        width: width,
+        ansi_enabled: human_enabled && requested_ansi,
+        unicode_enabled: human_enabled && facts.tty && facts.unicode && !term_is_dumb,
+        progress_enabled: human_enabled && facts.tty && !term_is_dumb,
+        human_enabled: human_enabled,
+        machine_enabled: machine_enabled,
+        renderable: if machine_enabled -> hidden else -> JetCLIOutputChannel.HumanStdout,
+        status: if machine_enabled -> hidden else -> human_stderr,
+        log: if machine_enabled -> hidden else -> human_stderr,
+        progress: if machine_enabled -> hidden else -> human_stderr,
+        machine: if machine_enabled -> JetCLIOutputChannel.MachineStdout else -> hidden,
+    })
+}
+
+// Rust `OutputProfile::channel`: the channel for one semantic output kind.
+pub fn jet_cli_output_profile_channel(profile: JetCLIOutputProfile, kind: JetCLIOutputKind) -> JetCLIOutputChannel Never! {
+    if kind == {
+        .Renderable -> profile.renderable
+        .Status -> profile.status
+        .Log -> profile.log
+        .Progress -> profile.progress
+        .Machine -> profile.machine
+    }
+}

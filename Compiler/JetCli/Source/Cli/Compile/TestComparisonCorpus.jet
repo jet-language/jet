@@ -1,0 +1,319 @@
+// Recorded corpus adapter (Rust Source/CmdTest.rs:194-626). Verdicts and
+// persisted payloads belong exclusively to Foundation TestingComparison.
+// ReceiptStore's native optional-history owner must enqueue publication before
+// emitting this command's output; a synchronous replacement is not equivalent.
+use core.encoding.[DataTree]
+
+fn jet_cli_test_comparison_error(message: String) -> JetCLITestError Never! {
+    JetCLITestError{code: "E2104", message: message, fix: "", exit_code: 1}
+}
+
+// Rust object_value (CmdTest.rs:551-557): presence without copying a subtree.
+fn jet_cli_test_comparison_has(value: DataTree, key: String) -> Bool Never! {
+    if value == .Object(object) -> return object.has_key(key)
+    false
+}
+// Rust object_text (CmdTest.rs:559-564). Core's canonical text variant is Text.
+fn jet_cli_test_comparison_text(value: DataTree, key: String) -> String? Never! {
+    if value == .Object(object) {
+        if object.has_key(key) {
+            if object[key] == .Text(text) -> return Val(~text)
+        }
+    }
+    None
+}
+// Rust object_int (CmdTest.rs:566-572). Core parses exact integer tokens once;
+// retain the frozen i64 field domain rather than narrowing with a lossy cast.
+fn jet_cli_test_comparison_int(value: DataTree, key: String) -> Int? Never! {
+    if value == .Object(object) {
+        if object.has_key(key) {
+            if object[key] == .Int(number) {
+                if number >= -9223372036854775808 && number <= 9223372036854775807 -> return Val(number)
+            }
+        }
+    }
+    None
+}
+// Rust object_bool (CmdTest.rs:574-579).
+fn jet_cli_test_comparison_bool(value: DataTree, key: String) -> Bool? Never! {
+    if value == .Object(object) {
+        if object.has_key(key) {
+            if object[key] == .Bool(boolean) -> return Val(boolean)
+        }
+    }
+    None
+}
+// Rust object_strings (CmdTest.rs:581-594), retaining order and duplicates.
+fn jet_cli_test_comparison_strings(value: DataTree, key: String) -> [String] JetCLITestError! {
+    values := [String]{}
+    if value == .Object(object) {
+        if !object.has_key(key) -> return Ok(values)
+        if object[key] == .Array(entries) {
+            loop entry in entries {
+                if entry == .Text(text) -> &values.push(~text)
+                else -> return Err(jet_cli_test_comparison_error("`{key}` entries must be strings"))
+            }
+            return Ok(values)
+        }
+        return Err(jet_cli_test_comparison_error("`{key}` must be an array"))
+    }
+    Ok(values)
+}
+
+// Rust canonical_data_tree (CmdTest.rs:596-626); this is an observation
+// rendering, not an alternate JSON codec. Object insertion order is semantic.
+fn jet_cli_test_comparison_canonical_append(value: DataTree, out: &String) Never! {
+    if value == {
+        .Null -> out += "null"
+        .Bool(boolean) -> out += "{boolean}"
+        .Int(number) -> out += "{number}"
+        .Float(number) -> out += jet_cli_db_float_display(number, false)
+        .Text(text) -> out += foundation_json_quote(text)
+        // #4452: frozen Bytes observation awaits Main's Core DataTree owner
+        // ballot. Retain this exact branch; no second carrier can implement it.
+        .Bytes(bytes) -> out += "bytes:{bytes.len()}"
+        .Array(values) -> {
+            out += "["
+            loop (index, child) in values {
+                if index != 0 -> out += ","
+                jet_cli_test_comparison_canonical_append(child, &out)
+            }
+            out += "]"
+        }
+        .Object(entries) -> {
+            out += "{{"
+            index := 0
+            loop entry in entries {
+                if index != 0 -> out += ","
+                out += foundation_json_quote(entry.key)
+                out += ":"
+                jet_cli_test_comparison_canonical_append(entry.value, &out)
+                index += 1
+            }
+            out += "}}"
+        }
+    }
+}
+pub fn jet_cli_test_comparison_canonical_data_tree(value: DataTree) -> String Never! {
+    out := ""
+    jet_cli_test_comparison_canonical_append(value, &out)
+    out
+}
+
+// Rust parse_observation (CmdTest.rs:450-474).
+pub fn jet_cli_test_comparison_parse_observation(value: DataTree, prefix: String, relation: ObservationRelation) -> ComparisonObservation JetCLITestError! {
+    if value == .Object(object) {
+        if object.has_key(prefix) {
+            raw :: if object[prefix] == .Text(text) -> ~text else -> jet_cli_test_comparison_canonical_data_tree(object[prefix])
+            observation := comparison_observation_value(raw)
+            observation.typed_failure = jet_cli_test_comparison_text(value, "{prefix}_failure")
+            if relation == ObservationRelation.OrderedEffects {
+                observation.ordered_effects = jet_cli_test_comparison_strings(value, "{prefix}_effects")
+                observation.cleanup = jet_cli_test_comparison_strings(value, "{prefix}_cleanup")
+            }
+            observation.mutation = jet_cli_test_comparison_text(value, "{prefix}_mutation")
+            return Ok(observation)
+        }
+    }
+    Err(jet_cli_test_comparison_error("case observation `{prefix}` is missing"))
+}
+// Rust optional_observation (CmdTest.rs:476-486).
+fn jet_cli_test_comparison_optional_observation(value: DataTree, prefix: String, relation: ObservationRelation) -> ComparisonObservation? JetCLITestError! {
+    if !jet_cli_test_comparison_has(value, prefix) -> return Ok(None)
+    Ok(Val(jet_cli_test_comparison_parse_observation(value, prefix, relation)))
+}
+fn jet_cli_test_comparison_seed(value: DataTree) -> U64? Never! {
+    seed :: jet_cli_test_comparison_int(value, "seed") ?? return None
+    if seed < 0 -> return None
+    Val(U64{seed})
+}
+// Rust parse_sample (CmdTest.rs:412-448), including eager replay validation.
+pub fn jet_cli_test_comparison_parse_sample(value: DataTree, index: Int, seed: U64?, source: String, tool: String, target: String, relation: ObservationRelation) -> ComparisonSample JetCLITestError! {
+    case_name := jet_cli_test_comparison_text(value, "case_id")
+    if case_name == None -> case_name = jet_cli_test_comparison_text(value, "caseId")
+    case_id :: case_name ?? return Err(jet_cli_test_comparison_error("case {index} is missing `case_id`"))
+    input_name := jet_cli_test_comparison_text(value, "input_id")
+    if input_name == None -> input_name = jet_cli_test_comparison_text(value, "inputId")
+    input_id :: input_name ?? return Err(jet_cli_test_comparison_error("case `{case_id}` is missing `input_id`"))
+    identity := comparison_identity_new(case_id, input_id, source, tool, target)
+    identity.seed = if jet_cli_test_comparison_seed(value) == .Val(local) -> Val(local) else -> seed
+    reference :: jet_cli_test_comparison_parse_observation(value, "reference", relation)
+    candidate :: jet_cli_test_comparison_parse_observation(value, "candidate", relation)
+    sample := comparison_sample_new(identity, reference, candidate)
+    // Both fallible calls execute before testing the pair, as in Rust.
+    reference_replay :: jet_cli_test_comparison_optional_observation(value, "reference_replay", relation)
+    candidate_replay :: jet_cli_test_comparison_optional_observation(value, "candidate_replay", relation)
+    if reference_replay != None && candidate_replay != None {
+        sample.reference_replay = reference_replay
+        sample.candidate_replay = candidate_replay
+    } else {
+        if jet_cli_test_comparison_has(value, "reference_replay") || jet_cli_test_comparison_has(value, "candidate_replay") -> return Err(jet_cli_test_comparison_error("case `{case_id}` must provide both replay observations"))
+    }
+    sample.declared_equal = jet_cli_test_comparison_bool(value, "declared_equal")
+    Ok(sample)
+}
+
+// Rust parse_record (CmdTest.rs:261-302). Root adapter allows the runner to
+// reuse the already parsed tree without a serialize/reparse conversion.
+pub fn jet_cli_test_comparison_parse_root(root: DataTree, relation_override: String?) -> ComparisonRecord JetCLITestError! {
+    if root == .Object(object) {
+        relation_name :: relation_override ?? (jet_cli_test_comparison_text(root, "relation") ?? "typed_equality")
+        relation :: if relation_name == {
+            "typed_equality" -> ObservationRelation.TypedEquality
+            "ordered_effects" -> ObservationRelation.OrderedEffects
+            "typed_failure" -> ObservationRelation.TypedFailure
+            else -> ObservationRelation.Custom(relation_name)
+        }
+        source :: jet_cli_test_comparison_text(root, "source") ?? JET_CLI_TEST_COMPARE_SOURCE
+        tool :: jet_cli_test_comparison_text(root, "tool") ?? JET_CLI_TEST_COMPARE_TOOL
+        target :: jet_cli_test_comparison_text(root, "target") ?? JET_CLI_TEST_COMPARE_TARGET
+        seed :: jet_cli_test_comparison_seed(root)
+        discarded :: jet_cli_test_comparison_int(root, "discarded_cases") ?? (jet_cli_test_comparison_int(root, "discarded") ?? 0)
+        if discarded < 0 -> return Err(jet_cli_test_comparison_error("discarded_cases must be nonnegative"))
+        if !object.has_key("cases") -> return Err(jet_cli_test_comparison_error("record is missing `cases`"))
+        if object["cases"] == .Array(cases) {
+            samples := [ComparisonSample]{}
+            loop (index, value) in cases -> &samples.push(jet_cli_test_comparison_parse_sample(value, index, seed, source, tool, target, relation))
+            return Ok(testing_compare_samples_with_discarded(relation, ^samples, discarded))
+        }
+        return Err(jet_cli_test_comparison_error("record `cases` must be an array"))
+    }
+    Err(jet_cli_test_comparison_error("record root must be an object"))
+}
+pub fn jet_cli_test_comparison_parse_record(input: String, relation_override: String?) -> ComparisonRecord JetCLITestError! {
+    // Protocol bounds apply to observations and ignored fields before policy.
+    // Preserve the canonical helper's #3598 export gate; no general-parser fallback.
+    root :: foundation_parse_protocol_json(input) ?? return Err(jet_cli_test_comparison_error("record is not valid JSON"))
+    jet_cli_test_comparison_parse_root(root, relation_override)
+}
+
+// Rust comparison_status (CmdTest.rs:536-550).
+pub fn jet_cli_test_comparison_status(value: String) -> ComparisonStatus? Never! {
+    if value == {
+        "matched" -> Val(ComparisonStatus.Matched)
+        "mismatch" -> Val(ComparisonStatus.Mismatch)
+        "empty" -> Val(ComparisonStatus.Empty)
+        "unsupported" -> Val(ComparisonStatus.Unsupported)
+        "unavailable" -> Val(ComparisonStatus.Unavailable)
+        "timeout" -> Val(ComparisonStatus.Timeout)
+        "cancelled" -> Val(ComparisonStatus.Cancelled)
+        "invalid_oracle" -> Val(ComparisonStatus.InvalidOracle)
+        "contaminated" -> Val(ComparisonStatus.Contaminated)
+        else -> None
+    }
+}
+// Rust run_test_compare (CmdTest.rs:213-240): bindings precede record errors;
+// recorded terminal runner outcomes must never promote stale equal samples.
+pub fn jet_cli_test_comparison_prepare_root(root: DataTree, relation_override: String?) -> ComparisonRecord JetCLITestError! {
+    _ :: jet_cli_test_comparison_binding_from_root(root)
+    record := jet_cli_test_comparison_parse_root(root, relation_override)
+    Ok(jet_cli_test_comparison_runner_outcome(^record, root))
+}
+// Rust run_test_compare (CmdTest.rs:230-240). The real host retains the binding
+// it already validated, then uses parse_root + this helper: no duplicate binding
+// allocation or serialize/reparse pass is needed at the publication boundary.
+pub fn jet_cli_test_comparison_runner_outcome(incoming: ^ComparisonRecord, root: DataTree) -> ComparisonRecord Never! {
+    record := incoming
+    if jet_cli_test_comparison_text(root, "status") == .Val(name) {
+        if jet_cli_test_comparison_status(name) == .Val(status) {
+            if status != ComparisonStatus.Matched && status != ComparisonStatus.Mismatch {
+                record.status = status
+                record.reason = Val("recorded runner outcome is {comparison_status_as_str(status)}")
+                record.universal_proof = false
+            }
+        }
+    }
+    record
+}
+// Rust run_test_compare (CmdTest.rs:195-198), first relation flag wins.
+pub fn jet_cli_test_comparison_relation_override(args: [String]) -> String? Never! {
+    loop arg in args {
+        if arg.starts_with("--relation=") -> return Val(~arg.slice(11, arg.len()))
+    }
+    None
+}
+pub fn jet_cli_test_comparison_json_output(args: [String], machine: Bool) -> Bool Never! {
+    if machine -> return true
+    loop arg in args { if arg == "--json" -> return true }
+    false
+}
+
+// Rust comparison_evidence_outcome (CmdTest.rs:399-410).
+pub fn jet_cli_test_comparison_evidence_outcome(status: ComparisonStatus) -> EvidenceOutcome Never! {
+    if status == {
+        .Matched -> EvidenceOutcome.Passed
+        .Mismatch -> EvidenceOutcome.Failed
+        .InvalidOracle | .Contaminated -> EvidenceOutcome.Error
+        .Empty | .Unsupported | .Unavailable | .Timeout | .Cancelled -> EvidenceOutcome.Unavailable
+    }
+}
+// Rust ComparisonBinding::attachments (CmdTest.rs:124-145), adapting the actual
+// read-only CLI binding to the canonical EvidenceAttachment carrier.
+pub fn jet_cli_test_comparison_binding_attachments(binding: JetCLITestComparisonBinding) -> [EvidenceAttachment] Never! {
+    attachments := [EvidenceAttachment]{}
+    if binding.boundary_digest == .Val(value) -> &attachments.push(EvidenceAttachment{name: "boundary", value: value})
+    if binding.source_identity == .Val(value) -> &attachments.push(EvidenceAttachment{name: "source-identity", value: value})
+    if binding.replacement_identity == .Val(value) -> &attachments.push(EvidenceAttachment{name: "replacement-identity", value: value})
+    if binding.tool_identity == .Val(value) -> &attachments.push(EvidenceAttachment{name: "tool-identity", value: value})
+    if binding.target_identity == .Val(value) -> &attachments.push(EvidenceAttachment{name: "target-identity", value: value})
+    if binding.coverage_digest == .Val(value) -> &attachments.push(EvidenceAttachment{name: "coverage", value: value})
+    loop value in binding.assumptions -> &attachments.push(EvidenceAttachment{name: "assumption", value: value})
+    attachments
+}
+// Rust persist_comparison_artifacts (CmdTest.rs:310-370), reachable canonical
+// report construction. Store/evidence publication belongs to their real owners.
+pub fn jet_cli_test_comparison_evidence_report(target: String, record: ComparisonRecord, binding: JetCLITestComparisonBinding) -> EvidenceReport JetCLITestError! {
+    payload :: comparison_record_to_json(record) ?? return Err(jet_cli_test_comparison_error(err.message))
+    artifact_id :: canonical_json_sha256(payload)
+    if record.samples.len() > 18446744073709551615 -> return Err(jet_cli_test_comparison_error("comparison sample count is too large"))
+    sample_count :: U64{record.samples.len()}
+    source := JET_CLI_TEST_COMPARE_SOURCE
+    tool := JET_CLI_TEST_COMPARE_TOOL
+    comparison_target := ~target
+    if record.samples.len() != 0 {
+        source = ~record.samples[0].identity.source
+        tool = ~record.samples[0].identity.tool
+        comparison_target = ~record.samples[0].identity.target
+    }
+    detail :: record.reason ?? "comparison record is {comparison_status_as_str(record.status)}"
+    source_ref :: EvidenceSource{path: source, line: U32{0}, column: U32{1}}
+    build :: EvidenceBuild{toolchain: tool, target: comparison_target, profile: "comparison"}
+    revision :: EvidenceRevision{source: artifact_id, build: "jet-comparison-v1", revision: artifact_id}
+    report_id :: "test-compare-{artifact_id}"
+    identity :: evidence_identity_for_record(report_id, "comparison", EvidenceProducerKind.Test, EvidenceKind.Unit, source_ref, sample_count, detail)
+    evidence := evidence_record_new(identity, EvidenceKind.Unit, EvidenceProducerKind.Test, jet_cli_test_comparison_evidence_outcome(record.status), sample_count, source_ref, build, revision)
+    evidence.attachments = jet_cli_test_comparison_binding_attachments(binding)
+    &evidence.attachments.push(EvidenceAttachment{name: "comparison-artifact", value: artifact_id})
+    derivation :: evidence_record_checked_derivation(evidence)
+    report := evidence_report_new(report_id, EvidenceProducerKind.Test, source_ref, build, revision)
+    evidence_report_add_record_with_derivation(&report, ^evidence, ^derivation) ?? return Err(jet_cli_test_comparison_error(evidence_merge_error_text(err)))
+    Ok(report)
+}
+
+// Rust render_record (CmdTest.rs:487-524). Summary field order is deliberate;
+// this wire surface is not A-canonical persistence or Core JSON serialization.
+pub fn jet_cli_test_comparison_render_record(record: ComparisonRecord, json_output: Bool) -> String Never! {
+    status :: comparison_status_as_str(record.status)
+    relation :: observation_relation_as_str(record.relation)
+    reason :: record.reason ?? "comparison has no reason"
+    if json_output {
+        first_difference :: if record.first_difference == .Val(index) -> "{index}" else -> "null"
+        return "{{\"schema_version\":{record.schema_version},\"status\":{foundation_json_quote(status)},\"relation\":{foundation_json_quote(relation)},\"samples\":{record.samples.len()},\"discarded_cases\":{record.discarded_cases},\"first_difference\":{first_difference},\"universal_proof\":false,\"reason\":{foundation_json_quote(reason)}}}"
+    }
+    out := "status={status} relation={relation} samples={record.samples.len()} reason={reason}"
+    if comparison_record_first_mismatch(record) == .Val(sample) {
+        out += "\nreplay case={sample.identity.case_id} input={sample.identity.input_id} source={sample.identity.source} tool={sample.identity.tool} target={sample.identity.target}"
+        out += "\nreference={sample.reference.raw}\ncandidate={sample.candidate.raw}"
+    }
+    out
+}
+// Rust emit_error (CmdTest.rs:525-535), channel selection and exact exit code.
+pub fn jet_cli_test_comparison_error_output(json_output: Bool, message: String) -> JetDriverVerbOutput Never! {
+    if json_output -> return JetDriverVerbOutput{stdout: "{{\"status\":\"invalid_oracle\",\"universal_proof\":false,\"error\":{foundation_json_quote(message)}}}\n", stderr: "", exit_code: 1}
+    JetDriverVerbOutput{stdout: "", stderr: "{message}\n", exit_code: 1}
+}
+// Rust run_test_compare (CmdTest.rs:252-258). Publication failure never changes
+// this result: its notice is emitted separately by canonical optional history.
+pub fn jet_cli_test_comparison_record_output(record: ComparisonRecord, json_output: Bool) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: "{jet_cli_test_comparison_render_record(record, json_output)}\n", stderr: "", exit_code: if comparison_status_is_success(record.status) -> 0 else -> 1}
+}

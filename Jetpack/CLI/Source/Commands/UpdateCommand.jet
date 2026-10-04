@@ -3,7 +3,7 @@
 // scopes from the current directory, re-pin channel sources behind one
 // confirmation, and report channel freshness read-only.
 
-pub fn cli_render_channel_update_row(theme: Theme, scope: String, name: String, name_w: Int, before: String, after: String, package_count: Int, download_bytes: Int?) Never! -[IO]> {
+pub fn cli_render_channel_update_row(theme: Theme, scope: String, name: String, name_w: Int, before: String, after: String, package_count: Int, download_bytes: Int?) Never! -[IO, Time.Wait]> {
     shown_after :: "{after}   {cli_package_noun(package_count)}, {cli_download_size(download_bytes)}"
     label :: "{terminal_pad_end(scope, 5)} {terminal_pad_end(name, name_w)}"
     theme.plan_row(PlanMark.Change, label, label.len(), before, shown_after)
@@ -67,31 +67,32 @@ pub struct UpdateScopes {
     pub tools: Bool
 }
 
-pub fn cli_update_scopes(parsed: CliParsed) -> UpdateScopes Never! {
+pub fn cli_update_scopes(parsed: CLIParsed) -> UpdateScopes Never! {
     if parsed.flags.update_deps || parsed.flags.update_tools -> return UpdateScopes{deps: parsed.flags.update_deps, tools: parsed.flags.update_tools}
     if parsed.positional.get(0) == {
-        .Val(word) -> if word == @TOOL_PROFILE_NAME -> UpdateScopes{deps: false, tools: true} else -> UpdateScopes{deps: true, tools: false}
+        .Val(word) -> if word == TOOL_PROFILE_NAME -> UpdateScopes{deps: false, tools: true} else -> UpdateScopes{deps: true, tools: false}
         .None -> UpdateScopes{deps: true, tools: true}
     }
 }
 
 // The project root when it has an env file to update.
-fn cli_project_scope_root() -[IO, FS, Env, Exec]> String? Never! {
-    root :: cli_project_root(cli_current_dir())
+fn cli_project_scope_root(cache: &WorkspaceDeclarationCache) -[IO, FS, Env, Exec, Time.Wait]> String? Never! {
+    root :: cli_project_root(&cache, cli_current_dir())
     if files.is_file(EnvFile.path_in(root)) -> return Val(root)
     None
 }
 
-pub fn cli_cmd_update(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+pub fn cli_cmd_update(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    cache := WorkspaceDeclarationCache.new()
     confirmation := UpdateConfirmation.new()
     scopes :: cli_update_scopes(parsed)
-    project_scope :: cli_project_scope_root()
+    project_scope :: cli_project_scope_root(&cache)
     if scopes.deps && scopes.tools {
         if project_scope == .Val(root) -> theme.status("scope: project dependencies ({root})")
         theme.status("scope: user tools")
-        project_plan := None
+        project_plan := ProjectUpdatePlan?{None}
         if project_scope != None {
-            if cli_plan_project_update(theme, parsed) == {
+            if cli_plan_project_update(&cache, theme, parsed) == {
                 .Ok(plan) -> project_plan = plan
                 .Err(error) -> return cli_update_exit_code(error)
             }
@@ -103,37 +104,37 @@ pub fn cli_cmd_update(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net,
         has_project_plan :: project_plan != None
         apply_project :: () -> if project_plan == {
             .Val(plan) -> cli_apply_project_update(theme, plan)
-            .None -> @EXIT_OK
+            .None -> EXIT_OK
         }
-        return cli_update_user_tools_with_plan(theme, parsed, &confirmation, has_project_plan, apply_project)
+        return cli_update_user_tools_with_plan(&verification, theme, parsed, &confirmation, has_project_plan, apply_project)
     }
-    if scopes.tools -> return cli_update_user_tools(theme, parsed, &confirmation)
-    cli_cmd_update_project(theme, parsed, &confirmation)
+    if scopes.tools -> return cli_update_user_tools(&verification, theme, parsed, &confirmation)
+    cli_cmd_update_project(&cache, theme, parsed, &confirmation)
 }
 
 // The exit code a failed update plan already reported.
-fn cli_update_exit_code(error: CliError) -> Int Never! {
+fn cli_update_exit_code(error: CLIError) -> Int Never! {
     if error == {
         .Reported(code) -> code
-        else -> @EXIT_USAGE
+        else -> EXIT_USAGE
     }
 }
 
 // `jetpack update --deps` / `jetpack update <source>`: resolve project
 // channel refs and move only their lock entries; nothing is realized.
-fn cli_cmd_update_project(theme: Theme, parsed: CliParsed, confirmation: &UpdateConfirmation) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    planned :: cli_plan_project_update(theme, parsed) ?? return cli_update_exit_code(err)
-    plan :: planned ?? return @EXIT_OK
+fn cli_cmd_update_project(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, confirmation: &UpdateConfirmation) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    planned :: cli_plan_project_update(&cache, theme, parsed) ?? return cli_update_exit_code(err)
+    plan :: planned ?? return EXIT_OK
     theme.status("Plan channel update")
     cli_render_project_update_plan(theme, plan)
     confirmed :: &confirmation.confirm(theme, parsed.flags.assume_yes)
-    if !confirmed -> return @EXIT_USAGE
+    if !confirmed -> return EXIT_USAGE
     cli_apply_project_update(theme, plan)
 }
 
-pub fn cli_plan_project_update(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ProjectUpdatePlan? CliError! {
-    if parsed.flags.offline && parsed.flags.local_nix_catalog == None -> return Err(CliError.Reported(cli_offline_refusal(theme, "update")))
-    plan :: cli_load_project_plan(theme)
+pub fn cli_plan_project_update(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ProjectUpdatePlan? CLIError! {
+    if parsed.flags.offline && parsed.flags.local_nix_catalog == None -> return Err(CLIError.Reported(cli_offline_refusal(theme, "update")))
+    plan :: cli_load_project_plan(&cache, theme)
     project_dir :: plan.project_root
     only :: parsed.positional.get(0)
     sources :: cli_channel_sources(plan.table)
@@ -145,7 +146,7 @@ pub fn cli_plan_project_update(theme: Theme, parsed: CliParsed) -[IO, FS, Env, E
         }
         if declared && !tracked {
             theme.error_coded("E1352", "source `{name}` is pinned and cannot be updated", "a pinned source has no moving channel policy, so Jetpack must never change its lock or manifest", "declare `{name}` with `#latest` for manual movement or `#auto` for automatic movement")
-            return Err(CliError.Reported(@EXIT_USAGE))
+            return Err(CLIError.Reported(EXIT_USAGE))
         }
     }
     selected := [ChannelSource]{}
@@ -158,7 +159,7 @@ pub fn cli_plan_project_update(theme: Theme, parsed: CliParsed) -[IO, FS, Env, E
     if selected.len() == 0 {
         if only == .Val(name) {
             theme.error("no channel source named `{name}`", "only moving channel declarations or supported NixOS/nixpkgs channel sources can be updated.", "run `jetpack outdated` to see channel sources.")
-            return Err(CliError.Reported(@EXIT_USAGE))
+            return Err(CLIError.Reported(EXIT_USAGE))
         }
         theme.status("no channel sources to update.")
         return Ok(None)
@@ -193,11 +194,11 @@ pub fn cli_plan_project_update(theme: Theme, parsed: CliParsed) -[IO, FS, Env, E
             }
         }
     }
-    if !ok -> return Err(CliError.Reported(@EXIT_USAGE))
+    if !ok -> return Err(CLIError.Reported(EXIT_USAGE))
     Ok(Val(ProjectUpdatePlan{project_dir, updates}))
 }
 
-pub fn cli_render_project_update_plan(theme: Theme, plan: ProjectUpdatePlan) Never! -[IO]> {
+pub fn cli_render_project_update_plan(theme: Theme, plan: ProjectUpdatePlan) Never! -[IO, Time.Wait]> {
     name_w := 8
     loop update in plan.updates {
         if update.source.name.len() > name_w -> name_w = update.source.name.len()
@@ -207,7 +208,7 @@ pub fn cli_render_project_update_plan(theme: Theme, plan: ProjectUpdatePlan) Nev
 }
 
 pub fn cli_apply_project_update(theme: Theme, plan: ProjectUpdatePlan) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
-    lock_diff := CliLockDiffGuard.new(theme, plan.project_dir)
+    lock_diff := CLILockDiffGuard.new(theme, plan.project_dir)
     defer close(^lock_diff)
     &lock_diff.set_sizes(cli_sizes_from_bytes(cli_update_download_bytes(plan.updates), None))
     ok := true
@@ -226,27 +227,28 @@ pub fn cli_apply_project_update(theme: Theme, plan: ProjectUpdatePlan) -[IO, FS,
         }
         theme.status("{theme.bold(source.name)} {theme.gray(source.lock_channel)} → {update.after}")
     }
-    if ok -> return @EXIT_OK
-    @EXIT_USAGE
+    if ok -> return EXIT_OK
+    EXIT_USAGE
 }
 
 // `jetpack outdated`: a read-only channel freshness report. It may query
 // metadata, but never writes `.jet/lock`.
-pub fn cli_cmd_outdated(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+pub fn cli_cmd_outdated(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    cache := WorkspaceDeclarationCache.new()
     if parsed.flags.offline -> return cli_offline_refusal(theme, "outdated")
     project_dir :: cli_current_dir()
-    plan :: cli_load_project_plan(theme) ?? return cli_update_exit_code(err)
+    plan :: cli_load_project_plan(&cache, theme) ?? return cli_update_exit_code(err)
     sources :: cli_channel_sources(plan.table)
     declarations :: plan.table.declarations()
     if declarations.len() == 0 {
         theme.status("no declared sources.")
-        return @EXIT_OK
+        return EXIT_OK
     }
     any := false
     ok := true
     loop declaration in declarations {
         policy :: plan.table.channel_policy(declaration.name)
-        found := None
+        found := ChannelSource?{None}
         loop source in sources {
             if source.name == declaration.name && found == None -> found = Val(source)
         }
@@ -275,6 +277,6 @@ pub fn cli_cmd_outdated(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Ne
         }
     }
     if ok && !any -> theme.status("all channel sources are current.")
-    if ok -> return @EXIT_OK
-    @EXIT_USAGE
+    if ok -> return EXIT_OK
+    EXIT_USAGE
 }

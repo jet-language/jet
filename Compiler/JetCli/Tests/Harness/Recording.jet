@@ -1,0 +1,468 @@
+// Recording.rs has no inline tests. RC01-RC03 behavioral codec/storage claims.
+RECORDING_TEST_CR :: prep { String.from_bytes([U8]{U8{13}}) ?? panic("CR") }
+RECORDING_TEST_ESC :: prep { String.from_bytes([U8]{U8{27}}) ?? panic("ESC") }
+RECORDING_TEST_NUL :: prep { String.from_bytes([U8]{U8{0}}) ?? panic("NUL") }
+fn recording_test_new() -> JetCLIRecording {
+    identity :: jet_cli_recording_identity_new("jet ?", 80, 24, false) ?? panic(jet_cli_recording_error_message(err))
+    jet_cli_recording_new(identity) ?? panic(jet_cli_recording_error_message(err))
+}
+fn recording_test_push(recording: &JetCLIRecording, event: JetCLIRecordingEvent) Never! {
+    jet_cli_recording_push(&recording, event) ?? panic(jet_cli_recording_error_message(err))
+}
+fn recording_test_encode(recording: JetCLIRecording) -> [U8] {
+    jet_cli_recording_encode(recording) ?? panic(jet_cli_recording_error_message(err))
+}
+fn recording_test_decode(bytes: [U8]) -> JetCLIRecording {
+    jet_cli_recording_decode(bytes) ?? panic(jet_cli_recording_error_message(err))
+}
+fn recording_test_decode_error(bytes: [U8]) -> String {
+    if jet_cli_recording_decode(bytes) == {
+        .Err(error) -> jet_cli_recording_error_message(error)
+        .Ok(_) -> panic("expected recording decoder refusal")
+    }
+}
+fn recording_test_push_error(event: JetCLIRecordingEvent) -> String {
+    recording := recording_test_new()
+    if jet_cli_recording_push(&recording, event) == {
+        .Err(error) -> jet_cli_recording_error_message(error)
+        .Ok(_) -> panic("expected recording event refusal")
+    }
+}
+fn recording_test_repeat(text: String, count: Int) -> String {
+    text.repeat(count)
+}
+fn recording_test_rehash(bytes: &[U8]) Never! {
+    start :: bytes.len() - 52
+    hash :: mir_sha256_bytes(~bytes[0..<start])
+    loop index in 0..<32 -> bytes[start + 20 + index] = hash[index]
+}
+fn recording_test_patch_le(bytes: &[U8], offset: Int, value: Int, count: Int) Never! {
+    loop index in 0..<count -> bytes[offset + index] = U8{(value >> (8 * index)) & 255}
+}
+fn recording_test_envelope(header: [U8], kind: Int, payload: [U8]) -> [U8] {
+    out := [U8]{}
+    jet_cli_recording_write_prefix(&out, header)
+    if kind >= 0 -> jet_cli_recording_append(&out, jet_cli_recording_encode_frame(1, kind, 0, payload))
+    jet_cli_recording_write_footer(&out, if kind >= 0 -> 1 else -> 0, payload.len())
+    out
+}
+fn recording_test_value(text: String) -> CanonicalJSON {
+    canonical_json_parse(text.bytes()) ?? panic(err.message)
+}
+fn recording_test_event_error(kind: Int, text: String) -> String {
+    if jet_cli_recording_decode_event(kind, recording_test_value(text)) == {
+        .Err(error) -> jet_cli_recording_error_message(error)
+        .Ok(_) -> panic("expected payload refusal")
+    }
+}
+fn recording_test_header_error(text: String) -> String {
+    if jet_cli_recording_parse_header(recording_test_value(text)) == {
+        .Err(error) -> jet_cli_recording_error_message(error)
+        .Ok(_) -> panic("expected header refusal")
+    }
+}
+fn recording_test_header() -> [U8] {
+    jet_cli_recording_header_json(jet_cli_recording_identity(recording_test_new()), JET_CLI_RECORDING_ZERO_ID) ?? panic(jet_cli_recording_error_message(err))
+}
+fn recording_test_command() -> JetCLICommandResult {
+    JetCLICommandResult{stdout: "{RECORDING_TEST_ESC}[32m文{RECORDING_TEST_ESC}[0m{RECORDING_TEST_CR}\n", stderr: "why{RECORDING_TEST_CR}\n", diagnostics: [JetCLICommandDiagnostic]{jet_cli_command_diagnostic_new("E2101", JetCLIDiagnosticSeverity.Error, "bad{RECORDING_TEST_CR}\n", "because", "fix")}, exit_code: -1}
+}
+
+#Test("recording empty envelope header endian magic content identity and digest") {
+    recording :: recording_test_new()
+    assert_eq(jet_cli_recording_normalized_text(recording), "")
+    assert_eq(jet_cli_recording_digest(recording), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+    header :: recording_test_header()
+    expected :: "{{\"artifact_id\":\"000000000000000000000000\",\"capture\":{{\"mode\":\"tui\",\"roots\":[\"Input\",\"Output\",\"Frame\"]}},\"identity\":{{\"command\":\"jet ?\",\"terminal\":{{\"color\":false,\"height\":24,\"width\":80}}}},\"limits\":{{\"frames\":100000,\"payload_bytes\":268435404}},\"producer\":\"jet-cli\",\"schema\":\"jet.tui-replay\",\"version\":{{\"major\":1,\"minor\":0}}}}\n"
+    assert_eq(header, expected.bytes())
+    bytes :: recording_test_encode(recording)
+    assert_eq(~bytes[0..<8], "JREPLAY{RECORDING_TEST_NUL}".bytes())
+    assert_eq(~bytes[8..<12], [U8]{U8{1}, U8{0}, U8{0}, U8{0}})
+    length :: Int.from_u64(jet_cli_recording_read_le(bytes, 12, 4))
+    assert_eq(length, header.len())
+    footer :: 16 + length
+    assert_eq(~bytes[footer..<footer + 4], "JEND".bytes())
+    assert_eq(jet_cli_recording_read_le(bytes, footer + 4, 8), U64{0})
+    assert_eq(jet_cli_recording_read_le(bytes, footer + 12, 8), U64{0})
+    assert_eq(~bytes[footer + 20..<bytes.len()], mir_sha256_bytes(~bytes[0..<footer]))
+    zero_body := [U8]{}
+    jet_cli_recording_write_prefix(&zero_body, header)
+    id :: jet_cli_recording_artifact_id(recording) ?? panic(jet_cli_recording_error_message(err))
+    assert_eq(id, jet_cli_recording_content_id(zero_body))
+    assert_eq(id.bytes().len(), 24)
+    assert(recording == recording_test_decode(bytes))
+}
+#Test("recording every event round trips with command normalization only on wire") {
+    recording := recording_test_new()
+    events :: [JetCLIRecordingEvent]{
+        JetCLIRecordingEvent.Type("文😀\n"), JetCLIRecordingEvent.Enter, JetCLIRecordingEvent.Sleep(U64{1500}),
+        JetCLIRecordingEvent.Wait("{RECORDING_TEST_ESC}[31mready{RECORDING_TEST_ESC}[0m{RECORDING_TEST_CR}\n"), JetCLIRecordingEvent.Require("jet"),
+        JetCLIRecordingEvent.Set{name: "LANG", value: "C"}, JetCLIRecordingEvent.Output("{RECORDING_TEST_ESC}[32mok{RECORDING_TEST_ESC}[0m{RECORDING_TEST_CR}\n"),
+        JetCLIRecordingEvent.Resize{width: 120, height: 40}, JetCLIRecordingEvent.Frame{width: 120, height: 40, text: "{RECORDING_TEST_ESC}[2Jframe{RECORDING_TEST_CR}\n"}, JetCLIRecordingEvent.Command(recording_test_command()),
+    }
+    loop event in events -> recording_test_push(&recording, ~event)
+    assert_eq(jet_cli_recording_events(recording).len(), 10)
+    assert_eq(recording.events.len(), 10)
+    decoded :: recording_test_decode(recording_test_encode(recording))
+    decoded_events :: jet_cli_recording_events(decoded)
+    loop index in 0..<9 -> assert(decoded_events[index] == events[index])
+    assert(decoded_events[9] == JetCLIRecordingEvent.Command(jet_cli_command_result_normalized(recording_test_command())))
+    observed :: decoded.events
+    loop index in 0..<9 -> assert(observed[index] == events[index])
+    assert(observed[9] == JetCLIRecordingEvent.Command(jet_cli_command_result_normalized(recording_test_command())))
+    expected :: "Type \"文😀\\n\"\nEnter\nSleep 1500ms\nWait \"ready\\n\"\nRequire \"jet\"\nSet LANG \"C\"\nOutput \"ok\\n\"\nResize 120x40\nFrame 120x40\nframe\nCommand {{\"diagnostics\":[{{\"code\":\"E2101\",\"fix\":\"fix\",\"severity\":\"error\",\"what\":\"bad\\n\",\"why\":\"because\"}}],\"exit_code\":-1,\"stderr\":\"why\\n\",\"stdout\":\"文\\n\"}}\n"
+    assert_eq(jet_cli_recording_normalized_text(recording), expected)
+    assert_eq(jet_cli_recording_normalized_text(decoded), expected)
+    assert_eq(jet_cli_recording_normalized_bytes(recording), expected.bytes())
+    assert_eq(jet_cli_recording_digest(recording), mir_sha256_hex_bytes(mir_sha256_bytes(expected.bytes())))
+    assert_eq(recording_test_encode(decoded), recording_test_encode(recording))
+}
+#Test("recording identity control byte dimensions and UTF8 byte bounds") {
+    cases :: [String]{"", "a{RECORDING_TEST_NUL}b", "a\nb", "a{RECORDING_TEST_CR}b", "{RECORDING_TEST_ESC}bad", recording_test_repeat("é", 2049)}
+    expected :: [String]{"recording command identity must contain 1..=4096 bytes", "recording command identity must not contain control line breaks", "recording command identity must not contain control line breaks", "recording command identity must not contain control line breaks", "recording command identity must not contain ANSI escapes", "recording command identity must contain 1..=4096 bytes"}
+    loop index in 0..<cases.len() {
+        if jet_cli_recording_identity_new(~cases[index], 80, 24, false) == {
+            .Err(error) -> assert_eq(jet_cli_recording_error_message(error), expected[index])
+            .Ok(_) -> panic("invalid identity accepted")
+        }
+    }
+    jet_cli_recording_identity_new(recording_test_repeat("é", 2048), 65535, 65535, true) ?? panic("boundary identity rejected")
+    if jet_cli_recording_identity_new("jet", 0, 24, false) == {
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "recording terminal dimensions must be non-zero")
+        .Ok(_) -> panic("zero width accepted")
+    }
+    if jet_cli_recording_identity_new("jet", 80, 0, false) == {
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "recording terminal dimensions must be non-zero")
+        .Ok(_) -> panic("zero height accepted")
+    }
+}
+#Test("recording event refusal precedence secrets sleep text requirements dimensions") {
+    assert_eq(recording_test_push_error(JetCLIRecordingEvent.Type(RECORDING_TEST_NUL)), "recording text must not contain NUL")
+    assert_eq(recording_test_push_error(JetCLIRecordingEvent.Sleep(U64{3600001})), "recording Sleep exceeds one hour")
+    assert_eq(recording_test_push_error(JetCLIRecordingEvent.Require("")), "invalid recording requirement")
+    assert_eq(recording_test_push_error(JetCLIRecordingEvent.Require("a{RECORDING_TEST_NUL}b")), "invalid recording requirement")
+    assert_eq(recording_test_push_error(JetCLIRecordingEvent.Require(recording_test_repeat("é", 2049))), "invalid recording requirement")
+    assert_eq(recording_test_push_error(JetCLIRecordingEvent.Set{name: "9TOKEN", value: RECORDING_TEST_NUL}), "invalid environment name `9TOKEN`")
+    assert_eq(recording_test_push_error(JetCLIRecordingEvent.Set{name: "auth_mode", value: RECORDING_TEST_NUL}), "refusing to record sensitive environment name `auth_mode`")
+    assert_eq(recording_test_push_error(JetCLIRecordingEvent.Resize{width: 0, height: 1}), "recording dimensions must be non-zero")
+    assert_eq(recording_test_push_error(JetCLIRecordingEvent.Frame{width: 1, height: 0, text: RECORDING_TEST_NUL}), "recording dimensions must be non-zero")
+    markers :: [String]{"token", "secret", "password", "passwd", "private", "credential", "auth", "api_key", "access_key", "cookie"}
+    loop marker in markers -> assert(jet_cli_recording_sensitive_name(marker))
+    recording := recording_test_new()
+    recording_test_push(&recording, JetCLIRecordingEvent.Sleep(U64{3600000}))
+    recording_test_push(&recording, JetCLIRecordingEvent.Set{name: "_A09", value: "ok"})
+    assert_eq(jet_cli_recording_push_frame(&recording, JetCLIHeadlessFrame{size: jet_cli_headless_size_new(80, 24), text: "{RECORDING_TEST_ESC}[31mready{RECORDING_TEST_ESC}[0m{RECORDING_TEST_CR}\n", focus: None, cursor: None}) ?? panic("push frame"), 2)
+    assert(jet_cli_recording_events(recording)[2] == JetCLIRecordingEvent.Frame{width: 80, height: 24, text: "ready\n"})
+    assert(recording.events[2] == JetCLIRecordingEvent.Frame{width: 80, height: 24, text: "ready\n"})
+    if jet_cli_recording_push_frame(&recording, JetCLIHeadlessFrame{size: jet_cli_headless_size_new(65536, 24), text: "ok", focus: None, cursor: None}) == {
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "headless frame width exceeds recording limits")
+        .Ok(_) -> panic("oversized headless frame")
+    }
+    if jet_cli_recording_push_frame(&recording, JetCLIHeadlessFrame{size: jet_cli_headless_size_new(80, 65536), text: "ok", focus: None, cursor: None}) == {
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "headless frame height exceeds recording limits")
+        .Ok(_) -> panic("oversized headless frame")
+    }
+}
+#Test("recording text and encoded payload byte limits are distinct") {
+    text :: recording_test_repeat("é", 524288)
+    recording := recording_test_new()
+    recording_test_push(&recording, JetCLIRecordingEvent.Type(~text))
+    if jet_cli_recording_encode(recording) == {
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "recording frame payload bytes exceeds the 1048576 item limit")
+        .Ok(_) -> panic("JSON overhead must count")
+    }
+    assert_eq(recording_test_push_error(JetCLIRecordingEvent.Type("{text}a")), "recording text bytes exceeds the 1048576 item limit")
+    assert_eq(recording_test_push_error(JetCLIRecordingEvent.Output("{text}a{RECORDING_TEST_NUL}")), "recording text bytes exceeds the 1048576 item limit")
+    command := recording_test_command()
+    command.stdout = "{text}a"
+    command.stderr = "{text}a"
+    assert_eq(recording_test_push_error(JetCLIRecordingEvent.Command(~command)), "recording command stdout bytes exceeds the 1048576 item limit")
+    command.stdout = ""
+    assert_eq(recording_test_push_error(JetCLIRecordingEvent.Command(command)), "recording command stderr bytes exceeds the 1048576 item limit")
+}
+#Test("recording frame count rejects before validating a new event") {
+    recording := recording_test_new()
+    // No Rust inline test builds this fixture. Fill cheaply, then call the real
+    // append boundary twice instead of dispatching 100000 assertions.
+    loop _ in 0..<99999 -> &recording.events.push(JetCLIRecordingEvent.Enter)
+    assert_eq(jet_cli_recording_push(&recording, JetCLIRecordingEvent.Enter) ?? panic("frame boundary"), 99999)
+    if jet_cli_recording_push(&recording, JetCLIRecordingEvent.Type(RECORDING_TEST_NUL)) == {
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "recording frame count exceeds the 100000 item limit")
+        .Ok(_) -> panic("frame limit")
+    }
+}
+#Test("recording interaction tape retains seven actions skips observations and refuses other seams") {
+    recording := recording_test_new()
+    events :: [JetCLIRecordingEvent]{JetCLIRecordingEvent.Type("文"), JetCLIRecordingEvent.Enter, JetCLIRecordingEvent.Sleep(U64{2}), JetCLIRecordingEvent.Wait("ready"), JetCLIRecordingEvent.Require("jet"), JetCLIRecordingEvent.Set{name: "LANG", value: "C"}, JetCLIRecordingEvent.Output("ok"), JetCLIRecordingEvent.Frame{width: 80, height: 24, text: "frame"}}
+    loop event in events -> recording_test_push(&recording, ~event)
+    tape :: jet_cli_recording_interaction_tape(recording) ?? panic("interaction tape")
+    assert_eq(jet_cli_tape_to_text(tape), "Type \"文\"\nEnter\nSleep 2ms\nWait \"ready\"\nRequire \"jet\"\nSet LANG \"C\"\nOutput \"ok\"\n")
+    recording_test_push(&recording, JetCLIRecordingEvent.Resize{width: 80, height: 24})
+    if jet_cli_recording_interaction_tape(recording) == {
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "recording resize events cannot be replayed by this headless target")
+        .Ok(_) -> panic("resize dropped")
+    }
+    other := recording_test_new()
+    recording_test_push(&other, JetCLIRecordingEvent.Command(recording_test_command()))
+    if jet_cli_recording_interaction_tape(other) == {
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "recording command events cannot be replayed by this headless target")
+        .Ok(_) -> panic("command dropped")
+    }
+    // Wait accepts empty at recording boundary, Tape validates its stricter action contract.
+    empty_wait := recording_test_new()
+    recording_test_push(&empty_wait, JetCLIRecordingEvent.Wait(""))
+    if jet_cli_recording_interaction_tape(empty_wait) == {
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "recording interaction tape is invalid: tape step 1: Wait needs a readiness marker")
+        .Ok(_) -> panic("invalid tape accepted")
+    }
+}
+#Test("recording envelope corruptions preserve validation order and exact refusals") {
+    recording := recording_test_new()
+    recording_test_push(&recording, JetCLIRecordingEvent.Enter)
+    original :: recording_test_encode(recording)
+    assert_eq(recording_test_decode_error([U8]{}), "missing JREPLAY magic")
+    bad := ~original
+    bad[0] = U8{0}
+    assert_eq(recording_test_decode_error(bad), "missing JREPLAY magic")
+    bad = ~original
+    bad[8] = U8{2}
+    assert_eq(recording_test_decode_error(bad), "unsupported recording schema 2.0")
+    bad = ~original
+    recording_test_patch_le(&bad, 12, 4194305, 4)
+    assert_eq(recording_test_decode_error(bad), "recording header bytes exceeds the 4194304 item limit")
+    bad = ~original
+    recording_test_patch_le(&bad, 12, original.len(), 4)
+    assert_eq(recording_test_decode_error(bad), "recording header is truncated")
+    footer :: original.len() - 52
+    bad = ~original
+    bad[footer] = U8{0}
+    assert_eq(recording_test_decode_error(bad), "missing JEND footer")
+    bad = ~original
+    bad[footer + 20] = U8{0}
+    assert_eq(recording_test_decode_error(bad), "recording footer hash mismatch")
+    frame :: 16 + Int.from_u64(jet_cli_recording_read_le(original, 12, 4))
+    bad = ~original
+    bad[frame] = U8{0}
+    recording_test_rehash(&bad)
+    assert_eq(recording_test_decode_error(bad), "recording frame flags or ordering are invalid")
+    bad = ~original
+    recording_test_patch_le(&bad, frame + 3, 1, 8)
+    recording_test_rehash(&bad)
+    assert_eq(recording_test_decode_error(bad), "recording frame flags or ordering are invalid")
+    bad = ~original
+    recording_test_patch_le(&bad, frame + 11, 1048577, 4)
+    recording_test_rehash(&bad)
+    assert_eq(recording_test_decode_error(bad), "recording frame payload bytes exceeds the 1048576 item limit")
+    bad = ~original
+    recording_test_patch_le(&bad, frame + 11, 100, 4)
+    recording_test_rehash(&bad)
+    assert_eq(recording_test_decode_error(bad), "truncated recording frame")
+    bad = ~original
+    bad[frame + 15] = U8{0}
+    recording_test_rehash(&bad)
+    assert_eq(recording_test_decode_error(bad), "recording frame hash mismatch")
+    bad = ~original
+    recording_test_patch_le(&bad, footer + 4, 2, 8)
+    assert_eq(recording_test_decode_error(bad), "recording footer counts do not match frames")
+    bad = ~original
+    recording_test_patch_le(&bad, footer + 12, 4, 8)
+    assert_eq(recording_test_decode_error(bad), "recording footer counts do not match frames")
+    assert_eq(recording_test_decode_error(recording_test_envelope(recording_test_header(), -1, [U8]{})), "recording artifact_id does not match content")
+}
+#Test("recording payload canonical keys types unknown kinds and integer ranges") {
+    assert_eq(recording_test_event_error(0x2001, "{{\"other\":\"x\"}}\n"), "recording object keys differ: expected {{\"text\"}}, observed {{\"other\"}}")
+    assert_eq(recording_test_event_error(0x2002, "{{\"text\":\"x\"}}\n"), "recording object keys differ: expected {{}}, observed {{\"text\"}}")
+    assert_eq(recording_test_event_error(0x2001, "{{\"text\":true}}\n"), "recording `text` must be a string")
+    assert_eq(recording_test_event_error(0x2001, "[]\n"), "recording value must be an object")
+    assert_eq(recording_test_event_error(0x1234, "{{}}\n"), "unknown recording frame kind 0x1234")
+    assert_eq(recording_test_event_error(0x2003, "{{\"milliseconds\":18446744073709551615}}\n"), "recording Sleep exceeds one hour")
+    assert_eq(recording_test_event_error(0x2003, "{{\"milliseconds\":18446744073709551616}}\n"), "recording `milliseconds` must be a non-negative integer")
+    assert_eq(recording_test_event_error(0x2003, "{{\"milliseconds\":-1}}\n"), "recording `milliseconds` must be a non-negative integer")
+    assert_eq(recording_test_event_error(0x2003, "{{\"milliseconds\":\"0\"}}\n"), "recording `milliseconds` must be an integer")
+    assert_eq(recording_test_event_error(0x2101, "{{\"height\":24,\"width\":65536}}\n"), "recording `width` is out of range")
+    assert_eq(recording_test_event_error(0x2101, "{{\"height\":0,\"width\":80}}\n"), "recording dimensions must be non-zero")
+    assert_eq(recording_test_event_error(0x2201, "{{\"diagnostics\":{{}},\"exit_code\":0,\"stderr\":\"\",\"stdout\":\"\"}}\n"), "command diagnostics must be an array")
+    assert_eq(recording_test_event_error(0x2201, "{{\"diagnostics\":[],\"exit_code\":2147483648,\"stderr\":\"\",\"stdout\":\"\"}}\n"), "recording `exit_code` is out of range")
+    assert_eq(recording_test_event_error(0x2201, "{{\"diagnostics\":[],\"exit_code\":9223372036854775808,\"stderr\":\"\",\"stdout\":\"\"}}\n"), "recording `exit_code` must be an integer")
+    assert_eq(recording_test_event_error(0x2201, "{{\"diagnostics\":[{{\"code\":\"X\",\"fix\":\"\",\"severity\":\"fatal\",\"what\":\"\",\"why\":\"\"}}],\"exit_code\":0,\"stderr\":\"\",\"stdout\":\"\"}}\n"), "unknown command diagnostic severity `fatal`")
+    header :: recording_test_header()
+    assert_eq(recording_test_decode_error(recording_test_envelope(header, 0x2001, "{{\"text\":\"a\",\"text\":\"b\"}}\n".bytes())), "duplicate JSON key `text`")
+    assert_eq(recording_test_decode_error(recording_test_envelope(header, 0x2001, "{{\"text\":\"\\u0061\"}}\n".bytes())), "JSON is valid but not A-canonical")
+    assert_eq(recording_test_decode_error(recording_test_envelope(header, 0x2002, "{{}}".bytes())), "canonical JSON must end in exactly one LF")
+}
+#Test("recording header validates nested schemas and key sets") {
+    header :: String.from_bytes(recording_test_header()) ?? panic("header UTF-8")
+    assert_eq(recording_test_header_error(header.replace("jet-cli", "unknown")), "unexpected recording producer")
+    assert_eq(recording_test_header_error(header.replace("jet.tui-replay", "jet.proof-replay")), "unexpected recording schema")
+    assert_eq(recording_test_header_error(header.replace("\"major\":1", "\"major\":2")), "recording version is incompatible")
+    assert_eq(recording_test_header_error(header.replace("\"tui\"", "\"proof\"")), "recording capture mode is not tui")
+    assert_eq(recording_test_header_error(header.replace("[\"Input\",\"Output\",\"Frame\"]", "[]")), "recording roots are incompatible")
+    assert_eq(recording_test_header_error(header.replace("[\"Input\",\"Output\",\"Frame\"]", "false")), "recording roots must be an array")
+    assert_eq(recording_test_header_error(header.replace("100000", "100001")), "recording limits are incompatible")
+    assert_eq(recording_test_header_error(header.replace("false", "0")), "recording `color` must be a boolean")
+    assert_eq(recording_test_header_error(header.replace("000000000000000000000000", "ABCDEF000000000000000000")), "recording artifact_id must be 24 lowercase hexadecimal bytes")
+    assert_eq(recording_test_header_error(header.replace("000000000000000000000000", "00")), "recording artifact_id must be 24 lowercase hexadecimal bytes")
+}
+
+// Controlled native-boundary test double, not a production filesystem adapter.
+struct RecordingTestHost {
+    files: [String:[U8]]
+    calls: [String]
+    fail: String
+    impl JetCLIRecordingHost {
+        fn mkdir_all(&self, path: String) JetCLIRecordingIOError! -[FS.Write]> {
+            &self.calls.push("mkdir {path}")
+            if self.fail == "mkdir" -> return Err(JetCLIRecordingIOError{message: "mkdir failed"})
+        }
+        fn create_synced_new(&self, path: String, bytes: [U8], mode: Int) JetCLIRecordingIOError! -[FS.Write]> {
+            &self.calls.push("create {path} {mode}")
+            if self.files.has_key(path) -> return Err(JetCLIRecordingIOError{message: "already exists"})
+            self.files[path] = ~bytes
+            if self.fail == "create" -> return Err(JetCLIRecordingIOError{message: "sync failed"})
+        }
+        fn link_new(&self, source: String, destination: String) -[FS.Write]> JetCLIRecordingLinkResult JetCLIRecordingIOError! {
+            &self.calls.push("link {source} {destination}")
+            if self.fail == "link" -> return Err(JetCLIRecordingIOError{message: "link failed"})
+            if self.files.has_key(destination) -> return Ok(JetCLIRecordingLinkResult.AlreadyExists)
+            self.files[destination] = ~self.files[source]
+            Ok(JetCLIRecordingLinkResult.Published)
+        }
+        fn read(&self, path: String) -[FS.Read]> [U8] JetCLIRecordingIOError! {
+            &self.calls.push("read {path}")
+            if self.fail == "read" -> return Err(JetCLIRecordingIOError{message: "read failed"})
+            if !self.files.has_key(path) -> return Err(JetCLIRecordingIOError{message: "not found"})
+            Ok(~self.files[path])
+        }
+        fn remove(&self, path: String) JetCLIRecordingIOError! -[FS.Write]> {
+            &self.calls.push("remove {path}")
+            if self.fail == "remove" -> return Err(JetCLIRecordingIOError{message: "remove failed"})
+            &self.files.remove(path).drop("test cleanup ignores an absent temp like fs::remove_file")
+        }
+    }
+}
+fn recording_test_host() -> RecordingTestHost { RecordingTestHost{files: [String:[U8]]{}, calls: [String]{}, fail: ""} }
+#Test("recording named store closes names publishes idempotently and never replaces conflicts") {
+    store :: jet_cli_recording_store_default()
+    assert_eq(store.root, ".jet/replays")
+    invalid :: [String]{"", "../escape", "a/b", "a\\b", ".hidden", "a.b", "é", "a b", "a{RECORDING_TEST_NUL}"}
+    loop name in invalid {
+        if jet_cli_recording_store_path_for_name(store, name) == {
+            .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "recording NAME must be non-empty and contain only ASCII letters, digits, `-`, or `_`")
+            .Ok(_) -> panic("invalid name accepted")
+        }
+    }
+    assert_eq(jet_cli_recording_store_path_for_name(store, "Name_09-ok") ?? panic("path"), ".jet/replays/Name_09-ok.jetproof-replay")
+    host := recording_test_host()
+    recording :: recording_test_new()
+    path :: jet_cli_recording_store_write(store, "one", recording, 42, &host) ?? panic(jet_cli_recording_error_message(err))
+    assert_eq(path, ".jet/replays/one.jetproof-replay")
+    assert_eq(host.calls, [String]{"mkdir .jet/replays", "create .jet/replays/.one.42.tmp 384", "link .jet/replays/.one.42.tmp .jet/replays/one.jetproof-replay", "remove .jet/replays/.one.42.tmp"})
+    assert(!host.files.has_key(".jet/replays/.one.42.tmp"))
+    assert_eq(jet_cli_recording_store_write(store, "one", recording, 42, &host) ?? panic("idempotent publication"), path)
+    assert(recording == (jet_cli_recording_store_read(store, "one", &host) ?? panic("read")))
+    different := recording_test_new()
+    recording_test_push(&different, JetCLIRecordingEvent.Enter)
+    if jet_cli_recording_store_write(store, "one", different, 42, &host) == {
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "recording already exists with different content: .jet/replays/one.jetproof-replay")
+        .Ok(_) -> panic("conflicting artifact replaced")
+    }
+    assert_eq(host.files[path], recording_test_encode(recording))
+    assert(!host.files.has_key(".jet/replays/.one.42.tmp"))
+}
+#Test("recording store failures preserve Rust cleanup and failure precedence") {
+    store :: jet_cli_recording_store_new("replays")
+    recording :: recording_test_new()
+    host := recording_test_host()
+    host.fail = "create"
+    if jet_cli_recording_store_write(store, "one", recording, 7, &host) == {
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "sync failed")
+        .Ok(_) -> panic("sync failure accepted")
+    }
+    assert(host.files.has_key("replays/.one.7.tmp"))
+    assert_eq(host.calls.len(), 2)
+    host = recording_test_host()
+    host.fail = "link"
+    if jet_cli_recording_store_write(store, "one", recording, 7, &host) == {
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "link failed")
+        .Ok(_) -> panic("link failure accepted")
+    }
+    assert(!host.files.has_key("replays/.one.7.tmp"))
+    assert_eq(host.calls.len(), 4)
+    host = recording_test_host()
+    host.fail = "remove"
+    assert_eq(jet_cli_recording_store_write(store, "one", recording, 7, &host) ?? panic("cleanup failure changed publication"), "replays/one.jetproof-replay")
+    assert(host.files.has_key("replays/.one.7.tmp"))
+    host = recording_test_host()
+    host.files["replays/one.jetproof-replay"] = recording_test_encode(recording)
+    host.fail = "read"
+    if jet_cli_recording_store_write(store, "one", recording, 7, &host) == {
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "read failed")
+        .Ok(_) -> panic("existing read failure")
+    }
+    assert(!host.files.has_key("replays/.one.7.tmp"))
+}
+
+#Test("recording field readers preserve missing keys signed boundaries and header duplicate errors") {
+    empty :: CanonicalJSON.Object([CanonicalJSONField]{})
+    if jet_cli_recording_string_field(empty, "missing") == {
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "recording object is missing `missing`")
+        .Ok(_) -> panic("missing field accepted")
+    }
+    boundary :: recording_test_value("{{\"exit_code\":-2147483648,\"unsigned\":18446744073709551615}}\n")
+    assert_eq(jet_cli_recording_signed_integer_field(boundary, "exit_code") ?? panic("i32 min"), -2147483648)
+    assert_eq(jet_cli_recording_integer_field(boundary, "unsigned") ?? panic("u64 max"), U64{18446744073709551615})
+    signed :: recording_test_value("{{\"exit_code\":2147483647}}\n")
+    assert_eq(jet_cli_recording_signed_integer_field(signed, "exit_code") ?? panic("i32 max"), 2147483647)
+    bad_signed :: recording_test_value("{{\"exit_code\":-2147483649}}\n")
+    if jet_cli_recording_signed_integer_field(bad_signed, "exit_code") == {
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "recording `exit_code` is out of range")
+        .Ok(_) -> panic("outside i32")
+    }
+    header :: String.from_bytes(recording_test_header()) ?? panic("header")
+    duplicate :: header.replace("\"producer\":\"jet-cli\"", "\"producer\":\"jet-cli\",\"producer\":\"jet-cli\"")
+    assert_eq(recording_test_decode_error(recording_test_envelope(duplicate.bytes(), -1, [U8]{})), "duplicate JSON key `producer`")
+    extra :: header.replace("\"producer\":\"jet-cli\"", "\"producer\":\"jet-cli\",\"rogue\":0")
+    if jet_cli_recording_parse_header(recording_test_value(extra)) == {
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "recording object keys differ: expected {{\"artifact_id\", \"capture\", \"identity\", \"limits\", \"producer\", \"schema\", \"version\"}}, observed {{\"artifact_id\", \"capture\", \"identity\", \"limits\", \"producer\", \"rogue\", \"schema\", \"version\"}}")
+        .Ok(_) -> panic("extra header key")
+    }
+}
+#Test("recording command diagnostic count bound and storage early refusals") {
+    result := JetCLICommandResult{stdout: "", stderr: "", diagnostics: [JetCLICommandDiagnostic]{}, exit_code: 0}
+    loop _ in 0..<100001 -> &result.diagnostics.push(jet_cli_command_diagnostic_error("", "", "", ""))
+    assert_eq(recording_test_push_error(JetCLIRecordingEvent.Command(result)), "recording command diagnostic count exceeds the 100000 item limit")
+    store :: jet_cli_recording_store_new("replays")
+    host := recording_test_host()
+    if jet_cli_recording_store_write(store, "../x", recording_test_new(), 7, &host) == {
+        .Err(_) -> {}
+        .Ok(_) -> panic("unsafe publication name")
+    }
+    assert_eq(host.calls.len(), 0)
+    host.fail = "mkdir"
+    if jet_cli_recording_store_write(store, "one", recording_test_new(), 7, &host) == {
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "mkdir failed")
+        .Ok(_) -> panic("mkdir failure accepted")
+    }
+    assert_eq(host.calls, [String]{"mkdir replays"})
+}
+
+#Test("recording distinct TUI frame kinds payload bytes little endian and hashes are exact") {
+    events :: [JetCLIRecordingEvent]{JetCLIRecordingEvent.Type("é"), JetCLIRecordingEvent.Enter, JetCLIRecordingEvent.Sleep(U64{2}), JetCLIRecordingEvent.Wait("ready"), JetCLIRecordingEvent.Require("jet"), JetCLIRecordingEvent.Set{name: "A", value: "B"}, JetCLIRecordingEvent.Output("ok"), JetCLIRecordingEvent.Resize{width: 80, height: 24}, JetCLIRecordingEvent.Frame{width: 80, height: 24, text: "frame"}, JetCLIRecordingEvent.Command(recording_test_command())}
+    kinds :: [Int]{0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2101, 0x2102, 0x2201}
+    payloads :: [String]{"{{\"text\":\"é\"}}\n", "{{}}\n", "{{\"milliseconds\":2}}\n", "{{\"readiness\":\"ready\"}}\n", "{{\"program\":\"jet\"}}\n", "{{\"name\":\"A\",\"value\":\"B\"}}\n", "{{\"text\":\"ok\"}}\n", "{{\"height\":24,\"width\":80}}\n", "{{\"height\":24,\"text\":\"frame\",\"width\":80}}\n"}
+    loop index in 0..<events.len() -> assert_eq(jet_cli_recording_event_kind(events[index]), kinds[index])
+    loop index in 0..<payloads.len() -> assert_eq(jet_cli_recording_event_payload(events[index]) ?? panic("payload"), payloads[index].bytes())
+    recording := recording_test_new()
+    recording_test_push(&recording, JetCLIRecordingEvent.Type("é"))
+    bytes :: recording_test_encode(recording)
+    start :: 16 + Int.from_u64(jet_cli_recording_read_le(bytes, 12, 4))
+    assert_eq(~bytes[start..<start + 3], [U8]{U8{1}, U8{1}, U8{32}})
+    assert_eq(jet_cli_recording_read_le(bytes, start + 3, 8), U64{0})
+    assert_eq(jet_cli_recording_read_le(bytes, start + 11, 4), jet_cli_recording_u64(payloads[0].bytes().len()))
+    end :: start + 15 + payloads[0].bytes().len()
+    assert_eq(~bytes[start + 15..<end], payloads[0].bytes())
+    assert_eq(~bytes[end..<end + 32], mir_sha256_bytes(~bytes[start..<end]))
+    footer :: bytes.len() - 52
+    assert_eq(jet_cli_recording_read_le(bytes, footer + 4, 8), U64{1})
+    assert_eq(jet_cli_recording_read_le(bytes, footer + 12, 8), jet_cli_recording_u64(payloads[0].bytes().len()))
+}

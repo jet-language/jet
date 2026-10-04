@@ -1,0 +1,239 @@
+// PORT-PENDING 0868 crates-jetpack-src-jetos-entry-module-group: crates/jetpack/src/JetOS/load_validate.rs:1-235
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::entry::default_config_path;
+//RS use super::options_rendering::user_names;
+//RS use super::types::Target;
+//RS use crate::Output::Theme;
+//RS use crate::Package::PackageFacts;
+//RS use crate::Syntax;
+//RS use jet_env_model::ModuleEval::{
+//RS     self, env_plan_from_package_outputs, project_package_outputs, EnvPlan, SystemPlan,
+//RS };
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS pub(super) fn parse_target_or_report(theme: &Theme, raw: Option<&str>) -> Option<Target> {
+//RS     let raw = raw.unwrap_or("");
+//RS     if raw.trim().is_empty() {
+//RS         theme.error_coded(
+//RS             "E0979",
+//RS             "`jet os` needs a host to apply",
+//RS             "D-JPK-REF1: a bare host selects `system.<host>` in ./config.jet; `host@root` selects an exact external root.",
+//RS             "write `jet os switch laptop` or `jet os switch laptop@../machines`.",
+//RS         );
+//RS         return None;
+//RS     }
+//RS     let Some((host, root)) = raw.split_once(Syntax::OS_HOST_SELECTOR) else {
+//RS         return Some(Target {
+//RS             config: config_for_root(
+//RS                 default_config_path()
+//RS                     .parent()
+//RS                     .unwrap_or_else(|| Path::new(".")),
+//RS             ),
+//RS             host: raw.to_string(),
+//RS         });
+//RS     };
+//RS     if host.trim().is_empty() {
+//RS         theme.error_coded(
+//RS             "E0979",
+//RS             "`jet os` needs a host to apply",
+//RS             "D-JPK-REF1: `host@root` uses the text before `@` as the host name.",
+//RS             "write `jet os switch laptop` or `jet os switch laptop@../machines`.",
+//RS         );
+//RS         return None;
+//RS     }
+//RS     if root.trim().is_empty() {
+//RS         theme.error_coded(
+//RS             "E0979",
+//RS             &format!("`jet os` target `{raw}` needs a root after `@`"),
+//RS             "D-JPK-REF1: `host@root` uses the text after `@` as the external config root.",
+//RS             "write `jet os switch laptop` or `jet os switch laptop@../machines`.",
+//RS         );
+//RS         return None;
+//RS     }
+//RS     let path = PathBuf::from(root);
+//RS     let config = if path.is_dir() {
+//RS         config_for_root(&path)
+//RS     } else {
+//RS         path
+//RS     };
+//RS     Some(Target {
+//RS         config,
+//RS         host: host.to_string(),
+//RS     })
+//RS }
+//RS 
+//RS fn config_for_root(root: &Path) -> PathBuf {
+//RS     let package = root.join(Syntax::PACKAGE_FILE);
+//RS     if package.is_file() {
+//RS         package
+//RS     } else {
+//RS         root.join(Syntax::CONFIG_FILE)
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn load_target(theme: &Theme, target: &Target) -> Option<(EnvPlan, SystemPlan)> {
+//RS     let plan = load_plan(theme, target)?;
+//RS     let Some(system) = plan.systems.iter().find(|s| s.name == target.host).cloned() else {
+//RS         let mut systems: Vec<String> = plan.systems.iter().map(|s| s.name.clone()).collect();
+//RS         systems.sort();
+//RS         let known = if systems.is_empty() {
+//RS             "this config defines no systems".to_string()
+//RS         } else {
+//RS             format!("available systems: {}", systems.join(", "))
+//RS         };
+//RS         theme.error_coded(
+//RS             "E0980",
+//RS             &format!("`{}` is not a system in this config", target.host),
+//RS             &known,
+//RS             "define `system.<host>: { ... }`, or select one of the systems above.",
+//RS         );
+//RS         return None;
+//RS     };
+//RS     if !validate_system_options(theme, &system) {
+//RS         return None;
+//RS     }
+//RS     Some((plan, system))
+//RS }
+//RS 
+//RS pub(super) fn load_user_generation_target(
+//RS     theme: &Theme,
+//RS     target: &Target,
+//RS     user: &str,
+//RS ) -> Option<(EnvPlan, SystemPlan)> {
+//RS     let plan = load_plan(theme, target)?;
+//RS     let Some(system) = plan
+//RS         .systems
+//RS         .iter()
+//RS         .find(|s| user_names(s).iter().any(|name| name == user))
+//RS         .cloned()
+//RS     else {
+//RS         let mut users = plan.systems.iter().flat_map(user_names).collect::<Vec<_>>();
+//RS         users.sort();
+//RS         users.dedup();
+//RS         let known = if users.is_empty() {
+//RS             "this config defines no user generations".to_string()
+//RS         } else {
+//RS             format!("available users: {}", users.join(", "))
+//RS         };
+//RS         theme.error(
+//RS             &format!("`{user}` is not a user generation in this config"),
+//RS             &known,
+//RS             "define `user.<name>.*` or `users.<name>.*` options on a system, then rerun `jetos user plan <name>`.",
+//RS         );
+//RS         return None;
+//RS     };
+//RS     if !validate_system_options(theme, &system) {
+//RS         return None;
+//RS     }
+//RS     Some((plan, system))
+//RS }
+//RS 
+//RS pub(super) fn load_plan(theme: &Theme, target: &Target) -> Option<EnvPlan> {
+//RS     if target.config.file_name().and_then(|name| name.to_str()) == Some(Syntax::PACKAGE_FILE) {
+//RS         return load_package_plan(theme, target);
+//RS     }
+//RS     let src = match fs::read_to_string(&target.config) {
+//RS         Ok(src) => src,
+//RS         Err(_) => {
+//RS             theme.error_coded(
+//RS                 "E0981",
+//RS                 "the jetos config file does not exist",
+//RS                 &format!(
+//RS                     "`jet os` tried to load `{}` for host `{}`.",
+//RS                     target.config.display(),
+//RS                     target.host
+//RS                 ),
+//RS                 "create the config file, or pass an explicit root after the `@`.",
+//RS             );
+//RS             return None;
+//RS         }
+//RS     };
+//RS     let source_base = std::env::var_os("JETOS_STUDIO_SOURCE_BASE").map(PathBuf::from);
+//RS     let base = source_base
+//RS         .as_deref()
+//RS         .unwrap_or_else(|| target.config.parent().unwrap_or_else(|| Path::new(".")));
+//RS     let plan = match ModuleEval::evaluate_env(&src, base) {
+//RS         Ok(plan) => plan,
+//RS         Err(d) => {
+//RS             eprint!(
+//RS                 "{}",
+//RS                 crate::Diagnostics::render_all(
+//RS                     &target.config.to_string_lossy(),
+//RS                     &src,
+//RS                     std::slice::from_ref(&d)
+//RS                 )
+//RS             );
+//RS             return None;
+//RS         }
+//RS     };
+//RS     Some(plan)
+//RS }
+//RS 
+//RS fn load_package_plan(theme: &Theme, target: &Target) -> Option<EnvPlan> {
+//RS     let root = target
+//RS         .config
+//RS         .parent()
+//RS         .filter(|path| !path.as_os_str().is_empty())
+//RS         .unwrap_or_else(|| Path::new("."));
+//RS     let facts = match PackageFacts::load(root) {
+//RS         Some(Ok(facts)) => facts,
+//RS         Some(Err(error)) => {
+//RS             theme.error(
+//RS                 "the Package graph is invalid",
+//RS                 &format!(
+//RS                     "{} could not load package.jet: {error}",
+//RS                     target.config.display()
+//RS                 ),
+//RS                 "repair package.jet or its composed Config files, then run the command again.",
+//RS             );
+//RS             return None;
+//RS         }
+//RS         None => {
+//RS             theme.error_coded(
+//RS                 "E0981",
+//RS                 "the jetos package file does not exist",
+//RS                 &format!(
+//RS                     "jet os tried to load {} for host {}.",
+//RS                     target.config.display(),
+//RS                     target.host
+//RS                 ),
+//RS                 "create package.jet, or pass an explicit root after the @.",
+//RS             );
+//RS             return None;
+//RS         }
+//RS     };
+//RS     let projection = match project_package_outputs(&facts) {
+//RS         Ok(projection) => projection,
+//RS         Err(error) => {
+//RS             theme.error(
+//RS                 "the Package graph cannot project to JetOS",
+//RS                 &format!("package output projection failed: {error}"),
+//RS                 "repair the named System or Fleet output, then run the command again.",
+//RS             );
+//RS             return None;
+//RS         }
+//RS     };
+//RS     Some(env_plan_from_package_outputs(
+//RS         Syntax::PACKAGE_FILE,
+//RS         projection,
+//RS     ))
+//RS }
+//RS 
+//RS pub(super) fn validate_system_options(theme: &Theme, system: &SystemPlan) -> bool {
+//RS     if let Some(bad) = system.options.iter().find(|o| {
+//RS         let ns = o.key.split('.').next().unwrap_or("");
+//RS         !Syntax::OS_OPTION_NAMESPACES.contains(&ns)
+//RS     }) {
+//RS         theme.error_coded(
+//RS             "E1277",
+//RS             &format!("`{}` uses a retired jetos option namespace", bad.key),
+//RS             "D-JPK-OSNS1=B, D-JOS-SYSTEMTREE1=A, and Epoch 7 jetos surface decisions: jetos option keys start with full-word namespaces such as `filesystem`, `network`, `packages`, `services`, `users`, `user`, `apps`, `performance`, `storage`, `theme`, `workload`, `hardware`, `groups`, `secrets`, `boot`, `kernel`, `init`, `health`, or `deploy`.",
+//RS             "rename the option namespace, for example `net.hostName` becomes `network.hostName`.",
+//RS         );
+//RS         return false;
+//RS     }
+//RS     true
+//RS }
+// END-PORT-PENDING 0868 crates/jetpack/src/JetOS/load_validate.rs:1-235
+

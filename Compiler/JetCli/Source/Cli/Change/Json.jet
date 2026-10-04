@@ -1,0 +1,287 @@
+// Restricted JSON reader for codemod plans, logs and recovery journals
+// (Source/CmdCodemod/JSON.rs). It is not Core `json`: numbers are unsigned
+// 64-bit integers only, a repeated object field is refused, and every error
+// string is the codemod command's own.
+
+// Rust `Value`.
+pub enum JetCLICodemodJSONValue {
+    Null
+    Bool(Bool)
+    Number(U64)
+    String(String)
+    Array([JetCLICodemodJSONValue])
+    // Fields in ascending key order (Rust `BTreeMap<String, Value>`).
+    Object([JetCLICodemodJSONField])
+}
+
+// One object field (a Rust `BTreeMap` entry).
+pub struct JetCLICodemodJSONField {
+    pub key: String
+    pub value: JetCLICodemodJSONValue
+}
+
+#Error
+pub struct JetCLICodemodJSONError {
+    pub message: String
+}
+
+// Rust `Parser`: the input bytes and the read offset.
+struct JetCLICodemodJSONParser {
+    bytes: [U8]
+    at: Int
+}
+
+fn jet_cli_codemod_json_error(message: String) -> JetCLICodemodJSONError Never! {
+    JetCLICodemodJSONError{message: message}
+}
+
+// The byte at `at` as an Int, or -1 past the end (Rust `bytes.get(at)`).
+fn jet_cli_codemod_json_peek(parser: JetCLICodemodJSONParser) -> Int Never! {
+    if parser.at >= parser.bytes.len() -> return -1
+    Int.from_u8(parser.bytes[parser.at])
+}
+
+// Rust `parse`: one value, optional trailing whitespace, then the end.
+pub fn jet_cli_codemod_json_parse(input: String) -> JetCLICodemodJSONValue JetCLICodemodJSONError! {
+    parser := JetCLICodemodJSONParser{bytes: input.bytes(), at: 0}
+    value :: jet_cli_codemod_json_value(&parser)
+    jet_cli_codemod_json_ws(&parser)
+    if parser.at != parser.bytes.len() -> return Err(jet_cli_codemod_json_error("unexpected data at byte {parser.at}"))
+    Ok(value)
+}
+
+// Rust `Parser::ws`: skip ASCII whitespace (space, tab, LF, form feed, CR).
+fn jet_cli_codemod_json_ws(parser: &JetCLICodemodJSONParser) Never! {
+    loop parser.at < parser.bytes.len() {
+        byte :: Int.from_u8(parser.bytes[parser.at])
+        if byte != 32 && byte != 9 && byte != 10 && byte != 12 && byte != 13 -> return
+        parser.at += 1
+    }
+}
+
+// Rust `Parser::value`.
+fn jet_cli_codemod_json_value(parser: &JetCLICodemodJSONParser) -> JetCLICodemodJSONValue JetCLICodemodJSONError! {
+    jet_cli_codemod_json_ws(&parser)
+    byte :: jet_cli_codemod_json_peek(parser)
+    if byte == 123 -> return Ok(jet_cli_codemod_json_object(&parser))
+    if byte == 91 -> return Ok(jet_cli_codemod_json_array(&parser))
+    if byte == 34 -> return Ok(JetCLICodemodJSONValue.String(jet_cli_codemod_json_string(&parser)))
+    if byte == 116 {
+        jet_cli_codemod_json_word(&parser, "true")
+        return Ok(JetCLICodemodJSONValue.Bool(true))
+    }
+    if byte == 102 {
+        jet_cli_codemod_json_word(&parser, "false")
+        return Ok(JetCLICodemodJSONValue.Bool(false))
+    }
+    if byte == 110 {
+        jet_cli_codemod_json_word(&parser, "null")
+        return Ok(JetCLICodemodJSONValue.Null)
+    }
+    if byte >= 48 && byte <= 57 -> return Ok(JetCLICodemodJSONValue.Number(jet_cli_codemod_json_number(&parser)))
+    Err(jet_cli_codemod_json_error("expected JSON value at byte {parser.at}"))
+}
+
+// Rust `Parser::word`: the exact literal bytes at `at`.
+fn jet_cli_codemod_json_word(parser: &JetCLICodemodJSONParser, word: String) JetCLICodemodJSONError! {
+    expected :: word.bytes()
+    if parser.at + expected.len() > parser.bytes.len() -> return Err(jet_cli_codemod_json_error("expected JSON value at byte {parser.at}"))
+    loop index in 0..<expected.len() {
+        if parser.bytes[parser.at + index] != expected[index] -> return Err(jet_cli_codemod_json_error("expected JSON value at byte {parser.at}"))
+    }
+    parser.at += expected.len()
+}
+
+// Rust `Parser::number`: ASCII digits parsed as `u64`; an overflow is an
+// invalid integer at the first digit.
+fn jet_cli_codemod_json_number(parser: &JetCLICodemodJSONParser) -> U64 JetCLICodemodJSONError! {
+    start :: parser.at
+    value := U64{0}
+    overflow := false
+    loop parser.at < parser.bytes.len() {
+        digit :: Int.from_u8(parser.bytes[parser.at]) - 48
+        if digit < 0 || digit > 9 -> break
+        if !overflow {
+            if value.checked_mul(U64{10}) == {
+                .Val(scaled) -> {
+                    if scaled.checked_add(U64.from_u8(U8{digit})) == {
+                        .Val(next) -> value = next
+                        None -> overflow = true
+                    }
+                }
+                None -> overflow = true
+            }
+        }
+        parser.at += 1
+    }
+    if overflow -> return Err(jet_cli_codemod_json_error("invalid integer at byte {start}"))
+    Ok(value)
+}
+
+// The value of one hex digit, or -1.
+fn jet_cli_codemod_json_hex_digit(byte: Int) -> Int Never! {
+    if {
+        byte >= 48 && byte <= 57 -> byte - 48
+        byte >= 97 && byte <= 102 -> byte - 87
+        byte >= 65 && byte <= 70 -> byte - 55
+        else -> -1
+    }
+}
+
+// Rust `u16::from_str_radix(hex, 16)` over the four escape bytes: an optional
+// leading `+`, then hex digits only.
+fn jet_cli_codemod_json_hex4(bytes: [U8], start: Int) -> Int? Never! {
+    index := start
+    if Int.from_u8(bytes[index]) == 43 -> index += 1
+    value := 0
+    loop index < start + 4 {
+        digit :: jet_cli_codemod_json_hex_digit(Int.from_u8(bytes[index]))
+        if digit < 0 -> return None
+        value = value * 16 + digit
+        index += 1
+    }
+    Val(value)
+}
+
+// Append the UTF-8 encoding of one Unicode scalar below U+10000.
+fn jet_cli_codemod_json_push_scalar(out: &[U8], scalar: Int) Never! {
+    if scalar < 128 {
+        &out.push(U8{scalar})
+        return
+    }
+    if scalar < 2048 {
+        &out.push(U8{192 + scalar /% 64})
+        &out.push(U8{128 + scalar % 64})
+        return
+    }
+    &out.push(U8{224 + scalar /% 4096})
+    &out.push(U8{128 + (scalar /% 64) % 64})
+    &out.push(U8{128 + scalar % 64})
+}
+
+// Rust `Parser::string`: the opening quote is at `at`.
+fn jet_cli_codemod_json_string(parser: &JetCLICodemodJSONParser) -> String JetCLICodemodJSONError! {
+    parser.at += 1
+    out := [U8]{}
+    loop parser.at < parser.bytes.len() {
+        byte :: Int.from_u8(parser.bytes[parser.at])
+        parser.at += 1
+        if byte == 34 -> return Ok(String.from_bytes(out) ?? "")
+        if byte == 92 {
+            if parser.at >= parser.bytes.len() -> return Err(jet_cli_codemod_json_error("unfinished JSON escape"))
+            escape :: Int.from_u8(parser.bytes[parser.at])
+            parser.at += 1
+            if {
+                escape == 34 -> &out.push(U8{34})
+                escape == 92 -> &out.push(U8{92})
+                escape == 47 -> &out.push(U8{47})
+                escape == 98 -> &out.push(U8{8})
+                escape == 102 -> &out.push(U8{12})
+                escape == 110 -> &out.push(U8{10})
+                escape == 114 -> &out.push(U8{13})
+                escape == 116 -> &out.push(U8{9})
+                escape == 117 -> {
+                    if parser.at + 4 > parser.bytes.len() -> return Err(jet_cli_codemod_json_error("unfinished unicode escape"))
+                    scalar :: jet_cli_codemod_json_hex4(parser.bytes, parser.at) ?? return Err(jet_cli_codemod_json_error("bad unicode escape"))
+                    parser.at += 4
+                    if scalar >= 55296 && scalar <= 57343 -> return Err(jet_cli_codemod_json_error("bad unicode scalar"))
+                    jet_cli_codemod_json_push_scalar(&out, scalar)
+                }
+                else -> return Err(jet_cli_codemod_json_error("unknown JSON escape at byte {parser.at - 1}"))
+            }
+            next
+        }
+        if byte < 32 -> return Err(jet_cli_codemod_json_error("control byte in JSON string"))
+        // The input is a String, so non-ASCII bytes are already valid UTF-8.
+        &out.push(U8{byte})
+    }
+    Err(jet_cli_codemod_json_error("unterminated JSON string"))
+}
+
+// Rust `Parser::array`: the opening bracket is at `at`.
+fn jet_cli_codemod_json_array(parser: &JetCLICodemodJSONParser) -> JetCLICodemodJSONValue JetCLICodemodJSONError! {
+    parser.at += 1
+    items := [JetCLICodemodJSONValue]{}
+    jet_cli_codemod_json_ws(&parser)
+    if jet_cli_codemod_json_peek(parser) == 93 {
+        parser.at += 1
+        return Ok(JetCLICodemodJSONValue.Array(items))
+    }
+    loop {
+        &items.push(jet_cli_codemod_json_value(&parser))
+        jet_cli_codemod_json_ws(&parser)
+        byte :: jet_cli_codemod_json_peek(parser)
+        if byte == 44 {
+            parser.at += 1
+            next
+        }
+        if byte == 93 {
+            parser.at += 1
+            break
+        }
+        return Err(jet_cli_codemod_json_error("expected `,` or `]` at byte {parser.at}"))
+    }
+    Ok(JetCLICodemodJSONValue.Array(items))
+}
+
+// Rust `Parser::object`: the opening brace is at `at`. Fields come back in
+// ascending key order; a repeated key is refused once its value has parsed.
+fn jet_cli_codemod_json_object(parser: &JetCLICodemodJSONParser) -> JetCLICodemodJSONValue JetCLICodemodJSONError! {
+    parser.at += 1
+    values := [String: JetCLICodemodJSONValue]{}
+    jet_cli_codemod_json_ws(&parser)
+    if jet_cli_codemod_json_peek(parser) == 125 {
+        parser.at += 1
+        return Ok(JetCLICodemodJSONValue.Object([JetCLICodemodJSONField]{}))
+    }
+    loop {
+        jet_cli_codemod_json_ws(&parser)
+        if jet_cli_codemod_json_peek(parser) != 34 -> return Err(jet_cli_codemod_json_error("expected object key at byte {parser.at}"))
+        key :: jet_cli_codemod_json_string(&parser)
+        jet_cli_codemod_json_ws(&parser)
+        if jet_cli_codemod_json_peek(parser) != 58 -> return Err(jet_cli_codemod_json_error("expected `:` at byte {parser.at}"))
+        parser.at += 1
+        value :: jet_cli_codemod_json_value(&parser)
+        if values.get(key) != None -> return Err(jet_cli_codemod_json_error("duplicate field `{key}`"))
+        values[key] = value
+        jet_cli_codemod_json_ws(&parser)
+        byte :: jet_cli_codemod_json_peek(parser)
+        if byte == 44 {
+            parser.at += 1
+            next
+        }
+        if byte == 125 {
+            parser.at += 1
+            break
+        }
+        return Err(jet_cli_codemod_json_error("expected `,` or `}}` at byte {parser.at}"))
+    }
+    keys := values.keys().to_list()
+    &keys.sort()
+    fields :: loop key in keys -> JetCLICodemodJSONField{key: key, value: values[key]}
+    Ok(JetCLICodemodJSONValue.Object(fields))
+}
+
+// Rust `Value::object`: the fields of an object value.
+pub fn jet_cli_codemod_json_object_fields(value: JetCLICodemodJSONValue) -> [JetCLICodemodJSONField] JetCLICodemodJSONError! {
+    if value == {
+        .Object(fields) -> Ok(fields)
+        else -> Err(jet_cli_codemod_json_error("expected JSON object"))
+    }
+}
+
+// Rust `BTreeMap::get` over sorted object fields (binary search).
+pub fn jet_cli_codemod_json_field(fields: [JetCLICodemodJSONField], key: String) -> JetCLICodemodJSONValue? Never! {
+    low := 0
+    high := fields.len()
+    loop low < high {
+        middle :: (low + high) /% 2
+        candidate :: fields[middle].key
+        if candidate == key -> return Val(fields[middle].value)
+        if {
+            candidate < key -> low = middle + 1
+            else -> high = middle
+        }
+    }
+    None
+}

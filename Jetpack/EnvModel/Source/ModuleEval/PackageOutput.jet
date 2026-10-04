@@ -1,0 +1,297 @@
+// Checked Package output facts are the only authority for this projection.
+// No source evaluation, resolution, store access, or rollout occurs here.
+#Error
+pub struct PackageOutputError {
+    pub path: String
+    pub message: String
+
+    fn message(self) -> String Never! { "{self.path}: {self.message}" }
+}
+
+pub struct PackageOutputPlan {
+    pub package_name: String
+    pub graph_identity: String
+    pub systems: [SystemPlan]
+    pub fleets: [FleetPlan]
+}
+
+pub fn envmodel_project_package_outputs(facts: PackageFacts) -> PackageOutputPlan PackageOutputError! {
+    systems := [SystemPlan]{}
+    system_names := [String: String]{}
+    keys := facts.outputs.keys().to_list()
+    &keys.sort()
+    loop key in keys {
+        output :: facts.outputs[key]
+        if output.kind != PackageOutputKind.System -> next
+        path :: "outputs.{key}"
+        system :: envmodel_project_system(path, output)
+        if system_names.has_key(system.name) -> return Err(PackageOutputError{path: path, message: "system {system.name} is declared more than once"})
+        system_names[system.name] = key
+        &systems.push(system)
+    }
+    fleets := [FleetPlan]{}
+    fleet_names := [String: String]{}
+    host_paths := [String: String]{}
+    loop key in keys {
+        output :: facts.outputs[key]
+        if output.kind != PackageOutputKind.Fleet -> next
+        path :: "outputs.{key}"
+        fleet :: envmodel_project_fleet(path, output, system_names)
+        if fleet_names.has_key(fleet.name) -> return Err(PackageOutputError{path: path, message: "fleet {fleet.name} is declared more than once"})
+        fleet_names[fleet.name] = key
+        loop host in fleet.hosts {
+            host_path :: "{path}.hosts.{host.name}"
+            if host_paths.get(host.name) == {
+                .Val(previous) -> { return Err(PackageOutputError{path: host_path, message: "host `{host.name}` for system `{host.system}` collides with Fleet host at {previous}"}) }
+                .None -> {}
+            }
+            host_paths[host.name] = host_path
+        }
+        &fleets.push(fleet)
+    }
+    Ok(PackageOutputPlan{package_name: facts.name, graph_identity: facts.semantic_digest(), systems: systems, fleets: fleets})
+}
+
+pub fn envmodel_env_plan_from_package_outputs(source_file: String, projection: PackageOutputPlan) -> EnvPlan Never! {
+    EnvPlan{
+        table: SourceTable.empty(), source_files: [String]{source_file}, graph_identity: Val(projection.graph_identity),
+        environment_reads: [EnvironmentRead]{}, package_refs: [String]{}, adapters: [AdapterPlan]{},
+        prompt: None, prompt_path: PromptPathMode.Short, prompt_strip: PromptStripMode.Off,
+        systems: projection.systems, images: [ImagePlan]{}, fleets: projection.fleets,
+        dev_services: [DevServicePlan]{}, secrets: [SecretSpec]{}, lifecycle: EnvironmentLifecycle{},
+        presets: [PresetSpec]{}, languages: [LanguageSpec]{}, selected_preset: None,
+        language_expansion: LanguageExpansion{}, language_packs: [LanguagePack]{}, language_projections: [LanguageProjection]{},
+        files: [ManagedFile]{}, integrations: [EnvironmentIntegration]{}, integration_facts: IntegrationFactProjection{},
+        package_profiles: [PackageProfileSpec]{}, environment_names: [String]{}, active_environment: None,
+        active_environment_provenance: [String]{},
+    }
+}
+
+fn envmodel_project_system(path: String, output: OutputFact) -> SystemPlan PackageOutputError! {
+    fields :: envmodel_output_object(path, output)
+    name :: if fields.has_key("name") -> envmodel_output_text_field(fields.get("name"), "{path}.name") else -> output.name
+    if name.trim().is_empty() -> return Err(PackageOutputError{path: "{path}.name", message: "must not be empty"})
+    envmodel_validate_projection_name("{path}.name", name, "system")
+    target_path :: "{path}.target"
+    target :: envmodel_output_text_field(fields.get("target"), target_path)
+    if target != "linux.x64" && target != "linux.arm64" -> return Err(PackageOutputError{path: target_path, message: "unknown target {target}; use linux.x64 or linux.arm64"})
+    Ok(SystemPlan{name: name, target: target,
+        packages: envmodel_project_packages(fields.get("packages"), "{path}.packages"),
+        services: envmodel_project_services(fields.get("services"), "{path}.services"),
+        options: envmodel_project_options(fields.get("options"), "{path}.options")})
+}
+
+fn envmodel_project_fleet(path: String, output: OutputFact, systems: [String: String]) -> FleetPlan PackageOutputError! {
+    fields :: envmodel_output_object(path, output)
+    name :: if fields.has_key("name") -> envmodel_output_text_field(fields.get("name"), "{path}.name") else -> output.name
+    if name.trim().is_empty() -> return Err(PackageOutputError{path: "{path}.name", message: "must not be empty"})
+    envmodel_validate_projection_name("{path}.name", name, "fleet")
+    hosts_path :: "{path}.hosts"
+    value :: fields.get("hosts") ?? return Err(PackageOutputError{path: hosts_path, message: "is required"})
+    hosts :: if value == {
+        .Object(hosts) -> hosts
+        else -> { return Err(PackageOutputError{path: hosts_path, message: "must be an object of host names to systems"}) }
+    }
+    projected := [HostPlan]{}
+    loop host_name in envmodel_sorted_payload_keys(hosts) {
+        host_path :: "{path}.hosts.{host_name}"
+        envmodel_validate_projection_name(host_path, host_name, "host")
+        host :: envmodel_project_host(host_path, hosts[host_name])
+        if !systems.has_key(host.system) -> return Err(PackageOutputError{path: host_path, message: "unknown system {host.system}"})
+        &projected.push(HostPlan{name: host_name, system: host.system, overrides: host.overrides, override_source: host.override_source})
+    }
+    Ok(FleetPlan{name: name, hosts: projected})
+}
+
+fn envmodel_project_host(path: String, value: OutputPayload) -> (system: String, overrides: HostOverride?, override_source: String?) PackageOutputError! {
+    fields :: if value == {
+        .Object(fields) -> fields
+        else -> {
+            system :: envmodel_normalize_system_name(envmodel_output_text_field(Val(value), path))
+            return Ok((system: system, overrides: None, override_source: None))
+        }
+    }
+    reference :: if fields.has_key("system") -> fields.get("system") else -> fields.get("name")
+    system :: envmodel_normalize_system_name(envmodel_output_text_field(reference, "{path}.system"))
+    fields_out := [HostOverrideField]{}
+    provenance := [HostOverrideProvenance]{}
+    loop field in envmodel_sorted_payload_keys(fields) {
+        if field == "system" || field == "name" -> next
+        payload :: fields[field]
+        field_path :: "{path}.{field}"
+        projected :: if field == {
+            "target" -> {
+                target :: envmodel_output_text_field(Val(payload), field_path)
+                if target != "linux.x64" && target != "linux.arm64" -> return Err(PackageOutputError{path: field_path, message: "unknown target {target}; use linux.x64 or linux.arm64"})
+                HostOverrideValue.Platform{value: target}
+            }
+            "packages" -> HostOverrideValue.Packages{values: envmodel_project_packages(Val(payload), field_path)}
+            "services" -> HostOverrideValue.Services{values: envmodel_project_services(Val(payload), field_path)}
+            "options" -> HostOverrideValue.Options{values: envmodel_project_options(Val(payload), field_path)}
+            else -> HostOverrideValue.Value{value: envmodel_payload_to_ct_value(payload)}
+        }
+        &fields_out.push(HostOverrideField{name: field, value: projected})
+        &provenance.push(HostOverrideProvenance{field: field, dependencies: [String]{}, pure: true, source: envmodel_payload_display(payload)})
+    }
+    if fields_out.len() == 0 -> return Ok((system: system, overrides: None, override_source: None))
+    source :: envmodel_payload_display(value)
+    Ok((system: system, overrides: Val(HostOverride{fields: fields_out, source: source, provenance: provenance}), override_source: Val(source)))
+}
+
+fn envmodel_project_packages(value: OutputPayload?, path: String) -> [Pkg] PackageOutputError! {
+    payload :: value ?? return Ok([Pkg]{})
+    values :: if payload == {
+        .Array(values) -> values
+        else -> { return Err(PackageOutputError{path: path, message: "must be an array of package refs"}) }
+    }
+    packages := [Pkg]{}
+    loop index in 0..<values.len() {
+        item_path :: "{path}[{index}]"
+        raw :: envmodel_output_text_field(Val(values[index]), item_path)
+        package :: if raw.cut_last("@") == {
+            .Val(parts) -> {
+                name := parts.before.trim() // #4303
+                source := parts.after.trim() // #4303
+                if name.is_empty() || source.is_empty() -> return Err(PackageOutputError{path: item_path, message: "package refs need both a name and a source"})
+                Pkg.new(source, name)
+            }
+            .None -> {
+                if raw.starts_with("./") || raw.starts_with("../") || raw.starts_with("/") -> Pkg.new("", raw) else -> Pkg.new("jetpack", raw)
+            }
+        }
+        if !packages.contains(package) { &packages.push(package) }
+    }
+    Ok(packages)
+}
+
+fn envmodel_project_services(value: OutputPayload?, path: String) -> [ServicePlan] PackageOutputError! {
+    payload :: value ?? return Ok([ServicePlan]{})
+    services :: if payload == {
+        .Object(services) -> services
+        else -> { return Err(PackageOutputError{path: path, message: "must be an object of services"}) }
+    }
+    projected := [ServicePlan]{}
+    loop name in envmodel_sorted_payload_keys(services) {
+        service_path :: "{path}.{name}"
+        fields :: if services[name] == {
+            .Object(fields) -> fields
+            else -> { return Err(PackageOutputError{path: service_path, message: "must be an object with enable: true|false"}) }
+        }
+        flag :: fields.get("enable") ?? return Err(PackageOutputError{path: "{service_path}.enable", message: "is required"})
+        enable :: if flag == {
+            .Bool(enable) -> enable
+            else -> { return Err(PackageOutputError{path: "{service_path}.enable", message: "must be a boolean"}) }
+        }
+        extra := [ServicePlanExtra]{}
+        loop field in envmodel_sorted_payload_keys(fields) {
+            if field != "enable" { &extra.push(ServicePlanExtra{key: field, value: envmodel_payload_display(fields[field])}) }
+        }
+        &projected.push(ServicePlan{name: name, enable: enable, extra: extra})
+    }
+    Ok(projected)
+}
+
+fn envmodel_project_options(value: OutputPayload?, path: String) -> [OptionPlan] PackageOutputError! {
+    payload :: value ?? return Ok([OptionPlan]{})
+    fields :: if payload == {
+        .Object(fields) -> fields
+        else -> { return Err(PackageOutputError{path: path, message: "must be an object of option values"}) }
+    }
+    options := [OptionPlan]{}
+    loop field in envmodel_sorted_payload_keys(fields) -> envmodel_flatten_option(field, fields[field], path, &options)
+    Ok(options)
+}
+
+fn envmodel_flatten_option(field: String, value: OutputPayload, path: String, options: &[OptionPlan]) PackageOutputError! {
+    if value == {
+        .Object(fields) -> {
+            loop nested in envmodel_sorted_payload_keys(fields) -> envmodel_flatten_option("{field}.{nested}", fields[nested], "{path}.{field}", &options)
+        }
+        .Array(_) -> { return Err(PackageOutputError{path: "{path}.{field}", message: "must be a scalar or nested object"}) }
+        else -> { &options.push(OptionPlan{key: field, value: envmodel_payload_display(value)}) }
+    }
+}
+
+fn envmodel_output_object(path: String, output: OutputFact) -> [String: OutputPayload] PackageOutputError! {
+    if output.payload == {
+        .Object(fields) -> Ok(fields)
+        else -> Err(PackageOutputError{path: path, message: "must be an output object"})
+    }
+}
+
+fn envmodel_output_text_field(value: OutputPayload?, path: String) -> String PackageOutputError! {
+    payload :: value ?? return Err(PackageOutputError{path: path, message: "is required"})
+    if payload == {
+        .String(value) -> Ok(value)
+        else -> Err(PackageOutputError{path: path, message: "must be a string or dotted name"})
+    }
+}
+
+fn envmodel_normalize_system_name(value: String) -> String Never! {
+    if value.starts_with("system.") -> return value.removeprefix("system.")
+    if value.starts_with("systems.") -> return value.removeprefix("systems.")
+    value
+}
+
+fn envmodel_validate_projection_name(path: String, value: String, kind: String) PackageOutputError! {
+    valid := !value.is_empty() && value != "." && value != ".."
+    loop byte in value.bytes() {
+        if !(byte >= (U8{65}) && byte <= (U8{90})) && !(byte >= (U8{97}) && byte <= (U8{122})) && !(byte >= (U8{48}) && byte <= (U8{57})) && byte != (U8{95}) && byte != (U8{45}) && byte != (U8{46}) -> valid = false
+    }
+    if !valid -> return Err(PackageOutputError{path: path, message: "{kind} name `{value}` is not a safe path component"})
+}
+
+fn envmodel_payload_to_ct_value(value: OutputPayload) -> CtValue Never! {
+    if value == {
+        .Null -> CtValue.Unit
+        .Bool(flag) -> CtValue.Bool{value: flag}
+        .Number(text) -> {
+            if Int.parse(text) == {
+                .Ok(number) -> {
+                    if number >= -9223372036854775808 && number <= 9223372036854775807 -> return CtValue.Int{value: number}
+                }
+                .Err(_) -> {}
+            }
+            if Float.parse(text) == {
+                .Ok(number) -> { return CtValue.Float{value: CtFloat.F64{value: number}} }
+                .Err(_) -> {}
+            }
+            CtValue.Str{value: text}
+        }
+        .String(text) -> CtValue.Str{value: text}
+        .Array(values) -> {
+            items := [CtValue]{}
+            loop item in values -> { &items.push(envmodel_payload_to_ct_value(item)) }
+            CtValue.List{values: items}
+        }
+        .Object(fields) -> {
+            entries := [CtMapEntry]{}
+            loop key in envmodel_sorted_payload_keys(fields) -> { &entries.push(CtMapEntry{key: CtKey.Str{value: key}, value: envmodel_payload_to_ct_value(fields[key])}) }
+            CtValue.Map{entries: entries}
+        }
+    }
+}
+
+fn envmodel_payload_display(value: OutputPayload) -> String Never! {
+    if value == {
+        .Null -> "null"
+        .Bool(flag) -> "{flag}"
+        .Number(text) | .String(text) -> text
+        .Array(values) -> {
+            parts := [String]{}
+            loop item in values -> { &parts.push(envmodel_payload_display(item)) }
+            "[{parts.join(", ")}]"
+        }
+        .Object(fields) -> {
+            parts := [String]{}
+            loop key in envmodel_sorted_payload_keys(fields) -> { &parts.push("{key}: {envmodel_payload_display(fields[key])}") }
+            "{{{parts.join(", ")}}}"
+        }
+    }
+}
+
+fn envmodel_sorted_payload_keys(fields: [String: OutputPayload]) -> [String] Never! {
+    keys := fields.keys().to_list()
+    &keys.sort()
+    keys
+}

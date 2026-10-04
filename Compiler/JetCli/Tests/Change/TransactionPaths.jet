@@ -1,0 +1,377 @@
+// CT01 permanent policy regressions. Native tests below use the SAME real
+// retained Core provider as production; pure path tests do not prove IO authority.
+use core.files as transaction_fixture_files
+use jet_foundation.[TEXT_NUL]
+
+fn transaction_test_unix(value: String) -> transaction_paths.OsPath Never! {
+    transaction_paths.from_text(value, transaction_paths.PathPlatform.Unix)
+}
+
+fn transaction_test_relative(project: String, path: String, fix: Bool) -> transaction_paths.PathSpan Never! {
+    jet_cli_transaction_destination_relative(transaction_test_unix(project), transaction_test_unix(path), fix) ?? panic("destination rejected: {err}")
+}
+
+fn transaction_test_refused(project: String, path: String, fix: Bool, invalid: Bool, message: String) Never! {
+    if jet_cli_transaction_destination_relative(transaction_test_unix(project), transaction_test_unix(path), fix) == {
+        .Ok(_) -> panic("unsafe destination accepted")
+        .Err(error) -> {
+            if invalid {
+                assert(error == IOError.InvalidInput(IOContext{operation: .Read, resource: None, os_code: None, cause: Val(message)}))
+            } else {
+                assert(error == IOError.PermissionDenied(IOContext{operation: .Read, resource: None, os_code: None, cause: Val(message)}))
+            }
+        }
+    }
+}
+
+#Test("transaction allowed Examples and tests/ui destination policy") {
+    examples :: transaction_test_relative("/p", "/p/Examples/a.jet", false)
+    assert_eq(examples.start, 3)
+    assert_eq(examples.end, 17)
+    _ :: transaction_test_relative("/p", "/p/Examples/deep/a.jet", false)
+    _ :: transaction_test_relative("/p", "/p/tests/ui/a.jet", false)
+    _ :: transaction_test_relative("/p", "/p/tests/ui/a.stderr", false)
+    transaction_test_refused("/p", "/p/tests/ui.jet", false, false, "destination must be beneath Examples/ or tests/ui/")
+}
+
+#Test("transaction component-aware project and allowed roots do not accept sibling prefixes") {
+    transaction_test_refused("/p", "/prefix/Examples/a.jet", false, false, "destination escapes project")
+    transaction_test_refused("/p", "/p-other/Examples/a.jet", true, false, "destination escapes project")
+    transaction_test_refused("/p", "Examples/a.jet", false, false, "destination escapes project")
+    transaction_test_refused("/p", "/p/ExamplesElse/a.jet", false, false, "destination must be beneath Examples/ or tests/ui/")
+    transaction_test_refused("/p", "/p/tests/uiElse/a.jet", false, false, "destination must be beneath Examples/ or tests/ui/")
+    transaction_test_refused("/p", "/p/Examples", false, false, "destination must be beneath Examples/ or tests/ui/")
+    transaction_test_refused("/p", "/p/tests/ui", false, false, "destination must be a .jet source or paired tests/ui .stderr snapshot")
+    transaction_test_refused("/p", "/p", false, false, "destination must be beneath Examples/ or tests/ui/")
+}
+
+#Test("transaction nonnormal components precede root and extension refusals") {
+    // Original batch_rejects_symlink_and_parent_escape_roots, second root.
+    transaction_test_refused("/p", "/p/Examples/../tests/ui/x.jet", false, true, "non-normal destination path")
+    transaction_test_refused("/p", "/p/outside/../a.txt", false, true, "non-normal destination path")
+    transaction_test_refused("/p", "/p/../outside.jet", true, true, "non-normal destination path")
+    transaction_test_refused("/p", "/p", true, true, "non-normal destination path")
+    // Rust Path.components ignores repeated separators/interior CurDir.
+    _ :: transaction_test_relative("/p", "/p/Examples//./a.jet", false)
+}
+
+#Test("transaction fix selection has no ordinary allowlist or extension restriction") {
+    _ :: transaction_test_relative("/p", "/p/src/a.rs", true)
+    _ :: transaction_test_relative("/p", "/p/package.jet", true)
+    _ :: transaction_test_relative("/p", "/p/.hidden", true)
+    transaction_test_refused("/p", "/p/src/a.jet", false, false, "destination must be beneath Examples/ or tests/ui/")
+    transaction_test_refused("/p", "/p/Examples/a.stderr", false, false, "destination must be a .jet source or paired tests/ui .stderr snapshot")
+}
+
+#Test("transaction allowed extensions match Rust dotfile trailing-dot and case laws") {
+    transaction_test_refused("/p", "/p/Examples/.jet", false, false, "destination must be a .jet source or paired tests/ui .stderr snapshot")
+    transaction_test_refused("/p", "/p/Examples/a.jet.", false, false, "destination must be a .jet source or paired tests/ui .stderr snapshot")
+    transaction_test_refused("/p", "/p/Examples/a.JET", false, false, "destination must be a .jet source or paired tests/ui .stderr snapshot")
+    transaction_test_refused("/p", "/p/tests/ui/.stderr", false, false, "destination must be a .jet source or paired tests/ui .stderr snapshot")
+    _ :: transaction_test_relative("/p", "/p/Examples/.hidden.jet", false)
+    _ :: transaction_test_relative("/p", "/p/tests/ui/a.jet.stderr", false)
+    _ :: transaction_test_relative("/p", "/p/Examples/a..jet", false)
+}
+
+#Test("transaction lexical policy preserves nonUTF8 Unix destination bytes") {
+    project :: transaction_test_unix("/p")
+    bytes := "/p/Examples/".bytes()
+    &bytes.push(U8{255})
+    loop byte in ".jet".bytes() -> &bytes.push(byte)
+    path :: transaction_paths.from_encoded(^bytes, transaction_paths.PathPlatform.Unix)
+    span :: jet_cli_transaction_destination_relative(project, path, false) ?? panic("raw destination rejected")
+    assert_eq(path.encoded[span.start + 9], U8{255})
+    assert(jet_cli_transaction_source_suffix(path, false))
+}
+
+#Test("transaction Windows policy uses canonical prefix and component owner") {
+    project :: transaction_paths.from_text("C:\\p", transaction_paths.PathPlatform.Windows)
+    path :: transaction_paths.from_text("c:/p/Examples/a.jet", transaction_paths.PathPlatform.Windows)
+    _ :: jet_cli_transaction_destination_relative(project, path, false) ?? panic("Windows destination rejected")
+    hostile :: transaction_paths.from_text("C:\\prefix\\Examples\\a.jet", transaction_paths.PathPlatform.Windows)
+    if jet_cli_transaction_destination_relative(project, hostile, false) == {
+        .Ok(_) -> panic("Windows sibling prefix accepted")
+        .Err(_) -> {}
+    }
+}
+
+#Test("transaction Windows opened final-path containment exact textual law") {
+    assert(jet_cli_transaction_windows_contains("\\\\?\\c:\\p", "\\\\?\\c:\\p\\a.jet"))
+    assert(jet_cli_transaction_windows_contains("c:\\p\\/\\", "c:\\p\\a.jet"))
+    assert(jet_cli_transaction_windows_contains("\\\\?\\\\\\?\\c:\\p", "\\\\?\\\\\\?\\c:\\p\\a.jet"))
+    assert(!jet_cli_transaction_windows_contains("c:\\p", "c:\\prefix\\a.jet"))
+    assert(!jet_cli_transaction_windows_contains("c:\\p", "c:\\p"))
+    assert(!jet_cli_transaction_windows_contains("c:\\p", "c:\\p/a.jet"))
+    assert(!jet_cli_transaction_windows_contains("c:\\p", "d:\\p\\a.jet"))
+    assert(jet_cli_transaction_windows_contains("\\\\?\\unc\\server\\share\\", "\\\\?\\unc\\server\\share\\a.jet"))
+}
+
+// Authored UTF8 fixture paths may use text for setup. All production metadata,
+// identity and reads below use the retained canonical OsPath provider.
+fn transaction_test_root() -[FS]> TempDir {
+    transaction_fixture_files.temp_dir("jet-transaction-ct01") ?? panic("transaction fixture: {err}")
+}
+
+fn transaction_test_io_cause(error: IOError, wanted: String) Never! {
+    assert_eq(jet_cli_transaction_io_message(error), wanted)
+}
+
+#Test("transaction real allowed destination and raw empty pinned reads") {
+    directory :: transaction_test_root()
+    root :: jet_cli_transaction_canonical_project_io(transaction_test_unix(directory.path)) ?? panic("canonical project")
+    transaction_fixture_files.create_dir_all("{directory.path}/Examples") ?? panic("Examples")
+    transaction_fixture_files.write_bytes("{directory.path}/Examples/a.jet", [U8]{0, 255, 10}) ?? panic("write bytes")
+    path := ~root
+    transaction_paths.push(&path, transaction_test_unix("Examples/a.jet"))
+    _ :: jet_cli_transaction_validate_destination(root, path, true) ?? panic("validate regular source")
+    assert_eq(jet_cli_transaction_read_beneath_unix(root, transaction_test_unix("Examples/a.jet")) ?? panic("pinned bytes"), [U8]{0, 255, 10})
+    transaction_fixture_files.write_bytes("{directory.path}/Examples/a.jet", [U8]{}) ?? panic("empty")
+    assert_eq(jet_cli_transaction_read_beneath_unix(root, transaction_test_unix("Examples/a.jet")) ?? panic("pinned empty"), [U8]{})
+}
+
+#Test("transaction symlink final and parent escape original root controls") {
+    directory :: transaction_test_root()
+    outside :: transaction_test_root()
+    transaction_fixture_files.create_dir_all("{directory.path}/Examples") ?? panic("Examples")
+    transaction_fixture_files.write("{outside.path}/a.jet", "outside\n") ?? panic("outside")
+    transaction_fixture_files.symlink("{outside.path}/a.jet", "{directory.path}/Examples/link.jet") ?? panic("symlink")
+    root :: jet_cli_transaction_canonical_project_io(transaction_test_unix(directory.path)) ?? panic("canonical project")
+    path := ~root
+    transaction_paths.push(&path, transaction_test_unix("Examples/link.jet"))
+    if jet_cli_transaction_validate_destination(root, path, true) == {
+        .Ok(_) -> panic("symlink final accepted")
+        .Err(error) -> transaction_test_io_cause(error, "destination is not a regular non-link file")
+    }
+    if jet_cli_transaction_read_beneath_unix(root, transaction_test_unix("Examples/link.jet")) == {
+        .Ok(_) -> panic("nofollow read followed final symlink")
+        .Err(_) -> {}
+    }
+    escaped := ~root
+    transaction_paths.push(&escaped, transaction_test_unix("Examples/../tests/ui/x.jet"))
+    if jet_cli_transaction_validate_destination(root, escaped, true) == {
+        .Ok(_) -> panic("original parent escape root accepted")
+        .Err(error) -> transaction_test_io_cause(error, "non-normal destination path")
+    }
+    assert_eq(transaction_fixture_files.read("{outside.path}/a.jet") ?? panic("outside control"), "outside\n")
+}
+
+#Test("transaction canonical project refuses symlink and regular-file roots") {
+    directory :: transaction_test_root()
+    transaction_fixture_files.create_dir("{directory.path}/real") ?? panic("real")
+    transaction_fixture_files.symlink("{directory.path}/real", "{directory.path}/link") ?? panic("root symlink")
+    transaction_fixture_files.write("{directory.path}/file", "not a directory") ?? panic("file root")
+    roots :: [String]{"{directory.path}/link", "{directory.path}/file"}
+    loop root in roots {
+        if jet_cli_transaction_canonical_project_io(transaction_test_unix(root)) == {
+            .Ok(_) -> panic("non-directory project accepted")
+            .Err(error) -> transaction_test_io_cause(error, "codemod project is not a real directory")
+        }
+    }
+}
+
+#Test("transaction symlink or non-directory parents reject ordinary and fix") {
+    directory :: transaction_test_root()
+    outside :: transaction_test_root()
+    transaction_fixture_files.symlink(outside.path, "{directory.path}/Examples") ?? panic("parent symlink")
+    transaction_fixture_files.write("{outside.path}/a.jet", "outside\n") ?? panic("outside")
+    transaction_fixture_files.write("{directory.path}/file", "parent") ?? panic("parent file")
+    root :: jet_cli_transaction_canonical_project_io(transaction_test_unix(directory.path)) ?? panic("canonical project")
+    paths :: [String]{"Examples/a.jet", "file/a.jet"}
+    loop relative in paths {
+        path := ~root
+        transaction_paths.push(&path, transaction_test_unix(relative))
+        if jet_cli_transaction_validate_fix_destination(root, path, true) == {
+            .Ok(_) -> panic("unsafe fix parent accepted")
+            .Err(error) -> transaction_test_io_cause(error, "destination parent contains a link or non-directory")
+        }
+    }
+    path := ~root
+    transaction_paths.push(&path, transaction_test_unix("Examples/a.jet"))
+    if jet_cli_transaction_validate_destination(root, path, true) == {
+        .Ok(_) -> panic("ordinary symlink parent accepted")
+        .Err(error) -> transaction_test_io_cause(error, "destination parent contains a link or non-directory")
+    }
+}
+
+#Test("transaction Unix real file identity rejects hardlinks but pinned reads do not") {
+    directory :: transaction_test_root()
+    transaction_fixture_files.write("{directory.path}/a.jet", "raw\n") ?? panic("file")
+    path :: transaction_test_unix("{directory.path}/a.jet")
+    before :: jet_cli_transaction_path_identity_unix(path) ?? panic("single link identity")
+    again :: jet_cli_transaction_path_identity_unix(path) ?? panic("same file identity")
+    assert_eq(before.device, again.device)
+    assert_eq(before.inode, again.inode)
+    transaction_fixture_files.hard_link("{directory.path}/a.jet", "{directory.path}/b.jet") ?? panic("hardlink")
+    if jet_cli_transaction_path_identity_unix(path) == {
+        .Ok(_) -> panic("hardlinked file identity accepted")
+        .Err(error) -> transaction_test_io_cause(error, "file is not regular or has multiple hard links")
+    }
+    // The distinct Rust read_beneath law checks regular-only.
+    assert_eq(jet_cli_transaction_read_beneath_unix(transaction_test_unix(directory.path), transaction_test_unix("a.jet")) ?? panic("read hardlinked regular"), "raw\n".bytes())
+}
+
+#Test("transaction Unix nofollow rejects parent links and nonnormal relative components") {
+    directory :: transaction_test_root()
+    outside :: transaction_test_root()
+    transaction_fixture_files.write("{outside.path}/a.jet", "outside") ?? panic("outside")
+    transaction_fixture_files.symlink(outside.path, "{directory.path}/linked") ?? panic("parent link")
+    if jet_cli_transaction_read_beneath_unix(transaction_test_unix(directory.path), transaction_test_unix("linked/a.jet")) == {
+        .Ok(_) -> panic("pinned reader followed parent link")
+        .Err(_) -> {}
+    }
+    if jet_cli_transaction_read_beneath_unix(transaction_test_unix(directory.path), transaction_test_unix("")) == {
+        .Ok(_) -> panic("empty relative read accepted")
+        .Err(error) -> transaction_test_io_cause(error, "empty relative path")
+    }
+    if jet_cli_transaction_read_beneath_unix(transaction_test_unix(directory.path), transaction_test_unix("../a.jet")) == {
+        .Ok(_) -> panic("parent relative read accepted")
+        .Err(error) -> transaction_test_io_cause(error, "non-normal relative path")
+    }
+    if jet_cli_transaction_read_beneath_unix(transaction_test_unix(directory.path), transaction_test_unix("..")) == {
+        .Ok(_) -> panic("parent final name accepted")
+        .Err(error) -> transaction_test_io_cause(error, "non-normal file name")
+    }
+    if jet_cli_transaction_read_beneath_unix(transaction_test_unix(directory.path), transaction_test_unix("a{TEXT_NUL}.jet")) == {
+        .Ok(_) -> panic("NUL relative name accepted")
+        .Err(error) -> transaction_test_io_cause(error, "NUL in codemod path")
+    }
+}
+
+#Test("transaction opened directory remains authority after pathname replacement") {
+    directory :: transaction_test_root()
+    transaction_fixture_files.create_dir("{directory.path}/root") ?? panic("root")
+    transaction_fixture_files.write("{directory.path}/root/a.jet", "original") ?? panic("original")
+    options :: transaction_io.OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false}
+    held :: transaction_io.open_directory(transaction_test_unix("{directory.path}/root"), options) ?? panic("hold root")
+    transaction_fixture_files.rename("{directory.path}/root", "{directory.path}/old") ?? panic("rename root")
+    transaction_fixture_files.create_dir("{directory.path}/root") ?? panic("replacement root")
+    transaction_fixture_files.write("{directory.path}/root/a.jet", "hostile") ?? panic("hostile")
+    relative :: transaction_test_unix("a.jet")
+    cursor := transaction_paths.components(relative)
+    name :: transaction_paths.next(relative, &cursor) ?? panic("filename")
+    file :: held.open_reader(relative, name, options) ?? panic("read held root")
+    assert_eq(file.read_to_end() ?? panic("retained read"), "original".bytes())
+    assert_eq(transaction_fixture_files.read("{directory.path}/root/a.jet") ?? panic("replacement control"), "hostile")
+}
+
+#Test("transaction opened reader retains inode and bytes after pathname replacement") {
+    directory :: transaction_test_root()
+    path :: transaction_test_unix("{directory.path}/a.jet")
+    transaction_fixture_files.write("{directory.path}/a.jet", "original") ?? panic("original")
+    file :: transaction_io.open_reader(path, transaction_io.OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false}) ?? panic("hold reader")
+    before :: file.stat() ?? panic("held stat")
+    transaction_fixture_files.rename("{directory.path}/a.jet", "{directory.path}/old.jet") ?? panic("rename file")
+    transaction_fixture_files.write("{directory.path}/a.jet", "hostile") ?? panic("replacement")
+    after :: file.stat() ?? panic("held stat after")
+    replacement :: transaction_io.metadata(path) ?? panic("replacement stat")
+    assert_eq(before.file_id.device, after.file_id.device)
+    assert_eq(before.file_id.inode, after.file_id.inode)
+    assert(before.file_id.device != replacement.file_id.device || before.file_id.inode != replacement.file_id.inode)
+    assert_eq(file.read_to_end() ?? panic("held bytes"), "original".bytes())
+    assert_eq(transaction_fixture_files.read("{directory.path}/a.jet") ?? panic("replacement control"), "hostile")
+}
+
+#Test("transaction codemods directory create false and symlink controls") {
+    directory :: transaction_test_root()
+    root :: transaction_test_unix(directory.path)
+    if jet_cli_transaction_validate_codemods_dir(root, false) == {
+        .Ok(_) -> panic("absent codemods accepted")
+        .Err(_) -> {}
+    }
+    codemods :: jet_cli_transaction_validate_codemods_dir(root, true) ?? panic("create codemods")
+    _ :: jet_cli_transaction_validate_codemods_dir(root, false) ?? panic("existing codemods")
+    transaction_fixture_files.rename("{directory.path}/.jet/codemods", "{directory.path}/saved") ?? panic("move codemods")
+    transaction_fixture_files.symlink("{directory.path}/saved", "{directory.path}/.jet/codemods") ?? panic("codemods link")
+    if jet_cli_transaction_validate_codemods_dir(root, false) == {
+        .Ok(_) -> panic("codemods symlink accepted")
+        .Err(error) -> transaction_test_io_cause(error, "codemods is not a real directory")
+    }
+    assert_eq(transaction_paths.display(codemods), "{directory.path}/.jet/codemods")
+}
+
+#Test("transaction replay direct-parent type and log-symlink original controls") {
+    directory :: transaction_test_root()
+    root :: transaction_test_unix(directory.path)
+    codemods :: jet_cli_transaction_validate_codemods_dir(root, true) ?? panic("codemods")
+    transaction_fixture_files.write("{directory.path}/.jet/codemods/Alias.log.json", "{}") ?? panic("log")
+    transaction_fixture_files.symlink("{directory.path}/.jet/codemods/Alias.log.json", "{directory.path}/.jet/codemods/AliasLink.log.json") ?? panic("log symlink")
+    good :: transaction_test_unix("{directory.path}/.jet/codemods/Alias.log.json")
+    _ :: jet_cli_transaction_replay_name(codemods, good) ?? panic("regular direct log")
+    if jet_cli_transaction_replay_name(codemods, transaction_test_unix("{directory.path}/.jet/codemods/AliasLink.log.json")) == {
+        .Ok(_) -> panic("original symlink replay log accepted")
+        .Err(error) -> transaction_test_io_cause(error, "replay log is not a regular non-link file")
+    }
+    if jet_cli_transaction_replay_name(codemods, transaction_test_unix("{directory.path}/.jet/codemods")) == {
+        .Ok(_) -> panic("replay wrong parent accepted")
+        .Err(error) -> transaction_test_io_cause(error, "replay log is not directly beneath the opened project codemod directory")
+    }
+    transaction_fixture_files.create_dir("{directory.path}/.jet/codemods/not-file") ?? panic("log directory")
+    if jet_cli_transaction_replay_name(codemods, transaction_test_unix("{directory.path}/.jet/codemods/not-file")) == {
+        .Ok(_) -> panic("directory replay log accepted")
+        .Err(error) -> transaction_test_io_cause(error, "replay log is not a regular non-link file")
+    }
+}
+
+#Test("transaction nofollow native root symlink and opened directory final controls") {
+    directory :: transaction_test_root()
+    transaction_fixture_files.create_dir("{directory.path}/real") ?? panic("real")
+    transaction_fixture_files.write("{directory.path}/real/a.jet", "safe") ?? panic("safe")
+    transaction_fixture_files.symlink("{directory.path}/real", "{directory.path}/linked") ?? panic("link root")
+    if jet_cli_transaction_read_beneath_unix(transaction_test_unix("{directory.path}/linked"), transaction_test_unix("a.jet")) == {
+        .Ok(_) -> panic("native read followed root symlink")
+        .Err(_) -> {}
+    }
+    if jet_cli_transaction_read_beneath_unix(transaction_test_unix(directory.path), transaction_test_unix("real")) == {
+        .Ok(_) -> panic("native read accepted directory final")
+        .Err(error) -> transaction_test_io_cause(error, "opened object is not a regular file")
+    }
+}
+
+#Test("transaction native missing final optional creation and real fix destination") {
+    directory :: transaction_test_root()
+    transaction_fixture_files.create_dir("{directory.path}/Examples") ?? panic("Examples")
+    transaction_fixture_files.write("{directory.path}/package.jet", "package") ?? panic("package")
+    root :: jet_cli_transaction_canonical_project_io(transaction_test_unix(directory.path)) ?? panic("canonical project")
+    path := ~root
+    transaction_paths.push(&path, transaction_test_unix("Examples/missing.jet"))
+    _ :: jet_cli_transaction_validate_destination(root, path, false) ?? panic("optional final")
+    if jet_cli_transaction_validate_destination(root, path, true) == {
+        .Ok(_) -> panic("missing required final accepted")
+        .Err(_) -> {}
+    }
+    fix := ~root
+    transaction_paths.push(&fix, transaction_test_unix("package.jet"))
+    _ :: jet_cli_transaction_validate_fix_destination(root, fix, true) ?? panic("actual fix destination")
+}
+
+// These whole native Windows tests require a Windows target/native provider;
+// they are retained, never simulated with a Linux FD or fake final path.
+#Test("transaction Windows native same-handle identity raw bytes and hardlink refusal") {
+    directory :: transaction_test_root()
+    transaction_fixture_files.write_bytes("{directory.path}/a.jet", [U8]{0, 255, 10}) ?? panic("Windows file")
+    root :: transaction_paths.from_text(directory.path, transaction_paths.PathPlatform.Windows)
+    path :: transaction_paths.from_text("{directory.path}/a.jet", transaction_paths.PathPlatform.Windows)
+    before :: jet_cli_transaction_path_identity_windows(path) ?? panic("Windows identity")
+    again :: jet_cli_transaction_path_identity_windows(path) ?? panic("Windows repeated identity")
+    assert_eq(before.device, again.device)
+    assert_eq(before.inode, again.inode)
+    assert_eq(jet_cli_transaction_read_beneath_windows(root, transaction_paths.from_text("a.jet", transaction_paths.PathPlatform.Windows)) ?? panic("Windows pinned bytes"), [U8]{0, 255, 10})
+    transaction_fixture_files.hard_link("{directory.path}/a.jet", "{directory.path}/b.jet") ?? panic("Windows hardlink")
+    if jet_cli_transaction_path_identity_windows(path) == {
+        .Ok(_) -> panic("Windows linked identity accepted")
+        .Err(error) -> transaction_test_io_cause(error, "file has multiple hard links")
+    }
+}
+
+#Test("transaction Windows native opened final path rejects root escape") {
+    directory :: transaction_test_root()
+    outside :: transaction_test_root()
+    transaction_fixture_files.write("{outside.path}/a.jet", "outside") ?? panic("Windows outside")
+    root :: transaction_paths.from_text(directory.path, transaction_paths.PathPlatform.Windows)
+    absolute :: transaction_paths.from_text("{outside.path}/a.jet", transaction_paths.PathPlatform.Windows)
+    if jet_cli_transaction_read_beneath_windows(root, absolute) == {
+        .Ok(_) -> panic("Windows opened file escaped root")
+        .Err(error) -> transaction_test_io_cause(error, "opened file escapes root handle")
+    }
+    assert_eq(transaction_fixture_files.read("{outside.path}/a.jet") ?? panic("outside control"), "outside")
+}

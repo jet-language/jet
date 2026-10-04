@@ -1,0 +1,650 @@
+// Checked-source projection for the bounded solver (Rust Source/ProveSolver.rs).
+// Front-end checking remains the driver's responsibility; malformed sources emit no obligations.
+
+pub struct JetCLISolverSourceMember { pub path: String, pub source: String }
+struct JetCLISolverFunctionSpec { params: [String], pre: [Expr] }
+
+// Rust run_solver_producer (219-275).
+pub fn jet_cli_solver_run_producer(members: [JetCLISolverSourceMember], target_input_sha256: String, enable: Bool) -> [JetCLISolverEvidence] JetCLISolverError! {
+    if !enable -> return Ok([JetCLISolverEvidence]{})
+    obligations := [JetCLISolverObligation]{}
+    loop member in members {
+        loop obligation in jet_cli_solver_extract_obligations(member.path, member.source, target_input_sha256) -> &obligations.push(obligation)
+        if obligations.len() > JET_CLI_SOLVER_MAX_OBLIGATIONS -> return Err(JetCLISolverError.Failure("solver structural_limit: more than 10000 obligations"))
+    }
+    out := [JetCLISolverEvidence]{}
+    loop obligation in obligations {
+        if obligation.unsupported_reason == .Val(reason) {
+            &out.push(JetCLISolverEvidence{evidence_id: jet_cli_solver_evidence_id_for(obligation, "unknown"), obligation: obligation, outcome: JetCLISolverOutcome.Unknown{reason: reason, steps: 0}})
+            next
+        }
+        if jet_cli_solver_formula_term_count(obligation.formula) > JET_CLI_SOLVER_MAX_TERMS || jet_cli_solver_formula_variables(obligation.formula).len() > JET_CLI_SOLVER_MAX_VARS {
+            &out.push(JetCLISolverEvidence{evidence_id: jet_cli_solver_evidence_id_for(obligation, "unknown"), obligation: obligation, outcome: JetCLISolverOutcome.Unknown{reason: "structural_limit", steps: 0}})
+            next
+        }
+        outcome :: if {
+            obligation.kind == "fixed_index_bounds" -> jet_cli_solver_prove_finite_obligation(obligation.formula) ?? return Err(JetCLISolverError.Failure("solver certificate failure: {jet_cli_solver_error_message(err)}"))
+            else -> jet_cli_solver_prove_obligation(obligation.formula) ?? return Err(JetCLISolverError.Failure("solver certificate failure: {jet_cli_solver_error_message(err)}"))
+        }
+        outcome_tag :: if outcome == {
+            .Proved(_, _, _) -> "proved"
+            .Disproved(_, _) -> "disproved"
+            .Unknown(_, _) -> "unknown"
+        }
+        &out.push(JetCLISolverEvidence{evidence_id: jet_cli_solver_evidence_id_for(obligation, outcome_tag), obligation: obligation, outcome: outcome})
+    }
+    Ok(out)
+}
+
+// Rust evidence_id_for (277-285).
+pub fn jet_cli_solver_evidence_id_for(obligation: JetCLISolverObligation, outcome_tag: String) -> String Never! {
+    jet_cli_solver_framed_sha256([String]{obligation.id, obligation.kind, obligation.origin, obligation.span, outcome_tag})
+}
+
+// Rust extract_obligations (287-308). parse_source preserves lexer and parser diagnostics.
+pub fn jet_cli_solver_extract_obligations(path: String, source: String, target_input_sha256: String) -> [JetCLISolverObligation] {
+    parsed :: parse_source(source.bytes())
+    if parsed.diagnostics.len() != 0 -> return [JetCLISolverObligation]{}
+    jet_cli_solver_extract_from_program(path, source, target_input_sha256, parsed.program)
+}
+
+// Rust extract_from_program (310-328).
+pub fn jet_cli_solver_extract_from_program(path: String, source: String, target_input_sha256: String, program: Program) -> [JetCLISolverObligation] Never! {
+    out := [JetCLISolverObligation]{}
+    specs := [String:JetCLISolverFunctionSpec]{}
+    jet_cli_solver_collect_function_specs(program.items, &specs)
+    jet_cli_solver_walk_items(path, source, target_input_sha256, program.items, specs, &out)
+    out
+}
+
+// Rust collect_function_specs (336-381); first declaration of a name wins, including methods.
+fn jet_cli_solver_collect_function_specs(items: [Item], out: &[String:JetCLISolverFunctionSpec]) Never! {
+    loop item in items {
+        if item == {
+            .Func(func) -> jet_cli_solver_insert_function_spec(func, &out)
+            .Impl(def) -> loop func in def.methods -> jet_cli_solver_insert_function_spec(func, &out)
+            .Struct(def) -> loop func in def.methods -> jet_cli_solver_insert_function_spec(func, &out)
+            .Enum(def) -> loop func in def.methods -> jet_cli_solver_insert_function_spec(func, &out)
+            .CodeModule(code_module) -> { if code_module.body == .Val(body) -> jet_cli_solver_collect_function_specs(body, &out) }
+            else -> {}
+        }
+    }
+}
+fn jet_cli_solver_insert_function_spec(func: Func, out: &[String:JetCLISolverFunctionSpec]) Never! {
+    if out.has_key(func.name) -> return
+    params := [String]{}
+    pre := [Expr]{}
+    loop param in func.params -> &params.push(param.name)
+    loop clause in func.pre -> &pre.push(~clause.cond)
+    out[func.name] = JetCLISolverFunctionSpec{params: params, pre: pre}
+}
+
+// Rust walk_items (383-479).
+fn jet_cli_solver_walk_items(path: String, source: String, target: String, items: [Item], specs: [String:JetCLISolverFunctionSpec], out: &[JetCLISolverObligation]) Never! {
+    loop item in items {
+        if item == {
+            .Distinct(def) -> {
+                if def.range == .Val(range) {
+                    bounds :: jet_cli_solver_inclusive_bounds(range.lo, range.hi)
+                    formula :: JetCLISolverFormula{assumptions: bounds, claim: bounds}
+                    span :: jet_cli_solver_source_span_text(source, range.span)
+                    id :: jet_cli_solver_framed_sha256([String]{target, "fixed_index_bounds", path, span, jet_cli_solver_formula_hash(formula)})
+                    &out.push(JetCLISolverObligation{id: id, kind: "fixed_index_bounds", origin: path, span: span, formula: formula, unsupported_reason: None})
+                }
+            }
+            .Func(func) -> jet_cli_solver_collect_function(path, source, target, func, specs, &out)
+            .Impl(def) -> loop func in def.methods -> jet_cli_solver_collect_function(path, source, target, func, specs, &out)
+            .Struct(def) -> loop func in def.methods -> jet_cli_solver_collect_function(path, source, target, func, specs, &out)
+            .Enum(def) -> loop func in def.methods -> jet_cli_solver_collect_function(path, source, target, func, specs, &out)
+            .CodeModule(code_module) -> { if code_module.body == .Val(body) -> jet_cli_solver_walk_items(path, source, target, body, specs, &out) }
+            else -> {}
+        }
+    }
+}
+fn jet_cli_solver_collect_function(path: String, source: String, target: String, func: Func, specs: [String:JetCLISolverFunctionSpec], out: &[JetCLISolverObligation]) Never! {
+    jet_cli_solver_collect_func_contracts(path, source, target, func, &out)
+    jet_cli_solver_collect_call_preconditions(path, source, target, func, specs, &out)
+}
+fn jet_cli_solver_parameter_substitutions(func: Func) -> [String:JetCLISolverAffine] Never! {
+    substitutions := [String:JetCLISolverAffine]{}
+    loop param in func.params -> substitutions[param.name] = jet_cli_solver_affine_var(param.name, 1)
+    substitutions
+}
+fn jet_cli_solver_extend_inequalities(out: &[JetCLISolverInequality], values: [JetCLISolverInequality]) Never! {
+    loop value in values -> &out.push(value)
+}
+
+// Rust collect_func_contracts (481-546). Preserve the Rust last-reason-wins order.
+fn jet_cli_solver_collect_func_contracts(path: String, source: String, target: String, func: Func, out: &[JetCLISolverObligation]) Never! {
+    if func.post.len() == 0 -> return
+    assumptions := [JetCLISolverInequality]{}
+    reason := String?{None}
+    loop clause in func.pre {
+        if jet_cli_solver_expr_to_inequalities(clause.cond) == {
+            .Val(values) -> {
+                if !jet_cli_solver_contains_machine_arithmetic(clause.cond) -> jet_cli_solver_extend_inequalities(&assumptions, values)
+                else -> reason = Val("machine_overflow")
+            }
+            .None -> reason = Val("unsupported_formula")
+        }
+    }
+    substitutions := jet_cli_solver_parameter_substitutions(func)
+    if jet_cli_solver_affine_return_expression(func, substitutions) == {
+        .Ok(value) -> {
+            if value == .Val(affine) {
+                if jet_cli_solver_function_body_contains_machine_arithmetic(func) -> reason = Val("machine_overflow")
+                substitutions["result"] = affine
+            } else { reason = Val("unsupported_formula") }
+        }
+        .Err(error) -> reason = Val(jet_cli_solver_error_message(error))
+    }
+    claim := [JetCLISolverInequality]{}
+    loop clause in func.post {
+        if jet_cli_solver_expr_to_inequalities_with_subst(clause.cond, substitutions) == {
+            .Val(values) -> {
+                if !jet_cli_solver_contains_machine_arithmetic(clause.cond) -> jet_cli_solver_extend_inequalities(&claim, values)
+                else -> reason = Val("machine_overflow")
+            }
+            .None -> reason = Val("unsupported_formula")
+        }
+    }
+    if claim.len() == 0 && reason == None -> return
+    formula :: JetCLISolverFormula{assumptions: assumptions, claim: claim}
+    span :: jet_cli_solver_source_span_text(source, func.span)
+    id :: jet_cli_solver_framed_sha256([String]{target, "function_postcondition", path, span, jet_cli_solver_formula_hash(formula)})
+    &out.push(JetCLISolverObligation{id: id, kind: "function_postcondition", origin: "{path}::{func.name}", span: span, formula: formula, unsupported_reason: reason})
+}
+
+// Rust affine_return_expression (553-583): only immutable named affine bindings and one return.
+fn jet_cli_solver_affine_return_expression(func: Func, substitutions: [String:JetCLISolverAffine]) -> JetCLISolverAffine? JetCLISolverError! {
+    if func.body.len() == 0 -> return Ok(None)
+    local := ~substitutions
+    loop index in 0..<(func.body.len() - 1) {
+        if func.body[index] == .Val(binding) {
+            if binding.mutable || binding.pattern != None || binding.uninit || binding.arena_view || binding.string_view -> return Err(JetCLISolverError.Failure("unsupported_formula"))
+            value :: jet_cli_solver_expr_to_affine_with_subst(binding.init, local) ?? return Err(JetCLISolverError.Failure("unsupported_formula"))
+            local[binding.name] = value
+        } else { return Err(JetCLISolverError.Failure("unsupported_formula")) }
+    }
+    if func.body[func.body.len() - 1] == .Return(value, _) {
+        expr :: value ?? return Err(JetCLISolverError.Failure("unsupported_formula"))
+        affine :: jet_cli_solver_expr_to_affine_with_subst(expr, local) ?? return Err(JetCLISolverError.Failure("unsupported_formula"))
+        return Ok(Val(affine))
+    }
+    Err(JetCLISolverError.Failure("unsupported_formula"))
+}
+
+// Rust collect_call_preconditions (585-699). Each statement's calls use its incoming affine snapshot.
+fn jet_cli_solver_collect_call_preconditions(path: String, source: String, target: String, func: Func, specs: [String:JetCLISolverFunctionSpec], out: &[JetCLISolverObligation]) Never! {
+    assumptions := [JetCLISolverInequality]{}
+    pre_unsupported := false
+    loop clause in func.pre {
+        if jet_cli_solver_expr_to_inequalities(clause.cond) == {
+            .Val(values) -> {
+                if !jet_cli_solver_contains_machine_arithmetic(clause.cond) -> jet_cli_solver_extend_inequalities(&assumptions, values)
+                else -> pre_unsupported = true
+            }
+            .None -> pre_unsupported = true
+        }
+    }
+    substitutions := jet_cli_solver_parameter_substitutions(func)
+    flow_unsupported := false
+    machine_overflow := false
+    loop statement in func.body {
+        statement_flow :: flow_unsupported || jet_cli_solver_statement_is_flow_boundary(statement)
+        calls := [Call]{}
+        jet_cli_solver_visit_stmt_calls(statement, &calls)
+        loop call in calls {
+            spec :: specs.get(call.name) ?? next
+            if spec.pre.len() == 0 -> next
+            claim := [JetCLISolverInequality]{}
+            reason := String?{None}
+            if pre_unsupported || statement_flow {
+                reason = Val("unsupported_formula")
+            } else {
+                if machine_overflow || jet_cli_solver_call_args_contain_machine_arithmetic(call) -> reason = Val("machine_overflow")
+            }
+            if jet_cli_solver_bind_call_arguments(spec.params, call.args, substitutions) == {
+                .Val(bound) -> {
+                    loop condition in spec.pre {
+                        if jet_cli_solver_expr_to_inequalities_with_subst(condition, bound) == {
+                            .Val(values) -> jet_cli_solver_extend_inequalities(&claim, values)
+                            .None -> reason = Val("unsupported_formula")
+                        }
+                    }
+                }
+                .None -> reason = Val("unsupported_formula")
+            }
+            if claim.len() == 0 && reason == None -> next
+            formula :: JetCLISolverFormula{assumptions: ~assumptions, claim: claim}
+            span :: jet_cli_solver_source_span_text(source, call.name_span)
+            origin :: "{path}::{func.name} -> {call.name}"
+            id :: jet_cli_solver_framed_sha256([String]{target, "call_precondition", path, origin, span, jet_cli_solver_formula_hash(formula)})
+            &out.push(JetCLISolverObligation{id: id, kind: "call_precondition", origin: origin, span: span, formula: formula, unsupported_reason: reason})
+        }
+        if statement == .Val(binding) {
+            if jet_cli_solver_contains_machine_arithmetic(binding.init) -> machine_overflow = true
+            if binding.mutable || binding.pattern != None || binding.uninit || binding.arena_view || binding.string_view || substitutions.has_key(binding.name) {
+                flow_unsupported = true
+            } else {
+                if jet_cli_solver_expr_to_affine_with_subst(binding.init, substitutions) == {
+                    .Val(value) -> substitutions[binding.name] = value
+                    .None -> flow_unsupported = true
+                }
+            }
+        } else { if jet_cli_solver_statement_is_flow_boundary(statement) -> flow_unsupported = true }
+    }
+}
+
+// Rust statement_is_flow_boundary (701-740).
+pub fn jet_cli_solver_statement_is_flow_boundary(statement: Stmt) -> Bool Never! {
+    if statement == {
+        .Expr(expr) -> !jet_cli_solver_is_call(expr)
+        .DeferClose(expr, _) -> !jet_cli_solver_is_call(expr)
+        .Val(binding) -> !jet_cli_solver_is_call(binding.init)
+        .Return(value, _) -> if value == {
+            .Val(expr) -> !jet_cli_solver_is_call(expr)
+            .None -> false
+        }
+        .Break(_) -> false
+        .Continue(_) -> false
+        .BreakLabel(_, _) -> false
+        .ContinueLabel(_, _) -> false
+        else -> true
+    }
+}
+fn jet_cli_solver_is_call(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Call(_) -> true
+        else -> false
+    }
+}
+
+// Rust bind_call_arguments (742-780): labeled slots, then next unoccupied positional slot.
+pub fn jet_cli_solver_bind_call_arguments(params: [String], args: [CallArg], caller: [String:JetCLISolverAffine]) -> [String:JetCLISolverAffine]? Never! {
+    if params.len() != args.len() -> return None
+    slots := [JetCLISolverAffine?]{}
+    empty_slot :: JetCLISolverAffine?{None}
+    loop _ in params -> &slots.push(empty_slot)
+    positional := 0
+    loop arg in args {
+        if arg.spread -> return None
+        index := positional
+        if arg.label == .Val(label) {
+            found := false
+            loop (slot, param) in params {
+                if param == label.name {
+                    index = slot
+                    found = true
+                    break
+                }
+            }
+            if !found -> return None
+        } else {
+            loop positional < slots.len() && slots[positional] != None -> positional += 1
+            index = positional
+            positional += 1
+        }
+        if index >= slots.len() || slots[index] != None -> return None
+        value :: jet_cli_solver_expr_to_affine_with_subst(arg.expr, caller) ?? return None
+        slots[index] = Val(value)
+    }
+    substitutions := [String:JetCLISolverAffine]{}
+    loop (index, param) in params {
+        value :: slots[index] ?? return None
+        substitutions[param] = value
+    }
+    Val(substitutions)
+}
+
+// Rust expr_to_inequalities (1105-1107).
+pub fn jet_cli_solver_expr_to_inequalities(expr: Expr) -> [JetCLISolverInequality]? Never! {
+    jet_cli_solver_expr_to_inequalities_with_subst(expr, [String:JetCLISolverAffine]{})
+}
+// Rust contains_machine_arithmetic (1113-1124); deliberately not a general AST traversal.
+pub fn jet_cli_solver_contains_machine_arithmetic(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Binary(op, left, right, _) -> op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || jet_cli_solver_contains_machine_arithmetic(left) || jet_cli_solver_contains_machine_arithmetic(right)
+        .Unary(op, _, _) -> op == UnOp.Neg
+        .Paren(inner, _) -> jet_cli_solver_contains_machine_arithmetic(inner)
+        else -> false
+    }
+}
+// Rust call_args_contain_machine_arithmetic (1126-1130).
+fn jet_cli_solver_call_args_contain_machine_arithmetic(call: Call) -> Bool Never! {
+    loop arg in call.args { if jet_cli_solver_contains_machine_arithmetic(arg.expr) -> return true }
+    false
+}
+// Rust function_body_contains_machine_arithmetic (1132-1140).
+fn jet_cli_solver_function_body_contains_machine_arithmetic(func: Func) -> Bool Never! {
+    loop statement in func.body {
+        contains :: if statement == {
+            .Val(binding) -> jet_cli_solver_contains_machine_arithmetic(binding.init)
+            .Return(value, _) -> if value == {
+                .Val(expr) -> jet_cli_solver_contains_machine_arithmetic(expr)
+                .None -> true
+            }
+            .Expr(expr) -> jet_cli_solver_contains_machine_arithmetic(expr)
+            .DeferClose(expr, _) -> jet_cli_solver_contains_machine_arithmetic(expr)
+            else -> true
+        }
+        if contains -> return true
+    }
+    false
+}
+
+// Rust expr_to_inequalities_with_subst (1142-1176). All affine operations retain i128 checks.
+pub fn jet_cli_solver_expr_to_inequalities_with_subst(expr: Expr, substitutions: [String:JetCLISolverAffine]) -> [JetCLISolverInequality]? Never! {
+    if expr == .Binary(op, left, right, _) {
+        if op == BinOp.And {
+            out := jet_cli_solver_expr_to_inequalities_with_subst(left, substitutions) ?? return None
+            rest :: jet_cli_solver_expr_to_inequalities_with_subst(right, substitutions) ?? return None
+            jet_cli_solver_extend_inequalities(&out, rest)
+            return Val(out)
+        }
+        lhs :: jet_cli_solver_expr_to_affine_with_subst(left, substitutions) ?? return None
+        rhs :: jet_cli_solver_expr_to_affine_with_subst(right, substitutions) ?? return None
+        out := [JetCLISolverInequality]{}
+        if op == {
+            .Le -> {
+                neg :: jet_cli_solver_affine_scale(rhs, -1) ?? return None
+                affine :: jet_cli_solver_affine_add(lhs, neg) ?? return None
+                &out.push(jet_cli_solver_inequality_le(affine))
+            }
+            .Ge -> {
+                neg :: jet_cli_solver_affine_scale(lhs, -1) ?? return None
+                affine :: jet_cli_solver_affine_add(rhs, neg) ?? return None
+                &out.push(jet_cli_solver_inequality_le(affine))
+            }
+            .Lt -> {
+                shifted :: jet_cli_solver_affine_add(rhs, jet_cli_solver_affine_constant(-1)) ?? return None
+                neg :: jet_cli_solver_affine_scale(shifted, -1) ?? return None
+                affine :: jet_cli_solver_affine_add(lhs, neg) ?? return None
+                &out.push(jet_cli_solver_inequality_le(affine))
+            }
+            .Gt -> {
+                shifted :: jet_cli_solver_affine_add(rhs, jet_cli_solver_affine_constant(1)) ?? return None
+                neg :: jet_cli_solver_affine_scale(lhs, -1) ?? return None
+                affine :: jet_cli_solver_affine_add(shifted, neg) ?? return None
+                &out.push(jet_cli_solver_inequality_le(affine))
+            }
+            .Eq -> {
+                neg_rhs :: jet_cli_solver_affine_scale(rhs, -1) ?? return None
+                a :: jet_cli_solver_affine_add(lhs, neg_rhs) ?? return None
+                neg_lhs :: jet_cli_solver_affine_scale(lhs, -1) ?? return None
+                b :: jet_cli_solver_affine_add(rhs, neg_lhs) ?? return None
+                &out.push(jet_cli_solver_inequality_le(a))
+                &out.push(jet_cli_solver_inequality_le(b))
+            }
+            else -> return None
+        }
+        return Val(out)
+    }
+    None
+}
+
+// Rust expr_to_affine_with_subst (1178-1212).
+pub fn jet_cli_solver_expr_to_affine_with_subst(expr: Expr, substitutions: [String:JetCLISolverAffine]) -> JetCLISolverAffine? Never! {
+    if expr == {
+        .Int(value, _, _, _) -> Val(jet_cli_solver_affine_constant(value))
+        .Ident(name, _) -> Val(substitutions.get(name) ?? jet_cli_solver_affine_var(name, 1))
+        .Binary(op, left, right, _) -> {
+            l :: jet_cli_solver_expr_to_affine_with_subst(left, substitutions) ?? return None
+            r :: jet_cli_solver_expr_to_affine_with_subst(right, substitutions) ?? return None
+            if op == {
+                .Add -> {
+                    value :: jet_cli_solver_affine_add(l, r) ?? return None
+                    Val(value)
+                }
+                .Sub -> {
+                    neg :: jet_cli_solver_affine_scale(r, -1) ?? return None
+                    value :: jet_cli_solver_affine_add(l, neg) ?? return None
+                    Val(value)
+                }
+                .Mul -> {
+                    if l.terms.len() == 0 {
+                        value :: jet_cli_solver_affine_scale(r, l.constant) ?? return None
+                        return Val(value)
+                    }
+                    if r.terms.len() == 0 {
+                        value :: jet_cli_solver_affine_scale(l, r.constant) ?? return None
+                        return Val(value)
+                    }
+                    None
+                }
+                else -> None
+            }
+        }
+        .Unary(op, inner, _) -> {
+            if op != UnOp.Neg -> return None
+            affine :: jet_cli_solver_expr_to_affine_with_subst(inner, substitutions) ?? return None
+            scaled :: jet_cli_solver_affine_scale(affine, -1) ?? return None
+            Val(scaled)
+        }
+        .Paren(inner, _) -> jet_cli_solver_expr_to_affine_with_subst(inner, substitutions)
+        else -> None
+    }
+}
+
+// Rust visit_stmt_calls (782-900).
+fn jet_cli_solver_visit_stmt_calls(statement: Stmt, calls: &[Call]) Never! {
+    if statement == {
+        .Expr(expr) -> jet_cli_solver_visit_expr_calls(expr, &calls)
+        .Yield(expr, _) -> jet_cli_solver_visit_expr_calls(expr, &calls)
+        .DeferClose(expr, _) -> jet_cli_solver_visit_expr_calls(expr, &calls)
+        .Val(binding) -> jet_cli_solver_visit_expr_calls(binding.init, &calls)
+        .Assign(target, _, _, value) -> {
+            jet_cli_solver_visit_lvalue_calls(target, &calls)
+            jet_cli_solver_visit_expr_calls(value, &calls)
+        }
+        .Return(value, _) -> { if value == .Val(expr) -> jet_cli_solver_visit_expr_calls(expr, &calls) }
+        .BreakValue(expr, _) -> jet_cli_solver_visit_expr_calls(expr, &calls)
+        .BreakLabelValue(_, _, expr, _) -> jet_cli_solver_visit_expr_calls(expr, &calls)
+        .While(cond, body, _, _, _) -> {
+            jet_cli_solver_visit_expr_calls(cond, &calls)
+            jet_cli_solver_visit_stmt_list(body, &calls)
+        }
+        .For(_, _, _, kind, body, _, _, _, _) -> {
+            if kind == {
+                .Range(start, end, step, _) -> {
+                    jet_cli_solver_visit_expr_calls(start, &calls)
+                    jet_cli_solver_visit_expr_calls(end, &calls)
+                    if step == .Val(expr) -> jet_cli_solver_visit_expr_calls(expr, &calls)
+                }
+                .In(collection, step) -> {
+                    jet_cli_solver_visit_expr_calls(collection, &calls)
+                    if step == .Val(expr) -> jet_cli_solver_visit_expr_calls(expr, &calls)
+                }
+            }
+            jet_cli_solver_visit_stmt_list(body, &calls)
+        }
+        .Switch(subject, arms, otherwise, _) -> jet_cli_solver_visit_switch_calls(subject, arms, otherwise, &calls)
+        .ComptimeSwitch(subject, arms, otherwise, _) -> jet_cli_solver_visit_switch_calls(subject, arms, otherwise, &calls)
+        .CountedLoop(init, cond, step, body, _, _, _) -> {
+            jet_cli_solver_visit_expr_calls(init.init, &calls)
+            jet_cli_solver_visit_expr_calls(cond, &calls)
+            if step == .Val(stmt) -> jet_cli_solver_visit_stmt_calls(stmt, &calls)
+            jet_cli_solver_visit_stmt_list(body, &calls)
+        }
+        .ComptimeIf(cond, _, then_body, else_body, _, _) -> {
+            jet_cli_solver_visit_expr_calls(cond, &calls)
+            jet_cli_solver_visit_stmt_list(then_body, &calls)
+            if else_body == .Val(body) -> jet_cli_solver_visit_stmt_list(body, &calls)
+        }
+        .ContextBlock(fields, body, _) -> {
+            loop field in fields -> jet_cli_solver_visit_expr_calls(field.value, &calls)
+            jet_cli_solver_visit_stmt_list(body, &calls)
+        }
+        .ScopeMember(_, _, args, _, body, _, _, _) -> {
+            loop arg in args -> jet_cli_solver_visit_expr_calls(arg, &calls)
+            jet_cli_solver_visit_stmt_list(body, &calls)
+        }
+        .Loop(body, _, _, _) -> jet_cli_solver_visit_stmt_list(body, &calls)
+        .Unsafe(_, _, body, _) -> jet_cli_solver_visit_stmt_list(body, &calls)
+        .Impure(_, _, body, _) -> jet_cli_solver_visit_stmt_list(body, &calls)
+        .Reactive(body, _) -> jet_cli_solver_visit_stmt_list(body, &calls)
+        .Shield(body, _) -> jet_cli_solver_visit_stmt_list(body, &calls)
+        .Switched(_, body, _) -> jet_cli_solver_visit_stmt_list(body, &calls)
+        .Region(_, _, body, _) -> jet_cli_solver_visit_stmt_list(body, &calls)
+        .Policy(_, body, _) -> jet_cli_solver_visit_stmt_list(body, &calls)
+        .TaskGroup(_, _, _, body, _) -> jet_cli_solver_visit_stmt_list(body, &calls)
+        .Layout(_, _, body, _) -> jet_cli_solver_visit_stmt_list(body, &calls)
+        .AuthorityScope(_, _, _, body, _) -> jet_cli_solver_visit_stmt_list(body, &calls)
+        .ComptimeBlock(body, _, _) -> jet_cli_solver_visit_stmt_list(body, &calls)
+        .Live(body, _) -> jet_cli_solver_visit_stmt_list(body, &calls)
+        .AssumeDet(_, _, body, _) -> jet_cli_solver_visit_stmt_list(body, &calls)
+        .Transact(_, _, body, _, _) -> jet_cli_solver_visit_stmt_list(body, &calls)
+        .Break(_) -> {}
+        .Continue(_) -> {}
+        .BreakLabel(_, _) -> {}
+        .ContinueLabel(_, _) -> {}
+    }
+}
+fn jet_cli_solver_visit_switch_calls(subject: Expr, arms: [SwitchArm], otherwise: [Stmt]?, calls: &[Call]) Never! {
+    jet_cli_solver_visit_expr_calls(subject, &calls)
+    loop arm in arms {
+        jet_cli_solver_visit_expr_calls(arm.cond, &calls)
+        jet_cli_solver_visit_stmt_list(arm.body, &calls)
+    }
+    if otherwise == .Val(body) -> jet_cli_solver_visit_stmt_list(body, &calls)
+}
+// Rust visit_stmt_list (902-906).
+fn jet_cli_solver_visit_stmt_list(statements: [Stmt], calls: &[Call]) Never! {
+    loop statement in statements -> jet_cli_solver_visit_stmt_calls(statement, &calls)
+}
+// Rust visit_lvalue_calls (908-917).
+fn jet_cli_solver_visit_lvalue_calls(target: LValue, calls: &[Call]) Never! {
+    if target == {
+        .Local(_, _) -> {}
+        .Index(base, index, _, _) -> {
+            jet_cli_solver_visit_expr_calls(base, &calls)
+            jet_cli_solver_visit_expr_calls(index, &calls)
+        }
+        .Field(base, _, _) -> jet_cli_solver_visit_expr_calls(base, &calls)
+    }
+}
+// Rust visit_call_args (919-923).
+fn jet_cli_solver_visit_call_args(args: [CallArg], calls: &[Call]) Never! {
+    loop arg in args -> jet_cli_solver_visit_expr_calls(arg.expr, &calls)
+}
+// Rust visit_expr_calls (925-1070). Preserve preorder and the Rust leaf exclusions.
+fn jet_cli_solver_visit_expr_calls(expr: Expr, calls: &[Call]) Never! {
+    if expr == {
+        .Call(call) -> {
+            &calls.push(~call)
+            jet_cli_solver_visit_call_args(call.args, &calls)
+        }
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) -> {
+            jet_cli_solver_visit_expr_calls(receiver, &calls)
+            jet_cli_solver_visit_call_args(args, &calls)
+        }
+        .CallValue(callee, args, _) -> {
+            jet_cli_solver_visit_expr_calls(callee, &calls)
+            jet_cli_solver_visit_call_args(args, &calls)
+        }
+        .Str(parts, _) -> { loop part in parts { if part == .Interp(value, _) -> jet_cli_solver_visit_expr_calls(value, &calls) } }
+        .ListLit(items, _) -> { loop item in items -> jet_cli_solver_visit_expr_calls(item, &calls) }
+        .TupleLit(items, _, _) -> { loop item in items -> jet_cli_solver_visit_expr_calls(item.value, &calls) }
+        .MemberSpread(base, _, _) -> jet_cli_solver_visit_expr_calls(base, &calls)
+        .Spread(base, _) -> jet_cli_solver_visit_expr_calls(base, &calls)
+        .Deref(base, _) -> jet_cli_solver_visit_expr_calls(base, &calls)
+        .RawOf(base, _) -> jet_cli_solver_visit_expr_calls(base, &calls)
+        .Copy(base, _) -> jet_cli_solver_visit_expr_calls(base, &calls)
+        .Place(base, _, _) -> jet_cli_solver_visit_expr_calls(base, &calls)
+        .Field(base, _, _) -> jet_cli_solver_visit_expr_calls(base, &calls)
+        .Present(base, _) -> jet_cli_solver_visit_expr_calls(base, &calls)
+        .Ok(base, _) -> jet_cli_solver_visit_expr_calls(base, &calls)
+        .Err(base, _) -> jet_cli_solver_visit_expr_calls(base, &calls)
+        .Paren(base, _) -> jet_cli_solver_visit_expr_calls(base, &calls)
+        .Try(base, _, _, note) -> {
+            jet_cli_solver_visit_expr_calls(base, &calls)
+            if note == .Val(value) -> jet_cli_solver_visit_expr_calls(value, &calls)
+        }
+        .MapLit(entries, _) -> loop entry in entries {
+            jet_cli_solver_visit_expr_calls(entry.key, &calls)
+            jet_cli_solver_visit_expr_calls(entry.value, &calls)
+        }
+        .Index(base, index, _, _) -> {
+            jet_cli_solver_visit_expr_calls(base, &calls)
+            jet_cli_solver_visit_expr_calls(index, &calls)
+        }
+        .Slice(base, start, end, range, _) -> {
+            jet_cli_solver_visit_expr_calls(base, &calls)
+            if range == .Val(value) {
+                jet_cli_solver_visit_expr_calls(value, &calls)
+            } else {
+                jet_cli_solver_visit_expr_calls(start, &calls)
+                jet_cli_solver_visit_expr_calls(end, &calls)
+            }
+        }
+        .Range(start, end, _, _) -> {
+            jet_cli_solver_visit_expr_calls(start, &calls)
+            jet_cli_solver_visit_expr_calls(end, &calls)
+        }
+        .Unary(_, inner, _) -> jet_cli_solver_visit_expr_calls(inner, &calls)
+        .Binary(_, left, right, _) -> {
+            jet_cli_solver_visit_expr_calls(left, &calls)
+            jet_cli_solver_visit_expr_calls(right, &calls)
+        }
+        .CompareChain(operands, _, _, _) -> loop operand in operands -> jet_cli_solver_visit_expr_calls(operand, &calls)
+        .OptField(base, _, _, _, _) -> jet_cli_solver_visit_expr_calls(base, &calls)
+        .StructLit(_, _, _, _, fields, _, _) -> loop field in fields -> jet_cli_solver_visit_expr_calls(field.value, &calls)
+        .TypedLit(_, body, _) -> {
+            if body == {
+                .Fields(fields) -> loop field in fields -> jet_cli_solver_visit_expr_calls(field.value, &calls)
+                .Elements(items) -> loop item in items -> jet_cli_solver_visit_expr_calls(item, &calls)
+                .Entries(entries) -> loop entry in entries {
+                    jet_cli_solver_visit_expr_calls(entry.key, &calls)
+                    jet_cli_solver_visit_expr_calls(entry.value, &calls)
+                }
+                .Value(value) -> jet_cli_solver_visit_expr_calls(value, &calls)
+                else -> {}
+            }
+        }
+        .EnumLit(_, _, _, args, _, _) -> loop arg in args {
+            if arg == {
+                .Positional(value) -> jet_cli_solver_visit_expr_calls(value, &calls)
+                .Named(_, value) -> jet_cli_solver_visit_expr_calls(value, &calls)
+            }
+        }
+        .Tainted(inner, _, _) -> jet_cli_solver_visit_expr_calls(inner, &calls)
+        .PatternTest(subject, pattern, _) -> {
+            jet_cli_solver_visit_expr_calls(subject, &calls)
+            jet_cli_solver_visit_pattern_calls(pattern, &calls)
+        }
+        .If(cond, then_body, then_value, else_body, else_value, _) -> {
+            jet_cli_solver_visit_expr_calls(cond, &calls)
+            jet_cli_solver_visit_stmt_list(then_body, &calls)
+            jet_cli_solver_visit_expr_calls(then_value, &calls)
+            jet_cli_solver_visit_stmt_list(else_body, &calls)
+            jet_cli_solver_visit_expr_calls(else_value, &calls)
+        }
+        .Lambda(lambda) -> {
+            if lambda.body == {
+                .Expr(value) -> jet_cli_solver_visit_expr_calls(value, &calls)
+                .Block(body) -> jet_cli_solver_visit_stmt_list(body, &calls)
+            }
+        }
+        .OrFallback(value, fallback, _, _) -> {
+            jet_cli_solver_visit_expr_calls(value, &calls)
+            if fallback == {
+                .Value(inner) -> jet_cli_solver_visit_expr_calls(inner, &calls)
+                .Return(inner, _) -> { if inner == .Val(returned) -> jet_cli_solver_visit_expr_calls(returned, &calls) }
+                .Panic(_, args) -> jet_cli_solver_visit_call_args(args, &calls)
+                else -> {}
+            }
+        }
+        .PtrFromAddr(_, _, _, addr, _) -> jet_cli_solver_visit_expr_calls(addr, &calls)
+        else -> {}
+    }
+}
+// Rust visit_pattern_calls (1072-1088).
+fn jet_cli_solver_visit_pattern_calls(pattern: Pattern, calls: &[Call]) Never! {
+    if pattern == {
+        .Or(patterns, _) -> loop inner in patterns -> jet_cli_solver_visit_pattern_calls(inner, &calls)
+        .Struct(fields, _, _) -> loop field in fields {
+            if field == .Value(_, _, value) -> jet_cli_solver_visit_expr_calls(value, &calls)
+        }
+        else -> {}
+    }
+}

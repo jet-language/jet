@@ -1,0 +1,724 @@
+// Source/CmdExpand.rs: checked-fact presentation. This owner does not check,
+// reparse, expand templates, reconstruct an index, or ask a Rust backend.
+// Full command admission is gated on CP-PROGRAM-BUNDLE's retained checked AST
+// publication and canonical Comptime display/layout/origin producers. These
+// leaves use the existing Foundation AST and sole SemIndex callable records.
+use core.text as expand_unicode
+use jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
+use jet_foundation.[
+    Diagnostic, Span, Func, Item, TestDef, Stmt, Expr, CtValue,
+    compiler_stage_as_str, diagnostic_layout_byte_facts_unavailable,
+    failure_contract_effective_type, failure_contract_source, type_name,
+    COMPILER_FACT_ORIGIN, fact_read_kind, fact_read_public_read_type,
+    ast_comptime_value_type, expr_without_parens, diagnostic_from_registry,
+    app_graph_explain_lines,
+]
+use jet_semindex.[
+    SemIndex, SymbolDef, EffectFact, EffectProvenance, SourceSpan,
+    ExpandValue, ExpandObjectEntry, CallableFactUnavailable,
+    CallableParameterFact, CallableSignatureFact, CallableEffectsFact,
+    ViewProvenanceFact,
+]
+use jet_sema.[SemIndexEffectFacts, MemoryFact, MemoryProjection, MemoryFactDeclaration, effect_facts_memory_display]
+
+// Source/CmdExpand.rs:28-90 Lens/LENSES. Registry order is observable in both
+// all-lens output and unknown-lens help. Dispatch remains private to this owner.
+struct JetCLIExpandLens { name: String, summary: String }
+JET_CLI_EXPAND_LENSES :: prep { [JetCLIExpandLens]{
+    JetCLIExpandLens{name: "inline", summary: "#Inline / #Inline(Always) contracts (D-METHODMACRO1)"},
+    JetCLIExpandLens{name: "memory", summary: "transitive Mem.* denial facts (D-MEM-FACTS1 / D-AUTHORITY-MEM1)"},
+    JetCLIExpandLens{name: "web", summary: "D-WEBAPP1 application graph facts (routes/actions/policy)"},
+    JetCLIExpandLens{name: "effects", summary: "resolved function effect rows (D-EFF1 / D-SEMINDEX1)"},
+    JetCLIExpandLens{name: "layout", summary: "D-LAYOUT-FACTS1 compiler-owned type layout facts"},
+    JetCLIExpandLens{name: "origin", summary: "D-TRACK-ORIGIN1 typed #Track provenance facts"},
+    JetCLIExpandLens{name: "derive", summary: "derived behavior already attached to types (D-ONCE-DERIVE1)"},
+    JetCLIExpandLens{name: "templates", summary: "checked prep loop marker in impl, test, and measurement expansions (D-STRUCT-ONCE1)"},
+    JetCLIExpandLens{name: "callable-signature", summary: "typed checked semindex projection; metadata identity and convention producers remain unavailable"},
+} }
+
+struct JetCLIExpandSelection { path: String, lens: Int?, selection: String }
+#Error
+struct JetCLIExpandArgumentError { diagnostic: Diagnostic, show_lenses: Bool }
+
+// Source/CmdExpand.rs:92-159 argument/error precedence. Unknown flags are
+// ignored, repeated --facts uses the last value, only the first positional wins.
+fn jet_cli_expand_selection(args: [String]) -> JetCLIExpandSelection JetCLIExpandArgumentError! {
+    lens_name := String?{None}
+    path := String?{None}
+    at := 0
+    loop at < args.len() {
+        argument :: args[at]
+        if argument.starts_with("--facts=") {
+            value := argument.slice(8, argument.len()) // #4303
+            lens_name = Val(value)
+        } else if argument == "--facts" {
+            at += 1
+            if at == args.len() -> return Err(JetCLIExpandArgumentError{
+                diagnostic: diagnostic_from_registry("E2104", None,
+                    "`--facts` needs a lens name",
+                    "the expand command must know which registered lens to project",
+                    "pass `--facts inline`, `--facts memory`, `--facts web`, `--facts effects`, `--facts layout`, `--facts origin`, `--facts derive`, `--facts templates`, or `--facts callable-signature`"),
+                show_lenses: true})
+            lens_name = Val(args[at])
+        } else if !argument.starts_with("-") && path == None {
+            path = Val(argument)
+        }
+        at += 1
+    }
+    entry :: path ?? return Err(JetCLIExpandArgumentError{
+        diagnostic: diagnostic_from_registry("E2104", None,
+            "`jet inspect expand` needs an entry file",
+            "expand facts come from one checked Jet entry file",
+            "run `jet inspect expand --facts inline Examples/features/basics/hello.jet`"),
+        show_lenses: false})
+    if lens_name == .Val(name) {
+        loop (index, lens) in JET_CLI_EXPAND_LENSES {
+            if lens.name == name -> return Ok(JetCLIExpandSelection{path: entry, lens: Val(index), selection: name})
+        }
+        return Err(JetCLIExpandArgumentError{
+            diagnostic: diagnostic_from_registry("E2941", None,
+                "unknown expand lens `{name}`",
+                "only registered lenses have checked semantic facts",
+                "use `inline`, `memory`, `web`, `effects`, `layout`, `origin`, `derive`, `templates`, or `callable-signature`"),
+            show_lenses: true})
+    }
+    Ok(JetCLIExpandSelection{path: entry, lens: None, selection: "all"})
+}
+
+// Source/CmdExpand.rs:247-252; render bytes, leaving the actual stderr/exit
+// operation to the command's canonical Driver output boundary.
+fn jet_cli_expand_available_lenses() -> String Never! {
+    lines := [String]{" available lenses:"}
+    loop lens in JET_CLI_EXPAND_LENSES {
+        padding :: if lens.name.len() < 8 -> " ".repeat(8 - lens.name.len()) else -> ""
+        &lines.push("   {lens.name}{padding} {lens.summary}")
+    }
+    "{lines.join("\n")}\n"
+}
+
+// Source/CmdExpand.rs:254-285. ExpandValue is the canonical semantic projection
+// carrier; SemIndex's envelope codec turns it into Foundation StatusValue.
+fn jet_cli_expand_string(value: String) -> ExpandValue Never! { ExpandValue.String{value: value} }
+fn jet_cli_expand_field(key: String, value: ^ExpandValue) -> ExpandObjectEntry Never! { ExpandObjectEntry{key: key, value: ^value} }
+fn jet_cli_expand_object(entries: ^[ExpandObjectEntry]) -> ExpandValue Never! { ExpandValue.Object{entries: ^entries} }
+fn jet_cli_expand_string_list(values: [String]) -> ExpandValue Never! {
+    rows := [ExpandValue]{}
+    loop value in values -> &rows.push(jet_cli_expand_string(value))
+    ExpandValue.Array{values: ^rows}
+}
+fn jet_cli_expand_add_location(fields: &[ExpandObjectEntry], location: (line: Int, col: Int)?) Never! {
+    if location == .Val(site) {
+        &fields.push(jet_cli_expand_field("line", ExpandValue.Number{value: site.line}))
+        &fields.push(jet_cli_expand_field("column", ExpandValue.Number{value: site.col}))
+    }
+}
+fn jet_cli_expand_span(span: Span, location: (line: Int, col: Int)?) -> ExpandValue Never! {
+    fields := [ExpandObjectEntry]{
+        jet_cli_expand_field("start", ExpandValue.Number{value: span.start}),
+        jet_cli_expand_field("end", ExpandValue.Number{value: span.end}),
+    }
+    jet_cli_expand_add_location(&fields, location)
+    jet_cli_expand_object(^fields)
+}
+
+// Source/CmdExpand.rs:525-595 effects are the already checked index's rows.
+fn jet_cli_expand_effect_row_text(effect: EffectFact) -> String Never! {
+    resolved :: "[{effect.inferred.join(", ")}]"
+    maximal :: if effect.maximal -> " (maximal)" else -> ""
+    "{effect.function}: resolved={resolved}{maximal}"
+}
+fn jet_cli_expand_render_effects(index: SemIndex) -> [String] Never! {
+    rows := [String]{}
+    loop effect in index.effects() -> &rows.push(jet_cli_expand_effect_row_text(effect))
+    rows
+}
+fn jet_cli_expand_effect_provenance_json(provenance: EffectProvenance) -> ExpandValue Never! {
+    spans := [ExpandValue]{}
+    loop span in provenance.spans -> &spans.push(jet_cli_expand_callable_source_span(span))
+    jet_cli_expand_object([ExpandObjectEntry]{
+        jet_cli_expand_field("effect", jet_cli_expand_string(provenance.effect_name)),
+        jet_cli_expand_field("call_path", jet_cli_expand_string_list(provenance.call_path)),
+        jet_cli_expand_field("spans", ExpandValue.Array{values: ^spans}),
+    })
+}
+fn jet_cli_expand_render_effects_json(index: SemIndex) -> [ExpandValue] Never! {
+    rows := [ExpandValue]{}
+    loop effect in index.effects() {
+        provenance := [ExpandValue]{}
+        loop item in effect.provenance -> &provenance.push(jet_cli_expand_effect_provenance_json(item))
+        &rows.push(jet_cli_expand_object([ExpandObjectEntry]{
+            jet_cli_expand_field("function", jet_cli_expand_string(effect.function)),
+            jet_cli_expand_field("direct", jet_cli_expand_string_list(effect.direct)),
+            jet_cli_expand_field("callees", jet_cli_expand_string_list(effect.callees)),
+            jet_cli_expand_field("inferred", jet_cli_expand_string_list(effect.inferred)),
+            jet_cli_expand_field("maximal", ExpandValue.Bool{value: effect.maximal}),
+            jet_cli_expand_field("evidence", jet_cli_expand_string("checked_static")),
+            jet_cli_expand_field("runtime_observation", jet_cli_expand_string("not_run")),
+            jet_cli_expand_field("provenance", ExpandValue.Array{values: ^provenance}),
+        }))
+    }
+    rows
+}
+
+// Source/CmdExpand.rs:1183-1244. Named records retain original tuple fields.
+// Read-only traversal appends leaf facts, never copies a Func or item subtree.
+struct JetCLIExpandInlineRow { qualified: String, span: Span, contract: String, attribute: String }
+fn jet_cli_expand_inline_row(function: Func, owner: String?) -> JetCLIExpandInlineRow? Never! {
+    contract := ""
+    attribute := ""
+    if function.is_inline_always {
+        contract = "#Inline(Always)"
+        attribute = "#[inline(always)]"
+    } else if function.is_inline {
+        contract = "#Inline"
+        attribute = "#[inline]"
+    } else -> return None
+    qualified :: if owner == .Val(name) -> "{name}.{function.name}" else -> function.name
+    Val(JetCLIExpandInlineRow{qualified: qualified, span: function.inline_span ?? function.name_span, contract: contract, attribute: attribute})
+}
+fn jet_cli_expand_inline_append(function: Func, owner: String?, rows: &[JetCLIExpandInlineRow]) Never! {
+    if jet_cli_expand_inline_row(function, owner) == .Val(row) -> &rows.push(row)
+}
+fn jet_cli_expand_collect_inline_facts(items: [Item], owner: String?, rows: &[JetCLIExpandInlineRow]) Never! {
+    loop item in items {
+        if item == {
+            .Func(function) -> jet_cli_expand_inline_append(function, owner, &rows)
+            .Struct(definition) -> {
+                loop method in definition.methods -> jet_cli_expand_inline_append(method, Val(definition.name), &rows)
+                loop implementation in definition.trait_impls {
+                    loop method in implementation.methods -> jet_cli_expand_inline_append(method, Val(definition.name), &rows)
+                }
+            }
+            .Enum(definition) -> {
+                loop method in definition.methods -> jet_cli_expand_inline_append(method, Val(definition.name), &rows)
+                loop implementation in definition.trait_impls {
+                    loop method in implementation.methods -> jet_cli_expand_inline_append(method, Val(definition.name), &rows)
+                }
+            }
+            .Impl(implementation) -> {
+                loop method in implementation.methods -> jet_cli_expand_inline_append(method, Val(implementation.type_name), &rows)
+            }
+            .CodeModule(definition) -> {
+                if definition.body == .Val(body) -> jet_cli_expand_collect_inline_facts(body, owner, &rows)
+            }
+            else -> {}
+        }
+    }
+}
+
+// Source/CmdExpand.rs:846-885: transparent ownership/parens do not hide a fact.
+fn jet_cli_expand_origin_value_is_option(value: CtValue) -> Bool Never! {
+    if ast_comptime_value_type(value) == .Option(inner) {
+        if inner == .Named(name) -> return name == "OriginInfo"
+    }
+    false
+}
+fn jet_cli_expand_origin_expr(expression: Expr) -> @Expr Never! from expression {
+    current := expr_without_parens(expression)
+    loop {
+        if current == {
+            .Copy(inner, _) | .Place(inner, _, _) -> current = expr_without_parens(inner)
+            else -> return current
+        }
+    }
+}
+
+// Source/CmdExpand.rs:1246-1275. Sort only indices into the borrowed canonical
+// definition view, not complete recursive SymbolDef/callable-signature values.
+fn jet_cli_expand_ordered_definitions(index: SemIndex) -> [Int] Never! {
+    definitions :: index.definitions()
+    order := [Int]{}
+    loop at in 0..<definitions.len() -> &order.push(at)
+    &order.sort_by((left: Int, right: Int) -> {
+        a :: definitions[left]
+        b :: definitions[right]
+        (a.module_path <=> b.module_path).then(a.def_span.start <=> b.def_span.start).then(a.identity <=> b.identity)
+    })
+    order
+}
+fn jet_cli_expand_render_derive(index: SemIndex) -> [String] Never! {
+    rows := [String]{}
+    definitions :: index.definitions()
+    loop at in jet_cli_expand_ordered_definitions(index) {
+        definition :: definitions[at]
+        if definition.derives.len() > 0 -> &rows.push("{definition.name}: {definition.derives.join(", ")} [{definition.identity}]")
+    }
+    rows
+}
+
+// Source/CmdExpand.rs:1322-1336. test_is_measurement is a production predicate,
+// not a Rust #[test]; it only considers direct ScopeMember statements.
+fn jet_cli_expand_module_has_template_loop(source: String) -> Bool Never! {
+    loop line in source.lines() {
+        trimmed := line.trim_start() // #4303
+        if trimmed.starts_with("prep loop") -> return true
+    }
+    false
+}
+fn jet_cli_expand_test_is_measurement(test: TestDef) -> Bool Never! {
+    loop statement in test.body {
+        if statement == .ScopeMember(name, _, _, _, _, _, _, _) && name == "measure" -> return true
+    }
+    false
+}
+
+// Source/CmdExpand.rs:1483-1712. Presentation consumes only typed checked facts;
+// unavailable producer metadata is projected exactly, never fabricated.
+fn jet_cli_expand_callable_unavailable_value(unavailable: CallableFactUnavailable) -> ExpandValue Never! {
+    jet_cli_expand_object([ExpandObjectEntry]{
+        jet_cli_expand_field("status", jet_cli_expand_string("unavailable")),
+        jet_cli_expand_field("required_stage", jet_cli_expand_string(compiler_stage_as_str(unavailable.required_stage))),
+        jet_cli_expand_field("reason", jet_cli_expand_string(unavailable.reason)),
+    })
+}
+fn jet_cli_expand_callable_source_span(span: SourceSpan) -> ExpandValue Never! {
+    jet_cli_expand_object([ExpandObjectEntry]{
+        jet_cli_expand_field("start", ExpandValue.Number{value: span.start}),
+        jet_cli_expand_field("end", ExpandValue.Number{value: span.end}),
+    })
+}
+fn jet_cli_expand_callable_parameter_text(parameter: CallableParameterFact) -> String Never! {
+    access :: if parameter.access_name() == "read" -> "" else -> "{parameter.access_name()} "
+    label :: if parameter.label == "" || parameter.label == parameter.name -> parameter.name else -> "{parameter.label}: {parameter.name}"
+    default :: if parameter.default == .Val(value) -> "{{{value.source_text}}}" else -> ""
+    variadic :: if parameter.variadic -> "..." else -> ""
+    "{access}{variadic}{label}{default}: {parameter.type_name()} [{parameter.zone_name()}]"
+}
+fn jet_cli_expand_callable_signature_text(definition: SymbolDef, signature: CallableSignatureFact) -> String Never! {
+    parameters := [String]{}
+    loop parameter in signature.parameters -> &parameters.push(jet_cli_expand_callable_parameter_text(parameter))
+    effects :: if signature.effect_names() == .Val(values) -> "[{values.join(", ")}]" else -> "unavailable"
+    errors :: if signature.error_names() == .Val(values) -> "[{values.join(", ")}]" else -> "unavailable"
+    return_type :: if signature.return_type == .Val(ty) -> type_name(ty) else -> "no value"
+    failure_contract := "unavailable"
+    failure_source := ""
+    if signature.failure_contract == {
+        .Checked(failure) -> {
+            failure_contract = type_name(failure_contract_effective_type(failure))
+            failure_source = failure_contract_source(failure)
+        }
+        .Unavailable(unavailable) -> failure_source = unavailable.reason
+    }
+    generics := "unavailable"
+    if signature.generic_parameters == .Checked(values) {
+        names := [String]{}
+        loop parameter in values -> &names.push(parameter.name)
+        generics = names.join(", ")
+    }
+    views := [String]{}
+    loop view in signature.returned_views -> &views.push(view.canonical())
+    "{definition.name} [{definition.identity}] ({parameters.join(", ")}) -> {return_type} effects={effects} errors={errors} failure={failure_contract} ({failure_source}) views=[{views.join(" | ")}] policies=[{signature.policy_names().join(", ")}] generics=[{generics}]"
+}
+fn jet_cli_expand_callable_parameter_json(parameter: CallableParameterFact) -> ExpandValue Never! {
+    default := ExpandValue.Null
+    default_source := ExpandValue.Null
+    default_value := ExpandValue.Null
+    if parameter.default == .Val(value) {
+        default = jet_cli_expand_string(value.source_text)
+        default_source = jet_cli_expand_callable_source_span(value.source)
+        default_value = jet_cli_expand_callable_unavailable_value(value.value_unavailable)
+    }
+    jet_cli_expand_object([ExpandObjectEntry]{
+        jet_cli_expand_field("name", jet_cli_expand_string(parameter.name)),
+        jet_cli_expand_field("label", jet_cli_expand_string(parameter.label)),
+        jet_cli_expand_field("source", jet_cli_expand_callable_source_span(parameter.source)),
+        jet_cli_expand_field("default", ^default),
+        jet_cli_expand_field("default_source", ^default_source),
+        jet_cli_expand_field("default_value", ^default_value),
+        jet_cli_expand_field("access", jet_cli_expand_string(parameter.access_name())),
+        jet_cli_expand_field("zone", jet_cli_expand_string(parameter.zone_name())),
+        jet_cli_expand_field("type", jet_cli_expand_string(parameter.type_name())),
+        jet_cli_expand_field("variadic", ExpandValue.Bool{value: parameter.variadic}),
+    })
+}
+struct JetCLIExpandCallableEffects { names: ExpandValue, status: ExpandValue, facts: ExpandValue }
+fn jet_cli_expand_callable_effects_json(effects: CallableEffectsFact) -> JetCLIExpandCallableEffects Never! {
+    if effects == {
+        .Unavailable(unavailable) -> JetCLIExpandCallableEffects{names: ExpandValue.Null, status: jet_cli_expand_callable_unavailable_value(unavailable), facts: ExpandValue.Null}
+        .Checked(values) -> {
+            names := [String]{}
+            facts := [ExpandValue]{}
+            loop effect in values {
+                &names.push(effect.display_name())
+                if effect == {
+                    .Named(name, source) -> &facts.push(jet_cli_expand_object([ExpandObjectEntry]{
+                        jet_cli_expand_field("kind", jet_cli_expand_string("named")),
+                        jet_cli_expand_field("name", jet_cli_expand_string(name)),
+                        jet_cli_expand_field("source", jet_cli_expand_callable_source_span(source)),
+                    }))
+                    .ViaParameter(name, source) -> &facts.push(jet_cli_expand_object([ExpandObjectEntry]{
+                        jet_cli_expand_field("kind", jet_cli_expand_string("via_parameter")),
+                        jet_cli_expand_field("name", jet_cli_expand_string(name)),
+                        jet_cli_expand_field("source", jet_cli_expand_callable_source_span(source)),
+                    }))
+                }
+            }
+            JetCLIExpandCallableEffects{names: jet_cli_expand_string_list(names), status: jet_cli_expand_object([ExpandObjectEntry]{jet_cli_expand_field("status", jet_cli_expand_string("checked"))}), facts: ExpandValue.Array{values: ^facts}}
+        }
+    }
+}
+fn jet_cli_expand_callable_view_json(view: ViewProvenanceFact) -> ExpandValue Never! {
+    sources := [ExpandValue]{}
+    loop source in view.sources {
+        kind :: if source.source == {
+            .Receiver -> "receiver"
+            .Parameter(index) -> "parameter:{index}"
+            .Static(module_path, name) -> "static:{module_path}::{name}"
+        }
+        projections := [ExpandValue]{}
+        loop projection in source.projections {
+            text :: if projection == {
+                .Field(name) -> "field:{name}"
+                .Index -> "index"
+                .Range -> "range"
+            }
+            &projections.push(jet_cli_expand_string(text))
+        }
+        &sources.push(jet_cli_expand_object([ExpandObjectEntry]{
+            jet_cli_expand_field("source", jet_cli_expand_string(kind)),
+            jet_cli_expand_field("projections", ExpandValue.Array{values: ^projections}),
+        }))
+    }
+    jet_cli_expand_object([ExpandObjectEntry]{
+        jet_cli_expand_field("output_path", jet_cli_expand_string_list(view.output_path)),
+        jet_cli_expand_field("sources", ExpandValue.Array{values: ^sources}),
+        jet_cli_expand_field("mutable", ExpandValue.Bool{value: view.mutable}),
+    })
+}
+fn jet_cli_expand_render_callable_signature(index: SemIndex) -> [String] Never! {
+    rows := [String]{}
+    definitions :: index.definitions()
+    loop at in jet_cli_expand_ordered_definitions(index) {
+        definition :: definitions[at]
+        if definition.callable_signature == .Val(signature) -> &rows.push(jet_cli_expand_callable_signature_text(definition, signature))
+    }
+    rows
+}
+
+// Source/CmdExpand.rs:1714-1822 row assembly. The source location is supplied by
+// the original checked module owner; it is not guessed from a filename.
+fn jet_cli_expand_callable_signature_json(definition: SymbolDef, signature: CallableSignatureFact, location: (line: Int, col: Int)?) -> ExpandValue Never! {
+    effects := jet_cli_expand_callable_effects_json(signature.effects)
+    errors :: if signature.error_names() == .Val(values) -> jet_cli_expand_string_list(values) else -> ExpandValue.Null
+    failure := ExpandValue.Null
+    failure_source := ExpandValue.Null
+    failure_status := ExpandValue.Null
+    if signature.failure_contract == {
+        .Checked(contract) -> {
+            failure = jet_cli_expand_string(type_name(failure_contract_effective_type(contract)))
+            failure_source = jet_cli_expand_string(failure_contract_source(contract))
+            failure_status = jet_cli_expand_object([ExpandObjectEntry]{jet_cli_expand_field("status", jet_cli_expand_string("checked"))})
+        }
+        .Unavailable(unavailable) -> failure_status = jet_cli_expand_callable_unavailable_value(unavailable)
+    }
+    generics := ExpandValue.Null
+    generics_status := ExpandValue.Null
+    if signature.generic_parameters == {
+        .Checked(parameters) -> {
+            names := [String]{}
+            loop parameter in parameters -> &names.push(parameter.name)
+            generics = jet_cli_expand_string_list(names)
+            generics_status = jet_cli_expand_object([ExpandObjectEntry]{jet_cli_expand_field("status", jet_cli_expand_string("checked"))})
+        }
+        .Unavailable(unavailable) -> generics_status = jet_cli_expand_callable_unavailable_value(unavailable)
+    }
+    return_type :: if signature.return_type == .Val(ty) -> jet_cli_expand_string(type_name(ty)) else -> ExpandValue.Null
+    producer :: if signature.metadata_producer_status == {
+        .ContractOnly -> "ContractOnly"
+        .NotImplemented -> "NotImplemented"
+        .ExistingCallableProducerNeedsExtension -> "ExistingCallableProducerNeedsExtension"
+    }
+    parameters := [ExpandValue]{}
+    loop parameter in signature.parameters -> &parameters.push(jet_cli_expand_callable_parameter_json(parameter))
+    views := [ExpandValue]{}
+    loop view in signature.returned_views -> &views.push(jet_cli_expand_callable_view_json(view))
+    jet_cli_expand_object([ExpandObjectEntry]{
+        jet_cli_expand_field("name", jet_cli_expand_string(definition.name)),
+        jet_cli_expand_field("identity", jet_cli_expand_string(definition.identity)),
+        jet_cli_expand_field("source", jet_cli_expand_string(definition.module_path)),
+        jet_cli_expand_field("evidence", jet_cli_expand_string("checked_static")),
+        jet_cli_expand_field("runtime_observation", jet_cli_expand_string("not_run")),
+        jet_cli_expand_field("span", jet_cli_expand_span(Span{start: definition.def_span.start, end: definition.def_span.end}, location)),
+        jet_cli_expand_field("parameters", ExpandValue.Array{values: ^parameters}),
+        jet_cli_expand_field("return_type", ^return_type),
+        jet_cli_expand_field("return_type_status", jet_cli_expand_string("checked")),
+        jet_cli_expand_field("effects", ^effects.names),
+        jet_cli_expand_field("effect_status", ^effects.status),
+        jet_cli_expand_field("effect_facts", ^effects.facts),
+        jet_cli_expand_field("errors", ^errors),
+        jet_cli_expand_field("failure_contract", ^failure),
+        jet_cli_expand_field("failure_source", ^failure_source),
+        jet_cli_expand_field("failure_status", ^failure_status),
+        jet_cli_expand_field("returned_views", ExpandValue.Array{values: ^views}),
+        jet_cli_expand_field("policies", jet_cli_expand_string_list(signature.policy_names())),
+        jet_cli_expand_field("generic_parameters", ^generics),
+        jet_cli_expand_field("generic_parameters_status", ^generics_status),
+        jet_cli_expand_field("metadata_producer_status", jet_cli_expand_string(producer)),
+    })
+}
+
+// Source/CmdExpand.rs:617-626. Return a loan into the original value rather
+// than copying a recursive CtValue merely to inspect one field.
+fn jet_cli_expand_ct_field(value: CtValue, name: String) -> (@CtValue)? Never! from value {
+    if value == .Struct(_, fields) {
+        loop field in fields {
+            if field.name == name -> return Val(@field.value)
+        }
+    }
+    None
+}
+
+// Source/CmdExpand.rs:655-708. Missing byte facts retain E0959's registered
+// explanation; an unknown target is never assigned a host byte layout.
+fn jet_cli_expand_layout_has_unavailable_bytes(layout: CtValue) -> Bool Never! {
+    loop name in [String]{"size", "alignment", "stride"} {
+        field :: jet_cli_expand_ct_field(layout, name) ?? return true
+        if field == .Failed(report) && report == .Clean(_) -> return true
+    }
+    fields :: jet_cli_expand_ct_field(layout, "fields") ?? return true
+    if fields == .List(values) {
+        loop value in values {
+            loop name in [String]{"offset", "size"} {
+                field :: jet_cli_expand_ct_field(value, name) ?? return true
+                if field == .Failed(report) && report == .Clean(_) -> return true
+            }
+        }
+    }
+    false
+}
+fn jet_cli_expand_layout_byte_fact_diagnostic() -> Diagnostic Never! {
+    diagnostic_layout_byte_facts_unavailable("LayoutInfo", "size", None)
+}
+fn jet_cli_expand_layout_unavailable_text() -> String Never! {
+    diagnostic :: jet_cli_expand_layout_byte_fact_diagnostic()
+    "unavailable[{diagnostic.code}] {diagnostic.what}; Why: {diagnostic.why}; Fix: {diagnostic.fix}; More: jet-lang.dev/e/{diagnostic.code}"
+}
+fn jet_cli_expand_layout_byte_fact_json(layout: CtValue) -> ExpandValue Never! {
+    if !jet_cli_expand_layout_has_unavailable_bytes(layout) -> return jet_cli_expand_object([ExpandObjectEntry]{jet_cli_expand_field("status", jet_cli_expand_string("available"))})
+    diagnostic :: jet_cli_expand_layout_byte_fact_diagnostic()
+    jet_cli_expand_object([ExpandObjectEntry]{
+        jet_cli_expand_field("status", jet_cli_expand_string("unavailable")),
+        jet_cli_expand_field("diagnostic", jet_cli_expand_object([ExpandObjectEntry]{
+            jet_cli_expand_field("code", jet_cli_expand_string(diagnostic.code)),
+            jet_cli_expand_field("what", jet_cli_expand_string(diagnostic.what)),
+            jet_cli_expand_field("why", jet_cli_expand_string(diagnostic.why)),
+            jet_cli_expand_field("fix", jet_cli_expand_string(diagnostic.fix)),
+        })),
+    })
+}
+
+// Source/CmdExpand.rs:295-333. The canonical Sema packet retains projection
+// rows. Index once using the ORIGINAL composite key; never serialize that key
+// or search the whole projection array for every root (#4499 emission gate).
+struct JetCLIExpandMemoryKey { root: String, fact: MemoryFact }
+fn jet_cli_expand_memory_indices(facts: SemIndexEffectFacts) -> [JetCLIExpandMemoryKey:Int] Never! {
+    indices := [JetCLIExpandMemoryKey:Int]{}
+    loop (index, row) in facts.memory_projections {
+        &indices.insert(JetCLIExpandMemoryKey{root: row.root, fact: row.fact}, index)
+    }
+    indices
+}
+fn jet_cli_expand_memory_projection_text(projection: (@MemoryProjection)?) -> String Never! {
+    if projection == {
+        .None -> "not projected"
+        .Val(value) -> if value == {
+            .Proven -> "proven"
+            .Violated(call_path, operation) -> "violated by {operation} through {call_path.join(" -> ")}"
+            .OpenWorld(call_path, reason) -> "open through {call_path.join(" -> ")}: {reason}"
+        }
+    }
+}
+fn jet_cli_expand_render_memory(facts: SemIndexEffectFacts) -> [String] Never! {
+    indices :: jet_cli_expand_memory_indices(facts)
+    lines := [String]{}
+    loop declaration in facts.memory_declarations {
+        loop root in declaration.roots {
+            projection := (@MemoryProjection)?{None}
+            if indices.get(JetCLIExpandMemoryKey{root: root, fact: declaration.fact}) == .Val(index) -> projection = Val(@facts.memory_projections[index].projection)
+            status :: jet_cli_expand_memory_projection_text(projection)
+            &lines.push("{root}: {effect_facts_memory_display(declaration.fact)} — {status} ({declaration.provenance})")
+        }
+    }
+    &lines.sort()
+    lines
+}
+// Source/CmdExpand.rs:344-367; fact-row/source-location assembly stays at the
+// bundle boundary. This helper never converts missing into a proven fact.
+fn jet_cli_expand_memory_projection_json(projection: (@MemoryProjection)?) -> ExpandValue Never! {
+    if projection == {
+        .None -> jet_cli_expand_object([ExpandObjectEntry]{jet_cli_expand_field("kind", jet_cli_expand_string("not_projected"))})
+        .Val(value) -> if value == {
+            .Proven -> jet_cli_expand_object([ExpandObjectEntry]{jet_cli_expand_field("kind", jet_cli_expand_string("proven"))})
+            .Violated(call_path, operation) -> jet_cli_expand_object([ExpandObjectEntry]{
+                jet_cli_expand_field("kind", jet_cli_expand_string("violated")),
+                jet_cli_expand_field("operation", jet_cli_expand_string(operation)),
+                jet_cli_expand_field("call_path", jet_cli_expand_string_list(call_path)),
+            })
+            .OpenWorld(call_path, reason) -> jet_cli_expand_object([ExpandObjectEntry]{
+                jet_cli_expand_field("kind", jet_cli_expand_string("open_world")),
+                jet_cli_expand_field("reason", jet_cli_expand_string(reason)),
+                jet_cli_expand_field("call_path", jet_cli_expand_string_list(call_path)),
+            })
+        }
+    }
+}
+// Source/CmdExpand.rs:384-401; Foundation owns all graph explanation meaning.
+fn jet_cli_expand_render_web(facts: SemIndexEffectFacts) -> [String] Never! {
+    graph :: facts.web_app ?? return [String]{}
+    if graph.entry_file == "" && graph.routes.len() == 0 && graph.actions.len() == 0 && graph.mounts.len() == 0 && graph.routes_from.len() == 0 -> return [String]{}
+    app_graph_explain_lines(graph)
+}
+
+// Source/CmdExpand.rs:1313-1437. Only private presentation rows are allocated;
+// checked declarations/method bodies stay with their original AST owner.
+struct JetCLIExpandTemplateRow {
+    source: String, span: Span, kind: String, name: String,
+    methods: [String], text: String
+}
+struct JetCLIExpandTemplateMarkerKey { name: String, span: Span }
+fn jet_cli_expand_collect_template_module(source: String, display: String, items: [Item], rows: &[JetCLIExpandTemplateRow]) Never! {
+    if !jet_cli_expand_module_has_template_loop(source) -> return
+    loop item in items {
+        if item == {
+            .Struct(definition) -> {
+                seen := [JetCLIExpandTemplateMarkerKey:Bool]{} // #4499: exact composite key.
+                loop marker in definition.type_markers {
+                    &seen.insert(JetCLIExpandTemplateMarkerKey{name: marker.name, span: marker.span}, true)
+                    &rows.push(JetCLIExpandTemplateRow{source: display, span: marker.span, kind: "marker", name: definition.name, methods: [String]{}, text: "marker #{marker.name} on {definition.name}"})
+                }
+                loop derive in definition.derives {
+                    if seen.has_key(JetCLIExpandTemplateMarkerKey{name: derive.name, span: derive.span}) -> next
+                    &rows.push(JetCLIExpandTemplateRow{source: display, span: derive.span, kind: "derive", name: definition.name, methods: [String]{}, text: "derive #{derive.name} on {definition.name}"})
+                }
+            }
+            .Impl(implementation) -> {
+                if implementation.is_generated_serde -> next
+                methods := [String]{}
+                loop method in implementation.methods -> &methods.push(method.name)
+                suffix :: if implementation.trait_name == .Val(name) -> ": {name}" else -> ""
+                members :: if methods.len() == 0 -> "" else -> " [{methods.join(", ")}]"
+                text :: "impl {implementation.type_name}{suffix}{members}"
+                &rows.push(JetCLIExpandTemplateRow{source: display, span: implementation.span, kind: "impl", name: implementation.type_name, methods: ^methods, text: text})
+            }
+            .Test(test) -> {
+                name :: test.name ?? "<unresolved>"
+                kind :: if jet_cli_expand_test_is_measurement(test) -> "measurement" else -> "test"
+                &rows.push(JetCLIExpandTemplateRow{source: display, span: test.span, kind: kind, name: name, methods: [String]{}, text: "{kind} #Test({name})"})
+            }
+            else -> {}
+        }
+    }
+}
+fn jet_cli_expand_order_template_rows(rows: &[JetCLIExpandTemplateRow]) Never! {
+    &rows.sort_by((a: JetCLIExpandTemplateRow, b: JetCLIExpandTemplateRow) -> (a.source <=> b.source).then(a.span.start <=> b.span.start).then(a.kind <=> b.kind).then(a.name <=> b.name))
+}
+
+// Source/CmdExpand.rs:368-375, single memory row; module lookup and Rust Debug
+// sort-key fidelity require their canonical checked-module/debug producers.
+fn jet_cli_expand_memory_row_json(declaration: MemoryFactDeclaration, root: String, projection: (@MemoryProjection)?, location: (line: Int, col: Int)?) -> ExpandValue Never! {
+    fields := [ExpandObjectEntry]{
+        jet_cli_expand_field("fact", jet_cli_expand_string(effect_facts_memory_display(declaration.fact))),
+        jet_cli_expand_field("root", jet_cli_expand_string(root)),
+        jet_cli_expand_field("source", jet_cli_expand_string(declaration.source)),
+        jet_cli_expand_field("span", jet_cli_expand_span(declaration.span, location)),
+        jet_cli_expand_field("provenance", jet_cli_expand_string(declaration.provenance)),
+        jet_cli_expand_field("status", jet_cli_expand_memory_projection_json(projection)),
+    }
+    jet_cli_expand_add_location(&fields, location)
+    jet_cli_expand_object(^fields)
+}
+// Source/CmdExpand.rs:1167-1177,1276-1310,1461-1481: complete row projections
+// over original leaves; callers supply only locations from their retained owner.
+fn jet_cli_expand_inline_row_json(source: String, row: JetCLIExpandInlineRow, location: (line: Int, col: Int)?) -> ExpandValue Never! {
+    jet_cli_expand_object([ExpandObjectEntry]{
+        jet_cli_expand_field("name", jet_cli_expand_string(row.qualified)),
+        jet_cli_expand_field("source", jet_cli_expand_string(source)),
+        jet_cli_expand_field("span", jet_cli_expand_span(row.span, location)),
+        jet_cli_expand_field("contract", jet_cli_expand_string(row.contract)),
+        jet_cli_expand_field("rust_attribute", jet_cli_expand_string(row.attribute)),
+    })
+}
+fn jet_cli_expand_derive_row_json(definition: SymbolDef, location: (line: Int, col: Int)?) -> ExpandValue Never! {
+    jet_cli_expand_object([ExpandObjectEntry]{
+        jet_cli_expand_field("name", jet_cli_expand_string(definition.name)),
+        jet_cli_expand_field("identity", jet_cli_expand_string(definition.identity)),
+        jet_cli_expand_field("source", jet_cli_expand_string(definition.module_path)),
+        jet_cli_expand_field("span", jet_cli_expand_span(Span{start: definition.def_span.start, end: definition.def_span.end}, location)),
+        jet_cli_expand_field("derives", jet_cli_expand_string_list(definition.derives)),
+    })
+}
+fn jet_cli_expand_template_row_json(row: JetCLIExpandTemplateRow, location: (line: Int, col: Int)?) -> ExpandValue Never! {
+    jet_cli_expand_object([ExpandObjectEntry]{
+        jet_cli_expand_field("kind", jet_cli_expand_string(row.kind)),
+        jet_cli_expand_field("name", jet_cli_expand_string(row.name)),
+        jet_cli_expand_field("methods", jet_cli_expand_string_list(row.methods)),
+        jet_cli_expand_field("text", jet_cli_expand_string(row.text)),
+        jet_cli_expand_field("source", jet_cli_expand_string(row.source)),
+        jet_cli_expand_field("span", jet_cli_expand_span(row.span, location)),
+        jet_cli_expand_field("origin", jet_cli_expand_string("prep loop (closed comptime source)")),
+    })
+}
+
+// Source/CmdExpand.rs:854-873. Rust str::get uses UTF-8 BYTE boundaries; trim
+// and split_whitespace use Unicode White_Space, not an ASCII token scan.
+fn jet_cli_expand_origin_receiver_from_source(source: String, span: Span) -> String Never! {
+    raw :: source.bytes()
+    if span.start < 0 || span.end < span.start || span.end > raw.len() -> return "value"
+    if span.start < raw.len() {
+        code :: Int.from_u8(raw[span.start])
+        if code >= 128 && code <= 191 -> return "value"
+    }
+    if span.end < raw.len() {
+        code :: Int.from_u8(raw[span.end])
+        if code >= 128 && code <= 191 -> return "value"
+    }
+    text := source.slice(span.start, span.end).trim() // #4303
+    if text.ends_with(".@origin") {
+        receiver := text.slice(0, text.len() - 8).trim() // #4303
+        if receiver != "" -> return receiver
+    }
+    if text == "@origin" {
+        end := span.start
+        loop end > 0 {
+            start := end - 1
+            loop start > 0 {
+                code :: Int.from_u8(raw[start])
+                if code < 128 || code > 191 -> break
+                start -= 1
+            }
+            scalar := source.slice(start, end) // #4303
+            if !expand_unicode.is_whitespace(scalar) -> break
+            end = start
+        }
+        start := end
+        loop start > 0 {
+            previous := start - 1
+            loop previous > 0 {
+                code :: Int.from_u8(raw[previous])
+                if code < 128 || code > 191 -> break
+                previous -= 1
+            }
+            scalar := source.slice(previous, start) // #4303
+            if expand_unicode.is_whitespace(scalar) -> break
+            start = previous
+        }
+        loop end > start && raw[end - 1] == (U8{46}) -> end -= 1
+        if end > start -> return source.slice(start, end)
+    }
+    "value"
+}
+
+// Source/CmdExpand.rs:236-245. The existing CLI report owner serializes the
+// spanless failure through Foundation Report/StatusValue; only CmdExpand's
+// USER_ERROR exit differs from the argument owner's generic usage exit.
+fn jet_cli_expand_json_cli_error(code: String, what: String, why: String, fix: String) -> JetDriverVerbOutput Never! {
+    refusal := jet_cli_args_refuse(code, what, why, fix, true)
+    JetDriverVerbOutput{stdout: ^refusal.stdout, stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+}
+
+// Source/CmdExpand.rs:1146-1150. Public read type comes from the canonical
+// Foundation fact registry, not a CLI-owned spelling/type table.
+fn jet_cli_expand_origin_fact_type() -> String Never! {
+    read :: fact_read_kind(COMPILER_FACT_ORIGIN) ?? panic("origin fact has a public read type")
+    fact_read_public_read_type(read) ?? panic("origin fact has a public read type")
+}

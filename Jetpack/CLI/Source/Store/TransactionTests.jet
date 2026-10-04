@@ -1,0 +1,129 @@
+// PORT-PENDING 0950 crates-jetpack-src-store-tests-module-group-slice-1789: crates/jetpack/src/Store/TransactionTests.rs:1-125
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS use crate::Store::{
+//RS     closure_graph, list_checked, recover_hangar, CacheIdentity, IngestRequest, Roots,
+//RS };
+//RS use std::collections::BTreeMap;
+//RS use std::fs;
+//RS 
+//RS struct RootGuard {
+//RS     roots: Roots,
+//RS }
+//RS 
+//RS impl RootGuard {
+//RS     fn new(tag: &str) -> Self {
+//RS         let path = std::env::temp_dir().join(format!(
+//RS             "jet-admission-{tag}-{}-{}",
+//RS             std::process::id(),
+//RS             TRANSACTION_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+//RS         ));
+//RS         fs::create_dir_all(&path).unwrap();
+//RS         Self {
+//RS             roots: Roots {
+//RS                 root: path,
+//RS                 dev_mode: true,
+//RS             },
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for RootGuard {
+//RS     fn drop(&mut self) {
+//RS         let _ = make_tree_writable_for_removal(&self.roots.root);
+//RS         let _ = fs::remove_dir_all(&self.roots.root);
+//RS     }
+//RS }
+//RS 
+//RS fn identity() -> CacheIdentity {
+//RS     CacheIdentity {
+//RS         source_fingerprint: "transaction-source".into(),
+//RS         recipe_fingerprint: "transaction-recipe".into(),
+//RS         policy_fingerprint: "transaction-policy".into(),
+//RS         platform: crate::Envelope::host_platform(),
+//RS     }
+//RS }
+//RS 
+//RS fn request(roots: &Roots, name: &str) -> IngestRequest {
+//RS     let source = roots.root.join(format!("source-{name}"));
+//RS     fs::create_dir_all(&source).unwrap();
+//RS     fs::write(source.join("payload"), name.as_bytes()).unwrap();
+//RS     IngestRequest {
+//RS         name: name.into(),
+//RS         version: "1".into(),
+//RS         reference: format!("path:{name}"),
+//RS         cache_identity: identity(),
+//RS         references: Vec::new(),
+//RS         outputs: BTreeMap::from([(String::from("out"), source)]),
+//RS         signature: String::new(),
+//RS         provenance: "admission-transaction-test".into(),
+//RS         platform_artifact_kind: String::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn assert_no_committed_package(roots: &Roots) {
+//RS     assert!(list_checked(roots).unwrap().is_empty());
+//RS     assert!(closure_graph(roots).unwrap().records.is_empty());
+//RS     assert_eq!(
+//RS         fs::read_dir(roots.hangar_dir().join(OBJECTS_DIR))
+//RS             .unwrap()
+//RS             .count(),
+//RS         0
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn admission_failure_after_object_publication_recovers_without_live_orphans() {
+//RS     let guard = RootGuard::new("object");
+//RS     let request = request(&guard.roots, "object");
+//RS     let result = with_admission_failure(AdmissionFailurePoint::AfterObjectPublication, || {
+//RS         crate::Store::ingest_tree(&guard.roots, &request)
+//RS     });
+//RS     assert!(result.is_err());
+//RS 
+//RS     recover_hangar(&guard.roots).unwrap();
+//RS     recover_hangar(&guard.roots).unwrap();
+//RS     assert_no_committed_package(&guard.roots);
+//RS }
+//RS 
+//RS #[test]
+//RS fn admission_failure_after_receipt_publication_recovers_without_half_registration() {
+//RS     let guard = RootGuard::new("receipt");
+//RS     let request = request(&guard.roots, "receipt");
+//RS     let result = with_admission_failure(AdmissionFailurePoint::AfterReceiptPublication, || {
+//RS         crate::Store::ingest_tree(&guard.roots, &request)
+//RS     });
+//RS     assert!(result.is_err());
+//RS 
+//RS     recover_hangar(&guard.roots).unwrap();
+//RS     recover_hangar(&guard.roots).unwrap();
+//RS     assert_no_committed_package(&guard.roots);
+//RS }
+//RS 
+//RS #[test]
+//RS fn admission_failure_after_closure_registration_recovers_projection_idempotently() {
+//RS     let guard = RootGuard::new("closure");
+//RS     let request = request(&guard.roots, "closure");
+//RS     let result = with_admission_failure(AdmissionFailurePoint::AfterClosureRegistration, || {
+//RS         crate::Store::ingest_tree(&guard.roots, &request)
+//RS     });
+//RS     assert!(result.is_err());
+//RS 
+//RS     let committed = list_checked(&guard.roots).unwrap();
+//RS     assert_eq!(committed.len(), 1);
+//RS     let meta = guard
+//RS         .roots
+//RS         .hangar_dir()
+//RS         .join(&committed[0].id)
+//RS         .join("meta.json");
+//RS     fs::remove_file(&meta).unwrap();
+//RS 
+//RS     recover_hangar(&guard.roots).unwrap();
+//RS     let recovered = list_checked(&guard.roots).unwrap();
+//RS     assert_eq!(recovered, committed);
+//RS     recover_hangar(&guard.roots).unwrap();
+//RS     assert_eq!(list_checked(&guard.roots).unwrap(), recovered);
+//RS     assert_eq!(closure_graph(&guard.roots).unwrap().records.len(), 1);
+//RS }
+// END-PORT-PENDING 0950 crates/jetpack/src/Store/TransactionTests.rs:1-125
+

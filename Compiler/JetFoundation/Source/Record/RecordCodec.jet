@@ -93,6 +93,7 @@ pub struct RecordReader {
     bytes: [U8]
     strings: [String]
     ids: [Int]
+    section_positions: [Int:Int]
     firsts: [Int]
     bounds: [Int]
 }
@@ -105,6 +106,121 @@ pub struct RecordReaderResult {
 pub struct RecordValueResult {
     pub value: RecordValue?
     pub problem: String?
+}
+
+// Typed views use the same explicit problem carriers as the binary reader.
+pub struct RecordStringResult {
+    pub value: String?
+    pub problem: String?
+}
+pub struct RecordOptionalStringResult {
+    pub value: String?
+    pub problem: String?
+}
+pub struct RecordListResult {
+    pub value: [RecordValue]?
+    pub problem: String?
+}
+pub struct RecordCountResult {
+    pub value: Int?
+    pub problem: String?
+}
+pub struct RecordStringsResult {
+    pub value: [String]?
+    pub problem: String?
+}
+
+fn record_value_kind(value: RecordValue) -> String Never! {
+    if value == {
+        .Null -> "null"
+        .Bool(_) -> "boolean"
+        .Int(_) -> "integer"
+        .Str(_) -> "string"
+        .Bytes(_) -> "bytes"
+        .List(_) -> "list"
+        .Map(_) -> "map"
+        .Digest(_) -> "digest"
+    }
+}
+
+fn record_value_shape(expected: String, value: RecordValue) -> String Never! {
+    "record is malformed: expected {expected}, found {record_value_kind(value)}"
+}
+
+pub fn record_value_field(value: RecordValue, name: String) -> RecordValueResult Never! {
+    if value == {
+        .Map(fields) -> {
+            loop field in fields {
+                if field.name == name -> return RecordValueResult{value: Val(field.value), problem: None}
+            }
+            RecordValueResult{value: None, problem: Val("record is malformed: field `{name}` is missing")}
+        }
+        else -> RecordValueResult{value: None, problem: Val(record_value_shape("map", value))}
+    }
+}
+
+pub fn record_value_as_str(value: RecordValue) -> RecordStringResult Never! {
+    if value == {
+        .Str(text) -> RecordStringResult{value: Val(text), problem: None}
+        else -> RecordStringResult{value: None, problem: Val(record_value_shape("string", value))}
+    }
+}
+
+pub fn record_value_as_optional_str(value: RecordValue) -> RecordOptionalStringResult Never! {
+    if value == .Null -> return RecordOptionalStringResult{value: None, problem: None}
+    decoded :: record_value_as_str(value)
+    RecordOptionalStringResult{value: decoded.value, problem: decoded.problem}
+}
+
+pub fn record_value_as_list(value: RecordValue) -> RecordListResult Never! {
+    if value == {
+        .List(values) -> RecordListResult{value: Val(values), problem: None}
+        else -> RecordListResult{value: None, problem: Val(record_value_shape("list", value))}
+    }
+}
+
+pub fn record_value_as_usize(value: RecordValue) -> RecordCountResult Never! {
+    if value == {
+        .Int(number) -> {
+            if number < 0 || number > 18446744073709551615 -> return RecordCountResult{value: None, problem: Val("record is malformed: negative or oversized count")}
+            RecordCountResult{value: Val(number), problem: None}
+        }
+        else -> RecordCountResult{value: None, problem: Val(record_value_shape("integer", value))}
+    }
+}
+
+pub fn record_value_str_list(value: RecordValue) -> RecordStringsResult Never! {
+    decoded :: record_value_as_list(value)
+    items :: decoded.value ?? return RecordStringsResult{value: None, problem: decoded.problem}
+    texts := [String]{}
+    loop item in items {
+        text :: record_value_as_str(item)
+        if text.problem != None -> return RecordStringsResult{value: None, problem: text.problem}
+        &texts.push(text.value ?? "")
+    }
+    RecordStringsResult{value: Val(texts), problem: None}
+}
+
+pub fn record_value_optional_str(value: String?) -> RecordValue Never! {
+    if value == {
+        .Val(text) -> RecordValue.Str{value: text}
+        .None -> RecordValue.Null
+    }
+}
+
+pub fn record_value_list_of_str(values: [String]) -> RecordValue Never! {
+    items := [RecordValue]{}
+    loop text in values -> &items.push(RecordValue.Str{value: text})
+    RecordValue.List{values: items}
+}
+
+// Rust RecordReader::open_schema: opening verifies checksum and framing
+// before checking the required schema; element payloads decode on demand.
+pub fn record_open_schema(bytes: [U8], schema: String) -> RecordReaderResult Never! {
+    opened :: record_open(bytes)
+    reader :: opened.reader ?? return opened
+    if reader.schema != schema -> return RecordReaderResult{reader: None, problem: Val("record schema is `{reader.schema}`, expected `{schema}`")}
+    opened
 }
 
 // ---------------------------------------------------------------- encoding
@@ -288,46 +404,74 @@ fn record_put_value(out: &[U8], table: RecordStringTable, value: RecordValue) Ne
     }
 }
 
+// Stable scalar-position ordering by section id.
+// Rust: crates/jet-foundation/src/RecordCodec.rs::encode_record
+fn record_section_order(ids: [Int]) -> [Int] Never! {
+    order := [Int]{}
+    loop index in 0..<ids.len() -> &order.push(index)
+    width := 1
+    loop width < order.len() {
+        merged := [Int]{}
+        start := 0
+        loop start < order.len() {
+            middle :: if start + width < order.len() -> start + width else -> order.len()
+            end :: if start + 2 * width < order.len() -> start + 2 * width else -> order.len()
+            left := start
+            right := middle
+            loop left < middle || right < end {
+                if right >= end || (left < middle && !(ids[order[right]] < ids[order[left]])) {
+                    &merged.push(order[left])
+                    left += 1
+                } else {
+                    &merged.push(order[right])
+                    right += 1
+                }
+            }
+            start = end
+        }
+        order = merged
+        width = width * 2
+    }
+    order
+}
+
 // Encode a record. Sections may be passed in any order; they are written in
 // ascending id order. A repeated section id, a repeated map key, an integer
 // outside i64, or a digest that is not 32 bytes is a problem, not bytes.
+// Rust: crates/jet-foundation/src/RecordCodec.rs::encode_record
 pub fn record_encode(schema: String, sections: [RecordSection]) -> RecordEncodeResult Never! {
     problems := [String]{}
     canonical := [RecordSection]{}
-    order := [Int]{}
+    ids := [Int]{}
+    seen := [Int:Bool]{}
     loop section in sections {
         if section.id < 0 || section.id >> 64 != 0 -> return RecordEncodeResult{bytes: None, problem: Val("record section id {section.id} is outside u64")}
         elements := [RecordValue]{}
         loop element in section.elements -> &elements.push(record_canonical_value(element, &problems))
         &canonical.push(RecordSection{id: section.id, elements: elements})
-        &order.push(canonical.len() - 1)
-        position := order.len() - 1
-        loop position > 0 && section.id < canonical[order[position - 1]].id {
-            order[position] = order[position - 1]
-            order[position - 1] = canonical.len() - 1
-            position -= 1
-        }
-        if position > 0 && canonical[order[position - 1]].id == section.id {
+        &ids.push(section.id)
+        if seen.get(section.id) != None {
             return RecordEncodeResult{bytes: None, problem: Val("record section {section.id} is duplicated or out of order")}
         }
+        seen[section.id] = true
     }
-    ordered :: loop index in order -> canonical[index]
+    order :: record_section_order(ids)
     if problems.len() > 0 -> return RecordEncodeResult{bytes: None, problem: Val(problems[0])}
     table := RecordStringTable{order: [String]{}, index: [String:Int]{}}
-    loop section in ordered {
-        loop element in section.elements -> record_intern_value(&table, element)
+    loop index in order {
+        loop element in canonical[index].elements -> record_intern_value(&table, element)
     }
     out := [U8]{74, 69, 84, 82}
     record_put_uvarint(&out, RECORD_FORMAT)
     record_put_str(&out, schema)
     record_put_uvarint(&out, table.order.len())
     loop text in table.order -> record_put_str(&out, text)
-    record_put_uvarint(&out, ordered.len())
-    loop section in ordered {
-        record_put_uvarint(&out, section.id)
-        record_put_uvarint(&out, section.elements.len())
+    record_put_uvarint(&out, order.len())
+    loop index in order {
+        record_put_uvarint(&out, canonical[index].id)
+        record_put_uvarint(&out, canonical[index].elements.len())
         body := [U8]{}
-        loop element in section.elements {
+        loop element in canonical[index].elements {
             encoded := [U8]{}
             record_put_value(&encoded, table, element)
             record_put_uvarint(&out, encoded.len())
@@ -441,6 +585,7 @@ fn record_reader_failure(problem: String) -> RecordReaderResult Never! {
 
 // Verify the checksum and framing and index every section. Element payloads
 // are not decoded until asked for.
+// Rust: crates/jet-foundation/src/RecordCodec.rs::RecordReader::open
 pub fn record_open(bytes: [U8]) -> RecordReaderResult Never! {
     if bytes.len() < 4 + RECORD_CHECKSUM_BYTES -> return record_reader_failure("record is truncated")
     body_end :: bytes.len() - RECORD_CHECKSUM_BYTES
@@ -461,6 +606,7 @@ pub fn record_open(bytes: [U8]) -> RecordReaderResult Never! {
     }
     section_count :: record_read_len(bytes, &cursor)
     ids := [Int]{}
+    section_positions := [Int:Int]{}
     firsts := [Int]{}
     bounds := [Int]{}
     loop _ in 0..<section_count {
@@ -474,6 +620,7 @@ pub fn record_open(bytes: [U8]) -> RecordReaderResult Never! {
             if cursor.problem != None -> break
             &lengths.push(record_read_len(bytes, &cursor))
         }
+        section_positions[id] = ids.len()
         &ids.push(id)
         &firsts.push(bounds.len())
         &bounds.push(cursor.at)
@@ -485,16 +632,14 @@ pub fn record_open(bytes: [U8]) -> RecordReaderResult Never! {
     if cursor.problem == None && cursor.at != body_end -> record_malformed(&cursor, "trailing bytes before the checksum")
     if cursor.problem != None -> return record_reader_failure(cursor.problem ?? "")
     RecordReaderResult{
-        reader: Val(RecordReader{schema: schema, digest: checksum, bytes: bytes, strings: strings, ids: ids, firsts: firsts, bounds: bounds}),
+        reader: Val(RecordReader{schema: schema, digest: checksum, bytes: bytes, strings: strings, ids: ids, section_positions: section_positions, firsts: firsts, bounds: bounds}),
         problem: None,
     }
 }
 
+// Rust: crates/jet-foundation/src/RecordCodec.rs::RecordReader::slices
 fn record_section_index(reader: RecordReader, id: Int) -> Int? Never! {
-    loop index in 0..<reader.ids.len() {
-        if reader.ids[index] == id -> return Val(index)
-    }
-    None
+    reader.section_positions.get(id)
 }
 
 fn record_section_elements(reader: RecordReader, section: Int) -> Int Never! {

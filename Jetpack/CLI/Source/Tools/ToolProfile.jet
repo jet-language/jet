@@ -4,16 +4,16 @@
 // publication of the checked `current` pointer. Every entry point runs under
 // the `profile-user-tools` lock on the tools state directory.
 
-@TOOL_PROFILE_LOCK_SCOPE :: "profile-user-tools"
-@TOOL_PROFILE_COMPLETE_FILE :: "complete"
-@TOOL_PROFILE_META_FILE :: "meta.json"
-@TOOL_PROFILE_POINTER_PARTIAL :: "profile.json.partial"
-@TOOL_PROFILE_CURRENT_FILE :: "current"
-@TOOL_PROFILE_CURRENT_PARTIAL :: "current.partial"
-@TOOL_MANIFEST_FILE :: "manifest.json"
-@TOOL_MANIFEST_PARTIAL :: "manifest.json.partial"
-@TOOL_PROFILE_FAILPOINT_ENV :: "JETPACK_INTERNAL_TEST_PROFILE_FAILPOINT"
-@TOOL_LEGACY_GENERATIONS_DIR :: "legacy-generations"
+TOOL_PROFILE_LOCK_SCOPE :: prep { "profile-user-tools" }
+TOOL_PROFILE_COMPLETE_FILE :: prep { "complete" }
+TOOL_PROFILE_META_FILE :: prep { "meta.json" }
+TOOL_PROFILE_POINTER_PARTIAL :: prep { "profile.json.partial" }
+TOOL_PROFILE_CURRENT_FILE :: prep { "current" }
+TOOL_PROFILE_CURRENT_PARTIAL :: prep { "current.partial" }
+TOOL_MANIFEST_FILE :: prep { "manifest.json" }
+TOOL_MANIFEST_PARTIAL :: prep { "manifest.json.partial" }
+TOOL_PROFILE_FAILPOINT_ENV :: prep { "JETPACK_INTERNAL_TEST_PROFILE_FAILPOINT" }
+TOOL_LEGACY_GENERATIONS_DIR :: prep { "legacy-generations" }
 
 // One installed tool as a generation records it.
 pub struct InstalledUserTool {
@@ -43,15 +43,15 @@ pub struct ToolGenerationRecord {
 
 pub fn cli_user_jet_dir() -[Env]> String Never! {
     home :: sys.get("HOME") ?? "."
-    files.join(home, @CONFIG_DEFAULT_DIR)
+    files.join(home, CONFIG_DEFAULT_DIR)
 }
 
 pub fn cli_user_bin_dir() -[Env]> String Never! {
-    files.join(cli_user_jet_dir(), @TOOL_BIN_DIR)
+    files.join(cli_user_jet_dir(), TOOL_BIN_DIR)
 }
 
 pub fn cli_tools_state_dir() -[Env]> String Never! {
-    files.join(cli_user_jet_dir(), @TOOL_STATE_DIR)
+    files.join(cli_user_jet_dir(), TOOL_STATE_DIR)
 }
 
 pub fn cli_tool_generations_dir() -[Env]> String Never! {
@@ -67,16 +67,16 @@ fn cli_tool_profile_path() -[Env]> String Never! {
 }
 
 pub fn cli_tool_current_path() -[Env]> String Never! {
-    files.join(cli_tools_state_dir(), @TOOL_PROFILE_CURRENT_FILE)
+    files.join(cli_tools_state_dir(), TOOL_PROFILE_CURRENT_FILE)
 }
 
 pub fn cli_tool_manifest_path() -[Env]> String Never! {
-    files.join(cli_tools_state_dir(), @TOOL_MANIFEST_FILE)
+    files.join(cli_tools_state_dir(), TOOL_MANIFEST_FILE)
 }
 
 // The profile lock; released at scope exit.
 pub fn cli_tool_profile_lock() -[FS, Env, Time]> RuntimeLock IOError! {
-    env_runtime_lock(cli_tools_state_dir(), @TOOL_PROFILE_LOCK_SCOPE)
+    env_runtime_lock(cli_tools_state_dir(), TOOL_PROFILE_LOCK_SCOPE)
 }
 
 // Unix seconds now.
@@ -85,35 +85,33 @@ pub fn cli_now_secs() -[Time]> Int Never! {
 }
 
 // A test-only crash injection point named by the failpoint env var.
-fn cli_profile_failpoint(phase: String) CliError! -[Env]> {
-    if sys.get(@TOOL_PROFILE_FAILPOINT_ENV) == .Val(requested) {
-        if requested == phase -> return Err(CliError.Other("profile publication failpoint `{phase}`"))
+fn cli_profile_failpoint(phase: String) CLIError! -[Env]> {
+    if sys.get(TOOL_PROFILE_FAILPOINT_ENV) == .Val(requested) {
+        if requested == phase -> return Err(CLIError.Other("profile publication failpoint `{phase}`"))
     }
-    Ok()
 }
 
 // ── Manifest I/O ──
 
-pub fn cli_read_tool_manifest() -[FS, Env]> ToolManifest CliError! {
+pub fn cli_read_tool_manifest() -[FS, Env]> ToolManifest CLIError! {
     path :: cli_tool_manifest_path()
     if !files.is_file(path) -> return Ok(ToolManifest.empty())
     ToolManifest.parse(cli_read_bounded(path))
 }
 
-pub fn cli_write_tool_manifest(manifest: ToolManifest) CliError! -[FS, Env]> {
+pub fn cli_write_tool_manifest(manifest: ToolManifest) CLIError! -[FS, Env]> {
     files.create_dir_all(cli_tools_state_dir())
-    partial :: files.join(cli_tools_state_dir(), @TOOL_MANIFEST_PARTIAL)
+    partial :: files.join(cli_tools_state_dir(), TOOL_MANIFEST_PARTIAL)
     if cli_stat_optional(partial) != None -> files.remove(partial)
     cli_write_synced(partial, manifest.format().bytes())
     cli_finalize_profile_pointer(partial, cli_tool_manifest_path())
     store_sync_store_directory(cli_tools_state_dir())
-    Ok()
 }
 
 // Record the installed tools in the manifest: sources merge the old
 // declarations with the realization table, and each tool keeps its declared
 // reference and tier unless this install overrides its policy.
-pub fn cli_record_tool_manifest_locked(tools: [InstalledUserTool], declared_sources: SourceTable, override_ref: String?, override_policy: ChannelPolicy) CliError! -[FS, Env]> {
+pub fn cli_record_tool_manifest_locked(tools: [InstalledUserTool], declared_sources: SourceTable, override_ref: String?, override_policy: ChannelPolicy) CLIError! -[FS, Env]> {
     old :: cli_read_tool_manifest()
     source_map := [String: ToolManifestSource]{}
     loop source in old.sources -> source_map[source.name] = source
@@ -145,7 +143,7 @@ pub fn cli_record_tool_manifest_locked(tools: [InstalledUserTool], declared_sour
 
 // ── Generation records ──
 
-pub fn cli_format_tool_generation_meta(generation: Int, tools: [InstalledUserTool]) -[Time]> String CliError! {
+pub fn cli_format_tool_generation_meta(generation: Int, tools: [InstalledUserTool]) -[Time]> String CLIError! {
     rows := [ToolGenerationTool]{}
     loop tool in tools {
         &rows.push(ToolGenerationTool{
@@ -163,7 +161,7 @@ pub fn cli_format_tool_generation_meta(generation: Int, tools: [InstalledUserToo
     ToolGenerationMetadata{generation: generation, created_at: cli_now_secs(), tools: rows}.format()
 }
 
-pub fn cli_parse_tool_generation_meta(text: String, expected_generation: Int) -> [InstalledUserTool] CliError! {
+pub fn cli_parse_tool_generation_meta(text: String, expected_generation: Int) -> [InstalledUserTool] CLIError! {
     metadata :: ToolGenerationMetadata.parse(text, expected_generation)
     tools := [InstalledUserTool]{}
     loop tool in metadata.tools {
@@ -182,35 +180,35 @@ pub fn cli_parse_tool_generation_meta(text: String, expected_generation: Int) ->
     Ok(tools)
 }
 
-fn cli_tool_generation_record_witness(metadata: String, generation: Int) -> String CliError! {
+fn cli_tool_generation_record_witness(metadata: String, generation: Int) -> String CLIError! {
     parsed :: ToolGenerationMetadata.parse(metadata, generation)
     Ok(parsed.witness(metadata))
 }
 
 // A complete generation whose completion marker matches its metadata.
-pub fn cli_read_tool_generation_record(generation: Int) -[FS, Env]> ToolGenerationRecord CliError! {
-    path :: files.join(cli_tool_generation_dir(generation), @TOOL_PROFILE_META_FILE)
-    if !files.is_file(path) -> return Err(CliError.Other("tool generation {generation} has no metadata"))
+pub fn cli_read_tool_generation_record(generation: Int) -[FS, Env]> ToolGenerationRecord CLIError! {
+    path :: files.join(cli_tool_generation_dir(generation), TOOL_PROFILE_META_FILE)
+    if !files.is_file(path) -> return Err(CLIError.Other("tool generation {generation} has no metadata"))
     text :: cli_read_bounded(path)
     tools :: cli_parse_tool_generation_meta(text, generation)
     witness :: cli_tool_generation_record_witness(text, generation)
-    marker :: cli_read_bounded(files.join(cli_tool_generation_dir(generation), @TOOL_PROFILE_COMPLETE_FILE))
-    if marker != "{witness}\n" -> return Err(CliError.Other("tool generation {generation} witness mismatch"))
+    marker :: cli_read_bounded(files.join(cli_tool_generation_dir(generation), TOOL_PROFILE_COMPLETE_FILE))
+    if marker != "{witness}\n" -> return Err(CLIError.Other("tool generation {generation} witness mismatch"))
     Ok(ToolGenerationRecord{tools: tools, witness: witness})
 }
 
 // The tools of the published generation; none before the first publish.
-pub fn cli_read_current_tools() -[FS, Env]> [InstalledUserTool] CliError! {
+pub fn cli_read_current_tools() -[FS, Env]> [InstalledUserTool] CLIError! {
     path :: cli_tool_current_path()
     if !files.is_file(path) -> return Ok([InstalledUserTool]{})
     pointer :: ToolProfilePointer.parse(cli_read_bounded(path))
     if pointer.generation == 0 -> return Ok([InstalledUserTool]{})
     record :: cli_read_tool_generation_record(pointer.generation)
-    if record.witness != pointer.witness -> return Err(CliError.Other("current pointer witness disagrees with generation"))
+    if record.witness != pointer.witness -> return Err(CLIError.Other("current pointer witness disagrees with generation"))
     Ok(record.tools)
 }
 
-pub fn cli_tool_current_generation_locked() -[FS, Env]> Int? CliError! {
+pub fn cli_tool_current_generation_locked() -[FS, Env]> Int? CLIError! {
     path :: cli_tool_current_path()
     if !files.is_file(path) -> return Ok(None)
     pointer :: ToolProfilePointer.parse(cli_read_bounded(path))
@@ -220,50 +218,50 @@ pub fn cli_tool_current_generation_locked() -[FS, Env]> Int? CliError! {
 
 // Every generation directory's number, ascending; a non-numeric or zero
 // directory name is an error.
-pub fn cli_tool_generation_numbers() -[FS, Env]> [Int] CliError! {
+pub fn cli_tool_generation_numbers() -[FS, Env]> [Int] CLIError! {
     if !files.is_dir(cli_tool_generations_dir()) -> return Ok([Int]{})
     generations := [Int]{}
     loop entry in files.list_dir(cli_tool_generations_dir()) {
         info :: files.stat(entry.path)
         if !info.is_dir || info.is_symlink -> next
-        generation :: cli_parse_u64(entry.name) ?? return Err(CliError.Other("invalid tool generation name"))
-        if generation == 0 -> return Err(CliError.Other("invalid tool generation name"))
+        generation :: cli_parse_u64(entry.name) ?? return Err(CLIError.Other("invalid tool generation name"))
+        if generation == 0 -> return Err(CLIError.Other("invalid tool generation name"))
         &generations.push(generation)
     }
     &generations.sort()
     Ok(generations)
 }
 
-fn cli_tool_next_generation() -[FS, Env]> Int CliError! {
+fn cli_tool_next_generation() -[FS, Env]> Int CLIError! {
     files.create_dir_all(cli_tool_generations_dir())
     maximum := 0
     loop entry in files.list_dir(cli_tool_generations_dir()) {
-        generation :: cli_parse_u64(entry.name) ?? return Err(CliError.Other("invalid tool generation `{entry.name}`"))
+        generation :: cli_parse_u64(entry.name) ?? return Err(CLIError.Other("invalid tool generation `{entry.name}`"))
         info :: files.stat(entry.path)
-        if generation == 0 || !info.is_dir || info.is_symlink -> return Err(CliError.Other("invalid tool generation `{entry.name}`"))
+        if generation == 0 || !info.is_dir || info.is_symlink -> return Err(CLIError.Other("invalid tool generation `{entry.name}`"))
         if generation > maximum -> maximum = generation
     }
-    if maximum == @CLI_INT_MAX -> return Err(CliError.Other("tool generation number overflow"))
+    if maximum == CLI_INT_MAX -> return Err(CLIError.Other("tool generation number overflow"))
     Ok(maximum + 1)
 }
 
 // ── Disk usage ──
 
-pub fn cli_tool_generation_disk_bytes(generation: Int) -[FS, Env]> Int CliError! {
+pub fn cli_tool_generation_disk_bytes(generation: Int) -[FS, Env]> Int CLIError! {
     cli_disk_file_bytes(cli_tool_generation_dir(generation), None)
 }
 
-pub fn cli_tool_profile_state_disk_bytes() -[FS, Env]> Int CliError! {
+pub fn cli_tool_profile_state_disk_bytes() -[FS, Env]> Int CLIError! {
     cli_disk_file_bytes(cli_tools_state_dir(), Val("generations"))
 }
 
-pub fn cli_tool_profile_bin_disk_bytes() -[FS, Env]> Int CliError! {
+pub fn cli_tool_profile_bin_disk_bytes() -[FS, Env]> Int CLIError! {
     cli_disk_file_bytes(cli_user_bin_dir(), None)
 }
 
 // Regular-file bytes below `path` without following links; `excluded`
 // names one top-level child to skip.
-fn cli_disk_file_bytes(path: String, excluded: String?) -[FS]> Int CliError! {
+fn cli_disk_file_bytes(path: String, excluded: String?) -[FS]> Int CLIError! {
     info :: cli_stat_optional(path) ?? return Ok(0)
     if info.is_symlink -> return Ok(0)
     if info.is_file -> return Ok(info.size)
@@ -281,32 +279,32 @@ fn cli_disk_file_bytes(path: String, excluded: String?) -[FS]> Int CliError! {
 // Write a new generation for `tools` (projecting bins, recording metadata
 // and its witness, rooting targets) and publish it. A generation that never
 // completed is removed on failure.
-pub fn cli_write_tool_generation_locked(tools: [InstalledUserTool], live: ToolLiveInstall?) -[FS, Env, Time]> Int CliError! {
+pub fn cli_write_tool_generation_locked(verification: &StoreVerification, tools: [InstalledUserTool], live: ToolLiveInstall?) -[FS, Env, Time]> Int CLIError! {
     generation :: cli_tool_next_generation()
     generation_dir :: cli_tool_generation_dir(generation)
     files.create_dir(generation_dir)
-    if cli_tool_write_generation_body(generation, generation_dir, tools, live) == {
+    if cli_tool_write_generation_body(&verification, generation, generation_dir, tools, live) == {
         .Ok(written) -> Ok(written)
         .Err(error) -> {
-            if !files.is_file(files.join(generation_dir, @TOOL_PROFILE_COMPLETE_FILE)) -> files.remove_all(generation_dir).drop("an incomplete generation is best-effort removed")
+            if !files.is_file(files.join(generation_dir, TOOL_PROFILE_COMPLETE_FILE)) -> files.remove_all(generation_dir).drop("an incomplete generation is best-effort removed")
             Err(error)
         }
     }
 }
 
-fn cli_tool_write_generation_body(generation: Int, generation_dir: String, tools: [InstalledUserTool], live: ToolLiveInstall?) -[FS, Env, Time]> Int CliError! {
+fn cli_tool_write_generation_body(verification: &StoreVerification, generation: Int, generation_dir: String, tools: [InstalledUserTool], live: ToolLiveInstall?) -[FS, Env, Time]> Int CLIError! {
     generation_tools := tools
-    cli_materialize_generation_bins(generation_dir, &generation_tools, live)
+    cli_materialize_generation_bins(&verification, generation_dir, &generation_tools, live)
     meta :: cli_format_tool_generation_meta(generation, generation_tools)
-    cli_write_synced(files.join(generation_dir, @TOOL_PROFILE_META_FILE), meta.bytes())
-    cli_validate_generation_bins(generation, generation_tools)
+    cli_write_synced(files.join(generation_dir, TOOL_PROFILE_META_FILE), meta.bytes())
+    cli_validate_generation_bins(&verification, generation, generation_tools)
     witness :: cli_tool_generation_record_witness(meta, generation)
-    cli_write_synced(files.join(generation_dir, @TOOL_PROFILE_COMPLETE_FILE), "{witness}\n".bytes())
+    cli_write_synced(files.join(generation_dir, TOOL_PROFILE_COMPLETE_FILE), "{witness}\n".bytes())
     store_sync_store_directory(generation_dir)
     store_sync_store_directory(cli_tool_generations_dir())
     cli_profile_failpoint("after-generation")
     if generation_tools.len() > 0 {
-        cli_ensure_tool_generation_roots(generation, generation_tools, witness)
+        cli_ensure_tool_generation_roots(&verification, generation, generation_tools, witness)
         cli_profile_failpoint("after-root-commit")
     }
     cli_profile_failpoint("before-pointer")
@@ -316,16 +314,16 @@ fn cli_tool_write_generation_body(generation: Int, generation_dir: String, tools
 }
 
 // Reactivate an existing complete generation.
-pub fn cli_activate_tool_generation_locked(generation: Int) CliError! -[FS, Env, Time]> {
+pub fn cli_activate_tool_generation_locked(verification: &StoreVerification, generation: Int) CLIError! -[FS, Env, Time]> {
     record :: cli_read_tool_generation_record(generation)
-    cli_validate_generation_bins(generation, record.tools)
-    if record.tools.len() > 0 -> cli_ensure_tool_generation_roots(generation, record.tools, record.witness)
+    cli_validate_generation_bins(&verification, generation, record.tools)
+    if record.tools.len() > 0 -> cli_ensure_tool_generation_roots(&verification, generation, record.tools, record.witness)
     cli_publish_tool_generation(generation, record.witness, record.tools)
 }
 
 // Prepare, then commit, one Store root per store authority so no target of
 // this generation can be collected while it is reachable.
-fn cli_ensure_tool_generation_roots(generation: Int, tools: [InstalledUserTool], witness: String) CliError! -[FS, Env, Time]> {
+fn cli_ensure_tool_generation_roots(verification: &StoreVerification, generation: Int, tools: [InstalledUserTool], witness: String) CLIError! -[FS, Env, Time]> {
     authorities := [String: [String]]{}
     loop tool in tools {
         cli_profile_validate_digest(tool.output_hash)
@@ -338,25 +336,24 @@ fn cli_ensure_tool_generation_roots(generation: Int, tools: [InstalledUserTool],
     prepared := [(roots: HangarRoots, receipt: PreparedProfileGenerationRoot)]{}
     loop root in store_roots {
         roots :: HangarRoots{root: root, dev_mode: true}
-        receipt :: store_reconcile_profile_generation_root(roots, @TOOL_PROFILE_OWNER, @TOOL_PROFILE_NAME, generation, witness, authorities[root], cli_now_secs())
+        receipt :: store_reconcile_profile_generation_root(&verification, roots, TOOL_PROFILE_OWNER, TOOL_PROFILE_NAME, generation, witness, authorities[root], cli_now_secs())
         if receipt == .Val(pending) -> &prepared.push((roots: roots, receipt: pending))
     }
     cli_profile_failpoint("after-root-prepare")
     loop index in 0..<prepared.len() {
-        store_commit_profile_generation_root(prepared[index].roots, prepared[index].receipt, cli_now_secs())
+        store_commit_profile_generation_root(&verification, prepared[index].roots, prepared[index].receipt, cli_now_secs())
         if index + 1 != prepared.len() -> cli_profile_failpoint("between-root-commits")
     }
-    Ok()
 }
 
 // Install every projection of the generation, publish the checked current
 // pointer and the profile record, then retire names only the previous
 // generation used. A crash or an interrupted cleanup leaves the last
 // published name usable; stale names go on the next successful publish.
-fn cli_publish_tool_generation(generation: Int, witness: String, tools: [InstalledUserTool]) CliError! -[FS, Env]> {
+fn cli_publish_tool_generation(generation: Int, witness: String, tools: [InstalledUserTool]) CLIError! -[FS, Env]> {
     files.create_dir_all(cli_user_jet_dir())
     files.create_dir_all(cli_user_bin_dir())
-    if files.stat(cli_user_bin_dir()).is_symlink -> return Err(CliError.Other("legacy profile bin symlink requires explicit migration"))
+    if files.stat(cli_user_bin_dir()).is_symlink -> return Err(CLIError.Other("legacy profile bin symlink requires explicit migration"))
     previous :: cli_read_current_tools() ?? [InstalledUserTool]{}
     active := [String]{}
     loop tool in tools {
@@ -372,7 +369,7 @@ fn cli_publish_tool_generation(generation: Int, witness: String, tools: [Install
     pointer :: ToolProfilePointer{generation: generation, witness: witness}.format()
     cli_atomic_write_current_pointer(pointer.bytes())
     cli_profile_failpoint("after-current-pointer")
-    profile :: "{{\n  \"name\": \"{@TOOL_PROFILE_NAME}\",\n  \"current\": {generation},\n  \"witness\": {cli_tool_json_str(witness)}\n}}\n"
+    profile :: "{{\n  \"name\": \"{TOOL_PROFILE_NAME}\",\n  \"current\": {generation},\n  \"witness\": {cli_tool_json_str(witness)}\n}}\n"
     cli_atomic_write_profile_pointer(profile.bytes())
     loop tool in previous {
         loop bin in tool.bins {
@@ -380,13 +377,12 @@ fn cli_publish_tool_generation(generation: Int, witness: String, tools: [Install
             if active.contains(physical) -> next
             path :: files.join(cli_user_bin_dir(), physical)
             info :: cli_stat_optional(path) ?? next
-            if info.is_symlink -> return Err(CliError.ManagedTool("managed tool `{bin}` cannot remove symlink projection `{path}`"))
-            if !info.is_file -> return Err(CliError.ManagedTool("managed tool `{bin}` projection is not a regular file"))
-            files.remove(path) ?? return Err(cli_managed_tool_write_error(bin, path, CliError.Io(err)))
+            if info.is_symlink -> return Err(CLIError.ManagedTool("managed tool `{bin}` cannot remove symlink projection `{path}`"))
+            if !info.is_file -> return Err(CLIError.ManagedTool("managed tool `{bin}` projection is not a regular file"))
+            files.remove(path) ?? return Err(cli_managed_tool_write_error(bin, path, CLIError.IO(err)))
         }
     }
     store_sync_store_directory(cli_user_bin_dir())
-    Ok()
 }
 
 // Rust `json_str`: quote with only `\`, `"`, and newline escaped.
@@ -399,35 +395,35 @@ fn cli_tool_json_str(value: String) -> String Never! {
 // Remove abandoned partial pointers and projection staging, migrate legacy
 // generations, revalidate and re-root every complete generation, and
 // republish the requested (or newest complete) generation.
-pub fn cli_recover_tool_profile_state() CliError! -[FS, Env, Time]> {
+pub fn cli_recover_tool_profile_state(verification: &StoreVerification) CLIError! -[FS, Env, Time]> {
     files.create_dir_all(cli_tools_state_dir())
-    partials :: [String]{@TOOL_PROFILE_POINTER_PARTIAL, @TOOL_PROFILE_CURRENT_PARTIAL, @TOOL_MANIFEST_PARTIAL}
+    partials :: [String]{TOOL_PROFILE_POINTER_PARTIAL, TOOL_PROFILE_CURRENT_PARTIAL, TOOL_MANIFEST_PARTIAL}
     loop name in partials {
         partial :: files.join(cli_tools_state_dir(), name)
         info :: cli_stat_optional(partial) ?? next
-        if !info.is_file || info.is_symlink -> return Err(CliError.Other("tool generation pointer partial is not a regular file"))
+        if !info.is_file || info.is_symlink -> return Err(CLIError.Other("tool generation pointer partial is not a regular file"))
         files.remove(partial)
     }
     cli_recover_projection_staging()
-    cli_migrate_legacy_tool_generations_locked()
+    cli_migrate_legacy_tool_generations_locked(&verification)
     requested_current :: cli_tool_current_generation_locked() ?? None
     publish := 0
     if files.is_dir(cli_tool_generations_dir()) {
         generations := [Int]{}
         loop entry in files.list_dir(cli_tool_generations_dir()) {
-            generation :: cli_parse_u64(entry.name) ?? return Err(CliError.Other("invalid tool generation name"))
+            generation :: cli_parse_u64(entry.name) ?? return Err(CLIError.Other("invalid tool generation name"))
             &generations.push(generation)
         }
         &generations.sort()
         loop generation in generations {
-            complete :: files.join(cli_tool_generation_dir(generation), @TOOL_PROFILE_COMPLETE_FILE)
+            complete :: files.join(cli_tool_generation_dir(generation), TOOL_PROFILE_COMPLETE_FILE)
             if !files.is_file(complete) -> next
             tools :: cli_read_tool_generation_record(generation).tools
-            metadata :: cli_read_bounded(files.join(cli_tool_generation_dir(generation), @TOOL_PROFILE_META_FILE))
+            metadata :: cli_read_bounded(files.join(cli_tool_generation_dir(generation), TOOL_PROFILE_META_FILE))
             witness :: cli_tool_generation_record_witness(metadata, generation)
-            if cli_read_bounded(complete).trim() != witness -> return Err(CliError.Other("tool generation witness mismatch"))
-            cli_validate_generation_bins(generation, tools)
-            if tools.len() > 0 -> cli_ensure_tool_generation_roots(generation, tools, witness)
+            if cli_read_bounded(complete).trim() != witness -> return Err(CLIError.Other("tool generation witness mismatch"))
+            cli_validate_generation_bins(&verification, generation, tools)
+            if tools.len() > 0 -> cli_ensure_tool_generation_roots(&verification, generation, tools, witness)
             if generation > publish -> publish = generation
         }
     }
@@ -438,10 +434,9 @@ pub fn cli_recover_tool_profile_state() CliError! -[FS, Env, Time]> {
             if known.contains(requested) -> selected = requested
         }
         tools :: cli_read_tool_generation_record(selected).tools
-        metadata :: cli_read_bounded(files.join(cli_tool_generation_dir(selected), @TOOL_PROFILE_META_FILE))
+        metadata :: cli_read_bounded(files.join(cli_tool_generation_dir(selected), TOOL_PROFILE_META_FILE))
         cli_publish_tool_generation(selected, cli_tool_generation_record_witness(metadata, selected), tools)
     }
-    Ok()
 }
 
 // One legacy (pre-schema) generation awaiting migration.
@@ -453,43 +448,42 @@ struct LegacyToolGeneration {
 
 // Rewrite every complete legacy generation into the canonical schema (unless
 // an equal canonical generation exists) and archive the legacy directory.
-fn cli_migrate_legacy_tool_generations_locked() CliError! -[FS, Env, Time]> {
-    if !files.is_dir(cli_tool_generations_dir()) -> return Ok()
+fn cli_migrate_legacy_tool_generations_locked(verification: &StoreVerification) CLIError! -[FS, Env, Time]> {
+    if !files.is_dir(cli_tool_generations_dir()) -> return
     legacy := [LegacyToolGeneration]{}
     loop entry in files.list_dir(cli_tool_generations_dir()) {
         info :: files.stat(entry.path)
-        if !info.is_dir || info.is_symlink -> return Err(CliError.Other("invalid tool generation entry"))
-        generation :: cli_parse_u64(entry.name) ?? return Err(CliError.Other("invalid tool generation name"))
-        if generation == 0 -> return Err(CliError.Other("invalid tool generation name"))
-        if !files.is_file(files.join(entry.path, @TOOL_PROFILE_COMPLETE_FILE)) || !files.is_file(files.join(entry.path, @TOOL_PROFILE_META_FILE)) -> next
-        metadata :: cli_read_bounded(files.join(entry.path, @TOOL_PROFILE_META_FILE))
-        root :: pkg_json_object(cli_json_parse(metadata)) ?? return Err(CliError.Other("tool metadata root is not an object"))
+        if !info.is_dir || info.is_symlink -> return Err(CLIError.Other("invalid tool generation entry"))
+        generation :: cli_parse_u64(entry.name) ?? return Err(CLIError.Other("invalid tool generation name"))
+        if generation == 0 -> return Err(CLIError.Other("invalid tool generation name"))
+        if !files.is_file(files.join(entry.path, TOOL_PROFILE_COMPLETE_FILE)) || !files.is_file(files.join(entry.path, TOOL_PROFILE_META_FILE)) -> next
+        metadata :: cli_read_bounded(files.join(entry.path, TOOL_PROFILE_META_FILE))
+        root :: pkg_json_object(cli_json_parse(metadata)) ?? return Err(CLIError.Other("tool metadata root is not an object"))
         if !root.has_key("schema") -> &legacy.push(LegacyToolGeneration{generation: generation, path: entry.path, metadata: metadata})
     }
     &legacy.sort_by((left: LegacyToolGeneration, right: LegacyToolGeneration) -> left.generation <=> right.generation)
     loop old in legacy {
-        tools :: cli_parse_legacy_tool_generation_meta(old.metadata, old.generation)
+        tools :: cli_parse_legacy_tool_generation_meta(&verification, old.metadata, old.generation)
         digests := [String]{}
         loop tool in tools -> &digests.push(tool.output_hash)
         witness :: cli_profile_generation_witness(old.metadata, digests)
-        marker :: cli_read_bounded(files.join(old.path, @TOOL_PROFILE_COMPLETE_FILE))
+        marker :: cli_read_bounded(files.join(old.path, TOOL_PROFILE_COMPLETE_FILE))
         if marker != "complete\n" && marker != "{witness}\n" {
-            return Err(CliError.Other("legacy tool generation {old.generation} witness mismatch; remove only after auditing `{old.path}`"))
+            return Err(CLIError.Other("legacy tool generation {old.generation} witness mismatch; remove only after auditing `{old.path}`"))
         }
-        if !cli_canonical_tool_generation_matches(tools) -> cli_write_tool_generation_locked(tools, None)
-        archive :: files.join(cli_tools_state_dir(), @TOOL_LEGACY_GENERATIONS_DIR)
+        if !cli_canonical_tool_generation_matches(&verification, tools) -> cli_write_tool_generation_locked(&verification, tools, None)
+        archive :: files.join(cli_tools_state_dir(), TOOL_LEGACY_GENERATIONS_DIR)
         files.create_dir_all(archive)
         destination :: files.join(archive, "generation-{old.generation}")
-        if files.exists(destination) -> return Err(CliError.Other("legacy profile migration archive collision"))
+        if files.exists(destination) -> return Err(CLIError.Other("legacy profile migration archive collision"))
         files.rename(old.path, destination)
         store_sync_store_directory(archive)
         store_sync_store_directory(cli_tool_generations_dir())
     }
-    Ok()
 }
 
 // Whether a readable canonical generation already records `legacy`'s tools.
-fn cli_canonical_tool_generation_matches(legacy: [InstalledUserTool]) -[FS, Env]> Bool CliError! {
+fn cli_canonical_tool_generation_matches(verification: &StoreVerification, legacy: [InstalledUserTool]) -[FS, Env]> Bool CLIError! {
     loop entry in files.list_dir(cli_tool_generations_dir()) {
         generation :: cli_parse_u64(entry.name) ?? next
         record :: cli_read_tool_generation_record(generation) ?? next
@@ -499,7 +493,7 @@ fn cli_canonical_tool_generation_matches(legacy: [InstalledUserTool]) -[FS, Env]
             if !record.tools[index].same_authority(legacy[index]) -> equal = false
         }
         if equal {
-            cli_validate_generation_bins(generation, record.tools)
+            cli_validate_generation_bins(&verification, generation, record.tools)
             return Ok(true)
         }
     }
@@ -508,23 +502,23 @@ fn cli_canonical_tool_generation_matches(legacy: [InstalledUserTool]) -[FS, Env]
 
 // A legacy `meta.json`: tools point at absolute targets inside one verified
 // Store authority, from which the executable member names are recovered.
-fn cli_parse_legacy_tool_generation_meta(text: String, expected_generation: Int) -[FS, Env]> [InstalledUserTool] CliError! {
-    root :: pkg_json_object(cli_json_parse(text)) ?? return Err(CliError.Other("legacy profile metadata root is not an object"))
+fn cli_parse_legacy_tool_generation_meta(verification: &StoreVerification, text: String, expected_generation: Int) -[FS, Env]> [InstalledUserTool] CLIError! {
+    root :: pkg_json_object(cli_json_parse(text)) ?? return Err(CLIError.Other("legacy profile metadata root is not an object"))
     cli_json_expect_exact_keys(root, [String]{"created_at", "generation", "profile", "tools"}, "legacy profile metadata")
     profile :: cli_json_string_field(root, "profile")
     generation :: cli_json_integer_field(root, "generation")
-    if profile != @TOOL_PROFILE_NAME || generation != expected_generation -> return Err(CliError.Other("legacy profile metadata identity mismatch"))
+    if profile != TOOL_PROFILE_NAME || generation != expected_generation -> return Err(CLIError.Other("legacy profile metadata identity mismatch"))
     _ :: cli_json_integer_field(root, "created_at")
-    tools_value :: root.get("tools") ?? return Err(CliError.Other("legacy metadata lacks tools"))
-    entries :: pkg_json_array(tools_value) ?? return Err(CliError.Other("legacy profile tools field is not an array"))
-    if entries.len() > @TOOL_PROFILE_MAX_TOOLS -> return Err(CliError.Other("legacy profile tool count exceeds bound"))
+    tools_value :: root.get("tools") ?? return Err(CLIError.Other("legacy metadata lacks tools"))
+    entries :: pkg_json_array(tools_value) ?? return Err(CLIError.Other("legacy profile tools field is not an array"))
+    if entries.len() > TOOL_PROFILE_MAX_TOOLS -> return Err(CLIError.Other("legacy profile tool count exceeds bound"))
     roots :: pkg_resolve_roots()
-    if !cli_path_is_normalized_absolute(roots.root) -> return Err(CliError.Other("profile Store authority is not an absolute normalized path"))
-    store :: store_list_checked(roots)
+    if !cli_path_is_normalized_absolute(roots.root) -> return Err(CLIError.Other("profile Store authority is not an absolute normalized path"))
+    store :: store_list_checked(&verification, roots)
     tools := [InstalledUserTool]{}
     seen_bins := [String]{}
     loop entry in entries {
-        tool :: pkg_json_object(entry) ?? return Err(CliError.Other("legacy profile tool entry is not an object"))
+        tool :: pkg_json_object(entry) ?? return Err(CLIError.Other("legacy profile tool entry is not an object"))
         cli_json_expect_exact_keys(tool, [String]{"bins", "name", "output_hash", "reference", "source", "targets", "version"}, "legacy profile tool")
         name :: cli_tool_bounded_json_string(tool, "name")
         version :: cli_tool_bounded_json_string(tool, "version")
@@ -532,24 +526,24 @@ fn cli_parse_legacy_tool_generation_meta(text: String, expected_generation: Int)
         reference :: cli_tool_bounded_json_string(tool, "reference")
         output_hash :: cli_tool_bounded_json_string(tool, "output_hash")
         cli_profile_validate_digest(output_hash)
-        bins :: cli_json_string_array(tool, "bins", @TOOL_PROFILE_MAX_BIN_NAME, true)
-        targets :: cli_json_string_array(tool, "targets", @TOOL_PROFILE_MAX_STRING, true)
-        if bins.len() == 0 || bins.len() != targets.len() -> return Err(CliError.Other("legacy profile tool has mismatched bin/target pairs"))
+        bins :: cli_json_string_array(tool, "bins", TOOL_PROFILE_MAX_BIN_NAME, true)
+        targets :: cli_json_string_array(tool, "targets", TOOL_PROFILE_MAX_STRING, true)
+        if bins.len() == 0 || bins.len() != targets.len() -> return Err(CLIError.Other("legacy profile tool has mismatched bin/target pairs"))
         authority := StoreEntry?{None}
         loop candidate in store {
             if authority == None && candidate.reference == reference && candidate.envelope.output_hash == output_hash -> authority = Val(candidate)
         }
-        verified :: authority ?? return Err(CliError.Other("legacy profile Store authority is unavailable"))
+        verified :: authority ?? return Err(CLIError.Other("legacy profile Store authority is unavailable"))
         members := [String]{}
         loop index in 0..<bins.len() {
             bin :: bins[index]
             cli_validate_bin_name(bin)
-            if seen_bins.contains(bin) -> return Err(CliError.Other("duplicate legacy profile bin `{bin}`"))
+            if seen_bins.contains(bin) -> return Err(CLIError.Other("duplicate legacy profile bin `{bin}`"))
             &seen_bins.push(bin)
             member :: files.basename(targets[index])
-            if member == "" -> return Err(CliError.Other("legacy profile target has no UTF-8 member"))
+            if member == "" -> return Err(CLIError.Other("legacy profile target has no UTF-8 member"))
             cli_validate_bin_name(member)
-            if targets[index] != files.join(verified.bin, member) -> return Err(CliError.Other("legacy profile target escapes verified Store authority"))
+            if targets[index] != files.join(verified.bin, member) -> return Err(CLIError.Other("legacy profile target escapes verified Store authority"))
             &members.push(member)
         }
         &tools.push(InstalledUserTool{name: name, version: version, source: source, reference: reference, bins: bins, members: members, member_digests: [String]{}, output_hash: output_hash, store_root: roots.root})

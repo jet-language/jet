@@ -1,0 +1,182 @@
+// Rust receipt.rs::rich_diagnostic/typed roundtrip, at the section boundary.
+// Store receipt integration remains in Receipt tests; no replacement store.
+fn store_diagnostic_test_origin(display: String, path: String, source: String) -> DiagnosticOrigin Never! {
+    DiagnosticOrigin{display: display, path: path, source: source, revision: record_blob_key(source.bytes())}
+}
+
+fn store_diagnostic_test_rich(origin: DiagnosticOrigin, core: DiagnosticOrigin) -> Diagnostic Never! {
+    Diagnostic{moment: DiagnosticMoment.Compile, severity: DIAGNOSTIC_LINT, code: "L2510", what: "this implicit clone repeats \"inside\" a loop\n", why: "why", fix: "fix", span: Val(Span{start: 3, end: 9}), origin: Val(origin), labels: [DiagnosticLabel{span: Span{start: 1, end: 2}, message: "first use"}], cause: [DiagnosticCause{code: "E0301", span: None, origin: Val(core)}], edit: Val(TextEdit{span: Span{start: 3, end: 9}, new_text: "x.clone()"}), applicability: Val(FixApplicability.Suggested), safety: Val(FixSafety.BehaviorPreserving), detail: Val("detail\twith tab"), structured: Val(DiagnosticStructured.CryptoMisuse{reason: DiagnosticCryptoMisuseReason.NonceLength, operation: "seal", expected: Val("12"), actual: Val(-170141183460469231731687303715884105728)}), denial_kind: Val("effect"), call_chain: ["run", "helper"]}
+}
+
+fn store_diagnostic_test_roundtrip(diagnostic: Diagnostic) -> Diagnostic Never! {
+    sections :: store_encode_diagnostics([diagnostic], [String]{}) ?? panic("encode")
+    decoded :: store_decode_diagnostics(sections.origins, sections.diagnostics, (revision: String) -> None) ?? panic("decode")
+    decoded[0]
+}
+
+#Test("typed diagnostic sections retain all fields and closure origin sources") {
+    source :: "fn run() {{\n    x := 1\n}}\n"
+    origin :: store_diagnostic_test_origin("main.jet", "/p/main.jet", source)
+    core :: store_diagnostic_test_origin("math", "<corelib>/math", "pub fn one() {{}}\n")
+    diagnostic :: store_diagnostic_test_rich(origin, core)
+    sections :: store_encode_diagnostics([diagnostic, diagnostic], [origin.revision]) ?? panic("encode")
+    assert_eq(sections.origins.len(), 2)
+    decoded :: store_decode_diagnostics(sections.origins, sections.diagnostics, (revision: String) -> if revision == origin.revision -> Val(source) else -> None) ?? panic("decode")
+    assert_eq(decoded, [diagnostic, diagnostic])
+    // Rust interns causes before the primary origin.
+    assert_eq(store_diagnostic_optional_text(sections.origins[0], "source") ?? panic("core source"), Val(core.source))
+    assert_eq(store_diagnostic_optional_text(sections.origins[1], "source") ?? panic("closure source"), None)
+    if store_decode_diagnostics(sections.origins, sections.diagnostics, (revision: String) -> None) == {
+        .Ok(_) -> panic("unresolved closure must miss")
+        .Err(error) -> assert_eq(error.message, "diagnostic origin `/p/main.jet` is not in the closure")
+    }
+    if store_decode_diagnostics(sections.origins, sections.diagnostics, (revision: String) -> Val("changed")) == {
+        .Ok(_) -> panic("wrong revision must miss")
+        .Err(error) -> assert_eq(error.message, "diagnostic origin `/p/main.jet` revision mismatch")
+    }
+}
+
+#Test("typed diagnostics retain nullable grades reasons edits and all structured variants") {
+    base :: Diagnostic{severity: DIAGNOSTIC_ERROR, code: "E0301", what: "what", why: "why", fix: "fix"}
+    assert_eq(store_diagnostic_test_roundtrip(base), base)
+    loop moment in [DiagnosticMoment.Compile, DiagnosticMoment.Run, DiagnosticMoment.Test, DiagnosticMoment.Tool] {
+        diagnostic := base
+        diagnostic.moment = moment
+        diagnostic.no_fix_reason = Val(NoFixReason.new(NoFixReasonKind.Design, "review this design"))
+        stdout :: String.from_bytes([U8{97}, U8{10}, U8{0}, U8{98}]) ?? panic("UTF-8 stdout")
+        diagnostic.structured = Val(DiagnosticStructured.RuntimeHostFault{stdout: stdout})
+        assert_eq(store_diagnostic_test_roundtrip(diagnostic), diagnostic)
+    }
+    loop safety in [FixSafety.Formatting, FixSafety.BehaviorPreserving, FixSafety.APIChanging, FixSafety.TargetChanging, FixSafety.NeedsReview] {
+        diagnostic := base
+        diagnostic.safety = Val(safety)
+        diagnostic.applicability = Val(FixApplicability.Safe)
+        diagnostic.structured = Val(DiagnosticStructured.SuggestedEdits{edits: [TextEdit{span: Span{start: 0, end: 2}, new_text: "é"}]})
+        assert_eq(store_diagnostic_test_roundtrip(diagnostic), diagnostic)
+    }
+    loop reason in [DiagnosticCryptoMisuseReason.InvalidLength, DiagnosticCryptoMisuseReason.NonceLength, DiagnosticCryptoMisuseReason.OutputLength, DiagnosticCryptoMisuseReason.SaltLength, DiagnosticCryptoMisuseReason.MemoryCost, DiagnosticCryptoMisuseReason.IterationCount, DiagnosticCryptoMisuseReason.LaneCount, DiagnosticCryptoMisuseReason.MemoryTimeCost, DiagnosticCryptoMisuseReason.RawNonce, DiagnosticCryptoMisuseReason.RawAlgorithm, DiagnosticCryptoMisuseReason.DeterministicEntropy] {
+        diagnostic := base
+        diagnostic.structured = Val(DiagnosticStructured.CryptoMisuse{reason: reason, operation: "op", expected: None, actual: None})
+        assert_eq(store_diagnostic_test_roundtrip(diagnostic), diagnostic)
+    }
+}
+
+#Test("diagnostic aggregate source mapping is refused without inventing wire fields") {
+    base :: Diagnostic{severity: DIAGNOSTIC_ERROR, code: "E0301", what: "what", why: "why", fix: "fix"}
+    loop index in 0..<3 {
+        diagnostic := base
+        if index == 0 -> diagnostic.source_path = Val("part.jet")
+        if index == 1 -> diagnostic.source_offset = Val(10)
+        if index == 2 -> diagnostic.source_start = Val(2)
+        if store_encode_diagnostics([diagnostic], [String]{}) == {
+            .Ok(_) -> panic("aggregate source mapping must refuse")
+            .Err(error) -> assert_eq(error.message, "diagnostic `E0301` carries aggregate source mapping")
+        }
+    }
+}
+
+#Test("diagnostic decision rows are refused with the original exact reason") {
+    row :: MIRDecisionRow{id: 1, kind: MIRDecisionKind.Copy, disposition: MIRDecisionDisposition.Rejected, function: None, function_name: "run", span: Span{start: 0, end: 1}, rule: "rule", reason: "reason", producer: "compiler", evidence: "", edit: None, derivation: None, identity: None, evidence_method: None, derivation_disposition: None}
+    diagnostic :: Diagnostic{severity: DIAGNOSTIC_ERROR, code: "E0301", what: "what", why: "why", fix: "fix", decision_row: Val(row)}
+    if store_encode_diagnostics([diagnostic], [String]{}) == {
+        .Ok(_) -> panic("decision row cannot be recorded")
+        .Err(error) -> assert_eq(error.message, "diagnostic `E0301` carries a decision row")
+    }
+}
+
+#Test("diagnostic malformed shapes offsets enums and origin indexes refuse exactly") {
+    if store_diagnostic_decode_span(RecordValue.List{values: [RecordValue.Int{value: 1}]}) == {
+        .Ok(_) -> panic("span shape")
+        .Err(error) -> assert_eq(error.message, "diagnostic span must be a [start, end] pair")
+    }
+    if store_diagnostic_decode_origin(RecordValue.Int{value: 0}, [DiagnosticOrigin]{}) == {
+        .Ok(_) -> panic("origin index")
+        .Err(error) -> assert_eq(error.message, "diagnostic origin index is out of range")
+    }
+    if store_diagnostic_parse_moment("future") == {
+        .Ok(_) -> panic("moment")
+        .Err(error) -> assert_eq(error.message, "unknown report moment `future`")
+    }
+    if store_diagnostic_parse_severity("warning") == {
+        .Ok(_) -> panic("severity")
+        .Err(error) -> assert_eq(error.message, "unknown severity `warning`")
+    }
+    if store_diagnostic_parse_safety("unsafe") == {
+        .Ok(_) -> panic("safety")
+        .Err(error) -> assert_eq(error.message, "unknown fix safety `unsafe`")
+    }
+    if store_diagnostic_decode_structured(store_diagnostic_map([RecordField{name: "kind", value: RecordValue.Str{value: "future"}}])) == {
+        .Ok(_) -> panic("structured kind")
+        .Err(error) -> assert_eq(error.message, "unknown structured diagnostic `future`")
+    }
+}
+
+// #3598 gates these original wire reads until Core exports parse_with_limits.
+// Keep the real canonical codec; never replace it with a Store-local parser.
+fn store_diagnostic_test_build_report() -> JetErrorReport Never! {
+    JetErrorReport{
+        code: Val("E3502"), message: "duplicate target", typed_identity: Val("BuildError::DuplicateTargetName"),
+        causes: [JetErrorReport{message: "inner"}],
+        context_frames: [JetErrorContextFrame{text: "while building", file: "run.jet", line: 2}],
+        origin: Val(JetErrorJourneyFrame{fn_name: "target", file: "package.jet", line: 1, column: 7, note: "declared", hops: 2}),
+        source_journey: [JetErrorJourneyFrame{fn_name: "build", file: "run.jet", line: 2, column: 13, note: "called", hops: 1}],
+        conversion_history: [JetErrorConversion{source: "Inner", target: "BuildError"}],
+        details: Val(JetErrorDetails{variant: "DuplicateTargetName", fields: [JetErrorField{name: "name", value: "\"app\""}], source_span: Val(JetErrorSpan{start: 1, end: 3})}),
+    }
+}
+
+#Test("BuildError diagnostic encoding delegates its complete wire to Outcome") {
+    report :: store_diagnostic_test_build_report()
+    diagnostic :: Diagnostic{severity: DIAGNOSTIC_ERROR, code: "E3502", what: "what", why: "why", fix: "fix", structured: Val(DiagnosticStructured.BuildError{report: report})}
+    sections :: store_encode_diagnostics([diagnostic], [String]{}) ?? panic("encode")
+    assert_eq(sections.diagnostics.len(), 1)
+    structured :: store_diagnostic_field(sections.diagnostics[0], "structured") ?? panic("structured")
+    assert_eq(store_diagnostic_text(structured, "kind") ?? panic("kind"), "build_error")
+    assert_eq(store_diagnostic_text(structured, "report") ?? panic("report"), report.to_json())
+}
+
+#Test("BuildError structured diagnostic retains complete JetErrorReport wire") {
+    report :: store_diagnostic_test_build_report()
+    diagnostic :: Diagnostic{severity: DIAGNOSTIC_ERROR, code: "E3502", what: "what", why: "why", fix: "fix", structured: Val(DiagnosticStructured.BuildError{report: report})}
+    restored :: store_diagnostic_test_roundtrip(diagnostic)
+    assert_eq(restored, diagnostic)
+    restored_report :: if (restored.structured ?? panic("lost structured report")) == {
+        .BuildError(value) -> value
+        else -> panic("wrong structured variant")
+    }
+    assert_eq(restored_report.origin, report.origin)
+    assert_eq(restored_report.source_journey[0].column, 13)
+    sections :: store_encode_diagnostics([diagnostic], [String]{}) ?? panic("encode")
+    structured :: store_diagnostic_field(sections.diagnostics[0], "structured") ?? panic("structured")
+    assert_eq(store_diagnostic_text(structured, "report") ?? panic("report"), report.to_json())
+}
+
+#Test("BuildError canonical codec refusals retain ReportError messages at Store boundary") {
+    cases :: [String]{
+        "",
+        "{{\"schema\":\"jet.err/v1\",\"message\":\"plain\",\"code\":null,\"cause\":null,\"message\":\"other\"}}",
+        "{{\"schema\":\"jet.err/v0\",\"message\":\"plain\",\"code\":null,\"cause\":null}}",
+        " {{\"schema\":\"jet.err/v1\",\"message\":\"plain\",\"code\":null,\"cause\":null}}",
+    }
+    expected :: [String]{
+        "invalid error report: expected a JSON value",
+        "invalid error report: duplicate object key `message`",
+        "unsupported error report schema",
+        "error report is not canonical",
+    }
+    loop index in 0..<cases.len() {
+        structured :: store_diagnostic_map([RecordField{name: "kind", value: RecordValue.Str{value: "build_error"}}, RecordField{name: "report", value: RecordValue.Str{value: cases[index]}}])
+        if store_diagnostic_decode_structured(structured) == {
+            .Ok(_) -> panic("invalid BuildError wire accepted")
+            .Err(error) -> assert_eq(error.message, expected[index])
+        }
+    }
+}
+
+// #4306/#4456 ordered raw detail objects remain an exact acceptance gate.
+#Test("BuildError diagnostic raw details retain original wire order and typed values") {
+    report := store_diagnostic_test_build_report()
+    report.details = Val(JetErrorDetails{variant: "DuplicateTargetName", fields: [JetErrorField{name: "z", value: "{{\"z\":null,\"a\":[false,1.25,9223372036854775808]}}"}, JetErrorField{name: "name", value: "\"app\""}], source_span: Val(JetErrorSpan{start: 1, end: 3})})
+    diagnostic :: Diagnostic{severity: DIAGNOSTIC_ERROR, code: "E3502", what: "what", why: "why", fix: "fix", structured: Val(DiagnosticStructured.BuildError{report: report})}
+    assert_eq(store_diagnostic_test_roundtrip(diagnostic), diagnostic)
+}

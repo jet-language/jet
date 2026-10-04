@@ -1,0 +1,297 @@
+// Source/CmdMigration.rs has no inline tests. These controls preserve its
+// option/error precedence, exact-width numeric and text behavior (no providers).
+#Test("migration decimal keeps Rust u64 syntax and full-width boundary") {
+    assert_eq(jet_cli_migration_decimal("1"), Val(U64{1}))
+    assert_eq(jet_cli_migration_decimal("+001"), Val(U64{1}))
+    assert_eq(jet_cli_migration_decimal("0"), Val(U64{0}))
+    assert_eq(jet_cli_migration_decimal("18446744073709551615"), Val(U64{18446744073709551615}))
+    loop value in [String]{"", "+", "-1", " 1", "1 ", "1_0", "١", "18446744073709551616", "99999999999999999999999999999999"} -> assert_eq(jet_cli_migration_decimal(value), None)
+}
+#Test("migration slug preserves ASCII camel boundaries and Unicode separators") {
+    assert_eq(jet_cli_backend_slugify("AddIndex"), "add_index")
+    assert_eq(jet_cli_backend_slugify("HTTPServer"), "httpserver")
+    assert_eq(jet_cli_backend_slugify("aBC"), "a_bc")
+    assert_eq(jet_cli_backend_slugify("Add2Index"), "add2index")
+    assert_eq(jet_cli_backend_slugify("  Add---Index  "), "_add_index")
+    assert_eq(jet_cli_backend_slugify("aéB"), "a_b")
+    assert_eq(jet_cli_backend_slugify("a_éB"), "a_b")
+    assert_eq(jet_cli_backend_slugify("é💡"), "")
+    assert_eq(jet_cli_backend_slugify("___"), "")
+    assert_eq(jet_cli_backend_slugify(""), "")
+}
+#Test("migration help honors machine and quiet output channels") {
+    plain :: jet_cli_migration_print_help(JetCLIOutputMode{json: false, color: false, quiet: false})
+    assert_eq(plain.exit_code, JET_DRIVER_EXIT_OK)
+    assert_eq(plain.stdout, "")
+    assert_eq(plain.stderr, jet_cli_migration_help_text())
+    quiet :: jet_cli_migration_print_help(JetCLIOutputMode{json: false, color: true, quiet: true})
+    assert_eq(quiet.stdout, "")
+    assert_eq(quiet.stderr, "")
+    machine :: jet_cli_migration_print_help(JetCLIOutputMode{json: true, color: false, quiet: true})
+    assert_eq(machine.stderr, "")
+    assert(machine.stdout.ends_with("\n"))
+    assert(machine.stdout.contains("\"action\":\"db.migrate.help\""))
+    assert(machine.stdout.contains("\"help\":"))
+    assert(machine.stdout.contains("jet db migrate rollback"))
+}
+#Test("migration JSON counts retain full unsigned width without float conversion") {
+    assert_eq(jet_cli_migration_number(U64{0}).json(), "0")
+    assert_eq(jet_cli_migration_number(U64{9223372036854775808}).json(), "9223372036854775808")
+    assert_eq(jet_cli_migration_number(U64{18446744073709551615}).json(), "18446744073709551615")
+}
+#Test("migration output does not mix machine stdout with human status") {
+    machine :: jet_cli_migration_output(JetCLIOutputMode{json: true, color: true, quiet: true}, "{}")
+    assert_eq(machine.stdout, "{}\n")
+    assert_eq(machine.stderr, "")
+    plain :: jet_cli_migration_output(JetCLIOutputMode{json: false, color: false, quiet: false}, "target: prod\n")
+    assert_eq(plain.stdout, "")
+    assert_eq(plain.stderr, "target: prod\n")
+    quiet :: jet_cli_migration_output(JetCLIOutputMode{json: false, color: false, quiet: true}, "target: prod\n")
+    assert_eq(quiet.stderr, "")
+}
+
+fn migration_test_options(args: [String], verb: String) -> JetCLIMigrationOptions Never! {
+    parsed :: jet_cli_migration_parse_options(args, verb, 0) ?? panic(err.message)
+    if parsed == {
+        .Options(options) -> options
+        .Help -> panic("expected options, received help")
+    }
+}
+fn migration_test_parse_error(args: [String], verb: String) -> MigrationError Never! {
+    if jet_cli_migration_parse_options(args, verb, 0) == {
+        .Err(error) -> error
+        .Ok(_) -> panic("invalid migration flags were accepted")
+    }
+}
+fn migration_test_validation_error(args: [String], verb: String) -> MigrationError Never! {
+    options :: migration_test_options(args, verb)
+    if jet_cli_migration_validate_options(options, verb) == {
+        .Err(error) -> error
+        .Ok(_) -> panic("invalid migration options were accepted")
+    }
+}
+#Test("migration parser preserves inline SQL equals aliases output flags and positional text") {
+    options :: migration_test_options([String]{"AddIndex", "--up=SELECT a=b", "--down", "DROP INDEX x", "--risk=", "--lock=read", "--json=ignored", "--quiet", "--no-color", "--color-malformed"}, "new")
+    assert_eq(options.positionals, [String]{"AddIndex"})
+    assert_eq(options.up, Val("SELECT a=b"))
+    assert_eq(options.down, Val("DROP INDEX x"))
+    assert_eq(options.risk, Val(""))
+    assert_eq(options.lock, Val(MigrationLock.Shared))
+    positional :: migration_test_options([String]{"a=b", "--sql", "--help"}, "new")
+    assert_eq(positional.positionals, [String]{"a=b"})
+    assert_eq(positional.up, Val("--help"))
+    inline_empty :: migration_test_options([String]{"--target=", "--database=a=b"}, "target")
+    assert_eq(inline_empty.target, Val(""))
+    assert_eq(inline_empty.database, Val("a=b"))
+}
+#Test("migration parser normalizes step and rollback positionals only under Rust conditions") {
+    step :: migration_test_options([String]{"--target", "prod", "+002"}, "step")
+    assert_eq(step.step, Val(U64{2}))
+    assert_eq(step.positionals.len(), 0)
+    rollback :: migration_test_options([String]{"--target=prod", "004"}, "rollback")
+    assert_eq(rollback.to, Val(U64{4}))
+    assert_eq(rollback.positionals.len(), 0)
+    selected_step :: migration_test_options([String]{"--target=prod", "--step=1", "2"}, "step")
+    assert_eq(selected_step.positionals, [String]{"2"})
+    selected_rollback :: migration_test_options([String]{"--target=prod", "--to=1", "2"}, "rollback")
+    assert_eq(selected_rollback.positionals, [String]{"2"})
+    relative_rollback :: migration_test_options([String]{"--target=prod", "--step=1", "2"}, "rollback")
+    assert_eq(relative_rollback.positionals, [String]{"2"})
+}
+#Test("migration parser keeps error text code fix and duplicate precedence") {
+    missing :: migration_test_parse_error([String]{"--target"}, "plan")
+    assert_eq(missing.code, "E2104")
+    assert_eq(missing.message, "`--target` needs a value")
+    assert_eq(missing.fix, "write `--target <value>` for `jet db migrate plan`")
+    unknown :: migration_test_parse_error([String]{"--unknown=x"}, "plan")
+    assert_eq(unknown.code, "E2102")
+    assert_eq(unknown.message, "unknown `jet db migrate` flag `--unknown=x`")
+    assert_eq(unknown.fix, "use `jet db migrate --help` to see migration flags")
+    alias :: migration_test_parse_error([String]{"--sql=SELECT 1", "--up=SELECT 2"}, "new")
+    assert_eq(alias.message, "`--up` was supplied twice")
+    assert_eq(alias.fix, "provide one value per migration option")
+    lock :: migration_test_parse_error([String]{"--lock=shared", "--lock=nonsense"}, "plan")
+    assert_eq(lock.message, "`--lock` was supplied twice")
+    assert_eq(lock.fix, "choose one migration lock policy")
+    to :: migration_test_parse_error([String]{"--to=1", "--to=bad"}, "plan")
+    assert_eq(to.message, "migration target version was supplied twice")
+    assert_eq(to.fix, "choose one `--to` value")
+    step :: migration_test_parse_error([String]{"--step=1", "--step=bad"}, "plan")
+    assert_eq(step.message, "migration step count was supplied twice")
+    assert_eq(step.fix, "choose one `--step` value")
+    loop flag in [String]{"--target", "--database", "--down", "--risk"} {
+        duplicate :: migration_test_parse_error([String]{"{flag}=first", "{flag}=second"}, "plan")
+        assert_eq(duplicate.message, "`{flag}` was supplied twice")
+        assert_eq(duplicate.fix, "provide one value per migration option")
+    }
+}
+#Test("migration parser help terminates at its original position not as a pre-scan") {
+    help :: jet_cli_migration_parse_options([String]{"--to=1", "--help=ignored", "--unknown"}, "plan", 0) ?? panic(err.message)
+    assert(help == .Help)
+    late_help :: migration_test_parse_error([String]{"--unknown", "--help"}, "plan")
+    assert_eq(late_help.code, "E2102")
+    // The dispatcher skips its migrate/verb prefix without slicing argv.
+    offset :: jet_cli_migration_parse_options([String]{"migrate", "plan", "--target=prod"}, "plan", 2) ?? panic(err.message)
+    if offset == {
+        .Options(options) -> assert_eq(options.target, Val("prod"))
+        else -> panic("prefix words entered the option parser")
+    }
+    rollback :: migration_test_options([String]{"--rollback=ignored", "--rollback"}, "preview")
+    assert(rollback.rollback)
+}
+#Test("migration version and count errors distinguish malformed text from zero") {
+    if jet_cli_migration_parse_version("bad") == {
+        .Err(error) -> { assert_eq(error.message, "`bad` is not a migration version"); assert_eq(error.fix, "use a positive decimal version") }
+        else -> panic("invalid version accepted")
+    }
+    if jet_cli_migration_parse_version("0") == {
+        .Err(error) -> { assert_eq(error.message, "migration versions start at 1"); assert_eq(error.fix, "use a positive version") }
+        else -> panic("zero version accepted")
+    }
+    if jet_cli_migration_parse_count("bad") == {
+        .Err(error) -> { assert_eq(error.message, "`bad` is not a migration step count"); assert_eq(error.fix, "use a positive decimal count") }
+        else -> panic("invalid count accepted")
+    }
+    if jet_cli_migration_parse_count("+000") == {
+        .Err(error) -> { assert_eq(error.message, "migration step count must be positive"); assert_eq(error.fix, "use `--step 1` or a larger count") }
+        else -> panic("zero count accepted")
+    }
+    assert_eq(jet_cli_migration_parse_version("18446744073709551615") ?? panic(err.message), U64{18446744073709551615})
+}
+#Test("migration validator follows source error precedence without tightening unknown verbs") {
+    precedence :: migration_test_validation_error([String]{"--to=1", "--step=1"}, "apply")
+    assert_eq(precedence.message, "`--to` and `--step` cannot be combined")
+    assert_eq(precedence.fix, "choose an absolute target version or a relative step count")
+    target :: migration_test_validation_error([String]{"unexpected", "--rollback"}, "apply")
+    assert_eq(target.message, "`jet db migrate apply` needs `--target <name>`")
+    rollback :: migration_test_validation_error([String]{"--target=prod", "unexpected", "--rollback"}, "apply")
+    assert_eq(rollback.message, "`--rollback` is not valid for `jet db migrate apply`")
+    positional :: migration_test_validation_error([String]{"--target=prod", "unexpected", "--up=SELECT 1"}, "apply")
+    assert_eq(positional.message, "`jet db migrate apply` received unexpected positional arguments")
+    sql :: migration_test_validation_error([String]{"--target=prod", "--up=SELECT 1", "--to=1"}, "status")
+    assert_eq(sql.message, "SQL generation flags are only valid for `jet db migrate new`, not `status`")
+    unknown :: migration_test_options([String]{"--to=1", "--step=1", "--up=SELECT 1", "unexpected"}, "unknown")
+    jet_cli_migration_validate_options(unknown, "unknown") ?? panic("unknown verb was prematurely validated")
+}
+#Test("migration validator preserves every verb-specific flag refusal") {
+    loop verb in [String]{"new", "status", "drift", "checksum", "locks", "target", "resume"} {
+        args :: if verb == "new" -> [String]{"Name", "--up=SELECT 1", "--to=1"} else -> [String]{"--target=prod", "--to=1"}
+        error :: migration_test_validation_error(args, verb)
+        assert_eq(error.message, "version selection is not valid for `jet db migrate {verb}`")
+        assert_eq(error.fix, "use `preview`, `plan`, `apply`, `step`, or `rollback` to select a version")
+    }
+    new_target :: migration_test_validation_error([String]{"Name", "--up=SELECT 1", "--target=prod"}, "new")
+    assert_eq(new_target.message, "`new` does not accept a deployment target or database path")
+    new_database :: migration_test_validation_error([String]{"Name", "--up=SELECT 1", "--database=db.sqlite"}, "new")
+    assert_eq(new_database.message, new_target.message)
+    loop verb in [String]{"apply", "step", "rollback", "resume"} {
+        error :: migration_test_validation_error([String]{"--target=prod", "--lock=shared"}, verb)
+        assert_eq(error.message, "`--lock shared` is not valid for migration writer command `{verb}`")
+    }
+    loop verb in [String]{"status", "drift", "checksum", "locks"} {
+        error :: migration_test_validation_error([String]{"--target=prod", "--lock=exclusive"}, verb)
+        assert_eq(error.message, "`--lock` is not valid for read-only `{verb}`")
+    }
+    locks_database :: migration_test_validation_error([String]{"--database=db.sqlite"}, "locks")
+    assert_eq(locks_database.message, "`locks` does not select a database path")
+}
+#Test("migration validator accepts its exact read and write combinations") {
+    loop verb in [String]{"preview", "plan", "apply", "step", "rollback"} {
+        options :: migration_test_options([String]{"--target=prod", "--step=2", "--lock=exclusive"}, verb)
+        jet_cli_migration_validate_options(options, verb) ?? panic(err.message)
+    }
+    loop verb in [String]{"preview", "plan", "checksum"} {
+        options :: migration_test_options([String]{"--target=prod", "--rollback"}, verb)
+        jet_cli_migration_validate_options(options, verb) ?? panic(err.message)
+    }
+    loop verb in [String]{"status", "drift", "checksum", "target", "resume"} {
+        options :: migration_test_options([String]{"--target=prod"}, verb)
+        jet_cli_migration_validate_options(options, verb) ?? panic(err.message)
+    }
+    jet_cli_migration_validate_options(migration_test_options([String]{}, "locks"), "locks") ?? panic(err.message)
+    jet_cli_migration_validate_options(migration_test_options([String]{"AddIndex", "--up=SELECT 1", "--lock=shared"}, "new"), "new") ?? panic(err.message)
+}
+#Test("migration version display uses minimum three digits and timestamp casts retain all bits") {
+    assert_eq(jet_cli_migration_version_text(U64{0}), "000")
+    assert_eq(jet_cli_migration_version_text(U64{9}), "009")
+    assert_eq(jet_cli_migration_version_text(U64{10}), "010")
+    assert_eq(jet_cli_migration_version_text(U64{99}), "099")
+    assert_eq(jet_cli_migration_version_text(U64{100}), "100")
+    assert_eq(jet_cli_migration_version_text(U64{1000}), "1000")
+    assert_eq(jet_cli_migration_timestamp(U128{0}), I128{0})
+    assert_eq(jet_cli_migration_timestamp(U128{18446744073709551616}), I128{18446744073709551616})
+    assert_eq(jet_cli_migration_timestamp(U128{170141183460469231731687303715884105727}), I128{170141183460469231731687303715884105727})
+    assert_eq(jet_cli_migration_timestamp(U128{170141183460469231731687303715884105728}), I128{-170141183460469231731687303715884105727} - I128{1})
+    assert_eq(jet_cli_migration_timestamp(U128{340282366920938463463374607431768211455}), I128{-1})
+}
+#Test("migration scalar projections retain field order SQL bytes and exact numeric JSON") {
+    assert_eq(jet_cli_migration_value(U64{18446744073709551615}, "AddIndex", true).json(), `{"version":18446744073709551615,"name":"AddIndex","rollback":true}`)
+    assert_eq(jet_cli_migration_step_value(U64{1}, "SELECT a=b;\n", "schema change", "exclusive").json(), `{"ordinal":1,"sql":"SELECT a=b;\n","risk":"schema change","lock":"exclusive"}`)
+    assert_eq(jet_cli_migration_strings([String]{"a", "b"}).json(), `["a","b"]`)
+}
+
+#Test("migration failures keep canonical cli reports and stay visible under quiet") {
+    error :: MigrationError.usage("E2104", "migration versions start at 1", "use a positive version")
+    plain :: jet_cli_migration_fail(error, JetCLIOutputMode{json: false, color: false, quiet: true})
+    assert_eq(plain.stdout, "")
+    assert_eq(plain.exit_code, JET_DRIVER_EXIT_USER_ERROR)
+    assert(plain.stderr.contains("migration versions start at 1"))
+    assert(plain.stderr.contains("migration commands keep versioned SQL, target identity, and receipts together"))
+    assert(plain.stderr.contains("use a positive version"))
+    machine :: jet_cli_migration_fail(error, JetCLIOutputMode{json: true, color: false, quiet: true})
+    assert_eq(machine.stderr, "")
+    assert(machine.stdout.contains("\"action\":\"cli\""))
+    assert(machine.stdout.contains("\"ok\":false"))
+    assert(machine.stdout.contains("\"code\":\"E2104\""))
+}
+#Test("migration command early help and route refusal do not require a database") {
+    mode :: JetCLIOutputMode{json: false, color: false, quiet: false}
+    loop args in [[String]]{[String]{}, [String]{"help"}, [String]{"--help"}, [String]{"-h"}, [String]{"migrate"}, [String]{"migrate", "help"}} {
+        output :: jet_cli_run_migration(args, mode, U64{18446744073709551615})
+        assert_eq(output.exit_code, JET_DRIVER_EXIT_OK)
+        assert_eq(output.stderr, jet_cli_migration_help_text())
+    }
+    refused :: jet_cli_run_migration([String]{"unknown"}, mode, U64{18446744073709551615})
+    assert_eq(refused.exit_code, JET_DRIVER_EXIT_USER_ERROR)
+    assert(refused.stderr.contains("`jet db unknown` is not a database migration command"))
+    // Parse-level help intentionally ignores the outer JSON/quiet choices.
+    help :: jet_cli_run_migration([String]{"migrate", "apply", "--help", "--unknown"}, JetCLIOutputMode{json: true, color: true, quiet: true}, U64{18446744073709551615})
+    assert_eq(help.stdout, "")
+    assert_eq(help.stderr, jet_cli_migration_help_text())
+    assert_eq(help.exit_code, JET_DRIVER_EXIT_OK)
+}
+fn migration_test_outcome(error: String?) -> migration_db.MigrationOutcome Never! {
+    migration_db.MigrationOutcome{
+        receipt_id: "receipt", operation: "apply", status: "applied", target: "prod",
+        target_identity: "target-id", source_identity: "source-id", schema_identity: "schema-id",
+        database_identity: "database-id", tool_identity: "tool-id",
+        from_version: U64{0}, to_version: U64{18446744073709551615},
+        step_count: U64{2}, step_ids: [String]{"step-1", "step-2"},
+        checksum: "checksum", lock: migration_db.MigrationLock.Exclusive, risk: "schema change",
+        started_unix_ms: U128{170141183460469231731687303715884105728},
+        finished_unix_ms: U128{340282366920938463463374607431768211455}, error: error,
+    }
+}
+#Test("migration receipt projection uses the original ordered fields and signed timestamp reinterpret") {
+    value :: jet_cli_migration_outcome_value(migration_test_outcome(None)).json()
+    expected :: `{"receipt_id":"receipt","operation":"apply","status":"applied","target":"prod","target_identity":"target-id","source_identity":"source-id","schema_identity":"schema-id","database_identity":"database-id","tool_identity":"tool-id","from_version":0,"to_version":18446744073709551615,"step_count":2,"step_ids":["step-1","step-2"],"checksum":"checksum","lock":"exclusive","risk":"schema change","started_unix_ms":-170141183460469231731687303715884105728,"finished_unix_ms":-1,"error":null}`
+    assert_eq(value, expected)
+    failure :: jet_cli_migration_outcome_value(migration_test_outcome(Val("transaction failed"))).json()
+    assert(failure.ends_with(`"error":"transaction failed"}`))
+    assert_eq(jet_cli_migration_lock_name(migration_db.MigrationLock.Shared), "shared")
+    assert_eq(jet_cli_migration_lock_name(migration_db.MigrationLock.Exclusive), "exclusive")
+}
+#Test("migration lock projection preserves high owner pid and native path display") {
+    path :: migration_paths.from_text(".jet/migrations/locks/prod.lock", migration_paths.PathPlatform.Unix)
+    lock :: MigrationLockInfo{path: path, target: "prod", target_identity: "target-id", database: ".jet/db/prod.sqlite", database_identity: "database-id", lock: MigrationLock.Shared, pid: U64{18446744073709551615}}
+    assert_eq(jet_cli_migration_lock_value(lock).json(), `{"target":"prod","target_identity":"target-id","database":".jet/db/prod.sqlite","database_identity":"database-id","lock":"shared","pid":18446744073709551615,"path":".jet/migrations/locks/prod.lock"}`)
+}
+#Test("migration empty catalog version selection preserves rollback-to-zero and zero-count refusal") {
+    root :: migration_paths.from_text(".", migration_paths.PathPlatform.Unix)
+    catalog :: MigrationCatalog{root: root, migrations: [], source_identity: "catalog"}
+    assert_eq(jet_cli_migration_version_after(catalog, U64{0}, U64{0}, U64{18446744073709551615}), None)
+    assert_eq(jet_cli_migration_version_after(catalog, U64{0}, U64{1}, U64{18446744073709551615}), None)
+    assert_eq(jet_cli_migration_version_before(catalog, U64{1}, U64{0}, U64{18446744073709551615}), None)
+    assert_eq(jet_cli_migration_version_before(catalog, U64{1}, U64{1}, U64{18446744073709551615}), Val(U64{0}))
+    assert_eq(jet_cli_migration_version_before(catalog, U64{1}, U64{2}, U64{4294967295}), None)
+}

@@ -1,0 +1,34 @@
+// Universal views of the canonical record value; exact Rust RecordError text.
+#Test("record value views preserve typed payloads") {
+    map :: RecordValue.Map{fields: [RecordField{name: "name", value: RecordValue.Str{value: "é\n"}}]}
+    value :: record_value_field(map, "name").value ?? panic("field")
+    assert_eq(record_value_as_str(value).value, Val("é\n"))
+    assert_eq(record_value_as_optional_str(RecordValue.Null).problem, None)
+    assert_eq(record_value_as_optional_str(RecordValue.Null).value, None)
+    assert_eq(record_value_optional_str(None), RecordValue.Null)
+    assert_eq(record_value_str_list(record_value_list_of_str(["a", "b"])).value, Val(["a", "b"]))
+    assert_eq(record_value_as_usize(RecordValue.Int{value: 0}).value, Val(0))
+    assert_eq(record_value_as_usize(RecordValue.Int{value: 18446744073709551615}).value, Val(18446744073709551615))
+}
+
+#Test("record value views reject malformed shapes with exact errors") {
+    assert_eq(record_value_field(RecordValue.Null, "x").problem, Val("record is malformed: expected map, found null"))
+    assert_eq(record_value_field(RecordValue.Map{fields: [RecordField]{}}, "x").problem, Val("record is malformed: field `x` is missing"))
+    assert_eq(record_value_as_str(RecordValue.Bool{value: true}).problem, Val("record is malformed: expected string, found boolean"))
+    assert_eq(record_value_as_optional_str(RecordValue.Int{value: 1}).problem, Val("record is malformed: expected string, found integer"))
+    assert_eq(record_value_as_list(RecordValue.Str{value: "x"}).problem, Val("record is malformed: expected list, found string"))
+    assert_eq(record_value_as_usize(RecordValue.Str{value: "0"}).problem, Val("record is malformed: expected integer, found string"))
+    assert_eq(record_value_as_usize(RecordValue.Int{value: -1}).problem, Val("record is malformed: negative or oversized count"))
+    assert_eq(record_value_as_usize(RecordValue.Int{value: 18446744073709551616}).problem, Val("record is malformed: negative or oversized count"))
+    assert_eq(record_value_str_list(RecordValue.List{values: [RecordValue.Str{value: "a"}, RecordValue.Null]}).problem, Val("record is malformed: expected string, found null"))
+}
+
+#Test("record reader open_schema checks wire before schema") {
+    encoded :: record_encode("jet.items/v1", [RecordSection{id: 1, elements: [RecordValue.Str{value: "pkg:."}]}]).bytes ?? panic("encode")
+    assert_eq(record_open_schema(encoded, "jet.items/v1").problem, None)
+    assert_eq(record_open_schema(encoded, "jet.diags/v1").problem, Val("record schema is `jet.items/v1`, expected `jet.diags/v1`"))
+    assert_eq(record_open_schema([U8]{}, "jet.items/v1").problem, record_open([U8]{}).problem)
+    corrupt := encoded
+    corrupt[corrupt.len() - 1] = corrupt[corrupt.len() - 1] ^ U8{1}
+    assert_eq(record_open_schema(corrupt, "jet.diags/v1").problem, Val("record checksum does not match its bytes"))
+}

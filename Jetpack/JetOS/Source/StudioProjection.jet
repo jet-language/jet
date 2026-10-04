@@ -1,0 +1,637 @@
+use core.files.runtime.kernel_path_components as studio_path
+use core.files.host.retained_descriptor
+
+// Whole Rust JetOS/studio_projection.rs:1-842; fixed-schema JSON uses the
+// canonical Foundation quote, and every object_of value is a STRING.
+// Native publication manifest: imports below target ONLY Main's published
+// required ABI (RETAINED-DESCRIPTOR-ABI.md:161-181), not delivered bodies.
+// RtW35 create_dir_all/write/is_file/exists/metadata/set_permissions are ALL
+// unresolved #4494/#4392/#4483/#4409. No String filesystem fallback is used.
+// jetos_make_executable remains undeclared pending actual selected Unix cfg.
+// Unix law :831-837: followed metadata FIRST; match native Unix(mode,uid),
+// retained_descriptor.set_permissions(ORIGINAL path, mode | U32{73}),
+// metadata BEFORE setter errors and preserving every original permission bit.
+// NonUnix :839-842 is Ok() WITHOUT metadata/setter. Raw lexical PathPlatform
+// cannot decide native cfg; sys.family() and guessed #Target cannot supply it.
+// RootProjection's symlink/nonUnix copy helper is a DISTINCT native gate.
+
+// Rust :831-837 Unix body, ready for the ONE actual selected-family publisher.
+// NOT the canonical callable: #4483/D-LANG-IN-LIBS has no ratified cfg selector.
+// No caller may choose this using the OsPath's lexical platform.
+fn jetos_make_executable_unix_body(path: studio_path.OsPath) IOError! -[FS]> {
+    metadata :: retained_descriptor.metadata(path)
+    mode :: if metadata.native == {
+        .Unix(mode, _) -> mode
+        .Windows(_, _) -> panic("selected Unix metadata must carry native Unix permissions")
+    }
+    retained_descriptor.set_permissions(path, mode | U32{0o111})
+}
+
+// Rust :839-842 actual nonUnix body. Its empty success is the ORIGINAL cfg
+// contract, never a fallback for missing Unix natives. Also unselected #4483.
+fn jetos_make_executable_nonunix_body(_path: studio_path.OsPath) IOError! {}
+
+// Rust :84-175, exact order, renderer is always the id.
+struct JetOSStudioPage {
+    id: String
+    title: String
+    group: String
+    needs: String
+    controller: String
+    model_contract: String
+    read_only: Bool
+}
+JETOS_STUDIO_PAGES :: prep { [JetOSStudioPage]{
+    JetOSStudioPage{id: "dashboard", title: "Dashboard", group: "operations", needs: "dashboard,services,artifacts", controller: "read-only", model_contract: "system_plan,proof_state", read_only: true},
+    JetOSStudioPage{id: "settings", title: "Settings", group: "settings", needs: "options,source", controller: "studio-actions", model_contract: "system_plan.options,changeset", read_only: false},
+    JetOSStudioPage{id: "monitoring", title: "Monitoring", group: "operations", needs: "services,artifacts", controller: "read-only", model_contract: "system_plan.services,proof_state", read_only: true},
+    JetOSStudioPage{id: "services", title: "Services", group: "operations", needs: "services", controller: "read-only", model_contract: "system_plan.services", read_only: true},
+    JetOSStudioPage{id: "packages", title: "Packages", group: "inventory", needs: "packages", controller: "read-only", model_contract: "system_plan.packages", read_only: true},
+    JetOSStudioPage{id: "secrets", title: "Secrets", group: "settings", needs: "options", controller: "read-only", model_contract: "system_plan.options", read_only: true},
+    JetOSStudioPage{id: "fleet", title: "Fleet", group: "operations", needs: "fleet,proof", controller: "read-only", model_contract: "proof_state", read_only: true},
+    JetOSStudioPage{id: "generations", title: "Generations", group: "operations", needs: "artifacts", controller: "studio-actions", model_contract: "generations,changeset", read_only: false},
+    JetOSStudioPage{id: "changeset", title: "Changeset", group: "review", needs: "source,diff,impact", controller: "studio-actions", model_contract: "changeset", read_only: false},
+    JetOSStudioPage{id: "proof-provenance", title: "Proof/Provenance", group: "audit", needs: "artifacts,run", controller: "studio-actions", model_contract: "system_plan,proof_state,generations", read_only: false}
+} }
+
+// Rust Path.file_name().and_then(OsStr.to_str()), not staging basename or
+// lossy display. Raw published path also retains non-UTF8/surrogate refusal.
+fn jetos_studio_generation(published_dir: studio_path.OsPath) -> String Never! {
+    name :: studio_path.file_name_span(published_dir) ?? return "unrecorded"
+    bytes := published_dir.encoded[name.start..<name.end] // #4303 owned slice.
+    String.from_bytes(bytes) ?? "unrecorded"
+}
+
+// Generated ordinary filenames enter the ONE semantic PathBuf owner; existing
+// raw path bytes are never displayed and re-parsed. Joining owns one result.
+fn jetos_studio_child(dir: studio_path.OsPath, name: String) -> studio_path.OsPath Never! {
+    out := dir
+    studio_path.push(&out, studio_path.from_text(name, dir.platform))
+    out
+}
+
+// Rust :6-70. Only the exact four directories, with sequential write/error
+// ordering; the native helper is a real unresolved dependency, not omitted IO.
+pub fn jetos_write_studio_app_projection(dir: studio_path.OsPath, published_dir: studio_path.OsPath, system: SystemPlan) IOError! -[FS]> {
+    generation :: jetos_studio_generation(published_dir)
+    studio_dir :: jetos_studio_child(dir, "studio")
+    bin_dir :: jetos_studio_child(dir, "sw/bin")
+    desktop_dir :: jetos_studio_child(dir, "share/applications")
+    autostart_dir :: jetos_studio_child(dir, "share/xdg/autostart")
+    retained_descriptor.create_dir_all(studio_dir)
+    retained_descriptor.create_dir_all(bin_dir)
+    retained_descriptor.create_dir_all(desktop_dir)
+    retained_descriptor.create_dir_all(autostart_dir)
+    app :: "{{\n  \"kind\": \"jetos-studio-app\",\n  \"host\": {foundation_json_quote(system.name)},\n  \"runtime\": \"jetos-system-app\",\n  \"protocol\": \"local-projection-service\",\n  \"source_truth\": \"jet-source-transactions\",\n  \"semantic_state\": \"jet-source-only\",\n  \"browser_fallback\": \"true\",\n  \"canvas_coupled\": \"false\",\n  \"first_boot_role\": \"os-control-center\"\n}}"
+    retained_descriptor.write(jetos_studio_child(studio_dir, "app.json"), app.bytes())
+    retained_descriptor.write(jetos_studio_child(studio_dir, "data.json"), jetos_studio_data_json(dir, generation, system).bytes())
+    retained_descriptor.write(jetos_studio_child(studio_dir, "index.html"), jetos_studio_index_html(dir, generation, system).bytes())
+    retained_descriptor.write(jetos_studio_child(studio_dir, "first-boot.json"), jetos_studio_first_boot_json(dir, generation, system).bytes())
+    retained_descriptor.write(jetos_studio_child(studio_dir, "first-boot.pending"), "1\n".bytes())
+    launcher :: "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_STUDIO_ROOT:-/run/current-system}}\npage=\"$root/studio/index.html\"\nif command -v jetos >/dev/null 2>&1; then\n  exec jetos studio \"$@\"\nfi\nif command -v xdg-open >/dev/null 2>&1; then\n  exec xdg-open \"$page\"\nfi\nprintf '%s\\n' \"$page\"\n"
+    launcher_path :: jetos_studio_child(bin_dir, "jetos-studio")
+    retained_descriptor.write(launcher_path, launcher.bytes())
+    jetos_make_executable(launcher_path)
+    // D-JOS-FIRSTBOOT1=D: first graphical session opens Studio as the OS
+    // control center. Canvas stays a deep-link from source spans only.
+    first_boot :: "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_STUDIO_ROOT:-/run/current-system}}\nmarker=${{JETOS_FIRST_BOOT_MARKER:-$root/studio/first-boot.pending}}\nif [ ! -f \"$marker\" ]; then\n  exit 0\nfi\nif command -v jetos-studio >/dev/null 2>&1; then\n  jetos-studio --first-boot || true\nelif [ -x \"$root/sw/bin/jetos-studio\" ]; then\n  \"$root/sw/bin/jetos-studio\" --first-boot || true\nfi\nrm -f \"$marker\"\n"
+    first_boot_path :: jetos_studio_child(bin_dir, "jetos-studio-first-boot")
+    retained_descriptor.write(first_boot_path, first_boot.bytes())
+    jetos_make_executable(first_boot_path)
+    retained_descriptor.write(jetos_studio_child(desktop_dir, "jetos-studio.desktop"), "[Desktop Entry]\nName=Jetos Studio\nComment=Edit jetos system source\nExec=/run/current-system/sw/bin/jetos-studio\nType=Application\nCategories=System;Settings;\n".bytes())
+    retained_descriptor.write(jetos_studio_child(autostart_dir, "jetos-studio-first-boot.desktop"), "[Desktop Entry]\nName=Jetos Studio First Boot\nComment=Open the jetos control center on first boot\nExec=/run/current-system/sw/bin/jetos-studio-first-boot\nType=Application\nX-GNOME-Autostart-enabled=true\nX-KDE-autostart-condition=true\nOnlyShowIn=GNOME;KDE;XFCE;Hyprland;niri;\n".bytes())
+}
+
+// Rust :72-82.
+pub fn jetos_studio_first_boot_json(dir: studio_path.OsPath, generation: String, system: SystemPlan) -> String -[FS]> {
+    proof_present :: if retained_descriptor.is_file(jetos_studio_child(dir, "proof.txt")) -> "true" else -> "false"
+    health_present :: if retained_descriptor.exists(jetos_studio_child(dir, "health")) || retained_descriptor.exists(jetos_studio_child(dir, "acceptance")) -> "true" else -> "false"
+    "{{\"kind\":\"jetos.studio.first-boot\",\"role\":\"os-control-center\",\"host\":{foundation_json_quote(system.name)},\"generation\":{foundation_json_quote(generation)},\"surfaces\":[\"host\",\"generation\",\"source\",\"proof\",\"update\",\"rollback\",\"health\"],\"source_truth\":\"jet-source-only\",\"proof_visible\":{proof_present},\"health_visible\":{health_present},\"update_path\":\"jet os switch\",\"rollback_path\":\"jet os rollback\",\"canvas\":{{\"mode\":\"separate-app-deeplink\",\"path\":\"/canvas\",\"from\":\"source-spans-only\",\"first_surface\":false}},\"autostart\":\"share/xdg/autostart/jetos-studio-first-boot.desktop\",\"proof\":\"first-boot-control-center-ready\"}}"
+}
+
+// Rust :177-240. Preserve packages, options, service fields and duplicates in
+// original source order. No option resolver/deduper belongs in this projection.
+pub fn jetos_studio_data_json(dir: studio_path.OsPath, generation: String, system: SystemPlan) -> String -[FS]> {
+    pages :: jetos_studio_pages_json()
+    packages := [String]{}
+    loop pkg in system.packages {
+        source :: if pkg.source.is_empty() -> "default" else -> pkg.source
+        &packages.push("{{\n  \"name\": {foundation_json_quote(pkg.name)},\n  \"source\": {foundation_json_quote(source)}\n}}")
+    }
+    services := [String]{}
+    enabled := 0
+    loop svc in system.services {
+        fields := [String]{}
+        loop field in svc.extra -> &fields.push("{{\n  \"key\": {foundation_json_quote(field.key)},\n  \"value\": {foundation_json_quote(field.value)}\n}}")
+        enable :: if svc.enable -> "true" else -> "false"
+        if svc.enable -> enabled += 1
+        &services.push("{{\"name\":{foundation_json_quote(svc.name)},\"enable\":{enable},\"fields\":[{fields.join(",")}]}}")
+    }
+    options := [String]{}
+    loop opt in system.options -> &options.push("{{\n  \"key\": {foundation_json_quote(opt.key)},\n  \"value\": {foundation_json_quote(opt.value)}\n}}")
+    total :: system.services.len()
+    "{{\"kind\":\"jetos-studio-projection\",\"host\":{foundation_json_quote(system.name)},\"target\":{foundation_json_quote(system.target)},\"dashboard\":{{\"selected_host\":{foundation_json_quote(system.name)},\"generation\":{foundation_json_quote(generation)},\"service_configuration\":\"{enabled}/{total} enabled\",\"runtime_health\":\"not-projected\",\"alerts\":[],\"last_run\":\"generation-built\",\"rollback_status\":\"not-evaluated\"}},\"page_registry\":[{pages}],\"packages\":[{packages.join(",")}],\"services\":[{services.join(",")}],\"options\":[{options.join(",")}],\"changeset\":{{\"state\":\"empty\",\"apply_gate\":\"single-source-transaction\",\"proof_required\":[\"check\",\"plan\",\"build\",\"proof\"]}},\"secret_policy\":{{\"plaintext_in_projection\":false,\"visible_fields\":[\"name\",\"source\",\"runtime_path\",\"provenance\"],\"transaction\":\"audited-secret-rekey\"}},\"fleet\":{{\"mode\":\"adaptive\",\"single_host_default\":true,\"rollout_gate\":\"proof-before-switch\"}},\"first_boot\":{{\"role\":\"os-control-center\",\"autostart\":true,\"surfaces\":[\"host\",\"generation\",\"source\",\"proof\",\"update\",\"rollback\",\"health\"],\"canvas_first_surface\":false}},\"canvas_bridge\":{{\"mode\":\"separate-app-deeplink\",\"target\":\"/canvas\",\"shared_state\":\"source-only\",\"from\":\"source-spans-only\"}},\"artifacts\":{{\"plan\":{jetos_studio_artifact_json(dir, "plan.json")},\"proof\":{jetos_studio_artifact_json(dir, "proof.txt")},\"provenance\":{jetos_studio_artifact_json(dir, "provenance.json")},\"vm_proof\":{jetos_studio_artifact_json(dir, "vm-proof.txt")}}}}}"
+}
+
+// Rust :242-252: directories and missing paths are false, not exists().
+pub fn jetos_studio_artifact_json(dir: studio_path.OsPath, name: String) -> String -[FS]> {
+    present :: if retained_descriptor.is_file(jetos_studio_child(dir, name)) -> "true" else -> "false"
+    "{{\"path\":{foundation_json_quote("../{name}")},\"present\":{present}}}"
+}
+
+// Rust :254-271; ordered compact registry with real booleans.
+pub fn jetos_studio_pages_json() -> String Never! {
+    rows := [String]{}
+    loop page in JETOS_STUDIO_PAGES {
+        read_only :: if page.read_only -> "true" else -> "false"
+        &rows.push("{{\"id\":{foundation_json_quote(page.id)},\"title\":{foundation_json_quote(page.title)},\"group\":{foundation_json_quote(page.group)},\"renderer\":{foundation_json_quote(page.id)},\"controller\":{foundation_json_quote(page.controller)},\"model_contract\":{foundation_json_quote(page.model_contract)},\"read_only\":{read_only},\"data_needs\":{foundation_json_quote(page.needs)}}}")
+    }
+    rows.join(",")
+}
+
+// Rust :823-829: escaping order is significant; apostrophes remain unchanged.
+pub fn jetos_studio_html_escape(value: String) -> String Never! {
+    value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+}
+
+// Rust :273-821, ENTIRE original static HTML/CSS/JS, with each original newline
+// represented explicitly. ${...} in JS is literal via Jet's doubled braces.
+pub fn jetos_studio_index_html(dir: studio_path.OsPath, generation: String, system: SystemPlan) -> String -[FS]> {
+    jetos_studio_render_index_html(generation, system, retained_descriptor.is_file(jetos_studio_child(dir, "proof.txt")))
+}
+
+// One renderer, not an alternative UI. Native observation is performed ONLY
+// by the original entry above; this entire body is independent of native IO.
+fn jetos_studio_render_index_html(generation: String, system: SystemPlan, proof_present: Bool) -> String Never! {
+    enabled_services := 0
+    loop svc in system.services { if svc.enable -> enabled_services += 1 }
+    proof_status :: jetos_studio_html_escape(if proof_present -> "proof artifact present" else -> "proof not run")
+    nav_rows := [String]{}
+    loop page in JETOS_STUDIO_PAGES -> &nav_rows.push("<a href=\"#{page.id}\" data-page=\"{page.id}\">{jetos_studio_html_escape(page.title)}</a>")
+    nav :: nav_rows.join("")
+    package_rows := [String]{}
+    loop pkg in system.packages {
+        source :: if pkg.source.is_empty() -> "default" else -> pkg.source
+        &package_rows.push("<tr><td>{jetos_studio_html_escape(pkg.name)}</td><td>{jetos_studio_html_escape(source)}</td></tr>")
+    }
+    packages :: if package_rows.is_empty() -> "<tr><td>none</td><td></td></tr>" else -> package_rows.join("")
+    service_rows := [String]{}
+    loop svc in system.services {
+        fields := [String]{}
+        loop field in svc.extra -> &fields.push("{field.key}: {field.value}")
+        enable :: if svc.enable -> "enabled" else -> "disabled"
+        &service_rows.push("<tr><td>{jetos_studio_html_escape(svc.name)}</td><td>{enable}</td><td>{jetos_studio_html_escape(fields.join(", "))}</td></tr>")
+    }
+    services :: if service_rows.is_empty() -> "<tr><td>none</td><td></td><td></td></tr>" else -> service_rows.join("")
+    option_rows := [String]{}
+    setting_rows := [String]{}
+    loop opt in system.options {
+        &option_rows.push("<tr><td>{jetos_studio_html_escape(opt.key)}</td><td>{jetos_studio_html_escape(opt.value)}</td></tr>")
+        &setting_rows.push("<div class=\"setting-control\"><label><span>{jetos_studio_html_escape(opt.key)}</span><input data-setting-key=\"{jetos_studio_html_escape(opt.key)}\" value=\"{jetos_studio_html_escape(opt.value)}\"></label><button type=\"button\" data-stage-setting=\"{jetos_studio_html_escape(opt.key)}\">Stage Change</button></div>")
+    }
+    options :: if option_rows.is_empty() -> "<tr><td>none</td><td></td></tr>" else -> option_rows.join("")
+    settings_controls :: if setting_rows.is_empty() -> "<div class=\"empty\">No settings projected.</div>" else -> setting_rows.join("")
+    host :: jetos_studio_html_escape(system.name)
+    target :: jetos_studio_html_escape(system.target)
+    generation_html :: jetos_studio_html_escape(generation)
+    service_total :: system.services.len()
+    package_total :: system.packages.len()
+    option_total :: system.options.len()
+    chunks :: [String]{
+        "<!doctype html>\n",
+        "<html>\n",
+        "<head>\n",
+        "<meta charset=\"utf-8\">\n",
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n",
+        "<title>Jetos Studio - {host}</title>\n",
+        "<style>\n",
+        ":root {{ --paper: #eef3f6; --panel: #fbfdfe; --ink: #142430; --muted: #607482; --nav: #132b3a; --accent: #32769a; --ok: #1b7f70; --warn: #b56f1c; --line: #c8d4dc; font-family: \"IBM Plex Sans\", Inter, ui-sans-serif, system-ui, sans-serif; background: var(--paper); color: var(--ink); }}\n",
+        "body {{ margin: 0; min-height: 100vh; background: var(--paper); }}\n",
+        "main {{ display: grid; grid-template-columns: 248px 1fr; min-height: 100vh; }}\n",
+        "aside {{ border-right: 1px solid #0d202b; padding: 22px 16px; background: var(--nav); color: #f3f8fa; }}\n",
+        "section {{ padding: 28px; }}\n",
+        "h1, h2 {{ margin: 0; font-weight: 650; }}\n",
+        "h1 {{ font-size: 22px; letter-spacing: -0.025em; }}\n",
+        "h2 {{ font-size: 15px; margin-bottom: 12px; }}\n",
+        ".nav {{ display: grid; gap: 4px; margin-top: 24px; }}\n",
+        ".nav a {{ color: #b9cbd4; text-decoration: none; border-left: 2px solid transparent; border-radius: 3px; padding: 8px 10px; font-size: 14px; }}\n",
+        ".nav a:hover, .nav a.active {{ background: #1d3b4d; border-left-color: #67b6d5; color: #ffffff; }}\n",
+        ".host {{ display: grid; gap: 6px; margin-top: 20px; }}\n",
+        ".host .pill {{ border-color: #466374; background: #193748; color: #ffffff; }}\n",
+        ".host > span:last-child {{ color: #a9bec9; font: 12px \"JetBrains Mono\", ui-monospace, monospace; }}\n",
+        ".pill {{ border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; width: max-content; background: var(--panel); }}\n",
+        ".grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }}\n",
+        ".panel {{ border: 1px solid var(--line); border-radius: 7px; background: var(--panel); overflow: hidden; box-shadow: 0 5px 18px rgba(20, 36, 48, .05); }}\n",
+        ".panel header {{ padding: 14px 16px; border-bottom: 1px solid var(--line); }}\n",
+        ".hero {{ display: grid; gap: 14px; margin-bottom: 18px; }}\n",
+        ".metrics {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }}\n",
+        ".metric {{ border: 1px solid var(--line); border-radius: 7px; background: var(--panel); padding: 14px; color: var(--muted); }}\n",
+        ".metric strong {{ display: block; font-size: 22px; margin-top: 4px; }}\n",
+        ".lineage {{ display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: 7px; background: #dfe9ee; overflow: hidden; }}\n",
+        ".lineage span {{ position: relative; padding: 11px 14px; color: #294554; font: 12px \"JetBrains Mono\", ui-monospace, monospace; }}\n",
+        ".lineage span + span {{ border-left: 1px solid #b5c7d1; }}\n",
+        ".lineage small {{ display: block; margin-bottom: 3px; color: var(--accent); font: 600 10px \"IBM Plex Sans\", ui-sans-serif, sans-serif; letter-spacing: .09em; text-transform: uppercase; }}\n",
+        ".page {{ display: none; }}\n",
+        ".page.active {{ display: block; }}\n",
+        "table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}\n",
+        "td {{ padding: 10px 16px; border-top: 1px solid #e7ebf0; vertical-align: top; }}\n",
+        "td:first-child {{ color: #245d7a; font-weight: 600; white-space: nowrap; }}\n",
+        ".status {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 24px; }}\n",
+        ".empty {{ color: var(--muted); padding: 16px; }}\n",
+        ".form {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 16px; }}\n",
+        ".setting-control {{ display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }}\n",
+        "label {{ display: grid; gap: 6px; font-size: 12px; color: var(--muted); }}\n",
+        "input {{ min-width: 0; border: 1px solid var(--line); border-radius: 5px; padding: 9px 10px; background: #ffffff; color: var(--ink); }}\n",
+        ".actions {{ display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 16px; }}\n",
+        "button {{ border: 1px solid #9eb1bc; border-radius: 5px; padding: 8px 11px; background: #e6eef2; color: var(--ink); cursor: pointer; }}\n",
+        "button:hover {{ border-color: var(--accent); background: #dce9ef; }}\n",
+        "a:focus-visible, button:focus-visible, input:focus-visible {{ outline: 3px solid rgba(50, 118, 154, .32); outline-offset: 2px; }}\n",
+        "pre {{ margin: 0; padding: 16px; min-height: 96px; max-height: 300px; overflow: auto; border-top: 1px solid var(--line); color: #22313f; background: #f4f8fa; font: 12px/1.5 \"JetBrains Mono\", ui-monospace, monospace; }}\n",
+        ".changeset-tray {{ position: sticky; bottom: 0; z-index: 2; border-top: 1px solid #91aab7; background: #f8fbfc; padding: 12px 16px; display: flex; gap: 10px; align-items: center; justify-content: space-between; box-shadow: 0 -8px 24px rgba(20, 36, 48, .08); }}\n",
+        "@media (max-width: 720px) {{ main {{ grid-template-columns: 1fr; }} aside {{ border-right: 0; border-bottom: 1px solid #0d202b; }} section {{ padding: 18px; }} .form, .lineage {{ grid-template-columns: 1fr; }} .lineage span + span {{ border-left: 0; border-top: 1px solid #b5c7d1; }} }}\n",
+        "</style>\n",
+        "</head>\n",
+        "<body>\n",
+        "<main id=\"studio\" data-host=\"{host}\" data-protocol=\"local-projection-service\" data-source-truth=\"jet-source-transactions\">\n",
+        "<aside>\n",
+        "<h1>Jetos Studio</h1>\n",
+        "<div class=\"host\">\n",
+        "<span class=\"pill\">{host}</span>\n",
+        "<span>{target}</span>\n",
+        "</div>\n",
+        "<nav class=\"nav\" data-page-registry=\"studio-pages\">{nav}</nav>\n",
+        "</aside>\n",
+        "<section>\n",
+        "<div id=\"dashboard\" class=\"page active\" data-page-kind=\"dashboard\">\n",
+        "<div class=\"hero\">\n",
+        "<h2>Dashboard</h2>\n",
+        "<div class=\"lineage\" aria-label=\"Source to Built Generation\">\n",
+        "<span><small>Source</small>config.jet</span>\n",
+        "<span><small>Plan</small>plan.json</span>\n",
+        "<span><small>Proof</small>proof.txt</span>\n",
+        "<span><small>Generation</small>{generation_html}</span>\n",
+        "</div>\n",
+        "<div class=\"status\">\n",
+        "<span class=\"pill\">Selected Host: {host}</span>\n",
+        "<span class=\"pill\">Generation: {generation_html}</span>\n",
+        "<span class=\"pill\">Rollback: not evaluated</span>\n",
+        "</div>\n",
+        "<div class=\"metrics\">\n",
+        "<div class=\"metric\">Services Configured<strong data-live-count=\"services\">{enabled_services}/{service_total}</strong></div>\n",
+        "<div class=\"metric\">Packages<strong data-live-count=\"packages\">{package_total}</strong></div>\n",
+        "<div class=\"metric\">Options<strong data-live-count=\"options\">{option_total}</strong></div>\n",
+        "<div class=\"metric\">Projection Alerts<strong>0</strong></div>\n",
+        "</div>\n",
+        "</div>\n",
+        "<div class=\"grid\">\n",
+        "<article class=\"panel\"><header><h2>Service Configuration</h2></header><div class=\"empty\">Runtime health is not projected yet.</div><table data-live-services><thead><tr><th>Name</th><th>Enabled</th><th>Fields</th></tr></thead><tbody>{services}</tbody></table></article>\n",
+        "<article class=\"panel\"><header><h2>Proof/Rollback Status</h2></header><pre data-live-proof>plan.json proof.txt provenance.json vm-proof.txt\n",
+        "last run: generation built\n",
+        "status: {proof_status}\n",
+        "rollback: not evaluated\n",
+        "proof required: check, plan, build, proof</pre></article>\n",
+        "</div>\n",
+        "</div>\n",
+        "<div id=\"settings\" class=\"page\" data-page-kind=\"settings\">\n",
+        "<div class=\"grid\">\n",
+        "<article class=\"panel\"><header><h2>Settings</h2></header><div id=\"settings-controls\" class=\"form\">{settings_controls}</div></article>\n",
+        "<article class=\"panel\"><header><h2>Exact Jet Diff</h2></header><pre id=\"tx-output\"></pre></article>\n",
+        "</div>\n",
+        "</div>\n",
+        "<div id=\"monitoring\" class=\"page\" data-page-kind=\"monitoring\"><div class=\"grid\"><article class=\"panel\"><header><h2>Monitoring</h2></header><table data-live-services><thead><tr><th>Name</th><th>Enabled</th><th>Fields</th></tr></thead><tbody>{services}</tbody></table></article><article class=\"panel\"><header><h2>Artifacts</h2></header><pre data-live-proof>provenance: ../provenance.json\n",
+        "proof: ../proof.txt\n",
+        "vm proof: ../vm-proof.txt</pre></article></div></div>\n",
+        "<div id=\"services\" class=\"page\" data-page-kind=\"services\"><article class=\"panel\"><header><h2>Services</h2></header><table data-live-services><thead><tr><th>Name</th><th>Enabled</th><th>Fields</th></tr></thead><tbody>{services}</tbody></table></article></div>\n",
+        "<div id=\"packages\" class=\"page\" data-page-kind=\"packages\"><article class=\"panel\"><header><h2>Packages</h2></header><table data-live-packages><thead><tr><th>Package</th><th>Version</th></tr></thead><tbody>{packages}</tbody></table></article></div>\n",
+        "<div id=\"secrets\" class=\"page\" data-page-kind=\"secrets\" data-secret-policy=\"no-plaintext\"><article class=\"panel\"><header><h2>Secrets</h2></header><pre>plaintext: never projected\n",
+        "runtime path: /run/jetos-secrets/*\n",
+        "transactions: audited rekey/add only</pre><table><thead><tr><th>Option</th><th>Value</th></tr></thead><tbody>{options}</tbody></table></article></div>\n",
+        "<div id=\"fleet\" class=\"page\" data-page-kind=\"fleet\" data-fleet-mode=\"adaptive\"><article class=\"panel\"><header><h2>Fleet</h2></header><pre>single host default: true\n",
+        "rollout gate: proof-before-switch\n",
+        "rollback on failed health window</pre></article></div>\n",
+        "<div id=\"generations\" class=\"page\" data-page-kind=\"generations\"><article class=\"panel\"><header><h2>Generations</h2></header><pre data-live-generations>current generation: {generation_html}\n",
+        "Rollback restores source through the same Changeset review and Apply gate.</pre><div class=\"actions\"><button data-changeset-action=\"stage-rollback\">Stage Last Source Rollback</button><button data-run=\"generations\">List Generations</button></div></article></div>\n",
+        "<div id=\"changeset\" class=\"page\" data-page-kind=\"changeset\" data-apply-gate=\"single-source-transaction\">\n",
+        "<div class=\"grid\">\n",
+        "<article class=\"panel\"><header><h2>Changeset</h2></header><pre id=\"changeset-diff\">No staged changes.</pre></article>\n",
+        "<article class=\"panel\"><header><h2>Impact Ledger</h2></header><pre id=\"changeset-impact\">generation delta: current -> candidate\n",
+        "proof requirements: check, plan, build, proof\n",
+        "source transaction: config.jet only</pre>\n",
+        "<div class=\"actions\">\n",
+        "<button data-changeset-action=\"apply\">Apply to config.jet</button>\n",
+        "<button data-run=\"build\">Build Only</button>\n",
+        "<button data-pipeline=\"build-switch\">Build and Switch</button>\n",
+        "<button data-changeset-action=\"discard\">Discard</button>\n",
+        "</div></article>\n",
+        "</div>\n",
+        "</div>\n",
+        "<div id=\"proof-provenance\" class=\"page\" data-page-kind=\"proof-provenance\">\n",
+        "<div class=\"grid\">\n",
+        "<article class=\"panel\"><header><h2>Packages</h2></header><table data-live-packages><thead><tr><th>Package</th><th>Version</th></tr></thead><tbody>{packages}</tbody></table></article>\n",
+        "<article class=\"panel\"><header><h2>Services</h2></header><table data-live-services><thead><tr><th>Name</th><th>Enabled</th><th>Fields</th></tr></thead><tbody>{services}</tbody></table></article>\n",
+        "<article class=\"panel\"><header><h2>Options</h2></header><table data-live-options><thead><tr><th>Option</th><th>Value</th></tr></thead><tbody>{options}</tbody></table></article>\n",
+        "<article class=\"panel\"><header><h2>Source</h2></header>\n",
+        "<div class=\"form\">\n",
+        "<label>Option<input id=\"tx-key\" value=\"network.hostName\"></label>\n",
+        "<label>Value<input id=\"tx-value\" value=\"{host}\"></label>\n",
+        "</div>\n",
+        "<div class=\"actions\">\n",
+        "<button data-stage-source=\"true\">Stage Edit</button>\n",
+        "<a href=\"/canvas\" data-open-canvas=\"source\">Open Canvas</a>\n",
+        "</div>\n",
+        "<pre id=\"source-tx-output\"></pre>\n",
+        "</article>\n",
+        "<article class=\"panel\"><header><h2>Module</h2></header><pre id=\"source-output\"></pre></article>\n",
+        "<article class=\"panel\"><header><h2>Proof</h2></header>\n",
+        "<div class=\"actions\">\n",
+        "<button data-run=\"check\">Check</button>\n",
+        "<button data-run=\"plan\">Plan</button>\n",
+        "<button data-run=\"build\">Build</button>\n",
+        "<button data-run=\"proof\">Proof</button>\n",
+        "<button data-run=\"generations\">List Generations</button>\n",
+        "</div>\n",
+        "<pre id=\"run-output\">plan.json proof.txt provenance.json vm-proof.txt</pre>\n",
+        "</article>\n",
+        "</div>\n",
+        "</div>\n",
+        "<div class=\"changeset-tray\" data-changeset-tray=\"true\"><span id=\"changeset-summary\">0 staged changes</span><button data-open-page=\"changeset\">Review Changeset</button></div>\n",
+        "</section>\n",
+        "</main>\n",
+        "<script>\n",
+        "function showPage(id) {{\n",
+        "  for (const page of document.querySelectorAll('.page')) page.classList.toggle('active', page.id === id);\n",
+        "  for (const link of document.querySelectorAll('[data-page]')) link.classList.toggle('active', link.dataset.page === id);\n",
+        "}}\n",
+        "function wirePageLink(link) {{\n",
+        "  link.addEventListener('click', (event) => {{\n",
+        "    event.preventDefault();\n",
+        "    showPage(link.dataset.page);\n",
+        "  }});\n",
+        "}}\n",
+        "for (const link of document.querySelectorAll('[data-page]')) wirePageLink(link);\n",
+        "for (const button of document.querySelectorAll('[data-open-page]')) {{\n",
+        "  button.addEventListener('click', () => showPage(button.dataset.openPage));\n",
+        "}}\n",
+        "async function refreshSource() {{\n",
+        "  const res = await fetch('/studio/source');\n",
+        "  document.getElementById('source-output').textContent = await res.text();\n",
+        "}}\n",
+        "async function refreshProjection() {{\n",
+        "  const res = await fetch('/studio/data.json');\n",
+        "  const projection = await res.json();\n",
+        "  if (!res.ok) throw new Error(projection.error || 'Studio projection failed');\n",
+        "  installPageRegistry(projection.page_registry || [], projection);\n",
+        "  return projection;\n",
+        "}}\n",
+        "function installPageRegistry(registry, projection) {{\n",
+        "  const nav = document.querySelector('[data-page-registry=\"studio-pages\"]');\n",
+        "  nav.replaceChildren();\n",
+        "  for (const entry of registry) {{\n",
+        "    let page = document.getElementById(entry.id);\n",
+        "    if (!page) {{\n",
+        "      page = document.createElement('div');\n",
+        "      page.id = entry.id;\n",
+        "      page.className = 'page';\n",
+        "      page.dataset.pageKind = entry.id;\n",
+        "      const panel = document.createElement('article');\n",
+        "      panel.className = 'panel';\n",
+        "      const header = document.createElement('header');\n",
+        "      const title = document.createElement('h2');\n",
+        "      title.textContent = entry.title;\n",
+        "      header.append(title);\n",
+        "      const detail = document.createElement('div');\n",
+        "      detail.className = 'empty';\n",
+        "      detail.textContent = `Live data: ${{entry.data_needs || 'none'}}`;\n",
+        "      panel.append(header, detail);\n",
+        "      page.append(panel);\n",
+        "      document.querySelector('section').insertBefore(page, document.querySelector('.changeset-tray'));\n",
+        "    }}\n",
+        "    const link = document.createElement('a');\n",
+        "    link.href = `#${{entry.id}}`;\n",
+        "    link.dataset.page = entry.id;\n",
+        "    link.textContent = entry.title;\n",
+        "    wirePageLink(link);\n",
+        "    nav.append(link);\n",
+        "    const binding = resolvePageBinding(entry);\n",
+        "    binding.renderer(page, projection, entry);\n",
+        "    binding.controller(page, projection, entry);\n",
+        "  }}\n",
+        "}}\n",
+        "function replaceRows(selector, rows, fields) {{\n",
+        "  for (const table of document.querySelectorAll(selector)) {{\n",
+        "    const body = table.tBodies[0] || table.createTBody();\n",
+        "    body.replaceChildren();\n",
+        "    for (const row of rows) {{\n",
+        "      const tr = document.createElement('tr');\n",
+        "      for (const field of fields) {{\n",
+        "        const td = document.createElement('td');\n",
+        "        td.textContent = String(field(row) ?? '');\n",
+        "        tr.append(td);\n",
+        "      }}\n",
+        "      body.append(tr);\n",
+        "    }}\n",
+        "  }}\n",
+        "}}\n",
+        "function renderDashboard(_page, projection) {{\n",
+        "  const plan = projection.system_plan || projection;\n",
+        "  const services = plan.services || [];\n",
+        "  const enabled = services.filter(service => service.enable === true || service.enable === 'true').length;\n",
+        "  const serviceCount = document.querySelector('[data-live-count=services]');\n",
+        "  const packageCount = document.querySelector('[data-live-count=packages]');\n",
+        "  const optionCount = document.querySelector('[data-live-count=options]');\n",
+        "  if (serviceCount) serviceCount.textContent = `${{enabled}}/${{services.length}}`;\n",
+        "  if (packageCount) packageCount.textContent = String((plan.packages || []).length);\n",
+        "  if (optionCount) optionCount.textContent = String((plan.options || []).length);\n",
+        "}}\n",
+        "function renderSettings(_page, projection) {{\n",
+        "  const plan = projection.system_plan || projection;\n",
+        "  const controls = document.getElementById('settings-controls');\n",
+        "  controls.replaceChildren();\n",
+        "  for (const option of plan.options || []) {{\n",
+        "    const row = document.createElement('div');\n",
+        "    row.className = 'setting-control';\n",
+        "    const label = document.createElement('label');\n",
+        "    const name = document.createElement('span');\n",
+        "    name.textContent = option.key;\n",
+        "    const input = document.createElement('input');\n",
+        "    input.dataset.settingKey = option.key;\n",
+        "    input.value = option.value;\n",
+        "    label.append(name, input);\n",
+        "    const stage = document.createElement('button');\n",
+        "    stage.type = 'button';\n",
+        "    stage.textContent = 'Stage Change';\n",
+        "    stage.dataset.stageSetting = option.key;\n",
+        "    stage.addEventListener('click', () => stageSetting(option.key, input.value));\n",
+        "    row.append(label, stage);\n",
+        "    controls.append(row);\n",
+        "  }}\n",
+        "}}\n",
+        "function renderServices(_page, projection) {{\n",
+        "  const plan = projection.system_plan || projection;\n",
+        "  replaceRows('[data-live-services]', plan.services || [], [row => row.name, row => row.enable, row => row.fields || '']);\n",
+        "}}\n",
+        "function renderPackages(_page, projection) {{\n",
+        "  const plan = projection.system_plan || projection;\n",
+        "  replaceRows('[data-live-packages]', plan.packages || [], [row => row.name, row => row.version || row.source || row.ref]);\n",
+        "}}\n",
+        "function renderOptions(_page, projection) {{\n",
+        "  const plan = projection.system_plan || projection;\n",
+        "  replaceRows('[data-live-options]', plan.options || [], [row => row.key, row => row.value]);\n",
+        "}}\n",
+        "function renderProof(_page, projection) {{\n",
+        "  for (const output of document.querySelectorAll('[data-live-proof]')) {{\n",
+        "    const state = projection.proof_state || {{ state: 'unproved', source_revision: null }};\n",
+        "    output.textContent = `proof: ${{state.state}}\nsource revision: ${{state.source_revision || 'none'}}`;\n",
+        "  }}\n",
+        "}}\n",
+        "function renderGenerations(_page, projection) {{\n",
+        "  const output = document.querySelector('[data-live-generations]');\n",
+        "  if (output) output.textContent = projection.generations || 'No generations recorded.';\n",
+        "}}\n",
+        "function renderComposite(page, projection) {{\n",
+        "  renderPackages(page, projection);\n",
+        "  renderServices(page, projection);\n",
+        "  renderOptions(page, projection);\n",
+        "  renderProof(page, projection);\n",
+        "}}\n",
+        "function renderBound(page, projection, entry) {{\n",
+        "  page.dataset.modelRevision = projection.proof_state?.source_revision || 'live';\n",
+        "  page.dataset.dataNeeds = entry.data_needs || '';\n",
+        "}}\n",
+        "const PAGE_RENDERERS = {{\n",
+        "  bound: renderBound,\n",
+        "  dashboard: (page, model, entry) => {{ renderBound(page, model, entry); renderDashboard(page, model); renderServices(page, model); renderProof(page, model); }},\n",
+        "  settings: (page, model, entry) => {{ renderBound(page, model, entry); renderSettings(page, model); }},\n",
+        "  monitoring: (page, model, entry) => {{ renderBound(page, model, entry); renderServices(page, model); renderProof(page, model); }},\n",
+        "  services: (page, model, entry) => {{ renderBound(page, model, entry); renderServices(page, model); }},\n",
+        "  packages: (page, model, entry) => {{ renderBound(page, model, entry); renderPackages(page, model); }},\n",
+        "  secrets: (page, model, entry) => {{ renderBound(page, model, entry); renderOptions(page, model); }},\n",
+        "  fleet: renderBound,\n",
+        "  generations: (page, model, entry) => {{ renderBound(page, model, entry); renderGenerations(page, model); }},\n",
+        "  changeset: renderBound,\n",
+        "  'proof-provenance': (page, model, entry) => {{ renderBound(page, model, entry); renderComposite(page, model); renderGenerations(page, model); }}\n",
+        "}};\n",
+        "function wireOnce(control, key, handler) {{\n",
+        "  const marker = `studio${{key}}Wired`;\n",
+        "  if (control.dataset[marker]) return;\n",
+        "  control.dataset[marker] = 'true';\n",
+        "  control.addEventListener('click', handler);\n",
+        "}}\n",
+        "function controllerReadOnly(page, _projection, entry) {{\n",
+        "  page.dataset.controller = 'read-only';\n",
+        "  page.dataset.modelContract = entry.model_contract;\n",
+        "}}\n",
+        "function controllerStudioActions(page, _projection, entry) {{\n",
+        "  page.dataset.controller = 'studio-actions';\n",
+        "  page.dataset.modelContract = entry.model_contract;\n",
+        "  for (const button of page.querySelectorAll('[data-stage-source]')) {{\n",
+        "    wireOnce(button, 'stageSource', async () => {{\n",
+        "      await stageSetting(document.getElementById('tx-key').value, document.getElementById('tx-value').value);\n",
+        "    }});\n",
+        "  }}\n",
+        "  for (const button of page.querySelectorAll('[data-stage-setting]')) {{\n",
+        "    wireOnce(button, 'stageSetting', async () => {{\n",
+        "      const input = page.querySelector('[data-setting-key=\"' + button.dataset.stageSetting + '\"]');\n",
+        "      await stageSetting(button.dataset.stageSetting, input ? input.value : '');\n",
+        "    }});\n",
+        "  }}\n",
+        "  for (const button of page.querySelectorAll('[data-changeset-action]')) {{\n",
+        "    wireOnce(button, 'changeset', async () => {{\n",
+        "      const action = button.dataset.changesetAction;\n",
+        "      const result = await studioPost('/studio/transaction', {{ op: action, session_id: studioSessionId, token: studioChangesetToken, base_revision: studioChangesetBaseRevision }});\n",
+        "      renderChangeset(result);\n",
+        "      if (action === 'apply' && !result.error) {{\n",
+        "        await refreshSource();\n",
+        "        await refreshProjection();\n",
+        "      }} else if (action === 'stage-rollback' && !result.error) {{\n",
+        "        showPage('changeset');\n",
+        "      }}\n",
+        "    }});\n",
+        "  }}\n",
+        "  for (const button of page.querySelectorAll('[data-run]')) {{\n",
+        "    wireOnce(button, 'run', async () => {{\n",
+        "      if (studioChangesetState === 'staged' && (button.dataset.run === 'build' || button.dataset.run === 'proof')) {{\n",
+        "        document.getElementById('run-output').textContent = 'Apply Changeset before building or proving this source.';\n",
+        "        showPage('changeset');\n",
+        "        return;\n",
+        "      }}\n",
+        "      await runStudioAction(button.dataset.run);\n",
+        "      await refreshProjection();\n",
+        "    }});\n",
+        "  }}\n",
+        "  for (const button of page.querySelectorAll('[data-pipeline=\"build-switch\"]')) {{\n",
+        "    wireOnce(button, 'pipeline', async () => {{\n",
+        "      if (studioChangesetState === 'staged') return;\n",
+        "      const build = await runStudioAction('build');\n",
+        "      if (!build.success) return;\n",
+        "      const proof = await runStudioAction('proof');\n",
+        "      if (!proof.success) return;\n",
+        "      await runStudioAction('switch');\n",
+        "      await refreshProjection();\n",
+        "    }});\n",
+        "  }}\n",
+        "}}\n",
+        "const PAGE_CONTROLLERS = {{\n",
+        "  'read-only': controllerReadOnly,\n",
+        "  'studio-actions': controllerStudioActions\n",
+        "}};\n",
+        "function resolvePageBinding(entry) {{\n",
+        "  if (!entry.model_contract) throw new Error(`Studio page ${{entry.id}} has no model contract`);\n",
+        "  const renderer = PAGE_RENDERERS[entry.renderer];\n",
+        "  if (!renderer) throw new Error(`Studio page ${{entry.id}} has no registered renderer ${{entry.renderer}}`);\n",
+        "  const controllerName = entry.controller || (entry.read_only === true ? 'read-only' : '');\n",
+        "  const controller = PAGE_CONTROLLERS[controllerName];\n",
+        "  if (!controller) throw new Error(`Studio page ${{entry.id}} has no registered controller`);\n",
+        "  if (entry.read_only !== true && controllerName === 'read-only') throw new Error(`Interactive Studio page ${{entry.id}} cannot use read-only controller`);\n",
+        "  return {{ renderer, controller }};\n",
+        "}}\n",
+        "const STUDIO_REGISTRY_CONTRACT_PROBE = resolvePageBinding({{\n",
+        "  id: 'synthetic-registered-page',\n",
+        "  renderer: 'bound',\n",
+        "  controller: 'read-only',\n",
+        "  read_only: true,\n",
+        "  model_contract: 'system_plan'\n",
+        "}});\n",
+        "async function studioPost(path, payload) {{\n",
+        "  const res = await fetch(path, {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: JSON.stringify(payload) }});\n",
+        "  return await res.json();\n",
+        "}}\n",
+        "let studioChangesetState = 'empty';\n",
+        "let studioSessionId = null;\n",
+        "let studioChangesetToken = null;\n",
+        "let studioChangesetBaseRevision = null;\n",
+        "function renderChangeset(result) {{\n",
+        "  studioChangesetState = result.state || studioChangesetState;\n",
+        "  if (Object.prototype.hasOwnProperty.call(result, 'token')) studioChangesetToken = result.token;\n",
+        "  if (Object.prototype.hasOwnProperty.call(result, 'base_revision')) studioChangesetBaseRevision = result.base_revision;\n",
+        "  const diff = result.diff || result.error || 'No staged changes.';\n",
+        "  document.getElementById('tx-output').textContent = diff;\n",
+        "  document.getElementById('changeset-diff').textContent = diff;\n",
+        "  const count = result.staged_count || 0;\n",
+        "  document.getElementById('changeset-summary').textContent = count === 1 ? '1 staged source transaction' : `${{count}} staged source transactions`;\n",
+        "}}\n",
+        "async function runStudioAction(action) {{\n",
+        "  const result = await studioPost('/studio/run', {{ action }});\n",
+        "  document.getElementById('run-output').textContent = result.stdout || result.stderr || result.error || JSON.stringify(result, null, 2);\n",
+        "  return result;\n",
+        "}}\n",
+        "async function stageSetting(key, value) {{\n",
+        "  const result = await studioPost('/studio/transaction', {{ op: 'set-option', key, value, session_id: studioSessionId, token: studioChangesetToken, base_revision: studioChangesetBaseRevision }});\n",
+        "  renderChangeset(result);\n",
+        "  showPage('changeset');\n",
+        "  return result;\n",
+        "}}\n",
+        "studioPost('/studio/transaction', {{ op: 'session' }}).then(session => {{\n",
+        "  studioSessionId = session.session_id;\n",
+        "  return Promise.all([\n",
+        "    refreshSource(),\n",
+        "    refreshProjection(),\n",
+        "    studioPost('/studio/transaction', {{ op: 'status', session_id: studioSessionId }}).then(renderChangeset)\n",
+        "  ]);\n",
+        "}});\n",
+        "</script>\n",
+        "</body>\n",
+        "</html>\n"
+    }
+    chunks.join("")
+}

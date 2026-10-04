@@ -1,0 +1,321 @@
+// CmdImport.rs IM05 pure half + Python translator behavioral parity.
+fn import_bindings_test_function(result: String, rows: [JetCLIImportBodyLine]) -> JetCLIImportFunction Never! {
+    JetCLIImportFunction{name: "test", params: [], result: result, body: ~rows}
+}
+fn import_bindings_test_header_error(line: String) -> String Never! {
+    if jet_cli_import_parse_header(line) == {
+        .Ok(_) -> panic("unexpected Python mapping")
+        .Err(error) -> ~error.message
+    }
+}
+fn import_bindings_test_body_error(function: JetCLIImportFunction) -> JetCLIImportBodyError Never! {
+    if jet_cli_import_translate_body(function) == {
+        .Ok(_) -> panic("unexpected Python body mapping")
+        .Err(error) -> error
+    }
+}
+fn import_bindings_test_docs(lines: [String]) -> JetCLIImportJavaScriptDocs Never! { jet_cli_import_javascript_doc_types(lines, lines.len()) }
+fn import_bindings_test_js_error(function: &JetCLIImportFunction, docs: JetCLIImportJavaScriptDocs) -> String Never! {
+    if jet_cli_import_infer_javascript_types(&function, docs) == {
+        .Ok(_) -> panic("unexpected JavaScript mapping")
+        .Err(error) -> ~error.message
+    }
+}
+
+#Test("foreign body collection keeps brace and source line boundaries") {
+    result :: jet_cli_import_collect_foreign_body(["function f() {{", "  return \"é{{}}\";", "}}"], 0) ?? panic("collect body")
+    assert_eq(result.end, 2)
+    assert_eq(result.body.len(), 1)
+    assert_eq(result.body[0].line, 2)
+    assert_eq(result.body[0].text, "return \"é{{}}\";")
+    single :: jet_cli_import_collect_foreign_body(["é {{ return 1; }}"], 0) ?? panic("inline body")
+    assert_eq(single.end, 0)
+    assert_eq(single.body[0].text, "return 1;")
+    empty :: jet_cli_import_collect_foreign_body(["{{}}"], 0) ?? panic("empty body")
+    assert(empty.body.is_empty())
+    // Rust deliberately drops opening-line content unless its fragment closes braces.
+    opening :: jet_cli_import_collect_foreign_body(["{{ skipped();", "kept();", "}}"], 0) ?? panic("opening content")
+    assert_eq(opening.body.len(), 1)
+    assert_eq(opening.body[0].line, 2)
+    cases :: [(lines: [String], at: Int, message: String)]{
+        // #4370: empty [] in an annotated named tuple infers [Int].
+        (lines: [String]{}, at: 0, message: "function body is missing"),
+        (lines: ["{{}}"], at: 1, message: "function body is missing"),
+        (lines: ["\"{{\""], at: 0, message: "function body needs `{{`"),
+        (lines: ["{{", "return 1;"], at: 0, message: "function body has unmatched braces"),
+        (lines: ["{{}}}}"], at: 0, message: "function body has unmatched braces")
+    }
+    loop row in cases {
+        if jet_cli_import_collect_foreign_body(row.lines, row.at) == {
+            .Ok(_) -> panic("body unexpectedly collected")
+            .Err(error) -> assert_eq(error.message, row.message)
+        }
+    }
+}
+#Test("foreign ignored import and structural lines use exact spellings") {
+    roots :: [(language: String, root: String)]{(language: "csharp", root: "cs"), (language: "ts", root: "js"), (language: "js", root: "js"), (language: "java", root: "java"), (language: "go", root: "go"), (language: "py", root: "py")}
+    loop row in roots -> assert_eq(jet_cli_import_foreign_binder_root(row.language), row.root)
+    boundaries :: [String]{"{{", "}}", ");", ")"}
+    loop line in boundaries -> assert(jet_cli_import_foreign_ignored_line("unknown", line))
+    assert(jet_cli_import_foreign_ignored_line("java", "package demo;"))
+    assert(!jet_cli_import_foreign_ignored_line("java", "package\tdemo;"))
+    assert(jet_cli_import_foreign_ignored_line("csharp", "namespace demo {{"))
+    assert(jet_cli_import_foreign_ignored_line("csharp", "using System;"))
+    assert(!jet_cli_import_foreign_ignored_line("csharp", "using System; "))
+    assert(jet_cli_import_foreign_ignored_line("go", "import ("))
+    assert(!jet_cli_import_foreign_ignored_line("ts", "package demo;"))
+    assert(jet_cli_import_foreign_import_line("java", "import demo.X;"))
+    assert(jet_cli_import_foreign_import_line("csharp", "using X;"))
+    assert(jet_cli_import_foreign_import_line("ts", "export * from 'x';"))
+    assert(jet_cli_import_foreign_import_line("js", "import x;"))
+    assert(jet_cli_import_foreign_import_line("go", "\"fmt\""))
+    assert(!jet_cli_import_foreign_import_line("go", " \"fmt\""))
+    assert(!jet_cli_import_foreign_import_line("py", "import x"))
+    assert(jet_cli_import_foreign_supported_import("csharp", "using System;"))
+    assert(!jet_cli_import_foreign_supported_import("csharp", "using X;"))
+    imports :: [String]{"import (", "import \"fmt\"", "\"fmt\""}
+    loop line in imports -> assert(jet_cli_import_foreign_supported_import("go", line))
+    assert(!jet_cli_import_foreign_supported_import("java", "import java.lang.System;"))
+    assert(!jet_cli_import_foreign_supported_import("go", "import \"os\""))
+    tokens :: [String]{"package", "namespace", "class", "interface", "struct", "enum", "record"}
+    loop token in tokens -> assert(jet_cli_import_foreign_structural_line("{{{token} Demo}}"))
+    assert(jet_cli_import_foreign_structural_line("{{"))
+    assert(jet_cli_import_foreign_structural_line("}}"))
+    assert(!jet_cli_import_foreign_structural_line("className"))
+    assert(!jet_cli_import_foreign_structural_line("{{class;}}"))
+}
+#Test("JSDoc parameter return and refusal precedence") {
+    tags :: [String]{"@param", "@arg"}
+    loop doc_tag in tags {
+        docs :: import_bindings_test_docs(["// {doc_tag} {{number}} [value] description"])
+        assert_eq(docs.params.get("value") ?? panic("param tag"), "Float")
+        assert(docs.error == None)
+    }
+    // Rust scans @arg before @argument, so the longer tag is shadowed and refused.
+    assert_eq(import_bindings_test_docs(["// @argument {{number}} value"]).error ?? panic("argument prefix precedence"), "JavaScript parameter JSDoc needs `{{type}} name`")
+    types :: [(raw: String, mapped: String)]{(raw: "number", mapped: "Float"), (raw: "integer", mapped: "Int"), (raw: "int", mapped: "Int"), (raw: "boolean", mapped: "Bool"), (raw: "bool", mapped: "Bool"), (raw: "string", mapped: "String"), (raw: "void", mapped: "()"), (raw: "undefined", mapped: "()")}
+    loop row in types -> assert_eq(jet_cli_import_map_javascript_doc_type(" {row.raw} ") ?? panic("doc type"), row.mapped)
+    params :: [String]{"number x", "{{number x", "{{number}}", "{{number}} [x=1]", "{{number}} bad-name", "{{number}} 2x"}
+    loop raw in params {
+        assert(jet_cli_import_parse_javascript_param_doc(raw) == None)
+        assert_eq(import_bindings_test_docs(["// @param {raw}"]).error ?? panic("parameter doc error"), "JavaScript parameter JSDoc needs `{{type}} name`")
+    }
+    bracketed :: jet_cli_import_parse_javascript_param_doc(" {{ string }} [[Name]] description") ?? panic("trim bracket edges")
+    assert_eq(bracketed.ty, "string")
+    assert_eq(bracketed.name, "Name")
+    returns :: [String]{"@returns", "@return"}
+    loop doc_tag in returns {
+        assert_eq(import_bindings_test_docs(["/** {doc_tag} {{string}} */"]).result ?? panic("return doc"), "String")
+        assert_eq(import_bindings_test_docs(["// {doc_tag} string"]).error ?? panic("return doc error"), "JavaScript return JSDoc needs a type")
+        assert_eq(import_bindings_test_docs(["// {doc_tag} {{string"]).error ?? panic("incomplete return doc"), "JavaScript return JSDoc needs a type")
+    }
+    assert_eq(import_bindings_test_docs(["// @param {{object}} x"]).error ?? panic("unknown param type"), "JavaScript JSDoc type `object` has no proven Jet mapping")
+    assert_eq(import_bindings_test_docs(["// @returns {{Object}}"]).error ?? panic("unknown result type"), "JavaScript JSDoc type `Object` has no proven Jet mapping")
+    // @throws is intentionally not a recognized contract in Rust.
+    throws :: import_bindings_test_docs(["// @throws {{Error}} boom"])
+    assert(throws.error == None)
+    assert(throws.result == None)
+    assert(throws.params.is_empty())
+    repeated :: import_bindings_test_docs(["// @param {{int}} x", "// @param {{string}} x", "// @returns {{int}}", "// @return {{bool}}"])
+    assert_eq(repeated.params.get("x") ?? panic("last parameter doc"), "String")
+    assert_eq(repeated.result ?? panic("last result doc"), "Bool")
+    assert(import_bindings_test_docs(["// @param {{int}} x", ""]).params.is_empty())
+    assert(import_bindings_test_docs(["// @param {{int}} x", "not a comment"]).params.is_empty())
+    // A later valid tag does not erase an earlier error; return tag overrides same-line param error.
+    both :: import_bindings_test_docs(["// @param bad @return {{object}}", "// @return {{int}}"])
+    assert_eq(both.error ?? panic("sticky doc error"), "JavaScript JSDoc type `object` has no proven Jet mapping")
+    assert_eq(both.result ?? panic("still collect valid result"), "Int")
+}
+#Test("JavaScript lexical inference preserves ambiguity and precedence") {
+    assert_eq(jet_cli_import_infer_javascript_parameter_type("return name + 'hi'", "name") ?? panic("concat"), "String")
+    assert(jet_cli_import_infer_javascript_parameter_type("return name + 1", "name") == None)
+    assert(jet_cli_import_infer_javascript_parameter_type("'name'+'name'", "name") == None)
+    assert_eq(jet_cli_import_infer_javascript_parameter_type("'name' + 'name'", "name") ?? panic("untrimmed pieces differ"), "String")
+    assert_eq(jet_cli_import_infer_javascript_parameter_type("name === true + 'hi'", "name") ?? panic("concat precedence"), "String")
+    checks :: [String]{"flag === true", "true === flag", "flag === false", "false === flag"}
+    loop value in checks -> assert_eq(jet_cli_import_infer_javascript_parameter_type(value, "flag") ?? panic("boolean"), "Bool")
+    assert(jet_cli_import_infer_javascript_parameter_type("flag===true", "flag") == None)
+    assert(jet_cli_import_contains_identifier("éname-é", "name"))
+    assert(!jet_cli_import_contains_identifier("name2 _name", "name"))
+    assert(jet_cli_import_contains_identifier("", ""))
+    assert(jet_cli_import_contains_quote("'"))
+    assert(jet_cli_import_contains_quote("\""))
+    assert(!jet_cli_import_contains_quote("plain"))
+    known :: [String:String]{"i": "Int", "f": "Float", "s": "String", "b": "Bool", "x": "Opaque"}
+    cases :: [(raw: String, ty: String)]{(raw: "i", ty: "Int"), (raw: "  f;;;  ", ty: "Float"), (raw: "i + 1", ty: "Int"), (raw: "f + 1", ty: "Float"), (raw: "1.5", ty: "Float"), (raw: "'text' + 1", ty: "String"), (raw: "i === 1", ty: "Bool"), (raw: "s !== 'x'", ty: "Bool"), (raw: "b && true", ty: "Bool"), (raw: "b + 1", ty: "Int"), (raw: "x", ty: "Opaque"), (raw: "()1", ty: "Int")}
+    loop row in cases -> assert_eq(jet_cli_import_infer_javascript_value_type(row.raw, known) ?? panic("inferred {row.raw}"), row.ty)
+    ambiguous :: [String]{"", "()", "missing", "x + 1", "call(i, f)", "1.2.3", "[]", "'unterminated"}
+    loop raw in ambiguous -> assert(jet_cli_import_infer_javascript_value_type(raw, known) == None)
+}
+#Test("JavaScript signatures docs inference errors and partial mutation") {
+    docs :: import_bindings_test_docs(["// @param {{number}} left", "// @param {{number}} right", "// @returns {{number}}"])
+    function := JetCLIImportFunction{name: "add", params: [(name: "left", ty: "__js__"), (name: "right", ty: "__js__")], result: "__js__", body: [JetCLIImportBodyLine{line: 5, text: "return left + right;"}]}
+    jet_cli_import_infer_javascript_types(&function, docs) ?? panic("documented signature")
+    assert_eq(function.params[0].ty, "Float")
+    assert_eq(function.params[1].ty, "Float")
+    assert_eq(function.result, "Float")
+    // tests/source_import.rs enterprise scalar fixture signature expectation, JS case.
+    rendered :: jet_cli_import_render_function("", function, ["return left + right"])
+    assert(rendered.starts_with("fn add(left: Float, right: Float) -> Float {{\n"))
+    inferred := JetCLIImportFunction{name: "greet", params: [(name: "name", ty: "__js__")], result: "__js__", body: [JetCLIImportBodyLine{line: 1, text: "return 'hi' + name;"}]}
+    empty :: import_bindings_test_docs([String]{})
+    jet_cli_import_infer_javascript_types(&inferred, empty) ?? panic("inferred signature")
+    assert_eq(inferred.params[0].ty, "String")
+    assert_eq(inferred.result, "String")
+    no_return := import_bindings_test_function("__js__", [JetCLIImportBodyLine]{})
+    jet_cli_import_infer_javascript_types(&no_return, empty) ?? panic("unit inference")
+    assert_eq(no_return.result, "()")
+    ambiguous := JetCLIImportFunction{name: "add", params: [(name: "x", ty: "__js__")], result: "__js__", body: [JetCLIImportBodyLine{line: 1, text: "return x + 1;"}]}
+    assert_eq(import_bindings_test_js_error(&ambiguous, empty), "JavaScript value type is ambiguous")
+    conflict := import_bindings_test_function("Int", [JetCLIImportBodyLine]{})
+    assert_eq(import_bindings_test_js_error(&conflict, import_bindings_test_docs(["// @returns {{string}}"])), "JavaScript JSDoc return type conflicts with the declaration")
+    unit_param := JetCLIImportFunction{name: "f", params: [(name: "x", ty: "__js__")], result: "__js__", body: []}
+    assert_eq(import_bindings_test_js_error(&unit_param, import_bindings_test_docs(["// @param {{void}} x"])), "JavaScript parameter `x` cannot have unit type")
+    assert_eq(unit_param.params[0].ty, "()")
+    assert_eq(unit_param.result, "__js__")
+    doc_error := import_bindings_test_function("__js__", [JetCLIImportBodyLine]{})
+    assert_eq(import_bindings_test_js_error(&doc_error, import_bindings_test_docs(["// @returns {{object}}"])), "JavaScript JSDoc type `object` has no proven Jet mapping")
+    assert_eq(doc_error.result, "__js__")
+    // tests/source_import.rs javascript_import_does_not_rewrite_foreign_names_inside_strings.
+    label := import_bindings_test_function("__js__", [JetCLIImportBodyLine{line: 3, text: "return \"console.log(\";"}])
+    jet_cli_import_infer_javascript_types(&label, import_bindings_test_docs(["/** @returns {{string}} */"])) ?? panic("label inference")
+    assert_eq(label.result, "String")
+    body :: jet_cli_import_translate_foreign_body("js", label, false, false) ?? panic("label body")
+    assert_eq(body[0], "return \"console.log(\"")
+}
+#Test("declared enterprise Pascal Ada names and POSIX file stems") {
+    cases :: [(language: String, raw: String, name: String)]{
+        (language: "java", raw: "// package wrong;\n/* package wrong; */\n* package wrong;\npackage acme.Math;", name: "Math"),
+        (language: "csharp", raw: "namespace Acme.Math {{", name: "Math"),
+        (language: "go", raw: "package demo", name: "demo"),
+        (language: "java", raw: "packagefoo;\npackage 123;", name: "123"),
+        (language: "java", raw: "package a.;\npackage okay;", name: "okay")
+    }
+    loop row in cases -> assert_eq(jet_cli_import_enterprise_unit_name(row.language, row.raw, "ignored") ?? panic("enterprise unit"), row.name)
+    assert(jet_cli_import_enterprise_unit_name("java", "package;", "math.java") == None)
+    assert(jet_cli_import_enterprise_unit_name("py", "package demo", "math.py") == None)
+    paths :: [(path: String, name: String)]{(path: "math.js", name: "math"), (path: "/dir/math.test.js", name: "math.test"), (path: "math/./", name: "math"), (path: "name.", name: "name"), (path: "a\\b.js", name: "a\\b")}
+    // Only safe identifiers survive; multi-dot and backslash stems are refused on POSIX.
+    assert_eq(jet_cli_import_enterprise_unit_name("js", "", paths[0].path) ?? panic("stem"), "math")
+    assert(jet_cli_import_enterprise_unit_name("js", "", paths[1].path) == None)
+    assert_eq(jet_cli_import_enterprise_unit_name("ts", "", paths[2].path) ?? panic("trailing dot component"), "math")
+    assert_eq(jet_cli_import_enterprise_unit_name("js", "", paths[3].path) ?? panic("trailing extension"), "name")
+    assert(jet_cli_import_enterprise_unit_name("js", "", paths[4].path) == None)
+    invalid :: [String]{"", "/", ".", "..", "dir/..", ".hidden", "2name.js", "é.js", "bad-name.js"}
+    loop path in invalid -> assert(jet_cli_import_enterprise_unit_name("js", "", path) == None)
+    // tests/source_import.rs pascal_source_import_preserves_source_and_emits_binder_todo.
+    assert_eq(jet_cli_import_pascal_library_name("// library Wrong;\n{{ comment }}\n(* comment *)\nLibrary Inventory;") ?? panic("Pascal library"), "inventory")
+    assert(jet_cli_import_pascal_library_name("library 2bad;\nlibrary Good;") == None)
+    assert(jet_cli_import_pascal_library_name("library  DoubleSpace;") == None)
+    // tests/source_import.rs ada_source_import_preserves_package_and_emits_binder_todo.
+    assert_eq(jet_cli_import_ada_package_name("-- package Wrong is\npackage body Geodesy is\npackage renames Other\npackage Geodesy is") ?? panic("Ada package"), "geodesy")
+    assert(jet_cli_import_ada_package_name("package 2bad is\npackage Good is") == None)
+    assert(jet_cli_import_ada_package_name("package body Only is") == None)
+    assert_eq(jet_cli_import_header("py"), "// Generated by jet import py (D-MIGRATE-SRC1). Editable Jet source.\n")
+    assert_eq(jet_cli_import_binder_header("java"), "// Prepared by jet import java (D-MIGRATE-SRC1). Binder-only/manual migration; semantic source conversion is unavailable.\n")
+}
+#Test("Python annotated headers exact errors defaults and canonicalization") {
+    function :: jet_cli_import_parse_header("def HTTPServer(FirstName: str, count: int) -> bool:") ?? panic("Python signature")
+    assert_eq(function.name, "http_server")
+    assert_eq(function.params[0].name, "first_name")
+    assert_eq(function.params[0].ty, "String")
+    assert_eq(function.result, "Bool")
+    assert(function.body.is_empty())
+    assert_eq((jet_cli_import_parse_header("def run() -> None:") ?? panic("unit header")).result, "()")
+    cases :: [(line: String, message: String)]{
+        (line: "def f() -> int", message: "expected def name(args) -> Type:"),
+        (line: " def f() -> int:", message: "expected def name(args) -> Type:"),
+        (line: "def f -> int:", message: "function needs ("),
+        (line: "def f( -> int:", message: "function needs )"),
+        (line: "def )f( -> int:", message: "function name is not a safe Jet identifier"),
+        (line: "def é() -> int:", message: "function name is not a safe Jet identifier"),
+        (line: "def f(x):", message: "function needs a return annotation"),
+        (line: "def f(x) -> list:", message: "Python type list has no proven Jet mapping"),
+        (line: "def f(x) -> int:", message: "parameter x needs a type annotation"),
+        (line: "def f(self: int) -> int:", message: "parameter self has no safe importer mapping"),
+        (line: "def f(x=1: int) -> int:", message: "parameter x=1 has no safe importer mapping"),
+        (line: "def f(x: int = 1) -> int:", message: "Python type int = 1 has no proven Jet mapping"),
+        (line: "def f(*x: int) -> int:", message: "parameter *x has no safe importer mapping"),
+        (line: "def f(x: List[int]) -> int:", message: "Python type List[int] has no proven Jet mapping"),
+        (line: "def f(x: int,) -> int:", message: "parameter  needs a type annotation")
+    }
+    loop row in cases -> assert_eq(import_bindings_test_header_error(row.line), row.message)
+    assert_eq(jet_cli_import_map_type("float") ?? panic("float"), "Float")
+    // Rust does not deduplicate parameters, a body-driver/checker concern.
+    assert_eq((jet_cli_import_parse_header("def f(x: int, x: bool) -> int:") ?? panic("duplicates retained")).params.len(), 2)
+}
+#Test("Python body conversion line attribution assignments assertions borrowed strings") {
+    empty :: import_bindings_test_body_error(import_bindings_test_function("()", [JetCLIImportBodyLine]{}))
+    assert_eq(empty.line, 1)
+    assert_eq(empty.message, "function body is empty")
+    // tests/source_import.rs python_source_import_translates_real_subset_and_reports_every_gap.
+    add := jet_cli_import_parse_header("def add(x: int, y: int) -> int:") ?? panic("add header")
+    add.body = [JetCLIImportBodyLine{line: 41, text: "    total = x + y"}, JetCLIImportBodyLine{line: 42, text: "    return total"}]
+    body :: jet_cli_import_translate_body(add) ?? panic("add body")
+    assert_eq(body[0], "total := x + y")
+    assert_eq(body[1], "return total")
+    assert_eq(jet_cli_import_render_function("", add, body), "fn add(x: Int, y: Int) -> Int {{\n    total := x + y\n    return total\n}}\n")
+    test := jet_cli_import_parse_header("def test_add() -> None:") ?? panic("test header")
+    test.body = [JetCLIImportBodyLine{line: 45, text: "    assert add(2, 3) == 5"}]
+    assert_eq((jet_cli_import_translate_body(test) ?? panic("test body"))[0], "assert_eq(add(2, 3), 5)")
+    nested :: import_bindings_test_body_error(import_bindings_test_function("Int", [JetCLIImportBodyLine{line: 48, text: "    if x > 0:"}, JetCLIImportBodyLine{line: 49, text: "        return x"}]))
+    assert_eq(nested.line, 48)
+    assert_eq(nested.message, "nested control flow has no proven equivalent in this importer")
+    initial_nested :: import_bindings_test_body_error(import_bindings_test_function("Int", [JetCLIImportBodyLine{line: 9, text: "        nested"}, JetCLIImportBodyLine{line: 10, text: "    base"}]))
+    assert_eq(initial_nested.line, 9)
+    rows :: [JetCLIImportBodyLine]{JetCLIImportBodyLine{line: 1, text: "\tValue = 1"}, JetCLIImportBodyLine{line: 2, text: " Value = 2"}, JetCLIImportBodyLine{line: 3, text: " pass"}, JetCLIImportBodyLine{line: 4, text: " return"}}
+    converted :: jet_cli_import_translate_body(import_bindings_test_function("()", rows)) ?? panic("assignment body")
+    assert_eq(converted, ["value := 1", "value = 2", "return"])
+    errors :: [(text: String, message: String)]{
+        (text: "assert True", message: "only equality assertions have a proven Jet test mapping"),
+        (text: "obj.x = 1", message: "assignment target is not a local name"),
+        (text: "x = None", message: "None needs an explicit Option mapping"),
+        (text: "return None", message: "None needs an explicit Option mapping"),
+        (text: "assert None == 1", message: "None needs an explicit Option mapping"),
+        (text: "assert 1 == None", message: "None needs an explicit Option mapping"),
+        (text: "[]", message: "unsupported Python expression token [")
+    }
+    loop row in errors {
+        error :: import_bindings_test_body_error(import_bindings_test_function("Int", [JetCLIImportBodyLine{line: 17, text: row.text}]))
+        assert_eq(error.line, 17)
+        assert_eq(error.message, row.message)
+    }
+    // tests/source_import.rs python_source_import_matches_python_oracle_fixed_corpus: decorate borrows.
+    decorate := jet_cli_import_parse_header("def decorate(value: str) -> str:") ?? panic("decorate")
+    decorate.body = [JetCLIImportBodyLine{line: 5, text: "    copy = value"}, JetCLIImportBodyLine{line: 6, text: "    return value"}]
+    assert_eq(jet_cli_import_translate_body(decorate) ?? panic("materialize string"), ["copy := ~value", "return ~value"])
+    // Function result unit does not hide a nonempty return expression (Rust's behavior).
+    assert_eq(jet_cli_import_translate_body(import_bindings_test_function("()", [JetCLIImportBodyLine{line: 1, text: "return 1"}])) ?? panic("unit return expression"), ["return 1"])
+}
+#Test("shared assignment indentation shortening and rendering boundaries") {
+    assert_eq(jet_cli_import_indentation(" \té"), 2)
+    assert_eq(jet_cli_import_indentation("  x"), 0)
+    assert_eq(jet_cli_import_indentation("   "), 3)
+    comparisons :: [String]{"x==1", "x!=1", "x<=1", "x>=1"}
+    loop value in comparisons -> assert(jet_cli_import_assignment(value) == None)
+    assigned :: jet_cli_import_assignment(" x = 'é=a' ") ?? panic("assignment")
+    assert_eq(assigned.left, "x")
+    assert_eq(assigned.right, "'é=a'")
+    assert(jet_cli_import_assignment("call(x=1)") == None)
+    assert_eq(jet_cli_import_shorten("short"), "short")
+    forty_eight :: "éééééééééééééééééééééééééééééééééééééééééééééééé"
+    assert_eq(forty_eight.len(), 48)
+    assert_eq(jet_cli_import_shorten(forty_eight), forty_eight)
+    assert_eq(jet_cli_import_shorten("{forty_eight}x"), "{forty_eight}...")
+    function :: JetCLIImportFunction{name: "HTTPServer", params: [(name: "FirstName", ty: "String")], result: "()", body: []}
+    assert_eq(jet_cli_import_render_function("#Test ", function, [String]{}), "#Test fn http_server(first_name: String) {{\n}}\n")
+}
+
+#Test("Python fixed corpus run retains calls print and generated marker") {
+    // tests/source_import.rs python_source_import_matches_python_oracle_fixed_corpus,
+    // tests/fixtures/source_import/corpus.py:7-10; source-language execution is driver-owned.
+    run := jet_cli_import_parse_header("def run() -> None:") ?? panic("corpus run header")
+    run.body = [
+        JetCLIImportBodyLine{line: 8, text: "    total = add(2, 5)"},
+        JetCLIImportBodyLine{line: 9, text: "    print(total * 2)"},
+        JetCLIImportBodyLine{line: 10, text: "    print(decorate(\"jet\"))"}
+    ]
+    body :: jet_cli_import_translate_body(run) ?? panic("corpus run body")
+    assert_eq(body, ["total := add(2, 5)", "print(total * 2)", "print(decorate(\"jet\"))"])
+    assert_eq(jet_cli_import_render_function("", run, body), "fn run() {{\n    total := add(2, 5)\n    print(total * 2)\n    print(decorate(\"jet\"))\n}}\n")
+}

@@ -1,5 +1,37 @@
 // Compile-time values retained on AST nodes and semantic projections.
 
+// Rust AST/metaprogramming.rs CompilerStage: fact availability, not `$phase`.
+pub enum CompilerStage {
+    Parsed
+    Resolved
+    Typed
+    Prepared
+    Emitted
+}
+
+pub COMPILER_STAGE_ALL :: prep { [CompilerStage]{
+    CompilerStage.Parsed, CompilerStage.Resolved, CompilerStage.Typed,
+    CompilerStage.Prepared, CompilerStage.Emitted
+} }
+
+pub fn compiler_stage_as_str(stage: CompilerStage) -> String Never! {
+    if stage == {
+        .Parsed -> "Parsed"
+        .Resolved -> "Resolved"
+        .Typed -> "Typed"
+        .Prepared -> "Prepared"
+        .Emitted -> "Emitted"
+    }
+}
+
+// Rust AST/metaprogramming.rs MetadataProducerStatus: producer obligations
+// remain explicit; an unavailable producer never becomes a default value.
+pub enum MetadataProducerStatus {
+    ContractOnly
+    NotImplemented
+    ExistingCallableProducerNeedsExtension
+}
+
 pub enum CtFloat {
     F32(value: Float)
     F64(value: Float)

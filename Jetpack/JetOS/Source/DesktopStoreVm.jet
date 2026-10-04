@@ -1,0 +1,513 @@
+// PORT-PENDING 0867 crates-jetpack-src-jetos-activation-provenance-module-group: crates/jetpack/src/JetOS/desktop_store_vm.rs:1-509
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::activation_provenance::compat_hatches_json;
+//RS use super::options_rendering::{
+//RS     clean_bool_json, clean_symbol, option_rows_json, option_value, parse_list_items,
+//RS     prefixed_options, risk_classes, strings_json, user_names,
+//RS };
+//RS use super::root_projection::enable_unit;
+//RS use super::store_realize::RealizedPackage;
+//RS use super::studio_projection::make_executable;
+//RS use super::types::VM_TOOLS;
+//RS use crate::JSON;
+//RS use jet_env_model::ModuleEval::SystemPlan;
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS pub(super) fn write_acceptance_fixture(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+//RS     let acceptance_dir = dir.join("acceptance");
+//RS     let bin_dir = dir.join("sw/bin");
+//RS     fs::create_dir_all(&acceptance_dir)?;
+//RS     fs::create_dir_all(&bin_dir)?;
+//RS     let coverage = vec![
+//RS         (
+//RS             "flake-inputs-pins-channels",
+//RS             option_value(system, &["packages.channel"]).is_some(),
+//RS             "#330/U21",
+//RS         ),
+//RS         (
+//RS             "overlays-patches-nur-unfree",
+//RS             !prefixed_options(system, "packages.overlay.").is_empty(),
+//RS             "#330",
+//RS         ),
+//RS         (
+//RS             "multi-variant-host-specialisation",
+//RS             !prefixed_options(system, &format!("hardware.{}.specialisation.", system.name))
+//RS                 .is_empty(),
+//RS             "#326/#331",
+//RS         ),
+//RS         (
+//RS             "disko-btrfs-impermanence",
+//RS             !prefixed_options(system, "storage.").is_empty(),
+//RS             "#328",
+//RS         ),
+//RS         (
+//RS             "limine-kernel-zram-sysctl-scx",
+//RS             option_value(system, &["boot.kernel"]).is_some()
+//RS                 && !prefixed_options(system, "performance.").is_empty(),
+//RS             "#336",
+//RS         ),
+//RS         (
+//RS             "users-groups-network-security",
+//RS             !user_names(system).is_empty() && option_value(system, &["network.hostName"]).is_some(),
+//RS             "#262/#321",
+//RS         ),
+//RS         (
+//RS             "home-manager-app-modules",
+//RS             !prefixed_options(system, "apps.program.").is_empty(),
+//RS             "#321/#332",
+//RS         ),
+//RS         (
+//RS             "desktop-audio-locale-fonts-virt-gaming-smartcard",
+//RS             !prefixed_options(system, "services.audio.").is_empty()
+//RS                 && !prefixed_options(system, "services.virtualization.").is_empty(),
+//RS             "#334",
+//RS         ),
+//RS         (
+//RS             "stylix-theme",
+//RS             option_value(system, &["theme.name", "theme.profile"]).is_some(),
+//RS             "#333",
+//RS         ),
+//RS         (
+//RS             "flatpak-appimage",
+//RS             !prefixed_options(system, "apps.flatpak.").is_empty()
+//RS                 && !prefixed_options(system, "apps.appimage.").is_empty(),
+//RS             "#335",
+//RS         ),
+//RS         ("custom-iso-vm-install", true, "#263/#325"),
+//RS         (
+//RS             "substituters-cache-providers",
+//RS             true,
+//RS             "jetpack providers/cache",
+//RS         ),
+//RS         (
+//RS             "secrets",
+//RS             !prefixed_options(system, "secrets.").is_empty(),
+//RS             "#262/U13",
+//RS         ),
+//RS         (
+//RS             "local-path-jetlang-package",
+//RS             system.packages.iter().any(|p| p.source == "mine"),
+//RS             "jetpack path providers",
+//RS         ),
+//RS         ("vm-test-framework", true, "#320"),
+//RS         (
+//RS             "fleet-deploy",
+//RS             !prefixed_options(system, "deploy.host.").is_empty(),
+//RS             "#322",
+//RS         ),
+//RS         ("options-search", true, "#323"),
+//RS         ("service-manager-depth", !system.services.is_empty(), "#329"),
+//RS         (
+//RS             "hardware-scan-profile",
+//RS             !prefixed_options(system, "hardware.").is_empty(),
+//RS             "#326",
+//RS         ),
+//RS         (
+//RS             "lifecycle-gc-auto-upgrade",
+//RS             !prefixed_options(system, "deploy.autoUpgrade.").is_empty(),
+//RS             "#327",
+//RS         ),
+//RS     ];
+//RS     let rows = coverage
+//RS         .iter()
+//RS         .map(|(name, present, card)| {
+//RS             JSON::object_of(&[
+//RS                 ("module", *name),
+//RS                 ("state", if *present { "covered" } else { "missing" }),
+//RS                 ("covering", *card),
+//RS             ])
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let missing = coverage
+//RS         .iter()
+//RS         .filter(|(_, present, _)| !*present)
+//RS         .map(|(name, _, _)| JSON::quote(name))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     fs::write(
+//RS         acceptance_dir.join("jetos-host-coverage.json"),
+//RS         format!(
+//RS             "{{\"kind\":\"jetos.host-coverage\",\"host\":{},\"source\":\"tests/fixtures/jetpack-config/config.jet\",\"coverage\":[{}],\"omissions\":[{}],\"vm_gate\":\"acceptance/vm-gates.json\",\"proof\":\"jetos-host-covered\"}}",
+//RS             JSON::quote(&system.name),
+//RS             rows,
+//RS             missing
+//RS         ),
+//RS     )?;
+//RS     fs::write(
+//RS         acceptance_dir.join("coverage-matrix.tsv"),
+//RS         coverage
+//RS             .iter()
+//RS             .map(|(name, present, card)| {
+//RS                 format!(
+//RS                     "{name}\t{}\t{card}\n",
+//RS                     if *present { "covered" } else { "missing" }
+//RS                 )
+//RS             })
+//RS             .collect::<String>(),
+//RS     )?;
+//RS     fs::write(
+//RS         acceptance_dir.join("vm-gates.json"),
+//RS         format!(
+//RS             "{{\"kind\":\"jetos.acceptance-vm-gates\",\"host\":{},\"assertions\":[\"boot-installed-disk\",\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\",\"rollback-generation-bootable\",\"terminal-login-ready\",\"desktop-session-ready\",\"graphical-console-ready\",\"app-modules-present\"],\"proof\":\"vm-acceptance-required\"}}",
+//RS             JSON::quote(&system.name)
+//RS         ),
+//RS     )?;
+//RS     fs::write(
+//RS         acceptance_dir.join("owner-jetos-coverage.md"),
+//RS         "# JetOS Host Acceptance\n\nAll listed owner modules are mapped to generated JetOS artifacts in `coverage-matrix.tsv`.\n\nOmissions: none.\n",
+//RS     )?;
+//RS     let prove = "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_SYSTEM_ROOT:-/run/current-system}\nproof_dir=${JETOS_ACCEPTANCE_PROOF_DIR:-$root/acceptance}\nmkdir -p \"$proof_dir\"\nneed() { if [ ! -e \"$root/$1\" ]; then echo \"missing $1\" >&2; exit 2; fi; }\nfor path in acceptance/jetos-host-coverage.json acceptance/vm-gates.json acceptance/owner-jetos-coverage.md vm-proof.txt desktop/facts.json users/index.json apps/modules.json storage/plan.json flatpak/plan.json lifecycle/policy.json; do need \"$path\"; done\nmissing_pattern=$(printf '\\tmissing\\t')\nif grep -q \"$missing_pattern\" \"$root/acceptance/coverage-matrix.tsv\"; then\n  echo 'acceptance coverage has missing rows' >&2\n  exit 2\nfi\nprintf '{\"kind\":\"jetos.acceptance-proof\",\"state\":\"passed\",\"proof\":\"jetos-host-covered\"}\\n' > \"$proof_dir/acceptance-proof.json\"\ncat \"$proof_dir/acceptance-proof.json\"\n";
+//RS     let prove_path = bin_dir.join("jetos-acceptance-prove");
+//RS     fs::write(&prove_path, prove)?;
+//RS     make_executable(&prove_path)
+//RS }
+//RS 
+//RS pub(super) fn write_desktop_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+//RS     let desktop_dir = dir.join("desktop");
+//RS     let bin_dir = dir.join("sw/bin");
+//RS     let session_dir = dir.join("share/wayland-sessions");
+//RS     let xdg_dir = dir.join("share/applications");
+//RS     let icon_dir = dir.join("share/icons/hicolor/scalable/apps");
+//RS     let font_dir = dir.join("etc/fonts");
+//RS     fs::create_dir_all(&desktop_dir)?;
+//RS     fs::create_dir_all(&bin_dir)?;
+//RS     fs::create_dir_all(&session_dir)?;
+//RS     fs::create_dir_all(&xdg_dir)?;
+//RS     fs::create_dir_all(&icon_dir)?;
+//RS     fs::create_dir_all(&font_dir)?;
+//RS     let profile = option_value(system, &["services.desktop.profile"])
+//RS         .map(|s| clean_symbol(&s))
+//RS         .unwrap_or_else(|| {
+//RS             option_value(system, &["services.desktop.session"])
+//RS                 .map(|s| clean_symbol(&s))
+//RS                 .unwrap_or_else(|| "Default".to_string())
+//RS         });
+//RS     let profile_lower = profile.to_ascii_lowercase();
+//RS     let (session, display_manager, compositor, shell) =
+//RS         if profile_lower == "default" || profile_lower == "gnome" {
+//RS             (
+//RS                 "gnome-wayland".to_string(),
+//RS                 option_value(system, &["services.displayManager"])
+//RS                     .map(|s| clean_symbol(&s))
+//RS                     .unwrap_or_else(|| "gdm".to_string()),
+//RS                 "mutter".to_string(),
+//RS                 "gnome-shell".to_string(),
+//RS             )
+//RS         } else {
+//RS             (
+//RS                 profile.clone(),
+//RS                 option_value(system, &["services.displayManager"])
+//RS                     .map(|s| clean_symbol(&s))
+//RS                     .unwrap_or_else(|| "greetd".to_string()),
+//RS                 profile.clone(),
+//RS                 profile.clone(),
+//RS             )
+//RS         };
+//RS     fs::write(
+//RS         desktop_dir.join("facts.json"),
+//RS         format!(
+//RS             "{{\"profile\":{},\"session\":{},\"protocol\":\"wayland\",\"display_manager\":{},\"compositor\":{},\"shell\":{},\"terminal_fallback\":\"ttyS0+tty1\",\"studio_app\":\"jetos-studio\",\"browser_fallback\":true,\"proof\":\"desktop-session-ready\",\"source\":\"system options\"}}",
+//RS             JSON::quote(&profile),
+//RS             JSON::quote(&session),
+//RS             JSON::quote(&display_manager),
+//RS             JSON::quote(&compositor),
+//RS             JSON::quote(&shell)
+//RS         ),
+//RS     )?;
+//RS     fs::write(
+//RS         desktop_dir.join("session.env"),
+//RS         format!(
+//RS             "XDG_SESSION_TYPE=wayland\nXDG_CURRENT_DESKTOP=jetos:{}\nJETOS_DESKTOP_PROFILE={}\nJETOS_TERMINAL_FALLBACK=ttyS0,tty1\n",
+//RS             session, profile
+//RS         ),
+//RS     )?;
+//RS     fs::write(
+//RS         session_dir.join("jetos-gnome.desktop"),
+//RS         "[Desktop Entry]\nName=JetOS GNOME\nComment=JetOS default Wayland desktop\nExec=/run/current-system/sw/bin/jetos-desktop-session\nType=Application\nDesktopNames=GNOME;jetos;\n",
+//RS     )?;
+//RS     fs::write(
+//RS         session_dir.join("jetos-plasma.desktop"),
+//RS         "[Desktop Entry]\nName=JetOS Plasma\nComment=JetOS Plasma Wayland desktop\nExec=/run/current-system/sw/bin/jetos-desktop-session plasma\nType=Application\nDesktopNames=KDE;jetos;\n",
+//RS     )?;
+//RS     fs::write(
+//RS         icon_dir.join("jetos-logo.svg"),
+//RS         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128 128\"><rect width=\"128\" height=\"128\" rx=\"18\" fill=\"#101820\"/><path d=\"M28 84c18-4 31-18 39-42 9 23 21 37 37 42-23 2-36 14-41 34-5-20-17-32-35-34z\" fill=\"#61dafb\"/><path d=\"M36 34h56v12H36z\" fill=\"#f7f7f7\"/></svg>\n",
+//RS     )?;
+//RS     write_desktop_breadth(dir, system)?;
+//RS     let fallback = "#!/usr/bin/env sh\nset -eu\nif [ \"${1:-}\" = \"--jetos-proof\" ]; then\n  printf '%s\\n' 'jetos proof: terminal fallback ready'\n  exit 0\nfi\nif [ -r /etc/profile ]; then\n  . /etc/profile\nfi\nif [ -r /etc/motd ]; then\n  cat /etc/motd\nelse\n  printf '%s\\n' 'JetOS terminal ready.'\nfi\nprintf '%s\\n' 'ttyS0 and tty1 remain available.'\nexec /bin/sh -i\n";
+//RS     let fallback_path = bin_dir.join("jetos-terminal-fallback");
+//RS     fs::write(&fallback_path, fallback)?;
+//RS     make_executable(&fallback_path)?;
+//RS     let session_launcher = "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_SYSTEM_ROOT:-/var/lib/jetos/current-system}\nif [ ! -d \"$root\" ]; then root=/run/current-system; fi\nPATH=\"$root/sw/bin:$PATH\"\nexport PATH\nexport XDG_SESSION_TYPE=wayland\nexport XDG_CURRENT_DESKTOP=jetos:GNOME\nif [ \"${1:-}\" = \"--jetos-proof\" ]; then\n  if command -v gnome-session >/dev/null 2>&1; then\n    printf '%s\\n' 'jetos proof: desktop session command gnome-session'\n    exit 0\n  fi\n  if command -v gnome-shell >/dev/null 2>&1; then\n    printf '%s\\n' 'jetos proof: desktop session command gnome-shell --wayland'\n    exit 0\n  fi\n  exec \"$root/sw/bin/jetos-terminal-fallback\" --jetos-proof\nfi\nif command -v gnome-session >/dev/null 2>&1; then\n  exec gnome-session\nfi\nif command -v gnome-shell >/dev/null 2>&1; then\n  exec gnome-shell --wayland\nfi\nexec \"$root/sw/bin/jetos-terminal-fallback\"\n";
+//RS     let session_path = bin_dir.join("jetos-desktop-session");
+//RS     fs::write(&session_path, session_launcher)?;
+//RS     make_executable(&session_path)?;
+//RS     let dm_launcher = "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_SYSTEM_ROOT:-/var/lib/jetos/current-system}\nif [ ! -d \"$root\" ]; then root=/run/current-system; fi\nPATH=\"$root/sw/bin:$PATH\"\nexport PATH\nif [ \"${1:-}\" = \"--jetos-proof\" ]; then\n  if command -v gdm >/dev/null 2>&1; then\n    printf '%s\\n' 'jetos proof: display manager command gdm'\n    exit 0\n  fi\n  exec \"$root/sw/bin/jetos-desktop-session\" --jetos-proof\nfi\nif command -v gdm >/dev/null 2>&1; then\n  exec gdm\nfi\nexec \"$root/sw/bin/jetos-desktop-session\"\n";
+//RS     let dm_path = bin_dir.join("jetos-display-manager");
+//RS     fs::write(&dm_path, dm_launcher)?;
+//RS     make_executable(&dm_path)?;
+//RS     let unit_dir = dir.join("etc/systemd/system");
+//RS     fs::create_dir_all(&unit_dir)?;
+//RS     fs::write(
+//RS         unit_dir.join("display-manager.service"),
+//RS         "[Unit]\nDescription=jetos graphical login\nAfter=systemd-user-sessions.service plymouth-quit-wait.service\n\n[Service]\nEnvironment=JETOS_SYSTEM_ROOT=/var/lib/jetos/current-system\nExecStart=/var/lib/jetos/current-system/sw/bin/gdm\nRestart=always\n\n[Install]\nWantedBy=graphical.target\n",
+//RS     )?;
+//RS     enable_unit(&unit_dir, "graphical.target", "display-manager.service")?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn write_desktop_breadth(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+//RS     let desktop_dir = dir.join("desktop");
+//RS     let unit_dir = dir.join("etc/systemd/system");
+//RS     let pipewire_dir = dir.join("etc/pipewire");
+//RS     let security_dir = dir.join("etc/security/limits.d");
+//RS     let font_dir = dir.join("etc/fonts");
+//RS     let xdg_dir = dir.join("share/applications");
+//RS     let binfmt_dir = dir.join("etc/binfmt.d");
+//RS     fs::create_dir_all(&unit_dir)?;
+//RS     fs::create_dir_all(&pipewire_dir)?;
+//RS     fs::create_dir_all(&security_dir)?;
+//RS     fs::create_dir_all(&font_dir)?;
+//RS     fs::create_dir_all(&xdg_dir)?;
+//RS     fs::create_dir_all(&binfmt_dir)?;
+//RS 
+//RS     let audio = clean_bool_json(
+//RS         &option_value(system, &["services.audio.pipewire.enable"])
+//RS             .unwrap_or_else(|| "false".to_string()),
+//RS     );
+//RS     let rtkit = clean_bool_json(
+//RS         &option_value(system, &["services.audio.rtkit.enable"])
+//RS             .unwrap_or_else(|| "false".to_string()),
+//RS     );
+//RS     if audio == "true" {
+//RS         fs::write(pipewire_dir.join("jetos.conf"), "context.properties = {}\n")?;
+//RS         fs::write(
+//RS             unit_dir.join("pipewire.service"),
+//RS             "[Unit]\nDescription=PipeWire audio graph\n\n[Service]\nExecStart=/var/lib/jetos/current-system/sw/bin/pipewire\n\n[Install]\nWantedBy=graphical.target\n",
+//RS         )?;
+//RS         enable_unit(&unit_dir, "graphical.target", "pipewire.service")?;
+//RS     }
+//RS     if rtkit == "true" {
+//RS         fs::write(
+//RS             security_dir.join("99-jetos-rtkit.conf"),
+//RS             "@audio - rtprio 95\n",
+//RS         )?;
+//RS     }
+//RS     let locale = option_value(
+//RS         system,
+//RS         &["services.localization.locale", "filesystem.locale"],
+//RS     )
+//RS     .unwrap_or_else(|| "en_US.UTF-8".to_string());
+//RS     let keymap = option_value(system, &["services.localization.keyboardLayout"])
+//RS         .unwrap_or_else(|| "us".to_string());
+//RS     fs::write(dir.join("etc/locale.conf"), format!("LANG={locale}\n"))?;
+//RS     fs::write(dir.join("etc/vconsole.conf"), format!("KEYMAP={keymap}\n"))?;
+//RS     let fonts = option_value(system, &["services.fonts.packages"])
+//RS         .map(|v| parse_list_items(&v))
+//RS         .unwrap_or_default();
+//RS     fs::write(
+//RS         font_dir.join("local.conf"),
+//RS         format!("<!-- jetos fonts: {} -->\n", fonts.join(",")),
+//RS     )?;
+//RS     let mime_rows = prefixed_options(system, "services.xdg.mime.");
+//RS     fs::write(
+//RS         xdg_dir.join("mimeapps.list"),
+//RS         mime_rows
+//RS             .iter()
+//RS             .map(|(mime, app)| format!("{mime}={app}\n"))
+//RS             .collect::<String>(),
+//RS     )?;
+//RS     let virtualization = prefixed_options(system, "services.virtualization.");
+//RS     if !virtualization.is_empty() {
+//RS         for unit in [
+//RS             "libvirtd.service",
+//RS             "swtpm.service",
+//RS             "spice-vdagentd.service",
+//RS         ] {
+//RS             fs::write(
+//RS                 unit_dir.join(unit),
+//RS                 format!("[Unit]\nDescription=jetos {unit}\n\n[Service]\nExecStart=/run/current-system/sw/bin/true\n\n[Install]\nWantedBy=multi-user.target\n"),
+//RS             )?;
+//RS             enable_unit(&unit_dir, "multi-user.target", unit)?;
+//RS         }
+//RS     }
+//RS     if clean_bool_json(
+//RS         &option_value(system, &["services.virtualization.docker.enable"])
+//RS             .unwrap_or_else(|| "false".to_string()),
+//RS     ) == "true"
+//RS     {
+//RS         fs::write(
+//RS             unit_dir.join("docker.service"),
+//RS             "[Unit]\nDescription=Docker Application Container Engine\n\n[Service]\nExecStart=/run/current-system/sw/bin/dockerd\n\n[Install]\nWantedBy=multi-user.target\n",
+//RS         )?;
+//RS         enable_unit(&unit_dir, "multi-user.target", "docker.service")?;
+//RS     }
+//RS     if clean_bool_json(
+//RS         &option_value(system, &["hardware.bluetooth.enable"])
+//RS             .unwrap_or_else(|| "false".to_string()),
+//RS     ) == "true"
+//RS     {
+//RS         fs::write(
+//RS             unit_dir.join("bluetooth.service"),
+//RS             "[Unit]\nDescription=Bluetooth service\n\n[Service]\nExecStart=/run/current-system/sw/bin/bluetoothd\n\n[Install]\nWantedBy=multi-user.target\n",
+//RS         )?;
+//RS         enable_unit(&unit_dir, "multi-user.target", "bluetooth.service")?;
+//RS     }
+//RS     let gaming = prefixed_options(system, "services.gaming.");
+//RS     if !gaming.is_empty() {
+//RS         fs::write(
+//RS             unit_dir.join("gamemoded.service"),
+//RS             "[Unit]\nDescription=GameMode daemon\n\n[Service]\nExecStart=/run/current-system/sw/bin/gamemoded\n\n[Install]\nWantedBy=graphical.target\n",
+//RS         )?;
+//RS         enable_unit(&unit_dir, "graphical.target", "gamemoded.service")?;
+//RS     }
+//RS     if clean_bool_json(
+//RS         &option_value(system, &["services.smartcard.pcscd.enable"])
+//RS             .unwrap_or_else(|| "false".to_string()),
+//RS     ) == "true"
+//RS     {
+//RS         fs::write(
+//RS             unit_dir.join("pcscd.service"),
+//RS             "[Unit]\nDescription=PC/SC smartcard daemon\n\n[Service]\nExecStart=/run/current-system/sw/bin/pcscd\n\n[Install]\nWantedBy=multi-user.target\n",
+//RS         )?;
+//RS         enable_unit(&unit_dir, "multi-user.target", "pcscd.service")?;
+//RS     }
+//RS     if clean_bool_json(
+//RS         &option_value(system, &["apps.appimage.binfmt.enable"])
+//RS             .unwrap_or_else(|| "false".to_string()),
+//RS     ) == "true"
+//RS     {
+//RS         fs::write(
+//RS             binfmt_dir.join("appimage.conf"),
+//RS             ":AppImage:E::AppImage::/run/current-system/sw/bin/jetos-appimage-run:\n",
+//RS         )?;
+//RS     }
+//RS     fs::write(
+//RS         desktop_dir.join("breadth.json"),
+//RS         format!(
+//RS             "{{\"kind\":\"jetos.desktop-breadth\",\"audio\":{},\"rtkit\":{},\"locale\":{},\"keyboard\":{},\"fonts\":[{}],\"xdg_mime\":[{}],\"virtualization\":[{}],\"gaming\":[{}],\"smartcard\":{},\"appimage_binfmt\":{},\"sessions\":[\"gnome-wayland\",\"plasma-wayland\"],\"proof\":\"desktop-module-breadth-ready\"}}",
+//RS             audio,
+//RS             rtkit,
+//RS             JSON::quote(&locale),
+//RS             JSON::quote(&keymap),
+//RS             strings_json(&fonts),
+//RS             option_rows_json(&mime_rows),
+//RS             option_rows_json(&virtualization),
+//RS             option_rows_json(&gaming),
+//RS             clean_bool_json(&option_value(system, &["services.smartcard.pcscd.enable"]).unwrap_or_else(|| "false".to_string())),
+//RS             clean_bool_json(&option_value(system, &["apps.appimage.binfmt.enable"]).unwrap_or_else(|| "false".to_string()))
+//RS         ),
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn write_store_cache_facts(
+//RS     dir: &Path,
+//RS     realized: &[RealizedPackage],
+//RS ) -> std::io::Result<()> {
+//RS     let store_dir = dir.join("store");
+//RS     fs::create_dir_all(&store_dir)?;
+//RS     let entries = realized
+//RS         .iter()
+//RS         .map(|p| {
+//RS             JSON::object_of(&[
+//RS                 ("name", &p.name),
+//RS                 ("reference", &p.reference),
+//RS                 ("output_hash", &p.envelope.output_hash),
+//RS                 (
+//RS                     "cache_key",
+//RS                     &format!("{}:{}", p.reference, p.envelope.output_hash),
+//RS                 ),
+//RS             ])
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     fs::write(
+//RS         store_dir.join("cache.json"),
+//RS         format!("{{\"kind\":\"jetpack-hangar\",\"entries\":[{}]}}", entries),
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn write_compat_escape_hatches(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+//RS     let compat_dir = dir.join("compat");
+//RS     fs::create_dir_all(&compat_dir)?;
+//RS     fs::write(
+//RS         compat_dir.join("escape-hatches.json"),
+//RS         format!("{{\"hatches\":[{}]}}", compat_hatches_json(system)),
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn write_vm_proof(
+//RS     dir: &Path,
+//RS     system: &SystemPlan,
+//RS     plan_text: &str,
+//RS ) -> std::io::Result<()> {
+//RS     let risks = risk_classes(system);
+//RS     if risks.is_empty() {
+//RS         let _ = fs::remove_file(dir.join("vm-proof.txt"));
+//RS         return Ok(());
+//RS     }
+//RS     for svc in system.services.iter().filter(|s| s.enable) {
+//RS         let unit = dir
+//RS             .join("etc/systemd/system")
+//RS             .join(format!("{}.service", svc.name));
+//RS         if !unit.is_file() {
+//RS             return Err(std::io::Error::new(
+//RS                 std::io::ErrorKind::NotFound,
+//RS                 format!("missing generated service unit {}", unit.display()),
+//RS             ));
+//RS         }
+//RS     }
+//RS     let plan_hash = crate::SHA256::sha256_hex(plan_text.as_bytes());
+//RS     let mut proof = String::new();
+//RS     proof.push_str(&format!("vm proof for {}\n", system.name));
+//RS     proof.push_str(&format!("plan-sha256: {plan_hash}\n"));
+//RS     proof.push_str(&format!("risk: {}\n", risks.join(", ")));
+//RS     proof.push_str("boot-graph: pass\n");
+//RS     proof.push_str("service-artifacts: pass\n");
+//RS     proof.push_str("rollback-required: true\n");
+//RS     fs::write(dir.join("vm-proof.txt"), proof)
+//RS }
+//RS 
+//RS pub(super) fn missing_vm_tools() -> Vec<String> {
+//RS     VM_TOOLS
+//RS         .iter()
+//RS         .filter(|tool| find_path_tool_in_path(tool).is_none())
+//RS         .map(|tool| (*tool).to_string())
+//RS         .collect()
+//RS }
+//RS 
+//RS fn find_path_tool_in_path(name: &str) -> Option<PathBuf> {
+//RS     let dirs = std::env::var_os("PATH")
+//RS         .map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
+//RS         .unwrap_or_default();
+//RS     for dir in dirs {
+//RS         let candidate = dir.join(name);
+//RS         if candidate.is_file() {
+//RS             return Some(candidate);
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS pub(super) fn find_path_tool(name: &str) -> Option<PathBuf> {
+//RS     if let Some(found) = find_path_tool_in_path(name) {
+//RS         return Some(found);
+//RS     }
+//RS     for fallback in [
+//RS         "/run/current-system/sw/bin",
+//RS         "/usr/bin",
+//RS         "/bin",
+//RS         "/usr/sbin",
+//RS         "/sbin",
+//RS     ] {
+//RS         let candidate = PathBuf::from(fallback).join(name);
+//RS         if candidate.is_file() {
+//RS             return Some(candidate);
+//RS         }
+//RS     }
+//RS     None
+//RS }
+// END-PORT-PENDING 0867 crates/jetpack/src/JetOS/desktop_store_vm.rs:1-509
+

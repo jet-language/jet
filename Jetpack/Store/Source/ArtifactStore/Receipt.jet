@@ -1,0 +1,156 @@
+// crates/jet-store/src/receipt.rs: typed immutable invocation receipts, with
+// the newest mutable closure pointer in the ONE workspace-root .jet home.
+// DiagnosticRecord and RecordCodec own diagnostic/source and binary encoding.
+use core.files as store_receipt_files
+
+#Error
+pub struct ReceiptRecordError {
+    pub message: String
+}
+
+pub struct ReceiptInput {
+    pub path: String
+    pub digest: String
+}
+
+pub struct ReceiptRecord {
+    pub schema: String
+    pub verb: String
+    pub closure: String
+    pub modules: [ReceiptInput]
+    pub inputs: [ReceiptInput]
+    pub diagnostics: [Diagnostic]
+    pub facts: [String: String]
+
+    fn new(verb: String, closure: String, modules: [ReceiptInput], inputs: [ReceiptInput], diagnostics: [Diagnostic], facts: [String: String]) -> ReceiptRecord Never! {
+        ReceiptRecord{schema: "jet.receipt/v1", verb: verb, closure: closure, modules: store_receipt_sorted_inputs(modules), inputs: store_receipt_sorted_inputs(inputs), diagnostics: diagnostics, facts: facts}
+    }
+
+    // Module revisions elide origin source; every other source is embedded.
+    fn to_bytes(self) -> [U8] ReceiptRecordError! {
+        revisions := [String]{}
+        loop input in self.modules {
+            if !revisions.contains(input.digest) -> &revisions.push(input.digest)
+        }
+        diagnostics :: if store_encode_diagnostics(self.diagnostics, revisions) == {
+            .Ok(sections) -> sections
+            .Err(error) -> {
+                return Err(ReceiptRecordError{message: error.message})
+            }
+        }
+        facts := [RecordValue]{}
+        names := self.facts.keys().to_list()
+        &names.sort()
+        loop name in names -> &facts.push(RecordValue.Map{fields: [RecordField{name: "name", value: RecordValue.Str{value: name}}, RecordField{name: "value", value: RecordValue.Str{value: self.facts[name]}}]})
+        encoded :: record_encode("jet.receipt/v1", [
+            RecordSection{id: 1, elements: [RecordValue.Map{fields: [RecordField{name: "verb", value: RecordValue.Str{value: self.verb}}, RecordField{name: "closure", value: RecordValue.Str{value: self.closure}}]}]},
+            RecordSection{id: 2, elements: store_receipt_encode_inputs(self.modules)},
+            RecordSection{id: 3, elements: store_receipt_encode_inputs(self.inputs)},
+            RecordSection{id: 4, elements: diagnostics.origins},
+            RecordSection{id: 5, elements: diagnostics.diagnostics},
+            RecordSection{id: 6, elements: facts},
+        ])
+        Ok(encoded.bytes ?? return Err(ReceiptRecordError{message: encoded.problem ?? ""}))
+    }
+
+    fn from_bytes(bytes: [U8], source_for_revision: fn(String) -> String? Never!) -> ReceiptRecord ReceiptRecordError! {
+        opened :: record_open_schema(bytes, "jet.receipt/v1")
+        reader :: opened.reader ?? return Err(ReceiptRecordError{message: opened.problem ?? ""})
+        decoded_header :: record_element(reader, 1, 0)
+        header :: decoded_header.value ?? return Err(ReceiptRecordError{message: decoded_header.problem ?? ""})
+        verb :: store_receipt_text(header, "verb")
+        closure :: store_receipt_text(header, "closure")
+        modules :: store_receipt_decode_inputs(store_receipt_elements(reader, 2))
+        inputs :: store_receipt_decode_inputs(store_receipt_elements(reader, 3))
+        diagnostics :: if store_decode_diagnostics(store_receipt_elements(reader, 4), store_receipt_elements(reader, 5), source_for_revision) == {
+            .Ok(values) -> values
+            .Err(error) -> {
+                return Err(ReceiptRecordError{message: error.message})
+            }
+        }
+        facts := [String: String]{}
+        loop fact in store_receipt_elements(reader, 6) {
+            name :: store_receipt_text(fact, "name")
+            facts[name] = store_receipt_text(fact, "value")
+        }
+        // Decoding preserves element order/duplicates; only new() normalizes.
+        Ok(ReceiptRecord{schema: "jet.receipt/v1", verb: verb, closure: closure, modules: modules, inputs: inputs, diagnostics: diagnostics, facts: facts})
+    }
+}
+
+fn store_receipt_sorted_inputs(inputs: [ReceiptInput]) -> [ReceiptInput] Never! {
+    sorted := inputs
+    &sorted.sort_by((left: ReceiptInput, right: ReceiptInput) -> (left.path <=> right.path).then(left.digest <=> right.digest))
+    unique := [ReceiptInput]{}
+    loop input in sorted {
+        if unique.len() == 0 || unique[unique.len() - 1] != input -> &unique.push(input)
+    }
+    unique
+}
+
+fn store_receipt_encode_inputs(inputs: [ReceiptInput]) -> [RecordValue] Never! {
+    values := [RecordValue]{}
+    loop input in inputs -> &values.push(RecordValue.Map{fields: [RecordField{name: "path", value: RecordValue.Str{value: input.path}}, RecordField{name: "digest", value: RecordValue.Str{value: input.digest}}]})
+    values
+}
+
+fn store_receipt_text(value: RecordValue, name: String) -> String ReceiptRecordError! {
+    field :: record_value_field(value, name)
+    payload :: field.value ?? return Err(ReceiptRecordError{message: field.problem ?? ""})
+    text :: record_value_as_str(payload)
+    Ok(text.value ?? return Err(ReceiptRecordError{message: text.problem ?? ""}))
+}
+
+fn store_receipt_decode_inputs(values: [RecordValue]) -> [ReceiptInput] ReceiptRecordError! {
+    inputs := [ReceiptInput]{}
+    loop value in values -> &inputs.push(ReceiptInput{path: store_receipt_text(value, "path"), digest: store_receipt_text(value, "digest")})
+    Ok(inputs)
+}
+
+fn store_receipt_elements(reader: RecordReader, id: Int) -> [RecordValue] ReceiptRecordError! {
+    count :: record_element_count(reader, id) ?? return Err(ReceiptRecordError{message: "record section {id} is missing"})
+    values := [RecordValue]{}
+    loop index in 0..<count {
+        decoded :: record_element(reader, id, index)
+        &values.push(decoded.value ?? return Err(ReceiptRecordError{message: decoded.problem ?? ""}))
+    }
+    Ok(values)
+}
+
+pub fn store_receipt_pointer_path(workspace_root: String, closure: String) -> String Never! {
+    store_receipt_files.join(store_receipt_files.join(store_project_state_dir(workspace_root), "receipts"), ArtifactDigest.hash(closure.bytes()).to_hex())
+}
+
+impl ArtifactStore {
+    fn publish_receipt(self, workspace_root: String, record: ReceiptRecord) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
+        payload :: if record.to_bytes() == {
+            .Ok(bytes) -> bytes
+            .Err(error) -> {
+                return Err(ArtifactStoreError.Config("receipt is not recordable: {error.message}"))
+            }
+        }
+        object :: self.publish_blob(payload)
+        store_artifact_replace_unsynced(store_receipt_pointer_path(workspace_root, record.closure), object.text().bytes())
+    }
+
+    fn receipt(self, workspace_root: String, closure: String, source_for_revision: fn(String) -> String? Never!) -[FS, Env, Exec, Time, Rand]> ReceiptRecord? ArtifactStoreError! {
+        pointer :: store_receipt_pointer_path(workspace_root, closure)
+        object :: if self.read_build_pointer(pointer) == {
+            .Ok(value) -> value ?? return Ok(None)
+            .Err(_) -> {
+                store_receipt_files.remove(pointer).drop("bad pointer is a miss; removal is best effort")
+                return Ok(None)
+            }
+        }
+        // Blob IO failures propagate; a missing/quarantined blob is a miss.
+        bytes :: self.get_blob(object) ?? return Ok(None)
+        if ReceiptRecord.from_bytes(bytes, source_for_revision) == {
+            .Ok(record) -> {
+                if record.closure == closure -> return Ok(Val(record))
+            }
+            .Err(_) -> {}
+        }
+        store_receipt_files.remove(pointer).drop("undecodable or wrong-closure record is a miss; removal is best effort")
+        Ok(None)
+    }
+}

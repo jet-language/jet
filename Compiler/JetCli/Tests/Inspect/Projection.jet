@@ -1,0 +1,598 @@
+// Behavioral projection coverage. The live-query tests below use the actual
+// Driver, parser, source snapshot and compiler-owned effect source. Codec tests
+// exercise value grammar independently; they do not claim checker parity.
+use core.encoding.json as inspect_projection_test_json
+use core.files as inspect_projection_test_files
+use core.files.runtime.kernel_path_components as inspect_projection_test_os_path
+use jet_driver.[
+    JetDriverAuthorizedSourceFile,
+    JetDriverAuthorizedSourceRoot,
+    JetDriverAuthorizedSourceSnapshot,
+    JetDriverCompileRequest,
+    JetDriverCompileTarget,
+    JetDriverCompilerCheckInput,
+    JetDriverHostFacts,
+    JetDriverVerbOutput,
+    jet_driver_embedded_core_sources,
+    jet_driver_compiler_check_demand_index,
+]
+use jet_eval.[
+    JetCompilerServicesSourceInput,
+    JetCompilerServicesSourcePreparation,
+    jet_eval_compiler_services_parse,
+    jet_eval_default_config,
+]
+use jet_foundation.[TComptimeField, TComptimeEnumArg, TComptimeMapEntry, TComptimeKeyField, TComptimeReport, Type, DIAGNOSTIC_LINT, mir_sha256_hex, foundation_embedded_core]
+use jet_foundation.[StatusFields, StatusValue, StatusEnvelope]
+use jet_foundation.[comptime_character]
+use jet_foundation.[BuildStamp]
+
+fn projection_test_field(value: DataTree, name: String) -> DataTree Never! {
+    if value == .Object(fields) -> return fields.get(name) ?? panic("missing field {name}")
+    panic("expected object for {name}")
+}
+fn projection_test_parse(text: String) -> DataTree Never! {
+    inspect_projection_test_json.parse(text) ?? panic("projection is not JSON: {err}")
+}
+
+// DataTree intentionally has no Equatable contract. Compare the entire
+// mechanical JSON tree, not just counts/versions or a partial lens.
+fn projection_test_same(actual: DataTree, expected: DataTree) -> Bool Never! {
+    inspect_projection_test_json.to_string(actual) == inspect_projection_test_json.to_string(expected)
+}
+fn projection_test_not_null(value: DataTree) -> Bool Never! {
+    if value == .Null -> return false
+    true
+}
+
+fn projection_test_status_find(fields: StatusFields, name: String) -> StatusValue? Never! {
+    loop field in fields.entries { if field.name == name -> return Val(field.value) }
+    None
+}
+fn projection_test_status_field(value: StatusValue, name: String) -> StatusValue Never! {
+    if value == .Object(fields) -> return projection_test_status_find(fields, name) ?? panic("missing field {name}")
+    panic("expected object for {name}")
+}
+fn projection_test_status_same(actual: StatusValue, expected: StatusValue) -> Bool Never! {
+    actual.json() == expected.json()
+}
+fn projection_test_status_not_null(value: StatusValue) -> Bool Never! {
+    if value == .Null -> return false
+    true
+}
+
+// Independent Rust oracles: Compiler.rs1866-1957 is twelve fields, while
+// JSON.rs1095 is fifteen. They are views of one retained index, not one wire.
+fn projection_test_index_views(compiler: DataTree, full: DataTree) Never! {
+    compiler_names :: [String]{"schema_version", "source_digest", "definitions", "references", "calls", "structural_nodes", "effects", "arithmetic", "outputs", "state_graphs", "fact_registry", "derivations"}
+    full_names :: [String]{"schema_version", "definitions", "definition_facts", "derivations", "instances", "outputs", "state_graphs", "package_facts", "workspace_overlays", "effect_projection", "references", "calls", "effects", "arithmetic", "members"}
+    if compiler == .Object(fields) {
+        assert_eq(fields.len(), 12)
+        loop name in compiler_names -> assert(fields.get(name) != None)
+        assert(fields.get("members") == None)
+        assert(fields.get("definition_facts") == None)
+    } else -> panic("compiler semantic index must be an object")
+    if full == .Object(fields) {
+        assert_eq(fields.len(), 15)
+        loop name in full_names -> assert(fields.get(name) != None)
+        assert(fields.get("source_digest") == None)
+        assert(fields.get("structural_nodes") == None)
+        assert(fields.get("fact_registry") == None)
+    } else -> panic("full semantic index must be an object")
+    assert(projection_test_same(projection_test_field(compiler, "schema_version"), DataTree.Int(20)))
+    assert(projection_test_same(projection_test_field(full, "schema_version"), DataTree.Int(20)))
+}
+
+fn projection_test_full_definition(index: DataTree, name: String) -> DataTree Never! {
+    if projection_test_field(index, "definitions") == .Array(rows) {
+        loop row in rows {
+            if projection_test_field(row, "leaf_name") == .Text(leaf) {
+                if leaf == name -> return row
+            }
+        }
+    }
+    panic("full index has no definition {name}")
+}
+
+// CmdSemIndex.rs96-114 emits canonical diagnostic JSON Lines and USER_ERROR,
+// never an inspect.semindex success document with a null payload.
+fn projection_test_semindex_diagnostics(output: JetDriverVerbOutput, diagnostics: [Diagnostic]) Never! {
+    assert_eq(output.exit_code, 1)
+    assert_eq(output.stderr, "")
+    assert(output.stdout.ends_with("\n"))
+    count := 0
+    loop line in output.stdout.split("\n") {
+        if line == "" -> next
+        text := line // #4303: split view flows to a String-typed parser.
+        assert(text.starts_with("{{\"schema\":\"jet.report/v3\","))
+        report :: projection_test_parse(text)
+        assert(projection_test_same(projection_test_field(report, "schema"), DataTree.Text("jet.report/v3")))
+        assert(projection_test_same(projection_test_field(report, "code"), DataTree.Text(diagnostics[count].code)))
+        if report == .Object(fields) -> assert(fields.get("semindex") == None) else -> panic("diagnostic must be an object")
+        count += 1
+    }
+    assert_eq(count, diagnostics.len())
+    assert(count > 0)
+}
+
+#Test("projection codec preserves scalars bytes Unicode and exact integers") {
+    values :: [TComptimeValue]{
+        TComptimeValue.Int{value: 18446744073709551617},
+        TComptimeValue.Float{value: 1.5, bits: 64},
+        TComptimeValue.Bool{value: false},
+        TComptimeValue.Char{value: 0x1f642},
+        TComptimeValue.String{value: "é\n\"\\"},
+        TComptimeValue.BigInt{decimal: "123456789012345678901234567890"},
+        TComptimeValue.Bytes{value: [U8]{U8{0}, U8{255}}},
+    }
+    actual :: jet_cli_projection_value_status_value(TComptimeValue.List{values: values})
+    assert_eq(actual.json(), "[18446744073709551617,1.5,false,\"🙂\",\"é\\n\\\"\\\\\",\"123456789012345678901234567890\",[0,255]]")
+    char_codes :: [Int]{0x24, 0xa2, 0x20ac, 0x1f642}
+    char_texts :: [String]{"$", "¢", "€", "🙂"}
+    loop index in 0..<char_codes.len() {
+        assert(projection_test_status_same(jet_cli_projection_value_status_value(TComptimeValue.Char{value: char_codes[index]}), StatusValue.String{value: char_texts[index]}))
+    }
+}
+
+#Test("projection codec retains nested structs without transport type tags") {
+    value :: TComptimeValue.Struct{type_name: "CompilerSymbol", fields: [TComptimeField]{
+        TComptimeField{name: "name", value: TComptimeValue.String{value: "run"}},
+        TComptimeField{name: "span", value: TComptimeValue.Struct{type_name: "SourceSpan", fields: [TComptimeField]{
+            TComptimeField{name: "start", value: TComptimeValue.Int{value: 3}},
+            TComptimeField{name: "end", value: TComptimeValue.Int{value: 6}},
+        }}},
+        TComptimeField{name: "__jet___memo_cached", value: TComptimeValue.Int{value: 99}},
+    }}
+    value_status :: jet_cli_projection_value_status_value(value)
+    assert(projection_test_status_same(projection_test_status_field(value_status, "name"), StatusValue.String{value: "run"}))
+    span :: projection_test_status_field(value_status, "span")
+    assert(projection_test_status_same(projection_test_status_field(span, "start"), StatusValue.Integer{value: 3}))
+    if value_status == .Object(fields) {
+        assert_eq(fields.entries.len(), 2)
+        assert(projection_test_status_find(fields, "__jet___memo_cached") == None)
+        assert(projection_test_status_find(fields, "type_name") == None)
+    } else {
+        panic("struct was not an object")
+    }
+}
+
+#Test("projection codec clean and told carriers do not fabricate index facts") {
+    absent :: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Int}}
+    assert(projection_test_status_same(jet_cli_projection_value_status_value(absent), StatusValue.Null))
+    assert(projection_test_status_same(jet_cli_projection_value_status_value(TComptimeValue.Unit), StatusValue.Null))
+    told :: TComptimeValue.Failed{report: TComptimeReport.Told{value: TComptimeValue.String{value: "denied"}}}
+    assert(projection_test_status_same(projection_test_status_field(jet_cli_projection_value_status_value(told), "err"), StatusValue.String{value: "denied"}))
+    present :: TComptimeValue.Present{value: TComptimeValue.Bool{value: true}}
+    assert(projection_test_status_same(jet_cli_projection_value_status_value(present), StatusValue.Bool{value: true}))
+}
+
+#Test("projection codec enum empty labeled unlabeled and mixed payloads") {
+    empty :: TComptimeValue.Enum{type_name: "Kind", variant: "Function", args: [TComptimeEnumArg]{}}
+    assert(projection_test_status_same(jet_cli_projection_value_status_value(empty), StatusValue.String{value: "Function"}))
+    labeled :: TComptimeValue.Enum{type_name: "Fact", variant: "Checked", args: [TComptimeEnumArg]{
+        TComptimeEnumArg{name: Val("count"), value: TComptimeValue.Int{value: 7}},
+    }}
+    assert(projection_test_status_same(projection_test_status_field(projection_test_status_field(jet_cli_projection_value_status_value(labeled), "Checked"), "count"), StatusValue.Integer{value: 7}))
+    mixed :: TComptimeValue.Enum{type_name: "Fact", variant: "Mixed", args: [TComptimeEnumArg]{
+        TComptimeEnumArg{name: Val("ignored"), value: TComptimeValue.Int{value: 7}},
+        TComptimeEnumArg{name: None, value: TComptimeValue.String{value: "x"}},
+    }}
+    payload :: projection_test_status_field(jet_cli_projection_value_status_value(mixed), "Mixed")
+    assert_eq(payload.json(), "[7,\"x\"]")
+}
+
+#Test("projection codec map keys retain scalar and compound meaning") {
+    entries :: [TComptimeMapEntry]{
+        TComptimeMapEntry{key: TComptimeKey.Int{value: 3}, value: TComptimeValue.Bool{value: true}},
+        TComptimeMapEntry{key: TComptimeKey.Char{value: 0xa2}, value: TComptimeValue.Unit},
+        TComptimeMapEntry{key: TComptimeKey.Tuple{fields: [TComptimeKeyField]{TComptimeKeyField{name: "0", key: TComptimeKey.Int{value: 7}}}}, value: TComptimeValue.Int{value: 9}},
+    }
+    value_status :: jet_cli_projection_value_status_value(TComptimeValue.Map{entries: entries})
+    assert(projection_test_status_same(projection_test_status_field(value_status, "3"), StatusValue.Bool{value: true}))
+    assert(projection_test_status_same(projection_test_status_field(value_status, "¢"), StatusValue.Null))
+    assert(projection_test_status_same(projection_test_status_field(value_status, "{{\"0\":7}}"), StatusValue.Integer{value: 9}))
+}
+
+// Whole-byte Rust status_ct_value oracles; deliberately z-before-a, never
+// sorted-map expectations. These exercise the shipping TIR carriers only.
+#Test("projection codec preserves nested nonlexicographic wire field order") {
+    value :: TComptimeValue.Struct{type_name: "Outer", fields: [TComptimeField]{
+        TComptimeField{name: "z", value: TComptimeValue.List{values: [TComptimeValue]{
+            TComptimeValue.Struct{type_name: "Inner", fields: [TComptimeField]{
+                TComptimeField{name: "z", value: TComptimeValue.Int{value: 2}},
+                TComptimeField{name: "__jet___memo_inner", value: TComptimeValue.Int{value: 90}},
+                TComptimeField{name: "a", value: TComptimeValue.String{value: "é\n\"\\"}},
+            }},
+            TComptimeValue.Map{entries: [TComptimeMapEntry]{
+                TComptimeMapEntry{key: TComptimeKey.String{value: "z"}, value: TComptimeValue.Bool{value: true}},
+                TComptimeMapEntry{key: TComptimeKey.String{value: "a"}, value: TComptimeValue.Bytes{value: [U8]{U8{0}, U8{255}}}},
+            }},
+        }}},
+        TComptimeField{name: "__jet___memo_outer", value: TComptimeValue.Int{value: 91}},
+        TComptimeField{name: "a", value: TComptimeValue.Enum{type_name: "Fact", variant: "Checked", args: [TComptimeEnumArg]{
+            TComptimeEnumArg{name: Val("z"), value: TComptimeValue.Int{value: 3}},
+            TComptimeEnumArg{name: Val("a"), value: TComptimeValue.Int{value: 4}},
+        }}},
+    }}
+    assert_eq(jet_cli_projection_value_status_value(value).json(), "{{\"z\":[{{\"z\":2,\"a\":\"é\\n\\\"\\\\\"}},{{\"z\":true,\"a\":[0,255]}}],\"a\":{{\"Checked\":{{\"z\":3,\"a\":4}}}}}}")
+}
+
+#Test("projection codec preserves scalar map key entry order and escaping") {
+    value :: TComptimeValue.Map{entries: [TComptimeMapEntry]{
+        TComptimeMapEntry{key: TComptimeKey.String{value: "z"}, value: TComptimeValue.Int{value: 1}},
+        TComptimeMapEntry{key: TComptimeKey.Int{value: 18446744073709551617}, value: TComptimeValue.Int{value: 2}},
+        TComptimeMapEntry{key: TComptimeKey.Bool{value: false}, value: TComptimeValue.Int{value: 3}},
+        TComptimeMapEntry{key: TComptimeKey.Char{value: 0x1f642}, value: TComptimeValue.Int{value: 4}},
+        TComptimeMapEntry{key: TComptimeKey.String{value: "a\"\\"}, value: TComptimeValue.Int{value: 5}},
+    }}
+    assert_eq(jet_cli_projection_value_status_value(value).json(), "{{\"z\":1,\"18446744073709551617\":2,\"false\":3,\"🙂\":4,\"a\\\"\\\\\":5}}")
+}
+
+// Compound names use CtKey.to_value().to_json(), including its memo filter,
+// not the StatusValue object renderer or a CLI-specific key codec.
+#Test("projection compound map names retain canonical order and memo filtering") {
+    fields :: [TComptimeKeyField]{
+        TComptimeKeyField{name: "z", key: TComptimeKey.Int{value: 7}},
+        TComptimeKeyField{name: "__jet___memo_cached", key: TComptimeKey.Bool{value: false}},
+        TComptimeKeyField{name: "a", key: TComptimeKey.Struct{type_name: "Nested", fields: [TComptimeKeyField]{
+            TComptimeKeyField{name: "z", key: TComptimeKey.String{value: "é"}},
+            TComptimeKeyField{name: "__jet___memo_inner", key: TComptimeKey.Int{value: 99}},
+            TComptimeKeyField{name: "a", key: TComptimeKey.Int{value: 2}},
+        }}},
+    }
+    value :: TComptimeValue.Map{entries: [TComptimeMapEntry]{
+        TComptimeMapEntry{key: TComptimeKey.Tuple{fields: fields}, value: TComptimeValue.Int{value: 1}},
+        TComptimeMapEntry{key: TComptimeKey.Struct{type_name: "Key", fields: [TComptimeKeyField]{
+            TComptimeKeyField{name: "z", key: TComptimeKey.Int{value: 3}},
+            TComptimeKeyField{name: "a", key: TComptimeKey.Int{value: 4}},
+        }}, value: TComptimeValue.Int{value: 2}},
+        TComptimeMapEntry{key: TComptimeKey.Enum{type_name: "Kind", variant: "Ready"}, value: TComptimeValue.Int{value: 3}},
+    }}
+    assert_eq(jet_cli_projection_value_status_value(value).json(), "{{\"{{\\\"z\\\":7,\\\"a\\\":{{\\\"z\\\":\\\"é\\\",\\\"a\\\":2}}}}\":1,\"{{\\\"z\\\":3,\\\"a\\\":4}}\":2,\"\\\"Ready\\\"\":3}}")
+}
+
+#Test("projection codec exact empty mixed unlabeled and failure carrier bytes") {
+    values :: [TComptimeValue]{
+        TComptimeValue.Enum{type_name: "Kind", variant: "Empty", args: [TComptimeEnumArg]{}},
+        TComptimeValue.Enum{type_name: "Kind", variant: "Mixed", args: [TComptimeEnumArg]{
+            TComptimeEnumArg{name: Val("z"), value: TComptimeValue.Int{value: 1}},
+            TComptimeEnumArg{name: None, value: TComptimeValue.Int{value: 2}},
+        }},
+        TComptimeValue.Enum{type_name: "Kind", variant: "Bare", args: [TComptimeEnumArg]{
+            TComptimeEnumArg{name: None, value: TComptimeValue.Int{value: 3}},
+            TComptimeEnumArg{name: None, value: TComptimeValue.Int{value: 4}},
+        }},
+        TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Int}},
+        TComptimeValue.Failed{report: TComptimeReport.Told{value: TComptimeValue.Struct{type_name: "Failure", fields: [TComptimeField]{
+            TComptimeField{name: "z", value: TComptimeValue.Int{value: 5}},
+            TComptimeField{name: "a", value: TComptimeValue.Int{value: 6}},
+        }}}},
+        TComptimeValue.Present{value: TComptimeValue.Int{value: 18446744073709551617}},
+        TComptimeValue.BigInt{decimal: "-123456789012345678901234567890"},
+        TComptimeValue.Unit,
+    }
+    assert_eq(jet_cli_projection_value_status_value(TComptimeValue.List{values: values}).json(), "[\"Empty\",{{\"Mixed\":[1,2]}},{{\"Bare\":[3,4]}},null,{{\"err\":{{\"z\":5,\"a\":6}}}},18446744073709551617,\"-123456789012345678901234567890\",null]")
+}
+
+// AST/comptime.rs:2111-2119 freezes width-native Debug, not f64 Display.
+#Test("projection float wire honors native widths signed zero and integral dot zero") {
+    values :: [TComptimeValue]{
+        TComptimeValue.Float{value: 16777217.0, bits: 32},
+        TComptimeValue.Float{value: 16777217.0, bits: 64},
+        TComptimeValue.Float{value: 1.23456789012345, bits: 32},
+        TComptimeValue.Float{value: 1.23456789012345, bits: 64},
+        TComptimeValue.Float{value: 0.0, bits: 32},
+        TComptimeValue.Float{value: -0.0, bits: 32},
+        TComptimeValue.Float{value: 0.0, bits: 64},
+        TComptimeValue.Float{value: -0.0, bits: 64},
+        TComptimeValue.Float{value: 1.0, bits: 32},
+        TComptimeValue.Float{value: 1.0, bits: 64},
+        TComptimeValue.Float{value: 1.0e-20, bits: 32},
+        TComptimeValue.Float{value: 1.0e-20, bits: 64},
+    }
+    assert_eq(jet_cli_projection_value_status_value(TComptimeValue.List{values: values}).json(), "[16777216.0,16777217.0,1.2345679,1.23456789012345,0.0,-0.0,0.0,-0.0,1.0,1.0,1e-20,1e-20]")
+}
+
+#Test("projection wrappers expose one genuine checked query and its actual index version") {
+    // Do not fabricate CompilerChecked or SemIndex packets for a codec proof.
+    // Both presentations below consume the same canonical Driver result.
+    projection := jet_cli_check_projection(projection_test_input("fn run() {{}}\n", None)) ?? panic("canonical checked query unavailable")
+    assert(projection.result.semantic_index == None)
+    assert(jet_driver_compiler_check_demand_index(&projection.result))
+    checked :: projection.result.checked ?? panic("demand lost the checked packet")
+    index :: projection.result.semantic_index ?? panic("demand lost the full typed index")
+    compiler_output :: jet_cli_projection_compiler_output(checked)
+    semindex_output :: jet_cli_projection_semindex_output(index)
+    assert_eq(semindex_output.stdout, "{index.to_status_envelope().json()}\n")
+    assert(jet_driver_compiler_check_demand_index(&projection.result))
+    assert_eq(jet_cli_projection_semindex_output(projection.result.semantic_index ?? panic("memo lost its index")).stdout, semindex_output.stdout)
+    assert_eq(compiler_output.exit_code, 0)
+    assert_eq(semindex_output.exit_code, 0)
+    assert_eq(compiler_output.stderr, "")
+    assert_eq(semindex_output.stderr, "")
+    assert(compiler_output.stdout.starts_with("{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.compiler.check\",\"ok\":true,\"reports\":[],\"compiler\":{{\"schema_version\":1,\"api_version\":1,\"operation\":\"check\",\"value\":"))
+    assert(semindex_output.stdout.starts_with("{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.semindex\",\"ok\":true,\"reports\":[],\"semindex\":"))
+    assert(compiler_output.stdout.ends_with("}}\n"))
+    assert(semindex_output.stdout.ends_with("}}\n"))
+    compiler_tree :: projection_test_parse(compiler_output.stdout)
+    semindex_tree :: projection_test_parse(semindex_output.stdout)
+    assert(projection_test_same(projection_test_field(compiler_tree, "schema"), DataTree.Text("jet.status/v1")))
+    assert(projection_test_same(projection_test_field(semindex_tree, "schema"), DataTree.Text("jet.status/v1")))
+    assert(projection_test_same(projection_test_field(compiler_tree, "action"), DataTree.Text("inspect.compiler.check")))
+    assert(projection_test_same(projection_test_field(semindex_tree, "action"), DataTree.Text("inspect.semindex")))
+    assert(projection_test_same(projection_test_field(compiler_tree, "reports"), DataTree.Array([DataTree]{})))
+    assert(projection_test_same(projection_test_field(semindex_tree, "reports"), DataTree.Array([DataTree]{})))
+    compiler :: projection_test_field(compiler_tree, "compiler")
+    assert(projection_test_same(projection_test_field(compiler, "schema_version"), DataTree.Int(1)))
+    assert(projection_test_same(projection_test_field(compiler, "api_version"), DataTree.Int(1)))
+    nested :: projection_test_field(projection_test_field(compiler, "value"), "semantic_index")
+    if projection_test_field(compiler, "value") == .Object(fields) {
+        assert_eq(fields.len(), 7)
+        assert(fields.get("source_revisions") == None)
+        assert(fields.get("proof_rows") == None)
+    } else -> panic("CompilerChecked must retain its seven-field packet")
+    projection_test_index_views(nested, projection_test_field(semindex_tree, "semindex"))
+}
+
+#Test("projection wrappers retain genuine rejected-check absent semantic index") {
+    input := projection_test_input("fn run() {{ missing() }}\n", None)
+    input.request.semantic_index_requested = true
+    compared :: jet_cli_check_diagnostics(input)
+    assert(!compared.valid)
+    assert(jet_cli_projection_has_errors(compared.result.diagnostics))
+    checked :: compared.result.checked ?? panic("canonical rejected-check packet unavailable")
+    assert(compared.result.semantic_index != None)
+    compiler_tree :: projection_test_parse(jet_cli_projection_compiler_output(checked).stdout)
+    semindex_output :: jet_cli_inspect_semindex(input) ?? panic("semantic rejection became a transport error")
+    assert(projection_test_same(projection_test_field(compiler_tree, "ok"), DataTree.Bool(true)))
+    assert(projection_test_same(projection_test_field(compiler_tree, "schema"), DataTree.Text("jet.status/v1")))
+    projection_test_semindex_diagnostics(semindex_output, compared.result.diagnostics)
+    assert(projection_test_same(projection_test_field(compiler_tree, "action"), DataTree.Text("inspect.compiler.check")))
+    assert(projection_test_same(projection_test_field(projection_test_field(projection_test_field(compiler_tree, "compiler"), "value"), "semantic_index"), DataTree.Null))
+}
+
+#Test("check scope is explicit command intent") {
+    assert_eq(jet_cli_check_scope_name(JetCLICheckScope.Project), "project")
+    assert_eq(jet_cli_check_scope_name(JetCLICheckScope.ExplicitFile), "explicit-file")
+}
+
+#Test("projection character transport preserves every UTF8 width boundary") {
+    codes :: [Int]{0, 0x7f, 0x80, 0x7ff, 0x800, 0xd7ff, 0xe000, 0xffff, 0x10000, 0x10ffff}
+    bytes :: [[U8]]{
+        [U8]{U8{0}}, [U8]{U8{127}}, [U8]{U8{194}, U8{128}}, [U8]{U8{223}, U8{191}},
+        [U8]{U8{224}, U8{160}, U8{128}}, [U8]{U8{237}, U8{159}, U8{191}}, [U8]{U8{238}, U8{128}, U8{128}},
+        [U8]{U8{239}, U8{191}, U8{191}}, [U8]{U8{240}, U8{144}, U8{128}, U8{128}}, [U8]{U8{244}, U8{143}, U8{191}, U8{191}},
+    }
+    loop index in 0..<codes.len() -> assert_eq(comptime_character(codes[index]).bytes(), bytes[index])
+}
+
+#Test("projection error predicate retains canonical diagnostics and ignores lints") {
+    assert(!jet_cli_projection_has_errors([Diagnostic]{}))
+    error :: diagnostic_from_registry("E2393", None, "use project.<module> needs an owning project context.", "owning project required", "select the project")
+    lint := error
+    lint.severity = DIAGNOSTIC_LINT
+    assert(!jet_cli_projection_has_errors([Diagnostic]{lint}))
+    assert(jet_cli_projection_has_errors([Diagnostic]{lint, error}))
+    assert(jet_cli_projection_has_errors([Diagnostic]{error, lint}))
+}
+
+// Live-query cases are deliberately separate from codec-domain packets above.
+// No mocked checker, Core.compiler facade, frozen index, or schema substitute.
+fn projection_test_input(source: String, manifest: String?) -> JetDriverCompilerCheckInput {
+    parsed :: jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: source, preparation: Val(JetCompilerServicesSourcePreparation.Masked{source: source})}) ?? panic("canonical source preparation failed")
+    platform :: inspect_projection_test_os_path.PathPlatform.Unix
+    entry :: inspect_projection_test_os_path.from_text("/projection/main.jet", platform)
+    files := [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: entry, relative_path: inspect_projection_test_os_path.from_text("main.jet", platform), identity: "fixture-main", source: source}}
+    if manifest == .Val(text) -> &files.push(JetDriverAuthorizedSourceFile{path: inspect_projection_test_os_path.from_text("/projection/package.jet", platform), relative_path: inspect_projection_test_os_path.from_text("package.jet", platform), identity: "fixture-manifest", source: text})
+    snapshot :: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: inspect_projection_test_os_path.from_text("/projection", platform), identity: "fixture-root", allow_hardlinks: false, files: files, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}}}, entry_root_identity: "fixture-root", entry_path: entry}
+    embedded_core :: foundation_embedded_core()
+    request :: JetDriverCompileRequest{
+        authorized_sources: snapshot,
+        canonical_effect_source: embedded_core.effect_source(),
+        core_sources: jet_driver_embedded_core_sources(embedded_core),
+        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: None, build_stamp: Val(BuildStamp{git: None, dirty: false, toolchain: "0.1.0", at: ""})},
+        eval_config: jet_eval_default_config(),
+        target: JetDriverCompileTarget.Native,
+        record_store: None,
+        mir_lint_every_pass: false,
+    }
+    JetDriverCompilerCheckInput{parsed: parsed, request: request}
+}
+
+// Compiler and inspect.semindex are distinct Rust projections of retained facts.
+#Test("live checked compiler and semindex routes share source index and digest") {
+    source :: "fn run() {{}}\n"
+    input :: projection_test_input(source, None)
+    compiler :: jet_cli_inspect_compiler_check(input) ?? panic("compiler query failed")
+    semindex :: jet_cli_inspect_semindex(input) ?? panic("semindex query failed")
+    assert_eq(compiler.exit_code, 0)
+    assert_eq(semindex.exit_code, 0)
+    compiler_value :: projection_test_field(projection_test_field(projection_test_parse(compiler.stdout), "compiler"), "value")
+    index :: projection_test_field(compiler_value, "semantic_index")
+    projection_test_index_views(index, projection_test_field(projection_test_parse(semindex.stdout), "semindex"))
+    assert(projection_test_same(projection_test_field(compiler_value, "source"), DataTree.Text(source)))
+    assert(projection_test_same(projection_test_field(index, "source_digest"), DataTree.Text(mir_sha256_hex(source))))
+}
+
+// Canonical rejected-check carrier contract from #3181; scope errors never
+// publish a successful index merely because syntactic declarations exist.
+#Test("live semantic rejection retains registered diagnostics and absent index") {
+    input :: projection_test_input("fn run() {{ missing() }}\n", None)
+    compared :: jet_cli_check_diagnostics(input)
+    assert(!compared.valid)
+    assert(jet_cli_projection_has_errors(compared.result.diagnostics))
+    checked :: compared.result.checked ?? panic("semantic diagnostic packet was lost")
+    assert(projection_test_status_same(jet_cli_projection_index_status_value(checked), StatusValue.Null))
+    output :: jet_cli_inspect_compiler_check(input) ?? panic("user errors became transport rejection")
+    assert_eq(output.exit_code, 0)
+    packet :: projection_test_field(projection_test_field(projection_test_parse(output.stdout), "compiler"), "value")
+    assert(projection_test_same(projection_test_field(packet, "semantic_index"), DataTree.Null))
+    if projection_test_field(packet, "diagnostics") == .Array(rows) -> assert(rows.len() > 0) else -> panic("diagnostics not an array")
+    if jet_cli_check_projection(input) == {
+        .Ok(_) -> panic("strict projection accepted semantic errors")
+        .Err(error) -> if error == {
+            .Diagnostics(rows) -> assert(rows.len() > 0)
+            else -> panic("semantic errors were not retained")
+        }
+    }
+}
+
+// tests/project_check.rs::library_package_check_needs_no_run_entry (416-424).
+#Test("live library source checking does not demand a program entry") {
+    input :: projection_test_input("pub fn answer() -> Int {{ 42 }}\n", Val("name: \"projection-lib\"\nversion: \"0.0.1\"\nedition: \"2028\"\noutputs: {{ lib: .Library{{}} }}\n"))
+    projection := jet_cli_check_projection(input) ?? panic("library check demanded run or failed")
+    assert(!jet_cli_projection_has_errors(projection.result.diagnostics))
+    assert(jet_driver_compiler_check_demand_index(&projection.result))
+    checked :: projection.result.checked ?? panic("library demand lost the checked packet")
+    assert(projection_test_status_not_null(jet_cli_projection_index_status_value(checked)))
+}
+
+// tests/project_check.rs::explicit_file_without_owning_project_context_teaches_missing_context (380-412).
+#Test("explicit-file project import needs owning context with source-owned span") {
+    source :: "use project.math\nfn run() {{}}\n"
+    input :: projection_test_input(source, None)
+    diagnostic :: jet_cli_missing_project_context_diagnostic(input.parsed, false) ?? panic("project import context missing without diagnostic")
+    assert_eq(diagnostic.code, "E2393")
+    assert_eq(diagnostic.what, "use project.<module> needs an owning project context.")
+    span :: diagnostic.span ?? panic("project import lost its span")
+    assert_eq(span.start, 4)
+    assert_eq(span.end, 16)
+    assert(jet_cli_missing_project_context_diagnostic(input.parsed, true) == None)
+}
+
+#Test("missing-context detection ignores strings comments and bad lexing") {
+    sources :: [String]{
+        "// use project.math\nfn run() {{}}\n",
+        "text :: \"use project.math\"\nfn run() {{}}\n",
+        "use local\nfn run() {{}}\n",
+        "use project.math\n\"unfinished\n",
+    }
+    loop source in sources {
+        parsed :: projection_test_input(source, None).parsed
+        assert(jet_cli_missing_project_context_diagnostic(parsed, false) == None)
+    }
+}
+
+#Test("missing-context lexical fallback survives a later parse error") {
+    input :: projection_test_input("use project.math\nfn run( {{\n", None)
+    diagnostic :: jet_cli_missing_project_context_diagnostic(input.parsed, false) ?? panic("lexical fallback lost project import")
+    assert_eq(diagnostic.code, "E2393")
+    site :: diagnostic.span ?? panic("fallback lost source span")
+    assert_eq(site.start, 4)
+    assert_eq(site.end, 16)
+}
+
+// #3181 live authorized-request fixtures. Request captures native disk/root
+// identities once; the unsaved overlay changes only that owned snapshot's
+// already-authorized entry bytes. The parser and checked source use those same
+// bytes, with no CLI overlay flag and no mutation of the captured disk file.
+fn projection_test_authorized_input(path: String, overlay: String?) -> JetDriverCompilerCheckInput {
+    request := if jet_cli_request_file(path, false) == {
+        .Ready(request, _) -> request
+        .Refused(output) -> panic("authorized fixture request refused: {output.stderr}")
+    }
+    source := String?{None}
+    loop root_index in 0..<request.authorized_sources.roots.len() {
+        loop file_index in 0..<request.authorized_sources.roots[root_index].files.len() {
+            if !inspect_projection_test_os_path.equals(request.authorized_sources.roots[root_index].files[file_index].path, request.authorized_sources.entry_path) -> next
+            if overlay == .Val(text) -> request.authorized_sources.roots[root_index].files[file_index].source = text
+            source = Val(request.authorized_sources.roots[root_index].files[file_index].source)
+        }
+    }
+    text :: source ?? panic("authorized fixture request lost its entry")
+    parsed :: jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: text, preparation: Val(JetCompilerServicesSourcePreparation.Masked{source: text})}) ?? panic("authorized fixture did not parse")
+    JetDriverCompilerCheckInput{parsed: parsed, request: request}
+}
+
+fn projection_test_named_row(value: DataTree, name: String) -> DataTree Never! {
+    if value == .Array(rows) {
+        loop row in rows {
+            if projection_test_field(row, "name") == .Text(text) {
+                if text == name -> return row
+            }
+        }
+    }
+    panic("checked packet has no named row {name}")
+}
+
+// CW7-CHECKING's semindex_unsaved_overlay_keeps_source_callable_and_field_meanings,
+// now through the production Jet Driver query, not the Rust/core facade guard.
+// Full live proof also requires the CW7 checked callable/member metadata merge.
+#Test("live unsaved authorized overlay preserves typed callable and field meanings") {
+    disk :: "struct Payload {{ code: Int }}\nfn score(value: Int) -> Int {{ value }}\nfn run() {{}}\n"
+    overlay :: "struct Payload {{ code: String }}\nfn score(value: Bool) -> Int {{ if value {{ 1 }} else {{ 0 }} }}\nfn run() {{}}\n"
+    directory :: inspect_projection_test_files.temp_dir("jet-projection-overlay") ?? panic("overlay fixture directory failed")
+    path :: "{directory.path}/main.jet"
+    inspect_projection_test_files.write(path, disk) ?? panic("overlay fixture write failed")
+    input :: projection_test_authorized_input(path, Val(overlay))
+    assert_eq(input.parsed.source, overlay)
+    compiler :: jet_cli_inspect_compiler_check(input) ?? panic("unsaved compiler query unavailable")
+    semindex :: jet_cli_inspect_semindex(input) ?? panic("unsaved semindex query unavailable")
+    checked :: projection_test_field(projection_test_field(projection_test_parse(compiler.stdout), "compiler"), "value")
+    index :: projection_test_field(checked, "semantic_index")
+    full_index :: projection_test_field(projection_test_parse(semindex.stdout), "semindex")
+    projection_test_index_views(index, full_index)
+    assert(projection_test_same(projection_test_field(checked, "source"), DataTree.Text(overlay)))
+    assert(projection_test_same(projection_test_field(index, "source_digest"), DataTree.Text(mir_sha256_hex(overlay))))
+    definitions :: projection_test_field(index, "definitions")
+    payload :: projection_test_named_row(definitions, "Payload")
+    fields :: projection_test_field(projection_test_field(payload, "kind"), "fields")
+    field :: projection_test_named_row(fields, "code")
+    assert(projection_test_same(projection_test_field(field, "ty"), DataTree.Text("String")))
+    score :: projection_test_full_definition(full_index, "score")
+    callable :: projection_test_field(score, "callable_signature")
+    assert(projection_test_same(projection_test_field(callable, "status"), DataTree.Text("checked")))
+    parameter :: projection_test_named_row(projection_test_field(callable, "parameters"), "value")
+    assert(projection_test_same(projection_test_field(parameter, "type"), DataTree.Text("Bool")))
+    assert_eq(inspect_projection_test_files.read(path) ?? panic("overlay disk fixture became unreadable"), disk)
+}
+
+// CW7-CHECKING's semindex_generated_declaration_retains_callable_and_member_origin.
+// Run from the repository root to load the authored generator fixture; nothing
+// replaces generation by a manually constructed member/definition packet.
+#Test("live generated methods retain checked callable and inherent origins") {
+    root :: inspect_projection_test_files.cwd() ?? panic("generated fixture needs the repository working directory: {err}")
+    input :: projection_test_authorized_input("{root}/Examples/features/reflection/derive_loop.jet", None)
+    compiler :: jet_cli_inspect_compiler_check(input) ?? panic("generated compiler query unavailable")
+    semindex :: jet_cli_inspect_semindex(input) ?? panic("generated semindex query unavailable")
+    checked :: projection_test_field(projection_test_field(projection_test_parse(compiler.stdout), "compiler"), "value")
+    index :: projection_test_field(checked, "semantic_index")
+    full_index :: projection_test_field(projection_test_parse(semindex.stdout), "semindex")
+    projection_test_index_views(index, full_index)
+    assert(projection_test_same(projection_test_field(index, "source_digest"), DataTree.Text(mir_sha256_hex(input.parsed.source))))
+    methods :: [String]{"marked_x", "marked_y", "generated"}
+    loop name in methods {
+        member :: projection_test_named_row(projection_test_field(full_index, "members"), name)
+        assert(projection_test_same(projection_test_field(member, "owner"), DataTree.Text("Point")))
+        assert(projection_test_same(projection_test_field(member, "kind"), DataTree.Text("method")))
+        origin :: projection_test_field(member, "origin")
+        assert(projection_test_same(projection_test_field(origin, "kind"), DataTree.Text("inherent_impl")))
+        assert(projection_test_same(projection_test_field(origin, "trait"), DataTree.Null))
+        definition :: projection_test_full_definition(full_index, name)
+        callable :: projection_test_field(definition, "callable_signature")
+        assert(projection_test_same(projection_test_field(callable, "status"), DataTree.Text("checked")))
+        // Preserve the actual checked return carrier, not a frozen Rust detail
+        // model or a guessed String return when the effective carrier differs.
+        assert(projection_test_not_null(projection_test_field(callable, "return_type")))
+        assert(projection_test_not_null(projection_test_field(callable, "failure_contract")))
+    }
+}
+
+// Use the one Report validator, not a CLI refusal policy or map overwrite.
+#Test("projection ordered fields preserve canonical name refusals") {
+    fields := StatusFields.new().with("z", StatusValue.Integer{value: 1})
+    if &fields.insert("z", StatusValue.Integer{value: 2}) == {
+        .Ok(_) -> panic("duplicate status name accepted")
+        .Err(error) -> assert_eq(error.message, "duplicate status field `z`")
+    }
+    names :: [String]{"", "\n", "\u{7f}", "\u{85}"}
+    loop name in names {
+        if &fields.insert(name, StatusValue.Null) == {
+            .Ok(_) -> panic("nonprintable status name accepted")
+            .Err(error) -> assert_eq(error.message, "status field names must be non-empty and printable")
+        }
+    }
+    envelope :: StatusEnvelope.new("inspect.compiler.check", true)
+        .with_field("compiler", StatusValue.Object{fields: ^fields.with("a", StatusValue.Integer{value: 2})})
+    assert_eq(envelope.json(), "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.compiler.check\",\"ok\":true,\"reports\":[],\"compiler\":{{\"z\":1,\"a\":2}}}}")
+}

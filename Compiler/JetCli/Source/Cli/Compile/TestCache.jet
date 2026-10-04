@@ -1,0 +1,123 @@
+// Rust Source/CmdCompile.rs:6168-6337. The compiler/authority host supplies
+// the pinned input closure and native identity; this codec never reopens paths.
+
+pub struct JetCLITestResultCache { pub ok: Bool, pub stdout: String, pub stderr: String }
+pub struct JetCLITestCacheInput { pub path: String, pub contents: [U8]? }
+pub struct JetCLITestComptimeInput { pub path: String, pub hash: String }
+pub struct JetCLITestCacheIdentity {
+    pub canonical_path: String
+    pub package: Bool
+    // Ordered exactly like the checked Loader bundle, before ordinary inputs.
+    pub comptime_inputs: [JetCLITestComptimeInput]
+    // Rust BTreeSet<PathBuf> order, deduplicated by the checked closure owner;
+    // includes entry, manifest, dependency discovery and bundle module paths.
+    pub inputs: [JetCLITestCacheInput]
+    // None means the canonical compiler found this target uncacheable.
+    pub native_identity: String?
+}
+
+// Rust append_test_cache_field (CmdCompile.rs:6175-6178).
+fn jet_cli_test_cache_append_field(buffer: &[U8], value: [U8]) Never! {
+    length :: value.len()
+    loop shift in 0..<8 -> &buffer.push(U8{(length >> ((7 - shift) * 8)) & 255})
+    loop byte in value -> &buffer.push(byte)
+}
+
+fn jet_cli_test_cache_optional_string(value: String?) -> String Never! {
+    if value == {
+        .None -> "None"
+        .Val(text) -> "Some({jet_cli_debug_quote(text)})"
+    }
+}
+fn jet_cli_test_cache_optional_int(value: Int?) -> String Never! {
+    if value == {
+        .None -> "None"
+        .Val(number) -> "Some({number})"
+    }
+}
+
+// Rust test_result_cache_key option formatting (CmdCompile.rs:6237-6255).
+pub fn jet_cli_test_cache_options_text(options: JetCLITestRunOptions) -> String Never! {
+    "show_default={options.show_default};coverage={options.coverage};release={options.release};profile={jet_cli_test_cache_optional_string(options.profile)};trace_tiers={options.trace_tiers};filter={jet_cli_test_cache_optional_string(options.filter)};shuffle={jet_cli_test_cache_optional_int(options.shuffle_seed)};serial={options.serial};measure={options.measure};docs={options.docs};browser={jet_cli_test_cache_optional_string(options.browser_engines)};browser_retries={jet_cli_test_cache_optional_int(options.browser_retries)};browser_reporter={jet_cli_test_cache_optional_string(options.browser_reporter)};browser_ui={options.browser_ui};browser_visual={options.browser_visual};browser_trace={options.browser_trace};"
+}
+
+// Rust test_result_cache_key (CmdCompile.rs:6180-6258), after the canonical
+// loader/native-key host has pinned the filesystem and compile-time facts.
+pub fn jet_cli_test_cache_key(identity: JetCLITestCacheIdentity, options: JetCLITestRunOptions) -> String? Never! {
+    native :: identity.native_identity ?? return None
+    bytes := [U8]{}
+    jet_cli_test_cache_append_field(&bytes, "jet-test-result-v2".bytes())
+    jet_cli_test_cache_append_field(&bytes, identity.canonical_path.bytes())
+    jet_cli_test_cache_append_field(&bytes, (if identity.package -> "package" else -> "file").bytes())
+    loop input in identity.comptime_inputs {
+        jet_cli_test_cache_append_field(&bytes, "comptime-input".bytes())
+        jet_cli_test_cache_append_field(&bytes, input.path.bytes())
+        jet_cli_test_cache_append_field(&bytes, input.hash.bytes())
+    }
+    loop input in identity.inputs {
+        jet_cli_test_cache_append_field(&bytes, input.path.bytes())
+        if input.contents == {
+            .Val(contents) -> jet_cli_test_cache_append_field(&bytes, contents)
+            .None -> jet_cli_test_cache_append_field(&bytes, "<missing>".bytes())
+        }
+    }
+    jet_cli_test_cache_append_field(&bytes, "native-identity".bytes())
+    jet_cli_test_cache_append_field(&bytes, native.bytes())
+    jet_cli_test_cache_append_field(&bytes, jet_cli_test_cache_options_text(options).bytes())
+    Val(mir_sha256_hex_bytes(mir_sha256_bytes(bytes)))
+}
+
+// Rust test_result_cache_path (CmdCompile.rs:6260-6271), resolved workspace
+// root is supplied by the same compiler host (not a per-package cache).
+pub fn jet_cli_test_cache_path(project_root: String, key: String) -> String Never! {
+    "{project_root}/.jet/test-results/{key}.cache"
+}
+
+// Rust read_test_cache_line (CmdCompile.rs:6273-6278). Returning offsets keeps
+// length-header scanning borrowed and never copies an output payload early.
+fn jet_cli_test_cache_line(bytes: [U8], cursor: &Int) -> String? Never! {
+    if cursor > bytes.len() -> return None
+    start :: ~cursor
+    loop at in start..<bytes.len() {
+        if bytes[at] == (U8{10}) {
+            cursor = at + 1
+            line :: String.from_bytes(bytes[start..<at]) ?? return None
+            return Val(line)
+        }
+    }
+    None
+}
+
+// Rust test_result_cache_read (CmdCompile.rs:6280-6304). A non-"1" status
+// means false; trailing bytes are ignored, matching the Rust reader.
+pub fn jet_cli_test_cache_decode(bytes: [U8]) -> JetCLITestResultCache? Never! {
+    cursor := 0
+    if jet_cli_test_cache_line(bytes, &cursor) != Val("JET_TEST_RESULT_V2") -> return None
+    status :: jet_cli_test_cache_line(bytes, &cursor) ?? return None
+    stdout_length :: jet_cli_test_unsigned(jet_cli_test_cache_line(bytes, &cursor) ?? return None) ?? return None
+    stderr_length :: jet_cli_test_unsigned(jet_cli_test_cache_line(bytes, &cursor) ?? return None) ?? return None
+    stdout_end :: cursor + stdout_length
+    stderr_end :: stdout_end + stderr_length
+    if stdout_end > 18446744073709551615 || stderr_end > 18446744073709551615 || stderr_end > bytes.len() -> return None
+    stdout :: String.from_bytes(bytes[cursor..<stdout_end]) ?? return None
+    stderr :: String.from_bytes(bytes[stdout_end..<stderr_end]) ?? return None
+    Val(JetCLITestResultCache{ok: status == "1", stdout: stdout, stderr: stderr})
+}
+
+// Rust test_result_cache_write (CmdCompile.rs:6306-6326), pure codec half.
+// Main's 2026-10-03 ruling corrects the missing LF between the two length
+// headers (Rust lines6320-6322); tandem Rust fix is required at integration.
+pub fn jet_cli_test_cache_encode(result: JetCLITestResultCache) -> [U8] Never! {
+    stdout :: result.stdout.bytes()
+    stderr :: result.stderr.bytes()
+    bytes := "JET_TEST_RESULT_V2\n{if result.ok -> "1" else -> "0"}\n{stdout.len()}\n{stderr.len()}\n".bytes()
+    loop byte in stdout -> &bytes.push(byte)
+    loop byte in stderr -> &bytes.push(byte)
+    bytes
+}
+
+// Rust test_result_cache_write_allowed (CmdCompile.rs:6328-6337), environment
+// presence stays an explicit fact even when JET_RECEIPT_BYPASS is empty.
+pub fn jet_cli_test_cache_write_allowed(options: JetCLITestRunOptions, receipt_bypass: Bool) -> Bool Never! {
+    !options.docs && !options.coverage && !options.measure && !options.update_snapshots && options.record == None && !receipt_bypass
+}

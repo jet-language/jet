@@ -1,0 +1,261 @@
+// Original os_switch_activates_and_sets_current Fleet :1630-1668 and lifecycle
+// :1719-1868. Consumed fixture inputs are config.jet :94,132-150, NOT a copied
+// evaluator. Pure byte tests prove renderers, not the writer/GC/CLI journey.
+// Native originals retain #4479/#3593 executable/link and #3594 process gates.
+// FleetFacts now owns/invokes the complete original artifact writer/launcher
+// integration and all FIVE actual default SSH-target argv regressions.
+
+fn jetos_fl_test_system(options: [OptionPlan]) -> SystemPlan Never! {
+    SystemPlan{name: "halcyon", target: "linux.x64", packages: [Pkg]{}, services: [ServicePlan]{}, options: options}
+}
+
+fn jetos_fl_test_halcyon() -> SystemPlan Never! {
+    jetos_fl_test_system([OptionPlan]{
+        OptionPlan{key: "packages.channel", value: "\"stable\""},
+        OptionPlan{key: "deploy.generations.keep", value: "2"},
+        OptionPlan{key: "deploy.autoUpgrade.enable", value: "true"},
+        OptionPlan{key: "deploy.autoUpgrade.schedule", value: "\"daily\""}
+    })
+}
+
+fn jetos_fl_test_read(root: String, relative: String) -[FS]> String Never! {
+    files.read(files.join(root, relative)) ?? panic("read {relative}")
+}
+
+fn jetos_fl_test_fleet_script(health: String) -> String Never! {
+    jetos_render_fleet_host_script("home", "halcyon", "halcyon", "halcyon@halcyon", "echo push >> $JETOS_DEPLOY_LOG", "echo proof >> $JETOS_DEPLOY_LOG", "echo switch >> $JETOS_DEPLOY_LOG", health, "echo rollback >> $JETOS_DEPLOY_LOG", "null")
+}
+
+#Test("JetOS lifecycle defaults exact three JSON documents and units") {
+    rendered :: jetos_lifecycle_rendering(jetos_fl_test_system([OptionPlan]{}))
+    assert_eq(rendered.policy, "{{\"kind\":\"jetos.lifecycle-policy\",\"keep_generations\":\"10\",\"channel\":\"locked\",\"auto_upgrade\":false,\"schedule\":\"daily\",\"gc\":\"explain-before-delete\",\"rollback_window\":\"kept-generations\",\"proof\":\"lifecycle-policy-ready\"}}")
+    assert_eq(rendered.channel, "{{\"kind\":\"jetos.channel-policy\",\"channel\":\"locked\",\"update_command\":\"sw/bin/jetos-channel-update\",\"proof\":\"channel-policy-ready\"}}")
+    assert_eq(rendered.auto_upgrade, "{{\"kind\":\"jetos.auto-upgrade\",\"enabled\":false,\"schedule\":\"daily\",\"steps\":[\"fetch-channel\",\"build\",\"proof\",\"switch\",\"health\",\"rollback-on-fail\"],\"proof\":\"auto-upgrade-proof-gated\"}}")
+    assert(!rendered.enabled)
+    assert_eq(rendered.service, "[Unit]\nDescription=jetos proof-gated auto-upgrade\n\n[Service]\nType=oneshot\nExecStart=/run/current-system/sw/bin/jetos-auto-upgrade\n")
+    assert_eq(rendered.timer, "[Unit]\nDescription=jetos auto-upgrade schedule\n\n[Timer]\nOnCalendar=daily\nUnit=jetos-auto-upgrade.service\n\n[Install]\nWantedBy=timers.target\n")
+}
+
+#Test("JetOS lifecycle original policy aliases keep fallback bool and schedule bytes") {
+    original :: jetos_lifecycle_rendering(jetos_fl_test_halcyon())
+    assert_eq(original.policy, "{{\"kind\":\"jetos.lifecycle-policy\",\"keep_generations\":\"2\",\"channel\":\"stable\",\"auto_upgrade\":true,\"schedule\":\"daily\",\"gc\":\"explain-before-delete\",\"rollback_window\":\"kept-generations\",\"proof\":\"lifecycle-policy-ready\"}}")
+    assert_eq(original.channel, "{{\"kind\":\"jetos.channel-policy\",\"channel\":\"stable\",\"update_command\":\"sw/bin/jetos-channel-update\",\"proof\":\"channel-policy-ready\"}}")
+    assert_eq(original.auto_upgrade, "{{\"kind\":\"jetos.auto-upgrade\",\"enabled\":true,\"schedule\":\"daily\",\"steps\":[\"fetch-channel\",\"build\",\"proof\",\"switch\",\"health\",\"rollback-on-fail\"],\"proof\":\"auto-upgrade-proof-gated\"}}")
+    assert(original.enabled)
+    // Original :1721-1723 expectation, also the deliberate proof control.
+    assert(original.policy.contains("gc") && original.policy.contains("rollback_window") && original.policy.contains("\"auto_upgrade\":true"))
+    defaults :: jetos_lifecycle_rendering(jetos_fl_test_system([OptionPlan]{}))
+    assert_eq(original.gc_script, defaults.gc_script.replace("\nkeep=10\n", "\nkeep=2\n"))
+    assert_eq(original.channel_script, defaults.channel_script.replace("locked", "stable"))
+    assert_eq(original.upgrade_script, defaults.upgrade_script)
+    assert_eq(original.service, defaults.service)
+    assert_eq(original.timer, defaults.timer)
+    custom :: jetos_lifecycle_rendering(jetos_fl_test_system([OptionPlan]{OptionPlan{key: "packages.generations.keep", value: "invalid"}, OptionPlan{key: "deploy.generations.keep", value: "2"}, OptionPlan{key: "packages.channel", value: "edge' ; % λ"}, OptionPlan{key: "deploy.autoUpgrade.enable", value: "true"}, OptionPlan{key: "deploy.autoUpgrade.schedule", value: "weekly"}}))
+    assert_eq(custom.policy, "{{\"kind\":\"jetos.lifecycle-policy\",\"keep_generations\":\"invalid\",\"channel\":\"edge' ; % λ\",\"auto_upgrade\":true,\"schedule\":\"weekly\",\"gc\":\"explain-before-delete\",\"rollback_window\":\"kept-generations\",\"proof\":\"lifecycle-policy-ready\"}}")
+    assert_eq(custom.channel, "{{\"kind\":\"jetos.channel-policy\",\"channel\":\"edge' ; % λ\",\"update_command\":\"sw/bin/jetos-channel-update\",\"proof\":\"channel-policy-ready\"}}")
+    assert_eq(custom.auto_upgrade, "{{\"kind\":\"jetos.auto-upgrade\",\"enabled\":true,\"schedule\":\"weekly\",\"steps\":[\"fetch-channel\",\"build\",\"proof\",\"switch\",\"health\",\"rollback-on-fail\"],\"proof\":\"auto-upgrade-proof-gated\"}}")
+    assert_eq(custom.timer, "[Unit]\nDescription=jetos auto-upgrade schedule\n\n[Timer]\nOnCalendar=weekly\nUnit=jetos-auto-upgrade.service\n\n[Install]\nWantedBy=timers.target\n")
+    assert_eq(custom.gc_script, defaults.gc_script)
+    false_values :: [String]{"false", "yes", "1", "garbage"}
+    loop value in false_values -> assert(!jetos_lifecycle_rendering(jetos_fl_test_system([OptionPlan]{OptionPlan{key: "deploy.autoUpgrade.enable", value: value}})).enabled)
+    assert(jetos_lifecycle_rendering(jetos_fl_test_system([OptionPlan]{OptionPlan{key: "deploy.autoUpgrade.enable", value: "\"true\""}})).enabled)
+    assert(jetos_lifecycle_rendering(jetos_fl_test_system([OptionPlan]{OptionPlan{key: "deploy.autoUpgrade.enable", value: ".TRUE"}})).enabled)
+    values :: [String]{"", "-1", " 2", "2 ", "2.0", "٢", "+", "18446744073709551616"}
+    loop value in values -> assert_eq(jetos_lifecycle_keep(value), 10)
+    assert_eq(jetos_lifecycle_keep("+02"), 2)
+    assert_eq(jetos_lifecycle_keep("000"), 0)
+    assert_eq(jetos_lifecycle_keep("18446744073709551615"), 18446744073709551615)
+}
+
+#Test("JetOS lifecycle exact complete GC channel and upgrade scripts") {
+    rendered :: jetos_lifecycle_rendering(jetos_fl_test_system([OptionPlan]{}))
+    assert_eq(rendered.gc_script, "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\nsystems=${{JETOS_SYSTEMS_DIR:-${{JETPACK_ROOT:-$HOME/.jetpack}}/systems}}\nlog=\"$systems/generations.log\"\nkeep=10\nhost='halcyon'\napply=false\nif [ \"${{1:-}}\" = \"--apply\" ]; then apply=true; fi\nmkdir -p \"$root/lifecycle\"\nout=\"$root/lifecycle/gc-plan.txt\"\n: > \"$out\"\nif [ ! -f \"$log\" ]; then\n  echo 'no generations log' | tee -a \"$out\"\n  exit 0\nfi\ncount=0\nsort -r \"$log\" | while IFS='\t' read -r created entry_host name path; do\n  [ \"$entry_host\" = \"$host\" ] || continue\n  count=$((count + 1))\n  if [ \"$count\" -le \"$keep\" ]; then\n    printf 'keep\\t%s\\t%s\\t%s\\treason=within-retention\\n' \"$created\" \"$name\" \"$path\" | tee -a \"$out\"\n  else\n    printf 'delete\\t%s\\t%s\\t%s\\treason=older-than-retention\\n' \"$created\" \"$name\" \"$path\" | tee -a \"$out\"\n    if [ \"$apply\" = true ]; then\n      rm -rf -- \"$path\"\n    fi\n  fi\ndone\n")
+    assert_eq(rendered.channel_script, "#!/usr/bin/env sh\nset -eu\nchannel='locked'\ndefault_cmd='jetpack channel update '\\''locked'\\'''\ncmd=${{JETOS_CHANNEL_UPDATE_CMD:-$default_cmd}}\nsh -c \"$cmd\"\n")
+    assert_eq(rendered.upgrade_script, "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\nproof_dir=${{JETOS_LIFECYCLE_PROOF_DIR:-$root/lifecycle}}\nmkdir -p \"$proof_dir\"\nfetch=${{JETOS_UPGRADE_FETCH_CMD:-/run/current-system/sw/bin/jetos-channel-update}}\ndefault_build='jet os build '\\''halcyon'\\'''\ndefault_proof='jet os proof '\\''halcyon'\\'''\ndefault_switch='jet os switch '\\''halcyon'\\'''\ndefault_rollback='jet os rollback '\\''halcyon'\\'''\nbuild=${{JETOS_UPGRADE_BUILD_CMD:-$default_build}}\nproof=${{JETOS_UPGRADE_PROOF_CMD:-$default_proof}}\nswitch_cmd=${{JETOS_UPGRADE_SWITCH_CMD:-$default_switch}}\nhealth=${{JETOS_UPGRADE_HEALTH_CMD:-true}}\nrollback=${{JETOS_UPGRADE_ROLLBACK_CMD:-$default_rollback}}\nrun_step() {{ name=$1; shift; printf '%s\\n' \"jetos lifecycle: $name\"; sh -c \"$*\"; }}\nrun_step fetch \"$fetch\"\nrun_step build \"$build\"\nrun_step proof \"$proof\"\nrun_step switch \"$switch_cmd\"\nif run_step health \"$health\"; then\n  printf '{{\"kind\":\"jetos.auto-upgrade-proof\",\"state\":\"switched\",\"rollback\":\"available\",\"proof\":\"health-passed\"}}\\n' > \"$proof_dir/auto-upgrade-proof.json\"\nelse\n  sh -c \"$rollback\" || true\n  printf '{{\"kind\":\"jetos.auto-upgrade-proof\",\"state\":\"rolled-back\",\"rollback\":\"executed\",\"proof\":\"health-failed\"}}\\n' > \"$proof_dir/auto-upgrade-proof.json\"\n  exit 1\nfi\ncat \"$proof_dir/auto-upgrade-proof.json\"\n")
+}
+
+#Test("JetOS fleet exact complete original host renderer") {
+    script :: jetos_fl_test_fleet_script("echo health >> $JETOS_DEPLOY_LOG")
+    assert_eq(script, "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\ngeneration=$(cat \"$root/generation.txt\" 2>/dev/null || basename \"$root\")\nexport root generation\nproof_dir=${{JETOS_DEPLOY_PROOF_DIR:-$root/fleet/proofs}}\nmkdir -p \"$proof_dir\"\nproof_name='home-halcyon.json'\nproof_file=\"$proof_dir/$proof_name\"\nhost_label='halcyon'\npush_cmd='echo push >> $JETOS_DEPLOY_LOG'\nproof_cmd='echo proof >> $JETOS_DEPLOY_LOG'\nswitch_cmd='echo switch >> $JETOS_DEPLOY_LOG'\nhealth_cmd='echo health >> $JETOS_DEPLOY_LOG'\nrollback_cmd='echo rollback >> $JETOS_DEPLOY_LOG'\nrun_step() {{\n  name=$1\n  cmd=$2\n  printf '%s\\n' \"jetos deploy $host_label: $name\"\n  sh -c \"$cmd\"\n}}\nif [ \"${{JETOS_FLEET_DRY_RUN:-}}\" = \"1\" ]; then\n  printf '{{\"state\":\"dry-run\",\"fleet\":%s,\"host\":%s,\"system\":%s,\"target\":%s,\"graph_identity\":%s,\"generation\":\"%s\"}}\\n' '\"home\"' '\"halcyon\"' '\"halcyon\"' '\"halcyon@halcyon\"' 'null' \"$generation\" > \"$proof_file\"\n  cat \"$proof_file\"\n  exit 0\nfi\nrun_step push \"$push_cmd\"\nrun_step proof \"$proof_cmd\"\nif [ \"${{JETOS_FLEET_STAGE_ONLY:-}}\" = \"1\" ]; then\n  printf '{{\"state\":\"staged\",\"fleet\":%s,\"host\":%s,\"system\":%s,\"target\":%s,\"graph_identity\":%s,\"generation\":\"%s\"}}\\n' '\"home\"' '\"halcyon\"' '\"halcyon\"' '\"halcyon@halcyon\"' 'null' \"$generation\" > \"$proof_file\"\n  cat \"$proof_file\"\n  exit 0\nfi\nrun_step switch \"$switch_cmd\"\nif ! sh -c \"$health_cmd\"; then\n  sh -c \"$rollback_cmd\" || true\n  printf '{{\"state\":\"rolled-back\",\"fleet\":%s,\"host\":%s,\"system\":%s,\"target\":%s,\"graph_identity\":%s,\"generation\":\"%s\"}}\\n' '\"home\"' '\"halcyon\"' '\"halcyon\"' '\"halcyon@halcyon\"' 'null' \"$generation\" > \"$proof_file\"\n  cat \"$proof_file\"\n  exit 2\nfi\nprintf '{{\"state\":\"deployed\",\"fleet\":%s,\"host\":%s,\"system\":%s,\"target\":%s,\"graph_identity\":%s,\"generation\":\"%s\",\"proofs\":[\"push\",\"remote-proof-before-switch\",\"health-window\"]}}\\n' '\"home\"' '\"halcyon\"' '\"halcyon\"' '\"halcyon@halcyon\"' 'null' \"$generation\" > \"$proof_file\"\ncat \"$proof_file\"\n")
+}
+
+#Test("JetOS fleet JSON apostrophes percent newline Unicode canonical shell quoting") {
+    data :: "x'; echo injected; # \"\n%snλ$(echo injected)"
+    json_word :: "'\"x'\\''; echo injected; # \\\"\\n%snλ$(echo injected)\"'"
+    operands :: "{json_word} {json_word} {json_word} {json_word} {json_word}"
+    script :: jetos_render_fleet_host_script(data, data, data, data, "true; : 'explicit'", "true", "true", "true", "false", foundation_json_quote(data))
+    states :: [String]{"dry-run", "staged", "rolled-back"}
+    loop state in states -> assert(script.contains("printf '{{\"state\":\"{state}\",\"fleet\":%s,\"host\":%s,\"system\":%s,\"target\":%s,\"graph_identity\":%s,\"generation\":\"%s\"}}\\n' {operands} \"$generation\""))
+    assert(script.contains("printf '{{\"state\":\"deployed\",\"fleet\":%s,\"host\":%s,\"system\":%s,\"target\":%s,\"graph_identity\":%s,\"generation\":\"%s\",\"proofs\":[\"push\",\"remote-proof-before-switch\",\"health-window\"]}}\\n' {operands} \"$generation\""))
+    assert(script.contains("proof_name={jetos_shell_single_quote("{data}-{data}.json")}\n"))
+    assert(script.contains("host_label={jetos_shell_single_quote(data)}\n"))
+    assert(script.contains("push_cmd='true; : '\\''explicit'\\'''\n"))
+    host_script :: jetos_lifecycle_upgrade_script(data)
+    steps :: [String]{"build", "proof", "switch", "rollback"}
+    loop step in steps -> assert(host_script.contains("default_{step}={jetos_shell_single_quote("jet os {step} {jetos_shell_single_quote(data)}")}\n"))
+}
+
+
+#Test("JetOS fleet native rendered script original process stage rollback and dryrun") {
+    root :: files.tmpdir("jetos-fleet-render-original-") ?? panic("fleet scratch")
+    generation :: files.join(root, "generation")
+    files.create_dir_all(generation) ?? panic("generation")
+    files.write(files.join(generation, "generation.txt"), "known-good\n") ?? panic("generation name")
+    script :: files.join(root, "deploy.sh")
+    log :: files.join(root, "deploy.log")
+    proofs :: files.join(root, "proofs")
+    files.write(script, jetos_fl_test_fleet_script("echo health >> $JETOS_DEPLOY_LOG")) ?? panic("fleet script")
+    modes :: [String]{"deployed", "staged", "dry-run"}
+    loop mode in modes {
+        files.write(log, "") ?? panic("log reset")
+        run :: process.cmd([String]{"/bin/sh", script}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_DEPLOY_PROOF_DIR", proofs).env("JETOS_DEPLOY_LOG", log).env("JETOS_FLEET_STAGE_ONLY", if mode == "staged" -> "1" else -> "").env("JETOS_FLEET_DRY_RUN", if mode == "dry-run" -> "1" else -> "").stdout(.Capture).stderr(.Capture).run() ?? panic("fleet process")
+        assert(run.success, run.errors)
+        assert_eq(files.read(log) ?? panic("fleet steps"), if mode == "deployed" -> "push\nproof\nswitch\nhealth\n" else -> if mode == "staged" -> "push\nproof\n" else -> "")
+        suffix :: if mode == "deployed" -> ",\"proofs\":[\"push\",\"remote-proof-before-switch\",\"health-window\"]" else -> ""
+        assert_eq(jetos_fl_test_read(proofs, "home-halcyon.json"), "{{\"state\":\"{mode}\",\"fleet\":\"home\",\"host\":\"halcyon\",\"system\":\"halcyon\",\"target\":\"halcyon@halcyon\",\"graph_identity\":null,\"generation\":\"known-good\"{suffix}}}\n")
+    }
+    files.write(script, jetos_fl_test_fleet_script("echo health >> $JETOS_DEPLOY_LOG; false")) ?? panic("rollback script")
+    files.write(log, "") ?? panic("log reset")
+    rollback :: process.cmd([String]{"/bin/sh", script}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_DEPLOY_PROOF_DIR", proofs).env("JETOS_DEPLOY_LOG", log).stdout(.Capture).stderr(.Capture).run() ?? panic("fleet rollback")
+    assert_eq(rollback.code, 2)
+    assert_eq(files.read(log) ?? panic("rollback log"), "push\nproof\nswitch\nhealth\nrollback\n")
+    assert_eq(jetos_fl_test_read(proofs, "home-halcyon.json"), "{{\"state\":\"rolled-back\",\"fleet\":\"home\",\"host\":\"halcyon\",\"system\":\"halcyon\",\"target\":\"halcyon@halcyon\",\"graph_identity\":null,\"generation\":\"known-good\"}}\n")
+    // Root fallback, generation fallback, and best-effort failed rollback.
+    files.write(script, jetos_render_fleet_host_script("home", "halcyon", "halcyon", "halcyon@halcyon", "true", "true", "true", "false", "false", "null")) ?? panic("failed rollback")
+    files.remove(files.join(generation, "generation.txt")) ?? panic("generation fallback")
+    fallback :: process.cmd([String]{"/bin/sh", script}).env("JETOS_SYSTEM_ROOT", generation).stdout(.Capture).stderr(.Capture).run() ?? panic("fallback")
+    assert_eq(fallback.code, 2)
+    assert_eq(jetos_fl_test_read(generation, "fleet/proofs/home-halcyon.json"), "{{\"state\":\"rolled-back\",\"fleet\":\"home\",\"host\":\"halcyon\",\"system\":\"halcyon\",\"target\":\"halcyon@halcyon\",\"graph_identity\":null,\"generation\":\"generation\"}}\n")
+    files.remove_all(root) ?? panic("fleet cleanup")
+}
+
+#Test("JetOS fleet native hostile JSON never executes even DRY_RUN") {
+    root :: files.tmpdir("jetos-fleet-json-security-") ?? panic("JSON scratch")
+    marker :: files.join(root, "marker")
+    // Marker is supplied through environment so hostile names remain one component.
+    data :: "x'; touch $MARKER; #\"\n%sλ$(touch $MARKER)"
+    script :: files.join(root, "deploy.sh")
+    generation :: files.join(root, "generation")
+    files.create_dir_all(generation) ?? panic("generation")
+    files.write(files.join(generation, "generation.txt"), "known-good\n") ?? panic("generation name")
+    proofs :: files.join(root, "proofs")
+    // Positive control, hostile, restored: same real process, no shell evaluator.
+    values :: [String]{"benign", data, "benign"}
+    loop value in values {
+        files.write(script, jetos_render_fleet_host_script(value, value, value, value, "true", "true", "true", "true", "true", foundation_json_quote(value))) ?? panic("hostile JSON script")
+        dry_modes :: [String]{"1", ""}
+        loop dry in dry_modes {
+            run :: process.cmd([String]{"/bin/sh", script}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_DEPLOY_PROOF_DIR", proofs).env("JETOS_FLEET_DRY_RUN", dry).env("MARKER", marker).stdout(.Capture).stderr(.Capture).run() ?? panic("hostile JSON process")
+            assert(run.success, run.errors)
+            state :: if dry == "1" -> "dry-run" else -> "deployed"
+            suffix :: if dry == "1" -> "" else -> ",\"proofs\":[\"push\",\"remote-proof-before-switch\",\"health-window\"]"
+            expected :: "{{\"state\":\"{state}\",\"fleet\":{foundation_json_quote(value)},\"host\":{foundation_json_quote(value)},\"system\":{foundation_json_quote(value)},\"target\":{foundation_json_quote(value)},\"graph_identity\":{foundation_json_quote(value)},\"generation\":\"known-good\"{suffix}}}\n"
+            assert_eq(jetos_fl_test_read(proofs, "{value}-{value}.json"), expected)
+            assert(!files.exists(marker))
+        }
+    }
+    files.remove_all(root) ?? panic("JSON cleanup")
+}
+
+#Test("JetOS lifecycle native original writer units GC upgrade rollback") {
+    root :: files.tmpdir("jetos-lifecycle-original-") ?? panic("lifecycle scratch")
+    generation :: files.join(root, "generation")
+    system :: jetos_fl_test_halcyon()
+    jetos_write_lifecycle_facts(generation, system) ?? panic("original lifecycle writer")
+    rendered :: jetos_lifecycle_rendering(system)
+    assert_eq(jetos_fl_test_read(generation, "lifecycle/policy.json"), rendered.policy)
+    assert_eq(jetos_fl_test_read(generation, "lifecycle/channel.json"), rendered.channel)
+    assert_eq(jetos_fl_test_read(generation, "lifecycle/auto-upgrade.json"), rendered.auto_upgrade)
+    assert(rendered.policy.contains("gc") && rendered.policy.contains("rollback_window") && rendered.policy.contains("\"auto_upgrade\":true"))
+    assert(rendered.auto_upgrade.contains("auto-upgrade-proof-gated") && rendered.auto_upgrade.contains("rollback-on-fail"))
+    assert(rendered.channel.contains("\"channel\":\"stable\"") && rendered.channel.contains("channel-policy-ready"))
+    paths :: [String]{"sw/bin/jetos-lifecycle-gc", "sw/bin/jetos-channel-update", "sw/bin/jetos-auto-upgrade", "etc/systemd/system/jetos-auto-upgrade.timer"}
+    loop path in paths -> assert(files.is_file(files.join(generation, path)))
+    assert_eq(jetos_fl_test_read(generation, "sw/bin/jetos-lifecycle-gc"), rendered.gc_script)
+    assert_eq(jetos_fl_test_read(generation, "sw/bin/jetos-channel-update"), rendered.channel_script)
+    assert_eq(jetos_fl_test_read(generation, "sw/bin/jetos-auto-upgrade"), rendered.upgrade_script)
+    assert_eq(jetos_fl_test_read(generation, "etc/systemd/system/jetos-auto-upgrade.service"), rendered.service)
+    assert_eq(jetos_fl_test_read(generation, "etc/systemd/system/jetos-auto-upgrade.timer"), rendered.timer)
+    assert_eq(jetos_fl_test_read(generation, "etc/systemd/system/timers.target.wants/jetos-auto-upgrade.timer"), rendered.timer)
+    // Original old/mid/new destructive journey is confined to this private fixture.
+    systems :: files.join(root, "gc-systems")
+    old :: files.join(systems, "generations/old")
+    mid :: files.join(systems, "generations/mid")
+    new :: files.join(systems, "generations/new")
+    other :: files.join(systems, "generations/other")
+    generation_paths :: [String]{old, mid, new, other}
+    loop path in generation_paths -> files.create_dir_all(path) ?? panic("GC fixture")
+    files.write(files.join(systems, "generations.log"), "1\thalcyon\told\t{old}\n2\thalcyon\tmid\t{mid}\n3\thalcyon\tnew\t{new}\n4\tother\tother\t{other}\n") ?? panic("generations log")
+    expected :: "keep\t3\tnew\t{new}\treason=within-retention\nkeep\t2\tmid\t{mid}\treason=within-retention\ndelete\t1\told\t{old}\treason=older-than-retention\n"
+    explain :: process.cmd([String]{files.join(generation, "sw/bin/jetos-lifecycle-gc")}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_SYSTEMS_DIR", systems).stdout(.Capture).stderr(.Capture).run() ?? panic("GC explain")
+    assert(explain.success, explain.errors)
+    assert(files.exists(old) && files.exists(mid) && files.exists(new) && files.exists(other))
+    assert_eq(jetos_fl_test_read(generation, "lifecycle/gc-plan.txt"), expected)
+    gc :: process.cmd([String]{files.join(generation, "sw/bin/jetos-lifecycle-gc"), "--apply"}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_SYSTEMS_DIR", systems).stdout(.Capture).stderr(.Capture).run() ?? panic("original GC apply")
+    assert(gc.success, gc.errors)
+    assert(!files.exists(old))
+    assert(files.exists(mid) && files.exists(new) && files.exists(other))
+    assert_eq(jetos_fl_test_read(generation, "lifecycle/gc-plan.txt"), expected)
+    files.remove(files.join(systems, "generations.log")) ?? panic("no log fixture")
+    no_log :: process.cmd([String]{files.join(generation, "sw/bin/jetos-lifecycle-gc")}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_SYSTEMS_DIR", systems).stdout(.Capture).stderr(.Capture).run() ?? panic("no log")
+    assert(no_log.success, no_log.errors)
+    assert_eq(jetos_fl_test_read(generation, "lifecycle/gc-plan.txt"), "no generations log\n")
+    log :: files.join(root, "lifecycle.log")
+    log_q :: jetos_shell_single_quote(log)
+    proofs :: files.join(root, "lifecycle-proofs")
+    upgrade :: process.cmd([String]{files.join(generation, "sw/bin/jetos-auto-upgrade")}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_LIFECYCLE_PROOF_DIR", proofs).env("JETOS_UPGRADE_FETCH_CMD", "echo fetch >> {log_q}").env("JETOS_UPGRADE_BUILD_CMD", "echo build >> {log_q}").env("JETOS_UPGRADE_PROOF_CMD", "echo proof >> {log_q}").env("JETOS_UPGRADE_SWITCH_CMD", "echo switch >> {log_q}").env("JETOS_UPGRADE_HEALTH_CMD", "echo health >> {log_q}").stdout(.Capture).stderr(.Capture).run() ?? panic("original upgrade")
+    assert(upgrade.success, upgrade.errors)
+    assert_eq(files.read(log) ?? panic("lifecycle steps"), "fetch\nbuild\nproof\nswitch\nhealth\n")
+    assert_eq(jetos_fl_test_read(proofs, "auto-upgrade-proof.json"), "{{\"kind\":\"jetos.auto-upgrade-proof\",\"state\":\"switched\",\"rollback\":\"available\",\"proof\":\"health-passed\"}}\n")
+    rollback_log :: files.join(root, "lifecycle-rollback.log")
+    rollback_q :: jetos_shell_single_quote(rollback_log)
+    rollback_proofs :: files.join(root, "lifecycle-rollback-proofs")
+    rollback :: process.cmd([String]{files.join(generation, "sw/bin/jetos-auto-upgrade")}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_LIFECYCLE_PROOF_DIR", rollback_proofs).env("JETOS_UPGRADE_FETCH_CMD", "true").env("JETOS_UPGRADE_BUILD_CMD", "true").env("JETOS_UPGRADE_PROOF_CMD", "true").env("JETOS_UPGRADE_SWITCH_CMD", "true").env("JETOS_UPGRADE_HEALTH_CMD", "false").env("JETOS_UPGRADE_ROLLBACK_CMD", "echo rollback >> {rollback_q}; false").stdout(.Capture).stderr(.Capture).run() ?? panic("original rollback")
+    assert_eq(rollback.code, 1)
+    assert((files.read(rollback_log) ?? panic("rollback log")).contains("rollback"))
+    assert_eq(jetos_fl_test_read(rollback_proofs, "auto-upgrade-proof.json"), "{{\"kind\":\"jetos.auto-upgrade-proof\",\"state\":\"rolled-back\",\"rollback\":\"executed\",\"proof\":\"health-failed\"}}\n")
+    disabled :: files.join(root, "disabled")
+    jetos_write_lifecycle_facts(disabled, jetos_fl_test_system([OptionPlan]{})) ?? panic("disabled writer")
+    assert(!files.exists(files.join(disabled, "etc/systemd/system/jetos-auto-upgrade.timer")))
+    assert(!files.exists(files.join(disabled, "etc/systemd/system/jetos-auto-upgrade.service")))
+    assert(!files.exists(files.join(disabled, "etc/systemd/system/timers.target.wants/jetos-auto-upgrade.timer")))
+    files.remove_all(root) ?? panic("lifecycle cleanup")
+}
+
+#Test("JetOS lifecycle native implicit host argv and channel quoting overrides verbatim") {
+    root :: files.tmpdir("jetos-lifecycle-argv-security-") ?? panic("argv scratch")
+    marker :: files.join(root, "marker")
+    bin :: files.join(root, "bin")
+    files.create_dir_all(bin) ?? panic("argv fixture bin")
+    recorder :: "#!/bin/sh\nprintf '%s\\n' \"$#\" \"$1\" \"$2\" \"$3\" >> \"$ARGV_LOG\"\n"
+    names :: [String]{"jet", "jetpack"}
+    loop name in names {
+        path :: files.join(bin, name)
+        files.write(path, recorder) ?? panic("argv recorder")
+        jetos_make_executable(path) ?? panic("real executable helper")
+    }
+    log :: files.join(root, "argv.log")
+    hostile :: "name'; touch {jetos_shell_single_quote(marker)}; #\"%λ$(touch {jetos_shell_single_quote(marker)})"
+    hosts :: [String]{"halcyon", hostile, "halcyon"}
+    loop host in hosts {
+        generation :: files.join(root, "generation")
+        system :: SystemPlan{name: host, target: "linux.x64", packages: [Pkg]{}, services: [ServicePlan]{}, options: [OptionPlan]{OptionPlan{key: "packages.channel", value: host}}}
+        jetos_write_lifecycle_facts(generation, system) ?? panic("security writer")
+        files.write(log, "") ?? panic("argv reset")
+        upgrade :: process.cmd([String]{files.join(generation, "sw/bin/jetos-auto-upgrade")}).env("PATH", "{bin}:/usr/bin:/bin").env("ARGV_LOG", log).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_UPGRADE_FETCH_CMD", "true").env("JETOS_UPGRADE_HEALTH_CMD", "false").stdout(.Capture).stderr(.Capture).run() ?? panic("implicit host process")
+        assert_eq(upgrade.code, 1)
+        assert_eq(files.read(log) ?? panic("host argv log"), "3\nos\nbuild\n{host}\n3\nos\nproof\n{host}\n3\nos\nswitch\n{host}\n3\nos\nrollback\n{host}\n")
+        assert(!files.exists(marker))
+        files.write(log, "") ?? panic("argv reset")
+        channel :: process.cmd([String]{files.join(generation, "sw/bin/jetos-channel-update")}).env("PATH", "{bin}:/usr/bin:/bin").env("ARGV_LOG", log).stdout(.Capture).stderr(.Capture).run() ?? panic("implicit channel process")
+        assert(channel.success, channel.errors)
+        assert_eq(files.read(log) ?? panic("channel argv log"), "3\nchannel\nupdate\n{host}\n")
+        assert(!files.exists(marker))
+        // Explicit user source is intentionally interpreted, not sanitized.
+        explicit :: process.cmd([String]{files.join(generation, "sw/bin/jetos-channel-update")}).env("JETOS_CHANNEL_UPDATE_CMD", "printf '%s' 'explicit; λ' > {jetos_shell_single_quote(log)}").stdout(.Capture).stderr(.Capture).run() ?? panic("explicit command")
+        assert(explicit.success, explicit.errors)
+        assert_eq(files.read(log) ?? panic("explicit log"), "explicit; λ")
+        assert(!files.exists(marker))
+    }
+    files.remove_all(root) ?? panic("argv cleanup")
+}

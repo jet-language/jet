@@ -1,0 +1,144 @@
+// Native linker policy (Source/NativeLinker.rs). Explicit choices are read on
+// every invocation; host discovery is cached once by the host-owned state.
+use core.process as linker_process
+use core.sys as linker_sys
+
+// Rust `Selection` (NativeLinker.rs:13-20).
+pub struct JetCLINativeLinkerSelection {
+    pub driver: String?
+    pub identity_driver: String?
+    pub backend: String?
+    pub backend_program: String?
+    pub explicit: Bool
+}
+
+// Rust `Selection::system` (NativeLinker.rs:23-25).
+pub fn jet_cli_native_linker_system() -> JetCLINativeLinkerSelection Never! {
+    jet_cli_native_linker_system_with_identity(None)
+}
+
+// Rust `Selection::system_with_identity` (NativeLinker.rs:27-35).
+pub fn jet_cli_native_linker_system_with_identity(driver: String?) -> JetCLINativeLinkerSelection Never! {
+    JetCLINativeLinkerSelection{driver: None, identity_driver: driver, backend: None, backend_program: None, explicit: false}
+}
+
+// Rust `Selection::explicit` (NativeLinker.rs:37-45).
+pub fn jet_cli_native_linker_explicit(driver: String) -> JetCLINativeLinkerSelection Never! {
+    JetCLINativeLinkerSelection{driver: Val(~driver), identity_driver: Val(driver), backend: None, backend_program: None, explicit: true}
+}
+
+// Rust `Selection::auto` (NativeLinker.rs:47-55).
+pub fn jet_cli_native_linker_auto(driver: String, backend: String, backend_program: String) -> JetCLINativeLinkerSelection Never! {
+    JetCLINativeLinkerSelection{driver: Val(~driver), identity_driver: Val(driver), backend: Val(backend), backend_program: Val(backend_program), explicit: false}
+}
+
+// Rust `Selection::rustc_args` (NativeLinker.rs:65-74).
+pub fn jet_cli_native_linker_rustc_args(selection: JetCLINativeLinkerSelection) -> [String] Never! {
+    driver :: selection.driver ?? return [String]{}
+    args := [String]{"-C", "linker={driver}"}
+    if selection.backend == .Val(backend) {
+        &args.push("-C")
+        &args.push("link-arg=-fuse-ld={backend}")
+    }
+    args
+}
+
+// Rust `Selection::identity` (NativeLinker.rs:76-82).
+pub fn jet_cli_native_linker_identity(selection: JetCLINativeLinkerSelection) -> (driver: String?, backend: String?, backend_program: String?) Never! {
+    (driver: selection.identity_driver, backend: selection.backend, backend_program: selection.backend_program)
+}
+
+// Rust `Selection::label` (NativeLinker.rs:85-93).
+pub fn jet_cli_native_linker_label(selection: JetCLINativeLinkerSelection) -> String Never! {
+    driver :: selection.identity_driver ?? return "system"
+    if selection.backend == .Val(backend) -> return "{backend} via {driver}"
+    if selection.explicit -> return "explicit:{driver}"
+    "system via {driver}"
+}
+
+// Rust `explicit_linker_from` (NativeLinker.rs:112-117).
+// Whitespace is only used to reject a blank value: keep a nonblank value's
+// original spelling (including leading/trailing whitespace).
+pub fn jet_cli_native_linker_explicit_from(get: fn(String) -> String? Never!) -> String? Never! {
+    names :: [String]{"RUSTC_LINKER", "CC"}
+    loop name in names {
+        if get(name) == .Val(value) {
+            if !value.trim().is_empty() -> return Val(value)
+        }
+    }
+    None
+}
+
+// Rust `explicit_linker` (NativeLinker.rs:108-110).
+pub fn jet_cli_native_linker_explicit_environment() -[Env]> String? Never! {
+    rustc :: linker_sys.get("RUSTC_LINKER")
+    if rustc == .Val(value) {
+        if !value.trim().is_empty() -> return Val(value)
+    }
+    cc :: linker_sys.get("CC")
+    if cc == .Val(value) {
+        if !value.trim().is_empty() -> return Val(value)
+    }
+    None
+}
+
+// Rust `preferred_backend` (NativeLinker.rs:160-165).
+pub fn jet_cli_native_linker_preferred_backend(available: fn(String) -> Bool Never!) -> String? Never! {
+    if available("mold") -> return Val("mold")
+    if available("lld") -> return Val("lld")
+    None
+}
+
+// Rust `command_available` (NativeLinker.rs:167-174).
+// C-PROC: null stdout/stderr are required; capturing and discarding them would
+// allocate needlessly and impose Core run's output/UTF8 failure conditions.
+pub fn jet_cli_native_linker_command_available<H: JetCLIHostProcess>(program: String, host: &H) -[Exec, Time.Wait]> Bool Never! {
+    spec :: linker_process.cmd([String]{program, "--version"}).stdin(.Inherit)
+    &host.null_status(spec) ?? false
+}
+
+// Rust `system_linker` (NativeLinker.rs:121-130).
+pub fn jet_cli_native_linker_system_identity<H: JetCLIHostProcess>(host: &H) -[Exec, Time.Wait]> String? Never! {
+    output :: &host.capture(linker_process.cmd([String]{"rustc", "--print", "linker"})) ?? return None
+    // Same success/UTF8/trim filter as the engine protocol query; stderr is
+    // intentionally not decoded or used to decide success.
+    jet_cli_engine_protocol_reply(output)
+}
+
+// Rust `detect_host` (NativeLinker.rs:132-158).
+pub fn jet_cli_native_linker_detect_host<H: JetCLIHostProcess>(host: &H) -[Exec, Time.Wait]> JetCLINativeLinkerSelection Never! {
+    backend := ""
+    if jet_cli_native_linker_command_available("mold", &host) -> backend = "mold"
+    else {
+        if jet_cli_native_linker_command_available("lld", &host) || jet_cli_native_linker_command_available("ld.lld", &host) -> backend = "lld"
+    }
+    if backend.is_empty() -> return jet_cli_native_linker_system_with_identity(jet_cli_native_linker_system_identity(&host))
+    backend_program := ~backend
+    if backend == "lld" && !jet_cli_native_linker_command_available("lld", &host) -> backend_program = "ld.lld"
+    drivers :: if backend == "mold" -> [String]{"clang", "cc"} else -> [String]{"cc", "clang"}
+    loop driver in drivers {
+        if jet_cli_native_linker_command_available(driver, &host) -> return jet_cli_native_linker_auto(driver, backend, backend_program)
+    }
+    jet_cli_native_linker_system()
+}
+
+// Rust `for_target`'s HOST_SELECTION OnceLock (NativeLinker.rs:104-105).
+// The process host owns ONE instance and its write window serializes discovery.
+pub struct JetCLINativeLinkerCache {
+    pub host_selection: JetCLINativeLinkerSelection?
+}
+
+pub fn jet_cli_native_linker_cache_new() -> JetCLINativeLinkerCache Never! {
+    JetCLINativeLinkerCache{host_selection: None}
+}
+
+// Rust `for_target` (NativeLinker.rs:97-106). Never cache the environment choice
+// or probe host tools for a cross target (including an empty target spelling).
+pub fn jet_cli_native_linker_for_target<H: JetCLIHostProcess>(cross_target: String?, cache: &JetCLINativeLinkerCache, host: &H) -[Env, Exec, Time.Wait]> JetCLINativeLinkerSelection Never! {
+    if jet_cli_native_linker_explicit_environment() == .Val(linker) -> return jet_cli_native_linker_explicit(linker)
+    if cross_target != None -> return jet_cli_native_linker_system()
+    if cache.host_selection == .Val(selection) -> return ~selection
+    selection :: jet_cli_native_linker_detect_host(&host)
+    cache.host_selection = Val(~selection)
+    selection
+}

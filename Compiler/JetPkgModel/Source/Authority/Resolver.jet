@@ -1,0 +1,522 @@
+use core.crypto as crypto
+use core.files.runtime.kernel_path_components as path_components
+use core.files.runtime.kernel_path_components.[OSPath, PathSpan, ComponentKind, PathComponent]
+use core.files.runtime.descriptor_metadata.[DescriptorStat]
+use core.files.host.retained_descriptor as authority_io
+use core.files.host.retained_descriptor.[Directory, FileReader]
+use jet_foundation.[PACKAGE_FILE, PAYLOAD_FILE, WORKSPACE_FILE, UNIFIED_LOCK_FILE, FILE_EXT]
+
+// Authority.rs: checked root, descendant opens, bounded reads, discovery and
+// revalidation. Native producers are staged-unavailable (#4494/#4392/#4483).
+// Every lookup retains its root and all descended directory owners; display
+// strings below are diagnostic labels only, never filesystem inputs.
+struct AuthorityFileOpen {
+    handle: FileReader
+    parents: [Directory]
+}
+struct AuthorityDirectoryOpen {
+    handle: Directory
+    parents: [Directory]
+}
+
+pub struct AuthorityResolver {
+    pub root: OSPath
+    root_identity: FileIdentity
+    root_handle: Directory
+    parents: [Directory]
+    allow_hardlinks: Bool
+
+    pub fn open_for_authority_walk(root: OSPath) -[FS, Env]> AuthorityResolver? AuthorityError! {
+        effective :: pkg_authority_effective_root(root)
+        info :: pkg_authority_inspect_root(effective)
+        if pkg_authority_is_shared_directory(info) || !pkg_authority_has_candidate(effective) -> return Ok(None)
+        Ok(Val(AuthorityResolver.open(effective)))
+    }
+
+    pub fn authority_walk_root(root: OSPath) -[FS, Env]> OSPath AuthorityError! {
+        effective :: pkg_authority_effective_root(root)
+        pkg_authority_inspect_root(effective)
+        pkg_authority_canonicalize_root(effective)
+    }
+
+    pub fn authority_walk_parent(path: OSPath) -[FS, Env]> OSPath? Never! {
+        if pkg_authority_is_shared_directory_path(path) -> return None
+        extent :: path_components.parent_span(path) ?? return None
+        parent :: path_components.owned_span(path, extent)
+        if path_components.equals(parent, path) || pkg_authority_is_shared_directory_path(parent) -> return None
+        Val(parent)
+    }
+
+    pub fn open(root: OSPath) -[FS, Env]> AuthorityResolver AuthorityError! {
+        AuthorityResolver.open_with_hardlink_policy(root, false)
+    }
+
+    pub fn open_store(root: OSPath) -[FS, Env]> AuthorityResolver AuthorityError! {
+        AuthorityResolver.open_with_hardlink_policy(root, true)
+    }
+
+    fn open_with_hardlink_policy(root: OSPath, allow_hardlinks: Bool) -[FS, Env]> AuthorityResolver AuthorityError! {
+        effective :: pkg_authority_effective_root(root)
+        info :: pkg_authority_inspect_root(effective)
+        expected :: FileIdentity.from_stat(info, AuthorityKind.Directory)
+        canonical :: pkg_authority_canonicalize_root(effective)
+        final_info :: authority_io.symlink_metadata(effective) ?? return Err(AuthorityError.IO{path: path_components.display(effective), operation: "revalidate", detail: "{err}"})
+        if final_info.is_symlink -> return Err(AuthorityError.Symlink(path_components.display(effective)))
+        if !final_info.is_dir || FileIdentity.from_stat(final_info, AuthorityKind.Directory) != expected {
+            return Err(AuthorityError.Changed(path_components.display(effective)))
+        }
+        handle :: authority_io.open_directory(canonical, pkg_authority_open_options()) ?? return Err(pkg_authority_map_io(canonical, err, true))
+        held :: handle.stat() ?? return Err(AuthorityError.IO{path: path_components.display(canonical), operation: "inspect", detail: "{err}"})
+        if !held.is_dir {
+            return Err(AuthorityError.WrongKind{path: path_components.display(canonical), expected: AUTHORITY_KIND_DIRECTORY, actual: AUTHORITY_KIND_FILE})
+        }
+        root_identity :: FileIdentity.from_stat(held, AuthorityKind.Directory)
+        if root_identity != expected -> return Err(AuthorityError.Changed(path_components.display(effective)))
+        Ok(AuthorityResolver{root: canonical, root_identity: root_identity, root_handle: handle, parents: [Directory]{}, allow_hardlinks: allow_hardlinks})
+    }
+
+    pub fn from_checked_directory(directory: CheckedDirectory) -[FS, Env]> AuthorityResolver AuthorityError! {
+        handle :: directory.handle.dup() ?? return Err(pkg_authority_map_io(directory.path, err, true))
+        parents := [Directory]{}
+        loop parent in directory.parents {
+            held :: parent.dup() ?? return Err(pkg_authority_map_io(directory.path, err, true))
+            &parents.push(^held)
+        }
+        Ok(AuthorityResolver{root: directory.path, root_identity: directory.identity, root_handle: handle, parents: parents, allow_hardlinks: directory.allow_hardlinks})
+    }
+
+    // Each component borrows the original normalized native path. Intermediate
+    // descriptors remain in the returned owner, not an ephemeral traversal.
+    fn open_file_relative(self, relative: OSPath) -[FS, Env]> AuthorityFileOpen AuthorityError! {
+        cursor := path_components.components(relative)
+        current := path_components.next(relative, &cursor) ?? return Err(AuthorityError.WrongKind{path: path_components.display(self.root), expected: AUTHORITY_KIND_FILE, actual: AUTHORITY_KIND_DIRECTORY})
+        parents := [Directory]{}
+        loop {
+            following :: path_components.next(relative, &cursor)
+            if following == None {
+                handle :: if parents.len() == 0 -> self.root_handle.open_reader(relative, current, pkg_authority_open_options()) ?? return Err(pkg_authority_map_io(pkg_authority_join(self.root, relative), err, false)) else -> parents[parents.len() - 1].open_reader(relative, current, pkg_authority_open_options()) ?? return Err(pkg_authority_map_io(pkg_authority_join(self.root, relative), err, false))
+                return Ok(AuthorityFileOpen{handle: handle, parents: parents})
+            }
+            next_directory :: if parents.len() == 0 -> self.root_handle.open_directory(relative, current, pkg_authority_open_options()) ?? return Err(pkg_authority_map_io(pkg_authority_join(self.root, relative), err, true)) else -> parents[parents.len() - 1].open_directory(relative, current, pkg_authority_open_options()) ?? return Err(pkg_authority_map_io(pkg_authority_join(self.root, relative), err, true))
+            &parents.push(^next_directory)
+            current = following ?? return Err(AuthorityError.Escapes(path_components.display(relative)))
+        }
+    }
+
+    fn open_directory_relative(self, relative: OSPath) -[FS, Env]> AuthorityDirectoryOpen AuthorityError! {
+        cursor := path_components.components(relative)
+        parents := [Directory]{}
+        first :: path_components.next(relative, &cursor)
+        if first == None {
+            handle :: self.root_handle.dup() ?? return Err(pkg_authority_map_io(self.root, err, true))
+            return Ok(AuthorityDirectoryOpen{handle: handle, parents: parents})
+        }
+        current := first ?? return Err(AuthorityError.Escapes(path_components.display(relative)))
+        loop {
+            handle :: if parents.len() == 0 -> self.root_handle.open_directory(relative, current, pkg_authority_open_options()) ?? return Err(pkg_authority_map_io(pkg_authority_join(self.root, relative), err, true)) else -> parents[parents.len() - 1].open_directory(relative, current, pkg_authority_open_options()) ?? return Err(pkg_authority_map_io(pkg_authority_join(self.root, relative), err, true))
+            following :: path_components.next(relative, &cursor)
+            if following == None -> return Ok(AuthorityDirectoryOpen{handle: handle, parents: parents})
+            &parents.push(^handle)
+            current = following ?? return Err(AuthorityError.Escapes(path_components.display(relative)))
+        }
+    }
+
+    pub fn checked_file(self, path: OSPath) -[FS, Env]> CheckedFile AuthorityError! {
+        relative :: self.relative_path(path)
+        full :: pkg_authority_join(self.root, relative)
+        if relative.encoded.len() == 0 {
+            return Err(AuthorityError.WrongKind{path: path_components.display(full), expected: AUTHORITY_KIND_FILE, actual: AUTHORITY_KIND_DIRECTORY})
+        }
+        opened :: self.open_file_relative(relative)
+        info :: opened.handle.stat() ?? return Err(AuthorityError.IO{path: path_components.display(full), operation: "inspect", detail: "{err}"})
+        if !info.is_file {
+            return Err(AuthorityError.WrongKind{path: path_components.display(full), expected: AUTHORITY_KIND_FILE, actual: pkg_authority_kind_name(info)})
+        }
+        self.check_file_links(full, info)
+        identity :: FileIdentity.from_stat(info, AuthorityKind.File)
+        if info.size > U64{PKG_MAX_TREE_FILE_BYTES} {
+            return Err(pkg_authority_limit_error(full, "authority file exceeds the {PKG_MAX_TREE_FILE_BYTES}-byte read bound"))
+        }
+        bytes :: opened.handle.read_bounded(U64{PKG_MAX_TREE_FILE_BYTES + 1}) ?? return Err(AuthorityError.IO{path: path_components.display(full), operation: "read", detail: "{err}"})
+        if bytes.len() > PKG_MAX_TREE_FILE_BYTES {
+            return Err(pkg_authority_limit_error(full, "authority file exceeds the {PKG_MAX_TREE_FILE_BYTES}-byte read bound"))
+        }
+        final_info :: opened.handle.stat() ?? return Err(AuthorityError.IO{path: path_components.display(full), operation: "revalidate", detail: "{err}"})
+        if !final_info.is_file || FileIdentity.from_stat(final_info, AuthorityKind.File) != identity {
+            return Err(AuthorityError.Changed(path_components.display(full)))
+        }
+        self.check_file_links(full, final_info)
+        checked :: CheckedFile{path: full, relative: relative, identity: identity, handle: ^opened.handle, parents: ^opened.parents, bytes: bytes}
+        self.revalidate_file(checked)
+        Ok(checked)
+    }
+
+    pub fn checked_directory(self, path: OSPath) -[FS, Env]> CheckedDirectory AuthorityError! {
+        relative :: self.relative_path(path)
+        full :: pkg_authority_join(self.root, relative)
+        opened :: self.open_directory_relative(relative)
+        info :: opened.handle.stat() ?? return Err(AuthorityError.IO{path: path_components.display(full), operation: "inspect", detail: "{err}"})
+        if !info.is_dir {
+            return Err(AuthorityError.WrongKind{path: path_components.display(full), expected: AUTHORITY_KIND_DIRECTORY, actual: pkg_authority_kind_name(info)})
+        }
+        checked :: CheckedDirectory{path: full, relative: relative, identity: FileIdentity.from_stat(info, AuthorityKind.Directory), handle: ^opened.handle, parents: ^opened.parents, allow_hardlinks: self.allow_hardlinks}
+        self.revalidate_directory(checked)
+        Ok(checked)
+    }
+
+    pub fn checked_manifest(self, directory: OSPath) -[FS, Env]> CheckedManifest AuthorityError! {
+        relative :: self.relative_path(directory)
+        canonical :: self.probe_file(pkg_authority_named_join(relative, PACKAGE_FILE))
+        retired :: self.probe_file(pkg_authority_named_join(relative, PAYLOAD_FILE))
+        if canonical != None && retired != None {
+            return Err(AuthorityError.AmbiguousManifest(path_components.display(pkg_authority_join(self.root, relative))))
+        }
+        file :: canonical ?? {
+            if retired == {
+                .Val(retired_file) -> return Err(AuthorityError.RetiredManifest(path_components.display(retired_file.path)))
+                .None -> return Err(AuthorityError.Missing(path_components.display(pkg_authority_named_join(pkg_authority_join(self.root, relative), PACKAGE_FILE))))
+            }
+        }
+        text :: file.text()
+        facts :: PackageFacts.parse_uncomposed(text, path_components.display(file.path)) ?? return Err(AuthorityError.ManifestParse{path: path_components.display(file.path), error: err})
+        self.revalidate_file(file)
+        self.revalidate_root()
+        Ok(CheckedManifest{file: file, facts: facts})
+    }
+
+    pub fn checked_member(self, path: OSPath) -[FS, Env]> CheckedMember AuthorityError! {
+        directory :: self.checked_directory(path)
+        manifest :: self.checked_manifest(directory.relative)
+        member :: CheckedMember{directory: directory, manifest: manifest}
+        self.revalidate_member(member)
+        Ok(member)
+    }
+
+    pub fn checked_package(self, path: OSPath) -[FS, Env]> CheckedPackage AuthorityError! {
+        member :: self.checked_member(path)
+        self.complete_checked_package(^member)
+    }
+
+    pub fn checked_root_package(self) -[FS, Env]> CheckedPackage AuthorityError! {
+        member :: self.checked_member(path_components.from_text(".", self.root.platform))
+        package_resolver :: AuthorityResolver.from_checked_directory(member.directory)
+        facts := member.manifest.facts
+        manifest_path :: path_components.display(member.manifest.file.path)
+        &facts.compose_configs_checked(package_resolver) ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
+        facts.validate_guarantees() ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
+        facts.validate_defaults() ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
+        self.revalidate_member(member)
+        Ok(CheckedPackage{member: member, facts: facts})
+    }
+
+    pub fn complete_checked_package(self, member: ^CheckedMember) -[FS, Env]> CheckedPackage AuthorityError! {
+        package_resolver :: AuthorityResolver.from_checked_directory(member.directory)
+        facts := member.manifest.facts
+        manifest_path :: path_components.display(member.manifest.file.path)
+        &facts.compose_configs_checked(package_resolver) ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
+        facts.validate_defaults() ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
+        facts.checked_members_in(package_resolver)
+        self.revalidate_member(member)
+        Ok(CheckedPackage{member: member, facts: facts})
+    }
+
+    pub fn discover_members(self, path: OSPath) -[FS, Env]> [CheckedMember] AuthorityError! {
+        scan :: self.checked_directory(path)
+        budget := AuthorityWalkBudget.new()
+        entries :: pkg_authority_read_sorted_entries(scan.handle, scan.path, &budget)
+        members := [CheckedMember]{}
+        loop entry in entries {
+            if entry.info.is_symlink -> return Err(AuthorityError.Symlink(path_components.display(entry.path)))
+            if !entry.info.is_dir -> next
+            relative :: pkg_authority_relative_join(scan.relative, entry.name)
+            if self.checked_member(relative) == {
+                .Ok(member) -> { self.revalidate_member(member); &members.push(member) }
+                .Err(error) -> { if !error.is_missing() -> return Err(error) }
+            }
+        }
+        self.revalidate_directory(scan)
+        Ok(members)
+    }
+
+    pub fn discover_files(self, path: OSPath, extension: String?) -[FS, Env]> [CheckedFile] AuthorityError! {
+        scan :: self.checked_directory(path)
+        budget := AuthorityWalkBudget.new()
+        entries :: pkg_authority_read_sorted_entries(scan.handle, scan.path, &budget)
+        found := [CheckedFile]{}
+        loop entry in entries {
+            relative :: pkg_authority_relative_join(scan.relative, entry.name)
+            if entry.info.is_symlink -> return Err(AuthorityError.Symlink(path_components.display(pkg_authority_join(self.root, relative))))
+            if extension == { .Val(wanted) -> { if pkg_authority_extension(entry.name) != Val(wanted) -> next }; .None -> {} }
+            if !entry.info.is_file {
+                return Err(AuthorityError.WrongKind{path: path_components.display(pkg_authority_join(self.root, relative)), expected: AUTHORITY_KIND_FILE, actual: pkg_authority_entry_kind_name(entry.info)})
+            }
+            file :: self.checked_file(relative)
+            self.revalidate_file(file)
+            &budget.record_file(file.path, file.bytes.len())
+            &found.push(file)
+        }
+        self.revalidate_directory(scan)
+        Ok(found)
+    }
+
+    pub fn discover_source_files(self) -[FS, Env]> [CheckedFile] AuthorityError! {
+        found := [CheckedFile]{}
+        budget := AuthorityWalkBudget.new()
+        self.discover_source_files_from(path_components.from_text(".", self.root.platform), &found, &budget, 0)
+        &found.sort_by(file -> file.relative.encoded)
+        self.revalidate_root()
+        Ok(found)
+    }
+
+    pub fn source_tree_hash(self, directory: CheckedDirectory) -[FS, Env]> String AuthorityError! {
+        self.revalidate_directory(directory)
+        found := [CheckedFile]{}
+        budget := AuthorityWalkBudget.new()
+        self.discover_source_files_from(directory.relative, &found, &budget, 0)
+        &found.sort_by(file -> file.relative.encoded)
+        hasher := crypto.Hasher.new()
+        loop file in found {
+            relative :: path_components.strip_prefix(file.relative, directory.relative) ?? return Err(AuthorityError.Escapes(path_components.display(file.path)))
+            &hasher.update(path_components.slash(relative).bytes())
+            &hasher.update([U8]{U8{0}})
+            &hasher.update(pkg_u64_be_bytes(file.bytes.len()))
+            &hasher.update(file.bytes)
+            self.revalidate_file(file)
+        }
+        self.revalidate_directory(directory)
+        Ok("sha256-{hasher.digest()}")
+    }
+
+    pub fn resolve_workspace_source(self, cache: &WorkspaceDeclarationCache) -[FS, Env]> WorkspaceSource? AuthorityError! {
+        self.revalidate_root()
+        if self.checked_manifest(path_components.from_text(".", self.root.platform)) == {
+            .Ok(manifest) -> {
+                if manifest.facts.members.len() > 0 {
+                    source :: WorkspaceSource{path: manifest.file.path, source: manifest.file.text(), role: WorkspaceSourceRole.Index, checked: manifest.file}
+                    self.revalidate_source(source)
+                    return Ok(Val(source))
+                }
+            }
+            .Err(error) -> { if !error.is_missing() && !pkg_authority_is_retired_manifest(error) -> return Err(error) }
+        }
+        budget := AuthorityWalkBudget.new()
+        entries :: pkg_authority_read_sorted_entries(self.root_handle, self.root, &budget)
+        indexes := [WorkspaceSource]{}
+        authorities := [WorkspaceSource]{}
+        malformed_canonical := false
+        loop entry in entries {
+            if pkg_authority_extension(entry.name) != Val(FILE_EXT) -> next
+            file :: self.checked_file(entry.name)
+            &budget.record_file(file.path, file.bytes.len())
+            source :: file.text()
+            canonical_name :: path_components.equals(entry.name, path_components.from_text(WORKSPACE_FILE, entry.name.platform))
+            if pkg_declares_workspace_module(&cache, source) {
+                role :: if canonical_name || pkg_declares_workspace_members(&cache, source) -> WorkspaceSourceRole.Index else -> WorkspaceSourceRole.Authority
+                candidate :: WorkspaceSource{path: file.path, source: source, role: role, checked: file}
+                self.revalidate_source(candidate)
+                if role == WorkspaceSourceRole.Index -> &indexes.push(candidate) else -> &authorities.push(candidate)
+            } else if canonical_name -> malformed_canonical = true
+        }
+        self.revalidate_root()
+        if malformed_canonical && indexes.len() == 0 -> return Err(AuthorityError.WorkspaceNoModule)
+        if indexes.len() > 1 {
+            paths := [String]{}
+            loop source in indexes -> &paths.push(path_components.display(source.path))
+            loop source in authorities -> &paths.push(path_components.display(source.path))
+            return Err(AuthorityError.WorkspaceAmbiguous(paths))
+        }
+        if indexes.len() > 0 {
+            index :: indexes[indexes.len() - 1]
+            if authorities.len() == 0 -> return Ok(Val(index))
+            paths := [String]{path_components.display(index.path)}
+            loop source in authorities -> &paths.push(path_components.display(source.path))
+            return Err(AuthorityError.WorkspaceAmbiguous(paths))
+        }
+        if authorities.len() == {
+            0 -> Ok(None)
+            1 -> Ok(Val(authorities[0]))
+            else -> {
+                paths := [String]{}
+                loop source in authorities -> &paths.push(path_components.display(source.path))
+                Err(AuthorityError.WorkspaceAmbiguous(paths))
+            }
+        }
+    }
+
+    pub fn revalidate_file(self, file: CheckedFile) AuthorityError! -[FS, Env]> {
+        self.validate_checked_path(file.path, file.relative)
+        self.revalidate_root()
+        self.revalidate_file_handle(file.path, file.identity, file.handle)
+    }
+    pub fn revalidate_directory(self, directory: CheckedDirectory) AuthorityError! -[FS, Env]> {
+        self.validate_checked_path(directory.path, directory.relative)
+        self.revalidate_root()
+        self.revalidate_directory_handle(directory.path, directory.identity, directory.handle)
+    }
+    pub fn revalidate_member(self, member: CheckedMember) AuthorityError! -[FS, Env]> {
+        self.revalidate_directory(member.directory)
+        self.revalidate_file(member.manifest.file)
+        self.revalidate_root()
+    }
+    pub fn revalidate_source(self, source: WorkspaceSource) AuthorityError! -[FS, Env]> {
+        if !path_components.equals(source.path, source.checked.path) || source.source.bytes() != source.checked.bytes {
+            return Err(AuthorityError.Changed(path_components.display(source.path)))
+        }
+        self.revalidate_file(source.checked)
+    }
+    pub fn relative_identity(self, directory: CheckedDirectory) -[FS, Env]> String AuthorityError! {
+        self.revalidate_directory(directory)
+        canonical :: pkg_authority_join(self.root, directory.relative)
+        if !path_components.starts_with(canonical, self.root) -> return Err(AuthorityError.Escapes(path_components.display(directory.path)))
+        Ok(path_components.slash(directory.relative))
+    }
+    pub fn revalidate_root(self) AuthorityError! -[FS, Env]> {
+        self.revalidate_directory_handle(self.root, self.root_identity, self.root_handle)
+    }
+
+    pub fn has_nested_project_boundary(self, relative: OSPath) -[FS, Env]> Bool AuthorityError! {
+        candidate_values :: [String]{PACKAGE_FILE, PAYLOAD_FILE, WORKSPACE_FILE, UNIFIED_LOCK_FILE}
+        loop candidate in candidate_values {
+            probed :: self.probe_file(pkg_authority_named_join(relative, candidate)) ? found -> found ! error -> {
+                if pkg_authority_is_symlink(error) -> return Ok(true)
+                return Err(error)
+            }
+            if probed != None -> return Ok(true)
+        }
+        Ok(false)
+    }
+
+    fn discover_source_files_from(self, path: OSPath, found: &[CheckedFile], budget: &AuthorityWalkBudget, depth: Int) AuthorityError! -[FS, Env]> {
+        if depth > PKG_MAX_TREE_DEPTH {
+            return Err(pkg_authority_limit_error(pkg_authority_join(self.root, path), "authority source walk exceeds the {PKG_MAX_TREE_DEPTH}-level depth bound"))
+        }
+        scan :: self.checked_directory(path)
+        entries :: pkg_authority_read_sorted_entries(scan.handle, scan.path, &budget)
+        loop entry in entries {
+            relative :: pkg_authority_relative_join(scan.relative, entry.name)
+            if entry.info.is_symlink {
+                if authority_io.is_directory(entry.path) -> next
+                return Err(AuthorityError.Symlink(path_components.display(pkg_authority_join(self.root, relative))))
+            }
+            if pkg_authority_source_walk_skips(entry.name) -> next
+            if entry.info.is_dir {
+                if self.has_nested_project_boundary(relative) -> next
+                if depth >= PKG_MAX_TREE_DEPTH {
+                    return Err(pkg_authority_limit_error(pkg_authority_join(self.root, relative), "authority source walk exceeds the {PKG_MAX_TREE_DEPTH}-level depth bound"))
+                }
+                self.discover_source_files_from(relative, &found, &budget, depth + 1)
+            } else if pkg_authority_extension(entry.name) == (Val(FILE_EXT)) {
+                if !entry.info.is_file {
+                    return Err(AuthorityError.WrongKind{path: path_components.display(pkg_authority_join(self.root, relative)), expected: AUTHORITY_KIND_FILE, actual: pkg_authority_entry_kind_name(entry.info)})
+                }
+                budget.ensure_file(pkg_authority_join(self.root, relative), entry.info.size)
+                file :: self.checked_file(relative)
+                self.revalidate_file(file)
+                &budget.record_file(file.path, file.bytes.len())
+                &found.push(file)
+            }
+        }
+        self.revalidate_directory(scan)
+    }
+
+    pub fn probe_file(self, path: OSPath) -[FS, Env]> CheckedFile? AuthorityError! {
+        if self.checked_file(path) == {
+            .Ok(file) -> Ok(Val(file))
+            .Err(error) -> { if error.is_missing() -> return Ok(None); Err(error) }
+        }
+    }
+
+    pub fn relative_path(self, path: OSPath) -> OSPath AuthorityError! {
+        relative :: if path_components.is_absolute(path) -> path_components.strip_prefix(path, self.root) ?? return Err(AuthorityError.Escapes(path_components.display(path))) else -> path
+        out := OSPath{encoded: [U8]{}, platform: relative.platform}
+        cursor := path_components.components(relative)
+        loop {
+            component :: path_components.next(relative, &cursor) ?? break
+            if component.kind == {
+                .CurDir -> next
+                .Normal -> path_components.push_component(&out, relative, component)
+                else -> return Err(AuthorityError.Escapes(path_components.display(path)))
+            }
+        }
+        Ok(out)
+    }
+
+    fn revalidate_file_handle(self, path: OSPath, expected: FileIdentity, handle: FileReader) AuthorityError! -[FS, Env]> {
+        info :: handle.stat() ?? return Err(AuthorityError.IO{path: path_components.display(path), operation: "revalidate", detail: "{err}"})
+        self.revalidate_identity(path, AuthorityKind.File, expected, info)
+        self.check_file_links(path, info)
+    }
+    fn revalidate_directory_handle(self, path: OSPath, expected: FileIdentity, handle: Directory) AuthorityError! -[FS, Env]> {
+        info :: handle.stat() ?? return Err(AuthorityError.IO{path: path_components.display(path), operation: "revalidate", detail: "{err}"})
+        self.revalidate_identity(path, AuthorityKind.Directory, expected, info)
+    }
+    fn revalidate_identity(self, path: OSPath, kind: AuthorityKind, expected: FileIdentity, info: DescriptorStat) AuthorityError! {
+        if !info.is_dir && !info.is_file {
+            return Err(AuthorityError.WrongKind{path: path_components.display(path), expected: kind.name(), actual: pkg_authority_kind_name(info)})
+        }
+        actual_kind :: if info.is_dir -> AuthorityKind.Directory else -> AuthorityKind.File
+        if actual_kind != kind || FileIdentity.from_stat(info, actual_kind) != expected {
+            return Err(AuthorityError.Changed(path_components.display(path)))
+        }
+    }
+    fn check_file_links(self, path: OSPath, info: DescriptorStat) AuthorityError! {
+        if self.allow_hardlinks -> return
+        pkg_authority_require_single_link(path, info)
+    }
+    fn validate_checked_path(self, path: OSPath, relative: OSPath) AuthorityError! {
+        if path_components.is_absolute(relative) || !path_components.equals(path, pkg_authority_join(self.root, relative)) || !path_components.starts_with(path, self.root) {
+            return Err(AuthorityError.Escapes(path_components.display(path)))
+        }
+    }
+}
+
+pub fn pkg_authority_effective_root(root: OSPath) -> OSPath Never! {
+    if root.encoded.len() == 0 -> return path_components.from_text(".", root.platform)
+    root
+}
+
+pub fn pkg_authority_inspect_root(root: OSPath) -[FS]> DescriptorStat AuthorityError! {
+    info :: authority_io.symlink_metadata(root) ? found -> found ! error -> {
+        if pkg_io_is_not_found(error) -> return Err(AuthorityError.Missing(path_components.display(root)))
+        return Err(AuthorityError.IO{path: path_components.display(root), operation: "inspect", detail: "{error}"})
+    }
+    if info.is_symlink -> return Err(AuthorityError.Symlink(path_components.display(root)))
+    if !info.is_dir {
+        return Err(AuthorityError.WrongKind{path: path_components.display(root), expected: AUTHORITY_KIND_DIRECTORY, actual: pkg_authority_kind_name(info)})
+    }
+    Ok(info)
+}
+
+pub fn pkg_authority_canonicalize_root(root: OSPath) -[FS, Env]> OSPath AuthorityError! {
+    canonical :: authority_io.canonicalize(root) ? resolved -> resolved ! error -> {
+        if pkg_io_is_not_found(error) -> return Err(AuthorityError.Missing(path_components.display(root)))
+        return Err(AuthorityError.IO{path: path_components.display(root), operation: "resolve", detail: "{error}"})
+    }
+    Ok(canonical)
+}
+
+pub fn pkg_authority_is_retired_manifest(error: AuthorityError) -> Bool Never! {
+    if error == { .RetiredManifest(_) -> true; else -> false }
+}
+pub fn pkg_authority_is_symlink(error: AuthorityError) -> Bool Never! {
+    if error == { .Symlink(_) -> true; else -> false }
+}
+
+pub fn pkg_authority_relative_join(relative: OSPath, name: OSPath) -> OSPath Never! {
+    out := ~relative
+    path_components.push(&out, name)
+    out
+}
+
+// Constant/source text is encoded once according to its actual native owner;
+// this is not inversion of a lossy display path.
+pub fn pkg_authority_named_join(relative: OSPath, name: String) -> OSPath Never! {
+    pkg_authority_relative_join(relative, path_components.from_text(name, relative.platform))
+}
+
+pub fn pkg_u64_be_bytes(value: Int) -> [U8] Never! {
+    out := [U8]{}
+    shift_values :: [Int]{56, 48, 40, 32, 24, 16, 8, 0}
+    loop shift in shift_values -> &out.push(U8{(value >> shift) & 0xFF})
+    out
+}

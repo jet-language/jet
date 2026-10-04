@@ -1,0 +1,330 @@
+// PORT-PENDING 2093 crates-jet-pkg-model-src-envelope-slice-1801: crates/jet-pkg-model/src/Envelope.rs:1801-2126
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS         drop(socket);
+//RS         fs::remove_dir_all(dir).ok();
+//RS         fs::remove_file(outside).ok();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn path_law_rejects_reserved_trailing_and_casefold() {
+//RS         assert!(validate_path_component(b"CON").is_err());
+//RS         assert!(validate_path_component(b"foo.").is_err());
+//RS         assert!(validate_path_component(b"foo ").is_err());
+//RS         assert!(validate_path_component(b"ok-name").is_ok());
+//RS         let err = reject_casefold_collisions(&[b"Foo".to_vec(), b"foo".to_vec()]).unwrap_err();
+//RS         assert_eq!(err.code, "case-fold");
+//RS         assert!(reject_casefold_collisions(&[b"Foo".to_vec(), b"Bar".to_vec()]).is_ok());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn path_law_never_implicitly_normalizes_unicode() {
+//RS         // NFC vs NFD for "é" — distinct bytes must remain distinct names.
+//RS         let nfc = "é".as_bytes().to_vec();
+//RS         let nfd = "e\u{0301}".as_bytes().to_vec();
+//RS         assert_ne!(nfc, nfd);
+//RS         assert!(validate_path_component(&nfc).is_ok());
+//RS         assert!(validate_path_component(&nfd).is_ok());
+//RS         // Not a case-fold collision (different bytes after ASCII fold too).
+//RS         assert!(reject_casefold_collisions(&[nfc, nfd]).is_ok());
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn sparse_and_dense_zero_holes_share_digest() {
+//RS         use std::process::Command;
+//RS         let dir = scratch("sparse-policy");
+//RS         let sparse = dir.join("sparse");
+//RS         let dense = dir.join("dense");
+//RS         // 1 byte data + hole + 1 byte data via truncate/seek write.
+//RS         fs::write(&sparse, []).unwrap();
+//RS         let status = Command::new("truncate")
+//RS             .args(["-s", "1048576", sparse.to_str().unwrap()])
+//RS             .status()
+//RS             .unwrap();
+//RS         assert!(status.success());
+//RS         {
+//RS             use std::io::Write as _;
+//RS             let mut f = fs::OpenOptions::new().write(true).open(&sparse).unwrap();
+//RS             f.write_all(b"A").unwrap();
+//RS             use std::io::Seek as _;
+//RS             f.seek(std::io::SeekFrom::Start(1048575)).unwrap();
+//RS             f.write_all(b"Z").unwrap();
+//RS         }
+//RS         // Dense file with same logical bytes (zeros in the middle).
+//RS         let mut bytes = vec![0u8; 1_048_576];
+//RS         bytes[0] = b'A';
+//RS         bytes[1_048_575] = b'Z';
+//RS         fs::write(&dense, &bytes).unwrap();
+//RS         let hs = try_output_hash_of(&sparse.to_string_lossy()).unwrap();
+//RS         let hd = try_output_hash_of(&dense.to_string_lossy()).unwrap();
+//RS         // File roots hash file bytes only — same logical content → same digest.
+//RS         assert_eq!(hs, hd);
+//RS         fs::remove_dir_all(dir).ok();
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn path_law_rejects_casefold_siblings_during_hash() {
+//RS         let dir = scratch("casefold-sibs");
+//RS         fs::write(dir.join("Foo"), "a").unwrap();
+//RS         fs::write(dir.join("foo"), "b").unwrap();
+//RS         // On a case-sensitive FS both exist; archive must reject.
+//RS         let err = try_output_hash_of(&dir.to_string_lossy()).unwrap_err();
+//RS         assert!(
+//RS             err.contains("case-fold") || err.contains("collides"),
+//RS             "{err}"
+//RS         );
+//RS         fs::remove_dir_all(dir).ok();
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn canonical_archive_accepts_casefold_siblings_only_in_nix_mode() {
+//RS         let hangar = scratch("nix-casefold-sibs");
+//RS         fs::write(hangar.join("Foo"), "a").unwrap();
+//RS         fs::write(hangar.join("foo"), "b").unwrap();
+//RS 
+//RS         assert!(try_output_hash_of(&hangar.to_string_lossy()).is_err());
+//RS         let first =
+//RS             try_output_hash_of_in_hangar(&hangar.to_string_lossy(), &hangar, false).unwrap();
+//RS         let second =
+//RS             try_output_hash_of_in_hangar(&hangar.to_string_lossy(), &hangar, false).unwrap();
+//RS         assert_eq!(first, second);
+//RS         fs::remove_dir_all(hangar).ok();
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn canonical_archive_accepts_backslash_components_only_in_nix_mode() {
+//RS         use std::ffi::OsString;
+//RS         use std::os::unix::ffi::OsStringExt as _;
+//RS 
+//RS         let hangar = scratch("nix-backslash-name");
+//RS         let name = b"dev-disk-by\\x2duuid-test.device";
+//RS         let path = hangar.join(OsString::from_vec(name.to_vec()));
+//RS         fs::write(path, b"device").unwrap();
+//RS 
+//RS         assert_eq!(validate_path_component(name).unwrap_err().code, "backslash");
+//RS         assert!(validate_path_component_with_mode(name, true).is_ok());
+//RS         let error = try_output_hash_of(&hangar.to_string_lossy()).unwrap_err();
+//RS         assert!(error.contains("backslash") || error.contains("path component"), "{error}");
+//RS         let first =
+//RS             try_output_hash_of_in_hangar(&hangar.to_string_lossy(), &hangar, false).unwrap();
+//RS         let second =
+//RS             try_output_hash_of_in_hangar(&hangar.to_string_lossy(), &hangar, false).unwrap();
+//RS         assert_eq!(first, second);
+//RS         fs::remove_dir_all(hangar).ok();
+//RS     }
+//RS 
+//RS     #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))]
+//RS     #[test]
+//RS     fn canonical_archive_hashes_file_root_deterministically_in_hangar_mode() {
+//RS         let hangar = scratch("nix-file-root");
+//RS         let file = hangar.join("file-root");
+//RS         fs::write(&file, b"file-root bytes").unwrap();
+//RS 
+//RS         let first = try_output_hash_of_in_hangar(&file.to_string_lossy(), &hangar, false).unwrap();
+//RS         let second =
+//RS             try_output_hash_of_in_hangar(&file.to_string_lossy(), &hangar, false).unwrap();
+//RS         assert_eq!(first, second);
+//RS         assert_eq!(
+//RS             first,
+//RS             format!(
+//RS                 "sha256-{}",
+//RS                 SHA256::sha256_hex(&reference_archive(&file, false))
+//RS             )
+//RS         );
+//RS         fs::remove_dir_all(hangar).ok();
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     #[test]
+//RS     fn semantic_xattr_name_and_value_are_canonical_digest_bytes() {
+//RS         use std::os::unix::ffi::OsStrExt as _;
+//RS         unsafe extern "C" {
+//RS             fn lsetxattr(
+//RS                 path: *const i8,
+//RS                 name: *const i8,
+//RS                 value: *const u8,
+//RS                 size: usize,
+//RS                 flags: i32,
+//RS             ) -> i32;
+//RS         }
+//RS         let dir = scratch("xattr-digest");
+//RS         let file = dir.join("payload");
+//RS         fs::write(&file, "bytes").unwrap();
+//RS         let path = std::ffi::CString::new(file.as_os_str().as_bytes()).unwrap();
+//RS         let name = std::ffi::CString::new("user.jet.identity").unwrap();
+//RS         let set = |value: &[u8]| unsafe {
+//RS             lsetxattr(path.as_ptr(), name.as_ptr(), value.as_ptr(), value.len(), 0)
+//RS         };
+//RS         assert_eq!(set(b"first"), 0);
+//RS         assert!(try_output_hash_of(&dir.to_string_lossy()).is_err());
+//RS         let first =
+//RS             try_output_hash_of_with_policy(&dir.to_string_lossy(), true, &mut |_, _| {}).unwrap();
+//RS         assert_eq!(set(b"second"), 0);
+//RS         let second =
+//RS             try_output_hash_of_with_policy(&dir.to_string_lossy(), true, &mut |_, _| {}).unwrap();
+//RS         assert_ne!(first, second);
+//RS         fs::remove_dir_all(dir).ok();
+//RS     }
+//RS 
+//RS     // Test-only old-style encoder. It materializes the canonical archive so
+//RS     // the production streaming encoder remains pinned to the same bytes.
+//RS     #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))]
+//RS     fn reference_archive(root: &Path, allow_semantic_xattrs: bool) -> Vec<u8> {
+//RS         let mut archive = b"jet-hangar-archive-v1\0".to_vec();
+//RS         let mut hardlinks = std::collections::BTreeMap::new();
+//RS         reference_encode_node(
+//RS             root,
+//RS             Path::new(""),
+//RS             &mut archive,
+//RS             &mut hardlinks,
+//RS             allow_semantic_xattrs,
+//RS         );
+//RS         archive
+//RS     }
+//RS 
+//RS     #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))]
+//RS     fn reference_encode_node(
+//RS         path: &Path,
+//RS         rel: &Path,
+//RS         archive: &mut Vec<u8>,
+//RS         hardlinks: &mut std::collections::BTreeMap<(u64, u64), PathBuf>,
+//RS         allow_semantic_xattrs: bool,
+//RS     ) {
+//RS         let metadata = fs::symlink_metadata(path).unwrap();
+//RS         let rel_bytes = path_bytes(rel);
+//RS         if metadata.is_dir() {
+//RS             reference_record_header(archive, b'D', &rel_bytes, mode_of(&metadata));
+//RS             reference_encode_xattrs(path, archive, allow_semantic_xattrs);
+//RS             let mut entries = fs::read_dir(path)
+//RS                 .unwrap()
+//RS                 .map(Result::unwrap)
+//RS                 .collect::<Vec<_>>();
+//RS             entries.sort_by_key(|entry| path_bytes(Path::new(&entry.file_name())));
+//RS             for entry in entries {
+//RS                 reference_encode_node(
+//RS                     &entry.path(),
+//RS                     &rel.join(entry.file_name()),
+//RS                     archive,
+//RS                     hardlinks,
+//RS                     allow_semantic_xattrs,
+//RS                 );
+//RS             }
+//RS         } else if metadata.file_type().is_symlink() {
+//RS             let target = fs::read_link(path).unwrap();
+//RS             reference_record_header(archive, b'L', &rel_bytes, mode_of(&metadata));
+//RS             reference_push_bytes(archive, &path_bytes(&target));
+//RS             reference_encode_xattrs(path, archive, allow_semantic_xattrs);
+//RS         } else if metadata.is_file() {
+//RS             if let Some(identity) = file_identity(&metadata) {
+//RS                 if let Some(first) = hardlinks.get(&identity) {
+//RS                     reference_record_header(archive, b'H', &rel_bytes, mode_of(&metadata));
+//RS                     reference_push_bytes(archive, &path_bytes(first));
+//RS                     return;
+//RS                 }
+//RS             }
+//RS             reference_record_header(archive, b'F', &rel_bytes, mode_of(&metadata));
+//RS             reference_encode_xattrs(path, archive, allow_semantic_xattrs);
+//RS             let bytes = fs::read(path).unwrap();
+//RS             reference_push_bytes(archive, &bytes);
+//RS             if let Some(identity) = file_identity(&metadata) {
+//RS                 hardlinks.insert(identity, rel.to_path_buf());
+//RS             }
+//RS         } else {
+//RS             panic!("fixture contains unsupported node `{}`", path.display());
+//RS         }
+//RS     }
+//RS 
+//RS     #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))]
+//RS     fn reference_encode_xattrs(path: &Path, archive: &mut Vec<u8>, allow: bool) {
+//RS         let mut names = list_xattr_names(path)
+//RS             .unwrap()
+//RS             .into_iter()
+//RS             .filter(|name| !is_excluded_xattr(name))
+//RS             .collect::<Vec<_>>();
+//RS         names.sort();
+//RS         if names.is_empty() {
+//RS             return;
+//RS         }
+//RS         assert!(allow, "fixture xattrs require explicit allowance");
+//RS         for name in names {
+//RS             archive.push(b'X');
+//RS             reference_push_bytes(archive, name.as_bytes());
+//RS             reference_push_bytes(archive, &xattr_value(path, &name).unwrap());
+//RS         }
+//RS     }
+//RS 
+//RS     #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))]
+//RS     fn reference_record_header(out: &mut Vec<u8>, kind: u8, path: &[u8], mode: u32) {
+//RS         out.push(kind);
+//RS         reference_push_bytes(out, path);
+//RS         out.extend_from_slice(&mode.to_be_bytes());
+//RS     }
+//RS 
+//RS     #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))]
+//RS     fn reference_push_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
+//RS         out.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+//RS         out.extend_from_slice(bytes);
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     fn set_test_xattr(path: &Path, value: &[u8]) -> bool {
+//RS         use std::os::unix::ffi::OsStrExt as _;
+//RS         unsafe extern "C" {
+//RS             fn lsetxattr(
+//RS                 path: *const i8,
+//RS                 name: *const i8,
+//RS                 value: *const u8,
+//RS                 size: usize,
+//RS                 flags: i32,
+//RS             ) -> i32;
+//RS         }
+//RS         let path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+//RS         let name = std::ffi::CString::new("user.jet.stream_reference").unwrap();
+//RS         unsafe { lsetxattr(path.as_ptr(), name.as_ptr(), value.as_ptr(), value.len(), 0) == 0 }
+//RS     }
+//RS 
+//RS     #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS     fn set_test_xattr(path: &Path, value: &[u8]) -> bool {
+//RS         use std::os::unix::ffi::OsStrExt as _;
+//RS         unsafe extern "C" {
+//RS             fn setxattr(
+//RS                 path: *const i8,
+//RS                 name: *const i8,
+//RS                 value: *const u8,
+//RS                 size: usize,
+//RS                 position: u32,
+//RS                 options: i32,
+//RS             ) -> i32;
+//RS         }
+//RS         let path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+//RS         let name = std::ffi::CString::new("user.jet.stream_reference").unwrap();
+//RS         unsafe {
+//RS             setxattr(
+//RS                 path.as_ptr(),
+//RS                 name.as_ptr(),
+//RS                 value.as_ptr(),
+//RS                 value.len(),
+//RS                 0,
+//RS                 0x0001,
+//RS             ) == 0
+//RS         }
+//RS     }
+//RS 
+//RS     fn scratch(tag: &str) -> PathBuf {
+//RS         let dir = std::env::temp_dir().join(format!(
+//RS             "env-{tag}-{}",
+//RS             std::time::SystemTime::now()
+//RS                 .duration_since(std::time::UNIX_EPOCH)
+//RS                 .unwrap()
+//RS                 .as_nanos()
+//RS         ));
+//RS         fs::create_dir_all(&dir).unwrap();
+//RS         dir
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2093 crates/jet-pkg-model/src/Envelope.rs:1801-2126
+

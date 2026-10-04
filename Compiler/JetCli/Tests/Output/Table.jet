@@ -1,0 +1,203 @@
+// Behavioral parity claims for AdaptiveTable.rs (the reference has no
+// #[cfg(test)] blocks). Expectations follow its typed bounds and render paths.
+fn table_test_profile(width: Int, unicode: Bool, machine: Bool) -> JetCLIOutputProfile {
+    facts := jet_cli_output_facts_default()
+    facts.tty = true
+    facts.term = Val("xterm")
+    facts.width = Val(width)
+    facts.unicode = unicode
+    facts.json = machine
+    jet_cli_output_profile_select(facts) ?? panic("table test profile failed")
+}
+fn table_test_render(table: JetCLIAdaptiveTable, width: Int, unicode: Bool) -> String {
+    jet_cli_table_layout_render(table, jet_cli_table_layout(table, table_test_profile(width, unicode, false))) ?? panic("human table hidden")
+}
+fn table_test_sample() -> JetCLIAdaptiveTable {
+    jet_cli_table_new(
+        [JetCLITableColumn]{jet_cli_table_column_new("Name", JetCLITableCellKind.Text), jet_cli_table_column_new("N", JetCLITableCellKind.Integer)},
+        [JetCLITableRow]{jet_cli_table_row_new([JetCLITableCell]{jet_cli_table_cell_text("a"), jet_cli_table_cell_integer(12)})},
+    )
+}
+#Test("table cell constructors preserve typed facts and alignment") {
+    cells :: [JetCLITableCell]{jet_cli_table_cell_text("text"), jet_cli_table_cell_integer(-7), jet_cli_table_cell_unsigned(9), jet_cli_table_cell_boolean(true), jet_cli_table_cell_empty()}
+    kinds :: [JetCLITableCellKind]{JetCLITableCellKind.Text, JetCLITableCellKind.Integer, JetCLITableCellKind.Unsigned, JetCLITableCellKind.Boolean, JetCLITableCellKind.Empty}
+    strings :: [String]{"text", "-7", "9", "true", ""}
+    loop index in 0..<cells.len() {
+        assert(jet_cli_table_cell_kind(cells[index]) == kinds[index])
+        assert_eq(jet_cli_table_cell_display_text(cells[index]), strings[index])
+        column :: jet_cli_table_column_new("heading", kinds[index])
+        assert(column.alignment == if index == 1 || index == 2 -> JetCLITableAlignment.Right else -> JetCLITableAlignment.Left)
+    }
+    assert_eq(jet_cli_table_cell_display_text(jet_cli_table_cell_boolean(false)), "false")
+}
+#Test("table full i128 and u128 numeric cells retain exact decimal rendering") {
+    minimum :: -170141183460469231731687303715884105728
+    maximum :: 170141183460469231731687303715884105727
+    unsigned_maximum :: 340282366920938463463374607431768211455
+    assert_eq(jet_cli_table_cell_display_text(jet_cli_table_cell_integer(minimum)), "-170141183460469231731687303715884105728")
+    assert_eq(jet_cli_table_cell_display_text(jet_cli_table_cell_integer(maximum)), "170141183460469231731687303715884105727")
+    assert_eq(jet_cli_table_cell_display_text(jet_cli_table_cell_unsigned(unsigned_maximum)), "340282366920938463463374607431768211455")
+}
+#Test("table constructors enforce bounds and preserve truncation semantics") {
+    columns := [JetCLITableColumn]{}
+    loop _ in 0..<65 -> &columns.push(jet_cli_table_column_new("c", JetCLITableCellKind.Text))
+    cells := [JetCLITableCell]{}
+    loop _ in 0..<65 -> &cells.push(jet_cli_table_cell_text("v"))
+    row :: jet_cli_table_row_new(^cells)
+    assert_eq(row.cells.len(), 64)
+    rows := [JetCLITableRow]{}
+    loop _ in 0..<4097 -> &rows.push(row)
+    table :: jet_cli_table_new(~columns, ^rows)
+    structured :: jet_cli_table_structured(table)
+    assert_eq(structured.columns.len(), 64)
+    assert_eq(structured.rows.len(), 4096)
+    assert(structured.truncated)
+    assert(table.truncated)
+    extra :: jet_cli_table_new([JetCLITableColumn]{jet_cli_table_column_new("one", JetCLITableCellKind.Text)}, [JetCLITableRow]{row})
+    assert_eq(extra.rows[0].cells.len(), 1)
+    assert(extra.truncated)
+    // The row constructor's own cap does not set the table's truncation bit.
+    exact :: jet_cli_table_new(~columns[0..<64], [JetCLITableRow]{row})
+    assert(!exact.truncated)
+}
+#Test("table sanitation removes CSI OSC and lone escape sequences only") {
+    escape :: String.from_bytes([U8]{U8{27}}) ?? panic("escape encoding")
+    bell :: String.from_bytes([U8]{U8{7}}) ?? panic("bell encoding")
+    assert_eq(jet_cli_table_strip_ansi("a{escape}[31mred{escape}[0mz"), "aredz")
+    assert_eq(jet_cli_table_strip_ansi("a{escape}]title{bell}b"), "ab")
+    assert_eq(jet_cli_table_strip_ansi("a{escape}]title{escape}\\b"), "ab")
+    assert_eq(jet_cli_table_strip_ansi("a{escape}Qb{escape}["), "ab")
+    cr :: String.from_bytes([U8]{U8{13}}) ?? panic("carriage return encoding")
+    assert_eq(jet_cli_table_strip_ansi("a\t{cr}\nb{bell}"), "a\t{cr}\nb{bell}")
+    table :: jet_cli_table_new([JetCLITableColumn]{JetCLITableColumn{name: "{escape}[31mH", kind: JetCLITableCellKind.Text, alignment: JetCLITableAlignment.Left}}, [JetCLITableRow]{JetCLITableRow{cells: [JetCLITableCell]{JetCLITableCell.Text("{escape}]x{bell}v")}}})
+    facts :: jet_cli_table_structured(table)
+    assert_eq(facts.columns[0].name, "H")
+    assert(facts.rows[0].cells[0] == JetCLITableCell.Text("v"))
+    assert(!facts.truncated)
+}
+#Test("table text byte bound never splits a reference cluster and skips oversized clusters") {
+    assert_eq(jet_cli_table_bounded_text("a".repeat(4097)).bytes().len(), 4096)
+    prefix_4095 :: "a".repeat(4095)
+    prefix_4094 :: "a".repeat(4094)
+    assert_eq(jet_cli_table_bounded_text("{prefix_4095}界z"), "{prefix_4095}z")
+    assert_eq(jet_cli_table_bounded_text("{prefix_4094}éz"), "{prefix_4094}z")
+    // The reference continues after a cluster which does not fit.
+    assert_eq(jet_cli_table_bounded_text("e{"́".repeat(2048)}z"), "z")
+    table :: jet_cli_table_new([JetCLITableColumn]{jet_cli_table_column_new("H", JetCLITableCellKind.Text)}, [JetCLITableRow]{jet_cli_table_row_new([JetCLITableCell]{JetCLITableCell.Text("a".repeat(4097))})})
+    assert(!table.truncated)
+}
+#Test("table width uses reference combining wide regional and ZWJ rules") {
+    cr :: String.from_bytes([U8]{U8{13}}) ?? panic("carriage return encoding")
+    assert_eq(jet_cli_table_display_width(""), 0)
+    assert_eq(jet_cli_table_display_width("abc\n界界{cr}"), 4)
+    assert_eq(jet_cli_table_display_width("é"), 1)
+    assert_eq(jet_cli_table_display_width("́"), 0)
+    assert_eq(jet_cli_table_display_width("界"), 2)
+    assert_eq(jet_cli_table_display_width("👩‍💻"), 2)
+    assert_eq(jet_cli_table_display_width("👍🏽"), 2)
+    assert_eq(jet_cli_table_display_width("🇺🇸"), 2)
+    assert_eq(jet_cli_table_display_width("🇺🇸🇨"), 3)
+    assert_eq(jet_cli_table_display_width("a‍界"), 2)
+    assert_eq(jet_cli_table_display_width("\t{cr}\n"), 0)
+    // These endpoints are deliberately not substituted with Core text tables.
+    assert_eq(jet_cli_table_scalar_width(0x1d167), 0)
+    assert_eq(jet_cli_table_scalar_width(0x1d1ff), 0)
+    assert_eq(jet_cli_table_scalar_width(0x1d200), 1)
+    assert_eq(jet_cli_table_scalar_width(0x2ffb), 2)
+    assert_eq(jet_cli_table_scalar_width(0x2ffc), 1)
+    assert_eq(jet_cli_table_scalar_width(0x3fffd), 2)
+    assert_eq(jet_cli_table_scalar_width(0x3fffe), 1)
+}
+#Test("table clipping preserves clusters and exact unicode ascii suffix budgets") {
+    assert_eq(jet_cli_clip_to_width_with_unicode("abcdef", 0, true), "")
+    assert_eq(jet_cli_clip_to_width_with_unicode("abcdef", 1, true), "…")
+    assert_eq(jet_cli_clip_to_width_with_unicode("abcdef", 4, true), "abc…")
+    assert_eq(jet_cli_clip_to_width_with_unicode("abcdef", 1, false), ".")
+    assert_eq(jet_cli_clip_to_width_with_unicode("abcdef", 2, false), "..")
+    assert_eq(jet_cli_clip_to_width_with_unicode("abcdef", 3, false), "...")
+    assert_eq(jet_cli_clip_to_width_with_unicode("abcdef", 4, false), "a...")
+    assert_eq(jet_cli_clip_to_width_with_unicode("éxyz", 2, true), "é…")
+    assert_eq(jet_cli_clip_to_width_with_unicode("👩‍💻xyz", 3, true), "👩‍💻…")
+    assert_eq(jet_cli_clip_to_width_with_unicode("界xyz", 2, true), "…")
+    assert_eq(jet_cli_clip_to_width_with_unicode("a\nb", 1, false), "a\nb")
+}
+#Test("table wrapping preserves logical lines and replaces oversized clusters") {
+    cr :: String.from_bytes([U8]{U8{13}}) ?? panic("carriage return encoding")
+    assert_eq(jet_cli_table_wrap_cell("", 0), [String]{""})
+    assert_eq(jet_cli_table_wrap_cell("a{cr}\n\nb\n", 2), [String]{"a", "", "b", ""})
+    assert_eq(jet_cli_table_wrap_cell("abcd", 2), [String]{"ab", "cd"})
+    assert_eq(jet_cli_table_wrap_cell("éxy", 1), [String]{"é", "x", "y"})
+    assert_eq(jet_cli_table_wrap_cell("a界b", 1), [String]{"a", "?", "b"})
+    assert_eq(jet_cli_table_wrap_cell("👩‍💻", 1), [String]{"?"})
+    assert_eq(jet_cli_table_wrap_cell("🇺🇸", 1), [String]{"?"})
+    assert_eq(jet_cli_table_wrap_cell("́", 1), [String]{"́"})
+    assert_eq(jet_cli_table_wrap_cell("a\t", 1), [String]{"a"})
+}
+#Test("table fitting is bounded fair and does not grow past natural widths") {
+    assert_eq(jet_cli_table_fit_widths([Int]{}, 10), [Int]{})
+    assert_eq(jet_cli_table_fit_widths([Int]{10, 10}, 8), [Int]{1, 1})
+    assert_eq(jet_cli_table_fit_widths([Int]{10, 10}, 12), [Int]{3, 2})
+    assert_eq(jet_cli_table_fit_widths([Int]{1, 8}, 12), [Int]{1, 4})
+    assert_eq(jet_cli_table_fit_widths([Int]{2, 3}, 100), [Int]{2, 3})
+    table :: table_test_sample()
+    assert_eq(jet_cli_table_layout(table, table_test_profile(500, true, false)).width, 256)
+    assert_eq(jet_cli_table_layout(table, table_test_profile(500, true, false)).widths, [Int]{4, 2})
+}
+#Test("table ascii and unicode grids render exact borders padding and numeric alignment") {
+    table :: table_test_sample()
+    assert_eq(table_test_render(table, 80, false), "+------+----+\n| Name |  N |\n+------+----+\n| a    | 12 |\n+------+----+")
+    assert_eq(table_test_render(table, 80, true), "┌──────┬────┐\n│ Name │  N │\n├──────┼────┤\n│ a    │ 12 │\n└──────┴────┘")
+    assert_eq(jet_cli_table_pad_cell("x", 4, JetCLITableAlignment.Center), " x  ")
+    assert_eq(jet_cli_table_pad_cell("界", 4, JetCLITableAlignment.Right), "  界")
+    assert_eq(jet_cli_table_pad_cell("abcde", 4, JetCLITableAlignment.Left), "abc…")
+}
+#Test("table grid wraps multiline cells and pads missing cells") {
+    columns :: [JetCLITableColumn]{jet_cli_table_column_new("A", JetCLITableCellKind.Text), jet_cli_table_column_new("B", JetCLITableCellKind.Text)}
+    table :: jet_cli_table_new(^columns, [JetCLITableRow]{jet_cli_table_row_new([JetCLITableCell]{jet_cli_table_cell_text("ab\nc")})})
+    assert_eq(table_test_render(table, 10, false), "+----+---+\n| A  | B |\n+----+---+\n| ab |   |\n| c  |   |\n+----+---+")
+}
+#Test("table narrow layout clips labels indents continuations and retains empty schema heading") {
+    table :: table_test_sample()
+    assert_eq(table_test_render(table, 8, false), "Name: a\nN   : 12")
+    assert_eq(table_test_render(table, 1, false), "a\n1\n2")
+    columns :: [JetCLITableColumn]{jet_cli_table_column_new("AA", JetCLITableCellKind.Text), jet_cli_table_column_new("B", JetCLITableCellKind.Text)}
+    multiline :: jet_cli_table_new(~columns, [JetCLITableRow]{jet_cli_table_row_new([JetCLITableCell]{jet_cli_table_cell_text("abcde"), jet_cli_table_cell_empty()})})
+    assert_eq(table_test_render(multiline, 6, true), "AA: ab\n    cd\n    e\nB : ")
+    no_rows :: jet_cli_table_new(^columns, [JetCLITableRow]{})
+    assert_eq(table_test_render(no_rows, 6, false), "AA | B")
+}
+#Test("table plain layout and empty schemas keep reference newline behavior") {
+    empty :: jet_cli_table_new([JetCLITableColumn]{}, [JetCLITableRow]{})
+    assert_eq(table_test_render(empty, 1, false), "")
+    empty_row :: jet_cli_table_new([JetCLITableColumn]{}, [JetCLITableRow]{jet_cli_table_row_new([JetCLITableCell]{})})
+    assert_eq(table_test_render(empty_row, 1, false), "")
+    one :: jet_cli_table_new([JetCLITableColumn]{jet_cli_table_column_new("Head", JetCLITableCellKind.Text)}, [JetCLITableRow]{jet_cli_table_row_new([JetCLITableCell]{jet_cli_table_cell_text("abc")})})
+    assert_eq(table_test_render(one, 3, false), "Hea\nd\nabc")
+    assert_eq(table_test_render(one, 5, false), "+---+\n| H |\n| e |\n| a |\n| d |\n+---+\n| a |\n| b |\n| c |\n+---+")
+}
+#Test("table machine output hides rendering without discarding structured facts") {
+    table :: table_test_sample()
+    layout :: jet_cli_table_layout(table, table_test_profile(80, true, true))
+    assert(jet_cli_table_layout_render(table, layout) == None)
+    facts :: jet_cli_table_structured(table)
+    assert_eq(facts.columns.len(), 2)
+    assert_eq(facts.rows.len(), 1)
+    assert_eq(table.columns.len(), 2)
+    assert_eq(table.columns[0].name, "Name")
+    assert_eq(table.rows.len(), 1)
+    assert(facts.rows[0].cells[1] == JetCLITableCell.Integer(12))
+    assert(!facts.truncated)
+    assert_eq(layout.width, 80)
+    assert_eq(layout.widths, [Int]{4, 2})
+}
+#Test("table rendering is deterministic and every line fits each supported width") {
+    table :: table_test_sample()
+    loop width in 1..<257 {
+        choices :: [Bool]{true, false}
+        loop unicode in choices {
+            first :: table_test_render(table, width, unicode)
+            assert_eq(first, table_test_render(table, width, unicode))
+            loop line in first.split("\n") -> assert(jet_cli_table_display_width(line) <= width)
+        }
+    }
+}

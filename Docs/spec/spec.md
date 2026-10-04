@@ -402,7 +402,10 @@ evaluates its single final expression while building, and names bound inside a
 scope, other `name :: value` and `name := value` bindings remain runtime module
 globals; they do not require `#Persist`. `#Static NAME :: value` requests a
 stable-address Rust static when the contract needs one, and `#Inline NAME ::
-value` copies the value into use sites (D-CONSTMARK1). The retired `@NAME`
+value` copies the value into use sites (D-CONSTMARK1). Without a marker, an
+immutable constant whose value is a number, text, or a small record or enum
+case of those is copied into its use sites; a list or map is read through one
+shared item instead, and a large one is built once. The retired `@NAME`
 spelling teaches E0388. `#Persist name := value` additionally marks hot-reload state on a bare
 binding (D-VERDICT-1308-1, D-PERSIST1).
 

@@ -1,0 +1,844 @@
+// PORT-PENDING 2129 crates-jet-pkg-model-src-manifest: crates/jet-pkg-model/src/Manifest.rs:1-840
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! `package.jet` package-manifest loading (M12.1, S52, U1/U10, D-JPK23).
+//RS //!
+//RS //! The on-disk format is Jet syntax, not TOML — `src/jetpack/packmanifest.rs`
+//RS //! is the structural parser for `package.jet`'s bare identity and typed
+//RS //! `deps:`/`outputs:` shape; this module owns the compiler-facing `Manifest` type that
+//RS //! `loader.rs`/`fetch.rs`/`lock.rs`/`store.rs` operate on, the toolchain
+//RS //! check (E1208), and the comment-preserving `jet add`/`jet remove` edits.
+//RS //! `package.jet` replaces the old TOML `jet.toml` as a clean break (U1/U10) —
+//RS //! no back-compat alias.
+//RS 
+//RS use crate::Authority::AuthorityResolver;
+//RS use crate::Diagnostics::Diagnostic;
+//RS use crate::Package::{self, PackageParseError};
+//RS use crate::Syntax;
+//RS use std::collections::BTreeMap;
+//RS use std::path::Path;
+//RS 
+//RS /// The compiler's version string for E1208 toolchain checks.
+//RS pub const COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
+//RS 
+//RS /// The package version is independent from the current release channel. A
+//RS /// development build carries its SemVer identity while the owner keeps the
+//RS /// 1.0 compatibility policy future-only.
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub struct ReleaseStatus {
+//RS     channel: &'static str,
+//RS     disposition: &'static str,
+//RS     readiness: &'static str,
+//RS     policy: &'static str,
+//RS     policy_disposition: &'static str,
+//RS     policy_active: bool,
+//RS }
+//RS 
+//RS impl ReleaseStatus {
+//RS     /// The current release identity (`prerelease` until the owner ships 1.0).
+//RS     pub const fn channel(self) -> &'static str {
+//RS         self.channel
+//RS     }
+//RS 
+//RS     /// How the current release identity should be treated by consumers.
+//RS     pub const fn disposition(self) -> &'static str {
+//RS         self.disposition
+//RS     }
+//RS 
+//RS     pub const fn readiness(self) -> &'static str {
+//RS         self.readiness
+//RS     }
+//RS 
+//RS     /// The ratified policy that will apply at 1.0 and after it.
+//RS     pub const fn policy(self) -> &'static str {
+//RS         self.policy
+//RS     }
+//RS 
+//RS     /// Whether the policy is current or still a future target.
+//RS     pub const fn policy_disposition(self) -> &'static str {
+//RS         self.policy_disposition
+//RS     }
+//RS 
+//RS     pub const fn policy_active(self) -> bool {
+//RS         self.policy_active
+//RS     }
+//RS }
+//RS 
+//RS const CURRENT_RELEASE_CHANNEL: &str = "prerelease";
+//RS const CURRENT_RELEASE_DISPOSITION: &str = "current";
+//RS const CURRENT_RELEASE_READINESS: &str = "not-ready";
+//RS const RELEASE_COMPATIBILITY_POLICY: &str = "future-1.0";
+//RS const RELEASE_COMPATIBILITY_POLICY_DISPOSITION: &str = "planned";
+//RS const RELEASE_COMPATIBILITY_POLICY_ACTIVE: bool = false;
+//RS 
+//RS /// One executable source for the current release/readiness projection.
+//RS ///
+//RS /// `jet version`, `jet --version`, and machine-readable inspection all consume
+//RS /// this value. The package SemVer is not evidence that the future policy has
+//RS /// shipped.
+//RS pub const fn current_release_status() -> ReleaseStatus {
+//RS     ReleaseStatus {
+//RS         channel: CURRENT_RELEASE_CHANNEL,
+//RS         disposition: CURRENT_RELEASE_DISPOSITION,
+//RS         readiness: CURRENT_RELEASE_READINESS,
+//RS         policy: RELEASE_COMPATIBILITY_POLICY,
+//RS         policy_disposition: RELEASE_COMPATIBILITY_POLICY_DISPOSITION,
+//RS         policy_active: RELEASE_COMPATIBILITY_POLICY_ACTIVE,
+//RS     }
+//RS }
+//RS 
+//RS // ──────────────────────────────────────────────
+//RS // Editions & release policy (E2-M2, D-REL1…D-REL5)
+//RS // ──────────────────────────────────────────────
+//RS 
+//RS /// The editions this toolchain understands (D-REL3). An edition opts a project
+//RS /// into a specific era of Jet syntax (Docs/spec/release-policy.md). The list is
+//RS /// ordered oldest→newest; the last entry is the newest stable edition, used by
+//RS /// single-file `jet run file.jet` which carries no edition marker (E2-V4).
+//RS const LATEST_EDITION: &str = "2028";
+//RS pub const SUPPORTED_EDITIONS: &[&str] = &["2026", "2027", "2028"];
+//RS 
+//RS /// Parse an edition label like `"2027"` into its year. Unknown labels sort before
+//RS /// every supported edition so comparisons fail closed.
+//RS pub fn edition_year(edition: &str) -> u16 {
+//RS     edition.trim().parse().unwrap_or(0)
+//RS }
+//RS 
+//RS /// `true` when `edition` is at least as new as `baseline` under numeric ordering.
+//RS pub fn edition_at_least(edition: &str, baseline: &str) -> bool {
+//RS     edition_year(edition) >= edition_year(baseline)
+//RS }
+//RS 
+//RS /// Resolve a manifest's effective edition, defaulting to the newest stable one.
+//RS pub fn effective_edition(manifest: &Manifest) -> String {
+//RS     manifest
+//RS         .package
+//RS         .edition
+//RS         .clone()
+//RS         .filter(|e| !e.trim().is_empty())
+//RS         .unwrap_or_else(|| latest_edition().to_string())
+//RS }
+//RS 
+//RS /// The newest stable edition this toolchain ships. Single-file programs and a
+//RS /// manifest with no `edition:` field use this.
+//RS pub fn latest_edition() -> &'static str {
+//RS     LATEST_EDITION
+//RS }
+//RS 
+//RS /// The registry-protocol version this toolchain speaks (D-REL1: normal SemVer;
+//RS /// the registry index format is versioned independently of the compiler).
+//RS pub const REGISTRY_COMPAT: &str = "1";
+//RS 
+//RS /// `true` if `edition` is one this toolchain supports.
+//RS pub fn edition_is_supported(edition: &str) -> bool {
+//RS     SUPPORTED_EDITIONS.contains(&edition.trim())
+//RS }
+//RS 
+//RS /// Validate the `edition:` field from `package.jet` (D-REL3). A manifest that
+//RS /// asks for an edition this toolchain doesn't ship is E2001. A manifest with no
+//RS /// `edition:` field is fine — it tracks the toolchain's newest stable edition.
+//RS pub fn check_edition_support(manifest: &Manifest, _file: &str) -> Result<(), Diagnostic> {
+//RS     let Some(edition) = &manifest.package.edition else {
+//RS         return Ok(());
+//RS     };
+//RS     if edition_is_supported(edition) {
+//RS         return Ok(());
+//RS     }
+//RS     Err(e2001(edition))
+//RS }
+//RS 
+//RS /// E2001 — the manifest requests an edition this toolchain can't provide.
+//RS pub fn e2001(requested: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E2001",
+//RS         "this package needs a newer Jet".to_string(),
+//RS         format!(
+//RS             "editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. This toolchain supports editions up to {}, but `{}` asks for `{}`.",
+//RS             latest_edition(),
+//RS             Syntax::PACKAGE_FILE,
+//RS             requested,
+//RS         ),
+//RS         format!(
+//RS             "upgrade with `{} self upgrade`, or set `{}: \"{}\"` in `{}`.",
+//RS             Syntax::BINARY_NAME,
+//RS             Syntax::MANIFEST_FIELD_EDITION,
+//RS             latest_edition(),
+//RS             Syntax::PACKAGE_FILE,
+//RS         ),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS /// The `jet --version` banner (E2-D1). Deterministic and golden-testable: it
+//RS /// states the compiler SemVer, current prerelease identity/disposition, the
+//RS /// future-only 1.0 compatibility policy, the supported edition range, and
+//RS /// registry-protocol compatibility. The package SemVer remains independent
+//RS /// from the current release channel.
+//RS pub fn version_banner() -> String {
+//RS     let editions = SUPPORTED_EDITIONS.join(", ");
+//RS     let release = current_release_status();
+//RS     let policy_state = if release.policy_active() {
+//RS         "active"
+//RS     } else {
+//RS         "not active"
+//RS     };
+//RS     format!(
+//RS         "{lang} {ver}\nrelease status: {channel}\nrelease disposition: {disposition}\nrelease readiness: {readiness}\n1.0 compatibility policy: {policy} ({policy_disposition}; {policy_state})\nsupported editions: {editions} (newest: {latest})\nregistry protocol: v{registry}\n",
+//RS         lang = Syntax::LANG_NAME,
+//RS         ver = COMPILER_VERSION,
+//RS         channel = release.channel(),
+//RS         disposition = release.disposition(),
+//RS         readiness = release.readiness(),
+//RS         policy = release.policy(),
+//RS         policy_disposition = release.policy_disposition(),
+//RS         policy_state = policy_state,
+//RS         editions = editions,
+//RS         latest = latest_edition(),
+//RS         registry = REGISTRY_COMPAT,
+//RS     )
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::{parse, version_banner};
+//RS     use crate::Package::PackageParseError;
+//RS     use std::path::Path;
+//RS 
+//RS     #[test]
+//RS     fn current_release_status_is_separate_from_package_semver() {
+//RS         let status = super::current_release_status();
+//RS         assert_eq!(status.channel(), "prerelease");
+//RS         assert_eq!(status.disposition(), "current");
+//RS         assert_eq!(status.readiness(), "not-ready");
+//RS         assert_eq!(status.policy(), "future-1.0");
+//RS         assert_eq!(status.policy_disposition(), "planned");
+//RS         assert!(!status.policy_active());
+//RS         assert!(version_banner().contains("release status: prerelease"));
+//RS         assert!(version_banner().contains("release disposition: current"));
+//RS         assert!(version_banner().contains("release readiness: not-ready"));
+//RS         assert!(version_banner().contains(
+//RS             "1.0 compatibility policy: future-1.0 (planned; not active)"
+//RS         ));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn malformed_authority_outer_value_uses_e1221() {
+//RS         for authority in ["authority: []", "authority: {}\nauthority: {}"] {
+//RS             let raw = format!("name: \"demo\"\nversion: \"0.1.0\"\n{authority}\n");
+//RS             let error = crate::Package::PackageFacts::parse(&raw, "package.jet")
+//RS                 .expect_err("malformed authority must be rejected");
+//RS             assert!(matches!(error, PackageParseError::BadEffectsBlock(_)));
+//RS             let diagnostic = parse(Path::new("package.jet"), &raw)
+//RS                 .expect_err("malformed authority must use the authority diagnostic family");
+//RS             assert_eq!(diagnostic.code, "E1221");
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn package_policy_surface_parses_and_rejects_duplicate_license_entries() {
+//RS         let raw = r#"
+//RS name: "consumer"
+//RS version: "0.1.0"
+//RS license: "MIT"
+//RS policy: {
+//RS     licenses: .Allow(["MIT", "Apache-2.0"]),
+//RS     sources: { "Acme.*": ["internal"] },
+//RS }
+//RS "#;
+//RS         let manifest = parse(Path::new("package.jet"), raw).expect("package policy parses");
+//RS         assert_eq!(
+//RS             manifest.policy.licenses,
+//RS             Some(vec!["MIT".to_string(), "Apache-2.0".to_string()])
+//RS         );
+//RS         assert_eq!(
+//RS             manifest.policy.source_maps,
+//RS             vec![("Acme.*".to_string(), vec!["internal".to_string()])]
+//RS         );
+//RS 
+//RS         let duplicate = "name: \"consumer\"\nversion: \"0.1.0\"\npolicy: { licenses: .Allow([\"MIT\", \"MIT\"]) }\n";
+//RS         let diagnostic = parse(Path::new("package.jet"), duplicate)
+//RS             .expect_err("duplicate license policy entries must fail");
+//RS         assert_eq!(diagnostic.code, "E1206");
+//RS         assert!(diagnostic.what.contains("package.jet"));
+//RS         assert!(diagnostic
+//RS             .why
+//RS             .to_ascii_lowercase()
+//RS             .contains("package metadata policy is malformed"));
+//RS         assert!(diagnostic.fix.contains("syntax-decisions.md"));
+//RS     }
+//RS }
+//RS 
+//RS // ──────────────────────────────────────────────
+//RS // Public types
+//RS // ──────────────────────────────────────────────
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct Manifest {
+//RS     pub package: PackageMeta,
+//RS     /// D-JPK-POLICYSURFACE1=D: root metadata policy carried into fetch.
+//RS     pub policy: crate::Package::PackagePolicy,
+//RS     /// D-AUTHORITY-MANIFEST1=A: package authority policy, including the
+//RS     /// D-BOUND-PROV1 provenance requirement.
+//RS     pub authority: crate::Package::PackageAuthority,
+//RS     /// D-STRUCT-EDGE1=A: package-owned import boundary policy.
+//RS     pub boundaries: Vec<crate::Package::ImportBoundary>,
+//RS     /// Jet package dependencies.
+//RS     pub dependencies: BTreeMap<String, DepSpec>,
+//RS     /// Rust crate dependencies for `extern rust` blocks. Always empty today:
+//RS     /// `extern rust "crate@version" { … }` (S50) carries its own version
+//RS     /// pin in source, so nothing has ever read this map — kept for shape
+//RS     /// stability, not parsed from `package.jet`.
+//RS     pub dependencies_rust: BTreeMap<String, String>,
+//RS     /// Raw `package.jet` text (preserved for comment-preserving edits).
+//RS     pub raw: String,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct PackageMeta {
+//RS     pub name: String,
+//RS     pub version: String,
+//RS     /// Project compatibility marker from `edition: "..."` (D-REL3). A toolchain
+//RS     /// supports a fixed set of editions (`SUPPORTED_EDITIONS`); a future edition
+//RS     /// is E2001. `None` means "use the toolchain's newest stable edition".
+//RS     pub edition: Option<String>,
+//RS     /// Toolchain constraint from `jet: "..."`.
+//RS     pub jet_constraint: Option<String>,
+//RS     pub description: Option<String>,
+//RS     pub license: Option<String>,
+//RS     pub repository: Option<String>,
+//RS     /// D-RINGLAYER1=A: optional runtime ceiling from `runtime:` in the Package.
+//RS     pub layer: Option<crate::Syntax::RuntimeLayer>,
+//RS     /// D-ALLOC-PROGRAM1=A: selected hosted whole-program allocator.
+//RS     pub allocator: crate::TargetMachine::AllocatorPolicy,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub enum DepSpec {
+//RS     /// Path dependency: `helpers: ../helpers`.
+//RS     Path { path: String },
+//RS     /// Git dependency with one selector (D-JPK23): `{ git: "...", tag/branch/rev: "..." }`,
+//RS     /// or an `owner/repo/rev@github` provider ref (always a pinned rev).
+//RS     Git { url: String, selector: GitSelector },
+//RS     /// Registry version string. `jet fetch` materializes its verified source
+//RS     /// tree before the compiler builds module search paths.
+//RS     Registry(String),
+//RS     /// D-FFI-UNIFY1 project-tier dependency. The map key is the foreign
+//RS     /// library name; Jetpack realizes the provider ref and projects its
+//RS     /// binding into `.jet/bindings/<language>/` before compilation.
+//RS     Foreign {
+//RS         language: crate::AST::ForeignLanguage,
+//RS         reference: String,
+//RS     },
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub enum GitSelector {
+//RS     Tag(String),
+//RS     Branch(String),
+//RS     Rev(String),
+//RS }
+//RS 
+//RS impl GitSelector {
+//RS     pub fn is_moving(&self) -> bool {
+//RS         match self {
+//RS             GitSelector::Tag(t) => t == "@latest",
+//RS             GitSelector::Branch(_) => true,
+//RS             GitSelector::Rev(_) => false,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS // ──────────────────────────────────────────────
+//RS // Parser
+//RS // ──────────────────────────────────────────────
+//RS 
+//RS /// Parse a `package.jet` package manifest from its text (D-CONF-PLANE1: the
+//RS /// one role-typed parser, no legacy-vocabulary fallback).
+//RS pub fn parse(path: &Path, raw: &str) -> Result<Manifest, Diagnostic> {
+//RS     // `parse_uncomposed`, not `parse`: the compile path's toolchain/edition/
+//RS     // dependency checks operate on this package's own declared facts and
+//RS     // never load file-backed `Config` contributions (that composition, and
+//RS     // the `defaults:`/`outputs:` validation it enables, is a tooling/Canvas
+//RS     // concern via `PackageFacts::load`). Validating `defaults:` here against
+//RS     // an uncomposed read would reject any package whose default output is
+//RS     // declared in a `configs:`-referenced file.
+//RS     let facts = Package::PackageFacts::parse_uncomposed(raw, path.display().to_string())
+//RS         .map_err(|e| manifest_parse_diagnostic(path, &e))?;
+//RS     facts
+//RS         .validate_guarantees()
+//RS         .map_err(|e| manifest_parse_diagnostic(path, &e))?;
+//RS     Package::to_manifest(&facts, raw)
+//RS }
+//RS 
+//RS /// The path to the one package manifest in a project dir.
+//RS pub fn manifest_path_in(dir: &Path) -> std::path::PathBuf {
+//RS     dir.join(Syntax::PACKAGE_FILE)
+//RS }
+//RS 
+//RS /// Whether both the canonical manifest and a retired alias exist. The alias
+//RS /// is never parsed, but a mixed root is rejected so migration cannot silently
+//RS /// hide a second Package identity.
+//RS pub fn has_both_manifests(dir: &Path) -> bool {
+//RS     match AuthorityResolver::open(dir) {
+//RS         Ok(resolver) => match resolver.checked_manifest(Path::new(".")) {
+//RS             Ok(_) | Err(crate::Authority::AuthorityError::Missing(_)) => false,
+//RS             Err(crate::Authority::AuthorityError::AmbiguousManifest(_)) => true,
+//RS             Err(_) => true,
+//RS         },
+//RS         Err(_) => true,
+//RS     }
+//RS }
+//RS 
+//RS /// Load and parse the nearest package manifest in a directory.
+//RS pub fn load(dir: &Path) -> Option<Result<Manifest, Diagnostic>> {
+//RS     let resolver = match AuthorityResolver::open(dir) {
+//RS         Ok(resolver) => resolver,
+//RS         Err(error) if error.is_missing() => return None,
+//RS         Err(error) => return Some(Err(error.diagnostic())),
+//RS     };
+//RS     let checked = match resolver.checked_manifest(Path::new(".")) {
+//RS         Ok(checked) => checked,
+//RS         Err(error) if error.is_missing() => return None,
+//RS         Err(error) => return Some(Err(error.diagnostic())),
+//RS     };
+//RS     let raw = match checked.file.text() {
+//RS         Ok(raw) => raw,
+//RS         Err(error) => return Some(Err(error.diagnostic())),
+//RS     };
+//RS     if let Err(error) = resolver.revalidate_file(&checked.file) {
+//RS         return Some(Err(error.diagnostic()));
+//RS     }
+//RS     let result = parse(&checked.file.path, &raw);
+//RS     if let Err(error) = resolver.revalidate_file(&checked.file) {
+//RS         return Some(Err(error.diagnostic()));
+//RS     }
+//RS     Some(result)
+//RS }
+//RS 
+//RS /// Validate the toolchain constraint from `package.jet`. Returns E1208 on mismatch.
+//RS pub fn check_toolchain(manifest: &Manifest, _file: &str) -> Result<(), Diagnostic> {
+//RS     let Some(constraint) = &manifest.package.jet_constraint else {
+//RS         return Ok(());
+//RS     };
+//RS     // D-JPK-TOOLCHAIN1=A (#179): the `jet:` field is a toolchain *pin* — a
+//RS     // channel ref (`0.4`, `0.4.2`, `main`). A channel-form value is owned by
+//RS     // the version-dispatch path (`Jetpack::JetPin`: E1249 for a malformed pin,
+//RS     // realize + re-exec or E1251 for a mismatch), NOT by this compatibility
+//RS     // gate. Only an explicit range/operator constraint (`>=x`, `^x`, `*`) keeps
+//RS     // the legacy E1208 "minimum toolchain" semantics.
+//RS     if !is_range_constraint(constraint) {
+//RS         return Ok(());
+//RS     }
+//RS     if !satisfies_constraint(COMPILER_VERSION, constraint) {
+//RS         return Err(Diagnostic::error(
+//RS             "E1208",
+//RS             format!(
+//RS                 "this project requires Jet `{}` but this is Jet {}",
+//RS                 constraint, COMPILER_VERSION
+//RS             ),
+//RS             "the top-level `jet` field specifies a minimum toolchain version".to_string(),
+//RS             format!(
+//RS                 "update Jet to a newer version, or change the `jet` field in `{}`",
+//RS                 Syntax::PACKAGE_FILE
+//RS             ),
+//RS             None,
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// A `jet:` value is a legacy range constraint (E1208 gate) when it leads with
+//RS /// a comparison/wildcard operator; otherwise it is a D-JPK-TOOLCHAIN1 channel
+//RS /// pin, handled by the version-dispatch path.
+//RS fn is_range_constraint(value: &str) -> bool {
+//RS     matches!(
+//RS         value.trim().bytes().next(),
+//RS         Some(b'>') | Some(b'<') | Some(b'=') | Some(b'^') | Some(b'~') | Some(b'*')
+//RS     )
+//RS }
+//RS 
+//RS fn satisfies_constraint(version: &str, constraint: &str) -> bool {
+//RS     let constraint = constraint.trim();
+//RS     // Support: ">=X.Y.Z", "^X.Y.Z", "X.Y.Z" (exact), "*".
+//RS     if constraint == "*" || constraint.is_empty() {
+//RS         return true;
+//RS     }
+//RS     if let Some(min) = constraint.strip_prefix(">=") {
+//RS         return version_ge(version, min.trim());
+//RS     }
+//RS     if let Some(min) = constraint.strip_prefix("^") {
+//RS         // ^X.Y.Z means >=X.Y.Z, <(X+1).0.0
+//RS         return version_ge(version, min.trim());
+//RS     }
+//RS     // Exact match
+//RS     version.trim() == constraint
+//RS }
+//RS 
+//RS fn version_ge(a: &str, b: &str) -> bool {
+//RS     let parse = |s: &str| -> (u64, u64, u64) {
+//RS         let mut p = s.trim().splitn(3, '.');
+//RS         let major = p.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+//RS         let minor = p.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+//RS         let patch = p.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+//RS         (major, minor, patch)
+//RS     };
+//RS     parse(a) >= parse(b)
+//RS }
+//RS 
+//RS // ──────────────────────────────────────────────
+//RS // Comment-preserving edit helpers for `jet add`/`jet remove`
+//RS // ──────────────────────────────────────────────
+//RS 
+//RS /// Insert or update a dependency in the `deps: { … }` block, preserving
+//RS /// comments and existing entries. Returns the updated `package.jet` text.
+//RS pub fn add_dependency(raw: &str, name: &str, spec: &DepSpec) -> String {
+//RS     Package::add_dep(raw, name, spec)
+//RS }
+//RS 
+//RS /// Add one application effect to `authority.holds.allow` while preserving
+//RS /// comments and the manifest's existing layout. The caller must reparse the
+//RS /// returned source before writing it.
+//RS pub fn add_authority_hold(raw: &str, effect: &str) -> String {
+//RS     Package::add_authority_hold(raw, effect)
+//RS }
+//RS 
+//RS /// Remove a dependency from `deps: { … }`, preserving comments.
+//RS pub fn remove_dependency(raw: &str, name: &str) -> String {
+//RS     Package::remove_dep(raw, name)
+//RS }
+//RS 
+//RS /// Generate a `package.jet` template for `jet new`.
+//RS pub fn new_template(name: &str, annotated: bool) -> String {
+//RS     Package::new_template(name, annotated)
+//RS }
+//RS 
+//RS // ──────────────────────────────────────────────
+//RS // Diagnostics
+//RS // ──────────────────────────────────────────────
+//RS 
+//RS pub fn manifest_parse_diagnostic(path: &Path, err: &PackageParseError) -> Diagnostic {
+//RS     let file = path.display().to_string();
+//RS     match err {
+//RS         PackageParseError::UnknownField(field) => e1206_unknown_field(field),
+//RS         PackageParseError::MissingName => {
+//RS             e1206(&file, &format!("`{}` needs a `name` field", Syntax::PACKAGE_FILE))
+//RS         }
+//RS         PackageParseError::MissingRecord(field) => {
+//RS             e1206(&file, &format!("`{field}:` needs a record value"))
+//RS         }
+//RS         PackageParseError::MalformedField(value) => {
+//RS             e1206(&file, &format!("malformed field `{value}`"))
+//RS         }
+//RS         PackageParseError::UnknownOutputKind(kind) => {
+//RS             e1206(&file, &format!("unknown Output kind `{kind}`"))
+//RS         }
+//RS         PackageParseError::RetiredRecordHead => e1206(
+//RS             &file,
+//RS             "record literals use `{ … }`; remove the retired dot before `{` (D-LIT-DOT1)",
+//RS         ),
+//RS         PackageParseError::InvalidValue { field, value } if field == "runtime" => e1206(
+//RS             &file,
+//RS             &format!(
+//RS                 "`runtime` must be `{}`, `{}`, or `{}`, not `{value}`",
+//RS                 Syntax::RuntimeLayer::CORE,
+//RS                 Syntax::RuntimeLayer::ALLOC,
+//RS                 Syntax::RuntimeLayer::HOSTED,
+//RS             ),
+//RS         ),
+//RS         PackageParseError::InvalidValue { field, value } => {
+//RS             e1206(&file, &format!("invalid value for `{field}`: `{value}`"))
+//RS         }
+//RS         PackageParseError::ConfigMembers => {
+//RS             e1206(&file, "a Config file cannot declare `members`")
+//RS         }
+//RS         PackageParseError::NestedMembers { root, member } => Diagnostic::error(
+//RS             "E1323",
+//RS             format!("member Package `{member}` declares `members`"),
+//RS             format!(
+//RS                 "Package membership has depth cap one: `{root}` owns the member list, but `{member}` declares another one"
+//RS             ),
+//RS             format!(
+//RS                 "remove `members:` from `{member}` and lift its references into `{root}`"
+//RS             ),
+//RS             None,
+//RS         ),
+//RS         PackageParseError::LintPolicyCode { code, name } => e1206_lint_policy(code, name),
+//RS         PackageParseError::Composition(detail) => e1206(&file, detail),
+//RS         PackageParseError::BadTarget { name, value, reserved: true } => e1210(
+//RS             &file,
+//RS             &format!(
+//RS                 "package `{name}` lists target `{value}`, which has no backend yet (reserved for a future increment)"
+//RS             ),
+//RS         ),
+//RS         PackageParseError::BadTarget { name, value, reserved: false } => e1210(
+//RS             &file,
+//RS             &format!("package `{name}` lists target `{value}`, which is not a known target"),
+//RS         ),
+//RS         PackageParseError::KindFieldRemoved { name } => e1211(
+//RS             &file,
+//RS             &format!(
+//RS                 "package `{name}` uses `{}:`, which was removed",
+//RS                 Syntax::PACKAGE_FIELD_KIND_REMOVED,
+//RS             ),
+//RS         ),
+//RS         PackageParseError::BadTargetField { name, detail } => {
+//RS             e1216(&file, &format!("package `{name}`: {detail}"))
+//RS         }
+//RS         PackageParseError::ReservedSection(section) => e1209(&file, section),
+//RS         PackageParseError::BadEffectsBlock(detail) => e1221(&file, detail),
+//RS         PackageParseError::RetiredAuthorityField { field, replacement } => {
+//RS             e1206_retired_authority(&file, field, replacement)
+//RS         }
+//RS         PackageParseError::BadMemoryPolicy { detail }
+//RS             if detail.contains("retired memory floor")
+//RS                 || detail.contains("memory floors belong in `authority.holds.deny`") =>
+//RS         {
+//RS             e1206_retired_memory(&file, detail)
+//RS         }
+//RS         PackageParseError::BadMemoryPolicy { detail } => {
+//RS             e1206(&file, &format!("memory policy is malformed: {detail}"))
+//RS         }
+//RS         PackageParseError::RetiredPolicyField { field, replacement } => {
+//RS             e1206_retired_policy(&file, field, replacement)
+//RS         }
+//RS         PackageParseError::BadGuaranteePolicy { detail } => e1206(
+//RS             &file,
+//RS             &format!("package guarantee policy is malformed: {detail}"),
+//RS         ),
+//RS         PackageParseError::BadPackagePolicy { detail } => e1206(
+//RS             &file,
+//RS             &format!("package metadata policy is malformed: {detail}"),
+//RS         ),
+//RS         PackageParseError::BadAllocatorPolicy { detail } => Diagnostic::error(
+//RS             "E1206",
+//RS             "invalid hosted program allocator".to_string(),
+//RS             detail.clone(),
+//RS             "use `allocator: mem.Heap` or wrap it with `allocator: mem.Counting.over(mem.Heap, cap: 2.gb)`".to_string(),
+//RS             None,
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS /// D-CONF-PLANE1/D-CONF-NAME1: an unknown top-level manifest field — most
+//RS /// often a retired spelling (`payload:`, `identity:`, a `packages:` typo).
+//RS /// This is the one diagnostic every wrong-vocabulary `package.jet` hits, now
+//RS /// that there is one parser and one field list.
+//RS fn e1206_unknown_field(field: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1206",
+//RS         format!("unknown field `{field}:` in `{}`", Syntax::PACKAGE_FILE),
+//RS         format!(
+//RS             "`{field}:` is not part of the Package vocabulary. Identity is bare `name:` and `version:` at the top level (D-CONF-NAME1) — there is no `identity:` or `payload:` wrapper."
+//RS         ),
+//RS         "use `name:`, `version:`, `deps:`, `boundaries:`, `outputs:`, `settings:`, `build:`, `policy:`, or `members:`; see Docs/spec/syntax-decisions.md D-CONF-NAME1".to_string(),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS /// D-AUTHORITY-MANIFEST1 (E1221): a malformed `authority:` block — an unknown
+//RS /// field, a non-list value, or a right name outside the closed vocabulary.
+//RS fn e1221(_file: &str, detail: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1221",
+//RS         format!(
+//RS             "`{}` has a malformed `{}` block",
+//RS             Syntax::PACKAGE_FILE,
+//RS             Syntax::MANIFEST_BLOCK_AUTHORITY,
+//RS         ),
+//RS         detail.to_string(),
+//RS         format!(
+//RS             "`{}: {{ holds: {{ allow: […], deny: […] }}, grants: {{ \"dep\": […] }}, trust: {{ … }}, providers: {{ … }} }}` is the one package authority block; rights use the thirteen grantable roots, `FFI` and its language leaves (`FFI.Go`, `FFI.Py`, `FFI.Octave`), plus deny-only `Panic`/`Mem`",
+//RS             Syntax::MANIFEST_BLOCK_AUTHORITY,
+//RS         ),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS fn e1206(_file: &str, detail: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1206",
+//RS         format!("`{}` has a shape error", Syntax::PACKAGE_FILE),
+//RS         detail.to_string(),
+//RS         format!(
+//RS             "check `{}` against Docs/spec/syntax-decisions.md (U1)",
+//RS             Syntax::PACKAGE_FILE
+//RS         ),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS fn e1206_retired_policy(_file: &str, field: &str, replacement: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1206",
+//RS         format!("`{field}` is retired"),
+//RS         format!(
+//RS             "Package refusals use the named `policy.lints.deny` surface; `{field}` was a separate boolean and no longer has meaning."
+//RS         ),
+//RS         format!(
+//RS             "remove `{field}` for the default, or put `auto_derive` in `policy.lints.deny` as `{replacement}` to refuse auto-derive"
+//RS         ),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS fn e1206_retired_authority(_file: &str, field: &str, replacement: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1206",
+//RS         format!("`{field}` is retired"),
+//RS         format!("`{field}` moved into `{replacement}` in the one `authority:` block."),
+//RS         format!("write `{replacement}` inside `authority: {{ … }}`"),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS fn e1206_retired_memory(_file: &str, detail: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1206",
+//RS         format!("`{}` uses a retired memory floor", Syntax::PACKAGE_FILE),
+//RS         format!("{detail}; memory floors belong in `authority.holds.deny`."),
+//RS         "write the denial in `authority.holds.deny` inside `authority: { holds: { deny: […] } }`"
+//RS             .to_string(),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS fn e1206_lint_policy(code: &str, name: &str) -> Diagnostic {
+//RS     Diagnostic::from_row("E1206", &[("code", code), ("name", name)], None)
+//RS }
+//RS 
+//RS pub fn e1209(_file: &str, section: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1209",
+//RS         format!("`{}` is reserved and not yet implemented", section),
+//RS         "this section name is reserved for a future Jet feature — using it now is an error"
+//RS             .to_string(),
+//RS         format!(
+//RS             "remove the `{}` block from `{}`, or leave it empty",
+//RS             section,
+//RS             Syntax::PACKAGE_FILE
+//RS         ),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS fn e1210(_file: &str, detail: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1210",
+//RS         format!("`{}` lists an unknown target", Syntax::PACKAGE_FILE),
+//RS         detail.to_string(),
+//RS         format!(
+//RS             "use a shipped target: `{}`, `{}`, `{}`, `{}`, or `{}`",
+//RS             Syntax::TARGET_LIBRARY,
+//RS             Syntax::TARGET_EXECUTABLE,
+//RS             Syntax::TARGET_TEST,
+//RS             Syntax::TARGET_EXAMPLE,
+//RS             Syntax::TARGET_SANDBOX,
+//RS         ),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS fn e1211(_file: &str, detail: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1211",
+//RS         format!("`{}` uses the removed `kind:` field", Syntax::PACKAGE_FILE),
+//RS         detail.to_string(),
+//RS         format!(
+//RS             "write `{}: [{}]` (or `[{}]`) instead",
+//RS             Syntax::PACKAGE_FIELD_TARGETS,
+//RS             Syntax::TARGET_EXECUTABLE,
+//RS             Syntax::TARGET_LIBRARY,
+//RS         ),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS fn e1216(_file: &str, detail: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1216",
+//RS         format!("`{}` has an invalid target field", Syntax::PACKAGE_FILE),
+//RS         detail.to_string(),
+//RS         format!(
+//RS             "a target block accepts `{}: \"…\"` and `{}: \"…\"`",
+//RS             Syntax::TARGET_FIELD_ENTRY,
+//RS             Syntax::TARGET_FIELD_NAME,
+//RS         ),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS pub fn e1212(_file: &str, name: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1212",
+//RS         format!(
+//RS             "`{}` declares package `{name}` but no `module {name}` was found",
+//RS             Syntax::PACKAGE_FILE
+//RS         ),
+//RS         format!(
+//RS             "each `packages:` name must correspond to a `module <name> {{ … }}` declaration in a `.{}` file in the source tree",
+//RS             Syntax::FILE_EXT
+//RS         ),
+//RS         format!(
+//RS             "add a `.{}` file containing `module {name} {{ … }}`, or remove `{name}` from `packages:` in `{}`",
+//RS             Syntax::FILE_EXT,
+//RS             Syntax::PACKAGE_FILE,
+//RS         ),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS pub fn e1213(_file: &str, name: &str, paths: &[std::path::PathBuf]) -> Diagnostic {
+//RS     let list = paths
+//RS         .iter()
+//RS         .map(|p| p.display().to_string())
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ");
+//RS     Diagnostic::error(
+//RS         "E1213",
+//RS         format!(
+//RS             "`{}` declares package `{name}` but `module {name}` is ambiguous",
+//RS             Syntax::PACKAGE_FILE
+//RS         ),
+//RS         format!("`module {name}` was found in multiple files: {list}; each package name must map to exactly one module"),
+//RS         format!("rename one of the conflicting `module {name}` declarations so each package has a unique name"),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS /// E1258 (D-PLUGIN-AUTHORITY1): a `target: sandbox` package's own code uses a
+//RS /// host effect that is not covered by its declared `authority.needs` rights.
+//RS /// `Mem` remains implicit for guest allocation; every other effect must name
+//RS /// the canonical right that authorizes its host import.
+//RS pub fn e1258(effects: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1258",
+//RS         "a sandbox effect is not declared".to_string(),
+//RS         format!(
+//RS             "this package builds as `target: sandbox` and uses: {effects}. Every non-memory effect must be covered by the package's canonical `authority.needs` declaration before a host import can be registered."
+//RS         ),
+//RS         "declare each required canonical right in `authority.needs`, or remove the effectful call from the sandbox guest".to_string(),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS /// E1259 (D-DEP-WASM1=A, c81): the sandbox's wasm32 Component Model build
+//RS /// failed — missing toolchain (`wasm-tools`) or a rejected module. Never a raw
+//RS /// process crash reaching the user (I2): named tool, named failure.
+//RS pub fn e1259(detail: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1259",
+//RS         "couldn't build the sandbox's WASM Component".to_string(),
+//RS         detail.to_string(),
+//RS         "make sure `rustc` supports `--target wasm32-unknown-unknown` and `wasm-tools` is on PATH (both ship in the project's `nix develop` shell)".to_string(),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS /// D-BUILDPROFILE1: emit E1219 when the user passes `--profile=<name>` but
+//RS /// `name` is not a blessed default (`release`/`debug`) or defined in `package.jet`'s
+//RS /// `build { }` block. The typed diagnostic row owns the rendered message.
+//RS pub fn e1219(name: &str) -> Diagnostic {
+//RS     Diagnostic::from_row("E1219", &[("name", name)], None)
+//RS }
+//RS 
+// END-PORT-PENDING 2129 crates/jet-pkg-model/src/Manifest.rs:1-840
+

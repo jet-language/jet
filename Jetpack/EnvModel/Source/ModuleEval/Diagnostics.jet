@@ -1,4 +1,4 @@
-// Module-evaluation diagnostics (E0966-E0977, E1266-E1267, E1269, E1317)
+// Module-evaluation diagnostics (E0966-E0978, E1242-E1245, E1266-E1267, E1269, E1317)
 // plus the §6 merge-conflict wrapper. Each constructor carries its pinned
 // what/why/fix copy (I4); the registry row owns the protocol metadata.
 
@@ -97,9 +97,9 @@ fn envmodel_image_unknown_kind(word: String, span: Span) -> EnvModelEvalError Ne
 // `from:` names (D-JPK-IMAGE1) — e.g. `kind: .Iso` alongside
 // `from: packages.<name>`, or any `from: system.<name>`.
 fn envmodel_image_kind_from_mismatch(kind: String, span: Span) -> EnvModelEvalError Never! {
-    wants :: if kind == @IMAGE_KIND_OCI -> "packages.<name>" else -> "system.<name>"
-    got :: if kind == @IMAGE_KIND_OCI -> "system.<name>" else -> "packages.<name>"
-    status :: if kind == @IMAGE_KIND_OCI -> "active `.Oci` images are built from packages" else -> "`.Iso` disk images are frozen jetos research capture"
+    wants :: if kind == IMAGE_KIND_OCI -> "packages.<name>" else -> "system.<name>"
+    got :: if kind == IMAGE_KIND_OCI -> "system.<name>" else -> "packages.<name>"
+    status :: if kind == IMAGE_KIND_OCI -> "active `.Oci` images are built from packages" else -> "`.Iso` disk images are frozen jetos research capture"
     envmodel_error("E1266", "`kind: .{kind}` doesn't match this image's `from:`", "D-JPK-IMAGE1: {status}; this `from:` names a `{got}`", "change `from:` to `{wants}`, or change `kind:` to match what `from:` names", Val(span))
 }
 
@@ -121,10 +121,40 @@ pub fn envmodel_merge_error_to_diagnostic(error: MergeError) -> EnvModelEvalErro
     if error == {
         .SourceConflict(name, a, b) -> envmodel_error("E0967", "Source `{name}` is declared with two different refs", "One module declares `{name}` as `{a}`, another as `{b}` — sources merge by name, so the refs must agree", "Make every declaration of this source agree, or rename one of them", None)
         .FactConflict(fact_error) -> {
-            if fact_error.diagnostic() == {
+            if fact_error_diagnostic(fact_error) == {
                 .Val(diagnostic) -> EnvModelEvalError{diagnostic: diagnostic}
-                .None -> envmodel_error("E3521", "fact contribution failed", fact_error.message(), "make the contribution valid, or move it to the supported contribution layer", None)
+                .None -> envmodel_error("E3521", "fact contribution failed", fact_error_message(fact_error), "make the contribution valid, or move it to the supported contribution layer", None)
             }
         }
     }
+}
+
+fn envmodel_unknown_record_field(ty: String, field: String, known: String, span: Span) -> EnvModelEvalError Never! {
+    envmodel_error("E0972", "`{field}` isn't a field of `{ty}`", "A `{ty}` has a fixed set of fields: {known}", "Remove `{field}`, or use one of {known}", Val(span))
+}
+
+fn envmodel_missing_system_target(span: Span) -> EnvModelEvalError Never! {
+    envmodel_error("E0974", "This `System` has no `target`", "U11: every machine names the platform it runs on with a typed `target` value", "Add `target: linux.x64` (or `linux.arm64`)", Val(span))
+}
+
+fn envmodel_fleet_unknown_field(field: String, span: Span) -> EnvModelEvalError Never! {
+    envmodel_error("E1244", "`{field}` isn't a field of `Fleet`", "fleet deployment remains frozen jetos research; only `hosts` is captured for planning", "remove `{field}`; captured fleets use `hosts: {{ … }}`", Val(span))
+}
+
+fn envmodel_fleet_missing_hosts(span: Span) -> EnvModelEvalError Never! {
+    envmodel_error("E1245", "this `Fleet` has no `hosts`", "fleet deployment is frozen jetos research, but captured fleets still name hosts for later planning", "add `hosts: {{ web1: system.<name> }}` if this is research capture", Val(span))
+}
+
+fn envmodel_fleet_unknown_system(fleet: String, host: String, system: String, known: [String]) -> EnvModelEvalError Never! {
+    hint :: if known.len() == 0 -> "no `system.<name>:` contribution is defined" else -> "known systems: {known.join(", ")}"
+    envmodel_error("E1242", "the fleet `{fleet}` host `{host}` names an unknown system `{system}`", "fleets are frozen jetos research capture; captured hosts must still point at a captured system so the plan is coherent", "define captured `system.{system}: {{ … }}`, or point the host at an existing captured system ({hint})", None)
+}
+
+fn envmodel_image_bad_format(word: String, span: Span) -> EnvModelEvalError Never! {
+    envmodel_error("E0976", "`{word}` isn't a disk-image format", "Disk-image formats are frozen jetos research; Jetpack only builds `.Oci` images today", "Use `kind: .Oci` for an active image, or keep disk-image notes in the jetos research appendix", Val(span))
+}
+
+fn envmodel_image_from_unknown_system(image: String, system: String, known: [String]) -> EnvModelEvalError Never! {
+    hint :: if known.len() == 0 -> "no `system.<name>:` contribution is defined" else -> "known systems: {known.join(", ")}"
+    envmodel_error("E0978", "The image `{image}` is built from an unknown system `{system}`", "`from: system.<name>` is frozen jetos disk-image research; Jetpack's active image path uses `from: packages.<name>`", "Use `from: packages.<name>` for an `.Oci` image, or keep the system image as research capture ({hint})", None)
 }

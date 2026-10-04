@@ -1,0 +1,748 @@
+// PORT-PENDING 0914 crates-jetpack-src-runtimepolicy-lock-unix-module-group: crates/jetpack/src/RuntimePolicy/Lock/unix.rs:1-320
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use std::fs::File;
+//RS use std::io::{self, ErrorKind};
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS #[cfg(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios",
+//RS     target_os = "freebsd",
+//RS     target_os = "dragonfly",
+//RS     target_os = "openbsd",
+//RS     target_os = "netbsd"
+//RS ))]
+//RS mod supported {
+//RS     use super::*;
+//RS     use std::fs::{self, OpenOptions};
+//RS     use std::os::fd::AsRawFd as _;
+//RS     use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _};
+//RS 
+//RS     const F_GETFD: i32 = 1;
+//RS     const F_SETFD: i32 = 2;
+//RS     const FD_CLOEXEC: i32 = 1;
+//RS     const LOCK_EX: i32 = 2;
+//RS     const LOCK_NB: i32 = 4;
+//RS     const LOCK_UN: i32 = 8;
+//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS     const O_NOFOLLOW: i32 = 0o400000;
+//RS     #[cfg(any(
+//RS         target_os = "macos",
+//RS         target_os = "ios",
+//RS         target_os = "freebsd",
+//RS         target_os = "dragonfly",
+//RS         target_os = "openbsd",
+//RS         target_os = "netbsd"
+//RS     ))]
+//RS     const O_NOFOLLOW: i32 = 0x0000_0100;
+//RS 
+//RS     unsafe extern "C" {
+//RS         fn fcntl(fd: i32, command: i32, ...) -> i32;
+//RS         fn flock(fd: i32, operation: i32) -> i32;
+//RS     }
+//RS 
+//RS     pub struct LockFile {
+//RS         // Authority lives on canonical managed-root directory inode. Replacing
+//RS         // every name under `.locks` cannot create second kernel lock domain.
+//RS         owner: File,
+//RS         marker: File,
+//RS         owner_path: PathBuf,
+//RS         marker_path: PathBuf,
+//RS     }
+//RS 
+//RS     pub fn open(path: &Path) -> io::Result<LockFile> {
+//RS         open_mode(path, true)
+//RS     }
+//RS 
+//RS     pub fn open_existing(path: &Path) -> io::Result<LockFile> {
+//RS         open_mode(path, false)
+//RS     }
+//RS 
+//RS     fn open_mode(path: &Path, create: bool) -> io::Result<LockFile> {
+//RS         let owner_path = canonical_owner(path)?;
+//RS         let owner = OpenOptions::new()
+//RS             .read(true)
+//RS             .custom_flags(O_NOFOLLOW)
+//RS             .open(&owner_path)?;
+//RS         set_close_on_exec(&owner)?;
+//RS         let marker = OpenOptions::new()
+//RS             .read(true)
+//RS             .write(true)
+//RS             .create(create)
+//RS             .custom_flags(O_NOFOLLOW)
+//RS             .open(path)?;
+//RS         set_close_on_exec(&marker)?;
+//RS         let lock = LockFile {
+//RS             owner,
+//RS             marker,
+//RS             owner_path,
+//RS             marker_path: path.to_path_buf(),
+//RS         };
+//RS         validate_path(&lock, path)?;
+//RS         Ok(lock)
+//RS     }
+//RS 
+//RS     fn canonical_owner(path: &Path) -> io::Result<PathBuf> {
+//RS         let lock_dir = path.parent().ok_or_else(|| {
+//RS             io::Error::new(
+//RS                 ErrorKind::InvalidInput,
+//RS                 "jetpack lock path has no directory",
+//RS             )
+//RS         })?;
+//RS         let root = lock_dir.parent().ok_or_else(|| {
+//RS             io::Error::new(
+//RS                 ErrorKind::InvalidInput,
+//RS                 "jetpack lock path has no managed root",
+//RS             )
+//RS         })?;
+//RS         fs::canonicalize(root)
+//RS     }
+//RS 
+//RS     fn validate_identity(file: &File, path: &Path, directory: bool) -> io::Result<()> {
+//RS         let path_metadata = fs::symlink_metadata(path)?;
+//RS         let file_metadata = file.metadata()?;
+//RS         let expected_kind = if directory {
+//RS             path_metadata.file_type().is_dir() && file_metadata.file_type().is_dir()
+//RS         } else {
+//RS             path_metadata.file_type().is_file() && file_metadata.file_type().is_file()
+//RS         };
+//RS         if !expected_kind
+//RS             || path_metadata.dev() != file_metadata.dev()
+//RS             || path_metadata.ino() != file_metadata.ino()
+//RS         {
+//RS             return Err(io::Error::other(format!(
+//RS                 "jetpack lock ownership path `{}` changed",
+//RS                 path.display()
+//RS             )));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn validate_path(lock: &LockFile, path: &Path) -> io::Result<()> {
+//RS         if path != lock.marker_path {
+//RS             return Err(io::Error::new(
+//RS                 ErrorKind::InvalidInput,
+//RS                 "jetpack lock validation used a different marker path",
+//RS             ));
+//RS         }
+//RS         validate_identity(&lock.owner, &lock.owner_path, true)?;
+//RS         validate_identity(&lock.marker, path, false)
+//RS     }
+//RS 
+//RS     fn set_close_on_exec(file: &File) -> io::Result<()> {
+//RS         let fd = file.as_raw_fd();
+//RS         // SAFETY: fd belongs to live File; commands change descriptor flags.
+//RS         let flags = unsafe { fcntl(fd, F_GETFD) };
+//RS         if flags < 0 {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         // SAFETY: fd remains live; F_SETFD consumes integer flags only.
+//RS         if unsafe { fcntl(fd, F_SETFD, flags | FD_CLOEXEC) } < 0 {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn set_inheritable(lock: &LockFile) -> io::Result<()> {
+//RS         let fd = lock.owner.as_raw_fd();
+//RS         // SAFETY: fd belongs to live File; descriptor flags are read only.
+//RS         let flags = unsafe { fcntl(fd, F_GETFD) };
+//RS         if flags < 0 {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         // SAFETY: fd remains live; F_SETFD changes only descriptor flags.
+//RS         if unsafe { fcntl(fd, F_SETFD, flags & !FD_CLOEXEC) } < 0 {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn try_lock(lock: &LockFile) -> io::Result<bool> {
+//RS         // SAFETY: owner is live canonical-root directory descriptor.
+//RS         if unsafe { flock(lock.owner.as_raw_fd(), LOCK_EX | LOCK_NB) } == 0 {
+//RS             return Ok(true);
+//RS         }
+//RS         let error = io::Error::last_os_error();
+//RS         if error.kind() == ErrorKind::WouldBlock {
+//RS             Ok(false)
+//RS         } else {
+//RS             Err(error)
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn unlock(lock: &LockFile) -> io::Result<()> {
+//RS         // SAFETY: owner is live descriptor locked by flock above.
+//RS         if unsafe { flock(lock.owner.as_raw_fd(), LOCK_UN) } == 0 {
+//RS             Ok(())
+//RS         } else {
+//RS             Err(io::Error::last_os_error())
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios",
+//RS     target_os = "freebsd",
+//RS     target_os = "dragonfly",
+//RS     target_os = "openbsd",
+//RS     target_os = "netbsd"
+//RS ))]
+//RS pub(super) use supported::LockFile;
+//RS 
+//RS #[cfg(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios",
+//RS     target_os = "freebsd",
+//RS     target_os = "dragonfly",
+//RS     target_os = "openbsd",
+//RS     target_os = "netbsd"
+//RS ))]
+//RS pub(super) use supported::{
+//RS     open, open_existing, set_inheritable, try_lock, unlock, validate_path,
+//RS };
+//RS 
+//RS #[cfg(not(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios",
+//RS     target_os = "freebsd",
+//RS     target_os = "dragonfly",
+//RS     target_os = "openbsd",
+//RS     target_os = "netbsd"
+//RS )))]
+//RS pub(super) struct LockFile;
+//RS 
+//RS #[cfg(not(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios",
+//RS     target_os = "freebsd",
+//RS     target_os = "dragonfly",
+//RS     target_os = "openbsd",
+//RS     target_os = "netbsd"
+//RS )))]
+//RS fn unsupported() -> io::Error {
+//RS     io::Error::new(
+//RS         ErrorKind::Unsupported,
+//RS         "Jetpack advisory locks are unsupported on this Unix target",
+//RS     )
+//RS }
+//RS 
+//RS #[cfg(not(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios",
+//RS     target_os = "freebsd",
+//RS     target_os = "dragonfly",
+//RS     target_os = "openbsd",
+//RS     target_os = "netbsd"
+//RS )))]
+//RS pub(super) fn open(_path: &Path) -> io::Result<LockFile> {
+//RS     Err(unsupported())
+//RS }
+//RS 
+//RS #[cfg(not(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios",
+//RS     target_os = "freebsd",
+//RS     target_os = "dragonfly",
+//RS     target_os = "openbsd",
+//RS     target_os = "netbsd"
+//RS )))]
+//RS pub(super) fn open_existing(_path: &Path) -> io::Result<LockFile> {
+//RS     Err(unsupported())
+//RS }
+//RS 
+//RS #[cfg(not(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios",
+//RS     target_os = "freebsd",
+//RS     target_os = "dragonfly",
+//RS     target_os = "openbsd",
+//RS     target_os = "netbsd"
+//RS )))]
+//RS pub(super) fn validate_path(_file: &LockFile, _path: &Path) -> io::Result<()> {
+//RS     Err(unsupported())
+//RS }
+//RS 
+//RS #[cfg(not(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios",
+//RS     target_os = "freebsd",
+//RS     target_os = "dragonfly",
+//RS     target_os = "openbsd",
+//RS     target_os = "netbsd"
+//RS )))]
+//RS pub(super) fn try_lock(_file: &LockFile) -> io::Result<bool> {
+//RS     Err(unsupported())
+//RS }
+//RS 
+//RS #[cfg(not(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios",
+//RS     target_os = "freebsd",
+//RS     target_os = "dragonfly",
+//RS     target_os = "openbsd",
+//RS     target_os = "netbsd"
+//RS )))]
+//RS pub(super) fn unlock(_file: &LockFile) -> io::Result<()> {
+//RS     Err(unsupported())
+//RS }
+//RS 
+//RS #[cfg(not(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios",
+//RS     target_os = "freebsd",
+//RS     target_os = "dragonfly",
+//RS     target_os = "openbsd",
+//RS     target_os = "netbsd"
+//RS )))]
+//RS pub(super) fn set_inheritable(_file: &LockFile) -> io::Result<()> {
+//RS     Err(unsupported())
+//RS }
+// END-PORT-PENDING 0914 crates/jetpack/src/RuntimePolicy/Lock/unix.rs:1-320
+
+// PORT-PENDING 0914 crates-jetpack-src-runtimepolicy-lock-unix-module-group: crates/jetpack/src/RuntimePolicy/Lock/unsupported.rs:1-35
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use std::io::{self, ErrorKind};
+//RS use std::path::Path;
+//RS 
+//RS pub(super) struct LockFile;
+//RS 
+//RS fn unsupported() -> io::Error {
+//RS     io::Error::new(
+//RS         ErrorKind::Unsupported,
+//RS         "Jetpack advisory locks are unsupported on this target",
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn open(_path: &Path) -> io::Result<LockFile> {
+//RS     Err(unsupported())
+//RS }
+//RS 
+//RS pub(super) fn open_existing(_path: &Path) -> io::Result<LockFile> {
+//RS     Err(unsupported())
+//RS }
+//RS 
+//RS pub(super) fn validate_path(_file: &LockFile, _path: &Path) -> io::Result<()> {
+//RS     Err(unsupported())
+//RS }
+//RS 
+//RS pub(super) fn try_lock(_file: &LockFile) -> io::Result<bool> {
+//RS     Err(unsupported())
+//RS }
+//RS 
+//RS pub(super) fn unlock(_file: &LockFile) -> io::Result<()> {
+//RS     Err(unsupported())
+//RS }
+//RS 
+//RS pub(super) fn set_inheritable(_file: &LockFile) -> io::Result<()> {
+//RS     Err(unsupported())
+//RS }
+// END-PORT-PENDING 0914 crates/jetpack/src/RuntimePolicy/Lock/unsupported.rs:1-35
+
+// PORT-PENDING 0914 crates-jetpack-src-runtimepolicy-lock-unix-module-group: crates/jetpack/src/RuntimePolicy/Lock/windows.rs:1-381
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use std::ffi::c_void;
+//RS use std::fs::{File, OpenOptions};
+//RS use std::io;
+//RS use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+//RS use std::os::windows::io::AsRawHandle as _;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS type Handle = *mut c_void;
+//RS 
+//RS const FILE_SHARE_READ: u32 = 0x0000_0001;
+//RS const FILE_SHARE_WRITE: u32 = 0x0000_0002;
+//RS const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+//RS const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+//RS const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+//RS const HANDLE_FLAG_INHERIT: u32 = 0x0000_0001;
+//RS const LOCKFILE_FAIL_IMMEDIATELY: u32 = 0x0000_0001;
+//RS const LOCKFILE_EXCLUSIVE_LOCK: u32 = 0x0000_0002;
+//RS const ERROR_LOCK_VIOLATION: i32 = 33;
+//RS 
+//RS #[repr(C)]
+//RS struct Overlapped {
+//RS     internal: usize,
+//RS     internal_high: usize,
+//RS     offset: [u32; 2],
+//RS     event: Handle,
+//RS }
+//RS 
+//RS #[repr(C)]
+//RS struct FileTime {
+//RS     low: u32,
+//RS     high: u32,
+//RS }
+//RS 
+//RS #[repr(C)]
+//RS struct ByHandleFileInformation {
+//RS     attributes: u32,
+//RS     creation_time: FileTime,
+//RS     last_access_time: FileTime,
+//RS     last_write_time: FileTime,
+//RS     volume_serial: u32,
+//RS     size_high: u32,
+//RS     size_low: u32,
+//RS     links: u32,
+//RS     file_index_high: u32,
+//RS     file_index_low: u32,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, PartialEq, Eq)]
+//RS struct FileIdentity {
+//RS     volume_serial: u32,
+//RS     file_index_high: u32,
+//RS     file_index_low: u32,
+//RS }
+//RS 
+//RS pub(super) struct LockFile {
+//RS     file: File,
+//RS     path: PathBuf,
+//RS     identity: FileIdentity,
+//RS     parents: Vec<PinnedComponent>,
+//RS }
+//RS 
+//RS struct PinnedComponent {
+//RS     file: File,
+//RS     path: PathBuf,
+//RS     identity: FileIdentity,
+//RS }
+//RS 
+//RS unsafe extern "system" {
+//RS     fn SetHandleInformation(handle: Handle, mask: u32, flags: u32) -> i32;
+//RS     fn GetFileInformationByHandle(handle: Handle, information: *mut ByHandleFileInformation)
+//RS         -> i32;
+//RS     fn LockFileEx(
+//RS         handle: Handle,
+//RS         flags: u32,
+//RS         reserved: u32,
+//RS         bytes_low: u32,
+//RS         bytes_high: u32,
+//RS         overlapped: *mut Overlapped,
+//RS     ) -> i32;
+//RS     fn UnlockFileEx(
+//RS         handle: Handle,
+//RS         reserved: u32,
+//RS         bytes_low: u32,
+//RS         bytes_high: u32,
+//RS         overlapped: *mut Overlapped,
+//RS     ) -> i32;
+//RS }
+//RS 
+//RS fn overlapped() -> Overlapped {
+//RS     Overlapped {
+//RS         internal: 0,
+//RS         internal_high: 0,
+//RS         offset: [0, 0],
+//RS         event: std::ptr::null_mut(),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn open(path: &Path) -> io::Result<LockFile> {
+//RS     open_with_create(path, true)
+//RS }
+//RS 
+//RS pub(super) fn open_existing(path: &Path) -> io::Result<LockFile> {
+//RS     open_with_create(path, false)
+//RS }
+//RS 
+//RS fn open_with_create(path: &Path, create: bool) -> io::Result<LockFile> {
+//RS     // Pin each existing directory from the filesystem root through the lock
+//RS     // parent before opening the leaf. Denying delete sharing on every handle
+//RS     // prevents a junction or directory replacement from changing what later
+//RS     // path validation names.
+//RS     let parents = pin_parent_components(path)?;
+//RS     let file = open_raw(path, create)?;
+//RS     let identity = file_identity(&file)?;
+//RS     let lock = LockFile {
+//RS         file,
+//RS         path: path.to_path_buf(),
+//RS         identity,
+//RS         parents,
+//RS     };
+//RS     validate_path(&lock, path)?;
+//RS     Ok(lock)
+//RS }
+//RS 
+//RS fn pin_parent_components(path: &Path) -> io::Result<Vec<PinnedComponent>> {
+//RS     let parent = path.parent().ok_or_else(|| {
+//RS         io::Error::new(
+//RS             io::ErrorKind::InvalidInput,
+//RS             "jetpack lock path has no parent",
+//RS         )
+//RS     })?;
+//RS     let mut paths = parent
+//RS         .ancestors()
+//RS         .filter(|component| !component.as_os_str().is_empty())
+//RS         .map(Path::to_path_buf)
+//RS         .collect::<Vec<_>>();
+//RS     paths.reverse();
+//RS     let mut pinned = Vec::with_capacity(paths.len());
+//RS     for component in paths {
+//RS         let file = open_directory_raw(&component)?;
+//RS         let identity = file_identity(&file)?;
+//RS         pinned.push(PinnedComponent {
+//RS             file,
+//RS             path: component,
+//RS             identity,
+//RS         });
+//RS     }
+//RS     Ok(pinned)
+//RS }
+//RS 
+//RS fn open_raw(path: &Path, create: bool) -> io::Result<File> {
+//RS     let file = OpenOptions::new()
+//RS         .read(true)
+//RS         .write(true)
+//RS         .create(create)
+//RS         // Open reparse object itself, never its target. Validation below
+//RS         // rejects every reparse-point attribute before lock use.
+//RS         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+//RS         // Deny delete sharing: path cannot be replaced while any contender
+//RS         // holds its handle.
+//RS         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+//RS         .open(path)?;
+//RS     // SAFETY: raw handle belongs to live file; inheritance metadata only.
+//RS     if unsafe { SetHandleInformation(file.as_raw_handle().cast(), HANDLE_FLAG_INHERIT, 0) } == 0 {
+//RS         return Err(io::Error::last_os_error());
+//RS     }
+//RS     if file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+//RS         return Err(io::Error::other(format!(
+//RS             "jetpack lock path `{}` is a reparse point",
+//RS             path.display()
+//RS         )));
+//RS     }
+//RS     Ok(file)
+//RS }
+//RS 
+//RS fn open_directory_raw(path: &Path) -> io::Result<File> {
+//RS     let file = OpenOptions::new()
+//RS         // Metadata/identity access only. Do not request data read access from
+//RS         // directories whose ACL permits traversal but not listing.
+//RS         .access_mode(0)
+//RS         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
+//RS         // No FILE_SHARE_DELETE: every component name remains pinned while
+//RS         // the lock participates in acquisition or validation.
+//RS         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+//RS         .open(path)?;
+//RS     // SAFETY: raw handle belongs to live directory; inheritance metadata only.
+//RS     if unsafe { SetHandleInformation(file.as_raw_handle().cast(), HANDLE_FLAG_INHERIT, 0) } == 0 {
+//RS         return Err(io::Error::last_os_error());
+//RS     }
+//RS     if file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+//RS         return Err(io::Error::other(format!(
+//RS             "jetpack lock parent `{}` is a reparse point",
+//RS             path.display()
+//RS         )));
+//RS     }
+//RS     Ok(file)
+//RS }
+//RS 
+//RS fn file_identity(file: &File) -> io::Result<FileIdentity> {
+//RS     let mut information = std::mem::MaybeUninit::<ByHandleFileInformation>::uninit();
+//RS     // SAFETY: live handle; Windows initializes complete output on success.
+//RS     if unsafe { GetFileInformationByHandle(file.as_raw_handle().cast(), information.as_mut_ptr()) }
+//RS         == 0
+//RS     {
+//RS         return Err(io::Error::last_os_error());
+//RS     }
+//RS     // SAFETY: call above succeeded and initialized output.
+//RS     let information = unsafe { information.assume_init() };
+//RS     Ok(FileIdentity {
+//RS         volume_serial: information.volume_serial,
+//RS         file_index_high: information.file_index_high,
+//RS         file_index_low: information.file_index_low,
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn validate_path(lock: &LockFile, path: &Path) -> io::Result<()> {
+//RS     if path != lock.path {
+//RS         return Err(io::Error::other("jetpack lock validation path changed"));
+//RS     }
+//RS     if lock.file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+//RS         return Err(io::Error::other(
+//RS             "jetpack lock handle became a reparse point",
+//RS         ));
+//RS     }
+//RS     for component in &lock.parents {
+//RS         if component.file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+//RS             return Err(io::Error::other(format!(
+//RS                 "jetpack lock parent `{}` became a reparse point",
+//RS                 component.path.display()
+//RS             )));
+//RS         }
+//RS         let reopened = open_directory_raw(&component.path)?;
+//RS         if file_identity(&reopened)? != component.identity {
+//RS             return Err(io::Error::other(format!(
+//RS                 "jetpack lock parent `{}` changed file identity",
+//RS                 component.path.display()
+//RS             )));
+//RS         }
+//RS     }
+//RS     let reopened = open_raw(path, false)?;
+//RS     if file_identity(&reopened)? != lock.identity {
+//RS         return Err(io::Error::other(format!(
+//RS             "jetpack lock path `{}` changed file identity",
+//RS             path.display()
+//RS         )));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub(super) fn try_lock(lock: &LockFile) -> io::Result<bool> {
+//RS     let mut state = overlapped();
+//RS     // SAFETY: handle live; initialized state lives through synchronous call.
+//RS     if unsafe {
+//RS         LockFileEx(
+//RS             lock.file.as_raw_handle().cast(),
+//RS             LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+//RS             0,
+//RS             1,
+//RS             0,
+//RS             &mut state,
+//RS         )
+//RS     } != 0
+//RS     {
+//RS         return Ok(true);
+//RS     }
+//RS     let error = io::Error::last_os_error();
+//RS     if error.raw_os_error() == Some(ERROR_LOCK_VIOLATION) {
+//RS         Ok(false)
+//RS     } else {
+//RS         Err(error)
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn unlock(lock: &LockFile) -> io::Result<()> {
+//RS     let mut state = overlapped();
+//RS     // SAFETY: handle live; range matches LockFileEx above.
+//RS     if unsafe { UnlockFileEx(lock.file.as_raw_handle().cast(), 0, 1, 0, &mut state) } != 0 {
+//RS         Ok(())
+//RS     } else {
+//RS         Err(io::Error::last_os_error())
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn set_inheritable(lock: &LockFile) -> io::Result<()> {
+//RS     // SAFETY: raw handle belongs to the live lock file; this changes only its
+//RS     // inheritance flag for the next child launch.
+//RS     if unsafe {
+//RS         SetHandleInformation(
+//RS             lock.file.as_raw_handle().cast(),
+//RS             HANDLE_FLAG_INHERIT,
+//RS             HANDLE_FLAG_INHERIT,
+//RS         )
+//RS     } != 0
+//RS     {
+//RS         Ok(())
+//RS     } else {
+//RS         Err(io::Error::last_os_error())
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn lockfileex_runtime_serializes_and_pins_file_identity() {
+//RS         let root = std::env::temp_dir().join(format!("jetpack-lockfileex-{}", std::process::id()));
+//RS         std::fs::create_dir_all(&root).unwrap();
+//RS         let path = root.join("lock");
+//RS         let first = open(&path).unwrap();
+//RS         let second = open(&path).unwrap();
+//RS         assert!(try_lock(&first).unwrap());
+//RS         assert!(!try_lock(&second).unwrap());
+//RS         assert!(std::fs::rename(&path, root.join("replacement")).is_err());
+//RS         unlock(&first).unwrap();
+//RS         assert!(try_lock(&second).unwrap());
+//RS         unlock(&second).unwrap();
+//RS         drop(first);
+//RS         drop(second);
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn reparse_points_fail_closed_when_creation_is_permitted() {
+//RS         let root =
+//RS             std::env::temp_dir().join(format!("jetpack-lockfileex-reparse-{}", std::process::id()));
+//RS         std::fs::create_dir_all(&root).unwrap();
+//RS         let target = root.join("target");
+//RS         let link = root.join("lock");
+//RS         std::fs::write(&target, "target").unwrap();
+//RS         match std::os::windows::fs::symlink_file(&target, &link) {
+//RS             Ok(()) => assert!(open(&link).is_err()),
+//RS             Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {}
+//RS             Err(error) => panic!("couldn't create reparse fixture: {error}"),
+//RS         }
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn parent_junction_is_rejected_before_lock_leaf_open() {
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jetpack-lockfileex-parent-junction-{}",
+//RS             std::process::id()
+//RS         ));
+//RS         std::fs::create_dir_all(&root).unwrap();
+//RS         let target = root.join("target");
+//RS         let junction = root.join("junction");
+//RS         std::fs::create_dir_all(&target).unwrap();
+//RS         let output = std::process::Command::new("cmd")
+//RS             .args(["/C", "mklink", "/J"])
+//RS             .arg(&junction)
+//RS             .arg(&target)
+//RS             .output()
+//RS             .unwrap();
+//RS         if output.status.success() {
+//RS             assert!(
+//RS                 open(&junction.join("lock")).is_err(),
+//RS                 "a junction in any parent component must fail closed"
+//RS             );
+//RS             std::fs::remove_dir(&junction).unwrap();
+//RS         }
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn parent_replacement_is_blocked_while_component_identity_is_pinned() {
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jetpack-lockfileex-parent-replace-{}",
+//RS             std::process::id()
+//RS         ));
+//RS         let parent = root.join("state");
+//RS         let displaced = root.join("state-displaced");
+//RS         std::fs::create_dir_all(&parent).unwrap();
+//RS         let path = parent.join("lock");
+//RS         let lock = open(&path).unwrap();
+//RS         assert!(std::fs::rename(&parent, &displaced).is_err());
+//RS         validate_path(&lock, &path).unwrap();
+//RS         drop(lock);
+//RS         std::fs::rename(&parent, &displaced).unwrap();
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS }
+// END-PORT-PENDING 0914 crates/jetpack/src/RuntimePolicy/Lock/windows.rs:1-381
+

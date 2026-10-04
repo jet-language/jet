@@ -1,0 +1,399 @@
+// Host-neutral bounded projection of checked facts (DynamicCompletions.rs).
+// No command/provider/shell/network/ambient-value execution belongs at this seam.
+use core.math as completion_math
+
+pub JET_CLI_MAX_COMPLETION_SOURCE_BYTES :: 1048576
+pub JET_CLI_MAX_TYPED_FACTS :: 4096
+pub JET_CLI_MAX_FACT_VALUES :: 4096
+pub JET_CLI_MAX_COMPLETION_CANDIDATES :: 256
+pub JET_CLI_MAX_DIRECTORY_ENTRIES :: 4096
+pub JET_CLI_MAX_PATH_DEPTH :: 64
+pub JET_CLI_MAX_AUTHORITY_ROOTS :: 64
+pub enum JetCLICompletionKind { Enum Tag Literal Bool Path Job }
+pub enum JetCLICompletionFreshness { Fresh Stale }
+pub enum JetCLICompletionTarget { Value Path Jobs }
+pub struct JetCLICompletionReplacement { pub span: Span, pub text: String }
+pub struct JetCLICompletionCandidate {
+    pub label: String
+    pub kind: JetCLICompletionKind
+    pub detail: String
+    pub replacement: JetCLICompletionReplacement
+    pub source: String
+    pub freshness: JetCLICompletionFreshness
+    pub rank: U32
+}
+pub struct JetCLICompletionResult {
+    pub token_span: Span
+    pub prefix: String
+    pub replacement_span: Span
+    pub candidates: [JetCLICompletionCandidate]
+    pub truncated: Bool
+    pub schema_revision: U64
+    pub revision: U64
+    pub freshness: JetCLICompletionFreshness
+}
+pub struct JetCLICompletionValueFact { pub value: String, pub detail: String?, pub source: String?, pub rank: U32 }
+pub enum JetCLITypedCompletionKind {
+    Enum(type_name: String, variants: [JetCLICompletionValueFact])
+    Tag(tag_name: String, values: [JetCLICompletionValueFact])
+    Literal(type_name: String, values: [JetCLICompletionValueFact])
+    Bool
+}
+pub struct JetCLITypedCompletionFact { pub command: String?, pub field: String, pub kind: JetCLITypedCompletionKind }
+pub struct JetCLICompletionLimits { pub max_candidates: Int, pub max_directory_entries: Int, pub max_path_depth: Int }
+pub struct JetCLICompletionRequest {
+    pub source: String
+    pub cursor: Int
+    pub target: JetCLICompletionTarget
+    pub field: String?
+    pub command: String?
+    pub schema_revision: U64
+    pub revision: U64
+}
+// Context owns its immutable bundle once; functions borrow it, never copy it per candidate.
+pub struct JetCLICompletionContext {
+    pub schema: CLICommandSchema
+    pub schema_revision: U64
+    pub revision: U64
+    pub typed_facts: [JetCLITypedCompletionFact]
+    pub path_authority: JetCLIPathAuthority?
+    pub limits: JetCLICompletionLimits
+}
+#Error
+pub enum JetCLICompletionError {
+    InvalidCursor(cursor: Int, source_len: Int)
+    StaleSchema(expected: U64, actual: U64)
+    StaleRevision(expected: U64, actual: U64)
+    MissingField(JetCLICompletionTarget)
+    UnknownCommand(String)
+    UnknownField(command: String?, field: String)
+    ConflictingFacts(command: String?, field: String)
+    UnsupportedInput(field: String, kind: String, target: JetCLICompletionTarget)
+    MissingPathAuthority
+    PathOutsideAuthority(String)
+    PathDepthExceeded(path: String, limit: Int)
+    InvalidFact(field: String, reason: String)
+    InvalidLimit(String)
+    Filesystem(path: OSPath, error: String)
+}
+// Rust CompletionKind::as_str / preserves_declaration_order / derived Ord.
+pub fn jet_cli_completion_kind_index(kind: JetCLICompletionKind) -> Int Never! {
+    if kind == {
+        .Enum -> 0
+        .Tag -> 1
+        .Literal -> 2
+        .Bool -> 3
+        .Path -> 4
+        .Job -> 5
+    }
+}
+pub fn jet_cli_completion_kind_name(kind: JetCLICompletionKind) -> String Never! {
+    if kind == {
+        .Enum -> "enum"
+        .Tag -> "tag"
+        .Literal -> "literal"
+        .Bool -> "bool"
+        .Path -> "path"
+        .Job -> "job"
+    }
+}
+// Rust CompletionFreshness::as_str / target_name.
+pub fn jet_cli_completion_freshness_name(freshness: JetCLICompletionFreshness) -> String Never! {
+    if freshness == {
+        .Fresh -> "fresh"
+        .Stale -> "stale"
+    }
+}
+pub fn jet_cli_completion_target_name(target: JetCLICompletionTarget) -> String Never! {
+    if target == {
+        .Value -> "value"
+        .Path -> "path"
+        .Jobs -> "job"
+    }
+}
+// Rust CompletionError::fmt.
+pub fn jet_cli_completion_error_message(error: JetCLICompletionError) -> String Never! {
+    if error == {
+        .InvalidCursor(cursor, len) -> "completion cursor {cursor} is invalid for {len} source bytes"
+        .StaleSchema(expected, actual) -> "completion schema is stale (request {expected}, context {actual})"
+        .StaleRevision(expected, actual) -> "completion source is stale (request {expected}, context {actual})"
+        .MissingField(target) -> "completion target {jet_cli_completion_target_name(target)} needs a checked field"
+        .UnknownCommand(command) -> "unknown checked completion command `{command}`"
+        .UnknownField(command, field) -> if command == {
+            .Val(name) -> "unknown checked completion field `{field}` for `{name}`"
+            None -> "unknown checked completion field `{field}`"
+        }
+        .ConflictingFacts(command, field) -> if command == {
+            .Val(name) -> "conflicting completion facts for `{name}.{field}`"
+            None -> "conflicting completion facts for `{field}`"
+        }
+        .UnsupportedInput(field, kind, target) -> "checked input `{field}` has kind {kind}, which cannot serve {jet_cli_completion_target_name(target)} completion"
+        .MissingPathAuthority -> "path completion needs explicit filesystem authority"
+        .PathOutsideAuthority(path) -> "completion path is outside the granted roots: {path}"
+        .PathDepthExceeded(path, limit) -> "completion path exceeds the {limit}-component bound: {path}"
+        .InvalidFact(field, reason) -> "invalid completion fact for `{field}`: {reason}"
+        .InvalidLimit(name) -> "completion limit `{name}` must be non-zero"
+        .Filesystem(path, message) -> "could not inspect completion path {completion_paths.display(path)}: {message}"
+    }
+}
+// Rust CompletionReplacement::new / CompletionResult::is_empty.
+pub fn jet_cli_completion_replacement_new(span: Span, text: String) -> JetCLICompletionReplacement Never! { JetCLICompletionReplacement{span: span, text: text} }
+pub fn jet_cli_completion_result_is_empty(result: JetCLICompletionResult) -> Bool Never! { result.candidates.is_empty() }
+// Rust CompletionValueFact::new; detail/source are explicit fields rather than builder aliases.
+pub fn jet_cli_completion_value_new(value: String) -> JetCLICompletionValueFact Never! { JetCLICompletionValueFact{value: value, detail: None, source: None, rank: U32{0}} }
+// Rust TypedCompletionFact::{enum_values,tag_values,literal_values,bool_value,for_command}:
+// one constructor accepts the semantic family and scope without redundant builders.
+pub fn jet_cli_completion_fact_new(field: String, kind: JetCLITypedCompletionKind, command: String?) -> JetCLITypedCompletionFact Never! { JetCLITypedCompletionFact{field: field, kind: kind, command: command} }
+// Rust CompletionLimits::default / bounded.
+pub fn jet_cli_completion_limits_default() -> JetCLICompletionLimits Never! { JetCLICompletionLimits{max_candidates: 256, max_directory_entries: 4096, max_path_depth: 64} }
+pub fn jet_cli_completion_limits_bounded(limits: JetCLICompletionLimits) -> JetCLICompletionLimits JetCLICompletionError! {
+    if limits.max_candidates <= 0 -> return Err(JetCLICompletionError.InvalidLimit("max_candidates"))
+    if limits.max_directory_entries <= 0 -> return Err(JetCLICompletionError.InvalidLimit("max_directory_entries"))
+    if limits.max_path_depth <= 0 -> return Err(JetCLICompletionError.InvalidLimit("max_path_depth"))
+    Ok(JetCLICompletionLimits{max_candidates: completion_math.min(limits.max_candidates, 256), max_directory_entries: completion_math.min(limits.max_directory_entries, 4096), max_path_depth: completion_math.min(limits.max_path_depth, 64)})
+}
+// Rust CompletionRequest::{new,for_value,for_path,for_jobs,in_command} consolidated.
+pub fn jet_cli_completion_request_new(source: String, cursor: Int, target: JetCLICompletionTarget, field: String?, command: String?, schema_revision: U64, revision: U64) -> JetCLICompletionRequest Never! {
+    JetCLICompletionRequest{source: source, cursor: cursor, target: target, field: field, command: command, schema_revision: schema_revision, revision: revision}
+}
+// Rust CompletionContext::{new,with_typed_facts,with_path_authority,with_limits};
+// optional facts/authority/limits remain explicit context fields.
+pub fn jet_cli_completion_context_new(schema: ^CLICommandSchema, schema_revision: U64, revision: U64) -> JetCLICompletionContext Never! {
+    JetCLICompletionContext{schema: ^schema, schema_revision: schema_revision, revision: revision, typed_facts: [JetCLITypedCompletionFact]{}, path_authority: None, limits: jet_cli_completion_limits_default()}
+}
+// Rust char::is_control (Unicode Cc = C0 and C1), without lossy decoding.
+fn jet_cli_completion_has_control(text: String) -> Bool Never! {
+    bytes :: text.bytes()
+    loop (index, byte) in bytes {
+        if byte < (U8{32}) || byte == (U8{127}) -> return true
+        if byte == (U8{194}) && index + 1 < bytes.len() && bytes[index + 1] >= (U8{128}) && bytes[index + 1] <= (U8{159}) -> return true
+    }
+    false
+}
+fn jet_cli_completion_slice(source: String, start: Int, end: Int) -> String Never! { String.from_bytes(source.bytes()[start..<end]) ?? panic("completion UTF-8 boundary") }
+// Rust token_span. Reuse Foundation's Unicode cursor, without materializing scalars.
+pub fn jet_cli_completion_token_span(source: String, cursor: Int) -> Span Never! {
+    start := 0
+    bytes :: source.bytes()
+    end := bytes.len()
+    offset := 0
+    loop offset < bytes.len() {
+        next_offset :: offset + diagnostic_utf8_width(bytes, offset)
+        if diagnostic_is_whitespace_at(bytes, offset) {
+            if next_offset <= cursor -> start = next_offset
+            if offset >= cursor {
+                end = offset
+                break
+            }
+        }
+        offset = next_offset
+    }
+    Span{start: start, end: end}
+}
+fn jet_cli_completion_wanted(field: String) -> String Never! {
+    if field.starts_with("--") -> return jet_cli_completion_slice(field, 2, field.bytes().len())
+    if field.starts_with("-") -> return jet_cli_completion_slice(field, 1, field.bytes().len())
+    ~field
+}
+// Rust value_start; rfind('=') is a byte index here, not String.slice coordinates.
+pub fn jet_cli_completion_value_start(source: String, token: Span, cursor: Int, field: String?) -> Int Never! {
+    selected :: field ?? return token.start
+    equals := -1
+    bytes :: source.bytes()
+    loop index in token.start..<cursor { if bytes[index] == (U8{61}) -> equals = index }
+    if equals < 0 -> return token.start
+    head :: jet_cli_completion_slice(source, token.start, equals)
+    wanted :: jet_cli_completion_wanted(selected)
+    long :: "--{wanted}"
+    short :: "-{wanted}"
+    if head == selected || head == long || head == short -> return equals + 1
+    token.start
+}
+// Rust find_input. Return scope/input indexes, never clone the checked input bundle.
+fn jet_cli_completion_find_input(schema: CLICommandSchema, command: String?, field: String) -> (scope: Int, index: Int) JetCLICompletionError! {
+    wanted :: jet_cli_completion_wanted(field)
+    if command == {
+        None -> {
+            loop (index, input) in schema.inputs { if input.field == field || input.flag == wanted || input.short == (Val(wanted)) -> return Ok((scope: -1, index: index)) }
+        }
+        .Val(name) -> {
+            loop (scope, candidate) in schema.commands {
+                if candidate.name != name -> next
+                loop (index, input) in candidate.inputs { if input.field == field || input.flag == wanted || input.short == (Val(wanted)) -> return Ok((scope: scope, index: index)) }
+                return Err(JetCLICompletionError.UnknownField{command: ~command, field: ~field})
+            }
+            return Err(JetCLICompletionError.UnknownCommand(~name))
+        }
+    }
+    Err(JetCLICompletionError.UnknownField{command: ~command, field: ~field})
+}
+// Rust matching_fact.
+fn jet_cli_completion_matching_fact(facts: [JetCLITypedCompletionFact], command: String?, field: String) -> Int? JetCLICompletionError! {
+    found := Int?{None}
+    loop (index, fact) in facts {
+        if fact.field != field || fact.command != command -> next
+        if found != None -> return Err(JetCLICompletionError.ConflictingFacts{command: ~command, field: ~field})
+        found = Val(index)
+    }
+    Ok(found)
+}
+// Rust validate_fact_name / validate_fact_value / validate_fact_values.
+fn jet_cli_completion_validate_name(field: String, value: String, label: String) JetCLICompletionError! {
+    if value.is_empty() || value.bytes().len() > JET_CLI_MAX_COMPLETION_SOURCE_BYTES || jet_cli_completion_has_control(value) -> return Err(JetCLICompletionError.InvalidFact{field: ~field, reason: "{label} is empty, too large, or contains a control character"})
+}
+fn jet_cli_completion_validate_value(field: String, value: JetCLICompletionValueFact) JetCLICompletionError! {
+    if value.value.is_empty() || value.value.bytes().len() > JET_CLI_MAX_COMPLETION_SOURCE_BYTES -> return Err(JetCLICompletionError.InvalidFact{field: ~field, reason: "value is empty or too large"})
+    if jet_cli_completion_has_control(value.value) -> return Err(JetCLICompletionError.InvalidFact{field: ~field, reason: "value contains a control character"})
+    if value.detail == {
+        .Val(text) -> { if text.bytes().len() > JET_CLI_MAX_COMPLETION_SOURCE_BYTES || jet_cli_completion_has_control(text) -> return Err(JetCLICompletionError.InvalidFact{field: ~field, reason: "detail is too large or contains a control character"}) }
+        None -> {}
+    }
+    if value.source == {
+        .Val(text) -> { if text.bytes().len() > JET_CLI_MAX_COMPLETION_SOURCE_BYTES || jet_cli_completion_has_control(text) -> return Err(JetCLICompletionError.InvalidFact{field: ~field, reason: "source is too large or contains a control character"}) }
+        None -> {}
+    }
+}
+fn jet_cli_completion_validate_values(field: String, values: [JetCLICompletionValueFact]) JetCLICompletionError! {
+    if values.len() > JET_CLI_MAX_FACT_VALUES -> return Err(JetCLICompletionError.InvalidFact{field: ~field, reason: "more than 4096 values"})
+    loop value in values -> jet_cli_completion_validate_value(field, value)
+}
+// Rust validate_typed_fact.
+fn jet_cli_completion_validate_fact(fact: JetCLITypedCompletionFact) JetCLICompletionError! {
+    if fact.field.is_empty() || jet_cli_completion_has_control(fact.field) -> return Err(JetCLICompletionError.InvalidFact{field: ~fact.field, reason: "field is empty or contains a control character"})
+    if fact.command == {
+        .Val(command) -> { if command.is_empty() || jet_cli_completion_has_control(command) -> return Err(JetCLICompletionError.InvalidFact{field: ~fact.field, reason: "command is empty or contains a control character"}) }
+        None -> {}
+    }
+    if fact.kind == {
+        .Enum(name, values) -> {
+            jet_cli_completion_validate_name(fact.field, name, "enum type")
+            jet_cli_completion_validate_values(fact.field, values)
+        }
+        .Tag(name, values) -> {
+            jet_cli_completion_validate_name(fact.field, name, "tag name")
+            jet_cli_completion_validate_values(fact.field, values)
+        }
+        .Literal(name, values) -> {
+            jet_cli_completion_validate_name(fact.field, name, "literal type")
+            jet_cli_completion_validate_values(fact.field, values)
+        }
+        .Bool -> {}
+    }
+}
+fn jet_cli_completion_candidate(label: String, kind: JetCLICompletionKind, detail: String, span: Span, source: String, rank: Int) -> JetCLICompletionCandidate Never! {
+    JetCLICompletionCandidate{label: ~label, kind: kind, detail: detail, replacement: jet_cli_completion_replacement_new(span, label), source: source, freshness: JetCLICompletionFreshness.Fresh, rank: U32{rank}}
+}
+// Rust bool_candidates.
+fn jet_cli_completion_bool_candidates(span: Span, prefix: String) -> [JetCLICompletionCandidate] Never! {
+    result := [JetCLICompletionCandidate]{}
+    values :: [String]{"false", "true"}
+    loop (rank, value) in values { if value.starts_with(prefix) -> &result.push(jet_cli_completion_candidate(~value, JetCLICompletionKind.Bool, "Boolean value", span, "typed-schema", if value == prefix -> 0 else -> 1000 + rank)) }
+    result
+}
+// Rust typed_candidates.
+fn jet_cli_completion_typed_candidates(kind: JetCLICompletionKind, detail: String, values: [JetCLICompletionValueFact], span: Span, prefix: String, field: String) -> [JetCLICompletionCandidate] JetCLICompletionError! {
+    jet_cli_completion_validate_values(field, values)
+    result := [JetCLICompletionCandidate]{}
+    loop value in values {
+        if !value.value.starts_with(prefix) -> next
+        rank :: (if value.value == prefix -> 0 else -> 1000000) + completion_math.min(Int.from_u32(value.rank), 999999)
+        &result.push(jet_cli_completion_candidate(~value.value, kind, value.detail ?? ~detail, span, value.source ?? "typed-schema", rank))
+    }
+    Ok(result)
+}
+// Rust value_candidates (schema selection and matching fact handled by query).
+fn jet_cli_completion_value_candidates(input: TCLIInput, request: JetCLICompletionRequest, context: JetCLICompletionContext, span: Span, prefix: String) -> [JetCLICompletionCandidate] JetCLICompletionError! {
+    kind :: cli_input_value_kind(input)
+    selected :: jet_cli_completion_matching_fact(context.typed_facts, request.command, input.field)
+    index :: selected ?? return Ok(if kind == TCLIValueKind.Bool -> jet_cli_completion_bool_candidates(span, prefix) else -> [JetCLICompletionCandidate]{})
+    fact :: context.typed_facts[index]
+    jet_cli_completion_validate_fact(fact)
+    unsupported :: JetCLICompletionError.UnsupportedInput{field: ~input.field, kind: cli_value_kind_name(kind), target: request.target}
+    if fact.kind == {
+        .Enum(name, values) -> {
+            if kind != TCLIValueKind.String -> return Err(unsupported)
+            jet_cli_completion_typed_candidates(JetCLICompletionKind.Enum, "enum {name}", values, span, prefix, input.field)
+        }
+        .Tag(name, values) -> {
+            if kind != TCLIValueKind.String -> return Err(unsupported)
+            jet_cli_completion_typed_candidates(JetCLICompletionKind.Tag, "tag {name}", values, span, prefix, input.field)
+        }
+        .Literal(name, values) -> jet_cli_completion_typed_candidates(JetCLICompletionKind.Literal, "literal {name}", values, span, prefix, input.field)
+        .Bool -> {
+            if kind != TCLIValueKind.Bool -> return Err(unsupported)
+            Ok(jet_cli_completion_bool_candidates(span, prefix))
+        }
+    }
+}
+// Rust job_candidates.
+fn jet_cli_completion_job_candidates(schema: CLICommandSchema, span: Span, prefix: String) -> [JetCLICompletionCandidate] Never! {
+    result := [JetCLICompletionCandidate]{}
+    loop job in schema.jobs {
+        if job.scope == JobScope.Internal || !job.name.starts_with(prefix) -> next
+        scope :: if job.scope == {
+            .Dev -> "dev"
+            .Ship -> "ship"
+            .Internal -> "internal"
+        }
+        &result.push(jet_cli_completion_candidate(~job.name, JetCLICompletionKind.Job, job.doc ?? "{scope} job", span, "job-schema", if job.name == prefix -> 0 else -> 1))
+    }
+    result
+}
+// Rust candidate_order; sort_by is stable, so equal typed ranks preserve declarations.
+pub fn jet_cli_completion_candidate_order(left: JetCLICompletionCandidate, right: JetCLICompletionCandidate) -> Ordering Never! {
+    rank :: left.rank <=> right.rank
+    if rank != Ordering.Equal -> return rank
+    if left.kind == right.kind && jet_cli_completion_kind_index(left.kind) < 4 -> return Ordering.Equal
+    label :: left.label <=> right.label
+    if label != Ordering.Equal -> return label
+    kind :: jet_cli_completion_kind_index(left.kind) <=> jet_cli_completion_kind_index(right.kind)
+    if kind != Ordering.Equal -> return kind
+    detail :: left.detail <=> right.detail
+    if detail != Ordering.Equal -> return detail
+    left.source <=> right.source
+}
+// Rust query. Revision checks precede all lexical/fact/filesystem projection.
+pub fn jet_cli_completion_query(request: JetCLICompletionRequest, context: JetCLICompletionContext) -[FS.Read]> JetCLICompletionResult JetCLICompletionError! {
+    if request.schema_revision != context.schema_revision -> return Err(JetCLICompletionError.StaleSchema{expected: request.schema_revision, actual: context.schema_revision})
+    if request.revision != context.revision -> return Err(JetCLICompletionError.StaleRevision{expected: request.revision, actual: context.revision})
+    bytes :: request.source.bytes()
+    if bytes.len() > JET_CLI_MAX_COMPLETION_SOURCE_BYTES || request.cursor < 0 || request.cursor > bytes.len() -> return Err(JetCLICompletionError.InvalidCursor{cursor: request.cursor, source_len: bytes.len()})
+    if request.cursor < bytes.len() && bytes[request.cursor] >= (U8{128}) && bytes[request.cursor] < (U8{192}) -> return Err(JetCLICompletionError.InvalidCursor{cursor: request.cursor, source_len: bytes.len()})
+    limits :: jet_cli_completion_limits_bounded(context.limits)
+    if context.typed_facts.len() > JET_CLI_MAX_TYPED_FACTS -> return Err(JetCLICompletionError.InvalidFact{field: "<context>", reason: "more than 4096 typed facts"})
+    token :: jet_cli_completion_token_span(request.source, request.cursor)
+    start :: jet_cli_completion_value_start(request.source, token, request.cursor, request.field)
+    span :: Span{start: start, end: request.cursor}
+    prefix :: jet_cli_completion_slice(request.source, start, request.cursor)
+    candidates := [JetCLICompletionCandidate]{}
+    truncated := false
+    if request.target == JetCLICompletionTarget.Jobs {
+        candidates = jet_cli_completion_job_candidates(context.schema, span, prefix)
+    } else {
+        field :: request.field ?? return Err(JetCLICompletionError.MissingField(request.target))
+        selected :: jet_cli_completion_find_input(context.schema, request.command, field)
+        input :: if selected.scope < 0 -> context.schema.inputs[selected.index] else -> context.schema.commands[selected.scope].inputs[selected.index]
+        if request.target == JetCLICompletionTarget.Path {
+            kind :: cli_input_value_kind(input)
+            if kind != TCLIValueKind.Path -> return Err(JetCLICompletionError.UnsupportedInput{field: ~input.field, kind: cli_value_kind_name(kind), target: request.target})
+            authority :: context.path_authority ?? return Err(JetCLICompletionError.MissingPathAuthority)
+            projection := jet_cli_completion_path_candidates(authority, prefix, span, limits)
+            truncated = projection.truncated
+            candidates = ^projection.candidates
+        } else { candidates = jet_cli_completion_value_candidates(input, request, context, span, prefix) }
+    }
+    &candidates.sort_by((left: JetCLICompletionCandidate, right: JetCLICompletionCandidate) -> jet_cli_completion_candidate_order(left, right))
+    seen := [String:Bool]{}
+    unique := [JetCLICompletionCandidate]{}
+    loop candidate in candidates {
+        key :: "{jet_cli_completion_kind_index(candidate.kind)}:{candidate.label}"
+        if seen.get(key) != None -> next
+        seen[key] = true
+        if unique.len() >= limits.max_candidates {
+            truncated = true
+            next
+        }
+        &unique.push(~candidate)
+    }
+    Ok(JetCLICompletionResult{token_span: token, prefix: prefix, replacement_span: span, candidates: unique, truncated: truncated, schema_revision: context.schema_revision, revision: context.revision, freshness: JetCLICompletionFreshness.Fresh})
+}

@@ -1,0 +1,485 @@
+// Source/Publish/Advisory.rs: signed offline feed and fail-closed supply policy.
+// Reuses SemVer, Sign (Core strict Ed25519), manifest exceptions and Lock.
+// Native/proof gates: #3593 file authority, #3597 entropy, #3598 JSON,
+// #4262 composed Fetch/Hangar/CLI, #4303 borrowed trim ABI, #4409 InvalidData.
+// #4438: time.now declares JetDateTime while its native leaf returns i64.
+// Keep the real clock and original JET_ADVISORY_NOW override; no alternate clock.
+use core.crypto as publication_advisory_crypto
+
+PUBLICATION_ADVISORY_FEED_MAGIC :: "jet-advisory-feed-v1"
+PUBLICATION_DEFAULT_MATURITY_SECONDS :: prep { 86400 }
+
+pub enum PublicationSeverity {
+    Low
+    Medium
+    High
+    Critical
+}
+pub fn publication_parse_severity(raw: String) -> PublicationSeverity Never! {
+    value :: authority_ascii_lower(raw.trim())
+    if value == "low" -> return .Low
+    if value == "high" -> return .High
+    if value == "critical" || value == "crit" -> return .Critical
+    PublicationSeverity.Medium
+}
+pub fn publication_severity_label(value: PublicationSeverity) -> String Never! {
+    if value == {
+        .Low -> "low"
+        .Medium -> "medium"
+        .High -> "high"
+        .Critical -> "critical"
+    }
+}
+pub enum PublicationSourceClass {
+    ThirdParty
+    FirstParty
+    Workspace
+}
+pub fn publication_parse_source_class(raw: String) -> PublicationSourceClass? Never! {
+    value :: raw.trim()
+    if value == "third-party" -> return Val(.ThirdParty)
+    if value == "first-party" -> return Val(.FirstParty)
+    if value == "workspace" -> return Val(.Workspace)
+    None
+}
+pub fn publication_source_class_label(value: PublicationSourceClass) -> String Never! {
+    if value == {
+        .ThirdParty -> "third-party"
+        .FirstParty -> "first-party"
+        .Workspace -> "workspace"
+    }
+}
+pub struct PublicationAdvisory {
+    pub id: String
+    pub package: String
+    pub affected: PublicationVersionReq
+    pub fixed: PublicationSemVer?
+    pub title: String
+    pub severity: PublicationSeverity
+}
+pub fn publication_advisory_affects(advisory: PublicationAdvisory, version: PublicationSemVer) -> Bool Never! {
+    if !publication_matches(advisory.affected, version) -> return false
+    if advisory.fixed == .Val(fixed) -> return version < fixed
+    true
+}
+pub struct PublicationAdvisoryRelease {
+    pub package: String
+    pub version: PublicationSemVer
+    pub first_seen: Int
+    pub source_class: PublicationSourceClass
+}
+pub struct PublicationAdvisoryException {
+    pub package: String
+    pub version: PublicationSemVer
+    pub reason: String
+    pub reviewer: String
+    pub expires_at: Int
+}
+pub struct PublicationAdvisoryFeed {
+    pub sequence: Int
+    pub issued_at: Int
+    pub expires_at: Int
+    pub maturity_seconds: Int
+    pub key_id: String
+    pub public_key: String
+    pub signature: String
+    pub releases: [PublicationAdvisoryRelease]
+    pub advisories: [PublicationAdvisory]
+    pub exceptions: [PublicationAdvisoryException]
+}
+pub struct PublicationAdvisoryTrustRoot {
+    pub public_key: String{""}
+    pub min_sequence: Int{0}
+    pub accepted_digest: String?{None}
+    pub revoked_keys: [String]{[String]{}}
+}
+pub struct PublicationAdvisoryReceipt {
+    pub sequence: Int
+    pub digest: String
+    pub key_id: String
+    pub issued_at: Int
+    pub expires_at: Int
+    pub maturity_seconds: Int
+}
+pub struct PublicationAuditMatch {
+    pub severity: PublicationSeverity
+    pub diagnostic: Diagnostic
+}
+pub struct PublicationPolicyAudit {
+    pub receipt: PublicationAdvisoryReceipt
+    pub matches: [PublicationAuditMatch]
+    pub maturity: [Diagnostic]
+    pub source_exceptions: [String]
+}
+pub struct PublicationAdvisoryPolicy {
+    pub feed: PublicationAdvisoryFeed
+    pub trust: PublicationAdvisoryTrustRoot
+    pub receipt: PublicationAdvisoryReceipt
+    pub now: Int
+}
+struct PublicationAdvisoryTarget {
+    package: String
+    version: PublicationSemVer
+}
+pub struct PublicationLockMaturity {
+    pub maturity: [Diagnostic]
+    pub source_exceptions: [String]
+}
+
+pub fn publication_advisory_feed_path(root: String) -[FS, Env]> String? Never! {
+    if sys.get("JET_ADVISORY_DB") == .Val(path) -> return Val(path)
+    path :: files.join(files.join(root, ".jet"), "advisories.db")
+    if files.is_file(path) -> return Val(path)
+    None
+}
+pub fn publication_advisory_trust_path(root: String) -> String Never! {
+    files.join(files.join(root, ".jet"), "advisory-trust")
+}
+pub fn publication_load_advisory_policy(root: String) -[FS, Env, Time]> PublicationAdvisoryPolicy? PublicationDiagnosticError! {
+    path :: publication_advisory_feed_path(root) ?? return Ok(None)
+    text :: files.read(path) ?? return Err(PublicationDiagnosticError{diagnostic: publication_e2610("advisory database", "could not read `{path}`: {err}")})
+    feed :: publication_parse_advisory_feed(text)
+    trust_path :: publication_advisory_trust_path(root)
+    trust_text :: files.read(trust_path) ?? return Err(PublicationDiagnosticError{diagnostic: publication_e2610("advisory trust root", "could not read `{trust_path}`: {err}")})
+    trust :: publication_parse_advisory_trust(trust_text)
+    now :: publication_advisory_now()
+    receipt :: publication_verify_advisory_feed(feed, trust, now)
+    Ok(Val(PublicationAdvisoryPolicy{feed: feed, trust: trust, receipt: receipt, now: now}))
+}
+pub fn publication_authorize_registry_candidate(policy: PublicationAdvisoryPolicy, package: String, version: String) PublicationDiagnosticError! {
+    publication_authorize_registry_candidate_with_source_exception(policy, package, version, None)
+}
+pub fn publication_authorize_registry_candidate_with_source_exception(policy: PublicationAdvisoryPolicy, package: String, raw_version: String, source_exception: PackagePolicyException?) PublicationDiagnosticError! {
+    version :: publication_parse_semver(raw_version) ?? return Err(PublicationDiagnosticError{diagnostic: publication_e2610("registry package", "{package} has an invalid selected version `{raw_version}`")})
+    release_index := Int?{None}
+    loop index in 0..<policy.feed.releases.len() {
+        release :: policy.feed.releases[index]
+        if release.package == package && release.version == version {
+            release_index = Val(index)
+            break
+        }
+    }
+    index :: release_index ?? return Err(PublicationDiagnosticError{diagnostic: publication_e2610("advisory feed", "no trusted release record exists for {package}#{version}")})
+    release :: policy.feed.releases[index]
+    required :: if release.source_class == .ThirdParty -> policy.receipt.maturity_seconds else -> 0
+    mature_at :: publication_advisory_saturating_add(release.first_seen, required)
+    if source_exception == .Val(exception) {
+        if !exception.matches(package, publication_semver_display(version)) || exception.id.trim() == "" || exception.reason.trim() == "" || exception.expires_at <= policy.now -> return Err(PublicationDiagnosticError{diagnostic: publication_e2610("source policy exception", "exception `{exception.id}` is not an active exact exception for {package}#{version}")})
+    }
+    feed_exception := false
+    loop exception in policy.feed.exceptions {
+        if exception.package == package && exception.version == version && exception.expires_at > policy.now -> feed_exception = true
+    }
+    if policy.now < mature_at && !feed_exception && source_exception == None -> return Err(PublicationDiagnosticError{diagnostic: publication_e2609(package, publication_semver_display(version), mature_at, release.source_class)})
+    loop advisory in policy.feed.advisories {
+        if advisory.package == package && publication_advisory_affects(advisory, version) -> return Err(PublicationDiagnosticError{diagnostic: publication_e2603(advisory.id, package, publication_semver_display(version), advisory.title, advisory.severity, advisory.fixed)})
+    }
+}
+fn publication_advisory_saturating_add(left: Int, right: Int) -> Int Never! {
+    if left > PUBLICATION_U64_MAX - right -> return PUBLICATION_U64_MAX
+    left + right
+}
+fn publication_advisory_number(raw: String, source: String, number: Int, label: String) -> Int PublicationDiagnosticError! {
+    value :: pkg_lock_parse_unsigned(raw.trim(), PUBLICATION_U64_MAX) ?? return Err(PublicationDiagnosticError{diagnostic: publication_e2607(source, "line {number} has an invalid {label}")})
+    Ok(value)
+}
+fn publication_advisory_bad(detail: String) -> PublicationDiagnosticError Never! {
+    PublicationDiagnosticError{diagnostic: publication_e2607("advisory feed", detail)}
+}
+pub fn publication_parse_advisory_feed(text: String) -> PublicationAdvisoryFeed PublicationDiagnosticError! {
+    // Core lines() returns its canonical List; traverse it once without making
+    // a second collection of trimmed records.
+    lines :: text.lines()
+    number := 0
+    magic := ""
+    magic_line := 0
+    loop number < lines.len() {
+        raw :: lines[number]
+        number += 1
+        line :: raw.trim()
+        if line == "" || line.starts_with("#") -> next
+        magic = line
+        magic_line = number
+        break
+    }
+    if magic == "" -> return Err(publication_advisory_bad("the signed feed is empty"))
+    if magic != PUBLICATION_ADVISORY_FEED_MAGIC -> return Err(publication_advisory_bad("line {magic_line} must start with {PUBLICATION_ADVISORY_FEED_MAGIC}"))
+    header := ""
+    header_line := 0
+    loop number < lines.len() {
+        raw :: lines[number]
+        number += 1
+        line :: raw.trim()
+        if line == "" || line.starts_with("#") -> next
+        header = line
+        header_line = number
+        break
+    }
+    if header == "" -> return Err(publication_advisory_bad("the signed feed has no feed header"))
+    fields :: header.split("|").to_list()
+    if fields.len() != 8 || fields[0] != "feed" -> return Err(publication_advisory_bad("line {header_line} must contain eight pipe-separated feed fields"))
+    sequence :: publication_advisory_number(fields[1], "advisory feed", header_line, "sequence")
+    issued :: publication_advisory_number(fields[2], "advisory feed", header_line, "issued timestamp")
+    expires :: publication_advisory_number(fields[3], "advisory feed", header_line, "expiry timestamp")
+    maturity :: publication_advisory_number(fields[4], "advisory feed", header_line, "maturity window")
+    if sequence == 0 || issued == 0 || expires <= issued -> return Err(publication_advisory_bad("line {header_line} has a non-monotonic sequence or time range"))
+    if fields[5].trim() == "" || fields[6].trim() == "" || fields[7].trim() == "" -> return Err(publication_advisory_bad("line {header_line} has an empty trust or signature field"))
+    feed := PublicationAdvisoryFeed{sequence: sequence, issued_at: issued, expires_at: expires, maturity_seconds: maturity, key_id: fields[5].trim(), public_key: fields[6].trim(), signature: fields[7].trim(), releases: [PublicationAdvisoryRelease]{}, advisories: [PublicationAdvisory]{}, exceptions: [PublicationAdvisoryException]{}}
+    release_keys := [String: Bool]{}
+    advisory_ids := [String: Bool]{}
+    exception_keys := [String: Bool]{}
+    loop number < lines.len() {
+        raw :: lines[number]
+        number += 1
+        line :: raw.trim()
+        if line == "" || line.starts_with("#") -> next
+        line_number :: number
+        record :: line.split("|").to_list()
+        if record[0] == "release" && record.len() == 4 {
+            target :: publication_advisory_exact_target(record[1], line_number)
+            seen :: publication_advisory_number(record[2], "advisory feed", line_number, "release timestamp")
+            source :: publication_parse_source_class(record[3]) ?? return Err(publication_advisory_bad("line {line_number} has an unknown source class"))
+            key :: "{target.package}#{target.version}"
+            if release_keys.has_key(key) || seen == 0 || seen > issued -> return Err(publication_advisory_bad("line {line_number} repeats a release or has no first-seen time"))
+            release_keys[key] = true
+            &feed.releases.push(PublicationAdvisoryRelease{package: target.package, version: target.version, first_seen: seen, source_class: source})
+        } else if record[0] == "advisory" && record.len() == 7 {
+            id :: record[1].trim()
+            package :: record[2].trim()
+            title :: record[5].trim()
+            if id == "" || package == "" || title == "" -> return Err(publication_advisory_bad("line {line_number} has an empty advisory identity"))
+            if advisory_ids.has_key(id) -> return Err(publication_advisory_bad("line {line_number} repeats advisory {id}"))
+            advisory_ids[id] = true
+            affected :: publication_parse_version_req(record[3].trim()) ?? return Err(publication_advisory_bad("line {line_number} has an invalid affected version range"))
+            fixed := PublicationSemVer?{None}
+            if record[4].trim() != "" -> fixed = Val(publication_parse_semver(record[4].trim()) ?? return Err(publication_advisory_bad("line {line_number} has an invalid fixed version")))
+            word :: authority_ascii_lower(record[6].trim())
+            if word != "low" && word != "medium" && word != "high" && word != "critical" -> return Err(publication_advisory_bad("line {line_number} has an unknown severity"))
+            &feed.advisories.push(PublicationAdvisory{id: id, package: package, affected: affected, fixed: fixed, title: title, severity: publication_parse_severity(word)})
+        } else if record[0] == "exception" && record.len() == 5 {
+            target :: publication_advisory_exact_target(record[1], line_number)
+            reason :: record[2].trim()
+            reviewer :: record[3].trim()
+            expiry :: publication_advisory_number(record[4], "advisory feed", line_number, "exception expiry")
+            key :: "{target.package}#{target.version}"
+            if reason == "" || reviewer == "" || expiry <= issued || exception_keys.has_key(key) -> return Err(publication_advisory_bad("line {line_number} has an invalid or repeated exact exception"))
+            exception_keys[key] = true
+            &feed.exceptions.push(PublicationAdvisoryException{package: target.package, version: target.version, reason: reason, reviewer: reviewer, expires_at: expiry})
+        } else -> return Err(publication_advisory_bad("line {line_number} has an unknown record or field count"))
+    }
+    publication_validate_advisory_identity(feed)
+    Ok(feed)
+}
+fn publication_advisory_exact_target(raw: String, number: Int) -> PublicationAdvisoryTarget PublicationDiagnosticError! {
+    if raw.contains("@") -> return Err(publication_advisory_bad("line {number} uses @; exact policy targets use package#version"))
+    parts :: raw.trim().split_once("#") ?? return Err(publication_advisory_bad("line {number} needs an exact package#version target"))
+    package :: parts.before.trim()
+    version :: publication_parse_semver(parts.after.trim()) ?? return Err(publication_advisory_bad("line {number} has an invalid exact version"))
+    if package == "" -> return Err(publication_advisory_bad("line {number} has an empty exact package name"))
+    Ok(PublicationAdvisoryTarget{package: package, version: version})
+}
+fn publication_validate_advisory_identity(feed: PublicationAdvisoryFeed) PublicationDiagnosticError! {
+    expected :: publication_advisory_key_id(feed.public_key.trim()) ?? return Err(PublicationDiagnosticError{diagnostic: publication_e2610("advisory feed", "the publisher public key is malformed")})
+    if feed.key_id != expected -> return Err(PublicationDiagnosticError{diagnostic: publication_e2610("advisory feed", "the key id does not match the publisher key")})
+}
+pub fn publication_advisory_key_id(raw: String) -> String? Never! {
+    key :: raw.trim()
+    if key.bytes().len() != 64 -> return None
+    bytes :: hex.decode(key) ?? return None
+    Val("sha256-{publication_advisory_crypto.sha256(bytes).hex()}")
+}
+fn publication_advisory_is_digest(value: String) -> Bool Never! {
+    if !value.starts_with("sha256-") -> return false
+    raw :: value.removeprefix("sha256-")
+    if raw.bytes().len() != 64 -> return false
+    hex.is_hex(raw)
+}
+// Sort indices, not cloned records: signed ordering is package+SemVer / id.
+pub fn publication_advisory_feed_payload(feed: PublicationAdvisoryFeed) -> String Never! {
+    out := [String]{"{PUBLICATION_ADVISORY_FEED_MAGIC}\nfeed|{feed.sequence}|{feed.issued_at}|{feed.expires_at}|{feed.maturity_seconds}|{feed.key_id}|{feed.public_key}\n"}
+    releases := [Int]{}
+    loop index in 0..<feed.releases.len() -> &releases.push(index)
+    &releases.sort_by((a: Int, b: Int) -> {
+        order :: feed.releases[a].package <=> feed.releases[b].package
+        if order != Ordering.Equal -> order else -> feed.releases[a].version <=> feed.releases[b].version
+    })
+    loop index in releases {
+        release :: feed.releases[index]
+        &out.push("release|{release.package}#{release.version}|{release.first_seen}|{publication_source_class_label(release.source_class)}\n")
+    }
+    advisories := [Int]{}
+    loop index in 0..<feed.advisories.len() -> &advisories.push(index)
+    &advisories.sort_by((a: Int, b: Int) -> feed.advisories[a].id <=> feed.advisories[b].id)
+    loop index in advisories {
+        advisory :: feed.advisories[index]
+        fixed :: if advisory.fixed == .Val(version) -> publication_semver_display(version) else -> ""
+        &out.push("advisory|{advisory.id}|{advisory.package}|{advisory.affected.raw}|{fixed}|{advisory.title}|{publication_severity_label(advisory.severity)}\n")
+    }
+    exceptions := [Int]{}
+    loop index in 0..<feed.exceptions.len() -> &exceptions.push(index)
+    &exceptions.sort_by((a: Int, b: Int) -> {
+        order :: feed.exceptions[a].package <=> feed.exceptions[b].package
+        if order != Ordering.Equal -> order else -> feed.exceptions[a].version <=> feed.exceptions[b].version
+    })
+    loop index in exceptions {
+        exception :: feed.exceptions[index]
+        &out.push("exception|{exception.package}#{exception.version}|{exception.reason}|{exception.reviewer}|{exception.expires_at}\n")
+    }
+    out.join("")
+}
+pub fn publication_advisory_feed_text(feed: PublicationAdvisoryFeed) -> String Never! {
+    payload :: publication_advisory_feed_payload(feed)
+    magic :: payload.split_once("\n") ?? panic("canonical feed has magic")
+    header :: magic.after.split_once("\n") ?? panic("canonical feed has header")
+    "{magic.before}\n{header.before}|{feed.signature}\n{header.after}"
+}
+pub fn publication_sign_advisory_feed(feed: PublicationAdvisoryFeed, seed: String) -[FS, Env]> String PublicationDiagnosticError! {
+    publication_sign(seed, publication_advisory_crypto.sha256(publication_advisory_feed_payload(feed).bytes()).hex())
+}
+pub fn publication_advisory_feed_digest(feed: PublicationAdvisoryFeed) -> String Never! {
+    "sha256-{publication_advisory_crypto.sha256(publication_advisory_feed_text(feed).bytes()).hex()}"
+}
+pub fn publication_verify_advisory_feed(feed: PublicationAdvisoryFeed, trust: PublicationAdvisoryTrustRoot, now: Int) -> PublicationAdvisoryReceipt PublicationDiagnosticError! {
+    publication_validate_advisory_identity(feed)
+    if trust.public_key.trim() == "" || feed.public_key != trust.public_key.trim() -> return Err(PublicationDiagnosticError{diagnostic: publication_e2610("advisory feed", "the feed key is not pinned by the local trust root")})
+    if trust.revoked_keys.contains(feed.public_key.trim()) -> return Err(PublicationDiagnosticError{diagnostic: publication_e2610("advisory feed", "the feed key is revoked by local policy")})
+    if feed.sequence < trust.min_sequence -> return Err(PublicationDiagnosticError{diagnostic: publication_e2610("advisory feed", "the feed sequence rolled back below the locally accepted sequence")})
+    digest :: publication_advisory_feed_digest(feed)
+    if feed.sequence == trust.min_sequence && trust.accepted_digest == .Val(accepted) {
+        if accepted != digest -> return Err(PublicationDiagnosticError{diagnostic: publication_e2610("advisory feed", "the feed forked at an already accepted sequence")})
+    }
+    if feed.issued_at > publication_advisory_saturating_add(now, 300) -> return Err(PublicationDiagnosticError{diagnostic: publication_e2610("advisory feed", "the feed is issued in the future")})
+    if feed.expires_at <= now -> return Err(PublicationDiagnosticError{diagnostic: publication_e2610("advisory feed", "the signed advisory metadata is stale or expired")})
+    if feed.maturity_seconds != 0 && feed.maturity_seconds < PUBLICATION_DEFAULT_MATURITY_SECONDS -> return Err(PublicationDiagnosticError{diagnostic: publication_e2610("advisory feed", "the signed third-party maturity window is weaker than the 24-hour default")})
+    signed_digest :: publication_advisory_crypto.sha256(publication_advisory_feed_payload(feed).bytes()).hex()
+    if !publication_verify(feed.public_key, signed_digest, feed.signature) -> return Err(PublicationDiagnosticError{diagnostic: publication_e2610("advisory feed", "the feed signature does not verify")})
+    Ok(PublicationAdvisoryReceipt{sequence: feed.sequence, digest: digest, key_id: feed.key_id, issued_at: feed.issued_at, expires_at: feed.expires_at, maturity_seconds: if feed.maturity_seconds == 0 -> PUBLICATION_DEFAULT_MATURITY_SECONDS else -> feed.maturity_seconds})
+}
+pub fn publication_parse_advisory_trust(text: String) -> PublicationAdvisoryTrustRoot PublicationDiagnosticError! {
+    root := PublicationAdvisoryTrustRoot{}
+    seen := [String]{}
+    number := 0
+    loop raw in text.lines() {
+        number += 1
+        line :: raw.trim()
+        if line == "" || line.starts_with("#") -> next
+        parts :: line.split_once("=") ?? return Err(PublicationDiagnosticError{diagnostic: publication_e2607("advisory trust root", "line {number} is not key=value")})
+        key :: parts.before.trim()
+        value :: parts.after.trim()
+        if key != "revoked_key" && seen.contains(key) -> return Err(PublicationDiagnosticError{diagnostic: publication_e2607("advisory trust root", "line {number} repeats field {key}")})
+        if key != "revoked_key" -> &seen.push(key)
+        if key == "public_key" && root.public_key == "" -> root.public_key = value
+        else if key == "min_sequence" -> root.min_sequence = publication_advisory_number(value, "advisory trust root", number, "minimum sequence")
+        else if key == "accepted_digest" && root.accepted_digest == None {
+            if !publication_advisory_is_digest(value) -> return Err(PublicationDiagnosticError{diagnostic: publication_e2607("advisory trust root", "line {number} has an invalid accepted digest")})
+            root.accepted_digest = Val(value)
+        } else if key == "revoked_key" {
+            if value == "" -> return Err(PublicationDiagnosticError{diagnostic: publication_e2607("advisory trust root", "line {number} has an empty revoked key")})
+            if !root.revoked_keys.contains(value) -> &root.revoked_keys.push(value)
+        } else -> return Err(PublicationDiagnosticError{diagnostic: publication_e2607("advisory trust root", "line {number} has an unknown or repeated field")})
+    }
+    if root.public_key == "" -> return Err(PublicationDiagnosticError{diagnostic: publication_e2610("advisory trust root", "no publisher public key is pinned")})
+    if root.accepted_digest != None && root.min_sequence == 0 -> return Err(PublicationDiagnosticError{diagnostic: publication_e2610("advisory trust root", "an accepted digest needs its monotonic minimum sequence")})
+    Ok(root)
+}
+pub fn publication_audit_advisory_feed(lock: LockFile, feed: PublicationAdvisoryFeed, trust: PublicationAdvisoryTrustRoot, now: Int) -> PublicationPolicyAudit PublicationDiagnosticError! {
+    publication_audit_advisory_feed_with_source_exceptions(lock, feed, trust, now, [PackagePolicyException]{})
+}
+pub fn publication_audit_advisory_feed_with_source_exceptions(lock: LockFile, feed: PublicationAdvisoryFeed, trust: PublicationAdvisoryTrustRoot, now: Int, exceptions: [PackagePolicyException]) -> PublicationPolicyAudit PublicationDiagnosticError! {
+    receipt :: publication_verify_advisory_feed(feed, trust, now)
+    if lock.authority == .Val(authority) {
+        if authority.trust == .Val(trust_policy) {
+            if trust_policy.require == .Val(requirement) {
+                if pkg_lock_enforce_provenance_requirement(lock, requirement) == .Err(error) -> return Err(PublicationDiagnosticError{diagnostic: publication_e2610("lock provenance", error.message())})
+            }
+        }
+    }
+    maturity :: publication_lock_maturity_diagnostics(lock, feed, receipt.maturity_seconds, now, exceptions)
+    Ok(PublicationPolicyAudit{receipt: receipt, matches: publication_audit_lockfile(lock, feed.advisories), maturity: maturity.maturity, source_exceptions: maturity.source_exceptions})
+}
+pub fn publication_lock_maturity_diagnostics(lock: LockFile, feed: PublicationAdvisoryFeed, maturity_seconds: Int, now: Int, exceptions: [PackagePolicyException]) -> PublicationLockMaturity PublicationDiagnosticError! {
+    result := PublicationLockMaturity{maturity: [Diagnostic]{}, source_exceptions: [String]{}}
+    loop package in lock.packages {
+        version :: publication_locked_package_version(package)
+        release_index := Int?{None}
+        loop index in 0..<feed.releases.len() {
+            release :: feed.releases[index]
+            if release.package == package.name && release.version == version {
+                release_index = Val(index)
+                break
+            }
+        }
+        if release_index == None {
+            exempt :: if package.source == {
+                .Root -> true
+                .Path(_) -> true
+                else -> false
+            }
+            if !exempt -> &result.maturity.push(publication_e2610("advisory feed", "no trusted release record exists for {package.name}#{package.version}"))
+            next
+        }
+        index :: release_index ?? panic("release index checked")
+        release :: feed.releases[index]
+        required :: if release.source_class == .ThirdParty -> maturity_seconds else -> 0
+        mature_at :: publication_advisory_saturating_add(release.first_seen, required)
+        feed_exception := false
+        loop exception in feed.exceptions {
+            if exception.package == package.name && exception.version == version && exception.expires_at > now -> feed_exception = true
+        }
+        source_exception := false
+        loop exception in exceptions {
+            if exception.matches(package.name, publication_semver_display(version)) && exception.id.trim() != "" && exception.reason.trim() != "" && exception.expires_at > now {
+                &result.source_exceptions.push(exception.summary())
+                source_exception = true
+                break
+            }
+        }
+        if now < mature_at && !feed_exception && !source_exception -> &result.maturity.push(publication_e2609(package.name, package.version, mature_at, release.source_class))
+    }
+    Ok(result)
+}
+pub fn publication_advisory_now() -[Env, Time]> Int Never! {
+    if sys.get("JET_ADVISORY_NOW") == .Val(value) {
+        if pkg_lock_parse_unsigned(value, PUBLICATION_U64_MAX) == .Val(now) -> return now
+    }
+    now :: time.unix_ms(time.now()) /% 1000
+    if now < 0 -> return 0
+    now
+}
+fn publication_locked_package_version(package: LockedPackage) -> PublicationSemVer PublicationDiagnosticError! {
+    version :: publication_parse_semver(package.version) ?? return Err(PublicationDiagnosticError{diagnostic: publication_e2610("lockfile", "locked package `{package.name}` has an invalid version `{package.version}`")})
+    Ok(version)
+}
+pub fn publication_audit_lockfile(lock: LockFile, advisories: [PublicationAdvisory]) -> [PublicationAuditMatch] PublicationDiagnosticError! {
+    matches := [PublicationAuditMatch]{}
+    loop package in lock.packages {
+        version :: publication_locked_package_version(package)
+        loop advisory in advisories {
+            if advisory.package == package.name && publication_advisory_affects(advisory, version) -> &matches.push(PublicationAuditMatch{severity: advisory.severity, diagnostic: publication_e2603(advisory.id, package.name, package.version, advisory.title, advisory.severity, advisory.fixed)})
+        }
+    }
+    Ok(matches)
+}
+pub fn publication_e2609(package: String, version: String, mature_at: Int, source: PublicationSourceClass) -> Diagnostic Never! {
+    diagnostic_from_registry("E2609", None, "{package}#{version} is not mature under the advisory policy", "the signed feed classifies this {publication_source_class_label(source)} release as new until Unix time {mature_at}", "wait for the maturity window, or add a reviewed exact `policy.exceptions` record for {package}#{version} with an id, reason, and expiry")
+}
+pub fn publication_e2610(source: String, detail: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E2610", None, "{source} was rejected: {detail}", "advisory policy is security-sensitive; Jet will not use unsigned, stale, rolled-back, forked, or downgraded evidence.", "refresh the signed offline feed and trust root, or repair the lock provenance before retrying.")
+}
+pub fn publication_e2611(input: String, fix: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E2611", None, "jet inspect audit needs {input}", "an audit without its lock or advisory database could report a false clean result.", fix)
+}
+pub fn publication_e2607(source: String, detail: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E2607", None, "{source} is malformed: {detail}", "supply-chain metadata is security-sensitive, so Jet rejects ambiguous or partial records instead of silently skipping them.", "fix the malformed {source} record and retry; use the documented parser contract and UTF-8 text.")
+}
+pub fn publication_e2603(id: String, package: String, version: String, title: String, severity: PublicationSeverity, fixed: PublicationSemVer?) -> Diagnostic Never! {
+    fix :: if fixed == .Val(value) -> "upgrade `{package}` to >= {value}. Run `jet inspect audit --explain {id}` for details." else -> "no fixed version is known; monitor `{package}` for a patch. Run `jet inspect audit --explain {id}` for details."
+    diagnostic_from_registry("E2603", None, "[{publication_severity_label(severity)}] advisory {id} matches `{package}` {version}: {title}", "the advisory database flags `{package}` {version} as having a known vulnerability, exposed interface, or supply-chain risk.", fix)
+}
+pub fn publication_e2604(package: String, version: String, expected: String, actual: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E2604", None, "integrity check failed for `{package}` {version}", "expected hash {expected}, got {actual}. The artifact changed after it was locked — this may indicate accidental or deliberate tampering.", "re-run `jet store fetch` after cleaning stale Jetpack hangar entries (`jet clean`). If the problem persists, the upstream source may have been altered; audit the change before proceeding.")
+}
+pub fn publication_verify_package_integrity(package: LockedPackage, store_entry: String) PublicationDiagnosticError! -[FS]> {
+    actual :: foundation_tree_hash(store_entry)
+    if actual != package.fingerprint -> return Err(PublicationDiagnosticError{diagnostic: publication_e2604(package.name, package.version, package.fingerprint, actual)})
+}

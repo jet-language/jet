@@ -1,0 +1,1806 @@
+// PORT-PENDING 1129 tests-pkg-slice-1: tests/pkg.rs:1-1802
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Integration tests for M12.1 — package manager (path deps, lock, store).
+//RS //!
+//RS //! Tests that need real file I/O create temp dirs under `std::env::temp_dir()`
+//RS //! and clean up on exit. Tests that need the `jet` binary or `git` subprocess
+//RS //! are skipped (not failed) if the tool is unavailable.
+//RS //!
+//RS //! Exit criteria (M12.1):
+//RS //!   path dep, git dep (local bare), lock verify, --locked CI mode,
+//RS //!   version conflict E1201, tamper E1204, two projects sharing one store inode,
+//RS //!   @latest update rewrites lock, reserved section E1209, toolchain mismatch E1208,
+//RS //!   end-to-end jet new → jet add --path, jet new --annotated snapshot.
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::{Command, Stdio};
+//RS use std::sync::Mutex;
+//RS 
+//RS mod common;
+//RS use common::Scratch;
+//RS 
+//RS // Serialize tests that mutate process-global package environment or helper selection.
+//RS static STORE_LOCK: Mutex<()> = Mutex::new(());
+//RS 
+//RS // ─────────────────────────────────────────────
+//RS // Helpers
+//RS // ─────────────────────────────────────────────
+//RS 
+//RS fn tmp_dir(label: &str) -> PathBuf {
+//RS     let base = std::env::temp_dir().join(format!("jet_pkg_{}_{}", label, std::process::id()));
+//RS     fs::create_dir_all(&base).unwrap();
+//RS     base
+//RS }
+//RS 
+//RS fn write(dir: &Path, rel: &str, content: &str) {
+//RS     let path = dir.join(rel);
+//RS     if let Some(parent) = path.parent() {
+//RS         fs::create_dir_all(parent).unwrap();
+//RS     }
+//RS     fs::write(path, content).unwrap();
+//RS }
+//RS 
+//RS fn first_diag_code(diags: &[jet::Diagnostics::Diagnostic]) -> &str {
+//RS     diags.first().map(|d| d.code.as_str()).unwrap_or("")
+//RS }
+//RS 
+//RS fn jet_bin() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS fn have_git() -> bool {
+//RS     Command::new("git").arg("--version").output().is_ok()
+//RS }
+//RS 
+//RS fn jet_cmd(args: &[&str], cwd: &Path, store_dir: &Path) -> std::process::Output {
+//RS     Command::new(jet_bin())
+//RS         .args(args)
+//RS         .current_dir(cwd)
+//RS         .env("JET_PACKAGE_STORE_DIR", store_dir)
+//RS         .output()
+//RS         .expect("jet binary should run")
+//RS }
+//RS 
+//RS /// Run the jet binary with an explicit set of env vars (used to point
+//RS /// `jet registry publish`/`jet registry yank` at a scratch registry via `JET_REGISTRY_URL` and
+//RS /// `JET_REGISTRY_CACHE_DIR`).
+//RS fn jet_cmd_env(args: &[&str], cwd: &Path, envs: &[(&str, &str)]) -> std::process::Output {
+//RS     let mut cmd = Command::new(jet_bin());
+//RS     cmd.args(args).current_dir(cwd);
+//RS     for (k, v) in envs {
+//RS         cmd.env(k, v);
+//RS     }
+//RS     cmd.output().expect("jet binary should run")
+//RS }
+//RS 
+//RS #[test]
+//RS fn shape6_registry_routes_and_retired_bare_snapshots() {
+//RS     let tmp = tmp_dir("shape6_registry");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     let key = jet_cmd(&["registry", "key"], &tmp, &store);
+//RS     assert!(!key.status.success());
+//RS     assert_eq!(
+//RS         String::from_utf8(key.stderr).unwrap(),
+//RS         "Error [E2104]: `jet registry key` needs a subcommand — try `jet registry key backup`.\n Why: Jet needs valid command input before it can run this command\n Fix: correct the named argument or input, then run the command again\n"
+//RS     );
+//RS 
+//RS     for verb in ["publish", "keygen", "key", "yank"] {
+//RS         let bare = jet_cmd(&[verb, "sentinel"], &tmp, &store);
+//RS         assert_eq!(bare.status.code(), Some(2), "bare jet {verb}");
+//RS         assert_eq!(
+//RS             String::from_utf8(bare.stderr).unwrap(),
+//RS             format!(
+//RS                 "Error [E2101]: `{verb}` moved under `jet registry`.\n Why: infrequent commands live in a named area so daily Jet commands stay easy to scan.\n Fix: run `jet registry {verb} sentinel`.\n"
+//RS             )
+//RS         );
+//RS     }
+//RS 
+//RS     fs::remove_dir_all(tmp).unwrap();
+//RS }
+//RS 
+//RS // #2075: every bridge key's built artifacts live in ONE Cargo target dir shared
+//RS // per (toolchain, target, profile) — `<home>/.cache/jet/ffi/deps/<build
+//RS // hash>/<triple>/release/` — with the key in each file NAME
+//RS // (`jet-crypto-helper-<key>`, `libjet_ffi_<key>.rlib`, and the digest sidecar
+//RS // `jet_ffi_<key>.sha256` beside them). `cached_crypto_helper_path()` (called
+//RS // against the *test process's own* real HOME) returns that helper path for the
+//RS // current deps/target key — the key is HOME-independent, so the tail below the
+//RS // cache root is safe to re-root under an isolated `home`.
+//RS fn isolated_crypto_helper_paths(home: &Path) -> (PathBuf, PathBuf) {
+//RS     let real_helper = jetpack::FFI::cached_crypto_helper_path();
+//RS     let real_root = real_helper
+//RS         .ancestors()
+//RS         .find(|dir| dir.ends_with("ffi"))
+//RS         .expect("the crypto helper lives under the FFI cache root");
+//RS     let relative = real_helper.strip_prefix(real_root).unwrap();
+//RS     let helper = home.join(".cache/jet/ffi").join(relative);
+//RS     let cache_key = common::ffi_bridge_key(&helper);
+//RS     let rlib = helper
+//RS         .parent()
+//RS         .unwrap()
+//RS         .join(format!("libjet_ffi_{cache_key}.rlib"));
+//RS     (rlib, helper)
+//RS }
+//RS 
+//RS /// Install a fake crypto helper AND its cache-verification sidecar
+//RS /// (`artifacts.sha256`) so `ensure_bridge_helper()`'s cache-hit fast path
+//RS /// (`bridge_cache_verified`) accepts these files instead of falling through to
+//RS /// a real `cargo build` that would silently bypass the fake helper.
+//RS #[cfg(unix)]
+//RS fn install_closed_status_crypto_helper(home: &Path) {
+//RS     use std::os::unix::fs::PermissionsExt;
+//RS 
+//RS     let (rlib, helper) = isolated_crypto_helper_paths(home);
+//RS     let release = helper.parent().unwrap();
+//RS     fs::create_dir_all(release).unwrap();
+//RS 
+//RS     let rlib_bytes = b"test cache sentinel".to_vec();
+//RS     fs::write(&rlib, &rlib_bytes).unwrap();
+//RS 
+//RS     let crate_stem = rlib.file_stem().unwrap().to_str().unwrap().to_string();
+//RS     let cdylib = release.join(format!("{crate_stem}.{}", std::env::consts::DLL_EXTENSION));
+//RS     let cdylib_bytes = b"test cache cdylib sentinel".to_vec();
+//RS     fs::write(&cdylib, &cdylib_bytes).unwrap();
+//RS 
+//RS     let signature = "00".repeat(64);
+//RS     let helper_bytes = format!(
+//RS         "#!/bin/sh\nIFS= read -r command\ncase \"$command\" in\n  keygen*) printf 'secret helper output' ; printf 'raw OS status and dependency text' >&2 ; exit 75 ;;\n  sign*) printf '%s\\n' '{signature}' ;;\n  verify*) exit 0 ;;\n  *) exit 1 ;;\nesac\n"
+//RS     )
+//RS     .into_bytes();
+//RS     fs::write(&helper, &helper_bytes).unwrap();
+//RS     fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
+//RS 
+//RS     // The sidecar sits beside the artifacts it blesses, one row per file, each
+//RS     // row's path relative to that shared release dir — i.e. a bare file name.
+//RS     let crate_name = crate_stem
+//RS         .strip_prefix("lib")
+//RS         .expect("bridge rlib is `lib*`");
+//RS     let mut manifest = String::from("jet-ffi-artifacts-v2\n");
+//RS     for (bytes, path) in [
+//RS         (&rlib_bytes, &rlib),
+//RS         (&cdylib_bytes, &cdylib),
+//RS         (&helper_bytes, &helper),
+//RS     ] {
+//RS         let relative = path.file_name().unwrap().to_str().unwrap();
+//RS         manifest.push_str(&format!("{} {relative}\n", jet::SHA256::sha256_hex(bytes)));
+//RS     }
+//RS     fs::write(release.join(format!("{crate_name}.sha256")), manifest).unwrap();
+//RS }
+//RS 
+//RS /// Init an empty bare git repo standing in for a registry index. Returns its
+//RS /// `file://` URL.
+//RS fn bare_registry(dir: &Path) -> String {
+//RS     Command::new("git")
+//RS         .args(["init", "--bare", dir.to_str().unwrap()])
+//RS         .output()
+//RS         .unwrap();
+//RS     format!("file://{}", dir.to_str().unwrap())
+//RS }
+//RS 
+//RS /// Seed the maintainer-owned receipt required for a core-tier publish.
+//RS fn seed_core_review(dir: &Path, package: &str, version: &str) {
+//RS     let work = dir.with_extension(format!("review-{}", std::process::id()));
+//RS     let url = format!("file://{}", dir.to_str().unwrap());
+//RS     Command::new("git")
+//RS         .args([
+//RS             "--git-dir",
+//RS             dir.to_str().unwrap(),
+//RS             "symbolic-ref",
+//RS             "HEAD",
+//RS             "refs/heads/main",
+//RS         ])
+//RS         .status()
+//RS         .unwrap();
+//RS     Command::new("git")
+//RS         .args(["clone", url.as_str(), work.to_str().unwrap()])
+//RS         .status()
+//RS         .unwrap();
+//RS     let review = work
+//RS         .join("reviews")
+//RS         .join(package)
+//RS         .join(format!("{version}.review"));
+//RS     fs::create_dir_all(review.parent().unwrap()).unwrap();
+//RS     fs::write(
+//RS         &review,
+//RS         format!(
+//RS             "jet-registry-core-review-v1\npackage={package}\nversion={version}\nreviewer=test-maintainer\ndecision=approved\n"
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     for args in [
+//RS         vec!["config", "user.email", "test@jet.test"],
+//RS         vec!["config", "user.name", "Jet Test"],
+//RS         vec!["add", "."],
+//RS         vec!["commit", "-m", "approve core package"],
+//RS         vec!["push", "origin", "HEAD:main"],
+//RS     ] {
+//RS         Command::new("git")
+//RS             .args(&args)
+//RS             .current_dir(&work)
+//RS             .status()
+//RS             .unwrap();
+//RS     }
+//RS     fs::remove_dir_all(work).unwrap();
+//RS }
+//RS 
+//RS /// Read `index/<name>/<name>.jsonl` out of a bare registry via `git show`.
+//RS fn read_index_file(bare: &Path, name: &str) -> Option<String> {
+//RS     let spec = format!("HEAD:index/{name}/{name}.jsonl");
+//RS     let out = Command::new("git")
+//RS         .args(["--git-dir", bare.to_str().unwrap(), "show", &spec])
+//RS         .output()
+//RS         .unwrap();
+//RS     if out.status.success() {
+//RS         Some(String::from_utf8_lossy(&out.stdout).to_string())
+//RS     } else {
+//RS         None
+//RS     }
+//RS }
+//RS 
+//RS /// Write a minimal project and commit it (clean tree) so `jet registry publish` clears
+//RS /// the dirty-tree gate (E2605).
+//RS fn init_clean_project(dir: &Path, name: &str, version: &str) {
+//RS     write(dir, "package.jet", &min_manifest(name, version));
+//RS     write(
+//RS         dir,
+//RS         "run.jet",
+//RS         "#Test(\"smoke\") { expect(1 == 1) }\nfn run() { print(\"hi\") }\n",
+//RS     );
+//RS     for args in &[
+//RS         vec!["init", "-b", "main"],
+//RS         vec!["config", "user.email", "test@jet.test"],
+//RS         vec!["config", "user.name", "Jet Test"],
+//RS         vec!["add", "."],
+//RS         vec!["commit", "-m", "init"],
+//RS     ] {
+//RS         Command::new("git")
+//RS             .args(args)
+//RS             .current_dir(dir)
+//RS             .output()
+//RS             .unwrap();
+//RS     }
+//RS }
+//RS 
+//RS /// Run `f` with JET_PACKAGE_STORE_DIR set to `store_dir`, serializing concurrent calls.
+//RS fn with_store<T, F: FnOnce() -> T>(store_dir: &Path, f: F) -> T {
+//RS     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+//RS     let prev = std::env::var("JET_PACKAGE_STORE_DIR").ok();
+//RS     std::env::set_var("JET_PACKAGE_STORE_DIR", store_dir);
+//RS     let result = f();
+//RS     match prev {
+//RS         Some(v) => std::env::set_var("JET_PACKAGE_STORE_DIR", v),
+//RS         None => std::env::remove_var("JET_PACKAGE_STORE_DIR"),
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS // Minimal `package.jet` (Jet syntax, U1) for a named package with no deps.
+//RS fn min_manifest(name: &str, version: &str) -> String {
+//RS     format!(
+//RS         "name: \"{}\"\nversion: \"{}\"\njet: \">=0.1.0\"\ndescription: \"\"\nlicense: \"MIT\"\nrepository: \"\"\n",
+//RS         name, version
+//RS     )
+//RS }
+//RS 
+//RS // `min_manifest` plus a `deps: { … }` block holding the given entry lines.
+//RS fn manifest_with_deps(name: &str, version: &str, dep_lines: &str) -> String {
+//RS     format!(
+//RS         "{}\ndeps: {{\n{}\n}}\n",
+//RS         min_manifest(name, version),
+//RS         dep_lines
+//RS     )
+//RS }
+//RS 
+//RS // ─────────────────────────────────────────────
+//RS // E4 Jetpack: strict graph, semantic lock, importers, federated providers
+//RS // ─────────────────────────────────────────────
+//RS 
+//RS fn graph_with_app() -> jetpack::PackageGraph::PackageGraph {
+//RS     use jetpack::PackageGraph::{PackageGraph, PackageNode};
+//RS     let mut graph = PackageGraph::new();
+//RS     graph.add_package(
+//RS         PackageNode::new("app")
+//RS             .with_deps(&["ui"])
+//RS             .with_transitives(&["log"]),
+//RS     );
+//RS     graph.add_package(PackageNode::new("ui").with_deps(&["log"]));
+//RS     graph.add_package(PackageNode::new("worker").with_transitives(&["log"]));
+//RS     graph
+//RS }
+//RS 
+//RS fn semantic_record(owner: &str, key: &str, exact: &str) -> jetpack::SemanticLock::SemanticRecord {
+//RS     use jetpack::SemanticLock::{LockIdentity, LockRationale, LockRecordKind, SemanticRecord};
+//RS     SemanticRecord::new(
+//RS         LockIdentity {
+//RS             kind: LockRecordKind::Package,
+//RS             key: key.to_string(),
+//RS             exact: exact.to_string(),
+//RS             hash: format!("sha256-{exact}"),
+//RS             platform: "x86_64-linux".to_string(),
+//RS         },
+//RS         LockRationale {
+//RS             owner_package: owner.to_string(),
+//RS             reason: format!("{owner} declared {key}"),
+//RS             source_ref: format!("catalog:{key}"),
+//RS             provider: "core".to_string(),
+//RS             channel_input: "stable".to_string(),
+//RS             exact_output: exact.to_string(),
+//RS             policy_fingerprint: "policy-1".to_string(),
+//RS             recipe_id: String::new(),
+//RS             adapter_id: String::new(),
+//RS             signature: "ed25519:sig".to_string(),
+//RS             cache_provenance: "hangar".to_string(),
+//RS             update_command: format!("jet update {key}"),
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn semantic_record_with_hash(
+//RS     owner: &str,
+//RS     key: &str,
+//RS     exact: &str,
+//RS     hash: &str,
+//RS ) -> jetpack::SemanticLock::SemanticRecord {
+//RS     let mut record = semantic_record(owner, key, exact);
+//RS     record.identity.hash = hash.to_string();
+//RS     record
+//RS }
+//RS 
+//RS fn replacement_identity(
+//RS     provider: &str,
+//RS     name: &str,
+//RS     version: &str,
+//RS ) -> jetpack::Replacement::PackageIdentity {
+//RS     jetpack::Replacement::PackageIdentity::new(provider, name, version)
+//RS }
+//RS 
+//RS fn replacement_surface(
+//RS     provider: &str,
+//RS     name: &str,
+//RS     version: &str,
+//RS ) -> jetpack::Replacement::CompatibilitySurface {
+//RS     use jetpack::Replacement::{
+//RS         CompatibilitySurface, GoldenFixture, PackageIdentity, PublicSymbol,
+//RS     };
+//RS     let mut surface = CompatibilitySurface::new(PackageIdentity::new(provider, name, version));
+//RS     surface.public_symbols = vec![
+//RS         PublicSymbol::new("pad_left", "fn(String, Int) -> String")
+//RS             .with_effects(&["pure"])
+//RS             .with_errors(&["ValueError"]),
+//RS         PublicSymbol::new("trim", "fn(String) -> String").with_effects(&["pure"]),
+//RS     ];
+//RS     surface.examples = vec!["examples/replacement/pad.jet".to_string()];
+//RS     surface.goldens = vec![GoldenFixture::new("pad_left_basic", "  hi\n")];
+//RS     surface.platforms = vec!["x86_64-linux".to_string()];
+//RS     surface
+//RS }
+//RS 
+//RS fn replacement_passed_candidate() -> jetpack::Replacement::ReplacementCandidate {
+//RS     let foreign = replacement_surface("npm", "left-pad", "1.0.0");
+//RS     let native = replacement_surface("core", "core.text.pad", "1.0.0");
+//RS     let report = jetpack::Replacement::run_proof(&foreign, &native, "x86_64-linux");
+//RS     report.candidate("MIT", vec!["x86_64-linux".to_string()])
+//RS }
+//RS 
+//RS #[test]
+//RS fn strict_graph_rejects_transitive_import() {
+//RS     let graph = graph_with_app();
+//RS     let err = graph
+//RS         .check_visible("app", "log")
+//RS         .expect_err("transitive dep must not be visible");
+//RS     assert!(err.reason.contains("direct deps"));
+//RS     assert_eq!(err.requested, "log");
+//RS }
+//RS 
+//RS #[test]
+//RS fn strict_graph_accepts_direct_dep() {
+//RS     let graph = graph_with_app();
+//RS     let edge = graph
+//RS         .check_visible("app", "ui")
+//RS         .expect("direct dep visible");
+//RS     assert_eq!(edge.dependency, "ui");
+//RS     assert_eq!(edge.kind, jetpack::PackageGraph::VisibleEdgeKind::DirectDep);
+//RS }
+//RS 
+//RS #[test]
+//RS fn catalog_edge_behaves_like_direct_dep_after_selection() {
+//RS     use jetpack::PackageGraph::{CatalogEntry, VisibleEdgeKind};
+//RS     let mut graph = graph_with_app();
+//RS     graph.add_catalog(CatalogEntry {
+//RS         logical_name: "log".to_string(),
+//RS         provider_ref: "core.log@1.2.3".to_string(),
+//RS         version_rule: "1.2".to_string(),
+//RS         allowed_packages: vec!["app".to_string()],
+//RS         owner_workspace: "root".to_string(),
+//RS         rationale: "workspace selected shared logging version".to_string(),
+//RS     });
+//RS     let edge = graph
+//RS         .check_visible("app", "log")
+//RS         .expect("catalog edge visible");
+//RS     assert_eq!(edge.kind, VisibleEdgeKind::Catalog);
+//RS     assert_eq!(edge.provider_ref, "core.log@1.2.3");
+//RS }
+//RS 
+//RS #[test]
+//RS fn lock_records_catalog_owner_and_rationale() {
+//RS     use jetpack::SemanticLock::{parse, write, SemanticLockFile};
+//RS     let lock = SemanticLockFile {
+//RS         records: vec![semantic_record("app", "core.log", "1.2.3")],
+//RS         ..Default::default()
+//RS     };
+//RS     let text = write(&lock);
+//RS     assert!(text.contains("owner-package = \"app\""));
+//RS     assert!(text.contains("reason = \"app declared core.log\""));
+//RS     let parsed = parse(&text);
+//RS     assert_eq!(parsed.records[0].rationales[0].owner_package, "app");
+//RS }
+//RS 
+//RS #[test]
+//RS fn catalog_merge_conflict_names_owner_package() {
+//RS     use jetpack::SemanticLock::{merge, SemanticLockFile};
+//RS     let left = SemanticLockFile {
+//RS         records: vec![semantic_record("app", "core.log", "1.2.3")],
+//RS         ..Default::default()
+//RS     };
+//RS     let right = SemanticLockFile {
+//RS         records: vec![semantic_record("app", "core.log", "1.3.0")],
+//RS         ..Default::default()
+//RS     };
+//RS     let out = merge(&SemanticLockFile::default(), &left, &right);
+//RS     assert_eq!(out.conflicts.len(), 1);
+//RS     assert_eq!(out.conflicts[0].owner_package, "app");
+//RS     assert_eq!(out.conflicts[0].semantic_key, "package:core.log");
+//RS }
+//RS 
+//RS #[test]
+//RS fn missing_dep_fix_prefers_direct_add_for_single_package() {
+//RS     let graph = graph_with_app();
+//RS     let err = graph.check_visible("app", "only-app").unwrap_err();
+//RS     assert!(err
+//RS         .fix_text()
+//RS         .contains("jet add only-app --path ../only-app"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn missing_dep_fix_does_not_catalog_without_hidden_use_evidence() {
+//RS     let mut graph = graph_with_app();
+//RS     graph
+//RS         .add_package(jetpack::PackageGraph::PackageNode::new("direct-only").with_deps(&["shared"]));
+//RS     let err = graph.check_visible("app", "shared").unwrap_err();
+//RS     assert!(matches!(
+//RS         err.fix,
+//RS         jetpack::PackageGraph::MissingDependencyFix::DirectAddPath { .. }
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn missing_dep_fix_prefers_catalog_for_workspace_reuse() {
+//RS     let graph = graph_with_app();
+//RS     let err = graph.check_visible("app", "log").unwrap_err();
+//RS     assert!(err.fix_text().contains("catalog data"));
+//RS     assert!(err.fix_text().contains("app"));
+//RS     assert!(err.fix_text().contains("worker"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn lsp_completion_hides_transitive_deps() {
+//RS     let graph = graph_with_app();
+//RS     let visible: Vec<String> = graph
+//RS         .visible_edges("app")
+//RS         .into_iter()
+//RS         .map(|edge| edge.dependency)
+//RS         .collect();
+//RS     assert_eq!(visible, vec!["ui".to_string()]);
+//RS     assert!(!visible.contains(&"log".to_string()));
+//RS }
+//RS 
+//RS #[test]
+//RS fn lock_record_kinds_roundtrip_unknown_future_fields() {
+//RS     use jetpack::SemanticLock::{parse, write, LockRecordKind, SemanticLockFile};
+//RS     let raw = "semantic-lock-version = 1\n\n[[semantic_record]]\nkind = \"future-kind\"\nkey = \"k\"\nexact = \"e\"\nhash = \"h\"\nplatform = \"p\"\nfuture-key = \"future-value\"\n";
+//RS     let parsed = parse(raw);
+//RS     assert!(matches!(
+//RS         parsed.records[0].identity.kind,
+//RS         LockRecordKind::Future(_)
+//RS     ));
+//RS     assert_eq!(
+//RS         parsed.records[0].future_fields.get("future-key"),
+//RS         Some(&"future-value".to_string())
+//RS     );
+//RS     let reparsed = parse(&write(&SemanticLockFile {
+//RS         records: parsed.records,
+//RS         ..Default::default()
+//RS     }));
+//RS     assert_eq!(
+//RS         reparsed.records[0].future_fields.get("future-key"),
+//RS         Some(&"future-value".to_string())
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn lock_rationale_preserves_exact_identity() {
+//RS     use jetpack::SemanticLock::SemanticLockFile;
+//RS     let a = SemanticLockFile {
+//RS         records: vec![semantic_record("app", "core.log", "1.2.3")],
+//RS         ..Default::default()
+//RS     };
+//RS     let mut b = a.clone();
+//RS     b.records[0].rationales[0].reason = "human text changed".to_string();
+//RS     assert_eq!(
+//RS         a.records[0].identity.machine_identity(),
+//RS         b.records[0].identity.machine_identity()
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn lock_merge_independent_additions() {
+//RS     use jetpack::SemanticLock::{merge, SemanticLockFile};
+//RS     let left = SemanticLockFile {
+//RS         records: vec![semantic_record("app", "core.log", "1.2.3")],
+//RS         ..Default::default()
+//RS     };
+//RS     let right = SemanticLockFile {
+//RS         records: vec![semantic_record("app", "core.http", "2.0.0")],
+//RS         ..Default::default()
+//RS     };
+//RS     let out = merge(&SemanticLockFile::default(), &left, &right);
+//RS     assert!(out.conflicts.is_empty());
+//RS     assert_eq!(out.merged.records.len(), 2);
+//RS }
+//RS 
+//RS #[test]
+//RS fn lock_merge_same_identity_two_owners() {
+//RS     use jetpack::SemanticLock::{merge, SemanticLockFile};
+//RS     let left = SemanticLockFile {
+//RS         records: vec![semantic_record("app", "core.log", "1.2.3")],
+//RS         ..Default::default()
+//RS     };
+//RS     let right = SemanticLockFile {
+//RS         records: vec![semantic_record("worker", "core.log", "1.2.3")],
+//RS         ..Default::default()
+//RS     };
+//RS     let out = merge(&SemanticLockFile::default(), &left, &right);
+//RS     assert!(out.conflicts.is_empty());
+//RS     assert_eq!(out.merged.records[0].rationales.len(), 2);
+//RS }
+//RS 
+//RS #[test]
+//RS fn lock_merge_conflicting_identity_diagnostic() {
+//RS     use jetpack::SemanticLock::{merge, SemanticLockFile};
+//RS     let left = SemanticLockFile {
+//RS         records: vec![semantic_record("app", "core.log", "1.2.3")],
+//RS         ..Default::default()
+//RS     };
+//RS     let right = SemanticLockFile {
+//RS         records: vec![semantic_record("app", "core.log", "1.3.0")],
+//RS         ..Default::default()
+//RS     };
+//RS     let out = merge(&SemanticLockFile::default(), &left, &right);
+//RS     assert_eq!(out.conflicts[0].left_reason, "app declared core.log");
+//RS     assert_eq!(out.conflicts[0].right_reason, "app declared core.log");
+//RS }
+//RS 
+//RS #[test]
+//RS fn lock_merge_conflicts_on_same_version_different_hash() {
+//RS     use jetpack::SemanticLock::{merge, SemanticLockFile};
+//RS     let left = SemanticLockFile {
+//RS         records: vec![semantic_record_with_hash(
+//RS             "app",
+//RS             "core.log",
+//RS             "1.2.3",
+//RS             "sha256-left",
+//RS         )],
+//RS         ..Default::default()
+//RS     };
+//RS     let right = SemanticLockFile {
+//RS         records: vec![semantic_record_with_hash(
+//RS             "app",
+//RS             "core.log",
+//RS             "1.2.3",
+//RS             "sha256-right",
+//RS         )],
+//RS         ..Default::default()
+//RS     };
+//RS     let out = merge(&SemanticLockFile::default(), &left, &right);
+//RS     assert_eq!(out.conflicts.len(), 1);
+//RS }
+//RS 
+//RS #[test]
+//RS fn lock_merge_accepts_one_sided_identity_change_from_base() {
+//RS     use jetpack::SemanticLock::{merge, SemanticLockFile};
+//RS     let base = SemanticLockFile {
+//RS         records: vec![semantic_record("app", "core.log", "1.2.3")],
+//RS         ..Default::default()
+//RS     };
+//RS     let left = base.clone();
+//RS     let right = SemanticLockFile {
+//RS         records: vec![semantic_record("app", "core.log", "1.3.0")],
+//RS         ..Default::default()
+//RS     };
+//RS     let out = merge(&base, &left, &right);
+//RS     assert!(out.conflicts.is_empty());
+//RS     assert_eq!(out.merged.records[0].identity.exact, "1.3.0");
+//RS }
+//RS 
+//RS #[test]
+//RS fn lock_merge_platform_specific_records() {
+//RS     use jetpack::SemanticLock::{merge, SemanticLockFile};
+//RS     let left = SemanticLockFile {
+//RS         records: vec![semantic_record("app", "bin.tool:x86_64-linux", "1")],
+//RS         ..Default::default()
+//RS     };
+//RS     let mut right_rec = semantic_record("app", "bin.tool:aarch64-macos", "1");
+//RS     right_rec.identity.platform = "aarch64-macos".to_string();
+//RS     let right = SemanticLockFile {
+//RS         records: vec![right_rec],
+//RS         ..Default::default()
+//RS     };
+//RS     let out = merge(&SemanticLockFile::default(), &left, &right);
+//RS     assert!(out.conflicts.is_empty());
+//RS     assert_eq!(out.merged.records.len(), 2);
+//RS }
+//RS 
+//RS #[test]
+//RS fn lock_explain_names_owner_policy_provider_platform() {
+//RS     use jetpack::SemanticLock::{explain, SemanticLockFile};
+//RS     let lock = SemanticLockFile {
+//RS         records: vec![semantic_record("app", "core.log", "1.2.3")],
+//RS         ..Default::default()
+//RS     };
+//RS     let fact = explain(&lock, "package:core.log").expect("explain fact");
+//RS     assert_eq!(fact.owners, vec!["app".to_string()]);
+//RS     assert_eq!(fact.provider, "core");
+//RS     assert_eq!(fact.platform, "x86_64-linux");
+//RS     assert_eq!(fact.policy_fingerprint, "policy-1");
+//RS     assert_eq!(fact.contenders.len(), 1);
+//RS }
+//RS 
+//RS #[test]
+//RS fn lock_satisfied_offline_verbs_do_not_touch_network() {
+//RS     use jetpack::ProviderGraph::{
+//RS         AuthorityGraph, FetchDecision, ProviderFamily, ProviderObject, ProviderRequest,
+//RS     };
+//RS     let obj = ProviderObject {
+//RS         family: ProviderFamily::Npm,
+//RS         ref_key: "left-pad".to_string(),
+//RS         exact_identity: "npm:left-pad@1.0.0".to_string(),
+//RS         hash: "sha256-aa".to_string(),
+//RS         platform: "any".to_string(),
+//RS         signature: String::new(),
+//RS         audit: Vec::new(),
+//RS         sandbox_effects: Vec::new(),
+//RS         build_effects: Vec::new(),
+//RS     };
+//RS     let mut graph = AuthorityGraph::default();
+//RS     graph.add_locked(obj);
+//RS     let decision = graph.fetch_allowed(&ProviderRequest {
+//RS         family: ProviderFamily::Npm,
+//RS         ref_key: "left-pad".to_string(),
+//RS         exact_identity: "npm:left-pad@1.0.0".to_string(),
+//RS         hash: "sha256-aa".to_string(),
+//RS         platform: "any".to_string(),
+//RS         offline: true,
+//RS     });
+//RS     assert_eq!(decision, FetchDecision::AllowedOfflineSatisfied);
+//RS }
+//RS 
+//RS #[test]
+//RS fn read_only_verbs_do_not_rewrite_lock() {
+//RS     use jetpack::SemanticLock::{parse, write, SemanticLockFile};
+//RS     let lock = SemanticLockFile {
+//RS         records: vec![semantic_record("app", "core.log", "1.2.3")],
+//RS         ..Default::default()
+//RS     };
+//RS     let before = write(&lock);
+//RS     let after = write(&parse(&before));
+//RS     assert_eq!(before, after);
+//RS }
+//RS 
+//RS #[test]
+//RS fn nix_import_emits_role_modules_and_todos() {
+//RS     let plan = jetpack::MigrationImport::import_nix_facts(
+//RS         "flake.nix",
+//RS         r#"{"name":"app","packages":["ripgrep"],"shellHook":"echo hi"}"#,
+//RS     );
+//RS     assert!(plan.generated_files.iter().any(|f| f.path == "env.jet"));
+//RS     assert!(plan.todos.iter().any(|t| t.message.contains("shellHook")));
+//RS }
+//RS 
+//RS #[test]
+//RS fn nix_import_emits_exact_refs_and_retains_native_facts() {
+//RS     let plan = jetpack::MigrationImport::import_nix_facts(
+//RS         "flake.lock",
+//RS         r#"{"name":"app","version":"1.0.0","source":"nixpkgs","packages":[{"name":"ripgrep","version":"14.1.1","drvPath":"/nix/store/hash-ripgrep-14.1.1.drv","buildInputs":["openssl"],"system":"x86_64-linux","license":"BSD-3-Clause"}]}"#,
+//RS     );
+//RS     assert_eq!(plan.deps[0].provider_ref, "ripgrep@nixpkgs#version=14.1.1");
+//RS     assert_eq!(plan.deps[0].locked_version, "14.1.1");
+//RS     assert!(plan
+//RS         .emit_pkg_jet()
+//RS         .contains("ripgrep: ripgrep@nixpkgs#version=14.1.1"));
+//RS     let facts = &plan.provider_facts["ripgrep@nixpkgs#version=14.1.1"];
+//RS     facts.validate().expect("exact Nix import is lossless");
+//RS     assert_eq!(facts.native_format, "flake-facts.json");
+//RS     assert!(facts.native_document.contains("drvPath"));
+//RS     assert!(facts.facts.contains_key("provider.nix.import.drvPath"));
+//RS     assert!(facts.facts.contains_key("provider.nix.dependency.build"));
+//RS     assert!(facts.facts.contains_key("provider.nix.variant.system"));
+//RS     assert!(facts.facts.contains_key("provider.nix.license"));
+//RS     assert!(facts.facts.contains_key("provider.nix.source.drv_path"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn nix_import_keeps_mutable_refs_out_of_generated_source() {
+//RS     let plan = jetpack::MigrationImport::import_nix_facts(
+//RS         "flake.nix",
+//RS         r#"{"name":"app","packages":["ripgrep"]}"#,
+//RS     );
+//RS     assert_eq!(plan.deps[0].provider_ref, "ripgrep@nixpkgs");
+//RS     assert!(!plan.emit_pkg_jet().contains("ripgrep: ripgrep@nixpkgs"));
+//RS     assert!(plan.provider_facts["ripgrep@nixpkgs"]
+//RS         .losses
+//RS         .iter()
+//RS         .any(|loss| loss.reason.contains("no exact version")));
+//RS     assert!(plan
+//RS         .todos
+//RS         .iter()
+//RS         .any(|todo| todo.message.contains("migration remains unresolved")));
+//RS }
+//RS 
+//RS #[test]
+//RS fn nix_import_reports_malformed_package_facts_without_generating_them() {
+//RS     let plan = jetpack::MigrationImport::import_nix_facts(
+//RS         "flake.lock",
+//RS         r#"{"name":"app","version":"1.0.0","packages":[{"name":"broken","version":"1.0.0","drvPath":1,"buildInputs":false}]}"#,
+//RS     );
+//RS     let facts = &plan.provider_facts["broken@nixpkgs#version=1.0.0"];
+//RS     assert!(facts
+//RS         .losses
+//RS         .iter()
+//RS         .any(|loss| loss.reason.contains("drvPath")));
+//RS     assert!(facts
+//RS         .losses
+//RS         .iter()
+//RS         .any(|loss| loss.reason.contains("buildInputs")));
+//RS     assert!(!plan
+//RS         .emit_pkg_jet()
+//RS         .contains("broken: broken@nixpkgs#version=1.0.0"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn cargo_import_preserves_locked_versions() {
+//RS     let plan = jetpack::MigrationImport::import_cargo(
+//RS         "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nserde = \"1\"\n",
+//RS         "[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\n",
+//RS     );
+//RS     assert_eq!(plan.deps[0].locked_version, "1.0.200");
+//RS     assert_eq!(plan.deps[0].provider_ref, "serde@cargo#version=1.0.200");
+//RS     assert!(plan
+//RS         .emit_pkg_jet()
+//RS         .contains("serde: serde@cargo#version=1.0.200"));
+//RS     assert!(plan.provider_facts["serde#version=1.0.200@cargo"]
+//RS         .validate()
+//RS         .is_ok());
+//RS     assert!(plan.ffi_stubs.iter().any(|s| s.symbol == "serde"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn npm_import_turns_scripts_into_legacy_build_actions() {
+//RS     let plan = jetpack::MigrationImport::import_npm(
+//RS         r#"{"name":"web","version":"1.0.0","dependencies":{"vite":"5"},"scripts":{"build":"vite build"}}"#,
+//RS     );
+//RS     assert!(plan.deps.iter().any(|d| d.name == "vite"));
+//RS     assert_eq!(plan.deps[0].provider_ref, "vite@npm");
+//RS     assert!(!plan.emit_pkg_jet().contains("vite: vite@npm"));
+//RS     assert!(plan
+//RS         .todos
+//RS         .iter()
+//RS         .any(|t| t.message.contains("legacy build action")));
+//RS     assert!(plan.provider_facts.values().any(|facts| facts
+//RS         .losses
+//RS         .iter()
+//RS         .any(|loss| loss.reason.contains("not an exact lock"))));
+//RS }
+//RS 
+//RS #[test]
+//RS fn npm_import_emits_exact_provider_refs_and_retains_requests() {
+//RS     let plan = jetpack::MigrationImport::import_npm(
+//RS         r#"{"name":"web","version":"1.0.0","dependencies":{"vite":"5.4.0"}}"#,
+//RS     );
+//RS     assert_eq!(plan.deps[0].provider_ref, "vite@npm#version=5.4.0");
+//RS     assert_eq!(plan.deps[0].locked_version, "5.4.0");
+//RS     assert!(plan.emit_pkg_jet().contains("vite: vite@npm#version=5.4.0"));
+//RS     assert!(plan.provider_facts["vite@npm#version=5.4.0"]
+//RS         .validate()
+//RS         .is_ok());
+//RS }
+//RS 
+//RS #[test]
+//RS fn cargo_import_reports_missing_lock_without_generating_mutable_ref() {
+//RS     let plan = jetpack::MigrationImport::import_cargo(
+//RS         "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nserde = \"1\"\n",
+//RS         "",
+//RS     );
+//RS     assert_eq!(plan.deps[0].provider_ref, "serde@cargo");
+//RS     assert!(!plan.emit_pkg_jet().contains("serde: serde@cargo"));
+//RS     assert!(plan
+//RS         .todos
+//RS         .iter()
+//RS         .any(|todo| todo.message.contains("unresolved")));
+//RS     assert!(plan.provider_facts["serde@cargo"]
+//RS         .losses
+//RS         .iter()
+//RS         .any(|loss| loss.reason.contains("no exact version")));
+//RS }
+//RS 
+//RS #[test]
+//RS fn python_import_marks_dynamic_metadata_todo() {
+//RS     let plan = jetpack::MigrationImport::import_python_metadata("pkg", &["version"]);
+//RS     assert!(plan.todos[0].message.contains("dynamic Python metadata"));
+//RS     assert!(jetpack::MigrationImport::todo_diagnostics_need_ballot());
+//RS }
+//RS 
+//RS #[test]
+//RS fn swiftpm_import_emits_provider_refs() {
+//RS     let plan = jetpack::MigrationImport::import_swiftpm("swift-log", "abc123");
+//RS     assert_eq!(
+//RS         plan.deps[0].provider_ref,
+//RS         "swift-log#revision=abc123@swiftpm"
+//RS     );
+//RS     assert_eq!(plan.deps[0].locked_version, "abc123");
+//RS     assert!(plan.provider_facts["swift-log#revision=abc123@swiftpm"]
+//RS         .validate()
+//RS         .is_ok());
+//RS }
+//RS 
+//RS #[test]
+//RS fn import_idempotent_without_user_edits() {
+//RS     use jetpack::MigrationImport::{merge_generated_file, GeneratedFile};
+//RS     let file = GeneratedFile {
+//RS         path: "env.jet".to_string(),
+//RS         contents: "module env.dev\n".to_string(),
+//RS         owned: true,
+//RS     };
+//RS     let merged = merge_generated_file(Some("module env.dev\n"), &file).expect("stable");
+//RS     assert_eq!(merged, "module env.dev\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn import_conflict_preserves_user_edit() {
+//RS     use jetpack::MigrationImport::{merge_generated_file, GeneratedFile, ImportConflict};
+//RS     let file = GeneratedFile {
+//RS         path: "env.jet".to_string(),
+//RS         contents: "module env.dev\n".to_string(),
+//RS         owned: true,
+//RS     };
+//RS     let err = merge_generated_file(Some("# jet-import: edited\nmodule env.dev\n"), &file)
+//RS         .expect_err("user edit must conflict");
+//RS     assert_eq!(
+//RS         err,
+//RS         ImportConflict::UserEditedGeneratedLine {
+//RS             path: "env.jet".to_string()
+//RS         }
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn import_conflicts_on_any_generated_file_drift() {
+//RS     use jetpack::MigrationImport::{merge_generated_file, GeneratedFile};
+//RS     let file = GeneratedFile {
+//RS         path: "env.jet".to_string(),
+//RS         contents: "module env.dev\n".to_string(),
+//RS         owned: true,
+//RS     };
+//RS     let err = merge_generated_file(Some("module env.dev\n// user change\n"), &file)
+//RS         .expect_err("any drift from generated baseline must conflict");
+//RS     assert_eq!(
+//RS         err,
+//RS         jetpack::MigrationImport::ImportConflict::UserEditedGeneratedLine {
+//RS             path: "env.jet".to_string()
+//RS         }
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn migration_status_feeds_lock_explain() {
+//RS     use jetpack::MigrationImport::MigrationStatus;
+//RS     let status = MigrationStatus::AdapterWrapped {
+//RS         name: "left-pad".to_string(),
+//RS     };
+//RS     let mut record = semantic_record("app", "left-pad", "1.0.0");
+//RS     record.rationales[0].adapter_id = match status {
+//RS         MigrationStatus::AdapterWrapped { name } => format!("adapter:{name}"),
+//RS         _ => String::new(),
+//RS     };
+//RS     assert_eq!(record.rationales[0].adapter_id, "adapter:left-pad");
+//RS }
+//RS 
+//RS #[test]
+//RS fn provider_contract_covers_core_nix_path_github() {
+//RS     use jetpack::ProviderGraph::{built_in_contracts, ProviderFamily};
+//RS     let contracts = built_in_contracts();
+//RS     let families: Vec<ProviderFamily> = contracts.iter().map(|c| c.family.clone()).collect();
+//RS     assert!(families.contains(&ProviderFamily::Core));
+//RS     assert!(families.contains(&ProviderFamily::Nix));
+//RS     assert!(families.contains(&ProviderFamily::Path));
+//RS     assert!(families.contains(&ProviderFamily::Github));
+//RS     assert!(
+//RS         !contracts
+//RS             .iter()
+//RS             .find(|contract| contract.family == ProviderFamily::Homebrew)
+//RS             .expect("Homebrew contract")
+//RS             .fetches_bytes
+//RS     );
+//RS     assert!(
+//RS         !contracts
+//RS             .iter()
+//RS             .find(|contract| contract.family == ProviderFamily::Github)
+//RS             .expect("GitHub contract")
+//RS             .fetches_bytes
+//RS     );
+//RS     assert!(
+//RS         contracts
+//RS             .iter()
+//RS             .find(|contract| contract.family == ProviderFamily::Binary)
+//RS             .expect("binary contract")
+//RS             .fetches_bytes
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn npm_metadata_normalizes_deps_scripts_bins() {
+//RS     let facts = jetpack::ProviderGraph::normalize_npm(
+//RS         r#"{"name":"web","version":"1.0.0","license":"MIT","dependencies":{"vite":"5"},"scripts":{"build":"vite build"},"bin":{"web":"cli.js"}}"#,
+//RS     );
+//RS     assert_eq!(facts.dependencies, vec!["vite".to_string()]);
+//RS     assert_eq!(facts.scripts, vec!["build".to_string()]);
+//RS     assert_eq!(facts.bins, vec!["web".to_string()]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn provider_report_round_trips_through_lock_and_explain() {
+//RS     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+//RS     let native = r#"{"name":"web","version":"1.0.0","license":"MIT","dependencies":{"vite":"5"}}"#;
+//RS     let report = normalize_provider_document(ProviderFamily::Npm, native);
+//RS     report.validate().expect("lossless npm report");
+//RS     let shared = report.shared_facts();
+//RS     assert_eq!(shared.qualified_reference(), "web#version=1.0.0@npm");
+//RS     assert_eq!(shared.native_document, native);
+//RS     assert!(shared
+//RS         .explain_lines()
+//RS         .iter()
+//RS         .any(|line| line == "native json: retained"));
+//RS     let round_trip = jetpack::ProviderFacts::from_json(&report.export_json())
+//RS         .expect("shared provider facts JSON");
+//RS     assert_eq!(round_trip, shared);
+//RS     let lock = report
+//RS         .lock_record("app", "web@npm#1.0.0", "any")
+//RS         .expect("provider semantic lock");
+//RS     assert_eq!(lock.identity.exact, "web#version=1.0.0@npm");
+//RS     let digest = shared.digest();
+//RS     assert_eq!(
+//RS         lock.future_fields.get("provider-facts-digest"),
+//RS         Some(&digest)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn provider_report_surfaces_missing_identity_as_loss() {
+//RS     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+//RS     let report = normalize_provider_document(ProviderFamily::Npm, r#"{"name":"web"}"#);
+//RS     assert!(!report.is_lossless());
+//RS     let error = report.validate().expect_err("missing provider version");
+//RS     assert!(
+//RS         error.contains("lossy") || error.contains("exact"),
+//RS         "{error}"
+//RS     );
+//RS     let shared = report.shared_facts_for("web@npm");
+//RS     assert!(shared
+//RS         .losses
+//RS         .iter()
+//RS         .any(|loss| loss.reason.contains("exact version")));
+//RS }
+//RS 
+//RS #[test]
+//RS fn provider_report_preserves_alias_resolution_and_typed_native_facts() {
+//RS     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+//RS     use jetpack::{ProviderFactValue, ProviderFacts};
+//RS     let native = r#"{"name":"web","version":"1.0.0","yanked":false}"#;
+//RS     let report = normalize_provider_document(ProviderFamily::Npm, native);
+//RS     let shared = report.shared_facts_for("web@catalog");
+//RS     shared.validate().expect("catalog alias remains lossless");
+//RS     assert_eq!(shared.qualified_reference(), "web#version=1.0.0@catalog");
+//RS     assert_eq!(shared.native_document, native);
+//RS     assert_eq!(
+//RS         shared.facts.get("provider.resolved_selector"),
+//RS         Some(&ProviderFactValue::Text("#version=1.0.0".to_string()))
+//RS     );
+//RS     assert_eq!(
+//RS         shared.facts.get("provider.npm.native.yanked"),
+//RS         Some(&ProviderFactValue::List(vec![ProviderFactValue::Bool(
+//RS             false
+//RS         )]))
+//RS     );
+//RS 
+//RS     let lock = report
+//RS         .lock_record("app", "web@catalog", "any")
+//RS         .expect("alias lock retains source authority");
+//RS     assert_eq!(lock.identity.exact, "web#version=1.0.0@catalog");
+//RS     let locked = ProviderFacts::from_json(
+//RS         lock.future_fields
+//RS             .get("provider-facts")
+//RS             .expect("provider facts in lock"),
+//RS     )
+//RS     .expect("locked provider facts");
+//RS     locked.validate().expect("locked alias facts");
+//RS     assert_eq!(locked.reference, "web@catalog");
+//RS }
+//RS 
+//RS #[test]
+//RS fn swiftpm_v2_report_keeps_revision_and_native_bytes() {
+//RS     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+//RS     let revision = "0123456789abcdef0123456789abcdef01234567";
+//RS     let native = format!(
+//RS         "{{\"pins\":[{{\"identity\":\"swift-log\",\"state\":{{\"revision\":\"{revision}\",\"version\":\"1.5.4\"}}}}]}}"
+//RS     );
+//RS     let report = normalize_provider_document(ProviderFamily::SwiftPM, &native);
+//RS     report.validate().expect("SwiftPM v2 pin is lossless");
+//RS     let shared = report.shared_facts();
+//RS     assert_eq!(
+//RS         shared.qualified_reference(),
+//RS         format!("swift-log#revision={revision}@swiftpm")
+//RS     );
+//RS     assert_eq!(shared.native_document, native);
+//RS     assert!(shared
+//RS         .facts
+//RS         .get("provider.revision")
+//RS         .is_some_and(|value| format!("{value:?}").contains(revision)));
+//RS }
+//RS 
+//RS #[test]
+//RS fn homebrew_report_reads_stable_version_and_dependencies() {
+//RS     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+//RS     let native = r#"{"name":"jq","versions":{"stable":"1.7.1"},"license":"MIT","dependencies":["oniguruma"]}"#;
+//RS     let report = normalize_provider_document(ProviderFamily::Homebrew, native);
+//RS     report
+//RS         .validate()
+//RS         .expect("Homebrew formula identity is lossless");
+//RS     assert_eq!(report.facts.version, "1.7.1");
+//RS     assert_eq!(report.facts.dependencies, vec!["oniguruma".to_string()]);
+//RS     assert_eq!(report.shared_facts().native_document, native);
+//RS }
+//RS 
+//RS #[test]
+//RS fn homebrew_conformance_retains_bottle_source_and_hook_facts() {
+//RS     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+//RS     let native = r##"{"name":"jq","full_name":"jq","version":"1.7.1","versions":{"stable":"1.7.1","head":"HEAD"},"license":"MIT","tap":"homebrew/core","dependencies":["oniguruma"],"build_dependencies":["pkg-config"],"test_dependencies":["bats-core"],"recommended_dependencies":[{"name":"less","version":"1.0"}],"source":{"url":"https://example.invalid/jq.tar.gz","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},"bottle":{"stable":{"files":{"arm64_sonoma":{"url":"https://example.invalid/jq.arm64.bottle.tar.gz","sha256":"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"}}}},"relocatable":true,"test":"system \"#{bin}/jq\", \"--version\"","deprecated":false}"##;
+//RS     let report = normalize_provider_document(ProviderFamily::Homebrew, native);
+//RS     report.validate().expect("Homebrew formula is lossless");
+//RS     assert_eq!(report.facts.dependencies, vec!["oniguruma".to_string()]);
+//RS     assert_eq!(
+//RS         report.facts.build_dependencies,
+//RS         vec!["pkg-config".to_string()]
+//RS     );
+//RS     assert_eq!(report.facts.dev_dependencies, vec!["bats-core".to_string()]);
+//RS     assert!(report
+//RS         .facts
+//RS         .typed
+//RS         .contains_key("provider.homebrew.bottle.arm64_sonoma.sha256"));
+//RS     assert!(report
+//RS         .shared_facts()
+//RS         .facts
+//RS         .contains_key("provider.homebrew.hook.test"));
+//RS     let shared = report.shared_facts();
+//RS     let lock = report
+//RS         .lock_record("app", "jq@homebrew#1.7.1", "x86_64-linux")
+//RS         .expect("Homebrew provider lock");
+//RS     let locked = jetpack::ProviderFacts::from_json(
+//RS         lock.future_fields
+//RS             .get("provider-facts")
+//RS             .expect("provider facts in Homebrew lock"),
+//RS     )
+//RS     .expect("Homebrew provider facts JSON");
+//RS     assert_eq!(locked, shared);
+//RS     assert_eq!(locked.native_document, native);
+//RS }
+//RS 
+//RS #[test]
+//RS fn homebrew_conformance_reports_conflicting_identity_facts() {
+//RS     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+//RS     let report = normalize_provider_document(
+//RS         ProviderFamily::Homebrew,
+//RS         r#"{"name":"jq","version":"1.7.1","versions":{"stable":"1.7.2"}}"#,
+//RS     );
+//RS     assert!(report
+//RS         .conflicts
+//RS         .iter()
+//RS         .any(|conflict| conflict.contains("conflicting version")));
+//RS     assert!(report.validate().is_err());
+//RS }
+//RS 
+//RS #[test]
+//RS fn github_conformance_retains_release_assets_source_and_status() {
+//RS     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+//RS     let digest = "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+//RS     let revision = "0123456789abcdef0123456789abcdef01234567";
+//RS     let native = format!(
+//RS         r#"{{"name":"tool","tag_name":"v1.2.3","target_commitish":"{revision}","license":"MIT","repository":{{"full_name":"acme/tool"}},"draft":false,"prerelease":false,"assets":[{{"name":"tool-linux","platform":"x86_64-linux","digest":"{digest}","browser_download_url":"https://example.invalid/tool"}}],"signature":{{"key":"pk","value":"sig"}},"advisories":["CVE-0000-0000"],"hooks":{{"build":"reviewed"}}}}"#
+//RS     );
+//RS     let report = normalize_provider_document(ProviderFamily::Github, &native);
+//RS     report.validate().expect("GitHub release is lossless");
+//RS     assert_eq!(report.facts.version, "v1.2.3");
+//RS     assert!(report.facts.platforms.contains(&"x86_64-linux".to_string()));
+//RS     assert!(report.facts.typed.contains_key("provider.github.revision"));
+//RS     assert!(report
+//RS         .shared_facts()
+//RS         .facts
+//RS         .contains_key("provider.github.asset.tool-linux.browser_download_url"));
+//RS     let shared = report.shared_facts();
+//RS     let lock = report
+//RS         .lock_record("app", "tool@github#v1.2.3", "x86_64-linux")
+//RS         .expect("GitHub provider lock");
+//RS     let locked = jetpack::ProviderFacts::from_json(
+//RS         lock.future_fields
+//RS             .get("provider-facts")
+//RS             .expect("provider facts in GitHub lock"),
+//RS     )
+//RS     .expect("GitHub provider facts JSON");
+//RS     assert_eq!(locked, shared);
+//RS     assert_eq!(locked.native_document, native);
+//RS }
+//RS 
+//RS #[test]
+//RS fn github_conformance_reports_unhashed_release_assets() {
+//RS     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+//RS     let report = normalize_provider_document(
+//RS         ProviderFamily::Github,
+//RS         r#"{"name":"tool","tag_name":"v1.2.3","assets":[{"name":"tool-linux","browser_download_url":"https://example.invalid/tool"}]}"#,
+//RS     );
+//RS     assert!(report
+//RS         .losses
+//RS         .iter()
+//RS         .any(|loss| loss.contains("no content digest")));
+//RS     assert!(report.validate().is_err());
+//RS }
+//RS 
+//RS #[test]
+//RS fn binary_conformance_retains_platform_signature_and_provenance() {
+//RS     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+//RS     let digest = "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+//RS     let native = format!(
+//RS         r#"{{"name":"tool","version":"2.0.0","hash":"{digest}","platforms":["x86_64-linux"],"license":"MIT","url":"https://example.invalid/tool","signature":{{"key":"pk","value":"sig"}},"provenance":{{"builder":"ci"}},"sbom":{{"format":"spdx"}},"variants":{{"debug":{{"features":["trace"]}}}}}}"#
+//RS     );
+//RS     let report = normalize_provider_document(ProviderFamily::Binary, &native);
+//RS     report
+//RS         .validate()
+//RS         .expect("binary provider facts are lossless");
+//RS     assert_eq!(report.shared_facts().selector.digest, digest);
+//RS     assert!(report
+//RS         .shared_facts()
+//RS         .facts
+//RS         .contains_key("provider.binary.signature"));
+//RS     assert!(report
+//RS         .shared_facts()
+//RS         .facts
+//RS         .contains_key("provider.binary.provenance"));
+//RS     assert_eq!(report.shared_facts().native_document, native);
+//RS }
+//RS 
+//RS #[test]
+//RS fn binary_conformance_reports_missing_platform_and_weak_hash() {
+//RS     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+//RS     let report = normalize_provider_document(
+//RS         ProviderFamily::Binary,
+//RS         r#"{"name":"tool","hash":"sha256-aa"}"#,
+//RS     );
+//RS     assert!(report
+//RS         .losses
+//RS         .iter()
+//RS         .any(|loss| loss.contains("not an exact digest")));
+//RS     assert!(report
+//RS         .losses
+//RS         .iter()
+//RS         .any(|loss| loss.contains("no target platform")));
+//RS     assert!(report.validate().is_err());
+//RS }
+//RS 
+//RS #[test]
+//RS fn binary_report_uses_digest_identity_without_fabricating_a_version() {
+//RS     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+//RS     let digest = "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+//RS     let native = format!("{{\"name\":\"tool\",\"hash\":\"{digest}\",\"platforms\":[\"linux\"]}}");
+//RS     let report = normalize_provider_document(ProviderFamily::Binary, &native);
+//RS     report
+//RS         .validate()
+//RS         .expect("binary digest is an exact identity");
+//RS     assert_eq!(
+//RS         report.shared_facts().qualified_reference(),
+//RS         format!("tool#digest={digest}@binary")
+//RS     );
+//RS     assert_eq!(report.shared_facts().native_document, native);
+//RS }
+//RS 
+//RS #[test]
+//RS fn binary_report_surfaces_an_invalid_digest_as_loss() {
+//RS     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+//RS     let report = normalize_provider_document(
+//RS         ProviderFamily::Binary,
+//RS         r#"{"name":"tool","hash":"sha256-aa","platforms":["linux"]}"#,
+//RS     );
+//RS     assert!(!report.is_lossless());
+//RS     let shared = report.shared_facts();
+//RS     assert!(shared
+//RS         .losses
+//RS         .iter()
+//RS         .any(|loss| loss.reason.contains("exact version, revision, or digest")));
+//RS     assert!(report.validate().is_err());
+//RS }
+//RS 
+//RS #[test]
+//RS fn cargo_metadata_normalizes_features_and_build_script_fact() {
+//RS     let facts = jetpack::ProviderGraph::normalize_cargo(
+//RS         "[package]\nname = \"lib\"\nversion = \"0.1.0\"\nbuild = \"build.rs\"\n[dependencies]\nserde = \"1\"\n[build-dependencies]\ncc = \"1\"\n",
+//RS     );
+//RS     assert_eq!(facts.dependencies, vec!["serde".to_string()]);
+//RS     assert_eq!(facts.build_dependencies, vec!["cc".to_string()]);
+//RS     assert_eq!(facts.scripts, vec!["build.rs".to_string()]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn pypi_dynamic_metadata_becomes_todo_fact() {
+//RS     let facts = jetpack::ProviderGraph::normalize_pypi("pkg", "1.0.0", true);
+//RS     assert!(facts.todos[0].contains("dynamic metadata"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn swiftpm_metadata_locks_exact_revision() {
+//RS     let facts = jetpack::ProviderGraph::normalize_swiftpm("swift-log", "abc123");
+//RS     assert_eq!(facts.integrity_hash, "abc123");
+//RS     assert_eq!(facts.source_identity, "swiftpm:swift-log@abc123");
+//RS }
+//RS 
+//RS #[test]
+//RS fn binary_provider_requires_hash_and_platform() {
+//RS     assert!(jetpack::ProviderGraph::binary_object("tool", "", "linux", "").is_err());
+//RS     assert!(jetpack::ProviderGraph::binary_object("tool", "sha256-aa", "", "").is_err());
+//RS     let obj = jetpack::ProviderGraph::binary_object("tool", "sha256-aa", "linux", "")
+//RS         .expect("hash + platform ok");
+//RS     assert_eq!(obj.exact_identity, "binary:tool:linux:sha256-aa");
+//RS }
+//RS 
+//RS #[test]
+//RS fn provider_fetch_denied_under_offline_without_lock() {
+//RS     use jetpack::ProviderGraph::{AuthorityGraph, FetchDecision, ProviderFamily, ProviderRequest};
+//RS     let decision = AuthorityGraph::default().fetch_allowed(&ProviderRequest {
+//RS         family: ProviderFamily::Cargo,
+//RS         ref_key: "serde".to_string(),
+//RS         exact_identity: "cargo:serde@1".to_string(),
+//RS         hash: "sha256-aa".to_string(),
+//RS         platform: "any".to_string(),
+//RS         offline: true,
+//RS     });
+//RS     assert_eq!(decision, FetchDecision::DeniedOfflineMissingLock);
+//RS }
+//RS 
+//RS #[test]
+//RS fn provider_fetch_allowed_offline_with_satisfied_lock() {
+//RS     use jetpack::ProviderGraph::{
+//RS         AuthorityGraph, FetchDecision, ProviderFamily, ProviderObject, ProviderRequest,
+//RS     };
+//RS     let mut graph = AuthorityGraph::default();
+//RS     graph.add_locked(ProviderObject {
+//RS         family: ProviderFamily::Cargo,
+//RS         ref_key: "serde".to_string(),
+//RS         exact_identity: "cargo:serde@1".to_string(),
+//RS         hash: "sha256-aa".to_string(),
+//RS         platform: "any".to_string(),
+//RS         signature: String::new(),
+//RS         audit: Vec::new(),
+//RS         sandbox_effects: Vec::new(),
+//RS         build_effects: Vec::new(),
+//RS     });
+//RS     let decision = graph.fetch_allowed(&ProviderRequest {
+//RS         family: ProviderFamily::Cargo,
+//RS         ref_key: "serde".to_string(),
+//RS         exact_identity: "cargo:serde@1".to_string(),
+//RS         hash: "sha256-aa".to_string(),
+//RS         platform: "any".to_string(),
+//RS         offline: true,
+//RS     });
+//RS     assert_eq!(decision, FetchDecision::AllowedOfflineSatisfied);
+//RS }
+//RS 
+//RS #[test]
+//RS fn replacement_candidate_visible_but_inactive() {
+//RS     use jetpack::ProviderGraph::{normalize_npm, ReplacementOverlay};
+//RS     use jetpack::Replacement::{PackageIdentity, ProofStatus};
+//RS     let mut facts = normalize_npm(r#"{"name":"left-pad","version":"1.0.0"}"#);
+//RS     facts.replacement_candidates.push(ReplacementOverlay {
+//RS         foreign_identity: PackageIdentity::new("npm", "left-pad", "1.0.0"),
+//RS         native_identity: PackageIdentity::new("core", "core.text.pad", "1.0.0"),
+//RS         covered_public_symbols: Vec::new(),
+//RS         unsupported_symbols: Vec::new(),
+//RS         license: "MIT".to_string(),
+//RS         platforms: vec!["x86_64-linux".to_string()],
+//RS         proof_status: ProofStatus::Missing,
+//RS         proof_digest: String::new(),
+//RS         proof_inputs: Vec::new(),
+//RS     });
+//RS     let record = semantic_record("app", &facts.name, &facts.version);
+//RS     assert_eq!(facts.source_identity, "npm:left-pad@1.0.0");
+//RS     assert_eq!(record.identity.semantic_key(), "package:left-pad");
+//RS     assert_eq!(
+//RS         facts.replacement_candidates[0].proof_status,
+//RS         ProofStatus::Missing
+//RS     );
+//RS     assert_eq!(
+//RS         facts.replacement_candidates[0].native_identity.ref_string(),
+//RS         "core:core.text.pad@1.0.0"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn replacement_compat_proof_fails_on_missing_symbol() {
+//RS     use jetpack::Replacement::{run_proof, ProofFailureKind};
+//RS     let foreign = replacement_surface("npm", "left-pad", "1.0.0");
+//RS     let mut native = replacement_surface("core", "core.text.pad", "1.0.0");
+//RS     native.public_symbols.retain(|symbol| symbol.name != "trim");
+//RS     let report = run_proof(&foreign, &native, "x86_64-linux");
+//RS     assert!(report
+//RS         .failures
+//RS         .iter()
+//RS         .any(|f| { f.kind == ProofFailureKind::MissingPublicSymbol && f.name == "trim" }));
+//RS }
+//RS 
+//RS #[test]
+//RS fn replacement_compat_proof_fails_on_effect_mismatch() {
+//RS     use jetpack::Replacement::{run_proof, ProofFailureKind};
+//RS     let foreign = replacement_surface("npm", "left-pad", "1.0.0");
+//RS     let mut native = replacement_surface("core", "core.text.pad", "1.0.0");
+//RS     native.public_symbols[0].effects = vec!["fs.read".to_string()];
+//RS     let report = run_proof(&foreign, &native, "x86_64-linux");
+//RS     assert!(report
+//RS         .failures
+//RS         .iter()
+//RS         .any(|f| { f.kind == ProofFailureKind::EffectMismatch && f.name == "pad_left" }));
+//RS }
+//RS 
+//RS #[test]
+//RS fn replacement_compat_proof_fails_on_error_shape_mismatch() {
+//RS     use jetpack::Replacement::{run_proof, ProofFailureKind};
+//RS     let foreign = replacement_surface("npm", "left-pad", "1.0.0");
+//RS     let mut native = replacement_surface("core", "core.text.pad", "1.0.0");
+//RS     native.public_symbols[0].errors = vec!["RangeError".to_string()];
+//RS     let report = run_proof(&foreign, &native, "x86_64-linux");
+//RS     assert!(report
+//RS         .failures
+//RS         .iter()
+//RS         .any(|f| { f.kind == ProofFailureKind::ErrorShapeMismatch && f.name == "pad_left" }));
+//RS }
+//RS 
+//RS #[test]
+//RS fn replacement_compat_proof_fails_on_golden_output_diff() {
+//RS     use jetpack::Replacement::{run_proof, GoldenFixture, ProofFailureKind};
+//RS     let foreign = replacement_surface("npm", "left-pad", "1.0.0");
+//RS     let mut native = replacement_surface("core", "core.text.pad", "1.0.0");
+//RS     native.goldens = vec![GoldenFixture::new("pad_left_basic", "hi\n")];
+//RS     let report = run_proof(&foreign, &native, "x86_64-linux");
+//RS     assert!(report
+//RS         .failures
+//RS         .iter()
+//RS         .any(|f| { f.kind == ProofFailureKind::GoldenOutputDiff && f.name == "pad_left_basic" }));
+//RS }
+//RS 
+//RS #[test]
+//RS fn replacement_compat_proof_pass_enables_policy_replacement() {
+//RS     use jetpack::Replacement::{resolve_replacement, ReplacementDecision, ReplacementPolicy};
+//RS     let candidate = replacement_passed_candidate();
+//RS     let policy = ReplacementPolicy::allow(
+//RS         &candidate.foreign_identity,
+//RS         &candidate.native_identity,
+//RS         "app",
+//RS     );
+//RS     let decision = resolve_replacement(&candidate, &policy, "app", "x86_64-linux");
+//RS     let ReplacementDecision::Active(active) = decision else {
+//RS         panic!("passed proof + allow policy should activate replacement");
+//RS     };
+//RS     assert_eq!(
+//RS         active.native_identity.ref_string(),
+//RS         "core:core.text.pad@1.0.0"
+//RS     );
+//RS     assert_eq!(
+//RS         active.lock_record.identity.kind.as_str(),
+//RS         "replacement-overlay"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn replacement_policy_deny_blocks_replacement() {
+//RS     use jetpack::Replacement::{resolve_replacement, ReplacementDecision, ReplacementPolicy};
+//RS     let candidate = replacement_passed_candidate();
+//RS     let decision = resolve_replacement(
+//RS         &candidate,
+//RS         &ReplacementPolicy::default(),
+//RS         "app",
+//RS         "x86_64-linux",
+//RS     );
+//RS     assert!(matches!(decision, ReplacementDecision::Denied { .. }));
+//RS }
+//RS 
+//RS #[test]
+//RS fn replacement_preserves_foreign_call_site() {
+//RS     use jetpack::Replacement::{resolve_replacement, ReplacementDecision, ReplacementPolicy};
+//RS     let candidate = replacement_passed_candidate();
+//RS     let policy = ReplacementPolicy::prefer(
+//RS         &candidate.foreign_identity,
+//RS         &candidate.native_identity,
+//RS         "app",
+//RS     );
+//RS     let decision = resolve_replacement(&candidate, &policy, "app", "x86_64-linux");
+//RS     let ReplacementDecision::Active(active) = decision else {
+//RS         panic!("prefer policy should activate replacement");
+//RS     };
+//RS     assert_eq!(active.foreign_call_site, "npm:left-pad@1.0.0");
+//RS     assert_eq!(
+//RS         active.lock_record.identity.key,
+//RS         "npm:left-pad@1.0.0@x86_64-linux"
+//RS     );
+//RS     assert_eq!(
+//RS         active.lock_record.identity.exact,
+//RS         "core:core.text.pad@1.0.0"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn replacement_lock_records_foreign_native_proof_and_policy() {
+//RS     let candidate = replacement_passed_candidate();
+//RS     let record = jetpack::Replacement::replacement_lock_record(
+//RS         &candidate,
+//RS         "app",
+//RS         "x86_64-linux",
+//RS         "policy.replacements:npm:left-pad@1.0.0=>core:core.text.pad@1.0.0:allow",
+//RS     );
+//RS     assert_eq!(
+//RS         record
+//RS             .future_fields
+//RS             .get("replacement-foreign")
+//RS             .map(String::as_str),
+//RS         Some("npm:left-pad@1.0.0")
+//RS     );
+//RS     assert_eq!(
+//RS         record
+//RS             .future_fields
+//RS             .get("replacement-native")
+//RS             .map(String::as_str),
+//RS         Some("core:core.text.pad@1.0.0")
+//RS     );
+//RS     assert_eq!(
+//RS         record
+//RS             .future_fields
+//RS             .get("replacement-proof-digest")
+//RS             .map(String::as_str),
+//RS         Some(candidate.proof_digest.as_str())
+//RS     );
+//RS     assert_eq!(
+//RS         record
+//RS             .future_fields
+//RS             .get("replacement-proof-inputs")
+//RS             .map(|s| s.contains("platform=x86_64-linux")),
+//RS         Some(true)
+//RS     );
+//RS     assert!(record.rationales[0]
+//RS         .policy_fingerprint
+//RS         .contains("policy.replacements"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn replacement_lock_merge_conflict_names_owners() {
+//RS     use jetpack::Replacement::{
+//RS         replacement_lock_record, PackageIdentity, ProofStatus, ReplacementCandidate,
+//RS     };
+//RS     use jetpack::SemanticLock::{merge, SemanticLockFile};
+//RS     let foreign = replacement_identity("npm", "left-pad", "1.0.0");
+//RS     let mk_candidate = |native: &str| ReplacementCandidate {
+//RS         foreign_identity: foreign.clone(),
+//RS         native_identity: PackageIdentity::new("core", native, "1.0.0"),
+//RS         covered_public_symbols: vec!["pad_left".to_string()],
+//RS         unsupported_symbols: Vec::new(),
+//RS         license: "MIT".to_string(),
+//RS         platforms: vec!["x86_64-linux".to_string()],
+//RS         proof_status: ProofStatus::Passed,
+//RS         proof_digest: format!("proof-{native}"),
+//RS         proof_inputs: vec![format!("platform=x86_64-linux;native={native}")],
+//RS     };
+//RS     let left = SemanticLockFile {
+//RS         records: vec![replacement_lock_record(
+//RS             &mk_candidate("core.text.pad"),
+//RS             "app",
+//RS             "x86_64-linux",
+//RS             "policy-left",
+//RS         )],
+//RS         ..Default::default()
+//RS     };
+//RS     let right = SemanticLockFile {
+//RS         records: vec![replacement_lock_record(
+//RS             &mk_candidate("core.string.pad"),
+//RS             "app",
+//RS             "x86_64-linux",
+//RS             "policy-right",
+//RS         )],
+//RS         ..Default::default()
+//RS     };
+//RS     let out = merge(&SemanticLockFile::default(), &left, &right);
+//RS     assert_eq!(out.conflicts.len(), 1);
+//RS     assert_eq!(out.conflicts[0].owner_package, "app");
+//RS     assert_eq!(
+//RS         out.conflicts[0].semantic_key,
+//RS         "replacement-overlay:npm:left-pad@1.0.0@x86_64-linux"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn replacement_lock_keys_are_platform_specific() {
+//RS     let candidate = replacement_passed_candidate();
+//RS     let linux =
+//RS         jetpack::Replacement::replacement_lock_record(&candidate, "app", "x86_64-linux", "policy");
+//RS     let macos = jetpack::Replacement::replacement_lock_record(
+//RS         &candidate,
+//RS         "app",
+//RS         "aarch64-apple-darwin",
+//RS         "policy",
+//RS     );
+//RS     assert_ne!(linux.identity.semantic_key(), macos.identity.semantic_key());
+//RS }
+//RS 
+//RS #[test]
+//RS fn replacement_importer_reports_replacement_progress() {
+//RS     use jetpack::Replacement::{ImporterProgressFact, ImporterReplacementStatus};
+//RS     let candidate = replacement_passed_candidate();
+//RS     let proof = ImporterProgressFact::from_candidate(&candidate);
+//RS     let active = ImporterProgressFact::active(&candidate);
+//RS     assert_eq!(proof.status, ImporterReplacementStatus::ProofPassed);
+//RS     assert_eq!(active.status, ImporterReplacementStatus::ReplacementActive);
+//RS     assert_eq!(active.proof_digest, candidate.proof_digest);
+//RS }
+//RS 
+//RS // ─────────────────────────────────────────────
+//RS // Manifest parsing
+//RS // ─────────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn manifest_parse_valid_fields() {
+//RS     let raw = r#"name:    "myapp"
+//RS version: "1.2.3"
+//RS jet:     ">=0.1.0"
+//RS description: "A test package"
+//RS license: "MIT OR Apache-2.0"
+//RS repository: "https://example.com"
+//RS deps: {
+//RS }
+//RS "#;
+//RS     let path = PathBuf::from("package.jet");
+//RS     let mf = jet::Manifest::parse(&path, raw).expect("valid manifest should parse");
+//RS     assert_eq!(mf.package.name, "myapp");
+//RS     assert_eq!(mf.package.version, "1.2.3");
+//RS     assert_eq!(mf.package.jet_constraint.as_deref(), Some(">=0.1.0"));
+//RS     assert_eq!(mf.package.description.as_deref(), Some("A test package"));
+//RS     assert_eq!(mf.package.license.as_deref(), Some("MIT OR Apache-2.0"));
+//RS     assert!(mf.dependencies.is_empty());
+//RS     assert!(mf.boundaries.is_empty());
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_parse_import_boundaries() {
+//RS     let raw = min_manifest("app", "0.1.0")
+//RS         + r#"
+//RS boundaries: {
+//RS     deny: [
+//RS         { from: "app.ui", to: "app.db" },
+//RS         { from: "app.api.*", to: "app.db.*" },
+//RS     ],
+//RS }
+//RS "#;
+//RS     let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
+//RS         .expect("boundary policy should parse");
+//RS     assert_eq!(mf.boundaries.len(), 2);
+//RS     assert_eq!(mf.boundaries[0].from, "app.ui");
+//RS     assert_eq!(mf.boundaries[0].to, "app.db");
+//RS     assert!(mf.boundaries[1].matches("app.api.auth", "app.db.users"));
+//RS     assert!(!mf.boundaries[1].matches("app.web", "app.db.users"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_parse_import_boundaries_rejects_malformed_patterns() {
+//RS     for (label, pattern) in [
+//RS         ("unquoted", "app.ui"),
+//RS         ("interior wildcard", "app.*.ui"),
+//RS         ("multiple wildcards", "app.**"),
+//RS     ] {
+//RS         let raw = min_manifest("app", "0.1.0")
+//RS             + &format!("boundaries: {{ deny: [{{ from: {pattern}, to: \"app.db\" }}] }}\n");
+//RS         let error = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
+//RS             .expect_err("malformed boundary pattern must use E1206");
+//RS         assert_eq!(error.code, "E1206", "{label}");
+//RS         assert!(
+//RS             error.what.contains("package.jet"),
+//RS             "{label}: {}",
+//RS             error.what
+//RS         );
+//RS     }
+//RS 
+//RS     for (label, block) in [
+//RS         (
+//RS             "unknown boundary field",
+//RS             "boundaries: { allow: [{ from: \"app.ui\", to: \"app.db\" }] }",
+//RS         ),
+//RS         ("missing from", "boundaries: { deny: [{ to: \"app.db\" }] }"),
+//RS         ("missing to", "boundaries: { deny: [{ from: \"app.ui\" }] }"),
+//RS         (
+//RS             "duplicate edge field",
+//RS             "boundaries: { deny: [{ from: \"app.ui\", from: \"app.api\", to: \"app.db\" }] }",
+//RS         ),
+//RS     ] {
+//RS         let raw = min_manifest("app", "0.1.0") + block + "\n";
+//RS         let error = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
+//RS             .expect_err("malformed boundary record must use E1206");
+//RS         assert_eq!(error.code, "E1206", "{label}");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn loader_enforces_import_boundaries_and_warns_on_zero_match() {
+//RS     let denied = tmp_dir("import_boundary_denied");
+//RS     write(
+//RS         &denied,
+//RS         "package.jet",
+//RS         &(min_manifest("app", "0.1.0")
+//RS             + "boundaries: { deny: [{ from: \"app.ui\", to: \"app.db\" }] }\n"),
+//RS     );
+//RS     write(&denied, "ui.jet", "use db\nfn run() -[IO]> { }\n");
+//RS     write(&denied, "db.jet", "pub fn value() -> Int -> 1\n");
+//RS     let error = jet::Loader::load_entry(denied.join("ui.jet").to_str().unwrap())
+//RS         .expect_err("a denied import edge must fail during loading");
+//RS     assert_eq!(first_diag_code(&error), "E0619");
+//RS     assert!(error[0].what.contains("app.ui"));
+//RS     assert!(error[0].what.contains("app.db"));
+//RS     fs::remove_dir_all(&denied).unwrap();
+//RS 
+//RS     let unused = tmp_dir("import_boundary_unused");
+//RS     write(
+//RS         &unused,
+//RS         "package.jet",
+//RS         &(min_manifest("app", "0.1.0")
+//RS             + "boundaries: { deny: [{ from: \"app.ui\", to: \"app.db\" }] }\n"),
+//RS     );
+//RS     write(&unused, "ui.jet", "fn run() { }\n");
+//RS     let bundle = jet::Loader::load_entry(unused.join("ui.jet").to_str().unwrap())
+//RS         .expect("an unmatched boundary is a warning");
+//RS     assert!(bundle
+//RS         .parse_teaching
+//RS         .iter()
+//RS         .any(|diagnostic| diagnostic.code == "L0619"));
+//RS     fs::remove_dir_all(&unused).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn loader_records_import_edge_facts_and_erases_boundary_policy_before_codegen() {
+//RS     let root = tmp_dir("import_boundary_structure_fact");
+//RS     write(
+//RS         &root,
+//RS         "package.jet",
+//RS         &(min_manifest("app", "0.1.0")
+//RS             + "boundaries: { deny: [{ from: \"app.ui\", to: \"app.hidden.*\" }] }\n"),
+//RS     );
+//RS     write(
+//RS         &root,
+//RS         "ui.jet",
+//RS         "use db\nfn run() -[IO]> { print(db.value()) }\n",
+//RS     );
+//RS     write(&root, "db.jet", "pub fn value() -> Int -> 1\n");
+//RS     let entry = root.join("ui.jet");
+//RS     let shown = entry.to_str().unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(shown).expect("allowed edge must load");
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .all(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Lint),
+//RS         "allowed boundary edge diagnostics: {diagnostics:?}"
+//RS     );
+//RS     let edge = bundle
+//RS         .name_ledger
+//RS         .structure_facts()
+//RS         .iter()
+//RS         .find(|fact| fact.kind == jet_foundation::Names::StructureFactKind::ImportEdge)
+//RS         .expect("allowed edge structure fact");
+//RS     assert_eq!(edge.subject, "app.ui -> app.db");
+//RS     assert_eq!(edge.status, "allowed");
+//RS     assert_eq!(edge.gate.as_deref(), Some("manifest rule edit"));
+//RS 
+//RS     let gates =
+//RS         jet::Sema::GateLedger::GateLedger::collect(&bundle, jet::Policy::GateSet::default());
+//RS     assert!(gates.entries().iter().any(|entry| {
+//RS         entry.kind == jet::Sema::GateLedger::GateKind::Structure
+//RS             && entry.scope == "import-edge"
+//RS             && entry.subject == "app.ui -> app.db"
+//RS     }));
+//RS 
+//RS     let inspected = Command::new(jet_bin())
+//RS         .current_dir(&root)
+//RS         .args(["inspect", "structure", shown])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("inspect structure must run");
+//RS     assert!(inspected.status.success(), "inspect failed: {inspected:?}");
+//RS     let inspected = String::from_utf8(inspected.stdout).expect("inspection is UTF-8");
+//RS     assert!(inspected.contains("Structure.ImportEdge"));
+//RS     assert!(inspected.contains("app.ui -> app.db"));
+//RS     assert!(inspected.contains("manifest rule edit"));
+//RS 
+//RS     let output = jet::compile_with_path("", shown).expect("allowed edge must codegen");
+//RS     assert!(!output.rust.contains("manifest rule edit"));
+//RS     assert!(!output.rust.contains("app.hidden.*"));
+//RS 
+//RS     for (label, args) in [
+//RS         ("aot", vec!["run", "--release", shown]),
+//RS         ("jit", vec!["run", shown]),
+//RS         ("interpreter", vec!["run", "--interpret", shown]),
+//RS         ("dev", vec!["dev", shown, "--watch=off"]),
+//RS     ] {
+//RS         let output = Command::new(jet_bin())
+//RS             .current_dir(&root)
+//RS             .args(args)
+//RS             .env("NO_COLOR", "1")
+//RS             .env(
+//RS                 "JET_RUN_CACHE_DIR",
+//RS                 root.join(".cache").join(label).join("run"),
+//RS             )
+//RS             .env(
+//RS                 "JET_STORE_DIR",
+//RS                 root.join(".cache").join(label).join("build"),
+//RS             )
+//RS             .output()
+//RS             .expect("tier command must run");
+//RS         assert!(
+//RS             output.status.success(),
+//RS             "{label} failed: stdout={} stderr={}",
+//RS             String::from_utf8_lossy(&output.stdout),
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS         assert_eq!(output.stdout, b"1\n", "{label} output");
+//RS     }
+//RS 
+//RS     let wasm = Command::new("rustc")
+//RS         .args([
+//RS             "--print",
+//RS             "target-libdir",
+//RS             "--target",
+//RS             "wasm32-unknown-unknown",
+//RS         ])
+//RS         .output()
+//RS         .expect("probe web target");
+//RS     if wasm.status.success() {
+//RS         let output = Command::new(jet_bin())
+//RS             .current_dir(&root)
+//RS             .args(["build", "--target=web", shown])
+//RS             .env("NO_COLOR", "1")
+//RS             .env("JET_STORE_DIR", root.join(".cache").join("web"))
+//RS             .output()
+//RS             .expect("web command must run");
+//RS         assert!(
+//RS             output.status.success(),
+//RS             "web failed: stdout={} stderr={}",
+//RS             String::from_utf8_lossy(&output.stdout),
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS     } else {
+//RS         eprintln!("note: skipping import-boundary web tier proof (wasm target unavailable)");
+//RS     }
+//RS     fs::remove_dir_all(&root).unwrap();
+//RS }
+//RS 
+//RS #[test]
+// END-PORT-PENDING 1129 tests/pkg.rs:1-1802
+

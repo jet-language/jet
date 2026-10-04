@@ -1,0 +1,67 @@
+// Rust Source/CmdCompile.rs:8967-9049. Snapshot edits use the existing
+// Doctest marker scanner; publication remains the canonical transaction seam.
+use jet_foundation.[Span]
+
+// Rust rewrite_doctest_expect (CmdCompile.rs:8967-9016). One target line is
+// rewritten, preserving indentation/doc spacing/LF and all unrelated bytes.
+// Like Rust, the rewritten CRLF line becomes LF (and a bare CR is removed).
+pub fn jet_cli_test_rewrite_doctest_expect(source: &String, line: Int, actual: String) -> Bool Never! {
+    if line < 1 -> return false
+    bytes :: source.bytes()
+    start := 0
+    number := 1
+    loop start < bytes.len() {
+        end := start
+        loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
+        lf :: end < bytes.len()
+        next_line :: if lf -> end + 1 else -> end
+        if number == line {
+            body_end :: if end > start && bytes[end - 1] == (U8{13}) -> end - 1 else -> end
+            body :: String.from_bytes(bytes[start..<body_end]) ?? panic("LF boundary")
+            trimmed :: ~body.trim_start()
+            if !trimmed.starts_with("///") -> return false
+            indent_length :: body.bytes().len() - trimmed.bytes().len()
+            inner :: jet_cli_doctest_doc_inner(trimmed)
+            marker :: jet_cli_doctest_find_expect_marker(inner) ?? return false
+            inner_bytes :: inner.bytes()
+            expr_raw :: String.from_bytes(inner_bytes[0..<marker]) ?? panic("ASCII marker boundary")
+            expr :: ~expr_raw.trim_end()
+            out := [U8]{}
+            loop byte in bytes[0..<start + indent_length + 3] -> &out.push(byte)
+            doc_bytes :: trimmed.bytes()
+            if doc_bytes.len() > 3 && doc_bytes[3] == (U8{32}) -> &out.push(U8{32})
+            loop byte in expr.bytes() -> &out.push(byte)
+            if expr != "" -> &out.push(U8{32})
+            loop byte in "// => ".bytes() -> &out.push(byte)
+            loop byte in actual.bytes() -> &out.push(byte)
+            if lf -> &out.push(U8{10})
+            loop byte in bytes[next_line..<bytes.len()] -> &out.push(byte)
+            source = String.from_bytes(out) ?? panic("doctest snapshot preserves UTF-8")
+            return true
+        }
+        start = next_line
+        number += 1
+    }
+    false
+}
+
+// Rust doc_line_span (CmdCompile.rs:9039-9049), UTF-8 byte coordinates and
+// trim_end_matches(['LF','CR']) rather than Unicode-whitespace trimming.
+pub fn jet_cli_test_doc_line_span(source: String, line: Int) -> Span? Never! {
+    if line < 1 -> return None
+    bytes :: source.bytes()
+    start := 0
+    number := 1
+    loop start < bytes.len() {
+        end := start
+        loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
+        next_line :: if end < bytes.len() -> end + 1 else -> end
+        if number == line {
+            loop end > start && (bytes[end - 1] == (U8{10}) || bytes[end - 1] == (U8{13})) -> end -= 1
+            return Val(Span{start: start, end: end})
+        }
+        start = next_line
+        number += 1
+    }
+    None
+}

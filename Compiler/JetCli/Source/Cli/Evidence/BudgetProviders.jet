@@ -1,0 +1,810 @@
+// Compiler-owned measurement providers; no lookup consults PATH.
+use jet_foundation.PerformanceBudget.[stable_id, CanonicalJson, Rational, Comparison, Direction, Enforcement, Evaluation, MeasurementPolicy, Percentile]
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.EncodingJson.[parse_json]
+use jet_foundation.SHA256.[sha256_hex]
+// GATE #4494: native process, clock, channel and atomic primitives.
+use std.process.[Command, Stdio]
+use std.time.[Duration, Instant]
+use std.sync.[Arc, AtomicBool, AtomicU64, AtomicOrdering, mpsc]
+use std.io.[BufReader]
+
+// Rust: Source/BudgetProviders.rs:25
+pub MAX_SAMPLES :: 1_000_000
+// Rust: Source/BudgetProviders.rs:26
+pub MAX_BYTES :: 16 * 1024 * 1024
+// Rust: Source/BudgetProviders.rs:27
+pub MAX_SPECS :: 4096
+// Rust: Source/BudgetProviders.rs:28
+pub MAX_DETAIL_SCALARS :: 512
+// Rust: Source/BudgetProviders.rs:29
+pub MAX_METADATA_SCALARS :: 262144
+// Rust: Source/BudgetProviders.rs:30
+MAGIC :: "JETBUDGET1\n".bytes()
+// Rust: Source/BudgetProviders.rs:39
+COMPILE_WORKLOAD_SEQUENCE :: AtomicU64.new(0) // GATE #4494
+
+// Rust: Source/BudgetProviders.rs:72
+pub struct ProviderSpec { budget_hash: String, metric: String }
+// Rust: Source/BudgetProviders.rs:78
+pub struct ProviderRequest {
+    schema: String, version: U32, request_id: String, provider_hash: String,
+    context_hash: String, specs: [ProviderSpec], workload: CanonicalJson, policy: CanonicalJson
+}
+// Rust: Source/BudgetProviders.rs:90
+pub fn ProviderRequest.validate(self: &ProviderRequest) ProviderFailure! {
+    if self.schema != "jet.provider-request" || self.version != 1 {
+        return Err(ProviderFailure.malformed("unsupported provider request schema/version"))
+    }
+    loop (name, value) in [("request_id", self.request_id), ("provider_hash", self.provider_hash), ("context_hash", self.context_hash)] {
+        if !is_hex64(value) -> return Err(ProviderFailure.malformed("${name} is not lowercase Hex64"))
+    }
+    if self.specs.is_empty() || self.specs.len() > MAX_SPECS {
+        return Err(ProviderFailure.malformed("provider request spec count is outside 1..=4096"))
+    }
+    previous := (String, String)?{None}
+    loop spec in self.specs {
+        if !is_hex64(spec.budget_hash) || spec.metric.is_empty() {
+            return Err(ProviderFailure.malformed("provider request has an invalid budget hash or empty metric"))
+        }
+        key :: (spec.metric, spec.budget_hash)
+        if previous == { .Val(prior) -> prior >= key, .None -> false } {
+            return Err(ProviderFailure.malformed("provider request specs are not strictly ordered by metric then budget hash"))
+        }
+        previous = Val(key)
+    }
+    Ok(())
+}
+// Rust: Source/BudgetProviders.rs:130
+pub fn ProviderRequest.bytes(self: &ProviderRequest) -> [U8] ProviderFailure! {
+    self.validate()
+    specs := [CanonicalJson]{}
+    loop spec in self.specs {
+        &specs.push(CanonicalJson.object([
+            ("budget_hash", CanonicalJson.String(spec.budget_hash)),
+            ("metric", CanonicalJson.String(spec.metric))
+        ]).expect("fixed keys"))
+    }
+    Ok(CanonicalJson.object([
+        ("context_hash", CanonicalJson.String(self.context_hash)),
+        ("policy", self.policy), ("provider_hash", CanonicalJson.String(self.provider_hash)),
+        ("request_id", CanonicalJson.String(self.request_id)),
+        ("schema", CanonicalJson.String(self.schema)), ("specs", CanonicalJson.Array(^specs)),
+        ("version", CanonicalJson.Integer(self.version.to_string())), ("workload", self.workload)
+    ]).expect("fixed keys").bytes())
+}
+// Rust: Source/BudgetProviders.rs:174
+pub enum ProviderEvent {
+    Sample { spec: U32, metric: String, value: Rational },
+    Metadata { spec: U32, details: [(String, String)] },
+    Unavailable { spec: U32, reason: String, details: [(String, String)] },
+    Complete { request_id: String, samples: U64 }
+}
+// Rust: Source/BudgetProviders.rs:199
+pub struct ProviderEvidence { events: [ProviderEvent] }
+// Rust: Source/BudgetProviders.rs:204
+pub enum FailureClass { Unavailable, Malformed, Panic, Timeout, Execution, Incompatible, Unsupported, Unresolved }
+// Rust: Source/BudgetProviders.rs:217
+#Error
+pub struct ProviderFailure { class: FailureClass, reason: String }
+// Rust: Source/BudgetProviders.rs:221
+pub fn ProviderFailure.malformed(reason: String) -> ProviderFailure {
+    ProviderFailure{class: .Malformed, reason: ^reason}
+}
+// Rust: Source/BudgetProviders.rs:227
+fn ProviderFailure.operation(class: FailureClass, reason: String) -> ProviderFailure {
+    ProviderFailure{class: class, reason: ^reason}
+}
+// Rust: Source/BudgetProviders.rs:233
+pub fn ProviderFailure.diagnostic(self: &ProviderFailure, budget: String) -> ProviderDiagnostic {
+    if self.class == {
+        .Unavailable | .Incompatible -> ProviderDiagnostic{code: "E2906", what: "Performance budget ${budget} has no usable evidence", why: self.reason, fix: "Correct the provider evidence or bootstrap only when absent or stale evidence is eligible"},
+        .Unsupported -> ProviderDiagnostic{code: "E2903", what: "Performance budget ${budget} is not valid", why: self.reason, fix: "Use one supported metric and provider pair"},
+        .Unresolved -> ProviderDiagnostic{code: "E2905", what: "Performance budget ${budget} cannot resolve provider", why: self.reason, fix: "Name one registered provider identity"},
+        else -> ProviderDiagnostic{code: "E2908", what: "Performance budget operation failed", why: "Measurement provider refused the operation: ${self.reason}", fix: "Correct the named provider failure and retry the operation"}
+    }
+}
+// Rust: Source/BudgetProviders.rs:244
+pub struct ProviderDiagnostic { code: String, what: String, why: String, fix: String }
+// Rust: Source/BudgetProviders.rs:251
+pub fn ProviderDiagnostic.render(self: &ProviderDiagnostic) -> String {
+    "Error [${self.code}]: ${self.what}\n Why: ${self.why}\n Fix: ${self.fix}\nMore: jet-lang.dev/e/${self.code}\n"
+}
+// Rust: Source/BudgetProviders.rs:260
+pub struct ProviderCancellation { cancelled: Arc[AtomicBool] }
+// Rust: Source/BudgetProviders.rs:264
+pub fn ProviderCancellation.cancelled(self: &ProviderCancellation) -> Bool {
+    self.cancelled.load(AtomicOrdering.Acquire) // GATE #4494
+}
+// Rust: Source/BudgetProviders.rs:268
+type InProcessProvider = fn(&ProviderRequest, &ProviderCancellation) -> [ProviderEvent] ProviderFailure!
+// Rust: Source/BudgetProviders.rs:271
+enum Provider { InProcess(InProcessProvider), Subprocess(OSPath), File(OSPath) }
+// Rust: Source/BudgetProviders.rs:278
+pub struct ProviderRegistry { providers: [String: Provider] }
+// Rust: Source/BudgetProviders.rs:285
+pub fn ProviderRegistry.with_compiler_facts() -> ProviderRegistry {
+    registry := ProviderRegistry{providers: [:]}
+    registry.register_in_process("CompilerFacts", compiler_facts_provider).expect("fixed compiler provider identity")
+    registry.register_in_process("CompilerProbe", compiler_latency_provider).expect("fixed compiler probe provider identity")
+    ^registry
+}
+// Rust: Source/BudgetProviders.rs:295
+pub fn ProviderRegistry.with_builtins() -> ProviderRegistry {
+    registry := ProviderRegistry.with_compiler_facts()
+    registry.register_in_process("BuildArtifact", build_artifact_provider).expect("fixed build-artifact provider identity")
+    ^registry
+}
+// Rust: Source/BudgetProviders.rs:304
+pub fn ProviderRegistry.register_in_process(self: &ProviderRegistry, identity: String, provider: InProcessProvider) Err! {
+    self.insert(^identity, Provider.InProcess(provider))
+}
+// Rust: Source/BudgetProviders.rs:311
+pub fn ProviderRegistry.register_subprocess(self: &ProviderRegistry, identity: String, executable: OSPath) Err! {
+    if !executable.is_absolute() -> return Err("provider executable must be an absolute compiler-resolved path")
+    self.insert(^identity, Provider.Subprocess(^executable))
+}
+// Rust: Source/BudgetProviders.rs:321
+pub fn ProviderRegistry.register_file(self: &ProviderRegistry, identity: String, response: OSPath) Err! {
+    if !response.is_absolute() -> return Err("provider response must be an absolute compiler-resolved path")
+    self.insert(^identity, Provider.File(^response))
+}
+// Rust: Source/BudgetProviders.rs:331
+fn ProviderRegistry.insert(self: &ProviderRegistry, identity: String, provider: Provider) Err! {
+    if identity.is_empty() -> return Err("provider identity is empty")
+    if self.providers.insert(identity, ^provider).is_some() -> return Err("duplicate provider identity `${identity}`")
+    Ok(())
+}
+// Rust: Source/BudgetProviders.rs:340
+pub fn ProviderRegistry.collect(self: &ProviderRegistry, identity: String, request: &ProviderRequest, timeout: Duration) -> ProviderEvidence ProviderFailure! {
+    request.validate()
+    provider :: self.providers.get(identity).ok_or_else(fn() { ProviderFailure.operation(.Unresolved, "provider `${identity}` is unresolved") })
+    events :: if provider == {
+        .InProcess(function) -> run_in_process(function, request, timeout, identity),
+        .Subprocess(path) -> decode_stream(run_subprocess(path, request.bytes(), timeout), request),
+        .File(path) -> decode_stream(read_bounded(path, timeout), request)
+    }
+    validate_events(^events, request)
+}
+// Rust: Source/BudgetProviders.rs:364
+fn compiler_facts_provider(request: &ProviderRequest, cancellation: &ProviderCancellation) -> [ProviderEvent] ProviderFailure! {
+    values :: if request.workload == {
+        .Array(values) -> values,
+        else -> return Err(ProviderFailure.malformed("CompilerFacts workload is not an ordered sample array"))
+    }
+    if values.len() != request.specs.len() -> return Err(ProviderFailure.malformed("CompilerFacts workload/spec count differs"))
+    events := [ProviderEvent]{}
+    loop index in 0..<values.len() {
+        text :: if values[index] == {
+            .Integer(value) -> value,
+            else -> return Err(ProviderFailure.malformed("CompilerFacts sample is not an integer"))
+        }
+        value :: Rational.parse(text, "1").map_err(ProviderFailure.malformed)
+        &events.push(ProviderEvent.Sample{spec: index as U32, metric: request.specs[index].metric, value: ^value})
+    }
+    &events.push(ProviderEvent.Complete{request_id: request.request_id, samples: values.len() as U64})
+    Ok(^events)
+}
+// Rust: Source/BudgetProviders.rs:399
+fn build_artifact_provider(request: &ProviderRequest, cancellation: &ProviderCancellation) -> [ProviderEvent] ProviderFailure! {
+    workload :: if request.workload == {
+        .Object(workload) -> workload,
+        else -> return Err(ProviderFailure.malformed("BuildArtifact workload is not an object"))
+    }
+    path_text :: if workload.get("path") == {
+        .Val(.String(path)) -> path,
+        else -> return Err(ProviderFailure.malformed("BuildArtifact workload has no artifact path"))
+    }
+    path :: OSPath.new(path_text)
+    if !path.is_absolute() -> return Err(ProviderFailure.malformed("BuildArtifact path is not compiler-resolved absolute text"))
+    metadata :: std.fs.symlink_metadata(path).map_err(fn(error) { ProviderFailure.operation(.Unavailable, "built artifact is unavailable: ${error}") }) // GATE #4494
+    if metadata.file_type().is_symlink() || !metadata.is_file() -> return Err(ProviderFailure.operation(.Incompatible, "built artifact is not a regular file"))
+    value :: Rational.parse(metadata.len().to_string(), "1").map_err(ProviderFailure.malformed)
+    runtime := ArtifactRuntime?{None}
+    if request.specs.iter().any(fn(spec) { spec.metric == "StartupTime" || spec.metric == "MemoryHighWater" }) {
+        if core.sys.target.selected_os() == "linux" {
+            runtime = Val(measure_artifact_runtime(path, ARTIFACT_RUNTIME_SAMPLES))
+        } else {
+            return Err(ProviderFailure.operation(.Unavailable, "BuildArtifact startup and memory measurements require Linux /proc process accounting"))
+        }
+    }
+    events := [ProviderEvent]{}
+    sample_count := U64{0}
+    loop index in 0..<request.specs.len() {
+        spec :: request.specs[index]
+        if spec.metric == {
+            "BinarySize" | "ArtifactSize" -> {
+                &events.push(ProviderEvent.Sample{spec: index as U32, metric: spec.metric, value: value})
+                sample_count += 1
+            }
+            "StartupTime" | "MemoryHighWater" -> {
+                measured :: runtime.expect("runtime measurements were requested")
+                samples :: if spec.metric == "StartupTime" { measured.startup_ns } else { measured.memory_bytes }
+                loop sample in samples {
+                    &events.push(ProviderEvent.Sample{spec: index as U32, metric: spec.metric, value: sample})
+                    sample_count += 1
+                }
+            }
+            else -> return Err(ProviderFailure.operation(.Unsupported, "BuildArtifact does not support metric `${spec.metric}`"))
+        }
+    }
+    &events.push(ProviderEvent.Complete{request_id: request.request_id, samples: sample_count})
+    Ok(^events)
+}
+// Rust: Source/BudgetProviders.rs:505
+ARTIFACT_RUNTIME_SAMPLES :: 20
+// Rust: Source/BudgetProviders.rs:506
+ARTIFACT_READY_DEADLINE :: Duration.from_secs(2)
+// Rust: Source/BudgetProviders.rs:509
+struct ArtifactRuntime { startup_ns: [Rational], memory_bytes: [Rational] }
+// Rust: Source/BudgetProviders.rs:515
+fn measure_artifact_runtime(path: OSPath, samples: USize) -> ArtifactRuntime ProviderFailure! {
+    startup_ns := [Rational]{}
+    memory_bytes := [Rational]{}
+    loop trial in 0..<samples {
+        started :: Instant.now()
+        command := Command.new(path)
+        command.stdin(Stdio.null()).stdout(Stdio.piped()).stderr(Stdio.null())
+        if core.sys.target.selected_family() == "unix" -> command.process_group(0) // GATE #4494
+        child := command.spawn().map_err(fn(error) { ProviderFailure.operation(.Execution, "cannot launch artifact for startup/RSS measurement: ${error}") })
+        pid :: child.id()
+        stdout :: child.stdout.take().ok_or_else(fn() { ProviderFailure.operation(.Execution, "artifact stdout was unavailable for its readiness line") })
+        (ready_tx, ready_rx) :: mpsc.sync_channel(1) // GATE #4494
+        reader :: std.thread.spawn(fn() {
+            line := ""
+            result :: BufReader.new(^stdout).read_line(&line).map_err(fn(error) { error.to_string() })
+            _ :: ready_tx.send(^result)
+        })
+        deadline :: Instant.now() + ARTIFACT_READY_DEADLINE
+        high_water := U64{0}
+        ready_ns :: loop {
+            if read_vm_hwm(pid) == { .Val(value) -> { high_water = high_water.max(value) }, .None -> {} }
+            if ready_rx.try_recv() == {
+                .Ok(.Ok(bytes)) -> {
+                    if bytes > 0 {
+                        if read_vm_hwm(pid) == { .Val(value) -> { high_water = high_water.max(value) }, .None -> {} }
+                        high_water = high_water.max(stop_artifact(pid))
+                        break started.elapsed().as_nanos()
+                    }
+                    _ :: reader.join()
+                    return Err(ProviderFailure.operation(.Unavailable, "artifact exited without a readiness line"))
+                }
+                .Ok(.Err(error)) -> {
+                    _ :: reader.join()
+                    return Err(ProviderFailure.operation(.Unavailable, "artifact readiness read failed: ${error}"))
+                }
+                .Err(.Disconnected) -> {
+                    _ :: reader.join()
+                    return Err(ProviderFailure.operation(.Unavailable, "artifact readiness reader exited unexpectedly"))
+                }
+                .Err(.Empty) -> {}
+            }
+            if wait4_artifact(pid, true) == {
+                .Val(value) -> {
+                    high_water = high_water.max(value)
+                    if ready_rx.recv_timeout(Duration.from_millis(100)) == {
+                        .Ok(.Ok(bytes)) -> {
+                            if bytes > 0 -> break started.elapsed().as_nanos()
+                            return Err(ProviderFailure.operation(.Unavailable, "artifact exited without a readiness line"))
+                        }
+                        .Ok(.Err(error)) -> return Err(ProviderFailure.operation(.Unavailable, "artifact readiness read failed: ${error}")),
+                        .Err(error) -> return Err(ProviderFailure.operation(.Unavailable, "artifact exited before its readiness line"))
+                    }
+                }
+                .None -> {
+                    if Instant.now() >= deadline {
+                        _ :: stop_artifact(pid)
+                        _ :: reader.join()
+                        return Err(ProviderFailure.operation(.Timeout, "artifact did not emit a readiness line within 2 seconds"))
+                    }
+                }
+            }
+            std.thread.sleep(Duration.from_millis(1)) // GATE #4494
+        }
+        _ :: reader.join()
+        if high_water == 0 -> return Err(ProviderFailure.operation(.Unavailable, "artifact exited before VmHWM could be observed"))
+        &startup_ns.push(Rational.parse(ready_ns.to_string(), "1").map_err(ProviderFailure.malformed))
+        &memory_bytes.push(Rational.parse(high_water.to_string(), "1").map_err(ProviderFailure.malformed))
+    }
+    Ok(ArtifactRuntime{startup_ns: ^startup_ns, memory_bytes: ^memory_bytes})
+}
+// Rust: Source/BudgetProviders.rs:649
+struct ProcessUsage { status: I32, process_cpu_ns: U128, peak_rss_bytes: U64 }
+// Rust: Source/BudgetProviders.rs:656
+fn process_timeval_ns(seconds: I64, micros: I64, name: String) -> U128 ProviderFailure! {
+    seconds_u :: U128.try_from(seconds).map_err(fn(error) { ProviderFailure.malformed("${name} seconds are negative") })
+    micros_u :: U128.try_from(micros).map_err(fn(error) { ProviderFailure.malformed("${name} microseconds are negative") })
+    if micros_u >= 1_000_000 -> return Err(ProviderFailure.malformed("${name} microseconds are outside 0..1_000_000"))
+    seconds_u.checked_mul(1_000_000_000).and_then(fn(value) { value.checked_add(micros_u * 1000) }).ok_or_else(fn() { ProviderFailure.malformed("${name} overflowed nanoseconds") })
+}
+// Rust: Source/BudgetProviders.rs:677
+// Rust: Source/BudgetProviders.rs:717
+fn wait4_process(pid: U32, nonblocking: Bool) -> ProcessUsage? ProviderFailure! {
+    if core.sys.target.selected_os() != "linux" {
+        return Err(ProviderFailure.operation(.Unavailable, "process CPU child accounting requires Linux wait4 resource usage"))
+    }
+    status := I32{0}
+    usage := [std.os.raw.CLong].repeat(0, 18)
+    options :: if nonblocking { 1 } else { 0 }
+    // Rust: Source/BudgetProviders.rs:681
+    // GATE #4494: Linux wait4 ABI; #4483 selected-target c_long width.
+    result :: #Unsafe("wait4 writes status and the Linux rusage buffer") {
+        std.os.raw.wait4(pid as I32, &status, options, usage.as_mut_ptr())
+    }
+    if result == 0 -> return Ok(None)
+    if result < 0 -> return Err(ProviderFailure.operation(.Execution, "cannot collect child resource usage: ${std.io.Error.last_os_error()}"))
+    user_ns :: process_timeval_ns(usage[0], usage[1], "child ru_utime")
+    system_ns :: process_timeval_ns(usage[2], usage[3], "child ru_stime")
+    process_cpu_ns :: user_ns.checked_add(system_ns).ok_or_else(fn() { ProviderFailure.malformed("child process CPU time overflowed") })
+    kib :: U64.try_from(usage[4]).map_err(fn(error) { ProviderFailure.malformed("child ru_maxrss is negative") })
+    peak_rss_bytes :: kib.checked_mul(1024).ok_or_else(fn() { ProviderFailure.malformed("child ru_maxrss overflowed bytes") })
+    Ok(Val(ProcessUsage{status: status, process_cpu_ns: process_cpu_ns, peak_rss_bytes: peak_rss_bytes}))
+}
+// Rust: Source/BudgetProviders.rs:725
+fn wait4_artifact(pid: U32, nonblocking: Bool) -> U64? ProviderFailure! {
+    Ok(wait4_process(pid, nonblocking).map(fn(usage) { usage.peak_rss_bytes }))
+}
+// Rust: Source/BudgetProviders.rs:730
+fn stop_artifact(pid: U32) -> U64 ProviderFailure! {
+    // Rust: Source/BudgetProviders.rs:734
+    // GATE #4494: native kill of the entire child process group.
+    #Unsafe("terminate the isolated artifact process group") {
+        _ :: std.os.raw.kill(-(pid as I32), 9)
+    }
+    wait4_artifact(pid, false).ok_or_else(fn() { ProviderFailure.operation(.Execution, "artifact wait4 returned without reaping the process") })
+}
+// Rust: Source/BudgetProviders.rs:746
+fn read_vm_hwm(pid: U32) -> U64? ProviderFailure! {
+    path :: OSPath.new("/proc/${pid}/status")
+    status :: if std.fs.read_to_string(path) == {
+        .Ok(status) -> status,
+        .Err(error) -> {
+            if error.kind() == std.io.ErrorKind.NotFound -> return Ok(None)
+            return Err(ProviderFailure.operation(.Unavailable, "cannot read ${path}: ${error}"))
+        }
+    }
+    line :: status.lines().find(fn(line) { line.starts_with("VmHWM:") }) ?? return Ok(None)
+    fields := line.split_whitespace()
+    _ :: fields.next()
+    kib :: fields.next().ok_or_else(fn() { ProviderFailure.malformed("artifact VmHWM has no value") }).parse[U64]().map_err(fn(error) { ProviderFailure.malformed("artifact VmHWM is not an integer") })
+    if fields.next() != Val("kB") -> return Err(ProviderFailure.malformed("artifact VmHWM is not expressed in kB"))
+    Ok(Val(kib.checked_mul(1024).ok_or_else(fn() { ProviderFailure.malformed("artifact VmHWM overflowed bytes") })))
+}
+// Rust: Source/BudgetProviders.rs:781
+COMPILE_WARMUPS :: U128{1}
+// Rust: Source/BudgetProviders.rs:782
+COMPILE_SAMPLES :: 20
+// Rust: Source/BudgetProviders.rs:783
+COMPILE_CLOCK :: "process_cpu"
+// Rust: Source/BudgetProviders.rs:784
+COMPILE_MAX_PROJECT_BYTES :: U64{64 * 1024 * 1024}
+// Rust: Source/BudgetProviders.rs:791
+enum CompileBackend { JitCranelift, AotRustc }
+// Rust: Source/BudgetProviders.rs:797
+fn CompileBackend.for_profile(profile: String) -> CompileBackend {
+    if profile == "dev" { .JitCranelift } else { .AotRustc }
+}
+// Rust: Source/BudgetProviders.rs:805
+fn CompileBackend.label(self: CompileBackend) -> String {
+    if self == { .JitCranelift -> "cranelift-jit", .AotRustc -> "rustc-aot" }
+}
+// Rust: Source/BudgetProviders.rs:812
+fn CompileBackend.linker(self: CompileBackend) -> String {
+    if self == { .JitCranelift -> "cranelift-jit", .AotRustc -> NativeLinker.for_target(None).label() }
+}
+// Rust: Source/BudgetProviders.rs:825
+pub NATIVE_BUILD_DEADLINE :: Duration.from_secs(120)
+// Rust: Source/BudgetProviders.rs:837
+pub fn collection_deadline(kind: String, mode: String?, facts: Duration, native_build: Duration) -> Duration {
+    if kind == {
+        "BuildArtifact" -> Duration.from_secs(ARTIFACT_READY_DEADLINE.as_secs() * ARTIFACT_RUNTIME_SAMPLES as U64) + facts,
+        "CompilerProbe" -> {
+            trials :: COMPILE_WARMUPS as U32 + COMPILE_SAMPLES as U32
+            prime :: if mode == Val("Edit") { 1 } else { 0 }
+            (trials + prime) * native_build + facts
+        }
+        "BenchMeasurement" | "AllocationProbe" -> native_build + facts,
+        else -> facts
+    }
+}
+// Rust: Source/BudgetProviders.rs:867
+pub fn compiler_probe_workload(project_root: OSPath, entry: OSPath, mode: String, target: String, profile: String, patch: String?) -> CanonicalJson Err! {
+    root :: project_root.canonicalize().map_err(fn(error) { "cannot resolve compile workload root: ${error}" })
+    resolved_entry :: entry.canonicalize().map_err(fn(error) { "cannot resolve compile workload entry: ${error}" })
+    if !resolved_entry.starts_with(root) -> return Err("compile workload entry escapes its project root")
+    descriptor :: compile_descriptor(root, mode, target, profile, patch)
+    provider_version :: compiler_probe_version(root, mode, target, profile, patch)
+    CanonicalJson.object([
+        ("entry", CanonicalJson.String(resolved_entry.to_string_lossy())),
+        ("mode", CanonicalJson.String(mode)), ("patch", patch.map(fn(value) { CanonicalJson.String(value) }) ?? CanonicalJson.Null),
+        ("patch_sha256", CanonicalJson.String(descriptor.patch_sha256)),
+        ("profile", CanonicalJson.String(profile)), ("provider_version", CanonicalJson.String(provider_version)),
+        ("project_root", CanonicalJson.String(root.to_string_lossy())),
+        ("samples", CanonicalJson.Integer(COMPILE_SAMPLES.to_string())),
+        ("source_tree_sha256", CanonicalJson.String(descriptor.source_tree_sha256)),
+        ("target", CanonicalJson.String(target)), ("warmups", CanonicalJson.Integer(COMPILE_WARMUPS.to_string()))
+    ])
+}
+// Rust: Source/BudgetProviders.rs:929
+pub fn compiler_probe_version(project_root: OSPath, mode: String, target: String, profile: String, patch: String?) -> String Err! {
+    root :: project_root.canonicalize().map_err(fn(error) { "cannot resolve compile workload root: ${error}" })
+    descriptor :: compile_descriptor(root, mode, target, profile, patch)
+    backend :: CompileBackend.for_profile(profile)
+    Ok("jet-compile-latency-v3;clock=${COMPILE_CLOCK};mode=${mode};target=${target};profile=${profile};backend=${backend.label()};linker=${backend.linker()};warmups=${COMPILE_WARMUPS};samples=${COMPILE_SAMPLES};source=${descriptor.source_tree_sha256};patch=${descriptor.patch_sha256}")
+}
+// Rust: Source/BudgetProviders.rs:950
+struct CompileDescriptor { source_tree_sha256: String, patch_sha256: String }
+// Rust: Source/BudgetProviders.rs:955
+fn compile_descriptor(root: OSPath, mode: String, target: String, profile: String, patch: String?) -> CompileDescriptor Err! {
+    if !(mode == "Clean" || mode == "NoChange" || mode == "Edit") || target.is_empty() || profile.is_empty() {
+        return Err("compile workload has an unsupported mode, empty target, or empty profile")
+    }
+    if target != "cli" -> return Err("compile workload target `${target}` is unsupported by the resident fixture compiler")
+    validate_compile_profile(root, profile)
+    if mode == "Edit" && patch.is_none() -> return Err("CompileProbe Edit workload has no patch path")
+    if mode != "Edit" && patch.is_some() -> return Err("only an Edit workload may name a patch path")
+    patch_sha256 :: if patch == {
+        .Val(path_text) -> {
+            if !safe_relative_path(path_text) -> return Err("compile workload patch path is not project-relative")
+            path :: root.join(path_text)
+            metadata :: std.fs.symlink_metadata(path).map_err(fn(error) { "compile workload patch is unavailable: ${error}" })
+            if metadata.file_type().is_symlink() || !metadata.is_file() -> return Err("compile workload patch is not a regular file")
+            bytes :: std.fs.read(path).map_err(fn(error) { "cannot read compile workload patch: ${error}" })
+            sha256_hex(bytes)
+        }
+        .None -> sha256_hex([])
+    }
+    Ok(CompileDescriptor{source_tree_sha256: source_tree_digest(root), patch_sha256: patch_sha256})
+}
+// Rust: Source/BudgetProviders.rs:1000
+fn validate_compile_profile(root: OSPath, profile: String) Err! {
+    if profile == "dev" || profile == "release" || profile == "debug" || profile == "ci" || profile == "small" -> return Ok(())
+    manifest :: root.join("package.jet")
+    raw :: std.fs.read_to_string(manifest).map_err(fn(error) { "compile workload profile `${profile}` is unsupported by the resident fixture compiler" })
+    facts :: PackageFacts.parse(raw, manifest.display().to_string()).map_err(fn(error) { "compile workload profile `${profile}` is unsupported by the resident fixture compiler" })
+    if facts.build_profiles.iter().any(fn(candidate) { candidate.name == profile }) -> return Ok(())
+    Err("compile workload profile `${profile}` is unsupported by the resident fixture compiler")
+}
+// Rust: Source/BudgetProviders.rs:1026
+fn compiler_latency_provider(request: &ProviderRequest, cancellation: &ProviderCancellation) -> [ProviderEvent] ProviderFailure! {
+    workload :: if request.workload == {
+        .Object(workload) -> workload,
+        else -> return Err(ProviderFailure.malformed("CompilerProbe workload is not an object"))
+    }
+    validate_compile_workload_identity(request, workload)
+    mode :: workload_text(workload, "mode")
+    target :: workload_text(workload, "target")
+    profile :: workload_text(workload, "profile")
+    provider_version :: workload_text(workload, "provider_version")
+    root_path :: OSPath.new(workload_text(workload, "project_root"))
+    entry_path :: OSPath.new(workload_text(workload, "entry"))
+    if !root_path.is_absolute() || !entry_path.is_absolute() -> return Err(ProviderFailure.malformed("CompilerProbe paths are not compiler-resolved absolute text"))
+    patch :: if workload.get("patch") == {
+        .Val(.Null) -> None,
+        .Val(.String(value)) -> Val(value),
+        else -> return Err(ProviderFailure.malformed("CompilerProbe patch is not text or null"))
+    }
+    warmups :: workload_unsigned(workload, "warmups")
+    sample_count :: workload_unsigned(workload, "samples")
+    if warmups != COMPILE_WARMUPS || sample_count != COMPILE_SAMPLES as U128 {
+        return Err(ProviderFailure.operation(.Incompatible, "CompilerProbe workload does not use the pinned warmup/sample policy"))
+    }
+    if target != "cli" -> return Err(ProviderFailure.operation(.Unsupported, "compile workload target `${target}` is unsupported by the resident fixture compiler"))
+    loop spec in request.specs {
+        if !(spec.metric == "CompileTime(P50)" || spec.metric == "CompileTime(P90)" || spec.metric == "CompileTime(P95)" || spec.metric == "CompileTime(P99)" || spec.metric == "CompileTime(P999)") {
+            return Err(ProviderFailure.operation(.Unsupported, "CompilerProbe does not support metric `${spec.metric}`"))
+        }
+    }
+    root :: root_path.canonicalize().map_err(fn(error) { ProviderFailure.operation(.Unavailable, "compile workload root is unavailable: ${error}") })
+    entry :: entry_path.canonicalize().map_err(fn(error) { ProviderFailure.operation(.Unavailable, "compile workload entry is unavailable: ${error}") })
+    if !entry.starts_with(root) -> return Err(ProviderFailure.operation(.Incompatible, "compile workload entry escapes its project root"))
+    descriptor :: compile_descriptor(root, mode, target, profile, patch).map_err(ProviderFailure.malformed)
+    expected_provider_version :: compiler_probe_version(root, mode, target, profile, patch).map_err(ProviderFailure.malformed)
+    if provider_version != expected_provider_version -> return Err(ProviderFailure.operation(.Incompatible, "compile workload provider identity is stale or forged"))
+    source_tree_sha256 :: workload_text(workload, "source_tree_sha256")
+    patch_sha256 :: workload_text(workload, "patch_sha256")
+    if source_tree_sha256 != descriptor.source_tree_sha256 || patch_sha256 != descriptor.patch_sha256 {
+        return Err(ProviderFailure.operation(.Incompatible, "compile workload source or patch identity is stale or forged"))
+    }
+    sequence :: COMPILE_WORKLOAD_SEQUENCE.fetch_add(1, AtomicOrdering.Relaxed) // GATE #4494
+    scratch :: std.env.temp_dir().join("jet-compile-latency-${std.process.id()}-${sequence}-${request.request_id[..12]}")
+    result := compile_latency_samples(root, entry, scratch, mode, patch, descriptor.source_tree_sha256, descriptor.patch_sha256, target, profile, warmups as USize, sample_count as USize, request.specs, request.request_id)
+    _ :: std.fs.remove_dir_all(scratch)
+    ^result
+}
+// Rust: Source/BudgetProviders.rs:1157
+fn validate_compile_workload_identity(request: &ProviderRequest, fields: [String: CanonicalJson]) ProviderFailure! {
+    KEYS :: ["entry", "mode", "patch", "patch_sha256", "profile", "project_root", "provider_version", "samples", "source_tree_sha256", "target", "warmups"]
+    if fields.len() != KEYS.len() || KEYS.iter().any(fn(key) { !fields.contains_key(key) }) {
+        return Err(ProviderFailure.malformed("CompilerProbe workload has an unexpected or missing identity field"))
+    }
+    if request.request_id != stable_id(request.workload) -> return Err(ProviderFailure.operation(.Incompatible, "compile workload request identity is stale or forged"))
+    Ok(())
+}
+// Rust: Source/BudgetProviders.rs:1188
+fn compile_latency_samples(root: OSPath, entry: OSPath, scratch: OSPath, mode: String, patch: String?, expected_source_tree_sha256: String, expected_patch_sha256: String, target: String, profile: String, warmups: USize, sample_count: USize, specs: [ProviderSpec], request_id: String) -> [ProviderEvent] ProviderFailure! {
+    relative_entry :: entry.strip_prefix(root).map_err(fn(error) { ProviderFailure.malformed("compile workload entry is outside its project root") })
+    workload_bytes :: source_tree_bytes(root).map_err(ProviderFailure.malformed)
+    edit_bytes_data :: patch.map(fn(path) { std.fs.read(root.join(path)) }).transpose().map_err(fn(error) { ProviderFailure.malformed("cannot read edit bytes: ${error}") })
+    edit_bytes :: edit_bytes_data.map(fn(bytes) { bytes.len() as U128 }) ?? 0
+    edit_sha256 :: edit_bytes_data.map(sha256_hex) ?? sha256_hex([])
+    if edit_sha256 != expected_patch_sha256 -> return Err(ProviderFailure.operation(.Incompatible, "compile workload patch changed while it was copied"))
+    compiler_digest :: JET_COMPILER_BUILD_ID
+    core_digest :: JET_STDLIB_BUILD_ID
+    host :: "${core.sys.target.selected_os()}:${JET_BUILD_TARGET}"
+    backend :: CompileBackend.for_profile(profile)
+    linker :: backend.linker()
+    sample_values := [Rational]{}
+    sample_records := [CanonicalJson]{}
+    peak_rss_bytes := U64{0}
+    edit_patch :: if mode == "Edit" { Val(patch.ok_or_else(fn() { ProviderFailure.malformed("Edit workload has no patch path") })) } else { None }
+    // Prime a fixed watched path once; restore its exact warm cache per edit.
+    warm :: scratch.join("warm-cache")
+    edit_trial :: scratch.join("edit-trial")
+    if mode == "Edit" {
+        std.fs.create_dir_all(scratch).map_err(fn(error) { ProviderFailure.operation(.Execution, "cannot create edit workload scratch directory: ${error}") })
+        copy_compile_project(root, edit_trial).map_err(ProviderFailure.malformed)
+        copied_digest :: source_tree_digest(edit_trial).map_err(ProviderFailure.malformed)
+        if copied_digest != expected_source_tree_sha256 -> return Err(ProviderFailure.operation(.Incompatible, "compile workload source changed while it was copied"))
+        reset_compile_cache(edit_trial)
+        run_compile_child(edit_trial.join(relative_entry), edit_trial, target, profile)
+        restore_compile_cache(edit_trial, warm)
+    } else {
+        copy_compile_project(root, scratch).map_err(ProviderFailure.malformed)
+        copied_digest :: source_tree_digest(scratch).map_err(ProviderFailure.malformed)
+        if copied_digest != expected_source_tree_sha256 -> return Err(ProviderFailure.operation(.Incompatible, "compile workload source changed while it was copied"))
+    }
+    loop trial in 0..<warmups {
+        if mode == "Edit" {
+            _ :: compile_edit_trial(root, relative_entry, edit_trial, warm, edit_patch.ok_or_else(fn() { ProviderFailure.malformed("Edit workload has no patch path") }), expected_source_tree_sha256, expected_patch_sha256, target, profile)
+        } else {
+            scratch_entry :: scratch.join(relative_entry)
+            if mode == "Clean" -> reset_compile_cache(scratch)
+            run_compile_child(scratch_entry, scratch, target, profile)
+        }
+    }
+    loop trial in 0..<sample_count {
+        (child, phase_totals) :: if mode == "Edit" {
+            compile_edit_trial(root, relative_entry, edit_trial, warm, edit_patch.ok_or_else(fn() { ProviderFailure.malformed("Edit workload has no patch path") }), expected_source_tree_sha256, expected_patch_sha256, target, profile)
+        } else {
+            scratch_entry :: scratch.join(relative_entry)
+            if mode == "Clean" -> reset_compile_cache(scratch)
+            child :: run_compile_child(scratch_entry, scratch, target, profile)
+            (child, read_compile_phases(scratch, scratch_entry))
+        }
+        peak_rss_bytes = peak_rss_bytes.max(child.peak_rss_bytes)
+        elapsed_ns :: child.process_cpu_ns
+        &sample_values.push(Rational.parse(elapsed_ns.to_string(), "1").map_err(ProviderFailure.malformed))
+        &sample_records.push(CanonicalJson.object([
+            ("backend", CanonicalJson.String(backend.label())), ("cache_state", CanonicalJson.String(mode)),
+            ("clock", CanonicalJson.String(COMPILE_CLOCK)), ("compiler_digest", CanonicalJson.String(compiler_digest)),
+            ("core_digest", CanonicalJson.String(core_digest)), ("edit_bytes", CanonicalJson.Integer(edit_bytes.to_string())),
+            ("elapsed_ns", CanonicalJson.Integer(elapsed_ns.to_string())), ("host", CanonicalJson.String(host)),
+            ("linker", CanonicalJson.String(linker)), ("peak_rss_bytes", CanonicalJson.Integer(child.peak_rss_bytes.to_string())),
+            ("phase_totals", phase_totals_json(phase_totals)), ("profile", CanonicalJson.String(profile)),
+            ("source_tree_sha256", CanonicalJson.String(expected_source_tree_sha256)),
+            ("target", CanonicalJson.String(target)), ("workload_bytes", CanonicalJson.Integer(workload_bytes.to_string()))
+        ]).map_err(ProviderFailure.malformed))
+    }
+    sum := Rational.zero()
+    loop value in sample_values -> sum = sum.add(value).map_err(ProviderFailure.malformed)
+    mean :: sum.div(Rational.integer(sample_values.len() as I128)).map_err(ProviderFailure.malformed)
+    squared_sum := Rational.zero()
+    loop value in sample_values {
+        delta :: value.sub(mean).map_err(ProviderFailure.malformed)
+        squared_sum = squared_sum.add(delta.mul(delta).map_err(ProviderFailure.malformed)).map_err(ProviderFailure.malformed)
+    }
+    variance :: squared_sum.div(Rational.integer(sample_values.len() as I128)).map_err(ProviderFailure.malformed)
+    aggregate_phases :: aggregate_compile_phases(sample_records)
+    metadata_json :: CanonicalJson.object([
+        ("backend", CanonicalJson.String(backend.label())), ("cache_state", CanonicalJson.String(mode)),
+        ("clock", CanonicalJson.String(COMPILE_CLOCK)), ("compiler_digest", CanonicalJson.String(compiler_digest)),
+        ("core_digest", CanonicalJson.String(core_digest)), ("edit_bytes", CanonicalJson.Integer(edit_bytes.to_string())),
+        ("edit_sha256", CanonicalJson.String(edit_sha256)), ("host", CanonicalJson.String(host)),
+        ("linker", CanonicalJson.String(linker)), ("peak_rss_bytes", CanonicalJson.Integer(peak_rss_bytes.to_string())),
+        ("phase_totals", aggregate_phases), ("profile", CanonicalJson.String(profile)),
+        ("sample_records", CanonicalJson.Array(^sample_records)), ("samples", CanonicalJson.Integer(sample_count.to_string())),
+        ("source_tree_sha256", CanonicalJson.String(expected_source_tree_sha256)), ("target", CanonicalJson.String(target)),
+        ("variance", variance.to_json()), ("warmups", CanonicalJson.Integer(warmups.to_string())),
+        ("workload_bytes", CanonicalJson.Integer(workload_bytes.to_string()))
+    ]).map_err(ProviderFailure.malformed)
+    metadata :: String.from_utf8(metadata_json.bytes()).map_err(fn(error) { ProviderFailure.malformed("compile metadata is not UTF-8") })
+    events := [ProviderEvent]{}
+    loop spec in 0..<specs.len() {
+        loop value in sample_values {
+            &events.push(ProviderEvent.Sample{spec: spec as U32, metric: specs[spec].metric, value: value})
+        }
+        &events.push(ProviderEvent.Metadata{spec: spec as U32, details: [("compile", metadata)]})
+    }
+    &events.push(ProviderEvent.Complete{request_id: request_id, samples: (sample_count * specs.len()) as U64})
+    Ok(^events)
+}
+// Rust: Source/BudgetProviders.rs:1470
+fn compile_edit_trial(root: OSPath, relative_entry: OSPath, trial: OSPath, warm: OSPath, patch: String, expected_source_tree_sha256: String, expected_patch_sha256: String, target: String, profile: String) -> (ChildMetrics, [(String, U128)]) ProviderFailure! {
+    copy_compile_project(root, trial).map_err(ProviderFailure.malformed)
+    copied_digest :: source_tree_digest(trial).map_err(ProviderFailure.malformed)
+    if copied_digest != expected_source_tree_sha256 -> return Err(ProviderFailure.operation(.Incompatible, "compile workload source changed while it was copied"))
+    patch_bytes :: std.fs.read(trial.join(patch)).map_err(fn(error) { ProviderFailure.operation(.Incompatible, "compile workload patch changed while it was copied: ${error}") })
+    if sha256_hex(patch_bytes) != expected_patch_sha256 -> return Err(ProviderFailure.operation(.Incompatible, "compile workload patch changed while it was copied"))
+    restore_compile_cache(warm, trial)
+    apply_unified_patch(trial, patch).map_err(ProviderFailure.malformed)
+    entry :: trial.join(relative_entry)
+    child :: run_compile_child(entry, trial, target, profile)
+    Ok((child, read_compile_phases(trial, entry)))
+}
+// Rust: Source/BudgetProviders.rs:1515
+fn workload_text(fields: [String: CanonicalJson], key: String) -> String ProviderFailure! {
+    if fields.get(key) == {
+        .Val(.String(value)) -> {
+            if !value.is_empty() -> return Ok(value)
+        }
+        else -> {}
+    }
+    Err(ProviderFailure.malformed("CompilerProbe workload has no nonempty `${key}` text"))
+}
+// Rust: Source/BudgetProviders.rs:1527
+fn workload_unsigned(fields: [String: CanonicalJson], key: String) -> U128 ProviderFailure! {
+    value :: if fields.get(key) == {
+        .Val(.Integer(value)) -> value,
+        else -> return Err(ProviderFailure.malformed("CompilerProbe workload `${key}` is not a canonical unsigned integer"))
+    }
+    parsed :: value.parse[U128]().map_err(fn(error) { ProviderFailure.malformed("CompilerProbe workload `${key}` is not a canonical unsigned integer") })
+    if parsed.to_string() != value -> return Err(ProviderFailure.malformed("CompilerProbe workload `${key}` is not a canonical unsigned integer"))
+    Ok(parsed)
+}
+// Rust: Source/BudgetProviders.rs:1552
+fn safe_relative_path(value: String) -> Bool {
+    !value.is_empty() && !value.starts_with("/") && !value.contains("\\") &&
+        value.split("/").all(fn(part) { !part.is_empty() && part != "." && part != ".." })
+}
+// Rust: Source/BudgetProviders.rs:1561
+fn source_files(root: OSPath) -> [(String, OSPath)] Err! {
+    // Rust: Source/BudgetProviders.rs:1562
+    fn visit(root: OSPath, dir: OSPath, files: &[(String, OSPath)]) Err! {
+        entries := std.fs.read_dir(dir).map_err(fn(error) { "cannot read compile workload directory: ${error}" }).collect_result().map_err(fn(error) { "cannot enumerate compile workload directory: ${error}" })
+        entries.sort_by_key(fn(entry) { entry.file_name() })
+        loop entry in entries {
+            path :: entry.path()
+            name :: entry.file_name().to_string_lossy()
+            if name == ".jet" || name == ".jet-compile-cache" || name == "build" || name == "target" || name == ".git" -> continue
+            metadata :: std.fs.symlink_metadata(path).map_err(fn(error) { "cannot inspect compile workload path: ${error}" })
+            if metadata.file_type().is_symlink() -> return Err("compile workload contains a symlink: ${path.display()}")
+            if metadata.is_dir() {
+                visit(root, path, &files)
+            } else if metadata.is_file() {
+                relative :: path.strip_prefix(root).map_err(fn(error) { "compile workload path escaped its root" }).to_string_lossy().replace("\\", "/")
+                if relative == "package.jet" || relative.ends_with(".jet") -> &files.push((relative, path))
+            }
+        }
+        Ok(())
+    }
+    files := [(String, OSPath)]{}
+    visit(root, root, &files)
+    files.sort_by(fn(left, right) { left.0.cmp(right.0) })
+    if files.is_empty() -> return Err("compile workload has no package or Jet source files")
+    Ok(^files)
+}
+// Rust: Source/BudgetProviders.rs:1610
+fn source_tree_digest(root: OSPath) -> String Err! {
+    files :: source_files(root)
+    frame := [U8]{}
+    total := U64{0}
+    loop (relative, path) in files {
+        length :: std.fs.metadata(path).map_err(fn(error) { "cannot inspect compile workload source: ${error}" }).len()
+        total = total.checked_add(length).ok_or_else(fn() { "compile workload source byte count overflowed" })
+        if total > COMPILE_MAX_PROJECT_BYTES -> return Err("compile workload exceeds the 64 MiB project limit")
+        bytes :: std.fs.read(path).map_err(fn(error) { "cannot read compile workload source: ${error}" })
+        &frame.extend_from_slice((relative.bytes().len() as U64).to_be_bytes())
+        &frame.extend_from_slice(relative.bytes())
+        &frame.extend_from_slice((bytes.len() as U64).to_be_bytes())
+        &frame.extend_from_slice(bytes)
+    }
+    Ok(sha256_hex(frame))
+}
+// Rust: Source/BudgetProviders.rs:1634
+fn source_tree_bytes(root: OSPath) -> U128 Err! {
+    total := U128{0}
+    loop (relative, path) in source_files(root) {
+        bytes :: std.fs.metadata(path).map_err(fn(error) { "cannot inspect compile workload source: ${error}" }).len() as U128
+        total = total.checked_add(bytes).ok_or_else(fn() { "compile workload source byte count overflowed" })
+        if total > COMPILE_MAX_PROJECT_BYTES as U128 -> return Err("compile workload exceeds the 64 MiB project limit")
+    }
+    Ok(total)
+}
+// Rust: Source/BudgetProviders.rs:1651
+fn copy_compile_project(source: OSPath, destination: OSPath) Err! {
+    // Rust: Source/BudgetProviders.rs:1652
+    fn copy_dir(source: OSPath, destination: OSPath, total: &U64) Err! {
+        std.fs.create_dir_all(destination).map_err(fn(error) { "cannot create compile workload scratch directory: ${error}" })
+        entries := std.fs.read_dir(source).map_err(fn(error) { "cannot read compile workload project: ${error}" }).collect_result().map_err(fn(error) { "cannot enumerate compile workload project: ${error}" })
+        entries.sort_by_key(fn(entry) { entry.file_name() })
+        loop entry in entries {
+            path :: entry.path()
+            name :: entry.file_name().to_string_lossy()
+            if name == ".jet" || name == ".jet-compile-cache" || name == "build" || name == "target" || name == ".git" -> continue
+            metadata :: std.fs.symlink_metadata(path).map_err(fn(error) { "cannot inspect compile workload project path: ${error}" })
+            if metadata.file_type().is_symlink() -> return Err("compile workload contains a symlink: ${path.display()}")
+            target :: destination.join(entry.file_name())
+            if metadata.is_dir() {
+                copy_dir(path, target, &total)
+            } else if metadata.is_file() {
+                total = total.checked_add(metadata.len()).ok_or_else(fn() { "compile workload exceeds its byte limit" })
+                if total > COMPILE_MAX_PROJECT_BYTES -> return Err("compile workload exceeds the 64 MiB project limit")
+                _ :: std.fs.copy(path, target).map_err(fn(error) { "cannot copy compile workload input: ${error}" })
+            }
+        }
+        Ok(())
+    }
+    total := U64{0}
+    copy_dir(source, destination, &total)
+}
+// Rust: Source/BudgetProviders.rs:1700
+fn compile_cache_root(root: OSPath) -> OSPath? Err! {
+    jet_dir :: root.join(".jet")
+    metadata :: if std.fs.symlink_metadata(jet_dir) == {
+        .Ok(metadata) -> metadata,
+        .Err(error) -> {
+            if error.kind() == std.io.ErrorKind.NotFound -> return Ok(None)
+            return Err("cannot inspect compile workload state: ${error}")
+        }
+    }
+    if metadata.file_type().is_symlink() || !metadata.is_dir() -> return Err("compile workload state `${jet_dir.display()}` is not a real directory")
+    Ok(Val(jet_dir.join("build")))
+}
+// Rust: Source/BudgetProviders.rs:1716
+fn ensure_compile_cache_root(root: OSPath) -> OSPath Err! {
+    jet_dir :: root.join(".jet")
+    if std.fs.symlink_metadata(jet_dir) == {
+        .Ok(metadata) -> {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() -> return Err("compile workload state `${jet_dir.display()}` is not a real directory")
+        }
+        .Err(error) -> {
+            if error.kind() == std.io.ErrorKind.NotFound {
+                std.fs.create_dir(jet_dir).map_err(fn(error) { "cannot create compile workload state: ${error}" })
+            } else { return Err("cannot inspect compile workload state: ${error}") }
+        }
+    }
+    cache :: jet_dir.join("build")
+    if std.fs.symlink_metadata(cache) == {
+        .Ok(metadata) -> {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() -> return Err("compile workload cache `${cache.display()}` is not a real directory")
+        }
+        .Err(error) -> {
+            if error.kind() == std.io.ErrorKind.NotFound {
+                std.fs.create_dir(cache).map_err(fn(error) { "cannot create compile workload cache: ${error}" })
+            } else { return Err("cannot inspect compile workload cache: ${error}") }
+        }
+    }
+    Ok(cache)
+}
+// Rust: Source/BudgetProviders.rs:1750
+fn reset_compile_cache(root: OSPath) ProviderFailure! {
+    cache :: compile_cache_root(root).map_err(fn(error) { ProviderFailure.operation(.Execution, error) }) ?? return Ok(())
+    if std.fs.symlink_metadata(cache) == {
+        .Ok(metadata) -> {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() -> return Err(ProviderFailure.operation(.Execution, "compile workload cache `${cache.display()}` is not a real directory"))
+        }
+        .Err(error) -> {
+            if error.kind() == std.io.ErrorKind.NotFound -> return Ok(())
+            return Err(ProviderFailure.operation(.Execution, "cannot inspect compile workload cache: ${error}"))
+        }
+    }
+    std.fs.remove_dir_all(cache).map_err(fn(error) { ProviderFailure.operation(.Execution, "cannot reset compile workload cache: ${error}") })
+}
+// Rust: Source/BudgetProviders.rs:1785
+fn restore_compile_cache(warm: OSPath, trial: OSPath) ProviderFailure! {
+    reset_compile_cache(trial)
+    source :: compile_cache_root(warm).map_err(fn(error) { ProviderFailure.operation(.Execution, error) }) ?? return Ok(())
+    metadata :: if std.fs.symlink_metadata(source) == {
+        .Ok(metadata) -> metadata,
+        .Err(error) -> {
+            if error.kind() == std.io.ErrorKind.NotFound -> return Ok(())
+            return Err(ProviderFailure.operation(.Execution, "cannot inspect compile workload cache: ${error}"))
+        }
+    }
+    if metadata.file_type().is_symlink() || !metadata.is_dir() -> return Err(ProviderFailure.operation(.Execution, "compile workload cache `${source.display()}` is not a real directory"))
+    destination :: ensure_compile_cache_root(trial).map_err(fn(error) { ProviderFailure.operation(.Execution, error) })
+    copy_cache_tree(source, destination).map_err(fn(error) { ProviderFailure.operation(.Execution, error) })
+    Ok(())
+}
+

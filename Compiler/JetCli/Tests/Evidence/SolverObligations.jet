@@ -1,0 +1,325 @@
+// Source-extraction tests from Rust Source/ProveSolver.rs, plus projection boundaries.
+fn solver_obligations_test_run(path: String, source: String) -> [JetCLISolverEvidence] {
+    jet_cli_solver_run_producer([JetCLISolverSourceMember]{JetCLISolverSourceMember{path: path, source: source}}, "target", true) ?? panic(jet_cli_solver_error_message(err))
+}
+fn solver_obligations_test_unknown(evidence: JetCLISolverEvidence, expected: String) {
+    if evidence.outcome == {
+        .Unknown(reason, steps) -> {
+            assert_eq(reason, expected)
+            assert_eq(steps, 0)
+        }
+        else -> panic("expected unknown solver outcome")
+    }
+}
+// Rust finite_distinct_range_emits_a_rechecked_certificate (2159-2176).
+#Test("finite_distinct_range_emits_a_rechecked_certificate") {
+    evidence :: solver_obligations_test_run("bounded.jet", "Index :: distinct Int(0..3)\n")
+    assert_eq(evidence.len(), 1)
+    assert_eq(evidence[0].obligation.kind, "fixed_index_bounds")
+    if evidence[0].outcome == {
+        .Proved(certificate, _, _) -> {
+            assert(certificate.contains("domainManifest"))
+            assert(certificate.contains("rollingResultSha256"))
+            assert(jet_cli_solver_check_certificate(evidence[0].obligation.formula, certificate) ?? false)
+        }
+        else -> panic("finite range was not proved")
+    }
+}
+// Rust marks_machine_arithmetic_postconditions_unknown_without_range_facts (2214-2232).
+#Test("marks_machine_arithmetic_postconditions_unknown_without_range_facts") {
+    source :: "\n#[Pre(value > 0, \"positive\"), Post(result > value, \"grows\")]\nfn grow(value: Int) -> Int {{\n    next :: value + 1\n    return next\n}}\n"
+    evidence :: solver_obligations_test_run("grow.jet", source)
+    assert_eq(evidence.len(), 1)
+    solver_obligations_test_unknown(evidence[0], "machine_overflow")
+}
+// Rust carries_dominating_affine_bindings_into_a_call_precondition (2235-2251).
+#Test("carries_dominating_affine_bindings_into_a_call_precondition") {
+    source :: "\n#Pre(value > 0, \"positive\")\nfn checked(value: Int) -> Int {{ return value }}\n\n#Pre(input > 0, \"positive input\")\nfn caller(input: Int) -> Int {{\n    shifted :: input\n    return checked(shifted)\n}}\n"
+    evidence :: solver_obligations_test_run("calls.jet", source)
+    assert_eq(evidence.len(), 1)
+    assert_eq(evidence[0].obligation.kind, "call_precondition")
+    if evidence[0].outcome == { .Proved(_, _, _) -> {} else -> panic("dominating binding was not proved") }
+}
+// Rust marks_machine_arithmetic_call_unknown_without_range_facts (2254-2279).
+#Test("marks_machine_arithmetic_call_unknown_without_range_facts") {
+    source :: "\n#Pre(value > 0, \"positive\")\nfn checked(value: Int) -> Int {{ return value }}\n\n#Pre(input > 0, \"positive input\")\nfn caller(input: Int) -> Int {{\n    shifted :: input + 1\n    return checked(shifted)\n}}\n"
+    evidence :: solver_obligations_test_run("calls-overflow.jet", source)
+    assert_eq(evidence.len(), 1)
+    solver_obligations_test_unknown(evidence[0], "machine_overflow")
+}
+// Rust does_not_reuse_affine_facts_after_control_flow (2282-2305).
+#Test("does_not_reuse_affine_facts_after_control_flow") {
+    source :: "\n#Pre(value > 0, \"positive\")\nfn checked(value: Int) -> Int {{ return value }}\n\n#Pre(input > 0, \"positive input\")\n    fn caller(input: Int) -> Int {{\n        shifted :: input\n        if input > 0 {{ }}\n        return checked(shifted)\n    }}\n"
+    evidence :: solver_obligations_test_run("calls-flow.jet", source)
+    assert_eq(evidence.len(), 1)
+    solver_obligations_test_unknown(evidence[0], "unsupported_formula")
+}
+// Rust marks_an_uncovered_postcondition_body_unknown_instead_of_disproving_it (2308-2326).
+#Test("marks_an_uncovered_postcondition_body_unknown_instead_of_disproving_it") {
+    source :: "\n#Post(result > value, \"grows\")\nfn nonlinear(value: Int) -> Int {{\n    return value * value\n}}\n"
+    evidence :: solver_obligations_test_run("nonlinear.jet", source)
+    assert_eq(evidence.len(), 1)
+    solver_obligations_test_unknown(evidence[0], "unsupported_formula")
+}
+#Test("solver producer disabled and malformed source emit no evidence") {
+    members :: [JetCLISolverSourceMember]{JetCLISolverSourceMember{path: "bounded.jet", source: "Index :: distinct Int(0..3)\n"}}
+    assert_eq((jet_cli_solver_run_producer(members, "target", false) ?? panic("disabled producer failed")).len(), 0)
+    assert_eq(solver_obligations_test_run("bad.jet", "fn broken(").len(), 0)
+    assert_eq(solver_obligations_test_run("bad-lex.jet", "\"unterminated").len(), 0)
+}
+#Test("solver evidence identities bind target path span and outcome") {
+    first :: solver_obligations_test_run("bounded.jet", "Index :: distinct Int(0..3)\n")
+    second :: solver_obligations_test_run("elsewhere.jet", "Index :: distinct Int(0..3)\n")
+    changed :: jet_cli_solver_run_producer([JetCLISolverSourceMember]{JetCLISolverSourceMember{path: "bounded.jet", source: "Index :: distinct Int(0..3)\n"}}, "other-target", true) ?? panic("producer failed")
+    assert_eq(first.len(), 1)
+    assert_eq(second.len(), 1)
+    assert_eq(changed.len(), 1)
+    assert(first[0].obligation.id != second[0].obligation.id)
+    assert(first[0].obligation.id != changed[0].obligation.id)
+    assert_eq(first[0].evidence_id, jet_cli_solver_evidence_id_for(first[0].obligation, "proved"))
+    assert(first[0].evidence_id != jet_cli_solver_evidence_id_for(first[0].obligation, "unknown"))
+}
+#Test("solver parser rejects retired separators and preserves checked-source policy") {
+    // Projection does not replace semantic checking: undefined names are left to the driver.
+    assert_eq(jet_cli_solver_extract_obligations("bad.jet", "fn f() {{ x :: 1; return x }}", "target").len(), 0)
+    assert_eq(jet_cli_solver_extract_obligations("bad.jet", "fn f() {{ return @ }}", "target").len(), 0)
+    assert_eq(jet_cli_solver_extract_obligations("empty.jet", "", "target").len(), 0)
+    source :: "#Post(result > 0, \"positive\")\nfn f() -> Int {{ return undefined }}\n"
+    obligations :: jet_cli_solver_extract_obligations("unchecked.jet", source, "target")
+    assert_eq(obligations.len(), 1)
+    assert_eq(obligations[0].unsupported_reason, None)
+}
+
+#Test("solver parser source spans count Unicode scalars from byte offsets") {
+    source :: "// é日本\nIndex :: distinct Int(0..3)\n"
+    parsed :: parse_source(source.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    obligations :: jet_cli_solver_extract_obligations("unicode.jet", source, "target")
+    assert_eq(obligations.len(), 1)
+    if parsed.program.items[0] == {
+        .Distinct(def) -> {
+            range :: def.range ?? panic("distinct range missing")
+            assert_eq(obligations[0].span, jet_cli_solver_source_span_text(source, range.span))
+            assert(range.span.start >= "// é日本\n".bytes().len())
+        }
+        else -> panic("expected distinct declaration")
+    }
+    assert_eq(jet_cli_solver_source_span_text("é日本\nx", Span{start: 8, end: 10}), "1:4-2:2")
+}
+
+// A parenthesized comparison is not one of Rust's fixed inequality shapes.
+#Test("solver parser retains unsupported formula instead of erasing postconditions") {
+    source :: "#Post((result > 0), \"positive\")\nfn f(value: Int) -> Int {{ return value }}\n"
+    evidence :: solver_obligations_test_run("paren.jet", source)
+    assert_eq(evidence.len(), 1)
+    solver_obligations_test_unknown(evidence[0], "unsupported_formula")
+}
+
+fn solver_obligations_test_expr(value: Int) -> Expr Never! { Expr.Int{value: value, span: Span{start: 0, end: 1}, width: None, raw: None} }
+fn solver_obligations_test_var(name: String) -> Expr Never! { Expr.Ident{name: name, span: Span{start: 0, end: 1}} }
+fn solver_obligations_test_arg(expr: Expr, label: String?) -> CallArg Never! {
+    span :: Span{start: 0, end: 1}
+    call_label :: if label == {
+        .Val(name) -> Val(CallLabel{name: name, span: span})
+        .None -> None
+    }
+    CallArg{convention: AccessConvention.Read, expr: expr, span: span, flags: ast_empty_call_arg_flags(), label: call_label, spread: false}
+}
+#Test("solver call binder covers labels positional holes duplicates and spread") {
+    params :: [String]{"left", "right"}
+    args :: [CallArg]{solver_obligations_test_arg(solver_obligations_test_expr(2), Val("right")), solver_obligations_test_arg(solver_obligations_test_expr(1), None)}
+    bound :: jet_cli_solver_bind_call_arguments(params, args, [String:JetCLISolverAffine]{}) ?? panic("named and positional binding failed")
+    assert_eq((bound.get("left") ?? panic("missing left")).constant, 1)
+    assert_eq((bound.get("right") ?? panic("missing right")).constant, 2)
+    duplicate :: [CallArg]{args[0], args[0]}
+    assert_eq(jet_cli_solver_bind_call_arguments(params, duplicate, [String:JetCLISolverAffine]{}), None)
+    unknown :: [CallArg]{solver_obligations_test_arg(solver_obligations_test_expr(1), Val("missing")), args[0]}
+    assert_eq(jet_cli_solver_bind_call_arguments(params, unknown, [String:JetCLISolverAffine]{}), None)
+    spread := ~args
+    spread[0].spread = true
+    assert_eq(jet_cli_solver_bind_call_arguments(params, spread, [String:JetCLISolverAffine]{}), None)
+    assert_eq(jet_cli_solver_bind_call_arguments(params, [CallArg]{args[0]}, [String:JetCLISolverAffine]{}), None)
+}
+#Test("solver affine conversion substitutes binds rejects nonlinear and checks overflow") {
+    span :: Span{start: 0, end: 1}
+    substitutions :: [String:JetCLISolverAffine]{"alias": jet_cli_solver_affine_var("input", 1)}
+    expr :: Expr.Binary{op: BinOp.Mul, left: solver_obligations_test_expr(3), right: solver_obligations_test_var("alias"), span: span}
+    affine :: jet_cli_solver_expr_to_affine_with_subst(expr, substitutions) ?? panic("linear product rejected")
+    assert_eq(affine.terms.get("input"), Val(3))
+    nonlinear :: Expr.Binary{op: BinOp.Mul, left: solver_obligations_test_var("x"), right: solver_obligations_test_var("y"), span: span}
+    assert_eq(jet_cli_solver_expr_to_affine_with_subst(nonlinear, substitutions), None)
+    overflow :: Expr.Binary{op: BinOp.Add, left: solver_obligations_test_expr(170141183460469231731687303715884105727), right: solver_obligations_test_expr(1), span: span}
+    assert_eq(jet_cli_solver_expr_to_affine_with_subst(overflow, substitutions), None)
+}
+#Test("solver strict comparisons equality and conjunction preserve normalized claims") {
+    span :: Span{start: 0, end: 1}
+    left :: solver_obligations_test_var("x")
+    right :: solver_obligations_test_expr(3)
+    less :: Expr.Binary{op: BinOp.Lt, left: left, right: right, span: span}
+    greater :: Expr.Binary{op: BinOp.Gt, left: left, right: right, span: span}
+    equal :: Expr.Binary{op: BinOp.Eq, left: left, right: right, span: span}
+    lt :: jet_cli_solver_expr_to_inequalities(less) ?? panic("less rejected")
+    gt :: jet_cli_solver_expr_to_inequalities(greater) ?? panic("greater rejected")
+    eq :: jet_cli_solver_expr_to_inequalities(equal) ?? panic("equal rejected")
+    assert_eq(lt[0].affine.constant, -2)
+    assert_eq(gt[0].affine.constant, 4)
+    assert_eq(eq.len(), 2)
+    assert_eq(eq[0].affine.constant, -3)
+    assert_eq(eq[1].affine.constant, 3)
+    conjunction :: jet_cli_solver_expr_to_inequalities(Expr.Binary{op: BinOp.And, left: less, right: greater, span: span}) ?? panic("and rejected")
+    assert_eq(conjunction.len(), 2)
+    assert_eq(jet_cli_solver_expr_to_inequalities(Expr.Binary{op: BinOp.Or, left: less, right: greater, span: span}), None)
+    assert_eq(jet_cli_solver_expr_to_inequalities(Expr.Paren{value: less, span: span}), None)
+}
+
+fn solver_obligations_test_param(name: String) -> Param Never! {
+    span :: Span{start: 0, end: 1}
+    Param{convention: AccessConvention.Read, root: false, name: name, name_span: span, public_label: None, zone: ParamZone.Either, ty: Type.Int, ty_span: span, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None}
+}
+fn solver_obligations_test_clause(name: String) -> ContractClause Never! {
+    span :: Span{start: 0, end: 1}
+    cond :: Expr.Binary{op: BinOp.Gt, left: solver_obligations_test_var(name), right: solver_obligations_test_expr(0), span: span}
+    ContractClause{cond: cond, message_expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: "positive"}}, span: span}, message_span: span, span: span}
+}
+fn solver_obligations_test_call(name: String, args: [CallArg]) -> Expr Never! {
+    Expr.Call{call: Call{name: name, name_span: Span{start: 0, end: 1}, type_args: [Type]{}, args: args, resolved_ret: None, range_checked: false, widen_approx: false}}
+}
+fn solver_obligations_test_calls_program(body: [Stmt]) -> Program Never! {
+    span :: Span{start: 0, end: 1}
+    checked := ast_func("checked", span, span)
+    checked.params = [Param]{solver_obligations_test_param("value")}
+    checked.pre = [ContractClause]{solver_obligations_test_clause("value")}
+    checked.body = [Stmt]{Stmt.Return{value: Val(solver_obligations_test_var("value")), span: span}}
+    caller := ast_func("caller", span, span)
+    caller.params = [Param]{solver_obligations_test_param("input")}
+    caller.pre = [ContractClause]{solver_obligations_test_clause("input")}
+    caller.body = ~body
+    program := ast_program()
+    program.items = [Item]{Item.Func{value: checked}, Item.Func{value: caller}}
+    program
+}
+#Test("solver AST projection preserves dominating bindings and call snapshots") {
+    span :: Span{start: 0, end: 1}
+    binding :: ast_binding("shifted", span, false, solver_obligations_test_var("input"), None)
+    call_expr :: solver_obligations_test_call("checked", [CallArg]{solver_obligations_test_arg(solver_obligations_test_var("shifted"), None)})
+    body :: [Stmt]{Stmt.Val{binding: binding}, Stmt.Return{value: Val(call_expr), span: span}}
+    program :: solver_obligations_test_calls_program(body)
+    obligations :: jet_cli_solver_extract_from_program("calls.jet", "x", "target", program)
+    assert_eq(obligations.len(), 1)
+    assert_eq(obligations[0].unsupported_reason, None)
+    assert_eq(obligations[0].origin, "calls.jet::caller -> checked")
+    outcome :: jet_cli_solver_prove_obligation(obligations[0].formula) ?? panic("solver failed")
+    if outcome == {
+        .Proved(_, _, _) -> {}
+        else -> panic("dominating affine binding was not proved")
+    }
+    changed := ~body
+    changed[0] = Stmt.Val{binding: ast_binding("shifted", span, false, Expr.Binary{op: BinOp.Add, left: solver_obligations_test_var("input"), right: solver_obligations_test_expr(1), span: span}, None)}
+    overflow :: jet_cli_solver_extract_from_program("calls.jet", "x", "target", solver_obligations_test_calls_program(changed))
+    assert_eq(overflow[0].unsupported_reason, Val("machine_overflow"))
+    flow_body :: [Stmt]{body[0], Stmt.Loop{body: [Stmt]{}, span: span, arrow_body: false, label: None}, body[1]}
+    flow :: jet_cli_solver_extract_from_program("calls.jet", "x", "target", solver_obligations_test_calls_program(flow_body))
+    assert_eq(flow[0].unsupported_reason, Val("unsupported_formula"))
+}
+#Test("solver AST postconditions refuse uncovered bodies and machine arithmetic") {
+    span :: Span{start: 0, end: 1}
+    func := ast_func("grow", span, span)
+    func.params = [Param]{solver_obligations_test_param("value")}
+    func.pre = [ContractClause]{solver_obligations_test_clause("value")}
+    func.post = [ContractClause]{solver_obligations_test_clause("result")}
+    func.body = [Stmt]{Stmt.Return{value: Val(solver_obligations_test_var("value")), span: span}}
+    program := ast_program()
+    program.items = [Item]{Item.Func{value: func}}
+    supported :: jet_cli_solver_extract_from_program("grow.jet", "x", "target", program)
+    assert_eq(supported.len(), 1)
+    assert_eq(supported[0].unsupported_reason, None)
+    arithmetic :: Expr.Binary{op: BinOp.Add, left: solver_obligations_test_var("value"), right: solver_obligations_test_expr(1), span: span}
+    func.body = [Stmt]{Stmt.Return{value: Val(arithmetic), span: span}}
+    program.items = [Item]{Item.Func{value: func}}
+    overflow :: jet_cli_solver_extract_from_program("grow.jet", "x", "target", program)
+    assert_eq(overflow[0].unsupported_reason, Val("machine_overflow"))
+    nonlinear :: Expr.Binary{op: BinOp.Mul, left: solver_obligations_test_var("value"), right: solver_obligations_test_var("value"), span: span}
+    func.body = [Stmt]{Stmt.Return{value: Val(nonlinear), span: span}}
+    program.items = [Item]{Item.Func{value: func}}
+    uncovered :: jet_cli_solver_extract_from_program("grow.jet", "x", "target", program)
+    assert_eq(uncovered[0].unsupported_reason, Val("unsupported_formula"))
+}
+#Test("solver call visitor preserves preorder through assignment lvalues and typed literals") {
+    span :: Span{start: 0, end: 1}
+    inner :: solver_obligations_test_call("inner", [CallArg]{})
+    outer :: solver_obligations_test_call("outer", [CallArg]{solver_obligations_test_arg(inner, None)})
+    typed :: Expr.TypedLit{head: None, body: TypedLitBody.Entries{entries: [ExprPair]{ExprPair{key: inner, value: outer}}}, span: span}
+    statement :: Stmt.Assign{target: LValue.Index{base: inner, index: outer, span: span, kind: IndexKind.Unknown}, op: None, op_span: span, value: typed}
+    calls := [Call]{}
+    jet_cli_solver_visit_stmt_calls(statement, &calls)
+    names :: loop call in calls -> call.name
+    assert_eq(names, [String]{"inner", "outer", "inner", "inner", "outer", "inner"})
+    assert(jet_cli_solver_statement_is_flow_boundary(statement))
+    assert(!jet_cli_solver_statement_is_flow_boundary(Stmt.Return{value: Val(outer), span: span}))
+    assert(jet_cli_solver_statement_is_flow_boundary(Stmt.Return{value: Val(inner), span: span}) == false)
+}
+
+#Test("solver AST function specs use the first declaration") {
+    span :: Span{start: 0, end: 1}
+    first := ast_func("same", span, span)
+    first.params = [Param]{solver_obligations_test_param("first")}
+    first.pre = [ContractClause]{solver_obligations_test_clause("first")}
+    second := ast_func("same", span, span)
+    second.params = [Param]{solver_obligations_test_param("second")}
+    specs := [String:JetCLISolverFunctionSpec]{}
+    jet_cli_solver_collect_function_specs([Item]{Item.Func{value: first}, Item.Func{value: second}}, &specs)
+    spec :: specs.get("same") ?? panic("function spec missing")
+    assert_eq(spec.params, [String]{"first"})
+    assert_eq(spec.pre.len(), 1)
+}
+
+#Test("solver AST call snapshots reject shadowing without changing prior calls") {
+    span :: Span{start: 0, end: 1}
+    call :: solver_obligations_test_call("checked", [CallArg]{solver_obligations_test_arg(solver_obligations_test_var("input"), None)})
+    shadow :: ast_binding("input", span, false, solver_obligations_test_expr(1), None)
+    body :: [Stmt]{Stmt.Expr{expr: call}, Stmt.Val{binding: shadow}, Stmt.Return{value: Val(call), span: span}}
+    obligations :: jet_cli_solver_extract_from_program("snapshots.jet", "x", "target", solver_obligations_test_calls_program(body))
+    assert_eq(obligations.len(), 2)
+    assert_eq(obligations[0].unsupported_reason, None)
+    assert_eq(obligations[1].unsupported_reason, Val("unsupported_formula"))
+}
+
+#Test("solver AST machine arithmetic detection preserves the Rust narrow traversal") {
+    span :: Span{start: 0, end: 1}
+    arithmetic :: Expr.Binary{op: BinOp.Add, left: solver_obligations_test_var("x"), right: solver_obligations_test_expr(1), span: span}
+    assert(jet_cli_solver_contains_machine_arithmetic(arithmetic))
+    assert(jet_cli_solver_contains_machine_arithmetic(Expr.Paren{value: arithmetic, span: span}))
+    assert(!jet_cli_solver_contains_machine_arithmetic(Expr.Unary{op: UnOp.Not, operand: arithmetic, span: span}))
+    assert(!jet_cli_solver_contains_machine_arithmetic(solver_obligations_test_call("f", [CallArg]{solver_obligations_test_arg(arithmetic, None)})))
+    affine :: jet_cli_solver_expr_to_affine_with_subst(Expr.Paren{value: solver_obligations_test_expr(2), span: span}, [String:JetCLISolverAffine]{}) ?? panic("parenthesized affine rejected")
+    assert_eq(affine.constant, 2)
+}
+
+// Parser-independent original source-projection helpers; canonical byte spans and identity framing.
+#Test("solver obligation source spans use UTF-8 byte positions") {
+    source :: "é日本\nx"
+    assert_eq(jet_cli_solver_source_span_text(source, Span{start: 0, end: 2}), "1:1-1:2")
+    assert_eq(jet_cli_solver_source_span_text(source, Span{start: 2, end: 8}), "1:2-1:4")
+    assert_eq(jet_cli_solver_source_span_text(source, Span{start: 8, end: 10}), "1:4-2:2")
+    assert_eq(jet_cli_solver_source_span_text("", Span{start: 0, end: 0}), "1:1-1:1")
+}
+
+#Test("solver obligation evidence identity frames Unicode and every original field") {
+    formula :: JetCLISolverFormula{assumptions: [JetCLISolverInequality]{}, claim: [JetCLISolverInequality]{}}
+    original :: JetCLISolverObligation{id: "é", kind: "call_precondition", origin: "日本.jet::caller -> checked", span: "2:1-2:8", formula: formula, unsupported_reason: Val("unsupported_formula")}
+    identity :: jet_cli_solver_evidence_id_for(original, "unknown")
+    assert_eq(identity, jet_cli_solver_framed_sha256([String]{original.id, original.kind, original.origin, original.span, "unknown"}))
+    assert(identity != jet_cli_solver_evidence_id_for(original, "proved"))
+    changed := ~original
+    changed.id = "other"
+    assert(identity != jet_cli_solver_evidence_id_for(changed, "unknown"))
+    changed = ~original
+    changed.kind = "function_postcondition"
+    assert(identity != jet_cli_solver_evidence_id_for(changed, "unknown"))
+    changed = ~original
+    changed.origin = "other.jet::caller -> checked"
+    assert(identity != jet_cli_solver_evidence_id_for(changed, "unknown"))
+    changed = ~original
+    changed.span = "3:1-3:8"
+    assert(identity != jet_cli_solver_evidence_id_for(changed, "unknown"))
+}

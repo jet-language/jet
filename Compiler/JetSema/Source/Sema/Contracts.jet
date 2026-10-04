@@ -67,11 +67,14 @@ fn sema_contract_result_mode(carrier: Type, binding: Type) -> TContractResultMod
     }
 }
 
-fn sema_contract_result_for_function(return_type: Type?, span: Span) -> TContractResult Never! {
+// The binding local carries the symbol `#Post` reads of `result` resolve to,
+// so lowering binds the checked return value under that identity.
+fn sema_contract_result_for_function(return_type: Type?, span: Span, environment: SemaScopeEnvironment, owner: String) -> TContractResult Never! {
     carrier :: sema_effective_return_type(return_type)
     binding :: sema_contract_success_type(return_type)
     mode :: sema_contract_result_mode(carrier, binding)
-    binding_local :: tir_generated_local("result", span)
+    binding_local := tir_generated_local("result", span)
+    binding_local.symbol_id = Val(sema_contract_result_binding_symbol(environment, owner, binding, span).id)
     carrier_local :: if mode != TContractResultMode.Direct -> tir_generated_local("result_carrier", span) else -> binding_local
     TContractResult{carrier_ty: carrier, binding_ty: binding, carrier_local: carrier_local, binding_local: binding_local, mode: mode}
 }
@@ -609,9 +612,13 @@ fn sema_contract_make(kind: TContractKind, condition: TExpr, message: TExpr, env
     TContract{kind: kind, condition: condition, message: message, file: sema_contract_file(environment, location_span), line: sema_contract_line(environment, location_span), span: span, disposition: sema_contract_disposition(condition, environment)}
 }
 
+// `owner` is the function owner key plus a `post` segment: a body local named
+// `result` lives in the function frame itself, so the contract binding needs
+// an identity of its own once both are lowered by symbol.
 fn sema_contract_result_binding_symbol(environment: SemaScopeEnvironment, owner: String, ty: Type, span: Span) -> Symbol Never! {
-    id :: symbol_id(SymbolKind.Local, environment.module_identity, owner, "result")
-    Symbol{id: id, kind: SymbolKind.Local, name: "result", module_name: environment.module_identity, owner: Val(owner), span: span, ty: Val(ty), visibility: 0}
+    result_owner :: "{owner}/post"
+    id :: symbol_id(SymbolKind.Local, environment.module_identity, result_owner, "result")
+    Symbol{id: id, kind: SymbolKind.Local, name: "result", module_name: environment.module_identity, owner: Val(result_owner), span: span, ty: Val(ty), visibility: 0}
 }
 
 pub fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaContractDeclaration {
@@ -619,7 +626,7 @@ pub fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironmen
     if environment.registration_graph == .Val(graph) && declared_return == .Val(declared) {
         declared_return = Val(sema_type_resolve_declared_with_generics(graph, declared, environment.module_identity, environment.generic_params))
     }
-    result :: sema_contract_result_for_function(declared_return, func.name_span)
+    result :: sema_contract_result_for_function(declared_return, func.name_span, environment, sema_scope_function_owner_key(scopes))
     complete := true
     post := [TContract]{}
     loop clause in func.pre {

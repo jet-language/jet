@@ -1,0 +1,92 @@
+// Pure crate owner tests. Rust runtime.rs:1003-1032 original goldens follow.
+#Test("split_puts_runtime_and_core_into_one_crate") {
+    generated :: "#![allow(warnings)]\n{STORE_RUNTIME_BEGIN}fn runtime_item() {{ core_item() }}\n{STORE_RUNTIME_END}{STORE_RUNTIME_CORE_BEGIN}fn core_item() {{}}\n{STORE_RUNTIME_CORE_END}fn main() {{ runtime_item() }}\n"
+    found :: split_generated(generated) ?? panic("valid markers")
+    split :: found ?? panic("marked program splits")
+    assert_eq(split.runtime, "fn runtime_item() {{ core_item() }}\nfn core_item() {{}}\n")
+    assert_eq(split.program, "#![allow(warnings)]\nextern crate jet_runtime;\nuse jet_runtime::*;\nfn main() {{ runtime_item() }}\n")
+}
+
+#Test("export_opens_macro_and_thread_local_runtime_items") {
+    source :: "macro_rules! kernels {{\n    ($name:ident, $t:ty) => {{\n        pub(crate) fn $name(value: $t) -> $t {{ value }}\n        trait Callable {{}}\n        impl Marker for $t {{\n            fn mark(&self) {{}}\n        }}\n    }};\n}}\n#[macro_export]\nmacro_rules! exported {{\n    () => {{}};\n}}\nkernels!(jet_u64_trap_shl, u64);\nthread_local! {{\n    static STATE: u8 = const {{ 0 }};\n}}\n"
+    expected :: "#[macro_export]\nmacro_rules! kernels {{\n    ($name:ident, $t:ty) => {{\n        pub fn $name(value: $t) -> $t {{ value }}\n        pub trait Callable {{}}\n        impl Marker for $t {{\n            fn mark(&self) {{}}\n        }}\n    }};\n}}\n#[macro_export]\nmacro_rules! exported {{\n    () => {{}};\n}}\nkernels!(jet_u64_trap_shl, u64);\nthread_local! {{\n    pub static STATE: u8 = const {{ 0 }};\n}}\n"
+    assert_eq(export_crate_source(source), expected)
+}
+
+#Test("public split exports pre-runtime FFI head with runtime and Core not program") {
+    head :: "#[no_mangle]\nunsafe extern \"C\" fn ffi_report() {{}}\n"
+    generated :: "{head}{STORE_RUNTIME_BEGIN}fn runtime_item() {{ core_item() }}\n{STORE_RUNTIME_END}const PROGRAM: u8 = 7;\n{STORE_RUNTIME_CORE_BEGIN}fn core_item() {{}}\n{STORE_RUNTIME_CORE_END}fn main() {{ runtime_item() }}\n"
+    found :: split_runtime_crate(generated) ?? panic("valid markers")
+    split :: found ?? panic("marked program splits")
+    assert_eq(split.runtime_lib, "#![allow(warnings)]\n#[no_mangle]\npub unsafe extern \"C\" fn ffi_report() {{}}\npub fn runtime_item() {{ core_item() }}\npub fn core_item() {{}}\n")
+    assert_eq(split.program, "extern crate jet_runtime;\nuse jet_runtime::*;\nconst PROGRAM: u8 = 7;\nfn main() {{ runtime_item() }}\n")
+    assert(!split.program.contains("ffi_report"))
+    assert(!split.program.contains("fn runtime_item"))
+    assert(!split.program.contains("fn core_item"))
+}
+
+#Test("public split without Core handles empty and nonempty heads") {
+    loop head in [String]{"", "fn ffi_hook() {{}}\n"} {
+        found :: split_runtime_crate("{head}{STORE_RUNTIME_BEGIN}struct Runtime;\n{STORE_RUNTIME_END}fn main() {{}}\n") ?? panic("valid markers")
+        split :: found ?? panic("marked program")
+        expected_head :: if head == "" -> "" else -> "pub fn ffi_hook() {{}}\n"
+        assert_eq(split.runtime_lib, "#![allow(warnings)]\n{expected_head}pub struct Runtime;\n")
+        assert_eq(split.program, "extern crate jet_runtime;\nuse jet_runtime::*;\nfn main() {{}}\n")
+    }
+}
+
+#Test("public split with no runtime begin returns None before other marker validation") {
+    loop source in [String]{"", "fn main() {{}}\n", STORE_RUNTIME_END, "{STORE_RUNTIME_CORE_BEGIN}{STORE_RUNTIME_CORE_END}", STORE_RUNTIME_CORE_END} {
+        assert_eq(split_runtime_crate(source) ?? panic("unmarked source cannot fail"), None)
+        assert_eq(split_generated(source) ?? panic("unmarked source cannot fail"), None)
+    }
+}
+
+struct RuntimeRefusalCase {
+    source: String
+    message: String
+}
+
+#Test("public and native split preserve every reachable exact marker refusal and precedence") {
+    valid_runtime :: "{STORE_RUNTIME_BEGIN}fn rt() {{}}\n{STORE_RUNTIME_END}"
+    cases :: [RuntimeRefusalCase]{
+        RuntimeRefusalCase{source: STORE_RUNTIME_BEGIN, message: "generated Rust has an invalid runtime marker pair"},
+        RuntimeRefusalCase{source: "{STORE_RUNTIME_BEGIN}{STORE_RUNTIME_BEGIN}{STORE_RUNTIME_END}", message: "generated Rust has an invalid runtime marker pair"},
+        RuntimeRefusalCase{source: "{valid_runtime}{STORE_RUNTIME_END}", message: "generated Rust has an invalid runtime marker pair"},
+        RuntimeRefusalCase{source: "{STORE_RUNTIME_END}{STORE_RUNTIME_BEGIN}", message: "generated Rust has an unterminated runtime block"},
+        RuntimeRefusalCase{source: "{valid_runtime}{STORE_RUNTIME_CORE_END}", message: "generated Rust has an invalid core marker pair"},
+        RuntimeRefusalCase{source: "{valid_runtime}{STORE_RUNTIME_CORE_BEGIN}{STORE_RUNTIME_CORE_BEGIN}{STORE_RUNTIME_CORE_END}", message: "generated Rust has an invalid core marker pair"},
+        RuntimeRefusalCase{source: "{valid_runtime}{STORE_RUNTIME_CORE_BEGIN}{STORE_RUNTIME_CORE_END}{STORE_RUNTIME_CORE_END}", message: "generated Rust has an invalid core marker pair"},
+        RuntimeRefusalCase{source: "{STORE_RUNTIME_CORE_BEGIN}{STORE_RUNTIME_CORE_END}{valid_runtime}", message: "generated Rust has nested runtime/core markers"},
+        RuntimeRefusalCase{source: "{STORE_RUNTIME_BEGIN}{STORE_RUNTIME_CORE_BEGIN}{STORE_RUNTIME_CORE_END}{STORE_RUNTIME_END}", message: "generated Rust has nested runtime/core markers"},
+        RuntimeRefusalCase{source: "{valid_runtime}{STORE_RUNTIME_CORE_BEGIN}", message: "generated Rust has an unterminated core block"},
+        RuntimeRefusalCase{source: "{valid_runtime}{STORE_RUNTIME_CORE_END}{STORE_RUNTIME_CORE_BEGIN}", message: "generated Rust has an unterminated core block"},
+        RuntimeRefusalCase{source: "{STORE_RUNTIME_BEGIN}{STORE_RUNTIME_CORE_END}", message: "generated Rust has an invalid runtime marker pair"},
+    }
+    loop item in cases {
+        if split_runtime_crate(item.source) == {
+            .Err(error) -> assert_eq(error.message(), item.message)
+            .Ok(_) -> panic("malformed public runtime markers must fail")
+        }
+        if split_generated(item.source) == {
+            .Err(error) -> assert_eq(error.message(), item.message)
+            .Ok(_) -> panic("malformed native runtime markers must fail")
+        }
+    }
+    // The sixth Rust error, "split program does not start with the pre-runtime
+    // text", is an internal invariant guard: split_generated always puts the
+    // exact head first. The public FFI golden above exercises that real path;
+    // no fabricated split or extra production injection API is used here.
+}
+
+#Test("export module struct inherent and trait scopes preserve restricted boundaries") {
+    source :: "use std::fmt;\nmod inner {{\n    pub(crate) struct Pair(u8);\n    pub(crate) use self::Pair as Alias;\n}}\npub(crate) use inner::*;\nstruct S {{\n    field: u8,\n}}\nimpl S {{\n    fn get(&self) -> u8 {{ self.field }}\n}}\nimpl Marker for S {{\n    fn get(&self) -> u8 {{ self.field }}\n}}\n"
+    expected :: "use std::fmt;\npub mod inner {{\n    pub struct Pair(pub u8);\n    pub use self::Pair as Alias;\n}}\npub use inner::*;\npub struct S {{\n    pub field: u8,\n}}\nimpl S {{\n    pub fn get(&self) -> u8 {{ self.field }}\n}}\nimpl Marker for S {{\n    fn get(&self) -> u8 {{ self.field }}\n}}\n"
+    assert_eq(export_crate_source(source), expected)
+}
+
+#Test("export open multiline headers do not publish generic parameters or masked fake items") {
+    source :: "fn generic<\n    T: Clone,\n    const N: usize,\n>(value: T) -> T\nwhere T: Send\n{{\n    // fn fake() {{}}\n    let text = \"}} fn fake() {{\";\n    value\n}}\nconst LAST: u8 = 1;"
+    expected :: "pub fn generic<\n    T: Clone,\n    const N: usize,\n>(value: T) -> T\nwhere T: Send\n{{\n    // fn fake() {{}}\n    let text = \"}} fn fake() {{\";\n    value\n}}\npub const LAST: u8 = 1;"
+    assert_eq(export_crate_source(source), expected)
+}

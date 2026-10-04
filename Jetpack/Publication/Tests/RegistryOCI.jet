@@ -1,0 +1,374 @@
+// JP-PUB-REG-OCI: original composed Publish/mod.rs:661-754 remain unchanged
+// in Tests/Index.jet; tests/pkg.rs:7275 pre-Hangar tamper journey remains in
+// Tests/Tuf.jet. Those genuine entry points retain #4262/#3593/#3598/#4409
+// rather than successful fixtures standing in for Artifacts/Fetch.
+// Reuse Index's actual entry/root helpers; unique suffix is Cache-owned.
+fn publication_oci_test_subject() -> String Never! {
+    "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}
+fn publication_oci_test_entry() -> PublicationIndexEntry Never! {
+    entry := publication_index_test_entry("ref-kit", "1.0.0", false)
+    entry.content_hash = publication_oci_test_subject()
+    entry.fingerprint = "sha256-fingerprint"
+    entry
+}
+fn publication_oci_test_descriptors() -> [PublicationOCIDescriptor] Never! {
+    out := [PublicationOCIDescriptor]{}
+    loop kind in ([String]{PUBLICATION_OCI_SBOM_TYPE, PUBLICATION_OCI_SIGNATURE_TYPE, PUBLICATION_OCI_PROVENANCE_TYPE, PUBLICATION_OCI_REPRODUCIBILITY_TYPE}) -> &out.push(PublicationOCIDescriptor{artifact_type: kind, digest: publication_oci_test_subject(), size: 7})
+    out
+}
+// Focused actual renderer/binding declarations: narrow proof, not OCI parity.
+#Test("OCI renderer exact empty and escaped bytes") {
+    assert_eq(publication_render_oci_index("s", [PublicationOCIDescriptor]{}), "{{\"schemaVersion\":2,\"subject\":{{\"digest\":\"s\"}},\"manifests\":[]}}\n")
+    descriptor :: PublicationOCIDescriptor{artifact_type: "t\"\\\n", digest: "d\t", size: 9}
+    assert_eq(publication_render_oci_index("é\"\\", [PublicationOCIDescriptor]{descriptor}), "{{\"schemaVersion\":2,\"subject\":{{\"digest\":\"é\\\"\\\\\"}},\"manifests\":[{{\"artifactType\":\"t\\\"\\\\\\n\",\"digest\":\"d\\t\",\"mediaType\":\"t\\\"\\\\\\n\",\"size\":9}}]}}\n")
+    subject :: publication_oci_test_subject()
+    assert_eq(publication_render_oci_index(subject, publication_oci_test_descriptors()), "{{\"schemaVersion\":2,\"subject\":{{\"digest\":\"{subject}\"}},\"manifests\":[{{\"artifactType\":\"application/vnd.jet.sbom.v1\",\"digest\":\"{subject}\",\"mediaType\":\"application/vnd.jet.sbom.v1\",\"size\":7}},{{\"artifactType\":\"application/vnd.jet.signature.v1\",\"digest\":\"{subject}\",\"mediaType\":\"application/vnd.jet.signature.v1\",\"size\":7}},{{\"artifactType\":\"application/vnd.jet.provenance.v1\",\"digest\":\"{subject}\",\"mediaType\":\"application/vnd.jet.provenance.v1\",\"size\":7}},{{\"artifactType\":\"application/vnd.jet.reproducibility.v1\",\"digest\":\"{subject}\",\"mediaType\":\"application/vnd.jet.reproducibility.v1\",\"size\":7}}]}}\n")
+}
+#Test("OCI SBOM binding keeps newline and all three identity markers") {
+    entry :: publication_oci_test_entry()
+    sbom :: "# JetSubject: {entry.content_hash}\nPackageName: {entry.name}\nPackageVersion: {entry.version}\n"
+    assert(publication_oci_sbom_bound(sbom, entry))
+    loop changed in ([String]{sbom.replace(entry.content_hash, "other"), sbom.replace("PackageName: ref-kit", "PackageName: other"), sbom.replace("PackageVersion: 1.0.0", "PackageVersion: 2.0.0"), sbom.removesuffix("\n")}) -> assert(!publication_oci_sbom_bound(changed, entry))
+}
+#Test("OCI payload exact unsigned signed provenance and reproducibility bytes") {
+    entry := publication_oci_test_entry()
+    subject :: entry.content_hash
+    assert_eq(publication_oci_signature_payload(entry) ?? panic("signature"), "jet-oci-signature-v1\nsubject={subject}\nname=ref-kit\nversion=1.0.0\npublic-key=\nsignature=\nstatus=unsigned\n")
+    entry.public_key = "aa"
+    entry.signature = "bb"
+    assert_eq(publication_oci_signature_payload(entry) ?? panic("signed"), "jet-oci-signature-v1\nsubject={subject}\nname=ref-kit\nversion=1.0.0\npublic-key=aa\nsignature=bb\nstatus=signed\n")
+    assert_eq(publication_oci_provenance_payload(entry) ?? panic("provenance"), "jet-oci-provenance-v1\nsubject={subject}\npackage=ref-kit#1.0.0\ncontent-hash={subject}\nfingerprint=sha256-fingerprint\ntier=core\ngate-status=signature=not-required;audit=not-required;name=not-required;liveness=not-required;review=passed\n")
+    assert_eq(publication_oci_reproducibility_payload(entry) ?? panic("reproducibility"), "jet-oci-reproducibility-v1\nsubject={subject}\nsource-hash={subject}\nfingerprint=sha256-fingerprint\nstatus=verified\n")
+    assert(publication_validate_evidence_value("no\n", "publisher key") == .Err(.InvalidData(_)))
+    carriage :: String.from_bytes([U8]{13}) ?? panic("CR fixture")
+    assert(publication_validate_evidence_value("no{carriage}", "publisher key") == .Err(.InvalidData(_)))
+    publication_validate_evidence_value("ok=é", "publisher key") ?? panic("allowed value")
+    entry.name = "ref\nkit"
+    assert(publication_oci_signature_payload(entry) == .Err(.InvalidData(_)))
+    entry.fingerprint = "bad{carriage}hash"
+    assert(publication_oci_reproducibility_payload(entry) == .Err(.InvalidData(_)))
+}
+#Test("OCI digest validation exact ASCII prefix length and case") {
+    publication_validate_oci_digest(publication_oci_test_subject()) ?? panic("valid")
+    publication_validate_oci_digest(publication_oci_test_subject().replace("a", "A")) ?? panic("uppercase accepted")
+    loop value in ([String]{"sha256-tree", "SHA256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaag", "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé", "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}) -> assert(publication_validate_oci_digest(value) == .Err(.InvalidData(_)))
+}
+#Test("OCI parser roundtrip order keys types subject digest size and missing evidence") {
+    subject :: publication_oci_test_subject()
+    descriptors :: publication_oci_test_descriptors()
+    valid :: publication_render_oci_index(subject, descriptors)
+    assert_eq(publication_parse_oci_index(valid.bytes(), subject) ?? panic("parse"), descriptors)
+    loop bad in ([String]{
+        "not-json", "[]", valid.replace("\"schemaVersion\":2", "\"schemaVersion\":3"),
+        valid.replace("\"schemaVersion\":2", "\"schemaVersion\":2,\"schemaVersion\":2"),
+        valid.replace("\"schemaVersion\":2", "\"schemaVersion\":2,\"unknown\":0"),
+        valid.replace("\"subject\":", "\"unknown\":"), valid.replace("\"subject\":{{", "\"subject\":{{\"extra\":0,"),
+        valid.replace("\"digest\":", "\"unknown\":"), valid.replace("\"size\":7", "\"size\":-1"),
+        valid.replace("\"size\":7", "\"size\":7.0"), valid.replace("\"size\":7", "\"size\":\"7\""),
+        valid.replace("\"size\":7", "\"size\":7,\"other\":0"),
+        valid.replace(PUBLICATION_OCI_SIGNATURE_TYPE, PUBLICATION_OCI_SBOM_TYPE),
+        valid.replace(PUBLICATION_OCI_SIGNATURE_TYPE, "application/unknown"),
+        valid.replace("\"mediaType\":\"{PUBLICATION_OCI_SIGNATURE_TYPE}\"", "\"mediaType\":\"{PUBLICATION_OCI_SBOM_TYPE}\""),
+        valid.replace("\"artifactType\":\"{PUBLICATION_OCI_SIGNATURE_TYPE}\"", "\"artifactType\":0"),
+        valid.replace("\"digest\":\"{subject}\"", "\"digest\":\"sha256-short\""),
+        publication_render_oci_index(subject, [PublicationOCIDescriptor]{}),
+        publication_render_oci_index(subject, descriptors[0..<3]),
+        "{valid} trailing"
+    }) -> assert(publication_parse_oci_index(bad.bytes(), subject) == .Err(.InvalidData(_)))
+    assert(publication_parse_oci_index(valid.bytes(), "other") == .Err(.InvalidData(_)))
+    assert(publication_parse_oci_index([U8]{255}, subject) == .Err(.InvalidData(_)))
+}
+#Test("OCI root creation versus existing and unsafe root subject directories") {
+    repo :: publication_index_test_root("oci-roots")
+    subject :: publication_oci_test_subject()
+    assert(publication_existing_oci_referrer_root(repo, subject) == .Err(.NotFound(_)))
+    root :: publication_oci_referrer_root(repo, subject) ?? panic("create")
+    assert_eq(publication_existing_oci_referrer_root(repo, subject) ?? panic("existing"), root)
+    files.remove_all(files.join(repo, "referrers")) ?? panic("remove")
+    files.write(files.join(repo, "referrers"), "not directory") ?? panic("file root")
+    assert(publication_oci_referrer_root(repo, subject) == .Err(.InvalidData(_)))
+    files.remove(files.join(repo, "referrers")) ?? panic("remove root")
+    outside :: files.join(repo, "outside")
+    files.create_dir_all(outside) ?? panic("outside")
+    files.symlink(outside, files.join(repo, "referrers")) ?? panic("root link")
+    assert(publication_existing_oci_referrer_root(repo, subject) == .Err(.InvalidData(_)))
+    files.remove(files.join(repo, "referrers")) ?? panic("unlink root")
+    files.create_dir_all(files.join(repo, "referrers")) ?? panic("root")
+    files.symlink(outside, root) ?? panic("subject link")
+    assert(publication_oci_referrer_root(repo, subject) == .Err(.InvalidData(_)))
+    assert(publication_existing_oci_referrer_root(repo, subject) == .Err(.InvalidData(_)))
+    files.remove_all(repo) ?? panic("cleanup")
+}
+#Test("OCI immutable writer identical conflict nonregular symlink and four MiB bounds") {
+    repo :: publication_index_test_root("oci-io")
+    path :: files.join(repo, "nested/blob")
+    publication_write_oci_file(path, "first".bytes(), "OCI referrer blob") ?? panic("first")
+    publication_write_oci_file(path, "first".bytes(), "OCI referrer blob") ?? panic("identical")
+    if publication_write_oci_file(path, "other".bytes(), "OCI referrer blob") == {
+        .Err(error) -> {
+            assert(error == .AlreadyExists(_))
+            assert("{error}".contains("immutable OCI referrer blob changed"))
+        }
+        .Ok(_) -> panic("conflict accepted")
+    }
+    assert_eq(publication_read_oci_file(path, 5) ?? panic("exact bound"), "first".bytes())
+    assert(publication_read_oci_file(path, 4) == .Err(.InvalidData(_)))
+    directory :: files.join(repo, "directory")
+    files.create_dir_all(directory) ?? panic("directory")
+    assert(publication_write_oci_file(directory, "x".bytes(), "OCI referrer blob") == .Err(.InvalidData(_)))
+    link :: files.join(repo, "link")
+    files.symlink(path, link) ?? panic("link")
+    assert(publication_read_oci_file(link, 5) == .Err(.InvalidData(_)))
+    assert(publication_write_oci_file(link, "first".bytes(), "OCI referrer blob") == .Err(.InvalidData(_)))
+    bytes := [U8]{}
+    loop _ in 0..<PUBLICATION_MAX_OCI_REFERRER_BYTES -> &bytes.push(U8{120})
+    large :: files.join(repo, "large")
+    publication_write_oci_file(large, bytes, "OCI referrer blob") ?? panic("4 MiB exact")
+    &bytes.push(U8{120})
+    assert(publication_write_oci_file(files.join(repo, "too-large"), bytes, "OCI referrer blob") == .Err(.InvalidData(_)))
+    // Bound refusal precedes both existing-byte conflict and path type checks.
+    assert(publication_write_oci_file(path, bytes, "OCI referrer blob") == .Err(.InvalidData(_)))
+    assert(publication_write_oci_file(directory, bytes, "OCI referrer blob") == .Err(.InvalidData(_)))
+    files.write_bytes(large, bytes) ?? panic("oversized stored file")
+    assert(publication_read_oci_file(large, PUBLICATION_MAX_OCI_REFERRER_BYTES) == .Err(.InvalidData(_)))
+    files.remove_all(repo) ?? panic("cleanup")
+}
+fn publication_oci_test_write_outcome(path: String, payload: String) -[FS, Env, Time]> String Never! {
+    if publication_write_oci_file(path, payload.bytes(), "OCI referrer blob") == {
+        .Ok(_) -> ""
+        .Err(error) -> {
+            assert(error == .AlreadyExists(_))
+            "{error}"
+        }
+    }
+}
+#Test("OCI concurrent different byte writers must lose with immutable conflict") {
+    repo :: publication_index_test_root("oci-race")
+    loop attempt in 0..<16 {
+        path :: files.join(repo, "blob-{publication_registry_unique_suffix()}-{attempt}")
+        left :: task { publication_oci_test_write_outcome(path, "left") }
+        right :: task { publication_oci_test_write_outcome(path, "right") }
+        a :: left.join() ?? panic("join left")
+        b :: right.join() ?? panic("join right")
+        assert((a == "") != (b == ""))
+        loser :: if a != "" -> a else -> b
+        assert(loser.contains("immutable OCI referrer blob changed"))
+        assert_eq(publication_read_oci_file(path, 5) ?? panic("winner bytes"), if a == "" -> "left".bytes() else -> "right".bytes())
+    }
+    files.remove_all(repo) ?? panic("cleanup")
+}
+#Test("OCI concurrent identical byte writers share the immutable winner") {
+    repo :: publication_index_test_root("oci-race-identical")
+    path :: files.join(repo, "blob")
+    left :: task { publication_write_oci_file(path, "same".bytes(), "OCI referrer blob") == .Ok(_) }
+    right :: task { publication_write_oci_file(path, "same".bytes(), "OCI referrer blob") == .Ok(_) }
+    left_ok :: left.join() ?? panic("join left")
+    right_ok :: right.join() ?? panic("join right")
+    assert(left_ok)
+    assert(right_ok)
+    assert_eq(publication_read_oci_file(path, 4) ?? panic("winner"), "same".bytes())
+    files.remove_all(repo) ?? panic("cleanup")
+}
+// Full verifier fixture uses the real four evidence producers and publisher;
+// it bypasses no verifier binding, parser or IO operation. Composed artifact
+// publication is separately retained in the ORIGINAL Index/TUF tests.
+fn publication_oci_test_evidence(repo: String, entry: PublicationIndexEntry) -[FS, Env, Time]> [PublicationOCIDescriptor] Never! {
+    root :: publication_oci_referrer_root(repo, entry.content_hash) ?? panic("root")
+    payloads :: [String]{publication_registry_spdx(None, entry.name, entry.version, entry.content_hash), publication_oci_signature_payload(entry) ?? panic("signature"), publication_oci_provenance_payload(entry) ?? panic("provenance"), publication_oci_reproducibility_payload(entry) ?? panic("reproducibility")}
+    descriptors := publication_oci_test_descriptors()
+    loop index in 0..<4 {
+        digest :: "sha256-{pkg_sha256_hex(payloads[index].bytes())}"
+        descriptors[index].digest = digest
+        descriptors[index].size = payloads[index].bytes().len()
+        publication_write_oci_file(files.join(files.join(root, "blobs"), digest), payloads[index].bytes(), "OCI referrer blob") ?? panic("blob")
+    }
+    publication_write_oci_file(files.join(root, PUBLICATION_OCI_REFERRER_INDEX), publication_render_oci_index(entry.content_hash, descriptors).bytes(), "OCI referrer index") ?? panic("index")
+    descriptors
+}
+#Test("OCI complete verifier digest size evidence subject unsafe and unexpected controls") {
+    repo :: publication_index_test_root("oci-verifier")
+    entry :: publication_oci_test_entry()
+    descriptors :: publication_oci_test_evidence(repo, entry)
+    publication_verify_oci_referrers(repo, entry) ?? panic("valid evidence")
+    root :: files.join(files.join(repo, "referrers"), entry.content_hash)
+    index :: files.join(root, PUBLICATION_OCI_REFERRER_INDEX)
+    assert_eq(publication_referrer_index_digest(repo, entry) ?? panic("digest"), "sha256-{pkg_sha256_hex((publication_render_oci_index(entry.content_hash, descriptors)).bytes())}")
+    original :: publication_read_oci_file(index, PUBLICATION_MAX_OCI_REFERRER_BYTES) ?? panic("index bytes")
+    changed := ~descriptors
+    changed[0].size += 1
+    files.write(index, publication_render_oci_index(entry.content_hash, changed)) ?? panic("size tamper")
+    assert(publication_verify_oci_referrers(repo, entry) == .Err(.InvalidData(_)))
+    files.write_bytes(index, original) ?? panic("restore index")
+    blob :: files.join(files.join(root, "blobs"), descriptors[1].digest)
+    bytes :: publication_read_oci_file(blob, PUBLICATION_MAX_OCI_REFERRER_BYTES) ?? panic("blob")
+    files.write(blob, "x".repeat(bytes.len())) ?? panic("same length digest tamper")
+    assert(publication_verify_oci_referrers(repo, entry) == .Err(.InvalidData(_)))
+    files.write_bytes(blob, bytes) ?? panic("restore blob")
+    changed_entry := ~entry
+    changed_entry.public_key = "changed"
+    assert(publication_verify_oci_referrers(repo, changed_entry) == .Err(.InvalidData(_)))
+    changed_entry = ~entry
+    changed_entry.name = "different"
+    assert(publication_verify_oci_referrers(repo, changed_entry) == .Err(.InvalidData(_)))
+    changed_entry = ~entry
+    changed_entry.fingerprint = "different"
+    assert(publication_verify_oci_referrers(repo, changed_entry) == .Err(.InvalidData(_)))
+    extra :: files.join(root, "blobs/extra")
+    files.write(extra, "extra") ?? panic("extra")
+    assert(publication_verify_oci_referrers(repo, entry) == .Err(.InvalidData(_)))
+    files.remove(extra) ?? panic("remove extra")
+    files.write(files.join(root, PUBLICATION_OCI_PENDING_SBOM), "pending") ?? panic("unexpected pending")
+    assert(publication_verify_oci_referrers(repo, entry) == .Err(.InvalidData(_)))
+    files.remove(files.join(root, PUBLICATION_OCI_PENDING_SBOM)) ?? panic("remove pending")
+    files.remove(blob) ?? panic("missing blob")
+    assert(publication_verify_oci_referrers(repo, entry) == .Err(.NotFound(_)))
+    files.symlink(index, blob) ?? panic("unsafe blob link")
+    assert(publication_verify_oci_referrers(repo, entry) == .Err(.InvalidData(_)))
+    files.remove_all(repo) ?? panic("cleanup")
+}
+#Test("OCI stage finalize missing pending and completed idempotent publication") {
+    repo :: publication_index_test_root("oci-finalize")
+    source :: publication_index_test_root("oci-finalize-source")
+    files.write(files.join(source, "package.jet"), "package bytes\n") ?? panic("source")
+    entry := publication_oci_test_entry()
+    entry.content_hash = foundation_tree_hash(source)
+    _ :: publication_publish_artifact(repo, source, entry.name, entry.version, entry.content_hash) ?? panic("actual artifact")
+    publication_finalize_oci_referrers(repo, entry) ?? panic("finalize")
+    publication_finalize_oci_referrers(repo, entry) ?? panic("completed without pending must verify")
+    publication_verify_oci_referrers(repo, entry) ?? panic("verify")
+    files.remove_all(repo) ?? panic("cleanup")
+    files.remove_all(source) ?? panic("cleanup source")
+}
+
+#Test("OCI CreateNew deterministic appearance collision and native failure precedence") {
+    repo :: publication_index_test_root("oci-create-new-collision")
+    path :: files.join(repo, "blob")
+    authority :: foundation_open_directory_authority(repo)
+    collide :: () IOError! -[FS, Env]> {
+        files.write(path, "winner")
+    }
+    error :: if foundation_write_file_nofollow_at_root(repo, "blob", "loser".bytes(), Val(collide), FoundationPublicationPolicy{create: .CreateNew}) == {
+        .Err(error) -> error
+        .Ok(_) -> panic("CreateNew replaced an appearing winner")
+    }
+    assert(error == .AlreadyExists(_))
+    assert_eq(files.read(path) ?? panic("winner untouched"), "winner")
+    assert(publication_oci_reconcile_winner(authority, path, "loser".bytes(), "OCI referrer blob", error) == .Err(.AlreadyExists(_)))
+    publication_oci_reconcile_winner(authority, path, "winner".bytes(), "OCI referrer blob", error) ?? panic("identical immutable winner")
+    // Exercise production error precedence, not fabricated successful handles:
+    // fsync/authority refusals must not be swallowed even if identical bytes exist.
+    loop failure in ([IOError]{
+        IOError.Other(publication_oci_context(path, "fsync refused")),
+        IOError.Other(publication_oci_context(path, "file authority directory moved while it was held")),
+        IOError.PermissionDenied(publication_oci_context(path, "native write refused")),
+        IOError.Cancelled(publication_oci_context(path, "cancelled"))
+    }) {
+        actual :: if publication_oci_reconcile_winner(authority, path, "winner".bytes(), "OCI referrer blob", failure) == {
+            .Err(observed) -> observed
+            .Ok(_) -> { panic("native refusal swallowed") }
+        }
+        if failure == .Other(_) -> assert(actual == .Other(_))
+        if failure == .PermissionDenied(_) -> assert(actual == .PermissionDenied(_))
+        if failure == .Cancelled(_) -> assert(actual == .Cancelled(_))
+        assert_eq("{actual}", "{failure}")
+    }
+    files.remove(path) ?? panic("remove winner")
+    refuse :: () IOError! -[FS, Env]> { return Err(IOError.Other(publication_oci_context(path, "validation refused after fsync"))) }
+    assert(foundation_write_file_nofollow_at_root(repo, "blob", "winner".bytes(), Val(refuse), FoundationPublicationPolicy{create: .CreateNew}) == .Err(.Other(_)))
+    assert(!files.lexists(path))
+    files.remove_all(repo) ?? panic("cleanup")
+}
+#Test("OCI winner reconciliation retains original ancestor authority") {
+    repo :: publication_index_test_root("oci-ancestor")
+    parent :: files.join(repo, "parent")
+    files.create_dir_all(parent) ?? panic("parent")
+    authority :: foundation_open_directory_authority(parent)
+    path :: files.join(parent, "blob")
+    publication_write_oci_file(path, "same".bytes(), "OCI referrer blob") ?? panic("first")
+    files.rename(parent, files.join(repo, "detached")) ?? panic("swap parent")
+    files.create_dir_all(parent) ?? panic("replacement parent")
+    files.write(path, "same") ?? panic("same bytes in untrusted tree")
+    collision :: IOError.AlreadyExists(publication_oci_context(path, "file authority publication target already exists"))
+    assert(publication_oci_reconcile_winner(authority, path, "same".bytes(), "OCI referrer blob", collision) == .Err(.Other(_)))
+    files.remove_all(repo) ?? panic("cleanup")
+}
+
+#Test("OCI content addressed but forged evidence cannot evade entry binding") {
+    entry :: publication_oci_test_entry()
+    sbom :: publication_registry_spdx(None, entry.name, entry.version, entry.content_hash)
+    forgeries :: [[U8]]{
+        sbom.replace("# JetSubject: {entry.content_hash}", "# JetSubject: other").bytes(),
+        sbom.replace("PackageName: ref-kit", "PackageName: other").bytes(),
+        sbom.replace("PackageVersion: 1.0.0", "PackageVersion: other").bytes(),
+        [U8]{255},
+        "forged signature".bytes(), "forged provenance".bytes(), "forged reproducibility".bytes()
+    }
+    loop control in 0..<forgeries.len() {
+        repo :: publication_index_test_root("oci-forged-{control}")
+        descriptors := publication_oci_test_evidence(repo, entry)
+        slot :: if control < 4 -> 0 else -> control - 3
+        root :: files.join(files.join(repo, "referrers"), entry.content_hash)
+        blobs :: files.join(root, "blobs")
+        bytes :: forgeries[control]
+        files.remove(files.join(blobs, descriptors[slot].digest)) ?? panic("remove original")
+        descriptors[slot].digest = "sha256-{pkg_sha256_hex(bytes)}"
+        descriptors[slot].size = bytes.len()
+        publication_write_oci_file(files.join(blobs, descriptors[slot].digest), bytes, "OCI referrer blob") ?? panic("forged addressed blob")
+        files.write(files.join(root, PUBLICATION_OCI_REFERRER_INDEX), publication_render_oci_index(entry.content_hash, descriptors)) ?? panic("bind digest and size")
+        assert(publication_verify_oci_referrers(repo, entry) == .Err(.InvalidData(_)))
+        files.remove_all(repo) ?? panic("cleanup")
+    }
+}
+#Test("OCI verifier rejects repeated digest and nonregular blob store") {
+    repo :: publication_index_test_root("oci-repeated")
+    entry :: publication_oci_test_entry()
+    descriptors := publication_oci_test_evidence(repo, entry)
+    root :: files.join(files.join(repo, "referrers"), entry.content_hash)
+    descriptors[1].digest = descriptors[0].digest
+    descriptors[1].size = descriptors[0].size
+    files.write(files.join(root, PUBLICATION_OCI_REFERRER_INDEX), publication_render_oci_index(entry.content_hash, descriptors)) ?? panic("repeat digest")
+    if publication_verify_oci_referrers(repo, entry) == {
+        .Err(error) -> assert("{error}".contains("repeats a blob digest"))
+        .Ok(_) -> panic("repeated blob accepted")
+    }
+    files.remove_all(files.join(root, "blobs")) ?? panic("remove blobs")
+    files.write(files.join(root, "blobs"), "not directory") ?? panic("nonregular store")
+    assert(publication_verify_oci_referrers(repo, entry) == .Err(.InvalidData(_)))
+    files.remove_all(repo) ?? panic("cleanup")
+}
+
+#Test("OCI absent or unreadable winner preserves publisher collision refusal") {
+    repo :: publication_index_test_root("oci-unreadable-winner")
+    authority :: foundation_open_directory_authority(repo)
+    path :: files.join(repo, "blob")
+    failure :: IOError.AlreadyExists(publication_oci_context(path, "could not reserve a temporary authority file"))
+    absent :: if publication_oci_reconcile_winner(authority, path, "candidate".bytes(), "OCI referrer blob", failure) == {
+        .Err(error) -> error
+        .Ok(_) -> { panic("absent winner blessed") }
+    }
+    assert(absent == .AlreadyExists(_))
+    assert_eq("{absent}", "{failure}")
+    files.create_dir_all(path) ?? panic("nonregular winner")
+    unreadable :: if publication_oci_reconcile_winner(authority, path, "candidate".bytes(), "OCI referrer blob", failure) == {
+        .Err(error) -> error
+        .Ok(_) -> { panic("unreadable winner blessed") }
+    }
+    assert(unreadable == .AlreadyExists(_))
+    assert_eq("{unreadable}", "{failure}")
+    files.remove_all(repo) ?? panic("cleanup")
+}
+
+#Test("OCI protected winner reader refuses same byte file replacement with unchanged parent") {
+    repo :: publication_index_test_root("oci-held-winner")
+    path :: files.join(repo, "blob")
+    publication_write_oci_file(path, "winner".bytes(), "OCI referrer blob") ?? panic("first")
+    parent :: foundation_open_directory_authority(repo)
+    held :: foundation_open_file_authority(repo, "blob") ?? panic("hold original winner")
+    files.rename(path, files.join(repo, "detached")) ?? panic("replace winner binding")
+    files.write(path, "winner") ?? panic("same bytes different file")
+    parent.revalidate() ?? panic("parent remained unchanged")
+    assert(held.read_bounded(6) == .Err(.Other(_)))
+    assert(held.revalidate() == .Err(.Other(_)))
+    files.remove_all(repo) ?? panic("cleanup")
+}

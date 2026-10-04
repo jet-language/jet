@@ -11,7 +11,7 @@
 //          generated `fn run()` for the default `jet run` tier (I9)
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { readdir, readFile, realpath, stat, writeFile, mkdir, rm } from "node:fs/promises";
+import { readdir, readFile, realpath, stat, writeFile, mkdir, rm, copyFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,8 +56,7 @@ const packageSource = [
   "}",
   "",
 ].join("\n");
-// Jetpack reuses the Compiler's Jet front end instead of porting a second copy,
-// so manifests may name Compiler sources as well as Jetpack sources.
+// Shared dependencies reference canonical Compiler/ sources in this checkout.
 const allowedPrefixes = ["Jetpack/", "Compiler/"];
 
 function fail(message) {
@@ -82,11 +81,10 @@ async function jetFilesUnder(directory) {
   return files;
 }
 
-// With JETPACK_BOOTSTRAP_DEPS_FROM_HEAD=1 while proving one area, dependency
-// areas come from the last commit (list lines and file bytes), so another
-// writer's unfinished edits in a dependency cannot break this proof. The proved
-// area itself always comes from the working copy.
-const depsFromHead = process.env.JETPACK_BOOTSTRAP_DEPS_FROM_HEAD === "1" && process.env.JETPACK_BOOTSTRAP_OWN_AREA;
+// One opt-in flag freezes dependency manifests and bytes to HEAD. By default
+// every reference reads its live canonical path. The proved area's own sources
+// always remain live when JETPACK_BOOTSTRAP_OWN_AREA selects one.
+const depsFromHead = process.env.JETPACK_BOOTSTRAP_DEPS_FROM_HEAD === "1";
 function headFile(path) {
   try {
     return execFileSync("git", ["show", `HEAD:${path}`], { cwd: sourceRootDir, maxBuffer: 256 * 1024 * 1024 });
@@ -120,14 +118,19 @@ function mergedManifest(workingText, name) {
 }
 
 // `embed_file("rel")` is written relative to its own source file, as in any
-// package. The assembled unit lives elsewhere, so rebase each relative path onto
-// the unit's directory; the embedded file itself must stay inside the source root.
+// package. The assembled unit lives elsewhere and an embed may not leave its
+// project (E0957), so each embedded file is copied into the unit's project as
+// `src/embedded/<repository path>` and the call is rebased onto that copy; the
+// embedded file itself must stay inside the source root.
+const embeddedFiles = new Map();
 function rebaseEmbeds(text, sourcePath, where) {
   return text.replace(/embed_file\("([^"\\{}]+)"\)/g, (whole, rel) => {
     if (isAbsolute(rel)) fail(`${where}: ${sourcePath}: embed_file paths are relative to their source file`);
     const target = resolve(sourceRootDir, dirname(sourcePath), rel);
     if (!containedPath(sourceRootDir, target)) fail(`${where}: ${sourcePath}: embed_file("${rel}") resolves outside the source root`);
-    return `embed_file("${relative(sourceDir, target)}")`;
+    const copy = `embedded/${relative(sourceRootDir, target).split(sep).join("/")}`;
+    embeddedFiles.set(copy, target);
+    return `embed_file("${copy}")`;
   });
 }
 
@@ -157,10 +160,9 @@ async function readManifest(name) {
     if (!allowedPrefixes.some((prefix) => sourcePath.startsWith(prefix))) {
       fail(`${where}: sources must live under ${allowedPrefixes.join(" or ")}`);
     }
-    // Compiler/ sections are referenced, never owned: always read them from the
-    // last commit so another stream's unfinished compiler edits cannot break a
-    // Jetpack check.
-    const fromHead = sourcePath.startsWith("Compiler/") || (depsFromHead && section !== process.env.JETPACK_BOOTSTRAP_OWN_AREA);
+    // Dependency references have the same live/HEAD rule, never a per-file
+    // fallback to a different implementation.
+    const fromHead = depsFromHead && section !== process.env.JETPACK_BOOTSTRAP_OWN_AREA;
     let bytes;
     if (fromHead) {
       bytes = headFile(sourcePath);
@@ -282,10 +284,31 @@ function append(text) {
   generatedByte += Buffer.byteLength(text, "utf8");
   nextLine += (text.match(/\n/g) ?? []).length;
 }
+// D-MOD-CYCLE1=A (as Compiler/Bootstrap/assemble.mjs): the listed Compiler/
+// front-end files import their sibling packages with `use <package>.[names]`.
+// This unit is one namespace, so those imports are blanked to spaces of the
+// same length (every byte offset and line in the source map still matches),
+// and a repeated single-line Core import after its first occurrence is
+// blanked the same way (a duplicate import name is E0105).
+const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_pkg_model|jet_lexer|jet_parser|jet_optimizer|jet_sema|jet_codegen|jet_eval|jet_driver|jet_backend|jet_cli|compiler_bootstrap)\.\[[^\]]*\]/gm;
+const CORE_IMPORT = /^use core\.[^\[\n]*$/gm;
+const seenCoreImports = new Set();
+const blank = (block) => block.replace(/[^\n]/g, " ");
+function blankPackageImports(text) {
+  return text.replace(PACKAGE_IMPORT, blank).replace(CORE_IMPORT, (line) => {
+    const key = line.trimEnd();
+    if (!seenCoreImports.has(key)) {
+      seenCoreImports.add(key);
+      return line;
+    }
+    return blank(line);
+  });
+}
 for (const entry of units) {
   append(`// [jetpack-bootstrap source: ${entry.sourcePath}]\n`);
-  const rendered = testPaths.has(entry.sourcePath) ? renderTests(entry.text, entry.sourcePath) : entry.text;
-  const body = rendered ?? entry.text;
+  const text = blankPackageImports(entry.text);
+  const rendered = testPaths.has(entry.sourcePath) ? renderTests(text, entry.sourcePath) : text;
+  const body = rendered ?? text;
   const bytes = Buffer.from(body, "utf8");
   const startByte = generatedByte;
   const startLine = nextLine;
@@ -317,6 +340,11 @@ if (mode === "run") {
 
 await rm(projectDir, { recursive: true, force: true });
 await mkdir(sourceDir, { recursive: true });
+for (const [copy, target] of embeddedFiles) {
+  const destination = resolve(sourceDir, copy);
+  await mkdir(dirname(destination), { recursive: true });
+  await copyFile(target, destination).catch((error) => fail(`cannot copy embedded file ${relative(sourceRootDir, target)}: ${error.message}`));
+}
 await writeFile(unitPath, output, "utf8");
 await writeFile(packagePath, packageSource, "utf8");
 await writeFile(mapPath, `${JSON.stringify({

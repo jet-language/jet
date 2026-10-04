@@ -8,7 +8,7 @@
 
 store_shared_cas_sequence := 0
 
-pub struct SharedCasReport {
+pub struct SharedCASReport {
     pub optimized_files: Int
     pub optimized_bytes: Int
 }
@@ -40,18 +40,17 @@ fn store_hex8(value: Int) -> String Never! {
 }
 
 pub fn store_share_tree_files(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) StoreError! -[FS, Env, Time]> {
-    if allow_semantic_xattrs -> return Ok()
+    if allow_semantic_xattrs -> return
     shared_lock :: store_with_shared_cas_lock(roots)
     store_share_tree_files_unlocked(roots, root, allow_semantic_xattrs)
 }
 
 pub fn store_share_tree_files_unlocked(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) StoreError! -[FS, Env, Time]> {
     store_share_tree_files_unlocked_with_report(roots, root, allow_semantic_xattrs)
-    Ok()
 }
 
-pub fn store_share_tree_files_unlocked_with_report(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) -[FS, Env, Time]> SharedCasReport StoreError! {
-    empty :: SharedCasReport{optimized_files: 0, optimized_bytes: 0}
+pub fn store_share_tree_files_unlocked_with_report(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) -[FS, Env, Time]> SharedCASReport StoreError! {
+    empty :: SharedCASReport{optimized_files: 0, optimized_bytes: 0}
     if allow_semantic_xattrs -> return Ok(empty)
     if files.stat(root).is_symlink -> return Ok(empty)
     hangar :: roots.hangar_dir()
@@ -65,23 +64,23 @@ pub fn store_share_tree_files_unlocked_with_report(roots: HangarRoots, root: Str
     store_ensure_real_directory(shared, "shared CAS pool")
     store_make_tree_writable_for_removal(canonical_root)
     used := Set<String>.new()
-    report := SharedCasReport{optimized_files: 0, optimized_bytes: 0}
+    report := SharedCASReport{optimized_files: 0, optimized_bytes: 0}
     store_share_node(canonical_root, shared, &used, &report)
     store_seal_node(canonical_root)
     store_fsync_tree(canonical_root)
     Ok(report)
 }
 
-fn store_share_node(path: String, shared: String, used: &Set<String>, report: &SharedCasReport) StoreError! -[FS, Env, Time]> {
+fn store_share_node(path: String, shared: String, used: &Set<String>, report: &SharedCASReport) StoreError! -[FS, Env, Time]> {
     info :: files.stat(path)
-    if info.is_symlink -> return Ok()
+    if info.is_symlink -> return
     if info.is_dir {
         entries := files.list_dir(path)
         &entries.sort_by((entry: files.DirEntry) -> entry.name)
         loop entry in entries -> store_share_node(entry.path, shared, used, report)
-        return Ok()
+        return
     }
-    if !info.is_file -> return Ok()
+    if !info.is_file -> return
     source_len :: info.size
     mode :: store_clear_write_bits(store_permission_identity(info))
     key :: store_shared_cas_key(store_sha256_file_hex(path), mode)
@@ -90,12 +89,12 @@ fn store_share_node(path: String, shared: String, used: &Set<String>, report: &S
     // sibling could be linked in-tree.
     if info.links > 1 {
         &used.add(key)
-        return Ok()
+        return
     }
-    if used.has(key) -> return Ok()
+    if used.has(key) -> return
     &used.add(key)
     ensured :: store_ensure_shared_file(shared, key, path, info, mode)
-    if store_same_file_inode(path, ensured.path) -> return Ok()
+    if store_same_file_inode(path, ensured.path) -> return
     linked := true
     store_replace_with_shared_link(path, ensured.path) ?? {
         linked = false
@@ -104,23 +103,22 @@ fn store_share_node(path: String, shared: String, used: &Set<String>, report: &S
     if linked {
         report.optimized_files += 1
         report.optimized_bytes += source_len
-        return Ok()
+        return
     }
     if ensured.created && (files.stat(ensured.path) ? pooled -> pooled.size == source_len ! failed -> false) {
         files.remove(ensured.path).drop("a pool entry created for a failed link is discarded")
     }
-    Ok()
 }
 
-pub struct SharedCasFile {
+pub struct SharedCASFile {
     pub path: String
     pub created: Bool
 }
 
-fn store_ensure_shared_file(shared: String, key: String, source_path: String, source: files.Stat, mode: Int) -[FS, Env, Time]> SharedCasFile StoreError! {
+fn store_ensure_shared_file(shared: String, key: String, source_path: String, source: files.Stat, mode: Int) -[FS, Env, Time]> SharedCASFile StoreError! {
     destination :: files.join(shared, key)
     existing :: files.stat(destination) ? found -> Val(found) ! error -> {
-        if !store_io_is_not_found(error) -> return Err(StoreError.Io(error))
+        if !store_io_is_not_found(error) -> return Err(StoreError.IO(error))
         None
     }
     if existing == .Val(pooled) {
@@ -128,7 +126,7 @@ fn store_ensure_shared_file(shared: String, key: String, source_path: String, so
             return Err(StoreError.InvalidData("shared CAS entry is not a regular file: {destination}"))
         }
         if pooled.size == source.size && store_permission_identity(pooled) == mode && store_files_equal(destination, source_path) {
-            return Ok(SharedCasFile{path: destination, created: false})
+            return Ok(SharedCASFile{path: destination, created: false})
         }
         // Self-healing default: a drifted pool entry (for example one
         // rewritten through a peer hardlink) is swept aside and replaced
@@ -148,9 +146,9 @@ fn store_ensure_shared_file(shared: String, key: String, source_path: String, so
         failure :: err
         files.remove(partial).drop("the unpublished partial is scratch")
         if store_io_is_already_exists(failure) -> return store_ensure_shared_file(shared, key, source_path, source, mode)
-        return Err(StoreError.Io(failure))
+        return Err(StoreError.IO(failure))
     }
-    Ok(SharedCasFile{path: destination, created: true})
+    Ok(SharedCASFile{path: destination, created: true})
 }
 
 fn store_next_shared_cas_sequence() -> Int Never! {
@@ -183,10 +181,9 @@ fn store_replace_with_shared_link(path: String, shared: String) StoreError! -[FS
     files.hard_link(shared, path) ?? {
         failure :: err
         files.rename(temporary, path).drop("restoring the original name is best-effort")
-        return Err(StoreError.Io(failure))
+        return Err(StoreError.IO(failure))
     }
     files.remove(temporary).drop("the displaced original is scratch")
-    Ok()
 }
 
 fn store_same_file_inode(left: String, right: String) -[FS]> Bool Never! {

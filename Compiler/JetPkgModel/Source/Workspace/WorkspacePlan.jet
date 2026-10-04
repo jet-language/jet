@@ -1,0 +1,42 @@
+use jet_foundation.[ComptimeInput]
+use core.files.runtime.kernel_path_components.[OSPath]
+
+// `WorkspacePlan`, the workspace-source authority, and workspace members:
+// the data produced by evaluating a workspace declaration (D-WORKSPACE1=B,
+// D-WORKSPACE2=A). They live in the package model so the evaluator
+// (EnvModel `WorkspaceFile`) and the read-only lock reader share one
+// definition without depending on each other.
+
+
+// The result of evaluating a workspace declaration.
+pub struct WorkspacePlan {
+    // Member packages in source order (the order `members:` produced them).
+    pub members: [WorkspacePlanMember]
+    // D-CTEFFECT1 Tier-1: content-addressed inputs a `members:` expression
+    // pulled in during evaluation, recorded so the index is reproducible.
+    pub comptime_inputs: [ComptimeInput]
+    // D-JPK-OVERLAY1=A: reviewed overlay/override policy from the workspace
+    // declaration; commands may draft this source but never hide override
+    // state.
+    pub overlay_policy: OverlayPolicy
+    // Digest of the workspace source that produced this plan; a lock is
+    // reusable only while the source bytes keep this identity.
+    pub source_digest: String
+
+    pub fn empty() -> WorkspacePlan Never! {
+        WorkspacePlan{members: [WorkspacePlanMember]{}, comptime_inputs: [ComptimeInput]{}, overlay_policy: OverlayPolicy.empty(), source_digest: ""}
+    }
+}
+
+// One workspace member package (Rust `WorkspacePlan::WorkspaceMember`).
+pub struct WorkspacePlanMember {
+    // Package name read from the member's `package.jet` (or its path).
+    pub name: String
+    // Package directory relative to the workspace root.
+    // TANDEM: retain native discovered paths; authored UTF8 is encoded once.
+    pub path: OSPath
+    // Checkout-relative canonical directory identity used by the workspace
+    // lock, so a committed lock stays portable after a checkout moves.
+    pub canonical_path: String
+}
+

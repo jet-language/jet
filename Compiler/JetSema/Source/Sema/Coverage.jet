@@ -239,13 +239,26 @@ fn sema_coverage_is_open_scalar(ty: Type) -> Bool Never! {
     }
 }
 
+// Rust `builtin_type_registry`: the compiler-owned runtime enums (`Ordering`,
+// `RemoveBy`) are closed sets without a registered nominal.
+fn sema_coverage_compiler_enum(ty: Type) -> [String]? {
+    if ty == .Named(name) -> return sema_compiler_enum_variants(name)
+    None
+}
+
 fn sema_coverage_missing(subject_ty: Type, keys: [String], environment: SemaScopeEnvironment) -> [String] Never! {
     missing := [String]{}
     if subject_ty == {
         .Named(_) | .Apply(_, _) -> {
             graph_option :: environment.registration_graph
             graph :: graph_option ?? return missing
-            nominal :: sema_pattern_nominal(graph, environment.module_identity, subject_ty) ?? return missing
+            nominal :: sema_pattern_nominal(graph, environment.module_identity, subject_ty) ?? {
+                variants :: sema_coverage_compiler_enum(subject_ty) ?? return missing
+                loop variant in variants {
+                    if !sema_coverage_has_key(keys, variant) -> &missing.push(variant)
+                }
+                return missing
+            }
             if nominal.kind != SemaRegistrationNominalKind.Enum -> return missing
             key_set :: sema_coverage_key_set(keys)
             loop row in nominal.variants {
@@ -440,7 +453,7 @@ fn sema_coverage_is_closed_set(ty: Type, environment: SemaScopeEnvironment) -> B
     }
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return false
-    nominal :: sema_pattern_nominal(graph, environment.module_identity, ty) ?? return false
+    nominal :: sema_pattern_nominal(graph, environment.module_identity, ty) ?? return sema_coverage_compiler_enum(ty) != None
     nominal.kind == SemaRegistrationNominalKind.Enum
 }
 

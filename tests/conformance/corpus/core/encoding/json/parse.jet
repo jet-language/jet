@@ -1,7 +1,206 @@
 // core-conformance: core.encoding.json.parse
 use core.encoding.json as json
+use core.encoding.[DataTree, EncodingErrorKind, EncodingLimits]
+use core.encoding.jsonl as jsonl
 
 fn run() {
     result :: json.parse("{{\"a\":1}}") ?? panic("parse")
     print(result)
+}
+
+// Rust EncodingJson.rs:83-395 / EncodingErrors.rs:3-18.
+// Each expectation pins the failure position, not merely rejection.
+fn json_error_case(text: String, reason: String, line: Int, offset: Int) {
+    if json.parse(text) == {
+        .Ok(_) -> panic("invalid JSON accepted")
+        .Err(error) -> {
+            assert_eq(error.reason, reason)
+            assert_eq(error.line ?? 0, line)
+            // #4367: EncodingError.byte_offset is native i64 at this Core
+            // boundary; decimal text preserves exact offset equality.
+            assert_eq("{error.byte_offset}", "{offset}")
+            assert(error.kind == EncodingErrorKind.Syntax)
+        }
+    }
+}
+
+#Test("JSON value and word errors stop before the offending scalar") {
+    json_error_case("", "expected a JSON value", 1, 0)
+    json_error_case(" \n\t", "expected a JSON value", 2, 3)
+    json_error_case("\n?", "expected a JSON value", 2, 1)
+    json_error_case("[\n", "expected a JSON value", 2, 2)
+    json_error_case("{{\"a\":\n", "expected a JSON value", 2, 6)
+    json_error_case("\nnul", "expected a JSON word", 2, 4)
+    json_error_case("nu\n", "expected a JSON word", 1, 2)
+    json_error_case("\ntrX", "expected a JSON word", 2, 3)
+    json_error_case("\nfal", "expected a JSON word", 2, 4)
+}
+
+#Test("JSON string errors match consumed versus unconsumed newline positions") {
+    json_error_case("{{\n1:0}}", "expected quoted text", 2, 2)
+    json_error_case("{{\n", "expected quoted text", 2, 2)
+    json_error_case("\n\"abc\\", "unfinished escape", 2, 6)
+    json_error_case("\n\"\\q\"", "invalid escape in string", 2, 4)
+    json_error_case("\"\\\n\"", "invalid escape in string", 2, 3)
+    json_error_case("\"a\nb\"", "control character in string", 2, 3)
+    json_error_case("\n\"abc", "missing closing quote", 2, 5)
+    json_error_case("\n\"é\\q\"", "invalid escape in string", 2, 6)
+}
+
+#Test("JSON unicode escape and surrogate failures retain Rust positions") {
+    json_error_case("\"\\u12\n\"", "invalid unicode escape", 1, 5)
+    json_error_case("\n\"\\u12", "truncated unicode escape", 2, 6)
+    json_error_case("\n\"\\uDC00\"", "unpaired surrogate in string", 2, 8)
+    json_error_case("\"\\uD800\n\"", "unpaired surrogate in string", 1, 7)
+    json_error_case("\"\\uD800\\\n\"", "unpaired surrogate in string", 1, 8)
+    json_error_case("\n\"\\uD800\\u0000\"", "unpaired surrogate in string", 2, 14)
+    json_error_case("\n\"\\uD800", "unpaired surrogate in string", 2, 8)
+    json_error_case("\n\"\\uD800\\", "unpaired surrogate in string", 2, 9)
+    json_error_case("\n\"\\uD800\\u12", "truncated unicode escape", 2, 12)
+    value :: json.parse("\"\\uD834\\uDD1E\"") ?? panic("valid surrogate pair")
+    assert_eq(json.to_string(value), "\"𝄞\"")
+}
+
+#Test("JSON number grammar and nonfinite failures share bad number") {
+    json_error_case("\n-", "bad number", 2, 2)
+    json_error_case("-\n", "bad number", 1, 1)
+    json_error_case("\n1.", "bad number", 2, 3)
+    json_error_case("1.\n", "bad number", 1, 2)
+    json_error_case("\n1e", "bad number", 2, 3)
+    json_error_case("1e+\n", "bad number", 1, 3)
+    json_error_case("\n1e400", "bad number", 2, 6)
+    json_error_case("\n-1e400", "bad number", 2, 7)
+    json_error_case("\n01", "extra text after JSON value", 2, 2)
+    json_error_case("[\n01]", "expected `,` or `]`", 2, 3)
+    json_error_case("{{\"a\":\n01}}", "expected `,` or `}}`", 2, 7)
+}
+
+#Test("JSON array and object punctuation errors distinguish EOF and trailing commas") {
+    json_error_case("[1\n", "expected `,` or `]`", 2, 3)
+    json_error_case("[1\n2]", "expected `,` or `]`", 2, 3)
+    json_error_case("[1,\n]", "expected `,` or `]`", 2, 4)
+    json_error_case("{{\"a\":1\n", "expected `,` or `}}`", 2, 7)
+    json_error_case("{{\"a\":1\n\"b\":2}}", "expected `,` or `}}`", 2, 7)
+    json_error_case("{{\"a\":1,\n}}", "expected `,` or `}}`", 2, 8)
+    json_error_case("{{\"a\"\n0}}", "expected `:` after object key", 2, 5)
+    json_error_case("{{\"a\"\n", "expected `:` after object key", 2, 5)
+    json_error_case("null\ntrue", "extra text after JSON value", 2, 5)
+}
+
+#Test("JSON duplicates fail after colon before value and later value keeps first position") {
+    json_error_case("{{\"a\":1,\n\"a\":\n}}", "duplicate object key `a`", 2, 12)
+    value :: json.parse_allow_duplicates("{{\"a\":1,\"b\":2,\"a\":3}}") ?? panic("allow duplicate")
+    assert_eq(json.to_string(value), "{{\"a\":3,\"b\":2}}")
+    json_error_case("{{\"é\":1,\n\"\\u00e9\":}}", "duplicate object key `é`", 2, 18)
+}
+
+fn json_test_limits(depth: Int, bytes: Int) -> EncodingLimits {
+    {
+        buffer_bytes: 65536, max_depth: depth, max_item_bytes: bytes,
+        max_total_bytes: None, max_expansion_depth: 32, max_expansion_bytes: 8388608,
+    }
+}
+
+fn json_nested(depth: Int) -> String {
+    opens :: "[".repeat(depth)
+    closes :: "]".repeat(depth)
+    "{opens}0{closes}"
+}
+
+#Test("JSON explicit 64 depth allows 64 containers and rejects the 65th before open") {
+    limits :: json_test_limits(64, 16777216)
+    _value :: json.parse_with_limits(json_nested(64), limits) ?? panic("64 containers")
+    if json.parse_with_limits(json_nested(65), limits) == {
+        .Ok(_) -> panic("65 containers accepted")
+        .Err(error) -> {
+            assert_eq(error.reason, "JSON value is nested too deeply")
+            assert_eq(error.line ?? 0, 1)
+            assert_eq("{error.byte_offset}", "64")
+        }
+    }
+    _object :: json.parse_with_limits("{{\"a\":0}}", json_test_limits(1, 16777216)) ?? panic("root object")
+    if json.parse_with_limits("{{\"a\":\n{{}}}}", json_test_limits(1, 16777216)) == {
+        .Ok(_) -> panic("nested object accepted")
+        .Err(error) -> {
+            assert_eq(error.reason, "JSON value is nested too deeply")
+            assert_eq(error.line ?? 0, 2)
+            assert_eq("{error.byte_offset}", "6")
+        }
+    }
+    _default :: json.parse(json_nested(256)) ?? panic("default 256 containers")
+    json_error_case(json_nested(257), "JSON value is nested too deeply", 1, 256)
+    _duplicate :: json.parse_allow_duplicates_with_limits("{{\"a\":1,\"a\":2}}", limits) ?? panic("bounded allow duplicate")
+    if json.parse_with_limits("null", json_test_limits(64, 3)) == {
+        .Ok(_) -> panic("input byte limit ignored")
+        .Err(error) -> assert(error.kind == EncodingErrorKind.Limit)
+    }
+}
+
+#Test("JSON integers outside i64 remain exact Int without Float rounding") {
+    minimum :: json.parse("-9223372036854775808") ?? panic("i64 minimum")
+    above :: json.parse("9223372036854775808") ?? panic("above i64")
+    huge :: json.parse("123456789012345678901234567890") ?? panic("big integer")
+    if minimum == {
+        .Int(n) -> assert_eq(n, -9223372036854775808)
+        else -> panic("integer became a different carrier")
+    }
+    if above == {
+        .Int(n) -> assert_eq(n, 9223372036854775808)
+        else -> panic("integer became a different carrier")
+    }
+    if huge == {
+        .Int(n) -> assert_eq(n, 123456789012345678901234567890)
+        else -> panic("integer became a different carrier")
+    }
+    too_long :: "1".repeat(1000001)
+    json_error_case("\n{too_long}", "JSON number exceeds the 1000000-digit limit", 2, 1000002)
+    // Rust parse_json's Float mode does not call validate_json_number:
+    // underflow (even with an exponent beyond its exact-number limit) is legal.
+    underflow :: json.parse("1e-1000001") ?? panic("finite underflow")
+    if underflow == {
+        .Float(n) -> assert_eq(n, 0.0)
+        else -> panic("fraction became a different carrier")
+    }
+}
+
+#Test("JSON reader shares reason and line vocabulary") {
+    reader := json.reader("nu\n")
+    if &reader.next() == {
+        .Ok(_) -> panic("invalid reader accepted")
+        .Err(error) -> {
+            assert_eq(error.reason, "expected a JSON word")
+            assert_eq(error.line ?? 0, 1)
+            assert_eq("{error.byte_offset}", "2")
+        }
+    }
+    allow := json.reader_allow_duplicates("{{\"a\":1,\n\"a\":}}")
+    if &allow.next() == {
+        .Ok(_) -> panic("invalid duplicate value accepted")
+        .Err(error) -> {
+            assert_eq(error.reason, "expected a JSON value")
+            assert_eq(error.line ?? 0, 2)
+        }
+    }
+}
+
+#Test("JSONL forwards parser reasons while anchoring record position") {
+    if jsonl.parse("null\n\nnuX\n") == {
+        .Ok(_) -> panic("invalid JSONL accepted")
+        .Err(error) -> {
+            assert_eq(error.reason, "expected a JSON word")
+            assert_eq(error.line ?? 0, 3)
+            assert_eq("{error.byte_offset}", "8")
+            assert_eq(error.path, "/1")
+        }
+    }
+    if jsonl.parse("null\n{{\"c\":") == {
+        .Ok(_) -> panic("incomplete JSONL accepted")
+        .Err(error) -> {
+            assert_eq(error.reason, "expected a JSON value")
+            assert_eq(error.line ?? 0, 2)
+            assert_eq("{error.byte_offset}", "10")
+            assert_eq(error.path, "/1/c")
+            assert(error.kind == EncodingErrorKind.Syntax)
+        }
+    }
 }

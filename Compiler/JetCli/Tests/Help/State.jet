@@ -1,0 +1,488 @@
+fn help_state_test_cursor(state: JetCLIHelpState, column: Int, row: Int) Never! {
+    cursor :: jet_cli_help_state_cursor(state) ?? panic("expected semantic cursor")
+    assert_eq(cursor.column, column)
+    assert_eq(cursor.row, row)
+}
+// Behavior of Interactive.rs pure state (no inline Rust tests). These mirror
+// the state-observable help_pty.rs journeys, without pretending to prove a PTY.
+fn help_state_test_type(state: &JetCLIHelpState, text: String) Never! {
+    loop scalar in text.chars() {
+        _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Char(scalar))
+    }
+}
+fn help_state_test_seed(mode: JetCLIHelpMode) -> JetCLIHelpState Never! {
+    state := jet_cli_help_state_new(80, 10, false)
+    state.cat_entry = Val(0)
+    state.res_scroll = 3
+    state.ref_scroll = 4
+    if mode != JetCLIHelpMode.Categorized {
+        help_state_test_type(&state, "run")
+        state.res_scroll = 3
+    }
+    state.mode = mode
+    if mode == JetCLIHelpMode.Reference {
+        state.ref_entry = jet_cli_help_state_selected_category(state)
+        state.ref_query = "run"
+    }
+    state
+}
+fn help_state_test_same(left: JetCLIHelpState, right: JetCLIHelpState) Never! {
+    assert_eq(left.mode, right.mode)
+    assert_eq(left.query, right.query)
+    assert_eq(left.cat_selected, right.cat_selected)
+    assert_eq(left.cat_entry, right.cat_entry)
+    assert_eq(left.hits.len(), right.hits.len())
+    assert_eq(left.res_selected, right.res_selected)
+    assert_eq(left.res_scroll, right.res_scroll)
+    assert_eq(left.ref_category, right.ref_category)
+    assert_eq(left.ref_entry, right.ref_entry)
+    assert_eq(left.ref_query, right.ref_query)
+    assert_eq(left.ref_scroll, right.ref_scroll)
+    assert_eq(jet_cli_help_state_render(left), jet_cli_help_state_render(right))
+}
+fn help_state_test_modes() -> [JetCLIHelpMode] Never! {
+    [JetCLIHelpMode]{JetCLIHelpMode.Categorized, JetCLIHelpMode.Results, JetCLIHelpMode.Detail, JetCLIHelpMode.Reference}
+}
+#Test("every mode swallows inert decoded keys and idle without changing state") {
+    keys :: [JetCLITermKey]{JetCLITermKey.Delete, JetCLITermKey.Home, JetCLITermKey.End, JetCLITermKey.F3,
+        JetCLITermKey.CtrlB, JetCLITermKey.CtrlP, JetCLITermKey.CtrlF, JetCLITermKey.CtrlR, JetCLITermKey.Unknown, JetCLITermKey.Idle}
+    loop mode in help_state_test_modes() {
+        loop key in keys {
+            state := help_state_test_seed(mode)
+            before :: ~state
+            assert_eq(jet_cli_help_state_apply_key(&state, key), JetCLIHelpAction.Continue)
+            help_state_test_same(state, before)
+        }
+    }
+}
+#Test("every mode quits on eof and ctrl c without changing selection") {
+    keys :: [JetCLITermKey]{JetCLITermKey.EOF, JetCLITermKey.CtrlC}
+    loop mode in help_state_test_modes() {
+        loop key in keys {
+            state := help_state_test_seed(mode)
+            before :: ~state
+            assert_eq(jet_cli_help_state_apply_key(&state, key), JetCLIHelpAction.Quit)
+            help_state_test_same(state, before)
+        }
+    }
+}
+#Test("escape action and reset are mode specific") {
+    loop mode in help_state_test_modes() {
+        state := help_state_test_seed(mode)
+        expected := ~state
+        action := JetCLIHelpAction.Quit
+        if mode == JetCLIHelpMode.Detail {
+            expected.mode = JetCLIHelpMode.Results
+            expected.res_scroll = 0
+            action = JetCLIHelpAction.Continue
+        }
+        if mode == JetCLIHelpMode.Reference {
+            expected.mode = JetCLIHelpMode.Results
+            expected.ref_scroll = 0
+            action = JetCLIHelpAction.LeaveReference
+        }
+        assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Escape), action)
+        help_state_test_same(state, expected)
+    }
+    state := help_state_test_seed(JetCLIHelpMode.Categorized)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Tab)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Down)
+    assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Escape), JetCLIHelpAction.Continue)
+    assert_eq(state.mode, JetCLIHelpMode.Categorized)
+    assert_eq(state.res_scroll, 0)
+}
+// Mirrors f1_uses_alt_screen_and_escape_restores_palette at the Action seam.
+#Test("f1 enters once resets reference and restores the original query mode") {
+    loop mode in help_state_test_modes() {
+        state := help_state_test_seed(mode)
+        expected := ~state
+        action := JetCLIHelpAction.Continue
+        if mode != JetCLIHelpMode.Reference {
+            action = JetCLIHelpAction.EnterReference
+            expected.mode = JetCLIHelpMode.Reference
+            expected.ref_category = 0
+            expected.ref_entry = jet_cli_help_state_selected_category(state)
+            expected.ref_query = ""
+            expected.ref_scroll = 0
+        }
+        assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.F1), action)
+        help_state_test_same(state, expected)
+    }
+    state := jet_cli_help_state_new(80, 10, false)
+    state.cat_selected = 2
+    entries :: jet_cli_help_state_entries(state.index, 2)
+    assert(entries.len() > 0)
+    assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.F1), JetCLIHelpAction.EnterReference)
+    // Rust starts the reference category at zero even when carrying a command
+    // from another category; do not silently normalize this state.
+    assert_eq(state.ref_category, 0)
+    assert_eq(state.ref_entry, Val(entries[0]))
+    assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Escape), JetCLIHelpAction.LeaveReference)
+    assert_eq(state.mode, JetCLIHelpMode.Categorized)
+}
+#Test("tab toggles only eligible detail and does not reset scroll on collapse") {
+    loop mode in help_state_test_modes() {
+        state := help_state_test_seed(mode)
+        expected := ~state
+        if mode == JetCLIHelpMode.Categorized || mode == JetCLIHelpMode.Results {
+            expected.mode = JetCLIHelpMode.Detail
+            expected.res_scroll = 0
+        }
+        if mode == JetCLIHelpMode.Detail -> expected.mode = JetCLIHelpMode.Results
+        assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Tab), JetCLIHelpAction.Continue)
+        help_state_test_same(state, expected)
+    }
+    state := jet_cli_help_state_new(80, 10, false)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Tab)
+    assert_eq(state.mode, JetCLIHelpMode.Categorized)
+    help_state_test_type(&state, "zzzzzzzzzzzz")
+    assert_eq(state.hits.len(), 0)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Tab)
+    assert_eq(state.mode, JetCLIHelpMode.Results)
+}
+#Test("char and backspace transitions preserve reference and scalar boundaries") {
+    loop mode in help_state_test_modes() {
+        state := help_state_test_seed(mode)
+        assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Char('n')), JetCLIHelpAction.Continue)
+        if mode == JetCLIHelpMode.Reference {
+            assert_eq(state.mode, mode)
+            assert_eq(state.query, "run")
+            assert_eq(state.ref_query, "runn")
+            assert_eq(state.ref_scroll, 0)
+            assert_eq(state.res_scroll, 3)
+        } else {
+            assert_eq(state.mode, JetCLIHelpMode.Results)
+            assert_eq(state.query, if mode == JetCLIHelpMode.Categorized -> "n" else -> "runn")
+            assert_eq(state.res_selected, 0)
+            assert_eq(state.res_scroll, 0)
+        }
+        assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Backspace), JetCLIHelpAction.Continue)
+        if mode == JetCLIHelpMode.Reference -> assert_eq(state.ref_query, "run")
+        else -> assert_eq(state.mode, if mode == JetCLIHelpMode.Categorized -> JetCLIHelpMode.Categorized else -> JetCLIHelpMode.Results)
+    }
+    state := jet_cli_help_state_new(80, 10, false)
+    assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Char('q')), JetCLIHelpAction.Quit)
+    assert_eq(state.query, "")
+    help_state_test_type(&state, "é日")
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Backspace)
+    assert_eq(state.query, "é")
+    state.res_scroll = 7
+    state.res_selected = 9
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Backspace)
+    assert_eq(state.query, "")
+    assert_eq(state.hits.len(), 0)
+    assert_eq(state.mode, JetCLIHelpMode.Categorized)
+    // Empty-query backspace preserves stale result position/scroll in Rust.
+    assert_eq(state.res_scroll, 7)
+    assert_eq(state.res_selected, 9)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.F1)
+    assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Char('q')), JetCLIHelpAction.Continue)
+    assert_eq(state.ref_query, "q")
+    selected :: state.ref_entry
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Backspace)
+    assert_eq(state.ref_entry, selected)
+}
+#Test("left right change only category entry focus in each mode") {
+    loop mode in help_state_test_modes() {
+        state := help_state_test_seed(mode)
+        expected := ~state
+        if mode == JetCLIHelpMode.Categorized -> expected.cat_entry = None
+        if mode == JetCLIHelpMode.Reference -> expected.ref_entry = None
+        assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Left), JetCLIHelpAction.Continue)
+        help_state_test_same(state, expected)
+        if mode == JetCLIHelpMode.Categorized -> expected.cat_entry = Val(0)
+        if mode == JetCLIHelpMode.Reference -> expected.ref_entry = Val(jet_cli_help_state_entries(state.index, 0)[0])
+        assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Right), JetCLIHelpAction.Continue)
+        help_state_test_same(state, expected)
+    }
+}
+#Test("up down selection wraps but detail scroll clamps") {
+    loop mode in help_state_test_modes() {
+        state := help_state_test_seed(mode)
+        expected := ~state
+        entries :: jet_cli_help_state_entries(state.index, 0)
+        if mode == JetCLIHelpMode.Categorized -> expected.cat_entry = Val(entries.len() - 1)
+        if mode == JetCLIHelpMode.Results -> expected.res_selected = state.hits.len() - 1
+        if mode == JetCLIHelpMode.Reference -> expected.ref_entry = Val(entries[entries.len() - 1])
+        if mode == JetCLIHelpMode.Detail -> expected.res_scroll = 2
+        assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Up), JetCLIHelpAction.Continue)
+        help_state_test_same(state, expected)
+        if mode == JetCLIHelpMode.Categorized -> expected.cat_entry = Val(0)
+        if mode == JetCLIHelpMode.Results -> expected.res_selected = 0
+        if mode == JetCLIHelpMode.Reference -> expected.ref_entry = Val(entries[0])
+        if mode == JetCLIHelpMode.Detail -> expected.res_scroll = 3
+        assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Down), JetCLIHelpAction.Continue)
+        help_state_test_same(state, expected)
+    }
+    state := jet_cli_help_state_new(80, 10, false)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Up)
+    assert_eq(state.cat_selected, JET_CLI_HELP_CATEGORIES.len() - 1)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Down)
+    assert_eq(state.cat_selected, 0)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.F1)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Left)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Up)
+    assert_eq(state.ref_category, JET_CLI_HELP_CATEGORIES.len() - 1)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Right)
+    assert_eq(state.ref_entry, None)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Down)
+    assert_eq(state.ref_category, 0)
+    assert_eq(jet_cli_help_state_step(9, 0, -1), 0)
+}
+// Mirrors enter_expands_then_guides_without_hooks_instead_of_pasting and
+// alt_enter_guides_example_without_hooks_instead_of_pasting: only the prefill
+// Action is in this scope; stdout/shell insertion belongs to the terminal host.
+#Test("enter and alt enter submit command or example in each mode never execute") {
+    keys :: [JetCLITermKey]{JetCLITermKey.Enter, JetCLITermKey.EscapeEnter}
+    loop mode in help_state_test_modes() {
+        loop key in keys {
+            state := help_state_test_seed(mode)
+            before :: ~state
+            assert_eq(jet_cli_help_state_apply_key(&state, key), JetCLIHelpAction.Submit(Val("jet run")))
+            help_state_test_same(state, before)
+        }
+    }
+    state := jet_cli_help_state_new(80, 10, false)
+    assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.EscapeEnter), JetCLIHelpAction.Continue)
+    assert_eq(state.cat_entry, None)
+    assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Enter), JetCLIHelpAction.Continue)
+    assert_eq(state.cat_entry, Val(0))
+    assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Enter), JetCLIHelpAction.Submit(Val("jet run")))
+    loop at in 0..<state.index.len() {
+        if state.index[at].symbol.name == "check" -> jet_cli_help_state_select_command(&state, at)
+    }
+    assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.EscapeEnter), JetCLIHelpAction.Submit(Val("jet check Examples/features/basics/hello.jet")))
+    state.cat_selected = JET_CLI_HELP_CATEGORIES.len() - 1
+    assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Enter), JetCLIHelpAction.Continue)
+}
+// Mirrors normal_search_and_detail_open_verbatim_error_code_page,
+// f1_search_opens_verbatim_error_code_page, short_detail_view_scrolls_without_moving_terminal.
+#Test("exact code results and reference render canonical essay and scroll not select") {
+    state := jet_cli_help_state_new(120, 24, false)
+    help_state_test_type(&state, "E0102")
+    code :: jet_cli_explain_lookup_code("E0102") ?? panic("registered code")
+    canonical :: jet_cli_help_render_code_page(code, false)
+    assert_eq(jet_cli_help_state_focus_name(state), Val("E0102"))
+    assert(jet_cli_help_state_cursor(state) == None)
+    assert_eq(jet_cli_help_state_render(state), jet_cli_help_render_text_viewport(canonical, 120, 24, 0))
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Up)
+    assert_eq(state.res_scroll, 0)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Down)
+    assert_eq(state.res_scroll, 1)
+    assert_eq(state.res_selected, 0)
+    assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Enter), JetCLIHelpAction.Submit(None))
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Tab)
+    assert_eq(state.mode, JetCLIHelpMode.Detail)
+    assert_eq(state.res_scroll, 0)
+    assert_eq(jet_cli_help_state_render(state), jet_cli_help_render_text_viewport(canonical, 120, 24, 0))
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.F1)
+    help_state_test_type(&state, "E0102")
+    focus :: state.ref_entry
+    assert_eq(jet_cli_help_state_render(state), jet_cli_help_render_text_viewport(canonical, 120, 24, 0))
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Up)
+    assert_eq(state.ref_scroll, 0)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Down)
+    assert_eq(state.ref_scroll, 1)
+    assert_eq(state.ref_entry, focus)
+}
+#Test("focus readiness cursor wait and clamped resize are semantic") {
+    state := jet_cli_help_state_new(0, 0, false)
+    assert_eq(jet_cli_help_state_width(state), 1)
+    assert_eq(jet_cli_help_state_height(state), 1)
+    assert_eq(jet_cli_help_state_focus_name(state), Val("Build & Run"))
+    assert(jet_cli_help_state_ready(state, "categorized"))
+    assert(!jet_cli_help_state_ready(state, ""))
+    assert(!jet_cli_help_state_ready(state, "Build"))
+    jet_cli_help_state_resize(&state, 80, 10)
+    help_state_test_cursor(state, 0, 3)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Enter)
+    assert_eq(jet_cli_help_state_focus_name(state), Val("run"))
+    assert(jet_cli_help_state_ready(state, "run"))
+    assert(jet_cli_help_state_ready(state, "jet run"))
+    assert(!jet_cli_help_state_ready(state, "jet jet run"))
+    help_state_test_cursor(state, 0, 4)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Tab)
+    assert(jet_cli_help_state_ready(state, "detail"))
+    assert_eq(jet_cli_help_state_focus_name(state), None)
+    assert(jet_cli_help_state_cursor(state) == None)
+    before :: ~state
+    jet_cli_help_state_wait(&state)
+    help_state_test_same(state, before)
+    jet_cli_help_state_resize(&state, 0, 0)
+    assert_eq(state.width, 1)
+    assert_eq(state.height, 1)
+    assert_eq(state.mode, before.mode)
+    assert_eq(state.cat_entry, before.cat_entry)
+    help_state_test_type(&state, "zzzzzzzzzzzz")
+    assert_eq(jet_cli_help_state_focus_name(state), None)
+    assert(jet_cli_help_state_cursor(state) == None)
+    assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Enter), JetCLIHelpAction.Submit(None))
+}
+#Test("categorized click geometry ignores title borders and out of viewport") {
+    state := jet_cli_help_state_new(80, 24, false)
+    before :: ~state
+    assert_eq(jet_cli_help_state_click(&state, 80, 3), JetCLIHelpAction.Continue)
+    _ := jet_cli_help_state_click(&state, 0, 24)
+    _ := jet_cli_help_state_click(&state, 0, 2)
+    help_state_test_same(state, before)
+    _ := jet_cli_help_state_click(&state, 79, 4)
+    assert_eq(state.cat_selected, 1)
+    assert_eq(state.cat_entry, None)
+    _ := jet_cli_help_state_click(&state, 0, 3)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Right)
+    _ := jet_cli_help_state_click(&state, 5, 5)
+    assert_eq(state.cat_entry, Val(1))
+    help_state_test_cursor(state, 0, 5)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Tab)
+    before_detail :: ~state
+    _ := jet_cli_help_state_click(&state, 0, 3)
+    help_state_test_same(state, before_detail)
+    state.mode = JetCLIHelpMode.Categorized
+    state.cat_selected = JET_CLI_HELP_CATEGORIES.len() - 1
+    state.cat_entry = Val(0)
+    rows :: jet_cli_help_state_categorized_elements(state)
+    assert_eq(rows[rows.len() - 1], None)
+}
+// Mirrors fuzzy_results_scroll_selected_row_within_terminal_height and
+// narrow_fuzzy_results_fit_actual_terminal: exact viewport/cursor mapping.
+#Test("results clicks track scrolled indices across tiny viewport and resize") {
+    state := jet_cli_help_state_new(32, 10, false)
+    help_state_test_type(&state, "E")
+    assert(state.hits.len() > 20)
+    state.res_selected = 20
+    viewport :: jet_cli_help_state_result_viewport(state) ?? panic("result viewport")
+    // The first E hit has an example: 4 fixed rows + footer + lower rule + example.
+    assert_eq(viewport.visible, 3)
+    assert_eq(viewport.start, 18)
+    help_state_test_cursor(state, 0, 5)
+    assert_eq(jet_cli_help_state_click(&state, 31, 3), JetCLIHelpAction.Continue)
+    assert_eq(state.res_selected, 18)
+    jet_cli_help_state_resize(&state, 32, 7)
+    viewport_short :: jet_cli_help_state_result_viewport(state) ?? panic("short viewport")
+    assert_eq(viewport_short.visible, 1)
+    assert_eq(viewport_short.start, 18)
+    help_state_test_cursor(state, 0, 3)
+    assert_eq(jet_cli_help_lines(jet_cli_help_state_render(state)).len(), 7)
+    _ := jet_cli_help_state_click(&state, 0, 4)
+    assert_eq(state.res_selected, 18)
+    state.res_selected = 0
+    help_state_test_cursor(state, 0, 3)
+}
+// Mirrors short_f1_viewport_keeps_later_selection_visible_without_scrolling_terminal.
+#Test("reference clicks use left pane only and scrolling follows selected command") {
+    state := jet_cli_help_state_new(60, 8, true)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.F1)
+    help_state_test_cursor(state, 0, 2)
+    before :: ~state
+    _ := jet_cli_help_state_click(&state, 20, 3)
+    help_state_test_same(state, before)
+    _ := jet_cli_help_state_click(&state, 19, 3)
+    entries :: jet_cli_help_state_entries(state.index, 0)
+    assert_eq(state.ref_entry, Val(entries[1]))
+    help_state_test_cursor(state, 0, 3)
+    _ := jet_cli_help_state_click(&state, 0, 1)
+    assert_eq(state.ref_entry, None)
+    assert_eq(jet_cli_help_state_focus_name(state), Val("Build & Run"))
+    assert(jet_cli_help_state_ready(state, "reference"))
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Right)
+    loop _ in 0..<7 -> _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Down)
+    assert_eq(state.ref_entry, Val(entries[7]))
+    help_state_test_cursor(state, 0, 6)
+    assert_eq(jet_cli_help_lines(jet_cli_help_state_render(state)).len(), 8)
+    // Clicking the scrolled top row selects an index, not text or ANSI bytes.
+    regions :: jet_cli_help_state_reference_hit_map(state)
+    selected :: regions[0].element
+    _ := jet_cli_help_state_click(&state, 0, 1)
+    if selected == .ReferenceCommand(at) -> assert_eq(state.ref_entry, Val(at))
+    else -> panic("expected command at scrolled top")
+}
+
+#Test("empty categories results and reference return the precise empty actions") {
+    state := jet_cli_help_state_new(80, 10, false)
+    state.cat_selected = JET_CLI_HELP_CATEGORIES.len() - 1
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Right)
+    assert_eq(state.cat_entry, Val(0))
+    assert_eq(jet_cli_help_state_focus_name(state), Val("Error Codes"))
+    assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Enter), JetCLIHelpAction.Continue)
+    assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.EscapeEnter), JetCLIHelpAction.Continue)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Down)
+    assert_eq(state.cat_entry, Val(0))
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.F1)
+    assert_eq(state.ref_entry, None)
+    assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Enter), JetCLIHelpAction.Submit(None))
+    assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.EscapeEnter), JetCLIHelpAction.Submit(None))
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Escape)
+    help_state_test_type(&state, "zzzzzzzzzzzz")
+    before :: ~state
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Up)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Down)
+    help_state_test_same(state, before)
+}
+#Test("reference command search selects canonical identity but clearing preserves focus") {
+    state := jet_cli_help_state_new(80, 10, false)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.F1)
+    help_state_test_type(&state, "add")
+    assert_eq(jet_cli_help_state_focus_name(state), Val("add"))
+    // Exact index identity, not the presentation alias typed by the user.
+    selected :: state.ref_entry ?? panic("reference search must select a command")
+    assert_eq(state.ref_category, jet_cli_help_state_category_index(state, selected) ?? panic("category"))
+    loop _ in 0..<3 -> _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Backspace)
+    assert_eq(state.ref_query, "")
+    // Intermediate searches can select other commands; empty search preserves
+    // whichever canonical focus the last non-empty query chose.
+    focus :: state.ref_entry
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Backspace)
+    assert_eq(state.ref_entry, focus)
+}
+#Test("code result clicks are inert and reference essay retains semantic hit map") {
+    state := jet_cli_help_state_new(80, 10, false)
+    help_state_test_type(&state, "E0102")
+    before :: ~state
+    _ := jet_cli_help_state_click(&state, 0, 3)
+    help_state_test_same(state, before)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.F1)
+    help_state_test_type(&state, "E0102")
+    // Reference code rendering does not erase the reference hit-map in Rust.
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Left)
+    _ := jet_cli_help_state_click(&state, 0, 1)
+    assert_eq(state.ref_entry, None)
+    assert_eq(state.ref_category, 0)
+    assert_eq(state.ref_query, "E0102")
+}
+
+#Test("scroll state saturates at unsigned host bound and zero") {
+    assert_eq(jet_cli_help_state_scroll(0, -1), 0)
+    assert_eq(jet_cli_help_state_scroll(18446744073709551615, 1), 18446744073709551615)
+    assert_eq(jet_cli_help_state_scroll(18446744073709551614, 1), 18446744073709551615)
+    state := help_state_test_seed(JetCLIHelpMode.Detail)
+    state.res_scroll = 18446744073709551615
+    assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Down), JetCLIHelpAction.Continue)
+    assert_eq(state.res_scroll, 18446744073709551615)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Up)
+    assert_eq(state.res_scroll, 18446744073709551614)
+}
+
+// Mirrors explicit_color_law_reaches_interactive_renderer: the reducer routes
+// resolved color facts, it never probes the environment or terminal.
+#Test("all command frame modes delegate exact bytes and color to shared renderers") {
+    loop mode in help_state_test_modes() {
+        state := help_state_test_seed(mode)
+        state.color = true
+        expected := ""
+        if mode == {
+            .Categorized -> expected = jet_cli_help_render_categorized(state.index, 0, true, Val("run"), 80, true, Val(10))
+            .Results -> expected = jet_cli_help_render_result_list(state.hits, "run", 80, true, Val(0), Val(10))
+            .Detail -> {
+                entry :: jet_cli_help_state_current_entry(state) ?? panic("detail entry")
+                expected = jet_cli_help_render_lines_viewport(jet_cli_help_render_detail(state.index[entry], 80, true), 10, 3)
+            }
+            .Reference -> {
+                entry :: state.ref_entry ?? panic("reference entry")
+                expected = jet_cli_help_render_reference(state.index, 0, Val(state.index[entry]), 80, 10, true, "run")
+            }
+        }
+        assert_eq(jet_cli_help_state_render(state), expected)
+        state.color = false
+        assert(!jet_cli_help_state_render(state).contains(JET_CLI_HELP_ESCAPE))
+    }
+}

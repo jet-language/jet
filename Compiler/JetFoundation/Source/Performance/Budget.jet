@@ -1,0 +1,389 @@
+// Exact, deterministic performance-budget math (PerformanceBudget.rs:274-1204).
+// D-INTBIG1: BigInt arithmetic/ordering/display is Jet's arbitrary-precision Int.
+// Core Fraction displays terminating decimals; this wire rational deliberately
+// retains Rust's reduced numerator/denominator and integer-or-n/d display.
+#Error
+pub struct PerfBudgetError { pub message: String }
+fn perf_error(message: String) -> PerfBudgetError Never! { PerfBudgetError{message: message} }
+
+// Rust BigInt::parse (PerformanceBudget.rs).
+pub fn perf_integer_parse(text: String) -> Int PerfBudgetError! {
+    if !canonical_json_valid_integer(text) -> return Err(perf_error("non-canonical integer `{text}`"))
+    Ok(Int.parse(text) ?? return Err(perf_error("invalid integer")))
+}
+// Rust BigInt::parse_source (PerformanceBudget.rs).
+pub fn perf_integer_parse_source(text: String) -> Int PerfBudgetError! {
+    bytes :: text.bytes()
+    negative :: bytes.len() > 0 && Int.from_u8(bytes[0]) == 45
+    start := if { negative -> 1 else -> 0 }
+    radix := 10
+    if bytes.len() >= start + 2 && Int.from_u8(bytes[start]) == 48 {
+        prefix :: Int.from_u8(bytes[start + 1])
+        if prefix == 120 {
+            radix = 16
+            start += 2
+        }
+        if prefix == 111 {
+            radix = 8
+            start += 2
+        }
+        if prefix == 98 {
+            radix = 2
+            start += 2
+        }
+    }
+    value := 0
+    saw_digit := false
+    separator :: Int.from_u8(DIGIT_SEPARATOR.bytes()[0])
+    loop index in start..<bytes.len() {
+        byte :: Int.from_u8(bytes[index])
+        if byte == separator -> next
+        digit :: if {
+            byte >= 48 && byte <= 57 -> byte - 48
+            byte >= 97 && byte <= 102 -> byte - 97 + 10
+            byte >= 65 && byte <= 70 -> byte - 65 + 10
+            else -> -1
+        }
+        if digit < 0 || digit >= radix -> return Err(perf_error("invalid base-{radix} integer `{text}`"))
+        value = value * radix + digit
+        saw_digit = true
+    }
+    if !saw_digit -> return Err(perf_error("invalid integer `{text}`"))
+    Ok(if { negative -> -value else -> value })
+}
+// Rust BigInt::div_rem_abs (PerformanceBudget.rs).
+pub fn perf_integer_div_rem_abs(left: Int, right: Int) -> (quotient: Int, remainder: Int) PerfBudgetError! {
+    if right == 0 -> return Err(perf_error("integer division by zero"))
+    a :: if { left < 0 -> -left else -> left }
+    b :: if { right < 0 -> -right else -> right }
+    Ok((quotient: a /% b, remainder: a % b))
+}
+// Rust BigInt::exact_div (PerformanceBudget.rs).
+pub fn perf_integer_exact_div(left: Int, right: Int) -> Int PerfBudgetError! {
+    division :: perf_integer_div_rem_abs(left, right)
+    if division.remainder != 0 -> return Err(perf_error("integer division is not exact"))
+    Ok(if { (left < 0) != (right < 0) -> -division.quotient else -> division.quotient })
+}
+// Rust BigInt::gcd (PerformanceBudget.rs).
+pub fn perf_integer_gcd(left: Int, right: Int) -> Int Never! {
+    a := if { left < 0 -> -left else -> left }
+    b := if { right < 0 -> -right else -> right }
+    loop b != 0 {
+        remainder :: a % b
+        a = b
+        b = remainder
+    }
+    a
+}
+
+pub struct PerfRational { pub num: Int, pub den: Int }
+// Rust Rational::new/from_bigints (PerformanceBudget.rs).
+pub fn perf_rational_new(num: Int, den: Int) -> PerfRational PerfBudgetError! {
+    if den == 0 -> return Err(perf_error("rational denominator is zero"))
+    if num == 0 -> return Ok(perf_rational_zero())
+    divisor :: perf_integer_gcd(num, den)
+    sign :: if { den < 0 -> -1 else -> 1 }
+    Ok(PerfRational{num: num /% divisor * sign, den: den /% divisor * sign})
+}
+// Rust Rational::parse (PerformanceBudget.rs).
+pub fn perf_rational_parse(num: String, den: String) -> PerfRational PerfBudgetError! {
+    numerator :: perf_integer_parse(num)
+    denominator :: perf_integer_parse(den)
+    perf_rational_new(numerator, denominator)
+}
+// Rust Rational::parse_source (PerformanceBudget.rs).
+pub fn perf_rational_parse_source(num: String, den: String) -> PerfRational PerfBudgetError! {
+    numerator :: perf_integer_parse_source(num)
+    denominator :: perf_integer_parse_source(den)
+    perf_rational_new(numerator, denominator)
+}
+// Rust Rational::zero/integer (PerformanceBudget.rs).
+pub fn perf_rational_zero() -> PerfRational Never! { PerfRational{num: 0, den: 1} }
+pub fn perf_rational_integer(value: Int) -> PerfRational Never! { PerfRational{num: value, den: 1} }
+// Rust Rational::add/sub/mul (PerformanceBudget.rs).
+pub fn perf_rational_add(left: PerfRational, right: PerfRational) -> PerfRational PerfBudgetError! {
+    perf_rational_new(left.num * right.den + right.num * left.den, left.den * right.den)
+}
+pub fn perf_rational_sub(left: PerfRational, right: PerfRational) -> PerfRational PerfBudgetError! {
+    perf_rational_add(left, perf_rational_neg(right))
+}
+pub fn perf_rational_mul(left: PerfRational, right: PerfRational) -> PerfRational PerfBudgetError! {
+    perf_rational_new(left.num * right.num, left.den * right.den)
+}
+// Rust Rational::div (PerformanceBudget.rs).
+pub fn perf_rational_div(left: PerfRational, right: PerfRational) -> PerfRational PerfBudgetError! {
+    if right.num == 0 -> return Err(perf_error("rational division by zero"))
+    perf_rational_new(left.num * right.den, left.den * right.num)
+}
+// Rust Rational::neg/abs/max_zero (PerformanceBudget.rs).
+pub fn perf_rational_neg(value: PerfRational) -> PerfRational Never! { PerfRational{num: -value.num, den: value.den} }
+pub fn perf_rational_abs(value: PerfRational) -> PerfRational Never! { PerfRational{num: if { value.num < 0 -> -value.num else -> value.num }, den: value.den} }
+pub fn perf_rational_max_zero(value: PerfRational) -> PerfRational Never! {
+    if { value.num < 0 -> perf_rational_zero() else -> ~value }
+}
+// Rust Rational::cmp/Display (PerformanceBudget.rs).
+pub fn perf_rational_cmp(left: PerfRational, right: PerfRational) -> Ordering Never! {
+    left.num * right.den <=> right.num * left.den
+}
+pub fn perf_rational_text(value: PerfRational) -> String Never! {
+    if { value.den == 1 -> "{value.num}" else -> "{value.num}/{value.den}" }
+}
+// Rust Rational::to_json (PerformanceBudget.rs).
+pub fn perf_rational_to_json(value: PerfRational) -> CanonicalJSON Never! {
+    CanonicalJSON.Object([CanonicalJSONField]{
+        CanonicalJSONField{key: "den", value: CanonicalJSON.Integer("{value.den}")},
+        CanonicalJSONField{key: "num", value: CanonicalJSON.Integer("{value.num}")},
+    })
+}
+
+pub struct PerfStatistics {
+    pub p50: PerfRational, pub p90: PerfRational, pub p95: PerfRational,
+    pub p99: PerfRational, pub p999: PerfRational, pub mean: PerfRational, pub mad: PerfRational
+}
+// Rust nearest_rank (PerformanceBudget.rs). Rust usize overflow remains a wire boundary.
+pub fn perf_nearest_rank(sorted: [PerfRational], numerator: Int, denominator: Int) -> PerfRational PerfBudgetError! {
+    if sorted.len() == 0 -> return Err(perf_error("rank requires at least one value"))
+    product :: sorted.len() * numerator
+    if product > 18446744073709551615 -> return Err(perf_error("rank overflow"))
+    rank :: (product + denominator - 1) /% denominator
+    index :: if { rank < 1 -> 0 else -> rank - 1 }
+    Ok(~sorted[index])
+}
+// Rust statistics (PerformanceBudget.rs).
+pub fn perf_statistics(samples: [PerfRational]) -> PerfStatistics PerfBudgetError! {
+    if samples.len() == 0 -> return Err(perf_error("statistics require at least one sample"))
+    sorted := ~samples
+    &sorted.sort_by((left: PerfRational, right: PerfRational) -> perf_rational_cmp(left, right))
+    p50 :: perf_nearest_rank(sorted, 500, 1000)
+    sum := perf_rational_zero()
+    deviations := [PerfRational]{}
+    loop sample in sorted {
+        sum = perf_rational_add(sum, sample)
+        &deviations.push(perf_rational_abs(perf_rational_sub(sample, p50)))
+    }
+    &deviations.sort_by((left: PerfRational, right: PerfRational) -> perf_rational_cmp(left, right))
+    Ok(PerfStatistics{
+        p50: p50, p90: perf_nearest_rank(sorted, 900, 1000),
+        p95: perf_nearest_rank(sorted, 950, 1000), p99: perf_nearest_rank(sorted, 990, 1000),
+        p999: perf_nearest_rank(sorted, 999, 1000),
+        mean: perf_rational_div(sum, perf_rational_integer(sorted.len())),
+        mad: perf_nearest_rank(deviations, 500, 1000),
+    })
+}
+pub enum PerfPercentile {
+    P50
+    P90
+    P95
+    P99
+    P999
+}
+// Rust estimator (PerformanceBudget.rs).
+pub fn perf_estimator(samples: [PerfRational], percentile: PerfPercentile?) -> PerfRational PerfBudgetError! {
+    if samples.len() == 1 && percentile == None -> return Ok(~samples[0])
+    stats :: perf_statistics(samples)
+    selected :: percentile ?? PerfPercentile.P50
+    Ok(if selected == {
+        .P50 -> stats.p50
+        .P90 -> stats.p90
+        .P95 -> stats.p95
+        .P99 -> stats.p99
+        .P999 -> stats.p999
+    })
+}
+pub enum PerfDirection {
+    LowerIsBetter
+    HigherIsBetter
+}
+pub enum PerfLimitDirection {
+    AtMost
+    AtLeast
+}
+pub enum PerfRelativeGoal {
+    RegressionAtMost
+    ImprovementAtLeast
+}
+pub enum PerfEvidence {
+    Pass
+    Regression
+    Inconclusive
+    Unavailable
+}
+pub enum PerfEnforcement {
+    Warn
+    Fail
+}
+pub enum PerfPolicyOutcome {
+    Pass
+    Warn
+    Fail
+}
+pub enum PerfComparison {
+    Absolute(limit: PerfRational, direction: PerfLimitDirection)
+    AbsoluteFrom(limit: PerfRational, direction: PerfLimitDirection)
+    RelativeTo(limit_basis_points: Int, goal: PerfRelativeGoal)
+}
+pub struct PerfMeasurementPolicy { pub bootstrap_resamples: Int, pub lower_rank: Int, pub upper_rank: Int }
+pub struct PerfEvaluation {
+    pub point: PerfRational, pub lower95: PerfRational?, pub upper95: PerfRational?,
+    pub evidence: PerfEvidence, pub outcome: PerfPolicyOutcome, pub bootstrap: [PerfRational]
+}
+// Rust finish (PerformanceBudget.rs).
+pub fn perf_finish(point: PerfRational, lower95: PerfRational?, upper95: PerfRational?, evidence: PerfEvidence, enforcement: PerfEnforcement, bootstrap: [PerfRational]) -> PerfEvaluation Never! {
+    outcome :: if {
+        evidence == PerfEvidence.Pass -> PerfPolicyOutcome.Pass
+        enforcement == PerfEnforcement.Warn -> PerfPolicyOutcome.Warn
+        else -> PerfPolicyOutcome.Fail
+    }
+    PerfEvaluation{point: point, lower95: lower95, upper95: upper95, evidence: evidence, outcome: outcome, bootstrap: bootstrap}
+}
+// Rust relative_stat (PerformanceBudget.rs).
+pub fn perf_relative_stat(candidate: PerfRational, baseline: PerfRational, limit_basis_points: Int, goal: PerfRelativeGoal, direction: PerfDirection) -> PerfRational PerfBudgetError! {
+    candidate_minus_baseline :: (goal == PerfRelativeGoal.RegressionAtMost && direction == PerfDirection.LowerIsBetter) || (goal == PerfRelativeGoal.ImprovementAtLeast && direction == PerfDirection.HigherIsBetter)
+    delta :: perf_rational_max_zero(if { candidate_minus_baseline -> perf_rational_sub(candidate, baseline) else -> perf_rational_sub(baseline, candidate) })
+    basis_points :: perf_rational_div(perf_rational_mul(delta, perf_rational_integer(10000)), baseline)
+    limit :: perf_rational_integer(limit_basis_points)
+    if { goal == PerfRelativeGoal.RegressionAtMost -> perf_rational_sub(basis_points, limit) else -> perf_rational_sub(limit, basis_points) }
+}
+
+// Rust BOOTSTRAP_DOMAIN/ShaStream (PerformanceBudget.rs). Int retains every u64 bit.
+PERF_BOOTSTRAP_DOMAIN :: "jet.performance-budget.bootstrap.v1"
+struct PerfSHAStream { prefix: [U8], block: Int, words: [Int] }
+// Rust ShaStream::new (PerformanceBudget.rs).
+fn perf_sha_stream_new(evidence_id: String, context_key: String, baseline_ids: [String], replicate: Int) -> PerfSHAStream Never! {
+    prefix := PERF_BOOTSTRAP_DOMAIN.bytes()
+    &prefix.push(U8{0})
+    loop byte in evidence_id.bytes() -> &prefix.push(byte)
+    loop byte in context_key.bytes() -> &prefix.push(byte)
+    loop id in baseline_ids {
+        loop byte in id.bytes() -> &prefix.push(byte)
+    }
+    perf_push_u64(&prefix, replicate)
+    PerfSHAStream{prefix: prefix, block: 0, words: [Int]{}}
+}
+fn perf_push_u64(bytes: &[U8], value: Int) Never! {
+    loop index in 0..<8 -> &bytes.push(U8{(value >> ((7 - index) * 8)) & 255})
+}
+// Rust ShaStream::word (PerformanceBudget.rs).
+fn perf_sha_stream_word(stream: &PerfSHAStream) -> Int Never! {
+    if stream.words.len() == 0 {
+        input := ~stream.prefix
+        perf_push_u64(&input, stream.block)
+        stream.block = (stream.block + 1) % 18446744073709551616
+        digest :: mir_sha256_bytes(input)
+        loop chunk in 0..<4 {
+            word := 0
+            loop offset in 0..<8 -> word = word * 256 + Int.from_u8(digest[(3 - chunk) * 8 + offset])
+            &stream.words.push(word)
+        }
+    }
+    &stream.words.pop() ?? panic("digest contains four words")
+}
+// Rust ShaStream::index (PerformanceBudget.rs).
+fn perf_sha_stream_index(stream: &PerfSHAStream, population: Int) -> Int PerfBudgetError! {
+    if population == 0 -> return Err(perf_error("cannot sample an empty population"))
+    threshold :: 18446744073709551616 /% population * population
+    loop true {
+        word :: perf_sha_stream_word(&stream)
+        if word < threshold -> return Ok(word % population)
+    }
+}
+// Rust resample (PerformanceBudget.rs).
+fn perf_resample(values: [PerfRational], count: Int, stream: &PerfSHAStream) -> [PerfRational] PerfBudgetError! {
+    out := [PerfRational]{}
+    loop _ in 0..<count {
+        index :: perf_sha_stream_index(&stream, values.len())
+        &out.push(~values[index])
+    }
+    Ok(out)
+}
+// Rust bootstrap_values (PerformanceBudget.rs).
+pub fn perf_bootstrap_values(evidence_id: String, context_key: String, baseline_report_ids: [String], candidate: [PerfRational], baseline: [PerfRational], percentile: PerfPercentile?, comparison: PerfComparison, direction: PerfDirection, policy: PerfMeasurementPolicy) -> [PerfRational] PerfBudgetError! {
+    if policy.bootstrap_resamples == 0 -> return Err(perf_error("bootstrap requires at least one replicate"))
+    values := [PerfRational]{}
+    loop replicate in 0..<policy.bootstrap_resamples {
+        stream := perf_sha_stream_new(evidence_id, context_key, baseline_report_ids, replicate)
+        candidate_resample :: perf_resample(candidate, candidate.len(), &stream)
+        candidate_estimator :: perf_estimator(candidate_resample, percentile)
+        value :: if comparison == {
+            .AbsoluteFrom(limit, limit_direction) -> {
+                if { limit_direction == PerfLimitDirection.AtMost -> perf_rational_sub(candidate_estimator, limit) else -> perf_rational_sub(limit, candidate_estimator) }
+            }
+            .RelativeTo(limit_basis_points, goal) -> {
+                baseline_resample :: perf_resample(baseline, baseline.len(), &stream)
+                baseline_estimator :: perf_estimator(baseline_resample, percentile)
+                if baseline_estimator.num == 0 -> return Err(perf_error("RelativeTo bootstrap baseline estimator is zero"))
+                perf_relative_stat(candidate_estimator, baseline_estimator, limit_basis_points, goal, direction)
+            }
+            .Absolute(_, _) -> {
+                return Err(perf_error("Absolute does not bootstrap"))
+            }
+        }
+        &values.push(value)
+    }
+    &values.sort_by((left: PerfRational, right: PerfRational) -> perf_rational_cmp(left, right))
+    Ok(values)
+}
+// Rust evaluate (PerformanceBudget.rs).
+pub fn perf_evaluate(evidence_id: String, context_key: String, baseline_report_ids: [String], candidate: [PerfRational], baseline: [PerfRational], percentile: PerfPercentile?, comparison: PerfComparison, direction: PerfDirection, enforcement: PerfEnforcement, policy: PerfMeasurementPolicy?) -> PerfEvaluation PerfBudgetError! {
+    if candidate.len() == 0 -> return Err(perf_error("candidate samples are empty"))
+    candidate_point :: perf_estimator(candidate, percentile)
+    point :: if comparison == {
+        .Absolute(limit, limit_direction) -> {
+            order :: perf_rational_cmp(candidate_point, limit)
+            pass :: if { limit_direction == PerfLimitDirection.AtMost -> order != Ordering.Greater else -> order != Ordering.Less }
+            evidence :: if { pass -> PerfEvidence.Pass else -> PerfEvidence.Regression }
+            return Ok(perf_finish(candidate_point, None, None, evidence, enforcement, [PerfRational]{}))
+        }
+        .AbsoluteFrom(limit, limit_direction) -> {
+            if policy == None -> return Err(perf_error("AbsoluteFrom requires a measurement policy"))
+            if { limit_direction == PerfLimitDirection.AtMost -> perf_rational_sub(candidate_point, limit) else -> perf_rational_sub(limit, candidate_point) }
+        }
+        .RelativeTo(limit_basis_points, goal) -> {
+            if baseline.len() == 0 -> return Err(perf_error("RelativeTo baseline samples are empty"))
+            baseline_point :: perf_estimator(baseline, percentile)
+            if baseline_point.num == 0 -> return Ok(perf_finish(perf_rational_zero(), None, None, PerfEvidence.Unavailable, enforcement, [PerfRational]{}))
+            result :: perf_relative_stat(candidate_point, baseline_point, limit_basis_points, goal, direction)
+            if policy == None -> return Err(perf_error("RelativeTo requires a measurement policy"))
+            result
+        }
+    }
+    measurement :: policy ?? panic("statistical branches require policy")
+    bootstrap :: perf_bootstrap_values(evidence_id, context_key, baseline_report_ids, candidate, baseline, percentile, comparison, direction, measurement)
+    if measurement.lower_rank == 0 || measurement.upper_rank == 0 || measurement.lower_rank > bootstrap.len() || measurement.upper_rank > bootstrap.len() -> return Err(perf_error("bootstrap ranks are outside the replicate set"))
+    lower :: bootstrap[measurement.lower_rank - 1]
+    upper :: bootstrap[measurement.upper_rank - 1]
+    evidence :: if {
+        upper.num <= 0 -> PerfEvidence.Pass
+        lower.num > 0 -> PerfEvidence.Regression
+        else -> PerfEvidence.Inconclusive
+    }
+    Ok(perf_finish(point, Val(lower), Val(upper), evidence, enforcement, bootstrap))
+}
+
+pub enum PerfTrendLabel {
+    Improving
+    Stable
+    Regressing
+    Insufficient
+}
+pub struct PerfTrend { pub report_ids: [String], pub estimators: [PerfRational], pub score: PerfRational?, pub label: PerfTrendLabel }
+// Rust trend (PerformanceBudget.rs).
+pub fn perf_trend(report_ids: [String], estimators: [PerfRational], direction: PerfDirection) -> PerfTrend PerfBudgetError! {
+    if report_ids.len() != estimators.len() -> return Err(perf_error("trend ids and estimators differ in length"))
+    if estimators.len() < 3 -> return Ok(PerfTrend{report_ids: report_ids, estimators: estimators, score: None, label: PerfTrendLabel.Insufficient})
+    slopes := [PerfRational]{}
+    loop left in 0..<estimators.len() {
+        loop right in left + 1..<estimators.len() {
+            numerator :: if { direction == PerfDirection.LowerIsBetter -> perf_rational_sub(estimators[left], estimators[right]) else -> perf_rational_sub(estimators[right], estimators[left]) }
+            &slopes.push(perf_rational_div(numerator, perf_rational_integer(right - left)))
+        }
+    }
+    &slopes.sort_by((left: PerfRational, right: PerfRational) -> perf_rational_cmp(left, right))
+    score :: perf_nearest_rank(slopes, 500, 1000)
+    label :: if {
+        score.num > 0 -> PerfTrendLabel.Improving
+        score.num < 0 -> PerfTrendLabel.Regressing
+        else -> PerfTrendLabel.Stable
+    }
+    Ok(PerfTrend{report_ids: report_ids, estimators: estimators, score: Val(score), label: label})
+}

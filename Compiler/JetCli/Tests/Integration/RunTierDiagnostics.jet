@@ -1,0 +1,531 @@
+// PORT-PENDING 1146 tests-run-tier-diagnostics-module-group: tests/run_tier_diagnostics.rs:1-423
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! #1629 — runtime-tier E0956 uses the shared diagnostic voice.
+//RS //!
+//RS //! Default `jet run` shares the TIR evaluator with comptime. When that
+//RS //! evaluator hits an unsupported construct, every tier renders the same
+//RS //! E0956 what/why/fix text.
+//RS 
+//RS use std::fs;
+//RS 
+//RS mod common;
+//RS 
+//RS use jet::Interpreter::run_jit_once;
+//RS use jet_foundation::JitBackend::RunOutcome;
+//RS 
+//RS fn skip_if_cranelift_host_unsupported() -> bool {
+//RS     if jet_jit::cranelift_host_supported() {
+//RS         false
+//RS     } else if std::env::var("JET_REQUIRE_CRANELIFT_HOST").as_deref() == Ok("1") {
+//RS         panic!(
+//RS             "cranelift-jit host path unsupported on this architecture \
+//RS              (JET_REQUIRE_CRANELIFT_HOST=1)"
+//RS         );
+//RS     } else {
+//RS         eprintln!("note: cranelift-jit host path unsupported; skipping run-tier diag assertion");
+//RS         true
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn e1112_row_text_matches_aot_run_and_interpreter() {
+//RS     std::thread::Builder::new()
+//RS         .name("e1112-tier-parity".into())
+//RS         .stack_size(8 * 1024 * 1024)
+//RS         .spawn(e1112_row_text_matches_aot_run_and_interpreter_inner)
+//RS         .unwrap()
+//RS         .join()
+//RS         .unwrap();
+//RS }
+//RS 
+//RS fn e1112_row_text_matches_aot_run_and_interpreter_inner() {
+//RS     let file = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("tests/ui/empty_task_combinator.jet");
+//RS     let path = file.to_string_lossy().into_owned();
+//RS     let src = fs::read_to_string(&file).unwrap();
+//RS     let snapshot = fs::read_to_string(file.with_extension("stderr")).unwrap();
+//RS 
+//RS     let aot = jet::compile_with_path(&src, &path)
+//RS         .expect_err("AOT front end must reject an empty task combinator");
+//RS     let run = match run_jit_once(&path) {
+//RS         RunOutcome::Problems(diags) => diags,
+//RS         other => panic!("default jet run must reject E1112: {other:?}"),
+//RS     };
+//RS     let interpreter = match jet::Interpreter::dev_iteration(&path, false, true) {
+//RS         RunOutcome::Problems(diags) => diags,
+//RS         other => panic!("interpreter gate must reject E1112: {other:?}"),
+//RS     };
+//RS 
+//RS     let shape = |diags: &[jet::Diagnostics::Diagnostic]| {
+//RS         diags
+//RS             .iter()
+//RS             .map(|diag| {
+//RS                 (
+//RS                     diag.code.clone(),
+//RS                     diag.what.clone(),
+//RS                     diag.why.clone(),
+//RS                     diag.fix.clone(),
+//RS                     diag.span,
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS     };
+//RS     let expected = shape(&aot);
+//RS     let expected_report = jet::render_all_json(
+//RS         &jet::Diagnostics::ReportPath::from_path(file.as_path()),
+//RS         &src,
+//RS         &aot,
+//RS     );
+//RS     assert_eq!(expected.len(), 3);
+//RS     assert!(expected.iter().all(|(code, ..)| code == "E1112"));
+//RS     for (tier, diags) in [("default jet run", run), ("interpreter", interpreter)] {
+//RS         assert_eq!(
+//RS             shape(&diags),
+//RS             expected,
+//RS             "{tier} diagnostic drifted from AOT"
+//RS         );
+//RS         assert_eq!(
+//RS             jet::render_all_json(
+//RS                 &jet::Diagnostics::ReportPath::from_path(file.as_path()),
+//RS                 &src,
+//RS                 &diags,
+//RS             ),
+//RS             expected_report,
+//RS             "{tier} structured report drifted from AOT"
+//RS         );
+//RS         assert_eq!(
+//RS             jet::render_diagnostics("tests/ui/empty_task_combinator.jet", &src, &diags),
+//RS             snapshot,
+//RS             "{tier} text drifted from the UI snapshot"
+//RS         );
+//RS     }
+//RS     assert_eq!(
+//RS         jet::render_diagnostics("tests/ui/empty_task_combinator.jet", &src, &aot),
+//RS         snapshot,
+//RS         "AOT text drifted from the UI snapshot"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn e0956_row_text_matches_aot_run_and_interpreter() {
+//RS     std::thread::Builder::new()
+//RS         .name("e0956-tier-parity".into())
+//RS         .stack_size(8 * 1024 * 1024)
+//RS         .spawn(e0956_row_text_matches_aot_run_and_interpreter_inner)
+//RS         .unwrap()
+//RS         .join()
+//RS         .unwrap();
+//RS }
+//RS 
+//RS fn e0956_row_text_matches_aot_run_and_interpreter_inner() {
+//RS     if skip_if_cranelift_host_unsupported() {
+//RS         return;
+//RS     }
+//RS     let file =
+//RS         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui/comptime_panic.jet");
+//RS     let path = file.to_string_lossy().into_owned();
+//RS     let src = fs::read_to_string(&file).unwrap();
+//RS     let snapshot = fs::read_to_string(file.with_extension("stderr")).unwrap();
+//RS 
+//RS     let aot = jet::compile_with_path(&src, &path)
+//RS         .expect_err("AOT front end must reject the unsupported comptime construct");
+//RS     let run = match run_jit_once(&path) {
+//RS         RunOutcome::Problems(diags) => diags,
+//RS         other => panic!("default jet run must reject E0956: {other:?}"),
+//RS     };
+//RS     let interpreter = match jet::Interpreter::dev_iteration(&path, false, true) {
+//RS         RunOutcome::Problems(diags) => diags,
+//RS         other => panic!("interpreter gate must reject E0956: {other:?}"),
+//RS     };
+//RS 
+//RS     let shape = |diags: &[jet::Diagnostics::Diagnostic]| {
+//RS         diags
+//RS             .iter()
+//RS             .map(|diag| {
+//RS                 (
+//RS                     diag.code.clone(),
+//RS                     diag.what.clone(),
+//RS                     diag.why.clone(),
+//RS                     diag.fix.clone(),
+//RS                     diag.span,
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS     };
+//RS     let expected = shape(&aot);
+//RS     let expected_report = jet::render_all_json(
+//RS         &jet::Diagnostics::ReportPath::from_path(file.as_path()),
+//RS         &src,
+//RS         &aot,
+//RS     );
+//RS     assert!(expected.iter().any(|(code, ..)| code == "E0956"));
+//RS     for (tier, diags) in [("default jet run", run), ("interpreter", interpreter)] {
+//RS         assert_eq!(
+//RS             shape(&diags),
+//RS             expected,
+//RS             "{tier} diagnostic drifted from AOT"
+//RS         );
+//RS         assert_eq!(
+//RS             jet::render_all_json(
+//RS                 &jet::Diagnostics::ReportPath::from_path(file.as_path()),
+//RS                 &src,
+//RS                 &diags,
+//RS             ),
+//RS             expected_report,
+//RS             "{tier} structured report drifted from AOT"
+//RS         );
+//RS         assert_eq!(
+//RS             jet::render_diagnostics("tests/ui/comptime_panic.jet", &src, &diags),
+//RS             snapshot,
+//RS             "{tier} text drifted from the UI snapshot"
+//RS         );
+//RS     }
+//RS     assert_eq!(
+//RS         jet::render_diagnostics("tests/ui/comptime_panic.jet", &src, &aot),
+//RS         snapshot,
+//RS         "AOT text drifted from the UI snapshot"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn e0999_row_fix_matches_aot_run_and_interpreter() {
+//RS     std::thread::Builder::new()
+//RS         .name("e0999-tier-parity".into())
+//RS         .stack_size(8 * 1024 * 1024)
+//RS         .spawn(e0999_row_fix_matches_aot_run_and_interpreter_inner)
+//RS         .unwrap()
+//RS         .join()
+//RS         .unwrap();
+//RS }
+//RS 
+//RS fn e0999_row_fix_matches_aot_run_and_interpreter_inner() {
+//RS     let file = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("tests/ui/single_bracket_marker.jet");
+//RS     let path = file.to_string_lossy().into_owned();
+//RS     let src = fs::read_to_string(&file).unwrap();
+//RS     let snapshot = fs::read_to_string(file.with_extension("stderr")).unwrap();
+//RS 
+//RS     let aot = jet::compile_with_path(&src, &path)
+//RS         .expect_err("AOT front end must reject a bare marker with brackets");
+//RS     let run = match run_jit_once(&path) {
+//RS         RunOutcome::Problems(diags) => diags,
+//RS         other => panic!("default jet run must reject E0999: {other:?}"),
+//RS     };
+//RS     let interpreter = match jet::Interpreter::dev_iteration(&path, false, true) {
+//RS         RunOutcome::Problems(diags) => diags,
+//RS         other => panic!("interpreter gate must reject E0999: {other:?}"),
+//RS     };
+//RS 
+//RS     let shape = |diags: &[jet::Diagnostics::Diagnostic]| {
+//RS         diags
+//RS             .iter()
+//RS             .map(|diag| {
+//RS                 (
+//RS                     diag.code.clone(),
+//RS                     diag.what.clone(),
+//RS                     diag.why.clone(),
+//RS                     diag.fix.clone(),
+//RS                     diag.span,
+//RS                     diag.edit.clone(),
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS     };
+//RS     let expected = shape(&aot);
+//RS     let expected_report = jet::render_all_json(
+//RS         &jet::Diagnostics::ReportPath::from_path(file.as_path()),
+//RS         &src,
+//RS         &aot,
+//RS     );
+//RS     assert_eq!(expected.len(), 1);
+//RS     assert_eq!(expected[0].0, "E0999");
+//RS     assert_eq!(
+//RS         expected[0].5.as_ref().map(|edit| edit.new_text.as_str()),
+//RS         Some("#Codable")
+//RS     );
+//RS 
+//RS     for (tier, diags) in [("default jet run", run), ("interpreter", interpreter)] {
+//RS         assert_eq!(
+//RS             shape(&diags),
+//RS             expected,
+//RS             "{tier} diagnostic or recovery data drifted from AOT"
+//RS         );
+//RS         assert_eq!(
+//RS             jet::render_all_json(
+//RS                 &jet::Diagnostics::ReportPath::from_path(file.as_path()),
+//RS                 &src,
+//RS                 &diags,
+//RS             ),
+//RS             expected_report,
+//RS             "{tier} structured report drifted from AOT"
+//RS         );
+//RS         assert_eq!(
+//RS             jet::render_diagnostics("tests/ui/single_bracket_marker.jet", &src, &diags),
+//RS             snapshot,
+//RS             "{tier} text drifted from the UI snapshot"
+//RS         );
+//RS     }
+//RS     assert_eq!(
+//RS         jet::render_diagnostics("tests/ui/single_bracket_marker.jet", &src, &aot),
+//RS         snapshot,
+//RS         "AOT text drifted from the UI snapshot"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn e0311_suggested_fix_matches_aot_run_and_interpreter() {
+//RS     std::thread::Builder::new()
+//RS         .name("e0311-tier-parity".into())
+//RS         .stack_size(8 * 1024 * 1024)
+//RS         .spawn(e0311_suggested_fix_matches_aot_run_and_interpreter_inner)
+//RS         .unwrap()
+//RS         .join()
+//RS         .unwrap();
+//RS }
+//RS 
+//RS fn e0311_suggested_fix_matches_aot_run_and_interpreter_inner() {
+//RS     let file =
+//RS         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui/map_method_typo.jet");
+//RS     let path = file.to_string_lossy().into_owned();
+//RS     let src = fs::read_to_string(&file).unwrap();
+//RS     let snapshot = fs::read_to_string(file.with_extension("stderr")).unwrap();
+//RS 
+//RS     let aot =
+//RS         jet::compile_with_path(&src, &path).expect_err("AOT front end must reject missing methods");
+//RS     let run = match run_jit_once(&path) {
+//RS         RunOutcome::Problems(diags) => diags,
+//RS         other => panic!("default jet run must reject E0311: {other:?}"),
+//RS     };
+//RS     let interpreter = match jet::Interpreter::dev_iteration(&path, false, true) {
+//RS         RunOutcome::Problems(diags) => diags,
+//RS         other => panic!("interpreter gate must reject E0311: {other:?}"),
+//RS     };
+//RS 
+//RS     let shape = |diags: &[jet::Diagnostics::Diagnostic]| {
+//RS         diags
+//RS             .iter()
+//RS             .map(|diag| {
+//RS                 (
+//RS                     diag.code.clone(),
+//RS                     diag.what.clone(),
+//RS                     diag.why.clone(),
+//RS                     diag.fix.clone(),
+//RS                     diag.span,
+//RS                     diag.edit.clone(),
+//RS                     diag.applicability,
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS     };
+//RS     let expected = shape(&aot);
+//RS     let expected_report = jet::render_all_json(
+//RS         &jet::Diagnostics::ReportPath::from_path(file.as_path()),
+//RS         &src,
+//RS         &aot,
+//RS     );
+//RS     assert_eq!(expected.len(), 4);
+//RS     assert!(expected.iter().all(|(code, ..)| code == "E0311"));
+//RS     assert!(expected.iter().all(|(_, _, _, _, _, edit, applicability)| {
+//RS         edit.is_some() && *applicability == Some(jet::Diagnostics::FixApplicability::Suggested)
+//RS     }));
+//RS 
+//RS     for (tier, diags) in [("default jet run", run), ("interpreter", interpreter)] {
+//RS         assert_eq!(
+//RS             shape(&diags),
+//RS             expected,
+//RS             "{tier} diagnostic or recovery data drifted from AOT"
+//RS         );
+//RS         assert_eq!(
+//RS             jet::render_all_json(
+//RS                 &jet::Diagnostics::ReportPath::from_path(file.as_path()),
+//RS                 &src,
+//RS                 &diags,
+//RS             ),
+//RS             expected_report,
+//RS             "{tier} structured report drifted from AOT"
+//RS         );
+//RS         assert_eq!(
+//RS             jet::render_diagnostics("tests/ui/map_method_typo.jet", &src, &diags),
+//RS             snapshot,
+//RS             "{tier} text drifted from the UI snapshot"
+//RS         );
+//RS     }
+//RS     assert_eq!(
+//RS         jet::render_diagnostics("tests/ui/map_method_typo.jet", &src, &aot),
+//RS         snapshot,
+//RS         "AOT text drifted from the UI snapshot"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn programmable_build_check_matches_aot_interpreter_dev_and_web() {
+//RS     let scratch = common::Scratch::new("programmable-build-tier-parity");
+//RS     let file = scratch.join("main.jet");
+//RS     let source = r#"
+//RS struct Entity { id: Int }
+//RS 
+//RS fn build(b: BuildContext) -> BuildPlan {
+//RS     types :: b.program.types()
+//RS     b.error(types[0].span, "ORG01", "entity must define archive", "company policy requires archival", "add an archive method")
+//RS     return b.plan()
+//RS }
+//RS 
+//RS fn run() {}
+//RS "#;
+//RS     fs::write(&file, source).unwrap();
+//RS     let path = file.to_string_lossy().into_owned();
+//RS     let shape = |diags: &[jet::Diagnostics::Diagnostic]| {
+//RS         diags
+//RS             .iter()
+//RS             .map(|diag| {
+//RS                 (
+//RS                     diag.code.clone(),
+//RS                     diag.what.clone(),
+//RS                     diag.why.clone(),
+//RS                     diag.fix.clone(),
+//RS                     diag.span,
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS     };
+//RS 
+//RS     let aot = jet::compile_programmable_build(&path, &[])
+//RS         .expect_err("programmable build check must reject this source");
+//RS     let expected = shape(&aot);
+//RS     assert_eq!(expected.len(), 1);
+//RS     assert_eq!(expected[0].0, "ORG01");
+//RS 
+//RS     let interpreter = match jet::Interpreter::run_interpreter_once_with_args(&path, &[]) {
+//RS         RunOutcome::Problems(diags) => diags,
+//RS         other => panic!("interpreter must reject the programmable build check: {other:?}"),
+//RS     };
+//RS     let jit = match jet::Interpreter::run_jit_once_with_args(&path, &[]) {
+//RS         RunOutcome::Problems(diags) => diags,
+//RS         other => panic!("Cranelift run must reject the programmable build check: {other:?}"),
+//RS     };
+//RS     let dev = match jet::Interpreter::dev_iteration(&path, false, false) {
+//RS         RunOutcome::Problems(diags) => diags,
+//RS         other => panic!("dev must reject the programmable build check: {other:?}"),
+//RS     };
+//RS     let web = jet::compile_web_with_gates(&path, jet::Policy::GateSet::default())
+//RS         .expect_err("web checking must reject the programmable build check");
+//RS 
+//RS     for (tier, diags) in [
+//RS         ("Cranelift run", jit),
+//RS         ("interpreter", interpreter),
+//RS         ("dev", dev),
+//RS         ("web", web),
+//RS     ] {
+//RS         assert_eq!(
+//RS             shape(&diags),
+//RS             expected,
+//RS             "{tier} diagnostic drifted from AOT"
+//RS         );
+//RS     }
+//RS }
+// END-PORT-PENDING 1146 tests/run_tier_diagnostics.rs:1-423
+
+// PORT-PENDING 1146 tests-run-tier-diagnostics-module-group: tests/sema_soundness_provenance.rs:1-4
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS const SUITE: &str = "sema_soundness_provenance";
+//RS mod common;
+//RS include!("sema_soundness_parts/support.rs");
+//RS include!("sema_soundness_parts/provenance.rs");
+// END-PORT-PENDING 1146 tests/sema_soundness_provenance.rs:1-4
+
+// PORT-PENDING 1146 tests-run-tier-diagnostics-module-group: tests/sema_soundness_parts/provenance.rs:1-92
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use common::{build_and_run, strip_vetted_prelude_modules};
+//RS 
+//RS #[test]
+//RS fn valid_corpus_reaches_rustc() {
+//RS     // FEATURE_CLAIM: claim.native-language / valid-native-execution
+//RS     let filter = case_filter();
+//RS     let selected = selected_cases("valid", filter.as_deref());
+//RS     require_lane_selection("valid", filter.as_deref(), selected.len());
+//RS     require_rustc();
+//RS     let failures = run_all_collecting_failures(selected, |path| {
+//RS         replay(path, "valid_corpus_reaches_rustc");
+//RS         let src = fs::read_to_string(path).unwrap();
+//RS         let name = path.file_stem().unwrap().to_string_lossy();
+//RS         let (code, _, stderr) = build_and_run("jet_sema_sound_valid", &name, &src);
+//RS         if code == 0 {
+//RS             Ok(())
+//RS         } else {
+//RS             Err(format!("{}: failed (exit {code}):\n{stderr}", relative(path)))
+//RS         }
+//RS     });
+//RS     assert!(
+//RS         failures.is_empty(),
+//RS         "{} valid-corpus failure(s), each replayable via SEMA_SOUNDNESS_CASE=<path>:\n{}",
+//RS         failures.len(),
+//RS         failures.join("\n")
+//RS     );
+//RS }
+//RS /// Crit #3: safe generated user bodies contain no unaudited `unsafe`,
+//RS /// classified structurally by provenance. Every `valid`/`differential`
+//RS /// fixture's generated Rust must be free of bare `unsafe` once the vetted
+//RS /// prelude modules (FFI/mem/term/os/atomic/gtk bridges) are stripped —
+//RS /// except the handful of `Examples/features/{lowlevel,memory,effects,
+//RS /// crypto}` stems that intentionally exercise the audited `#Unsafe` gate
+//RS /// (`GATED_UNSAFE_STEMS`), which may contain only *gated* `unsafe { … }` /
+//RS /// `unsafe fn` forms, never an ungated one. Mirrors golden.rs's per-example
+//RS /// I1 check, applied across the whole soundness corpus.
+//RS #[test]
+//RS fn generated_rust_has_no_unaudited_unsafe() {
+//RS     // FEATURE_CLAIM: claim.native-language / safe-codegen-boundary
+//RS     let filter = case_filter();
+//RS     let mut selected = selected_cases("valid", filter.as_deref());
+//RS     selected.extend(selected_cases("differential", filter.as_deref()));
+//RS     require_lane_selection("valid or differential", filter.as_deref(), selected.len());
+//RS     let failures = run_all_collecting_failures(selected, |path| {
+//RS         replay(path, "generated_rust_has_no_unaudited_unsafe");
+//RS         let src = fs::read_to_string(path).unwrap();
+//RS         // NB: keep this prefix free of the substring "unsafe" — codegen
+//RS         // embeds the source path in a `jet:source-map` comment, and a tmp
+//RS         // dir name containing "unsafe" would false-positive every check
+//RS         // below.
+//RS         let materialized = common::unique_tmp("jet_sema_sound_prov").with_extension("jet");
+//RS         fs::write(&materialized, &src).unwrap();
+//RS         let compiled = match jet::compile_with_path(&src, &materialized.to_string_lossy()) {
+//RS             Ok(c) => c,
+//RS             Err(diags) => {
+//RS                 return Err(format!("{}: front end rejected: {diags:?}", relative(path)))
+//RS             }
+//RS         };
+//RS         let user_code = strip_vetted_prelude_modules(&compiled.rust);
+//RS         let stem = path.file_stem().unwrap().to_string_lossy();
+//RS         let gated = original_example_stem(&stem)
+//RS             .map(|orig| GATED_UNSAFE_STEMS.contains(&orig.as_str()))
+//RS             .unwrap_or(false);
+//RS         if gated {
+//RS             for (i, line) in user_code.lines().enumerate() {
+//RS                 if let Some(col) = line.find("unsafe") {
+//RS                     let after = line[col..].trim_start_matches("unsafe").trim_start();
+//RS                     if !(after.starts_with('{') || after.starts_with("fn ")) {
+//RS                         return Err(format!(
+//RS                             "{}: ungated `unsafe` at line {}: {}",
+//RS                             relative(path),
+//RS                             i + 1,
+//RS                             line.trim()
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS             }
+//RS         } else if user_code.contains("unsafe") {
+//RS             return Err(format!(
+//RS                 "{}: generated Rust contains `unsafe` outside the vetted prelude/gated #Unsafe tier",
+//RS                 relative(path)
+//RS             ));
+//RS         }
+//RS         Ok(())
+//RS     });
+//RS     assert!(
+//RS         failures.is_empty(),
+//RS         "{} unsafe-provenance failure(s), each replayable via SEMA_SOUNDNESS_CASE=<path>:\n{}",
+//RS         failures.len(),
+//RS         failures.join("\n")
+//RS     );
+//RS }
+// END-PORT-PENDING 1146 tests/sema_soundness_parts/provenance.rs:1-92
+

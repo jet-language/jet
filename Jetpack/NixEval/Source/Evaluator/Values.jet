@@ -2,8 +2,8 @@
 // arguments hold thunk indices into the evaluator's thunk table, so values
 // stay acyclic and sharing is explicit.
 
-@NIXEVAL_MAX_PATH_BYTES :: 4096
-@NIXEVAL_MAX_PACKAGE_NAME_BYTES :: 128
+NIXEVAL_MAX_PATH_BYTES :: prep { 4096 }
+NIXEVAL_MAX_PACKAGE_NAME_BYTES :: prep { 128 }
 
 // A package namespace. `overlay` names a shared, mutable override table once
 // the namespace has been merged or overlaid; a plain namespace has none.
@@ -262,7 +262,7 @@ struct NixEvalFrame {
 
 fn nixeval_package_name(raw: String) -> String NixEvalError! {
     name :: nixeval_last_segment(raw, "./")
-    if name == "" || name.bytes().len() > @NIXEVAL_MAX_PACKAGE_NAME_BYTES {
+    if name == "" || name.bytes().len() > NIXEVAL_MAX_PACKAGE_NAME_BYTES {
         return Err(NixEvalError.Unsupported("invalid package name `{raw}`"))
     }
     Ok(name)

@@ -1,0 +1,276 @@
+// One command palette, derived from Commands/Registry, with presentation-only
+// aliases (crates/jet-cli/src/Help/mod.rs). Tools supplies semantic lookup and
+// consumes command facts through the typed adapter; this module owns no engine.
+
+use jet_semindex.[SemanticSymbol, SemanticSymbolKind, SemanticProvenance, SemanticSymbolIndex]
+// Rust `Entry` (Help/mod.rs).
+pub struct JetCLIHelpEntry {
+    pub symbol: SemanticSymbol
+    pub category: String
+    pub flags: [JetCLIFlagSpec]
+    pub see_also: [String]
+    pub keywords: [String]
+}
+// Rust `Hit` (Help/mod.rs). Positions are scalar indices, not byte offsets.
+pub enum JetCLIHelpHit {
+    Command(entry: JetCLIHelpEntry, score: Int, haystack: String, positions: [Int])
+    Code(DiagnosticExplanation)
+}
+pub struct JetCLIHelpFuzzyMatch {
+    pub score: Int
+    pub positions: [Int]
+}
+
+// Rust `CATEGORIES` (Help/mod.rs).
+pub JET_CLI_HELP_CATEGORIES :: prep {
+    [String]{"Build & Run", "Projects & Environments", "Packages", "Jetos", "Development Server", "Reference", "Error Codes"}
+}
+// Rust `command_symbol` (Help/mod.rs).
+pub fn jet_cli_help_command_symbol(cmd: String, usage: String, summary: String, example: String?) -> SemanticSymbol Never! {
+    examples := [String]{}
+    if example == .Val(text) -> &examples.push(text)
+    SemanticSymbol{
+        identity: "command:{cmd}", name: cmd, qualified_name: cmd, owner: None,
+        module_path: "jet CLI", kind: SemanticSymbolKind.Command,
+        signature: usage, summary: summary, examples: examples,
+        provenance: SemanticProvenance.CommandRegistry, span: None, lexical_scope: None,
+    }
+}
+// Rust `category_for` (Help/mod.rs).
+fn jet_cli_help_category_for(cmd: String) -> String Never! {
+    if cmd == {
+        "run" | "check" | "test" | "build" | "debug" | "eval" | "emit" | "learn" -> "Build & Run"
+        "dev" -> "Development Server"
+        "new" | "fmt" | "fix" | "lint" | "env" | "init" | "config" | "toolchain" -> "Projects & Environments"
+        "add" | "remove" | "fetch" | "update" | "outdated" | "search" | "info" | "logs" | "clean" | "publish" | "yank" | "keygen" | "key" | "vendor" | "audit" | "sbom" | "schema" | "gc" | "shared-store" -> "Packages"
+        "os" | "image" | "bind" | "push" | "trust" | "bridge" | "services" -> "Jetos"
+        else -> "Reference"
+    }
+}
+// Rust `example_for` (Help/mod.rs).
+fn jet_cli_help_example_for(cmd: String) -> String? Never! {
+    if cmd == {
+        "run" -> Val("jet run")
+        "check" | "build" -> Val("jet {cmd} Examples/features/basics/hello.jet")
+        "dev" -> Val("jet dev run.jet")
+        "learn" -> Val("jet learn")
+        "notebook" -> Val("jet notebook analysis.jetnb")
+        "explain" -> Val("jet explain E0102")
+        "new" -> Val("jet new web-api")
+        else -> None
+    }
+}
+// Rust `see_also_for` (Help/mod.rs).
+fn jet_cli_help_see_also_for(cmd: String) -> [String] Never! {
+    if cmd == {
+        "run" -> [String]{"build", "test", "dev"}
+        "dev" -> [String]{"run"}
+        "learn" -> [String]{"dev", "explain"}
+        "build" -> [String]{"run", "check"}
+        "test" -> [String]{"run", "check"}
+        "add" -> [String]{"fetch", "update"}
+        "explain" -> [String]{"doctor"}
+        else -> [String]{}
+    }
+}
+// Rust `keywords_for` (Help/mod.rs).
+fn jet_cli_help_keywords_for(cmd: String) -> [String] Never! {
+    if cmd == {
+        "dev" -> [String]{"run on save", "rebuild on save", "run a file and rebuild on save", "watch", "start a web app"}
+        "run" -> [String]{"watch", "run on save"}
+        "learn" -> [String]{"kata", "exercise", "hint", "offline"}
+        "add" -> [String]{"add a dependency", "dependency"}
+        "explain" -> [String]{"understand an error message", "error", "diagnostic"}
+        else -> [String]{}
+    }
+}
+// Rust `build_index`, `usage_for`, `flags_for` (Help/mod.rs). Read the existing
+// command/flag tables and help-summary projection; never duplicate their rows.
+pub fn jet_cli_help_build_index() -> [JetCLIHelpEntry] Never! {
+    entries := [JetCLIHelpEntry]{}
+    loop command in JET_CLI_COMMANDS {
+        if !jet_cli_is_canonical_top_level(command.name) -> next
+        &entries.push(JetCLIHelpEntry{
+            symbol: jet_cli_help_command_symbol(command.name, jet_cli_command_usage(command.name), command.summary, jet_cli_help_example_for(command.name)),
+            category: jet_cli_help_category_for(command.name),
+            flags: jet_cli_flags_for_command(command.name),
+            see_also: jet_cli_help_see_also_for(command.name),
+            keywords: jet_cli_help_keywords_for(command.name),
+        })
+    }
+    loop group in JET_CLI_COMMANDS {
+        loop action in group.actions {
+            handler_index :: jet_cli_handler_index(action.handler) ?? panic("help action has no registered handler")
+            dispatch :: JET_CLI_HANDLERS[handler_index].dispatch_word
+            usages := [String]{}
+            loop usage in diagnostic_text_lines(action.usage) -> &usages.push("jet {group.name} {usage}")
+            &entries.push(JetCLIHelpEntry{
+                symbol: jet_cli_help_command_symbol("{group.name} {action.name}", usages.join("\n"), jet_cli_action_help_summary(group.name, action), None),
+                category: jet_cli_help_category_for(dispatch),
+                flags: jet_cli_flags_for_command(dispatch),
+                see_also: [String]{}, keywords: jet_cli_help_keywords_for(dispatch),
+            })
+        }
+    }
+    entries
+}
+// Rust `symbol_index` (Help/mod.rs): command facts use the shared consumer-neutral
+// carrier and are indexed by the canonical semantic engine.
+pub fn jet_cli_help_symbol_index(entries: [JetCLIHelpEntry]) -> SemanticSymbolIndex Never! {
+    symbols := [SemanticSymbol]{}
+    loop entry in entries -> &symbols.push(entry.symbol)
+    SemanticSymbolIndex.new(^symbols)
+}
+// Rust `looks_like_code` (Help/mod.rs).
+pub fn jet_cli_help_looks_like_code(value: String) -> Bool Never! {
+    jet_cli_explain_is_code(value)
+}
+// Rust `fuzzy_match` (Help/mod.rs). Lowercase before taking scalar positions,
+// exactly as Rust does, including Unicode lowercase expansions.
+pub fn jet_cli_help_fuzzy_match(query: String, hay: String) -> JetCLIHelpFuzzyMatch? Never! {
+    if query.len() == 0 -> return Val(JetCLIHelpFuzzyMatch{score: 0, positions: [Int]{}})
+    q :: query.to_lower().chars()
+    h :: hay.to_lower().chars()
+    qi := 0
+    score := 0
+    positions := [Int]{}
+    previous := -2
+    loop hi in 0..<h.len() {
+        if qi >= q.len() -> break
+        if h[hi] == q[qi] {
+            &positions.push(hi)
+            score += 1
+            if previous == hi - 1 -> score += 5
+            if hi == 0 {
+                score += 3
+            } else {
+                before :: h[hi - 1]
+                if before == ' ' || before == '-' || before == '.' || before == '<' -> score += 3
+            }
+            previous = hi
+            qi += 1
+        }
+    }
+    if qi != q.len() -> return None
+    Val(JetCLIHelpFuzzyMatch{score: score - h.len() /% 8, positions: positions})
+}
+
+struct JetCLIHelpBestMatch {
+    score: Int
+    haystack: String
+    positions: [Int]
+}
+fn jet_cli_help_consider(query: String, haystack: String, best: &JetCLIHelpBestMatch?) Never! {
+    matched :: jet_cli_help_fuzzy_match(query, haystack) ?? return
+    if best == .Val(old) {
+        if matched.score <= old.score -> return
+    }
+    best = Val(JetCLIHelpBestMatch{score: matched.score, haystack: haystack, positions: matched.positions})
+}
+fn jet_cli_help_ascii_lower(text: String) -> String Never! {
+    bytes := text.bytes()
+    loop index in 0..<bytes.len() {
+        value :: Int.from_u8(bytes[index])
+        if value >= 65 && value <= 90 -> bytes[index] = U8.from_int(value + 32) ?? panic("ASCII lowercase overflow")
+    }
+    String.from_bytes(bytes) ?? panic("ASCII lowercase preserves UTF-8")
+}
+// Rust `search` (Help/mod.rs). Iterate entries directly rather than cloning an
+// index and doing a quadratic identity join. Match one haystack at a time.
+pub fn jet_cli_help_search(index: [JetCLIHelpEntry], raw_query: String) -> [JetCLIHelpHit] Never! {
+    // ~ materializes the trim view (#4303).
+    query :: ~raw_query.trim()
+    if query.len() == 0 -> return [JetCLIHelpHit]{}
+    if jet_cli_help_looks_like_code(query) {
+        if jet_cli_explain_lookup_code(query) == .Val(explanation) -> return [JetCLIHelpHit]{JetCLIHelpHit.Code(explanation)}
+    }
+    hits := [JetCLIHelpHit]{}
+    folded_query :: jet_cli_help_ascii_lower(query)
+    loop entry in index {
+        best := JetCLIHelpBestMatch?{None}
+        jet_cli_help_consider(query, "jet {entry.symbol.name}", &best)
+        jet_cli_help_consider(query, entry.symbol.signature, &best)
+        jet_cli_help_consider(query, entry.symbol.summary, &best)
+        loop flag in entry.flags -> jet_cli_help_consider(query, "{flag.long} {flag.help}", &best)
+        loop example in entry.symbol.examples -> jet_cli_help_consider(query, example, &best)
+        loop name in entry.see_also -> jet_cli_help_consider(query, name, &best)
+        loop keyword in entry.keywords -> jet_cli_help_consider(query, keyword, &best)
+        if best == .Val(matched) {
+            boost :: if jet_cli_help_ascii_lower(entry.symbol.name) == folded_query -> 1000 else -> 0
+            &hits.push(JetCLIHelpHit.Command{entry: entry, score: matched.score + boost, haystack: matched.haystack, positions: matched.positions})
+        }
+    }
+    &hits.sort_by((left: JetCLIHelpHit, right: JetCLIHelpHit) -> jet_cli_help_hit_compare(left, right))
+    hits
+}
+fn jet_cli_help_hit_compare(left: JetCLIHelpHit, right: JetCLIHelpHit) -> Ordering Never! {
+    if left == .Command(le, ls, _, _) {
+        if right == .Command(re, rs, _, _) {
+            if ls != rs -> return rs <=> ls
+            return le.symbol.name <=> re.symbol.name
+        }
+    }
+    0 <=> 0
+}
+// Rust `str::split_whitespace().map(...).eq(...)` in run_query: scan UTF-8
+// once, stop at the first mismatch, and do not collect the query's words.
+fn jet_cli_help_observation_word(word: String, index: Int) -> Bool Never! {
+    lower :: jet_cli_help_ascii_lower(word)
+    if index == {
+        0 -> lower == "why"
+        1 -> lower == "is"
+        2 -> lower == "my"
+        3 -> lower == "program"
+        4 -> lower == "slow"
+        else -> false
+    }
+}
+fn jet_cli_help_is_observation_query(query: String) -> Bool Never! {
+    bytes :: query.bytes()
+    word_index := 0
+    index := 0
+    start := -1
+    loop index < bytes.len() {
+        if diagnostic_is_whitespace_at(bytes, index) {
+            if start >= 0 {
+                if !jet_cli_help_observation_word(diagnostic_bytes_text(bytes, start, index), word_index) -> return false
+                word_index += 1
+            }
+            start = -1
+        } else {
+            if start < 0 {
+                if word_index >= 5 -> return false
+                start = index
+            }
+        }
+        index += diagnostic_utf8_width(bytes, index)
+    }
+    if start >= 0 {
+        if !jet_cli_help_observation_word(diagnostic_bytes_text(bytes, start, bytes.len()), word_index) -> return false
+        word_index += 1
+    }
+    word_index == 5
+}
+fn jet_cli_help_provenance_text(provenance: SemanticProvenance) -> String Never! {
+    if provenance == {
+        .Builtin(_) -> "builtin"
+        .Source(_) -> "source"
+        .CommandRegistry -> "command"
+        .Session -> "session"
+    }
+}
+// Rust `run_query` (Help/mod.rs). The host supplies the single authored guide
+// and the real semantic-symbol lookup adapter. Neither is fabricated here.
+pub fn jet_cli_help_run_query(query: String, color: Bool, observation_guide: String, lookup: fn(String) -> SemanticSymbol? Never!) -> String Never! {
+    if jet_cli_help_is_observation_query(query) -> return ~observation_guide
+    if lookup(query.trim()) == .Val(symbol) {
+        example :: symbol.examples.get(0) ?? ""
+        provenance :: jet_cli_help_provenance_text(symbol.provenance)
+        return "{symbol.signature}\n{symbol.summary}\nExample: {example}\nSource: {symbol.module_path} ({provenance})\n"
+    }
+    index :: jet_cli_help_build_index()
+    hits :: jet_cli_help_search(index, query)
+    if hits.len() == 0 -> return "No matches for `{query}` — try `{JET_CLI_BINARY} ?` for the full command palette or `{JET_CLI_BINARY} help`\n"
+    if hits[0] == .Code(explanation) -> return jet_cli_explain_render(explanation, color)
+    jet_cli_help_render_result_list(hits, query, 72, color, None, None)
+}

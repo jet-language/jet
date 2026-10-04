@@ -1,0 +1,291 @@
+// Behavioral registry claims from CLI.rs; shell/man claims remain in Help/Completions.jet.
+
+// Rust `known_flag_ignores_value` (CLI.rs:3398-3405).
+#Test("known_flag_ignores_value") {
+    assert(jet_cli_is_known_flag("--color=always"))
+    assert(jet_cli_is_known_flag("--json"))
+    assert(jet_cli_is_known_flag("--raw-frames"))
+    assert(jet_cli_is_known_flag("--dap"))
+    assert(!jet_cli_is_known_flag("--nonsense"))
+}
+
+// Rust `hangar_is_not_a_jet_command_or_help_route` (CLI.rs:3515-3520).
+#Test("hangar_is_not_a_jet_command_or_help_route") {
+    assert(!jet_cli_is_builtin("hangar"))
+    assert(jet_cli_group_index("hangar") == None)
+    assert(!jet_cli_usage_page("frequency").to_lower().contains("hangar"))
+}
+
+// Rust `moved_command_registry_agrees_with_dispatch` (CLI.rs:3555-3592).
+#Test("moved_command_registry_agrees_with_dispatch") {
+    exceptions :: [String]{
+        // CLI.rs:779,1307: Rust test stale vs its table (PortLead-4).
+        "inspect build",
+        // CLI.rs:788,1480: Rust test stale vs its table (PortLead-4).
+        "inspect env",
+        // CLI.rs:796,1168: Rust test stale vs its table (PortLead-4).
+        "inspect bind",
+        // CLI.rs:821,1592: Rust test stale vs its table (PortLead-4).
+        "self update",
+        // CLI.rs:902,1298: Rust test stale vs its table (PortLead-4).
+        "shared-store status",
+        // CLI.rs:805-810,1842-1848: Rust test stale vs its table (PortLead-4).
+        "gc report",
+    }
+    observed := [String]{}
+    loop group in JET_CLI_COMMANDS {
+        loop action in group.actions {
+            if action.name == "install" {
+                assert_eq(action.handler, "SharedStore")
+                assert(jet_cli_moved_command(action.name) == None)
+                next
+            }
+            route :: "{group.name} {action.name}"
+            if (!action.also_canonical_top_level && jet_cli_command_index(action.name) != None) || (action.also_canonical_top_level && jet_cli_is_retired_root(action.name)) {
+                &observed.push(route)
+            }
+            if exceptions.contains(route) {
+                assert_eq(jet_cli_is_canonical_top_level(action.name), route != "gc report")
+                assert(jet_cli_moved_command(action.name) == None)
+                next
+            }
+            if action.also_canonical_top_level {
+                assert(jet_cli_is_canonical_top_level(action.name))
+                assert(jet_cli_moved_command(action.name) == None)
+                next
+            }
+            assert(!jet_cli_is_canonical_top_level(action.name))
+            owner :: jet_cli_moved_command(action.name) ?? panic("missing moved owner")
+            owner_group :: JET_CLI_COMMANDS[owner.group]
+            assert_eq(owner_group.actions[owner.action].name, action.name)
+            assert(jet_cli_group_index(owner_group.name) != None)
+        }
+    }
+    // Exhaustive equality prevents the exception list from concealing new drift.
+    assert_eq(observed, exceptions)
+}
+
+// Rust `every_nested_action_has_canonical_usage` (CLI.rs:3610-3629).
+#Test("every_nested_action_has_canonical_usage") {
+    loop group in JET_CLI_COMMANDS {
+        loop action in group.actions {
+            assert(!action.usage.trim().is_empty())
+            loop usage in action.usage.split("\n") {
+                assert(usage == action.name || usage.starts_with("{action.name} "))
+            }
+        }
+    }
+}
+
+// Rust `every_nested_action_routes_to_a_real_dispatch_seam` (CLI.rs:3631-3680).
+// The parser inventory explicitly permits `inspect env` to consume both words
+// (CLI.rs:2528-2535); apply that same exception to its owning-group assertion.
+#Test("every_nested_action_routes_to_a_real_dispatch_seam") {
+    loop group in JET_CLI_COMMANDS {
+        loop action in group.actions {
+            assert(!action.summary.trim().is_empty())
+            handler_index :: jet_cli_handler_index(action.handler) ?? panic("missing handler")
+            handler :: JET_CLI_HANDLERS[handler_index]
+            assert(jet_cli_is_builtin(handler.dispatch_word))
+            nested :: jet_cli_nested_command(group.name, action.name) ?? panic("missing nested command")
+            assert_eq(JET_CLI_COMMANDS[nested.group].actions[nested.action].handler, action.handler)
+            if handler.keeps_group && !(group.name == "inspect" && action.name == "env") {
+                assert_eq(handler.dispatch_word, group.name)
+            }
+            normalized := [String]{group.name, action.name, "tail"}
+            if !handler.keeps_group {
+                normalized = [String]{handler.dispatch_word, normalized[2]}
+            }
+            expected :: if handler.keeps_group -> [String]{group.name, action.name, "tail"} else -> [String]{handler.dispatch_word, "tail"}
+            assert_eq(normalized, expected)
+        }
+    }
+}
+
+// Rust `no_command_declared_in_both_tables` (CLI.rs:3783-3803).
+#Test("no_command_declared_in_both_tables") {
+    exceptions :: [String]{
+        // CLI.rs:796,1168: Rust test stale vs its table (PortLead-4).
+        "inspect bind",
+        // CLI.rs:794,1444: Rust test stale vs its table (PortLead-4).
+        "inspect audit",
+    }
+    loop group in JET_CLI_COMMANDS {
+        loop action in group.actions {
+            handler_index :: jet_cli_handler_index(action.handler) ?? panic("missing handler")
+            handler :: JET_CLI_HANDLERS[handler_index]
+            if handler.keeps_group -> next
+            loop command in JET_CLI_COMMANDS {
+                if command.name == handler.dispatch_word {
+                    assert(exceptions.contains("{group.name} {action.name}"))
+                    assert_eq(handler.dispatch_word, action.name)
+                }
+            }
+        }
+    }
+}
+
+// Rust `is_help_flag_recognizes_both_spellings` (CLI.rs:3805-3811).
+#Test("is_help_flag_recognizes_both_spellings") {
+    assert(jet_cli_is_help_flag("--help"))
+    assert(jet_cli_is_help_flag("-h"))
+    assert(!jet_cli_is_help_flag("--json"))
+    assert(!jet_cli_is_help_flag("help"))
+    assert(!jet_cli_is_help_flag("--help=yes"))
+}
+
+// Rust `command_group_usage_lists_every_action` (CLI.rs:3861-3875).
+#Test("command_group_usage_lists_every_action") {
+    loop group in JET_CLI_COMMANDS {
+        if group.actions.len() == 0 -> next
+        text :: jet_cli_group_usage(group.name)
+        loop action in group.actions -> assert(text.contains(action.name))
+    }
+    assert_eq(jet_cli_group_usage("no-such-group"), "")
+}
+
+// Rust `help_copy_uses_sentence_case_descriptions_and_title_case_chrome` (CLI.rs:3877-3899).
+fn registry_test_starts_uppercase(text: String) -> Bool Never! {
+    if text.is_empty() -> return false
+    first :: text.slice(0..<1)
+    first.to_upper() == first && first.to_lower() != first
+}
+#Test("help_copy_uses_sentence_case_descriptions_and_title_case_chrome") {
+    loop command in JET_CLI_COMMANDS {
+        assert(registry_test_starts_uppercase(command.summary))
+        loop action in command.actions -> assert(registry_test_starts_uppercase(action.summary))
+    }
+    loop flag in JET_CLI_FLAGS -> assert(registry_test_starts_uppercase(flag.help))
+    help :: jet_cli_usage_page("frequency")
+    assert(help.contains("\nUsage:\n"))
+    assert(help.contains("\nFlags:\n"))
+    loop group in JET_CLI_COMMANDS {
+        if group.actions.len() > 0 -> assert(help.contains("\n{jet_cli_group_label(group.name)} Commands:\n"))
+    }
+}
+
+// Rust `frequency_ranks_order_every_command_exactly_once` (CLI.rs:3901-3910).
+#Test("frequency_ranks_order_every_command_exactly_once") {
+    ranks := [Int]{}
+    expected := [Int]{}
+    loop (index, command) in JET_CLI_COMMANDS {
+        &ranks.push(command.frequency_rank)
+        &expected.push(index + 1)
+    }
+    &ranks.sort()
+    assert_eq(ranks, expected)
+}
+
+// Rust `retired_routes_have_zero_live_registry_rows` metadata half (CLI.rs:3951-3952).
+// Help/Completions.jet owns its row-absence and generated-surface assertions.
+#Test("retired command metadata and every fix") {
+    expected :: [String]{"jet inspect types", "jet inspect rights", "jet inspect gates", "jet inspect rights", "jet inspect build", "jet inspect build", "jet test --measure", "jet dev <file.jet> --swap", "jetpack hangar / jet clean / jet fetch", "jet fetch", "jetpack hangar verify", "jetpack hangar", "jetpack hangar", "jet clean", "jet fetch --lock <script.jet>", "jet fetch --lock <script.jet>"}
+    assert_eq(JET_CLI_RETIRED.len(), expected.len())
+    loop (index, retired) in JET_CLI_RETIRED {
+        assert(retired.category == JetCLIRetirementCategory.Semantic)
+        assert_eq(retired.error_code, "E2101")
+        assert(retired.rewrite == None)
+        assert_eq(jet_cli_retired_fix(retired, [String]{}), expected[index])
+    }
+}
+
+#Test("retired longest match and argument-sensitive fixes") {
+    assert(jet_cli_retired_command([String]{}) == None)
+    assert(jet_cli_retired_command([String]{"build"}) == None)
+    assert(jet_cli_retired_command([String]{"store lock"}) == None)
+    index :: jet_cli_retired_command([String]{"store", "lock", "script.jet", "ignored"}) ?? panic("missing retired store lock")
+    row :: JET_CLI_RETIRED[index]
+    assert_eq(row.spelling, "store lock")
+    assert_eq(jet_cli_retired_fix(row, [String]{"store", "lock", "脚本.jet", "ignored"}), "jet fetch --lock 脚本.jet")
+    store :: jet_cli_retired_command([String]{"store", "unknown"}) ?? panic("missing store root")
+    assert_eq(JET_CLI_RETIRED[store].spelling, "store")
+    serve_index :: jet_cli_retired_command([String]{"serve"}) ?? panic("missing serve")
+    lock_index :: jet_cli_retired_command([String]{"lock"}) ?? panic("missing lock")
+    assert_eq(jet_cli_retired_fix(JET_CLI_RETIRED[serve_index], [String]{"serve", "main.jet", "tail"}), "jet dev main.jet --swap")
+    assert_eq(jet_cli_retired_fix(JET_CLI_RETIRED[lock_index], [String]{"lock", "main.jet", "tail"}), "jet fetch --lock main.jet")
+    assert_eq(jet_cli_retired_fix(row, [String]{"store", "lock"}), "jet fetch --lock <script.jet>")
+    report :: jet_cli_retired_report([String]{"lock"}, false) ?? panic("missing retired report")
+    assert(report.contains("E2101"))
+    assert(report.contains("Run `jet fetch --lock <script.jet>`"))
+    assert(jet_cli_retired_report([String]{"build"}, false) == None)
+}
+
+#Test("retired roots and canonical teaching exclusions") {
+    loop retired in JET_CLI_RETIRED {
+        assert_eq(jet_cli_is_retired_root(retired.spelling), !retired.spelling.contains(" "))
+        if !retired.spelling.contains(" ") -> assert(!jet_cli_is_canonical_top_level(retired.spelling))
+    }
+    assert(!jet_cli_is_retired_root(""))
+    assert(!jet_cli_is_retired_root("build"))
+    assert(!jet_cli_is_canonical_top_level("install"))
+    assert(!jet_cli_is_canonical_top_level("publish"))
+    assert(jet_cli_is_canonical_top_level("build"))
+    // Like Rust, this helper filters teaching routes; it is not a membership query.
+    assert(jet_cli_is_canonical_top_level("unregistered"))
+}
+
+// Rust `flash_registry_matches_parser_surface` owns-vocabulary assertion (CLI.rs:3508).
+#Test("bespoke flag vocabulary matches every Rust spelling") {
+    names :: [String]{"env", "cc", "c++", "remote", "shared-store", "dev", "devtools", "push", "trust", "bridge", "services", "image", "new", "flash", "os", "add", "remove", "bind", "lsp", "config", "update", "outdated", "search", "info", "import", "explain", "logs", "clean", "fetch", "publish", "yank", "keygen", "key", "vendor", "audit", "sbom", "repl", "notebook", "schema", "db", "semindex", "impact", "codemod", "generate", "expand", "diff", "merge", "review", "prove", "budget", "perf", "completions", "self-update"}
+    loop name in names -> assert(jet_cli_owns_flag_vocabulary(name))
+    generic :: [String]{"build", "check", "run", "test", "inspect", "registry", "", "FLASH", "unregistered"}
+    loop name in generic -> assert(!jet_cli_owns_flag_vocabulary(name))
+}
+
+// Rust `parser_inventory_guard_is_clean` (CLI.rs:3955-3963).
+#Test("parser_inventory_guard_is_clean") {
+    assert_eq(jet_cli_parser_inventory_violations(), [String]{})
+    assert_eq(jet_cli_parser_inventory_violations_against(None), [String]{})
+    assert_eq(jet_cli_parser_inventory_violations_against_slices(None), [String]{})
+}
+
+fn registry_test_dispatch_words() -> [String] Never! {
+    words := [String]{"install"}
+    loop command in JET_CLI_COMMANDS {
+        if command.actions.len() == 0 || !command.exhaustive {
+            if !words.contains(command.name) -> &words.push(command.name)
+        }
+        loop action in command.actions {
+            handler_index :: jet_cli_handler_index(action.handler) ?? panic("missing handler")
+            word :: JET_CLI_HANDLERS[handler_index].dispatch_word
+            if !words.contains(word) -> &words.push(word)
+        }
+    }
+    words
+}
+
+#Test("parser inventory accepts complete explicit host slices") {
+    words :: registry_test_dispatch_words()
+    assert_eq(jet_cli_parser_inventory_violations_against(Val(words)), [String]{})
+    first := [String]{}
+    second := [String]{}
+    loop (index, word) in words {
+        if index % 2 == 0 -> &first.push(word) else -> &second.push(word)
+    }
+    groups :: [[String]]{first, [String]{}, second}
+    assert_eq(jet_cli_parser_inventory_violations_against_slices(Val(groups)), [String]{})
+    assert(jet_cli_inventory_registry_has_dispatch("install"))
+    assert(jet_cli_inventory_registry_has_dispatch("os"))
+    assert(jet_cli_inventory_registry_has_dispatch("env"))
+    assert(!jet_cli_inventory_registry_has_dispatch("registry"))
+    assert(!jet_cli_inventory_registry_has_dispatch("store"))
+}
+
+#Test("parser inventory reports missing and unregistered host routes in order") {
+    complete :: registry_test_dispatch_words()
+    missing := [String]{}
+    loop word in complete { if word != "build" && word != "publish" -> &missing.push(word) }
+    violations :: jet_cli_parser_inventory_violations_against(Val(missing))
+    assert_eq(violations, [String]{"nested action `registry publish` routes to missing host dispatch `publish`", "canonical command `build` has no host dispatch route"})
+    groups :: [[String]]{complete, [String]{"unregistered", "store", "unregistered"}}
+    assert_eq(jet_cli_parser_inventory_violations_against_slices(Val(groups)), [String]{"host dispatch `unregistered` has no registered parser route", "host dispatch `store` has no registered parser route", "host dispatch `unregistered` has no registered parser route"})
+    empty :: jet_cli_parser_inventory_violations_against(Val([String]{}))
+    expected := 0
+    loop command in JET_CLI_COMMANDS {
+        if command.actions.len() == 0 && jet_cli_is_canonical_top_level(command.name) -> expected += 1
+        expected += command.actions.len()
+    }
+    assert_eq(empty.len(), expected)
+    assert_eq(empty[0], "nested action `registry publish` routes to missing host dispatch `publish`")
+    assert_eq(empty, jet_cli_parser_inventory_violations_against_slices(Val([[String]]{})))
+}

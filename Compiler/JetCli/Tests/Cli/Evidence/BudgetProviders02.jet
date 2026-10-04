@@ -1,0 +1,413 @@
+use std.fs as fs
+use std.env as env
+use std.process.[Command, Stdio]
+use std.process as process
+use std.time.[Duration, Instant]
+use std.sync.[Arc, Mutex]
+use std.sync.atomic.[AtomicU64, Ordering]
+use std.thread as thread
+use std.io as io
+use c.c as native
+use core.sys.target as target
+
+// Same canonical BudgetProviders test module as BudgetProviders.jet, not a
+// second provider owner. Native process/filesystem/thread/test-runner seams
+// remain GATE #4494; selected-width C varargs remain GATE #4483.
+// Rust: Source/BudgetProviders.rs:3262
+PROCESS_TEST_LOCK :: Mutex.new(())
+// Rust: Source/BudgetProviders.rs:3326
+PROVIDER_TEST_NEXT :: AtomicU64.new(0)
+
+// Rust: Source/BudgetProviders.rs:3266
+#Test("process_cpu_time_conversion_is_exact_and_rejects_invalid_timevals") {
+    if target.selected_os() == "linux" {
+        assert_eq(process_timeval_ns(2, 345_678, "test").unwrap(), U128{2_345_678_000})
+        assert(process_timeval_ns(-1, 0, "test").is_err())
+        assert(process_timeval_ns(0, 1_000_000, "test").is_err())
+    }
+}
+
+// Rust: Source/BudgetProviders.rs:3275
+fn request() -> ProviderRequest {
+    ProviderRequest{
+        schema: "jet.provider-request", version: 1,
+        request_id: "1".repeat(64), provider_hash: "2".repeat(64), context_hash: "3".repeat(64),
+        specs: [ProviderSpec{budget_hash: "4".repeat(64), metric: "BenchTime"}],
+        workload: CanonicalJson.Null, policy: CanonicalJson.Null
+    }
+}
+// Rust: Source/BudgetProviders.rs:3290
+fn valid_events(request: &ProviderRequest) -> [ProviderEvent] {
+    [
+        ProviderEvent.Sample{spec: 0, metric: "BenchTime", value: Rational.integer(42)},
+        ProviderEvent.Complete{request_id: request.request_id, samples: 1}
+    ]
+}
+// Rust: Source/BudgetProviders.rs:3303
+fn panic_provider(_: &ProviderRequest, _: &ProviderCancellation) -> [ProviderEvent] ProviderFailure! {
+    panic("hostile provider panic")
+}
+// Rust: Source/BudgetProviders.rs:3309
+fn unavailable_provider(request: &ProviderRequest, _: &ProviderCancellation) -> [ProviderEvent] ProviderFailure! {
+    Ok([
+        ProviderEvent.Unavailable{spec: 0, reason: "probe could not observe ready event", details: []},
+        ProviderEvent.Complete{request_id: request.request_id, samples: 0}
+    ])
+}
+// Rust: Source/BudgetProviders.rs:3325
+fn temporary(name: String) -> OSPath {
+    env.temp_dir().join("jet-budget-provider-{process.id()}-{name}-{PROVIDER_TEST_NEXT.fetch_add(1, Ordering.Relaxed)}")
+}
+
+// Rust: Source/BudgetProviders.rs:3334
+#Test("compiler_probe_rejects_forged_workload_identity_before_execution") {
+    root :: temporary("compile-identity")
+    fs.create_dir_all(root.join("src")).unwrap()
+    fs.create_dir_all(root.join("edits")).unwrap()
+    fs.write(root.join("package.jet"), "name: \"identity\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(root.join("src/run.jet"), "fn run() {}\n").unwrap()
+    fs.write(root.join("edits/change.patch"), "patch\n").unwrap()
+    workload :: compiler_probe_workload(root, root.join("src/run.jet"), "Edit", "cli", "dev", Val("edits/change.patch")).unwrap()
+    fields := if workload == { .Object(fields) -> fields, else -> panic("workload object") }
+    fields["source_tree_sha256"] = CanonicalJson.String("0".repeat(64))
+    req :: ProviderRequest{
+        schema: "jet.provider-request", version: 1,
+        request_id: "1".repeat(64), provider_hash: "2".repeat(64), context_hash: "3".repeat(64),
+        specs: [ProviderSpec{budget_hash: "4".repeat(64), metric: "CompileTime(P95)"}],
+        workload: CanonicalJson.Object(^fields), policy: CanonicalJson.Null
+    }
+    cancellation :: ProviderCancellation{cancelled: Arc.new(AtomicBool.new(false))}
+    failure :: compiler_latency_provider(&req, &cancellation).unwrap_err()
+    assert_eq(failure.class, FailureClass.Incompatible)
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: Source/BudgetProviders.rs:3383
+#Test("compiler_probe_applies_a_deterministic_one_file_edit") {
+    root :: temporary("edit-patch")
+    fs.create_dir_all(root.join("src")).unwrap()
+    fs.write(root.join("src/run.jet"), "fn run() {}\n").unwrap()
+    fs.write(root.join("change.patch"), "--- a/src/run.jet\n+++ b/src/run.jet\n@@ -1,1 +1,1 @@\n-fn run() {}\n+fn run() { print(\"fixture\") }\n").unwrap()
+    apply_unified_patch(root, "change.patch").unwrap()
+    assert_eq(fs.read_to_string(root.join("src/run.jet")).unwrap(), "fn run() { print(\"fixture\") }\n")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: Source/BudgetProviders.rs:3397
+#Test("compiler_probe_rejects_unsupported_profile_before_execution") {
+    root :: temporary("compile-profile")
+    fs.create_dir_all(root.join("src")).unwrap()
+    fs.write(root.join("package.jet"), "name: \"profile\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(root.join("src/run.jet"), "fn run() {}\n").unwrap()
+    error :: compiler_probe_workload(root, root.join("src/run.jet"), "Clean", "cli", "unsupported", None).unwrap_err()
+    assert(error.contains("profile `unsupported` is unsupported"), error)
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: Source/BudgetProviders.rs:3423
+#Test("compiler_probe_rejects_pathological_source_before_hashing") {
+    root :: temporary("compile-oversized-source")
+    fs.create_dir_all(root.join("src")).unwrap()
+    fs.write(root.join("package.jet"), "name: \"large\"\nversion: \"0.1.0\"\n").unwrap()
+    source :: root.join("src/run.jet")
+    file :: fs.File.create(source).unwrap()
+    file.set_len(COMPILE_MAX_PROJECT_BYTES + 1).unwrap()
+    error :: compiler_probe_workload(root, source, "Clean", "cli", "dev", None).unwrap_err()
+    assert(error.contains("64 MiB project limit"), error)
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: Source/BudgetProviders.rs:3441
+#Test("compiler_probe_identity_names_the_production_lens_for_each_profile") {
+    root :: temporary("compile-lenses")
+    fs.create_dir_all(root.join("src")).unwrap()
+    fs.write(root.join("package.jet"), "name: \"lenses\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(root.join("src/run.jet"), "fn run() {}\n").unwrap()
+    jit :: compiler_probe_version(root, "Clean", "cli", "dev", None).unwrap()
+    aot :: compiler_probe_version(root, "Clean", "cli", "release", None).unwrap()
+    assert(jit.contains("backend=cranelift-jit;linker=cranelift-jit"), jit)
+    assert(aot.contains("backend=rustc-aot;linker="), aot)
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: Source/BudgetProviders.rs:3461
+fn assert_last_group_gone() {
+    group :: LAST_ISOLATED_GROUP.load(Ordering.SeqCst) as I32
+    deadline :: Instant.now() + Duration.from_millis(100)
+    #Unsafe("probe the recorded isolated worker process group with kill signal zero") {
+        loop native.kill(-group, 0) == 0 && Instant.now() < deadline -> thread.yield_now()
+        assert_ne(native.kill(-group, 0), 0, "isolated provider process group survived timeout")
+    }
+}
+// Rust: Source/BudgetProviders.rs:3477
+SYS_PIDFD_SEND_SIGNAL :: ISize{424}
+// Rust: Source/BudgetProviders.rs:3479
+SYS_PIDFD_OPEN :: ISize{434}
+// Rust: Source/BudgetProviders.rs:3481
+struct PidFd { file: fs.File }
+// Rust: Source/BudgetProviders.rs:3484
+fn PidFd.open(pid: I32) -> PidFd io.Error! {
+    #Unsafe("open a Linux pidfd and transfer exactly one owned descriptor to File") {
+        fd :: native.syscall(SYS_PIDFD_OPEN, pid, U32{0})
+        if fd < 0 -> return Err(io.Error.last_os_error())
+        Ok(PidFd{file: fs.File.from_raw_fd(fd as I32)})
+    }
+}
+// Rust: Source/BudgetProviders.rs:3496
+fn PidFd.signal(self: &PidFd, signal: I32) io.Error! {
+    #Unsafe("pidfd signal syscall borrows the live descriptor and passes null siginfo") {
+        if native.syscall(SYS_PIDFD_SEND_SIGNAL, self.file.as_raw_fd(), signal, std.ptr.null[U8](), U32{0}) == 0 -> return Ok(())
+        Err(io.Error.last_os_error())
+    }
+}
+// Rust: Source/BudgetProviders.rs:3516
+fn PidFd.alive(self: &PidFd) -> Bool io.Error! {
+    if self.signal(0) == {
+        .Ok(_) -> Ok(true),
+        .Err(error) -> {
+            if error.raw_os_error() == Val(3) -> return Ok(false)
+            Err(error)
+        }
+    }
+}
+
+// Rust: Source/BudgetProviders.rs:3527
+#Test("isolated_worker_dies_with_supervisor") {
+    if target.selected_os() == "linux" {
+        CHILD_ENV :: "JET_TEST_ISOLATED_WORKER_SUPERVISOR"
+        PID_PATH_ENV :: "JET_TEST_ISOLATED_WORKER_PID_PATH"
+        if env.var_os(CHILD_ENV).is_some() {
+            path :: OSPath.from_native(env.var_os(PID_PATH_ENV).expect("worker PID path"))
+            _ :: run_isolated_bytes(Duration.from_secs(10), "parent-death regression", fn() -> [U8] ProviderFailure! {
+                fs.write(path, process.id().to_string()) ?? return Err(ProviderFailure.operation(FailureClass.Execution, "cannot publish isolated worker PID: {err}"))
+                loop -> std.hint.spin_loop()
+            })
+        } else {
+            guard :: PROCESS_TEST_LOCK.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+            path :: temporary("isolated-worker-pid")
+            // Keep the original exact filter: canonical test-module publication
+            // must retain the BudgetProviders::tests name for self-reexecution.
+            supervisor := Command.new(env.current_exe().unwrap())
+                .args(["--exact", "BudgetProviders::tests::isolated_worker_dies_with_supervisor", "--nocapture"])
+                .env(CHILD_ENV, "1").env(PID_PATH_ENV, path)
+                .stdout(Stdio.null()).stderr(Stdio.null()).spawn().unwrap()
+            publish_deadline :: Instant.now() + Duration.from_secs(5)
+            worker_pid := I32?{None}
+            loop worker_pid.is_none() {
+                if fs.read_to_string(path) == {
+                    .Ok(text) -> { if text.parse[I32]() == { .Ok(pid) -> worker_pid = Val(pid), .Err(_) -> {} } },
+                    .Err(_) -> {}
+                }
+                if worker_pid.is_some() -> break
+                if Instant.now() >= publish_deadline {
+                    _ :: supervisor.wait()
+                    _ :: fs.remove_file(path)
+                    panic("isolated worker did not publish its PID before the deadline")
+                }
+                assert(supervisor.try_wait().unwrap().is_none(), "isolated worker supervisor exited before publishing its PID")
+                thread.sleep(Duration.from_millis(2))
+            }
+            worker :: PidFd.open(worker_pid.unwrap()) ?? {
+                _ :: supervisor.wait()
+                _ :: fs.remove_file(path)
+                panic("cannot open isolated worker pidfd: {err}")
+            }
+            supervisor.kill().unwrap()
+            supervisor.wait().unwrap()
+            exit_deadline :: Instant.now() + Duration.from_secs(2)
+            loop worker.alive().unwrap() && Instant.now() < exit_deadline -> thread.sleep(Duration.from_millis(2))
+            gone :: !worker.alive().unwrap()
+            if !gone {
+                worker.signal(9).unwrap()
+                cleanup_deadline :: Instant.now() + Duration.from_secs(2)
+                loop worker.alive().unwrap() && Instant.now() < cleanup_deadline -> thread.sleep(Duration.from_millis(2))
+            }
+            _ :: fs.remove_file(path)
+            assert(gone, "isolated worker survived its supervisor")
+        }
+    }
+}
+
+// Rust: Source/BudgetProviders.rs:3615
+#Test("file_transport_round_trips_and_rejects_hostile_frames") {
+    guard :: PROCESS_TEST_LOCK.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+    req :: request()
+    path :: temporary("response")
+    fs.write(path, encode_stream(valid_events(&req))).unwrap()
+    registry := ProviderRegistry{providers: [:]}
+    registry.register_file("fixture", ~path).unwrap()
+    evidence :: registry.collect("fixture", &req, Duration.from_secs(1)).unwrap()
+    assert_eq(evidence.events, valid_events(&req))
+    truncated := ~MAGIC
+    &truncated.extend_from_slice([U8]{1, 0, 0})
+    trailing := encode_stream(valid_events(&req))
+    &trailing.push(99)
+    loop (name, bytes) in [("bad-magic", "NOTBUDGET\n".bytes()), ("truncated", ^truncated), ("trailing", ^trailing)] {
+        hostile :: temporary(name)
+        fs.write(hostile, bytes).unwrap()
+        registry := ProviderRegistry{providers: [:]}
+        registry.register_file("hostile", ~hostile).unwrap()
+        error :: registry.collect("hostile", &req, Duration.from_secs(1)).unwrap_err()
+        assert_eq(error.diagnostic("api").code, "E2908")
+        _ :: fs.remove_file(hostile)
+    }
+    _ :: fs.remove_file(path)
+}
+
+// Rust: Source/BudgetProviders.rs:3655
+#Test("in_process_panic_and_unavailable_are_separate_diagnostic_classes") {
+    req :: request()
+    registry := ProviderRegistry{providers: [:]}
+    registry.register_in_process("panic", panic_provider).unwrap()
+    failure :: registry.collect("panic", &req, Duration.from_secs(1)).unwrap_err()
+    diagnostic :: failure.diagnostic("api-p99")
+    assert_eq((diagnostic.code, diagnostic.what), ("E2908", "performance budget operation failed"))
+    registry.register_in_process("unavailable", unavailable_provider).unwrap()
+    evidence :: registry.collect("unavailable", &req, Duration.from_secs(1)).unwrap()
+    diagnostic :: unavailable_if_too_few("api-p99", &evidence, 20).unwrap_err()
+    assert_eq((diagnostic.code, diagnostic.what), ("E2906", "performance budget api-p99 has no usable evidence"))
+    assert(diagnostic.why.contains("ready event"))
+    // Rust: Source/BudgetProviders.rs:3681
+    hostile :: fn(_: &ProviderRequest, _: &ProviderCancellation) -> [ProviderEvent] ProviderFailure! {
+        loop -> std.hint.spin_loop()
+    }
+    guard :: PROCESS_TEST_LOCK.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+    registry.register_in_process("hostile", hostile).unwrap()
+    started :: Instant.now()
+    loop _ in 0..<25 {
+        failure :: registry.collect("hostile", &req, Duration.from_millis(5)).unwrap_err()
+        assert_eq(failure.class, FailureClass.Timeout)
+        assert_last_group_gone()
+        assert_eq(ACTIVE_ISOLATED_WORKERS.load(Ordering.SeqCst), 0)
+    }
+    assert(started.elapsed() < Duration.from_secs(1))
+}
+
+// Rust: Source/BudgetProviders.rs:3707
+#Test("subprocess_uses_exact_path_and_is_bounded_and_timed") {
+    if target.selected_family() == "unix" {
+        guard :: PROCESS_TEST_LOCK.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+        req :: request()
+        response :: temporary("subprocess-response")
+        fs.write(response, encode_stream(valid_events(&req))).unwrap()
+        script :: temporary("provider.sh")
+        fs.write(script, "#!/bin/sh\ncat '{response.display()}'\n").unwrap()
+        permissions := fs.metadata(script).unwrap().permissions()
+        permissions.set_mode(448)
+        fs.set_permissions(script, permissions).unwrap()
+        registry := ProviderRegistry{providers: [:]}
+        registry.register_subprocess("process", ~script).unwrap()
+        assert_eq(registry.collect("process", &req, Duration.from_secs(2)).unwrap().events, valid_events(&req))
+        sleeper :: temporary("sleep.sh")
+        fs.write(sleeper, "#!/bin/sh\nsleep 5\n").unwrap()
+        permissions := fs.metadata(sleeper).unwrap().permissions()
+        permissions.set_mode(448)
+        fs.set_permissions(sleeper, permissions).unwrap()
+        registry := ProviderRegistry{providers: [:]}
+        registry.register_subprocess("slow", ~sleeper).unwrap()
+        started :: Instant.now()
+        failure :: registry.collect("slow", &req, Duration.from_millis(30)).unwrap_err()
+        assert_eq(failure.class, FailureClass.Timeout)
+        assert(started.elapsed() < Duration.from_secs(2))
+        descendant :: temporary("descendant.sh")
+        fs.write(descendant, "#!/bin/sh\nsleep 5 &\nexit 0\n").unwrap()
+        permissions := fs.metadata(descendant).unwrap().permissions()
+        permissions.set_mode(448)
+        fs.set_permissions(descendant, permissions).unwrap()
+        registry := ProviderRegistry{providers: [:]}
+        registry.register_subprocess("descendant", ~descendant).unwrap()
+        started :: Instant.now()
+        failure :: registry.collect("descendant", &req, Duration.from_millis(30)).unwrap_err()
+        assert_eq(failure.class, FailureClass.Timeout)
+        assert(started.elapsed() < Duration.from_secs(1))
+        loop path in [response, script, sleeper, descendant] -> _ :: fs.remove_file(path)
+    }
+}
+
+// Rust: Source/BudgetProviders.rs:3771
+#Test("file_transport_rejects_symlinks_and_scalar_overflow") {
+    guard :: PROCESS_TEST_LOCK.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+    req :: request()
+    target_path :: temporary("target")
+    fs.write(target_path, encode_stream(valid_events(&req))).unwrap()
+    if target.selected_family() == "unix" {
+        link :: temporary("link")
+        std.os.unix.fs.symlink(target_path, link).unwrap()
+        registry := ProviderRegistry{providers: [:]}
+        registry.register_file("link", ~link).unwrap()
+        assert(registry.collect("link", &req, Duration.from_secs(1)).is_err())
+        _ :: fs.remove_file(link)
+    }
+    events :: [
+        ProviderEvent.Unavailable{spec: 0, reason: "x".repeat(513), details: []},
+        ProviderEvent.Complete{request_id: req.request_id, samples: 0}
+    ]
+    path :: temporary("detail")
+    fs.write(path, encode_stream(events)).unwrap()
+    registry := ProviderRegistry{providers: [:]}
+    registry.register_file("detail", ~path).unwrap()
+    assert(registry.collect("detail", &req, Duration.from_secs(1)).unwrap_err().reason.contains("512 scalars"))
+    loop file in [target_path, path] -> _ :: fs.remove_file(file)
+}
+
+// Rust: Source/BudgetProviders.rs:3817
+#Test("repeated_timed_file_readers_are_killed_and_reaped") {
+    if target.selected_family() == "unix" {
+        guard :: PROCESS_TEST_LOCK.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+        req :: request()
+        path :: temporary("delayed")
+        fs.write(path, encode_stream(valid_events(&req))).unwrap()
+        registry := ProviderRegistry{providers: [:]}
+        registry.register_file("delayed", ~path).unwrap()
+        FILE_READER_DELAY_MS.store(100, Ordering.SeqCst)
+        started :: Instant.now()
+        loop _ in 0..<25 {
+            failure :: registry.collect("delayed", &req, Duration.from_millis(5)).unwrap_err()
+            assert_eq(failure.class, FailureClass.Timeout)
+            assert_last_group_gone()
+            assert_eq(ACTIVE_FILE_READERS.load(Ordering.SeqCst), 0)
+        }
+        FILE_READER_DELAY_MS.store(0, Ordering.SeqCst)
+        assert(started.elapsed() < Duration.from_secs(1))
+        _ :: fs.remove_file(path)
+    }
+}
+
+// Rust: Source/BudgetProviders.rs:3843
+#Test("concurrent_isolated_workers_do_not_mask_file_reader_reaping") {
+    if target.selected_os() == "linux" {
+        // Rust: Source/BudgetProviders.rs:3844
+        hostile :: fn(_: &ProviderRequest, _: &ProviderCancellation) -> [ProviderEvent] ProviderFailure! {
+            loop -> std.hint.spin_loop()
+        }
+        guard :: PROCESS_TEST_LOCK.lock().unwrap_or_else(fn(poisoned) { poisoned.into_inner() })
+        workers := []
+        loop _ in 0..<4 {
+            &workers.push(thread.spawn(fn() {
+                req :: request()
+                registry := ProviderRegistry{providers: [:]}
+                registry.register_in_process("hostile", hostile).unwrap()
+                registry.collect("hostile", &req, Duration.from_millis(500)).unwrap_err()
+            }))
+        }
+        deadline :: Instant.now() + Duration.from_secs(1)
+        loop ACTIVE_ISOLATED_WORKERS.load(Ordering.SeqCst) < 4 && Instant.now() < deadline -> thread.yield_now()
+        assert(ACTIVE_ISOLATED_WORKERS.load(Ordering.SeqCst) >= 4, "hostile isolated workers did not overlap")
+        req :: request()
+        path :: temporary("parallel-delayed")
+        fs.write(path, encode_stream(valid_events(&req))).unwrap()
+        registry := ProviderRegistry{providers: [:]}
+        registry.register_file("delayed", ~path).unwrap()
+        FILE_READER_DELAY_MS.store(100, Ordering.SeqCst)
+        loop _ in 0..<10 {
+            failure :: registry.collect("delayed", &req, Duration.from_millis(5)).unwrap_err()
+            assert_eq(failure.class, FailureClass.Timeout)
+            assert_eq(ACTIVE_FILE_READERS.load(Ordering.SeqCst), 0)
+            assert(ACTIVE_ISOLATED_WORKERS.load(Ordering.SeqCst) >= 4, "generic workers ended before file-reader lifecycle was checked")
+        }
+        FILE_READER_DELAY_MS.store(0, Ordering.SeqCst)
+        loop worker in workers -> assert_eq(worker.join().unwrap().class, FailureClass.Timeout)
+        assert_eq(ACTIVE_FILE_READERS.load(Ordering.SeqCst), 0)
+        _ :: fs.remove_file(path)
+    }
+}

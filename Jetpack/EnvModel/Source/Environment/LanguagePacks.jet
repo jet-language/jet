@@ -2,7 +2,7 @@
 // the typed `languages` selections that expand into ordinary package refs.
 
 // The tier-one host platforms every built-in pack supports.
-@ENVMODEL_LANGUAGE_PLATFORMS :: [String]{"aarch64-macos", "aarch64-linux", "x86_64-macos", "x86_64-linux"}
+ENVMODEL_LANGUAGE_PLATFORMS :: prep { [String]{"aarch64-macos", "aarch64-linux", "x86_64-macos", "x86_64-linux"} }
 
 pub struct LanguagePack {
     pub name: String{""}
@@ -314,9 +314,9 @@ fn envmodel_merge_language_fact(facts: &[String: String], pack_name: String, kin
 // version or channel marker.
 fn envmodel_versioned_package(package: String, version: String?) -> String Never! {
     selected :: version ?? return package
-    parts :: package.cut_last(@REF_PROVIDER_AT) ?? return package
-    if parts.before.contains("#version=") || parts.after.contains(@REF_CHANNEL_MARKER) -> return package
-    "{parts.before}{@REF_PROVIDER_AT}{parts.after}{@REF_CHANNEL_MARKER}version={selected}"
+    parts :: package.cut_last(REF_PROVIDER_AT) ?? return package
+    if parts.before.contains("#version=") || parts.after.contains(REF_CHANNEL_MARKER) -> return package
+    "{parts.before}{REF_PROVIDER_AT}{parts.after}{REF_CHANNEL_MARKER}version={selected}"
 }
 
 // The four core language families with their curated command maps.
@@ -327,7 +327,7 @@ fn envmodel_core_language_packs() -> [LanguagePack] Never! {
             packages: [String]{"rustc@nixpkgs", "cargo@nixpkgs", "rust-analyzer@nixpkgs", "rustfmt@nixpkgs", "clippy@nixpkgs"},
             commands: [String: String]{"rustc": "rustc", "cargo": "cargo", "rust-analyzer": "rust-analyzer", "rustfmt": "rustfmt", "clippy": "clippy-driver"},
             host: "native",
-            platforms: @ENVMODEL_LANGUAGE_PLATFORMS,
+            platforms: ENVMODEL_LANGUAGE_PLATFORMS,
             license: "Apache-2.0 OR MIT",
             required_tools: [String]{"rustc", "cargo", "rust-analyzer", "rustfmt", "clippy"}
         },
@@ -337,7 +337,7 @@ fn envmodel_core_language_packs() -> [LanguagePack] Never! {
             venv_packages: [String]{"pythonPackages.virtualenv@nixpkgs"},
             commands: [String: String]{"python": "python3", "pip": "pip"},
             host: "native",
-            platforms: @ENVMODEL_LANGUAGE_PLATFORMS,
+            platforms: ENVMODEL_LANGUAGE_PLATFORMS,
             license: "MIT OR PSF-2.0",
             required_tools: [String]{"python", "pip"}
         },
@@ -346,7 +346,7 @@ fn envmodel_core_language_packs() -> [LanguagePack] Never! {
             packages: [String]{"go@nixpkgs", "gopls@nixpkgs"},
             commands: [String: String]{"go": "go", "gofmt": "gofmt", "gopls": "gopls"},
             host: "native",
-            platforms: @ENVMODEL_LANGUAGE_PLATFORMS,
+            platforms: ENVMODEL_LANGUAGE_PLATFORMS,
             license: "BSD-3-Clause",
             required_tools: [String]{"go", "gofmt", "gopls"}
         },
@@ -355,7 +355,7 @@ fn envmodel_core_language_packs() -> [LanguagePack] Never! {
             packages: [String]{"nodejs@nixpkgs"},
             commands: [String: String]{"node": "node", "npm": "npm", "npx": "npx"},
             host: "native",
-            platforms: @ENVMODEL_LANGUAGE_PLATFORMS,
+            platforms: ENVMODEL_LANGUAGE_PLATFORMS,
             license: "MIT",
             required_tools: [String]{"node", "npm", "npx"}
         }
@@ -372,7 +372,7 @@ struct LanguageCatalogRow {
     fn pack(self) -> LanguagePack Never! {
         commands := [String: String]{}
         loop tool in self.tools -> commands[tool] = tool
-        LanguagePack{name: self.name, packages: self.packages, commands: commands, host: "native", platforms: @ENVMODEL_LANGUAGE_PLATFORMS, license: self.license, required_tools: self.tools}
+        LanguagePack{name: self.name, packages: self.packages, commands: commands, host: "native", platforms: ENVMODEL_LANGUAGE_PLATFORMS, license: self.license, required_tools: self.tools}
     }
 }
 

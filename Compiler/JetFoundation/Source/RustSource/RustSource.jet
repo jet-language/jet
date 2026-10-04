@@ -1,0 +1,426 @@
+// Text-level scans of generated Rust source. Comments/literals are masked
+// byte-for-byte; stripping uses those byte offsets against the original text.
+// Where the Rust lexer is while masking.
+enum RustSourceMaskState {
+    Code
+    LineComment
+    BlockComment(Int)
+    Str(Bool)
+    RawStr(Int)
+    Char(Bool)
+}
+
+// `source` with comments, strings and character literals replaced by spaces,
+// byte for byte; newlines inside them are kept so lines stay aligned.
+pub fn rust_code_mask(source: String) -> String Never! {
+    bytes :: source.bytes()
+    escaped_char_ends := [Int]{}
+    out := [U8]{}
+    state := RustSourceMaskState.Code
+    index := 0
+    loop index < bytes.len() {
+        byte :: bytes[index]
+        code :: Int.from_u8(byte)
+        blank :: if code == 10 -> byte else -> U8{32}
+        if state == {
+            .Code -> {
+                if code == 39 && pkg_bytes_code(bytes, index + 1) == 92 && escaped_char_ends.len() == 0 {
+                    escaped_char_ends = rust_source_escaped_char_ends(bytes)
+                }
+                raw_start :: rust_source_raw_string_start(bytes, index)
+                if {
+                    code == 47 && pkg_bytes_code(bytes, index + 1) == 47 -> {
+                        rust_source_push_spaces(&out, 2)
+                        index += 2
+                        state = RustSourceMaskState.LineComment
+                    }
+                    code == 47 && pkg_bytes_code(bytes, index + 1) == 42 -> {
+                        rust_source_push_spaces(&out, 2)
+                        index += 2
+                        state = RustSourceMaskState.BlockComment(1)
+                    }
+                    raw_start != None -> {
+                        found :: raw_start ?? panic("raw string start was just found")
+                        rust_source_push_spaces(&out, found.prefix_len)
+                        index += found.prefix_len
+                        state = RustSourceMaskState.RawStr(found.hashes)
+                    }
+                    code == 34 || (code == 98 && pkg_bytes_code(bytes, index + 1) == 34) -> {
+                        width :: if code == 98 -> 2 else -> 1
+                        rust_source_push_spaces(&out, width)
+                        index += width
+                        state = RustSourceMaskState.Str(false)
+                    }
+                    code == 39 && rust_source_char_literal_end(bytes, index, escaped_char_ends) != None -> {
+                        &out.push(U8{32})
+                        index += 1
+                        state = RustSourceMaskState.Char(false)
+                    }
+                    else -> {
+                        &out.push(byte)
+                        index += 1
+                    }
+                }
+            }
+            .LineComment -> {
+                &out.push(blank)
+                if code == 10 -> state = RustSourceMaskState.Code
+                index += 1
+            }
+            .BlockComment(nesting) -> {
+                if {
+                    code == 47 && pkg_bytes_code(bytes, index + 1) == 42 -> {
+                        rust_source_push_spaces(&out, 2)
+                        index += 2
+                        state = RustSourceMaskState.BlockComment(nesting + 1)
+                    }
+                    code == 42 && pkg_bytes_code(bytes, index + 1) == 47 -> {
+                        rust_source_push_spaces(&out, 2)
+                        index += 2
+                        state = if nesting == 1 -> RustSourceMaskState.Code else -> RustSourceMaskState.BlockComment(nesting - 1)
+                    }
+                    else -> {
+                        &out.push(blank)
+                        index += 1
+                    }
+                }
+            }
+            .Str(escaped) -> {
+                &out.push(blank)
+                index += 1
+                if {
+                    escaped -> state = RustSourceMaskState.Str(false)
+                    code == 92 -> state = RustSourceMaskState.Str(true)
+                    code == 34 -> state = RustSourceMaskState.Code
+                    else -> {}
+                }
+            }
+            .RawStr(hashes) -> {
+                closes :: code == 34 && rust_source_all_hashes(bytes, index + 1, hashes)
+                &out.push(blank)
+                index += 1
+                if closes {
+                    rust_source_push_spaces(&out, hashes)
+                    index += hashes
+                    state = RustSourceMaskState.Code
+                }
+            }
+            .Char(escaped) -> {
+                &out.push(U8{32})
+                index += 1
+                if {
+                    escaped -> state = RustSourceMaskState.Char(false)
+                    code == 92 -> state = RustSourceMaskState.Char(true)
+                    code == 39 -> state = RustSourceMaskState.Code
+                    else -> {}
+                }
+            }
+        }
+    }
+    String.from_bytes(out) ?? panic("Rust source mask preserves UTF-8 bytes")
+}
+
+fn rust_source_push_spaces(out: &[U8], count: Int) Never! {
+    loop _ in 0..<count -> &out.push(U8{32})
+}
+
+// Whether `bytes[start..<start + count]` exists and is all `#`.
+fn rust_source_all_hashes(bytes: [U8], start: Int, count: Int) -> Bool Never! {
+    if start + count > bytes.len() -> return false
+    loop offset in 0..<count {
+        if Int.from_u8(bytes[start + offset]) != 35 -> return false
+    }
+    true
+}
+
+struct RustSourceRawStringStart {
+    prefix_len: Int
+    hashes: Int
+}
+
+// A raw string opener at `at` (`r"`, `r#"`, `br##"`, ...): the opener's byte
+// length and its hash count.
+fn rust_source_raw_string_start(bytes: [U8], at: Int) -> RustSourceRawStringStart? Never! {
+    first :: pkg_bytes_code(bytes, at)
+    byte_string :: first == 98 && pkg_bytes_code(bytes, at + 1) == 114
+    if first != 114 && !byte_string -> return None
+    start :: if byte_string -> 2 else -> 1
+    index := start
+    loop pkg_bytes_code(bytes, at + index) == 35 -> index += 1
+    if pkg_bytes_code(bytes, at + index) != 34 -> return None
+    Val(RustSourceRawStringStart{prefix_len: index + 1, hashes: index - start})
+}
+
+// The offset (from `at`) of the closing quote of a character literal opening
+// at `at`, or None when the quote is a lifetime or label.
+fn rust_source_char_literal_end(bytes: [U8], at: Int, escaped_ends: [Int]) -> Int? Never! {
+    if pkg_bytes_code(bytes, at) != 39 -> return None
+    second :: pkg_bytes_code(bytes, at + 1)
+    if second != 92 {
+        width :: if {
+            second >= 0 && second <= 0x7F -> 1
+            second >= 0xC0 && second <= 0xDF -> 2
+            second >= 0xE0 && second <= 0xEF -> 3
+            second >= 0xF0 && second <= 0xF7 -> 4
+            else -> return None
+        }
+        end :: 1 + width
+        if at + end > bytes.len() -> return None
+        // Decode only this scalar, never the remaining source per quote.
+        if String.from_bytes(bytes[at + 1..<at + end]) == None -> return None
+        if pkg_bytes_code(bytes, at + end) == 39 -> return Val(end)
+        return None
+    }
+    end :: escaped_ends[bytes.len() - at - 2]
+    if end < 0 -> None else -> Val(end - at)
+}
+
+BODY_ITEMS :: prep { [String]{"fn ", "mod ", "impl ", "impl<", "trait ", "struct ", "enum ", "union ", "macro_rules!", "thread_local!", "unsafe fn ", "unsafe impl", "unsafe trait ", "async fn ", "const fn ", "const unsafe fn ", "extern "} }
+SEMICOLON_ITEMS :: prep { [String]{"const ", "static ", "use ", "type "} }
+
+// Remove only delimitable test-only items, including their leading docs and
+// attributes. Accumulation is linear; every retained source byte is copied once.
+pub fn strip_test_items(source: String) -> String Never! {
+    if !source.contains("#[cfg(test)]") && !source.contains("#[test]") -> return source
+    raw :: source.bytes()
+    code :: rust_code_mask(source).bytes()
+    brackets :: rust_source_brackets(code)
+    item_ends :: rust_source_item_ends(code, brackets)
+    leading :: rust_source_leading_lines(raw, code)
+    ends := [Int]{}
+    loop _ in code -> &ends.push(-2)
+    out := [U8]{}
+    kept := 0
+    line_start := 0
+    loop line_start < code.len() {
+        line_end := line_start
+        loop line_end < code.len() && pkg_bytes_code(code, line_end) != 10 -> line_end += 1
+        if line_end < code.len() -> line_end += 1
+        at := line_start
+        loop at < line_end && (pkg_bytes_code(code, at) == 32 || pkg_bytes_code(code, at) == 9) -> at += 1
+        if pkg_bytes_starts_with(code, at, "#[cfg(test)]".bytes()) || pkg_bytes_starts_with(code, at, "#[test]".bytes()) {
+            end :: rust_source_test_item_end(code, at, brackets, item_ends, &ends)
+            if end == {
+                .Val(last) -> {
+                    if rust_source_leading_item_start(leading, line_start, kept) == {
+                        .Val(first) -> {
+                            &out.extend(raw[kept..<first])
+                            kept = last
+                            line_start = last
+                            next
+                        }
+                        else -> {}
+                    }
+                }
+                else -> {}
+            }
+        }
+        line_start = line_end
+    }
+    &out.extend(raw[kept..<raw.len()])
+    String.from_bytes(out) ?? panic("stripping Rust items preserves UTF-8 bytes")
+}
+
+// Rust's bracket scan counts all three bracket kinds together. Compute every
+// matching close once, including unmatched opens (-1), rather than rescan a
+// long multi-line attribute for every subsequent test attribute.
+fn rust_source_brackets(code: [U8]) -> [Int] Never! {
+    closes := [Int]{}
+    stack := [Int]{}
+    loop _ in code -> &closes.push(-1)
+    loop index in 0..<code.len() {
+        byte :: pkg_bytes_code(code, index)
+        if byte == 40 || byte == 91 || byte == 123 -> &stack.push(index)
+        if (byte == 41 || byte == 93 || byte == 125) && stack.len() > 0 {
+            open :: &stack.pop() ?? panic("nonempty bracket stack")
+            closes[open] = index
+        }
+    }
+    closes
+}
+
+fn rust_source_closing_bracket(closes: [Int], open: Int) -> Int? Never! {
+    close :: if open >= 0 && open < closes.len() -> closes[open] else -> -1
+    if close < 0 -> None else -> Val(close)
+}
+
+fn rust_source_skip_whitespace(code: [U8], at: Int) -> Int Never! {
+    index := at
+    loop index < code.len() && rust_source_ascii_space(pkg_bytes_code(code, index)) -> index += 1
+    index
+}
+
+fn rust_source_ascii_space(byte: Int) -> Bool Never! {
+    byte == 32 || byte == 9 || byte == 10 || byte == 12 || byte == 13
+}
+
+fn rust_source_past_line_end(code: [U8], end: Int) -> Int Never! {
+    index := end
+    loop index < code.len() && (pkg_bytes_code(code, index) == 32 || pkg_bytes_code(code, index) == 9 || pkg_bytes_code(code, index) == 13) -> index += 1
+    if pkg_bytes_code(code, index) == 10 -> return index + 1
+    if index == code.len() -> return index
+    end
+}
+
+fn rust_source_leading_item_start(leading: [RustSourceLeading], line_start: Int, floor: Int) -> Int? Never! {
+    row :: leading[line_start]
+    if row.above >= floor -> return None
+    Val(if row.start < floor -> floor else -> row.start)
+}
+
+// Memoize the result for every outer attribute visited in the same chain.
+// Bracketed header/body regions use the precomputed close, so failed candidates
+// cannot repeatedly walk a nested body or initializer.
+fn rust_source_test_item_end(code: [U8], at: Int, closes: [Int], item_ends: RustSourceItemEnds, ends: &[Int]) -> Int? Never! {
+    visited := [Int]{}
+    index := at
+    result := -1
+    loop {
+        index = rust_source_skip_whitespace(code, index)
+        if index >= code.len() -> break
+        if ends[index] != -2 {
+            result = ends[index]
+            break
+        }
+        if pkg_bytes_code(code, index) == 35 && pkg_bytes_code(code, index + 1) == 91 {
+            &visited.push(index)
+            close :: rust_source_closing_bracket(closes, index + 1) ?? break
+            index = close + 1
+            next
+        }
+        if pkg_bytes_starts_with(code, index, "pub(".bytes()) {
+            close :: rust_source_closing_bracket(closes, index + 3) ?? break
+            index = rust_source_skip_whitespace(code, close + 1)
+        } else if pkg_bytes_starts_with(code, index, "pub ".bytes()) {
+            index = rust_source_skip_whitespace(code, index + 4)
+        }
+        body_item := false
+        known := false
+        loop keyword in BODY_ITEMS {
+            if pkg_bytes_starts_with(code, index, keyword.bytes()) {
+                body_item = true
+                known = true
+                break
+            }
+        }
+        if !known {
+            loop keyword in SEMICOLON_ITEMS {
+                if pkg_bytes_starts_with(code, index, keyword.bytes()) {
+                    known = true
+                    break
+                }
+            }
+        }
+        if !known -> break
+        result = if body_item -> item_ends.body[index] else -> item_ends.semicolon[index]
+        break
+    }
+    loop attribute in visited -> ends[attribute] = result
+    if result < 0 -> None else -> Val(result)
+}
+
+// Reverse DP: each suffix is read once even with many invalid escaped-char
+// openers on one long line. Entries are reverse indexed.
+fn rust_source_escaped_char_ends(bytes: [U8]) -> [Int] Never! {
+    ends := [Int]{}
+    normal := -1
+    escaped := -1
+    index := bytes.len() - 1
+    loop index >= 0 {
+        byte :: pkg_bytes_code(bytes, index)
+        next_normal :: if {
+            byte == 39 -> index
+            byte == 10 -> -1
+            byte == 92 -> escaped
+            else -> normal
+        }
+        escaped = normal
+        normal = next_normal
+        &ends.push(normal)
+        index -= 1
+    }
+    ends
+}
+
+struct RustSourceItemEnds {
+    body: [Int]
+    semicolon: [Int]
+}
+
+// Suffix DP retains Rust's header/bracket/angle semantics in O(n), including
+// malformed input. No failed candidate rescans the remaining source.
+fn rust_source_item_ends(code: [U8], closes: [Int]) -> RustSourceItemEnds Never! {
+    body := [Int]{}
+    semicolon := [Int]{}
+    angle := [Int]{}
+    loop _ in 0..=code.len() {
+        &body.push(-1)
+        &semicolon.push(-1)
+        &angle.push(-1)
+    }
+    index := code.len() - 1
+    loop index >= 0 {
+        byte :: pkg_bytes_code(code, index)
+        if byte == 40 || byte == 91 || byte == 123 {
+            close :: closes[index]
+            if close >= 0 {
+                angle[index] = angle[close + 1]
+                semicolon[index] = semicolon[close + 1]
+                body[index] = if byte == 123 -> rust_source_past_line_end(code, close + 1) else -> body[close + 1]
+            }
+        } else if byte != 41 && byte != 93 && byte != 125 {
+            semicolon[index] = if byte == 59 -> rust_source_past_line_end(code, index + 1) else -> semicolon[index + 1]
+            if byte == 60 {
+                close :: angle[index + 1]
+                if close >= 0 {
+                    angle[index] = angle[close + 1]
+                    body[index] = body[close + 1]
+                }
+            } else if byte == 62 && pkg_bytes_code(code, index - 1) != 45 {
+                angle[index] = index
+            } else {
+                angle[index] = angle[index + 1]
+                body[index] = if byte == 59 -> rust_source_past_line_end(code, index + 1) else -> body[index + 1]
+            }
+        }
+        index -= 1
+    }
+    RustSourceItemEnds{body, semicolon}
+}
+
+struct RustSourceLeading {
+    start: Int
+    above: Int
+}
+
+// Prefix DP at line starts replaces repeated backwards doc/attribute scans.
+// `above` is the last non-whitespace byte just before the leading chain when
+// it is `]`, otherwise -1. A removal floor may make that earlier byte irrelevant.
+fn rust_source_leading_lines(source: [U8], code: [U8]) -> [RustSourceLeading] Never! {
+    rows := [RustSourceLeading]{}
+    loop _ in 0..=code.len() -> &rows.push(RustSourceLeading{start: 0, above: -1})
+    chain_start := 0
+    chain_above := -1
+    last_nonspace := -1
+    start := 0
+    loop start < code.len() {
+        rows[start] = RustSourceLeading{start: chain_start, above: chain_above}
+        end := start
+        loop end < code.len() {
+            byte :: pkg_bytes_code(code, end)
+            if !rust_source_ascii_space(byte) -> last_nonspace = end
+            end += 1
+            if pkg_bytes_code(source, end - 1) == 10 -> break
+        }
+        source_indent := start
+        loop source_indent < end && (pkg_bytes_code(source, source_indent) == 32 || pkg_bytes_code(source, source_indent) == 9) -> source_indent += 1
+        code_indent := start
+        loop code_indent < end && (pkg_bytes_code(code, code_indent) == 32 || pkg_bytes_code(code, code_indent) == 9) -> code_indent += 1
+        if !pkg_bytes_starts_with(source, source_indent, "///".bytes()) && !pkg_bytes_starts_with(code, code_indent, "#[".bytes()) {
+            chain_start = end
+            chain_above = if pkg_bytes_code(code, last_nonspace) == 93 -> last_nonspace else -> -1
+        }
+        start = end
+    }
+    rows
+}

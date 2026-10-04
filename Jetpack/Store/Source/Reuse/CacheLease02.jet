@@ -1,0 +1,815 @@
+// PORT-PENDING 0947 crates-jetpack-src-store-reuse-module-group-slice-1867: crates/jetpack/src/Store/Reuse.rs:1867-2677
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn open_nix_projection_sources(
+//RS     projections: Vec<NixStoreProjection>,
+//RS ) -> std::io::Result<(Vec<(String, PathBuf)>, Vec<NixProjectionBinding>)> {
+//RS     use std::os::fd::AsRawFd as _;
+//RS     use std::os::unix::fs::MetadataExt as _;
+//RS     use std::os::unix::fs::OpenOptionsExt as _;
+//RS 
+//RS     let mut stable = Vec::with_capacity(projections.len());
+//RS     let mut bindings = Vec::with_capacity(projections.len());
+//RS     for projection in projections {
+//RS         let path_metadata = fs::symlink_metadata(&projection.source).map_err(|error| {
+//RS             std::io::Error::other(format!(
+//RS                 "Nix output `{}` Hangar object `{}` is unavailable: {error}",
+//RS                 projection.logical, projection.digest
+//RS             ))
+//RS         })?;
+//RS         if !path_metadata.file_type().is_symlink()
+//RS             && !path_metadata.is_dir()
+//RS             && !path_metadata.is_file()
+//RS         {
+//RS             return Err(std::io::Error::other(format!(
+//RS                 "Nix projection source `{}` is not a regular node",
+//RS                 projection.source.display()
+//RS             )));
+//RS         }
+//RS         if path_metadata.file_type().is_symlink() {
+//RS             // Symlink-root objects project as the symlink itself; there is no
+//RS             // fd to pin, so the lease re-reads the target for stability.
+//RS             let target = fs::read_link(&projection.source).map_err(|error| {
+//RS                 std::io::Error::other(format!(
+//RS                     "Nix output `{}` Hangar object `{}` is unavailable: {error}",
+//RS                     projection.logical, projection.digest
+//RS                 ))
+//RS             })?;
+//RS             stable.push((projection.logical.clone(), projection.source.clone()));
+//RS             bindings.push(NixProjectionBinding {
+//RS                 logical: projection.logical,
+//RS                 digest: projection.digest,
+//RS                 primary: projection.primary,
+//RS                 source: projection.source,
+//RS                 handle: None,
+//RS                 symlink_target: Some(target),
+//RS             });
+//RS             continue;
+//RS         }
+//RS         let mut options = fs::OpenOptions::new();
+//RS         options
+//RS             .read(true)
+//RS             .custom_flags(crate::Envelope::nofollow_open_flag().map_err(std::io::Error::other)?);
+//RS         let handle = options.open(&projection.source).map_err(|error| {
+//RS             std::io::Error::other(format!(
+//RS                 "Nix output `{}` Hangar object `{}` is unavailable: {error}",
+//RS                 projection.logical, projection.digest
+//RS             ))
+//RS         })?;
+//RS         let opened_metadata = handle.metadata()?;
+//RS         if path_metadata.dev() != opened_metadata.dev()
+//RS             || path_metadata.ino() != opened_metadata.ino()
+//RS         {
+//RS             return Err(std::io::Error::other(format!(
+//RS                 "Nix projection source `{}` changed while opening",
+//RS                 projection.source.display()
+//RS             )));
+//RS         }
+//RS         clear_close_on_exec(&handle)?;
+//RS         let stable_path = PathBuf::from(format!("/proc/self/fd/{}", handle.as_raw_fd()));
+//RS         stable.push((projection.logical.clone(), stable_path));
+//RS         bindings.push(NixProjectionBinding {
+//RS             logical: projection.logical,
+//RS             digest: projection.digest,
+//RS             primary: projection.primary,
+//RS             source: projection.source,
+//RS             handle: Some(handle),
+//RS             symlink_target: None,
+//RS         });
+//RS     }
+//RS     Ok((stable, bindings))
+//RS }
+//RS 
+//RS /// Build a Nix projection from the read-only package metadata index. Warm
+//RS /// environments already load this index to match their receipt selections, so
+//RS /// following the recorded digest edges avoids replaying and scanning the full
+//RS /// closure graph. An incomplete index is a warm miss; the caller takes the
+//RS /// normal cold path rather than rebuilding the graph once per package.
+//RS fn nix_store_projection_for_entry_index(
+//RS     roots: &Roots,
+//RS     entry: &StoreEntry,
+//RS     snapshot_root: &Path,
+//RS     index: &NixProjectionIndex<'_>,
+//RS ) -> std::io::Result<Vec<NixStoreProjection>> {
+//RS     if entry.producer_record.is_empty() {
+//RS         return Ok(Vec::new());
+//RS     }
+//RS     let producer = match ProducerRecord::decode(&entry.producer_record) {
+//RS         Ok(producer) => producer,
+//RS         Err(error) => {
+//RS             return Err(std::io::Error::other(format!(
+//RS                 "cache entry `{}` has an invalid producer record: {error}",
+//RS                 entry.id
+//RS             )));
+//RS         }
+//RS     };
+//RS     if producer.provider != "nix" {
+//RS         return Ok(Vec::new());
+//RS     }
+//RS 
+//RS     let mut pending = BTreeSet::from([entry.envelope.output_hash.clone()]);
+//RS     pending.extend(entry.named_outputs.values().cloned());
+//RS     let mut visited = BTreeSet::new();
+//RS     let mut logical_digests = BTreeMap::new();
+//RS     while let Some(digest) = pending.pop_first() {
+//RS         if !visited.insert(digest.clone()) {
+//RS             continue;
+//RS         }
+//RS         let candidates = if digest == entry.envelope.output_hash {
+//RS             vec![entry]
+//RS         } else {
+//RS             index
+//RS                 .by_digest
+//RS                 .get(digest.as_str())
+//RS                 .cloned()
+//RS                 .ok_or_else(|| {
+//RS                     std::io::Error::other(format!(
+//RS                         "Nix closure object `{digest}` is missing from the warm reuse index"
+//RS                     ))
+//RS                 })?
+//RS         };
+//RS         for candidate in candidates {
+//RS             let candidate_producer = match ProducerRecord::decode(&candidate.producer_record) {
+//RS                 Ok(producer) => producer,
+//RS                 Err(error) => {
+//RS                     return Err(std::io::Error::other(format!(
+//RS                         "Nix closure entry `{}` has invalid producer facts: {error}",
+//RS                         candidate.id
+//RS                     )));
+//RS                 }
+//RS             };
+//RS             if candidate_producer.provider != "nix" {
+//RS                 return Err(std::io::Error::other(format!(
+//RS                     "Nix closure object `{digest}` is owned by `{}`",
+//RS                     candidate_producer.provider
+//RS                 )));
+//RS             }
+//RS             let mut output_fact = false;
+//RS             for key in candidate_producer.facts.keys() {
+//RS                 let Some(name) = key.strip_prefix("nix.output.") else {
+//RS                     continue;
+//RS                 };
+//RS                 if name.contains('.') {
+//RS                     continue;
+//RS                 }
+//RS                 let output_digest = if name == "out" {
+//RS                     candidate.envelope.output_hash.clone()
+//RS                 } else {
+//RS                     let Some(output_digest) = candidate.named_outputs.get(name) else {
+//RS                         return Err(std::io::Error::other(format!(
+//RS                             "Nix output `{name}` has no verified named-output digest"
+//RS                         )));
+//RS                     };
+//RS                     output_digest.clone()
+//RS                 };
+//RS                 let path = match canonical_nix_output_path(&candidate_producer, name) {
+//RS                     Ok(path) => path,
+//RS                     Err(error) => return Err(error),
+//RS                 };
+//RS                 if output_digest == digest {
+//RS                     output_fact = true;
+//RS                 }
+//RS                 if let Err(error) =
+//RS                     add_nix_projection_path(&mut logical_digests, path, &output_digest)
+//RS                 {
+//RS                     return Err(error);
+//RS                 }
+//RS             }
+//RS             if !output_fact {
+//RS                 if let Ok(path) = canonical_nix_output_path(&candidate_producer, "out") {
+//RS                     if let Err(error) = add_nix_projection_path(
+//RS                         &mut logical_digests,
+//RS                         path,
+//RS                         &candidate.envelope.output_hash,
+//RS                     ) {
+//RS                         return Err(error);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             pending.extend(candidate.references.iter().cloned());
+//RS         }
+//RS     }
+//RS     if logical_digests.is_empty() {
+//RS         return Err(std::io::Error::other(format!(
+//RS             "Nix cache entry `{}` has no canonical output path for projection",
+//RS             entry.id
+//RS         )));
+//RS     }
+//RS 
+//RS     let primary_logical = ["out", "bin"]
+//RS         .into_iter()
+//RS         .find_map(|name| canonical_nix_output_path(&producer, name).ok());
+//RS     let mut projection = Vec::new();
+//RS     for (logical, digest) in logical_digests {
+//RS         let primary = primary_logical == Some(logical.as_str());
+//RS         let source = if primary {
+//RS             snapshot_root.to_path_buf()
+//RS         } else {
+//RS             match hangar_projection_object(roots, &digest, logical.as_str()) {
+//RS                 Ok(source) => source,
+//RS                 Err(error) => return Err(error),
+//RS             }
+//RS         };
+//RS         projection.push(NixStoreProjection {
+//RS             logical,
+//RS             digest,
+//RS             primary,
+//RS             source,
+//RS         });
+//RS     }
+//RS     Ok(projection)
+//RS }
+//RS 
+//RS pub(crate) fn nix_store_projection_for_entry(
+//RS     roots: &Roots,
+//RS     entry: &StoreEntry,
+//RS     snapshot_root: &Path,
+//RS ) -> std::io::Result<Vec<NixStoreProjection>> {
+//RS     if entry.producer_record.is_empty() {
+//RS         return Ok(Vec::new());
+//RS     }
+//RS     let producer = ProducerRecord::decode(&entry.producer_record).map_err(|error| {
+//RS         std::io::Error::other(format!(
+//RS             "cache entry `{}` has an invalid producer record: {error}",
+//RS             entry.id
+//RS         ))
+//RS     })?;
+//RS     if producer.provider != "nix" {
+//RS         return Ok(Vec::new());
+//RS     }
+//RS 
+//RS     // The logical store names remain producer facts, but every runtime source
+//RS     // below is either the verified lease snapshot or a Hangar CAS object. A
+//RS     // Nix closure record is the authority for transitive runtime objects.
+//RS     let mut logical_digests = BTreeMap::new();
+//RS     for key in producer.facts.keys() {
+//RS         let Some(name) = key.strip_prefix("nix.output.") else {
+//RS             continue;
+//RS         };
+//RS         if name.contains('.') {
+//RS             continue;
+//RS         }
+//RS         let digest = if name == "out" {
+//RS             entry.envelope.output_hash.clone()
+//RS         } else {
+//RS             entry.named_outputs.get(name).cloned().ok_or_else(|| {
+//RS                 std::io::Error::other(format!(
+//RS                     "Nix output `{name}` has no verified named-output digest"
+//RS                 ))
+//RS             })?
+//RS         };
+//RS         let path = canonical_nix_output_path(&producer, name)?;
+//RS         add_nix_projection_path(&mut logical_digests, path, &digest)?;
+//RS     }
+//RS     if logical_digests.is_empty() {
+//RS         return Err(std::io::Error::other(format!(
+//RS             "Nix cache entry `{}` has no canonical output path for projection",
+//RS             entry.id
+//RS         )));
+//RS     }
+//RS 
+//RS     let graph = Closure::closure_graph_structure_unlocked(roots).map_err(|error| {
+//RS         std::io::Error::other(format!(
+//RS             "Nix cache entry `{}`: a Hangar object in its recorded closure is unavailable: {error}",
+//RS             entry.id
+//RS         ))
+//RS     })?;
+//RS     let mut closure_digests = BTreeSet::new();
+//RS     if let Some(record) = graph.records.get(&entry.id) {
+//RS         let mut expected_outputs = entry.named_outputs.clone();
+//RS         expected_outputs.insert("out".to_string(), entry.envelope.output_hash.clone());
+//RS         if record.primary != entry.envelope.output_hash
+//RS             || record.outputs != expected_outputs
+//RS             || record.references != entry.references.iter().cloned().collect()
+//RS         {
+//RS             return Err(std::io::Error::other(format!(
+//RS                 "Nix closure record `{}` disagrees with the verified entry",
+//RS                 entry.id
+//RS             )));
+//RS         }
+//RS         // Every named root may have references not shared by `out`.
+//RS         for digest in expected_outputs.values() {
+//RS             closure_digests.extend(graph.closure(digest));
+//RS         }
+//RS         for digest in &closure_digests {
+//RS             let object = graph.objects.get(digest).ok_or_else(|| {
+//RS                 std::io::Error::other(format!(
+//RS                     "Nix closure object `{digest}` is missing from the Hangar graph"
+//RS                 ))
+//RS             })?;
+//RS             let expected_path = roots.hangar_dir().join(OBJECTS_DIR).join(digest);
+//RS             if object.external || Path::new(&object.path) != expected_path {
+//RS                 return Err(std::io::Error::other(format!(
+//RS                     "Nix closure object `{digest}` is not a canonical Hangar object"
+//RS                 )));
+//RS             }
+//RS             // Admitted Nix objects are directory, regular file, or symlink
+//RS             // roots (gcc-wrapper-info and pkg-config-man are symlink roots);
+//RS             // only other node kinds are corrupt here.
+//RS             let metadata = fs::symlink_metadata(&expected_path)?;
+//RS             if !metadata.file_type().is_symlink() && !metadata.is_dir() && !metadata.is_file() {
+//RS                 return Err(std::io::Error::other(format!(
+//RS                     "Nix closure object `{digest}` is not a regular Hangar node"
+//RS                 )));
+//RS             }
+//RS 
+//RS             let mut paths = BTreeSet::new();
+//RS             for owner in graph.records.values() {
+//RS                 for (name, owner_digest) in &owner.outputs {
+//RS                     if owner_digest != digest {
+//RS                         continue;
+//RS                     }
+//RS                     let producer =
+//RS                         ProducerRecord::decode(&owner.producer_record).map_err(|error| {
+//RS                             std::io::Error::other(format!(
+//RS                                 "Nix closure record `{}` has invalid producer facts: {error}",
+//RS                                 owner.id
+//RS                             ))
+//RS                         })?;
+//RS                     if producer.provider != "nix" {
+//RS                         return Err(std::io::Error::other(format!(
+//RS                             "Nix closure object `{digest}` is owned by `{}`",
+//RS                             producer.provider
+//RS                         )));
+//RS                     }
+//RS                     let path = canonical_nix_output_path(&producer, name).map_err(|error| {
+//RS                         std::io::Error::other(format!(
+//RS                             "Nix closure object `{digest}` has no canonical `{name}` output fact: {error}"
+//RS                         ))
+//RS                     })?;
+//RS                     paths.insert(path.to_string());
+//RS                 }
+//RS             }
+//RS             if paths.len() != 1 {
+//RS                 return Err(std::io::Error::other(format!(
+//RS                     "Nix closure object `{digest}` has {} canonical store paths",
+//RS                     paths.len()
+//RS                 )));
+//RS             }
+//RS             add_nix_projection_path(
+//RS                 &mut logical_digests,
+//RS                 paths.first().expect("one path checked above"),
+//RS                 digest,
+//RS             )?;
+//RS         }
+//RS     } else if !entry.references.is_empty()
+//RS         || producer.facts.contains_key("nix.closure.receipt")
+//RS         || producer
+//RS             .facts
+//RS             .contains_key("nix.cache.closure.receipt.sha256")
+//RS     {
+//RS         return Err(std::io::Error::other(format!(
+//RS             "Nix closure record `{}` is missing from the Hangar graph",
+//RS             entry.id
+//RS         )));
+//RS     }
+//RS 
+//RS     let primary_logical = ["out", "bin"]
+//RS         .into_iter()
+//RS         .find_map(|name| canonical_nix_output_path(&producer, name).ok());
+//RS     let mut projection = Vec::new();
+//RS     for (logical, digest) in logical_digests {
+//RS         let primary = primary_logical == Some(logical.as_str());
+//RS         let source = if primary {
+//RS             snapshot_root.to_path_buf()
+//RS         } else {
+//RS             hangar_projection_object(roots, &digest, logical.as_str())?
+//RS         };
+//RS         projection.push(NixStoreProjection {
+//RS             logical,
+//RS             digest,
+//RS             primary,
+//RS             source,
+//RS         });
+//RS     }
+//RS     Ok(projection)
+//RS }
+//RS 
+//RS fn canonical_nix_output_path<'a>(
+//RS     producer: &'a ProducerRecord,
+//RS     name: &str,
+//RS ) -> std::io::Result<&'a str> {
+//RS     let output = producer
+//RS         .facts
+//RS         .get(&format!("nix.output.{name}"))
+//RS         .filter(|path| path.starts_with("/nix/store/"));
+//RS     let store_path = (name == "out")
+//RS         .then(|| producer.facts.get("nix.store-path"))
+//RS         .flatten()
+//RS         .filter(|path| path.starts_with("/nix/store/"));
+//RS     if let (Some(output), Some(store_path)) = (output, store_path) {
+//RS         if output != store_path {
+//RS             return Err(std::io::Error::other(format!(
+//RS                 "Nix output `{name}` disagrees with its canonical store path"
+//RS             )));
+//RS         }
+//RS     }
+//RS     output.or(store_path).map(String::as_str).ok_or_else(|| {
+//RS         std::io::Error::other(format!(
+//RS             "Nix output `{name}` has no canonical `/nix/store` path"
+//RS         ))
+//RS     })
+//RS }
+//RS 
+//RS fn add_nix_projection_path(
+//RS     logical_digests: &mut BTreeMap<String, String>,
+//RS     logical: &str,
+//RS     digest: &str,
+//RS ) -> std::io::Result<()> {
+//RS     let name = logical.strip_prefix("/nix/store/").ok_or_else(|| {
+//RS         std::io::Error::other(format!("invalid canonical Nix output path `{logical}`"))
+//RS     })?;
+//RS     if name.is_empty() || name.contains('/') || name == "." || name == ".." {
+//RS         return Err(std::io::Error::other(format!(
+//RS             "invalid canonical Nix output path `{logical}`"
+//RS         )));
+//RS     }
+//RS     let mut digest_components = Path::new(digest).components();
+//RS     if digest.is_empty()
+//RS         || !matches!(
+//RS             digest_components.next(),
+//RS             Some(std::path::Component::Normal(_))
+//RS         )
+//RS         || digest_components.next().is_some()
+//RS     {
+//RS         return Err(std::io::Error::other(format!(
+//RS             "invalid Hangar digest `{digest}` for `{logical}`"
+//RS         )));
+//RS     }
+//RS     if let Some(existing) = logical_digests.insert(logical.to_string(), digest.to_string()) {
+//RS         if existing != digest {
+//RS             return Err(std::io::Error::other(format!(
+//RS                 "conflicting canonical Nix output path `{logical}`"
+//RS             )));
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn hangar_projection_object(
+//RS     roots: &Roots,
+//RS     digest: &str,
+//RS     logical: &str,
+//RS ) -> std::io::Result<PathBuf> {
+//RS     let object = roots.hangar_dir().join(OBJECTS_DIR).join(digest);
+//RS     let metadata = fs::symlink_metadata(&object).map_err(|error| {
+//RS         std::io::Error::other(format!(
+//RS             "Nix output `{logical}` Hangar object `{digest}` is unavailable: {error}"
+//RS         ))
+//RS     })?;
+//RS     // Admitted Nix objects are directory, regular file, or symlink roots
+//RS     // (gcc-wrapper-info projects a symlink); only other kinds are corrupt.
+//RS     if !metadata.file_type().is_symlink() && !metadata.is_dir() && !metadata.is_file() {
+//RS         return Err(std::io::Error::other(format!(
+//RS             "Nix output `{logical}` Hangar object `{digest}` is not a regular node"
+//RS         )));
+//RS     }
+//RS     Ok(object)
+//RS }
+//RS 
+//RS fn sealed_hangar_projection_object(
+//RS     roots: &Roots,
+//RS     digest: &str,
+//RS     logical: &str,
+//RS ) -> std::io::Result<PathBuf> {
+//RS     let object = hangar_projection_object(roots, digest, logical)?;
+//RS     #[cfg(target_os = "linux")]
+//RS     if check_seal(&object, &roots.hangar_dir())?.as_deref() != Some(digest) {
+//RS         return Err(std::io::Error::other(format!(
+//RS             "Nix output `{logical}` Hangar object `{digest}` has no valid seal witness"
+//RS         )));
+//RS     }
+//RS     Ok(object)
+//RS }
+//RS 
+//RS fn validate_direct_projection_seals(
+//RS     roots: &Roots,
+//RS     projections: &[NixStoreProjection],
+//RS ) -> std::io::Result<()> {
+//RS     #[cfg(target_os = "linux")]
+//RS     for projection in projections {
+//RS         if projection.primary {
+//RS             continue;
+//RS         }
+//RS         if check_seal(&projection.source, &roots.hangar_dir())?.as_deref()
+//RS             != Some(projection.digest.as_str())
+//RS         {
+//RS             return Err(std::io::Error::other(format!(
+//RS                 "Nix output `{}` Hangar object `{}` has no valid seal witness",
+//RS                 projection.logical, projection.digest
+//RS             )));
+//RS         }
+//RS     }
+//RS     #[cfg(not(target_os = "linux"))]
+//RS     let _ = (roots, projections);
+//RS     Ok(())
+//RS }
+//RS 
+//RS struct ExecWrappers {
+//RS     root: PathBuf,
+//RS     directory: fs::File,
+//RS }
+//RS 
+//RS pub(crate) fn required_child_pipe<T>(pipe: Option<T>, message: &'static str) -> std::io::Result<T> {
+//RS     pipe.ok_or_else(|| std::io::Error::other(message))
+//RS }
+//RS 
+//RS fn open_snapshot_executables(
+//RS     snapshot_root: &Path,
+//RS     bin: Option<&Path>,
+//RS ) -> std::io::Result<Vec<(std::ffi::OsString, fs::File)>> {
+//RS     let Some(bin) = bin else {
+//RS         return Ok(Vec::new());
+//RS     };
+//RS     let path = snapshot_root.join(bin);
+//RS     let mut out = Vec::new();
+//RS     if !path.is_dir() {
+//RS         return Ok(out);
+//RS     }
+//RS     let mut entries = fs::read_dir(path)?.collect::<Result<Vec<_>, _>>()?;
+//RS     entries.sort_by_key(|entry| entry.file_name());
+//RS     for entry in entries {
+//RS         let file = fs::File::open(entry.path())?;
+//RS         if !file.metadata()?.is_file() {
+//RS             continue;
+//RS         }
+//RS         clear_close_on_exec(&file)?;
+//RS         out.push((entry.file_name(), file));
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS fn executable_lease_members(
+//RS     executables: &[(std::ffi::OsString, fs::File)],
+//RS ) -> std::io::Result<Vec<crate::RuntimePolicy::LeaseMember>> {
+//RS     use std::io::{Read as _, Seek as _};
+//RS 
+//RS     let mut members = Vec::with_capacity(executables.len());
+//RS     for (name, file) in executables {
+//RS         let name = name
+//RS             .to_str()
+//RS             .ok_or_else(|| std::io::Error::other("lease executable name is not UTF-8"))?;
+//RS         let mut input = file.try_clone()?;
+//RS         input.seek(std::io::SeekFrom::Start(0))?;
+//RS         let mut hasher = SHA256::StreamingSha256::new();
+//RS         let mut buffer = [0u8; 64 * 1024];
+//RS         loop {
+//RS             let count = input.read(&mut buffer)?;
+//RS             if count == 0 {
+//RS                 break;
+//RS             }
+//RS             hasher.update(&buffer[..count]);
+//RS         }
+//RS         let digest = hasher
+//RS             .finalize()
+//RS             .iter()
+//RS             .map(|byte| format!("{byte:02x}"))
+//RS             .collect::<String>();
+//RS         members.push(crate::RuntimePolicy::LeaseMember {
+//RS             name: name.to_string(),
+//RS             digest: format!("sha256-{digest}"),
+//RS         });
+//RS     }
+//RS     Ok(members)
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS fn create_exec_wrappers(
+//RS     snapshot_root: &Path,
+//RS     executables: &[(std::ffi::OsString, fs::File)],
+//RS ) -> std::io::Result<Option<ExecWrappers>> {
+//RS     use std::io::{BufRead as _, Write as _};
+//RS     use std::os::fd::AsRawFd as _;
+//RS 
+//RS     if executables.is_empty() {
+//RS         return Ok(None);
+//RS     }
+//RS     let mountpoint = snapshot_root.with_extension("exec-mount");
+//RS     fs::create_dir_all(&mountpoint)?;
+//RS     let unshare = find_system_tool("unshare")?;
+//RS     let mount = find_system_tool("mount")?;
+//RS     let shell = find_system_tool("sh")?;
+//RS     let script = r#"set -eu
+//RS "$1" -t tmpfs -o size=1m,mode=0755 jetpack-exec "$2"
+//RS printf 'ready\n'
+//RS IFS= read -r _
+//RS "$1" -o remount,bind,ro "$2"
+//RS printf 'sealed\n'
+//RS IFS= read -r _ || true
+//RS "#;
+//RS     let mut child = Command::new(unshare)
+//RS         .args([
+//RS             "--user",
+//RS             "--map-root-user",
+//RS             "--mount",
+//RS             "--propagation",
+//RS             "private",
+//RS         ])
+//RS         .arg(shell)
+//RS         .args(["-c", script, "jetpack-lease-keeper"])
+//RS         .arg(mount)
+//RS         .arg(&mountpoint)
+//RS         .stdin(Stdio::piped())
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()?;
+//RS     let mut input = required_child_pipe(child.stdin.take(), "piped lease keeper stdin")?;
+//RS     let output = required_child_pipe(child.stdout.take(), "piped lease keeper stdout")?;
+//RS     let mut output = std::io::BufReader::new(output);
+//RS     let mut line = String::new();
+//RS     output.read_line(&mut line)?;
+//RS     if line.trim() != "ready" {
+//RS         return Err(wrapper_keeper_error(
+//RS             child,
+//RS             "creating private executable mount",
+//RS         ));
+//RS     }
+//RS     let root = PathBuf::from(format!("/proc/{}/root{}", child.id(), mountpoint.display()));
+//RS     for (name, file) in executables {
+//RS         std::os::unix::fs::symlink(
+//RS             format!("/proc/self/fd/{}", file.as_raw_fd()),
+//RS             root.join(name),
+//RS         )?;
+//RS     }
+//RS     input.write_all(b"seal\n")?;
+//RS     input.flush()?;
+//RS     line.clear();
+//RS     output.read_line(&mut line)?;
+//RS     if line.trim() != "sealed" {
+//RS         return Err(wrapper_keeper_error(
+//RS             child,
+//RS             "sealing private executable mount",
+//RS         ));
+//RS     }
+//RS     let directory = fs::File::open(&root)?;
+//RS     clear_close_on_exec(&directory)?;
+//RS     let root = PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()));
+//RS     drop(input);
+//RS     let status = child.wait()?;
+//RS     if !status.success() {
+//RS         return Err(std::io::Error::other(
+//RS             "private executable mount keeper failed",
+//RS         ));
+//RS     }
+//RS     fs::remove_dir(&mountpoint)?;
+//RS     Ok(Some(ExecWrappers { root, directory }))
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS fn find_system_tool(name: &str) -> std::io::Result<PathBuf> {
+//RS     ["/run/current-system/sw/bin", "/usr/bin", "/bin"]
+//RS         .into_iter()
+//RS         .map(PathBuf::from)
+//RS         .map(|dir| dir.join(name))
+//RS         .find(|path| path.is_file())
+//RS         .ok_or_else(|| {
+//RS             std::io::Error::new(
+//RS                 std::io::ErrorKind::NotFound,
+//RS                 format!("required system tool `{name}` not found"),
+//RS             )
+//RS         })
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS fn wrapper_keeper_error(mut child: Child, action: &str) -> std::io::Error {
+//RS     use std::io::Read as _;
+//RS     let mut stderr = String::new();
+//RS     if let Some(mut pipe) = child.stderr.take() {
+//RS         let _ = pipe.read_to_string(&mut stderr);
+//RS     }
+//RS     let _ = child.wait();
+//RS     std::io::Error::other(format!("{action} failed: {}", stderr.trim()))
+//RS }
+//RS 
+//RS #[cfg(not(target_os = "linux"))]
+//RS fn create_exec_wrappers(
+//RS     _snapshot_root: &Path,
+//RS     executables: &[(std::ffi::OsString, fs::File)],
+//RS ) -> std::io::Result<Option<ExecWrappers>> {
+//RS     if executables.is_empty() {
+//RS         return Ok(None);
+//RS     }
+//RS     // A private snapshot is not a caller-unwritable handoff on these tiers.
+//RS     // Refuse the child before it can receive a raw snapshot path until the
+//RS     // installer-provided protected lease service accepts the same protocol.
+//RS     let _ = executables;
+//RS     Err(std::io::Error::new(
+//RS         std::io::ErrorKind::Unsupported,
+//RS         "protected executable lease service is unavailable",
+//RS     ))
+//RS }
+//RS 
+//RS pub(crate) fn copy_snapshot_node(
+//RS     src: &Path,
+//RS     dst: &Path,
+//RS     hardlinks: &mut BTreeMap<(u64, u64), PathBuf>,
+//RS ) -> std::io::Result<()> {
+//RS     let meta = fs::symlink_metadata(src)?;
+//RS     if meta.is_dir() {
+//RS         fs::create_dir_all(dst)?;
+//RS         let mut entries = fs::read_dir(src)?.collect::<Result<Vec<_>, _>>()?;
+//RS         entries.sort_by_key(|entry| entry.file_name());
+//RS         for entry in entries {
+//RS             copy_snapshot_node(&entry.path(), &dst.join(entry.file_name()), hardlinks)?;
+//RS         }
+//RS         fs::set_permissions(dst, meta.permissions())?;
+//RS     } else if meta.is_file() {
+//RS         if let Some(key) = snapshot_file_identity(&meta) {
+//RS             if let Some(first) = hardlinks.get(&key) {
+//RS                 fs::hard_link(first, dst)?;
+//RS             } else {
+//RS                 fs::copy(src, dst)?;
+//RS                 hardlinks.insert(key, dst.to_path_buf());
+//RS             }
+//RS         } else {
+//RS             fs::copy(src, dst)?;
+//RS         }
+//RS         fs::set_permissions(dst, meta.permissions())?;
+//RS     } else if meta.file_type().is_symlink() {
+//RS         let target = fs::read_link(src)?;
+//RS         #[cfg(unix)]
+//RS         std::os::unix::fs::symlink(target, dst)?;
+//RS         #[cfg(not(unix))]
+//RS         {
+//RS             let _ = target;
+//RS             return Err(std::io::Error::other(
+//RS                 "cache symlink snapshots need platform support",
+//RS             ));
+//RS         }
+//RS     } else {
+//RS         return Err(std::io::Error::other("special file in cache snapshot"));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn remove_snapshot_node(path: &Path) -> std::io::Result<()> {
+//RS     let metadata = fs::symlink_metadata(path)?;
+//RS     make_tree_writable_for_removal(path)?;
+//RS     if metadata.is_dir() {
+//RS         fs::remove_dir_all(path)
+//RS     } else {
+//RS         fs::remove_file(path)
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn snapshot_file_identity(meta: &fs::Metadata) -> Option<(u64, u64)> {
+//RS     use std::os::unix::fs::MetadataExt as _;
+//RS     (meta.nlink() > 1).then(|| (meta.dev(), meta.ino()))
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn snapshot_file_identity(_meta: &fs::Metadata) -> Option<(u64, u64)> {
+//RS     None
+//RS }
+//RS 
+//RS pub(crate) fn open_snapshot_files(
+//RS     root: &Path,
+//RS     path: &Path,
+//RS     files: &mut Vec<(PathBuf, fs::File)>,
+//RS ) -> std::io::Result<()> {
+//RS     let relative = path.strip_prefix(root).map_err(|_| {
+//RS         std::io::Error::new(
+//RS             std::io::ErrorKind::InvalidInput,
+//RS             format!(
+//RS                 "snapshot path `{}` is outside snapshot root `{}`",
+//RS                 path.display(),
+//RS                 root.display()
+//RS             ),
+//RS         )
+//RS     })?;
+//RS     let meta = fs::symlink_metadata(path)?;
+//RS     if meta.file_type().is_symlink() {
+//RS         return Ok(());
+//RS     }
+//RS     if meta.is_dir() {
+//RS         for entry in fs::read_dir(path)? {
+//RS             open_snapshot_files(root, &entry?.path(), files)?;
+//RS         }
+//RS         return Ok(());
+//RS     }
+//RS     let file = fs::File::open(path)?;
+//RS     clear_close_on_exec(&file)?;
+//RS     files.push((relative.to_path_buf(), file));
+//RS     Ok(())
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn clear_close_on_exec(file: &fs::File) -> std::io::Result<()> {
+//RS     use std::os::fd::AsRawFd as _;
+//RS     const F_SETFD: i32 = 2;
+//RS     // Must match studio_transactions.rs: variadic fcntl (clashing_extern_declarations).
+//RS     unsafe extern "C" {
+//RS         fn fcntl(fd: i32, command: i32, ...) -> i32;
+//RS     }
+//RS     if unsafe { fcntl(file.as_raw_fd(), F_SETFD, 0) } == -1 {
+//RS         return Err(std::io::Error::last_os_error());
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn clear_close_on_exec(_file: &fs::File) -> std::io::Result<()> {
+//RS     Ok(())
+//RS }
+// END-PORT-PENDING 0947 crates/jetpack/src/Store/Reuse.rs:1867-2677
+

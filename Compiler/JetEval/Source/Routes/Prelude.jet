@@ -14,6 +14,7 @@ use jet_foundation.[
     TComptimeValue,
     mir_symbol_name,
     mir_type_from_kind,
+    tir_comptime_key_value,
 ]
 
 fn jet_eval_route_is_exact_integer_member(member: String) -> Bool Never! {
@@ -688,7 +689,7 @@ fn jet_eval_route_builtin(member: String, args: [TComptimeValue], fallibility: M
                     pairs := [TComptimeValue]{}
                     loop entry in entries {
                         &pairs.push(TComptimeValue.Struct{type_name: "", fields: [TComptimeField]{
-                            TComptimeField{name: "key", value: jet_eval_iterator_key_value(entry.key)},
+                            TComptimeField{name: "key", value: tir_comptime_key_value(entry.key)},
                             TComptimeField{name: "value", value: entry.value},
                         }})
                     }

@@ -1,0 +1,105 @@
+// The Package/Config parse and composition error carriers (Package/mod.rs).
+// `message()` is the Rust `Display` text; `pkg_manifest_parse_diagnostic`
+// (Manifest.jet) turns a parse error into its registered E12xx diagnostic.
+
+#Error
+pub enum PackageParseError {
+    MissingName
+    MissingRecord(String)
+    MalformedField(String)
+    UnknownField(String)
+    UnknownOutputKind(String)
+    InvalidValue(field: String, value: String)
+    RetiredRecordHead
+    ConfigMembers
+    Composition(String)
+    // D-ECO-MEMBERS1: a member Package may not introduce another member list.
+    NestedMembers(root: String, member: String)
+    // D-LINTPOLICY1: a registered diagnostic code used as a lint selector.
+    LintPolicyCode(code: String, name: String)
+    // D-TGT1/D-TGT2/D-TGT3: an unknown or not-yet-shipped target.
+    BadTarget(name: String, value: String, reserved: Bool)
+    // D-TGT1: a `packages:` entry uses the removed `kind:` field.
+    KindFieldRemoved(name: String)
+    // D-TGT3/D-TGT4: a target block carries an unknown field.
+    BadTargetField(name: String, detail: String)
+    // U1/S52/E1209: a reserved top-level key was used non-empty.
+    ReservedSection(String)
+    // D-EFFBUDGET1: a malformed `authority:`/`build.allow:` block.
+    BadEffectsBlock(String)
+    // D-AUTHORITY-MANIFEST1: a retired authority field moved into `authority:`.
+    RetiredAuthorityField(field: String, replacement: String)
+    // D-PACKAGE-POLICY-SCOPE1: malformed or widening package memory policy.
+    BadMemoryPolicy(detail: String)
+    // D-ONCE-RETIRE1=C: a retired package policy field needs migration.
+    RetiredPolicyField(field: String, replacement: String)
+    // D-MEM-GUARANTEE1=A: malformed or widening package guarantee policy.
+    BadGuaranteePolicy(detail: String)
+    // D-JPK-POLICYSURFACE1=D: malformed SPDX/source package policy.
+    BadPackagePolicy(detail: String)
+    // D-ALLOC-PROGRAM1=A: malformed hosted whole-program allocator fact.
+    BadAllocatorPolicy(detail: String)
+
+    pub fn message(self) -> String Never! {
+        if self == {
+            .MissingName -> "Package needs a `name` field"
+            .MissingRecord(name) -> "`{name}` needs a record value"
+            .MalformedField(value) -> "malformed Package field `{value}`"
+            .UnknownField(name) -> "unknown Package field `{name}`"
+            .UnknownOutputKind(kind) -> "unknown Output kind `{kind}`"
+            .InvalidValue(field, value) -> "invalid value for `{field}`: `{value}`"
+            .RetiredRecordHead -> "record literals use `{{ … }}`; remove the retired dot before `{{` (D-LIT-DOT1)"
+            .ConfigMembers -> "Config cannot declare `members`"
+            .Composition(value) -> value
+            .NestedMembers(root, member) -> "member Package `{member}` declares `members`; Package root `{root}` owns membership"
+            .LintPolicyCode(code, name) -> "`{code}` is a diagnostic code; use `{name}` in `policy.lints.deny`"
+            .BadTarget(name, value, reserved) -> "package `{name}` names {if reserved -> "the reserved" else -> "the unknown"} target `{value}`"
+            .KindFieldRemoved(name) -> "package `{name}` uses the removed `kind:` field"
+            .BadTargetField(name, detail) -> "package `{name}`: {detail}"
+            .ReservedSection(section) -> "`{section}` is reserved"
+            .BadEffectsBlock(detail) -> detail
+            .RetiredAuthorityField(field, replacement) -> "`{field}` is retired; use `{replacement}`"
+            .BadMemoryPolicy(detail) -> detail
+            .RetiredPolicyField(field, replacement) -> "`{field}` is retired; use `{replacement}`"
+            .BadGuaranteePolicy(detail) -> detail
+            .BadPackagePolicy(detail) -> detail
+            .BadAllocatorPolicy(detail) -> detail
+        }
+    }
+}
+
+// Why Package composition or output selection failed.
+#Error
+pub enum ComposeError {
+    MembersInConfig(origin: String)
+    Conflict(field: String, left_origin: String, right_origin: String, left: String, right: String)
+    UnknownDefault(intent: String, output: String)
+    UnknownIntent(intent: String)
+
+    pub fn message(self) -> String Never! {
+        if self == {
+            .MembersInConfig(origin) -> "Config `{origin}` cannot declare Package members"
+            .Conflict(field, left_origin, right_origin, left, right) -> "conflicting `{field}` from `{left_origin}` ({left}) and `{right_origin}` ({right})"
+            .UnknownDefault(intent, output) -> "default `{intent}` names unknown output `{output}`"
+            .UnknownIntent(intent) -> "unknown Output intent `{intent}`"
+        }
+    }
+}
+
+// D-ECO-INLINEPACKAGE1=A: structural carrier failures and canonical Package
+// field failures share one parse result.
+#Error
+pub enum InlinePackageParseError {
+    Structure(InlinePackageError)
+    Fields(PackageParseError)
+
+    pub fn message(self) -> String Never! {
+        if self == {
+            .Structure(error) -> error.message()
+            .Fields(error) -> error.message()
+        }
+    }
+}
+
+// A composition failure reported through the Package parse carrier.
+impl ComposeError -> PackageParseError { PackageParseError.Composition(self.message()) }

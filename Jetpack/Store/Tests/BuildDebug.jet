@@ -39,7 +39,7 @@ fn recipe_debug_test_root(label: String) -[Env, Rand]> String {
         .Err(_) -> {}
     }
     assert_eq(attempt.scratch_dir, "")
-    assert(!files.exists(files.join(files.join(root, @BUILD_DEBUG_SCRATCH_ROOT), attempt.id)))
+    assert(!files.exists(files.join(files.join(root, BUILD_DEBUG_SCRATCH_ROOT), attempt.id)))
     assert_eq(files.read(files.join(outside, "live")) ?? panic("live file"), "must survive")
     recipe_debug_remove_tree(root).drop("test cleanup")
 }
@@ -47,8 +47,8 @@ fn recipe_debug_test_root(label: String) -[Env, Rand]> String {
 #Test("build scratch recovery removes only unpublished stages") {
     root :: recipe_debug_test_root("recover")
     hangar :: files.join(root, "hangar")
-    stage :: files.join(files.join(hangar, @BUILD_DEBUG_SCRATCH_ROOT), ".jet-build-stage-orphan")
-    published :: files.join(files.join(hangar, @BUILD_DEBUG_SCRATCH_ROOT), "pkg-1")
+    stage :: files.join(files.join(hangar, BUILD_DEBUG_SCRATCH_ROOT), ".jet-build-stage-orphan")
+    published :: files.join(files.join(hangar, BUILD_DEBUG_SCRATCH_ROOT), "pkg-1")
     files.create_dir_all(stage) ?? panic("stage")
     files.create_dir_all(published) ?? panic("published")
     files.write(files.join(stage, "partial"), "partial") ?? panic("partial")

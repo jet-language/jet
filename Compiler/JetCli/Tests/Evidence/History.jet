@@ -1,0 +1,167 @@
+// ReceiptStore.rs:1258-1280; CmdCompile.rs:6686-6841,183-228.
+// C-HISTORY-RUNTIME #4451 CONC-BACKGROUND-1: policy proofs do not prove native
+// nonblocking enqueue, worker startup/panic/lifetime or guarded-set synchronization.
+// C-FS/C-RECEIPT-STORE/C-RECORD-INDEX: no fake host or memory Store is used here.
+// Original native optional_history_uses_canonical_jobs_and_fails_closed_for_
+// blocked_destinations (ReceiptStore.rs:4503+) additionally needs the pending-job
+// helper and process transport; it cannot be replaced by these policy tests.
+fn history_test_report() -> EvidenceReport Never! {
+    evidence_report_new("report", .Test, EvidenceSource{path: "test.jet", line: U32{0}, column: U32{1}}, EvidenceBuild{toolchain: "jet-test", target: "host", profile: "comparison"}, EvidenceRevision{source: "a".repeat(64), build: "jet-comparison-v1", revision: "b".repeat(64)})
+}
+fn history_test_identity() -> JetCLIRecordIdentity Never! {
+    jet_cli_record_identity_new("a".repeat(64), "jet-test", "jet-test") ?? panic("canonical identity")
+}
+fn history_test_metadata(symlink: Bool, directory: Bool, regular: Bool) -> history_files.Stat Never! {
+    history_files.Stat{size: 0, modified_ms: 0, created_ms: 0, readonly: false, is_file: regular, is_dir: directory, is_symlink: symlink, kind: "fixture", mode: 0}
+}
+#Test("history fix precedence and ASCII folding match Rust") {
+    assert_eq(jet_cli_history_notice_fix("PERMISSION denied; quota queue budget"), "check `.jet` history permissions")
+    assert_eq(jet_cli_history_notice_fix("Access Denied"), "check `.jet` history permissions")
+    errors :: [String]{"No Space Left", "DISK FULL", "Quota exceeded; worker budget"}
+    loop error in errors -> assert_eq(jet_cli_history_notice_fix(error), "free `.jet` history storage or raise its quota")
+    assert_eq(jet_cli_history_notice_fix("Queue budget exceeds"), "retry after optional history drains or repair `.jet` history storage")
+    assert_eq(jet_cli_history_notice_fix("worker failed"), "retry after optional history drains or repair `.jet` history storage")
+    assert_eq(jet_cli_history_notice_fix("BYTE BUDGET"), "raise the history byte budget or remove disposable history")
+    assert_eq(jet_cli_history_notice_fix("exceeds"), "raise the history byte budget or remove disposable history")
+    assert_eq(jet_cli_history_notice_fix("unrecognized café failure"), "check `.jet` history storage and retry")
+}
+#Test("history deduplicates by fix not operation or error") {
+    seen := [String:Bool]{}
+    first :: jet_cli_history_notice_first(&seen, "writing a comparison record", "permission denied") ?? panic("first notice")
+    assert_eq(first, "history: optional persistence failed while writing a comparison record: permission denied; fix: check `.jet` history permissions\n")
+    assert_eq(jet_cli_history_notice_first(&seen, "indexing a cached receipt", "ACCESS DENIED"), None)
+    queue :: jet_cli_history_notice_first(&seen, "writing a result", JET_CLI_OPTIONAL_HISTORY_QUEUE_UNAVAILABLE) ?? panic("new fix")
+    assert_eq(queue, "history: optional persistence failed while writing a result: optional history queue is full or unavailable; fix: retry after optional history drains or repair `.jet` history storage\n")
+    assert_eq(jet_cli_history_notice_first(&seen, "worker", JET_CLI_OPTIONAL_HISTORY_WORKER_PANIC), None)
+    assert_eq(jet_cli_history_notice_first(&seen, "startup", JET_CLI_OPTIONAL_HISTORY_WORKER_UNAVAILABLE), None)
+    assert_eq(seen.len(), 2)
+    // Rust poison branch emits unconditionally even when that fix was seen.
+    assert_eq(jet_cli_history_notice_line("startup", JET_CLI_OPTIONAL_HISTORY_WORKER_UNAVAILABLE, jet_cli_history_notice_fix(JET_CLI_OPTIONAL_HISTORY_WORKER_UNAVAILABLE)), "history: optional persistence failed while startup: optional history worker is unavailable; fix: retry after optional history drains or repair `.jet` history storage\n")
+    assert_eq(JET_CLI_OPTIONAL_HISTORY_QUEUE_CAPACITY, 8)
+    assert_eq(JET_CLI_OPTIONAL_HISTORY_WORKER_NAME, "jet-optional-history")
+}
+#Test("history evidence ids use frozen validation not a stricter parser") {
+    invalid :: [String]{"", ".", "..", "../report", "a/b", "a\\b"}
+    loop id in invalid {
+        if jet_cli_history_evidence_relative_path(id) == {
+            .Ok(_) -> panic("unsafe id accepted")
+            .Err(error) -> assert_eq(error.message, "evidence report has an unsafe id `{id}`")
+        }
+    }
+    assert_eq(jet_cli_history_evidence_relative_path("report") ?? panic("path"), ".jet/evidence/report.json")
+    assert_eq(jet_cli_history_evidence_relative_path("café") ?? panic("path"), ".jet/evidence/café.json")
+    assert_eq(jet_cli_history_evidence_relative_path("a..b") ?? panic("path"), ".jet/evidence/a..b.json")
+    // These pass the write boundary, then fail later RecordIndex validation.
+    assert_eq(jet_cli_history_evidence_relative_path("a\nb") ?? panic("write boundary"), ".jet/evidence/a\nb.json")
+}
+#Test("history evidence parent follows canonical Unix components") {
+    assert_eq(jet_cli_history_evidence_parent(""), None)
+    assert_eq(jet_cli_history_evidence_parent("/"), None)
+    assert_eq(jet_cli_history_evidence_parent("////"), None)
+    assert_eq(jet_cli_history_evidence_parent("file"), Val(""))
+    assert_eq(jet_cli_history_evidence_parent("."), Val(""))
+    assert_eq(jet_cli_history_evidence_parent(".."), Val(""))
+    assert_eq(jet_cli_history_evidence_parent("/file"), Val("/"))
+    assert_eq(jet_cli_history_evidence_parent("/a//file/"), Val("/a"))
+    assert_eq(jet_cli_history_evidence_parent("/a/."), Val("/"))
+    assert_eq(jet_cli_history_evidence_parent("./a/café.json"), Val("./a"))
+    assert_eq(jet_cli_history_evidence_parent("a/../b"), Val("a/.."))
+    assert_eq(jet_cli_history_evidence_parent("a/./b"), Val("a"))
+    assert_eq(jet_cli_history_evidence_parent("./b"), Val("."))
+}
+#Test("history evidence staging names use SHA256 not hex encoded bytes") {
+    assert_eq(jet_cli_history_evidence_temporary("/root/.jet/evidence/report.json", 42, "abc".bytes()), "/root/.jet/evidence/report.json.tmp.42.ba7816bf")
+    assert_eq(jet_cli_history_evidence_temporary("report", 0, [U8]{}), "report.json.tmp.0.e3b0c442")
+    assert_eq(jet_cli_history_evidence_temporary(".hidden", 7, "abc".bytes()), ".hidden.json.tmp.7.ba7816bf")
+    assert_eq(jet_cli_history_evidence_temporary("a/café.test.json", 7, "abc".bytes()), "a/café.test.json.tmp.7.ba7816bf")
+    no_filename :: [String]{"", ".", "..", "a/..", "/", "////"}
+    loop path in no_filename -> assert_eq(jet_cli_history_evidence_temporary(path, 7, "abc".bytes()), path)
+    assert_eq(jet_cli_history_evidence_temporary("a/.", 7, "abc".bytes()), "a.json.tmp.7.ba7816bf")
+}
+#Test("history evidence symlink and regular directory precedence") {
+    if jet_cli_history_validate_evidence_parent("/a", history_test_metadata(true, false, false)) == {
+        .Ok(_) -> panic("symlink parent accepted")
+        .Err(error) -> assert_eq(error.message, "test evidence parent is a symlink: /a")
+    }
+    if jet_cli_history_validate_evidence_parent("/a", history_test_metadata(false, false, true)) == {
+        .Ok(_) -> panic("file parent accepted")
+        .Err(error) -> assert_eq(error.message, "test evidence parent is not a directory: /a")
+    }
+    jet_cli_history_validate_evidence_parent("/a", history_test_metadata(false, true, false)) ?? panic("directory rejected")
+    if jet_cli_history_validate_evidence_destination("/a/report", history_test_metadata(true, false, true)) == {
+        .Ok(_) -> panic("symlink destination accepted")
+        .Err(error) -> assert_eq(error.message, "final test evidence path is not a regular file: /a/report")
+    }
+    if jet_cli_history_validate_evidence_destination("/a/report", history_test_metadata(false, true, false)) == {
+        .Ok(_) -> panic("directory destination accepted")
+        .Err(error) -> assert_eq(error.message, "final test evidence path is not a regular file: /a/report")
+    }
+}
+#Test("history evidence existing bytes are immutable and equality is byte exact") {
+    assert_eq(jet_cli_history_existing_evidence_size("report", "café".bytes(), "café".bytes()) ?? panic("identical"), 5)
+    assert_eq(jet_cli_history_existing_evidence_size("report", [U8]{}, [U8]{}) ?? panic("empty"), 0)
+    if jet_cli_history_existing_evidence_size("report", "old".bytes(), "new".bytes()) == {
+        .Ok(_) -> panic("different bytes accepted")
+        .Err(error) -> assert_eq(error.message, "refusing to overwrite differing test evidence report at report")
+    }
+}
+#Test("history canonical evidence codec and index identity stay distinct") {
+    report :: history_test_report()
+    bytes :: evidence_report_encode(report) ?? panic("real evidence codec")
+    assert_eq(mir_sha256_hex_bytes(bytes), "4a455445564944330003")
+    entry :: jet_cli_history_evidence_entry(report, report.revision.source, bytes.len(), true, None, 1) ?? panic("entry")
+    assert_eq(entry.artifact_id, report.identity.report_id)
+    assert_eq(entry.identity.target_inputs_sha256, report.revision.source)
+    assert_eq(entry.identity.tool_version, report.build.toolchain)
+    assert_eq(entry.identity.engine, "jet-test")
+    assert_eq(entry.path, ".jet/evidence/report.json")
+    assert_eq(entry.size, bytes.len())
+    assert_eq(entry.recorded_sequence, 1)
+    assert(entry.saved)
+    assert_eq(entry.capture, JetCLIRecordCapture.Safe)
+    assert_eq(entry.consumed.len(), 0)
+    assert_eq(entry.produced.len(), 0)
+    override :: jet_cli_history_evidence_entry(report, "b".repeat(64), bytes.len(), false, None, 2) ?? panic("override")
+    assert_eq(override.identity.target_inputs_sha256, "b".repeat(64))
+    assert(!override.saved)
+    assert(jet_cli_record_entry_is_disposable(override))
+}
+#Test("history artifact indexing preserves saved and sequence across reruns") {
+    previous := jet_cli_record_entry_new(history_test_identity(), .Evidence, "report", ".jet/evidence/report.json") ?? panic("existing")
+    previous.recorded_sequence = 17
+    previous.saved = true
+    report :: history_test_report()
+    kept :: jet_cli_history_evidence_entry(report, report.revision.source, 25, false, Val(previous), 999) ?? panic("repeat")
+    assert_eq(kept.recorded_sequence, 17)
+    assert(kept.saved)
+    previous.saved = false
+    protected :: jet_cli_history_evidence_entry(report, report.revision.source, 25, true, Val(previous), 999) ?? panic("protected repeat")
+    assert_eq(protected.recorded_sequence, 17)
+    assert(protected.saved)
+    disposable :: jet_cli_history_evidence_entry(report, report.revision.source, 25, false, Val(previous), 999) ?? panic("optional repeat")
+    assert_eq(disposable.recorded_sequence, 17)
+    assert(!disposable.saved)
+}
+// Real CLI-44B producer -> canonical evidence codec -> history index-entry policy.
+// This does not enqueue or discharge any native publication gate.
+#Test("history CLI44B consumer retains terminal evidence and protected identity") {
+    comparison :: comparison_record_terminal(.TypedEquality, .Unavailable, "runner unavailable")
+    binding :: JetCLITestComparisonBinding{boundary_digest: None, source_identity: None, replacement_identity: None, tool_identity: None, target_identity: None, coverage_digest: None, assumptions: [String]{}}
+    report :: jet_cli_test_comparison_evidence_report("corpus.json", comparison, binding) ?? panic("actual CLI44B report: {err.message}")
+    artifact_id :: comparison_record_artifact_id(comparison) ?? panic("actual comparison artifact")
+    assert_eq(report.identity.report_id, "test-compare-{artifact_id}")
+    assert_eq(report.revision.source, artifact_id)
+    assert_eq(report.records.len(), 1)
+    assert_eq(report.records[0].outcome, EvidenceOutcome.Unavailable)
+    assert_eq(report.records[0].count, U64{0})
+    assert(report.records[0].derivation != None)
+    bytes :: evidence_report_encode(report) ?? panic("actual evidence codec: {err.message}")
+    assert(bytes.len() > 10)
+    entry :: jet_cli_history_evidence_entry(report, report.revision.source, bytes.len(), true, None, 1) ?? panic("history consumer entry")
+    assert_eq(entry.artifact_id, report.identity.report_id)
+    assert_eq(entry.identity.target_inputs_sha256, artifact_id)
+    assert_eq(entry.identity.engine, "jet-test")
+    assert_eq(entry.path, ".jet/evidence/test-compare-{artifact_id}.json")
+    assert(entry.saved)
+    assert(!jet_cli_record_entry_is_disposable(entry))
+}

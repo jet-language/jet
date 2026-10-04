@@ -1,0 +1,762 @@
+// Behavioral parity for CmdLearn.rs curriculum/progress policy and rendering.
+// Fixtures are the actual authored assets through the production embedding
+// owner; no native read provider or substitute lesson/evaluator is mocked.
+
+struct LearnTestFixtures {
+    pub texts: [String:String]
+    impl JetCLILearnFixtures {
+        fn text(self, path: String) -> String? Never! { self.texts.get(path) }
+    }
+}
+fn learn_test_text() -> String Never! {
+    JET_CLI_LEARN_CURRICULUM_JSON
+}
+fn learn_test_fixtures() -> LearnTestFixtures Never! {
+    texts := [String:String]{}
+    families :: [String]{"loop", "state", "effects", "foreign"}
+    suffixes :: [String]{".jet", ".solution.jet", ".change.jet", ".change.solution.jet", ".transfer.jet", ".transfer.solution.jet"}
+    loop family in families {
+        loop suffix in suffixes {
+            path :: "{family}{suffix}"
+            texts[path] = JetCLILearnPackagedFixtures{}.text(path) ?? panic("actual packaged fixture missing: {path}")
+        }
+    }
+    LearnTestFixtures{texts: ^texts}
+}
+fn learn_test_tree() -> DataTree Never! { jet_cli_learn_parse_json(learn_test_text(), "test JSON") ?? panic("real curriculum JSON: {err.message}") }
+fn learn_test_object(tree: DataTree) -> [String:DataTree] Never! {
+    if tree == .Object(object) -> return ~object
+    panic("test expected object")
+}
+fn learn_test_task_tree() -> DataTree Never! {
+    object :: learn_test_object(learn_test_tree())
+    if object["tasks"] == .Array(values) -> return ~values[0]
+    panic("test expected tasks array")
+}
+fn learn_test_task() -> JetCLILearningTask Never! {
+    jet_cli_learn_parse_task(learn_test_task_tree(), 0, learn_test_fixtures()) ?? panic("real task: {err.message}")
+}
+fn learn_test_progress() -> JetCLILearnProgress Never! {
+    jet_cli_learn_progress_new(learn_test_task(), "curriculum-rev", "fixture-rev", "source-rev", "oracle-rev")
+}
+fn learn_test_curriculum_error(text: String, expected: String, fixtures: LearnTestFixtures) Never! {
+    if jet_cli_learn_load_curriculum(text, fixtures) == {
+        .Ok(_) -> panic("accepted invalid curriculum: {expected}")
+        .Err(error) -> assert_eq(error.message, expected)
+    }
+}
+fn learn_test_task_error(tree: DataTree, expected: String, fixtures: LearnTestFixtures) Never! {
+    if jet_cli_learn_parse_task(tree, 7, fixtures) == {
+        .Ok(_) -> panic("accepted invalid task: {expected}")
+        .Err(error) -> assert_eq(error.message, expected)
+    }
+}
+fn learn_test_progress_error(text: String, expected: String) Never! {
+    if jet_cli_learn_load_progress(text) == {
+        .Ok(_) -> panic("accepted invalid progress: {expected}")
+        .Err(error) -> assert_eq(error.message, expected)
+    }
+}
+
+#Test("learning parses the real four authored lessons and source-bound digest") {
+    text :: learn_test_text()
+    curriculum :: jet_cli_learn_load_curriculum(text, learn_test_fixtures()) ?? panic("real curriculum: {err.message}")
+    assert_eq(curriculum.tasks.len(), 4)
+    assert_eq(curriculum.revision, mir_sha256_hex(text))
+    assert_eq(curriculum.revision, "8c897b2a38f0d154346eef7b1a07e0d3eeb8e923af64ca4cc0c429e205e89592")
+    assert_eq(curriculum.relation, JET_CLI_LEARN_CENSUS_RELATION)
+    assert_eq(curriculum.relation_source, JET_CLI_LEARN_CENSUS_SOURCE)
+    assert_eq(curriculum.revision_rule, JET_CLI_LEARN_REVISION_RULE)
+    changed :: jet_cli_learn_load_curriculum("{text}\n", learn_test_fixtures()) ?? panic("whitespace curriculum: {err.message}")
+    assert(changed.revision != curriculum.revision)
+    found_foreign := false
+    loop lesson in curriculum.tasks {
+        assert(lesson.accessibility.keyboard)
+        assert(lesson.accessibility.text_only)
+        assert(lesson.accessibility.reduced_motion)
+        assert(lesson.accessibility.no_auto_quiz)
+        assert(!lesson.prerequisites.is_empty())
+        if lesson.family == "foreign" {
+            found_foreign = true
+            // Rust predictions_require_the_authored_code_answer (2285-2296).
+            assert(jet_cli_learn_prediction_matches(lesson, " String "))
+            assert(!jet_cli_learn_prediction_matches(lesson, "not String"))
+            assert(!jet_cli_learn_prediction_matches(lesson, "correct"))
+        }
+    }
+    assert(found_foreign)
+}
+
+#Test("learning curriculum errors preserve labels order and duplicate policy") {
+    fixtures :: learn_test_fixtures()
+    learn_test_curriculum_error("", "invalid JSON at line 1: expected a JSON value", fixtures)
+    learn_test_curriculum_error("[]", "curriculum root must be an object: expected a DataTree object", fixtures)
+    learn_test_curriculum_error("{{\"schema\":\"a\",\"schema\":\"b\"}}", "invalid JSON at line 1: duplicate object key `schema`", fixtures)
+    original :: learn_test_object(learn_test_tree())
+    fields :: [String]{"schema", "relation", "relation_source", "revision_rule"}
+    loop field in fields {
+        object := ~original
+        _ :: &object.remove(field)
+        learn_test_curriculum_error(learn_json.to_string(DataTree.Object(object)), "curriculum is missing non-empty `{field}`", fixtures)
+    }
+    bad_values :: [String]{"schema", "relation", "relation_source", "revision_rule"}
+    messages :: [String]{"unsupported curriculum schema `bad`", "curriculum must project `jet-learning-census-v1`, got `bad`", "curriculum must use `Examples/learn/curriculum.json`, got `bad`", "curriculum revision rule does not match the census contract"}
+    loop index in 0..<bad_values.len() {
+        object := ~original
+        object[bad_values[index]] = DataTree.Text("bad")
+        learn_test_curriculum_error(learn_json.to_string(DataTree.Object(object)), messages[index], fixtures)
+    }
+    missing := ~original
+    _ :: &missing.remove("tasks")
+    learn_test_curriculum_error(learn_json.to_string(DataTree.Object(missing)), "curriculum is missing `tasks`", fixtures)
+    wrong := ~original
+    wrong["tasks"] = DataTree.Null
+    learn_test_curriculum_error(learn_json.to_string(DataTree.Object(wrong)), "curriculum tasks must be an array: expected a DataTree array", fixtures)
+    empty := ~original
+    empty["tasks"] = DataTree.Array([DataTree]{})
+    learn_test_curriculum_error(learn_json.to_string(DataTree.Object(empty)), "curriculum has no lessons", fixtures)
+    first :: learn_test_task_tree()
+    duplicate := ~original
+    duplicate["tasks"] = DataTree.Array([DataTree]{~first, ~first})
+    learn_test_curriculum_error(learn_json.to_string(DataTree.Object(duplicate)), "duplicate curriculum task `language.tir-stmt.loop.predict`", fixtures)
+    other := learn_test_object(first)
+    other["id"] = DataTree.Text("other")
+    duplicate["tasks"] = DataTree.Array([DataTree]{~first, DataTree.Object(other)})
+    learn_test_curriculum_error(learn_json.to_string(DataTree.Object(duplicate)), "duplicate curriculum capability `language.tir-stmt.loop`", fixtures)
+}
+
+#Test("learning field helpers report every wrong shape without losing labels") {
+    object := [String:DataTree]{}
+    bad_texts :: [DataTree]{DataTree.Null, DataTree.Bool(true), DataTree.Text("")}
+    loop value in bad_texts {
+        object["name"] = ~value
+        if jet_cli_learn_required_text(object, "name", "lesson") == {
+            .Ok(_) -> panic("invalid required text")
+            .Err(error) -> assert_eq(error.message, "lesson is missing non-empty `name`")
+        }
+    }
+    if jet_cli_learn_required_text(object, "missing", "lesson") == {
+        .Ok(_) -> panic("missing required text")
+        .Err(error) -> assert_eq(error.message, "lesson is missing non-empty `missing`")
+    }
+    if jet_cli_learn_required_bool(object, "flag", "lesson") == {
+        .Ok(_) -> panic("missing required bool")
+        .Err(error) -> assert_eq(error.message, "lesson is missing boolean `flag`")
+    }
+    object["flag"] = DataTree.Text("true")
+    if jet_cli_learn_required_bool(object, "flag", "lesson") == {
+        .Ok(_) -> panic("text required bool")
+        .Err(error) -> assert_eq(error.message, "lesson is missing boolean `flag`")
+    }
+    object["flag"] = DataTree.Bool(false)
+    assert_eq(jet_cli_learn_required_bool(object, "flag", "lesson") ?? panic("false boolean"), false)
+    if jet_cli_learn_text_array(object, "items", "lesson") == {
+        .Ok(_) -> panic("missing text array")
+        .Err(error) -> assert_eq(error.message, "lesson is missing `items`")
+    }
+    object["items"] = DataTree.Null
+    if jet_cli_learn_text_array(object, "items", "lesson") == {
+        .Ok(_) -> panic("wrong text array")
+        .Err(error) -> assert_eq(error.message, "lesson.items must be an array: expected a DataTree array")
+    }
+    object["items"] = DataTree.Array([DataTree]{DataTree.Text(""), DataTree.Bool(true)})
+    if jet_cli_learn_text_array(object, "items", "lesson") == {
+        .Ok(_) -> panic("non-string text array member")
+        .Err(error) -> assert_eq(error.message, "lesson.items contains a non-string: expected a DataTree string")
+    }
+    object["items"] = DataTree.Array([DataTree]{DataTree.Text("")})
+    assert_eq(jet_cli_learn_text_array(object, "items", "lesson") ?? panic("empty array string is allowed"), [String]{""})
+    assert(jet_cli_learn_object_field(object, "absent") == None)
+    field :: jet_cli_learn_object_field(object, "flag") ?? panic("present object field")
+    if field == .Bool(flag) -> assert(!flag) else -> panic("object field lost type")
+    optional_values :: [DataTree]{DataTree.Null, DataTree.Bool(false), DataTree.Int(1)}
+    loop value in optional_values {
+        object["optional"] = ~value
+        assert_eq(jet_cli_learn_optional_text(object, "optional"), "")
+        assert_eq(jet_cli_learn_optional_nullable_text(object, "optional"), None)
+    }
+    assert_eq(jet_cli_learn_optional_text(object, "absent"), "")
+    assert_eq(jet_cli_learn_optional_nullable_text(object, "absent"), None)
+    object["optional"] = DataTree.Text("")
+    assert_eq(jet_cli_learn_optional_nullable_text(object, "optional"), Val(""))
+}
+
+#Test("learning task validates every required field and nested shape with its label") {
+    fixtures :: learn_test_fixtures()
+    original :: learn_test_object(learn_test_task_tree())
+    label :: "language.tir-stmt.loop.predict"
+    learn_test_task_error(DataTree.Null, "task 7 must be an object: expected a DataTree object", fixtures)
+    fields :: [String]{"id", "capability_id", "census_task_id", "family", "axis", "concept", "prompt", "wrong_model"}
+    loop field in fields {
+        object := ~original
+        _ :: &object.remove(field)
+        owner :: if field == "id" -> "task" else -> label
+        learn_test_task_error(DataTree.Object(object), "{owner} is missing non-empty `{field}`", fixtures)
+    }
+    prerequisites := ~original
+    _ :: &prerequisites.remove("prerequisites")
+    learn_test_task_error(DataTree.Object(prerequisites), "{label} is missing `prerequisites`", fixtures)
+    prerequisites["prerequisites"] = DataTree.Null
+    learn_test_task_error(DataTree.Object(prerequisites), "{label}.prerequisites must be an array: expected a DataTree array", fixtures)
+    prerequisites["prerequisites"] = DataTree.Array([DataTree]{DataTree.Int(1)})
+    learn_test_task_error(DataTree.Object(prerequisites), "{label}.prerequisites contains a non-string: expected a DataTree string", fixtures)
+    nested :: [String]{"source", "input_identity", "oracle", "reveal", "controlled_edit", "transfer", "accessibility"}
+    loop field in nested {
+        object := ~original
+        _ :: &object.remove(field)
+        learn_test_task_error(DataTree.Object(object), "{label} is missing `{field}`", fixtures)
+        object[field] = DataTree.Null
+        learn_test_task_error(DataTree.Object(object), "{label}.{field} must be an object: expected a DataTree object", fixtures)
+    }
+    object := ~original
+    object["census_task_id"] = DataTree.Text("other")
+    learn_test_task_error(DataTree.Object(object), "{label}.census_task_id must name the canonical predict task", fixtures)
+    object = ~original
+    object["axis"] = DataTree.Text("check")
+    learn_test_task_error(DataTree.Object(object), "{label}.axis must be predict", fixtures)
+    groups :: [String]{"source", "controlled_edit", "transfer", "input_identity", "oracle", "reveal", "accessibility"}
+    group_fields :: [[String]]{
+        [String]{"path", "solution_path", "expected_output", "failure"},
+        [String]{"path", "solution_path", "expected_output", "failure"},
+        [String]{"path", "solution_path", "expected_output", "failure", "structural_difference", "copy_guard"},
+        [String]{"path", "role", "revision"},
+        [String]{"id", "kind", "answer", "expected_output", "distinguishes"},
+        [String]{"policy", "evidence", "reason", "counterexample"},
+        [String]{"keyboard", "text_only", "reduced_motion", "no_auto_quiz"},
+    }
+    loop index in 0..<groups.len() {
+        group :: groups[index]
+        loop field in group_fields[index] {
+            parent := ~original
+            child := learn_test_object(parent[group])
+            _ :: &child.remove(field)
+            parent[group] = DataTree.Object(child)
+            owner :: if (group == "source" || group == "controlled_edit" || group == "transfer") && field != "structural_difference" && field != "copy_guard" -> "{label}.{group}" else -> label
+            qualifier :: if group == "accessibility" -> "boolean" else -> "non-empty"
+            learn_test_task_error(DataTree.Object(parent), "{owner} is missing {qualifier} `{field}`", fixtures)
+        }
+    }
+    mismatches :: [String]{"input_identity", "oracle", "reveal"}
+    keys :: [String]{"path", "expected_output", "policy"}
+    errors :: [String]{"{label}.input_identity.path must match source.path", "{label}.oracle.expected_output must match source.expected_output", "{label}.reveal.policy must be predict_then_reveal"}
+    loop index in 0..<mismatches.len() {
+        parent := ~original
+        child := learn_test_object(parent[mismatches[index]])
+        child[keys[index]] = DataTree.Text("wrong")
+        parent[mismatches[index]] = DataTree.Object(child)
+        learn_test_task_error(DataTree.Object(parent), errors[index], fixtures)
+    }
+}
+
+#Test("learning fixtures enforce POSIX component extension and packaging precedence") {
+    safe :: [String]{"loop.jet", "a/b.jet", "a//b.jet", "a/./b.jet", "a.jet/", "a.jet/.", "a\\b.jet", "C:lesson.jet", ".hidden.jet"}
+    unsafe :: [String]{"", "/a.jet", "./a.jet", "../a.jet", "a/../b.jet", ".jet", "a.JET", "a.jet/b", "a.jet/..", "a.jet.txt"}
+    loop path in safe -> assert(jet_cli_learn_safe_fixture_path(path))
+    loop path in unsafe -> assert(!jet_cli_learn_safe_fixture_path(path))
+    fixtures :: learn_test_fixtures()
+    fixture := learn_test_task().source
+    fixture.path = "../unsafe.jet"
+    fixture.failure = "wrong"
+    if jet_cli_learn_validate_fixture(fixture, "label", fixtures) == {
+        .Ok(_) -> panic("unsafe fixture accepted")
+        .Err(error) -> assert_eq(error.message, "label fixture path `../unsafe.jet` is not a safe Jet filename")
+    }
+    fixture.path = "missing.jet"
+    if jet_cli_learn_validate_fixture(fixture, "label", fixtures) == {
+        .Ok(_) -> panic("unpackaged fixture accepted")
+        .Err(error) -> assert_eq(error.message, "label fixture `missing.jet` is not packaged")
+    }
+    fixture.path = "loop.jet"
+    fixture.solution_path = "/unsafe.jet"
+    if jet_cli_learn_validate_fixture(fixture, "label", fixtures) == {
+        .Ok(_) -> panic("unsafe solution accepted")
+        .Err(error) -> assert_eq(error.message, "label fixture path `/unsafe.jet` is not a safe Jet filename")
+    }
+    fixture.solution_path = "missing.jet"
+    if jet_cli_learn_validate_fixture(fixture, "label", fixtures) == {
+        .Ok(_) -> panic("unpackaged solution accepted")
+        .Err(error) -> assert_eq(error.message, "label fixture `missing.jet` is not packaged")
+    }
+    fixture.solution_path = "loop.solution.jet"
+    if jet_cli_learn_validate_fixture(fixture, "label", fixtures) == {
+        .Ok(_) -> panic("unsupported failure accepted")
+        .Err(error) -> assert_eq(error.message, "label fixture has unsupported failure `wrong`")
+    }
+    fixture.failure = "diagnostic"
+    jet_cli_learn_validate_fixture(fixture, "label", fixtures) ?? panic("diagnostic accepted: {err.message}")
+    fixture.failure = "output"
+    jet_cli_learn_validate_fixture(fixture, "label", fixtures) ?? panic("output accepted: {err.message}")
+    assert_eq(jet_cli_learn_fixture_text(fixtures, "missing.jet"), None)
+    assert_eq(jet_cli_learn_fixture_text(fixtures, "loop.jet"), fixtures.texts.get("loop.jet"))
+}
+
+#Test("learning progress phase branches and status precedence are source-bound") {
+    progress := learn_test_progress()
+    assert_eq(progress.phase, "prediction")
+    assert_eq(jet_cli_learn_step_name(progress), "PREDICT")
+    jet_cli_learn_progress_update_phase(&progress)
+    assert_eq(progress.phase, "source")
+    progress.source_completed = true
+    jet_cli_learn_progress_update_phase(&progress)
+    assert_eq(progress.phase, "prediction")
+    progress.prediction_measured = true
+    progress.prediction = "correct"
+    jet_cli_learn_progress_update_phase(&progress)
+    assert_eq(progress.phase, "evidence")
+    assert_eq(jet_cli_learn_step_name(progress), "CHECK")
+    progress.evidence_status = "current"
+    jet_cli_learn_progress_update_phase(&progress)
+    assert_eq(progress.phase, "reason")
+    assert_eq(jet_cli_learn_step_name(progress), "CHECK")
+    progress.reason_completed = true
+    jet_cli_learn_progress_update_phase(&progress)
+    assert_eq(progress.phase, "controlled_change")
+    assert_eq(jet_cli_learn_step_name(progress), "CHANGE")
+    progress.controlled_completed = true
+    jet_cli_learn_progress_update_phase(&progress)
+    assert_eq(progress.phase, "transfer")
+    assert_eq(jet_cli_learn_step_name(progress), "TRANSFER")
+    progress.transfer_completed = true
+    jet_cli_learn_progress_update_phase(&progress)
+    assert_eq(progress.phase, "transfer")
+    progress.transfer_evidence = true
+    progress.status = "cancelled"
+    jet_cli_learn_progress_update_phase(&progress)
+    assert_eq(progress.phase, "complete")
+    assert(jet_cli_learn_progress_complete(progress))
+    answers :: [String]{"unknown", "unmeasured"}
+    loop answer in answers {
+        progress.prediction = ~answer
+        jet_cli_learn_progress_update_phase(&progress)
+        assert_eq(progress.phase, "complete")
+        assert_eq(progress.status, "in_progress")
+    }
+    progress.stale_reason = Val("changed")
+    progress.evidence_status = "unavailable"
+    progress.status = "cancelled"
+    jet_cli_learn_progress_update_phase(&progress)
+    assert_eq(progress.status, "cancelled")
+    progress.status = "in_progress"
+    jet_cli_learn_progress_update_phase(&progress)
+    assert_eq(progress.status, "unavailable")
+    progress.evidence_status = "current"
+    jet_cli_learn_progress_update_phase(&progress)
+    assert_eq(progress.status, "stale")
+    progress.stale_reason = None
+    progress.prediction = "wrong"
+    jet_cli_learn_progress_update_phase(&progress)
+    assert_eq(progress.status, "completed")
+    progress.source_completed = false
+    assert_eq(jet_cli_learn_step_name(progress), "CHECK")
+    jet_cli_learn_progress_update_phase(&progress)
+    assert_eq(progress.phase, "source")
+    assert_eq(progress.status, "in_progress")
+    progress.transfer_completed = false
+    progress.transfer_evidence = true
+    progress.source_completed = true
+    jet_cli_learn_progress_update_phase(&progress)
+    assert_eq(progress.phase, "transfer")
+}
+
+#Test("learning stale reset clears all evidence but retains task and fixture identity") {
+    progress := learn_test_progress()
+    progress.status = "completed"
+    progress.phase = "complete"
+    progress.prediction_initial = "correct"
+    progress.prediction = "correct"
+    progress.prediction_response = "answer"
+    progress.prediction_measured = true
+    progress.reveal_shown = true
+    progress.evidence_status = "current"
+    progress.evidence_source_revision = "old"
+    progress.derivation_ref = Val("receipt")
+    progress.reason_completed = true
+    progress.source_completed = true
+    progress.controlled_completed = true
+    progress.controlled_revision = "old-control"
+    progress.transfer_completed = true
+    progress.transfer_revision = "old-transfer"
+    progress.transfer_evidence = true
+    jet_cli_learn_progress_reset_for_stale(&progress, "source changed", "new-source")
+    expected := learn_test_progress()
+    expected.status = "stale"
+    expected.source_revision = "new-source"
+    expected.evidence_status = "stale"
+    expected.stale_reason = Val("source changed")
+    assert_eq(jet_cli_learn_progress_json(progress), jet_cli_learn_progress_json(expected))
+    assert(!jet_cli_learn_progress_complete(progress))
+}
+
+#Test("learning actions preserve exact aliases whitespace and ASCII normalization") {
+    unknown :: [String]{"i do not know", "unknown", "idk", " IDK \n"}
+    loop line in unknown -> assert_eq(jet_cli_learn_parse_action(line), Val(JetCLILearnAction.Unknown))
+    assert_eq(jet_cli_learn_parse_action("skip"), Val(JetCLILearnAction.Skip))
+    reveals :: [String]{"reveal", "help"}
+    loop line in reveals -> assert_eq(jet_cli_learn_parse_action(line), Val(JetCLILearnAction.Reveal))
+    reasons :: [String]{"reason", "explain"}
+    loop line in reasons -> assert_eq(jet_cli_learn_parse_action(line), Val(JetCLILearnAction.Reason))
+    cancels :: [String]{"cancel", "quit"}
+    loop line in cancels -> assert_eq(jet_cli_learn_parse_action(line), Val(JetCLILearnAction.Cancel))
+    assert_eq(jet_cli_learn_parse_action(" Predict  String "), Val(JetCLILearnAction.Predict("string")))
+    assert_eq(jet_cli_learn_parse_action("predict ÄBC"), Val(JetCLILearnAction.Predict("Äbc")))
+    invalid :: [String]{"", "predict", "predict ", "predict\tString", "correct", "i  do not know", "skip extra"}
+    loop line in invalid -> assert_eq(jet_cli_learn_parse_action(line), None)
+}
+
+#Test("learning progress JSON round-trips null and escaped optional values in Rust order") {
+    progress := learn_test_progress()
+    text :: jet_cli_learn_progress_json(progress)
+    loaded :: jet_cli_learn_load_progress(text) ?? panic("progress round trip: {err.message}")
+    assert_eq(jet_cli_learn_progress_json(loaded), text)
+    assert(text.starts_with("{{\"schema\":\"jet-learn-progress-v1\",\"curriculum_revision\":\"curriculum-rev\""))
+    assert(text.ends_with(",\"transfer_evidence\":false,\"stale_reason\":null}}\n"))
+    assert(text.contains("\"derivation_ref\":null"))
+    cr :: String.from_bytes([U8]{U8{13}}) ?? panic("CR is UTF-8")
+    progress.prediction_response = "\"\\\n{cr}\t café"
+    progress.derivation_ref = Val("receipt\n\"\\")
+    progress.stale_reason = Val("")
+    progress.evidence_source_revision = "evidence-source"
+    progress.controlled_revision = "controlled-source"
+    progress.transfer_revision = "transfer-source"
+    progress.prediction_measured = true
+    progress.reveal_shown = true
+    progress.reason_completed = true
+    progress.source_completed = true
+    progress.controlled_completed = true
+    progress.transfer_completed = true
+    progress.transfer_evidence = true
+    populated :: jet_cli_learn_progress_json(progress)
+    populated_loaded :: jet_cli_learn_load_progress(populated) ?? panic("escaped progress round trip: {err.message}")
+    assert_eq(jet_cli_learn_progress_json(populated_loaded), populated)
+    assert_eq(populated_loaded.derivation_ref, progress.derivation_ref)
+    assert_eq(populated_loaded.stale_reason, Val(""))
+    assert_eq(populated_loaded.prediction_response, progress.prediction_response)
+    // Optional fields accept absent/null/non-string values, not just valid strings.
+    original :: learn_test_object(jet_cli_learn_parse_json(text, "test") ?? panic("progress tree"))
+    optional :: [String]{"prediction_response", "evidence_source_revision", "derivation_ref", "controlled_revision", "transfer_revision", "stale_reason"}
+    object := ~original
+    loop field in optional -> _ :: &object.remove(field)
+    absent :: jet_cli_learn_load_progress(learn_json.to_string(DataTree.Object(object))) ?? panic("absent optional progress")
+    assert_eq(jet_cli_learn_progress_json(absent), text)
+    loop field in optional -> object[field] = DataTree.Int(5)
+    wrong :: jet_cli_learn_load_progress(learn_json.to_string(DataTree.Object(object))) ?? panic("wrong optional progress")
+    assert_eq(jet_cli_learn_progress_json(wrong), text)
+}
+
+#Test("learning progress errors preserve every required field label") {
+    learn_test_progress_error("", "progress JSON at line 1: expected a JSON value")
+    learn_test_progress_error("[]", "progress must be an object: expected a DataTree object")
+    learn_test_progress_error("{{\"schema\":\"bad\"}}", "unsupported progress schema `bad`")
+    text :: jet_cli_learn_progress_json(learn_test_progress())
+    original :: learn_test_object(jet_cli_learn_parse_json(text, "test") ?? panic("progress tree"))
+    required :: [String]{"schema", "curriculum_revision", "task_id", "capability_id", "family", "source_path", "source_fixture_revision", "source_revision", "oracle_id", "oracle_revision", "status", "phase", "prediction_initial", "prediction", "evidence_status"}
+    loop field in required {
+        object := ~original
+        _ :: &object.remove(field)
+        learn_test_progress_error(learn_json.to_string(DataTree.Object(object)), "progress is missing non-empty `{field}`")
+        object[field] = DataTree.Text("")
+        learn_test_progress_error(learn_json.to_string(DataTree.Object(object)), "progress is missing non-empty `{field}`")
+    }
+    booleans :: [String]{"prediction_measured", "reveal_shown", "reason_completed", "source_completed", "controlled_completed", "transfer_completed", "transfer_evidence"}
+    loop field in booleans {
+        object := ~original
+        _ :: &object.remove(field)
+        learn_test_progress_error(learn_json.to_string(DataTree.Object(object)), "progress is missing boolean `{field}`")
+        object[field] = DataTree.Text("false")
+        learn_test_progress_error(learn_json.to_string(DataTree.Object(object)), "progress is missing boolean `{field}`")
+    }
+}
+
+#Test("learning safe identifiers count UTF-8 bytes and oracle revision uses NUL delimiters") {
+    assert_eq(jet_cli_learn_safe_id("A-z.09/é🛩"), "A_z_09_______")
+    lesson := learn_test_task()
+    lesson.id = "../é"
+    assert_eq(jet_cli_learn_progress_path(lesson), "progress/_____.json")
+    oracle :: lesson.oracle
+    nul :: String.from_bytes([U8]{U8{0}}) ?? panic("NUL is UTF-8")
+    joined :: "{oracle.id}{nul}{oracle.kind}{nul}{oracle.answer}{nul}{oracle.expected_output}{nul}{oracle.distinguishes}"
+    assert_eq(jet_cli_learn_oracle_revision(lesson), mir_sha256_hex(joined))
+    prior :: jet_cli_learn_oracle_revision(lesson)
+    lesson.oracle.answer = "different"
+    assert(jet_cli_learn_oracle_revision(lesson) != prior)
+    lesson.oracle.answer = "é"
+    assert(jet_cli_learn_prediction_matches(lesson, " é "))
+    assert(!jet_cli_learn_prediction_matches(lesson, "É"))
+}
+
+#Test("learning JSON preserves the Rust 64-container depth bound") {
+    prefix := ""
+    suffix := ""
+    loop _ in 0..<64 {
+        prefix += "["
+        suffix += "]"
+    }
+    allowed :: "{prefix}0{suffix}"
+    jet_cli_learn_parse_json(allowed, "invalid JSON") ?? panic("64 containers must parse: {err.message}")
+    if jet_cli_learn_parse_json("[{allowed}]", "invalid JSON") == {
+        .Ok(_) -> panic("65 containers parsed")
+        .Err(error) -> assert_eq(error.message, "invalid JSON at line 1: JSON value is nested too deeply")
+    }
+}
+
+#Test("learning packaged loader preserves all original assets and authored prediction test") {
+    curriculum :: jet_cli_learn_packaged_curriculum() ?? panic("actual curriculum: {err.message}")
+    assert_eq(curriculum.tasks.len(), 4)
+    assert_eq(curriculum.revision, mir_sha256_hex(learn_test_text()))
+    packaged :: JetCLILearnPackagedFixtures{}
+    actual :: learn_test_fixtures()
+    loop item in actual.texts -> assert_eq(packaged.text(item.key), Val(item.value))
+    assert_eq(packaged.text("missing.jet"), None)
+}
+
+#Test("learning options retain the exact accepted vocabulary and once semantics") {
+    flags :: [String]{"--check", "--watch", "--watch=on", "--watch=true", "--watch=off", "--json", "--quiet", "--color", "--color=never", "--color="}
+    options :: jet_cli_learn_options(flags) ?? panic("valid learn flags")
+    assert(options.check)
+    assert(options.once)
+    // The Rust runner tests any watch=off occurrence; this is not WatchPolicy's
+    // later-wins rule and must not be changed to that different command policy.
+    once :: jet_cli_learn_options([String]{"--watch=off", "--watch=on"}) ?? panic("valid watch flags")
+    assert(once.once)
+    default :: jet_cli_learn_options([String]{}) ?? panic("no args")
+    assert(!default.once && !default.check)
+    invalid :: [String]{"--watch=false", "--watch=ON", "--", "loop", "--check=true"}
+    loop flag in invalid {
+        if jet_cli_learn_options([String]{flag}) == {
+            .Ok(_) -> panic("invalid learn argument accepted")
+            .Err(error) -> assert_eq(error.message, "{flag} is not a jet learn argument")
+        }
+    }
+}
+
+#Test("learning buffered actions skip invalid lines and preserve stdin trimming") {
+    actions := jet_cli_learn_actions_from_text("\r\ninvalid\n  PREDICT String \r\n\nHELP\nquit\n")
+    assert_eq(actions.lines, [String]{"invalid", "PREDICT String", "HELP", "quit"})
+    assert(!actions.interactive)
+    assert_eq(jet_cli_learn_actions_next_buffered(&actions), Val(JetCLILearnAction.Predict("string")))
+    assert_eq(actions.next, 2)
+    assert_eq(jet_cli_learn_actions_next_buffered(&actions), Val(JetCLILearnAction.Reveal))
+    assert_eq(jet_cli_learn_actions_next_buffered(&actions), Val(JetCLILearnAction.Cancel))
+    assert_eq(jet_cli_learn_actions_next_buffered(&actions), None)
+    assert_eq(jet_cli_learn_lines("a\rb\nc\r\n\n"), [String]{"a\rb", "c", ""})
+    assert_eq(jet_cli_learn_lines(""), [String]{})
+}
+
+#Test("learning prediction records the initial attempt independently of the later answer") {
+    lesson :: learn_test_task()
+    progress := learn_test_progress()
+    assert(!jet_cli_learn_apply_prediction(lesson, &progress, "wrong"))
+    assert_eq(progress.prediction_initial, "incorrect")
+    assert_eq(progress.prediction, "incorrect")
+    assert(progress.prediction_measured)
+    assert_eq(progress.prediction_response, "wrong")
+    assert(jet_cli_learn_apply_prediction(lesson, &progress, ~lesson.oracle.answer))
+    assert_eq(progress.prediction_initial, "incorrect")
+    assert_eq(progress.prediction, "correct")
+    jet_cli_learn_prediction_unknown(&progress)
+    assert_eq(progress.prediction, "unknown")
+    assert_eq(progress.prediction_response, "I do not know")
+    assert(progress.reveal_shown)
+    jet_cli_learn_prediction_skip(&progress)
+    assert_eq(progress.prediction, "unmeasured")
+    assert_eq(progress.prediction_response, "skip")
+    jet_cli_learn_cancel(&progress)
+    assert_eq(progress.status, "cancelled")
+    assert_eq(progress.stale_reason, Val("learner cancelled this checkpoint"))
+}
+
+#Test("learning reconciliation preserves reset priority and resumes only its own cancellation") {
+    curriculum :: jet_cli_learn_packaged_curriculum() ?? panic("curriculum")
+    lesson :: curriculum.tasks[0]
+    progress := jet_cli_learn_progress_new(lesson, curriculum.revision, "fixture", "source", "oracle")
+    jet_cli_learn_cancel(&progress)
+    jet_cli_learn_reconcile(&progress, curriculum, lesson, "fixture", "source", "oracle")
+    assert_eq(progress.status, "in_progress")
+    assert_eq(progress.stale_reason, None)
+    progress.curriculum_revision = "old"
+    progress.prediction_measured = true
+    jet_cli_learn_reconcile(&progress, curriculum, lesson, "new-fixture", "new-source", "new-oracle")
+    assert_eq(progress.stale_reason, Val("lesson content changed"))
+    assert(!progress.prediction_measured)
+    assert_eq(progress.source_revision, "new-source")
+    assert_eq(progress.source_fixture_revision, "new-fixture")
+    assert_eq(progress.oracle_revision, "new-oracle")
+    jet_cli_learn_reconcile(&progress, curriculum, lesson, "new-fixture", "new-source", "changed-oracle")
+    assert_eq(progress.stale_reason, Val("lesson answer changed"))
+    jet_cli_learn_reconcile(&progress, curriculum, lesson, "changed-fixture", "new-source", "changed-oracle")
+    assert_eq(progress.stale_reason, Val("packaged lesson source changed"))
+    jet_cli_learn_reconcile(&progress, curriculum, lesson, "changed-fixture", "edited", "changed-oracle")
+    assert_eq(progress.stale_reason, Val("source changed: {lesson.source.path}"))
+    progress.controlled_completed = true
+    progress.transfer_completed = true
+    progress.transfer_evidence = true
+    progress.controlled_revision = "saved"
+    jet_cli_learn_controlled_changed(&progress, "edit")
+    assert(!progress.controlled_completed && !progress.transfer_completed && !progress.transfer_evidence)
+    assert_eq(progress.stale_reason, Val("controlled edit source changed"))
+    jet_cli_learn_controlled_checked(&progress, "edit")
+    assert(progress.controlled_completed)
+    assert_eq(progress.stale_reason, None)
+    progress.transfer_completed = true
+    progress.transfer_evidence = true
+    progress.transfer_revision = "saved"
+    jet_cli_learn_transfer_changed(&progress, "edit")
+    assert(!progress.transfer_completed && !progress.transfer_evidence)
+    assert_eq(progress.stale_reason, Val("transfer source changed"))
+}
+
+#Test("learning plain wrapping counts Unicode scalars and retains split whitespace") {
+    assert_eq(jet_cli_learn_wrap_plain("", 0), [String]{""})
+    assert_eq(jet_cli_learn_wrap_plain("abcdef", 2), [String]{"ab", "cd", "ef"})
+    assert_eq(jet_cli_learn_wrap_plain("a bcdef", 4), [String]{"a ", "bcde", "f"})
+    assert_eq(jet_cli_learn_wrap_plain("é中x", 1), [String]{"é", "中", "x"})
+    assert_eq(jet_cli_learn_wrap_plain("a\u{2003}bcde", 3), [String]{"a\u{2003}", "bcd", "e"})
+    assert_eq(jet_cli_learn_pad_plain("abc", 3), "abc")
+    assert_eq(jet_cli_learn_pad_plain("é", 3), "é  ")
+    escape :: String.from_bytes([U8]{U8{27}}) ?? panic("ESC")
+    assert_eq(jet_cli_learn_visible_cols("{escape}[31mé{escape}[0mx"), 2)
+    assert_eq(jet_cli_learn_visible_cols("{escape}[31"), 0)
+    style :: JetCLILearnStyle{color: false, width: 24, unicode: false}
+    assert_eq(jet_cli_learn_frame(style, "title", [String]{"é"}), "+- title --------------+\n| é                    |\n+----------------------+")
+    assert_eq(jet_cli_learn_source_rows("a\r\nb\n"), [String]{"  1 | a", "  2 | b"})
+    assert_eq(jet_cli_learn_source_rows(""), [String]{})
+}
+
+#Test("learning bounded output retains Rust line scalar and omission limits") {
+    assert_eq(jet_cli_learn_bounded_output_rows("", false), [String]{"(no output)"})
+    assert_eq(jet_cli_learn_bounded_output_rows("\n", true), [String]{""})
+    assert_eq(jet_cli_learn_bounded_output_rows("a\r\nb\r", false), [String]{"a", "b\r"})
+    long :: "é".repeat(121)
+    assert_eq(jet_cli_learn_bounded_output_rows(long, true), [String]{"{"é".repeat(120)}…"})
+    assert_eq(jet_cli_learn_bounded_output_rows(long, false), [String]{"{"é".repeat(120)}..."})
+    assert_eq(jet_cli_learn_bounded_output_rows("é".repeat(120), true), [String]{"é".repeat(120)})
+    rows :: jet_cli_learn_bounded_output_rows("x\n".repeat(9), false)
+    assert_eq(rows.len(), 9)
+    assert_eq(rows[8], "... more output omitted")
+}
+
+#Test("learning status uses canonical envelopes and preserves nested payload fields") {
+    curriculum :: jet_cli_learn_packaged_curriculum() ?? panic("curriculum")
+    lesson :: curriculum.tasks[0]
+    progress := jet_cli_learn_progress_new(lesson, curriculum.revision, "fixture", "source", "oracle")
+    text :: jet_cli_learn_status_envelope(lesson, progress, None).json()
+    envelope :: learn_test_object(jet_cli_learn_parse_json(text, "status") ?? panic("status JSON"))
+    assert_eq(envelope["schema"], DataTree.Text("jet.status/v1"))
+    assert_eq(envelope["action"], DataTree.Text("learn"))
+    assert_eq(envelope["ok"], DataTree.Bool(false))
+    payload :: learn_test_object(envelope["learn"])
+    assert_eq(payload["schema"], DataTree.Text("jet.learn/v1"))
+    assert_eq(payload["task_id"], DataTree.Text(lesson.id))
+    assert_eq(payload["stale_reason"], DataTree.Null)
+    evidence :: learn_test_object(payload["evidence"])
+    assert_eq(evidence["derivation"], DataTree.Null)
+    assert_eq(evidence["derivation_ref"], DataTree.Null)
+    source :: learn_test_object(payload["source_identity"])
+    assert_eq(source["digest"], DataTree.Text("source"))
+    assert_eq(source["packaged_digest"], DataTree.Text("fixture"))
+    assert_eq(learn_test_object(payload["oracle"])["answer"], DataTree.Text(lesson.oracle.answer))
+    complete :: learn_test_object(jet_cli_learn_parse_json(jet_cli_learn_complete_envelope(curriculum).json(), "complete") ?? panic("complete JSON"))
+    assert_eq(complete["witnesses"], DataTree.Int(4))
+    assert_eq(complete["relation_source"], DataTree.Text(JET_CLI_LEARN_CENSUS_SOURCE))
+    check :: learn_test_object(jet_cli_learn_parse_json(jet_cli_learn_check_envelope(curriculum).json(), "check") ?? panic("check JSON"))
+    assert_eq(check["action"], DataTree.Text("learn.check"))
+    assert_eq(check["witnesses"], DataTree.Int(4))
+}
+
+#Test("learning pure output routing honors json before quiet and keeps human status") {
+    curriculum :: jet_cli_learn_packaged_curriculum() ?? panic("curriculum")
+    lesson :: curriculum.tasks[0]
+    progress := jet_cli_learn_progress_new(lesson, curriculum.revision, "fixture", "source", "oracle")
+    style :: jet_cli_learn_style_new(None, false)
+    assert_eq(style.width, 80)
+    assert(!style.color && !style.unicode)
+    quiet :: JetCLIOutputMode{json: false, quiet: true, color: false}
+    human :: JetCLIOutputMode{json: false, quiet: false, color: false}
+    machine :: JetCLIOutputMode{json: true, quiet: true, color: false}
+    assert_eq(jet_cli_learn_status_output(lesson, progress, None, quiet, style).stdout, "")
+    assert_eq(jet_cli_learn_complete_output(curriculum, quiet, style).stdout, "")
+    assert_eq(jet_cli_learn_check_output(curriculum, quiet, style).stdout, "")
+    output :: jet_cli_learn_status_output(lesson, progress, None, machine, style)
+    assert_eq(output.exit_code, JET_DRIVER_EXIT_USER_ERROR)
+    assert_eq(output.stdout, "{jet_cli_learn_status_envelope(lesson, progress, None).json()}\n")
+    assert_eq(output.stderr, "")
+    check :: jet_cli_learn_check_output(curriculum, human, style)
+    assert(check.stdout.starts_with("PASS Packaged lessons checked: 4 passed.\n"))
+    assert(check.stdout.ends_with("No source files were changed by this check.\n"))
+    assert_eq(jet_cli_learn_complete_output(curriculum, human, style).exit_code, JET_DRIVER_EXIT_OK)
+    jet_cli_learn_cancel(&progress)
+    cancelled :: jet_cli_learn_status_output(lesson, progress, None, human, style)
+    assert(cancelled.stdout.starts_with("PAUSED Progress saved. Run `jet learn` to resume.\nSteps"))
+    error :: jet_cli_learn_error("E2105", "learning progress is unavailable: broken", "preserve source edits", machine)
+    assert_eq(error.exit_code, JET_DRIVER_EXIT_USER_ERROR)
+    assert_eq(error.stderr, "")
+    assert(error.stdout.contains("\"schema\":\"jet.status/v1\""))
+    assert(error.stdout.contains("learning progress is unavailable: broken"))
+}
+
+#Test("learning reason and evidence absence cannot manufacture a completed checkpoint") {
+    progress := learn_test_progress()
+    jet_cli_learn_primary_checked(&progress, "checked-source", None)
+    assert(progress.source_completed)
+    assert_eq(progress.evidence_status, "unavailable")
+    assert_eq(progress.derivation_ref, None)
+    assert_eq(progress.evidence_source_revision, "checked-source")
+    assert(!jet_cli_learn_reason_action(&progress, JetCLILearnAction.Reveal))
+    assert(!progress.reason_completed)
+    assert(progress.reveal_shown)
+    assert(jet_cli_learn_reason_action(&progress, JetCLILearnAction.Reason))
+    assert(progress.reason_completed)
+    jet_cli_learn_progress_update_phase(&progress)
+    assert_eq(progress.status, "unavailable")
+    assert(!jet_cli_learn_progress_complete(progress))
+    assert(!jet_cli_learn_reason_action(&progress, JetCLILearnAction.Cancel))
+    assert_eq(progress.status, "cancelled")
+}
+
+#Test("learning human projections retain authored help and color role bytes") {
+    lesson :: learn_test_task()
+    progress :: learn_test_progress()
+    style :: JetCLILearnStyle{color: false, width: 80, unicode: false}
+    assert(jet_cli_learn_show_reveal(lesson, style).contains("Why: The upper bound is exclusive"))
+    assert(jet_cli_learn_show_reveal(lesson, style).contains("Common mistake: The upper bound only describes the loop;"))
+    assert(jet_cli_learn_show_skip(style).starts_with("HELP Prediction skipped. It stays unmeasured"))
+    assert_eq(jet_cli_learn_action_prompt(style, "Your prediction:"), "learn> Your prediction:")
+    assert_eq(jet_cli_learn_action_help(style), "Commands: predict <answer>  unknown  skip  help  reason  cancel")
+    assert_eq(jet_cli_learn_step_rail(style, progress), "Steps  [PREDICT]  [CHECK]  [CHANGE]  [TRANSFER]")
+    color :: JetCLILearnStyle{color: true, width: 80, unicode: true}
+    escape :: String.from_bytes([U8]{U8{27}}) ?? panic("ESC")
+    assert_eq(jet_cli_learn_status_line(color, "success", "x"), "{escape}[32mPASS{escape}[0m x")
+    assert_eq(jet_cli_learn_status_line(color, "error", "x"), "{escape}[31mCHECK{escape}[0m x")
+    assert_eq(jet_cli_learn_status_line(color, "hint", "x"), "{escape}[33mHELP{escape}[0m x")
+    assert_eq(jet_cli_learn_horizontal(color), "─")
+    assert_eq(jet_cli_learn_vertical(color), "│")
+    intro :: jet_cli_learn_print_task_intro(lesson, progress, 0, 4, ".jet/learn/feedback/loop.jet", JET_CLI_LEARN_LOOP, style)
+    assert(intro.contains("JET LEARN / 1/4"))
+    assert(intro.contains("Edit .jet/learn/feedback/loop.jet"))
+    assert(intro.contains("  2 |     loop i in 0..<2"))
+    assert(intro.ends_with("unknown  Explanation    skip  Leave incomplete    cancel  Save and exit\n"))
+}
+
+#Test("learning evaluation classification requires both zero exit and exact stdout") {
+    good :: jet_cli_learn_evaluated_run("ok\n", "warning\n", 0, "ok\n", None)
+    assert(jet_cli_learn_evaluation_complete(good))
+    assert_eq(jet_cli_learn_evaluation_kind(good), "complete")
+    assert_eq(jet_cli_learn_evaluation_derivation(good), None)
+    nonzero :: jet_cli_learn_evaluated_run("ok\n", "", 1, "ok\n", None)
+    assert(!jet_cli_learn_evaluation_complete(nonzero))
+    assert_eq(jet_cli_learn_evaluation_kind(nonzero), "wrong-output")
+    mismatch :: jet_cli_learn_evaluated_run("ok", "", 0, "ok\n", None)
+    assert(!jet_cli_learn_evaluation_complete(mismatch))
+    lesson :: learn_test_task()
+    // A successful runtime output without current derivation is the original
+    // refusal, not a successful curriculum check or forged checked provider.
+    broken :: jet_cli_learn_evaluated_run("wrong\n", "", 0, "ok\n", None)
+    if jet_cli_learn_validate_evaluations(lesson, lesson.source, "source", broken, good) == {
+        .Ok(_) -> panic("solved fixture without checked evidence accepted")
+        .Err(error) -> assert_eq(error.message, "{lesson.id} source solved without current checked evidence")
+    }
+    if jet_cli_learn_validate_evaluations(lesson, lesson.source, "source", good, good) == {
+        .Ok(_) -> panic("broken fixture success accepted")
+        .Err(error) -> assert_eq(error.message, "{lesson.id} source expected output failure, got \"complete\"")
+    }
+}

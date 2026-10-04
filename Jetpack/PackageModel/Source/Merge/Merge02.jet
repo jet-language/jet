@@ -1,0 +1,451 @@
+// PORT-PENDING 2147 crates-jet-pkg-model-src-merge: crates/jet-pkg-model/src/Merge.rs:1-447
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! The canonical merge engine (U5 — unified-ecosystem §6).
+//RS //!
+//RS //! One referee reconciles the typed contributions every module makes, across
+//RS //! all three tiers (`env` / `system` / `image`). The §6 table:
+//RS //!
+//RS //! | Field | Rule |
+//RS //! |---|---|
+//RS //! | `sources` | merge by key; duplicate names with **different** refs conflict |
+//RS //! | `packages` | concatenate, de-duplicate, **preserve source identity** |
+//RS //! | namespace entries | merge by key; package lists combine; facts per below |
+//RS //! | fact settings | one value wins by the shared contribution law |
+//RS //!
+//RS //! This is the pure data-reconciliation core (std-only, I6). It operates on the
+//RS //! typed contribution model the module parser/evaluator will populate (Chunk 3+)
+//RS //! and is independent of how those contributions are read. Conflicts are typed
+//RS //! `MergeError`s here; they become I4 diagnostics when wired into evaluation.
+//RS 
+//RS use std::collections::BTreeMap;
+//RS 
+//RS pub use jet_foundation::Policy::{
+//RS     ContributionLayer, FactContribution, FactError, FactKey, FactValue, SourceScope,
+//RS };
+//RS 
+//RS /// A package value (`Pkg`, §5) with its source identity preserved so the
+//RS /// de-duplication in §6 keeps `default.ripgrep` distinct from `unstable.ripgrep`.
+//RS #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+//RS pub struct Pkg {
+//RS     pub source: String,
+//RS     pub name: String,
+//RS }
+//RS 
+//RS impl Pkg {
+//RS     pub fn new(source: impl Into<String>, name: impl Into<String>) -> Pkg {
+//RS         Pkg {
+//RS             source: source.into(),
+//RS             name: name.into(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Parse a `packages:` list body (the text inside `[ … ]`) into `Pkg`s,
+//RS /// expanding the type-directed sugar (U6 / D-JPK19):
+//RS ///
+//RS /// - `default.ripgrep`      → `Pkg{ default, ripgrep }`
+//RS /// - `unstable.neovim`      → `Pkg{ unstable, neovim }`
+//RS /// - `"mine@hello"`         → escape-hatch string; source left empty for the
+//RS ///   resolver to interpret
+//RS /// - bare `ripgrep`         → `Pkg{ "", ripgrep }` (source filled in later from
+//RS ///   the default source)
+//RS ///
+//RS /// std-only and lenient: empty items are skipped. The split is bracket-aware,
+//RS /// so a nested list value never splits mid-item.
+//RS pub fn parse_package_list(body: &str) -> Vec<Pkg> {
+//RS     let mut out = Vec::new();
+//RS     for item in split_top_level(body) {
+//RS         out.extend(parse_package_item(item.trim()));
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn parse_package_item(item: &str) -> Vec<Pkg> {
+//RS     if item.is_empty() {
+//RS         return Vec::new();
+//RS     }
+//RS     // Escape-hatch quoted string: keep verbatim, source unresolved.
+//RS     if item.starts_with('"') {
+//RS         let inner = item.trim_matches('"');
+//RS         if inner.is_empty() {
+//RS             return Vec::new();
+//RS         }
+//RS         return vec![Pkg::new("", inner)];
+//RS     }
+//RS     // D-SPREAD1=A: `source.[a, b, c]` → one Pkg per member.
+//RS     if let Some((source, rest)) = item.split_once('.') {
+//RS         let rest = rest.trim();
+//RS         if rest.starts_with('[') && rest.ends_with(']') {
+//RS             let inner = &rest[1..rest.len() - 1];
+//RS             return inner
+//RS                 .split(',')
+//RS                 .map(str::trim)
+//RS                 .filter(|name| !name.is_empty())
+//RS                 .map(|name| Pkg::new(source, name))
+//RS                 .collect();
+//RS         }
+//RS         if !rest.is_empty() {
+//RS             return vec![Pkg::new(source, rest)];
+//RS         }
+//RS     }
+//RS     // Bare name: source resolved from the default later.
+//RS     vec![Pkg::new("", item)]
+//RS }
+//RS 
+//RS /// Split on commas not nested inside `()`/`[]`/`{}` (so `["a", "b"]` is one
+//RS /// item). Returns the raw (untrimmed) slices.
+//RS fn split_top_level(body: &str) -> Vec<&str> {
+//RS     let mut out = Vec::new();
+//RS     let mut depth = 0i32;
+//RS     let mut start = 0usize;
+//RS     for (i, c) in body.char_indices() {
+//RS         match c {
+//RS             '(' | '[' | '{' => depth += 1,
+//RS             ')' | ']' | '}' => depth -= 1,
+//RS             ',' if depth == 0 => {
+//RS                 out.push(&body[start..i]);
+//RS                 start = i + 1;
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     if start < body.len() {
+//RS         out.push(&body[start..]);
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS /// One namespace entry's contributions (e.g. everything modules contribute to
+//RS /// `env.dev`). Package lists combine; fact settings reconcile through the
+//RS /// canonical contribution law.
+//RS #[derive(Debug, Clone, Default, PartialEq, Eq)]
+//RS pub struct EntryContribution {
+//RS     pub packages: Vec<Pkg>,
+//RS     /// Fact settings (`services`/`options`/plain fields), keyed by setting
+//RS     /// name. Each writer already carries its layer, scope, span, and source.
+//RS     pub settings: BTreeMap<String, Vec<FactContribution>>,
+//RS }
+//RS 
+//RS /// A fully merged namespace entry: deduped packages + resolved fact values.
+//RS #[derive(Debug, Clone, Default, PartialEq, Eq)]
+//RS pub struct MergedEntry {
+//RS     pub packages: Vec<Pkg>,
+//RS     pub settings: BTreeMap<String, String>,
+//RS }
+//RS 
+//RS /// Why a merge could not be reconciled (§6 conflict diagnostics).
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub enum MergeError {
+//RS     /// Two `sources` declarations share a name but resolve to different refs.
+//RS     SourceConflict { name: String, a: String, b: String },
+//RS     /// A fact setting failed the canonical contribution law.
+//RS     FactConflict(FactError),
+//RS }
+//RS 
+//RS /// Merge `sources` maps by key: identical refs de-duplicate; the same name with
+//RS /// different refs is a conflict (§6).
+//RS pub fn merge_sources(
+//RS     contribs: &[BTreeMap<String, String>],
+//RS ) -> Result<BTreeMap<String, String>, MergeError> {
+//RS     let mut out: BTreeMap<String, String> = BTreeMap::new();
+//RS     for map in contribs {
+//RS         for (name, reference) in map {
+//RS             match out.get(name) {
+//RS                 Some(existing) if existing != reference => {
+//RS                     return Err(MergeError::SourceConflict {
+//RS                         name: name.clone(),
+//RS                         a: existing.clone(),
+//RS                         b: reference.clone(),
+//RS                     });
+//RS                 }
+//RS                 _ => {
+//RS                     out.insert(name.clone(), reference.clone());
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS /// Concatenate package lists, de-duplicate while preserving source identity, and
+//RS /// keep first-seen order (§6).
+//RS pub fn merge_packages(lists: &[Vec<Pkg>]) -> Vec<Pkg> {
+//RS     let mut out: Vec<Pkg> = Vec::new();
+//RS     for list in lists {
+//RS         for pkg in list {
+//RS             if !out.contains(pkg) {
+//RS                 out.push(pkg.clone());
+//RS             }
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS /// Merge several contributions to one namespace entry: packages combine+dedup,
+//RS /// fact settings reconcile through the one resolver (§6).
+//RS pub fn merge_entry(contribs: &[EntryContribution]) -> Result<MergedEntry, MergeError> {
+//RS     let lists: Vec<Vec<Pkg>> = contribs.iter().map(|c| c.packages.clone()).collect();
+//RS     let packages = merge_packages(&lists);
+//RS 
+//RS     // Gather every contribution per setting key.
+//RS     let mut by_key: BTreeMap<String, Vec<FactContribution>> = BTreeMap::new();
+//RS     for c in contribs {
+//RS         for (k, writers) in &c.settings {
+//RS             by_key.entry(k.clone()).or_default().extend(writers.clone());
+//RS         }
+//RS     }
+//RS     let mut settings = BTreeMap::new();
+//RS     for (key, writers) in by_key {
+//RS         let Some(fact) = jet_foundation::Policy::resolve(FactKey::new(key.clone()), writers)
+//RS             .map_err(MergeError::FactConflict)?
+//RS         else {
+//RS             continue;
+//RS         };
+//RS         if let FactValue::Text(value) = fact.value {
+//RS             settings.insert(key, value);
+//RS         }
+//RS     }
+//RS     Ok(MergedEntry { packages, settings })
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+//RS         pairs
+//RS             .iter()
+//RS             .map(|(k, v)| (k.to_string(), v.to_string()))
+//RS             .collect()
+//RS     }
+//RS 
+//RS     // ── Pkg sugar (U6 / D-JPK19) ──
+//RS 
+//RS     #[test]
+//RS     fn sugar_member_spread() {
+//RS         assert_eq!(
+//RS             parse_package_list("default.[cargo, ripgrep, fd]"),
+//RS             vec![
+//RS                 Pkg::new("default", "cargo"),
+//RS                 Pkg::new("default", "ripgrep"),
+//RS                 Pkg::new("default", "fd"),
+//RS             ]
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn sugar_dotted_single() {
+//RS         assert_eq!(
+//RS             parse_package_list("default.ripgrep"),
+//RS             vec![Pkg::new("default", "ripgrep")]
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn sugar_mixed_sources_in_one_list() {
+//RS         // The example from unified-ecosystem §5.
+//RS         assert_eq!(
+//RS             parse_package_list("default.ripgrep, default.fd, unstable.neovim"),
+//RS             vec![
+//RS                 Pkg::new("default", "ripgrep"),
+//RS                 Pkg::new("default", "fd"),
+//RS                 Pkg::new("unstable", "neovim"),
+//RS             ]
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn sugar_escape_hatch_string() {
+//RS         assert_eq!(
+//RS             parse_package_list("\"mine@hello\""),
+//RS             vec![Pkg::new("", "mine@hello")]
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn sugar_bare_name_has_empty_source() {
+//RS         assert_eq!(parse_package_list("ripgrep"), vec![Pkg::new("", "ripgrep")]);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn sugar_empty_and_whitespace_skipped() {
+//RS         assert!(parse_package_list("   ").is_empty());
+//RS         assert_eq!(
+//RS             parse_package_list("default.fd, , default.rg"),
+//RS             vec![Pkg::new("default", "fd"), Pkg::new("default", "rg")]
+//RS         );
+//RS     }
+//RS 
+//RS     // ── sources ──
+//RS 
+//RS     #[test]
+//RS     fn sources_merge_by_key_and_dedup() {
+//RS         let a = map(&[("default", "NixOS/nixpkgs/nixos-24.05@github")]);
+//RS         let b = map(&[
+//RS             ("default", "NixOS/nixpkgs/nixos-24.05@github"), // identical → dedup
+//RS             ("unstable", "NixOS/nixpkgs/nixpkgs-unstable@github"),
+//RS         ]);
+//RS         let merged = merge_sources(&[a, b]).unwrap();
+//RS         assert_eq!(merged.len(), 2);
+//RS         assert_eq!(merged["unstable"], "NixOS/nixpkgs/nixpkgs-unstable@github");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn sources_conflict_on_different_refs() {
+//RS         let a = map(&[("default", "NixOS/nixpkgs/nixos-24.05@github")]);
+//RS         let b = map(&[("default", "NixOS/nixpkgs/nixos-23.11@github")]);
+//RS         assert!(matches!(
+//RS             merge_sources(&[a, b]),
+//RS             Err(MergeError::SourceConflict { .. })
+//RS         ));
+//RS     }
+//RS 
+//RS     // ── packages ──
+//RS 
+//RS     #[test]
+//RS     fn packages_concat_dedup_preserve_source_and_order() {
+//RS         let l1 = vec![Pkg::new("default", "ripgrep"), Pkg::new("default", "fd")];
+//RS         let l2 = vec![
+//RS             Pkg::new("default", "ripgrep"),  // dup → dropped
+//RS             Pkg::new("unstable", "ripgrep"), // different source → kept
+//RS             Pkg::new("default", "jq"),
+//RS         ];
+//RS         let merged = merge_packages(&[l1, l2]);
+//RS         assert_eq!(
+//RS             merged,
+//RS             vec![
+//RS                 Pkg::new("default", "ripgrep"),
+//RS                 Pkg::new("default", "fd"),
+//RS                 Pkg::new("unstable", "ripgrep"),
+//RS                 Pkg::new("default", "jq"),
+//RS             ]
+//RS         );
+//RS     }
+//RS 
+//RS     fn writer(key: &str, value: &str, layer: ContributionLayer, source: &str) -> FactContribution {
+//RS         FactContribution::new(
+//RS             key,
+//RS             FactValue::Text(value.to_string()),
+//RS             SourceScope::Package,
+//RS             layer,
+//RS             source,
+//RS         )
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn fact_law_resolves_layers_and_force_without_a_second_priority_table() {
+//RS         let resolved = jet_foundation::Policy::resolve(
+//RS             FactKey::new("k"),
+//RS             [
+//RS                 writer(
+//RS                     "k",
+//RS                     "default",
+//RS                     ContributionLayer::Declaration,
+//RS                     "package.jet",
+//RS                 ),
+//RS                 writer(
+//RS                     "k",
+//RS                     "bundle",
+//RS                     ContributionLayer::OptimizationBundle,
+//RS                     "release",
+//RS                 ),
+//RS                 writer("k", "cli", ContributionLayer::CommandLine, "command line"),
+//RS             ],
+//RS         )
+//RS         .unwrap()
+//RS         .unwrap();
+//RS         assert_eq!(resolved.value, FactValue::Text("cli".to_string()));
+//RS 
+//RS         let pinned = jet_foundation::Policy::resolve(
+//RS             FactKey::new("k"),
+//RS             [
+//RS                 writer(
+//RS                     "k",
+//RS                     "bundle",
+//RS                     ContributionLayer::OptimizationBundle,
+//RS                     "release",
+//RS                 ),
+//RS                 writer("k", "fleet", ContributionLayer::Fleet, "fleet.jet").force(),
+//RS                 writer("k", "cli", ContributionLayer::CommandLine, "command line"),
+//RS             ],
+//RS         )
+//RS         .unwrap()
+//RS         .unwrap();
+//RS         assert_eq!(pinned.value, FactValue::Text("fleet".to_string()));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn fact_law_conflict_keeps_both_writers() {
+//RS         let error = jet_foundation::Policy::resolve(
+//RS             FactKey::new("k"),
+//RS             [
+//RS                 writer("k", "a", ContributionLayer::Environment, "env-a"),
+//RS                 writer("k", "b", ContributionLayer::Environment, "env-b"),
+//RS             ],
+//RS         )
+//RS         .unwrap_err();
+//RS         assert!(matches!(error, FactError::Conflict { .. }));
+//RS     }
+//RS 
+//RS     // ── full entry ──
+//RS 
+//RS     #[test]
+//RS     fn entry_combines_packages_and_resolves_settings() {
+//RS         let c1 = EntryContribution {
+//RS             packages: vec![Pkg::new("default", "ripgrep")],
+//RS             settings: BTreeMap::from([(
+//RS                 "prompt".to_string(),
+//RS                 vec![writer(
+//RS                     "prompt",
+//RS                     "jetpack",
+//RS                     ContributionLayer::Declaration,
+//RS                     "package.jet",
+//RS                 )],
+//RS             )]),
+//RS         };
+//RS         let c2 = EntryContribution {
+//RS             packages: vec![Pkg::new("default", "fd")],
+//RS             settings: BTreeMap::from([(
+//RS                 "prompt".to_string(),
+//RS                 vec![writer(
+//RS                     "prompt",
+//RS                     "wordstats",
+//RS                     ContributionLayer::OptimizationBundle,
+//RS                     "profile",
+//RS                 )],
+//RS             )]),
+//RS         };
+//RS         let merged = merge_entry(&[c1, c2]).unwrap();
+//RS         assert_eq!(
+//RS             merged.packages,
+//RS             vec![Pkg::new("default", "ripgrep"), Pkg::new("default", "fd")]
+//RS         );
+//RS         // The optimization bundle overrides the declaration fallback.
+//RS         assert_eq!(merged.settings["prompt"], "wordstats");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn entry_propagates_fact_conflict() {
+//RS         let c1 = EntryContribution {
+//RS             packages: vec![],
+//RS             settings: BTreeMap::from([(
+//RS                 "host".to_string(),
+//RS                 vec![writer("host", "a", ContributionLayer::Environment, "env-a")],
+//RS             )]),
+//RS         };
+//RS         let c2 = EntryContribution {
+//RS             packages: vec![],
+//RS             settings: BTreeMap::from([(
+//RS                 "host".to_string(),
+//RS                 vec![writer("host", "b", ContributionLayer::Environment, "env-b")],
+//RS             )]),
+//RS         };
+//RS         assert!(matches!(
+//RS             merge_entry(&[c1, c2]),
+//RS             Err(MergeError::FactConflict(FactError::Conflict { key, .. })) if key == "host"
+//RS         ));
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2147 crates/jet-pkg-model/src/Merge.rs:1-447
+

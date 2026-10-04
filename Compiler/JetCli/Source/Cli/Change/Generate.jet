@@ -1,0 +1,820 @@
+// Source/CmdCodemod/Generate.rs: explicit, auditable #Job source generation.
+// Native operations use only the retained descriptor ABI. This owner does not
+// supply a filesystem, compiler, transaction, or toolchain-fact substitute.
+use core.files.runtime.kernel_path_components as generate_paths
+use core.files.runtime.kernel_path_traits as generate_path_order
+use core.files.host.retained_descriptor as generate_io
+use core.crypto as generate_crypto
+use core.term as generate_term
+use core.sys.host.os_path_ingress as generate_ingress
+use core.process.host.native_process as generate_process
+use core.sys.host.retained_clock as generate_clock
+use core.files.runtime.descriptor_metadata as generate_time_metadata
+use core.time.runtime.kernel_wide_time as generate_wide_time
+use jet_foundation.[JobMetadata, Func, Diagnostic, StatusFields, StatusValue, StatusEnvelope, ast_job_metadata, DIAGNOSTIC_ERROR]
+
+// Native provider gates: #4494/#4392 retained resources and payload loans,
+// #4483 selected target facts, #4409 exact UTF8 InvalidData. String map keys
+// only are used here; #4499 composite-key equality is not applicable.
+GENERATE_RECEIPT_SCHEMA :: "jet-generate-v1"
+GENERATE_HEADER :: "// jet-generated: schema=1"
+
+#Error
+pub struct JetCLIGenerateError { pub message: String }
+pub struct JetCLIGenerateOptions {
+    pub job: String
+    pub apply: Bool
+    pub entry: String?
+    pub json: Bool
+    pub dry_run: Bool
+    pub quiet: Bool
+}
+pub struct JetCLIGenerateInputFact {
+    pub path: String
+    pub absolute: generate_paths.OSPath
+    pub digest: String
+}
+pub struct JetCLIGenerateAuthorityFact {
+    pub path: String
+    pub absolute: generate_paths.OSPath?
+    pub digest: String
+}
+pub struct JetCLIGenerateFact {
+    pub name: String
+    pub source: String
+    pub line: Int
+    pub input_digest: String
+    pub authority: JetCLIGenerateAuthorityFact
+    pub metadata: JobMetadata
+}
+pub struct JetCLIGenerateOutputPath { pub path: String, pub absolute: generate_paths.OSPath }
+pub struct JetCLIGenerateOutputPlan {
+    pub path: String
+    pub absolute: generate_paths.OSPath
+    pub before: [U8]?
+    pub after: [U8]
+}
+
+fn jet_cli_generate_error(message: String) -> JetCLIGenerateError Never! { JetCLIGenerateError{message: message} }
+fn jet_cli_generate_push(out: &[U8], text: String) Never! { loop byte in text.bytes() -> &out.push(byte) }
+fn jet_cli_generate_text(bytes: [U8]) -> String Never! { String.from_bytes(bytes) ?? panic("generation renderer preserves UTF8") }
+fn jet_cli_generate_hash(bytes: [U8]) -> String Never! { generate_crypto.sha256(bytes).hex() }
+
+// Rust parse_options:484–518; the caller supplies arguments after `generate`.
+pub fn jet_cli_generate_parse_options(args: [String]) -> JetCLIGenerateOptions JetCLIGenerateError! {
+    job := String?{None}
+    apply := false
+    dry_run := false
+    json := false
+    quiet := false
+    entry := String?{None}
+    index := 0
+    loop index < args.len() {
+        value :: args[index]
+        if value == "--apply" { apply = true }
+        else if value == "--dry-run" { dry_run = true }
+        else if value == "--json" { json = true }
+        else if value == "--quiet" { quiet = true }
+        else if value == "--verbose" || value == "-v" || value == "--color" || value.starts_with("--color=") {}
+        else if value == "--entry" {
+            index += 1
+            if index == args.len() -> return Err(jet_cli_generate_error("`--entry` needs a `.jet` file"))
+            entry = Val(args[index])
+        } else if value.starts_with("-") { return Err(jet_cli_generate_error("unknown `jet generate` flag `{value}`")) }
+        else {
+            if job != None -> return Err(jet_cli_generate_error("`jet generate` accepts one generator name"))
+            job = Val(value)
+        }
+        index += 1
+    }
+    name :: job ?? return Err(jet_cli_generate_error("`jet generate` needs a generator name"))
+    jet_cli_generate_validate_identifier(name)
+    Ok(JetCLIGenerateOptions{job: name, apply: apply && !dry_run, entry: entry, json: json, dry_run: dry_run, quiet: quiet})
+}
+
+// Rust resolve_entry:520–529: reuse the accepted lossless project-entry owner.
+pub fn jet_cli_generate_resolve_entry(cwd: generate_paths.OSPath, raw: String?) -[FS, Env, IO]> generate_paths.OSPath JetCLIProjectEntryError! {
+    if raw == .Val(text) {
+        path := generate_paths.from_text(text, cwd.platform)
+        if generate_paths.is_absolute(path) -> return Ok(^path)
+        joined := ~cwd
+        generate_paths.push(&joined, path)
+        return Ok(^joined)
+    }
+    jet_cli_find_project_entry(cwd)
+}
+
+// Rust declared_path lexical preflight, before ANY parent/native lookup.
+fn jet_cli_generate_declared_relative(project: generate_paths.OSPath, raw: String, kind: String) -> generate_paths.OSPath JetCLIGenerateError! {
+    relative :: generate_paths.from_text(raw, project.platform)
+    cursor := generate_paths.components(relative)
+    invalid := raw == "" || generate_paths.is_absolute(relative)
+    loop {
+        component :: generate_paths.next(relative, &cursor) ?? break
+        if component.kind != generate_paths.ComponentKind.Normal -> invalid = true
+    }
+    if invalid -> return Err(jet_cli_generate_error("generator {kind} `{raw}` must be a project-relative path without `.` or `..`"))
+    if raw.starts_with(".git/") || raw.starts_with("target/") -> return Err(jet_cli_generate_error("generator {kind} `{raw}` points into compiler state"))
+    Ok(relative)
+}
+
+// Rust validate_parent:613–655. Keep one component lookahead instead of
+// allocating a whole component list; missing parents fail before the leaf.
+fn jet_cli_generate_validate_parent(project: generate_paths.OSPath, relative: generate_paths.OSPath, kind: String) -[FS.Read]> JetCLIGenerateError! {
+    current := ~project
+    cursor := generate_paths.components(relative)
+    pending := generate_paths.next(relative, &cursor)
+    loop {
+        component :: pending ?? break
+        pending = generate_paths.next(relative, &cursor)
+        if pending == None -> break
+        if component.kind != generate_paths.ComponentKind.Normal -> return Err(jet_cli_generate_error("generator {kind} path has a non-normal parent"))
+        generate_paths.push_component(&current, relative, component)
+        metadata :: generate_io.symlink_metadata(current) ?? return Err(jet_cli_generate_error("generator {kind} parent `{generate_paths.display(current)}` is unavailable: {jet_cli_transaction_io_message(err)}"))
+        if metadata.is_symlink || !metadata.is_dir -> return Err(jet_cli_generate_error("generator {kind} parent `{generate_paths.display(current)}` must be a real directory"))
+    }
+}
+
+// Rust declared_path:531–611. NotFound is tolerated only for absent outputs;
+// every other inspection failure propagates, with the original precedence.
+fn jet_cli_generate_declared_path(project: generate_paths.OSPath, raw: String, kind: String, must_exist: Bool) -[FS.Read]> generate_paths.OSPath JetCLIGenerateError! {
+    relative :: jet_cli_generate_declared_relative(project, raw, kind)
+    jet_cli_generate_validate_parent(project, relative, kind)
+    absolute := ~project
+    generate_paths.push(&absolute, relative)
+    if generate_io.symlink_metadata(absolute) == {
+        .Ok(metadata) -> {
+            if metadata.is_symlink -> return Err(jet_cli_generate_error("generator {kind} `{raw}` is a symlink"))
+            if !metadata.is_file && !metadata.is_dir -> return Err(jet_cli_generate_error("generator {kind} `{raw}` is not a regular path"))
+            if !must_exist && kind == "output" && !metadata.is_file -> return Err(jet_cli_generate_error("generator output `{raw}` must be a regular file"))
+        }
+        .Err(error) -> {
+            if error == .NotFound(_) {
+                if must_exist -> return Err(jet_cli_generate_error("generator {kind} `{raw}` does not exist"))
+            } else { return Err(jet_cli_generate_error("could not inspect generator {kind} `{raw}`: {jet_cli_transaction_io_message(error)}")) }
+        }
+    }
+    Ok(^absolute)
+}
+
+fn jet_cli_generate_output_paths(project: generate_paths.OSPath, fact: JetCLIGenerateFact) -[FS.Read]> [JetCLIGenerateOutputPath] JetCLIGenerateError! {
+    seen := [String: Bool]{}
+    outputs := [JetCLIGenerateOutputPath]{}
+    loop raw in fact.metadata.outputs {
+        absolute :: jet_cli_generate_declared_path(project, raw, "output", false)
+        path :: jet_cli_generate_relative_path(project, absolute)
+        if seen.has_key(path) -> return Err(jet_cli_generate_error("generator declares output `{path}` more than once"))
+        seen[path] = true
+        suffix :: generate_paths.extension_span(absolute) ?? return Err(jet_cli_generate_error("generator output `{path}` must be a `.jet` source file"))
+        if !jet_cli_transaction_component_is(absolute, suffix, "jet") -> return Err(jet_cli_generate_error("generator output `{path}` must be a `.jet` source file"))
+        &outputs.push(JetCLIGenerateOutputPath{path: path, absolute: absolute})
+    }
+    Ok(^outputs)
+}
+
+// Rust copy_tree:713–743: exclusions apply at EVERY recursive level, unlike
+// collect_files. Sort native file names before inspecting child metadata.
+fn jet_cli_generate_copy_tree(source: generate_paths.OSPath, destination: generate_paths.OSPath) -[FS]> IOError! {
+    generate_io.create_dir_all(destination)
+    entries := [generate_io.DirectoryEntry]{}
+    stream :: generate_io.read_dir(source)
+    loop {
+        entry :: (stream.next() ?? return Err(err)) ?? break
+        &entries.push(^entry)
+    }
+    &entries.sort_by((left: generate_io.DirectoryEntry, right: generate_io.DirectoryEntry) -> generate_path_order.compare(left.file_name(), right.file_name()))
+    loop entry in entries {
+        name :: entry.file_name()
+        if jet_cli_generate_excluded(name) -> next
+        child :: entry.path()
+        target := ~destination
+        generate_paths.push(&target, name)
+        metadata :: generate_io.symlink_metadata(child)
+        if metadata.is_symlink -> return Err(jet_cli_transaction_permission("staging refuses symlink `{generate_paths.display(child)}`"))
+        if metadata.is_dir { jet_cli_generate_copy_tree(child, target) }
+        else if metadata.is_file { _ :: generate_io.copy(child, target) }
+        else { return Err(jet_cli_transaction_permission("staging refuses special file `{generate_paths.display(child)}`")) }
+    }
+}
+fn jet_cli_generate_copy_project(project: generate_paths.OSPath, destination: generate_paths.OSPath) -[FS]> JetCLIGenerateError! {
+    jet_cli_generate_copy_tree(project, destination) ?? return Err(jet_cli_generate_error("could not stage project `{generate_paths.display(project)}` for generation: {jet_cli_transaction_io_message(err)}"))
+}
+fn jet_cli_generate_excluded(name: generate_paths.OSPath) -> Bool Never! {
+    extent :: generate_paths.PathSpan{start: 0, end: name.encoded.len()}
+    jet_cli_transaction_component_is(name, extent, ".git") || jet_cli_transaction_component_is(name, extent, "target") || jet_cli_transaction_component_is(name, extent, ".jet")
+}
+
+// Rust collect_files/collect_files_at:745–791. Only root entries are excluded;
+// a generator-created nested .git/.jet/target is included and can be undeclared.
+fn jet_cli_generate_collect_files_at(root: generate_paths.OSPath, current: generate_paths.OSPath, files: &[String: [U8]]) -[FS.Read]> IOError! {
+    entries := [generate_io.DirectoryEntry]{}
+    stream :: generate_io.read_dir(current)
+    loop {
+        entry :: (stream.next() ?? return Err(err)) ?? break
+        &entries.push(^entry)
+    }
+    &entries.sort_by((left: generate_io.DirectoryEntry, right: generate_io.DirectoryEntry) -> generate_path_order.compare(left.file_name(), right.file_name()))
+    loop entry in entries {
+        if generate_paths.equals(current, root) && jet_cli_generate_excluded(entry.file_name()) -> next
+        child :: entry.path()
+        metadata :: generate_io.symlink_metadata(child)
+        if metadata.is_symlink -> return Err(jet_cli_transaction_permission("staged generator tree contains symlink `{generate_paths.display(child)}`"))
+        if metadata.is_dir { jet_cli_generate_collect_files_at(root, child, &files) }
+        else if metadata.is_file {
+            span :: generate_paths.strip_prefix_span(child, root) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("staged path escaped root")}))
+            relative :: jet_cli_generate_path_string_span(child, span) ?? return Err(jet_cli_transaction_invalid_input(err.message))
+            files[relative] = generate_io.read_bytes(child)
+        } else { return Err(jet_cli_transaction_permission("staged generator tree contains special file `{generate_paths.display(child)}`")) }
+    }
+}
+fn jet_cli_generate_collect_files(root: generate_paths.OSPath) -[FS.Read]> [String: [U8]] JetCLIGenerateError! {
+    files := [String: [U8]]{}
+    jet_cli_generate_collect_files_at(root, root, &files) ?? return Err(jet_cli_generate_error("could not inspect staged generator project `{generate_paths.display(root)}`: {jet_cli_transaction_io_message(err)}"))
+    Ok(^files)
+}
+
+// Rust changed_paths:793–805: sorted union, no repeated whole-tree scans.
+fn jet_cli_generate_changed_paths(before: [String: [U8]], after: [String: [U8]]) -> [String] Never! {
+    keys := [String: Bool]{}
+    loop item in before -> keys[item.key] = true
+    loop item in after -> keys[item.key] = true
+    changed := [String]{}
+    loop item in keys { if before.get(item.key) != after.get(item.key) -> &changed.push(item.key) }
+    &changed.sort()
+    ^changed
+}
+fn jet_cli_generate_output_is_changed(plan: JetCLIGenerateOutputPlan) -> Bool Never! {
+    if plan.before == { .Val(bytes) -> bytes != plan.after .None -> true }
+}
+
+// Rust strip_generated_header:846–855. The offset is a borrowed byte span,
+// not a copied body. A matching magic without a blank line retains all bytes.
+fn jet_cli_generate_header_body_start(bytes: [U8]) -> Int Never! {
+    magic :: "{GENERATE_HEADER}\n".bytes()
+    if bytes.len() < magic.len() -> return 0
+    loop at in 0..<magic.len() { if bytes[at] != magic[at] -> return 0 }
+    loop at in 0..<bytes.len() - 1 { if bytes[at] == (U8{10}) && bytes[at + 1] == (U8{10}) -> return at + 2 }
+    0
+}
+fn jet_cli_generate_strip_generated_header(bytes: [U8]) -> View<U8> Never! {
+    bytes[jet_cli_generate_header_body_start(bytes)..<bytes.len()]
+}
+fn jet_cli_generate_generated_source(fact: JetCLIGenerateFact, path: String, raw: [U8], toolchain: String) -> [U8] Never! {
+    body := jet_cli_generate_strip_generated_header(raw) // #4303 borrowed slice
+    digest :: jet_cli_generate_hash(body)
+    output := "{GENERATE_HEADER}\n// generator={fact.name}\n// source={fact.source}:{fact.line}\n// output={path}\n// inputs={fact.input_digest}\n// authority={fact.authority.path}\n// authority-digest={fact.authority.digest}\n// toolchain={toolchain}\n// body-sha256={digest}\n\n".bytes()
+    loop byte in body -> &output.push(byte)
+    ^output
+}
+
+// Rust generation_header:900–916: validate the ENTIRE byte input as UTF8;
+// duplicate fields overwrite, values may contain '='; no trailing blank = None.
+fn jet_cli_generate_generation_header(bytes: [U8]) -> [String: String]? Never! {
+    text := String.from_bytes(bytes) ?? return None
+    lines :: text.split("\n")
+    if lines.len() == 0 || lines[0] != GENERATE_HEADER -> return None
+    fields := [String: String]{}
+    loop at in 1..<lines.len() {
+        line := lines[at] // #4303 split view passed to String calls
+        if line == "" -> return Val(^fields)
+        if !line.starts_with("// ") -> return None
+        value := line.slice(3, line.len()) // #4303
+        equal :: value.find("=") ?? return None
+        key := value.slice(0, equal) // #4303
+        payload := value.slice(equal + 1, value.len()) // #4303
+        fields[key] = payload
+    }
+    None
+}
+fn jet_cli_generate_ensure_output_collision(bytes: [U8], generator: String, output: String) JetCLIGenerateError! {
+    header :: jet_cli_generate_generation_header(bytes) ?? return Err(jet_cli_generate_error("refusing collision with existing source output `{output}`; the file is not attributed to this generator"))
+    if header.get("generator") != Val(generator) || header.get("output") != Val(output) -> return Err(jet_cli_generate_error("refusing collision with existing source output `{output}`; another generator owns it"))
+    body := jet_cli_generate_strip_generated_header(bytes) // #4303
+    if header.get("body-sha256") != Val(jet_cli_generate_hash(body)) -> return Err(jet_cli_generate_error("refusing stale source output `{output}`; its attributed body was edited outside the generator"))
+}
+fn jet_cli_generate_ensure_generated_input_current(path: generate_paths.OSPath, relative: String) -[FS.Read]> JetCLIGenerateError! {
+    metadata :: generate_io.symlink_metadata(path) ?? return Err(jet_cli_generate_error("could not inspect generator input `{relative}`: {jet_cli_transaction_io_message(err)}"))
+    if !metadata.is_file -> return
+    bytes :: generate_io.read_bytes(path) ?? return Err(jet_cli_generate_error("could not read generator input `{relative}`: {jet_cli_transaction_io_message(err)}"))
+    magic :: "{GENERATE_HEADER}\n".bytes()
+    if bytes.len() < magic.len() -> return
+    loop at in 0..<magic.len() { if bytes[at] != magic[at] -> return }
+    header :: jet_cli_generate_generation_header(bytes) ?? return Err(jet_cli_generate_error("generated input `{relative}` has an incomplete provenance header"))
+    if header.get("output") != Val(relative) -> return Err(jet_cli_generate_error("generated input `{relative}` has a mismatched provenance output"))
+    body := jet_cli_generate_strip_generated_header(bytes) // #4303
+    if header.get("body-sha256") != Val(jet_cli_generate_hash(body)) -> return Err(jet_cli_generate_error("stale generated input `{relative}` was edited outside its generator; regenerate it first"))
+}
+
+// Indexed dedup keeps first declaration order but avoids Rust's repeated
+// linear add_input scan over every previously declared input.
+fn jet_cli_generate_add_input(inputs: &[JetCLIGenerateInputFact], seen: &[String: String], input: ^JetCLIGenerateInputFact) JetCLIGenerateError! {
+    if seen.get(input.path) == .Val(digest) {
+        if digest != input.digest -> return Err(jet_cli_generate_error("generator input `{input.path}` resolves to conflicting bytes"))
+        return
+    }
+    seen[input.path] = input.digest
+    &inputs.push(^input)
+}
+fn jet_cli_generate_digest_input_facts(inputs: [JetCLIGenerateInputFact]) -> String Never! {
+    identity := [U8]{}
+    loop input in inputs {
+        jet_cli_generate_push(&identity, input.path)
+        &identity.push(U8{0})
+        jet_cli_generate_push(&identity, input.digest)
+        &identity.push(U8{10})
+    }
+    jet_cli_generate_hash(identity)
+}
+
+// Rust validate_tree:1273–1290 preserves native iteration order (not sorted).
+fn jet_cli_generate_validate_tree(path: generate_paths.OSPath) -[FS.Read]> JetCLIGenerateError! {
+    stream :: generate_io.read_dir(path) ?? return Err(jet_cli_generate_error("could not inspect `{generate_paths.display(path)}`: {jet_cli_transaction_io_message(err)}"))
+    loop {
+        entry :: (stream.next() ?? return Err(jet_cli_generate_error("could not inspect `{generate_paths.display(path)}`: {jet_cli_transaction_io_message(err)}"))) ?? break
+        child :: entry.path()
+        metadata :: generate_io.symlink_metadata(child) ?? return Err(jet_cli_generate_error("could not inspect `{generate_paths.display(child)}`: {jet_cli_transaction_io_message(err)}"))
+        if metadata.is_symlink -> return Err(jet_cli_generate_error("generator input tree contains symlink `{generate_paths.display(child)}`"))
+        if metadata.is_dir { jet_cli_generate_validate_tree(child) }
+        else if !metadata.is_file { return Err(jet_cli_generate_error("generator input tree contains special file `{generate_paths.display(child)}`")) }
+    }
+}
+fn jet_cli_generate_relative_path(project: generate_paths.OSPath, path: generate_paths.OSPath) -> String JetCLIGenerateError! {
+    span :: generate_paths.strip_prefix_span(path, project) ?? return Err(jet_cli_generate_error("path `{generate_paths.display(path)}` escapes project"))
+    jet_cli_generate_path_string_span(path, span) ?? return Err(jet_cli_generate_error("generator path contains a non-normal component"))
+}
+fn jet_cli_generate_path_string(path: generate_paths.OSPath) -> String JetCLIGenerateError! {
+    jet_cli_generate_path_string_span(path, generate_paths.PathSpan{start: 0, end: path.encoded.len()})
+}
+fn jet_cli_generate_path_string_span(path: generate_paths.OSPath, span: generate_paths.PathSpan) -> String JetCLIGenerateError! {
+    cursor := generate_paths.components_span(path, span)
+    out := [U8]{}
+    first := true
+    loop {
+        component :: generate_paths.next(path, &cursor) ?? break
+        if component.kind != generate_paths.ComponentKind.Normal -> return Err(jet_cli_generate_error("staged generator path contains a non-normal component"))
+        if !first -> &out.push(U8{47})
+        first = false
+        jet_cli_generate_push(&out, generate_paths.display_span(path, component.span))
+    }
+    Ok(jet_cli_generate_text(^out))
+}
+fn jet_cli_generate_source_line(source: String, offset: Int) -> Int Never! {
+    bytes :: source.bytes()
+    limit :: offset.min(bytes.len())
+    line := 1
+    loop at in 0..<limit { if bytes[at] == (U8{10}) -> line += 1 }
+    line
+}
+fn jet_cli_generate_ascii_alpha(byte: U8) -> Bool Never! { (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) }
+fn jet_cli_generate_ascii_digit(byte: U8) -> Bool Never! { byte >= (U8{48}) && byte <= (U8{57}) }
+fn jet_cli_generate_safe_component(value: String) -> String Never! {
+    out := [U8]{}
+    // Emit one underscore per Unicode scalar, not one per UTF8 byte.
+    loop byte in value.bytes() {
+        if byte >= (U8{128}) && byte <= (U8{191}) -> next
+        &out.push(if jet_cli_generate_ascii_alpha(byte) || jet_cli_generate_ascii_digit(byte) || byte == (U8{95}) || byte == (U8{45}) -> byte else -> U8{95})
+    }
+    jet_cli_generate_text(^out)
+}
+fn jet_cli_generate_validate_identifier(value: String) JetCLIGenerateError! {
+    bytes :: value.bytes()
+    if bytes.len() == 0 -> return Err(jet_cli_generate_error("`{value}` is not a valid generator name"))
+    if bytes[0] != (U8{95}) && !jet_cli_generate_ascii_alpha(bytes[0]) -> return Err(jet_cli_generate_error("`{value}` is not a valid generator name"))
+    loop byte in bytes { if byte != (U8{95}) && !jet_cli_generate_ascii_alpha(byte) && !jet_cli_generate_ascii_digit(byte) -> return Err(jet_cli_generate_error("`{value}` is not a valid generator name")) }
+}
+fn jet_cli_generate_format_run_failure(exit_code: I32, stdout: String, stderr: String) -> String Never! {
+    error := stderr.trim() // #4303
+    output := stdout.trim() // #4303
+    if error != "" -> return "generator job exited with status {exit_code}: {error}"
+    if output != "" -> return "generator job exited with status {exit_code}: {output}"
+    "generator job exited with status {exit_code}"
+}
+fn jet_cli_generate_fail_with_source(entry: generate_paths.OSPath, source: String, generator: String, detail: String) -> JetCLIGenerateError Never! {
+    marker :: "fn {generator}"
+    line :: if source.find(marker) == .Val(offset) -> jet_cli_generate_source_line(source, offset) else -> 1
+    jet_cli_generate_error("generator `{generator}` failed at {generate_paths.display(entry)}:{line}: {detail}")
+}
+fn jet_cli_generate_fail_with_diagnostics(entry: generate_paths.OSPath, source: String, generator: String, diagnostics: [Diagnostic]) -> JetCLIGenerateError Never! {
+    out := [U8]{}
+    first := true
+    loop diagnostic in diagnostics {
+        if !first -> jet_cli_generate_push(&out, "; ")
+        first = false
+        line :: if diagnostic.span == .Val(span) -> jet_cli_generate_source_line(source, span.start) else -> 1
+        jet_cli_generate_push(&out, "{generate_paths.display(entry)}:{line}: {diagnostic.code}: {diagnostic.what}")
+    }
+    jet_cli_generate_fail_with_source(entry, source, generator, jet_cli_generate_text(^out))
+}
+
+// Wire projection uses the sole Foundation Report/StatusValue vocabulary;
+// machine output is jet.status/v1, not a second CLI-specific envelope.
+fn jet_cli_generate_generator_value(fact: JetCLIGenerateFact) -> StatusValue Never! {
+    fields := StatusFields.new()
+    fields = ^fields.with("name", StatusValue.String{value: fact.name})
+    fields = ^fields.with("source", StatusValue.String{value: fact.source})
+    fields = ^fields.with("line", StatusValue.Integer{value: fact.line})
+    StatusValue.object(^fields)
+}
+fn jet_cli_generate_authority_value(fact: JetCLIGenerateAuthorityFact) -> StatusValue Never! {
+    fields := StatusFields.new()
+    fields = ^fields.with("path", StatusValue.String{value: fact.path})
+    fields = ^fields.with("digest", StatusValue.String{value: fact.digest})
+    StatusValue.object(^fields)
+}
+fn jet_cli_generate_inputs_value(inputs: [JetCLIGenerateInputFact]) -> StatusValue Never! {
+    rows := [StatusValue]{}
+    loop input in inputs {
+        fields := StatusFields.new()
+        fields = ^fields.with("path", StatusValue.String{value: input.path})
+        fields = ^fields.with("digest", StatusValue.String{value: input.digest})
+        &rows.push(StatusValue.object(^fields))
+    }
+    StatusValue.array(^rows)
+}
+fn jet_cli_generate_action(output: JetCLIGenerateOutputPlan) -> String Never! {
+    if !jet_cli_generate_output_is_changed(output) -> "unchanged"
+    else if output.before != None -> "update"
+    else -> "create"
+}
+fn jet_cli_generate_quote(value: String) -> String Never! { StatusValue.String{value: value}.json() }
+// Persisted receipts/logs retain original bytes for unchanged detection.
+fn jet_cli_generate_render_receipt(fact: JetCLIGenerateFact, inputs: [JetCLIGenerateInputFact], outputs: [JetCLIGenerateOutputPlan], status: String, error: String?, toolchain: String) -> String Never! {
+    suffix :: if status == "ok" -> " --apply" else -> ""
+    command :: jet_cli_generate_quote("jet generate {fact.name}{suffix}")
+    out := [U8]{}
+    jet_cli_generate_push(&out, "{{\n  \"schema\":\"{GENERATE_RECEIPT_SCHEMA}\",\n  \"status\":\"{status}\",\n  \"command\":{command},\n  \"generator\":{jet_cli_generate_generator_value(fact).json()},\n  \"authority\":{jet_cli_generate_authority_value(fact.authority).json()},\n  \"toolchain\":{jet_cli_generate_quote(toolchain)},\n  \"inputs\":[")
+    loop at in 0..<inputs.len() {
+        if at > 0 -> &out.push(U8{44})
+        input :: inputs[at]
+        jet_cli_generate_push(&out, "{{\"path\":{jet_cli_generate_quote(input.path)},\"digest\":\"{input.digest}\"}}")
+    }
+    jet_cli_generate_push(&out, "],\n  \"outputs\":[")
+    loop at in 0..<outputs.len() {
+        if at > 0 -> &out.push(U8{44})
+        output :: outputs[at]
+        jet_cli_generate_push(&out, "{{\"path\":{jet_cli_generate_quote(output.path)},\"digest\":\"{jet_cli_generate_hash(output.after)}\",\"changed\":{jet_cli_generate_output_is_changed(output)}}}")
+    }
+    &out.push(U8{93})
+    if error == .Val(detail) -> jet_cli_generate_push(&out, ",\n  \"error\":{jet_cli_generate_quote(detail)}")
+    jet_cli_generate_push(&out, "\n}\n")
+    jet_cli_generate_text(^out)
+}
+fn jet_cli_generate_render_transaction_log(fact: JetCLIGenerateFact, outputs: [JetCLIGenerateOutputPlan], project: generate_paths.OSPath, receipt: generate_paths.OSPath) -> String JetCLIGenerateError! {
+    relative :: jet_cli_generate_relative_path(project, receipt)
+    out := [U8]{}
+    jet_cli_generate_push(&out, "{{\n  \"schema\":\"jet-generate-transaction-v1\",\n  \"generator\":{jet_cli_generate_quote(fact.name)},\n  \"receipt\":{jet_cli_generate_quote(relative)},\n  \"files\":[")
+    loop at in 0..<outputs.len() {
+        if at > 0 -> &out.push(U8{44})
+        output :: outputs[at]
+        before :: if output.before == .Val(bytes) -> "\"{jet_cli_generate_hash(bytes)}\"" else -> "null"
+        jet_cli_generate_push(&out, "{{\"path\":{jet_cli_generate_quote(output.path)},\"before\":{before},\"after\":\"{jet_cli_generate_hash(output.after)}\"}}")
+    }
+    jet_cli_generate_push(&out, "]\n}\n")
+    Ok(jet_cli_generate_text(^out))
+}
+fn jet_cli_generate_print_machine_result(fact: JetCLIGenerateFact, inputs: [JetCLIGenerateInputFact], outputs: [JetCLIGenerateOutputPlan], project: generate_paths.OSPath, receipt: generate_paths.OSPath, status: String, toolchain: String) -> String JetCLIGenerateError! {
+    fields := StatusFields.new()
+    fields = ^fields.with("status", StatusValue.String{value: status})
+    fields = ^fields.with("generator", jet_cli_generate_generator_value(fact))
+    fields = ^fields.with("authority", jet_cli_generate_authority_value(fact.authority))
+    fields = ^fields.with("inputs_digest", StatusValue.String{value: fact.input_digest})
+    fields = ^fields.with("inputs", jet_cli_generate_inputs_value(inputs))
+    fields = ^fields.with("toolchain", StatusValue.String{value: toolchain})
+    rows := [StatusValue]{}
+    loop output in outputs {
+        row := StatusFields.new()
+        row = ^row.with("path", StatusValue.String{value: output.path})
+        row = ^row.with("action", StatusValue.String{value: jet_cli_generate_action(output)})
+        row = ^row.with("digest", StatusValue.String{value: jet_cli_generate_hash(output.after)})
+        &rows.push(StatusValue.object(^row))
+    }
+    fields = ^fields.with("outputs", StatusValue.array(^rows))
+    fields = ^fields.with("receipt", StatusValue.String{value: jet_cli_generate_relative_path(project, receipt)})
+    envelope := StatusEnvelope.new("generate", status != "failed")
+    Ok((^envelope.with_fields(^fields)).json_line())
+}
+fn jet_cli_generate_render_preview(fact: JetCLIGenerateFact, inputs: [JetCLIGenerateInputFact], outputs: [JetCLIGenerateOutputPlan], project: generate_paths.OSPath, receipt: generate_paths.OSPath, machine: Bool, quiet: Bool, toolchain: String) -> String JetCLIGenerateError! {
+    if machine -> return jet_cli_generate_print_machine_result(fact, inputs, outputs, project, receipt, "preview", toolchain)
+    if quiet -> return Ok("")
+    out := [U8]{}
+    jet_cli_generate_push(&out, "generator: {fact.name}\nsource: {fact.source}:{fact.line}\npreview: planned source writes (nothing applied)\n")
+    loop output in outputs -> jet_cli_generate_push(&out, "  {jet_cli_generate_action(output)} {output.path}\n")
+    jet_cli_generate_push(&out, "apply: jet generate {fact.name} --apply (receipt {generate_paths.display(receipt)})\n")
+    Ok(jet_cli_generate_text(^out))
+}
+
+// The run boundary must receive the SAME checked entry Func from the sole
+// ProgramBundle producer; this check never reparses or fabricates an AST.
+fn jet_cli_generate_checked_metadata(function: Func) -> JobMetadata JetCLIGenerateError! {
+    if !function.is_job -> return Err(jet_cli_generate_error("generator entrypoint must be marked with `#Job`"))
+    if function.params.len() != 0 -> return Err(jet_cli_generate_error("generator entrypoints cannot take parameters; put configuration in declared inputs"))
+    metadata :: function.job_metadata ?? return Err(jet_cli_generate_error("generator `#Job` must declare typed `inputs` and `outputs` metadata"))
+    if metadata.inputs.len() == 0 -> return Err(jet_cli_generate_error("generator `#Job` must declare at least one input"))
+    if metadata.outputs.len() == 0 -> return Err(jet_cli_generate_error("generator `#Job` must declare at least one output"))
+    Ok(metadata)
+}
+
+// Rust run_generate:242–251,327–351: original error ordering before planning.
+fn jet_cli_generate_ensure_disjoint(inputs: [JetCLIGenerateInputFact], outputs: [JetCLIGenerateOutputPath]) JetCLIGenerateError! {
+    declared := [String: Bool]{}
+    loop output in outputs -> declared[output.path] = true
+    loop input in inputs {
+        if declared.has_key(input.path) -> return Err(jet_cli_generate_error("generator input/output overlap at `{input.path}`"))
+    }
+}
+fn jet_cli_generate_ensure_declared_changes(before: [String: [U8]], after: [String: [U8]], outputs: [JetCLIGenerateOutputPath]) JetCLIGenerateError! {
+    declared := [String: Bool]{}
+    loop output in outputs -> declared[output.path] = true
+    undeclared := [String]{}
+    loop path in jet_cli_generate_changed_paths(before, after) {
+        if !declared.has_key(path) -> &undeclared.push(path)
+    }
+    if undeclared.len() != 0 -> return Err(jet_cli_generate_error("generator changed undeclared project files: {undeclared.join(", ")}"))
+}
+
+// Rust run_generate:352–396, preserving declared output order and all
+// lstat/read/collision branches. Any lstat error originally means no before;
+// only an observed nonregular object or a subsequent read fails this stage.
+fn jet_cli_generate_plan_output(fact: JetCLIGenerateFact, output: ^JetCLIGenerateOutputPath, raw: [U8], toolchain: String) -[FS.Read]> JetCLIGenerateOutputPlan JetCLIGenerateError! {
+    after :: jet_cli_generate_generated_source(fact, output.path, raw, toolchain)
+    before := [U8]?{None}
+    if generate_io.symlink_metadata(output.absolute) == .Ok(metadata) {
+        if metadata.is_symlink || !metadata.is_file -> return Err(jet_cli_generate_error("declared output `{output.path}` is not a regular file"))
+        bytes :: generate_io.read_bytes(output.absolute) ?? return Err(jet_cli_generate_error("could not read declared output `{output.path}`: {jet_cli_transaction_io_message(err)}"))
+        jet_cli_generate_ensure_output_collision(bytes, fact.name, output.path)
+        before = Val(bytes)
+    }
+    Ok(JetCLIGenerateOutputPlan{path: output.path, absolute: output.absolute, before: before, after: after})
+}
+fn jet_cli_generate_plan_outputs(fact: JetCLIGenerateFact, outputs: ^[JetCLIGenerateOutputPath], after_tree: [String: [U8]], toolchain: String) -[FS.Read]> [JetCLIGenerateOutputPlan] JetCLIGenerateError! {
+    plans := [JetCLIGenerateOutputPlan]{}
+    loop output in outputs {
+        raw :: after_tree.get(output.path) ?? return Err(jet_cli_generate_error("generator did not produce declared output `{output.path}`"))
+        &plans.push(jet_cli_generate_plan_output(fact, ^output, raw, toolchain))
+    }
+    Ok(^plans)
+}
+
+fn jet_cli_generate_read_receipt(receipt: generate_paths.OSPath) -[FS.Read]> [U8]? JetCLIGenerateError! {
+    if generate_io.symlink_metadata(receipt) == .Ok(metadata) {
+        if metadata.is_symlink || !metadata.is_file -> return Err(jet_cli_generate_error("generation receipt path is not a regular file"))
+        bytes :: generate_io.read_bytes(receipt) ?? return Err(jet_cli_generate_error("could not read generation receipt: {jet_cli_transaction_io_message(err)}"))
+        return Ok(Val(bytes))
+    }
+    Ok(None)
+}
+
+// Rust run_generate:432–466: ownership-transfer publication planning. Only
+// changed payloads are moved into the sole Transaction::Change carrier.
+struct JetCLIGeneratePublication {
+    changes: [JetCLITransactionChange]
+    absent: [generate_paths.OSPath]
+}
+fn jet_cli_generate_publication(plans: ^[JetCLIGenerateOutputPlan], receipt: generate_paths.OSPath, receipt_before: ^[U8]?, receipt_after: ^[U8]) -> JetCLIGeneratePublication Never! {
+    changes := [JetCLITransactionChange]{}
+    absent := [generate_paths.OSPath]{}
+    loop plan in plans {
+        if plan.before == None -> &absent.push(~plan.absolute)
+        if !jet_cli_generate_output_is_changed(plan) -> next
+        &changes.push(JetCLITransactionChange{path: plan.absolute, before: plan.before ?? [U8]{}, after: plan.after})
+    }
+    if receipt_before != Val(receipt_after) {
+        if receipt_before == None -> &absent.push(~receipt)
+        &changes.push(JetCLITransactionChange{path: receipt, before: receipt_before ?? [U8]{}, after: receipt_after})
+    }
+    JetCLIGeneratePublication{changes: ^changes, absent: ^absent}
+}
+fn jet_cli_generate_render_applied(fact: JetCLIGenerateFact, plans: [JetCLIGenerateOutputPlan], project: generate_paths.OSPath, receipt: generate_paths.OSPath) -> String Never! {
+    out := [U8]{}
+    jet_cli_generate_push(&out, "generate: applied `{fact.name}`\n")
+    loop plan in plans {
+        if !jet_cli_generate_output_is_changed(plan) -> next
+        path := ~project
+        generate_paths.push(&path, generate_paths.from_text(plan.path, project.platform))
+        jet_cli_generate_push(&out, "  wrote {generate_paths.display(path)}\n")
+    }
+    jet_cli_generate_push(&out, "receipt: {generate_paths.display(receipt)}\n")
+    jet_cli_generate_text(^out)
+}
+
+// Rust TempProject::drop:83–85; native Close removes the actual staging
+// path on every exit, ignoring cleanup errors exactly as Rust Drop does.
+struct JetCLIGenerateTempProject { path: generate_paths.OSPath }
+impl JetCLIGenerateTempProject.Close {
+    fn close(^self) {
+        generate_io.remove_dir_all(self.path).drop("disposable generation staging cleanup is best effort")
+    }
+}
+
+// Main-authorized pending Rust-owner ABI bindings (not new providers):
+// Driver/Interpreter/ProgramBundle: pending CP-PROGRAM-BUNDLE ABI reconciliation.
+// SHA256.sha256_file_hex/tree_hash: pending packet0096 ABI reconciliation.
+// Transaction.lock/recover/commit_generate: pending packet0665 ABI reconciliation.
+// Loader.find_manifest_root/manifest_path: pending Loader lossless ABI reconciliation.
+// Native PID/clock/temp_dir: published retained ABI, native bodies #4494/#4483.
+// UInt128Parts decimal and CARGO_PKG_VERSION/OS/ARCH: pending sole wide-time
+// / checked-toolchain ABI reconciliation (#4494/#4483/#4500).
+
+// Rust TempProject::new:63–79. Preserve timestamp-zero only for failed
+// duration_since, exclusive create_dir, and the original diagnostic.
+fn jet_cli_generate_temp_project_new() -[Env, FS.Write, Time]> JetCLIGenerateTempProject JetCLIGenerateError! {
+    time :: generate_clock.system_time_now()
+    stamp :: if generate_time_metadata.modified_nanoseconds(&time) == .Val(parts) -> generate_wide_time.decimal(parts) else -> "0"
+    path := generate_ingress.temp_dir()
+    generate_paths.push(&path, generate_paths.from_text("jet-generate-{generate_process.id()}-{stamp}", path.platform))
+    generate_io.create_dir(path) ?? return Err(jet_cli_generate_error("could not create source-generation staging directory `{generate_paths.display(path)}`: {jet_cli_transaction_io_message(err)}"))
+    Ok(JetCLIGenerateTempProject{path: ^path})
+}
+
+fn jet_cli_generate_toolchain_id() -> String Never! {
+    "jet/{CARGO_PKG_VERSION}-{OS}-{ARCH}"
+}
+fn jet_cli_generate_digest_file(path: generate_paths.OSPath) -[FS.Read]> String JetCLIGenerateError! {
+    SHA256.sha256_file_hex(path) ?? return Err(jet_cli_generate_error("could not hash generator input `{generate_paths.display(path)}`: {jet_cli_transaction_io_message(err)}"))
+}
+fn jet_cli_generate_digest_declared(path: generate_paths.OSPath) -[FS.Read]> String JetCLIGenerateError! {
+    metadata :: generate_io.symlink_metadata(path) ?? return Err(jet_cli_generate_error("could not inspect generator input `{generate_paths.display(path)}`: {jet_cli_transaction_io_message(err)}"))
+    if metadata.is_symlink -> return Err(jet_cli_generate_error("generator input `{generate_paths.display(path)}` is a symlink"))
+    if metadata.is_file -> return jet_cli_generate_digest_file(path)
+    if metadata.is_dir {
+        jet_cli_generate_validate_tree(path)
+        return Ok(SHA256.tree_hash(path))
+    }
+    Err(jet_cli_generate_error("generator input `{generate_paths.display(path)}` is not a regular path"))
+}
+fn jet_cli_generate_authority_fact(project: generate_paths.OSPath, source_digest: String) -[FS.Read]> JetCLIGenerateAuthorityFact JetCLIGenerateError! {
+    if Loader.manifest_path(project) == .Val(path) {
+        digest :: jet_cli_generate_digest_file(path)
+        return Ok(JetCLIGenerateAuthorityFact{path: jet_cli_generate_relative_path(project, path), absolute: Val(path), digest: digest})
+    }
+    Ok(JetCLIGenerateAuthorityFact{path: "ambient", absolute: None, digest: source_digest})
+}
+fn jet_cli_generate_ensure_inputs_current(inputs: [JetCLIGenerateInputFact], entry: generate_paths.OSPath, source: String, generator: String) -[FS.Read]> JetCLIGenerateError! {
+    loop input in inputs {
+        digest :: jet_cli_generate_digest_declared(input.absolute)
+        if digest != input.digest -> return Err(jet_cli_generate_fail_with_source(entry, source, generator, "stale generator input `{input.path}` changed while generation was running; rerun the command"))
+    }
+}
+fn jet_cli_generate_ensure_authority_current(authority: JetCLIGenerateAuthorityFact, entry: generate_paths.OSPath, source: String, generator: String) -[FS.Read]> JetCLIGenerateError! {
+    if authority.absolute == .Val(path) {
+        digest :: jet_cli_generate_digest_file(path)
+        if digest != authority.digest -> return Err(jet_cli_generate_fail_with_source(entry, source, generator, "package authority changed while generation was running; rerun the command"))
+    }
+}
+fn jet_cli_generate_publish_failure_receipt(project: generate_paths.OSPath, receipt: generate_paths.OSPath, log: generate_paths.OSPath, bytes: [U8]) -[FS]> JetCLIGenerateError! {
+    before :: jet_cli_generate_read_receipt(receipt)
+    if before == Val(bytes) -> return
+    absent := [generate_paths.OSPath]{}
+    if before == None -> &absent.push(~receipt)
+    changes :: [JetCLITransactionChange]{JetCLITransactionChange{path: ~receipt, before: before ?? [U8]{}, after: bytes}}
+    lock :: Transaction.lock(project)
+    Transaction.recover(lock)
+    Transaction.commit_generate(lock, changes, absent, log, bytes)
+}
+fn jet_cli_generate_publish_failure_receipt_if_apply(apply: Bool, project: generate_paths.OSPath, receipt: generate_paths.OSPath, log: generate_paths.OSPath, bytes: [U8]) -[FS]> JetCLIGenerateError! {
+    if apply -> jet_cli_generate_publish_failure_receipt(project, receipt, log, bytes)
+}
+
+// Rust run_generate:88–482: real checking, disposable evaluation, tree
+// comparison, provenance, current-input checks and ONE transactional publish.
+// The unresolved Rust-owner bindings above are explicit integration gates;
+// this is not a command that returns success without executing its generator.
+pub fn jet_cli_generate_run(args: [String], json: Bool) -[FS, Env, IO, Exec, Time]> JetCLIGenerateError! {
+    options :: jet_cli_generate_parse_options(args)
+    machine :: json || options.json
+    job :: options.job
+    cwd :: generate_ingress.current_dir() ?? return Err(jet_cli_generate_error("could not read the current directory: {jet_cli_transaction_io_message(err)}"))
+    selected :: jet_cli_generate_resolve_entry(cwd, options.entry)
+    entry :: generate_io.canonicalize(selected) ?? return Err(jet_cli_generate_error("could not resolve generator entry `{generate_paths.display(selected)}`: {jet_cli_transaction_io_message(err)}"))
+    parent_span :: generate_paths.parent_span(entry) ?? return Err(jet_cli_generate_error("generator entry has no project root"))
+    parent :: generate_paths.owned_span(entry, parent_span)
+    root :: Loader.find_manifest_root(parent) ?? parent
+    project :: generate_io.canonicalize(root) ?? return Err(jet_cli_generate_error("could not resolve generator project `{generate_paths.display(root)}`: {jet_cli_transaction_io_message(err)}"))
+    source :: generate_io.read_text(entry) ?? return Err(jet_cli_generate_error("could not read generator source `{generate_paths.display(entry)}`: {jet_cli_transaction_io_message(err)}"))
+    (diagnostics, checked, _) :: Driver.check_file_with_effect_facts_for_run_and_entry(entry, "dev", [String: String]{}, Val(job))
+    loop diagnostic in diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> return Err(jet_cli_generate_fail_with_diagnostics(entry, source, job, diagnostics))
+    }
+    bundle :: checked ?? return Err(jet_cli_generate_fail_with_source(entry, source, job, "the source check returned no checked bundle"))
+    function := Func?{None}
+    loop item in bundle.modules[bundle.entry].items {
+        if item == .Func(candidate) && candidate.name == job { function = Val(candidate)
+            break
+        }
+    }
+    selected_function :: function ?? return Err(jet_cli_generate_fail_with_source(entry, source, job, "generator entrypoint is not declared in the project entry module"))
+    metadata :: jet_cli_generate_checked_metadata(selected_function) ?? return Err(jet_cli_generate_fail_with_source(entry, source, job, err.message))
+    source_rel :: jet_cli_generate_relative_path(project, entry)
+    line :: jet_cli_generate_source_line(source, (selected_function.job_span ?? selected_function.span).start)
+    source_digest :: jet_cli_generate_digest_file(entry)
+    authority :: jet_cli_generate_authority_fact(project, source_digest)
+    inputs := [JetCLIGenerateInputFact]{}
+    input_index := [String: String]{}
+    jet_cli_generate_add_input(&inputs, &input_index, JetCLIGenerateInputFact{path: source_rel, absolute: ~entry, digest: source_digest})
+    loop raw in metadata.inputs {
+        absolute :: jet_cli_generate_declared_path(project, raw, "input", true) ?? return Err(jet_cli_generate_fail_with_source(entry, source, job, err.message))
+        path :: jet_cli_generate_relative_path(project, absolute)
+        jet_cli_generate_ensure_generated_input_current(absolute, path) ?? return Err(jet_cli_generate_fail_with_source(entry, source, job, err.message))
+        digest :: jet_cli_generate_digest_declared(absolute)
+        jet_cli_generate_add_input(&inputs, &input_index, JetCLIGenerateInputFact{path: path, absolute: absolute, digest: digest})
+    }
+    fact :: JetCLIGenerateFact{name: job, source: source_rel, line: line, input_digest: jet_cli_generate_digest_input_facts(inputs), authority: authority, metadata: metadata}
+    outputs :: jet_cli_generate_output_paths(project, fact) ?? return Err(jet_cli_generate_fail_with_source(entry, source, job, err.message))
+    jet_cli_generate_ensure_disjoint(inputs, outputs) ?? return Err(jet_cli_generate_fail_with_source(entry, source, job, err.message))
+    receipt_path := ~project
+    log_path := ~project
+    safe :: jet_cli_generate_safe_component(job)
+    generate_paths.push(&receipt_path, generate_paths.from_text(".jet/codemods/generate-{safe}.receipt.json", project.platform))
+    generate_paths.push(&log_path, generate_paths.from_text(".jet/codemods/generate-{safe}.log.json", project.platform))
+    staging :: jet_cli_generate_temp_project_new()
+    jet_cli_generate_copy_project(project, staging.path)
+    baseline :: jet_cli_generate_collect_files(staging.path)
+    relative :: generate_paths.strip_prefix_span(entry, project) ?? return Err(jet_cli_generate_error("generator entry is outside its project root"))
+    staged_entry := ~staging.path
+    generate_paths.push_span(&staged_entry, entry, relative)
+    run :: Interpreter.run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority_and_entry(staged_entry, [String]{job}, GateSet.default(), [String: String]{}, None, None)
+    toolchain :: jet_cli_generate_toolchain_id()
+    if run.outcome == {
+        .Ran(stdout, stderr, exit_code) -> {
+            if exit_code == (I32{0}) {
+                if !machine && !options.quiet {
+                    if stdout != "" -> jet_cli_generate_stdout(stdout)
+                    if stderr != "" -> jet_cli_generate_stderr(stderr)
+                }
+            } else {
+                detail :: jet_cli_generate_format_run_failure(exit_code, stdout, stderr)
+                receipt :: jet_cli_generate_render_receipt(fact, inputs, [JetCLIGenerateOutputPlan]{}, "failed", Val(detail), toolchain)
+                jet_cli_generate_publish_failure_receipt_if_apply(options.apply, project, receipt_path, log_path, receipt.bytes())
+                return Err(jet_cli_generate_fail_with_source(entry, source, job, detail))
+            }
+        }
+        .Problems(problems) -> {
+            detail_bytes := [U8]{}
+            loop at in 0..<problems.len() {
+                if at > 0 -> jet_cli_generate_push(&detail_bytes, "; ")
+                jet_cli_generate_push(&detail_bytes, "{problems[at].code}: {problems[at].what}")
+            }
+            detail :: jet_cli_generate_text(^detail_bytes)
+            receipt :: jet_cli_generate_render_receipt(fact, inputs, [JetCLIGenerateOutputPlan]{}, "failed", Val(detail), toolchain)
+            jet_cli_generate_publish_failure_receipt_if_apply(options.apply, project, receipt_path, log_path, receipt.bytes())
+            return Err(jet_cli_generate_fail_with_source(entry, source, job, detail))
+        }
+    }
+    after_tree :: jet_cli_generate_collect_files(staging.path)
+    if jet_cli_generate_ensure_declared_changes(baseline, after_tree, outputs) == .Err(error) {
+        receipt :: jet_cli_generate_render_receipt(fact, inputs, [JetCLIGenerateOutputPlan]{}, "failed", Val(error.message), toolchain)
+        jet_cli_generate_publish_failure_receipt_if_apply(options.apply, project, receipt_path, log_path, receipt.bytes())
+        return Err(jet_cli_generate_fail_with_source(entry, source, job, error.message))
+    }
+    // Only a missing declared output publishes a failure receipt here. Native
+    // inspection/read/collision failures preserve Rust's no-publication branch.
+    plans := [JetCLIGenerateOutputPlan]{}
+    loop output in outputs {
+        raw :: after_tree.get(output.path) ?? {
+            detail :: "generator did not produce declared output `{output.path}`"
+            receipt :: jet_cli_generate_render_receipt(fact, inputs, [JetCLIGenerateOutputPlan]{}, "failed", Val(detail), toolchain)
+            jet_cli_generate_publish_failure_receipt_if_apply(options.apply, project, receipt_path, log_path, receipt.bytes())
+            return Err(jet_cli_generate_fail_with_source(entry, source, job, detail))
+        }
+        plan :: jet_cli_generate_plan_output(fact, ^output, raw, toolchain) ?? return Err(jet_cli_generate_fail_with_source(entry, source, job, err.message))
+        &plans.push(^plan)
+    }
+    jet_cli_generate_ensure_inputs_current(inputs, entry, source, job)
+    jet_cli_generate_ensure_authority_current(fact.authority, entry, source, job)
+    receipt :: jet_cli_generate_render_receipt(fact, inputs, plans, "ok", None, toolchain)
+    if !options.apply {
+        preview :: jet_cli_generate_render_preview(fact, inputs, plans, project, receipt_path, machine, options.quiet, toolchain)
+        if preview != "" -> jet_cli_generate_stdout(preview)
+        return
+    }
+    before :: jet_cli_generate_read_receipt(receipt_path) ?? return Err(jet_cli_generate_fail_with_source(entry, source, job, err.message))
+    receipt_changed :: before != Val(receipt.bytes())
+    output_changed := false
+    loop plan in plans { if jet_cli_generate_output_is_changed(plan) -> output_changed = true }
+    if !receipt_changed && !output_changed {
+        if machine { jet_cli_generate_stdout(jet_cli_generate_print_machine_result(fact, inputs, plans, project, receipt_path, "unchanged", toolchain)) }
+        else if !options.quiet { jet_cli_generate_stdout("generate: `{job}` is unchanged\nreceipt: {generate_paths.display(receipt_path)}\n") }
+        return
+    }
+    transaction_log :: jet_cli_generate_render_transaction_log(fact, plans, project, receipt_path)
+    // Render before consuming payload owners; no copied after/before blobs.
+    result :: if machine -> jet_cli_generate_print_machine_result(fact, inputs, plans, project, receipt_path, "applied", toolchain)
+        else if options.quiet -> ""
+        else -> jet_cli_generate_render_applied(fact, plans, project, receipt_path)
+    publication :: jet_cli_generate_publication(plans, receipt_path, before, receipt.bytes())
+    lock :: Transaction.lock(project)
+    Transaction.recover(lock)
+    Transaction.commit_generate(lock, publication.changes, publication.absent, log_path, transaction_log.bytes())
+    if result != "" -> jet_cli_generate_stdout(result)
+}
+
+// Print raw bytes without the extra newline of term.print; IO failure stops
+// just as Rust print!/eprint! do. Native stdio is the shared Core producer.
+fn jet_cli_generate_stdout(text: String) -[IO, Time.Wait]> Never! {
+    out :: generate_term.stdout()
+    out.write_bytes(text.bytes()) ?? panic("failed printing to stdout: {err}")
+}
+fn jet_cli_generate_stderr(text: String) -[IO, Time.Wait]> Never! {
+    out :: generate_term.stderr()
+    out.write_bytes(text.bytes()) ?? panic("failed printing to stderr: {err}")
+}

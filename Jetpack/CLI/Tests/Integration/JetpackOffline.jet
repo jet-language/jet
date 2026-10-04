@@ -1,0 +1,1115 @@
+// PORT-PENDING 1097 tests-jetpack-offline-module-group: tests/jetpack_offline.rs:1-306
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! U29 (D-JPK-OFFLINE1=A): offline guarantee process tests.
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS 
+//RS mod common;
+//RS use common::{jetpack_bin, Scratch};
+//RS 
+//RS fn jetpack() -> Command {
+//RS     Command::new(jetpack_bin())
+//RS }
+//RS 
+//RS fn write_runnable_fixture(
+//RS     fixtures: &Path,
+//RS     root: &Path,
+//RS     staging_dir: &Path,
+//RS     lua_path: Option<&str>,
+//RS ) -> PathBuf {
+//RS     fs::create_dir_all(fixtures).unwrap();
+//RS     let bin = staging_dir.join("bin");
+//RS     fs::create_dir_all(&bin).unwrap();
+//RS     let greet = bin.join(if cfg!(windows) { "greet.bat" } else { "greet" });
+//RS     #[cfg(windows)]
+//RS     fs::write(&greet, "@echo hello from offline cache\r\n").unwrap();
+//RS     #[cfg(not(windows))]
+//RS     {
+//RS         fs::write(&greet, "#!/bin/sh\necho hello from offline cache\n").unwrap();
+//RS         use std::os::unix::fs::PermissionsExt;
+//RS         fs::set_permissions(&greet, fs::Permissions::from_mode(0o755)).unwrap();
+//RS     }
+//RS     if let Some(lua_path) = lua_path {
+//RS         fs::write(staging_dir.join("lua-path"), lua_path).unwrap();
+//RS     }
+//RS     jetpack::Store::seal_local_output(staging_dir).unwrap();
+//RS     let digest = jetpack::Envelope::try_output_hash_of(&staging_dir.to_string_lossy()).unwrap();
+//RS     let out_dir = root.join("hangar").join("objects").join(&digest);
+//RS     fs::create_dir_all(out_dir.parent().unwrap()).unwrap();
+//RS     let mut staging_permissions = fs::metadata(staging_dir).unwrap().permissions();
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::PermissionsExt;
+//RS         staging_permissions.set_mode(staging_permissions.mode() | 0o200);
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     staging_permissions.set_readonly(false);
+//RS     fs::set_permissions(staging_dir, staging_permissions).unwrap();
+//RS     fs::rename(staging_dir, &out_dir).unwrap();
+//RS     jetpack::Store::seal_local_output(&out_dir).unwrap();
+//RS     assert_eq!(
+//RS         jetpack::Envelope::try_output_hash_of(&out_dir.to_string_lossy()).unwrap(),
+//RS         digest,
+//RS         "published fixture must retain its content-addressed identity"
+//RS     );
+//RS     let json = format!(
+//RS         "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-greet.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
+//RS         out_dir.to_string_lossy()
+//RS     );
+//RS     fs::write(fixtures.join("nixpkgs-greet.json"), json).unwrap();
+//RS     out_dir
+//RS }
+//RS 
+//RS #[test]
+//RS fn offline_build_and_run_use_hangar_cache_with_network_denied() {
+//RS     let project = Scratch::new("project");
+//RS     let root = Scratch::new("root");
+//RS     let fixtures = Scratch::new("fixtures");
+//RS     let out_dir = Scratch::new("out");
+//RS     write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path, None);
+//RS 
+//RS     let first = jetpack()
+//RS         .args([
+//RS             "build",
+//RS             "greet@nixpkgs",
+//RS             "--no-color",
+//RS             "--offline",
+//RS             "--fixtures",
+//RS         ])
+//RS         .arg(&fixtures.path)
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         first.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&first.stderr)
+//RS     );
+//RS 
+//RS     let second = jetpack()
+//RS         .args(["build", "greet@nixpkgs", "--no-color", "--offline"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_DENY_NETWORK", "1")
+//RS         .env_remove("JETPACK_FIXTURES")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         second.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&second.stderr)
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&second.stderr);
+//RS     assert!(stderr.contains("cached"), "stderr: {stderr}");
+//RS     assert!(!stderr.contains("fixture"), "stderr: {stderr}");
+//RS 
+//RS     let run = jetpack()
+//RS         .args([
+//RS             "run",
+//RS             "greet@nixpkgs",
+//RS             "--no-color",
+//RS             "--offline",
+//RS             "--",
+//RS             "greet",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_DENY_NETWORK", "1")
+//RS         .env_remove("JETPACK_FIXTURES")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&run.stdout);
+//RS     assert!(
+//RS         stdout.contains("hello from offline cache"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn selected_workspace_run_propagates_unsafe_metadata_failure_before_command() {
+//RS     let project = Scratch::new("unsafe-metadata-project");
+//RS     let root = Scratch::new("unsafe-metadata-root");
+//RS     let fixtures = Scratch::new("unsafe-metadata-fixtures");
+//RS     let out_dir = Scratch::new("unsafe-metadata-out");
+//RS     write_runnable_fixture(
+//RS         &fixtures.path,
+//RS         &root.path,
+//RS         &out_dir.path,
+//RS         Some("../outside\n"),
+//RS     );
+//RS 
+//RS     let member = project.path.join("packages/hello");
+//RS     fs::create_dir_all(&member).unwrap();
+//RS     fs::write(
+//RS         project.path.join("workspace.jet"),
+//RS         "module workspace { members: find(\"./packages\") }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         member.join("package.jet"),
+//RS         "name: \"hello\"\nversion: \"0.1.0\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         member.join("hello.jet"),
+//RS         "module hello { pub fn greeting() -[]> String { return \"hello\" } }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         project.path.join("env.jet"),
+//RS         "module env.dev { packages: [nixpkgs.greet] }\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let sentinel = project.path.join("command-ran");
+//RS     let output = jetpack()
+//RS         .args(["run", "-p", "hello", "--offline", "--trust", "--fixtures"])
+//RS         .arg(&fixtures.path)
+//RS         .args(["--", "sh", "-c", "printf executed > \"$1\"", "jet-test"])
+//RS         .arg(&sentinel)
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS 
+//RS     assert_eq!(output.status.code(), Some(1), "{output:?}");
+//RS     assert!(
+//RS         !sentinel.exists(),
+//RS         "requested command ran after compose failure"
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert_eq!(
+//RS         stderr
+//RS             .matches("couldn't compose package environment")
+//RS             .count(),
+//RS         1,
+//RS         "stderr: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS /// D-JPK-OFFLINE2=B tamper gate: after a first build records the locked
+//RS /// identity + closure digest, corrupting the realized closure on disk must make
+//RS /// the offline reuse refuse loudly (integrity), naming the artifact — never
+//RS /// silently serve the stale/mismatched copy (card #418 trust hole stays closed).
+//RS #[test]
+//RS fn offline_reuse_refuses_a_tampered_closure() {
+//RS     let project = Scratch::new("tamper-project");
+//RS     let root = Scratch::new("tamper-root");
+//RS     let fixtures = Scratch::new("tamper-fixtures");
+//RS     let out_dir = Scratch::new("tamper-out");
+//RS     let seeded_out = write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path, None);
+//RS 
+//RS     let first = jetpack()
+//RS         .args([
+//RS             "build",
+//RS             "greet@nixpkgs",
+//RS             "--no-color",
+//RS             "--offline",
+//RS             "--fixtures",
+//RS         ])
+//RS         .arg(&fixtures.path)
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         first.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&first.stderr)
+//RS     );
+//RS 
+//RS     // Corrupt the realized closure on disk (a partial GC / bit-rot / tamper
+//RS     // stand-in): drop the executable the recorded digest covers.
+//RS     let greet = seeded_out
+//RS         .join("bin")
+//RS         .join(if cfg!(windows) { "greet.bat" } else { "greet" });
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::PermissionsExt;
+//RS         let _ = fs::set_permissions(seeded_out.join("bin"), fs::Permissions::from_mode(0o755));
+//RS     }
+//RS     fs::remove_file(&greet).unwrap();
+//RS 
+//RS     let second = jetpack()
+//RS         .args(["build", "greet@nixpkgs", "--no-color", "--offline"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_DENY_NETWORK", "1")
+//RS         .env_remove("JETPACK_FIXTURES")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         !second.status.success(),
+//RS         "a tampered closure must refuse, not serve stale; stderr: {}",
+//RS         String::from_utf8_lossy(&second.stderr)
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&second.stderr);
+//RS     assert!(
+//RS         stderr.contains("greet"),
+//RS         "the refusal must name the artifact; stderr: {stderr}"
+//RS     );
+//RS     assert!(
+//RS         !stderr.contains("hello from offline cache"),
+//RS         "stale bytes must never be served; stderr: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn offline_missing_object_is_loud_e1276() {
+//RS     let project = Scratch::new("project");
+//RS     let root = Scratch::new("root");
+//RS     let out = jetpack()
+//RS         .args(["build", "greet@nixpkgs", "--no-color", "--offline"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_DENY_NETWORK", "1")
+//RS         .env_remove("JETPACK_FIXTURES")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(stderr.contains("E1276"), "stderr: {stderr}");
+//RS     assert!(stderr.contains("greet@nixpkgs"), "stderr: {stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn network_class_verbs_refuse_offline_immediately() {
+//RS     let project = Scratch::new("project");
+//RS     let root = Scratch::new("root");
+//RS     for args in [
+//RS         &["update", "--no-color", "--offline"][..],
+//RS         &["outdated", "--no-color", "--offline"][..],
+//RS         &["add", "ripgrep@nixpkgs", "--no-color", "--offline"][..],
+//RS     ] {
+//RS         let out = jetpack()
+//RS             .args(args)
+//RS             .current_dir(&project.path)
+//RS             .env("JETPACK_ROOT", &root.path)
+//RS             .env("JETPACK_DENY_NETWORK", "1")
+//RS             .output()
+//RS             .unwrap();
+//RS         assert_eq!(out.status.code(), Some(2), "args: {args:?}");
+//RS         let stderr = String::from_utf8_lossy(&out.stderr);
+//RS         assert!(stderr.contains("E1276"), "args: {args:?}\nstderr: {stderr}");
+//RS         assert!(
+//RS             stderr.contains("network-class command"),
+//RS             "args: {args:?}\nstderr: {stderr}"
+//RS         );
+//RS     }
+//RS }
+// END-PORT-PENDING 1097 tests/jetpack_offline.rs:1-306
+
+// PORT-PENDING 1097 tests-jetpack-offline-module-group: tests/jetpack_output.rs:1-105
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS fn rust_sources(root: &Path, out: &mut Vec<PathBuf>) {
+//RS     for entry in fs::read_dir(root).unwrap() {
+//RS         let path = entry.unwrap().path();
+//RS         if path.is_dir() {
+//RS             rust_sources(&path, out);
+//RS         } else if path.extension().and_then(|value| value.to_str()) == Some("rs") {
+//RS             out.push(path);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn uncoded_errors_use_registered_report_snapshot() {
+//RS     let theme = jetpack::Output::Theme { color: false };
+//RS     let actual = theme.render_error_coded(
+//RS         "E1340",
+//RS         "package download failed",
+//RS         "the remote server closed the connection",
+//RS         "check the network connection and run the command again",
+//RS     );
+//RS     assert_eq!(
+//RS         actual,
+//RS         include_str!("fixtures/jetpack-diagnostics/E1340.stderr")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn unsupported_nix_projection_uses_registered_report_snapshot() {
+//RS     let theme = jetpack::Output::Theme { color: false };
+//RS     let actual = theme.render_error_coded(
+//RS         "E1351",
+//RS         "Nix closure execution is unavailable on this host.",
+//RS         "Jetpack could not create the isolated /nix/store projection: rootless `/nix/store` projection needs `unshare`.",
+//RS         "Use a Linux host with unprivileged user and mount namespaces, or choose a native provider for this package.",
+//RS     );
+//RS     assert_eq!(
+//RS         actual,
+//RS         include_str!("fixtures/jetpack-diagnostics/E1351.stderr")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn pinned_channel_update_uses_registered_report_snapshot() {
+//RS     let theme = jetpack::Output::Theme { color: false };
+//RS     let actual = theme.render_error_coded(
+//RS         "E1352",
+//RS         "Source `stable` is pinned and cannot be updated.",
+//RS         "a pinned source has no moving channel policy, so Jetpack must never change its lock or manifest",
+//RS         "declare `stable` with `#latest` for manual movement or `#auto` for automatic movement",
+//RS     );
+//RS     assert_eq!(
+//RS         actual,
+//RS         include_str!("fixtures/jetpack-diagnostics/E1352.stderr")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repeated_diagnostic_uses_one_card_count_and_next_step_snapshot() {
+//RS     let theme = jetpack::Output::Theme { color: false };
+//RS     let actual = theme.render_collapsed_error(
+//RS         "E1350",
+//RS         "native Nix cache closure could not be admitted",
+//RS         "the same signed Nix closure failed for every requested object",
+//RS         "repair the signed cache response or restore network access, then retry the realization.",
+//RS         8,
+//RS     );
+//RS     assert_eq!(
+//RS         actual,
+//RS         include_str!("fixtures/jetpack-diagnostics/collapsed_diagnostics.stderr")
+//RS     );
+//RS     assert_eq!(actual.matches("Error [E1350]").count(), 1);
+//RS     assert_eq!(actual.matches("Next:").count(), 1);
+//RS }
+//RS 
+//RS #[test]
+//RS fn retired_off_compiler_report_renderers_do_not_return() {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let mut sources = Vec::new();
+//RS     rust_sources(&root.join("crates/jetpack/src"), &mut sources);
+//RS     sources.push(root.join("Source/CmdGc.rs"));
+//RS 
+//RS     let retired = [
+//RS         "eprintln!(\"error:",
+//RS         "eprintln!(\"Error [",
+//RS         "self.red(\"error:\")",
+//RS         "format!(\"error[{code}]:\")",
+//RS         "format!(\"warning[{code}]:\")",
+//RS         "matches the compiler's house style",
+//RS     ];
+//RS     for path in sources {
+//RS         let source = fs::read_to_string(&path).unwrap();
+//RS         for text in retired {
+//RS             assert!(
+//RS                 !source.contains(text),
+//RS                 "{} restored retired report text `{text}`",
+//RS                 path.display()
+//RS             );
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 1097 tests/jetpack_output.rs:1-105
+
+// PORT-PENDING 1097 tests-jetpack-offline-module-group: tests/jetpack_package_outputs.rs:1-147
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Focused production-path proof for Package System/Fleet projections.
+//RS 
+//RS use std::fs;
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "support/jetpack_fixtures.rs"]
+//RS mod jetpack_fixtures;
+//RS use jetpack_fixtures::{jet, Scratch};
+//RS 
+//RS #[test]
+//RS fn package_fleet_output_reaches_the_immutable_generation_and_retries_cleanly() {
+//RS     let project = Scratch::new("package-fleet-output");
+//RS     let root = Scratch::new("package-fleet-output-root");
+//RS     fs::write(
+//RS         project.join("package.jet"),
+//RS         r#"name: "demo"
+//RS outputs: {
+//RS     workstation: System{
+//RS         target: linux.x64
+//RS         options: { boot: { kernel: Linux }, init: { path: "/bin/init" } }
+//RS     }
+//RS     prod: Fleet{
+//RS         name: "prod"
+//RS         hosts: { edge: system.workstation }
+//RS     }
+//RS }"#,
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let run = || {
+//RS         jet()
+//RS             .args([
+//RS                 "os",
+//RS                 "build",
+//RS                 "workstation",
+//RS                 "--name",
+//RS                 "fleet-output",
+//RS                 "--no-color",
+//RS                 "--offline",
+//RS             ])
+//RS             .current_dir(&project.path)
+//RS             .env("JETPACK_ROOT", &root.path)
+//RS             .env("PATH", "/usr/bin:/bin")
+//RS             .output()
+//RS             .unwrap()
+//RS     };
+//RS 
+//RS     let first = run();
+//RS     assert!(
+//RS         first.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&first.stderr)
+//RS     );
+//RS     let deploy_plan = root.join("systems/generations/fleet-output/fleet/deploy-plan.json");
+//RS     let script = root.join("systems/generations/fleet-output/fleet/deploy-edge.sh");
+//RS     let system_plan = root.join("systems/generations/fleet-output/plan.json");
+//RS     let first_plan = fs::read_to_string(&deploy_plan).unwrap();
+//RS     let first_system_plan = fs::read_to_string(&system_plan).unwrap();
+//RS     assert!(first_system_plan.contains("\"graph_identity\":\""));
+//RS     let graph_identity = first_system_plan
+//RS         .split_once("\"graph_identity\":\"")
+//RS         .and_then(|(_, rest)| rest.split_once('"').map(|(value, _)| value))
+//RS         .expect("system plan graph identity");
+//RS     assert!(
+//RS         first_plan.contains(&format!("\"graph_identity\":\"{graph_identity}\"")),
+//RS         "{first_plan}"
+//RS     );
+//RS     assert!(first_plan.contains("\"fleet\":\"prod\""), "{first_plan}");
+//RS     assert!(first_plan.contains("\"host\":\"edge\""), "{first_plan}");
+//RS     assert!(
+//RS         first_plan.contains("\"system\":\"workstation\""),
+//RS         "{first_plan}"
+//RS     );
+//RS     assert!(script.is_file(), "missing generated Fleet host script");
+//RS     let script_text = fs::read_to_string(&script).unwrap();
+//RS     assert!(
+//RS         script_text.contains(&format!("\"graph_identity\":\"{graph_identity}\"")),
+//RS         "{script_text}"
+//RS     );
+//RS 
+//RS     let root_proof =
+//RS         fs::read_to_string(root.join("systems/generations/fleet-output/generation-root.json"))
+//RS             .unwrap();
+//RS     assert!(
+//RS         root_proof.contains("\"kind\":\"jetos.generation-root.v1\"")
+//RS             && root_proof.contains("\"source_proof_sha256\":\"")
+//RS             && root_proof.contains("\"files_proof_sha256\":\"")
+//RS             && root_proof.contains("\"witness\":\""),
+//RS         "{root_proof}"
+//RS     );
+//RS     let ledger = fs::read_to_string(root.join("systems/generations.log")).unwrap();
+//RS     let ledger_row = ledger
+//RS         .lines()
+//RS         .find(|line| line.contains("\tfleet-output\t"))
+//RS         .expect("generation ledger row");
+//RS     let witness = root_proof
+//RS         .split_once("\"witness\":\"")
+//RS         .and_then(|(_, rest)| rest.split_once('"').map(|(value, _)| value))
+//RS         .expect("generation root witness");
+//RS     assert!(ledger_row.ends_with(&format!("\t{witness}")), "{ledger}");
+//RS 
+//RS     let second = run();
+//RS     assert!(
+//RS         second.status.success(),
+//RS         "retry stderr: {}",
+//RS         String::from_utf8_lossy(&second.stderr)
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&deploy_plan).unwrap(), first_plan);
+//RS     assert_eq!(fs::read_to_string(&system_plan).unwrap(), first_system_plan);
+//RS }
+//RS 
+//RS #[test]
+//RS fn package_fleet_path_escape_fails_before_generation_publication() {
+//RS     let project = Scratch::new("package-fleet-path-escape");
+//RS     let root = Scratch::new("package-fleet-path-escape-root");
+//RS     fs::write(
+//RS         project.join("package.jet"),
+//RS         r#"name: "demo"
+//RS outputs: {
+//RS     workstation: System{
+//RS         target: linux.x64
+//RS         options: { boot: { kernel: Linux }, init: { path: "/bin/init" } }
+//RS     }
+//RS     prod: Fleet{ hosts: { "../escape": system.workstation } }
+//RS }"#,
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let output = jet()
+//RS         .args([
+//RS             "os",
+//RS             "plan",
+//RS             "workstation",
+//RS             "--json",
+//RS             "--no-color",
+//RS             "--offline",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(output.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("safe path component"), "{stderr}");
+//RS     assert!(!root.join("systems").exists());
+//RS }
+// END-PORT-PENDING 1097 tests/jetpack_package_outputs.rs:1-147
+
+// PORT-PENDING 1097 tests-jetpack-offline-module-group: tests/jetpack_platform.rs:1-541
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! U25 (D-JPK-PLATFORM1=A): platform-tier audit tests.
+//RS //!
+//RS //! These are intentionally narrow. They prove the product contract is encoded
+//RS //! in code, then drive one real package through the native CI lane for each
+//RS //! tier-1 OS. A local run proves only its host; the CI matrix supplies the
+//RS //! native macOS and Windows executions.
+//RS 
+//RS use std::fs;
+//RS use std::time::{Duration, Instant};
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "support/jetpack_fixtures.rs"]
+//RS mod jetpack_fixtures;
+//RS use jetpack_fixtures::*;
+//RS 
+//RS use jetpack::Platform;
+//RS 
+//RS #[test]
+//RS fn platform_tier_audit_contract_names_linux_macos_windows() {
+//RS     assert_eq!(
+//RS         Platform::TIER_ONE_OSES,
+//RS         [Platform::OS_LINUX, Platform::OS_MACOS, Platform::OS_WINDOWS]
+//RS     );
+//RS 
+//RS     for arch in Platform::TIER_ONE_ARCHES {
+//RS         for os in Platform::TIER_ONE_OSES {
+//RS             let key = Platform::PlatformKey::new(arch, os).unwrap();
+//RS             assert!(key.is_tier_one());
+//RS             assert_eq!(key.envelope_key(), format!("{arch}-{os}"));
+//RS         }
+//RS     }
+//RS 
+//RS     let host = Platform::PlatformKey::host();
+//RS     assert!(
+//RS         host.is_tier_one(),
+//RS         "the current CI host is outside Jetpack's tier-1 matrix: {}",
+//RS         host.envelope_key()
+//RS     );
+//RS     assert_eq!(Platform::host_key(), host.envelope_key());
+//RS 
+//RS     assert!(Platform::PlatformKey::new("riscv64", Platform::OS_LINUX).is_none());
+//RS     assert!(Platform::PlatformKey::new(Platform::ARCH_X64, "freebsd").is_none());
+//RS 
+//RS     assert_eq!(Platform::exe_suffix_for_os(Platform::OS_WINDOWS), ".exe");
+//RS     assert_eq!(Platform::path_separator_for_os(Platform::OS_WINDOWS), ';');
+//RS     assert_eq!(Platform::path_separator_for_os(Platform::OS_LINUX), ':');
+//RS     assert_eq!(Platform::path_separator_for_os(Platform::OS_MACOS), ':');
+//RS }
+//RS 
+//RS #[test]
+//RS #[cfg(target_os = "linux")]
+//RS fn platform_tier_gate_runs_native_package_offline_and_cleans_store() {
+//RS     let root = Scratch::new("platform-gate-root");
+//RS     let fixtures = Scratch::new("platform-gate-fixtures");
+//RS     let staging = Scratch::new("platform-gate-staging");
+//RS     let missing_tools = Scratch::new("platform-gate-missing-tools");
+//RS     write_native_jetpack_fixture(&fixtures.path, &root.path, &staging.path);
+//RS     let program = format!("jetpack{}", std::env::consts::EXE_SUFFIX);
+//RS 
+//RS     let run = jetpack()
+//RS         .args([
+//RS             "use",
+//RS             "native-jetpack@nixpkgs",
+//RS             "--no-color",
+//RS             "--offline",
+//RS             "--",
+//RS             &program,
+//RS             "--help",
+//RS         ])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_FIXTURES", &fixtures.path)
+//RS         .env("PATH", &missing_tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&run.stdout).contains("jetpack"),
+//RS         "native package did not run: {}",
+//RS         String::from_utf8_lossy(&run.stdout)
+//RS     );
+//RS 
+//RS     let stale = write_hangar_meta(
+//RS         &root.path,
+//RS         "platform-stale",
+//RS         "platform-stale",
+//RS         "1.0",
+//RS         Some(1),
+//RS     )
+//RS     .0;
+//RS     let clean = jetpack()
+//RS         .args(["hangar", "clean", "--no-color", "--yes"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", &missing_tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         clean.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&clean.stderr)
+//RS     );
+//RS     assert!(
+//RS         !stale.exists(),
+//RS         "production clean left stale platform state"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(not(target_os = "linux"))]
+//RS #[test]
+//RS fn platform_tier_gate_accepts_data_only_output_without_executable_service() {
+//RS     // Non-Linux hosts keep data-only packages usable while executable
+//RS     // handoff waits for the protected native lease service. This drives the
+//RS     // normal core-provider -> Store realization path with no `bin/`.
+//RS     let base = Scratch::new("platform-data-only");
+//RS     let repo = base.join("jet-pkgs");
+//RS     let project = base.join("project");
+//RS     let root = base.join("root");
+//RS     let package = repo.join("lib/mathlib");
+//RS     fs::create_dir_all(&package).unwrap();
+//RS     fs::create_dir_all(&project).unwrap();
+//RS     fs::write(
+//RS         repo.join("package.jet"),
+//RS         "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: {\n    mathlib: library,\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         package.join("mathlib.jet"),
+//RS         "module mathlib {\n    pub fn add(a: Int, b: Int) -> Int { return a + b }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         project.join("env.jet"),
+//RS         format!(
+//RS             "module dev {{\n    sources: {{ mine: {} }}\n    env.dev: Env{{\n        packages: [mine.mathlib],\n    }}\n}}\n",
+//RS             repo.to_string_lossy()
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let output = jetpack()
+//RS         .args(["build", "--no-color"])
+//RS         .current_dir(&project)
+//RS         .env("JETPACK_ROOT", &root)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "data-only realization failed: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(
+//RS         stderr.contains("built 1 package(s)"),
+//RS         "expected one data-only package, got: {stderr}"
+//RS     );
+//RS     assert!(
+//RS         fs::read_dir(root.join("leases"))
+//RS             .map(|entries| entries.flatten().next().is_none())
+//RS             .unwrap_or(true),
+//RS         "data-only realization left a lease container"
+//RS     );
+//RS     assert!(
+//RS         fs::read_dir(root.join("lease-service/leases"))
+//RS             .map(|entries| entries.flatten().next().is_none())
+//RS             .unwrap_or(true),
+//RS         "data-only realization left an authenticated lease record"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS #[cfg(target_os = "linux")]
+//RS fn platform_gate_reaches_store_authenticated_lease_service() {
+//RS     let root = Scratch::new("platform-authenticated-lease-root");
+//RS     let fixtures = Scratch::new("platform-authenticated-lease-fixtures");
+//RS     let staging = Scratch::new("platform-authenticated-lease-staging");
+//RS     let missing_tools = Scratch::new("platform-authenticated-lease-missing-tools");
+//RS     write_native_jetpack_fixture(&fixtures.path, &root.path, &staging.path);
+//RS     let program = format!("omp{}", std::env::consts::EXE_SUFFIX);
+//RS 
+//RS     let mut run = jetpack()
+//RS         .args([
+//RS             "use",
+//RS             "omp@releases#1.0.0",
+//RS             "-y",
+//RS             "--no-color",
+//RS             "--offline",
+//RS             "--fixtures",
+//RS         ])
+//RS         .arg(&fixtures.path)
+//RS         .args(["--", &program, "--hold"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_FIXTURES", &fixtures.path)
+//RS         .env("PATH", &missing_tools.path)
+//RS         .spawn()
+//RS         .unwrap();
+//RS 
+//RS     let records = root.path.join("lease-service/leases");
+//RS     let deadline = Instant::now() + Duration::from_secs(5);
+//RS     let found = loop {
+//RS         let found = fs::read_dir(&records).ok().and_then(|entries| {
+//RS             entries.flatten().find_map(|entry| {
+//RS                 let generation = entry.path().join("generations/1");
+//RS                 let receipt = generation.join("receipt");
+//RS                 let complete = generation.join("complete");
+//RS                 if receipt.is_file() && complete.is_file() {
+//RS                     fs::read_to_string(&receipt)
+//RS                         .ok()
+//RS                         .map(|contents| (entry.path(), contents))
+//RS                 } else {
+//RS                     None
+//RS                 }
+//RS             })
+//RS         });
+//RS         if found.is_some() || Instant::now() >= deadline {
+//RS             break found;
+//RS         }
+//RS         std::thread::sleep(Duration::from_millis(10));
+//RS     };
+//RS     let Some((record, receipt)) = found else {
+//RS         let _ = run.kill();
+//RS         let output = run.wait_with_output().unwrap();
+//RS         panic!(
+//RS             "production run did not publish a complete authenticated lease receipt: {}",
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS     };
+//RS     assert!(receipt.starts_with("JET-EXECUTABLE-LEASE/1 receipt\n"));
+//RS     assert!(receipt.contains("\ngeneration=1\n"), "receipt: {receipt}");
+//RS     let mac = receipt
+//RS         .lines()
+//RS         .find_map(|line| line.strip_prefix("mac="))
+//RS         .expect("authenticated lease receipt tag");
+//RS     assert_eq!(mac.len(), 64);
+//RS     assert!(mac.bytes().all(|byte| byte.is_ascii_hexdigit()));
+//RS     let witness = fs::read_to_string(record.join("generations/1/complete")).unwrap();
+//RS     assert_eq!(witness.trim().len(), 71);
+//RS     assert!(witness.trim().starts_with("sha256-"));
+//RS 
+//RS     let recover = jetpack()
+//RS         .args(["hangar", "recover", "--no-color"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", &missing_tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         recover.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&recover.stderr)
+//RS     );
+//RS     assert!(
+//RS         record.join("generations/1/receipt").is_file(),
+//RS         "recovery removed a live authenticated lease"
+//RS     );
+//RS 
+//RS     let run_output = run.wait_with_output().unwrap();
+//RS     assert!(
+//RS         run_output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&run_output.stderr)
+//RS     );
+//RS     let recover_after_exit = jetpack()
+//RS         .args(["hangar", "recover", "--no-color"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", &missing_tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         recover_after_exit.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&recover_after_exit.stderr)
+//RS     );
+//RS     assert!(
+//RS         fs::read_dir(&records)
+//RS             .map(|entries| entries.flatten().next().is_none())
+//RS             .unwrap_or(true),
+//RS         "idle authenticated lease record survived recovery"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn platform_tier_gate_recovers_hostile_partial_lease_without_losing_good_output() {
+//RS     let root = Scratch::new("platform-hostile-lease-root");
+//RS     let fixtures = Scratch::new("platform-hostile-lease-fixtures");
+//RS     let staging = Scratch::new("platform-hostile-lease-staging");
+//RS     let missing_tools = Scratch::new("platform-hostile-lease-missing-tools");
+//RS     write_native_jetpack_fixture(&fixtures.path, &root.path, &staging.path);
+//RS     let (good_object, _) = write_hangar_meta(
+//RS         &root.path,
+//RS         "platform-hostile-good",
+//RS         "platform-hostile-good",
+//RS         "1.0",
+//RS         None,
+//RS     );
+//RS     let interrupted = root
+//RS         .join("leases")
+//RS         .join("4294967294-1-platform-hostile-good");
+//RS     fs::create_dir_all(interrupted.join("snapshot/bin")).unwrap();
+//RS     fs::write(interrupted.join("snapshot/bin/partial"), "interrupted").unwrap();
+//RS 
+//RS     let recover = jetpack()
+//RS         .args(["hangar", "recover", "--no-color"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_FIXTURES", &fixtures.path)
+//RS         .env("PATH", &missing_tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         recover.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&recover.stderr)
+//RS     );
+//RS     assert!(
+//RS         !interrupted.exists(),
+//RS         "recovery left an interrupted hostile lease"
+//RS     );
+//RS     assert!(
+//RS         good_object.join("meta.json").is_file(),
+//RS         "recovery removed the last good Hangar object"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS #[cfg(target_os = "linux")]
+//RS fn platform_tier_gate_exercises_native_lease_diagnostics_and_audit() {
+//RS     let root = Scratch::new("platform-diagnostics-root");
+//RS     let fixtures = Scratch::new("platform-diagnostics-fixtures");
+//RS     let staging = Scratch::new("platform-diagnostics-staging");
+//RS     let missing_tools = Scratch::new("platform-diagnostics-missing-tools");
+//RS     write_native_jetpack_fixture(&fixtures.path, &root.path, &staging.path);
+//RS     let program = format!("omp{}", std::env::consts::EXE_SUFFIX);
+//RS     let run = jetpack()
+//RS         .args([
+//RS             "use",
+//RS             "omp@releases#1.0.0",
+//RS             "--no-color",
+//RS             "--offline",
+//RS             "--",
+//RS             &program,
+//RS             "--help",
+//RS         ])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_FIXTURES", &fixtures.path)
+//RS         .env("PATH", &missing_tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "native lease handoff failed: {}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&run.stdout).contains("jetpack"),
+//RS         "native lease child did not run: {}",
+//RS         String::from_utf8_lossy(&run.stdout)
+//RS     );
+//RS     assert!(
+//RS         fs::read_dir(root.join("leases"))
+//RS             .unwrap()
+//RS             .next()
+//RS             .is_none(),
+//RS         "production child exit left an executable lease behind"
+//RS     );
+//RS 
+//RS     let (good_object, _) = write_hangar_meta(
+//RS         &root.path,
+//RS         "platform-diagnostics-good",
+//RS         "platform-diagnostics-good",
+//RS         "1.0",
+//RS         None,
+//RS     );
+//RS     let stale = root
+//RS         .join("leases")
+//RS         .join("4294967294-1-platform-diagnostics-good");
+//RS     fs::create_dir_all(stale.join("snapshot")).unwrap();
+//RS     fs::write(stale.join("snapshot/partial"), "interrupted").unwrap();
+//RS 
+//RS     let doctor = jetpack()
+//RS         .args(["doctor", "--json", "--offline"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     let doctor_json = String::from_utf8_lossy(&doctor.stdout);
+//RS     assert!(
+//RS         doctor_json.contains("stale executable lease(s) found"),
+//RS         "doctor missed stale lease: {doctor_json}"
+//RS     );
+//RS     assert!(stale.is_dir(), "doctor changed lease state");
+//RS 
+//RS     let audit = jetpack()
+//RS         .args(["audit", "--no-color"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         audit.status.success(),
+//RS         "audit stderr: {}",
+//RS         String::from_utf8_lossy(&audit.stderr)
+//RS     );
+//RS     let audit_text = String::from_utf8_lossy(&audit.stderr);
+//RS     assert!(audit_text.contains("Leases:"), "audit omitted lease state");
+//RS     assert!(
+//RS         audit_text.contains("0 active, 1 stale"),
+//RS         "audit missed stale lease: {audit_text}"
+//RS     );
+//RS 
+//RS     let journal = root.path.join("hangar/closure-db/journal");
+//RS     fs::create_dir_all(&journal).unwrap();
+//RS     let partial = journal.join("00000000000000000099-corrupt.txn.partial");
+//RS     fs::write(&partial, "interrupted").unwrap();
+//RS     let broken = jetpack()
+//RS         .args(["audit", "--no-color"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(broken.status.code(), Some(2));
+//RS     let broken_text = String::from_utf8_lossy(&broken.stderr);
+//RS     assert!(broken_text.contains("Error [E1340]:"), "{broken_text}");
+//RS     assert!(broken_text.contains("Why:"), "{broken_text}");
+//RS     assert!(broken_text.contains("Fix:"), "{broken_text}");
+//RS     assert!(
+//RS         broken_text.contains("More: jet-lang.dev/e/E1340"),
+//RS         "{broken_text}"
+//RS     );
+//RS     assert!(partial.is_file(), "audit repaired partial journal");
+//RS     assert!(good_object.join("meta.json").is_file());
+//RS 
+//RS     fs::remove_file(&partial).unwrap();
+//RS     let recover = jetpack()
+//RS         .args(["hangar", "recover", "--no-color"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", &missing_tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         recover.status.success(),
+//RS         "lease recovery stderr: {}",
+//RS         String::from_utf8_lossy(&recover.stderr)
+//RS     );
+//RS     assert!(!stale.exists(), "production recovery left stale lease");
+//RS     assert!(
+//RS         good_object.join("meta.json").is_file(),
+//RS         "production recovery removed the last good Hangar object"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn platform_store_lease_projection_rejects_invalid_identity_in_doctor_and_audit() {
+//RS     // Criterion 6: a raw lease-directory scan would silently classify this
+//RS     // node. The production Store projection must reject it in both readers.
+//RS     let root = Scratch::new("platform-invalid-lease-identity");
+//RS     let malformed = root.join("leases").join("not-a-lease");
+//RS     fs::create_dir_all(&malformed).unwrap();
+//RS 
+//RS     let doctor = jetpack()
+//RS         .args(["doctor", "--json", "--offline"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(doctor.status.code(), Some(2));
+//RS     let doctor_json = String::from_utf8_lossy(&doctor.stdout);
+//RS     assert!(doctor_json.contains("\"name\":\"leases\""), "{doctor_json}");
+//RS     assert!(doctor_json.contains("\"status\":\"broken\""), "{doctor_json}");
+//RS     assert!(doctor_json.contains("invalid identity"), "{doctor_json}");
+//RS 
+//RS     let audit = jetpack()
+//RS         .args(["audit", "--no-color"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(audit.status.code(), Some(2));
+//RS     let audit_stderr = String::from_utf8_lossy(&audit.stderr);
+//RS     assert!(audit_stderr.contains("Error [E1340]:"), "{audit_stderr}");
+//RS     assert!(audit_stderr.contains("invalid identity"), "{audit_stderr}");
+//RS     assert!(audit_stderr.contains("More: jet-lang.dev/e/E1340"), "{audit_stderr}");
+//RS     assert!(malformed.is_dir(), "diagnostics mutated the lease projection");
+//RS }
+//RS 
+//RS #[test]
+//RS fn audit_reports_stale_executable_lease_golden() {
+//RS     let root = Scratch::new("audit-stale-lease-golden");
+//RS     let stale = root.join("leases").join("4294967294-1-audit-stale");
+//RS     fs::create_dir_all(stale.join("snapshot")).unwrap();
+//RS     fs::write(stale.join("snapshot/partial"), "interrupted").unwrap();
+//RS 
+//RS     let audit = jetpack()
+//RS         .args(["audit", "--no-color"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         audit.status.success(),
+//RS         "audit stderr: {}",
+//RS         String::from_utf8_lossy(&audit.stderr)
+//RS     );
+//RS     let audit_text = String::from_utf8_lossy(&audit.stderr);
+//RS     let lease_lines = audit_text
+//RS         .lines()
+//RS         .filter(|line| line.contains("Leases:") || line.contains("Lease Note:"))
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n");
+//RS     assert_eq!(
+//RS         format!("{lease_lines}\n"),
+//RS         include_str!("cli/jetpack_audit_stale_lease.txt")
+//RS     );
+//RS     assert!(stale.is_dir(), "audit repaired stale lease state");
+//RS }
+//RS 
+//RS #[test]
+//RS fn platform_tier_gate_reports_missing_offline_component() {
+//RS     let root = Scratch::new("platform-failure-root");
+//RS     let fixtures = Scratch::new("platform-failure-fixtures");
+//RS     let missing_tools = Scratch::new("platform-failure-missing-tools");
+//RS     let missing = root.join("missing-component-output");
+//RS     fs::create_dir_all(&fixtures.path).unwrap();
+//RS     fs::write(
+//RS         fixtures.join("nixpkgs-native-jetpack.json"),
+//RS         format!(
+//RS             "[{{\"drvPath\":\"/nix/store/0fixture-native-jetpack.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
+//RS             missing.to_string_lossy()
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let output = jetpack()
+//RS         .args(["build", "native-jetpack@nixpkgs", "--no-color", "--offline"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_FIXTURES", &fixtures.path)
+//RS         .env("PATH", &missing_tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!output.status.success());
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("Error [E1315]:"), "stderr: {stderr}");
+//RS     assert!(stderr.contains("does not exist"), "stderr: {stderr}");
+//RS     assert_no_hangar_entry(&root.path, "native-jetpack-");
+//RS }
+// END-PORT-PENDING 1097 tests/jetpack_platform.rs:1-541
+

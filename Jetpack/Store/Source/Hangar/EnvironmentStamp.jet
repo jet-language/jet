@@ -177,7 +177,7 @@ fn store_append_external_output_stamp(stamp: &[U8], path: String) Never! {
 // A missing node records `missing`; any other failure records `failed` and
 // the Rust error-kind name.
 fn store_append_stat_failure(stamp: &[U8], error: IOError, missing: String, failed: String) Never! {
-    if StoreError.Io(error).is_not_found() {
+    if StoreError.IO(error).is_not_found() {
         store_append_environment_stamp_field(&stamp, missing.bytes())
         return
     }
@@ -194,7 +194,7 @@ pub fn store_environment_entry_stamp_with_index(roots: HangarRoots, project: Str
     ordered := ~selections
     &ordered.sort_by(selection -> selection.key())
     selected := [StoreEntry]{}
-    seals :: files.join(roots.hangar_dir(), @STORE_SEALS_DIR)
+    seals :: files.join(roots.hangar_dir(), STORE_SEALS_DIR)
     loop selection in ordered {
         fields :: [String]{selection.reference, selection.name, selection.version, selection.output_hash, selection.metadata}
         loop field in fields -> store_append_environment_stamp_field(&canonical, field.bytes())

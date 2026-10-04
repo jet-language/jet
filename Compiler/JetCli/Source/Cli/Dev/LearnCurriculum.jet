@@ -1,0 +1,1163 @@
+// Source-bound learning curriculum, progress, actions and presentation.
+// Native execution/IO remain gated by #4494/#4483/#4409; see the exact Rust
+// anchor gates below. These pure bodies never manufacture checked evidence.
+use core.encoding.[DataTree, EncodingLimits]
+use core.encoding.json as learn_json
+use jet_foundation.[StatusFields, StatusValue, StatusEnvelope, DerivationRecord, Diagnostic, derivation_record_status_value, mir_sha256_hex, mir_sha256_bytes, mir_sha256_hex_bytes, json_escape, diagnostic_utf8_width, diagnostic_is_whitespace_at, diagnostic_theme_paint, diagnostic_theme_accent, diagnostic_theme_dim, diagnostic_theme_bold]
+
+// Rust constants (CmdLearn.rs:25-31); authored bytes are embedded below.
+JET_CLI_LEARN_DIR :: ".jet/learn/feedback"
+JET_CLI_LEARN_CURRICULUM_SCHEMA :: "jet-learning-curriculum-v1"
+JET_CLI_LEARN_CENSUS_RELATION :: "jet-learning-census-v1"
+JET_CLI_LEARN_CENSUS_SOURCE :: "Examples/learn/curriculum.json"
+JET_CLI_LEARN_PROGRESS_SCHEMA :: "jet-learn-progress-v1"
+JET_CLI_LEARN_REVISION_RULE :: "source-bound observations are valid only when source_identity.digest matches; a source edit invalidates the observation until the dependent projection is regenerated and the task is re-run"
+
+
+// Rust Curriculum (CmdLearn.rs:34-40).
+pub struct JetCLILearnCurriculum {
+    pub relation: String
+    pub relation_source: String
+    pub revision_rule: String
+    pub tasks: [JetCLILearningTask]
+    pub revision: String
+}
+// Rust LearningTask (CmdLearn.rs:43-60).
+pub struct JetCLILearningTask {
+    pub id: String
+    pub capability_id: String
+    pub census_task_id: String
+    pub family: String
+    pub axis: String
+    pub concept: String
+    pub prerequisites: [String]
+    pub prompt: String
+    pub wrong_model: String
+    pub source: JetCLILearnFixture
+    pub input_identity: JetCLILearnInputIdentity
+    pub oracle: JetCLILearnOracle
+    pub reveal: JetCLILearnReveal
+    pub controlled_edit: JetCLILearnFixture
+    pub transfer: JetCLILearnTransfer
+    pub accessibility: JetCLILearnAccessibility
+}
+// Rust Fixture (CmdLearn.rs:63-68).
+pub struct JetCLILearnFixture {
+    pub path: String
+    pub solution_path: String
+    pub expected_output: String
+    pub failure: String
+}
+// Rust Transfer (CmdLearn.rs:71-75).
+pub struct JetCLILearnTransfer {
+    pub fixture: JetCLILearnFixture
+    pub structural_difference: String
+    pub copy_guard: String
+}
+// Rust InputIdentity (CmdLearn.rs:78-82).
+pub struct JetCLILearnInputIdentity {
+    pub path: String
+    pub role: String
+    pub revision: String
+}
+// Rust Oracle (CmdLearn.rs:85-91).
+pub struct JetCLILearnOracle {
+    pub id: String
+    pub kind: String
+    pub answer: String
+    pub expected_output: String
+    pub distinguishes: String
+}
+// Rust Reveal (CmdLearn.rs:94-99).
+pub struct JetCLILearnReveal {
+    pub policy: String
+    pub evidence: String
+    pub reason: String
+    pub counterexample: String
+}
+// Rust Accessibility (CmdLearn.rs:102-107).
+pub struct JetCLILearnAccessibility {
+    pub keyboard: Bool
+    pub text_only: Bool
+    pub reduced_motion: Bool
+    pub no_auto_quiz: Bool
+}
+// Rust Progress (CmdLearn.rs:110-139).
+pub struct JetCLILearnProgress {
+    pub schema: String
+    pub curriculum_revision: String
+    pub task_id: String
+    pub capability_id: String
+    pub family: String
+    pub source_path: String
+    pub source_fixture_revision: String
+    pub source_revision: String
+    pub oracle_id: String
+    pub oracle_revision: String
+    pub status: String
+    pub phase: String
+    pub prediction_initial: String
+    pub prediction: String
+    pub prediction_response: String
+    pub prediction_measured: Bool
+    pub reveal_shown: Bool
+    pub evidence_status: String
+    pub evidence_source_revision: String
+    pub derivation_ref: String?
+    pub reason_completed: Bool
+    pub source_completed: Bool
+    pub controlled_completed: Bool
+    pub controlled_revision: String
+    pub transfer_completed: Bool
+    pub transfer_revision: String
+    pub transfer_evidence: Bool
+    pub stale_reason: String?
+}
+// Rust Action (CmdLearn.rs:276-284).
+pub enum JetCLILearnAction {
+    Predict(String)
+    Unknown
+    Skip
+    Reveal
+    Reason
+    Cancel
+}
+
+// Rust fixture_text (CmdLearn.rs:697-749), C-EMBED provider boundary.
+// None means not packaged. Implementations return the actual packaged text.
+pub trait JetCLILearnFixtures { fn text(self, path: String) -> String? Never! }
+pub fn jet_cli_learn_fixture_text<F: JetCLILearnFixtures>(fixtures: F, path: String) -> String? Never! { fixtures.text(path) }
+
+// Rust Progress::new (CmdLearn.rs:142-179).
+pub fn jet_cli_learn_progress_new(lesson: JetCLILearningTask, curriculum_revision: String, source_fixture_revision: String, source_revision: String, oracle_revision: String) -> JetCLILearnProgress Never! {
+    JetCLILearnProgress{
+        schema: JET_CLI_LEARN_PROGRESS_SCHEMA, curriculum_revision: ~curriculum_revision,
+        task_id: ~lesson.id, capability_id: ~lesson.capability_id, family: ~lesson.family,
+        source_path: ~lesson.source.path, source_fixture_revision: ~source_fixture_revision,
+        source_revision: ~source_revision, oracle_id: ~lesson.oracle.id, oracle_revision: ~oracle_revision,
+        status: "in_progress", phase: "prediction", prediction_initial: "pending", prediction: "pending",
+        prediction_response: "", prediction_measured: false, reveal_shown: false,
+        evidence_status: "unknown", evidence_source_revision: "", derivation_ref: None,
+        reason_completed: false, source_completed: false, controlled_completed: false, controlled_revision: "",
+        transfer_completed: false, transfer_revision: "", transfer_evidence: false, stale_reason: None,
+    }
+}
+// Rust Progress::reset_for_stale (CmdLearn.rs:181-201).
+pub fn jet_cli_learn_progress_reset_for_stale(progress: &JetCLILearnProgress, reason: String, source_revision: String) Never! {
+    progress.status = "stale"
+    progress.phase = "prediction"
+    progress.source_revision = ~source_revision
+    progress.prediction_initial = "pending"
+    progress.prediction = "pending"
+    progress.prediction_response = ""
+    progress.prediction_measured = false
+    progress.reveal_shown = false
+    progress.evidence_status = "stale"
+    progress.evidence_source_revision = ""
+    progress.derivation_ref = None
+    progress.reason_completed = false
+    progress.source_completed = false
+    progress.controlled_completed = false
+    progress.controlled_revision = ""
+    progress.transfer_completed = false
+    progress.transfer_revision = ""
+    progress.transfer_evidence = false
+    progress.stale_reason = Val(~reason)
+}
+// Rust Progress::update_phase (CmdLearn.rs:203-237), including status precedence.
+pub fn jet_cli_learn_progress_update_phase(progress: &JetCLILearnProgress) Never! {
+    progress.phase = if {
+        !progress.source_completed -> "source"
+        !progress.prediction_measured -> "prediction"
+        progress.evidence_status != "current" -> "evidence"
+        !progress.reason_completed -> "reason"
+        !progress.controlled_completed -> "controlled_change"
+        !progress.transfer_completed || !progress.transfer_evidence -> "transfer"
+        else -> "complete"
+    }
+    progress.status = if {
+        progress.phase == "complete" && progress.prediction_measured && progress.prediction != "unknown" && progress.prediction != "unmeasured" && progress.evidence_status == "current" && progress.stale_reason == None && progress.transfer_evidence -> "completed"
+        progress.status == "cancelled" -> "cancelled"
+        progress.evidence_status == "unavailable" -> "unavailable"
+        progress.stale_reason != None -> "stale"
+        else -> "in_progress"
+    }
+}
+// Rust Progress::complete (CmdLearn.rs:239-241).
+pub fn jet_cli_learn_progress_complete(progress: JetCLILearnProgress) -> Bool Never! { progress.status == "completed" }
+
+// Rust parse_json(_, true) bound (EncodingJson.rs MAX_JSON_DEPTH).
+fn jet_cli_learn_parse_json(text: String, label: String) -> DataTree Err! {
+    limits :: EncodingLimits{buffer_bytes: 65536, max_depth: 64, max_item_bytes: text.bytes().len(), max_total_bytes: None, max_expansion_depth: 32, max_expansion_bytes: 8388608}
+    learn_json.parse_with_limits(text, limits) ?? return Err("{label} at line {err.line ?? 1}: {err.reason}")
+}
+// Rust load_curriculum (CmdLearn.rs:413-469). Input bytes bind the revision.
+pub fn jet_cli_learn_load_curriculum<F: JetCLILearnFixtures>(text: String, fixtures: F) -> JetCLILearnCurriculum Err! {
+    value :: jet_cli_learn_parse_json(text, "invalid JSON")
+    if value == .Object(object) {
+        schema :: jet_cli_learn_required_text(object, "schema", "curriculum")
+        if schema != JET_CLI_LEARN_CURRICULUM_SCHEMA -> return Err("unsupported curriculum schema `{schema}`")
+        relation :: jet_cli_learn_required_text(object, "relation", "curriculum")
+        if relation != JET_CLI_LEARN_CENSUS_RELATION -> return Err("curriculum must project `{JET_CLI_LEARN_CENSUS_RELATION}`, got `{relation}`")
+        relation_source :: jet_cli_learn_required_text(object, "relation_source", "curriculum")
+        if relation_source != JET_CLI_LEARN_CENSUS_SOURCE -> return Err("curriculum must use `{JET_CLI_LEARN_CENSUS_SOURCE}`, got `{relation_source}`")
+        revision_rule :: jet_cli_learn_required_text(object, "revision_rule", "curriculum")
+        if revision_rule != JET_CLI_LEARN_REVISION_RULE -> return Err("curriculum revision rule does not match the census contract")
+        jet_cli_learn_require_field(object, "tasks", "curriculum")
+        if object["tasks"] == .Array(values) {
+            tasks := [JetCLILearningTask]{}
+            ids := [String:Bool]{}
+            capabilities := [String:Bool]{}
+            loop (index, task_value) in values {
+                lesson :: jet_cli_learn_parse_task(task_value, index, fixtures)
+                if ids.has_key(lesson.id) -> return Err("duplicate curriculum task `{lesson.id}`")
+                if capabilities.has_key(lesson.capability_id) -> return Err("duplicate curriculum capability `{lesson.capability_id}`")
+                ids[lesson.id] = true
+                capabilities[lesson.capability_id] = true
+                &tasks.push(^lesson)
+            }
+            if tasks.is_empty() -> return Err("curriculum has no lessons")
+            return Ok(JetCLILearnCurriculum{relation: relation, relation_source: relation_source, revision_rule: revision_rule, tasks: ^tasks, revision: mir_sha256_hex(text)})
+        }
+        return Err("curriculum tasks must be an array: expected a DataTree array")
+    }
+    return Err("curriculum root must be an object: expected a DataTree object")
+}
+// Rust parse_task (CmdLearn.rs:471-563); borrowed object/array projections.
+pub fn jet_cli_learn_parse_task<F: JetCLILearnFixtures>(value: DataTree, index: Int, fixtures: F) -> JetCLILearningTask Err! {
+    if value == .Object(object) {
+        id :: jet_cli_learn_required_text(object, "id", "task")
+        capability_id :: jet_cli_learn_required_text(object, "capability_id", id)
+        census_task_id :: jet_cli_learn_required_text(object, "census_task_id", id)
+        if !census_task_id.ends_with(".predict") -> return Err("{id}.census_task_id must name the canonical predict task")
+        family :: jet_cli_learn_required_text(object, "family", id)
+        axis :: jet_cli_learn_required_text(object, "axis", id)
+        if axis != "predict" -> return Err("{id}.axis must be predict")
+        concept :: jet_cli_learn_required_text(object, "concept", id)
+        prerequisites :: jet_cli_learn_text_array(object, "prerequisites", id)
+        prompt :: jet_cli_learn_required_text(object, "prompt", id)
+        wrong_model :: jet_cli_learn_required_text(object, "wrong_model", id)
+        jet_cli_learn_require_field(object, "source", id)
+        source :: jet_cli_learn_parse_fixture(object["source"], "{id}.source")
+        jet_cli_learn_require_field(object, "input_identity", id)
+        input_identity :: jet_cli_learn_parse_input_identity(object["input_identity"], id)
+        jet_cli_learn_require_field(object, "oracle", id)
+        oracle :: jet_cli_learn_parse_oracle(object["oracle"], id)
+        jet_cli_learn_require_field(object, "reveal", id)
+        reveal :: jet_cli_learn_parse_reveal(object["reveal"], id)
+        jet_cli_learn_require_field(object, "controlled_edit", id)
+        controlled_edit :: jet_cli_learn_parse_fixture(object["controlled_edit"], "{id}.controlled_edit")
+        jet_cli_learn_require_field(object, "transfer", id)
+        transfer :: jet_cli_learn_parse_transfer(object["transfer"], id)
+        jet_cli_learn_require_field(object, "accessibility", id)
+        accessibility :: jet_cli_learn_parse_accessibility(object["accessibility"], id)
+        jet_cli_learn_validate_fixture(source, id, fixtures)
+        jet_cli_learn_validate_fixture(controlled_edit, id, fixtures)
+        jet_cli_learn_validate_fixture(transfer.fixture, id, fixtures)
+        if input_identity.path != source.path -> return Err("{id}.input_identity.path must match source.path")
+        if oracle.expected_output != source.expected_output -> return Err("{id}.oracle.expected_output must match source.expected_output")
+        if reveal.policy != "predict_then_reveal" -> return Err("{id}.reveal.policy must be predict_then_reveal")
+        return Ok(JetCLILearningTask{id: id, capability_id: capability_id, census_task_id: census_task_id, family: family, axis: axis, concept: concept, prerequisites: prerequisites, prompt: prompt, wrong_model: wrong_model, source: source, input_identity: input_identity, oracle: oracle, reveal: reveal, controlled_edit: controlled_edit, transfer: transfer, accessibility: accessibility})
+    }
+    return Err("task {index} must be an object: expected a DataTree object")
+}
+// Rust parse_task Transfer construction (CmdLearn.rs:514-525).
+fn jet_cli_learn_parse_transfer(value: DataTree, label: String) -> JetCLILearnTransfer Err! {
+    if value == .Object(object) {
+        return Ok(JetCLILearnTransfer{fixture: jet_cli_learn_parse_fixture(value, "{label}.transfer"), structural_difference: jet_cli_learn_required_text(object, "structural_difference", label), copy_guard: jet_cli_learn_required_text(object, "copy_guard", label)})
+    }
+    return Err("{label}.transfer must be an object: expected a DataTree object")
+}
+// Rust parse_fixture (CmdLearn.rs:565-575).
+pub fn jet_cli_learn_parse_fixture(value: DataTree, label: String) -> JetCLILearnFixture Err! {
+    if value == .Object(object) {
+        return Ok(JetCLILearnFixture{path: jet_cli_learn_required_text(object, "path", label), solution_path: jet_cli_learn_required_text(object, "solution_path", label), expected_output: jet_cli_learn_required_text(object, "expected_output", label), failure: jet_cli_learn_required_text(object, "failure", label)})
+    }
+    return Err("{label} must be an object: expected a DataTree object")
+}
+// Rust parse_input_identity (CmdLearn.rs:577-586).
+pub fn jet_cli_learn_parse_input_identity(value: DataTree, label: String) -> JetCLILearnInputIdentity Err! {
+    if value == .Object(object) {
+        return Ok(JetCLILearnInputIdentity{path: jet_cli_learn_required_text(object, "path", label), role: jet_cli_learn_required_text(object, "role", label), revision: jet_cli_learn_required_text(object, "revision", label)})
+    }
+    return Err("{label}.input_identity must be an object: expected a DataTree object")
+}
+// Rust parse_oracle (CmdLearn.rs:588-599).
+pub fn jet_cli_learn_parse_oracle(value: DataTree, label: String) -> JetCLILearnOracle Err! {
+    if value == .Object(object) {
+        return Ok(JetCLILearnOracle{id: jet_cli_learn_required_text(object, "id", label), kind: jet_cli_learn_required_text(object, "kind", label), answer: jet_cli_learn_required_text(object, "answer", label), expected_output: jet_cli_learn_required_text(object, "expected_output", label), distinguishes: jet_cli_learn_required_text(object, "distinguishes", label)})
+    }
+    return Err("{label}.oracle must be an object: expected a DataTree object")
+}
+// Rust parse_reveal (CmdLearn.rs:601-611).
+pub fn jet_cli_learn_parse_reveal(value: DataTree, label: String) -> JetCLILearnReveal Err! {
+    if value == .Object(object) {
+        return Ok(JetCLILearnReveal{policy: jet_cli_learn_required_text(object, "policy", label), evidence: jet_cli_learn_required_text(object, "evidence", label), reason: jet_cli_learn_required_text(object, "reason", label), counterexample: jet_cli_learn_required_text(object, "counterexample", label)})
+    }
+    return Err("{label}.reveal must be an object: expected a DataTree object")
+}
+// Rust parse_accessibility (CmdLearn.rs:613-623).
+pub fn jet_cli_learn_parse_accessibility(value: DataTree, label: String) -> JetCLILearnAccessibility Err! {
+    if value == .Object(object) {
+        return Ok(JetCLILearnAccessibility{keyboard: jet_cli_learn_required_bool(object, "keyboard", label), text_only: jet_cli_learn_required_bool(object, "text_only", label), reduced_motion: jet_cli_learn_required_bool(object, "reduced_motion", label), no_auto_quiz: jet_cli_learn_required_bool(object, "no_auto_quiz", label)})
+    }
+    return Err("{label}.accessibility must be an object: expected a DataTree object")
+}
+// Rust validate_fixture (CmdLearn.rs:625-643), source before solution before failure.
+pub fn jet_cli_learn_validate_fixture<F: JetCLILearnFixtures>(fixture: JetCLILearnFixture, label: String, fixtures: F) Err! {
+    jet_cli_learn_validate_fixture_path(fixture.path, label, fixtures)
+    jet_cli_learn_validate_fixture_path(fixture.solution_path, label, fixtures)
+    if fixture.failure != "diagnostic" && fixture.failure != "output" -> return Err("{label} fixture has unsupported failure `{fixture.failure}`")
+}
+fn jet_cli_learn_validate_fixture_path<F: JetCLILearnFixtures>(path: String, label: String, fixtures: F) Err! {
+    if !jet_cli_learn_safe_fixture_path(path) -> return Err("{label} fixture path `{path}` is not a safe Jet filename")
+    if jet_cli_learn_fixture_text(fixtures, path) == None -> return Err("{label} fixture `{path}` is not packaged")
+}
+// Rust object_field (CmdLearn.rs:645-649).
+pub fn jet_cli_learn_object_field(object: [String:DataTree], name: String) -> DataTree? Never! { object.get(name) }
+// Missing-field check permits borrowed indexing, not a copied nested tree.
+fn jet_cli_learn_require_field(object: [String:DataTree], name: String, label: String) Err! {
+    if !object.has_key(name) -> return Err("{label} is missing `{name}`")
+}
+// Rust required_text (CmdLearn.rs:651-657).
+pub fn jet_cli_learn_required_text(object: [String:DataTree], name: String, label: String) -> String Err! {
+    if object.has_key(name) {
+        if object[name] == .Text(text) { if !text.is_empty() -> return Ok(~text) }
+    }
+    return Err("{label} is missing non-empty `{name}`")
+}
+// Rust required_bool (CmdLearn.rs:659-664).
+pub fn jet_cli_learn_required_bool(object: [String:DataTree], name: String, label: String) -> Bool Err! {
+    if object.has_key(name) { if object[name] == .Bool(value) -> return Ok(value) }
+    return Err("{label} is missing boolean `{name}`")
+}
+// Rust text_array (CmdLearn.rs:666-684).
+pub fn jet_cli_learn_text_array(object: [String:DataTree], name: String, label: String) -> [String] Err! {
+    jet_cli_learn_require_field(object, name, label)
+    if object[name] == .Array(values) {
+        out := [String]{}
+        loop value in values {
+            if value == {
+                .Text(text) -> &out.push(~text)
+                else -> { return Err("{label}.{name} contains a non-string: expected a DataTree string") }
+            }
+        }
+        return Ok(^out)
+    }
+    return Err("{label}.{name} must be an array: expected a DataTree array")
+}
+// Rust safe_fixture_path (CmdLearn.rs:686-695), POSIX Path::components.
+// Repeated separators and interior/trailing '.' vanish; leading '.' does not.
+pub fn jet_cli_learn_safe_fixture_path(path: String) -> Bool Never! {
+    if path.is_empty() || path.starts_with("/") -> return false
+    parts :: path.split("/")
+    last := ""
+    first := true
+    loop part in parts {
+        if part.is_empty() -> next
+        if part == ".." -> return false
+        if part == "." { if first -> return false else -> next }
+        first = false
+        last = ~part
+    }
+    // Rust extension of '.jet' is None; extension of 'x.jet' is 'jet'.
+    last != ".jet" && last.ends_with(".jet")
+}
+// Rust step_name (CmdLearn.rs:1389-1402).
+pub fn jet_cli_learn_step_name(progress: JetCLILearnProgress) -> String Never! {
+    if {
+        !progress.prediction_measured -> "PREDICT"
+        !progress.source_completed || progress.evidence_status != "current" || !progress.reason_completed -> "CHECK"
+        !progress.controlled_completed -> "CHANGE"
+        else -> "TRANSFER"
+    }
+}
+// Rust prediction_matches (CmdLearn.rs:1615-1619); ASCII case only.
+pub fn jet_cli_learn_prediction_matches(lesson: JetCLILearningTask, answer: String) -> Bool Never! {
+    wanted := lesson.oracle.answer.trim() // #4303
+    response := answer.trim() // #4303
+    left :: wanted.bytes()
+    right :: response.bytes()
+    if left.len() != right.len() -> return false
+    loop index in 0..<left.len() {
+        a :: Int.from_u8(left[index])
+        b :: Int.from_u8(right[index])
+        if (if a >= 65 && a <= 90 -> a + 32 else -> a) != (if b >= 65 && b <= 90 -> b + 32 else -> b) -> return false
+    }
+    true
+}
+// Rust oracle_revision (CmdLearn.rs:1804-1813).
+pub fn jet_cli_learn_oracle_revision(lesson: JetCLILearningTask) -> String Never! {
+    out := [U8]{}
+    jet_cli_learn_append(&out, lesson.oracle.id)
+    &out.push(U8{0})
+    jet_cli_learn_append(&out, lesson.oracle.kind)
+    &out.push(U8{0})
+    jet_cli_learn_append(&out, lesson.oracle.answer)
+    &out.push(U8{0})
+    jet_cli_learn_append(&out, lesson.oracle.expected_output)
+    &out.push(U8{0})
+    jet_cli_learn_append(&out, lesson.oracle.distinguishes)
+    digest :: mir_sha256_bytes(out[0..<out.len()])
+    mir_sha256_hex_bytes(digest[0..<digest.len()])
+}
+// Rust safe_id (CmdLearn.rs:2268-2279); one underscore per non-ASCII BYTE.
+pub fn jet_cli_learn_safe_id(value: String) -> String Never! {
+    out := [U8]{}
+    loop byte in value.bytes() {
+        n :: Int.from_u8(byte)
+        &out.push(if (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) -> byte else -> U8{95})
+    }
+    String.from_bytes(out) ?? panic("safe id is ASCII")
+}
+// Rust progress_path (CmdLearn.rs:1815-1825); root joining belongs to C-FS caller.
+pub fn jet_cli_learn_progress_path(lesson: JetCLILearningTask) -> String Never! { "progress/{jet_cli_learn_safe_id(lesson.id)}.json" }
+// Rust load_progress parse half (CmdLearn.rs:1833-1871). C-FS handles NotFound.
+pub fn jet_cli_learn_load_progress(text: String) -> JetCLILearnProgress Err! {
+    value :: jet_cli_learn_parse_json(text, "progress JSON")
+    if value == .Object(object) {
+        schema :: jet_cli_learn_required_text(object, "schema", "progress")
+        if schema != JET_CLI_LEARN_PROGRESS_SCHEMA -> return Err("unsupported progress schema `{schema}`")
+        return Ok(JetCLILearnProgress{
+            schema: schema,
+            curriculum_revision: jet_cli_learn_required_text(object, "curriculum_revision", "progress"),
+            task_id: jet_cli_learn_required_text(object, "task_id", "progress"),
+            capability_id: jet_cli_learn_required_text(object, "capability_id", "progress"),
+            family: jet_cli_learn_required_text(object, "family", "progress"),
+            source_path: jet_cli_learn_required_text(object, "source_path", "progress"),
+            source_fixture_revision: jet_cli_learn_required_text(object, "source_fixture_revision", "progress"),
+            source_revision: jet_cli_learn_required_text(object, "source_revision", "progress"),
+            oracle_id: jet_cli_learn_required_text(object, "oracle_id", "progress"),
+            oracle_revision: jet_cli_learn_required_text(object, "oracle_revision", "progress"),
+            status: jet_cli_learn_required_text(object, "status", "progress"),
+            phase: jet_cli_learn_required_text(object, "phase", "progress"),
+            prediction_initial: jet_cli_learn_required_text(object, "prediction_initial", "progress"),
+            prediction: jet_cli_learn_required_text(object, "prediction", "progress"),
+            prediction_response: jet_cli_learn_optional_text(object, "prediction_response"),
+            prediction_measured: jet_cli_learn_required_bool(object, "prediction_measured", "progress"),
+            reveal_shown: jet_cli_learn_required_bool(object, "reveal_shown", "progress"),
+            evidence_status: jet_cli_learn_required_text(object, "evidence_status", "progress"),
+            evidence_source_revision: jet_cli_learn_optional_text(object, "evidence_source_revision"),
+            derivation_ref: jet_cli_learn_optional_nullable_text(object, "derivation_ref"),
+            reason_completed: jet_cli_learn_required_bool(object, "reason_completed", "progress"),
+            source_completed: jet_cli_learn_required_bool(object, "source_completed", "progress"),
+            controlled_completed: jet_cli_learn_required_bool(object, "controlled_completed", "progress"),
+            controlled_revision: jet_cli_learn_optional_text(object, "controlled_revision"),
+            transfer_completed: jet_cli_learn_required_bool(object, "transfer_completed", "progress"),
+            transfer_revision: jet_cli_learn_optional_text(object, "transfer_revision"),
+            transfer_evidence: jet_cli_learn_required_bool(object, "transfer_evidence", "progress"),
+            stale_reason: jet_cli_learn_optional_nullable_text(object, "stale_reason"),
+        })
+    }
+    return Err("progress must be an object: expected a DataTree object")
+}
+// Rust optional_text (CmdLearn.rs:1874-1879).
+pub fn jet_cli_learn_optional_text(object: [String:DataTree], name: String) -> String Never! {
+    if object.has_key(name) { if object[name] == .Text(text) -> return ~text }
+    ""
+}
+// Rust optional_nullable_text (CmdLearn.rs:1881-1886).
+pub fn jet_cli_learn_optional_nullable_text(object: [String:DataTree], name: String) -> String? Never! {
+    if object.has_key(name) { if object[name] == .Text(text) -> return Val(~text) }
+    None
+}
+fn jet_cli_learn_append(out: &[U8], text: String) Never! { loop byte in text.bytes() -> &out.push(byte) }
+fn jet_cli_learn_progress_string(out: &[U8], name: String, text: String, comma: Bool) Never! {
+    if comma -> &out.push(U8{44})
+    jet_cli_learn_append(&out, "\"{name}\":\"{json_escape(text)}\"")
+}
+fn jet_cli_learn_progress_bool(out: &[U8], name: String, value: Bool) Never! { jet_cli_learn_append(&out, ",\"{name}\":{if value -> "true" else -> "false"}") }
+fn jet_cli_learn_progress_option(out: &[U8], name: String, value: String?) Never! {
+    jet_cli_learn_append(&out, ",\"{name}\":")
+    if value == {
+        .Val(text) -> jet_cli_learn_append(&out, "\"{json_escape(text)}\"")
+        .None -> jet_cli_learn_append(&out, "null")
+    }
+}
+// Rust progress_json (CmdLearn.rs:1900-1938); exact field order and final LF.
+pub fn jet_cli_learn_progress_json(progress: JetCLILearnProgress) -> String Never! {
+    out := [U8]{}
+    &out.push(U8{123})
+    jet_cli_learn_progress_string(&out, "schema", progress.schema, false)
+    jet_cli_learn_progress_string(&out, "curriculum_revision", progress.curriculum_revision, true)
+    jet_cli_learn_progress_string(&out, "task_id", progress.task_id, true)
+    jet_cli_learn_progress_string(&out, "capability_id", progress.capability_id, true)
+    jet_cli_learn_progress_string(&out, "family", progress.family, true)
+    jet_cli_learn_progress_string(&out, "source_path", progress.source_path, true)
+    jet_cli_learn_progress_string(&out, "source_fixture_revision", progress.source_fixture_revision, true)
+    jet_cli_learn_progress_string(&out, "source_revision", progress.source_revision, true)
+    jet_cli_learn_progress_string(&out, "oracle_id", progress.oracle_id, true)
+    jet_cli_learn_progress_string(&out, "oracle_revision", progress.oracle_revision, true)
+    jet_cli_learn_progress_string(&out, "status", progress.status, true)
+    jet_cli_learn_progress_string(&out, "phase", progress.phase, true)
+    jet_cli_learn_progress_string(&out, "prediction_initial", progress.prediction_initial, true)
+    jet_cli_learn_progress_string(&out, "prediction", progress.prediction, true)
+    jet_cli_learn_progress_string(&out, "prediction_response", progress.prediction_response, true)
+    jet_cli_learn_progress_bool(&out, "prediction_measured", progress.prediction_measured)
+    jet_cli_learn_progress_bool(&out, "reveal_shown", progress.reveal_shown)
+    jet_cli_learn_progress_string(&out, "evidence_status", progress.evidence_status, true)
+    jet_cli_learn_progress_string(&out, "evidence_source_revision", progress.evidence_source_revision, true)
+    jet_cli_learn_progress_option(&out, "derivation_ref", progress.derivation_ref)
+    jet_cli_learn_progress_bool(&out, "reason_completed", progress.reason_completed)
+    jet_cli_learn_progress_bool(&out, "source_completed", progress.source_completed)
+    jet_cli_learn_progress_bool(&out, "controlled_completed", progress.controlled_completed)
+    jet_cli_learn_progress_string(&out, "controlled_revision", progress.controlled_revision, true)
+    jet_cli_learn_progress_bool(&out, "transfer_completed", progress.transfer_completed)
+    jet_cli_learn_progress_string(&out, "transfer_revision", progress.transfer_revision, true)
+    jet_cli_learn_progress_bool(&out, "transfer_evidence", progress.transfer_evidence)
+    jet_cli_learn_progress_option(&out, "stale_reason", progress.stale_reason)
+    jet_cli_learn_append(&out, "}}\n")
+    String.from_bytes(out) ?? panic("progress JSON is UTF-8")
+}
+// Rust parse_action (CmdLearn.rs:2068-2089).
+pub fn jet_cli_learn_parse_action(line: String) -> JetCLILearnAction? Never! {
+    trimmed := line.trim() // #4303
+    normalized :: trimmed.to_ascii_lower()
+    if normalized == {
+        "i do not know" -> return Val(JetCLILearnAction.Unknown)
+        "unknown" -> return Val(JetCLILearnAction.Unknown)
+        "idk" -> return Val(JetCLILearnAction.Unknown)
+        "skip" -> return Val(JetCLILearnAction.Skip)
+        "reveal" -> return Val(JetCLILearnAction.Reveal)
+        "help" -> return Val(JetCLILearnAction.Reveal)
+        "reason" -> return Val(JetCLILearnAction.Reason)
+        "explain" -> return Val(JetCLILearnAction.Reason)
+        "cancel" -> return Val(JetCLILearnAction.Cancel)
+        "quit" -> return Val(JetCLILearnAction.Cancel)
+        else -> {}
+    }
+    if normalized.starts_with("predict ") {
+        answer := normalized.slice(8, normalized.len()).trim() // #4303
+        if !answer.is_empty() -> return Val(JetCLILearnAction.Predict(~answer))
+    }
+    None
+}
+
+// Original include_str assets, not a runtime disk lookup or copied curriculum.
+// Main must publish the repository embedding root when assembling JetCli.
+JET_CLI_LEARN_CURRICULUM_JSON :: prep { embed_file("../../../../../Examples/learn/curriculum.json") }
+JET_CLI_LEARN_LOOP :: prep { embed_file("../../../../../Examples/learn/feedback/loop.jet") }
+JET_CLI_LEARN_LOOP_SOLUTION :: prep { embed_file("../../../../../Examples/learn/feedback/loop.solution.jet") }
+JET_CLI_LEARN_LOOP_CHANGE :: prep { embed_file("../../../../../Examples/learn/feedback/loop.change.jet") }
+JET_CLI_LEARN_LOOP_CHANGE_SOLUTION :: prep { embed_file("../../../../../Examples/learn/feedback/loop.change.solution.jet") }
+JET_CLI_LEARN_LOOP_TRANSFER :: prep { embed_file("../../../../../Examples/learn/feedback/loop.transfer.jet") }
+JET_CLI_LEARN_LOOP_TRANSFER_SOLUTION :: prep { embed_file("../../../../../Examples/learn/feedback/loop.transfer.solution.jet") }
+JET_CLI_LEARN_STATE :: prep { embed_file("../../../../../Examples/learn/feedback/state.jet") }
+JET_CLI_LEARN_STATE_SOLUTION :: prep { embed_file("../../../../../Examples/learn/feedback/state.solution.jet") }
+JET_CLI_LEARN_STATE_CHANGE :: prep { embed_file("../../../../../Examples/learn/feedback/state.change.jet") }
+JET_CLI_LEARN_STATE_CHANGE_SOLUTION :: prep { embed_file("../../../../../Examples/learn/feedback/state.change.solution.jet") }
+JET_CLI_LEARN_STATE_TRANSFER :: prep { embed_file("../../../../../Examples/learn/feedback/state.transfer.jet") }
+JET_CLI_LEARN_STATE_TRANSFER_SOLUTION :: prep { embed_file("../../../../../Examples/learn/feedback/state.transfer.solution.jet") }
+JET_CLI_LEARN_EFFECTS :: prep { embed_file("../../../../../Examples/learn/feedback/effects.jet") }
+JET_CLI_LEARN_EFFECTS_SOLUTION :: prep { embed_file("../../../../../Examples/learn/feedback/effects.solution.jet") }
+JET_CLI_LEARN_EFFECTS_CHANGE :: prep { embed_file("../../../../../Examples/learn/feedback/effects.change.jet") }
+JET_CLI_LEARN_EFFECTS_CHANGE_SOLUTION :: prep { embed_file("../../../../../Examples/learn/feedback/effects.change.solution.jet") }
+JET_CLI_LEARN_EFFECTS_TRANSFER :: prep { embed_file("../../../../../Examples/learn/feedback/effects.transfer.jet") }
+JET_CLI_LEARN_EFFECTS_TRANSFER_SOLUTION :: prep { embed_file("../../../../../Examples/learn/feedback/effects.transfer.solution.jet") }
+JET_CLI_LEARN_FOREIGN :: prep { embed_file("../../../../../Examples/learn/feedback/foreign.jet") }
+JET_CLI_LEARN_FOREIGN_SOLUTION :: prep { embed_file("../../../../../Examples/learn/feedback/foreign.solution.jet") }
+JET_CLI_LEARN_FOREIGN_CHANGE :: prep { embed_file("../../../../../Examples/learn/feedback/foreign.change.jet") }
+JET_CLI_LEARN_FOREIGN_CHANGE_SOLUTION :: prep { embed_file("../../../../../Examples/learn/feedback/foreign.change.solution.jet") }
+JET_CLI_LEARN_FOREIGN_TRANSFER :: prep { embed_file("../../../../../Examples/learn/feedback/foreign.transfer.jet") }
+JET_CLI_LEARN_FOREIGN_TRANSFER_SOLUTION :: prep { embed_file("../../../../../Examples/learn/feedback/foreign.transfer.solution.jet") }
+pub struct JetCLILearnPackagedFixtures {
+    impl JetCLILearnFixtures {
+        fn text(self, path: String) -> String? Never! {
+            if path == {
+                "loop.jet" -> Val(JET_CLI_LEARN_LOOP)
+                "loop.solution.jet" -> Val(JET_CLI_LEARN_LOOP_SOLUTION)
+                "loop.change.jet" -> Val(JET_CLI_LEARN_LOOP_CHANGE)
+                "loop.change.solution.jet" -> Val(JET_CLI_LEARN_LOOP_CHANGE_SOLUTION)
+                "loop.transfer.jet" -> Val(JET_CLI_LEARN_LOOP_TRANSFER)
+                "loop.transfer.solution.jet" -> Val(JET_CLI_LEARN_LOOP_TRANSFER_SOLUTION)
+                "state.jet" -> Val(JET_CLI_LEARN_STATE)
+                "state.solution.jet" -> Val(JET_CLI_LEARN_STATE_SOLUTION)
+                "state.change.jet" -> Val(JET_CLI_LEARN_STATE_CHANGE)
+                "state.change.solution.jet" -> Val(JET_CLI_LEARN_STATE_CHANGE_SOLUTION)
+                "state.transfer.jet" -> Val(JET_CLI_LEARN_STATE_TRANSFER)
+                "state.transfer.solution.jet" -> Val(JET_CLI_LEARN_STATE_TRANSFER_SOLUTION)
+                "effects.jet" -> Val(JET_CLI_LEARN_EFFECTS)
+                "effects.solution.jet" -> Val(JET_CLI_LEARN_EFFECTS_SOLUTION)
+                "effects.change.jet" -> Val(JET_CLI_LEARN_EFFECTS_CHANGE)
+                "effects.change.solution.jet" -> Val(JET_CLI_LEARN_EFFECTS_CHANGE_SOLUTION)
+                "effects.transfer.jet" -> Val(JET_CLI_LEARN_EFFECTS_TRANSFER)
+                "effects.transfer.solution.jet" -> Val(JET_CLI_LEARN_EFFECTS_TRANSFER_SOLUTION)
+                "foreign.jet" -> Val(JET_CLI_LEARN_FOREIGN)
+                "foreign.solution.jet" -> Val(JET_CLI_LEARN_FOREIGN_SOLUTION)
+                "foreign.change.jet" -> Val(JET_CLI_LEARN_FOREIGN_CHANGE)
+                "foreign.change.solution.jet" -> Val(JET_CLI_LEARN_FOREIGN_CHANGE_SOLUTION)
+                "foreign.transfer.jet" -> Val(JET_CLI_LEARN_FOREIGN_TRANSFER)
+                "foreign.transfer.solution.jet" -> Val(JET_CLI_LEARN_FOREIGN_TRANSFER_SOLUTION)
+                else -> None
+            }
+        }
+    }
+}
+pub fn jet_cli_learn_packaged_curriculum() -> JetCLILearnCurriculum Err! {
+    jet_cli_learn_load_curriculum(JET_CLI_LEARN_CURRICULUM_JSON, JetCLILearnPackagedFixtures{})
+}
+
+// Rust Evaluation: only the evaluator may create these outcomes. Problems
+// retain canonical diagnostics, never a made-up reason or success sentinel.
+pub enum JetCLILearnEvaluation {
+    Complete(stdout: String, stderr: String, derivation: DerivationRecord?)
+    Problems(diagnostics: [Diagnostic])
+    WrongOutput(stdout: String, stderr: String, derivation: DerivationRecord?)
+}
+pub fn jet_cli_learn_evaluation_complete(value: JetCLILearnEvaluation) -> Bool Never! {
+    if value == .Complete(_, _, _) -> return true
+    false
+}
+pub fn jet_cli_learn_evaluation_derivation(value: JetCLILearnEvaluation) -> DerivationRecord? Never! {
+    if value == {
+        .Complete(_, _, derivation) -> derivation
+        .WrongOutput(_, _, derivation) -> derivation
+        .Problems(_) -> None
+    }
+}
+pub fn jet_cli_learn_evaluation_kind(value: JetCLILearnEvaluation) -> String Never! {
+    if value == {
+        .Complete(_, _, _) -> "complete"
+        .Problems(_) -> "diagnostic"
+        .WrongOutput(_, _, _) -> "wrong-output"
+    }
+}
+
+// Rust Actions::from_stdin collection half: IO/IsTerminal remains #4494.
+pub struct JetCLILearnActions { pub lines: [String], pub next: Int, pub interactive: Bool }
+pub fn jet_cli_learn_actions_from_text(text: String) -> JetCLILearnActions Never! {
+    lines := [String]{}
+    loop line in jet_cli_learn_lines(text) {
+        trimmed := line.trim() // #4303
+        if !trimmed.is_empty() -> &lines.push(~trimmed)
+    }
+    JetCLILearnActions{lines: ^lines, next: 0, interactive: false}
+}
+// Rust Actions::next buffered branch; interactive readline/flush is gated.
+pub fn jet_cli_learn_actions_next_buffered(actions: &JetCLILearnActions) -> JetCLILearnAction? Never! {
+    loop actions.next < actions.lines.len() {
+        action :: jet_cli_learn_parse_action(actions.lines[actions.next])
+        actions.next += 1
+        if action != None -> return action
+    }
+    None
+}
+
+// Rust str::lines: LF or CRLF only, no terminal empty row; lone CR retained.
+fn jet_cli_learn_lines(text: String) -> [String] Never! {
+    raw :: text.bytes()
+    rows := [String]{}
+    start := 0
+    loop index in 0..<raw.len() {
+        if raw[index] != (U8{10}) -> next
+        end :: if index > start && raw[index - 1] == (U8{13}) -> index - 1 else -> index
+        &rows.push(String.from_bytes(raw[start..<end]) ?? panic("line is UTF-8"))
+        start = index + 1
+    }
+    if start < raw.len() -> &rows.push(String.from_bytes(raw[start..<raw.len()]) ?? panic("line is UTF-8"))
+    rows
+}
+
+// Rust LearnStyle::new: active_profile is supplied by the one CLI output owner.
+pub struct JetCLILearnStyle { pub color: Bool, pub width: Int, pub unicode: Bool }
+pub fn jet_cli_learn_style_new(profile: JetCLIOutputProfile?, fallback_color: Bool) -> JetCLILearnStyle Never! {
+    if profile == .Val(active) {
+        return JetCLILearnStyle{color: active.ansi_enabled, width: if active.width < 24 -> 24 else if active.width > 96 -> 96 else -> active.width, unicode: active.unicode_enabled}
+    }
+    JetCLILearnStyle{color: fallback_color, width: 80, unicode: false}
+}
+pub fn jet_cli_learn_horizontal(style: JetCLILearnStyle) -> String Never! { if style.unicode -> "─" else -> "-" }
+pub fn jet_cli_learn_vertical(style: JetCLILearnStyle) -> String Never! { if style.unicode -> "│" else -> "|" }
+pub fn jet_cli_learn_visible_cols(text: String) -> Int Never! {
+    raw :: text.bytes()
+    at := 0
+    columns := 0
+    escaped := false
+    loop at < raw.len() {
+        code :: Int.from_u8(raw[at])
+        if escaped {
+            if code == 109 -> escaped = false
+        } else {
+            if code == 27 -> escaped = true else -> columns += 1
+        }
+        at += diagnostic_utf8_width(raw, at)
+    }
+    columns
+}
+// Same whitespace split as wrap_plain; byte cursor avoids a char-array copy.
+// Each row visits at most width scalars and advances at least one.
+pub fn jet_cli_learn_wrap_plain(text: String, requested: Int) -> [String] Never! {
+    width :: if requested < 1 -> 1 else -> requested
+    if text.is_empty() -> return [String]{""}
+    raw :: text.bytes()
+    rows := [String]{}
+    start := 0
+    loop start < raw.len() {
+        end := start
+        count := 0
+        split := start
+        loop end < raw.len() && count < width {
+            space :: diagnostic_is_whitespace_at(raw, end)
+            end += diagnostic_utf8_width(raw, end)
+            count += 1
+            if space -> split = end
+        }
+        if end < raw.len() && split > start -> end = split
+        &rows.push(String.from_bytes(raw[start..<end]) ?? panic("wrapped row is UTF-8"))
+        start = end
+    }
+    rows
+}
+pub fn jet_cli_learn_pad_plain(text: String, width: Int) -> String Never! {
+    columns :: jet_cli_learn_visible_cols(text)
+    if columns >= width -> return ~text
+    "{text}{" ".repeat(width - columns)}"
+}
+fn jet_cli_learn_sub(left: Int, right: Int) -> Int Never! { if left > right -> left - right else -> 0 }
+pub fn jet_cli_learn_frame(style: JetCLILearnStyle, title: String, rows: [String]) -> String Never! {
+    inner :: if style.width > 4 -> style.width - 4 else -> 1
+    horizontal :: jet_cli_learn_horizontal(style)
+    vertical :: diagnostic_theme_paint(style.color, "90", jet_cli_learn_vertical(style))
+    prefix :: "{if style.unicode -> "╭" else -> "+"}{horizontal} "
+    fill :: jet_cli_learn_sub(style.width, jet_cli_learn_visible_cols(prefix) + jet_cli_learn_visible_cols(title) + 2)
+    suffix :: " {horizontal.repeat(fill)}{if style.unicode -> "╮" else -> "+"}"
+    out := [U8]{}
+    jet_cli_learn_append(&out, diagnostic_theme_paint(style.color, "90", prefix))
+    jet_cli_learn_append(&out, diagnostic_theme_accent(style.color, title))
+    jet_cli_learn_append(&out, diagnostic_theme_paint(style.color, "90", suffix))
+    &out.push(U8{10})
+    loop row in rows {
+        loop wrapped in jet_cli_learn_wrap_plain(row, inner) {
+            jet_cli_learn_append(&out, "{vertical} {jet_cli_learn_pad_plain(wrapped, inner)} {vertical}\n")
+        }
+    }
+    bottom :: "{if style.unicode -> "╰" else -> "+"}{horizontal.repeat(jet_cli_learn_sub(style.width, 2))}{if style.unicode -> "╯" else -> "+"}"
+    jet_cli_learn_append(&out, diagnostic_theme_paint(style.color, "90", bottom))
+    String.from_bytes(out) ?? panic("learn frame is UTF-8")
+}
+pub fn jet_cli_learn_status_line(style: JetCLILearnStyle, kind: String, message: String) -> String Never! {
+    badge :: if kind == {
+        "success" -> diagnostic_theme_paint(style.color, "32", "PASS")
+        "error" -> diagnostic_theme_paint(style.color, "31", "CHECK")
+        "hint" -> diagnostic_theme_paint(style.color, "33", "HELP")
+        "stale" -> diagnostic_theme_paint(style.color, "33", "STALE")
+        "resume" -> diagnostic_theme_accent(style.color, "RESUME")
+        "paused" -> diagnostic_theme_paint(style.color, "33", "PAUSED")
+        else -> diagnostic_theme_accent(style.color, kind)
+    }
+    "{badge} {message}"
+}
+pub fn jet_cli_learn_action_help(style: JetCLILearnStyle) -> String Never! {
+    "{diagnostic_theme_dim(style.color, "Commands:")} {diagnostic_theme_dim(style.color, "predict <answer>  unknown  skip  help  reason  cancel")}"
+}
+pub fn jet_cli_learn_action_prompt(style: JetCLILearnStyle, prompt: String) -> String Never! {
+    "{diagnostic_theme_accent(style.color, "learn>")} {diagnostic_theme_bold(style.color, prompt)}"
+}
+pub fn jet_cli_learn_step_rail(style: JetCLILearnStyle, progress: JetCLILearnProgress) -> String Never! {
+    current :: jet_cli_learn_step_name(progress)
+    steps :: [String]{"PREDICT", "CHECK", "CHANGE", "TRANSFER"}
+    current_index := 0
+    loop (index, step) in steps { if step == current -> current_index = index }
+    rendered := [String]{diagnostic_theme_dim(style.color, "Steps")}
+    loop (index, step) in steps {
+        label :: "[{step}]"
+        &rendered.push(if index == current_index -> diagnostic_theme_paint(style.color, "48;5;24;97;1", label) else if index < current_index -> diagnostic_theme_paint(style.color, "32", label) else -> diagnostic_theme_dim(style.color, label))
+    }
+    rendered.join("  ")
+}
+// source_rows text half; native read/error fallback belongs to #4494.
+pub fn jet_cli_learn_source_rows(source: String) -> [String] Never! {
+    rows := [String]{}
+    loop (index, line) in jet_cli_learn_lines(source) {
+        number :: "{index + 1}"
+        &rows.push("{" ".repeat(jet_cli_learn_sub(3, number.bytes().len()))}{number} | {line}")
+    }
+    rows
+}
+pub fn jet_cli_learn_bounded_output_rows(value: String, unicode: Bool) -> [String] Never! {
+    raw :: value.bytes()
+    rows := [String]{}
+    start := 0
+    loop start < raw.len() {
+        if rows.len() == 8 { &rows.push("... more output omitted"); break }
+        end := start
+        loop end < raw.len() && raw[end] != (U8{10}) -> end += 1
+        content_end :: if end < raw.len() && end > start && raw[end - 1] == (U8{13}) -> end - 1 else -> end
+        at := start
+        columns := 0
+        loop at < content_end && columns < 120 {
+            at += diagnostic_utf8_width(raw, at)
+            columns += 1
+        }
+        display :: String.from_bytes(raw[start..<at]) ?? panic("output row is UTF-8")
+        &rows.push(if at < content_end -> "{display}{if unicode -> "…" else -> "..."}" else -> display)
+        start = end + 1
+    }
+    if rows.is_empty() -> &rows.push("(no output)")
+    rows
+}
+pub fn jet_cli_learn_output_comparison(style: JetCLILearnStyle, expected: String, actual: String, stderr: String) -> String Never! {
+    rows := [String]{"Expected output:"}
+    loop row in jet_cli_learn_bounded_output_rows(expected, style.unicode) -> &rows.push(^row)
+    &rows.push("")
+    &rows.push("Actual output:")
+    loop row in jet_cli_learn_bounded_output_rows(actual, style.unicode) -> &rows.push(^row)
+    if !stderr.is_empty() {
+        &rows.push("")
+        &rows.push("Stderr:")
+        loop row in jet_cli_learn_bounded_output_rows(stderr, style.unicode) -> &rows.push(^row)
+    }
+    jet_cli_learn_frame(style, "output", rows)
+}
+
+// apply_prediction's policy is shared with both prediction loops.
+pub fn jet_cli_learn_apply_prediction(lesson: JetCLILearningTask, progress: &JetCLILearnProgress, answer: ^String) -> Bool Never! {
+    correct :: jet_cli_learn_prediction_matches(lesson, answer)
+    result :: if correct -> "correct" else -> "incorrect"
+    if progress.prediction_initial == "pending" -> progress.prediction_initial = result
+    progress.prediction = result
+    progress.prediction_response = ^answer
+    progress.prediction_measured = true
+    correct
+}
+pub fn jet_cli_learn_show_skip(style: JetCLILearnStyle) -> String Never! {
+    "{jet_cli_learn_status_line(style, "hint", "Prediction skipped. It stays unmeasured and cannot complete this lesson.")}\n"
+}
+pub fn jet_cli_learn_show_reveal(lesson: JetCLILearningTask, style: JetCLILearnStyle) -> String Never! {
+    "{jet_cli_learn_frame(style, "Help", [String]{"Why: {lesson.reveal.reason}", "Try this: {lesson.reveal.counterexample}", "Common mistake: {lesson.wrong_model}"})}\n"
+}
+
+// Exact native gates, not callable declarations or successful fallbacks:
+// run347/run_task751/drive_fixture1169/exit_check_curriculum2132/
+// validate_curriculum2200 require actual retained FS and OS-path ingress,
+// SystemTime nanoseconds/PID, stdin terminal/readline/read-all/flush and close.
+// materialize1781 uses exists -> packaged NotFound -> write(create/truncate);
+// digest_file1798 uses read_bytes -> SHA256; load_progress1827 distinguishes
+// NotFound; save_progress1888 creates parent -> json.tmp write -> rename.
+// Native producers: core.files.host.retained_descriptor (#4494/#4409),
+// core.sys.host.os_path_ingress / retained_clock (#4494/#4483).
+// evaluate1199 needs Driver's actual development-iteration run + checked
+// snapshot (no published callable yet), then SAME SemIndex producer
+// jet_semindex.semindex_from_checked (port-tools, no independently recheck).
+// watch_until_changed1734 needs packet0794 WatchSession.open/poll/acknowledge
+// and scheduler_sleep_ms(120); WatchPolicy alone cannot supply any receipt.
+// #4499 is not used: ids/capability sets are String keys (load_curriculum443).
+
+// Rust run argument vocabulary: validate before any curriculum/FS read.
+pub struct JetCLILearnOptions { pub check: Bool, pub once: Bool }
+pub fn jet_cli_learn_options(args: [String]) -> JetCLILearnOptions Err! {
+    check := false
+    once := false
+    loop arg in args {
+        if arg == {
+            "--check" -> check = true
+            "--watch=off" -> once = true
+            "--watch" | "--watch=on" | "--watch=true" | "--json" | "--quiet" | "--color" -> {}
+            else -> { if !arg.starts_with("--color=") -> return Err("{arg} is not a jet learn argument") }
+        }
+    }
+    Ok(JetCLILearnOptions{check: check, once: once})
+}
+
+// Rust run_task804–829: reset precedence and cancelled-checkpoint resumption.
+pub fn jet_cli_learn_reconcile(progress: &JetCLILearnProgress, curriculum: JetCLILearnCurriculum, lesson: JetCLILearningTask, fixture_revision: ^String, source_revision: ^String, oracle_revision: ^String) Never! {
+    if progress.task_id != lesson.id || progress.curriculum_revision != curriculum.revision || progress.oracle_revision != oracle_revision || progress.source_fixture_revision != fixture_revision || progress.source_revision != source_revision {
+        reason :: if {
+            progress.curriculum_revision != curriculum.revision -> "lesson content changed"
+            progress.oracle_revision != oracle_revision -> "lesson answer changed"
+            progress.source_fixture_revision != fixture_revision -> "packaged lesson source changed"
+            else -> "source changed: {lesson.source.path}"
+        }
+        progress.curriculum_revision = ~curriculum.revision
+        progress.oracle_revision = ^oracle_revision
+        progress.source_fixture_revision = ^fixture_revision
+        jet_cli_learn_progress_reset_for_stale(&progress, reason, ^source_revision)
+    }
+    if progress.status == "cancelled" && progress.stale_reason == Val("learner cancelled this checkpoint") {
+        progress.status = "in_progress"
+        progress.stale_reason = None
+    }
+    jet_cli_learn_progress_update_phase(&progress)
+}
+// Rust run_task prediction loops share these exact unknown/skip/cancel writes.
+pub fn jet_cli_learn_prediction_unknown(progress: &JetCLILearnProgress) Never! {
+    progress.prediction_initial = "unknown"
+    progress.prediction = "unknown"
+    progress.prediction_response = "I do not know"
+    progress.reveal_shown = true
+}
+pub fn jet_cli_learn_prediction_skip(progress: &JetCLILearnProgress) Never! {
+    progress.prediction_initial = "unmeasured"
+    progress.prediction = "unmeasured"
+    progress.prediction_response = "skip"
+}
+pub fn jet_cli_learn_cancel(progress: &JetCLILearnProgress) Never! {
+    progress.status = "cancelled"
+    progress.stale_reason = Val("learner cancelled this checkpoint")
+}
+// Rust run_task911–923: actual checked derivation only; absence is unavailable.
+pub fn jet_cli_learn_primary_checked(progress: &JetCLILearnProgress, revision: ^String, derivation: DerivationRecord?) Never! {
+    progress.source_completed = true
+    progress.source_revision = ^revision
+    progress.stale_reason = None
+    progress.evidence_source_revision = ~progress.source_revision
+    if derivation == {
+        .Val(record) -> {
+            progress.evidence_status = "current"
+            progress.derivation_ref = Val(~record.id)
+        }
+        .None -> {
+            progress.evidence_status = "unavailable"
+            progress.derivation_ref = None
+        }
+    }
+}
+pub fn jet_cli_learn_controlled_changed(progress: &JetCLILearnProgress, revision: String) Never! {
+    if progress.controlled_completed && revision != progress.controlled_revision {
+        progress.controlled_completed = false
+        progress.transfer_completed = false
+        progress.transfer_evidence = false
+        progress.status = "stale"
+        progress.stale_reason = Val("controlled edit source changed")
+    }
+}
+pub fn jet_cli_learn_transfer_changed(progress: &JetCLILearnProgress, revision: String) Never! {
+    if progress.transfer_completed && revision != progress.transfer_revision {
+        progress.transfer_completed = false
+        progress.transfer_evidence = false
+        progress.status = "stale"
+        progress.stale_reason = Val("transfer source changed")
+    }
+}
+// Rust validate_curriculum2222–2253, policy after the actual fixture runs.
+pub fn jet_cli_learn_validate_evaluations(lesson: JetCLILearningTask, fixture: JetCLILearnFixture, label: String, broken: JetCLILearnEvaluation, solved: JetCLILearnEvaluation) Err! {
+    matches_failure :: if fixture.failure == {
+        "diagnostic" -> jet_cli_learn_evaluation_kind(broken) == "diagnostic"
+        "output" -> jet_cli_learn_evaluation_kind(broken) == "wrong-output"
+        else -> false
+    }
+    if !matches_failure -> return Err("{lesson.id} {label} expected {fixture.failure} failure, got \"{jet_cli_learn_evaluation_kind(broken)}\"")
+    if !jet_cli_learn_evaluation_complete(solved) -> return Err("{lesson.id} {label} solution failed: {jet_cli_learn_evaluation_kind(solved)}")
+    if jet_cli_learn_evaluation_derivation(solved) == None -> return Err("{lesson.id} {label} solved without current checked evidence")
+}
+
+fn jet_cli_learn_status_optional(value: String?) -> StatusValue Never! {
+    if value == { .Val(text) -> StatusValue.String{value: ~text} .None -> StatusValue.Null }
+}
+// Rust print_status1946–2004: preserve every field, with typed Report values.
+pub fn jet_cli_learn_status_value(lesson: JetCLILearningTask, progress: JetCLILearnProgress, derivation: DerivationRecord?) -> StatusValue Never! {
+    source := StatusFields.new()
+    source = ^source.with("path", StatusValue.String{value: ~lesson.source.path})
+    source = ^source.with("digest", StatusValue.String{value: ~progress.source_revision})
+    source = ^source.with("packaged_digest", StatusValue.String{value: ~progress.source_fixture_revision})
+    input := StatusFields.new()
+    input = ^input.with("path", StatusValue.String{value: ~lesson.input_identity.path})
+    input = ^input.with("role", StatusValue.String{value: ~lesson.input_identity.role})
+    input = ^input.with("revision", StatusValue.String{value: ~lesson.input_identity.revision})
+    oracle := StatusFields.new()
+    oracle = ^oracle.with("id", StatusValue.String{value: ~lesson.oracle.id})
+    oracle = ^oracle.with("revision", StatusValue.String{value: ~progress.oracle_revision})
+    oracle = ^oracle.with("kind", StatusValue.String{value: ~lesson.oracle.kind})
+    oracle = ^oracle.with("answer", StatusValue.String{value: ~lesson.oracle.answer})
+    oracle = ^oracle.with("expected_output", StatusValue.String{value: ~lesson.oracle.expected_output})
+    oracle = ^oracle.with("distinguishes", StatusValue.String{value: ~lesson.oracle.distinguishes})
+    prediction := StatusFields.new()
+    prediction = ^prediction.with("initial", StatusValue.String{value: ~progress.prediction_initial})
+    prediction = ^prediction.with("result", StatusValue.String{value: ~progress.prediction})
+    prediction = ^prediction.with("response", StatusValue.String{value: ~progress.prediction_response})
+    prediction = ^prediction.with("measured", StatusValue.Bool{value: progress.prediction_measured})
+    reveal := StatusFields.new()
+    reveal = ^reveal.with("policy", StatusValue.String{value: ~lesson.reveal.policy})
+    reveal = ^reveal.with("shown", StatusValue.Bool{value: progress.reveal_shown})
+    reveal = ^reveal.with("evidence", StatusValue.String{value: ~lesson.reveal.evidence})
+    reveal = ^reveal.with("reason", StatusValue.String{value: ~lesson.reveal.reason})
+    reveal = ^reveal.with("counterexample", StatusValue.String{value: ~lesson.reveal.counterexample})
+    evidence := StatusFields.new()
+    evidence = ^evidence.with("status", StatusValue.String{value: ~progress.evidence_status})
+    evidence = ^evidence.with("source_digest", StatusValue.String{value: ~progress.evidence_source_revision})
+    evidence = ^evidence.with("derivation_ref", jet_cli_learn_status_optional(progress.derivation_ref))
+    record_value :: if derivation == { .Val(record) -> derivation_record_status_value(record) .None -> StatusValue.Null }
+    evidence = ^evidence.with("derivation", ^record_value)
+    completion := StatusFields.new()
+    completion = ^completion.with("source", StatusValue.Bool{value: progress.source_completed})
+    completion = ^completion.with("controlled_change", StatusValue.Bool{value: progress.controlled_completed})
+    completion = ^completion.with("transfer", StatusValue.Bool{value: progress.transfer_completed})
+    completion = ^completion.with("transfer_evidence", StatusValue.Bool{value: progress.transfer_evidence})
+    accessibility := StatusFields.new()
+    accessibility = ^accessibility.with("keyboard", StatusValue.Bool{value: lesson.accessibility.keyboard})
+    accessibility = ^accessibility.with("text_only", StatusValue.Bool{value: lesson.accessibility.text_only})
+    accessibility = ^accessibility.with("reduced_motion", StatusValue.Bool{value: lesson.accessibility.reduced_motion})
+    accessibility = ^accessibility.with("no_auto_quiz", StatusValue.Bool{value: lesson.accessibility.no_auto_quiz})
+    fields := StatusFields.new()
+    fields = ^fields.with("schema", StatusValue.String{value: "jet.learn/v1"})
+    fields = ^fields.with("status", StatusValue.String{value: ~progress.status})
+    fields = ^fields.with("phase", StatusValue.String{value: ~progress.phase})
+    fields = ^fields.with("task_id", StatusValue.String{value: ~lesson.id})
+    fields = ^fields.with("census_task_id", StatusValue.String{value: ~lesson.census_task_id})
+    fields = ^fields.with("capability_id", StatusValue.String{value: ~lesson.capability_id})
+    fields = ^fields.with("family", StatusValue.String{value: ~lesson.family})
+    fields = ^fields.with("axis", StatusValue.String{value: ~lesson.axis})
+    fields = ^fields.with("concept", StatusValue.String{value: ~lesson.concept})
+    fields = ^fields.with("curriculum_revision", StatusValue.String{value: ~progress.curriculum_revision})
+    fields = ^fields.with("source_identity", StatusValue.object(^source))
+    fields = ^fields.with("input_identity", StatusValue.object(^input))
+    fields = ^fields.with("oracle", StatusValue.object(^oracle))
+    fields = ^fields.with("prediction", StatusValue.object(^prediction))
+    fields = ^fields.with("reveal", StatusValue.object(^reveal))
+    fields = ^fields.with("evidence", StatusValue.object(^evidence))
+    fields = ^fields.with("completion", StatusValue.object(^completion))
+    fields = ^fields.with("stale_reason", jet_cli_learn_status_optional(progress.stale_reason))
+    fields = ^fields.with("accessibility", StatusValue.object(^accessibility))
+    StatusValue.object(^fields)
+}
+pub fn jet_cli_learn_status_envelope(lesson: JetCLILearningTask, progress: JetCLILearnProgress, derivation: DerivationRecord?) -> StatusEnvelope Never! {
+    StatusEnvelope.new("learn", jet_cli_learn_progress_complete(progress)).with_field("learn", jet_cli_learn_status_value(lesson, progress, derivation))
+}
+pub fn jet_cli_learn_complete_envelope(curriculum: JetCLILearnCurriculum) -> StatusEnvelope Never! {
+    StatusEnvelope.new("learn", true)
+        .with_field("curriculum", StatusValue.String{value: "feedback"})
+        .with_field("relation", StatusValue.String{value: ~curriculum.relation})
+        .with_field("relation_source", StatusValue.String{value: ~curriculum.relation_source})
+        .with_field("witnesses", StatusValue.Integer{value: curriculum.tasks.len()})
+        .with_field("revision_rule", StatusValue.String{value: ~curriculum.revision_rule})
+}
+pub fn jet_cli_learn_check_envelope(curriculum: JetCLILearnCurriculum) -> StatusEnvelope Never! {
+    StatusEnvelope.new("learn.check", true)
+        .with_field("curriculum", StatusValue.String{value: "feedback"})
+        .with_field("relation", StatusValue.String{value: ~curriculum.relation})
+        .with_field("witnesses", StatusValue.Integer{value: curriculum.tasks.len()})
+}
+
+// Human projections return their exact stdout bytes. The caller applies
+// OutputMode.json/quiet before sending these to the actual terminal owner.
+pub fn jet_cli_learn_print_status(lesson: JetCLILearningTask, progress: JetCLILearnProgress, style: JetCLILearnStyle) -> String Never! {
+    if progress.status == "cancelled" -> return "{jet_cli_learn_status_line(style, "paused", "Progress saved. Run `jet learn` to resume.")}\n{jet_cli_learn_step_rail(style, progress)}\n"
+    kind :: if progress.status == {
+        "completed" -> "success"
+        "stale" -> "stale"
+        "unavailable" -> "error"
+        else -> "STATUS"
+    }
+    rows := [String]{"Lesson: {lesson.concept}", "Source: {progress.source_path}", "Prediction: {progress.prediction}", "Check: {progress.evidence_status}", "Change: {if progress.controlled_completed -> "passed" else -> "pending"}", "Transfer: {if progress.transfer_evidence -> "passed" else -> "pending"}"}
+    if progress.stale_reason == .Val(reason) -> &rows.push("Note: {reason}")
+    "{jet_cli_learn_status_line(style, kind, "{progress.status} / current step: {jet_cli_learn_step_name(progress).to_ascii_lower()}")}\n{jet_cli_learn_frame(style, "progress", rows)}\n{jet_cli_learn_step_rail(style, progress)}\n"
+}
+pub fn jet_cli_learn_print_complete(curriculum: JetCLILearnCurriculum, style: JetCLILearnStyle) -> String Never! {
+    "{jet_cli_learn_status_line(style, "success", "All {curriculum.tasks.len()} lessons are complete.")}\n{jet_cli_learn_frame(style, "JET LEARN / DONE", [String]{"Each lesson was predicted, checked, changed, and transferred.", "Run `jet learn --check` to check the packaged lessons offline."})}\n"
+}
+pub fn jet_cli_learn_show_execution_evidence(lesson: JetCLILearningTask, evaluation: JetCLILearnEvaluation, style: JetCLILearnStyle) -> String Never! {
+    if evaluation == .Complete(stdout, stderr, derivation) {
+        evidence :: if derivation == { .Val(record) -> "Checked evidence: {record.id} ({record.rule})" .None -> "Checked evidence is unavailable; this lesson cannot finish yet." }
+        return "{jet_cli_learn_status_line(style, "success", "The source passed the check and printed the expected output.")}\n{jet_cli_learn_output_comparison(style, lesson.oracle.expected_output, stdout, stderr)}\n{jet_cli_learn_frame(style, "checked run", [String]{~lesson.reveal.evidence, evidence})}\n{diagnostic_theme_dim(style.color, "Next: explain why the source behaves this way.")}\n"
+    }
+    ""
+}
+pub fn jet_cli_learn_prediction_feedback(correct: Bool, answer: String, style: JetCLILearnStyle) -> String Never! {
+    kind :: if correct -> "success" else -> "hint"
+    message :: if correct -> "Your answer matches." else -> "Prediction recorded. Compare it with the output below."
+    "{jet_cli_learn_status_line(style, kind, message)}\n{jet_cli_learn_frame(style, "prediction", [String]{"You wrote: {answer}", "Now check the source."})}\n"
+}
+pub fn jet_cli_learn_print_task_intro(lesson: JetCLILearningTask, progress: JetCLILearnProgress, index: Int, total: Int, display_path: String, source: String, style: JetCLILearnStyle) -> String Never! {
+    out := [U8]{}
+    jet_cli_learn_append(&out, "{jet_cli_learn_frame(style, "JET LEARN / {index + 1}/{total}", [String]{~lesson.concept, "Before this lesson: {lesson.prerequisites.join(", ")}"})}\n{jet_cli_learn_step_rail(style, progress)}\n")
+    if progress.status == "stale" {
+        if progress.stale_reason == .Val(reason) -> jet_cli_learn_append(&out, "{jet_cli_learn_status_line(style, "stale", "Saved evidence is stale because {reason}.")}\n")
+    } else if progress.prediction_measured || progress.source_completed || progress.controlled_completed || progress.transfer_completed {
+        jet_cli_learn_append(&out, "{jet_cli_learn_status_line(style, "resume", "Resuming at the {jet_cli_learn_step_name(progress).to_ascii_lower()} step.")}\n")
+    }
+    rows := [String]{"Edit {display_path}", ""}
+    loop row in jet_cli_learn_source_rows(source) -> &rows.push(^row)
+    jet_cli_learn_append(&out, "\n{jet_cli_learn_frame(style, "Source", rows)}\n\n{jet_cli_learn_frame(style, "Your prediction", [String]{~lesson.prompt, "", "Type predict <answer>, or unknown for an explanation."})}\n{diagnostic_theme_dim(style.color, "unknown  Explanation    skip  Leave incomplete    cancel  Save and exit")}\n")
+    String.from_bytes(out) ?? panic("intro is UTF-8")
+}
+
+// Rust show_evaluation human tail. Problems' diagnostic batch is emitted
+// first by the canonical report_problems owner, even in json/quiet mode;
+// the source read and that dispatch remain native/integration gates.
+pub fn jet_cli_learn_show_evaluation(lesson: JetCLILearningTask, display_path: String, source: String, evaluation: JetCLILearnEvaluation, style: JetCLILearnStyle) -> String Never! {
+    if evaluation == {
+        .Problems(_) -> "{jet_cli_learn_status_line(style, "error", "The check reported a problem.")}\n{jet_cli_learn_frame(style, "CHECK / next", [String]{"Lesson source: {display_path}", "Read the message above before editing."})}\n{jet_cli_learn_frame(style, "source", jet_cli_learn_source_rows(source))}\n{diagnostic_theme_dim(style.color, "Next: resolve the reported problem before continuing.")}\n"
+        .WrongOutput(stdout, stderr, _) -> "{jet_cli_learn_status_line(style, "error", "{lesson.family} runs, but the output is not right yet.")}\n{jet_cli_learn_output_comparison(style, lesson.oracle.expected_output, stdout, stderr)}\n{jet_cli_learn_frame(style, "source / edit", jet_cli_learn_source_rows(source))}\n{diagnostic_theme_dim(style.color, "Next: edit the named target, save, and check the output again.")}\n"
+        .Complete(_, _, _) -> ""
+    }
+}
+// Rust run_task895–900; failed source check is not successful source evidence.
+pub fn jet_cli_learn_primary_failed(progress: &JetCLILearnProgress, evaluation: JetCLILearnEvaluation) Never! {
+    progress.source_completed = false
+    progress.evidence_status = if jet_cli_learn_evaluation_kind(evaluation) == "diagnostic" -> "current" else -> "unknown"
+    jet_cli_learn_progress_update_phase(&progress)
+}
+// Rust run_task988–991/994–995: help does not count as explaining the result.
+pub fn jet_cli_learn_reason_action(progress: &JetCLILearnProgress, action: JetCLILearnAction) -> Bool Never! {
+    if action == {
+        .Reason -> { progress.reason_completed = true; progress.reveal_shown = true; true }
+        .Reveal -> { progress.reveal_shown = true; false }
+        .Cancel -> { jet_cli_learn_cancel(&progress); false }
+        else -> false
+    }
+}
+pub fn jet_cli_learn_controlled_checked(progress: &JetCLILearnProgress, revision: ^String) Never! {
+    progress.controlled_completed = true
+    progress.controlled_revision = ^revision
+    progress.stale_reason = None
+}
+pub fn jet_cli_learn_transfer_checked<F: JetCLILearnFixtures>(lesson: JetCLILearningTask, progress: &JetCLILearnProgress, revision: ^String, result: JetCLILearnEvaluation, fixtures: F) Never! {
+    progress.transfer_completed = true
+    progress.transfer_revision = ^revision
+    primary_solution :: fixtures.text(lesson.source.solution_path) ?? ""
+    transfer_solution :: fixtures.text(lesson.transfer.fixture.solution_path) ?? ""
+    primary_source :: fixtures.text(lesson.source.path) ?? ""
+    progress.transfer_evidence = transfer_solution != primary_solution && transfer_solution != primary_source && jet_cli_learn_evaluation_complete(result)
+    progress.stale_reason = None
+}
+pub fn jet_cli_learn_digest_text(text: String) -> String Never! { mir_sha256_hex(text) }
+
+// Publication gates (not substitute implementations):
+// - Foundation Registry/Diagnostics publishes diagnostic_is_whitespace_at in
+//   port-compiler; Main propagates that same public body (no second decoder).
+// - Foundation Derivations owns derivation_record_status_value (port-compiler).
+// - embed_file must retain this file's origin and repository project root for
+//   the 25 exact authored assets; an assembled temporary file is not the origin.
+// - packet0611 InterpreterBoundary only scans execution boundaries; it is NOT
+//   the development-iteration/snapshot provider. That callable is still absent
+//   from the searched Eval/Driver owners and wave INDEX, not a guessed API.
+
+// Canonical CLI output routing, no process exit or native terminal shim.
+pub fn jet_cli_learn_status_output(lesson: JetCLILearningTask, progress: JetCLILearnProgress, derivation: DerivationRecord?, mode: JetCLIOutputMode, style: JetCLILearnStyle) -> JetDriverVerbOutput Never! {
+    stdout :: if mode.json -> "{jet_cli_learn_status_envelope(lesson, progress, derivation).json()}\n" else if mode.quiet -> "" else -> jet_cli_learn_print_status(lesson, progress, style)
+    JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: if jet_cli_learn_progress_complete(progress) -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR}
+}
+pub fn jet_cli_learn_complete_output(curriculum: JetCLILearnCurriculum, mode: JetCLIOutputMode, style: JetCLILearnStyle) -> JetDriverVerbOutput Never! {
+    stdout :: if mode.json -> "{jet_cli_learn_complete_envelope(curriculum).json()}\n" else if mode.quiet -> "" else -> jet_cli_learn_print_complete(curriculum, style)
+    JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+pub fn jet_cli_learn_check_output(curriculum: JetCLILearnCurriculum, mode: JetCLIOutputMode, style: JetCLILearnStyle) -> JetDriverVerbOutput Never! {
+    stdout :: if mode.json -> "{jet_cli_learn_check_envelope(curriculum).json()}\n" else if mode.quiet -> "" else -> "{jet_cli_learn_status_line(style, "success", "Packaged lessons checked: {curriculum.tasks.len()} passed.")}\n{diagnostic_theme_dim(style.color, "No source files were changed by this check.")}\n"
+    JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+pub fn jet_cli_learn_error(code: String, message: String, fix: String, mode: JetCLIOutputMode) -> JetDriverVerbOutput Never! {
+    refusal :: jet_cli_args_refuse(code, message, jet_cli_why(code), fix, mode.json)
+    JetDriverVerbOutput{stdout: refusal.stdout, stderr: if !mode.json && mode.color -> jet_cli_report(code, message, jet_cli_why(code), fix, true) else -> refusal.stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+}
+
+// Rust evaluate1219–1232: classify actual Ran outputs. Calling the canonical
+// compiler/runtime and selecting its current derivation remain separate gates.
+pub fn jet_cli_learn_evaluated_run(stdout: ^String, stderr: ^String, exit_code: Int, expected_output: String, derivation: ^DerivationRecord?) -> JetCLILearnEvaluation Never! {
+    if exit_code == 0 && stdout == expected_output -> return JetCLILearnEvaluation.Complete{stdout: ^stdout, stderr: ^stderr, derivation: ^derivation}
+    JetCLILearnEvaluation.WrongOutput{stdout: ^stdout, stderr: ^stderr, derivation: ^derivation}
+}
+pub fn jet_cli_learn_watch_prompt(display_path: String, style: JetCLILearnStyle) -> String Never! {
+    "{jet_cli_learn_status_line(style, "WAIT", "Watching {display_path}. Save the file to run the check again.")}\nPress Ctrl+C to exit. Run 'jet learn' to resume.\n"
+}
+pub fn jet_cli_learn_recheck(label: String, style: JetCLILearnStyle) -> String Never! {
+    "{jet_cli_learn_status_line(style, "CHECK", "Rechecking {label}.")}\n"
+}
+pub fn jet_cli_learn_controlled_feedback(display_path: String, style: JetCLILearnStyle) -> String Never! {
+    "{jet_cli_learn_status_line(style, "success", "The controlled change now passes the check.")}\n{jet_cli_learn_frame(style, "CHANGE / passed", [String]{"Checked file: {display_path}", "The edit changed the requested behavior and still passes the lesson check."})}\n"
+}
+pub fn jet_cli_learn_transfer_feedback(lesson: JetCLILearningTask, display_path: String, style: JetCLILearnStyle) -> String Never! {
+    "{jet_cli_learn_status_line(style, "success", "The transfer check passes with a different source shape.")}\n{jet_cli_learn_frame(style, "TRANSFER / passed", [String]{~lesson.transfer.structural_difference, "Checked file: {display_path}"})}\n"
+}
+pub fn jet_cli_learn_lesson_complete(lesson: JetCLILearningTask, style: JetCLILearnStyle) -> String Never! {
+    "{jet_cli_learn_frame(style, "LESSON COMPLETE", [String]{"{lesson.concept} is complete.", "You predicted, checked the source, made a controlled change, and solved a different example."})}\n"
+}

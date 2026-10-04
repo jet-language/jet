@@ -1,0 +1,98 @@
+// Rust Source/CmdTest.rs:25-189. Foreign binding validation is independent
+// of the Foundation verdict engine; no equality/proof policy lives here.
+use core.encoding.[DataTree]
+
+pub JET_CLI_TEST_COMPARE_SOURCE :: "jet.test-compare"
+pub JET_CLI_TEST_COMPARE_TOOL :: "jet"
+pub JET_CLI_TEST_COMPARE_TARGET :: "recorded-corpus"
+pub struct JetCLITestComparisonBinding {
+    pub boundary_digest: String?
+    pub source_identity: String?
+    pub replacement_identity: String?
+    pub tool_identity: String?
+    pub target_identity: String?
+    pub coverage_digest: String?
+    pub assumptions: [String]
+}
+
+// Rust validate_binding_shape (CmdTest.rs:39-95), root aliases are rejected
+// before nested-object shape, which is rejected before nested aliases.
+pub fn jet_cli_test_comparison_validate_binding_shape(root: DataTree) JetCLITestError! {
+    if root == .Object(object) {
+        root_aliases :: [String]{"foreign", "foreign-binding", "boundary_digest", "boundary-digest", "boundary", "source_identity", "source-identity", "replacement_identity", "replacement-identity", "tool_identity", "tool-identity", "target_identity", "target-identity", "coverage_digest", "coverage-digest", "coverage", "assumptions"}
+        loop key in root_aliases {
+            if object.has_key(key) -> return Err(jet_cli_test_option_error("foreign binding field `{key}` must be nested under `foreign_binding`"))
+        }
+        if !object.has_key("foreign_binding") -> return
+        if object["foreign_binding"] == .Object(binding) {
+            nested_aliases :: [String]{"foreign", "foreign-binding", "foreign_binding", "boundary-digest", "boundary", "source-identity", "source", "replacement-identity", "replacement", "tool-identity", "tool", "target-identity", "target", "coverage-digest", "coverage"}
+            loop key in nested_aliases {
+                if binding.has_key(key) -> return Err(jet_cli_test_option_error("foreign binding field `{key}` is not a canonical snake_case field"))
+            }
+        } else {
+            return Err(jet_cli_test_option_error("`foreign_binding` must be an object"))
+        }
+    }
+}
+
+// Rust binding_text (CmdTest.rs:153-166), values retain original spelling;
+// whitespace is only the emptiness check, never a normalization.
+fn jet_cli_test_comparison_binding_text(binding: [String:DataTree], key: String) -> String? JetCLITestError! {
+    if !binding.has_key(key) -> return Ok(None)
+    if binding[key] == .Text(text) {
+        if text.trim() == "" -> return Err(jet_cli_test_option_error("foreign binding `{key}` must not be empty"))
+        return Ok(Val(~text))
+    }
+    Err(jet_cli_test_option_error("foreign binding `{key}` must be a string"))
+}
+
+// Rust binding_strings (CmdTest.rs:168-189), validate in input order before
+// deterministic sort/dedup, so the first invalid entry has Rust precedence.
+fn jet_cli_test_comparison_binding_strings(binding: [String:DataTree], key: String) -> [String] JetCLITestError! {
+    values := [String]{}
+    if !binding.has_key(key) -> return Ok(values)
+    if binding[key] == .Array(entries) {
+        seen := [String:Bool]{}
+        loop entry in entries {
+            if entry == .Text(text) {
+                if text.trim() == "" -> return Err(jet_cli_test_option_error("foreign binding `{key}` entries must not be empty"))
+                if !seen.has_key(text) {
+                    seen[text] = true
+                    &values.push(~text)
+                }
+            } else {
+                return Err(jet_cli_test_option_error("foreign binding `{key}` entries must be strings"))
+            }
+        }
+        &values.sort()
+        return Ok(values)
+    }
+    Err(jet_cli_test_option_error("foreign binding `{key}` must be an array"))
+}
+
+// Rust ComparisonBinding::from_root (CmdTest.rs:97-122), required-fields
+// refusal comes only after field types and assumptions have been validated.
+pub fn jet_cli_test_comparison_binding_from_root(root: DataTree) -> JetCLITestComparisonBinding JetCLITestError! {
+    jet_cli_test_comparison_validate_binding_shape(root)
+    fields := [String:DataTree]{}
+    if root == .Object(object) {
+        if object.has_key("foreign_binding") {
+            // Shape was checked above; iterate/index borrowed in that branch
+            // rather than copying a nested binding tree into a local map.
+            if object["foreign_binding"] == .Object(binding) -> return jet_cli_test_comparison_binding_from_fields(binding)
+        }
+    }
+    jet_cli_test_comparison_binding_from_fields(fields)
+}
+fn jet_cli_test_comparison_binding_from_fields(fields: [String:DataTree]) -> JetCLITestComparisonBinding JetCLITestError! {
+    binding :: JetCLITestComparisonBinding{
+        boundary_digest: jet_cli_test_comparison_binding_text(fields, "boundary_digest"),
+        source_identity: jet_cli_test_comparison_binding_text(fields, "source_identity"),
+        replacement_identity: jet_cli_test_comparison_binding_text(fields, "replacement_identity"),
+        tool_identity: jet_cli_test_comparison_binding_text(fields, "tool_identity"),
+        target_identity: jet_cli_test_comparison_binding_text(fields, "target_identity"),
+        coverage_digest: jet_cli_test_comparison_binding_text(fields, "coverage_digest"),
+        assumptions: jet_cli_test_comparison_binding_strings(fields, "assumptions")}
+    if binding.boundary_digest == None || binding.source_identity == None || binding.replacement_identity == None || binding.tool_identity == None || binding.target_identity == None || binding.coverage_digest == None -> return Err(jet_cli_test_option_error("`foreign_binding` requires boundary_digest, source_identity, replacement_identity, tool_identity, target_identity, and coverage_digest"))
+    Ok(binding)
+}

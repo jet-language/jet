@@ -1,0 +1,213 @@
+// Canonical inspect plane grammar (crates/jet-cli/src/CLI.rs:370-610).
+// Scope selection is independent of filesystem resolution and flag validation.
+
+// Rust `InspectPlane` (CLI.rs:371-381).
+pub enum JetCLIInspectPlane {
+    Types
+    Rights
+    Claims
+    Shapes
+    Accel
+    Decisions
+    Structure
+    Build
+    Gates
+}
+
+// Rust `InspectPlane::ALL` (CLI.rs:384-394).
+pub JET_CLI_INSPECT_PLANES :: [JetCLIInspectPlane]{
+    JetCLIInspectPlane.Types, JetCLIInspectPlane.Rights, JetCLIInspectPlane.Claims,
+    JetCLIInspectPlane.Shapes, JetCLIInspectPlane.Accel, JetCLIInspectPlane.Decisions,
+    JetCLIInspectPlane.Structure, JetCLIInspectPlane.Build, JetCLIInspectPlane.Gates,
+}
+
+// Rust `InspectPlane::name` (CLI.rs:396-408).
+pub fn jet_cli_inspect_plane_name(plane: JetCLIInspectPlane) -> String Never! {
+    if plane == {
+        .Types -> "types"
+        .Rights -> "rights"
+        .Claims -> "claims"
+        .Shapes -> "shapes"
+        .Accel -> "accel"
+        .Decisions -> "decisions"
+        .Structure -> "structure"
+        .Build -> "build"
+        .Gates -> "gates"
+    }
+}
+
+// Rust `InspectPlane::usage` (CLI.rs:410-422).
+pub fn jet_cli_inspect_plane_usage(plane: JetCLIInspectPlane) -> String Never! {
+    suffix :: if plane == {
+        .Structure -> " [--core]"
+        .Build -> " [--coverage]"
+        else -> ""
+    }
+    "{jet_cli_inspect_plane_name(plane)} [TARGET]{suffix} [--live PID | --replay ARTIFACT]"
+}
+
+// Rust `InspectPlane::summary` (CLI.rs:424-436).
+pub fn jet_cli_inspect_plane_summary(plane: JetCLIInspectPlane) -> String Never! {
+    if plane == {
+        .Types -> "Show registered type and operator facts"
+        .Rights -> "Show required and granted rights"
+        .Claims -> "Show receipt-backed claims"
+        .Shapes -> "Show semantic shapes and projections"
+        .Accel -> "Show vector proof and acceleration gate decisions"
+        .Decisions -> "Show compiler decisions and their evidence"
+        .Structure -> "Show structure and lifecycle facts"
+        .Build -> "Show build identity, provenance, and coverage"
+        .Gates -> "Show the complete compile-time gate ledger"
+    }
+}
+
+// Rust `InspectPlane::parse`, `inspect_plane` (CLI.rs:439-445).
+pub fn jet_cli_inspect_plane(name: String) -> JetCLIInspectPlane? Never! {
+    loop plane in JET_CLI_INSPECT_PLANES {
+        if jet_cli_inspect_plane_name(plane) == name -> return Val(plane)
+    }
+    None
+}
+
+// Rust `InspectScope` (CLI.rs:450-455). A Live value is constrained to u32.
+pub enum JetCLIInspectScope {
+    Package
+    Target(String)
+    Live(Int)
+    Replay(String)
+}
+
+// Rust `InspectRequest` (CLI.rs:461-465).
+pub struct JetCLIInspectRequest {
+    pub plane: JetCLIInspectPlane
+    pub scope: JetCLIInspectScope
+    pub options: [String]
+}
+
+// Rust `Result<_, String>` refusal carrier; message bytes are unchanged.
+#Error
+pub struct JetCLIInspectError {
+    pub message: String
+}
+
+// Rust `parse_inspect_pid` (CLI.rs:574-582).
+// Rust u32 parsing accepts one leading '+', rejects whitespace and overflow.
+fn jet_cli_inspect_parse_pid(value: String) -> Int JetCLIInspectError! {
+    invalid :: "`--live` expects a positive process id, got `{value}`"
+    raw :: value.bytes()
+    index := if value.starts_with("+") -> 1 else -> 0
+    if index == raw.len() -> return Err(JetCLIInspectError{message: invalid})
+    pid := 0
+    loop index < raw.len() {
+        digit :: Int.from_u8(raw[index]) - 48
+        if digit < 0 || digit > 9 -> return Err(JetCLIInspectError{message: invalid})
+        if pid > (4294967295 - digit) /% 10 -> return Err(JetCLIInspectError{message: invalid})
+        pid = pid * 10 + digit
+        index += 1
+    }
+    if pid == 0 -> return Err(JetCLIInspectError{message: "`--live` expects a positive process id"})
+    Ok(pid)
+}
+
+// Rust `inspect_flag_takes_value` (CLI.rs:584-600).
+fn jet_cli_inspect_flag_takes_value(argument: String) -> Bool Never! {
+    raw :: argument.bytes()
+    name := argument
+    loop index in 0..<raw.len() {
+        if raw[index] == (U8{61}) {
+            name = String.from_bytes(raw[0..<index]) ?? argument
+            break
+        }
+    }
+    if name == {
+        "--before" | "--color" | "--facts" | "--gate" | "--kind" | "--output" |
+        "--profile" | "--scope" | "--set" | "--target" | "--topic" -> true
+        else -> false
+    }
+}
+
+// Rust `parse_inspect_args` (CLI.rs:472-572).
+pub fn jet_cli_parse_inspect_args(args: [String]) -> JetCLIInspectRequest JetCLIInspectError! {
+    if args.len() == 0 -> return Err(JetCLIInspectError{message: "inspect parser expects `jet inspect <plane>`"})
+    if args[0] != "inspect" -> return Err(JetCLIInspectError{message: "inspect parser expects `jet inspect <plane>`"})
+    choices :: "types, rights, claims, shapes, accel, decisions, structure, build, or gates"
+    if args.len() < 2 -> return Err(JetCLIInspectError{message: "missing inspect plane; choose {choices}"})
+    plane_name :: args[1]
+    plane :: jet_cli_inspect_plane(plane_name) ?? return Err(JetCLIInspectError{message: "unknown inspect plane `{plane_name}`; choose {choices}"})
+    target := String?{None}
+    live := Int?{None}
+    replay := String?{None}
+    options := [String]{}
+    index := 2
+    loop index < args.len() {
+        argument :: args[index]
+        if argument == "--live" {
+            if index + 1 >= args.len() -> return Err(JetCLIInspectError{message: "`--live` needs a process id"})
+            value :: args[index + 1]
+            live = Val(jet_cli_inspect_parse_pid(value))
+            &options.push("--live")
+            &options.push(value)
+            index += 2
+            next
+        }
+        if argument.starts_with("--live=") {
+            live = Val(jet_cli_inspect_parse_pid(argument.slice(7..<argument.len())))
+            &options.push(argument)
+            index += 1
+            next
+        }
+        if argument == "--replay" {
+            if index + 1 >= args.len() -> return Err(JetCLIInspectError{message: "`--replay` needs a replay artifact path"})
+            value :: args[index + 1]
+            if value.starts_with("-") -> return Err(JetCLIInspectError{message: "`--replay` needs a replay artifact path"})
+            replay = Val(value)
+            &options.push("--replay")
+            &options.push(value)
+            index += 2
+            next
+        }
+        if argument.starts_with("--replay=") {
+            value :: argument.slice(9..<argument.len())
+            if value == "" -> return Err(JetCLIInspectError{message: "`--replay` needs a replay artifact path"})
+            replay = Val(value)
+            &options.push(argument)
+            index += 1
+            next
+        }
+        if argument == "--" -> return Err(JetCLIInspectError{message: "inspect planes do not accept a `--` command tail"})
+        if argument.starts_with("-") {
+            &options.push(argument)
+            if jet_cli_inspect_flag_takes_value(argument) && index + 1 < args.len() {
+                value :: args[index + 1]
+                if !value.starts_with("-") {
+                    &options.push(value)
+                    index += 2
+                    next
+                }
+            }
+            index += 1
+            next
+        }
+        if target != None -> return Err(JetCLIInspectError{message: "inspect accepts at most one file or package target"})
+        target = Val(argument)
+        index += 1
+    }
+    if live != None && replay != None -> return Err(JetCLIInspectError{message: "inspect accepts at most one of `--live PID` or `--replay ARTIFACT`"})
+    if target != None && (live != None || replay != None) -> return Err(JetCLIInspectError{message: "inspect accepts a target, `--live PID`, or `--replay ARTIFACT` as one scope"})
+    scope := JetCLIInspectScope.Package
+    if target == .Val(path) -> scope = JetCLIInspectScope.Target(path)
+    if live == .Val(pid) -> scope = JetCLIInspectScope.Live(pid)
+    if replay == .Val(artifact) -> scope = JetCLIInspectScope.Replay(artifact)
+    Ok(JetCLIInspectRequest{plane: plane, scope: scope, options: options})
+}
+
+// Rust `inspect_plane_action` (CLI.rs:602-610); registry integration reuses it.
+pub fn jet_cli_inspect_plane_action(plane: JetCLIInspectPlane) -> JetCLIActionSpec Never! {
+    JetCLIActionSpec{
+        name: jet_cli_inspect_plane_name(plane),
+        usage: jet_cli_inspect_plane_usage(plane),
+        summary: jet_cli_inspect_plane_summary(plane),
+        handler: "InspectPlane",
+        also_canonical_top_level: false,
+    }
+}

@@ -1,0 +1,764 @@
+// PORT-PENDING 0854 crates-jetpack-src-cli-studio-server: crates/jetpack/src/CLI/studio_server.rs:1-760
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::parse::Parsed;
+//RS use super::studio_transactions::{
+//RS     handle_studio_run, handle_studio_transaction, studio_live_projection, StudioAppliedChange,
+//RS     StudioChangeSet, StudioProvedSource,
+//RS };
+//RS use crate::Output::Theme;
+//RS use crate::Syntax;
+//RS use std::collections::BTreeMap;
+//RS use std::net::{IpAddr, SocketAddr};
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS pub(super) struct StudioContext {
+//RS     pub(super) config: PathBuf,
+//RS     pub(super) host: String,
+//RS     pub(super) offline: bool,
+//RS     pub(super) session_secret: String,
+//RS     pub(super) source_write: std::sync::Mutex<()>,
+//RS     pub(super) sessions: std::sync::Mutex<std::collections::BTreeSet<String>>,
+//RS     pub(super) changeset: std::sync::Mutex<Option<StudioChangeSet>>,
+//RS     pub(super) last_applied: std::sync::Mutex<Option<StudioAppliedChange>>,
+//RS     pub(super) live_projection: std::sync::Mutex<Option<String>>,
+//RS     pub(super) proved_source: std::sync::Mutex<Option<StudioProvedSource>>,
+//RS }
+//RS 
+//RS const STUDIO_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+//RS const STUDIO_WORKER_COUNT: usize = 4;
+//RS const STUDIO_CONNECTION_QUEUE: usize = 4;
+//RS 
+//RS pub(super) fn studio_host(parsed: &Parsed) -> Option<String> {
+//RS     parsed.flags.studio_host.clone()
+//RS }
+//RS 
+//RS pub(super) fn studio_context(parsed: &Parsed) -> Option<StudioContext> {
+//RS     let project = parsed
+//RS         .positional
+//RS         .iter()
+//RS         .find(|arg| !arg.starts_with('-'))
+//RS         .map(PathBuf::from)
+//RS         .unwrap_or_else(|| PathBuf::from("."));
+//RS     let config = if project.is_dir() {
+//RS         project.join(Syntax::CONFIG_FILE)
+//RS     } else {
+//RS         project
+//RS     };
+//RS     let host = studio_host(parsed).unwrap_or_else(|| "host".to_string());
+//RS     let offline = parsed.flags.offline;
+//RS     let session_secret = studio_session_secret()?;
+//RS     Some(StudioContext {
+//RS         config,
+//RS         host,
+//RS         offline,
+//RS         session_secret,
+//RS         source_write: std::sync::Mutex::new(()),
+//RS         sessions: std::sync::Mutex::new(std::collections::BTreeSet::new()),
+//RS         changeset: std::sync::Mutex::new(None),
+//RS         last_applied: std::sync::Mutex::new(None),
+//RS         live_projection: std::sync::Mutex::new(None),
+//RS         proved_source: std::sync::Mutex::new(None),
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn serve_studio(
+//RS     theme: &Theme,
+//RS     addr: &str,
+//RS     app: &Path,
+//RS     meta: &Path,
+//RS     data: &Path,
+//RS     context: Option<&StudioContext>,
+//RS     open_browser: bool,
+//RS ) -> i32 {
+//RS     let Some(context) = context else {
+//RS         theme.error(
+//RS             "jetos Studio could not start its secure service",
+//RS             "the operating system did not provide a secure session secret",
+//RS             "retry `jetos studio` after restoring the OS random source.",
+//RS         );
+//RS         return 2;
+//RS     };
+//RS     let listener = match std::net::TcpListener::bind(addr) {
+//RS         Ok(listener) => listener,
+//RS         Err(e) => {
+//RS             theme.error(
+//RS                 "jetos Studio could not bind the local service",
+//RS                 &format!("binding `{addr}` failed: {e}"),
+//RS                 "choose a free loopback address, for example `--serve 127.0.0.1:7417`.",
+//RS             );
+//RS             return 2;
+//RS         }
+//RS     };
+//RS     let local_addr = match listener.local_addr() {
+//RS         Ok(addr) => addr,
+//RS         Err(error) => {
+//RS             theme.error(
+//RS                 "jetos Studio could not start its secure service",
+//RS                 &format!("reading the bound address failed: {error}"),
+//RS                 "retry `jetos studio --serve`.",
+//RS             );
+//RS             return 2;
+//RS         }
+//RS     };
+//RS     let local = local_addr.to_string();
+//RS     let url = format!("http://{local}/studio/?session={}", context.session_secret);
+//RS     println!("{url}");
+//RS     theme.ok("Jetos Studio Service Listening");
+//RS     if open_browser {
+//RS         match std::process::Command::new("xdg-open").arg(&url).spawn() {
+//RS             Ok(_) => theme.ok("Opened Jetos Studio"),
+//RS             Err(_) => {
+//RS                 theme.detail("open the printed Studio URL in a browser.");
+//RS             }
+//RS         }
+//RS     }
+//RS     with_studio_workers(app, meta, data, context, local_addr, |sender| {
+//RS         for stream in listener.incoming() {
+//RS             match stream {
+//RS                 Ok(stream) => {
+//RS                     let _ = queue_studio_connection(sender, stream);
+//RS                 }
+//RS                 Err(e) => {
+//RS                     theme.error(
+//RS                         "jetos Studio service connection failed",
+//RS                         &format!("accepting a local connection failed: {e}"),
+//RS                         "restart `jetos studio --serve`.",
+//RS                     );
+//RS                     return 2;
+//RS                 }
+//RS             }
+//RS         }
+//RS         0
+//RS     })
+//RS }
+//RS 
+//RS fn with_studio_workers<T>(
+//RS     app: &Path,
+//RS     meta: &Path,
+//RS     data: &Path,
+//RS     context: &StudioContext,
+//RS     local_addr: SocketAddr,
+//RS     serve: impl FnOnce(&std::sync::mpsc::SyncSender<std::net::TcpStream>) -> T,
+//RS ) -> T {
+//RS     std::thread::scope(|scope| {
+//RS         let (sender, receiver) = std::sync::mpsc::sync_channel(STUDIO_CONNECTION_QUEUE);
+//RS         let receiver = std::sync::Arc::new(std::sync::Mutex::new(receiver));
+//RS         let mut workers = Vec::with_capacity(STUDIO_WORKER_COUNT);
+//RS         for _ in 0..STUDIO_WORKER_COUNT {
+//RS             let receiver = std::sync::Arc::clone(&receiver);
+//RS             workers.push(scope.spawn(move || loop {
+//RS                 let stream = match receiver.lock() {
+//RS                     Ok(receiver) => receiver.recv(),
+//RS                     Err(_) => return,
+//RS                 };
+//RS                 let Ok(mut stream) = stream else {
+//RS                     return;
+//RS                 };
+//RS                 let _ = handle_studio_request(&mut stream, app, meta, data, context, local_addr);
+//RS             }));
+//RS         }
+//RS         let result = serve(&sender);
+//RS         drop(sender);
+//RS         for worker in workers {
+//RS             let _ = worker.join();
+//RS         }
+//RS         result
+//RS     })
+//RS }
+//RS 
+//RS fn queue_studio_connection(
+//RS     sender: &std::sync::mpsc::SyncSender<std::net::TcpStream>,
+//RS     stream: std::net::TcpStream,
+//RS ) -> bool {
+//RS     let _ = configure_studio_stream(&stream);
+//RS     match sender.try_send(stream) {
+//RS         Ok(()) => true,
+//RS         Err(std::sync::mpsc::TrySendError::Full(_))
+//RS         | Err(std::sync::mpsc::TrySendError::Disconnected(_)) => false,
+//RS     }
+//RS }
+//RS 
+//RS fn configure_studio_stream(stream: &std::net::TcpStream) -> std::io::Result<()> {
+//RS     stream.set_read_timeout(Some(STUDIO_IO_TIMEOUT))?;
+//RS     stream.set_write_timeout(Some(STUDIO_IO_TIMEOUT))
+//RS }
+//RS 
+//RS fn handle_studio_request(
+//RS     stream: &mut std::net::TcpStream,
+//RS     app: &Path,
+//RS     meta: &Path,
+//RS     data: &Path,
+//RS     context: &StudioContext,
+//RS     local_addr: SocketAddr,
+//RS ) -> std::io::Result<()> {
+//RS     let request_bytes = read_http_request(stream)?;
+//RS     let Some(request) = parse_studio_request(&request_bytes) else {
+//RS         return studio_write_response(
+//RS             stream,
+//RS             "400 Bad Request",
+//RS             "text/plain; charset=utf-8",
+//RS             b"malformed Studio request\n",
+//RS             None,
+//RS         );
+//RS     };
+//RS     if !studio_request_authorized(&request, context, local_addr) {
+//RS         return studio_write_response(
+//RS             stream,
+//RS             "401 Unauthorized",
+//RS             "text/plain; charset=utf-8",
+//RS             b"Studio session, host, or origin rejected\n",
+//RS             None,
+//RS         );
+//RS     }
+//RS     let method = request.method.as_str();
+//RS     let path = request.target.split('?').next().unwrap_or("/");
+//RS     if method == "POST" && path == "/studio/transaction" {
+//RS         let (status, body) = handle_studio_transaction(&request.body, Some(context));
+//RS         return studio_write_response(stream, status, "application/json", body.as_bytes(), None);
+//RS     }
+//RS     if method == "POST" && path == "/studio/run" {
+//RS         let (status, body) = handle_studio_run(&request.body, Some(context));
+//RS         return studio_write_response(stream, status, "application/json", body.as_bytes(), None);
+//RS     }
+//RS     let (status, content_type, body, set_cookie) = match path {
+//RS         "/" | "/studio" | "/studio/" | "/studio/index.html" => {
+//RS             (
+//RS                 "200 OK",
+//RS                 "text/html; charset=utf-8",
+//RS                 fs_read_for_http(app),
+//RS                 Some(context.session_secret.as_str()),
+//RS             )
+//RS         }
+//RS         "/studio/app.json" => (
+//RS             "200 OK",
+//RS             "application/json",
+//RS             fs_read_for_http(meta),
+//RS             None,
+//RS         ),
+//RS         "/studio/data.json" => match studio_live_projection(context, data) {
+//RS             Ok(body) => ("200 OK", "application/json", body.into_bytes(), None),
+//RS             Err(body) => (
+//RS                 "500 Internal Server Error",
+//RS                 "application/json",
+//RS                 body.into_bytes(),
+//RS                 None,
+//RS             ),
+//RS         },
+//RS         "/studio/source" => (
+//RS             "200 OK",
+//RS             "text/plain; charset=utf-8",
+//RS             fs_read_for_http(&context.config),
+//RS             None,
+//RS         ),
+//RS         _ => (
+//RS             "404 Not Found",
+//RS             "text/plain; charset=utf-8",
+//RS             b"not found\n".to_vec(),
+//RS             None,
+//RS         ),
+//RS     };
+//RS     studio_write_response(stream, status, content_type, &body, set_cookie)
+//RS }
+//RS 
+//RS struct StudioRequest {
+//RS     method: String,
+//RS     target: String,
+//RS     headers: BTreeMap<String, String>,
+//RS     body: String,
+//RS }
+//RS 
+//RS fn studio_session_secret() -> Option<String> {
+//RS     const HEX: &[u8; 16] = b"0123456789abcdef";
+//RS     let bytes = crate::TrustRoot::os_random_bytes::<32>().ok()?;
+//RS     let mut secret = String::with_capacity(bytes.len() * 2);
+//RS     for byte in bytes {
+//RS         secret.push(HEX[(byte >> 4) as usize] as char);
+//RS         secret.push(HEX[(byte & 0x0f) as usize] as char);
+//RS     }
+//RS     Some(secret)
+//RS }
+//RS 
+//RS fn parse_studio_request(bytes: &[u8]) -> Option<StudioRequest> {
+//RS     let header_end = bytes.windows(4).position(|window| window == b"\r\n\r\n")?;
+//RS     let header_end = header_end + 4;
+//RS     let headers = std::str::from_utf8(&bytes[..header_end]).ok()?;
+//RS     let mut lines = headers.split("\r\n");
+//RS     let mut request_line = lines.next()?.split_whitespace();
+//RS     let method = request_line.next()?;
+//RS     let target = request_line.next()?;
+//RS     if request_line.next()? != "HTTP/1.1" || request_line.next().is_some() {
+//RS         return None;
+//RS     }
+//RS     let mut parsed_headers = BTreeMap::new();
+//RS     for line in lines {
+//RS         if line.is_empty() {
+//RS             continue;
+//RS         }
+//RS         let (name, value) = line.split_once(':')?;
+//RS         let name = name.trim().to_ascii_lowercase();
+//RS         if name.is_empty()
+//RS             || parsed_headers
+//RS                 .insert(name, value.trim().to_string())
+//RS                 .is_some()
+//RS         {
+//RS             return None;
+//RS         }
+//RS     }
+//RS     let body = String::from_utf8_lossy(&bytes[header_end..]).into_owned();
+//RS     Some(StudioRequest {
+//RS         method: method.to_string(),
+//RS         target: target.to_string(),
+//RS         headers: parsed_headers,
+//RS         body,
+//RS     })
+//RS }
+//RS 
+//RS fn studio_request_authorized(
+//RS     request: &StudioRequest,
+//RS     context: &StudioContext,
+//RS     local_addr: SocketAddr,
+//RS ) -> bool {
+//RS     if !matches!(request.method.as_str(), "GET" | "POST") {
+//RS         return false;
+//RS     }
+//RS     let Some(host) = request.headers.get("host") else {
+//RS         return false;
+//RS     };
+//RS     if !studio_host_allowed(host, local_addr) {
+//RS         return false;
+//RS     }
+//RS     let origin = request.headers.get("origin");
+//RS     if let Some(origin) = origin {
+//RS         if !studio_origin_allowed(origin, host, local_addr) {
+//RS             return false;
+//RS         }
+//RS     }
+//RS     if request.method == "POST" {
+//RS         if origin.is_none()
+//RS             || !request.headers.get("content-type").is_some_and(|value| {
+//RS                 value.split(';').next().is_some_and(|media_type| {
+//RS                     media_type.trim().eq_ignore_ascii_case("application/json")
+//RS                 })
+//RS             })
+//RS             || !request.headers.contains_key("content-length")
+//RS         {
+//RS             return false;
+//RS         }
+//RS     }
+//RS     let query_session = match studio_query_session(&request.target) {
+//RS         Ok(session) => session,
+//RS         Err(()) => return false,
+//RS     };
+//RS     let cookie_session = match request.headers.get("cookie") {
+//RS         Some(cookie) => match studio_cookie_session(cookie) {
+//RS             Ok(session) => session,
+//RS             Err(()) => return false,
+//RS         },
+//RS         None => None,
+//RS     };
+//RS     let mut authenticated = false;
+//RS     if let Some(authorization) = request.headers.get("authorization") {
+//RS         let Some(token) = authorization.strip_prefix("Bearer ") else {
+//RS             return false;
+//RS         };
+//RS         if !constant_time_equal(token, &context.session_secret) {
+//RS             return false;
+//RS         }
+//RS         authenticated = true;
+//RS     }
+//RS     if let Some(session) = query_session.as_deref() {
+//RS         if !constant_time_equal(session, &context.session_secret) {
+//RS             return false;
+//RS         }
+//RS         authenticated = true;
+//RS     }
+//RS     if let Some(session) = cookie_session {
+//RS         if !constant_time_equal(session, &context.session_secret) {
+//RS             return false;
+//RS         }
+//RS         if request.method == "GET"
+//RS             && origin.is_none()
+//RS             && !request
+//RS                 .headers
+//RS                 .get("sec-fetch-site")
+//RS                 .is_some_and(|site| site.eq_ignore_ascii_case("same-origin"))
+//RS         {
+//RS             return false;
+//RS         }
+//RS         authenticated = true;
+//RS     }
+//RS     authenticated
+//RS }
+//RS 
+//RS fn studio_query_session(target: &str) -> Result<Option<String>, ()> {
+//RS     let Some((_, query)) = target.split_once('?') else {
+//RS         return Ok(None);
+//RS     };
+//RS     let mut session = None;
+//RS     for part in query.split('&') {
+//RS         let (name, value) = part.split_once('=').unwrap_or((part, ""));
+//RS         if name == "session" {
+//RS             if session.is_some() {
+//RS                 return Err(());
+//RS             }
+//RS             session = Some(value.to_string());
+//RS         }
+//RS     }
+//RS     Ok(session)
+//RS }
+//RS 
+//RS fn studio_cookie_session(value: &str) -> Result<Option<&str>, ()> {
+//RS     let mut session = None;
+//RS     for part in value.split(';') {
+//RS         let (name, value) = part.trim().split_once('=').unwrap_or((part.trim(), ""));
+//RS         if name == "jetos_studio" {
+//RS             if session.is_some() {
+//RS                 return Err(());
+//RS             }
+//RS             session = Some(value);
+//RS         }
+//RS     }
+//RS     Ok(session)
+//RS }
+//RS 
+//RS fn studio_host_allowed(value: &str, local_addr: SocketAddr) -> bool {
+//RS     let value = value.trim();
+//RS     let Some((host, port)) = studio_host_port(value) else {
+//RS         return false;
+//RS     };
+//RS     if port != local_addr.port() {
+//RS         return false;
+//RS     }
+//RS     if host.eq_ignore_ascii_case("localhost") {
+//RS         return local_addr.ip().is_loopback() || local_addr.ip().is_unspecified();
+//RS     }
+//RS     let Ok(ip) = host.parse::<IpAddr>() else {
+//RS         return false;
+//RS     };
+//RS     ip == local_addr.ip()
+//RS         || local_addr.ip().is_unspecified()
+//RS         || (local_addr.ip().is_loopback() && ip.is_loopback())
+//RS }
+//RS 
+//RS fn studio_host_port(value: &str) -> Option<(&str, u16)> {
+//RS     if let Some(value) = value.strip_prefix('[') {
+//RS         let end = value.find(']')?;
+//RS         let host = &value[..end];
+//RS         let port = value.get(end + 1..)?.strip_prefix(':')?.parse().ok()?;
+//RS         return Some((host, port));
+//RS     }
+//RS     let (host, port) = value.rsplit_once(':')?;
+//RS     if host.contains(':') {
+//RS         return None;
+//RS     }
+//RS     Some((host, port.parse().ok()?))
+//RS }
+//RS 
+//RS fn studio_origin_allowed(value: &str, host: &str, local_addr: SocketAddr) -> bool {
+//RS     let Some(origin_host) = value.trim().strip_prefix("http://") else {
+//RS         return false;
+//RS     };
+//RS     !origin_host.contains('/')
+//RS         && studio_host_allowed(origin_host, local_addr)
+//RS         && origin_host.eq_ignore_ascii_case(host.trim())
+//RS }
+//RS 
+//RS fn constant_time_equal(left: &str, right: &str) -> bool {
+//RS     let left = left.as_bytes();
+//RS     let right = right.as_bytes();
+//RS     let mut difference = left.len() ^ right.len();
+//RS     for index in 0..left.len().max(right.len()) {
+//RS         difference |= left.get(index).copied().unwrap_or(0) as usize
+//RS             ^ right.get(index).copied().unwrap_or(0) as usize;
+//RS     }
+//RS     difference == 0
+//RS }
+//RS 
+//RS fn studio_write_response(
+//RS     stream: &mut std::net::TcpStream,
+//RS     status: &str,
+//RS     content_type: &str,
+//RS     body: &[u8],
+//RS     set_cookie: Option<&str>,
+//RS ) -> std::io::Result<()> {
+//RS     use std::io::Write;
+//RS     let cookie = set_cookie
+//RS         .map(|session| {
+//RS             format!(
+//RS                 "Set-Cookie: jetos_studio={session}; Path=/studio; HttpOnly; SameSite=Strict\r\n"
+//RS             )
+//RS         })
+//RS         .unwrap_or_default();
+//RS     write!(
+//RS         stream,
+//RS         "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n{}Connection: close\r\n\r\n",
+//RS         body.len(),
+//RS         cookie
+//RS     )?;
+//RS     stream.write_all(body)
+//RS }
+//RS 
+//RS fn fs_read_for_http(path: &Path) -> Vec<u8> {
+//RS     std::fs::read(path).unwrap_or_else(|_| b"missing\n".to_vec())
+//RS }
+//RS 
+//RS fn read_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<Vec<u8>> {
+//RS     read_http_request_until(stream, std::time::Instant::now() + STUDIO_IO_TIMEOUT)
+//RS }
+//RS 
+//RS fn read_http_request_until(
+//RS     stream: &mut std::net::TcpStream,
+//RS     deadline: std::time::Instant,
+//RS ) -> std::io::Result<Vec<u8>> {
+//RS     use std::io::Read;
+//RS     let mut buf = Vec::new();
+//RS     let mut chunk = [0_u8; 1024];
+//RS     loop {
+//RS         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+//RS         if remaining.is_zero() {
+//RS             return Err(std::io::Error::new(
+//RS                 std::io::ErrorKind::TimedOut,
+//RS                 "Studio request deadline exceeded",
+//RS             ));
+//RS         }
+//RS         stream.set_read_timeout(Some(remaining))?;
+//RS         let n = stream.read(&mut chunk)?;
+//RS         if n == 0 {
+//RS             break;
+//RS         }
+//RS         buf.extend_from_slice(&chunk[..n]);
+//RS         if http_request_complete(&buf) || buf.len() > 64 * 1024 {
+//RS             break;
+//RS         }
+//RS     }
+//RS     Ok(buf)
+//RS }
+//RS 
+//RS fn http_request_complete(buf: &[u8]) -> bool {
+//RS     let Some(header_end) = buf.windows(4).position(|w| w == b"\r\n\r\n").map(|p| p + 4) else {
+//RS         return false;
+//RS     };
+//RS     let headers = String::from_utf8_lossy(&buf[..header_end]);
+//RS     let content_len = headers
+//RS         .lines()
+//RS         .find_map(|line| {
+//RS             let (key, value) = line.split_once(':')?;
+//RS             key.eq_ignore_ascii_case("content-length")
+//RS                 .then(|| value.trim().parse::<usize>().ok())
+//RS                 .flatten()
+//RS         })
+//RS         .unwrap_or(0);
+//RS     buf.len().saturating_sub(header_end) >= content_len
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     fn test_studio_context(session_secret: &str) -> StudioContext {
+//RS         StudioContext {
+//RS             config: PathBuf::from("missing/config.jet"),
+//RS             host: "test".to_string(),
+//RS             offline: true,
+//RS             session_secret: session_secret.to_string(),
+//RS             source_write: std::sync::Mutex::new(()),
+//RS             sessions: std::sync::Mutex::new(std::collections::BTreeSet::new()),
+//RS             changeset: std::sync::Mutex::new(None),
+//RS             last_applied: std::sync::Mutex::new(None),
+//RS             live_projection: std::sync::Mutex::new(None),
+//RS             proved_source: std::sync::Mutex::new(None),
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn studio_slowloris_connections_have_io_deadlines() {
+//RS         use std::io::Write;
+//RS 
+//RS         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS         let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+//RS         let (mut server, _) = listener.accept().unwrap();
+//RS 
+//RS         configure_studio_stream(&server).unwrap();
+//RS         assert_eq!(server.read_timeout().unwrap(), Some(STUDIO_IO_TIMEOUT));
+//RS         assert_eq!(server.write_timeout().unwrap(), Some(STUDIO_IO_TIMEOUT));
+//RS         server
+//RS             .set_read_timeout(Some(std::time::Duration::from_millis(20)))
+//RS             .unwrap();
+//RS         let writer = std::thread::spawn(move || {
+//RS             let mut client = client;
+//RS             for _ in 0..200 {
+//RS                 if client.write_all(b"G").is_err() {
+//RS                     break;
+//RS                 }
+//RS                 std::thread::sleep(std::time::Duration::from_millis(5));
+//RS             }
+//RS         });
+//RS         let started = std::time::Instant::now();
+//RS         let error = read_http_request_until(
+//RS             &mut server,
+//RS             started + std::time::Duration::from_millis(80),
+//RS         )
+//RS         .unwrap_err();
+//RS         assert!(
+//RS             matches!(
+//RS                 error.kind(),
+//RS                 std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+//RS             ),
+//RS             "partial request should hit the read deadline: {error}"
+//RS         );
+//RS         assert!(started.elapsed() < std::time::Duration::from_millis(500));
+//RS         drop(server);
+//RS         writer.join().unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn studio_slowloris_does_not_starve_later_clients() {
+//RS         use std::io::{Read, Write};
+//RS         use std::sync::mpsc;
+//RS         use std::time::{Duration, Instant};
+//RS 
+//RS         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS         let local_addr = listener.local_addr().unwrap();
+//RS         let context = test_studio_context("slowloris-secret");
+//RS         let app = PathBuf::from("missing/studio/index.html");
+//RS         let meta = PathBuf::from("missing/studio/app.json");
+//RS         let data = PathBuf::from("missing/studio/data.json");
+//RS         let partial_secret = context.session_secret.clone();
+//RS         let complete_secret = context.session_secret.clone();
+//RS         let (partial_ready_tx, partial_ready_rx) = mpsc::channel();
+//RS         let (release_partial_tx, release_partial_rx) = mpsc::channel();
+//RS         let (accepted_partial_tx, accepted_partial_rx) = mpsc::channel();
+//RS         let (complete_result_tx, complete_result_rx) = mpsc::channel();
+//RS 
+//RS         std::thread::scope(|scope| {
+//RS             scope.spawn(move || {
+//RS                 let mut client = std::net::TcpStream::connect(local_addr).unwrap();
+//RS                 write!(
+//RS                     client,
+//RS                     "GET /studio/app.json?session={} HTTP/1.1\r\nHost: {local_addr}\r\n",
+//RS                     partial_secret
+//RS                 )
+//RS                 .unwrap();
+//RS                 partial_ready_tx.send(()).unwrap();
+//RS                 release_partial_rx.recv().unwrap();
+//RS             });
+//RS             partial_ready_rx.recv().unwrap();
+//RS 
+//RS             let server = scope.spawn(|| {
+//RS                 with_studio_workers(
+//RS                     &app,
+//RS                     &meta,
+//RS                     &data,
+//RS                     &context,
+//RS                     local_addr,
+//RS                     |sender| {
+//RS                         let (stream, _) = listener.accept().unwrap();
+//RS                         let accepted = queue_studio_connection(sender, stream);
+//RS                         accepted_partial_tx.send(accepted).unwrap();
+//RS                         let (stream, _) = listener.accept().unwrap();
+//RS                         assert!(queue_studio_connection(sender, stream));
+//RS                         0
+//RS                     },
+//RS                 )
+//RS             });
+//RS             assert!(accepted_partial_rx.recv().unwrap());
+//RS 
+//RS             let complete = scope.spawn(move || {
+//RS                 let result: Result<Duration, String> = (|| {
+//RS                     let started = Instant::now();
+//RS                     let mut client =
+//RS                         std::net::TcpStream::connect(local_addr).map_err(|error| error.to_string())?;
+//RS                     write!(
+//RS                         client,
+//RS                         "GET /studio/app.json?session={complete_secret} HTTP/1.1\r\nHost: {local_addr}\r\nConnection: close\r\n\r\n"
+//RS                     )
+//RS                     .map_err(|error| error.to_string())?;
+//RS                     client
+//RS                         .set_read_timeout(Some(Duration::from_secs(2)))
+//RS                         .map_err(|error| error.to_string())?;
+//RS                     let mut response = Vec::new();
+//RS                     client
+//RS                         .read_to_end(&mut response)
+//RS                         .map_err(|error| error.to_string())?;
+//RS                     if !response.starts_with(b"HTTP/1.1 200 OK\r\n") {
+//RS                         return Err(format!(
+//RS                             "complete Studio request failed: {}",
+//RS                             String::from_utf8_lossy(&response)
+//RS                         ));
+//RS                     }
+//RS                     Ok(started.elapsed())
+//RS                 })();
+//RS                 let _ = release_partial_tx.send(());
+//RS                 complete_result_tx.send(result).unwrap();
+//RS             });
+//RS 
+//RS             let elapsed = complete_result_rx.recv().unwrap().unwrap();
+//RS             assert!(
+//RS                 elapsed < STUDIO_IO_TIMEOUT,
+//RS                 "later request waited {:?} behind the partial request",
+//RS                 elapsed
+//RS             );
+//RS             complete.join().unwrap();
+//RS             assert_eq!(server.join().unwrap(), 0);
+//RS         });
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn studio_connection_cap_refuses_excess_without_leaking() {
+//RS         use std::io::Write;
+//RS         use std::sync::atomic::{AtomicBool, Ordering};
+//RS         use std::sync::{mpsc, Arc};
+//RS 
+//RS         let total = STUDIO_WORKER_COUNT + STUDIO_CONNECTION_QUEUE + 1;
+//RS         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS         let local_addr = listener.local_addr().unwrap();
+//RS         let context = test_studio_context("cap-secret");
+//RS         let app = PathBuf::from("missing/studio/index.html");
+//RS         let meta = PathBuf::from("missing/studio/app.json");
+//RS         let data = PathBuf::from("missing/studio/data.json");
+//RS         let release = Arc::new(AtomicBool::new(false));
+//RS         let (connected_tx, connected_rx) = mpsc::channel();
+//RS 
+//RS         std::thread::scope(|scope| {
+//RS             for _ in 0..total {
+//RS                 let connected_tx = connected_tx.clone();
+//RS                 let release = Arc::clone(&release);
+//RS                 scope.spawn(move || {
+//RS                     let mut client = std::net::TcpStream::connect(local_addr).unwrap();
+//RS                     client.write_all(b"G").unwrap();
+//RS                     connected_tx.send(()).unwrap();
+//RS                     while !release.load(Ordering::Acquire) {
+//RS                         std::thread::yield_now();
+//RS                     }
+//RS                 });
+//RS             }
+//RS             for _ in 0..total {
+//RS                 connected_rx.recv().unwrap();
+//RS             }
+//RS 
+//RS             let server = scope.spawn(|| {
+//RS                 with_studio_workers(
+//RS                     &app,
+//RS                     &meta,
+//RS                     &data,
+//RS                     &context,
+//RS                     local_addr,
+//RS                     |sender| {
+//RS                         let mut rejected = 0;
+//RS                         for _ in 0..total {
+//RS                             let (stream, _) = listener.accept().unwrap();
+//RS                             if !queue_studio_connection(sender, stream) {
+//RS                                 rejected += 1;
+//RS                             }
+//RS                         }
+//RS                         release.store(true, Ordering::Release);
+//RS                         rejected
+//RS                     },
+//RS                 )
+//RS             });
+//RS             assert_eq!(server.join().unwrap(), 1);
+//RS         });
+//RS     }
+//RS }
+// END-PORT-PENDING 0854 crates/jetpack/src/CLI/studio_server.rs:1-760
+

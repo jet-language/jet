@@ -1,0 +1,59 @@
+// Rust CoreModuleExports/CoreSourceParts and Prelude Core/Effects declarations.
+// The generated payload stays private; callers obtain it through this accessor,
+// not a process-global table or a runtime toolchain source directory.
+pub struct FoundationCoreSource {
+    pub module_name: String
+    pub alias: String
+    pub path: String
+    pub owner: String
+    pub owned_members: [String]
+    pub source: String
+}
+
+pub struct FoundationCoreEffectDeclaration {
+    pub name: String
+    pub irreversible: Bool
+}
+
+// A stateless accessor keeps menu initialization from allocating Core bodies.
+pub enum FoundationEmbeddedCore { Embedded }
+
+pub fn foundation_embedded_core() -> FoundationEmbeddedCore Never! {
+    FoundationEmbeddedCore.Embedded
+}
+
+impl FoundationEmbeddedCore {
+    pub fn declaration_text(self) -> String Never! {
+        foundation_embedded_core_declaration_text()
+    }
+
+    pub fn effect_source(self) -> String Never! {
+        foundation_embedded_core_effect_source()
+    }
+
+    pub fn effect_declarations(self) -> [FoundationCoreEffectDeclaration] Never! {
+        foundation_embedded_core_effect_declarations()
+    }
+
+    // Rust Effects::EFFECT_ROOTS: declaration order, excluding dotted leaves.
+    pub fn effect_roots(self) -> [String] Never! {
+        roots := [String]{}
+        loop declaration in self.effect_declarations() {
+            if !declaration.name.contains(".") -> &roots.push(^declaration.name)
+        }
+        roots
+    }
+
+    pub fn builtin_tags(self) -> [String] Never! {
+        foundation_embedded_core_builtin_tags()
+    }
+
+    // Rust CoreModuleExports::core_source_modules, then CoreSourceParts.
+    pub fn public_sources(self) -> [FoundationCoreSource] Never! {
+        foundation_embedded_core_public_sources()
+    }
+
+    pub fn private_sources(self) -> [FoundationCoreSource] Never! {
+        foundation_embedded_core_private_sources()
+    }
+}

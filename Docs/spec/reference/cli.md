@@ -138,11 +138,41 @@ The options below are intentionally named exactly as in `target/debug/jet help`:
 - `--explain-partition` is the web-target build option that shows JavaScript or
   WebAssembly assignment.
 
+Development reload selection uses Foundation's shared [watch policy](../../../Compiler/JetFoundation/Source/Execution/WatchPolicy.jet).
+The last recognized policy flag before the program-argument separator wins;
+child arguments do not change the development session's reload behavior.
+
+Retirement diagnostics use the [canonical Foundation retirement table](../../../Compiler/JetFoundation/Source/Syntax/Retirements.jet).
+The flat foreign-effect roots retain their registered refusals and dotted
+replacements, including `Dart` → `FFI.Dart` (E0119); a consumer must not delete
+a retirement merely because it no longer advertises the old spelling.
+
 For C and C++, the driver-specific options are `--project-root`, `--build-root`,
 `-c`, `-o`, `-MMD`, `-MD`, `-MF`, `-MT`, reserved `--sysroot`, `-I`, `-D`, `-L`,
 `-l`, `-std`, `-dumpmachine`, `-print-sysroot`, `-dumpversion`, `-v`, and
 `--target`. The exact acceptance and forwarding behavior is documented in
 [CC driver hosts](cc-driver.md).
+
+## Results and optional history
+
+A recorded comparison reports the finite result of its corpus, not a universal
+proof. A recorded terminal execution outcome cannot become a pass merely
+because retained samples compare equal. The [comparison adapter](../../../Compiler/JetCli/Source/Cli/Compile/TestComparisonCorpus.jet)
+uses Foundation's comparison and evidence models rather than a separate verdict
+engine.
+
+Optional history failure must not change the command's result. Notices are
+grouped by their corrective action so one unusable history store does not
+produce a notice for every attempted write. The [history policy](../../../Compiler/JetCli/Source/Cli/Evidence/History.jet)
+keeps this notice policy separate from the runtime worker and authenticated
+receipt store. Evidence publication preserves immutable bytes, rejects symlink
+destinations, and retains the index's saved status and recorded sequence on
+repeat publication.
+
+Receipt authority inputs must be hashed with the canonical bounded, held-file,
+no-follow reader, including opened-handle and path-after identity checks; a
+metadata check followed by an ordinary path read is not equivalent. Metadata
+classification uses Core's `files.Stat`, not a parallel CLI metadata carrier.
 
 ## Jet-hosted `check` and `build`
 
@@ -152,13 +182,13 @@ The Jet-hosted CLI ([`Compiler/JetCli`](../../../Compiler/JetCli)) runs
 nearest directory at or above the file that holds `package.jet`, or the file's
 own directory for a loose file, with every `.jet` file under it (dot names,
 `target`, `build`, `node_modules`, `bin`, and nested projects stay out) and the
-generated C/C++ binding caches. The Core library bodies are read from the Jet
-toolchain source tree named by `JET_TOOLCHAIN_ROOT` (the directory that holds
-`Core/`); the Core row table and the canonical effect source are generated
-into [`CoreSources.jet`](../../../Compiler/JetCli/Source/Cli/CoreSources.jet)
-by `node Compiler/Bootstrap/generate-core-sources.mjs`, which
-`node Tools/agent/check-core-surface-ledger.mjs --write` runs and `--check`
-holds current.
+generated C/C++ binding caches. Core bodies, metadata, and the canonical effect
+source come from Foundation's single [`foundation_embedded_core()` accessor](../../../Compiler/JetFoundation/Source/Registry/EmbeddedCore.jet);
+the CLI does not read a runtime Core directory or require a toolchain-root
+environment variable. `node Compiler/Bootstrap/generate-core-sources.mjs`
+generates Foundation's canonical embedded payload and Core-menu projection
+from the frozen Rust tables. `node Tools/agent/check-core-surface-ledger.mjs
+--write` runs that generator, and `--check` holds the generated payload current.
 
 `jet build` writes `.jet/build/<stem>` in that source root. The default and
 `--profile debug` builds use the Jet-native backend (`lir_lower_program` and a

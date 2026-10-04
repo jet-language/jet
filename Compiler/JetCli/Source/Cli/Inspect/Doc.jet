@@ -1,0 +1,893 @@
+// PORT-PENDING 0684 source-cmddoc-module-group-slice-1: Source/CmdDoc.rs:1-149
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! `jet doc` — generate deterministic reference documentation.
+//RS 
+//RS use std::collections::BTreeMap;
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::exit;
+//RS 
+//RS use jet::Diagnostics::{Diagnostic, ReportPath, Span};
+//RS use jet::ExitCodes;
+//RS use jet_semindex::build_doc_graph;
+//RS 
+//RS use crate::OutputMode;
+//RS 
+//RS pub(crate) fn run_doc(target: &str, mode: OutputMode, check: bool) {
+//RS     let entry = PathBuf::from(crate::resolve_source_path(target));
+//RS     let projection =
+//RS         match crate::CmdInspect::check_projection_for_effects(&entry, "dev", &BTreeMap::new()) {
+//RS             Ok(projection) => projection,
+//RS             Err(diagnostics) => {
+//RS                 let source = fs::read_to_string(&entry).unwrap_or_default();
+//RS                 if mode.json {
+//RS                     print!(
+//RS                         "{}",
+//RS                         jet::render_all_json(&ReportPath::from_path(&entry), &source, &diagnostics)
+//RS                     );
+//RS                 } else {
+//RS                     eprint!(
+//RS                         "{}",
+//RS                         jet::render_all_colored(
+//RS                             &entry.display().to_string(),
+//RS                             &source,
+//RS                             &diagnostics,
+//RS                             mode.color_stderr(),
+//RS                         )
+//RS                     );
+//RS                 }
+//RS                 exit(ExitCodes::USER_ERROR);
+//RS             }
+//RS         };
+//RS     let graph = build_doc_graph(&projection.bundle, projection.index());
+//RS 
+//RS     if check {
+//RS         let diagnostics = undocumented_diagnostics(&graph);
+//RS         if !diagnostics.is_empty() {
+//RS             render_doc_diagnostics(&projection.bundle, &diagnostics, mode);
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS         if mode.json {
+//RS             println!("{}", graph.to_status_envelope().json());
+//RS         } else {
+//RS             println!(
+//RS                 "doc check: passed ({} doctest block(s))",
+//RS                 graph.doctests.len()
+//RS             );
+//RS         }
+//RS         return;
+//RS     }
+//RS 
+//RS     if mode.json {
+//RS         println!("{}", graph.to_status_envelope().json());
+//RS         return;
+//RS     }
+//RS 
+//RS     let output_dir = entry
+//RS         .parent()
+//RS         .filter(|path| !path.as_os_str().is_empty())
+//RS         .unwrap_or_else(|| Path::new("."))
+//RS         .join("docs");
+//RS     if let Err(error) = fs::create_dir_all(&output_dir)
+//RS         .and_then(|_| fs::write(output_dir.join("index.html"), graph.to_html()))
+//RS         .and_then(|_| fs::write(output_dir.join("index.md"), graph.to_markdown()))
+//RS     {
+//RS         crate::cli_error!(
+//RS             "E2105",
+//RS             "couldn't write generated documentation in `{}`: {}",
+//RS             output_dir.display(),
+//RS             error
+//RS         );
+//RS         exit(ExitCodes::USER_ERROR);
+//RS     }
+//RS     println!("doc: generated {}", output_dir.display());
+//RS }
+//RS 
+//RS fn undocumented_diagnostics(graph: &jet_semindex::DocGraph) -> Vec<(String, Diagnostic)> {
+//RS     graph
+//RS         .undocumented_public()
+//RS         .into_iter()
+//RS         .map(|item| {
+//RS             let name = item.qualified_name.clone();
+//RS             (
+//RS                 item.source.path.clone(),
+//RS                 Diagnostic::from_row(
+//RS                     "L2201",
+//RS                     &[("name", name.as_str())],
+//RS                     Some(Span::new(item.source.start, item.source.end)),
+//RS                 ),
+//RS             )
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn render_doc_diagnostics(
+//RS     bundle: &jet::AST::ProgramBundle,
+//RS     diagnostics: &[(String, Diagnostic)],
+//RS     mode: OutputMode,
+//RS ) {
+//RS     let mut by_path: BTreeMap<&str, Vec<Diagnostic>> = BTreeMap::new();
+//RS     for (path, diagnostic) in diagnostics {
+//RS         by_path
+//RS             .entry(path.as_str())
+//RS             .or_default()
+//RS             .push(diagnostic.clone());
+//RS     }
+//RS     for (path, diagnostics) in by_path {
+//RS         let Some(module) = bundle.modules.iter().find(|module| {
+//RS             let stable = module
+//RS                 .path
+//RS                 .strip_prefix(&bundle.project_root)
+//RS                 .ok()
+//RS                 .map_or_else(
+//RS                     || module.display.replace('\\', "/"),
+//RS                     |relative| relative.to_string_lossy().replace('\\', "/"),
+//RS                 );
+//RS             stable == path
+//RS         }) else {
+//RS             continue;
+//RS         };
+//RS         if mode.json {
+//RS             print!(
+//RS                 "{}",
+//RS                 jet::render_all_json(
+//RS                     &ReportPath::from_path(&module.path),
+//RS                     &module.source,
+//RS                     &diagnostics,
+//RS                 )
+//RS             );
+//RS         } else {
+//RS             eprint!(
+//RS                 "{}",
+//RS                 jet::render_all_colored(
+//RS                     &module.display,
+//RS                     &module.source,
+//RS                     &diagnostics,
+//RS                     mode.color_stderr(),
+//RS                 )
+//RS             );
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0684 Source/CmdDoc.rs:1-149
+
+// PORT-PENDING 0684 source-cmddoc-module-group-slice-1: Source/CmdDossier.rs:1-86
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-CONF-MODULE1=A: generic-module member explanation over semantic facts.
+//RS 
+//RS use std::process::exit;
+//RS 
+//RS use jet::ExitCodes;
+//RS use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
+//RS 
+//RS use crate::absolutize;
+//RS /// D-CONF-MODULE1=A: explain a generic-module member's specialization input
+//RS /// from the semantic index, including the profile/declaration chain for a
+//RS /// build-fact value.
+//RS pub(crate) fn run_module_explain(subject: &str, file: &str, profile: &str, json: bool) {
+//RS     let abs = absolutize(file);
+//RS     let module_name = subject.split('.').next().unwrap_or(subject);
+//RS     let checked = crate::CmdInspect::check_projection_with_options(
+//RS         &abs,
+//RS         jet::Policy::GateSet::default(),
+//RS         profile,
+//RS         &std::collections::BTreeMap::new(),
+//RS     )
+//RS     .unwrap_or_else(|diagnostics| {
+//RS         crate::CmdInspect::render_check_failure(&abs, &diagnostics, json, false);
+//RS     });
+//RS     let index = checked.index();
+//RS     let Some(instance) = index.instances().iter().find(|instance| {
+//RS         instance.name == module_name
+//RS             || instance
+//RS                 .applications
+//RS                 .iter()
+//RS                 .any(|application| application.name == module_name)
+//RS     }) else {
+//RS         crate::cli_error!(@fix "E2104", format!("generic module `{module_name}` is not present in `{file}`"), "pass the instantiated member as `module.member` and the source entry file");
+//RS         exit(ExitCodes::USER_ERROR);
+//RS     };
+//RS     if json {
+//RS         let arguments = StatusValue::array(
+//RS             instance
+//RS                 .argument_values
+//RS                 .iter()
+//RS                 .zip(&instance.argument_provenance)
+//RS                 .map(|(value, sources)| {
+//RS                     StatusValue::object(
+//RS                         StatusFields::new()
+//RS                             .with("value", value.as_str())
+//RS                             .with(
+//RS                                 "provenance",
+//RS                                 StatusValue::array(
+//RS                                     sources
+//RS                                         .iter()
+//RS                                         .map(|source| StatusValue::from(source.as_str())),
+//RS                                 ),
+//RS                             ),
+//RS                     )
+//RS                 }),
+//RS         );
+//RS         let generic_module = StatusValue::object(
+//RS             StatusFields::new()
+//RS                 .with("subject", subject)
+//RS                 .with("module", instance.name.as_str())
+//RS                 .with("fingerprint", instance.fingerprint.as_str())
+//RS                 .with("arguments", arguments)
+//RS                 .with("check", crate::CmdInspect::check_result_value(&checked.check)),
+//RS         );
+//RS         println!(
+//RS             "{}",
+//RS             StatusEnvelope::new("inspect.generic_module", true)
+//RS                 .with_field("generic_module", generic_module)
+//RS                 .json()
+//RS         );
+//RS         return;
+//RS     }
+//RS     println!("generic module `{subject}`");
+//RS     println!("  instance: {}", instance.name);
+//RS     println!("  fingerprint: {}", instance.fingerprint);
+//RS     for (value, sources) in instance
+//RS         .argument_values
+//RS         .iter()
+//RS         .zip(&instance.argument_provenance)
+//RS     {
+//RS         println!("  argument: {value}");
+//RS         for source in sources {
+//RS             println!("    from: {source}");
+//RS         }
+//RS     }
+//RS     print!("{}", crate::CmdInspect::check_result_text(&checked.check));
+//RS }
+// END-PORT-PENDING 0684 Source/CmdDossier.rs:1-86
+
+// PORT-PENDING 0684 source-cmddoc-module-group-slice-1: Source/CmdImpact.rs:1-118
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-IMPACT1: `jet inspect impact` — blast-radius queries over the semantic index.
+//RS 
+//RS use std::process::exit;
+//RS 
+//RS use jet::ExitCodes;
+//RS use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
+//RS use jet_impact::ImpactReport;
+//RS 
+//RS use crate::absolutize;
+//RS 
+//RS pub(crate) fn run_impact(args: &[String], json: bool) {
+//RS     let mut depth = 3usize;
+//RS     let mut positional: Vec<&str> = Vec::new();
+//RS     for a in args {
+//RS         if let Some(n) = a.strip_prefix("--depth=") {
+//RS             depth = n.parse().unwrap_or_else(|_| {
+//RS                 crate::cli_error!("E2104", "`--depth` must be a positive integer");
+//RS                 exit(ExitCodes::USER_ERROR);
+//RS             });
+//RS         } else if !a.starts_with('-') {
+//RS             positional.push(a.as_str());
+//RS         }
+//RS     }
+//RS 
+//RS     let (path, symbol) = match positional.as_slice() {
+//RS         [path, symbol] => (*path, *symbol),
+//RS         _ => {
+//RS             crate::cli_error!(@fix "E2104", "`jet inspect impact` needs an entry file and a symbol name", "jet inspect impact Examples/features/effects/effects.jet report");
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS     };
+//RS 
+//RS     if depth == 0 {
+//RS         crate::cli_error!("E2104", "`--depth` must be at least 1");
+//RS         exit(ExitCodes::USER_ERROR);
+//RS     }
+//RS 
+//RS     let abs = absolutize(path);
+//RS     let checked = crate::CmdInspect::check_projection(&abs).unwrap_or_else(|diagnostics| {
+//RS         crate::CmdInspect::render_check_failure(&abs, &diagnostics, json, false);
+//RS     });
+//RS     let report = ImpactReport::analyze(checked.index(), symbol, depth);
+//RS     if json {
+//RS         let impact = impact_value(&report, &checked.check);
+//RS         println!(
+//RS             "{}",
+//RS             StatusEnvelope::new("inspect.impact", report.found)
+//RS                 .with_field("impact", impact)
+//RS                 .json()
+//RS         );
+//RS     } else {
+//RS         print!("{}", crate::CmdInspect::check_result_text(&checked.check));
+//RS         print!("{}", report.render_text());
+//RS     }
+//RS     if !report.found {
+//RS         exit(ExitCodes::USER_ERROR);
+//RS     }
+//RS }
+//RS 
+//RS fn impact_value(report: &ImpactReport, check: &crate::CmdInspect::CheckResult) -> StatusValue {
+//RS     let span = |start: usize, end: usize| {
+//RS         StatusValue::object(
+//RS             StatusFields::new()
+//RS                 .with("start", start)
+//RS                 .with("end", end),
+//RS         )
+//RS     };
+//RS     let reference = |value: &jet_impact::ImpactRef| {
+//RS         StatusValue::object(
+//RS             StatusFields::new()
+//RS                 .with("depth", value.depth)
+//RS                 .with("name", value.name.as_str())
+//RS                 .with("module_path", value.module_path.as_str())
+//RS                 .with("span", span(value.span_start, value.span_end)),
+//RS         )
+//RS     };
+//RS     let edge = |value: &jet_impact::ImpactEdge| {
+//RS         StatusValue::object(
+//RS             StatusFields::new()
+//RS                 .with("depth", value.depth)
+//RS                 .with("caller", value.caller.as_str())
+//RS                 .with("callee", value.callee.as_str())
+//RS                 .with("module_path", value.module_path.as_str())
+//RS                 .with("span", span(value.span_start, value.span_end)),
+//RS         )
+//RS     };
+//RS     StatusValue::object(
+//RS         StatusFields::new()
+//RS             .with("symbol", report.symbol.as_str())
+//RS             .with("found", report.found)
+//RS             .with("depth_limit", report.depth_limit)
+//RS             .with(
+//RS                 "definition_module",
+//RS                 report
+//RS                     .definition_module
+//RS                     .as_deref()
+//RS                     .map(StatusValue::from)
+//RS                     .unwrap_or(StatusValue::Null),
+//RS             )
+//RS             .with(
+//RS                 "references",
+//RS                 StatusValue::array(report.references.iter().map(reference)),
+//RS             )
+//RS             .with(
+//RS                 "call_sites",
+//RS                 StatusValue::array(report.call_sites.iter().map(edge)),
+//RS             )
+//RS             .with(
+//RS                 "upstream_callers",
+//RS                 StatusValue::array(report.upstream_callers.iter().map(edge)),
+//RS             )
+//RS             .with(
+//RS                 "downstream_callees",
+//RS                 StatusValue::array(report.downstream_callees.iter().map(edge)),
+//RS             )
+//RS             .with("check", crate::CmdInspect::check_result_value(check)),
+//RS     )
+//RS }
+// END-PORT-PENDING 0684 Source/CmdImpact.rs:1-118
+
+// PORT-PENDING 0684 source-cmddoc-module-group-slice-1: Source/CmdInspect.rs:1-29
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Read-only projections owned by `jet inspect`.
+//RS 
+//RS use std::collections::{BTreeMap, BTreeSet};
+//RS use std::fmt::Write as _;
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::exit;
+//RS use std::time::Instant;
+//RS 
+//RS use jet::Diagnostics::Diagnostic;
+//RS use jet_foundation::MIROptimization::Acceleration::{
+//RS     AccelerationGate, AccelerationGateInput, AccelerationGateStatus, AccelerationProof,
+//RS     AccelerationWorkloadFacts, D_ACCEL_CACHE_BLOCK_BYTES, D_ACCEL_REQUIRED_GAIN_DENOMINATOR,
+//RS     D_ACCEL_REQUIRED_GAIN_NUMERATOR, D_ACCEL_STATIC_FLOOR_ITEMS,
+//RS };
+//RS use jet_foundation::Policy::{AppliedRule, PolicyScope, RuleResolution, RuleStatus};
+//RS use jet_foundation::Registry;
+//RS use jet_foundation::Report::{
+//RS     render_status, render_status_with_reports, StatusEnvelope, StatusFields, StatusValue,
+//RS };
+//RS use jet_foundation::Shape::{
+//RS     ShapeDefault, ShapeDimensions, ShapeFact, ShapeFieldFact, ShapeFieldNames, ShapeLayoutKind,
+//RS     ShapeOrigin, ShapeProjectionKind, ShapeType,
+//RS };
+//RS use jet_foundation::JSON::json_escape;
+//RS use jet_foundation::MIR::{
+//RS     MirDecisionDisposition, MirDecisionIdentity, MirDecisionKind, MirDecisionLedger, MirDecisionRow,
+//RS };
+//RS 
+// END-PORT-PENDING 0684 Source/CmdInspect.rs:1-29
+
+// PORT-PENDING 0684 source-cmddoc-module-group-slice-1: Source/CmdInspect.rs:81-117
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS 
+//RS const CHECK_RESULT_SCHEMA_VERSION: u32 = 1;
+//RS const CHECK_RESULT_CONTRACT: &str = "jet.check/v1";
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub(crate) enum CheckScope {
+//RS     Project,
+//RS     ExplicitFile,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS struct CheckProofRow {
+//RS     output: String,
+//RS     name: String,
+//RS     status: String,
+//RS     detail: String,
+//RS     diagnostic: String,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct ProjectOutputSpec {
+//RS     address: String,
+//RS     name: String,
+//RS     path: Option<PathBuf>,
+//RS }
+//RS 
+//RS pub(crate) struct CheckResult {
+//RS     source: String,
+//RS     profile: String,
+//RS     front_end: String,
+//RS     programmable_build: String,
+//RS     diagnostics: usize,
+//RS     scope: CheckScope,
+//RS     elapsed_ms: u64,
+//RS     proof_rows: Vec<CheckProofRow>,
+//RS }
+//RS 
+// END-PORT-PENDING 0684 Source/CmdInspect.rs:81-117
+
+// PORT-PENDING 0684 source-cmddoc-module-group-slice-1: Source/CmdInspect.rs:175-274
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS 
+//RS pub(crate) fn check_projection_with_options(
+//RS     path: &Path,
+//RS     gates: jet::Policy::GateSet,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS ) -> Result<CheckProjection, Vec<Diagnostic>> {
+//RS     check_projection_with_options_and_preflight(
+//RS         path,
+//RS         gates,
+//RS         profile,
+//RS         setting_overrides,
+//RS         None,
+//RS         false,
+//RS         CheckScope::ExplicitFile,
+//RS         None,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS /// Check the target selected by the command dispatcher.  A bare or directory
+//RS /// command is a project promise; an explicitly named file keeps semantic
+//RS /// scope, even when it lives inside a package.
+//RS pub(crate) fn check_projection_for_command(
+//RS     path: &Path,
+//RS     gates: jet::Policy::GateSet,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     scope: CheckScope,
+//RS     entry_fn: Option<&str>,
+//RS     target: Option<&str>,
+//RS ) -> Result<CheckProjection, Vec<Diagnostic>> {
+//RS     check_projection_with_options_and_preflight(
+//RS         path,
+//RS         gates,
+//RS         profile,
+//RS         setting_overrides,
+//RS         None,
+//RS         false,
+//RS         scope,
+//RS         entry_fn,
+//RS         target,
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn check_projection_for_effects(
+//RS     path: &Path,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS ) -> Result<CheckProjection, Vec<Diagnostic>> {
+//RS     check_projection_with_options_and_preflight(
+//RS         path,
+//RS         jet::Policy::GateSet::default(),
+//RS         profile,
+//RS         setting_overrides,
+//RS         None,
+//RS         false,
+//RS         CheckScope::ExplicitFile,
+//RS         None,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn check_projection_for_run(
+//RS     path: &Path,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS ) -> Result<CheckProjection, Vec<Diagnostic>> {
+//RS     check_projection_with_options_and_preflight(
+//RS         path,
+//RS         jet::Policy::GateSet::default(),
+//RS         profile,
+//RS         setting_overrides,
+//RS         None,
+//RS         true,
+//RS         CheckScope::ExplicitFile,
+//RS         None,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn check_projection_for_output_effects(
+//RS     path: &Path,
+//RS     output: &str,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS ) -> Result<CheckProjection, Vec<Diagnostic>> {
+//RS     check_projection_with_options_and_preflight(
+//RS         path,
+//RS         jet::Policy::GateSet::default(),
+//RS         profile,
+//RS         setting_overrides,
+//RS         Some(output),
+//RS         false,
+//RS         CheckScope::ExplicitFile,
+//RS         None,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+// END-PORT-PENDING 0684 Source/CmdInspect.rs:175-274
+
+// PORT-PENDING 0684 source-cmddoc-module-group-slice-1: Source/CmdPkg.rs:1-346
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! add / remove / fetch / update / store / gc package-manager subcommand
+//RS //! handlers (M12.1).
+//RS 
+//RS use std::fs;
+//RS use std::io::Write;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::exit;
+//RS 
+//RS use jet::ExitCodes;
+//RS 
+//RS use crate::flag_value;
+//RS struct PackageInput {
+//RS     path: PathBuf,
+//RS     raw: String,
+//RS     inline: Option<jet::Package::Blocks::InlinePackageBlock>,
+//RS     manifest: jet::Manifest::Manifest,
+//RS }
+//RS 
+//RS fn package_input(root: &Path) -> PackageInput {
+//RS     let entry = crate::find_project_entry(root);
+//RS     let entry_raw = fs::read_to_string(&entry).unwrap_or_else(|error| {
+//RS         crate::cli_error!("E2105", "couldn't read {}: {}", entry.display(), error);
+//RS         exit(ExitCodes::USER_ERROR);
+//RS     });
+//RS     let inline = jet::Package::extract_inline_package(&entry_raw).unwrap_or_else(|error| {
+//RS         eprint!(
+//RS             "{}",
+//RS             jet::render_diagnostics(
+//RS                 &entry.display().to_string(),
+//RS                 &entry_raw,
+//RS                 &[error.diagnostic()],
+//RS             )
+//RS         );
+//RS         exit(ExitCodes::USER_ERROR);
+//RS     });
+//RS     let facts = jet::Loader::package_facts_for_entry(&entry)
+//RS         .unwrap_or_else(|diagnostics| {
+//RS             eprint!(
+//RS                 "{}",
+//RS                 jet::render_diagnostics(
+//RS                     &entry.display().to_string(),
+//RS                     &entry_raw,
+//RS                     &diagnostics,
+//RS                 )
+//RS             );
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         })
+//RS         .unwrap_or_else(|| {
+//RS             crate::cli_error!(
+//RS                 "E2105",
+//RS                 "couldn't resolve package facts for {}",
+//RS                 entry.display()
+//RS             );
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         });
+//RS     if let Some(block) = inline {
+//RS         let raw = block.body(&entry_raw).to_string();
+//RS         let manifest = jet::Package::to_manifest(&facts, &raw).unwrap_or_else(|diagnostic| {
+//RS             eprint!(
+//RS                 "{}",
+//RS                 jet::render_diagnostics(&entry.display().to_string(), &raw, &[diagnostic])
+//RS             );
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         });
+//RS         return PackageInput {
+//RS             path: entry,
+//RS             raw: entry_raw,
+//RS             inline: Some(block),
+//RS             manifest,
+//RS         };
+//RS     }
+//RS     let path = jet::Loader::manifest_path(root).unwrap_or_else(|| {
+//RS         crate::cli_error!("E2105", "couldn't locate {}", jet::Syntax::PACKAGE_FILE);
+//RS         exit(ExitCodes::USER_ERROR);
+//RS     });
+//RS     let raw = fs::read_to_string(&path).unwrap_or_else(|error| {
+//RS         crate::cli_error!("E2105", "couldn't read {}: {}", path.display(), error);
+//RS         exit(ExitCodes::USER_ERROR);
+//RS     });
+//RS     let manifest = jet::Package::to_manifest(&facts, &raw).unwrap_or_else(|diagnostic| {
+//RS         eprint!(
+//RS             "{}",
+//RS             jet::render_diagnostics(&path.display().to_string(), &raw, &[diagnostic])
+//RS         );
+//RS         exit(ExitCodes::USER_ERROR);
+//RS     });
+//RS     PackageInput {
+//RS         path,
+//RS         raw,
+//RS         inline: None,
+//RS         manifest,
+//RS     }
+//RS }
+//RS 
+//RS fn edited_package_source(input: &PackageInput, updated_body: impl FnOnce(&str) -> String) -> String {
+//RS     let Some(block) = input.inline else {
+//RS         return updated_body(&input.raw);
+//RS     };
+//RS     let mut source = input.raw.clone();
+//RS     let updated = updated_body(block.body(&input.raw));
+//RS     source.replace_range(block.body_span.start..block.body_span.end, &updated);
+//RS     source
+//RS }
+//RS /// Replace a package carrier only after re-reading the same checked source
+//RS /// object used to build the edit. This keeps inline package edits atomic and
+//RS /// prevents a concurrent writer from losing an unrelated source change.
+//RS fn write_package_source(input: &PackageInput, updated: &str) -> Result<(), String> {
+//RS     let parent = input
+//RS         .path
+//RS         .parent()
+//RS         .ok_or_else(|| "package source has no parent directory".to_string())?;
+//RS     let name = input
+//RS         .path
+//RS         .file_name()
+//RS         .ok_or_else(|| "package source has no file name".to_string())?;
+//RS     let resolver = jet::Authority::AuthorityResolver::open(parent)
+//RS         .map_err(|error| format!("could not open package source authority: {error}"))?;
+//RS     let checked = resolver
+//RS         .checked_file(Path::new(name))
+//RS         .map_err(|error| format!("could not check {}: {error}", input.path.display()))?;
+//RS     let current = checked
+//RS         .text()
+//RS         .map_err(|error| format!("could not read {}: {error}", input.path.display()))?;
+//RS     if current != input.raw {
+//RS         return Err(format!(
+//RS             "{} changed while the package edit was prepared",
+//RS             input.path.display()
+//RS         ));
+//RS     }
+//RS     resolver
+//RS         .revalidate_file(&checked)
+//RS         .map_err(|error| format!("package source changed before writing: {error}"))?;
+//RS 
+//RS     let nonce = std::time::SystemTime::now()
+//RS         .duration_since(std::time::UNIX_EPOCH)
+//RS         .map_err(|error| format!("could not create package edit nonce: {error}"))?
+//RS         .as_nanos();
+//RS     let temporary = parent.join(format!(
+//RS         ".{}.jet-package-edit-{}-{nonce}",
+//RS         name.to_string_lossy(),
+//RS         std::process::id()
+//RS     ));
+//RS     let result = (|| {
+//RS         let mut file = fs::OpenOptions::new()
+//RS             .write(true)
+//RS             .create_new(true)
+//RS             .open(&temporary)
+//RS             .map_err(|error| format!("could not stage {}: {error}", input.path.display()))?;
+//RS         file.write_all(updated.as_bytes())
+//RS             .map_err(|error| format!("could not stage {}: {error}", input.path.display()))?;
+//RS         file.sync_all()
+//RS             .map_err(|error| format!("could not sync {}: {error}", input.path.display()))?;
+//RS         resolver
+//RS             .revalidate_file(&checked)
+//RS             .map_err(|error| format!("package source changed before publishing: {error}"))?;
+//RS         fs::rename(&temporary, &input.path)
+//RS             .map_err(|error| format!("could not publish {}: {error}", input.path.display()))
+//RS     })();
+//RS     if result.is_err() {
+//RS         let _ = fs::remove_file(&temporary);
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS pub(crate) fn run_add(raw_args: &[String]) {
+//RS     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+//RS     let root = crate::require_manifest_root(
+//RS         &cwd,
+//RS         "error: no package.jet found — run `jet add` inside a project\n fix: run `jet new <name>` to create a project first",
+//RS     );
+//RS 
+//RS     // Parse: jet add <dep-name> --path <dir> | --git <url> [--tag <t>|--branch <b>|--rev <r>]
+//RS     let non_flag: Vec<&String> = raw_args.iter().filter(|a| !a.starts_with("--")).collect();
+//RS     let dep_name = match non_flag.get(1) {
+//RS         Some(n) => n.as_str(),
+//RS         None => {
+//RS             crate::cli_error!(@fix "E2104", "`jet add` needs a dependency name", "try `jet add mylib --path ../mylib`");
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS     };
+//RS 
+//RS     let path_val = flag_value(raw_args, "--path");
+//RS     let git_val = flag_value(raw_args, "--git");
+//RS     let tag_val = flag_value(raw_args, "--tag");
+//RS     let branch_val = flag_value(raw_args, "--branch");
+//RS     let rev_val = flag_value(raw_args, "--rev");
+//RS 
+//RS     let spec = if let Some(p) = path_val {
+//RS         jet::Manifest::DepSpec::Path {
+//RS             path: p.to_string(),
+//RS         }
+//RS     } else if let Some(url) = git_val {
+//RS         let selector = if let Some(t) = tag_val {
+//RS             jet::Manifest::GitSelector::Tag(t.to_string())
+//RS         } else if let Some(b) = branch_val {
+//RS             jet::Manifest::GitSelector::Branch(b.to_string())
+//RS         } else if let Some(r) = rev_val {
+//RS             jet::Manifest::GitSelector::Rev(r.to_string())
+//RS         } else {
+//RS             crate::cli_error!(
+//RS                 "E2104",
+//RS                 "git dependency `{}` needs one of: --tag, --branch, --rev",
+//RS                 dep_name
+//RS             );
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         };
+//RS         jet::Manifest::DepSpec::Git {
+//RS             url: url.to_string(),
+//RS             selector,
+//RS         }
+//RS     } else {
+//RS         crate::cli_error!(@fix "E2104", format!("`jet add {}` needs --path or --git", dep_name), format!("try `jet add {} --path ../{}` or `jet add {} --git <url> --tag <tag>`", dep_name, dep_name, dep_name));
+//RS         exit(ExitCodes::USER_ERROR);
+//RS     };
+//RS 
+//RS     let input = package_input(&root);
+//RS     let updated = edited_package_source(&input, |raw| {
+//RS         jet::Manifest::add_dependency(raw, dep_name, &spec)
+//RS     });
+//RS     if let Err(error) = write_package_source(&input, &updated) {
+//RS         crate::cli_error!("E2105", "couldn't write {}: {}", input.path.display(), error);
+//RS         exit(ExitCodes::USER_ERROR);
+//RS     }
+//RS     println!("added `{}` to {}", dep_name, input.path.display());
+//RS 
+//RS     // Auto-fetch.
+//RS     do_fetch(&root, false);
+//RS }
+//RS 
+//RS pub(crate) fn run_remove(dep_name: &str) {
+//RS     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+//RS     let root = crate::require_manifest_root(&cwd, "error: no package.jet found");
+//RS 
+//RS     let input = package_input(&root);
+//RS     if !input.manifest.dependencies.contains_key(dep_name) {
+//RS         crate::cli_error!(
+//RS             @fix "E2104",
+//RS             format!("dependency `{dep_name}` is not present in {}", jet::Syntax::PACKAGE_FILE),
+//RS             format!("remove a dependency listed in {}, or add `{dep_name}` first", jet::Syntax::PACKAGE_FILE)
+//RS         );
+//RS         exit(ExitCodes::USER_ERROR);
+//RS     }
+//RS     let updated = edited_package_source(&input, |raw| {
+//RS         jet::Manifest::remove_dependency(raw, dep_name)
+//RS     });
+//RS     if let Err(error) = write_package_source(&input, &updated) {
+//RS         crate::cli_error!("E2105", "couldn't write {}: {}", input.path.display(), error);
+//RS         exit(ExitCodes::USER_ERROR);
+//RS     }
+//RS     println!("removed `{}` from {}", dep_name, input.path.display());
+//RS 
+//RS     // Re-fetch to update lock.
+//RS     do_fetch(&root, false);
+//RS }
+//RS pub(crate) fn run_fetch(locked: bool) {
+//RS     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+//RS     let root = crate::require_manifest_root(
+//RS         &cwd,
+//RS         "error: no package.jet found — run `jet fetch` inside a project",
+//RS     );
+//RS     do_fetch(&root, locked);
+//RS }
+//RS 
+//RS pub(crate) fn run_update(dep: Option<&str>) {
+//RS     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+//RS     let root = crate::require_manifest_root(&cwd, "error: no package.jet found");
+//RS 
+//RS     let input = package_input(&root);
+//RS     let pack_path = input.path;
+//RS     let raw = input.raw;
+//RS     let mf = input.manifest;
+//RS     let existing_lock = jet::Lock::load(&root);
+//RS     let opts = jet::Fetch::FetchOptions {
+//RS         locked: false,
+//RS         update: true,
+//RS         update_dep: dep.map(str::to_string),
+//RS         resolution: jet::Publish::ResolveMode::Conservative,
+//RS     };
+//RS     match jet::Fetch::fetch(&root, &mf, existing_lock.as_ref(), &opts) {
+//RS         Ok((lock, _)) => {
+//RS             print_registry_tiers(&lock);
+//RS             if let Some(d) = dep {
+//RS                 println!("updated `{}`", d);
+//RS             } else {
+//RS                 println!("updated all moving selectors");
+//RS             }
+//RS         }
+//RS         Err(diags) => {
+//RS             let src = raw;
+//RS             eprint!(
+//RS                 "{}",
+//RS                 jet::render_diagnostics(&pack_path.display().to_string(), &src, &diags)
+//RS             );
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn do_fetch(root: &Path, locked: bool) {
+//RS     let input = package_input(root);
+//RS     let pack_path = input.path;
+//RS     let raw = input.raw;
+//RS     let mf = input.manifest;
+//RS     let existing_lock = jet::Lock::load(root);
+//RS     let opts = jet::Fetch::FetchOptions {
+//RS         locked,
+//RS         update: false,
+//RS         update_dep: None,
+//RS         resolution: jet::Publish::ResolveMode::Conservative,
+//RS     };
+//RS     match jet::Fetch::fetch(root, &mf, existing_lock.as_ref(), &opts) {
+//RS         Ok((lock, _)) => {
+//RS             print_registry_tiers(&lock);
+//RS             if locked {
+//RS                 println!("lock verified");
+//RS             } else {
+//RS                 println!("fetched all dependencies");
+//RS             }
+//RS         }
+//RS         Err(diags) => {
+//RS             eprint!(
+//RS                 "{}",
+//RS                 jet::render_diagnostics(&pack_path.display().to_string(), &raw, &diags)
+//RS             );
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn print_registry_tiers(lock: &jet::Lock::LockFile) {
+//RS     for package in &lock.packages {
+//RS         let jet::Lock::LockSource::Registry {
+//RS             registry,
+//RS             tier,
+//RS             gate_status,
+//RS             ..
+//RS         } = &package.source
+//RS         else {
+//RS             continue;
+//RS         };
+//RS         println!(
+//RS             "resolved `{}` {} from registry `{}` (tier: {}; gate status: {})",
+//RS             package.name, package.version, registry, tier, gate_status
+//RS         );
+//RS     }
+//RS }
+// END-PORT-PENDING 0684 Source/CmdPkg.rs:1-346
+

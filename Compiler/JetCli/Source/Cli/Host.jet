@@ -12,6 +12,7 @@ use jet_backend.[
 use jet_driver.[
     JetDriverAuthorizedSourceSnapshot,
     JetDriverCompileResult,
+    JetDriverCompilerCheckInput,
     JetDriverVerbOutput,
     JET_DRIVER_EXIT_OK,
     JET_DRIVER_EXIT_USER_ERROR,
@@ -22,6 +23,11 @@ use jet_driver.[
 use jet_foundation.[
     Diagnostic,
     DIAGNOSTIC_ERROR,
+]
+use jet_eval.[
+    JetCompilerServicesSourceInput,
+    JetCompilerServicesSourcePreparation,
+    jet_eval_compiler_services_parse,
 ]
 
 // crates/jet-foundation/src/ExitCodes.rs `ICE`: Jet's own defect.
@@ -181,15 +187,179 @@ fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Boo
     output
 }
 
-// Unannotated because the compile verbs are (Request.jet `jet_cli_compile_file`).
-pub fn jet_cli_main(args: [String]) -> Int {
-    plan :: jet_cli_front(args)
-    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}
-    if plan == {
-        .Done(done) -> output = ~done
-        .Check(file, source, color, quiet) -> output = jet_cli_compile_check(file, source, color, quiet)
-        .Build(file, source, color, release) -> output = jet_cli_compile_build(file, source, color, release)
+// Compiler inspection consumes the same authorized request as compilation,
+// but asks only the shared checked query. The serializer lives in Projection.
+fn jet_cli_inspect_file(file: String, color: Bool, semindex: Bool) -> JetDriverVerbOutput {
+    if jet_cli_request_file(file, color) == {
+        .Refused(output) -> return ~output
+        .Ready(request, snapshot) -> {
+            source := String?{None}
+            loop root in snapshot.roots {
+                loop candidate in root.files {
+                    if candidate.path == snapshot.entry_path -> source = Val(candidate.source)
+                }
+            }
+            original :: source ?? return jet_cli_ice("the authorized request lost its entry source")
+            parsed :: jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: original, preparation: Val(JetCompilerServicesSourcePreparation.Masked{source: original})}) ?? return jet_cli_ice("the compiler query could not prepare its authorized source")
+            input :: JetDriverCompilerCheckInput{parsed: parsed, request: request}
+            projected :: if semindex -> jet_cli_inspect_semindex(input) else -> jet_cli_inspect_compiler_check(input)
+            if projected == {
+                .Ok(output) -> return ~output
+                .Err(error) -> {
+                    if error == {
+                        .Internal(message) -> return jet_cli_ice(~message)
+                        .Diagnostics(diagnostics) | .Incomplete(diagnostics) -> {
+                            if diagnostics.len() == 0 -> return jet_cli_ice("the checked query stopped without a diagnostic packet")
+                            return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, original, diagnostics, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+                        }
+                    }
+                }
+            }
+        }
     }
+}
+
+// Production execution remains a native-provider prerequisite until the
+// backend installs the Main-approved O0 session seam. Never select O1/rustc.
+fn jet_cli_execution_unavailable(invocation: JetCLIExecutionInvocation) -> JetDriverVerbOutput Never! {
+    jet_cli_build_failed("the O0 execution host is unavailable", "run and dev require the shared in-memory runtime session", "install the native O0 execution provider for this Jet toolchain", invocation.output.profile.ansi_enabled)
+}
+
+fn jet_cli_dispatch_plan(plan: JetCLIPlan) -> JetDriverVerbOutput {
+    if plan == {
+        .Done(done) -> return ~done
+        .Check(file, source, color, quiet) -> return jet_cli_compile_check(file, source, color, quiet)
+        .Build(file, source, color, release) -> return jet_cli_compile_build(file, source, color, release)
+        .Inspect(file, color, semindex) -> return jet_cli_inspect_file(file, color, semindex)
+        .Run(invocation) | .Dev(invocation) -> return jet_cli_execution_unavailable(~invocation)
+        .Completions(arguments) -> {
+            if jet_cli_dev_completions(arguments) == {
+                .Done(output) -> return ~output
+                .OpenProgram(program) -> return jet_cli_dev_completion_metadata_error(program.program, "the opened-handle metadata provider is unavailable")
+                .ReadOpened(_, _, _) -> return jet_cli_ice("completion planning requested a read without opening the program")
+            }
+        }
+        .Explain(request) -> return jet_cli_build_failed("the requested explanation service is unavailable", "syntax, policy and build facts must come from the canonical compiler services", "install the explanation provider for this Jet toolchain", request.mode.color)
+        .Format(_, mode) | .ExternalFormat(_, mode) | .Fix(_, mode) -> return jet_cli_build_failed("the canonical format/fix service is unavailable", "formatting and safe fixes require the shared formatter and checked publication transaction", "install the compiler formatting and transaction providers for this Jet toolchain", mode.color)
+        .Status(_, json) -> {
+            if json -> return JetDriverVerbOutput{stdout: StatusEnvelope.new("status", false).with_fields(StatusFields.new().with("error", "the authenticated receipt-store provider is unavailable")).json_line(), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            return jet_cli_build_failed("the authenticated receipt-store provider is unavailable", "status reads existing authenticated receipts and never runs a producer", "install the receipt-store provider for this Jet toolchain", false)
+        }
+        .Test(_, mode, _) -> return jet_cli_build_failed("the canonical test execution service is unavailable", "tests require the shared checked harness, O0 runtime and authenticated evidence publication", "install the compiler test and native execution providers for this Jet toolchain", mode.color)
+        .Try(_, _, mode) -> return jet_cli_build_failed("the canonical speculative-edit service is unavailable", "try uses one checked semantic index, resident overlay query and recoverable publication transaction", "install the compiler query and transaction providers for this Jet toolchain", mode.color)
+        .Budget(_) -> return jet_cli_build_failed("the canonical budget service is unavailable", "budget commands require checked budget facts, authenticated measurements and baseline publication", "install the compiler budget and evidence-store providers for this Jet toolchain", false)
+        .PackageDesktop(_, _, machine) -> return jet_cli_bundle_error_output("the canonical package materialization and receipt-store providers are unavailable", machine)
+    }
+}
+
+// The native entry and in-process harness install their real compiler/runtime/
+// watch providers here. Focused tests inject controlled hosts at this same
+// boundary; they do not replace Front dispatch or implement another command.
+pub fn jet_cli_dispatch_with_execution<C: JetCLIExecutionCompiler, H: JetCLIExecutionHost, W: JetCLIDevWatchHost>(args: [String], facts: JetCLIProcessFacts, compiler: &C, execution: &H, watcher: &W) -> JetDriverVerbOutput {
+    plan :: jet_cli_front(args, facts)
+    if plan == {
+        .Run(invocation) -> return jet_cli_run_invocation<C, H>(invocation, &compiler, &execution)
+        .Dev(invocation) -> return jet_cli_dev_invocation<C, H, W>(invocation, &compiler, &execution, &watcher)
+        else -> return jet_cli_dispatch_plan(plan)
+    }
+}
+
+pub fn jet_cli_dispatch_with_developer<H: JetCLICompletionProgramHost>(args: [String], facts: JetCLIProcessFacts, metadata: &H) -> JetDriverVerbOutput {
+    plan :: jet_cli_front(args, facts)
+    if plan == {
+        .Completions(arguments) -> return jet_cli_run_completions<H>(&metadata, arguments)
+        else -> return jet_cli_dispatch_plan(plan)
+    }
+}
+
+pub fn jet_cli_dispatch_with_format<H: JetCLIFormatHost>(args: [String], facts: JetCLIProcessFacts, formatter: &H) -> JetDriverVerbOutput {
+    plan :: jet_cli_front(args, facts)
+    if plan == {
+        .Format(options, mode) -> return jet_cli_run_fmt<H>(&formatter, ~options, ~mode)
+        .ExternalFormat(options, mode) -> return jet_cli_run_external_fmt<H>(&formatter, ~options, ~mode)
+        .Fix(options, mode) -> return jet_cli_run_fix<H>(&formatter, ~options, ~mode)
+        else -> return jet_cli_dispatch_plan(plan)
+    }
+}
+
+pub fn jet_cli_dispatch_with_explanation<H: JetCLIDevExplainHost>(args: [String], facts: JetCLIProcessFacts, explanation: &H) -> JetDriverVerbOutput {
+    plan :: jet_cli_front(args, facts)
+    if plan == {
+        .Explain(request) -> return jet_cli_run_explain<H>(&explanation, ~request)
+        else -> return jet_cli_dispatch_plan(plan)
+    }
+}
+
+pub fn jet_cli_dispatch_with_status<H: JetCLIStatusHost>(args: [String], facts: JetCLIProcessFacts, receipts: &H) -> JetDriverVerbOutput {
+    plan :: jet_cli_front(args, facts)
+    if plan == {
+        .Status(arguments, json) -> return jet_cli_run_status<H>(&receipts, ~arguments, ~json)
+        else -> return jet_cli_dispatch_plan(plan)
+    }
+}
+// The provider emits target/child/evidence reports through the same invocation
+// sink that the native entry or command harness installed. Completed returns
+// only its status; do not print those reports a second time.
+pub fn jet_cli_dispatch_with_test<P: JetCLITestProvider, H: JetCLIExecutionHost>(args: [String], facts: JetCLIProcessFacts, provider: &P, execution: &H) -> JetDriverVerbOutput {
+    plan :: jet_cli_front(args, facts)
+    if plan == {
+        .Test(arguments, mode, advisory) -> {
+            if jet_cli_test_command<P,H>(~arguments, ~mode, advisory, &provider, &execution) == {
+                .Completed(status) -> return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: status}
+                .TestRefused(error) -> return jet_cli_test_refusal_output(~error, ~mode)
+                .OptionsRefused(refusal) -> return jet_cli_dispatch_plan(jet_cli_args_refusal_plan(~refusal, mode.color))
+            }
+        }
+        else -> return jet_cli_dispatch_plan(plan)
+    }
+}
+
+pub fn jet_cli_dispatch_with_try<H: JetCLITryHost>(args: [String], facts: JetCLIProcessFacts, host: &H) -> JetDriverVerbOutput {
+    plan :: jet_cli_front(args, facts)
+    if plan == {
+        .Try(file, keep, mode) -> {
+            if jet_cli_try_run(~file, keep, mode.json, &host) == {
+                .Ok(output) -> return ~output
+                .Err(.Load(entry, source, diagnostics)) -> return JetDriverVerbOutput{stdout: "", stderr: &host.render_diagnostics(entry, source, diagnostics), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+                .Err(.Message(message)) -> {
+                    refusal := jet_cli_args_refuse("E2105", ~message, jet_cli_why("E2105"), "correct the named problem, then run the command again", mode.json)
+                    refusal.exit_code = JET_DRIVER_EXIT_USER_ERROR
+                    return jet_cli_dispatch_plan(jet_cli_args_refusal_plan(refusal, mode.color))
+                }
+            }
+        }
+        else -> return jet_cli_dispatch_plan(plan)
+    }
+}
+
+pub fn jet_cli_dispatch_with_budget<H: JetCLIBudgetHost>(args: [String], facts: JetCLIProcessFacts, host: &H) -> JetDriverVerbOutput {
+    plan :: jet_cli_front(args, facts)
+    if plan == {
+        .Budget(arguments) -> return jet_cli_budget_run<H>(&host, ~arguments)
+        else -> return jet_cli_dispatch_plan(plan)
+    }
+}
+
+pub fn jet_cli_dispatch_with_package<H: JetCLIBundleHost>(args: [String], facts: JetCLIProcessFacts, host: &H) -> JetDriverVerbOutput {
+    plan :: jet_cli_front(args, facts)
+    if plan == {
+        .PackageDesktop(arguments, options, machine) -> return jet_cli_bundle_run_desktop<H>(arguments, options, machine, &host)
+        else -> return jet_cli_dispatch_plan(plan)
+    }
+}
+
+
+// One in-process `jet` invocation: plan it and run it, returning the bytes
+// and status the process writes. `jet_cli_main` and the command harness's
+// real dispatcher (Harness/Command.jet) share it; `facts` are the output
+// facts the caller observed. Unannotated because the compile verbs are
+// (Request.jet `jet_cli_compile_file`).
+pub fn jet_cli_dispatch(args: [String], facts: JetCLIProcessFacts) -> JetDriverVerbOutput {
+    jet_cli_dispatch_plan(jet_cli_front(args, facts))
+}
+
+pub fn jet_cli_main(args: [String]) -> Int {
+    output :: jet_cli_dispatch(args, jet_cli_process_facts())
     if output.stdout.len() > 0 {
         out :: cli_term.stdout()
         &out.write(output.stdout).drop("jet stdout")

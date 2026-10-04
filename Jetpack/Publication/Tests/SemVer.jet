@@ -1,0 +1,352 @@
+// Source/Publish/mod.rs:69-309, one #Test per original SemVer/range test.
+// Additional acceptance tests cover parser branches, u64 arithmetic, display,
+// and the approved exact release-intersection correction to SemVer.rs:714-771.
+// Tier proof retains compiler gates: default tier #4414 (String.split Iter.next
+// yields None) and #4313 (Ordering debug carrier); AOT #4403 (Display receiver)
+// and #4303 (borrowed trim view). No alternate splitter or assertion spelling.
+
+fn publication_test_sv(text: String) -> PublicationSemVer Never! {
+    publication_parse_semver(text) ?? panic("invalid test version: {text}")
+}
+
+fn publication_test_req(text: String) -> PublicationVersionReq Never! {
+    publication_parse_version_req(text) ?? panic("invalid test requirement: {text}")
+}
+
+fn publication_test_matches(range: String, version: String) -> Bool Never! {
+    publication_matches(publication_test_req(range), publication_test_sv(version))
+}
+
+fn publication_test_intersects(left: String, right: String) -> Bool Never! {
+    publication_intersects(publication_test_req(left), publication_test_req(right))
+}
+
+fn publication_test_comparator(range: String, index: Int, op: PublicationOp, version: String) Never! {
+    req :: publication_test_req(range)
+    assert_eq(req.sets.len(), 1)
+    assert_eq(req.sets[0][index].op, op)
+    assert_eq(req.sets[0][index].version, publication_test_sv(version))
+    // Precedence equality ignores build; display separately verifies retention.
+    assert_eq(publication_semver_display(req.sets[0][index].version), version)
+}
+
+#Test("publication semver_parse_basic") {
+    v :: publication_test_sv("1.2.3")
+    assert_eq(v.major, 1)
+    assert_eq(v.minor, 2)
+    assert_eq(v.patch, 3)
+}
+
+#Test("publication semver_parse_with_prefix_v") {
+    assert_eq(publication_test_sv("v2.0.0").major, 2)
+}
+
+#Test("publication semver_parse_with_pre") {
+    v :: publication_test_sv("1.0.0-alpha.1")
+    assert_eq(v.major, 1)
+    assert_eq(v.pre, Val("alpha.1"))
+}
+
+#Test("publication semver_ordering") {
+    assert(publication_test_sv("2.0.0") > publication_test_sv("1.9.9"))
+    assert(publication_test_sv("1.1.0") > publication_test_sv("1.0.9"))
+    assert_eq(publication_test_sv("1.2.3"), publication_test_sv("1.2.3"))
+}
+
+#Test("publication semver_compatible") {
+    v100 :: publication_test_sv("1.0.0")
+    v120 :: publication_test_sv("1.2.0")
+    assert(publication_is_compatible_with(v120, v100))
+    assert(!publication_is_compatible_with(v100, v120))
+}
+
+#Test("publication classify_bump_kinds") {
+    old :: publication_test_sv("1.0.0")
+    assert_eq(publication_classify_bump(old, publication_test_sv("2.0.0")), PublicationBumpKind.Major)
+    assert_eq(publication_classify_bump(old, publication_test_sv("1.1.0")), PublicationBumpKind.Minor)
+    assert_eq(publication_classify_bump(old, publication_test_sv("1.0.1")), PublicationBumpKind.Patch)
+    assert_eq(publication_classify_bump(old, old), PublicationBumpKind.Same)
+}
+
+#Test("publication version_req_caret") {
+    assert(publication_test_matches("^1.2", "1.2.0"))
+    assert(publication_test_matches("^1.2", "1.5.3"))
+    assert(!publication_test_matches("^1.2", "2.0.0"))
+    assert(!publication_test_matches("^1.2", "1.1.9"))
+}
+
+#Test("publication version_req_exact") {
+    assert(publication_test_matches("1.2.3", "1.2.3"))
+    assert(!publication_test_matches("1.2.3", "1.2.4"))
+}
+
+#Test("publication version_req_any") {
+    assert(publication_test_matches("*", "99.99.99"))
+}
+
+#Test("publication semver_parses_build_metadata") {
+    v :: publication_test_sv("1.2.3+build.5")
+    assert_eq(v.build, Val("build.5"))
+    assert_eq(v.pre, None)
+    v2 :: publication_test_sv("1.2.3-rc.1+exp.sha.5114f85")
+    assert_eq(v2.pre, Val("rc.1"))
+    assert_eq(v2.build, Val("exp.sha.5114f85"))
+    assert_eq(publication_semver_display(v2), "1.2.3-rc.1+exp.sha.5114f85")
+}
+
+#Test("publication semver_build_metadata_ignored_in_precedence") {
+    assert_eq(publication_test_sv("1.2.3+a"), publication_test_sv("1.2.3+b"))
+    assert_eq(publication_precedence(publication_test_sv("1.2.3+a"), publication_test_sv("1.2.3")), Ordering.Equal)
+}
+
+#Test("publication semver_rejects_leading_zeros") {
+    invalid :: [String]{"01.2.3", "1.02.3", "1.2.3-01", "1.2", "1.2.3.4"}
+    loop text in invalid -> assert_eq(publication_parse_semver(text), None)
+    assert(publication_parse_semver("1.2.3+0010") != None)
+}
+
+#Test("publication semver_hostile_numbers_and_ambiguous_ranges_never_panic_or_match") {
+    huge := ""
+    loop _ in 0..<200 -> huge = "{huge}9"
+    assert(publication_test_sv("1.0.0-{huge}") > publication_test_sv("1.0.0-2"))
+    invalid :: [String]{
+        "1 ||", "|| 1", "1 || || 2", "^18446744073709551615",
+        "~1.18446744073709551615", "18446744073709551615.x",
+        ">=", ">", "<", "=", "^", "~", "~>", "~>1.2"
+    }
+    loop range in invalid -> assert_eq(publication_parse_version_req(range), None)
+}
+
+#Test("publication semver_leading_v_is_consistent_across_versions_and_ranges") {
+    assert_eq(publication_parse_semver("v1.2.3"), Val(publication_test_sv("1.2.3")))
+    ranges :: [String]{"v1.2", "=v1.2.3", ">=v1.2.3", "^v1.2.3", "~v1.2.3"}
+    loop range in ranges -> assert(publication_test_matches(range, "1.2.3"))
+    assert(publication_test_matches("v1.2.3 - v2.0.0", "1.5.0"))
+}
+
+#Test("publication semver_prerelease_precedence") {
+    chain :: [String]{"1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0"}
+    loop index in 0..<(chain.len() - 1) -> assert(publication_test_sv(chain[index]) < publication_test_sv(chain[index + 1]))
+}
+
+#Test("publication version_req_operators") {
+    assert(publication_test_matches(">=1.2.0", "1.5.0"))
+    assert(!publication_test_matches(">=1.2.0", "1.1.9"))
+    assert(publication_test_matches("<2.0.0", "1.9.9"))
+    assert(!publication_test_matches("<2.0.0", "2.0.0"))
+    assert(publication_test_matches(">=1.2.0 < 2.0.0", "1.5.0"))
+    assert(!publication_test_matches(">=1.2.0 < 2.0.0", "2.0.0"))
+    assert(!publication_test_matches(">=1.2.0 < 2.0.0", "1.0.0"))
+}
+
+#Test("publication version_req_tilde") {
+    assert(publication_test_matches("~1.2.3", "1.2.9"))
+    assert(!publication_test_matches("~1.2.3", "1.3.0"))
+    assert(!publication_test_matches("~1.2.3", "1.2.2"))
+    assert(publication_test_matches("~1", "1.9.9"))
+    assert(!publication_test_matches("~1", "2.0.0"))
+}
+
+#Test("publication version_req_x_ranges") {
+    assert(publication_test_matches("1.2.x", "1.2.0"))
+    assert(publication_test_matches("1.2.x", "1.2.99"))
+    assert(!publication_test_matches("1.2.x", "1.3.0"))
+    assert(publication_test_matches("1", "1.9.9"))
+    assert(!publication_test_matches("1", "2.0.0"))
+}
+
+#Test("publication version_req_hyphen_and_or") {
+    assert(publication_test_matches("1.2.3 - 2.3.4", "1.2.3"))
+    assert(publication_test_matches("1.2.3 - 2.3.4", "2.3.4"))
+    assert(!publication_test_matches("1.2.3 - 2.3.4", "2.3.5"))
+    assert(publication_test_matches("1.2.3 - 2.3", "2.3.9"))
+    assert(!publication_test_matches("1.2.3 - 2.3", "2.4.0"))
+    assert(publication_test_matches("^1.0.0 || ^3.0.0", "1.5.0"))
+    assert(publication_test_matches("^1.0.0 || ^3.0.0", "3.2.0"))
+    assert(!publication_test_matches("^1.0.0 || ^3.0.0", "2.0.0"))
+}
+
+#Test("publication version_req_prerelease_rule") {
+    assert(!publication_test_matches(">=1.0.0", "2.0.0-alpha"))
+    assert(publication_test_matches(">=1.2.3-alpha", "1.2.3-beta"))
+    assert(!publication_test_matches(">=1.2.3-alpha", "1.2.4-beta"))
+}
+
+#Test("publication version_req_caret_zero") {
+    assert(publication_test_matches("^0.2.3", "0.2.9"))
+    assert(!publication_test_matches("^0.2.3", "0.3.0"))
+    assert(publication_test_matches("^0.0.3", "0.0.3"))
+    assert(!publication_test_matches("^0.0.3", "0.0.4"))
+}
+
+#Test("publication strict identifiers and full u64 component limits") {
+    invalid :: [String]{
+        "", "v", "vv1.2.3", "1", "1.2", "1.2.3.4", "1.2.03", "+1.2.3",
+        "-1.2.3", "1.2.3-", "1.2.3+", "1.2.3-a..b", "1.2.3+a..b",
+        "1.2.3-alpha_1", "1.2.3+bad_1", "1.2.3+one+two", "1.2.3-α",
+        "１.2.3", "18446744073709551616.0.0", "0.18446744073709551616.0",
+        "0.0.18446744073709551616", "999999999999999999999999999.0.0"
+    }
+    loop text in invalid -> assert_eq(publication_parse_semver(text), None)
+    max :: publication_test_sv("18446744073709551615.18446744073709551615.18446744073709551615")
+    assert_eq(max.major, PUBLICATION_U64_MAX)
+    assert_eq(max.minor, PUBLICATION_U64_MAX)
+    assert_eq(max.patch, PUBLICATION_U64_MAX)
+    assert_eq(publication_test_sv("  v1.2.3-a-1+000.-  ").pre, Val("a-1"))
+    assert_eq(publication_test_sv("1.2.3-0").pre, Val("0"))
+    assert_eq(publication_test_sv("1.2.3-01a").pre, Val("01a"))
+}
+
+#Test("publication prerelease numeric lexical and list-length ordering") {
+    assert(publication_test_sv("1.0.0-9") < publication_test_sv("1.0.0-10"))
+    assert(publication_test_sv("1.0.0-11") > publication_test_sv("1.0.0-10"))
+    assert(publication_test_sv("1.0.0-2") < publication_test_sv("1.0.0-a"))
+    assert(publication_test_sv("1.0.0-a") > publication_test_sv("1.0.0-2"))
+    assert(publication_test_sv("1.0.0-a.1") > publication_test_sv("1.0.0-a"))
+    assert_eq(publication_test_sv("1.0.0-a.1+x"), publication_test_sv("1.0.0-a.1+y"))
+    assert(publication_test_sv("1.0.0-18446744073709551616") > publication_test_sv("1.0.0-18446744073709551615"))
+    assert(publication_test_sv("1.0.0-A") < publication_test_sv("1.0.0-a"))
+}
+
+#Test("publication compatibility and bump faithfully ignore prerelease and regressions") {
+    assert(publication_is_compatible_with(publication_test_sv("1.2.3-alpha"), publication_test_sv("1.2.3")))
+    assert(!publication_is_compatible_with(publication_test_sv("2.0.0"), publication_test_sv("1.0.0")))
+    assert(!publication_is_compatible_with(publication_test_sv("1.2.2"), publication_test_sv("1.2.3")))
+    assert_eq(publication_classify_bump(publication_test_sv("1.0.0-alpha"), publication_test_sv("1.0.0")), PublicationBumpKind.Same)
+    assert_eq(publication_classify_bump(publication_test_sv("2.0.0"), publication_test_sv("1.1.0")), PublicationBumpKind.Minor)
+    assert_eq(publication_classify_bump(publication_test_sv("2.2.2"), publication_test_sv("1.1.1")), PublicationBumpKind.Same)
+}
+
+#Test("publication all operator partial replacements and normalized comparator display") {
+    publication_test_comparator("1", 0, PublicationOp.Gte, "1.0.0")
+    publication_test_comparator("1", 1, PublicationOp.Lt, "2.0.0")
+    publication_test_comparator("1.2", 0, PublicationOp.Gte, "1.2.0")
+    publication_test_comparator("1.2", 1, PublicationOp.Lt, "1.3.0")
+    publication_test_comparator("=1.2.3-a+001", 0, PublicationOp.Eq, "1.2.3-a+001")
+    publication_test_comparator(">1", 0, PublicationOp.Gte, "2.0.0")
+    publication_test_comparator(">1.2", 0, PublicationOp.Gte, "1.3.0")
+    publication_test_comparator(">1.2.3-a+b", 0, PublicationOp.Gt, "1.2.3-a+b")
+    publication_test_comparator("<1", 0, PublicationOp.Lt, "1.0.0")
+    publication_test_comparator("<1.2", 0, PublicationOp.Lt, "1.2.0")
+    publication_test_comparator("<1.2.3-a+b", 0, PublicationOp.Lt, "1.2.3-a+b")
+    publication_test_comparator(">=1.2-a+b", 0, PublicationOp.Gte, "1.2.0-a+b")
+    publication_test_comparator("<=1", 0, PublicationOp.Lt, "2.0.0")
+    publication_test_comparator("<=1.2", 0, PublicationOp.Lt, "1.3.0")
+    publication_test_comparator("<=1.2.3-a+b", 0, PublicationOp.Lte, "1.2.3-a+b")
+    assert(publication_test_matches(">1", "2.0.0"))
+    assert(!publication_test_matches(">1", "1.99.99"))
+    assert(publication_test_matches("<=1.2", "1.2.99"))
+    assert(!publication_test_matches("<=1.2", "1.3.0"))
+    assert(publication_test_matches(">1.2.3", "1.2.4"))
+    assert(!publication_test_matches(">1.2.3", "1.2.3"))
+    assert(publication_test_matches("<=1.2.3", "1.2.3"))
+    assert(!publication_test_matches("<=1.2.3", "1.2.4"))
+}
+
+#Test("publication caret tilde and hyphen every partial branch") {
+    publication_test_comparator("^0", 1, PublicationOp.Lt, "1.0.0")
+    publication_test_comparator("^0.0", 1, PublicationOp.Lt, "0.1.0")
+    publication_test_comparator("^0.0.3", 1, PublicationOp.Lt, "0.0.4")
+    publication_test_comparator("^0.2", 1, PublicationOp.Lt, "0.3.0")
+    publication_test_comparator("^1.2.3-a+b", 0, PublicationOp.Gte, "1.2.3-a")
+    publication_test_comparator("~1.2.3-a+b", 0, PublicationOp.Gte, "1.2.3-a")
+    publication_test_comparator("~1.2", 1, PublicationOp.Lt, "1.3.0")
+    publication_test_comparator("~1", 1, PublicationOp.Lt, "2.0.0")
+    publication_test_comparator("* - 2", 0, PublicationOp.Gte, "0.0.0")
+    publication_test_comparator("1 - 2", 1, PublicationOp.Lt, "3.0.0")
+    publication_test_comparator("1.2 - 2.3", 1, PublicationOp.Lt, "2.4.0")
+    publication_test_comparator("1.2.3-a+b - 2.3.4-c+d", 0, PublicationOp.Gte, "1.2.3-a")
+    publication_test_comparator("1.2.3-a+b - 2.3.4-c+d", 1, PublicationOp.Lte, "2.3.4-c")
+}
+
+#Test("publication wildcards whitespace raw display and OR gate isolation") {
+    wildcards :: [String]{"", " ", "*", "x", "X", "^*", "~x", ">*", "<=x", ">=X"}
+    loop range in wildcards {
+        assert(publication_test_matches(range, "0.0.0"))
+        assert(publication_test_matches(range, "99.99.99"))
+        assert(!publication_test_matches(range, "1.0.0-a"))
+    }
+    major_ranges :: [String]{"1.x", "1.X", "1.*", "1.", "1.."}
+    loop range in major_ranges -> assert(publication_test_matches(range, "1.9.9"))
+    minor_ranges :: [String]{"1.2.x", "1.2.X", "1.2.*", "1.2."}
+    loop range in minor_ranges -> assert(publication_test_matches(range, "1.2.99"))
+    vertical_tab :: String.from_bytes([U8]{U8{11}}) ?? panic("ASCII vertical tab must decode")
+    spaced :: [String]{"^ 1.2.3", "~ 1.2.3", "= 1.2.3", ">= 1.2.3", ">={vertical_tab}1.2.3"}
+    loop range in spaced -> assert(publication_test_matches(range, "1.2.3"))
+    assert_eq(publication_version_req_display(publication_test_req(" \t ")), "*")
+    assert_eq(publication_version_req_display(publication_test_req("  >= 1.2.3  <2.0.0  ")), ">= 1.2.3  <2.0.0")
+    assert(!publication_test_matches("^1 || >=2.0.0-alpha <2.0.0", "1.5.0-alpha"))
+    assert(publication_test_matches("^1 || >=2.0.0-alpha <2.0.0", "2.0.0-beta"))
+    assert(!publication_test_matches(">=1.0.0-alpha <1.0.0-beta", "1.0.0-rc"))
+}
+
+#Test("publication malformed ranges and every checked range upper-bound overflow") {
+    invalid :: [String]{
+        "v", "vv1.2.3", "1.x.3", "*.2", "1..3", "1.2.3.4", "01.2", "1.02",
+        "1.2.3-01", "1.2.3-a_1", "1.2.3+", "1.2.3+a+b", "1,2", "1 | 2",
+        "1.2.3 - *", "1.2.3 - 2.3.4 - 3.0.0", ">= >=1.2.3",
+        "18446744073709551616", "0.18446744073709551616", "0.0.18446744073709551616",
+        "18446744073709551615", "1.18446744073709551615", ">18446744073709551615",
+        ">1.18446744073709551615", "<=18446744073709551615", "<=1.18446744073709551615",
+        "^18446744073709551615.0.0", "^0.18446744073709551615.0", "^0.0.18446744073709551615",
+        "~18446744073709551615", "~0.18446744073709551615.0",
+        "0 - 18446744073709551615", "0 - 1.18446744073709551615"
+    }
+    loop range in invalid -> assert_eq(publication_parse_version_req(range), None)
+    assert(publication_test_matches("=18446744073709551615.0.0", "18446744073709551615.0.0"))
+    assert(publication_test_matches(">=18446744073709551615", "18446744073709551615.0.0"))
+    assert(publication_test_matches("0 - 18446744073709551615.18446744073709551615.18446744073709551615", "18446744073709551615.18446744073709551615.18446744073709551615"))
+}
+
+#Test("publication intersection AND OR equality and tightest boundaries") {
+    assert(!publication_test_intersects("^1.0", "^2.0"))
+    assert(publication_test_intersects("^1.0", "^1.2"))
+    assert(publication_test_intersects("*", "*"))
+    assert(publication_test_intersects("1.2.3", ">=1.2.3 <=1.2.3"))
+    assert(!publication_test_intersects("1.2.3", ">1.2.3"))
+    assert(!publication_test_intersects("1.2.3", "<1.2.3"))
+    assert(!publication_test_intersects(">=2.0.0", "<1.0.0"))
+    assert(publication_test_intersects("^1 || ^3", "^3.2"))
+    assert(!publication_test_intersects("^1 || ^3", "^2"))
+    assert(publication_test_intersects(">=0.0.0 >=1.0.0 >=0.5.0", "<=2.0.0 <=1.0.0 <=1.5.0"))
+    assert(!publication_test_intersects(">=1.0.0 >1.0.0", "<=1.0.0"))
+    assert(!publication_test_intersects("<=1.0.0 <1.0.0", ">=1.0.0"))
+    assert(!publication_test_intersects("<1.0.0 <=1.0.0", ">=1.0.0"))
+}
+
+#Test("publication exact discrete release intersection gaps and u64 rollover") {
+    assert(!publication_test_intersects(">1.0.0", "<1.0.1"))
+    assert(publication_test_intersects(">1.0.0", "<=1.0.1"))
+    assert(publication_test_intersects(">=1.0.0", "<1.0.1"))
+    assert(!publication_test_intersects("<0.0.0", "*"))
+    assert(!publication_test_intersects(">18446744073709551615.18446744073709551615.18446744073709551615", "*"))
+    assert(publication_test_intersects(">=18446744073709551615.18446744073709551615.18446744073709551615", "*"))
+    assert(!publication_test_intersects(">1.0.18446744073709551615", "<1.1.0"))
+    assert(publication_test_intersects(">1.0.18446744073709551615", "<=1.1.0"))
+    assert(!publication_test_intersects(">1.18446744073709551615.18446744073709551615", "<2.0.0"))
+    assert(publication_test_intersects(">1.18446744073709551615.18446744073709551615", "<=2.0.0"))
+    assert(publication_test_intersects("<1.1.0", "=1.0.18446744073709551615"))
+    assert(publication_test_intersects("<2.0.0", "=1.18446744073709551615.18446744073709551615"))
+}
+
+#Test("publication exact release projection for all prerelease comparator operators") {
+    assert(publication_test_intersects(">1.0.0-alpha", "=1.0.0"))
+    assert(publication_test_intersects(">=1.0.0-alpha", "=1.0.0"))
+    assert(!publication_test_intersects("<1.0.0-alpha", ">=1.0.0"))
+    assert(!publication_test_intersects("<=1.0.0-alpha", ">=1.0.0"))
+    assert(publication_test_intersects("<=1.0.0-alpha", "=0.18446744073709551615.18446744073709551615"))
+    assert(!publication_test_intersects("=1.0.0-alpha", "*"))
+    assert(!publication_test_intersects("<0.0.0-alpha", "*"))
+    assert(!publication_test_intersects("<=0.0.0-alpha", "*"))
+    assert(publication_test_intersects(">18446744073709551615.18446744073709551615.18446744073709551615-alpha", "*"))
+    // Matching prereleases is independently unchanged, even when no release exists.
+    assert(publication_test_matches("=1.0.0-alpha", "1.0.0-alpha"))
+    assert(publication_test_matches(">=1.0.0-alpha <1.0.0", "1.0.0-beta"))
+    assert(!publication_test_intersects(">=1.0.0-alpha <1.0.0", "*"))
+}
+
+#Test("publication behavioral proof control anchor") {
+    // Main's deliberate-failure control: change only 1 to 2 in this assertion,
+    // require a failed test, restore it, then run this complete focused suite.
+    assert_eq(publication_test_sv("1.2.3").major, 1)
+}

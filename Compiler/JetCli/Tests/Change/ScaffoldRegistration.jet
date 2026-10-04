@@ -1,0 +1,178 @@
+// New regressions derived from the three Rust function bodies in
+// Source/CmdBackendScaffold.rs:715-845; that source has no direct Rust tests.
+fn backend_registration_test_token(text: String, start: Int, end: Int) -> JetCLIBackendSyntaxToken Never! {
+    JetCLIBackendSyntaxToken{text: text, start: start, end: end}
+}
+fn backend_registration_test_end(source: String, expected: Int) Never! {
+    if jet_cli_backend_app_constructor_end(source) == {
+        .Ok(end) -> assert_eq(end, expected)
+        .Err(error) -> panic("unexpected App refusal: {error.message}")
+    }
+}
+fn backend_registration_test_error(source: String, expected: String) Never! {
+    if jet_cli_backend_app_constructor_end(source) == {
+        .Ok(_) -> panic("expected App refusal")
+        .Err(error) -> assert_eq(error.message, expected)
+    }
+}
+
+#Test("backend syntax blank and ASCII whitespace produce no tokens") {
+    assert_eq(jet_cli_backend_syntax_tokens(""), [JetCLIBackendSyntaxToken]{})
+    whitespace :: String.from_bytes([U8]{U8{32}, U8{9}, U8{10}, U8{13}, U8{12}}) ?? panic("ASCII whitespace fixture")
+    assert_eq(jet_cli_backend_syntax_tokens(whitespace), [JetCLIBackendSyntaxToken]{})
+    // Rust's ASCII whitespace set does not contain vertical tab.
+    vertical_tab :: String.from_bytes([U8]{U8{11}}) ?? panic("ASCII vertical tab fixture")
+    assert_eq(jet_cli_backend_syntax_tokens(vertical_tab), [JetCLIBackendSyntaxToken]{backend_registration_test_token(vertical_tab, 0, 1)})
+}
+
+#Test("backend syntax ASCII identifiers include digit starts and underscore") {
+    assert_eq(jet_cli_backend_syntax_tokens("a_Z09 9a _ .()+"), [JetCLIBackendSyntaxToken]{
+        backend_registration_test_token("a_Z09", 0, 5),
+        backend_registration_test_token("9a", 6, 8),
+        backend_registration_test_token("_", 9, 10),
+        backend_registration_test_token(".", 11, 12),
+        backend_registration_test_token("(", 12, 13),
+        backend_registration_test_token(")", 13, 14),
+        backend_registration_test_token("+", 14, 15),
+    })
+}
+
+#Test("backend syntax skips line and block comments with byte positions") {
+    assert_eq(jet_cli_backend_syntax_tokens("// app()\nx/*routes*/y"), [JetCLIBackendSyntaxToken]{
+        backend_registration_test_token("x", 9, 10),
+        backend_registration_test_token("y", 20, 21),
+    })
+    assert_eq(jet_cli_backend_syntax_tokens("// app()"), [JetCLIBackendSyntaxToken]{})
+}
+
+#Test("backend syntax block comments are nonnested") {
+    assert_eq(jet_cli_backend_syntax_tokens("/*a/*b*/app()"), [JetCLIBackendSyntaxToken]{
+        backend_registration_test_token("app", 8, 11),
+        backend_registration_test_token("(", 11, 12),
+        backend_registration_test_token(")", 12, 13),
+    })
+}
+
+#Test("backend syntax unterminated block boundaries truncate") {
+    inputs :: [String]{"/*", "/*x", "/* app()", "/*x*"}
+    loop input in inputs -> assert_eq(jet_cli_backend_syntax_tokens(input), [JetCLIBackendSyntaxToken]{})
+    assert_eq(jet_cli_backend_syntax_tokens("x/*y"), [JetCLIBackendSyntaxToken]{backend_registration_test_token("x", 0, 1)})
+    assert_eq(jet_cli_backend_syntax_tokens("/"), [JetCLIBackendSyntaxToken]{backend_registration_test_token("/", 0, 1)})
+}
+
+#Test("backend syntax quotes preserve escapes and slash comment text") {
+    assert_eq(jet_cli_backend_syntax_tokens("\"a\\\"b\" 'c\\'d' \"//app()\""), [JetCLIBackendSyntaxToken]{
+        backend_registration_test_token("\"a\\\"b\"", 0, 6),
+        backend_registration_test_token("'c\\'d'", 7, 13),
+        backend_registration_test_token("\"//app()\"", 14, 23),
+    })
+}
+
+#Test("backend syntax unterminated quotes retain the entire tail") {
+    assert_eq(jet_cli_backend_syntax_tokens("\"app()"), [JetCLIBackendSyntaxToken]{backend_registration_test_token("\"app()", 0, 6)})
+    assert_eq(jet_cli_backend_syntax_tokens("'x\\"), [JetCLIBackendSyntaxToken]{backend_registration_test_token("'x\\", 0, 3)})
+    assert_eq(jet_cli_backend_syntax_tokens("\"x\\\""), [JetCLIBackendSyntaxToken]{backend_registration_test_token("\"x\\\"", 0, 4)})
+    assert_eq(jet_cli_backend_syntax_tokens("'"), [JetCLIBackendSyntaxToken]{backend_registration_test_token("'", 0, 1)})
+}
+
+#Test("backend syntax backslash skips exactly one next byte") {
+    assert_eq(jet_cli_backend_syntax_tokens("\"\\\\\"app()"), [JetCLIBackendSyntaxToken]{
+        backend_registration_test_token("\"\\\\\"", 0, 4),
+        backend_registration_test_token("app", 4, 7),
+        backend_registration_test_token("(", 7, 8),
+        backend_registration_test_token(")", 8, 9),
+    })
+}
+
+#Test("backend syntax UTF8 punctuation is one lossy token per byte") {
+    assert_eq(jet_cli_backend_syntax_tokens("é🦀app()"), [JetCLIBackendSyntaxToken]{
+        backend_registration_test_token("�", 0, 1),
+        backend_registration_test_token("�", 1, 2),
+        backend_registration_test_token("�", 2, 3),
+        backend_registration_test_token("�", 3, 4),
+        backend_registration_test_token("�", 4, 5),
+        backend_registration_test_token("�", 5, 6),
+        backend_registration_test_token("app", 6, 9),
+        backend_registration_test_token("(", 9, 10),
+        backend_registration_test_token(")", 10, 11),
+    })
+}
+
+#Test("backend syntax UTF8 quoted and comment text retains byte offsets") {
+    assert_eq(jet_cli_backend_syntax_tokens("'é🦀' app()"), [JetCLIBackendSyntaxToken]{
+        backend_registration_test_token("'é🦀'", 0, 8),
+        backend_registration_test_token("app", 9, 12),
+        backend_registration_test_token("(", 12, 13),
+        backend_registration_test_token(")", 13, 14),
+    })
+    assert_eq(jet_cli_backend_syntax_tokens("/*é*/app()"), [JetCLIBackendSyntaxToken]{
+        backend_registration_test_token("app", 6, 9),
+        backend_registration_test_token("(", 9, 10),
+        backend_registration_test_token(")", 10, 11),
+    })
+}
+
+#Test("backend routes positional named and both quote styles") {
+    inputs :: [String]{"app().routes(\"routes\")", ".routes('routes')", ".routes(from: \"routes\")", ".routes(from:'routes')"}
+    loop input in inputs -> assert(jet_cli_backend_has_routes_registration(input))
+}
+
+#Test("backend routes comments between tokens and missing close accepted") {
+    assert(jet_cli_backend_has_routes_registration(". /*a*/ routes //b\n ( /*c*/ from /*d*/ : /*e*/ 'routes'"))
+    assert(jet_cli_backend_has_routes_registration(".routes(\"routes\""))
+    assert(jet_cli_backend_has_routes_registration(".routes('routes', other)"))
+}
+
+#Test("backend routes rejects wrong spelling paths and truncated prefixes") {
+    inputs :: [String]{"", ".", ".routes", ".routes(", ".routes(from", ".routes(from:", "routes('routes')", ".Routes('routes')", ".routes('Routes')", ".routes('routes/x')", ".routes(from='routes')", ".routes(source:'routes')", ".routes(routes)", ".routes('routes", ".routes('rout\\es')"}
+    loop input in inputs -> assert(!jet_cli_backend_has_routes_registration(input))
+}
+
+#Test("backend routes fake strings and comments do not register") {
+    inputs :: [String]{"// .routes('routes')", "/* .routes('routes') */", "\".routes('routes')\"", "'.routes(\"routes\")'", "\"//\" /* .routes('routes') */"}
+    loop input in inputs -> assert(!jet_cli_backend_has_routes_registration(input))
+    assert(jet_cli_backend_has_routes_registration("'fake' /*.routes('bad')*/ x.routes('routes')"))
+}
+
+#Test("backend App bare web and core qualification end at closing byte") {
+    backend_registration_test_end("app()", 5)
+    backend_registration_test_end("web.app()", 9)
+    backend_registration_test_end("core.web.app()", 14)
+    backend_registration_test_end("return app().routes('routes')", 12)
+}
+
+#Test("backend App fn exclusion and wrong qualification and arguments") {
+    inputs :: [String]{"", "fn app() {{}}", "fn/*gap*/app()", "other.app()", "other.web.app()", "web.other.app()", "core.app()", "app(x)", "app(,)", "App()", "app(", "app", ".app()"}
+    loop input in inputs -> backend_registration_test_error(input, "the checked run function has no canonical App builder")
+}
+
+#Test("backend App Rust core prefix and immediate fn policy are preserved") {
+    // core-qualified recognition intentionally permits a dot before core.
+    backend_registration_test_end("other.core.web.app()", 20)
+    backend_registration_test_end("fn web.app()", 12)
+    backend_registration_test_end("fn core.web.app()", 17)
+    backend_registration_test_end("notfn app()", 11)
+}
+
+#Test("backend App comments strings and UTF8 preserve the unique byte end") {
+    backend_registration_test_end("é🦀 app()", 12)
+    backend_registration_test_end("/*é*/web/*x*/./*y*/app/*z*/(/*q*/)tail", 35)
+    backend_registration_test_end("'app()' \"web.app()\" //core.web.app()\napp()", 42)
+    backend_registration_test_error("'app()' /*web.app()*/ \"core.web.app()\"", "the checked run function has no canonical App builder")
+}
+
+#Test("backend App zero and multiple candidates keep exact refusal text") {
+    backend_registration_test_error("// app()", "the checked run function has no canonical App builder")
+    backend_registration_test_error("app(); web.app()", "the checked run function has multiple App builders")
+    backend_registration_test_error("core.web.app() app()", "the checked run function has multiple App builders")
+    backend_registration_test_end("fn app() {{}} app()", 17)
+}
+
+#Test("backend App large repeated candidate input remains a multiple refusal") {
+    bytes := [U8]{}
+    loop index in 0..<4096 {
+        loop byte in "core.web.app();".bytes() -> &bytes.push(byte)
+    }
+    source :: String.from_bytes(bytes) ?? panic("ASCII candidate fixture")
+    backend_registration_test_error(source, "the checked run function has multiple App builders")
+}

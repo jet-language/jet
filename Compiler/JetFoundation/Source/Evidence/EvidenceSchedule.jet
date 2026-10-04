@@ -1,0 +1,140 @@
+// Typed derivation payload adapter: ResourceSchedule.rs:880–919,1095–1318.
+// Parsing remains the canonical Core JSON implementation, never a second parser.
+use core.encoding.json as evidence_payload_json
+fn evidence_schedule_object(value: DataTree, what: String) -> [String:DataTree] EvidenceCodecError! {
+    if value == {
+        .Object(fields) -> Ok(fields)
+        else -> Err(evidence_codec_error("expected {what} object"))
+    }
+}
+fn evidence_schedule_field(fields: [String:DataTree], name: String) -> DataTree EvidenceCodecError! { Ok(fields.get(name) ?? return Err(evidence_codec_error("frame schedule is missing `{name}`"))) }
+fn evidence_schedule_array(value: DataTree, what: String) -> [DataTree] EvidenceCodecError! {
+    if value == {
+        .Array(values) -> Ok(values)
+        else -> Err(evidence_codec_error("expected {what} array"))
+    }
+}
+fn evidence_schedule_text(value: DataTree, what: String) -> String EvidenceCodecError! {
+    if value == {
+        .Text(text) -> Ok(text)
+        else -> Err(evidence_codec_error("expected {what} text"))
+    }
+}
+fn evidence_schedule_bool(value: DataTree, what: String) -> Bool EvidenceCodecError! {
+    if value == {
+        .Bool(flag) -> Ok(flag)
+        else -> Err(evidence_codec_error("expected {what} boolean"))
+    }
+}
+fn evidence_schedule_unsigned(value: DataTree, what: String) -> Int EvidenceCodecError! {
+    text :: if value == {
+        .Int(number) -> {
+            if number < 0 -> return Err(evidence_codec_error("expected {what} unsigned integer"))
+            number.to_string()
+        }
+        .Text(text) -> text
+        else -> { return Err(evidence_codec_error("expected {what} unsigned integer")) }
+    }
+    bytes :: text.bytes()
+    start :: if bytes.len() > 0 && bytes[0] == (U8{43}) -> 1 else -> 0
+    if start == bytes.len() -> return Err(evidence_codec_error("invalid {what} unsigned integer `{text}`"))
+    loop index in start..<bytes.len() {
+        if bytes[index] < (U8{48}) || bytes[index] > (U8{57}) -> return Err(evidence_codec_error("invalid {what} unsigned integer `{text}`"))
+    }
+    number :: Int.parse(text) ?? return Err(evidence_codec_error("invalid {what} unsigned integer `{text}`"))
+    if number < 0 || number > 18446744073709551615 -> return Err(evidence_codec_error("invalid {what} unsigned integer `{text}`"))
+    Ok(number)
+}
+fn evidence_schedule_optional(value: DataTree, what: String) -> String? EvidenceCodecError! { if value == { .Null -> Ok(None) else -> Ok(Val(evidence_schedule_text(value, what))) } }
+fn evidence_schedule_identity(value: DataTree) -> MIRResourceIdentity EvidenceCodecError! {
+    fields :: evidence_schedule_object(value, "resource identity")
+    kind :: evidence_schedule_text(evidence_schedule_field(fields, "kind"), "resource identity kind")
+    if kind == {
+        "named" -> Ok(MIRResourceIdentity.Named{name: evidence_schedule_text(evidence_schedule_field(fields, "value"), "resource identity value")})
+        "unknown" -> Ok(MIRResourceIdentity.Unknown)
+        else -> Err(evidence_codec_error("unsupported resource identity kind `{kind}`"))
+    }
+}
+fn evidence_schedule_region(value: DataTree) -> MIRResourceRegion EvidenceCodecError! {
+    fields :: evidence_schedule_object(value, "resource region")
+    kind :: evidence_schedule_text(evidence_schedule_field(fields, "kind"), "resource region kind")
+    if kind == {
+        "whole" -> Ok(MIRResourceRegion.Whole)
+        "unknown" -> Ok(MIRResourceRegion.Unknown)
+        "bytes" -> Ok(MIRResourceRegion.Bytes{start: evidence_schedule_unsigned(evidence_schedule_field(fields, "start"), "region start"), length: evidence_schedule_unsigned(evidence_schedule_field(fields, "length"), "region length")})
+        else -> Err(evidence_codec_error("unsupported resource region kind `{kind}`"))
+    }
+}
+fn evidence_schedule_layout(value: DataTree) -> MIRResourceLayout? EvidenceCodecError! {
+    if value == {
+        .Null -> return Ok(None)
+        else -> {}
+    }
+    fields :: evidence_schedule_object(value, "resource layout")
+    Ok(Val(MIRResourceLayout{size: evidence_schedule_unsigned(evidence_schedule_field(fields, "size"), "layout size"), align: evidence_schedule_unsigned(evidence_schedule_field(fields, "align"), "layout alignment"), layout: evidence_schedule_text(evidence_schedule_field(fields, "layout"), "layout identity"), device: evidence_schedule_text(evidence_schedule_field(fields, "device"), "layout device")}))
+}
+fn evidence_schedule_access(value: DataTree) -> MIRResourceAccess EvidenceCodecError! {
+    fields :: evidence_schedule_object(value, "resource access")
+    mode_text :: evidence_schedule_text(evidence_schedule_field(fields, "mode"), "resource access mode")
+    mode :: if mode_text == {
+        "read" -> MIRResourceAccessMode.Read
+        "write" -> MIRResourceAccessMode.Write
+        "move" -> MIRResourceAccessMode.Move
+        else -> { return Err(evidence_codec_error("unsupported resource access mode `{mode_text}`")) }
+    }
+    Ok(MIRResourceAccess{resource: evidence_schedule_identity(evidence_schedule_field(fields, "resource")), mode: mode, region: evidence_schedule_region(evidence_schedule_field(fields, "region")), layout: evidence_schedule_layout(evidence_schedule_field(fields, "layout")), temporary: evidence_schedule_bool(evidence_schedule_field(fields, "temporary"), "temporary")})
+}
+fn evidence_schedule_completion(value: DataTree) -> MIRFrameCompletion EvidenceCodecError! {
+    fields :: evidence_schedule_object(value, "completion")
+    kind :: evidence_schedule_text(evidence_schedule_field(fields, "kind"), "completion kind")
+    if kind == {
+        "synchronous" -> Ok(MIRFrameCompletion.Synchronous)
+        "pending" -> Ok(MIRFrameCompletion.Pending{token: evidence_schedule_text(evidence_schedule_field(fields, "token"), "completion token")})
+        "event" -> Ok(MIRFrameCompletion.Event{token: evidence_schedule_text(evidence_schedule_field(fields, "token"), "completion token")})
+        else -> Err(evidence_codec_error("unsupported completion kind `{kind}`"))
+    }
+}
+fn evidence_schedule_operation(value: DataTree) -> MIRFrameOperation EvidenceCodecError! {
+    fields :: evidence_schedule_object(value, "frame operation")
+    accesses := [MIRResourceAccess]{}
+    loop access in evidence_schedule_array(evidence_schedule_field(fields, "accesses"), "operation accesses") -> &accesses.push(evidence_schedule_access(access))
+    provider :: if fields.get("completion_provider") == {
+        .None -> None
+        .Val(provider_value) -> evidence_schedule_optional(provider_value, "completion provider")
+    }
+    Ok(MIRFrameOperation{name: evidence_schedule_text(evidence_schedule_field(fields, "name"), "operation name"), source_index: evidence_schedule_unsigned(evidence_schedule_field(fields, "source_index"), "source index"), accesses: accesses, completion: evidence_schedule_completion(evidence_schedule_field(fields, "completion")), completion_provider: provider, external_effect: evidence_schedule_bool(evidence_schedule_field(fields, "external_effect"), "external effect")})
+}
+fn evidence_decode_frame_schedule(text: String) -> MIRFrameSchedule EvidenceCodecError! {
+    tree :: if evidence_payload_json.parse(text) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(evidence_codec_error("invalid frame schedule JSON: {error.reason}")) }
+    }
+    fields :: evidence_schedule_object(tree, "frame schedule")
+    schema :: evidence_schedule_text(evidence_schedule_field(fields, "schema"), "schema")
+    if schema != "jet.frame_schedule/v1" -> return Err(evidence_codec_error("unsupported frame schedule schema `{schema}`"))
+    operations := [MIRFrameOperation]{}
+    dependencies := [MIRFrameDependency]{}
+    transfers := [MIRFrameTransfer]{}
+    reuse := [MIRFrameReuse]{}
+    retentions := [MIRFrameRetention]{}
+    conservative := [String]{}
+    loop value in evidence_schedule_array(evidence_schedule_field(fields, "operations"), "operations") -> &operations.push(evidence_schedule_operation(value))
+    loop value in evidence_schedule_array(evidence_schedule_field(fields, "dependencies"), "dependencies") {
+        row :: evidence_schedule_object(value, "frame dependency")
+        &dependencies.push(MIRFrameDependency{before: evidence_schedule_unsigned(evidence_schedule_field(row, "before"), "dependency before"), after: evidence_schedule_unsigned(evidence_schedule_field(row, "after"), "dependency after"), resource: evidence_schedule_text(evidence_schedule_field(row, "resource"), "dependency resource"), reason: evidence_schedule_text(evidence_schedule_field(row, "reason"), "dependency reason")})
+    }
+    loop value in evidence_schedule_array(evidence_schedule_field(fields, "transfers"), "transfers") {
+        row :: evidence_schedule_object(value, "frame transfer")
+        &transfers.push(MIRFrameTransfer{before: evidence_schedule_unsigned(evidence_schedule_field(row, "before"), "transfer before"), after: evidence_schedule_unsigned(evidence_schedule_field(row, "after"), "transfer after"), resource: evidence_schedule_text(evidence_schedule_field(row, "resource"), "transfer resource"), from_device: evidence_schedule_text(evidence_schedule_field(row, "from_device"), "source device"), to_device: evidence_schedule_text(evidence_schedule_field(row, "to_device"), "destination device")})
+    }
+    loop value in evidence_schedule_array(evidence_schedule_field(fields, "reuse"), "reuse") {
+        row :: evidence_schedule_object(value, "frame reuse")
+        &reuse.push(MIRFrameReuse{previous_resource: evidence_schedule_text(evidence_schedule_field(row, "previous_resource"), "previous resource"), next_resource: evidence_schedule_text(evidence_schedule_field(row, "next_resource"), "next resource"), previous_last_use: evidence_schedule_unsigned(evidence_schedule_field(row, "previous_last_use"), "previous last use"), next_first_use: evidence_schedule_unsigned(evidence_schedule_field(row, "next_first_use"), "next first use"), legal: evidence_schedule_bool(evidence_schedule_field(row, "legal"), "reuse legality"), reason: evidence_schedule_text(evidence_schedule_field(row, "reason"), "reuse reason")})
+    }
+    loop value in evidence_schedule_array(evidence_schedule_field(fields, "retentions"), "retentions") {
+        row :: evidence_schedule_object(value, "frame retention")
+        &retentions.push(MIRFrameRetention{resource: evidence_schedule_text(evidence_schedule_field(row, "resource"), "retained resource"), operation: evidence_schedule_unsigned(evidence_schedule_field(row, "operation"), "retention operation"), owner: evidence_schedule_text(evidence_schedule_field(row, "owner"), "retention owner"), completion_token: evidence_schedule_optional(evidence_schedule_field(row, "completion_token"), "retention completion token"), completed: evidence_schedule_bool(evidence_schedule_field(row, "completed"), "retention completion")})
+    }
+    loop value in evidence_schedule_array(evidence_schedule_field(fields, "conservative"), "conservative") -> &conservative.push(evidence_schedule_text(value, "conservative reason"))
+    Ok(MIRFrameSchedule{operations: operations, dependencies: dependencies, transfers: transfers, reuse: reuse, retentions: retentions, conservative: conservative})
+}

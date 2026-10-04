@@ -1,0 +1,679 @@
+// Receipt store query and publication (Source/ReceiptStore.rs RE02/RE03).
+// ONE canonical claim/lookup/write/record/list/current/section-adoption path;
+// Rust write/record/diff overload aliases are retired (diff stays on Receipt).
+// Context/discovery/identity belong to ReceiptContext; the record index is the
+// canonical RecordIndex owner. No second store, codec, index or path scanner.
+// C-FS (#3593/#3598): receipt bytes are read only through the canonical held
+// no-follow bounded Foundation reader in Jetpack/Foundation/Source/TreeHash.jet
+// (JpW16 correction/acceptance and #4409 InvalidData composition still held).
+// create-new/write/sync_all/hard-link/rename/remove/directory-fsync reuse the
+// canonical RecordIndex native file seam. No mock provider exists here.
+// #4451 native bounded worker/queue and publisher instantiation remain separate
+// gates: this policy never substitutes synchronous work for optional enqueue.
+use core.files.path as receipt_paths
+
+// Rust ReceiptStore (ReceiptStore.rs:365-372); `new` is this struct literal.
+pub struct JetCLIReceiptStore { pub root: receipt_paths.Path }
+// Rust read_section_records row (ReceiptStore.rs:1079): (PathBuf, record).
+pub struct JetCLIReceiptSectionRecordFile { pub path: receipt_paths.Path, pub record: JetCLIReceiptSectionRecord }
+// Rust indexed_comparison_sections row (ReceiptStore.rs:2616): (id, consumed, size).
+pub struct JetCLIReceiptIndexedComparison { pub artifact_id: String, pub consumed: [JetCLIRecordLink], pub size: Int }
+
+// Rust ReceiptStore::context_path / object_path / section_path /
+// section_stage_path (ReceiptStore.rs:378-380,1060-1073).
+pub fn jet_cli_receipt_store_context_path(store: JetCLIReceiptStore, context_key: String) -> receipt_paths.Path Never! {
+    receipt_paths.join(receipt_paths.join(store.root, "contexts"), context_key)
+}
+pub fn jet_cli_receipt_store_object_path(store: JetCLIReceiptStore, key: String) -> receipt_paths.Path Never! {
+    receipt_paths.join(receipt_paths.join(store.root, "objects"), key)
+}
+pub fn jet_cli_receipt_store_section_path(store: JetCLIReceiptStore, claim_key: String) -> receipt_paths.Path Never! {
+    receipt_paths.join(receipt_paths.join(store.root, JET_CLI_RECEIPT_SECTION_DIR), claim_key)
+}
+pub fn jet_cli_receipt_store_section_stage_path(store: JetCLIReceiptStore, claim_key: String) -> receipt_paths.Path Never! {
+    receipt_paths.join(receipt_paths.join(store.root, JET_CLI_RECEIPT_SECTION_STAGE_DIR), claim_key)
+}
+
+// Rust read_regular (ReceiptStore.rs:3273-3275): SHA256::read_file_nofollow,
+// the canonical held/no-follow bounded read (Main ruling), never path reads.
+fn jet_cli_receipt_read_regular(path: receipt_paths.Path) -[FS]> [U8] IOError! {
+    foundation_read_file_nofollow(path.raw, JET_CLI_MAX_RECEIPT_BYTES)
+}
+// Rust eprintln! (panics when stderr cannot be written).
+fn jet_cli_receipt_store_notice<P: JetCLIReceiptProcessHost>(process_host: &P, text: String) Never! -[IO]> {
+    &process_host.write_stderr(text.bytes()) ?? panic("failed printing to stderr: {err.message}")
+}
+
+// Rust receipt_secret_values (ReceiptStore.rs:3697-3718). Environment rows are
+// the actual process observation in OS order. Rust's stable sort_by_key is an
+// explicit (length desc, arrival asc) key over owned rows: a comparator that
+// borrows the local value list hits a generated-Rust borrow ICE (E0502).
+struct JetCLIReceiptSecretValue { length: Int, arrival: Int, value: String }
+pub fn jet_cli_receipt_secret_values_from(environment: [JetCLIReceiptEnvironmentEntry], argv: [String]) -> [String] Never! {
+    values := [String]{}
+    loop entry in environment {
+        if entry.value != "" && jet_cli_receipt_is_secret_environment_name(entry.name) -> &values.push(~entry.value)
+    }
+    loop (index, argument) in argv {
+        bytes :: argument.bytes()
+        equal := -1
+        loop offset in 0..<bytes.len() {
+            if Int.from_u8(bytes[offset]) == 61 {
+                equal = offset
+                break
+            }
+        }
+        if equal >= 0 {
+            name :: String.from_bytes(bytes[0..<equal]) ?? panic("ASCII separator boundary")
+            value :: String.from_bytes(bytes[(equal + 1)..<bytes.len()]) ?? panic("ASCII separator boundary")
+            if jet_cli_receipt_is_secret_name(name) && value != "" -> &values.push(value)
+            next
+        }
+        if jet_cli_receipt_is_secret_name(argument) && index + 1 < argv.len() {
+            if argv[index + 1] != "" -> &values.push(~argv[index + 1])
+        }
+    }
+    rows := [JetCLIReceiptSecretValue]{}
+    loop (arrival, value) in values -> &rows.push(JetCLIReceiptSecretValue{length: value.bytes().len(), arrival: arrival, value: ~value})
+    &rows.sort_by((a: JetCLIReceiptSecretValue, b: JetCLIReceiptSecretValue) -> {
+        if {
+            a.length != b.length -> b.length <=> a.length
+            else -> a.arrival <=> b.arrival
+        }
+    })
+    out := [String]{}
+    loop row in rows {
+        if out.len() == 0 || out[out.len() - 1] != row.value -> &out.push(~row.value)
+    }
+    out
+}
+pub fn jet_cli_receipt_secret_values<P: JetCLIReceiptProcessHost>(argv: [String], process_host: &P) -[Env]> [String] Never! {
+    jet_cli_receipt_secret_values_from(&process_host.environment(), argv)
+}
+
+// Rust ReceiptStore::context_key (ReceiptStore.rs:374-376).
+pub fn jet_cli_receipt_store_context_key<P: JetCLIReceiptProcessHost>(verb: String, argv: [String], tools: JetCLIReceiptToolIdentity, process_host: &P) -[Env, IO]> String JetCLIReceiptError! {
+    identity :: jet_cli_receipt_context_identity(verb, argv, tools, &process_host)
+    Ok(mir_sha256_hex_bytes(mir_sha256_bytes(identity)))
+}
+// Rust ReceiptStore::claim (ReceiptStore.rs:384-391).
+pub fn jet_cli_receipt_store_claim<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost, P: JetCLIReceiptProcessHost>(verb: String, argv: [String], input_paths: [receipt_paths.Path], tools: JetCLIReceiptToolIdentity, file_host: &F, authority: &A, process_host: &P) -[FS, Env, IO]> JetCLIReceiptClaim JetCLIReceiptError! {
+    identity := jet_cli_receipt_context_identity(verb, argv, tools, &process_host)
+    jet_cli_receipt_store_claim_with_identity(verb, &identity, input_paths, &file_host, &authority, &process_host)
+}
+// Rust ReceiptStore::claim_with_attempt (ReceiptStore.rs:392-403).
+pub fn jet_cli_receipt_store_claim_with_attempt<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost, P: JetCLIReceiptProcessHost>(verb: String, argv: [String], input_paths: [receipt_paths.Path], attempt: [U8], tools: JetCLIReceiptToolIdentity, file_host: &F, authority: &A, process_host: &P) -[FS, Env, IO]> JetCLIReceiptClaim JetCLIReceiptError! {
+    identity := jet_cli_receipt_context_identity(verb, argv, tools, &process_host)
+    jet_cli_receipt_frame(&identity, "generated-replay-attempt-v1".bytes())
+    jet_cli_receipt_frame(&identity, attempt)
+    jet_cli_receipt_store_claim_with_identity(verb, &identity, input_paths, &file_host, &authority, &process_host)
+}
+// Rust ReceiptStore::claim_with_identity (ReceiptStore.rs:405-441). Dedup is
+// Rust BTreeSet<PathBuf> (component equality) via the ONE shared path key.
+fn jet_cli_receipt_store_claim_with_identity<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost, P: JetCLIReceiptProcessHost>(verb: String, identity: &[U8], input_paths: [receipt_paths.Path], file_host: &F, authority: &A, process_host: &P) -[FS, Env]> JetCLIReceiptClaim JetCLIReceiptError! {
+    if verb == "check" -> jet_cli_receipt_append_check_context_identity(&identity, &file_host, &authority, &process_host)
+    inputs := [JetCLIReceiptInput]{}
+    seen := [String:Bool]{}
+    loop path in input_paths {
+        canonical :: jet_cli_receipt_canonical_path(path, &file_host)
+        key :: jet_cli_record_path_key(canonical.raw)
+        if seen.has_key(key) -> next
+        seen[key] = true
+        digest :: jet_cli_receipt_file_digest(canonical, &file_host)
+        &inputs.push(JetCLIReceiptInput{path: canonical, digest: digest})
+    }
+    &inputs.sort_by((a: JetCLIReceiptInput, b: JetCLIReceiptInput) -> jet_cli_record_compare_paths(a.path.raw, b.path.raw))
+    loop input in inputs {
+        jet_cli_receipt_frame(&identity, input.path.raw.bytes())
+        jet_cli_receipt_frame(&identity, input.digest.bytes())
+    }
+    Ok(JetCLIReceiptClaim{verb: verb, key: mir_sha256_hex_bytes(mir_sha256_bytes(identity)), inputs: inputs})
+}
+
+// Rust lookup_context pointer decoding (ReceiptStore.rs:465-471): non-UTF-8
+// or non-digest pointer bytes are a cache miss, never an error.
+pub fn jet_cli_receipt_context_pointer_key(bytes: [U8]) -> String? Never! {
+    key :: String.from_bytes(bytes) ?? return None
+    if !jet_cli_receipt_is_digest(key) -> return None
+    Val(key)
+}
+// Rust ReceiptStore::lookup_context (ReceiptStore.rs:446-573).
+pub fn jet_cli_receipt_store_lookup_context<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost, P: JetCLIReceiptProcessHost>(store: JetCLIReceiptStore, verb: String, argv: [String], cwd: receipt_paths.Path, tools: JetCLIReceiptToolIdentity, file_host: &F, authority: &A, process_host: &P) -[FS, Env, IO]> JetCLIReceipt? JetCLIReceiptError! {
+    identity := jet_cli_receipt_context_identity(verb, argv, tools, &process_host)
+    context_key :: mir_sha256_hex_bytes(mir_sha256_bytes(identity))
+    pointer :: jet_cli_receipt_store_context_path(store, context_key)
+    pointer_bytes :: if jet_cli_receipt_read_regular(pointer) == {
+        .Ok(bytes) -> bytes
+        .Err(error) -> {
+            if error == .NotFound(_) -> return Ok(None)
+            return Err(jet_cli_receipt_error("could not read receipt context {pointer.raw}: {error}"))
+        }
+    }
+    key :: jet_cli_receipt_context_pointer_key(pointer_bytes) ?? return Ok(None)
+    object :: jet_cli_receipt_store_object_path(store, key)
+    bytes :: if jet_cli_receipt_read_regular(object) == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            if error == .NotFound(_) -> return Ok(None)
+            return Err(jet_cli_receipt_error("could not read receipt {object.raw}: {error}"))
+        }
+    }
+    receipt :: if jet_cli_receipt_decode(bytes) == {
+        .Ok(value) -> value
+        .Err(_) -> { return Ok(None) }
+    }
+    if receipt.claim.key != key || receipt.claim.verb != verb -> return Ok(None)
+    identity_cwd :: jet_cli_receipt_current_dir(&process_host)
+    if verb == "build" || verb == "prove" {
+        _ :: jet_cli_receipt_target_inputs_sha256(receipt.claim, argv, cwd, identity_cwd, &file_host, &authority)
+    }
+    if verb == "prove" {
+        generated_failure :: jet_cli_receipt_has_generated_failure_for_target(receipt, argv, cwd, identity_cwd, &file_host, &authority)
+        if generated_failure -> return Ok(None)
+    }
+    input_paths := [receipt_paths.Path]{}
+    target :: jet_cli_receipt_target_path(verb, argv, cwd, &file_host, &authority)
+    if verb == "check" && !jet_cli_receipt_has_explicit_target(verb, argv) {
+        if jet_cli_receipt_project_check_input_paths(cwd, &file_host, &authority) == Val(paths) -> input_paths = paths
+        else {
+            directory := false
+            if target == Val(value) -> directory = jet_cli_receipt_is_directory(value, &file_host)
+            if directory -> input_paths = jet_cli_receipt_input_paths_for(verb, argv, cwd, &file_host, &authority)
+            else { loop input in receipt.claim.inputs -> &input_paths.push(~input.path) }
+        }
+    } else {
+        tree := false
+        if target == Val(value) -> tree = jet_cli_receipt_is_directory(value, &file_host) || verb == "budget check"
+        if tree -> input_paths = jet_cli_receipt_input_paths_for(verb, argv, cwd, &file_host, &authority)
+        else {
+            loop input in receipt.claim.inputs -> &input_paths.push(~input.path)
+            // Rediscover authority paths so a new workspace, lock, generated
+            // input or entry candidate cannot hide behind an old claim.
+            if target == Val(value) -> jet_cli_receipt_add_project_inputs(value, verb, &input_paths, &file_host, &authority)
+            jet_cli_receipt_sort_paths(&input_paths)
+        }
+    }
+    claim :: if jet_cli_receipt_store_claim_with_identity(verb, &identity, input_paths, &file_host, &authority, &process_host) == {
+        .Ok(value) -> value
+        .Err(_) -> { return Ok(None) }
+    }
+    generated_replay_receipt :: verb == "prove" && claim.inputs == receipt.claim.inputs
+    if claim != receipt.claim && !generated_replay_receipt {
+        if jet_cli_receipt_notices_visible(verb, argv) {
+            changes :: jet_cli_receipt_changed_inputs(receipt.claim.inputs, claim.inputs)
+            if changes.len() == 0 -> jet_cli_receipt_store_notice(&process_host, "receipt: {verb} invalidated (entry candidates or authority context changed)\n")
+            else { loop path in changes -> jet_cli_receipt_store_notice(&process_host, "receipt: {verb} invalidated (input changed: `{path.raw}`)\n") }
+        }
+        return Ok(None)
+    }
+    if jet_cli_receipt_stale_input(claim.inputs, &file_host) == Val(path) {
+        if jet_cli_receipt_notices_visible(verb, argv) -> jet_cli_receipt_store_notice(&process_host, "receipt: {verb} invalidated (input changed: `{path.raw}`)\n")
+        return Ok(None)
+    }
+    if receipt.digest != jet_cli_receipt_digest(receipt) {
+        if jet_cli_receipt_notices_visible(verb, argv) -> jet_cli_receipt_store_notice(&process_host, "receipt: {verb} invalidated (receipt authentication changed)\n")
+        return Ok(None)
+    }
+    Ok(Val(receipt))
+}
+
+// Rust ReceiptStore::remember_context_key (ReceiptStore.rs:576-620).
+pub fn jet_cli_receipt_store_remember_context_key<F: JetCLIReceiptReadHost, H: JetCLIRecordIndexFileHost>(store: JetCLIReceiptStore, context_key: String, claim: JetCLIReceiptClaim, file_host: &F, host: &H) JetCLIReceiptError! -[FS, Env]> {
+    if !jet_cli_receipt_is_digest(context_key) || claim.verb == "" || !jet_cli_receipt_is_digest(claim.key) -> return Err(jet_cli_receipt_error("receipt context claim is malformed"))
+    path :: jet_cli_receipt_store_context_path(store, context_key)
+    parent :: jet_cli_receipt_parent(path) ?? return Err(jet_cli_receipt_error("receipt context path has no parent"))
+    jet_cli_receipt_secure_create_dir(parent, &file_host, &host)
+    if &file_host.symlink_metadata(path) == {
+        .Ok(metadata) -> { if metadata.is_symlink || !metadata.is_file -> return Err(jet_cli_receipt_error("receipt context is unsafe: {path.raw}")) }
+        .Err(_) -> {}
+    }
+    temp :: receipt_paths.join(parent, ".{context_key}.{record_index_sys.pid()}.{&host.next_temporary_id()}")
+    handle :: &host.create_new(temp) ?? {
+        if &host.remove_file(temp) == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
+        return Err(jet_cli_receipt_error("could not stage receipt context: {jet_cli_record_index_io_message(err)}"))
+    }
+    if jet_cli_receipt_publish_context(handle, temp, path, parent, claim.key, &host) == {
+        .Ok(_) -> &host.close(handle)
+        .Err(error) -> {
+            &host.close(handle)
+            if &host.remove_file(temp) == {
+                .Ok(_) -> {}
+                .Err(_) -> {}
+            }
+            return Err(error)
+        }
+    }
+}
+// Rust remember_context_key publication closure (ReceiptStore.rs:600-615);
+// the staged handle stays open until the closure ends, as in Rust.
+fn jet_cli_receipt_publish_context<H: JetCLIRecordIndexFileHost>(handle: Int, temp: receipt_paths.Path, path: receipt_paths.Path, parent: receipt_paths.Path, key: String, host: &H) JetCLIReceiptError! -[FS]> {
+    &host.write_all(handle, key.bytes()) ?? return Err(jet_cli_receipt_error("could not write receipt context: {jet_cli_record_index_io_message(err)}"))
+    &host.sync_all(handle) ?? return Err(jet_cli_receipt_error("could not flush receipt context: {jet_cli_record_index_io_message(err)}"))
+    &host.rename(temp, path) ?? return Err(jet_cli_receipt_error("could not publish receipt context: {jet_cli_record_index_io_message(err)}"))
+    &host.sync_directory(parent) ?? return Err(jet_cli_receipt_error("could not flush receipt context directory: {jet_cli_record_index_io_message(err)}"))
+}
+
+// Rust inputs_current (ReceiptStore.rs:3251-3255).
+fn jet_cli_receipt_inputs_current<F: JetCLIReceiptReadHost>(inputs: [JetCLIReceiptInput], file_host: &F) -[FS]> Bool Never! {
+    loop input in inputs {
+        if jet_cli_receipt_file_digest(input.path, &file_host) == {
+            .Ok(digest) -> { if digest != input.digest -> return false }
+            .Err(_) -> { return false }
+        }
+    }
+    true
+}
+// Rust secure_create_dir (ReceiptStore.rs:3263-3271).
+fn jet_cli_receipt_secure_create_dir<F: JetCLIReceiptReadHost, H: JetCLIRecordIndexFileHost>(path: receipt_paths.Path, file_host: &F, host: &H) JetCLIReceiptError! -[FS]> {
+    if &file_host.symlink_metadata(path) == {
+        .Ok(metadata) -> {
+            if metadata.is_symlink || !metadata.is_dir -> return Err(jet_cli_receipt_error("receipt directory is unsafe: {path.raw}"))
+            return
+        }
+        .Err(_) -> {}
+    }
+    &host.create_directory_all(path) ?? return Err(jet_cli_receipt_error("could not create receipt directory: {jet_cli_record_index_io_message(err)}"))
+}
+
+// Rust lookup section projection (ReceiptStore.rs:648-674): appended records
+// identical to an immutable section are skipped; a same-name record conflicts.
+pub fn jet_cli_receipt_merge_published_sections(receipt: &JetCLIReceipt, appended: [JetCLIReceiptSection]) JetCLIReceiptError! {
+    loop section in appended {
+        same := false
+        named := false
+        loop existing in receipt.sections {
+            if existing.name == section.name {
+                named = true
+                if existing.type_name == section.type_name && existing.schema_digest == section.schema_digest && existing.payload_digest == section.payload_digest -> same = true
+            }
+        }
+        if same -> next
+        if named -> return Err(jet_cli_receipt_error("receipt section `{section.name}` conflicts with the immutable receipt"))
+        &receipt.sections.push(~section)
+    }
+    jet_cli_receipt_normalize_sections(&receipt.sections) ?? return Err(jet_cli_receipt_error(err.message))
+}
+// Rust ReceiptStore::lookup (ReceiptStore.rs:624-676).
+pub fn jet_cli_receipt_store_lookup<F: JetCLIReceiptReadHost>(store: JetCLIReceiptStore, claim: JetCLIReceiptClaim, file_host: &F) -[FS]> JetCLIReceipt? JetCLIReceiptError! {
+    if !jet_cli_receipt_is_digest(claim.key) || !jet_cli_receipt_inputs_current(claim.inputs, &file_host) -> return Ok(None)
+    path :: jet_cli_receipt_store_object_path(store, claim.key)
+    bytes :: if jet_cli_receipt_read_regular(path) == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            if error == .NotFound(_) -> return Ok(None)
+            return Err(jet_cli_receipt_error("could not read receipt {path.raw}: {error}"))
+        }
+    }
+    receipt := if jet_cli_receipt_decode(bytes) == {
+        .Ok(value) -> value
+        .Err(_) -> { return Ok(None) }
+    }
+    // The immutable object authenticates itself before append-only section
+    // records are projected into the caller-visible receipt.
+    if receipt.claim != claim || receipt.digest != jet_cli_receipt_digest(receipt) -> return Ok(None)
+    appended :: jet_cli_receipt_store_published_sections(store, receipt.claim.key, receipt.digest, &file_host)
+    jet_cli_receipt_merge_published_sections(&receipt, appended)
+    Ok(Val(receipt))
+}
+
+// Rust ReceiptStore::write_with_sections_and_links (ReceiptStore.rs:718-799),
+// the one canonical write. `true` = new object, `false` = identical object.
+pub fn jet_cli_receipt_store_write<F: JetCLIReceiptReadHost, H: JetCLIRecordIndexFileHost, P: JetCLIReceiptProcessHost>(store: JetCLIReceiptStore, claim: JetCLIReceiptClaim, argv: [String], status: I32, stdout: [U8], stderr: [U8], sections: [JetCLIReceiptSection], consumed: [JetCLIRecordLink], produced: [JetCLIRecordLink], file_host: &F, host: &H, process_host: &P) -[FS, Env]> Bool JetCLIReceiptError! {
+    secret_values :: jet_cli_receipt_secret_values(argv, &process_host)
+    if !jet_cli_receipt_is_digest(claim.key) -> return Err(jet_cli_receipt_error("receipt claim key is not a lowercase SHA-256 digest"))
+    normalized :: jet_cli_receipt_normalized_sections(sections) ?? return Err(jet_cli_receipt_error(err.message))
+    consumed_links :: jet_cli_receipt_normalized_links(consumed, "consumed")
+    produced_links :: jet_cli_receipt_normalized_links(produced, "produced")
+    if !jet_cli_receipt_inputs_current(claim.inputs, &file_host) -> return Ok(false)
+    redacted_stdout :: jet_cli_receipt_bounded_redact_bytes(stdout, secret_values)
+    redacted_stderr :: jet_cli_receipt_bounded_redact_bytes(stderr, secret_values)
+    receipt := JetCLIReceipt{claim: ~claim, status: status, stdout: redacted_stdout, stderr: redacted_stderr, sections: normalized, consumed: consumed_links, produced: produced_links, digest: ""}
+    receipt.digest = jet_cli_receipt_digest(receipt)
+    bytes :: jet_cli_receipt_encode(receipt)
+    path :: jet_cli_receipt_store_object_path(store, claim.key)
+    parent :: jet_cli_receipt_parent(path) ?? return Err(jet_cli_receipt_error("receipt path has no parent: {path.raw}"))
+    jet_cli_receipt_secure_create_dir(parent, &file_host, &host)
+    temp :: receipt_paths.join(parent, ".{claim.key}.{record_index_sys.pid()}.{&host.next_temporary_id()}")
+    jet_cli_receipt_publish_staged(temp, path, parent, bytes, "receipt", "receipt key collision with different content", &host)
+}
+// Rust publish_immutable_bytes (ReceiptStore.rs:1157-1205).
+fn jet_cli_receipt_publish_immutable_bytes<F: JetCLIReceiptReadHost, H: JetCLIRecordIndexFileHost>(path: receipt_paths.Path, bytes: [U8], file_host: &F, host: &H) -[FS, Env]> Bool JetCLIReceiptError! {
+    parent :: jet_cli_receipt_parent(path) ?? return Err(jet_cli_receipt_error("receipt section path has no parent: {path.raw}"))
+    jet_cli_receipt_secure_create_dir(parent, &file_host, &host)
+    name :: jet_cli_receipt_file_name(path)
+    stem :: if name == "" -> "section" else -> name
+    temp :: receipt_paths.join(parent, ".{stem}.{record_index_sys.pid()}.{&host.next_temporary_id()}")
+    jet_cli_receipt_publish_staged(temp, path, parent, bytes, "receipt section", "receipt section identity collision with different content", &host)
+}
+// The shared create-new/sync/hard-link algorithm of write (758-798) and
+// publish_immutable_bytes (1162-1204); only the message labels differ. Every
+// failure removes the stage; the staged handle closes at closure end.
+fn jet_cli_receipt_publish_staged<H: JetCLIRecordIndexFileHost>(temp: receipt_paths.Path, path: receipt_paths.Path, parent: receipt_paths.Path, bytes: [U8], label: String, collision: String, host: &H) -[FS]> Bool JetCLIReceiptError! {
+    handle :: &host.create_new(temp) ?? {
+        if &host.remove_file(temp) == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
+        return Err(jet_cli_receipt_error("could not stage {label}: {jet_cli_record_index_io_message(err)}"))
+    }
+    if jet_cli_receipt_publish_handle(handle, temp, path, parent, bytes, label, collision, &host) == {
+        .Ok(published) -> {
+            &host.close(handle)
+            Ok(published)
+        }
+        .Err(error) -> {
+            &host.close(handle)
+            if &host.remove_file(temp) == {
+                .Ok(_) -> {}
+                .Err(_) -> {}
+            }
+            Err(error)
+        }
+    }
+}
+fn jet_cli_receipt_publish_handle<H: JetCLIRecordIndexFileHost>(handle: Int, temp: receipt_paths.Path, path: receipt_paths.Path, parent: receipt_paths.Path, bytes: [U8], label: String, collision: String, host: &H) -[FS]> Bool JetCLIReceiptError! {
+    &host.write_all(handle, bytes) ?? return Err(jet_cli_receipt_error("could not write {label}: {jet_cli_record_index_io_message(err)}"))
+    &host.sync_all(handle) ?? return Err(jet_cli_receipt_error("could not flush {label}: {jet_cli_record_index_io_message(err)}"))
+    if &host.hard_link(temp, path) == {
+        .Ok(_) -> {
+            &host.remove_file(temp) ?? return Err(jet_cli_receipt_error("could not remove staged {label}: {jet_cli_record_index_io_message(err)}"))
+            &host.sync_directory(parent) ?? return Err(jet_cli_receipt_error("could not flush {label} directory: {jet_cli_record_index_io_message(err)}"))
+            Ok(true)
+        }
+        .Err(error) -> {
+            if error == .AlreadyExists(_) {
+                existing :: jet_cli_receipt_read_regular(path) ?? return Err(jet_cli_receipt_error("could not inspect {label}: {err}"))
+                if &host.remove_file(temp) == {
+                    .Ok(_) -> {}
+                    .Err(_) -> {}
+                }
+                if existing == bytes -> return Ok(false)
+                return Err(jet_cli_receipt_error(collision))
+            }
+            Err(jet_cli_receipt_error("could not publish {label}: {jet_cli_record_index_io_message(error)}"))
+        }
+    }
+}
+
+// Rust ReceiptStore::record_with_sections_and_links (ReceiptStore.rs:841-871),
+// the one canonical record: claim, write, authenticated re-lookup, then index.
+pub fn jet_cli_receipt_store_record<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost, P: JetCLIReceiptProcessHost, H: JetCLIRecordIndexFileHost, R: JetCLIRecordRetentionHost>(store: JetCLIReceiptStore, verb: String, argv: [String], input_paths: [receipt_paths.Path], status: I32, stdout: [U8], stderr: [U8], sections: [JetCLIReceiptSection], consumed: [JetCLIRecordLink], produced: [JetCLIRecordLink], tools: JetCLIReceiptToolIdentity, file_host: &F, authority: &A, process_host: &P, host: &H, retention: &R) -[FS, Env, IO, Time]> JetCLIReceipt JetCLIReceiptError! {
+    claim :: jet_cli_receipt_store_claim(verb, argv, input_paths, tools, &file_host, &authority, &process_host)
+    _ :: jet_cli_receipt_store_write(store, claim, argv, status, stdout, stderr, sections, consumed, produced, &file_host, &host, &process_host)
+    found :: jet_cli_receipt_store_lookup(store, claim, &file_host)
+    receipt :: found ?? return Err(jet_cli_receipt_error("receipt was not current after publication"))
+    if &process_host.current_dir() == {
+        .Ok(cwd) -> jet_cli_receipt_index_published(store, receipt, argv, cwd, &file_host, &authority, &process_host, &host, &retention)
+        .Err(_) -> {}
+    }
+    Ok(receipt)
+}
+
+// Rust ReceiptStore::list (ReceiptStore.rs:876-928): only fully decoded,
+// self-authenticated receipts in stable claim-key order.
+pub fn jet_cli_receipt_store_list<F: JetCLIReceiptReadHost>(store: JetCLIReceiptStore, file_host: &F) -[FS]> [JetCLIReceipt] JetCLIReceiptError! {
+    objects :: receipt_paths.join(store.root, "objects")
+    metadata :: if &file_host.symlink_metadata(objects) == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            if error.not_found -> return Ok([JetCLIReceipt]{})
+            return Err(jet_cli_receipt_error("could not inspect receipt store: {error.message}"))
+        }
+    }
+    if metadata.is_symlink || !metadata.is_dir -> return Err(jet_cli_receipt_error("receipt object store is not a regular directory: {objects.raw}"))
+    receipts := [JetCLIReceipt]{}
+    handle :: &file_host.open_directory(objects) ?? return Err(jet_cli_receipt_error("could not list receipts: {err.message}"))
+    loop {
+        entry :: if &file_host.next_entry(handle) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                &file_host.close_directory(handle)
+                return Err(jet_cli_receipt_error("could not inspect receipt: {error.message}"))
+            }
+        }
+        if entry == Val(path) {
+            name :: jet_cli_receipt_file_name(path)
+            if name == "" || name.starts_with(".") -> next
+            if !jet_cli_receipt_is_digest(name) -> next
+            bytes :: jet_cli_receipt_read_regular(path) ?? next
+            receipt := jet_cli_receipt_decode(bytes) ?? next
+            if receipt.claim.key != name || receipt.digest != jet_cli_receipt_digest(receipt) -> next
+            appended :: jet_cli_receipt_store_published_sections(store, receipt.claim.key, receipt.digest, &file_host) ?? next
+            &receipt.sections.extend(appended)
+            jet_cli_receipt_normalize_sections(&receipt.sections) ?? next
+            &receipts.push(receipt)
+        } else { break }
+    }
+    &file_host.close_directory(handle)
+    &receipts.sort_by((a: JetCLIReceipt, b: JetCLIReceipt) -> a.claim.key.bytes() <=> b.claim.key.bytes())
+    Ok(receipts)
+}
+// Rust ReceiptStore::is_current (ReceiptStore.rs:932-935).
+pub fn jet_cli_receipt_store_is_current<F: JetCLIReceiptReadHost>(store: JetCLIReceiptStore, receipt: JetCLIReceipt, file_host: &F) -[FS]> Bool JetCLIReceiptError! {
+    current :: jet_cli_receipt_store_lookup(store, receipt.claim, &file_host)
+    if current == Val(value) -> return Ok(value == receipt)
+    Ok(false)
+}
+// Rust ReceiptStore::list_current (ReceiptStore.rs:939-948): first error wins.
+pub fn jet_cli_receipt_store_list_current<F: JetCLIReceiptReadHost>(store: JetCLIReceiptStore, file_host: &F) -[FS]> [JetCLIReceipt] JetCLIReceiptError! {
+    receipts :: jet_cli_receipt_store_list(store, &file_host)
+    current := [JetCLIReceipt]{}
+    loop receipt in receipts {
+        current_receipt :: jet_cli_receipt_store_is_current(store, receipt, &file_host)
+        if current_receipt -> &current.push(~receipt)
+    }
+    Ok(current)
+}
+// Rust ReceiptStore::query_sections (ReceiptStore.rs:951-962): every selected
+// name is validated before the shared projection.
+pub fn jet_cli_receipt_store_query_sections(receipt: JetCLIReceipt, names: [String]?) -> CanonicalJSON JetCLIReceiptError! {
+    if names == Val(selection) {
+        loop name in selection { _ :: jet_cli_receipt_section(receipt, name) }
+    }
+    projection :: jet_cli_receipt_query(receipt, names) ?? return Err(jet_cli_receipt_error(err.message))
+    Ok(projection)
+}
+
+// Rust ReceiptStore::adopt_staged_sections (ReceiptStore.rs:984-1030).
+pub fn jet_cli_receipt_store_adopt_staged_sections<F: JetCLIReceiptReadHost, H: JetCLIRecordIndexFileHost>(store: JetCLIReceiptStore, claim: JetCLIReceiptClaim, file_host: &F, host: &H) JetCLIReceiptError! -[FS, Env]> {
+    found :: jet_cli_receipt_store_lookup(store, claim, &file_host)
+    receipt :: found ?? return Err(jet_cli_receipt_error("cannot adopt receipt sections before parent publication"))
+    stage_dir :: jet_cli_receipt_store_section_stage_path(store, claim.key)
+    staged :: jet_cli_receipt_read_section_records(stage_dir, Val(claim.key), Val(""), &file_host)
+    if staged.len() == 0 -> return
+    existing := ~receipt.sections
+    pending := [JetCLIReceiptSection]{}
+    loop entry in staged {
+        section :: entry.record.section
+        same := false
+        loop current in existing {
+            if current.name == section.name && current.type_name == section.type_name && current.schema_digest == section.schema_digest && current.payload_digest == section.payload_digest -> same = true
+        }
+        if same -> next
+        conflict := false
+        loop current in existing { if current.name == section.name -> conflict = true }
+        loop current in pending { if current.name == section.name -> conflict = true }
+        if conflict -> return Err(jet_cli_receipt_error("receipt section `{section.name}` conflicts with an existing section"))
+        &pending.push(~section)
+    }
+    &existing.extend(pending)
+    // Rust normalized_sections(&existing)? discards the sorted copy: validate only.
+    jet_cli_receipt_validate_sections(existing) ?? return Err(jet_cli_receipt_error(err.message))
+    loop entry in staged {
+        _ :: jet_cli_receipt_store_append_section_record(store, claim.key, receipt.digest, entry.record.section, &file_host, &host)
+        &host.remove_file(entry.path) ?? return Err(jet_cli_receipt_error("could not remove staged receipt section: {jet_cli_record_index_io_message(err)}"))
+    }
+    if &host.remove_directory(stage_dir) == {
+        .Ok(_) -> {}
+        .Err(_) -> {}
+    }
+}
+// Rust ReceiptStore::published_sections (ReceiptStore.rs:1032-1046).
+fn jet_cli_receipt_store_published_sections<F: JetCLIReceiptReadHost>(store: JetCLIReceiptStore, claim_key: String, parent_digest: String, file_host: &F) -[FS]> [JetCLIReceiptSection] JetCLIReceiptError! {
+    records :: jet_cli_receipt_read_section_records(jet_cli_receipt_store_section_path(store, claim_key), Val(claim_key), Val(parent_digest), &file_host)
+    sections :: loop entry in records -> ~entry.record.section
+    Ok(sections)
+}
+// Rust ReceiptStore::append_section_record (ReceiptStore.rs:1048-1058).
+fn jet_cli_receipt_store_append_section_record<F: JetCLIReceiptReadHost, H: JetCLIRecordIndexFileHost>(store: JetCLIReceiptStore, claim_key: String, parent_digest: String, section: JetCLIReceiptSection, file_host: &F, host: &H) -[FS, Env]> Bool JetCLIReceiptError! {
+    record :: jet_cli_receipt_section_record_new(claim_key, parent_digest, section) ?? return Err(jet_cli_receipt_error(err.message))
+    id :: jet_cli_receipt_section_record_identity(record)
+    bytes :: jet_cli_receipt_encode_section_record(record) ?? return Err(jet_cli_receipt_error(err.message))
+    jet_cli_receipt_publish_immutable_bytes(receipt_paths.join(jet_cli_receipt_store_section_path(store, claim_key), id), bytes, &file_host, &host)
+}
+
+// Rust read_section_records (ReceiptStore.rs:1075-1155).
+fn jet_cli_receipt_read_section_records<F: JetCLIReceiptReadHost>(directory: receipt_paths.Path, expected_claim: String?, expected_parent: String?, file_host: &F) -[FS]> [JetCLIReceiptSectionRecordFile] JetCLIReceiptError! {
+    metadata :: if &file_host.symlink_metadata(directory) == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            if error.not_found -> return Ok([JetCLIReceiptSectionRecordFile]{})
+            return Err(jet_cli_receipt_error("could not inspect receipt section directory {directory.raw}: {error.message}"))
+        }
+    }
+    if metadata.is_symlink || !metadata.is_dir -> return Err(jet_cli_receipt_error("receipt section directory is not a regular directory: {directory.raw}"))
+    handle :: &file_host.open_directory(directory) ?? return Err(jet_cli_receipt_error("could not list receipt sections: {err.message}"))
+    records := [JetCLIReceiptSectionRecordFile]{}
+    loop {
+        entry :: if &file_host.next_entry(handle) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                &file_host.close_directory(handle)
+                return Err(jet_cli_receipt_error("could not inspect receipt section: {error.message}"))
+            }
+        }
+        if entry == Val(path) {
+            name :: jet_cli_receipt_file_name(path)
+            if name == "" || name.starts_with(".") -> next
+            if jet_cli_receipt_read_section_record(path, name, expected_claim, expected_parent, &file_host) == {
+                .Ok(record) -> &records.push(JetCLIReceiptSectionRecordFile{path: path, record: record})
+                .Err(error) -> {
+                    &file_host.close_directory(handle)
+                    return Err(error)
+                }
+            }
+        } else { break }
+    }
+    &file_host.close_directory(handle)
+    &records.sort_by((a: JetCLIReceiptSectionRecordFile, b: JetCLIReceiptSectionRecordFile) -> jet_cli_receipt_file_name(a.path).bytes() <=> jet_cli_receipt_file_name(b.path).bytes())
+    sections :: loop entry in records -> ~entry.record.section
+    jet_cli_receipt_validate_sections(sections) ?? return Err(jet_cli_receipt_error(err.message))
+    Ok(records)
+}
+// Rust read_section_records per-entry checks (ReceiptStore.rs:1110-1140).
+fn jet_cli_receipt_read_section_record<F: JetCLIReceiptReadHost>(path: receipt_paths.Path, name: String, expected_claim: String?, expected_parent: String?, file_host: &F) -[FS]> JetCLIReceiptSectionRecord JetCLIReceiptError! {
+    if !jet_cli_receipt_is_digest(name) -> return Err(jet_cli_receipt_error("receipt section record has a non-digest name: {path.raw}"))
+    metadata :: &file_host.symlink_metadata(path) ?? return Err(jet_cli_receipt_error("could not inspect receipt section: {err.message}"))
+    if metadata.is_symlink || !metadata.is_file -> return Err(jet_cli_receipt_error("receipt section record is not a regular file: {path.raw}"))
+    bytes :: jet_cli_receipt_read_regular(path) ?? return Err(jet_cli_receipt_error("could not read receipt section {path.raw}: {err}"))
+    record :: jet_cli_receipt_decode_section_record(bytes) ?? return Err(jet_cli_receipt_error(err.message))
+    if jet_cli_receipt_section_record_identity(record) != name -> return Err(jet_cli_receipt_error("receipt section record identity does not match its path: {path.raw}"))
+    mismatch := false
+    if expected_claim == Val(wanted_claim) -> mismatch = record.claim_key != wanted_claim
+    if expected_parent == Val(wanted_parent) -> mismatch = mismatch || record.parent_digest != wanted_parent
+    if mismatch -> return Err(jet_cli_receipt_error("receipt section record belongs to a different receipt: {path.raw}"))
+    Ok(record)
+}
+
+// Rust reserve_receipt_record (ReceiptStore.rs:2494-2524). Tool version is
+// Rust env!("CARGO_PKG_VERSION") = JET_CLI_VERSION.
+pub fn jet_cli_receipt_reserve_record<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost, P: JetCLIReceiptProcessHost, H: JetCLIRecordIndexFileHost, R: JetCLIRecordRetentionHost>(store: JetCLIReceiptStore, claim: JetCLIReceiptClaim, argv: [String], cwd: receipt_paths.Path, file_host: &F, authority: &A, process_host: &P, host: &H, retention: &R) -[FS, Env, Time]> JetCLIRecordLink? JetCLIReceiptError! {
+    path :: jet_cli_receipt_record_path(store.root, jet_cli_receipt_store_object_path(store, claim.key), cwd, &file_host) ?? return Ok(None)
+    identity :: jet_cli_receipt_record_identity(claim, argv, cwd, jet_cli_receipt_current_dir(&process_host), JET_CLI_VERSION, &file_host, &authority)
+    link :: jet_cli_receipt_record_link(claim) ?? return Err(jet_cli_receipt_error(err.message))
+    project_root :: jet_cli_receipt_project_root_for_store(store.root, cwd, &file_host) ?? return Err(jet_cli_receipt_error("receipt store is not under the canonical project `.jet` root"))
+    index := jet_cli_record_index_load_for_project(project_root, &host) ?? return Err(jet_cli_receipt_error(err.message))
+    if jet_cli_record_index_find(index, .Receipt, claim.key, true) == Val(existing) {
+        if !jet_cli_receipt_same_record_identity(existing.identity, identity) -> return Err(jet_cli_receipt_error("receipt `{claim.key}` conflicts with its indexed identity"))
+        return Ok(Val(link))
+    }
+    sequence :: jet_cli_record_index_next_recorded_sequence(index) ?? return Err(jet_cli_receipt_error(jet_cli_record_index_error_message(err)))
+    entry := jet_cli_record_entry_new(identity, .Receipt, claim.key, path.raw) ?? return Err(jet_cli_receipt_error(err.message))
+    jet_cli_record_entry_with_capture(&entry, .Safe)
+    jet_cli_record_entry_with_size(&entry, 0) ?? return Err(jet_cli_receipt_error(err.message))
+    jet_cli_record_entry_with_recorded_sequence(&entry, sequence) ?? return Err(jet_cli_receipt_error(err.message))
+    jet_cli_record_index_update_and_store(&index, entry, &host, &retention) ?? return Err(jet_cli_receipt_error(err.message))
+    Ok(Val(link))
+}
+// Rust derived RecordIdentity PartialEq: all three fields.
+fn jet_cli_receipt_same_record_identity(left: JetCLIRecordIdentity, right: JetCLIRecordIdentity) -> Bool Never! {
+    left.target_inputs_sha256 == right.target_inputs_sha256 && left.tool_version == right.tool_version && left.engine == right.engine
+}
+// Rust index_published_receipt (ReceiptStore.rs:2525-2612). New comparison
+// rows draw next_recorded_sequence from the SAME loaded index, as in Rust.
+fn jet_cli_receipt_index_published<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost, P: JetCLIReceiptProcessHost, H: JetCLIRecordIndexFileHost, R: JetCLIRecordRetentionHost>(store: JetCLIReceiptStore, receipt: JetCLIReceipt, argv: [String], cwd: receipt_paths.Path, file_host: &F, authority: &A, process_host: &P, host: &H, retention: &R) JetCLIReceiptError! -[FS, Env, Time]> {
+    path :: jet_cli_receipt_record_path(store.root, jet_cli_receipt_store_object_path(store, receipt.claim.key), cwd, &file_host) ?? return
+    object :: jet_cli_receipt_store_object_path(store, receipt.claim.key)
+    metadata :: &file_host.symlink_metadata(object) ?? return Err(jet_cli_receipt_error("could not inspect receipt object `{object.raw}`: {err.message}"))
+    if metadata.is_symlink || !metadata.is_file -> return Err(jet_cli_receipt_error("receipt object is not a regular file: {object.raw}"))
+    size :: metadata.size
+    identity :: jet_cli_receipt_record_identity(receipt.claim, argv, cwd, jet_cli_receipt_current_dir(&process_host), JET_CLI_VERSION, &file_host, &authority)
+    comparisons :: jet_cli_receipt_indexed_comparison_sections(receipt)
+    project_root :: jet_cli_receipt_project_root_for_store(store.root, cwd, &file_host) ?? return Err(jet_cli_receipt_error("receipt store is not under the canonical project `.jet` root"))
+    index := jet_cli_record_index_load_for_project(project_root, &host) ?? return Err(jet_cli_receipt_error(err.message))
+    entries := [JetCLIRecordIndexEntry]{}
+    produced := ~receipt.produced
+    comparison_links := [JetCLIRecordLink]{}
+    loop comparison in comparisons {
+        sequence := 0
+        saved := false
+        if jet_cli_record_index_find(index, .Comparison, comparison.artifact_id, true) == Val(existing) {
+            sequence = existing.recorded_sequence
+            saved = existing.saved
+        } else {
+            sequence = jet_cli_record_index_next_recorded_sequence(index) ?? return Err(jet_cli_receipt_error(jet_cli_record_index_error_message(err)))
+        }
+        comparison_identity :: jet_cli_record_identity_new(identity.target_inputs_sha256, identity.tool_version, "jet-comparison-v1") ?? return Err(jet_cli_receipt_error(err.message))
+        entry := jet_cli_record_entry_new(comparison_identity, .Comparison, comparison.artifact_id, path.raw) ?? return Err(jet_cli_receipt_error(err.message))
+        consumed := ~comparison.consumed
+        jet_cli_record_entry_with_links(&entry, ^consumed, ^[JetCLIRecordLink]{}) ?? return Err(jet_cli_receipt_error(err.message))
+        jet_cli_record_entry_with_capture(&entry, .Safe)
+        jet_cli_record_entry_with_size(&entry, comparison.size) ?? return Err(jet_cli_receipt_error(err.message))
+        jet_cli_record_entry_with_recorded_sequence(&entry, sequence) ?? return Err(jet_cli_receipt_error(err.message))
+        jet_cli_record_entry_with_saved(&entry, saved)
+        &entries.push(entry)
+        link :: jet_cli_record_link_new(.Comparison, comparison.artifact_id) ?? return Err(jet_cli_receipt_error(err.message))
+        &comparison_links.push(link)
+    }
+    loop link in comparison_links {
+        if !produced.contains(link) -> &produced.push(~link)
+    }
+    sequence := 0
+    saved := false
+    if jet_cli_record_index_find(index, .Receipt, receipt.claim.key, true) == Val(existing) {
+        sequence = existing.recorded_sequence
+        saved = existing.saved
+    } else {
+        sequence = jet_cli_record_index_next_recorded_sequence(index) ?? return Err(jet_cli_receipt_error(jet_cli_record_index_error_message(err)))
+    }
+    entry := jet_cli_record_entry_new(identity, .Receipt, receipt.claim.key, path.raw) ?? return Err(jet_cli_receipt_error(err.message))
+    consumed := ~receipt.consumed
+    jet_cli_record_entry_with_links(&entry, ^consumed, ^produced) ?? return Err(jet_cli_receipt_error(err.message))
+    jet_cli_record_entry_with_capture(&entry, .Safe)
+    jet_cli_record_entry_with_size(&entry, size) ?? return Err(jet_cli_receipt_error(err.message))
+    jet_cli_record_entry_with_recorded_sequence(&entry, sequence) ?? return Err(jet_cli_receipt_error(err.message))
+    jet_cli_record_entry_with_saved(&entry, saved)
+    &entries.push(entry)
+    jet_cli_record_index_upsert_many_and_store(&index, entries, &host, &retention) ?? return Err(jet_cli_receipt_error(err.message))
+}
+// Rust indexed_comparison_sections (ReceiptStore.rs:2614-2644). Rust's u64
+// payload-size conversion cannot fail on 64-bit targets; Jet Int is exact.
+pub fn jet_cli_receipt_indexed_comparison_sections(receipt: JetCLIReceipt) -> [JetCLIReceiptIndexedComparison] JetCLIReceiptError! {
+    consumed := [JetCLIRecordLink]{}
+    loop link in receipt.consumed { if link.kind == .Evidence -> &consumed.push(~link) }
+    comparisons := [JetCLIReceiptIndexedComparison]{}
+    loop section in receipt.sections {
+        if section.name != "comparison" || section.type_name != "ComparisonRecord" -> next
+        if consumed.len() == 0 -> return Err(jet_cli_receipt_error("comparison receipt must link at least one canonical evidence record"))
+        payload :: jet_cli_receipt_section_value(section) ?? return Err(jet_cli_receipt_error(err.message))
+        size :: canonical_json_bytes(payload).len()
+        record :: comparison_record_from_json(payload) ?? return Err(jet_cli_receipt_error(err.message))
+        artifact_id :: comparison_record_artifact_id(record) ?? return Err(jet_cli_receipt_error(err.message))
+        if section.payload_digest != artifact_id -> return Err(jet_cli_receipt_error("comparison section payload digest is not canonical"))
+        &comparisons.push(JetCLIReceiptIndexedComparison{artifact_id: artifact_id, consumed: ~consumed, size: size})
+    }
+    Ok(comparisons)
+}

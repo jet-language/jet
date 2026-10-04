@@ -7,13 +7,13 @@
 // (`SandboxPolicy`) lives in Foundation/SandboxPolicy.jet.
 
 // Test override: `available` or `unavailable` replaces the native probe.
-@SANDBOX_FAKE_ENV :: "JETPACK_FAKE_SANDBOX"
-@SANDBOX_NOT_ENFORCED :: "not-enforced"
-@SANDBOX_REQUIRED_MESSAGE :: "build sandboxing is required but unavailable"
-@SANDBOX_REQUIRED_FIX :: "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry"
-@SANDBOX_FALLBACK_MESSAGE :: "build sandboxing unavailable; local executable actions will be refused after substitution/remote resolution"
-@SANDBOX_FALLBACK_WARNING :: "build sandboxing is unavailable; local executable actions will be refused after substitution/remote resolution"
-@SANDBOX_FALLBACK_FIX :: "provide a trusted substitute or approved remote builder, or enable the native sandbox"
+SANDBOX_FAKE_ENV :: prep { "JETPACK_FAKE_SANDBOX" }
+SANDBOX_NOT_ENFORCED :: prep { "not-enforced" }
+SANDBOX_REQUIRED_MESSAGE :: prep { "build sandboxing is required but unavailable" }
+SANDBOX_REQUIRED_FIX :: prep { "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry" }
+SANDBOX_FALLBACK_MESSAGE :: prep { "build sandboxing unavailable; local executable actions will be refused after substitution/remote resolution" }
+SANDBOX_FALLBACK_WARNING :: prep { "build sandboxing is unavailable; local executable actions will be refused after substitution/remote resolution" }
+SANDBOX_FALLBACK_FIX :: prep { "provide a trusted substitute or approved remote builder, or enable the native sandbox" }
 
 pub enum SandboxLevel {
     Strong
@@ -27,13 +27,13 @@ pub struct SandboxStatus {
     pub reason: String
 
     fn fallback(mechanism: String, reason: String) -> SandboxStatus Never! {
-        SandboxStatus{level: SandboxLevel.Fallback, mechanism, policy: @SANDBOX_NOT_ENFORCED, reason}
+        SandboxStatus{level: SandboxLevel.Fallback, mechanism, policy: SANDBOX_NOT_ENFORCED, reason}
     }
 }
 
 // Which native backend this host can actually enforce right now.
 pub fn env_detect_sandbox() -[FS, Env, Exec, Time.Wait]> SandboxStatus Never! {
-    override :: sys.get(@SANDBOX_FAKE_ENV) ?? ""
+    override :: sys.get(SANDBOX_FAKE_ENV) ?? ""
     if override == {
         "available" -> return SandboxStatus.fallback("fake-userns-available", "test override reports sandbox support, but the build child has not entered a jail")
         "unavailable" -> return SandboxStatus.fallback("unsandboxed", "test override reports no sandbox support")
@@ -50,7 +50,7 @@ pub fn env_detect_sandbox() -[FS, Env, Exec, Time.Wait]> SandboxStatus Never! {
 // Refuse under `Require` when no strong backend exists (E1275, exit 2);
 // under `AllowFallback` warn (L0205) and continue. Returns the exit code of a
 // refusal, or None to proceed.
-pub fn env_enforce_sandbox_policy(theme: Theme, json_output: Bool) -[FS, Env, Exec, Time.Wait]> Int? Never! {
+pub fn env_enforce_sandbox_policy(theme: Theme, json_output: Bool) -[IO, FS, Env, Exec, Time.Wait]> Int? Never! {
     status :: env_detect_sandbox()
     if status.level == SandboxLevel.Strong -> return None
     if env_read_sandbox_policy() == {
@@ -58,7 +58,7 @@ pub fn env_enforce_sandbox_policy(theme: Theme, json_output: Bool) -[FS, Env, Ex
             if json_output {
                 eprint(env_sandbox_json("E1275", "error", status))
             } else {
-                theme.error_coded("E1275", @SANDBOX_REQUIRED_MESSAGE, status.reason, "{@SANDBOX_REQUIRED_FIX}.")
+                theme.error_coded("E1275", SANDBOX_REQUIRED_MESSAGE, status.reason, "{SANDBOX_REQUIRED_FIX}.")
             }
             Val(2)
         }
@@ -72,10 +72,10 @@ pub fn env_enforce_sandbox_policy(theme: Theme, json_output: Bool) -[FS, Env, Ex
 // The allow-mode capability loss at an executable-action boundary. A lint
 // only: the Store may still satisfy the action from a verified substitute, but
 // a local child must fail with E1275 when no substitute is available.
-pub fn env_warn_sandbox_fallback(theme: Theme) Never! -[FS, Env, Exec, Time.Wait]> {
+pub fn env_warn_sandbox_fallback(theme: Theme) Never! -[IO, FS, Env, Exec, Time.Wait]> {
     status :: env_detect_sandbox()
     if status.level == SandboxLevel.Fallback && env_read_sandbox_policy() == SandboxPolicy.AllowFallback {
-        theme.warning_coded("L0205", @SANDBOX_FALLBACK_WARNING, status.reason, @SANDBOX_FALLBACK_FIX)
+        theme.warning_coded("L0205", SANDBOX_FALLBACK_WARNING, status.reason, SANDBOX_FALLBACK_FIX)
     }
 }
 
@@ -86,10 +86,10 @@ fn env_sandbox_json(code: String, severity: String, status: SandboxStatus) -> St
     fields["schema_version"] = DataTree.Text("1")
     fields["code"] = DataTree.Text(code)
     fields["severity"] = DataTree.Text(severity)
-    fields["message"] = DataTree.Text(if refusal -> @SANDBOX_REQUIRED_MESSAGE else -> @SANDBOX_FALLBACK_MESSAGE)
+    fields["message"] = DataTree.Text(if refusal -> SANDBOX_REQUIRED_MESSAGE else -> SANDBOX_FALLBACK_MESSAGE)
     fields["why"] = DataTree.Text(status.reason)
     fields["policy"] = DataTree.Text(status.policy)
-    fields["fix"] = DataTree.Text(if refusal -> @SANDBOX_REQUIRED_FIX else -> @SANDBOX_FALLBACK_FIX)
+    fields["fix"] = DataTree.Text(if refusal -> SANDBOX_REQUIRED_FIX else -> SANDBOX_FALLBACK_FIX)
     fields["mechanism"] = DataTree.Text(status.mechanism)
     json.to_string_pretty(DataTree.Object(fields))
 }

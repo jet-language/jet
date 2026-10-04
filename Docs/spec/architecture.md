@@ -301,6 +301,35 @@ root compiler owns the small deterministic encoder so the compiler seam does
 not acquire a serialization dependency. No API method mutates or executes a
 source tree, and no backend reimplements these facts.
 
+The Jet-hosted CLI consumes one authorized Driver request for a checked query
+and serializes the compiler-owned packet. `inspect compiler check` and
+`inspect semindex --json` retain the same nested semantic index, source digest,
+callable signatures and member origins; a diagnostic-side missing index stays
+absent. Inspection must not reopen the source to reconstruct another index.
+
+### CLI execution boundary
+
+Under D-EXEC1, `run`, `dev` and the canonical test harness consume already-checked
+MIR through one O0 execution host. The host carries the selected entry, artifact
+identity, immutable authorized source closure, cwd, exact argv, explicit
+environment overrides and inherited/captured stream policy. Launch, wait,
+transactional reload and close own a live session; close must drain and reap
+workers before releasing executable memory. A rejected recheck or reload retains
+the last-good generation. Development watches exist independently of executable
+sessions so an initial type error does not prevent the first successful save.
+
+Compiler selection and preparation remain Driver policy; dependency-aware watch
+selection remains tooling policy. The CLI does not substitute a static image,
+rustc or an interpreter when a native O0 provider is unavailable. Controlled
+host tests establish command orchestration, not native execution parity.
+
+Read-only status uses the authenticated receipt-store boundary. It checks
+existing input closures and never invokes a producer to manufacture evidence.
+Formatting and speculative source changes publish only through the shared
+checked transaction owner; an unavailable provider must not be replaced by
+unchecked path writes or a successful synthetic receipt.
+
+
 ### Concurrency boundary safety
 
 A data race is two tasks that access the same memory at the same time when at

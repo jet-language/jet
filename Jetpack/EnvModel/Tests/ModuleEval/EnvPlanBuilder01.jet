@@ -1,0 +1,292 @@
+// Existing full-strength claims stay at their canonical owners. Each mapping
+// below identifies the Rust function and the exact existing Jet test body,
+// rather than treating a similar name as evidence. Only the narrowed
+// dev/system independence claim needs its original assertions restored here.
+
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:73
+// base_dir -> ../ModuleEvalSupport.jet:5 envmodel_test_base_dir (system temp dir).
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:77
+// setting_value -> ../ModuleEvalSupport.jet:29 envmodel_test_setting_value
+// (first writer's value, None for absent key or empty writers).
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:85
+// check_diagnostic_snapshot -> ../ModuleEvalSupport.jet:88 envmodel_test_check_snapshot
+// (Error/Why/Fix checks, UPDATE_EXPECT write, and exact fixture comparison).
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:102
+// normalize_diagnostic_paths -> ../ModuleEvalSupport.jet:71 envmodel_test_normalize_paths
+// (E0970/E0971 only, backtick-delimited temp prefix and preserved path suffix).
+
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:129
+// evaluates_plain_fact_and_packages -> ../ModuleEvalEnv.jet:4
+// #Test("evaluates plain fact and packages"): module identity, namespace,
+// ordered package list and prompt value.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:159
+// selects_one_environment_module_and_discloses_its_provenance -> ../ModuleEvalEnv.jet:16
+// #Test("selects one environment module and discloses its provenance").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:186
+// selected_environment_projection_does_not_merge_sibling_facts -> ../ModuleEvalEnv.jet:33
+// #Test("selected environment projection does not merge sibling facts").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:234
+// environment_reads_are_retained_in_the_environment_plan -> ../ModuleEvalEnv.jet:50
+// #Test("environment reads are retained in the environment plan").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:247
+// package_profile_plan_preserves_composition_provider_and_collision_facts -> ../ModuleEvalEnv.jet:55
+// #Test("package profile plan preserves composition provider and collision facts").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:279
+// package_profile_provider_facts_preserve_selector_and_provenance -> ../ModuleEvalEnv.jet:70
+// #Test("package profile provider facts preserve selector and provenance").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:292
+// package_profile_named_source_retains_resolved_external_selector -> ../ModuleEvalEnv.jet:82
+// #Test("package profile named source retains resolved external selector").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:312
+// package_profile_cycles_are_rejected_before_planning -> ../ModuleEvalEnv.jet:94
+// #Test("package profile cycles are rejected before planning").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:323
+// explicit_preset_selection_ignores_a_cyclic_ambient_match -> ../ModuleEvalEnv.jet:101
+// #Test("explicit preset selection ignores a cyclic ambient match").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:347
+// conflicting_reload_policies_are_rejected_with_module_provenance -> ../ModuleEvalEnv.jet:110
+// #Test("conflicting reload policies are rejected with module provenance").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:368
+// evaluates_computed_fact_via_if_else -> ../ModuleEvalEnv.jet:117
+// #Test("evaluates computed fact via if else").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:385
+// computed_module_fields_resolve_sibling_values_independent_of_source_order -> ../ModuleEvalEnv.jet:123
+// #Test("computed module fields resolve sibling values independent of source order").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:408
+// computed_module_fields_consume_top_level_known_values -> ../ModuleEvalEnv.jet:131
+// #Test("computed module fields consume top level known values").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:426
+// computed_module_field_cycles_are_reported_before_evaluation -> ../ModuleEvalEnv.jet:137
+// #Test("computed module field cycles are reported before evaluation").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:441
+// computed_module_field_self_cycles_are_reported_before_evaluation -> ../ModuleEvalEnv.jet:144
+// #Test("computed module field self cycles are reported before evaluation").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:455
+// internal_module_is_skipped_by_automatic_merge -> ../ModuleEvalEnv.jet:151
+// #Test("internal module is skipped by automatic merge").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:468
+// wrong_namespace_type_is_a_pinned_diagnostic -> ../ModuleEvalEnv.jet:157
+// #Test("wrong namespace type is a pinned diagnostic").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:478
+// ambient_io_in_build_is_e3402 -> ../ModuleEvalEnv.jet:164
+// #Test("ambient io in build is e3402"), including both policy message checks.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:493
+// fresh_dir -> ../ModuleEvalSupport.jet:16 envmodel_test_fresh_dir:
+// unique empty directory beneath the system temp directory.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:504
+// evaluate_env_builds_plan_from_typed_surface -> ../ModuleEvalEnv.jet:174
+// #Test("evaluate env builds plan from typed surface").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:526
+// evaluate_env_captures_structured_prompt_config -> ../ModuleEvalEnv.jet:183
+// #Test("evaluate env captures structured prompt config").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:541
+// evaluate_env_prompt_shorthand_keeps_default_modes -> ../ModuleEvalEnv.jet:191
+// #Test("evaluate env prompt shorthand keeps default modes").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:554
+// github_source_kind_is_left_to_inference -> ../ModuleEvalEnv.jet:199
+// #Test("github source kind is left to inference").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:570
+// nixpkgs_source_kind_stays_nix -> ../ModuleEvalEnv.jet:208
+// #Test("nixpkgs source kind stays nix").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:582
+// evaluate_env_bare_package_resolves_to_default_source -> ../ModuleEvalEnv.jet:214
+// #Test("evaluate env bare package resolves to default source").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:594
+// evaluate_env_captures_adapt_package -> ../ModuleEvalEnv.jet:220
+// #Test("evaluate env captures adapt package"), including Prebuilt bin/as fields.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:629
+// evaluate_env_captures_copy_adapter -> ../ModuleEvalEnv.jet:237
+// #Test("evaluate env captures copy adapter").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:649
+// evaluate_env_rejects_empty_prebuilt_recipe -> ../ModuleEvalEnv.jet:244
+// #Test("evaluate env rejects empty prebuilt recipe").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:666
+// evaluate_env_captures_finite_build_recipe -> ../ModuleEvalEnv.jet:249
+// #Test("evaluate env captures finite build recipe"), all four step kinds and
+// decoded sha256 braces/newline/tab retained.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:709
+// evaluate_env_rejects_unknown_build_step_fields -> ../ModuleEvalEnv.jet:266
+// #Test("evaluate env rejects unknown build step fields").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:728
+// evaluate_env_bad_adapter_is_e1270 -> ../ModuleEvalEnv.jet:271
+// #Test("evaluate env bad adapter is e1270").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:749
+// evaluate_env_rejects_non_provider_source_ref -> ../ModuleEvalEnv.jet:278
+// #Test("evaluate env rejects non provider source ref").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:758
+// evaluate_env_conflicting_sources_are_a_merge_error -> ../ModuleEvalEnv.jet:285
+// #Test("evaluate env conflicting sources are a merge error").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:776
+// merges_packages_across_modules_and_dedupes -> ../ModuleEvalEnv.jet:292
+// #Test("merges packages across modules and dedupes").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:802
+// conflicting_fact_contributions_are_a_merge_error -> ../ModuleEvalEnv.jet:300
+// #Test("conflicting fact contributions are a merge error"), both writers and
+// both quoted conflicting values checked in the rendered E3521 diagnostic.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:828
+// find_discovers_modules_and_merges_their_packages -> ../ModuleEvalEnv.jet:317
+// #Test("find discovers modules and merges their packages").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:850
+// find_missing_directory_is_a_pinned_diagnostic -> ../ModuleEvalEnv.jet:330
+// #Test("find missing directory is a pinned diagnostic"), source-span rendering.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:867
+// non_find_import_directive_is_e0969 -> ../ModuleEvalEnv.jet:343
+// #Test("non find import directive is e0969").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:876
+// typed_integrations_lower_to_one_environment_fact_graph -> ../ModuleEvalEnv.jet:350
+// #Test("typed integrations lower to one environment fact graph"), all eight
+// integrations, retained options/tasks/providers/secrets/grants and both
+// Android/Apple positive and negative target contracts.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1009
+// typed_integration_loss_is_reported_before_plan_persistence -> ../ModuleEvalEnv.jet:406
+// #Test("typed integration loss is reported before plan persistence").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1025
+// cloud_and_vault_fact_contracts_reject_dropped_authority -> ../ModuleEvalEnv.jet:416
+// #Test("cloud and vault fact contracts reject dropped authority").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1052
+// cloud_and_vault_secret_values_fail_without_echoing_input -> ../ModuleEvalEnv.jet:440
+// #Test("cloud and vault secret values fail without echoing input").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1069
+// conflicting_typed_integration_is_e1335 -> ../ModuleEvalEnv.jet:452
+// #Test("conflicting typed integration is e1335").
+
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1084
+// worked_example_captures_system_and_image -> ../ModuleEvalFleet.jet:45
+// #Test("worked example captures system and image"), all System/Service/Option/
+// Image fields and ordered package contributions from the original example.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1152
+// computed_system_service_fields_consume_top_level_known_values -> ../ModuleEvalFleet.jet:66
+// #Test("computed system service fields consume top level known values").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1170
+// s61_hyphenated_system_and_image_names -> ../ModuleEvalFleet.jet:74
+// #Test("s61 hyphenated system and image names").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1192
+// s61_leading_hyphen_name_is_clean_error -> ../ModuleEvalImages.jet:4
+// #Test("s61 leading hyphen name is clean error").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1202
+// s61_double_hyphen_name_is_clean_error -> ../ModuleEvalImages.jet:11
+// #Test("s61 double hyphen name is clean error").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1212
+// committed_system_example_field_checks_clean -> ../ModuleEvalFleet.jet:85
+// #Test("committed system example field checks clean").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1229
+// explicit_type_names_still_parse -> ../ModuleEvalFleet.jet:96
+// #Test("explicit system service image type names still parse").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1246
+// unknown_system_field_is_e0972 -> ../ModuleEvalFleet.jet:104
+// #Test("unknown system field is e0972").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1256
+// unknown_platform_target_is_e0973 -> ../ModuleEvalFleet.jet:111
+// #Test("unknown platform target is e0973").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1270
+// system_without_target_is_e0974 -> ../ModuleEvalFleet.jet:120
+// #Test("system without target is e0974").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1280
+// service_without_enable_is_e0975 -> ../ModuleEvalFleet.jet:127
+// #Test("system service without enable is e0975").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1292
+// service_enable_not_bool_is_e0975 -> ../ModuleEvalFleet.jet:136
+// #Test("system service enable not bool is e0975").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1299
+// bad_image_format_is_e0976 -> ../ModuleEvalFleet.jet:193
+// #Test("bad image format is e0976").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1314
+// image_without_from_is_e0977 -> ../ModuleEvalImages.jet:18
+// #Test("image without from is e0977").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1324
+// image_restating_inherited_field_is_e0977 -> ../ModuleEvalImages.jet:25
+// #Test("image restating inherited field is e0977").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1337
+// image_cross_compile_target_is_allowed -> ../ModuleEvalFleet.jet:202
+// #Test("image cross compile target is allowed").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1344
+// image_from_unknown_system_is_e0978 -> ../ModuleEvalFleet.jet:208
+// #Test("image from unknown system is e0978").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1360
+// oci_base_dir -> ../ModuleEvalSupport.jet:22 envmodel_test_oci_base_dir:
+// unique directory and executable package manifest, never a shared base path.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1382
+// worked_example_captures_oci_image -> ../ModuleEvalImages.jet:32
+// #Test("worked example captures oci image"), sorted/deduped ports, sorted
+// environment variables and files, and absent base.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1415
+// computed_image_fields_consume_top_level_known_values -> ../ModuleEvalImages.jet:50
+// #Test("computed image fields consume top level known values").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1432
+// oci_kind_is_inferred_when_omitted -> ../ModuleEvalImages.jet:58
+// #Test("oci kind is inferred when omitted").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1445
+// oci_base_is_captured -> ../ModuleEvalImages.jet:65
+// #Test("oci base is captured").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1455
+// image_unknown_kind_is_e1266 -> ../ModuleEvalImages.jet:72
+// #Test("image unknown kind is e1266").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1463
+// image_kind_from_mismatch_is_e1266 -> ../ModuleEvalImages.jet:77
+// #Test("image kind from mismatch is e1266").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1476
+// oci_from_library_package_is_e1267 -> ../ModuleEvalImages.jet:84
+// #Test("oci from library package is e1267").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1495
+// oci_from_undeclared_package_is_e1267 -> ../ModuleEvalImages.jet:94
+// #Test("oci from undeclared package is e1267").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1509
+// oci_expose_wrong_shape_is_e1269 -> ../ModuleEvalImages.jet:103
+// #Test("oci expose wrong shape is e1269").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1519
+// oci_image_rejects_iso_only_field -> ../ModuleEvalImages.jet:110
+// #Test("oci image rejects iso only field").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1529
+// iso_image_rejects_oci_only_field -> ../ModuleEvalFleet.jet:217
+// #Test("iso image keeps format and validates known systems before fleets"):
+// the oci_fields case uses the same expose:[22] field-shape rejection as the
+// Rust expose:[8080] case and checks E0977 on the same system-backed image.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1541
+// fleet_captures_hosts_and_cross_checks -> ../ModuleEvalFleet.jet:3
+// #Test("fleet captures hosts and cross checks"), raw and typed overrides.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1577
+// fleet_bare_host_ref_has_no_overrides -> ../ModuleEvalFleet.jet:21
+// #Test("fleet bare host ref has no overrides").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1588
+// fleet_host_unknown_system_is_e1242 -> ../ModuleEvalFleet.jet:28
+// #Test("fleet host unknown system is e1242").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1602
+// fleet_unknown_field_is_e1244 -> ../ModuleEvalFleet.jet:35
+// #Test("fleet unknown field is e1244").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1610
+// fleet_missing_hosts_is_e1245 -> ../ModuleEvalFleet.jet:40
+// #Test("fleet missing hosts is e1245").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1623
+// dev_services_are_captured_with_typed_fields -> ../ModuleEvalEnv.jet:457
+// #Test("dev services are captured with typed fields").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1657
+// dev_service_unrecognized_field_lands_in_extra -> ../ModuleEvalEnv.jet:474
+// #Test("dev service unrecognized field lands in extra").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1671
+// dev_service_depends_on_is_rejected_in_favor_of_after -> ../ModuleEvalEnv.jet:480
+// #Test("dev service depends on is rejected in favor of after").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1687
+// dev_service_without_enable_is_e0975 -> ../ModuleEvalEnv.jet:488
+// #Test("dev service without enable is e0975").
+
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1696
+#Test("dev_services_and_jetos_services_are_independent") {
+    src :: "\nmodule env.dev {{\n    services: {{ redis: {{ enable: true }} }}\n}}\nmodule system.box {{\n    target: linux.x64,\n    services: {{ openssh: {{ enable: true }} }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic(err.diagnostic.what)
+    assert_eq(plan.dev_services.len(), 1)
+    assert_eq(plan.dev_services[0].name, "redis")
+    assert_eq(plan.systems[0].services.len(), 1)
+    assert_eq(plan.systems[0].services[0].name, "openssh")
+}
+
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1716
+// committed_services_example_field_checks_clean -> ../ModuleEvalEnv.jet:502
+// #Test("committed services example field checks clean"), both catalog-backed
+// services, worker's typed ports/run/ready and disabled cache retained.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1750
+// discovered_module_that_imports_is_e0971 -> ../ModuleEvalEnv.jet:529
+// #Test("discovered module that imports is e0971").
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:1770
+// repository_shell_modules_evaluate_without_nix_runtime -> ../ModuleEvalEnv.jet:544
+// #Test("repository shell modules evaluate without nix runtime"), dev/full
+// counts and every listed full-environment package retained.

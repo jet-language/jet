@@ -1,0 +1,116 @@
+// Claims for doctest discovery and synthesis (Source/Doctest.rs).
+use jet_foundation.[
+    Span,
+]
+
+#Test("a jet fence inside doc comments yields setup and expectations") {
+    source :: "/// Adds one.\n///\n/// ```jet\n/// x := 1\n///   y := x + 1\n/// y // => 2\n/// \"a // => b\" // => a // => b\n/// // => orphan\n/// ```\nfn add(x: Int) -> Int {{ x + 1 }}\n"
+    blocks :: jet_cli_doctest_discover(source)
+    assert_eq(blocks.len(), 1)
+    block :: blocks[0]
+    assert_eq(block.fence_line, 3)
+    assert_eq(block.setup.len(), 2)
+    assert_eq(block.setup[0], "x := 1")
+    assert_eq(block.setup[1], "  y := x + 1")
+    assert_eq(block.expects.len(), 2)
+    assert_eq(block.expects[0].expr, "y")
+    assert_eq(block.expects[0].expected, "2")
+    assert_eq(block.expects[0].line, 6)
+    assert_eq(block.expects[1].expr, "\"a // => b\"")
+    assert_eq(block.expects[1].expected, "a // => b")
+    assert_eq(block.expects[1].line, 7)
+}
+
+#Test("fence language, indentation and CRLF follow the Rust scanner") {
+    cr :: String.from_bytes([U8]{U8{13}}) ?? panic("a carriage return is valid UTF-8")
+    source :: "    ///```JET{cr}\n    /// 1 // => 1{cr}\n    ///```{cr}\n/// ```\n/// 2 // => 2\n/// ```\n/// ```rust\n/// 3 // => 3\n/// ```\n"
+    blocks :: jet_cli_doctest_discover(source)
+    assert_eq(blocks.len(), 2)
+    assert_eq(blocks[0].fence_line, 1)
+    assert_eq(blocks[0].expects[0].expr, "1")
+    assert_eq(blocks[1].fence_line, 4)
+    assert_eq(blocks[1].expects[0].line, 5)
+}
+
+#Test("a block whose doc run ends before the closing fence is dropped") {
+    source :: "/// ```jet\n/// 1 // => 1\nfn f() {{}}\n/// ```jet\n/// 2 // => 2\n/// ```\n"
+    blocks :: jet_cli_doctest_discover(source)
+    assert_eq(blocks.len(), 1)
+    assert_eq(blocks[0].fence_line, 4)
+    assert_eq(blocks[0].expects[0].expected, "2")
+    assert_eq(jet_cli_doctest_discover("// ```jet\n// 1 // => 1\n// ```\n").len(), 0)
+}
+
+#Test("the synthesized program prints each expectation after the setup") {
+    block :: JetCLIDoctestBlock{
+        fence_line: 1,
+        setup: [String]{"x := 1", "  y := x + 1"},
+        expects: [JetCLIDoctestExpect]{
+            JetCLIDoctestExpect{expr: "y", expected: "2", line: 3},
+            JetCLIDoctestExpect{expr: "x * 3", expected: "3", line: 4},
+        },
+    }
+    assert_eq(jet_cli_doctest_synth_program(block), "fn run() {{\n    x := 1\n      y := x + 1\n    print(\"{{y}}\")\n    print(\"{{x * 3}}\")\n}}\n")
+}
+
+#Test("a mismatch is E2901 at the producing line") {
+    expect :: JetCLIDoctestExpect{expr: "y", expected: "2", line: 6}
+    diagnostic :: jet_cli_doctest_mismatch_diagnostic(expect, "3", Val(Span{start: 40, end: 52}))
+    assert_eq(diagnostic.code, "E2901")
+    assert_eq(diagnostic.what, "Doctest output mismatch. Expected: `2` Got: `3`")
+    assert_eq(diagnostic.why, "The example in the doc comment claims a different result from what the code produces; docs cannot lie (D-TEST4)")
+    assert_eq(diagnostic.fix, "Run `jet test --update-snapshots` to update the claimed output, or fix the code to match it")
+    span :: diagnostic.span ?? panic("the mismatch lost its span")
+    assert_eq(span.start, 40)
+    assert_eq(span.end, 52)
+}
+
+#Test("doctest marker offsets are UTF-8 bytes and quoted markers stay literal") {
+    assert_eq(jet_cli_doctest_find_expect_marker("é // => 日本"), Val(3))
+    assert_eq(jet_cli_doctest_find_expect_marker("\"é // => 日本\""), None)
+    blocks :: jet_cli_doctest_discover("/// ```jet\n/// \"é // => 日本\" // => é // => 日本\n/// ```\n")
+    assert_eq(blocks.len(), 1)
+    assert_eq(blocks[0].expects[0].expr, "\"é // => 日本\"")
+    assert_eq(blocks[0].expects[0].expected, "é // => 日本")
+    assert_eq(blocks[0].expects[0].line, 2)
+}
+
+#Test("doctest quote policy checks the immediately preceding backslash") {
+    escaped :: String.from_bytes([U8]{U8{34}, U8{97}, U8{92}, U8{34}, U8{32}, U8{47}, U8{47}, U8{32}, U8{61}, U8{62}, U8{32}, U8{98}, U8{34}, U8{32}, U8{47}, U8{47}, U8{32}, U8{61}, U8{62}, U8{32}, U8{99}}) ?? panic("ASCII fixture")
+    assert_eq(jet_cli_doctest_find_expect_marker(escaped), Val(14))
+    even_slashes :: String.from_bytes([U8]{U8{34}, U8{97}, U8{92}, U8{92}, U8{34}, U8{32}, U8{47}, U8{47}, U8{32}, U8{61}, U8{62}}) ?? panic("ASCII fixture")
+    // The Rust policy is not a full string parser: even two backslashes suppress the quote toggle.
+    assert_eq(jet_cli_doctest_find_expect_marker(even_slashes), None)
+}
+
+#Test("doctest fence policy accepts extra ticks but rejects language attributes") {
+    assert(jet_cli_doctest_fence_lang_is_jet("```` JeT "))
+    assert(!jet_cli_doctest_fence_lang_is_jet("```jet ignore"))
+    blocks :: jet_cli_doctest_discover("/// ````jet\n/// 1 // => \n/// ```rust closes too\n/// ```jet ignore\n/// x := 2\n/// ```\n/// ```\n")
+    assert_eq(blocks.len(), 2)
+    assert_eq(blocks[0].expects.len(), 1)
+    assert_eq(blocks[0].expects[0].expected, "")
+    assert_eq(blocks[1].fence_line, 6)
+    assert_eq(blocks[1].setup.len(), 0)
+    assert_eq(blocks[1].expects.len(), 0)
+}
+
+#Test("doctest EOF drops open blocks and setup trimming removes only trailing whitespace") {
+    assert_eq(jet_cli_doctest_discover("/// ```jet\n/// 1 // => 1").len(), 0)
+    blocks :: jet_cli_doctest_discover("///```jet\n///  x := 1   \n///\t\n/// // => orphan\n///```")
+    assert_eq(blocks.len(), 1)
+    assert_eq(blocks[0].setup, [String]{" x := 1"})
+    assert_eq(blocks[0].expects.len(), 0)
+    assert_eq(jet_cli_doctest_synth_program(blocks[0]), "fn run() {{\n     x := 1\n}}\n")
+}
+
+#Test("doctest E2901 uses canonical registry metadata without a span") {
+    expect :: JetCLIDoctestExpect{expr: "x", expected: "é", line: 1}
+    diagnostic :: jet_cli_doctest_mismatch_diagnostic(expect, "日本", None)
+    row :: diagnostic_registry_row("E2901") ?? panic("E2901 is registered")
+    assert_eq(diagnostic.moment, row.moment)
+    assert_eq(diagnostic.severity, row.severity)
+    assert_eq(diagnostic.no_fix_reason, row.no_fix_reason)
+    assert_eq(diagnostic.span, None)
+    assert_eq(diagnostic.what, "Doctest output mismatch. Expected: `é` Got: `日本`")
+}

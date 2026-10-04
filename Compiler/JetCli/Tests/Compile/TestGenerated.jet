@@ -1,0 +1,12 @@
+// Rust run_generated_test corpus naming (CmdCompile.rs:7457-7475).
+#Test("generated corpus names preserve ASCII spelling and replace Unicode scalars once") {
+    assert_eq(jet_cli_test_generated_corpus("unused.jet", Val("Az09_-")), ".jet/fuzz/Az09_-")
+    assert_eq(jet_cli_test_generated_corpus("unused.jet", Val("a🦀/b-c")), ".jet/fuzz/a__b-c")
+    assert_eq(jet_cli_test_generated_corpus("unused.jet", Val("🦀🦀")), ".jet/fuzz/__")
+}
+#Test("generated unnamed or empty property uses Rust dotted file stem") {
+    assert_eq(jet_cli_test_generated_corpus("path/a.b.jet", None), ".jet/fuzz/a_b")
+    assert_eq(jet_cli_test_generated_corpus("path/a.b.jet", Val("")), ".jet/fuzz/a_b")
+    assert_eq(jet_cli_test_generated_corpus("path/.hidden", None), ".jet/fuzz/_hidden")
+    assert_eq(jet_cli_test_generated_corpus("path/plain", None), ".jet/fuzz/plain")
+}

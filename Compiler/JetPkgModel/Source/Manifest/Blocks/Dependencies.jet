@@ -1,0 +1,204 @@
+use jet_foundation.[pkg_bytes_text]
+use jet_foundation.[DEP_PROVIDER_C, ForeignLanguage, REF_PROVIDER_AT]
+
+// `deps: { … }` (D-JPK23, D-JPK-REF1, S59/D-CFFI2, D-FFI-UNIFY1): the typed
+// dependency source of each entry, its display/audit spelling, and the one
+// dependency-name path boundary (Package/Blocks.rs).
+
+// Where a dependency resolves from.
+pub enum DepSource {
+    // The selector from a `name#version` registry ref (or a quoted selector).
+    Version(String)
+    // A bare path or `target@provider` source ref.
+    Provider(provider: RefSource, target: String)
+    // An inline git dependency with exactly one selector (D-JPK23).
+    Git(url: String, selector: GitSelector)
+    // A native C-library link dependency: `c@system` or `c@"vendor/path"`.
+    CLib(target: String)
+    // D-FFI-UNIFY1: a package-backed foreign namespace dependency.
+    Foreign(language: ForeignLanguage, reference: String)
+}
+
+// Render one `DepSource` back to its display/audit string form.
+pub fn pkg_dep_display(source: DepSource) -> String Never! {
+    if source == {
+        .Version(value) -> value
+        .Provider(provider, target) -> if provider == {
+            .Path -> target
+            else -> "{target}{REF_PROVIDER_AT}{provider.label()}"
+        }
+        .Git(url, selector) -> "{{ git: {pkg_debug_str(url)}, {selector.field()}: {pkg_debug_str(selector.value())} }}"
+        .CLib(target) -> "lib: {target}"
+        .Foreign(language, reference) -> "{language.root()}{REF_PROVIDER_AT}{pkg_debug_str(reference)}"
+    }
+}
+
+// Render one `DepSource` for a public package view: git URL user
+// information and query/fragment text never cross the projection.
+pub fn pkg_dep_display_redacted(source: DepSource) -> String Never! {
+    if source == {
+        .Git(url, selector) -> "{{ git: {pkg_debug_str(pkg_redact_dependency_url(url))}, {selector.field()}: {pkg_debug_str(selector.value())} }}"
+        else -> pkg_dep_display(source)
+    }
+}
+
+fn pkg_redact_dependency_url(input: String) -> String Never! {
+    raw :: input.bytes()
+    cut := raw.len()
+    loop index in 0..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if code == 63 || code == 35 {
+            cut = index
+            break
+        }
+    }
+    value :: pkg_bytes_text(raw, 0, cut)
+    separator :: pkg_binder_find(value, "://", 0)
+    if separator < 0 -> return value
+    bytes :: value.bytes()
+    authority_start :: separator + 3
+    authority_end := bytes.len()
+    loop index in authority_start..<bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if code == 47 || code == 63 || code == 35 {
+            authority_end = index
+            break
+        }
+    }
+    authority :: pkg_bytes_text(bytes, authority_start, authority_end)
+    at :: pkg_text_rfind_byte(authority, 64) ?? return value
+    "{pkg_bytes_text(bytes, 0, authority_start)}{pkg_binder_tail(authority, at + 1)}{pkg_bytes_text(bytes, authority_end, bytes.len())}"
+}
+
+fn pkg_bad_dep_value(name: String, value: String) -> PackageParseError Never! {
+    PackageParseError.Composition("dependency `{name}` has value `{value}`, which is not a `name#version`, bare path, `target@provider` ref, foreign `lang@\"ref\"`, or inline git struct")
+}
+
+fn pkg_dep_ref_error(name: String, error: RefError) -> PackageParseError Never! {
+    if error == {
+        .ProviderFirst(raw, replacement) -> PackageParseError.Composition("dependency `{name}` uses retired provider-first ref `{raw}`; write `{replacement}`")
+        .RetiredNixpkgs(raw, replacement) -> PackageParseError.Composition("dependency `{name}` uses the retired `nixpkgs` source spelling `{raw}`; write `{replacement}`")
+        .PathProviderRetired(raw, path) -> PackageParseError.Composition("dependency `{name}` uses retired path-provider ref `{raw}`; write the bare path `{path}`")
+        else -> PackageParseError.Composition("dependency `{name}`'s ref is invalid: {pkg_ref_error_debug(error)}")
+    }
+}
+
+// The Rust `Debug` spelling of a `RefError`.
+fn pkg_ref_error_debug(error: RefError) -> String Never! {
+    if error == {
+        .MissingSeparator(raw) -> "MissingSeparator({pkg_debug_str(raw)})"
+        .EmptyHalf(raw) -> "EmptyHalf({pkg_debug_str(raw)})"
+        .ProviderFirst(raw, replacement) -> "ProviderFirst {{ raw: {pkg_debug_str(raw)}, replacement: {pkg_debug_str(replacement)} }}"
+        .NonCanonical(raw, replacement) -> "NonCanonical {{ raw: {pkg_debug_str(raw)}, replacement: {pkg_debug_str(replacement)} }}"
+        .RetiredNixpkgs(raw, replacement) -> "RetiredNixpkgs {{ raw: {pkg_debug_str(raw)}, replacement: {pkg_debug_str(replacement)} }}"
+        .PathProviderRetired(raw, path) -> "PathProviderRetired {{ raw: {pkg_debug_str(raw)}, path: {pkg_debug_str(path)} }}"
+        .UnknownSource(source, raw, declared) -> "UnknownSource {{ source: {pkg_debug_str(source)}, raw: {pkg_debug_str(raw)}, declared: {pkg_debug_str_list(declared)} }}"
+        .AmbiguousBare(raw) -> "AmbiguousBare({pkg_debug_str(raw)})"
+        .AmbiguousMember(query, candidates) -> "AmbiguousMember {{ query: {pkg_debug_str(query)}, candidates: {pkg_debug_str_list(candidates)} }}"
+        .UnknownMember(query, suggestions) -> "UnknownMember {{ query: {pkg_debug_str(query)}, suggestions: {pkg_debug_str_list(suggestions)} }}"
+    }
+}
+
+pub fn pkg_parse_deps(body: String) -> [String: DepSource] PackageParseError! {
+    deps := [String: DepSource]{}
+    loop entry in pkg_key_value_entries(body) {
+        name :: entry.key
+        if !pkg_validate_dependency_name(name) -> return Err(PackageParseError.Composition("dependency name `{name}` must be one safe path component"))
+        trimmed :: entry.value.trim()
+        source :: pkg_parse_dep_value(name, trimmed)
+        if deps.has_key(name) -> return Err(PackageParseError.Composition("dependency `{name}` is declared more than once"))
+        deps[name] = source
+    }
+    Ok(deps)
+}
+
+// Classify one dependency value: inline git record, native C link, foreign
+// namespace, source ref or bare path, `name#selector`, or quoted selector.
+fn pkg_parse_dep_value(name: String, trimmed: String) -> DepSource PackageParseError! {
+    if trimmed.starts_with("{{") {
+        inner :: trimmed.removeprefix("{{")
+        body :: if inner.ends_with("}}") -> inner.removesuffix("}}") else -> inner
+        return pkg_parse_git_dep(name, body)
+    }
+    if pkg_parse_c_lib_ref(trimmed) == {
+        .Val(target) -> return Ok(DepSource.CLib{target: target})
+        .None -> {}
+    }
+    if pkg_parse_foreign_ref(name, trimmed) == {
+        .Val(foreign) -> return Ok(foreign)
+        .None -> {}
+    }
+    // Bare legacy tokens and the ratified quoted spelling read the same.
+    unquoted :: pkg_unquote(trimmed)
+    if pkg_is_bare_path(unquoted) || unquoted.contains(REF_PROVIDER_AT) {
+        if ProviderRef.classify(unquoted) == {
+            .Ok(parsed) -> return Ok(DepSource.Provider{provider: parsed.provider, target: parsed.target})
+            .Err(error) -> return Err(pkg_dep_ref_error(name, error))
+        }
+    }
+    if unquoted.split_once("#") == {
+        .Val(parts) -> {
+            if parts.before == name && parts.after != "" -> return Ok(DepSource.Version(parts.after))
+            return Err(pkg_bad_dep_value(name, trimmed))
+        }
+        .None -> {}
+    }
+    // A bare quoted string with no `#`/`@`/path shape is a plain version
+    // selector (D-CONF-NAME1: `deps: { httpkit: "^2" }`).
+    if trimmed.starts_with("\"") -> return Ok(DepSource.Version(unquoted))
+    Err(pkg_bad_dep_value(name, trimmed))
+}
+
+// Dependency names become directory names in the store and build tree, so
+// the package model keeps them one safe path component.
+pub fn pkg_validate_dependency_name(name: String) -> Bool Never! {
+    name != "" && name != "." && name != ".." && !name.contains("/") && !name.contains("\\") && !name.contains(":") && !pkg_text_has_control(name)
+}
+
+// A native C-library link ref: `c@system` or `c@"vendor/path"`.
+fn pkg_parse_c_lib_ref(value: String) -> String? Never! {
+    parts :: value.split_once(REF_PROVIDER_AT) ?? return None
+    if parts.before.trim() != DEP_PROVIDER_C -> return None
+    Val(pkg_unquote(parts.after))
+}
+
+// The D-FFI-UNIFY1 project-tier shape `lang@"provider ref"`; C stays owned by
+// the native `c@target` form.
+fn pkg_parse_foreign_ref(name: String, value: String) -> DepSource? PackageParseError! {
+    parts :: value.split_once(REF_PROVIDER_AT) ?? return Ok(None)
+    language :: ForeignLanguage.from_root(parts.before.trim()) ?? return Ok(None)
+    if language == ForeignLanguage.C -> return Ok(None)
+    reference :: parts.after.trim()
+    if !reference.starts_with("\"") || !reference.ends_with("\"") -> return Err(PackageParseError.Composition("foreign dependency `{name}` must quote its provider ref as `{language.root()}@\"ref\"`"))
+    unquoted :: pkg_unquote(reference)
+    if unquoted.trim() == "" -> return Err(PackageParseError.Composition("foreign dependency `{name}` has an empty provider ref"))
+    Ok(Val(DepSource.Foreign{language: language, reference: unquoted}))
+}
+
+// `git: "<url>", tag/branch/rev: "<value>"` with exactly one selector.
+fn pkg_parse_git_dep(name: String, body: String) -> DepSource PackageParseError! {
+    url := String?{None}
+    tag_value := String?{None}
+    branch_value := String?{None}
+    rev_value := String?{None}
+    seen := [String]{}
+    loop entry in pkg_key_value_entries(body) {
+        if seen.contains(entry.key) -> return Err(PackageParseError.Composition("git dependency `{name}.{entry.key}` is declared more than once"))
+        &seen.push(entry.key)
+        value :: pkg_unquote(entry.value)
+        if entry.key == {
+            "git" -> url = Val(value)
+            "tag" -> tag_value = Val(value)
+            "branch" -> branch_value = Val(value)
+            "rev" -> rev_value = Val(value)
+            else -> {}
+        }
+    }
+    found_url :: url ?? return Err(PackageParseError.Composition("git dependency `{name}` is missing `git:`"))
+    selectors := [GitSelector]{}
+    if tag_value == .Val(value) -> &selectors.push(GitSelector.Tag(value))
+    if branch_value == .Val(value) -> &selectors.push(GitSelector.Branch(value))
+    if rev_value == .Val(value) -> &selectors.push(GitSelector.Rev(value))
+    if selectors.len() != 1 -> return Err(PackageParseError.Composition("git dependency `{name}` must have exactly one of `tag`, `branch`, `rev`"))
+    Ok(DepSource.Git{url: found_url, selector: selectors[0]})
+}

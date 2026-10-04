@@ -1,0 +1,224 @@
+// PORT-PENDING 0948 crates-jetpack-src-store-sealtests-module-group: crates/jetpack/src/Store/NixCache/TestCache.rs:1-220
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS use crate::Store::NixNarInfoSignature;
+//RS use ed25519_dalek::{Signer, SigningKey};
+//RS use std::collections::BTreeMap;
+//RS use std::fs;
+//RS use std::io::{Read, Write};
+//RS use std::net::{TcpListener, TcpStream};
+//RS use std::path::{Path, PathBuf};
+//RS use std::sync::{Arc, Mutex};
+//RS use std::thread;
+//RS use std::time::Duration;
+//RS 
+//RS pub(super) fn unique_dir(tag: &str) -> PathBuf {
+//RS     let path = std::env::temp_dir().join(format!("jet-nix-cache-{tag}-{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&path);
+//RS     fs::create_dir_all(&path).unwrap();
+//RS     path
+//RS }
+//RS 
+//RS pub(super) fn remove_dir(path: &Path) {
+//RS     let _ = fs::remove_dir_all(path);
+//RS }
+//RS 
+//RS pub(super) fn signed_narinfo(
+//RS     store_path: &str,
+//RS     nar_name: &str,
+//RS     nar: &[u8],
+//RS     references: &[&str],
+//RS     key_id: &str,
+//RS     signing_key: &SigningKey,
+//RS ) -> Vec<u8> {
+//RS     signed_narinfo_with_payload(
+//RS         store_path,
+//RS         nar_name,
+//RS         nar,
+//RS         nar,
+//RS         NixCompression::None,
+//RS         references,
+//RS         key_id,
+//RS         signing_key,
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn signed_zstd_narinfo(
+//RS     store_path: &str,
+//RS     nar_name: &str,
+//RS     nar: &[u8],
+//RS     references: &[&str],
+//RS     key_id: &str,
+//RS     signing_key: &SigningKey,
+//RS ) -> Vec<u8> {
+//RS     let compressed = crate::Store::encode_zstd_deterministic(nar).unwrap();
+//RS     signed_narinfo_with_payload(
+//RS         store_path,
+//RS         nar_name,
+//RS         &compressed,
+//RS         nar,
+//RS         NixCompression::Zstd,
+//RS         references,
+//RS         key_id,
+//RS         signing_key,
+//RS     )
+//RS }
+//RS 
+//RS fn signed_narinfo_with_payload(
+//RS     store_path: &str,
+//RS     nar_name: &str,
+//RS     payload: &[u8],
+//RS     nar: &[u8],
+//RS     compression: NixCompression,
+//RS     references: &[&str],
+//RS     key_id: &str,
+//RS     signing_key: &SigningKey,
+//RS ) -> Vec<u8> {
+//RS     let file_hash = format!("sha256:{}", crate::SHA256::sha256_hex(payload));
+//RS     let nar_hash = format!("sha256:{}", crate::SHA256::sha256_hex(nar));
+//RS     let references = references
+//RS         .iter()
+//RS         .map(|reference| reference.rsplit('/').next().unwrap())
+//RS         .collect::<Vec<_>>()
+//RS         .join(" ");
+//RS     let mut info = NixNarInfo {
+//RS         store_path: store_path.to_string(),
+//RS         url: format!("nar/{nar_name}"),
+//RS         compression,
+//RS         file_hash: Some(file_hash.clone()),
+//RS         file_size: Some(payload.len() as u64),
+//RS         nar_hash,
+//RS         nar_size: nar.len() as u64,
+//RS         references: references.split_whitespace().map(str::to_string).collect(),
+//RS         deriver: None,
+//RS         ca: None,
+//RS         signatures: Vec::new(),
+//RS     };
+//RS     let fingerprint = info.fingerprint("/nix/store").unwrap();
+//RS     info.signatures.push(NixNarInfoSignature {
+//RS         key_id: key_id.to_string(),
+//RS         signature: signing_key.sign(&fingerprint).to_bytes(),
+//RS     });
+//RS     format!(
+//RS         "StorePath: {}\nURL: {}\nCompression: {}\nFileHash: {}\nFileSize: {}\nNarHash: {}\nNarSize: {}\nReferences: {}\nSig: {}:{}\n",
+//RS         info.store_path,
+//RS         info.url,
+//RS         info.compression.as_str(),
+//RS         file_hash,
+//RS         info.file_size.unwrap(),
+//RS         info.nar_hash,
+//RS         info.nar_size,
+//RS         references,
+//RS         key_id,
+//RS         base64_encode(&info.signatures[0].signature),
+//RS     )
+//RS     .into_bytes()
+//RS }
+//RS 
+//RS pub(super) fn base64_encode(bytes: &[u8]) -> String {
+//RS     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+//RS     let mut output = String::new();
+//RS     for chunk in bytes.chunks(3) {
+//RS         let first = chunk[0];
+//RS         output.push(ALPHABET[(first >> 2) as usize] as char);
+//RS         output.push(
+//RS             ALPHABET[((first & 0x03) << 4 | chunk.get(1).copied().unwrap_or(0) >> 4) as usize]
+//RS                 as char,
+//RS         );
+//RS         if let Some(second) = chunk.get(1) {
+//RS             output.push(
+//RS                 ALPHABET[((second & 0x0f) << 2 | chunk.get(2).copied().unwrap_or(0) >> 6) as usize]
+//RS                     as char,
+//RS             );
+//RS         } else {
+//RS             output.push('=');
+//RS         }
+//RS         if let Some(third) = chunk.get(2) {
+//RS             output.push(ALPHABET[(third & 0x3f) as usize] as char);
+//RS         } else {
+//RS             output.push('=');
+//RS         }
+//RS     }
+//RS     output
+//RS }
+//RS 
+//RS pub(super) struct TestCacheServer {
+//RS     pub(super) endpoint: String,
+//RS     routes: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
+//RS     stop: Arc<std::sync::atomic::AtomicBool>,
+//RS     join: Option<thread::JoinHandle<()>>,
+//RS }
+//RS 
+//RS impl TestCacheServer {
+//RS     pub(super) fn start(routes: BTreeMap<String, Vec<u8>>) -> Self {
+//RS         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+//RS         listener.set_nonblocking(true).unwrap();
+//RS         let address = listener.local_addr().unwrap();
+//RS         let routes = Arc::new(Mutex::new(routes));
+//RS         let thread_routes = Arc::clone(&routes);
+//RS         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS         let thread_stop = Arc::clone(&stop);
+//RS         let join = thread::spawn(move || {
+//RS             while !thread_stop.load(std::sync::atomic::Ordering::Relaxed) {
+//RS                 match listener.accept() {
+//RS                     Ok((stream, _)) => serve_cache_request(stream, &thread_routes),
+//RS                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+//RS                         thread::sleep(Duration::from_millis(1));
+//RS                     }
+//RS                     Err(_) => break,
+//RS                 }
+//RS             }
+//RS         });
+//RS         Self {
+//RS             endpoint: format!("http://127.0.0.1:{}", address.port()),
+//RS             routes,
+//RS             stop,
+//RS             join: Some(join),
+//RS         }
+//RS     }
+//RS 
+//RS     pub(super) fn replace_routes(&self, routes: BTreeMap<String, Vec<u8>>) {
+//RS         *self.routes.lock().unwrap() = routes;
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for TestCacheServer {
+//RS     fn drop(&mut self) {
+//RS         self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+//RS         let _ = TcpStream::connect(self.endpoint.strip_prefix("http://").unwrap());
+//RS         if let Some(join) = self.join.take() {
+//RS             join.join().unwrap();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn serve_cache_request(mut stream: TcpStream, routes: &Arc<Mutex<BTreeMap<String, Vec<u8>>>>) {
+//RS     let mut request = [0u8; 4096];
+//RS     let count = stream.read(&mut request).unwrap_or(0);
+//RS     let path = std::str::from_utf8(&request[..count])
+//RS         .ok()
+//RS         .and_then(|request| request.lines().next())
+//RS         .and_then(|line| line.split_whitespace().nth(1))
+//RS         .unwrap_or("/")
+//RS         .split('?')
+//RS         .next()
+//RS         .unwrap_or("/");
+//RS     let body = routes.lock().unwrap().get(path).cloned();
+//RS     match body {
+//RS         Some(body) => {
+//RS             let header = format!(
+//RS                 "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+//RS                 body.len()
+//RS             );
+//RS             let _ = stream.write_all(header.as_bytes());
+//RS             let _ = stream.write_all(&body);
+//RS         }
+//RS         None => {
+//RS             let _ = stream.write_all(
+//RS                 b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+//RS             );
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0948 crates/jetpack/src/Store/NixCache/TestCache.rs:1-220
+

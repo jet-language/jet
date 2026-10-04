@@ -4,6 +4,7 @@ use jet_foundation.[
     CORE_CALLS,
     CallablePolicy,
     CallablePolicyChain,
+    ConstAttr,
     CoreCallCompletion,
     CoreCallRecord,
     CoreCallResourceAccess,
@@ -124,6 +125,7 @@ use jet_foundation.[
     TCLIInput,
     TCLIValueKind,
     TCompilerBuiltin,
+    TComptimeValue,
     TConstantDef,
     TCoreBuiltinOwner,
     TDeclarationOwnership,
@@ -744,8 +746,72 @@ fn jet_codegen_constant_is_output_type(ty: Type, modules: [SemaGraphModuleResult
     }
 }
 
+// Card #4258 (D-CONSTMARK1): a read of an immutable module constant copies
+// its folded value into the use site when the value is a scalar, short text,
+// or a small record or enum case of those, so the optimizer folds it and no
+// backend calls an accessor. `#Static` keeps the one addressable item and
+// `#Inline` copies any value; tables stay one shared item, cached when large.
+// The Rust bootstrap mirrors this in `inline_known_constant_reads`.
+fn jet_codegen_constant_copies_into_uses(definition: TConstantDef, modules: [SemaGraphModuleResult]) -> Bool Never! {
+    if jet_codegen_constant_is_output_type(definition.ty, modules, definition.module_identity) -> return true
+    if definition.is_storage -> return false
+    forced_static := false
+    forced_inline := false
+    loop semantic_module in modules {
+        if semantic_module.module_identity != definition.module_identity -> next
+        loop constant in semantic_module.constants {
+            if constant.symbol.id.key != definition.key -> next
+            loop attr in constant.declaration.attrs {
+                if attr == ConstAttr.ForceStatic -> forced_static = true
+                if attr == ConstAttr.ForceInline -> forced_inline = true
+            }
+        }
+    }
+    if forced_static -> return false
+    if forced_inline -> return true
+    if definition.value == .Closure(_) -> return definition.is_comptime
+    leaves :: jet_codegen_constant_use_site_leaves(definition.value)
+    leaves >= 0 && leaves <= 8
+}
+
+// The scalar leaves of a value that may be copied into a use site: scalars and
+// text of at most 256 bytes, through records, enum cases, and present
+// optionals. Any other value (tables, bytes, failures) is -1.
+fn jet_codegen_constant_use_site_leaves(value: TComptimeValue) -> Int Never! {
+    return if value == {
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Unit -> 1
+        .String(text) -> if text.bytes().len() <= 256 -> 1 else -> -1
+        .Struct(_, fields) -> {
+            total := 0
+            loop field in fields {
+                leaves :: jet_codegen_constant_use_site_leaves(field.value)
+                if leaves < 0 -> return -1
+                total += leaves
+            }
+            total
+        }
+        .Enum(_, _, args) -> {
+            total := 0
+            loop argument in args {
+                leaves :: jet_codegen_constant_use_site_leaves(argument.value)
+                if leaves < 0 -> return -1
+                total += leaves
+            }
+            total
+        }
+        .Present(inner) -> jet_codegen_constant_use_site_leaves(inner)
+        else -> -1
+    }
+}
+
+// Every module constant a body may read through a `Global` keeps its row
+// (Rust `lower_constant_rows`): runtime constants, storage, and prepared
+// constants whose value is folded, also when every read was copied into its
+// use site; the emitter writes an accessor only for rows still read through
+// `Global`. A prepared `Unit` and an `Output`/`OutputDefaults` value have none.
 fn jet_codegen_lower_constant_definition(definition: TConstantDef, modules: [SemaGraphModuleResult]) -> MIRConstantDef? {
-    if definition.is_comptime || jet_codegen_constant_is_output_type(definition.ty, modules, definition.module_identity) -> return None
+    if jet_codegen_constant_is_output_type(definition.ty, modules, definition.module_identity) -> return None
+    if definition.is_comptime && definition.value == .Unit -> return None
     value :: jet_codegen_lower_comptime_value(definition.value, modules, definition.module_identity, [String]{}) ?? return None
     return MIRConstantDef{
         id: MIRConstantID{value: stable_id("mir-constant", definition.key)},
@@ -761,17 +827,25 @@ fn jet_codegen_lower_constant_definition(definition: TConstantDef, modules: [Sem
 }
 
 fn jet_codegen_lower_constant_reference(builder: &JetCodegenBuilder, expression: TExpr, symbol: SymbolID) -> MIRValueID {
-    if jet_codegen_find_function(builder.function_index, symbol.key) != None {
+    if jet_codegen_find_function_row(builder.function_index, symbol.key) != None {
         return jet_codegen_lower_named_function_value(&builder, expression, symbol.key, false)
     }
     loop semantic_module in builder.modules {
         loop definition in semantic_module.declarations.constants {
             if definition.key != symbol.key -> next
-            if definition.is_comptime || jet_codegen_constant_is_output_type(definition.ty, builder.modules, definition.module_identity) {
-                constant :: jet_codegen_lower_comptime_value(definition.value, builder.modules, definition.module_identity, builder.generic_type_names) ?? panic("checked compile-time constant reference has no MIR value")
-                return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Constant{value: constant})
+            if !jet_codegen_constant_copies_into_uses(definition, builder.modules) -> return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Global{name: definition.key})
+            constant := jet_codegen_lower_comptime_value(definition.value, builder.modules, definition.module_identity, builder.generic_type_names) ?? {
+                if definition.is_comptime -> panic("checked compile-time constant reference has no MIR value")
+                return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Global{name: definition.key})
             }
-            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Global{name: definition.key})
+            // A sized-integer read keeps its width, as a literal does.
+            if constant == {
+                .Int(number, width, spelling) -> {
+                    if width == None -> constant = MIRConstant.Int{value: number, width: jet_codegen_pattern_integer_width(expression.ty), spelling: spelling}
+                }
+                else -> {}
+            }
+            return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Constant{value: constant})
         }
     }
     panic("checked constant reference has no declaration or function target")
@@ -804,7 +878,8 @@ fn jet_codegen_tuple_shape_names(name: String) -> MIRShapeFieldNames Never! {
     }
 }
 
-fn jet_codegen_append_tuple_field_rows(ty: MIRType, rows: &[MIRFieldRow], seen: &[MIRFieldID]) Never! {
+// `seen` holds the field-ID values already emitted, program-wide.
+fn jet_codegen_append_tuple_field_rows(ty: MIRType, rows: &[MIRFieldRow], seen: &[Int:Bool]) Never! {
     _ := if ty.kind == {
         .Tuple(fields) -> {
             if {
@@ -812,11 +887,7 @@ fn jet_codegen_append_tuple_field_rows(ty: MIRType, rows: &[MIRFieldRow], seen: 
                     owner :: ty.identity ?? panic("tuple MIR type has no identity")
                     loop field in fields {
                         id := mir_field_id("{mir_type_identity_key(ty)}::{field.name}")
-                        already_seen := false
-                        loop previous in seen {
-                            if previous == id -> already_seen = true
-                        }
-                        if !already_seen {
+                        if seen.get(id.value) == None {
                             &rows.push(MIRFieldRow{
                                 id: id,
                                 owner: owner,
@@ -834,7 +905,7 @@ fn jet_codegen_append_tuple_field_rows(ty: MIRType, rows: &[MIRFieldRow], seen: 
                                     redact: false,
                                 },
                             })
-                            &seen.push(id)
+                            seen[id.value] = true
                         }
                         jet_codegen_append_tuple_field_rows(field.ty, &rows, &seen)
                     }
@@ -910,13 +981,13 @@ fn jet_codegen_append_tuple_field_rows(ty: MIRType, rows: &[MIRFieldRow], seen: 
     }
 }
 
-fn jet_codegen_append_type_definition_fields(definition: MIRTypeDef, rows: &[MIRFieldRow], seen: &[MIRFieldID]) Never! {
+fn jet_codegen_append_type_definition_fields(definition: MIRTypeDef, rows: &[MIRFieldRow], seen: &[Int:Bool]) Never! {
     _ := if definition.kind == {
         .Struct(fields, _) -> {
             loop field in fields {
-                if !seen.contains(field.id) {
+                if seen.get(field.id.value) == None {
                     &rows.push(MIRFieldRow{id: field.id, owner: definition.id, field: field})
-                    &seen.push(field.id)
+                    seen[field.id.value] = true
                 }
                 jet_codegen_append_tuple_field_rows(field.ty, &rows, &seen)
             }
@@ -931,9 +1002,9 @@ fn jet_codegen_append_type_definition_fields(definition: MIRTypeDef, rows: &[MIR
                     }
                     .Named(fields) -> {
                         loop field in fields {
-                            if !seen.contains(field.id) {
+                            if seen.get(field.id.value) == None {
                                 &rows.push(MIRFieldRow{id: field.id, owner: definition.id, field: field})
-                                &seen.push(field.id)
+                                seen[field.id.value] = true
                             }
                             jet_codegen_append_tuple_field_rows(field.ty, &rows, &seen)
                         }
@@ -956,7 +1027,7 @@ fn jet_codegen_append_type_definition_fields(definition: MIRTypeDef, rows: &[MIR
     }
 }
 
-fn jet_codegen_append_failure_tuple_rows(failure: MIRFailureCarrier, rows: &[MIRFieldRow], seen: &[MIRFieldID]) Never! {
+fn jet_codegen_append_failure_tuple_rows(failure: MIRFailureCarrier, rows: &[MIRFieldRow], seen: &[Int:Bool]) Never! {
     _ := if failure == {
         .Infallible -> ()
         .Result(success, error) -> {
@@ -977,7 +1048,7 @@ fn jet_codegen_append_failure_tuple_rows(failure: MIRFailureCarrier, rows: &[MIR
 
 fn jet_codegen_lower_field_rows(types: [MIRTypeDef], functions: [MIRFunction], traits: [MIRTraitDef], impls: [MIRImplDef], constants: [MIRConstantDef]) -> [MIRFieldRow] Never! {
     rows := [MIRFieldRow]{}
-    seen := [MIRFieldID]{}
+    seen := [Int:Bool]{}
     loop definition in types {
         jet_codegen_append_type_definition_fields(definition, &rows, &seen)
         if definition.cli != None {
@@ -2168,9 +2239,9 @@ fn jet_codegen_union_mir_member_tag(ty: MIRType) -> String {
         }
     }
     start := if last_separator >= 0 -> last_separator + 1 else -> 0
-    base := String.from_bytes(bytes[start..bytes.len()]) ?? panic("canonical union member name is not valid UTF-8")
+    base := String.from_bytes(bytes[start..<bytes.len()]) ?? panic("canonical union member name is not valid UTF-8")
     suffix := ""
-    if before_args.len() < raw.len() -> suffix = String.from_bytes(raw.bytes()[before_args.bytes().len()..raw.bytes().len()]) ?? panic("canonical union generic name is not valid UTF-8")
+    if before_args.len() < raw.len() -> suffix = String.from_bytes(raw.bytes()[before_args.bytes().len()..<raw.bytes().len()]) ?? panic("canonical union generic name is not valid UTF-8")
     jet_codegen_union_member_tag_name("{base}{suffix}")
 }
 
@@ -2409,7 +2480,7 @@ fn jet_codegen_canonical_target_type(module_identity: String, name: String) -> S
         remainder := text
         prefix_length := prefix.bytes().len()
         loop remainder.starts_with(prefix) {
-            remainder = String.from_bytes(remainder.bytes()[prefix_length..remainder.bytes().len()]) ?? remainder
+            remainder = String.from_bytes(remainder.bytes()[prefix_length..<remainder.bytes().len()]) ?? remainder
         }
         return "{prefix}{remainder}"
     }
@@ -2436,7 +2507,7 @@ fn jet_codegen_canonical_impl_key(module_identity: String, owner: MIRType, trait
     owner_display := qualified_display
     if module_identity != "" {
         prefix := "{module_identity}::"
-        if owner_display.starts_with(prefix) -> owner_display = String.from_bytes(owner_display.bytes()[prefix.bytes().len()..owner_display.bytes().len()]) ?? owner_display
+        if owner_display.starts_with(prefix) -> owner_display = String.from_bytes(owner_display.bytes()[prefix.bytes().len()..<owner_display.bytes().len()]) ?? owner_display
     }
     if !jet_codegen_plain_impl_owner(owner) && mir_type_canonical_key(owner) != qualified_display -> owner_display = "{owner_display}__instance__{mir_type_canonical_key(owner)}"
     key := if module_identity == "" -> owner_display else -> "{module_identity}::{owner_display}"

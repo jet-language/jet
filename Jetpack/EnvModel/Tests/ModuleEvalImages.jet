@@ -49,7 +49,7 @@
 
 #Test("computed image fields consume top level known values") {
     dir :: envmodel_test_oci_base_dir("computed-fields")
-    src :: "\n@PORT :: 8080\nmodule image.server {{\n    from: packages.app,\n    expose: [PORT],\n}}\n"
+    src :: "\nPORT :: prep {{ 8080 }}\nmodule image.server {{\n    from: packages.app,\n    expose: [PORT],\n}}\n"
     plan :: envmodel_evaluate_env(src, dir) ?? panic("the image plans")
     assert_eq(plan.images[0].expose, [Int]{8080})
     files.remove_all(dir) ?? return
@@ -83,7 +83,7 @@
 
 #Test("oci from library package is e1267") {
     dir :: envmodel_test_oci_base_dir("library-rejected")
-    files.write(files.join(dir, @PACKAGE_FILE), "name: \"t\"\nversion: \"0.1.0\"\npackages: {{ app: library }}\n") ?? panic("write the package manifest")
+    files.write(files.join(dir, PACKAGE_FILE), "name: \"t\"\nversion: \"0.1.0\"\npackages: {{ app: library }}\n") ?? panic("write the package manifest")
     src :: "module image.server {{ from: packages.app }}"
     error :: envmodel_test_env_error(envmodel_evaluate_env(src, dir))
     assert_eq(error.code, "E1267")

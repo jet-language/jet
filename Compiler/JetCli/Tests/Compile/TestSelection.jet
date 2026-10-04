@@ -1,0 +1,51 @@
+fn jet_cli_test_selection_error(expression: String, message: String) {
+    if jet_cli_test_parse_where(expression) == {
+        .Ok(_) -> panic("invalid where expression accepted")
+        .Err(error) -> assert_eq(error.message, message)
+    }
+}
+#Test("where conjunction is ASCII insensitive and byte safe around Unicode quotes") {
+    clauses :: jet_cli_test_parse_where(" package = 'café and tea' AND dependency=net.http and tag=Test ") ?? panic(err.message)
+    assert_eq(clauses.len(), 3)
+    assert_eq(clauses[0].value, "café and tea")
+    assert_eq(clauses[1].field, "dep")
+    escaped :: jet_cli_test_parse_where("tag='a\\' and b'") ?? panic(err.message)
+    assert_eq(escaped[0].value, "a\\' and b")
+    assert_eq((jet_cli_test_parse_where("tag=''") ?? panic(err.message))[0].value, "")
+}
+#Test("where grammar preserves exact failure precedence") {
+    jet_cli_test_selection_error("", "empty predicate in --where expression")
+    jet_cli_test_selection_error("and tag=x", "empty predicate before `and`")
+    jet_cli_test_selection_error("tag=x and", "empty predicate in --where expression")
+    jet_cli_test_selection_error("tag='unfinished", "unterminated quote in --where expression")
+    jet_cli_test_selection_error("tag='unfinished\\", "unterminated quote in --where expression")
+    jet_cli_test_selection_error("tag", "predicate `tag` needs `field=value`")
+    jet_cli_test_selection_error("unknown=", "unknown --where field `unknown` (expected package, dep, path, tag, or status)")
+    jet_cli_test_selection_error("tag=", "empty value for --where field `tag`")
+    jet_cli_test_selection_error("tag=a b", "unquoted --where value `a b` contains whitespace")
+    // Balanced interior quotes still fail the outer-value closing quote check.
+    jet_cli_test_selection_error("tag='a'b", "unterminated quote for --where field `tag`")
+}
+#Test("where uses exact facts dependency component prefix and status aliases") {
+    facts :: JetCLITestTargetFacts{package: "app", deps: [String]{"net.http", "other"}, path: "/tmp/app/tests/café.jet", tags: [String]{"Test", "Unsafe"}, status: Val("pass")}
+    assert(jet_cli_test_where_matches("package=app and dep=net and path='café.jet' and tag=Test and status=SUCCESS", facts))
+    assert(!jet_cli_test_where_matches("dep=ne", facts))
+    assert(!jet_cli_test_where_matches("tag=test", facts))
+    assert(!jet_cli_test_where_matches("status=failed", facts))
+    assert(!jet_cli_test_where_matches("tag", facts))
+    missing :: JetCLITestTargetFacts{package: "app", deps: [String]{}, path: "x", tags: [String]{}, status: None}
+    assert(!jet_cli_test_where_matches("status=pass", missing))
+    assert(jet_cli_test_where_matches("path=af", facts))
+}
+#Test("source tags are ASCII hash identifiers sorted unique not substring markers") {
+    assert_eq(jet_cli_test_source_hash_tags("  #Test(\"name\") {{}}\n#Unsafe\n #Test\n// #Ignored\n#É\n#tag_2.more\n#123\n"), [String]{"123", "Test", "Unsafe", "tag_2"})
+}
+#Test("reserved fact and role modules never become test targets") {
+    names :: [String]{"package.jet", "env.jet", "workspace.jet", "config.jet", "@run.jet", "@build.jet", "@dev.jet", "@test.jet"}
+    loop name in names -> assert(jet_cli_test_reserved_target_file("dir/{name}"))
+    assert(!jet_cli_test_reserved_target_file("test.jet"))
+    assert(!jet_cli_test_reserved_target_file("dir/test.jet"))
+    assert(jet_cli_test_target_ok(JetCLITestTargetOutcome.NoTests))
+    assert(jet_cli_test_target_ok(JetCLITestTargetOutcome.Override(true)))
+    assert(!jet_cli_test_target_ok(JetCLITestTargetOutcome.Ran(false)))
+}

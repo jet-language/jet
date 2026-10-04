@@ -8,14 +8,14 @@
 // Materialize the bundled battery `slug` under
 // `<store parent>/sources/batteries/<slug>-<key>` and return that directory.
 pub fn env_battery_materialize_package(store_dir: String, slug: String) -[FS, Rand]> String ProviderReason! {
-    package := None
+    package := BatteryPackage?{None}
     loop candidate in env_battery_packages() {
         if package == None && candidate.slug == slug -> package = Val(candidate)
     }
     found :: package ?? return Err(ProviderReason{message: "unknown first-party battery package `{slug}`"})
     key :: env_battery_source_key(found)
     parent :: files.dirname(store_dir)
-    source_root :: files.join(files.join(if parent == "" -> store_dir else -> parent, "sources"), @BATTERIES_SOURCE_NAME)
+    source_root :: files.join(files.join(if parent == "" -> store_dir else -> parent, "sources"), BATTERIES_SOURCE_NAME)
     env_battery_ensure_real_directory(source_root)
     destination :: files.join(source_root, "{found.slug}-{key}")
     if files.stat(destination) == {
@@ -75,7 +75,7 @@ fn env_battery_ensure_real_directory(path: String) ProviderReason! -[FS]> {
     if files.stat(path) == {
         .Ok(info) -> {
             if info.is_symlink || !info.is_dir -> return Err(ProviderReason{message: "embedded battery cache path is not a real directory: {path}"})
-            return Ok()
+            return
         }
         .Err(error) -> {
             if !store_io_is_not_found(error) -> return Err(ProviderReason{message: "could not inspect embedded battery cache path {path}: {error}"})
@@ -120,14 +120,14 @@ fn env_battery_verify_directory(directory: String, relative: String, package: Ba
         }
         if !info.is_file -> return Err(ProviderReason{message: "embedded battery cache contains a non-file: {entry.path}"})
         relative_name :: next_relative.replace("\\", "/")
-        expected := None
+        expected := BatteryFile?{None}
         loop file in package.files {
             if expected == None && file.path == relative_name -> expected = Val(file)
         }
         file :: expected ?? return Err(ProviderReason{message: "embedded battery cache contains an unexpected file: {entry.path}"})
         bytes :: files.read_bytes(entry.path) ?? return Err(ProviderReason{message: "could not read embedded battery cache file {entry.path}: {err}"})
         if bytes != file.bytes -> return Err(ProviderReason{message: "embedded battery cache bytes do not match bundled `{file.path}`"})
-        mode :: if sys.is_windows() -> @BATTERIES_FILE_MODE else -> info.mode & 0o7777
+        mode :: if sys.is_windows() -> BATTERIES_FILE_MODE else -> info.mode & 0o7777
         if mode != file.mode -> return Err(ProviderReason{message: "embedded battery cache mode does not match bundled `{file.path}`"})
         if !seen.contains(relative_name) -> &seen.push(relative_name)
     }

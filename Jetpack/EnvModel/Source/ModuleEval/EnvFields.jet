@@ -43,13 +43,13 @@ enum EnvFieldKind {
 
     fn classify(name: String) -> EnvFieldKind Never! {
         if name == {
-            @SYSTEM_FIELD_PACKAGES -> EnvFieldKind.Packages
-            @ENV_FIELD_PROMPT -> EnvFieldKind.Prompt
-            @ENV_FIELD_SECRETS -> EnvFieldKind.Secrets
-            @ENV_FIELD_PRESETS -> EnvFieldKind.Presets
-            @ENV_FIELD_LANGUAGES -> EnvFieldKind.Languages
-            @ENV_FIELD_FILES -> EnvFieldKind.Files
-            @ENV_FIELD_DOTENV | @ENV_FIELD_UNSET | @ENV_FIELD_ON_ENTER | @ENV_FIELD_CHECKS | @ENV_FIELD_GIT_HOOKS_PATH | @ENV_FIELD_FORMATTER | @ENV_FIELD_RELOAD -> EnvFieldKind.Lifecycle
+            SYSTEM_FIELD_PACKAGES -> EnvFieldKind.Packages
+            ENV_FIELD_PROMPT -> EnvFieldKind.Prompt
+            ENV_FIELD_SECRETS -> EnvFieldKind.Secrets
+            ENV_FIELD_PRESETS -> EnvFieldKind.Presets
+            ENV_FIELD_LANGUAGES -> EnvFieldKind.Languages
+            ENV_FIELD_FILES -> EnvFieldKind.Files
+            ENV_FIELD_DOTENV | ENV_FIELD_UNSET | ENV_FIELD_ON_ENTER | ENV_FIELD_CHECKS | ENV_FIELD_GIT_HOOKS_PATH | ENV_FIELD_FORMATTER | ENV_FIELD_RELOAD -> EnvFieldKind.Lifecycle
             else -> EnvFieldKind.Setting
         }
     }
@@ -69,12 +69,12 @@ enum EnvFieldKind {
 pub fn envmodel_evaluate_env_contribution(value: Expr, src: String, scope: ModuleEvalScope, globals: [String: CtValue], source: String) -> EnvCapture EnvModelEvalError! {
     if value == {
         .StructLit(type_name, _, _, _, fields, _, _) -> {
-            if type_name != "" && type_name != @TYPE_ENV -> return Err(envmodel_wrong_namespace_type(@TYPE_ENV, type_name, expr_span(value)))
+            if type_name != "" && type_name != TYPE_ENV -> return Err(envmodel_wrong_namespace_type(TYPE_ENV, type_name, expr_span(value)))
             named := [NamedExpr]{}
             loop field in fields -> { &named.push(NamedExpr{name: field.name, name_span: field.name_span, value: field.value}) }
             Ok(envmodel_evaluate_env_fields(named, src, scope, globals, source))
         }
-        else -> Err(envmodel_not_a_namespace_literal(@TYPE_ENV, expr_span(value)))
+        else -> Err(envmodel_not_a_namespace_literal(TYPE_ENV, expr_span(value)))
     }
 }
 
@@ -145,12 +145,12 @@ pub fn envmodel_evaluate_env_fields(fields: [NamedExpr], src: String, scope: Mod
 // explicit expert record's scalar fields.
 fn envmodel_evaluate_lifecycle_value(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue]) -> CtValue EnvModelEvalError! {
     if expr == {
-        .Ident(name, _) -> Ok(CtValue.Str(name))
-        .Field(_, _, _) -> Ok(CtValue.Str(envmodel_expression_name(expr)))
+        .Ident(name, _) -> Ok(CtValue.Str{value: name})
+        .Field(_, _, _) -> Ok(CtValue.Str{value: envmodel_expression_name(expr)})
         .ListLit(values, _) -> {
             items := [CtValue]{}
             loop value in values -> { &items.push(envmodel_evaluate_lifecycle_value(value, scope, globals)) }
-            Ok(CtValue.List(items))
+            Ok(CtValue.List{values: items})
         }
         .StructLit(type_name, _, _, _, fields, _, _) -> {
             lowered := [NamedCtValue]{}
@@ -176,7 +176,7 @@ fn envmodel_evaluate_lifecycle_value(expr: Expr, scope: ModuleEvalScope, globals
                 value :: envmodel_evaluate_lifecycle_value(entry.value, scope, globals)
                 if !envmodel_ct_map_insert(&lowered, key, value) -> envmodel_ct_map_replace(&lowered, key, value)
             }
-            Ok(CtValue.Map(lowered))
+            Ok(CtValue.Map{entries: lowered})
         }
         else -> {
             envmodel_check_build_io(expr)
@@ -198,10 +198,10 @@ fn envmodel_ct_map_replace(entries: &[CtMapEntry], key: CtKey, value: CtValue) N
 // A scalar comptime value as a map key (string, integer, boolean, character).
 fn envmodel_scalar_ct_key(value: CtValue) -> CtKey? Never! {
     if value == {
-        .Str(text) -> Val(CtKey.Str(text))
-        .Int(number) -> Val(CtKey.Int(number))
-        .Bool(flag) -> Val(CtKey.Bool(flag))
-        .Char(character) -> Val(CtKey.Char(character))
+        .Str(text) -> Val(CtKey.Str{value: text})
+        .Int(number) -> Val(CtKey.Int{value: number})
+        .Bool(flag) -> Val(CtKey.Bool{value: flag})
+        .Char(character) -> Val(CtKey.Char{value: character})
         else -> None
     }
 }
@@ -228,9 +228,9 @@ enum PromptField {
 
     fn parse(name: String) -> PromptField? Never! {
         if name == {
-            @PROMPT_FIELD_LABEL -> Val(PromptField.Label)
-            @PROMPT_FIELD_PATH -> Val(PromptField.Path)
-            @PROMPT_FIELD_STRIP -> Val(PromptField.Strip)
+            PROMPT_FIELD_LABEL -> Val(PromptField.Label)
+            PROMPT_FIELD_PATH -> Val(PromptField.Path)
+            PROMPT_FIELD_STRIP -> Val(PromptField.Strip)
             else -> None
         }
     }
@@ -242,7 +242,7 @@ enum PromptField {
 fn envmodel_capture_prompt_setting(entry: &EntryContribution, value: Expr, scope: ModuleEvalScope, globals: [String: CtValue], source: String) EnvModelEvalError! {
     if value == {
         .StructLit(type_name, _, _, _, fields, _, _) -> {
-            if type_name == @TYPE_PROMPT {
+            if type_name == TYPE_PROMPT {
                 loop field in fields {
                     span :: field.name_span
                     evaluated :: envmodel_evaluate_expression(field.value, globals, scope)
@@ -253,17 +253,17 @@ fn envmodel_capture_prompt_setting(entry: &EntryContribution, value: Expr, scope
                                 .Str(text) -> text
                                 else -> { return Err(envmodel_prompt_bad_value(field.name, "a quoted label", span)) }
                             }
-                            envmodel_record_setting(&entry, @ENV_FIELD_PROMPT, label, span, source)
+                            envmodel_record_setting(&entry, ENV_FIELD_PROMPT, label, span, source)
                         }
                         .Path -> {
                             word :: envmodel_prompt_word(evaluated) ?? return Err(envmodel_prompt_bad_value(field.name, ".Short or .Full", span))
-                            if word != @PROMPT_PATH_SHORT && word != @PROMPT_PATH_FULL -> return Err(envmodel_prompt_bad_value(field.name, ".Short or .Full", span))
-                            envmodel_record_setting(&entry, @PROMPT_SETTING_PATH, word, span, source)
+                            if word != PROMPT_PATH_SHORT && word != PROMPT_PATH_FULL -> return Err(envmodel_prompt_bad_value(field.name, ".Short or .Full", span))
+                            envmodel_record_setting(&entry, PROMPT_SETTING_PATH, word, span, source)
                         }
                         .Strip -> {
                             word :: envmodel_prompt_word(evaluated) ?? return Err(envmodel_prompt_bad_value(field.name, ".On or .Off", span))
-                            if word != @PROMPT_STRIP_ON && word != @PROMPT_STRIP_OFF -> return Err(envmodel_prompt_bad_value(field.name, ".On or .Off", span))
-                            envmodel_record_setting(&entry, @PROMPT_SETTING_STRIP, word, span, source)
+                            if word != PROMPT_STRIP_ON && word != PROMPT_STRIP_OFF -> return Err(envmodel_prompt_bad_value(field.name, ".On or .Off", span))
+                            envmodel_record_setting(&entry, PROMPT_SETTING_STRIP, word, span, source)
                         }
                     }
                 }
@@ -273,13 +273,13 @@ fn envmodel_capture_prompt_setting(entry: &EntryContribution, value: Expr, scope
         else -> {}
     }
     evaluated :: envmodel_evaluate_expression(value, globals, scope)
-    envmodel_record_setting(&entry, @ENV_FIELD_PROMPT, ast_comptime_value_show(evaluated), expr_span(value), source)
+    envmodel_record_setting(&entry, ENV_FIELD_PROMPT, ast_comptime_value_show(evaluated), expr_span(value), source)
 }
 
 // Record one environment-layer text fact written by `{source}.{key}`.
 fn envmodel_record_setting(entry: &EntryContribution, key: String, value: String, span: Span, source: String) Never! {
     writers := entry.settings.get(key) ?? [FactContribution]{}
-    &writers.push(FactContribution.new(key, FactValue.Text(value), SourceScope.Item, ContributionLayer.Environment, "{source}.{key}").at(span))
+    &writers.push(fact_contribution_at(fact_contribution_new(key, FactValue.Text(value), SourceScope.Item, ContributionLayer.Environment, "{source}.{key}"), span))
     entry.settings[key] = writers
 }
 

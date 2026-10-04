@@ -1,0 +1,100 @@
+// Behavioral coverage of CLI.rs:370-610. Rust's cfg(test) module has no
+// dedicated inspect parser test; these exercise its grammar and precedence.
+fn inspect_planes_test_parse(args: [String]) -> JetCLIInspectRequest {
+    jet_cli_parse_inspect_args(args) ?? panic("inspect parsing failed: {err.message}")
+}
+
+fn inspect_planes_test_error(args: [String], message: String) {
+    if jet_cli_parse_inspect_args(args) == {
+        .Ok(_) -> panic("inspect unexpectedly accepted invalid argv")
+        .Err(error) -> assert_eq(error.message, message)
+    }
+}
+
+#Test("every inspect plane has canonical metadata and defaults to package scope") {
+    names :: [String]{"types", "rights", "claims", "shapes", "accel", "decisions", "structure", "build", "gates"}
+    loop (index, plane) in JET_CLI_INSPECT_PLANES {
+        assert_eq(jet_cli_inspect_plane_name(plane), names[index])
+        assert(jet_cli_inspect_plane(names[index]) == Val(plane))
+        request :: inspect_planes_test_parse([String]{"inspect", names[index]})
+        assert(request.plane == plane)
+        assert(request.scope == JetCLIInspectScope.Package)
+        assert(request.options == [String]{})
+        action :: jet_cli_inspect_plane_action(plane)
+        assert_eq(action.name, names[index])
+        assert_eq(action.usage, jet_cli_inspect_plane_usage(plane))
+        assert_eq(action.summary, jet_cli_inspect_plane_summary(plane))
+        assert_eq(action.handler, "InspectPlane")
+        assert(!action.also_canonical_top_level)
+    }
+    assert_eq(jet_cli_inspect_plane_usage(JetCLIInspectPlane.Structure), "structure [TARGET] [--core] [--live PID | --replay ARTIFACT]")
+    assert_eq(jet_cli_inspect_plane_usage(JetCLIInspectPlane.Build), "build [TARGET] [--coverage] [--live PID | --replay ARTIFACT]")
+    assert(jet_cli_inspect_plane("Types") == None)
+    assert(jet_cli_inspect_plane("reserved") == None)
+}
+
+#Test("inspect accepts a target or live or replay with options retained in order") {
+    target :: inspect_planes_test_parse([String]{"inspect", "structure", "pkg", "--core", "--color", "never", "--unknown"})
+    assert(target.scope == JetCLIInspectScope.Target("pkg"))
+    assert(target.options == [String]{"--core", "--color", "never", "--unknown"})
+    live :: inspect_planes_test_parse([String]{"inspect", "types", "--live", "+42", "--json"})
+    assert(live.scope == JetCLIInspectScope.Live(42))
+    assert(live.options == [String]{"--live", "+42", "--json"})
+    replay :: inspect_planes_test_parse([String]{"inspect", "claims", "--replay=record.jet", "--scope", "all"})
+    assert(replay.scope == JetCLIInspectScope.Replay("record.jet"))
+    assert(replay.options == [String]{"--replay=record.jet", "--scope", "all"})
+    assert(inspect_planes_test_parse([String]{"inspect", "rights", "--replay", ""}).scope == JetCLIInspectScope.Replay(""))
+    assert(inspect_planes_test_parse([String]{"inspect", "rights", "--replay=-path"}).scope == JetCLIInspectScope.Replay("-path"))
+}
+
+#Test("inspect value flags consume a following nonflag even in equals form") {
+    flags :: [String]{"--before", "--color", "--facts", "--gate", "--kind", "--output", "--profile", "--scope", "--set", "--target", "--topic"}
+    loop flag in flags {
+        request :: inspect_planes_test_parse([String]{"inspect", "types", flag, "value"})
+        assert(request.scope == JetCLIInspectScope.Package)
+        assert(request.options == [String]{flag, "value"})
+        equals :: "{flag}=inline"
+        assert(inspect_planes_test_parse([String]{"inspect", "types", equals, "value"}).options == [String]{equals, "value"})
+        assert(inspect_planes_test_parse([String]{"inspect", "types", flag, "--json"}).options == [String]{flag, "--json"})
+    }
+    request :: inspect_planes_test_parse([String]{"inspect", "types", "--unknown", "file.jet"})
+    assert(request.scope == JetCLIInspectScope.Target("file.jet"))
+}
+
+#Test("inspect duplicate same-kind scopes select last while preserving all options") {
+    request :: inspect_planes_test_parse([String]{"inspect", "types", "--live", "1", "--live=2"})
+    assert(request.scope == JetCLIInspectScope.Live(2))
+    assert(request.options == [String]{"--live", "1", "--live=2"})
+    replay :: inspect_planes_test_parse([String]{"inspect", "types", "--replay=a", "--replay", "b"})
+    assert(replay.scope == JetCLIInspectScope.Replay("b"))
+    assert(replay.options == [String]{"--replay=a", "--replay", "b"})
+}
+
+#Test("inspect rejects wrong route and missing or unknown plane with Rust messages") {
+    choices :: "types, rights, claims, shapes, accel, decisions, structure, build, or gates"
+    inspect_planes_test_error([String]{}, "inspect parser expects `jet inspect <plane>`")
+    inspect_planes_test_error([String]{"types"}, "inspect parser expects `jet inspect <plane>`")
+    inspect_planes_test_error([String]{"inspect"}, "missing inspect plane; choose {choices}")
+    inspect_planes_test_error([String]{"inspect", "wat"}, "unknown inspect plane `wat`; choose {choices}")
+}
+
+#Test("inspect pid preserves u32 boundaries plus prefix and zero refusal") {
+    assert(inspect_planes_test_parse([String]{"inspect", "types", "--live=4294967295"}).scope == JetCLIInspectScope.Live(4294967295))
+    assert(inspect_planes_test_parse([String]{"inspect", "types", "--live=+0001"}).scope == JetCLIInspectScope.Live(1))
+    bad :: [String]{"", "+", "-1", " 1", "1 ", "1.0", "4294967296", "9999999999999999999999999", "１２"}
+    loop value in bad -> inspect_planes_test_error([String]{"inspect", "types", "--live={value}"}, "`--live` expects a positive process id, got `{value}`")
+    inspect_planes_test_error([String]{"inspect", "types", "--live=0"}, "`--live` expects a positive process id")
+    inspect_planes_test_error([String]{"inspect", "types", "--live=+000"}, "`--live` expects a positive process id")
+    inspect_planes_test_error([String]{"inspect", "types", "--live"}, "`--live` needs a process id")
+}
+
+#Test("inspect scope exclusivity and sequential errors have Rust precedence") {
+    inspect_planes_test_error([String]{"inspect", "types", "--replay"}, "`--replay` needs a replay artifact path")
+    inspect_planes_test_error([String]{"inspect", "types", "--replay="}, "`--replay` needs a replay artifact path")
+    inspect_planes_test_error([String]{"inspect", "types", "--replay", "--json"}, "`--replay` needs a replay artifact path")
+    inspect_planes_test_error([String]{"inspect", "types", "--"}, "inspect planes do not accept a `--` command tail")
+    inspect_planes_test_error([String]{"inspect", "types", "a", "b"}, "inspect accepts at most one file or package target")
+    inspect_planes_test_error([String]{"inspect", "types", "file", "--live=1"}, "inspect accepts a target, `--live PID`, or `--replay ARTIFACT` as one scope")
+    inspect_planes_test_error([String]{"inspect", "types", "file", "--live=1", "--replay=a"}, "inspect accepts at most one of `--live PID` or `--replay ARTIFACT`")
+    inspect_planes_test_error([String]{"inspect", "types", "--live=1", "--replay=a", "--live=bad"}, "`--live` expects a positive process id, got `bad`")
+}

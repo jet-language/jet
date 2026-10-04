@@ -28,10 +28,10 @@ pub enum SandboxAuthorityError {
 // The typed result of checking one host import (Rust `HostImportDecision`):
 // data only, so every tier marshals the same verdict.
 pub struct HostImportDecision {
-    pub import: MirHostImportFact
+    pub import: MIRHostImportFact
     pub verdict: AuthorityVerdict
 
-    fn check(authority: CanonicalAuthority, import: MirHostImportFact) -> HostImportDecision Never! {
+    fn check(authority: CanonicalAuthority, import: MIRHostImportFact) -> HostImportDecision Never! {
         HostImportDecision{import: import, verdict: pkg_authority_decide_import(authority, import)}
     }
 
@@ -42,7 +42,7 @@ pub struct HostImportDecision {
 
 // `Authority::decide_import`: one typed host import against an authority,
 // without letting an adapter reinterpret the right.
-pub fn pkg_authority_decide_import(authority: CanonicalAuthority, import: MirHostImportFact) -> AuthorityVerdict Never! {
+pub fn pkg_authority_decide_import(authority: CanonicalAuthority, import: MIRHostImportFact) -> AuthorityVerdict Never! {
     if authority.allows_operation(import.required_right) -> return AuthorityVerdict.Allowed
     AuthorityVerdict.Missing
 }
@@ -50,20 +50,16 @@ pub fn pkg_authority_decide_import(authority: CanonicalAuthority, import: MirHos
 // One physical path root held without following links, associated with its
 // canonical rights-tree entry. The resolver stays the sole identity source.
 pub struct NoFollowRoot {
-    right: String
+    pub right: String
     resolver: AuthorityResolver
 
-    fn new(right: String, resolver: AuthorityResolver) -> NoFollowRoot SandboxAuthorityError! {
+    fn new(right: String, resolver: ^AuthorityResolver) -> NoFollowRoot SandboxAuthorityError! {
         canonical :: authority_parse_right(right) ?? return Err(SandboxAuthorityError.InvalidRight(right))
         Ok(NoFollowRoot{right: canonical, resolver: resolver})
     }
 
-    fn right(self) -> String Never! {
-        self.right
-    }
-
     fn root(self) -> String Never! {
-        self.resolver.root()
+        ~self.resolver.root
     }
 
     fn checked_file(self, path: String) -[FS, Env]> CheckedFile SandboxAuthorityError! {
@@ -76,13 +72,13 @@ pub struct NoFollowRoot {
 
 // Backend-neutral guest authority projection.
 pub struct SandboxAuthority {
-    authority: CanonicalAuthority
-    needs: [String]
-    roots: [NoFollowRoot]
+    pub authority: CanonicalAuthority
+    pub needs: [String]
+    pub roots: [NoFollowRoot]
 
     // Lend a host scope to a guest. Every requested right must be a
     // tighten-only child of the host and must satisfy a declared need.
-    fn lend(package: PackageAuthority, host: CanonicalAuthority, requested: [String], roots: [NoFollowRoot]) -> SandboxAuthority SandboxAuthorityError! {
+    fn lend(package: PackageAuthority, host: CanonicalAuthority, requested: [String], roots: ^[NoFollowRoot]) -> SandboxAuthority SandboxAuthorityError! {
         needs := [String]{}
         loop right in package.needs {
             parsed :: authority_parse_right(right) ?? return Err(SandboxAuthorityError.InvalidRight(right))
@@ -90,17 +86,13 @@ pub struct SandboxAuthority {
         }
         needs = authority_holds(needs)
         authority :: host.tighten(requested) ?? return Err(SandboxAuthorityError.Widened(err))
-        loop right in authority.holds() {
+        loop right in authority.holds {
             if !authority_covers_any(needs, right) -> return Err(SandboxAuthorityError.UndeclaredRight(right))
         }
         loop root in roots {
-            if !authority.allows(root.right()) -> return Err(SandboxAuthorityError.MissingRoot(root.right()))
+            if !authority.allows(root.right) -> return Err(SandboxAuthorityError.MissingRoot(~root.right))
         }
         Ok(SandboxAuthority{authority: authority, needs: needs, roots: roots})
-    }
-
-    fn authority(self) -> CanonicalAuthority Never! {
-        self.authority
     }
 
     fn verdict(self, right: String) -> AuthorityVerdict Never! {
@@ -108,37 +100,28 @@ pub struct SandboxAuthority {
         AuthorityVerdict.Missing
     }
 
-    fn needs(self) -> [String] Never! {
-        self.needs
-    }
-
-    fn roots(self) -> [NoFollowRoot] Never! {
-        self.roots
-    }
-
     // Check the exact right one host import requests; the foundation
     // authority computes the verdict, and the guest must have declared it.
-    fn authorize_import(self, import: MirHostImportFact) SandboxAuthorityError! {
+    fn authorize_import(self, import: MIRHostImportFact) SandboxAuthorityError! {
         if pkg_authority_decide_import(self.authority, import) != AuthorityVerdict.Allowed {
             return Err(SandboxAuthorityError.MissingNeed(import.required_right))
         }
         if !authority_covers_any(self.needs, import.required_right) {
             return Err(SandboxAuthorityError.UndeclaredRight(import.required_right))
         }
-        Ok()
     }
 
     // The canonical typed decision for a host import; adapters use this row
     // instead of reconstructing a policy from `needs` or a resource path.
-    fn import_decision(self, import: MirHostImportFact) -> HostImportDecision Never! {
+    fn import_decision(self, import: MIRHostImportFact) -> HostImportDecision Never! {
         HostImportDecision.check(self.authority, import)
     }
 
     // Authorize and open a file import through a matching no-follow root.
-    fn checked_file(self, import: MirHostImportFact, path: String) -[FS, Env]> CheckedFile SandboxAuthorityError! {
+    fn checked_file(self, import: MIRHostImportFact, path: String) -[FS, Env]> CheckedFile SandboxAuthorityError! {
         self.authorize_import(import)
         loop root in self.roots {
-            if authority_covers(root.right(), import.required_right) || authority_covers(import.required_right, root.right()) {
+            if authority_covers(root.right, import.required_right) || authority_covers(import.required_right, root.right) {
                 return root.checked_file(path)
             }
         }

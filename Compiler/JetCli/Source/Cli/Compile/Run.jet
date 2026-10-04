@@ -1,0 +1,112 @@
+// Source/main.rs run/dev dispatch and CmdCompile.rs execution request policy.
+// Compile policy stays in the canonical Driver service; O0 execution stays in
+// Host/Execution.jet. In particular no CLI runner emits or spawns an O1 image.
+use jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+use jet_foundation.[WatchPolicy]
+
+pub struct JetCLIExecutionInvocation {
+    pub command: String
+    // Jet-owned argv prefix, with the command as argv[0]. Compiler service
+    // resolves project/member/default/output/function/profile/settings/gates
+    // from these words using the same checked command law as check/build.
+    pub arguments: [String]
+    pub program_arguments: [String]
+    pub output: JetCLIOutputAdapter
+    pub reload: WatchPolicy
+}
+
+pub enum JetCLIExecutionPreparation {
+    Ready(request: JetCLIExecutionRequest)
+    Refused(output: JetDriverVerbOutput)
+}
+pub trait JetCLIExecutionCompiler {
+    // Includes required environment/authority preflight, callable resolution,
+    // one immutable source closure, diagnostics and O0-target checked MIR.
+    // Never ignore invocation flags merely because Driver lacks an adapter.
+    fn prepare(&self, invocation: JetCLIExecutionInvocation) -> JetCLIExecutionPreparation
+}
+
+fn jet_cli_execution_failure(error: JetCLIExecutionError, color: Bool) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "{error.operation}: {error.message}", jet_cli_why("E2105"), "repair the execution host and retry", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+}
+
+// Real finite run journey through the injected canonical compiler and O0 host.
+pub fn jet_cli_run_invocation<C: JetCLIExecutionCompiler, H: JetCLIExecutionHost>(invocation: JetCLIExecutionInvocation, compiler: &C, host: &H) -> JetDriverVerbOutput {
+    if &compiler.prepare(invocation) == {
+        .Refused(output) -> return ~output
+        .Ready(request) -> {
+            result :: jet_cli_execute_once<H>(request, &host) ?? return jet_cli_execution_failure(err, invocation.output.profile.ansi_enabled)
+            return JetDriverVerbOutput{stdout: result.stdout, stderr: result.stderr, exit_code: result.exit_code}
+        }
+    }
+}
+
+// Watching is separate from an executable session: an initial type error must
+// still allow the first successful save to start the program. The watch owner
+// is the Tools closure watcher, not path polling or a second CLI analyzer.
+pub struct JetCLIDevWatch { pub identity: Int }
+pub trait JetCLIDevWatchHost {
+    fn open(&self, invocation: JetCLIExecutionInvocation) -> JetCLIDevWatch JetCLIExecutionError!
+    fn next(&self, watch: JetCLIDevWatch) -> JetCLIExecutionChange JetCLIExecutionError!
+    fn close(&self, watch: JetCLIDevWatch) JetCLIExecutionError!
+    // Streaming output; do not accumulate an unbounded development transcript.
+    fn present(&self, output: JetDriverVerbOutput) JetCLIExecutionError!
+}
+
+// One dev watch lifetime. Failed rechecks show diagnostics without installing
+// a new generation; reload failures likewise leave last-good state to the O0
+// host. Every exit closes the execution before releasing the watch authority.
+pub fn jet_cli_dev_invocation<C: JetCLIExecutionCompiler, H: JetCLIExecutionHost, W: JetCLIDevWatchHost>(invocation: JetCLIExecutionInvocation, compiler: &C, host: &H, watcher: &W) -> JetDriverVerbOutput {
+    if invocation.reload == WatchPolicy.Once -> return jet_cli_run_invocation<C, H>(invocation, &compiler, &host)
+    watch :: &watcher.open(invocation) ?? return jet_cli_execution_failure(err, invocation.output.profile.ansi_enabled)
+    session := JetCLIExecutionSession?{None}
+    failure := JetCLIExecutionError?{None}
+    loop {
+        if &compiler.prepare(invocation) == {
+            .Refused(output) -> {
+                &watcher.present(~output) ?? {
+                    failure = Val(err)
+                    break
+                }
+            }
+            .Ready(request) -> {
+                if session == .Val(current) {
+                    &host.reload(current, request, invocation.reload) ?? {
+                        &watcher.present(jet_cli_execution_failure(err, invocation.output.profile.ansi_enabled)) ?? {
+                            failure = Val(err)
+                            break
+                        }
+                    }
+                } else {
+                    if &host.launch(request) == {
+                        .Ok(current) -> session = Val(~current)
+                        .Err(error) -> {
+                            &watcher.present(jet_cli_execution_failure(~error, invocation.output.profile.ansi_enabled)) ?? {
+                                failure = Val(err)
+                                break
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        change :: &watcher.next(watch) ?? {
+            failure = Val(err)
+            break
+        }
+        if change == JetCLIExecutionChange.Stop -> break
+    }
+    // Cleanup failures retain the first failure, but never skip watch release.
+    if session == .Val(current) {
+        &host.close(current) ?? {
+            if failure == None -> failure = Val(err)
+            ()
+        }
+    }
+    &watcher.close(watch) ?? {
+        if failure == None -> failure = Val(err)
+        ()
+    }
+    if failure == .Val(error) -> return jet_cli_execution_failure(~error, invocation.output.profile.ansi_enabled)
+    JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}

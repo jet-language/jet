@@ -1,0 +1,788 @@
+// PORT-PENDING 0950 crates-jetpack-src-store-tests-module-group-slice-1789: crates/jetpack/src/Store/Tests.rs:1789-2572
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     fn configured_ed25519_signature_verifies_the_cache_receipt() {
+//RS         use ed25519_dalek::{Signer as _, SigningKey};
+//RS 
+//RS         let (roots, _g) = temp_roots();
+//RS         let out = roots.root.join("signed-output-real");
+//RS         fs::create_dir_all(&out).unwrap();
+//RS         fs::write(out.join("payload"), "signed").unwrap();
+//RS         let envelope = super::super::super::Envelope::Envelope::for_output(
+//RS             &out.to_string_lossy(),
+//RS             "cache:demo",
+//RS             "remote-cache",
+//RS         );
+//RS         let mut entry = StoreEntry {
+//RS             id: entry_id("demo", "1", "cache:demo", &out.to_string_lossy()),
+//RS             name: "demo".to_string(),
+//RS             version: "1".to_string(),
+//RS             reference: "cache:demo".to_string(),
+//RS             out: out.to_string_lossy().into_owned(),
+//RS             bin: String::new(),
+//RS             rlib: String::new(),
+//RS             envelope,
+//RS             cache_identity: test_identity(),
+//RS             references: Vec::new(),
+//RS             named_outputs: BTreeMap::new(),
+//RS             platform_artifact_kind: String::new(),
+//RS             producer_record: String::new(),
+//RS             receipt: String::new(),
+//RS             realized_at: 0,
+//RS             last_used_at: 0,
+//RS         };
+//RS         let expectation = CacheExpectation {
+//RS             identity: test_identity(),
+//RS             owned_output: None,
+//RS             allow_unsigned_local: false,
+//RS         };
+//RS         let signing_key = SigningKey::from_bytes(&[7; 32]);
+//RS         fs::create_dir_all(roots.root.join("trust")).unwrap();
+//RS         fs::write(
+//RS             roots.root.join("trust/cache.ed25519.pub"),
+//RS             hex(&signing_key.verifying_key().to_bytes()),
+//RS         )
+//RS         .unwrap();
+//RS         entry.envelope.signature = format!(
+//RS             "ed25519:{}",
+//RS             hex(&signing_key
+//RS                 .sign(cache_signature_message(&entry, &expectation).as_bytes())
+//RS                 .to_bytes())
+//RS         );
+//RS         assert!(verify_configured_signature(&roots, &entry, &expectation));
+//RS 
+//RS         let replacement = if entry.envelope.signature.as_bytes()[9] == b'0' {
+//RS             "1"
+//RS         } else {
+//RS             "0"
+//RS         };
+//RS         entry.envelope.signature.replace_range(9..10, replacement);
+//RS         assert!(!verify_configured_signature(&roots, &entry, &expectation));
+//RS     }
+//RS 
+//RS     fn hex(bytes: &[u8]) -> String {
+//RS         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn mutable_replaced_crypto_helper_is_never_a_trust_root() {
+//RS         use std::os::unix::fs::PermissionsExt as _;
+//RS 
+//RS         let (roots, _g) = temp_roots();
+//RS         let out = roots.root.join("signed-output-hostile");
+//RS         fs::create_dir_all(&out).unwrap();
+//RS         fs::write(out.join("payload"), "signed").unwrap();
+//RS         fs::create_dir_all(roots.root.join("trust")).unwrap();
+//RS         fs::write(roots.root.join("trust/cache.ed25519.pub"), "attacker-key").unwrap();
+//RS         let marker = roots.root.join("helper-ran");
+//RS         let helper = roots.root.join("trust/jet-crypto-helper");
+//RS         fs::write(
+//RS             &helper,
+//RS             format!("#!/bin/sh\ntouch '{}'\nexit 0\n", marker.display()),
+//RS         )
+//RS         .unwrap();
+//RS         fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
+//RS         let mut envelope = super::super::super::Envelope::Envelope::for_output(
+//RS             &out.to_string_lossy(),
+//RS             "cache:hostile",
+//RS             "remote-cache",
+//RS         );
+//RS         envelope.signature = "ed25519:forged".to_string();
+//RS         let entry = StoreEntry {
+//RS             id: entry_id("hostile", "1", "cache:hostile", &out.to_string_lossy()),
+//RS             name: "hostile".to_string(),
+//RS             version: "1".to_string(),
+//RS             reference: "cache:hostile".to_string(),
+//RS             out: out.to_string_lossy().into_owned(),
+//RS             bin: String::new(),
+//RS             rlib: String::new(),
+//RS             envelope,
+//RS             cache_identity: test_identity(),
+//RS             references: Vec::new(),
+//RS             named_outputs: BTreeMap::new(),
+//RS             platform_artifact_kind: String::new(),
+//RS             producer_record: String::new(),
+//RS             receipt: String::new(),
+//RS             realized_at: 0,
+//RS             last_used_at: 0,
+//RS         };
+//RS         let expectation = CacheExpectation {
+//RS             identity: test_identity(),
+//RS             owned_output: None,
+//RS             allow_unsigned_local: false,
+//RS         };
+//RS         let proof = verify_cache_entry(&roots, &entry, "cache:hostile", &expectation);
+//RS         assert!(!proof.signature_verified);
+//RS         assert!(!proof.trusted());
+//RS         assert!(!marker.exists(), "mutable helper must never execute");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn e2604_reason_snapshot_is_exact() {
+//RS         let failure = IntegrityFailure {
+//RS             package: "demo".to_string(),
+//RS             version: "1.2.3".to_string(),
+//RS             expected: "sha256-good".to_string(),
+//RS             actual: "sha256-bad".to_string(),
+//RS             reason: "content digest verification".to_string(),
+//RS             disposition: "Jetpack quarantined it instead of using or silently repairing it."
+//RS                 .to_string(),
+//RS             fix: "Re-run `jet store fetch` after `jet clean`. If the problem persists, audit the source before rebuilding."
+//RS                 .to_string(),
+//RS         };
+//RS         assert_eq!(
+//RS             failure.what(),
+//RS             "Integrity check failed for `demo` `1.2.3` — expected `sha256-good`, got `sha256-bad`."
+//RS         );
+//RS         assert_eq!(
+//RS             failure.why(),
+//RS             "The cached artifact failed content digest verification. Jetpack quarantined it instead of using or silently repairing it."
+//RS         );
+//RS         assert_eq!(
+//RS             failure.fix(),
+//RS             "Re-run `jet store fetch` after `jet clean`. If the problem persists, audit the source before rebuilding."
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn ingest_atomic_dedupes_same_bytes_and_records_referrers() {
+//RS         let (roots, _g) = temp_roots();
+//RS         let src_a = roots.root.join("src-a");
+//RS         let src_b = roots.root.join("src-b");
+//RS         let src_c = roots.root.join("src-c");
+//RS         fs::create_dir_all(&src_a).unwrap();
+//RS         fs::create_dir_all(&src_b).unwrap();
+//RS         fs::create_dir_all(&src_c).unwrap();
+//RS         fs::write(src_a.join("payload"), "same-bytes").unwrap();
+//RS         fs::write(src_b.join("payload"), "same-bytes").unwrap();
+//RS         fs::write(src_c.join("payload"), "different").unwrap();
+//RS 
+//RS         let mut outs_a = BTreeMap::new();
+//RS         outs_a.insert("out".to_string(), src_a);
+//RS         let first = ingest_tree(
+//RS             &roots,
+//RS             &IngestRequest {
+//RS                 name: "alpha".into(),
+//RS                 version: "1".into(),
+//RS                 reference: "path:a".into(),
+//RS                 cache_identity: test_identity(),
+//RS                 references: Vec::new(),
+//RS                 outputs: outs_a,
+//RS                 signature: String::new(),
+//RS                 provenance: "test via hangar-ingest".into(),
+//RS                 platform_artifact_kind: String::new(),
+//RS             },
+//RS         )
+//RS         .unwrap();
+//RS         assert!(!first.deduplicated);
+//RS         assert!(first.entry.envelope.output_hash.starts_with("sha256-"));
+//RS 
+//RS         let mut outs_b = BTreeMap::new();
+//RS         outs_b.insert("out".to_string(), src_b);
+//RS         let second = ingest_tree(
+//RS             &roots,
+//RS             &IngestRequest {
+//RS                 name: "beta".into(),
+//RS                 version: "1".into(),
+//RS                 reference: "path:b".into(),
+//RS                 cache_identity: test_identity(),
+//RS                 references: Vec::new(),
+//RS                 outputs: outs_b,
+//RS                 signature: String::new(),
+//RS                 provenance: "test via hangar-ingest".into(),
+//RS                 platform_artifact_kind: String::new(),
+//RS             },
+//RS         )
+//RS         .unwrap();
+//RS         assert!(second.deduplicated);
+//RS         assert_eq!(
+//RS             first.entry.envelope.output_hash,
+//RS             second.entry.envelope.output_hash
+//RS         );
+//RS 
+//RS         let mut outs_c = BTreeMap::new();
+//RS         outs_c.insert("out".to_string(), src_c);
+//RS         let third = ingest_tree(
+//RS             &roots,
+//RS             &IngestRequest {
+//RS                 name: "gamma".into(),
+//RS                 version: "1".into(),
+//RS                 reference: "path:c".into(),
+//RS                 cache_identity: test_identity(),
+//RS                 references: vec![first.entry.envelope.output_hash.clone()],
+//RS                 outputs: outs_c,
+//RS                 signature: String::new(),
+//RS                 provenance: "test via hangar-ingest".into(),
+//RS                 platform_artifact_kind: String::new(),
+//RS             },
+//RS         )
+//RS         .unwrap();
+//RS         assert!(!third.deduplicated);
+//RS         assert_ne!(
+//RS             first.entry.envelope.output_hash,
+//RS             third.entry.envelope.output_hash
+//RS         );
+//RS         assert_eq!(
+//RS             referrers_of(&roots, &first.entry.envelope.output_hash).unwrap(),
+//RS             vec![third.entry.envelope.output_hash.clone()]
+//RS         );
+//RS         assert_eq!(recover_hangar_staging(&roots).unwrap(), 0);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn ingest_missing_output_is_typed_atomic_and_retryable() {
+//RS         let (roots, _g) = temp_roots();
+//RS         let src = roots.root.join("late-ingest-output");
+//RS         let request = |src: PathBuf| IngestRequest {
+//RS             name: "late-ingest".into(),
+//RS             version: "1".into(),
+//RS             reference: "path:late-ingest".into(),
+//RS             cache_identity: test_identity(),
+//RS             references: Vec::new(),
+//RS             outputs: BTreeMap::from([("out".into(), src)]),
+//RS             signature: String::new(),
+//RS             provenance: String::new(),
+//RS             platform_artifact_kind: String::new(),
+//RS         };
+//RS 
+//RS         let error = ingest_tree(&roots, &request(src.clone())).unwrap_err();
+//RS         assert!(matches!(&error, IngestError::IO(_)), "{error:?}");
+//RS         assert_eq!(error.code(), "E1315");
+//RS         assert!(list_checked(&roots).unwrap().is_empty());
+//RS         assert!(closure_graph(&roots).unwrap().records.is_empty());
+//RS         assert!(find_by_reference(&roots, "path:late-ingest").is_none());
+//RS         assert!(
+//RS             find_verified_by_reference(&roots, "path:late-ingest", &test_expectation(&src))
+//RS                 .unwrap()
+//RS                 .is_none()
+//RS         );
+//RS         assert!(!roots.root.join("leases").exists());
+//RS 
+//RS         fs::create_dir_all(&src).unwrap();
+//RS         fs::write(src.join("payload"), "now-real").unwrap();
+//RS         let ingested = ingest_tree(&roots, &request(src)).unwrap();
+//RS         assert_eq!(
+//RS             find_by_reference(&roots, "path:late-ingest"),
+//RS             Some(ingested.entry.clone())
+//RS         );
+//RS         let expectation = test_expectation(Path::new(&ingested.entry.out));
+//RS         let hit = find_verified_by_reference(&roots, "path:late-ingest", &expectation)
+//RS             .unwrap()
+//RS             .expect("retry must publish one verified cache hit");
+//RS         assert_eq!(hit.entry, ingested.entry);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn ingest_child_replaced_after_copy_is_typed_atomic_and_retryable() {
+//RS         let (roots, _g) = temp_roots();
+//RS         let src = roots.root.join("racing-tree");
+//RS         let replaced = src.join("replaced-after-copy");
+//RS         let replacement = roots.root.join("replacement");
+//RS         fs::create_dir_all(&src).unwrap();
+//RS         fs::write(&replaced, "first").unwrap();
+//RS         fs::write(&replacement, "later").unwrap();
+//RS         fs::write(src.join("stable"), "stable").unwrap();
+//RS         let request = |src: PathBuf| IngestRequest {
+//RS             name: "child-race".into(),
+//RS             version: "1".into(),
+//RS             reference: "path:child-race".into(),
+//RS             cache_identity: test_identity(),
+//RS             references: Vec::new(),
+//RS             outputs: BTreeMap::from([("out".into(), src)]),
+//RS             signature: String::new(),
+//RS             provenance: String::new(),
+//RS             platform_artifact_kind: String::new(),
+//RS         };
+//RS         let fired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS         let hook_fired = fired.clone();
+//RS         let hook_replaced = replaced.clone();
+//RS         let hook_replacement = replacement.clone();
+//RS 
+//RS         let attempted = super::Ingest::with_after_child_copy_hook(
+//RS             move |copied| {
+//RS                 if copied == hook_replaced
+//RS                     && !hook_fired.swap(true, std::sync::atomic::Ordering::SeqCst)
+//RS                 {
+//RS                     #[cfg(not(unix))]
+//RS                     fs::remove_file(&hook_replaced).unwrap();
+//RS                     fs::rename(&hook_replacement, &hook_replaced).unwrap();
+//RS                 }
+//RS             },
+//RS             || ingest_tree(&roots, &request(src.clone())),
+//RS         );
+//RS         assert!(fired.load(std::sync::atomic::Ordering::SeqCst));
+//RS         let error = attempted.expect_err("source mutation must not return a success receipt");
+//RS         assert!(matches!(&error, IngestError::Mutated(_)), "{error:?}");
+//RS         assert_eq!(error.code(), "E1315");
+//RS         assert!(list_checked(&roots).unwrap().is_empty());
+//RS         assert!(closure_graph(&roots).unwrap().records.is_empty());
+//RS         assert!(find_by_reference(&roots, "path:child-race").is_none());
+//RS         assert!(
+//RS             find_verified_by_reference(&roots, "path:child-race", &test_expectation(&src))
+//RS                 .unwrap()
+//RS                 .is_none()
+//RS         );
+//RS         assert!(!roots.root.join("leases").exists());
+//RS 
+//RS         fs::write(&replaced, "first").unwrap();
+//RS         let ingested = ingest_tree(&roots, &request(src)).unwrap();
+//RS         assert_eq!(list_checked(&roots).unwrap(), vec![ingested.entry.clone()]);
+//RS         let expectation = test_expectation(Path::new(&ingested.entry.out));
+//RS         let hit = find_verified_by_reference(&roots, "path:child-race", &expectation)
+//RS             .unwrap()
+//RS             .expect("retry must publish one verified cache hit");
+//RS         assert_eq!(hit.entry, ingested.entry);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn ingest_retry_after_object_publish_seals_before_metadata() {
+//RS         let (roots, _g) = temp_roots();
+//RS         let first = ingest_fixture(&roots, "retry-crash", &[("out", "retry")], Vec::new());
+//RS         let object = PathBuf::from(&first.entry.out);
+//RS         make_tree_writable_for_removal(&object).unwrap();
+//RS         fs::remove_dir_all(roots.hangar_dir().join(&first.entry.id)).unwrap();
+//RS         fs::remove_dir_all(roots.hangar_dir().join("closure-db")).unwrap();
+//RS 
+//RS         let retry = ingest_fixture(&roots, "retry-crash", &[("out", "retry")], Vec::new());
+//RS         assert!(retry.deduplicated);
+//RS         assert!(fs::metadata(&object).unwrap().permissions().readonly());
+//RS         assert!(fs::metadata(object.join("payload"))
+//RS             .unwrap()
+//RS             .permissions()
+//RS             .readonly());
+//RS         assert!(roots
+//RS             .hangar_dir()
+//RS             .join(&retry.entry.id)
+//RS             .join("meta.json")
+//RS             .is_file());
+//RS         assert!(closure_graph(&roots)
+//RS             .unwrap()
+//RS             .records
+//RS             .contains_key(&retry.entry.id));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn ingest_rejects_path_law_reserved_name() {
+//RS         let (roots, _g) = temp_roots();
+//RS         let src = roots.root.join("src-bad");
+//RS         fs::create_dir_all(&src).unwrap();
+//RS         fs::write(src.join("CON"), "nope").unwrap();
+//RS         let mut outputs = BTreeMap::new();
+//RS         outputs.insert("out".to_string(), src);
+//RS         let err = ingest_tree(
+//RS             &roots,
+//RS             &IngestRequest {
+//RS                 name: "bad".into(),
+//RS                 version: "1".into(),
+//RS                 reference: "path:bad".into(),
+//RS                 cache_identity: test_identity(),
+//RS                 references: Vec::new(),
+//RS                 outputs,
+//RS                 signature: String::new(),
+//RS                 provenance: String::new(),
+//RS                 platform_artifact_kind: String::new(),
+//RS             },
+//RS         )
+//RS         .unwrap_err();
+//RS         assert_eq!(err.code(), "E1299");
+//RS         assert!(
+//RS             err.what().contains("store path")
+//RS                 || err.why().contains("reserved")
+//RS                 || err.why().contains("CON")
+//RS                 || format!("{err:?}").contains("reserved"),
+//RS             "{err:?}"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn ingest_rejects_output_names_that_escape_staging() {
+//RS         for alias in [
+//RS             "../escaped-output",
+//RS             "..\\escaped-output",
+//RS             ".",
+//RS             "out/",
+//RS             "out//",
+//RS             "out/.",
+//RS             "out/./",
+//RS             "out\\",
+//RS             "out\\.",
+//RS         ] {
+//RS             let (roots, _g) = temp_roots();
+//RS             let src = roots.root.join("src-output-name");
+//RS             fs::create_dir_all(&src).unwrap();
+//RS             fs::write(src.join("payload"), "bytes").unwrap();
+//RS             let escaped = roots.root.join("escaped-output");
+//RS             let mut outputs = BTreeMap::new();
+//RS             outputs.insert("out".to_string(), src.clone());
+//RS             outputs.insert(alias.to_string(), src);
+//RS             let err = ingest_tree(
+//RS                 &roots,
+//RS                 &IngestRequest {
+//RS                     name: "bad-output-name".into(),
+//RS                     version: "1".into(),
+//RS                     reference: "path:bad-output-name".into(),
+//RS                     cache_identity: test_identity(),
+//RS                     references: Vec::new(),
+//RS                     outputs,
+//RS                     signature: String::new(),
+//RS                     provenance: String::new(),
+//RS                     platform_artifact_kind: String::new(),
+//RS                 },
+//RS             )
+//RS             .unwrap_err();
+//RS             assert_eq!(err.code(), "E1315", "alias {alias:?}: {err:?}");
+//RS             assert!(
+//RS                 err.what().contains("one path component"),
+//RS                 "alias {alias:?}: {err:?}"
+//RS             );
+//RS             assert!(!roots.hangar_dir().exists(), "alias {alias:?}");
+//RS             assert!(!escaped.exists(), "alias {alias:?}");
+//RS         }
+//RS     }
+//RS 
+//RS     /// Minimal scoped tempdir for tests (std-only; auto-removes on drop).
+//RS     #[cfg(test)]
+//RS     mod tempdir {
+//RS         use std::ffi::OsString;
+//RS         use std::path::{Path, PathBuf};
+//RS         use std::sync::{Mutex, MutexGuard, OnceLock};
+//RS 
+//RS         static ENVIRONMENT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+//RS 
+//RS         pub struct Guard {
+//RS             pub path: PathBuf,
+//RS             parent: PathBuf,
+//RS             environment: Option<EnvironmentGuard>,
+//RS         }
+//RS 
+//RS         struct EnvironmentGuard {
+//RS             previous: Vec<(&'static str, Option<OsString>)>,
+//RS             _lock: MutexGuard<'static, ()>,
+//RS         }
+//RS 
+//RS         impl EnvironmentGuard {
+//RS             fn new(root: &Path, parent: &Path) -> Self {
+//RS                 let lock = ENVIRONMENT_LOCK
+//RS                     .get_or_init(|| Mutex::new(()))
+//RS                     .lock()
+//RS                     .unwrap_or_else(|error| error.into_inner());
+//RS                 let desired = [
+//RS                     ("HOME", Some(parent.join("home").into_os_string())),
+//RS                     ("USERPROFILE", Some(parent.join("home").into_os_string())),
+//RS                     ("LOCALAPPDATA", Some(parent.join("local").into_os_string())),
+//RS                     ("XDG_DATA_HOME", Some(parent.join("data").into_os_string())),
+//RS                     (
+//RS                         "XDG_STATE_HOME",
+//RS                         Some(parent.join("state").into_os_string()),
+//RS                     ),
+//RS                     (
+//RS                         "XDG_CACHE_HOME",
+//RS                         Some(parent.join("cache").into_os_string()),
+//RS                     ),
+//RS                     (
+//RS                         "XDG_CONFIG_HOME",
+//RS                         Some(parent.join("config").into_os_string()),
+//RS                     ),
+//RS                     ("JETPACK_ROOT", Some(root.as_os_str().to_os_string())),
+//RS                     (
+//RS                         "JETPACK_SHARED_CAS",
+//RS                         Some(parent.join("shared-cas").into_os_string()),
+//RS                     ),
+//RS                 ];
+//RS                 let previous = desired
+//RS                     .iter()
+//RS                     .map(|(name, _)| (*name, std::env::var_os(name)))
+//RS                     .collect();
+//RS                 for (name, value) in desired {
+//RS                     if let Some(value) = value {
+//RS                         std::env::set_var(name, value);
+//RS                     } else {
+//RS                         std::env::remove_var(name);
+//RS                     }
+//RS                 }
+//RS                 Self {
+//RS                     previous,
+//RS                     _lock: lock,
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         impl Drop for EnvironmentGuard {
+//RS             fn drop(&mut self) {
+//RS                 for (name, value) in self.previous.drain(..).rev() {
+//RS                     if let Some(value) = value {
+//RS                         std::env::set_var(name, value);
+//RS                     } else {
+//RS                         std::env::remove_var(name);
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         impl Guard {
+//RS             pub fn new(tag: &str) -> Guard {
+//RS                 static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+//RS                 let nanos = std::time::SystemTime::now()
+//RS                     .duration_since(std::time::UNIX_EPOCH)
+//RS                     .unwrap()
+//RS                     .as_nanos();
+//RS                 let parent = std::env::temp_dir().join(format!(
+//RS                     "{tag}-{}-{nanos}-{}",
+//RS                     std::process::id(),
+//RS                     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+//RS                 ));
+//RS                 let path = parent.join("root");
+//RS                 std::fs::create_dir_all(&path).unwrap();
+//RS                 let environment = EnvironmentGuard::new(&path, &parent);
+//RS                 Guard {
+//RS                     path,
+//RS                     parent,
+//RS                     environment: Some(environment),
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         impl Drop for Guard {
+//RS             fn drop(&mut self) {
+//RS                 drop(self.environment.take());
+//RS                 let _ = std::fs::remove_dir_all(&self.parent);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn store_stays_split_along_existing_phases() {
+//RS         const MAX_MODULE_LINES: usize = 2500;
+//RS         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+//RS         let read = |relative: &str| std::fs::read_to_string(root.join(relative)).unwrap();
+//RS         let store = read("src/Store.rs");
+//RS         let ingest = read("src/Store/Ingest.rs");
+//RS         let closure = read("src/Store/Closure.rs");
+//RS         let receipt = read("src/Store/Receipt.rs");
+//RS         let journal = read("src/Store/Journal.rs");
+//RS         let tests = read("src/Store/Tests.rs");
+//RS         // Exclude this test's own body: the marker must match the indented
+//RS         // source, and the forbidden literals below are built at runtime so the
+//RS         // scan cannot trigger on itself.
+//RS         let tests_production = tests
+//RS             .split("fn store_stays_split_along_existing_phases")
+//RS             .next()
+//RS             .unwrap();
+//RS         let include_marker = format!("include{}(", '!');
+//RS         let path_marker = format!("#{}path", '[');
+//RS 
+//RS         for (relative, source) in [
+//RS             ("src/Store.rs", store.as_str()),
+//RS             ("src/Store/Ingest.rs", ingest.as_str()),
+//RS             ("src/Store/Closure.rs", closure.as_str()),
+//RS             ("src/Store/Receipt.rs", receipt.as_str()),
+//RS             ("src/Store/Journal.rs", journal.as_str()),
+//RS             ("src/Store/Tests.rs", tests_production),
+//RS         ] {
+//RS             assert!(
+//RS                 source.lines().count() < MAX_MODULE_LINES,
+//RS                 "{relative} must stay below the card #510 module boundary"
+//RS             );
+//RS             assert!(!source.contains(&include_marker));
+//RS             assert!(!source.contains(&path_marker));
+//RS         }
+//RS         assert!(store.contains("\nmod Ingest;\npub use Ingest::*;"));
+//RS         assert!(store.contains("\nmod Closure;\npub use Closure::*;"));
+//RS         assert!(store.contains("\nmod Receipt;\n"));
+//RS         assert!(store.contains("\nmod Journal;\n"));
+//RS         assert!(store.contains("\n#[cfg(test)]\nmod Tests;"));
+//RS 
+//RS         let ordered = [
+//RS             "pub struct IngestRequest",
+//RS             "pub fn recover_hangar_staging",
+//RS             "pub fn ingest_tree",
+//RS             "fn copy_nofollow_tree",
+//RS             "fn stable_meta_identity",
+//RS         ];
+//RS         let positions: Vec<usize> = ordered
+//RS             .iter()
+//RS             .map(|needle| ingest.find(needle).unwrap())
+//RS             .collect();
+//RS         assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+//RS         let closure_ordered = [
+//RS             "pub fn closure_graph",
+//RS             "pub fn referrers_of",
+//RS             "pub fn migrate_closure_graph",
+//RS         ];
+//RS         let positions: Vec<usize> = closure_ordered
+//RS             .iter()
+//RS             .map(|needle| closure.find(needle).unwrap())
+//RS             .collect();
+//RS         assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+//RS         let journal_ordered = ["fn load_graph", "fn validate_graph"];
+//RS         let positions: Vec<usize> = journal_ordered
+//RS             .iter()
+//RS             .map(|needle| journal.find(needle).unwrap())
+//RS             .collect();
+//RS         assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+//RS     }
+//RS     #[test]
+//RS     fn locked_nix_cas_replay_is_cold_and_warm_stable() {
+//RS         let (source_roots, _source_guard) = temp_roots();
+//RS         let source_project = source_roots.root.join("project");
+//RS         std::fs::create_dir_all(&source_project).unwrap();
+//RS         let source = ingest_fixture(&source_roots, "locked-nix", &[("out", "portable")], vec![]);
+//RS         let mut source_entry = source.entry.clone();
+//RS         assert!(remove_closure_record(&source_roots, &source_entry.id).unwrap());
+//RS 
+//RS         let revision = "a".repeat(40);
+//RS         let signed_manifest = "b".repeat(64);
+//RS         let derivation = "c".repeat(64);
+//RS         let nar_hash = format!("sha256:{}", "d".repeat(64));
+//RS         let upstream_proof = format!("sha256-{}", "e".repeat(64));
+//RS         let cache_key = "f".repeat(64);
+//RS         let system = crate::Envelope::host_platform();
+//RS         let mut producer = ProducerRecord::decode(&source_entry.producer_record).unwrap();
+//RS         producer.provider = "nix".into();
+//RS         producer.immutable_source = "nix-source-locked-nix".into();
+//RS         producer.source_digest = source_entry.envelope.output_hash.clone();
+//RS         producer.facts.extend(BTreeMap::from([
+//RS             ("nix.index.channel".into(), "nixpkgs-unstable".into()),
+//RS             ("nix.index.revision".into(), revision.clone()),
+//RS             ("nix.index.system".into(), system.clone()),
+//RS             ("nix.index.manifest.sha256".into(), signed_manifest.clone()),
+//RS             ("nix.derivation.sha256".into(), derivation.clone()),
+//RS             ("nix.output.out".into(), source_entry.out.clone()),
+//RS             ("nix.store-path".into(), "/nix/store/locked-nix".into()),
+//RS             ("nix.proof".into(), upstream_proof.clone()),
+//RS             ("nix.nar-hash".into(), nar_hash.clone()),
+//RS             ("nix.nar-size".into(), "1".into()),
+//RS             ("nix.compression".into(), "none".into()),
+//RS             ("nix.cache.key".into(), cache_key.clone()),
+//RS         ]));
+//RS         source_entry.producer_record = producer.encode();
+//RS         assert!(crate::RuntimePolicy::with_lock(&source_roots.root, "hangar", || {
+//RS             register_admitted_nix_entries_unlocked(&source_roots, &[source_entry.clone()])
+//RS         })
+//RS         .unwrap());
+//RS 
+//RS         let bundle =
+//RS             publish_nix_cas_bundle(&source_project, &source_roots, &source_entry.id).unwrap();
+//RS         // One environment guard owns both Hangars. Acquiring a second Guard
+//RS         // while _source_guard is alive would re-enter its process-env mutex.
+//RS         let imported_root = source_roots.root.parent().unwrap().join("imported-root");
+//RS         std::fs::create_dir_all(&imported_root).unwrap();
+//RS         let imported_roots = Roots {
+//RS             root: imported_root,
+//RS             dev_mode: true,
+//RS         };
+//RS         let (_, object_digests) =
+//RS             import_nix_cas_bundle(&source_project, &imported_roots, &bundle).unwrap();
+//RS         let closure = crate::Lock::NixClosureRecord {
+//RS             channel: "nixpkgs-unstable".into(),
+//RS             revision,
+//RS             system: system.clone(),
+//RS             index_authority: signed_manifest,
+//RS             derivation,
+//RS             output: source_entry.envelope.output_hash.clone(),
+//RS             nar_hash,
+//RS             size: 1,
+//RS             compression: "none".into(),
+//RS             references: Vec::new(),
+//RS             upstream_proof,
+//RS             cache_key,
+//RS             project_cas_bundle: bundle,
+//RS         };
+//RS         let envelope = crate::Lock::LockEnvelope {
+//RS             output_hash: closure.output.clone(),
+//RS             platform: closure.system.clone(),
+//RS             signature: String::new(),
+//RS             provenance: "locked-nix".into(),
+//RS             catalog_tier: "local-unofficial".into(),
+//RS             catalog_trust: "unverified".into(),
+//RS         };
+//RS         let first = record_locked_nix(
+//RS             &imported_roots,
+//RS             "locked-nix",
+//RS             "1",
+//RS             "locked-nix@nixpkgs",
+//RS             &envelope,
+//RS             &closure,
+//RS             &object_digests,
+//RS             "lock-digest",
+//RS         )
+//RS         .unwrap();
+//RS         let second = record_locked_nix(
+//RS             &imported_roots,
+//RS             "locked-nix",
+//RS             "1",
+//RS             "locked-nix@nixpkgs",
+//RS             &envelope,
+//RS             &closure,
+//RS             &object_digests,
+//RS             "lock-digest",
+//RS         )
+//RS         .unwrap();
+//RS         assert_eq!(first.id, second.id);
+//RS         assert_eq!(first.envelope.output_hash, second.envelope.output_hash);
+//RS         assert_eq!(
+//RS             list_checked(&imported_roots)
+//RS                 .unwrap()
+//RS                 .iter()
+//RS                 .filter(|entry| entry.reference == "locked-nix@nixpkgs")
+//RS                 .count(),
+//RS             1
+//RS         );
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn hangar_doctor_preserves_malformed_cas_lock_namespace() {
+//RS         use std::os::unix::fs::{MetadataExt as _, symlink};
+//RS 
+//RS         let (roots, _guard) = temp_roots();
+//RS         let cas = roots.hangar_dir().join("cas");
+//RS         fs::create_dir_all(&cas).unwrap();
+//RS         let locks = cas.join(".locks");
+//RS         let assert_unrepaired = |report: HangarDoctorReport| {
+//RS             assert_eq!(report.findings.len(), 1);
+//RS             let finding = &report.findings[0];
+//RS             assert_eq!(finding.kind, "drift");
+//RS             assert_eq!(finding.subject, "cas/.locks");
+//RS             assert!(!finding.fixed);
+//RS         };
+//RS 
+//RS         fs::write(&locks, b"not a directory").unwrap();
+//RS         let file_metadata = fs::symlink_metadata(&locks).unwrap();
+//RS         assert_unrepaired(hangar_doctor(&roots, false, true).unwrap());
+//RS         assert_unrepaired(hangar_doctor(&roots, true, true).unwrap());
+//RS         let after = fs::symlink_metadata(&locks).unwrap();
+//RS         assert!(after.is_file());
+//RS         assert_eq!(
+//RS             (after.dev(), after.ino()),
+//RS             (file_metadata.dev(), file_metadata.ino()),
+//RS         );
+//RS         assert_eq!(fs::read(&locks).unwrap(), b"not a directory");
+//RS 
+//RS         fs::remove_file(&locks).unwrap();
+//RS         let outside_cas = roots.root.join("outside-cas");
+//RS         fs::create_dir_all(&outside_cas).unwrap();
+//RS         let protected = outside_cas.join("must-retain");
+//RS         fs::write(&protected, b"outside CAS").unwrap();
+//RS         let protected_metadata = fs::metadata(&protected).unwrap();
+//RS         symlink(&outside_cas, &locks).unwrap();
+//RS         let link_metadata = fs::symlink_metadata(&locks).unwrap();
+//RS         assert_unrepaired(hangar_doctor(&roots, false, true).unwrap());
+//RS         assert_unrepaired(hangar_doctor(&roots, true, true).unwrap());
+//RS         let after = fs::symlink_metadata(&locks).unwrap();
+//RS         assert!(after.file_type().is_symlink());
+//RS         assert_eq!(
+//RS             (after.dev(), after.ino()),
+//RS             (link_metadata.dev(), link_metadata.ino()),
+//RS         );
+//RS         assert_eq!(fs::read_link(&locks).unwrap(), outside_cas);
+//RS         let after = fs::metadata(&protected).unwrap();
+//RS         assert_eq!(
+//RS             (after.dev(), after.ino()),
+//RS             (protected_metadata.dev(), protected_metadata.ino()),
+//RS         );
+//RS         assert_eq!(fs::read(&protected).unwrap(), b"outside CAS");
+//RS     }
+//RS }
+// END-PORT-PENDING 0950 crates/jetpack/src/Store/Tests.rs:1789-2572
+

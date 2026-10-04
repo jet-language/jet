@@ -6,8 +6,8 @@
 // move-only Jet values, so a foreign call cannot reuse a consumed handle.
 // Unsupported signatures fail before compilation instead of guessing an ABI.
 
-@PKG_GO_BUILD_TOOL :: "go build -buildmode=c-archive"
-@PKG_GO_BUILD_ACTION :: "rejected the source"
+PKG_GO_BUILD_TOOL :: prep { "go build -buildmode=c-archive" }
+PKG_GO_BUILD_ACTION :: prep { "rejected the source" }
 
 // The Go scalar shapes the c-archive boundary accepts.
 enum GoScalar {
@@ -71,9 +71,9 @@ pub fn pkg_go_bind(source_path: String, source: String, lib: String, cache: Stri
         if (function.result ?? GoScalar.Int) == GoScalar.Handle -> uses_handles = true
     }
     if uses_handles && !pkg_binder_host_is_64_bit() -> return Err(ForeignBindError.Source("Go `uintptr` handles need a 64-bit host ABI"))
-    output :: pkg_binder_supervise([String]{"go", "build", "-buildmode=c-archive", "-trimpath", "-o", archive, source_path}, None, [(name: String, value: String)]{(name: "CGO_ENABLED", value: "1")}, @BINDER_TOOL_CAPTURE_LIMIT, 60s, "go")
-    if output.timed_out -> return Err(ForeignBindError.ToolFailed{tool: @PKG_GO_BUILD_TOOL, action: @PKG_GO_BUILD_ACTION, detail: "the compiler exceeded the 60 second limit"})
-    if !output.success -> return Err(ForeignBindError.ToolFailed{tool: @PKG_GO_BUILD_TOOL, action: @PKG_GO_BUILD_ACTION, detail: pkg_go_launder(output.stderr)})
+    output :: pkg_binder_supervise([String]{"go", "build", "-buildmode=c-archive", "-trimpath", "-o", archive, source_path}, None, [(name: String, value: String)]{(name: "CGO_ENABLED", value: "1")}, BINDER_TOOL_CAPTURE_LIMIT, 60s, "go")
+    if output.timed_out -> return Err(ForeignBindError.ToolFailed{tool: PKG_GO_BUILD_TOOL, action: PKG_GO_BUILD_ACTION, detail: "the compiler exceeded the 60 second limit"})
+    if !output.success -> return Err(ForeignBindError.ToolFailed{tool: PKG_GO_BUILD_TOOL, action: PKG_GO_BUILD_ACTION, detail: pkg_go_launder(output.stderr)})
     provenance := "schema=jet-go-bind-v1\n"
     pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Go, "Go", lib, source_path, archive, "go={pkg_bridge_tool_identity("go")};cgo=enabled;trimpath;ar")
     bound := [String]{}
@@ -177,8 +177,8 @@ fn pkg_go_launder(stderr: [U8]) -> String Never! {
         if trimmed == "" || trimmed.starts_with("#") -> next
         at :: pkg_binder_rfind(trimmed, ":")
         detail :: if at < 0 -> trimmed else -> pkg_binder_tail(trimmed, at + 1).trim()
-        if detail == "" -> return @BINDER_TOOL_FAILURE_DETAIL
+        if detail == "" -> return BINDER_TOOL_FAILURE_DETAIL
         return pkg_binder_take_chars(detail, 160)
     }
-    @BINDER_TOOL_FAILURE_DETAIL
+    BINDER_TOOL_FAILURE_DETAIL
 }

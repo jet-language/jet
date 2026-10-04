@@ -228,6 +228,27 @@ view provenance, and maturity facts; consumers must use the registered fact
 record rather than infer a fact from a string. `fact_reads.jet` and
 `reflect-value.jet` are executable examples of those member names.
 
+## Compiler-value projection
+
+Foundation owns the ordered AST and checked TIR compiler-value writer. Compound
+map keys convert to values with the lowercase `tuple` identity and retain their
+authored field order. Struct projection omits only compiler-generated memo
+storage (`__jet_` followed by `__memo_`); user lookalikes remain visible.
+No field or map entry sorting or deduplication occurs.
+
+Strings, characters, field names, enum variants and argument labels use the
+same Foundation JSON escaper. An enum with all labeled arguments has an object
+payload; positional arguments have an array payload. In a mixed array, each
+labeled argument is a one-key object. Present values project as their payload,
+clean failures and Unit/closures as null, and told failures as an `err` object.
+
+Float text comes from the native-width scalar formatter: Float32 rounding and
+shortest spelling are not reconstructed from a Float64 string. Compiler-value
+notation remains JSON-like rather than a general JSON product format: map keys
+may themselves be numbers or compound values, and nonfinite floats retain their
+diagnostic spelling. The finite, string-key subset is strict JSON. This notation
+is distinct from ordered CLI status envelopes and sorted canonical JSON.
+
 ## The metadata contract
 
 The owner-controlled lexical ledger names these ratified fact roots

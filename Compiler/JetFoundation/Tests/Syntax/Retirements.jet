@@ -1,0 +1,156 @@
+// Rust Syntax/retirements.rs:817-820.
+#Test("the_table_obeys_its_own_law") {
+    assert_eq(syntax_retirement_law_violations().len(), 0)
+}
+
+// Rust Syntax/retirements.rs:822-841.
+#Test("a_rename_rewrites_and_a_semantic_change_does_not") {
+    assert(syntax_rename_target(LEGACY_ENTRY_FILE) == (Val(DEFAULT_ENTRY_FILE)))
+    assert(syntax_rename_target(PAYLOAD_FILE) == (Val(PACKAGE_FILE)))
+    assert(syntax_rename_target(RETIRED_INTERPOLATION_SELECTOR_EXAMPLE) == (Val(INTERPOLATION_SELECTOR_EXAMPLE)))
+    assert(syntax_rename_target(RETIRED_COMPTIME_MARK) == None)
+    assert(syntax_rename_target("io.println") == (Val("io.print")))
+    assert(syntax_rename_target("io.sprint") == (Val("{{value}}")))
+    assert(syntax_rename_target("io.repr") == (Val("{{value:Debug}}")))
+    assert(syntax_rename_target(RETIRED_TYPE_QUEUE) == (Val(TYPE_QUEUE)))
+    assert(syntax_rename_target(RETIRED_TYPE_RANK) == (Val(TYPE_RANK)))
+    assert(syntax_rename_target(RETIRED_TYPE_TALLY) == (Val(TYPE_TALLY)))
+    assert(syntax_rename_target(RETIRED_TYPE_BITS) == (Val(TYPE_BITS)))
+    assert(syntax_rename_target(RETIRED_TYPE_BYTES) == (Val(TYPE_BYTES)))
+    assert(syntax_rename_target("payload: {{") == None)
+    assert(syntax_rename_target("provider@target") == None)
+}
+
+// Rust Syntax/retirements.rs:843-850.
+#Test("every_semantic_retirement_names_the_code_that_refuses_it") {
+    loop row in SYNTAX_RETIREMENTS {
+        if row.kind == SyntaxRetirementKind.Semantic -> assert(row.code != None)
+    }
+}
+
+// Rust Syntax/retirements.rs:852-863.
+#Test("a_second_copy_of_a_row_fails_the_guard") {
+    doubled := ~SYNTAX_RETIREMENTS
+    &doubled.push(SYNTAX_RETIREMENTS[0])
+    violations :: syntax_retirement_law_violations_of(doubled)
+    found := false
+    loop line in violations {
+        if line.contains("retired twice") -> found = true
+    }
+    assert(found)
+}
+
+// Rust Syntax/retirements.rs:865-877.
+#Test("a_rename_that_names_a_code_fails_the_guard") {
+    row := syntax_retirement("entry-file") ?? panic("retirement table needs a rename row")
+    row.code = Val("E1206")
+    wrong :: [SyntaxRetirement]{row}
+    assert(syntax_retirement_law_violations_of(wrong).len() > 0)
+}
+
+#Test("retirement lookup keeps every row and the provider order") {
+    loop row in SYNTAX_RETIREMENTS {
+        found :: syntax_retirement(row.id) ?? panic("row lookup failed")
+        assert_eq(found.retired, row.retired)
+        assert_eq(found.canonical, row.canonical)
+        assert(found.kind == row.kind)
+        assert_eq(found.decision, row.decision)
+        assert_eq(found.since, row.since)
+        assert(found.code == row.code)
+    }
+    assert(syntax_retirement("not-a-retirement") == None)
+    assert_eq(REF_PROVIDERS.len(), 15)
+    assert_eq(REF_PROVIDERS[0], "jetpack")
+    assert_eq(REF_PROVIDERS[14], "releases")
+}
+
+#Test("removed core modules select the longest dotted prefix only") {
+    exact :: syntax_retired_core_module("core.sketch.hll") ?? panic("exact retired module absent")
+    assert_eq(exact.id, "core-namespace-sketch-hll")
+    child :: syntax_retired_core_module("core.sketch.hll.Counter") ?? panic("retired parent absent")
+    assert_eq(child.canonical, "core.data.sketch.hll")
+    parent :: syntax_retired_core_module("core.sketch.unknown") ?? panic("retired namespace absent")
+    assert_eq(parent.canonical, "core.data.sketch.*")
+    assert(syntax_retired_core_module("core.sketchy") == None)
+    assert(syntax_retired_core_module("core.time.dateTime") == None)
+    assert(syntax_retired_core_module("core.files") == None)
+    assert(syntax_retired_core_module("io.println") == None)
+}
+
+#Test("removed core module diagnostic carries the row answer and span") {
+    diagnostic :: syntax_retired_core_module_diagnostic("core.sketch.hll.Counter", Span{start: 4, end: 27}) ?? panic("retired diagnostic absent")
+    assert_eq(diagnostic.code, "E1001")
+    assert(diagnostic.span == (Val(Span{start: 4, end: 27})))
+    assert_eq(diagnostic.what, "Core module `core.sketch.hll.Counter` was retired")
+    assert_eq(diagnostic.why, "D-CORE-TREE1=A removed this free namespace; the canonical home is core.data.sketch.hll")
+    assert_eq(diagnostic.fix, "Use one of: core.data.sketch.hll")
+    assert(syntax_retired_core_module_diagnostic("core.files", Span{start: 0, end: 10}) == None)
+}
+
+#Test("law guard preserves refusal ordering and exact messages") {
+    row :: SyntaxRetirement{id: "broken", retired: "", canonical: "", kind: SyntaxRetirementKind.Semantic, decision: "", since: "bad", code: None}
+    violations :: syntax_retirement_law_violations_of([SyntaxRetirement]{row, row})
+    assert_eq(violations.len(), 12)
+    assert_eq(violations[0], "broken: a row names an empty spelling")
+    assert_eq(violations[1], "broken: retires the form it names as canonical")
+    assert_eq(violations[2], "broken: names no decision")
+    assert_eq(violations[3], "broken: `bad` is not a YYYY-MM-DD date")
+    assert_eq(violations[4], "broken: a semantic change is refused, so it must name its code")
+    assert_eq(violations[5], "broken: two rows claim this id")
+    assert_eq(violations[6], "broken: `` is retired twice, so the two rows can disagree")
+    rename := syntax_retirement("entry-file") ?? panic("rename absent")
+    rename.code = Val("E1206")
+    renamed :: syntax_retirement_law_violations_of([SyntaxRetirement]{rename})
+    assert_eq(renamed.len(), 1)
+    assert_eq(renamed[0], "entry-file: a rename rewrites and refuses nothing, so it must name no code (`E1206`)")
+}
+
+#Test("law guard checks ASCII codes but only the Rust date shape") {
+    row := syntax_retirement("allow-impure") ?? panic("semantic row absent")
+    invalid :: [String]{"", "E123", "E12345", "e1234", "W1234", "E12x4", "E１２３４"}
+    loop code in invalid {
+        row.code = Val(code)
+        errors :: syntax_retirement_law_violations_of([SyntaxRetirement]{row})
+        assert_eq(errors.len(), 1)
+        assert_eq(errors[0], "allow-impure: `{code}` is not a registered code")
+    }
+    row.code = Val("E9999")
+    row.since = "--abcdefgh"
+    assert_eq(syntax_retirement_law_violations_of([SyntaxRetirement]{row}).len(), 0)
+    row.since = "2026/08/07"
+    assert_eq(syntax_retirement_law_violations_of([SyntaxRetirement]{row}).len(), 1)
+    row.since = "--éabcdefg"
+    assert_eq(syntax_retirement_law_violations_of([SyntaxRetirement]{row}).len(), 1)
+}
+
+#Test("core retirement projection derives every answer from the syntax table") {
+    projected :: core_module_retirements()
+    expected_count := 0
+    loop row in SYNTAX_RETIREMENTS {
+        if row.kind != SyntaxRetirementKind.Semantic || row.code != Val("E1001") -> next
+        assert_eq(projected[expected_count].retired, row.retired)
+        assert_eq(projected[expected_count].canonical, row.canonical)
+        assert_eq(projected[expected_count].decision, row.decision)
+        found :: core_module_retirement("{row.retired}.member") ?? panic("Core projection lookup failed")
+        assert_eq(found.retired, row.retired)
+        assert_eq(found.canonical, row.canonical)
+        expected_count += 1
+    }
+    assert_eq(projected.len(), expected_count)
+    assert(core_module_retirement("core.net.mime") == None)
+}
+
+// Rust `retired_ffi_effect!` rows (retirements.rs:89-107), in registry order.
+#Test("flat FFI retirements preserve the Rust rows without additions") {
+    names :: [String]{"Go", "Java", "DotNet", "Fortran", "Cobol", "Tcl", "Lua", "Ada", "Pascal", "Dart", "PowerShell", "Perl", "Ruby", "Php", "R", "Com", "Cpp", "Py", "Octave"}
+    loop (index, name) in names {
+        row :: SYNTAX_RETIREMENTS[index]
+        canonical :: "FFI.{name}"
+        assert_eq(row.retired, name)
+        assert_eq(row.canonical, canonical)
+        assert(row.kind == SyntaxRetirementKind.Semantic)
+        assert(row.code == (Val("E0119")))
+    }
+    assert_eq(SYNTAX_RETIREMENTS[names.len()].id, "entry-file")
+    assert(syntax_retirement("effect-flat-ffi-dart") != None)
+}

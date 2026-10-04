@@ -1,0 +1,360 @@
+// Speculative source overlays (Source/CmdTry.rs, D-DEVR-TRY1=A).
+// The default path never creates a transaction directory or writes source.
+use core.files as try_paths
+
+// Rust TryPlan / Action / EditPlan.
+pub struct JetCLITryPlan {
+    pub name: String
+    pub entry: String
+    pub action: JetCLITryAction
+}
+pub enum JetCLITryAction {
+    Rename(from: String, to: String)
+    Edits(edits: [JetCLITryEditPlan])
+}
+pub struct JetCLITryEditPlan { pub path: String, pub edit: TextEdit }
+// Rust Transaction::Change, shared by speculative keep and fix publication.
+pub struct JetCLIChange { pub path: String, pub before: [U8], pub after: [U8] }
+pub struct JetCLITryVerdict {
+    pub diagnostics: [Diagnostic]
+    pub claims_rechecked: U64
+    pub claims_reused: U64
+}
+#Error
+pub enum JetCLITryError {
+    Message(message: String)
+    // SemIndex::open failures are rendered as source diagnostics, not E2105.
+    Load(entry: String, source: String, diagnostics: [Diagnostic])
+}
+
+// One invocation-scoped host owns ONE resident JetDriverCompilerQueries and
+// its sealed JetDriverQuerySnapshot. check_disk/check_text/set_document/stats
+// delegate to that service; no second checker and no invented reuse counters.
+// Both checks return source diagnostics in Ok, including a broken baseline;
+// Err is reserved for a host/service fault, never a failed source verdict.
+// open_index consumes the canonical checked SemIndex producer (Tools S4).
+// apply_edits is the compiler's shared FixEngine (byte offsets, stable start/end
+// sort, overlap rejection, clamped coordinates, reverse splice). identifier_valid
+// uses Rust Unicode Alphabetic/Alphanumeric, not Core.text's approximate ranges.
+// Renderers consume the shared Diagnostic/ReportEnvelope models.
+pub trait JetCLITryHost {
+    fn cwd(&self) -> String JetCLITryError!
+    fn canonicalize(&self, path: String) -> String JetCLITryError!
+    fn read_bytes(&self, path: String) -> [U8] JetCLITryError!
+    fn identifier_valid(&self, name: String) -> Bool Never!
+    fn open_index(&self, entry: String) -> SemIndex JetCLITryError!
+    fn apply_edits(&self, source: String, edits: [TextEdit]) -> String JetCLITryError!
+    fn check_disk(&self, entry: String) -> [Diagnostic] JetCLITryError!
+    fn stats(&self) -> JetDriverCompilerQueryStats Never!
+    fn set_document(&self, path: String, source: String) JetCLITryError!
+    fn check_text(&self, entry: String, source: String) -> [Diagnostic] JetCLITryError!
+    fn render_diagnostics(&self, entry: String, source: String, diagnostics: [Diagnostic]) -> String Never!
+    fn diagnostic_reports(&self, entry: String, source: String, diagnostics: [Diagnostic]) -> [ReportEnvelope] Never!
+    // ONE publication boundary, Rust commit_fix_with_semantic_ops ->
+    // commit_fix_internal(infer_fix_rename=false). The host canonicalizes the
+    // destination, resolves fix_project_for, holds the exclusive codemod lock,
+    // recovers BEFORE planning publication, selects the first free Fix-<stem>
+    // log name, renders schema-2 fix provenance with the supplied canonical
+    // operations (or exact changed-region rewrite when none were supplied),
+    // then calls the SAME pinned, recoverable commit_fix transaction. Preserve
+    // before/after hashes and bytes, semantic targets and file fingerprints.
+    // No inferred rename, textual identity guesses, fs.write/write_atomic
+    // substitute, unpinned path CAS, or success before durable log publication.
+    // Native held-directory/file-ID/no-follow/lock/fsync substrate is C-FS.
+    // Return the published replay log path; an unavailable substrate must Err.
+    fn commit_fix_with_semantic_ops(&self, change: JetCLIChange, operations: [SemanticOp]) -> String JetCLITryError!
+}
+
+fn jet_cli_try_error(message: String) -> JetCLITryError Never! { JetCLITryError.Message{message: message} }
+fn jet_cli_try_error_message(error: JetCLITryError) -> String Never! {
+    if error == { .Message(message) -> message else -> "semantic index load failed" }
+}
+
+// Rust absolutize / resolve_against / canonicalish / same_path.
+fn jet_cli_try_absolutize<H: JetCLITryHost>(raw: String, host: &H) -> String JetCLITryError! {
+    if try_paths.is_abs(raw) -> return Ok(raw)
+    cwd :: &host.cwd() ?? return Err(jet_cli_try_error("could not resolve current directory: {jet_cli_try_error_message(err)}"))
+    Ok(try_paths.join(cwd, raw))
+}
+fn jet_cli_try_resolve(parent: String, raw: String) -> String Never! {
+    if try_paths.is_abs(raw) -> raw else -> try_paths.join(parent, raw)
+}
+fn jet_cli_try_canonicalish<H: JetCLITryHost>(path: String, host: &H) -> String Never! {
+    &host.canonicalize(path) ?? path
+}
+// PathBuf equality is component-wise, like the staging groups below.
+fn jet_cli_try_same_path<H: JetCLITryHost>(left: String, right: String, host: &H) -> Bool Never! {
+    jet_cli_record_compare_paths(jet_cli_try_canonicalish(left, &host), jet_cli_try_canonicalish(right, &host)) == Ordering.Equal
+}
+
+// Rust take_value / contains_key / object_keys. Core objects retain insertion
+// order; only unknown-field diagnostics sort the remaining names.
+fn jet_cli_try_take(object: &[String:DataTree], key: String) -> DataTree? Never! {
+    if !object.has_key(key) -> return None
+    Val(&object.remove(key) ?? panic("try plan field disappeared"))
+}
+fn jet_cli_try_unknown(object: [String:DataTree], context: String) JetCLITryError! {
+    if object.len() == 0 -> return
+    keys := [String]{}
+    loop field in object -> &keys.push(field.key)
+    &keys.sort()
+    return Err(jet_cli_try_error("unknown field(s) in {context}: {keys.join(", ")}"))
+}
+// Rust take_string / take_string_opt / take_string_default.
+fn jet_cli_try_string(object: &[String:DataTree], key: String) -> String JetCLITryError! {
+    if jet_cli_try_take(&object, key) == {
+        .Val(.Text(value)) -> return Ok(value)
+        None -> return Err(jet_cli_try_error("try plan is missing `{key}`"))
+        else -> return Err(jet_cli_try_error("`{key}` must be text"))
+    }
+}
+fn jet_cli_try_string_opt(object: &[String:DataTree], key: String) -> String? JetCLITryError! {
+    if jet_cli_try_take(&object, key) == {
+        .Val(.Text(value)) -> return Ok(Val(value))
+        None -> return Ok(None)
+        else -> return Err(jet_cli_try_error("`{key}` must be text"))
+    }
+}
+// Rust take_number. Offsets are source BYTES, never String character indices.
+fn jet_cli_try_number(object: &[String:DataTree], key: String) -> Int JetCLITryError! {
+    if jet_cli_try_take(&object, key) == {
+        .Val(.Int(value)) -> {
+            if value >= 0 -> return Ok(value)
+            return Err(jet_cli_try_error("`{key}` must be a non-negative integer"))
+        }
+        None -> return Err(jet_cli_try_error("try edit is missing `{key}`"))
+        else -> return Err(jet_cli_try_error("`{key}` must be a non-negative integer"))
+    }
+}
+// Rust validate_ident: Unicode classification is a canonical substrate leaf.
+fn jet_cli_try_ident<H: JetCLITryHost>(name: String, host: &H) JetCLITryError! {
+    if !&host.identifier_valid(name) -> return Err(jet_cli_try_error("`{name}` is not a Jet identifier"))
+}
+
+// Rust read_plan's decoding policy, separated from its filesystem read.
+// Main D-JSON=C tandem: Foundation delegates to established Core EncodingJson.
+pub fn jet_cli_try_parse_plan<H: JetCLITryHost>(text: String, path: String, host: &H) -> JetCLITryPlan JetCLITryError! {
+    value :: foundation_json_parse(text) ?? return Err(jet_cli_try_error("invalid try plan JSON: {err.message}"))
+    object := if value == {
+        .Object(fields) -> fields
+        else -> { return Err(jet_cli_try_error("try plan must be a JSON object")) }
+    }
+    version :: jet_cli_try_take(&object, "version")
+    if version == .Val(item) {
+        valid :: if item == { .Int(number) -> number == 1 else -> false }
+        if !valid -> return Err(jet_cli_try_error("unsupported try plan version; expected version 1"))
+    }
+    name_option :: jet_cli_try_string_opt(&object, "name")
+    name :: name_option ?? "Try"
+    parent :: try_paths.dirname(path)
+    entry :: jet_cli_try_resolve(parent, jet_cli_try_string(&object, "entry"))
+    operation :: jet_cli_try_string_opt(&object, "operation")
+    action :: if operation == {
+        .Val(word) -> {
+            if word == {
+                "rename" -> {
+                    from :: jet_cli_try_string(&object, "from")
+                    to :: jet_cli_try_string(&object, "to")
+                    jet_cli_try_ident(from, &host)
+                    jet_cli_try_ident(to, &host)
+                    JetCLITryAction.Rename{from: from, to: to}
+                }
+                "text_edit" -> JetCLITryAction.Edits{edits: jet_cli_try_take_edits(&object, parent)}
+                else -> { return Err(jet_cli_try_error("try plan operation `{word}` is not supported")) }
+            }
+        }
+        None -> {
+            if !object.has_key("edits") -> return Err(jet_cli_try_error("try plan needs `operation: \"rename\"` or `edits`"))
+            JetCLITryAction.Edits{edits: jet_cli_try_take_edits(&object, parent)}
+        }
+    }
+    jet_cli_try_unknown(object, "try plan")
+    Ok(JetCLITryPlan{name: name, entry: entry, action: action})
+}
+// Rust take_edits.
+fn jet_cli_try_take_edits(object: &[String:DataTree], parent: String) -> [JetCLITryEditPlan] JetCLITryError! {
+    values :: if jet_cli_try_take(&object, "edits") == {
+        .Val(.Array(items)) -> items
+        None -> { return Err(jet_cli_try_error("try plan is missing `edits`")) }
+        else -> { return Err(jet_cli_try_error("`edits` must be an array")) }
+    }
+    if values.len() == 0 -> return Err(jet_cli_try_error("try plan needs at least one edit"))
+    edits := [JetCLITryEditPlan]{}
+    loop value in values {
+        fields := if value == {
+            .Object(items) -> items
+            else -> { return Err(jet_cli_try_error("each try edit must be an object")) }
+        }
+        path :: jet_cli_try_resolve(parent, jet_cli_try_string(&fields, "path"))
+        start :: jet_cli_try_number(&fields, "start")
+        end :: jet_cli_try_number(&fields, "end")
+        if end < start -> return Err(jet_cli_try_error("try edit `end` must not be before `start`"))
+        new_text :: jet_cli_try_string(&fields, "new_text")
+        jet_cli_try_unknown(fields, "try edit")
+        &edits.push(JetCLITryEditPlan{path: path, edit: TextEdit{span: Span{start: start, end: end}, new_text: new_text}})
+    }
+    Ok(edits)
+}
+
+// Rust BTreeMap<PathBuf, Vec<TextEdit>> group: one group per Unix Path
+// component sequence, keeping the first-inserted spelling as its key.
+// #4378 Core publication remains gated: RecordTypes owns ONE CLI-internal
+// borrowed Rust path component/order/equality law, including roots and dots.
+struct JetCLITryEditGroup { path: String, edits: [TextEdit] }
+fn jet_cli_try_group_edit(groups: &[JetCLITryEditGroup], group_of: &[String:Int], path: ^String, edit: ^TextEdit) Never! {
+    key :: jet_cli_record_path_key(path)
+    if group_of.get(key) == .Val(index) {
+        &groups[index].edits.push(^edit)
+        return
+    }
+    group_of[key] = groups.len()
+    &groups.push(JetCLITryEditGroup{path: ^path, edits: [TextEdit]{^edit}})
+}
+
+// Rust stage / stage_rename / stage_edits. Groups follow PathBuf equality and
+// order in both publication and receipt hashing; source spans stay bytes.
+pub fn jet_cli_try_stage<H: JetCLITryHost>(plan: JetCLITryPlan, host: &H) -> [JetCLIChange] JetCLITryError! {
+    groups := [JetCLITryEditGroup]{}
+    group_of := [String:Int]{}
+    if plan.action == {
+        .Rename(from, to) -> {
+            index :: &host.open_index(plan.entry) ?? return Err(err)
+            loop definition in index.definitions() {
+                if definition.name == from -> jet_cli_try_group_edit(&groups, &group_of, jet_cli_try_canonicalish(definition.module_path, &host), TextEdit{span: Span{start: definition.def_span.start, end: definition.def_span.end}, new_text: ~to})
+            }
+            loop reference in index.references() {
+                if reference.name == from -> jet_cli_try_group_edit(&groups, &group_of, jet_cli_try_canonicalish(reference.module_path, &host), TextEdit{span: Span{start: reference.span.start, end: reference.span.end}, new_text: ~to})
+            }
+            if groups.len() == 0 -> return Err(jet_cli_try_error("try plan found no `{from}` symbols"))
+        }
+        .Edits(edits) -> {
+            loop item in edits -> jet_cli_try_group_edit(&groups, &group_of, jet_cli_try_canonicalish(item.path, &host), ~item.edit)
+        }
+    }
+    &groups.sort_by((a: JetCLITryEditGroup, b: JetCLITryEditGroup) -> jet_cli_record_compare_paths(a.path, b.path))
+    changes := [JetCLIChange]{}
+    loop group in groups {
+        path :: group.path
+        before :: &host.read_bytes(path) ?? return Err(jet_cli_try_error("could not read `{path}`: {jet_cli_try_error_message(err)}"))
+        source :: String.from_bytes(before) ?? return Err(jet_cli_try_error("try target `{path}` is not UTF-8"))
+        after_source :: &host.apply_edits(source, group.edits) ?? return Err(jet_cli_try_error("try edits overlap or fall outside `{path}`"))
+        after :: after_source.bytes()
+        if before == after -> return Err(jet_cli_try_error("try edit leaves `{path}` unchanged"))
+        &changes.push(JetCLIChange{path: ~path, before: before, after: after})
+    }
+    Ok(changes)
+}
+
+// Rust semantic_ops_for_action. The checked definition facts, never a textual
+// spelling/body hash guess, own stable ID, ancestry, kind and human identity.
+pub fn jet_cli_try_semantic_ops<H: JetCLITryHost>(plan: JetCLITryPlan, host: &H) -> [SemanticOp] JetCLITryError! {
+    if plan.action == {
+        .Rename(from, to) -> {
+            index :: &host.open_index(plan.entry) ?? return Err(jet_cli_try_error("try rename could not rebuild its semantic index"))
+            targets := [SemanticOpTarget]{}
+            loop fact in index.definition_facts() {
+                if fact.name == from -> &targets.push(SemanticOpTarget{stable_id: fact.stable_id, before: fact.human_identity, after: "{fact.module_path}::{to}", kind: fact.kind, module_path: fact.module_path})
+            }
+            return Ok([SemanticOp]{SemanticOp{kind: "rename", rule_id: Val(plan.name), from: Val(from), to: Val(to), node: None, match_template: None, replace_template: None, targets: targets, files: [SemanticOpFile]{}}})
+        }
+        .Edits(_) -> return Ok([SemanticOp]{})
+    }
+}
+
+// Rust verdict: baseline check is intentionally not an acceptance gate; its
+// diagnostics can be repaired by the overlay. Both checks share one service.
+pub fn jet_cli_try_verdict<H: JetCLITryHost>(entry: String, changes: [JetCLIChange], entry_source: String, host: &H) -> JetCLITryVerdict JetCLITryError! {
+    baseline_diagnostics :: &host.check_disk(entry)
+    before :: &host.stats()
+    loop change in changes {
+        source :: String.from_bytes(change.after) ?? return Err(jet_cli_try_error("try overlay contains non-UTF-8 source"))
+        &host.set_document(change.path, source)
+    }
+    diagnostics :: &host.check_text(entry, entry_source)
+    after :: &host.stats()
+    rechecked :: if after.item_recomputes >= before.item_recomputes -> after.item_recomputes - before.item_recomputes else -> 0
+    reused :: if after.item_hits >= before.item_hits -> after.item_hits - before.item_hits else -> 0
+    checked_count :: U64.from_int(rechecked) ?? panic("compiler query recompute counter exceeds u64")
+    reused_count :: U64.from_int(reused) ?? panic("compiler query hit counter exceeds u64")
+    Ok(JetCLITryVerdict{diagnostics: diagnostics, claims_rechecked: checked_count, claims_reused: reused_count})
+}
+// Rust verify_current_bytes. ALL files are checked before the first commit.
+pub fn jet_cli_try_verify_current<H: JetCLITryHost>(changes: [JetCLIChange], host: &H) JetCLITryError! {
+    loop change in changes {
+        current :: &host.read_bytes(change.path) ?? return Err(jet_cli_try_error("could not re-read `{change.path}`: {jet_cli_try_error_message(err)}"))
+        if current != change.before -> return Err(jet_cli_try_error("try target `{change.path}` changed while it was being checked; no files written"))
+    }
+}
+// Rust receipt_id: UTF-8 name, two little-endian u64 counters, sorted path,
+// before/after bytes, SHA-256, first twelve hex digits. No framing was in Rust.
+pub fn jet_cli_try_receipt_id(name: String, changes: [JetCLIChange], verdict: JetCLITryVerdict) -> String Never! {
+    bytes := name.bytes()
+    counters :: [U64]{verdict.claims_rechecked, verdict.claims_reused}
+    loop count in counters {
+        // D-SHAPE-CONVERT1: U64 -> U8 is checked narrowing. Masking proves
+        // this destination-owned conversion succeeds; typed heads only widen.
+        loop shift in 0..<8 -> &bytes.push(U8.from_u64(count >> (shift * 8) & U64{255}) ?? panic("masked receipt byte exceeds U8"))
+    }
+    loop change in changes {
+        loop byte in change.path.bytes() -> &bytes.push(byte)
+        loop byte in change.before -> &bytes.push(byte)
+        loop byte in change.after -> &bytes.push(byte)
+    }
+    digest :: mir_sha256_hex_bytes(mir_sha256_bytes(bytes))
+    "try-{digest.slice(0..<12)}"
+}
+// Rust emit_success / emit_failure. Return captured bytes; Front owns process
+// exit, stream routing and diagnostic E2105 presentation for fallible policy.
+fn jet_cli_try_success(plan: JetCLITryPlan, verdict: JetCLITryVerdict, receipt: ^String, keep: Bool, json: Bool) -> JetDriverVerbOutput Never! {
+    if json {
+        fields :: StatusFields.new().with("name", DataTree.Text(~plan.name)).with("kept", DataTree.Bool(keep)).with("claims_rechecked", DataTree.Int(Int.from_u64(verdict.claims_rechecked))).with("claims_reused", DataTree.Int(Int.from_u64(verdict.claims_reused))).with("receipt_id", DataTree.Text(~receipt))
+        return JetDriverVerbOutput{stdout: StatusEnvelope.new("try", true).with_fields(fields).json_line(), stderr: "", exit_code: 0}
+    }
+    ending :: if keep -> "  kept: working tree now contains the staged bytes\n" else -> "  rolled back (default): working tree is byte-identical\n"
+    JetDriverVerbOutput{stdout: "try `{plan.name}`: verdict clean\n  claims re-checked: {verdict.claims_rechecked} · claims reused: {verdict.claims_reused}\n  receipt: {receipt}\n{ending}", stderr: "", exit_code: 0}
+}
+fn jet_cli_try_failure<H: JetCLITryHost>(plan: JetCLITryPlan, source: String, verdict: JetCLITryVerdict, receipt: ^String, json: Bool, host: &H) -> JetDriverVerbOutput Never! {
+    if json {
+        fields :: StatusFields.new().with("name", DataTree.Text(~plan.name)).with("kept", DataTree.Bool(false)).with("verdict", DataTree.Text("failed")).with("receipt_id", DataTree.Text(~receipt))
+        reports :: &host.diagnostic_reports(plan.entry, source, verdict.diagnostics)
+        return JetDriverVerbOutput{stdout: StatusEnvelope.new("try", false).with_reports(reports).with_fields(fields).json_line(), stderr: "", exit_code: 1}
+    }
+    rendered :: &host.render_diagnostics(plan.entry, source, verdict.diagnostics)
+    JetDriverVerbOutput{stdout: "", stderr: "try `{plan.name}`: verdict failed; rolled back\n{rendered}", exit_code: 1}
+}
+
+// Rust run_try. Source is never temporarily written to disk: even a failed
+// verdict leaves the working tree untouched, and --keep cannot override it.
+pub fn jet_cli_try_run<H: JetCLITryHost>(raw: String, keep: Bool, json: Bool, host: &H) -> JetDriverVerbOutput JetCLITryError! {
+    path :: jet_cli_try_absolutize(raw, &host)
+    raw_plan :: &host.read_bytes(path) ?? return Err(jet_cli_try_error("could not read try plan `{path}`: {jet_cli_try_error_message(err)}"))
+    text :: String.from_bytes(raw_plan) ?? return Err(jet_cli_try_error("could not read try plan `{path}`: stream did not contain valid UTF-8"))
+    plan :: jet_cli_try_parse_plan(text, path, &host)
+    staged :: jet_cli_try_stage(plan, &host)
+    if staged.len() == 0 -> return Err(jet_cli_try_error("try plan produced no edit"))
+    entry_source := String?{None}
+    loop change in staged {
+        if jet_cli_try_same_path(change.path, plan.entry, &host) {
+            entry_source = Val(String.from_bytes(change.after) ?? return Err(jet_cli_try_error("try overlay contains non-UTF-8 source")))
+            break
+        }
+    }
+    if entry_source == None {
+        bytes :: &host.read_bytes(plan.entry) ?? return Err(jet_cli_try_error("could not read try entry `{plan.entry}`: {jet_cli_try_error_message(err)}"))
+        entry_source = Val(String.from_bytes(bytes) ?? return Err(jet_cli_try_error("could not read try entry `{plan.entry}`: stream did not contain valid UTF-8")))
+    }
+    source :: entry_source ?? panic("try entry source was not assembled")
+    verdict :: jet_cli_try_verdict(plan.entry, staged, source, &host)
+    receipt :: jet_cli_try_receipt_id(plan.name, staged, verdict)
+    loop diagnostic in verdict.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> return Ok(jet_cli_try_failure(plan, source, verdict, ^receipt, json, &host))
+    }
+    if keep {
+        jet_cli_try_verify_current(staged, &host)
+        operations :: jet_cli_try_semantic_ops(plan, &host)
+        loop change in staged {
+            log_path :: &host.commit_fix_with_semantic_ops(change, operations)
+        }
+    }
+    Ok(jet_cli_try_success(plan, verdict, ^receipt, keep, json))
+}

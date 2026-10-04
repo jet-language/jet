@@ -1,0 +1,144 @@
+// Rust receipt_context_ignores_nix_shell_temp_paths_and_systemd_invocation (ReceiptStore.rs:4285).
+#Test("receipt context ignores transient shell and systemd environment") {
+    first :: [JetCLIReceiptEnvironmentEntry]{
+        JetCLIReceiptEnvironmentEntry{name: "INVOCATION_ID", value: "first"},
+        JetCLIReceiptEnvironmentEntry{name: "NIX_BUILD_TOP", value: "/tmp/nix.first"},
+        JetCLIReceiptEnvironmentEntry{name: "TEMP", value: "/tmp/first"},
+        JetCLIReceiptEnvironmentEntry{name: "TEMPDIR", value: "/tmp/first"},
+        JetCLIReceiptEnvironmentEntry{name: "TMP", value: "/tmp/first"},
+        JetCLIReceiptEnvironmentEntry{name: "TMPDIR", value: "/tmp/first"},
+        JetCLIReceiptEnvironmentEntry{name: "JET_RECEIPT_BYPASS", value: "1"},
+        JetCLIReceiptEnvironmentEntry{name: "JET_RECEIPT_TEST_STABLE", value: "same"}
+    }
+    second :: [JetCLIReceiptEnvironmentEntry]{JetCLIReceiptEnvironmentEntry{name: "JET_RECEIPT_TEST_STABLE", value: "same"}}
+    assert_eq(jet_cli_receipt_environment_identity_from(first), jet_cli_receipt_environment_identity_from(second))
+    changed :: [JetCLIReceiptEnvironmentEntry]{JetCLIReceiptEnvironmentEntry{name: "JET_RECEIPT_TEST_STABLE", value: "different"}}
+    assert(jet_cli_receipt_environment_identity_from(first) != jet_cli_receipt_environment_identity_from(changed))
+}
+#Test("receipt environment sorts by key and value and redacts secrets") {
+    first :: [JetCLIReceiptEnvironmentEntry]{JetCLIReceiptEnvironmentEntry{name: "Z", value: "public"}, JetCLIReceiptEnvironmentEntry{name: "MY_APIKEY", value: "first"}}
+    second :: [JetCLIReceiptEnvironmentEntry]{JetCLIReceiptEnvironmentEntry{name: "MY_APIKEY", value: "rotated"}, JetCLIReceiptEnvironmentEntry{name: "Z", value: "public"}}
+    assert_eq(jet_cli_receipt_environment_identity_from(first), jet_cli_receipt_environment_identity_from(second))
+    duplicates :: [JetCLIReceiptEnvironmentEntry]{JetCLIReceiptEnvironmentEntry{name: "A", value: "z"}, JetCLIReceiptEnvironmentEntry{name: "A", value: "a"}}
+    expected := [U8]{}
+    jet_cli_receipt_frame(&expected, "A".bytes())
+    jet_cli_receipt_frame(&expected, "a".bytes())
+    jet_cli_receipt_frame(&expected, "A".bytes())
+    jet_cli_receipt_frame(&expected, "z".bytes())
+    assert_eq(jet_cli_receipt_environment_identity_from(duplicates), expected)
+}
+// Rust secret_names_cover_camel_case_dotted_env_and_receipt_identity (ReceiptStore.rs:4316).
+#Test("receipt argv and context identity survive secret rotation") {
+    first :: [String]{"check", "--apiToken=camel-secret", "--auth.token", "dotted-secret", "--persistenceToken", "persistence-secret", "--digest.key=digest-secret", "--replayToken", "replay-secret", "public"}
+    second :: loop argument in first -> argument.replace("secret", "rotated")
+    assert_eq(jet_cli_receipt_argv_identity(first), jet_cli_receipt_argv_identity(second))
+    assert_eq(jet_cli_receipt_context_frames("check", "/project".bytes(), first, [JetCLIReceiptEnvironmentEntry]{}, "tools".bytes(), "000".bytes()) ?? panic("context"), jet_cli_receipt_context_frames("check", "/project".bytes(), second, [JetCLIReceiptEnvironmentEntry]{}, "tools".bytes(), "000".bytes()) ?? panic("context"))
+}
+#Test("receipt argv uses first equals and UTF-8 byte boundaries") {
+    argv :: [String]{"check", "--é.apiToken=a=b", "--public=a=b", "--token", "--secret=not-an-option"}
+    expected := [U8]{}
+    jet_cli_receipt_frame(&expected, "check".bytes())
+    jet_cli_receipt_frame(&expected, "--é.apiToken=<redacted>".bytes())
+    jet_cli_receipt_frame(&expected, "--public=a=b".bytes())
+    jet_cli_receipt_frame(&expected, "--token".bytes())
+    jet_cli_receipt_frame(&expected, "<redacted>".bytes())
+    assert_eq(jet_cli_receipt_argv_identity(argv), expected)
+}
+#Test("receipt context refuses empty verbs and frames terminals") {
+    if jet_cli_receipt_context_frames("", [U8]{}, [String]{}, [JetCLIReceiptEnvironmentEntry]{}, [U8]{}, [U8]{}) == {
+        .Ok(_) -> panic("empty verb accepted")
+        .Err(error) -> assert_eq(error.message, "receipt verb is empty")
+    }
+    assert_eq(jet_cli_receipt_terminal_identity(true, false, true), "101".bytes())
+    assert_eq(jet_cli_receipt_terminal_identity(false, true, false), "010".bytes())
+}
+#Test("receipt target scanning skips option values and stops at double dash") {
+    argv :: [String]{"budget", "check", "--profile", "release", "--filter", "case", "--seed", "9", "source", "ignored"}
+    assert_eq(jet_cli_receipt_target_argument("budget check", argv), Val("source"))
+    assert(!jet_cli_receipt_has_explicit_target("test", [String]{"test", "--", "source"}))
+    assert(!jet_cli_receipt_has_explicit_target("check", [String]{"check", "--output", "source"}))
+    assert_eq(jet_cli_receipt_target_argument("check", [String]{"check", "--unknown", "source"}), Val("source"))
+    assert_eq(jet_cli_receipt_target_argument("test", [String]{"test", "--profile=release", "é.jet"}), Val("é.jet"))
+}
+#Test("receipt identity strips cwd by components without collapsing parent traversal") {
+    cwd :: receipt_paths.path("/project")
+    assert_eq(jet_cli_receipt_identity_path(receipt_paths.path("/project/a/./b"), cwd), "a/./b")
+    assert_eq(jet_cli_receipt_identity_path(receipt_paths.path("/project/a/./b///."), cwd), "a/./b")
+    assert_eq(jet_cli_receipt_identity_path(receipt_paths.path("/project/./"), cwd), "")
+    assert_eq(jet_cli_receipt_identity_path(receipt_paths.path("/project-two/a"), cwd), "/project-two/a")
+    assert_eq(jet_cli_receipt_identity_path(receipt_paths.path("/project/../a"), cwd), "../a")
+    assert_eq(jet_cli_receipt_identity_path(receipt_paths.path("a\\b"), cwd), "a/b")
+    assert_eq(jet_cli_receipt_identity_path(cwd, cwd), "")
+}
+#Test("receipt identity generated exclusion uses literal slash adjacency") {
+    assert(jet_cli_receipt_is_generated_identity_path("x/.jet/generated/a"))
+    assert(!jet_cli_receipt_is_generated_identity_path("x/.jet//generated/a"))
+    assert(!jet_cli_receipt_is_generated_identity_path("x/.jet/./generated/a"))
+    assert(!jet_cli_receipt_is_generated_identity_path(".jet/records/generated/a"))
+}
+#Test("receipt target members deduplicate conflict and exclude generated inputs") {
+    members := [JetCLIReceiptIdentityMember]{}
+    cwd :: receipt_paths.path("/project")
+    jet_cli_receipt_identity_insert(&members, "/project/a.jet", "digest", cwd) ?? panic("insert")
+    jet_cli_receipt_identity_insert(&members, "a.jet", "digest", cwd) ?? panic("duplicate")
+    jet_cli_receipt_identity_insert(&members, ".jet/generated/failure.jet", "ignored", cwd) ?? panic("generated")
+    assert_eq(members.len(), 1)
+    if jet_cli_receipt_identity_insert(&members, "a.jet", "different", cwd) == {
+        .Ok(_) -> panic("conflict accepted")
+        .Err(error) -> assert_eq(error.message, "canonical target identity has conflicting digests for `a.jet`")
+    }
+}
+#Test("receipt target identity byte-sorts exact JSON escape and sha256") {
+    members := [JetCLIReceiptIdentityMember]{JetCLIReceiptIdentityMember{path: "z.jet", digest: "z"}, JetCLIReceiptIdentityMember{path: "a\".jet", digest: "a"}}
+    identity :: jet_cli_receipt_finish_target_identity(&members, receipt_paths.path("/project"))
+    expected :: "{{\"path\":\"a\\\".jet\",\"sha256\":\"a\"}}\n{{\"path\":\"z.jet\",\"sha256\":\"z\"}}\n"
+    assert_eq(identity.input_sha256, mir_sha256_hex(expected))
+    assert_eq(identity.members[0].path, "a\".jet")
+    assert_eq(identity.authority_root.raw, "/project")
+}
+#Test("receipt generated replay matches complete digest followed by hyphen") {
+    assert(jet_cli_receipt_generated_failure_matches_target(receipt_paths.path("/project/.jet/records/./generated/abc-case.jet"), "abc"))
+    assert(!jet_cli_receipt_generated_failure_matches_target(receipt_paths.path("/project/.jet/records/generated/abcd-case.jet"), "abc"))
+    assert(!jet_cli_receipt_generated_failure_matches_target(receipt_paths.path("/project/.jet/generated/abc-case.jet"), "abc"))
+    assert(!jet_cli_receipt_generated_failure_matches_target(receipt_paths.path(".jet/records/generated/abc"), "abc"))
+}
+// #4381: original complete Path equality/currentness behavior retained; no raw-string workaround.
+#Test("receipt changed inputs includes removed added and changed paths") {
+    old :: [JetCLIReceiptInput]{JetCLIReceiptInput{path: receipt_paths.path("b.jet"), digest: "b"}, JetCLIReceiptInput{path: receipt_paths.path("a.jet"), digest: "a"}}
+    fresh :: [JetCLIReceiptInput]{JetCLIReceiptInput{path: receipt_paths.path("a.jet"), digest: "changed"}, JetCLIReceiptInput{path: receipt_paths.path("c.jet"), digest: "c"}}
+    changed :: jet_cli_receipt_changed_inputs(old, fresh)
+    assert_eq(changed.len(), 3)
+    assert_eq(changed[0].raw, "a.jet")
+    assert_eq(changed[1].raw, "b.jet")
+    assert_eq(changed[2].raw, "c.jet")
+}
+#Test("receipt notices use canonical output flags only for check") {
+    assert(!jet_cli_receipt_notices_visible("check", [String]{"check"}))
+    assert(jet_cli_receipt_notices_visible("check", [String]{"check", "--verbose"}))
+    assert(!jet_cli_receipt_notices_visible("check", [String]{"check", "--verbose", "--color=bogus"}))
+    assert(!jet_cli_receipt_notices_visible("check", [String]{"check", "--", "--verbose"}))
+    assert(jet_cli_receipt_notices_visible("test", [String]{"test", "--color=bogus"}))
+}
+#Test("receipt normalized generated inputs differ from literal identity exclusion") {
+    assert(jet_cli_receipt_generated_input(receipt_paths.path("x/.jet//./generated/file.bin")))
+    assert(!jet_cli_receipt_is_generated_identity_path("x/.jet//./generated/file.bin"))
+    assert(jet_cli_receipt_under_jet(receipt_paths.path("x/.jet/records/generated/a")))
+    assert(!jet_cli_receipt_under_jet(receipt_paths.path("x/not.jet/a")))
+}
+#Test("receipt shared path ordering and dedup preserve Rust components") {
+    paths := [receipt_paths.Path]{receipt_paths.path("z.jet"), receipt_paths.path("a/./b"), receipt_paths.path("a//b"), receipt_paths.path("../x"), receipt_paths.path("/x")}
+    jet_cli_receipt_sort_paths(&paths)
+    assert_eq(paths.len(), 4)
+    assert_eq(paths[0].raw, "/x")
+    assert_eq(paths[1].raw, "../x")
+    assert_eq(jet_cli_receipt_file_name(receipt_paths.path("x/é.jet///")), "é.jet")
+    assert_eq(jet_cli_receipt_file_name(receipt_paths.path("x/..")), "")
+    assert_eq(jet_cli_receipt_file_name(receipt_paths.path("/")), "")
+}
+// Rust compiler_tool_identity_never_reads_the_running_binary (ReceiptStore.rs:3867).
+// Canonical foundation_sha256_file_hex's native opened-handle closure is gated
+// #3593/#3598; retain the original jet-only branch assertion, never replace its
+// dependency with a private hash/provider to make this test compile.
+#Test("receipt compiler tool identity never reads the running binary") {
+    assert_eq(jet_cli_receipt_tool_digest("jet", receipt_paths.path("/definitely/missing/jet"), "embedded-compiler-build-id"), "embedded-compiler-build-id")
+}

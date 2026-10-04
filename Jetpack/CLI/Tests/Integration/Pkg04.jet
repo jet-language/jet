@@ -1,0 +1,1846 @@
+// PORT-PENDING 1132 tests-pkg-slice-5433: tests/pkg.rs:5433-7274
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn cli_run_reports_ambiguous_retired_entry_layout() {
+//RS     assert!(
+//RS         jet_bin().is_file(),
+//RS         "the Cargo-provided jet binary must exist"
+//RS     );
+//RS 
+//RS     let tmp = tmp_dir("cli_run_entry_ambiguous");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS     write(&tmp, "package.jet", &min_manifest("ambiguous", "0.1.0"));
+//RS     write(&tmp, "run.jet", "fn run() { print(\"current\") }\n");
+//RS     write(&tmp, "main.jet", "fn run() { print(\"retired\") }\n");
+//RS 
+//RS     let out = jet_cmd(&["run"], &tmp, &store);
+//RS     assert!(!out.status.success());
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(stderr.contains("ambiguous project entry"), "{stderr}");
+//RS     assert!(
+//RS         stderr.contains("main.jet") && stderr.contains("run.jet"),
+//RS         "{stderr}"
+//RS     );
+//RS     assert_eq!(stderr.matches("`run.jet`").count(), 1, "{stderr}");
+//RS     assert!(tmp.join("main.jet").is_file());
+//RS     assert!(tmp.join("run.jet").is_file());
+//RS 
+//RS     fs::remove_dir_all(&tmp).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn cli_run_reports_named_canonical_retired_entry_layout() {
+//RS     assert!(
+//RS         jet_bin().is_file(),
+//RS         "the Cargo-provided jet binary must exist"
+//RS     );
+//RS 
+//RS     let tmp = tmp_dir("cli_run_named_entry_ambiguous");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS     write(&tmp, "package.jet", &min_manifest("ambiguous", "0.1.0"));
+//RS     write(&tmp, "ambiguous.jet", "fn run() { print(\"current\") }\n");
+//RS     write(&tmp, "main.jet", "fn run() { print(\"retired\") }\n");
+//RS 
+//RS     let out = jet_cmd(&["run"], &tmp, &store);
+//RS     assert!(!out.status.success());
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(stderr.contains("ambiguous project entry"), "{stderr}");
+//RS     assert!(
+//RS         stderr.contains("main.jet") && stderr.contains("ambiguous.jet"),
+//RS         "{stderr}"
+//RS     );
+//RS     assert!(tmp.join("main.jet").is_file());
+//RS     assert!(tmp.join("ambiguous.jet").is_file());
+//RS 
+//RS     fs::remove_dir_all(&tmp).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn cli_run_keeps_explicit_retired_entry_target() {
+//RS     assert!(
+//RS         jet_bin().is_file(),
+//RS         "the Cargo-provided jet binary must exist"
+//RS     );
+//RS 
+//RS     let tmp = tmp_dir("cli_run_explicit_retired");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS     write(&tmp, "main.jet", "fn run() { print(\"explicit\") }\n");
+//RS 
+//RS     let out = jet_cmd(&["run", "main.jet"], &tmp, &store);
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "explicit source target failed:\n{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&out.stdout), "explicit\n");
+//RS     assert!(tmp.join("main.jet").is_file());
+//RS     assert!(!tmp.join("run.jet").exists());
+//RS 
+//RS     fs::remove_dir_all(&tmp).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn unsupported_authority_reports_a_host_recovery() {
+//RS     let diagnostic = jet::Authority::AuthorityError::Unsupported(
+//RS         "descriptor-relative no-follow authority is unavailable on this platform".to_string(),
+//RS     )
+//RS     .diagnostic();
+//RS     assert_eq!(diagnostic.code, "E1334");
+//RS     assert!(diagnostic.what.contains("unavailable on this platform"));
+//RS     assert!(diagnostic.why.contains("descriptor-relative no-follow"));
+//RS     assert!(diagnostic.fix.contains("use a platform"));
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn cli_run_authority_failure_offers_specific_recovery() {
+//RS     use std::os::unix::fs::symlink;
+//RS 
+//RS     let tmp = tmp_dir("cli_run_authority_recovery");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS     write(&tmp, "package.jet", &min_manifest("authority", "0.1.0"));
+//RS     write(&tmp, "real.jet", "fn run() { print(\"real\") }\n");
+//RS     symlink("real.jet", tmp.join("run.jet")).unwrap();
+//RS 
+//RS     let out = jet_cmd(&["run"], &tmp, &store);
+//RS     assert!(!out.status.success());
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(stderr.contains("Error [E1334]:"), "{stderr}");
+//RS     assert!(
+//RS         stderr.contains("run.jet") && stderr.contains("symlink"),
+//RS         "{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("replace the symlink with the expected regular file"),
+//RS         "{stderr}"
+//RS     );
+//RS 
+//RS     fs::remove_dir_all(&tmp).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn cli_build_sbom_writes_spdx() {
+//RS     // D-SUPPLY1: `jet build --sbom` writes an SPDX file next to the binary.
+//RS     if !jet_bin().is_file() {
+//RS         eprintln!("note: skipping cli_build_sbom (run `cargo build` first)");
+//RS         return;
+//RS     }
+//RS     let tmp = tmp_dir("cli_build_sbom");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS     write(&tmp, "hello.jet", "fn run() { print(\"hi\") }\n");
+//RS 
+//RS     let out = jet_cmd(&["build", "--sbom", "hello.jet"], &tmp, &store);
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "jet build --sbom failed:\n{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("sbom:"),
+//RS         "build output must announce the SBOM path"
+//RS     );
+//RS 
+//RS     // The SBOM lands beside the produced binary as <bin>.spdx.
+//RS     let spdx = tmp.join(".jet/build/hello.spdx");
+//RS     assert!(spdx.is_file(), "expected SBOM at {}", spdx.display());
+//RS     let body = fs::read_to_string(&spdx).unwrap();
+//RS     assert!(
+//RS         body.starts_with("SPDXVersion: SPDX-2.3\n"),
+//RS         "SBOM must be SPDX 2.3"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cli_vendor_dir_flag_relocates() {
+//RS     // D-SUPPLY1: `--vendor-dir` writes the vendor tree to a chosen location.
+//RS     if !jet_bin().is_file() || !have_git() {
+//RS         eprintln!("note: skipping cli_vendor_dir (need built binary)");
+//RS         return;
+//RS     }
+//RS     let tmp = tmp_dir("cli_vendor_dir");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     write(
+//RS         &tmp,
+//RS         "greeter/package.jet",
+//RS         &min_manifest("greeter", "0.1.0"),
+//RS     );
+//RS     write(
+//RS         &tmp,
+//RS         "greeter/greeter.jet",
+//RS         "pub fn greet() -> String { return \"hi\" }\n",
+//RS     );
+//RS     write(
+//RS         &tmp,
+//RS         "package.jet",
+//RS         &manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,"),
+//RS     );
+//RS 
+//RS     let out = jet_cmd(
+//RS         &["registry", "vendor", "--vendor-dir", "third_party"],
+//RS         &tmp,
+//RS         &store,
+//RS     );
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "jet registry vendor --vendor-dir failed:\n{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert!(
+//RS         tmp.join("third_party/greeter").is_dir(),
+//RS         "dep must land in the chosen dir"
+//RS     );
+//RS     assert!(
+//RS         tmp.join("third_party/manifest.json").is_file(),
+//RS         "vendor manifest must be written"
+//RS     );
+//RS     assert!(
+//RS         !tmp.join("vendor").exists(),
+//RS         "default vendor/ must not be created"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cli_jet_new_annotated_has_dep_comments() {
+//RS     if !jet_bin().is_file() {
+//RS         eprintln!("note: skipping cli_jet_new_annotated (run `cargo build` first)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let tmp = tmp_dir("cli_annotated");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     jet_cmd(&["new", "annotated_app", "--annotated"], &tmp, &store);
+//RS 
+//RS     let manifest = fs::read_to_string(tmp.join("annotated_app/package.jet"))
+//RS         .expect("package.jet must exist after jet new --annotated");
+//RS     assert!(
+//RS         manifest.contains("// Jet package dependencies:"),
+//RS         "annotated template should have dep comments:\n{}",
+//RS         manifest
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cli_end_to_end_new_then_add_path() {
+//RS     if !jet_bin().is_file() {
+//RS         eprintln!("note: skipping cli_end_to_end (run `cargo build` first)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let tmp = tmp_dir("e2e");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     // 1. jet new myapp
+//RS     let out = jet_cmd(&["new", "myapp"], &tmp, &store);
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "jet new failed:\n{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS 
+//RS     // 2. Create a local lib for `jet add --path`.
+//RS     let lib = tmp.join("mylib");
+//RS     write(&lib, "package.jet", &min_manifest("mylib", "0.1.0"));
+//RS     write(&lib, "mylib.jet", "pub fn answer() -> Int { return 42 }\n");
+//RS 
+//RS     // 3. jet add mylib --path ../mylib (from inside the project)
+//RS     let proj = tmp.join("myapp");
+//RS     let out = jet_cmd(&["add", "mylib", "--path", "../mylib"], &proj, &store);
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "jet add --path failed:\n{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS 
+//RS     // package.jet must now reference mylib.
+//RS     let manifest = fs::read_to_string(proj.join("package.jet")).unwrap();
+//RS     assert!(
+//RS         manifest.contains("mylib"),
+//RS         "package.jet should list mylib after jet add"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cli_add_path_into_inline_empty_deps_table() {
+//RS     if !jet_bin().is_file() {
+//RS         eprintln!(
+//RS             "note: skipping cli_add_path_into_inline_empty_deps_table (run `cargo build` first)"
+//RS         );
+//RS         return;
+//RS     }
+//RS 
+//RS     let tmp = tmp_dir("cli_add_inline_deps");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS     write(
+//RS         &tmp,
+//RS         "package.jet",
+//RS         &(min_manifest("app", "0.1.0") + "\ndeps: {}\n"),
+//RS     );
+//RS     let lib = tmp.join("mylib");
+//RS     write(&lib, "package.jet", &min_manifest("mylib", "0.1.0"));
+//RS     write(&lib, "mylib.jet", "pub fn answer() -> Int { return 42 }\n");
+//RS 
+//RS     let out = jet_cmd(&["add", "mylib", "--path", "./mylib"], &tmp, &store);
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "jet add --path failed:\n{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let raw = fs::read_to_string(tmp.join("package.jet")).unwrap();
+//RS     let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw)
+//RS         .expect("jet add must leave an inline deps table parseable");
+//RS     assert!(manifest.dependencies.contains_key("mylib"));
+//RS     assert!(raw.contains("deps: {\n    mylib: ./mylib,\n}\n"));
+//RS 
+//RS     let fetch = jet_cmd(&["fetch"], &tmp, &store);
+//RS     assert!(
+//RS         fetch.status.success(),
+//RS         "fetch after add failed:\n{}",
+//RS         String::from_utf8_lossy(&fetch.stderr)
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cli_remove_absent_dependency_is_an_error() {
+//RS     if !jet_bin().is_file() {
+//RS         eprintln!(
+//RS             "note: skipping cli_remove_absent_dependency_is_an_error (run `cargo build` first)"
+//RS         );
+//RS         return;
+//RS     }
+//RS 
+//RS     let tmp = tmp_dir("cli_remove_absent");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS     let manifest_path = tmp.join("package.jet");
+//RS     let before = min_manifest("app", "0.1.0");
+//RS     write(&tmp, "package.jet", &before);
+//RS 
+//RS     let out = jet_cmd(&["remove", "json"], &tmp, &store);
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(!out.status.success(), "absent dependency removal must fail");
+//RS     assert!(
+//RS         stderr.contains("json") && stderr.contains("not present"),
+//RS         "missing absent-dep diagnostic:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         !stdout.contains("removed") && !stdout.contains("fetched"),
+//RS         "false success output:\n{stdout}"
+//RS     );
+//RS     assert_eq!(fs::read_to_string(manifest_path).unwrap(), before);
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cli_corrupt_manifest_has_one_diagnostic_across_package_commands() {
+//RS     if !jet_bin().is_file() {
+//RS         eprintln!("note: skipping cli_corrupt_manifest_has_one_diagnostic_across_package_commands (run `cargo build` first)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let tmp = tmp_dir("cli_corrupt_manifest");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS     write(
+//RS         &tmp,
+//RS         "package.jet",
+//RS         &(min_manifest("app", "0.1.0") + "\ndeps: {\n}\nunknown: ../broken,\n"),
+//RS     );
+//RS     write(&tmp, "run.jet", "fn run() { print(\"hi\") }\n");
+//RS     let lib = tmp.join("mylib");
+//RS     write(&lib, "package.jet", &min_manifest("mylib", "0.1.0"));
+//RS 
+//RS     let outputs = [
+//RS         jet_cmd(&["fetch"], &tmp, &store),
+//RS         jet_cmd(&["build", "run.jet"], &tmp, &store),
+//RS         jet_cmd(&["add", "mylib", "--path", "./mylib"], &tmp, &store),
+//RS     ];
+//RS     let lines: Vec<String> = outputs
+//RS         .iter()
+//RS         .map(|out| {
+//RS             assert!(
+//RS                 !out.status.success(),
+//RS                 "corrupt manifest command unexpectedly succeeded"
+//RS             );
+//RS             String::from_utf8_lossy(&out.stderr)
+//RS                 .lines()
+//RS                 .find(|line| line.starts_with("Error [E1206]:"))
+//RS                 .unwrap_or("")
+//RS                 .to_string()
+//RS         })
+//RS         .collect();
+//RS     assert!(
+//RS         lines.iter().all(|line| !line.is_empty()),
+//RS         "missing E1206 diagnosis: {lines:?}"
+//RS     );
+//RS     assert!(
+//RS         lines.windows(2).all(|pair| pair[0] == pair[1]),
+//RS         "inconsistent diagnostics: {lines:?}"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS // ─────────────────────────────────────────────
+//RS // E2-M8: SemVer + supply-chain tests
+//RS // ─────────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn semver_break_e2601() {
+//RS     // A minor bump that removes a public API item must produce E2601.
+//RS     use jet::Publish::{diff_public_api, e2601, ApiItem, BumpKind};
+//RS 
+//RS     let old_api = vec![ApiItem {
+//RS         kind: "fn".into(),
+//RS         name: "parse".into(),
+//RS         signature: "fn parse(raw: String) -> Int".into(),
+//RS     }];
+//RS     let new_api: Vec<ApiItem> = vec![]; // removed
+//RS 
+//RS     let changes = diff_public_api(&old_api, &new_api);
+//RS     assert!(
+//RS         !changes.is_empty(),
+//RS         "removed pub fn must be a breaking change"
+//RS     );
+//RS 
+//RS     let diag = e2601("1.2.0", BumpKind::Minor, &changes[0], 2);
+//RS     assert_eq!(diag.code, "E2601");
+//RS     assert!(diag.what.contains("1.2.0"), "what must name the version");
+//RS     assert!(diag.why.contains("minor"), "why must name the bump kind");
+//RS     assert!(diag.fix.contains("2.0.0"), "fix must name the next major");
+//RS     assert!(
+//RS         diag.why.contains("parse") || diag.why.contains("removed"),
+//RS         "why must name the broken item or action"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn returned_view_source_union_change_feeds_e1218_and_e2601() {
+//RS     use jet::Publish::SemVer::SemVer;
+//RS     use jet::Publish::{classify_bump, diff_public_api, e1218, e2601, ApiItem, BumpKind};
+//RS 
+//RS     let item = |source: &str| ApiItem {
+//RS         kind: "fn".into(),
+//RS         name: "pick".into(),
+//RS         signature: format!("fn pick(left: [Int], right: [Int]) -> View<Int> ; view_source = {source}"),
+//RS     };
+//RS     let changes = diff_public_api(
+//RS         &[item("parameter:0;access:read;path:range")],
+//RS         &[item(
+//RS             "one_of(parameter:0;path:range,parameter:1;path:range);access:read",
+//RS         )],
+//RS     );
+//RS     assert_eq!(
+//RS         changes.len(),
+//RS         1,
+//RS         "adding a possible owner to a source union must be breaking"
+//RS     );
+//RS     assert!(changes[0].description.contains("parameter:0"));
+//RS     assert!(changes[0].description.contains("parameter:1"));
+//RS 
+//RS     let bump = classify_bump(
+//RS         &SemVer::parse("1.0.0").unwrap(),
+//RS         &SemVer::parse("1.1.0").unwrap(),
+//RS     );
+//RS     assert_eq!(bump, BumpKind::Minor);
+//RS     assert_eq!(e1218("1.0.0", "1.1.0", bump, &changes[0], 2).code, "E1218");
+//RS     assert_eq!(e2601("1.1.0", bump, &changes[0], 2).code, "E2601");
+//RS }
+//RS 
+//RS #[test]
+//RS fn capability_sigil_frozen_in_public_api() {
+//RS     // c129 (D-MEM1, was D-CAP7/D-CAP8): the resolved capability sigil is part of
+//RS     // a pub fn's published signature, and a read -> write drift is a breaking change.
+//RS     use jet::Publish::{diff_public_api, extract_public_api};
+//RS 
+//RS     let dir = tmp_dir("cap_api_freeze");
+//RS 
+//RS     let write_src = "\
+//RS struct Account { balance: Int }
+//RS pub fn deposit(a: &Account, amount: Int) -> Int {
+//RS     a.balance = a.balance + amount
+//RS     return a.balance
+//RS }
+//RS ";
+//RS     let f = dir.join("write.jet");
+//RS     fs::write(&f, write_src).unwrap();
+//RS     let write_api = extract_public_api(write_src, f.to_str().unwrap());
+//RS     let deposit = write_api
+//RS         .iter()
+//RS         .find(|i| i.name == "deposit")
+//RS         .expect("deposit must be in the public API");
+//RS     assert!(
+//RS         deposit.signature.contains("a: &"),
+//RS         "the write sigil must be frozen onto the param type in the published signature, got `{}`",
+//RS         deposit.signature
+//RS     );
+//RS 
+//RS     // Same signature, only the capability sigil differs (read instead of write).
+//RS     let read_src = "\
+//RS struct Account { balance: Int }
+//RS pub fn deposit(a: Account, amount: Int) -> Int { return a.balance + amount }
+//RS ";
+//RS     let f2 = dir.join("read.jet");
+//RS     fs::write(&f2, read_src).unwrap();
+//RS     let read_api = extract_public_api(read_src, f2.to_str().unwrap());
+//RS 
+//RS     let changes = diff_public_api(&read_api, &write_api);
+//RS     assert!(
+//RS         !changes.is_empty(),
+//RS         "a read -> write capability drift on a pub fn must be a breaking change"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cli_typed_default_is_not_frozen_as_positional() {
+//RS     let dir = tmp_dir("cli_default_api_freeze");
+//RS     let src = "#CLI\npub struct Config {\n    port: Int{3000}\n    required: Int\n}\n";
+//RS     let path = dir.join("config.jet");
+//RS     fs::write(&path, src).unwrap();
+//RS     let api = jet::Publish::extract_public_api_for_package(src, path.to_str().unwrap(), "config");
+//RS     let config = api
+//RS         .iter()
+//RS         .find(|item| item.name == "Config")
+//RS         .expect("public CLI struct must be frozen");
+//RS     assert_eq!(
+//RS         config.signature,
+//RS         "struct Config { port: Int; required: Int [positional 0] }"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
+//RS     use jet::Publish::{diff_public_api, ApiItem};
+//RS 
+//RS     let dir = tmp_dir("physical_unit_api_freeze");
+//RS     let current = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }\npub fn distance() -> Millimeter { return Millimeter.from_float(1.0) }\n";
+//RS     let current_path = dir.join("current.jet");
+//RS     fs::write(&current_path, current).unwrap();
+//RS     let current_api = jet::Publish::extract_public_api_for_package(
+//RS         current,
+//RS         current_path.to_str().unwrap(),
+//RS         "physics",
+//RS     );
+//RS     let mut bundle =
+//RS         jet::Loader::load_entry_with_overlay(current_path.to_str().unwrap(), None, true).unwrap();
+//RS     let (_, facts) =
+//RS         jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Check);
+//RS     let entry = &bundle.modules[bundle.entry];
+//RS     let frozen = jet::Publish::ApiFreeze::snapshot_from_items_with_effects(
+//RS         &entry.items,
+//RS         "physics",
+//RS         "1.0.0",
+//RS         Some(&facts.solved),
+//RS         Some(&entry.alias),
+//RS     );
+//RS     assert_eq!(
+//RS         frozen.api_version,
+//RS         jet::Publish::ApiFreeze::API_SNAPSHOT_VERSION
+//RS     );
+//RS     let frozen_api: Vec<ApiItem> = frozen
+//RS         .funcs
+//RS         .iter()
+//RS         .map(|function| ApiItem {
+//RS             kind: "fn".into(),
+//RS             name: function.name.clone(),
+//RS             signature: function.signature.clone(),
+//RS         })
+//RS         .collect();
+//RS     assert!(diff_public_api(&frozen_api, &current_api).is_empty());
+//RS 
+//RS     let changed = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/100) }\npub fn distance() -> Millimeter { return Millimeter.from_float(1.0) }\n";
+//RS     let changed_path = dir.join("changed.jet");
+//RS     fs::write(&changed_path, changed).unwrap();
+//RS     let changed_api = jet::Publish::extract_public_api_for_package(
+//RS         changed,
+//RS         changed_path.to_str().unwrap(),
+//RS         "physics",
+//RS     );
+//RS     assert_eq!(diff_public_api(&current_api, &changed_api).len(), 1);
+//RS     let foreign_api = jet::Publish::extract_public_api_for_package(
+//RS         current,
+//RS         current_path.to_str().unwrap(),
+//RS         "geometry",
+//RS     );
+//RS     assert_eq!(diff_public_api(&current_api, &foreign_api).len(), 1);
+//RS 
+//RS     let affine = "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27315/100) }\npub fn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }\n";
+//RS     let affine_path = dir.join("affine.jet");
+//RS     fs::write(&affine_path, affine).unwrap();
+//RS     let affine_api = jet::Publish::extract_public_api_for_package(
+//RS         affine,
+//RS         affine_path.to_str().unwrap(),
+//RS         "physics",
+//RS     );
+//RS     let shifted = "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27415/100) }\npub fn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }\n";
+//RS     let shifted_path = dir.join("shifted.jet");
+//RS     fs::write(&shifted_path, shifted).unwrap();
+//RS     let shifted_api = jet::Publish::extract_public_api_for_package(
+//RS         shifted,
+//RS         shifted_path.to_str().unwrap(),
+//RS         "physics",
+//RS     );
+//RS     assert_eq!(diff_public_api(&affine_api, &shifted_api).len(), 1);
+//RS 
+//RS     let length_generic =
+//RS         "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }\n";
+//RS     let time_generic = "pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) -> Q { return value }\n";
+//RS     let length_path = dir.join("length_generic.jet");
+//RS     let time_path = dir.join("time_generic.jet");
+//RS     fs::write(&length_path, length_generic).unwrap();
+//RS     fs::write(&time_path, time_generic).unwrap();
+//RS     let length_api = jet::Publish::extract_public_api_for_package(
+//RS         length_generic,
+//RS         length_path.to_str().unwrap(),
+//RS         "physics",
+//RS     );
+//RS     let time_api = jet::Publish::extract_public_api_for_package(
+//RS         time_generic,
+//RS         time_path.to_str().unwrap(),
+//RS         "physics",
+//RS     );
+//RS     assert_eq!(
+//RS         length_api[0].signature,
+//RS         "fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) Q -[]>"
+//RS     );
+//RS     assert_eq!(diff_public_api(&length_api, &time_api).len(), 1);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn soft_public_names_are_not_semver_promises() {
+//RS     use jet::Publish::{diff_public_api, extract_public_api};
+//RS 
+//RS     let dir = tmp_dir("soft_public_api");
+//RS     let old = "pub fn stable() {}\npub fn _unstable() {}\n";
+//RS     let new = "pub fn stable() {}\n";
+//RS     let old_path = dir.join("old.jet");
+//RS     let new_path = dir.join("new.jet");
+//RS     fs::write(&old_path, old).unwrap();
+//RS     fs::write(&new_path, new).unwrap();
+//RS 
+//RS     let old_api = extract_public_api(old, old_path.to_str().unwrap());
+//RS     let new_api = extract_public_api(new, new_path.to_str().unwrap());
+//RS     assert!(old_api.iter().all(|item| item.name != "_unstable"));
+//RS     assert!(diff_public_api(&old_api, &new_api).is_empty());
+//RS 
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn inferred_public_effect_drift_is_breaking() {
+//RS     use jet::Publish::{diff_public_api, extract_public_api};
+//RS 
+//RS     let dir = tmp_dir("effect_api_drift");
+//RS     let pure_path = dir.join("pure.jet");
+//RS     let io_path = dir.join("io.jet");
+//RS     let pure = "pub fn report() -> Int { return 1 }\n";
+//RS     let io = "pub fn report() -> Int {\n    print(\"report\")\n    return 1\n}\n";
+//RS     fs::write(&pure_path, pure).unwrap();
+//RS     fs::write(&io_path, io).unwrap();
+//RS 
+//RS     let pure_api = extract_public_api(pure, pure_path.to_str().unwrap());
+//RS     let io_api = extract_public_api(io, io_path.to_str().unwrap());
+//RS     assert!(pure_api[0].signature.contains("-[]>"));
+//RS     assert!(io_api[0].signature.contains("-[IO]>"));
+//RS     assert_eq!(diff_public_api(&pure_api, &io_api).len(), 1);
+//RS 
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn inferred_inline_module_effects_are_published() {
+//RS     use jet::Publish::{diff_public_api, extract_public_api};
+//RS 
+//RS     let dir = tmp_dir("inline_module_effect_api");
+//RS     let old_dir = dir.join("old");
+//RS     let new_dir = dir.join("new");
+//RS     fs::create_dir_all(&old_dir).unwrap();
+//RS     fs::create_dir_all(&new_dir).unwrap();
+//RS     let old_path = old_dir.join("run.jet");
+//RS     let new_path = new_dir.join("run.jet");
+//RS     let old = "module files { pub fn report() { print(\"report\") } }\nmodule bench { pub fn report() {} }\n";
+//RS     let new = "module files { pub fn report() { print(\"report\") } }\nmodule bench { pub fn report() { print(\"bench\") } }\n";
+//RS     fs::write(&old_path, old).unwrap();
+//RS     fs::write(&new_path, new).unwrap();
+//RS 
+//RS     let old_api = extract_public_api(old, old_path.to_str().unwrap());
+//RS     let new_api = extract_public_api(new, new_path.to_str().unwrap());
+//RS     let report = old_api
+//RS         .iter()
+//RS         .find(|item| item.name == "files.report")
+//RS         .expect("inline module function is public API");
+//RS     assert!(report.signature.contains("-[IO]>"), "{}", report.signature);
+//RS     assert!(old_api.iter().any(|item| item.name == "bench.report"));
+//RS     assert_eq!(diff_public_api(&old_api, &new_api).len(), 1);
+//RS 
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn v2_snapshot_upgrade_matches_duplicate_inline_leaves() {
+//RS     use jet::Publish::ApiFreeze::{legacy_api_name, legacy_api_signature, ApiSnapshot};
+//RS     use jet::Publish::{diff_public_api, extract_public_api, ApiItem};
+//RS 
+//RS     let dir = tmp_dir("v2_inline_api_upgrade");
+//RS     let path = dir.join("current.jet");
+//RS     let source = "module bench { pub fn report() {} }\nmodule files { pub fn report(x: Int) {} }\n";
+//RS     fs::write(&path, source).unwrap();
+//RS     let mut current = extract_public_api(source, path.to_str().unwrap())
+//RS         .into_iter()
+//RS         .filter(|item| item.kind == "fn")
+//RS         .collect::<Vec<_>>();
+//RS     for item in &mut current {
+//RS         item.name = legacy_api_name(&item.name).to_string();
+//RS         item.signature = legacy_api_signature(&item.signature);
+//RS     }
+//RS 
+//RS     let previous = ApiSnapshot::parse(
+//RS         "api_version = 2\npackage = demo\npublished_version = 1.0.0\nfn report()\nfn report(x: Int (a whole number))\n",
+//RS     )
+//RS     .expect("v2 snapshot");
+//RS     let mut old = previous
+//RS         .funcs
+//RS         .iter()
+//RS         .map(|function| ApiItem {
+//RS             kind: "fn".to_string(),
+//RS             name: function.name.clone(),
+//RS             signature: function.signature.clone(),
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     for item in &mut old {
+//RS         item.name = legacy_api_name(&item.name).to_string();
+//RS         item.signature = legacy_api_signature(&item.signature);
+//RS     }
+//RS     assert!(
+//RS         diff_public_api(&old, &current).is_empty(),
+//RS         "old={old:#?}\ncurrent={current:#?}"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_effect_metadata_preserves_symbolic_rows() {
+//RS     use jet::Publish::extract_public_api;
+//RS 
+//RS     let dir = tmp_dir("effect_api_open_row");
+//RS     let path = dir.join("open.jet");
+//RS     let source = "pub fn invoke<E>(act: fn() -[..E]> Int) -[..E]> Int { return act() }\n";
+//RS     fs::write(&path, source).unwrap();
+//RS 
+//RS     let api = extract_public_api(source, path.to_str().unwrap());
+//RS     assert!(api[0].signature.contains("-[..E]>"), "{}", api[0].signature);
+//RS 
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_trait_effect_contract_drift_is_breaking() {
+//RS     use jet::Publish::{diff_public_api, extract_public_api};
+//RS 
+//RS     let dir = tmp_dir("trait_effect_api_drift");
+//RS     let old_path = dir.join("old.jet");
+//RS     let new_path = dir.join("new.jet");
+//RS     let old = "pub trait Render { fn draw(self) -[IO]> Int }\n";
+//RS     let new = "pub trait Render { fn draw(self) -[GPU]> Int }\n";
+//RS     fs::write(&old_path, old).unwrap();
+//RS     fs::write(&new_path, new).unwrap();
+//RS 
+//RS     let old_api = extract_public_api(old, old_path.to_str().unwrap());
+//RS     let new_api = extract_public_api(new, new_path.to_str().unwrap());
+//RS     assert!(old_api[0].signature.contains("-[IO]>"));
+//RS     assert!(new_api[0].signature.contains("-[GPU]>"));
+//RS     assert!(
+//RS         !diff_public_api(&old_api, &new_api).is_empty(),
+//RS         "trait method effect drift must be breaking"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn physical_unit_trait_methods_use_canonical_dimensions() {
+//RS     use jet::Publish::extract_public_api;
+//RS 
+//RS     let dir = tmp_dir("physical_unit_trait_api");
+//RS     let path = dir.join("current.jet");
+//RS     // No local `#UnitFamily(Length)` here: D-DIMENSION-OPEN1=D says a
+//RS     // same-named local declaration shadows the standard Prelude catalog
+//RS     // (`Bundle/Units.rs`'s "Local names shadow Prelude members; physical
+//RS     // dimension behavior remains explicit opt-in"), so it would stay
+//RS     // nominal and could never carry `core.units::Length`. Referencing
+//RS     // `Meter` bare lets the ambient standard-unit prelude supply the real,
+//RS     // canonical Length family instead (card #1765/#1769 root cause: the
+//RS     // prior fixture redeclared the family and shadowed the very identity
+//RS     // it meant to assert on).
+//RS     let source = "pub trait Measure { fn scale(value: Meter) -> Meter }\n";
+//RS     fs::write(&path, source).unwrap();
+//RS 
+//RS     let api = extract_public_api(source, path.to_str().unwrap());
+//RS     let method = api
+//RS         .iter()
+//RS         .find(|item| item.name == "Measure.scale")
+//RS         .expect("public trait method");
+//RS     assert_eq!(
+//RS         method.signature,
+//RS         "fn Measure.scale(value: Meter{package=core.units; family=Length; base=Meter; dimension=core.units%3A%3ALength:1; scale=1; provenance=Rational; offset=0}) Meter{package=core.units; family=Length; base=Meter; dimension=core.units%3A%3ALength:1; scale=1; provenance=Rational; offset=0}"
+//RS     );
+//RS 
+//RS     let mut bundle = jet::Loader::load_entry_with_overlay(path.to_str().unwrap(), None, true)
+//RS         .expect("trait source bundle");
+//RS     let (_, facts) =
+//RS         jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Check);
+//RS     let entry = &bundle.modules[bundle.entry];
+//RS     let frozen = jet::Publish::ApiFreeze::snapshot_from_items_with_effects(
+//RS         &entry.items,
+//RS         "physics",
+//RS         "1.0.0",
+//RS         Some(&facts.solved),
+//RS         Some(&entry.alias),
+//RS     );
+//RS     assert_eq!(
+//RS         frozen
+//RS             .funcs
+//RS             .iter()
+//RS             .find(|item| item.name == "Measure.scale")
+//RS             .expect("frozen public trait method")
+//RS             .signature,
+//RS         method.signature
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn resolver_conflict_e2602() {
+//RS     // Two packages requiring incompatible versions of a shared dep → E2602.
+//RS     use jet::Publish::{check_conflicts, VersionConstraint, VersionReq};
+//RS     use std::collections::BTreeMap;
+//RS 
+//RS     let constraints = vec![
+//RS         VersionConstraint {
+//RS             package: "log".into(),
+//RS             req: VersionReq::parse("^1.0").unwrap(),
+//RS             from: "web-server 2.1.0".into(),
+//RS         },
+//RS         VersionConstraint {
+//RS             package: "log".into(),
+//RS             req: VersionReq::parse("^2.0").unwrap(),
+//RS             from: "db-client 3.0.0".into(),
+//RS         },
+//RS     ];
+//RS     let diags = check_conflicts(&constraints, &BTreeMap::new());
+//RS     assert!(
+//RS         !diags.is_empty(),
+//RS         "disjoint major caret ranges must be a conflict"
+//RS     );
+//RS     assert_eq!(diags[0].code, "E2602");
+//RS     let why = &diags[0].why;
+//RS     assert!(why.contains("log"), "why must name the conflicting package");
+//RS     assert!(
+//RS         why.contains("web-server") || why.contains("db-client"),
+//RS         "why must name a dependent"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn vendored_offline_locked_build() {
+//RS     // --locked on a project with a lock file and a vendored dep must succeed.
+//RS     // Without network this verifies the offline path works.
+//RS     let tmp = tmp_dir("m8_vendor_locked");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     // Create a simple library.
+//RS     write(
+//RS         &tmp,
+//RS         "greeter/package.jet",
+//RS         &min_manifest("greeter", "0.1.0"),
+//RS     );
+//RS     write(
+//RS         &tmp,
+//RS         "greeter/greeter.jet",
+//RS         "pub fn greet() -> String { return \"hi\" }\n",
+//RS     );
+//RS 
+//RS     // Project that depends on it.
+//RS     write(
+//RS         &tmp,
+//RS         "package.jet",
+//RS         &manifest_with_deps("vendored_app", "0.1.0", "    greeter: ./greeter,"),
+//RS     );
+//RS     write(
+//RS         &tmp,
+//RS         "run.jet",
+//RS         "use greeter\nfn run() { print(greeter.greet()) }\n",
+//RS     );
+//RS 
+//RS     let entry = tmp.join("run.jet");
+//RS     let pack_path = tmp.join("package.jet");
+//RS 
+//RS     // Fetch to create the lock.
+//RS     let mf = jet::Manifest::parse(&pack_path, &fs::read_to_string(&pack_path).unwrap()).unwrap();
+//RS     let opts = jet::Fetch::FetchOptions {
+//RS         locked: false,
+//RS         update: false,
+//RS         update_dep: None,
+//RS         resolution: jet::Publish::ResolveMode::Conservative,
+//RS     };
+//RS     let result = with_store(&store, || jet::Fetch::fetch(&tmp, &mf, None, &opts));
+//RS     assert!(result.is_ok(), "initial fetch must succeed");
+//RS     let (lock, dep_dirs) = result.unwrap();
+//RS 
+//RS     // Vendor the dependency.
+//RS     let vendor_dir = tmp.join("vendor");
+//RS     let vendor_result = jet::Publish::vendor(&tmp, &lock, &dep_dirs, &vendor_dir);
+//RS     assert!(vendor_result.is_ok(), "vendor must succeed");
+//RS     let copied = vendor_result.unwrap();
+//RS     assert!(
+//RS         copied.contains(&"greeter".to_string()),
+//RS         "greeter must be vendored"
+//RS     );
+//RS     assert!(
+//RS         tmp.join("vendor/greeter").is_dir(),
+//RS         "vendor/greeter must exist"
+//RS     );
+//RS     // D-SUPPLY1: a vendor manifest records each dep's name/version/fingerprint.
+//RS     let manifest = fs::read_to_string(tmp.join("vendor/manifest.json")).unwrap();
+//RS     assert!(
+//RS         manifest.contains("\"name\": \"greeter\""),
+//RS         "manifest must list greeter"
+//RS     );
+//RS     assert!(
+//RS         manifest.contains("\"fingerprint\""),
+//RS         "manifest must record fingerprints"
+//RS     );
+//RS 
+//RS     // With the lock present, --locked fetch succeeds (no network needed).
+//RS     let lock_text = fs::read_to_string(tmp.join(".jet/lock")).unwrap_or_default();
+//RS     assert!(!lock_text.is_empty(), "lock file must exist after fetch");
+//RS 
+//RS     // Compile the project (uses the in-store copy, not network).
+//RS     let compile_result = with_store(&store, || {
+//RS         jet::compile_with_path("", &entry.to_string_lossy())
+//RS     });
+//RS     assert!(
+//RS         compile_result.is_ok(),
+//RS         "vendored project must compile offline"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn vendor_rejects_symlink_sources_and_traversal_names() {
+//RS     use std::collections::HashMap;
+//RS     use std::os::unix::fs::symlink;
+//RS 
+//RS     let tmp = tmp_dir("vendor_symlink_boundary");
+//RS     let outside = tmp.join("outside");
+//RS     fs::write(&outside, "must survive\n").unwrap();
+//RS     let source = tmp.join("source");
+//RS     fs::create_dir_all(&source).unwrap();
+//RS     fs::write(source.join("package.jet"), "name: \"dep\"\n").unwrap();
+//RS     symlink(&outside, source.join("leak")).unwrap();
+//RS 
+//RS     let mut symlink_deps = HashMap::new();
+//RS     symlink_deps.insert("dep".to_string(), source.clone());
+//RS     let symlink_result = jet::Publish::vendor(
+//RS         &tmp,
+//RS         &make_test_lock("dep", "0.1.0", "sha256-dep"),
+//RS         &symlink_deps,
+//RS         &tmp.join("vendor-symlink"),
+//RS     );
+//RS     assert!(
+//RS         symlink_result.is_err(),
+//RS         "vendor must refuse source symlinks"
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&outside).unwrap(), "must survive\n");
+//RS 
+//RS     let safe_source = tmp.join("safe-source");
+//RS     fs::create_dir_all(&safe_source).unwrap();
+//RS     fs::write(safe_source.join("package.jet"), "name: \"escape\"\n").unwrap();
+//RS     let mut traversal_deps = HashMap::new();
+//RS     traversal_deps.insert("../escape".to_string(), safe_source);
+//RS     let traversal_result = jet::Publish::vendor(
+//RS         &tmp,
+//RS         &make_test_lock("../escape", "0.1.0", "sha256-escape"),
+//RS         &traversal_deps,
+//RS         &tmp.join("vendor-name"),
+//RS     );
+//RS     assert!(
+//RS         traversal_result.is_err(),
+//RS         "vendor must refuse traversal-shaped dependency names"
+//RS     );
+//RS     assert!(!tmp.join("escape").exists());
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::Lock::LockFile {
+//RS     use jet::Lock::{LockFile, LockSource, LockedPackage};
+//RS     LockFile {
+//RS         version: 1,
+//RS         packages: vec![LockedPackage {
+//RS             name: name.into(),
+//RS             version: version.into(),
+//RS             fingerprint: fp.into(),
+//RS             content_hash: None,
+//RS             source: LockSource::Path("/tmp/placeholder".into()),
+//RS             nix_closure: None,
+//RS 
+//RS             locked: None,
+//RS             dependencies: vec![],
+//RS             layer: None,
+//RS             inferred_layer: None,
+//RS 
+//RS             effects: vec![],
+//RS 
+//RS             effect_grants: vec![],
+//RS             required_effects: vec![],
+//RS             granted_effects: vec![],
+//RS             denied_effects: vec![],
+//RS             effect_authority: None,
+//RS             envelope: None,
+//RS             receipt: None,
+//RS             provenance: None,
+//RS         }],
+//RS         root_dependencies: vec![name.into()],
+//RS         authority: None,
+//RS         workspace_members: vec![],
+//RS         workspace_source_digest: None,
+//RS         workspace_overlay_policy: Default::default(),
+//RS         comptime_inputs: Vec::new(),
+//RS         toolchains: Vec::new(),
+//RS         browsers: Vec::new(),
+//RS         source_channels: Vec::new(),
+//RS         build_stamp: None,
+//RS         build_contributions: Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn sbom_spdx_golden() {
+//RS     // SBOM emitted from a known lockfile has the expected SPDX structure.
+//RS     use jet::Publish::emit_spdx;
+//RS 
+//RS     let lock = make_test_lock(
+//RS         "logger",
+//RS         "1.2.3",
+//RS         "sha256-deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb",
+//RS     );
+//RS     let sbom = emit_spdx(&lock, "myapp", "0.5.0");
+//RS     // Golden structure checks (not full byte comparison because Created: timestamp varies).
+//RS     assert!(sbom.starts_with("SPDXVersion: SPDX-2.3\n"));
+//RS     assert!(sbom.contains("DataLicense: CC0-1.0\n"));
+//RS     assert!(sbom.contains("DocumentNamespace: https://jet-lang.dev/spdx/myapp-0.5.0-"));
+//RS     assert!(sbom.contains("PackageName: logger\n"));
+//RS     assert!(sbom.contains("PackageVersion: 1.2.3\n"));
+//RS     assert!(sbom.contains("PackageChecksum: SHA256: deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb\n"));
+//RS     assert!(sbom.contains("Relationship: SPDXRef-root DEPENDS_ON SPDXRef-pkg-0\n"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn sbom_cyclonedx_golden() {
+//RS     use jet::Publish::emit_cyclonedx;
+//RS 
+//RS     let lock = make_test_lock(
+//RS         "logger",
+//RS         "1.2.3",
+//RS         "sha256-deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb",
+//RS     );
+//RS     let sbom = emit_cyclonedx(&lock, "myapp", "0.5.0");
+//RS     assert!(sbom.contains("\"bomFormat\": \"CycloneDX\""));
+//RS     assert!(sbom.contains("\"specVersion\": \"1.5\""));
+//RS     assert!(sbom.contains("\"name\": \"logger\""));
+//RS     assert!(sbom.contains("\"version\": \"1.2.3\""));
+//RS     assert!(sbom.contains("\"alg\": \"SHA-256\""));
+//RS     assert!(sbom.contains("deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn audit_e2603_on_vulnerable_dep() {
+//RS     use jet::Publish::Advisory::Advisory;
+//RS     use jet::Publish::SemVer::SemVer;
+//RS     use jet::Publish::{audit_lockfile, Severity, VersionReq};
+//RS 
+//RS     let lock = make_test_lock("crypto-lib", "0.9.0", "sha256-aabb");
+//RS     // Advisory: crypto-lib ^0 (pre-1.0) has a critical issue fixed in 0.9.5.
+//RS     let advisories = vec![Advisory {
+//RS         id: "JET-2026-SEC-001".into(),
+//RS         package: "crypto-lib".into(),
+//RS         affected: VersionReq::parse("^0").unwrap(),
+//RS         fixed: Some(SemVer::parse("0.9.5").unwrap()),
+//RS         title: "Timing side-channel in AES-GCM".into(),
+//RS         severity: Severity::Critical,
+//RS     }];
+//RS     let matches = audit_lockfile(&lock, &advisories).unwrap();
+//RS 
+//RS     assert_eq!(matches.len(), 1, "one advisory match expected");
+//RS     let d = &matches[0].diagnostic;
+//RS     assert_eq!(d.code, "E2603");
+//RS     assert!(d.what.contains("JET-2026-SEC-001"));
+//RS     assert!(d.what.contains("crypto-lib"));
+//RS     assert!(d.what.contains("Timing side-channel"));
+//RS     assert!(
+//RS         d.what.contains("[critical]"),
+//RS         "severity must prefix the message"
+//RS     );
+//RS     assert_eq!(matches[0].severity, jet::Publish::Severity::Critical);
+//RS }
+//RS 
+//RS #[test]
+//RS fn audit_non_critical_is_advisory() {
+//RS     // D-SUPPLY1: a non-critical advisory still matches but is advisory-only —
+//RS     // the severity carried back is below Critical, so `jet inspect audit` exits 0.
+//RS     use jet::Publish::Advisory::Advisory;
+//RS     use jet::Publish::SemVer::SemVer;
+//RS     use jet::Publish::{audit_lockfile, Severity, VersionReq};
+//RS 
+//RS     let lock = make_test_lock("util-lib", "1.0.0", "sha256-ccdd");
+//RS     let advisories = vec![Advisory {
+//RS         id: "JET-2026-INFO-1".into(),
+//RS         package: "util-lib".into(),
+//RS         affected: VersionReq::parse("^1").unwrap(),
+//RS         fixed: Some(SemVer::parse("1.0.2").unwrap()),
+//RS         title: "Minor info leak in debug logs".into(),
+//RS         severity: Severity::Low,
+//RS     }];
+//RS     let matches = audit_lockfile(&lock, &advisories).unwrap();
+//RS     assert_eq!(matches.len(), 1);
+//RS     assert_eq!(matches[0].severity, Severity::Low);
+//RS     assert!(matches.iter().all(|m| m.severity != Severity::Critical));
+//RS }
+//RS 
+//RS #[test]
+//RS fn e1217_missing_locked_revision() {
+//RS     // D-SUPPLY1 Step 2: a dep declared in the manifest with no lock entry fails
+//RS     // the bidirectional completeness check.
+//RS     use jet::Lock::{verify_all_manifest_deps_locked, LockFile};
+//RS 
+//RS     let raw = manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
+//RS     let tmp = tmp_dir("e1217");
+//RS     write(&tmp, "package.jet", &raw);
+//RS     let mf = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
+//RS 
+//RS     // Empty lock — greeter is declared but not pinned.
+//RS     let empty_lock = LockFile {
+//RS         version: 1,
+//RS         packages: vec![],
+//RS         root_dependencies: vec![],
+//RS         authority: None,
+//RS         workspace_members: vec![],
+//RS         workspace_source_digest: None,
+//RS         workspace_overlay_policy: Default::default(),
+//RS         comptime_inputs: Vec::new(),
+//RS         toolchains: Vec::new(),
+//RS         browsers: Vec::new(),
+//RS         source_channels: Vec::new(),
+//RS         build_stamp: None,
+//RS         build_contributions: Vec::new(),
+//RS     };
+//RS     let diagnostic = verify_all_manifest_deps_locked(&mf, &empty_lock)
+//RS         .expect_err("missing locked revision must fail")
+//RS         .diagnostic();
+//RS     assert_eq!(diagnostic.code, "E1217");
+//RS     assert!(diagnostic.what.contains("greeter"));
+//RS     assert!(diagnostic.why.contains("missing `package`"));
+//RS     assert!(diagnostic.fix.contains("fetch"));
+//RS     assert!(diagnostic.fix.contains(".jet/lock"));
+//RS 
+//RS     // A lock that pins greeter passes.
+//RS     let good_lock = make_test_lock("greeter", "0.1.0", "sha256-aabb");
+//RS     assert!(verify_all_manifest_deps_locked(&mf, &good_lock).is_ok());
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn e1218_breaking_change_under_minor_bump() {
+//RS     // D-SUPPLY1 Step 3: a removed public fn under a minor bump is E1218.
+//RS     use jet::Publish::SemVer::SemVer;
+//RS     use jet::Publish::{classify_bump, diff_public_api, e1218, ApiItem, BumpKind};
+//RS 
+//RS     let old = vec![ApiItem {
+//RS         kind: "fn".into(),
+//RS         name: "parse".into(),
+//RS         signature: "fn parse(raw: String) -> Int".into(),
+//RS     }];
+//RS     let new: Vec<ApiItem> = vec![]; // parse removed
+//RS     let breaking = diff_public_api(&old, &new);
+//RS     assert!(!breaking.is_empty());
+//RS 
+//RS     let bump = classify_bump(
+//RS         &SemVer::parse("1.0.0").unwrap(),
+//RS         &SemVer::parse("1.1.0").unwrap(),
+//RS     );
+//RS     assert_eq!(bump, BumpKind::Minor);
+//RS 
+//RS     let d = e1218("1.0.0", "1.1.0", bump, &breaking[0], 2);
+//RS     assert_eq!(d.code, "E1218");
+//RS     assert!(d.what.contains("1.1.0"));
+//RS     assert!(d.fix.contains("2.0.0"), "fix must suggest a major bump");
+//RS }
+//RS 
+//RS #[test]
+//RS fn integrity_e2604_on_tampered_store() {
+//RS     use jet::Publish::e2604;
+//RS 
+//RS     let diag = e2604("mylib", "1.0.0", "sha256-expected", "sha256-actual");
+//RS     assert_eq!(diag.code, "E2604");
+//RS     assert!(diag.what.contains("mylib"));
+//RS     assert!(diag.what.contains("1.0.0"));
+//RS     assert!(diag.why.contains("sha256-expected"));
+//RS     assert!(diag.why.contains("sha256-actual"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn private_registry_from_env() {
+//RS     use jet::Publish::parse_registries_from_env;
+//RS     let mut env = std::collections::HashMap::new();
+//RS     env.insert(
+//RS         "JET_REGISTRY_INTERNAL_URL".into(),
+//RS         "https://registry.acme.corp/jet".into(),
+//RS     );
+//RS     let regs = parse_registries_from_env(&env);
+//RS     assert!(!regs.is_empty());
+//RS     assert_eq!(regs[0].name, "internal");
+//RS     assert_eq!(regs[0].url, "https://registry.acme.corp/jet");
+//RS     assert!(!regs[0].mirror);
+//RS }
+//RS 
+//RS #[test]
+//RS fn pre_publish_gate_blocks_on_build_failure() {
+//RS     use jet::Publish::{BumpKind, PrePublishGate};
+//RS     let gate = PrePublishGate {
+//RS         build_ok: false,
+//RS         tests_ok: true,
+//RS         breaking: vec![],
+//RS         version: "1.1.0".into(),
+//RS         bump_kind: BumpKind::Minor,
+//RS         next_major: 2,
+//RS     };
+//RS     assert!(gate.is_blocked(), "failed build must block publish");
+//RS }
+//RS 
+//RS #[test]
+//RS fn pre_publish_gate_passes_with_no_breaks_and_minor_bump() {
+//RS     use jet::Publish::{BumpKind, PrePublishGate};
+//RS     let gate = PrePublishGate {
+//RS         build_ok: true,
+//RS         tests_ok: true,
+//RS         breaking: vec![],
+//RS         version: "1.1.0".into(),
+//RS         bump_kind: BumpKind::Minor,
+//RS         next_major: 2,
+//RS     };
+//RS     assert!(!gate.is_blocked());
+//RS     assert!(gate.semver_errors().is_empty());
+//RS }
+//RS 
+//RS // ─────────────────────────────────────────────
+//RS // D-PUBLISH1A: dirty-tree refusal (E2605)
+//RS // ─────────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn cli_publish_refuses_dirty_git_tree() {
+//RS     // D-PUBLISH1A: `jet registry publish` must refuse (E2605) when the git working tree
+//RS     // has uncommitted changes. This test initialises a fresh git repo with one
+//RS     // commit, adds an uncommitted file, then runs `jet registry publish` and asserts it
+//RS     // exits nonzero with E2605 in stderr.
+//RS     if !jet_bin().is_file() {
+//RS         eprintln!("note: skipping cli_publish_refuses_dirty_git_tree (run `cargo build` first)");
+//RS         return;
+//RS     }
+//RS     if !have_git() {
+//RS         eprintln!("note: skipping cli_publish_refuses_dirty_git_tree (git not found)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let tmp = tmp_dir("pub_dirty");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS 
+//RS     // Create a minimal project.
+//RS     write(&tmp, "package.jet", &min_manifest("dirtypkg", "1.0.0"));
+//RS     write(&tmp, "run.jet", "fn run() { print(\"hello\") }\n");
+//RS 
+//RS     // Init git, commit everything (clean tree first).
+//RS     for cmd_args in &[
+//RS         vec!["init", "-b", "main"],
+//RS         vec!["config", "user.email", "test@jet.test"],
+//RS         vec!["config", "user.name", "Jet Test"],
+//RS         vec!["add", "."],
+//RS         vec!["commit", "-m", "initial"],
+//RS     ] {
+//RS         Command::new("git")
+//RS             .args(cmd_args)
+//RS             .current_dir(&tmp)
+//RS             .output()
+//RS             .unwrap();
+//RS     }
+//RS 
+//RS     // Add a new uncommitted file → dirty tree.
+//RS     write(&tmp, "untracked.jet", "// dirty\n");
+//RS 
+//RS     let out = jet_cmd(&["registry", "publish"], &tmp, &store);
+//RS     assert!(
+//RS         !out.status.success(),
+//RS         "jet registry publish must fail on a dirty tree"
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("E2605"),
+//RS         "jet registry publish must cite E2605 for a dirty tree:\n{stderr}"
+//RS     );
+//RS 
+//RS     // With --force it must emit a warning and get past the dirty gate. The
+//RS     // uncommitted warning is printed before any registry push, so pointing the
+//RS     // registry at a bogus local path (push then fails fast, no network) does not
+//RS     // affect these assertions.
+//RS     let cache = tmp.join("cache");
+//RS     let bogus = format!("file://{}", tmp.join("nonexistent.git").to_str().unwrap());
+//RS     let out_force = jet_cmd_env(
+//RS         &["registry", "publish", "--force"],
+//RS         &tmp,
+//RS         &[
+//RS             ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()),
+//RS             ("JET_REGISTRY_URL", bogus.as_str()),
+//RS             ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
+//RS         ],
+//RS     );
+//RS     let stderr_force = String::from_utf8_lossy(&out_force.stderr);
+//RS     assert!(
+//RS         stderr_force.contains("warning") && stderr_force.contains("uncommitted"),
+//RS         "jet registry publish --force must warn about uncommitted changes:\n{stderr_force}"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS // ─────────────────────────────────────────────
+//RS // D-VERSION1: yank local marker
+//RS // ─────────────────────────────────────────────
+//RS 
+//RS #[test]
+//RS fn cli_publish_pushes_index_and_enforces_immutability_e1234() {
+//RS     // c56 (D-JPK-CACHE1=A / D-VERSION1=A): `jet registry publish` writes a JSONL line to
+//RS     // the git registry index and pushes it; republishing the same version is
+//RS     // refused with E1234 (version immutability).
+//RS     if !jet_bin().is_file() {
+//RS         eprintln!("note: skipping cli_publish_pushes_index (run `cargo build` first)");
+//RS         return;
+//RS     }
+//RS     if !have_git() {
+//RS         eprintln!("note: skipping cli_publish_pushes_index (git not found)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let tmp = tmp_dir("pub_push");
+//RS     let proj = tmp.join("proj");
+//RS     fs::create_dir_all(&proj).unwrap();
+//RS     let bare = tmp.join("registry.git");
+//RS     let url = bare_registry(&bare);
+//RS     let cache = tmp.join("cache");
+//RS     let store = tmp.join("store");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS     let keys = tmp.join("keys");
+//RS     init_clean_project(&proj, "textkit", "1.2.0");
+//RS     seed_core_review(&bare, "textkit", "1.2.0");
+//RS 
+//RS     let envs = &[
+//RS         ("JET_REGISTRY_URL", url.as_str()),
+//RS         ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
+//RS         ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()),
+//RS         ("JET_KEYS_DIR", keys.to_str().unwrap()),
+//RS     ];
+//RS 
+//RS     let out = jet_cmd_env(&["registry", "publish"], &proj, envs);
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "publish should succeed:\n{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS 
+//RS     let index = read_index_file(&bare, "textkit").expect("index file must exist in registry");
+//RS     assert!(
+//RS         index.contains("\"name\":\"textkit\""),
+//RS         "index line:\n{index}"
+//RS     );
+//RS     assert!(
+//RS         index.contains("\"version\":\"1.2.0\""),
+//RS         "index line:\n{index}"
+//RS     );
+//RS     assert!(index.contains("\"yanked\":false"), "index line:\n{index}");
+//RS     let entry = index
+//RS         .lines()
+//RS         .find_map(jet::Publish::IndexEntry::parse_line)
+//RS         .expect("published index line must parse");
+//RS     let referrer = format!("referrers/{}/index.json", entry.content_hash);
+//RS     let referrer_probe = Command::new("git")
+//RS         .args(["--git-dir", bare.to_str().unwrap(), "cat-file", "-e"])
+//RS         .arg(format!("HEAD:{referrer}"))
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         referrer_probe.status.success(),
+//RS         "publish must commit the OCI referrer index at {referrer}"
+//RS     );
+//RS 
+//RS     // S2/D-MEM1: `jet registry publish` now unconditionally snapshots the public-fn
+//RS     // surface to `.jet/cache/api/<pkg>.api` — a committed, durable interface
+//RS     // contract (not a build artifact). Commit it so the tree is clean again
+//RS     // before the republish attempt below (matching real usage: generate,
+//RS     // review, commit).
+//RS     for cmd_args in &[vec!["add", "."], vec!["commit", "-m", "snapshot api"]] {
+//RS         Command::new("git")
+//RS             .args(cmd_args)
+//RS             .current_dir(&proj)
+//RS             .output()
+//RS             .unwrap();
+//RS     }
+//RS 
+//RS     // Republish the same version → E1234 immutability.
+//RS     let out2 = jet_cmd_env(&["registry", "publish"], &proj, envs);
+//RS     assert!(
+//RS         !out2.status.success(),
+//RS         "republishing an existing version must fail"
+//RS     );
+//RS     let stderr2 = String::from_utf8_lossy(&out2.stderr);
+//RS     assert!(
+//RS         stderr2.contains("E1234"),
+//RS         "republish must cite E1234:\n{stderr2}"
+//RS     );
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cli_concurrent_publish_keeps_one_immutable_version() {
+//RS     if !jet_bin().is_file() || !have_git() {
+//RS         eprintln!("note: skipping cli_concurrent_publish (need built binary and git)");
+//RS         return;
+//RS     }
+//RS 
+//RS     let tmp = tmp_dir("pub_concurrent");
+//RS     let left = tmp.join("left");
+//RS     let right = tmp.join("right");
+//RS     let bare = tmp.join("registry.git");
+//RS     let url = bare_registry(&bare);
+//RS     let cache = tmp.join("cache");
+//RS     let keys = tmp.join("keys");
+//RS     fs::create_dir_all(&left).unwrap();
+//RS     fs::create_dir_all(&right).unwrap();
+//RS     init_clean_project(&left, "racekit", "1.0.0");
+//RS     init_clean_project(&right, "racekit", "1.0.0");
+//RS     write(
+//RS         &right,
+//RS         "run.jet",
+//RS         "#Test(\"smoke\") { expect(1 == 1) }\nfn run() { print(\"different bytes\") }\n",
+//RS     );
+//RS     for args in &[vec!["add", "."], vec!["commit", "-m", "different source"]] {
+//RS         Command::new("git")
+//RS             .args(args)
+//RS             .current_dir(&right)
+//RS             .output()
+//RS             .unwrap();
+//RS     }
+//RS     seed_core_review(&bare, "racekit", "1.0.0");
+//RS 
+//RS     let keygen = jet_cmd_env(
+//RS         &["registry", "keygen"],
+//RS         &left,
+//RS         &[("JET_KEYS_DIR", keys.to_str().unwrap())],
+//RS     );
+//RS     assert!(
+//RS         keygen.status.success(),
+//RS         "shared publish keygen failed: {}",
+//RS         String::from_utf8_lossy(&keygen.stderr)
+//RS     );
+//RS 
+//RS     let spawn = |project: &Path, store: &Path| {
+//RS         Command::new(jet_bin())
+//RS             .args(["registry", "publish"])
+//RS             .current_dir(project)
+//RS             .env("JET_REGISTRY_URL", &url)
+//RS             .env("JET_REGISTRY_CACHE_DIR", &cache)
+//RS             .env("JET_KEYS_DIR", &keys)
+//RS             .env("JET_PACKAGE_STORE_DIR", store)
+//RS             .stdout(Stdio::piped())
+//RS             .stderr(Stdio::piped())
+//RS             .spawn()
+//RS             .unwrap()
+//RS     };
+//RS     let left_child = spawn(&left, &tmp.join("left-store"));
+//RS     let right_child = spawn(&right, &tmp.join("right-store"));
+//RS     let left_output = left_child.wait_with_output().unwrap();
+//RS     let right_output = right_child.wait_with_output().unwrap();
+//RS     let outputs = [&left_output, &right_output];
+//RS     assert_eq!(
+//RS         outputs
+//RS             .iter()
+//RS             .filter(|output| output.status.success())
+//RS             .count(),
+//RS         1,
+//RS         "exactly one concurrent immutable publish may win: left={:?}, right={:?}",
+//RS         left_output.status,
+//RS         right_output.status
+//RS     );
+//RS     let loser = outputs
+//RS         .iter()
+//RS         .find(|output| !output.status.success())
+//RS         .expect("one concurrent publisher must lose");
+//RS     assert!(
+//RS         String::from_utf8_lossy(&loser.stderr).contains("E1234"),
+//RS         "duplicate concurrent publish must report immutable-version error: {}",
+//RS         String::from_utf8_lossy(&loser.stderr)
+//RS     );
+//RS 
+//RS     let index = read_index_file(&bare, "racekit").expect("winning index entry must be published");
+//RS     assert_eq!(
+//RS         index
+//RS             .lines()
+//RS             .filter(|line| line.contains("\"version\":\"1.0.0\""))
+//RS             .count(),
+//RS         1,
+//RS         "concurrent publication must leave one immutable index line: {index}"
+//RS     );
+//RS     for path in [
+//RS         "artifacts/racekit/1.0.0/package.jet",
+//RS         "metadata/racekit.json",
+//RS         "transparency/log",
+//RS         "transparency/checkpoint",
+//RS     ] {
+//RS         let output = Command::new("git")
+//RS             .args(["--git-dir", bare.to_str().unwrap(), "cat-file", "-e"])
+//RS             .arg(format!("HEAD:{path}"))
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(output.status.success(), "winning publish omitted {path}");
+//RS     }
+//RS 
+//RS     let _ = fs::remove_dir_all(&tmp);
+//RS }
+//RS 
+//RS #[test]
+//RS fn registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it() {
+//RS     if !jet_bin().is_file() || !have_git() {
+//RS         eprintln!(
+//RS             "note: skipping registry_fetch_installs_verified_artifact (need built binary and git)"
+//RS         );
+//RS         return;
+//RS     }
+//RS 
+//RS     let tmp = tmp_dir("registry_fetch_hangar");
+//RS     let publisher = tmp.join("publisher");
+//RS     let consumer = tmp.join("consumer");
+//RS     fs::create_dir_all(&publisher).unwrap();
+//RS     fs::create_dir_all(&consumer).unwrap();
+//RS     let bare = tmp.join("registry.git");
+//RS     let url = bare_registry(&bare);
+//RS     let cache = tmp.join("registry-cache");
+//RS     let store = tmp.join("legacy-store");
+//RS     let hangar_root = tmp.join("jetpack-root");
+//RS     let keys = tmp.join("keys");
+//RS     fs::create_dir_all(&store).unwrap();
+//RS     init_clean_project(&publisher, "textkit", "1.2.0");
+//RS     seed_core_review(&bare, "textkit", "1.2.0");
+//RS 
+//RS     let publish = jet_cmd_env(
+//RS         &["registry", "publish"],
+//RS         &publisher,
+//RS         &[
+//RS             ("JET_REGISTRY_URL", url.as_str()),
+//RS             ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
+//RS             ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()),
+//RS             ("JET_KEYS_DIR", keys.to_str().unwrap()),
+//RS         ],
+//RS     );
+//RS     assert!(
+//RS         publish.status.success(),
+//RS         "registry publish failed:\n{}",
+//RS         String::from_utf8_lossy(&publish.stderr)
+//RS     );
+//RS 
+//RS     let raw = format!(
+//RS         "{}\npolicy: {{ licenses: .Allow([\"MIT\"]), sources: {{ \"textkit\": [\"jet\"] }} }}\n",
+//RS         manifest_with_deps("consumer", "0.1.0", "    textkit: textkit#1.2.0,")
+//RS     );
+//RS     write(&consumer, "package.jet", &raw);
+//RS     let manifest = jet::Manifest::parse(&consumer.join("package.jet"), &raw).unwrap();
+//RS     let opts = jet::Fetch::FetchOptions {
+//RS         locked: false,
+//RS         update: false,
+//RS         update_dep: None,
+//RS         resolution: jet::Publish::ResolveMode::Conservative,
+//RS     };
+//RS 
+//RS     let denied_raw = format!(
+//RS         "{}\npolicy: {{ licenses: .Allow([\"MIT\"]), sources: {{ \"textkit\": [\"other\"] }} }}\n",
+//RS         manifest_with_deps("consumer", "0.1.0", "    textkit: textkit#1.2.0,")
+//RS     );
+//RS     let denied_manifest = jet::Manifest::parse(&consumer.join("package.jet"), &denied_raw)
+//RS         .expect("denied policy manifest parses");
+//RS     let denied = with_store(&store, || {
+//RS         let previous = [
+//RS             ("JET_REGISTRY_URL", std::env::var_os("JET_REGISTRY_URL")),
+//RS             (
+//RS                 "JET_REGISTRY_CACHE_DIR",
+//RS                 std::env::var_os("JET_REGISTRY_CACHE_DIR"),
+//RS             ),
+//RS             ("JET_KEYS_DIR", std::env::var_os("JET_KEYS_DIR")),
+//RS             ("JETPACK_ROOT", std::env::var_os("JETPACK_ROOT")),
+//RS         ];
+//RS         std::env::set_var("JET_REGISTRY_URL", &url);
+//RS         std::env::set_var("JET_REGISTRY_CACHE_DIR", &cache);
+//RS         std::env::set_var("JET_KEYS_DIR", &keys);
+//RS         std::env::set_var("JETPACK_ROOT", &hangar_root);
+//RS         let result = jet::Fetch::fetch(&consumer, &denied_manifest, None, &opts);
+//RS         for (key, value) in previous {
+//RS             if let Some(value) = value {
+//RS                 std::env::set_var(key, value);
+//RS             } else {
+//RS                 std::env::remove_var(key);
+//RS             }
+//RS         }
+//RS         result
+//RS     })
+//RS     .expect_err("wrong source mapping must deny before Hangar ingest");
+//RS     assert_eq!(denied[0].code, "E1207");
+//RS     assert!(denied[0].what.contains("source authority"));
+//RS     assert!(denied[0].what.contains("consumer -> textkit#1.2.0"));
+//RS     assert!(denied[0].why.contains("package `consumer`"));
+//RS     assert!(denied[0].fix.contains("use an allowed source"));
+//RS     assert!(
+//RS         jetpack::Store::list(&jetpack::Store::Roots::at(hangar_root.clone()))
+//RS             .into_iter()
+//RS             .all(|entry| !(entry.name == "textkit" && entry.version == "1.2.0"))
+//RS     );
+//RS 
+//RS     let (lock, dep_dirs) = with_store(&store, || {
+//RS         let previous = [
+//RS             ("JET_REGISTRY_URL", std::env::var_os("JET_REGISTRY_URL")),
+//RS             (
+//RS                 "JET_REGISTRY_CACHE_DIR",
+//RS                 std::env::var_os("JET_REGISTRY_CACHE_DIR"),
+//RS             ),
+//RS             ("JET_KEYS_DIR", std::env::var_os("JET_KEYS_DIR")),
+//RS             ("JETPACK_ROOT", std::env::var_os("JETPACK_ROOT")),
+//RS         ];
+//RS         std::env::set_var("JET_REGISTRY_URL", &url);
+//RS         std::env::set_var("JET_REGISTRY_CACHE_DIR", &cache);
+//RS         std::env::set_var("JET_KEYS_DIR", &keys);
+//RS         std::env::set_var("JETPACK_ROOT", &hangar_root);
+//RS         let result = jet::Fetch::fetch(&consumer, &manifest, None, &opts);
+//RS         for (key, value) in previous {
+//RS             if let Some(value) = value {
+//RS                 std::env::set_var(key, value);
+//RS             } else {
+//RS                 std::env::remove_var(key);
+//RS             }
+//RS         }
+//RS         result.expect("verified registry fetch should succeed")
+//RS     });
+//RS 
+//RS     let installed = dep_dirs.get("textkit").expect("registry dep directory");
+//RS     assert!(
+//RS         installed.starts_with(hangar_root.join("hangar").join("objects")),
+//RS         "registry dependency must resolve from Hangar, got {}",
+//RS         installed.display()
+//RS     );
+//RS     assert!(installed.join("package.jet").is_file());
+//RS     assert!(
+//RS         !installed.starts_with(&store),
+//RS         "registry dependency must not use the legacy path store"
+//RS     );
+//RS     let lock_source = lock
+//RS         .packages
+//RS         .iter()
+//RS         .find(|package| package.name == "textkit")
+//RS         .expect("registry package must be locked");
+//RS     assert!(
+//RS         matches!(&lock_source.source, jet::Lock::LockSource::Registry { .. }),
+//RS         "registry dependency must retain registry lock identity"
+//RS     );
+//RS     let hangar_entry = jetpack::Store::list(&jetpack::Store::Roots::at(hangar_root.clone()))
+//RS         .into_iter()
+//RS         .find(|entry| entry.name == "textkit" && entry.version == "1.2.0")
+//RS         .expect("registry fetch must register immutable Hangar metadata");
+//RS     assert_eq!(
+//RS         hangar_entry.out.as_str(),
+//RS         installed.to_string_lossy().as_ref(),
+//RS         "Hangar metadata must point at the resolved output"
+//RS     );
+//RS     assert_eq!(
+//RS         hangar_entry.cache_identity.source_fingerprint,
+//RS         lock_source
+//RS             .content_hash
+//RS             .as_deref()
+//RS             .expect("registry lock must retain the source hash")
+//RS     );
+//RS     assert!(
+//RS         hangar_entry
+//RS             .envelope
+//RS             .provenance
+//RS             .contains("package=textkit#1.2.0"),
+//RS         "Hangar provenance must retain the immutable registry package identity"
+//RS     );
+//RS     assert!(
+//RS         hangar_entry
+//RS             .envelope
+//RS             .provenance
+//RS             .contains("package-policy=package=textkit#1.2.0;license=MIT;source=jet;source-rule=textkit => [jet];fingerprint=sha256-"),
+//RS         "Hangar provenance must retain the package policy receipt"
+//RS     );
+//RS     assert!(
+//RS         hangar_entry
+//RS             .cache_identity
+//RS             .policy_fingerprint
+//RS             .starts_with("sha256-"),
+//RS         "Hangar cache identity must bind the package policy"
+//RS     );
+//RS     assert_eq!(
+//RS         hangar_entry.cache_identity.policy_fingerprint,
+//RS         jet::Publish::policy_fingerprint(&manifest.policy),
+//RS         "Hangar cache identity must use the canonical policy fingerprint"
+//RS     );
+//RS     assert!(
+//RS         hangar_entry
+//RS             .envelope
+//RS             .provenance
+//RS             .contains("oci-referrers=subject="),
+//RS         "Hangar provenance must retain the verified OCI referrer receipt"
+//RS     );
+//RS 
+//RS     let update_opts = jet::Fetch::FetchOptions {
+//RS         locked: false,
+//RS         update: true,
+//RS         update_dep: Some("textkit".to_string()),
+//RS         resolution: jet::Publish::ResolveMode::Conservative,
+//RS     };
+//RS     with_store(&store, || {
+//RS         let previous = [
+//RS             ("JET_REGISTRY_URL", std::env::var_os("JET_REGISTRY_URL")),
+//RS             (
+//RS                 "JET_REGISTRY_CACHE_DIR",
+//RS                 std::env::var_os("JET_REGISTRY_CACHE_DIR"),
+//RS             ),
+//RS             ("JET_KEYS_DIR", std::env::var_os("JET_KEYS_DIR")),
+//RS             ("JETPACK_ROOT", std::env::var_os("JETPACK_ROOT")),
+//RS         ];
+//RS         std::env::set_var("JET_REGISTRY_URL", &url);
+//RS         std::env::set_var("JET_REGISTRY_CACHE_DIR", &cache);
+//RS         std::env::set_var("JET_KEYS_DIR", &keys);
+//RS         std::env::set_var("JETPACK_ROOT", &hangar_root);
+//RS         let result = jet::Fetch::fetch(&consumer, &manifest, Some(&lock), &update_opts);
+//RS         for (key, value) in previous {
+//RS             if let Some(value) = value {
+//RS                 std::env::set_var(key, value);
+//RS             } else {
+//RS                 std::env::remove_var(key);
+//RS             }
+//RS         }
+//RS         result.expect("targeted registry update should preserve the verified package")
+//RS     });
+//RS     let semantic_lock = fs::read_to_string(consumer.join(".jet/lock")).unwrap();
+//RS     assert!(semantic_lock.contains("adapter-id = \"registry.pubgrub\""));
+//RS     assert!(semantic_lock.contains("update-command = \"jet update textkit\""));
+//RS     assert!(semantic_lock.contains("exact = \"textkit#1.2.0\""));
+//RS     assert!(
+//RS         semantic_lock.contains(
+//RS             "package-policy=package=textkit#1.2.0;license=MIT;source=jet;source-rule=textkit => [jet];fingerprint=sha256-"
+//RS         ),
+//RS         "semantic lock must retain the matched source rule and policy receipt: {semantic_lock}"
+//RS     );
+//RS     assert!(semantic_lock.contains("pattern = \"textkit\""));
+//RS     assert!(semantic_lock.contains("sources = [\"jet\"]"));
+//RS 
+//RS     let locked_opts = jet::Fetch::FetchOptions {
+//RS         locked: true,
+//RS         update: false,
+//RS         update_dep: None,
+//RS         resolution: jet::Publish::ResolveMode::Conservative,
+//RS     };
+//RS     let locked_dirs = with_store(&store, || {
+//RS         let previous = [
+//RS             ("JET_REGISTRY_URL", std::env::var_os("JET_REGISTRY_URL")),
+//RS             (
+//RS                 "JET_REGISTRY_CACHE_DIR",
+//RS                 std::env::var_os("JET_REGISTRY_CACHE_DIR"),
+//RS             ),
+//RS             ("JET_KEYS_DIR", std::env::var_os("JET_KEYS_DIR")),
+//RS             ("JETPACK_ROOT", std::env::var_os("JETPACK_ROOT")),
+//RS         ];
+//RS         std::env::set_var("JET_REGISTRY_URL", &url);
+//RS         std::env::set_var("JET_REGISTRY_CACHE_DIR", &cache);
+//RS         std::env::set_var("JET_KEYS_DIR", &keys);
+//RS         std::env::set_var("JETPACK_ROOT", &hangar_root);
+//RS         let result = jet::Fetch::fetch(&consumer, &manifest, Some(&lock), &locked_opts);
+//RS         for (key, value) in previous {
+//RS             if let Some(value) = value {
+//RS                 std::env::set_var(key, value);
+//RS             } else {
+//RS                 std::env::remove_var(key);
+//RS             }
+//RS         }
+//RS         result
+//RS             .expect("locked registry fetch should verify and reuse the published artifact")
+//RS             .1
+//RS     });
+//RS     assert_eq!(
+//RS         locked_dirs.get("textkit"),
+//RS         Some(installed),
+//RS         "locked consumption must resolve the same immutable Hangar object"
+//RS     );
+//RS 
+//RS     let offline_registry_url = format!("file://{}/must-not-be-read.git", tmp.display());
+//RS     let offline = jet_cmd_env(
+//RS         &["fetch", "--offline"],
+//RS         &consumer,
+//RS         &[
+//RS             ("JET_REGISTRY_URL", offline_registry_url.as_str()),
+//RS             ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
+//RS             ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()),
+//RS             ("JET_KEYS_DIR", keys.to_str().unwrap()),
+//RS             ("JETPACK_ROOT", hangar_root.to_str().unwrap()),
+//RS         ],
+//RS     );
+//RS     assert!(
+//RS         offline.status.success(),
+//RS         "offline registry fetch must use the verified local lock path:\n{}",
+//RS         String::from_utf8_lossy(&offline.stderr)
+//RS     );
+//RS 
+//RS     common::make_tree_writable(&tmp);
+//RS     fs::remove_dir_all(tmp).unwrap();
+//RS }
+//RS 
+//RS #[test]
+// END-PORT-PENDING 1132 tests/pkg.rs:5433-7274
+

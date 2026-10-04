@@ -3,10 +3,10 @@
 // allocated ports, the shutdown marker, supervisor errors, and captured logs.
 // Every state file is replaced whole, so a reader never sees half a record.
 
-@SERVICES_MAX_SERVICE_NAME_BYTES :: 256
-@SERVICES_MAX_STATE_BYTES :: 4096
-@SERVICES_MAX_LIFECYCLE_BYTES :: 16384
-@SERVICES_SUPERVISOR_ENV :: "JETPACK_SERVICE_SUPERVISOR"
+SERVICES_MAX_SERVICE_NAME_BYTES :: prep { 256 }
+SERVICES_MAX_STATE_BYTES :: prep { 4096 }
+SERVICES_MAX_LIFECYCLE_BYTES :: prep { 16384 }
+SERVICES_SUPERVISOR_ENV :: prep { "JETPACK_SERVICE_SUPERVISOR" }
 
 // A service process's saved identity: the PID plus the platform-tagged start
 // token and optional containment name (D-CORE-PROCIDENT1), so a reused PID
@@ -32,14 +32,14 @@ enum PersistedProcessState {
     Verified(ServiceProcessState)
     // Written by Jetpack versions that persisted only a PID. It may be
     // removed but never authorizes a liveness claim or a signal.
-    LegacyPid(Int)
+    LegacyPID(Int)
 }
 
 // The verified identity of a record; a legacy PID authorizes nothing.
 fn services_verified_state(record: PersistedProcessState) -> ServiceProcessState? Never! {
     if record == {
         .Verified(verified) -> Val(verified)
-        .LegacyPid(_) -> None
+        .LegacyPID(_) -> None
     }
 }
 
@@ -148,7 +148,7 @@ enum ServiceAuthority {
 
 // The `.jet/services/<canonical-name>/` directory for `name`.
 fn services_service_dir(project_dir: String, name: String) -> String Never! {
-    root :: files.join(files.join(project_dir, @CONFIG_DEFAULT_DIR), @SERVICES_STATE_DIR)
+    root :: files.join(files.join(project_dir, CONFIG_DEFAULT_DIR), SERVICES_STATE_DIR)
     canonical :: services_canonical_service_name(name)
     if canonical == "" -> return root
     files.join(root, canonical)
@@ -170,7 +170,7 @@ fn services_stderr_path(dir: String) -> String Never! { files.join(dir, "stderr.
 
 // The recorded supervisor failure for `plan`, if any.
 fn services_supervisor_failure(project_dir: String, plan: DevServicePlan) -[FS]> String? Never! {
-    text :: services_read_text_bounded(services_supervisor_error_path(services_service_dir(project_dir, plan.name)), @SERVICES_MAX_STATE_BYTES) ?? return None
+    text :: services_read_text_bounded(services_supervisor_error_path(services_service_dir(project_dir, plan.name)), SERVICES_MAX_STATE_BYTES) ?? return None
     error :: text.trim()
     if error == "" -> return None
     Val(error)
@@ -188,7 +188,6 @@ fn services_write_atomic(path: String, contents: [U8]) IOError! -[FS, Env]> {
         files.remove(temporary).drop("the temporary is abandoned after a failed publish")
         return Err(error)
     }
-    Ok()
 }
 
 fn services_replace_through(temporary: String, path: String, contents: [U8]) IOError! -[FS]> {
@@ -210,7 +209,6 @@ fn services_remove_existing(path: String) IOError! -[FS]> {
     if files.remove(path) == .Err(error) {
         if !services_is_not_found(error) -> return Err(error)
     }
-    Ok()
 }
 
 fn services_is_not_found(error: IOError) -> Bool Never! {
@@ -257,7 +255,7 @@ fn services_parse_pid(text: String) -> Int? Never! {
 fn services_read_process_state(dir: String) -[FS]> PersistedProcessState? ServicesError! {
     path :: services_pid_path(dir)
     invalid :: ServicesError.new("service process state `{path}` is invalid")
-    text :: if services_read_text_bounded(path, @SERVICES_MAX_STATE_BYTES) == {
+    text :: if services_read_text_bounded(path, SERVICES_MAX_STATE_BYTES) == {
         .Ok(text) -> text
         .Err(error) -> {
             if services_is_not_found(error) -> return Ok(None)
@@ -267,13 +265,13 @@ fn services_read_process_state(dir: String) -[FS]> PersistedProcessState? Servic
     trimmed :: text.trim()
     if Int.parse(trimmed) == .Val(legacy) {
         if legacy <= 0 || legacy > 4294967295 -> return Err(invalid)
-        return Ok(Val(PersistedProcessState.LegacyPid(legacy)))
+        return Ok(Val(PersistedProcessState.LegacyPID(legacy)))
     }
     if trimmed == "" -> return Err(invalid)
     version := false
-    pid := None
-    start := None
-    containment := None
+    pid := Int?{None}
+    start := String?{None}
+    containment := String?{None}
     seen := [String]{}
     lines :: services_lines(trimmed)
     loop raw in lines {
@@ -309,11 +307,11 @@ fn services_authority_from_lifecycle(facts: LifecycleFacts) -> ServiceAuthority 
         "test-process-group" -> Ok(ServiceAuthority.TestProcessGroup)
         "linux-systemd-user" -> {
             unit :: facts.unit ?? return Err(ServicesError.new("service lifecycle state is missing its systemd unit"))
-            Ok(ServiceAuthority.LinuxSystemdUser(unit))
+            Ok(ServiceAuthority.LinuxSystemdUser{unit: unit})
         }
         "windows-guardian-job-object" -> {
             guardian :: facts.guardian ?? return Err(ServicesError.new("service lifecycle state is missing its guardian"))
-            Ok(ServiceAuthority.WindowsGuardianJobObject(guardian))
+            Ok(ServiceAuthority.WindowsGuardianJobObject{guardian: guardian})
         }
         "unsupported" -> Ok(ServiceAuthority.Unsupported)
         else -> Err(ServicesError.new("service lifecycle state has unknown authority `{facts.backend}`"))
@@ -352,7 +350,7 @@ fn services_write_lifecycle_quiet(dir: String, facts: LifecycleFacts) -[FS, Env]
 fn services_read_lifecycle(dir: String) -[FS]> LifecycleFacts? ServicesError! {
     path :: services_lifecycle_path(dir)
     invalid :: ServicesError.new("service lifecycle state `{path}` is invalid")
-    text :: if services_read_text_bounded(path, @SERVICES_MAX_LIFECYCLE_BYTES) == {
+    text :: if services_read_text_bounded(path, SERVICES_MAX_LIFECYCLE_BYTES) == {
         .Ok(text) -> text
         .Err(error) -> {
             if services_is_not_found(error) -> return Ok(None)
@@ -360,14 +358,14 @@ fn services_read_lifecycle(dir: String) -[FS]> LifecycleFacts? ServicesError! {
         }
     }
     version := false
-    backend := None
-    generation := None
-    phase := None
-    containment := None
-    recovery := None
-    pid := None
-    unit := None
-    guardian := None
+    backend := String?{None}
+    generation := Int?{None}
+    phase := ServicePhase?{None}
+    containment := String?{None}
+    recovery := String?{None}
+    pid := Int?{None}
+    unit := String?{None}
+    guardian := String?{None}
     dependencies := [String]{}
     seen := [String]{}
     lines :: services_lines(text)
@@ -433,7 +431,6 @@ fn services_validate_lifecycle_authority(facts: LifecycleFacts, path: String) Se
     if facts.backend != authority.backend() || facts.containment != authority.containment() || facts.unit != authority.unit() || facts.guardian != authority.guardian() {
         return Err(ServicesError.new("service lifecycle state `{path}` has inconsistent authority facts"))
     }
-    Ok()
 }
 
 // E1262: the first unrecognized `services:` field. `extra` holds every

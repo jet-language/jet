@@ -1,0 +1,190 @@
+// System/Fleet capture shares the canonical parser, pure evaluator and plans.
+// Source text is provenance only; downstream consumers use the typed fields.
+pub fn envmodel_evaluate_system(path: String, lit: SystemLit, src: String, scope: ModuleEvalScope, globals: [String: CtValue]) -> SystemPlan EnvModelEvalError! {
+    target := String?{None}
+    packages := [Pkg]{}
+    services := [ServicePlan]{}
+    options := [OptionPlan]{}
+    bytes :: src.bytes()
+    loop field in lit.fields {
+        if field.value == {
+            .Platform(os, arch, span) -> target = Val(envmodel_check_platform(os, arch, span))
+            .Packages(expr) -> {
+                loop package in envmodel_extract_packages(expr, src).packages -> { &packages.push(package) }
+            }
+            .Services(entries) -> {
+                loop entry in entries -> { &services.push(envmodel_evaluate_system_service(entry, scope, globals)) }
+            }
+            .Options(entries) -> {
+                loop entry in entries {
+                    text := pkg_bytes_text(bytes, entry.value_span.start, entry.value_span.end).trim() // #4303
+                    &options.push(OptionPlan{key: entry.key, value: text})
+                }
+            }
+            .Other(_) -> { return Err(envmodel_unknown_record_field("System", field.name, "`target`, `packages`, `services`, `options`", field.name_span)) }
+        }
+    }
+    platform :: target ?? return Err(envmodel_missing_system_target(lit.span))
+    Ok(SystemPlan{name: path, target: platform, packages: packages, services: services, options: options})
+}
+
+fn envmodel_evaluate_system_service(entry: ServiceEntry, scope: ModuleEvalScope, globals: [String: CtValue]) -> ServicePlan EnvModelEvalError! {
+    enable := Bool?{None}
+    extra := [ServicePlanExtra]{}
+    loop field in entry.fields {
+        value :: envmodel_evaluate_expression(field.value, globals, scope)
+        if field.name == SERVICE_FIELD_ENABLE {
+            if value == {
+                .Bool(flag) -> enable = Val(flag)
+                else -> { return Err(envmodel_service_enable_not_bool(field.name_span)) }
+            }
+        } else {
+            &extra.push(ServicePlanExtra{key: field.name, value: ast_comptime_value_show(value)})
+        }
+    }
+    flag :: enable ?? return Err(envmodel_service_missing_enable(entry.name, entry.span))
+    Ok(ServicePlan{name: entry.name, enable: flag, extra: extra})
+}
+
+pub fn envmodel_evaluate_fleet(path: String, lit: FleetLit, src: String, scope: ModuleEvalScope, globals: [String: CtValue]) -> FleetPlan EnvModelEvalError! {
+    hosts := [HostPlan]?{None}
+    bytes :: src.bytes()
+    loop field in lit.fields {
+        if field.value == {
+            .Hosts(entries) -> {
+                captured := [HostPlan]{}
+                loop entry in entries {
+                    overrides := HostOverride?{None}
+                    override_source := String?{None}
+                    if entry.overrides == {
+                        .Val(span) -> {
+                            source := pkg_bytes_text(bytes, span.start, span.end).trim() // #4303
+                            overrides = Val(envmodel_evaluate_host_override(source, span, scope, globals))
+                            override_source = Val(source)
+                        }
+                        .None -> {}
+                    }
+                    &captured.push(HostPlan{name: entry.name, system: entry.system, overrides: overrides, override_source: override_source})
+                }
+                hosts = Val(captured)
+            }
+            .Other(_) -> { return Err(envmodel_fleet_unknown_field(field.name, field.name_span)) }
+        }
+    }
+    captured :: hosts ?? return Err(envmodel_fleet_missing_hosts(lit.span))
+    Ok(FleetPlan{name: path, hosts: captured})
+}
+
+fn envmodel_evaluate_host_override(source: String, original_span: Span, scope: ModuleEvalScope, globals: [String: CtValue]) -> HostOverride EnvModelEvalError! {
+    wrapped :: "module system.fleet_override {source}"
+    program :: envmodel_parse_program(wrapped) ?? {
+        diagnostic := err.diagnostic
+        diagnostic.span = Val(original_span)
+        return Err(EnvModelEvalError{diagnostic: diagnostic})
+    }
+    found := ModuleDecl?{None}
+    loop item in program.items {
+        if item == {
+            .Module(module) -> {
+                found = Val(module)
+                break
+            }
+            else -> {}
+        }
+    }
+    module :: found ?? return Err(envmodel_error("E0003", "host override is not a record", "fleet overrides use the same record evaluator as system fields", "write `.{{ field: value }}` after the system reference", Val(original_span)))
+    if module.contributions.len() == 0 -> return Err(envmodel_error("E0003", "host override is empty", "a host override must contain at least one typed field", "add a field inside the override record", Val(original_span)))
+    lit :: if module.contributions[0].value == {
+        .System(lit) -> lit
+        else -> { return Err(envmodel_error("E0003", "host override is not a system record", "fleet overrides use System field semantics", "write named fields inside `.{{ … }}`", Val(original_span))) }
+    }
+    definitions := [String: NamedFieldExpr]{}
+    loop field in lit.fields {
+        if field.value == {
+            .Other(expr) -> definitions[field.name] = NamedFieldExpr{span: field.span, expr: expr}
+            else -> {}
+        }
+    }
+    computed :: envmodel_evaluate_named_fields(definitions, globals, scope, Val(wrapped), "host override values must have a deterministic dependency order", "break the cycle by making one field independent or by moving the shared computation into a pure function")
+    field_names :: definitions.keys().to_list()
+    prefix_len :: wrapped.bytes().len() - source.bytes().len()
+    fields := [HostOverrideField]{}
+    provenance := [HostOverrideProvenance]{}
+    loop field in lit.fields {
+        value :: if field.value == {
+            .Platform(os, arch, span) -> HostOverrideValue.Platform{value: envmodel_check_platform(os, arch, span)}
+            .Packages(expr) -> HostOverrideValue.Packages{values: envmodel_extract_packages(expr, wrapped).packages}
+            .Services(entries) -> {
+                services := [ServicePlan]{}
+                loop entry in entries -> { &services.push(envmodel_evaluate_system_service(entry, scope, computed.values)) }
+                HostOverrideValue.Services{values: services}
+            }
+            .Options(entries) -> {
+                options := [OptionPlan]{}
+                loop entry in entries -> { &options.push(OptionPlan{key: entry.key, value: envmodel_evaluate_host_option(entry.value, entry.value_span, source, prefix_len, scope, computed.values)}) }
+                HostOverrideValue.Options{values: options}
+            }
+            .Other(expr) -> HostOverrideValue.Value{value: envmodel_evaluate_expression(expr, computed.values, scope)}
+        }
+        &fields.push(HostOverrideField{name: field.name, value: value})
+        common := ComputedFieldProvenance?{None}
+        loop candidate in computed.provenance {
+            if candidate.field == field.name { common = Val(candidate); break }
+        }
+        dependencies := envmodel_typed_field_dependencies(field.value, field_names)
+        pure := true
+        text := envmodel_host_field_source(source, field.span, prefix_len)
+        if common == {
+            .Val(candidate) -> {
+                dependencies = candidate.dependencies
+                pure = candidate.pure
+                if !candidate.source.is_empty() -> text = candidate.source
+            }
+            .None -> {}
+        }
+        &provenance.push(HostOverrideProvenance{field: field.name, dependencies: dependencies, pure: pure, source: text})
+    }
+    Ok(HostOverride{fields: fields, source: source, provenance: provenance})
+}
+
+fn envmodel_evaluate_host_option(expr: Expr, span: Span, source: String, prefix_len: Int, scope: ModuleEvalScope, resolved: [String: CtValue]) -> String EnvModelEvalError! {
+    symbolic :: if expr == {
+        .Ident(name, _) -> !resolved.has_key(name)
+        .Field(_, _, _) | .Str(_, _) -> true
+        else -> false
+    }
+    value :: if symbolic -> CtValue.Str{value: envmodel_host_field_source(source, span, prefix_len)} else -> envmodel_evaluate_expression(expr, resolved, scope)
+    Ok(ast_comptime_value_show(value))
+}
+
+fn envmodel_host_field_source(source: String, span: Span, prefix_len: Int) -> String Never! {
+    start :: if span.start < prefix_len -> 0 else -> span.start - prefix_len
+    end :: if span.end < prefix_len -> 0 else -> span.end - prefix_len
+    bytes :: source.bytes()
+    text := if start <= end && end <= bytes.len() -> String.from_bytes(bytes[start..<end]) ?? source else -> source // #4303
+    text.trim()
+}
+
+fn envmodel_typed_field_dependencies(value: SystemFieldValue, field_names: [String]) -> [String] Never! {
+    expressions := [Expr]{}
+    if value == {
+        .Packages(expr) | .Other(expr) -> { &expressions.push(expr) }
+        .Services(entries) -> {
+            loop entry in entries {
+                loop field in entry.fields -> { &expressions.push(field.value) }
+            }
+        }
+        .Options(entries) -> {
+            loop entry in entries -> { &expressions.push(entry.value) }
+        }
+        .Platform(_, _, _) -> {}
+    }
+    dependencies := [String]{}
+    loop expr in expressions {
+        loop dependency in envmodel_dependencies_for_expression(expr, field_names) {
+            if !dependencies.contains(dependency) { &dependencies.push(dependency) }
+        }
+    }
+    &dependencies.sort()
+    dependencies
+}

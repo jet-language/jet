@@ -39,7 +39,7 @@ fn pkg_test_envelope_hook_error(out: String, hook: &EnvelopeWalkHook) -[FS, Env]
     }
 }
 
-fn pkg_test_run(argv: [String]) -[FS, Env, Exec, Time.Wait]> {
+fn pkg_test_run(argv: [String]) Never! -[FS, Env, Exec, Time.Wait]> {
     receipt :: process.cmd(argv).run() ?? panic("host tool runs")
     assert(receipt.success)
 }
@@ -47,30 +47,30 @@ fn pkg_test_run(argv: [String]) -[FS, Env, Exec, Time.Wait]> {
 // Test-only materialized encoder: the canonical archive bytes built in
 // memory, so the streaming encoder stays pinned to the same bytes.
 struct EnvelopeTestLink {
-    key: FileId
+    key: FileID
     first: String
 }
 
 fn pkg_test_reference_archive(root: String, allow_semantic_xattrs: Bool) -[FS, Env]> [U8] Never! {
-    archive := @ENVELOPE_ARCHIVE_MAGIC.bytes()
-    &archive.push(U8{0})
+    archive_bytes := ENVELOPE_ARCHIVE_MAGIC.bytes()
+    &archive_bytes.push(U8{0})
     links := [EnvelopeTestLink]{}
-    pkg_test_reference_encode_node(root, "", &archive, &links, allow_semantic_xattrs)
-    archive
+    pkg_test_reference_encode_node(root, "", &archive_bytes, &links, allow_semantic_xattrs)
+    archive_bytes
 }
 
-fn pkg_test_reference_push_bytes(out: &[U8], bytes: [U8]) {
+fn pkg_test_reference_push_bytes(out: &[U8], bytes: [U8]) Never! {
     loop byte in pkg_u64_be_bytes(bytes.len()) -> &out.push(byte)
     loop byte in bytes -> &out.push(byte)
 }
 
-fn pkg_test_reference_header(out: &[U8], kind: U8, path: [U8], mode: Int) {
+fn pkg_test_reference_header(out: &[U8], kind: U8, path: [U8], mode: Int) Never! {
     &out.push(kind)
     pkg_test_reference_push_bytes(&out, path)
     loop byte in pkg_u32_be_bytes(mode) -> &out.push(byte)
 }
 
-fn pkg_test_reference_xattrs(path: String, out: &[U8], allow: Bool) -[FS]> {
+fn pkg_test_reference_xattrs(path: String, out: &[U8], allow: Bool) Never! -[FS]> {
     names := [String]{}
     listed :: pkg_list_xattr_names(path) ?? panic("xattr names")
     loop name in listed {
@@ -87,7 +87,7 @@ fn pkg_test_reference_xattrs(path: String, out: &[U8], allow: Bool) -[FS]> {
     }
 }
 
-fn pkg_test_reference_encode_node(path: String, rel: String, out: &[U8], links: &[EnvelopeTestLink], allow: Bool) -[FS, Env]> {
+fn pkg_test_reference_encode_node(path: String, rel: String, out: &[U8], links: &[EnvelopeTestLink], allow: Bool) Never! -[FS, Env]> {
     info :: files.stat(path) ?? panic("stat fixture node")
     mode :: pkg_envelope_mode(info)
     if info.is_dir {
@@ -351,7 +351,7 @@ fn pkg_test_reference_encode_node(path: String, rel: String, out: &[U8], links: 
     files.remove(marker).drop("a stale marker may be absent")
     hook := EnvelopeWalkHook{
         events: [EnvelopeWalkEvent]{},
-        react: (path: String, stage: EnvelopeWalkStage) -[FS]> {
+        react: (path: String, stage: EnvelopeWalkStage) Never! -[FS]> {
             if files.exists(marker) || path != dir || stage != EnvelopeWalkStage.DirectorySnapshotted -> return
             files.write(marker, "") ?? panic("marker")
             transient :: files.join(dir, "transient")
@@ -400,7 +400,7 @@ fn pkg_test_reference_encode_node(path: String, rel: String, out: &[U8], links: 
     files.write(payload, "bytes") ?? panic("write")
     hook := EnvelopeWalkHook{
         events: [EnvelopeWalkEvent]{},
-        react: (path: String, stage: EnvelopeWalkStage) -[FS]> {
+        react: (path: String, stage: EnvelopeWalkStage) Never! -[FS]> {
             if path != payload || stage != EnvelopeWalkStage.FileOpened || !files.exists(payload) -> return
             files.remove(payload) ?? panic("remove payload")
         }
@@ -422,7 +422,7 @@ fn pkg_test_reference_encode_node(path: String, rel: String, out: &[U8], links: 
     files.remove(marker).drop("a stale marker may be absent")
     hook := EnvelopeWalkHook{
         events: [EnvelopeWalkEvent]{},
-        react: (path: String, stage: EnvelopeWalkStage) -[FS]> {
+        react: (path: String, stage: EnvelopeWalkStage) Never! -[FS]> {
             if files.exists(marker) || path != file || stage != EnvelopeWalkStage.FileOpened -> return
             files.write(marker, "") ?? panic("marker")
             files.write(file, "BBBB") ?? panic("rewrite")

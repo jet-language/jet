@@ -1,0 +1,421 @@
+// PORT-PENDING 0871 crates-jetpack-src-jetos-generations-activation-module-group: crates/jetpack/src/JetOS/generations_activation.rs:1-417
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::generation_files::{generations_log, systems_dir};
+//RS use super::options_rendering::risk_classes;
+//RS use super::types::Generation;
+//RS use crate::Output::Theme;
+//RS use crate::Store;
+//RS use crate::JSON;
+//RS use jet_env_model::ModuleEval::SystemPlan;
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::time::{SystemTime, UNIX_EPOCH};
+//RS 
+//RS pub(super) fn prove_activation(theme: &Theme, gen: &Generation, system: &SystemPlan) -> bool {
+//RS     let risks = risk_classes(system);
+//RS     let plan = gen.path.join("plan.json");
+//RS     let proof = gen.path.join("proof.txt");
+//RS     if !plan.is_file() || !proof.is_file() {
+//RS         theme.error_coded(
+//RS             "E1278",
+//RS             "jetos activation proof is incomplete",
+//RS             "D-WD8 requires a plan and proof artifact before `jet os switch` can activate a generation.",
+//RS             "run `jet os build <host>` again; if the generation is hand-edited, discard it.",
+//RS         );
+//RS         return false;
+//RS     }
+//RS     for svc in system.services.iter().filter(|s| s.enable) {
+//RS         let unit = gen
+//RS             .path
+//RS             .join("etc/systemd/system")
+//RS             .join(format!("{}.service", svc.name));
+//RS         if !unit.is_file() {
+//RS             theme.error_coded(
+//RS                 "E1278",
+//RS                 "jetos service proof is incomplete",
+//RS                 &format!(
+//RS                     "`{}` is enabled, but its generated systemd unit is missing.",
+//RS                     svc.name
+//RS                 ),
+//RS                 "rebuild the generation so service artifacts and proof are regenerated together.",
+//RS             );
+//RS             return false;
+//RS         }
+//RS     }
+//RS     let plan_text = match fs::read_to_string(&plan) {
+//RS         Ok(text) => text,
+//RS         Err(e) => {
+//RS             theme.error_coded(
+//RS                 "E1278",
+//RS                 "jetos activation proof is incomplete",
+//RS                 &format!("reading the plan artifact failed: {e}"),
+//RS                 "rebuild the generation so plan and proof artifacts are regenerated together.",
+//RS             );
+//RS             return false;
+//RS         }
+//RS     };
+//RS     let plan_hash = crate::SHA256::sha256_hex(plan_text.as_bytes());
+//RS     if !risks.is_empty() {
+//RS         let vm_proof = gen.path.join("vm-proof.txt");
+//RS         let vm_text = match fs::read_to_string(&vm_proof) {
+//RS             Ok(text) => text,
+//RS             Err(_) => {
+//RS                 theme.error_coded(
+//RS                     "E1278",
+//RS                     "jetos VM proof is missing",
+//RS                     "D-WD8 requires a plan-bound VM/service proof artifact for boot, kernel, filesystem, or service-risk changes.",
+//RS                     "run `jet os build <host>` again; if the generation is hand-edited, discard it.",
+//RS                 );
+//RS                 return false;
+//RS             }
+//RS         };
+//RS         if !vm_text.contains(&format!("plan-sha256: {plan_hash}"))
+//RS             || !vm_text.contains("service-artifacts: pass")
+//RS         {
+//RS             theme.error_coded(
+//RS                 "E1278",
+//RS                 "jetos VM proof is stale",
+//RS                 "the VM/service proof does not match the generation plan artifact.",
+//RS                 "rebuild the generation so proof and plan are regenerated together.",
+//RS             );
+//RS             return false;
+//RS         }
+//RS     }
+//RS     let rollback = rollback_proof_for(&gen.host, &gen.path);
+//RS     if rollback.starts_with("warning") {
+//RS         theme.error_coded(
+//RS             "E1278",
+//RS             "jetos rollback proof is incomplete",
+//RS             &rollback,
+//RS             "remove stale generation ledger entries or rebuild the previous generation.",
+//RS         );
+//RS         return false;
+//RS     }
+//RS     let mut activation = String::new();
+//RS     activation.push_str(&format!("activation proof for {}\n", gen.host));
+//RS     activation.push_str(&format!("generation: {}\n", gen.name));
+//RS     activation.push_str(&format!(
+//RS         "risk: {}\n",
+//RS         if risks.is_empty() {
+//RS             "low".to_string()
+//RS         } else {
+//RS             risks.join(", ")
+//RS         }
+//RS     ));
+//RS     activation.push_str("plan-diff: pass\n");
+//RS     if risks.is_empty() {
+//RS         activation.push_str("vm-proof: not required for low-risk change\n");
+//RS     } else {
+//RS         activation.push_str(&format!("vm-proof: pass plan-sha256={plan_hash}\n"));
+//RS     }
+//RS     activation.push_str(&format!("rollback-proof: {rollback}\n"));
+//RS     let activation_path = systems_dir()
+//RS         .join("activation-proofs")
+//RS         .join(&gen.host)
+//RS         .join(format!("{}.txt", gen.name));
+//RS     let activation_parent = activation_path.parent().unwrap_or_else(|| Path::new("."));
+//RS     let write_activation = || -> std::io::Result<()> {
+//RS         fs::create_dir_all(activation_parent)?;
+//RS         fs::write(&activation_path, activation.as_bytes())?;
+//RS         fs::File::open(&activation_path)?.sync_all()?;
+//RS         Store::sync_store_node(activation_parent, true)
+//RS     };
+//RS     if let Err(e) = write_activation() {
+//RS         theme.error_coded(
+//RS             "E1278",
+//RS             "jetos activation proof could not be recorded",
+//RS             &format!("writing activation proof failed: {e}"),
+//RS             "check permissions on the Jetpack root, or set JETPACK_ROOT.",
+//RS         );
+//RS         return false;
+//RS     }
+//RS     theme.detail("activation proof: pass");
+//RS     true
+//RS }
+//RS 
+//RS fn rollback_proof_for(host: &str, current: &Path) -> String {
+//RS     let current = current
+//RS         .canonicalize()
+//RS         .unwrap_or_else(|_| current.to_path_buf());
+//RS     let mut gens = read_generations()
+//RS         .into_iter()
+//RS         .filter(|g| g.host == host)
+//RS         .filter(|g| g.path.is_dir())
+//RS         .filter(|g| g.path.canonicalize().map(|p| p != current).unwrap_or(true))
+//RS         .collect::<Vec<_>>();
+//RS     gens.sort_by(|a, b| {
+//RS         b.created_at
+//RS             .cmp(&a.created_at)
+//RS             .then_with(|| b.name.cmp(&a.name))
+//RS     });
+//RS     match gens.into_iter().next() {
+//RS         Some(prev) => format!("pass previous={}", prev.name),
+//RS         None => "pass initial-activation".to_string(),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn append_generation(gen: &Generation, witness: &str) -> std::io::Result<u64> {
+//RS     let roots = Store::resolve();
+//RS     crate::RuntimePolicy::with_lock(&roots.root, "jetos-generations", || {
+//RS         let log = generations_log();
+//RS         let parent = log
+//RS             .parent()
+//RS             .ok_or_else(|| std::io::Error::other("generation ledger has no parent"))?;
+//RS         fs::create_dir_all(parent)?;
+//RS         let mut existing = match fs::read(&log) {
+//RS             Ok(bytes) => bytes,
+//RS             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+//RS             Err(error) => return Err(error),
+//RS         };
+//RS         if !existing.is_empty() && !existing.ends_with(b"\n") {
+//RS             let recovered_len = existing
+//RS                 .iter()
+//RS                 .rposition(|byte| *byte == b'\n')
+//RS                 .map(|offset| offset + 1)
+//RS                 .unwrap_or(0);
+//RS             let file = fs::OpenOptions::new().write(true).open(&log)?;
+//RS             file.set_len(recovered_len as u64)?;
+//RS             file.sync_all()?;
+//RS             existing.truncate(recovered_len);
+//RS         }
+//RS         if let Some(created_at) = ledger_timestamp_in(&existing, gen, witness)? {
+//RS             let file = fs::OpenOptions::new().read(true).open(&log)?;
+//RS             file.sync_all()?;
+//RS             if generation_failpoint("after-ledger-durable") {
+//RS                 return Err(std::io::Error::other(
+//RS                     "generation ledger durability failpoint",
+//RS                 ));
+//RS             }
+//RS             Store::sync_store_node(parent, true)?;
+//RS             return Ok(created_at);
+//RS         }
+//RS         let line = format!(
+//RS             "{}\t{}\t{}\t{}\t{}\n",
+//RS             gen.created_at,
+//RS             gen.host,
+//RS             gen.name,
+//RS             gen.path.display(),
+//RS             witness,
+//RS         );
+//RS         use std::io::Write;
+//RS         let mut file = fs::OpenOptions::new()
+//RS             .create(true)
+//RS             .append(true)
+//RS             .open(&log)?;
+//RS         if generation_failpoint("after-ledger-partial") {
+//RS             file.write_all(&line.as_bytes()[..line.len() / 2])?;
+//RS             file.sync_all()?;
+//RS             return Err(std::io::Error::other(
+//RS                 "generation ledger partial-write failpoint",
+//RS             ));
+//RS         }
+//RS         file.write_all(line.as_bytes())?;
+//RS         if generation_failpoint("after-ledger-append") {
+//RS             return Err(std::io::Error::other("generation ledger append failpoint"));
+//RS         }
+//RS         file.sync_all()?;
+//RS         if generation_failpoint("after-ledger-durable") {
+//RS             return Err(std::io::Error::other(
+//RS                 "generation ledger durability failpoint",
+//RS             ));
+//RS         }
+//RS         Store::sync_store_node(parent, true)?;
+//RS         Ok(gen.created_at)
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn generation_ledger_timestamp(
+//RS     gen: &Generation,
+//RS     witness: &str,
+//RS ) -> std::io::Result<Option<u64>> {
+//RS     let bytes = match fs::read(generations_log()) {
+//RS         Ok(bytes) => bytes,
+//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+//RS         Err(error) => return Err(error),
+//RS     };
+//RS     let complete = if bytes.ends_with(b"\n") {
+//RS         bytes.as_slice()
+//RS     } else {
+//RS         let len = bytes
+//RS             .iter()
+//RS             .rposition(|byte| *byte == b'\n')
+//RS             .map(|offset| offset + 1)
+//RS             .unwrap_or(0);
+//RS         &bytes[..len]
+//RS     };
+//RS     ledger_timestamp_in(complete, gen, witness)
+//RS }
+//RS 
+//RS fn ledger_timestamp_in(
+//RS     bytes: &[u8],
+//RS     gen: &Generation,
+//RS     witness: &str,
+//RS ) -> std::io::Result<Option<u64>> {
+//RS     let text = std::str::from_utf8(bytes)
+//RS         .map_err(|_| std::io::Error::other("generation ledger is not UTF-8"))?;
+//RS     for line in text.lines() {
+//RS         let parts = line.split('\t').collect::<Vec<_>>();
+//RS         if parts.len() < 3 || parts[1] != gen.host || parts[2] != gen.name {
+//RS             continue;
+//RS         }
+//RS         if parts.len() != 5 || Path::new(parts[3]) != gen.path || parts[4] != witness {
+//RS             return Err(std::io::Error::other(
+//RS                 "generation ledger cannot replace an immutable publication",
+//RS             ));
+//RS         }
+//RS         let created_at = parts[0]
+//RS             .parse::<u64>()
+//RS             .map_err(|_| std::io::Error::other("generation ledger timestamp is invalid"))?;
+//RS         return Ok(Some(created_at));
+//RS     }
+//RS     Ok(None)
+//RS }
+//RS 
+//RS fn generation_failpoint(name: &str) -> bool {
+//RS     cfg!(debug_assertions) && std::env::var("JET_TEST_GENERATION_FAILPOINT").as_deref() == Ok(name)
+//RS }
+//RS 
+//RS pub(super) fn read_generations() -> Vec<Generation> {
+//RS     let Ok(text) = fs::read_to_string(generations_log()) else {
+//RS         return Vec::new();
+//RS     };
+//RS     let mut out = Vec::new();
+//RS     for line in text.lines() {
+//RS         let parts: Vec<&str> = line.split('\t').collect();
+//RS         if parts.len() != 4 && parts.len() != 5 {
+//RS             continue;
+//RS         }
+//RS         let Ok(created_at) = parts[0].parse::<u64>() else {
+//RS             continue;
+//RS         };
+//RS         out.push(Generation {
+//RS             created_at,
+//RS             host: parts[1].to_string(),
+//RS             name: parts[2].to_string(),
+//RS             path: PathBuf::from(parts[3]),
+//RS         });
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS pub(super) fn latest_generation_for(host: &str) -> Option<Generation> {
+//RS     let mut gens = read_generations()
+//RS         .into_iter()
+//RS         .filter(|g| g.host == host)
+//RS         .filter(|g| g.path.is_dir())
+//RS         .collect::<Vec<_>>();
+//RS     gens.sort_by(|a, b| {
+//RS         b.created_at
+//RS             .cmp(&a.created_at)
+//RS             .then_with(|| b.name.cmp(&a.name))
+//RS     });
+//RS     gens.into_iter().next()
+//RS }
+//RS 
+//RS pub(super) fn generation_named(host: &str, name: &str) -> Option<Generation> {
+//RS     read_generations().into_iter().find(|generation| {
+//RS         generation.host == host && generation.name == name && generation.path.is_dir()
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn render_generation_proof_json(gen: &Generation) -> std::io::Result<String> {
+//RS     let plan = fs::read_to_string(gen.path.join("plan.json"))?;
+//RS     let proof = fs::read_to_string(gen.path.join("proof.txt"))?;
+//RS     let activation_diff = fs::read_to_string(gen.path.join("activation-diff.txt"))?;
+//RS     let health = fs::read_to_string(gen.path.join("health-checks.txt"))?;
+//RS     let provenance = fs::read_to_string(gen.path.join("provenance.json"))?;
+//RS     let boot = fs::read_to_string(gen.path.join("boot/facts.json"))?;
+//RS     let init = fs::read_to_string(gen.path.join("init/systemd.json"))?;
+//RS     let secrets = fs::read_to_string(gen.path.join("secrets.tmpfs.manifest"))?;
+//RS     let vm_proof = fs::read_to_string(gen.path.join("vm-proof.txt")).unwrap_or_default();
+//RS     let source_proof = fs::read_to_string(gen.path.join("source-proof.json"))?;
+//RS     Ok(format!(
+//RS         "{{\"host\":{},\"generation\":{},\"path\":{},\"created_at\":{},\"source_proof\":{},\"plan\":{},\"proof\":{},\"activation_diff\":{},\"health\":{},\"provenance\":{},\"boot\":{},\"init\":{},\"secrets\":{},\"vm_proof\":{}}}",
+//RS         JSON::quote(&gen.host),
+//RS         JSON::quote(&gen.name),
+//RS         JSON::quote(&gen.path.display().to_string()),
+//RS         gen.created_at,
+//RS         source_proof,
+//RS         JSON::quote(&plan),
+//RS         JSON::quote(&proof),
+//RS         JSON::quote(&activation_diff),
+//RS         JSON::quote(&health),
+//RS         provenance,
+//RS         boot,
+//RS         init,
+//RS         JSON::quote(&secrets),
+//RS         JSON::quote(&vm_proof)
+//RS     ))
+//RS }
+//RS 
+//RS pub(super) fn find_rollback_generation(host: &str, requested: Option<&str>) -> Option<Generation> {
+//RS     let current = current_generation_path();
+//RS     let mut gens = read_generations()
+//RS         .into_iter()
+//RS         .filter(|g| g.host == host)
+//RS         .filter(|g| g.path.is_dir())
+//RS         .filter(|g| {
+//RS             current
+//RS                 .as_ref()
+//RS                 .map(|c| g.path.canonicalize().map(|p| p != *c).unwrap_or(true))
+//RS                 .unwrap_or(true)
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     gens.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+//RS     if let Some(name) = requested {
+//RS         return gens.into_iter().find(|g| g.name == name);
+//RS     }
+//RS     gens.into_iter().next()
+//RS }
+//RS 
+//RS pub(super) fn activate_generation(gen: &Generation) -> std::io::Result<()> {
+//RS     let dir = systems_dir();
+//RS     fs::create_dir_all(&dir)?;
+//RS     write_pointer(&dir.join("current"), &gen.path)?;
+//RS     write_pointer(&dir.join("default"), &gen.path)?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn write_pointer(link: &Path, target: &Path) -> std::io::Result<()> {
+//RS     let tmp = link.with_extension("tmp");
+//RS     let _ = fs::remove_file(&tmp);
+//RS     std::os::unix::fs::symlink(target, &tmp)?;
+//RS     fs::rename(tmp, link)
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn write_pointer(link: &Path, target: &Path) -> std::io::Result<()> {
+//RS     let tmp = link.with_extension("tmp");
+//RS     fs::write(&tmp, target.display().to_string())?;
+//RS     fs::rename(tmp, link)
+//RS }
+//RS 
+//RS pub(super) fn current_generation_path() -> Option<PathBuf> {
+//RS     let link = systems_dir().join("current");
+//RS     #[cfg(unix)]
+//RS     {
+//RS         fs::read_link(&link)
+//RS             .ok()
+//RS             .and_then(|p| p.canonicalize().ok())
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         fs::read_to_string(&link)
+//RS             .ok()
+//RS             .and_then(|s| PathBuf::from(s.trim()).canonicalize().ok())
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn now_secs() -> u64 {
+//RS     SystemTime::now()
+//RS         .duration_since(UNIX_EPOCH)
+//RS         .map(|d| d.as_secs())
+//RS         .unwrap_or(0)
+//RS }
+//RS 
+//RS pub(super) fn print_help() {
+//RS     println!("jet os check|init|plan|proof|build|switch|rollback|generations|lift|import|image|vm <host>|host@root");
+//RS }
+// END-PORT-PENDING 0871 crates/jetpack/src/JetOS/generations_activation.rs:1-417
+

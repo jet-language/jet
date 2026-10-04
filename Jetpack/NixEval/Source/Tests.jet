@@ -1,0 +1,52 @@
+// Rust: crates/jet-nix-eval/src/tests.rs:8
+ZERO_SRI :: prep { "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" }
+// Rust: crates/jet-nix-eval/src/tests.rs:9
+X86_64_LINUX_BUILD :: prep { "sha256-CM7sAhHMOi6XW7Ly1Z3ASuPzMWyz828sLRpLyt7r47Y=" }
+// Rust: crates/jet-nix-eval/src/tests.rs:10
+X86_64_LINUX_EXECUTABLE :: prep { "sha256-VdvAPujI/c6bKKSPQK+Q1dtICYEqzljvR19Ld+Ht3sQ=" }
+// Rust: crates/jet-nix-eval/src/tests.rs:11
+STAGE_A_FIXTURE :: prep { embed_file("../../../tests/fixtures/nix-compat/stage-a.json") }
+// Rust: crates/jet-nix-eval/src/tests.rs:12
+STAGE_A_AUTHORITY_FIXTURE :: prep { embed_file("../../../tests/fixtures/nix-compat/stage-a-authority.json") }
+// Rust: crates/jet-nix-eval/src/tests.rs:14
+STAGE_A_DERIVATION_FIXTURE :: prep { embed_file("../../../tests/fixtures/nix-compat/stage-a-derivation.json") }
+// Rust: crates/jet-nix-eval/src/tests.rs:16
+BREADTH_FIXTURE :: prep { embed_file("../../../tests/fixtures/nix-compat/breadth.json") }
+
+// Rust: crates/jet-nix-eval/src/tests.rs:36
+fn manifest_with_identities(status: String, corpus_status: String) -> String Never! {
+    NIXEVAL_ORACLE_JSON.replace("\"status\": \"ready\"", "\"status\": \"{status}\"").replace("bit_exact", corpus_status)
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:45
+fn ready_manifest() -> NixEvalOracleManifest Never! {
+    NixEvalOracleManifest.parse_and_validate(manifest_with_identities("ready", "bit_exact")) ?? panic("ready manifest must validate")
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:50
+fn identity(build: String, executable: String) -> NixEvalOracleIdentity Never! {
+    NixEvalOracleIdentity.new("x86_64-linux", build, executable) ?? panic("test identity must use canonical SRI")
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:653
+fn breadth_variant(source: String, seed: Int) -> String Never! {
+    if seed % 5 == {
+        0 -> "# breadth seed {seed}\n{source}"
+        1 -> "(\n{source}\n)"
+        2 -> "{source}\n# breadth seed {seed}\n"
+        3 -> "(\n# breadth seed {seed}\n{source}\n)"
+        4 -> "let result = ({source}); in result"
+        else -> "let result = {source}; in result"
+    }
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:798
+// JSON's canonical representation is an arena; a value is a document + node.
+fn fixture_strings(document: NixEvalJSON, value: Int) -> [String] Never! {
+    items :: document.array(value) ?? panic("fixture string array")
+    strings := [String]{}
+    loop item in items {
+        &strings.push(document.string(item) ?? panic("fixture string"))
+    }
+    ^strings
+}

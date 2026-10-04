@@ -1,0 +1,289 @@
+// Behavioral port of MultiProgress.rs:1365-1558, plus bounded frame contracts.
+fn progress_test_profile() -> JetCLIOutputProfile Never! {
+    facts := jet_cli_output_facts_default()
+    facts.tty = true
+    facts.term = Val("xterm-256color")
+    facts.requested_color = JetCLIColorRequest.Never
+    facts.width = Val(80)
+    jet_cli_output_profile_select(facts) ?? panic("progress profile failed")
+}
+fn progress_test_fact(progress: JetCLIMultiProgress, index: Int) -> JetCLIProgressFact Never! {
+    jet_cli_progress_task(progress, jet_cli_task_id_new(index)) ?? panic("missing task")
+}
+struct ProgressTestIntCursor { items: Queue<Int> }
+fn progress_test_int_source(items: ^[Int]) -> JetCLIProgressSource<Int> Never! {
+    cursor :: shared ProgressTestIntCursor{items: Queue.init(^items)}
+    JetCLIProgressSource<Int>{
+        pull: () Int? -> {
+            guard := cursor.guard_edit()
+            &guard.value.items.pop_front()
+        },
+        hint: () (lower: Int, upper: Int?) -> {
+            guard :: cursor.guard_read()
+            remaining :: guard.value.items.len()
+            (lower: remaining, upper: Val(remaining))
+        },
+    }
+}
+struct ProgressTestByteCursor { items: Queue<[U8]> }
+fn progress_test_byte_source(items: ^[[U8]]) -> JetCLIProgressSource<[U8]> Never! {
+    cursor :: shared ProgressTestByteCursor{items: Queue.init(^items)}
+    JetCLIProgressSource<[U8]>{
+        pull: () [U8]? -> {
+            guard := cursor.guard_edit()
+            &guard.value.items.pop_front()
+        },
+        hint: () (lower: Int, upper: Int?) -> {
+            guard :: cursor.guard_read()
+            remaining :: guard.value.items.len()
+            (lower: remaining, upper: Val(remaining))
+        },
+    }
+}
+fn progress_test_convert(error: JetCLIProgressError) -> JetCLIProgressError Never! { ~error }
+fn progress_test_byte_length(chunk: [U8]) -> U64 JetCLIProgressError! { Ok(U64{chunk.len()}) }
+fn progress_test_item_work(item: Int) -> Int JetCLIProgressError! { Ok(item) }
+fn progress_test_byte_work(chunk: [U8]) -> Int JetCLIProgressError! {
+    if chunk == "de".bytes() -> return Err(JetCLIProgressError.InvalidText("work"))
+    Ok(chunk.len())
+}
+fn progress_test_scope_success(scope: JetCLIProgressReporter) -> Int JetCLIProgressError! {
+    jet_cli_progress_reporter_increment(scope, U64{2}) ?? return Err(err)
+    Ok(7)
+}
+fn progress_test_scope_error(scope: JetCLIProgressReporter) -> Int JetCLIProgressError! {
+    jet_cli_progress_reporter_increment(scope, U64{2}) ?? return Err(err)
+    Err(JetCLIProgressError.InvalidText("callback"))
+}
+fn progress_test_scope_cancel(scope: JetCLIProgressReporter) -> Int JetCLIProgressError! {
+    jet_cli_progress_reporter_increment(scope, U64{2}) ?? return Err(err)
+    jet_cli_progress_reporter_cancel(scope) ?? return Err(err)
+    Ok(0)
+}
+#Test("counts_stay_observed_when_work_exceeds_or_revises_estimate") {
+    progress := jet_cli_progress_new(progress_test_profile())
+    id :: jet_cli_progress_add_known(&progress, "download", U64{10}) ?? panic("add")
+    jet_cli_progress_increment(&progress, id, U64{12}) ?? panic("increment")
+    fact :: progress_test_fact(progress, 0)
+    assert(fact.completed == (U64{12}))
+    assert(fact.total == JetCLIProgressTotal.Known(U64{10}))
+    assert(fact.state == JetCLIProgressState.Running)
+    assert_eq(jet_cli_progress_fact_percentage(fact) ?? -1, 100)
+    jet_cli_progress_set_total(&progress, id, Val(U64{1})) ?? panic("total")
+    revised :: progress_test_fact(progress, 0)
+    assert(revised.completed == (U64{12}))
+    assert(revised.total == JetCLIProgressTotal.Known(U64{1}))
+    assert(revised.state == JetCLIProgressState.Running)
+    jet_cli_progress_finish(&progress, id) ?? panic("finish")
+    finished :: progress_test_fact(progress, 0)
+    assert(finished.completed == (U64{12}))
+    assert(finished.state == JetCLIProgressState.Finished)
+}
+#Test("zero_estimate_and_early_finish_do_not_fabricate_work") {
+    progress := jet_cli_progress_new(progress_test_profile())
+    empty :: jet_cli_progress_add_known(&progress, "empty", U64{0}) ?? panic("add")
+    assert(progress_test_fact(progress, 0).state == JetCLIProgressState.Running)
+    assert(jet_cli_progress_fact_percentage(progress_test_fact(progress, 0)) == None)
+    jet_cli_progress_finish(&progress, empty) ?? panic("finish")
+    assert(progress_test_fact(progress, 0).completed == (U64{0}))
+    early :: jet_cli_progress_add_known(&progress, "early", U64{10}) ?? panic("add")
+    jet_cli_progress_increment(&progress, early, U64{2}) ?? panic("increment")
+    jet_cli_progress_finish(&progress, early) ?? panic("finish")
+    fact :: progress_test_fact(progress, 1)
+    assert(fact.completed == (U64{2}))
+    assert(fact.state == JetCLIProgressState.Finished)
+}
+#Test("count_overflow_rejects_update_without_changing_state") {
+    progress := jet_cli_progress_new(progress_test_profile())
+    id :: jet_cli_progress_add_unknown(&progress, "bytes") ?? panic("add")
+    jet_cli_progress_set_position(&progress, id, U64{18446744073709551615}) ?? panic("position")
+    if jet_cli_progress_increment(&progress, id, U64{1}) == {
+        .Ok(_) -> panic("overflow accepted")
+        .Err(error) -> assert(error == JetCLIProgressError.CountOverflow(id))
+    }
+    fact :: progress_test_fact(progress, 0)
+    assert(fact.completed == (U64{18446744073709551615}))
+    assert(fact.state == JetCLIProgressState.Running)
+}
+#Test("automatic_item_and_byte_helpers_finish_only_successful_work") {
+    progress := jet_cli_progress_new(progress_test_profile())
+    source :: progress_test_int_source([Int]{1, 2})
+    jet_cli_progress_each<Int, Int, JetCLIProgressError>(&progress, "items", ^source, jet_cli_task_options_known(U64{10}), progress_test_item_work, progress_test_convert) ?? panic("items")
+    items :: progress_test_fact(progress, 0)
+    assert(items.completed == (U64{2}))
+    assert(items.state == JetCLIProgressState.Finished)
+    chunks :: progress_test_byte_source([[U8]]{"abc".bytes(), "de".bytes()})
+    if jet_cli_progress_bytes<[U8], Int, JetCLIProgressError>(&progress, "bytes", ^chunks, jet_cli_task_options_unknown(), progress_test_byte_length, progress_test_byte_work, progress_test_convert) == {
+        .Ok(_) -> panic("failed chunk accepted")
+        .Err(error) -> assert(error == JetCLIProgressError.InvalidText("work"))
+    }
+    bytes :: progress_test_fact(progress, 1)
+    assert(bytes.completed == (U64{3}))
+    assert(bytes.total == JetCLIProgressTotal.Unknown)
+    assert(bytes.state == JetCLIProgressState.Failed)
+}
+#Test("scoped_success_finishes_and_preserves_observed_count") {
+    progress := jet_cli_progress_new(progress_test_profile())
+    result :: jet_cli_progress_with_task<Int, JetCLIProgressError>(&progress, "scoped", jet_cli_task_options_known(U64{10}), progress_test_scope_success, progress_test_convert) ?? panic("scope")
+    assert_eq(result, 7)
+    fact :: progress_test_fact(progress, 0)
+    assert(fact.completed == (U64{2}))
+    assert(fact.state == JetCLIProgressState.Finished)
+}
+#Test("scoped_error_and_explicit_cancel_never_finish") {
+    progress := jet_cli_progress_new(progress_test_profile())
+    if jet_cli_progress_with_task<Int, JetCLIProgressError>(&progress, "failed", jet_cli_task_options_unknown(), progress_test_scope_error, progress_test_convert) == {
+        .Ok(_) -> panic("callback error discarded")
+        .Err(error) -> assert(error == JetCLIProgressError.InvalidText("callback"))
+    }
+    failed :: progress_test_fact(progress, 0)
+    assert(failed.completed == (U64{2}))
+    assert(failed.state == JetCLIProgressState.Failed)
+    result :: jet_cli_progress_with_task<Int, JetCLIProgressError>(&progress, "cancelled", jet_cli_task_options_known(U64{2}), progress_test_scope_cancel, progress_test_convert) ?? panic("scope")
+    assert_eq(result, 0)
+    cancelled :: progress_test_fact(progress, 1)
+    assert(cancelled.completed == (U64{2}))
+    assert(cancelled.state == JetCLIProgressState.Cancelled)
+}
+#Test("dropping_manual_reporter_or_iterator_cancels_unfinished_task") {
+    progress := jet_cli_progress_new(progress_test_profile())
+    if true {
+        handle := jet_cli_progress_manual_task(&progress, "manual", jet_cli_task_options_known(U64{10})) ?? panic("manual")
+        jet_cli_progress_reporter_increment(handle, U64{3}) ?? panic("increment")
+        assert_eq(jet_cli_progress_reporter_task_id(handle).index, 0)
+    }
+    manual :: progress_test_fact(progress, 0)
+    assert(manual.completed == (U64{3}))
+    assert(manual.state == JetCLIProgressState.Cancelled)
+    id :: jet_cli_progress_add_known(&progress, "iter", U64{10}) ?? panic("add")
+    if true {
+        source :: progress_test_int_source([Int]{1, 2, 3})
+        iterator := jet_cli_progress_iter<Int>(&progress, id, ^source) ?? panic("iter")
+        assert_eq(jet_cli_progress_iter_next<Int>(&iterator) ?? -1, 1)
+    }
+    iter :: progress_test_fact(progress, 1)
+    assert(iter.completed == (U64{1}))
+    assert(iter.state == JetCLIProgressState.Cancelled)
+}
+#Test("iterator_exhaustion_finishes_without_using_estimate") {
+    progress := jet_cli_progress_new(progress_test_profile())
+    id :: jet_cli_progress_add_known(&progress, "iter", U64{10}) ?? panic("add")
+    if true {
+        source :: progress_test_int_source([Int]{1, 2})
+        iterator := jet_cli_progress_iter<Int>(&progress, id, ^source) ?? panic("iter")
+        assert_eq(jet_cli_progress_iter_next<Int>(&iterator) ?? -1, 1)
+        assert_eq(jet_cli_progress_iter_next<Int>(&iterator) ?? -1, 2)
+        assert(jet_cli_progress_iter_next<Int>(&iterator) == None)
+    }
+    fact :: progress_test_fact(progress, 0)
+    assert(fact.completed == (U64{2}))
+    assert(fact.state == JetCLIProgressState.Finished)
+}
+#Test("progress frames preserve order columns messages transient facts and diffs") {
+    progress := jet_cli_progress_new(progress_test_profile())
+    first :: jet_cli_progress_add_known(&progress, "download", U64{10}) ?? panic("add")
+    second :: jet_cli_progress_add_unknown(&progress, "compile") ?? panic("add")
+    jet_cli_progress_set_custom_column(&progress, first, "rate", "2/s") ?? panic("column")
+    jet_cli_progress_increment(&progress, first, U64{2}) ?? panic("increment")
+    observation :: jet_cli_progress_observe(&progress) ?? panic("observe")
+    frame :: observation.frame ?? panic("frame")
+    assert_eq(frame.text, "… download 2/10 running  rate=2/s\n… compile 0/? running")
+    assert_eq(frame.bytes, frame.text.bytes().len())
+    assert_eq(observation.diff.changed_lines.len(), 2)
+    same :: jet_cli_progress_observe(&progress) ?? panic("observe")
+    assert(!same.diff.changed)
+    jet_cli_progress_fail_with_message(&progress, second, Val("no input")) ?? panic("fail")
+    failed :: jet_cli_progress_observe(&progress) ?? panic("observe")
+    assert_eq(failed.diff.changed_lines.len(), 1)
+    assert_eq(failed.diff.changed_lines[0].index, 1)
+    assert_eq(failed.diff.changed_lines[0].text, "✗ compile 0/? failed  no input")
+    jet_cli_progress_set_transient(&progress, second, true) ?? panic("transient")
+    hidden :: jet_cli_progress_observe(&progress) ?? panic("observe")
+    assert_eq(hidden.facts.len(), 2)
+    assert_eq(hidden.diff.removed_lines, 1)
+    profile := progress_test_profile()
+    profile.progress_enabled = false
+    plain := jet_cli_progress_new(profile)
+    id :: jet_cli_progress_add_unknown(&plain, "hidden") ?? panic("add")
+    jet_cli_progress_increment(&plain, id, U64{3}) ?? panic("increment")
+    invisible :: jet_cli_progress_observe(&plain) ?? panic("observe")
+    assert(invisible.frame == None)
+    assert(!invisible.diff.changed)
+    assert(invisible.facts[0].completed == (U64{3}))
+}
+#Test("progress validation byte bounds precedence and column replacement") {
+    progress := jet_cli_progress_new(progress_test_profile())
+    if jet_cli_progress_add_unknown(&progress, "é".repeat(129)) == {
+        .Ok(_) -> panic("byte bound accepted")
+        .Err(error) -> assert(error == JetCLIProgressError.Limit{what: "progress task label", limit: 256})
+    }
+    control :: String.from_bytes([U8]{U8{194}, U8{133}}) ?? panic("UTF-8")
+    if jet_cli_progress_add_unknown(&progress, control) == {
+        .Ok(_) -> panic("control accepted")
+        .Err(error) -> assert(error == JetCLIProgressError.InvalidText("progress task label"))
+    }
+    id :: jet_cli_progress_add_unknown(&progress, "x") ?? panic("add")
+    loop index in 0..<16 -> jet_cli_progress_set_custom_column(&progress, id, "c{index}", "") ?? panic("column")
+    jet_cli_progress_set_custom_column(&progress, id, "c0", "new") ?? panic("replace")
+    fact :: progress_test_fact(progress, 0)
+    assert_eq(fact.columns.len(), 16)
+    assert_eq(fact.columns[0].value, "new")
+    if jet_cli_progress_set_custom_column(&progress, id, "extra", "v") == {
+        .Ok(_) -> panic("column bound accepted")
+        .Err(error) -> assert(error == JetCLIProgressError.Limit{what: "progress columns", limit: 16})
+    }
+    jet_cli_progress_finish(&progress, id) ?? panic("finish")
+    if jet_cli_progress_set_label(&progress, id, "") == {
+        .Ok(_) -> panic("invalid label accepted")
+        .Err(error) -> assert(error == JetCLIProgressError.InvalidText("progress task label"))
+    }
+    if jet_cli_progress_increment(&progress, id, U64{0}) == {
+        .Ok(_) -> panic("closed update accepted")
+        .Err(error) -> assert(error == JetCLIProgressError.TaskClosed(id))
+    }
+    if jet_cli_progress_finish(&progress, jet_cli_task_id_new(99)) == {
+        .Ok(_) -> panic("unknown task accepted")
+        .Err(error) -> assert_eq(jet_cli_progress_error_message(error), "unknown progress task 99")
+    }
+}
+#Test("progress percentage is exact over the entire u64 domain") {
+    progress := jet_cli_progress_new(progress_test_profile())
+    id :: jet_cli_progress_add_known(&progress, "large", U64{18446744073709551615}) ?? panic("add")
+    jet_cli_progress_set_position(&progress, id, U64{18446744073709551614}) ?? panic("position")
+    assert_eq(jet_cli_progress_fact_percentage(progress_test_fact(progress, 0)) ?? -1, 99)
+    jet_cli_progress_set_total(&progress, id, Val(U64{3})) ?? panic("total")
+    jet_cli_progress_set_position(&progress, id, U64{1}) ?? panic("position")
+    assert_eq(jet_cli_progress_fact_percentage(progress_test_fact(progress, 0)) ?? -1, 33)
+}
+#Test("progress frame rendering unknown total") {
+    progress := jet_cli_progress_new(progress_test_profile())
+    jet_cli_progress_add_unknown(&progress, "compile") ?? panic("add")
+    if jet_cli_progress_frame_text(progress) == {
+        .Ok(text) -> assert_eq(text ?? panic("hidden frame"), "… compile 0/? running")
+        .Err(_) -> panic("frame error")
+    }
+}
+#Test("progress frame diffs compare change append and removal without rendering") {
+    old :: Val(jet_cli_progress_frame_from_lines([String]{"a", "b"}) ?? panic("frame"))
+    same :: jet_cli_progress_diff_frames(old, old)
+    assert(!same.changed)
+    newer :: Val(jet_cli_progress_frame_from_lines([String]{"a", "c", "d"}) ?? panic("frame"))
+    changed :: jet_cli_progress_diff_frames(old, newer)
+    assert(changed.changed)
+    assert_eq(changed.changed_lines.len(), 2)
+    assert_eq(changed.changed_lines[0].index, 1)
+    assert_eq(changed.changed_lines[1].index, 2)
+    cleared :: jet_cli_progress_diff_frames(newer, None)
+    assert_eq(cleared.removed_lines, 3)
+    assert_eq(cleared.text, "")
+}
+#Test("progress manual reporter closes at scope exit") {
+    progress := jet_cli_progress_new(progress_test_profile())
+    if true {
+        reporter :: jet_cli_progress_manual_task(&progress, "manual", jet_cli_task_options_known(U64{10})) ?? panic("manual")
+        jet_cli_progress_reporter_increment(reporter, U64{3}) ?? panic("increment")
+    }
+    fact :: progress_test_fact(progress, 0)
+    assert(fact.completed == (U64{3}))
+    assert(fact.state == JetCLIProgressState.Cancelled)
+}

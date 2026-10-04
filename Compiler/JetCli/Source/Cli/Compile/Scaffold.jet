@@ -1,0 +1,246 @@
+// Project and browser-test scaffolds (Source/CmdCompile.rs:5687-5919) and the
+// `jet new` / `jet test --browser-scaffold` request policy (Source/main.rs:
+// 4719-4747, 4752-4771). The package manifest template and authority edit are
+// Jetpack's canonical Manifest Convert/Edit, the toolchain pin is Trust JetPin
+// and the lock write is the one Lock recorder; this file owns only the starter
+// assets, the materialization order and the command status/error policy.
+use core.files as scaffold_files
+use jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+use jet_foundation.[
+    BINARY_NAME,
+    COMMAND_FILE_BUILD,
+    COMMAND_FILE_DEV,
+    COMMAND_FILE_RUN,
+    COMMAND_FILE_TEST,
+    DEFAULT_ENTRY_FILE,
+    EFFECT_LEAF_EXEC_ARGS,
+    PACKAGE_FILE,
+    UNIFIED_LOCK_FILE,
+]
+
+// Rust `cli_diagnostic_copy` (main.rs:126-161) fix text of the two codes this
+// command reports without an explicit `@fix`.
+JET_CLI_SCAFFOLD_E2104_FIX :: "correct the named argument or input, then run the command again"
+JET_CLI_SCAFFOLD_E2105_FIX :: "correct the named problem, then run the command again"
+
+// Rust `cli_error!` (main.rs:290-306) through `emit_cli_value_for_action`
+// with the `cli` action: machine mode writes the status envelope on stdout,
+// human mode the rendered diagnostic on stderr with the resolved color.
+fn jet_cli_scaffold_report(code: String, what: String, fix: String, mode: JetCLIOutputMode, exit_code: Int) -> JetDriverVerbOutput Never! {
+    if mode.json -> return JetDriverVerbOutput{stdout: jet_cli_args_refuse(code, what, jet_cli_why(code), fix, true).stdout, stderr: "", exit_code: exit_code}
+    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report(code, what, jet_cli_why(code), fix, mode.color), exit_code: exit_code}
+}
+
+// ── Browser test project (D-DX-BROWSERTEST1=A) ──
+
+JET_CLI_BROWSER_TEST_CONFIG_FILE :: "browser-tests.conf"
+JET_CLI_BROWSER_TEST_DIR :: "tests"
+JET_CLI_BROWSER_TEST_SUITE_FILE :: "browser_suite.jet"
+JET_CLI_BROWSER_TEST_RUN :: "#Target(Web)\n\nfn run() {{}}\n"
+JET_CLI_BROWSER_TEST_CONFIG :: "browsers=chromium,firefox,webkit\nserver=reuse\nwebServer=jet dev\nserver-url=http://127.0.0.1:8080\nreporter=json\n"
+// D-TEST1 ratifies this parameterized `#Test fn`: BrowserPage is injected by
+// the native browser harness. Preserve the starter's exact spelling and bytes.
+JET_CLI_BROWSER_TEST_SUITE :: "use core.web.browser\n\n#Test fn first_page(page: BrowserPage) {{\n  page.goto(\"/\")\n}}\n"
+
+// Rust `Result<PathBuf, String>` error of `scaffold_browser_tests`.
+#Error
+pub struct JetCLIScaffoldError {
+    pub message: String
+}
+
+// Rust `ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-')` over every char;
+// any non-ASCII byte fails, as its char does.
+fn jet_cli_browser_test_name_valid(name: String) -> Bool Never! {
+    if name == "" || name == "." || name == ".." || name.contains("/") || name.contains("\\") -> return false
+    loop byte in name.bytes() {
+        code :: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 45) -> return false
+    }
+    true
+}
+
+// Rust `scaffold_browser_tests` (CmdCompile.rs:5689-5731): one isolated
+// native-BiDi test project with a runnable first test and explicit
+// cross-browser/server configuration. Returns the created project path.
+pub fn jet_cli_scaffold_browser_tests(root: String, name: String) -[FS]> String JetCLIScaffoldError! {
+    if !jet_cli_browser_test_name_valid(name) -> return Err(JetCLIScaffoldError{message: "browser test project name must be a simple folder name"})
+    project :: scaffold_files.join(root, name)
+    if scaffold_files.exists(project) -> return Err(JetCLIScaffoldError{message: "browser test project `{project}` already exists"})
+    tests :: scaffold_files.join(project, JET_CLI_BROWSER_TEST_DIR)
+    scaffold_files.create_dir_all(tests) ?? return Err(JetCLIScaffoldError{message: "couldn't create `{tests}`: {err}"})
+    manifest :: "name: \"{name}_browser_tests\"\nversion: \"0.1.0\"\nedition: \"2026\"\ndescription: \"Native cross-browser tests\"\n"
+    scaffold_files.write(scaffold_files.join(project, PACKAGE_FILE), manifest) ?? return Err(JetCLIScaffoldError{message: "couldn't write browser test package: {err}"})
+    scaffold_files.write(scaffold_files.join(project, DEFAULT_ENTRY_FILE), JET_CLI_BROWSER_TEST_RUN) ?? return Err(JetCLIScaffoldError{message: "couldn't write browser app entry: {err}"})
+    scaffold_files.write(scaffold_files.join(project, JET_CLI_BROWSER_TEST_CONFIG_FILE), JET_CLI_BROWSER_TEST_CONFIG) ?? return Err(JetCLIScaffoldError{message: "couldn't write browser test configuration: {err}"})
+    scaffold_files.write(scaffold_files.join(tests, JET_CLI_BROWSER_TEST_SUITE_FILE), JET_CLI_BROWSER_TEST_SUITE) ?? return Err(JetCLIScaffoldError{message: "couldn't write first browser test: {err}"})
+    Ok(project)
+}
+
+// Rust main.rs:4753-4771 `jet test --browser-scaffold=<name>` with the
+// directory the project is created in: status on success (exit 0), E2104
+// with the flag spelling on any refusal (exit 1). No test run follows.
+pub fn jet_cli_test_browser_scaffold(root: String, name: String, mode: JetCLIOutputMode) -[FS]> JetDriverVerbOutput Never! {
+    project :: jet_cli_scaffold_browser_tests(root, name) ?? return jet_cli_scaffold_report("E2104", err.message, "use `jet test --browser-scaffold=<new-project-name>`", mode, JET_DRIVER_EXIT_USER_ERROR)
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    jet_cli_write_mode_status(&output, mode, "created browser test project `{project}`\n")
+    output
+}
+
+// Rust main.rs:4754: the process working directory, or `.` when it is unreadable.
+pub fn jet_cli_test_browser_scaffold_here(name: String, mode: JetCLIOutputMode) -[FS, Env]> JetDriverVerbOutput Never! {
+    jet_cli_test_browser_scaffold(scaffold_files.cwd() ?? ".", name, mode)
+}
+
+// ── `jet new` starters (D-NEW-TEMPLATE1=A) ──
+
+// Rust `NewTemplate`: the opt-in starters behind `jet new <name> --template`.
+// Plain `jet new` (no template) writes the print-only project.
+pub enum JetCLINewTemplate {
+    // A typed `#CLI` argument struct, no UI.
+    CLI
+    // The native reactive UI tree mounted on a backend.
+    UI
+    // The browser counter app for `jet dev`.
+    Web
+    // The print-only project plus the four comment-only `@*.jet` homes.
+    Overrides
+}
+
+// Rust `NewTemplate::NAMES`.
+pub JET_CLI_NEW_TEMPLATE_NAMES :: "cli, ui, web, overrides"
+
+// Rust `NewTemplate::parse`: the exact template spellings.
+pub fn jet_cli_new_template_parse(name: String) -> JetCLINewTemplate? Never! {
+    if name == {
+        "cli" -> Val(JetCLINewTemplate.CLI)
+        "ui" -> Val(JetCLINewTemplate.UI)
+        "web" -> Val(JetCLINewTemplate.Web)
+        "overrides" -> Val(JetCLINewTemplate.Overrides)
+        else -> None
+    }
+}
+
+// Rust NEW_PRINT_RUN / NEW_CLI_RUN / NEW_UI_RUN / NEW_WEB_RUN (CmdCompile.rs:5787-5793).
+JET_CLI_NEW_PRINT_RUN :: "fn greeting(name: String) -> String {{ \"hello, {{name}}\" }}\n\nfn run() {{\n    print(greeting(\"world\"))\n}}\n\n#Test(\"the greeting stays stable\") {{\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}}\n"
+JET_CLI_NEW_CLI_RUN :: "#CLI\nstruct GreetingArgs {{\n    #Doc(\"name to greet\") name: String{{\"world\"}}\n}}\n\nfn greeting(name: String) -> String {{ \"hello, {{name}}\" }}\n\nfn run(args: GreetingArgs) {{\n    print(greeting(args.name))\n}}\n\n#Test(\"the greeting stays stable\") {{\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}}\n"
+JET_CLI_NEW_UI_RUN :: "use core.ui as ui\n\n#CLI\nstruct GreetingArgs {{\n    #Doc(\"name to greet\") name: String{{\"world\"}}\n}}\n\nfn greeting(name: String) -> String {{ \"hello, {{name}}\" }}\n\nfn run(args: GreetingArgs) {{\n    message :: greeting(args.name)\n    print(message)\n    backend :: ui.null_backend()\n    ui.reactive_render(() -> {{\n        tree :: ui.text(message)\n        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 320.0, 80.0))\n    }})\n}}\n\n#Test(\"the greeting stays stable\") {{\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}}\n"
+JET_CLI_NEW_WEB_RUN :: "// Start the live browser app: `jet dev`\n// Run the scaffold test: `jet test`\n// Build static browser files: `jet build --target web`\nuse core.ui as ui\nuse core.reactive as reactive\n#Target(Web)\n\nfn run() {{\n    count :: reactive.signal(0)\n    ui.reactive_render(() -> {{\n        n := count.get()\n        tree :: ui.box([\n            ui.node_color(\"Clicks: {{n}}\", 240.0, 40.0, \"#3366ff\"),\n            ui.button(\"Add one\") {{\n                count.set(count.get() + 1)\n            }}\n        ])\n        backend :: ui.null_backend()\n        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 320.0, 120.0))\n    }})\n}}\n\n#Test(\"the counter increments\") {{\n    count :: reactive.signal(0)\n    count.set(count.get() + 1)\n    assert_eq(count.get(), 1)\n}}\n"
+
+// Rust NEW_COMMAND_HOMES bodies (CmdCompile.rs:5796-5813).
+JET_CLI_NEW_RUN_HOME :: "// Optional `jet run` override. Uncomment one `fn run` to replace the stock default.\n// fn run() {{\n//     print(\"run override\")\n// }}\n// Inspect the stock behavior with: `jet run --show-default`\n"
+JET_CLI_NEW_BUILD_HOME :: "// Optional `jet build` override. Uncomment one `fn build` to replace the stock default.\n// fn build(b: BuildContext) -> BuildPlan {{ return b.plan() }}\n// Inspect the stock behavior with: `jet build --show-default`\n"
+JET_CLI_NEW_DEV_HOME :: "// Optional `jet dev` override. Uncomment one `fn dev` to replace the stock default.\n// fn dev() {{\n//     print(\"dev override\")\n// }}\n// Inspect the stock behavior with: `jet dev --show-default`\n"
+JET_CLI_NEW_TEST_HOME :: "// Optional `jet test` override. Uncomment one `fn test` to replace the stock default.\n// fn test(suite: TestSuite) {{ suite.run() }}\n// Inspect the stock behavior with: `jet test --show-default`\n"
+
+JET_CLI_NEW_GITIGNORE_FILE :: ".gitignore"
+JET_CLI_NEW_GITIGNORE :: ".jet/build/\n.jet/lock\n.jet/cache/\n"
+
+// One comment-only command home (a named row, not a tuple: #4357).
+pub struct JetCLINewCommandHome {
+    pub file: String
+    pub source: String
+}
+
+// Rust `NewTemplate::run_source`.
+fn jet_cli_new_run_source(template: JetCLINewTemplate?) -> String Never! {
+    chosen :: template ?? return JET_CLI_NEW_PRINT_RUN
+    if chosen == {
+        .CLI -> JET_CLI_NEW_CLI_RUN
+        .UI -> JET_CLI_NEW_UI_RUN
+        .Web -> JET_CLI_NEW_WEB_RUN
+        .Overrides -> JET_CLI_NEW_PRINT_RUN
+    }
+}
+
+// Rust `NewTemplate::holds`: authority the starter's `run.jet` needs beyond
+// the base manifest. Argument reading is the `Exec.Args` leaf (a new project
+// never holds the `Exec` root); `core.ui`'s Browser effect must be visible to
+// `jet dev` for the UI and Web starters.
+fn jet_cli_new_holds(template: JetCLINewTemplate?) -> [String] Never! {
+    chosen :: template ?? return [String]{}
+    if chosen == {
+        .CLI -> [String]{EFFECT_LEAF_EXEC_ARGS}
+        .UI -> [String]{EFFECT_LEAF_EXEC_ARGS, "Browser"}
+        .Web -> [String]{"Browser"}
+        .Overrides -> [String]{}
+    }
+}
+
+// Rust `command_files` (CmdCompile.rs:5875-5879): only `--template overrides`
+// writes the four homes, which keep the stock command behavior until the
+// owner opts in.
+fn jet_cli_new_command_homes(template: JetCLINewTemplate?) -> [JetCLINewCommandHome] Never! {
+    chosen :: template ?? return [JetCLINewCommandHome]{}
+    if chosen != JetCLINewTemplate.Overrides -> return [JetCLINewCommandHome]{}
+    [JetCLINewCommandHome]{
+        JetCLINewCommandHome{file: COMMAND_FILE_RUN, source: JET_CLI_NEW_RUN_HOME},
+        JetCLINewCommandHome{file: COMMAND_FILE_BUILD, source: JET_CLI_NEW_BUILD_HOME},
+        JetCLINewCommandHome{file: COMMAND_FILE_DEV, source: JET_CLI_NEW_DEV_HOME},
+        JetCLINewCommandHome{file: COMMAND_FILE_TEST, source: JET_CLI_NEW_TEST_HOME},
+    }
+}
+
+// Rust `run_new` (CmdCompile.rs:5815-5919). `base` is the directory `name` is
+// relative to: "" in the process entry, which resolves against the process
+// working directory exactly as Rust's relative `Path::new(name)`. Creates
+// <name>/.jet, package.jet, the `[[toolchain]]` lock pin of the running
+// toolchain, run.jet, the optional command homes and .gitignore, in order;
+// the first failure stops with its diagnostic and leaves earlier files.
+pub fn jet_cli_run_new(base: String, name: String, annotated: Bool, template: JetCLINewTemplate?, mode: JetCLIOutputMode) -[FS, Env, Exec, Time, Time.Wait]> JetDriverVerbOutput Never! {
+    if name == "" || name.contains("/") || name.contains("\\") -> return jet_cli_scaffold_report("E2104", "project name must be a simple folder name", "try: {BINARY_NAME} new my_app", mode, JET_DRIVER_EXIT_USER_ERROR)
+    dir :: scaffold_files.join(base, name)
+    if scaffold_files.exists(dir) -> return jet_cli_scaffold_report("E2104", "`{name}` already exists", JET_CLI_SCAFFOLD_E2104_FIX, mode, JET_DRIVER_EXIT_USER_ERROR)
+    scaffold_files.create_dir_all(scaffold_files.join(dir, ".jet")) ?? return jet_cli_scaffold_report("E2105", "couldn't create `{name}`/.jet: {err}", JET_CLI_SCAFFOLD_E2105_FIX, mode, JET_DRIVER_EXIT_USER_ERROR)
+    manifest := pkg_new_template(name, annotated)
+    loop hold in jet_cli_new_holds(template) -> manifest = pkg_add_authority_hold(manifest, hold)
+    scaffold_files.write(scaffold_files.join(dir, PACKAGE_FILE), manifest) ?? return jet_cli_scaffold_report("E2105", "couldn't write {PACKAGE_FILE}: {err}", JET_CLI_SCAFFOLD_E2105_FIX, mode, JET_DRIVER_EXIT_USER_ERROR)
+    // Rust `env!("CARGO_PKG_VERSION")` is JET_CLI_VERSION.
+    channel :: trust_pin_channel_of(JET_CLI_VERSION)
+    pkg_lock_record_toolchain(dir, trust_pin_toolchain_record(channel, JET_CLI_VERSION)) ?? return jet_cli_scaffold_report("E1206", "couldn't write {UNIFIED_LOCK_FILE}", "check the project lock permissions: {err.message()}", mode, JET_DRIVER_EXIT_USER_ERROR)
+    scaffold_files.write(scaffold_files.join(dir, DEFAULT_ENTRY_FILE), jet_cli_new_run_source(template)) ?? return jet_cli_scaffold_report("E2105", "couldn't write {DEFAULT_ENTRY_FILE}: {err}", JET_CLI_SCAFFOLD_E2105_FIX, mode, JET_DRIVER_EXIT_USER_ERROR)
+    homes :: jet_cli_new_command_homes(template)
+    loop home in homes {
+        scaffold_files.write(scaffold_files.join(dir, home.file), home.source) ?? return jet_cli_scaffold_report("E2105", "couldn't write {home.file}: {err}", JET_CLI_SCAFFOLD_E2105_FIX, mode, JET_DRIVER_EXIT_USER_ERROR)
+    }
+    scaffold_files.write(scaffold_files.join(dir, JET_CLI_NEW_GITIGNORE_FILE), JET_CLI_NEW_GITIGNORE) ?? return jet_cli_scaffold_report("E2105", "couldn't write .gitignore: {err}", JET_CLI_SCAFFOLD_E2105_FIX, mode, JET_DRIVER_EXIT_USER_ERROR)
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    // #1659 criterion 3: `--quiet` mutes only this narration; the project
+    // itself was still created.
+    if mode.quiet -> return output
+    jet_cli_write_mode_status(&output, mode, "created {name}/\n")
+    jet_cli_write_mode_status(&output, mode, "  {PACKAGE_FILE}\n")
+    jet_cli_write_mode_status(&output, mode, "  {DEFAULT_ENTRY_FILE}\n")
+    loop home in homes -> jet_cli_write_mode_status(&output, mode, "  {home.file}\n")
+    jet_cli_write_mode_status(&output, mode, "  .gitignore\n")
+    next :: if template == {
+        .Val(.Web) -> "dev"
+        else -> "run"
+    }
+    jet_cli_write_mode_status(&output, mode, "next: cd {name} && {BINARY_NAME} {next}\n")
+    output
+}
+
+// The parsed `jet new <name>` invocation (main.rs:2871, 4719-4746).
+pub struct JetCLINewRequest {
+    pub name: String
+    pub annotated: Bool
+    pub template: JetCLINewTemplate?
+}
+
+// Rust main.rs:4719-4746: `args` are the positional words (`args[0]` is
+// `new`), `jet_argv` the Jet-owned words. A missing name or an unknown
+// `--template` value is E2104 with usage exit status, before any file work.
+pub fn jet_cli_new_request(args: [String], jet_argv: [String], json: Bool) -> JetCLINewRequest JetCLIArgsRefusal! {
+    if args.len() < 2 -> return Err(jet_cli_args_refuse("E2104", "`jet new` needs a project name", jet_cli_why("E2104"), "run `jet new my_app`", json))
+    name :: args[1]
+    template := JetCLINewTemplate?{None}
+    asked := false
+    loop argument in jet_argv {
+        if argument == "--template" || argument.starts_with("--template=") -> asked = true
+    }
+    if asked {
+        value :: jet_cli_args_option_value(jet_argv, "--template") ?? ""
+        template = Val(jet_cli_new_template_parse(value) ?? return Err(jet_cli_args_refuse("E2104", "`{value}` is not a `jet new` template", jet_cli_why("E2104"), "choose one of {JET_CLI_NEW_TEMPLATE_NAMES}: `jet new {name} --template ui`", json)))
+    }
+    Ok(JetCLINewRequest{name: name, annotated: jet_argv.contains("--annotated"), template: template})
+}

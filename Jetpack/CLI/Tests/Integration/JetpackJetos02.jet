@@ -1,0 +1,2313 @@
+// PORT-PENDING 1094 tests-jetpack-jetos-slice-2348: tests/jetpack_jetos.rs:2348-4656
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn os_plan_prints_checked_system_contract_without_building() {
+//RS     let root = Scratch::new("os-plan-root");
+//RS     let out = jet()
+//RS         .args(["os", "plan", "halcyon", "--json", "--no-color", "--offline"])
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let json = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(json.contains("\"host\":\"halcyon\""), "plan: {json}");
+//RS     assert!(json.contains("\"loader\":\"Limine\""), "plan: {json}");
+//RS     assert!(json.contains("\"kernel\":\"CachyOS\""), "plan: {json}");
+//RS     assert!(
+//RS         json.contains("\"key\": \"users.nate.normal\""),
+//RS         "plan: {json}"
+//RS     );
+//RS     assert!(
+//RS         !root.join("systems/generations").exists(),
+//RS         "plan must not create a generation"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn jetos_user_commands_use_same_generation_engine() {
+//RS     let root = Scratch::new("jetos-user-root");
+//RS     let plan = jetos()
+//RS         .args(["user", "plan", "nate", "--json", "--no-color"])
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         plan.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&plan.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&plan.stdout);
+//RS     assert!(
+//RS         stdout.contains("\"kind\":\"jetos.user-generation\"")
+//RS             && stdout.contains("\"user\":\"nate\""),
+//RS         "plan: {stdout}"
+//RS     );
+//RS 
+//RS     let build = jetos()
+//RS         .args([
+//RS             "user",
+//RS             "build",
+//RS             "nate",
+//RS             "--name",
+//RS             "user-gen",
+//RS             "--no-color",
+//RS             "--offline",
+//RS         ])
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         build.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&build.stderr)
+//RS     );
+//RS     assert!(
+//RS         root.path
+//RS             .join("systems/generations/user-gen/users/nate/profile.json")
+//RS             .is_file(),
+//RS         "expected user generation artifact"
+//RS     );
+//RS 
+//RS     let proof = jetos()
+//RS         .args(["user", "prove", "nate", "--json", "--no-color"])
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         proof.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&proof.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&proof.stdout);
+//RS     assert!(
+//RS         stdout.contains("\"user\":\"nate\"") && stdout.contains("user-gen"),
+//RS         "proof: {stdout}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_build_bare_host_uses_current_repo_config() {
+//RS     // D-JPK-OSHOST1=C: bare host discovers system.<host> in ./config.jet.
+//RS     let proj = Scratch::new("os-repo");
+//RS     let root = Scratch::new("os-default-root");
+//RS     // A minimal self-contained system (no packages → realizes trivially offline).
+//RS     let pkg = proj.join("jet-pkgs/pkgs/cachyos-kernel");
+//RS     let systemd = proj.join("jet-pkgs/pkgs/systemd");
+//RS     fs::create_dir_all(pkg.join("boot")).unwrap();
+//RS     fs::create_dir_all(systemd.join("bin")).unwrap();
+//RS     fs::write(
+//RS         proj.join("jet-pkgs/package.jet"),
+//RS         "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         pkg.join("cachyos-kernel.jet"),
+//RS         "module cachyos-kernel { }\n",
+//RS     )
+//RS     .unwrap();
+//RS     write_bootlike_cachyos_artifacts(&pkg);
+//RS     write_cachyos_source_recipe(&pkg);
+//RS     fs::write(systemd.join("systemd.jet"), "module systemd { }\n").unwrap();
+//RS     fs::write(systemd.join("bin/systemd"), "test systemd\n").unwrap();
+//RS     fs::write(
+//RS         proj.join("config.jet"),
+//RS         "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = jet()
+//RS         .args(["os", "build", "box", "--no-color", "--offline"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(stderr.contains("box"), "stderr: {stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_cachyos_kernel_source_recipe_builds_boot_artifacts() {
+//RS     let proj = Scratch::new("os-kernel-source-build");
+//RS     let root = Scratch::new("os-kernel-source-build-root");
+//RS     let pkg = proj.join("jet-pkgs/pkgs/cachyos-kernel");
+//RS     let systemd = proj.join("jet-pkgs/pkgs/systemd");
+//RS     fs::create_dir_all(&pkg).unwrap();
+//RS     fs::create_dir_all(systemd.join("bin")).unwrap();
+//RS     fs::write(
+//RS         proj.join("jet-pkgs/package.jet"),
+//RS         "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         pkg.join("cachyos-kernel.jet"),
+//RS         "module cachyos-kernel { }\n",
+//RS     )
+//RS     .unwrap();
+//RS     write_cachyos_source_recipe(&pkg);
+//RS     write_cachyos_source_builder(
+//RS         &pkg,
+//RS         "#!/bin/sh\nset -eu\nprintf 'MZ built cachyos kernel\\nHdrS\\n' > \"$JETOS_KERNEL_OUT/vmlinuz-cachyos\"\nprintf '070701 built cachyos initrd\\n' > \"$JETOS_KERNEL_OUT/initrd-cachyos\"\n",
+//RS     );
+//RS     fs::write(systemd.join("systemd.jet"), "module systemd { }\n").unwrap();
+//RS     fs::write(systemd.join("bin/systemd"), "test systemd\n").unwrap();
+//RS     fs::write(
+//RS         proj.join("config.jet"),
+//RS         "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = jet()
+//RS         .args([
+//RS             "os",
+//RS             "build",
+//RS             "box",
+//RS             "--name",
+//RS             "kernel-source-built",
+//RS             "--no-color",
+//RS             "--offline",
+//RS         ])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let kernel = fs::read_to_string(
+//RS         root.path
+//RS             .join("systems/generations/kernel-source-built/boot/kernel"),
+//RS     )
+//RS     .unwrap();
+//RS     assert!(kernel.contains("built cachyos kernel"), "kernel: {kernel}");
+//RS     let boot = fs::read_to_string(
+//RS         root.path
+//RS             .join("systems/generations/kernel-source-built/boot/facts.json"),
+//RS     )
+//RS     .unwrap();
+//RS     assert!(
+//RS         boot.contains("\"bootstrap\":\"source-built\""),
+//RS         "boot: {boot}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_cachyos_kernel_source_builder_failure_is_diagnostic() {
+//RS     let proj = Scratch::new("os-kernel-source-build-fail");
+//RS     let root = Scratch::new("os-kernel-source-build-fail-root");
+//RS     let pkg = proj.join("jet-pkgs/pkgs/cachyos-kernel");
+//RS     let systemd = proj.join("jet-pkgs/pkgs/systemd");
+//RS     fs::create_dir_all(&pkg).unwrap();
+//RS     fs::create_dir_all(systemd.join("bin")).unwrap();
+//RS     fs::write(
+//RS         proj.join("jet-pkgs/package.jet"),
+//RS         "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         pkg.join("cachyos-kernel.jet"),
+//RS         "module cachyos-kernel { }\n",
+//RS     )
+//RS     .unwrap();
+//RS     write_cachyos_source_recipe(&pkg);
+//RS     write_cachyos_source_builder(&pkg, "#!/bin/sh\necho compiler missing >&2\nexit 7\n");
+//RS     fs::write(systemd.join("systemd.jet"), "module systemd { }\n").unwrap();
+//RS     fs::write(systemd.join("bin/systemd"), "test systemd\n").unwrap();
+//RS     fs::write(
+//RS         proj.join("config.jet"),
+//RS         "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = jet()
+//RS         .args(["os", "build", "box", "--no-color", "--offline"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     let diagnostic = stderr
+//RS         .find("\n  error[E1286]")
+//RS         .map(|idx| &stderr[idx..])
+//RS         .unwrap_or(&stderr);
+//RS     assert_jetos_stderr_snapshot("cachyos_source_build_failed", diagnostic);
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_cachyos_kernel_requires_first_party_source() {
+//RS     let proj = Scratch::new("os-missing-kernel");
+//RS     let root = Scratch::new("os-missing-kernel-root");
+//RS     fs::write(
+//RS         proj.join("config.jet"),
+//RS         "module box {\n    system.box: { target: linux.x64 }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = jet()
+//RS         .args(["os", "build", "box", "--no-color", "--offline"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert_jetos_stderr_snapshot("missing_cachyos_kernel", &stderr);
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_systemd_init_requires_first_party_source() {
+//RS     let proj = Scratch::new("os-missing-systemd");
+//RS     let root = Scratch::new("os-missing-systemd-root");
+//RS     let pkg = proj.join("jet-pkgs/pkgs/cachyos-kernel");
+//RS     fs::create_dir_all(pkg.join("boot")).unwrap();
+//RS     fs::write(
+//RS         proj.join("jet-pkgs/package.jet"),
+//RS         "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         pkg.join("cachyos-kernel.jet"),
+//RS         "module cachyos-kernel { }\n",
+//RS     )
+//RS     .unwrap();
+//RS     write_bootlike_cachyos_artifacts(&pkg);
+//RS     write_cachyos_source_recipe(&pkg);
+//RS     fs::write(
+//RS         proj.join("config.jet"),
+//RS         "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = jet()
+//RS         .args(["os", "build", "box", "--no-color", "--offline"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     let diagnostic = stderr
+//RS         .find("\n  error[E1281]")
+//RS         .map(|idx| &stderr[idx..])
+//RS         .unwrap_or(&stderr);
+//RS     assert_jetos_stderr_snapshot("missing_systemd_init", diagnostic);
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_default_gnome_desktop_requires_first_party_packages() {
+//RS     let proj = Scratch::new("os-missing-gnome-desktop");
+//RS     let root = Scratch::new("os-missing-gnome-desktop-root");
+//RS     let kernel = proj.join("jet-pkgs/pkgs/cachyos-kernel");
+//RS     let systemd = proj.join("jet-pkgs/pkgs/systemd");
+//RS     fs::create_dir_all(kernel.join("boot")).unwrap();
+//RS     fs::create_dir_all(systemd.join("bin")).unwrap();
+//RS     fs::write(
+//RS         proj.join("jet-pkgs/package.jet"),
+//RS         "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         kernel.join("cachyos-kernel.jet"),
+//RS         "module cachyos-kernel { }\n",
+//RS     )
+//RS     .unwrap();
+//RS     write_bootlike_cachyos_artifacts(&kernel);
+//RS     write_cachyos_source_recipe(&kernel);
+//RS     fs::write(systemd.join("systemd.jet"), "module systemd { }\n").unwrap();
+//RS     write_executable(&systemd.join("bin/systemd"), "#!/bin/sh\nexit 0\n");
+//RS     fs::write(
+//RS         proj.join("config.jet"),
+//RS         "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64, options: [ services.desktop.profile: .Default ] }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = jet()
+//RS         .args(["os", "build", "box", "--no-color", "--offline"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     let diagnostic = stderr
+//RS         .find("\n  error[E1288]")
+//RS         .map(|idx| &stderr[idx..])
+//RS         .unwrap_or(&stderr);
+//RS     assert_jetos_stderr_snapshot("missing_gnome_desktop", diagnostic);
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_cachyos_kernel_requires_boot_artifacts() {
+//RS     let proj = Scratch::new("os-missing-kernel-artifacts");
+//RS     let root = Scratch::new("os-missing-kernel-artifacts-root");
+//RS     let pkg = proj.join("jet-pkgs/pkgs/cachyos-kernel");
+//RS     let systemd = proj.join("jet-pkgs/pkgs/systemd");
+//RS     fs::create_dir_all(&pkg).unwrap();
+//RS     fs::create_dir_all(systemd.join("bin")).unwrap();
+//RS     fs::write(
+//RS         proj.join("jet-pkgs/package.jet"),
+//RS         "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         pkg.join("cachyos-kernel.jet"),
+//RS         "module cachyos-kernel { }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(systemd.join("systemd.jet"), "module systemd { }\n").unwrap();
+//RS     fs::write(systemd.join("bin/systemd"), "test systemd\n").unwrap();
+//RS     fs::write(
+//RS         proj.join("config.jet"),
+//RS         "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = jet()
+//RS         .args(["os", "build", "box", "--no-color", "--offline"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     let diagnostic = stderr
+//RS         .find("\n  error[E1282]")
+//RS         .map(|idx| &stderr[idx..])
+//RS         .unwrap_or(&stderr);
+//RS     assert_jetos_stderr_snapshot_trimmed("missing_cachyos_boot_artifacts", diagnostic);
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_cachyos_kernel_rejects_text_boot_artifacts() {
+//RS     let proj = Scratch::new("os-text-kernel-artifacts");
+//RS     let root = Scratch::new("os-text-kernel-artifacts-root");
+//RS     let pkg = proj.join("jet-pkgs/pkgs/cachyos-kernel");
+//RS     let systemd = proj.join("jet-pkgs/pkgs/systemd");
+//RS     fs::create_dir_all(pkg.join("boot")).unwrap();
+//RS     fs::create_dir_all(systemd.join("bin")).unwrap();
+//RS     fs::write(
+//RS         proj.join("jet-pkgs/package.jet"),
+//RS         "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         pkg.join("cachyos-kernel.jet"),
+//RS         "module cachyos-kernel { }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(pkg.join("boot/vmlinuz-cachyos"), "not a kernel\n").unwrap();
+//RS     fs::write(pkg.join("boot/initrd-cachyos"), "not an initrd\n").unwrap();
+//RS     write_cachyos_source_recipe(&pkg);
+//RS     fs::write(systemd.join("systemd.jet"), "module systemd { }\n").unwrap();
+//RS     fs::write(systemd.join("bin/systemd"), "test systemd\n").unwrap();
+//RS     fs::write(
+//RS         proj.join("config.jet"),
+//RS         "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = jet()
+//RS         .args(["os", "build", "box", "--no-color", "--offline"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     let diagnostic = stderr
+//RS         .find("\n  error[E1282]")
+//RS         .map(|idx| &stderr[idx..])
+//RS         .unwrap_or(&stderr);
+//RS     assert_jetos_stderr_snapshot_trimmed("missing_cachyos_boot_artifacts", diagnostic);
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_cachyos_kernel_requires_source_recipe() {
+//RS     let proj = Scratch::new("os-missing-kernel-source");
+//RS     let root = Scratch::new("os-missing-kernel-source-root");
+//RS     let pkg = proj.join("jet-pkgs/pkgs/cachyos-kernel");
+//RS     let systemd = proj.join("jet-pkgs/pkgs/systemd");
+//RS     fs::create_dir_all(pkg.join("boot")).unwrap();
+//RS     fs::create_dir_all(systemd.join("bin")).unwrap();
+//RS     fs::write(
+//RS         proj.join("jet-pkgs/package.jet"),
+//RS         "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         pkg.join("cachyos-kernel.jet"),
+//RS         "module cachyos-kernel { }\n",
+//RS     )
+//RS     .unwrap();
+//RS     write_bootlike_cachyos_artifacts(&pkg);
+//RS     fs::write(systemd.join("systemd.jet"), "module systemd { }\n").unwrap();
+//RS     fs::write(systemd.join("bin/systemd"), "test systemd\n").unwrap();
+//RS     fs::write(
+//RS         proj.join("config.jet"),
+//RS         "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = jet()
+//RS         .args(["os", "build", "box", "--no-color", "--offline"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     let diagnostic = stderr
+//RS         .find("\n  error[E1284]")
+//RS         .map(|idx| &stderr[idx..])
+//RS         .unwrap_or(&stderr);
+//RS     assert_jetos_stderr_snapshot_trimmed("missing_cachyos_source_recipe", diagnostic);
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_systemd_init_requires_init_artifact() {
+//RS     let proj = Scratch::new("os-missing-systemd-artifact");
+//RS     let root = Scratch::new("os-missing-systemd-artifact-root");
+//RS     let kernel = proj.join("jet-pkgs/pkgs/cachyos-kernel");
+//RS     let systemd = proj.join("jet-pkgs/pkgs/systemd");
+//RS     fs::create_dir_all(kernel.join("boot")).unwrap();
+//RS     fs::create_dir_all(&systemd).unwrap();
+//RS     fs::write(
+//RS         proj.join("jet-pkgs/package.jet"),
+//RS         "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: { cachyos-kernel: library, systemd: executable }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         kernel.join("cachyos-kernel.jet"),
+//RS         "module cachyos-kernel { }\n",
+//RS     )
+//RS     .unwrap();
+//RS     write_bootlike_cachyos_artifacts(&kernel);
+//RS     write_cachyos_source_recipe(&kernel);
+//RS     fs::write(systemd.join("systemd.jet"), "module systemd { }\n").unwrap();
+//RS     fs::write(
+//RS         proj.join("config.jet"),
+//RS         "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = jet()
+//RS         .args(["os", "build", "box", "--no-color", "--offline"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     let diagnostic = stderr
+//RS         .find("\n  error[E1283]")
+//RS         .map(|idx| &stderr[idx..])
+//RS         .unwrap_or(&stderr);
+//RS     assert_jetos_stderr_snapshot("missing_systemd_init_artifact", diagnostic);
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_missing_host_is_friendly_and_exits_2() {
+//RS     let root = Scratch::new("os-no-host");
+//RS     let out = jet()
+//RS         .args(["os", "build", "--no-color"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert_jetos_stderr_snapshot("missing_host", &stderr);
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_missing_external_root_is_friendly_and_exits_2() {
+//RS     let root = Scratch::new("os-no-root");
+//RS     let out = jet()
+//RS         .args(["os", "build", "laptop@", "--no-color"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     assert_jetos_stderr_snapshot_trimmed(
+//RS         "missing_host_root",
+//RS         &String::from_utf8_lossy(&out.stderr),
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_unknown_host_lists_available_systems() {
+//RS     let root = Scratch::new("os-bad-host");
+//RS     let out = jet()
+//RS         .args(["os", "build", "nope", "--no-color", "--offline"])
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert_jetos_stderr_snapshot("unknown_host", &stderr);
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_missing_config_file_is_friendly() {
+//RS     let root = Scratch::new("os-no-config");
+//RS     let out = jet()
+//RS         .args(["os", "build", "box@/definitely/not/here", "--no-color"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert_jetos_stderr_snapshot("missing_config", &stderr);
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_retired_option_namespace_is_snapshot_pinned() {
+//RS     let proj = Scratch::new("os-bad-namespace");
+//RS     let root = Scratch::new("os-bad-namespace-root");
+//RS     fs::write(
+//RS         proj.join("config.jet"),
+//RS         "module box {\n    system.box: { target: linux.x64, options: [net.hostName: \"box\"] }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = jet()
+//RS         .args(["os", "build", "box", "--no-color", "--offline"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert_jetos_stderr_snapshot("retired_namespace", &stderr);
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_generations_are_newest_first_and_rollback_activates_prior() {
+//RS     let root = Scratch::new("os-gens-root");
+//RS     for name in ["first", "second"] {
+//RS         let out = jet()
+//RS             .args([
+//RS                 "os",
+//RS                 "switch",
+//RS                 "halcyon",
+//RS                 "--name",
+//RS                 name,
+//RS                 "--no-color",
+//RS                 "--offline",
+//RS             ])
+//RS             .current_dir(config_example_dir())
+//RS             .env("JETPACK_ROOT", &root.path)
+//RS             .env("PATH", "/usr/bin:/bin")
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(
+//RS             out.status.success(),
+//RS             "stderr: {}",
+//RS             String::from_utf8_lossy(&out.stderr)
+//RS         );
+//RS     }
+//RS     assert!(
+//RS         !root
+//RS             .join("systems/generations/second/activation-proof.txt")
+//RS             .exists(),
+//RS         "activation must never mutate a sealed generation"
+//RS     );
+//RS     let sealed_retry = jet()
+//RS         .args([
+//RS             "os",
+//RS             "build",
+//RS             "halcyon",
+//RS             "--name",
+//RS             "second",
+//RS             "--no-color",
+//RS             "--offline",
+//RS         ])
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         sealed_retry.status.success(),
+//RS         "activation left the sealed proof stale: {}",
+//RS         String::from_utf8_lossy(&sealed_retry.stderr)
+//RS     );
+//RS     for name in ["first", "second"] {
+//RS         let proof = fs::read_to_string(
+//RS             root.path
+//RS                 .join("systems/generations")
+//RS                 .join(name)
+//RS                 .join("generation-root.json"),
+//RS         )
+//RS         .unwrap();
+//RS         assert!(
+//RS             proof.contains("\"kind\":\"jetos.generation-root.v1\"")
+//RS                 && proof.contains("\"output_digests\":[\"sha256-"),
+//RS             "retained generation {name} must keep its typed Hangar root proof: {proof}"
+//RS         );
+//RS     }
+//RS     let journal = root.join("hangar/lifecycle-db/journal");
+//RS     let read_journal = || {
+//RS         let mut entries = fs::read_dir(&journal)
+//RS             .unwrap()
+//RS             .filter_map(Result::ok)
+//RS             .map(|entry| (entry.file_name(), fs::read(entry.path()).unwrap()))
+//RS             .collect::<Vec<_>>();
+//RS         entries.sort_by(|a, b| a.0.cmp(&b.0));
+//RS         entries
+//RS     };
+//RS     let lifecycle_before_rollback = read_journal();
+//RS     let lifecycle_text = lifecycle_before_rollback
+//RS         .iter()
+//RS         .map(|(_, bytes)| String::from_utf8_lossy(bytes))
+//RS         .collect::<String>();
+//RS     assert!(
+//RS         lifecycle_text.matches("external-consumer").count() >= 2,
+//RS         "both retained generations must remain lifecycle roots: {lifecycle_text}"
+//RS     );
+//RS     let list = jet()
+//RS         .args(["os", "generations", "halcyon", "--no-color"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(list.status.success());
+//RS     let stdout = String::from_utf8_lossy(&list.stdout);
+//RS     let second = stdout.find("second").unwrap();
+//RS     let first = stdout.find("first").unwrap();
+//RS     assert!(
+//RS         second < first,
+//RS         "generations should be newest-first: {stdout}"
+//RS     );
+//RS     let proof = fs::read_to_string(
+//RS         root.path
+//RS             .join("systems/activation-proofs/halcyon/second.txt"),
+//RS     )
+//RS     .unwrap();
+//RS     assert!(proof.contains("service-risk"), "proof: {proof}");
+//RS     assert!(
+//RS         proof.contains("rollback-proof: pass previous=first"),
+//RS         "proof: {proof}"
+//RS     );
+//RS 
+//RS     let rollback = jet()
+//RS         .args(["os", "rollback", "halcyon", "first", "--no-color"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         rollback.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&rollback.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&rollback.stderr).contains("rolled back"),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&rollback.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         read_journal(),
+//RS         lifecycle_before_rollback,
+//RS         "rollback changes activation pointers, never lifecycle roots"
+//RS     );
+//RS     let same = jet()
+//RS         .args(["os", "rollback", "halcyon", "first", "--no-color"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(same.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&same.stderr);
+//RS     assert!(
+//RS         stderr.contains("no generation is available"),
+//RS         "stderr: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_vm_run_never_reaches_nixos_migration_backend() {
+//RS     let proj = Scratch::new("os-vm-real-no-nixpkgs-pin");
+//RS     let root = Scratch::new("os-vm-real-no-nixpkgs-pin-root");
+//RS     fs::write(
+//RS         proj.join("config.jet"),
+//RS         "module halcyon {\n    sources: {}\n    system.halcyon: {\n        target: linux.x64,\n        packages: [],\n        services: {},\n        options: [\n            network.hostName: halcyon,\n        ],\n    }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = jet()
+//RS         .args([
+//RS             "os",
+//RS             "vm",
+//RS             "run",
+//RS             "halcyon",
+//RS             "--disk",
+//RS             "halcyon.qcow2",
+//RS             "--no-color",
+//RS             "--offline",
+//RS         ])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         !stderr.contains("E1291"),
+//RS         "product VM path reached NixOS backend: {stderr}"
+//RS     );
+//RS     assert!(!root.join("systems/backend").exists());
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_vm_prove_requires_pinned_media_tools() {
+//RS     let root = Scratch::new("os-vm-tools-root");
+//RS     let tools = Scratch::new("os-vm-tools-empty");
+//RS     let out = jet()
+//RS         .args([
+//RS             "os",
+//RS             "vm",
+//RS             "prove",
+//RS             "halcyon",
+//RS             "--disk",
+//RS             "halcyon.qcow2",
+//RS             "--no-color",
+//RS             "--offline",
+//RS         ])
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", &tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert_jetos_stderr_snapshot_trimmed("vm_tools_missing", &stderr);
+//RS     assert!(
+//RS         !root.join("systems/vm-proofs").exists(),
+//RS         "missing tools must not write VM proof artifacts"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_vm_run_requires_proved_installed_disk() {
+//RS     let root = Scratch::new("os-vm-run-unproven-root");
+//RS     let tools = Scratch::new("os-vm-run-unproven-tools");
+//RS     write_fake_vm_tools(&tools.path, false);
+//RS     let out = jet()
+//RS         .args([
+//RS             "os",
+//RS             "vm",
+//RS             "run",
+//RS             "halcyon",
+//RS             "--disk",
+//RS             "halcyon.qcow2",
+//RS             "--no-color",
+//RS             "--offline",
+//RS         ])
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", &tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert_jetos_stderr_snapshot("vm_run_unproven", &stderr);
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_vm_prove_real_tier_is_retired_to_explicit_migration() {
+//RS     let root = Scratch::new("os-vm-real-root");
+//RS     let tools = Scratch::new("os-vm-real-tools");
+//RS     write_fake_vm_tools(&tools.path, true);
+//RS     let out = jet()
+//RS         .args([
+//RS             "os",
+//RS             "vm",
+//RS             "prove",
+//RS             "halcyon",
+//RS             "--disk",
+//RS             "halcyon.qcow2",
+//RS             "--real",
+//RS             "--name",
+//RS             "vm-real",
+//RS             "--no-color",
+//RS             "--offline",
+//RS         ])
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", &tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("`--real` is not a jetos VM option"),
+//RS         "{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("jet os migrate compare-nixos <host> --out <dir>"),
+//RS         "{stderr}"
+//RS     );
+//RS     assert!(
+//RS         !root.join("systems/vm-proofs").exists(),
+//RS         "retired product path must not write comparison proof"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_migrate_compare_nixos_is_explicit_and_proof_gated() {
+//RS     let root = Scratch::new("os-migrate-nixos-root");
+//RS     let (path, outputs) = build_nixos_migration_test_tools(&root.path);
+//RS     let out_dir = root.join("published");
+//RS     let out = jet()
+//RS         .args([
+//RS             "os",
+//RS             "migrate",
+//RS             "compare-nixos",
+//RS             "halcyon-gnome",
+//RS             "--out",
+//RS             out_dir.to_str().unwrap(),
+//RS             "--no-color",
+//RS             "--offline",
+//RS         ])
+//RS         .current_dir(
+//RS             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-config-real"),
+//RS         )
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JET_TEST_TOOL_ROOT", outputs)
+//RS         .env(
+//RS             "JET_TEST_MISSING_LOCKED_INPUT",
+//RS             "github:NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51",
+//RS         )
+//RS         .env("JET_TEST_REQUIRE_COMPOSED_METADATA", "1")
+//RS         .env("PATH", path)
+//RS         .output()
+//RS         .unwrap();
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(2),
+//RS         "stdout: {}\nstderr: {stderr}",
+//RS         String::from_utf8_lossy(&out.stdout)
+//RS     );
+//RS     assert!(stderr.contains(
+//RS         "migration comparison unavailable offline: github:NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51"
+//RS     ), "{stderr}");
+//RS     assert!(
+//RS         !out_dir.exists(),
+//RS         "comparison artifacts must not publish before guest proof"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn nixos_migration_prompt_probe_executes_interactive_shell_init() {
+//RS     let root = Scratch::new("nixos-interactive-prompt");
+//RS     let bashrc = root.join("bashrc");
+//RS     let backend = include_str!("../crates/jetpack/src/JetOS/nixos_backend.rs");
+//RS     let prompt_init = backend
+//RS         .lines()
+//RS         .map(str::trim)
+//RS         .find(|line| line.starts_with("PS1="))
+//RS         .expect("generated NixOS configuration must initialize PS1");
+//RS     fs::write(&bashrc, format!("{prompt_init}\nexport PS1\n")).unwrap();
+//RS 
+//RS     let out = Command::new("bash")
+//RS         .args(["--noprofile", "--rcfile"])
+//RS         .arg(&bashrc)
+//RS         .args(["-i", "-c", "printf '%s' \"$PS1\""])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8(out.stdout).unwrap(),
+//RS         "NixOS comparison $ "
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn nixos_migration_protects_stage_before_writing_inputs() {
+//RS     let root = Scratch::new("nixos-private-stage");
+//RS     let out_dir = root.join("published");
+//RS     let trace = root.join("stage.trace");
+//RS     let jet_program = jet().get_program().to_owned();
+//RS 
+//RS     let out = Command::new("strace")
+//RS         .args(["-f", "-s", "4096", "-o"])
+//RS         .arg(&trace)
+//RS         .args(["-e", "trace=%file", "--"])
+//RS         .arg(jet_program)
+//RS         .args([
+//RS             "os",
+//RS             "migrate",
+//RS             "compare-nixos",
+//RS             "halcyon-gnome",
+//RS             "--out",
+//RS             out_dir.to_str().unwrap(),
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(
+//RS             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-config-real"),
+//RS         )
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("NIX_REMOTE", "invalid")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     assert!(!out_dir.exists());
+//RS 
+//RS     let trace = fs::read_to_string(trace).unwrap();
+//RS     let marker = "/.nixos-comparison-halcyon-gnome-";
+//RS     let lines = trace.lines().collect::<Vec<_>>();
+//RS     let mkdir = lines
+//RS         .iter()
+//RS         .position(|line| line.contains("mkdir(") && line.contains(marker) && line.contains("0700"))
+//RS         .unwrap_or_else(|| panic!("private 0700 mkdir missing:\n{trace}"));
+//RS     let first_input = lines
+//RS         .iter()
+//RS         .position(|line| {
+//RS             line.contains(marker)
+//RS                 && (line.contains("/flake.nix")
+//RS                     || line.contains("/configuration.nix")
+//RS                     || line.contains("/input-facts.json"))
+//RS         })
+//RS         .unwrap_or_else(|| panic!("private input creation missing:\n{trace}"));
+//RS     let protected = lines
+//RS         .iter()
+//RS         .enumerate()
+//RS         .filter_map(|(index, line)| {
+//RS             (index < first_input
+//RS                 && line.contains(marker)
+//RS                 && line.contains("AT_SYMLINK_NOFOLLOW")
+//RS                 && (line.contains("S_IFDIR|0700") || line.contains("stx_mode=S_IFDIR|0700")))
+//RS             .then_some(index)
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(
+//RS         protected.len(),
+//RS         2,
+//RS         "expected post-mkdir and pre-write verification:\n{trace}"
+//RS     );
+//RS     let insecure = lines.iter().find(|line| {
+//RS         line.contains(marker)
+//RS             && (line.contains("st_mode=S_IFDIR|") || line.contains("stx_mode=S_IFDIR|"))
+//RS             && !line.contains("S_IFDIR|0700")
+//RS     });
+//RS     assert!(insecure.is_none(), "stage mode widened: {insecure:?}");
+//RS     assert!(mkdir < protected[0], "mode checked before mkdir:\n{trace}");
+//RS     assert!(
+//RS         protected[1] < first_input,
+//RS         "private input opened before mode/no-follow verification:\n{trace}"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS fn build_nixos_migration_test_tools(root: &Path) -> (std::ffi::OsString, std::path::PathBuf) {
+//RS     let tools = root.join("tools");
+//RS     let outputs = root.join("tool-outputs");
+//RS     fs::create_dir_all(&tools).unwrap();
+//RS     fs::create_dir_all(&outputs).unwrap();
+//RS     let source = root.join("migration-tool.c");
+//RS     let binary = tools.join("migration-tool");
+//RS     fs::write(
+//RS         &source,
+//RS         r##"#define _GNU_SOURCE
+//RS #include <errno.h>
+//RS #include <limits.h>
+//RS #include <stdio.h>
+//RS #include <stdlib.h>
+//RS #include <string.h>
+//RS #include <sys/socket.h>
+//RS #include <sys/stat.h>
+//RS #include <sys/types.h>
+//RS #include <sys/un.h>
+//RS #include <unistd.h>
+//RS 
+//RS static void write_file(const char *path, const char *text) {
+//RS     FILE *file = fopen(path, "w");
+//RS     if (!file) exit(20);
+//RS     fputs(text, file);
+//RS     fclose(file);
+//RS }
+//RS 
+//RS static int run_nix(int argc, char **argv) {
+//RS     const char *root = getenv("JET_TEST_TOOL_ROOT");
+//RS     const char *missing = getenv("JET_TEST_MISSING_LOCKED_INPUT");
+//RS     char dir[PATH_MAX], path[PATH_MAX];
+//RS     int disk = 0;
+//RS     int offline = 0;
+//RS     for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--offline")) offline = 1;
+//RS     if (getenv("JET_TEST_REQUIRE_OFFLINE") && !offline) return 24;
+//RS     for (int i = 1; i < argc; i++) {
+//RS         if (!strcmp(argv[i], "metadata")) {
+//RS             if (getenv("JET_TEST_REQUIRE_COMPOSED_METADATA") && strcmp(argv[argc - 1], "path:.")) return 25;
+//RS             if (missing) {
+//RS                 fprintf(stderr, "cannot fetch input '%s' because offline mode is enabled\n", missing);
+//RS                 return 1;
+//RS             }
+//RS             puts("{}");
+//RS             return 0;
+//RS         }
+//RS     }
+//RS     for (int i = 1; i < argc; i++) if (strstr(argv[i], "#disk")) disk = 1;
+//RS     if (disk) {
+//RS         snprintf(dir, sizeof(dir), "%s/disk", root);
+//RS         mkdir(dir, 0700);
+//RS         snprintf(path, sizeof(path), "%s/system.qcow2", dir);
+//RS         write_file(path, "qcow2");
+//RS     } else {
+//RS         snprintf(dir, sizeof(dir), "%s/firmware", root);
+//RS         mkdir(dir, 0700);
+//RS         snprintf(path, sizeof(path), "%s/FV", dir);
+//RS         mkdir(path, 0700);
+//RS         snprintf(path, sizeof(path), "%s/FV/OVMF_CODE.fd", dir);
+//RS         write_file(path, "code");
+//RS         snprintf(path, sizeof(path), "%s/FV/OVMF_VARS.fd", dir);
+//RS         write_file(path, "vars");
+//RS     }
+//RS     printf("%s/%s\n", root, disk ? "disk" : "firmware");
+//RS     return 0;
+//RS }
+//RS 
+//RS static int run_qemu(int argc, char **argv) {
+//RS     const char *serial = NULL, *qmp = NULL;
+//RS     for (int i = 1; i + 1 < argc; i++) {
+//RS         if (!strcmp(argv[i], "-serial") && !strncmp(argv[i + 1], "file:", 5)) serial = argv[i + 1] + 5;
+//RS         if (!strcmp(argv[i], "-qmp") && !strncmp(argv[i + 1], "unix:", 5)) qmp = argv[i + 1] + 5;
+//RS     }
+//RS     if (!serial || !qmp) return 21;
+//RS     char socket_path[PATH_MAX];
+//RS     snprintf(socket_path, sizeof(socket_path), "%s", qmp);
+//RS     char *comma = strchr(socket_path, ',');
+//RS     if (comma) *comma = '\0';
+//RS 
+//RS     int server = socket(AF_UNIX, SOCK_STREAM, 0);
+//RS     struct sockaddr_un address = { .sun_family = AF_UNIX };
+//RS     snprintf(address.sun_path, sizeof(address.sun_path), "%s", socket_path);
+//RS     unlink(socket_path);
+//RS     if (bind(server, (struct sockaddr *)&address, sizeof(address)) || listen(server, 1)) return 22;
+//RS 
+//RS     const char *collision = getenv("JET_TEST_COLLIDE_PUBLISH");
+//RS     if (collision) {
+//RS         char path[PATH_MAX];
+//RS         snprintf(path, sizeof(path), "%s/.nixos-comparison-publish-halcyon-gnome-%d", collision, getppid());
+//RS         mkdir(path, 0700);
+//RS     }
+//RS     write_file(serial, "NIXOS_COMPARISON_PROOF:{\"host\":\"halcyon-gnome\",\"os_release\":\"NixOS\",\"prompt\":\"NixOS comparison $ \",\"banner\":\"NixOS comparison guest\",\"proof\":\"live-desktop\"}\n");
+//RS 
+//RS     int client = accept(server, NULL, NULL);
+//RS     FILE *stream = fdopen(client, "r+");
+//RS     fputs("{\"QMP\":{}}\n", stream);
+//RS     fflush(stream);
+//RS     char line[PATH_MAX * 2];
+//RS     while (fgets(line, sizeof(line), stream)) {
+//RS         char *filename = strstr(line, "\"filename\":\"");
+//RS         if (filename) {
+//RS             filename += strlen("\"filename\":\"");
+//RS             char *end = strchr(filename, '"');
+//RS             if (end) {
+//RS                 *end = '\0';
+//RS                 write_file(filename, "png");
+//RS             }
+//RS         }
+//RS         fputs("{\"return\":{}}\n", stream);
+//RS         fflush(stream);
+//RS         if (strstr(line, "system_powerdown")) break;
+//RS     }
+//RS     fclose(stream);
+//RS     close(server);
+//RS     unlink(socket_path);
+//RS     return 0;
+//RS }
+//RS 
+//RS int main(int argc, char **argv) {
+//RS     const char *name = strrchr(argv[0], '/');
+//RS     name = name ? name + 1 : argv[0];
+//RS     if (!strcmp(name, "nix")) return run_nix(argc, argv);
+//RS     if (!strcmp(name, "qemu-system-x86_64")) return run_qemu(argc, argv);
+//RS     return 0;
+//RS }
+//RS "##,
+//RS     )
+//RS     .unwrap();
+//RS     let built = Command::new("cc")
+//RS         .args(["-std=c11", "-O0"])
+//RS         .arg(&source)
+//RS         .arg("-o")
+//RS         .arg(&binary)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         built.status.success(),
+//RS         "cc failed: {}",
+//RS         String::from_utf8_lossy(&built.stderr)
+//RS     );
+//RS     for name in ["nix", "qemu-system-x86_64", "qemu-img"] {
+//RS         fs::hard_link(&binary, tools.join(name)).unwrap();
+//RS     }
+//RS     let path = std::env::join_paths(std::iter::once(tools).chain(std::env::split_paths(
+//RS         &std::env::var_os("PATH").unwrap_or_default(),
+//RS     )))
+//RS     .unwrap();
+//RS     (path, outputs)
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS fn traced_nixos_migration(
+//RS     root: &Scratch,
+//RS     out_dir: &Path,
+//RS     trace: &Path,
+//RS     path: &std::ffi::OsStr,
+//RS     outputs: &Path,
+//RS     collide_publish: bool,
+//RS     json: bool,
+//RS ) -> std::process::Output {
+//RS     let jet_program = jet().get_program().to_owned();
+//RS     let mut command = Command::new("strace");
+//RS     command
+//RS         .args(["-f", "-s", "4096", "-o"])
+//RS         .arg(trace)
+//RS         .args(["-e", "trace=%file", "--"])
+//RS         .arg(jet_program)
+//RS         .args([
+//RS             "os",
+//RS             "migrate",
+//RS             "compare-nixos",
+//RS             "halcyon-gnome",
+//RS             "--out",
+//RS             out_dir.to_str().unwrap(),
+//RS             "--no-color",
+//RS             "--offline",
+//RS         ])
+//RS         .current_dir(
+//RS             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-config-real"),
+//RS         )
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JET_TEST_TOOL_ROOT", outputs)
+//RS         .env("JET_TEST_REQUIRE_OFFLINE", "1")
+//RS         .env("JET_TEST_REQUIRE_COMPOSED_METADATA", "1")
+//RS         // Keep process-generated temporary files inside Scratch; its parent
+//RS         // follows the disk-backed TMPDIR selected by the test harness.
+//RS         .env("TMPDIR", &root.path)
+//RS         .env("PATH", path);
+//RS     if collide_publish {
+//RS         command.env("JET_TEST_COLLIDE_PUBLISH", &root.path);
+//RS     }
+//RS     if json {
+//RS         command.arg("--json");
+//RS     }
+//RS     command.output().unwrap()
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn nixos_migration_publish_stage_is_private_and_collision_safe() {
+//RS     let root = Scratch::new("nixos-private-publish");
+//RS     let (path, outputs) = build_nixos_migration_test_tools(&root.path);
+//RS 
+//RS     let published = root.join("published");
+//RS     let success_trace = root.join("publish-success.trace");
+//RS     let out = traced_nixos_migration(
+//RS         &root,
+//RS         &published,
+//RS         &success_trace,
+//RS         &path,
+//RS         &outputs,
+//RS         false,
+//RS         false,
+//RS     );
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&out.stdout),
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let trace = fs::read_to_string(success_trace).unwrap();
+//RS     let marker = "/.nixos-comparison-publish-halcyon-gnome-";
+//RS     let lines = trace.lines().collect::<Vec<_>>();
+//RS     let mkdir = lines
+//RS         .iter()
+//RS         .position(|line| line.contains("mkdir(") && line.contains(marker) && line.contains("0700"))
+//RS         .unwrap_or_else(|| panic!("private publish mkdir missing:\n{trace}"));
+//RS     let protected = lines
+//RS         .iter()
+//RS         .position(|line| {
+//RS             line.contains(marker)
+//RS                 && line.contains("AT_SYMLINK_NOFOLLOW")
+//RS                 && (line.contains("S_IFDIR|0700") || line.contains("stx_mode=S_IFDIR|0700"))
+//RS         })
+//RS         .unwrap_or_else(|| panic!("private publish verification missing:\n{trace}"));
+//RS     let first_output = lines
+//RS         .iter()
+//RS         .position(|line| {
+//RS             line.contains(marker) && line.contains("/nixos/halcyon-gnome/system.qcow2")
+//RS         })
+//RS         .unwrap_or_else(|| panic!("private publish output missing:\n{trace}"));
+//RS     assert!(mkdir < protected && protected < first_output, "{trace}");
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::PermissionsExt;
+//RS         assert_eq!(
+//RS             fs::metadata(&published).unwrap().permissions().mode() & 0o777,
+//RS             0o700
+//RS         );
+//RS     }
+//RS     let host = published.join("nixos/halcyon-gnome");
+//RS     let image = host.join("system.qcow2");
+//RS     let proof = host.join("proof.json");
+//RS     let receipt = host.join("receipt.json");
+//RS     assert!(image.is_file());
+//RS     assert!(proof.is_file());
+//RS     assert!(receipt.is_file());
+//RS     assert!(fs::read_to_string(&proof)
+//RS         .unwrap()
+//RS         .contains("\"image\":\"system.qcow2\""));
+//RS     assert!(fs::read_to_string(&receipt)
+//RS         .unwrap()
+//RS         .contains("\"boot_proof\":\"proof.json\""));
+//RS     let plan = fs::read_to_string(host.join("build-boot-plan.json")).unwrap();
+//RS     assert_eq!(plan.matches("\"--offline\"").count(), 2, "{plan}");
+//RS     let stdout = String::from_utf8(out.stdout).unwrap();
+//RS     for path in [&image, &proof, &receipt] {
+//RS         assert!(stdout.contains(&path.display().to_string()), "{stdout}");
+//RS     }
+//RS 
+//RS     let json_out_dir = root.join("json-output");
+//RS     let json_trace = root.join("publish-json.trace");
+//RS     let out = traced_nixos_migration(
+//RS         &root,
+//RS         &json_out_dir,
+//RS         &json_trace,
+//RS         &path,
+//RS         &outputs,
+//RS         false,
+//RS         true,
+//RS     );
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&out.stdout),
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8(out.stdout).unwrap(),
+//RS         format!(
+//RS             "{{\"kind\":\"nixos.migration.comparison\",\"state\":\"proved\",\"host\":\"halcyon-gnome\",\"image\":\"{}\",\"proof\":\"{}\",\"receipt\":\"{}\"}}\n",
+//RS             json_out_dir.join("nixos/halcyon-gnome/system.qcow2").display(),
+//RS             json_out_dir.join("nixos/halcyon-gnome/proof.json").display(),
+//RS             json_out_dir.join("nixos/halcyon-gnome/receipt.json").display(),
+//RS         )
+//RS     );
+//RS 
+//RS     let collision_out = root.join("collision-output");
+//RS     let collision_trace = root.join("publish-collision.trace");
+//RS     let out = traced_nixos_migration(
+//RS         &root,
+//RS         &collision_out,
+//RS         &collision_trace,
+//RS         &path,
+//RS         &outputs,
+//RS         true,
+//RS         false,
+//RS     );
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     assert!(!collision_out.exists());
+//RS     let trace = fs::read_to_string(collision_trace).unwrap();
+//RS     assert!(
+//RS         trace.lines().any(|line| {
+//RS             line.contains("mkdir(")
+//RS                 && line.contains(marker)
+//RS                 && line.contains("0700")
+//RS                 && line.contains("EEXIST")
+//RS         }),
+//RS         "preexisting publish leaf did not fail atomically:\n{trace}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn nixos_migration_rejects_direct_engine_front_doors() {
+//RS     let marker = std::process::id().to_string();
+//RS     for (name, mut command, prefix) in [
+//RS         ("jetpack", jetpack(), &["os", "migrate"][..]),
+//RS         ("jetos", jetos(), &["migrate"][..]),
+//RS     ] {
+//RS         let root = Scratch::new("os-direct-migration-rejected");
+//RS         let out_dir = root.join("should-not-publish");
+//RS         let out = command
+//RS             .args(prefix)
+//RS             .args([
+//RS                 "compare-nixos",
+//RS                 "halcyon",
+//RS                 "--out",
+//RS                 out_dir.to_str().unwrap(),
+//RS                 "--no-color",
+//RS                 "--offline",
+//RS             ])
+//RS             .current_dir(config_example_dir())
+//RS             .env("JETPACK_ROOT", &root.path)
+//RS             .env("JET_INTERNAL_ROOT_DISPATCH_PID", &marker)
+//RS             .output()
+//RS             .unwrap();
+//RS         let stderr = String::from_utf8_lossy(&out.stderr);
+//RS         assert_eq!(out.status.code(), Some(2), "{name}: {stderr}");
+//RS         assert!(
+//RS             stderr.contains("available only through root `jet`"),
+//RS             "{name}: {stderr}"
+//RS         );
+//RS         assert!(!out_dir.exists(), "{name} reached migration publication");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn direct_os_engines_install_the_config_eval_bridge() {
+//RS     for (mut command, args) in [
+//RS         (jetpack(), &["os", "check", "halcyon", "--no-color"][..]),
+//RS         (jetos(), &["check", "halcyon", "--no-color"][..]),
+//RS     ] {
+//RS         let root = Scratch::new("os-direct-engine-bridge");
+//RS         let out = command
+//RS             .args(args)
+//RS             .current_dir(config_example_dir())
+//RS             .env("JETPACK_ROOT", &root.path)
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(
+//RS             out.status.success(),
+//RS             "stdout: {}\nstderr: {}",
+//RS             String::from_utf8_lossy(&out.stdout),
+//RS             String::from_utf8_lossy(&out.stderr)
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn nixos_migration_backend_has_no_product_path_or_rebranding_rewrite() {
+//RS     let vm = fs::read_to_string("crates/jetpack/src/JetOS/vm_commands.rs").unwrap();
+//RS     let generation = fs::read_to_string("crates/jetpack/src/JetOS/generation.rs").unwrap();
+//RS     let backend = fs::read_to_string("crates/jetpack/src/JetOS/nixos_backend.rs").unwrap();
+//RS     let files = fs::read_to_string("crates/jetpack/src/JetOS/generation_files.rs").unwrap();
+//RS     let syntax = fs::read_to_string("crates/jet-foundation/src/Syntax/jetpack_config.rs").unwrap();
+//RS     assert!(!vm.contains("nixos_backend"), "{vm}");
+//RS     assert!(!generation.contains("nixos_backend"), "{generation}");
+//RS     assert!(!backend.contains("distroName = \"jetos\""), "{backend}");
+//RS     assert!(!backend.contains("bounded_redacted_tail"));
+//RS     assert!(backend.contains("private build output was suppressed"));
+//RS     assert!(backend.contains("guest payload was suppressed"));
+//RS     let service = backend
+//RS         .split_once("const CONFIGURATION_PROOF_SERVICE")
+//RS         .and_then(|(_, rest)| rest.split_once("fn render_configuration_nix"))
+//RS         .map(|(service, _)| service)
+//RS         .unwrap();
+//RS     assert!(service.contains("--rcfile /etc/bashrc -i"));
+//RS     assert!(syntax.contains("pub const OS_VERB_MIGRATE: &str = \"migrate\";"));
+//RS     assert!(syntax.contains("pub const OS_MIGRATION_COMPARE_NIXOS: &str = \"compare-nixos\";"));
+//RS     assert!(syntax.contains("pub const OS_MIGRATION_FLAG_OUT: &str = \"--out\";"));
+//RS     assert!(syntax.contains("OS_VERB_MIGRATE,"));
+//RS     for pattern in [
+//RS         "sanitize_runtime_branding",
+//RS         "replace_bytes_in_place",
+//RS         "b\"NixOS\".as_slice(), b\"JetOS\"",
+//RS     ] {
+//RS         assert!(
+//RS             !files.contains(pattern),
+//RS             "rebranding rewrite remains: {pattern}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_vm_prove_writes_media_bound_harness() {
+//RS     let root = Scratch::new("os-vm-proof-root");
+//RS     let tools = Scratch::new("os-vm-proof-tools");
+//RS     write_fake_vm_tools(&tools.path, false);
+//RS     let out = jet()
+//RS         .args([
+//RS             "os",
+//RS             "vm",
+//RS             "prove",
+//RS             "halcyon",
+//RS             "--disk",
+//RS             "halcyon.qcow2",
+//RS             "--name",
+//RS             "vm-proof",
+//RS             "--no-color",
+//RS             "--offline",
+//RS         ])
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", &tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("error[E1285]"),
+//RS         "stderr should refuse harness-only proof: {stderr}"
+//RS     );
+//RS     let proof_dir = root.path.join("systems/vm-proofs");
+//RS     let proof = fs::read_dir(&proof_dir)
+//RS         .unwrap()
+//RS         .filter_map(Result::ok)
+//RS         .map(|entry| entry.path())
+//RS         .find(|path| path.extension().and_then(|e| e.to_str()) == Some("json"))
+//RS         .expect("vm proof json");
+//RS     let data = fs::read_to_string(&proof).unwrap();
+//RS     assert!(
+//RS         data.contains("\"state\":\"harness-ready\""),
+//RS         "proof should not claim guest pass before QEMU run: {data}"
+//RS     );
+//RS     assert!(
+//RS         data.contains("\"proof_tier\":\"plumbing\""),
+//RS         "fake-tool harness should be labeled plumbing tier: {data}"
+//RS     );
+//RS     assert!(data.contains("\"disk\":\"halcyon.qcow2\""), "proof: {data}");
+//RS     assert!(
+//RS         data.contains("\"media_proof\":"),
+//RS         "proof should bind installer media: {data}"
+//RS     );
+//RS     assert!(
+//RS         data.contains("\"expected_guest_proof\":"),
+//RS         "proof should name the guest proof artifact path: {data}"
+//RS     );
+//RS     assert!(
+//RS         data.contains("\"sha256\":"),
+//RS         "proof should hash tools: {data}"
+//RS     );
+//RS     assert!(
+//RS         data.contains("rollback-generation-bootable"),
+//RS         "proof should name guest assertions: {data}"
+//RS     );
+//RS     assert!(
+//RS         data.contains("terminal-login-ready")
+//RS             && data.contains("desktop-session-ready")
+//RS             && data.contains("graphical-console-ready")
+//RS             && data.contains("desktop-launchers-run"),
+//RS         "proof should require terminal and desktop readiness: {data}"
+//RS     );
+//RS     assert!(
+//RS         data.contains("\"phase\":\"boot-installer\""),
+//RS         "proof should record QEMU boot phase: {data}"
+//RS     );
+//RS     assert!(
+//RS         data.contains("\"phase\":\"boot-installed-disk\""),
+//RS         "proof should record reboot phase: {data}"
+//RS     );
+//RS     assert!(
+//RS         data.contains("\"phase\":\"boot-graphical-desktop\""),
+//RS         "proof should record graphical desktop phase: {data}"
+//RS     );
+//RS     assert!(
+//RS         data.contains("\"-cdrom\"") && data.contains("jetos-installer-halcyon.iso"),
+//RS         "installer phase should boot the ISO media: {data}"
+//RS     );
+//RS     let installed_phase = data
+//RS         .split("\"phase\":\"boot-installed-disk\"")
+//RS         .nth(1)
+//RS         .and_then(|rest| rest.split("\"phase\":\"boot-graphical-desktop\"").next())
+//RS         .expect("installed-disk command in proof");
+//RS     assert!(
+//RS         installed_phase.contains("\"-boot\",\"c\"")
+//RS             && installed_phase.contains("file=halcyon.qcow2,format=qcow2,if=ide")
+//RS             && !installed_phase.contains("\"-kernel\"")
+//RS             && !installed_phase.contains("\"-initrd\"")
+//RS             && !installed_phase.contains("\"-append\""),
+//RS         "installed-disk phase should boot firmware/disk, not direct kernel: {installed_phase}"
+//RS     );
+//RS     assert!(
+//RS         data.contains("\"-kernel\"") && data.contains("/boot/kernel"),
+//RS         "graphical proof should direct-boot the generation kernel: {data}"
+//RS     );
+//RS     assert!(
+//RS         data.contains("\"-initrd\"") && data.contains("/boot/initrd"),
+//RS         "graphical proof should direct-boot the generation initrd: {data}"
+//RS     );
+//RS     assert!(
+//RS         data.contains("jetos.mode=desktop-verify")
+//RS             && data.contains("\"-display\"")
+//RS             && data.contains("vnc=127.0.0.1:0")
+//RS             && data.contains("\"-vga\"")
+//RS             && data.contains("\"std\""),
+//RS         "graphical proof should expose a fixed VNC-backed stdvga display: {data}"
+//RS     );
+//RS     assert!(
+//RS         data.contains("qemu-xhci,id=xhci")
+//RS             && data.contains("usb-kbd,bus=xhci.0")
+//RS             && data.contains("usb-tablet,bus=xhci.0"),
+//RS         "graphical proof should expose explicit USB input devices for VNC use: {data}"
+//RS     );
+//RS     assert!(
+//RS         data.contains("rdinit=/jetos/init"),
+//RS         "graphical QEMU proof should boot the JetOS verifier overlay script: {data}"
+//RS     );
+//RS     assert!(
+//RS         data.contains("jetos.generation=vm-proof"),
+//RS         "QEMU proof should bind guest boot to the generation name: {data}"
+//RS     );
+//RS     assert!(
+//RS         data.contains("console=ttyS0"),
+//RS         "QEMU proof needs serial output for guest proof marker: {data}"
+//RS     );
+//RS     assert!(
+//RS         proof
+//RS             .with_file_name("halcyon-vm-proof-vm-proof.run")
+//RS             .join("boot-graphical-desktop.stdout")
+//RS             .is_file(),
+//RS         "vm prove should run the recorded QEMU phases"
+//RS     );
+//RS     assert!(
+//RS         root.path
+//RS             .join("systems/images/jetos-installer-halcyon.iso.proof.json")
+//RS             .is_file(),
+//RS         "vm prove should build media proof first"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_vm_prove_runs_qemu_and_records_guest_proof() {
+//RS     let root = Scratch::new("os-vm-run-root");
+//RS     let tools = Scratch::new("os-vm-run-tools");
+//RS     write_fake_vm_tools(&tools.path, true);
+//RS     let out = jet()
+//RS         .args([
+//RS             "os",
+//RS             "vm",
+//RS             "prove",
+//RS             "halcyon",
+//RS             "--disk",
+//RS             "halcyon.qcow2",
+//RS             "--name",
+//RS             "vm-live",
+//RS             "--no-color",
+//RS             "--offline",
+//RS         ])
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", &tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let proof = root
+//RS         .path
+//RS         .join("systems/vm-proofs/halcyon-vm-live-vm-proof.json");
+//RS     let guest = root
+//RS         .path
+//RS         .join("systems/vm-proofs/halcyon-vm-live-vm-proof-guest-proof.json");
+//RS     let final_proof = fs::read_to_string(&proof).unwrap();
+//RS     assert!(
+//RS         final_proof.contains("\"state\":\"guest-passed\""),
+//RS         "proof: {final_proof}"
+//RS     );
+//RS     assert!(
+//RS         final_proof.contains("\"proof_tier\":\"plumbing\""),
+//RS         "regular VM proof is harness plumbing until --real passes: {final_proof}"
+//RS     );
+//RS     assert!(
+//RS         final_proof.contains("\"guest_proof_sha256\""),
+//RS         "proof: {final_proof}"
+//RS     );
+//RS     let guest_proof = fs::read_to_string(&guest).unwrap();
+//RS     assert!(
+//RS         guest_proof.contains("\"serial_report\""),
+//RS         "guest proof: {guest_proof}"
+//RS     );
+//RS     assert!(
+//RS         guest_proof.contains("halcyon") && guest_proof.contains("vm-live"),
+//RS         "guest serial report should bind host and generation: {guest_proof}"
+//RS     );
+//RS     assert!(
+//RS         guest_proof.contains("\"qemu-system-x86_64\""),
+//RS         "guest proof should bind the runner toolchain: {guest_proof}"
+//RS     );
+//RS     let boot_log = root
+//RS         .path
+//RS         .join("systems/vm-proofs/halcyon-vm-live-vm-proof.run/boot-graphical-desktop.stdout");
+//RS     assert!(
+//RS         fs::read_to_string(&boot_log)
+//RS             .unwrap()
+//RS             .contains("JETOS_GUEST_PROOF"),
+//RS         "boot log should carry guest proof marker"
+//RS     );
+//RS 
+//RS     let run = jet()
+//RS         .args([
+//RS             "os",
+//RS             "vm",
+//RS             "run",
+//RS             "halcyon",
+//RS             "--disk",
+//RS             "halcyon.qcow2",
+//RS             "--no-color",
+//RS             "--offline",
+//RS         ])
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", &tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&run.stdout);
+//RS     let stderr = String::from_utf8_lossy(&run.stderr);
+//RS     assert!(
+//RS         stderr.contains("booting jetos VM halcyon generation vm-live"),
+//RS         "stderr: {stderr}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("JETOS_GUEST_PROOF"),
+//RS         "interactive run should launch QEMU with the proved disk: {stdout}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_vm_test_runs_declared_scenario_and_records_proof() {
+//RS     let project = Scratch::new("os-vmtest-project");
+//RS     copy_dir_recursive(&config_example_dir(), &project.path);
+//RS     let mut config = fs::read_to_string(project.path.join("config.jet")).unwrap();
+//RS     config.push_str(
+//RS         r#"
+//RS 
+//RS module vmtest.ssh-smoke {
+//RS     hosts: { halcyon: system.halcyon }
+//RS     run: test {
+//RS         halcyon.wait_for_boot()
+//RS         halcyon.assert_unit_active(.openssh)
+//RS         halcyon.assert_port_open(22)
+//RS     }
+//RS }
+//RS "#,
+//RS     );
+//RS     fs::write(project.path.join("config.jet"), config).unwrap();
+//RS     let root = Scratch::new("os-vmtest-root");
+//RS     let tools = Scratch::new("os-vmtest-tools");
+//RS     write_fake_vm_tools(&tools.path, true);
+//RS     let out = jet()
+//RS         .args([
+//RS             "os",
+//RS             "vm",
+//RS             "test",
+//RS             "ssh-smoke",
+//RS             "--disk",
+//RS             "ssh-smoke.qcow2",
+//RS             "--name",
+//RS             "vmtest-proof",
+//RS             "--no-color",
+//RS             "--offline",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", &tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let proof = root
+//RS         .path
+//RS         .join("systems/vm-tests/ssh-smoke-vmtest-proof.json");
+//RS     let data = fs::read_to_string(&proof).unwrap();
+//RS     assert!(
+//RS         data.contains("\"kind\":\"jetos.vmtest.proof\"")
+//RS             && data.contains("\"state\":\"passed\"")
+//RS             && data.contains("\"name\":\"ssh-smoke\""),
+//RS         "proof: {data}"
+//RS     );
+//RS     assert!(
+//RS         data.contains("\"name\": \"halcyon\"")
+//RS             && data.contains("\"system\": \"halcyon\"")
+//RS             && data.contains("\"disk\": \"ssh-smoke.qcow2\""),
+//RS         "proof: {data}"
+//RS     );
+//RS     assert!(
+//RS         data.contains("\"wait_for_boot\"")
+//RS             && data.contains("\"assert_unit_active\"")
+//RS             && data.contains("\"assert_port_open\""),
+//RS         "proof should capture typed assertion methods: {data}"
+//RS     );
+//RS     assert!(
+//RS         data.contains("halcyon.assert_unit_active(.openssh)"),
+//RS         "proof should carry the source test body for replay: {data}"
+//RS     );
+//RS     assert!(
+//RS         root.path
+//RS             .join("systems/vm-proofs/halcyon-vmtest-proof-vm-proof.json")
+//RS             .is_file(),
+//RS         "vmtest should reuse the install/reboot VM proof harness"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_vm_prove_accepts_matching_guest_proof() {
+//RS     let root = Scratch::new("os-vm-guest-proof-root");
+//RS     let tools = Scratch::new("os-vm-guest-proof-tools");
+//RS     write_fake_vm_tools(&tools.path, false);
+//RS     let args = [
+//RS         "os",
+//RS         "vm",
+//RS         "prove",
+//RS         "halcyon",
+//RS         "--disk",
+//RS         "halcyon.qcow2",
+//RS         "--name",
+//RS         "vm-proof",
+//RS         "--no-color",
+//RS         "--offline",
+//RS     ];
+//RS     let first = jet()
+//RS         .args(args)
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", &tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(first.status.code(), Some(2));
+//RS     let proof = root
+//RS         .path
+//RS         .join("systems/vm-proofs/halcyon-vm-proof-vm-proof.json");
+//RS     let guest = root
+//RS         .path
+//RS         .join("systems/vm-proofs/halcyon-vm-proof-vm-proof-guest-proof.json");
+//RS     let media_proof = root
+//RS         .path
+//RS         .join("systems/images/jetos-installer-halcyon.iso.proof.json");
+//RS     let harness = fs::read_to_string(&proof).unwrap();
+//RS     fs::write(
+//RS         &guest,
+//RS         format!(
+//RS             "{{\"state\":\"guest-passed\",\"host\":\"halcyon\",\"generation\":\"vm-proof\",\"disk\":\"halcyon.qcow2\",\"media_proof\":\"{}\",\"media_proof_sha256\":\"{}\",\"installer_iso_fingerprint\":\"{}\",\"assertions\":[\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\",\"rollback-generation-bootable\",\"terminal-login-ready\",\"desktop-session-ready\",\"graphical-console-ready\",\"desktop-launchers-run\"],\"toolchain\":\"{}\"}}\n",
+//RS             test_json_escape(&media_proof.display().to_string()),
+//RS             harness_json_field(&harness, "media_proof_sha256"),
+//RS             harness_json_field(&harness, "installer_iso_fingerprint"),
+//RS             test_json_escape(&harness)
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let second = jet()
+//RS         .args(args)
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", &tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         second.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&second.stderr)
+//RS     );
+//RS     let final_proof = fs::read_to_string(&proof).unwrap();
+//RS     assert!(
+//RS         final_proof.contains("\"state\":\"guest-passed\""),
+//RS         "proof: {final_proof}"
+//RS     );
+//RS     assert!(
+//RS         final_proof.contains("\"guest_proof_sha256\""),
+//RS         "proof: {final_proof}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_vm_prove_rejects_incomplete_guest_proof() {
+//RS     let root = Scratch::new("os-vm-stale-guest-proof-root");
+//RS     let tools = Scratch::new("os-vm-stale-guest-proof-tools");
+//RS     write_fake_vm_tools(&tools.path, false);
+//RS     let args = [
+//RS         "os",
+//RS         "vm",
+//RS         "prove",
+//RS         "halcyon",
+//RS         "--disk",
+//RS         "halcyon.qcow2",
+//RS         "--name",
+//RS         "vm-proof",
+//RS         "--no-color",
+//RS         "--offline",
+//RS     ];
+//RS     let first = jet()
+//RS         .args(args)
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", &tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(first.status.code(), Some(2));
+//RS     let proof = root
+//RS         .path
+//RS         .join("systems/vm-proofs/halcyon-vm-proof-vm-proof.json");
+//RS     let guest = root
+//RS         .path
+//RS         .join("systems/vm-proofs/halcyon-vm-proof-vm-proof-guest-proof.json");
+//RS     let media_proof = root
+//RS         .path
+//RS         .join("systems/images/jetos-installer-halcyon.iso.proof.json");
+//RS     let harness = fs::read_to_string(&proof).unwrap();
+//RS     fs::write(
+//RS         &guest,
+//RS         format!(
+//RS             "{{\"state\":\"guest-passed\",\"host\":\"halcyon\",\"generation\":\"vm-proof\",\"disk\":\"halcyon.qcow2\",\"media_proof\":\"{}\",\"media_proof_sha256\":\"{}\",\"installer_iso_fingerprint\":\"{}\",\"assertions\":[\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\"],\"toolchain\":\"{}\"}}\n",
+//RS             test_json_escape(&media_proof.display().to_string()),
+//RS             harness_json_field(&harness, "media_proof_sha256"),
+//RS             harness_json_field(&harness, "installer_iso_fingerprint"),
+//RS             test_json_escape(&harness)
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let second = jet()
+//RS         .args(args)
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", &tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(second.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&second.stderr);
+//RS     assert!(
+//RS         stderr.contains("guest assertions did not match"),
+//RS         "stderr: {stderr}"
+//RS     );
+//RS     let final_proof = fs::read_to_string(&proof).unwrap();
+//RS     assert!(
+//RS         final_proof.contains("\"state\":\"harness-ready\""),
+//RS         "proof should remain unpromoted: {final_proof}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_vm_prove_rejects_stale_guest_generation() {
+//RS     let root = Scratch::new("os-vm-stale-generation-root");
+//RS     let tools = Scratch::new("os-vm-stale-generation-tools");
+//RS     write_fake_vm_tools(&tools.path, false);
+//RS     let args = [
+//RS         "os",
+//RS         "vm",
+//RS         "prove",
+//RS         "halcyon",
+//RS         "--disk",
+//RS         "halcyon.qcow2",
+//RS         "--name",
+//RS         "vm-proof",
+//RS         "--no-color",
+//RS         "--offline",
+//RS     ];
+//RS     let first = jet()
+//RS         .args(args)
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", &tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(first.status.code(), Some(2));
+//RS     let proof = root
+//RS         .path
+//RS         .join("systems/vm-proofs/halcyon-vm-proof-vm-proof.json");
+//RS     let guest = root
+//RS         .path
+//RS         .join("systems/vm-proofs/halcyon-vm-proof-vm-proof-guest-proof.json");
+//RS     let media_proof = root
+//RS         .path
+//RS         .join("systems/images/jetos-installer-halcyon.iso.proof.json");
+//RS     let harness = fs::read_to_string(&proof).unwrap();
+//RS     fs::write(
+//RS         &guest,
+//RS         format!(
+//RS             "{{\"state\":\"guest-passed\",\"host\":\"halcyon\",\"generation\":\"older-generation\",\"disk\":\"halcyon.qcow2\",\"media_proof\":\"{}\",\"assertions\":[\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\",\"rollback-generation-bootable\",\"terminal-login-ready\",\"desktop-session-ready\",\"graphical-console-ready\",\"desktop-launchers-run\"],\"toolchain\":\"{}\"}}\n",
+//RS             test_json_escape(&media_proof.display().to_string()),
+//RS             test_json_escape(&harness)
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let second = jet()
+//RS         .args(args)
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", &tools.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(second.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&second.stderr);
+//RS     assert!(
+//RS         stderr.contains("`generation` expected `vm-proof`, found `older-generation`"),
+//RS         "stderr: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_image_writes_jetos_installer_media_proof() {
+//RS     let root = Scratch::new("os-image-root");
+//RS     let tools = Scratch::new("os-image-tools");
+//RS     let boot = Scratch::new("os-image-boot");
+//RS     fs::write(boot.join("kernel"), "MZ test kernel\nHdrS\n").unwrap();
+//RS     fs::write(
+//RS         boot.join("initrd"),
+//RS         b"070701 test initrd with embedded zstd magic \x28\xb5\x2f\xfd\n",
+//RS     )
+//RS     .unwrap();
+//RS     write_fake_vm_tools(&tools.path, true);
+//RS     let out = jet()
+//RS         .args([
+//RS             "os",
+//RS             "image",
+//RS             "halcyon",
+//RS             "--manual",
+//RS             "/dev/sda",
+//RS             "--no-color",
+//RS             "--offline",
+//RS         ])
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", &tools.path)
+//RS         .env("JETOS_CACHYOS_KERNEL", boot.join("kernel"))
+//RS         .env("JETOS_CACHYOS_INITRD", boot.join("initrd"))
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let proof = root
+//RS         .path
+//RS         .join("systems/images")
+//RS         .join("jetos-installer-halcyon.iso.proof.json");
+//RS     let data = fs::read_to_string(&proof).unwrap();
+//RS     assert!(data.contains("\"brand\":\"jetos\""), "data: {data}");
+//RS     assert!(data.contains("\"kind\":\"hybrid-iso\""), "data: {data}");
+//RS     assert!(data.contains("\"state\":\"built\""), "data: {data}");
+//RS     assert!(data.contains("\"sha256\":"), "data: {data}");
+//RS     assert!(
+//RS         root.path
+//RS             .join("systems/images/jetos-installer-halcyon.iso")
+//RS             .is_file(),
+//RS         "expected real hybrid ISO artifact"
+//RS     );
+//RS     let variant_proof = root
+//RS         .path
+//RS         .join("systems/images")
+//RS         .join("jetos-image-variants-halcyon.proof.json");
+//RS     let variants = fs::read_to_string(&variant_proof).unwrap();
+//RS     assert!(
+//RS         variants.contains("\"kind\":\"jetos.image-variants\"")
+//RS             && (variants.contains("\"proof\":\"image-variants-smoke-proved\"")
+//RS                 || variants.contains("\"proof\":\"image-variants-staged\""))
+//RS             && variants.contains("\"kind\": \"qcow2\"")
+//RS             && variants.contains("\"kind\": \"sd\"")
+//RS             && variants.contains("\"kind\": \"netboot-ipxe\""),
+//RS         "variants: {variants}"
+//RS     );
+//RS     // D-JOS-IMAGEPROOF1=C: sparse raw/sd markers must never claim built.
+//RS     assert!(
+//RS         variants.contains("\"kind\": \"raw\"") && variants.contains("\"state\": \"staged\""),
+//RS         "raw sparse marker must be staged: {variants}"
+//RS     );
+//RS     assert!(
+//RS         variants.contains("\"kind\": \"sd\"")
+//RS             && variants
+//RS                 .split("\"kind\": \"sd\"")
+//RS                 .nth(1)
+//RS                 .map(|rest| rest.contains("\"state\": \"staged\""))
+//RS                 .unwrap_or(false),
+//RS         "sd sparse marker must be staged: {variants}"
+//RS     );
+//RS     for artifact in [
+//RS         "jetos-halcyon.qcow2",
+//RS         "jetos-halcyon.raw",
+//RS         "jetos-halcyon-sd.img",
+//RS         "jetos-halcyon-netboot/vmlinuz",
+//RS         "jetos-halcyon-netboot/initrd",
+//RS         "jetos-halcyon-netboot/ipxe.conf",
+//RS     ] {
+//RS         assert!(
+//RS             root.path.join("systems/images").join(artifact).is_file(),
+//RS             "expected image variant artifact {artifact}"
+//RS         );
+//RS     }
+//RS     let ipxe = fs::read_to_string(
+//RS         root.path
+//RS             .join("systems/images/jetos-halcyon-netboot/ipxe.conf"),
+//RS     )
+//RS     .unwrap();
+//RS     assert!(
+//RS         ipxe.contains("kernel vmlinuz")
+//RS             && ipxe.contains("initrd initrd")
+//RS             && ipxe.contains("jetos.mode=run"),
+//RS         "ipxe: {ipxe}"
+//RS     );
+//RS     let staging = root
+//RS         .path
+//RS         .join("systems/images")
+//RS         .join("jetos-installer-halcyon.iso.d");
+//RS     let transaction = fs::read_to_string(staging.join("install/transaction.json")).unwrap();
+//RS     assert!(
+//RS         transaction.contains("\"disk\":\"/dev/sda\""),
+//RS         "tx: {transaction}"
+//RS     );
+//RS     assert!(
+//RS         transaction.contains("\"partition-gpt\"")
+//RS             && transaction.contains("\"mkfs.vfat-esp\"")
+//RS             && transaction.contains("\"install-limine-esp\""),
+//RS         "tx: {transaction}"
+//RS     );
+//RS     let install = fs::read_to_string(staging.join("install/install.sh")).unwrap();
+//RS     assert!(
+//RS         install.contains("sfdisk --wipe always"),
+//RS         "install: {install}"
+//RS     );
+//RS     assert!(
+//RS         install.contains("blockdev --rereadpt"),
+//RS         "install: {install}"
+//RS     );
+//RS     assert!(install.contains("mkfs.vfat -F 32"), "install: {install}");
+//RS     assert!(install.contains("mkfs.ext4"), "install: {install}");
+//RS     assert!(
+//RS         install.contains("EFI/BOOT/BOOTX64.EFI") && install.contains("installed-limine.conf"),
+//RS         "install: {install}"
+//RS     );
+//RS     assert!(install.contains("install-proof.json"), "install: {install}");
+//RS     let verify = fs::read_to_string(staging.join("install/guest-verify.sh")).unwrap();
+//RS     assert!(
+//RS         verify.contains("system=\"$root/var/lib/jetos/generations/")
+//RS             && verify.contains("need \"$system/plan.json\""),
+//RS         "verify: {verify}"
+//RS     );
+//RS     assert!(
+//RS         verify.contains("jetos verifier: missing $path"),
+//RS         "verify: {verify}"
+//RS     );
+//RS     assert!(
+//RS         verify.contains("LABEL=jetos-root /dev/vda2 /dev/sda2 /dev/vda /dev/sda"),
+//RS         "verify should probe partitioned installed disks: {verify}"
+//RS     );
+//RS     assert!(
+//RS         verify.contains("terminal/facts.json")
+//RS             && verify.contains("serial-getty@ttyS0.service")
+//RS             && verify.contains("desktop/facts.json")
+//RS             && verify.contains("sw/bin/gdm")
+//RS             && verify.contains("sw/bin/gnome-session")
+//RS             && verify.contains("sw/bin/gnome-shell")
+//RS             && verify.contains("jetos-desktop-session")
+//RS             && verify.contains("jetos-studio")
+//RS             && verify.contains("--jetos-proof")
+//RS             && verify.contains("desktop-launchers-run"),
+//RS         "verify: {verify}"
+//RS     );
+//RS     assert!(
+//RS         verify.contains("for svc in openssh backup metrics"),
+//RS         "verify: {verify}"
+//RS     );
+//RS     assert!(verify.contains("\"rollback\""), "verify: {verify}");
+//RS     let initrd_bytes = fs::read(staging.join("boot/initrd")).unwrap();
+//RS     assert!(
+//RS         initrd_bytes.starts_with(b"070701"),
+//RS         "raw newc initrd with embedded compressed payload bytes must stay a raw cpio archive"
+//RS     );
+//RS     let initrd = String::from_utf8_lossy(&initrd_bytes);
+//RS     assert!(initrd.contains("jetos.mode=install"), "initrd: {initrd}");
+//RS     assert!(initrd.contains("jetos.mode=verify"), "initrd: {initrd}");
+//RS     assert!(
+//RS         initrd.contains("jetos.mode=desktop-verify"),
+//RS         "initrd: {initrd}"
+//RS     );
+//RS     assert!(
+//RS         initrd.contains("jetos/init"),
+//RS         "initrd should carry the JetOS init dispatcher: {initrd}"
+//RS     );
+//RS     assert!(
+//RS         initrd.contains("mount -t proc proc /proc")
+//RS             && initrd.contains("mount -t devtmpfs devtmpfs /dev"),
+//RS         "initrd dispatcher should prepare proc/dev before reading cmdline: {initrd}"
+//RS     );
+//RS     assert!(
+//RS         initrd.contains("LABEL=jetos-root /dev/vda2 /dev/sda2 /dev/vda /dev/sda"),
+//RS         "initrd should probe partitioned installed disks before installer fallback: {initrd}"
+//RS     );
+//RS     assert!(
+//RS         initrd.contains("use_system_nix")
+//RS             && initrd.contains("ln -s \"$system_nix\" /nix"),
+//RS         "initrd should expose the installed generation nix store when no initrd /nix exists: {initrd}"
+//RS     );
+//RS     assert!(
+//RS         initrd.contains("jetos/tools/bin/sh")
+//RS             && initrd.contains("jetos/tools/bin/sfdisk")
+//RS             && initrd.contains("jetos/tools/bin/blockdev"),
+//RS         "initrd should carry installer partition tools: {initrd}"
+//RS     );
+//RS     assert!(
+//RS         initrd.contains("exec chroot /sysroot /run/current-system/sbin/init")
+//RS             && initrd.contains("SYSTEMD_UNIT_PATH=/etc/systemd/system")
+//RS             && initrd.contains("for top in etc sbin sw share studio init systemd lib usr network")
+//RS             && initrd.contains("ln -s \"$generation_target/$top\" \"/sysroot/$top\""),
+//RS         "initrd run mode should hand off to installed current-system, not fallback shell: {initrd}"
+//RS     );
+//RS     assert!(
+//RS         initrd.contains("jetos/modules/atkbd.ko.xz")
+//RS             && initrd.contains("jetos/modules/usbhid.ko.xz")
+//RS             && initrd.contains("jetos/modules/xhci-hcd.ko.xz"),
+//RS         "initrd should carry keyboard and USB HID modules for VNC input: {initrd}"
+//RS     );
+//RS     assert!(
+//RS         initrd.contains("JETOS_GUEST_PROOF"),
+//RS         "initrd should carry guest proof reporter: {initrd}"
+//RS     );
+//RS     let limine = fs::read_to_string(staging.join("boot/limine.conf")).unwrap();
+//RS     assert!(
+//RS         limine.contains("/Install jetos 26.10 (Apex) — halcyon")
+//RS             && limine.contains("cmdline: console=ttyS0 rdinit=/jetos/init")
+//RS             && limine.contains("jetos.disk=/dev/sda"),
+//RS         "limine: {limine}"
+//RS     );
+//RS     let installed_limine = fs::read_to_string(staging.join("boot/installed-limine.conf")).unwrap();
+//RS     assert!(
+//RS         installed_limine.contains("/jetos 26.10 (Apex) — halcyon verify"),
+//RS         "installed limine: {installed_limine}"
+//RS     );
+//RS     let installer_os_release =
+//RS         fs::read_to_string(staging.join("jetos/current-system/etc/os-release")).unwrap();
+//RS     let installer_usr_os_release =
+//RS         fs::read_to_string(staging.join("jetos/current-system/usr/lib/os-release")).unwrap();
+//RS     assert_eq!(installer_os_release, installer_usr_os_release);
+//RS     assert!(
+//RS         installer_os_release.contains("PRETTY_NAME=\"jetos 26.10 (Apex)\"")
+//RS             && installer_os_release.contains("VERSION_CODENAME=apex")
+//RS     );
+//RS     let installer_wallpaper =
+//RS         fs::read_to_string(staging.join("jetos/current-system/share/backgrounds/jetos/apex.svg"))
+//RS             .unwrap();
+//RS     assert!(
+//RS         installer_wallpaper.contains("jetos 26.10 Apex")
+//RS             && installer_wallpaper.contains("linearGradient")
+//RS             && installer_wallpaper.len() > 1_000,
+//RS         "installer must contain projected wallpaper bytes"
+//RS     );
+//RS     for text in [
+//RS         limine.as_str(),
+//RS         installed_limine.as_str(),
+//RS         installer_os_release.as_str(),
+//RS         installer_wallpaper.as_str(),
+//RS     ] {
+//RS         assert!(!text.contains("NixOS") && !text.contains("Yarara"));
+//RS     }
+//RS     assert!(
+//RS         staging.join("boot/efiboot.img").is_file(),
+//RS         "installer media should carry a UEFI FAT ESP boot image"
+//RS     );
+//RS     assert!(
+//RS         staging.join("EFI/BOOT/BOOTX64.EFI").is_file(),
+//RS         "installer media should expose the EFI loader for target ESP install"
+//RS     );
+//RS     assert!(
+//RS         staging.join("boot/installed-limine.conf").is_file(),
+//RS         "installer media should carry installed-disk Limine config"
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(staging.join("limine.conf")).unwrap(),
+//RS         limine,
+//RS         "Limine config should be available at the ISO root and /boot"
+//RS     );
+//RS     assert!(staging.join("jetos/provenance.json").is_file());
+//RS     assert!(
+//RS         staging
+//RS             .join("jetos/current-system/etc/systemd/system/openssh.service")
+//RS             .is_file(),
+//RS         "installer media should carry the full generation"
+//RS     );
+//RS     assert!(
+//RS         !fs::symlink_metadata(staging.join("jetos/current-system/plan.json"))
+//RS             .unwrap()
+//RS             .file_type()
+//RS             .is_symlink(),
+//RS         "installer media must be self-contained"
+//RS     );
+//RS     assert!(
+//RS         !fs::symlink_metadata(staging.join("jetos/current-system/sbin/init"))
+//RS             .unwrap()
+//RS             .file_type()
+//RS             .is_symlink(),
+//RS         "installer media must not point back to the host root"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS #[ignore = "epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored"]
+//RS fn os_init_writes_guided_ext4_config() {
+//RS     let proj = Scratch::new("os-init");
+//RS     let out = jet()
+//RS         .args(["os", "init", "laptop", "--no-color"])
+//RS         .current_dir(&proj.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let config = fs::read_to_string(proj.join("config.jet")).unwrap();
+//RS     assert!(config.contains("system.laptop"), "config: {config}");
+//RS     assert!(config.contains("filesystem.layout"), "config: {config}");
+//RS     assert!(config.contains("network.hostName"), "config: {config}");
+//RS }
+// END-PORT-PENDING 1094 tests/jetpack_jetos.rs:2348-4656
+

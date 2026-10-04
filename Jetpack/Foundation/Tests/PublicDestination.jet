@@ -1,0 +1,111 @@
+// crates/jet-net/src/lib.rs:1079-1100 and strict range/mapped-v6 boundaries.
+// Pure cases use decoded parts, never a replacement IP parser or Core provider.
+#Test("foundation public_destination_policy_rejects_reserved_ipv4_space") {
+    loop last in ([Int]{1, 9, 255}) -> assert(!foundation_public_destination_ipv4(192, 0, 0, last))
+    assert(foundation_public_destination_ipv4(8, 8, 8, 8))
+}
+#Test("foundation strict outbound IPv4 refuses every reserved range") {
+    assert(!foundation_public_destination_ipv4(0, 1, 2, 3))
+    assert(!foundation_public_destination_ipv4(10, 1, 2, 3))
+    assert(!foundation_public_destination_ipv4(100, 64, 0, 0))
+    assert(!foundation_public_destination_ipv4(100, 127, 255, 255))
+    assert(!foundation_public_destination_ipv4(127, 1, 2, 3))
+    assert(!foundation_public_destination_ipv4(169, 254, 1, 2))
+    assert(!foundation_public_destination_ipv4(172, 16, 0, 0))
+    assert(!foundation_public_destination_ipv4(172, 31, 255, 255))
+    assert(!foundation_public_destination_ipv4(192, 0, 2, 1))
+    assert(!foundation_public_destination_ipv4(192, 168, 255, 255))
+    assert(!foundation_public_destination_ipv4(198, 18, 0, 0))
+    assert(!foundation_public_destination_ipv4(198, 19, 255, 255))
+    assert(!foundation_public_destination_ipv4(198, 51, 100, 1))
+    assert(!foundation_public_destination_ipv4(203, 0, 113, 1))
+    assert(!foundation_public_destination_ipv4(224, 0, 0, 1))
+    assert(!foundation_public_destination_ipv4(239, 255, 255, 255))
+    assert(!foundation_public_destination_ipv4(240, 1, 2, 3))
+    assert(!foundation_public_destination_ipv4(255, 255, 255, 255))
+}
+#Test("foundation strict outbound IPv4 accepted adjacent boundaries") {
+    assert(foundation_public_destination_ipv4(1, 0, 0, 0))
+    assert(foundation_public_destination_ipv4(100, 63, 255, 255))
+    assert(foundation_public_destination_ipv4(100, 128, 0, 0))
+    assert(foundation_public_destination_ipv4(169, 253, 255, 255))
+    assert(foundation_public_destination_ipv4(169, 255, 0, 0))
+    assert(foundation_public_destination_ipv4(172, 15, 255, 255))
+    assert(foundation_public_destination_ipv4(172, 32, 0, 0))
+    assert(foundation_public_destination_ipv4(192, 0, 1, 255))
+    assert(foundation_public_destination_ipv4(192, 0, 3, 0))
+    assert(foundation_public_destination_ipv4(192, 167, 255, 255))
+    assert(foundation_public_destination_ipv4(192, 169, 0, 0))
+    assert(foundation_public_destination_ipv4(198, 17, 255, 255))
+    assert(foundation_public_destination_ipv4(198, 20, 0, 0))
+    assert(foundation_public_destination_ipv4(198, 51, 99, 255))
+    assert(foundation_public_destination_ipv4(198, 51, 101, 0))
+    assert(foundation_public_destination_ipv4(203, 0, 112, 255))
+    assert(foundation_public_destination_ipv4(203, 0, 114, 0))
+    assert(foundation_public_destination_ipv4(223, 255, 255, 255))
+}
+#Test("foundation strict outbound IPv6 global unicast only") {
+    assert(foundation_public_destination_ipv6([Int]{8193, 18528, 18528, 0, 0, 0, 0, 34952}))
+    assert(foundation_public_destination_ipv6([Int]{8192, 0, 0, 0, 0, 0, 0, 0}))
+    assert(foundation_public_destination_ipv6([Int]{16383, 65535, 65535, 65535, 65535, 65535, 65535, 65535}))
+    assert(!foundation_public_destination_ipv6([Int]{8191, 65535, 0, 0, 0, 0, 0, 0}))
+    assert(!foundation_public_destination_ipv6([Int]{16384, 0, 0, 0, 0, 0, 0, 0}))
+    assert(!foundation_public_destination_ipv6([Int]{0, 0, 0, 0, 0, 0, 0, 0}))
+    assert(!foundation_public_destination_ipv6([Int]{0, 0, 0, 0, 0, 0, 0, 1}))
+    assert(!foundation_public_destination_ipv6([Int]{65280, 0, 0, 0, 0, 0, 0, 1}))
+    assert(!foundation_public_destination_ipv6([Int]{64512, 0, 0, 0, 0, 0, 0, 1}))
+    assert(!foundation_public_destination_ipv6([Int]{64768, 0, 0, 0, 0, 0, 0, 1}))
+    assert(!foundation_public_destination_ipv6([Int]{65152, 0, 0, 0, 0, 0, 0, 1}))
+}
+#Test("foundation strict outbound IPv6 documentation exception and adjacent words") {
+    assert(!foundation_public_destination_ipv6([Int]{8193, 3512, 0, 0, 0, 0, 0, 0}))
+    assert(!foundation_public_destination_ipv6([Int]{8193, 3512, 65535, 65535, 65535, 65535, 65535, 65535}))
+    assert(foundation_public_destination_ipv6([Int]{8193, 3511, 0, 0, 0, 0, 0, 0}))
+    assert(foundation_public_destination_ipv6([Int]{8193, 3513, 0, 0, 0, 0, 0, 0}))
+    assert(foundation_public_destination_ipv6([Int]{8194, 3512, 0, 0, 0, 0, 0, 0}))
+}
+#Test("foundation strict outbound IPv4 mapped IPv6 shares exact IPv4 policy") {
+    assert(foundation_public_destination_ipv6([Int]{0, 0, 0, 0, 0, 65535, 2056, 2056}))
+    assert(!foundation_public_destination_ipv6([Int]{0, 0, 0, 0, 0, 65535, 32512, 1}))
+    assert(!foundation_public_destination_ipv6([Int]{0, 0, 0, 0, 0, 65535, 25664, 1}))
+    assert(!foundation_public_destination_ipv6([Int]{0, 0, 0, 0, 0, 65535, 49152, 9}))
+    assert(!foundation_public_destination_ipv6([Int]{0, 0, 0, 0, 0, 65535, 49152, 513}))
+    assert(!foundation_public_destination_ipv6([Int]{0, 0, 0, 0, 0, 65535, 65535, 65535}))
+    assert(!foundation_public_destination_ipv6([Int]{0, 0, 0, 0, 1, 65535, 2056, 2056}))
+    assert(!foundation_public_destination_ipv6([Int]{0, 0, 0, 0, 0, 65534, 2056, 2056}))
+}
+
+// Real typed-IP/DNS/pinned-stream closure; #3595 native contracts, not mocks.
+#Test("foundation all DNS answers must be public including mapped IPv6") {
+    public :: net.socket_addr("8.8.8.8", 443) ?? panic("public socket")
+    private :: net.socket_addr("127.0.0.1", 443) ?? panic("private socket")
+    mapped :: net.socket_addr("::ffff:127.0.0.1", 443) ?? panic("mapped socket")
+    assert(!foundation_addresses_are_public([SocketAddr]{}))
+    assert(foundation_addresses_are_public([SocketAddr]{public}))
+    assert(!foundation_addresses_are_public([SocketAddr]{public, private}))
+    assert(!foundation_addresses_are_public([SocketAddr]{private, public}))
+    assert(!foundation_addresses_are_public([SocketAddr]{public, mapped}))
+}
+#Test("foundation comptime_http_fetch_rejects_loopback_before_connecting original") {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind loopback fixture")
+    address :: net.listener_local_socket_addr(listener) ?? panic("loopback address")
+    port :: net.socket_port(address)
+    // Foundation Rooted/stream fetch is a mandatory #3595/#4262 dependency;
+    // a public-policy-only check cannot stand in for fetch-before-connect proof.
+    if foundation_fetch("http://127.0.0.1:{port}/secret") == {
+        .Err(error) -> assert("{error}".contains("not public"))
+        .Ok(_) -> panic("loopback destination accepted")
+    }
+    // Rust sets nonblocking and requires WouldBlock on accept. Core has no
+    // matching listener nonblocking/try_accept operation yet (#3595).
+}
+#Test("foundation pinned stream rejects empty set and resolves numeric public endpoint") {
+    if foundation_get_stream_pinned("https://example.test/r", [SocketAddr]{}, 30s) == {
+        .Err(error) -> assert_eq(error, FoundationFetchError.IO("pinned network transport has no resolved addresses"))
+        .Ok(_) -> panic("empty pinned set accepted")
+    }
+    addresses :: foundation_resolve_public_addresses("[2001:4860:4860::8888]", 443) ?? panic("numeric IPv6 endpoint")
+    assert_eq(addresses.len(), 1)
+    assert(foundation_addresses_are_public(addresses))
+    assert_eq(net.socket_port(addresses[0]), 443)
+}

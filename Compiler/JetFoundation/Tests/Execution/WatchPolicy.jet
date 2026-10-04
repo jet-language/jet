@@ -1,0 +1,21 @@
+use jet_foundation.[WatchPolicy, watch_policy_from]
+
+#Test("watch policy preserves each default without recognized flags") {
+    defaults :: [WatchPolicy]{.Auto, .Restart, .Swap, .Once}
+    ignored :: [String]{"file.jet", "--watch", "--watch=on", "--restart=yes", "--SWAP"}
+    loop policy in defaults {
+        assert(watch_policy_from([String]{}, policy) == policy)
+        assert(watch_policy_from(ignored, policy) == policy)
+    }
+}
+#Test("watch policy recognizes exact restart swap and off flags") {
+    assert(watch_policy_from([String]{"--restart"}, .Auto) == .Restart)
+    assert(watch_policy_from([String]{"--swap"}, .Restart) == .Swap)
+    assert(watch_policy_from([String]{"--watch=off"}, .Swap) == .Once)
+}
+#Test("watch policy last recognized flag wins independent of unrelated arguments") {
+    assert(watch_policy_from([String]{"--restart", "file.jet", "--swap", "--watch=on", "--watch=off", "tail"}, .Auto) == .Once)
+    assert(watch_policy_from([String]{"--watch=off", "--swap", "--restart", "--restart=yes"}, .Once) == .Restart)
+    assert(watch_policy_from([String]{"--restart", "--watch=off", "--swap", "--watch"}, .Restart) == .Swap)
+    assert(watch_policy_from([String]{"--swap", "--swap"}, .Auto) == .Swap)
+}

@@ -4,10 +4,10 @@
 // nixpkgs revision, the target system, the attribute path and the canonical
 // project-lock digest before a fallback evaluation may be constructed.
 
-@NIX_FALLBACK_PROVENANCE_SCHEMA :: "jetpack-nix-fallback-v1"
-@NIX_LOCKED_NIXPKGS_PREFIX :: "github:NixOS/nixpkgs#"
-@NIX_FALLBACK_PROVENANCE_FIELDS :: [String]{"schema", "executable", "executable_sha256", "version", "nixpkgs_revision", "system", "attr", "lock_sha256"}
-@NIX_VERSION_OUTPUT_PREFIX :: "nix (Nix) "
+NIX_FALLBACK_PROVENANCE_SCHEMA :: prep { "jetpack-nix-fallback-v1" }
+NIX_LOCKED_NIXPKGS_PREFIX :: prep { "github:NixOS/nixpkgs#" }
+NIX_FALLBACK_PROVENANCE_FIELDS :: prep { [String]{"schema", "executable", "executable_sha256", "version", "nixpkgs_revision", "system", "attr", "lock_sha256"} }
+NIX_VERSION_OUTPUT_PREFIX :: prep { "nix (Nix) " }
 
 // All inputs that identify one permitted local Nix fallback evaluation.
 pub struct NixFallbackIdentity {
@@ -57,11 +57,11 @@ pub struct NixFallbackIdentity {
             .Object(entries) -> fields = entries
             else -> return Err(NixError.Fallback("Nix fallback provenance must be a JSON object"))
         }
-        if fields.len() != @NIX_FALLBACK_PROVENANCE_FIELDS.len() || !nix_fallback_has_every_field(fields) {
+        if fields.len() != NIX_FALLBACK_PROVENANCE_FIELDS.len() || !nix_fallback_has_every_field(fields) {
             return Err(NixError.Fallback("Nix fallback provenance has an unknown or missing identity field"))
         }
         schema :: nix_fallback_provenance_text(fields, "schema")
-        if schema != @NIX_FALLBACK_PROVENANCE_SCHEMA -> return Err(NixError.Fallback("unsupported Nix fallback provenance schema"))
+        if schema != NIX_FALLBACK_PROVENANCE_SCHEMA -> return Err(NixError.Fallback("unsupported Nix fallback provenance schema"))
         executable :: nix_fallback_provenance_text(fields, "executable")
         executable_sha256 :: nix_fallback_provenance_text(fields, "executable_sha256")
         version :: nix_fallback_provenance_text(fields, "version")
@@ -75,7 +75,7 @@ pub struct NixFallbackIdentity {
     // The exact source input allowed for a fallback invocation. A bare
     // `nixpkgs`, channel name or floating flake ref has no representation.
     fn locked_nixpkgs_input(self) -> String Never! {
-        "{@NIX_LOCKED_NIXPKGS_PREFIX}{self.nixpkgs_revision}"
+        "{NIX_LOCKED_NIXPKGS_PREFIX}{self.nixpkgs_revision}"
     }
 
     fn attrpath(self) -> String Never! {
@@ -97,7 +97,7 @@ pub struct NixFallbackIdentity {
         attrs := [DataTree]{}
         loop segment in self.attr -> &attrs.push(DataTree.Text(segment))
         pkg_json_render(DataTree.Object([
-            "schema": DataTree.Text(@NIX_FALLBACK_PROVENANCE_SCHEMA),
+            "schema": DataTree.Text(NIX_FALLBACK_PROVENANCE_SCHEMA),
             "executable": DataTree.Text(self.executable),
             "executable_sha256": DataTree.Text(self.executable_sha256),
             "version": DataTree.Text(self.version),
@@ -133,7 +133,7 @@ fn nix_fallback_inspect_executable(executable: String) -[FS, Env, Exec, Time.Wai
 fn nix_fallback_reported_version(text: String) -> String? Never! {
     loop line in text.split("\n") {
         trimmed :: line.trim()
-        if trimmed.starts_with(@NIX_VERSION_OUTPUT_PREFIX) -> return Val(trimmed.removeprefix(@NIX_VERSION_OUTPUT_PREFIX).trim())
+        if trimmed.starts_with(NIX_VERSION_OUTPUT_PREFIX) -> return Val(trimmed.removeprefix(NIX_VERSION_OUTPUT_PREFIX).trim())
     }
     None
 }
@@ -165,20 +165,20 @@ fn nix_fallback_project_binding(project: String, source_name: String) -[FS]> (lo
 
 fn nix_fallback_locked_exact(lock: LockFile, source_name: String) -> String? Never! {
     loop channel in lock.source_channels {
-        if channel.name == source_name || (source_name == @REF_SOURCE_JETPACK && channel.name == @REF_SOURCE_NIXPKGS) -> return Val(channel.exact)
+        if channel.name == source_name || (source_name == REF_SOURCE_JETPACK && channel.name == REF_SOURCE_NIXPKGS) -> return Val(channel.exact)
     }
     None
 }
 
 fn nix_fallback_revision_from_locked_input(input: String) -> String NixError! {
-    if !input.starts_with(@NIX_LOCKED_NIXPKGS_PREFIX) -> return Err(NixError.Fallback("local Nix fallback rejects ambient or unpinned nixpkgs input"))
-    revision :: input.removeprefix(@NIX_LOCKED_NIXPKGS_PREFIX)
+    if !input.starts_with(NIX_LOCKED_NIXPKGS_PREFIX) -> return Err(NixError.Fallback("local Nix fallback rejects ambient or unpinned nixpkgs input"))
+    revision :: input.removeprefix(NIX_LOCKED_NIXPKGS_PREFIX)
     nix_fallback_validate_revision(revision)
     Ok(revision)
 }
 
 fn nix_fallback_has_every_field(fields: [String: DataTree]) -> Bool Never! {
-    loop field in @NIX_FALLBACK_PROVENANCE_FIELDS {
+    loop field in NIX_FALLBACK_PROVENANCE_FIELDS {
         if fields.get(field) == None -> return false
     }
     true

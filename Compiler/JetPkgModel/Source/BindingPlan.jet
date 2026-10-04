@@ -1,0 +1,526 @@
+// Data-driven foreign-adaptation plans, ported from jet_pkg_model::Bindgen.
+//
+// Low-level binders parse foreign declarations. This file owns the decision
+// that selects native arity or a checked adaptation. A name that merely looks
+// like a count is never enough evidence to remove an argument or claim a
+// borrowed view.
+
+// The requested generated surface. `Automatic` is a checked facade; `Native`
+// retains the foreign declaration's arity while keeping boundary checks.
+pub enum BindingShape {
+    Automatic
+    Native
+
+    pub fn parse(value: String) -> BindingShape BindingPlanError! {
+        if value == {
+            "automatic" | "auto" -> Ok(BindingShape.Automatic)
+            "native" -> Ok(BindingShape.Native)
+            else -> Err(BindingPlanError.InvalidInput("unknown binding shape `{value}`; use `automatic` or `native`"))
+        }
+    }
+
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Automatic -> "automatic"
+            .Native -> "native"
+        }
+    }
+}
+
+// Project-level binding drift policy.
+pub enum BindingPolicy {
+    Automatic
+    Frozen
+
+    pub fn parse(value: String) -> BindingPolicy BindingPlanError! {
+        if value == {
+            "automatic" | "auto" -> Ok(BindingPolicy.Automatic)
+            "frozen" -> Ok(BindingPolicy.Frozen)
+            else -> Err(BindingPlanError.InvalidInput("unknown binding policy `{value}`; use `automatic` or `frozen`"))
+        }
+    }
+
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Automatic -> "automatic"
+            .Frozen -> "frozen"
+        }
+    }
+}
+
+// The unit carried by a foreign pointer/count pair.
+pub enum CountUnit {
+    Bytes
+    Elements(String)
+    Unknown
+
+    pub fn known(self) -> Bool Never! {
+        if self == {
+            .Bytes -> true
+            .Elements(element) -> element.trim() != ""
+            .Unknown -> false
+        }
+    }
+
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Bytes -> "bytes"
+            .Elements(element) -> "elements:{element}"
+            .Unknown -> "unknown"
+        }
+    }
+}
+
+// Whether a count describes the complete extent or only a prefix.
+pub enum CountMeaning {
+    FullExtent
+    Prefix
+    Unknown
+
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .FullExtent -> "full-extent"
+            .Prefix -> "prefix"
+            .Unknown -> "unknown"
+        }
+    }
+}
+
+// Retention evidence for a pointer crossing the boundary.
+pub enum PointerRetention {
+    BorrowedForCall
+    MayRetain
+    Unknown
+
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .BorrowedForCall -> "borrowed-for-call"
+            .MayRetain -> "may-retain"
+            .Unknown -> "unknown"
+        }
+    }
+}
+
+// Canonical facts needed before a pointer/count adaptation can remove the
+// native count argument.
+pub struct PointerCountFact {
+    pub pointer_parameter: String
+    pub count_parameter: String
+    pub unit: CountUnit
+    pub meaning: CountMeaning
+    pub native_width_bits: Int
+    pub retention: PointerRetention
+
+    pub fn new(pointer_parameter: String, count_parameter: String, unit: CountUnit, meaning: CountMeaning, native_width_bits: Int, retention: PointerRetention) -> PointerCountFact Never! {
+        PointerCountFact{
+            pointer_parameter: pointer_parameter,
+            count_parameter: count_parameter,
+            unit: unit,
+            meaning: meaning,
+            native_width_bits: native_width_bits,
+            retention: retention
+        }
+    }
+
+    pub fn validate_names(self) BindingPlanError! {
+        if self.pointer_parameter.trim() == "" || self.count_parameter.trim() == "" {
+            return Err(BindingPlanError.InvalidInput("pointer/count evidence needs both parameter names"))
+        }
+        if self.pointer_parameter == self.count_parameter {
+            return Err(BindingPlanError.InvalidInput("pointer/count evidence names the same parameter twice"))
+        }
+    }
+}
+
+// One parsed foreign operation supplied to the planner by a language binder.
+pub struct BindingOperation {
+    pub name: String
+    pub native_signature: String
+    pub result_type: String
+    pub pointer_count: PointerCountFact?
+    pub nullable_return: Bool
+    pub borrowed_view: Bool
+    pub status_out: Bool
+    pub partial_success: Bool
+    pub fallible_close: Bool
+    pub callback_transport: String
+    pub effects: String
+    pub ownership: String
+    pub failure_mapping: String
+    pub copies: String
+    pub placement: String
+    pub cleanup: String
+
+    pub fn new(name: String, native_signature: String, result_type: String) -> BindingOperation Never! {
+        BindingOperation{
+            name: name,
+            native_signature: native_signature,
+            result_type: result_type,
+            pointer_count: None,
+            nullable_return: false,
+            borrowed_view: false,
+            status_out: false,
+            partial_success: false,
+            fallible_close: false,
+            callback_transport: "none",
+            effects: "foreign",
+            ownership: "signature-declared",
+            failure_mapping: "preserve",
+            copies: "none",
+            placement: "caller",
+            cleanup: "none"
+        }
+    }
+
+    pub fn with_pointer_count(self, fact: PointerCountFact) -> BindingOperation Never! {
+        out := self
+        out.pointer_count = Val(fact)
+        out
+    }
+
+    pub fn requires_protocol_evidence(self) -> Bool Never! {
+        self.nullable_return
+            || self.borrowed_view
+            || self.status_out
+            || self.partial_success
+            || self.fallible_close
+            || self.callback_transport != "none"
+    }
+}
+
+// Exact inputs pinned by a generated binding plan.
+pub struct BindingInputs {
+    pub target: String
+    pub generator: String
+    pub artifact: String
+    pub dependencies: [String]
+    pub compiler_flags: [String]
+
+    pub fn new(target: String, generator: String, artifact: String) -> BindingInputs Never! {
+        BindingInputs{target: target, generator: generator, artifact: artifact, dependencies: [String]{}, compiler_flags: [String]{}}
+    }
+
+    pub fn with_dependencies(self, dependencies: [String]) -> BindingInputs Never! {
+        out := self
+        out.dependencies = pkg_plan_sorted_strings(dependencies)
+        out
+    }
+
+    pub fn with_compiler_flags(self, flags: [String]) -> BindingInputs Never! {
+        out := self
+        out.compiler_flags = pkg_plan_sorted_strings(flags)
+        out
+    }
+
+    pub fn validate(self) BindingPlanError! {
+        fields :: [(name: String, value: String)]{
+            (name: "target", value: self.target),
+            (name: "generator", value: self.generator),
+            (name: "artifact", value: self.artifact)
+        }
+        loop field in fields {
+            if field.value.trim() == "" -> return Err(BindingPlanError.InvalidInput("binding input `{field.name}` is empty"))
+        }
+    }
+
+    pub fn digest(self) -> String Never! {
+        identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
+        &identity.field("target", self.target.bytes())
+        &identity.field("generator", self.generator.bytes())
+        &identity.field("artifact", self.artifact.bytes())
+        &identity.field("dependencies", self.dependencies.join("\n").bytes())
+        &identity.field("compiler-flags", self.compiler_flags.join("\n").bytes())
+        identity.finish()
+    }
+}
+
+// A stable, reviewable description of what an adaptation preserves.
+pub struct PlanSemantics {
+    pub ownership: String
+    pub failure_mapping: String
+    pub copies: String
+    pub placement: String
+    pub effects: String
+    pub cleanup: String
+}
+
+// A resolved generated binding plan.
+pub struct BindingPlan {
+    pub operation: BindingOperation
+    pub library: String
+    pub shape: BindingShape
+    pub boundary_digest: String
+    pub input_digest: String
+    pub artifact: String
+    pub checked_obligations: [String]
+    pub semantics: PlanSemantics
+    pub digest: String
+
+    // Resolve one operation against the canonical boundary contract. Every
+    // automatic adaptation requires a complete artifact identity and
+    // guarantee-level evidence for the affected obligations. Unknown evidence
+    // produces one actionable refusal instead of a best-effort projection.
+    pub fn resolve(contract: ForeignBoundaryContract, operation: BindingOperation, inputs: BindingInputs, shape: BindingShape) -> BindingPlan BindingPlanError! {
+        if contract.validate() == {
+            .Err(error) -> return Err(BindingPlanError.Contract(error.message))
+            .Ok(_) -> {}
+        }
+        inputs.validate()
+        if operation.name.trim() == "" -> return Err(BindingPlanError.InvalidInput("binding operation needs a name"))
+        if operation.pointer_count == {
+            .Val(pointer_count) -> pointer_count.validate_names()
+            .None -> {}
+        }
+
+        required := [String]{"abi", "layout", "width", "alignment", "target"}
+        if operation.pointer_count != None {
+            &required.push("ownership")
+            &required.push("lifetime")
+        }
+        if operation.requires_protocol_evidence() {
+            &required.push("errors")
+            &required.push("cleanup")
+        }
+        if operation.nullable_return -> &required.push("nullability")
+        if operation.fallible_close -> &required.push("cleanup")
+        checked_obligations :: pkg_plan_sorted_strings(required)
+
+        loop obligation in checked_obligations {
+            admitted :: if shape == {
+                .Native -> contract.has_complete_artifact_coverage() && pkg_plan_obligation_known(contract, obligation)
+                .Automatic -> contract.permits_guarantee(obligation)
+            }
+            if !admitted -> return Err(BindingPlanError.Refused(BindingRefusal.missing(operation.name, obligation)))
+        }
+        if operation.pointer_count == {
+            .Val(pointer_count) -> {
+                width :: pointer_count.native_width_bits
+                if width == 0 || width > 64 || width % 8 != 0 {
+                    return Err(BindingPlanError.Refused(BindingRefusal{
+                        operation: operation.name,
+                        obligation: "width",
+                        message: "The native count width is not checked. Record the target ABI width before adapting this pointer/count pair."
+                    }))
+                }
+                if shape == BindingShape.Automatic {
+                    if !pointer_count.unit.known() || pointer_count.meaning == CountMeaning.Unknown {
+                        return Err(BindingPlanError.Refused(BindingRefusal{
+                            operation: operation.name,
+                            obligation: "count-unit",
+                            message: "The pointer/count unit or meaning is unknown. Record bytes-versus-elements and full-extent-versus-prefix evidence, or select `--shape native`."
+                        }))
+                    }
+                    if pointer_count.retention != PointerRetention.BorrowedForCall {
+                        return Err(BindingPlanError.Refused(BindingRefusal{
+                            operation: operation.name,
+                            obligation: "lifetime",
+                            message: "The foreign implementation may retain the pointer. Supply a checked borrowed-for-call contract or select `--shape native`; no copy or retry is inserted."
+                        }))
+                    }
+                }
+            }
+            .None -> {}
+        }
+
+        semantics :: PlanSemantics{
+            ownership: operation.ownership,
+            failure_mapping: operation.failure_mapping,
+            copies: operation.copies,
+            placement: operation.placement,
+            effects: operation.effects,
+            cleanup: operation.cleanup
+        }
+        boundary_digest :: contract.digest()
+        input_digest :: inputs.digest()
+        digest :: pkg_plan_digest(operation, contract.library, shape, boundary_digest, input_digest, checked_obligations, semantics)
+        Ok(BindingPlan{
+            operation: operation,
+            library: contract.library,
+            shape: shape,
+            boundary_digest: boundary_digest,
+            input_digest: input_digest,
+            artifact: inputs.artifact,
+            checked_obligations: checked_obligations,
+            semantics: semantics,
+            digest: digest
+        })
+    }
+
+    pub fn candidate_digest(self) -> String Never! { self.digest }
+
+    pub fn is_native(self) -> Bool Never! { self.shape == BindingShape.Native }
+
+    // The native count for a view: the requested prefix, or the whole view.
+    // It must fit both the view and the pinned native width; nothing narrows.
+    pub fn checked_count(self, view_len: Int, requested: Int?) -> Int BindingPlanError! {
+        pointer_count :: self.operation.pointer_count ?? return Err(BindingPlanError.InvalidInput("checked count requested for an operation without pointer/count evidence"))
+        count :: requested ?? view_len
+        if count < 0 || count > view_len {
+            return Err(BindingPlanError.Refused(BindingRefusal{
+                operation: self.operation.name,
+                obligation: "extent",
+                message: "The requested count exceeds the view extent; shorten the count or pass the complete view."
+            }))
+        }
+        // A width of 63 or 64 bits holds every non-negative Int.
+        if pointer_count.native_width_bits < 63 && count > (1 << pointer_count.native_width_bits) - 1 {
+            return Err(BindingPlanError.Refused(BindingRefusal{
+                operation: self.operation.name,
+                obligation: "width",
+                message: "The requested count does not fit the pinned native width; no narrowing conversion is performed."
+            }))
+        }
+        Ok(count)
+    }
+
+    // Render the generated facade and its explicit native call seam.
+    pub fn render_facade(self) -> String Never! {
+        lines := [String]{
+            "// jet-ffi-plan={self.digest}\n// jet-ffi-shape={self.shape.as_str()}\n",
+            "// jet-ffi-boundary={self.boundary_digest} input={self.input_digest}\n",
+            "// ownership={self.semantics.ownership} failure={self.semantics.failure_mapping} copies={self.semantics.copies} placement={self.semantics.placement} effects={self.semantics.effects} cleanup={self.semantics.cleanup}\n"
+        }
+        if self.operation.callback_transport != "none" {
+            &lines.push("// jet-ffi-callback-transport={self.operation.callback_transport}\n// jet-ffi-callback-identity={self.operation.name}\n// jet-ffi-callback-plan={self.digest}\n")
+        }
+        name :: self.operation.name
+        if self.shape == {
+            .Automatic -> {
+                if self.operation.pointer_count == {
+                    .Val(pointer_count) -> {
+                        pointer :: pointer_count.pointer_parameter
+                        &lines.push("#Import module c.{self.library} {{\n    fn __jet_ffi_native_{name}({pointer}: &[U8], {pointer_count.count_parameter}: U64) {self.operation.result_type} = \"{name}\"\n}}\n\n")
+                        &lines.push("pub fn {name}({pointer}: &[U8]) -> {self.operation.result_type} {{\n    return __jet_ffi_native_{name}({pointer}, {pointer}.len())\n}}\n")
+                    }
+                    .None -> &lines.push("// automatic facade preserves native signature: {self.operation.native_signature}\n")
+                }
+            }
+            .Native -> &lines.push("// native facade preserves arity: {self.operation.native_signature}\n")
+        }
+        lines.join("")
+    }
+
+    // Explain the exact diff that would be written by a mutating command.
+    pub fn explain(self) -> String Never! {
+        count_unit :: if self.operation.pointer_count == {
+            .Val(pointer_count) -> pointer_count.unit.as_str()
+            .None -> "none"
+        }
+        [String]{
+            "operation: {self.operation.name}\n",
+            "library: {self.library}\n",
+            "shape: {self.shape.as_str()}\n",
+            "count units: {count_unit}\n",
+            "ownership: {self.semantics.ownership}\n",
+            "failure mapping: {self.semantics.failure_mapping}\n",
+            "copies: {self.semantics.copies}\n",
+            "placement: {self.semantics.placement}\n",
+            "effects: {self.semantics.effects}\n",
+            "cleanup: {self.semantics.cleanup}\n",
+            "artifact: {self.artifact}\n",
+            "input digest: {self.input_digest}\n",
+            "boundary evidence: {self.boundary_digest}\n",
+            "candidate digest: {self.digest}\n"
+        }.join("")
+    }
+
+    pub fn frozen_drift(self, recorded_digest: String) BindingPlanError! {
+        if self.digest == recorded_digest -> return
+        return Err(BindingPlanError.FrozenDrift{recorded: recorded_digest, candidate: self.digest})
+    }
+}
+
+// A single refusal keeps the command actionable and avoids a cascade of
+// secondary diagnostics caused by one missing canonical fact.
+pub struct BindingRefusal {
+    pub operation: String
+    pub obligation: String
+    pub message: String
+
+    pub fn missing(operation: String, obligation: String) -> BindingRefusal Never! {
+        BindingRefusal{
+            operation: operation,
+            obligation: obligation,
+            message: "Canonical foreign evidence for `{obligation}` is missing or not guarantee-level. Record the exact artifact evidence, then retry; no guessed adaptation is emitted."
+        }
+    }
+
+    pub fn render(self) -> String Never! {
+        "binding `{self.operation}` refused adaptation at `{self.obligation}`: {self.message}"
+    }
+}
+
+// Errors from plan resolution, extent checks, and frozen-plan checks.
+#Error
+pub enum BindingPlanError {
+    InvalidInput(String)
+    Contract(String)
+    Refused(BindingRefusal)
+    FrozenDrift(recorded: String, candidate: String)
+
+    pub fn message(self) -> String Never! {
+        if self == {
+            .InvalidInput(message) -> message
+            .Contract(message) -> "invalid foreign boundary contract: {message}"
+            .Refused(refusal) -> refusal.render()
+            .FrozenDrift(recorded, candidate) -> "frozen binding plan drifted: recorded={recorded} candidate={candidate}; rerun with `--update --accept {candidate}`"
+        }
+    }
+}
+
+// Resolve a plan without making callers spell the plan type.
+pub fn pkg_resolve_plan(contract: ForeignBoundaryContract, operation: BindingOperation, inputs: BindingInputs, shape: BindingShape) -> BindingPlan BindingPlanError! {
+    BindingPlan.resolve(contract, operation, inputs, shape)
+}
+
+// Native plans need a recorded, non-unknown evidence row for the obligation.
+fn pkg_plan_obligation_known(contract: ForeignBoundaryContract, obligation: String) -> Bool Never! {
+    row :: contract.obligation(obligation) ?? return false
+    !row.basis.is_unknown()
+}
+
+// Non-blank values, sorted and deduplicated.
+fn pkg_plan_sorted_strings(values: [String]) -> [String] Never! {
+    kept := [String]{}
+    loop value in values {
+        if value.trim() == "" -> next
+        &kept.push(value)
+    }
+    &kept.sort()
+    out := [String]{}
+    loop value in kept {
+        if out.len() > 0 && out[out.len() - 1] == value -> next
+        &out.push(value)
+    }
+    out
+}
+
+fn pkg_plan_digest(operation: BindingOperation, library: String, shape: BindingShape, boundary_digest: String, input_digest: String, checked_obligations: [String], semantics: PlanSemantics) -> String Never! {
+    identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
+    &identity.field("library", library.bytes())
+    &identity.field("operation", operation.name.bytes())
+    &identity.field("native-signature", operation.native_signature.bytes())
+    &identity.field("result", operation.result_type.bytes())
+    &identity.field("shape", shape.as_str().bytes())
+    &identity.field("boundary", boundary_digest.bytes())
+    &identity.field("inputs", input_digest.bytes())
+    &identity.field("obligations", checked_obligations.join("\n").bytes())
+    &identity.field("ownership", semantics.ownership.bytes())
+    &identity.field("failure", semantics.failure_mapping.bytes())
+    &identity.field("copies", semantics.copies.bytes())
+    &identity.field("placement", semantics.placement.bytes())
+    &identity.field("effects", semantics.effects.bytes())
+    &identity.field("cleanup", semantics.cleanup.bytes())
+    if operation.pointer_count == {
+        .Val(pointer_count) -> {
+            &identity.field("pointer", pointer_count.pointer_parameter.bytes())
+            &identity.field("count", pointer_count.count_parameter.bytes())
+            &identity.field("unit", pointer_count.unit.as_str().bytes())
+            &identity.field("meaning", pointer_count.meaning.as_str().bytes())
+            &identity.field("width", "{pointer_count.native_width_bits}".bytes())
+            &identity.field("retention", pointer_count.retention.as_str().bytes())
+        }
+        .None -> {}
+    }
+    identity.finish()
+}

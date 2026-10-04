@@ -12,13 +12,13 @@ fn env_wlock_test_member(name: String, path: String) -> WorkspacePlanMember {
 fn env_wlock_test_manifest(root: String, path: String, name: String) -[FS]> {
     dir :: files.join(root, path)
     files.create_dir_all(dir) ?? panic("member dir")
-    files.write(files.join(dir, @PACKAGE_FILE), "name: \"{name}\"\n") ?? panic("member manifest")
+    files.write(files.join(dir, PACKAGE_FILE), "name: \"{name}\"\n") ?? panic("member manifest")
 }
 
 fn env_wlock_test_index(root: String) -[FS]> String {
     source :: "module workspace {{ members: find(\"./packages\") }}\n"
     files.create_dir_all(files.join(root, "packages")) ?? panic("packages dir")
-    files.write(files.join(root, @WORKSPACE_FILE), source) ?? panic("workspace index")
+    files.write(files.join(root, WORKSPACE_FILE), source) ?? panic("workspace index")
     pkg_sha256_hex(source.bytes())
 }
 
@@ -29,27 +29,29 @@ fn env_wlock_test_plan(members: [WorkspacePlanMember]) -> WorkspacePlan {
 }
 
 fn env_wlock_test_lock_text(root: String) -[FS]> String {
-    files.read(files.join(root, @UNIFIED_LOCK_FILE)) ?? panic("read the unified lock")
+    files.read(files.join(root, UNIFIED_LOCK_FILE)) ?? panic("read the unified lock")
 }
 
 #Test("workspace lock round trips an empty plan") {
+    cache := WorkspaceDeclarationCache.new()
     root :: env_wlock_test_dir("empty")
     env_wlock_test_index(root)
-    env_workspace_lock_write(root, WorkspacePlan.empty()) ?? panic("write the empty workspace lock")
-    assert(files.exists(files.join(root, @UNIFIED_LOCK_FILE)))
-    loaded :: pkg_workspace_lock_load(root) ?? panic("reload the workspace lock")
+    env_workspace_lock_write(&cache, root, WorkspacePlan.empty()) ?? panic("write the empty workspace lock")
+    assert(files.exists(files.join(root, UNIFIED_LOCK_FILE)))
+    loaded :: pkg_workspace_lock_load(&cache, root) ?? panic("reload the workspace lock")
     assert_eq(loaded.members.len(), 0)
     files.remove_all(root).drop("test cleanup")
 }
 
 #Test("workspace lock round trips members") {
+    cache := WorkspaceDeclarationCache.new()
     root :: env_wlock_test_dir("members")
     env_wlock_test_index(root)
     env_wlock_test_manifest(root, "packages/hello", "hello")
     env_wlock_test_manifest(root, "packages/ranker", "ranker")
     plan :: env_wlock_test_plan([WorkspacePlanMember]{env_wlock_test_member("hello", "packages/hello"), env_wlock_test_member("ranker", "packages/ranker")})
-    env_workspace_lock_write(root, plan) ?? panic("write members")
-    loaded :: pkg_workspace_lock_load(root) ?? panic("reload members")
+    env_workspace_lock_write(&cache, root, plan) ?? panic("write members")
+    loaded :: pkg_workspace_lock_load(&cache, root) ?? panic("reload members")
     assert_eq(loaded.members.len(), 2)
     assert_eq(loaded.members[0].name, "hello")
     assert_eq(loaded.members[0].path, "packages/hello")
@@ -59,14 +61,15 @@ fn env_wlock_test_lock_text(root: String) -[FS]> String {
 }
 
 #Test("package root members round trip through one lock") {
+    cache := WorkspaceDeclarationCache.new()
     root :: env_wlock_test_dir("package-root")
     files.create_dir_all(files.join(root, "packages/hello")) ?? panic("member dir")
-    files.write(files.join(root, @PACKAGE_FILE), "name: \"root\"\nmembers: [\"packages/hello\"]\n") ?? panic("root manifest")
+    files.write(files.join(root, PACKAGE_FILE), "name: \"root\"\nmembers: [\"packages/hello\"]\n") ?? panic("root manifest")
     env_wlock_test_manifest(root, "packages/hello", "hello")
-    loaded_plan :: envmodel_workspace_load(root) ?? panic("Package members must evaluate")
+    loaded_plan :: envmodel_workspace_load(&cache, root) ?? panic("Package members must evaluate")
     plan :: loaded_plan ?? panic("the Package root must provide the member plan")
-    env_workspace_lock_write(root, plan) ?? panic("write the Package graph")
-    loaded :: pkg_workspace_lock_load(root) ?? panic("one unified lock must reload the Package graph")
+    env_workspace_lock_write(&cache, root, plan) ?? panic("write the Package graph")
+    loaded :: pkg_workspace_lock_load(&cache, root) ?? panic("one unified lock must reload the Package graph")
     assert_eq(loaded.members.len(), 1)
     assert_eq(loaded.members[0].name, "hello")
     assert_eq(loaded.members[0].path, "packages/hello")
@@ -74,88 +77,94 @@ fn env_wlock_test_lock_text(root: String) -[FS]> String {
 }
 
 #Test("a single package has no workspace membership") {
+    cache := WorkspaceDeclarationCache.new()
     root :: env_wlock_test_dir("root-member")
-    files.write(files.join(root, @PACKAGE_FILE), "name: \"root\"\n") ?? panic("root manifest")
-    env_workspace_lock_write(root, WorkspacePlan.empty()) ?? panic("write the single Package lock")
-    loaded :: pkg_workspace_lock_load(root) ?? panic("lock reload must preserve the single Package graph")
+    files.write(files.join(root, PACKAGE_FILE), "name: \"root\"\n") ?? panic("root manifest")
+    env_workspace_lock_write(&cache, root, WorkspacePlan.empty()) ?? panic("write the single Package lock")
+    loaded :: pkg_workspace_lock_load(&cache, root) ?? panic("lock reload must preserve the single Package graph")
     assert_eq(loaded.members.len(), 0)
     files.remove_all(root).drop("test cleanup")
 }
 
 #Test("workspace lock load reads members from the unified lock") {
+    cache := WorkspaceDeclarationCache.new()
     root :: env_wlock_test_dir("parse")
-    files.create_dir_all(files.join(root, @SOURCE_ROOT_DIR)) ?? panic("managed dir")
+    files.create_dir_all(files.join(root, SOURCE_ROOT_DIR)) ?? panic("managed dir")
     source_digest :: env_wlock_test_index(root)
     env_wlock_test_manifest(root, "packages/hello", "hello")
     canonical :: files.canonicalize(files.join(root, "packages/hello")) ?? panic("canonical member")
     facts_loaded :: PackageFacts.load(canonical) ?? panic("load member facts")
     facts :: facts_loaded ?? panic("member facts exist")
     lock_text :: "version = 1\nworkspace_source_digest = \"{source_digest}\"\n\n[[workspace_member]]\nname = \"hello\"\npath = \"packages/hello\"\nsource_digest = \"{source_digest}\"\ncanonical_path = \"packages/hello\"\npackage_digest = \"{facts.semantic_digest()}\"\n"
-    files.write(files.join(root, @UNIFIED_LOCK_FILE), lock_text) ?? panic("write the lock")
-    plan :: pkg_workspace_lock_load(root) ?? panic("load the handwritten lock")
+    files.write(files.join(root, UNIFIED_LOCK_FILE), lock_text) ?? panic("write the lock")
+    plan :: pkg_workspace_lock_load(&cache, root) ?? panic("load the handwritten lock")
     assert_eq(plan.members.len(), 1)
     assert_eq(plan.members[0].name, "hello")
     moved :: env_wlock_test_dir("moved")
-    files.create_dir_all(files.join(moved, @SOURCE_ROOT_DIR)) ?? panic("moved managed dir")
+    files.create_dir_all(files.join(moved, SOURCE_ROOT_DIR)) ?? panic("moved managed dir")
     env_wlock_test_index(moved)
     files.create_dir_all(files.join(moved, "packages/hello")) ?? panic("moved member dir")
-    files.copyfile(files.join(files.join(root, "packages/hello"), @PACKAGE_FILE), files.join(files.join(moved, "packages/hello"), @PACKAGE_FILE)) ?? panic("copy manifest")
-    files.copyfile(files.join(root, @UNIFIED_LOCK_FILE), files.join(moved, @UNIFIED_LOCK_FILE)) ?? panic("copy lock")
-    assert(pkg_workspace_lock_load(moved) != None)
+    files.copyfile(files.join(files.join(root, "packages/hello"), PACKAGE_FILE), files.join(files.join(moved, "packages/hello"), PACKAGE_FILE)) ?? panic("copy manifest")
+    files.copyfile(files.join(root, UNIFIED_LOCK_FILE), files.join(moved, UNIFIED_LOCK_FILE)) ?? panic("copy lock")
+    assert(pkg_workspace_lock_load(&cache, moved) != None)
     files.remove_all(moved).drop("test cleanup")
     files.remove_all(root).drop("test cleanup")
 }
 
 #Test("comptime inputs round trip through the lock") {
+    cache := WorkspaceDeclarationCache.new()
     root :: env_wlock_test_dir("ct")
     env_wlock_test_index(root)
     env_wlock_test_manifest(root, "packages/hello", "hello")
     plan := env_wlock_test_plan([WorkspacePlanMember]{env_wlock_test_member("hello", "packages/hello")})
     plan.comptime_inputs = [ComptimeInput]{ComptimeInput{path: "assets/index.json", hash: "sha256-deadbeef"}}
-    env_workspace_lock_write(root, plan) ?? panic("write comptime inputs")
+    env_workspace_lock_write(&cache, root, plan) ?? panic("write comptime inputs")
     raw :: env_wlock_test_lock_text(root)
     assert(raw.contains("[[comptime_inputs]]"))
     assert(raw.contains("assets/index.json"))
-    loaded :: pkg_workspace_lock_load(root) ?? panic("reload comptime inputs")
+    loaded :: pkg_workspace_lock_load(&cache, root) ?? panic("reload comptime inputs")
     assert_eq(loaded.comptime_inputs.len(), 1)
     assert_eq(loaded.comptime_inputs[0].path, "assets/index.json")
     // An idempotent re-write does not duplicate the input.
-    env_workspace_lock_write(root, loaded) ?? panic("rewrite")
-    reloaded :: pkg_workspace_lock_load(root) ?? panic("reload after rewrite")
+    env_workspace_lock_write(&cache, root, loaded) ?? panic("rewrite")
+    reloaded :: pkg_workspace_lock_load(&cache, root) ?? panic("reload after rewrite")
     assert_eq(reloaded.comptime_inputs.len(), 1)
     files.remove_all(root).drop("test cleanup")
 }
 
 #Test("lock load revalidates member manifest and flat membership") {
+    cache := WorkspaceDeclarationCache.new()
     root :: env_wlock_test_dir("member-validation")
     env_wlock_test_index(root)
     env_wlock_test_manifest(root, "packages/hello", "hello")
-    env_workspace_lock_write(root, env_wlock_test_plan([WorkspacePlanMember]{env_wlock_test_member("hello", "packages/hello")})) ?? panic("write")
-    files.write(files.join(files.join(root, "packages/hello"), @PACKAGE_FILE), "name: \"other\"\n") ?? panic("rename member")
-    assert(pkg_workspace_lock_load(root) == None)
+    env_workspace_lock_write(&cache, root, env_wlock_test_plan([WorkspacePlanMember]{env_wlock_test_member("hello", "packages/hello")})) ?? panic("write")
+    files.write(files.join(files.join(root, "packages/hello"), PACKAGE_FILE), "name: \"other\"\n") ?? panic("rename member")
+    assert(pkg_workspace_lock_load(&cache, root) == None)
     files.create_dir_all(files.join(root, "packages/hello/child")) ?? panic("child dir")
-    files.write(files.join(files.join(root, "packages/hello/child"), @PACKAGE_FILE), "name: \"child\"\n") ?? panic("child manifest")
-    files.write(files.join(files.join(root, "packages/hello"), @PACKAGE_FILE), "name: \"hello\"\nmembers: [\"child\"]\n") ?? panic("nested members")
-    assert(pkg_workspace_lock_load(root) == None)
+    files.write(files.join(files.join(root, "packages/hello/child"), PACKAGE_FILE), "name: \"child\"\n") ?? panic("child manifest")
+    files.write(files.join(files.join(root, "packages/hello"), PACKAGE_FILE), "name: \"hello\"\nmembers: [\"child\"]\n") ?? panic("nested members")
+    assert(pkg_workspace_lock_load(&cache, root) == None)
     files.remove_all(root).drop("test cleanup")
 }
 
 #Test("lock load rejects a workspace digest when the source is missing") {
+    cache := WorkspaceDeclarationCache.new()
     root :: env_wlock_test_dir("missing-source")
-    files.create_dir_all(files.join(root, @SOURCE_ROOT_DIR)) ?? panic("managed dir")
-    files.write(files.join(root, @UNIFIED_LOCK_FILE), "version = 1\nworkspace_source_digest = \"sha256-stale\"\n") ?? panic("stale lock")
-    assert(pkg_workspace_lock_load(root) == None)
+    files.create_dir_all(files.join(root, SOURCE_ROOT_DIR)) ?? panic("managed dir")
+    files.write(files.join(root, UNIFIED_LOCK_FILE), "version = 1\nworkspace_source_digest = \"sha256-stale\"\n") ?? panic("stale lock")
+    assert(pkg_workspace_lock_load(&cache, root) == None)
     files.remove_all(root).drop("test cleanup")
 }
 
 #Test("workspace lock write preserves existing package entries") {
+    cache := WorkspaceDeclarationCache.new()
     root :: env_wlock_test_dir("preserve")
-    files.create_dir_all(files.join(root, @SOURCE_ROOT_DIR)) ?? panic("managed dir")
+    files.create_dir_all(files.join(root, SOURCE_ROOT_DIR)) ?? panic("managed dir")
     receipt :: "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-    files.write(files.join(root, @UNIFIED_LOCK_FILE), "version = 1\n\n[[package]]\nname = \"dep\"\nversion = \"1.2.3\"\nsource = {{ path = \"../dep\" }}\nfingerprint = \"sha256-x\"\ndependencies = []\nreceipt = \"{receipt}\"\n\n[root]\ndependencies = [\"dep\"]\n") ?? panic("existing lock")
+    files.write(files.join(root, UNIFIED_LOCK_FILE), "version = 1\n\n[[package]]\nname = \"dep\"\nversion = \"1.2.3\"\nsource = {{ path = \"../dep\" }}\nfingerprint = \"sha256-x\"\ndependencies = []\nreceipt = \"{receipt}\"\n\n[root]\ndependencies = [\"dep\"]\n") ?? panic("existing lock")
     env_wlock_test_index(root)
     env_wlock_test_manifest(root, "packages/hello", "hello")
-    env_workspace_lock_write(root, env_wlock_test_plan([WorkspacePlanMember]{env_wlock_test_member("hello", "packages/hello")})) ?? panic("write members")
+    env_workspace_lock_write(&cache, root, env_wlock_test_plan([WorkspacePlanMember]{env_wlock_test_member("hello", "packages/hello")})) ?? panic("write members")
     raw :: env_wlock_test_lock_text(root)
     assert(raw.contains("[[package]]"))
     assert(raw.contains("name = \"dep\""))
@@ -167,12 +176,13 @@ fn env_wlock_test_lock_text(root: String) -[FS]> String {
 }
 
 #Test("workspace lock write rejects a malformed existing lock without overwriting it") {
+    cache := WorkspaceDeclarationCache.new()
     root :: env_wlock_test_dir("malformed")
-    files.create_dir_all(files.join(root, @SOURCE_ROOT_DIR)) ?? panic("managed dir")
-    lock_path :: files.join(root, @UNIFIED_LOCK_FILE)
+    files.create_dir_all(files.join(root, SOURCE_ROOT_DIR)) ?? panic("managed dir")
+    lock_path :: files.join(root, UNIFIED_LOCK_FILE)
     raw :: "version = 1\n[[package]]\nname = \"broken\"\n"
     files.write(lock_path, raw) ?? panic("malformed lock")
-    if env_workspace_lock_write(root, WorkspacePlan.empty()) == {
+    if env_workspace_lock_write(&cache, root, WorkspacePlan.empty()) == {
         .Ok(_) -> panic("a malformed lock must not be replaced")
         .Err(error) -> assert(error.message().contains("existing lock is malformed"))
     }

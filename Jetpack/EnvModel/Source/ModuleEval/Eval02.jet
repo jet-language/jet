@@ -1,0 +1,872 @@
+// PORT-PENDING 2077 crates-jet-env-model-src-moduleeval-eval-slice-1801: crates/jet-env-model/src/ModuleEval/Eval.rs:1801-2668
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS         if !valid_env_name(environment) {
+//RS             return Err(secret_decl_error(
+//RS                 format!("secret `{name}` names invalid environment label `{environment}`"),
+//RS                 span,
+//RS             ));
+//RS         }
+//RS         if !seen.insert(environment.clone()) {
+//RS             return Err(secret_decl_error(
+//RS                 format!("secret `{name}` repeats allowed environment `{environment}`"),
+//RS                 span,
+//RS             ));
+//RS         }
+//RS     }
+//RS     Ok(values)
+//RS }
+//RS 
+//RS fn secret_rotation(
+//RS     name: &str,
+//RS     value: &CtValue,
+//RS     span: crate::Diagnostics::Span,
+//RS ) -> Result<SecretRotationPolicy, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Str(value) if value == Syntax::SECRET_NONE => Ok(SecretRotationPolicy::None),
+//RS         CtValue::Struct { type_name, fields } if type_name == "SecretMaxAge" => {
+//RS             let seconds = fields
+//RS                 .iter()
+//RS                 .find_map(|(field, value)| (field == "seconds").then_some(value))
+//RS                 .and_then(|value| match value {
+//RS                     CtValue::Int(value) if *value > 0 => u64::try_from(*value).ok(),
+//RS                     _ => None,
+//RS                 })
+//RS                 .ok_or_else(|| {
+//RS                     secret_decl_error(
+//RS                         format!("secret `{name}` rotation max age must be positive"),
+//RS                         span,
+//RS                     )
+//RS                 })?;
+//RS             Ok(SecretRotationPolicy::MaxAge { seconds })
+//RS         }
+//RS         _ => Err(secret_decl_error(
+//RS             format!(
+//RS                 "secret `{name}` field `{}` must be `{}` or `{}`(…)",
+//RS                 Syntax::SECRET_META_FIELD_ROTATION,
+//RS                 Syntax::SECRET_NONE,
+//RS                 Syntax::SECRET_ROTATION_MAX_AGE
+//RS             ),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn secret_default(
+//RS     name: &str,
+//RS     value: &CtValue,
+//RS     span: crate::Diagnostics::Span,
+//RS ) -> Result<SecretDefault, Diagnostic> {
+//RS     if matches!(value, CtValue::Str(value) if value == Syntax::SECRET_NONE) {
+//RS         return Ok(SecretDefault::None);
+//RS     }
+//RS     let fields = match value {
+//RS         CtValue::Struct { fields, .. } => fields
+//RS             .iter()
+//RS             .map(|(profile, value)| (profile.clone(), value))
+//RS             .collect::<Vec<_>>(),
+//RS         CtValue::Map(entries) => {
+//RS             let mut fields = Vec::with_capacity(entries.len());
+//RS             for (key, value) in entries {
+//RS                 let CtKey::Str(profile) = key else {
+//RS                     return Err(secret_decl_error(
+//RS                         format!("secret `{name}` default profiles must be named strings"),
+//RS                         span,
+//RS                     ));
+//RS                 };
+//RS                 fields.push((profile.clone(), value));
+//RS             }
+//RS             fields
+//RS         }
+//RS         _ => {
+//RS             return Err(secret_decl_error(
+//RS                 format!("secret `{name}` field `default` must be `none` or a profile map"),
+//RS                 span,
+//RS             ));
+//RS         }
+//RS     };
+//RS     let mut result = BTreeMap::new();
+//RS     for (profile, value) in fields {
+//RS         if !valid_env_name(&profile) {
+//RS             return Err(secret_decl_error(
+//RS                 format!("secret `{name}` default uses invalid profile `{profile}`"),
+//RS                 span,
+//RS             ));
+//RS         }
+//RS         let CtValue::Str(value) = value else {
+//RS             return Err(secret_decl_error(
+//RS                 format!("secret `{name}` default values must be strings"),
+//RS                 span,
+//RS             ));
+//RS         };
+//RS         if result.insert(profile.clone(), value.clone()).is_some() {
+//RS             return Err(secret_decl_error(
+//RS                 format!("secret `{name}` repeats default profile `{profile}`"),
+//RS                 span,
+//RS             ));
+//RS         }
+//RS     }
+//RS     Ok(SecretDefault::PerProfile(result))
+//RS }
+//RS 
+//RS fn secret_generator(
+//RS     name: &str,
+//RS     value: &CtValue,
+//RS     span: crate::Diagnostics::Span,
+//RS ) -> Result<SecretGenerator, Diagnostic> {
+//RS     if matches!(value, CtValue::Str(value) if value == Syntax::SECRET_NONE) {
+//RS         return Ok(SecretGenerator::None);
+//RS     }
+//RS     if let CtValue::Struct { type_name, fields } = value {
+//RS         if type_name == "SecretRandom" {
+//RS             let length = fields
+//RS                 .iter()
+//RS                 .find_map(|(field, value)| {
+//RS                     (field == Syntax::SECRET_GENERATOR_FIELD_LENGTH).then_some(value)
+//RS                 })
+//RS                 .and_then(|value| match value {
+//RS                     CtValue::Int(value) if *value > 0 => u64::try_from(*value).ok(),
+//RS                     _ => None,
+//RS                 })
+//RS                 .ok_or_else(|| {
+//RS                     secret_decl_error(
+//RS                         format!("secret `{name}` random generator length must be positive"),
+//RS                         span,
+//RS                     )
+//RS                 })?;
+//RS             return Ok(SecretGenerator::Random { length });
+//RS         }
+//RS     }
+//RS     Err(secret_decl_error(
+//RS         format!(
+//RS             "secret `{name}` field `{}` must be `{}` or `{}`({}: …)",
+//RS             Syntax::SECRET_META_FIELD_GENERATE,
+//RS             Syntax::SECRET_NONE,
+//RS             Syntax::SECRET_GENERATOR_RANDOM,
+//RS             Syntax::SECRET_GENERATOR_FIELD_LENGTH
+//RS         ),
+//RS         span,
+//RS     ))
+//RS }
+//RS 
+//RS fn secret_string_list(
+//RS     value: &CtValue,
+//RS     scope: &str,
+//RS     span: crate::Diagnostics::Span,
+//RS ) -> Result<Vec<String>, Diagnostic> {
+//RS     let CtValue::List(values) = value else {
+//RS         return Err(secret_decl_error(
+//RS             format!("{scope} must be a list of strings"),
+//RS             span,
+//RS         ));
+//RS     };
+//RS     values
+//RS         .iter()
+//RS         .map(|value| match value {
+//RS             CtValue::Str(value) => Ok(value.clone()),
+//RS             _ => Err(secret_decl_error(
+//RS                 format!("{scope} must contain only strings"),
+//RS                 span,
+//RS             )),
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn secret_template_value(
+//RS     value: &Expr,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS ) -> Result<String, Diagnostic> {
+//RS     match value.without_parens() {
+//RS         Expr::Str(parts, _) => {
+//RS             let mut template = String::new();
+//RS             for part in parts {
+//RS                 match part {
+//RS                     StrPart::Lit(value) => template.push_str(value),
+//RS                     StrPart::Interp(expression, _) => {
+//RS                         let Some(name) = secret_reference_name(expression) else {
+//RS                             return Err(secret_decl_error(
+//RS                                 "compose template interpolations must name secrets",
+//RS                                 expression.span(),
+//RS                             ));
+//RS                         };
+//RS                         template.push('{');
+//RS                         template.push_str(&name);
+//RS                         template.push('}');
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Ok(template)
+//RS         }
+//RS         Expr::Ident(name, _) => Ok(name.clone()),
+//RS         Expr::Field(..) => Ok(expression_name(value)),
+//RS         _ => match secret_eval_value(value, base_dir, funcs, globals)? {
+//RS             CtValue::Str(value) => Ok(value),
+//RS             _ => Err(secret_decl_error(
+//RS                 "compose `template` must be a string",
+//RS                 value.span(),
+//RS             )),
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn secret_reference_name(value: &Expr) -> Option<String> {
+//RS     match value.without_parens() {
+//RS         Expr::Ident(_, _) | Expr::Field(_, _, _) => Some(expression_name(value)),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn validate_secret_template(
+//RS     name: &str,
+//RS     template: &str,
+//RS     from: &[String],
+//RS     span: crate::Diagnostics::Span,
+//RS ) -> Result<(), Diagnostic> {
+//RS     if template.is_empty() || template.chars().any(char::is_control) {
+//RS         return Err(secret_decl_error(
+//RS             format!("secret `{name}` compose template must be non-empty text"),
+//RS             span,
+//RS         ));
+//RS     }
+//RS     let mut placeholders = HashSet::new();
+//RS     let mut chars = template.chars().peekable();
+//RS     while let Some(character) = chars.next() {
+//RS         match character {
+//RS             '{' => {
+//RS                 let mut placeholder = String::new();
+//RS                 let mut closed = false;
+//RS                 for next in chars.by_ref() {
+//RS                     if next == '}' {
+//RS                         closed = true;
+//RS                         break;
+//RS                     }
+//RS                     if next == '{' || next.is_whitespace() {
+//RS                         return Err(secret_decl_error(
+//RS                             format!("secret `{name}` compose template has an invalid placeholder"),
+//RS                             span,
+//RS                         ));
+//RS                     }
+//RS                     placeholder.push(next);
+//RS                 }
+//RS                 if !closed || !valid_env_name(&placeholder) {
+//RS                     return Err(secret_decl_error(
+//RS                         format!("secret `{name}` compose template has an invalid placeholder"),
+//RS                         span,
+//RS                     ));
+//RS                 }
+//RS                 placeholders.insert(placeholder);
+//RS             }
+//RS             '}' => {
+//RS                 return Err(secret_decl_error(
+//RS                     format!("secret `{name}` compose template has an unmatched brace"),
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     let inputs = from.iter().cloned().collect::<HashSet<_>>();
+//RS     if placeholders != inputs {
+//RS         return Err(secret_decl_error(
+//RS             format!("secret `{name}` compose template placeholders must match `from`"),
+//RS             span,
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// A graph check shared by each map parser and the selected-environment merge.
+//RS /// Unknown input names are allowed here; activation is the tier that checks
+//RS /// whether each source exists in the encrypted store.
+//RS pub(super) fn validate_secret_graph(
+//RS     specs: &[SecretSpec],
+//RS     span: crate::Diagnostics::Span,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let composed = specs
+//RS         .iter()
+//RS         .filter_map(|spec| match &spec.declaration {
+//RS             SecretDeclaration::Compose { from, .. } => Some((spec.name.clone(), from.clone())),
+//RS             SecretDeclaration::Stored => None,
+//RS         })
+//RS         .collect::<BTreeMap<_, _>>();
+//RS     let mut states = HashMap::<String, u8>::new();
+//RS     for name in composed.keys() {
+//RS         secret_graph_visit(name, &composed, &mut states, span)?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn secret_graph_visit(
+//RS     name: &str,
+//RS     composed: &BTreeMap<String, Vec<String>>,
+//RS     states: &mut HashMap<String, u8>,
+//RS     span: crate::Diagnostics::Span,
+//RS ) -> Result<(), Diagnostic> {
+//RS     match states.get(name).copied() {
+//RS         Some(1) => {
+//RS             return Err(secret_decl_error(
+//RS                 format!("secret composition cycle includes `{name}`"),
+//RS                 span,
+//RS             ));
+//RS         }
+//RS         Some(2) => return Ok(()),
+//RS         _ => {}
+//RS     }
+//RS     states.insert(name.to_string(), 1);
+//RS     if let Some(inputs) = composed.get(name) {
+//RS         for input in inputs {
+//RS             if composed.contains_key(input) {
+//RS                 secret_graph_visit(input, composed, states, span)?;
+//RS             }
+//RS         }
+//RS     }
+//RS     states.insert(name.to_string(), 2);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn secret_eval_value(
+//RS     value: &Expr,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     match value.without_parens() {
+//RS         Expr::Ident(name, _) => Ok(globals
+//RS             .get(name)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| CtValue::Str(name.clone()))),
+//RS         Expr::Field(..) => Ok(CtValue::Str(expression_name(value))),
+//RS         Expr::ListLit(values, _) => values
+//RS             .iter()
+//RS             .map(|value| secret_eval_value(value, base_dir, funcs, globals))
+//RS             .collect::<Result<Vec<_>, _>>()
+//RS             .map(CtValue::List),
+//RS         Expr::MapLit(values, _) => {
+//RS             let mut lowered = BTreeMap::new();
+//RS             for (key, value_expr) in values {
+//RS                 let key = CtKey::from_value(secret_eval_value(key, base_dir, funcs, globals)?)
+//RS                     .ok_or_else(|| {
+//RS                         secret_decl_error("secret map keys must be scalar values", key.span())
+//RS                     })?;
+//RS                 let lowered_value = secret_eval_value(value_expr, base_dir, funcs, globals)?;
+//RS                 if lowered.insert(key, lowered_value).is_some() {
+//RS                     return Err(secret_decl_error(
+//RS                         "secret map contains a duplicate key",
+//RS                         value_expr.span(),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             Ok(CtValue::Map(lowered))
+//RS         }
+//RS         Expr::StructLit {
+//RS             type_name, fields, ..
+//RS         } => {
+//RS             let fields = fields
+//RS                 .iter()
+//RS                 .map(|(name, _, value)| {
+//RS                     secret_eval_value(value, base_dir, funcs, globals)
+//RS                         .map(|value| (name.clone(), value))
+//RS                 })
+//RS                 .collect::<Result<Vec<_>, _>>()?;
+//RS             Ok(CtValue::Struct {
+//RS                 type_name: type_name.clone(),
+//RS                 fields,
+//RS             })
+//RS         }
+//RS         Expr::UnitLit {
+//RS             raw, int, suffix, ..
+//RS         } => {
+//RS             let Some(amount) = int else {
+//RS                 return Err(secret_decl_error(
+//RS                     "secret duration policies need an integer unit literal",
+//RS                     value.span(),
+//RS                 ));
+//RS             };
+//RS             let _ = raw;
+//RS             Ok(CtValue::Struct {
+//RS                 type_name: suffix.clone(),
+//RS                 fields: vec![("value".to_string(), CtValue::Int(*amount))],
+//RS             })
+//RS         }
+//RS         Expr::Call(call) if call.name == Syntax::SECRET_ROTATION_MAX_AGE => {
+//RS             if call.args.len() != 1 || call.args[0].label.is_some() {
+//RS                 return Err(secret_decl_error(
+//RS                     "`max_age` needs one duration argument",
+//RS                     call.name_span,
+//RS                 ));
+//RS             }
+//RS             let duration = secret_eval_value(&call.args[0].expr, base_dir, funcs, globals)?;
+//RS             let seconds = secret_duration_seconds(&duration).ok_or_else(|| {
+//RS                 secret_decl_error(
+//RS                     "`max_age` needs a positive duration",
+//RS                     call.args[0].expr.span(),
+//RS                 )
+//RS             })?;
+//RS             Ok(CtValue::Struct {
+//RS                 type_name: "SecretMaxAge".to_string(),
+//RS                 fields: vec![("seconds".to_string(), CtValue::Int(seconds as i64))],
+//RS             })
+//RS         }
+//RS         Expr::Call(call) if call.name == Syntax::SECRET_GENERATOR_RANDOM => {
+//RS             let mut length = None;
+//RS             for argument in &call.args {
+//RS                 if argument.label.as_ref().map(|(name, _)| name.as_str())
+//RS                     != Some(Syntax::SECRET_GENERATOR_FIELD_LENGTH)
+//RS                 {
+//RS                     return Err(secret_decl_error(
+//RS                         "`random` needs a labeled `length` argument",
+//RS                         argument.span,
+//RS                     ));
+//RS                 }
+//RS                 if length.is_some() {
+//RS                     return Err(secret_decl_error(
+//RS                         "`random` repeats `length`",
+//RS                         argument.span,
+//RS                     ));
+//RS                 }
+//RS                 let value = secret_eval_value(&argument.expr, base_dir, funcs, globals)?;
+//RS                 let CtValue::Int(value) = value else {
+//RS                     return Err(secret_decl_error(
+//RS                         "`random` length must be an integer",
+//RS                         argument.expr.span(),
+//RS                     ));
+//RS                 };
+//RS                 length = Some(value);
+//RS             }
+//RS             let Some(length) = length.filter(|value| *value > 0) else {
+//RS                 return Err(secret_decl_error(
+//RS                     "`random` length must be positive",
+//RS                     call.name_span,
+//RS                 ));
+//RS             };
+//RS             Ok(CtValue::Struct {
+//RS                 type_name: "SecretRandom".to_string(),
+//RS                 fields: vec![(
+//RS                     Syntax::SECRET_GENERATOR_FIELD_LENGTH.to_string(),
+//RS                     CtValue::Int(length),
+//RS                 )],
+//RS             })
+//RS         }
+//RS         Expr::Paren(inner, _) => secret_eval_value(inner, base_dir, funcs, globals),
+//RS         _ => Comptime::evaluate(value, funcs, &HashSet::new(), base_dir, globals),
+//RS     }
+//RS }
+//RS 
+//RS fn secret_duration_seconds(value: &CtValue) -> Option<i64> {
+//RS     let CtValue::Struct { type_name, fields } = value else {
+//RS         return None;
+//RS     };
+//RS     let amount = fields.iter().find_map(|(field, value)| {
+//RS         (field == "value")
+//RS             .then_some(value)
+//RS             .and_then(|value| match value {
+//RS                 CtValue::Int(value) if *value > 0 => Some(*value),
+//RS                 _ => None,
+//RS             })
+//RS     })?;
+//RS     let unit = type_name.rsplit('.').next().unwrap_or(type_name);
+//RS     Some(match unit {
+//RS         "d" | "day" | "days" => amount.saturating_mul(86_400),
+//RS         "h" | "hour" | "hours" => amount.saturating_mul(3_600),
+//RS         "m" | "min" | "minute" | "minutes" => amount.saturating_mul(60),
+//RS         "s" | "sec" | "second" | "seconds" => amount,
+//RS         _ => return None,
+//RS     })
+//RS }
+//RS 
+//RS /// U12/D-JPK-MODBODY1=A: evaluate a canonical `env.<name>: { … }` role-module
+//RS /// body (`EnvLit`) — the same scalar/package fields as the legacy form, plus a
+//RS /// dev-supervised `services:` map, field-checked and captured as
+//RS /// `DevServicePlan`s (distinct from the jetos `system.*.services` capture).
+//RS fn evaluate_env_role(
+//RS     lit: &EnvLit,
+//RS     src: &str,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, crate::Comptime::CtValue>,
+//RS     source: &str,
+//RS ) -> Result<(EnvCapture, Vec<DevServicePlan>), Diagnostic> {
+//RS     let capture = evaluate_env_fields(&lit.fields, src, base_dir, funcs, globals, source)?;
+//RS     let mut services = Vec::new();
+//RS     for s in &lit.services {
+//RS         services.push(evaluate_dev_service(s, base_dir, funcs, globals)?);
+//RS     }
+//RS     Ok((capture, services))
+//RS }
+//RS 
+//RS /// Pull the package list out of a `packages: [ … ]` field by slicing its
+//RS /// source text and reusing the tested sugar parser (see module docs).
+//RS #[derive(Debug, Default, Clone, PartialEq, Eq)]
+//RS pub(super) struct ExtractedPackages {
+//RS     pub packages: Vec<Merge::Pkg>,
+//RS     pub adapters: Vec<AdapterPlan>,
+//RS }
+//RS 
+//RS pub(super) fn extract_packages(value: &Expr, src: &str) -> Result<ExtractedPackages, Diagnostic> {
+//RS     let Expr::ListLit(_, span) = value else {
+//RS         return Err(packages_not_a_list(value.span()));
+//RS     };
+//RS     let text = &src[span.start..span.end];
+//RS     let body = text
+//RS         .strip_prefix('[')
+//RS         .and_then(|t| t.strip_suffix(']'))
+//RS         .unwrap_or(text);
+//RS     let mut out = ExtractedPackages::default();
+//RS     let mut plain = Vec::new();
+//RS     for item in split_top_level(body) {
+//RS         let item = item.trim();
+//RS         if item.is_empty() {
+//RS             continue;
+//RS         }
+//RS         if item.starts_with(Syntax::PKG_ADAPT) {
+//RS             out.adapters.push(parse_adapter(item)?);
+//RS         } else {
+//RS             plain.push(item);
+//RS         }
+//RS     }
+//RS     out.packages = Merge::parse_package_list(&plain.join(", "));
+//RS     Ok(out)
+//RS }
+//RS 
+//RS fn split_top_level(body: &str) -> Vec<&str> {
+//RS     let mut out = Vec::new();
+//RS     let mut depth = 0i32;
+//RS     let mut start = 0usize;
+//RS     let mut in_string = false;
+//RS     let mut escape = false;
+//RS     for (i, c) in body.char_indices() {
+//RS         if in_string {
+//RS             escape = c == '\\' && !escape;
+//RS             if c == '"' && !escape {
+//RS                 in_string = false;
+//RS             } else if c != '\\' {
+//RS                 escape = false;
+//RS             }
+//RS             continue;
+//RS         }
+//RS         match c {
+//RS             '"' => in_string = true,
+//RS             '(' | '[' | '{' => depth += 1,
+//RS             ')' | ']' | '}' => depth -= 1,
+//RS             ',' if depth == 0 => {
+//RS                 out.push(&body[start..i]);
+//RS                 start = i + 1;
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     if start < body.len() {
+//RS         out.push(&body[start..]);
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn parse_adapter(item: &str) -> Result<AdapterPlan, Diagnostic> {
+//RS     let args = call_args(item, Syntax::PKG_ADAPT).ok_or_else(|| adapter_shape(item))?;
+//RS     validate_fields(
+//RS         args,
+//RS         &[
+//RS             Syntax::ADAPTER_FIELD_NAME,
+//RS             Syntax::ADAPTER_FIELD_SOURCE,
+//RS             Syntax::ADAPTER_FIELD_DEPS,
+//RS             Syntax::ADAPTER_FIELD_RECIPE,
+//RS         ],
+//RS     )?;
+//RS     let name = named_string(args, Syntax::ADAPTER_FIELD_NAME).ok_or_else(|| adapter_shape(item))?;
+//RS     let source =
+//RS         named_raw(args, Syntax::ADAPTER_FIELD_SOURCE).ok_or_else(|| adapter_shape(item))?;
+//RS     let source = unquote(source.trim()).unwrap_or(source);
+//RS     super::super::RefSpec::classify_provider_ref(&source).map_err(|_| adapter_shape(item))?;
+//RS     let deps = named_raw(args, Syntax::ADAPTER_FIELD_DEPS)
+//RS         .map(|raw| {
+//RS             let body = raw
+//RS                 .trim()
+//RS                 .strip_prefix('[')
+//RS                 .and_then(|t| t.strip_suffix(']'))
+//RS                 .unwrap_or(raw.trim());
+//RS             Merge::parse_package_list(body)
+//RS         })
+//RS         .unwrap_or_default();
+//RS     let recipe = parse_recipe(
+//RS         &named_raw(args, Syntax::ADAPTER_FIELD_RECIPE).ok_or_else(|| adapter_shape(item))?,
+//RS     )?;
+//RS     Ok(AdapterPlan {
+//RS         name,
+//RS         source,
+//RS         deps,
+//RS         recipe,
+//RS     })
+//RS }
+//RS 
+//RS fn parse_recipe(raw: &str) -> Result<AdapterRecipe, Diagnostic> {
+//RS     let raw = raw.trim();
+//RS     if let Some(args) = call_args(raw, Syntax::RECIPE_BUILD) {
+//RS         validate_fields(args, &[Syntax::RECIPE_FIELD_STEPS])?;
+//RS         let steps = parse_build_steps(args)?;
+//RS         return Ok(AdapterRecipe::Build(super::super::Recipe::BuildRecipe {
+//RS             steps,
+//RS         }));
+//RS     }
+//RS     if let Some(args) = call_args(raw, Syntax::RECIPE_COPY) {
+//RS         if args.trim().is_empty() {
+//RS             return Ok(AdapterRecipe::Copy);
+//RS         }
+//RS         return Err(adapter_shape(raw));
+//RS     }
+//RS     if let Some(args) = call_args(raw, Syntax::RECIPE_PREBUILT) {
+//RS         if args.trim().is_empty() {
+//RS             return Err(adapter_shape(raw));
+//RS         }
+//RS         validate_fields(
+//RS             args,
+//RS             &[
+//RS                 Syntax::RECIPE_FIELD_BIN,
+//RS                 Syntax::RECIPE_FIELD_AS,
+//RS                 Syntax::RECIPE_FIELD_AS_NAME,
+//RS             ],
+//RS         )?;
+//RS         let bin = named_string(args, Syntax::RECIPE_FIELD_BIN).ok_or_else(|| adapter_shape(raw))?;
+//RS         let as_name = named_string(args, Syntax::RECIPE_FIELD_AS)
+//RS             .or_else(|| named_string(args, Syntax::RECIPE_FIELD_AS_NAME))
+//RS             .unwrap_or_else(|| {
+//RS                 std::path::Path::new(&bin)
+//RS                     .file_name()
+//RS                     .and_then(|n| n.to_str())
+//RS                     .unwrap_or(&bin)
+//RS                     .to_string()
+//RS             });
+//RS         return Ok(AdapterRecipe::Prebuilt { bin, as_name });
+//RS     }
+//RS     Err(adapter_shape(raw))
+//RS }
+//RS 
+//RS fn parse_build_steps(args: &str) -> Result<Vec<super::super::Recipe::BuildStep>, Diagnostic> {
+//RS     let raw = named_field(args, Syntax::RECIPE_FIELD_STEPS).ok_or_else(|| adapter_shape(args))?;
+//RS     let body = raw
+//RS         .trim()
+//RS         .strip_prefix('[')
+//RS         .and_then(|value| value.strip_suffix(']'))
+//RS         .ok_or_else(|| adapter_shape(args))?;
+//RS     let mut steps = Vec::new();
+//RS     for item in split_top_level(body) {
+//RS         let item = item.trim();
+//RS         if item.is_empty() {
+//RS             continue;
+//RS         }
+//RS         steps.push(parse_build_step(item)?);
+//RS     }
+//RS     if steps.is_empty() {
+//RS         return Err(adapter_shape(args));
+//RS     }
+//RS     Ok(steps)
+//RS }
+//RS 
+//RS fn parse_build_step(raw: &str) -> Result<super::super::Recipe::BuildStep, Diagnostic> {
+//RS     use super::super::Recipe::BuildStep;
+//RS 
+//RS     if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_FETCH) {
+//RS         validate_fields(
+//RS             args,
+//RS             &[
+//RS                 Syntax::RECIPE_STEP_FIELD_URL,
+//RS                 Syntax::RECIPE_STEP_FIELD_SHA256,
+//RS             ],
+//RS         )?;
+//RS         return Ok(BuildStep::Fetch {
+//RS             url: required_field_string(args, Syntax::RECIPE_STEP_FIELD_URL)?,
+//RS             sha256: required_field_string(args, Syntax::RECIPE_STEP_FIELD_SHA256)?,
+//RS         });
+//RS     }
+//RS     if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_EXEC) {
+//RS         validate_fields(
+//RS             args,
+//RS             &[
+//RS                 Syntax::RECIPE_STEP_FIELD_TOOL,
+//RS                 Syntax::RECIPE_STEP_FIELD_ARGS,
+//RS             ],
+//RS         )?;
+//RS         return Ok(BuildStep::Exec {
+//RS             tool: required_field_string(args, Syntax::RECIPE_STEP_FIELD_TOOL)?,
+//RS             args: required_field_strings(args, Syntax::RECIPE_STEP_FIELD_ARGS)?,
+//RS         });
+//RS     }
+//RS     if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_INSTALL) {
+//RS         validate_fields(
+//RS             args,
+//RS             &[
+//RS                 Syntax::RECIPE_STEP_FIELD_SRC,
+//RS                 Syntax::RECIPE_STEP_FIELD_DEST,
+//RS             ],
+//RS         )?;
+//RS         return Ok(BuildStep::Install {
+//RS             src: required_field_string(args, Syntax::RECIPE_STEP_FIELD_SRC)?,
+//RS             dest: required_field_string(args, Syntax::RECIPE_STEP_FIELD_DEST)?,
+//RS         });
+//RS     }
+//RS     if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_INSTALL_TREE) {
+//RS         validate_fields(
+//RS             args,
+//RS             &[
+//RS                 Syntax::RECIPE_STEP_FIELD_SRC,
+//RS                 Syntax::RECIPE_STEP_FIELD_DEST,
+//RS             ],
+//RS         )?;
+//RS         return Ok(BuildStep::InstallTree {
+//RS             src: required_field_string(args, Syntax::RECIPE_STEP_FIELD_SRC)?,
+//RS             dest: required_field_string(args, Syntax::RECIPE_STEP_FIELD_DEST)?,
+//RS         });
+//RS     }
+//RS     Err(adapter_shape(raw))
+//RS }
+//RS 
+//RS fn named_field<'a>(args: &'a str, key: &str) -> Option<&'a str> {
+//RS     let fields = named_fields(args)?;
+//RS     let mut found = None;
+//RS     for (name, value) in fields {
+//RS         if name == key {
+//RS             if found.is_some() {
+//RS                 return None;
+//RS             }
+//RS             found = Some(value);
+//RS         }
+//RS     }
+//RS     found
+//RS }
+//RS 
+//RS fn named_fields<'a>(args: &'a str) -> Option<Vec<(&'a str, &'a str)>> {
+//RS     split_top_level(args)
+//RS         .into_iter()
+//RS         .filter(|item| !item.trim().is_empty())
+//RS         .map(|item| {
+//RS             let (name, value) = item.trim().split_once(':')?;
+//RS             let name = name.trim();
+//RS             let value = value.trim();
+//RS             (!name.is_empty() && !value.is_empty()).then_some((name, value))
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn validate_fields(args: &str, allowed: &[&str]) -> Result<(), Diagnostic> {
+//RS     let fields = named_fields(args).ok_or_else(|| adapter_shape(args))?;
+//RS     let mut seen = HashSet::new();
+//RS     if fields
+//RS         .iter()
+//RS         .any(|(name, _)| !allowed.contains(name) || !seen.insert(*name))
+//RS     {
+//RS         return Err(adapter_shape(args));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn required_field_string(args: &str, key: &str) -> Result<String, Diagnostic> {
+//RS     let value = named_field(args, key).ok_or_else(|| adapter_shape(args))?;
+//RS     unquote(value.trim()).ok_or_else(|| adapter_shape(args))
+//RS }
+//RS 
+//RS fn required_field_strings(args: &str, key: &str) -> Result<Vec<String>, Diagnostic> {
+//RS     let value = named_field(args, key).ok_or_else(|| adapter_shape(args))?;
+//RS     let body = value
+//RS         .trim()
+//RS         .strip_prefix('[')
+//RS         .and_then(|value| value.strip_suffix(']'))
+//RS         .ok_or_else(|| adapter_shape(args))?;
+//RS     split_top_level(body)
+//RS         .into_iter()
+//RS         .map(|item| unquote(item.trim()).ok_or_else(|| adapter_shape(args)))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn call_args<'a>(raw: &'a str, prefix: &str) -> Option<&'a str> {
+//RS     let rest = raw.trim().strip_prefix(prefix)?.trim_start();
+//RS     let rest = rest.strip_prefix('(')?;
+//RS     rest.strip_suffix(')')
+//RS }
+//RS 
+//RS fn named_raw(args: &str, key: &str) -> Option<String> {
+//RS     let needle = format!("{key}:");
+//RS     for item in split_top_level(args) {
+//RS         let item = item.trim();
+//RS         if let Some(rest) = item.strip_prefix(&needle) {
+//RS             return Some(rest.trim().trim_end_matches(',').to_string());
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn named_string(args: &str, key: &str) -> Option<String> {
+//RS     let raw = named_raw(args, key)?;
+//RS     unquote(raw.trim())
+//RS }
+//RS 
+//RS fn unquote(raw: &str) -> Option<String> {
+//RS     let s = raw.strip_prefix('"')?.strip_suffix('"')?;
+//RS     let mut out = String::new();
+//RS     let mut chars = s.chars();
+//RS     while let Some(ch) = chars.next() {
+//RS         match ch {
+//RS             '\\' => {
+//RS                 let escaped = chars.next()?;
+//RS                 let (_, decoded) = Syntax::ESCAPES
+//RS                     .iter()
+//RS                     .find(|&&(marker, _)| marker == escaped)?;
+//RS                 out.push(*decoded);
+//RS             }
+//RS             '{' if chars.clone().next() == Some('{') => {
+//RS                 chars.next();
+//RS                 out.push('{');
+//RS             }
+//RS             '}' if chars.clone().next() == Some('}') => {
+//RS                 chars.next();
+//RS                 out.push('}');
+//RS             }
+//RS             other => out.push(other),
+//RS         }
+//RS     }
+//RS     Some(out)
+//RS }
+//RS 
+//RS fn adapter_shape(_raw: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1270",
+//RS         "adapter package declaration is not complete".to_string(),
+//RS         "`Pkg.adapt` needs `name:`, `source:`, and a supported `recipe:`; recipes are `Recipe.copy()`, `Recipe.prebuilt(bin:, as:)`, or a finite `Recipe.build(steps: […])`.".to_string(),
+//RS         "write `Pkg.adapt(name: \"tool\", source: \"./vendor/tool\", recipe: Recipe.copy())`.".to_string(),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS /// Merge every evaluated module's contributions through the §6 engine,
+//RS /// grouping by `(namespace, path)` first.
+//RS pub fn merge_all(
+//RS     modules: &[EvaluatedModule],
+//RS ) -> Result<HashMap<(Namespace, String), MergedEntry>, MergeError> {
+//RS     let mut by_key: HashMap<(Namespace, String), Vec<EntryContribution>> = HashMap::new();
+//RS     for module in modules {
+//RS         for (key, entry) in &module.entries {
+//RS             by_key.entry(key.clone()).or_default().push(entry.clone());
+//RS         }
+//RS     }
+//RS     let mut out = HashMap::new();
+//RS     for (key, contribs) in by_key {
+//RS         out.insert(key, Merge::merge_entry(&contribs)?);
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS /// Render one merged `Pkg` as a `<package>@<source>` ref. A bare package (the
+//RS /// sugar's empty source) resolves against the conventional `default` source.
+//RS pub fn pkg_ref(pkg: &Merge::Pkg) -> String {
+//RS     if pkg.source.is_empty() && pkg.name.contains(Syntax::REF_PROVIDER_AT) {
+//RS         return pkg.name.clone();
+//RS     }
+//RS     let source = if pkg.source.is_empty() {
+//RS         Syntax::DEFAULT_SOURCE
+//RS     } else {
+//RS         pkg.source.as_str()
+//RS     };
+//RS     format!("{}{}{}", pkg.name, Syntax::REF_PROVIDER_AT, source)
+//RS }
+//RS 
+// END-PORT-PENDING 2077 crates/jet-env-model/src/ModuleEval/Eval.rs:1801-2668
+

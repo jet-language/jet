@@ -1,0 +1,40 @@
+// Project-job argv ownership (crates/jet-cli/src/CLI.rs).
+// The host invokes this before parsing output/global flags.
+
+// Rust `DRY_RUN_FLAG`, `CANVAS_FLAG`, `JOBS_COMMAND` (CLI.rs:199-207).
+pub JET_CLI_DRY_RUN_FLAG :: "--dry-run"
+pub JET_CLI_CANVAS_FLAG :: "--canvas"
+pub JET_CLI_JOBS_COMMAND :: "jobs"
+
+// Rust `flag_takes_separate_value` (CLI.rs:211-256).
+// Front.jet owns the existing canonical list; do not duplicate it here.
+pub fn jet_cli_flag_takes_separate_value(argument: String) -> Bool Never! {
+    JET_CLI_SEPARATE_VALUE_FLAGS.contains(argument)
+}
+
+// Rust `separate_job_argv` (CLI.rs:263-292).
+// Insert only the Jet/job boundary: any later separator belongs to the job.
+pub fn jet_cli_separate_job_argv(args: &[String]) Never! {
+    positionals := 0
+    index := 0
+    loop index < args.len() {
+        argument :: args[index]
+        if argument == "--" -> return
+        if jet_cli_flag_takes_separate_value(argument) {
+            index += 2
+            next
+        }
+        if argument.starts_with("-") && argument != "-" {
+            index += 1
+            next
+        }
+        positionals += 1
+        if positionals == 1 && argument != JET_CLI_JOBS_COMMAND -> return
+        if positionals == 2 {
+            rest :: index + 1
+            if rest < args.len() && args[rest] != "--" -> &args.insert(rest, "--")
+            return
+        }
+        index += 1
+    }
+}

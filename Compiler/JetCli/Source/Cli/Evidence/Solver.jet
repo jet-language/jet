@@ -1,0 +1,763 @@
+// Pure Presburger solver policy and independently checked certificates.
+// Rust Source/ProveSolver.rs; extraction and producer orchestration are in SolverObligations.jet.
+use core.encoding.[DataTree]
+use core.encoding.json as solver_json
+use core.math as solver_math
+use jet_foundation.[Span, diagnostic_line_at, diagnostic_column_at, mir_sha256_hex, mir_sha256_hex_bytes, mir_sha256_bytes]
+
+pub JET_CLI_SOLVER_MAX_OBLIGATIONS :: 10000
+pub JET_CLI_SOLVER_MAX_TERMS :: 50000
+pub JET_CLI_SOLVER_MAX_VARS :: 256
+pub JET_CLI_SOLVER_MAX_STEPS :: 1000000
+pub JET_CLI_SOLVER_BACKEND :: "native-presburger"
+pub JET_CLI_SOLVER_BACKEND_VERSION :: "1"
+// Jet Int is exact; explicitly retain Rust i128's overflow boundary.
+JET_CLI_SOLVER_I128_MAX :: prep { 170141183460469231731687303715884105727 }
+JET_CLI_SOLVER_I128_MIN :: prep { -170141183460469231731687303715884105728 }
+
+#Error
+pub enum JetCLISolverFail {
+    CoefficientOverflow
+    StructuralLimit
+}
+#Error
+pub enum JetCLISolverError { Failure(String) }
+#Error
+enum JetCLISolverSearchError {
+    Unknown(String)
+    Sat([String:Int])
+}
+struct JetCLISolverBudget { steps: Int }
+
+pub struct JetCLISolverAffine { pub constant: Int, pub terms: [String:Int] }
+pub struct JetCLISolverInequality { pub affine: JetCLISolverAffine }
+pub struct JetCLISolverFormula { pub assumptions: [JetCLISolverInequality], pub claim: [JetCLISolverInequality] }
+pub struct JetCLISolverObligation {
+    pub id: String
+    pub kind: String
+    pub origin: String
+    pub span: String
+    pub formula: JetCLISolverFormula
+    pub unsupported_reason: String?
+}
+pub enum JetCLISolverOutcome {
+    Proved(certificate: String, certificate_sha256: String, steps: Int)
+    Disproved(assignment: [String:Int], steps: Int)
+    Unknown(reason: String, steps: Int)
+}
+pub struct JetCLISolverEvidence {
+    pub obligation: JetCLISolverObligation
+    pub outcome: JetCLISolverOutcome
+    pub evidence_id: String
+}
+
+fn jet_cli_solver_checked(value: Int) -> Int? Never! {
+    if value < JET_CLI_SOLVER_I128_MIN || value > JET_CLI_SOLVER_I128_MAX -> return None
+    Val(value)
+}
+fn jet_cli_solver_add_checked(a: Int, b: Int) -> Int? Never! { jet_cli_solver_checked(a + b) }
+fn jet_cli_solver_neg_checked(a: Int) -> Int? Never! { jet_cli_solver_checked(-a) }
+fn jet_cli_solver_mul_checked(a: Int, b: Int) -> Int? Never! { jet_cli_solver_checked(a * b) }
+fn jet_cli_solver_quote(text: String) -> String Never! { solver_json.to_string(DataTree.Text(~text)) }
+fn jet_cli_solver_keys(terms: [String:Int]) -> [String] Never! {
+    names := terms.keys().to_list()
+    &names.sort()
+    names
+}
+// Rust Affine::constant (31-36).
+pub fn jet_cli_solver_affine_constant(value: Int) -> JetCLISolverAffine Never! {
+    JetCLISolverAffine{constant: value, terms: [String:Int]{}}
+}
+// Rust Affine::var (38-42); zero coefficients remain present, as in Rust.
+pub fn jet_cli_solver_affine_var(name: String, coeff: Int) -> JetCLISolverAffine Never! {
+    terms := [String:Int]{}
+    terms[name] = coeff
+    JetCLISolverAffine{constant: 0, terms: terms}
+}
+// Rust Affine::add (44-62).
+pub fn jet_cli_solver_affine_add(left: JetCLISolverAffine, right: JetCLISolverAffine) -> JetCLISolverAffine JetCLISolverFail! {
+    terms := ~left.terms
+    loop (name, coeff) in right.terms {
+        sum :: jet_cli_solver_add_checked(terms.get(name) ?? 0, coeff) ?? return Err(JetCLISolverFail.CoefficientOverflow)
+        if sum == 0 { _ :: &terms.remove(name) } else { terms[name] = sum }
+    }
+    constant :: jet_cli_solver_add_checked(left.constant, right.constant) ?? return Err(JetCLISolverFail.CoefficientOverflow)
+    Ok(JetCLISolverAffine{constant: constant, terms: terms})
+}
+// Rust Affine::scale (64-81).
+pub fn jet_cli_solver_affine_scale(affine: JetCLISolverAffine, factor: Int) -> JetCLISolverAffine JetCLISolverFail! {
+    terms := [String:Int]{}
+    loop (name, coeff) in affine.terms {
+        scaled :: jet_cli_solver_mul_checked(coeff, factor) ?? return Err(JetCLISolverFail.CoefficientOverflow)
+        if scaled != 0 -> terms[name] = scaled
+    }
+    constant :: jet_cli_solver_mul_checked(affine.constant, factor) ?? return Err(JetCLISolverFail.CoefficientOverflow)
+    Ok(JetCLISolverAffine{constant: constant, terms: terms})
+}
+// Rust Affine::term_count (83-85).
+pub fn jet_cli_solver_affine_term_count(affine: JetCLISolverAffine) -> Int Never! { affine.terms.len() + 1 }
+// Rust Affine::to_json (87-103), BTreeMap order is explicit.
+pub fn jet_cli_solver_affine_json(affine: JetCLISolverAffine) -> String Never! {
+    out := "{{\"constant\":\"{affine.constant}\",\"terms\":[".bytes()
+    loop (index, name) in jet_cli_solver_keys(affine.terms) {
+        if index > 0 -> jet_cli_solver_append(&out, ",")
+        coeff :: affine.terms.get(name) ?? 0
+        jet_cli_solver_append(&out, "{{\"coefficient\":\"{coeff}\",\"variable\":{jet_cli_solver_quote(name)}}}")
+    }
+    jet_cli_solver_append(&out, "]}}")
+    jet_cli_solver_finish(out)
+}
+// Rust Inequality::le (113-115).
+pub fn jet_cli_solver_inequality_le(affine: JetCLISolverAffine) -> JetCLISolverInequality Never! { JetCLISolverInequality{affine: ~affine} }
+// Rust Inequality::to_json (117-122).
+pub fn jet_cli_solver_inequality_json(ineq: JetCLISolverInequality) -> String Never! {
+    "{{\"affine\":{jet_cli_solver_affine_json(ineq.affine)},\"relation\":\"le\"}}"
+}
+// Rust canonical_inequalities (170-175). Sorting encodings avoids repeated serialization in comparisons.
+fn jet_cli_solver_canonical_inequalities(ineqs: [JetCLISolverInequality]) -> [String] Never! {
+    encodings := [String]{}
+    loop ineq in ineqs -> &encodings.push(jet_cli_solver_inequality_json(ineq))
+    &encodings.sort()
+    unique := [String]{}
+    previous := String?{None}
+    loop encoding in encodings {
+        if previous != Val(encoding) -> &unique.push(encoding)
+        previous = Val(encoding)
+    }
+    unique
+}
+// Rust Formula::to_json (132-146).
+pub fn jet_cli_solver_formula_json(formula: JetCLISolverFormula) -> String Never! {
+    assumptions :: jet_cli_solver_canonical_inequalities(formula.assumptions).join(",")
+    claim :: jet_cli_solver_canonical_inequalities(formula.claim).join(",")
+    "{{\"assumptions\":{{\"children\":[{assumptions}],\"op\":\"and\"}},\"claim\":{{\"children\":[{claim}],\"op\":\"and\"}}}}"
+}
+// Rust Formula::hash (148-151).
+pub fn jet_cli_solver_formula_hash(formula: JetCLISolverFormula) -> String Never! { mir_sha256_hex("{jet_cli_solver_formula_json(formula)}\n") }
+// Rust Formula::term_count (153-159).
+pub fn jet_cli_solver_formula_term_count(formula: JetCLISolverFormula) -> Int Never! {
+    count := 0
+    loop ineq in formula.assumptions -> count += jet_cli_solver_affine_term_count(ineq.affine)
+    loop ineq in formula.claim -> count += jet_cli_solver_affine_term_count(ineq.affine)
+    count
+}
+fn jet_cli_solver_variables(ineqs: [JetCLISolverInequality]) -> [String] Never! {
+    names := [String:Int]{}
+    loop ineq in ineqs { loop name in ineq.affine.terms.keys() -> names[name] = 0 }
+    jet_cli_solver_keys(names)
+}
+// Rust Formula::variables (161-167).
+pub fn jet_cli_solver_formula_variables(formula: JetCLISolverFormula) -> [String] Never! {
+    names := [String:Int]{}
+    loop ineq in formula.assumptions { loop name in ineq.affine.terms.keys() -> names[name] = 0 }
+    loop ineq in formula.claim { loop name in ineq.affine.terms.keys() -> names[name] = 0 }
+    jet_cli_solver_keys(names)
+}
+// Rust source_span_text (1090-1094).
+pub fn jet_cli_solver_source_span_text(source: String, span: Span) -> String Never! {
+    "{diagnostic_line_at(source, span.start)}:{diagnostic_column_at(source, span.start)}-{diagnostic_line_at(source, span.end)}:{diagnostic_column_at(source, span.end)}"
+}
+// Rust framed_sha256 (1096-1103): u64 big-endian byte-length framing.
+pub fn jet_cli_solver_framed_sha256(fields: [String]) -> String Never! {
+    bytes := [U8]{}
+    loop field in fields {
+        raw :: field.bytes()
+        shifts :: [Int]{56, 48, 40, 32, 24, 16, 8, 0}
+        loop shift in shifts -> &bytes.push(U8{(raw.len() >> shift) & 255})
+        loop byte in raw -> &bytes.push(byte)
+    }
+    mir_sha256_hex_bytes(mir_sha256_bytes(bytes))
+}
+// Rust inclusive_bounds (1214-1227).
+pub fn jet_cli_solver_inclusive_bounds(lower: Int, upper: Int) -> [JetCLISolverInequality] Never! {
+    low :: jet_cli_solver_affine_add(jet_cli_solver_affine_var("value", -1), jet_cli_solver_affine_constant(lower)) ?? jet_cli_solver_affine_constant(1)
+    high :: jet_cli_solver_affine_add(jet_cli_solver_affine_var("value", 1), jet_cli_solver_affine_constant(-upper)) ?? jet_cli_solver_affine_constant(1)
+    [JetCLISolverInequality]{jet_cli_solver_inequality_le(low), jet_cli_solver_inequality_le(high)}
+}
+struct JetCLISolverFiniteDomain { variable: String, lower: Int, upper: Int }
+// Rust finite_domain (1305-1334).
+fn jet_cli_solver_finite_domain(formula: JetCLISolverFormula) -> JetCLISolverFiniteDomain? Never! {
+    variable := String?{None}
+    lower := Int?{None}
+    upper := Int?{None}
+    loop ineq in formula.assumptions {
+        if ineq.affine.terms.len() != 1 -> return None
+        loop (name, coeff) in ineq.affine.terms {
+            if coeff != -1 && coeff != 1 -> return None
+            if variable == .Val(existing) { if existing != name -> return None }
+            variable = Val(name)
+            if coeff == -1 {
+                old :: lower ?? ineq.affine.constant
+                lower = Val(if old > ineq.affine.constant -> old else -> ineq.affine.constant)
+            } else {
+                bound :: jet_cli_solver_neg_checked(ineq.affine.constant) ?? return None
+                old :: upper ?? bound
+                upper = Val(if old < bound -> old else -> bound)
+            }
+        }
+    }
+    name :: variable ?? return None
+    lo :: lower ?? return None
+    hi :: upper ?? return None
+    Val(JetCLISolverFiniteDomain{variable: name, lower: lo, upper: hi})
+}
+// Rust finite_result_record (1336-1341).
+fn jet_cli_solver_finite_record(variable: String, value: Int) -> String Never! {
+    "{{\"assignment\":{{{jet_cli_solver_quote(variable)}:\"{value}\"}},\"result\":\"proved\"}}\n"
+}
+// Rust satisfies (1627-1647).
+pub fn jet_cli_solver_satisfies(ineqs: [JetCLISolverInequality], assignment: [String:Int]) -> Bool Never! {
+    loop ineq in ineqs {
+        total := ineq.affine.constant
+        loop (name, coeff) in ineq.affine.terms {
+            value :: assignment.get(name) ?? return false
+            term :: jet_cli_solver_mul_checked(coeff, value) ?? return false
+            total = jet_cli_solver_add_checked(total, term) ?? return false
+        }
+        if total > 0 -> return false
+    }
+    true
+}
+// Rust ceil_div (1699-1710); Jet /% floors, so a nonzero remainder increments the quotient.
+pub fn jet_cli_solver_ceil_div(numerator: Int, denominator: Int) -> Int? Never! {
+    if denominator == 0 || (numerator == JET_CLI_SOLVER_I128_MIN && denominator == -1) -> return None
+    quotient := numerator /% denominator
+    remainder :: numerator - quotient * denominator
+    if remainder != 0 -> quotient += 1
+    jet_cli_solver_checked(quotient)
+}
+struct JetCLISolverDomain { lower: Int?, upper: Int? }
+// Rust find_counterexample (1653-1697).
+pub fn jet_cli_solver_find_counterexample(ineqs: [JetCLISolverInequality]) -> [String:Int]? Never! {
+    variables :: jet_cli_solver_variables(ineqs)
+    if variables.len() > JET_CLI_SOLVER_MAX_VARS -> return None
+    domains := [String:JetCLISolverDomain]{}
+    loop name in variables -> domains[name] = JetCLISolverDomain{lower: None, upper: None}
+    loop ineq in ineqs {
+        if ineq.affine.terms.len() != 1 -> next
+        loop (name, coeff) in ineq.affine.terms {
+            negated :: jet_cli_solver_neg_checked(ineq.affine.constant) ?? return None
+            domain := domains.get(name) ?? return None
+            if coeff > 0 {
+                bound :: negated /% coeff
+                old :: domain.upper ?? bound
+                domain.upper = Val(if old < bound -> old else -> bound)
+            }
+            if coeff < 0 {
+                bound :: jet_cli_solver_ceil_div(negated, coeff) ?? return None
+                old :: domain.lower ?? bound
+                domain.lower = Val(if old > bound -> old else -> bound)
+            }
+            domains[name] = domain
+        }
+    }
+    assignment := [String:Int]{}
+    loop name in variables {
+        domain :: domains.get(name) ?? return None
+        value := 1
+        if domain.lower == .Val(lo) {
+            if domain.upper == {
+                .Val(hi) -> {
+                    if lo > hi -> return None
+                    if !(lo <= 1 && 1 <= hi) -> value = lo
+                }
+                .None -> value = if lo > 1 -> lo else -> 1
+            }
+        } else {
+            if domain.upper == .Val(hi) -> value = if hi < 1 -> hi else -> 1
+        }
+        assignment[name] = value
+    }
+    if jet_cli_solver_satisfies(ineqs, assignment) -> Val(assignment) else -> None
+}
+// Rust charge (1756-1762).
+fn jet_cli_solver_charge(budget: &JetCLISolverBudget) -> Bool Never! {
+    if budget.steps >= JET_CLI_SOLVER_MAX_STEPS -> return false
+    budget.steps += 1
+    true
+}
+// Rust find_linear_contradiction (1712-1754).
+fn jet_cli_solver_find_linear_contradiction(ineqs: [JetCLISolverInequality], budget: &JetCLISolverBudget) -> String? JetCLISolverSearchError! {
+    if !jet_cli_solver_charge(&budget) -> return Err(JetCLISolverSearchError.Unknown("step_limit"))
+    loop (index, ineq) in ineqs {
+        if ineq.affine.terms.len() == 0 && ineq.affine.constant > 0 {
+            return Ok(Val("{{\"kind\":\"linear_contradiction\",\"multipliers\":[{{\"inequalityIndex\":{index},\"multiplier\":\"1\"}}]}}"))
+        }
+    }
+    loop i in 0..<ineqs.len() {
+        loop j in i + 1..<ineqs.len() {
+            if !jet_cli_solver_charge(&budget) -> return Err(JetCLISolverSearchError.Unknown("step_limit"))
+            a :: ineqs[i].affine
+            b :: ineqs[j].affine
+            if a.terms.len() == 1 && b.terms.len() == 1 {
+                loop (name, coeff) in a.terms {
+                    opposite :: jet_cli_solver_neg_checked(coeff)
+                    if coeff != 0 && opposite != None && b.terms.get(name) == opposite {
+                        sum :: jet_cli_solver_add_checked(a.constant, b.constant) ?? return Err(JetCLISolverSearchError.Unknown("coefficient_overflow"))
+                        if sum > 0 {
+                            return Ok(Val("{{\"kind\":\"linear_contradiction\",\"multipliers\":[{{\"inequalityIndex\":{i},\"multiplier\":\"1\"}},{{\"inequalityIndex\":{j},\"multiplier\":\"1\"}}]}}"))
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+struct JetCLISolverBoundedDomain { lower: Int, upper: Int }
+// Rust enumerate (1600-1625); index avoids copying each recursive order suffix.
+fn jet_cli_solver_enumerate(order: [String], index: Int, domains: [String:JetCLISolverBoundedDomain], ineqs: [JetCLISolverInequality], assignment: &[String:Int], budget: &JetCLISolverBudget) -> [String:Int]? JetCLISolverSearchError! {
+    if index == order.len() {
+        if !jet_cli_solver_charge(&budget) -> return Err(JetCLISolverSearchError.Unknown("step_limit"))
+        if jet_cli_solver_satisfies(ineqs, assignment) -> return Ok(Val(~assignment))
+        return Ok(None)
+    }
+    name :: order[index]
+    domain :: domains.get(name) ?? return Err(JetCLISolverSearchError.Unknown("structural_limit"))
+    value := domain.lower
+    loop value <= domain.upper {
+        if !jet_cli_solver_charge(&budget) -> return Err(JetCLISolverSearchError.Unknown("step_limit"))
+        assignment[name] = value
+        hit :: jet_cli_solver_enumerate(order, index + 1, domains, ineqs, &assignment, &budget)
+        if hit == .Val(found) -> return Ok(Val(found))
+        if value == domain.upper -> break
+        value += 1
+    }
+    _ :: &assignment.remove(name)
+    Ok(None)
+}
+// Rust search_unsat (1513-1598).
+fn jet_cli_solver_search_unsat(ineqs: [JetCLISolverInequality], budget: &JetCLISolverBudget) -> String JetCLISolverSearchError! {
+    variables :: jet_cli_solver_variables(ineqs)
+    if variables.len() > JET_CLI_SOLVER_MAX_VARS -> return Err(JetCLISolverSearchError.Unknown("structural_limit"))
+    proof :: jet_cli_solver_find_linear_contradiction(ineqs, &budget)
+    if proof == .Val(found) -> return Ok(found)
+    domains := [String:JetCLISolverBoundedDomain]{}
+    loop name in variables {
+        lo := JET_CLI_SOLVER_I128_MIN /% 4
+        hi := JET_CLI_SOLVER_I128_MAX /% 4
+        loop ineq in ineqs {
+            if ineq.affine.terms.len() != 1 -> next
+            if ineq.affine.terms.get(name) == .Val(coeff) {
+                if coeff != 0 {
+                    negated :: jet_cli_solver_neg_checked(ineq.affine.constant) ?? return Err(JetCLISolverSearchError.Unknown("coefficient_overflow"))
+                    if coeff > 0 {
+                        bound :: negated /% coeff
+                        if bound < hi -> hi = bound
+                    } else {
+                        bound :: jet_cli_solver_ceil_div(negated, coeff) ?? return Err(JetCLISolverSearchError.Unknown("coefficient_overflow"))
+                        if bound > lo -> lo = bound
+                    }
+                }
+            }
+        }
+        if lo > hi {
+            if !jet_cli_solver_charge(&budget) -> return Err(JetCLISolverSearchError.Unknown("step_limit"))
+            return Ok("{{\"kind\":\"linear_contradiction\",\"multipliers\":[]}}")
+        }
+        if hi - lo > 64 -> return Err(JetCLISolverSearchError.Unknown("structural_limit"))
+        domains[name] = JetCLISolverBoundedDomain{lower: lo, upper: hi}
+    }
+    if domains.len() == 0 {
+        if !jet_cli_solver_charge(&budget) -> return Err(JetCLISolverSearchError.Unknown("step_limit"))
+        loop ineq in ineqs {
+            if ineq.affine.terms.len() == 0 && ineq.affine.constant > 0 -> return Ok("{{\"kind\":\"linear_contradiction\",\"multipliers\":[]}}")
+        }
+        return Err(JetCLISolverSearchError.Sat([String:Int]{}))
+    }
+    assignment := [String:Int]{}
+    hit :: jet_cli_solver_enumerate(variables, 0, domains, ineqs, &assignment, &budget)
+    if hit == .Val(counter) -> return Err(JetCLISolverSearchError.Sat(counter))
+    first :: variables[0]
+    domain :: domains.get(first) ?? return Err(JetCLISolverSearchError.Unknown("structural_limit"))
+    pivot :: domain.lower + (domain.upper - domain.lower) /% 2
+    Ok("{{\"kind\":\"split\",\"left\":{{\"kind\":\"linear_contradiction\",\"multipliers\":[]}},\"pivot\":\"{pivot}\",\"right\":{{\"kind\":\"linear_contradiction\",\"multipliers\":[]}},\"variable\":{jet_cli_solver_quote(first)}}}")
+}
+
+// Rust as_object/object_field/exact_certificate_keys/object_kind (1839-1873).
+fn jet_cli_solver_object(value: DataTree) -> [String:DataTree] JetCLISolverError! {
+    if value == {
+        .Object(object) -> Ok(~object)
+        else -> Err(JetCLISolverError.Failure("certificate_invalid"))
+    }
+}
+fn jet_cli_solver_exact_keys(object: [String:DataTree], keys: [String]) -> Bool Never! {
+    if object.len() != keys.len() -> return false
+    loop key in keys { if !object.has_key(key) -> return false }
+    true
+}
+fn jet_cli_solver_text(value: DataTree?) -> String JetCLISolverError! {
+    tree :: value ?? return Err(JetCLISolverError.Failure("certificate_invalid"))
+    if tree == {
+        .Text(text) -> Ok(~text)
+        else -> Err(JetCLISolverError.Failure("certificate_invalid"))
+    }
+}
+fn jet_cli_solver_array(value: DataTree?) -> [DataTree] JetCLISolverError! {
+    tree :: value ?? return Err(JetCLISolverError.Failure("certificate_invalid"))
+    if tree == {
+        .Array(items) -> Ok(~items)
+        else -> Err(JetCLISolverError.Failure("certificate_invalid"))
+    }
+}
+fn jet_cli_solver_kind(value: DataTree) -> String JetCLISolverError! {
+    object :: jet_cli_solver_object(value)
+    jet_cli_solver_text(object.get("kind"))
+}
+// Rust json_usize (1875-1882).
+fn jet_cli_solver_json_usize(value: DataTree?) -> Int JetCLISolverError! {
+    tree :: value ?? return Err(JetCLISolverError.Failure("certificate_invalid"))
+    if tree == .Int(number) {
+        if number >= 0 && number <= 18446744073709551615 -> return Ok(number)
+    }
+    Err(JetCLISolverError.Failure("certificate_invalid"))
+}
+// Rust json_i128 (1884-1893).
+fn jet_cli_solver_json_i128(value: DataTree?) -> Int JetCLISolverError! {
+    text :: jet_cli_solver_text(value)
+    parsed :: Int.parse(text) ?? return Err(JetCLISolverError.Failure("certificate_invalid"))
+    rendered :: "{parsed}"
+    if rendered != text || jet_cli_solver_checked(parsed) == None -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+    Ok(parsed)
+}
+// Rust canonical_json_value (1895-1934). Rust orders keys by UTF-8, not JCS UTF-16.
+pub fn jet_cli_solver_canonical_json_value(value: DataTree) -> String JetCLISolverError! {
+    if value == {
+        .Object(object) -> {
+            keys := object.keys().to_list()
+            &keys.sort()
+            out := "{{".bytes()
+            loop (index, key) in keys {
+                if index > 0 -> jet_cli_solver_append(&out, ",")
+                child :: object.get(key) ?? return Err(JetCLISolverError.Failure("certificate_invalid"))
+                encoded :: jet_cli_solver_canonical_json_value(child)
+                jet_cli_solver_append(&out, "{jet_cli_solver_quote(key)}:{encoded}")
+            }
+            jet_cli_solver_append(&out, "}}")
+            Ok(jet_cli_solver_finish(out))
+        }
+        .Array(items) -> {
+            out := "[".bytes()
+            loop (index, item) in items {
+                if index > 0 -> jet_cli_solver_append(&out, ",")
+                encoded :: jet_cli_solver_canonical_json_value(item)
+                jet_cli_solver_append(&out, encoded)
+            }
+            jet_cli_solver_append(&out, "]")
+            Ok(jet_cli_solver_finish(out))
+        }
+        .Float(number) -> {
+            if !solver_math.is_finite(number) -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+            Ok("{number}")
+        }
+        else -> Ok(solver_json.to_string(value))
+    }
+}
+fn jet_cli_solver_parse_certificate(certificate: String) -> DataTree JetCLISolverError! {
+    root :: solver_json.parse(certificate) ?? return Err(JetCLISolverError.Failure("certificate_invalid"))
+    canonical :: jet_cli_solver_canonical_json_value(root)
+    if canonical != certificate -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+    Ok(root)
+}
+// Rust check_certificate_node (1936-2038).
+fn jet_cli_solver_check_certificate_node(value: DataTree, inequalities: [JetCLISolverInequality]) -> Bool JetCLISolverError! {
+    object :: jet_cli_solver_object(value)
+    kind :: jet_cli_solver_kind(value)
+    if kind == {
+        "linear_contradiction" -> {
+            if !jet_cli_solver_exact_keys(object, [String]{"kind", "multipliers"}) -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+            entries :: jet_cli_solver_array(object.get("multipliers"))
+            if entries.len() == 0 {
+                budget := JetCLISolverBudget{steps: 0}
+                if jet_cli_solver_search_unsat(inequalities, &budget) == {
+                    .Ok(_) -> return Ok(true)
+                    .Err(error) -> if error == {
+                        .Sat(_) -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+                        .Unknown(reason) -> return Err(JetCLISolverError.Failure(reason))
+                    }
+                }
+            }
+            sum := jet_cli_solver_affine_constant(0)
+            seen := [Int:Bool]{}
+            loop item in entries {
+                entry :: jet_cli_solver_object(item)
+                if !jet_cli_solver_exact_keys(entry, [String]{"inequalityIndex", "multiplier"}) -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+                index :: jet_cli_solver_json_usize(entry.get("inequalityIndex"))
+                if index >= inequalities.len() || seen.has_key(index) -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+                seen[index] = true
+                multiplier :: jet_cli_solver_json_i128(entry.get("multiplier"))
+                if multiplier < 0 -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+                scaled :: jet_cli_solver_affine_scale(inequalities[index].affine, multiplier) ?? return Err(JetCLISolverError.Failure("coefficient_overflow"))
+                sum = jet_cli_solver_affine_add(sum, scaled) ?? return Err(JetCLISolverError.Failure("coefficient_overflow"))
+            }
+            if sum.terms.len() == 0 && sum.constant > 0 -> return Ok(true)
+        }
+        "split" -> {
+            if !jet_cli_solver_exact_keys(object, [String]{"kind", "left", "pivot", "right", "variable"}) -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+            variable :: jet_cli_solver_text(object.get("variable"))
+            if variable == "" || !jet_cli_solver_variables(inequalities).contains(variable) -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+            pivot :: jet_cli_solver_json_i128(object.get("pivot"))
+            left :: object.get("left") ?? return Err(JetCLISolverError.Failure("certificate_invalid"))
+            right :: object.get("right") ?? return Err(JetCLISolverError.Failure("certificate_invalid"))
+            negated :: jet_cli_solver_neg_checked(pivot) ?? return Err(JetCLISolverError.Failure("coefficient_overflow"))
+            next :: jet_cli_solver_add_checked(pivot, 1) ?? return Err(JetCLISolverError.Failure("coefficient_overflow"))
+            left_bound :: jet_cli_solver_affine_add(jet_cli_solver_affine_var(variable, 1), jet_cli_solver_affine_constant(negated)) ?? return Err(JetCLISolverError.Failure("coefficient_overflow"))
+            right_bound :: jet_cli_solver_affine_add(jet_cli_solver_affine_var(variable, -1), jet_cli_solver_affine_constant(next)) ?? return Err(JetCLISolverError.Failure("coefficient_overflow"))
+            left_branch := ~inequalities
+            right_branch := ~inequalities
+            &left_branch.push(jet_cli_solver_inequality_le(left_bound))
+            &right_branch.push(jet_cli_solver_inequality_le(right_bound))
+            _ :: jet_cli_solver_check_certificate_node(left, left_branch)
+            return jet_cli_solver_check_certificate_node(right, right_branch)
+        }
+        "assumption" -> {
+            if !jet_cli_solver_exact_keys(object, [String]{"assumptionIndex", "kind"}) -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+            index :: jet_cli_solver_json_usize(object.get("assumptionIndex"))
+            if index < inequalities.len() {
+                affine :: inequalities[index].affine
+                if affine.terms.len() == 0 && affine.constant > 0 -> return Ok(true)
+            }
+        }
+        else -> {}
+    }
+    Err(JetCLISolverError.Failure("certificate_invalid"))
+}
+fn jet_cli_solver_negate_claim(formula: JetCLISolverFormula) -> [JetCLISolverInequality] JetCLISolverFail! {
+    negated := [JetCLISolverInequality]{}
+    loop ineq in formula.claim {
+        scaled :: jet_cli_solver_affine_scale(ineq.affine, -1)
+        affine :: jet_cli_solver_affine_add(scaled, jet_cli_solver_affine_constant(1))
+        &negated.push(jet_cli_solver_inequality_le(affine))
+    }
+    Ok(negated)
+}
+// Rust check_certificate (1764-1837).
+pub fn jet_cli_solver_check_certificate(formula: JetCLISolverFormula, certificate: String) -> Bool JetCLISolverError! {
+    root :: jet_cli_solver_parse_certificate(certificate)
+    negated :: jet_cli_solver_negate_claim(formula) ?? return Err(JetCLISolverError.Failure("coefficient_overflow"))
+    if negated.len() == 0 -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+    if jet_cli_solver_kind(root) == "and_intro" {
+        object :: jet_cli_solver_object(root)
+        if !jet_cli_solver_exact_keys(object, [String]{"children", "kind"}) -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+        children :: jet_cli_solver_array(object.get("children"))
+        if children.len() != negated.len() -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+        loop (expected, child) in children {
+            entry :: jet_cli_solver_object(child)
+            if !jet_cli_solver_exact_keys(entry, [String]{"branchIndex", "proof"}) -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+            index :: jet_cli_solver_json_usize(entry.get("branchIndex"))
+            if index != expected -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+            proof :: entry.get("proof") ?? return Err(JetCLISolverError.Failure("certificate_invalid"))
+            branch := ~formula.assumptions
+            &branch.push(negated[index])
+            _ :: jet_cli_solver_check_certificate_node(proof, branch)
+        }
+    } else {
+        if negated.len() != 1 -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+        branch := ~formula.assumptions
+        &branch.push(negated[0])
+        _ :: jet_cli_solver_check_certificate_node(root, branch)
+    }
+    budget := JetCLISolverBudget{steps: 0}
+    loop neg in negated {
+        branch := ~formula.assumptions
+        &branch.push(neg)
+        if jet_cli_solver_search_unsat(branch, &budget) == {
+            .Ok(_) -> {}
+            .Err(error) -> if error == {
+                .Sat(_) -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+                .Unknown(reason) -> return Err(JetCLISolverError.Failure(reason))
+            }
+        }
+    }
+    Ok(true)
+}
+
+// Rust check_finite_certificate (1342-1416).
+pub fn jet_cli_solver_check_finite_certificate(formula: JetCLISolverFormula, certificate: String) -> Bool JetCLISolverError! {
+    root :: jet_cli_solver_parse_certificate(certificate)
+    object :: jet_cli_solver_object(root)
+    if !jet_cli_solver_exact_keys(object, [String]{"assignmentCount", "domainManifest", "rollingResultSha256"}) -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+    count :: jet_cli_solver_json_usize(object.get("assignmentCount"))
+    manifest :: jet_cli_solver_array(object.get("domainManifest"))
+    if manifest.len() != 1 -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+    entry :: jet_cli_solver_object(manifest[0])
+    if !jet_cli_solver_exact_keys(entry, [String]{"lower", "name", "upper"}) -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+    domain :: jet_cli_solver_finite_domain(formula) ?? return Err(JetCLISolverError.Failure("structural_limit"))
+    name :: jet_cli_solver_text(entry.get("name"))
+    lower :: jet_cli_solver_json_i128(entry.get("lower"))
+    upper :: jet_cli_solver_json_i128(entry.get("upper"))
+    if name != domain.variable || lower != domain.lower || upper != domain.upper -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+    claimed_hash :: jet_cli_solver_text(object.get("rollingResultSha256"))
+    if claimed_hash.len() != 64 -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+    loop byte in claimed_hash.bytes() {
+        code :: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+    }
+    difference :: jet_cli_solver_checked(upper - lower) ?? return Err(JetCLISolverError.Failure("coefficient_overflow"))
+    span :: jet_cli_solver_add_checked(difference, 1) ?? return Err(JetCLISolverError.Failure("coefficient_overflow"))
+    if span <= 0 -> return Err(JetCLISolverError.Failure("structural_limit"))
+    if span > JET_CLI_SOLVER_MAX_STEPS -> return Err(JetCLISolverError.Failure("step_limit"))
+    if count != span -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+    records := [U8]{}
+    assignment := [String:Int]{}
+    value := lower
+    loop {
+        assignment[name] = value
+        if !jet_cli_solver_satisfies(formula.assumptions, assignment) || !jet_cli_solver_satisfies(formula.claim, assignment) -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+        jet_cli_solver_append(&records, jet_cli_solver_finite_record(name, value))
+        if value == upper -> break
+        value = jet_cli_solver_add_checked(value, 1) ?? return Err(JetCLISolverError.Failure("coefficient_overflow"))
+    }
+    if mir_sha256_hex_bytes(mir_sha256_bytes(records)) != claimed_hash -> return Err(JetCLISolverError.Failure("certificate_invalid"))
+    Ok(true)
+}
+// Rust prove_finite_obligation (1229-1303).
+pub fn jet_cli_solver_prove_finite_obligation(formula: JetCLISolverFormula) -> JetCLISolverOutcome JetCLISolverError! {
+    domain :: jet_cli_solver_finite_domain(formula) ?? return Ok(JetCLISolverOutcome.Unknown{reason: "unsupported_formula", steps: 0})
+    difference :: jet_cli_solver_checked(domain.upper - domain.lower) ?? return Err(JetCLISolverError.Failure("finite domain size overflow"))
+    span :: jet_cli_solver_add_checked(difference, 1) ?? return Err(JetCLISolverError.Failure("finite domain size overflow"))
+    if span <= 0 -> return Ok(JetCLISolverOutcome.Unknown{reason: "structural_limit", steps: 0})
+    if span > JET_CLI_SOLVER_MAX_STEPS -> return Ok(JetCLISolverOutcome.Unknown{reason: "step_limit", steps: 0})
+    records := [U8]{}
+    steps := 0
+    value := domain.lower
+    assignment := [String:Int]{}
+    loop {
+        if steps >= JET_CLI_SOLVER_MAX_STEPS -> return Ok(JetCLISolverOutcome.Unknown{reason: "step_limit", steps: steps})
+        steps += 1
+        assignment[domain.variable] = value
+        if !jet_cli_solver_satisfies(formula.assumptions, assignment) -> return Ok(JetCLISolverOutcome.Unknown{reason: "structural_limit", steps: steps})
+        if !jet_cli_solver_satisfies(formula.claim, assignment) -> return Ok(JetCLISolverOutcome.Disproved{assignment: assignment, steps: steps})
+        jet_cli_solver_append(&records, jet_cli_solver_finite_record(domain.variable, value))
+        if value == domain.upper -> break
+        value = jet_cli_solver_add_checked(value, 1) ?? return Err(JetCLISolverError.Failure("finite domain cursor overflow"))
+    }
+    certificate :: "{{\"assignmentCount\":{steps},\"domainManifest\":[{{\"lower\":\"{domain.lower}\",\"name\":{jet_cli_solver_quote(domain.variable)},\"upper\":\"{domain.upper}\"}}],\"rollingResultSha256\":{jet_cli_solver_quote(mir_sha256_hex_bytes(mir_sha256_bytes(records)))}}}"
+    certificate_sha256 :: mir_sha256_hex("{certificate}\n")
+    if jet_cli_solver_check_finite_certificate(formula, certificate) == .Err(error) {
+        if error == .Failure(reason) {
+            if reason == "coefficient_overflow" || reason == "structural_limit" || reason == "step_limit" -> return Ok(JetCLISolverOutcome.Unknown{reason: reason, steps: steps})
+            return Err(JetCLISolverError.Failure("invalid finite certificate: {reason}"))
+        }
+    }
+    Ok(JetCLISolverOutcome.Proved{certificate: certificate, certificate_sha256: certificate_sha256, steps: steps})
+}
+// Rust prove_obligation (1418-1506).
+pub fn jet_cli_solver_prove_obligation(formula: JetCLISolverFormula) -> JetCLISolverOutcome JetCLISolverError! {
+    negated :: jet_cli_solver_negate_claim(formula) ?? {
+        reason :: if err == {
+            .CoefficientOverflow -> "coefficient_overflow"
+            .StructuralLimit -> "structural_limit"
+        }
+        return Ok(JetCLISolverOutcome.Unknown{reason: reason, steps: 0})
+    }
+    if negated.len() == 0 -> return Ok(JetCLISolverOutcome.Unknown{reason: "structural_limit", steps: 0})
+    budget := JetCLISolverBudget{steps: 0}
+    proofs := [String]{}
+    children := [U8]{}
+    loop (index, neg) in negated {
+        branch := ~formula.assumptions
+        &branch.push(neg)
+        if jet_cli_solver_find_counterexample(branch) == .Val(assignment) {
+            if !jet_cli_solver_charge(&budget) -> return Ok(JetCLISolverOutcome.Unknown{reason: "step_limit", steps: budget.steps})
+            return Ok(JetCLISolverOutcome.Disproved{assignment: assignment, steps: budget.steps})
+        }
+        proof :: jet_cli_solver_search_unsat(branch, &budget) ?? {
+            return if err == {
+                .Unknown(reason) -> Ok(JetCLISolverOutcome.Unknown{reason: reason, steps: budget.steps})
+                .Sat(assignment) -> Ok(JetCLISolverOutcome.Disproved{assignment: assignment, steps: budget.steps})
+            }
+        }
+        &proofs.push(proof)
+        if index > 0 -> jet_cli_solver_append(&children, ",")
+        jet_cli_solver_append(&children, "{{\"branchIndex\":{index},\"proof\":{proof}}}")
+    }
+    children_text :: jet_cli_solver_finish(children)
+    certificate :: if proofs.len() == 1 -> ~proofs[0] else -> "{{\"children\":[{children_text}],\"kind\":\"and_intro\"}}"
+    certificate_sha256 :: mir_sha256_hex("{certificate}\n")
+    if jet_cli_solver_check_certificate(formula, certificate) == .Err(error) {
+        if error == .Failure(reason) {
+            if reason == "coefficient_overflow" || reason == "structural_limit" || reason == "step_limit" -> return Ok(JetCLISolverOutcome.Unknown{reason: reason, steps: budget.steps})
+            return Err(JetCLISolverError.Failure("invalid certificate: {reason}"))
+        }
+    }
+    Ok(JetCLISolverOutcome.Proved{certificate: certificate, certificate_sha256: certificate_sha256, steps: budget.steps})
+}
+// Rust span_start (2094-2106).
+pub fn jet_cli_solver_span_start(span: String) -> (line: Int, column: Int) Never! {
+    parts :: span.split_once(":") ?? return (line: 1, column: 1)
+    line_text :: parts.before
+    column_text :: parts.after.before("-")
+    line := Int.parse(line_text) ?? 1
+    column := Int.parse(column_text) ?? 1
+    if line < 1 || line > 18446744073709551615 -> line = 1
+    if column < 1 || column > 18446744073709551615 -> column = 1
+    (line: line, column: column)
+}
+// Rust evidence_json (2040-2092).
+pub fn jet_cli_solver_evidence_json(item: JetCLISolverEvidence, diagnostic_indexes: String) -> String Never! {
+    formula_sha :: jet_cli_solver_quote(jet_cli_solver_formula_hash(item.obligation.formula))
+    obligation_id :: jet_cli_solver_quote(item.obligation.id)
+    obligation_kind :: jet_cli_solver_quote(item.obligation.kind)
+    certificate := "null"
+    certificate_sha := "null"
+    counterexample := "null"
+    reason := "null"
+    outcome := ""
+    steps := 0
+    if item.outcome == {
+        .Proved(cert, sha, count) -> {
+            outcome = "proved"
+            certificate = ~cert
+            certificate_sha = jet_cli_solver_quote(sha)
+            steps = count
+        }
+        .Disproved(assignment, count) -> {
+            outcome = "disproved"
+            steps = count
+            values := "[".bytes()
+            loop (index, name) in jet_cli_solver_keys(assignment) {
+                if index > 0 -> jet_cli_solver_append(&values, ",")
+                value :: assignment.get(name) ?? 0
+                jet_cli_solver_append(&values, "{{\"name\":{jet_cli_solver_quote(name)},\"value\":\"{value}\"}}")
+            }
+            jet_cli_solver_append(&values, "]")
+            counterexample = jet_cli_solver_finish(values)
+        }
+        .Unknown(why, count) -> {
+            outcome = "unknown"
+            reason = jet_cli_solver_quote(why)
+            steps = count
+        }
+    }
+    payload :: "{{\"backend\":\"native-presburger\",\"backendVersion\":\"1\",\"certificate\":{certificate},\"certificateSha256\":{certificate_sha},\"counterexample\":{counterexample},\"formulaSha256\":{formula_sha},\"obligationId\":{obligation_id},\"obligationKind\":{obligation_kind},\"reason\":{reason},\"status\":\"{outcome}\",\"stepLimit\":{JET_CLI_SOLVER_MAX_STEPS},\"steps\":{steps}}}"
+    start :: jet_cli_solver_span_start(item.obligation.span)
+    path :: item.obligation.origin.before("::")
+    "{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":{diagnostic_indexes},\"facet\":\"solver\",\"id\":{jet_cli_solver_quote(item.evidence_id)},\"kind\":\"solver\",\"outcome\":\"{outcome}\",\"producer\":\"native-presburger\",\"property\":null,\"reason\":null,\"solver\":{payload},\"source\":{{\"column\":{start.column},\"line\":{start.line},\"path\":{jet_cli_solver_quote(path)}}},\"state\":\"checked\"}}"
+}
+// Rust summarize (2108-2122).
+pub fn jet_cli_solver_summarize(items: [JetCLISolverEvidence]) -> (selected: Int, proved: Int, disproved: Int, unknown: Int, unavailable: Int) Never! {
+    proved := 0
+    disproved := 0
+    unknown := 0
+    loop item in items {
+        if item.outcome == {
+            .Proved(_, _, _) -> proved += 1
+            .Disproved(_, _) -> disproved += 1
+            .Unknown(_, _) -> unknown += 1
+        }
+    }
+    (selected: items.len(), proved: proved, disproved: disproved, unknown: unknown, unavailable: 0)
+}
+
+// Rust builds records and JSON into one growable byte buffer.
+fn jet_cli_solver_append(out: &[U8], text: String) Never! {
+    loop byte in text.bytes() -> &out.push(byte)
+}
+fn jet_cli_solver_finish(bytes: [U8]) -> String Never! {
+    String.from_bytes(bytes) ?? panic("solver encoded invalid UTF-8")
+}
+
+pub fn jet_cli_solver_error_message(error: JetCLISolverError) -> String Never! {
+    if error == { .Failure(reason) -> ~reason }
+}

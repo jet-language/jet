@@ -26,6 +26,11 @@ fn diagnostic_explanation_example(code: String) -> String? Never! {
 // Look up one diagnostic code (surrounding space and letter case ignored).
 pub fn diagnostic_explanation(code: String) -> DiagnosticExplanation? Never! {
     row :: diagnostic_registry_row(code.trim().to_upper()) ?? return None
+    Val(diagnostic_explanation_from_row(row))
+}
+
+// The explanation one registry row carries.
+pub fn diagnostic_explanation_from_row(row: DiagnosticRegistryRow) -> DiagnosticExplanation Never! {
     what := String?{None}
     why := String?{None}
     fix := String?{None}
@@ -34,7 +39,7 @@ pub fn diagnostic_explanation(code: String) -> DiagnosticExplanation? Never! {
         why = Val(diagnostic_sentence_case_line(row.why))
         fix = Val(diagnostic_sentence_case_line(row.fix))
     }
-    Val(DiagnosticExplanation{
+    DiagnosticExplanation{
         code: row.code,
         stage: row.stage,
         meaning: row.meaning,
@@ -43,7 +48,7 @@ pub fn diagnostic_explanation(code: String) -> DiagnosticExplanation? Never! {
         fix: fix,
         example: diagnostic_explanation_example(row.code),
         retired: row.status == DiagnosticRegistryStatus.Retired,
-    })
+    }
 }
 
 // Rust `str::lines`: split at `\n`, drop one `\r` before it, and yield no
@@ -90,5 +95,6 @@ pub fn diagnostic_explanation_render(explanation: DiagnosticExplanation, color: 
         if explanation.stage.len() > 0 -> out = "{out}Stage: {explanation.stage}\n\n"
         out = "{out}A longer explanation will land with the detailed typed row.\n\n"
     }
+    if explanation.stage == "syntax registry" -> return "{out}This explanation comes from Jet's syntax dictionary.\n"
     "{out}This explanation comes from jet's diagnostics reference.\n"
 }

@@ -1,0 +1,57 @@
+// Rust PerformanceBudget.rs:2438-2451.
+#Test("canonical_json_sorts_keys_escapes_and_hashes_lf_terminated_content") {
+    number :: canonical_json_integer("123") ?? panic("integer refused")
+    value :: canonical_json_object([CanonicalJSONField]{
+        CanonicalJSONField{key: "z", value: CanonicalJSON.String("é\n")},
+        CanonicalJSONField{key: "a", value: number},
+    }) ?? panic("object refused")
+    expected :: "{{\"a\":123,\"z\":\"é\\n\"}}\n".bytes()
+    assert_eq(canonical_json_bytes(value), expected)
+    assert_eq(canonical_json_sha256(value), mir_sha256_hex_bytes(mir_sha256_bytes(expected)))
+    if canonical_json_integer("-0") == {
+        .Ok(_) -> panic("negative zero accepted")
+        .Err(_) -> {}
+    }
+    if canonical_json_integer("01") == {
+        .Ok(_) -> panic("leading zero accepted")
+        .Err(_) -> {}
+    }
+}
+fn canonical_json_test_refuses(text: String, message: String) Never! {
+    if canonical_json_parse(text.bytes()) == {
+        .Ok(_) -> panic("invalid canonical JSON accepted")
+        .Err(error) -> assert_eq(error.message, message)
+    }
+}
+#Test("canonical JSON parser keeps arbitrary integers and UTF8 key order") {
+    text :: "{{\"x\":-999999999999999999999999999999999999999999999999999999999999999999}}\n"
+    value :: canonical_json_parse(text.bytes()) ?? panic("large integer refused")
+    assert_eq(canonical_json_bytes(value), text.bytes())
+    unicode :: "{{\"\":null,\"𐀀\":false}}\n"
+    assert_eq(canonical_json_bytes(canonical_json_parse(unicode.bytes()) ?? panic("UTF8 keys refused")), unicode.bytes())
+    escaped :: "[\"\\u0001\\b\\f\\n\\r\\t\\\"\\\\é\",null,true,0,-2]\n"
+    assert_eq(canonical_json_bytes(canonical_json_parse(escaped.bytes()) ?? panic("escapes refused")), escaped.bytes())
+}
+#Test("canonical JSON refuses noncanonical envelopes with Rust errors") {
+    canonical_json_test_refuses("null", "canonical JSON must end in exactly one LF")
+    canonical_json_test_refuses("null\n\n", "canonical JSON must end in exactly one LF")
+    canonical_json_test_refuses("\n", "unexpected end of JSON")
+    canonical_json_test_refuses(" null\n", "invalid canonical JSON token")
+    canonical_json_test_refuses("null \n", "trailing bytes after canonical JSON value")
+    canonical_json_test_refuses("{{\"z\":0,\"a\":1}}\n", "JSON is valid but not A-canonical")
+    canonical_json_test_refuses("{{\"a\":0,\"a\":1}}\n", "duplicate JSON key `a`")
+    canonical_json_test_refuses("-0\n", "non-canonical integer `-0`")
+    canonical_json_test_refuses("01\n", "non-canonical integer `01`")
+    canonical_json_test_refuses("1.0\n", "trailing bytes after canonical JSON value")
+    canonical_json_test_refuses("\"\\u0061\"\n", "JSON is valid but not A-canonical")
+    canonical_json_test_refuses("\"\\uD800\"\n", "unpaired surrogate in JSON string")
+    canonical_json_test_refuses("\"\\/\"\n", "invalid JSON string escape")
+    canonical_json_test_refuses("[0,]\n", "invalid canonical JSON token")
+    canonical_json_test_refuses("{{\"a\"0}}\n", "missing JSON object colon")
+}
+#Test("canonical JSON object constructor refuses duplicate keys") {
+    if canonical_json_object([CanonicalJSONField]{CanonicalJSONField{key: "x", value: CanonicalJSON.Null}, CanonicalJSONField{key: "x", value: CanonicalJSON.Bool(false)}}) == {
+        .Ok(_) -> panic("duplicate field accepted")
+        .Err(error) -> assert_eq(error.message, "duplicate JSON key `x`")
+    }
+}

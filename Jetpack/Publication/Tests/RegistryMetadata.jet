@@ -1,0 +1,274 @@
+// Registry.rs:2397-2804. Original metadata acceptance from tests/pkg.rs:
+// registry_fetch_applies_artifact_dependency_roles_features_and_constraints
+// (7404-7663) and registry_feature_cycle_fails_before_staging (8152-8176).
+// Full fetch/locked replay/tamper-before-Hangar and staging depend on the
+// mandatory artifact/fetch composition #4262; no fake store or hash here.
+// Native reader/error-kind gates #3593/#4409; JSON #3598; SemVer #4414/#4303.
+fn publication_metadata_test_dependency(name: String, roles: [String], enabled: Bool) -> PublicationRegistryDependency Never! {
+    PublicationRegistryDependency{name: name, requirements: [String]{"*"}, roles: roles, prefer: [String]{}, reject: [String]{}, strict: false, enabled_by_default: enabled}
+}
+fn publication_metadata_test_model(dependencies: [PublicationRegistryDependency], active: [String]) -> PublicationRegistryPackageMetadata Never! {
+    PublicationRegistryPackageMetadata{name: "rolekit", version: "1.0.0", dependencies: dependencies, active_features: active, canonical_text: "original lock text"}
+}
+fn publication_metadata_test_names(metadata: PublicationRegistryPackageMetadata) -> [String] Never! {
+    out := [String]{}
+    loop dependency in metadata.active_dependencies() -> &out.push(dependency.name)
+    out
+}
+#Test("publication metadata production roles and optional activation") {
+    model :: publication_metadata_test_model([PublicationRegistryDependency]{
+        publication_metadata_test_dependency("normal", [String]{"normal"}, false),
+        publication_metadata_test_dependency("build", [String]{"build"}, false),
+        publication_metadata_test_dependency("tool", [String]{"tool"}, false),
+        publication_metadata_test_dependency("peer", [String]{"peer"}, false),
+        publication_metadata_test_dependency("plugin", [String]{"plugin"}, false),
+        publication_metadata_test_dependency("target", [String]{"target"}, false),
+        publication_metadata_test_dependency("dev", [String]{"dev"}, true),
+        publication_metadata_test_dependency("test", [String]{"test"}, true),
+        publication_metadata_test_dependency("devtest", [String]{"dev", "test"}, true),
+        publication_metadata_test_dependency("optional", [String]{"optional"}, false),
+        publication_metadata_test_dependency("enabled", [String]{"optional"}, true),
+        publication_metadata_test_dependency("feature", [String]{"optional"}, false)
+    }, [String]{"feature"})
+    assert_eq(publication_metadata_test_names(model), [String]{"normal", "build", "tool", "peer", "plugin", "target", "enabled", "feature"})
+    assert(model.contains_dependency("dev"))
+    assert(!model.contains_dependency("absent"))
+    assert_eq(model.canonical(), "original lock text")
+}
+#Test("publication metadata merged roles override optional and empty roles excluded") {
+    model :: publication_metadata_test_model([PublicationRegistryDependency]{
+        publication_metadata_test_dependency("normal", [String]{"normal", "optional"}, false),
+        publication_metadata_test_dependency("build", [String]{"build", "dev", "optional"}, false),
+        publication_metadata_test_dependency("devoptional", [String]{"dev", "optional"}, false),
+        publication_metadata_test_dependency("activated", [String]{"test", "optional"}, false),
+        publication_metadata_test_dependency("empty", [String]{}, true)
+    }, [String]{"activated"})
+    assert_eq(publication_metadata_test_names(model), [String]{"normal", "build", "activated"})
+}
+#Test("publication metadata canonical carrier preserves bytes exactly") {
+    model :: publication_metadata_test_model([PublicationRegistryDependency]{}, [String]{})
+    assert_eq(model.canonical(), "original lock text")
+    assert_eq(model.name, "rolekit")
+    assert_eq(model.version, "1.0.0")
+    assert_eq(model.active_dependencies().len(), 0)
+}
+
+fn publication_metadata_test_parse(fields: String) -> PublicationRegistryPackageMetadata Never! {
+    publication_parse_registry_package_metadata("{{\"name\":\"rolekit\",\"version\":\"1.0.0\"{fields}}}", "rolekit", "1.0.0") ?? panic("valid metadata")
+}
+fn publication_metadata_test_refusal(text: String, detail: String) Never! {
+    if publication_parse_registry_package_metadata(text, "rolekit", "1.0.0") == {
+        .Ok(_) -> panic("invalid metadata accepted")
+        .Err(error) -> if error == {
+            .InvalidData(context) -> assert_eq(context.cause, Val(detail))
+            else -> panic("wrong metadata error kind")
+        }
+    }
+}
+#Test("publication registry_fetch_applies_artifact_dependency_roles_features_and_constraints metadata") {
+    // Exact original registry.json fixture, with all original production edges.
+    text :: "{{\"name\":\"rolekit\",\"version\":\"1.0.0\",\"dependencies\":{{\"runtime\":\"^1.0\"}},\"build_dependencies\":{{\"buildtool\":\"1.0.0\"}},\"dev_dependencies\":{{\"devkit\":\"1.0.0\"}},\"optional_dependencies\":{{\"trace\":\"1.0.0\"}},\"features\":{{\"default\":[\"trace\"]}},\"constraints\":{{\"runtime\":{{\"require\":\"^1.0\",\"prefer\":\"1.0.1\",\"reject\":[\"1.0.1\"],\"strict\":true}}}}}}"
+    model :: publication_parse_registry_package_metadata(text, "rolekit", "1.0.0") ?? panic("original fixture")
+    assert_eq(publication_metadata_test_names(model), [String]{"buildtool", "runtime", "trace"})
+    assert(model.contains_dependency("devkit"))
+    runtime :: model.active_dependencies()[1]
+    assert_eq(runtime.requirements, [String]{"^1.0"})
+    assert_eq(runtime.prefer, [String]{"1.0.1"})
+    assert_eq(runtime.reject, [String]{"1.0.1"})
+    assert(runtime.strict)
+    assert_eq(model.canonical(), text)
+    // Semantic locked replay must preserve canonical, not a re-encoded object.
+    replay :: publication_parse_registry_package_metadata(model.canonical(), "rolekit", "1.0.0") ?? panic("locked metadata replay")
+    assert_eq(replay, model)
+    tampered :: text.replace("\"build_dependencies\":{{\"buildtool\":\"1.0.0\"}}", "\"build_dependencies\":{{\"runtime\":\"1.0.0\"}}")
+    assert(tampered != text)
+    changed :: publication_parse_registry_package_metadata(tampered, "rolekit", "1.0.0") ?? panic("valid tamper")
+    assert(changed != model)
+    // The immutable artifact hash (not canonical()) must reject this valid
+    // tamper before Hangar ingest; composed original test remains #4262.
+}
+#Test("publication metadata all nine role fields") {
+    model :: publication_metadata_test_parse(",\"dependencies\":{{\"d\":\"*\"}},\"build_dependencies\":{{\"b\":\"*\"}},\"tool_dependencies\":{{\"t\":\"*\"}},\"dev_dependencies\":{{\"dev\":\"*\"}},\"test_dependencies\":{{\"test\":\"*\"}},\"optional_dependencies\":{{\"o\":\"*\"}},\"peer_dependencies\":{{\"p\":\"*\"}},\"plugin_dependencies\":{{\"plugin\":\"*\"}},\"target_dependencies\":{{\"target\":\"*\"}}")
+    assert_eq(publication_metadata_test_names(model), [String]{"b", "d", "p", "plugin", "t", "target"})
+    assert_eq(model.dependencies.len(), 9)
+    loop i in 0..<model.dependencies.len() -> assert_eq(model.dependencies[i].roles.len(), 1)
+}
+#Test("publication metadata descriptor merge stable lists and boolean OR") {
+    dependencies := [String: PublicationRegistryDependency]{}
+    first :: DataTree.Object([String: DataTree]{"require": DataTree.Text("^1"), "prefer": DataTree.Text("~1.2"), "reject": pkg_json_texts([String]{"1.2.3", "1.0.0", "1.2.3"}), "strict": DataTree.Bool(true), "default": DataTree.Bool(true)})
+    publication_merge_registry_dependency(&dependencies, "x", first, "optional") ?? panic("first descriptor")
+    publication_merge_registry_dependency(&dependencies, "x", DataTree.Text("^1"), "normal") ?? panic("duplicate requirement")
+    publication_merge_registry_dependency(&dependencies, "x", DataTree.Text(">=1.1"), "build") ?? panic("second requirement")
+    x :: dependencies["x"]
+    assert_eq(x.roles, [String]{"build", "normal", "optional"})
+    assert_eq(x.requirements, [String]{"^1", ">=1.1"})
+    assert_eq(x.prefer, [String]{"~1.2"})
+    assert_eq(x.reject, [String]{"1.0.0", "1.2.3"})
+    assert(x.strict && x.enabled_by_default)
+}
+#Test("publication metadata descriptor fallback and require precedence") {
+    model :: publication_metadata_test_parse(",\"dependencies\":{{\"a\":{{}},\"b\":{{\"version\":\"~1.0\"}},\"c\":{{\"require\":\"^1\",\"version\":42,\"future\":null,\"features\":[\"arbitrary/string\",\"\"]}}}}")
+    assert_eq(model.dependencies[0].requirements, [String]{"*"})
+    assert_eq(model.dependencies[1].requirements, [String]{"~1.0"})
+    assert_eq(model.dependencies[2].requirements, [String]{"^1"})
+}
+#Test("publication metadata features nested shared and default flag") {
+    model :: publication_metadata_test_parse(",\"optional_dependencies\":{{\"a\":\"*\",\"b\":{{\"default\":true}},\"c\":\"*\"}},\"features\":{{\"default\":[\"left\",\"right\",\"left\"],\"left\":[\"a\"],\"right\":[\"left\"]}}")
+    assert_eq(model.active_features, [String]{"a"})
+    assert_eq(publication_metadata_test_names(model), [String]{"a", "b"})
+    assert(model.dependencies[0].enabled_by_default)
+    dormant :: publication_metadata_test_parse(",\"features\":{{\"cycle\":[\"cycle\"]}}")
+    assert_eq(dormant.active_features, [String]{}) // Only default closure traversed.
+}
+#Test("publication metadata feature shadows same dependency name") {
+    model :: publication_metadata_test_parse(",\"optional_dependencies\":{{\"shadow\":\"*\",\"leaf\":\"*\"}},\"features\":{{\"default\":[\"shadow\"],\"shadow\":[\"leaf\"]}}")
+    assert_eq(publication_metadata_test_names(model), [String]{"leaf"})
+}
+#Test("publication registry_feature_cycle_fails_before_staging parsing") {
+    publication_metadata_test_refusal("{{\"name\":\"rolekit\",\"version\":\"1.0.0\",\"features\":{{\"default\":[\"loop\"],\"loop\":[\"default\"]}}}}", "registry feature closure contains a cycle")
+    // Original cycle-kit publish/no-destination test below retains staging.
+}
+#Test("publication metadata canonical joins trimmed lines not JSON recoding") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR fixture")
+    text :: "  {{\n \"name\":\"rolekit\",{cr}\n \"version\":\"1.0.0\",\n \"unknown\": \"line\\nvalue\"\n }}  \n"
+    model :: publication_parse_registry_package_metadata(text, "rolekit", "1.0.0") ?? panic("multiline")
+    assert_eq(model.canonical(), "{{\"name\":\"rolekit\",\"version\":\"1.0.0\",\"unknown\": \"line\\nvalue\"}}")
+}
+#Test("publication metadata JSON object identity and required string refusals") {
+    publication_metadata_test_refusal("not json", "registry.json is not valid JSON")
+    publication_metadata_test_refusal("[]", "registry.json must contain one JSON object")
+    loop fields in ([String]{"\"version\":\"1.0.0\"", "\"name\":42,\"version\":\"1.0.0\"", "\"name\":\" \\t\",\"version\":\"1.0.0\""}) -> publication_metadata_test_refusal("{{{fields}}}", "registry.json requires a non-empty `name`")
+    publication_metadata_test_refusal("{{\"name\":\"rolekit\",\"version\":null}}", "registry.json requires a non-empty `version`")
+    publication_metadata_test_refusal("{{\"name\":\"other\",\"version\":\"1.0.0\"}}", "registry.json identity disagrees with its artifact path")
+    publication_metadata_test_refusal("{{\"name\":\"rolekit\",\"version\":\"v1.0.0\"}}", "registry.json identity disagrees with its artifact path")
+    publication_metadata_test_refusal("{{\"name\":\"rolekit\",\"name\":\"rolekit\",\"version\":\"1.0.0\"}}", "registry.json is not valid JSON")
+}
+#Test("publication metadata unsafe dependency names") {
+    loop name in ([String]{"", ".", "..", "a/b", "a\\b", "a\n", "a\t", String.from_bytes([U8]{127}) ?? panic("DEL")}) {
+        if publication_validate_registry_dependency_name(name) == .Ok(_) -> panic("unsafe dependency name accepted")
+    }
+    loop name in ([String]{"a b", "é", "@scope", "a.b", "a#b"}) -> publication_validate_registry_dependency_name(name) ?? panic("Rust allows safe component")
+}
+#Test("publication metadata structural refusal fields") {
+    cases :: [String: String]{
+        ",\"dependencies\":[]": "registry `dependencies` dependencies must be an object",
+        ",\"features\":[]": "registry `features` must be an object of string arrays",
+        ",\"features\":{{\"default\":false}}": "registry feature values must be arrays",
+        ",\"features\":{{\"default\":[false]}}": "registry feature members must be strings",
+        ",\"features\":{{\"default\":[\"missing\"]}}": "registry feature names an undeclared dependency",
+        ",\"constraints\":[]": "registry `constraints` must be an object"
+    }
+    loop fields in cases.keys() -> publication_metadata_test_refusal("{{\"name\":\"rolekit\",\"version\":\"1.0.0\"{fields}}}", cases[fields])
+    loop field in ([String]{"dependencies", "build_dependencies", "tool_dependencies", "dev_dependencies", "test_dependencies", "optional_dependencies", "peer_dependencies", "plugin_dependencies", "target_dependencies"}) -> publication_metadata_test_refusal("{{\"name\":\"rolekit\",\"version\":\"1.0.0\",\"{field}\":[]}}", "registry `{field}` dependencies must be an object")
+}
+#Test("publication metadata descriptor refusal messages") {
+    cases :: [String: String]{
+        "false": "registry dependency values must be strings or objects",
+        "{{\"require\":false,\"version\":\"*\"}}": "registry dependency `require` must be a string",
+        "{{\"version\":false}}": "registry dependency `require` must be a string",
+        "{{\"prefer\":false}}": "registry dependency `prefer` must be a string",
+        "{{\"reject\":false}}": "registry dependency `reject` must be an array",
+        "{{\"reject\":[false]}}": "registry dependency reject values must be strings",
+        "{{\"reject\":[\"1.0\"]}}": "registry dependency reject values must be SemVer",
+        "{{\"strict\":0}}": "registry dependency `strict` must be boolean",
+        "{{\"default\":0}}": "registry dependency `default` must be boolean",
+        "{{\"features\":false}}": "registry dependency `features` must be an array",
+        "{{\"features\":[false]}}": "registry dependency feature values must be strings",
+        "\"nonsense\"": "registry dependency constraints must be valid SemVer requirements",
+        "{{\"prefer\":\"nonsense\"}}": "registry dependency constraints must be valid SemVer requirements"
+    }
+    loop descriptor in cases.keys() -> publication_metadata_test_refusal("{{\"name\":\"rolekit\",\"version\":\"1.0.0\",\"dependencies\":{{\"x\":{descriptor}}}}}", cases[descriptor])
+}
+
+fn publication_metadata_test_root(label: String) -[FS, Env]> String Never! {
+    root :: files.join(sys.get("HOME") ?? panic("HOME"), ".cache/jet-test-scratch/registry-metadata-{label}-{sys.pid()}")
+    files.remove_all(root).drop("fixture may be absent")
+    files.create_dir_all(root) ?? panic("create metadata fixture")
+    root
+}
+#Test("publication metadata checked reader missing and validation") {
+    root :: publication_metadata_test_root("missing")
+    assert_eq(publication_read_registry_package_metadata(root, "rolekit", "1.0.0") ?? panic("missing metadata"), None)
+    publication_validate_registry_metadata_file(root, "rolekit", "1.0.0") ?? panic("missing metadata permitted")
+    files.write(files.join(root, "registry.json"), "{{\"name\":\"rolekit\",\"version\":\"1.0.0\"}}") ?? panic("metadata fixture")
+    model :: publication_read_registry_package_metadata(root, "rolekit", "1.0.0") ?? panic("read held metadata")
+    assert(model != None)
+    publication_validate_registry_metadata_file(root, "rolekit", "1.0.0") ?? panic("publish validation")
+    files.remove_all(root) ?? panic("cleanup")
+}
+#Test("publication metadata checked reader byte limit and UTF8") {
+    root :: publication_metadata_test_root("bounds")
+    path :: files.join(root, "registry.json")
+    valid :: "{{\"name\":\"rolekit\",\"version\":\"1.0.0\"}}"
+    files.write(path, valid + " ".repeat(PUBLICATION_MAX_REGISTRY_PACKAGE_METADATA_BYTES - valid.bytes().len())) ?? panic("exact byte limit")
+    boundary :: publication_read_registry_package_metadata(root, "rolekit", "1.0.0") ?? panic("boundary allowed")
+    assert(boundary != None)
+    files.write(path, valid + " ".repeat(PUBLICATION_MAX_REGISTRY_PACKAGE_METADATA_BYTES + 1 - valid.bytes().len())) ?? panic("over byte limit")
+    if publication_read_registry_package_metadata(root, "rolekit", "1.0.0") == {
+        .Ok(_) -> panic("oversized metadata accepted")
+        .Err(error) -> if error == {
+            .InvalidData(context) -> assert_eq(context.cause, Val("registry.json exceeds its size limit"))
+            else -> panic("wrong bound error kind")
+        }
+    }
+    files.write_bytes(path, [U8]{255}) ?? panic("invalid UTF8")
+    if publication_read_registry_package_metadata(root, "rolekit", "1.0.0") == {
+        .Ok(_) -> panic("invalid UTF8 accepted")
+        .Err(error) -> if error == {
+            .InvalidData(context) -> assert_eq(context.cause, Val("stream did not contain valid UTF-8"))
+            else -> panic("wrong UTF8 error kind")
+        }
+    }
+    files.remove_all(root) ?? panic("cleanup")
+}
+#Test("publication metadata checked reader refuses directory symlink and hardlink") {
+    root :: publication_metadata_test_root("links")
+    path :: files.join(root, "registry.json")
+    files.create_dir_all(path) ?? panic("directory")
+    if publication_read_registry_package_metadata(root, "rolekit", "1.0.0") == {
+        .Ok(_) -> panic("directory accepted")
+        .Err(error) -> if error == {
+            .InvalidData(context) -> assert_eq(context.cause, Val("registry.json is not a regular file"))
+            else -> panic("wrong directory error kind")
+        }
+    }
+    files.remove_all(path) ?? panic("remove directory")
+    outside :: files.join(root, "outside.json")
+    files.write(outside, "{{\"name\":\"rolekit\",\"version\":\"1.0.0\"}}") ?? panic("outside")
+    files.symlink(outside, path) ?? panic("symlink")
+    if publication_read_registry_package_metadata(root, "rolekit", "1.0.0") == .Ok(_) -> panic("symlink accepted")
+    files.remove(path) ?? panic("remove symlink")
+    files.hard_link(outside, path) ?? panic("hardlink")
+    if publication_read_registry_package_metadata(root, "rolekit", "1.0.0") == .Ok(_) -> panic("hardlink accepted")
+    files.remove_all(root) ?? panic("cleanup")
+}
+#Test("publication metadata checked reader refuses artifact ancestor symlink") {
+    root :: publication_metadata_test_root("ancestors")
+    outside :: files.join(root, "outside")
+    alias :: files.join(root, "alias")
+    files.create_dir_all(files.join(outside, "artifact")) ?? panic("artifact")
+    files.write(files.join(outside, "artifact/registry.json"), "{{\"name\":\"rolekit\",\"version\":\"1.0.0\"}}") ?? panic("outside metadata")
+    files.symlink(outside, alias) ?? panic("ancestor link")
+    if publication_read_registry_package_metadata(files.join(alias, "artifact"), "rolekit", "1.0.0") == .Ok(_) -> panic("ancestor link accepted")
+    assert_eq(files.read(files.join(outside, "artifact/registry.json")) ?? panic("outside retained"), "{{\"name\":\"rolekit\",\"version\":\"1.0.0\"}}")
+    files.remove_all(root) ?? panic("cleanup")
+}
+#Test("publication registry_feature_cycle_fails_before_staging original") {
+    // Mandatory artifact composition #4262, never replaced by a mock publish.
+    root :: publication_metadata_test_root("cycle")
+    repo :: files.join(root, "registry")
+    source :: files.join(root, "source")
+    files.create_dir_all(repo) ?? panic("registry")
+    files.create_dir_all(source) ?? panic("source")
+    files.write(files.join(source, "package.jet"), "package bytes") ?? panic("package")
+    files.write(files.join(source, "registry.json"), "{{\"name\":\"cycle-kit\",\"version\":\"1.0.0\",\"features\":{{\"default\":[\"loop\"],\"loop\":[\"default\"]}}}}") ?? panic("cycle")
+    if publication_publish_artifact(repo, source, "cycle-kit", "1.0.0", "") == {
+        .Ok(_) -> panic("cyclic default feature closure published")
+        .Err(error) -> if error == {
+            .InvalidData(context) -> assert_eq(context.cause, Val("registry feature closure contains a cycle"))
+            else -> panic("wrong publish refusal")
+        }
+    }
+    assert(!files.exists(publication_artifact_path(repo, "cycle-kit", "1.0.0") ?? panic("artifact path")))
+    files.remove_all(root) ?? panic("cleanup")
+}

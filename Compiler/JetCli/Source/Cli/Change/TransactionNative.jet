@@ -1,0 +1,125 @@
+// Source/CmdCodemod/Transaction.rs: platform identity and pinned reads.
+// Only the sole retained Core provider supplies descriptors and native facts.
+// Canonical encoded paths remain intact through OS calls; Windows display and
+// Unicode lowercase are applied only to its original final-path containment
+// policy. Raw OS imports belong only to Core.
+use core.files.runtime.descriptor_metadata as transaction_metadata
+use core.text.runtime.kernel_unicode_string as transaction_case
+
+// Rust path_identity Unix (126–136). metadata follows the original path;
+// policy destination lstat/canonical checks remain separate caller operations.
+fn jet_cli_transaction_path_identity_unix(path: transaction_paths.OsPath) -[FS.Read]> transaction_metadata.FileID IOError! {
+    metadata :: transaction_io.metadata(path)
+    if !metadata.is_file || metadata.nlink != (U64{1}) -> return Err(jet_cli_transaction_permission("file is not regular or has multiple hard links"))
+    Ok(metadata.file_id)
+}
+
+// Rust path_identity Windows (138–195). Unlike Unix, the Rust identity leaf
+// checks nlink ONLY. GetFileInformationByHandle supplies the real volume and
+// high/low file index through DescriptorStat, from this same opened handle.
+fn jet_cli_transaction_path_identity_windows(path: transaction_paths.OsPath) -[FS.Read]> transaction_metadata.FileID IOError! {
+    file :: transaction_io.open_reader(path, transaction_io.OpenOptions{nofollow: false, cloexec: false, open_reparse_point: true})
+    metadata :: file.stat()
+    if metadata.nlink != (U64{1}) -> return Err(jet_cli_transaction_permission("file has multiple hard links"))
+    Ok(metadata.file_id)
+}
+
+// Rust read_beneath Unix (450–531). All directory owners, including root,
+// remain live until the final SAME-handle stat/read completes. No raw fd is
+// copied or used as authority; Close is the retained Core owner's mechanism.
+fn jet_cli_transaction_read_beneath_unix(root: transaction_paths.OsPath, relative: transaction_paths.OsPath) -[FS.Read]> [U8] IOError! {
+    options :: transaction_io.OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false}
+    directory :: transaction_io.open_directory(root, options)
+    held := [transaction_io.Directory]{^directory}
+    cursor := transaction_paths.components(relative)
+    pending := transaction_paths.next(relative, &cursor) ?? return Err(jet_cli_transaction_invalid_input("empty relative path"))
+    loop {
+        next_component :: transaction_paths.next(relative, &cursor) ?? break
+        if pending.kind != transaction_paths.ComponentKind.Normal -> return Err(jet_cli_transaction_invalid_input("non-normal relative path"))
+        jet_cli_transaction_c_name(relative, pending)
+        child :: held[held.len() - 1].open_directory(relative, pending, options)
+        &held.push(^child)
+        pending = next_component
+    }
+    if pending.kind != transaction_paths.ComponentKind.Normal -> return Err(jet_cli_transaction_invalid_input("non-normal file name"))
+    jet_cli_transaction_c_name(relative, pending)
+    file :: held[held.len() - 1].open_reader(relative, pending, options)
+    metadata :: file.stat()
+    if !metadata.is_file -> return Err(jet_cli_transaction_permission("opened object is not a regular file"))
+    // Regular-only is intentional: nlink1 belongs to path_identity, not reads.
+    file.read_to_end()
+}
+
+// Rust nested c_name (463–467). Preserve raw bytes; Core supplies the actual
+// synchronous native buffer loan and trailing NUL, not a String conversion.
+fn jet_cli_transaction_c_name(path: transaction_paths.OsPath, component: transaction_paths.PathComponent) IOError! {
+    loop at in component.span.start..<component.span.end {
+        if path.encoded[at] == (U8{0}) -> return Err(jet_cli_transaction_invalid_input("NUL in codemod path"))
+    }
+    Ok()
+}
+
+// Rust read_beneath Windows (533–592). This is intentionally its original
+// final-path containment law, not Unix ancestry traversal or an invented
+// stronger no-reparse policy. The final path comes from the OPENED HANDLE.
+fn jet_cli_transaction_read_beneath_windows(root: transaction_paths.OsPath, relative: transaction_paths.OsPath) -[FS.Read]> [U8] IOError! {
+    path := ~root
+    transaction_paths.push(&path, relative)
+    file :: transaction_io.open_reader(path, transaction_io.OpenOptions{nofollow: false, cloexec: false, open_reparse_point: true})
+    metadata :: file.stat()
+    if !metadata.is_file -> return Err(jet_cli_transaction_permission("opened object is not a regular file"))
+    root_canonical :: transaction_io.canonicalize(root)
+    file_final :: file.final_path()
+    root_lower :: transaction_case.lower(transaction_paths.display(root_canonical))
+    file_lower :: transaction_case.lower(transaction_paths.display(file_final))
+    if !jet_cli_transaction_windows_contains(root_lower, file_lower) -> return Err(jet_cli_transaction_permission("opened file escapes root handle"))
+    file.read_to_end()
+}
+
+// Rust read_nofollow other-platform (434–448). Despite its name, the source
+// opens without nofollow and checks only opened metadata. Do not silently
+// strengthen that race law or substitute a POSIX-only implementation.
+fn jet_cli_transaction_read_nofollow_other(path: transaction_paths.OsPath) -[FS.Read]> [U8] IOError! {
+    file :: transaction_io.open_reader(path, transaction_io.OpenOptions{nofollow: false, cloexec: false, open_reparse_point: false})
+    metadata :: file.stat()
+    if !metadata.is_file -> return Err(jet_cli_transaction_permission("opened object is not a regular file"))
+    file.read_to_end()
+}
+
+// Rust read_beneath other-platform (594–597).
+fn jet_cli_transaction_read_beneath_other(root: transaction_paths.OsPath, relative: transaction_paths.OsPath) -[FS.Read]> [U8] IOError! {
+    path := ~root
+    transaction_paths.push(&path, relative)
+    jet_cli_transaction_read_nofollow_other(path)
+}
+
+// This is the exact Windows textual containment law in read_beneath, not
+// component-prefix normalization: remove repeated leading \\?\, remove all
+// trailing root separators, append ONE backslash, then compare that prefix.
+fn jet_cli_transaction_windows_contains(root_lower: String, file_lower: String) -> Bool Never! {
+    root :: root_lower.bytes()
+    file :: file_lower.bytes()
+    root_start :: jet_cli_transaction_windows_tail_start(root)
+    file_start :: jet_cli_transaction_windows_tail_start(file)
+    root_end := root.len()
+    loop root_end > root_start {
+        byte :: root[root_end - 1]
+        if byte != (U8{92}) && byte != (U8{47}) -> break
+        root_end = root_end - 1
+    }
+    prefix_size :: root_end - root_start
+    if file.len() - file_start <= prefix_size -> return false
+    loop at in 0..<prefix_size {
+        if root[root_start + at] != file[file_start + at] -> return false
+    }
+    file[file_start + prefix_size] == (U8{92})
+}
+
+fn jet_cli_transaction_windows_tail_start(bytes: [U8]) -> Int Never! {
+    start := 0
+    loop bytes.len() - start >= 4 {
+        if bytes[start] != (U8{92}) || bytes[start + 1] != (U8{92}) || bytes[start + 2] != (U8{63}) || bytes[start + 3] != (U8{92}) -> break
+        start = start + 4
+    }
+    start
+}

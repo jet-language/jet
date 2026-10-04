@@ -1,0 +1,407 @@
+// Source/ReceiptStore.rs store policy cases. #Test cases below are the reachable
+// pure slice; the original native journeys follow as generic assertion bodies.
+// They take ONLY real canonical filesystem/Loader/WatchGraph/process providers,
+// never an in-memory store/mock authority. Caller supplies a fresh private
+// project directory and owns cleanup; no fixture path is globally reused.
+// C-FS #3593/#3598 and canonical Path/Stat #4381 hold native instantiation.
+// The canonical TreeHash no-follow reader also awaits JpW16 correction/acceptance.
+// #4451 bounded native worker publication is separate from these store policies.
+// Generic native bodies are NOT runtime #Test receipts or native parity evidence.
+fn receipt_io_test_receipt() -> JetCLIReceipt Never! {
+    JetCLIReceipt{claim: JetCLIReceiptClaim{verb: "check", key: "a".repeat(64), inputs: [JetCLIReceiptInput]{}}, status: I32{0}, stdout: [U8]{}, stderr: [U8]{}, sections: [JetCLIReceiptSection]{}, consumed: [JetCLIRecordLink]{}, produced: [JetCLIRecordLink]{}, digest: ""}
+}
+fn receipt_io_test_section(name: String, text: String) -> JetCLIReceiptSection Never! {
+    jet_cli_receipt_section_new(name, "T", text.bytes()) ?? panic("test section: {err.message}")
+}
+fn receipt_io_test_record_json(record: ComparisonRecord) -> CanonicalJSON Never! {
+    comparison_record_to_json(record) ?? panic("comparison json: {err.message}")
+}
+fn receipt_io_test_comparison(record: ComparisonRecord) -> JetCLIReceiptSection Never! {
+    jet_cli_receipt_section_from_json("comparison", "ComparisonRecord", receipt_io_test_record_json(record)) ?? panic("comparison section: {err.message}")
+}
+fn receipt_io_test_link(kind: JetCLIRecordKind, id: String) -> JetCLIRecordLink Never! {
+    jet_cli_record_link_new(kind, id) ?? panic("test link: {err.message}")
+}
+
+// Rust secret_names_cover_camel_case_dotted_env_and_receipt_identity (4352-4362)
+// and receipt_persistence_redacts_secret_values_before_digest (4406-4426,4447-4451).
+#Test("receipt secret values cover argv forms and redact persisted output") {
+    first :: [String]{"check", "--apiToken=camel-secret", "--auth.token", "dotted-secret", "--persistenceToken", "persistence-secret", "--digest.key=digest-secret", "--replayToken", "replay-secret", "public"}
+    values :: jet_cli_receipt_secret_values_from([JetCLIReceiptEnvironmentEntry]{}, first)
+    expected :: [String]{"camel-secret", "dotted-secret", "persistence-secret", "digest-secret", "replay-secret"}
+    loop value in expected -> assert(values.contains(value))
+    // Rust visits every argv row, including values: replay-secret is itself
+    // a secret name, so its following public row is conservatively captured.
+    assert(values.contains("public"))
+    assert(!jet_cli_receipt_is_secret_name("--public"))
+    argv :: [String]{"check", "--apiToken=receipt-api-token", "--auth.token", "receipt-dotted-secret", "--persistenceToken", "receipt-persistence-secret", "--digest.key=receipt-digest-secret", "--replayToken", "receipt-hostile-secret"}
+    secrets :: jet_cli_receipt_secret_values_from([JetCLIReceiptEnvironmentEntry]{}, argv)
+    stdout :: "public receipt-api-token receipt-dotted-secret receipt-persistence-secret receipt-digest-secret receipt-hostile-secret".bytes()
+    stdout_nul := ~stdout
+    &stdout_nul.push(U8{0})
+    expected_stdout := "public <redacted> <redacted> <redacted> <redacted> <redacted>".bytes()
+    &expected_stdout.push(U8{0})
+    assert_eq(jet_cli_receipt_bounded_redact_bytes(stdout_nul, secrets) ?? panic("stdout bound"), expected_stdout)
+    stderr :: "receipt-hostile-secret receipt-digest-secret receipt-persistence-secret receipt-dotted-secret receipt-api-token\n".bytes()
+    assert_eq(jet_cli_receipt_bounded_redact_bytes(stderr, secrets) ?? panic("stderr bound"), "<redacted> <redacted> <redacted> <redacted> <redacted>\n".bytes())
+    assert_eq(jet_cli_receipt_redact_bytes("receipt-hostile-secret".bytes(), secrets), "<redacted>".bytes())
+    assert_eq(jet_cli_receipt_redact_bytes("short".bytes(), [String]{"longer-secret"}), "short".bytes())
+}
+// Rust receipt_secret_values environment filter, empty values, sort and dedup (3697-3718).
+#Test("receipt secret values order longest first stable and drop empties") {
+    environment :: [JetCLIReceiptEnvironmentEntry]{
+        JetCLIReceiptEnvironmentEntry{name: "MY_APIKEY", value: "bbb"},
+        JetCLIReceiptEnvironmentEntry{name: "PUBLIC", value: "public-value"},
+        JetCLIReceiptEnvironmentEntry{name: "JET_TOKEN", value: ""},
+        JetCLIReceiptEnvironmentEntry{name: "OTHER_SECRET", value: "aaa"}
+    }
+    argv :: [String]{"check", "--token=", "--token", "", "--password", "longest-value", "--key=bbb", "--secret"}
+    assert_eq(jet_cli_receipt_secret_values_from(environment, argv), [String]{"longest-value", "bbb", "aaa", "bbb"})
+    adjacent :: [String]{"check", "--key=bbb", "--token", "bbb", "--secret=aaa"}
+    assert_eq(jet_cli_receipt_secret_values_from([JetCLIReceiptEnvironmentEntry]{}, adjacent), [String]{"bbb", "aaa"})
+}
+// Rust malformed_context_pointer_is_a_cache_miss (3884-3903) pointer decode.
+#Test("receipt malformed context pointer is a cache miss") {
+    assert_eq(jet_cli_receipt_context_pointer_key([U8]{U8{255}, U8{254}}), None)
+    assert_eq(jet_cli_receipt_context_pointer_key("not-a-digest".bytes()), None)
+    assert_eq(jet_cli_receipt_context_pointer_key("A".repeat(64).bytes()), None)
+    assert_eq(jet_cli_receipt_context_pointer_key("a".repeat(64).bytes()), Val("a".repeat(64)))
+}
+// Rust legacy_v1_receipts_with_unknown_rotated_and_file_secrets_fail_closed
+// (4473-4494) decode refusal with the exact fixture magic.
+#Test("receipt legacy v1 objects fail closed before lookup") {
+    receipt := receipt_io_test_receipt()
+    receipt.stdout = "legacy rotated-secret file-secret-value from /tmp/token.secret".bytes()
+    receipt.digest = jet_cli_receipt_digest(receipt)
+    bytes := jet_cli_receipt_encode(receipt) ?? panic("encode")
+    legacy :: "jet-receipt-v1".bytes()
+    loop index in 0..<legacy.len() -> bytes[index] = legacy[index]
+    if jet_cli_receipt_decode(bytes) == {
+        .Ok(_) -> panic("legacy receipt accepted")
+        .Err(error) -> assert_eq(error.message, "receipt magic is invalid")
+    }
+}
+// Rust ReceiptStore paths (378-380,1060-1073).
+#Test("receipt store layout paths") {
+    store :: JetCLIReceiptStore{root: receipt_paths.path("/p/.jet/receipts")}
+    assert_eq(jet_cli_receipt_store_context_path(store, "c").raw, "/p/.jet/receipts/contexts/c")
+    assert_eq(jet_cli_receipt_store_object_path(store, "k").raw, "/p/.jet/receipts/objects/k")
+    assert_eq(jet_cli_receipt_store_section_path(store, "k").raw, "/p/.jet/receipts/sections/k")
+    assert_eq(jet_cli_receipt_store_section_stage_path(store, "k").raw, "/p/.jet/receipts/staged/k")
+}
+// Rust ReceiptStore::lookup section projection (648-674).
+#Test("receipt published sections skip identical conflict on name and normalize") {
+    receipt := receipt_io_test_receipt()
+    receipt.sections = [JetCLIReceiptSection]{receipt_io_test_section("m", "{{\"a\":1}}\n")}
+    appended :: [JetCLIReceiptSection]{receipt_io_test_section("z", "{{\"b\":2}}\n"), receipt_io_test_section("m", "{{\"a\":1}}\n"), receipt_io_test_section("b", "{{}}\n")}
+    jet_cli_receipt_merge_published_sections(&receipt, appended) ?? panic("merge: {err.message}")
+    names :: loop section in receipt.sections -> section.name
+    assert_eq(names, [String]{"b", "m", "z"})
+    conflicting := receipt_io_test_receipt()
+    conflicting.sections = [JetCLIReceiptSection]{receipt_io_test_section("m", "{{\"a\":1}}\n")}
+    if jet_cli_receipt_merge_published_sections(&conflicting, [JetCLIReceiptSection]{receipt_io_test_section("m", "{{\"a\":2}}\n")}) == {
+        .Ok(_) -> panic("conflicting section accepted")
+        .Err(error) -> assert_eq(error.message, "receipt section `m` conflicts with the immutable receipt")
+    }
+}
+// Rust indexed_comparison_sections (2614-2644).
+#Test("receipt comparison sections index canonical artifacts with evidence links") {
+    record :: comparison_record_terminal(.TypedEquality, .Unavailable, "runner unavailable")
+    section :: receipt_io_test_comparison(record)
+    receipt := receipt_io_test_receipt()
+    receipt.sections = [JetCLIReceiptSection]{receipt_io_test_section("other", "{{}}\n"), section}
+    if jet_cli_receipt_indexed_comparison_sections(receipt) == {
+        .Ok(_) -> panic("comparison without evidence accepted")
+        .Err(error) -> assert_eq(error.message, "comparison receipt must link at least one canonical evidence record")
+    }
+    receipt.consumed = [JetCLIRecordLink]{receipt_io_test_link(.Receipt, "parent"), receipt_io_test_link(.Evidence, "report")}
+    rows :: jet_cli_receipt_indexed_comparison_sections(receipt) ?? panic("indexed: {err.message}")
+    assert_eq(rows.len(), 1)
+    expected_id :: comparison_record_artifact_id(record) ?? panic("artifact id")
+    assert_eq(rows[0].artifact_id, expected_id)
+    assert_eq(rows[0].artifact_id, section.payload_digest)
+    assert_eq(rows[0].size, canonical_json_bytes(receipt_io_test_record_json(record)).len())
+    assert_eq(rows[0].consumed.len(), 1)
+    assert_eq(rows[0].consumed[0].artifact_id, "report")
+    no_comparison := receipt_io_test_receipt()
+    no_comparison.sections = [JetCLIReceiptSection]{receipt_io_test_section("comparison", "{{}}\n")}
+    assert_eq((jet_cli_receipt_indexed_comparison_sections(no_comparison) ?? panic("other type ignored")).len(), 0)
+    // Unknown fields are ignored by typed decode, so the authenticated payload
+    // digest differs from the canonical record artifact id.
+    extended := [CanonicalJSONField]{}
+    json :: receipt_io_test_record_json(record)
+    if json == .Object(fields) { extended = ~fields }
+    &extended.push(CanonicalJSONField{key: "zz_unknown", value: CanonicalJSON.Null})
+    forged := ~receipt
+    forged.sections = [JetCLIReceiptSection]{jet_cli_receipt_section_from_json("comparison", "ComparisonRecord", CanonicalJSON.Object(extended)) ?? panic("forged section: {err.message}")}
+    if jet_cli_receipt_indexed_comparison_sections(forged) == {
+        .Ok(_) -> panic("non-canonical comparison digest accepted")
+        .Err(error) -> assert_eq(error.message, "comparison section payload digest is not canonical")
+    }
+}
+
+// Rust section payload validation is not a fixture-normalization boundary.
+#Test("receipt store fixtures preserve strict canonical LF validation") {
+    invalid :: [String]{"{{}}", "{{}}\n\n"}
+    loop payload in invalid {
+        if jet_cli_receipt_section_new("s", "T", payload.bytes()) == {
+            .Ok(_) -> panic("non-canonical section accepted")
+            .Err(error) -> assert_eq(error.message, "receipt section `s` has an invalid schema: canonical JSON is invalid: canonical JSON must end in exactly one LF")
+        }
+    }
+    section :: receipt_io_test_section("s", "{{}}\n")
+    assert_eq(section.bytes, "{{}}\n".bytes())
+}
+// Rust ReceiptStore::query_sections (951-962) delegates after validating every
+// name. A missing valid name is an empty selection, not a fabricated section.
+#Test("receipt store query validates names and shares section projection") {
+    receipt := receipt_io_test_receipt()
+    receipt.sections = [JetCLIReceiptSection]{receipt_io_test_section("z", "{{\"b\":2}}\n"), receipt_io_test_section("a", "{{\"a\":1}}\n")}
+    all :: jet_cli_receipt_store_query_sections(receipt, None) ?? panic("query all")
+    assert_eq(canonical_json_bytes(all), "{{\"a\":{{\"a\":1}},\"z\":{{\"b\":2}}}}\n".bytes())
+    selected :: jet_cli_receipt_store_query_sections(receipt, Val([String]{"z"})) ?? panic("query selection")
+    assert_eq(canonical_json_bytes(selected), "{{\"z\":{{\"b\":2}}}}\n".bytes())
+    missing :: jet_cli_receipt_store_query_sections(receipt, Val([String]{"missing"})) ?? panic("query missing")
+    assert_eq(canonical_json_bytes(missing), "{{}}\n".bytes())
+    empty :: jet_cli_receipt_store_query_sections(receipt, Val([String]{})) ?? panic("query empty")
+    assert_eq(canonical_json_bytes(empty), canonical_json_bytes(all))
+    if jet_cli_receipt_store_query_sections(receipt, Val([String]{"z", "z"})) == {
+        .Ok(_) -> panic("duplicate query accepted")
+        .Err(error) -> assert_eq(error.message, "receipt section `z` is duplicated in query")
+    }
+    if jet_cli_receipt_store_query_sections(receipt, Val([String]{"z", "../bad"})) == {
+        .Ok(_) -> panic("invalid query accepted")
+        .Err(error) -> assert_eq(error.message, "receipt section name `../bad` is invalid")
+    }
+}
+#Test("receipt context pointer bytes are exact and never trimmed") {
+    key :: "a".repeat(64)
+    assert_eq(jet_cli_receipt_context_pointer_key("{key}\n".bytes()), None)
+    assert_eq(jet_cli_receipt_context_pointer_key(" {key}".bytes()), None)
+    assert_eq(jet_cli_receipt_context_pointer_key("a".repeat(63).bytes()), None)
+}
+
+// Native receipt original contracts: no transport provider exists in this lane.
+// This marker bounds the pure proof slice; --all preserves every body verbatim.
+// Fixture writes use the canonical native seam, not Core check-then-read.
+fn receipt_io_native_write<H: JetCLIRecordIndexFileHost>(path: receipt_paths.Path, bytes: [U8], replace: Bool, host: &H) Never! -[FS]> {
+    parent :: jet_cli_receipt_parent(path) ?? panic("fixture path has no parent")
+    &host.create_directory_all(parent) ?? panic("fixture parent: {jet_cli_record_index_io_message(err)}")
+    if replace { &host.remove_file(path) ?? panic("fixture remove: {jet_cli_record_index_io_message(err)}") }
+    handle :: &host.create_new(path) ?? panic("fixture create: {jet_cli_record_index_io_message(err)}")
+    if &host.write_all(handle, bytes) == {
+        .Ok(_) -> &host.close(handle)
+        .Err(error) -> {
+            &host.close(handle)
+            panic("fixture write: {jet_cli_record_index_io_message(error)}")
+        }
+    }
+}
+// Rust malformed_context_pointer_is_a_cache_miss (3884-3903), including lookup.
+fn receipt_io_native_malformed_context<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost, P: JetCLIReceiptProcessHost, H: JetCLIRecordIndexFileHost>(project: receipt_paths.Path, tools: JetCLIReceiptToolIdentity, file_host: &F, authority: &A, process_host: &P, host: &H) Never! -[FS, Env, IO]> {
+    store :: JetCLIReceiptStore{root: ~project}
+    argv :: [String]{"check"}
+    key :: jet_cli_receipt_store_context_key("check", argv, tools, &process_host) ?? panic("context")
+    receipt_io_native_write(jet_cli_receipt_store_context_path(store, key), [U8]{U8{255}, U8{254}}, false, &host)
+    // #4376: consume the Result explicitly to retain its optional success type.
+    found :: if jet_cli_receipt_store_lookup_context(store, "check", argv, project, tools, &file_host, &authority, &process_host) == {
+        .Ok(value) -> value
+        .Err(error) -> panic("lookup context: {error.message}")
+    }
+    assert(found == None)
+}
+// Rust project_check_receipt_rejects_* (3906-4233) and explicit_check_receipt_*
+// (4109-4148). Each variant is a fresh original journey, not a simulated claim.
+enum ReceiptIONativeMutation { Entry ChangedGenerated Workspace Lock Authority ExplicitGenerated RetiredManifest MalformedWorkspace }
+fn receipt_io_native_context_invalidation<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost, P: JetCLIReceiptProcessHost, H: JetCLIRecordIndexFileHost>(project: receipt_paths.Path, mutation: ReceiptIONativeMutation, tools: JetCLIReceiptToolIdentity, file_host: &F, authority: &A, process_host: &P, host: &H) Never! -[FS, Env, IO]> {
+    package :: receipt_paths.join(project, PACKAGE_FILE)
+    package_name :: if mutation == {
+        .Entry -> "receipt-entry-priority"
+        .ChangedGenerated -> "receipt-generated-input"
+        .Workspace -> "receipt-workspace-input"
+        .Lock -> "receipt-lock-input"
+        .Authority -> "receipt-output-authority"
+        .ExplicitGenerated -> "receipt-explicit-generated"
+        .RetiredManifest -> "receipt-retired-manifest"
+        .MalformedWorkspace -> "receipt-malformed-workspace"
+    }
+    package_text :: "name: \"{package_name}\"\nversion: \"0.1.0\"\n"
+    receipt_io_native_write(package, package_text.bytes(), false, &host)
+    source :: if mutation == .ExplicitGenerated -> receipt_paths.join(project, "src/main.jet") else -> if mutation == .RetiredManifest || mutation == .MalformedWorkspace -> receipt_paths.join(project, DEFAULT_ENTRY_FILE) else -> receipt_paths.join(receipt_paths.join(project, "src"), DEFAULT_ENTRY_FILE)
+    receipt_io_native_write(source, "fn run() {{}}\n".bytes(), false, &host)
+    generated :: receipt_paths.join(project, ".jet/generated/inputs.jet")
+    if mutation == .ChangedGenerated -> receipt_io_native_write(generated, "generated-v1\n".bytes(), false, &host)
+    argv :: if mutation == .ExplicitGenerated -> [String]{"check", ~source.raw} else -> [String]{"check"}
+    store :: JetCLIReceiptStore{root: receipt_paths.join(project, "receipts")}
+    initial :: jet_cli_receipt_input_paths_for("check", argv, project, &file_host, &authority)
+    assert(initial.contains(source))
+    if mutation == .ChangedGenerated -> assert(initial.contains(generated))
+    if mutation == .Workspace || mutation == .MalformedWorkspace -> assert(!initial.contains(receipt_paths.join(project, "workspace.jet")))
+    if mutation == .Lock -> assert(!initial.contains(receipt_paths.join(project, ".jet/lock")))
+    if mutation == .RetiredManifest -> assert(!initial.contains(receipt_paths.join(project, PAYLOAD_FILE)))
+    claim :: jet_cli_receipt_store_claim("check", argv, initial, tools, &file_host, &authority, &process_host) ?? panic("initial claim")
+    _ :: jet_cli_receipt_store_write(store, claim, argv, I32{0}, "first".bytes(), [U8]{}, [JetCLIReceiptSection]{}, [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, &file_host, &host, &process_host) ?? panic("write")
+    key :: jet_cli_receipt_store_context_key("check", argv, tools, &process_host) ?? panic("context key")
+    jet_cli_receipt_store_remember_context_key(store, key, claim, &file_host, &host) ?? panic("remember")
+    if mutation == .ExplicitGenerated {
+        before :: if jet_cli_receipt_store_lookup_context(store, "check", argv, project, tools, &file_host, &authority, &process_host) == {
+            .Ok(value) -> value
+            .Err(error) -> panic("initial lookup: {error.message}")
+        }
+        assert(before == Val(_))
+    }
+    if mutation == {
+        .Entry -> {
+            entry :: receipt_paths.join(project, DEFAULT_ENTRY_FILE)
+            receipt_io_native_write(entry, "fn run() {{}}\n".bytes(), false, &host)
+            paths :: jet_cli_receipt_project_check_input_paths(project, &file_host, &authority) ?? panic("project inputs")
+            assert(paths.contains(entry))
+        }
+        .ChangedGenerated -> receipt_io_native_write(generated, "generated-v2\n".bytes(), true, &host)
+        .Workspace -> receipt_io_native_write(receipt_paths.join(project, "workspace.jet"), "module workspace {{ members: [] }}\n".bytes(), false, &host)
+        .Lock -> receipt_io_native_write(receipt_paths.join(project, ".jet/lock"), "lock-v1\n".bytes(), false, &host)
+        .Authority -> receipt_io_native_write(package, "name: \"project-check-output\"\noutputs: {{ release: .Executable{{ entry: run }} }}\n".bytes(), true, &host)
+        .ExplicitGenerated -> {
+            // Original Rust creates a directory named inputs.jet, then writes
+            // its child inputs.jet. Retain the actual recursive discovery case.
+            receipt_io_native_write(receipt_paths.join(generated, "inputs.jet"), "generated-v1\n".bytes(), false, &host)
+        }
+        .RetiredManifest -> receipt_io_native_write(receipt_paths.join(project, PAYLOAD_FILE), "name: \"retired\"\n".bytes(), false, &host)
+        .MalformedWorkspace -> receipt_io_native_write(receipt_paths.join(project, "workspace.jet"), "module workspace {{\n".bytes(), false, &host)
+    }
+    current :: jet_cli_receipt_input_paths_for("check", argv, project, &file_host, &authority)
+    if mutation == .Workspace || mutation == .MalformedWorkspace -> assert(current.contains(receipt_paths.join(project, "workspace.jet")))
+    if mutation == .Lock -> assert(current.contains(receipt_paths.join(project, ".jet/lock")))
+    if mutation == .RetiredManifest -> assert(current.contains(receipt_paths.join(project, PAYLOAD_FILE)))
+    updated :: jet_cli_receipt_store_claim("check", argv, current, tools, &file_host, &authority, &process_host) ?? panic("current claim")
+    assert(updated.key != claim.key)
+    found :: if jet_cli_receipt_store_lookup_context(store, "check", argv, project, tools, &file_host, &authority, &process_host) == {
+        .Ok(value) -> value
+        .Err(error) -> panic("lookup: {error.message}")
+    }
+    assert(found == None)
+}
+// Rust project_check_receipt_uses_inline_package_root_for_nested_cwd (4236-4260).
+fn receipt_io_native_inline_package<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost, H: JetCLIRecordIndexFileHost>(project: receipt_paths.Path, file_host: &F, authority: &A, host: &H) Never! -[FS]> {
+    entry :: receipt_paths.join(project, DEFAULT_ENTRY_FILE)
+    receipt_io_native_write(entry, "package {{\nname: \"receipt-inline\"\nversion: \"0.1.0\"\n}}\nfn run() {{}}\n".bytes(), false, &host)
+    nested :: receipt_paths.join(project, "src")
+    &host.create_directory_all(nested) ?? panic("fixture directory")
+    argv :: [String]{"check"}
+    assert_eq(jet_cli_receipt_root_for("check", argv, nested, &file_host, &authority), receipt_paths.join(project, ".jet/receipts"))
+    inputs :: jet_cli_receipt_input_paths_for("check", argv, nested, &file_host, &authority)
+    assert(inputs.contains(entry))
+}
+// Rust receipt_persistence_redacts_secret_values_before_digest (4393-4452).
+fn receipt_io_native_persistence_redaction<F: JetCLIReceiptReadHost, P: JetCLIReceiptProcessHost, H: JetCLIRecordIndexFileHost>(root: receipt_paths.Path, file_host: &F, process_host: &P, host: &H) Never! -[FS, Env]> {
+    store :: JetCLIReceiptStore{root: root}
+    claim :: receipt_io_test_receipt().claim
+    argv :: [String]{"check", "--apiToken=receipt-api-token", "--auth.token", "receipt-dotted-secret", "--persistenceToken", "receipt-persistence-secret", "--digest.key=receipt-digest-secret", "--replayToken", "receipt-hostile-secret"}
+    stdout := "public receipt-api-token receipt-dotted-secret receipt-persistence-secret receipt-digest-secret receipt-hostile-secret".bytes()
+    &stdout.push(U8{0})
+    stderr :: "receipt-hostile-secret receipt-digest-secret receipt-persistence-secret receipt-dotted-secret receipt-api-token\n".bytes()
+    _ :: jet_cli_receipt_store_write(store, claim, argv, I32{0}, stdout, stderr, [JetCLIReceiptSection]{}, [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, &file_host, &host, &process_host) ?? panic("write")
+    found :: if jet_cli_receipt_store_lookup(store, claim, &file_host) == {
+        .Ok(value) -> value
+        .Err(error) -> panic("lookup: {error.message}")
+    }
+    receipt :: found ?? panic("published receipt missing")
+    expected := "public <redacted> <redacted> <redacted> <redacted> <redacted>".bytes()
+    &expected.push(U8{0})
+    assert_eq(receipt.stdout, expected)
+    assert_eq(receipt.stderr, "<redacted> <redacted> <redacted> <redacted> <redacted>\n".bytes())
+    assert_eq(receipt.digest, jet_cli_receipt_digest(receipt))
+}
+// Rust legacy_v1_receipts_with_unknown_rotated_and_file_secrets_fail_closed
+// (4456-4500): exact fixture magic, file secret, native lookup AND list refusal.
+fn receipt_io_native_legacy_refusal<F: JetCLIReceiptReadHost, H: JetCLIRecordIndexFileHost>(root: receipt_paths.Path, file_host: &F, host: &H) Never! -[FS]> {
+    file_secret :: receipt_paths.join(root, "token.secret")
+    receipt_io_native_write(file_secret, "file-secret-value".bytes(), false, &host)
+    file_value :: String.from_bytes(jet_cli_receipt_read_regular(file_secret) ?? panic("read file secret")) ?? panic("secret UTF-8")
+    receipt := receipt_io_test_receipt()
+    receipt.stdout = "legacy rotated-secret {file_value} from {file_secret.raw}".bytes()
+    receipt.digest = jet_cli_receipt_digest(receipt)
+    bytes := jet_cli_receipt_encode(receipt) ?? panic("encode")
+    legacy :: "jet-receipt-v1".bytes()
+    loop index in 0..<legacy.len() -> bytes[index] = legacy[index]
+    assert(jet_cli_receipt_decode(bytes) == .Err(_))
+    store :: JetCLIReceiptStore{root: root}
+    receipt_io_native_write(jet_cli_receipt_store_object_path(store, receipt.claim.key), bytes, false, &host)
+    found :: if jet_cli_receipt_store_lookup(store, receipt.claim, &file_host) == {
+        .Ok(value) -> value
+        .Err(error) -> panic("lookup: {error.message}")
+    }
+    assert(found == None)
+    assert_eq((jet_cli_receipt_store_list(store, &file_host) ?? panic("list")).len(), 0)
+}
+
+// Native contract for claim/currentness/immutable publication (384-441,624-799,
+// 876-948). This instantiates the canonical store, never a substitute publisher.
+fn receipt_io_native_publication<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost, P: JetCLIReceiptProcessHost, H: JetCLIRecordIndexFileHost>(project: receipt_paths.Path, tools: JetCLIReceiptToolIdentity, file_host: &F, authority: &A, process_host: &P, host: &H) Never! -[FS, Env, IO]> {
+    source :: receipt_paths.join(project, DEFAULT_ENTRY_FILE)
+    receipt_io_native_write(source, "first\n".bytes(), false, &host)
+    argv :: [String]{"test", ~source.raw}
+    claim :: jet_cli_receipt_store_claim("test", argv, [receipt_paths.Path]{source, source}, tools, &file_host, &authority, &process_host) ?? panic("claim")
+    assert_eq(claim.inputs.len(), 1)
+    stable :: jet_cli_receipt_store_claim("test", argv, [receipt_paths.Path]{source}, tools, &file_host, &authority, &process_host) ?? panic("stable claim")
+    assert_eq(claim, stable) // #4381 canonical Path equality; no nominal rewrap.
+    store :: JetCLIReceiptStore{root: receipt_paths.join(project, "receipts")}
+    published :: jet_cli_receipt_store_write(store, claim, argv, I32{0}, "ok".bytes(), [U8]{}, [JetCLIReceiptSection]{}, [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, &file_host, &host, &process_host) ?? panic("publish")
+    assert(published)
+    identical :: jet_cli_receipt_store_write(store, claim, argv, I32{0}, "ok".bytes(), [U8]{}, [JetCLIReceiptSection]{}, [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, &file_host, &host, &process_host) ?? panic("identical publish")
+    assert(!identical)
+    if jet_cli_receipt_store_write(store, claim, argv, I32{0}, "different".bytes(), [U8]{}, [JetCLIReceiptSection]{}, [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, &file_host, &host, &process_host) == {
+        .Ok(_) -> panic("immutable collision accepted")
+        .Err(error) -> assert_eq(error.message, "receipt key collision with different content")
+    }
+    found :: if jet_cli_receipt_store_lookup(store, claim, &file_host) == {
+        .Ok(value) -> value
+        .Err(error) -> panic("lookup: {error.message}")
+    }
+    receipt :: found ?? panic("published receipt missing")
+    assert(jet_cli_receipt_store_is_current(store, receipt, &file_host) ?? panic("is_current"))
+    assert_eq((jet_cli_receipt_store_list_current(store, &file_host) ?? panic("list_current")).len(), 1)
+    receipt_io_native_write(source, "changed\n".bytes(), true, &host)
+    stale :: if jet_cli_receipt_store_lookup(store, claim, &file_host) == {
+        .Ok(value) -> value
+        .Err(error) -> panic("stale lookup: {error.message}")
+    }
+    assert(stale == None)
+    assert(!(jet_cli_receipt_store_is_current(store, receipt, &file_host) ?? panic("stale current")))
+    assert_eq((jet_cli_receipt_store_list(store, &file_host) ?? panic("list")).len(), 1)
+    assert_eq((jet_cli_receipt_store_list_current(store, &file_host) ?? panic("stale list_current")).len(), 0)
+    stale_write :: jet_cli_receipt_store_write(store, claim, argv, I32{0}, "ok".bytes(), [U8]{}, [JetCLIReceiptSection]{}, [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, &file_host, &host, &process_host) ?? panic("stale write")
+    assert(!stale_write)
+}
+// Native contract for section adoption and authenticated append-only projection
+// (984-1155): the immutable parent bytes and digest never change on adoption.
+fn receipt_io_native_adoption<F: JetCLIReceiptReadHost, P: JetCLIReceiptProcessHost, H: JetCLIRecordIndexFileHost>(root: receipt_paths.Path, file_host: &F, process_host: &P, host: &H) Never! -[FS, Env]> {
+    store :: JetCLIReceiptStore{root: root}
+    claim :: receipt_io_test_receipt().claim
+    _ :: jet_cli_receipt_store_write(store, claim, [String]{"check"}, I32{0}, [U8]{}, [U8]{}, [JetCLIReceiptSection]{}, [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, &file_host, &host, &process_host) ?? panic("parent write")
+    object :: jet_cli_receipt_store_object_path(store, claim.key)
+    immutable :: jet_cli_receipt_read_regular(object) ?? panic("parent read")
+    parent_found :: if jet_cli_receipt_store_lookup(store, claim, &file_host) == {
+        .Ok(value) -> value
+        .Err(error) -> panic("parent lookup: {error.message}")
+    }
+    parent :: parent_found ?? panic("parent missing")
+    section :: receipt_io_test_section("summary", "{{\"result\":\"ok\"}}\n")
+    record :: jet_cli_receipt_section_record_new(claim.key, "", section) ?? panic("staged record")
+    staged :: receipt_paths.join(jet_cli_receipt_store_section_stage_path(store, claim.key), jet_cli_receipt_section_record_identity(record))
+    receipt_io_native_write(staged, jet_cli_receipt_encode_section_record(record) ?? panic("encode staged"), false, &host)
+    jet_cli_receipt_store_adopt_staged_sections(store, claim, &file_host, &host) ?? panic("adopt")
+    assert_eq(jet_cli_receipt_read_regular(object) ?? panic("immutable parent read"), immutable)
+    found :: if jet_cli_receipt_store_lookup(store, claim, &file_host) == {
+        .Ok(value) -> value
+        .Err(error) -> panic("adopted lookup: {error.message}")
+    }
+    adopted :: found ?? panic("adopted receipt missing")
+    assert_eq(adopted.digest, parent.digest)
+    assert_eq(adopted.sections.len(), 1)
+    assert_eq(adopted.sections[0].payload_digest, section.payload_digest)
+    assert_eq(adopted.sections[0].bytes, section.bytes)
+    assert(jet_cli_receipt_store_is_current(store, adopted, &file_host) ?? panic("adopted current"))
+    remaining :: jet_cli_receipt_read_section_records(jet_cli_receipt_store_section_stage_path(store, claim.key), Val(claim.key), Val(""), &file_host) ?? panic("staged directory")
+    assert_eq(remaining.len(), 0)
+}

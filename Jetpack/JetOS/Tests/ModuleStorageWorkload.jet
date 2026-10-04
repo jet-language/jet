@@ -1,0 +1,306 @@
+// Original module_storage_workload.rs tests :151-188 and the applicable
+// tests/jetpack_jetos.rs os_switch_activates_and_sets_current :1380-1483,
+// :1574-1629. Fixtures are the consumed config.jet options, in source order.
+// Native originals remain GATED #4479/#3593 executable followed metadata,
+// #3593 enable-unit links, #3594 actual processes. Pure rendering is not native
+// acceptance or a complete OS switch. Main-authorized implicit-command quoting
+// and single-component name refusal intentionally correct the frozen Rust.
+
+fn jetos_msw_test_system(options: [OptionPlan]) -> SystemPlan Never! {
+    SystemPlan{name: "halcyon", target: "linux.x64", packages: [Pkg]{}, services: [ServicePlan]{}, options: options}
+}
+
+fn jetos_msw_test_halcyon() -> SystemPlan Never! {
+    jetos_msw_test_system([OptionPlan]{
+        OptionPlan{key: "filesystem.timeZone", value: "\"Europe/London\""},
+        OptionPlan{key: "filesystem.swap.fast.device", value: "\"/dev/disk/by-label/swap\""},
+        OptionPlan{key: "filesystem.swap.fast.priority", value: "5"},
+        OptionPlan{key: "storage.disk.main.device", value: "\"/dev/sda\""},
+        OptionPlan{key: "storage.disk.main.table", value: ".GPT"},
+        OptionPlan{key: "storage.disk.main.partitions.esp.size", value: "\"512M\""},
+        OptionPlan{key: "storage.disk.main.partitions.root.size", value: "\"rest\""},
+        OptionPlan{key: "storage.filesystem.root.type", value: ".Btrfs"},
+        OptionPlan{key: "storage.ephemeralRoot", value: "true"},
+        OptionPlan{key: "storage.persist.home.path", value: "\"/home/nate\""},
+        OptionPlan{key: "storage.persist.varLib.path", value: "\"/var/lib\""},
+        OptionPlan{key: "services.displayManager", value: "\"sddm\""},
+        OptionPlan{key: "services.displayManager", value: "\"gdm\""},
+        OptionPlan{key: "services.displayManager.tier", value: ".Force"},
+        OptionPlan{key: "packages.disabledModules", value: "[\"stylix.kmscon\"]"},
+        OptionPlan{key: "workload.web.backend", value: ".Container"},
+        OptionPlan{key: "workload.web.image", value: "\"ghcr.io/example/web\""},
+        OptionPlan{key: "workload.web.ports", value: "[8080]"},
+        OptionPlan{key: "workload.web.mounts", value: "[\"/srv/web:/srv/web:ro\"]"},
+        OptionPlan{key: "workload.web.secrets", value: "[\"web-token\"]"},
+        OptionPlan{key: "workload.web.resources.memory", value: "\"512M\""},
+        OptionPlan{key: "workload.web.resources.cpus", value: "2"},
+        OptionPlan{key: "workload.web.health.command", value: "\"test -f $JETOS_WORKLOAD_LOG\""},
+        OptionPlan{key: "workload.web.rollback.keep", value: "3"},
+        OptionPlan{key: "workload.web.command", value: "\"echo workload >> $JETOS_WORKLOAD_LOG\""},
+        OptionPlan{key: "workload.sandbox.backend", value: ".MicroVM"},
+        OptionPlan{key: "workload.sandbox.package", value: "\"/boot/kernel\""},
+        OptionPlan{key: "workload.sandbox.microvm.memory", value: "\"2048M\""},
+        OptionPlan{key: "workload.sandbox.microvm.cpus", value: "2"},
+        OptionPlan{key: "workload.sandbox.health.command", value: "\"true\""}
+    })
+}
+
+fn jetos_msw_test_read(root: String, relative: String) -[FS]> String Never! {
+    files.read(files.join(root, relative)) ?? panic("read {relative}")
+}
+
+// Rust original :151-157.
+#Test("JetOS storage size allowlist rejects shell source") {
+    assert(jetos_valid_storage_size("512M"))
+    assert(jetos_valid_storage_size("1GiB"))
+    assert(!jetos_valid_storage_size("512M; touch pwned"))
+    assert(!jetos_valid_storage_size("$(touch pwned)"))
+    assert(!jetos_valid_storage_size(""))
+}
+
+// Rust original :160-164.
+#Test("JetOS filesystem type allowlist rejects shell source") {
+    assert(jetos_valid_filesystem_type("ext4"))
+    assert(jetos_valid_filesystem_type("Btrfs"))
+    assert(!jetos_valid_filesystem_type("ext4 || true; touch pwned #"))
+}
+
+#Test("JetOS storage validators exact suffix and ASCII boundaries") {
+    suffixes :: [String]{"K", "M", "G", "T", "KiB", "MiB", "GiB", "TiB"}
+    loop suffix in suffixes {
+        assert(jetos_valid_storage_size("0{suffix}"))
+        assert(jetos_valid_storage_size("000{suffix}"))
+    }
+    bad_sizes :: [String]{"512", "M", " 1M", "1M ", "-1M", "+1M", "1m", "1MB", "1.5G", "١M", "1Ｍ", "1MiB\n"}
+    loop size in bad_sizes -> assert(!jetos_valid_storage_size(size), size)
+    good_filesystems :: [String]{"EXT4", "eXt4", "BTRFS", "bTrFs"}
+    loop filesystem in good_filesystems -> assert(jetos_valid_filesystem_type(filesystem))
+    bad_filesystems :: [String]{" ext4", "ext4 ", "ext4\n", "xfs", "btrfſ", ""}
+    loop filesystem in bad_filesystems -> assert(!jetos_valid_filesystem_type(filesystem), filesystem)
+}
+
+#Test("JetOS storage defaults precedence and exact plan bytes") {
+    empty :: jetos_msw_test_system([OptionPlan]{})
+    settings :: jetos_storage_settings(empty)
+    assert_eq(settings.disk, "guided-ext4")
+    assert_eq(settings.table, "GPT")
+    assert_eq(settings.esp_size, "512M")
+    assert_eq(settings.root_fs, "ext4")
+    assert_eq(settings.ephemeral, "false")
+    assert_eq(jetos_storage_fstab(settings), "LABEL=JETOS-ESP\t/boot\tvfat\tumask=0077\t0\t1\nLABEL=jetos-root\t/\text4\tdefaults\t0\t1\n")
+    assert_eq(jetos_storage_plan_json("halcyon", settings, [(key: String, value: String)]{}), "{{\"kind\":\"jetos.storage-plan\",\"host\":\"halcyon\",\"disk\":\"guided-ext4\",\"table\":\"GPT\",\"root_fs\":\"ext4\",\"partitions\":[{{\"name\":\"esp\",\"size\":\"512M\",\"fs\":\"vfat\",\"mount\":\"/boot\"}},{{\"name\":\"root\",\"size\":\"rest\",\"fs\":\"ext4\",\"mount\":\"/\"}}],\"ephemeral_root\":false,\"persistence\":[],\"destructive_actions\":[\"partition\",\"format\"],\"safety\":\"requires --manual plus --execute\"}}")
+    assert_eq(jetos_storage_facts_json(settings, [(key: String, value: String)]{}), "{{\"kind\":\"jetos.storage-tree\",\"installer_consumes\":true,\"activation_consumes\":true,\"disk\":\"guided-ext4\",\"table\":\"GPT\",\"root_fs\":\"ext4\",\"ephemeral_root\":false,\"options\":[],\"commands\":[\"jetos-storage-plan\",\"jetos-storage-apply\",\"jetos-persist-activate\"],\"proof\":\"storage-plan-ready\"}}")
+    primary :: jetos_storage_settings(jetos_msw_test_system([OptionPlan]{
+        OptionPlan{key: "storage.filesystem.root.type", value: "hostile; touch marker"},
+        OptionPlan{key: "filesystem.root.type", value: ".Btrfs"},
+        OptionPlan{key: "storage.disk.main.partitions.esp.size", value: "1M; touch marker"},
+        OptionPlan{key: "storage.ephemeralRoot", value: "false"},
+        OptionPlan{key: "storage.root.ephemeral", value: "true"}
+    }))
+    assert_eq(primary.root_fs, "ext4")
+    assert_eq(primary.esp_size, "512M")
+    assert_eq(primary.ephemeral, "false")
+    alias :: jetos_storage_settings(jetos_msw_test_system([OptionPlan]{OptionPlan{key: "filesystem.root.type", value: ".Btrfs"}, OptionPlan{key: "storage.root.ephemeral", value: ".True"}, OptionPlan{key: "storage.disk.main.partitions.esp.size", value: "0KiB"}}))
+    assert_eq(alias.root_fs, "Btrfs")
+    assert_eq(alias.esp_size, "0KiB")
+    assert_eq(jetos_clean_bool_json(alias.ephemeral), "true")
+}
+
+#Test("JetOS storage original fixture rendering preserves raw row order") {
+    system :: jetos_msw_test_halcyon()
+    settings :: jetos_storage_settings(system)
+    rows := jetos_prefixed_options(system, "storage.")
+    loop row in jetos_prefixed_options(system, "filesystem.") -> &rows.push(row)
+    assert_eq(rows.len(), 11)
+    assert_eq(rows[0].key, "disk.main.device")
+    assert_eq(rows[7].key, "persist.varLib.path")
+    assert_eq(rows[8].key, "timeZone")
+    assert_eq(rows[10].key, "swap.fast.priority")
+    persist :: jetos_prefixed_options(system, "storage.persist.")
+    assert_eq(persist[0].key, "home.path")
+    assert_eq(persist[1].key, "varLib.path")
+    assert(jetos_storage_plan_json(system.name, settings, persist).contains("\"root_fs\":\"Btrfs\""))
+    assert(jetos_storage_facts_json(settings, rows).contains("\"ephemeral_root\":true"))
+    script :: jetos_storage_apply_script(settings)
+    assert(script.contains("disk=${{JETOS_STORAGE_DISK:-'/dev/sda'}}\n"))
+    assert(script.contains("size=512M, type=U\\ntype=L\\nEOF"))
+    assert(script.contains("mkfs.btrfs -L jetos-root"))
+    assert(script.contains("if [ \"$execute\" = true ]; then\n  sh \"$log\"\nfi\n"))
+    assert(script.contains("*[!A-Za-z0-9_./-]*)"))
+    assert_eq(jetos_storage_plan_script(), "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\ncat \"$root/storage/plan.json\"\nprintf '\\n'\n")
+    assert(jetos_storage_persist_script().contains("while IFS='\t' read -r key path; do"))
+}
+
+// Original :167-188. Actual writer, not substituted pure rendering.
+#Test("JetOS storage script uses safe filesystem default for hostile option native") {
+    root :: files.tmpdir("jetos-storage-root-fs-") ?? panic("hostile root scratch")
+    marker :: files.join(root, "root-fs-injection-marker")
+    system :: SystemPlan{name: "hostile-root-fs", target: "linux.x64", packages: [Pkg]{}, services: [ServicePlan]{}, options: [OptionPlan]{OptionPlan{key: "filesystem.root.type", value: "ext4 || true; touch {marker} #"}}}
+    jetos_write_storage_facts(root, system) ?? panic("hostile storage write")
+    script :: jetos_msw_test_read(root, "sw/bin/jetos-storage-apply")
+    assert(script.contains("mkfs.ext4 -L jetos-root"))
+    assert(!script.contains("touch"))
+    files.remove_all(root).drop("Rust original test cleanup is best-effort")
+}
+
+#Test("JetOS module priority original explanations and disabled manifest filesystem") {
+    root :: files.tmpdir("jetos-module-priority-") ?? panic("module scratch")
+    jetos_write_module_priority_facts(root, jetos_msw_test_halcyon()) ?? panic("module write")
+    explain :: jetos_msw_test_read(root, "module-system/explain.json")
+    assert(explain.contains("\"key\":\"services.displayManager\"") && explain.contains("\"value\":\"gdm\"") && explain.contains("\"value\":\"sddm\"") && explain.contains("\"winner\":true") && explain.contains("Force") && explain.contains("stylix.kmscon"))
+    assert(explain.contains("\"tiers\":[\"Default\",\"Normal\",\"Force\",\"Priority(n)\"],\"module_ids\":\"stable-source-paths\""))
+    assert(!explain.contains("\"key\":\"services.displayManager.tier\""))
+    assert_eq(jetos_msw_test_read(root, "module-system/disabled-modules.manifest"), "stylix.kmscon\n")
+    system :: jetos_msw_test_system([OptionPlan]{OptionPlan{key: "z", value: "first"}, OptionPlan{key: "a", value: "value"}, OptionPlan{key: "z", value: "last"}, OptionPlan{key: "z.priority", value: "12"}, OptionPlan{key: "z.override", value: "true"}, OptionPlan{key: "z.disabled", value: "true"}, OptionPlan{key: "packages.disabledModules", value: "[\"z\", \"a\", \"z\"]"}})
+    jetos_write_module_priority_facts(root, system) ?? panic("module rewrite")
+    expected := [String]{}
+    ordered_keys :: [String]{"a", "packages.disabledModules", "z"}
+    loop key in ordered_keys -> &expected.push((jetos_resolved_option(system, key) ?? panic("resolved")).to_json())
+    assert_eq(jetos_msw_test_read(root, "module-system/explain.json"), "{{\"kind\":\"jetos.option-explain\",\"tiers\":[\"Default\",\"Normal\",\"Force\",\"Priority(n)\"],\"module_ids\":\"stable-source-paths\",\"resolved\":[{expected.join(",")}],\"disabled_modules\":[\"z\",\"a\",\"z\"]}}")
+    assert_eq(jetos_msw_test_read(root, "module-system/disabled-modules.manifest"), "z\na\nz\n")
+    jetos_write_module_priority_facts(root, jetos_msw_test_system([OptionPlan]{})) ?? panic("empty module")
+    assert_eq(jetos_msw_test_read(root, "module-system/disabled-modules.manifest"), "")
+    assert_eq(jetos_msw_test_read(root, "module-system/explain.json"), "{{\"kind\":\"jetos.option-explain\",\"tiers\":[\"Default\",\"Normal\",\"Force\",\"Priority(n)\"],\"module_ids\":\"stable-source-paths\",\"resolved\":[],\"disabled_modules\":[]}}")
+    files.remove_all(root) ?? panic("module cleanup")
+}
+
+#Test("JetOS workload defaults exact plan scripts rollback and unit") {
+    rendered :: jetos_workload_rendering(jetos_msw_test_system([OptionPlan]{}), "bare")
+    assert_eq(rendered.plan, "{{\"kind\":\"jetos.workload-plan\",\"name\":\"bare\",\"backend\":\"Container\",\"image\":\"bare\",\"ports\":[],\"mounts\":[],\"secrets\":[],\"resources\":{{\"memory\":\"host-shared\",\"cpus\":\"1\"}},\"health\":\"true\",\"rollback_keep\":\"2\",\"command\":\"${{JETOS_CONTAINER_BIN:-podman}} run --rm    'bare'\",\"proof\":\"workload-proof-ready\"}}")
+    assert_eq(rendered.facts, "{{\"name\":\"bare\",\"backend\":\"Container\",\"image\":\"bare\",\"ports\":[],\"mounts\":[],\"secrets\":[],\"resources\":{{\"memory\":\"host-shared\",\"cpus\":\"1\"}},\"health\":\"true\",\"rollback_keep\":\"2\",\"proof\":\"workload-rollout-ready\"}}")
+    assert_eq(rendered.health_script, "#!/usr/bin/env sh\nset -eu\ncmd='true'\nsh -c \"$cmd\"\n")
+    assert_eq(rendered.run_script, "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\ncmd='${{JETOS_CONTAINER_BIN:-podman}} run --rm    '\\''bare'\\'''\nsh -c \"$cmd\"\n\"$root/workloads/health-bare.sh\"\n")
+    assert_eq(rendered.rollback, "keep\t2\ncurrent\t/run/current-system/workloads/bare\n")
+    assert_eq(rendered.unit, "[Unit]\nDescription=jetos workload bare\n\n[Service]\nExecStart=/run/current-system/sw/bin/jetos-workload-run bare\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target\n")
+    assert(jetos_workload_runner_script().contains("exec /bin/sh \"$script\"\n"))
+}
+
+#Test("JetOS workload original rendering order resources image fallback and explicit command") {
+    system :: jetos_msw_test_halcyon()
+    assert_eq(jetos_collect_names(system, "workload"), [String]{"sandbox", "web"})
+    web :: jetos_workload_rendering(system, "web")
+    assert(web.plan.contains("/srv/web:/srv/web:ro") && web.plan.contains("\"memory\":\"512M\"") && web.plan.contains("\"rollback_keep\":\"3\"") && web.plan.contains("workload-proof-ready"))
+    assert_eq(web.run_script, "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\ncmd='echo workload >> $JETOS_WORKLOAD_LOG'\nsh -c \"$cmd\"\n\"$root/workloads/health-web.sh\"\n")
+    sandbox :: jetos_workload_rendering(system, "sandbox")
+    assert(sandbox.plan.contains("qemu-system-x86_64") && sandbox.plan.contains("-m '2048M'") && sandbox.plan.contains("\"backend\":\"MicroVM\""))
+    empty_vm :: jetos_workload_rendering(jetos_msw_test_system([OptionPlan]{OptionPlan{key: "workload.vm.backend", value: ".MicroVM"}}), "vm")
+    assert(empty_vm.plan.contains("\"memory\":\"1024M\",\"cpus\":\"1\""))
+    overrides :: jetos_workload_rendering(jetos_msw_test_system([OptionPlan]{OptionPlan{key: "workload.vm.backend", value: ".MicroVM"}, OptionPlan{key: "workload.vm.resources.memory", value: "4G"}, OptionPlan{key: "workload.vm.microvm.memory", value: "8G"}, OptionPlan{key: "workload.vm.resources.cpus", value: "3"}, OptionPlan{key: "workload.vm.microvm.cpus", value: "7"}, OptionPlan{key: "workload.vm.image", value: "first"}, OptionPlan{key: "workload.vm.package", value: "second"}}), "vm")
+    assert(overrides.plan.contains("\"image\":\"first\""))
+    assert(overrides.plan.contains("\"memory\":\"4G\",\"cpus\":\"3\""))
+    flags :: jetos_workload_rendering(jetos_msw_test_system([OptionPlan]{OptionPlan{key: "workload.x.ports", value: "[8080, 9090]"}, OptionPlan{key: "workload.x.mounts", value: "[\"/a:/b\", \"/c:/d\"]"}, OptionPlan{key: "workload.x.secrets", value: "[\"one\", \"two\"]"}}), "x")
+    assert(flags.plan.contains("run --rm -p '8080:8080' -p '9090:9090' -v '/a:/b' -v '/c:/d' --secret 'one' --secret 'two' 'x'"))
+    assert_eq(flags.health_script, "#!/usr/bin/env sh\nset -eu\ncmd='nc -z 127.0.0.1 '\\''8080'\\'''\nsh -c \"$cmd\"\n")
+}
+
+#Test("JetOS workload names reject traversal with exact error") {
+    good_names :: [String]{"web", "vm-1", "a_b", "a.b", "A0"}
+    loop name in good_names -> jetos_validate_workload_name(name) ?? panic("valid name")
+    bad_names :: [String]{"../x", "a/b", "/x", ".", "..", "", "x\\y", "x y", "é"}
+    loop name in bad_names {
+        if jetos_validate_workload_name(name) == {
+            .Err(error) -> {
+                if error == {
+                    .InvalidInput(context) -> assert_eq(context.cause, Val("jetos workload: name must be a single safe path component"))
+                    else -> panic("wrong error kind")
+                }
+            }
+            .Ok(_) -> panic("unsafe workload name accepted")
+        }
+    }
+}
+
+// Native original storage dryrun/manual/injection/persistence assertions.
+// NEVER invoke --execute: the real script would partition/format a real disk.
+#Test("JetOS storage original native manual dryrun injection refusal persistence") {
+    root :: files.tmpdir("jetos-storage-original-") ?? panic("storage scratch")
+    generation :: files.join(root, "generation")
+    jetos_write_storage_facts(generation, jetos_msw_test_halcyon()) ?? panic("storage write")
+    storage :: jetos_msw_test_read(generation, "storage/facts.json")
+    assert(storage.contains("jetos.storage-tree") && storage.contains("disk.main.device") && storage.contains("jetos-storage-apply") && storage.contains("\"ephemeral_root\":true"))
+    plan :: jetos_msw_test_read(generation, "storage/plan.json")
+    assert(plan.contains("\"root_fs\":\"Btrfs\"") && plan.contains("/var/lib") && plan.contains("requires --manual plus --execute"))
+    storage_paths :: [String]{"storage/mounts.fstab", "sw/bin/jetos-storage-plan", "sw/bin/jetos-storage-apply", "sw/bin/jetos-persist-activate"}
+    loop path in storage_paths -> assert(files.is_file(files.join(generation, path)))
+    assert_eq(jetos_msw_test_read(generation, "storage/persistence.manifest"), "home.path\t/home/nate\nvarLib.path\t/var/lib\n")
+    log :: files.join(root, "storage-apply.sh")
+    proofs :: files.join(root, "storage-proofs")
+    applied :: process.cmd([String]{files.join(generation, "sw/bin/jetos-storage-apply"), "--manual"}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_STORAGE_LOG", log).env("JETOS_STORAGE_PROOF_DIR", proofs).stdout(.Capture).stderr(.Capture).run() ?? panic("manual storage dryrun")
+    assert(applied.success, applied.errors)
+    steps :: files.read(log) ?? panic("storage log")
+    assert(steps.contains("sfdisk --wipe always /dev/sda") && steps.contains("mkfs.btrfs -L jetos-root"))
+    proof :: jetos_msw_test_read(proofs, "apply-proof.json")
+    assert(proof.contains("\"executed\":false") && proof.contains("manual-storage-plan-reviewed"))
+    marker :: files.join(root, "storage-injection-marker")
+    hostile :: process.cmd([String]{files.join(generation, "sw/bin/jetos-storage-apply"), "--manual"}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_STORAGE_DISK", "/dev/sda; touch {marker}").stdout(.Capture).stderr(.Capture).run() ?? panic("hostile disk")
+    assert_eq(hostile.code, 2)
+    assert(!files.exists(marker))
+    missing_manual :: process.cmd([String]{files.join(generation, "sw/bin/jetos-storage-apply")}).env("JETOS_SYSTEM_ROOT", generation).stdout(.Capture).stderr(.Capture).run() ?? panic("missing manual")
+    assert_eq(missing_manual.code, 2)
+    assert(missing_manual.errors.contains("destructive disk plan requires --manual"))
+    persist_root :: files.join(root, "persist-root")
+    ephemeral_root :: files.join(root, "ephemeral-root")
+    persisted :: process.cmd([String]{files.join(generation, "sw/bin/jetos-persist-activate")}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_PERSIST_ROOT", persist_root).env("JETOS_EPHEMERAL_ROOT", ephemeral_root).env("JETOS_STORAGE_PROOF_DIR", proofs).stdout(.Capture).stderr(.Capture).run() ?? panic("persistence")
+    assert(persisted.success, persisted.errors)
+    assert(files.is_dir(files.join(persist_root, "home/nate")) && files.is_dir(files.join(persist_root, "var/lib")) && files.is_dir(files.join(ephemeral_root, "home/nate")))
+    persist_proof :: jetos_msw_test_read(proofs, "persistence-proof.json")
+    assert(persist_proof.contains("\"state\":\"activated\"") && persist_proof.contains("impermanence-persist-ready"))
+    files.remove_all(root) ?? panic("storage cleanup")
+}
+
+#Test("JetOS workload original native units rollback health and real run") {
+    root :: files.tmpdir("jetos-workload-original-") ?? panic("workload scratch")
+    generation :: files.join(root, "generation")
+    jetos_write_workload_facts(generation, jetos_msw_test_halcyon()) ?? panic("workload write")
+    facts :: jetos_msw_test_read(generation, "workloads/facts.json")
+    assert(facts.contains("\"name\":\"web\"") && facts.contains("\"backend\":\"Container\"") && facts.contains("\"name\":\"sandbox\"") && facts.contains("\"backend\":\"MicroVM\"") && facts.contains("web-token"))
+    web :: jetos_msw_test_read(generation, "workloads/web.plan.json")
+    assert(web.contains("/srv/web:/srv/web:ro") && web.contains("\"memory\":\"512M\"") && web.contains("\"rollback_keep\":\"3\"") && web.contains("workload-proof-ready"))
+    sandbox :: jetos_msw_test_read(generation, "workloads/sandbox.plan.json")
+    // Main-approved quoting tandem updates the original unquoted -m assertion.
+    assert(sandbox.contains("qemu-system-x86_64") && sandbox.contains("-m '2048M'") && sandbox.contains("\"backend\":\"MicroVM\""))
+    assert(files.is_file(files.join(generation, "etc/systemd/system/workload-web.service")))
+    assert(files.exists(files.join(generation, "etc/systemd/system/multi-user.target.wants/workload-web.service")))
+    assert(files.is_file(files.join(generation, "workloads/web.rollback.manifest")) && files.is_file(files.join(generation, "workloads/health-web.sh")) && files.is_file(files.join(generation, "workloads/sandbox.rollback.manifest")))
+    log :: files.join(root, "workload.log")
+    ran :: process.cmd([String]{files.join(generation, "sw/bin/jetos-workload-run"), "web"}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_WORKLOAD_LOG", log).stdout(.Capture).stderr(.Capture).run() ?? panic("workload run")
+    assert(ran.success, ran.errors)
+    assert((files.read(log) ?? panic("workload steps")).contains("workload"))
+    missing :: process.cmd([String]{files.join(generation, "sw/bin/jetos-workload-run"), "missing"}).env("JETOS_SYSTEM_ROOT", generation).stdout(.Capture).stderr(.Capture).run() ?? panic("unknown workload")
+    assert_eq(missing.code, 2)
+    files.remove_all(root) ?? panic("workload cleanup")
+}
+
+// Real writer/process regression; the external executable is an argv-recording
+// fixture, never a replacement writer, process implementation or seal helper.
+#Test("JetOS workload implicit hostile argv remains one shell word native") {
+    root :: files.tmpdir("jetos-workload-injection-") ?? panic("injection scratch")
+    marker :: files.join(root, "marker")
+    image :: "image; touch {marker}"
+    generation :: files.join(root, "generation")
+    system :: jetos_msw_test_system([OptionPlan]{OptionPlan{key: "workload.x.image", value: image}})
+    jetos_write_workload_facts(generation, system) ?? panic("hostile workload write")
+    assert(jetos_msw_test_read(generation, "workloads/x.plan.json").contains("'image; touch {marker}'"))
+    fixture :: files.join(root, "container")
+    files.write(fixture, "#!/usr/bin/env sh\nprintf '%s\\n' \"$@\"\n") ?? panic("argv fixture")
+    jetos_make_executable(fixture) ?? panic("fixture mode")
+    ran :: process.cmd([String]{files.join(generation, "sw/bin/jetos-workload-run"), "x"}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_CONTAINER_BIN", fixture).stdout(.Capture).stderr(.Capture).run() ?? panic("hostile image actual runner")
+    assert(ran.success, ran.errors)
+    assert_eq(ran.output, "run\n--rm\n{image}\n")
+    assert(!files.exists(marker))
+    files.remove_all(root) ?? panic("injection cleanup")
+}
+
+#Test("JetOS workload implicit argv quotes all flags and microvm resources") {
+    hostile :: "a'; touch /marker #"
+    rendered :: jetos_workload_rendering(jetos_msw_test_system([OptionPlan]{OptionPlan{key: "workload.x.image", value: hostile}, OptionPlan{key: "workload.x.ports", value: "[\"{hostile}\"]"}, OptionPlan{key: "workload.x.mounts", value: "[\"{hostile}\"]"}, OptionPlan{key: "workload.x.secrets", value: "[\"{hostile}\"]"}}), "x")
+    container_command :: "${{JETOS_CONTAINER_BIN:-podman}} run --rm -p {jetos_shell_single_quote("{hostile}:{hostile}")} -v {jetos_shell_single_quote(hostile)} --secret {jetos_shell_single_quote(hostile)} {jetos_shell_single_quote(hostile)}"
+    assert_eq(rendered.run_script, "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\ncmd={jetos_shell_single_quote(container_command)}\nsh -c \"$cmd\"\n\"$root/workloads/health-x.sh\"\n")
+    health :: "nc -z 127.0.0.1 {jetos_shell_single_quote(hostile)}"
+    assert_eq(rendered.health_script, "#!/usr/bin/env sh\nset -eu\ncmd={jetos_shell_single_quote(health)}\nsh -c \"$cmd\"\n")
+    vm :: jetos_workload_rendering(jetos_msw_test_system([OptionPlan]{OptionPlan{key: "workload.x.backend", value: ".MicroVM"}, OptionPlan{key: "workload.x.resources.memory", value: hostile}, OptionPlan{key: "workload.x.resources.cpus", value: hostile}, OptionPlan{key: "workload.x.image", value: hostile}}), "x")
+    command :: "qemu-system-x86_64 -m {jetos_shell_single_quote(hostile)} -smp {jetos_shell_single_quote(hostile)} -nographic -kernel {jetos_shell_single_quote(hostile)}"
+    assert_eq(vm.run_script, "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\ncmd={jetos_shell_single_quote(command)}\nsh -c \"$cmd\"\n\"$root/workloads/health-x.sh\"\n")
+    explicit :: jetos_workload_rendering(jetos_msw_test_system([OptionPlan]{OptionPlan{key: "workload.x.command", value: hostile}}), "x")
+    assert(explicit.run_script.contains("cmd={jetos_shell_single_quote(hostile)}\n"))
+}

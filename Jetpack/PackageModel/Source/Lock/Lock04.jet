@@ -1,0 +1,282 @@
+// PORT-PENDING 2046 crates-jet-pkg-model-src-lock-slice-5401: crates/jet-pkg-model/src/Lock.rs:5401-5678
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS             "sha256-aa",
+//RS             "aarch64-macos",
+//RS             "ed25519:sigbytes",
+//RS             "ref via nix",
+//RS         );
+//RS         let lock = base_lock(vec![pkg_with("p", Some(e.clone()))], Vec::new());
+//RS         let back = parse(&write(&lock)).expect("parse");
+//RS         assert_eq!(back.packages[0].envelope, Some(e));
+//RS     }
+//RS 
+//RS     /// A legacy lock with no envelope lines parses to `None` and round-trips
+//RS     /// unchanged — no forced migration (the reason CACHE1 was frozen early).
+//RS     #[test]
+//RS     fn legacy_lock_without_envelope_roundtrips_none() {
+//RS         let lock = base_lock(vec![pkg_with("old", None)], Vec::new());
+//RS         let text = write(&lock);
+//RS         assert!(!text.contains("output-hash"));
+//RS         let back = parse(&text).expect("parse");
+//RS         assert_eq!(back.packages[0].envelope, None);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn lock_writer_migrates_legacy_ref_spellings() {
+//RS         let legacy = "#auto can1357/oh-my-pi#v18.0.4@github";
+//RS         let mut package = pkg_with("omp", None);
+//RS         package.source = LockSource::Nix {
+//RS             reference: legacy.into(),
+//RS             output: nix_digest('a'),
+//RS         };
+//RS         package.nix_closure = Some(nix_closure(&nix_digest('a')));
+//RS         let mut lock = base_lock(vec![package], Vec::new());
+//RS         lock.source_channels.push(LockedSourceChannel {
+//RS             name: "releases".into(),
+//RS             channel: "latest".into(),
+//RS             exact: legacy.into(),
+//RS         });
+//RS 
+//RS         let text = write(&lock);
+//RS         assert!(text.contains("can1357/oh-my-pi@github#v18.0.4"));
+//RS         assert!(!text.contains(legacy));
+//RS         assert!(!text.contains("can1357/oh-my-pi#v18.0.4@github"));
+//RS 
+//RS         let back = parse(&text).expect("migrated lock parses");
+//RS         assert!(matches!(
+//RS             &back.packages[0].source,
+//RS             LockSource::Nix { reference, .. }
+//RS                 if reference == "can1357/oh-my-pi@github#v18.0.4"
+//RS         ));
+//RS         assert_eq!(
+//RS             back.source_channels[0].exact,
+//RS             "can1357/oh-my-pi@github#v18.0.4"
+//RS         );
+//RS     }
+//RS 
+//RS     /// A `[[toolchain]]` block — a toolchain is an ordinary hangar object, so it
+//RS     /// carries the same envelope — round-trips through write→parse.
+//RS     #[test]
+//RS     fn lock_roundtrips_toolchain_record() {
+//RS         let tc = LockedToolchain {
+//RS             id: "toolchain-1.79.0".to_string(),
+//RS             channel: "1.79".to_string(),
+//RS             version: "1.79.0".to_string(),
+//RS             envelope: env("sha256-tc", "x86_64-linux", "", "rust-1.79.0 via toolchain"),
+//RS         };
+//RS         let lock = base_lock(vec![pkg_with("hello", None)], vec![tc.clone()]);
+//RS         let text = write(&lock);
+//RS         assert!(text.contains("[[toolchain]]"));
+//RS         assert!(text.contains("id = \"toolchain-1.79.0\""));
+//RS         assert!(text.contains("channel = \"1.79\""));
+//RS         let back = parse(&text).expect("parse");
+//RS         assert_eq!(back.toolchains, vec![tc]);
+//RS         // The toolchain's `version` key must not be mistaken for the lockfile version.
+//RS         assert_eq!(back.version, LOCK_VERSION);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn lock_roundtrips_workspace_overlay_policy() {
+//RS         let policy = crate::Overlay::OverlayPolicy {
+//RS             overlays: vec![crate::Overlay::OverlaySet {
+//RS                 name: "rust".to_string(),
+//RS                 provider: Some(crate::Overlay::ProviderOverride {
+//RS                     provider: "nixpkgs".to_string(),
+//RS                     channel: Some("unstable".to_string()),
+//RS                 }),
+//RS                 packages: vec![crate::Overlay::PackageOverride {
+//RS                     package: "rustc".to_string(),
+//RS                     source: Some("rust-overlay".to_string()),
+//RS                     version: Some("1.82".to_string()),
+//RS                     flags: vec!["llvm".to_string()],
+//RS                     priority: 20,
+//RS                     field_priorities: std::collections::BTreeMap::from([
+//RS                         ("version".to_string(), 20),
+//RS                         ("env.RUST_SRC".to_string(), 10),
+//RS                     ]),
+//RS                     env: vec![("RUST_SRC".to_string(), "src".to_string())],
+//RS                     patches: vec!["patches/rust.patch".to_string()],
+//RS                     allow_unfree: true,
+//RS                 }],
+//RS             }],
+//RS             allow_unfree: vec!["cuda".to_string()],
+//RS             build_deny: vec!["network".to_string()],
+//RS             build_grants: vec![("rustc".to_string(), vec!["filesystem".to_string()])],
+//RS         };
+//RS         let mut lock = base_lock(Vec::new(), Vec::new());
+//RS         lock.workspace_source_digest = Some("sha256-workspace".to_string());
+//RS         lock.workspace_overlay_policy = policy.clone();
+//RS         let back = parse(&write(&lock)).expect("workspace overlay lock must parse");
+//RS         assert_eq!(back.workspace_source_digest, lock.workspace_source_digest);
+//RS         assert_eq!(back.workspace_overlay_policy, policy);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn workspace_overlay_lock_rejects_missing_and_duplicate_identity() {
+//RS         let missing_package = r#"
+//RS version = 1
+//RS 
+//RS [[workspace_overlay]]
+//RS name = "beta"
+//RS 
+//RS [[workspace_overlay_package]]
+//RS overlay = "beta"
+//RS priority = 0
+//RS "#;
+//RS         let error = parse(missing_package).expect_err("missing overlay package must fail closed");
+//RS         assert!(error.contains("missing `package`"), "{error}");
+//RS 
+//RS         let duplicate_package = r#"
+//RS version = 1
+//RS 
+//RS [[workspace_overlay]]
+//RS name = "beta"
+//RS 
+//RS [[workspace_overlay_package]]
+//RS overlay = "beta"
+//RS package = "openssl"
+//RS priority = 1
+//RS 
+//RS [[workspace_overlay_package]]
+//RS overlay = "beta"
+//RS package = "openssl"
+//RS priority = 2
+//RS "#;
+//RS         let error = parse(duplicate_package).expect_err("duplicate overlay facts must fail closed");
+//RS         assert!(
+//RS             error.contains("duplicate workspace overlay package"),
+//RS             "{error}"
+//RS         );
+//RS     }
+//RS 
+//RS     /// `record_envelope` backfills a realized object's envelope into an
+//RS     /// existing on-disk lock, leaving other packages untouched.
+//RS     #[test]
+//RS     fn record_envelope_backfills_lock_on_disk() {
+//RS         let dir = std::env::temp_dir().join(format!(
+//RS             "a4-record-{}",
+//RS             std::time::SystemTime::now()
+//RS                 .duration_since(std::time::UNIX_EPOCH)
+//RS                 .unwrap()
+//RS                 .as_nanos()
+//RS         ));
+//RS         std::fs::create_dir_all(dir.join(".jet")).unwrap();
+//RS         let lock = base_lock(
+//RS             vec![pkg_with("hello", None), pkg_with("other", None)],
+//RS             Vec::new(),
+//RS         );
+//RS         std::fs::write(dir.join(Syntax::UNIFIED_LOCK_FILE), write(&lock)).unwrap();
+//RS 
+//RS         let e = env("sha256-real", "x86_64-linux", "", "hello via core-source");
+//RS         record_envelope(&dir, "hello", e.clone());
+//RS 
+//RS         let reloaded = load(&dir).expect("reload");
+//RS         let hello = reloaded
+//RS             .packages
+//RS             .iter()
+//RS             .find(|p| p.name == "hello")
+//RS             .unwrap();
+//RS         let other = reloaded
+//RS             .packages
+//RS             .iter()
+//RS             .find(|p| p.name == "other")
+//RS             .unwrap();
+//RS         assert_eq!(hello.envelope, Some(e));
+//RS         assert_eq!(other.envelope, None, "other packages untouched");
+//RS         std::fs::remove_dir_all(&dir).ok();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn receipt_roundtrips_without_changing_other_packages() {
+//RS         let receipt = format!("sha256-{}", "a".repeat(64));
+//RS         let mut lock = base_lock(
+//RS             vec![
+//RS                 pkg_with(
+//RS                     "hello",
+//RS                     Some(env("sha256-output", "x86_64-linux", "", "hello")),
+//RS                 ),
+//RS                 pkg_with("other", None),
+//RS             ],
+//RS             Vec::new(),
+//RS         );
+//RS         lock.packages[0].receipt = Some(receipt.clone());
+//RS         let reloaded = parse(&write(&lock)).unwrap();
+//RS         assert_eq!(
+//RS             reloaded.packages[0].receipt.as_deref(),
+//RS             Some(receipt.as_str())
+//RS         );
+//RS         assert_eq!(reloaded.packages[1].receipt, None);
+//RS     }
+//RS 
+//RS     /// Envelope + toolchain coexist with the older per-package fields (effects,
+//RS     /// content-hash) without cross-contamination.
+//RS     #[test]
+//RS     fn envelope_coexists_with_effects_and_content_hash() {
+//RS         let mut p = pkg_with(
+//RS             "p",
+//RS             Some(env("sha256-x", "x86_64-linux", "", "r via core-source")),
+//RS         );
+//RS         p.content_hash = Some("sha256-tree".to_string());
+//RS         p.effects = vec!["Net".to_string(), "FS".to_string()];
+//RS         p.required_effects = p.effects.clone();
+//RS         let lock = base_lock(vec![p.clone()], Vec::new());
+//RS         let back = parse(&write(&lock)).expect("parse");
+//RS         // The canonical writer sorts effect rows; round-trip returns the
+//RS         // canonical form of the same package.
+//RS         p.effects.sort();
+//RS         p.required_effects.sort();
+//RS         assert_eq!(back.packages[0], p);
+//RS     }
+//RS     #[test]
+//RS     fn lock_parser_rejects_missing_version_unknown_sections_and_malformed_lines() {
+//RS         assert!(parse("garbage").is_err());
+//RS         assert!(parse("[[unknown]]\n").is_err());
+//RS         assert!(parse("version = 1\nnot-a-field").is_err());
+//RS         assert!(parse("version = 0\n").is_err());
+//RS         assert!(parse("version = 1\n[root]\ndependencies = nope\n").is_err());
+//RS     }
+//RS     #[test]
+//RS     fn previous_lock_fixture_is_rejected_with_registered_diagnostic() {
+//RS         let raw = include_str!("../../../tests/fixtures/build-metadata-compat/lock-v0.lock");
+//RS         assert_eq!(
+//RS             parse(raw).expect_err("previous lock schema must be rejected"),
+//RS             "unsupported lock version 0; expected 1"
+//RS         );
+//RS         let diagnostic = parse_with_path(raw, Path::new(".jet/lock"))
+//RS             .expect_err("previous lock schema must map to the lock diagnostic");
+//RS         assert_eq!(diagnostic.code, "E1214");
+//RS         assert!(!diagnostic.what.is_empty());
+//RS         assert!(!diagnostic.why.is_empty());
+//RS         assert!(!diagnostic.fix.is_empty());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn unsupported_lock_version_renders_registered_snapshot() {
+//RS         let raw = include_str!("../../../tests/fixtures/build-metadata-compat/lock-v0.lock");
+//RS         let lock_path = Path::new(".jet/lock");
+//RS         let diagnostic =
+//RS             parse_with_path(raw, lock_path).expect_err("previous lock schema must be rejected");
+//RS         let rendered =
+//RS             crate::Diagnostics::render_all(&lock_path.display().to_string(), "", &[diagnostic]);
+//RS         let snapshot = Path::new(env!("CARGO_MANIFEST_DIR"))
+//RS             .join("../..")
+//RS             .join("tests/fixtures/jetpack-diagnostics/E1214.stderr");
+//RS         if std::env::var_os("UPDATE_EXPECT").is_some() {
+//RS             std::fs::write(&snapshot, &rendered).expect("write E1214 snapshot");
+//RS         }
+//RS         assert_eq!(rendered, std::fs::read_to_string(snapshot).expect("read E1214 snapshot"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn lock_parser_preserves_empty_array_members() {
+//RS         let lock = parse("version = 1\n[root]\ndependencies = [\"\", \"kept\"]\n")
+//RS             .expect("valid lock array");
+//RS         assert_eq!(
+//RS             lock.root_dependencies,
+//RS             vec![String::new(), "kept".to_string()]
+//RS         );
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2046 crates/jet-pkg-model/src/Lock.rs:5401-5678
+

@@ -1,0 +1,204 @@
+// Portable policy tests for CmdCompile.rs fmt/fix. Full source-format and
+// publication journeys require the canonical Formatter/LSP/transaction services;
+// these tests do not replace any of them with a canned formatter or fake writer.
+#Test("fmt native parser stdin precedence and first label") {
+    options :: jet_cli_format_options([String]{"--stdin-path=src/日本.jet", "--stdin-path=other.jet", "--check", "--diff", "--changed", "--explicit-copies", "--simplify"}, [String]{"a.jet", "-", "b.jet"})
+    assert(options.stdin)
+    assert_eq(options.stdin_path, Val("src/日本.jet"))
+    assert_eq(options.paths, [String]{"a.jet", "b.jet"})
+    assert(options.check && options.diff && options.changed && options.explicit_copies && options.simplify)
+}
+#Test("fmt dry run implies check and diff but diff alone does not imply native check") {
+    dry :: jet_cli_format_options([String]{"--dry-run"}, [String]{})
+    assert(dry.check && dry.diff)
+    diff :: jet_cli_format_options([String]{"--diff"}, [String]{"main.jet"})
+    assert(!diff.check && diff.diff)
+    assert(!diff.stdin && !diff.changed && !diff.simplify && !diff.explicit_copies)
+    assert_eq(diff.stdin_path, None)
+}
+#Test("fix parser first edition and exact switches") {
+    options :: jet_cli_fix_options([String]{"--edition=2027", "--edition=2028", "--all", "--dry-run"}, "日本.jet")
+    assert_eq(options.path, "日本.jet")
+    assert_eq(options.edition, Val("2027"))
+    assert(options.all && options.dry_run)
+    plain :: jet_cli_fix_options([String]{"--edition", "2027", "--all=no"}, "a.jet")
+    assert_eq(plain.edition, None)
+    assert(!plain.all && !plain.dry_run)
+}
+#Test("fmt walk skips diagnostic snapshots but retains fixed companions") {
+    skipped :: [String]{"tests/ui/error.jet", "/root/tests/ui/error.jet", "tests/ui_lint/a.jet", "tests/fuzz/sema/invalid/a.jet", "Docs/spec/reference/syntax-surface.jet", "syntax-surface.jet", "tests/fixtures/jetpack-config/a.jet", "tests/fixtures/jetpack-config-real/a.jet", "tests/fixtures/jetpack-project/functional-env.jet", "tests/fixtures/policy_package_unsafe_allow/a.jet", "tests/agent_workloads/inputs/build-test-recovery/invalid.jet", "/root/ex_concurrency_detached_task.jet"}
+    loop path in skipped -> assert(jet_cli_format_skip_walk_path(path))
+    retained :: [String]{"tests/ui", "tests/ui/nested", "tests/ui/example.fixed.jet", "tests/ui/example.fixed.jet.backup", "tests/ui_lintish/a.jet", "tests/fuzz/sema/valid/a.jet", "src/main.jet"}
+    loop path in retained -> assert(!jet_cli_format_skip_walk_path(path))
+    assert(jet_cli_format_skip_walk_path("C:\\root\\tests\\ui\\error.jet"))
+}
+#Test("fmt generated directory ignore is exact") {
+    ignored :: [String]{"vendor", "target", "build", ".git", "node_modules", ".jet"}
+    loop name in ignored -> assert(jet_cli_format_ignored(name))
+    assert(!jet_cli_format_ignored("Vendor"))
+    assert(!jet_cli_format_ignored("targeted"))
+}
+#Test("fmt reserved package and Config classification matches source routing") {
+    assert(jet_cli_format_is_package("/root/package.jet"))
+    assert(!jet_cli_format_is_package("config.jet"))
+    assert(!jet_cli_format_is_package("package.jet.bak"))
+    // Rust Path::file_name: trailing separators and interior `.` normalize away.
+    assert(jet_cli_format_is_package("/a/package.jet/"))
+    assert(jet_cli_format_is_package("/a/package.jet/."))
+    assert(jet_cli_format_is_package("a//package.jet"))
+    assert(!jet_cli_format_is_package("/a/package.jet/.."))
+    assert(!jet_cli_format_is_package("/"))
+    assert(!jet_cli_format_is_package(""))
+    assert(jet_cli_format_is_typed_package("name: \"demo\"", "package.jet"))
+    assert(jet_cli_format_is_typed_package("pub development :: Config{{ tools: [] }}", "env.jet"))
+    assert(jet_cli_format_is_typed_package("development :: Config .{{ tools: [] }}", "config.jet"))
+    assert(!jet_cli_format_is_typed_package("module config {{ }}", "config.jet"))
+    // The Rust helper first strips a leading Config, then looks for Config.
+    assert(!jet_cli_format_is_typed_package("Config{{ tools: [] }}", "env.jet"))
+    assert(jet_cli_format_is_typed_package("ConfigConfig{{ tools: [] }}", "env.jet"))
+    // That leading-Config fallback reads the text before any `pub ` strip.
+    assert(!jet_cli_format_is_typed_package("pub ConfigConfig{{ tools: [] }}", "env.jet"))
+}
+#Test("fmt component display prefix and extension boundaries") {
+    assert_eq(jet_cli_format_display_path("/root", "/root/src/日本.jet", false), "src/日本.jet")
+    assert_eq(jet_cli_format_display_path("/root", "/rootish/a.jet", false), "/rootish/a.jet")
+    assert_eq(jet_cli_format_display_path("/root/", "/root/a.jet", false), "a.jet")
+    assert_eq(jet_cli_format_display_path("/root", "/root//./src/a.jet", false), "src/a.jet")
+    assert_eq(jet_cli_format_display_path("/root", "/root", false), "")
+    assert_eq(jet_cli_format_display_path("", "/root/a.jet", false), "/root/a.jet")
+    // External display respells only a root-stripped relative path.
+    assert_eq(jet_cli_format_display_path("/root", "/root/a\\b.nix", true), "a/b.nix")
+    assert_eq(jet_cli_format_display_path("/root", "/other/a\\b.nix", true), "/other/a\\b.nix")
+    assert_eq(jet_cli_format_join("/work", "a.nix"), "/work/a.nix")
+    assert_eq(jet_cli_format_join("/", "a.nix"), "/a.nix")
+    assert_eq(jet_cli_format_join("/work", "/abs.nix"), "/abs.nix")
+    assert_eq(jet_cli_format_join("", "a.nix"), "a.nix")
+    assert(jet_cli_format_matches_language("/root/a.nix", "nix"))
+    assert(!jet_cli_format_matches_language("/root/.nix", "nix"))
+    assert(!jet_cli_format_matches_language("a.nix.bak", "nix"))
+    assert(jet_cli_format_matches_language("/root/.hidden.nix", "nix"))
+    assert(!jet_cli_format_matches_language("a.NIX", "nix"))
+    assert(jet_cli_format_matches_language("/root/a.nix/", "nix"))
+    assert(jet_cli_format_matches_language("/root/a.nix/.", "nix"))
+    assert(!jet_cli_format_matches_language("/root/a.nix/..", "nix"))
+    assert(jet_cli_format_matches_language("..nix", "nix"))
+    assert(!jet_cli_format_matches_language("a.", "nix"))
+}
+#Test("external formatter executable extraction and whitespace refusal") {
+    assert_eq(jet_cli_external_formatter_program("pkgs.nixfmt@local#revision"), Val("pkgs.nixfmt"))
+    assert_eq(jet_cli_external_formatter_program("registry:path/nixfmt@channel"), Val("nixfmt"))
+    assert_eq(jet_cli_external_formatter_program("formatter#tag@source"), Val("formatter"))
+    assert_eq(jet_cli_external_formatter_program("  nixfmt  "), Val("nixfmt"))
+    assert_eq(jet_cli_external_formatter_program(""), None)
+    assert_eq(jet_cli_external_formatter_program("path/"), None)
+    assert_eq(jet_cli_external_formatter_program("bad name"), None)
+    assert_eq(jet_cli_external_formatter_program("bad name"), None)
+}
+#Test("edition migration CBOR exact untyped call forwarding") {
+    source :: "cbor.encode(value)\ncbor.decode(bytes)\ncbor.encode(<T>value)\ncbor.decode<T>(bytes)\n"
+    expected :: "cbor.to_bytes(value)\ncbor.parse(bytes)\ncbor.encode(<T>value)\ncbor.decode<T>(bytes)\n"
+    assert_eq(jet_cli_format_edition_2027(source), expected)
+    assert_eq(jet_cli_format_edition_2027(expected), expected)
+}
+#Test("edition canonical JSON infallible nested scope and Unicode byte coordinates") {
+    source :: "fn 日本() -> String Never! {{ if true {{ json.canonical(\"é)\", call(1)) }} }}"
+    expected :: "fn 日本() -> String Never! {{ if true {{ json.canonical(\"é)\", call(1)) ?? panic(\"value is not canonical JSON\") }} }}"
+    assert_eq(jet_cli_format_edition_2027(source), expected)
+    assert_eq(jet_cli_format_edition_2027(expected), expected)
+    assert_eq(jet_cli_format_edition_2027("json.canonical(x)"), "json.canonical(x) ?? panic(\"value is not canonical JSON\")")
+}
+#Test("edition default and explicit fallible functions propagate untouched") {
+    default :: "fn run() {{ if true {{ json.canonical(x) }} }}"
+    explicit :: "fn run() -> String EncodingError! {{ json.canonical(x) }}"
+    assert_eq(jet_cli_format_edition_2027(default), default)
+    assert_eq(jet_cli_format_edition_2027(explicit), explicit)
+    wrapped :: "fn run() -> String Never! {{ json.canonical(x) \n ?? panic(\"custom\") }}"
+    assert_eq(jet_cli_format_edition_2027(wrapped), wrapped)
+    propagation :: "json.canonical(x) \t?"
+    assert_eq(jet_cli_format_edition_2027(propagation), propagation)
+}
+#Test("edition scanner quoted escapes unbalanced calls and multiple calls") {
+    source :: "json.canonical(\"\\\")\", f(1))\njson.canonical(unclosed"
+    expected :: "json.canonical(\"\\\")\", f(1)) ?? panic(\"value is not canonical JSON\")\njson.canonical(unclosed"
+    assert_eq(jet_cli_format_edition_2027(source), expected)
+    assert_eq(jet_cli_format_matching_paren("é(\"(x)\") ) tail".bytes(), 0), Val(10))
+    assert_eq(jet_cli_format_matching_paren("nested(unclosed".bytes(), 0), None)
+}
+#Test("edition audit wording order and no-op behavior") {
+    source :: "json.canonical(x)\ncbor.encode(x)"
+    migrated :: jet_cli_format_edition_2027(source)
+    assert_eq(jet_cli_format_edition_audit(source, migrated), [String]{"rewrote `json.canonical(...)` to fallible form; review hashing/signing fixtures", "rewrote deprecated CBOR forwarding calls (`encode`/`decode`)"})
+    assert_eq(jet_cli_format_edition_audit("fn run() {{}}", "fn run() {{}}"), [String]{"no encoding forwarding calls found"})
+    assert_eq(jet_cli_format_edition_audit("json.canonical(x)?", "json.canonical(x)?"), [String]{"review every `json.canonical(...)` call — edition 2027 requires fallible `json.canonical(data, limits)?` (or an explicit panic fallback)"})
+}
+#Test("external fmt parser environment selection child forwarding and last language") {
+    args :: [String]{"--lang=nix", "--lang", ".rs", "--fixtures=local", "--preset", "dev", "--preset=ci", "--env", "sandbox", "--check", "--changed", "--trust", "--offline", "--online", "--no-color", "--json", "--flake", "--pure", "--yes", "-y", "--color=never", "a.rs", "directory"}
+    options :: jet_cli_external_format_options(args) ?? panic("valid external flags")
+    assert_eq(options.language, "rs")
+    assert_eq(options.paths, [String]{"a.rs", "directory"})
+    assert_eq(options.preset, Val("ci"))
+    assert_eq(options.environment, Val("sandbox"))
+    assert(options.check && options.changed && !options.diff)
+    assert_eq(options.child_flags, [String]{"--fixtures", "local", "--preset", "dev", "--preset", "ci", "--env", "sandbox", "--trust", "--offline", "--online", "--no-color", "--json", "--flake", "--pure", "--yes", "-y", "--color=never"})
+}
+#Test("external fmt diff and dry run both imply check") {
+    diff :: jet_cli_external_format_options([String]{"--lang=nix", "--diff"}) ?? panic("valid diff")
+    dry :: jet_cli_external_format_options([String]{"--lang=nix", "--dry-run"}) ?? panic("valid dry run")
+    assert(diff.check && diff.diff && dry.check && dry.diff)
+    language :: jet_cli_external_format_options([String]{"--lang=  ...nix  "}) ?? panic("normalized language")
+    assert_eq(language.language, "nix")
+    // Rust trim_start_matches strips every repetition of an `=` option prefix.
+    repeated :: jet_cli_external_format_options([String]{"--lang=--lang=nix", "--env=--env=dev"}) ?? panic("repeated prefixes")
+    assert_eq(repeated.language, "nix")
+    assert_eq(repeated.environment, Val("dev"))
+    assert_eq(repeated.child_flags, [String]{"--env", "dev"})
+}
+#Test("external fmt parser missing value diagnostic precedes language validation") {
+    if jet_cli_external_format_options([String]{"--env"}) == {
+        .Ok(_) -> panic("missing environment must refuse")
+        .Err(error) -> {
+            assert_eq(error.code, "E2104")
+            assert_eq(error.what, "--env needs a value")
+            assert_eq(error.why, "these options select the realized environment")
+            assert_eq(error.fix, "pass a value after the option")
+        }
+    }
+    invalid :: [String]{"", ".", "..", "two words", "bad name", "path/name", "path\\name"}
+    loop language in invalid {
+        if jet_cli_external_format_options([String]{"--lang={language}"}) == {
+            .Ok(_) -> panic("invalid language must refuse")
+            .Err(error) -> assert_eq(error.what, "jet fmt needs --lang <language>")
+        }
+    }
+    if jet_cli_external_format_options([String]{"--lang"}) == {
+        .Ok(_) -> panic("missing language must refuse")
+        .Err(error) -> assert_eq(error.what, "jet fmt needs --lang <language>")
+    }
+}
+#Test("external fmt rejects separator unknown flags and stdin instead of forwarding") {
+    if jet_cli_external_format_options([String]{"--lang=nix", "--", "file.nix"}) == {
+        .Ok(_) -> panic("separator must refuse")
+        .Err(error) -> {
+            assert_eq(error.code, "E2104")
+            assert_eq(error.what, "jet fmt --lang does not accept a command separator")
+            assert_eq(error.why, "Jet supplies the staged files to the environment formatter")
+            assert_eq(error.fix, "pass formatter input paths before `--`")
+        }
+    }
+    flags :: [String]{"--unknown", "--simplify", "--explicit-copies", "-"}
+    loop flag in flags {
+        if jet_cli_external_format_options([String]{"--lang=nix", flag}) == {
+            .Ok(_) -> panic("unknown external flag must refuse")
+            .Err(error) -> {
+                assert_eq(error.code, "E2102")
+                assert_eq(error.what, "unknown external formatter option `{flag}`")
+                assert_eq(error.why, "Jet forwards only environment selection and formatter mode flags")
+                assert_eq(error.fix, "run `jet fmt --help` or remove the unknown option")
+            }
+        }
+    }
+}
+#Test("external fmt engine argv owns env and stage paths without shell joining") {
+    command :: jet_cli_external_format_command("nixfmt", [String]{"--trust", "--fixtures", "has space"}, [String]{"/tmp/stage/0000-a.nix", "/tmp/stage/0001-b name.nix"})
+    assert_eq(command, [String]{"env", "--trust", "--fixtures", "has space", "--", "nixfmt", "/tmp/stage/0000-a.nix", "/tmp/stage/0001-b name.nix"})
+}

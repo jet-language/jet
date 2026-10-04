@@ -1,0 +1,315 @@
+use jet_foundation.[JetReleaseInspect, BUILD_CTOR, BUILD_FIELD_ALLOW, BUILD_FIELD_DEBUG_INFO, BUILD_FIELD_OPTIMIZE, BUILD_FIELD_PANIC, BUILD_FIELD_SETTINGS, BUILD_FIELD_SMALL, BUILD_OPTIMIZE_BASIC, BUILD_OPTIMIZE_FULL, BUILD_OPTIMIZE_NONE, BUILD_PANIC_ABORT, BUILD_PANIC_UNWIND, BUILD_PROFILE_RELEASE, RETIRED_BUILD_FIELD_ENV, RETIRED_BUILD_FIELD_FEATURES, authority_root]
+
+// The canonical `package.jet` field name and the refusal text.
+RELEASE_INSPECT_FIELD :: prep { "inspect" }
+RELEASE_INSPECT_EXPECTED :: prep { "expected .Local, .ReadOnly, or .None" }
+// `build: { … }` named build profiles and `build.allow` standing effects
+// (D-BUILDPROFILE1, D-CTEFFECT1), plus the `dev:` development policy
+// (D-LIVE1) (Package/Blocks.rs).
+
+// Rust `BuildOptimize::None` is spelled `Off`: `None` is reserved in Jet.
+pub enum BuildOptimize {
+    Off
+    Basic
+    Full
+
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Off -> BUILD_OPTIMIZE_NONE
+            .Basic -> BUILD_OPTIMIZE_BASIC
+            .Full -> BUILD_OPTIMIZE_FULL
+        }
+    }
+
+    pub fn cache_tag(self) -> String Never! {
+        if self == {
+            .Off -> "opt:none"
+            .Basic -> "opt:basic"
+            .Full -> "opt:full"
+        }
+    }
+}
+
+pub enum BuildPanic {
+    Unwind
+    Abort
+}
+
+// Development-time replay policy from the package's `dev: { … }` block.
+pub struct DevRecordsBudget {
+    pub max_bytes: Int
+
+    pub fn default() -> DevRecordsBudget Never! {
+        DevRecordsBudget{max_bytes: 268435456}
+    }
+}
+
+pub enum DevCaptureSetting {
+    Default
+    On
+    Off
+}
+
+pub struct DevRecordsPolicy {
+    pub capture: DevCaptureSetting
+    pub budget: DevRecordsBudget
+
+    pub fn default() -> DevRecordsPolicy Never! {
+        DevRecordsPolicy{capture: DevCaptureSetting.Default, budget: DevRecordsBudget.default()}
+    }
+}
+
+pub struct DevPolicy {
+    pub swap: Bool
+    pub records: DevRecordsPolicy
+
+    pub fn default() -> DevPolicy Never! {
+        DevPolicy{swap: true, records: DevRecordsPolicy.default()}
+    }
+}
+
+// One named build profile declared in `build: { … }`.
+pub struct BuildProfileDef {
+    pub name: String
+    pub optimize: BuildOptimize
+    pub debug_info: Bool
+    pub small: Bool
+    pub panic: BuildPanic?
+    // D-CONF-MODULE1=A: profile contributions to declared typed settings.
+    pub settings: [String: String]
+    // D-DX-PROD1: release-only devtools presence form.
+    pub inspect: JetReleaseInspect
+    // Game packaging policy resolved from this named profile.
+    pub game_development_stripping: Bool?
+    pub game_cook_mode: String?
+}
+
+// `Blocks::record_body`: the text between the first `{` and the last `}`.
+fn pkg_block_record_body(value: String, field: String) -> String PackageParseError! {
+    open :: pkg_text_find_byte(value, 123) ?? return Err(PackageParseError.Composition("{field} needs a record value"))
+    close :: pkg_text_rfind_byte(value, 125) ?? return Err(PackageParseError.Composition("{field} needs a closed record value"))
+    Ok(pkg_binder_slice(value, open + 1, close))
+}
+
+pub fn pkg_parse_dev(value: String) -> DevPolicy PackageParseError! {
+    body :: pkg_block_record_body(value, "dev")
+    policy := DevPolicy.default()
+    seen_swap := false
+    seen_records := false
+    loop entry in pkg_key_value_entries(body) {
+        if entry.key == {
+            "swap" -> {
+                if seen_swap -> return Err(PackageParseError.Composition("dev policy field `swap` is declared more than once"))
+                seen_swap = true
+                policy.swap = if entry.value.trim() == {
+                    "true" -> true
+                    "false" -> false
+                    else -> {
+                        return Err(PackageParseError.Composition("dev policy field `swap` expected `true` or `false"))
+                    }
+                }
+            }
+            "records" -> {
+                if seen_records -> return Err(PackageParseError.Composition("dev policy field `records` is declared more than once"))
+                seen_records = true
+                policy.records = pkg_parse_dev_records(entry.value)
+            }
+            else -> return Err(PackageParseError.Composition("dev policy has unknown field `{entry.key}` (allowed: swap, records)"))
+        }
+    }
+    Ok(policy)
+}
+
+fn pkg_parse_dev_records(value: String) -> DevRecordsPolicy PackageParseError! {
+    body :: pkg_block_record_body(value, "dev.records")
+    policy := DevRecordsPolicy.default()
+    seen_capture := false
+    seen_budget := false
+    loop entry in pkg_key_value_entries(body) {
+        if entry.key == {
+            "capture" -> {
+                if seen_capture -> return Err(PackageParseError.Composition("dev.records field `capture` is declared more than once"))
+                seen_capture = true
+                policy.capture = if pkg_unquote(entry.value) == {
+                    "default" -> DevCaptureSetting.Default
+                    "on" -> DevCaptureSetting.On
+                    "off" -> DevCaptureSetting.Off
+                    else -> {
+                        return Err(PackageParseError.Composition("dev.records.capture expected `default`, `on`, or `off`"))
+                    }
+                }
+            }
+            "budget" -> {
+                if seen_budget -> return Err(PackageParseError.Composition("dev.records field `budget` is declared more than once"))
+                seen_budget = true
+                policy.budget = pkg_parse_dev_records_budget(entry.value)
+            }
+            else -> return Err(PackageParseError.Composition("dev.records has unknown field `{entry.key}` (allowed: capture, budget)"))
+        }
+    }
+    Ok(policy)
+}
+
+fn pkg_parse_dev_records_budget(value: String) -> DevRecordsBudget PackageParseError! {
+    body :: pkg_block_record_body(value, "dev.records.budget")
+    budget := DevRecordsBudget.default()
+    seen_size := false
+    loop entry in pkg_key_value_entries(body) {
+        if entry.key != "size" -> return Err(PackageParseError.Composition("dev.records.budget has unknown field `{entry.key}` (allowed: size)"))
+        if seen_size -> return Err(PackageParseError.Composition("dev.records.budget field `size` is declared more than once"))
+        seen_size = true
+        budget.max_bytes = pkg_parse_dev_record_bytes(entry.value)
+    }
+    Ok(budget)
+}
+
+// A byte quantity with an optional `bytes`/`gib`/`gb`/`mib`/`mb`/`kib`/`kb`/`b`
+// suffix, checked in that order.
+fn pkg_parse_dev_record_bytes(value: String) -> Int PackageParseError! {
+    compact :: pkg_ascii_lower(pkg_unquote(value)).trim()
+    digits := compact
+    multiplier := 1
+    suffixes :: [String]{"bytes", "gib", "gb", "mib", "mb", "kib", "kb", "b"}
+    loop suffix in suffixes {
+        if compact.ends_with(suffix) {
+            digits = compact.removesuffix(suffix).trim()
+            multiplier = if suffix == {
+                "gib" | "gb" -> 1073741824
+                "mib" | "mb" -> 1048576
+                "kib" | "kb" -> 1024
+                else -> 1
+            }
+            break
+        }
+    }
+    count :: pkg_parse_u64(pkg_without_whitespace(digits.replace("_", ""))) ?? return Err(PackageParseError.Composition("dev.records.budget.size must be a positive whole-byte quantity"))
+    if count == 0 -> return Err(PackageParseError.Composition("dev.records.budget.size must be a positive whole-byte quantity"))
+    if count > PKG_MAX_U64_IN_INT /% multiplier -> return Err(PackageParseError.Composition("dev.records.budget.size does not fit in 64 bits"))
+    Ok(count * multiplier)
+}
+
+// Parse every named profile of a `build: { … }` body (`allow` is skipped).
+pub fn pkg_parse_build(body: String) -> [BuildProfileDef] PackageParseError! {
+    profiles := [BuildProfileDef]{}
+    seen := [String]{}
+    loop entry in pkg_key_value_entries(body) {
+        name :: entry.key
+        if seen.contains(name) -> return Err(PackageParseError.Composition("build field `{name}` is declared more than once"))
+        &seen.push(name)
+        if name == BUILD_FIELD_ALLOW -> next
+        &profiles.push(pkg_parse_build_profile(name, entry.value.trim()))
+    }
+    Ok(profiles)
+}
+
+fn pkg_parse_build_profile(name: String, value: String) -> BuildProfileDef PackageParseError! {
+    inner_block := String?{None}
+    if value.starts_with(BUILD_CTOR) {
+        rest :: pkg_trim_start_matches(value.removeprefix(BUILD_CTOR), ".").trim()
+        if pkg_strip_wrapped(rest, "{{", "}}") == .Val(inner) -> inner_block = Val(inner.trim())
+    } else if value.starts_with("{{") {
+        rest :: value.removeprefix("{{")
+        if rest.ends_with("}}") -> inner_block = Val(rest.removesuffix("}}").trim())
+    } else {
+        return Err(PackageParseError.Composition("build profile `{name}` needs a `Build.{{ optimize: none|basic|full, … }}` value"))
+    }
+    inner :: inner_block ?? ""
+    optimize_value := String?{None}
+    profile := BuildProfileDef{
+        name: name,
+        optimize: BuildOptimize.Off,
+        debug_info: false,
+        small: false,
+        panic: None,
+        settings: [String: String]{},
+        inspect: JetReleaseInspect.Local,
+        game_development_stripping: None,
+        game_cook_mode: None,
+    }
+    seen_fields := [String]{}
+    loop field in pkg_key_value_entries(inner) {
+        key :: field.key
+        if seen_fields.contains(key) -> return Err(PackageParseError.Composition("build profile `{name}.{key}` is declared more than once"))
+        &seen_fields.push(key)
+        if key == {
+            BUILD_FIELD_OPTIMIZE -> optimize_value = Val(pkg_unquote(field.value))
+            BUILD_FIELD_DEBUG_INFO -> profile.debug_info = pkg_parse_build_bool(name, field.value)
+            BUILD_FIELD_SMALL -> profile.small = pkg_parse_build_bool(name, field.value)
+            BUILD_FIELD_PANIC -> {
+                spelled :: pkg_unquote(field.value)
+                if spelled == BUILD_PANIC_ABORT {
+                    profile.panic = Val(BuildPanic.Abort)
+                } else if spelled == BUILD_PANIC_UNWIND {
+                    profile.panic = Val(BuildPanic.Unwind)
+                } else {
+                    return Err(PackageParseError.Composition("build profile `{name}` has an unknown `panic:` value — use `abort` or `unwind`"))
+                }
+            }
+            RELEASE_INSPECT_FIELD -> {
+                if name != BUILD_PROFILE_RELEASE -> return Err(PackageParseError.Composition("build profile `{name}` may declare `inspect:` only on `release`"))
+                profile.inspect = pkg_release_inspect_parse(field.value) ?? return Err(PackageParseError.Composition("build profile `{name}` has an invalid `inspect:` value `{field.value.trim()}` — {RELEASE_INSPECT_EXPECTED}"))
+            }
+            "game_development_stripping" -> profile.game_development_stripping = Val(pkg_parse_build_bool(name, field.value))
+            "game_cook_mode" -> {
+                mode :: pkg_unquote(field.value)
+                if mode != "fast" && mode != "reproducible" && mode != "scripts-only" -> return Err(PackageParseError.Composition("build profile `{name}` has an unknown `game_cook_mode:` value `{mode}`"))
+                profile.game_cook_mode = Val(mode)
+            }
+            BUILD_FIELD_SETTINGS -> {
+                settings_body :: pkg_strip_wrapped(pkg_trim_start_matches(field.value, ".").trim(), "{{", "}}") ?? return Err(PackageParseError.Composition("build profile `{name}` needs `settings: {{ key: value, … }}`"))
+                loop setting in pkg_key_value_entries(settings_body.trim()) {
+                    if profile.settings.has_key(setting.key) -> return Err(PackageParseError.Composition("build profile `{name}.settings.{setting.key}` is declared more than once"))
+                    profile.settings[setting.key] = pkg_unquote(setting.value)
+                }
+            }
+            RETIRED_BUILD_FIELD_FEATURES | RETIRED_BUILD_FIELD_ENV -> return Err(PackageParseError.Composition("build profile `{name}` uses retired `{key}:`; declare a typed `settings: {{ key: Type = default }}` entry and override it with `--set key=value`"))
+            else -> return Err(PackageParseError.Composition("build profile `{name}` has an unknown field `{key}` (allowed: optimize, debug_info, small, panic, inspect, game_development_stripping, game_cook_mode, settings)"))
+        }
+    }
+    selected :: optimize_value ?? return Err(PackageParseError.Composition("build profile `{name}` is missing `optimize: none|basic|full`"))
+    if selected == BUILD_OPTIMIZE_NONE {
+        profile.optimize = BuildOptimize.Off
+    } else if selected == BUILD_OPTIMIZE_BASIC {
+        profile.optimize = BuildOptimize.Basic
+    } else if selected == BUILD_OPTIMIZE_FULL {
+        profile.optimize = BuildOptimize.Full
+    } else {
+        return Err(PackageParseError.Composition("build profile `{name}` is missing `optimize: none|basic|full`"))
+    }
+    Ok(profile)
+}
+
+// D-CTEFFECT1: `build: { allow: #(FS, Exec) }`.
+pub fn pkg_parse_build_allow(body: String) -> [String] PackageParseError! {
+    allow := [String]{}
+    seen_allow := false
+    loop entry in pkg_key_value_entries(body) {
+        if entry.key != BUILD_FIELD_ALLOW -> next
+        if seen_allow -> return Err(PackageParseError.BadEffectsBlock("`build.allow:` is declared more than once"))
+        seen_allow = true
+        inner :: pkg_strip_wrapped(entry.value.trim(), "#(", ")") ?? return Err(PackageParseError.BadEffectsBlock("`build.allow:` must be an effect tuple like `#(FS, Exec)`"))
+        loop piece in pkg_top_level_commas(inner) {
+            name :: pkg_unquote(piece.trim())
+            if !pkg_effect_root_known(authority_root(name)) -> return Err(PackageParseError.BadEffectsBlock("`{name}` isn't a known build effect"))
+            &allow.push(name)
+        }
+    }
+    Ok(allow)
+}
+
+fn pkg_parse_build_bool(profile: String, value: String) -> Bool PackageParseError! {
+    if value.trim() == {
+        "true" -> Ok(true)
+        "false" -> Ok(false)
+        else -> Err(PackageParseError.Composition("build profile `{profile}` expected `true` or `false`"))
+    }
+}
+// Parse one of the three ratified dotted values (`.None` is `Disabled`).
+pub fn pkg_release_inspect_parse(value: String) -> JetReleaseInspect? Never! {
+    if value.trim() == {
+        ".Local" -> Val(JetReleaseInspect.Local)
+        ".ReadOnly" -> Val(JetReleaseInspect.ReadOnly)
+        ".None" -> Val(JetReleaseInspect.Disabled)
+        else -> None
+    }
+}

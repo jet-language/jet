@@ -1,0 +1,365 @@
+fn receipt_test_nul(text: String) -> [U8] Never! {
+    bytes := text.bytes()
+    &bytes.push(U8{0})
+    bytes
+}
+// ReceiptStore.rs pure inline cases cited below; store/host cases stay RE02-RE04.
+fn receipt_test_empty() -> JetCLIReceipt Never! {
+    JetCLIReceipt{claim: JetCLIReceiptClaim{verb: "check", key: "a".repeat(64), inputs: [JetCLIReceiptInput]{}}, status: I32{0}, stdout: "ok".bytes(), stderr: [U8]{}, sections: [JetCLIReceiptSection]{}, consumed: [JetCLIRecordLink]{}, produced: [JetCLIRecordLink]{}, digest: ""}
+}
+fn receipt_test_section(name: String, text: String) -> JetCLIReceiptSection Never! { jet_cli_receipt_section_new(name, "T", text.bytes()) ?? panic("test section") }
+fn receipt_test_wire(frames: [[U8]]) -> [U8] Never! {
+    out := ~JET_CLI_RECEIPT_MAGIC
+    loop frame in frames -> jet_cli_receipt_frame(&out, frame)
+    out
+}
+fn receipt_test_prefix() -> [[U8]] Never! {
+    [[U8]]{"check".bytes(), "a".repeat(64).bytes(), jet_cli_receipt_be(0, 4), jet_cli_receipt_be(0, 8), "ok".bytes(), [U8]{}}
+}
+fn receipt_test_refuses(bytes: [U8], message: String) Never! {
+    if jet_cli_receipt_decode(bytes) == {
+        .Ok(_) -> panic("invalid receipt accepted")
+        .Err(error) -> assert_eq(error.message, message)
+    }
+}
+fn receipt_test_extension(extra: [[U8]]) -> [U8] Never! {
+    frames := receipt_test_prefix()
+    loop frame in extra -> &frames.push(~frame)
+    receipt_test_wire(frames)
+}
+// Rust receipt_body_digest_ignores_timestamp_because_there_is_none (3843-3864).
+#Test("receipt digest ignores digest field and no timestamp basic roundtrip") {
+    receipt := receipt_test_empty()
+    other :: receipt_test_empty()
+    assert_eq(jet_cli_receipt_digest(receipt), jet_cli_receipt_digest(other))
+    receipt.digest = jet_cli_receipt_digest(receipt)
+    encoded :: jet_cli_receipt_encode(receipt) ?? panic("encode")
+    decoded :: jet_cli_receipt_decode_bytes(encoded) ?? panic("authenticated decode: {err.message}")
+    // #4381: original complete-value equality; full proof owed after Core Path derive target fix.
+    assert(decoded == receipt)
+    assert_eq(decoded.claim.verb, receipt.claim.verb)
+    assert_eq(decoded.claim.key, receipt.claim.key)
+    assert_eq(decoded.claim.inputs.len(), 0)
+    assert_eq(decoded.status, receipt.status)
+    assert_eq(decoded.stdout, receipt.stdout)
+    assert_eq(decoded.stderr, receipt.stderr)
+    assert_eq(decoded.digest, receipt.digest)
+    receipt.digest = "b".repeat(64)
+    assert_eq(jet_cli_receipt_digest(receipt), decoded.digest)
+    tampered :: jet_cli_receipt_encode(receipt) ?? panic("encode tamper")
+    if jet_cli_receipt_decode_bytes(tampered) == {
+        .Ok(_) -> panic("tampered digest accepted")
+        .Err(error) -> assert_eq(error.message, "receipt digest does not authenticate its body")
+    }
+    body_tamper := ~encoded
+    body_tamper[JET_CLI_RECEIPT_MAGIC.len() + 8] = U8{116}
+    if jet_cli_receipt_decode_bytes(body_tamper) == {
+        .Ok(_) -> panic("tampered body accepted")
+        .Err(error) -> assert_eq(error.message, "receipt digest does not authenticate its body")
+    }
+}
+#Test("receipt full wire bytes and digest equal extracted Rust oracle") {
+    // std-only rustc oracle: scratch PortW11-CLI-41/CLI-41/build.cjs --oracle;
+    // exact ReceiptStore.rs encode_receipt_body/encode_links/frame/receipt_digest,
+    // jet-foundation SHA256.rs:4-17,876-961, Rust 64-bit native PathBuf UTF-8.
+    receipt := receipt_test_empty()
+    receipt.claim.verb = "test"
+    receipt.claim.inputs = [JetCLIReceiptInput]{JetCLIReceiptInput{path: receipt_paths.path("src/é.jet"), digest: "b".repeat(64)}}
+    receipt.status = I32{-17}
+    receipt.stdout = [U8]{U8{111}, U8{107}, U8{0}, U8{255}}
+    receipt.stderr = "warn\n".bytes()
+    receipt.sections = [JetCLIReceiptSection]{receipt_test_section("z", "{{\"v\":1}}\n"), receipt_test_section("a", "{{}}\n")}
+    receipt.consumed = [JetCLIRecordLink]{JetCLIRecordLink{kind: .Proof, artifact_id: "a-proof"}, JetCLIRecordLink{kind: .Receipt, artifact_id: "z-receipt"}}
+    receipt.produced = [JetCLIRecordLink]{JetCLIRecordLink{kind: .Evidence, artifact_id: "evidence"}}
+    receipt.digest = jet_cli_receipt_digest(receipt)
+    assert_eq(receipt.digest, "d5979bfdcc698f42e54636c8c4abf310f443813961d1d9b9724e9de86843a615")
+    encoded :: jet_cli_receipt_encode(receipt) ?? panic("oracle encode")
+    expected :: "6a65742d726563656970742d7632000000000000000004746573740000000000000040616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161610000000000000004ffffffef00000000000000080000000000000001000000000000000a7372632fc3a92e6a657400000000000000406262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626200000000000000046f6b00ff00000000000000057761726e0a00000000000000186a65742d726563656970742d73656374696f6e732d7631000000000000000008000000000000000200000000000000016100000000000000015400000000000000037b7d0a00000000000000017a00000000000000015400000000000000087b2276223a317d0a00000000000000156a65742d726563656970742d6c696e6b732d763100000000000000000800000000000000010000000000000008000000000000000200000000000000077265636569707400000000000000097a2d72656365697074000000000000000570726f6f660000000000000007612d70726f6f6600000000000000080000000000000001000000000000000865766964656e6365000000000000000865766964656e6365000000000000004064353937396266646363363938663432653534363336633863346162663331306634343338313339363164316439623937323465396465383638343361363135"
+    assert_eq(mir_sha256_hex_bytes(encoded), expected)
+    decoded :: jet_cli_receipt_decode_bytes(encoded) ?? panic("oracle decode")
+    assert_eq(decoded.status, I32{-17})
+    assert_eq(decoded.claim.inputs[0].path.raw, "src/é.jet")
+    assert_eq(decoded.sections[0].name, "a")
+    assert_eq(decoded.consumed[0].artifact_id, "z-receipt")
+    assert_eq(jet_cli_receipt_encode(decoded) ?? panic("reencode"), encoded)
+}
+#Test("receipt frame bounds and errors") {
+    receipt_test_refuses([U8]{}, "receipt magic is invalid")
+    receipt_test_refuses(receipt_test_nul("jet-receipt-v1"), "receipt magic is invalid")
+    receipt_test_refuses(JET_CLI_RECEIPT_MAGIC, "receipt frame length is truncated")
+    oversized := ~JET_CLI_RECEIPT_MAGIC
+    jet_cli_receipt_put_be(&oversized, JET_CLI_RECEIPT_MAX_FIELD + 1, 8)
+    receipt_test_refuses(oversized, "receipt frame is too large")
+    truncated := ~JET_CLI_RECEIPT_MAGIC
+    jet_cli_receipt_put_be(&truncated, JET_CLI_RECEIPT_MAX_FIELD, 8)
+    receipt_test_refuses(truncated, "receipt frame is truncated")
+    cursor := 18446744073709551615
+    if jet_cli_receipt_take_frame([U8]{}, &cursor) == {
+        .Ok(_) -> panic("overflow accepted")
+        .Err(error) -> assert_eq(error.message, "receipt frame length overflows")
+    }
+    receipt_test_refuses("x".repeat(JET_CLI_MAX_RECEIPT_BYTES + 1).bytes(), "receipt is too large")
+}
+#Test("receipt scalar input digest UTF8 and count error precedence") {
+    frames := receipt_test_prefix()
+    &frames.push("b".repeat(64).bytes())
+    frames[0] = [U8]{U8{255}}
+    receipt_test_refuses(receipt_test_wire(frames), "receipt verb is not UTF-8")
+    frames[0] = "check".bytes()
+    frames[1] = [U8]{U8{255}}
+    receipt_test_refuses(receipt_test_wire(frames), "receipt key is not UTF-8")
+    frames[1] = "a".repeat(64).bytes()
+    frames[2] = [U8]{}
+    receipt_test_refuses(receipt_test_wire(frames), "receipt status is malformed")
+    frames[2] = jet_cli_receipt_be(0, 4)
+    frames[3] = [U8]{}
+    receipt_test_refuses(receipt_test_wire(frames), "receipt input count is malformed")
+    frames[3] = jet_cli_receipt_be(100001, 8)
+    receipt_test_refuses(receipt_test_wire(frames), "receipt has too many inputs")
+    one :: [[U8]]{"check".bytes(), "a".repeat(64).bytes(), jet_cli_receipt_be(0, 4), jet_cli_receipt_be(1, 8), [U8]{U8{255}}, "b".repeat(64).bytes()}
+    receipt_test_refuses(receipt_test_wire(one), "receipt input path is not UTF-8")
+    input_frames := ~one
+    input_frames[4] = "path".bytes()
+    input_frames[5] = [U8]{U8{255}}
+    receipt_test_refuses(receipt_test_wire(input_frames), "receipt input digest is not UTF-8")
+    input_frames[5] = "B".repeat(64).bytes()
+    receipt_test_refuses(receipt_test_wire(input_frames), "receipt input digest is malformed")
+    frames = receipt_test_prefix()
+    &frames.push([U8]{U8{255}})
+    receipt_test_refuses(receipt_test_wire(frames), "receipt digest is not UTF-8")
+    frames[6] = "B".repeat(64).bytes()
+    receipt_test_refuses(receipt_test_wire(frames), "receipt has trailing bytes or malformed digest")
+    frames[6] = "b".repeat(64).bytes()
+    trailing := receipt_test_wire(frames)
+    &trailing.push(U8{0})
+    receipt_test_refuses(trailing, "receipt has trailing bytes or malformed digest")
+    frames[1] = "not-a-key".bytes()
+    receipt_test_refuses(receipt_test_wire(frames), "receipt has trailing bytes or malformed digest")
+    valid :: [String]{"0".repeat(64), "{"abcdef".repeat(10)}abcd"}
+    loop digest in valid -> assert(jet_cli_receipt_is_digest(digest))
+    invalid :: [String]{"a".repeat(63), "a".repeat(65), "A".repeat(64), "g".repeat(64), "é".repeat(32)}
+    loop digest in invalid -> assert(!jet_cli_receipt_is_digest(digest))
+}
+#Test("receipt section extension counts schema UTF8 duplicate validation") {
+    magic :: JET_CLI_RECEIPT_SECTION_WIRE_MAGIC
+    receipt_test_refuses(receipt_test_extension([[U8]]{magic, [U8]{}}), "receipt section count is malformed")
+    receipt_test_refuses(receipt_test_extension([[U8]]{magic, jet_cli_receipt_be(257, 8)}), "receipt has too many sections (maximum 256)")
+    receipt_test_refuses(receipt_test_extension([[U8]]{magic, jet_cli_receipt_be(1, 8), [U8]{U8{255}}}), "receipt section name is not UTF-8")
+    receipt_test_refuses(receipt_test_extension([[U8]]{magic, jet_cli_receipt_be(1, 8), "a".bytes(), [U8]{U8{255}}}), "receipt section type name is not UTF-8")
+    receipt_test_refuses(receipt_test_extension([[U8]]{magic, jet_cli_receipt_be(1, 8), "a".bytes(), "T".bytes(), "[]\n".bytes()}), "receipt section schema is invalid: receipt section `a` has an invalid schema: typed section value must be a canonical JSON object")
+    receipt_test_refuses(receipt_test_extension([[U8]]{magic, jet_cli_receipt_be(2, 8), "a".bytes(), "T".bytes(), "{{}}\n".bytes(), "a".bytes(), "T".bytes(), "{{}}\n".bytes()}), "receipt section `a` is duplicated")
+    receipt := receipt_test_empty()
+    receipt.sections = [JetCLIReceiptSection]{receipt_test_section("a", "{{}}\n"), receipt_test_section("a", "{{}}\n")}
+    if jet_cli_receipt_encode(receipt) == {
+        .Ok(_) -> panic("duplicate encoded")
+        .Err(error) -> assert_eq(error.message, "receipt section `a` is duplicated")
+    }
+}
+#Test("receipt link extension versions kinds ids sort duplicates and limits") {
+    magic :: JET_CLI_RECEIPT_LINK_WIRE_MAGIC
+    receipt_test_refuses(receipt_test_extension([[U8]]{magic, [U8]{}}), "receipt links version is malformed")
+    receipt_test_refuses(receipt_test_extension([[U8]]{magic, jet_cli_receipt_be(2, 8)}), "unsupported receipt links version 2")
+    labels :: [String]{"consumed", "produced"}
+    loop label in labels {
+        extra := [[U8]]{magic, jet_cli_receipt_be(1, 8)}
+        if label == "produced" -> &extra.push(jet_cli_receipt_be(0, 8))
+        malformed := ~extra
+        &malformed.push([U8]{})
+        receipt_test_refuses(receipt_test_extension(malformed), "receipt {label} link count is malformed")
+        over := ~extra
+        &over.push(jet_cli_receipt_be(100001, 8))
+        receipt_test_refuses(receipt_test_extension(over), "receipt has too many {label} links (maximum 100000)")
+        &extra.push(jet_cli_receipt_be(1, 8))
+        kind_utf8 := ~extra
+        &kind_utf8.push([U8]{U8{255}})
+        receipt_test_refuses(receipt_test_extension(kind_utf8), "receipt {label} link kind is not UTF-8")
+        kind_bad := ~extra
+        &kind_bad.push("bad".bytes())
+        receipt_test_refuses(receipt_test_extension(kind_bad), "receipt {label} link kind is invalid: unknown record kind `bad`")
+        &extra.push("receipt".bytes())
+        id_utf8 := ~extra
+        &id_utf8.push([U8]{U8{255}})
+        receipt_test_refuses(receipt_test_extension(id_utf8), "receipt {label} link artifact_id is not UTF-8")
+        bad_id := ~extra
+        &bad_id.push("".bytes())
+        receipt_test_refuses(receipt_test_extension(bad_id), "receipt {label} link is invalid: record link artifact_id is empty, too large, or contains control characters")
+        link :: JetCLIRecordLink{kind: .Receipt, artifact_id: "id"}
+        if jet_cli_receipt_normalized_links([JetCLIRecordLink]{link, link}, label) == {
+            .Ok(_) -> panic("duplicate link")
+            .Err(error) -> assert_eq(error.message, "receipt {label} links contain a duplicate")
+        }
+        duplicate_wire :: [[U8]]{magic, jet_cli_receipt_be(1, 8), jet_cli_receipt_be(2, 8), "receipt".bytes(), "id".bytes(), "receipt".bytes(), "id".bytes()}
+        if label == "consumed" -> receipt_test_refuses(receipt_test_extension(duplicate_wire), "receipt consumed links contain a duplicate")
+        receipt := receipt_test_empty()
+        if label == "consumed" -> receipt.consumed = [JetCLIRecordLink]{link, link} else -> receipt.produced = [JetCLIRecordLink]{link, link}
+        if jet_cli_receipt_encode(receipt) == {
+            .Ok(_) -> panic("duplicate encoded")
+            .Err(error) -> assert_eq(error.message, "receipt {label} links contain a duplicate")
+        }
+        too_many :: loop _ in 0..<100001 -> link
+        if jet_cli_receipt_normalized_links(too_many, label) == {
+            .Ok(_) -> panic("link count")
+            .Err(error) -> assert_eq(error.message, "receipt has too many {label} links (maximum 100000)")
+        }
+    }
+}
+// Rust receipt_debug_redacts_raw_legacy_and_unrecognized_output (4263-4282).
+#Test("receipt Debug redacts binary output section query diff and name boundaries") {
+    receipt := receipt_test_empty()
+    receipt.stdout = "legacy bearer secret".bytes()
+    &receipt.stdout.push(U8{255})
+    receipt.stderr = [U8]{U8{0}, U8{1}, U8{2}, U8{255}}
+    receipt.status = I32{17}
+    receipt.digest = "b".repeat(64)
+    debug :: jet_cli_receipt_debug(receipt)
+    assert(debug.contains("stdout: \"<redacted>\""))
+    assert(debug.contains("stderr: \"<redacted>\""))
+    assert(!debug.contains("legacy bearer secret"))
+    bad_names :: [String]{"", "a/b", "a\\b", "x\n", "é".repeat(65)}
+    loop name in bad_names {
+        if jet_cli_receipt_section(receipt, name) == {
+            .Ok(_) -> panic("bad name")
+            .Err(error) -> assert_eq(error.message, "receipt section name `{name}` is invalid")
+        }
+    }
+    receipt.sections = [JetCLIReceiptSection]{receipt_test_section("é".repeat(64), "{{\"v\":1}}\n")}
+    if jet_cli_receipt_section(receipt, "é".repeat(64)) == {
+        .Ok(index) -> assert_eq(index, Val(0))
+        .Err(_) -> panic("valid max name")
+    }
+    if jet_cli_receipt_section(receipt, "missing") == {
+        .Ok(index) -> assert_eq(index, None)
+        .Err(_) -> panic("missing")
+    }
+    query :: jet_cli_receipt_sections_json(receipt) ?? panic("query")
+    assert_eq(query, jet_cli_receipt_query(receipt, None) ?? panic("query named"))
+    assert_eq(canonical_json_bytes(jet_cli_receipt_diff_json(receipt, receipt) ?? panic("diff")), "[]\n".bytes())
+}
+// Rust secret_names_cover_camel_case_dotted_env_and_receipt_identity (4316-4363),
+// name assertions only; argv/environment identity is outside this packet.
+#Test("receipt secret component camel acronym punctuation digits environment policy") {
+    names :: [String]{"--apiToken", "--auth.token", "--token2", "JET_API_TOKEN", "PERSISTENCE_SECRET", "digestKey", "replayToken", "APIKey", "key123", "9Password", "éTOKEN", "----secret", "credential", "passwd"}
+    loop name in names -> assert(jet_cli_receipt_is_secret_name(name))
+    public_names :: [String]{"--public", "monkey", "MY_APIKEY", "tokenizer", "secrets", "", "123", "Tokenize"}
+    loop name in public_names -> assert(!jet_cli_receipt_is_secret_name(name))
+    assert(jet_cli_receipt_is_secret_environment_name("MY_APIKEY"))
+    assert(jet_cli_receipt_is_secret_environment_name("monkey"))
+    assert(!jet_cli_receipt_is_secret_environment_name("PUBLIC"))
+}
+// Rust replay_redacts_known_secret_values (4366-4390) and pure assertions from
+// receipt_persistence_redacts_secret_values_before_digest (4393-4453).
+#Test("receipt byte redaction binary nonoverlap order and redaction before digest") {
+    secrets :: [String]{"legacy-replay-secret"}
+    assert_eq(jet_cli_receipt_redact_bytes(receipt_test_nul("old legacy-replay-secret"), secrets), receipt_test_nul("old <redacted>"))
+    assert_eq(jet_cli_receipt_redact_bytes("legacy-replay-secret\n".bytes(), secrets), "<redacted>\n".bytes())
+    assert_eq(jet_cli_receipt_redact_bytes("short".bytes(), [String]{"longer-secret"}), "short".bytes())
+    assert_eq(jet_cli_receipt_redact_bytes("aaa".bytes(), [String]{"aa"}), "<redacted>a".bytes())
+    assert_eq(jet_cli_receipt_redact_bytes("abc".bytes(), [String]{"", "abc", "redacted"}), "<<redacted>>".bytes())
+    binary :: [U8]{U8{255}, U8{97}, U8{0}, U8{97}}
+    assert_eq(jet_cli_receipt_redact_bytes(binary, [String]{"a"}), [U8]{U8{255}, U8{60}, U8{114}, U8{101}, U8{100}, U8{97}, U8{99}, U8{116}, U8{101}, U8{100}, U8{62}, U8{0}, U8{60}, U8{114}, U8{101}, U8{100}, U8{97}, U8{99}, U8{116}, U8{101}, U8{100}, U8{62}})
+    receipt := receipt_test_empty()
+    receipt.stdout = jet_cli_receipt_bounded_redact_bytes(receipt_test_nul("public secret"), [String]{"secret"}) ?? panic("bounded redact")
+    receipt.digest = jet_cli_receipt_digest(receipt)
+    decoded :: jet_cli_receipt_decode_bytes(jet_cli_receipt_encode(receipt) ?? panic("redacted encode")) ?? panic("redacted decode")
+    assert_eq(decoded.stdout, receipt_test_nul("public <redacted>"))
+    assert_eq(decoded.digest, jet_cli_receipt_digest(decoded))
+}
+#Test("receipt bounded output input and redacted expansion limits") {
+    // Core repeat constructs bounded-size compact byte vectors efficiently.
+    over :: "x".repeat(JET_CLI_RECEIPT_MAX_FIELD + 1).bytes()
+    if jet_cli_receipt_bounded_redact_bytes(over, [String]{}) == {
+        .Ok(_) -> panic("oversized input")
+        .Err(error) -> assert_eq(error.message, "receipt output exceeds its size limit")
+    }
+    expansion :: "x".repeat((JET_CLI_RECEIPT_MAX_FIELD /% 10) + 1).bytes()
+    if jet_cli_receipt_bounded_redact_bytes(expansion, [String]{"x"}) == {
+        .Ok(_) -> panic("oversized redaction")
+        .Err(error) -> assert_eq(error.message, "redacted receipt output exceeds its size limit")
+    }
+}
+#Test("receipt encoder total wire size limit") {
+    receipt := receipt_test_empty()
+    receipt.stdout = "x".repeat(JET_CLI_RECEIPT_MAX_FIELD).bytes()
+    receipt.stderr = "x".repeat(JET_CLI_RECEIPT_MAX_FIELD).bytes()
+    receipt.digest = "a".repeat(4194304)
+    if jet_cli_receipt_encode(receipt) == {
+        .Ok(_) -> panic("oversized encoded receipt")
+        .Err(error) -> assert_eq(error.message, "receipt is too large (maximum 138412032 bytes)")
+    }
+}
+fn receipt_test_acceleration_section(name: String, value: CanonicalJSON) -> JetCLIReceiptSection Never! {
+    jet_cli_receipt_section_new_with_schema_digest(name, MIR_ACCELERATION_RECEIPT_TYPE_NAME, MIR_ACCELERATION_RECEIPT_SCHEMA_DIGEST, canonical_json_bytes(value)) ?? panic("acceleration section")
+}
+fn receipt_test_acceleration_value() -> CanonicalJSON Never! {
+    CanonicalJSON.Object([CanonicalJSONField]{
+        CanonicalJSONField{key: "decision", value: mir_acceleration_decision_to_json(acceleration_receipt_test_decision(.Selected))},
+        CanonicalJSONField{key: "function", value: CanonicalJSON.String("f")},
+        CanonicalJSONField{key: "loop_header", value: CanonicalJSON.Integer("3")},
+        CanonicalJSONField{key: "source", value: CanonicalJSON.Object([CanonicalJSONField]{CanonicalJSONField{key: "end", value: CanonicalJSON.Integer("9")}, CanonicalJSONField{key: "start", value: CanonicalJSON.Integer("1")}})},
+    })
+}
+fn receipt_test_acceleration_refuses(section: JetCLIReceiptSection, message: String) Never! {
+    receipt := receipt_test_empty()
+    receipt.sections = [JetCLIReceiptSection]{section}
+    if jet_cli_receipt_acceleration_decisions(receipt) == {
+        .Ok(_) -> panic("acceleration invalid accepted")
+        .Err(error) -> assert_eq(error.message, message)
+    }
+}
+#Test("receipt acceleration rows numeric ordering filtering duplicates and names") {
+    value :: receipt_test_acceleration_value()
+    receipt := receipt_test_empty()
+    receipt.sections = [JetCLIReceiptSection]{receipt_test_acceleration_section("jet.acceleration.10", value), receipt_test_section("irrelevant", "{{}}\n"), receipt_test_acceleration_section("jet.acceleration.2", value)}
+    rows :: jet_cli_receipt_acceleration_decisions(receipt) ?? panic("rows")
+    assert_eq(rows.len(), 2)
+    assert_eq(rows[0].sequence, 2)
+    assert_eq(rows[1].sequence, 10)
+    assert_eq(rows[0].function, "f")
+    assert_eq(rows[0].loop_header, U32{3})
+    assert_eq(rows[0].source_start, 1)
+    assert_eq(rows[0].source_end, 9)
+    max_source :: CanonicalJSON.Object([CanonicalJSONField]{CanonicalJSONField{key: "end", value: CanonicalJSON.Integer("18446744073709551615")}, CanonicalJSONField{key: "start", value: CanonicalJSON.Integer("18446744073709551615")}})
+    max_value :: acceleration_receipt_test_replace(acceleration_receipt_test_replace(value, "loop_header", CanonicalJSON.Integer("4294967295")), "source", max_source)
+    receipt.sections = [JetCLIReceiptSection]{receipt_test_acceleration_section("jet.acceleration.18446744073709551615", max_value)}
+    max_rows :: jet_cli_receipt_acceleration_decisions(receipt) ?? panic("maximum row refused")
+    assert_eq(max_rows[0].sequence, 18446744073709551615)
+    assert_eq(max_rows[0].loop_header, U32{4294967295})
+    assert_eq(max_rows[0].source_start, 18446744073709551615)
+    receipt.sections = [JetCLIReceiptSection]{receipt_test_acceleration_section("jet.acceleration.02", value), receipt_test_acceleration_section("jet.acceleration.+2", value)}
+    if jet_cli_receipt_acceleration_decisions(receipt) == {
+        .Ok(_) -> panic("duplicate numeric sequence")
+        .Err(error) -> assert_eq(error.message, "duplicate acceleration receipt sequence")
+    }
+    receipt_test_acceleration_refuses(receipt_test_acceleration_section("jet.acceleration.", value), "invalid acceleration section name `jet.acceleration.`")
+    invalid :: [String]{"-1", "18446744073709551616", "x", "+"}
+    loop suffix in invalid {
+        name :: "jet.acceleration.{suffix}"
+        receipt_test_acceleration_refuses(receipt_test_acceleration_section(name, value), "invalid acceleration section sequence `{name}`")
+    }
+    wrong := receipt_test_acceleration_section("jet.acceleration.1", value)
+    wrong.schema_digest = "a".repeat(64)
+    receipt_test_acceleration_refuses(wrong, "acceleration section `jet.acceleration.1` has an unexpected schema digest")
+}
+#Test("receipt acceleration envelope structure integer bounds and decision error precedence") {
+    base :: receipt_test_acceleration_value()
+    receipt_test_acceleration_refuses(receipt_test_acceleration_section("jet.acceleration.1", CanonicalJSON.Object([CanonicalJSONField]{})), "acceleration receipt has missing or unknown fields")
+    receipt_test_acceleration_refuses(receipt_test_acceleration_section("jet.acceleration.1", acceleration_receipt_test_replace(base, "function", CanonicalJSON.Null)), "acceleration receipt field `function` must be a string")
+    receipt_test_acceleration_refuses(receipt_test_acceleration_section("jet.acceleration.1", acceleration_receipt_test_replace(base, "loop_header", CanonicalJSON.Null)), "acceleration receipt field `loop_header` must be an integer")
+    bad_headers :: [String]{"-1", "4294967296"}
+    loop header in bad_headers {
+        receipt_test_acceleration_refuses(receipt_test_acceleration_section("jet.acceleration.1", acceleration_receipt_test_replace(base, "loop_header", CanonicalJSON.Integer(header))), "acceleration receipt loop_header is out of range")
+    }
+    receipt_test_acceleration_refuses(receipt_test_acceleration_section("jet.acceleration.1", acceleration_receipt_test_replace(base, "source", CanonicalJSON.Null)), "acceleration receipt source must be a canonical object")
+    receipt_test_acceleration_refuses(receipt_test_acceleration_section("jet.acceleration.1", acceleration_receipt_test_replace(base, "source", CanonicalJSON.Object([CanonicalJSONField]{}))), "acceleration receipt source has missing or unknown fields")
+    source :: CanonicalJSON.Object([CanonicalJSONField]{CanonicalJSONField{key: "end", value: CanonicalJSON.Integer("9")}, CanonicalJSONField{key: "start", value: CanonicalJSON.Integer("1")}})
+    keys :: [String]{"start", "end"}
+    loop key in keys {
+        invalid_source :: acceleration_receipt_test_replace(source, key, CanonicalJSON.Null)
+        receipt_test_acceleration_refuses(receipt_test_acceleration_section("jet.acceleration.1", acceleration_receipt_test_replace(base, "source", invalid_source)), "acceleration receipt field `{key}` must be an integer")
+        oversized_source :: acceleration_receipt_test_replace(source, key, CanonicalJSON.Integer("18446744073709551616"))
+        receipt_test_acceleration_refuses(receipt_test_acceleration_section("jet.acceleration.1", acceleration_receipt_test_replace(base, "source", oversized_source)), "acceleration receipt source {key} is out of range")
+    }
+    reversed :: acceleration_receipt_test_replace(source, "start", CanonicalJSON.Integer("10"))
+    receipt_test_acceleration_refuses(receipt_test_acceleration_section("jet.acceleration.1", acceleration_receipt_test_replace(base, "source", reversed)), "acceleration receipt source range is reversed")
+    receipt_test_acceleration_refuses(receipt_test_acceleration_section("jet.acceleration.1", acceleration_receipt_test_replace(base, "decision", CanonicalJSON.Null)), "acceleration decision must be a canonical object")
+}

@@ -1,0 +1,160 @@
+// Rust Source/CmdCompile.rs:5966-6091,6137-6166,7692-7712.
+// The checked project owns dependency/member facts; no second loader or path walk.
+
+pub struct JetCLITestWhereClause { pub field: String, pub value: String }
+pub struct JetCLITestTargetFacts {
+    pub package: String
+    pub deps: [String]
+    pub path: String
+    pub tags: [String]
+    pub status: String?
+}
+pub enum JetCLITestTargetOutcome {
+    Ran(Bool)
+    NoTests
+    Override(Bool)
+}
+
+fn jet_cli_test_ascii_space(byte: U8) -> Bool Never! {
+    code :: Int.from_u8(byte)
+    code == 32 || (code >= 9 && code <= 13)
+}
+
+// Rust split_test_where_terms (CmdCompile.rs:5966-6017). Byte offsets never
+// index a String; the quote/escape grammar intentionally does not unescape.
+pub fn jet_cli_test_split_where_terms(expression: String) -> [String] JetCLITestError! {
+    bytes :: expression.bytes()
+    terms := [String]{}
+    start := 0
+    quote := 0
+    index := 0
+    loop index < bytes.len() {
+        byte :: Int.from_u8(bytes[index])
+        if quote != 0 {
+            if byte == 92 {
+                index += 2
+                next
+            }
+            if byte == quote -> quote = 0
+            index += 1
+            next
+        }
+        if byte == 39 || byte == 34 {
+            quote = byte
+            index += 1
+            next
+        }
+        if index + 3 <= bytes.len() && (byte == 97 || byte == 65)
+            && (bytes[index + 1] == (U8{110}) || bytes[index + 1] == (U8{78}))
+            && (bytes[index + 2] == (U8{100}) || bytes[index + 2] == (U8{68}))
+            && (index == 0 || jet_cli_test_ascii_space(bytes[index - 1]))
+            && (index + 3 == bytes.len() || jet_cli_test_ascii_space(bytes[index + 3])) {
+            raw :: String.from_bytes(bytes[start..<index]) ?? panic("ASCII boundary")
+            term :: ~raw.trim()
+            if term == "" -> return Err(jet_cli_test_option_error("empty predicate before `and`"))
+            &terms.push(term)
+            index += 3
+            start = index
+            next
+        }
+        index += 1
+    }
+    if quote != 0 -> return Err(jet_cli_test_option_error("unterminated quote in --where expression"))
+    raw :: String.from_bytes(bytes[start..<bytes.len()]) ?? panic("ASCII boundary")
+    term :: ~raw.trim()
+    if term == "" -> return Err(jet_cli_test_option_error("empty predicate in --where expression"))
+    &terms.push(term)
+    Ok(terms)
+}
+
+// Rust parse_test_where (CmdCompile.rs:6019-6064).
+pub fn jet_cli_test_parse_where(expression: String) -> [JetCLITestWhereClause] JetCLITestError! {
+    clauses := [JetCLITestWhereClause]{}
+    loop term in jet_cli_test_split_where_terms(~expression.trim()) {
+        parts :: term.partition("=")
+        if parts.sep == "" -> return Err(jet_cli_test_option_error("predicate `{term}` needs `field=value`"))
+        field := jet_cli_test_ascii_lower(~parts.head.trim())
+        if field != "package" && field != "dep" && field != "dependency" && field != "path" && field != "tag" && field != "status" -> return Err(jet_cli_test_option_error("unknown --where field `{field}` (expected package, dep, path, tag, or status)"))
+        value := ~parts.tail.trim()
+        if value == "" -> return Err(jet_cli_test_option_error("empty value for --where field `{field}`"))
+        bytes :: value.bytes()
+        first :: Int.from_u8(bytes[0])
+        if first == 39 || first == 34 {
+            if bytes.len() < 2 || bytes[bytes.len() - 1] != bytes[0] -> return Err(jet_cli_test_option_error("unterminated quote for --where field `{field}`"))
+            value = String.from_bytes(bytes[1..<bytes.len() - 1]) ?? panic("ASCII quote boundary")
+        } else {
+            loop byte in bytes {
+                if jet_cli_test_ascii_space(byte) -> return Err(jet_cli_test_option_error("unquoted --where value `{value}` contains whitespace"))
+            }
+        }
+        if field == "dependency" -> field = "dep"
+        &clauses.push(JetCLITestWhereClause{field: field, value: value})
+    }
+    Ok(clauses)
+}
+
+// Rust source_hash_tags (CmdCompile.rs:6075-6091), with sorted BTreeSet order.
+pub fn jet_cli_test_source_hash_tags(source: String) -> [String] Never! {
+    seen := [String: Bool]{}
+    loop line in source.split("\n") {
+        marker :: line.trim_start()
+        if !marker.starts_with("#") -> next
+        bytes :: marker.bytes()
+        end := 1
+        loop end < bytes.len() {
+            code :: Int.from_u8(bytes[end])
+            if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95) -> break
+            end += 1
+        }
+        if end > 1 -> seen[String.from_bytes(bytes[1..<end]) ?? panic("ASCII tag")] = true
+    }
+    tags := seen.keys().to_list()
+    &tags.sort()
+    tags
+}
+
+// Rust test_where_matches (CmdCompile.rs:6137-6166). Invalid syntax matches
+// nothing here; the command validates first so syntax errors remain diagnostics.
+pub fn jet_cli_test_where_matches(expression: String, facts: JetCLITestTargetFacts) -> Bool Never! {
+    clauses :: jet_cli_test_parse_where(expression) ?? return false
+    loop clause in clauses {
+        if clause.field == {
+            "package" -> { if facts.package != clause.value -> return false }
+            "dep" -> {
+                found := false
+                prefix :: "{clause.value}."
+                loop dep in facts.deps { if dep == clause.value || dep.starts_with(prefix) -> found = true }
+                if !found -> return false
+            }
+            "path" -> { if facts.path != clause.value && !facts.path.ends_with("/{clause.value}") && !facts.path.contains(clause.value) -> return false }
+            "tag" -> { if !facts.tags.contains(clause.value) -> return false }
+            "status" -> {
+                lower :: jet_cli_test_ascii_lower(clause.value)
+                wanted :: if lower == {
+                    "passed" | "success" | "ok" -> "pass"
+                    "failed" | "failure" | "error" -> "fail"
+                    else -> ~lower
+                }
+                if facts.status != Val(wanted) -> return false
+            }
+            else -> return false
+        }
+    }
+    true
+}
+
+// Rust is_reserved_target_file (CmdCompile.rs:7692-7702). Canonical Syntax
+// constants are shared by the recursive walk and checked package member scan.
+pub fn jet_cli_test_reserved_target_file(path: String) -> Bool Never! {
+    name := ""
+    loop component in path.split("/") -> name = component
+    name == PACKAGE_FILE || name == ENV_FILE || name == WORKSPACE_FILE || name == CONFIG_FILE || COMMAND_ROLE_FILES.contains(name)
+}
+
+// Rust run_test_file (CmdCompile.rs:7714-7721).
+pub fn jet_cli_test_target_ok(outcome: JetCLITestTargetOutcome) -> Bool Never! {
+    if outcome == {
+        .Ran(ok) | .Override(ok) -> ok
+        .NoTests -> true
+    }
+}

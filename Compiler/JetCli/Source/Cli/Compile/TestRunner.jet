@@ -1,0 +1,514 @@
+// Rust Source/CmdCompile.rs:7397-8263,8481-8764. Command orchestration over
+// canonical compiler/authority/evidence and D-EXEC1 execution providers.
+// No production provider is asserted by this policy port. Those inward
+// providers must transform test MIR, preserve pinned inputs, grade evidence
+// and publish receipts through their one canonical implementation.
+use jet_driver.[JetDriverVerbOutput, JetDriverAuthorizedSourceSnapshot]
+
+pub struct JetCLITestInvocation {
+    pub target: String
+    pub options: JetCLITestRunOptions
+    pub mode: JetCLIOutputMode
+    pub advisory_lints_visible: Bool
+    pub receipt_bypass: Bool
+}
+pub struct JetCLITestCommandContext {
+    pub target: String
+    pub unix_ns: Int
+    pub receipt_bypass: Bool
+}
+pub enum JetCLITestCommandResult {
+    Completed(Int)
+    OptionsRefused(JetCLIArgsRefusal)
+    TestRefused(JetCLITestError)
+}
+pub enum JetCLITestDiscoveryKind { File Directory Package }
+pub struct JetCLITestDiscovery {
+    pub kind: JetCLITestDiscoveryKind
+    pub root: String
+    pub entry: String
+    pub entry_exists: Bool
+    // Resolved only when --show-default is absent (Rust skips the lookup).
+    pub override_file: String?
+    // Directory: recursive non-dot/non-build Jet files, reserved facts
+    // excluded, sorted in PathBuf component order. Package: authority-checked
+    // ProjectParts member order (not a second filesystem walk). Entry may
+    // also appear; CLI skips it once.
+    pub targets: [String]
+}
+pub struct JetCLITestPreparedTarget {
+    pub file: String
+    pub source: String
+    pub sources: JetDriverAuthorizedSourceSnapshot
+    pub project_root: String?
+    pub has_blocks: Bool
+    pub has_contracts: Bool
+    pub has_doctests: Bool
+    pub override_entry: Bool
+    pub facts: JetCLITestTargetFacts
+    pub cache_identity: JetCLITestCacheIdentity
+    pub cache_root: String
+    pub preserve_report: Bool
+    pub report_path: String
+    pub coverage_path: String?
+}
+// Rust run_test_target preparation (CmdCompile.rs:7733-7758). Failed is a
+// rendered couldn't-read E2105 or report_problems diagnostic set for one
+// target; traversal continues. Err is command-fatal (Rust
+// resolve_named_profile E1219 exits the process at the first target).
+pub enum JetCLITestPreparation {
+    Ready(target: JetCLITestPreparedTarget)
+    Failed(output: JetCLITestOutput)
+}
+pub enum JetCLITestCompilation {
+    Ready(request: JetCLIExecutionRequest, diagnostics: JetCLITestOutput)
+    Refused(JetDriverVerbOutput)
+}
+pub struct JetCLITestPhaseResult { pub ok: Bool, pub output: JetCLITestOutput }
+pub struct JetCLITestFinalization { pub ok: Bool?, pub output: JetCLITestOutput }
+pub struct JetCLITestCoverageResult { pub records: String, pub functions: [JetCLITestCoverableFunction] }
+pub struct JetCLITestWatchSession { pub identity: Int }
+pub struct JetCLITestWatchEvent { pub controls: [U8], pub changed: Bool }
+pub struct JetCLITestWatchChild { pub exit_code: Int, pub result: JetCLITestResultCache }
+
+// True inward seams, not alternate CLI implementations. prepare_command is
+// Rust run_test_opts' require_project_environment + existence check, before
+// any option-dependent branch; discover is its later directory/package
+// classification and command-override lookup, reached only by finite runs.
+// prepare_target resolves profile/settings and supplies checked facts/source
+// identities; compile_harness produces the canonical Stock/Override/Generated
+// transformed MIR and evidence environment (never a Rust/interpreter image).
+// doctests uses the existing Doctest discovery/synthesis/mismatch contracts;
+// finalize_evidence uses Foundation EvidenceReport+the canonical test/claim
+// projections, optional-history versus protected retention, and receipt/index
+// publication. It must not substitute child exit alone for required grading.
+// emit is the caller's OutputAdapter sink (harness capture or real streams).
+// Cache reads/writes are optional acceleration only, never producer execution.
+pub trait JetCLITestProvider {
+    // Rust main target resolution: a bare target resolves through the
+    // existing project/member default (override lookup unless show_default),
+    // never a guessed filename. Read the clock only when sample_shuffle_seed.
+    fn invocation_context(&self, requested_target: String?, show_default: Bool, sample_shuffle_seed: Bool) -> JetCLITestCommandContext JetCLITestError!
+    fn prepare_command(&self, invocation: JetCLITestInvocation) JetCLITestError!
+    fn discover(&self, invocation: JetCLITestInvocation) -> JetCLITestDiscovery JetCLITestError!
+    fn prepare_target(&self, file: String, invocation: JetCLITestInvocation, package: Bool) -> JetCLITestPreparation JetCLITestError!
+    // Apply this environment delta and stdio while constructing the owned
+    // request, preserving every unselected inherited/evidence binding. CLI
+    // executes Ready immutably; it never clones the checked MIR for mutation.
+    fn compile_harness(&self, target: JetCLITestPreparedTarget, invocation: JetCLITestInvocation, generated: Bool, environment: [String:String?], stdio: JetCLIExecutionStdio) -> JetCLITestCompilation JetCLITestError!
+    fn doctests(&self, target: JetCLITestPreparedTarget, invocation: JetCLITestInvocation) -> JetCLITestPhaseResult JetCLITestError!
+    fn finalize_evidence(&self, target: JetCLITestPreparedTarget, invocation: JetCLITestInvocation, harness_stdout: String?, child_ok: Bool) -> JetCLITestFinalization JetCLITestError!
+    fn read_cache(&self, path: String) -> [U8]? Never!
+    fn write_cache(&self, path: String, bytes: [U8]) Never!
+    fn remove_evidence(&self, target: JetCLITestPreparedTarget) Never!
+    fn remove_coverage(&self, target: JetCLITestPreparedTarget) Never!
+    fn coverage(&self, target: JetCLITestPreparedTarget, invocation: JetCLITestInvocation) -> JetCLITestCoverageResult JetCLITestError!
+    fn begin_record(&self, target: JetCLITestPreparedTarget, invocation: JetCLITestInvocation) JetCLITestError!
+    fn finish_record(&self, target: JetCLITestPreparedTarget, invocation: JetCLITestInvocation, exit_code: Int) JetCLITestError!
+    fn emit(&self, output: JetCLITestOutput) Never!
+    // Rust run_test_watch: the shared WatchService graph is the target file
+    // (or the recursive directory walk), runtime inputs and the manifest; one
+    // named capture belongs to the watch session, not its children. No
+    // directory/package override discovery happens on this path.
+    fn watch_open(&self, invocation: JetCLITestInvocation) -> JetCLITestWatchSession JetCLITestError!
+    // Drains controls, polls/acknowledges one change, waits max(poll_ms,25).
+    fn watch_next(&self, session: JetCLITestWatchSession) -> JetCLITestWatchEvent JetCLITestError!
+    // Exact self-CLI dispatch of the complete argv with captured channels,
+    // stdin null, JET_TEST_CAPTURE=all and JET_TEST_JSON=1 in machine mode.
+    // This must invoke this same Jet test command, never the retired Rust
+    // CLI/backend, and must not add or reorder argv words.
+    fn watch_child(&self, target: String, argv: [String], mode: JetCLIOutputMode) -> JetCLITestWatchChild JetCLITestError!
+    fn watch_close(&self, session: JetCLITestWatchSession, exit_code: Int) JetCLITestError!
+}
+
+// Rust child environment construction (CmdCompile.rs:8073-8128). This is a
+// delta, not a replacement: unselected inherited presence/empty bindings and
+// canonical evidence variables stay in the compiler-owned request.
+pub fn jet_cli_test_harness_environment(options: JetCLITestRunOptions, project_root: String?, coverage_path: String?, json: Bool) -> [String:String?] Never! {
+    environment := [String:String?]{}
+    if project_root == .Val(root) -> environment["JET_PROJECT_ROOT"] = Val(~root)
+    if options.update_snapshots -> environment["JET_UPDATE_SNAPSHOTS"] = Val("1")
+    if coverage_path == .Val(path) -> environment["JET_COV_OUT"] = Val(~path)
+    if options.browser_engines == .Val(engines) -> environment["JET_TEST_BROWSERS"] = Val(~engines)
+    if options.browser_retries == .Val(retries) -> environment["JET_TEST_RETRIES"] = Val("{retries}")
+    if options.browser_reporter == .Val(reporter) -> environment["JET_TEST_REPORTER"] = Val(~reporter)
+    if options.browser_ui -> environment["JET_TEST_BROWSER_UI"] = Val("1")
+    if options.browser_visual -> environment["JET_TEST_BROWSER_VISUAL"] = Val("1")
+    if options.browser_trace {
+        environment["JET_TEST_TRACE"] = Val("1")
+        environment["JET_TEST_TRACE_ON_RETRY"] = Val("1")
+    }
+    if options.filter == .Val(filter) -> environment["JET_TEST_FILTER"] = Val(~filter)
+    if options.shuffle_seed == .Val(seed) -> environment["JET_TEST_SHUFFLE_SEED"] = Val("{seed}")
+    if options.serial -> environment["JET_TEST_SERIAL"] = Val("1")
+    if options.trace_tiers -> environment["JET_TEST_TRACE_TIERS"] = Val("1")
+    if options.measure -> environment["JET_TEST_MEASURE"] = Val("1")
+    environment["JET_TEST_CAPTURE"] = Val(jet_cli_test_capture_name(options.capture))
+    if json -> environment["JET_TEST_JSON"] = Val("1")
+    environment
+}
+
+fn jet_cli_test_empty_output() -> JetCLITestOutput Never! { JetCLITestOutput{stdout: "", stderr: ""} }
+fn jet_cli_test_host_error(error: JetCLIExecutionError, file: String) -> JetCLITestError Never! {
+    JetCLITestError{code: "E2105", message: "couldn't run tests in `{file}`: {error.message}", fix: "", exit_code: 1}
+}
+// Rust main.rs "test" route: settings are parsed before any target
+// resolution, TestRunOpts next, then the stock-default status line, then
+// run_test_opts. Front supplies the Jet-owned argv prefix, already separated
+// at `--`. Preserve shared Args diagnostics rather than flattening them.
+pub fn jet_cli_test_command<P: JetCLITestProvider, H: JetCLIExecutionHost>(argv: [String], mode: JetCLIOutputMode, advisory_lints_visible: Bool, provider: &P, host: &H) -> JetCLITestCommandResult Never! {
+    settings :: jet_cli_args_parse_setting_overrides(argv, mode.json) ?? return JetCLITestCommandResult.OptionsRefused(err)
+    positionals :: jet_cli_positionals(argv)
+    requested :: if positionals.len() > 1 -> Val(positionals[1]) else -> None
+    context :: &provider.invocation_context(requested, argv.contains("--show-default"), argv.contains("--shuffle")) ?? return JetCLITestCommandResult.TestRefused(err)
+    options :: jet_cli_test_parse_options(argv, settings, context.unix_ns) ?? return JetCLITestCommandResult.TestRefused(err)
+    if options.show_default && !mode.json && !mode.quiet -> &provider.emit(JetCLITestOutput{stdout: "", stderr: "jet test: using stock default\n"})
+    invocation :: JetCLITestInvocation{target: context.target, options: options, mode: mode, advisory_lints_visible: advisory_lints_visible, receipt_bypass: context.receipt_bypass}
+    code :: jet_cli_test_run_command<P,H>(invocation, &provider, &host) ?? return JetCLITestCommandResult.TestRefused(err)
+    JetCLITestCommandResult.Completed(code)
+}
+pub fn jet_cli_test_refusal_output(error: JetCLITestError, mode: JetCLIOutputMode) -> JetDriverVerbOutput Never! {
+    why :: jet_cli_why(error.code)
+    if !mode.json -> return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report(error.code, error.message, why, error.fix, mode.color), exit_code: error.exit_code}
+    // Shared Args renderer uses registered Diagnostic -> ReportEnvelope,
+    // including typed no-fix classification, and the canonical CLI envelope.
+    refusal :: jet_cli_args_refuse(error.code, error.message, why, error.fix, true)
+    JetDriverVerbOutput{stdout: refusal.stdout, stderr: refusal.stderr, exit_code: error.exit_code}
+}
+
+
+// Rust finish_doctest_report closure (CmdCompile.rs:7856-7894).
+fn jet_cli_test_finish_target<P: JetCLITestProvider>(target: JetCLITestPreparedTarget, invocation: JetCLITestInvocation, stdout: String?, child_ok: Bool, provider: &P) -> Bool Never! {
+    if &provider.finalize_evidence(target, invocation, stdout, child_ok) == {
+        .Ok(finished) -> {
+            &provider.emit(finished.output)
+            return finished.ok ?? child_ok
+        }
+        .Err(error) -> {
+            if !target.preserve_report -> &provider.remove_evidence(target)
+            failure :: jet_cli_test_refusal_output(JetCLITestError{code: "E2105", message: "couldn't finalize test evidence for `{target.file}`: {error.message}", fix: "", exit_code: 1}, invocation.mode)
+            &provider.emit(JetCLITestOutput{stdout: failure.stdout, stderr: failure.stderr})
+            return false
+        }
+    }
+}
+
+// Rust run_test_target (CmdCompile.rs:7725-8263). Source/MIR/evidence are
+// prepared at their canonical owners, while every selection, cache decision,
+// capture policy, continuation and conjunction stays in this Jet command.
+pub fn jet_cli_test_run_target<P: JetCLITestProvider, H: JetCLIExecutionHost>(file: String, invocation: JetCLITestInvocation, package: Bool, provider: &P, host: &H) -> JetCLITestTargetOutcome JetCLITestError! {
+    // Rust source/root preparation failures are failed targets, not command
+    // refusals: package/directory traversal must still visit later members.
+    // A fatal preparation refusal (unknown profile) propagates as Err.
+    target :: if &provider.prepare_target(file, invocation, package) == {
+        .Ready(prepared) -> prepared
+        .Failed(output) -> {
+            &provider.emit(output)
+            return Ok(JetCLITestTargetOutcome.Ran(false))
+        }
+    }
+    options :: invocation.options
+    &provider.remove_evidence(target)
+    if options.where_expr == .Val(expression) {
+        if !jet_cli_test_where_matches(expression, target.facts) -> return Ok(JetCLITestTargetOutcome.NoTests)
+    }
+    doctests :: &provider.doctests(target, invocation)
+    &provider.emit(doctests.output)
+    if options.docs {
+        if !target.has_doctests {
+            &provider.remove_evidence(target)
+            return Ok(JetCLITestTargetOutcome.NoTests)
+        }
+        return Ok(JetCLITestTargetOutcome.Ran(jet_cli_test_finish_target<P>(target, invocation, None, doctests.ok, &provider)))
+    }
+    override_entry :: !options.show_default && target.override_entry
+    if !override_entry && !target.has_blocks && !target.has_contracts && (package || target.has_doctests) {
+        if target.has_doctests -> return Ok(JetCLITestTargetOutcome.Ran(jet_cli_test_finish_target<P>(target, invocation, None, doctests.ok, &provider)))
+        &provider.remove_evidence(target)
+        return Ok(JetCLITestTargetOutcome.NoTests)
+    }
+    cacheable :: jet_cli_test_cache_write_allowed(options, invocation.receipt_bypass) && !target.has_doctests && !override_entry
+    key :: jet_cli_test_cache_key(target.cache_identity, options)
+    if cacheable && !options.fresh && !invocation.advisory_lints_visible {
+        if key == .Val(cache_key) {
+            if &provider.read_cache(jet_cli_test_cache_path(target.cache_root, cache_key)) == .Val(bytes) {
+                if jet_cli_test_cache_decode(bytes) == .Val(cached) {
+                    evidence_ok :: jet_cli_test_finish_target<P>(target, invocation, Val(~cached.stdout), cached.ok, &provider)
+                    if !invocation.mode.json -> &provider.emit(jet_cli_test_capture_output(cached, options.capture, false))
+                    return Ok(JetCLITestTargetOutcome.Ran(cached.ok && evidence_ok))
+                }
+            }
+        }
+    }
+    // Rust write_mode_status: hidden in machine mode and under --quiet.
+    if override_entry && options.capture == JetCLITestCapturePolicy.All && !invocation.mode.json && !invocation.mode.quiet -> &provider.emit(JetCLITestOutput{stdout: "", stderr: "jet test: using fn test override\n"})
+    environment :: jet_cli_test_harness_environment(options, target.project_root, target.coverage_path, invocation.mode.json)
+    compilation :: &provider.compile_harness(target, invocation, false, environment, JetCLIExecutionStdio.Capture)
+    if compilation == {
+        .Refused(output) -> {
+            &provider.emit(JetCLITestOutput{stdout: ~output.stdout, stderr: ~output.stderr})
+            // Required evidence finalization still runs for compile failures.
+            _ :: jet_cli_test_finish_target<P>(target, invocation, None, false, &provider)
+            if !target.preserve_report -> &provider.remove_evidence(target)
+            return Ok(if override_entry -> JetCLITestTargetOutcome.Override(false) else -> JetCLITestTargetOutcome.Ran(false))
+        }
+        .Ready(checked, diagnostics) -> {
+            &provider.emit(diagnostics)
+            if options.coverage -> &provider.remove_coverage(target)
+            if options.record != None -> &provider.begin_record(target, invocation)
+            if jet_cli_execute_once<H>(checked, &host) == {
+                .Err(error) -> {
+                    if options.coverage -> &provider.remove_coverage(target)
+                    _ :: jet_cli_test_finish_target<P>(target, invocation, None, false, &provider)
+                    if !target.preserve_report -> &provider.remove_evidence(target)
+                    return Err(jet_cli_test_host_error(error, file))
+                }
+                .Ok(executed) -> {
+                    child_ok :: executed.exit_code == 0
+                    evidence_ok :: jet_cli_test_finish_target<P>(target, invocation, Val(~executed.stdout), child_ok, &provider)
+                    ok :: child_ok && doctests.ok && evidence_ok
+                    result :: JetCLITestResultCache{ok: ok, stdout: ~executed.stdout, stderr: ~executed.stderr}
+                    if !invocation.mode.json -> &provider.emit(jet_cli_test_capture_output(result, options.capture, false))
+                    if cacheable {
+                        if key == .Val(cache_key) -> &provider.write_cache(jet_cli_test_cache_path(target.cache_root, cache_key), jet_cli_test_cache_encode(result))
+                    }
+                    if options.coverage {
+                        coverage :: &provider.coverage(target, invocation)
+                        observed :: jet_cli_test_coverage_parse(coverage.records)
+                        if invocation.mode.json {
+                            fields :: StatusFields.new().with("coverage", jet_cli_test_coverage_tree(file, coverage.functions, observed))
+                            &provider.emit(JetCLITestOutput{stdout: "{report_render_status("coverage", true, fields)}\n", stderr: ""})
+                        } else {
+                            &provider.emit(JetCLITestOutput{stdout: jet_cli_test_coverage_human(file, coverage.functions, observed), stderr: ""})
+                        }
+                        &provider.remove_coverage(target)
+                    }
+                    status :: if ok -> 0 else -> if child_ok -> 1 else -> executed.exit_code
+                    if options.record != None -> &provider.finish_record(target, invocation, status)
+                    return Ok(if override_entry -> JetCLITestTargetOutcome.Override(ok) else -> JetCLITestTargetOutcome.Ran(ok))
+                }
+            }
+        }
+    }
+}
+
+// Rust run_test_package (CmdCompile.rs:7604-7663): an entry override owns
+// the package; a member override is only that member's test harness choice.
+fn jet_cli_test_run_package<P: JetCLITestProvider, H: JetCLIExecutionHost>(discovery: JetCLITestDiscovery, invocation: JetCLITestInvocation, provider: &P, host: &H) -> Int JetCLITestError! {
+    ran := 0
+    failed := false
+    if !invocation.options.show_default {
+        if discovery.override_file == .Val(file) -> return Ok(if jet_cli_test_target_ok(jet_cli_test_run_target<P,H>(file, invocation, false, &provider, &host)) -> 0 else -> 1)
+    }
+    if discovery.entry_exists {
+        outcome :: jet_cli_test_run_target<P,H>(discovery.entry, invocation, true, &provider, &host)
+        if outcome == {
+            .Override(ok) -> return Ok(if ok -> 0 else -> 1)
+            .Ran(ok) -> {
+                ran += 1
+                failed = !ok
+            }
+            .NoTests -> {}
+        }
+    }
+    loop file in discovery.targets {
+        if file == discovery.entry || jet_cli_test_reserved_target_file(file) -> next
+        outcome :: jet_cli_test_run_target<P,H>(file, invocation, true, &provider, &host)
+        if outcome == {
+            .Ran(ok) | .Override(ok) -> {
+                ran += 1
+                failed = failed || !ok
+            }
+            .NoTests -> {}
+        }
+    }
+    // Rust re-enters run_test_opts for the entry: environment/existence (a
+    // missing entry reports E2105 exactly once), where, fresh status, file run.
+    if ran == 0 {
+        entry_invocation := ~invocation
+        entry_invocation.target = ~discovery.entry
+        return jet_cli_test_run_command<P,H>(entry_invocation, &provider, &host)
+    }
+    Ok(if failed -> 1 else -> 0)
+}
+
+fn jet_cli_test_generated_corpus(file: String, property: String?) -> String Never! {
+    if property == .Val(name) {
+        sanitized := [U8]{}
+        loop byte in name.bytes() {
+            // Rust replaces one Unicode scalar, not each continuation byte.
+            if byte >= 0x80 && byte < 0xc0 -> next
+            if (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) || byte == 45 || byte == 95 {
+                &sanitized.push(byte)
+            } else {
+                &sanitized.push(U8{95})
+            }
+        }
+        if sanitized.len() > 0 {
+            sanitized_name :: String.from_bytes(sanitized) ?? panic("ASCII generated name")
+            return ".jet/fuzz/{sanitized_name}"
+        }
+    }
+    bytes :: file.bytes()
+    start := 0
+    loop at in 0..<bytes.len() { if bytes[at] == (U8{47}) -> start = at + 1 }
+    end := bytes.len()
+    loop at in start + 1..<bytes.len() { if bytes[at] == (U8{46}) -> end = at }
+    stem :: String.from_bytes(bytes[start..<end]) ?? panic("filename boundary")
+    ".jet/fuzz/{stem.replace(".", "_")}"
+}
+
+// Rust run_generated_test (CmdCompile.rs:7397-7504), using the canonical
+// generated-property MIR rather than emitting a Rust fuzz runner.
+fn jet_cli_test_run_generated<P: JetCLITestProvider, H: JetCLIExecutionHost>(invocation: JetCLITestInvocation, provider: &P, host: &H) -> Int JetCLITestError! {
+    // Rust exits USER_ERROR after reporting an unreadable source or project root.
+    target :: if &provider.prepare_target(invocation.target, invocation, false) == {
+        .Ready(prepared) -> prepared
+        .Failed(output) -> {
+            &provider.emit(output)
+            return Ok(1)
+        }
+    }
+    environment :: [String:String?]{
+        "JET_FUZZ_CORPUS": Val(invocation.options.generated_corpus ?? jet_cli_test_generated_corpus(invocation.target, invocation.options.generated_test_name)),
+        "JET_FUZZ_ITERATIONS": Val("{invocation.options.generated_iterations ?? 1000}"),
+        "JET_FUZZ_TIME_MS": Val("{invocation.options.generated_time_budget_ms ?? 0}"),
+        "JET_FUZZ_SEED": Val("{invocation.options.generated_seed ?? 0x5EED1234ABCD0001}"),
+    }
+    compilation :: &provider.compile_harness(target, invocation, true, environment, JetCLIExecutionStdio.Inherit)
+    if compilation == {
+        .Refused(output) -> {
+            &provider.emit(JetCLITestOutput{stdout: ~output.stdout, stderr: ~output.stderr})
+            Ok(output.exit_code)
+        }
+        .Ready(checked, diagnostics) -> {
+            &provider.emit(diagnostics)
+            // #4316: preserve the canonical generic execution call. The full
+            // journey repro loses this checked callee during specialization;
+            // do not clone or flatten execution policy to bypass the compiler.
+            executed :: jet_cli_execute_once<H>(checked, &host) ?? return Err(JetCLITestError{code: "E2105", message: "couldn't run generated tests in `{invocation.target}`: {err.message}", fix: "", exit_code: 1})
+            &provider.emit(JetCLITestOutput{stdout: ~executed.stdout, stderr: ~executed.stderr})
+            Ok(executed.exit_code)
+        }
+    }
+}
+
+// Rust run_test_opts (CmdCompile.rs:7513-7592). Front supplies already parsed
+// options; main remains the sole process exit owner. The provider's emit sink
+// is inherited from the one command harness/OutputAdapter boundary.
+pub fn jet_cli_test_run_command<P: JetCLITestProvider, H: JetCLIExecutionHost>(invocation: JetCLITestInvocation, provider: &P, host: &H) -> Int JetCLITestError! {
+    &provider.prepare_command(invocation)
+    if invocation.options.grade_generated -> return jet_cli_test_run_generated<P,H>(invocation, &provider, &host)
+    if invocation.options.where_expr == .Val(expression) {
+        _ :: jet_cli_test_parse_where(expression) ?? return Err(JetCLITestError{code: "E2104", message: "invalid --where expression: {err.message}", fix: "", exit_code: 1})
+    }
+    if invocation.options.watch -> return jet_cli_test_run_watch<P>(invocation, &provider)
+    // Rust write_mode_status: hidden in machine mode as well as --quiet.
+    if invocation.options.fresh && !invocation.mode.json && !invocation.mode.quiet -> &provider.emit(JetCLITestOutput{stdout: "", stderr: "jet test: fresh result run (test-result cache bypassed; build cache reusable)\n"})
+    discovery :: &provider.discover(invocation)
+    if discovery.kind == JetCLITestDiscoveryKind.Package -> return jet_cli_test_run_package<P,H>(discovery, invocation, &provider, &host)
+    if discovery.kind == JetCLITestDiscoveryKind.Directory {
+        if !invocation.options.show_default {
+            if discovery.override_file == .Val(file) -> return Ok(if jet_cli_test_target_ok(jet_cli_test_run_target<P,H>(file, invocation, false, &provider, &host)) -> 0 else -> 1)
+        }
+        if discovery.targets.len() == 0 -> return Err(JetCLITestError{code: "E2104", message: "no .jet files in `{invocation.target}` (searched subdirectories too)", fix: "", exit_code: 1})
+        failed := false
+        loop file in discovery.targets {
+            if !jet_cli_test_target_ok(jet_cli_test_run_target<P,H>(file, invocation, false, &provider, &host)) -> failed = true
+        }
+        return Ok(if failed -> 1 else -> 0)
+    }
+    Ok(if jet_cli_test_target_ok(jet_cli_test_run_target<P,H>(invocation.target, invocation, false, &provider, &host)) -> 0 else -> 1)
+}
+
+// Rust run_test_watch_selection (CmdCompile.rs:8546-8588), children use the
+// same actual command dispatch. A failed named rerun with no markers retains
+// its selected name, so the cursor cannot disappear merely on malformed output.
+fn jet_cli_test_watch_run_selection<P: JetCLITestProvider>(invocation: JetCLITestInvocation, selection: [String]?, output: JetCLITestCapturePolicy, provider: &P) -> JetCLITestWatchState JetCLITestError! {
+    state := jet_cli_test_watch_state_new(output)
+    names := [String?]{}
+    if selection == {
+        .Val(selected) -> { loop name in selected -> &names.push(Val(~name)) }
+        .None -> &names.push(String?{None})
+    }
+    seen := [String:Bool]{}
+    loop name in names {
+        // Rust run_test_watch_child argv: test <path> [--json] [--verbose]
+        // then append_test_watch_flags. A spawn failure is a failed child
+        // (USER_ERROR) whose message is captured stderr; the watch continues.
+        argv := [String]{"test", ~invocation.target}
+        if invocation.mode.json -> &argv.push("--json")
+        if invocation.advisory_lints_visible -> &argv.push("--verbose")
+        loop flag in jet_cli_test_watch_flags(invocation.options, name) -> &argv.push(flag)
+        child :: &provider.watch_child(invocation.target, argv, invocation.mode) ?? JetCLITestWatchChild{exit_code: 1, result: JetCLITestResultCache{ok: false, stdout: "", stderr: "jet test watcher: couldn't run child: {err.message}\n"}}
+        &provider.emit(jet_cli_test_capture_output(child.result, output, invocation.mode.json))
+        if selection == None || child.exit_code != 0 {
+            if child.exit_code != 0 -> state.last_status = child.exit_code
+            found := jet_cli_test_watch_failure_names(child.result.stdout, child.result.stderr)
+            if found.len() == 0 && child.exit_code != 0 { if name == .Val(selected) -> &found.push(~selected) }
+            loop failure in found {
+                if !seen.has_key(failure) {
+                    seen[failure] = true
+                    &state.failed.push(failure)
+                }
+            }
+        }
+    }
+    state
+}
+
+// Rust run_test_watch (CmdCompile.rs:8590-8764). Every exit/failure closes the
+// shared watcher/capture authority, and last-good stays retained on failed reruns.
+fn jet_cli_test_run_watch<P: JetCLITestProvider>(invocation: JetCLITestInvocation, provider: &P) -> Int JetCLITestError! {
+    session :: &provider.watch_open(invocation)
+    if jet_cli_test_run_watch_session<P>(session, invocation, &provider) == {
+        .Ok(status) -> {
+            &provider.watch_close(session, status)
+            Ok(status)
+        }
+        .Err(error) -> {
+            &provider.watch_close(session, error.exit_code).drop("preserve primary watch failure")
+            Err(~error)
+        }
+    }
+}
+fn jet_cli_test_run_watch_session<P: JetCLITestProvider>(session: JetCLITestWatchSession, invocation: JetCLITestInvocation, provider: &P) -> Int JetCLITestError! {
+    human :: !invocation.mode.json && !invocation.mode.quiet
+    if human -> &provider.emit(JetCLITestOutput{stdout: "", stderr: "jet test --watch ({if invocation.options.fresh -> "fresh" else -> "cached"} results): r rerun failed, a run all, o cycle output, q quit\n"})
+    state := jet_cli_test_watch_run_selection<P>(invocation, None, invocation.options.capture, &provider)
+    if state.last_status == 0 {
+        state.last_good = true
+    } else {
+        if human -> &provider.emit(JetCLITestOutput{stdout: "", stderr: "jet test: failure; last-good build artifact retained\n"})
+    }
+    loop {
+        event :: &provider.watch_next(session)
+        action :: jet_cli_test_watch_control(&state, event.controls)
+        selection := [String]?{None}
+        run := false
+        if action == {
+            .Quit -> return Ok(state.last_status)
+            .RerunFailed -> {
+                if state.failed.len() == 0 {
+                    if human -> &provider.emit(JetCLITestOutput{stdout: "", stderr: "jet test: no failed tests to rerun\n"})
+                } else {
+                    selection = Val(~state.failed)
+                    run = true
+                }
+            }
+            .RunAll -> run = true
+            .OutputChanged -> { if human -> &provider.emit(JetCLITestOutput{stdout: "", stderr: "jet test: output {jet_cli_test_capture_name(state.output)}\n"}) }
+            .NonePending -> {}
+        }
+        if run {
+            next :: jet_cli_test_watch_run_selection<P>(invocation, selection, state.output, &provider)
+            notice :: jet_cli_test_watch_observe(&state, next.last_status, next.failed, false)
+            if notice && human -> &provider.emit(JetCLITestOutput{stdout: "", stderr: "jet test: failure; last-good build artifact retained\n"})
+        }
+        if event.changed {
+            next :: jet_cli_test_watch_run_selection<P>(invocation, jet_cli_test_watch_changed_selection(state), state.output, &provider)
+            notice :: jet_cli_test_watch_observe(&state, next.last_status, next.failed, false)
+            if notice && human -> &provider.emit(JetCLITestOutput{stdout: "", stderr: "jet test: failure; last-good build artifact retained\n"})
+        }
+    }
+}

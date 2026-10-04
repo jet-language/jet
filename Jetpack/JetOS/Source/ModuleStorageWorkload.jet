@@ -1,0 +1,233 @@
+// Rust crates/jetpack/src/JetOS/module_storage_workload.rs:14-353.
+// OptionsRendering/Types, EnvModel Plans, Foundation JSON and UserFlatpakPerf
+// manifest_lines are canonical dependencies. This is not the OS-switch engine.
+// Native storage/workload writers retain Studio jetos_make_executable's actual
+// followed metadata/mode | 0111 prerequisite (#4479/#3593), RootProjection's
+// enable_unit link/copy (#3593), and original process acceptance (#3594).
+// No chmod/pathname/process substitute is defined here.
+
+pub fn jetos_write_module_priority_facts(dir: String, system: SystemPlan) IOError! -[FS]> {
+    module_dir :: files.join(dir, "module-system")
+    files.create_dir_all(module_dir)
+    keys := [String]{}
+    loop option in system.options {
+        if !jetos_is_option_priority_metadata(option.key) -> &keys.push(~option.key)
+    }
+    &keys.sort()
+    resolved := [String]{}
+    loop index in 0..<keys.len() {
+        if index > 0 && keys[index] == keys[index - 1] -> next
+        if jetos_resolved_option(system, keys[index]) == .Val(row) -> &resolved.push(row.to_json())
+    }
+    disabled :: if jetos_option_value(system, [String]{"packages.disabledModules"}) == {
+        .Val(value) -> jetos_parse_list_items(value)
+        .None -> [String]{}
+    }
+    files.write(files.join(module_dir, "disabled-modules.manifest"), jetos_manifest_lines(disabled))
+    files.write(files.join(module_dir, "explain.json"), "{{\"kind\":\"jetos.option-explain\",\"tiers\":[\"Default\",\"Normal\",\"Force\",\"Priority(n)\"],\"module_ids\":\"stable-source-paths\",\"resolved\":[{resolved.join(",")}],\"disabled_modules\":[{jetos_strings_json(disabled)}]}}")
+}
+
+// Rust :56-70: invalid primary root FS falls back to ext4, NOT the alias.
+struct JetOSStorageSettings {
+    disk: String
+    table: String
+    esp_size: String
+    root_fs: String
+    ephemeral: String
+}
+
+fn jetos_storage_settings(system: SystemPlan) -> JetOSStorageSettings Never! {
+    disk :: jetos_option_value(system, [String]{"storage.disk.main.device"}) ?? "guided-ext4"
+    table :: if jetos_option_value(system, [String]{"storage.disk.main.table"}) == {
+        .Val(value) -> jetos_clean_symbol(value)
+        .None -> "GPT"
+    }
+    esp_size := jetos_option_value(system, [String]{"storage.disk.main.partitions.esp.size"}) ?? "512M"
+    if !jetos_valid_storage_size(esp_size) -> esp_size = "512M"
+    root_fs := if jetos_option_value(system, [String]{"storage.filesystem.root.type", "filesystem.root.type"}) == {
+        .Val(value) -> jetos_clean_symbol(value)
+        .None -> "ext4"
+    }
+    if !jetos_valid_filesystem_type(root_fs) -> root_fs = "ext4"
+    ephemeral :: jetos_option_value(system, [String]{"storage.ephemeralRoot", "storage.root.ephemeral"}) ?? "false"
+    JetOSStorageSettings{disk: disk, table: table, esp_size: esp_size, root_fs: root_fs, ephemeral: ephemeral}
+}
+
+fn jetos_storage_facts_json(settings: JetOSStorageSettings, rows: [(key: String, value: String)]) -> String Never! {
+    "{{\"kind\":\"jetos.storage-tree\",\"installer_consumes\":true,\"activation_consumes\":true,\"disk\":{foundation_json_quote(settings.disk)},\"table\":{foundation_json_quote(settings.table)},\"root_fs\":{foundation_json_quote(settings.root_fs)},\"ephemeral_root\":{jetos_clean_bool_json(settings.ephemeral)},\"options\":[{jetos_option_rows_json(rows)}],\"commands\":[\"jetos-storage-plan\",\"jetos-storage-apply\",\"jetos-persist-activate\"],\"proof\":\"storage-plan-ready\"}}"
+}
+
+fn jetos_storage_plan_json(host: String, settings: JetOSStorageSettings, persist: [(key: String, value: String)]) -> String Never! {
+    "{{\"kind\":\"jetos.storage-plan\",\"host\":{foundation_json_quote(host)},\"disk\":{foundation_json_quote(settings.disk)},\"table\":{foundation_json_quote(settings.table)},\"root_fs\":{foundation_json_quote(settings.root_fs)},\"partitions\":[{{\"name\":\"esp\",\"size\":{foundation_json_quote(settings.esp_size)},\"fs\":\"vfat\",\"mount\":\"/boot\"}},{{\"name\":\"root\",\"size\":\"rest\",\"fs\":{foundation_json_quote(settings.root_fs)},\"mount\":\"/\"}}],\"ephemeral_root\":{jetos_clean_bool_json(settings.ephemeral)},\"persistence\":[{jetos_option_rows_json(persist)}],\"destructive_actions\":[\"partition\",\"format\"],\"safety\":\"requires --manual plus --execute\"}}"
+}
+
+fn jetos_storage_fstab(settings: JetOSStorageSettings) -> String Never! {
+    "LABEL=JETOS-ESP\t/boot\tvfat\tumask=0077\t0\t1\nLABEL=jetos-root\t/\t{settings.root_fs.to_lower()}\tdefaults\t0\t1\n"
+}
+
+pub fn jetos_write_storage_facts(dir: String, system: SystemPlan) IOError! -[FS, Env]> {
+    storage_dir :: files.join(dir, "storage")
+    bin_dir :: files.join(dir, "sw/bin")
+    files.create_dir_all(storage_dir)
+    files.create_dir_all(bin_dir)
+    rows := jetos_prefixed_options(system, "storage.")
+    loop row in jetos_prefixed_options(system, "filesystem.") -> &rows.push(row)
+    persist :: jetos_prefixed_options(system, "storage.persist.")
+    settings :: jetos_storage_settings(system)
+    files.write(files.join(storage_dir, "facts.json"), jetos_storage_facts_json(settings, rows))
+    files.write(files.join(storage_dir, "plan.json"), jetos_storage_plan_json(system.name, settings, persist))
+    files.write(files.join(storage_dir, "mounts.fstab"), jetos_storage_fstab(settings))
+    manifest := [String]{}
+    loop row in persist -> &manifest.push("{row.key}\t{row.value}\n")
+    files.write(files.join(storage_dir, "persistence.manifest"), manifest.join(""))
+    plan_path :: files.join(bin_dir, "jetos-storage-plan")
+    files.write(plan_path, jetos_storage_plan_script())
+    jetos_make_executable(plan_path)
+    apply_path :: files.join(bin_dir, "jetos-storage-apply")
+    files.write(apply_path, jetos_storage_apply_script(settings))
+    jetos_make_executable(apply_path)
+    persist_path :: files.join(bin_dir, "jetos-persist-activate")
+    files.write(persist_path, jetos_storage_persist_script())
+    jetos_make_executable(persist_path)
+}
+
+// Rust :129-138. No positivity constraint: 0M and 000KiB are valid.
+fn jetos_valid_storage_size(size: String) -> Bool Never! {
+    raw :: size.bytes()
+    split := 0
+    loop split < raw.len() {
+        code :: Int.from_u8(raw[split])
+        if code < 48 || code > 57 -> break
+        split += 1
+    }
+    if split == 0 -> return false
+    // The consumed prefix is ASCII, so this character index is also a byte index.
+    suffix := size.slice(split, size.len()) // #4303
+    suffix == "K" || suffix == "M" || suffix == "G" || suffix == "T" || suffix == "KiB" || suffix == "MiB" || suffix == "GiB" || suffix == "TiB"
+}
+
+fn jetos_valid_filesystem_type(filesystem: String) -> Bool Never! {
+    raw :: filesystem.bytes()
+    if raw.len() == 4 -> return (raw[0] == 101 || raw[0] == 69) && (raw[1] == 120 || raw[1] == 88) && (raw[2] == 116 || raw[2] == 84) && raw[3] == 52
+    if raw.len() == 5 -> return (raw[0] == 98 || raw[0] == 66) && (raw[1] == 116 || raw[1] == 84) && (raw[2] == 114 || raw[2] == 82) && (raw[3] == 102 || raw[3] == 70) && (raw[4] == 115 || raw[4] == 83)
+    false
+}
+
+fn jetos_storage_plan_script() -> String Never! {
+    "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\ncat \"$root/storage/plan.json\"\nprintf '\\n'\n"
+}
+
+fn jetos_storage_apply_script(settings: JetOSStorageSettings) -> String Never! {
+    "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\ndisk=${{JETOS_STORAGE_DISK:-{jetos_shell_single_quote(settings.disk)}}}\nmanual=false\nexecute=false\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    --manual) manual=true ;;\n    --execute) execute=true ;;\n    *) echo \"usage: jetos-storage-apply --manual [--execute]\" >&2; exit 2 ;;\n  esac\ndone\nif [ \"$manual\" != true ]; then\n  echo 'jetos storage: destructive disk plan requires --manual' >&2\n  exit 2\nfi\ncase \"$disk\" in\n  guided-ext4|/dev/*) ;;\n  *) echo 'jetos storage: disk must be guided-ext4 or an absolute /dev path' >&2; exit 2 ;;\nesac\ncase \"$disk\" in\n  *[!A-Za-z0-9_./-]*) echo 'jetos storage: disk contains unsafe characters' >&2; exit 2 ;;\nesac\nlog=${{JETOS_STORAGE_LOG:-$root/storage/apply-plan.sh}}\nproof_dir=${{JETOS_STORAGE_PROOF_DIR:-$root/storage}}\nmkdir -p \"$proof_dir\"\n{{\n  printf '%s\\n' '#!/usr/bin/env sh'\n  printf '%s\\n' 'set -eu'\n  printf 'sfdisk --wipe always %s <<EOF\\nlabel: gpt\\nsize={settings.esp_size}, type=U\\ntype=L\\nEOF\\n' \"$disk\"\n  printf 'mkfs.vfat -n JETOS-ESP %s1\\n' \"$disk\"\n  printf 'mkfs.{settings.root_fs.to_lower()} -L jetos-root %s2\\n' \"$disk\"\n}} > \"$log\"\nif [ \"$execute\" = true ]; then\n  sh \"$log\"\nfi\nprintf '{{\"kind\":\"jetos.storage-apply\",\"state\":\"planned\",\"executed\":%s,\"disk\":\"%s\",\"proof\":\"manual-storage-plan-reviewed\"}}\\n' \"$execute\" \"$disk\" > \"$proof_dir/apply-proof.json\"\ncat \"$proof_dir/apply-proof.json\"\n"
+}
+
+fn jetos_storage_persist_script() -> String Never! {
+    "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\npersist_root=${{JETOS_PERSIST_ROOT:-/persist}}\nephemeral_root=${{JETOS_EPHEMERAL_ROOT:-/}}\nproof_dir=${{JETOS_STORAGE_PROOF_DIR:-$root/storage}}\nmkdir -p \"$proof_dir\"\nproof=\"$proof_dir/persistence-proof.json\"\nmanifest=\"$root/storage/persistence.manifest\"\ncount=0\n: > \"$proof.tmp\"\nif [ -f \"$manifest\" ]; then\n  while IFS='\t' read -r key path; do\n    [ -n \"$path\" ] || continue\n    case \"$path\" in /*) rel=${{path#/}} ;; *) rel=$path ;; esac\n    mkdir -p \"$persist_root/$rel\" \"$ephemeral_root/$rel\"\n    printf '%s\\t%s\\n' \"$key\" \"$path\" >> \"$proof.tmp\"\n    count=$((count + 1))\n  done < \"$manifest\"\nfi\nprintf '{{\"kind\":\"jetos.persistence\",\"state\":\"activated\",\"count\":%s,\"proof\":\"impermanence-persist-ready\"}}\\n' \"$count\" > \"$proof\"\ncat \"$proof\"\n"
+}
+
+// One per-item render carrier; inputs are read-borrowed, never copied plans.
+struct JetOSWorkloadRendering {
+    plan: String
+    facts: String
+    rollback: String
+    health_script: String
+    run_script: String
+    unit: String
+}
+
+fn jetos_workload_rendering(system: SystemPlan, name: String) -> JetOSWorkloadRendering Never! {
+    backend :: if jetos_option_value(system, [String]{"workload.{name}.backend"}) == {
+        .Val(value) -> jetos_clean_symbol(value)
+        .None -> "Container"
+    }
+    image :: jetos_option_value(system, [String]{"workload.{name}.image", "workload.{name}.package"}) ?? name
+    ports :: if jetos_option_value(system, [String]{"workload.{name}.ports"}) == {
+        .Val(value) -> jetos_parse_list_items(value)
+        .None -> [String]{}
+    }
+    mounts :: if jetos_option_value(system, [String]{"workload.{name}.mounts"}) == {
+        .Val(value) -> jetos_parse_list_items(value)
+        .None -> [String]{}
+    }
+    secrets :: if jetos_option_value(system, [String]{"workload.{name}.secrets"}) == {
+        .Val(value) -> jetos_parse_list_items(value)
+        .None -> [String]{}
+    }
+    memory :: jetos_option_value(system, [String]{"workload.{name}.resources.memory", "workload.{name}.microvm.memory"}) ?? if backend == "MicroVM" -> "1024M" else -> "host-shared"
+    cpus :: jetos_option_value(system, [String]{"workload.{name}.resources.cpus", "workload.{name}.microvm.cpus"}) ?? "1"
+    health :: jetos_option_value(system, [String]{"workload.{name}.health.command"}) ?? if ports.len() == 0 -> "true" else -> "nc -z 127.0.0.1 {jetos_shell_single_quote(ports[0])}"
+    rollback_keep :: jetos_option_value(system, [String]{"workload.{name}.rollback.keep"}) ?? "2"
+    command :: if jetos_option_value(system, [String]{"workload.{name}.command"}) == {
+        .Val(value) -> value
+        .None -> {
+            default_command :: if backend == "MicroVM" -> "qemu-system-x86_64 -m {jetos_shell_single_quote(memory)} -smp {jetos_shell_single_quote(cpus)} -nographic -kernel {jetos_shell_single_quote(image)}" else -> {
+                port_flags := [String]{}
+                mount_flags := [String]{}
+                secret_flags := [String]{}
+                loop port in ports -> &port_flags.push("-p {jetos_shell_single_quote("{port}:{port}")}")
+                loop mount in mounts -> &mount_flags.push("-v {jetos_shell_single_quote(mount)}")
+                loop secret in secrets -> &secret_flags.push("--secret {jetos_shell_single_quote(secret)}")
+                "${{JETOS_CONTAINER_BIN:-podman}} run --rm {port_flags.join(" ")} {mount_flags.join(" ")} {secret_flags.join(" ")} {jetos_shell_single_quote(image)}"
+            }
+            default_command
+        }
+    }
+    ports_json :: jetos_strings_json(ports)
+    mounts_json :: jetos_strings_json(mounts)
+    secrets_json :: jetos_strings_json(secrets)
+    plan :: "{{\"kind\":\"jetos.workload-plan\",\"name\":{foundation_json_quote(name)},\"backend\":{foundation_json_quote(backend)},\"image\":{foundation_json_quote(image)},\"ports\":[{ports_json}],\"mounts\":[{mounts_json}],\"secrets\":[{secrets_json}],\"resources\":{{\"memory\":{foundation_json_quote(memory)},\"cpus\":{foundation_json_quote(cpus)}}},\"health\":{foundation_json_quote(health)},\"rollback_keep\":{foundation_json_quote(rollback_keep)},\"command\":{foundation_json_quote(command)},\"proof\":\"workload-proof-ready\"}}"
+    facts :: "{{\"name\":{foundation_json_quote(name)},\"backend\":{foundation_json_quote(backend)},\"image\":{foundation_json_quote(image)},\"ports\":[{ports_json}],\"mounts\":[{mounts_json}],\"secrets\":[{secrets_json}],\"resources\":{{\"memory\":{foundation_json_quote(memory)},\"cpus\":{foundation_json_quote(cpus)}}},\"health\":{foundation_json_quote(health)},\"rollback_keep\":{foundation_json_quote(rollback_keep)},\"proof\":\"workload-rollout-ready\"}}"
+    JetOSWorkloadRendering{
+        plan: plan,
+        facts: facts,
+        rollback: "keep\t{rollback_keep}\ncurrent\t/run/current-system/workloads/{name}\n",
+        health_script: "#!/usr/bin/env sh\nset -eu\ncmd={jetos_shell_single_quote(health)}\nsh -c \"$cmd\"\n",
+        run_script: "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\ncmd={jetos_shell_single_quote(command)}\nsh -c \"$cmd\"\n\"$root/workloads/health-{name}.sh\"\n",
+        unit: "[Unit]\nDescription=jetos workload {name}\n\n[Service]\nExecStart=/run/current-system/sw/bin/jetos-workload-run {name}\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target\n"
+    }
+}
+
+pub fn jetos_write_workload_facts(dir: String, system: SystemPlan) IOError! -[FS, Env]> {
+    workloads_dir :: files.join(dir, "workloads")
+    unit_dir :: files.join(dir, "etc/systemd/system")
+    files.create_dir_all(workloads_dir)
+    files.create_dir_all(unit_dir)
+    names :: jetos_collect_names(system, "workload")
+    facts := [String]{}
+    bin_dir :: files.join(dir, "sw/bin")
+    files.create_dir_all(bin_dir)
+    loop name in names {
+        jetos_validate_workload_name(name)
+        rendered :: jetos_workload_rendering(system, name)
+        files.write(files.join(workloads_dir, "{name}.plan.json"), rendered.plan)
+        files.write(files.join(workloads_dir, "{name}.rollback.manifest"), rendered.rollback)
+        health_path :: files.join(workloads_dir, "health-{name}.sh")
+        files.write(health_path, rendered.health_script)
+        jetos_make_executable(health_path)
+        script_path :: files.join(workloads_dir, "run-{name}.sh")
+        files.write(script_path, rendered.run_script)
+        jetos_make_executable(script_path)
+        files.write(files.join(unit_dir, "workload-{name}.service"), rendered.unit)
+        jetos_enable_unit(unit_dir, "multi-user.target", "workload-{name}.service")
+        &facts.push(rendered.facts)
+    }
+    runner_path :: files.join(bin_dir, "jetos-workload-run")
+    files.write(runner_path, jetos_workload_runner_script())
+    jetos_make_executable(runner_path)
+    files.write(files.join(workloads_dir, "facts.json"), "{{\"kind\":\"jetos.workloads\",\"items\":[{facts.join(",")}]}}")
+}
+
+fn jetos_workload_runner_script() -> String Never! {
+    "#!/usr/bin/env sh\nset -eu\nname=${{1:-}}\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\nif [ -z \"$name\" ]; then\n  echo 'usage: jetos-workload-run <name>' >&2\n  exit 2\nfi\nscript=\"$root/workloads/run-$name.sh\"\nif [ ! -x \"$script\" ]; then\n  echo \"jetos workload: no runnable workload named $name\" >&2\n  exit 2\nfi\nexec /bin/sh \"$script\"\n"
+}
+
+// Main-authorized tandem safety correction: one portable safe path component.
+// Validate before constructing any per-workload output path; no sanitizing alias.
+fn jetos_validate_workload_name(name: String) IOError! {
+    valid := name != "" && name != "." && name != ".."
+    loop byte in name.bytes() {
+        code :: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95 || code == 46) -> valid = false
+    }
+    if !valid -> return Err(IOError.InvalidInput(IOContext{operation: .Write, resource: Val(name), os_code: None, cause: Val("jetos workload: name must be a single safe path component")}))
+}

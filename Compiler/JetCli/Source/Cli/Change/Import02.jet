@@ -1,0 +1,1714 @@
+// PORT-PENDING 0690 source-cmdimport-slice-1814: Source/CmdImport.rs:1814-3523
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn infer_javascript_parameter_type(body: &str, name: &str) -> Option<String> {
+//RS     let string_concat = body.split('+').any(|piece| {
+//RS         contains_identifier(piece, name)
+//RS             && body
+//RS                 .split('+')
+//RS                 .any(|other| other != piece && contains_quote(other))
+//RS     });
+//RS     if string_concat {
+//RS         Some("String".into())
+//RS     } else if body.contains(&format!("{name} === true"))
+//RS         || body.contains(&format!("true === {name}"))
+//RS         || body.contains(&format!("{name} === false"))
+//RS         || body.contains(&format!("false === {name}"))
+//RS     {
+//RS         Some("Bool".into())
+//RS     } else {
+//RS         None
+//RS     }
+//RS }
+//RS 
+//RS fn contains_identifier(text: &str, wanted: &str) -> bool {
+//RS     text.split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+//RS         .any(|part| part == wanted)
+//RS }
+//RS 
+//RS fn infer_javascript_value_type(
+//RS     expression: &str,
+//RS     known: &BTreeMap<String, String>,
+//RS ) -> Option<String> {
+//RS     let expression = expression
+//RS         .trim()
+//RS         .trim_end_matches(';')
+//RS         .trim()
+//RS         .replace("!==", "!=")
+//RS         .replace("===", "==");
+//RS     if let Some(ty) = known.get(&expression) {
+//RS         return Some(ty.clone());
+//RS     }
+//RS     let tokens = lex(&expression).ok()?;
+//RS     let mut saw_value = false;
+//RS     let mut has_numeric = false;
+//RS     let mut has_float = false;
+//RS     let mut has_string = false;
+//RS     let mut has_comparison = false;
+//RS     let mut has_boolean = false;
+//RS     let mut has_arithmetic = false;
+//RS     for token in tokens {
+//RS         match token {
+//RS             Token::Word(word) => match word.as_str() {
+//RS                 "true" | "false" => {
+//RS                     saw_value = true;
+//RS                     has_boolean = true;
+//RS                 }
+//RS                 _ => {
+//RS                     let ty = known.get(&word)?;
+//RS                     saw_value = true;
+//RS                     match ty.as_str() {
+//RS                         "Float" => {
+//RS                             has_float = true;
+//RS                             has_numeric = true;
+//RS                         }
+//RS                         "String" => has_string = true,
+//RS                         "Bool" => has_boolean = true,
+//RS                         "Int" => has_numeric = true,
+//RS                         _ => return None,
+//RS                     }
+//RS                 }
+//RS             },
+//RS             Token::Number(value) => {
+//RS                 saw_value = true;
+//RS                 has_numeric = true;
+//RS                 has_float |= value.contains('.');
+//RS             }
+//RS             Token::Text(_) => {
+//RS                 saw_value = true;
+//RS                 has_string = true;
+//RS             }
+//RS             Token::Op(op) => match op.as_str() {
+//RS                 "==" | "!=" | "<" | ">" | "<=" | ">=" => has_comparison = true,
+//RS                 "&&" | "||" | "!" => has_boolean = true,
+//RS                 "+" | "-" | "*" | "/" | "%" => has_arithmetic = true,
+//RS                 _ => return None,
+//RS             },
+//RS             Token::Open | Token::Close => {}
+//RS             Token::Comma => return None,
+//RS         }
+//RS     }
+//RS     if !saw_value {
+//RS         return None;
+//RS     }
+//RS     if has_comparison || (has_boolean && !has_arithmetic) {
+//RS         Some("Bool".into())
+//RS     } else if has_string {
+//RS         Some("String".into())
+//RS     } else if has_arithmetic || has_float || has_numeric {
+//RS         Some(if has_float { "Float" } else { "Int" }.into())
+//RS     } else {
+//RS         None
+//RS     }
+//RS }
+//RS 
+//RS fn contains_quote(value: &str) -> bool {
+//RS     value.contains('"') || value.contains('\'')
+//RS }
+//RS 
+//RS /// Recover the declared module boundary for one enterprise source file.
+//RS fn enterprise_unit_name(language: &str, raw: &str, source: &Path) -> Option<String> {
+//RS     let keyword = match language {
+//RS         "java" => "package",
+//RS         "csharp" => "namespace",
+//RS         "go" => "package",
+//RS         "ts" | "js" => {
+//RS             return source
+//RS                 .file_stem()
+//RS                 .and_then(|name| name.to_str())
+//RS                 .filter(|name| identifier(name))
+//RS                 .map(str::to_string)
+//RS         }
+//RS         _ => return None,
+//RS     };
+//RS     for line in raw.lines() {
+//RS         let line = line.trim_start();
+//RS         if line.starts_with("//") || line.starts_with("/*") || line.starts_with('*') {
+//RS             continue;
+//RS         }
+//RS         let Some(rest) = line.strip_prefix(keyword) else {
+//RS             continue;
+//RS         };
+//RS         if !rest.starts_with(char::is_whitespace) {
+//RS             continue;
+//RS         }
+//RS         let name: String = rest
+//RS             .trim()
+//RS             .trim_end_matches(';')
+//RS             .trim_end_matches('{')
+//RS             .trim()
+//RS             .chars()
+//RS             .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '.')
+//RS             .collect();
+//RS         let name = name.rsplit('.').next().unwrap_or_default();
+//RS         if !name.is_empty() {
+//RS             return Some(name.to_string());
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn header(language: &str) -> String {
+//RS     format!("// Generated by jet import {language} (D-MIGRATE-SRC1). Editable Jet source.\n")
+//RS }
+//RS fn binder_header(language: &str) -> String {
+//RS     format!(
+//RS         "// Prepared by jet import {language} (D-MIGRATE-SRC1). Binder-only/manual migration; semantic source conversion is unavailable.\n"
+//RS     )
+//RS }
+//RS 
+//RS fn pascal_library_name(raw: &str) -> Option<String> {
+//RS     for line in raw.lines() {
+//RS         let line = line.trim_start();
+//RS         if line.starts_with("//") || line.starts_with('{') || line.starts_with("(*") {
+//RS             continue;
+//RS         }
+//RS         let lower = line.to_ascii_lowercase();
+//RS         let Some(tail) = lower.strip_prefix("library ") else {
+//RS             continue;
+//RS         };
+//RS         let name = tail
+//RS             .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+//RS             .next()
+//RS             .filter(|value| identifier(value))?;
+//RS         return Some(name.to_ascii_lowercase());
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn ada_package_name(raw: &str) -> Option<String> {
+//RS     for line in raw.lines() {
+//RS         let line = line.trim_start();
+//RS         if line.starts_with("--") {
+//RS             continue;
+//RS         }
+//RS         let lower = line.to_ascii_lowercase();
+//RS         let Some(tail) = lower.strip_prefix("package ") else {
+//RS             continue;
+//RS         };
+//RS         if tail.starts_with("body ") || tail.starts_with("renames ") {
+//RS             continue;
+//RS         }
+//RS         let name = tail
+//RS             .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+//RS             .next()
+//RS             .filter(|value| identifier(value))?;
+//RS         return Some(name.to_string());
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn parse_header(line: &str) -> Result<(String, Vec<(String, String)>, String), String> {
+//RS     let body = line
+//RS         .strip_prefix("def ")
+//RS         .and_then(|value| value.strip_suffix(':'))
+//RS         .ok_or_else(|| "expected def name(args) -> Type:".to_string())?;
+//RS     let open = body
+//RS         .find('(')
+//RS         .ok_or_else(|| "function needs (".to_string())?;
+//RS     let close = body
+//RS         .rfind(')')
+//RS         .ok_or_else(|| "function needs )".to_string())?;
+//RS     let name = body[..open].trim();
+//RS     if close < open || !identifier(name) {
+//RS         return Err("function name is not a safe Jet identifier".into());
+//RS     }
+//RS     let name = canonical_identifier(name);
+//RS     let result = body[close + 1..]
+//RS         .trim()
+//RS         .strip_prefix("->")
+//RS         .ok_or_else(|| "function needs a return annotation".to_string())?;
+//RS     let result = map_type(result.trim())?;
+//RS     let mut params = Vec::new();
+//RS     let raw_params = body[open + 1..close].trim();
+//RS     if !raw_params.is_empty() {
+//RS         for raw in split_commas(raw_params) {
+//RS             let (param, ty) = raw
+//RS                 .split_once(':')
+//RS                 .ok_or_else(|| format!("parameter {raw} needs a type annotation"))?;
+//RS             let param = param.trim();
+//RS             if !identifier(param) || param == "self" || param.contains('=') {
+//RS                 return Err(format!("parameter {param} has no safe importer mapping"));
+//RS             }
+//RS             params.push((canonical_identifier(param), map_type(ty.trim())?));
+//RS         }
+//RS     }
+//RS     Ok((name.to_string(), params, result))
+//RS }
+//RS 
+//RS fn map_type(ty: &str) -> Result<String, String> {
+//RS     match ty {
+//RS         "int" => Ok("Int".into()),
+//RS         "float" => Ok("Float".into()),
+//RS         "str" => Ok("String".into()),
+//RS         "bool" => Ok("Bool".into()),
+//RS         "None" => Ok("()".into()),
+//RS         _ => Err(format!("Python type {ty} has no proven Jet mapping")),
+//RS     }
+//RS }
+//RS 
+//RS fn split_commas(raw: &str) -> Vec<&str> {
+//RS     let mut out = Vec::new();
+//RS     let mut start = 0;
+//RS     let mut depth = 0;
+//RS     for (index, ch) in raw.char_indices() {
+//RS         match ch {
+//RS             '(' | '[' => depth += 1,
+//RS             ')' | ']' => depth -= 1,
+//RS             ',' if depth == 0 => {
+//RS                 out.push(raw[start..index].trim());
+//RS                 start = index + 1;
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     out.push(raw[start..].trim());
+//RS     out
+//RS }
+//RS 
+//RS fn translate_body(function: &Function) -> Result<Vec<String>, (usize, String)> {
+//RS     if function.body.is_empty() {
+//RS         return Err((1, "function body is empty".into()));
+//RS     }
+//RS     let base = function
+//RS         .body
+//RS         .iter()
+//RS         .map(|(_, line)| indentation(line))
+//RS         .min()
+//RS         .unwrap_or(0);
+//RS     if let Some(nested) = function
+//RS         .body
+//RS         .iter()
+//RS         .position(|(_, line)| indentation(line) > base)
+//RS     {
+//RS         let line = function
+//RS             .body
+//RS             .iter()
+//RS             .take(nested)
+//RS             .rev()
+//RS             .find(|(_, line)| indentation(line) == base)
+//RS             .map(|(line, _)| *line)
+//RS             .unwrap_or(function.body[nested].0);
+//RS         return Err((
+//RS             line,
+//RS             "nested control flow has no proven equivalent in this importer".into(),
+//RS         ));
+//RS     }
+//RS     let mut bindings = BTreeSet::new();
+//RS     let mut output = Vec::new();
+//RS     for (line_no, raw) in &function.body {
+//RS         let line = raw.trim();
+//RS         if line == "pass" && function.result == "()" {
+//RS             continue;
+//RS         }
+//RS         if let Some(value) = line.strip_prefix("return ") {
+//RS             let source_value = value;
+//RS             let value = parse_expression(source_value).map_err(|why| (*line_no, why))?;
+//RS             output.push(format!(
+//RS                 "return {}",
+//RS                 materialize_borrowed_string(function, source_value, value)
+//RS             ));
+//RS             continue;
+//RS         }
+//RS         if line == "return" && function.result == "()" {
+//RS             output.push("return".into());
+//RS             continue;
+//RS         }
+//RS         if let Some(value) = line.strip_prefix("assert ") {
+//RS             let (left, right) = split_top(value, "==").ok_or_else(|| {
+//RS                 (
+//RS                     *line_no,
+//RS                     "only equality assertions have a proven Jet test mapping".into(),
+//RS                 )
+//RS             })?;
+//RS             output.push(format!(
+//RS                 "assert_eq({}, {})",
+//RS                 parse_expression(left).map_err(|why| (*line_no, why))?,
+//RS                 parse_expression(right).map_err(|why| (*line_no, why))?
+//RS             ));
+//RS             continue;
+//RS         }
+//RS         if let Some((name, value)) = assignment(line) {
+//RS             let name = canonical_identifier(name);
+//RS             if !identifier(&name) {
+//RS                 return Err((*line_no, "assignment target is not a local name".into()));
+//RS             }
+//RS             let source_value = value;
+//RS             let value = parse_expression(source_value).map_err(|why| (*line_no, why))?;
+//RS             let value = materialize_borrowed_string(function, source_value, value);
+//RS             let operator = if bindings.insert(name.clone()) {
+//RS                 ":="
+//RS             } else {
+//RS                 "="
+//RS             };
+//RS             output.push(format!("{name} {operator} {value}"));
+//RS             continue;
+//RS         }
+//RS         output.push(parse_expression(line).map_err(|why| (*line_no, why))?);
+//RS     }
+//RS     Ok(output)
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS enum Token {
+//RS     Word(String),
+//RS     Number(String),
+//RS     Text(String),
+//RS     Op(String),
+//RS     Open,
+//RS     Close,
+//RS     Comma,
+//RS }
+//RS 
+//RS fn parse_expression(raw: &str) -> Result<String, String> {
+//RS     parse_expression_with_float(raw, false)
+//RS }
+//RS 
+//RS fn parse_expression_with_float(raw: &str, float_literals: bool) -> Result<String, String> {
+//RS     let tokens = lex(raw)?;
+//RS     if tokens.is_empty() {
+//RS         return Err("empty expression".into());
+//RS     }
+//RS     let mut depth = 0;
+//RS     let mut expect_value = true;
+//RS     let mut output = String::new();
+//RS     for token in tokens {
+//RS         match token {
+//RS             Token::Word(word) => {
+//RS                 if !expect_value && !matches!(word.as_str(), "and" | "or") {
+//RS                     return Err(format!("unsupported expression near {word}"));
+//RS                 }
+//RS                 let word = match word.as_str() {
+//RS                     "True" | "true" => "true".to_string(),
+//RS                     "False" | "false" => "false".to_string(),
+//RS                     "and" => "&&".to_string(),
+//RS                     "or" => "||".to_string(),
+//RS                     "None" => return Err("None needs an explicit Option mapping".into()),
+//RS                     "null" | "nil" | "undefined" | "new" | "this" => {
+//RS                         return Err("dynamic or reference value has no proven scalar mapping".into())
+//RS                     }
+//RS                     _ => canonical_identifier(&word),
+//RS                 };
+//RS                 push_piece(&mut output, &word);
+//RS                 expect_value = matches!(word.as_str(), "&&" | "||");
+//RS             }
+//RS             Token::Number(value) => {
+//RS                 if !expect_value {
+//RS                     return Err("two adjacent expression values".into());
+//RS                 }
+//RS                 let value = if float_literals && !value.contains('.') {
+//RS                     format!("{value}.0")
+//RS                 } else {
+//RS                     value
+//RS                 };
+//RS                 push_piece(&mut output, &value);
+//RS                 expect_value = false;
+//RS             }
+//RS             Token::Text(value) => {
+//RS                 if !expect_value {
+//RS                     return Err("two adjacent expression values".into());
+//RS                 }
+//RS                 push_piece(&mut output, &value);
+//RS                 expect_value = false;
+//RS             }
+//RS             Token::Op(op) => {
+//RS                 if expect_value && op != "-" && op != "!" {
+//RS                     return Err(format!("operator {op} needs a left operand"));
+//RS                 }
+//RS                 push_piece(&mut output, &op);
+//RS                 expect_value = true;
+//RS             }
+//RS             Token::Open => {
+//RS                 output.push('(');
+//RS                 depth += 1;
+//RS                 expect_value = true;
+//RS             }
+//RS             Token::Close => {
+//RS                 if depth == 0 || expect_value {
+//RS                     return Err("unbalanced expression parentheses".into());
+//RS                 }
+//RS                 output.push(')');
+//RS                 depth -= 1;
+//RS                 expect_value = false;
+//RS             }
+//RS             Token::Comma => {
+//RS                 if depth == 0 || expect_value {
+//RS                     return Err("comma outside a call".into());
+//RS                 }
+//RS                 output.push_str(", ");
+//RS                 expect_value = true;
+//RS             }
+//RS         }
+//RS     }
+//RS     if depth != 0 || expect_value {
+//RS         return Err("incomplete expression".into());
+//RS     }
+//RS     Ok(output)
+//RS }
+//RS 
+//RS fn lex(raw: &str) -> Result<Vec<Token>, String> {
+//RS     let bytes = raw.as_bytes();
+//RS     let mut out = Vec::new();
+//RS     let mut at = 0;
+//RS     while at < bytes.len() {
+//RS         if bytes[at].is_ascii_whitespace() {
+//RS             at += 1;
+//RS             continue;
+//RS         }
+//RS         let start = at;
+//RS         if bytes[at].is_ascii_alphabetic() || bytes[at] == b'_' {
+//RS             at += 1;
+//RS             while at < bytes.len() && (bytes[at].is_ascii_alphanumeric() || bytes[at] == b'_') {
+//RS                 at += 1;
+//RS             }
+//RS             out.push(Token::Word(raw[start..at].to_string()));
+//RS         } else if bytes[at].is_ascii_digit() {
+//RS             at += 1;
+//RS             let mut dots = 0;
+//RS             while at < bytes.len() && (bytes[at].is_ascii_digit() || bytes[at] == b'.') {
+//RS                 if bytes[at] == b'.' {
+//RS                     dots += 1;
+//RS                 }
+//RS                 at += 1;
+//RS             }
+//RS             if dots > 1 || raw[start..at].ends_with('.') {
+//RS                 return Err("malformed numeric literal".into());
+//RS             }
+//RS             out.push(Token::Number(raw[start..at].to_string()));
+//RS         } else if matches!(bytes[at], b'\'' | b'"') {
+//RS             let quote = bytes[at];
+//RS             at += 1;
+//RS             let content = at;
+//RS             while at < bytes.len() && bytes[at] != quote {
+//RS                 if bytes[at] == b'\\' {
+//RS                     at += 1;
+//RS                 }
+//RS                 at += 1;
+//RS             }
+//RS             if at >= bytes.len() {
+//RS                 return Err("unterminated Python string".into());
+//RS             }
+//RS             let value = raw[content..at].replace('"', "\\\"");
+//RS             at += 1;
+//RS             out.push(Token::Text(format!("\"{value}\"")));
+//RS         } else {
+//RS             let two = raw.get(at..at + 2).unwrap_or("");
+//RS             if matches!(two, "==" | "!=" | "<=" | ">=" | "&&" | "||") {
+//RS                 out.push(Token::Op(two.into()));
+//RS                 at += 2;
+//RS                 continue;
+//RS             }
+//RS             out.push(match bytes[at] as char {
+//RS                 '(' => Token::Open,
+//RS                 ')' => Token::Close,
+//RS                 ',' => Token::Comma,
+//RS                 '+' | '-' | '*' | '/' | '%' | '<' | '>' | '!' => {
+//RS                     Token::Op((bytes[at] as char).to_string())
+//RS                 }
+//RS                 other => return Err(format!("unsupported Python expression token {other}")),
+//RS             });
+//RS             at += 1;
+//RS         }
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS fn push_piece(output: &mut String, piece: &str) {
+//RS     if !output.is_empty() && !output.ends_with(['(', ' ']) {
+//RS         output.push(' ');
+//RS     }
+//RS     output.push_str(piece);
+//RS }
+//RS 
+//RS fn render_function(marker: &str, function: &Function, body: &[String]) -> String {
+//RS     let params = function
+//RS         .params
+//RS         .iter()
+//RS         .map(|(name, ty)| format!("{}: {ty}", canonical_identifier(name)))
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ");
+//RS     let result = if function.result == "()" {
+//RS         String::new()
+//RS     } else {
+//RS         format!(" -> {}", function.result)
+//RS     };
+//RS     let mut output = format!(
+//RS         "{marker}fn {}({params}){result} {{\n",
+//RS         canonical_identifier(&function.name)
+//RS     );
+//RS     for line in body {
+//RS         output.push_str("    ");
+//RS         output.push_str(line);
+//RS         output.push('\n');
+//RS     }
+//RS     output.push_str("}\n");
+//RS     output
+//RS }
+//RS 
+//RS fn import_evidence(
+//RS     boundary: &jet::ForeignBridge::ForeignBoundaryContract,
+//RS     source: &Path,
+//RS     target: &Path,
+//RS     source_digest: &str,
+//RS     replacement_digest: &str,
+//RS     file_count: usize,
+//RS     function_count: usize,
+//RS     test_count: usize,
+//RS     omission_count: usize,
+//RS ) -> Result<EvidenceReport, String> {
+//RS     let boundary_digest = boundary.digest();
+//RS     let report_id = format!("source-import-{boundary_digest}");
+//RS     let source_ref = EvidenceSource::new(source.display().to_string(), 0, 0);
+//RS     let derivation_identity = boundary.identity.derivation_identity();
+//RS     let revision = EvidenceRevision::new(
+//RS         derivation_identity.source.clone(),
+//RS         derivation_identity.build.clone(),
+//RS         derivation_identity.run.clone(),
+//RS     );
+//RS     let build = EvidenceBuild::new(
+//RS         derivation_identity.build.clone(),
+//RS         derivation_identity.target.clone(),
+//RS         "source-import",
+//RS     );
+//RS     let outcome = if omission_count == 0 {
+//RS         EvidenceOutcome::Generated
+//RS     } else {
+//RS         EvidenceOutcome::Incomplete
+//RS     };
+//RS     let detail = if omission_count == 0 {
+//RS         format!(
+//RS             "source import generated {file_count} files, {function_count} functions, and {test_count} tests"
+//RS         )
+//RS     } else {
+//RS         format!(
+//RS             "source import translated {file_count} files, {function_count} functions, and {test_count} tests with {omission_count} reported omissions"
+//RS         )
+//RS     };
+//RS     let count = u64::try_from(file_count)
+//RS         .map_err(|_| "source import file count is too large".to_string())?;
+//RS     let identity = EvidenceIdentity::for_record(
+//RS         &report_id,
+//RS         "source-import",
+//RS         EvidenceProducerKind::Compile,
+//RS         EvidenceKind::Contract,
+//RS         &source_ref,
+//RS         count,
+//RS         &detail,
+//RS     );
+//RS     let mut evidence = EvidenceRecord::new(
+//RS         identity,
+//RS         EvidenceKind::Contract,
+//RS         EvidenceProducerKind::Compile,
+//RS         outcome,
+//RS         count,
+//RS         source_ref.clone(),
+//RS         build.clone(),
+//RS         revision.clone(),
+//RS     );
+//RS     evidence.detail = detail;
+//RS     evidence.attachments.extend([
+//RS         EvidenceAttachment::new("boundary", boundary_digest.clone()),
+//RS         EvidenceAttachment::new("source-digest", source_digest),
+//RS         EvidenceAttachment::new("replacement-digest", replacement_digest),
+//RS         EvidenceAttachment::new("source-identity", boundary.identity.source.clone()),
+//RS         EvidenceAttachment::new("replacement-identity", boundary.identity.overlay.clone()),
+//RS         EvidenceAttachment::new("tool-identity", boundary.identity.toolchain.clone()),
+//RS         EvidenceAttachment::new("target-identity", boundary.identity.target.clone()),
+//RS         EvidenceAttachment::new("coverage", boundary.artifact_coverage.digest()),
+//RS         EvidenceAttachment::new(
+//RS             "import-report",
+//RS             target.join("import-report.json").display().to_string(),
+//RS         ),
+//RS     ]);
+//RS     evidence.attachments.extend(
+//RS         boundary
+//RS             .assumptions
+//RS             .iter()
+//RS             .cloned()
+//RS             .map(|value| EvidenceAttachment::new("assumption", value)),
+//RS     );
+//RS     let disposition = if omission_count == 0 {
+//RS         DerivationDisposition::Current
+//RS     } else {
+//RS         DerivationDisposition::Unavailable
+//RS     };
+//RS     let derivation = DerivationRecord::new(
+//RS         evidence.identity.evidence_id.clone(),
+//RS         evidence.identity.claim_id.clone(),
+//RS         evidence.producer.as_str(),
+//RS         DerivationMethod::StaticDerivation,
+//RS         "foreign-source-import",
+//RS         [
+//RS             boundary_digest,
+//RS             boundary.artifact_coverage.digest(),
+//RS             source_digest.to_string(),
+//RS             replacement_digest.to_string(),
+//RS         ],
+//RS         derivation_identity,
+//RS     )
+//RS     .with_disposition(disposition);
+//RS     let mut report = EvidenceReport::new(
+//RS         report_id,
+//RS         EvidenceProducerKind::Compile,
+//RS         source_ref,
+//RS         build,
+//RS         revision,
+//RS     );
+//RS     report
+//RS         .add_record_with_derivation(evidence, derivation)
+//RS         .map_err(|error| error.to_string())?;
+//RS     Ok(report)
+//RS }
+//RS 
+//RS fn attach_import_evidence(plan: &mut Plan) -> Result<(), String> {
+//RS     let Some(boundary) = plan.boundary.take() else {
+//RS         return Err("source import has no foreign boundary".to_string());
+//RS     };
+//RS     let Some(report) = plan.evidence.as_ref() else {
+//RS         return Err("source import has no evidence report".to_string());
+//RS     };
+//RS     let derivation = report
+//RS         .derivations
+//RS         .first()
+//RS         .ok_or_else(|| "source import evidence has no derivation".to_string())?;
+//RS     let evidence = report
+//RS         .records
+//RS         .first()
+//RS         .ok_or_else(|| "source import evidence has no record".to_string())?;
+//RS     let boundary = boundary
+//RS         .attach_derivation(derivation)?
+//RS         .attach_evidence(evidence)?;
+//RS     boundary.validate()?;
+//RS     plan.boundary = Some(boundary);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn indexed_artifact_path(index: &RecordIndex, entry: &RecordIndexEntry, cwd: &Path) -> PathBuf {
+//RS     if entry.path.is_absolute() {
+//RS         entry.path.clone()
+//RS     } else if entry.path.starts_with(Path::new(".jet")) {
+//RS         cwd.join(&entry.path)
+//RS     } else {
+//RS         index.root().join(&entry.path)
+//RS     }
+//RS }
+//RS 
+//RS fn receipt_store_for_artifact(path: &Path) -> Result<ReceiptStore, String> {
+//RS     let objects = path
+//RS         .parent()
+//RS         .ok_or_else(|| format!("receipt artifact has no parent: {}", path.display()))?;
+//RS     if objects.file_name().and_then(|name| name.to_str()) != Some("objects") {
+//RS         return Err(format!(
+//RS             "indexed comparison path is not a receipt object: {}",
+//RS             path.display()
+//RS         ));
+//RS     }
+//RS     let root = objects
+//RS         .parent()
+//RS         .ok_or_else(|| format!("receipt object has no store root: {}", path.display()))?;
+//RS     Ok(ReceiptStore::new(root))
+//RS }
+//RS 
+//RS fn attachment_values(record: &EvidenceRecord, name: &str) -> Vec<String> {
+//RS     record
+//RS         .attachments
+//RS         .iter()
+//RS         .filter(|attachment| attachment.name == name)
+//RS         .map(|attachment| attachment.value.clone())
+//RS         .collect()
+//RS }
+//RS 
+//RS fn require_attachment(
+//RS     record: &EvidenceRecord,
+//RS     name: &str,
+//RS     expected: &str,
+//RS ) -> Result<(), String> {
+//RS     let values = attachment_values(record, name);
+//RS     if values.len() != 1 || values.first().map(String::as_str) != Some(expected) {
+//RS         return Err(format!(
+//RS             "indexed evidence attachment `{name}` does not match the current import"
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn require_attachment_set(
+//RS     record: &EvidenceRecord,
+//RS     name: &str,
+//RS     expected: &[String],
+//RS ) -> Result<(), String> {
+//RS     let mut values = attachment_values(record, name);
+//RS     values.sort();
+//RS     if values != expected {
+//RS         return Err(format!(
+//RS             "indexed evidence attachments `{name}` do not match the current import"
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_import_binding(
+//RS     record: &EvidenceRecord,
+//RS     boundary: &jet::ForeignBridge::ForeignBoundaryContract,
+//RS     boundary_digest: &str,
+//RS     source_digest: &str,
+//RS     replacement_digest: &str,
+//RS ) -> Result<(), String> {
+//RS     require_attachment(record, "boundary", boundary_digest)?;
+//RS     require_attachment(record, "source-digest", source_digest)?;
+//RS     require_attachment(record, "replacement-digest", replacement_digest)?;
+//RS     require_attachment(record, "source-identity", &boundary.identity.source)?;
+//RS     require_attachment(record, "replacement-identity", &boundary.identity.overlay)?;
+//RS     require_attachment(record, "tool-identity", &boundary.identity.toolchain)?;
+//RS     require_attachment(record, "target-identity", &boundary.identity.target)?;
+//RS     require_attachment(
+//RS         record,
+//RS         "coverage",
+//RS         &boundary.artifact_coverage.digest(),
+//RS     )?;
+//RS     require_attachment_set(record, "assumption", &boundary.assumptions)?;
+//RS     let derivation_identity = boundary.identity.derivation_identity();
+//RS     if record.build.toolchain != derivation_identity.build
+//RS         || record.build.target != derivation_identity.target
+//RS         || record.build.profile != "source-import"
+//RS     {
+//RS         return Err("indexed import evidence build identity is stale".into());
+//RS     }
+//RS     if record.revision.source != derivation_identity.source
+//RS         || record.revision.build != derivation_identity.build
+//RS         || record.revision.revision != derivation_identity.run
+//RS     {
+//RS         return Err("indexed import evidence revision identity is stale".into());
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn indexed_import_evidence(
+//RS     index: &RecordIndex,
+//RS     cwd: &Path,
+//RS     boundary: &jet::ForeignBridge::ForeignBoundaryContract,
+//RS     boundary_digest: &str,
+//RS     source_digest: &str,
+//RS     replacement_digest: &str,
+//RS ) -> Result<(EvidenceRecord, DerivationRecord), String> {
+//RS     let report_id = format!("source-import-{boundary_digest}");
+//RS     let entry = index
+//RS         .find(RecordKind::Evidence, &report_id, true)
+//RS         .ok_or_else(|| {
+//RS             "source import update requires prior indexed import evidence for the current source"
+//RS                 .to_string()
+//RS         })?;
+//RS     if entry.identity.target_inputs_sha256 != source_digest
+//RS         || entry.identity.engine != EvidenceProducerKind::Compile.as_str()
+//RS     {
+//RS         return Err("indexed import evidence is stale against the current source digest".into());
+//RS     }
+//RS     let path = indexed_artifact_path(index, &entry, cwd);
+//RS     let report = EvidenceReport::read(&path)
+//RS         .map_err(|error| format!("cannot read indexed import evidence: {error}"))?;
+//RS     if !report.is_complete() {
+//RS         return Err("indexed import evidence is incomplete".into());
+//RS     }
+//RS     let record = report
+//RS         .records
+//RS         .iter()
+//RS         .find(|record| {
+//RS             record.identity.report_id == report_id && record.identity.claim_id == "source-import"
+//RS         })
+//RS         .cloned()
+//RS         .ok_or_else(|| "indexed import evidence has no source-import record".to_string())?;
+//RS     record
+//RS         .validate()
+//RS         .map_err(|error| format!("indexed import evidence is invalid: {error}"))?;
+//RS     if record.outcome != EvidenceOutcome::Generated {
+//RS         return Err(format!(
+//RS             "indexed import evidence is not a complete generated candidate: {}",
+//RS             record.outcome.as_str()
+//RS         ));
+//RS     }
+//RS     validate_import_binding(
+//RS         &record,
+//RS         boundary,
+//RS         boundary_digest,
+//RS         source_digest,
+//RS         replacement_digest,
+//RS     )?;
+//RS     let reference = record
+//RS         .derivation
+//RS         .as_ref()
+//RS         .ok_or_else(|| "indexed import evidence has no derivation reference".to_string())?;
+//RS     let derivation = report
+//RS         .derivation(reference)
+//RS         .cloned()
+//RS         .ok_or_else(|| "indexed import evidence has no derivation payload".to_string())?;
+//RS     derivation.validate()?;
+//RS     if derivation.identity != boundary.identity.derivation_identity() {
+//RS         return Err("indexed import derivation identity is stale".into());
+//RS     }
+//RS     if derivation.method != DerivationMethod::StaticDerivation
+//RS         || derivation.rule != "foreign-source-import"
+//RS         || derivation.disposition != DerivationDisposition::Current
+//RS     {
+//RS         return Err("indexed import derivation is not current".into());
+//RS     }
+//RS     let mut premises = vec![
+//RS         boundary_digest.to_string(),
+//RS         boundary.artifact_coverage.digest(),
+//RS         source_digest.to_string(),
+//RS         replacement_digest.to_string(),
+//RS     ];
+//RS     premises.sort();
+//RS     premises.dedup();
+//RS     if derivation.premises != premises {
+//RS         return Err("indexed import derivation premises are stale".into());
+//RS     }
+//RS     Ok((record, derivation))
+//RS }
+//RS 
+//RS fn validate_comparison_binding(
+//RS     record: &EvidenceRecord,
+//RS     comparison: &ComparisonRecord,
+//RS     artifact_id: &str,
+//RS     boundary: &jet::ForeignBridge::ForeignBoundaryContract,
+//RS     boundary_digest: &str,
+//RS ) -> Result<(), String> {
+//RS     require_attachment(record, "comparison-artifact", artifact_id)?;
+//RS     require_attachment(record, "boundary", boundary_digest)?;
+//RS     require_attachment(record, "source-identity", &boundary.identity.source)?;
+//RS     require_attachment(record, "replacement-identity", &boundary.identity.overlay)?;
+//RS     require_attachment(record, "tool-identity", &boundary.identity.toolchain)?;
+//RS     require_attachment(record, "target-identity", &boundary.identity.target)?;
+//RS     require_attachment(record, "coverage", &boundary.artifact_coverage.digest())?;
+//RS     require_attachment_set(record, "assumption", &boundary.assumptions)?;
+//RS     if record.build.toolchain != boundary.identity.toolchain
+//RS         || record.build.target != boundary.identity.target
+//RS         || record.build.profile != "comparison"
+//RS         || record.revision.source != artifact_id
+//RS         || record.revision.build != "jet-comparison-v1"
+//RS         || record.revision.revision != artifact_id
+//RS     {
+//RS         return Err("indexed comparison evidence build identity is stale".into());
+//RS     }
+//RS     if comparison.samples.iter().any(|sample| {
+//RS         sample.identity.source != boundary.identity.source
+//RS             || sample.identity.tool != boundary.identity.toolchain
+//RS             || sample.identity.target != boundary.identity.target
+//RS     }) {
+//RS         return Err("indexed comparison samples are not bound to the current foreign tool and target".into());
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn indexed_comparison(
+//RS     index: &RecordIndex,
+//RS     cwd: &Path,
+//RS     boundary: &jet::ForeignBridge::ForeignBoundaryContract,
+//RS     boundary_digest: &str,
+//RS ) -> Result<ComparisonRecord, String> {
+//RS     let mut entries = index.query_kind(RecordKind::Comparison, true);
+//RS     entries.sort_by(|left, right| {
+//RS         right
+//RS             .recorded_sequence
+//RS             .cmp(&left.recorded_sequence)
+//RS             .then(left.artifact_id.cmp(&right.artifact_id))
+//RS     });
+//RS     let mut stale_reason = None;
+//RS     for entry in entries {
+//RS         let path = indexed_artifact_path(index, &entry, cwd);
+//RS         let raw_receipt = match read_path(&path) {
+//RS             Ok(receipt) => receipt,
+//RS             Err(error) => {
+//RS                 stale_reason = Some(format!(
+//RS                     "indexed comparison receipt `{}` could not be authenticated: {error}",
+//RS                     entry.artifact_id
+//RS                 ));
+//RS                 continue;
+//RS             }
+//RS         };
+//RS         let store = receipt_store_for_artifact(&path)?;
+//RS         let receipt = match store.lookup(&raw_receipt.claim)? {
+//RS             Some(receipt) => receipt,
+//RS             None => {
+//RS                 stale_reason = Some(format!(
+//RS                     "indexed comparison `{}` is stale against its current corpus inputs",
+//RS                     entry.artifact_id
+//RS                 ));
+//RS                 continue;
+//RS             }
+//RS         };
+//RS         let Some(section) = receipt.sections.iter().find(|section| {
+//RS             section.name == "comparison" && section.type_name == "ComparisonRecord"
+//RS         }) else {
+//RS             continue;
+//RS         };
+//RS         let payload = section.value()?;
+//RS         let comparison = ComparisonRecord::from_json(&payload)?;
+//RS         let artifact_id = comparison.artifact_id()?;
+//RS         if section.payload_digest != artifact_id || artifact_id != entry.artifact_id {
+//RS             return Err(format!(
+//RS                 "indexed comparison `{}` has a non-canonical artifact digest",
+//RS                 entry.artifact_id
+//RS             ));
+//RS         }
+//RS         let mut bound = false;
+//RS         let mut bound_error = None;
+//RS         for link in receipt
+//RS             .consumed
+//RS             .iter()
+//RS             .filter(|link| link.kind == RecordKind::Evidence)
+//RS         {
+//RS             let Some(evidence_entry) = index.find(RecordKind::Evidence, &link.artifact_id, true)
+//RS             else {
+//RS                 bound_error = Some(format!(
+//RS                     "comparison `{}` links to missing evidence `{}`",
+//RS                     entry.artifact_id, link.artifact_id
+//RS                 ));
+//RS                 continue;
+//RS             };
+//RS             let evidence_path = indexed_artifact_path(index, &evidence_entry, cwd);
+//RS             let evidence_report = EvidenceReport::read(&evidence_path).map_err(|error| {
+//RS                 format!(
+//RS                     "cannot read comparison evidence `{}`: {error}",
+//RS                     link.artifact_id
+//RS                 )
+//RS             })?;
+//RS             if !evidence_report.is_complete() {
+//RS                 bound_error = Some(format!(
+//RS                     "comparison evidence `{}` is incomplete",
+//RS                     link.artifact_id
+//RS                 ));
+//RS                 continue;
+//RS             }
+//RS             for evidence in evidence_report.records.iter() {
+//RS                 if evidence.identity.report_id != link.artifact_id
+//RS                     || evidence.identity.claim_id != "comparison"
+//RS                 {
+//RS                     continue;
+//RS                 }
+//RS                 if validate_comparison_binding(
+//RS                     evidence,
+//RS                     &comparison,
+//RS                     &artifact_id,
+//RS                     boundary,
+//RS                     boundary_digest,
+//RS                 )
+//RS                 .is_err()
+//RS                 {
+//RS                     continue;
+//RS                 }
+//RS                 bound = true;
+//RS                 evidence
+//RS                     .validate()
+//RS                     .map_err(|error| format!("indexed comparison evidence is invalid: {error}"))?;
+//RS                 if evidence.outcome != EvidenceOutcome::Passed {
+//RS                     return Err(format!(
+//RS                         "indexed comparison `{}` is not accepted: evidence outcome is {}",
+//RS                         entry.artifact_id,
+//RS                         evidence.outcome.as_str()
+//RS                     ));
+//RS                 }
+//RS                 let Some(reference) = evidence.derivation.as_ref() else {
+//RS                     return Err(format!(
+//RS                         "indexed comparison `{}` has no checked derivation",
+//RS                         entry.artifact_id
+//RS                     ));
+//RS                 };
+//RS                 let Some(derivation) = evidence_report.derivation(reference) else {
+//RS                     return Err(format!(
+//RS                         "indexed comparison `{}` has a missing derivation payload",
+//RS                         entry.artifact_id
+//RS                     ));
+//RS                 };
+//RS                 if derivation.disposition != DerivationDisposition::Current {
+//RS                     return Err(format!(
+//RS                         "indexed comparison `{}` has stale derivation evidence",
+//RS                         entry.artifact_id
+//RS                     ));
+//RS                 }
+//RS                 if *derivation != evidence.checked_derivation() {
+//RS                     return Err(format!(
+//RS                         "indexed comparison `{}` derivation does not match its evidence",
+//RS                         entry.artifact_id
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS         if !bound {
+//RS             if let Some(error) = bound_error {
+//RS                 stale_reason = Some(error);
+//RS             }
+//RS             continue;
+//RS         }
+//RS         comparison.assert_equal().map_err(|error| {
+//RS             format!(
+//RS                 "indexed comparison `{}` was not matched: {error}",
+//RS                 entry.artifact_id
+//RS             )
+//RS         })?;
+//RS         return Ok(comparison);
+//RS     }
+//RS     Err(stale_reason.unwrap_or_else(|| {
+//RS         "source import update requires an indexed matched comparison bound to the current source, generated candidate, tool, target, coverage, and assumptions".into()
+//RS     }))
+//RS }
+//RS 
+//RS fn accept_update_replacement(
+//RS     plan: &mut Plan,
+//RS     cwd: &Path,
+//RS ) -> Result<jet::ForeignBridge::ForeignSourceReceipt, String> {
+//RS     let boundary = plan
+//RS         .boundary
+//RS         .as_ref()
+//RS         .ok_or_else(|| "source import has no foreign boundary".to_string())?
+//RS         .clone();
+//RS     if !boundary.has_complete_artifact_coverage() {
+//RS         return Err("source import replacement coverage is incomplete".into());
+//RS     }
+//RS     let mut current_files = Vec::new();
+//RS     collect_sources(
+//RS         &plan.source,
+//RS         &plan.source,
+//RS         &plan.language,
+//RS         &mut current_files,
+//RS     )?;
+//RS     current_files.sort();
+//RS     let current_source_digest =
+//RS         import_tree_identity(&plan.source, &current_files, "jet-source-import-input-v1")?;
+//RS     if current_source_digest != plan.source_digest {
+//RS         return Err("source import update source changed after planning".into());
+//RS     }
+//RS     let index = RecordIndex::load_for_project(cwd.to_path_buf())
+//RS         .map_err(|error| format!("cannot load indexed reasoning records: {error}"))?;
+//RS     let (evidence, derivation) = indexed_import_evidence(
+//RS         &index,
+//RS         cwd,
+//RS         &boundary,
+//RS         &plan.boundary_digest,
+//RS         &plan.source_digest,
+//RS         &plan.replacement_digest,
+//RS     )?;
+//RS     let comparison = indexed_comparison(&index, cwd, &boundary, &plan.boundary_digest)?;
+//RS     let mut accepted = boundary;
+//RS     let current_identity = accepted.identity.clone();
+//RS     let current_coverage = accepted.artifact_coverage.clone();
+//RS     let replacement_identity = current_identity.overlay.clone();
+//RS     let receipt = accepted.accept_reasoned_replacement(
+//RS         &current_identity,
+//RS         &current_coverage,
+//RS         &derivation,
+//RS         &evidence,
+//RS         &comparison,
+//RS         replacement_identity,
+//RS     )?;
+//RS     plan.boundary = Some(accepted);
+//RS     Ok(receipt)
+//RS }
+//RS 
+//RS fn accepted_receipt_json(
+//RS     receipt: &jet::ForeignBridge::ForeignSourceReceipt,
+//RS     assumptions: &[String],
+//RS ) -> Result<CanonicalJson, String> {
+//RS     let identity = CanonicalJson::object([
+//RS         ("generator".into(), CanonicalJson::String(receipt.boundary_identity.generator.clone())),
+//RS         (
+//RS             "implementation".into(),
+//RS             CanonicalJson::String(receipt.boundary_identity.implementation.clone()),
+//RS         ),
+//RS         ("overlay".into(), CanonicalJson::String(receipt.boundary_identity.overlay.clone())),
+//RS         ("source".into(), CanonicalJson::String(receipt.boundary_identity.source.clone())),
+//RS         ("target".into(), CanonicalJson::String(receipt.boundary_identity.target.clone())),
+//RS         (
+//RS             "toolchain".into(),
+//RS             CanonicalJson::String(receipt.boundary_identity.toolchain.clone()),
+//RS         ),
+//RS     ])?;
+//RS     let evidence = receipt
+//RS         .evidence
+//RS         .iter()
+//RS         .map(|identity| {
+//RS             CanonicalJson::object([
+//RS                 ("claim_id".into(), CanonicalJson::String(identity.claim_id.clone())),
+//RS                 (
+//RS                     "evidence_id".into(),
+//RS                     CanonicalJson::String(identity.evidence_id.clone()),
+//RS                 ),
+//RS                 ("report_id".into(), CanonicalJson::String(identity.report_id.clone())),
+//RS             ])
+//RS         })
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     let derivation = CanonicalJson::object([(
+//RS         "id".into(),
+//RS         CanonicalJson::String(receipt.derivation.id.clone()),
+//RS     )])?;
+//RS     CanonicalJson::object([
+//RS         ("artifact_coverage_digest".into(), CanonicalJson::String(receipt.artifact_coverage_digest.clone())),
+//RS         ("assumptions".into(), CanonicalJson::Array(assumptions.iter().cloned().map(CanonicalJson::String).collect())),
+//RS         ("boundary_digest".into(), CanonicalJson::String(receipt.boundary_digest.clone())),
+//RS         ("boundary_identity".into(), identity),
+//RS         ("comparison_artifact_id".into(), CanonicalJson::String(receipt.comparison_artifact_id.clone())),
+//RS         ("comparison_reason".into(), receipt.comparison_reason.clone().map(CanonicalJson::String).unwrap_or(CanonicalJson::Null)),
+//RS         ("comparison_relation".into(), CanonicalJson::String(receipt.comparison_relation.clone())),
+//RS         ("comparison_schema_version".into(), CanonicalJson::Integer(receipt.comparison_schema_version.to_string())),
+//RS         ("comparison_status".into(), CanonicalJson::String(receipt.comparison_status.clone())),
+//RS         ("compared_samples".into(), CanonicalJson::Integer(receipt.compared_samples.to_string())),
+//RS         ("derivation".into(), derivation),
+//RS         ("discarded_cases".into(), CanonicalJson::Integer(receipt.discarded_cases.to_string())),
+//RS         ("evidence".into(), CanonicalJson::Array(evidence)),
+//RS         ("first_difference".into(), receipt.first_difference.map(|value| CanonicalJson::Integer(value.to_string())).unwrap_or(CanonicalJson::Null)),
+//RS         ("replacement_identity".into(), CanonicalJson::String(receipt.replacement_identity.clone())),
+//RS         ("schema".into(), CanonicalJson::String(receipt.schema.into())),
+//RS         ("source_authority".into(), CanonicalJson::String(receipt.source_authority.as_str().into())),
+//RS         ("source_identity".into(), CanonicalJson::String(receipt.source_identity.clone())),
+//RS     ])
+//RS }
+//RS 
+//RS fn persist_accepted_receipt(
+//RS     plan: &Plan,
+//RS     receipt: &jet::ForeignBridge::ForeignSourceReceipt,
+//RS     cwd: &Path,
+//RS ) -> Result<(), String> {
+//RS     let boundary = plan
+//RS         .boundary
+//RS         .as_ref()
+//RS         .ok_or_else(|| "accepted source import has no boundary".to_string())?;
+//RS     receipt.validate()?;
+//RS     let mut files = Vec::new();
+//RS     collect_sources(&plan.source, &plan.source, &plan.language, &mut files)?;
+//RS     files.sort();
+//RS     if files.is_empty() {
+//RS         return Err("accepted source import has no source inputs".into());
+//RS     }
+//RS     let argv = vec![
+//RS         "import".to_string(),
+//RS         plan.source.display().to_string(),
+//RS         "--update".to_string(),
+//RS     ];
+//RS     let root = receipt_root_for("import", &argv, cwd);
+//RS     let store = ReceiptStore::new(root);
+//RS     let section = ReceiptSection::from_json(
+//RS         "foreign-source-replacement",
+//RS         "ForeignSourceReceipt",
+//RS         accepted_receipt_json(receipt, &boundary.assumptions)?,
+//RS     )?;
+//RS     let mut consumed = Vec::new();
+//RS     for evidence in &receipt.evidence {
+//RS         let link = RecordLink::new(RecordKind::Evidence, evidence.report_id.clone())?;
+//RS         if !consumed.contains(&link) {
+//RS             consumed.push(link);
+//RS         }
+//RS     }
+//RS     let comparison = RecordLink::new(
+//RS         RecordKind::Comparison,
+//RS         receipt.comparison_artifact_id.clone(),
+//RS     )?;
+//RS     if !consumed.contains(&comparison) {
+//RS         consumed.push(comparison);
+//RS     }
+//RS     store.record_with_sections_and_links(
+//RS         "import",
+//RS         &argv,
+//RS         &files,
+//RS         0,
+//RS         &[],
+//RS         &[],
+//RS         &[section],
+//RS         &consumed,
+//RS         &[],
+//RS     )?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn apply_plan(mut plan: Plan, mode: Mode, json: bool) -> i32 {
+//RS     if mode != Mode::DryRun {
+//RS         if let Err(error) = attach_import_evidence(&mut plan) {
+//RS             return operation_error("attach import evidence", &error, json);
+//RS         }
+//RS     }
+//RS     let accepted_receipt = if mode == Mode::Update {
+//RS         let cwd = match std::env::current_dir() {
+//RS             Ok(cwd) => cwd,
+//RS             Err(error) => {
+//RS                 return operation_error("read current directory", &error.to_string(), json)
+//RS             }
+//RS         };
+//RS         match accept_update_replacement(&mut plan, &cwd) {
+//RS             Ok(receipt) => Some(receipt),
+//RS             Err(error) => return operation_error("accept source replacement", &error, json),
+//RS         }
+//RS     } else {
+//RS         None
+//RS     };
+//RS     let report = report(&plan);
+//RS     let baseline_root = plan.target.join(".jet-import/baseline");
+//RS     let mut writes = Vec::new();
+//RS     let mut conflicts = Vec::new();
+//RS     for generated in &plan.generated {
+//RS         let target = plan.target.join(&generated.relative);
+//RS         let baseline = baseline_root.join(&generated.relative);
+//RS         let existing = fs::read_to_string(&target).ok();
+//RS         let prior = fs::read_to_string(&baseline).ok();
+//RS         match (mode, existing.as_deref(), prior.as_deref()) {
+//RS             (Mode::DryRun, _, _) => {}
+//RS             (_, None, _) => writes.push((target.clone(), generated.contents.clone())),
+//RS             (_, Some(current), _) if current == generated.contents => {}
+//RS             (Mode::Create, Some(_), _) => conflicts.push(target),
+//RS             (Mode::Update, Some(current), Some(old)) if current == old => {
+//RS                 writes.push((target, generated.contents.clone()))
+//RS             }
+//RS             (Mode::Update, Some(_), Some(old)) if generated.contents == old => {}
+//RS             (Mode::Update, Some(_), _) => conflicts.push(target),
+//RS         }
+//RS         if mode != Mode::DryRun && prior.as_deref() != Some(generated.contents.as_str()) {
+//RS             writes.push((baseline, generated.contents.clone()));
+//RS         }
+//RS     }
+//RS     let report_path = plan.target.join("import-report.json");
+//RS     let report_baseline = baseline_root.join("import-report.json");
+//RS     let existing_report = fs::read_to_string(&report_path).ok();
+//RS     let prior_report = fs::read_to_string(&report_baseline).ok();
+//RS     match (mode, existing_report.as_deref(), prior_report.as_deref()) {
+//RS         (Mode::DryRun, _, _) => {}
+//RS         (_, None, _) => writes.push((report_path.clone(), report.clone())),
+//RS         (_, Some(current), _) if current == report => {}
+//RS         (Mode::Create, Some(_), _) => conflicts.push(report_path.clone()),
+//RS         (Mode::Update, Some(current), Some(old)) if current == old => {
+//RS             writes.push((report_path.clone(), report.clone()))
+//RS         }
+//RS         (Mode::Update, Some(_), Some(old)) if report == old => {}
+//RS         (Mode::Update, Some(_), _) => conflicts.push(report_path.clone()),
+//RS     }
+//RS     if mode != Mode::DryRun && prior_report.as_deref() != Some(report.as_str()) {
+//RS         writes.push((report_baseline, report.clone()));
+//RS     }
+//RS     if !conflicts.is_empty() {
+//RS         let conflict_paths = conflicts
+//RS             .iter()
+//RS             .map(|path| path.display().to_string())
+//RS             .collect::<Vec<_>>();
+//RS         let diagnostic =
+//RS             Diagnostic::from_row("JT0199", &[("paths", &conflict_paths.join(", "))], None);
+//RS         if json {
+//RS             let report = ReportEnvelope::new(
+//RS                 "tool",
+//RS                 "error",
+//RS                 diagnostic.code.clone(),
+//RS                 diagnostic.what.clone(),
+//RS                 diagnostic.why.clone(),
+//RS                 diagnostic.fix.clone(),
+//RS             );
+//RS             let paths = StatusValue::array(
+//RS                 conflicts
+//RS                     .iter()
+//RS                     .map(|path| StatusValue::from(path.display().to_string())),
+//RS             );
+//RS             println!(
+//RS                 "{}",
+//RS                 StatusEnvelope::new("import", false)
+//RS                     .with_report(report)
+//RS                     .with_field("paths", paths)
+//RS                     .json()
+//RS             );
+//RS         } else {
+//RS             eprintln!("error[{}]: {}", diagnostic.code, diagnostic.what);
+//RS             for path in &conflicts {
+//RS                 eprintln!("  {path}", path = path.display());
+//RS             }
+//RS             eprintln!("  why: {}", diagnostic.why);
+//RS             eprintln!("  fix: {}", diagnostic.fix);
+//RS         }
+//RS         return ExitCodes::USER_ERROR;
+//RS     }
+//RS     for (path, contents) in writes {
+//RS         if let Some(parent) = path.parent() {
+//RS             if let Err(error) = fs::create_dir_all(parent) {
+//RS                 return operation_error("create import output", &error.to_string(), json);
+//RS             }
+//RS         }
+//RS         if let Err(error) = fs::write(path, contents) {
+//RS             return operation_error("write import output", &error.to_string(), json);
+//RS         }
+//RS     }
+//RS     if mode != Mode::DryRun {
+//RS         let evidence = match plan.evidence.as_ref() {
+//RS             Some(evidence) => evidence,
+//RS             None => return operation_error(
+//RS                 "persist import evidence",
+//RS                 "source import has no evidence report",
+//RS                 json,
+//RS             ),
+//RS         };
+//RS         if let Err(error) =
+//RS             crate::CmdCompile::persist_evidence_report_for_inputs(evidence, &plan.source_digest)
+//RS         {
+//RS             return operation_error("persist import evidence", &error, json);
+//RS         }
+//RS     }
+//RS     if let Some(receipt) = accepted_receipt.as_ref() {
+//RS         let cwd = match std::env::current_dir() {
+//RS             Ok(cwd) => cwd,
+//RS             Err(error) => {
+//RS                 return operation_error("read current directory", &error.to_string(), json)
+//RS             }
+//RS         };
+//RS         if let Err(error) = persist_accepted_receipt(&plan, receipt, &cwd) {
+//RS             return operation_error("persist accepted source receipt", &error, json);
+//RS         }
+//RS     }
+//RS     if json {
+//RS         let import = report_value(&plan);
+//RS         println!(
+//RS             "{}",
+//RS             StatusEnvelope::new("import", true)
+//RS                 .with_field("import", import)
+//RS                 .json()
+//RS         );
+//RS     } else {
+//RS         let verb = if mode == Mode::DryRun {
+//RS             "would import"
+//RS         } else {
+//RS             "imported"
+//RS         };
+//RS         println!(
+//RS             "{verb} {} -> {}",
+//RS             plan.source.display(),
+//RS             plan.target.display()
+//RS         );
+//RS         println!(
+//RS             "  {} functions, {} carried tests, {} TODO diagnostics",
+//RS             plan.functions,
+//RS             plan.tests,
+//RS             plan.todos.len()
+//RS         );
+//RS         if let Some(boundary) = plan.boundary.as_ref() {
+//RS             println!(
+//RS                 "  migration: {} (mode: {}; source conversion: {}; source authority: {})",
+//RS                 boundary.disposition.as_str(),
+//RS                 migration_mode(boundary),
+//RS                 migration_source_conversion(boundary),
+//RS                 boundary.source_authority.as_str(),
+//RS             );
+//RS         }
+//RS         for todo in &plan.todos {
+//RS             let diagnostic = todo.diagnostic();
+//RS             println!("  {} {}", diagnostic.code, diagnostic.what);
+//RS             println!("    why: {}", diagnostic.why);
+//RS             println!("    fix: {}", diagnostic.fix);
+//RS             println!("    target: {}  status: {}", todo.target, todo.status);
+//RS         }
+//RS     }
+//RS     ExitCodes::OK
+//RS }
+//RS fn migration_source_conversion(boundary: &jet::ForeignBridge::ForeignBoundaryContract) -> &'static str {
+//RS     if boundary.source_import {
+//RS         "narrow-checked-subset"
+//RS     } else {
+//RS         "unavailable"
+//RS     }
+//RS }
+//RS 
+//RS fn migration_mode(boundary: &jet::ForeignBridge::ForeignBoundaryContract) -> &'static str {
+//RS     if boundary.disposition == jet::ForeignBridge::ForeignBoundaryDisposition::BinderOnly {
+//RS         "manual"
+//RS     } else if boundary.source_import {
+//RS         "conversion"
+//RS     } else {
+//RS         "binder"
+//RS     }
+//RS }
+//RS 
+//RS fn migration_projection_json(plan: &Plan) -> String {
+//RS     let Some(boundary) = plan.boundary.as_ref() else {
+//RS         return "{\"disposition\":\"unavailable\",\"source_conversion\":\"unavailable\",\"mode\":\"manual\",\"source_authority\":\"foreign-until-accepted\"}".into();
+//RS     };
+//RS     format!(
+//RS         "{{\"disposition\":\"{}\",\"source_conversion\":\"{}\",\"mode\":\"{}\",\"source_authority\":\"{}\"}}",
+//RS         boundary.disposition.as_str(),
+//RS         migration_source_conversion(boundary),
+//RS         migration_mode(boundary),
+//RS         boundary.source_authority.as_str(),
+//RS     )
+//RS }
+//RS 
+//RS fn migration_projection_value(plan: &Plan) -> StatusValue {
+//RS     let Some(boundary) = plan.boundary.as_ref() else {
+//RS         return StatusValue::object(
+//RS             StatusFields::new()
+//RS                 .with("disposition", "unavailable")
+//RS                 .with("source_conversion", "unavailable")
+//RS                 .with("mode", "manual")
+//RS                 .with("source_authority", "foreign-until-accepted"),
+//RS         );
+//RS     };
+//RS     StatusValue::object(
+//RS         StatusFields::new()
+//RS             .with("disposition", boundary.disposition.as_str())
+//RS             .with("source_conversion", migration_source_conversion(boundary))
+//RS             .with("mode", migration_mode(boundary))
+//RS             .with("source_authority", boundary.source_authority.as_str()),
+//RS     )
+//RS }
+//RS 
+//RS 
+//RS fn boundary_projection_json(plan: &Plan) -> String {
+//RS     let Some(boundary) = plan.boundary.as_ref() else {
+//RS         return "[]".into();
+//RS     };
+//RS     let rows = boundary
+//RS         .provenance_fields()
+//RS         .into_iter()
+//RS         .map(|(name, value)| {
+//RS             format!(
+//RS                 "{{\"name\":\"{}\",\"value\":\"{}\"}}",
+//RS                 json_escape(&name),
+//RS                 json_escape(&value)
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     format!("[{}]", rows.join(","))
+//RS }
+//RS 
+//RS fn boundary_projection_value(plan: &Plan) -> StatusValue {
+//RS     let Some(boundary) = plan.boundary.as_ref() else {
+//RS         return StatusValue::array(std::iter::empty::<StatusValue>());
+//RS     };
+//RS     StatusValue::array(boundary.provenance_fields().into_iter().map(|(name, value)| {
+//RS         StatusValue::object(
+//RS             StatusFields::new()
+//RS                 .with("name", name)
+//RS                 .with("value", value),
+//RS         )
+//RS     }))
+//RS }
+//RS 
+//RS fn report(plan: &Plan) -> String {
+//RS     let boundary = boundary_projection_json(plan);
+//RS     let migration = migration_projection_json(plan);
+//RS     let mut output = format!(
+//RS         "{{\"schema\":\"jet.source-import.v1\",\"law\":\"D-MIGRATE-SRC1\",\"language\":\"{}\",\"source\":\"{}\",\"target\":\"{}\",\"migration\":{migration},\"provenance\":{{\"source_root\":\"{}\",\"generated_root\":\"{}\",\"boundary\":{boundary}}},\"summary\":{{\"files\":{},\"translated_functions\":{},\"carried_tests\":{},\"omissions\":{}}},\"omissions\":[",
+//RS         json_escape(&plan.language),
+//RS         json_escape(&plan.source.display().to_string()),
+//RS         json_escape(&plan.target.display().to_string()),
+//RS         json_escape(&plan.source.display().to_string()),
+//RS         json_escape(&plan.target.display().to_string()),
+//RS         plan.generated.len(),
+//RS         plan.functions,
+//RS         plan.tests,
+//RS         plan.todos.len()
+//RS     );
+//RS     for (index, todo) in plan.todos.iter().enumerate() {
+//RS         if index > 0 {
+//RS             output.push(',');
+//RS         }
+//RS         let diagnostic = todo.diagnostic();
+//RS         output.push_str(&format!(
+//RS             "{{\"code\":\"{}\",\"what\":\"{}\",\"why\":\"{}\",\"fix\":\"{}\",\"source\":\"{}\",\"source_span\":\"{}\",\"generated_target\":\"{}\",\"provenance\":\"D-MIGRATE-SRC1\",\"migration_status\":\"{}\"}}",
+//RS             diagnostic.code,
+//RS             json_escape(&diagnostic.what),
+//RS             json_escape(&diagnostic.why),
+//RS             json_escape(&diagnostic.fix),
+//RS             json_escape(&todo.source),
+//RS             json_escape(&todo.source),
+//RS             json_escape(&todo.target),
+//RS             todo.status
+//RS         ));
+//RS     }
+//RS     output.push_str("]}\n");
+//RS     output
+//RS }
+//RS 
+//RS fn report_value(plan: &Plan) -> StatusValue {
+//RS     let omissions = StatusValue::array(plan.todos.iter().map(|todo| {
+//RS         let diagnostic = todo.diagnostic();
+//RS         StatusValue::object(
+//RS             StatusFields::new()
+//RS                 .with("code", diagnostic.code.as_str())
+//RS                 .with("what", diagnostic.what.as_str())
+//RS                 .with("why", diagnostic.why.as_str())
+//RS                 .with("fix", diagnostic.fix.as_str())
+//RS                 .with("source", todo.source.as_str())
+//RS                 .with("source_span", todo.source.as_str())
+//RS                 .with("generated_target", todo.target.as_str())
+//RS                 .with("provenance", "D-MIGRATE-SRC1")
+//RS                 .with("migration_status", todo.status),
+//RS         )
+//RS     }));
+//RS     StatusValue::object(
+//RS         StatusFields::new()
+//RS             .with("schema", "jet.source-import.v1")
+//RS             .with("law", "D-MIGRATE-SRC1")
+//RS             .with("language", plan.language.as_str())
+//RS             .with("source", plan.source.display().to_string())
+//RS             .with("target", plan.target.display().to_string())
+//RS             .with("migration", migration_projection_value(plan))
+//RS             .with(
+//RS                 "provenance",
+//RS                 StatusValue::object(
+//RS                     StatusFields::new()
+//RS                         .with("source_root", plan.source.display().to_string())
+//RS                         .with("generated_root", plan.target.display().to_string())
+//RS                         .with("boundary", boundary_projection_value(plan)),
+//RS                 ),
+//RS             )
+//RS             .with(
+//RS                 "summary",
+//RS                 StatusValue::object(
+//RS                     StatusFields::new()
+//RS                         .with("files", plan.generated.len())
+//RS                         .with("translated_functions", plan.functions)
+//RS                         .with("carried_tests", plan.tests)
+//RS                         .with("omissions", plan.todos.len()),
+//RS                 ),
+//RS             )
+//RS             .with("omissions", omissions),
+//RS     )
+//RS }
+//RS 
+//RS fn gap(
+//RS     what: String,
+//RS     why: impl Into<String>,
+//RS     fix: impl Into<String>,
+//RS     source: &Path,
+//RS     target: &Path,
+//RS     line: usize,
+//RS ) -> Todo {
+//RS     Todo {
+//RS         what,
+//RS         why: why.into(),
+//RS         fix: fix.into(),
+//RS         source: format!("{}:{line}", source.display()),
+//RS         target: target.display().to_string(),
+//RS         status: "omitted-reported",
+//RS     }
+//RS }
+//RS 
+//RS fn assignment(line: &str) -> Option<(&str, &str)> {
+//RS     let (left, right) = split_top(line, "=")?;
+//RS     if right.starts_with('=') || left.ends_with(['!', '<', '>']) {
+//RS         return None;
+//RS     }
+//RS     Some((left.trim(), right.trim()))
+//RS }
+//RS 
+//RS fn split_top<'a>(raw: &'a str, needle: &str) -> Option<(&'a str, &'a str)> {
+//RS     let bytes = raw.as_bytes();
+//RS     let needle = needle.as_bytes();
+//RS     let mut depth = 0;
+//RS     let mut quote = None;
+//RS     let mut at = 0;
+//RS     while at + needle.len() <= bytes.len() {
+//RS         if let Some(active) = quote {
+//RS             if bytes[at] == active {
+//RS                 quote = None;
+//RS             } else if bytes[at] == b'\\' {
+//RS                 at += 1;
+//RS             }
+//RS             at += 1;
+//RS             continue;
+//RS         }
+//RS         match bytes[at] {
+//RS             b'\'' | b'"' => quote = Some(bytes[at]),
+//RS             b'(' | b'[' => depth += 1,
+//RS             b')' | b']' => depth -= 1,
+//RS             _ => {}
+//RS         }
+//RS         if depth == 0 && &bytes[at..at + needle.len()] == needle {
+//RS             return Some((&raw[..at], &raw[at + needle.len()..]));
+//RS         }
+//RS         at += 1;
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn indentation(line: &str) -> usize {
+//RS     line.len() - line.trim_start_matches([' ', '\t']).len()
+//RS }
+//RS 
+//RS fn canonical_identifier(value: &str) -> String {
+//RS     let chars: Vec<char> = value.chars().collect();
+//RS     let mut output = String::with_capacity(value.len());
+//RS     for (index, character) in chars.iter().copied().enumerate() {
+//RS         if character.is_ascii_uppercase() {
+//RS             let previous = index.checked_sub(1).and_then(|index| chars.get(index));
+//RS             let next = chars.get(index + 1);
+//RS             let boundary = previous.is_some_and(|previous| {
+//RS                 previous.is_ascii_lowercase()
+//RS                     || previous.is_ascii_digit()
+//RS                     || (previous.is_ascii_uppercase()
+//RS                         && next.is_some_and(|next| next.is_ascii_lowercase()))
+//RS             });
+//RS             if boundary && !output.ends_with('_') {
+//RS                 output.push('_');
+//RS             }
+//RS             output.push(character.to_ascii_lowercase());
+//RS         } else {
+//RS             output.push(character);
+//RS         }
+//RS     }
+//RS     output
+//RS }
+//RS 
+//RS fn identifier(value: &str) -> bool {
+//RS     let mut chars = value.chars();
+//RS     matches!(chars.next(), Some(ch) if ch.is_ascii_alphabetic() || ch == '_')
+//RS         && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+//RS }
+//RS 
+//RS fn shorten(value: &str) -> String {
+//RS     if value.chars().count() <= 48 {
+//RS         value.to_string()
+//RS     } else {
+//RS         format!("{}...", value.chars().take(48).collect::<String>())
+//RS     }
+//RS }
+//RS 
+//RS fn usage_error(what: &str, fix: &str, json: bool) -> i32 {
+//RS     if json {
+//RS         println!(
+//RS             "{}",
+//RS             StatusEnvelope::new("import", false)
+//RS                 .with_report(ReportEnvelope::new(
+//RS                     "tool",
+//RS                     "error",
+//RS                     "E2102",
+//RS                     what,
+//RS                     "D-MIGRATE-SRC1 keeps source import arguments explicit",
+//RS                     fix,
+//RS                 ))
+//RS                 .json()
+//RS         );
+//RS     } else {
+//RS         crate::emit_cli_report(
+//RS             "E2102",
+//RS             what.to_string(),
+//RS             "D-MIGRATE-SRC1 keeps source import arguments explicit".to_string(),
+//RS             fix.to_string(),
+//RS             false,
+//RS         );
+//RS     }
+//RS     ExitCodes::USAGE
+//RS }
+//RS 
+//RS fn operation_error(what: &str, why: &str, json: bool) -> i32 {
+//RS     let diagnostic = Diagnostic::from_row("JT0198", &[("operation", what), ("reason", why)], None);
+//RS     if json {
+//RS         println!(
+//RS             "{}",
+//RS             StatusEnvelope::new("import", false)
+//RS                 .with_report(ReportEnvelope::new(
+//RS                     "tool",
+//RS                     "error",
+//RS                     diagnostic.code,
+//RS                     diagnostic.what,
+//RS                     diagnostic.why,
+//RS                     diagnostic.fix,
+//RS                 ))
+//RS                 .json()
+//RS         );
+//RS     } else {
+//RS         eprintln!("error[{}]: {}", diagnostic.code, diagnostic.what);
+//RS         eprintln!("  why: {}", diagnostic.why);
+//RS         eprintln!("  fix: {}", diagnostic.fix);
+//RS     }
+//RS     ExitCodes::USER_ERROR
+//RS }
+// END-PORT-PENDING 0690 Source/CmdImport.rs:1814-3523
+

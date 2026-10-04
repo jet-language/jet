@@ -1,0 +1,29 @@
+#Test("doctest snapshot rewrite is byte safe and preserves unrelated text") {
+    source := "prefix é\n  /// café // => old\nsuffix\n"
+    assert(jet_cli_test_rewrite_doctest_expect(&source, 2, "new"))
+    assert_eq(source, "prefix é\n  /// café // => new\nsuffix\n")
+    span :: jet_cli_test_doc_line_span(source, 2) ?? panic("span")
+    assert_eq(span.start, 10)
+    assert_eq(span.end, 31)
+    assert(jet_cli_test_doc_line_span(source, 4) == None)
+    assert(jet_cli_test_doc_line_span(source, 0) == None)
+}
+#Test("doctest rewrite skips non-doc lines and quoted markers without mutation") {
+    source := "// x // => old\n/// \"// => quoted\"\n"
+    old :: ~source
+    assert(!jet_cli_test_rewrite_doctest_expect(&source, 1, "new"))
+    assert(!jet_cli_test_rewrite_doctest_expect(&source, 2, "new"))
+    assert(!jet_cli_test_rewrite_doctest_expect(&source, 3, "new"))
+    assert_eq(source, old)
+}
+#Test("doctest rewrite preserves optional doc space and normalizes rewritten CRLF") {
+    cr :: String.from_bytes([U8]{U8{13}}) ?? panic("CR")
+    source := "///x // => old{cr}\n/// // => old{cr}"
+    assert(jet_cli_test_rewrite_doctest_expect(&source, 1, "a"))
+    assert_eq(source, "///x // => a\n/// // => old{cr}")
+    assert(jet_cli_test_rewrite_doctest_expect(&source, 2, "b"))
+    assert_eq(source, "///x // => a\n/// // => b")
+    span :: jet_cli_test_doc_line_span("é{cr}{cr}\n", 1) ?? panic("span")
+    assert_eq(span.start, 0)
+    assert_eq(span.end, 2)
+}

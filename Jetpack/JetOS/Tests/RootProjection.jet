@@ -1,0 +1,467 @@
+use core.sys.host.os_path_ingress as root_test_ingress
+use core.sys.host.retained_counter as root_test_counter
+
+// Rust root_projection.rs has no embedded tests. These port the repository
+// journey tests/jetpack_jetos.rs::os_switch_activates_and_sets_current
+// root-projection assertions (root/etc/hostname, root/boot/kernel,
+// root/sbin/init, root/home/<user>/.profile, run/current-system projections)
+// and the identity installer copy path, plus staged-symlink policy regressions.
+//
+// Every native case is mandatory and UNEXECUTED. All fixture IO uses the sole
+// published raw retained-descriptor ABI (#DF89), including native temp parent,
+// exclusive fixture creation, links, followed/unfollowed facts and permissions.
+// Selected cfg and real native provider bodies remain #4500/#4483/#4494/#4392.
+// Original host guards in the tests are NOT production native-cfg dispatch.
+
+#Test("JetOS staged symlink policy keeps store and relative targets by component") {
+    assert(jetos_should_preserve_staged_symlink(root_path.from_text("/nix/store", .Unix)))
+    assert(jetos_should_preserve_staged_symlink(root_path.from_text("/nix/store/abc-hello/bin/hello", .Unix)))
+    assert(jetos_should_preserve_staged_symlink(root_path.from_text("/nix//store/abc", .Unix)))
+    assert(jetos_should_preserve_staged_symlink(root_path.from_text("/nix/./store/abc", .Unix)))
+    assert(jetos_should_preserve_staged_symlink(root_path.from_text("//nix/store/abc", .Unix)))
+    assert(jetos_should_preserve_staged_symlink(root_path.from_text("bin/hello", .Unix)))
+    assert(jetos_should_preserve_staged_symlink(root_path.from_text("../lib/libc.so", .Unix)))
+    assert(jetos_should_preserve_staged_symlink(root_path.from_text("./nix/store", .Unix)))
+    assert(jetos_should_preserve_staged_symlink(root_path.from_text("nix/storehouse", .Unix)))
+    assert(jetos_should_preserve_staged_symlink(root_path.from_text("", .Unix)))
+    assert(!jetos_should_preserve_staged_symlink(root_path.from_text("/nix/storehouse/abc", .Unix)))
+    assert(!jetos_should_preserve_staged_symlink(root_path.from_text("/nix/store-other/abc", .Unix)))
+    assert(!jetos_should_preserve_staged_symlink(root_path.from_text("/nix", .Unix)))
+    assert(!jetos_should_preserve_staged_symlink(root_path.from_text("/nix/../nix/store/abc", .Unix)))
+    assert(!jetos_should_preserve_staged_symlink(root_path.from_text("/etc/os-release", .Unix)))
+    assert(!jetos_should_preserve_staged_symlink(root_path.from_text("/", .Unix)))
+}
+
+// Pure Windows path laws, not an executed Windows native-copy parity claim.
+#Test("JetOS staged symlink policy uses Windows absolute and prefix semantics") {
+    assert(jetos_should_preserve_staged_symlink(root_path.from_text("C:relative", .Windows)))
+    assert(jetos_should_preserve_staged_symlink(root_path.from_text("\\rooted-without-prefix", .Windows)))
+    assert(jetos_should_preserve_staged_symlink(root_path.from_text("/nix/store", .Windows)))
+    assert(!jetos_should_preserve_staged_symlink(root_path.from_text("C:\\nix\\store\\package", .Windows)))
+    assert(!jetos_should_preserve_staged_symlink(root_path.from_text("\\\\server\\share\\file", .Windows)))
+    assert(!jetos_should_preserve_staged_symlink(root_path.from_text("\\\\?\\C:\\nix\\store", .Windows)))
+}
+
+#Test("JetOS staged symlink policy preserves native bytes without display recovery") {
+    target :: root_path.from_encoded([U8]{47, 110, 105, 120, 47, 115, 116, 111, 114, 101, 47, 255}, .Unix)
+    assert(jetos_should_preserve_staged_symlink(target))
+    outside :: root_path.from_encoded([U8]{47, 255}, .Unix)
+    assert(!jetos_should_preserve_staged_symlink(outside))
+    relative :: root_path.from_encoded([U8]{255}, .Unix)
+    assert(jetos_should_preserve_staged_symlink(relative))
+}
+
+#Test("JetOS root-generated child names retain encoded parents and PathBuf push rules") {
+    unix_parent :: root_path.from_encoded([U8]{47, 255}, .Unix)
+    unix_child :: jetos_root_child(unix_parent, "unit")
+    assert_eq(unix_child.encoded, [U8]{47, 255, 47, 117, 110, 105, 116})
+    assert_eq(unix_parent.encoded, [U8]{47, 255})
+    windows_parent :: root_path.from_encoded([U8]{67, 58, 92, 237, 160, 128}, .Windows)
+    windows_child :: jetos_root_child(windows_parent, "unit")
+    assert_eq(windows_child.encoded, [U8]{67, 58, 92, 237, 160, 128, 92, 117, 110, 105, 116})
+    assert_eq(windows_parent.encoded, [U8]{67, 58, 92, 237, 160, 128})
+    assert(root_path.equals(jetos_root_child(root_path.from_text("/etc/systemd/system", .Unix), "/replacement"), root_path.from_text("/replacement", .Unix)))
+    assert(root_path.equals(jetos_root_child(root_path.from_text("C:\\units", .Windows), "D:\\replacement"), root_path.from_text("D:\\replacement", .Windows)))
+    assert(root_path.equals(jetos_root_child(root_path.from_text("..", .Unix), "openssh.service"), root_path.from_text("../openssh.service", .Unix)))
+}
+
+// The native temp parent is never displayed/reparsed. Exclusive create_dir
+// owns uniqueness; each failed AlreadyExists candidate consumes a fresh
+// canonical process counter. No fixture wraps String Core.files providers.
+fn jetos_root_projection_test_temp(prefix: String) -> root_path.OSPath Never! -[FS, Env]> {
+    parent :: root_test_ingress.temp_dir()
+    loop {
+        counter :: root_test_counter.temp_counter_next()
+        path :: jetos_root_child(parent, "{prefix}{counter}")
+        if root_native.create_dir(path) == {
+            .Ok(_) -> return path
+            .Err(error) -> {
+                if error == .AlreadyExists(_) -> next
+                panic("fixture directory: {error}")
+            }
+        }
+    }
+}
+
+fn jetos_root_projection_test_write(root: root_path.OSPath, relative: String, text: String) Never! -[FS]> {
+    path :: jetos_root_child(root, relative)
+    parent :: root_path.parent_span(path) ?? panic("parent of {relative}")
+    root_native.create_dir_all(root_path.owned_span(path, parent)) ?? panic("parent of {relative}")
+    root_native.write(path, text.bytes()) ?? panic("write {relative}")
+}
+
+fn jetos_root_projection_test_read(root: root_path.OSPath, relative: String) -[FS]> String Never! {
+    root_native.read_text(jetos_root_child(root, relative)) ?? panic("read {relative}")
+}
+
+fn jetos_root_projection_test_lexists(path: root_path.OSPath) -> Bool Never! -[FS]> {
+    if root_native.symlink_metadata(path) == .Ok(_) -> return true
+    false
+}
+
+fn jetos_root_projection_test_link(root: root_path.OSPath, relative: String) -> String Never! -[FS]> {
+    target :: root_native.read_link(jetos_root_child(root, relative)) ?? panic("link {relative}")
+    root_path.to_str(target) ?? panic("fixture link target must be UTF8")
+}
+
+fn jetos_root_projection_test_mode(path: root_path.OSPath) -> U32 Never! -[FS]> {
+    permissions :: root_native.permissions(path) ?? panic("native permissions")
+    if permissions == {
+        .Unix(mode) -> return mode
+        .Windows(_) -> panic("Unix permission fixture requires selected Unix natives")
+    }
+}
+
+#Test("JetOS bootable root projection links current system and rooted trees") {
+    generation :: jetos_root_projection_test_temp("jetos-root-projection-")
+    jetos_root_projection_test_write(generation, "etc/hostname", "halcyon\n")
+    jetos_root_projection_test_write(generation, "etc/systemd/system/openssh.service", "[Unit]\n")
+    jetos_root_projection_test_write(generation, "boot/kernel", "MZ kernel HdrS")
+    jetos_root_projection_test_write(generation, "sbin/init", "systemd")
+    jetos_root_projection_test_write(generation, "home/nate/.profile", "export PATH\n")
+    jetos_root_projection_test_write(generation, "terminal/facts.json", "{{}}")
+    jetos_root_projection_test_write(generation, "studio/app.json", "{{}}")
+    jetos_root_projection_test_write(generation, "plan.json", "plan")
+    jetos_root_projection_test_write(generation, "secrets.tmpfs.manifest", "secrets")
+    jetos_root_projection_test_write(generation, "unlisted/file", "outside inventory")
+    jetos_root_projection_test_write(generation, "unlisted.txt", "outside inventory")
+    root_native.create_dir_all(jetos_root_child(generation, "vm-proof.txt")) ?? panic("directory named like a proof file")
+    jetos_root_projection_test_write(generation, "root/stale", "previous projection")
+    published :: root_path.from_text("/var/lib/jetos/systems/generations/known-good", generation.platform)
+    jetos_write_bootable_root_projection(generation, published) ?? panic("root projection")
+    assert(!root_native.exists(jetos_root_child(generation, "root/stale")))
+    assert_eq(jetos_root_projection_test_read(generation, "root/etc/hostname"), "halcyon\n")
+    assert_eq(jetos_root_projection_test_read(generation, "root/boot/kernel"), "MZ kernel HdrS")
+    assert_eq(jetos_root_projection_test_read(generation, "root/sbin/init"), "systemd")
+    assert_eq(jetos_root_projection_test_read(generation, "root/home/nate/.profile"), "export PATH\n")
+    assert_eq(jetos_root_projection_test_read(generation, "root/run/current-system/etc/systemd/system/openssh.service"), "[Unit]\n")
+    assert_eq(jetos_root_projection_test_read(generation, "root/run/current-system/terminal/facts.json"), "{{}}")
+    assert_eq(jetos_root_projection_test_read(generation, "root/run/current-system/studio/app.json"), "{{}}")
+    assert_eq(jetos_root_projection_test_read(generation, "root/run/current-system/plan.json"), "plan")
+    assert_eq(jetos_root_projection_test_read(generation, "root/run/current-system/secrets.tmpfs.manifest"), "secrets")
+    assert(!root_native.exists(jetos_root_child(generation, "root/terminal")))
+    assert(!root_native.exists(jetos_root_child(generation, "root/studio")))
+    assert(!root_native.exists(jetos_root_child(generation, "root/run/current-system/nix")))
+    assert(!root_native.exists(jetos_root_child(generation, "root/run/current-system/proof.txt")))
+    assert(!root_native.exists(jetos_root_child(generation, "root/run/current-system/unlisted")))
+    assert(!root_native.exists(jetos_root_child(generation, "root/run/current-system/unlisted.txt")))
+    assert(!root_native.exists(jetos_root_child(generation, "root/run/current-system/vm-proof.txt")))
+    assert(root_native.is_directory(jetos_root_child(generation, "root/var/lib/jetos/generations")))
+    assert_eq(jetos_root_projection_test_read(generation, "root/var/lib/jetos/generations/current"), "{root_path.display(published)}\n")
+    if sys.family() == "unix" {
+        assert_eq(jetos_root_projection_test_link(generation, "root/etc/hostname"), "../../etc/hostname")
+        assert_eq(jetos_root_projection_test_link(generation, "root/home/nate/.profile"), "../../../home/nate/.profile")
+        assert_eq(jetos_root_projection_test_link(generation, "root/run/current-system/etc/hostname"), "../../../../etc/hostname")
+        assert_eq(jetos_root_projection_test_link(generation, "root/run/current-system/plan.json"), "../../../plan.json")
+    }
+    root_native.remove_dir_all(generation) ?? panic("remove root scratch")
+}
+
+#Test("JetOS root projection follows linked proof files and skips dangling ones") {
+    if sys.family() != "unix" -> return
+    generation :: jetos_root_projection_test_temp("jetos-root-links-")
+    jetos_root_projection_test_write(generation, "real-plan", "linked plan")
+    root_native.symlink(root_path.from_text("real-plan", generation.platform), jetos_root_child(generation, "plan.json")) ?? panic("plan link")
+    root_native.symlink(root_path.from_text("missing-proof", generation.platform), jetos_root_child(generation, "proof.txt")) ?? panic("dangling proof link")
+    assert(root_native.is_file(jetos_root_child(generation, "plan.json")))
+    assert(!root_native.is_file(jetos_root_child(generation, "proof.txt")))
+    assert((root_native.metadata(jetos_root_child(generation, "plan.json")) ?? panic("followed file")).is_file)
+    if root_native.metadata(jetos_root_child(generation, "proof.txt")) == {
+        .Ok(_) -> panic("dangling link had followed metadata")
+        .Err(_) -> {}
+    }
+    jetos_write_bootable_root_projection(generation, root_path.from_text("/published", generation.platform)) ?? panic("root projection")
+    assert_eq(jetos_root_projection_test_read(generation, "root/run/current-system/plan.json"), "linked plan")
+    assert(!jetos_root_projection_test_lexists(jetos_root_child(generation, "root/run/current-system/proof.txt")))
+    assert_eq(jetos_root_projection_test_read(generation, "root/var/lib/jetos/generations/current"), "/published\n")
+    root_native.remove_dir_all(generation) ?? panic("remove root scratch")
+}
+
+#Test("JetOS dereferencing copy preserves staged links and skips broken absolute links") {
+    if sys.family() != "unix" -> return
+    root :: jetos_root_projection_test_temp("jetos-deref-")
+    root_native.create_dir_all(root) ?? panic("deref fixture directory")
+    src :: jetos_root_child(root, "src")
+    dst :: jetos_root_child(root, "dst")
+    outside :: jetos_root_child(root, "outside.txt")
+    root_native.write(outside, "outside bytes".bytes()) ?? panic("outside")
+    jetos_root_projection_test_write(src, "a/file.txt", "file bytes")
+    jetos_root_projection_test_write(src, "a/nested/deep.txt", "deep bytes")
+    root_native.symlink(root_path.from_text("/nix/store/abc-missing", root.platform), jetos_root_child(src, "store-link")) ?? panic("store link")
+    root_native.symlink(root_path.from_text("a/file.txt", root.platform), jetos_root_child(src, "relative-link")) ?? panic("relative link")
+    root_native.symlink(outside, jetos_root_child(src, "absolute-link")) ?? panic("absolute link")
+    root_native.symlink(jetos_root_child(root, "a-dir-outside"), jetos_root_child(src, "absolute-dir-link")) ?? panic("absolute dir link")
+    jetos_root_projection_test_write(root, "a-dir-outside/inner.txt", "inner bytes")
+    root_native.symlink(root_path.from_text("/definitely/missing/jetos", root.platform), jetos_root_child(src, "broken-absolute")) ?? panic("broken absolute")
+    root_native.symlink(root_path.from_text("/nix/storehouse/missing", root.platform), jetos_root_child(src, "broken-storehouse")) ?? panic("broken storehouse")
+    jetos_copy_dir_recursive_deref(src, dst) ?? panic("deref copy")
+    assert_eq(jetos_root_projection_test_read(dst, "a/file.txt"), "file bytes")
+    assert_eq(jetos_root_projection_test_read(dst, "a/nested/deep.txt"), "deep bytes")
+    assert_eq(jetos_root_projection_test_link(dst, "store-link"), "/nix/store/abc-missing")
+    assert_eq(jetos_root_projection_test_link(dst, "relative-link"), "a/file.txt")
+    assert(!(root_native.symlink_metadata(jetos_root_child(dst, "absolute-link")) ?? panic("absolute copy")).is_symlink)
+    assert_eq(jetos_root_projection_test_read(dst, "absolute-link"), "outside bytes")
+    assert(!(root_native.symlink_metadata(jetos_root_child(dst, "absolute-dir-link")) ?? panic("absolute dir copy")).is_symlink)
+    assert_eq(jetos_root_projection_test_read(dst, "absolute-dir-link/inner.txt"), "inner bytes")
+    assert(!jetos_root_projection_test_lexists(jetos_root_child(dst, "broken-absolute")))
+    assert(!jetos_root_projection_test_lexists(jetos_root_child(dst, "broken-storehouse")))
+    root_native.remove_dir_all(root) ?? panic("remove deref scratch")
+}
+
+#Test("JetOS dereferencing copy reports nested directory failures with context") {
+    if sys.family() != "unix" -> return
+    root :: jetos_root_projection_test_temp("jetos-deref-error-")
+    src :: jetos_root_child(root, "src")
+    dst :: jetos_root_child(root, "dst")
+    jetos_root_projection_test_write(src, "locked/file.txt", "bytes")
+    jetos_root_projection_test_write(dst, "locked", "not a directory")
+    if jetos_copy_dir_recursive_deref(src, dst) == {
+        .Ok(_) -> panic("nested directory copy over a file succeeded")
+        .Err(error) -> assert("{error}".contains("copying directory `{root_path.display(jetos_root_child(src, "locked"))}` to `{root_path.display(jetos_root_child(dst, "locked"))}` failed: "))
+    }
+    root_native.remove_dir_all(root) ?? panic("remove deref scratch")
+}
+
+#Test("JetOS enable unit replaces wanted entries with a parent-relative link") {
+    root :: jetos_root_projection_test_temp("jetos-enable-unit-")
+    unit_dir :: jetos_root_child(root, "etc/systemd/system")
+    jetos_root_projection_test_write(unit_dir, "openssh.service", "[Unit]\n")
+    jetos_root_projection_test_write(unit_dir, "multi-user.target.wants/openssh.service", "stale copy")
+    jetos_enable_unit(unit_dir, "multi-user.target", "openssh.service") ?? panic("enable unit")
+    assert_eq(jetos_root_projection_test_read(unit_dir, "multi-user.target.wants/openssh.service"), "[Unit]\n")
+    if sys.family() == "unix" -> assert_eq(jetos_root_projection_test_link(unit_dir, "multi-user.target.wants/openssh.service"), "../openssh.service")
+    jetos_enable_unit(unit_dir, "multi-user.target", "openssh.service") ?? panic("re-enable unit")
+    assert_eq(jetos_root_projection_test_read(unit_dir, "multi-user.target.wants/openssh.service"), "[Unit]\n")
+    root_native.remove_dir_all(root) ?? panic("remove unit scratch")
+}
+
+#Test("JetOS copy replacement preserves source permissions without creating parents") {
+    if sys.family() != "unix" -> return
+    root :: jetos_root_projection_test_temp("jetos-copy-mode-")
+    root_native.create_dir_all(root) ?? panic("copy fixture directory")
+    src :: jetos_root_child(root, "source")
+    dst :: jetos_root_child(root, "destination")
+    old :: jetos_root_child(root, "old-target")
+    root_native.write(src, "new bytes".bytes()) ?? panic("source")
+    root_native.set_permissions(src, U32{0o451}) ?? panic("source mode")
+    root_native.write(old, "old bytes".bytes()) ?? panic("old target")
+    root_native.symlink(root_path.from_text("old-target", root.platform), dst) ?? panic("old destination link")
+    jetos_copy_file_replace(src, dst) ?? panic("replace destination")
+    assert_eq(root_native.read_text(dst) ?? panic("copied bytes"), "new bytes")
+    assert_eq(root_native.read_text(old) ?? panic("old target bytes"), "old bytes")
+    assert(!(root_native.symlink_metadata(dst) ?? panic("copied stat")).is_symlink)
+    assert_eq(jetos_root_projection_test_mode(dst) & U32{0o777}, U32{0o673})
+    assert_eq(jetos_root_projection_test_mode(src) & U32{0o777}, U32{0o451})
+    if jetos_copy_file_replace(src, jetos_root_child(root, "absent/nested/destination")) == {
+        .Ok(_) -> panic("copy created nonexistent parents")
+        .Err(_) -> {}
+    }
+    assert(!jetos_root_projection_test_lexists(jetos_root_child(root, "absent")))
+    root_native.remove_dir_all(root) ?? panic("remove copy scratch")
+}
+
+// Full original inventory and rooted subset, not a reduced representative
+// golden. The fixture's names are deliberately written in reverse order.
+#Test("JetOS bootable projection includes every original top and proof filename") {
+    generation :: jetos_root_projection_test_temp("jetos-root-inventory-")
+    tops :: [String]{"home", "terminal", "compat", "store", "desktop", "acceptance", "apps", "service-manager", "lifecycle", "image-variants", "options", "fleet", "theme", "workloads", "storage", "module-system", "performance", "flatpak", "users", "hardware", "network", "usr", "lib", "nix", "systemd", "init", "studio", "share", "sw", "sbin", "etc", "boot"}
+    rooted :: [String]{"boot", "etc", "sbin", "lib", "usr", "systemd", "home"}
+    proofs :: [String]{"vm-proof.txt", "secrets.tmpfs.manifest", "activation-diff.txt", "health-checks.txt", "provenance.json", "proof.txt", "plan.json"}
+    loop top in tops -> jetos_root_projection_test_write(generation, "{top}/inventory", top)
+    loop file in proofs -> jetos_root_projection_test_write(generation, file, file)
+    jetos_root_projection_test_write(generation, "studio/data.json", "{{\"original\":true}}")
+    jetos_write_bootable_root_projection(generation, root_path.from_text("/published/inventory", generation.platform)) ?? panic("inventory projection")
+    loop top in tops {
+        assert_eq(jetos_root_projection_test_read(generation, "root/run/current-system/{top}/inventory"), top)
+        if rooted.contains(top) {
+            assert_eq(jetos_root_projection_test_read(generation, "root/{top}/inventory"), top)
+        } else {
+            assert(!jetos_root_projection_test_lexists(jetos_root_child(generation, "root/{top}")))
+        }
+    }
+    loop file in proofs {
+        assert_eq(jetos_root_projection_test_read(generation, "root/run/current-system/{file}"), file)
+        assert(!jetos_root_projection_test_lexists(jetos_root_child(generation, "root/{file}")))
+    }
+    assert_eq(jetos_root_projection_test_read(generation, "root/run/current-system/studio/data.json"), "{{\"original\":true}}")
+    assert_eq(jetos_root_projection_test_read(generation, "root/var/lib/jetos/generations/current"), "/published/inventory\n")
+    root_native.remove_dir_all(generation) ?? panic("remove inventory scratch")
+}
+
+#Test("JetOS dereferencing copy visits real directory entries in name order") {
+    root :: jetos_root_projection_test_temp("jetos-root-entry-order-")
+    src :: jetos_root_child(root, "src")
+    dst :: jetos_root_child(root, "dst")
+    jetos_root_projection_test_write(src, "z-last/value", "z")
+    jetos_root_projection_test_write(src, "a-first/value", "a")
+    jetos_root_projection_test_write(dst, "z-last", "block z")
+    jetos_root_projection_test_write(dst, "a-first", "block a")
+    if jetos_copy_dir_recursive_deref(src, dst) == {
+        .Ok(_) -> panic("directory copy over a file succeeded")
+        .Err(error) -> {
+            assert("{error}".contains("copying directory `{root_path.display(jetos_root_child(src, "a-first"))}` to `{root_path.display(jetos_root_child(dst, "a-first"))}` failed: "))
+            assert(!"{error}".contains("copying directory `{root_path.display(jetos_root_child(src, "z-last"))}`"))
+        }
+    }
+    root_native.remove_dir_all(root) ?? panic("remove entry order scratch")
+}
+
+#Test("JetOS dereferencing copy propagates directory-open errors instead of skipping them") {
+    root :: jetos_root_projection_test_temp("jetos-root-read-dir-")
+    src :: jetos_root_child(root, "not-a-directory")
+    dst :: jetos_root_child(root, "dst")
+    root_native.write(src, "file".bytes()) ?? panic("non-directory source")
+    if jetos_copy_dir_recursive_deref(src, dst) == {
+        .Ok(_) -> panic("read_dir over a file succeeded")
+        .Err(_) -> {}
+    }
+    assert(root_native.is_directory(dst))
+    assert_eq(root_native.read_text(src) ?? panic("original file"), "file")
+    root_native.remove_dir_all(root) ?? panic("remove read dir scratch")
+}
+
+// Pure raw-name law, separate from native enumeration/error-law acceptance.
+#Test("JetOS root entry ordering uses original native bytes not display text") {
+    a :: root_path.from_encoded([U8]{97}, .Unix)
+    longer :: root_path.from_encoded([U8]{97, 255}, .Unix)
+    invalid :: root_path.from_encoded([U8]{255}, .Unix)
+    replacement :: root_path.from_encoded([U8]{239, 191, 189}, .Unix)
+    assert(jetos_root_name_order(a, longer) == Ordering.Less)
+    assert(jetos_root_name_order(longer, a) == Ordering.Greater)
+    assert(jetos_root_name_order(invalid, replacement) == Ordering.Greater)
+    assert(jetos_root_name_order(invalid, invalid) == Ordering.Equal)
+}
+
+// Linux's real symlink target-length limit refuses the relative spelling while
+// each real absolute source/destination pathname remains below PATH_MAX. No
+// errno injection/mock filesystem: the actual symlink fails, then exact copy
+// must succeed and conserve the source permissions without enabling writes.
+#Test("JetOS link or copy falls back after a real native symlink failure") {
+    if sys.name() != "linux" -> return
+    root :: jetos_root_projection_test_temp("jetos-root-link-copy-")
+    source_dir := jetos_root_child(root, "source")
+    loop _ in 0..<170 -> root_path.push(&source_dir, root_path.from_text("source-component-long", root.platform))
+    destination_dir := jetos_root_child(root, "destination")
+    loop _ in 0..<330 -> root_path.push(&destination_dir, root_path.from_text("d", root.platform))
+    src :: jetos_root_child(source_dir, "file")
+    dst :: jetos_root_child(destination_dir, "file")
+    assert(src.encoded.len() < 4096)
+    assert(dst.encoded.len() < 4096)
+    root_native.create_dir_all(source_dir) ?? panic("long source parents")
+    root_native.create_dir_all(destination_dir) ?? panic("long destination parents")
+    root_native.write(src, "fallback bytes".bytes()) ?? panic("fallback source")
+    root_native.set_permissions(src, U32{0o451}) ?? panic("fallback source mode")
+    relative :: jetos_relative_path(destination_dir, src) ?? panic("original relative owner")
+    assert(relative.encoded.len() > 4096)
+    if root_native.symlink(relative, dst) == {
+        .Ok(_) -> panic("long symlink target unexpectedly succeeded")
+        .Err(_) -> {}
+    }
+    jetos_link_or_copy_file(src, dst) ?? panic("copy after symlink failure")
+    assert_eq(root_native.read_text(dst) ?? panic("fallback bytes"), "fallback bytes")
+    assert(!(root_native.symlink_metadata(dst) ?? panic("fallback type")).is_symlink)
+    assert_eq(jetos_root_projection_test_mode(dst) & U32{0o777}, U32{0o451})
+    assert_eq(jetos_root_projection_test_mode(src) & U32{0o777}, U32{0o451})
+    if jetos_link_or_copy_file(src, jetos_root_child(root, "absent/nested/destination")) == {
+        .Ok(_) -> panic("fallback copy created parents")
+        .Err(_) -> {}
+    }
+    assert(!jetos_root_projection_test_lexists(jetos_root_child(root, "absent")))
+    root_native.remove_dir_all(root) ?? panic("remove fallback scratch")
+}
+
+#Test("JetOS Unix root link refuses a missing parent with the original Other error") {
+    if sys.family() != "unix" -> return
+    root :: jetos_root_projection_test_temp("jetos-root-no-parent-")
+    jetos_root_projection_test_write(root, "source", "bytes")
+    if jetos_link_or_copy_file_unix_body(jetos_root_child(root, "source"), root_path.from_text("", root.platform)) == {
+        .Ok(_) -> panic("empty destination had a parent")
+        .Err(error) -> {
+            if error == {
+                .Other(context) -> assert_eq(context.cause ?? "", "root projection link has no parent")
+                else -> panic("missing parent changed the original Other kind")
+            }
+        }
+    }
+    assert_eq(jetos_root_projection_test_read(root, "source"), "bytes")
+    root_native.remove_dir_all(root) ?? panic("remove no-parent scratch")
+}
+
+// Original nonUnix permission-value law. Source-level until a real Windows
+// provider/selected target executes it; Unix mode is never invented here.
+#Test("JetOS Windows copy replacement clears only destination readonly state") {
+    if sys.family() != "windows" -> return
+    root :: jetos_root_projection_test_temp("jetos-root-windows-readonly-")
+    src :: jetos_root_child(root, "source")
+    dst :: jetos_root_child(root, "destination")
+    root_native.write(src, "readonly source".bytes()) ?? panic("Windows source")
+    source_permissions :: root_native.permissions(src) ?? panic("source permissions")
+    root_native.set_readonly(src, source_permissions, true) ?? panic("set source readonly")
+    jetos_copy_file_replace(src, dst) ?? panic("Windows replacement")
+    assert_eq(root_native.read_text(dst) ?? panic("Windows bytes"), "readonly source")
+    destination_permissions :: root_native.permissions(dst) ?? panic("destination permissions")
+    if destination_permissions == {
+        .Windows(readonly) -> assert(!readonly)
+        .Unix(_) -> panic("Windows native permissions were replaced with Unix mode")
+    }
+    captured :: root_native.permissions(src) ?? panic("source retained permissions")
+    if captured == {
+        .Windows(readonly) -> assert(readonly)
+        .Unix(_) -> panic("Windows source permissions were replaced with Unix mode")
+    }
+    root_native.set_readonly(src, captured, false) ?? panic("fixture cleanup permissions")
+    root_native.remove_dir_all(root) ?? panic("remove Windows scratch")
+}
+
+#Test("JetOS dereferencing file-copy errors retain the native kind and exact context") {
+    root :: jetos_root_projection_test_temp("jetos-root-file-error-")
+    src :: jetos_root_child(root, "src")
+    dst :: jetos_root_child(root, "dst")
+    path :: jetos_root_child(src, "payload")
+    target :: jetos_root_child(dst, "payload")
+    jetos_root_projection_test_write(src, "payload", "bytes")
+    root_native.create_dir_all(target) ?? panic("directory blocks destination file")
+    original :: if jetos_copy_file_replace(path, target) == {
+        .Ok(_) -> panic("native copy over a directory succeeded")
+        .Err(error) -> error
+    }
+    expected :: foundation_io_error_with_cause(original, "copying file `{root_path.display(path)}` to `{root_path.display(target)}` failed: {original}")
+    if jetos_copy_dir_recursive_deref(src, dst) == {
+        .Ok(_) -> panic("dereferencing copy over a directory succeeded")
+        .Err(error) -> assert_eq("{error}", "{expected}")
+    }
+    assert_eq(root_native.read_text(path) ?? panic("source preserved"), "bytes")
+    assert(root_native.is_directory(target))
+    root_native.remove_dir_all(root) ?? panic("remove file-error scratch")
+}
+
+#Test("JetOS root copy classifies native directory symlinks without following entry type") {
+    if sys.family() != "unix" -> return
+    generation :: jetos_root_projection_test_temp("jetos-root-entry-type-")
+    outside :: jetos_root_child(generation, "outside")
+    boot :: jetos_root_child(generation, "boot")
+    jetos_root_projection_test_write(outside, "inside", "external directory")
+    root_native.create_dir_all(boot) ?? panic("boot fixture")
+    root_native.symlink(outside, jetos_root_child(boot, "link-dir")) ?? panic("directory symlink")
+    stream :: root_native.read_dir(boot) ?? panic("read native entries")
+    found := false
+    loop {
+        optional :: stream.next() ?? panic("fixture entry read")
+        entry :: optional ?? break
+        name :: entry.file_name()
+        if root_path.equals(name, root_path.from_text("link-dir", generation.platform)) {
+            own :: entry.file_type() ?? panic("entry file type")
+            assert(own.is_symlink)
+            assert(!own.is_dir)
+            assert((root_native.metadata(entry.path()) ?? panic("follow directory")).is_dir)
+            found = true
+        }
+    }
+    assert(found)
+    jetos_write_bootable_root_projection(generation, root_path.from_text("/published", generation.platform)) ?? panic("symlink directory projection")
+    projected :: jetos_root_child(generation, "root/boot/link-dir")
+    assert((root_native.symlink_metadata(projected) ?? panic("projected entry type")).is_symlink)
+    assert(root_native.is_directory(projected))
+    assert_eq(root_native.read_text(jetos_root_child(projected, "inside")) ?? panic("linked directory bytes"), "external directory")
+    root_native.remove_dir_all(generation) ?? panic("remove entry-type scratch")
+}

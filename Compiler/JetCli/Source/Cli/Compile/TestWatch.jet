@@ -1,0 +1,95 @@
+// Rust Source/CmdCompile.rs:8417-8479,8663-8675,8697-8758. Child argument
+// construction and watch cursor policy; WatchService owns input/change IO.
+
+pub struct JetCLITestWatchState {
+    pub failed: [String]
+    pub last_status: Int
+    pub last_good: Bool
+    pub output: JetCLITestCapturePolicy
+}
+pub enum JetCLITestWatchAction {
+    NonePending
+    Quit
+    RerunFailed
+    RunAll
+    OutputChanged
+}
+
+// Rust append_test_watch_flags (CmdCompile.rs:8417-8479). No --watch and no
+// --record: one watch capture authority owns the whole watch lifetime.
+pub fn jet_cli_test_watch_flags(options: JetCLITestRunOptions, filter: String?) -> [String] Never! {
+    flags := [String]{"--quiet", "--capture=all"}
+    if options.show_default -> &flags.push("--show-default")
+    if options.update_snapshots -> &flags.push("--update-snapshots")
+    if options.coverage -> &flags.push("--coverage")
+    if options.release -> &flags.push("--release")
+    if options.profile == .Val(profile) -> &flags.push("--profile={profile}")
+    keys := options.setting_overrides.keys().to_list()
+    &keys.sort()
+    loop key in keys -> &flags.push("--set={key}={options.setting_overrides[key]}")
+    if options.trace_tiers -> &flags.push("--trace-tiers")
+    if options.browser_engines == .Val(engines) -> &flags.push("--browser={engines}")
+    if options.browser_retries == .Val(retries) -> &flags.push("--browser-retries={retries}")
+    if options.browser_reporter == .Val(reporter) -> &flags.push("--browser-reporter={reporter}")
+    if options.browser_ui -> &flags.push("--browser-ui")
+    if options.browser_visual -> &flags.push("--browser-visual")
+    if options.browser_trace -> &flags.push("--browser-trace")
+    chosen :: if filter == {
+        .Val(value) -> Val(~value)
+        .None -> ~options.filter
+    }
+    if chosen == .Val(value) -> &flags.push("--filter={value}")
+    if options.shuffle_seed == .Val(seed) -> &flags.push("--shuffle={seed}")
+    if options.serial -> &flags.push("--serial")
+    if options.measure -> &flags.push("--measure")
+    if options.where_expr == .Val(expression) -> &flags.push("--where={expression}")
+    if options.docs -> &flags.push("--docs")
+    if options.fresh -> &flags.push("--fresh")
+    flags
+}
+
+// Rust run_test_watch initialization (CmdCompile.rs:8663-8675).
+pub fn jet_cli_test_watch_state_new(output: JetCLITestCapturePolicy) -> JetCLITestWatchState Never! {
+    JetCLITestWatchState{failed: [String]{}, last_status: 0, last_good: false, output: output}
+}
+
+// Rust run_test_watch input drain (CmdCompile.rs:8679-8682): last byte wins,
+// including an unrecognized byte overwriting an earlier recognized control.
+pub fn jet_cli_test_watch_control(state: &JetCLITestWatchState, bytes: [U8]) -> JetCLITestWatchAction Never! {
+    if bytes.len() == 0 -> return JetCLITestWatchAction.NonePending
+    raw :: Int.from_u8(bytes[bytes.len() - 1])
+    code :: if raw >= 65 && raw <= 90 -> raw + 32 else -> raw
+    if code == {
+        113 | 3 -> JetCLITestWatchAction.Quit
+        114 -> JetCLITestWatchAction.RerunFailed
+        97 -> JetCLITestWatchAction.RunAll
+        111 -> {
+            state.output = if state.output == {
+                .Failed -> JetCLITestCapturePolicy.All
+                .All -> JetCLITestCapturePolicy.Off
+                .Off -> JetCLITestCapturePolicy.Failed
+            }
+            JetCLITestWatchAction.OutputChanged
+        }
+        else -> JetCLITestWatchAction.NonePending
+    }
+}
+
+// Rust run_test_watch failed cursor selection (CmdCompile.rs:8746).
+pub fn jet_cli_test_watch_changed_selection(state: JetCLITestWatchState) -> [String]? Never! {
+    if state.failed.len() == 0 -> return None
+    Val(~state.failed)
+}
+
+// Rust run_test_watch initial/rerun/update outcome (CmdCompile.rs:8670-8675,
+// 8707-8714,8722-8729,8751-8758). The bool answers whether to emit the retained
+// last-good notice; an initial failure emits it even before any good result.
+pub fn jet_cli_test_watch_observe(state: &JetCLITestWatchState, status: Int, failures: [String], initial: Bool) -> Bool Never! {
+    state.last_status = status
+    state.failed = failures
+    if status == 0 {
+        state.last_good = true
+        return false
+    }
+    initial || state.last_good
+}

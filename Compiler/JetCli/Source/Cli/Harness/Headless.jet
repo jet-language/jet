@@ -1,0 +1,233 @@
+// Deterministic in-process TUI driving (crates/jet-cli/src/Headless.rs).
+// The driver owns viewport and transport; the real help reducer owns meaning.
+// No PTY, raw mode, process environment writes, sleeping, or terminal output.
+
+// Rust `std::time::Duration::MAX`: u64::MAX seconds plus 999999999 ns.
+// Core Duration is only the bounded Tape input, never the elapsed carrier.
+pub JET_CLI_HEADLESS_MAX_ELAPSED_NS :: 18446744073709551615999999999
+// Rust `Size` / `Size::{new,columns,rows}` (Headless.rs:17-34).
+pub struct JetCLIHeadlessSize { pub width: Int, pub height: Int }
+pub fn jet_cli_headless_size_new(width: Int, height: Int) -> JetCLIHeadlessSize Never! { JetCLIHeadlessSize{width: width, height: height} }
+pub fn jet_cli_headless_size_columns(size: JetCLIHeadlessSize) -> Int Never! { size.width }
+pub fn jet_cli_headless_size_rows(size: JetCLIHeadlessSize) -> Int Never! { size.height }
+// Rust `Cursor` / `Cursor::{new,x,y}` (Headless.rs:38-55).
+pub struct JetCLIHeadlessCursor { pub column: Int, pub row: Int }
+pub fn jet_cli_headless_cursor_new(column: Int, row: Int) -> JetCLIHeadlessCursor Never! { JetCLIHeadlessCursor{column: column, row: row} }
+pub fn jet_cli_headless_cursor_x(cursor: JetCLIHeadlessCursor) -> Int Never! { cursor.column }
+pub fn jet_cli_headless_cursor_y(cursor: JetCLIHeadlessCursor) -> Int Never! { cursor.row }
+// Typed None keeps snapshot206's #4315 fallback inference on the cursor type.
+fn jet_cli_headless_no_cursor() -> JetCLIHeadlessCursor? Never! { None }
+// Rust `InputEvent` / `InputEvent::{key,click,resize,wait}` (Headless.rs:59-83).
+pub enum JetCLIHeadlessInputEvent { Key(JetCLITermKey) Click(column: Int, row: Int) Resize(JetCLIHeadlessSize) Wait }
+pub fn jet_cli_headless_input_key(key: JetCLITermKey) -> JetCLIHeadlessInputEvent Never! { JetCLIHeadlessInputEvent.Key(key) }
+pub fn jet_cli_headless_input_click(column: Int, row: Int) -> JetCLIHeadlessInputEvent Never! { JetCLIHeadlessInputEvent.Click{column: column, row: row} }
+pub fn jet_cli_headless_input_resize(width: Int, height: Int) -> JetCLIHeadlessInputEvent Never! { JetCLIHeadlessInputEvent.Resize(jet_cli_headless_size_new(width, height)) }
+pub fn jet_cli_headless_input_wait() -> JetCLIHeadlessInputEvent Never! { JetCLIHeadlessInputEvent.Wait }
+// Rust `Frame` (Headless.rs:87-96). Capture retains semantic focus and cursor.
+pub struct JetCLIHeadlessFrame { pub size: JetCLIHeadlessSize, pub text: String, pub focus: String?, pub cursor: JetCLIHeadlessCursor? }
+// Rust `Frame::content` (Headless.rs:99-101) is direct `frame.text` access in
+// Jet: a read argument borrows it; `~frame.text` explicitly requests a copy.
+// Rust `Frame::lines` (Headless.rs:103-105). LF/CRLF, not bare CR; no terminal LF row.
+pub fn jet_cli_headless_frame_lines(frame: JetCLIHeadlessFrame) -> [String] Never! {
+    lines := [String]{}
+    raw :: frame.text.bytes()
+    start := 0
+    loop at in 0..<raw.len() {
+        if raw[at] == (U8{10}) {
+            stop := at
+            if stop > start && raw[stop - 1] == (U8{13}) -> stop -= 1
+            &lines.push(String.from_bytes(raw[start..<stop]) ?? panic("frame is UTF-8"))
+            start = at + 1
+        }
+    }
+    if start < raw.len() -> &lines.push(String.from_bytes(raw[start..<raw.len()]) ?? panic("frame is UTF-8"))
+    lines
+}
+// Rust `Frame::line` (Headless.rs:107-109). Scan only to the requested row.
+pub fn jet_cli_headless_frame_line(frame: JetCLIHeadlessFrame, row: Int) -> String? Never! {
+    if row < 0 -> return None
+    raw :: frame.text.bytes()
+    start := 0
+    current := 0
+    loop at in 0..<raw.len() {
+        if raw[at] == (U8{10}) {
+            if current == row {
+                stop := at
+                if stop > start && raw[stop - 1] == (U8{13}) -> stop -= 1
+                return Val(String.from_bytes(raw[start..<stop]) ?? panic("frame is UTF-8"))
+            }
+            current += 1
+            start = at + 1
+        }
+    }
+    if current == row && start < raw.len() -> return Val(String.from_bytes(raw[start..<raw.len()]) ?? panic("frame is UTF-8"))
+    None
+}
+// Rust `RenderTarget` (Headless.rs:117-131), the shared reducer/render seam.
+pub trait JetCLIHeadlessRenderTarget {
+    fn render(self) -> String Never!
+    fn send(&self, event: JetCLIHeadlessInputEvent) Never!
+    fn resize(&self, size: JetCLIHeadlessSize) Never!
+    fn wait(&self) Never!
+    fn focus(self) -> String? Never!
+    fn cursor(self) -> JetCLIHeadlessCursor? Never!
+    fn ready(self, marker: String) -> Bool Never! { false }
+}
+// Rust `StateTarget` / `StateTarget::new` (Headless.rs:391-401).
+struct JetCLIHeadlessStateTarget {
+    state: JetCLIHelpState
+    // Rust `impl RenderTarget for StateTarget` (Headless.rs:403-439).
+    impl JetCLIHeadlessRenderTarget {
+        fn render(self) -> String Never! { jet_cli_help_state_render(self.state) }
+        fn send(&self, event: JetCLIHeadlessInputEvent) Never! {
+            if event == {
+                .Key(key) -> { _ := jet_cli_help_state_apply_key(&self.state, key) }
+                .Click(column, row) -> { _ := jet_cli_help_state_click(&self.state, column, row) }
+                .Resize(size) -> &self.resize(size)
+                .Wait -> &self.wait()
+            }
+        }
+        fn resize(&self, size: JetCLIHeadlessSize) Never! { jet_cli_help_state_resize(&self.state, size.width, size.height) }
+        fn wait(&self) Never! { jet_cli_help_state_wait(&self.state) }
+        fn focus(self) -> String? Never! { jet_cli_help_state_focus_name(self.state) }
+        fn cursor(self) -> JetCLIHeadlessCursor? Never! {
+            found :: jet_cli_help_state_cursor(self.state) ?? return jet_cli_headless_no_cursor()
+            Val(jet_cli_headless_cursor_new(found.column, found.row))
+        }
+        fn ready(self, marker: String) -> Bool Never! { jet_cli_help_state_ready(self.state, marker) }
+    }
+}
+// Rust `HeadlessDriver` (Headless.rs:136-139). Trait-valued target owns the TUI.
+pub struct JetCLIHeadlessDriver { size: JetCLIHeadlessSize, target: JetCLIHeadlessRenderTarget }
+// Rust `normalized_size` (Headless.rs:387-389).
+fn jet_cli_headless_normalized_size(size: JetCLIHeadlessSize) -> JetCLIHeadlessSize Never! {
+    jet_cli_headless_size_new(jet_cli_help_max(size.width, 1), jet_cli_help_max(size.height, 1))
+}
+// Rust `HeadlessDriver::new` (Headless.rs:143-145).
+pub fn jet_cli_headless_new(size: JetCLIHeadlessSize) -> JetCLIHeadlessDriver Never! { jet_cli_headless_with_color(size, false) }
+// Rust `HeadlessDriver::with_color` (Headless.rs:148-150).
+pub fn jet_cli_headless_with_color(size: JetCLIHeadlessSize, color: Bool) -> JetCLIHeadlessDriver Never! {
+    jet_cli_headless_with_target(size, JetCLIHeadlessStateTarget{state: jet_cli_help_state_new(size.width, size.height, color)})
+}
+// Rust `HeadlessDriver::with_target` (Headless.rs:154-165).
+pub fn jet_cli_headless_with_target(size: JetCLIHeadlessSize, target: ^JetCLIHeadlessRenderTarget) -> JetCLIHeadlessDriver Never! {
+    normalized :: jet_cli_headless_normalized_size(size)
+    driver := JetCLIHeadlessDriver{size: normalized, target: ^target}
+    &driver.target.resize(normalized)
+    driver
+}
+// Rust `HeadlessDriver::size` (Headless.rs:167-169).
+pub fn jet_cli_headless_size(driver: JetCLIHeadlessDriver) -> JetCLIHeadlessSize Never! { ~driver.size }
+// Rust `HeadlessDriver::render` (Headless.rs:172-179).
+pub fn jet_cli_headless_render(driver: JetCLIHeadlessDriver) -> JetCLIHeadlessFrame Never! {
+    JetCLIHeadlessFrame{size: ~driver.size, text: driver.target.render(), focus: driver.target.focus(), cursor: driver.target.cursor()}
+}
+// Rust `HeadlessDriver::record_frame` (Headless.rs:182-184).
+pub fn jet_cli_headless_record_frame(driver: JetCLIHeadlessDriver, recording: &JetCLIRecording) -> Int JetCLIRecordingError! {
+    jet_cli_recording_push_frame(&recording, jet_cli_headless_render(driver))
+}
+// Rust `HeadlessDriver::send` (Headless.rs:187-193).
+pub fn jet_cli_headless_send(driver: &JetCLIHeadlessDriver, event: JetCLIHeadlessInputEvent) Never! {
+    if event == {
+        .Resize(size) -> jet_cli_headless_resize(&driver, size)
+        .Wait -> jet_cli_headless_wait(&driver)
+        .Key(_) | .Click(_, _) -> &driver.target.send(event)
+    }
+}
+// Rust `HeadlessDriver::press` (Headless.rs:195-197).
+pub fn jet_cli_headless_press(driver: &JetCLIHeadlessDriver, key: JetCLITermKey) Never! { jet_cli_headless_send(&driver, jet_cli_headless_input_key(key)) }
+// Rust `HeadlessDriver::click` (Headless.rs:199-201).
+pub fn jet_cli_headless_click(driver: &JetCLIHeadlessDriver, column: Int, row: Int) Never! { jet_cli_headless_send(&driver, jet_cli_headless_input_click(column, row)) }
+// Rust `HeadlessDriver::resize` (Headless.rs:203-207).
+pub fn jet_cli_headless_resize(driver: &JetCLIHeadlessDriver, size: JetCLIHeadlessSize) Never! {
+    driver.size = jet_cli_headless_normalized_size(size)
+    &driver.target.resize(driver.size)
+}
+// Rust `HeadlessDriver::wait` (Headless.rs:211-213).
+pub fn jet_cli_headless_wait(driver: &JetCLIHeadlessDriver) Never! { &driver.target.wait() }
+// Rust `HeadlessDriver::{ready,focus,cursor}` (Headless.rs:216-225).
+pub fn jet_cli_headless_ready(driver: JetCLIHeadlessDriver, marker: String) -> Bool Never! { driver.target.ready(marker) }
+pub fn jet_cli_headless_focus(driver: JetCLIHeadlessDriver) -> String? Never! { driver.target.focus() }
+pub fn jet_cli_headless_cursor(driver: JetCLIHeadlessDriver) -> JetCLIHeadlessCursor? Never! { driver.target.cursor() }
+
+// Rust `HeadlessReplay` (Headless.rs:232-237). Rust driver/driver_mut, recording,
+// and environment borrowed accessors (281-299) are direct Jet field access:
+// read by default, &replay.driver for mutation, no cloned getter collections.
+pub struct JetCLIHeadlessReplay {
+    // Rust `HeadlessReplay::{driver,driver_mut}` (Headless.rs:282-289).
+    pub driver: JetCLIHeadlessDriver
+    // Rust `HeadlessReplay::recording` (Headless.rs:292-294).
+    pub recording: JetCLIRecording
+    // Rust `HeadlessReplay::environment` (Headless.rs:297-299).
+    pub environment: [String:String]
+    // Rust `HeadlessReplay::elapsed` (Headless.rs:301-304), projected to exact ns.
+    pub elapsed_ns: Int
+    // Rust `impl TapeExecutor for HeadlessReplay` (Headless.rs:331-384).
+    impl JetCLITapeExecutor {
+        fn type_text(&self, text: String) JetCLITapeExecutorError! {
+            loop character in text.chars() -> jet_cli_headless_press(&self.driver, JetCLITermKey.Char(character))
+            jet_cli_headless_record_action(&self, JetCLIRecordingEvent.Type(~text))
+        }
+        fn enter(&self) JetCLITapeExecutorError! {
+            jet_cli_headless_press(&self.driver, JetCLITermKey.Enter)
+            jet_cli_headless_record_action(&self, JetCLIRecordingEvent.Enter)
+        }
+        fn sleep(&self, duration: Duration) JetCLITapeExecutorError! {
+            added :: self.elapsed_ns + duration.ns
+            self.elapsed_ns = if added > JET_CLI_HEADLESS_MAX_ELAPSED_NS -> JET_CLI_HEADLESS_MAX_ELAPSED_NS else -> added
+            jet_cli_headless_wait(&self.driver)
+            millis :: duration.ns /% 1000000
+            jet_cli_headless_record_action(&self, JetCLIRecordingEvent.Sleep(U64.from_int(millis % 18446744073709551616) ?? panic("nonnegative Duration milliseconds")))
+        }
+        fn wait(&self, readiness: String) JetCLITapeExecutorError! {
+            jet_cli_headless_wait(&self.driver)
+            if !jet_cli_headless_ready(self.driver, readiness) -> return Err(JetCLITapeExecutorError{message: "readiness marker `{readiness}` was not observed"})
+            jet_cli_headless_record_action(&self, JetCLIRecordingEvent.Wait(~readiness))
+        }
+        fn require(&self, program: String) JetCLITapeExecutorError! {
+            tape :: jet_cli_tape_new([JetCLITapeStep]{JetCLITapeStep.Require(~program)}) ?? return Err(JetCLITapeExecutorError{message: jet_cli_tape_error_message(err)})
+            jet_cli_tape_preflight(tape) ?? return Err(JetCLITapeExecutorError{message: jet_cli_tape_error_message(err)})
+            jet_cli_headless_record_action(&self, JetCLIRecordingEvent.Require(~program))
+        }
+        fn set(&self, name: String, value: String) JetCLITapeExecutorError! {
+            _ := jet_cli_tape_new([JetCLITapeStep]{JetCLITapeStep.Set{name: ~name, value: ~value}}) ?? return Err(JetCLITapeExecutorError{message: jet_cli_tape_error_message(err)})
+            jet_cli_headless_record_action(&self, JetCLIRecordingEvent.Set{name: ~name, value: ~value})
+            self.environment[name] = ~value
+        }
+        fn observe_output(&self) -> String JetCLITapeExecutorError! {
+            output :: jet_cli_tape_normalize_terminal_text(jet_cli_headless_render(self.driver).text)
+            jet_cli_headless_record_action(&self, JetCLIRecordingEvent.Output(~output))
+            Ok(output)
+        }
+    }
+}
+// Rust `HeadlessReplay::new` (Headless.rs:242-246).
+pub fn jet_cli_headless_replay_new(identity: JetCLIRecordingIdentity) -> JetCLIHeadlessReplay JetCLIRecordingError! {
+    jet_cli_headless_replay_with_driver(identity, jet_cli_headless_with_color(jet_cli_headless_size_new(identity.width, identity.height), identity.color))
+}
+// Rust `HeadlessReplay::with_driver` (Headless.rs:249-269). Dimensions before identity validation.
+pub fn jet_cli_headless_replay_with_driver(identity: JetCLIRecordingIdentity, driver: ^JetCLIHeadlessDriver) -> JetCLIHeadlessReplay JetCLIRecordingError! {
+    size :: jet_cli_headless_size(driver)
+    if identity.width != size.width || identity.height != size.height -> return Err(JetCLIRecordingError.Invalid("headless driver dimensions do not match recording identity"))
+    recording := jet_cli_recording_new(identity)
+    _ := jet_cli_headless_record_frame(driver, &recording)
+    Ok(JetCLIHeadlessReplay{driver: ^driver, recording: recording, environment: [String:String]{}, elapsed_ns: 0})
+}
+// Rust `HeadlessReplay::replay` (Headless.rs:272-274).
+pub fn jet_cli_headless_replay(replay: &JetCLIHeadlessReplay, tape: JetCLITape) -> JetCLITapeRun JetCLITapeError! { jet_cli_tape_replay(tape, &replay) }
+// Rust `HeadlessReplay::replay_source` (Headless.rs:277-279).
+pub fn jet_cli_headless_replay_source(replay: &JetCLIHeadlessReplay, source: String) -> JetCLITapeRun JetCLITapeError! { jet_cli_tape_replay_source(source, &replay) }
+// Rust `HeadlessReplay::into_parts` (Headless.rs:307-309).
+pub fn jet_cli_headless_into_parts(replay: ^JetCLIHeadlessReplay) -> (driver: JetCLIHeadlessDriver, recording: JetCLIRecording) Never! { (driver: ^replay.driver, recording: ^replay.recording) }
+// Rust `HeadlessReplay::capture_output` (Headless.rs:312-317).
+pub fn jet_cli_headless_capture_output(replay: &JetCLIHeadlessReplay) -> String JetCLIRecordingError! {
+    output :: jet_cli_tape_normalize_terminal_text(jet_cli_headless_render(replay.driver).text)
+    jet_cli_headless_record_action(&replay, JetCLIRecordingEvent.Output(~output)) ?? return Err(JetCLIRecordingError.Event(~err.message))
+    Ok(output)
+}
+// Rust `HeadlessReplay::record_action` (Headless.rs:320-328). An event remains
+// appended if the subsequent frame fails; never roll back reducer state.
+fn jet_cli_headless_record_action(replay: &JetCLIHeadlessReplay, event: JetCLIRecordingEvent) JetCLITapeExecutorError! {
+    _ := jet_cli_recording_push(&replay.recording, event) ?? return Err(JetCLITapeExecutorError{message: jet_cli_recording_error_message(err)})
+    _ := jet_cli_headless_record_frame(replay.driver, &replay.recording) ?? return Err(JetCLITapeExecutorError{message: jet_cli_recording_error_message(err)})
+}

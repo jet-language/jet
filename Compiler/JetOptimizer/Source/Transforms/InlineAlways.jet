@@ -201,9 +201,9 @@ fn mir_pass_inline_one_call(
     plan :: plan_result.plan ?? return MIRInlineOneCallResult{blocks_removed: 0, error: Val(mir_pass_error(.LegalityVerification, .InvalidDefUse, Val(caller.id), call_instruction.span, "#Inline(Always) body contains an operation that cannot be remapped safely"))}
 
     original := program.functions[caller_index].blocks[block_index]
-    prefix := original.instructions[0..instruction_index]
+    prefix := original.instructions[0..<instruction_index]
     loop adapter in plan.adapter_instructions -> &prefix.push(adapter)
-    suffix :: if plan.returns -> original.instructions[instruction_index + 1..original.instructions.len()] else -> [MIRInstruction]{}
+    suffix :: if plan.returns -> original.instructions[instruction_index + 1..<original.instructions.len()] else -> [MIRInstruction]{}
     continuation_instructions := [MIRInstruction]{}
     if plan.returns {
         if call_instruction.result != None {

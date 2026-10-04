@@ -1,0 +1,1806 @@
+// PORT-PENDING 0721 source-lib-slice-1: Source/lib.rs:1-1802
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! jet — compiler library.
+//RS //!
+//RS //! Pipeline: lex -> parse -> sema -> codegen (Docs/spec/architecture.md).
+//RS //! The front end (everything before codegen) owns ALL user-facing
+//RS //! correctness and every diagnostic. The Rust backend is a verifier and
+//RS //! optimizer, never a source of user-facing errors.
+//RS 
+//RS // Source files/modules use PascalCase names (owner decision), which trips the
+//RS // non_snake_case lint at module-name level.
+//RS #![allow(non_snake_case)]
+//RS // Warnings are errors: keeps the build warning-clean (card c115).
+//RS #![deny(warnings)]
+//RS 
+//RS // Seam crates — re-export everything so callers use `jet::AST`, `jet::Sema`, etc.
+//RS // unchanged. Within Source/, `crate::AST` etc. resolve through these re-exports.
+//RS pub use jet_driver::{
+//RS     boot_mir_eval,
+//RS     development_receipt,
+//RS     program_allocator,
+//RS     scheduler,
+//RS     AdaBind,
+//RS     Authority,
+//RS     Bindgen,
+//RS     CBind,
+//RS     CanonicalAST,
+//RS     CobolBind,
+//RS     Codegen,
+//RS     Collections,
+//RS     ComBind,
+//RS     Compile,
+//RS     CompileOutput,
+//RS     Comptime,
+//RS     CppBind,
+//RS     DartBind,
+//RS     Diagnostics,
+//RS     DotNetBind,
+//RS     Driver,
+//RS     // Card #367 / D-PRODUCT-SPLIT1=C slice 3: the read-only package/config
+//RS     // model and its pure policy computation (effect budget, lint policy) —
+//RS     // routed through jet-driver's jet-pkg-model re-export, not the full
+//RS     // `jetpack` engine. Renamed `Store` to `PkgStore`: this crate already has
+//RS     // its own `crate::Store` (the compiler's build cache) — `PkgStore` is the
+//RS     // read-only hangar root/listing half (`jetpack::Store` still re-exports
+//RS     // the same `lock_path` etc. for the engine's own genuine store calls).
+//RS     EffectBudget,
+//RS     Foreign,
+//RS     ForeignBridge,
+//RS     Formatter,
+//RS     FortranBind,
+//RS     Generics,
+//RS     GoBind,
+//RS     JavaBind,
+//RS     JavaScriptBind,
+//RS     JetLib,
+//RS     JetLibAccess,
+//RS     JetLibArtifact,
+//RS     JetLibExport,
+//RS     JetLibScalar,
+//RS     JetLibStamp,
+//RS     Lexer,
+//RS     LibraryExport,
+//RS     Migrations,
+//RS     LintPolicy,
+//RS     Loader,
+//RS     Lock,
+//RS     LuaBind,
+//RS     Manifest,
+//RS     OctaveBind,
+//RS     Package,
+//RS     Parser,
+//RS     PascalBind,
+//RS     PerlBind,
+//RS     PhpBind,
+//RS     Policy,
+//RS     PowerShellBind,
+//RS     PythonBind,
+//RS     RBind,
+//RS     RubyBind,
+//RS     ScriptDeps,
+//RS     Sema,
+//RS     Store as PkgStore,
+//RS     Syntax,
+//RS     TargetMachine,
+//RS     TclBind,
+//RS     Traits,
+//RS     AST,
+//RS     CFFI,
+//RS     FFI,
+//RS     SHA256,
+//RS };
+//RS pub use jet_queries as Queries;
+//RS // D-ARCH-SOURCE1=A: full debugger subsystem and stable exit policy live in
+//RS // inward workspace seams. Preserve public paths without root-owned wrappers.
+//RS pub use jet_debug as Debug;
+//RS // D-ARCH-SOURCE1=A: CLI registry, argument vocabulary, diagnostic reference,
+//RS // and hybrid help UI live in the inward jet-cli seam. Public paths remain
+//RS // `jet::CLI`, `jet::Explain`, and `jet::Help` without root wrapper modules.
+//RS pub use jet_canvas as CanvasUi;
+//RS pub use jet_cli::{Explain, Help, CLI};
+//RS pub use jet_devserver as DevServer;
+//RS pub use jet_foundation::ExitCodes;
+//RS pub use jetpack::MCP;
+//RS pub use jet_pkg_model as Bundler;
+//RS // D-FAIL-CARRIER1=A: the one outcome carrier. It is embedded as the first
+//RS // prelude part, and it is a real module here too, so the compiler's own
+//RS // interpreters call the same functions the generated program calls.
+//RS pub use jet_foundation::Outcome;
+//RS // D-ARCH-SOURCE1=A: real REPL seam ownership. Compatibility paths remain
+//RS // `jet::REPL`, `jet::Term`, and `jet::SemanticSymbols`; implementation lives
+//RS // entirely in the workspace crate.
+//RS pub use jet_repl as REPL;
+//RS pub use jet_repl::{SemanticSymbols, Term};
+//RS pub mod RecordIndex;
+//RS pub use RecordIndex::{
+//RS     RecordBudget, RecordCapture, RecordIdentity, RecordIndexEntry, RecordIndexError, RecordKind,
+//RS     RecordLink,
+//RS };
+//RS pub mod ReceiptStore;
+//RS pub mod RunCache;
+//RS pub use ReceiptStore::{Receipt, ReceiptClaim, ReceiptInput};
+//RS pub mod BudgetProviders;
+//RS pub mod BudgetStore;
+//RS mod NativeLinker;
+//RS pub use jet_devserver::Canvas;
+//RS pub use jet_driver::BudgetView;
+//RS pub use jet_driver::ProjectParts;
+//RS #[cfg(feature = "compiler-bootstrap-host")]
+//RS #[doc(hidden)]
+//RS pub(crate) const BOOTSTRAP_CANONICAL_SOURCE_ROOT: &str = env!("CARGO_MANIFEST_DIR");
+//RS #[doc(hidden)]
+//RS pub mod BootstrapBuildIdentity {
+//RS     include!("../Compiler/Bootstrap/BuildIdentity.rs");
+//RS }
+//RS pub mod Compiler;
+//RS // The private self-hosting bootstrap mounts the same Host/Runner module set
+//RS // that `package_bootstrap_artifact` writes into the generated compiler crate,
+//RS // so both crates resolve identical `crate::` paths.
+//RS #[cfg(feature = "compiler-bootstrap-host")]
+//RS #[path = "../Compiler/Bootstrap/Host/RuntimeMirCodec.rs"]
+//RS #[allow(dead_code)]
+//RS mod compiler_bootstrap_runtime_mir_codec;
+//RS #[cfg(feature = "compiler-bootstrap-host")]
+//RS #[path = "../Compiler/Bootstrap/Host/RuntimeMir.rs"]
+//RS #[allow(dead_code)]
+//RS mod compiler_bootstrap_runtime_mir;
+//RS #[cfg(feature = "compiler-bootstrap-host")]
+//RS #[path = "../Compiler/Bootstrap/Host/DiagnosticCodec.rs"]
+//RS #[allow(dead_code)]
+//RS mod compiler_bootstrap_diagnostic_codec;
+//RS #[cfg(feature = "compiler-bootstrap-host")]
+//RS #[path = "../Compiler/Bootstrap/Host/EntryCodec.rs"]
+//RS #[allow(dead_code)]
+//RS mod compiler_bootstrap_entry_codec;
+//RS #[cfg(feature = "compiler-bootstrap-host")]
+//RS #[allow(unused_imports)]
+//RS pub(crate) use compiler_bootstrap_entry_codec::{
+//RS     BootstrapEntryCodec, BootstrapEntryPhysicalBindings, BootstrapEntryValue,
+//RS };
+//RS #[cfg(feature = "compiler-bootstrap-host")]
+//RS #[path = "../Compiler/Bootstrap/Host/CompilerImage.rs"]
+//RS #[allow(dead_code)]
+//RS mod compiler_bootstrap_compiler_image;
+//RS #[cfg(feature = "compiler-bootstrap-host")]
+//RS #[allow(unused_imports)]
+//RS pub(crate) use compiler_bootstrap_compiler_image::{
+//RS     archive_compiler_image, restore_compiler_image, CompilerImageError, CompilerImageHeader,
+//RS     RestoredCompilerImage,
+//RS };
+//RS #[cfg(feature = "compiler-bootstrap-host")]
+//RS #[allow(unused_imports)]
+//RS pub(crate) use compiler_bootstrap_runtime_mir::{
+//RS     execute_source_mir, SourceMirExecution, SourceMirExecutionError,
+//RS };
+//RS #[cfg(feature = "compiler-bootstrap-host")]
+//RS #[path = "../Compiler/Bootstrap/Host/Native.rs"]
+//RS #[doc(hidden)]
+//RS #[allow(dead_code)]
+//RS mod compiler_bootstrap_host;
+//RS #[cfg(feature = "compiler-bootstrap-host")]
+//RS #[doc(hidden)]
+//RS #[allow(unused_imports)]
+//RS pub(crate) use compiler_bootstrap_host::{
+//RS     append_bootstrap_host_glue, open_authorized_sources, AuthorizedSourceLease,
+//RS     AuthorizedSourceSnapshot, BootstrapBindingDescriptor, BootstrapHostCodecError,
+//RS };
+//RS #[cfg(feature = "compiler-bootstrap-host")]
+//RS #[path = "../Compiler/Bootstrap/Runner.rs"]
+//RS #[doc(hidden)]
+//RS #[allow(dead_code)]
+//RS mod compiler_bootstrap_runner;
+//RS #[cfg(feature = "compiler-bootstrap-host")]
+//RS #[doc(hidden)]
+//RS #[allow(unused_imports)]
+//RS pub(crate) use compiler_bootstrap_runner::{
+//RS     bootstrap_artifact_build_id, invoke_bootstrap_entry, prepare_bootstrap_artifact,
+//RS     prepare_bootstrap_artifact_from_aot, BootstrapArtifact,
+//RS     BootstrapBackendArtifact, BootstrapFactoryTier, BootstrapJetCompileResult,
+//RS     BootstrapRunError, BootstrapRunOutput, BootstrapSourceResume, BootstrapSourceResumeFactory,
+//RS     BootstrapWebArtifacts,
+//RS };
+//RS #[cfg(all(test, feature = "compiler-bootstrap-host"))]
+//RS mod bootstrap_tests {
+//RS     include!("../Compiler/Bootstrap/Tests.rs");
+//RS }
+//RS pub mod Doctest;
+//RS pub mod Doctor;
+//RS pub mod Fetch;
+//RS pub use jet_driver::FixEngine;
+//RS pub mod Interpreter;
+//RS pub mod JitBackend;
+//RS pub mod LSP;
+//RS pub mod Publish;
+//RS pub mod Store;
+//RS 
+//RS use std::collections::BTreeMap;
+//RS use Diagnostics::Diagnostic;
+//RS 
+//RS /// Run root compiler work with its scoped Core evaluator on the compiler worker.
+//RS /// This facade installs the callback; the inward Driver seam carries it onto
+//RS /// the worker without depending on this crate. Callers needing `core.compiler`
+//RS /// operations must enter here, not call the worker-stack primitive directly.
+//RS #[doc(hidden)]
+//RS pub fn run_compiler_work<R: Send>(work: impl FnOnce() -> R + Send) -> R {
+//RS     // Nested root entries keep the installed callback and the caller's other
+//RS     // ambient hooks. The outer with_ambient scope restores its previous hooks
+//RS     // on both return and unwind; the Driver reuses an active compiler worker.
+//RS     if Comptime::ambient_hooks()
+//RS         .0
+//RS         .is_some_and(|hook| {
+//RS             hook as *const () == Compiler::eval_core_call_with_type as *const ()
+//RS         })
+//RS     {
+//RS         return jet_driver::run_compiler_work(work);
+//RS     }
+//RS     Comptime::with_ambient(Some(Compiler::eval_core_call_with_type), None, None, || {
+//RS         jet_driver::run_compiler_work(work)
+//RS     })
+//RS }
+//RS 
+//RS /// Run full frontend work on the canonical compiler stack.
+//RS #[doc(hidden)]
+//RS pub fn with_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
+//RS     run_compiler_work(work)
+//RS }
+//RS /// The checked package snapshot shared by every execution adapter.
+//RS ///
+//RS /// `facts` is the exact semantic result that checked `bundle`; `mir` is the
+//RS /// single optimized canonical lowering of that pair for `artifact`.
+//RS pub struct CheckedMirSnapshot {
+//RS     pub bundle: AST::ProgramBundle,
+//RS     pub facts: Sema::SemIndexEffectFacts,
+//RS     pub mir: jet_foundation::MIR::MirProgram,
+//RS     pub artifact: jet_foundation::MIR::MirArtifactId,
+//RS }
+//RS /// Lower one checked frontend result to the canonical optimized MIR for an
+//RS /// explicit artifact request. TIR performs the one canonical optimization pass
+//RS /// before returning the backend-ready program.
+//RS pub fn lower_checked_semantic_mir_program_for(
+//RS     bundle: &AST::ProgramBundle,
+//RS     request: jet_foundation::MIR::MirArtifactRequest,
+//RS ) -> (jet_foundation::MIR::MirProgram, jet_foundation::MIR::MirArtifactId) {
+//RS     let (mir, artifact) = Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+//RS         .unwrap_or_else(|error| jet_foundation::ice!(Some(error.span), "{error}"));
+//RS     mir.validate()
+//RS         .unwrap_or_else(|error| jet_foundation::ice!(None, "canonical MIR validation failed: {error}"));
+//RS     (mir, artifact)
+//RS }
+//RS 
+//RS /// Run the full front end on source text. All lex errors (then all parse
+//RS /// errors) surface in one run — M1 error recovery.
+//RS pub fn compile(src: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_with_mode(src, "input.jet", Sema::CompileMode::Run)
+//RS }
+//RS 
+//RS pub fn compile_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     let _ = src;
+//RS     compile_bundle_path(file, Sema::CompileMode::Run, None)
+//RS }
+//RS 
+//RS /// Like `compile_with_path`, but threads a `--target=<triple>` (or `None`)
+//RS /// through to codegen's native OS-target gating (D-OSTARGET1=A, ratified
+//RS /// 2026-07-01, c134) — an `impl` gated to a different `#Target(OS.*)` than
+//RS /// the resolved active OS is skipped entirely. `jet build`/`jet run`'s real
+//RS /// `--target=` flag is the only caller; `compile_with_path` keeps its
+//RS /// existing host-OS-default behavior unchanged for every other caller.
+//RS pub fn compile_with_target(
+//RS     src: &str,
+//RS     file: &str,
+//RS     cross_target: Option<&str>,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_with_target_and_gates(src, file, Policy::GateSet::default(), cross_target)
+//RS }
+//RS 
+//RS pub fn compile_with_target_and_gates(
+//RS     src: &str,
+//RS     file: &str,
+//RS     gates: Policy::GateSet,
+//RS     cross_target: Option<&str>,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_with_target_and_gates_and_profile(src, file, gates, cross_target, "dev")
+//RS }
+//RS 
+//RS pub fn compile_with_target_and_gates_and_profile(
+//RS     src: &str,
+//RS     file: &str,
+//RS     gates: Policy::GateSet,
+//RS     cross_target: Option<&str>,
+//RS     profile: &str,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_with_target_and_gates_and_profile_and_settings(
+//RS         src,
+//RS         file,
+//RS         gates,
+//RS         cross_target,
+//RS         profile,
+//RS         &BTreeMap::new(),
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_with_target_and_gates_and_profile_and_settings(
+//RS     src: &str,
+//RS     file: &str,
+//RS     gates: Policy::GateSet,
+//RS     cross_target: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     let _ = src;
+//RS     with_compiler_stack(|| {
+//RS         Driver::compile_bundle_path_opts_with_profile_and_settings(
+//RS             file,
+//RS             Sema::CompileMode::Run,
+//RS             false,
+//RS             gates,
+//RS             false,
+//RS             cross_target,
+//RS             profile,
+//RS             setting_overrides,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS /// Front-end check for a file on disk (and its imports). Library modules
+//RS /// need not define `main`; use `compile_with_path` when building or running.
+//RS pub fn check_with_path(file: &str) -> Vec<Diagnostic> {
+//RS     check_with_path_and_settings(file, &BTreeMap::new())
+//RS }
+//RS 
+//RS pub fn check_with_path_and_settings(
+//RS     file: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS ) -> Vec<Diagnostic> {
+//RS     with_compiler_stack(|| {
+//RS         if let Some(diagnostics) = check_workspace_file(file) {
+//RS             return diagnostics;
+//RS         }
+//RS         if !setting_overrides.is_empty() {
+//RS             return jet_driver::Driver::check_file_with_effect_facts_and_settings(
+//RS                 file,
+//RS                 None,
+//RS                 false,
+//RS                 setting_overrides,
+//RS             )
+//RS             .0;
+//RS         }
+//RS         let mut queries = jet_driver::QueryService::CompilerQueries::new();
+//RS         queries.check_disk(file, false).diagnostics.as_ref().clone()
+//RS     })
+//RS }
+//RS 
+//RS /// Workspace sources use the workspace evaluator as their front end. Keep its
+//RS /// diagnostics in the same carrier as ordinary source checks so callers use
+//RS /// the shared renderer and JSON path.
+//RS fn check_workspace_file(file: &str) -> Option<Vec<Diagnostic>> {
+//RS     let path = absolute_source_path(file);
+//RS     let root = path.parent().unwrap_or(std::path::Path::new("."));
+//RS     let resolver = match jet_driver::Authority::AuthorityResolver::open(root) {
+//RS         Ok(resolver) => resolver,
+//RS         Err(error) if error.is_missing() => return None,
+//RS         Err(error) => return Some(vec![error.diagnostic()]),
+//RS     };
+//RS     let source = match resolver.resolve_workspace_source() {
+//RS         Ok(Some(source)) => source,
+//RS         Ok(None) => return None,
+//RS         Err(error) => return Some(vec![error.workspace_diagnostic()]),
+//RS     };
+//RS     let Some(entry_name) = path.file_name() else {
+//RS         return None;
+//RS     };
+//RS     if source.path != resolver.root().join(entry_name) {
+//RS         return None;
+//RS     }
+//RS     match jetpack::WorkspaceFile::evaluate_checked_source(&source, &resolver) {
+//RS         Ok(_) => Some(Vec::new()),
+//RS         Err(diagnostic) => Some(vec![diagnostic]),
+//RS     }
+//RS }
+//RS 
+//RS /// Full sema type-check for `jet eval`: runs the same pipeline as `compile`
+//RS /// but with `CompileMode::Eval` so value-returning `run` entries are accepted
+//RS /// while all other diagnostics (type errors, unknown identifiers, etc.) still
+//RS /// fire. Returns the error diagnostics, or an empty vec on success.
+//RS pub fn check_for_eval(src: &str, file: &str) -> Vec<Diagnostic> {
+//RS     with_compiler_stack(|| Driver::check_eval(src, file))
+//RS }
+//RS 
+//RS /// Check an already loaded bundle on the compiler-owned stack.
+//RS pub fn check_bundle(bundle: &mut AST::ProgramBundle, mode: Sema::CompileMode) -> Vec<Diagnostic> {
+//RS     with_compiler_stack(|| Sema::check_bundle(bundle, mode))
+//RS }
+//RS 
+//RS fn compile_bundle_path(
+//RS     file: &str,
+//RS     mode: Sema::CompileMode,
+//RS     cross_target: Option<&str>,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_opts(
+//RS         file,
+//RS         mode,
+//RS         false,
+//RS         Policy::GateSet::default(),
+//RS         false,
+//RS         cross_target,
+//RS     )
+//RS }
+//RS 
+//RS /// Like `compile_with_path` but for a selected no-OS target (E2-M15).
+//RS /// Rejects OS-dependent std APIs (E3301) and emits a `panic = "abort"` hint.
+//RS pub fn compile_no_os(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_opts(
+//RS         file,
+//RS         Sema::CompileMode::Run,
+//RS         true,
+//RS         Policy::GateSet::default(),
+//RS         false,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS /// Compile with the selected audited-gate invocation permissions.
+//RS pub fn compile_with_gates(
+//RS     file: &str,
+//RS     gates: Policy::GateSet,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_bundle_path_opts(file, Sema::CompileMode::Run, false, gates, false, None)
+//RS }
+//RS 
+//RS 
+//RS /// D-BUILDENTRY1: native `jet build` path. No root `fn build` keeps existing
+//RS /// zero-config pipeline; selected root entry evaluates and executes first.
+//RS pub fn compile_programmable_build(
+//RS     file: &str,
+//RS     grants: &[String],
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_programmable_build_opts(
+//RS         file,
+//RS         grants,
+//RS         false,
+//RS         Policy::GateSet::allow(Policy::PolicyKey::Impure),
+//RS         false,
+//RS         false,
+//RS         false,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_programmable_build_opts(
+//RS     file: &str,
+//RS     grants: &[String],
+//RS     no_os: bool,
+//RS     gates: Policy::GateSet,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_programmable_build_opts_with_builder(
+//RS         file,
+//RS         grants,
+//RS         no_os,
+//RS         gates,
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_programmable_build_opts_with_builder(
+//RS     file: &str,
+//RS     grants: &[String],
+//RS     no_os: bool,
+//RS     gates: Policy::GateSet,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     remote_builder: Option<&str>,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_programmable_build_opts_with_builder_and_profile(
+//RS         file,
+//RS         grants,
+//RS         no_os,
+//RS         gates,
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target,
+//RS         remote_builder,
+//RS         "dev",
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_programmable_build_opts_with_builder_and_profile(
+//RS     file: &str,
+//RS     grants: &[String],
+//RS     no_os: bool,
+//RS     gates: Policy::GateSet,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     remote_builder: Option<&str>,
+//RS     profile: &str,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_programmable_build_opts_with_builder_and_profile_and_settings(
+//RS         file,
+//RS         grants,
+//RS         no_os,
+//RS         gates,
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target,
+//RS         remote_builder,
+//RS         profile,
+//RS         &BTreeMap::new(),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings(
+//RS     file: &str,
+//RS     grants: &[String],
+//RS     no_os: bool,
+//RS     gates: Policy::GateSet,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     remote_builder: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     prepared: Option<Driver::PreparedBuildFrontEnd>,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped(
+//RS         file,
+//RS         grants,
+//RS         no_os,
+//RS         gates,
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target,
+//RS         remote_builder,
+//RS         profile,
+//RS         setting_overrides,
+//RS         prepared,
+//RS         true,
+//RS         true,
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped(
+//RS     file: &str,
+//RS     grants: &[String],
+//RS     no_os: bool,
+//RS     gates: Policy::GateSet,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     remote_builder: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     prepared: Option<Driver::PreparedBuildFrontEnd>,
+//RS     package_scope: bool,
+//RS     build_override: bool,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped_with_entry(
+//RS         file,
+//RS         grants,
+//RS         no_os,
+//RS         gates,
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target,
+//RS         remote_builder,
+//RS         profile,
+//RS         setting_overrides,
+//RS         prepared,
+//RS         package_scope,
+//RS         build_override,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped_with_entry(
+//RS     file: &str,
+//RS     grants: &[String],
+//RS     no_os: bool,
+//RS     gates: Policy::GateSet,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     remote_builder: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     prepared: Option<Driver::PreparedBuildFrontEnd>,
+//RS     package_scope: bool,
+//RS     build_override: bool,
+//RS     entry_fn: Option<&str>,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_programmable_build_opts_inner(
+//RS         file,
+//RS         grants,
+//RS         no_os,
+//RS         gates,
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target,
+//RS         false,
+//RS         remote_builder,
+//RS         profile,
+//RS         setting_overrides,
+//RS         prepared,
+//RS         package_scope,
+//RS         build_override,
+//RS         entry_fn,
+//RS         false,
+//RS         false,
+//RS         None,
+//RS         None,
+//RS         false,
+//RS     )
+//RS     .map(|output| output.compile)
+//RS }
+//RS 
+//RS /// Compile a native cache hit after its checked front end has completed. The
+//RS /// returned output keeps diagnostics and facts but omits generated Rust.
+//RS pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped_without_codegen(
+//RS     file: &str,
+//RS     grants: &[String],
+//RS     no_os: bool,
+//RS     gates: Policy::GateSet,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     remote_builder: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     prepared: Option<Driver::PreparedBuildFrontEnd>,
+//RS     package_scope: bool,
+//RS     build_override: bool,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped_without_codegen_and_entry(
+//RS         file,
+//RS         grants,
+//RS         no_os,
+//RS         gates,
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target,
+//RS         remote_builder,
+//RS         profile,
+//RS         setting_overrides,
+//RS         prepared,
+//RS         package_scope,
+//RS         build_override,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped_without_codegen_and_entry(
+//RS     file: &str,
+//RS     grants: &[String],
+//RS     no_os: bool,
+//RS     gates: Policy::GateSet,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     remote_builder: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     prepared: Option<Driver::PreparedBuildFrontEnd>,
+//RS     package_scope: bool,
+//RS     build_override: bool,
+//RS     entry_fn: Option<&str>,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_programmable_build_opts_inner(
+//RS         file,
+//RS         grants,
+//RS         no_os,
+//RS         gates,
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target,
+//RS         false,
+//RS         remote_builder,
+//RS         profile,
+//RS         setting_overrides,
+//RS         prepared,
+//RS         package_scope,
+//RS         build_override,
+//RS         entry_fn,
+//RS         true,
+//RS         false,
+//RS         None,
+//RS         None,
+//RS         false,
+//RS     )
+//RS     .map(|output| output.compile)
+//RS }
+//RS 
+//RS /// D-BUILDGEN1 / #1040: compile a programmable build and copy the exact
+//RS /// generated Jet sources from this transaction into `.jet/generated/` for
+//RS /// inspection. The build still compiles the normal `.jet/generated` inputs;
+//RS /// this is the canonical project-local materialized source tree.
+//RS pub fn compile_programmable_build_emit_generated_opts(
+//RS     file: &str,
+//RS     grants: &[String],
+//RS     no_os: bool,
+//RS     gates: Policy::GateSet,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_programmable_build_emit_generated_opts_with_builder(
+//RS         file,
+//RS         grants,
+//RS         no_os,
+//RS         gates,
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_programmable_build_emit_generated_opts_with_builder(
+//RS     file: &str,
+//RS     grants: &[String],
+//RS     no_os: bool,
+//RS     gates: Policy::GateSet,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     remote_builder: Option<&str>,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_programmable_build_emit_generated_opts_with_builder_and_profile(
+//RS         file,
+//RS         grants,
+//RS         no_os,
+//RS         gates,
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target,
+//RS         remote_builder,
+//RS         "dev",
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile(
+//RS     file: &str,
+//RS     grants: &[String],
+//RS     no_os: bool,
+//RS     gates: Policy::GateSet,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     remote_builder: Option<&str>,
+//RS     profile: &str,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings(
+//RS         file,
+//RS         grants,
+//RS         no_os,
+//RS         gates,
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target,
+//RS         remote_builder,
+//RS         profile,
+//RS         &BTreeMap::new(),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings(
+//RS     file: &str,
+//RS     grants: &[String],
+//RS     no_os: bool,
+//RS     gates: Policy::GateSet,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     remote_builder: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     prepared: Option<Driver::PreparedBuildFrontEnd>,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings_scoped(
+//RS         file,
+//RS         grants,
+//RS         no_os,
+//RS         gates,
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target,
+//RS         remote_builder,
+//RS         profile,
+//RS         setting_overrides,
+//RS         prepared,
+//RS         true,
+//RS         true,
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings_scoped(
+//RS     file: &str,
+//RS     grants: &[String],
+//RS     no_os: bool,
+//RS     gates: Policy::GateSet,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     remote_builder: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     prepared: Option<Driver::PreparedBuildFrontEnd>,
+//RS     package_scope: bool,
+//RS     build_override: bool,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings_scoped_with_entry(
+//RS         file,
+//RS         grants,
+//RS         no_os,
+//RS         gates,
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target,
+//RS         remote_builder,
+//RS         profile,
+//RS         setting_overrides,
+//RS         prepared,
+//RS         package_scope,
+//RS         build_override,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings_scoped_with_entry(
+//RS     file: &str,
+//RS     grants: &[String],
+//RS     no_os: bool,
+//RS     gates: Policy::GateSet,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     remote_builder: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     prepared: Option<Driver::PreparedBuildFrontEnd>,
+//RS     package_scope: bool,
+//RS     build_override: bool,
+//RS     entry_fn: Option<&str>,
+//RS ) -> Result<CompileOutput, Vec<Diagnostic>> {
+//RS     compile_programmable_build_opts_inner(
+//RS         file,
+//RS         grants,
+//RS         no_os,
+//RS         gates,
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target,
+//RS         true,
+//RS         remote_builder,
+//RS         profile,
+//RS         setting_overrides,
+//RS         prepared,
+//RS         package_scope,
+//RS         build_override,
+//RS         entry_fn,
+//RS         false,
+//RS         false,
+//RS         None,
+//RS         None,
+//RS         false,
+//RS     )
+//RS     .map(|output| output.compile)
+//RS }
+//RS 
+//RS /// #2083: run the programmable build front end once, up front.
+//RS ///
+//RS /// `jet build` used to load and type-check its program twice — once to compute
+//RS /// the native content-cache key and once to compile — and a third time to
+//RS /// render the effect summary. The CLI now runs this instead: it computes the
+//RS /// key from the returned bundle, renders the effect summary from the returned
+//RS /// facts, and hands the value straight back to
+//RS /// `compile_programmable_build_opts_with_builder_and_profile_and_settings`,
+//RS /// which resumes the pipeline rather than restarting it. Because the key is
+//RS /// hashed from the very bundle that is then emitted, it cannot describe a
+//RS /// different program than the one compiled.
+//RS ///
+//RS /// The front end runs behind the same `with_compiler_stack` seam as every
+//RS /// other compiler entry point, so a `comptime` binding cannot observe a
+//RS /// different Core API here than it does inside the compile (D-FRONTENDAPI1=A).
+//RS pub fn prepare_programmable_build_front_end(
+//RS     file: &str,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS ) -> Result<Driver::PreparedBuildFrontEnd, Vec<Diagnostic>> {
+//RS     prepare_programmable_build_front_end_scoped(
+//RS         file,
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target,
+//RS         profile,
+//RS         setting_overrides,
+//RS         true,
+//RS         true,
+//RS     )
+//RS }
+//RS 
+//RS pub fn prepare_programmable_build_front_end_scoped(
+//RS     file: &str,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     package_scope: bool,
+//RS     build_override: bool,
+//RS ) -> Result<Driver::PreparedBuildFrontEnd, Vec<Diagnostic>> {
+//RS     prepare_programmable_build_front_end_scoped_with_entry(
+//RS         file,
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target,
+//RS         profile,
+//RS         setting_overrides,
+//RS         package_scope,
+//RS         build_override,
+//RS         None,
+//RS         false,
+//RS     )
+//RS }
+//RS 
+//RS pub fn prepare_programmable_build_front_end_scoped_with_entry(
+//RS     file: &str,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     package_scope: bool,
+//RS     build_override: bool,
+//RS     entry_fn: Option<&str>,
+//RS     artifact_build: bool,
+//RS ) -> Result<Driver::PreparedBuildFrontEnd, Vec<Diagnostic>> {
+//RS     let inputs = Driver::FrontEndInputs {
+//RS         file: file.to_string(),
+//RS         profile: profile.to_string(),
+//RS         artifact_build,
+//RS         setting_overrides: setting_overrides.clone(),
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target: cross_target.map(str::to_string),
+//RS         package_scope,
+//RS         build_override,
+//RS         entry_fn: entry_fn.map(str::to_string),
+//RS     };
+//RS     with_compiler_stack(move || {
+//RS         let mut prepared = Driver::prepare_build_front_end(inputs)?;
+//RS         attach_build_program_value(&mut prepared);
+//RS         Ok(prepared)
+//RS     })
+//RS }
+//RS 
+//RS /// Prepare a programmable build from an authority-selected source snapshot.
+//RS /// The loader consumes the overlay and does not reopen `file`.
+//RS pub fn prepare_programmable_build_front_end_scoped_with_entry_with_overlay(
+//RS     file: &str,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     package_scope: bool,
+//RS     build_override: bool,
+//RS     entry_fn: Option<&str>,
+//RS     artifact_build: bool,
+//RS     source_path: &std::path::Path,
+//RS     source: &str,
+//RS ) -> Result<Driver::PreparedBuildFrontEnd, Vec<Diagnostic>> {
+//RS     let inputs = Driver::FrontEndInputs {
+//RS         file: file.to_string(),
+//RS         profile: profile.to_string(),
+//RS         artifact_build,
+//RS         setting_overrides: setting_overrides.clone(),
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target: cross_target.map(str::to_string),
+//RS         package_scope,
+//RS         build_override,
+//RS         entry_fn: entry_fn.map(str::to_string),
+//RS     };
+//RS     with_compiler_stack(|| {
+//RS         let mut prepared =
+//RS             Driver::prepare_build_front_end_with_overlay(inputs, source_path, source)?;
+//RS         attach_build_program_value(&mut prepared);
+//RS         Ok(prepared)
+//RS     })
+//RS }
+//RS 
+//RS /// Prepare a programmable build from one immutable authority-selected source
+//RS /// closure. Entry, imports, and package build sources use these bytes.
+//RS pub fn prepare_programmable_build_front_end_scoped_with_entry_with_source_closure(
+//RS     file: &str,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     package_scope: bool,
+//RS     build_override: bool,
+//RS     entry_fn: Option<&str>,
+//RS     artifact_build: bool,
+//RS     source_closure: &[(std::path::PathBuf, String)],
+//RS ) -> Result<Driver::PreparedBuildFrontEnd, Vec<Diagnostic>> {
+//RS     let inputs = Driver::FrontEndInputs {
+//RS         file: file.to_string(),
+//RS         profile: profile.to_string(),
+//RS         artifact_build,
+//RS         setting_overrides: setting_overrides.clone(),
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target: cross_target.map(str::to_string),
+//RS         package_scope,
+//RS         build_override,
+//RS         entry_fn: entry_fn.map(str::to_string),
+//RS     };
+//RS     with_compiler_stack(|| {
+//RS         let mut prepared =
+//RS             Driver::prepare_build_front_end_with_source_closure(inputs, source_closure)?;
+//RS         attach_build_program_value(&mut prepared);
+//RS         Ok(prepared)
+//RS     })
+//RS }
+//RS 
+//RS /// Attach the compiler-owned program snapshot a selected `fn build` reads.
+//RS /// Building it walks the whole semantic index, so a build without a `fn build`
+//RS /// entry skips it.
+//RS fn attach_build_program_value(prepared: &mut Driver::PreparedBuildFrontEnd) {
+//RS     if prepared.selects_build_entry() {
+//RS         let program = Compiler::program_info_value(prepared.bundle(), prepared.effect_facts());
+//RS         prepared.set_program_value(program);
+//RS     }
+//RS }
+//RS 
+//RS fn file_selects_programmable_build(file: &str) -> bool {
+//RS     let source = match std::fs::read_to_string(file) {
+//RS         Ok(source) => source,
+//RS         Err(_) => return false,
+//RS     };
+//RS     let project_root = std::path::Path::new(file)
+//RS         .parent()
+//RS         .and_then(|directory| Loader::find_package_root_checked(directory).ok().flatten());
+//RS     Driver::selects_build_entry(&source, project_root.as_deref())
+//RS }
+//RS 
+//RS /// Run the selected build entry's compile-time checks for tiered run/dev
+//RS /// paths. `execute: false` still evaluates `fn build` and returns its
+//RS /// diagnostics, but never adds build actions or generated sources to runtime.
+//RS pub fn check_programmable_build_for_tier(
+//RS     file: &str,
+//RS     gates: Policy::GateSet,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS ) -> Option<Result<(), Vec<Diagnostic>>> {
+//RS     if !file_selects_programmable_build(file) {
+//RS         return None;
+//RS     }
+//RS     Some(with_compiler_stack(|| {
+//RS         let grants = resolve_build_grants(file, &[])?
+//RS             .iter()
+//RS             .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
+//RS             .collect();
+//RS         let prepared = prepare_programmable_build_front_end(
+//RS             file,
+//RS             false,
+//RS             false,
+//RS             false,
+//RS             None,
+//RS             profile,
+//RS             setting_overrides,
+//RS         )?;
+//RS         Driver::compile_bundle_path_build_with_front_end(
+//RS             file,
+//RS             Driver::BuildRunOptions {
+//RS                 grants,
+//RS                 policy: production_build_policy(),
+//RS                 execute: false,
+//RS                 gates,
+//RS                 inspect_only: false,
+//RS                 emit_generated: false,
+//RS                 locked: false,
+//RS                 no_os: false,
+//RS                 web_target: false,
+//RS                 plugin_target: false,
+//RS                 cross_target: None,
+//RS                 profile: profile.to_string(),
+//RS                 artifact_build: false,
+//RS                 application_authority: None,
+//RS                 setting_overrides: setting_overrides.clone(),
+//RS                 remote: None,
+//RS                 package_scope: true,
+//RS                 build_override: true,
+//RS                 entry_fn: None,
+//RS             },
+//RS             Some(prepared),
+//RS         )
+//RS         .map(|_| ())
+//RS     }))
+//RS }
+//RS 
+//RS /// Check a project-scoped programmable build without executing its actions or
+//RS /// emitting native code. The returned output contains the final runtime bundle
+//RS /// and the effect facts from its in-memory generated-source re-check.
+//RS pub fn check_project_build_for_tier(
+//RS     file: &str,
+//RS     gates: Policy::GateSet,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     target: Option<&str>,
+//RS     entry_fn: Option<&str>,
+//RS ) -> Result<Option<Driver::BuildCompileOutput>, Vec<Diagnostic>> {
+//RS     let selects_build = file_selects_programmable_build(file)
+//RS         || workspace_build_authority(file)?.is_some();
+//RS     if !selects_build {
+//RS         return Ok(None);
+//RS     }
+//RS     let output = compile_programmable_build_opts_inner(
+//RS         file,
+//RS         &[],
+//RS         false,
+//RS         gates,
+//RS         false,
+//RS         target == Some(Syntax::BUILD_TARGET_WEB),
+//RS         false,
+//RS         target,
+//RS         false,
+//RS         None,
+//RS         profile,
+//RS         setting_overrides,
+//RS         None,
+//RS         true,
+//RS         true,
+//RS         entry_fn,
+//RS         false,
+//RS         true,
+//RS         None,
+//RS         None,
+//RS         false,
+//RS     )?;
+//RS     Ok(Some(output))
+//RS }
+//RS 
+//RS 
+//RS /// Compile a programmable build with an invocation-local application
+//RS /// authority merged into the checked bundle before MIR lowering and codegen.
+//RS pub fn compile_programmable_build_output_with_builder_and_profile_and_settings_scoped_with_entry_and_authority(
+//RS     file: &str,
+//RS     grants: &[String],
+//RS     no_os: bool,
+//RS     gates: Policy::GateSet,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     emit_generated: bool,
+//RS     remote_builder: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     prepared: Option<Driver::PreparedBuildFrontEnd>,
+//RS     package_scope: bool,
+//RS     build_override: bool,
+//RS     entry_fn: Option<&str>,
+//RS     without_codegen: bool,
+//RS     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+//RS     artifact_build: bool,
+//RS ) -> Result<Driver::BuildCompileOutput, Vec<Diagnostic>> {
+//RS     compile_programmable_build_opts_inner(
+//RS         file,
+//RS         grants,
+//RS         no_os,
+//RS         gates,
+//RS         locked,
+//RS         web_target,
+//RS         plugin_target,
+//RS         cross_target,
+//RS         emit_generated,
+//RS         remote_builder,
+//RS         profile,
+//RS         setting_overrides,
+//RS         prepared,
+//RS         package_scope,
+//RS         build_override,
+//RS         entry_fn,
+//RS         without_codegen,
+//RS         false,
+//RS         None,
+//RS         application_authority,
+//RS         artifact_build,
+//RS     )
+//RS }
+//RS 
+//RS fn compile_programmable_build_opts_inner(
+//RS     file: &str,
+//RS     grants: &[String],
+//RS     no_os: bool,
+//RS     gates: Policy::GateSet,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     emit_generated: bool,
+//RS     remote_builder: Option<&str>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     prepared: Option<Driver::PreparedBuildFrontEnd>,
+//RS     package_scope: bool,
+//RS     build_override: bool,
+//RS     entry_fn: Option<&str>,
+//RS     without_codegen: bool,
+//RS     project_check: bool,
+//RS     overlay: Option<(&std::path::Path, &str)>,
+//RS     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+//RS     artifact_build: bool,
+//RS ) -> Result<Driver::BuildCompileOutput, Vec<Diagnostic>> {
+//RS     with_compiler_stack(|| {
+//RS         let remote = remote_builder
+//RS             .map(Comptime::Build::RemoteBuildBinding::load_host)
+//RS             .transpose()
+//RS             .map_err(|error| {
+//RS                 vec![Diagnostic::error(
+//RS                     "E3502",
+//RS                     format!("remote builder binding could not be loaded: {error}"),
+//RS                     "remote endpoints and credentials come only from host-owned bindings"
+//RS                         .to_string(),
+//RS                     "run `jet remote list`, or bind the builder with `jet remote bind`".to_string(),
+//RS                     None,
+//RS                 )]
+//RS             })?;
+//RS         if let Some(checked_workspace) = workspace_build_authority(file)? {
+//RS             // A workspace build compiles each member behind its own authority
+//RS             // boundary, so a front end prepared for the index entry is not the
+//RS             // stage this path resumes. Drop it and let each member load its own.
+//RS             drop(prepared);
+//RS             return compile_workspace_build_opts(
+//RS                 file,
+//RS                 grants,
+//RS                 no_os,
+//RS                 gates,
+//RS                 locked,
+//RS                 web_target,
+//RS                 plugin_target,
+//RS                 cross_target,
+//RS                 emit_generated,
+//RS                 remote,
+//RS                 profile,
+//RS                 setting_overrides,
+//RS                 package_scope,
+//RS                 build_override,
+//RS                 project_check,
+//RS                 application_authority,
+//RS                 artifact_build,
+//RS                 checked_workspace,
+//RS             );
+//RS         }
+//RS         let mut prepared = prepared;
+//RS         if prepared.is_none() {
+//RS             prepared = Some(match overlay {
+//RS                 Some((source_path, source)) =>
+//RS                     prepare_programmable_build_front_end_scoped_with_entry_with_overlay(
+//RS                         file,
+//RS                         locked,
+//RS                         web_target,
+//RS                         plugin_target,
+//RS                         cross_target,
+//RS                         profile,
+//RS                         setting_overrides,
+//RS                         package_scope,
+//RS                         build_override,
+//RS                         entry_fn,
+//RS                         artifact_build,
+//RS                         source_path,
+//RS                         source,
+//RS                     )?,
+//RS                 None => prepare_programmable_build_front_end_scoped_with_entry(
+//RS                     file,
+//RS                     locked,
+//RS                     web_target,
+//RS                     plugin_target,
+//RS                     cross_target,
+//RS                     profile,
+//RS                     setting_overrides,
+//RS                     package_scope,
+//RS                     build_override,
+//RS                     entry_fn,
+//RS                     artifact_build,
+//RS                 )?,
+//RS             });
+//RS         }
+//RS         let grants = resolve_build_grants(file, grants)?;
+//RS         let grants = grants
+//RS             .iter()
+//RS             .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
+//RS             .collect();
+//RS         let options = Driver::BuildRunOptions {
+//RS             grants,
+//RS             policy: production_build_policy(),
+//RS             execute: !project_check,
+//RS             gates,
+//RS             inspect_only: false,
+//RS             emit_generated,
+//RS             locked,
+//RS             no_os,
+//RS             web_target,
+//RS             plugin_target,
+//RS             cross_target: cross_target.map(str::to_string),
+//RS             profile: profile.to_string(),
+//RS             artifact_build,
+//RS             application_authority: application_authority.cloned(),
+//RS             setting_overrides: setting_overrides.clone(),
+//RS             remote,
+//RS             package_scope,
+//RS             build_override,
+//RS             entry_fn: entry_fn.map(str::to_string),
+//RS         };
+//RS         let output = if let Some((source_path, source)) = overlay {
+//RS             Driver::compile_bundle_path_build_with_overlay(file, source_path, source, options)?
+//RS         } else if project_check {
+//RS             Driver::compile_bundle_path_build_with_front_end_for_project_check(
+//RS                 file, options, prepared,
+//RS             )?
+//RS         } else if without_codegen {
+//RS             Driver::compile_bundle_path_build_with_front_end_without_codegen(
+//RS                 file, options, prepared,
+//RS             )?
+//RS         } else {
+//RS             Driver::compile_bundle_path_build_with_front_end(file, options, prepared)?
+//RS         };
+//RS         if emit_generated {
+//RS             export_generated_sources(file, &output)?;
+//RS         }
+//RS         Ok(output)
+//RS     })
+//RS }
+//RS 
+//RS /// D-BUILDSCOPE1: workspace builds are an orchestration boundary. Member
+//RS /// entries run in dependency order with their own BuildContext and policy;
+//RS /// the workspace entry runs last with a fresh context. No member plan crosses
+//RS /// that boundary as a mutable value.
+//RS fn compile_workspace_build_opts(
+//RS     _file: &str,
+//RS     grants: &[String],
+//RS     no_os: bool,
+//RS     gates: Policy::GateSet,
+//RS     locked: bool,
+//RS     web_target: bool,
+//RS     plugin_target: bool,
+//RS     cross_target: Option<&str>,
+//RS     emit_generated: bool,
+//RS     remote: Option<Comptime::Build::RemoteBuildBinding>,
+//RS     profile: &str,
+//RS     setting_overrides: &BTreeMap<String, String>,
+//RS     package_scope: bool,
+//RS     build_override: bool,
+//RS     project_check: bool,
+//RS     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+//RS     artifact_build: bool,
+//RS     checked_workspace: (
+//RS         jet_driver::Authority::AuthorityResolver,
+//RS         jetpack::WorkspaceFile::WorkspaceSource,
+//RS     ),
+//RS ) -> Result<Driver::BuildCompileOutput, Vec<Diagnostic>> {
+//RS     let (workspace_resolver, workspace_source) = checked_workspace;
+//RS     workspace_resolver
+//RS         .revalidate_source(&workspace_source)
+//RS         .map_err(|error| vec![error.diagnostic()])?;
+//RS     let workspace_path = workspace_source.path.clone();
+//RS     let plan =
+//RS         jetpack::WorkspaceFile::evaluate_checked_source(&workspace_source, &workspace_resolver)
+//RS             .map_err(|diagnostic| {
+//RS                 vec![workspace_build_root_diagnostic(
+//RS                     &workspace_path,
+//RS                     &diagnostic,
+//RS                 )]
+//RS             })?;
+//RS     let members = jetpack::MemberSelect::dependency_order_packages_checked(
+//RS         &workspace_resolver,
+//RS         &plan.members,
+//RS     )
+//RS     .map_err(|error| vec![error.diagnostic()])?;
+//RS 
+//RS     for (member, checked_package) in members {
+//RS         let entry = match workspace_member_entry(&workspace_resolver, &member.path, checked_package)
+//RS         {
+//RS             Ok(entry) => entry,
+//RS             Err(diagnostic) => return Err(vec![diagnostic]),
+//RS         };
+//RS         let Some(entry) = entry else {
+//RS             return Err(vec![Diagnostic::error(
+//RS                 "E3501",
+//RS                 format!("workspace member `{}` has no build entry", member.name),
+//RS                 "workspace members run their own unit-local build entry before the workspace entry"
+//RS                     .to_string(),
+//RS                 "add `run.jet` or `src/run.jet`, or name the member source explicitly".to_string(),
+//RS                 None,
+//RS             )]);
+//RS         };
+//RS         entry
+//RS             .revalidate(&workspace_resolver)
+//RS             .map_err(|error| vec![error.diagnostic()])?;
+//RS         let source_file = entry.source_file();
+//RS         let entry_path = source_file.path.to_string_lossy().into_owned();
+//RS         let raw_entry_source = source_file
+//RS             .text()
+//RS             .map_err(|error| vec![error.diagnostic()])?;
+//RS         let entry_source = if source_file.path.file_name().and_then(|name| name.to_str())
+//RS             == Some(Syntax::PACKAGE_FILE)
+//RS         {
+//RS             Package::build_entry_source(&raw_entry_source).unwrap_or(raw_entry_source)
+//RS         } else {
+//RS             raw_entry_source
+//RS         };
+//RS         // A dependency/member is its own authority boundary. The workspace
+//RS         // CLI grant names the workspace root; it is not inherited by every
+//RS         // member. Package-local and explicitly subject-matched workspace
+//RS         // grants still flow through `resolve_build_grants`.
+//RS         let member_grants = resolve_build_grants(&entry_path, &[])?;
+//RS         let member_grants = member_grants
+//RS             .iter()
+//RS             .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
+//RS             .collect();
+//RS         entry
+//RS             .revalidate(&workspace_resolver)
+//RS             .map_err(|error| vec![error.diagnostic()])?;
+//RS         let options = Driver::BuildRunOptions {
+//RS                 grants: member_grants,
+//RS                 policy: production_build_policy(),
+//RS                 execute: !project_check,
+//RS                 gates,
+//RS                 inspect_only: false,
+//RS                 emit_generated: false,
+//RS                 locked,
+//RS                 no_os,
+//RS                 web_target,
+//RS                 plugin_target,
+//RS                 cross_target: cross_target.map(str::to_string),
+//RS                 profile: profile.to_string(),
+//RS                 artifact_build,
+//RS                 application_authority: None,
+//RS                 setting_overrides: BTreeMap::new(),
+//RS                 remote: remote.clone(),
+//RS                 package_scope: true,
+//RS                 build_override: true,
+//RS                 entry_fn: entry.entry_fn.clone(),
+//RS             };
+//RS         let output = if project_check {
+//RS             Driver::compile_bundle_path_build_as_dependency_with_overlay_for_project_check(
+//RS                 &entry_path,
+//RS                 &source_file.path,
+//RS                 &entry_source,
+//RS                 options,
+//RS             )?
+//RS         } else {
+//RS             Driver::compile_bundle_path_build_as_dependency_with_overlay(
+//RS                 &entry_path,
+//RS                 &source_file.path,
+//RS                 &entry_source,
+//RS                 options,
+//RS             )?
+//RS         };
+//RS         if emit_generated {
+//RS             export_generated_sources(&entry_path, &output)?;
+//RS         }
+//RS     }
+//RS 
+//RS     let workspace_grants = resolve_build_grants(&workspace_path.to_string_lossy(), grants)?;
+//RS     let workspace_grants = workspace_grants
+//RS         .iter()
+//RS         .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
+//RS         .collect();
+//RS     // Member builds may create their own `.jet` trees below the workspace.
+//RS     // Refresh the workspace authority after that intentional child mutation,
+//RS     // while requiring the selected workspace source bytes and path to remain
+//RS     // exactly the snapshot used to order members.
+//RS     let workspace_root = workspace_path.parent().unwrap_or(std::path::Path::new("."));
+//RS     let original_workspace_source = workspace_source.source.clone();
+//RS     let workspace_resolver = jet_driver::Authority::AuthorityResolver::open(workspace_root)
+//RS         .map_err(|error| vec![error.diagnostic()])?;
+//RS     let workspace_source = workspace_resolver
+//RS         .resolve_workspace_source()
+//RS         .map_err(|error| vec![error.workspace_diagnostic()])?
+//RS         .ok_or_else(|| {
+//RS             vec![Diagnostic::error(
+//RS                 "E1334",
+//RS                 "workspace source disappeared during member builds".to_string(),
+//RS                 "workspace orchestration requires the same declared source through the root build"
+//RS                     .to_string(),
+//RS                 "restore workspace.jet and retry the build".to_string(),
+//RS                 None,
+//RS             )]
+//RS         })?;
+//RS     if workspace_source.path != workspace_path
+//RS         || workspace_source.source.as_bytes() != original_workspace_source.as_bytes()
+//RS     {
+//RS         return Err(vec![Diagnostic::error(
+//RS             "E1334",
+//RS             "workspace source changed during member builds".to_string(),
+//RS             "member builds cannot replace the workspace declaration selected for orchestration"
+//RS                 .to_string(),
+//RS             "restore workspace.jet and retry the build".to_string(),
+//RS             None,
+//RS         )]);
+//RS     }
+//RS     workspace_resolver
+//RS         .revalidate_source(&workspace_source)
+//RS         .map_err(|error| vec![error.diagnostic()])?;
+//RS     let workspace_entry_source = if workspace_path.file_name().and_then(|name| name.to_str())
+//RS         == Some(Syntax::PACKAGE_FILE)
+//RS     {
+//RS         Package::build_entry_source(&workspace_source.source)
+//RS             .unwrap_or_else(|| workspace_source.source.clone())
+//RS     } else {
+//RS         workspace_source.source.clone()
+//RS     };
+//RS     let options = Driver::BuildRunOptions {
+//RS             grants: workspace_grants,
+//RS             policy: production_build_policy(),
+//RS             execute: !project_check,
+//RS             gates,
+//RS             inspect_only: false,
+//RS             emit_generated: false,
+//RS             locked,
+//RS             no_os,
+//RS             web_target,
+//RS             plugin_target,
+//RS             cross_target: cross_target.map(str::to_string),
+//RS             profile: profile.to_string(),
+//RS             artifact_build,
+//RS             application_authority: application_authority.cloned(),
+//RS             setting_overrides: setting_overrides.clone(),
+//RS             remote,
+//RS             package_scope,
+//RS             build_override,
+//RS             entry_fn: None,
+//RS         };
+//RS     let output = if project_check {
+//RS         Driver::compile_bundle_path_build_with_overlay_for_project_check(
+//RS             &workspace_path.to_string_lossy(),
+//RS             &workspace_source.path,
+//RS             &workspace_entry_source,
+//RS             options,
+//RS         )?
+//RS     } else {
+//RS         Driver::compile_bundle_path_build_with_overlay(
+//RS             &workspace_path.to_string_lossy(),
+//RS             &workspace_source.path,
+//RS             &workspace_entry_source,
+//RS             options,
+//RS         )?
+//RS     };
+//RS     if emit_generated {
+//RS         export_generated_sources(&workspace_path.to_string_lossy(), &output)?;
+//RS     }
+//RS     Ok(output)
+//RS }
+//RS 
+//RS fn export_generated_sources(
+//RS     file: &str,
+//RS     output: &Driver::BuildCompileOutput,
+//RS ) -> Result<(), Vec<Diagnostic>> {
+//RS     let Some(build) = &output.build else {
+//RS         return Ok(());
+//RS     };
+//RS     let project_root = build_project_root(file)?;
+//RS     let export_root = project_root.join(".jet/generated");
+//RS     let mut exports = Vec::new();
+//RS     for generated in build.generated.iter().filter(|generated| {
+//RS         generated
+//RS             .path
+//RS             .extension()
+//RS             .and_then(|extension| extension.to_str())
+//RS             == Some(Syntax::FILE_EXT)
+//RS     }) {
+//RS         let relative = generated
+//RS             .path
+//RS             .strip_prefix(&project_root)
+//RS             .ok()
+//RS             .and_then(|path| path.strip_prefix(".jet/generated").ok())
+//RS             .ok_or_else(|| {
+//RS                 vec![Diagnostic::error(
+//RS                     "E3510",
+//RS                     format!("generated module `{}` is outside the project root", generated.name),
+//RS                     "the visible export must stay inside the project that produced the generated source".to_string(),
+//RS                     "run the build from the package containing the entry file".to_string(),
+//RS                     None,
+//RS                 )]
+//RS             })?;
+//RS         let destination = export_root.join(relative);
+//RS         let source = read_real_generated_file(&project_root, &generated.path).map_err(|error| {
+//RS             vec![Diagnostic::error(
+//RS                 "E3510",
+//RS                 format!(
+//RS                     "could not read generated module `{}`: {error}",
+//RS                     generated.name
+//RS                 ),
+//RS                 "the visible export must copy the exact source that was compiled".to_string(),
+//RS                 "remove the damaged generated file and rerun the build".to_string(),
+//RS                 None,
+//RS             )]
+//RS         })?;
+//RS         exports.push((generated.name.as_str(), destination, source));
+//RS     }
+//RS     let paths = exports.iter().map(|(_, path, _)| path.clone());
+//RS     let mut transaction =
+//RS         GeneratedExportTransaction::new(&project_root, paths).map_err(|error| {
+//RS             vec![Diagnostic::error(
+//RS                 "E3510",
+//RS                 format!("could not prepare generated export: {error}"),
+//RS                 "the visible export must be all-or-nothing and must not alter the compiled source"
+//RS                     .to_string(),
+//RS                 "make sure `.jet/generated` is writable and the generated module name is unique"
+//RS                     .to_string(),
+//RS                 None,
+//RS             )]
+//RS         })?;
+//RS     for (name, destination, source) in exports {
+//RS         write_exported_generated_file(&project_root, &destination, &source).map_err(|error| {
+//RS             vec![Diagnostic::error(
+//RS                 "E3510",
+//RS                 format!("could not write generated module `{name}`: {error}"),
+//RS                 "the visible export must be all-or-nothing and must not alter the compiled source"
+//RS                     .to_string(),
+//RS                 "make sure `.jet/generated` is writable and the generated module name is unique"
+//RS                     .to_string(),
+//RS                 None,
+//RS             )]
+//RS         })?;
+//RS     }
+//RS     transaction.commit();
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn workspace_build_root_diagnostic(
+//RS     workspace_path: &std::path::Path,
+//RS     diagnostic: &Diagnostic,
+//RS ) -> Diagnostic {
+//RS     // Workspace policy parsing owns the detail, while this boundary adds the
+//RS     // checked source path and the canonical E3503 contract. Package-manifest
+//RS     // parse failures keep their own identity.
+//RS     if diagnostic.code == "E1221" {
+//RS         return diagnostic.clone();
+//RS     }
+//RS     Diagnostic::error(
+//RS         "E3503",
+//RS         "This root build asks for authority missing from its declaration, `#Impure` gate, or effective policy.".to_string(),
+//RS         format!(
+//RS             "workspace build policy in `{}` is present but unavailable: {}",
+//RS             workspace_path.display(),
+//RS             diagnostic.why
+//RS         ),
+//RS         "Declare the effect, gate the ambient operation with `#Impure(\"reason\")`, and grant the effect through CLI/package/workspace policy.".to_string(),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS struct GeneratedExportTransaction {
+//RS     files: Vec<(std::path::PathBuf, Option<Vec<u8>>)>,
+//RS     project_root: std::path::PathBuf,
+//RS     committed: bool,
+//RS }
+//RS 
+//RS impl GeneratedExportTransaction {
+//RS     fn new(
+//RS         project_root: &std::path::Path,
+//RS         paths: impl IntoIterator<Item = std::path::PathBuf>,
+//RS     ) -> std::io::Result<Self> {
+//RS         let mut seen = std::collections::BTreeSet::new();
+//RS         let mut files = Vec::new();
+//RS         for path in paths.into_iter().filter(|path| seen.insert(path.clone())) {
+//RS             if path_has_symlinked_component(project_root, &path) {
+//RS                 return Err(std::io::Error::new(
+//RS                     std::io::ErrorKind::PermissionDenied,
+//RS                     format!(
+//RS                         "generated export path `{}` contains a symlink",
+//RS                         path.display()
+//RS                     ),
+//RS                 ));
+//RS             }
+//RS             let before = match std::fs::symlink_metadata(&path) {
+//RS                 Ok(metadata) if metadata.file_type().is_symlink() => {
+//RS                     return Err(std::io::Error::new(
+//RS                         std::io::ErrorKind::PermissionDenied,
+//RS                         format!("generated export path `{}` is a symlink", path.display()),
+//RS                     ));
+//RS                 }
+//RS                 Ok(metadata) if !metadata.is_file() => {
+//RS                     return Err(std::io::Error::new(
+//RS                         std::io::ErrorKind::AlreadyExists,
+//RS                         format!("generated export path `{}` is not a file", path.display()),
+//RS                     ));
+//RS                 }
+//RS                 Ok(_) => Some(std::fs::read(&path)?),
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+//RS                 Err(error) => return Err(error),
+//RS             };
+//RS             files.push((path, before));
+//RS         }
+//RS         Ok(Self {
+//RS             files,
+//RS             project_root: project_root.to_path_buf(),
+//RS             committed: false,
+//RS         })
+//RS     }
+//RS 
+//RS     fn commit(&mut self) {
+//RS         self.committed = true;
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for GeneratedExportTransaction {
+//RS     fn drop(&mut self) {
+//RS         if self.committed {
+//RS             return;
+//RS         }
+//RS         for (path, before) in self.files.iter().rev() {
+//RS             if path_has_symlinked_component(&self.project_root, path) {
+//RS                 continue;
+//RS             }
+//RS             match before {
+//RS                 Some(bytes) => {
+//RS                     let _ = write_exported_generated_file(&self.project_root, path, bytes);
+//RS                 }
+//RS                 None => {
+//RS                     if !std::fs::symlink_metadata(path)
+//RS                         .is_ok_and(|metadata| metadata.file_type().is_symlink())
+//RS                     {
+//RS                         let _ = std::fs::remove_file(path);
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 0721 Source/lib.rs:1-1802
+

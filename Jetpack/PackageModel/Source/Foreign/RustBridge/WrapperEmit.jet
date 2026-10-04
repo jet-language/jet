@@ -6,7 +6,7 @@
 
 // The fixed crate prelude: panic containment, the host failure reporter,
 // and the per-thread failure slot every trampoline reports through.
-@FFI_WRAPPER_PRELUDE :: ```// Auto-generated FFI wrappers — do not edit.
+FFI_WRAPPER_PRELUDE :: prep { ```// Auto-generated FFI wrappers — do not edit.
 #![allow(warnings)]
 
 type JetFfiReporter = extern "C" fn(*const u8, usize);
@@ -106,7 +106,7 @@ fn ffi_panic() -> ! {
     std::panic::resume_unwind(Box::new(format!("__jet_ffi_runtime__: {MESSAGE}")));
 }
 
-```
+``` }
 
 pub fn pkg_ffi_emit_cargo_toml(crate_name: String, deps: [String: String], has_native: Bool, foundation_crate_path: String?) -> String Never! {
     build :: if has_native -> "build = \"build.rs\"\n" else -> ""
@@ -118,9 +118,11 @@ pub fn pkg_ffi_emit_cargo_toml(crate_name: String, deps: [String: String], has_n
         version :: deps[name]
         // `jet-foundation` is a workspace path dependency; every other entry
         // is a registry dependency, some with feature flags.
-        if name == "jet-foundation" && foundation_crate_path == Val(version) {
-            s = "{s}jet-foundation = {{ path = {pkg_ffi_rust_debug_string(version)} }}\n"
-            next
+        if name == "jet-foundation" && foundation_crate_path == .Val(foundation_path) {
+            if version == foundation_path {
+                s = "{s}jet-foundation = {{ path = {pkg_ffi_rust_debug_string(foundation_path)} }}\n"
+                next
+            }
         }
         featured :: pkg_ffi_featured_dep(name)
         if featured == .Val(toml) {
@@ -133,7 +135,7 @@ pub fn pkg_ffi_emit_cargo_toml(crate_name: String, deps: [String: String], has_n
 }
 
 fn pkg_ffi_featured_dep(name: String) -> String? Never! {
-    loop dep in @FFI_FEATURED_DEPS {
+    loop dep in FFI_FEATURED_DEPS {
         if dep.name == name -> return Val(dep.toml)
     }
     None
@@ -149,25 +151,25 @@ fn pkg_ffi_runtime_mod(name: String, body: String) -> String Never! {
 }
 
 pub fn pkg_ffi_emit_wrapper_lib_with_handles(entries: [ExternEntry], needs: RustBridgeNeeds, handle_names: [String], record_defs: CRecordDefinitions) -> String Never! {
-    out := @FFI_WRAPPER_PRELUDE
+    out := FFI_WRAPPER_PRELUDE
     out = "{out}#[repr(C)]\npub struct JetFfiSlot {{\npub value: u64,\npub ptr: *mut u8,\npub len: usize,\n}}\n\n"
     out = "{out}{record_defs.source}"
     loop descriptor in pkg_ffi_foreign_descriptor_stamps(entries) -> out = "{out}// jet-ffi-descriptor={descriptor}\n"
     if entries.len() > 0 -> out = "{out}\n"
     // D-DEP-DB1: the database runtime is the only place `rusqlite` is touched.
-    if needs.db -> out = out + pkg_ffi_runtime_mod("__jet_db", "{@FFI_DB_RUNTIME}\n")
+    if needs.db -> out = "{out}{pkg_ffi_runtime_mod("__jet_db", "{FFI_DB_RUNTIME}\n")}"
     // D-DATA-READER1=A: the Parquet/Arrow closure registers its C export with Foundation.
-    if needs.parquet -> out = out + pkg_ffi_runtime_mod("__jet_parquet", "{@FFI_PARQUET_RUNTIME}\n")
+    if needs.parquet -> out = "{out}{pkg_ffi_runtime_mod("__jet_parquet", "{FFI_PARQUET_RUNTIME}\n")}"
     // D-HTTP-CLIENT2=A: native HTTP; rustls is the separately ratified TLS seam.
-    if needs.http_client -> out = out + pkg_ffi_runtime_mod("__jet_http_client", "const HTTP_PUBLIC_SUFFIX_LIST: &str = r################\"{@FFI_HTTP_PUBLIC_SUFFIX_LIST}\"################;\n{@FFI_HTTP_CLIENT_RUNTIME}\n")
+    if needs.http_client -> out = "{out}{pkg_ffi_runtime_mod("__jet_http_client", "const HTTP_PUBLIC_SUFFIX_LIST: &str = r################\"{FFI_HTTP_PUBLIC_SUFFIX_LIST}\"################;\n{FFI_HTTP_CLIENT_RUNTIME}\n")}"
     // D-TLSSERVE1=A: the server TLS runtime is the only place serving touches rustls.
-    if needs.http_server_tls -> out = out + pkg_ffi_runtime_mod("__jet_http_server_tls", "{@FFI_HTTP_SERVER_TLS_RUNTIME}\n")
+    if needs.http_server_tls -> out = "{out}{pkg_ffi_runtime_mod("__jet_http_server_tls", "{FFI_HTTP_SERVER_TLS_RUNTIME}\n")}"
     // D-NETSOCKET1=A / D-TLS1=A: client stream TLS over an existing TcpStream.
-    if needs.net_tls -> out = out + pkg_ffi_runtime_mod("__jet_net_tls", "{@FFI_NET_TLS_RUNTIME}\n")
-    if needs.crypto || needs.secrets -> out = out + pkg_ffi_crypto_modules(needs)
+    if needs.net_tls -> out = "{out}{pkg_ffi_runtime_mod("__jet_net_tls", "{FFI_NET_TLS_RUNTIME}\n")}"
+    if needs.crypto || needs.secrets -> out = "{out}{pkg_ffi_crypto_modules(needs)}"
     // D-DEP-WASM1=A: the application `core.plugin` host; the compiler-extension
     // host is a separate runtime.
-    if needs.plugin -> out = out + pkg_ffi_runtime_mod("__jet_plugin", "{@FFI_PLUGIN_RUNTIME}\n")
+    if needs.plugin -> out = "{out}{pkg_ffi_runtime_mod("__jet_plugin", "{FFI_PLUGIN_RUNTIME}\n")}"
     has_trampoline := false
     loop entry in entries {
         if pkg_ffi_emit_cabi_trampoline(entry, handle_names, record_defs) != None -> has_trampoline = true
@@ -178,7 +180,7 @@ pub fn pkg_ffi_emit_wrapper_lib_with_handles(entries: [ExternEntry], needs: Rust
         if !names.contains(entry.jet_name) -> &names.push(entry.jet_name)
     }
     loop entry in entries {
-        out = out + pkg_ffi_entry_wrapper(entry, names, record_defs)
+        out = "{out}{pkg_ffi_entry_wrapper(entry, names, record_defs)}"
         if pkg_ffi_emit_cabi_trampoline(entry, handle_names, record_defs) == .Val(cabi) -> out = "{out}{cabi}\n"
         out = "{out}\n"
     }
@@ -203,20 +205,20 @@ fn pkg_ffi_crypto_modules(needs: RustBridgeNeeds) -> String Never! {
     out := ""
     if needs.crypto {
         roots :: [(name: String, source: String)]{
-            (name: "jet_encoding_errors", source: @FFI_ENCODING_ERRORS_RUNTIME),
-            (name: "jet_json_number", source: @FFI_JSON_NUMBER_RUNTIME),
-            (name: "DataTree", source: @FFI_DATATREE_RUNTIME),
-            (name: "EncodingJson", source: @FFI_ENCODING_JSON_RUNTIME),
-            (name: "RuntimeDiagnosticCore", source: @FFI_RUNTIME_DIAGNOSTIC_CORE)
+            (name: "jet_encoding_errors", source: FFI_ENCODING_ERRORS_RUNTIME),
+            (name: "jet_json_number", source: FFI_JSON_NUMBER_RUNTIME),
+            (name: "DataTree", source: FFI_DATATREE_RUNTIME),
+            (name: "EncodingJson", source: FFI_ENCODING_JSON_RUNTIME),
+            (name: "RuntimeDiagnosticCore", source: FFI_RUNTIME_DIAGNOSTIC_CORE)
         }
         loop root in roots -> out = "{out}mod {root.name} {{\n{root.source}\n}}\n"
     }
     body := ""
     // D-DEP-CRYPTO1=A: the crypto runtime is the only place RustCrypto is touched.
-    if needs.crypto -> body = "{body}{pkg_ffi_standalone_outcome_runtime()}\n{@FFI_CRYPTO_ENTROPY_RUNTIME}\nuse jet_crypto_entropy::{{jet_crypto_entropy_fill, JetCryptoEntropyError}};\n{@FFI_CRYPTO_RUNTIME}\n"
+    if needs.crypto -> body = "{body}{pkg_ffi_standalone_outcome_runtime()}\n{FFI_CRYPTO_ENTROPY_RUNTIME}\nuse jet_crypto_entropy::{{jet_crypto_entropy_fill, JetCryptoEntropyError}};\n{FFI_CRYPTO_RUNTIME}\n"
     // U13 (D-JPK-SECRETCRYPTO1): the secrets runtime is the only place `age` is touched.
-    if needs.secrets -> body = "{body}{@FFI_UNICODE_TABLES_RUNTIME}\n{@FFI_VAULT_NFC_RUNTIME}\n{@FFI_SECRETS_RUNTIME}\n{@FFI_VAULT_KEY_WRAP_RUNTIME}\n"
-    out + pkg_ffi_runtime_mod("__jet_crypto", body)
+    if needs.secrets -> body = "{body}{FFI_UNICODE_TABLES_RUNTIME}\n{FFI_VAULT_NFC_RUNTIME}\n{FFI_SECRETS_RUNTIME}\n{FFI_VAULT_KEY_WRAP_RUNTIME}\n"
+    "{out}{pkg_ffi_runtime_mod("__jet_crypto", body)}"
 }
 
 // `FfiCallbackEvent<T>`'s payload type.
@@ -361,8 +363,8 @@ fn pkg_ffi_emit_asm_wrapper(entry: ExternEntry, inline: InlineEntry) -> String N
     params := [String]{}
     loop index in 0..<entry.params.len() -> &params.push("p{index}: {pkg_ffi_inline_rust_param_type(entry.params[index].convention, entry.params[index].ty)}")
     ret :: pkg_ffi_inline_return_type(entry.return_type)
-    output_param := None
-    return_reg := None
+    output_param := Int?{None}
+    return_reg := String?{None}
     if contract.output == .Val(output) {
         if output == {
             .Parameter(index) -> {
@@ -421,17 +423,6 @@ fn pkg_ffi_rust_string(value: String) -> String Never! {
     value.replace("\\", "\\\\").replace("\"", "\\\"")
 }
 
-fn pkg_ffi_inline_rust_type(ty: Type) -> String Never! {
-    if ty == {
-        .Int -> "i64"
-        .Float -> "f64"
-        .IntN(signed, bits) -> pkg_ffi_int_rust_name(signed, bits)
-        .InlineRange(base, _, _) -> pkg_ffi_inline_rust_type(base)
-        .Float32 -> "f32"
-        .Bool -> "bool"
-        else -> "()"
-    }
-}
 
 // D-FFI-CAP1: inline C/C++/asm wrappers keep the `extern rust` capability
 // shape; an exclusive lend is a pointer to the live Jet slot, never a
@@ -663,18 +654,18 @@ fn pkg_ffi_cabi_signed_integer(ty: Type) -> Bool Never! {
     }
 }
 
-@FFI_LENGTH_NAMES :: [String]{"n", "len", "length", "count", "size", "num", "number"}
-@FFI_LENGTH_SUFFIXES :: [String]{"_len", "_length", "_count", "_size", "_num", "_number"}
-@FFI_LENGTH_PREFIXES :: [String]{"len_", "length_", "count_", "size_", "num_", "number_"}
+FFI_LENGTH_NAMES :: prep { [String]{"n", "len", "length", "count", "size", "num", "number"} }
+FFI_LENGTH_SUFFIXES :: prep { [String]{"_len", "_length", "_count", "_size", "_num", "_number"} }
+FFI_LENGTH_PREFIXES :: prep { [String]{"len_", "length_", "count_", "size_", "num_", "number_"} }
 
 // A parameter name that names a native element count.
 fn pkg_ffi_length_name(name: String) -> Bool Never! {
     lower :: pkg_ascii_lower(name)
-    if @FFI_LENGTH_NAMES.contains(lower) -> return true
-    loop suffix in @FFI_LENGTH_SUFFIXES {
+    if FFI_LENGTH_NAMES.contains(lower) -> return true
+    loop suffix in FFI_LENGTH_SUFFIXES {
         if lower.ends_with(suffix) -> return true
     }
-    loop prefix in @FFI_LENGTH_PREFIXES {
+    loop prefix in FFI_LENGTH_PREFIXES {
         if lower.starts_with(prefix) -> return true
     }
     false
@@ -922,5 +913,5 @@ fn pkg_ffi_rust_type(ty: Type, user_types: [String]) -> String Never! {
 fn pkg_ffi_named_rust_type(name: String, user_types: [String]) -> String Never! {
     if name == "Error" -> return "String"
     if user_types.contains(name) -> return pkg_ffi_mangle_path(name)
-    name
+    ~name
 }

@@ -1,0 +1,817 @@
+// Invocation context and authority discovery (Source/ReceiptStore.rs).
+// Canonical Core Path is the only path carrier. #4381 equality and #4378
+// native non-UTF-8 paths remain owner gates, never opaque string replacements.
+// Loader/WatchGraph must supply checked authority/import facts; no fake roots.
+use core.files.path as receipt_paths
+use core.files as receipt_context_files
+
+pub struct JetCLIReceiptEnvironmentEntry { pub name: String, pub value: String }
+pub struct JetCLIReceiptIdentityMember { pub path: String, pub digest: String }
+pub struct JetCLICanonicalTargetIdentity {
+    pub members: [JetCLIReceiptIdentityMember]
+    pub input_sha256: String
+    pub authority_root: receipt_paths.Path
+}
+
+// Rust argv_identity (ReceiptStore.rs:3560-3584). Byte offsets are never String offsets.
+pub fn jet_cli_receipt_argv_identity(argv: [String]) -> [U8] Never! {
+    out := [U8]{}
+    redact_next := false
+    loop arg in argv {
+        if redact_next {
+            jet_cli_receipt_frame(&out, JET_CLI_RECEIPT_REDACTION_MARKER)
+            redact_next = false
+            next
+        }
+        bytes :: arg.bytes()
+        equal := -1
+        loop index in 0..<bytes.len() {
+            if Int.from_u8(bytes[index]) == 61 {
+                equal = index
+                break
+            }
+        }
+        if equal >= 0 {
+            name :: String.from_bytes(bytes[0..<equal]) ?? panic("ASCII separator boundary")
+            if jet_cli_receipt_is_secret_name(name) {
+                jet_cli_receipt_frame(&out, "{name}=<redacted>".bytes())
+            } else { jet_cli_receipt_frame(&out, bytes) }
+            next
+        }
+        jet_cli_receipt_frame(&out, bytes)
+        redact_next = jet_cli_receipt_is_secret_name(arg)
+    }
+    out
+}
+// Rust environment_identity_from (ReceiptStore.rs:3590-3621). Sort borrowed indices
+// by BOTH fields, retaining duplicate keys as Rust Vec<(String,String)>::sort does.
+pub fn jet_cli_receipt_environment_identity_from(environment: [JetCLIReceiptEnvironmentEntry]) -> [U8] Never! {
+    order := [Int]{}
+    loop (index, entry) in environment {
+        if entry.name == "INVOCATION_ID" || entry.name == "JET_RECEIPT_BYPASS" || entry.name == "NIX_BUILD_TOP" || entry.name == "TEMP" || entry.name == "TEMPDIR" || entry.name == "TMP" || entry.name == "TMPDIR" -> next
+        &order.push(index)
+    }
+    &order.sort_by((a: Int, b: Int) -> {
+        left :: environment[a]
+        right :: environment[b]
+        if {
+            left.name != right.name -> left.name.bytes() <=> right.name.bytes()
+            else -> left.value.bytes() <=> right.value.bytes()
+        }
+    })
+    out := [U8]{}
+    loop index in order {
+        entry :: environment[index]
+        jet_cli_receipt_frame(&out, entry.name.bytes())
+        jet_cli_receipt_frame(&out, if jet_cli_receipt_is_secret_environment_name(entry.name) -> JET_CLI_RECEIPT_REDACTION_MARKER else -> entry.value.bytes())
+    }
+    out
+}
+// Rust terminal_identity (ReceiptStore.rs:3662-3672).
+pub fn jet_cli_receipt_terminal_identity(stdin: Bool, stdout: Bool, stderr: Bool) -> [U8] Never! {
+    [U8]{U8{if stdin -> 49 else -> 48}, U8{if stdout -> 49 else -> 48}, U8{if stderr -> 49 else -> 48}}
+}
+// Rust context_identity framing (ReceiptStore.rs:3530-3543). Inputs here are the
+// actual process observations, NOT defaults; native capture is supplied below.
+fn jet_cli_receipt_context_frames(verb: String, cwd: [U8], argv: [String], environment: [JetCLIReceiptEnvironmentEntry], tools: [U8], terminal: [U8]) -> [U8] JetCLIReceiptError! {
+    if verb == "" -> return Err(jet_cli_receipt_error("receipt verb is empty"))
+    identity := ~JET_CLI_RECEIPT_MAGIC
+    jet_cli_receipt_frame(&identity, verb.bytes())
+    jet_cli_receipt_frame(&identity, cwd)
+    jet_cli_receipt_frame(&identity, jet_cli_receipt_argv_identity(argv))
+    jet_cli_receipt_frame(&identity, jet_cli_receipt_environment_identity_from(environment))
+    jet_cli_receipt_frame(&identity, tools)
+    jet_cli_receipt_frame(&identity, terminal)
+    Ok(identity)
+}
+// Rust has_explicit_target / target_path option scanning (ReceiptStore.rs:2798-2921).
+fn jet_cli_receipt_option_takes_value(arg: String) -> Bool Never! {
+    arg == "-p" || arg == "--project" || arg == "--output" || arg == "--target" || arg == "--profile" || arg == "--builder" || arg == "--filter" || arg == "--edition" || arg == "--scope" || arg == "--kind" || arg == "--set" || arg == "--port" || arg == "--seed" || arg == "--iterations" || arg == "--time" || arg == "--corpus" || arg == "--lens" || arg == "--save" || arg == "--unsave" || arg == "--replay"
+}
+fn jet_cli_receipt_target_argument(verb: String, argv: [String]) -> String? Never! {
+    skip_next := false
+    start :: if verb == "budget check" -> 2 else -> 1
+    loop index in start..<argv.len() {
+        arg :: argv[index]
+        if skip_next {
+            skip_next = false
+            next
+        }
+        if jet_cli_receipt_option_takes_value(arg) {
+            skip_next = true
+            next
+        }
+        if arg == "--" -> break
+        if !arg.starts_with("-") -> return Val(~arg)
+    }
+    None
+}
+pub fn jet_cli_receipt_has_explicit_target(verb: String, argv: [String]) -> Bool Never! { jet_cli_receipt_target_argument(verb, argv) != None }
+
+// Rust Path::strip_prefix: use the ONE borrowed component scanner (RecordTypes).
+// Preserve interior suffix spelling; trim its component bounds like as_path().
+// Do not collapse '..' or invent normalized roots.
+fn jet_cli_receipt_strip_prefix(path: receipt_paths.Path, prefix: receipt_paths.Path) -> receipt_paths.Path? Never! {
+    bytes :: path.raw.bytes()
+    base :: prefix.raw.bytes()
+    offset := 0
+    base_offset := 0
+    loop {
+        part :: jet_cli_record_next_path_component(bytes, offset)
+        expected :: jet_cli_record_next_path_component(base, base_offset)
+        if expected.start == expected.end {
+            if part.start == part.end -> return Val(receipt_paths.path(""))
+            end := part.end
+            cursor := part.next
+            loop {
+                remaining :: jet_cli_record_next_path_component(bytes, cursor)
+                if remaining.start == remaining.end -> break
+                end = remaining.end
+                cursor = remaining.next
+            }
+            return Val(receipt_paths.path(String.from_bytes(bytes[part.start..<end]) ?? panic("component boundary UTF-8")))
+        }
+        if part.start == part.end || bytes[part.start..<part.end] != base[expected.start..<expected.end] -> return None
+        offset = part.next
+        base_offset = expected.next
+    }
+}
+// Rust canonical_identity_path (ReceiptStore.rs:2343-2351), cwd supplied from
+// current_dir().unwrap_or("."); raw native path lossiness remains #4378.
+pub fn jet_cli_receipt_identity_path(path: receipt_paths.Path, cwd: receipt_paths.Path) -> String Never! {
+    relative := path
+    if receipt_paths.is_absolute(path) { if jet_cli_receipt_strip_prefix(path, cwd) == Val(value) -> relative = value }
+    receipt_paths.as_posix(relative)
+}
+// Rust is_generated_failure_identity_path (ReceiptStore.rs:2452-2456) uses
+// literal slash splits, intentionally NOT normalized Path components.
+pub fn jet_cli_receipt_is_generated_identity_path(path: String) -> Bool Never! {
+    bytes :: path.bytes()
+    previous := false
+    start := 0
+    loop index in 0..<(bytes.len() + 1) {
+        if index < bytes.len() && Int.from_u8(bytes[index]) != 47 -> next
+        if previous && bytes[start..<index] == "generated".bytes() -> return true
+        previous = bytes[start..<index] == ".jet".bytes()
+        start = index + 1
+    }
+    false
+}
+// Rust canonical_identity_insert (ReceiptStore.rs:2353-2372).
+pub fn jet_cli_receipt_identity_insert(members: &[JetCLIReceiptIdentityMember], path: String, digest: String, cwd: receipt_paths.Path) JetCLIReceiptError! {
+    name :: jet_cli_receipt_identity_path(receipt_paths.path(path), cwd)
+    if jet_cli_receipt_is_generated_identity_path(name) -> return
+    loop member in members {
+        if member.path == name {
+            if member.digest != digest -> return Err(jet_cli_receipt_error("canonical target identity has conflicting digests for `{name}`"))
+            return
+        }
+    }
+    &members.push(JetCLIReceiptIdentityMember{path: name, digest: digest})
+}
+// Rust canonical_target_identity final sorting/framing (ReceiptStore.rs:2324-2340).
+fn jet_cli_receipt_finish_target_identity(members: &[JetCLIReceiptIdentityMember], authority_root: receipt_paths.Path) -> JetCLICanonicalTargetIdentity Never! {
+    &members.sort_by((a: JetCLIReceiptIdentityMember, b: JetCLIReceiptIdentityMember) -> a.path.bytes() <=> b.path.bytes())
+    identity := [U8]{}
+    loop member in members {
+        &identity.extend("{{\"path\":\"{json_escape(member.path)}\",\"sha256\":\"{json_escape(member.digest)}\"}}\n".bytes())
+    }
+    JetCLICanonicalTargetIdentity{members: ~members, input_sha256: mir_sha256_hex_bytes(mir_sha256_bytes(identity)), authority_root: authority_root}
+}
+// Rust is_generated_failure_input (ReceiptStore.rs:3037-3046).
+pub fn jet_cli_receipt_is_generated_failure_input(path: receipt_paths.Path) -> Bool Never! {
+    bytes :: path.raw.bytes()
+    offset := 0
+    state := 0
+    loop {
+        part :: jet_cli_record_next_path_component(bytes, offset)
+        if part.start == part.end -> return false
+        if state == 2 && bytes[part.start..<part.end] == "generated".bytes() -> return true
+        state = if state == 1 && bytes[part.start..<part.end] == "records".bytes() -> 2 else -> if bytes[part.start..<part.end] == ".jet".bytes() -> 1 else -> 0
+        offset = part.next
+    }
+}
+// Rust generated_failure_matches_target (ReceiptStore.rs:3048-3057).
+pub fn jet_cli_receipt_generated_failure_matches_target(path: receipt_paths.Path, digest: String) -> Bool Never! {
+    if !jet_cli_receipt_is_generated_failure_input(path) -> return false
+    name :: jet_cli_receipt_file_name(path)
+    bytes :: name.bytes()
+    prefix :: digest.bytes()
+    bytes.len() > prefix.len() && bytes[0..<prefix.len()] == prefix && Int.from_u8(bytes[prefix.len()]) == 45
+}
+fn jet_cli_receipt_file_name(path: receipt_paths.Path) -> String Never! {
+    bytes :: path.raw.bytes()
+    offset := 0
+    start := 0
+    end := 0
+    rank := -1
+    loop {
+        part :: jet_cli_record_next_path_component(bytes, offset)
+        if part.start == part.end -> break
+        start = part.start
+        end = part.end
+        rank = jet_cli_record_path_component_rank(bytes, start, end)
+        offset = part.next
+    }
+    if rank != 3 -> return ""
+    String.from_bytes(bytes[start..<end]) ?? panic("component boundary UTF-8")
+}
+// Rust changed_receipt_inputs (ReceiptStore.rs:3202-3221), complete canonical
+// Path equality retained (#4381), not raw spelling equality.
+pub fn jet_cli_receipt_changed_inputs(old: [JetCLIReceiptInput], fresh: [JetCLIReceiptInput]) -> [receipt_paths.Path] Never! {
+    changed := [receipt_paths.Path]{}
+    loop input in old {
+        same := false
+        loop candidate in fresh {
+            if candidate.path == input.path {
+                same = candidate.digest == input.digest
+                break
+            }
+        }
+        if !same -> &changed.push(~input.path)
+    }
+    loop input in fresh {
+        found := false
+        loop candidate in old { if candidate.path == input.path -> found = true }
+        if !found -> &changed.push(~input.path)
+    }
+    jet_cli_receipt_sort_paths(&changed)
+    changed
+}
+fn jet_cli_receipt_sort_paths(paths: &[receipt_paths.Path]) Never! {
+    &paths.sort_by((a, b) -> jet_cli_record_compare_paths(a.raw, b.raw))
+    kept := 0
+    loop index in 0..<paths.len() {
+        if kept == 0 || jet_cli_record_compare_paths(paths[kept - 1].raw, paths[index].raw) != Ordering.Equal {
+            if kept != index -> paths[kept] = ~paths[index]
+            kept += 1
+        }
+    }
+    loop paths.len() > kept { _ :: &paths.pop() }
+}
+// Rust receipt_record_link (ReceiptStore.rs:2490-2492).
+pub fn jet_cli_receipt_record_link(claim: JetCLIReceiptClaim) -> JetCLIRecordLink JetCLIRecordError! { jet_cli_record_link_new(.Receipt, claim.key) }
+
+// Rust receipt_notices_visible (ReceiptStore.rs:3686-3688), use the canonical
+// OutputFlags parser including malformed --color refusal and separator boundary.
+pub fn jet_cli_receipt_notices_visible(verb: String, argv: [String]) -> Bool Never! {
+    if verb != "check" -> return true
+    if jet_cli_output_flags_parse(argv) == {
+        .Ok(flags) -> flags.verbose
+        .Err(_) -> false
+    }
+}
+
+// Approved native transport only; no production implementation while native
+// no-follow/canonical/raw-path contracts (#3593/#3598/#4378) remain open.
+// message = native Display, kind = native ErrorKind::to_string(), not_found
+// is the native NotFound discriminant. No synthesized checked facts.
+#Error
+pub struct JetCLIReceiptNativeError { pub message: String, pub kind: String, pub not_found: Bool }
+pub trait JetCLIReceiptReadHost {
+    fn metadata(&self, path: receipt_paths.Path) -[FS.Read]> receipt_context_files.Stat JetCLIReceiptNativeError!
+    fn symlink_metadata(&self, path: receipt_paths.Path) -[FS.Read]> receipt_context_files.Stat JetCLIReceiptNativeError!
+    fn canonicalize(&self, path: receipt_paths.Path) -[FS.Read]> receipt_paths.Path JetCLIReceiptNativeError!
+    fn open_directory(&self, path: receipt_paths.Path) -[FS.Read]> Int JetCLIReceiptNativeError!
+    fn next_entry(&self, handle: Int) -[FS.Read]> receipt_paths.Path? JetCLIReceiptNativeError!
+    fn close_directory(&self, handle: Int) Never! -[FS.Read]>
+}
+// Only actual Loader checked methods / WatchGraph::discover may implement this
+// boundary. Errors carry exact Rust diagnostic Debug text, not fabricated roots.
+pub trait JetCLIReceiptAuthorityHost {
+    fn workspace_root(&self, start: receipt_paths.Path) -[FS.Read]> receipt_paths.Path? JetCLIReceiptError!
+    fn package_root(&self, start: receipt_paths.Path) -[FS.Read]> receipt_paths.Path? JetCLIReceiptError!
+    fn selected_project_root(&self, start: receipt_paths.Path) -[FS.Read]> receipt_paths.Path JetCLIReceiptError!
+    fn package_name(&self, root: receipt_paths.Path) -[FS.Read]> String? JetCLIReceiptError!
+    fn watched_paths(&self, entry: receipt_paths.Path) -[FS.Read]> [receipt_paths.Path] JetCLIReceiptError!
+}
+pub trait JetCLIReceiptProcessHost {
+    fn current_dir(&self) -[Env]> receipt_paths.Path JetCLIReceiptNativeError!
+    fn current_exe(&self) -[Env]> receipt_paths.Path JetCLIReceiptNativeError!
+    fn path_directories(&self) -[Env]> [receipt_paths.Path]? Never!
+    fn environment(&self) -[Env]> [JetCLIReceiptEnvironmentEntry] Never!
+    fn stdin_terminal(&self) -[IO]> Bool Never!
+    fn stdout_terminal(&self) -[IO]> Bool Never!
+    fn stderr_terminal(&self) -[IO]> Bool Never!
+    fn write_stdout(&self, bytes: [U8]) JetCLIReceiptNativeError! -[IO]>
+    fn flush_stdout(&self) JetCLIReceiptNativeError! -[IO]>
+    fn write_stderr(&self, bytes: [U8]) JetCLIReceiptNativeError! -[IO]>
+    fn flush_stderr(&self) JetCLIReceiptNativeError! -[IO]>
+}
+fn jet_cli_receipt_parent(path: receipt_paths.Path) -> receipt_paths.Path? Never! {
+    if jet_cli_history_evidence_parent(path.raw) == Val(value) -> return Val(receipt_paths.path(value))
+    None
+}
+fn jet_cli_receipt_is_directory<F: JetCLIReceiptReadHost>(path: receipt_paths.Path, file_host: &F) -[FS.Read]> Bool Never! {
+    if &file_host.metadata(path) == {
+        .Ok(metadata) -> metadata.is_dir
+        .Err(_) -> false
+    }
+}
+fn jet_cli_receipt_is_file<F: JetCLIReceiptReadHost>(path: receipt_paths.Path, file_host: &F) -[FS.Read]> Bool Never! {
+    if &file_host.metadata(path) == {
+        .Ok(metadata) -> metadata.is_file
+        .Err(_) -> false
+    }
+}
+// Rust regular_file (ReceiptStore.rs:3257-3261), shared discovery prerequisite.
+fn jet_cli_receipt_regular_file<F: JetCLIReceiptReadHost>(path: receipt_paths.Path, file_host: &F) -[FS.Read]> Bool Never! {
+    if &file_host.symlink_metadata(path) == {
+        .Ok(metadata) -> metadata.is_file && !metadata.is_symlink
+        .Err(_) -> false
+    }
+}
+// Rust canonical_path / file_digest (ReceiptStore.rs:3233-3249).
+pub fn jet_cli_receipt_canonical_path<F: JetCLIReceiptReadHost>(path: receipt_paths.Path, file_host: &F) -[FS.Read]> receipt_paths.Path JetCLIReceiptError! {
+    metadata :: &file_host.symlink_metadata(path) ?? return Err(jet_cli_receipt_error("could not inspect input {path.raw}: {err.message}"))
+    if metadata.is_symlink || !metadata.is_file -> return Err(jet_cli_receipt_error("receipt input is not a regular file: {path.raw}"))
+    canonical :: &file_host.canonicalize(path) ?? return Err(jet_cli_receipt_error("could not canonicalize input {path.raw}: {err.message}"))
+    Ok(canonical)
+}
+// Reuse canonical bounded/no-follow streaming file hash, including held-handle
+// and path-after identity validation. #3593/#3598 Core opened-handle publication
+// is a real gate; never buffer the whole file or inject a checked host digest.
+pub fn jet_cli_receipt_file_digest<F: JetCLIReceiptReadHost>(path: receipt_paths.Path, file_host: &F) -[FS]> String JetCLIReceiptError! {
+    jet_cli_receipt_canonical_path(path, &file_host)
+    digest :: foundation_sha256_file_hex(path.raw) ?? return Err(jet_cli_receipt_error("could not read input {path.raw}: {err}"))
+    Ok(digest)
+}
+// Rust stale_receipt_input (ReceiptStore.rs:3223-3231).
+pub fn jet_cli_receipt_stale_input<F: JetCLIReceiptReadHost>(inputs: [JetCLIReceiptInput], file_host: &F) -[FS]> receipt_paths.Path? Never! {
+    loop input in inputs {
+        if jet_cli_receipt_file_digest(input.path, &file_host) == {
+            .Ok(digest) -> { if digest != input.digest -> return Val(~input.path) }
+            .Err(_) -> { return Val(~input.path) }
+        }
+    }
+    None
+}
+// Rust receipt_project_root / receipt_authority_root (ReceiptStore.rs:2734-2756).
+fn jet_cli_receipt_project_root<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost>(start: receipt_paths.Path, file_host: &F, authority: &A) -[FS.Read]> receipt_paths.Path Never! {
+    &authority.selected_project_root(start) ?? (&file_host.canonicalize(start) ?? ~start)
+}
+fn jet_cli_receipt_authority_root<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost>(start: receipt_paths.Path, file_host: &F, authority: &A) -[FS.Read]> receipt_paths.Path Never! {
+    if &authority.workspace_root(start) == { .Ok(root) -> { if root == Val(value) -> return value } .Err(_) -> {} }
+    if &authority.package_root(start) == { .Ok(root) -> { if root == Val(value) -> return value } .Err(_) -> {} }
+    &file_host.canonicalize(start) ?? ~start
+}
+// Rust receipt_authority_roots (ReceiptStore.rs:2758-2796): lexical invalidation
+// floor survives malformed authority; canonical_target_identity below is strict.
+fn jet_cli_receipt_authority_roots<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost>(start: receipt_paths.Path, file_host: &F, authority: &A) -[FS.Read]> [receipt_paths.Path] Never! {
+    roots := [receipt_paths.Path]{jet_cli_receipt_authority_root(start, &file_host, &authority)}
+    package_seen := false
+    directory := if jet_cli_receipt_is_directory(start, &file_host) -> ~start else -> jet_cli_receipt_parent(start) ?? receipt_paths.path(".")
+    loop {
+        package :: jet_cli_receipt_regular_file(receipt_paths.join(directory, PACKAGE_FILE), &file_host) || jet_cli_receipt_regular_file(receipt_paths.join(directory, PAYLOAD_FILE), &file_host)
+        workspace :: jet_cli_receipt_regular_file(receipt_paths.join(directory, WORKSPACE_FILE), &file_host)
+        if package && !package_seen {
+            &roots.push(~directory)
+            package_seen = true
+        }
+        if workspace {
+            &roots.push(~directory)
+            break
+        }
+        parent :: jet_cli_receipt_parent(directory) ?? break
+        if jet_cli_record_compare_paths(parent.raw, directory.raw) == Ordering.Equal -> break
+        directory = parent
+    }
+    jet_cli_receipt_sort_paths(&roots)
+    roots
+}
+// Rust target_path (ReceiptStore.rs:2798-2873).
+pub fn jet_cli_receipt_target_path<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost>(verb: String, argv: [String], cwd: receipt_paths.Path, file_host: &F, authority: &A) -[FS.Read]> receipt_paths.Path? Never! {
+    argument :: jet_cli_receipt_target_argument(verb, argv)
+    if argument == Val(value) {
+        candidate :: receipt_paths.join(cwd, value)
+        exists :: if &file_host.metadata(candidate) == {
+            .Ok(_) -> true
+            .Err(_) -> false
+        }
+        if exists -> return Val(candidate)
+        suffix :: ".{FILE_EXT}"
+        if receipt_paths.suffix(receipt_paths.path(jet_cli_receipt_file_name(candidate))) == suffix -> return Val(candidate)
+        resolved :: receipt_paths.path("{candidate.raw}.{FILE_EXT}")
+        if jet_cli_receipt_regular_file(resolved, &file_host) -> return Val(resolved)
+        return None
+    }
+    root :: jet_cli_receipt_authority_root(cwd, &file_host, &authority)
+    if verb == "test" || verb == "budget check" -> return Val(root)
+    candidates :: [receipt_paths.Path]{receipt_paths.join(root, DEFAULT_ENTRY_FILE), receipt_paths.join(receipt_paths.join(root, "src"), DEFAULT_ENTRY_FILE)}
+    loop entry in candidates { if jet_cli_receipt_regular_file(entry, &file_host) -> return Val(entry) }
+    Val(root)
+}
+// Rust receipt_root / receipt_root_for (ReceiptStore.rs:2716-2732,2875-2878).
+pub fn jet_cli_receipt_root_for<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost>(verb: String, argv: [String], cwd: receipt_paths.Path, file_host: &F, authority: &A) -[FS.Read]> receipt_paths.Path Never! {
+    target :: jet_cli_receipt_target_path(verb, argv, cwd, &file_host, &authority) ?? ~cwd
+    absolute :: if receipt_paths.is_absolute(target) -> target else -> receipt_paths.join_path(cwd, target)
+    start :: if jet_cli_receipt_is_directory(absolute, &file_host) -> absolute else -> jet_cli_receipt_parent(absolute) ?? absolute
+    receipt_paths.join(receipt_paths.join(jet_cli_receipt_project_root(start, &file_host, &authority), ".jet"), "receipts")
+}
+// Rust receipt_project_root_for_store / receipt_record_path (ReceiptStore.rs:2209-2232).
+pub fn jet_cli_receipt_project_root_for_store<F: JetCLIReceiptReadHost>(store_root: receipt_paths.Path, cwd: receipt_paths.Path, file_host: &F) -[FS.Read]> receipt_paths.Path? Never! {
+    object_root :: jet_cli_receipt_parent(store_root) ?? return None
+    if jet_cli_receipt_file_name(object_root) != ".jet" -> return None
+    root :: jet_cli_receipt_parent(object_root) ?? ~cwd
+    Val(&file_host.canonicalize(root) ?? root)
+}
+pub fn jet_cli_receipt_record_path<F: JetCLIReceiptReadHost>(store_root: receipt_paths.Path, object_path: receipt_paths.Path, cwd: receipt_paths.Path, file_host: &F) -[FS.Read]> receipt_paths.Path? Never! {
+    object :: if receipt_paths.is_absolute(object_path) -> object_path else -> receipt_paths.join_path(cwd, object_path)
+    root :: jet_cli_receipt_project_root_for_store(store_root, cwd, &file_host) ?? return None
+    relative :: jet_cli_receipt_strip_prefix(object, root) ?? return None
+    if relative.raw == "" || jet_cli_receipt_strip_prefix(relative, receipt_paths.path(".jet")) == None -> return None
+    Val(relative)
+}
+
+// Rust canonical_authority_roots (ReceiptStore.rs:2244-2294): malformed
+// authority is fatal here, unlike the lexical invalidation-floor discovery.
+fn jet_cli_receipt_canonical_authority_roots<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost>(target: receipt_paths.Path, file_host: &F, authority: &A) -[FS.Read]> (roots: [receipt_paths.Path], authority_root: receipt_paths.Path) JetCLIReceiptError! {
+    metadata :: &file_host.symlink_metadata(target) ?? return Err(jet_cli_receipt_error("couldn't inspect canonical target `{target.raw}`: {err.message}"))
+    if metadata.is_symlink -> return Err(jet_cli_receipt_error("canonical target `{target.raw}` must not be a symlink"))
+    start :: if metadata.is_dir -> ~target else -> jet_cli_receipt_parent(target) ?? receipt_paths.path(".")
+    workspace :: &authority.workspace_root(start) ?? return Err(jet_cli_receipt_error("couldn't resolve workspace authority for `{target.raw}`: {err.message}"))
+    package :: &authority.package_root(start) ?? return Err(jet_cli_receipt_error("couldn't resolve package authority for `{target.raw}`: {err.message}"))
+    roots := [receipt_paths.Path]{}
+    if package == Val(root) -> &roots.push(root)
+    if workspace == Val(root) -> &roots.push(root)
+    jet_cli_receipt_sort_paths(&roots)
+    selected :: &authority.selected_project_root(start) ?? return Err(jet_cli_receipt_error("couldn't resolve the workspace root for `{target.raw}`: {err.message}"))
+    Ok((roots: roots, authority_root: selected))
+}
+// Rust canonical_identity_file (ReceiptStore.rs:2374-2406).
+// Main-approved tandem correction: authority hashing uses the canonical
+// bounded held/no-follow read, never Rust's check-then-fs::read race.
+fn jet_cli_receipt_identity_file<F: JetCLIReceiptReadHost>(path: receipt_paths.Path, members: &[JetCLIReceiptIdentityMember], cwd: receipt_paths.Path, file_host: &F) JetCLIReceiptError! -[FS]> {
+    metadata :: if &file_host.symlink_metadata(path) == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            if error.not_found -> return
+            return Err(jet_cli_receipt_error("couldn't inspect canonical authority input `{path.raw}`: {error.message}"))
+        }
+    }
+    if metadata.is_symlink -> return Err(jet_cli_receipt_error("canonical authority input `{path.raw}` must not be a symlink"))
+    if !metadata.is_file -> return
+    digest :: foundation_sha256_file_hex(path.raw) ?? return Err(jet_cli_receipt_error("couldn't read canonical authority input `{path.raw}`: {err}"))
+    jet_cli_receipt_identity_insert(&members, path.raw, digest, cwd)
+}
+// Rust canonical_identity_tree (ReceiptStore.rs:2408-2450). Preserve directory
+// open errors vs iterator errors; close each handle on recursive/error returns.
+fn jet_cli_receipt_identity_tree<F: JetCLIReceiptReadHost>(root: receipt_paths.Path, members: &[JetCLIReceiptIdentityMember], cwd: receipt_paths.Path, file_host: &F) JetCLIReceiptError! -[FS]> {
+    metadata :: if &file_host.symlink_metadata(root) == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            if error.not_found -> return
+            return Err(jet_cli_receipt_error("couldn't inspect canonical generated inputs `{root.raw}`: {error.message}"))
+        }
+    }
+    if metadata.is_symlink -> return Err(jet_cli_receipt_error("canonical generated inputs `{root.raw}` must not contain a symlink"))
+    if metadata.is_file {
+        jet_cli_receipt_identity_file(root, &members, cwd, &file_host)
+        return
+    }
+    if !metadata.is_dir -> return
+    handle :: &file_host.open_directory(root) ?? return Err(jet_cli_receipt_error("couldn't read canonical generated inputs `{root.raw}`: {err.message}"))
+    loop {
+        entry :: if &file_host.next_entry(handle) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                &file_host.close_directory(handle)
+                return Err(jet_cli_receipt_error("couldn't inspect canonical generated inputs `{root.raw}`: {error.message}"))
+            }
+        }
+        if entry == Val(path) {
+            jet_cli_receipt_identity_tree(path, &members, cwd, &file_host) ?? {
+                &file_host.close_directory(handle)
+                return Err(err)
+            }
+        } else { break }
+    }
+    &file_host.close_directory(handle)
+}
+// Rust canonical_target_identity (ReceiptStore.rs:2296-2341).
+pub fn jet_cli_receipt_canonical_target_identity<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost>(target: receipt_paths.Path, members: [JetCLIReceiptIdentityMember], cwd: receipt_paths.Path, file_host: &F, authority: &A) -[FS]> JetCLICanonicalTargetIdentity JetCLIReceiptError! {
+    roots :: jet_cli_receipt_canonical_authority_roots(target, &file_host, &authority)
+    canonical := [JetCLIReceiptIdentityMember]{}
+    loop member in members -> jet_cli_receipt_identity_insert(&canonical, member.path, member.digest, cwd)
+    names :: [String]{PACKAGE_FILE, PAYLOAD_FILE, WORKSPACE_FILE, "build.jet", UNIFIED_LOCK_FILE}
+    loop root in roots.roots {
+        loop name in names -> jet_cli_receipt_identity_file(receipt_paths.join(root, name), &canonical, cwd, &file_host)
+        jet_cli_receipt_identity_tree(receipt_paths.join(receipt_paths.join(root, ".jet"), "generated"), &canonical, cwd, &file_host)
+    }
+    Ok(jet_cli_receipt_finish_target_identity(&canonical, roots.authority_root))
+}
+// Rust receipt_target_inputs_sha256 / receipt_record_identity (ReceiptStore.rs:2458-2488).
+pub fn jet_cli_receipt_target_inputs_sha256<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost>(claim: JetCLIReceiptClaim, argv: [String], cwd: receipt_paths.Path, identity_cwd: receipt_paths.Path, file_host: &F, authority: &A) -[FS]> String JetCLIReceiptError! {
+    target :: jet_cli_receipt_target_path(claim.verb, argv, cwd, &file_host, &authority) ?? return Err(jet_cli_receipt_error("couldn't resolve `{claim.verb}` target for receipt identity"))
+    members :: loop input in claim.inputs -> JetCLIReceiptIdentityMember{path: ~input.path.raw, digest: ~input.digest}
+    identity :: jet_cli_receipt_canonical_target_identity(target, members, identity_cwd, &file_host, &authority)
+    Ok(identity.input_sha256)
+}
+pub fn jet_cli_receipt_record_identity<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost>(claim: JetCLIReceiptClaim, argv: [String], cwd: receipt_paths.Path, identity_cwd: receipt_paths.Path, tool_version: String, file_host: &F, authority: &A) -[FS]> JetCLIRecordIdentity JetCLIReceiptError! {
+    digest :: jet_cli_receipt_target_inputs_sha256(claim, argv, cwd, identity_cwd, &file_host, &authority)
+    identity :: jet_cli_record_identity_new(digest, tool_version, JET_CLI_RECEIPT_RECORD_ENGINE) ?? return Err(jet_cli_receipt_error(err.message))
+    Ok(identity)
+}
+// Rust collect_tree_inputs Path component tests (ReceiptStore.rs:2953-3016).
+fn jet_cli_receipt_under_jet(path: receipt_paths.Path) -> Bool Never! {
+    bytes :: path.raw.bytes()
+    offset := 0
+    loop {
+        part :: jet_cli_record_next_path_component(bytes, offset)
+        if part.start == part.end -> return false
+        if bytes[part.start..<part.end] == ".jet".bytes() -> return true
+        offset = part.next
+    }
+}
+fn jet_cli_receipt_generated_input(path: receipt_paths.Path) -> Bool Never! {
+    bytes :: path.raw.bytes()
+    offset := 0
+    previous := false
+    loop {
+        part :: jet_cli_record_next_path_component(bytes, offset)
+        if part.start == part.end -> return false
+        if previous && bytes[part.start..<part.end] == "generated".bytes() -> return true
+        previous = bytes[part.start..<part.end] == ".jet".bytes()
+        offset = part.next
+    }
+}
+fn jet_cli_receipt_collect_tree_inputs<F: JetCLIReceiptReadHost>(root: receipt_paths.Path, verb: String, out: &[receipt_paths.Path], file_host: &F) Never! -[FS.Read]> {
+    if jet_cli_receipt_is_file(root, &file_host) {
+        &out.push(~root)
+        return
+    }
+    handle :: &file_host.open_directory(root) ?? return
+    loop {
+        if &file_host.next_entry(handle) == {
+            .Ok(entry) -> {
+                if entry == Val(path) {
+                    name :: jet_cli_receipt_file_name(path)
+                    if jet_cli_receipt_is_directory(path, &file_host) {
+                        if name == ".git" || name == "target" || name == "build" -> next
+                        if name == ".jet" {
+                            lock :: receipt_paths.join(path, "lock")
+                            if jet_cli_receipt_regular_file(lock, &file_host) -> &out.push(lock)
+                            jet_cli_receipt_collect_tree_inputs(receipt_paths.join(path, "generated"), verb, &out, &file_host)
+                            if verb == "budget check" -> jet_cli_receipt_collect_tree_inputs(receipt_paths.join(receipt_paths.join(path, "perf"), "baselines"), verb, &out, &file_host)
+                            next
+                        }
+                        if verb == "budget check" && jet_cli_receipt_under_jet(path) && (name == "locks" || name == "reports") -> next
+                        jet_cli_receipt_collect_tree_inputs(path, verb, &out, &file_host)
+                        next
+                    }
+                    suffix :: ".{FILE_EXT}"
+                    source :: receipt_paths.suffix(receipt_paths.path(name)) == suffix || name == PACKAGE_FILE || name == PAYLOAD_FILE || name == WORKSPACE_FILE || name == "lock"
+                    if source || jet_cli_receipt_generated_input(path) || (verb == "budget check" && jet_cli_receipt_under_jet(path)) -> &out.push(path)
+                } else { break }
+            }
+            .Err(_) -> {}
+        }
+    }
+    &file_host.close_directory(handle)
+}
+// Rust collect_generated_failure_inputs (ReceiptStore.rs:3017-3035).
+fn jet_cli_receipt_collect_generated_failure_inputs<F: JetCLIReceiptReadHost>(root: receipt_paths.Path, out: &[receipt_paths.Path], file_host: &F) Never! -[FS.Read]> {
+    handle :: &file_host.open_directory(root) ?? return
+    loop {
+        if &file_host.next_entry(handle) == {
+            .Ok(entry) -> {
+                if entry == Val(path) {
+                    metadata :: &file_host.symlink_metadata(path) ?? next
+                    if metadata.is_symlink -> next
+                    if metadata.is_dir -> jet_cli_receipt_collect_generated_failure_inputs(path, &out, &file_host)
+                    else { if metadata.is_file -> &out.push(path) }
+                } else { break }
+            }
+            .Err(_) -> {}
+        }
+    }
+    &file_host.close_directory(handle)
+}
+// Rust check_entry_candidates (ReceiptStore.rs:3145-3158): consecutive dedup,
+// not global dedup, preserves loader candidate priority.
+fn jet_cli_receipt_check_entry_candidates<A: JetCLIReceiptAuthorityHost>(root: receipt_paths.Path, authority: &A) -[FS.Read]> [receipt_paths.Path] Never! {
+    candidates := [receipt_paths.Path]{receipt_paths.join(root, DEFAULT_ENTRY_FILE), receipt_paths.join(receipt_paths.join(root, "src"), DEFAULT_ENTRY_FILE), receipt_paths.join(root, LEGACY_ENTRY_FILE)}
+    if &authority.package_name(root) == {
+        .Ok(name) -> {
+            if name == Val(value) {
+                if value != "" {
+                    candidate :: receipt_paths.join(root, "{value}.{FILE_EXT}")
+                    if jet_cli_record_compare_paths(candidates[candidates.len() - 1].raw, candidate.raw) != Ordering.Equal -> &candidates.push(candidate)
+                }
+            }
+        }
+        .Err(_) -> {}
+    }
+    candidates
+}
+// Rust add_project_inputs (ReceiptStore.rs:3081-3114).
+fn jet_cli_receipt_add_project_inputs<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost>(entry: receipt_paths.Path, verb: String, out: &[receipt_paths.Path], file_host: &F, authority: &A) Never! -[FS.Read]> {
+    start :: jet_cli_receipt_parent(entry) ?? receipt_paths.path(".")
+    names :: [String]{PACKAGE_FILE, PAYLOAD_FILE, WORKSPACE_FILE, "build.jet", UNIFIED_LOCK_FILE}
+    loop root in jet_cli_receipt_authority_roots(start, &file_host, &authority) {
+        loop name in names {
+            path :: receipt_paths.join(root, name)
+            if jet_cli_receipt_regular_file(path, &file_host) -> &out.push(path)
+        }
+        if verb == "check" {
+            loop candidate in jet_cli_receipt_check_entry_candidates(root, &authority) {
+                if jet_cli_receipt_regular_file(candidate, &file_host) -> &out.push(candidate)
+            }
+        }
+        jet_cli_receipt_collect_tree_inputs(receipt_paths.join(receipt_paths.join(root, ".jet"), "generated"), "check", &out, &file_host)
+    }
+}
+fn jet_cli_receipt_filter_regular<F: JetCLIReceiptReadHost>(paths: &[receipt_paths.Path], file_host: &F) Never! -[FS.Read]> {
+    jet_cli_receipt_sort_paths(&paths)
+    kept := 0
+    loop index in 0..<paths.len() {
+        if jet_cli_receipt_regular_file(paths[index], &file_host) {
+            if kept != index -> paths[kept] = ~paths[index]
+            kept += 1
+        }
+    }
+    loop paths.len() > kept { _ :: &paths.pop() }
+}
+// Rust project_check_input_paths (ReceiptStore.rs:2923-2951).
+fn jet_cli_receipt_project_check_input_paths<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost>(cwd: receipt_paths.Path, file_host: &F, authority: &A) -[FS.Read]> [receipt_paths.Path]? Never! {
+    roots :: jet_cli_receipt_authority_roots(cwd, &file_host, &authority)
+    if roots.len() == 0 -> return None
+    paths := [receipt_paths.Path]{}
+    loop root in roots -> jet_cli_receipt_collect_tree_inputs(root, "check", &paths, &file_host)
+    jet_cli_receipt_sort_paths(&paths)
+    sources := [receipt_paths.Path]{}
+    suffix :: ".{FILE_EXT}"
+    loop path in paths { if receipt_paths.suffix(receipt_paths.path(jet_cli_receipt_file_name(path))) == suffix -> &sources.push(~path) }
+    loop source in sources {
+        if &authority.watched_paths(source) == {
+            .Ok(watched) -> &paths.extend(watched)
+            .Err(_) -> {}
+        }
+    }
+    jet_cli_receipt_filter_regular(&paths, &file_host)
+    Val(paths)
+}
+// Rust input_paths_for (ReceiptStore.rs:1210-1250).
+pub fn jet_cli_receipt_input_paths_for<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost>(verb: String, argv: [String], cwd: receipt_paths.Path, file_host: &F, authority: &A) -[FS.Read]> [receipt_paths.Path] Never! {
+    if verb == "check" && !jet_cli_receipt_has_explicit_target(verb, argv) {
+        if jet_cli_receipt_project_check_input_paths(cwd, &file_host, &authority) == Val(paths) -> return paths
+    }
+    target :: jet_cli_receipt_target_path(verb, argv, cwd, &file_host, &authority) ?? return [receipt_paths.Path]{}
+    paths := [receipt_paths.Path]{}
+    directory :: jet_cli_receipt_is_directory(target, &file_host)
+    if directory || verb == "budget check" -> jet_cli_receipt_collect_tree_inputs(target, verb, &paths, &file_host)
+    else {
+        if !jet_cli_receipt_is_file(target, &file_host) -> return paths
+        if &authority.watched_paths(target) == {
+            .Ok(watched) -> &paths.extend(watched)
+            .Err(_) -> &paths.push(~target)
+        }
+        jet_cli_receipt_add_project_inputs(target, verb, &paths, &file_host, &authority)
+    }
+    if verb == "prove" {
+        start :: if directory -> ~target else -> jet_cli_receipt_parent(target) ?? ~cwd
+        loop root in jet_cli_receipt_authority_roots(start, &file_host, &authority) {
+            jet_cli_receipt_collect_generated_failure_inputs(receipt_paths.join(receipt_paths.join(receipt_paths.join(root, ".jet"), "records"), "generated"), &paths, &file_host)
+        }
+    }
+    jet_cli_receipt_filter_regular(&paths, &file_host)
+    paths
+}
+// Rust has_generated_failure_for_target (ReceiptStore.rs:3059-3078).
+pub fn jet_cli_receipt_has_generated_failure_for_target<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost>(receipt: JetCLIReceipt, argv: [String], cwd: receipt_paths.Path, identity_cwd: receipt_paths.Path, file_host: &F, authority: &A) -[FS]> Bool JetCLIReceiptError! {
+    digest :: jet_cli_receipt_target_inputs_sha256(receipt.claim, argv, cwd, identity_cwd, &file_host, &authority)
+    target :: jet_cli_receipt_target_path("prove", argv, cwd, &file_host, &authority) ?? return Err(jet_cli_receipt_error("couldn't resolve prove target for generated replay"))
+    roots :: jet_cli_receipt_canonical_authority_roots(target, &file_host, &authority)
+    paths := [receipt_paths.Path]{}
+    loop root in roots.roots -> jet_cli_receipt_collect_generated_failure_inputs(receipt_paths.join(receipt_paths.join(receipt_paths.join(root, ".jet"), "records"), "generated"), &paths, &file_host)
+    jet_cli_receipt_sort_paths(&paths)
+    loop path in paths { if jet_cli_receipt_generated_failure_matches_target(path, digest) -> return Ok(true) }
+    Ok(false)
+}
+
+// Rust current_dir_bytes (ReceiptStore.rs:3552-3558).
+fn jet_cli_receipt_current_dir<P: JetCLIReceiptProcessHost>(process_host: &P) -[Env]> receipt_paths.Path Never! {
+    &process_host.current_dir() ?? receipt_paths.path(".")
+}
+// Rust append_context_path (ReceiptStore.rs:3170-3200).
+fn jet_cli_receipt_append_context_path<F: JetCLIReceiptReadHost, P: JetCLIReceiptProcessHost>(identity: &[U8], label: [U8], path: receipt_paths.Path, file_host: &F, process_host: &P) Never! -[FS, Env]> {
+    jet_cli_receipt_frame(&identity, label)
+    absolute :: if receipt_paths.is_absolute(path) -> ~path else -> receipt_paths.join_path(jet_cli_receipt_current_dir(&process_host), path)
+    display :: &file_host.canonicalize(absolute) ?? absolute
+    jet_cli_receipt_frame(&identity, display.raw.bytes())
+    if &file_host.symlink_metadata(path) == {
+        .Ok(metadata) -> {
+            if metadata.is_symlink -> jet_cli_receipt_frame(&identity, "symlink".bytes())
+            else {
+                if metadata.is_file {
+                    jet_cli_receipt_frame(&identity, "file".bytes())
+                    digest :: jet_cli_receipt_file_digest(path, &file_host) ?? "unreadable"
+                    jet_cli_receipt_frame(&identity, digest.bytes())
+                } else {
+                    jet_cli_receipt_frame(&identity, if metadata.is_dir -> "directory".bytes() else -> "other".bytes())
+                }
+            }
+        }
+        .Err(error) -> {
+            if error.not_found -> jet_cli_receipt_frame(&identity, "missing".bytes())
+            else {
+                jet_cli_receipt_frame(&identity, "unreadable".bytes())
+                jet_cli_receipt_frame(&identity, error.kind.bytes())
+            }
+        }
+    }
+}
+// Rust append_context_tree (ReceiptStore.rs:3160-3168).
+fn jet_cli_receipt_append_context_tree<F: JetCLIReceiptReadHost, P: JetCLIReceiptProcessHost>(identity: &[U8], root: receipt_paths.Path, file_host: &F, process_host: &P) Never! -[FS, Env]> {
+    jet_cli_receipt_frame(&identity, "generated-inputs".bytes())
+    jet_cli_receipt_append_context_path(&identity, "root".bytes(), root, &file_host, &process_host)
+    paths := [receipt_paths.Path]{}
+    jet_cli_receipt_collect_tree_inputs(root, "check", &paths, &file_host)
+    jet_cli_receipt_sort_paths(&paths)
+    loop path in paths -> jet_cli_receipt_append_context_path(&identity, "file".bytes(), path, &file_host, &process_host)
+}
+// Rust append_check_context_identity (ReceiptStore.rs:3115-3143).
+pub fn jet_cli_receipt_append_check_context_identity<F: JetCLIReceiptReadHost, A: JetCLIReceiptAuthorityHost, P: JetCLIReceiptProcessHost>(identity: &[U8], file_host: &F, authority: &A, process_host: &P) Never! -[FS, Env]> {
+    cwd :: jet_cli_receipt_current_dir(&process_host)
+    jet_cli_receipt_frame(&identity, "check-context-v2".bytes())
+    jet_cli_receipt_append_context_path(&identity, "working-directory".bytes(), cwd, &file_host, &process_host)
+    roots :: jet_cli_receipt_authority_roots(cwd, &file_host, &authority)
+    if roots.len() == 0 {
+        jet_cli_receipt_frame(&identity, "authority-roots".bytes())
+        jet_cli_receipt_frame(&identity, "none".bytes())
+        return
+    }
+    names :: [String]{PACKAGE_FILE, PAYLOAD_FILE, WORKSPACE_FILE, UNIFIED_LOCK_FILE}
+    loop root in roots {
+        jet_cli_receipt_append_context_path(&identity, "package-root".bytes(), root, &file_host, &process_host)
+        loop (priority, candidate) in jet_cli_receipt_check_entry_candidates(root, &authority) {
+            jet_cli_receipt_frame(&identity, "entry-candidate".bytes())
+            jet_cli_receipt_frame(&identity, "{priority}".bytes())
+            jet_cli_receipt_append_context_path(&identity, "path".bytes(), candidate, &file_host, &process_host)
+        }
+        loop name in names -> jet_cli_receipt_append_context_path(&identity, name.bytes(), receipt_paths.join(root, name), &file_host, &process_host)
+        jet_cli_receipt_append_context_tree(&identity, receipt_paths.join(receipt_paths.join(root, ".jet"), "generated"), &file_host, &process_host)
+    }
+}
+// Rust executable_on_path (ReceiptStore.rs:3648-3660). OS split_paths belongs
+// to process transport; CLI owns regular-file selection and framing.
+fn jet_cli_receipt_executable_on_path<F: JetCLIReceiptReadHost, P: JetCLIReceiptProcessHost>(name: String, file_host: &F, process_host: &P) -[FS.Read, Env]> receipt_paths.Path? Never! {
+    if name == "jet" {
+        return if &process_host.current_exe() == { .Ok(path) -> Val(path) .Err(_) -> None }
+    }
+    directories :: &process_host.path_directories() ?? return None
+    loop directory in directories {
+        candidate :: receipt_paths.join(directory, name)
+        if jet_cli_receipt_regular_file(candidate, &file_host) -> return Val(candidate)
+    }
+    None
+}
+// Rust tool_digest (ReceiptStore.rs:3640-3646): build_id is the actual embedded
+// JET_COMPILER_BUILD_ID supplied by bootstrap, never a filesystem observation.
+pub fn jet_cli_receipt_tool_digest(name: String, path: receipt_paths.Path, compiler_build_id: String) -[FS]> String Never! {
+    if name == "jet" -> return ~compiler_build_id
+    foundation_sha256_file_hex(path.raw) ?? "unreadable"
+}
+// Rust tool_identity initializer (ReceiptStore.rs:3623-3639). This is computed
+// by CLI, not injected by a host. The runtime must store ONE immutable value
+// for the process lifetime with fallible/exclusive once initialization (#4451);
+// no uncached context route is supplied as a silent substitute for LazyLock.
+pub struct JetCLIReceiptToolIdentity { bytes: [U8] }
+pub fn jet_cli_receipt_initialize_tool_identity<F: JetCLIReceiptReadHost, P: JetCLIReceiptProcessHost>(compiler_build_id: String, file_host: &F, process_host: &P) -[FS, Env]> JetCLIReceiptToolIdentity Never! {
+    out := [U8]{}
+    names :: [String]{"jet", "jetpack", "rustc", "cargo", "wasm-tools"}
+    loop name in names {
+        jet_cli_receipt_frame(&out, name.bytes())
+        path :: jet_cli_receipt_executable_on_path(name, &file_host, &process_host) ?? {
+            jet_cli_receipt_frame(&out, "missing".bytes())
+            next
+        }
+        jet_cli_receipt_frame(&out, path.raw.bytes())
+        jet_cli_receipt_frame(&out, jet_cli_receipt_tool_digest(name, path, compiler_build_id).bytes())
+    }
+    JetCLIReceiptToolIdentity{bytes: out}
+}
+// Rust context_identity (ReceiptStore.rs:3530-3543). Only the CLI initializer
+// constructs the private identity bytes; caller borrows the process-once value.
+pub fn jet_cli_receipt_context_identity<P: JetCLIReceiptProcessHost>(verb: String, argv: [String], tools: JetCLIReceiptToolIdentity, process_host: &P) -[Env, IO]> [U8] JetCLIReceiptError! {
+    if verb == "" -> return Err(jet_cli_receipt_error("receipt verb is empty"))
+    cwd :: jet_cli_receipt_current_dir(&process_host)
+    environment :: &process_host.environment()
+    terminal :: jet_cli_receipt_terminal_identity(&process_host.stdin_terminal(), &process_host.stdout_terminal(), &process_host.stderr_terminal())
+    jet_cli_receipt_context_frames(verb, cwd.raw.bytes(), argv, environment, tools.bytes, terminal)
+}
+// Rust replay_receipt / write_bytes (ReceiptStore.rs:3674-3682,3833-3836).
+// Every write/flush error is intentionally ignored, like the frozen Rust.
+pub fn jet_cli_receipt_replay<P: JetCLIReceiptProcessHost>(command: String, argv: [String], receipt: JetCLIReceipt, secret_values: [String], process_host: &P) Never! -[IO]> {
+    stdout :: jet_cli_receipt_redact_bytes(receipt.stdout, secret_values)
+    stderr :: jet_cli_receipt_redact_bytes(receipt.stderr, secret_values)
+    &process_host.write_stdout(stdout) ?? {}
+    &process_host.flush_stdout() ?? {}
+    &process_host.write_stderr(stderr) ?? {}
+    &process_host.flush_stderr() ?? {}
+    if jet_cli_receipt_notices_visible(command, argv) {
+        short :: receipt.claim.key.bytes()[0..<12]
+        text :: String.from_bytes(short) ?? panic("receipt digest ASCII")
+        &process_host.write_stderr("ok: {command} current (receipt {text})\n".bytes()) ?? {}
+    }
+}

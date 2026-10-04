@@ -1,0 +1,897 @@
+// PORT-PENDING 0675 source-cmdcompile-slice-15566: Source/CmdCompile.rs:15566-16458
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod rustc_ice_tests {
+//RS     use super::first_rustc_error_block;
+//RS 
+//RS     #[test]
+//RS     fn first_rustc_error_block_keeps_the_first_error() {
+//RS         let stderr = concat!(
+//RS             "warning: unused import\n",
+//RS             "error[E0308]: mismatched types\n",
+//RS             "  --> build/out.rs:1:1\n",
+//RS             "  |\n",
+//RS             "warning: another unused import\n",
+//RS             "  --> build/out.rs:2:1\n",
+//RS             "error[E0425]: cannot find type\n",
+//RS         );
+//RS         let block = first_rustc_error_block(stderr).expect("first rustc error");
+//RS         assert_eq!(
+//RS             block,
+//RS             "error[E0308]: mismatched types\n  --> build/out.rs:1:1\n  |"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn first_rustc_error_block_accepts_unnumbered_error() {
+//RS         let stderr = "error: aborting due to previous error\n";
+//RS         assert_eq!(
+//RS             first_rustc_error_block(stderr),
+//RS             Some("error: aborting due to previous error")
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod profile_tests {
+//RS     use super::BuildProfile;
+//RS 
+//RS     #[test]
+//RS     fn command_defaults_route_dev_commands_to_fast_profile() {
+//RS         assert!(matches!(
+//RS             BuildProfile::default_for_command("run"),
+//RS             BuildProfile::Fast
+//RS         ));
+//RS         assert!(matches!(
+//RS             BuildProfile::default_for_command("dev"),
+//RS             BuildProfile::Fast
+//RS         ));
+//RS         assert!(matches!(
+//RS             BuildProfile::default_for_command("build"),
+//RS             BuildProfile::Default
+//RS         ));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn fast_profile_is_unoptimized_parallel_and_without_lto() {
+//RS         let args = BuildProfile::Fast.config().rustc_args(false);
+//RS         assert_eq!(
+//RS             args,
+//RS             vec![
+//RS                 "-C",
+//RS                 "codegen-units=256",
+//RS                 "-C",
+//RS                 "opt-level=0",
+//RS                 "-C",
+//RS                 "lto=off",
+//RS             ]
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn optimized_default_release_and_debug_profiles_keep_distinct_flags() {
+//RS         // The default dev build links the cached runtime rlib without
+//RS         // cross-crate LTO; release keeps ThinLTO across program and runtime.
+//RS         let optimized = BuildProfile::Default.config().rustc_args(false);
+//RS         assert!(optimized.contains(&"opt-level=2".to_string()));
+//RS         assert!(!optimized.contains(&"-O".to_string()));
+//RS         assert!(optimized.contains(&"lto=off".to_string()));
+//RS         assert!(optimized.contains(&"strip=symbols".to_string()));
+//RS         assert!(!optimized
+//RS             .iter()
+//RS             .any(|arg| arg == "lto=thin" || arg == "lto=fat" || arg.starts_with("codegen-units=")));
+//RS 
+//RS         let release = BuildProfile::Release.config().rustc_args(false);
+//RS         assert!(release.contains(&"opt-level=3".to_string()));
+//RS         assert!(release.contains(&"lto=thin".to_string()));
+//RS         assert!(!release.contains(&"lto=off".to_string()));
+//RS 
+//RS         let debug = BuildProfile::Debug.config().rustc_args(false);
+//RS         assert!(debug.contains(&"codegen-units=256".to_string()));
+//RS         assert!(debug.contains(&"debuginfo=2".to_string()));
+//RS         assert!(!debug.contains(&"-O".to_string()));
+//RS         assert!(!debug.contains(&"lto=thin".to_string()));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn fast_and_optimized_defaults_have_distinct_cache_identity() {
+//RS         assert_ne!(
+//RS             BuildProfile::Fast.cache_tag(),
+//RS             BuildProfile::Default.cache_tag()
+//RS         );
+//RS         assert!(BuildProfile::Fast
+//RS             .config()
+//RS             .settings_tag()
+//RS             .contains("codegen-units=256"));
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod missing_c_lib_tests {
+//RS     use super::{
+//RS         child_exit_code, missing_c_lib, missing_linker, native_cache_key,
+//RS         native_cache_key_for_prepared_build, native_cache_key_for_program,
+//RS         native_cache_key_with_toolchain, native_cache_salt, native_cache_salt_with_schema,
+//RS         render_internal_fault, NativeKeyBackend,
+//RS     };
+//RS 
+//RS     struct ScratchProject(std::path::PathBuf);
+//RS 
+//RS     impl ScratchProject {
+//RS         fn new() -> Self {
+//RS             let nonce = std::time::SystemTime::now()
+//RS                 .duration_since(std::time::UNIX_EPOCH)
+//RS                 .expect("clock after epoch")
+//RS                 .as_nanos();
+//RS             let root = std::env::temp_dir().join(format!(
+//RS                 "jet_genmod_cache_{}_{}",
+//RS                 std::process::id(),
+//RS                 nonce
+//RS             ));
+//RS             std::fs::create_dir_all(&root).expect("create generic-module cache fixture");
+//RS             Self(root)
+//RS         }
+//RS 
+//RS         fn write(&self, name: &str, source: &str) {
+//RS             let path = self.0.join(name);
+//RS             if let Some(parent) = path.parent() {
+//RS                 std::fs::create_dir_all(parent).expect("create cache fixture input directory");
+//RS             }
+//RS             std::fs::write(path, source).expect("write generic-module cache fixture");
+//RS         }
+//RS 
+//RS         fn main(&self) -> String {
+//RS             self.0.join("main.jet").to_string_lossy().into_owned()
+//RS         }
+//RS         fn native_cache_key_with_input(&self, relative: &str) -> String {
+//RS             // Production cache keys require a canonical package manifest. Keep
+//RS             // this fixture package-shaped so consumed-input edits exercise the
+//RS             // actual manifest-salted key path rather than the no-key fallback.
+//RS             self.write(
+//RS                 "package.jet",
+//RS                 "name: \"consumed-input-cache\"\nversion: \"1.0.0\"\n",
+//RS             );
+//RS             let mut bundle = jet::Loader::load_entry_with_overlay(&self.main(), None, false)
+//RS                 .expect("load consumed-input cache fixture");
+//RS             jet::Driver::seed_build_facts(
+//RS                 &mut bundle,
+//RS                 "dev",
+//RS                 false,
+//RS                 &std::collections::BTreeMap::new(),
+//RS             )
+//RS             .expect("seed consumed-input cache fixture");
+//RS             let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
+//RS             assert!(
+//RS                 diagnostics
+//RS                     .iter()
+//RS                     .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
+//RS                 "consumed-input cache fixture must check"
+//RS             );
+//RS             let bytes =
+//RS                 std::fs::read(self.0.join(relative)).expect("read consumed-input cache fixture");
+//RS             bundle.comptime_inputs = vec![jet::AST::ComptimeInput {
+//RS                 path: relative.replace(std::path::MAIN_SEPARATOR, "/"),
+//RS                 hash: jet::SHA256::sha256_hex(&bytes),
+//RS             }];
+//RS             native_cache_key_for_program(
+//RS                 &self.main(),
+//RS                 &bundle,
+//RS                 "default",
+//RS                 "run",
+//RS                 NativeKeyBackend::Rustc("comptime-input-test-toolchain"),
+//RS                 None,
+//RS             )
+//RS             .expect("consumed-input cache key")
+//RS         }
+//RS     }
+//RS 
+//RS     impl Drop for ScratchProject {
+//RS         fn drop(&mut self) {
+//RS             let _ = std::fs::remove_dir_all(&self.0);
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn crate_name_sanitizes_user_facing_file_stems() {
+//RS         assert_eq!(
+//RS             jet::Syntax::sanitize_crate_name("renderable-varargs"),
+//RS             "renderable_varargs"
+//RS         );
+//RS         assert_eq!(jet::Syntax::sanitize_crate_name("3d.demo"), "_3d_demo");
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn signaled_program_is_not_reported_as_success() {
+//RS         let status = std::process::Command::new("sh")
+//RS             .args(["-c", "kill -TERM $$"])
+//RS             .status()
+//RS             .expect("launch signal fixture");
+//RS         assert_eq!(child_exit_code(status), jet::ExitCodes::USER_ERROR);
+//RS     }
+//RS     #[test]
+//RS     fn native_cache_ignores_comments_and_tracks_bridge_identity() {
+//RS         let project = ScratchProject::new();
+//RS         project.write("main.jet", "fn run() { print(1) }\n");
+//RS         let base = native_cache_key(&project.main(), "dev", "default", "run", None)
+//RS             .expect("base cache key");
+//RS         project.write("main.jet", "// cache-only comment\nfn run() { print(1) }\n");
+//RS         let comment = native_cache_key(&project.main(), "dev", "default", "run", None)
+//RS             .expect("comment cache key");
+//RS         assert_eq!(base, comment, "comments must not invalidate native cache");
+//RS 
+//RS         let instances = Vec::new();
+//RS         let no_bridge = native_cache_salt(
+//RS             "tool",
+//RS             "dependencies",
+//RS             "runtime",
+//RS             "core",
+//RS             "run",
+//RS             "linux-x86_64",
+//RS             &instances,
+//RS             None,
+//RS             &[],
+//RS             None,
+//RS         );
+//RS         let bridge_a = native_cache_salt(
+//RS             "tool",
+//RS             "dependencies",
+//RS             "runtime",
+//RS             "core",
+//RS             "run",
+//RS             "linux-x86_64",
+//RS             &instances,
+//RS             Some("bridge-a"),
+//RS             &[],
+//RS             None,
+//RS         );
+//RS         let bridge_b = native_cache_salt(
+//RS             "tool",
+//RS             "dependencies",
+//RS             "runtime",
+//RS             "core",
+//RS             "run",
+//RS             "linux-x86_64",
+//RS             &instances,
+//RS             Some("bridge-b"),
+//RS             &[],
+//RS             None,
+//RS         );
+//RS         assert_ne!(
+//RS             no_bridge, bridge_a,
+//RS             "a bridge must have its own cache identity"
+//RS         );
+//RS         assert_ne!(
+//RS             bridge_a, bridge_b,
+//RS             "bridge input changes must invalidate cache"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn generic_instance_cache_salt_tracks_every_downstream_input() {
+//RS         let instances = vec!["instance-a".to_string(), "instance-b".to_string()];
+//RS         let salt = |tool, deps, runtime, core, mode, target, instances: &[String]| {
+//RS             native_cache_salt(
+//RS                 tool,
+//RS                 deps,
+//RS                 runtime,
+//RS                 core,
+//RS                 mode,
+//RS                 target,
+//RS                 instances,
+//RS                 None,
+//RS                 &[],
+//RS                 None,
+//RS             )
+//RS         };
+//RS         let base = salt(
+//RS             "tool-a",
+//RS             "deps-a",
+//RS             "runtime-a",
+//RS             "core-a",
+//RS             "run",
+//RS             "linux-x86_64",
+//RS             &instances,
+//RS         );
+//RS         assert_ne!(
+//RS             base,
+//RS             salt(
+//RS                 "tool-b",
+//RS                 "deps-a",
+//RS                 "runtime-a",
+//RS                 "core-a",
+//RS                 "run",
+//RS                 "linux-x86_64",
+//RS                 &instances
+//RS             )
+//RS         );
+//RS         assert_ne!(
+//RS             base,
+//RS             salt(
+//RS                 "tool-a",
+//RS                 "deps-b",
+//RS                 "runtime-a",
+//RS                 "core-a",
+//RS                 "run",
+//RS                 "linux-x86_64",
+//RS                 &instances
+//RS             )
+//RS         );
+//RS         assert_ne!(
+//RS             base,
+//RS             salt(
+//RS                 "tool-a",
+//RS                 "deps-a",
+//RS                 "runtime-b",
+//RS                 "core-a",
+//RS                 "run",
+//RS                 "linux-x86_64",
+//RS                 &instances
+//RS             )
+//RS         );
+//RS         assert_ne!(
+//RS             base,
+//RS             salt(
+//RS                 "tool-a",
+//RS                 "deps-a",
+//RS                 "runtime-a",
+//RS                 "core-b",
+//RS                 "run",
+//RS                 "linux-x86_64",
+//RS                 &instances
+//RS             )
+//RS         );
+//RS         assert_ne!(
+//RS             base,
+//RS             salt(
+//RS                 "tool-a",
+//RS                 "deps-a",
+//RS                 "runtime-a",
+//RS                 "core-a",
+//RS                 "test",
+//RS                 "linux-x86_64",
+//RS                 &instances
+//RS             )
+//RS         );
+//RS         assert_ne!(
+//RS             base,
+//RS             salt(
+//RS                 "tool-a",
+//RS                 "deps-a",
+//RS                 "runtime-a",
+//RS                 "core-a",
+//RS                 "run",
+//RS                 "macos-aarch64",
+//RS                 &instances
+//RS             )
+//RS         );
+//RS         assert_ne!(
+//RS             base,
+//RS             salt(
+//RS                 "tool-a",
+//RS                 "deps-a",
+//RS                 "runtime-a",
+//RS                 "core-a",
+//RS                 "run",
+//RS                 "linux-x86_64",
+//RS                 &["instance-c".into()]
+//RS             )
+//RS         );
+//RS         assert_eq!(
+//RS             base,
+//RS             salt(
+//RS                 "tool-a",
+//RS                 "deps-a",
+//RS                 "runtime-a",
+//RS                 "core-a",
+//RS                 "run",
+//RS                 "linux-x86_64",
+//RS                 &["instance-b".into(), "instance-a".into()]
+//RS             )
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn hostile_cache_invalidation_matrix() {
+//RS         let project = ScratchProject::new();
+//RS         project.write("main.jet", "fn run() { print(1) }\n");
+//RS         let identity = |compiler, schema, backend, flags, linker| {
+//RS             format!(
+//RS                 "compiler={compiler};schema={schema};backend={backend};flags={flags};linker={linker}"
+//RS             )
+//RS         };
+//RS         let base_identity = identity("compiler-a", "schema-a", "backend-a", "flags-a", "linker-a");
+//RS         let key = |toolchain: &str, profile: &str| {
+//RS             native_cache_key_with_toolchain(
+//RS                 &project.main(),
+//RS                 "dev",
+//RS                 profile,
+//RS                 "run",
+//RS                 toolchain,
+//RS                 None,
+//RS             )
+//RS             .expect("hostile cache fixture key");
+//RS         };
+//RS         let base = key(&base_identity, "default");
+//RS         let identities = [
+//RS             (
+//RS                 "compiler",
+//RS                 identity("compiler-b", "schema-a", "backend-a", "flags-a", "linker-a"),
+//RS             ),
+//RS             (
+//RS                 "schema",
+//RS                 identity("compiler-a", "schema-b", "backend-a", "flags-a", "linker-a"),
+//RS             ),
+//RS             (
+//RS                 "backend",
+//RS                 identity("compiler-a", "schema-a", "backend-b", "flags-a", "linker-a"),
+//RS             ),
+//RS             (
+//RS                 "flags",
+//RS                 identity("compiler-a", "schema-a", "backend-a", "flags-b", "linker-a"),
+//RS             ),
+//RS             (
+//RS                 "linker",
+//RS                 identity("compiler-a", "schema-a", "backend-a", "flags-a", "linker-b"),
+//RS             ),
+//RS         ];
+//RS         for (input, changed) in identities {
+//RS             assert_ne!(
+//RS                 base,
+//RS                 key(&changed, "default"),
+//RS                 "{input} must miss final cache"
+//RS             );
+//RS         }
+//RS         assert_ne!(
+//RS             base,
+//RS             key(&base_identity, "profile:debug;opt:none"),
+//RS             "profile must miss final cache"
+//RS         );
+//RS 
+//RS         let instances = vec!["instance-a".to_string()];
+//RS         let salt = |dependencies, runtime, core, target| {
+//RS             native_cache_salt(
+//RS                 &base_identity,
+//RS                 dependencies,
+//RS                 runtime,
+//RS                 core,
+//RS                 "run",
+//RS                 target,
+//RS                 &instances,
+//RS                 None,
+//RS                 &[],
+//RS                 None,
+//RS             )
+//RS         };
+//RS         let base_salt = salt(
+//RS             "dependency-a",
+//RS             "generated-runtime-a",
+//RS             "core-a",
+//RS             "linux-x86_64",
+//RS         );
+//RS         assert_ne!(
+//RS             base_salt,
+//RS             native_cache_salt_with_schema(
+//RS                 b"jet-native-cache-salt-v4",
+//RS                 &base_identity,
+//RS                 "dependency-a",
+//RS                 "generated-runtime-a",
+//RS                 "core-a",
+//RS                 "run",
+//RS                 "linux-x86_64",
+//RS                 &instances,
+//RS                 None,
+//RS                 &[],
+//RS                 None,
+//RS             ),
+//RS             "cache-schema change must miss final work"
+//RS         );
+//RS         for (input, changed) in [
+//RS             (
+//RS                 "dependency",
+//RS                 salt(
+//RS                     "dependency-b",
+//RS                     "generated-runtime-a",
+//RS                     "core-a",
+//RS                     "linux-x86_64",
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "generated code",
+//RS                 salt(
+//RS                     "dependency-a",
+//RS                     "generated-runtime-b",
+//RS                     "core-a",
+//RS                     "linux-x86_64",
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "Core artifact",
+//RS                 salt(
+//RS                     "dependency-a",
+//RS                     "generated-runtime-a",
+//RS                     "core-b",
+//RS                     "linux-x86_64",
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "target",
+//RS                 salt("dependency-a", "generated-runtime-a", "core-a", "wasm32"),
+//RS             ),
+//RS         ] {
+//RS             assert_ne!(base_salt, changed, "{input} must miss affected final work");
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn native_cache_key_requires_an_exact_emitted_program() {
+//RS         let project = ScratchProject::new();
+//RS         project.write(
+//RS             "package.jet",
+//RS             "name: \"prepared-cache\"\nversion: \"1.0.0\"\n",
+//RS         );
+//RS         project.write("main.jet", "fn run() {}\n");
+//RS         let mut options = jet::Driver::BuildRunOptions::default();
+//RS         options.package_scope = true;
+//RS         options.build_override = true;
+//RS 
+//RS         let exact_inputs = jet::Driver::FrontEndInputs::for_build(&project.main(), &options);
+//RS         let exact = jet::Driver::prepare_build_front_end(exact_inputs)
+//RS             .expect("prepare exact runtime bundle");
+//RS         assert!(exact.emitted_program().is_some());
+//RS         assert!(
+//RS             native_cache_key_for_prepared_build(
+//RS                 &project.main(),
+//RS                 Some(&exact),
+//RS                 "dev",
+//RS                 "run",
+//RS                 NativeKeyBackend::Cranelift,
+//RS                 None,
+//RS             )
+//RS                 .is_some(),
+//RS             "an exact checked runtime bundle keeps native caching enabled",
+//RS         );
+//RS 
+//RS         project.write(
+//RS             "tools/build.jet",
+//RS             "fn build(b: BuildContext) -> BuildPlan { return b.plan() }\n",
+//RS         );
+//RS         let package_inputs = jet::Driver::FrontEndInputs::for_build(&project.main(), &options);
+//RS         let package = jet::Driver::prepare_build_front_end(package_inputs)
+//RS             .expect("prepare external package build entry");
+//RS         assert!(
+//RS             package.emitted_program().is_none(),
+//RS             "a package build entry does not itself equal the emitted runtime bundle",
+//RS         );
+//RS         assert_eq!(
+//RS             native_cache_key_for_prepared_build(
+//RS                 &project.main(),
+//RS                 Some(&package),
+//RS                 "dev",
+//RS                 "run",
+//RS                 NativeKeyBackend::Cranelift,
+//RS                 None,
+//RS             ),
+//RS             None,
+//RS             "without an exact emitted bundle, native cache lookup and store stay disabled",
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn generic_instance_native_cache_key_invalidates_on_program_dependency_arg_package_and_profile_edits(
+//RS     ) {
+//RS         let project = ScratchProject::new();
+//RS         let main = "use defs.box\nmodule defs\n\nmodule selected :: box<Int>(3)\nfn run() { print(selected.value()) }\n";
+//RS         let dependency = "pub module box<T>(n: Int) { pub fn value() -> Int { return n } }\n";
+//RS         let manifest_v1 = "name: \"cache-proof\"\nversion: \"1.0.0\"\n";
+//RS         project.write("main.jet", main);
+//RS         project.write("defs.jet", dependency);
+//RS         project.write("package.jet", manifest_v1);
+//RS 
+//RS         let base = native_cache_key(&project.main(), "dev", "default", "run", None)
+//RS             .expect("base cache key");
+//RS 
+//RS         project.write(
+//RS             "package.jet",
+//RS             "// semantic no-op\nname: \"cache-proof\"\nversion: \"1.0.0\"\n",
+//RS         );
+//RS         let manifest_comment = native_cache_key(&project.main(), "dev", "default", "run", None)
+//RS             .expect("comment-only manifest cache key");
+//RS         assert_eq!(
+//RS             base, manifest_comment,
+//RS             "comment-only package manifest edit must reuse the native cache",
+//RS         );
+//RS         project.write("package.jet", manifest_v1);
+//RS 
+//RS         let toolchain_a = native_cache_key_with_toolchain(
+//RS             &project.main(),
+//RS             "dev",
+//RS             "default",
+//RS             "run",
+//RS             "compiler-build-a/rustc-a/linker-a/backend-a",
+//RS             None,
+//RS         )
+//RS         .expect("toolchain A cache key");
+//RS         let toolchain_b = native_cache_key_with_toolchain(
+//RS             &project.main(),
+//RS             "dev",
+//RS             "default",
+//RS             "run",
+//RS             "compiler-build-b/rustc-a/linker-a/backend-a",
+//RS             None,
+//RS         )
+//RS         .expect("toolchain B cache key");
+//RS         assert_ne!(
+//RS             toolchain_a, toolchain_b,
+//RS             "production native-cache key seam must include compiler/toolchain identity"
+//RS         );
+//RS 
+//RS         project.write(
+//RS             "main.jet",
+//RS             "use defs.box\nmodule defs\n\nmodule selected :: box<Int>(3)\nfn run() { print(selected.value() + 1) }\n",
+//RS         );
+//RS         let program_body = native_cache_key(&project.main(), "dev", "default", "run", None)
+//RS             .expect("program body cache key");
+//RS         assert_ne!(
+//RS             base, program_body,
+//RS             "entry-body edit must invalidate native cache"
+//RS         );
+//RS 
+//RS         project.write("main.jet", main);
+//RS         project.write(
+//RS             "defs.jet",
+//RS             "pub module box<T>(n: Int) { pub fn value() -> Int { return n + 1 } }\n",
+//RS         );
+//RS         let dependency_body = native_cache_key(&project.main(), "dev", "default", "run", None)
+//RS             .expect("dependency cache key");
+//RS         assert_ne!(
+//RS             base, dependency_body,
+//RS             "imported template-body edit must invalidate native cache"
+//RS         );
+//RS 
+//RS         project.write("defs.jet", dependency);
+//RS         project.write(
+//RS             "main.jet",
+//RS             "use defs.box\nmodule defs\n\nmodule selected :: box<Int>(4)\nfn run() { print(selected.value()) }\n",
+//RS         );
+//RS         let argument = native_cache_key(&project.main(), "dev", "default", "run", None)
+//RS             .expect("argument cache key");
+//RS         assert_ne!(
+//RS             base, argument,
+//RS             "normalized instance-argument edit must invalidate native cache"
+//RS         );
+//RS 
+//RS         project.write("main.jet", main);
+//RS         project.write("package.jet", "name: \"cache-proof\"\nversion: \"2.0.0\"\n");
+//RS         let package = native_cache_key(&project.main(), "dev", "default", "run", None)
+//RS             .expect("package cache key");
+//RS         assert_ne!(
+//RS             base, package,
+//RS             "package manifest edit must invalidate native cache"
+//RS         );
+//RS 
+//RS         project.write("package.jet", manifest_v1);
+//RS         let profile = native_cache_key(&project.main(), "small", "small", "run", None)
+//RS             .expect("profile cache key");
+//RS         assert_ne!(
+//RS             base, profile,
+//RS             "build-profile edit must invalidate native cache"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn native_cache_key_invalidates_when_consumed_lock_changes() {
+//RS         let project = ScratchProject::new();
+//RS         project.write("main.jet", "fn run() { print(1) }\n");
+//RS         project.write(".jet/lock", "version = 1\n");
+//RS         let base = project.native_cache_key_with_input(".jet/lock");
+//RS 
+//RS         project.write(".jet/lock", "version = 2\n");
+//RS         let changed = project.native_cache_key_with_input(".jet/lock");
+//RS 
+//RS         assert_ne!(
+//RS             base, changed,
+//RS             "a consumed package lock edit must invalidate native cache"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn native_cache_key_invalidates_when_consumed_profile_changes() {
+//RS         let project = ScratchProject::new();
+//RS         project.write("main.jet", "fn run() { print(1) }\n");
+//RS         project.write("env.jet", "module dev {}\n");
+//RS         let base = project.native_cache_key_with_input("env.jet");
+//RS 
+//RS         project.write("env.jet", "// changed profile\nmodule dev {}\n");
+//RS         let changed = project.native_cache_key_with_input("env.jet");
+//RS 
+//RS         assert_ne!(
+//RS             base, changed,
+//RS             "a consumed profile edit must invalidate native cache"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn native_cache_key_invalidates_when_consumed_config_changes() {
+//RS         let project = ScratchProject::new();
+//RS         project.write("main.jet", "fn run() { print(1) }\n");
+//RS         project.write(
+//RS             "config/release.jet",
+//RS             "pub release :: Config.{ version: \"1\" }\n",
+//RS         );
+//RS         let base = project.native_cache_key_with_input("config/release.jet");
+//RS 
+//RS         project.write(
+//RS             "config/release.jet",
+//RS             "// changed config\npub release :: Config.{ version: \"1\" }\n",
+//RS         );
+//RS         let changed = project.native_cache_key_with_input("config/release.jet");
+//RS 
+//RS         assert_ne!(
+//RS             base, changed,
+//RS             "a consumed package config edit must invalidate native cache"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn detects_ld_cannot_find() {
+//RS         // GNU ld / lld phrasing — must be routed to E3209, not the I2 ICE banner.
+//RS         let stderr = "  = note: /usr/bin/ld: cannot find -lraylib: No such file or directory\n  collect2: error: ld returned 1 exit status\n";
+//RS         assert_eq!(missing_c_lib(stderr).as_deref(), Some("raylib"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn detects_bare_form() {
+//RS         assert_eq!(
+//RS             missing_c_lib("ld: cannot find -lsqlite3\n").as_deref(),
+//RS             Some("sqlite3")
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn genuine_codegen_error_is_not_a_missing_lib() {
+//RS         // A real rustc type error must keep the ICE path (returns None here).
+//RS         let stderr = "error[E0308]: mismatched types\n --> build/main.rs:3:5\n";
+//RS         assert_eq!(missing_c_lib(stderr), None);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn detects_missing_system_linker() {
+//RS         let stderr =
+//RS             "error: linker `cc` not found\n  |\n  = note: No such file or directory (os error 2)\n";
+//RS         assert_eq!(missing_linker(stderr).as_deref(), Some("cc"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn genuine_codegen_error_is_not_a_missing_linker() {
+//RS         let stderr = "error[E0425]: cannot find type `RaylibWindow` in module `jet_std`\n";
+//RS         assert_eq!(missing_linker(stderr), None);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn driver_brands_runtime_host_fault_without_rust_text() {
+//RS         let diagnostic = jet::Diagnostics::Diagnostic::runtime_host_fault(
+//RS             "before\n".to_string(),
+//RS             "the JIT runtime helper failed".to_string(),
+//RS         );
+//RS         let (stdout, what) = diagnostic
+//RS             .runtime_host_fault_parts()
+//RS             .expect("typed runtime host fault");
+//RS         let report = render_internal_fault(what);
+//RS         assert_eq!(stdout, "before\n");
+//RS         assert!(report.starts_with("internal compiler error: the JIT runtime helper failed\n"));
+//RS         assert!(report.contains("This is a bug in jet, NOT in your program."));
+//RS         assert!(!report.contains("thread 'main' panicked"));
+//RS         assert!(!report.contains("runtime_host.rs"));
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod web_output_boundary_tests {
+//RS     use super::{ensure_web_output_dir, validate_web_output_file};
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn web_artifact_writer_rejects_symlink_output() {
+//RS         use std::os::unix::fs::symlink;
+//RS 
+//RS         let root = std::env::current_dir()
+//RS             .unwrap()
+//RS             .join(format!(".jet-web-output-symlink-{}", std::process::id()));
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS         std::fs::create_dir_all(&root).unwrap();
+//RS         let outside = root.join("outside.js");
+//RS         let output = root.join("app.js");
+//RS         std::fs::write(&outside, "must survive").unwrap();
+//RS         symlink(&outside, &output).unwrap();
+//RS 
+//RS         let error = validate_web_output_file(&output, &root)
+//RS             .expect_err("web artifact writes must not follow symlinks");
+//RS         assert!(error.contains("must not be a symlink"), "{error}");
+//RS         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive");
+//RS 
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn web_artifact_writer_rejects_hardlink_output() {
+//RS         let root = std::env::current_dir()
+//RS             .unwrap()
+//RS             .join(format!(".jet-web-output-hardlink-{}", std::process::id()));
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS         std::fs::create_dir_all(&root).unwrap();
+//RS         let outside = root.with_file_name(format!(
+//RS             ".jet-web-output-hardlink-target-{}",
+//RS             std::process::id()
+//RS         ));
+//RS         let output = root.join("app.js");
+//RS         std::fs::write(&outside, "must survive").unwrap();
+//RS         std::fs::hard_link(&outside, &output).unwrap();
+//RS 
+//RS         let error = validate_web_output_file(&output, &root)
+//RS             .expect_err("web artifact writes must not follow hardlinks");
+//RS         assert!(error.contains("must not be a hard link"), "{error}");
+//RS         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive");
+//RS 
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS         let _ = std::fs::remove_file(&outside);
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn web_build_rejects_symlinked_output_root_before_creation() {
+//RS         use std::os::unix::fs::symlink;
+//RS 
+//RS         let root =
+//RS             std::env::temp_dir().join(format!("jet-web-build-root-symlink-{}", std::process::id()));
+//RS         let outside =
+//RS             std::env::temp_dir().join(format!("jet-web-build-root-outside-{}", std::process::id()));
+//RS         let _ = std::fs::remove_file(&root);
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS         let _ = std::fs::remove_dir_all(&outside);
+//RS         std::fs::create_dir_all(&outside).unwrap();
+//RS         symlink(&outside, &root).unwrap();
+//RS 
+//RS         let error = ensure_web_output_dir(&root)
+//RS             .expect_err("web builds must reject a symlinked output root");
+//RS         assert!(error.contains("must not be a symlink"), "{error}");
+//RS         assert!(!outside.join("created-by-build").exists());
+//RS 
+//RS         let _ = std::fs::remove_file(&root);
+//RS         let _ = std::fs::remove_dir_all(&outside);
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS #[cfg(test)]
+//RS mod web_rustc_incremental_session_tests {
+//RS     use super::WebRustcIncrementalSession;
+//RS 
+//RS     #[test]
+//RS     fn changed_web_build_reuses_identity_path_and_populated_dir() {
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-web-rustc-session-{}",
+//RS             std::process::id()
+//RS         ));
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS         let mut session = WebRustcIncrementalSession::new(&root);
+//RS         let first = session
+//RS             .prepare_dir("stable-web-identity", true, false)
+//RS             .expect("baseline incremental directory");
+//RS         let marker = first.join("rustc-incremental-marker");
+//RS         std::fs::write(&marker, b"populated").expect("baseline rustc output");
+//RS 
+//RS         let second = session
+//RS             .prepare_dir("stable-web-identity", true, false)
+//RS             .expect("changed-function incremental directory");
+//RS         assert_eq!(first, second);
+//RS         assert!(second.join("rustc-incremental-marker").is_file());
+//RS         assert_eq!(session.reused_dirs(), 1);
+//RS 
+//RS         session.cleanup();
+//RS         assert!(!first.exists());
+//RS         let _ = std::fs::remove_dir_all(&root);
+//RS     }
+//RS }
+// END-PORT-PENDING 0675 Source/CmdCompile.rs:15566-16458
+

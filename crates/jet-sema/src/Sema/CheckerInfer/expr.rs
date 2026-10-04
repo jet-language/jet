@@ -1322,7 +1322,12 @@ impl<'a> Checker<'a> {
                 // rooted in an index (`pool[id].children.push(child)`) then
                 // took a silent `Expr::Copy`, and every tier pushed into the
                 // copy instead of the stored collection (D-MEM1 S6).
+                // The probe itself reads `base` as an index base, a borrow
+                // position exactly as in `infer_index`. Probing it as an
+                // owning read wrapped a field base in a silent `Expr::Copy`
+                // (`segment.line_starts[i]` cloned the whole list per index).
                 let saved_borrow_ctx = self.borrow_ctx;
+                self.borrow_ctx = true;
                 let base_ty = self.infer(base);
                 self.borrow_ctx = saved_borrow_ctx;
                 let Expr::ComptimeName { name, value, .. } = base.as_mut() else {
@@ -2819,6 +2824,11 @@ impl<'a> Checker<'a> {
         let saved_string_view_read = self.allow_string_view_read;
         if implicit_string_view_copy {
             self.allow_string_view_read = true;
+        }
+        // D-FMTPARENS1=A: grouping is transparent, so a borrow position stays
+        // a borrow position for the parenthesized expression.
+        if borrowed && matches!(e, Expr::Paren(..)) {
+            self.borrow_ctx = true;
         }
         let ty = self.infer_inner(e);
         self.allow_string_view_read = saved_string_view_read;

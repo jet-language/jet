@@ -29,6 +29,7 @@ use jet_foundation.[
     MIRTypeKind,
     MIRValueID,
     mir_measure_expression,
+    mir_operation_place_uses,
     mir_operation_value_uses,
     mir_terminator_value_uses,
     mir_type_from_kind,
@@ -780,11 +781,41 @@ fn jet_rust_emit_builtin_place_receiver(operation: MIROperation, value: MIRValue
     }
 }
 
+// A consumer that renders every use of `value` through
+// jet_rust_emit_borrowed_value_reference: an index base, and the receiver or
+// arguments a builtin route borrows (jet_rust_emit_builtin_method_values). Over a
+// `ReadPlace` that reference names the place itself, so the consumer never reads
+// the value slot (MIRRust borrowed_operation_use, direct_borrow_only).
+fn jet_rust_emit_place_borrowing_use(ctx: &JetRustEmitContext, function: MIRFunction, operation: MIROperation, value: MIRValueID) -> Bool Never! {
+    if operation == {
+        .Index(_, base, index, _, access, _, _) -> return base == value && index != value && access != MIRAccess.Move
+        .Semantic(semantic) -> {
+            if semantic == {
+                .BuiltinMethod(call, receiver, receiver_place, args, _) -> {
+                    if receiver_place != None && receiver == value -> return false
+                    row :: jet_rust_emit_prelude_route(ctx, call, false) ?? return false
+                    mask :: row.signature.borrow_mask
+                    if mask.len() != args.len() + 1 -> return false
+                    if receiver == value && !mask[0] -> return false
+                    loop (index, arg) in args {
+                        if arg != value -> next
+                        if !mask[index + 1] || jet_rust_emit_builtin_native_int_arg(row, index, true, jet_rust_emit_value_type(ctx, function, arg)) -> return false
+                    }
+                    return true
+                }
+                else -> return false
+            }
+        }
+        else -> return false
+    }
+}
+
 // D-MEM-COPYSEM1: true when `value` reads a stable place and every consumer
 // only inspects it (variant tests, payload reads, comparisons of non-scalar
 // operands, a borrowing slice), so the copy is never emitted. A read or
-// address that only feeds builtin routes writing through the same place is
-// never emitted either (MIRRust direct_borrow_only).
+// address that only feeds consumers borrowing the place itself (builtin routes
+// writing through it, index bases, borrowed builtin operands) is never emitted
+// either (MIRRust direct_borrow_only).
 fn jet_rust_emit_inspected_only(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
     instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return false
     address := false
@@ -796,14 +827,27 @@ fn jet_rust_emit_inspected_only(ctx: &JetRustEmitContext, function: MIRFunction,
         }
         else -> return false
     }
+    // A place projecting from the value's own slot reads that slot, so an
+    // instruction naming such a place is a use the value-use walk does not see.
+    slot_places := [Int:Bool]{}
+    loop row in function.places {
+        if row.base == .Temporary(base) {
+            if base == value -> _ := &slot_places.add(row.id.value, true)
+        }
+    }
     used := false
     place_receivers_only := true
     loop block in function.blocks {
         if mir_terminator_value_uses(block.terminator).contains(value) -> return false
         loop user in block.instructions {
+            if slot_places.len() > 0 {
+                loop place in mir_operation_place_uses(user.operation) {
+                    if slot_places.get(place.value) != None -> return false
+                }
+            }
             if !mir_operation_value_uses(user.operation).contains(value) -> next
             used = true
-            if jet_rust_emit_builtin_place_receiver(user.operation, value) -> next
+            if jet_rust_emit_builtin_place_receiver(user.operation, value) || jet_rust_emit_place_borrowing_use(&ctx, function, user.operation, value) -> next
             place_receivers_only = false
             inspects :: if user.operation == {
                 .EnumIs(subject, _, _) -> subject == value

@@ -1,0 +1,134 @@
+// project_state.rs::priors_and_stamps_round_trip_and_rehash_changed_files,
+// retained verbatim behavior under the #3593 native exact-stamp/atomic gates.
+#Test("workspace priors and stamps round trip and rehash changed files") {
+    root :: store_artifact_test_root("project-state")
+    defer store_artifact_test_cleanup(root)
+    files.create_dir_all(root) ?? panic("workspace")
+    assert_eq(store_project_last_run(root, "main.jet"), None)
+    store_project_write_last_run(root, "main.jet", "abc") ?? panic("last run")
+    assert_eq(store_project_last_run(root, "main.jet"), Val("abc"))
+    assert_eq(store_project_last_run(root, "../main.jet"), None)
+    file :: files.join(root, "input.txt")
+    files.write(file, "one") ?? panic("input")
+    table := StampTable.load(root)
+    first :: &table.file_digest(file) ?? panic("digest")
+    assert_eq(first, record_blob_key("one".bytes()))
+    table.save(root) ?? panic("save")
+    reloaded := StampTable.load(root)
+    assert_eq(&reloaded.file_digest(file), Val(first))
+    files.write(file, "changed") ?? panic("rewrite")
+    assert_eq(&reloaded.file_digest(file), Val(record_blob_key("changed".bytes())))
+    assert_eq(&reloaded.file_digest(files.join(root, "absent")), None)
+    assert_eq(store_project_state_dir(root), files.join(root, ".jet"))
+}
+
+#Test("project last run wire validates schema program and malformed state") {
+    encoded :: record_encode("jet.last-run/v1", [RecordSection{id: 1, elements: [RecordValue.Map{fields: [RecordField{name: "program", value: RecordValue.Str{value: "main.jet"}}, RecordField{name: "record", value: RecordValue.Str{value: "abc"}}]}]}])
+    bytes :: encoded.bytes ?? panic("encode")
+    assert_eq(store_project_last_run_from_bytes(bytes, "main.jet"), Val("abc"))
+    assert_eq(store_project_last_run_from_bytes(bytes, "../main.jet"), None)
+    assert_eq(store_project_last_run_from_bytes("corrupt".bytes(), "main.jet"), None)
+    wrong :: record_encode("other/v1", [RecordSection{id: 1, elements: [RecordValue.Null]}]).bytes ?? panic("encode")
+    assert_eq(store_project_last_run_from_bytes(wrong, "main.jet"), None)
+}
+
+#Test("stamp wire keeps all exact Unix fields unsigned casts sorted paths and malformed misses") {
+    stamp :: ProjectFileStamp{size: 18446744073709551615, modified_ns: -1, changed_ns: 17, inode: 9223372036854775808}
+    assert_eq(stamp.text(), "18446744073709551615:-1:17:9223372036854775808")
+    table := StampTable.empty()
+    table.entries["z"] = ProjectStampedDigest{stamp: stamp, digest: "last"}
+    table.entries["a"] = ProjectStampedDigest{stamp: stamp, digest: "first"}
+    assert_eq(table.cached_digest("a", Val(stamp)), Val("first"))
+    assert_eq(table.cached_digest("a", None), None)
+    assert_eq(table.cached_digest("missing", Val(stamp)), None)
+    loop field in 0..<4 {
+        changed := stamp
+        if field == 0 -> changed.size -= 1
+        if field == 1 -> changed.modified_ns += 1
+        if field == 2 -> changed.changed_ns += 1
+        if field == 3 -> changed.inode += 1
+        assert_eq(table.cached_digest("a", Val(changed)), None)
+    }
+    bytes :: table.to_bytes().bytes ?? panic("encode")
+    decoded :: StampTable.from_bytes(bytes)
+    assert_eq(decoded.entries, table.entries)
+    assert_eq(decoded.changed, false)
+    reader :: record_open_schema(bytes, "jet.stamps/v1").reader ?? panic("reader")
+    assert_eq(store_project_entry_text(record_element(reader, 1, 0).value ?? panic("entry"), "path"), Val("a"))
+    assert_eq(StampTable.from_bytes("malformed".bytes()).entries.len(), 0)
+    incomplete :: record_encode("jet.stamps/v1", [RecordSection{id: 1, elements: [RecordValue.Map{fields: [RecordField{name: "path", value: RecordValue.Str{value: "x"}}]}]}]).bytes ?? panic("encode")
+    assert_eq(StampTable.from_bytes(incomplete).entries.len(), 0)
+    wrong :: record_encode("other/v1", [RecordSection{id: 1, elements: [RecordValue.Null]}]).bytes ?? panic("encode")
+    assert_eq(StampTable.from_bytes(wrong).entries.len(), 0)
+}
+
+#Test("missing and corrupt workspace state only costs speed") {
+    root :: store_artifact_test_root("state-miss")
+    defer store_artifact_test_cleanup(root)
+    table := StampTable.load(root)
+    assert_eq(table.entries.len(), 0)
+    table.save(root) ?? panic("unchanged save")
+    assert_eq(files.exists(store_project_state_dir(root)) ?? panic("exists"), false)
+    files.create_dir_all(store_project_state_dir(root)) ?? panic("state directory")
+    files.write(files.join(store_project_state_dir(root), "stamps"), "bad") ?? panic("corrupt stamps")
+    file :: files.join(root, "input")
+    files.write(file, "current bytes") ?? panic("input")
+    corrupt := StampTable.load(root)
+    assert_eq(&corrupt.file_digest(file), Val(record_blob_key("current bytes".bytes())))
+    store_project_write_last_run(root, "main.jet", "newest") ?? panic("prior")
+    files.write(store_project_last_run_path(root, "main.jet"), "bad") ?? panic("corrupt prior")
+    assert_eq(store_project_last_run(root, "main.jet"), None)
+}
+
+// #3593: exact Unix stamps, including equal-size rewrites, inode replacement;
+// non-Unix deliberately has no stamp and always hashes, with no memo writes.
+#Test("stable exact stamps memoize and same-size rewrites never replay an old digest") {
+    root :: store_artifact_test_root("state-freshness")
+    defer store_artifact_test_cleanup(root)
+    files.create_dir_all(root) ?? panic("workspace")
+    file :: files.join(root, "input")
+    files.write(file, "one") ?? panic("input")
+    table := StampTable.load(root)
+    assert_eq(&table.file_digest(file), Val(record_blob_key("one".bytes())))
+    if sys.is_unix() {
+        stamp :: store_project_file_stamp(file) ?? panic("Unix regular file stamp")
+        assert_eq(table.entries.len(), 1)
+        table.changed = false
+        assert_eq(&table.file_digest(file), Val(record_blob_key("one".bytes())))
+        assert_eq(table.changed, false)
+        files.write(file, "two") ?? panic("same size rewrite")
+        assert_eq(&table.file_digest(file), Val(record_blob_key("two".bytes())))
+        assert(store_project_file_stamp(file) != Val(stamp))
+        replacement :: files.join(root, "replacement")
+        files.write(replacement, "tri") ?? panic("replacement")
+        files.rename(replacement, file) ?? panic("replace inode")
+        assert_eq(&table.file_digest(file), Val(record_blob_key("tri".bytes())))
+    } else {
+        assert_eq(store_project_file_stamp(file), None)
+        assert_eq(table.entries.len(), 0)
+        assert_eq(table.changed, false)
+        files.write(file, "two") ?? panic("same size rewrite")
+        assert_eq(&table.file_digest(file), Val(record_blob_key("two".bytes())))
+    }
+}
+
+// #3593 metadata-follow: retain Rust's final-symlink behavior exactly.
+#Test("Unix stamps follow final symlinks and track their target bytes") {
+    if sys.is_unix() {
+        root :: store_artifact_test_root("state-symlink")
+        defer store_artifact_test_cleanup(root)
+        files.create_dir_all(root) ?? panic("workspace")
+        target :: files.join(root, "target")
+        link :: files.join(root, "link")
+        files.write(target, "one") ?? panic("target")
+        files.symlink(target, link) ?? panic("link")
+        stamp :: store_project_file_stamp(target) ?? panic("target stamp")
+        assert_eq(store_project_file_stamp(link), Val(stamp))
+        table := StampTable.load(root)
+        assert_eq(&table.file_digest(link), Val(record_blob_key("one".bytes())))
+        assert_eq(table.entries.len(), 1)
+        files.write(target, "two") ?? panic("target rewrite")
+        assert_eq(&table.file_digest(link), Val(record_blob_key("two".bytes())))
+        assert_eq(store_project_file_stamp(link), store_project_file_stamp(target))
+    }
+}

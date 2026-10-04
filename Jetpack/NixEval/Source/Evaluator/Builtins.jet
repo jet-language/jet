@@ -103,7 +103,7 @@ impl NixEvaluator {
     // `builtins.fromJSON`: the reference reader's depth failure is a resource
     // limit; every other JSON failure is an invalid expression.
     fn from_json(&self, text: String) -> NixEvalValue NixEvalError! {
-        if NixEvalJson.parse(text) == {
+        if NixEvalJSON.parse(text) == {
             .Ok(document) -> return &self.json_to_value(document, document.root, 0)
             .Err(error) -> {
                 reason :: error.message()
@@ -132,14 +132,15 @@ impl NixEvaluator {
             .HasAttr -> {
                 name :: first.plain_string()
                 fields :: nixeval_attribute_set(second, "attribute set")
-                NixEvalValue.Bool(&self.attr_field(fields, name) != None)
+                found :: &self.attr_field(fields, name)
+                NixEvalValue.Bool(found != None)
             }
             .Map | .Filter -> {
                 values :: nixeval_list(second, "list")
                 keep_matches :: operation == NixEvalOperation.Filter
                 output := [Int]{}
                 loop value in values {
-                    result :: self.apply(first, value)
+                    result :: &self.apply(first, value)
                     if !keep_matches {
                         &output.push(&self.value_thunk(result))
                         next
@@ -252,7 +253,7 @@ impl NixEvaluator {
 
 // A fetcher request field: bounded, single-line and NUL-free.
 fn nixeval_is_request_text(value: String) -> Bool Never! {
-    value.bytes().len() <= @NIXEVAL_MAX_PATH_BYTES && !nixeval_contains_byte(value, 0) && !nixeval_contains_byte(value, 10)
+    value.bytes().len() <= NIXEVAL_MAX_PATH_BYTES && !nixeval_contains_byte(value, 0) && !nixeval_contains_byte(value, 10)
 }
 
 // The builtin a `builtins.<field>` selection names, if it is supported.

@@ -1,6 +1,5 @@
-// Applied-rule argument menus are projected from the specialized
-// core.compiler.lang declaration in embedded Prelude/Core.jet. The authority
-// roots and builtin taint tags remain inputs from their Source registries.
+// Applied-rule argument menus are projected from Foundation's embedded Core
+// declaration, Effects declarations and builtin taint tags. No menu globals.
 
 fn foundation_core_menu_ascii_lower(text: String) -> String Never! {
     bytes := text.bytes()
@@ -67,7 +66,11 @@ fn foundation_core_menu_variants(name: String, kind: CoreLeafKind, effect_roots:
 // from the canonical Source fixed-width integer registry, which mirrors the
 // native canonical_rule_arg_variants ordering instead of maintaining a
 // menu-local width table.
-pub fn foundation_core_argument_menus(core_source_text: String, effect_roots: [String], builtin_tags: [String]) -> [TAppliedRuleArgumentMenu]? {
+pub fn foundation_core_argument_menus(core: FoundationEmbeddedCore) -> [TAppliedRuleArgumentMenu]? {
+    foundation_core_argument_menus_from_source(core.declaration_text(), core.effect_roots(), core.builtin_tags())
+}
+
+fn foundation_core_argument_menus_from_source(core_source_text: String, effect_roots: [String], builtin_tags: [String]) -> [TAppliedRuleArgumentMenu]? {
     declaration :: core_module_declaration_from_source(core_source_text, "core.compiler.lang") ?? return None
     menus := [TAppliedRuleArgumentMenu]{}
     loop type_export in declaration.type_exports {
@@ -88,4 +91,14 @@ pub fn foundation_core_argument_menus(core_source_text: String, effect_roots: [S
         first_variant_segment: false,
     })
     Val(menus)
+}
+
+// Rust Policy::rule_arg_declaration: look up the canonical declaration, not
+// raw Core enum slots (which retain Unset/Unspecified and policy-only entries).
+// The caller supplies the menus projected from its embedded Core source.
+pub fn rule_arg_declaration(name: String, menus: [TAppliedRuleArgumentMenu]) -> TAppliedRuleArgumentMenu? {
+    loop menu in menus {
+        if menu.name == name -> return Val(~menu)
+    }
+    None
 }

@@ -4,8 +4,8 @@
 // A candidate is never consumable on its own: only an entry whose complete
 // proof passes under the Hangar lock gets a lease.
 
-pub fn store_find_by_reference(roots: HangarRoots, reference: String) -> StoreEntry? Never! {
-    store_reuse_newest(store_list(roots), reference)
+pub fn store_find_by_reference(verification: &StoreVerification, roots: HangarRoots, reference: String) -> StoreEntry? Never! {
+    store_reuse_newest(store_list(&verification, roots), reference)
 }
 
 // A cache candidate without the checked Store path. Prompt planning may
@@ -74,22 +74,22 @@ pub struct CacheVerification {
     }
 }
 
-pub fn store_verify_cache_entry(roots: HangarRoots, entry: StoreEntry, expected_reference: String, expectation: CacheExpectation) -> CacheVerification Never! {
-    graph :: store_reuse_optional_graph(roots)
-    store_verify_cache_entry_with_graph(roots, entry, expected_reference, expectation, graph)
+pub fn store_verify_cache_entry(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, expected_reference: String, expectation: CacheExpectation) -> CacheVerification Never! {
+    graph :: store_reuse_optional_graph(&verification, roots)
+    store_verify_cache_entry_with_graph(&verification, roots, entry, expected_reference, expectation, graph)
 }
 
-fn store_reuse_optional_graph(roots: HangarRoots) -> ClosureGraph? Never! {
-    if store_closure_graph_structure(roots) == {
+fn store_reuse_optional_graph(verification: &StoreVerification, roots: HangarRoots) -> ClosureGraph? Never! {
+    if store_closure_graph_structure(&verification, roots) == {
         .Ok(graph) -> Val(graph)
         else -> None
     }
 }
 
-pub fn store_verify_cache_entry_with_graph(roots: HangarRoots, entry: StoreEntry, expected_reference: String, expectation: CacheExpectation, graph: ClosureGraph?) -> CacheVerification Never! {
+pub fn store_verify_cache_entry_with_graph(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, expected_reference: String, expectation: CacheExpectation, graph: ClosureGraph?) -> CacheVerification Never! {
     // Admitted objects are directory, regular file, or symlink roots.
     output_exists :: store_reuse_lexists(entry.out)
-    output_digest :: output_exists && entry.envelope.output_hash != "" && store_reuse_output_hash_matches(roots, entry)
+    output_digest :: output_exists && entry.envelope.output_hash != "" && store_reuse_output_hash_matches(&verification, roots, entry)
     identity :: expectation.identity
     source :: identity.source_fingerprint != "" && entry.cache_identity.source_fingerprint == identity.source_fingerprint
     recipe :: identity.recipe_fingerprint != "" && entry.cache_identity.recipe_fingerprint == identity.recipe_fingerprint
@@ -107,27 +107,27 @@ pub fn store_verify_cache_entry_with_graph(roots: HangarRoots, entry: StoreEntry
     }
     unsigned_local_allowed :: entry.envelope.signature == "" && expectation.allow_unsigned_local && (canonical_local || owned_output)
     objects_rehash :: if graph == {
-        .Val(found) -> store_entry_closure_objects_rehash(roots, found, entry)
+        .Val(found) -> store_entry_closure_objects_rehash(&verification, roots, found, entry)
         .None -> false
     }
     closure :: output_exists && policy && store_closure_is_reachable(roots, entry) && objects_rehash
     verification :: CacheVerification{output_exists, output_digest, source, recipe, platform, policy, signature_verified, unsigned_local_allowed, closure}
     if !verification.trusted() && sys.get("JETPACK_VERIFY_TRACE") != None {
-        term.eprint("VERIFY-TRACE ref={entry.reference} id={entry.id} legs={verification.debug()} hash_probe={store_reuse_hash_probe(roots, entry)}")
+        term.eprint("VERIFY-TRACE ref={entry.reference} id={entry.id} legs={verification.debug()} hash_probe={store_reuse_hash_probe(&verification, roots, entry)}")
     }
     verification
 }
 
-fn store_reuse_output_hash_matches(roots: HangarRoots, entry: StoreEntry) -> Bool Never! {
-    if store_try_entry_output_hash(roots, entry) == {
+fn store_reuse_output_hash_matches(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -> Bool Never! {
+    if store_try_entry_output_hash(&verification, roots, entry) == {
         .Ok(hash) -> hash == entry.envelope.output_hash
         else -> false
     }
 }
 
 // Rust `{:?}` of the output-hash probe result.
-fn store_reuse_hash_probe(roots: HangarRoots, entry: StoreEntry) -> String Never! {
-    if store_try_entry_output_hash(roots, entry) == {
+fn store_reuse_hash_probe(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -> String Never! {
+    if store_try_entry_output_hash(&verification, roots, entry) == {
         .Ok(hash) -> "Ok(\"{hash}\")"
         .Err(error) -> "Err(\"{error.message()}\")"
     }
@@ -149,12 +149,12 @@ fn store_reuse_same_path(left: String, right: String) -> Bool Never! {
 
 // `<hangar>/objects/<digest>`.
 fn store_reuse_object_path(roots: HangarRoots, digest: String) -> String Never! {
-    files.join(files.join(roots.hangar_dir(), @STORE_OBJECTS_DIR), digest)
+    files.join(files.join(roots.hangar_dir(), STORE_OBJECTS_DIR), digest)
 }
 
 // `<hangar>/seals/<digest>`.
 fn store_reuse_seal_path(roots: HangarRoots, digest: String) -> String Never! {
-    files.join(files.join(roots.hangar_dir(), @STORE_SEALS_DIR), digest)
+    files.join(files.join(roots.hangar_dir(), STORE_SEALS_DIR), digest)
 }
 
 // The producer and cache provenance recorded with the entry must name this
@@ -193,15 +193,15 @@ fn store_reuse_producer_authority_verified(roots: HangarRoots, entry: StoreEntry
 // requires a provenance rung rejects the package before provider, cache, or
 // remote bytes become usable unless `.jet/lock` proves that rung.
 pub fn store_enforce_manifest_provenance_floor(project: String?, package: String) RealizeError! {
-    root :: project ?? return Ok()
+    root :: project ?? return
     found :: PackageFacts.load(root) ?? return Err(RealizeError.Store(StoreError.Other("package trust manifest could not be loaded: {err.message()}")))
-    manifest :: found ?? return Ok()
-    trust :: manifest.authority.trust ?? return Ok()
-    requirement :: trust.require ?? return Ok()
+    manifest :: found ?? return
+    trust :: manifest.authority.trust ?? return
+    requirement :: trust.require ?? return
     lock :: pkg_lock_load(root) ?? return Err(RealizeError.Integrity(store_reuse_provenance_failure(package, requirement, "{pkg_lock_path(root)} is missing")))
     if pkg_lock_enforce_provenance_requirement(lock, requirement) == {
-        .Err(detail) -> Err(RealizeError.Integrity(store_reuse_provenance_failure(package, requirement, detail.message())))
-        else -> Ok()
+        .Err(detail) -> return Err(RealizeError.Integrity(store_reuse_provenance_failure(package, requirement, detail.message())))
+        else -> {}
     }
 }
 
@@ -213,7 +213,7 @@ fn store_reuse_provenance_failure(package: String, requirement: ProvenanceRequir
         actual: actual,
         reason: "the package trust policy requires {requirement.label()} provenance",
         disposition: "Jetpack rejected the package before provider, cache, or remote bytes became usable.",
-        fix: "Refresh `.jet/lock` with the required provenance, then retry."
+        fix_text: "Refresh `.jet/lock` with the required provenance, then retry."
     }
 }
 
@@ -224,17 +224,17 @@ pub struct VerifiedCacheHit {
 
 // The newest entry for `reference` whose complete proof passes, leased
 // under the Hangar lock.
-pub fn store_find_verified_by_reference(roots: HangarRoots, reference: String, expectation: CacheExpectation) -> VerifiedCacheHit? StoreError! {
+pub fn store_find_verified_by_reference(verification: &StoreVerification, roots: HangarRoots, reference: String, expectation: CacheExpectation) -> VerifiedCacheHit? StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
-    graph :: store_closure_graph_structure_unlocked(roots)
+    graph :: store_closure_graph_structure_unlocked(&verification, roots)
     verified := [StoreEntry]{}
     entries :: store_list_unlocked(roots)
     loop entry in entries {
         if entry.reference != reference -> next
-        if store_verify_cache_entry_with_graph(roots, entry, reference, expectation, Val(graph)).trusted() -> &verified.push(entry)
+        if store_verify_cache_entry_with_graph(&verification, roots, entry, reference, expectation, Val(graph)).trusted() -> &verified.push(entry)
     }
     entry :: store_reuse_newest(verified, reference) ?? return Ok(None)
-    lease :: store_snapshot_lease_unlocked(roots, entry, None, true)
+    lease :: store_snapshot_lease_unlocked(&verification, roots, entry, None, true)
     Ok(Val(VerifiedCacheHit{entry: entry, lease: lease}))
 }
 
@@ -242,18 +242,18 @@ pub fn store_find_verified_by_reference(roots: HangarRoots, reference: String, e
 // refs have no project lock to derive a fresh expectation from, so the
 // recorded Hangar identity is the preparation witness; the closure, output,
 // provenance, and reproducibility checks still certify the hit.
-pub fn store_find_verified_user_profile_by_reference(roots: HangarRoots, reference: String) -> VerifiedRealization? StoreError! {
+pub fn store_find_verified_user_profile_by_reference(verification: &StoreVerification, roots: HangarRoots, reference: String) -> VerifiedRealization? StoreError! {
     candidate :: store_find_by_reference_read_only(roots, reference) ?? return Ok(None)
     expectation :: CacheExpectation{identity: candidate.cache_identity, owned_output: None, allow_unsigned_local: true}
-    found :: store_find_verified_by_reference(roots, reference, expectation)
+    found :: store_find_verified_by_reference(&verification, roots, reference, expectation)
     hit :: found ?? return Ok(None)
-    Ok(Val(VerifiedRealization{entry: hit.entry, source_state: SourceState.Cached, lease: hit.lease}))
+    Ok(Val(VerifiedRealization{entry: hit.entry, source_state_value: SourceState.Cached, lease: hit.lease}))
 }
 
 // Reuse independently valid user-profile entries with one Hangar lock,
 // graph load, and listing. Missing or invalid members are omitted so the
 // caller takes the ordinary per-reference path for those exact holes.
-pub fn store_reuse_verified_user_profile_batch(roots: HangarRoots, references: [String], local_nix_catalog: Bool) -> [VerifiedRealization]? Never! {
+pub fn store_reuse_verified_user_profile_batch(verification: &StoreVerification, roots: HangarRoots, references: [String], local_nix_catalog: Bool) -> [VerifiedRealization]? Never! {
     if references.len() == 0 -> return None
     // Only a candidate probe: a mixed cache is still worth the locked
     // verification below.
@@ -264,12 +264,12 @@ pub fn store_reuse_verified_user_profile_batch(roots: HangarRoots, references: [
         if candidate_refs.has_key(reference) -> any_candidate = true
     }
     if !any_candidate -> return None
-    store_reuse_user_profile_batch_locked(roots, references, local_nix_catalog) ?? None
+    store_reuse_user_profile_batch_locked(&verification, roots, references, local_nix_catalog) ?? None
 }
 
-fn store_reuse_user_profile_batch_locked(roots: HangarRoots, references: [String], local_nix_catalog: Bool) -> [VerifiedRealization]? StoreError! {
+fn store_reuse_user_profile_batch_locked(verification: &StoreVerification, roots: HangarRoots, references: [String], local_nix_catalog: Bool) -> [VerifiedRealization]? StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
-    graph :: store_closure_graph_structure_unlocked(roots)
+    graph :: store_closure_graph_structure_unlocked(&verification, roots)
     entries :: store_list_unlocked(roots)
     selected := [StoreEntry]{}
     loop reference in references {
@@ -278,7 +278,7 @@ fn store_reuse_user_profile_batch_locked(roots: HangarRoots, references: [String
         valid := [StoreEntry]{}
         loop entry in entries {
             if entry.reference != reference -> next
-            if store_verify_cache_entry_with_graph(roots, entry, reference, expectation, Val(graph)).trusted() -> &valid.push(entry)
+            if store_verify_cache_entry_with_graph(&verification, roots, entry, reference, expectation, Val(graph)).trusted() -> &valid.push(entry)
         }
         entry :: store_reuse_newest(valid, reference) ?? next
         permitted :: if store_require_entry_catalog_permission(entry, local_nix_catalog) == {
@@ -292,11 +292,11 @@ fn store_reuse_user_profile_batch_locked(roots: HangarRoots, references: [String
     index :: NixProjectionIndex.from_entries(entries)
     realized := [VerifiedRealization]{}
     loop entry in selected {
-        lease :: store_snapshot_lease_unlocked(roots, entry, Val(index), true)
+        lease :: store_snapshot_lease_unlocked(&verification, roots, entry, Val(index), true)
         if lease.status() != ConsumptionStatus.Consumable {
             return Err(StoreError.NotFound("a user-profile output disappeared while leasing"))
         }
-        &realized.push(VerifiedRealization{entry: entry, source_state: SourceState.Cached, lease: lease})
+        &realized.push(VerifiedRealization{entry: entry, source_state_value: SourceState.Cached, lease: lease})
     }
     Ok(Val(realized))
 }
@@ -305,10 +305,10 @@ fn store_reuse_user_profile_batch_locked(roots: HangarRoots, references: [String
 // changes. Each member is checked against the current provider identity and
 // closure under one Hangar lock; holes stay on the normal realization path
 // instead of invalidating unrelated verified members.
-pub fn store_reuse_verified_environment_members(roots: HangarRoots, selections: [EnvironmentSelection], expectations: [String: CacheExpectation], allow_local_nix_catalog: Bool) -> [VerifiedRealization]? StoreError! {
+pub fn store_reuse_verified_environment_members(verification: &StoreVerification, roots: HangarRoots, selections: [EnvironmentSelection], expectations: [String: CacheExpectation], allow_local_nix_catalog: Bool) -> [VerifiedRealization]? StoreError! {
     if selections.len() == 0 || expectations.len() == 0 -> return Ok(None)
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
-    graph :: store_closure_graph_structure_unlocked(roots)
+    graph :: store_closure_graph_structure_unlocked(&verification, roots)
     entries :: store_list_unlocked(roots)
     index :: EnvironmentEntryIndex.from_entries_for_selections(entries, selections)
     selected := [StoreEntry]{}
@@ -316,7 +316,7 @@ pub fn store_reuse_verified_environment_members(roots: HangarRoots, selections: 
         reference :: selection.reference
         expectation :: expectations.get(reference) ?? next
         entry :: index.get(selection) ?? next
-        if !store_verify_cache_entry_with_graph(roots, entry, reference, expectation, Val(graph)).trusted() -> next
+        if !store_verify_cache_entry_with_graph(&verification, roots, entry, reference, expectation, Val(graph)).trusted() -> next
         store_require_entry_catalog_permission(entry, allow_local_nix_catalog)
         // The receipt stamp records external dependency metadata, but the
         // member proof has no prior digest for those auxiliary paths. The
@@ -337,9 +337,9 @@ pub fn store_reuse_verified_environment_members(roots: HangarRoots, selections: 
     projection_index :: NixProjectionIndex.from_entries(entries)
     realized := [VerifiedRealization]{}
     loop entry in selected {
-        lease :: store_snapshot_lease_unlocked(roots, entry, Val(projection_index), true)
+        lease :: store_snapshot_lease_unlocked(&verification, roots, entry, Val(projection_index), true)
         if lease.status() == ConsumptionStatus.Consumable {
-            &realized.push(VerifiedRealization{entry: entry, source_state: SourceState.Cached, lease: lease})
+            &realized.push(VerifiedRealization{entry: entry, source_state_value: SourceState.Cached, lease: lease})
         } else {
             lease.release()
         }
@@ -348,17 +348,17 @@ pub fn store_reuse_verified_environment_members(roots: HangarRoots, selections: 
     Ok(Val(realized))
 }
 
-pub fn store_snapshot_lease(roots: HangarRoots, entry: StoreEntry) -> CacheLease StoreError! {
+pub fn store_snapshot_lease(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -> CacheLease StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
-    store_snapshot_lease_unlocked(roots, entry, None, true)
+    store_snapshot_lease_unlocked(&verification, roots, entry, None, true)
 }
 
 // Leases for a warm environment whose entries were already listed; a
 // missing consumable output fails the whole warm path.
-pub fn store_snapshot_leases_with_entries_unlocked(roots: HangarRoots, selected: [StoreEntry], entries: [StoreEntry]) -> [CacheLease] StoreError! {
+pub fn store_snapshot_leases_with_entries_unlocked(verification: &StoreVerification, roots: HangarRoots, selected: [StoreEntry], entries: [StoreEntry]) -> [CacheLease] StoreError! {
     projection_index :: NixProjectionIndex.from_entries(entries)
     leases := [CacheLease]{}
-    loop entry in selected -> &leases.push(store_snapshot_lease_unlocked(roots, entry, Val(projection_index), false))
+    loop entry in selected -> &leases.push(store_snapshot_lease_unlocked(&verification, roots, entry, Val(projection_index), false))
     loop lease in leases {
         if lease.status() != ConsumptionStatus.Consumable -> return Err(StoreError.NotFound("a warm environment output disappeared while leasing"))
     }

@@ -8,34 +8,34 @@
 // semantic authority; a guest cannot mutate compiler state.
 //
 // Wire bytes are compact JSON with byte-ordered object keys (Core
-// `json.canonical`); `protocol` must equal @EXTENSION_PROTOCOL_VERSION. The
+// `json.canonical`); `protocol` must equal EXTENSION_PROTOCOL_VERSION. The
 // session is Idle -> Loaded -> (staged response) -> Closed: staging never
 // mutates compiler facts, rollback drops staged output only (the accept latch
 // stays final), and close hands the guest handle to the host's closer.
 
 // Wire protocol version of the typed post-sema snapshot contract.
-@EXTENSION_PROTOCOL_VERSION :: 1
+EXTENSION_PROTOCOL_VERSION :: prep { 1 }
 // The first hook stage: after sema, typed facts only.
-@EXTENSION_STAGE :: "typed"
+EXTENSION_STAGE :: prep { "typed" }
 // The Component Model world of every compiler-extension component.
-@EXTENSION_WORLD_NAME :: "compiler-extension-v1"
-@EXTENSION_PACKAGE_NAME :: "jet:compiler-extension@0.1.0"
+EXTENSION_WORLD_NAME :: prep { "compiler-extension-v1" }
+EXTENSION_PACKAGE_NAME :: prep { "jet:compiler-extension@0.1.0" }
 // The application `target: sandbox` world, kept to assert the two never
 // collide.
-@EXTENSION_APPLICATION_PLUGIN_WORLD :: "jetplugin"
+EXTENSION_APPLICATION_PLUGIN_WORLD :: prep { "jetplugin" }
 // The guest export that receives the snapshot and returns the response.
-@EXTENSION_ANALYZE_EXPORT :: "analyze"
+EXTENSION_ANALYZE_EXPORT :: prep { "analyze" }
 // Expert registration until a user-facing spelling is balloted: the path of
 // one `compiler-extension-v1` component; unset skips the post-sema hook.
-@EXTENSION_ENV_COMPILER_EXTENSION :: "JET_COMPILER_EXTENSION"
+EXTENSION_ENV_COMPILER_EXTENSION :: prep { "JET_COMPILER_EXTENSION" }
 // Hidden sibling-host verb; its version is part of the process protocol.
-@EXTENSION_HOST_SUBCOMMAND :: "__compiler-extension-v1"
+EXTENSION_HOST_SUBCOMMAND :: prep { "__compiler-extension-v1" }
 // Largest encoded snapshot accepted across the compiler/host pipe.
-@EXTENSION_MAX_SNAPSHOT_BYTES :: 16777216
+EXTENSION_MAX_SNAPSHOT_BYTES :: prep { 16777216 }
 // Outer process deadline; guest execution has its own 2 s deadline.
-@EXTENSION_HOST_PROCESS_TIMEOUT_MS :: 5000
+EXTENSION_HOST_PROCESS_TIMEOUT_MS :: prep { 5000 }
 // The failure text that replaces a leaked internal diagnostic.
-@EXTENSION_INTERNAL_FAILURE :: "compiler-extension failed with an internal message"
+EXTENSION_INTERNAL_FAILURE :: prep { "compiler-extension failed with an internal message" }
 
 // The closed set of Jet plugin mechanisms, one semantic role each.
 pub enum PluginMechanism {
@@ -193,7 +193,7 @@ pub struct SpanFact {
     pub end: Int
 
     fn to_json_tree(self) -> DataTree Never! {
-        DataTree.Object(["end": DataTree.Int(self.end), "file": DataTree.Text(self.file), "id": DataTree.Text(self.id), "start": DataTree.Int(self.start)])
+        DataTree.Object(["end": DataTree.Int(self.end), "file": DataTree.Text(~self.file), "id": DataTree.Text(~self.id), "start": DataTree.Int(self.start)])
     }
 }
 
@@ -277,7 +277,7 @@ pub struct TypeFact {
     pub shape: TypeFactShape
 
     fn to_json_tree(self) -> DataTree Never! {
-        DataTree.Object(["id": DataTree.Text(self.id), "repr": DataTree.Text(self.repr), "shape": self.shape.to_json_tree()])
+        DataTree.Object(["id": DataTree.Text(~self.id), "repr": DataTree.Text(~self.repr), "shape": self.shape.to_json_tree()])
     }
 }
 
@@ -294,12 +294,12 @@ pub struct SymbolFact {
     fn to_json_tree(self) -> DataTree Never! {
         DataTree.Object([
             "effects": pkg_json_texts(self.effects),
-            "id": DataTree.Text(self.id),
-            "kind": DataTree.Text(self.kind),
-            "name": DataTree.Text(self.name),
-            "provenance": DataTree.Text(self.provenance),
-            "span_id": DataTree.Text(self.span_id),
-            "type_id": DataTree.Text(self.type_id)
+            "id": DataTree.Text(~self.id),
+            "kind": DataTree.Text(~self.kind),
+            "name": DataTree.Text(~self.name),
+            "provenance": DataTree.Text(~self.provenance),
+            "span_id": DataTree.Text(~self.span_id),
+            "type_id": DataTree.Text(~self.type_id)
         ])
     }
 }
@@ -316,17 +316,17 @@ pub struct TypedSnapshot {
     pub types: [TypeFact]
     pub symbols: [SymbolFact]
     pub spans: [SpanFact]
-    pub host_imports: [MirHostImportFact]
+    pub host_imports: [MIRHostImportFact]
 
     // A v1 snapshot with no host imports.
     fn new(abilities: [ExtensionAbility], types: [TypeFact], symbols: [SymbolFact], spans: [SpanFact]) -> TypedSnapshot ExtensionProtocolError! {
-        TypedSnapshot.new_with_imports(abilities, types, symbols, spans, [MirHostImportFact]{})
+        TypedSnapshot.new_with_imports(abilities, types, symbols, spans, [MIRHostImportFact]{})
     }
 
     // A snapshot with host-import facts; every fact list is sorted by
     // identity for byte-stable replay.
-    fn new_with_imports(abilities: [ExtensionAbility], types: [TypeFact], symbols: [SymbolFact], spans: [SpanFact], host_imports: [MirHostImportFact]) -> TypedSnapshot ExtensionProtocolError! {
-        granted :: pkg_extension_negotiate_abilities(@EXTENSION_PROTOCOL_VERSION, abilities)
+    fn new_with_imports(abilities: [ExtensionAbility], types: [TypeFact], symbols: [SymbolFact], spans: [SpanFact], host_imports: [MIRHostImportFact]) -> TypedSnapshot ExtensionProtocolError! {
+        granted :: pkg_extension_negotiate_abilities(EXTENSION_PROTOCOL_VERSION, abilities)
         sorted_types := types
         &sorted_types.sort_by(fact -> fact.id)
         sorted_symbols := symbols
@@ -337,8 +337,8 @@ pub struct TypedSnapshot {
         &sorted_imports.sort_by(fact -> fact.id)
         pkg_extension_validate_interface_facts(sorted_types, sorted_symbols, sorted_spans, sorted_imports)
         Ok(TypedSnapshot{
-            protocol: @EXTENSION_PROTOCOL_VERSION,
-            stage: @EXTENSION_STAGE,
+            protocol: EXTENSION_PROTOCOL_VERSION,
+            stage: EXTENSION_STAGE,
             abilities: granted,
             limits: ExtensionResourceLimits.v1_defaults(),
             trust: ExtensionTrustPolicy.Untrusted,
@@ -349,9 +349,10 @@ pub struct TypedSnapshot {
         })
     }
 
-    fn encode(self) -> [U8] ExtensionProtocolError! {
-        if self.protocol != @EXTENSION_PROTOCOL_VERSION -> return Err(ExtensionProtocolError.new("snapshot protocol must be {@EXTENSION_PROTOCOL_VERSION}"))
-        if self.stage != @EXTENSION_STAGE -> return Err(ExtensionProtocolError.new("snapshot stage must be `{@EXTENSION_STAGE}` in v1"))
+    // Protocol bytes, distinct from the automatically derived DataTree codec.
+    fn encode_bytes(self) -> [U8] ExtensionProtocolError! {
+        if self.protocol != EXTENSION_PROTOCOL_VERSION -> return Err(ExtensionProtocolError.new("snapshot protocol must be {EXTENSION_PROTOCOL_VERSION}"))
+        if self.stage != EXTENSION_STAGE -> return Err(ExtensionProtocolError.new("snapshot stage must be `{EXTENSION_STAGE}` in v1"))
         if self.trust != ExtensionTrustPolicy.Untrusted -> return Err(ExtensionProtocolError.new("v1 trust policy admits only `untrusted` components"))
         abilities := [DataTree]{}
         loop ability in self.abilities -> &abilities.push(DataTree.Text(ability.as_str()))
@@ -369,7 +370,7 @@ pub struct TypedSnapshot {
             "host_imports": DataTree.Array(imports),
             "protocol": DataTree.Int(self.protocol),
             "spans": DataTree.Array(spans),
-            "stage": DataTree.Text(self.stage),
+            "stage": DataTree.Text(~self.stage),
             "symbols": DataTree.Array(symbols),
             "trust": DataTree.Text(self.trust.as_str()),
             "types": DataTree.Array(types)
@@ -377,15 +378,15 @@ pub struct TypedSnapshot {
         Ok(text.bytes())
     }
 
-    fn decode(bytes: [U8]) -> TypedSnapshot ExtensionProtocolError! {
+    fn decode_bytes(bytes: [U8]) -> TypedSnapshot ExtensionProtocolError! {
         text :: String.from_bytes(bytes) ?? return Err(ExtensionProtocolError.new("snapshot is not valid UTF-8"))
         root :: pkg_extension_parse(text)
         object :: pkg_extension_object(root, "snapshot root")
         pkg_extension_require_keys(object, [String]{"protocol", "stage", "abilities", "limits", "trust", "types", "symbols", "spans"}, [String]{"host_imports"})
         protocol :: pkg_extension_json_u32(object["protocol"], "protocol")
-        if protocol != @EXTENSION_PROTOCOL_VERSION -> return Err(ExtensionProtocolError.new("compiler-extension protocol mismatch: host={@EXTENSION_PROTOCOL_VERSION}, snapshot={protocol}"))
+        if protocol != EXTENSION_PROTOCOL_VERSION -> return Err(ExtensionProtocolError.new("compiler-extension protocol mismatch: host={EXTENSION_PROTOCOL_VERSION}, snapshot={protocol}"))
         stage :: pkg_extension_text(object["stage"])
-        if stage != @EXTENSION_STAGE -> return Err(ExtensionProtocolError.new("snapshot stage must be `{@EXTENSION_STAGE}`, got `{stage}`"))
+        if stage != EXTENSION_STAGE -> return Err(ExtensionProtocolError.new("snapshot stage must be `{EXTENSION_STAGE}`, got `{stage}`"))
         trust_text :: pkg_extension_text(object["trust"])
         trust :: ExtensionTrustPolicy.parse(trust_text) ?? return Err(ExtensionProtocolError.new("unknown trust policy `{trust_text}`"))
         abilities :: pkg_extension_parse_abilities(object["abilities"])
@@ -395,7 +396,7 @@ pub struct TypedSnapshot {
         spans :: pkg_extension_parse_spans(object["spans"])
         host_imports :: if object.get("host_imports") == {
             .Val(value) -> pkg_extension_parse_host_imports(value)
-            .None -> [MirHostImportFact]{}
+            .None -> [MIRHostImportFact]{}
         }
         pkg_extension_validate_interface_facts(types, symbols, spans, host_imports)
         Ok(TypedSnapshot{protocol: protocol, stage: stage, abilities: abilities, limits: limits, trust: trust, types: types, symbols: symbols, spans: spans, host_imports: host_imports})
@@ -422,7 +423,7 @@ pub struct ExtensionFinding {
     pub severity: String
 
     fn to_json_tree(self) -> DataTree Never! {
-        DataTree.Object(["message": DataTree.Text(self.message), "rule": DataTree.Text(self.rule), "severity": DataTree.Text(self.severity), "span_id": DataTree.Text(self.span_id)])
+        DataTree.Object(["message": DataTree.Text(~self.message), "rule": DataTree.Text(~self.rule), "severity": DataTree.Text(~self.severity), "span_id": DataTree.Text(~self.span_id)])
     }
 }
 
@@ -433,7 +434,7 @@ pub struct ExtensionProposedEdit {
     pub rationale: String
 
     fn to_json_tree(self) -> DataTree Never! {
-        DataTree.Object(["rationale": DataTree.Text(self.rationale), "replacement": DataTree.Text(self.replacement), "span_id": DataTree.Text(self.span_id)])
+        DataTree.Object(["rationale": DataTree.Text(~self.rationale), "replacement": DataTree.Text(~self.replacement), "span_id": DataTree.Text(~self.span_id)])
     }
 }
 
@@ -445,7 +446,8 @@ pub struct AnalyzeResponse {
     // V1 requires this empty; any artifact is a protocol error.
     pub artifacts: [String]
 
-    fn encode(self) -> [U8] ExtensionProtocolError! {
+    // Protocol bytes, distinct from the automatically derived DataTree codec.
+    fn encode_bytes(self) -> [U8] ExtensionProtocolError! {
         findings := [DataTree]{}
         loop finding in self.findings -> &findings.push(finding.to_json_tree())
         edits := [DataTree]{}
@@ -459,7 +461,7 @@ pub struct AnalyzeResponse {
         Ok(text.bytes())
     }
 
-    fn decode(bytes: [U8]) -> AnalyzeResponse ExtensionProtocolError! {
+    fn decode_bytes(bytes: [U8]) -> AnalyzeResponse ExtensionProtocolError! {
         text :: String.from_bytes(bytes) ?? return Err(ExtensionProtocolError.new("response is not valid UTF-8"))
         root :: pkg_extension_parse(text)
         object :: pkg_extension_object(root, "response root")
@@ -477,7 +479,7 @@ pub struct AnalyzeResponse {
     // accept staged findings and edits explicitly.
     fn validate(self, snapshot: TypedSnapshot, raw_len: Int) ExtensionProtocolError! {
         limits :: snapshot.limits
-        if self.protocol != @EXTENSION_PROTOCOL_VERSION -> return Err(ExtensionProtocolError.new("response protocol must be {@EXTENSION_PROTOCOL_VERSION}, got {self.protocol}"))
+        if self.protocol != EXTENSION_PROTOCOL_VERSION -> return Err(ExtensionProtocolError.new("response protocol must be {EXTENSION_PROTOCOL_VERSION}, got {self.protocol}"))
         if raw_len > limits.max_response_bytes -> return Err(ExtensionProtocolError.new("response exceeds max_response_bytes ({raw_len} > {limits.max_response_bytes})"))
         if self.artifacts.len() > 0 -> return Err(ExtensionProtocolError.new("v1 responses must leave `artifacts` empty (no artifact mutation)"))
         if self.findings.len() > limits.max_findings -> return Err(ExtensionProtocolError.new("too many findings ({self.findings.len()} > {limits.max_findings})"))
@@ -514,7 +516,7 @@ pub struct AnalyzeResponse {
 
     // Decode and validate in one step, the host `analyze` path.
     fn decode_and_validate(snapshot: TypedSnapshot, bytes: [U8]) -> AnalyzeResponse ExtensionProtocolError! {
-        response :: AnalyzeResponse.decode(bytes)
+        response :: AnalyzeResponse.decode_bytes(bytes)
         response.validate(snapshot, bytes.len())
         Ok(response)
     }
@@ -578,7 +580,7 @@ pub struct ExtensionSession {
     // The host's explicit accept of staged output.
     fn accept_staged(&self) -> AnalyzeResponse ExtensionProtocolError! {
         if self.session_phase != ExtensionSessionPhase.Loaded -> return Err(ExtensionProtocolError.new("accept requires Loaded session"))
-        staged :: self.staged_response ?? return Err(ExtensionProtocolError.new("nothing staged to accept"))
+        staged :: ~self.staged_response ?? return Err(ExtensionProtocolError.new("nothing staged to accept"))
         self.staged_response = None
         self.committed = true
         Ok(staged)
@@ -587,8 +589,8 @@ pub struct ExtensionSession {
     // Close the session and drop the guest through `close_guest(handle)`,
     // returning what the closer reports (false when no handle was live).
     // Staged output is cleared and the session ends Closed.
-    fn close(&self, close_guest: fn(Int) -> Bool) -> Bool Never! {
-        live :: self.handle
+    fn close(&self, close_guest: fn(Int) -> Bool Never!) -> Bool Never! {
+        live :: ~self.handle
         self.handle = None
         self.staged_response = None
         self.committed = false
@@ -603,7 +605,7 @@ pub struct ExtensionSession {
 // Negotiate abilities against the v1 allowlist and protocol version; the
 // grant is the requested set, deduplicated in ability order.
 pub fn pkg_extension_negotiate_abilities(protocol: Int, requested: [ExtensionAbility]) -> [ExtensionAbility] ExtensionProtocolError! {
-    if protocol != @EXTENSION_PROTOCOL_VERSION -> return Err(ExtensionProtocolError.new("compiler-extension protocol mismatch: host={@EXTENSION_PROTOCOL_VERSION}, guest={protocol}"))
+    if protocol != EXTENSION_PROTOCOL_VERSION -> return Err(ExtensionProtocolError.new("compiler-extension protocol mismatch: host={EXTENSION_PROTOCOL_VERSION}, guest={protocol}"))
     allowed :: ExtensionAbility.v1_defaults()
     granted := [ExtensionAbility]{}
     loop ability in requested {
@@ -660,14 +662,14 @@ pub fn pkg_extension_message_exposes_rustc(message: String) -> Bool Never! {
 
 // A failure message with any leaked internal diagnostic replaced.
 fn pkg_extension_public_error(error: ExtensionProtocolError) -> ExtensionProtocolError Never! {
-    if pkg_extension_message_exposes_rustc(error.message) -> return ExtensionProtocolError.new(@EXTENSION_INTERNAL_FAILURE)
-    error
+    if pkg_extension_message_exposes_rustc(error.message) -> return ExtensionProtocolError.new(EXTENSION_INTERNAL_FAILURE)
+    ~error
 }
 
 // Load, analyze, validate and stage, accept, and close through one supplied
 // Component Model host. The Jetpack host supplies the real WASM functions;
 // keeping the orchestration here keeps one protocol and lifecycle.
-pub fn pkg_extension_analyze_with_host(wasm_path: String, snapshot: TypedSnapshot, load_guest: fn(String) -> String, analyze_guest: fn(Int, [U8]) -> String, close_guest: fn(Int) -> Bool) -> AnalyzeResponse ExtensionProtocolError! {
+pub fn pkg_extension_analyze_with_host(wasm_path: String, snapshot: TypedSnapshot, load_guest: fn(String) -> String Never!, analyze_guest: fn(Int, [U8]) -> String Never!, close_guest: fn(Int) -> Bool Never!) -> AnalyzeResponse ExtensionProtocolError! {
     handle :: if pkg_extension_parse_load_result(load_guest(wasm_path)) == {
         .Ok(handle) -> handle
         .Err(error) -> {
@@ -682,7 +684,7 @@ pub fn pkg_extension_analyze_with_host(wasm_path: String, snapshot: TypedSnapsho
             return Err(error)
         }
     }
-    snapshot_bytes :: if snapshot.encode() == {
+    snapshot_bytes :: if snapshot.encode_bytes() == {
         .Ok(bytes) -> bytes
         .Err(error) -> {
             _ :: &session.close(close_guest)
@@ -723,17 +725,17 @@ pub fn pkg_extension_mechanism() -> PluginMechanism Never! {
 // and response travel as `list<u8>` so the wire schema versions
 // independently of the WIT shape.
 pub fn pkg_extension_wit_world() -> String Never! {
-    "package {@EXTENSION_PACKAGE_NAME};\n\nworld {@EXTENSION_WORLD_NAME} {{\n\t/// Versioned typed post-sema snapshot bytes (host-owned schema).\n\texport {@EXTENSION_ANALYZE_EXPORT}: func(snapshot: list<u8>) -> list<u8>;\n}}\n"
+    "package {EXTENSION_PACKAGE_NAME};\n\nworld {EXTENSION_WORLD_NAME} {{\n\t/// Versioned typed post-sema snapshot bytes (host-owned schema).\n\texport {EXTENSION_ANALYZE_EXPORT}: func(snapshot: list<u8>) -> list<u8>;\n}}\n"
 }
 
 // Whether `world` names the application-plugin world, not this host.
 pub fn pkg_extension_is_application_plugin_world(world: String) -> Bool Never! {
-    world == @EXTENSION_APPLICATION_PLUGIN_WORLD
+    world == EXTENSION_APPLICATION_PLUGIN_WORLD
 }
 
 // Whether `world` names this compiler-extension world.
 pub fn pkg_extension_is_compiler_extension_world(world: String) -> Bool Never! {
-    world == @EXTENSION_WORLD_NAME
+    world == EXTENSION_WORLD_NAME
 }
 
 // The reference's bounded protocol JSON parse (1 MiB, 64 levels).
@@ -745,17 +747,17 @@ fn pkg_extension_parse(text: String) -> DataTree ExtensionProtocolError! {
 }
 
 fn pkg_extension_object(value: DataTree, label: String) -> [String: DataTree] ExtensionProtocolError! {
-    object :: pkg_json_object(value) ?? return Err(ExtensionProtocolError.new("{label}: {@PKG_JSON_NOT_OBJECT}"))
+    object :: pkg_json_object(value) ?? return Err(ExtensionProtocolError.new("{label}: {PKG_JSON_NOT_OBJECT}"))
     Ok(object)
 }
 
 fn pkg_extension_array(value: DataTree, label: String) -> [DataTree] ExtensionProtocolError! {
-    items :: pkg_json_array(value) ?? return Err(ExtensionProtocolError.new("{label}: {@PKG_JSON_NOT_ARRAY}"))
+    items :: pkg_json_array(value) ?? return Err(ExtensionProtocolError.new("{label}: {PKG_JSON_NOT_ARRAY}"))
     Ok(items)
 }
 
 fn pkg_extension_text(value: DataTree) -> String ExtensionProtocolError! {
-    text :: pkg_json_text(value) ?? return Err(ExtensionProtocolError.new(@PKG_JSON_NOT_STRING))
+    text :: pkg_json_text(value) ?? return Err(ExtensionProtocolError.new(PKG_JSON_NOT_STRING))
     Ok(text)
 }
 
@@ -779,15 +781,15 @@ fn pkg_extension_json_bounded(value: DataTree, maximum: Int) -> Int? Never! {
     if value == {
         .Int(number) -> {
             if number >= 0 && number <= maximum -> return Val(number)
-            None
+            return None
         }
         .Float(number) -> {
             if math.fract(number) != 0.0 || number < 0.0 -> return None
             whole :: Int.from_float(number) ?? return None
             if whole <= maximum -> return Val(whole)
-            None
+            return None
         }
-        else -> None
+        else -> return None
     }
 }
 
@@ -810,7 +812,7 @@ fn pkg_extension_parse_abilities(value: DataTree) -> [ExtensionAbility] Extensio
         ability :: ExtensionAbility.parse(name) ?? return Err(ExtensionProtocolError.new("unknown ability `{name}`"))
         &abilities.push(ability)
     }
-    pkg_extension_negotiate_abilities(@EXTENSION_PROTOCOL_VERSION, abilities)
+    pkg_extension_negotiate_abilities(EXTENSION_PROTOCOL_VERSION, abilities)
 }
 
 fn pkg_extension_string_array(value: DataTree, name: String) -> [String] ExtensionProtocolError! {
@@ -835,23 +837,23 @@ fn pkg_extension_parse_types(value: DataTree) -> [TypeFact] ExtensionProtocolErr
     Ok(out)
 }
 
-fn pkg_extension_host_import_json(import: MirHostImportFact) -> DataTree Never! {
+fn pkg_extension_host_import_json(import: MIRHostImportFact) -> DataTree Never! {
     result_type :: if import.result_type_id == {
         .Val(type_id) -> DataTree.Text(type_id)
         .None -> DataTree.Null
     }
     DataTree.Object([
-        "id": DataTree.Text(import.id),
-        "operation": DataTree.Text(import.operation),
+        "id": DataTree.Text(~import.id),
+        "operation": DataTree.Text(~import.operation),
         "parameter_type_ids": pkg_json_texts(import.parameter_type_ids),
-        "required_right": DataTree.Text(import.required_right),
+        "required_right": DataTree.Text(~import.required_right),
         "result_type_id": result_type
     ])
 }
 
-fn pkg_extension_parse_host_imports(value: DataTree) -> [MirHostImportFact] ExtensionProtocolError! {
+fn pkg_extension_parse_host_imports(value: DataTree) -> [MIRHostImportFact] ExtensionProtocolError! {
     items :: pkg_extension_array(value, "host_imports")
-    out := [MirHostImportFact]{}
+    out := [MIRHostImportFact]{}
     loop item in items {
         object :: pkg_extension_object(item, "host import")
         pkg_extension_require_keys(object, [String]{"id", "operation", "parameter_type_ids", "required_right", "result_type_id"}, [String]{})
@@ -860,7 +862,7 @@ fn pkg_extension_parse_host_imports(value: DataTree) -> [MirHostImportFact] Exte
             .Null -> None
             else -> Val(pkg_extension_text(raw_result))
         }
-        &out.push(MirHostImportFact{
+        &out.push(MIRHostImportFact{
             id: pkg_extension_text(object["id"]),
             operation: pkg_extension_text(object["operation"]),
             required_right: pkg_extension_text(object["required_right"]),
@@ -873,7 +875,7 @@ fn pkg_extension_parse_host_imports(value: DataTree) -> [MirHostImportFact] Exte
 
 // The type, span, symbol, and host-import identities are unique and every
 // reference between them resolves; import rights are known Jet rights.
-fn pkg_extension_validate_interface_facts(types: [TypeFact], symbols: [SymbolFact], spans: [SpanFact], host_imports: [MirHostImportFact]) ExtensionProtocolError! {
+fn pkg_extension_validate_interface_facts(types: [TypeFact], symbols: [SymbolFact], spans: [SpanFact], host_imports: [MIRHostImportFact]) ExtensionProtocolError! {
     type_ids := [String]{}
     loop fact in types {
         if fact.id == "" || type_ids.contains(fact.id) -> return Err(ExtensionProtocolError.new("duplicate or empty type identity `{fact.id}`"))

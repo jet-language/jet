@@ -1,0 +1,731 @@
+// The original seam tests use the canonical evaluator and JSON arena directly.
+fn test_object(json: NixEvalJSON, node: Int) -> [String: Int] Never! {
+    json.object(node) ?? panic("fixture object")
+}
+fn test_array(json: NixEvalJSON, node: Int) -> [Int] Never! {
+    json.array(node) ?? panic("fixture array")
+}
+fn test_field(fields: [String: Int], name: String) -> Int Never! {
+    fields.get(name) ?? panic("missing fixture field `{name}`")
+}
+fn test_text(json: NixEvalJSON, fields: [String: Int], name: String) -> String Never! {
+    json.string(test_field(fields, name)) ?? panic("fixture string `{name}`")
+}
+fn test_number(json: NixEvalJSON, node: Int) -> Int Never! {
+    number :: json.number(node) ?? panic("fixture number")
+    number.integer() ?? panic("fixture integer")
+}
+fn test_devshell_error(source: String, system: String) -> NixEvalError Never! {
+    if nixeval_evaluate_devshell(source, system) == {
+        .Ok(_) -> panic("devShell must fail closed")
+        .Err(error) -> error
+    }
+}
+fn test_derivation_error(source: String, system: String) -> NixEvalError Never! {
+    if nixeval_evaluate_derivation(source, system) == {
+        .Ok(_) -> panic("derivation must fail closed")
+        .Err(error) -> error
+    }
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:19
+#Test("partial_stage_authority_is_minted_inside_seam_tests") {
+    harness :: NixEvalInternalHarness{}
+    loop stage in [NixEvalInternalStage]{.Syntax, .Values, .Evaluation, .Authority, .Derivation, .Flakes} {
+        assert_eq(harness.authorize(stage).stage, stage)
+    }
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:56
+#Test("embedded_pin_is_exact_and_missing_build_identity_blocks") {
+    manifest :: NixEvalOracleManifest.embedded() ?? panic("embedded manifest must validate")
+    assert_eq(manifest.nix_version, NIXEVAL_NIX_VERSION)
+    assert_eq(manifest.nix_tag_object, NIXEVAL_NIX_TAG_OBJECT)
+    assert_eq(manifest.nix_source_commit, NIXEVAL_NIX_SOURCE_COMMIT)
+    assert_eq(manifest.nixpkgs_revision, NIXEVAL_NIXPKGS_REVISION)
+    assert_eq(manifest.nixpkgs_last_modified, NIXEVAL_NIXPKGS_LAST_MODIFIED)
+    assert_eq(manifest.nixpkgs_nar_hash, NIXEVAL_NIXPKGS_NAR_HASH)
+    assert_eq(manifest.systems(), nixeval_required_systems())
+    assert(manifest.product_ready())
+    loop system in nixeval_required_systems() {
+        observed :: NixEvalOracleIdentity.new(system, NIXEVAL_NIXPKGS_NAR_HASH, ZERO_SRI) ?? panic("canonical identity")
+        assert(if manifest.verify_oracle(observed) == {
+            .Err(.OracleIdentityMismatch(_, _, _, _)) -> true
+            else -> false
+        })
+    }
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:77
+#Test("exact_ready_identity_verifies") {
+    manifest :: ready_manifest()
+    verified :: manifest.verify_oracle(identity(X86_64_LINUX_BUILD, X86_64_LINUX_EXECUTABLE)) ?? panic("exact ready identity must verify")
+    assert_eq(verified.system, "x86_64-linux")
+    assert(manifest.product_ready())
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:87
+#Test("build_and_executable_mismatches_fail_closed") {
+    manifest :: ready_manifest()
+    assert(if manifest.verify_oracle(identity(ZERO_SRI, ZERO_SRI)) == {
+        .Err(.OracleIdentityMismatch(_, field, _, _)) -> field == "build_nar_hash"
+        else -> false
+    })
+    assert(if manifest.verify_oracle(identity(X86_64_LINUX_BUILD, NIXEVAL_NIXPKGS_NAR_HASH)) == {
+        .Err(.OracleIdentityMismatch(_, field, _, _)) -> field == "executable_nar_hash"
+        else -> false
+    })
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:106
+#Test("matching_identity_remains_blocked_when_build_status_is_blocked") {
+    manifest :: NixEvalOracleManifest.parse_and_validate(manifest_with_identities("blocked", "bit_exact")) ?? panic("blocked manifest with identities must validate")
+    assert(if manifest.verify_oracle(identity(X86_64_LINUX_BUILD, X86_64_LINUX_EXECUTABLE)) == {
+        .Err(.OracleBuildBlocked(_, _)) -> true
+        else -> false
+    })
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:119
+#Test("every_fixed_pin_field_is_validated") {
+    mutations :: [(String, String)]{
+        (NIXEVAL_NIX_VERSION, "2.34.7"),
+        (NIXEVAL_NIX_TAG_OBJECT, "a6769c588f60b3e762f73d3a8cf60294df078ccd"),
+        (NIXEVAL_NIX_SOURCE_COMMIT, "a3f1c3c5b8ad91850e0f7c590cf177f7ab022024"),
+        (NIXEVAL_NIXPKGS_REVISION, "a5aa0fbd538984f6e3d201be0005b4463d8b09f8"),
+        ("1782723713", "1782723712"), (NIXEVAL_NIXPKGS_NAR_HASH, ZERO_SRI)
+    }
+    loop (exact_pin, mutation) in mutations {
+        changed :: NIXEVAL_ORACLE_JSON.replacen(exact_pin, mutation, 1)
+        assert_ne(changed, NIXEVAL_ORACLE_JSON)
+        assert(NixEvalOracleManifest.parse_and_validate(changed).is_err())
+    }
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:139
+#Test("duplicate_keys_are_rejected_at_every_depth") {
+    root_duplicate :: NIXEVAL_ORACLE_JSON.replacen("\"schema\": 1,", "\"schema\": 1, \"schema\": 1,", 1)
+    assert(if NixEvalOracleManifest.parse_and_validate(root_duplicate) == {
+        .Err(.Manifest(reason)) -> reason.contains("duplicate object key `schema`")
+        else -> false
+    })
+    build_duplicate :: NIXEVAL_ORACLE_JSON.replacen("\"status\": \"ready\"", "\"status\": \"ready\", \"status\": \"blocked\"", 1)
+    assert(if NixEvalOracleManifest.parse_and_validate(build_duplicate) == {
+        .Err(.Manifest(reason)) -> reason.contains("duplicate object key `status`")
+        else -> false
+    })
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:158
+#Test("malformed_or_noncanonical_sha256_sri_is_rejected") {
+    loop malformed in [String]{"sha256-build", "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==", "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/=", "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="} {
+        assert(if NixEvalOracleIdentity.new("x86_64-linux", malformed, ZERO_SRI) == {
+            .Err(.MalformedSRI(field)) -> field == "build_nar_hash"
+            else -> false
+        })
+        changed :: NIXEVAL_ORACLE_JSON.replacen("\"build_nar_hash\": \"sha256-CM7sAhHMOi6XW7Ly1Z3ASuPzMWyz828sLRpLyt7r47Y=\"", "\"build_nar_hash\": \"{malformed}\"", 1)
+        assert(NixEvalOracleManifest.parse_and_validate(changed).is_err())
+    }
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:182
+#Test("unknown_oracle_system_fails_closed") {
+    manifest :: ready_manifest()
+    observed :: NixEvalOracleIdentity.new("riscv64-linux", NIXEVAL_NIXPKGS_NAR_HASH, ZERO_SRI) ?? panic("canonical identity")
+    assert(if manifest.verify_oracle(observed) == {
+        .Err(.UnsupportedOracleSystem(_)) -> true
+        else -> false
+    })
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:192
+#Test("native_devshell_projects_literal_packages_and_loss_facts") {
+    evaluated :: nixeval_evaluate_devshell(``{
+        outputs = { devShells.x86_64-linux.default = pkgs.mkShell {
+            packages = [ pkgs.ripgrep pkgs.fd ];
+            buildInputs = with pkgs; [ nodejs ];
+            shellHook = "export FOO=1";
+        }; };
+    }``, "x86_64-linux") ?? panic("literal devShell must evaluate")
+    assert_eq(evaluated.system, "x86_64-linux")
+    assert_eq(evaluated.packages, [String]{"fd", "nodejs", "ripgrep"})
+    assert_eq(evaluated.unsupported, [String]{"shellHook"})
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:219
+#Test("native_devshell_rejects_dynamic_package_expressions") {
+    error :: test_devshell_error("{ devShells.x86_64-linux.default = pkgs.mkShell { packages = pkgs.lib.optionals true [ pkgs.fd ]; }; }", "x86_64-linux")
+    assert(if error == { .Unsupported(reason) -> reason.contains("literal package list") else -> false })
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:231
+#Test("native_devshell_keeps_unused_thunks_lazy_and_reports_forced_cycles") {
+    evaluated :: nixeval_evaluate_devshell("let unused = unused; in { devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.fd ]; }; }", "x86_64-linux") ?? panic("unused recursive thunks must remain lazy")
+    assert_eq(evaluated.packages, [String]{"fd"})
+    error :: test_devshell_error("let cycle = cycle; in { devShells.x86_64-linux.default = pkgs.mkShell { packages = [ cycle ]; }; }", "x86_64-linux")
+    assert(if error == { .Invalid(reason) -> reason.contains("cyclic foreign flake evaluation") else -> false })
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:250
+#Test("native_devshell_bounds_lazy_thunk_chains") {
+    source := "let "
+    loop index in 0..300 { source += "v{index} = v{index + 1}; " }
+    source += "v300 = pkgs.fd; in { devShells.x86_64-linux.default = pkgs.mkShell { packages = [ v0 ]; }; }"
+    error :: test_devshell_error(source, "x86_64-linux")
+    assert(if error == { .ResourceLimit(reason) -> reason.contains("expression steps") else -> false })
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:266
+#Test("native_evaluator_rejects_deeply_nested_syntax_before_stack_overflow") {
+    opening :: "(".repeat(NIXEVAL_EXPRESSION_LIMIT * 2)
+    closing :: ")".repeat(NIXEVAL_EXPRESSION_LIMIT * 2)
+    error :: test_devshell_error("{opening}true{closing}", "x86_64-linux")
+    assert(if error == { .ResourceLimit(reason) -> reason.contains("parser") && reason.contains("nested expressions") else -> false })
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:281
+#Test("native_evaluator_applies_memory_budget_before_parser_growth") {
+    padding :: " ".repeat(800000)
+    tokens :: "a ".repeat(NIXEVAL_TOKEN_LIMIT)
+    error :: test_devshell_error("{padding}{tokens}", "x86_64-linux")
+    assert(if error == { .ResourceLimit(reason) -> reason.contains("memory budget") else -> false })
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:297
+#Test("native_evaluator_applies_json_depth_budget_before_recursive_conversion") {
+    nesting :: NIXEVAL_EXPRESSION_LIMIT + 1
+    opening :: "[".repeat(nesting)
+    closing :: "]".repeat(nesting)
+    json :: "{opening}true{closing}"
+    source :: "{{ devShells.x86_64-linux.default = pkgs.mkShell {{ packages = builtins.fromJSON \"{json}\"; }}; }}"
+    error :: test_devshell_error(source, "x86_64-linux")
+    assert(if error == { .ResourceLimit(reason) -> reason.contains("JSON value is too deeply nested") else -> false })
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:313
+#Test("native_devshell_releases_lazy_scopes_after_each_evaluation") {
+    source :: "let make = packages: pkgs.mkShell { packages = packages; }; in { outputs = { devShells.x86_64-linux.default = make [ pkgs.fd ]; }; }"
+    loop _ in 0..256 {
+        evaluated :: nixeval_evaluate_devshell(source, "x86_64-linux") ?? panic("repeated bounded evaluations must remain valid")
+        assert_eq(evaluated.packages, [String]{"fd"})
+    }
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:324
+#Test("native_devshell_rejects_truncated_expressions_without_panicking") {
+    loop source in [String]{"let", "let value =", "[", "{ outputs =", "(pkgs.mkShell"} {
+        assert(nixeval_evaluate_devshell(source, "x86_64-linux").is_err())
+    }
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:331
+#Test("native_evaluator_rejects_oversized_input_before_parsing") {
+    source :: "x".repeat((1 << 20) + 1)
+    assert(if nixeval_evaluate_devshell(source, "x86_64-linux") == { .Err(.InputTooLarge) -> true else -> false })
+    assert(if nixeval_evaluate_derivation(source, "x86_64-linux") == { .Err(.InputTooLarge) -> true else -> false })
+    assert(if nixeval_evaluate_derivation_output(source, "x86_64-linux", "out") == { .Err(.InputTooLarge) -> true else -> false })
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:348
+#Test("native_devshell_evaluates_indented_string_interpolation") {
+    evaluated :: nixeval_evaluate_devshell(``{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ ''${pkgs.fd}'' ]; }; }``, "x86_64-linux") ?? panic("indented string interpolation must evaluate")
+    assert_eq(evaluated.packages, [String]{"fd"})
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:358
+#Test("native_devshell_preserves_string_contexts_during_projection") {
+    evaluated :: nixeval_evaluate_devshell(``{
+        devShells.x86_64-linux.default = pkgs.mkShell {
+            packages = [ "${pkgs.fd}" (builtins.toString pkgs.ripgrep) ];
+            shellHook = "echo ${pkgs.fd}";
+        };
+    }``, "x86_64-linux") ?? panic("bounded string contexts must evaluate")
+    assert_eq(evaluated.packages, [String]{"fd", "ripgrep"})
+    assert_eq(evaluated.unsupported, [String]{"shellHook"})
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:377
+#Test("native_devshell_rejects_path_and_import_without_authority") {
+    path_error :: test_devshell_error("{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ /tmp/package ]; }; }", "x86_64-linux")
+    assert(if path_error == { .Unsupported(reason) -> reason.contains("absolute paths") else -> false })
+    import_error :: test_devshell_error("{ devShells.x86_64-linux.default = import ./shell.nix; }", "x86_64-linux")
+    assert(if import_error == { .Unsupported(reason) -> reason.contains("explicit project-root authority") else -> false })
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:398
+#Test("native_devshell_imports_bounded_relative_sources") {
+    files :: [String: String]{
+        "sub/shell.nix": ``{ pkgs }: pkgs.mkShell { packages = [ "${pkgs.fd}" ]; buildInputs = import ../inputs.nix pkgs; }``,
+        "inputs.nix": "pkgs: [ (builtins.toString pkgs.ripgrep) ]"
+    }
+    authority :: NixEvalAuthority{answer: fn(path: String) -> String NixEvalError! {
+        files.get(path) ?? return Err(NixEvalError.Denied("missing test import `{path}`"))
+    }}
+    evaluated :: nixeval_evaluate_devshell_with_import_authority("{ outputs = { devShells.x86_64-linux.default = (import ./sub/shell.nix) { pkgs = pkgs; }; }; }", "x86_64-linux", Val(^authority)) ?? panic("authorized relative imports must evaluate")
+    assert_eq(evaluated.packages, [String]{"fd", "ripgrep"})
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:427
+#Test("native_devshell_does_not_coerce_path_contexts_into_packages") {
+    authority :: NixEvalAuthority{answer: fn(_: String) -> String NixEvalError! { "pkgs.fd" }}
+    error :: if nixeval_evaluate_devshell_with_import_authority(``{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ "${./package}" ]; }; }``, "x86_64-linux", Val(^authority)) == {
+        .Ok(_) -> panic("path string contexts must not become package names")
+        .Err(error) -> error
+    }
+    assert(if error == { .Unsupported(reason) -> reason.contains("path string contexts") else -> false })
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:441
+#Test("native_devshell_import_authority_rejects_escape_and_cycles") {
+    escape_authority :: NixEvalAuthority{answer: fn(path: String) -> String NixEvalError! { "{path}: not used" }}
+    escape :: if nixeval_evaluate_devshell_with_import_authority("{ devShells.x86_64-linux.default = import ../outside.nix; }", "x86_64-linux", Val(^escape_authority)) == {
+        .Ok(_) -> panic("parent imports must not escape the project root")
+        .Err(error) -> error
+    }
+    assert(if escape == { .Unsupported(reason) -> reason.contains("escapes") else -> false })
+    cycle_authority :: NixEvalAuthority{answer: fn(path: String) -> String NixEvalError! {
+        if path == "a.nix" -> "import ./a.nix" else -> "pkgs.fd"
+    }}
+    cycle :: if nixeval_evaluate_devshell_with_import_authority("{ devShells.x86_64-linux.default = import ./a.nix; }", "x86_64-linux", Val(^cycle_authority)) == {
+        .Ok(_) -> panic("cyclic imports must fail closed")
+        .Err(error) -> error
+    }
+    assert(if cycle == { .Invalid(reason) -> reason.contains("cyclic") else -> false })
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:467
+#Test("stage_a_authority_fixture_matches_native_projection") {
+    fixture :: NixEvalJSON.parse(STAGE_A_AUTHORITY_FIXTURE) ?? panic("authority fixture must parse")
+    root :: test_object(fixture, fixture.root)
+    loop value_node in test_array(fixture, test_field(root, "values")) {
+        value :: test_object(fixture, value_node)
+        source :: test_text(fixture, value, "source")
+        system :: test_text(fixture, value, "system")
+        files :: test_object(fixture, test_field(value, "files"))
+        imports := [String: String]{}
+        loop path in nixeval_sorted(files.keys().to_list()) {
+            &imports.insert(path, fixture.string(test_field(files, path)) ?? panic("fixture import source"))
+        }
+        authority :: NixEvalAuthority{answer: fn(path: String) -> String NixEvalError! {
+            imports.get(path) ?? return Err(NixEvalError.Denied("fixture has no `{path}`"))
+        }}
+        evaluated :: nixeval_evaluate_devshell_with_import_authority(source, system, Val(^authority)) ?? panic("authority fixture source must evaluate")
+        assert_eq(evaluated.packages, fixture_strings(fixture, test_field(value, "jet_packages")))
+        assert_eq(evaluated.unsupported, fixture_strings(fixture, test_field(value, "jet_unsupported")))
+    }
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:504
+#Test("stage_a_differential_fixture_matches_native_projection") {
+    fixture :: NixEvalJSON.parse(STAGE_A_FIXTURE) ?? panic("Stage A fixture must parse")
+    root :: test_object(fixture, fixture.root)
+    values :: test_array(fixture, test_field(root, "values"))
+    loop value_node in values {
+        value :: test_object(fixture, value_node)
+        source :: test_text(fixture, value, "source")
+        system :: test_text(fixture, value, "system")
+        output :: if value.get("output") == {
+            .Val(node) -> fixture.string(node) ?? "default"
+            else -> "default"
+        }
+        evaluated :: nixeval_evaluate_devshell_output(source, system, output) ?? panic("pinned Stage A devShell value must evaluate")
+        assert_eq(evaluated.packages, fixture_strings(fixture, test_field(value, "jet_packages")))
+        assert_eq(evaluated.unsupported, fixture_strings(fixture, test_field(value, "jet_unsupported")))
+    }
+    value_case :: test_object(fixture, values[0])
+    nix_value :: test_object(fixture, test_field(value_case, "nix_value"))
+    assert_eq(fixture_strings(fixture, test_field(nix_value, "packages")), [String]{"ripgrep", "fd"})
+    assert_eq(fixture_strings(fixture, test_field(nix_value, "buildInputs")), [String]{"nodejs"})
+    errors :: test_array(fixture, test_field(root, "errors"))
+    error_case :: test_object(fixture, errors[0])
+    error :: test_devshell_error(test_text(fixture, error_case, "source"), "x86_64-linux")
+    assert_eq(error.message(), test_text(fixture, error_case, "jet_error"))
+    error_value :: test_object(fixture, test_field(error_case, "nix_value"))
+    assert_eq(fixture_strings(fixture, test_field(error_value, "packages")), [String]{"fd"})
+    locks :: test_array(fixture, test_field(root, "locks"))
+    lock_case :: test_object(fixture, locks[0])
+    lock :: test_object(fixture, test_field(lock_case, "nix_value"))
+    assert_eq(test_number(fixture, test_field(lock, "version")), 7)
+    nodes :: test_object(fixture, test_field(lock, "nodes"))
+    nixpkgs :: test_object(fixture, test_field(nodes, "nixpkgs"))
+    locked :: test_object(fixture, test_field(nixpkgs, "locked"))
+    assert_eq(test_text(fixture, locked, "rev"), NIXEVAL_NIXPKGS_REVISION)
+    assert_eq(test_text(fixture, locked, "narHash"), NIXEVAL_NIXPKGS_NAR_HASH)
+    identities :: test_object(fixture, test_field(root, "output_identities"))
+    manifest :: NixEvalOracleManifest.embedded() ?? panic("embedded manifest")
+    loop system in nixeval_required_systems() {
+        fixture_identity :: test_object(fixture, test_field(identities, system))
+        manifest_identity :: manifest.builds.get(system) ?? panic("required manifest system")
+        assert_eq(test_text(fixture, fixture_identity, "build_nar_hash"), manifest_identity.build_nar_hash ?? panic("build hash"))
+        assert_eq(test_text(fixture, fixture_identity, "executable_nar_hash"), manifest_identity.executable_nar_hash ?? panic("executable hash"))
+    }
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:665
+#Test("breadth_fixture_matches_native_projection_for_every_seed") {
+    fixture :: NixEvalJSON.parse(BREADTH_FIXTURE) ?? panic("breadth fixture must parse")
+    root :: test_object(fixture, fixture.root)
+    seeds := [Int]{}
+    loop seed in test_array(fixture, test_field(root, "fuzz_seeds")) { &seeds.push(test_number(fixture, seed)) }
+    loop node in test_array(fixture, test_field(root, "values")) {
+        value :: test_object(fixture, node)
+        source :: test_text(fixture, value, "source")
+        system :: test_text(fixture, value, "system")
+        packages :: fixture_strings(fixture, test_field(value, "jet_packages"))
+        unsupported :: fixture_strings(fixture, test_field(value, "jet_unsupported"))
+        nix_value :: test_object(fixture, test_field(value, "nix_value"))
+        assert_eq(fixture_strings(fixture, test_field(nix_value, "packages")), packages)
+        output :: if value.get("output") == { .Val(node) -> fixture.string(node) ?? "default" else -> "default" }
+        loop seed in seeds {
+            evaluated :: nixeval_evaluate_devshell_output(breadth_variant(source, seed), system, output) ?? panic("seeded breadth value must evaluate")
+            assert_eq(evaluated.packages, packages)
+            assert_eq(evaluated.unsupported, unsupported)
+        }
+    }
+    loop node in test_array(fixture, test_field(root, "errors")) {
+        error_case :: test_object(fixture, node)
+        source :: test_text(fixture, error_case, "source")
+        system :: test_text(fixture, error_case, "system")
+        expected :: test_text(fixture, error_case, "jet_error")
+        loop seed in seeds {
+            error :: test_devshell_error(breadth_variant(source, seed), system)
+            assert_eq(error.message(), expected)
+        }
+    }
+    budgets :: test_object(fixture, test_field(root, "budgets"))
+    budget :: nixeval_budget()
+    assert_eq(test_number(fixture, test_field(budgets, "input_bytes")), budget.input_bytes)
+    assert_eq(test_number(fixture, test_field(budgets, "tokens")), budget.tokens)
+    assert_eq(test_number(fixture, test_field(budgets, "expression_steps")), budget.expression_steps)
+    assert_eq(test_number(fixture, test_field(budgets, "imports")), budget.imports)
+    assert_eq(test_number(fixture, test_field(budgets, "string_bytes")), budget.string_bytes)
+    assert_eq(test_number(fixture, test_field(budgets, "memory_bytes")), NIXEVAL_MEMORY_BYTES)
+    assert_eq(test_number(fixture, test_field(budgets, "latency_micros")), NIXEVAL_LATENCY_MICROS)
+    // Latency is a declared budget, not a loaded-machine wall-clock test.
+    // Deterministic cost is pinned above; measured latency belongs in benchmarks.
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:758
+#Test("breadth_fixture_pins_lock_and_output_identity_corpus") {
+    breadth :: NixEvalJSON.parse(BREADTH_FIXTURE) ?? panic("breadth fixture must parse")
+    root :: test_object(breadth, breadth.root)
+    stage_a :: NixEvalJSON.parse(STAGE_A_FIXTURE) ?? panic("Stage A fixture must parse")
+    stage_root :: test_object(stage_a, stage_a.root)
+    assert(breadth.same(test_field(root, "locks"), stage_a, test_field(stage_root, "locks")))
+    assert(breadth.same(test_field(root, "output_identities"), stage_a, test_field(stage_root, "output_identities")))
+    identities :: test_object(breadth, test_field(root, "output_identities"))
+    manifest :: NixEvalOracleManifest.embedded() ?? panic("embedded oracle manifest")
+    loop system in nixeval_sorted(identities.keys().to_list()) {
+        fields :: test_object(breadth, test_field(identities, system))
+        observed :: NixEvalOracleIdentity.new(system, test_text(breadth, fields, "build_nar_hash"), test_text(breadth, fields, "executable_nar_hash")) ?? panic("fixture output identity must use canonical SRI")
+        _ :: manifest.verify_oracle(observed) ?? panic("fixture output identity must match pinned oracle")
+    }
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:808
+#Test("native_devshell_rejects_unknown_systems_and_empty_flakes") {
+    assert(if nixeval_evaluate_devshell("{ }", "x86_64-windows") == { .Err(.UnsupportedSystem(_)) -> true else -> false })
+    assert(if nixeval_evaluate_devshell("{ }", "x86_64-linux") == { .Err(.Unsupported(reason)) -> reason.contains("devShell") else -> false })
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:820
+#Test("pinned_inventory_has_no_implicit_skip_reason") {
+    inventory :: nixeval_pinned_inventory()
+    // The committed inventory remains the independent expected corpus.
+    manifest :: NixEvalJSON.parse(prep { embed_file("../../../tests/fixtures/nix-compat/pinned-inventory.json") }) ?? panic("inventory manifest JSON")
+    object :: test_object(manifest, manifest.root)
+    assert_eq(test_number(manifest, test_field(object, "schema")), 1)
+    assert_eq(test_text(manifest, object, "nix_version"), NIXEVAL_NIX_VERSION)
+    assert_eq(test_text(manifest, object, "nixpkgs_revision"), NIXEVAL_NIXPKGS_REVISION)
+    assert_eq(fixture_strings(manifest, test_field(object, "systems")), nixeval_required_systems())
+    entries :: test_array(manifest, test_field(object, "entries"))
+    assert_eq(entries.len(), 17)
+    assert_eq(inventory.len(), entries.len())
+    counts :: test_object(manifest, test_field(object, "expected_counts"))
+    assert_eq(test_number(manifest, test_field(counts, "evaluable")), 10)
+    assert_eq(test_number(manifest, test_field(counts, "buildable")), 5)
+    assert_eq(test_number(manifest, test_field(counts, "skipped")), 2)
+    covered := 0
+    skipped := 0
+    has_devshells := false
+    loop index in 0..inventory.len() {
+        entry :: inventory[index]
+        if entry.status == NixEvalInventoryStatus.Covered -> covered += 1 else -> skipped += 1
+        if entry.surface == "devshells" && entry.status == NixEvalInventoryStatus.Covered -> has_devshells = true
+        fields :: test_object(manifest, entries[index])
+        assert_eq(test_text(manifest, fields, "surface"), entry.surface)
+        assert_eq(test_text(manifest, fields, "status"), entry.status.label())
+        assert_eq(test_text(manifest, fields, "class"), entry.class.label())
+        reason := entry.reason.trim() // #4303
+        assert(!reason.is_empty())
+        assert_eq(test_text(manifest, fields, "reason"), entry.reason)
+    }
+    assert_eq(covered, 15)
+    assert_eq(skipped, 2)
+    assert(has_devshells)
+    budget :: nixeval_budget()
+    assert_eq(budget.input_bytes, 1 << 20)
+    assert_eq(budget.tokens, 65536)
+    assert_eq(budget.expression_steps, 256)
+    assert_eq(budget.imports, 64)
+    assert_eq(budget.string_bytes, 1 << 20)
+    assert(budget.expression_steps < budget.tokens)
+    assert(budget.imports < budget.expression_steps)
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:909
+#Test("native_derivation_builds_a_pure_request_with_required_builtins") {
+    evaluated :: nixeval_evaluate_derivation(``builtins.derivationStrict {
+        name = builtins.concatStringsSep "-" [ "hello" "native" ];
+        system = builtins.currentSystem;
+        builder = "/bin/sh";
+        args = builtins.map (value: value) [ "-c" "echo hi > $out" ];
+        message = builtins.toJSON (builtins.fromJSON "{\"ok\":true,\"count\":2}");
+        source = builtins.storePath "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-source";
+    }``, "x86_64-linux") ?? panic("required derivation builtins must evaluate")
+    assert_eq(evaluated.name, "hello-native")
+    assert_eq(evaluated.system, "x86_64-linux")
+    assert_eq(evaluated.builder, "/bin/sh")
+    assert_eq(evaluated.args, [String]{"-c", "echo hi > $out"})
+    assert_eq(evaluated.env.get("message"), Val("{\"count\":2,\"ok\":true}"))
+    assert_eq(evaluated.input_sources, [String]{"/nix/store/0123456789abcdfghijklmnpqrsvwxyz-source"})
+    assert_eq(evaluated.outputs[0].name, "out")
+    assert_eq(evaluated.outputs[0].method_algo, "")
+    assert_eq(evaluated.outputs[0].hash_hex, "")
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:945
+#Test("native_derivation_keeps_lazy_fields_lazy_until_strict") {
+    evaluated :: nixeval_evaluate_devshell(``
+        let d = builtins.derivation {
+            name = "lazy"; system = "x86_64-linux"; builder = "/bin/sh"; unused = unused;
+        };
+        in { devShells.x86_64-linux.default = pkgs.mkShell { packages = [ d.type ]; }; }
+    ``, "x86_64-linux") ?? panic("derivation must not force unused lazy fields")
+    assert_eq(evaluated.packages, [String]{"derivation"})
+    error :: test_devshell_error(``
+        let d = builtins.derivationStrict {
+            name = "strict"; system = "x86_64-linux"; builder = "/bin/sh"; unused = unused;
+        };
+        in { devShells.x86_64-linux.default = pkgs.mkShell { packages = [ d.type ]; }; }
+    ``, "x86_64-linux")
+    assert(if error == { .Invalid(reason) -> reason.contains("missing foreign flake value `unused`") else -> false })
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:980
+#Test("native_required_string_builtins_match_nix_edge_ordering") {
+    evaluated :: nixeval_evaluate_derivation(``builtins.derivation { name = builtins.replaceStrings [ "a" "ab" ] [ "X" "Y" ] "ab"; system = "x86_64-linux"; builder = "/bin/sh"; }``, "x86_64-linux") ?? panic("replaceStrings must use Nix list order")
+    assert_eq(evaluated.name, "Xb")
+    substring :: nixeval_evaluate_derivation(``builtins.derivation { name = builtins.substring 1 (-1) "abc"; system = "x86_64-linux"; builder = "/bin/sh"; }``, "x86_64-linux") ?? panic("negative substring length must mean the remainder")
+    assert_eq(substring.name, "bc")
+    error :: test_derivation_error(``builtins.derivation { name = builtins.substring (-1) 2 "abc"; system = "x86_64-linux"; builder = "/bin/sh"; }``, "x86_64-linux")
+    assert(if error == { .Invalid(reason) -> reason.contains("negative start") else -> false })
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:1004
+#Test("native_derivation_rejects_noncanonical_inputs_and_preserves_multiple_outputs") {
+    path_error :: test_derivation_error(``builtins.derivation { name = "bad"; system = "x86_64-linux"; builder = "/bin/sh"; src = "${pkgs.fd}"; }``, "x86_64-linux")
+    assert(if path_error == { .Unsupported(reason) -> reason.contains("canonical store-path context") else -> false })
+    evaluated :: nixeval_evaluate_derivation(``builtins.derivation { name = "many"; system = "x86_64-linux"; builder = "/bin/sh"; outputs = [ "out" "dev" ]; }``, "x86_64-linux") ?? panic("bounded evaluator must preserve non-fixed output declarations")
+    names := [String]{}
+    loop output in evaluated.outputs { &names.push(output.name) }
+    assert_eq(names, [String]{"out", "dev"})
+    assert_eq(evaluated.env.get("dev"), Val(""))
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:1031
+#Test("native_derivation_rejects_duplicate_or_invalid_outputs") {
+    loop source in [String]{
+        ``builtins.derivation { name = "duplicate"; system = "x86_64-linux"; builder = "/bin/sh"; outputs = [ "out" "out" ]; }``,
+        ``builtins.derivation { name = "invalid"; system = "x86_64-linux"; builder = "/bin/sh"; outputs = [ "out" "bad/name" ]; }``
+    } {
+        error :: test_derivation_error(source, "x86_64-linux")
+        assert(if error == { .Invalid(reason) -> reason.contains("output") else -> false })
+    }
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:1043
+#Test("native_derivation_fixture_matches_pure_request") {
+    fixture :: NixEvalJSON.parse(STAGE_A_DERIVATION_FIXTURE) ?? panic("derivation fixture must parse")
+    root :: test_object(fixture, fixture.root)
+    loop node in test_array(fixture, test_field(root, "values")) {
+        value :: test_object(fixture, node)
+        evaluated :: nixeval_evaluate_derivation(test_text(fixture, value, "source"), test_text(fixture, value, "system")) ?? panic("fixture derivation must evaluate natively")
+        expected :: test_object(fixture, test_field(value, "jet_request"))
+        assert_eq(evaluated.name, test_text(fixture, expected, "name"))
+        assert_eq(evaluated.system, test_text(fixture, expected, "system"))
+        assert_eq(evaluated.builder, test_text(fixture, expected, "builder"))
+        assert_eq(evaluated.args, fixture_strings(fixture, test_field(expected, "args")))
+        assert_eq(evaluated.input_sources, fixture_strings(fixture, test_field(expected, "input_sources")))
+        expected_outputs :: if expected.get("outputs") == {
+            .Val(outputs) -> test_array(fixture, outputs)
+            else -> [Int]{test_field(expected, "output")}
+        }
+        assert_eq(evaluated.outputs.len(), expected_outputs.len())
+        output_index := [String: Int]{}
+        loop index in 0..evaluated.outputs.len() { &output_index.insert(evaluated.outputs[index].name, index) }
+        loop expected_node in expected_outputs {
+            expected_output :: test_object(fixture, expected_node)
+            name :: test_text(fixture, expected_output, "name")
+            index :: output_index.get(name) ?? panic("fixture output name")
+            output :: evaluated.outputs[index]
+            assert_eq(output.method_algo, test_text(fixture, expected_output, "method_algo"))
+            assert_eq(output.hash_hex, test_text(fixture, expected_output, "hash_hex"))
+        }
+    }
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:1113
+#Test("native_devshell_treats_indented_hooks_as_unsupported_loss") {
+    evaluated :: nixeval_evaluate_devshell(``{
+        devShells.x86_64-linux.default = pkgs.mkShell {
+            packages = [ pkgs.fd ];
+            shellHook = ''
+                # packages = [ pkgs.must-not-leak ];
+                export FOO=1
+            '';
+        };
+    }``, "x86_64-linux") ?? panic("indented shell hooks must not confuse package extraction")
+    assert_eq(evaluated.packages, [String]{"fd"})
+    assert_eq(evaluated.unsupported, [String]{"shellHook"})
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:1132
+#Test("native_devshell_applies_bounded_package_overlays") {
+    evaluated :: nixeval_evaluate_devshell(``
+        let overlay = final: prev: { custom = prev.fd; };
+        in {
+            devShells.x86_64-linux.default =
+                (import pkgs { overlays = [ overlay ]; }).mkShell {
+                    packages = [ (import pkgs { overlays = [ overlay ]; }).custom ];
+                };
+        }
+    ``, "x86_64-linux") ?? panic("bounded package overlays must project package identities")
+    assert_eq(evaluated.packages, [String]{"fd"})
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:1150
+#Test("native_devshell_overlay_final_sees_following_override_and_prev_stays_stable") {
+    evaluated :: nixeval_evaluate_devshell(``
+        let first = final: prev: { from_prev = prev.fd; from_final = final.future; };
+        second = final: prev: { future = prev.ripgrep; second_view = final.future; };
+        in {
+            devShells.x86_64-linux.default =
+                (import pkgs { overlays = [ first second ]; }).mkShell {
+                    packages = [
+                        (import pkgs { overlays = [ first second ]; }).from_prev
+                        (import pkgs { overlays = [ first second ]; }).from_final
+                        (import pkgs { overlays = [ first second ]; }).second_view
+                    ];
+                };
+        }
+    ``, "x86_64-linux") ?? panic("overlay final/prev projections must remain deterministic")
+    assert_eq(evaluated.packages, [String]{"fd", "ripgrep"})
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:1179
+#Test("native_devshell_merge_keeps_overlay_packages_lazy") {
+    evaluated :: nixeval_evaluate_devshell(``
+        let overlayPkgs = pkgs // { custom = pkgs.ripgrep; };
+        in { devShells.x86_64-linux.default = overlayPkgs.mkShell { packages = [ overlayPkgs.custom ]; }; }
+    ``, "x86_64-linux") ?? panic("package-set merge must preserve explicit overlay fields")
+    assert_eq(evaluated.packages, [String]{"ripgrep"})
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:1192
+#Test("native_evaluator_rejects_fetchers_and_cross_system_packages_without_authority") {
+    fetch_error :: test_devshell_error(``{
+        devShells.x86_64-linux.default = pkgs.mkShell {
+            packages = [ (builtins.fetchurl { url = "https://example.invalid/source"; }) ];
+        };
+    }``, "x86_64-linux")
+    assert(if fetch_error == { .Unsupported(reason) -> reason.contains("explicit fetch authority") else -> false })
+    cross_error :: test_devshell_error("{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.pkgsCross.aarch64-multiplatform.foo ]; }; }", "x86_64-linux")
+    assert(if cross_error == { .Unsupported(reason) -> reason.contains("explicit target") else -> false })
+    external_flake_error :: test_devshell_error(``{
+        devShells.x86_64-linux.default = pkgs.mkShell {
+            packages = [ (builtins.getFlake "github:NixOS/nixpkgs") ];
+        };
+    }``, "x86_64-linux")
+    assert(if external_flake_error == { .Unsupported(reason) -> reason.contains("external flakes") && reason.contains("provider authority") else -> false })
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:1236
+#Test("breadth_authority_fixture_matches_pinned_values_and_derivation_inputs") {
+    fixture :: NixEvalJSON.parse(BREADTH_FIXTURE) ?? panic("breadth fixture must parse")
+    root :: test_object(fixture, fixture.root)
+    loop node in test_array(fixture, test_field(root, "authority_values")) {
+        case :: test_object(fixture, node)
+        source :: test_text(fixture, case, "source")
+        system :: test_text(fixture, case, "system")
+        response_fields :: test_object(fixture, test_field(case, "authority"))
+        responses := [String: String]{}
+        loop request in nixeval_sorted(response_fields.keys().to_list()) {
+            &responses.insert(request, fixture.string(test_field(response_fields, request)) ?? panic("authority response string"))
+        }
+        expected_packages :: fixture_strings(fixture, test_field(case, "jet_packages"))
+        expected_cross_packages :: fixture_strings(fixture, test_field(case, "jet_cross_packages"))
+        expected_unsupported :: fixture_strings(fixture, test_field(case, "jet_unsupported"))
+        nix_value :: test_object(fixture, test_field(case, "nix_value"))
+        assert_eq(fixture_strings(fixture, test_field(nix_value, "packages")), expected_packages)
+        nix_cross_packages :: if nix_value.get("cross_packages") == {
+            .Val(node) -> fixture_strings(fixture, node)
+            else -> [String]{}
+        }
+        assert_eq(nix_cross_packages, expected_cross_packages)
+        loop seed_node in test_array(fixture, test_field(root, "fuzz_seeds")) {
+            seed :: test_number(fixture, seed_node)
+            authority :: NixEvalAuthority{answer: fn(request: String) -> String NixEvalError! {
+                responses.get(request) ?? return Err(NixEvalError.Denied("unlisted authority request `{request}`"))
+            }}
+            evaluated :: nixeval_evaluate_devshell_with_import_authority(breadth_variant(source, seed), system, Val(^authority)) ?? panic("authorized breadth value must evaluate")
+            assert_eq(evaluated.packages, expected_packages)
+            assert_eq(evaluated.cross_packages, expected_cross_packages)
+            assert_eq(evaluated.unsupported, expected_unsupported)
+        }
+    }
+    loop node in test_array(fixture, test_field(root, "authority_derivations")) {
+        case :: test_object(fixture, node)
+        source :: test_text(fixture, case, "source")
+        system :: test_text(fixture, case, "system")
+        response_fields :: test_object(fixture, test_field(case, "authority"))
+        responses := [String: String]{}
+        loop request in nixeval_sorted(response_fields.keys().to_list()) {
+            &responses.insert(request, fixture.string(test_field(response_fields, request)) ?? panic("authority response string"))
+        }
+        expected_inputs :: fixture_strings(fixture, test_field(case, "jet_input_sources"))
+        loop seed_node in test_array(fixture, test_field(root, "fuzz_seeds")) {
+            seed :: test_number(fixture, seed_node)
+            authority :: NixEvalAuthority{answer: fn(request: String) -> String NixEvalError! {
+                responses.get(request) ?? return Err(NixEvalError.Denied("unlisted authority request `{request}`"))
+            }}
+            evaluated :: nixeval_evaluate_derivation_with_import_authority(breadth_variant(source, seed), system, Val(^authority)) ?? panic("authorized fixed-output derivation must evaluate")
+            assert_eq(evaluated.input_sources, expected_inputs)
+        }
+        nix_value :: test_object(fixture, test_field(case, "nix_value"))
+        assert_eq(expected_inputs, fixture_strings(fixture, test_field(nix_value, "input_sources")))
+    }
+}
+
+// Rust: crates/jet-nix-eval/src/tests.rs:1376
+#Test("breadth_derivation_fixture_matches_native_multi_output_request") {
+    fixture :: NixEvalJSON.parse(BREADTH_FIXTURE) ?? panic("breadth fixture must parse")
+    root :: test_object(fixture, fixture.root)
+    loop node in test_array(fixture, test_field(root, "derivations")) {
+        case :: test_object(fixture, node)
+        evaluated :: nixeval_evaluate_derivation(test_text(fixture, case, "source"), test_text(fixture, case, "system")) ?? panic("breadth derivation must evaluate natively")
+        assert_eq(evaluated.input_sources, fixture_strings(fixture, test_field(case, "jet_input_sources")))
+        expected_outputs :: test_array(fixture, test_field(case, "jet_outputs"))
+        assert_eq(evaluated.outputs.len(), expected_outputs.len())
+        output_index := [String: Int]{}
+        loop index in 0..evaluated.outputs.len() { &output_index.insert(evaluated.outputs[index].name, index) }
+        loop expected_node in expected_outputs {
+            expected :: test_object(fixture, expected_node)
+            name :: test_text(fixture, expected, "name")
+            index :: output_index.get(name) ?? panic("breadth output name")
+            actual :: evaluated.outputs[index]
+            assert_eq(actual.method_algo, test_text(fixture, expected, "method_algo"))
+            assert_eq(actual.hash_hex, test_text(fixture, expected, "hash_hex"))
+        }
+    }
+}

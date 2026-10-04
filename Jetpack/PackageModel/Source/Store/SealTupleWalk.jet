@@ -43,7 +43,7 @@ fn pkg_seal_collect_tuples(path: String, relative: String, tuples: &[SealTuple])
     if info.is_symlink || info.is_file {
         kind :: if info.is_symlink -> U8{108} else -> U8{102}
         &tuples.push(SealTuple{relative: relative, kind: kind, inode: info.id.inode, size: info.size, mtime_ns: info.modified.unix_ns})
-        return Ok()
+        return
     }
     if !info.is_dir {
         return Err(IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("Hangar object contains an unsupported node: {path}")}))
@@ -54,5 +54,4 @@ fn pkg_seal_collect_tuples(path: String, relative: String, tuples: &[SealTuple])
         child :: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
         pkg_seal_collect_tuples(entry.path, child, &tuples)
     }
-    Ok()
 }

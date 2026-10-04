@@ -1,0 +1,63 @@
+// Source/CmdCompile.rs:1-1859 has no original inline tests. These controls
+// exercise the translated pure helpers without native host substitutes.
+fn compile_host_test_replay_header(header: [U8]) -> [U8] Never! {
+    bytes := [U8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    &bytes.extend(U32{header.len()}.to_le_bytes())
+    &bytes.extend(header)
+    bytes
+}
+
+// Rust: Source/CmdCompile.rs:230
+#Test("compile_replay_artifact_header_validation_order") {
+    assert_eq(replay_artifact_id([]), Err("replay artifact is truncated before its header"))
+    truncated := [U8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0}
+    assert_eq(replay_artifact_id(truncated), Err("replay artifact header is truncated"))
+    assert_eq(replay_artifact_id(compile_host_test_replay_header([U8]{255})), Err("replay artifact header is not UTF-8"))
+    assert_eq(replay_artifact_id(compile_host_test_replay_header("not JSON".bytes())), Err("replay artifact header is not valid JSON"))
+    assert_eq(replay_artifact_id(compile_host_test_replay_header("[]".bytes())), Err("replay artifact header is not a JSON object"))
+    assert_eq(replay_artifact_id(compile_host_test_replay_header("{{}}".bytes())), Err("replay artifact header has no artifact_id"))
+    assert_eq(replay_artifact_id(compile_host_test_replay_header("{{\"artifact_id\":7}}".bytes())), Err("replay artifact header has no artifact_id"))
+    assert_eq(replay_artifact_id(compile_host_test_replay_header("{{\"artifact_id\":\"sha256-example\"}}".bytes())), Ok("sha256-example"))
+}
+
+// Rust: Source/CmdCompile.rs:650,672,956
+#Test("compile_vector_projection_retains_row_order_and_escapes") {
+    rows :: [(String, USize, USize, String, String, String, String)]{
+        ("f\"", 3, 9, "rule", "packed", "4", "accepted"),
+        ("g", 0, 1, "rule", "scalar", "none", "rejected")
+    }
+    assert_eq(vector_build_projection_json([]), "[]")
+    assert_eq(vector_build_projection_text([]), "")
+    assert_eq(vector_build_projection_text(rows), "vector\tf\"\t3..9\trule\tpacked\t4\taccepted\nvector\tg\t0..1\trule\tscalar\tnone\trejected\n")
+    assert_eq(vector_build_projection_json(rows), "[{{\"function\":\"f\\\"\",\"span\":{{\"start\":3,\"end\":9}},\"rule\":\"rule\",\"layout\":\"packed\",\"lane\":\"4\",\"decision\":\"accepted\"}},{{\"function\":\"g\",\"span\":{{\"start\":0,\"end\":1}},\"rule\":\"rule\",\"layout\":\"scalar\",\"lane\":\"none\",\"decision\":\"rejected\"}}]")
+    assert_eq(json_strings(["a\"", "b\n"]), "[\"a\\\"\",\"b\\n\"]")
+}
+
+// Rust: Source/CmdCompile.rs:1023
+#Test("compile_authority_relative_path_rejects_outside_root") {
+    assert_eq(authority_relative_path(OSPath.from("/project"), OSPath.from("/project/main.jet")), Val(OSPath.from("main.jet")))
+    assert_eq(authority_relative_path(OSPath.from("/project"), OSPath.from("/other/main.jet")), None)
+    assert_eq(authority_relative_path(OSPath.from(""), OSPath.from("main.jet")), Val(OSPath.from("main.jet")))
+    assert_eq(authority_relative_path(OSPath.from("/project"), OSPath.from("/project")), None)
+}
+
+// Rust: Source/CmdCompile.rs:1198
+#Test("compile_invocation_authority_union_is_sorted_and_denials_retained") {
+    projection := EffectProjection{required_effects: ["FS.Read"], granted_effects: ["Mem"], denied_effects: ["Net"], authority: "package"}
+    merge_invocation_authority(&projection, None)
+    assert_eq(projection.authority, "package")
+    invocation :: ApplicationAuthority{required_effects: [], granted_effects: ["FS.Read", "Mem"], denied_effects: ["Net", "Exec"], authority: "once"}
+    merge_invocation_authority(&projection, Val(invocation))
+    assert_eq(projection.required_effects, ["FS.Read"])
+    assert_eq(projection.granted_effects, ["FS.Read", "Mem"])
+    assert_eq(projection.denied_effects, ["Exec", "Net"])
+    assert_eq(projection.authority, "package + once")
+}
+
+// Rust: Source/CmdCompile.rs:1637
+#Test("compile_authority_prompt_names_every_right_before_question") {
+    assert_eq(authority_confirmation_prompt("main.jet", []), "main.jet will:\nRun it? [Y/n/always] ")
+    right :: "FS.Read"
+    action :: effect_action(right)
+    assert_eq(authority_confirmation_prompt("main.jet", [right]), "main.jet will:\n  {action}  {right}\nRun it? [Y/n/always] ")
+}

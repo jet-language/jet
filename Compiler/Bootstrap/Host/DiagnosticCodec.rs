@@ -10,11 +10,17 @@ fn __jet_bootstrap_int_i64(value: &jet_foundation::Numeric::JetInt, label: &str)
     value.to_i64().ok_or_else(|| format!("{label} is outside the signed 64-bit bootstrap range"))
 }
 fn __jet_bootstrap_int_u64(value: &jet_foundation::Numeric::JetInt, label: &str) -> Result<u64, String> {
-    u64::try_from(__jet_bootstrap_int_i64(value, label)?).map_err(|_| format!("{label} is negative"))
+    if let Some(value) = value.to_i64() {
+        return u64::try_from(value).map_err(|_| format!("{label} is negative"));
+    }
+    let value = value.to_big().try_i128().ok_or_else(|| format!("{label} exceeds u64"))?;
+    u64::try_from(value).map_err(|_| format!("{label} is outside u64"))
 }
-fn __jet_bootstrap_u64_int(value: u64, label: &str) -> Result<jet_foundation::Numeric::JetInt, String> {
-    let value = i64::try_from(value).map_err(|_| format!("{label} exceeds Source Int"))?;
-    Ok(jet_foundation::Numeric::JetInt::from_i64(value))
+fn __jet_bootstrap_u64_int(value: u64, _label: &str) -> Result<jet_foundation::Numeric::JetInt, String> {
+    Ok(match i64::try_from(value) {
+        Ok(value) => jet_foundation::Numeric::JetInt::from_i64(value),
+        Err(_) => jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(value)),
+    })
 }
 fn __jet_bootstrap_usize_int(value: usize, label: &str) -> Result<jet_foundation::Numeric::JetInt, String> {
     __jet_bootstrap_u64_int(u64::try_from(value).map_err(|_| format!("{label} exceeds u64"))?, label)
@@ -168,114 +174,110 @@ fn __jet_bootstrap_cause_from_host(value: &::jet_foundation::Diagnostics::Diagno
         },
     })
 }
-fn __jet_bootstrap_no_fix_to_host(value: &@t.DiagnosticNoFixReason@) -> Result<::jet_foundation::Report::NoFixReason, String> {
-    let kind = match &value.@f.DiagnosticNoFixReason.kind@ {
-        @v.DiagnosticNoFixReasonKind.Behavior@ => ::jet_foundation::Report::NoFixReasonKind::Behavior,
-        @v.DiagnosticNoFixReasonKind.Design@ => ::jet_foundation::Report::NoFixReasonKind::Design,
-        @v.DiagnosticNoFixReasonKind.Ambiguous@ => ::jet_foundation::Report::NoFixReasonKind::Ambiguous,
+fn __jet_bootstrap_no_fix_to_host(value: &@t.NoFixReason@) -> Result<::jet_foundation::Report::NoFixReason, String> {
+    let kind = match &value.@f.NoFixReason.kind@ {
+        @v.NoFixReasonKind.Behavior@ => ::jet_foundation::Report::NoFixReasonKind::Behavior,
+        @v.NoFixReasonKind.Design@ => ::jet_foundation::Report::NoFixReasonKind::Design,
+        @v.NoFixReasonKind.Ambiguous@ => ::jet_foundation::Report::NoFixReasonKind::Ambiguous,
     };
-    let reason = ::jet_foundation::Report::NoFixReason { kind, next: value.@f.DiagnosticNoFixReason.next@.clone() };
+    let reason = ::jet_foundation::Report::NoFixReason { kind, next: value.@f.NoFixReason.next@.clone() };
     reason.validate()?;
     Ok(reason)
 }
-fn __jet_bootstrap_no_fix_from_host(value: &::jet_foundation::Report::NoFixReason) -> @t.DiagnosticNoFixReason@ {
-    @t.DiagnosticNoFixReason@ {
-        @f.DiagnosticNoFixReason.kind@: match value.kind {
-            ::jet_foundation::Report::NoFixReasonKind::Behavior => @v.DiagnosticNoFixReasonKind.Behavior@,
-            ::jet_foundation::Report::NoFixReasonKind::Design => @v.DiagnosticNoFixReasonKind.Design@,
-            ::jet_foundation::Report::NoFixReasonKind::Ambiguous => @v.DiagnosticNoFixReasonKind.Ambiguous@,
+fn __jet_bootstrap_no_fix_from_host(value: &::jet_foundation::Report::NoFixReason) -> @t.NoFixReason@ {
+    @t.NoFixReason@ {
+        @f.NoFixReason.kind@: match value.kind {
+            ::jet_foundation::Report::NoFixReasonKind::Behavior => @v.NoFixReasonKind.Behavior@,
+            ::jet_foundation::Report::NoFixReasonKind::Design => @v.NoFixReasonKind.Design@,
+            ::jet_foundation::Report::NoFixReasonKind::Ambiguous => @v.NoFixReasonKind.Ambiguous@,
         },
-        @f.DiagnosticNoFixReason.next@: value.next.clone(),
+        @f.NoFixReason.next@: value.next.clone(),
     }
 }
 "#,
     );
     out.push_str(
         r#"
-fn __jet_bootstrap_error_context_to_host(value: &@t.DiagnosticErrorContextFrame@) -> Result<::jet_foundation::Outcome::JetErrorContextFrame, String> {
+fn __jet_bootstrap_error_context_to_host(value: &@t.JetErrorContextFrame@) -> Result<::jet_foundation::Outcome::JetErrorContextFrame, String> {
     Ok(::jet_foundation::Outcome::JetErrorContextFrame {
-        text: value.@f.DiagnosticErrorContextFrame.text@.clone(),
-        file: value.@f.DiagnosticErrorContextFrame.file@.clone(),
-        line: u32::try_from(__jet_bootstrap_int_u64(&value.@f.DiagnosticErrorContextFrame.line@, "build-error context line")?)
+        text: value.@f.JetErrorContextFrame.text@.clone(),
+        file: value.@f.JetErrorContextFrame.file@.clone(),
+        line: u32::try_from(__jet_bootstrap_int_u64(&value.@f.JetErrorContextFrame.line@, "build-error context line")?)
             .map_err(|_| "build-error context line exceeds u32".to_string())?,
     })
 }
-fn __jet_bootstrap_error_context_from_host(value: &::jet_foundation::Outcome::JetErrorContextFrame) -> @t.DiagnosticErrorContextFrame@ {
-    @t.DiagnosticErrorContextFrame@ {
-        @f.DiagnosticErrorContextFrame.text@: value.text.clone(),
-        @f.DiagnosticErrorContextFrame.file@: value.file.clone(),
-        @f.DiagnosticErrorContextFrame.line@: jet_foundation::Numeric::JetInt::from_i64(i64::from(value.line)),
+fn __jet_bootstrap_error_context_from_host(value: &::jet_foundation::Outcome::JetErrorContextFrame) -> @t.JetErrorContextFrame@ {
+    @t.JetErrorContextFrame@ {
+        @f.JetErrorContextFrame.text@: value.text.clone(),
+        @f.JetErrorContextFrame.file@: value.file.clone(),
+        @f.JetErrorContextFrame.line@: jet_foundation::Numeric::JetInt::from_i64(i64::from(value.line)),
     }
 }
-fn __jet_bootstrap_error_conversion_to_host(value: &@t.DiagnosticErrorConversion@) -> ::jet_foundation::Outcome::JetErrorConversion {
-    ::jet_foundation::Outcome::JetErrorConversion { source: value.@f.DiagnosticErrorConversion.source@.clone(), target: value.@f.DiagnosticErrorConversion.target@.clone() }
+fn __jet_bootstrap_error_conversion_to_host(value: &@t.JetErrorConversion@) -> ::jet_foundation::Outcome::JetErrorConversion {
+    ::jet_foundation::Outcome::JetErrorConversion { source: value.@f.JetErrorConversion.source@.clone(), target: value.@f.JetErrorConversion.target@.clone() }
 }
-fn __jet_bootstrap_error_conversion_from_host(value: &::jet_foundation::Outcome::JetErrorConversion) -> @t.DiagnosticErrorConversion@ {
-    @t.DiagnosticErrorConversion@ { @f.DiagnosticErrorConversion.source@: value.source.clone(), @f.DiagnosticErrorConversion.target@: value.target.clone() }
+fn __jet_bootstrap_error_conversion_from_host(value: &::jet_foundation::Outcome::JetErrorConversion) -> @t.JetErrorConversion@ {
+    @t.JetErrorConversion@ { @f.JetErrorConversion.source@: value.source.clone(), @f.JetErrorConversion.target@: value.target.clone() }
 }
-fn __jet_bootstrap_error_field_to_host(value: &@t.DiagnosticErrorField@) -> ::jet_foundation::Outcome::JetErrorField {
-    ::jet_foundation::Outcome::JetErrorField { name: value.@f.DiagnosticErrorField.name@.clone(), value: value.@f.DiagnosticErrorField.value@.clone() }
+fn __jet_bootstrap_error_field_to_host(value: &@t.JetErrorField@) -> ::jet_foundation::Outcome::JetErrorField {
+    ::jet_foundation::Outcome::JetErrorField { name: value.@f.JetErrorField.name@.clone(), value: value.@f.JetErrorField.value@.clone() }
 }
-fn __jet_bootstrap_error_field_from_host(value: &::jet_foundation::Outcome::JetErrorField) -> @t.DiagnosticErrorField@ {
-    @t.DiagnosticErrorField@ { @f.DiagnosticErrorField.name@: value.name.clone(), @f.DiagnosticErrorField.value@: value.value.clone() }
+fn __jet_bootstrap_error_field_from_host(value: &::jet_foundation::Outcome::JetErrorField) -> @t.JetErrorField@ {
+    @t.JetErrorField@ { @f.JetErrorField.name@: value.name.clone(), @f.JetErrorField.value@: value.value.clone() }
 }
-fn __jet_bootstrap_error_span_to_host(value: &@t.DiagnosticErrorSpan@) -> Result<::jet_foundation::Outcome::JetErrorSpan, String> {
-    let start = usize::try_from(__jet_bootstrap_int_u64(&value.@f.DiagnosticErrorSpan.start@, "build-error span start")?).map_err(|_| "build-error span start exceeds usize".to_string())?;
-    let end = usize::try_from(__jet_bootstrap_int_u64(&value.@f.DiagnosticErrorSpan.end@, "build-error span end")?).map_err(|_| "build-error span end exceeds usize".to_string())?;
-    if end < start { return Err("build-error span ends before it starts".to_string()); }
+fn __jet_bootstrap_error_span_to_host(value: &@t.JetErrorSpan@) -> Result<::jet_foundation::Outcome::JetErrorSpan, String> {
+    let start = usize::try_from(__jet_bootstrap_int_u64(&value.@f.JetErrorSpan.start@, "build-error span start")?).map_err(|_| "build-error span start exceeds usize".to_string())?;
+    let end = usize::try_from(__jet_bootstrap_int_u64(&value.@f.JetErrorSpan.end@, "build-error span end")?).map_err(|_| "build-error span end exceeds usize".to_string())?;
     Ok(::jet_foundation::Outcome::JetErrorSpan { start, end })
 }
-/// The Source journey frame records no column; the host frame's 1-based
-/// column is 0 ("not recorded") until the Jet frame carries one.
-fn __jet_bootstrap_error_journey_to_host(value: &@t.DiagnosticErrorJourneyFrame@) -> Result<::jet_foundation::Outcome::JetErrorJourneyFrame, String> {
+fn __jet_bootstrap_error_journey_to_host(value: &@t.JetErrorJourneyFrame@) -> Result<::jet_foundation::Outcome::JetErrorJourneyFrame, String> {
     Ok(::jet_foundation::Outcome::JetErrorJourneyFrame {
-        fn_name: value.@f.DiagnosticErrorJourneyFrame.fn_name@.clone(),
-        file: value.@f.DiagnosticErrorJourneyFrame.file@.clone(),
-        line: u32::try_from(__jet_bootstrap_int_u64(&value.@f.DiagnosticErrorJourneyFrame.line@, "build-error journey line")?).map_err(|_| "build-error journey line exceeds u32".to_string())?,
-        column: 0,
-        note: value.@f.DiagnosticErrorJourneyFrame.note@.clone(),
-        hops: u32::try_from(__jet_bootstrap_int_u64(&value.@f.DiagnosticErrorJourneyFrame.hops@, "build-error journey hops")?).map_err(|_| "build-error journey hops exceeds u32".to_string())?,
+        fn_name: value.@f.JetErrorJourneyFrame.fn_name@.clone(),
+        file: value.@f.JetErrorJourneyFrame.file@.clone(),
+        line: u32::try_from(__jet_bootstrap_int_u64(&value.@f.JetErrorJourneyFrame.line@, "build-error journey line")?).map_err(|_| "build-error journey line exceeds u32".to_string())?,
+        column: u32::try_from(__jet_bootstrap_int_u64(&value.@f.JetErrorJourneyFrame.column@, "build-error journey column")?).map_err(|_| "build-error journey column exceeds u32".to_string())?,
+        note: value.@f.JetErrorJourneyFrame.note@.clone(),
+        hops: u32::try_from(__jet_bootstrap_int_u64(&value.@f.JetErrorJourneyFrame.hops@, "build-error journey hops")?).map_err(|_| "build-error journey hops exceeds u32".to_string())?,
     })
 }
-fn __jet_bootstrap_error_journey_from_host(value: &::jet_foundation::Outcome::JetErrorJourneyFrame) -> @t.DiagnosticErrorJourneyFrame@ {
-    @t.DiagnosticErrorJourneyFrame@ {
-        @f.DiagnosticErrorJourneyFrame.fn_name@: value.fn_name.clone(),
-        @f.DiagnosticErrorJourneyFrame.file@: value.file.clone(),
-        @f.DiagnosticErrorJourneyFrame.line@: jet_foundation::Numeric::JetInt::from_i64(i64::from(value.line)),
-        @f.DiagnosticErrorJourneyFrame.note@: value.note.clone(),
-        @f.DiagnosticErrorJourneyFrame.hops@: jet_foundation::Numeric::JetInt::from_i64(i64::from(value.hops)),
+fn __jet_bootstrap_error_journey_from_host(value: &::jet_foundation::Outcome::JetErrorJourneyFrame) -> @t.JetErrorJourneyFrame@ {
+    @t.JetErrorJourneyFrame@ {
+        @f.JetErrorJourneyFrame.fn_name@: value.fn_name.clone(),
+        @f.JetErrorJourneyFrame.file@: value.file.clone(),
+        @f.JetErrorJourneyFrame.line@: jet_foundation::Numeric::JetInt::from_i64(i64::from(value.line)),
+        @f.JetErrorJourneyFrame.column@: jet_foundation::Numeric::JetInt::from_i64(i64::from(value.column)),
+        @f.JetErrorJourneyFrame.note@: value.note.clone(),
+        @f.JetErrorJourneyFrame.hops@: jet_foundation::Numeric::JetInt::from_i64(i64::from(value.hops)),
     }
 }
-fn __jet_bootstrap_error_details_to_host(value: &@t.DiagnosticErrorDetails@) -> Result<::jet_foundation::Outcome::JetErrorDetails, String> {
+fn __jet_bootstrap_error_details_to_host(value: &@t.JetErrorDetails@) -> Result<::jet_foundation::Outcome::JetErrorDetails, String> {
     Ok(::jet_foundation::Outcome::JetErrorDetails {
-        variant: value.@f.DiagnosticErrorDetails.variant@.clone(),
-        fields: value.@f.DiagnosticErrorDetails.fields@.iter().map(|field| Ok(__jet_bootstrap_error_field_to_host(field))).collect::<Result<Vec<_>, String>>()?,
-        source_span: match value.@f.DiagnosticErrorDetails.source_span@.as_ref().ok() {
+        variant: value.@f.JetErrorDetails.variant@.clone(),
+        fields: value.@f.JetErrorDetails.fields@.iter().map(__jet_bootstrap_error_field_to_host).collect(),
+        source_span: match value.@f.JetErrorDetails.source_span@.as_ref().ok() {
             Some(span) => Some(__jet_bootstrap_error_span_to_host(span)?),
             None => None,
         },
     })
 }
-/// The Source report keeps its whole journey in `source_journey`; it records
-/// no separate origin frame, so the host report's `origin` stays empty.
-fn __jet_bootstrap_build_error_to_host(value: &@t.DiagnosticBuildError@) -> Result<::jet_foundation::Outcome::JetErrorReport, String> {
+fn __jet_bootstrap_build_error_to_host(value: &@t.JetErrorReport@) -> Result<::jet_foundation::Outcome::JetErrorReport, String> {
     Ok(::jet_foundation::Outcome::JetErrorReport {
-        code: value.@f.DiagnosticBuildError.code@.as_ref().ok().cloned(),
-        message: value.@f.DiagnosticBuildError.message@.clone(),
-        typed_identity: value.@f.DiagnosticBuildError.typed_identity@.as_ref().ok().cloned(),
-        causes: value.@f.DiagnosticBuildError.causes@.iter().map(__jet_bootstrap_build_error_to_host).collect::<Result<Vec<_>, String>>()?,
-        context_frames: value.@f.DiagnosticBuildError.context_frames@.iter().map(__jet_bootstrap_error_context_to_host).collect::<Result<Vec<_>, String>>()?,
-        origin: None,
-        source_journey: value.@f.DiagnosticBuildError.source_journey@.iter().map(__jet_bootstrap_error_journey_to_host).collect::<Result<Vec<_>, String>>()?,
-        conversion_history: value.@f.DiagnosticBuildError.conversion_history@.iter().map(|item| Ok(__jet_bootstrap_error_conversion_to_host(item))).collect::<Result<Vec<_>, String>>()?,
-        details: match value.@f.DiagnosticBuildError.details@.as_ref().ok() {
+        code: value.@f.JetErrorReport.code@.as_ref().ok().cloned(),
+        message: value.@f.JetErrorReport.message@.clone(),
+        typed_identity: value.@f.JetErrorReport.typed_identity@.as_ref().ok().cloned(),
+        causes: value.@f.JetErrorReport.causes@.iter().map(__jet_bootstrap_build_error_to_host).collect::<Result<Vec<_>, String>>()?,
+        context_frames: value.@f.JetErrorReport.context_frames@.iter().map(__jet_bootstrap_error_context_to_host).collect::<Result<Vec<_>, String>>()?,
+        origin: value.@f.JetErrorReport.origin@.as_ref().ok().map(__jet_bootstrap_error_journey_to_host).transpose()?,
+        source_journey: value.@f.JetErrorReport.source_journey@.iter().map(__jet_bootstrap_error_journey_to_host).collect::<Result<Vec<_>, String>>()?,
+        conversion_history: value.@f.JetErrorReport.conversion_history@.iter().map(__jet_bootstrap_error_conversion_to_host).collect(),
+        details: match value.@f.JetErrorReport.details@.as_ref().ok() {
             Some(details) => Some(__jet_bootstrap_error_details_to_host(details)?),
             None => None,
         },
     })
 }
-fn __jet_bootstrap_build_error_from_host(value: &::jet_foundation::Outcome::JetErrorReport) -> @t.DiagnosticBuildError@ {
-    @s.DiagnosticBuildError@ {
+fn __jet_bootstrap_build_error_from_host(value: &::jet_foundation::Outcome::JetErrorReport) -> Result<@t.JetErrorReport@, String> {
+    Ok(@s.JetErrorReport@ {
         code: match value.code.as_ref() {
             Some(code) => Ok(code.clone()),
             None => Err(jet_foundation::Outcome::JetAbsent),
@@ -285,25 +287,29 @@ fn __jet_bootstrap_build_error_from_host(value: &::jet_foundation::Outcome::JetE
             Some(identity) => Ok(identity.clone()),
             None => Err(jet_foundation::Outcome::JetAbsent),
         },
-        causes: value.causes.iter().map(__jet_bootstrap_build_error_from_host).collect::<Vec<_>>(),
+        causes: value.causes.iter().map(__jet_bootstrap_build_error_from_host).collect::<Result<Vec<_>, String>>()?,
         context_frames: value.context_frames.iter().map(__jet_bootstrap_error_context_from_host).collect::<Vec<_>>(),
+        origin: match value.origin.as_ref() {
+            Some(origin) => Ok(__jet_bootstrap_error_journey_from_host(origin)),
+            None => Err(jet_foundation::Outcome::JetAbsent),
+        },
         source_journey: value.source_journey.iter().map(__jet_bootstrap_error_journey_from_host).collect::<Vec<_>>(),
         conversion_history: value.conversion_history.iter().map(__jet_bootstrap_error_conversion_from_host).collect::<Vec<_>>(),
         details: match value.details.as_ref() {
-            Some(details) => Ok(@s.DiagnosticErrorDetails@ {
+            Some(details) => Ok(@s.JetErrorDetails@ {
                 variant: details.variant.clone(),
                 fields: details.fields.iter().map(__jet_bootstrap_error_field_from_host).collect::<Vec<_>>(),
                 source_span: match details.source_span.as_ref() {
-                    Some(span) => Ok(@s.DiagnosticErrorSpan@ {
-                        start: jet_foundation::Numeric::JetInt::from_i64(span.start as i64),
-                        end: jet_foundation::Numeric::JetInt::from_i64(span.end as i64),
+                    Some(span) => Ok(@s.JetErrorSpan@ {
+                        start: __jet_bootstrap_usize_int(span.start, "build-error span start")?,
+                        end: __jet_bootstrap_usize_int(span.end, "build-error span end")?,
                     }),
                     None => Err(jet_foundation::Outcome::JetAbsent),
                 },
             }),
             None => Err(jet_foundation::Outcome::JetAbsent),
         },
-    }
+    })
 }
 "#,
     );
@@ -329,7 +335,7 @@ fn __jet_bootstrap_decision_to_host(value: &@t.MIRDecisionRow@) -> Result<::jet_
         @v.MIRDecisionDisposition.Unavailable@ => ::jet_foundation::MIR::MirDecisionDisposition::Unavailable,
     };
     let function = match value.@f.MIRDecisionRow.function@.as_ref().ok() {
-        Some(function) => Some(::jet_foundation::MIR::MirFunctionId(__jet_bootstrap_int_u64(&function.@f.MIRFunctionID.value@, "decision function ID")?)),
+        Some(function) => Some(::jet_foundation::MIR::MirFunctionId(function.@f.MIRFunctionID.value@)),
         None => None,
     };
     let edit = match value.@f.MIRDecisionRow.edit@.as_ref().ok() {
@@ -379,7 +385,7 @@ fn __jet_bootstrap_decision_to_host(value: &@t.MIRDecisionRow@) -> Result<::jet_
         None => None,
     };
     Ok(::jet_foundation::MIR::MirDecisionRow {
-        id: __jet_bootstrap_int_u64(&value.@f.MIRDecisionRow.id@, "decision row ID")?,
+        id: value.@f.MIRDecisionRow.id@,
         kind,
         disposition,
         function,
@@ -398,7 +404,7 @@ fn __jet_bootstrap_decision_to_host(value: &@t.MIRDecisionRow@) -> Result<::jet_
 }
 fn __jet_bootstrap_decision_from_host(value: &::jet_foundation::MIR::MirDecisionRow) -> Result<@t.MIRDecisionRow@, String> {
     Ok(@t.MIRDecisionRow@ {
-        @f.MIRDecisionRow.id@: __jet_bootstrap_u64_int(value.id, "decision row ID")?,
+        @f.MIRDecisionRow.id@: value.id,
         @f.MIRDecisionRow.kind@: match value.kind {
             ::jet_foundation::MIR::MirDecisionKind::Tier => @v.MIRDecisionKind.Tier@,
             ::jet_foundation::MIR::MirDecisionKind::Inline => @v.MIRDecisionKind.Inline@,
@@ -418,7 +424,7 @@ fn __jet_bootstrap_decision_from_host(value: &::jet_foundation::MIR::MirDecision
             ::jet_foundation::MIR::MirDecisionDisposition::Unavailable => @v.MIRDecisionDisposition.Unavailable@,
         },
         @f.MIRDecisionRow.function@: match value.function {
-            Some(function) => Ok(@t.MIRFunctionID@ { @f.MIRFunctionID.value@: __jet_bootstrap_u64_int(function.0, "decision function ID")? }),
+            Some(function) => Ok(@t.MIRFunctionID@ { @f.MIRFunctionID.value@: function.0 }),
             None => Err(jet_foundation::Outcome::JetAbsent),
         },
         @f.MIRDecisionRow.function_name@: value.function_name.clone(),
@@ -534,7 +540,7 @@ fn __jet_bootstrap_structured_from_host(value: &::jet_foundation::Diagnostics::S
             expected: match expected { Some(value) => Ok(value.to_string()), None => Err(jet_foundation::Outcome::JetAbsent) },
             actual: match actual { Some(value) => Ok(jet_foundation::Numeric::JetInt::from_i64(i64::try_from(*value).map_err(|_| "crypto structured actual exceeds Source Int".to_string())?)), None => Err(jet_foundation::Outcome::JetAbsent) },
         }),
-        ::jet_foundation::Diagnostics::StructuredDiagnostic::BuildError { report } => Ok(@new.DiagnosticStructured.BuildError@{ report: __jet_bootstrap_build_error_from_host(report) }),
+        ::jet_foundation::Diagnostics::StructuredDiagnostic::BuildError { report } => Ok(@new.DiagnosticStructured.BuildError@{ report: __jet_bootstrap_build_error_from_host(report)? }),
         ::jet_foundation::Diagnostics::StructuredDiagnostic::RuntimeHostFault { stdout } => Ok(@new.DiagnosticStructured.RuntimeHostFault@{ stdout: stdout.clone() }),
     }
 }
@@ -558,34 +564,34 @@ fn __jet_bootstrap_moment_from_host(value: ::jet_foundation::Diagnostics::Report
         ::jet_foundation::Diagnostics::ReportMoment::Tool => @v.DiagnosticMoment.Tool@,
     }
 }
-fn __jet_bootstrap_applicability_to_host(value: &@t.DiagnosticFixApplicability@) -> ::jet_foundation::Report::FixApplicability {
+fn __jet_bootstrap_applicability_to_host(value: &@t.FixApplicability@) -> ::jet_foundation::Report::FixApplicability {
     match value {
-        @v.DiagnosticFixApplicability.Safe@ => ::jet_foundation::Report::FixApplicability::Safe,
-        @v.DiagnosticFixApplicability.Suggested@ => ::jet_foundation::Report::FixApplicability::Suggested,
+        @v.FixApplicability.Safe@ => ::jet_foundation::Report::FixApplicability::Safe,
+        @v.FixApplicability.Suggested@ => ::jet_foundation::Report::FixApplicability::Suggested,
     }
 }
-fn __jet_bootstrap_applicability_from_host(value: ::jet_foundation::Report::FixApplicability) -> @t.DiagnosticFixApplicability@ {
+fn __jet_bootstrap_applicability_from_host(value: ::jet_foundation::Report::FixApplicability) -> @t.FixApplicability@ {
     match value {
-        ::jet_foundation::Report::FixApplicability::Safe => @v.DiagnosticFixApplicability.Safe@,
-        ::jet_foundation::Report::FixApplicability::Suggested => @v.DiagnosticFixApplicability.Suggested@,
+        ::jet_foundation::Report::FixApplicability::Safe => @v.FixApplicability.Safe@,
+        ::jet_foundation::Report::FixApplicability::Suggested => @v.FixApplicability.Suggested@,
     }
 }
-fn __jet_bootstrap_safety_to_host(value: &@t.DiagnosticFixSafety@) -> ::jet_foundation::Report::FixSafety {
+fn __jet_bootstrap_safety_to_host(value: &@t.FixSafety@) -> ::jet_foundation::Report::FixSafety {
     match value {
-        @v.DiagnosticFixSafety.Formatting@ => ::jet_foundation::Report::FixSafety::Formatting,
-        @v.DiagnosticFixSafety.BehaviorPreserving@ => ::jet_foundation::Report::FixSafety::BehaviorPreserving,
-        @v.DiagnosticFixSafety.APIChanging@ => ::jet_foundation::Report::FixSafety::ApiChanging,
-        @v.DiagnosticFixSafety.TargetChanging@ => ::jet_foundation::Report::FixSafety::TargetChanging,
-        @v.DiagnosticFixSafety.NeedsReview@ => ::jet_foundation::Report::FixSafety::NeedsReview,
+        @v.FixSafety.Formatting@ => ::jet_foundation::Report::FixSafety::Formatting,
+        @v.FixSafety.BehaviorPreserving@ => ::jet_foundation::Report::FixSafety::BehaviorPreserving,
+        @v.FixSafety.APIChanging@ => ::jet_foundation::Report::FixSafety::ApiChanging,
+        @v.FixSafety.TargetChanging@ => ::jet_foundation::Report::FixSafety::TargetChanging,
+        @v.FixSafety.NeedsReview@ => ::jet_foundation::Report::FixSafety::NeedsReview,
     }
 }
-fn __jet_bootstrap_safety_from_host(value: ::jet_foundation::Report::FixSafety) -> @t.DiagnosticFixSafety@ {
+fn __jet_bootstrap_safety_from_host(value: ::jet_foundation::Report::FixSafety) -> @t.FixSafety@ {
     match value {
-        ::jet_foundation::Report::FixSafety::Formatting => @v.DiagnosticFixSafety.Formatting@,
-        ::jet_foundation::Report::FixSafety::BehaviorPreserving => @v.DiagnosticFixSafety.BehaviorPreserving@,
-        ::jet_foundation::Report::FixSafety::ApiChanging => @v.DiagnosticFixSafety.APIChanging@,
-        ::jet_foundation::Report::FixSafety::TargetChanging => @v.DiagnosticFixSafety.TargetChanging@,
-        ::jet_foundation::Report::FixSafety::NeedsReview => @v.DiagnosticFixSafety.NeedsReview@,
+        ::jet_foundation::Report::FixSafety::Formatting => @v.FixSafety.Formatting@,
+        ::jet_foundation::Report::FixSafety::BehaviorPreserving => @v.FixSafety.BehaviorPreserving@,
+        ::jet_foundation::Report::FixSafety::ApiChanging => @v.FixSafety.APIChanging@,
+        ::jet_foundation::Report::FixSafety::TargetChanging => @v.FixSafety.TargetChanging@,
+        ::jet_foundation::Report::FixSafety::NeedsReview => @v.FixSafety.NeedsReview@,
     }
 }
 fn __jet_bootstrap_diagnostic_from_host(value: &::jet_foundation::Diagnostics::Diagnostic) -> Result<@t.Diagnostic@, String> {

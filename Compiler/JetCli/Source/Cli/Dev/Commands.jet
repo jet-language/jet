@@ -1,0 +1,287 @@
+// Developer command leaves (Source/CmdDevTools.rs and Source/main.rs).
+// Help owns text generation; the host owns process IO and the sole exit.
+// Completion transitions keep metadata and reads on ONE opened handle. Core's
+// FileReader currently has no O_NONBLOCK/fstat/bounded-read primitive: the
+// OpenProgram/ReadOpened actions require that native C-FS transport, never a
+// path-stat + whole-file read substitution. Explain Resolve requires the
+// missing shared syntax/fact/policy/registration explanation services.
+
+JET_CLI_COMPLETION_MAX_PROGRAM_BYTES :: 536870912
+JET_CLI_COMPLETION_USAGE :: "jet self completions <bash|zsh|fish|powershell> [--for PROGRAM]"
+
+pub struct JetCLICompletionProgram {
+    pub shell: String
+    pub program: String
+    pub command_name: String
+}
+
+// File::metadata on the handle returned by open_completion_program, not stat(path).
+pub struct JetCLICompletionProgramMetadata {
+    pub regular_file: Bool
+    pub size: Int
+}
+
+pub enum JetCLIDevCompletionPlan {
+    Done(JetDriverVerbOutput)
+    // Unix: open read-only with O_NONBLOCK so a FIFO cannot hang this command.
+    // The host retains the handle until the final Done transition (or failure).
+    OpenProgram(JetCLICompletionProgram)
+    // Read at most read_limit bytes from that SAME handle; capacity is a hint,
+    // not a requirement to allocate or a substitute for the actual-byte limit.
+    ReadOpened(program: JetCLICompletionProgram, capacity: Int, read_limit: Int)
+}
+
+pub enum JetCLICompletionIOStage {
+    Open
+    Inspect
+    Read
+}
+
+// The native host owns this resource identity until close. It must not reopen
+// the path for metadata or reads, and must not run application code.
+pub struct JetCLICompletionProgramHandle { pub identity: Int }
+
+#Error
+pub struct JetCLICompletionProgramIOError { pub message: String }
+
+pub trait JetCLICompletionProgramHost {
+    // Rust open_completion_program: read-only, O_NONBLOCK on Unix.
+    fn open_nonblocking(&self, path: String) -[FS.Read]> JetCLICompletionProgramHandle JetCLICompletionProgramIOError!
+    // Rust File::metadata: fstat the live handle, not stat its original path.
+    fn fstat(&self, handle: JetCLICompletionProgramHandle) -[FS.Read]> JetCLICompletionProgramMetadata JetCLICompletionProgramIOError!
+    // Rust Read::take(limit).read_to_end: EOF or at most limit actual bytes.
+    fn read_bounded(&self, handle: JetCLICompletionProgramHandle, capacity: Int, limit: Int) -[FS.Read]> [U8] JetCLICompletionProgramIOError!
+    // Rust File::drop: release exactly once, including every error path.
+    fn close(&self, handle: JetCLICompletionProgramHandle) Never! -[FS.Read]>
+}
+
+// Rust run_completions (CmdDevTools.rs:3112-3181), the complete command runner.
+// The provider is an explicit capability, not a path-stat/read fallback.
+pub fn jet_cli_run_completions<H: JetCLICompletionProgramHost>(host: &H, args: [String]) -[FS.Read]> JetDriverVerbOutput Never! {
+    program :: if jet_cli_dev_completions(args) == {
+        .Done(output) -> { return output }
+        .OpenProgram(context) -> context
+        .ReadOpened(_, _, _) -> panic("completion parser requested a read before opening")
+    }
+    handle :: &host.open_nonblocking(program.program) ?? return jet_cli_dev_completion_io_failure(program.program, JetCLICompletionIOStage.Open, err.message)
+    metadata :: &host.fstat(handle) ?? {
+        &host.close(handle)
+        return jet_cli_dev_completion_io_failure(program.program, JetCLICompletionIOStage.Inspect, err.message)
+    }
+    if jet_cli_dev_completion_opened(program, metadata) == {
+        .Done(output) -> {
+            &host.close(handle)
+            return output
+        }
+        .ReadOpened(context, capacity, limit) -> {
+            bytes :: &host.read_bounded(handle, capacity, limit) ?? {
+                &host.close(handle)
+                return jet_cli_dev_completion_io_failure(program.program, JetCLICompletionIOStage.Read, err.message)
+            }
+            &host.close(handle)
+            return jet_cli_dev_completion_read(context, bytes)
+        }
+        .OpenProgram(_) -> panic("opened completion program requested another open")
+    }
+}
+
+fn jet_cli_dev_output(stdout: String, stderr: String, exit_code: Int) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: exit_code}
+}
+
+// Rust run_completions (CmdDevTools.rs:3112-3181), argv validation + builtins.
+// Arguments are the raw words AFTER `self completions`, not global positionals.
+pub fn jet_cli_dev_completions(args: [String]) -> JetCLIDevCompletionPlan Never! {
+    shell := ""
+    if args.len() > 0 -> shell = args[0]
+    valid_shell :: shell == "bash" || shell == "zsh" || shell == "fish" || shell == "powershell"
+    valid_shape := args.len() == 1 || args.len() == 3
+    if args.len() == 3 && args[1] != "--for" -> valid_shape = false
+    if !valid_shell || !valid_shape {
+        return JetCLIDevCompletionPlan.Done(jet_cli_dev_output("", "Error [E2102]: Completions arguments don't match `{JET_CLI_COMPLETION_USAGE}`.\n Why: A completion script needs one supported shell and, optionally, one compiled Jet program.\n Fix: Run `{JET_CLI_COMPLETION_USAGE}`.\nMore: jet-lang.dev/e/E2102\n", JET_DRIVER_EXIT_USAGE))
+    }
+    if args.len() == 1 {
+        script :: if shell == {
+            "bash" -> jet_cli_completions_bash()
+            "zsh" -> jet_cli_completions_zsh()
+            "fish" -> jet_cli_completions_fish()
+            else -> jet_cli_completions_powershell()
+        }
+        return JetCLIDevCompletionPlan.Done(jet_cli_dev_output(script, "", JET_DRIVER_EXIT_OK))
+    }
+    program :: args[2]
+    command_name :: jet_cli_completion_command_name(program) ?? return JetCLIDevCompletionPlan.Done(jet_cli_dev_completion_metadata_error(program, jet_cli_completion_name_error_message(err)))
+    JetCLIDevCompletionPlan.OpenProgram(JetCLICompletionProgram{shell: shell, program: program, command_name: command_name})
+}
+
+// Rust run_completions (CmdDevTools.rs:3144-3159), before any program-byte read.
+pub fn jet_cli_dev_completion_opened(program: JetCLICompletionProgram, metadata: JetCLICompletionProgramMetadata) -> JetCLIDevCompletionPlan Never! {
+    if !metadata.regular_file -> return JetCLIDevCompletionPlan.Done(jet_cli_dev_completion_metadata_error(program.program, "the program is not a regular file"))
+    if metadata.size > JET_CLI_COMPLETION_MAX_PROGRAM_BYTES -> return JetCLIDevCompletionPlan.Done(jet_cli_dev_completion_metadata_error(program.program, "the program is larger than the 512 MiB metadata-reader limit"))
+    JetCLIDevCompletionPlan.ReadOpened{program: program, capacity: metadata.size, read_limit: JET_CLI_COMPLETION_MAX_PROGRAM_BYTES + 1}
+}
+
+// Rust run_completions (CmdDevTools.rs:3170-3175), actual read count, not stat size.
+// Split out so the 512 MiB boundary is exercised without a 512 MiB test allocation.
+pub fn jet_cli_dev_completion_read_bound(program: String, actual_size: Int) -> JetDriverVerbOutput? Never! {
+    if actual_size > JET_CLI_COMPLETION_MAX_PROGRAM_BYTES -> return Val(jet_cli_dev_completion_metadata_error(program, "the program grew beyond the 512 MiB metadata-reader limit while being read"))
+    None
+}
+
+// Rust run_completions (CmdDevTools.rs:3160-3180), static metadata only: never exec.
+pub fn jet_cli_dev_completion_read(program: JetCLICompletionProgram, bytes: [U8]) -> JetDriverVerbOutput Never! {
+    if jet_cli_dev_completion_read_bound(program.program, bytes.len()) == .Val(refusal) -> return refusal
+    schema :: cli_schema_read_executable(bytes) ?? return jet_cli_dev_completion_metadata_error(program.program, cli_metadata_error_message(err))
+    script :: jet_cli_completions_for_program(program.shell, program.command_name, schema) ?? panic("validated completion shell was rejected")
+    jet_cli_dev_output(script, "", JET_DRIVER_EXIT_OK)
+}
+
+// Rust run_completions IO error contexts (CmdDevTools.rs:3138-3149,3164-3168).
+pub fn jet_cli_dev_completion_io_failure(program: String, stage: JetCLICompletionIOStage, error: String) -> JetDriverVerbOutput Never! {
+    why :: if stage == {
+        .Open -> "the program could not be opened ({error})"
+        .Inspect -> "the opened program could not be inspected ({error})"
+        .Read -> "the opened program could not be read ({error})"
+    }
+    jet_cli_dev_completion_metadata_error(program, why)
+}
+
+// Rust char::escape_default in completion_metadata_error (CmdDevTools.rs:3202-3205).
+// Unlike Debug/JSON escaping, EVERY non-ASCII scalar becomes a lowercase \\u{...}.
+fn jet_cli_dev_escape_program(program: String) -> String Never! {
+    escaped := [U8]{}
+    hex :: "0123456789abcdef".bytes()
+    raw :: program.bytes()
+    index := 0
+    loop index < raw.len() {
+        scalar := Int.from_u8(raw[index])
+        index += 1
+        if scalar >= 128 {
+            continuation := 1
+            if {
+                scalar < 224 -> scalar -= 192
+                scalar < 240 -> {
+                    scalar -= 224
+                    continuation = 2
+                }
+                else -> {
+                    scalar -= 240
+                    continuation = 3
+                }
+            }
+            loop _ in 0..<continuation {
+                scalar = scalar * 64 + Int.from_u8(raw[index]) - 128
+                index += 1
+            }
+        }
+        escape := -1
+        if scalar == {
+            9 -> escape = 116
+            10 -> escape = 110
+            13 -> escape = 114
+            34 -> escape = 34
+            39 -> escape = 39
+            92 -> escape = 92
+            else -> {}
+        }
+        if {
+            escape >= 0 -> {
+                &escaped.push(U8{92})
+                &escaped.push(U8{escape})
+            }
+            scalar >= 32 && scalar <= 126 -> &escaped.push(U8{scalar})
+            else -> {
+                &escaped.push(U8{92})
+                &escaped.push(U8{117})
+                &escaped.push(U8{123})
+                place := 1
+                loop place * 16 <= scalar -> place *= 16
+                loop place > 0 {
+                    &escaped.push(hex[(scalar /% place) % 16])
+                    place = place /% 16
+                }
+                &escaped.push(U8{125})
+            }
+        }
+    }
+    String.from_bytes(escaped) ?? panic("escaped program is not UTF-8")
+}
+
+// Rust completion_metadata_error (CmdDevTools.rs:3201-3211), exact stream/status.
+pub fn jet_cli_dev_completion_metadata_error(program: String, why: String) -> JetDriverVerbOutput Never! {
+    escaped :: jet_cli_dev_escape_program(program)
+    jet_cli_dev_output("", "Error [E2103]: Couldn't read command metadata from `{escaped}`.\n Why: {why}.\n Fix: Rebuild the program with this Jet toolchain, then try again.\nMore: jet-lang.dev/e/E2103\n", JET_DRIVER_EXIT_USER_ERROR)
+}
+
+// Rust main `man` dispatch (main.rs:3508-3514): machine mode hides human roff.
+pub fn jet_cli_dev_man(version: String, profile: JetCLIOutputProfile) -> JetDriverVerbOutput Never! {
+    output := jet_cli_dev_output("", "", JET_DRIVER_EXIT_OK)
+    jet_cli_write_renderable(&output, profile, jet_cli_man_page(version))
+    output
+}
+
+pub struct JetCLIDevExplainRequest {
+    pub code: String?
+    pub fact_file: String?
+    pub mode: JetCLIOutputMode
+    pub verbose: Bool
+    pub profile: String
+    pub setting_overrides: [String:String]
+}
+
+pub enum JetCLIDevExplainPlan {
+    Done(JetDriverVerbOutput)
+    // Must call the canonical Help/Explain syntax/fact/policy/registration services.
+    // For facts, preserve profile/settings and resolve default entry exactly once.
+    // No diagnostic-only fallback or generic E2104 can complete this action.
+    Resolve(JetCLIDevExplainRequest)
+}
+
+// Canonical syntax dictionary, unified registration, and checked build/policy
+// query owner. Implementations must preserve Rust run_explain branch ordering
+// (fact, source-bound policy, syntax/diagnostic/registration) and branded errors.
+pub trait JetCLIDevExplainHost {
+    fn resolve(&self, request: JetCLIDevExplainRequest) -[FS, Env]> JetDriverVerbOutput Never!
+}
+
+// Rust run_explain command boundary (CmdDevTools.rs:4220-4274).
+pub fn jet_cli_run_explain<H: JetCLIDevExplainHost>(host: &H, request: JetCLIDevExplainRequest) -[FS, Env]> JetDriverVerbOutput Never! {
+    if jet_cli_dev_explain(request) == {
+        .Done(output) -> output
+        .Resolve(required) -> &host.resolve(required)
+    }
+}
+
+// Rust print_explanation (CmdDevTools.rs:4449-4477), shared report serializer.
+pub fn jet_cli_dev_print_explanation(explanation: DiagnosticExplanation, mode: JetCLIOutputMode) -> JetDriverVerbOutput Never! {
+    if mode.json {
+        fields :: StatusFields.new()
+            .with("code", DataTree.Text(~explanation.code))
+            .with("stage", DataTree.Text(~explanation.stage))
+            .with("what", DataTree.Text(explanation.what ?? explanation.meaning))
+            .with("why", jet_cli_dev_explanation_optional(explanation.why))
+            .with("fix", jet_cli_dev_explanation_optional(explanation.fix))
+            .with("example", jet_cli_dev_explanation_optional(explanation.example))
+        return jet_cli_dev_output(StatusEnvelope.new("explain", true).with_fields(fields).json_line(), "", JET_DRIVER_EXIT_OK)
+    }
+    jet_cli_dev_output(jet_cli_explain_render(explanation, mode.color), "", JET_DRIVER_EXIT_OK)
+}
+
+fn jet_cli_dev_explanation_optional(text: String?) -> DataTree Never! {
+    if text == {
+        .Val(value) -> DataTree.Text(value)
+        .None -> DataTree.Null
+    }
+}
+
+// Rust run_explain (CmdDevTools.rs:4220-4274), reachable diagnostic essay path.
+// The non-diagnostic paths remain explicit requests to their shared owner.
+pub fn jet_cli_dev_explain(request: JetCLIDevExplainRequest) -> JetCLIDevExplainPlan Never! {
+    code :: request.code ?? return JetCLIDevExplainPlan.Done(jet_cli_dev_output("", "usage: jet explain <CODE|FACT> [file]\n       jet explain marker <file>:<line> <policy-key>\n", JET_DRIVER_EXIT_USAGE))
+    if jet_cli_explain_lookup_code(code) == .Val(explanation) -> return JetCLIDevExplainPlan.Done(jet_cli_dev_print_explanation(explanation, request.mode))
+    if jet_cli_explain_is_code(code) {
+        stderr :: jet_cli_report("E2104", "no diagnostic code `{code}` exists", jet_cli_why("E2104"), "run a command that reports an error to see its code, e.g. `jet check file.jet`", request.mode.color)
+        return JetCLIDevExplainPlan.Done(jet_cli_dev_output("", stderr, JET_DRIVER_EXIT_USER_ERROR))
+    }
+    JetCLIDevExplainPlan.Resolve(request)
+}

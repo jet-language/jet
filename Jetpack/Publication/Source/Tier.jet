@@ -1,0 +1,156 @@
+// Canonical index trust carriers and review receipts: Source/Publish/Tier.rs
+// :9-232,310-337. Community/advisory gate composition is owned by publication policy.
+pub enum PublicationRegistryTier {
+    Core
+    Community
+}
+pub enum PublicationGateState {
+    Passed
+    Blocked
+    NotRequired
+}
+pub struct PublicationGateStatus {
+    pub signature: PublicationGateState
+    pub audit: PublicationGateState
+    pub name: PublicationGateState
+    pub liveness: PublicationGateState
+    pub review: PublicationGateState
+}
+
+pub fn publication_tier_label(tier: PublicationRegistryTier) -> String Never! {
+    if tier == {
+        .Core -> "core"
+        .Community -> "community"
+    }
+}
+pub fn publication_parse_tier(value: String) -> PublicationRegistryTier? Never! {
+    if value.trim().to_ascii_lower() == {
+        "core" -> Val(PublicationRegistryTier.Core)
+        "community" -> Val(PublicationRegistryTier.Community)
+        else -> None
+    }
+}
+pub fn publication_tier_from_environment() -[Env]> PublicationRegistryTier Never! {
+    publication_parse_tier(sys.get("JET_REGISTRY_TIER") ?? "") ?? PublicationRegistryTier.Core
+}
+pub fn publication_gate_label(state: PublicationGateState) -> String Never! {
+    if state == {
+        .Passed -> "passed"
+        .Blocked -> "blocked"
+        .NotRequired -> "not-required"
+    }
+}
+pub fn publication_parse_gate(value: String) -> PublicationGateState? Never! {
+    if value == {
+        "passed" -> Val(PublicationGateState.Passed)
+        "blocked" -> Val(PublicationGateState.Blocked)
+        "not-required" -> Val(PublicationGateState.NotRequired)
+        else -> None
+    }
+}
+pub fn publication_core_reviewed() -> PublicationGateStatus Never! {
+    PublicationGateStatus{signature: .NotRequired, audit: .NotRequired, name: .NotRequired, liveness: .NotRequired, review: .Passed}
+}
+pub fn publication_community_with_name(signature: PublicationGateState, audit: PublicationGateState, name: PublicationGateState) -> PublicationGateStatus Never! {
+    PublicationGateStatus{signature: signature, audit: audit, name: name, liveness: .Blocked, review: .NotRequired}
+}
+pub fn publication_community_open(status: PublicationGateStatus) -> Bool Never! {
+    status.signature == .Passed && status.audit == .Passed && status.name == .Passed && status.liveness == .Passed
+}
+pub fn publication_gate_summary(status: PublicationGateStatus) -> String Never! {
+    "signature={publication_gate_label(status.signature)};audit={publication_gate_label(status.audit)};name={publication_gate_label(status.name)};liveness={publication_gate_label(status.liveness)};review={publication_gate_label(status.review)}"
+}
+pub fn publication_parse_gate_status(summary: String) -> PublicationGateStatus? Never! {
+    signature := PublicationGateState?{None}
+    audit := PublicationGateState?{None}
+    name := PublicationGateState?{None}
+    liveness := PublicationGateState?{None}
+    review := PublicationGateState?{None}
+    loop field in summary.split(";") {
+        pair :: field.split_once("=") ?? return None
+        state :: publication_parse_gate(pair.after) ?? return None
+        if pair.before == {
+            "signature" -> {
+                if signature != None -> return None
+                signature = Val(state)
+            }
+            "audit" -> {
+                if audit != None -> return None
+                audit = Val(state)
+            }
+            "name" -> {
+                if name != None -> return None
+                name = Val(state)
+            }
+            "liveness" -> {
+                if liveness != None -> return None
+                liveness = Val(state)
+            }
+            "review" -> {
+                if review != None -> return None
+                review = Val(state)
+            }
+            else -> return None
+        }
+    }
+    Val(PublicationGateStatus{signature: signature ?? return None, audit: audit ?? return None, name: name ?? return None, liveness: liveness ?? return None, review: review ?? return None})
+}
+pub fn publication_blocked_reasons(status: PublicationGateStatus) -> [String] Never! {
+    reasons := [String]{}
+    if status.signature != .Passed -> &reasons.push("#935 live signature chain")
+    if status.audit != .Passed -> &reasons.push("#431 advisory audit")
+    if status.name != .Passed -> &reasons.push("#1912 name policy")
+    if status.liveness != .Passed -> &reasons.push("#1913 maintainer liveness")
+    reasons
+}
+
+pub fn publication_require_core_review(repo: String, package: String, version: String) PublicationDiagnosticError! -[FS]> {
+    publication_require_review(repo, package, version, false)
+}
+pub fn publication_require_takeover_review(repo: String, package: String, version: String) PublicationDiagnosticError! -[FS]> {
+    publication_require_review(repo, package, version, true)
+}
+fn publication_require_review(repo: String, package: String, version: String, takeover: Bool) PublicationDiagnosticError! -[FS]> {
+    path :: files.join(files.join(files.join(repo, "reviews"), package), "{version}.review")
+    text :: files.read(path) ?? return Err(publication_review_error(package, version, path, takeover))
+    package_field := String?{None}
+    version_field := String?{None}
+    reviewer := String?{None}
+    decision := String?{None}
+    lines :: text.lines()
+    if lines.len() == 0 || lines[0] != "jet-registry-core-review-v1" -> return Err(publication_review_error(package, version, path, takeover))
+    loop index in 1..<lines.len() {
+        line :: lines[index]
+        pair :: line.split_once("=") ?? return Err(publication_review_error(package, version, path, takeover))
+        if pair.before == {
+            "package" -> {
+                if package_field != None -> return Err(publication_review_error(package, version, path, takeover))
+                package_field = Val(pair.after)
+            }
+            "version" -> {
+                if version_field != None -> return Err(publication_review_error(package, version, path, takeover))
+                version_field = Val(pair.after)
+            }
+            "reviewer" -> {
+                if reviewer != None -> return Err(publication_review_error(package, version, path, takeover))
+                reviewer = Val(pair.after)
+            }
+            "decision" -> {
+                if decision != None -> return Err(publication_review_error(package, version, path, takeover))
+                decision = Val(pair.after)
+            }
+            else -> return Err(publication_review_error(package, version, path, takeover))
+        }
+    }
+    if package_field != Val(package) || version_field != Val(version) || (reviewer ?? "").trim() == "" || decision != Val("approved") -> return Err(publication_review_error(package, version, path, takeover))
+}
+fn publication_review_error(package: String, version: String, path: String, takeover: Bool) -> PublicationDiagnosticError Never! {
+    if takeover -> return PublicationDiagnosticError{diagnostic: diagnostic_from_registry("E2105", None,
+        "package takeover of `{package}` {version} has no approved registry review receipt",
+        "changing a package signing key transfers release authority, so a registry maintainer must review the takeover",
+        "commit `jet-registry-core-review-v1` receipt `{path}` with `decision=approved`, then publish the re-signed release again")}
+    PublicationDiagnosticError{diagnostic: diagnostic_from_registry("E2105", None,
+        "core-tier publish of `{package}` {version} has no approved review receipt",
+        "the core tier contains only packages reviewed by a registry maintainer",
+        "commit `jet-registry-core-review-v1` receipt `{path}` with `decision=approved`, then publish again")}
+}

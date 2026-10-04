@@ -1,0 +1,46 @@
+use jet.BudgetProviders.[collection_deadline]
+use std.time.[Duration]
+use core.files as fs
+use core.sys.target
+
+// Rust: Source/CmdBudget.rs:3705
+#Test("measuring_provider_deadlines_cover_their_pinned_inner_work") {
+    assert_eq(PROVIDER_DEADLINE, Duration.from_secs(30))
+    assert_eq(SELECTED_BUILD_DEADLINE, Duration.from_secs(120))
+    bound :: (kind: String, mode: String?) -> collection_deadline(kind, mode, PROVIDER_DEADLINE, SELECTED_BUILD_DEADLINE)
+    assert_eq(bound("CompilerFacts", None), PROVIDER_DEADLINE)
+    assert_eq(bound("BuildArtifact", None), Duration.from_secs(70))
+    assert_eq(bound("ServiceProbe", None), PROVIDER_DEADLINE)
+    assert_eq(bound("CompilerProbe", Val("Clean")), Duration.from_secs(21 * 120 + 30))
+    assert_eq(bound("CompilerProbe", Val("NoChange")), Duration.from_secs(21 * 120 + 30))
+    assert_eq(bound("CompilerProbe", Val("Edit")), Duration.from_secs(22 * 120 + 30))
+    assert_eq(bound("BenchMeasurement", None), SELECTED_BUILD_DEADLINE + PROVIDER_DEADLINE)
+    assert_eq(bound("AllocationProbe", None), SELECTED_BUILD_DEADLINE + PROVIDER_DEADLINE)
+    loop (kind, mode) in [("CompilerProbe", Val("Clean")), ("CompilerProbe", Val("Edit")), ("BenchMeasurement", None), ("AllocationProbe", None)] {
+        assert(bound(kind, mode) > PROVIDER_DEADLINE, "{kind} measures but is bounded like a fact read")
+    }
+}
+// Rust: Source/CmdBudget.rs:3754
+#Test("running_executable_selection_is_stable_and_fail_closed") {
+    if core.sys.target.selected_os() == "linux" {
+        // GATE #4494: real filesystem fixtures and POSIX permissions, no fake provider.
+        root :: std.env.temp_dir().join("jet-budget-executable-selection-{std.process.id()}")
+        _ :: fs.remove_dir_all(root)
+        fs.create_dir(root).unwrap()
+        current :: root.join("current")
+        stable :: root.join("stable")
+        fs.write(current, "current".bytes()).unwrap()
+        assert_eq(select_running_executable(current, stable).unwrap(), current)
+        fs.remove_file(current).unwrap()
+        fs.write(stable, "stable".bytes()).unwrap()
+        assert_eq(select_running_executable(current, stable).unwrap(), stable)
+        fs.remove_file(stable).unwrap()
+        assert(select_running_executable(current, stable).is_err())
+        fs.write(current, "unreadable".bytes()).unwrap()
+        fs.write(stable, "stable".bytes()).unwrap()
+        fs.set_permissions(current, fs.Permissions.from_mode(0o111)).unwrap()
+        // GATE #4409: unreadable canonical executable is not treated as NotFound.
+        assert_eq(select_running_executable(current, stable).unwrap(), current)
+        _ :: fs.remove_dir_all(root)
+    }
+}

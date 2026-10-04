@@ -1,3 +1,6 @@
+use core.files.runtime.descriptor_metadata.[DescriptorStat, FileID, NativeFileFacts, NativeModifiedTime]
+use core.time.runtime.kernel_wide_time.[UInt128Parts]
+
 // Claims ported from crates/jet-pkg-model/src/Authority.rs
 // `authority_walk_tests`. Fixtures live under the process temp directory
 // (never a tmpfs /tmp: jet-env points TMPDIR at on-disk scratch).
@@ -15,7 +18,7 @@ fn pkg_test_authority_root(label: String) -[FS, Env]> String Never! {
     files.write(files.join(root, "run.jet"), "fn run() {{}}\n") ?? panic("write")
     opened :: AuthorityResolver.open_for_authority_walk(root) ?? panic("open for walk")
     resolver :: opened ?? panic("a source directory is an authority candidate")
-    assert_eq(resolver.root(), files.canonicalize(root) ?? panic("canonicalize"))
+    assert_eq(resolver.root, files.canonicalize(root) ?? panic("canonicalize"))
     if sys.is_unix() {
         // Do not assume the temp directory is world-writable: agent scratch
         // lives on disk under $HOME.
@@ -74,7 +77,7 @@ fn pkg_test_authority_root(label: String) -[FS, Env]> String Never! {
     root :: pkg_test_authority_root("deep")
     files.create_dir_all(root) ?? panic("mkdir")
     current := root
-    loop index in 0..<(@PKG_MAX_TREE_DEPTH + 2) {
+    loop index in 0..<(PKG_MAX_TREE_DEPTH + 2) {
         current = files.join(current, "d{index}")
         files.create_dir(current) ?? panic("mkdir level")
     }
@@ -92,7 +95,7 @@ fn pkg_test_authority_root(label: String) -[FS, Env]> String Never! {
     files.create_dir_all(root) ?? panic("mkdir")
     path :: files.join(root, "oversized.jet")
     // `File::set_len`: a sparse file one byte past the read bound.
-    receipt :: process.cmd([String]{"truncate", "-s", "{@PKG_MAX_TREE_FILE_BYTES + 1}", path}).run() ?? panic("truncate")
+    receipt :: process.cmd([String]{"truncate", "-s", "{PKG_MAX_TREE_FILE_BYTES + 1}", path}).run() ?? panic("truncate")
     assert(receipt.success)
     resolver :: AuthorityResolver.open(root) ?? panic("open")
     if resolver.checked_file("oversized.jet") == {
@@ -100,4 +103,74 @@ fn pkg_test_authority_root(label: String) -[FS, Env]> String Never! {
         .Err(error) -> assert(error.message().contains("read bound"))
     }
     files.remove_all(root) ?? panic("cleanup")
+}
+
+// Scalar projection fixtures exercise the real identity/epoch bodies only.
+// They neither acquire a native descriptor nor prove retained-handle parity.
+fn pkg_test_authority_stat(seconds: I64, nanoseconds: I64) -> DescriptorStat Never! {
+    DescriptorStat{
+        file_id: FileID{device: U64{7}, inode: U64{11}},
+        nlink: U64{1}, size: U64{13},
+        modified: NativeModifiedTime.Unix{seconds: seconds, nanoseconds: nanoseconds},
+        is_file: true, is_dir: false, is_symlink: false,
+        native: NativeFileFacts.Unix{mode: U32{33188}, uid: U32{1000}},
+    }
+}
+
+#Test("authority scalar file identity retains both epoch words and drift") {
+    stat :: pkg_test_authority_stat(I64{18446744074}, I64{0})
+    original :: FileIdentity.from_stat(stat, AuthorityKind.File)
+    same :: FileIdentity.from_stat(stat, AuthorityKind.File)
+    assert_eq(original.modified_ns, Val(UInt128Parts{hi: U64{1}, lo: U64{290448384}}))
+    assert_eq(original, same)
+    changed_low := ~original
+    changed_low.modified_ns = Val(UInt128Parts{hi: U64{1}, lo: U64{290448385}})
+    assert(original != changed_low)
+    changed_high := ~original
+    changed_high.modified_ns = Val(UInt128Parts{hi: U64{2}, lo: U64{290448384}})
+    assert(original != changed_high)
+}
+
+#Test("authority scalar preepoch absence is not a zero epoch") {
+    before :: FileIdentity.from_stat(pkg_test_authority_stat(I64{-1}, I64{0}), AuthorityKind.File)
+    epoch :: FileIdentity.from_stat(pkg_test_authority_stat(I64{0}, I64{0}), AuthorityKind.File)
+    assert_eq(before.modified_ns, None)
+    assert_eq(epoch.modified_ns, Val(UInt128Parts{hi: U64{0}, lo: U64{0}}))
+    assert(before != epoch)
+}
+
+#Test("authority scalar Unix pinned directory ignores size and time but not object") {
+    stat :: pkg_test_authority_stat(I64{0}, I64{0})
+    original :: FileIdentity.from_stat(stat, AuthorityKind.Directory)
+    assert_eq(original.length, U64{0})
+    assert_eq(original.modified_ns, None)
+    changed := ~stat
+    changed.size = U64{999}
+    changed.modified = NativeModifiedTime.Unix{seconds: I64{18446744074}, nanoseconds: I64{1}}
+    assert_eq(original, FileIdentity.from_stat(changed, AuthorityKind.Directory))
+    changed.file_id.inode = U64{12}
+    assert(original != FileIdentity.from_stat(changed, AuthorityKind.Directory))
+    changed.file_id.inode = U64{11}
+    changed.file_id.device = U64{8}
+    assert(original != FileIdentity.from_stat(changed, AuthorityKind.Directory))
+}
+
+#Test("authority scalar nonunix directory preserves content fallback and unavailable IDs") {
+    stat := pkg_test_authority_stat(I64{0}, I64{0})
+    stat.native = NativeFileFacts.Windows{attributes: U32{16}, reparse_tag: U32{0}}
+    stat.modified = NativeModifiedTime.Windows{filetime: U64{116444736000000001}}
+    original :: FileIdentity.from_stat(stat, AuthorityKind.Directory)
+    assert_eq(original.device, None)
+    assert_eq(original.inode, None)
+    assert_eq(original.length, U64{13})
+    assert_eq(original.modified_ns, Val(UInt128Parts{hi: U64{0}, lo: U64{100}}))
+    changed := ~stat
+    changed.file_id.device = U64{8}
+    changed.file_id.inode = U64{12}
+    assert_eq(original, FileIdentity.from_stat(changed, AuthorityKind.Directory))
+    changed.size = U64{14}
+    assert(original != FileIdentity.from_stat(changed, AuthorityKind.Directory))
+    changed.size = U64{13}
+    changed.modified = NativeModifiedTime.Windows{filetime: U64{116444736000000002}}
+    assert(original != FileIdentity.from_stat(changed, AuthorityKind.Directory))
 }

@@ -55,8 +55,8 @@ pub fn image_write_projection_report(layout: String, manifest_digest: String, re
     document["rejected"] = image_report_values(report.rejected)
     json_text :: image_json_text(DataTree.Object(document))
     temporary :: image_with_extension(path, "json.tmp-{sys.pid()}")
-    node :: image_node(path) ?? OciNode.Missing
-    if node != OciNode.Missing && !node.is_file() {
+    node :: image_node(path) ?? OCINode.Missing
+    if node != OCINode.Missing && !node.is_file() {
         return Err(image_invalid("image projection is not a regular file"))
     }
     image_publish_json(temporary, path, json_text)
@@ -133,8 +133,8 @@ fn image_json_strings(values: [String]) -> DataTree Never! {
 // rename, recovering a stale temporary from an interrupted run.
 fn image_write_atomic_json(layout: String, name: String, json_text: String) ImageError! -[FS, Env]> {
     path :: files.join(layout, name)
-    node :: image_node(path) ?? OciNode.Missing
-    if node != OciNode.Missing && !node.is_file() {
+    node :: image_node(path) ?? OCINode.Missing
+    if node != OCINode.Missing && !node.is_file() {
         return Err(image_invalid("image inspection artifact is not a regular file"))
     }
     image_publish_json(image_with_extension(path, "tmp-{sys.pid()}"), path, json_text)
@@ -145,7 +145,6 @@ fn image_publish_json(temporary: String, path: String, json_text: String) ImageE
     image_write_new_file(temporary, json_text.bytes())
     if files.rename(temporary, path) == .Err(error) {
         image_remove_quiet(temporary)
-        return Err(ImageError.Io(error))
+        return Err(ImageError.IO(error))
     }
-    Ok()
 }

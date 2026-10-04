@@ -19,7 +19,7 @@ fn store_test_read_pinned_member(directory: PinnedLifecycleDirectory, name: Stri
 fn store_test_is_already_exists(error: StoreError) -> Bool Never! {
     if error == {
         .AlreadyExists(_) -> true
-        .Io(inner) -> store_io_is_already_exists(inner)
+        .IO(inner) -> store_io_is_already_exists(inner)
         else -> false
     }
 }
@@ -79,4 +79,31 @@ fn store_test_is_already_exists(error: StoreError) -> Bool Never! {
     assert_eq((files.list_dir(outside.root) ?? panic("list outside")).len(), 0)
     store_test_drop_roots(roots)
     store_test_drop_roots(outside)
+}
+
+// Directory.rs `path`/`absolute`: the held directory reports the exact
+// absolute path it was opened at, member diagnostics join that path, and a
+// traversal component is refused with InvalidInput before anything opens.
+#Test("pinned directory reports its opened path and refuses traversal") {
+    roots :: store_test_temp_roots()
+    original :: files.join(files.join(roots.root, "lifecycle-db"), "journal")
+    directory :: PinnedLifecycleDirectory.open_or_create(original) ?? panic("open pinned directory")
+    assert_eq(directory.path(), original)
+    assert_eq(directory.member_path("00000001.txn"), files.join(original, "00000001.txn"))
+    assert_eq(store_lifecycle_corrupt_name(directory, "00000001.txn", "bad checksum").message(), "lifecycle journal `{files.join(original, "00000001.txn")}`: bad checksum")
+    // The held path stays the opened path after a component is replaced.
+    files.rename(files.join(roots.root, "lifecycle-db"), files.join(roots.root, "held")) ?? panic("move component")
+    assert_eq(directory.path(), original)
+    escaped :: "{files.join(roots.root, "held")}/../outside"
+    if PinnedLifecycleDirectory.open_or_create(escaped) == {
+        .Ok(_) -> panic("a traversal component must be refused")
+        .Err(error) -> {
+            if error == {
+                .InvalidInput(message) -> assert_eq(message, "pinned directory path contains traversal")
+                else -> panic("traversal must be InvalidInput")
+            }
+        }
+    }
+    assert(!files.exists(files.join(roots.root, "outside")))
+    store_test_drop_roots(roots)
 }

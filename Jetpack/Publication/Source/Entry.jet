@@ -1,0 +1,871 @@
+// PORT-PENDING 0828 source-publish-mod: Source/Publish/mod.rs:1-867
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! E2-M8 — packages and enterprise supply chain.
+//RS //!
+//RS //! Owns:
+//RS //!   - SemVer parsing and comparison (no external crates, I6).
+//RS //!   - Public API extraction from parsed Jet AST items.
+//RS //!   - API diff → E2601 (breaking change under non-breaking version bump).
+//RS //!   - PubGrub-style conflict detection → E2602.
+//RS //!   - Signed advisory feed and policy check → E2603/E2609/E2610.
+//RS //!   - Artifact integrity verification → E2604.
+//RS //!   - Deterministic SBOM emission and OCI referrer evidence for registry
+//RS //!     publication (SBOM, signature, provenance, reproducibility).
+//RS //!   - `jet registry vendor` (copy resolved deps into a `vendor/` tree).
+//RS //!   - Private / mirror registry configuration.
+//RS 
+//RS mod API;
+//RS pub mod Advisory;
+//RS // ApiFreeze: pure sema types from Sema::ApiFreeze; driver-level write_api_snapshot_for_entry
+//RS // lives in Publish/ApiFreeze.rs which re-exports the pure items and adds the loader call.
+//RS pub mod ApiFreeze;
+//RS // Schema: pure types from Sema::Schema; write_schema_snapshots_for_entry in Publish/Schema.rs.
+//RS pub use crate::Sema::Schema::{
+//RS     load_all_snapshots, load_snapshot, save_snapshot, schema_cache_dir, snapshot_from_struct,
+//RS     SchemaSnapshot, SnapshotField, SNAPSHOT_VERSION,
+//RS };
+//RS mod Schema;
+//RS pub use Schema::write_schema_snapshots_for_entry;
+//RS mod Diff;
+//RS pub mod ForeignPackage;
+//RS pub mod Index;
+//RS mod NamePolicy;
+//RS pub mod Policy;
+//RS mod Registry;
+//RS mod Resolve;
+//RS mod SBOM;
+//RS pub mod SemVer;
+//RS pub mod Tier;
+//RS mod Tuf;
+//RS // c146 (D-PKGSIGN1): Ed25519 author signing via the hidden crypto bridge helper.
+//RS pub mod Sign;
+//RS mod Vendor;
+//RS 
+//RS pub use Advisory::*;
+//RS pub use Diff::*;
+//RS pub use Index::IndexEntry;
+//RS pub use NamePolicy::*;
+//RS pub use Policy::*;
+//RS pub use Registry::*;
+//RS pub(crate) use Registry::{
+//RS     read_registry_package_metadata, RegistryDependency, RegistryPackageMetadata,
+//RS };
+//RS pub use Resolve::*;
+//RS pub use SemVer::*;
+//RS pub use Tier::*;
+//RS pub use Tuf::*;
+//RS pub use Vendor::*;
+//RS pub use API::*;
+//RS pub use SBOM::*;
+//RS 
+//RS // ──────────────────────────────────────────────
+//RS // Unit tests
+//RS // ──────────────────────────────────────────────
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS     use crate::Lock::{LockFile, LockSource, LockedPackage};
+//RS     use std::collections::BTreeMap;
+//RS 
+//RS     fn sv(s: &str) -> SemVer::SemVer {
+//RS         SemVer::SemVer::parse(s).expect(s)
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn semver_parse_basic() {
+//RS         let v = sv("1.2.3");
+//RS         assert_eq!(v.major, 1);
+//RS         assert_eq!(v.minor, 2);
+//RS         assert_eq!(v.patch, 3);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn semver_parse_with_prefix_v() {
+//RS         let v = sv("v2.0.0");
+//RS         assert_eq!(v.major, 2);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn semver_parse_with_pre() {
+//RS         let v = sv("1.0.0-alpha.1");
+//RS         assert_eq!(v.major, 1);
+//RS         assert_eq!(v.pre.as_deref(), Some("alpha.1"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn semver_ordering() {
+//RS         assert!(sv("2.0.0") > sv("1.9.9"));
+//RS         assert!(sv("1.1.0") > sv("1.0.9"));
+//RS         assert_eq!(sv("1.2.3"), sv("1.2.3"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn semver_compatible() {
+//RS         let v100 = sv("1.0.0");
+//RS         let v120 = sv("1.2.0");
+//RS         assert!(v120.is_compatible_with(&v100));
+//RS         assert!(!v100.is_compatible_with(&v120)); // not >=
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn classify_bump_kinds() {
+//RS         assert_eq!(classify_bump(&sv("1.0.0"), &sv("2.0.0")), BumpKind::Major);
+//RS         assert_eq!(classify_bump(&sv("1.0.0"), &sv("1.1.0")), BumpKind::Minor);
+//RS         assert_eq!(classify_bump(&sv("1.0.0"), &sv("1.0.1")), BumpKind::Patch);
+//RS         assert_eq!(classify_bump(&sv("1.0.0"), &sv("1.0.0")), BumpKind::Same);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn version_req_caret() {
+//RS         let req = VersionReq::parse("^1.2").unwrap();
+//RS         assert!(req.matches(&sv("1.2.0")));
+//RS         assert!(req.matches(&sv("1.5.3")));
+//RS         assert!(!req.matches(&sv("2.0.0")));
+//RS         assert!(!req.matches(&sv("1.1.9")));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn version_req_exact() {
+//RS         let req = VersionReq::parse("1.2.3").unwrap();
+//RS         assert!(req.matches(&sv("1.2.3")));
+//RS         assert!(!req.matches(&sv("1.2.4")));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn version_req_any() {
+//RS         let req = VersionReq::parse("*").unwrap();
+//RS         assert!(req.matches(&sv("99.99.99")));
+//RS     }
+//RS 
+//RS     // ── Full SemVer 2.0.0 coverage (D-PARSE-1) ──
+//RS 
+//RS     #[test]
+//RS     fn semver_parses_build_metadata() {
+//RS         let v = sv("1.2.3+build.5");
+//RS         assert_eq!(v.build.as_deref(), Some("build.5"));
+//RS         assert_eq!(v.pre, None);
+//RS         // Pre-release then build: 1.2.3-rc.1+exp.sha.
+//RS         let v2 = sv("1.2.3-rc.1+exp.sha.5114f85");
+//RS         assert_eq!(v2.pre.as_deref(), Some("rc.1"));
+//RS         assert_eq!(v2.build.as_deref(), Some("exp.sha.5114f85"));
+//RS         // Round-trips through Display.
+//RS         assert_eq!(v2.to_string(), "1.2.3-rc.1+exp.sha.5114f85");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn semver_build_metadata_ignored_in_precedence() {
+//RS         assert_eq!(sv("1.2.3+a"), sv("1.2.3+b"));
+//RS         assert_eq!(sv("1.2.3+a").cmp(&sv("1.2.3")), std::cmp::Ordering::Equal);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn semver_rejects_leading_zeros() {
+//RS         assert!(SemVer::SemVer::parse("01.2.3").is_none());
+//RS         assert!(SemVer::SemVer::parse("1.02.3").is_none());
+//RS         assert!(SemVer::SemVer::parse("1.2.3-01").is_none()); // numeric pre-release id, leading zero
+//RS         assert!(SemVer::SemVer::parse("1.2").is_none()); // not three components
+//RS         assert!(SemVer::SemVer::parse("1.2.3.4").is_none());
+//RS         // Build metadata may carry leading zeros.
+//RS         assert!(SemVer::SemVer::parse("1.2.3+0010").is_some());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn semver_hostile_numbers_and_ambiguous_ranges_never_panic_or_match() {
+//RS         let huge_pre = format!("1.0.0-{}", "9".repeat(200));
+//RS         let parsed = SemVer::SemVer::parse(&huge_pre).expect("SemVer permits unbounded pre ids");
+//RS         assert!(parsed > sv("1.0.0-2"));
+//RS 
+//RS         for range in [
+//RS             "1 ||",
+//RS             "|| 1",
+//RS             "1 || || 2",
+//RS             "^18446744073709551615",
+//RS             "~1.18446744073709551615",
+//RS             "18446744073709551615.x",
+//RS             ">=",
+//RS             ">",
+//RS             "<",
+//RS             "=",
+//RS             "^",
+//RS             "~",
+//RS             "~>",
+//RS             "~>1.2",
+//RS         ] {
+//RS             assert!(
+//RS                 VersionReq::parse(range).is_none(),
+//RS                 "accepted hostile range: {range}"
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn semver_leading_v_is_consistent_across_versions_and_ranges() {
+//RS         assert_eq!(SemVer::SemVer::parse("v1.2.3"), Some(sv("1.2.3")));
+//RS         for range in ["v1.2", "=v1.2.3", ">=v1.2.3", "^v1.2.3", "~v1.2.3"] {
+//RS             assert!(
+//RS                 VersionReq::parse(range).unwrap().matches(&sv("1.2.3")),
+//RS                 "leading v failed in {range}"
+//RS             );
+//RS         }
+//RS         assert!(VersionReq::parse("v1.2.3 - v2.0.0")
+//RS             .unwrap()
+//RS             .matches(&sv("1.5.0")));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn semver_prerelease_precedence() {
+//RS         // Spec example chain: alpha < alpha.1 < alpha.beta < beta < beta.2 < beta.11 < rc.1 < release.
+//RS         let chain = [
+//RS             "1.0.0-alpha",
+//RS             "1.0.0-alpha.1",
+//RS             "1.0.0-alpha.beta",
+//RS             "1.0.0-beta",
+//RS             "1.0.0-beta.2",
+//RS             "1.0.0-beta.11",
+//RS             "1.0.0-rc.1",
+//RS             "1.0.0",
+//RS         ];
+//RS         for w in chain.windows(2) {
+//RS             assert!(sv(w[0]) < sv(w[1]), "{} should be < {}", w[0], w[1]);
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn version_req_operators() {
+//RS         assert!(VersionReq::parse(">=1.2.0").unwrap().matches(&sv("1.5.0")));
+//RS         assert!(!VersionReq::parse(">=1.2.0").unwrap().matches(&sv("1.1.9")));
+//RS         assert!(VersionReq::parse("<2.0.0").unwrap().matches(&sv("1.9.9")));
+//RS         assert!(!VersionReq::parse("<2.0.0").unwrap().matches(&sv("2.0.0")));
+//RS         // AND of two simples (whitespace), with space after operator.
+//RS         let r = VersionReq::parse(">=1.2.0 < 2.0.0").unwrap();
+//RS         assert!(r.matches(&sv("1.5.0")));
+//RS         assert!(!r.matches(&sv("2.0.0")));
+//RS         assert!(!r.matches(&sv("1.0.0")));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn version_req_tilde() {
+//RS         let r = VersionReq::parse("~1.2.3").unwrap();
+//RS         assert!(r.matches(&sv("1.2.9")));
+//RS         assert!(!r.matches(&sv("1.3.0")));
+//RS         assert!(!r.matches(&sv("1.2.2")));
+//RS         let r2 = VersionReq::parse("~1").unwrap();
+//RS         assert!(r2.matches(&sv("1.9.9")));
+//RS         assert!(!r2.matches(&sv("2.0.0")));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn version_req_x_ranges() {
+//RS         let r = VersionReq::parse("1.2.x").unwrap();
+//RS         assert!(r.matches(&sv("1.2.0")));
+//RS         assert!(r.matches(&sv("1.2.99")));
+//RS         assert!(!r.matches(&sv("1.3.0")));
+//RS         let r2 = VersionReq::parse("1").unwrap();
+//RS         assert!(r2.matches(&sv("1.9.9")));
+//RS         assert!(!r2.matches(&sv("2.0.0")));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn version_req_hyphen_and_or() {
+//RS         let r = VersionReq::parse("1.2.3 - 2.3.4").unwrap();
+//RS         assert!(r.matches(&sv("1.2.3")));
+//RS         assert!(r.matches(&sv("2.3.4")));
+//RS         assert!(!r.matches(&sv("2.3.5")));
+//RS         // Partial high bound: `1.2.3 - 2.3` → <2.4.0.
+//RS         let r2 = VersionReq::parse("1.2.3 - 2.3").unwrap();
+//RS         assert!(r2.matches(&sv("2.3.9")));
+//RS         assert!(!r2.matches(&sv("2.4.0")));
+//RS         // OR.
+//RS         let r3 = VersionReq::parse("^1.0.0 || ^3.0.0").unwrap();
+//RS         assert!(r3.matches(&sv("1.5.0")));
+//RS         assert!(r3.matches(&sv("3.2.0")));
+//RS         assert!(!r3.matches(&sv("2.0.0")));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn version_req_prerelease_rule() {
+//RS         // `*` and bare ranges do not match pre-releases…
+//RS         assert!(!VersionReq::parse(">=1.0.0")
+//RS             .unwrap()
+//RS             .matches(&sv("2.0.0-alpha")));
+//RS         // …unless a comparator names the same tuple with a pre-release.
+//RS         assert!(VersionReq::parse(">=1.2.3-alpha")
+//RS             .unwrap()
+//RS             .matches(&sv("1.2.3-beta")));
+//RS         assert!(!VersionReq::parse(">=1.2.3-alpha")
+//RS             .unwrap()
+//RS             .matches(&sv("1.2.4-beta")));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn version_req_caret_zero() {
+//RS         // ^0.2.3 → >=0.2.3 <0.3.0
+//RS         let r = VersionReq::parse("^0.2.3").unwrap();
+//RS         assert!(r.matches(&sv("0.2.9")));
+//RS         assert!(!r.matches(&sv("0.3.0")));
+//RS         // ^0.0.3 → >=0.0.3 <0.0.4
+//RS         let r2 = VersionReq::parse("^0.0.3").unwrap();
+//RS         assert!(r2.matches(&sv("0.0.3")));
+//RS         assert!(!r2.matches(&sv("0.0.4")));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn conflict_detection_disjoint_majors() {
+//RS         let constraints = vec![
+//RS             VersionConstraint {
+//RS                 package: "foo".into(),
+//RS                 req: VersionReq::parse("^1.0").unwrap(),
+//RS                 from: "bar 0.1.0".into(),
+//RS             },
+//RS             VersionConstraint {
+//RS                 package: "foo".into(),
+//RS                 req: VersionReq::parse("^2.0").unwrap(),
+//RS                 from: "baz 0.1.0".into(),
+//RS             },
+//RS         ];
+//RS         let diags = check_conflicts(&constraints, &BTreeMap::new());
+//RS         assert!(
+//RS             !diags.is_empty(),
+//RS             "disjoint caret ranges should be a conflict"
+//RS         );
+//RS         assert_eq!(diags[0].code, "E2602");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn conflict_compatible_ranges_no_conflict() {
+//RS         let constraints = vec![
+//RS             VersionConstraint {
+//RS                 package: "foo".into(),
+//RS                 req: VersionReq::parse("^1.0").unwrap(),
+//RS                 from: "bar 0.1.0".into(),
+//RS             },
+//RS             VersionConstraint {
+//RS                 package: "foo".into(),
+//RS                 req: VersionReq::parse("^1.2").unwrap(),
+//RS                 from: "baz 0.1.0".into(),
+//RS             },
+//RS         ];
+//RS         // Provide candidates that satisfy both.
+//RS         let mut avail = BTreeMap::new();
+//RS         avail.insert("foo".to_string(), vec![sv("1.2.0"), sv("1.3.0")]);
+//RS         let diags = check_conflicts(&constraints, &avail);
+//RS         assert!(
+//RS             diags.is_empty(),
+//RS             "compatible ranges with a valid candidate should not conflict"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn advisory_parse_and_match() {
+//RS         let public_key = "00".repeat(32);
+//RS         let key_id = advisory_key_id(&public_key).unwrap();
+//RS         let feed = parse_advisory_feed(&format!(
+//RS             "{ADVISORY_FEED_MAGIC}\nfeed|1|100|1000|86400|{key_id}|{public_key}|sig\nadvisory|JET-2026-0001|mylib|^1.0|1.0.5|Remote code execution via parse|medium\n"
+//RS         ))
+//RS         .unwrap();
+//RS         assert_eq!(feed.advisories.len(), 1);
+//RS         let adv = &feed.advisories[0];
+//RS         assert_eq!(adv.id, "JET-2026-0001");
+//RS         assert!(adv.affects(&sv("1.0.3")));
+//RS         assert!(!adv.affects(&sv("1.0.5"))); // fixed
+//RS         assert!(!adv.affects(&sv("2.0.0"))); // outside ^1.0
+//RS     }
+//RS 
+//RS     fn make_lock_pkg(name: &str, version: &str, fp: &str) -> LockedPackage {
+//RS         LockedPackage {
+//RS             name: name.into(),
+//RS             version: version.into(),
+//RS             fingerprint: fp.into(),
+//RS             content_hash: None,
+//RS             source: LockSource::Path("/tmp/placeholder".into()),
+//RS             nix_closure: None,
+//RS             locked: None,
+//RS             dependencies: vec![],
+//RS             layer: None,
+//RS             inferred_layer: None,
+//RS             effects: Vec::new(),
+//RS             effect_grants: Vec::new(),
+//RS             required_effects: Vec::new(),
+//RS             granted_effects: Vec::new(),
+//RS             denied_effects: Vec::new(),
+//RS             effect_authority: None,
+//RS             envelope: None,
+//RS             receipt: Default::default(),
+//RS             provenance: None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn make_lock(pkgs: Vec<LockedPackage>) -> LockFile {
+//RS         LockFile {
+//RS             version: 1,
+//RS             packages: pkgs,
+//RS             root_dependencies: vec![],
+//RS             authority: None,
+//RS             workspace_members: Vec::new(),
+//RS             workspace_source_digest: None,
+//RS             workspace_overlay_policy: Default::default(),
+//RS             comptime_inputs: Vec::new(),
+//RS             toolchains: Vec::new(),
+//RS             browsers: Vec::new(),
+//RS             source_channels: Vec::new(),
+//RS             build_stamp: None,
+//RS             build_contributions: Vec::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn audit_lockfile_includes_foreign_rust_bridge_packages() {
+//RS         let mut package = make_lock_pkg("base64", "0.22.1", "sha256-aabb");
+//RS         package.source = LockSource::Foreign {
+//RS             language: crate::AST::ForeignLanguage::Rust,
+//RS             reference: "base64@0.22.1".into(),
+//RS             output: "sha256-bridge".into(),
+//RS         };
+//RS         let lock = make_lock(vec![package]);
+//RS         let advisories = vec![Advisory::Advisory {
+//RS             id: "RUSTSEC-TEST".into(),
+//RS             package: "base64".into(),
+//RS             affected: VersionReq::parse("^0.22").unwrap(),
+//RS             fixed: None,
+//RS             title: "bridge advisory".into(),
+//RS             severity: Severity::High,
+//RS         }];
+//RS         let matches = audit_lockfile(&lock, &advisories).unwrap();
+//RS         assert_eq!(matches.len(), 1);
+//RS         assert_eq!(matches[0].severity, Severity::High);
+//RS         assert!(matches[0].diagnostic.what.contains("base64"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn sbom_emits_foreign_rust_bridge_packages() {
+//RS         let digest = "a".repeat(64);
+//RS         let mut package = make_lock_pkg("base64", "0.22.1", "sha256-aabb");
+//RS         package.content_hash = Some(format!("sha256-{digest}"));
+//RS         package.source = LockSource::Foreign {
+//RS             language: crate::AST::ForeignLanguage::Rust,
+//RS             reference: "base64@0.22.1".into(),
+//RS             output: "sha256-bridge".into(),
+//RS         };
+//RS         let lock = make_lock(vec![package]);
+//RS         let spdx = emit_spdx(&lock, "myapp", "0.1.0");
+//RS         assert!(spdx.contains("PackageName: base64"));
+//RS         assert!(spdx.contains("PackageVersion: 0.22.1"));
+//RS         assert!(spdx.contains(&format!("SHA256: {digest}")));
+//RS         let cyclonedx = emit_cyclonedx(&lock, "myapp", "0.1.0");
+//RS         assert!(cyclonedx.contains("\"name\": \"base64\""));
+//RS         assert!(cyclonedx.contains("\"version\": \"0.22.1\""));
+//RS         assert!(cyclonedx.contains(&format!("\"content\": \"{digest}\"")));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn maturity_window_applies_to_foreign_rust_bridge_packages() {
+//RS         let mut package = make_lock_pkg("base64", "0.22.1", "sha256-aabb");
+//RS         package.source = LockSource::Foreign {
+//RS             language: crate::AST::ForeignLanguage::Rust,
+//RS             reference: "base64@0.22.1".into(),
+//RS             output: "sha256-bridge".into(),
+//RS         };
+//RS         let lock = make_lock(vec![package]);
+//RS         let feed = |releases: Vec<AdvisoryRelease>| AdvisoryFeed {
+//RS             sequence: 1,
+//RS             issued_at: 100,
+//RS             expires_at: 200_000,
+//RS             maturity_seconds: DEFAULT_MATURITY_SECONDS,
+//RS             key_id: String::new(),
+//RS             public_key: String::new(),
+//RS             signature: String::new(),
+//RS             releases,
+//RS             advisories: Vec::new(),
+//RS             exceptions: Vec::new(),
+//RS         };
+//RS         let release = AdvisoryRelease {
+//RS             package: "base64".into(),
+//RS             version: sv("0.22.1"),
+//RS             first_seen: 100,
+//RS             source_class: SourceClass::ThirdParty,
+//RS         };
+//RS 
+//RS         // Inside the window: the bridge crate is refused like any dependency.
+//RS         let (maturity, applied) = Advisory::lock_maturity_diagnostics(
+//RS             &lock,
+//RS             &feed(vec![release.clone()]),
+//RS             DEFAULT_MATURITY_SECONDS,
+//RS             200,
+//RS             &[],
+//RS         )
+//RS         .unwrap();
+//RS         assert!(applied.is_empty());
+//RS         assert_eq!(maturity.len(), 1, "{maturity:?}");
+//RS         assert_eq!(maturity[0].code, "E2609");
+//RS         assert!(maturity[0].what.contains("base64#0.22.1"));
+//RS 
+//RS         // Past the window: clean.
+//RS         let (maturity, _) = Advisory::lock_maturity_diagnostics(
+//RS             &lock,
+//RS             &feed(vec![release]),
+//RS             DEFAULT_MATURITY_SECONDS,
+//RS             100 + DEFAULT_MATURITY_SECONDS,
+//RS             &[],
+//RS         )
+//RS         .unwrap();
+//RS         assert!(maturity.is_empty(), "{maturity:?}");
+//RS 
+//RS         // No release record: a foreign package is not exempt like root/path.
+//RS         let (maturity, _) = Advisory::lock_maturity_diagnostics(
+//RS             &lock,
+//RS             &feed(Vec::new()),
+//RS             DEFAULT_MATURITY_SECONDS,
+//RS             200,
+//RS             &[],
+//RS         )
+//RS         .unwrap();
+//RS         assert_eq!(maturity.len(), 1, "{maturity:?}");
+//RS         assert_eq!(maturity[0].code, "E2610");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn audit_lockfile_emits_e2603() {
+//RS         let lock = make_lock(vec![make_lock_pkg("mylib", "1.0.3", "sha256-aabb")]);
+//RS         let advisories = vec![Advisory::Advisory {
+//RS             id: "ADV-001".into(),
+//RS             package: "mylib".into(),
+//RS             affected: VersionReq::parse("^1.0").unwrap(),
+//RS             fixed: Some(sv("1.0.5")),
+//RS             title: "XSS in template engine".into(),
+//RS             severity: Severity::Medium,
+//RS         }];
+//RS         let matches = audit_lockfile(&lock, &advisories).unwrap();
+//RS         assert_eq!(matches.len(), 1);
+//RS         assert_eq!(matches[0].diagnostic.code, "E2603");
+//RS         // No explicit severity field → defaults to Medium (advisory, exit 0).
+//RS         assert_eq!(matches[0].severity, Severity::Medium);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn audit_severity_parsed_from_db() {
+//RS         let lock = make_lock(vec![make_lock_pkg("mylib", "1.0.3", "sha256-aabb")]);
+//RS         let advisories = vec![Advisory::Advisory {
+//RS             id: "ADV-002".into(),
+//RS             package: "mylib".into(),
+//RS             affected: VersionReq::parse("^1.0").unwrap(),
+//RS             fixed: None,
+//RS             title: "Heap overflow".into(),
+//RS             severity: Severity::Critical,
+//RS         }];
+//RS         assert_eq!(advisories[0].severity, Severity::Critical);
+//RS         let matches = audit_lockfile(&lock, &advisories).unwrap();
+//RS         assert_eq!(matches.len(), 1);
+//RS         assert_eq!(matches[0].severity, Severity::Critical);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn advisory_parser_rejects_partial_ambiguous_and_invalid_records() {
+//RS         let public_key = "00".repeat(32);
+//RS         let key_id = advisory_key_id(&public_key).unwrap();
+//RS         for record in [
+//RS             "missing|fields|only",
+//RS             "advisory|ADV||^1.0||title|critical",
+//RS             "release|pkg@1.0.0|100|third-party",
+//RS             "advisory|ADV|pkg|^1.0|not-a-version|title|critical",
+//RS             "advisory|ADV|pkg|^1.0||title|critical|extra",
+//RS         ] {
+//RS             let text = format!(
+//RS                 "{ADVISORY_FEED_MAGIC}\nfeed|1|100|1000|86400|{key_id}|{public_key}|sig\n{record}\n"
+//RS             );
+//RS             let diagnostic = parse_advisory_feed(&text).unwrap_err();
+//RS             assert_eq!(diagnostic.code, "E2607");
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn signed_advisory_feed_parser_binds_exact_policy_targets() {
+//RS         let public_key = "00".repeat(32);
+//RS         let key_id = advisory_key_id(&public_key).unwrap();
+//RS         let text = format!(
+//RS             "{ADVISORY_FEED_MAGIC}\nfeed|7|100|100000|86400|{key_id}|{public_key}|signature\nrelease|mylib#1.0.3|100|third-party\nadvisory|ADV-1|mylib|^1.0|1.0.5|security fix|high\nexception|mylib#1.0.3|incident response|security-team|200000\n"
+//RS         );
+//RS         let feed = parse_advisory_feed(&text).expect("signed feed records should parse");
+//RS         assert_eq!(feed.sequence, 7);
+//RS         assert_eq!(feed.releases[0].source_class, SourceClass::ThirdParty);
+//RS         assert_eq!(feed.exceptions[0].package, "mylib");
+//RS         assert!(advisory_feed_payload(&feed).contains("mylib#1.0.3"));
+//RS 
+//RS         let at_target = text.replace("mylib#1.0.3", "mylib@1.0.3");
+//RS         assert_eq!(parse_advisory_feed(&at_target).unwrap_err().code, "E2607");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn advisory_trust_and_policy_fail_closed() {
+//RS         let duplicate = "public_key=00\npublic_key=11\n";
+//RS         assert_eq!(parse_advisory_trust(duplicate).unwrap_err().code, "E2607");
+//RS         let revoked = parse_advisory_trust("public_key=00\nrevoked_key=00\n").unwrap();
+//RS         assert!(revoked.revoked_keys.contains("00"));
+//RS         assert_eq!(
+//RS             parse_advisory_trust("public_key=00\nmin_sequence=1\naccepted_digest=bad\n")
+//RS                 .unwrap_err()
+//RS                 .code,
+//RS             "E2607"
+//RS         );
+//RS 
+//RS         let diagnostic = e2609("mylib", "1.0.3", 86_500, SourceClass::ThirdParty);
+//RS         assert_eq!(diagnostic.code, "E2609");
+//RS         assert!(diagnostic.what.contains("mylib#1.0.3"));
+//RS         assert!(diagnostic.fix.contains("policy.exceptions"));
+//RS         assert!(diagnostic.fix.contains("mylib#1.0.3"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn audit_lockfile_rejects_invalid_locked_versions() {
+//RS         let lock = make_lock(vec![make_lock_pkg("mylib", "not-semver", "sha256-aabb")]);
+//RS         let error = audit_lockfile(&lock, &[]).expect_err("invalid lock versions must fail closed");
+//RS         assert_eq!(error.code, "E2610");
+//RS         assert!(error.what.contains("mylib"));
+//RS         assert!(error.what.contains("not-semver"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn malformed_supply_metadata_diagnostic_is_pinned() {
+//RS         let diagnostic = e2607("advisory feed", "line 2 has an invalid fixed version");
+//RS         assert_eq!(diagnostic.code, "E2607");
+//RS         assert_eq!(
+//RS             diagnostic.what,
+//RS             "advisory feed is malformed: line 2 has an invalid fixed version"
+//RS         );
+//RS         assert_eq!(
+//RS             diagnostic.why,
+//RS             "supply-chain metadata is security-sensitive, so Jet rejects ambiguous or partial records instead of silently skipping them."
+//RS         );
+//RS         assert_eq!(
+//RS             diagnostic.fix,
+//RS             "fix the malformed advisory feed record and retry; use the documented parser contract and UTF-8 text."
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn spdx_sbom_has_required_fields() {
+//RS         let lock = make_lock(vec![make_lock_pkg("helpers", "1.0.0", "sha256-abcd1234")]);
+//RS         let sbom = emit_spdx(&lock, "myapp", "0.1.0");
+//RS         assert_eq!(sbom, emit_spdx(&lock, "myapp", "0.1.0"));
+//RS         assert!(
+//RS             sbom.contains("SPDXVersion: SPDX-2.3"),
+//RS             "must have version header"
+//RS         );
+//RS         assert!(
+//RS             sbom.contains("PackageName: helpers"),
+//RS             "must list dependency"
+//RS         );
+//RS         assert!(sbom.contains("PackageVersion: 1.0.0"));
+//RS         assert!(sbom.contains("SHA256: abcd1234"));
+//RS         assert!(sbom.contains("DEPENDS_ON"), "must have relationship");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn registry_publish_writes_and_rejects_tampered_oci_referrers() {
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet_registry_referrers_{}",
+//RS             std::time::SystemTime::now()
+//RS                 .duration_since(std::time::UNIX_EPOCH)
+//RS                 .unwrap()
+//RS                 .as_nanos()
+//RS         ));
+//RS         let repo = root.join("registry");
+//RS         let source = root.join("source");
+//RS         std::fs::create_dir_all(&repo).unwrap();
+//RS         std::fs::create_dir_all(source.join(".jet")).unwrap();
+//RS         std::fs::write(source.join("package.jet"), "package bytes\n").unwrap();
+//RS         let lock = make_lock(vec![make_lock_pkg("helpers", "1.0.0", "sha256-abcd1234")]);
+//RS         std::fs::write(source.join(".jet").join("lock"), crate::Lock::write(&lock)).unwrap();
+//RS 
+//RS         let content_hash = crate::SHA256::tree_hash(&source);
+//RS         Registry::publish_artifact(&repo, &source, "ref-kit", "1.0.0", &content_hash).unwrap();
+//RS         let entry = IndexEntry {
+//RS             name: "ref-kit".into(),
+//RS             version: "1.0.0".into(),
+//RS             content_hash: content_hash.clone(),
+//RS             fingerprint: "sha256-fingerprint".into(),
+//RS             yanked: false,
+//RS             tier: RegistryTier::Core,
+//RS             gate_status: GateStatus::core_reviewed(),
+//RS             public_key: String::new(),
+//RS             signature: String::new(),
+//RS         };
+//RS         Index::write_index_entry(&repo, &entry).unwrap();
+//RS         Registry::verify_oci_referrers(&repo, &entry).unwrap();
+//RS 
+//RS         let blobs = repo.join("referrers").join(&content_hash).join("blobs");
+//RS         let blob = std::fs::read_dir(&blobs)
+//RS             .unwrap()
+//RS             .next()
+//RS             .unwrap()
+//RS             .unwrap()
+//RS             .path();
+//RS         let mut bytes = std::fs::read(&blob).unwrap();
+//RS         bytes.push(b'\n');
+//RS         std::fs::write(blob, bytes).unwrap();
+//RS         let error = Registry::verify_oci_referrers(&repo, &entry)
+//RS             .expect_err("a tampered OCI referrer must fail closed");
+//RS         assert!(
+//RS             error.to_string().contains("digest") || error.to_string().contains("size"),
+//RS             "tampering must fail on a bound OCI blob: {error}"
+//RS         );
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn registry_publish_rejects_missing_sbom_before_index_exposure() {
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet_registry_missing_sbom_{}",
+//RS             std::time::SystemTime::now()
+//RS                 .duration_since(std::time::UNIX_EPOCH)
+//RS                 .unwrap()
+//RS                 .as_nanos()
+//RS         ));
+//RS         let repo = root.join("registry");
+//RS         let source = root.join("source");
+//RS         std::fs::create_dir_all(&repo).unwrap();
+//RS         std::fs::create_dir_all(&source).unwrap();
+//RS         std::fs::write(source.join("package.jet"), "package bytes\n").unwrap();
+//RS 
+//RS         let content_hash = crate::SHA256::tree_hash(&source);
+//RS         Registry::publish_artifact(&repo, &source, "ref-kit", "1.0.0", &content_hash).unwrap();
+//RS         let pending = repo
+//RS             .join("referrers")
+//RS             .join(&content_hash)
+//RS             .join(".sbom.pending");
+//RS         std::fs::remove_file(&pending).unwrap();
+//RS         let entry = IndexEntry {
+//RS             name: "ref-kit".into(),
+//RS             version: "1.0.0".into(),
+//RS             content_hash,
+//RS             fingerprint: "sha256-fingerprint".into(),
+//RS             yanked: false,
+//RS             tier: RegistryTier::Core,
+//RS             gate_status: GateStatus::core_reviewed(),
+//RS             public_key: String::new(),
+//RS             signature: String::new(),
+//RS         };
+//RS 
+//RS         let error = Index::write_index_entry(&repo, &entry)
+//RS             .expect_err("a publication without its staged SBOM must fail closed");
+//RS         assert!(error.to_string().contains("SBOM evidence was not staged"));
+//RS         assert!(Index::find_entry(&repo, "ref-kit", "1.0.0")
+//RS             .unwrap()
+//RS             .is_none());
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn cyclonedx_sbom_is_valid_json_structure() {
+//RS         let lock = make_lock(vec![make_lock_pkg("helpers", "1.0.0", "sha256-abcd1234")]);
+//RS         let sbom = emit_cyclonedx(&lock, "myapp", "0.1.0");
+//RS         assert!(sbom.contains("\"bomFormat\": \"CycloneDX\""));
+//RS         assert!(sbom.contains("\"name\": \"helpers\""));
+//RS         assert!(sbom.contains("SHA-256"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn api_diff_detects_removed_fn() {
+//RS         let old = vec![ApiItem {
+//RS             kind: "fn".into(),
+//RS             name: "parse".into(),
+//RS             signature: "fn parse(raw: String) -> Int".into(),
+//RS         }];
+//RS         let new = vec![];
+//RS         let changes = diff_public_api(&old, &new);
+//RS         assert!(!changes.is_empty());
+//RS         assert!(changes[0].description.contains("removed"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn api_diff_detects_changed_signature() {
+//RS         let old = vec![ApiItem {
+//RS             kind: "fn".into(),
+//RS             name: "parse".into(),
+//RS             signature: "fn parse(raw: String) -> Int".into(),
+//RS         }];
+//RS         let new = vec![ApiItem {
+//RS             kind: "fn".into(),
+//RS             name: "parse".into(),
+//RS             signature: "fn parse(raw: String) -> Float".into(),
+//RS         }];
+//RS         let changes = diff_public_api(&old, &new);
+//RS         assert!(!changes.is_empty());
+//RS         assert!(changes[0].description.contains("changed"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn api_diff_no_change() {
+//RS         let api = vec![ApiItem {
+//RS             kind: "fn".into(),
+//RS             name: "greet".into(),
+//RS             signature: "fn greet(name: String)".into(),
+//RS         }];
+//RS         let changes = diff_public_api(&api, &api);
+//RS         assert!(changes.is_empty());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn pre_publish_gate_blocked_on_minor_with_break() {
+//RS         let gate = PrePublishGate {
+//RS             build_ok: true,
+//RS             tests_ok: true,
+//RS             breaking: vec![BreakingChange {
+//RS                 description: "fn `foo` removed".into(),
+//RS                 item_name: "foo".into(),
+//RS             }],
+//RS             version: "1.1.0".into(),
+//RS             bump_kind: BumpKind::Minor,
+//RS             next_major: 2,
+//RS         };
+//RS         assert!(gate.is_blocked());
+//RS         let errs = gate.semver_errors();
+//RS         assert!(!errs.is_empty());
+//RS         assert_eq!(errs[0].code, "E2601");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn pre_publish_gate_passes_major_with_break() {
+//RS         let gate = PrePublishGate {
+//RS             build_ok: true,
+//RS             tests_ok: true,
+//RS             breaking: vec![BreakingChange {
+//RS                 description: "fn `foo` removed".into(),
+//RS                 item_name: "foo".into(),
+//RS             }],
+//RS             version: "2.0.0".into(),
+//RS             bump_kind: BumpKind::Major,
+//RS             next_major: 3,
+//RS         };
+//RS         assert!(!gate.is_blocked());
+//RS         assert!(gate.semver_errors().is_empty());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn iso8601_format() {
+//RS         // Unix epoch → 1970-01-01T00:00:00Z
+//RS         assert_eq!(iso8601(0), "1970-01-01T00:00:00Z");
+//RS         // 2000-01-01T00:00:00Z = 946684800
+//RS         assert_eq!(iso8601(946684800), "2000-01-01T00:00:00Z");
+//RS         // 2024-01-01T00:00:00Z = 1704067200
+//RS         let ts = iso8601(1704067200);
+//RS         assert!(ts.starts_with("2024-01-01"), "got {}", ts);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn registries_from_env() {
+//RS         let mut env = std::collections::HashMap::new();
+//RS         env.insert(
+//RS             "JET_REGISTRY_PRIVATE_URL".into(),
+//RS             "https://my.company/jet".into(),
+//RS         );
+//RS         env.insert("JET_REGISTRY_PRIVATE_MIRROR".into(), "true".into());
+//RS         let regs = parse_registries_from_env(&env);
+//RS         assert!(!regs.is_empty());
+//RS         let r = &regs[0];
+//RS         assert_eq!(r.name, "private");
+//RS         assert!(r.mirror);
+//RS     }
+//RS }
+// END-PORT-PENDING 0828 Source/Publish/mod.rs:1-867
+

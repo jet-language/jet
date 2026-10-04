@@ -1,0 +1,100 @@
+use jet_foundation.[
+    DiagnosticExplanation,
+    DiagnosticRegistryStatus,
+    diagnostic_explanation_render,
+    DIAGNOSTIC_ROWS,
+    diagnostic_theme_dim,
+]
+
+// Behavioral claims for crates/jet-cli/src/Explain.rs and the reusable
+// foundation essay renderer. Registry-dependent marker/truth/build-fact tests
+// require the missing upstream unified registration and syntax registries.
+
+// Rust `migration_tool_codes_have_explain_shape` (Explain.rs:626-631).
+#Test("migration_tool_codes_have_explain_shape") {
+    assert(jet_cli_explain_is_code("JT0101"))
+    assert(jet_cli_explain_lookup_code("JT0101") != None)
+    assert(!jet_cli_explain_is_code("JT101"))
+}
+
+#Test("code recognition preserves numeric warning and symbolic boundaries") {
+    accepted :: [String]{"E0000", "E9999", "L0000", "W0410", "JT0000", "JT9999", "E-FACT-LAW1", "L-A-0", "E-A-B-C"}
+    loop value in accepted -> assert(jet_cli_explain_is_code(value))
+    rejected :: [String]{"", "E000", "E00000", "W0411", "W0000", "e0001", "jt0101", "JT01a1", " E0001", "E0001 ", "E-A", "E--A", "E-A-", "E-a-B", "L-A-B_", "L-A-Bé", "E-1-2-"}
+    loop value in rejected -> assert(!jet_cli_explain_is_code(value))
+}
+
+#Test("diagnostic lookup normalizes surrounding space and case") {
+    explanation :: jet_cli_explain_lookup_code("  e0003\n") ?? panic("registered diagnostic missing")
+    assert_eq(explanation.code, "E0003")
+    assert(explanation.what != None)
+    assert(explanation.why != None)
+    assert(explanation.fix != None)
+    assert_eq(explanation.example ?? "", "fn save(path: String) IOError! {{\n    print(path)\n}}")
+    assert(jet_cli_explain_lookup_code("E9999") == None)
+}
+
+#Test("diagnostic index includes retired rows and live codes are ordered") {
+    index :: jet_cli_explain_index()
+    previous_index_code := ""
+    loop (code, explanation) in index {
+        assert(previous_index_code < code)
+        assert_eq(explanation.code, code)
+        previous_index_code = code
+    }
+    codes :: jet_cli_explain_live_codes()
+    previous := ""
+    loop code in codes {
+        assert(previous < code)
+        explanation :: index.get(code) ?? panic("live code missing from index")
+        assert(!explanation.retired)
+        previous = code
+    }
+    loop row in DIAGNOSTIC_ROWS {
+        explanation :: index.get(row.code) ?? panic("registry row missing from index")
+        assert_eq(explanation.code, row.code)
+        assert(explanation.retired == (row.status == DiagnosticRegistryStatus.Retired))
+    }
+}
+
+fn explain_test_entry() -> DiagnosticExplanation Never! {
+    carriage_return :: String.from_bytes([U8]{U8{13}}) ?? panic("carriage return is valid UTF-8")
+    DiagnosticExplanation{code: "E0003", stage: "jet", meaning: "meaning", what: Val("first\n\nlast{carriage_return}\n"), why: Val("reason"), fix: Val("next step"), example: Val("one\n\ntwo\n"), retired: false}
+}
+
+#Test("essay preserves blank lines and Rust line-ending semantics") {
+    entry :: explain_test_entry()
+    assert_eq(jet_cli_explain_render(entry, false), "E0003\n\nWhat this means:\n  first\n\n  last\n\nWhy Jet enforces it:\n  reason\n\nHow to fix it:\n  next step\n\nExample:\n  one\n  \n  two\n\nThis explanation comes from jet's diagnostics reference.\n")
+    assert_eq(jet_cli_explain_render(entry, true), diagnostic_explanation_render(entry, true))
+}
+
+#Test("retired essays stop before section and source headers") {
+    entry := explain_test_entry()
+    entry.retired = true
+    entry.stage = "syntax registry"
+    assert_eq(jet_cli_explain_render(entry, false), "E0003\n\nThis code is retired: it is no longer produced by the current\ncompiler, and is kept here only so old build logs stay readable.\n")
+}
+
+#Test("syntax essays use syntax dictionary pointer without a second palette") {
+    entry := explain_test_entry()
+    entry.stage = "syntax registry"
+    plain :: jet_cli_explain_render(entry, false)
+    assert(plain.ends_with("This explanation comes from Jet's syntax dictionary.\n"))
+    assert(!plain.contains("diagnostics reference"))
+    assert(jet_cli_explain_render(entry, true).ends_with("This explanation comes from Jet's syntax dictionary.\n"))
+}
+
+#Test("undetailed rows retain stage and longer-explanation pointer") {
+    entry := explain_test_entry()
+    entry.what = None
+    entry.why = None
+    entry.fix = None
+    entry.example = None
+    assert_eq(jet_cli_explain_render(entry, false), "E0003\n\nWhat this means:\n  meaning\n\nStage: jet\n\nA longer explanation will land with the detailed typed row.\n\nThis explanation comes from jet's diagnostics reference.\n")
+}
+
+#Test("teaching pointer uses the shared dim ANSI role") {
+    body :: "run `jet explain E0003` to learn more"
+    assert_eq(jet_cli_explain_pointer_line("E0003", false), body)
+    assert_eq(jet_cli_explain_pointer_line("E0003", true), diagnostic_theme_dim(true, body))
+}

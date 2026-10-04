@@ -1,0 +1,259 @@
+// Original Syntax/core_surface.rs/package_files.rs/effects_surface.rs values.
+// Completion/rename catalogs stay separate from retired diagnostic spellings.
+#Test("canonical_tool_spelling_tables_preserve_complete_original_order") {
+    assert_eq(BUILTIN_EFFECT_LEAVES, [String]{"DB.Read", "DB.Write", "FS.Read", "FS.Write", "Rand.Draw", "Exec.Exit", "Exec.Args", "Time.Wait", "FFI.Go", "FFI.Java", "FFI.DotNet", "FFI.Fortran", "FFI.Cobol", "FFI.Tcl", "FFI.Lua", "FFI.Ada", "FFI.Pascal", "FFI.Dart", "FFI.PowerShell", "FFI.Perl", "FFI.Ruby", "FFI.Php", "FFI.R", "FFI.Com", "FFI.C", "FFI.Cpp", "FFI.Asm", "FFI.Py", "FFI.Octave"})
+    assert_eq(REF_SOURCE_PROVIDERS, [String]{"jetpack", "nixpkgs", "github", "path", "cran", "luarocks", "ruby", "perl", "php", "jet-registry", "npm", "cargo", "pypi", "swiftpm", "releases"})
+    assert_eq(COMMAND_ROLE_FILES, [String]{"@run.jet", "@build.jet", "@dev.jet", "@test.jet"})
+    assert_eq(jet_keyword_names(), [String]{"fn", "pub", "priv", "use", "as", "extern", "module", "if", "else", "loop", "in", "break", "return", "defer", "struct", "enum", "alias", "impl", "policy", "wrap", "trait", "tag", "effect", "derive", "distinct", "migration", "rename", "add", "remove", "change", "via", "self", "Unsafe", "Impure", "Context", "task", "freeze", "shared", "Transact", "Job", "Test", "Todo", "State", "Transition", "state", "protocol", "client", "server", "marker", "validate", "check", "true", "false", "None", "it"})
+    assert_eq(jet_type_names(), [String]{"Int", "Float", "Bool", "String", "()", "Char", "Err", "Shared", "SharedSnapshot", "SharedRevisionError", "SharedGuard", "Shared.Weak", "Condition", "Task", "Receiver", "Sender", "TaskFailure", "HashMap", "BTreeMap", "Map", "Queue", "Set", "Rank", "PriorityQueue", "Cache", "Tally", "Bits", "Bytes", "ViewIter", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "F32", "F64"})
+}
+#Test("canonical_sigils_keep_mutation_move_and_comptime_slots_distinct") {
+    assert_eq(KW_COPY, "copy")
+    assert_eq(KW_MUTATE, "mut")
+    assert_eq(KW_MOVE, "take")
+    assert_eq(SIGIL_BIND_IMMUT, "::")
+    assert_eq(SIGIL_BIND_MUT, ":=")
+    assert_eq(SIGIL_WRITE, "&")
+    assert_eq(SIGIL_COPY, "~")
+    assert_eq(SIGIL_MOVE, "^")
+    assert_eq(COMPTIME_MARK, "$")
+    assert_eq(SIGIL_FENCE_OPEN, "<:")
+    assert_eq(SIGIL_FENCE_CLOSE, ":>")
+    assert_eq(SIGIL_SPREAD, "...")
+    assert_eq(FILE_EXT, "jet")
+    assert_eq(UNIFIED_LOCK_FILE, ".jet/lock")
+    assert_eq(ENV_FILE, "env.jet")
+    assert_eq(CONFIG_FILE, "config.jet")
+    assert_eq(WORKSPACE_FILE, "workspace.jet")
+    assert_eq(TARGET_SANDBOX, "sandbox")
+    assert_eq(RETIRED_TARGET_PLUGIN, "plugin")
+    assert_eq(ENGINE_PROTOCOL_FLAG, "--engine-protocol")
+    assert_eq(RETIRED_COMPTIME_MARK, "@")
+}
+
+// CLI19: frozen Rust Syntax/package_files.rs:464-551 and Syntax/core_surface.rs.
+// These literals are an oracle, not a second public keyword provider. Retired
+// spellings stay teaching-only; this does not assert dictionary/query parity.
+#Test("CLI19 keyword table preserves every Rust word and its source order") {
+    expected :: [String]{
+        "fn", "pub", "priv", "use", "as", "extern", "module",
+        "if", "else", "loop", "in", "break", "return", "defer",
+        "struct", "enum", "alias", "impl", "policy", "wrap", "trait", "tag", "effect", "derive", "distinct",
+        "migration", "rename", "add", "remove", "change", "via", "self",
+        "Unsafe", "Impure", "Context", "task", "freeze", "shared", "Transact", "Job", "Test", "Todo",
+        "State", "Transition", "state", "protocol", "client", "server", "marker", "validate", "check",
+        "true", "false", "None", "it",
+    }
+    names :: jet_keyword_names()
+    assert_eq(names.len(), 55)
+    assert_eq(names, expected)
+}
+
+#Test("CLI19 retired words sigils and contextual names never enter the keyword table") {
+    assert_eq(KW_COPY, "copy")
+    assert_eq(KW_MUTATE, "mut")
+    assert_eq(KW_MOVE, "take")
+    assert_eq(KW_CONST, "const")
+    assert_eq(FOREIGN_UNSAFE, "unsafe")
+    excluded :: [String]{"copy", "mut", "take", "const", "comptime", "unsafe", "ref", "Ok", "Err", "Val", "Every", "::", ":=", "&", "^", "~", "$", "@", "<:", ":>", "..."}
+    names :: jet_keyword_names()
+    loop word in names {
+        loop spelling in excluded -> assert(word != spelling)
+    }
+    // Case is data: the marker spellings are not their lowercase names.
+    assert_eq(names[32], "Unsafe")
+    assert_eq(names[38], "Transact")
+    assert_eq(names[42], "State")
+    assert_eq(names[44], "state")
+    assert_eq(names[53], "None")
+}
+
+#Test("CLI19 binding ownership compiler fact fence and spread sigils are byte exact") {
+    actual :: [String]{SIGIL_BIND_IMMUT, SIGIL_BIND_MUT, SIGIL_WRITE, SIGIL_MOVE, SIGIL_COPY, COMPTIME_MARK, SIGIL_FENCE_OPEN, SIGIL_FENCE_CLOSE, SIGIL_SPREAD}
+    expected :: [String]{"::", ":=", "&", "^", "~", "$", "<:", ":>", "..."}
+    assert_eq(actual, expected)
+    assert_eq(RETIRED_COMPTIME_MARK, "@")
+    assert(COMPTIME_MARK != RETIRED_COMPTIME_MARK)
+    names :: jet_keyword_names()
+    loop spelling in actual {
+        loop word in names -> assert(spelling != word)
+    }
+}
+
+// Rust Syntax/predicates.rs:642-648, with 2/3/4-byte scalar boundaries.
+#Test("CLI19 identifier classification preserves the underscore ladder and UTF8 names") {
+    ordinary :: [String]{"", "_", "name_", "Name", "name", "é", "界", "😀", "é_name", "＿name"}
+    soft_public :: [String]{"_name", "_Name", "_é", "_界", "_😀", "_é_"}
+    reserved :: [String]{"__", "__name", "__name__", "__Name", "__é", "__界", "__😀"}
+    loop name in ordinary -> assert(classify_identifier(name) == IdentifierClass.Ordinary)
+    loop name in soft_public -> assert(classify_identifier(name) == IdentifierClass.SoftPublic)
+    loop name in reserved -> assert(classify_identifier(name) == IdentifierClass.Reserved)
+    assert_eq("_é".bytes().len(), 3)
+    assert_eq("_界".bytes().len(), 4)
+    assert_eq("_😀".bytes().len(), 5)
+}
+
+// Rust Registry::read_diagnostic_rows preserves Prelude/Diagnostics.jet source
+// order, NOT lexical order (the last row is E1363). This SHA-256 oracle is the
+// frozen Rust code sequence, each code followed by LF, including all 971 rows.
+// It is not computed from the Jet table or repinned to a generated projection.
+#Test("CLI19 complete diagnostic table preserves frozen Rust identities order and statuses") {
+    assert_eq(DIAGNOSTIC_ROWS.len(), 971)
+    codes := [String]{}
+    active := 0
+    retired := 0
+    reserved := 0
+    detailed := 0
+    lint_names := 0
+    loop row in DIAGNOSTIC_ROWS {
+        &codes.push(row.code)
+        if row.status == DiagnosticRegistryStatus.Active -> active += 1
+        if row.status == DiagnosticRegistryStatus.Retired -> retired += 1
+        if row.status == DiagnosticRegistryStatus.Reserved -> reserved += 1
+        if row.detail -> detailed += 1
+        if row.lint_name != None -> lint_names += 1
+    }
+    sequence :: "{codes.join("\n")}\n"
+    assert_eq(sequence.bytes().len(), 6114)
+    assert_eq(mir_sha256_hex(sequence), "f20898ff7cfb56177e46e3a27c8adff21e50ea0a776d79bdb32baf30dfd5f76c")
+    assert_eq(codes[0], "E0001")
+    assert_eq(codes[970], "E1363")
+    assert_eq(active, 821)
+    assert_eq(retired, 134)
+    assert_eq(reserved, 16)
+    assert_eq(detailed, 635)
+    assert_eq(lint_names, 68)
+}
+
+// Rust Registry::diagnostic_rows_are_typed_and_have_one_source and diagnostic.
+#Test("CLI19 every public row resolves through exact canonical lookup and construction") {
+    seen := [String: Bool]{}
+    loop row in DIAGNOSTIC_ROWS {
+        assert(seen.get(row.code) == None)
+        seen[row.code] = true
+        assert(row.code != "" && row.what != "" && row.why != "" && row.fix != "")
+        found :: diagnostic_registry_row(row.code) ?? panic("registered row missing")
+        assert_eq(found.code, row.code)
+        assert_eq(found.stage, row.stage)
+        assert_eq(found.meaning, row.meaning)
+        assert(found.status == row.status)
+        assert(found.moment == row.moment)
+        assert_eq(found.severity, row.severity)
+        assert(found.lint_name == row.lint_name)
+        diagnostic :: diagnostic_from_registry(row.code, None, row.what, row.why, row.fix)
+        assert_eq(diagnostic.code, row.code)
+        assert_eq(diagnostic.severity, row.severity)
+        assert(diagnostic.moment == row.moment)
+        assert(diagnostic.span == None && diagnostic.edit == None)
+        assert(diagnostic.applicability == None && diagnostic.safety == None)
+        assert(diagnostic.no_fix_reason == row.no_fix_reason)
+        assert_eq(diagnostic.what, diagnostic_sentence_case_line(row.what))
+        assert_eq(diagnostic.why, diagnostic_sentence_case_line(row.why))
+        assert_eq(diagnostic.fix, diagnostic_sentence_case_line(row.fix))
+    }
+    assert_eq((diagnostic_registry_row("E0102") ?? panic("error row")).severity, 1)
+    assert_eq((diagnostic_registry_row("L2001") ?? panic("lint row")).severity, 2)
+}
+
+// Rust Explain::index projection (33-61) and live_codes (65-71): reserved is
+// non-retired, not filtered as if it were retired. No fabricated catalog rows.
+#Test("CLI19 every row projects its real explanation including retired and reserved entries") {
+    live := 0
+    loop row in DIAGNOSTIC_ROWS {
+        explanation :: diagnostic_explanation_from_row(row)
+        found :: diagnostic_explanation(row.code) ?? panic("registered explanation missing")
+        assert_eq(found.code, explanation.code)
+        assert_eq(explanation.code, row.code)
+        assert_eq(explanation.stage, row.stage)
+        assert_eq(explanation.meaning, row.meaning)
+        assert(explanation.retired == (row.status == DiagnosticRegistryStatus.Retired))
+        if !explanation.retired -> live += 1
+        if row.detail {
+            assert(explanation.what == Val(diagnostic_sentence_case_line(row.what)))
+            assert(explanation.why == Val(diagnostic_sentence_case_line(row.why)))
+            assert(explanation.fix == Val(diagnostic_sentence_case_line(row.fix)))
+        } else {
+            assert(explanation.what == None && explanation.why == None && explanation.fix == None)
+        }
+        if row.code == "E0003" {
+            assert(explanation.example == Val("fn save(path: String) IOError! {{\n    print(path)\n}}"))
+        } else -> assert(explanation.example == None)
+    }
+    assert_eq(live, 837)
+    reserved :: diagnostic_explanation("E0067") ?? panic("reserved code missing")
+    assert(!reserved.retired)
+}
+
+// Rust Registry::diagnostic is exact; Explain::normalize trims and uppercases.
+#Test("CLI19 exact row lookup and forgiving help lookup have distinct name case laws") {
+    assert(diagnostic_registry_row("E0003") != None)
+    assert(diagnostic_registry_row("e0003") == None)
+    assert(diagnostic_registry_row(" E0003 ") == None)
+    queries :: [String]{"e0003", " E0003 ", "\te0003\n", "　e0003　"}
+    loop query in queries {
+        found :: diagnostic_explanation(query) ?? panic("help normalization failed")
+        assert_eq(found.code, "E0003")
+        assert_eq(found.stage, "parse")
+    }
+    missing :: [String]{"", " ", "E9999", "E000", "E00030", "E０００３", "é0003", "E0003é", "E0003\nE0004", "$", "@"}
+    loop query in missing {
+        assert(diagnostic_registry_row(query) == None)
+        assert(diagnostic_explanation(query) == None)
+    }
+}
+
+// Rust Explain::render and detailed_example: byte-exact genuine detailed row.
+#Test("CLI19 detailed help essay preserves canonical prose example and source pointer") {
+    explanation :: diagnostic_explanation("e0003") ?? panic("E0003 explanation missing")
+    assert_eq(diagnostic_explanation_render(explanation, false), "E0003\n\nWhat this means:\n  Expected a current statement form, found an unsupported or incomplete form\n\nWhy Jet enforces it:\n  This position accepts only a complete statement from Jet's current grammar\n\nHow to fix it:\n  Write the complete statement form named by the diagnostic\n\nExample:\n  fn save(path: String) IOError! {{\n      print(path)\n  }}\n\nThis explanation comes from jet's diagnostics reference.\n")
+    colored :: diagnostic_explanation_render(explanation, true)
+    assert(colored.starts_with("{diagnostic_theme_accent(true, "E0003")}\n\n"))
+    assert(colored.contains(diagnostic_theme_bold(true, "What this means:")))
+    assert(colored.ends_with("This explanation comes from jet's diagnostics reference.\n"))
+}
+
+#Test("CLI19 retired help stops before prose while undetailed live help retains its stage") {
+    retired :: diagnostic_explanation(" e0004 ") ?? panic("retired row missing")
+    assert_eq(retired.meaning, "*Retired in M1* (was: parameters staged)")
+    assert_eq(diagnostic_explanation_render(retired, false), "E0004\n\nThis code is retired: it is no longer produced by the current\ncompiler, and is kept here only so old build logs stay readable.\n")
+    live :: diagnostic_explanation("E0001") ?? panic("active row missing")
+    assert(!live.retired && live.what == None)
+    assert_eq(diagnostic_explanation_render(live, false), "E0001\n\nWhat this means:\n  Character/escape/lone brace means nothing here\n\nStage: jet\n\nA longer explanation will land with the detailed typed row.\n\nThis explanation comes from jet's diagnostics reference.\n")
+}
+
+// Genuine canonical constructor: prose casing must not interpret scalar
+// offsets as byte offsets; caller span byte offsets remain unchanged.
+#Test("CLI19 diagnostic construction preserves UTF8 bytes span and registry owned grade") {
+    span :: Span{start: 2, end: 9}
+    source :: "é界😀"
+    assert_eq(source.bytes().len(), 9)
+    assert_eq(String.from_bytes(source.bytes()[span.start..<span.end]) ?? panic("span must end on UTF8 boundaries"), "界😀")
+    diagnostic :: diagnostic_from_registry("E0003", Val(span), "　**échec ici", "\t_fix é😀", "fn save")
+    assert_eq(diagnostic.what, "　**échec ici")
+    assert_eq(diagnostic.why, "\t_Fix é😀")
+    assert_eq(diagnostic.fix, "fn save")
+    assert(diagnostic.span == Val(span))
+    edit :: TextEdit{span: span, new_text: "é😀"}
+    edited :: diagnostic_registry_with_edit(^diagnostic, edit)
+    assert(edited.edit == Val(edit))
+    assert(edited.applicability == Val(FixApplicability.Suggested))
+    assert(edited.safety == Val(FixSafety.NeedsReview))
+    assert(edited.no_fix_reason == None)
+    assert_eq((edited.edit ?? panic("edit absent")).new_text.bytes().len(), 6)
+    no_fix :: diagnostic_from_registry("E0001", Val(span), "échec", "reason", "fix")
+    assert(no_fix.edit == None && no_fix.applicability == None && no_fix.safety == None)
+    reason :: no_fix.no_fix_reason ?? panic("canonical no-fix reason absent")
+    assert(reason.kind == NoFixReasonKind.Behavior)
+    assert_eq(reason.next, "Remove the stray character or complete the escape or brace.")
+}
+
+// Rust str::lines semantics used by Explain::render, through the real helper.
+#Test("CLI19 help line splitting honors UTF8 CRLF empty and trailing boundaries") {
+    cr :: String.from_bytes([U8]{U8{13}}) ?? panic("CR is valid UTF8")
+    assert_eq(diagnostic_text_lines(""), [String]{})
+    assert_eq(diagnostic_text_lines("\n"), [String]{""})
+    assert_eq(diagnostic_text_lines("é{cr}\n\n界😀\n"), [String]{"é", "", "界😀"})
+    assert_eq(diagnostic_text_lines("é{cr}"), [String]{"é{cr}"})
+    assert_eq(diagnostic_text_lines("{cr}\n{cr}\n"), [String]{"", ""})
+    assert_eq(diagnostic_text_lines("é\n\n"), [String]{"é", ""})
+}

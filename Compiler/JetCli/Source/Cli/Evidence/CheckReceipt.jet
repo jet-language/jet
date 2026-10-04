@@ -1,0 +1,250 @@
+// Invocation Receipt closure (Source/CheckReceipt.rs, D-BUILD-NOCHANGE1=A).
+// The closure key frames the verb, the options that change what the verb
+// checks, the compiler/Core/target build identity, every module of the
+// immutable source closure and every package authority file that owns one of
+// those modules. Paths enter keys as project labels so two checkouts of one
+// tree share records; check-time read labels map to and from that form.
+//
+// Canonical prerequisites, not emulated here (no carrier copies):
+// - ReceiptClosure lookup/publish and sealed_inputs/undeclared_reads
+//   (CheckReceipt.rs:43-54,214-339) need the canonical store ReceiptInput/
+//   ReceiptRecord, Store receipt pointer and StampTable (jet-store receipt.rs/
+//   project_state.rs, JP-STORE-STATE-RECEIPT) and the Foundation CheckReads
+//   process-wide ReadSession recorder (CheckReads.rs, #4451).
+// - log_nodes Check/Compile/Link keys (CheckReceipt.rs:342-438) need the
+//   Comptime Build BuildPlanNode/ContentDigest port and the project_state
+//   last-build pointer; only its why-ran policy is here.
+// - PackageRecords/package_reuse_nodes (CheckReceipt.rs:441-507) need a sema
+//   PackageRecordStore/PackageReuseRow (#2517 S2); PackageRow::from_bundle
+//   (CheckReceipt.rs:560-598) needs Foundation PackageGraph components and
+//   interface digests. PackageRow inputs/node policy is Evidence/PackageNodes.
+use core.files.path as receipt_paths
+use core.sys as check_receipt_sys
+
+// Rust `CLOSURE_SCHEMA` (CheckReceipt.rs:22).
+pub JET_CLI_CHECK_RECEIPT_CLOSURE_SCHEMA :: "jet.receipt-closure/v1"
+
+// Rust `AUTHORITY_FILES` (CheckReceipt.rs:23-29).
+pub JET_CLI_CHECK_RECEIPT_AUTHORITY_FILES :: prep { [String]{PACKAGE_FILE, PAYLOAD_FILE, WORKSPACE_FILE, "build.jet", UNIFIED_LOCK_FILE} }
+
+// Rust `AUDIT_ENV` (CheckReceipt.rs:34-37): a verified Receipt does not
+// replay; the fresh check must read only what the record declares.
+pub JET_CLI_CHECK_RECEIPT_AUDIT_ENV :: "JET_CHECK_READS_AUDIT"
+
+// Rust env!("JET_COMPILER_BUILD_ID"/"JET_STDLIB_BUILD_ID"/"JET_BUILD_TARGET"):
+// the running compiler's embedded build facts, supplied by bootstrap, never
+// observed from the filesystem.
+pub struct JetCLICheckReceiptBuild {
+    pub compiler_build_id: String
+    pub stdlib_build_id: String
+    pub build_target: String
+}
+
+// One invocation option that changes what the verb checks (Rust `(&str, String)`).
+pub struct JetCLICheckReceiptOption {
+    pub name: String
+    pub value: String
+}
+
+// Rust `audit_requested` (CheckReceipt.rs:39-41).
+pub fn jet_cli_check_receipt_audit_requested() -[Env]> Bool Never! {
+    check_receipt_sys.get(JET_CLI_CHECK_RECEIPT_AUDIT_ENV) != None
+}
+
+// Rust `PackageRecords::compiler_identity` / `PackageRow::from_bundle` compiler (CheckReceipt.rs:453-459,565-569).
+pub fn jet_cli_check_receipt_compiler_identity(build: JetCLICheckReceiptBuild) -> String Never! {
+    "{build.compiler_build_id}+{build.stdlib_build_id}"
+}
+
+// Rust `label` (CheckReceipt.rs:61-69): project-relative inside the project,
+// the path itself otherwise; separators are written as `/`.
+pub fn jet_cli_check_receipt_label(project_root: receipt_paths.Path, path: receipt_paths.Path) -> String Never! {
+    relative :: jet_cli_receipt_strip_prefix(path, project_root) ?? path
+    relative.raw.replace("\\", "/")
+}
+
+// Rust `authority_roots` (CheckReceipt.rs:71-105): the project root, each
+// non-Core module's nearest ancestor holding package.jet or pkg.jet, and the
+// nearest workspace at or above the project root. Rust BTreeSet<PathBuf>
+// order and equality use the shared component scanner; `is_file` follows links.
+pub fn jet_cli_check_receipt_authority_roots<F: JetCLIReceiptReadHost>(project_root: receipt_paths.Path, source_closure: [MIRSourceFile], file_host: &F) -[FS.Read]> [receipt_paths.Path] Never! {
+    roots := [receipt_paths.Path]{~project_root}
+    visited := [String:Bool]{}
+    core_root :: receipt_paths.path(JET_DRIVER_CORE_SOURCE_ROOT)
+    loop source in source_closure {
+        path :: receipt_paths.path(source.path)
+        if jet_cli_receipt_strip_prefix(path, core_root) != None -> next
+        directory := jet_cli_receipt_parent(path)
+        loop directory != None {
+            current :: directory ?? panic("checked directory")
+            key :: jet_cli_record_path_key(current.raw)
+            if visited.has_key(key) -> break
+            visited[key] = true
+            if jet_cli_receipt_is_file(receipt_paths.join(current, PACKAGE_FILE), &file_host) || jet_cli_receipt_is_file(receipt_paths.join(current, PAYLOAD_FILE), &file_host) {
+                &roots.push(~current)
+                break
+            }
+            directory = jet_cli_receipt_parent(current)
+        }
+    }
+    workspace := receipt_paths.Path?{Val(~project_root)}
+    loop workspace != None {
+        current :: workspace ?? panic("checked workspace directory")
+        if jet_cli_receipt_is_file(receipt_paths.join(current, WORKSPACE_FILE), &file_host) {
+            &roots.push(~current)
+            break
+        }
+        workspace = jet_cli_receipt_parent(current)
+    }
+    jet_cli_receipt_sort_paths(&roots)
+    roots
+}
+
+// Rust `probe` (CheckReceipt.rs:107-121): presence and digest of one
+// authority file; absence is part of the key. The digest uses the canonical
+// held no-follow hash (Main tandem ruling on check-then-read). Native gate:
+// #3593/#3598 Core IOError lacks native ErrorKind. The regular-file read
+// error arm below is NOT Rust's exact `unreadable:{error.kind()}` wire;
+// native probe/closure-key parity must stay open until that seam lands.
+pub fn jet_cli_check_receipt_probe<F: JetCLIReceiptReadHost>(path: receipt_paths.Path, file_host: &F) -[FS]> String Never! {
+    metadata :: if &file_host.symlink_metadata(path) == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            if error.not_found -> return "missing"
+            return "unreadable:{error.kind}"
+        }
+    }
+    if metadata.is_symlink -> return "symlink"
+    if metadata.is_file {
+        if foundation_sha256_file_hex(path.raw) == {
+            .Ok(digest) -> return digest
+            .Err(error) -> return "unreadable:{error}"
+        }
+    }
+    if metadata.is_dir -> return "directory"
+    "other"
+}
+
+// Rust `ReceiptClosure::new` invocation framing (CheckReceipt.rs:131-152).
+// `entry` is the canonicalized invocation file; options sort by (name, value).
+pub fn jet_cli_check_receipt_frame_invocation(key: &[U8], verb: String, build: JetCLICheckReceiptBuild, project_root: receipt_paths.Path, entry: receipt_paths.Path, options: [JetCLICheckReceiptOption]) Never! {
+    jet_cli_receipt_frame(&key, JET_CLI_CHECK_RECEIPT_CLOSURE_SCHEMA.bytes())
+    jet_cli_receipt_frame(&key, verb.bytes())
+    jet_cli_receipt_frame(&key, build.compiler_build_id.bytes())
+    jet_cli_receipt_frame(&key, build.stdlib_build_id.bytes())
+    jet_cli_receipt_frame(&key, build.build_target.bytes())
+    // Recorded diagnostic origins carry process paths, so the checkout root
+    // is part of the closure: a replay never names another tree.
+    jet_cli_receipt_frame(&key, "root".bytes())
+    jet_cli_receipt_frame(&key, project_root.raw.bytes())
+    jet_cli_receipt_frame(&key, "entry".bytes())
+    jet_cli_receipt_frame(&key, jet_cli_check_receipt_label(project_root, entry).bytes())
+    sorted := ~options
+    &sorted.sort_by((left: JetCLICheckReceiptOption, right: JetCLICheckReceiptOption) -> (left.name.bytes() <=> right.name.bytes()).then(left.value.bytes() <=> right.value.bytes()))
+    loop option in sorted {
+        jet_cli_receipt_frame(&key, "option".bytes())
+        jet_cli_receipt_frame(&key, option.name.bytes())
+        jet_cli_receipt_frame(&key, option.value.bytes())
+    }
+}
+
+// Private sorting row, not a Store ReceiptInput or a sealed-read claim.
+struct JetCLICheckReceiptModuleRow {
+    label: String
+    digest: String
+}
+
+// Rust `ReceiptClosure::new` module rows (CheckReceipt.rs:153-170): each
+// module's label and SHA-256 of its exact bytes, sorted by (label, digest)
+// and deduplicated. `source_closure` is the Driver loader's immutable
+// closure: canonical module paths (Core as `<corelib>/...`) and exact source.
+pub fn jet_cli_check_receipt_frame_modules(key: &[U8], project_root: receipt_paths.Path, source_closure: [MIRSourceFile]) Never! {
+    // Capture-free field comparison keeps Rust's tuple order without a
+    // joined row encoding or a captured-list borrow (Rust E0502 original unit
+    // retained in CR01 scratch; compiler issue tracked by the lead).
+    rows := [JetCLICheckReceiptModuleRow]{}
+    loop source in source_closure {
+        label :: jet_cli_check_receipt_label(project_root, receipt_paths.path(source.path))
+        &rows.push(JetCLICheckReceiptModuleRow{label: label, digest: mir_sha256_hex(source.source)})
+    }
+    &rows.sort_by((left: JetCLICheckReceiptModuleRow, right: JetCLICheckReceiptModuleRow) -> (left.label.bytes() <=> right.label.bytes()).then(left.digest.bytes() <=> right.digest.bytes()))
+    loop index in 0..<rows.len() {
+        if index > 0 && rows[index - 1].label == rows[index].label && rows[index - 1].digest == rows[index].digest -> next
+        jet_cli_receipt_frame(&key, "module".bytes())
+        jet_cli_receipt_frame(&key, rows[index].label.bytes())
+        jet_cli_receipt_frame(&key, rows[index].digest.bytes())
+    }
+}
+
+// Rust `ReceiptClosure::new` authority rows (CheckReceipt.rs:171-178).
+pub fn jet_cli_check_receipt_frame_authority(key: &[U8], project_root: receipt_paths.Path, path: receipt_paths.Path, probe: String) Never! {
+    jet_cli_receipt_frame(&key, "authority".bytes())
+    jet_cli_receipt_frame(&key, jet_cli_check_receipt_label(project_root, path).bytes())
+    jet_cli_receipt_frame(&key, probe.bytes())
+}
+
+// Rust `jet::SHA256::sha256_hex(&key)` (CheckReceipt.rs:181).
+pub fn jet_cli_check_receipt_key_digest(key: [U8]) -> String Never! {
+    mir_sha256_hex_bytes(mir_sha256_bytes(key))
+}
+
+// Rust `ReceiptClosure::new` key (CheckReceipt.rs:123-188). `options` names
+// every option that changes what the verb checks; rendering options stay out
+// because the record is re-rendered per invocation.
+pub fn jet_cli_check_receipt_closure_key<F: JetCLIReceiptReadHost>(verb: String, file: String, project_root: receipt_paths.Path, build: JetCLICheckReceiptBuild, source_closure: [MIRSourceFile], options: [JetCLICheckReceiptOption], file_host: &F) -[FS]> String Never! {
+    key := [U8]{}
+    given :: receipt_paths.path(file)
+    entry :: &file_host.canonicalize(given) ?? ~given
+    jet_cli_check_receipt_frame_invocation(&key, verb, build, project_root, entry, options)
+    jet_cli_check_receipt_frame_modules(&key, project_root, source_closure)
+    loop root in jet_cli_check_receipt_authority_roots(project_root, source_closure, &file_host) {
+        loop name in JET_CLI_CHECK_RECEIPT_AUTHORITY_FILES {
+            path :: receipt_paths.join(root, name)
+            jet_cli_check_receipt_frame_authority(&key, project_root, path, jet_cli_check_receipt_probe(path, &file_host))
+        }
+    }
+    jet_cli_check_receipt_key_digest(key)
+}
+
+// Rust `ReceiptClosure::persisted_label` (CheckReceipt.rs:190-199): reader
+// labels inside the project persist project-relative.
+pub fn jet_cli_check_receipt_persisted_label(project_root: receipt_paths.Path, read_label: String) -> String Never! {
+    kinds :: [String]{"file:", "dir:"}
+    loop kind in kinds {
+        if read_label.starts_with(kind) {
+            path := read_label.removeprefix(kind) // #4303: view flows into String-typed path()
+            return "{kind}{jet_cli_check_receipt_label(project_root, receipt_paths.path(path))}"
+        }
+    }
+    ~read_label
+}
+
+// Rust `ReceiptClosure::current_label` (CheckReceipt.rs:201-212): the reader
+// label a persisted relative label names in this checkout.
+pub fn jet_cli_check_receipt_current_label(project_root: receipt_paths.Path, label: String) -> String Never! {
+    kinds :: [String]{"file:", "dir:"}
+    loop kind in kinds {
+        if label.starts_with(kind) {
+            path := receipt_paths.path(label.removeprefix(kind))
+            if receipt_paths.is_relative(path) -> return "{kind}{receipt_paths.join_path(project_root, path).raw}"
+        }
+    }
+    ~label
+}
+
+// Rust `log_nodes` why-ran (CheckReceipt.rs:361-375): `reused` on a Receipt
+// hit, `first-run` without a previous record, `bundle` when the previous node
+// of this kind and subject had the same key, else `input:<subject>`.
+pub fn jet_cli_check_receipt_why_ran(reused: Bool, previous: BuildRecord?, kind: String, subject: String, key: String) -> String Never! {
+    if reused -> return JET_CLI_PACKAGE_WHY_REUSED
+    if previous == Val(record) {
+        loop old in record.nodes {
+            if old.kind == kind && old.subject == subject {
+                if old.key == key -> return "bundle"
+                break
+            }
+        }
+        return "input:{subject}"
+    }
+    "first-run"
+}

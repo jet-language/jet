@@ -1,0 +1,71 @@
+// Rust records.rs::records_round_trip_by_kind_and_key retained intact.
+// Native closure requires actual #3593/#3594 services, not an in-memory store.
+#Test("store record kinds preserve all nine schemas and action framing") {
+    schemas :: ["jet.pkg-check/v1", "jet.iface/v1", "jet.diags/v1", "jet.items/v1", "jet.body/v1", "jet.program/v1", "jet.pkg-object/v1", "jet.item-check/v1", "jet.comptime-value/v1"]
+    kinds :: store_artifact_record_kinds()
+    assert_eq(kinds.len(), 9)
+    loop index in 0..<kinds.len() {
+        assert_eq(kinds[index].schema(), schemas[index])
+        assert_eq(ArtifactRecordKind.from_schema(schemas[index]), Val(kinds[index]))
+        assert_eq(kinds[index].is_action(), index == 0 || index >= 5)
+        framed := schemas[index].bytes()
+        &framed.push(U8{0})
+        loop byte in "key-a".bytes() -> &framed.push(byte)
+        assert_eq(kinds[index].action("key-a"), ActionHandle.from_bytes(framed))
+    }
+    assert_eq(ArtifactRecordKind.from_schema("jet.unknown/v1"), None)
+    package_kind :: ArtifactRecordKind.PkgCheck
+    program_kind :: ArtifactRecordKind.Program
+    assert(package_kind.action("key-a") != program_kind.action("key-a"))
+}
+
+#Test("store records round trip by kind and key") {
+    root :: store_artifact_test_root("records-round-trip")
+    defer store_artifact_test_cleanup(root)
+    store :: ArtifactStore.new(root) ?? panic("store opens")
+    iface_kind :: ArtifactRecordKind.Iface
+    iface :: record_encode(iface_kind.schema(), [RecordSection{id: 1, elements: [RecordValue.Str{value: "pkg:."}]}]).bytes ?? panic("iface")
+    digest :: record_blob_key(iface)
+    store.put_record(ArtifactRecordKind.Iface, digest, iface) ?? panic("publish iface")
+    assert_eq(store.record(ArtifactRecordKind.Iface, digest) ?? panic("read iface"), Val(iface))
+    assert_eq(store.record(ArtifactRecordKind.Diags, digest) ?? panic("read diags"), None)
+    if store.put_record(ArtifactRecordKind.Iface, "0".repeat(64), iface) == {
+        .Ok(_) -> panic("wrong digest must refuse")
+        .Err(_) -> {}
+    }
+    check_kind :: ArtifactRecordKind.PkgCheck
+    check :: record_encode(check_kind.schema(), [RecordSection{id: 1, elements: [RecordValue.Str{value: digest}]}]).bytes ?? panic("check")
+    store.put_record(ArtifactRecordKind.PkgCheck, "key-a", check) ?? panic("publish check")
+    assert_eq(store.record(ArtifactRecordKind.PkgCheck, "key-a") ?? panic("read check"), Val(check))
+    assert_eq(store.record(ArtifactRecordKind.Program, "key-a") ?? panic("read program"), None)
+    assert_eq(store.record(ArtifactRecordKind.PkgCheck, "key-b") ?? panic("read absent"), None)
+    if store.put_record(ArtifactRecordKind.Program, "key-a", check) == {
+        .Ok(_) -> panic("wrong schema must refuse")
+        .Err(_) -> {}
+    }
+    assert_eq(ArtifactRecordKind.from_schema("jet.items/v1"), Val(ArtifactRecordKind.Items))
+}
+
+#Test("store record batches skip malformed wire and preserve immutable conflicts") {
+    root :: store_artifact_test_root("records-batch")
+    defer store_artifact_test_cleanup(root)
+    store :: ArtifactStore.new(root) ?? panic("store")
+    kind :: ArtifactRecordKind.PkgCheck
+    first :: record_encode(kind.schema(), [RecordSection{id: 1, elements: [RecordValue.Str{value: "first"}]}]).bytes ?? panic("first")
+    second :: record_encode(kind.schema(), [RecordSection{id: 1, elements: [RecordValue.Str{value: "second"}]}]).bytes ?? panic("second")
+    store.put_records(kind, [ArtifactRecordPublication{key: "a", bytes: first}, ArtifactRecordPublication{key: "bad", bytes: [U8]{}}]) ?? panic("batch")
+    store.put_records(kind, [ArtifactRecordPublication{key: "a", bytes: second}, ArtifactRecordPublication{key: "b", bytes: second}]) ?? panic("conflict batch")
+    assert_eq(store.record_untouched(kind, "a") ?? panic("a"), Val(first))
+    assert_eq(store.record_untouched(kind, "b") ?? panic("b"), Val(second))
+    assert_eq(store.record_untouched(kind, "bad") ?? panic("bad"), None)
+    store.touch_records(kind, ["a", "b", "missing"])
+    store.publish_cache_actions([ArtifactActionPublication{action: kind.action("c"), bytes: first}]) ?? panic("cache batch")
+    assert_eq(store.record(kind, "c") ?? panic("cache read"), Val(first))
+    files.write_bytes(store.action_path(kind.action("bad-wire")), store_artifact_encode_action(kind.action("bad-wire"), "not a record".bytes())) ?? panic("write undecodable")
+    assert_eq(store.record(kind, "bad-wire") ?? panic("undecodable miss"), None)
+    assert_eq(store.record(ArtifactRecordKind.Iface, "not-a-digest") ?? panic("bad digest miss"), None)
+    if store.put_records(ArtifactRecordKind.Iface, [ArtifactRecordPublication]{}) == {
+        .Ok(_) -> panic("blob batch must refuse")
+        .Err(error) -> assert_eq(error.message(), "jet.iface/v1 records are content addressed; publish them one by one")
+    }
+}

@@ -961,15 +961,16 @@ fn jet_codegen_for_in_tuple_field_id(builder: JetCodegenBuilder, ty: Type, membe
     }
 }
 
-// D-MEM-COPYSEM1: a plain `loop item in list` over a read parameter's list
-// walks the list in place: an index runs over the list's length and the item
-// is a read-only alias of its slot, so neither the list nor any item is
-// copied. The parameter cannot change while the loop runs, so every alias
+// D-MEM-COPYSEM1: a plain `loop item in list` (or `loop (index, item) in
+// list`) over a read parameter's list walks the list in place: an index runs
+// over the list's length and the item is a read-only alias of its slot, so
+// neither the list nor any item is copied; the two-name form binds that index
+// as `index`. The parameter cannot change while the loop runs, so every alias
 // reads exactly what the copied item would hold. False (nothing emitted)
 // when `collection` is not such a list. A columnar list (D-SOA1) stores one
 // column per field, so its slots are not places an alias can name; the caller
 // keeps the gathered-record iteration for it.
-fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, label: String?, variable: String, collection: TExpr, body: [TStmt], span: Span) -> Bool {
+fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: TExpr, body: [TStmt], span: Span) -> Bool {
     listed := Type?{None}
     if jet_codegen_builtin_untag(collection.ty) == .List(inner) -> listed = Val(inner)
     element :: listed ?? return false
@@ -978,7 +979,8 @@ fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, label: String?,
     loop_scope_depth := builder.scope_depth
     jet_codegen_enter_lexical(&builder)
     length := jet_codegen_lower_expr(&builder, length_expr)
-    index_local := tir_user_local("read_walk_index_{span.start}", span)
+    index_local := if variable_two == None -> tir_user_local("read_walk_index_{span.start}", span) else -> variable
+    item_local := variable_two ?? variable
     index_place := jet_codegen_bind_local(&builder, index_local, Type.Int, true, None, None, false)
     zero := jet_codegen_emit_value(&builder, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: 0, width: None, spelling: None}})
     _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: index_place, value: zero})
@@ -996,7 +998,7 @@ fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, label: String?,
     index_expr := TExpr{ty: Type.Int, kind: TExprKind.Local{local: index_local}, span: span, integer_bounds: None, cost: None}
     location := jet_codegen_assignment_panic_location(&builder, span, false)
     item_place := jet_codegen_index_place(&builder, collection, index_expr, TIndexKind.List, element, MIRAccess.Read, location, span)
-    _ := jet_codegen_bind_local_alias(&builder, tir_user_local(variable, span), element, item_place, false)
+    _ := jet_codegen_bind_local_alias(&builder, item_local, element, item_place, false)
     jet_codegen_lower_block(&builder, body)
     if jet_codegen_current_is_open(builder) -> jet_codegen_terminate(&builder, MIRTerminator.Jump{target: advance_block})
     jet_codegen_switch_block(&builder, advance_block)
@@ -1011,8 +1013,8 @@ fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, label: String?,
     true
 }
 
-fn jet_codegen_lower_for_in(builder: &JetCodegenBuilder, label: String?, variable: String, variable_two: String?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, body: [TStmt], span: Span) {
-    if method_kind == None && variable_two == None && step == None && !by_value && !columnar && jet_codegen_lower_read_list_walk(&builder, label, variable, collection, body, span) -> return
+fn jet_codegen_lower_for_in(builder: &JetCodegenBuilder, label: String?, variable: TLocal, variable_two: TLocal?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, body: [TStmt], span: Span) {
+    if method_kind == None && step == None && !by_value && !columnar && jet_codegen_lower_read_list_walk(&builder, label, variable, variable_two, collection, body, span) -> return
     iter_init_call := jet_codegen_add_loop_prelude_call(&builder, "loop_iter_init", "jet_loop_iter_init", 5, [Bool]{false, false, false, false, false})
     iter_has_next_call := jet_codegen_add_loop_prelude_call(&builder, "loop_iter_has_next", "jet_loop_iter_has_next", 1, [Bool]{true})
     iter_value_call := jet_codegen_add_loop_prelude_call(&builder, "loop_iter_value", "jet_loop_iter_value", 1, [Bool]{true})
@@ -1050,6 +1052,7 @@ fn jet_codegen_lower_for_in(builder: &JetCodegenBuilder, label: String?, variabl
         .Local(local) -> if {
             owns_source && !indexed_pair && source_kind != MIRLoopSourceKind.ChannelReceiver -> {
                 place := jet_codegen_lower_local_place(&builder, local)
+                jet_codegen_retain_place_access(&builder, place, MIRAccess.Move)
                 jet_codegen_emit_value(&builder, source_expression.span, source_expression.ty, MIROperation.MovePlace{place: place})
             } else -> jet_codegen_lower_expr(&builder, source_expression)
         }
@@ -1089,14 +1092,9 @@ fn jet_codegen_lower_for_in(builder: &JetCodegenBuilder, label: String?, variabl
             }
         }
     }
-    first_local := tir_user_local(variable, span)
-    first_place := jet_codegen_bind_local(&builder, first_local, first_type, false, None, None, false)
+    first_place := jet_codegen_bind_local(&builder, variable, first_type, false, None, None, false)
     second_place := MIRPlaceID?{None}
-    if variable_two != None {
-        second_name :: variable_two
-        second_local := tir_user_local(second_name, span)
-        second_place = Val(jet_codegen_bind_local(&builder, second_local, second_type, false, None, None, false))
-    }
+    if variable_two == .Val(second_local) -> second_place = Val(jet_codegen_bind_local(&builder, second_local, second_type, false, None, None, false))
     condition_block := jet_codegen_new_block(&builder, span, "for-in-condition")
     body_block := jet_codegen_new_block(&builder, span, "for-in-body")
     advance_block := jet_codegen_new_block(&builder, span, "for-in-advance")
@@ -2192,7 +2190,7 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, statement: TStmt) {
         }
         .CountedLoop(label, init, condition, step, vectorization, body, span) -> jet_codegen_lower_counted_loop(&builder, label, init, condition, step, vectorization, body, span)
         .ForRange(label, local, start, end, step, exclusive, body, vectorization, span) -> jet_codegen_lower_range_loop(&builder, label, local, None, start, end, step, exclusive, vectorization, body, span)
-        .Range(label, variable, source, start, end, step, exclusive, vectorization, body, span) -> jet_codegen_lower_range_loop(&builder, label, tir_user_local(variable, span), source, start, end, step, exclusive, vectorization, body, span)
+        .Range(label, variable, source, start, end, step, exclusive, vectorization, body, span) -> jet_codegen_lower_range_loop(&builder, label, variable, source, start, end, step, exclusive, vectorization, body, span)
         .ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, body, span) -> jet_codegen_lower_for_in(&builder, label, variable, variable_two, source, collection, step, method_kind, columnar, by_value, body, span)
         .Loop(label, body, span) -> {
             body_block := jet_codegen_new_block(&builder, span, "loop-body")
@@ -2286,7 +2284,7 @@ fn jet_codegen_lower_fallback_panic(builder: &JetCodegenBuilder, expression: TEx
         &locals.push(MIRPanicLocal{name: local.display_name, local: binding.local})
     }
     panic_location := MIRPanicLoc{file: mir_source_file_id(location.file), line: location.line, column: location.column}
-    context := MIRPanicContext{function: location.function, source_line: location.source_line, caret: location.caret, locals: locals}
+    context := MIRPanicContext{function: builder.function.name, source_line: location.source_line, caret: location.caret, locals: locals}
     jet_codegen_emit_explicit_stop_cleanups(&builder)
     _ := jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.RequireStop{call: call, kind: MIRRequireKind.Panic, condition: None, location: panic_location, context: context, values: [MIRValueID]{value}, always_stops: true}})
     jet_codegen_terminate(&builder, MIRTerminator.Unreachable{reason: "checked fallback panic"})
@@ -2667,7 +2665,7 @@ fn jet_codegen_lower_env_set(builder: &JetCodegenBuilder, expression: TExpr, nam
         &locals.push(MIRPanicLocal{name: local.display_name, local: binding.local})
     }
     panic_location := MIRPanicLoc{file: mir_source_file_id(location.file), line: location.line, column: location.column}
-    context := MIRPanicContext{function: location.function, source_line: location.source_line, caret: location.caret, locals: locals}
+    context := MIRPanicContext{function: builder.function.name, source_line: location.source_line, caret: location.caret, locals: locals}
     jet_codegen_emit_explicit_stop_cleanups(&builder)
     _ := jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.RequireStop{call: stop_call, kind: MIRRequireKind.Require, condition: Val(condition), location: panic_location, context: context, values: [MIRValueID]{shown}, always_stops: true}})
     jet_codegen_terminate(&builder, MIRTerminator.Unreachable{reason: "environment update failure"})
@@ -2878,7 +2876,9 @@ fn jet_codegen_lower_require_stop(builder: &JetCodegenBuilder, expression: TExpr
         &locals.push(MIRPanicLocal{name: local.display_name, local: binding.local})
     }
     panic_location := MIRPanicLoc{file: mir_source_file_id(location.file), line: location.line, column: location.column}
-    context := MIRPanicContext{function: location.function, source_line: location.source_line, caret: location.caret, locals: locals}
+    // The enclosing function names the report (Rust `capture_panic_loc`
+    // `fn_name`); checked TIR locations do not carry it.
+    context := MIRPanicContext{function: builder.function.name, source_line: location.source_line, caret: location.caret, locals: locals}
     if condition == .Val(condition_value) && !always_stops {
         return jet_codegen_lower_conditional_stop(&builder, expression.span, expression.ty, call, operation, condition_value, panic_location, context, values, "require-stop")
     }

@@ -1,0 +1,1804 @@
+// PORT-PENDING 2035 crates-jet-pkg-model-src-ffi-slice-1801: crates/jet-pkg-model/src/FFI.rs:1801-3600
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS             }
+//RS         }
+//RS         transcript
+//RS             .lock()
+//RS             .unwrap()
+//RS             .push(String::from_utf8_lossy(&body).into_owned());
+//RS         if matches!(fixture, SMTPFixture::CloseAfterData) {
+//RS             return;
+//RS         }
+//RS         io.write_all(b"250 queued q-1\r\n").unwrap();
+//RS         io.flush().unwrap();
+//RS         let quit = smtp_read_line(io);
+//RS         transcript.lock().unwrap().push(quit);
+//RS         let _ = io.write_all(b"221 bye\r\n");
+//RS         let _ = io.flush();
+//RS     }
+//RS 
+//RS     fn spawn_smtp_server(
+//RS         starttls: bool,
+//RS         fixture: SMTPFixture,
+//RS     ) -> (
+//RS         std::net::SocketAddr,
+//RS         std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+//RS         std::thread::JoinHandle<()>,
+//RS     ) {
+//RS         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS         let address = listener.local_addr().unwrap();
+//RS         let transcript = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+//RS         let server_transcript = transcript.clone();
+//RS         let config = smtp_server_config();
+//RS         let server = std::thread::spawn(move || {
+//RS             let (mut socket, _) = listener.accept().unwrap();
+//RS             if starttls {
+//RS                 socket.write_all(b"220 relay ready\r\n").unwrap();
+//RS                 socket.flush().unwrap();
+//RS                 let ehlo = smtp_read_line(&mut socket);
+//RS                 server_transcript.lock().unwrap().push(ehlo);
+//RS                 socket
+//RS                     .write_all(b"250-relay\r\n250-STARTTLS\r\n250 AUTH PLAIN LOGIN\r\n")
+//RS                     .unwrap();
+//RS                 socket.flush().unwrap();
+//RS                 let command = smtp_read_line(&mut socket);
+//RS                 server_transcript.lock().unwrap().push(command.clone());
+//RS                 assert_eq!(command, "STARTTLS\r\n");
+//RS                 socket.write_all(b"220 begin TLS\r\n").unwrap();
+//RS                 socket.flush().unwrap();
+//RS             }
+//RS             let conn = rustls::ServerConnection::new(config).unwrap();
+//RS             let mut tls = rustls::StreamOwned::new(conn, socket);
+//RS             while tls.conn.is_handshaking() {
+//RS                 if tls.conn.complete_io(&mut tls.sock).is_err() {
+//RS                     return;
+//RS                 }
+//RS             }
+//RS             smtp_tls_session(&mut tls, !starttls, fixture, &server_transcript);
+//RS         });
+//RS         (address, transcript, server)
+//RS     }
+//RS 
+//RS     fn smtp_message() -> smtp_adapter::jet_email::Message {
+//RS         use smtp_adapter::jet_email as email;
+//RS         let from = email::address(&"sender@example.com".to_string()).unwrap();
+//RS         let to = email::address(&"recipient@example.net".to_string()).unwrap();
+//RS         email::message(
+//RS             &from,
+//RS             &vec![to],
+//RS             &vec![],
+//RS             &"subject".to_string(),
+//RS             &"first\r\n.second".to_string(),
+//RS             &String::new(),
+//RS             &vec![],
+//RS         )
+//RS         .unwrap()
+//RS     }
+//RS 
+//RS     fn smtp_config(port: u16, starttls: bool) -> smtp_adapter::jet_email::SMTPConfig<Vec<u8>> {
+//RS         use smtp_adapter::jet_email as email;
+//RS         email::SMTPConfig {
+//RS             host: "localhost".to_string(),
+//RS             port: port as i64,
+//RS             security: if starttls {
+//RS                 email::SMTPSecurity::StartTLS
+//RS             } else {
+//RS                 email::SMTPSecurity::TLS
+//RS             },
+//RS             auth: email::SMTPAuth::Password {
+//RS                 username: "mailer".to_string(),
+//RS                 password: b"swordfish".to_vec(),
+//RS             },
+//RS             recipient_policy: email::RecipientPolicy::RequireAll,
+//RS             trust: email::TLSTrust::SystemPlusCa {
+//RS                 pem: include_bytes!("../../../tests/fixtures/tls/smtp.ca.cert.pem").to_vec(),
+//RS             },
+//RS             limits: email::Limits::safe(),
+//RS             dkim: Err(smtp_adapter::JetAbsent),
+//RS         }
+//RS     }
+//RS 
+//RS     fn test_base64_decode(text: &str) -> Vec<u8> {
+//RS         let value = |byte| match byte {
+//RS             b'A'..=b'Z' => byte - b'A',
+//RS             b'a'..=b'z' => byte - b'a' + 26,
+//RS             b'0'..=b'9' => byte - b'0' + 52,
+//RS             b'+' => 62,
+//RS             b'/' => 63,
+//RS             _ => 0,
+//RS         };
+//RS         let bytes: Vec<u8> = text
+//RS             .bytes()
+//RS             .filter(|byte| !byte.is_ascii_whitespace())
+//RS             .collect();
+//RS         let mut out = Vec::new();
+//RS         for chunk in bytes.chunks_exact(4) {
+//RS             let values = [
+//RS                 value(chunk[0]),
+//RS                 value(chunk[1]),
+//RS                 value(chunk[2]),
+//RS                 value(chunk[3]),
+//RS             ];
+//RS             out.push(values[0] << 2 | values[1] >> 4);
+//RS             if chunk[2] != b'=' {
+//RS                 out.push(values[1] << 4 | values[2] >> 2);
+//RS             }
+//RS             if chunk[3] != b'=' {
+//RS                 out.push(values[2] << 6 | values[3]);
+//RS             }
+//RS         }
+//RS         out
+//RS     }
+//RS 
+//RS     fn test_relaxed_header(header: &str) -> String {
+//RS         let (name, value) = header.split_once(':').unwrap();
+//RS         let unfolded = value.replace("\r\n ", " ").replace("\r\n\t", " ");
+//RS         let value = unfolded
+//RS             .split_ascii_whitespace()
+//RS             .collect::<Vec<_>>()
+//RS             .join(" ");
+//RS         format!("{}:{}\r\n", name.to_ascii_lowercase(), value)
+//RS     }
+//RS 
+//RS     fn verify_dkim_wire(wire: &str, seed: [u8; 32]) {
+//RS         use sha2::Digest;
+//RS         let boundary = wire.find("\r\n\r\n").unwrap();
+//RS         let headers = &wire[..boundary];
+//RS         let body = &wire[boundary + 4..];
+//RS         let mut first_end = 0usize;
+//RS         for (index, line) in headers.split("\r\n").enumerate() {
+//RS             if index != 0 && !line.starts_with([' ', '\t']) {
+//RS                 break;
+//RS             }
+//RS             first_end += line.len() + 2;
+//RS         }
+//RS         let dkim_header = &headers[..first_end - 2];
+//RS         let unfolded = dkim_header.replace("\r\n ", " ");
+//RS         let tags = unfolded
+//RS             .split_once(':')
+//RS             .unwrap()
+//RS             .1
+//RS             .split(';')
+//RS             .filter_map(|tag| tag.trim().split_once('='))
+//RS             .map(|(name, value)| (name, value))
+//RS             .collect::<std::collections::HashMap<_, _>>();
+//RS         assert_eq!(tags["a"], "ed25519-sha256");
+//RS         assert_eq!(tags["c"], "relaxed/relaxed");
+//RS         assert_eq!(tags["d"], "example.com");
+//RS         assert_eq!(tags["s"], "login-2026");
+//RS 
+//RS         let mut body_lines: Vec<&str> = body.split("\r\n").collect();
+//RS         while body_lines
+//RS             .last()
+//RS             .is_some_and(|line| line.trim_end_matches([' ', '\t']).is_empty())
+//RS         {
+//RS             body_lines.pop();
+//RS         }
+//RS         let canonical_body = if body_lines.is_empty() {
+//RS             "\r\n".to_string()
+//RS         } else {
+//RS             body_lines
+//RS                 .into_iter()
+//RS                 .map(|line| line.trim_end_matches([' ', '\t']))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join("\r\n")
+//RS                 + "\r\n"
+//RS         };
+//RS         let body_hash: [u8; 32] = sha2::Sha256::digest(canonical_body.as_bytes()).into();
+//RS         assert_eq!(test_base64_decode(tags["bh"]), body_hash);
+//RS 
+//RS         let mut signing_input = String::new();
+//RS         for wanted in tags["h"].split(':') {
+//RS             let header = headers
+//RS                 .rsplit("\r\n")
+//RS                 .find(|line| {
+//RS                     line.split_once(':')
+//RS                         .is_some_and(|(name, _)| name.eq_ignore_ascii_case(wanted))
+//RS                 })
+//RS                 .unwrap();
+//RS             signing_input.push_str(&test_relaxed_header(header));
+//RS         }
+//RS         let empty_b = format!("{}b=", unfolded.split("b=").next().unwrap());
+//RS         signing_input.push_str(&test_relaxed_header(&empty_b));
+//RS         let signature: [u8; 64] = test_base64_decode(tags["b"]).try_into().unwrap();
+//RS         let header_hash: [u8; 32] = sha2::Sha256::digest(signing_input.as_bytes()).into();
+//RS         ed25519_dalek::SigningKey::from_bytes(&seed)
+//RS             .verifying_key()
+//RS             .verify_strict(
+//RS                 &header_hash,
+//RS                 &ed25519_dalek::Signature::from_bytes(&signature),
+//RS             )
+//RS             .unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn mailer_real_tls_starttls_cancellation_deadline_and_unknown_boundaries() {
+//RS         use smtp_adapter::jet_email as email;
+//RS         SMTP_CANCELLED.store(false, std::sync::atomic::Ordering::SeqCst);
+//RS         SMTP_DEADLINE_MS.store(i64::MAX, std::sync::atomic::Ordering::SeqCst);
+//RS         for starttls in [false, true] {
+//RS             let (address, transcript, server) = spawn_smtp_server(starttls, SMTPFixture::Success);
+//RS             let config = smtp_config(address.port(), starttls);
+//RS             let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
+//RS             let report = mailer.send(smtp_message()).unwrap();
+//RS             assert_eq!(
+//RS                 (
+//RS                     report.response_code,
+//RS                     report.accepted.len(),
+//RS                     report.rejected.len()
+//RS                 ),
+//RS                 (250, 1, 0)
+//RS             );
+//RS             server.join().unwrap();
+//RS             let transcript = transcript.lock().unwrap().join("");
+//RS             assert_eq!(transcript.matches("DATA\r\n").count(), 1);
+//RS             assert!(!transcript.contains("swordfish"));
+//RS             if starttls {
+//RS                 assert!(transcript.contains("STARTTLS\r\nEHLO localhost\r\n"));
+//RS             }
+//RS         }
+//RS 
+//RS         let (address, transcript, server) = spawn_smtp_server(false, SMTPFixture::CloseAfterData);
+//RS         let config = smtp_config(address.port(), false);
+//RS         let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
+//RS         assert!(matches!(
+//RS             mailer.send(smtp_message()),
+//RS             Err(email::Error::DeliveryUnknown { .. })
+//RS         ));
+//RS         server.join().unwrap();
+//RS         assert_eq!(
+//RS             transcript
+//RS                 .lock()
+//RS                 .unwrap()
+//RS                 .join("")
+//RS                 .matches("DATA\r\n")
+//RS                 .count(),
+//RS             1
+//RS         );
+//RS 
+//RS         let (address, _, server) = spawn_smtp_server(false, SMTPFixture::RejectAuth);
+//RS         let config = smtp_config(address.port(), false);
+//RS         let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
+//RS         let auth_error = mailer.send(smtp_message()).unwrap_err();
+//RS         assert!(matches!(auth_error, email::Error::Auth { .. }));
+//RS         assert!(!format!("{auth_error:?}").contains("swordfish"));
+//RS         server.join().unwrap();
+//RS 
+//RS         let (address, _, server) = spawn_smtp_server(false, SMTPFixture::StallGreeting);
+//RS         let config = smtp_config(address.port(), false);
+//RS         let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
+//RS         let cancel = std::thread::spawn(|| {
+//RS             std::thread::sleep(std::time::Duration::from_millis(60));
+//RS             SMTP_CANCELLED.store(true, std::sync::atomic::Ordering::SeqCst);
+//RS         });
+//RS         assert!(matches!(
+//RS             mailer.send(smtp_message()),
+//RS             Err(email::Error::Cancelled { .. })
+//RS         ));
+//RS         cancel.join().unwrap();
+//RS         server.join().unwrap();
+//RS         SMTP_CANCELLED.store(false, std::sync::atomic::Ordering::SeqCst);
+//RS 
+//RS         let (address, _, server) = spawn_smtp_server(false, SMTPFixture::StallGreeting);
+//RS         SMTP_DEADLINE_MS.store(smtp_now_ms() + 60, std::sync::atomic::Ordering::SeqCst);
+//RS         let config = smtp_config(address.port(), false);
+//RS         let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
+//RS         assert!(matches!(
+//RS             mailer.send(smtp_message()),
+//RS             Err(email::Error::TimedOut { .. })
+//RS         ));
+//RS         server.join().unwrap();
+//RS         SMTP_DEADLINE_MS.store(i64::MAX, std::sync::atomic::Ordering::SeqCst);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn mailer_dkim_signs_final_wire_with_real_ed25519_verifier() {
+//RS         use smtp_adapter::jet_email as email;
+//RS         let seed = [7u8; 32];
+//RS         let mut wires = Vec::new();
+//RS         for _ in 0..2 {
+//RS             let (address, transcript, server) = spawn_smtp_server(false, SMTPFixture::Success);
+//RS             let mut config = smtp_config(address.port(), false);
+//RS             config.dkim = Ok(email::DkimConfig {
+//RS                 domain: "example.com".to_string(),
+//RS                 selector: "login-2026".to_string(),
+//RS                 private_key: seed.to_vec(),
+//RS                 signed_headers: [
+//RS                     "from",
+//RS                     "to",
+//RS                     "subject",
+//RS                     "mime-version",
+//RS                     "content-type",
+//RS                     "content-transfer-encoding",
+//RS                 ]
+//RS                 .iter()
+//RS                 .map(|value| value.to_string())
+//RS                 .collect(),
+//RS             });
+//RS             let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
+//RS             mailer.send(smtp_message()).unwrap();
+//RS             server.join().unwrap();
+//RS             let transcript = transcript.lock().unwrap();
+//RS             let stuffed = transcript
+//RS                 .iter()
+//RS                 .find(|part| part.starts_with("DKIM-Signature:"))
+//RS                 .unwrap();
+//RS             wires.push(
+//RS                 stuffed
+//RS                     .strip_suffix(".\r\n")
+//RS                     .unwrap()
+//RS                     .replace("\r\n..", "\r\n."),
+//RS             );
+//RS         }
+//RS         assert_eq!(
+//RS             wires[0], wires[1],
+//RS             "DKIM ordering and folding must be deterministic"
+//RS         );
+//RS         verify_dkim_wire(&wires[0], seed);
+//RS         let mut relaxed_variant = wires[0].replace("\r\nFrom: ", "\r\nfRoM:\t  ");
+//RS         let body = relaxed_variant.find("\r\n\r\n").unwrap() + 4;
+//RS         let first_body_line = relaxed_variant[body..].find("\r\n").unwrap() + body;
+//RS         relaxed_variant.insert_str(first_body_line, " \t");
+//RS         verify_dkim_wire(&relaxed_variant, seed);
+//RS         assert!(
+//RS             wires[0].starts_with("DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/relaxed;\r\n")
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn mailer_dkim_rejects_before_connect_and_wipes_every_key_copy() {
+//RS         use smtp_adapter::jet_email as email;
+//RS         SMTP_WIPES.store(0, std::sync::atomic::Ordering::SeqCst);
+//RS         let mut config = smtp_config(465, false);
+//RS         config.dkim = Ok(email::DkimConfig {
+//RS             domain: "example.com".to_string(),
+//RS             selector: "login-2026".to_string(),
+//RS             private_key: vec![0x5a; 31],
+//RS             signed_headers: vec!["from".to_string()],
+//RS         });
+//RS         let error = match email::smtp(&config, |secret| secret.clone(), smtp_counting_runtime()) {
+//RS             Err(error) => error,
+//RS             Ok(_) => panic!("31-byte DKIM seed was accepted"),
+//RS         };
+//RS         assert!(
+//RS             matches!(&error, email::Error::Configuration { operation, reason, .. }
+//RS             if operation == "dkim" && reason == "private_key must contain exactly 32 bytes")
+//RS         );
+//RS         assert!(!format!("{error:?}").contains("5a5a"));
+//RS         assert_eq!(
+//RS             SMTP_WIPES.load(std::sync::atomic::Ordering::SeqCst),
+//RS             2,
+//RS             "construction failure must wipe copied SMTP password and DKIM seed"
+//RS         );
+//RS 
+//RS         config.dkim.as_mut().unwrap().private_key.push(0x5a);
+//RS         let mailer =
+//RS             email::smtp(&config, |secret| secret.clone(), smtp_counting_runtime()).unwrap();
+//RS         drop(mailer);
+//RS         assert_eq!(
+//RS             SMTP_WIPES.load(std::sync::atomic::Ordering::SeqCst),
+//RS             4,
+//RS             "Mailer drop must wipe owned SMTP password and DKIM seed"
+//RS         );
+//RS 
+//RS         config
+//RS             .dkim
+//RS             .as_mut()
+//RS             .unwrap()
+//RS             .signed_headers
+//RS             .push("x-absent".to_string());
+//RS         let mut mailer =
+//RS             email::smtp(&config, |secret| secret.clone(), smtp_counting_runtime()).unwrap();
+//RS         let error = mailer.send(smtp_message()).unwrap_err();
+//RS         assert!(
+//RS             matches!(error, email::Error::Configuration { operation, reason, .. }
+//RS             if operation == "dkim" && reason.contains("x-absent") && reason.contains("absent"))
+//RS         );
+//RS         drop(mailer);
+//RS         assert_eq!(SMTP_WIPES.load(std::sync::atomic::Ordering::SeqCst), 6);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn smtp_from_env_dkim_is_all_or_none_and_redacted() {
+//RS         use smtp_adapter::jet_email as email;
+//RS         let _guard = SMTP_ENV_LOCK.lock().unwrap();
+//RS         for name in [
+//RS             "SMTP_DKIM_DOMAIN",
+//RS             "SMTP_DKIM_SELECTOR",
+//RS             "SMTP_DKIM_PRIVATE_KEY_BASE64",
+//RS             "SMTP_DKIM_SIGNED_HEADERS",
+//RS         ] {
+//RS             std::env::remove_var(name);
+//RS         }
+//RS         std::env::set_var("SMTP_HOST", "localhost");
+//RS         std::env::set_var("SMTP_SECURITY", "tls");
+//RS         std::env::set_var("SMTP_PORT", "465");
+//RS         std::env::set_var("SMTP_DKIM_DOMAIN", "example.com");
+//RS         let partial = match email::smtp_from_env(smtp_runtime()) {
+//RS             Err(error) => error,
+//RS             Ok(_) => panic!("partial DKIM environment was accepted"),
+//RS         };
+//RS         assert!(
+//RS             matches!(partial, email::Error::Configuration { operation, reason, .. }
+//RS             if operation == "smtp_from_env" && reason.contains("must be set together"))
+//RS         );
+//RS 
+//RS         std::env::set_var("SMTP_DKIM_SELECTOR", "login-2026");
+//RS         std::env::set_var("SMTP_DKIM_PRIVATE_KEY_BASE64", "private-key-not-base64");
+//RS         let malformed = match email::smtp_from_env(smtp_runtime()) {
+//RS             Err(error) => error,
+//RS             Ok(_) => panic!("malformed DKIM environment was accepted"),
+//RS         };
+//RS         assert!(!format!("{malformed:?}").contains("private-key-not-base64"));
+//RS 
+//RS         std::env::set_var(
+//RS             "SMTP_DKIM_PRIVATE_KEY_BASE64",
+//RS             "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+//RS         );
+//RS         let mailer = email::smtp_from_env(smtp_runtime()).unwrap();
+//RS         drop(mailer);
+//RS         for name in [
+//RS             "SMTP_HOST",
+//RS             "SMTP_SECURITY",
+//RS             "SMTP_PORT",
+//RS             "SMTP_DKIM_DOMAIN",
+//RS             "SMTP_DKIM_SELECTOR",
+//RS             "SMTP_DKIM_PRIVATE_KEY_BASE64",
+//RS             "SMTP_DKIM_SIGNED_HEADERS",
+//RS         ] {
+//RS             std::env::remove_var(name);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Crate dependency specs that require non-trivial TOML values (e.g. feature flags).
+//RS /// These are emitted verbatim as the right-hand side of the `name = …` line.
+//RS const FEATURED_DEPS: &[(&str, &str)] = &[
+//RS     (
+//RS         "arrow-array",
+//RS         "{ version = \"=59.3.0\", default-features = false }",
+//RS     ),
+//RS     (
+//RS         "arrow-data",
+//RS         "{ version = \"=59.3.0\", default-features = false }",
+//RS     ),
+//RS     (
+//RS         "arrow-schema",
+//RS         "{ version = \"=59.3.0\", default-features = false }",
+//RS     ),
+//RS     (
+//RS         "arrow-select",
+//RS         "{ version = \"=59.3.0\", default-features = false }",
+//RS     ),
+//RS     (
+//RS         "bytes",
+//RS         "{ version = \"1\", default-features = false }",
+//RS     ),
+//RS     (
+//RS         "parquet",
+//RS         "{ version = \"=59.3.0\", default-features = false, features = [\"arrow\", \"brotli\", \"flate2-zlib-rs\", \"lz4\", \"simdutf8\", \"snap\", \"zstd\"] }",
+//RS     ),
+//RS     (
+//RS         "aes-gcm",
+//RS         "{ version = \"=0.10.3\", default-features = false, features = [\"aes\", \"alloc\"] }",
+//RS     ),
+//RS     (
+//RS         "age",
+//RS         "{ version = \"0.10\" }",
+//RS     ),
+//RS     (
+//RS         "argon2",
+//RS         "{ version = \"=0.5.3\", default-features = false, features = [\"alloc\", \"password-hash\"] }",
+//RS     ),
+//RS     (
+//RS         "blake3",
+//RS         "{ version = \"=1.8.2\", default-features = false, features = [\"std\", \"pure\"] }",
+//RS     ),
+//RS     (
+//RS         "chacha20poly1305",
+//RS         "{ version = \"=0.10.1\", default-features = false, features = [\"alloc\"] }",
+//RS     ),
+//RS     (
+//RS         "ed25519-dalek",
+//RS         "{ version = \"=2.2.0\", default-features = false, features = [\"alloc\", \"zeroize\"] }",
+//RS     ),
+//RS     (
+//RS         "hkdf",
+//RS         "{ version = \"=0.12.4\", default-features = false, features = [] }",
+//RS     ),
+//RS     (
+//RS         "rusqlite",
+//RS         "{ version = \"0.31\", features = [\"bundled\", \"hooks\"] }",
+//RS     ),
+//RS     (
+//RS         "rustls",
+//RS         "{ version = \"0.23\", default-features = false, features = [\"ring\", \"std\", \"tls12\"] }",
+//RS     ),
+//RS     (
+//RS         "sha2",
+//RS         "{ version = \"=0.10.9\", default-features = false, features = [] }",
+//RS     ),
+//RS     (
+//RS         "subtle",
+//RS         "{ version = \"=2.6.1\", default-features = false, features = [] }",
+//RS     ),
+//RS     (
+//RS         "wasmtime",
+//RS         "{ version = \"26\", features = [\"component-model\"] }",
+//RS     ),
+//RS     (
+//RS         "x25519-dalek",
+//RS         "{ version = \"=2.0.1\", default-features = false, features = [\"precomputed-tables\", \"zeroize\"] }",
+//RS     ),
+//RS ];
+//RS 
+//RS 
+//RS /// Hand-written database runtime emitted into the bridge crate when `core.db`
+//RS /// is used. This is the only code that touches the `rusqlite` crate.
+//RS const DB_RUNTIME: &str = include_str!("Prelude/DB.rs");
+//RS 
+//RS /// The `aes-gcm` crate version backing `core.crypto` envelope (D-DEP-CRYPTO1).
+//RS pub const AES_GCM_CRATE_SPEC: (&str, &str) = ("aes-gcm", "=0.10.3");
+//RS 
+//RS /// The `chacha20poly1305` crate version backing `core.crypto` envelope (D-DEP-CRYPTO1).
+//RS pub const CHACHA_POLY_CRATE_SPEC: (&str, &str) = ("chacha20poly1305", "=0.10.1");
+//RS 
+//RS /// The `ed25519-dalek` crate version backing `core.crypto.sign/verify` (D-DEP-CRYPTO1).
+//RS pub const ED25519_CRATE_SPEC: (&str, &str) = ("ed25519-dalek", "=2.2.0");
+//RS 
+//RS /// The `argon2` crate version backing `core.crypto.password_hash` (D-PWHASH1).
+//RS pub const ARGON2_CRATE_SPEC: (&str, &str) = ("argon2", "=0.5.3");
+//RS 
+//RS /// The `sha2` crate version backing SHA-512 + HKDF-SHA256 (D-CRYPTO-SUITE1).
+//RS pub const SHA2_CRATE_SPEC: (&str, &str) = ("sha2", "=0.10.9");
+//RS 
+//RS /// The `blake3` crate version backing `core.crypto.blake3` (D-CRYPTO-SUITE1).
+//RS pub const BLAKE3_CRATE_SPEC: (&str, &str) = ("blake3", "=1.8.2");
+//RS 
+//RS /// The `hkdf` crate version backing `core.crypto.hkdf_sha256` (D-CRYPTO-SUITE1).
+//RS pub const HKDF_CRATE_SPEC: (&str, &str) = ("hkdf", "=0.12.4");
+//RS 
+//RS /// The `x25519-dalek` crate version backing key agreement (D-CRYPTO-SUITE1).
+//RS pub const X25519_CRATE_SPEC: (&str, &str) = ("x25519-dalek", "=2.0.1");
+//RS 
+//RS /// Constant-time byte equality helper (D-CRYPTO-SUITE1).
+//RS pub const SUBTLE_CRATE_SPEC: (&str, &str) = ("subtle", "=2.6.1");
+//RS 
+//RS /// Hand-written crypto runtime emitted into the bridge crate when `core.crypto`
+//RS /// seal/open/sign/verify is used (D-CRYPTOENV1, D-DEP-CRYPTO1).
+//RS const CRYPTO_RUNTIME: &str = include_str!("Prelude/Crypto.rs");
+//RS const OUTCOME_RUNTIME: &str = include_str!("../../jet-foundation/src/Outcome.rs");
+//RS const RUNTIME_DIAGNOSTIC_CORE: &str = include_str!("../../jet-foundation/src/RuntimeDiagnosticCore.rs");
+//RS const ENCODING_ERRORS_RUNTIME: &str = include_str!("../../jet-foundation/src/EncodingErrors.rs");
+//RS const DATATREE_RUNTIME: &str = include_str!("../../jet-foundation/src/DataTree.rs");
+//RS const ENCODING_JSON_RUNTIME: &str = include_str!("../../jet-foundation/src/EncodingJson.rs");
+//RS const JSON_NUMBER_RUNTIME: &str = include_str!("../../jet-foundation/src/JSONNumber.rs");
+//RS const HOST_RUNTIME_STOP_BEGIN: &str = "// JET_HOST_RUNTIME_STOP_BEGIN";
+//RS const HOST_RUNTIME_STOP_END: &str = "// JET_HOST_RUNTIME_STOP_END";
+//RS const HOST_RUNTIME_SENTRY_BEGIN: &str = "// JET_HOST_RUNTIME_SENTRY_BEGIN";
+//RS const HOST_RUNTIME_SENTRY_END: &str = "// JET_HOST_RUNTIME_SENTRY_END";
+//RS const CRYPTO_ENTROPY_RUNTIME: &str =
+//RS     include_str!("../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
+//RS 
+//RS fn strip_outcome_host_wrapper(source: &str, begin: &str, end: &str) -> String {
+//RS     let start = source
+//RS         .find(begin)
+//RS         .expect("Outcome host wrapper marker missing");
+//RS     let end = source
+//RS         .find(end)
+//RS         .expect("Outcome host wrapper end marker missing")
+//RS         + end.len();
+//RS     let mut projected = String::with_capacity(source.len() - (end - start));
+//RS     projected.push_str(&source[..start]);
+//RS     projected.push_str(&source[end..]);
+//RS     projected
+//RS }
+//RS 
+//RS fn standalone_outcome_runtime() -> String {
+//RS     // Bridge crates have no compiler Registry. Keep the shared carriers and
+//RS     // row-driven kernels, but remove both foundation-only Registry adapters.
+//RS     let projected = strip_outcome_host_wrapper(
+//RS         OUTCOME_RUNTIME,
+//RS         HOST_RUNTIME_STOP_BEGIN,
+//RS         HOST_RUNTIME_STOP_END,
+//RS     );
+//RS     strip_outcome_host_wrapper(
+//RS         &projected,
+//RS         HOST_RUNTIME_SENTRY_BEGIN,
+//RS         HOST_RUNTIME_SENTRY_END,
+//RS     )
+//RS }
+//RS 
+//RS /// Crate-root modules a crypto bridge needs: Outcome's standalone projection
+//RS /// keeps its JSON decoding seam, and the embedded sources refer to these
+//RS /// through `crate::`/`super::`, so they stay at the bridge crate root.
+//RS #[doc(hidden)]
+//RS pub fn crypto_bridge_root_modules() -> String {
+//RS     let mut out = String::new();
+//RS     for (name, source) in [
+//RS         ("jet_encoding_errors", ENCODING_ERRORS_RUNTIME),
+//RS         ("jet_json_number", JSON_NUMBER_RUNTIME),
+//RS         ("DataTree", DATATREE_RUNTIME),
+//RS         ("EncodingJson", ENCODING_JSON_RUNTIME),
+//RS         ("RuntimeDiagnosticCore", RUNTIME_DIAGNOSTIC_CORE),
+//RS     ] {
+//RS         out.push_str("mod ");
+//RS         out.push_str(name);
+//RS         out.push_str(" {\n");
+//RS         out.push_str(source);
+//RS         out.push_str("\n}\n");
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS /// The standalone Outcome projection and the shared entropy provider, in the
+//RS /// exact form the bridge embeds ahead of the hand-written crypto runtime.
+//RS #[doc(hidden)]
+//RS pub fn crypto_bridge_entropy_runtime() -> String {
+//RS     let mut out = standalone_outcome_runtime();
+//RS     out.push('\n');
+//RS     out.push_str(CRYPTO_ENTROPY_RUNTIME);
+//RS     out.push('\n');
+//RS     out.push_str("use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};\n");
+//RS     out
+//RS }
+//RS 
+//RS /// The `wasmtime` crate version that backs sandboxed Component Model hosts
+//RS /// (D-DEP-WASM1=A application `core.plugin`, and D-DX5-HOOK1=A compiler
+//RS /// extensions). Application `core.plugin` still emits this pin into user
+//RS /// bridge crates; the compiler-extension host links the same pin only in the
+//RS /// sibling `jetpack` process under D-DEP1 / D-DX5-HOOK1. Reuses the already-
+//RS /// approved Cranelift backend (D-JITDEP1). Pin matches `jet-jit`'s Cranelift
+//RS /// generation instead of bloating the release with two backend generations.
+//RS pub const WASMTIME_CRATE_SPEC: (&str, &str) = ("wasmtime", "25");
+//RS /// The generated bridge uses the workspace's std-only foundation crate for
+//RS /// descriptor-relative, no-follow plugin reads. Keep the path in the cache
+//RS /// identity through the dependency map rather than duplicating its limits.
+//RS const JET_FOUNDATION_CRATE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-foundation");
+//RS const JET_FOUNDATION_SOURCE_SCHEMA: &str = "jet-ffi-foundation-source-v2";
+//RS const JET_FOUNDATION_CODEGEN_PRELUDE_PATH: &str =
+//RS     concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-codegen/src/Prelude");
+//RS const JET_FOUNDATION_ARCHIVE_SOURCE_PATH: &str =
+//RS     concat!(env!("CARGO_MANIFEST_DIR"), "/../../Core/archive");
+//RS const JET_FOUNDATION_TEXT_SOURCE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../Core/text");
+//RS const JET_FOUNDATION_TESTS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests");
+//RS const JET_FOUNDATION_CODEGEN_INPUTS: &[&str] = &[
+//RS     "Effects.jet",
+//RS     "Core.jet",
+//RS     "core/prelude.jet",
+//RS     "Facts.jet",
+//RS     "Diagnostics.jet",
+//RS     "Core/InlineRange.rs",
+//RS     "Core/TimeMonotonic.rs",
+//RS     "Core/MapKey.rs",
+//RS     "Markers.jet",
+//RS ];
+//RS const JET_FOUNDATION_ARCHIVE_INPUTS: &[&str] = &["archive.jet", "gzip.jet", "zstd.jet"];
+//RS const JET_FOUNDATION_TEXT_INPUTS: &[&str] = &["string.jet"];
+//RS const JET_FOUNDATION_TEST_INPUTS: &[&str] = &["diagnostics_coverage_baseline.txt"];
+//RS 
+//RS #[derive(Debug)]
+//RS struct JetFoundationSources {
+//RS     foundation: PathBuf,
+//RS     codegen_prelude: PathBuf,
+//RS     archive_source: PathBuf,
+//RS     text_source: PathBuf,
+//RS     tests: PathBuf,
+//RS     digest: String,
+//RS }
+//RS 
+//RS fn verified_source_directory(path: &Path, label: &str) -> Result<PathBuf, String> {
+//RS     let metadata = fs::symlink_metadata(path).map_err(|error| {
+//RS         format!(
+//RS             "jet-foundation {label} source `{}` is unavailable: {error}",
+//RS             path.display()
+//RS         )
+//RS     })?;
+//RS     if metadata.file_type().is_symlink() || !metadata.is_dir() {
+//RS         return Err(format!(
+//RS             "jet-foundation {label} source `{}` is not a real directory",
+//RS             path.display()
+//RS         ));
+//RS     }
+//RS     fs::canonicalize(path).map_err(|error| {
+//RS         format!(
+//RS             "could not canonicalize jet-foundation {label} source `{}`: {error}",
+//RS             path.display()
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn foundation_input_digest(
+//RS     root: &Path,
+//RS     relative: &str,
+//RS     label: &str,
+//RS ) -> Result<String, String> {
+//RS     let path = root.join(relative);
+//RS     let metadata = fs::symlink_metadata(&path).map_err(|error| {
+//RS         format!(
+//RS             "jet-foundation {label} input `{}` is unavailable: {error}",
+//RS             path.display()
+//RS         )
+//RS     })?;
+//RS     if metadata.file_type().is_symlink() || !metadata.is_file() {
+//RS         return Err(format!(
+//RS             "jet-foundation {label} input `{}` is not a regular file",
+//RS             path.display()
+//RS         ));
+//RS     }
+//RS     crate::ForeignBridge::sha_file(&path)
+//RS }
+//RS 
+//RS fn jet_foundation_sources() -> Result<JetFoundationSources, String> {
+//RS     let foundation = verified_source_directory(Path::new(JET_FOUNDATION_CRATE_PATH), "crate")?;
+//RS     let codegen_prelude =
+//RS         verified_source_directory(Path::new(JET_FOUNDATION_CODEGEN_PRELUDE_PATH), "codegen")?;
+//RS     let archive_source =
+//RS         verified_source_directory(Path::new(JET_FOUNDATION_ARCHIVE_SOURCE_PATH), "archive")?;
+//RS     let text_source =
+//RS         verified_source_directory(Path::new(JET_FOUNDATION_TEXT_SOURCE_PATH), "text")?;
+//RS     let tests = verified_source_directory(Path::new(JET_FOUNDATION_TESTS_PATH), "tests")?;
+//RS 
+//RS     let foundation_tree = crate::SHA256::try_tree_hash(&foundation)
+//RS         .map_err(|error| format!("could not fingerprint jet-foundation source: {error}"))?;
+//RS     let mut identity =
+//RS         crate::ForeignBridge::IdentityBuilder::new(JET_FOUNDATION_SOURCE_SCHEMA);
+//RS     identity.field("foundation-tree", foundation_tree.as_bytes());
+//RS     for relative in JET_FOUNDATION_CODEGEN_INPUTS {
+//RS         let digest = foundation_input_digest(&codegen_prelude, relative, "codegen")?;
+//RS         identity.field(
+//RS             "codegen-input",
+//RS             format!("{relative}\0{digest}").as_bytes(),
+//RS         );
+//RS     }
+//RS     for relative in JET_FOUNDATION_ARCHIVE_INPUTS {
+//RS         let digest = foundation_input_digest(&archive_source, relative, "archive")?;
+//RS         identity.field(
+//RS             "archive-input",
+//RS             format!("{relative}\0{digest}").as_bytes(),
+//RS         );
+//RS     }
+//RS     for relative in JET_FOUNDATION_TEXT_INPUTS {
+//RS         let digest = foundation_input_digest(&text_source, relative, "text")?;
+//RS         identity.field("text-input", format!("{relative}\0{digest}").as_bytes());
+//RS     }
+//RS     for relative in JET_FOUNDATION_TEST_INPUTS {
+//RS         let digest = foundation_input_digest(&tests, relative, "tests")?;
+//RS         identity.field("tests-input", format!("{relative}\0{digest}").as_bytes());
+//RS     }
+//RS 
+//RS     Ok(JetFoundationSources {
+//RS         foundation,
+//RS         codegen_prelude,
+//RS         archive_source,
+//RS         text_source,
+//RS         tests,
+//RS         digest: identity.finish(),
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS fn stage_foundation_input(
+//RS     source_root: &Path,
+//RS     relative: &str,
+//RS     destination_root: &Path,
+//RS     label: &str,
+//RS ) -> Result<(), String> {
+//RS     let source = source_root.join(relative);
+//RS     let destination = destination_root.join(relative);
+//RS     let parent = destination.parent().ok_or_else(|| {
+//RS         format!(
+//RS             "jet-foundation {label} input destination `{}` has no parent",
+//RS             destination.display()
+//RS         )
+//RS     })?;
+//RS     fs::create_dir_all(parent).map_err(|error| {
+//RS         format!(
+//RS             "could not stage jet-foundation {label} input directory `{}`: {error}",
+//RS             parent.display()
+//RS         )
+//RS     })?;
+//RS     fs::copy(&source, &destination).map_err(|error| {
+//RS         format!(
+//RS             "could not stage jet-foundation {label} input `{}`: {error}",
+//RS             source.display()
+//RS         )
+//RS     })?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS // The generated manifest keeps Cargo's host path dependency, so native Cargo
+//RS // must see that canonical path inside its namespace. Linux stages only the
+//RS // external files that Foundation includes; other adapters expose the same
+//RS // source directories directly because they do not remap mount destinations.
+//RS fn jet_foundation_mounts(
+//RS     _cache_root: &Path,
+//RS     sources: &JetFoundationSources,
+//RS ) -> Result<Vec<jet_sema::Comptime::Build::ReadOnlyMount>, String> {
+//RS     let mut mounts = vec![
+//RS         jet_sema::Comptime::Build::ReadOnlyMount::new(
+//RS             sources.foundation.clone(),
+//RS             sources.foundation.clone(),
+//RS         ),
+//RS     ];
+//RS     #[cfg(target_os = "linux")]
+//RS     {
+//RS         let closure_root = _cache_root.join(".jet-foundation-source-closure");
+//RS         match fs::remove_dir_all(&closure_root) {
+//RS             Ok(()) => {}
+//RS             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+//RS             Err(error) => {
+//RS                 return Err(format!(
+//RS                     "could not clear jet-foundation source closure `{}`: {error}",
+//RS                     closure_root.display()
+//RS                 ));
+//RS             }
+//RS         }
+//RS         let codegen_stage = closure_root.join("codegen/src/Prelude");
+//RS         let archive_stage = closure_root.join("archive/src");
+//RS         let text_stage = closure_root.join("Core/text");
+//RS         let tests_stage = closure_root.join("tests");
+//RS         for relative in JET_FOUNDATION_CODEGEN_INPUTS {
+//RS             stage_foundation_input(
+//RS                 &sources.codegen_prelude,
+//RS                 relative,
+//RS                 &codegen_stage,
+//RS                 "codegen",
+//RS             )?;
+//RS         }
+//RS         for relative in JET_FOUNDATION_ARCHIVE_INPUTS {
+//RS             stage_foundation_input(
+//RS                 &sources.archive_source,
+//RS                 relative,
+//RS                 &archive_stage,
+//RS                 "archive",
+//RS             )?;
+//RS         }
+//RS         for relative in JET_FOUNDATION_TEXT_INPUTS {
+//RS             stage_foundation_input(&sources.text_source, relative, &text_stage, "text")?;
+//RS         }
+//RS         for relative in JET_FOUNDATION_TEST_INPUTS {
+//RS             stage_foundation_input(&sources.tests, relative, &tests_stage, "tests")?;
+//RS         }
+//RS         mounts.extend([
+//RS             jet_sema::Comptime::Build::ReadOnlyMount::new(
+//RS                 codegen_stage,
+//RS                 sources.codegen_prelude.clone(),
+//RS             ),
+//RS             jet_sema::Comptime::Build::ReadOnlyMount::new(
+//RS                 archive_stage,
+//RS                 sources.archive_source.clone(),
+//RS             ),
+//RS             jet_sema::Comptime::Build::ReadOnlyMount::new(text_stage, sources.text_source.clone()),
+//RS             jet_sema::Comptime::Build::ReadOnlyMount::new(tests_stage, sources.tests.clone()),
+//RS         ]);
+//RS     }
+//RS     #[cfg(not(target_os = "linux"))]
+//RS     {
+//RS         mounts.extend([
+//RS             jet_sema::Comptime::Build::ReadOnlyMount::new(
+//RS                 sources.codegen_prelude.clone(),
+//RS                 sources.codegen_prelude.clone(),
+//RS             ),
+//RS             jet_sema::Comptime::Build::ReadOnlyMount::new(
+//RS                 sources.archive_source.clone(),
+//RS                 sources.archive_source.clone(),
+//RS             ),
+//RS             jet_sema::Comptime::Build::ReadOnlyMount::new(
+//RS                 sources.text_source.clone(),
+//RS                 sources.text_source.clone(),
+//RS             ),
+//RS             jet_sema::Comptime::Build::ReadOnlyMount::new(
+//RS                 sources.tests.clone(),
+//RS                 sources.tests.clone(),
+//RS             ),
+//RS         ]);
+//RS     }
+//RS     Ok(mounts)
+//RS }
+//RS 
+//RS /// Hand-written application plugin-loader runtime emitted into the bridge
+//RS /// crate when `core.plugin` is used (D-PLUGIN1 / D-DEP-WASM1=A).
+//RS const PLUGIN_RUNTIME: &str = include_str!("Prelude/Plugin.rs");
+//RS 
+//RS /// Hand-written compiler-extension host runtime (D-DX5-HOOK1=A). Same
+//RS /// wasmtime Component Model substrate as `PLUGIN_RUNTIME`, distinct WIT
+//RS /// world (`compiler-extension-v1`) and entry points. Compiled only by the
+//RS /// isolated `jetpack` binary; kept here beside other prelude runtimes for
+//RS /// substrate parity. Not mixed into application `core.plugin` bridges.
+//RS pub const COMPILER_EXTENSION_RUNTIME: &str = include_str!("Prelude/CompilerExtension.rs");
+//RS 
+//RS /// The `age` crate version backing `core.crypto.vault` (U13, D-JPK-SECRETCRYPTO1=A) —
+//RS /// the age-style crypto bridge: X25519 recipients, ChaCha20-Poly1305 payload.
+//RS /// Lives only here — never in the compiler's Cargo.toml (I6).
+//RS pub const AGE_CRATE_SPEC: (&str, &str) = ("age", "0.10");
+//RS 
+//RS /// Hand-written age-style crypto runtime emitted into the bridge crate when
+//RS /// `core.crypto.vault` is used (U13). This is the only place the `age` crate is
+//RS /// touched.
+//RS const SECRETS_RUNTIME: &str = include_str!("Prelude/SecretsCrypto.rs");
+//RS const VAULT_KEY_WRAP_RUNTIME: &str = include_str!("Prelude/VaultKeyWrap.rs");
+//RS const VAULT_NFC_RUNTIME: &str = include_str!("Prelude/VaultNfc.rs");
+//RS const UNICODE_TABLES_RUNTIME: &str =
+//RS     include_str!("../../jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs");
+//RS 
+//RS 
+//RS pub fn build_bridge(
+//RS     entries: &[ExternEntry],
+//RS     needs_regex: bool,
+//RS     needs_archive: bool,
+//RS     needs_db: bool,
+//RS     needs_http_client: bool,
+//RS     needs_crypto: bool,
+//RS     needs_compress: bool,
+//RS     needs_plugin: bool,
+//RS     needs_secrets: bool,
+//RS ) -> Result<FfiLink, Vec<Diagnostic>> {
+//RS     let target = host_target();
+//RS     build_bridge_full(
+//RS         entries,
+//RS         needs_regex,
+//RS         needs_archive,
+//RS         needs_db,
+//RS         false,
+//RS         needs_http_client,
+//RS         false,
+//RS         false,
+//RS         needs_crypto,
+//RS         needs_compress,
+//RS         needs_plugin,
+//RS         &[],
+//RS         needs_secrets,
+//RS         &[],
+//RS         &CRecordDefinitions::default(),
+//RS         &FfiLinkClosure::default(),
+//RS         &[],
+//RS         &target,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS 
+//RS 
+//RS /// Path of the already-built Ed25519 helper, without creating cache state.
+//RS /// Health checks use this instead of calling `build_bridge`.
+//RS pub fn cached_crypto_helper_path() -> PathBuf {
+//RS     let target = host_target();
+//RS     let mut deps = BTreeMap::new();
+//RS     for (name, version) in [
+//RS         AES_GCM_CRATE_SPEC,
+//RS         CHACHA_POLY_CRATE_SPEC,
+//RS         ED25519_CRATE_SPEC,
+//RS         ARGON2_CRATE_SPEC,
+//RS         SHA2_CRATE_SPEC,
+//RS         BLAKE3_CRATE_SPEC,
+//RS         HKDF_CRATE_SPEC,
+//RS         X25519_CRATE_SPEC,
+//RS         SUBTLE_CRATE_SPEC,
+//RS     ] {
+//RS         deps.insert(name.to_string(), version.to_string());
+//RS     }
+//RS     let key = cache_key_full(
+//RS         &[],
+//RS         &deps,
+//RS         false,
+//RS         false,
+//RS         false,
+//RS         false,
+//RS         false,
+//RS         false,
+//RS         false,
+//RS         true,
+//RS         false,
+//RS         false,
+//RS         &[],
+//RS         false,
+//RS         &[],
+//RS         "",
+//RS         &FfiLinkClosure::default(),
+//RS         &target,
+//RS         None,
+//RS         &[],
+//RS         None,
+//RS     );
+//RS     bridge_paths(&key, &target, &[]).crypto_helper
+//RS }
+//RS 
+//RS fn build_bridge_full(
+//RS     entries: &[ExternEntry],
+//RS     needs_regex: bool,
+//RS     needs_archive: bool,
+//RS     needs_db: bool,
+//RS     needs_parquet: bool,
+//RS     needs_http_client: bool,
+//RS     needs_http_server_tls: bool,
+//RS     needs_net_tls: bool,
+//RS     needs_crypto: bool,
+//RS     needs_compress: bool,
+//RS     needs_plugin: bool,
+//RS     authority_needs: &[String],
+//RS     needs_secrets: bool,
+//RS     handle_facts: &[FfiHandleFact],
+//RS     record_defs: &CRecordDefinitions,
+//RS     link_closure: &FfiLinkClosure,
+//RS     native_link_args: &[String],
+//RS     selected_target: &str,
+//RS     project_root: Option<&Path>,
+//RS ) -> Result<FfiLink, Vec<Diagnostic>> {
+//RS     let mut deps = collect_crate_deps(entries);
+//RS     let native_toolchain = inline_native_toolchain(entries, selected_target)?;
+//RS     if needs_db {
+//RS         deps.insert(DB_CRATE_SPEC.0.to_string(), DB_CRATE_SPEC.1.to_string());
+//RS     }
+//RS     if needs_parquet {
+//RS         for (name, version) in [
+//RS             PARQUET_CRATE_SPEC,
+//RS             ARROW_ARRAY_CRATE_SPEC,
+//RS             ARROW_DATA_CRATE_SPEC,
+//RS             ARROW_SCHEMA_CRATE_SPEC,
+//RS             ARROW_SELECT_CRATE_SPEC,
+//RS             BYTES_CRATE_SPEC,
+//RS         ] {
+//RS             deps.insert(name.to_string(), version.to_string());
+//RS         }
+//RS         deps.insert(
+//RS             "jet-foundation".to_string(),
+//RS             JET_FOUNDATION_CRATE_PATH.to_string(),
+//RS         );
+//RS     }
+//RS     if needs_http_client {
+//RS         deps.insert(
+//RS             HTTP_SERVER_TLS_CRATE_SPEC.0.to_string(),
+//RS             HTTP_SERVER_TLS_CRATE_SPEC.1.to_string(),
+//RS         );
+//RS         deps.insert(
+//RS             RUSTLS_NATIVE_CERTS_CRATE_SPEC.0.to_string(),
+//RS             RUSTLS_NATIVE_CERTS_CRATE_SPEC.1.to_string(),
+//RS         );
+//RS     }
+//RS     if needs_http_server_tls {
+//RS         deps.insert(
+//RS             HTTP_SERVER_TLS_CRATE_SPEC.0.to_string(),
+//RS             HTTP_SERVER_TLS_CRATE_SPEC.1.to_string(),
+//RS         );
+//RS         deps.insert(
+//RS             HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC.0.to_string(),
+//RS             HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC.1.to_string(),
+//RS         );
+//RS     }
+//RS     if needs_net_tls {
+//RS         deps.insert(
+//RS             HTTP_SERVER_TLS_CRATE_SPEC.0.to_string(),
+//RS             HTTP_SERVER_TLS_CRATE_SPEC.1.to_string(),
+//RS         );
+//RS         deps.insert(
+//RS             RUSTLS_NATIVE_CERTS_CRATE_SPEC.0.to_string(),
+//RS             RUSTLS_NATIVE_CERTS_CRATE_SPEC.1.to_string(),
+//RS         );
+//RS         deps.insert(
+//RS             HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC.0.to_string(),
+//RS             HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC.1.to_string(),
+//RS         );
+//RS     }
+//RS     if needs_crypto {
+//RS         deps.insert(
+//RS             AES_GCM_CRATE_SPEC.0.to_string(),
+//RS             AES_GCM_CRATE_SPEC.1.to_string(),
+//RS         );
+//RS         deps.insert(
+//RS             CHACHA_POLY_CRATE_SPEC.0.to_string(),
+//RS             CHACHA_POLY_CRATE_SPEC.1.to_string(),
+//RS         );
+//RS         deps.insert(
+//RS             ED25519_CRATE_SPEC.0.to_string(),
+//RS             ED25519_CRATE_SPEC.1.to_string(),
+//RS         );
+//RS         deps.insert(
+//RS             ARGON2_CRATE_SPEC.0.to_string(),
+//RS             ARGON2_CRATE_SPEC.1.to_string(),
+//RS         );
+//RS         deps.insert(SHA2_CRATE_SPEC.0.to_string(), SHA2_CRATE_SPEC.1.to_string());
+//RS         deps.insert(
+//RS             BLAKE3_CRATE_SPEC.0.to_string(),
+//RS             BLAKE3_CRATE_SPEC.1.to_string(),
+//RS         );
+//RS         deps.insert(HKDF_CRATE_SPEC.0.to_string(), HKDF_CRATE_SPEC.1.to_string());
+//RS         deps.insert(
+//RS             X25519_CRATE_SPEC.0.to_string(),
+//RS             X25519_CRATE_SPEC.1.to_string(),
+//RS         );
+//RS         deps.insert(
+//RS             SUBTLE_CRATE_SPEC.0.to_string(),
+//RS             SUBTLE_CRATE_SPEC.1.to_string(),
+//RS         );
+//RS     }
+//RS     if needs_secrets {
+//RS         deps.insert(
+//RS             AGE_CRATE_SPEC.0.to_string(),
+//RS             AGE_CRATE_SPEC.1.to_string(),
+//RS         );
+//RS     }
+//RS     if needs_plugin {
+//RS         deps.insert(
+//RS             WASMTIME_CRATE_SPEC.0.to_string(),
+//RS             WASMTIME_CRATE_SPEC.1.to_string(),
+//RS         );
+//RS         deps.insert(
+//RS             "jet-foundation".to_string(),
+//RS             JET_FOUNDATION_CRATE_PATH.to_string(),
+//RS         );
+//RS     }
+//RS     let foundation_sources = if needs_parquet || needs_plugin {
+//RS         Some(jet_foundation_sources().map_err(|error| tool_error(&error))?)
+//RS     } else {
+//RS         None
+//RS     };
+//RS     let key = cache_key_full(
+//RS         entries,
+//RS         &deps,
+//RS         needs_regex,
+//RS         needs_archive,
+//RS         needs_db,
+//RS         needs_parquet,
+//RS         needs_http_client,
+//RS         needs_http_server_tls,
+//RS         needs_net_tls,
+//RS         needs_crypto,
+//RS         needs_compress,
+//RS         needs_plugin,
+//RS         authority_needs,
+//RS         needs_secrets,
+//RS         handle_facts,
+//RS         &record_defs.source,
+//RS         link_closure,
+//RS         selected_target,
+//RS         native_toolchain.as_ref(),
+//RS         native_link_args,
+//RS         foundation_sources.as_ref().map(|sources| sources.digest.as_str()),
+//RS     );
+//RS     // #2075: `cache_root` owns this key's build INPUTS (generated manifest and
+//RS     // sources, the per-key lock); its OUTPUTS land in a Cargo target dir shared
+//RS     // by every key with the same build identity. See `bridge_paths`.
+//RS     let BridgePaths {
+//RS         cache_root,
+//RS         crate_name,
+//RS         target_dir,
+//RS         target,
+//RS         rlib,
+//RS         target_deps_dir,
+//RS         host_deps_dir,
+//RS         crypto_helper,
+//RS         secrets_helper,
+//RS         provenance,
+//RS     } = bridge_paths(
+//RS         &key,
+//RS         selected_target,
+//RS         native_link_args,
+//RS     );
+//RS 
+//RS     // c146: when the bridge carries crypto, it also emits a `jet-crypto-helper`
+//RS     // binary (a thin stdin wrapper around `jet_crypto_*_impl`) that `jet`'s own
+//RS     // publish/keygen path shells out to.
+//RS     let helper_bin = needs_crypto.then_some(crypto_helper);
+//RS     // U13: same shape, a `jet-secrets-helper` binary when the bridge carries the
+//RS     // age-style crypto bridge — `jetpack secrets *` shells out to it.
+//RS     let secrets_helper_bin = needs_secrets.then_some(secrets_helper);
+//RS     // Fast path (cache hit): existence is not proof. The sidecar records the
+//RS     // exact bytes of every artifact consumed by the compiler/JIT, so a stale
+//RS     // or corrupt cache falls through to a rebuild instead of leaking a later
+//RS     // linker failure.
+//RS     if let Some(artifacts) = bridge_artifact_paths(
+//RS         &rlib,
+//RS         &target,
+//RS         &crate_name,
+//RS         helper_bin.as_deref(),
+//RS         secrets_helper_bin.as_deref(),
+//RS     ) {
+//RS         if let Some(diagnostic) =
+//RS             bridge_artifact_integrity_diagnostic(&target, &crate_name, &deps, &artifacts)
+//RS         {
+//RS             return Err(vec![diagnostic]);
+//RS         }
+//RS         if bridge_cache_verified(
+//RS             &target,
+//RS             &crate_name,
+//RS             &key,
+//RS             selected_target,
+//RS             entries,
+//RS             &artifacts,
+//RS         ) {
+//RS             if let Err(error) = sync_bridge_lock(project_root, &cache_root, &key, &rlib) {
+//RS                 return Err(tool_error(&error));
+//RS             }
+//RS             let cdylib = artifacts[1].clone();
+//RS             return Ok(FfiLink {
+//RS                 crate_name,
+//RS                 cache_identity: key,
+//RS                 provenance_path: provenance,
+//RS                 rlib_path: rlib,
+//RS                 cdylib_path: cdylib,
+//RS                 target_deps_dir,
+//RS                 host_deps_dir,
+//RS                 helper_bin_path: helper_bin,
+//RS                 secrets_helper_bin_path: secrets_helper_bin,
+//RS                 handle_facts: handle_facts.to_vec(),
+//RS                 link_closure: link_closure.clone(),
+//RS             });
+//RS         }
+//RS     }
+//RS 
+//RS     let Some(cargo_path) = command_path("cargo") else {
+//RS         return Err(vec![Diagnostic::error(
+//RS             "E0703",
+//RS             "can't call foreign Rust crates without `cargo`".to_string(),
+//RS             "Jet builds a small helper crate for each `extern rust` dependency set".to_string(),
+//RS             "install Rust from https://rustup.rs (this includes `cargo`), then try again"
+//RS                 .to_string(),
+//RS             None,
+//RS         )]);
+//RS     };
+//RS 
+//RS     fs::create_dir_all(&cache_root)
+//RS         .map_err(|e| tool_error(&format!("couldn't create the FFI cache folder: {}", e)))?;
+//RS 
+//RS     // Slow path (cache miss): another `jet` process may be building this same
+//RS     // key right now. Cargo's target-dir lock protects the shared `target/`, not
+//RS     // the `Cargo.toml`/`src/lib.rs` sources this function is about to
+//RS     // (re)write, so guard the write+build with our own cross-process lock,
+//RS     // scoped to this cache key — two processes on *different* keys never block
+//RS     // each other here, though a concurrent COLD build of another key does queue
+//RS     // inside Cargo on the shared target dir (#2075: the trade for compiling the
+//RS     // dependency graph once instead of once per key).
+//RS     let _lock = BuildLock::acquire(&cache_root)?;
+//RS 
+//RS     // Re-check under the lock: whoever held it may have just finished
+//RS     // building this exact key while we were waiting.
+//RS     if let Some(artifacts) = bridge_artifact_paths(
+//RS         &rlib,
+//RS         &target,
+//RS         &crate_name,
+//RS         helper_bin.as_deref(),
+//RS         secrets_helper_bin.as_deref(),
+//RS     ) {
+//RS         if let Some(diagnostic) =
+//RS             bridge_artifact_integrity_diagnostic(&target, &crate_name, &deps, &artifacts)
+//RS         {
+//RS             return Err(vec![diagnostic]);
+//RS         }
+//RS         if bridge_cache_verified(
+//RS             &target,
+//RS             &crate_name,
+//RS             &key,
+//RS             selected_target,
+//RS             entries,
+//RS             &artifacts,
+//RS         ) {
+//RS             if let Err(error) = sync_bridge_lock(project_root, &cache_root, &key, &rlib) {
+//RS                 return Err(tool_error(&error));
+//RS             }
+//RS             let cdylib = artifacts[1].clone();
+//RS             return Ok(FfiLink {
+//RS                 crate_name,
+//RS                 cache_identity: key,
+//RS                 provenance_path: provenance,
+//RS                 rlib_path: rlib,
+//RS                 cdylib_path: cdylib,
+//RS                 target_deps_dir,
+//RS                 host_deps_dir,
+//RS                 helper_bin_path: helper_bin,
+//RS                 secrets_helper_bin_path: secrets_helper_bin,
+//RS                 handle_facts: handle_facts.to_vec(),
+//RS                 link_closure: link_closure.clone(),
+//RS             });
+//RS         }
+//RS     }
+//RS 
+//RS     // A missing or invalid manifest must not let Cargo bless an old/corrupt
+//RS     // output in place. Remove only this exact cache entry's link products;
+//RS     // Cargo will rebuild them under the existing per-key lock.
+//RS     invalidate_bridge_artifacts(
+//RS         &rlib,
+//RS         &target,
+//RS         &crate_name,
+//RS         helper_bin.as_deref(),
+//RS         secrets_helper_bin.as_deref(),
+//RS     );
+//RS 
+//RS     let src_dir = cache_root.join("src");
+//RS     fs::create_dir_all(&src_dir)
+//RS         .map_err(|e| tool_error(&format!("couldn't create the FFI build folder: {}", e)))?;
+//RS 
+//RS     let manifest = cache_root.join("Cargo.toml");
+//RS     let lib_rs = src_dir.join("lib.rs");
+//RS     let has_native = entries.iter().any(|e| {
+//RS         e.inline
+//RS             .as_ref()
+//RS             .is_some_and(|i| i.lang == "c" || i.lang == "cpp")
+//RS     });
+//RS     fs::write(&manifest, emit_cargo_toml(&crate_name, &deps, has_native))
+//RS         .map_err(|e| tool_error(&format!("couldn't write the FFI manifest: {}", e)))?;
+//RS     if has_native {
+//RS         fs::write(
+//RS             cache_root.join("build.rs"),
+//RS             emit_inline_build_rs(
+//RS                 entries,
+//RS                 native_toolchain
+//RS                     .as_ref()
+//RS                     .expect("native entries resolve a native toolchain"),
+//RS             ),
+//RS         )
+//RS         .map_err(|e| {
+//RS             tool_error(&format!(
+//RS                 "couldn't write the inline FFI build script: {}",
+//RS                 e
+//RS             ))
+//RS         })?;
+//RS         for (index, entry) in entries.iter().enumerate() {
+//RS             let Some(inline) = &entry.inline else {
+//RS                 continue;
+//RS             };
+//RS             if inline.lang != "c" && inline.lang != "cpp" {
+//RS                 continue;
+//RS             }
+//RS             let ext = if inline.lang == "cpp" { "cpp" } else { "c" };
+//RS             fs::write(
+//RS                 cache_root.join(format!("inline_{index}.{ext}")),
+//RS                 emit_native_inline_source(entry, index),
+//RS             )
+//RS             .map_err(|e| tool_error(&format!("couldn't write the inline foreign source: {}", e)))?;
+//RS         }
+//RS     }
+//RS     let handle_names = handle_facts
+//RS         .iter()
+//RS         .map(|fact| fact.jet_name.clone())
+//RS         .collect::<HashSet<_>>();
+//RS     let mut wrapper_source = emit_wrapper_lib_with_handles(
+//RS         entries,
+//RS         needs_regex,
+//RS         needs_archive,
+//RS         needs_db,
+//RS         needs_parquet,
+//RS         needs_http_client,
+//RS         needs_http_server_tls,
+//RS         needs_net_tls,
+//RS         needs_crypto,
+//RS         needs_compress,
+//RS         needs_plugin,
+//RS         needs_secrets,
+//RS         &handle_names,
+//RS         record_defs,
+//RS     );
+//RS     if needs_plugin {
+//RS         // D-PLUGIN-AUTHORITY1: the hidden host receives the checked package
+//RS         // declaration as data; it never reparses package.jet or invents needs.
+//RS         wrapper_source.push_str(
+//RS             "\nconst JET_PLUGIN_DECLARED_AUTHORITY_NEEDS: &[&str] = &[\n",
+//RS         );
+//RS         for need in authority_needs {
+//RS             wrapper_source.push_str(&format!("    {:?},\n", need));
+//RS         }
+//RS         wrapper_source.push_str(
+//RS             "];\n\
+//RS              fn jet_plugin_declared_authority_needs() -> Result<Vec<String>, String> {\n\
+//RS                  Ok(JET_PLUGIN_DECLARED_AUTHORITY_NEEDS\n\
+//RS                      .iter()\n\
+//RS                      .map(|need| (*need).to_string())\n\
+//RS                      .collect())\n\
+//RS              }\n",
+//RS         );
+//RS     }
+//RS     fs::write(&lib_rs, wrapper_source)
+//RS         .map_err(|e| tool_error(&format!("couldn't write the FFI wrappers: {}", e)))?;
+//RS 
+//RS     // `src/bin/` holds nothing but the generated helpers below, and #2075 keyed
+//RS     // their names. Clear it first so a helper written under the old unkeyed name
+//RS     // cannot linger as a second bin target that Cargo keeps rebuilding and
+//RS     // uplifting over another key's helper.
+//RS     let bin_dir = src_dir.join("bin");
+//RS     let _ = fs::remove_dir_all(&bin_dir);
+//RS     // c146: emit the crypto helper binary alongside the lib when crypto is in play.
+//RS     if needs_crypto {
+//RS         fs::create_dir_all(&bin_dir)
+//RS             .map_err(|e| tool_error(&format!("couldn't create the FFI bin folder: {}", e)))?;
+//RS         fs::write(
+//RS             bin_dir.join(format!("{}.rs", crypto_helper_bin_name(&key))),
+//RS             emit_crypto_helper_bin(&crate_name),
+//RS         )
+//RS         .map_err(|e| tool_error(&format!("couldn't write the crypto helper: {}", e)))?;
+//RS     }
+//RS     // U13: same shape, the secrets helper binary when the age-style crypto
+//RS     // bridge is in play.
+//RS     if needs_secrets {
+//RS         fs::create_dir_all(&bin_dir)
+//RS             .map_err(|e| tool_error(&format!("couldn't create the FFI bin folder: {}", e)))?;
+//RS         fs::write(
+//RS             bin_dir.join(format!("{}.rs", secrets_helper_bin_name(&key))),
+//RS             emit_secrets_helper_bin(&crate_name),
+//RS         )
+//RS         .map_err(|e| tool_error(&format!("couldn't write the secrets helper: {}", e)))?;
+//RS     }
+//RS 
+//RS     let sandbox_status = jet_sema::Comptime::Build::native_sandbox_status();
+//RS     if !sandbox_status.available {
+//RS         return Err(vec![Diagnostic::error(
+//RS             "E1275",
+//RS             "build sandboxing is required but unavailable".to_string(),
+//RS             format!(
+//RS                 "the foreign Rust bridge may execute Cargo build scripts or procedural macros, but the native sandbox is unavailable: {}",
+//RS                 sandbox_status.reason
+//RS             ),
+//RS             "install the native sandbox backend and retry; Jet will not run Cargo unsandboxed"
+//RS                 .to_string(),
+//RS             None,
+//RS         )]);
+//RS     }
+//RS 
+//RS     let metadata = match cargo_metadata(&cargo_path, &manifest) {
+//RS         Ok(metadata) => metadata,
+//RS         Err(detail) => {
+//RS             let dep = deps
+//RS                 .keys()
+//RS                 .next()
+//RS                 .map(|k| format!("{}@{}", k, deps[k]))
+//RS                 .unwrap_or_else(|| "a foreign crate".to_string());
+//RS             return Err(vec![cargo_bridge_failure_diagnostic(&dep, &detail)]);
+//RS         }
+//RS     };
+//RS     let compile_time_code = match cargo_metadata_has_compile_time_code(&metadata, &crate_name) {
+//RS         Ok(present) => present,
+//RS         Err(detail) => {
+//RS             let dep = deps
+//RS                 .keys()
+//RS                 .next()
+//RS                 .map(|k| format!("{}@{}", k, deps[k]))
+//RS                 .unwrap_or_else(|| "a foreign crate".to_string());
+//RS             return Err(vec![cargo_bridge_failure_diagnostic(&dep, &detail)]);
+//RS         }
+//RS     };
+//RS     fs::create_dir_all(&target_dir)
+//RS         .map_err(|e| tool_error(&format!("couldn't create the FFI target folder: {}", e)))?;
+//RS 
+//RS     let cargo_args = vec![
+//RS         "build".to_string(),
+//RS         "--release".to_string(),
+//RS         "--target".to_string(),
+//RS         selected_target.to_string(),
+//RS         "--manifest-path".to_string(),
+//RS         "/work/source/Cargo.toml".to_string(),
+//RS     ];
+//RS     let mut sandbox_env = BTreeMap::from([
+//RS         (
+//RS             "CARGO_HOME".to_string(),
+//RS             "/work/output/cargo-home".to_string(),
+//RS         ),
+//RS         ("CARGO_TARGET_DIR".to_string(), "/work/output".to_string()),
+//RS         ("HOME".to_string(), "/work/output/home".to_string()),
+//RS         ("SOURCE_DATE_EPOCH".to_string(), "0".to_string()),
+//RS     ]);
+//RS     if let Some(path) = std::env::var_os("PATH") {
+//RS         if !path.is_empty() {
+//RS             sandbox_env.insert("PATH".to_string(), path.to_string_lossy().into_owned());
+//RS         }
+//RS     }
+//RS 
+//RS     let cargo_home = std::env::var_os("CARGO_HOME")
+//RS         .map(PathBuf::from)
+//RS         .unwrap_or_else(|| dirs_home().join(".cargo"));
+//RS     let mut cargo_mounts = Vec::new();
+//RS     if let Ok(cargo_registry) = cargo_home.join("registry").canonicalize() {
+//RS         if cargo_registry.is_dir() {
+//RS             cargo_mounts.push(jet_sema::Comptime::Build::ReadOnlyMount::new(
+//RS                 cargo_registry,
+//RS                 "/work/output/cargo-home/registry",
+//RS             ));
+//RS         }
+//RS     }
+//RS     if let Some(sources) = foundation_sources.as_ref() {
+//RS         let mounts =
+//RS             jet_foundation_mounts(&cache_root, sources).map_err(|error| tool_error(&error))?;
+//RS         cargo_mounts.extend(mounts);
+//RS     }
+//RS     if !native_link_args.is_empty() {
+//RS         sandbox_env.insert(
+//RS             "CARGO_ENCODED_RUSTFLAGS".to_string(),
+//RS             native_link_args.join("\u{1f}"),
+//RS         );
+//RS     }
+//RS     let sandboxed = match jet_sema::Comptime::Build::run_native_sandboxed_with_mounts(
+//RS         &cargo_path,
+//RS         &cargo_args,
+//RS         &cache_root,
+//RS         Some(&target_dir),
+//RS         &sandbox_env,
+//RS         true,
+//RS         &cargo_mounts,
+//RS     ) {
+//RS         Ok(output) => output,
+//RS         Err(error) => {
+//RS             let detail = match error {
+//RS                 jet_sema::Comptime::Build::NativeSandboxError::Unsupported(detail)
+//RS                 | jet_sema::Comptime::Build::NativeSandboxError::Io(detail) => detail,
+//RS             };
+//RS             return Err(vec![Diagnostic::error(
+//RS                 "E1275",
+//RS                 "build sandboxing is required but unavailable".to_string(),
+//RS                 detail,
+//RS                 "install the native sandbox backend and retry; Jet will not run Cargo unsandboxed"
+//RS                     .to_string(),
+//RS                 None,
+//RS             )]);
+//RS         }
+//RS     };
+//RS     let receipt = CargoBridgeReceipt {
+//RS         sandbox_class: sandboxed.mechanism,
+//RS         sandbox_policy: sandboxed.policy,
+//RS         compile_time_code,
+//RS     };
+//RS     let out = sandboxed.output;
+//RS 
+//RS     if !out.status.success() {
+//RS         let stderr = String::from_utf8_lossy(&out.stderr);
+//RS         if entries.iter().any(|e| e.inline.is_some()) {
+//RS             let hint = entries
+//RS                 .iter()
+//RS                 .find(|e| e.inline.is_some())
+//RS                 .map(|e| e.line_hint.clone())
+//RS                 .unwrap_or_else(|| "an inline foreign declaration".to_string());
+//RS             return Err(vec![Diagnostic::error(
+//RS                 "E3222",
+//RS                 format!("the foreign body doesn't match the Jet signature at {hint}"),
+//RS                 "Jet compiled and linked the body against the declared scalar ABI contract, and the foreign toolchain rejected that contract".to_string(),
+//RS                 "make the foreign function name, parameter types, return type, operands, and target match the Jet signature".to_string(),
+//RS                 None,
+//RS             )]);
+//RS         }
+//RS         if looks_like_signature_mismatch(&stderr) {
+//RS             let hint = entries
+//RS                 .first()
+//RS                 .map(|e| e.line_hint.clone())
+//RS                 .unwrap_or_else(|| "an `extern rust` declaration".to_string());
+//RS             return Err(vec![Diagnostic::error(
+//RS                 "E0705",
+//RS                 format!(
+//RS                     "the Rust item doesn't match the Jet signature at {}",
+//RS                     hint
+//RS                 ),
+//RS                 "the `= \"rust::path\"` on an `extern rust` line must name a safe Rust function whose parameters and return type match what you wrote"
+//RS                     .to_string(),
+//RS                 format!(
+//RS                     "check the path and types on {}, or pick a different Rust function",
+//RS                     hint
+//RS                 ),
+//RS                 None,
+//RS             )
+//RS             .with_detail(format!("  cargo said:\n{}", stable_cargo_detail(&stderr)))]);
+//RS         }
+//RS         let dep = deps
+//RS             .keys()
+//RS             .next()
+//RS             .map(|k| format!("{}@{}", k, deps[k]))
+//RS             .unwrap_or_else(|| "a foreign crate".to_string());
+//RS         return Err(vec![cargo_bridge_failure_diagnostic(
+//RS             &dep,
+//RS             &stable_cargo_detail(&stderr),
+//RS         )]);
+//RS     }
+//RS 
+//RS     if !rlib.is_file() {
+//RS         return Err(tool_error(&format!(
+//RS             "FFI build finished but `{}` is missing",
+//RS             rlib.display()
+//RS         )));
+//RS     }
+//RS     if let Some(bin) = &helper_bin {
+//RS         if !bin.is_file() {
+//RS             return Err(tool_error(&format!(
+//RS                 "FFI build finished but the crypto helper `{}` is missing",
+//RS                 bin.display()
+//RS             )));
+//RS         }
+//RS     }
+//RS     if let Some(bin) = &secrets_helper_bin {
+//RS         if !bin.is_file() {
+//RS             return Err(tool_error(&format!(
+//RS                 "FFI build finished but the secrets helper `{}` is missing",
+//RS                 bin.display()
+//RS             )));
+//RS         }
+//RS     }
+//RS     let artifacts = bridge_artifact_paths(
+//RS         &rlib,
+//RS         &target,
+//RS         &crate_name,
+//RS         helper_bin.as_deref(),
+//RS         secrets_helper_bin.as_deref(),
+//RS     )
+//RS     .ok_or_else(|| tool_error("FFI build finished without its complete artifact set"))?;
+//RS     if let Err(error) = publish_bridge_manifest(&target, &crate_name, &artifacts) {
+//RS         return Err(tool_error(&error));
+//RS     }
+//RS     if let Err(error) = publish_bridge_provenance(
+//RS         &provenance,
+//RS         &key,
+//RS         selected_target,
+//RS         &crate_name,
+//RS         &target,
+//RS         &manifest,
+//RS         &receipt,
+//RS         entries,
+//RS         handle_facts,
+//RS         link_closure,
+//RS         &artifacts,
+//RS     ) {
+//RS         return Err(tool_error(&error));
+//RS     }
+//RS     if let Err(error) = sync_bridge_lock(project_root, &cache_root, &key, &rlib) {
+//RS         return Err(tool_error(&error));
+//RS     }
+//RS 
+//RS     let cdylib = artifacts[1].clone();
+//RS     Ok(FfiLink {
+//RS         crate_name,
+//RS         cache_identity: key,
+//RS         provenance_path: provenance,
+//RS         rlib_path: rlib,
+//RS         cdylib_path: cdylib,
+//RS         target_deps_dir,
+//RS         host_deps_dir,
+//RS         helper_bin_path: helper_bin,
+//RS         secrets_helper_bin_path: secrets_helper_bin,
+//RS         handle_facts: handle_facts.to_vec(),
+//RS         link_closure: link_closure.clone(),
+//RS     })
+//RS }
+//RS 
+//RS /// The crypto helper binary source (c146). A thin stdin-protocol wrapper around
+//RS /// the crate's own `jet_crypto_*_impl` functions (which is the *only* code that
+//RS /// touches `ed25519-dalek`, D-DEP-CRYPTO1). `jet` shells out to this exactly as
+//RS /// it already shells out to `cargo`/`rustc`, keeping the compiler crate itself
+//RS /// zero-dependency (I6). Protocol (one command line on stdin, hex-encoded args):
+//RS ///   `keygen`                          → stdout `<seed_hex> <pub_hex>`
+//RS ///   `sign <seed_hex> <msg_hex>`       → stdout `<sig_hex>`         (exit 0)
+//RS ///   `verify <pub_hex> <msg_hex> <sig_hex>` → exit 0 valid / 2 invalid / 1 error
+//RS fn emit_crypto_helper_bin(crate_name: &str) -> String {
+//RS     format!(
+//RS         r#"// Auto-generated Ed25519 signing helper (card c146) — do not edit.
+//RS #![allow(warnings)]
+//RS use std::io::{{Read, Write}};
+//RS use std::process::exit;
+//RS 
+//RS const ENTROPY_UNAVAILABLE: i32 = 75;
+//RS 
+//RS fn volatile_zeroize(bytes: &mut [u8]) {{
+//RS     for byte in bytes {{
+//RS         unsafe {{ std::ptr::write_volatile(byte, 0) }};
+//RS     }}
+//RS     std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+//RS }}
+//RS 
+//RS fn write_hex(out: &mut impl Write, bytes: &[u8]) -> std::io::Result<()> {{
+//RS     for byte in bytes {{
+//RS         write!(out, "{{:02x}}", byte)?;
+//RS     }}
+//RS     Ok(())
+//RS }}
+//RS 
+//RS fn hex_encode(bytes: &[u8]) -> String {{
+//RS     let mut s = String::with_capacity(bytes.len() * 2);
+//RS     for b in bytes {{
+//RS         s.push_str(&format!("{{:02x}}", b));
+//RS     }}
+//RS     s
+//RS }}
+//RS 
+//RS fn hex_decode(s: &str) -> Result<Vec<u8>, String> {{
+//RS     let s = s.trim();
+//RS     if s.len() % 2 != 0 {{
+//RS         return Err("odd-length hex".to_string());
+//RS     }}
+//RS     let mut out = Vec::with_capacity(s.len() / 2);
+//RS     let bytes = s.as_bytes();
+//RS     let mut i = 0;
+//RS     while i < bytes.len() {{
+//RS         let hi = (bytes[i] as char).to_digit(16).ok_or("bad hex digit")?;
+//RS         let lo = (bytes[i + 1] as char).to_digit(16).ok_or("bad hex digit")?;
+//RS         out.push(((hi << 4) | lo) as u8);
+//RS         i += 2;
+//RS     }}
+//RS     Ok(out)
+//RS }}
+//RS 
+//RS fn fail(msg: &str) -> ! {{
+//RS     eprintln!("error: {{}}", msg);
+//RS     exit(1);
+//RS }}
+//RS 
+//RS fn main() {{
+//RS     let mut input = String::new();
+//RS     if std::io::stdin().read_to_string(&mut input).is_err() {{
+//RS         fail("couldn't read stdin");
+//RS     }}
+//RS     let mut parts = input.split_whitespace();
+//RS     let cmd = parts.next().unwrap_or("");
+//RS     match cmd {{
+//RS         "keygen" => {{
+//RS             match {crate_name}::jet_crypto_keygen_impl() {{
+//RS                 Ok((mut seed, public)) => {{
+//RS                     let result = (|| -> std::io::Result<()> {{
+//RS                         let stdout = std::io::stdout();
+//RS                         let mut out = stdout.lock();
+//RS                         write_hex(&mut out, &seed)?;
+//RS                         out.write_all(b" ")?;
+//RS                         write_hex(&mut out, &public)?;
+//RS                         out.write_all(b"\n")?;
+//RS                         out.flush()
+//RS                     }})();
+//RS                     volatile_zeroize(&mut seed);
+//RS                     if result.is_err() {{ exit(1); }}
+//RS                 }}
+//RS                 Err(_) => exit(ENTROPY_UNAVAILABLE),
+//RS             }}
+//RS         }}
+//RS         "sign" => {{
+//RS             let seed = parts.next().unwrap_or_else(|| fail("sign: missing key"));
+//RS             let msg = parts.next().unwrap_or_else(|| fail("sign: missing message"));
+//RS             let seed = hex_decode(seed).unwrap_or_else(|e| fail(&e));
+//RS             let msg = hex_decode(msg).unwrap_or_else(|e| fail(&e));
+//RS             match {crate_name}::jet_crypto_sign_impl(&seed, &msg) {{
+//RS                 Ok(sig) => println!("{{}}", hex_encode(&sig)),
+//RS                 Err(e) => fail(&e),
+//RS             }}
+//RS         }}
+//RS         "verify" => {{
+//RS             let pk = parts.next().unwrap_or_else(|| fail("verify: missing public key"));
+//RS             let msg = parts.next().unwrap_or_else(|| fail("verify: missing message"));
+//RS             let sig = parts.next().unwrap_or_else(|| fail("verify: missing signature"));
+//RS             let pk = hex_decode(pk).unwrap_or_else(|e| fail(&e));
+//RS             let msg = hex_decode(msg).unwrap_or_else(|e| fail(&e));
+//RS             let sig = hex_decode(sig).unwrap_or_else(|e| fail(&e));
+//RS             match {crate_name}::jet_crypto_verify_impl(&pk, &msg, &sig) {{
+//RS                 Ok(()) => exit(0),
+//RS                 Err(_) => exit(2),
+//RS             }}
+//RS         }}
+//RS         other => fail(&format!("unknown command `{{}}`", other)),
+//RS     }}
+//RS }}
+//RS "#,
+//RS         crate_name = crate_name
+//RS     )
+//RS }
+//RS 
+//RS /// The secrets helper binary source (U13, D-JPK-SECRETCRYPTO1). A thin
+//RS /// stdin-protocol wrapper around the crate's own `jet_vault_*_impl`
+//RS /// functions (the *only* code that touches the `age` crate). `jetpack secrets
+//RS /// set/get/recipients/keygen` shells out to this exactly as `jet` already
+//RS /// shells out to `cargo`/`rustc`, keeping `crates/jet-driver` zero-dependency
+//RS /// (I6). Protocol (one command line on stdin, hex-encoded byte args, plain
+//RS /// age strings for identities/recipients since neither ever contains a space):
+//RS ///   `keygen`                                       → stdout `<identity> <recipient>`
+//RS ///   `encrypt <recipients_csv> <plaintext_hex>`      → stdout `<ciphertext_hex>` (exit 0) / exit 1 error
+//RS ///   `decrypt <identity> <ciphertext_hex>`           → stdout `<plaintext_hex>`  (exit 0) / exit 1 error
+//RS ///   `strings <plaintext_hex>`                       → stdout historical pair bytes as hex
+//RS ///   `replace-strings <pairs_hex>`                   → atomically updates only v2 String rows
+//RS fn emit_secrets_helper_bin(crate_name: &str) -> String {
+//RS     format!(
+//RS         r#"// Auto-generated age-style secrets helper (U13) — do not edit.
+//RS #![allow(warnings)]
+//RS use std::io::Read;
+//RS use std::process::exit;
+//RS 
+//RS fn hex_encode(bytes: &[u8]) -> String {{
+//RS     let mut s = String::with_capacity(bytes.len() * 2);
+//RS     for b in bytes {{
+//RS         s.push_str(&format!("{{:02x}}", b));
+//RS     }}
+//RS     s
+//RS }}
+//RS 
+//RS fn hex_decode(s: &str) -> Result<Vec<u8>, String> {{
+//RS     let s = s.trim();
+//RS     if s.len() % 2 != 0 {{
+//RS         return Err("odd-length hex".to_string());
+// END-PORT-PENDING 2035 crates/jet-pkg-model/src/FFI.rs:1801-3600
+

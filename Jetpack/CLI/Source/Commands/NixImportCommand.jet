@@ -2,10 +2,10 @@
 // jetpack::CLI::cmd_import): the bounded Nix devShell migration into
 // `env.jet` plus lock.
 
-pub fn cli_cmd_import(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+pub fn cli_cmd_import(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     if parsed.positional.len() > 1 || parsed.command != None {
         theme.error("import accepts one Nix file", "the bounded Nix migration reads one flake.nix, shell.nix, or default.nix at a time", "run `jetpack import [flake.nix|shell.nix|default.nix]` without a trailing command")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     requested :: parsed.positional.get(0)
     dir :: cli_current_dir()

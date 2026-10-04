@@ -1,71 +1,56 @@
+use jet_foundation.[jet_keyword_names, jet_type_names]
+
 // Generated-name policy for binders, ported from jet_foundation::Syntax
 // (`sanitize_generated_name`, `canonical_name_case`, and
 // `is_reserved_generated_name`). Binders name every generated type through
 // this one policy so their output never collides with Jet's own names.
 
-// Real Jet keywords (`JET_KEYWORD_LIST`).
-@GENERATED_NAME_KEYWORDS :: [String]{
-    "fn", "pub", "priv", "use", "as", "extern", "module", "if", "else", "loop", "in", "break",
-    "return", "defer", "struct", "enum", "alias", "impl", "policy", "wrap", "trait", "tag",
-    "effect", "derive", "distinct", "migration", "rename", "add", "remove", "change", "via",
-    "self", "Unsafe", "Impure", "Context", "task", "freeze", "shared", "Transact", "Job", "Test",
-    "Todo", "State", "Transition", "state", "protocol", "client", "server", "marker", "validate",
-    "check", "true", "false", "None", "it"
-}
 
 // Lexer keywords and teaching words outside the keyword list, and the
 // contextual `state` that stays legal (`KW_MUTATE`, `KW_MOVE`, `KW_COPY`,
 // `KW_CONST`, `FOREIGN_MATCH`, `LIT_NULL`, `KW_STATE_DECL`).
-@GENERATED_NAME_RETIRED_WORDS :: [String]{"mut", "take", "copy", "const", "match", "None"}
-@GENERATED_NAME_CONTEXTUAL_STATE :: "state"
+GENERATED_NAME_RETIRED_WORDS :: prep { [String]{"mut", "take", "copy", "const", "match", "None"} }
+GENERATED_NAME_CONTEXTUAL_STATE :: prep { "state" }
 
-// Built-in type names a user writes (`JET_TYPE_LIST`).
-@GENERATED_NAME_BUILTIN_TYPES :: [String]{
-    "Int", "Float", "Bool", "String", "()", "Char", "Err", "Shared", "SharedSnapshot",
-    "SharedRevisionError", "SharedGuard", "Shared.Weak", "Condition", "Task", "Receiver", "Sender",
-    "TaskFailure", "HashMap", "BTreeMap", "Map", "Queue", "Set", "Rank", "PriorityQueue", "Cache",
-    "Tally", "Bits", "Bytes", "ViewIter", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64",
-    "F32", "F64"
-}
 
 // Built-in type names users cannot redefine (`Collections::RESERVED_TYPES`).
-@GENERATED_NAME_RESERVED_TYPES :: [String]{
+GENERATED_NAME_RESERVED_TYPES :: prep { [String]{
     "HashMap", "BTreeMap", "Map", "Char", "Bits", "Bytes", "Set", "Rank", "PriorityQueue", "Cache",
     "Iter", "ViewIter", "MemoStats", "RemoveBy", "Ordering", "Range", "SharedGuard", "Shared.Weak",
     "Condition", "Tally", "Queue", "Decimal", "Duration", "DurationUnit", "RangeError",
     "ExpiringValue", "Authority", "Validate", "Solver", "BuildContext", "BuildPlan", "BuildAction",
     "BuildTarget", "BuildToolchain", "BuildProbe", "BuildSigningIdentity", "BuildError",
     "ProgramInfo", "Cell", "CellReadGuard", "CellEditGuard"
-}
+} }
 
 // Prelude type spellings (`TYPE_DATA`, `TYPE_JSON`, `TYPE_REGEX`, `TYPE_URL`,
 // `TYPE_PATH`, `TYPE_DATETIME`, `CLOCK_TYPE`, `TYPE_INSTANT`,
 // `TYPE_FRACTION`, `TYPE_RESULT`, `TYPE_ERR`, `TYPE_NEVER`,
 // `RETIRED_TYPE_ERROR`).
-@GENERATED_NAME_PRELUDE_TYPES :: [String]{
+GENERATED_NAME_PRELUDE_TYPES :: prep { [String]{
     "DataTree", "JSON", "Regex", "URL", "Path", "DateTime", "Clock", "Instant", "Fraction",
     "Result", "Err", "Never", "Error"
-}
+} }
 
 // The compile-time mark a canonical name keeps in front of its re-cased body.
-@GENERATED_NAME_COMPTIME_MARK :: "@"
+GENERATED_NAME_COMPTIME_MARK :: prep { "@" }
 
 // Whether generated source may not use `name`. This applies the keyword,
 // built-in, reserved, and Prelude type tables; Core module type exports
 // (`CoreModuleExports::is_core_type_name`) are not part of this check.
 pub fn foundation_is_reserved_generated_name(name: String) -> Bool Never! {
-    (@GENERATED_NAME_KEYWORDS.contains(name) && name != @GENERATED_NAME_CONTEXTUAL_STATE)
-        || @GENERATED_NAME_RETIRED_WORDS.contains(name)
-        || @GENERATED_NAME_BUILTIN_TYPES.contains(name)
-        || @GENERATED_NAME_RESERVED_TYPES.contains(name)
-        || @GENERATED_NAME_PRELUDE_TYPES.contains(name)
+    (jet_keyword_names().contains(name) && name != GENERATED_NAME_CONTEXTUAL_STATE)
+        || GENERATED_NAME_RETIRED_WORDS.contains(name)
+        || jet_type_names().contains(name)
+        || GENERATED_NAME_RESERVED_TYPES.contains(name)
+        || GENERATED_NAME_PRELUDE_TYPES.contains(name)
 }
 
 // `canonical_name_case(name, NameCase::Pascal)`: every `_`-separated word
 // capitalized and joined, keeping one leading `_` and a leading `@`.
 pub fn foundation_pascal_name_case(name: String) -> String Never! {
-    if name.starts_with(@GENERATED_NAME_COMPTIME_MARK) {
-        return "{@GENERATED_NAME_COMPTIME_MARK}{foundation_pascal_name_case(name.removeprefix(@GENERATED_NAME_COMPTIME_MARK))}"
+    if name.starts_with(GENERATED_NAME_COMPTIME_MARK) {
+        return "{GENERATED_NAME_COMPTIME_MARK}{foundation_pascal_name_case(name.removeprefix(GENERATED_NAME_COMPTIME_MARK))}"
     }
     leading :: name.starts_with("_")
     body := name

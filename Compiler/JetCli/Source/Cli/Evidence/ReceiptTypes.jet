@@ -1,0 +1,175 @@
+// Authenticated invocation receipts (Source/ReceiptStore.rs RE01).
+// Paths use Core Path; native byte-path transport belongs to the store host.
+use core.files.path as receipt_paths
+
+// Rust constants (ReceiptStore.rs:72-101). Section constants live in ReceiptSections.
+pub JET_CLI_RECEIPT_LINK_WIRE_MAGIC :: [U8]{U8{106}, U8{101}, U8{116}, U8{45}, U8{114}, U8{101}, U8{99}, U8{101}, U8{105}, U8{112}, U8{116}, U8{45}, U8{108}, U8{105}, U8{110}, U8{107}, U8{115}, U8{45}, U8{118}, U8{49}, U8{0}}
+pub JET_CLI_RECEIPT_LINK_VERSION :: 1
+pub JET_CLI_MAX_RECEIPT_LINKS :: 100000
+pub JET_CLI_RECEIPT_MAGIC :: [U8]{U8{106}, U8{101}, U8{116}, U8{45}, U8{114}, U8{101}, U8{99}, U8{101}, U8{105}, U8{112}, U8{116}, U8{45}, U8{118}, U8{50}, U8{0}}
+pub JET_CLI_RECEIPT_DIGEST_LEN :: 64
+pub JET_CLI_RECEIPT_MAX_FIELD :: 67108864
+pub JET_CLI_MAX_RECEIPT_BYTES :: 138412032
+pub JET_CLI_RECEIPT_SECTION_DIR :: "sections"
+pub JET_CLI_RECEIPT_SECTION_STAGE_DIR :: "staged"
+pub JET_CLI_RECEIPT_RECORD_CLAIM_ENV :: "JET_RECEIPT_RECORD_CLAIM"
+pub JET_CLI_RECEIPT_RECORD_ENGINE :: "jet-receipt-v2"
+pub JET_CLI_RECEIPT_DIR_ENV :: "JET_RECEIPT_DIR"
+pub JET_CLI_RECEIPT_CLAIM_ENV :: "JET_RECEIPT_CLAIM"
+pub JET_CLI_RECEIPT_DIGEST_ENV :: "JET_RECEIPT_DIGEST"
+pub JET_CLI_RECEIPT_CAPTURE_TRUNCATION_MARKER :: [U8]{U8{10}, U8{60}, U8{111}, U8{117}, U8{116}, U8{112}, U8{117}, U8{116}, U8{32}, U8{116}, U8{114}, U8{117}, U8{110}, U8{99}, U8{97}, U8{116}, U8{101}, U8{100}, U8{62}, U8{10}}
+pub JET_CLI_RECEIPT_SECRET_NAME_PARTS :: [String]{"secret", "token", "password", "passwd", "credential", "key"}
+pub JET_CLI_RECEIPT_REDACTION_MARKER :: [U8]{U8{60}, U8{114}, U8{101}, U8{100}, U8{97}, U8{99}, U8{116}, U8{101}, U8{100}, U8{62}}
+pub JET_CLI_RECEIPT_PARTICIPATING_VERBS :: [String]{"test", "prove", "budget check"}
+
+// Rust ReceiptInput / ReceiptClaim / Receipt (ReceiptStore.rs:103-142).
+// #4381: Rust PartialEq/Eq parity retained; Core Path derived comparison target needs compiler fix.
+#Equatable
+pub struct JetCLIReceiptInput { pub path: receipt_paths.Path, pub digest: String }
+// #4381: retain transitive canonical equality, never substitute a partial field comparison.
+#Equatable
+pub struct JetCLIReceiptClaim { pub verb: String, pub key: String, pub inputs: [JetCLIReceiptInput] }
+// #4381: retain complete receipt equality alongside the original roundtrip assertion.
+#Equatable
+pub struct JetCLIReceipt {
+    pub claim: JetCLIReceiptClaim
+    pub status: I32
+    pub stdout: [U8]
+    pub stderr: [U8]
+    pub sections: [JetCLIReceiptSection]
+    pub consumed: [JetCLIRecordLink]
+    pub produced: [JetCLIRecordLink]
+    pub digest: String
+}
+#Error
+pub struct JetCLIReceiptError { pub message: String }
+fn jet_cli_receipt_error(message: String) -> JetCLIReceiptError Never! { JetCLIReceiptError{message: message} }
+
+// Rust Receipt::section (ReceiptStore.rs:163-173). Return a borrowed-row index,
+// not a payload copy, as the compiler's other projection APIs do.
+pub fn jet_cli_receipt_section(receipt: JetCLIReceipt, name: String) -> Int? JetCLIReceiptError! {
+    if name == "" || name.bytes().len() > JET_CLI_MAX_RECEIPT_SECTION_NAME_BYTES -> return Err(jet_cli_receipt_error("receipt section name `{name}` is invalid"))
+    if jet_cli_receipt_has_control(name) || name.contains("/") || name.contains("\\") -> return Err(jet_cli_receipt_error("receipt section name `{name}` is invalid"))
+    loop (index, section) in receipt.sections { if section.name == name -> return Ok(Val(index)) }
+    Ok(None)
+}
+// Rust Receipt::sections_json / query_sections (ReceiptStore.rs:175-187).
+pub fn jet_cli_receipt_sections_json(receipt: JetCLIReceipt) -> CanonicalJSON JetCLIReceiptSectionError! { jet_cli_receipt_query_sections(receipt.sections, None) }
+pub fn jet_cli_receipt_query(receipt: JetCLIReceipt, names: [String]?) -> CanonicalJSON JetCLIReceiptSectionError! { jet_cli_receipt_query_sections(receipt.sections, names) }
+// Rust Receipt::diff_sections / diff_sections_json (ReceiptStore.rs:189-197).
+pub fn jet_cli_receipt_diff(receipt: JetCLIReceipt, before: JetCLIReceipt) -> [JetCLIReceiptFieldDiff] JetCLIReceiptSectionError! { jet_cli_receipt_diff_sections(before.sections, receipt.sections) }
+pub fn jet_cli_receipt_diff_json(receipt: JetCLIReceipt, before: JetCLIReceipt) -> CanonicalJSON JetCLIReceiptSectionError! {
+    diffs :: jet_cli_receipt_diff(receipt, before)
+    Ok(jet_cli_receipt_diff_projection(diffs))
+}
+// Rust Receipt::fmt (ReceiptStore.rs:144-158). Never format raw output bytes.
+pub fn jet_cli_receipt_debug(receipt: JetCLIReceipt) -> String Never! {
+    inputs :: loop input in receipt.claim.inputs -> "ReceiptInput {{ path: {jet_cli_debug_quote(input.path.raw)}, digest: {jet_cli_debug_quote(input.digest)} }}"
+    sections :: loop section in receipt.sections -> jet_cli_receipt_section_debug(section)
+    consumed :: loop link in receipt.consumed -> jet_cli_receipt_link_debug(link)
+    produced :: loop link in receipt.produced -> jet_cli_receipt_link_debug(link)
+    "Receipt {{ claim: ReceiptClaim {{ verb: {jet_cli_debug_quote(receipt.claim.verb)}, key: {jet_cli_debug_quote(receipt.claim.key)}, inputs: [{inputs.join(", ")}] }}, status: {receipt.status}, stdout: \"<redacted>\", stderr: \"<redacted>\", sections: [{sections.join(", ")}], consumed: [{consumed.join(", ")}], produced: [{produced.join(", ")}], digest: {jet_cli_debug_quote(receipt.digest)} }}"
+}
+fn jet_cli_receipt_link_debug(link: JetCLIRecordLink) -> String Never! {
+    kind :: if link.kind == {
+        .Receipt -> "Receipt"
+        .Replay -> "Replay"
+        .Proof -> "Proof"
+        .Evidence -> "Evidence"
+        .Comparison -> "Comparison"
+        .Trust -> "Trust"
+    }
+    "RecordLink {{ artifact_id: {jet_cli_debug_quote(link.artifact_id)}, kind: {kind} }}"
+}
+
+// Rust AccelerationReceiptRow (ReceiptStore.rs:201-208).
+pub struct JetCLIAccelerationReceiptRow {
+    pub sequence: Int
+    pub function: String
+    pub loop_header: U32
+    pub source_start: Int
+    pub source_end: Int
+    pub decision: MIRAccelerationDecision
+}
+// Rust acceleration_decisions (ReceiptStore.rs:214-292).
+pub fn jet_cli_receipt_acceleration_decisions(receipt: JetCLIReceipt) -> [JetCLIAccelerationReceiptRow] JetCLIReceiptError! {
+    rows := [JetCLIAccelerationReceiptRow]{}
+    prefix :: MIR_ACCELERATION_RECEIPT_SECTION_PREFIX.bytes()
+    loop section in receipt.sections {
+        if section.type_name != MIR_ACCELERATION_RECEIPT_TYPE_NAME || !section.name.starts_with(MIR_ACCELERATION_RECEIPT_SECTION_PREFIX) -> next
+        if section.schema_digest != MIR_ACCELERATION_RECEIPT_SCHEMA_DIGEST -> return Err(jet_cli_receipt_error("acceleration section `{section.name}` has an unexpected schema digest"))
+        raw_name :: section.name.bytes()
+        if raw_name.len() == prefix.len() -> return Err(jet_cli_receipt_error("invalid acceleration section name `{section.name}`"))
+        sequence_text :: String.from_bytes(~raw_name[prefix.len()..<raw_name.len()]) ?? panic("ASCII prefix boundary")
+        sequence :: jet_cli_receipt_acceleration_unsigned(sequence_text, 18446744073709551615) ?? return Err(jet_cli_receipt_error("invalid acceleration section sequence `{section.name}`"))
+        value :: jet_cli_receipt_section_value(section) ?? return Err(jet_cli_receipt_error(err.message))
+        jet_cli_receipt_acceleration_require_object(value, "acceleration receipt", [String]{"decision", "function", "loop_header", "source"})
+        if value == .Object(fields) {
+            function :: jet_cli_receipt_acceleration_string(value, "function")
+            loop_text :: jet_cli_receipt_acceleration_integer(value, "loop_header")
+            header :: jet_cli_receipt_acceleration_unsigned(loop_text, 4294967295) ?? return Err(jet_cli_receipt_error("acceleration receipt loop_header is out of range"))
+            source_index :: jet_cli_receipt_acceleration_field_index(fields, "source")
+            source :: fields[source_index].value
+            jet_cli_receipt_acceleration_require_object(source, "acceleration receipt source", [String]{"end", "start"})
+            start_text :: jet_cli_receipt_acceleration_integer(source, "start")
+            start :: jet_cli_receipt_acceleration_unsigned(start_text, 18446744073709551615) ?? return Err(jet_cli_receipt_error("acceleration receipt source start is out of range"))
+            end_text :: jet_cli_receipt_acceleration_integer(source, "end")
+            end :: jet_cli_receipt_acceleration_unsigned(end_text, 18446744073709551615) ?? return Err(jet_cli_receipt_error("acceleration receipt source end is out of range"))
+            if start > end -> return Err(jet_cli_receipt_error("acceleration receipt source range is reversed"))
+            decision_index :: jet_cli_receipt_acceleration_field_index(fields, "decision")
+            decision :: mir_acceleration_decision_from_json(fields[decision_index].value) ?? return Err(jet_cli_receipt_error(err.message))
+            &rows.push(JetCLIAccelerationReceiptRow{sequence: sequence, function: function, loop_header: U32{header}, source_start: start, source_end: end, decision: decision})
+        }
+    }
+    &rows.sort_by((a: JetCLIAccelerationReceiptRow, b: JetCLIAccelerationReceiptRow) -> a.sequence <=> b.sequence)
+    loop index in 1..<rows.len() {
+        if rows[index - 1].sequence == rows[index].sequence -> return Err(jet_cli_receipt_error("duplicate acceleration receipt sequence"))
+    }
+    Ok(rows)
+}
+// Rust receipt_acceleration_object / receipt_acceleration_require_fields.
+fn jet_cli_receipt_acceleration_require_object(value: CanonicalJSON, label: String, keys: [String]) JetCLIReceiptError! {
+    if value == .Object(fields) {
+        if fields.len() != keys.len() -> return Err(jet_cli_receipt_error("{label} has missing or unknown fields"))
+        loop key in keys {
+            found := false
+            loop field in fields { if field.key == key -> found = true }
+            if !found -> return Err(jet_cli_receipt_error("{label} has missing or unknown fields"))
+        }
+        return
+    }
+    return Err(jet_cli_receipt_error("{label} must be a canonical object"))
+}
+fn jet_cli_receipt_acceleration_field_index(fields: [CanonicalJSONField], key: String) -> Int JetCLIReceiptError! {
+    loop (index, field) in fields { if field.key == key -> return Ok(index) }
+    Err(jet_cli_receipt_error("acceleration receipt field `{key}` is missing"))
+}
+// Rust receipt_acceleration_string / receipt_acceleration_integer.
+fn jet_cli_receipt_acceleration_string(value: CanonicalJSON, key: String) -> String JetCLIReceiptError! {
+    if value == .Object(fields) {
+        index :: jet_cli_receipt_acceleration_field_index(fields, key)
+        if fields[index].value == .String(text) -> return Ok(~text)
+    }
+    Err(jet_cli_receipt_error("acceleration receipt field `{key}` must be a string"))
+}
+fn jet_cli_receipt_acceleration_integer(value: CanonicalJSON, key: String) -> String JetCLIReceiptError! {
+    if value == .Object(fields) {
+        index :: jet_cli_receipt_acceleration_field_index(fields, key)
+        if fields[index].value == .Integer(text) -> return Ok(~text)
+    }
+    Err(jet_cli_receipt_error("acceleration receipt field `{key}` must be an integer"))
+}
+// Rust str::parse::<u64/u32/usize>; unsigned '+' accepted, '-' refused.
+fn jet_cli_receipt_acceleration_unsigned(text: String, maximum: Int) -> Int? Never! {
+    bytes :: text.bytes()
+    start :: if bytes.len() > 0 && bytes[0] == (U8{43}) -> 1 else -> 0
+    if start == bytes.len() -> return None
+    number := 0
+    loop index in start..<bytes.len() {
+        digit :: Int.from_u8(bytes[index]) - 48
+        if digit < 0 || digit > 9 -> return None
+        number = number * 10 + digit
+        if number > maximum -> return None
+    }
+    Val(number)
+}

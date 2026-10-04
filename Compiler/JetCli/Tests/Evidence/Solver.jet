@@ -1,0 +1,183 @@
+// Rust Source/ProveSolver.rs pure solver tests; extraction tests belong to SolverObligations.jet.
+fn solver_test_bound(name: String, coeff: Int, constant: Int) -> JetCLISolverInequality {
+    affine :: jet_cli_solver_affine_add(jet_cli_solver_affine_var(name, coeff), jet_cli_solver_affine_constant(constant)) ?? panic("test affine overflow")
+    jet_cli_solver_inequality_le(affine)
+}
+fn solver_test_constant(value: Int) -> JetCLISolverInequality { jet_cli_solver_inequality_le(jet_cli_solver_affine_constant(value)) }
+fn solver_test_prove(formula: JetCLISolverFormula) -> JetCLISolverOutcome {
+    jet_cli_solver_prove_obligation(formula) ?? panic("solver failed")
+}
+fn solver_test_invalid(formula: JetCLISolverFormula, proof: String) -> Bool {
+    if jet_cli_solver_check_certificate(formula, proof) == {
+        .Err(_) -> true
+        .Ok(_) -> false
+    }
+}
+// Rust proves_simple_bound_implication (2129-2143).
+#Test("proves_simple_bound_implication") {
+    formula :: JetCLISolverFormula{assumptions: [JetCLISolverInequality]{solver_test_bound("value", -1, 0), solver_test_bound("value", 1, -3)}, claim: [JetCLISolverInequality]{solver_test_bound("value", -1, 0)}}
+    if solver_test_prove(formula) == {
+        .Proved(certificate, sha, steps) -> {
+            assert(steps > 0)
+            assert_eq(sha, mir_sha256_hex("{certificate}\n"))
+            assert(jet_cli_solver_check_certificate(formula, certificate) ?? false)
+        }
+        else -> panic("bound was not proved")
+    }
+}
+// Rust reports_a_counterexample_for_an_unbounded_claim (2146-2156).
+#Test("reports_a_counterexample_for_an_unbounded_claim") {
+    formula :: JetCLISolverFormula{assumptions: [JetCLISolverInequality]{}, claim: [JetCLISolverInequality]{solver_test_bound("value", 1, 0)}}
+    if solver_test_prove(formula) == {
+        .Disproved(assignment, steps) -> {
+            assert((assignment.get("value") ?? 0) >= 1)
+            assert_eq(steps, 1)
+        }
+        else -> panic("unbounded claim has no counterexample")
+    }
+}
+// Rust rejects_a_malformed_certificate (2179-2185).
+#Test("rejects_a_malformed_certificate") {
+    formula :: JetCLISolverFormula{assumptions: [JetCLISolverInequality]{solver_test_constant(-1)}, claim: [JetCLISolverInequality]{solver_test_constant(0)}}
+    assert(solver_test_invalid(formula, "{{}}"))
+}
+// Rust checks_canonical_branch_order_and_sound_assumption_leaves (2188-2201).
+#Test("checks_canonical_branch_order_and_sound_assumption_leaves") {
+    formula :: JetCLISolverFormula{assumptions: [JetCLISolverInequality]{solver_test_constant(1)}, claim: [JetCLISolverInequality]{solver_test_constant(0), solver_test_constant(0)}}
+    proof :: "{{\"children\":[{{\"branchIndex\":0,\"proof\":{{\"assumptionIndex\":0,\"kind\":\"assumption\"}}}},{{\"branchIndex\":1,\"proof\":{{\"assumptionIndex\":0,\"kind\":\"assumption\"}}}}],\"kind\":\"and_intro\"}}"
+    assert(jet_cli_solver_check_certificate(formula, proof) ?? false)
+    reordered :: "{{\"children\":[{{\"branchIndex\":1,\"proof\":{{\"assumptionIndex\":0,\"kind\":\"assumption\"}}}},{{\"branchIndex\":0,\"proof\":{{\"assumptionIndex\":0,\"kind\":\"assumption\"}}}}],\"kind\":\"and_intro\"}}"
+    assert(solver_test_invalid(formula, reordered))
+}
+// Rust rejects_a_split_on_an_unconstrained_variable (2204-2211).
+#Test("rejects_a_split_on_an_unconstrained_variable") {
+    formula :: JetCLISolverFormula{assumptions: [JetCLISolverInequality]{solver_test_constant(1)}, claim: [JetCLISolverInequality]{solver_test_constant(0)}}
+    proof :: "{{\"kind\":\"split\",\"left\":{{\"assumptionIndex\":0,\"kind\":\"assumption\"}},\"pivot\":\"0\",\"right\":{{\"assumptionIndex\":0,\"kind\":\"assumption\"}},\"variable\":\"ghost\"}}"
+    assert(solver_test_invalid(formula, proof))
+}
+#Test("finite solver rechecks every assignment and its rolling hash") {
+    bounds :: jet_cli_solver_inclusive_bounds(0, 3)
+    formula :: JetCLISolverFormula{assumptions: bounds, claim: bounds}
+    result :: jet_cli_solver_prove_finite_obligation(formula) ?? panic(jet_cli_solver_error_message(err))
+    if result == {
+        .Proved(certificate, sha, steps) -> {
+            assert_eq(steps, 4)
+            assert(certificate.contains("domainManifest"))
+            assert(certificate.contains("rollingResultSha256"))
+            assert_eq(sha, mir_sha256_hex("{certificate}\n"))
+            assert(jet_cli_solver_check_finite_certificate(formula, certificate) ?? false)
+            altered :: certificate.replace("\"assignmentCount\":4", "\"assignmentCount\":3")
+            if jet_cli_solver_check_finite_certificate(formula, altered) == { .Err(_) -> {} else -> panic("bad count accepted") }
+        }
+        else -> panic("finite bound not proved")
+    }
+}
+#Test("checked affine arithmetic keeps i128 boundaries and zero term policy") {
+    max :: jet_cli_solver_affine_constant(170141183460469231731687303715884105727)
+    if jet_cli_solver_affine_add(max, jet_cli_solver_affine_constant(1)) == { .Err(.CoefficientOverflow) -> {} else -> panic("i128 addition wrapped") }
+    min :: jet_cli_solver_affine_constant(-170141183460469231731687303715884105728)
+    if jet_cli_solver_affine_scale(min, -1) == { .Err(.CoefficientOverflow) -> {} else -> panic("i128 negation wrapped") }
+    a :: jet_cli_solver_affine_var("x", 1)
+    b :: jet_cli_solver_affine_var("x", -1)
+    sum :: jet_cli_solver_affine_add(a, b) ?? panic("cancellation failed")
+    assert_eq(sum.terms.len(), 0)
+    scaled :: jet_cli_solver_affine_scale(a, 0) ?? panic("zero scale failed")
+    assert_eq(scaled.terms.len(), 0)
+    assert_eq(jet_cli_solver_affine_var("x", 0).terms.len(), 1)
+}
+#Test("ceil division matches signed Rust checked division") {
+    assert_eq(jet_cli_solver_ceil_div(5, 2), Val(3))
+    assert_eq(jet_cli_solver_ceil_div(-5, 2), Val(-2))
+    assert_eq(jet_cli_solver_ceil_div(5, -2), Val(-2))
+    assert_eq(jet_cli_solver_ceil_div(-5, -2), Val(3))
+    assert_eq(jet_cli_solver_ceil_div(6, -2), Val(-3))
+    assert_eq(jet_cli_solver_ceil_div(1, 0), None)
+    assert_eq(jet_cli_solver_ceil_div(-170141183460469231731687303715884105728, -1), None)
+}
+#Test("formula identity ignores conjunction ordering and duplicates") {
+    a :: solver_test_bound("a", 1, -3)
+    b :: solver_test_bound("b", -1, 0)
+    first :: JetCLISolverFormula{assumptions: [JetCLISolverInequality]{a, b, a}, claim: [JetCLISolverInequality]{b}}
+    second :: JetCLISolverFormula{assumptions: [JetCLISolverInequality]{b, a}, claim: [JetCLISolverInequality]{b}}
+    assert_eq(jet_cli_solver_formula_json(first), jet_cli_solver_formula_json(second))
+    assert_eq(jet_cli_solver_formula_hash(first), jet_cli_solver_formula_hash(second))
+    assert_eq(jet_cli_solver_formula_variables(first), [String]{"a", "b"})
+    assert_eq(jet_cli_solver_formula_term_count(first), 8)
+}
+#Test("certificates reject extra keys noncanonical text and satisfiable assumption leaves") {
+    formula :: JetCLISolverFormula{assumptions: [JetCLISolverInequality]{solver_test_constant(-1)}, claim: [JetCLISolverInequality]{solver_test_constant(0)}}
+    assert(solver_test_invalid(formula, "{{\"assumptionIndex\":0,\"kind\":\"assumption\"}}"))
+    assert(solver_test_invalid(formula, "{{\"kind\":\"linear_contradiction\",\"multipliers\":[],\"extra\":0}}"))
+    assert(solver_test_invalid(formula, "{{ \"kind\":\"linear_contradiction\",\"multipliers\":[]}}"))
+}
+#Test("finite solver keeps structural and step limit precedence") {
+    empty :: JetCLISolverFormula{assumptions: [JetCLISolverInequality]{}, claim: [JetCLISolverInequality]{}}
+    if (jet_cli_solver_prove_finite_obligation(empty) ?? panic("finite failed")) == {
+        .Unknown(reason, steps) -> { assert_eq(reason, "unsupported_formula")
+            assert_eq(steps, 0) }
+        else -> panic("unsupported domain accepted")
+    }
+    bounds :: jet_cli_solver_inclusive_bounds(0, 1000000)
+    large :: JetCLISolverFormula{assumptions: bounds, claim: bounds}
+    if (jet_cli_solver_prove_finite_obligation(large) ?? panic("finite failed")) == {
+        .Unknown(reason, steps) -> { assert_eq(reason, "step_limit")
+            assert_eq(steps, 0) }
+        else -> panic("finite step bound ignored")
+    }
+    inverted_bounds :: jet_cli_solver_inclusive_bounds(3, 1)
+    inverted :: JetCLISolverFormula{assumptions: inverted_bounds, claim: inverted_bounds}
+    if (jet_cli_solver_prove_finite_obligation(inverted) ?? panic("finite failed")) == {
+        .Unknown(reason, steps) -> { assert_eq(reason, "structural_limit")
+            assert_eq(steps, 0) }
+        else -> panic("inverted domain accepted")
+    }
+}
+#Test("evidence carries canonical counterexample source and summary") {
+    formula :: JetCLISolverFormula{assumptions: [JetCLISolverInequality]{}, claim: [JetCLISolverInequality]{solver_test_bound("value", 1, 0)}}
+    item :: JetCLISolverEvidence{obligation: JetCLISolverObligation{id: "ob", kind: "postcondition", origin: "source.jet::f", span: "2:4-3:1", formula: formula, unsupported_reason: None}, outcome: solver_test_prove(formula), evidence_id: "evidence"}
+    text :: jet_cli_solver_evidence_json(item, "[2]")
+    assert(text.contains("\"counterexample\":[{{\"name\":\"value\",\"value\":\"1\"}}]"))
+    assert(text.contains("\"source\":{{\"column\":4,\"line\":2,\"path\":\"source.jet\"}}"))
+    summary :: jet_cli_solver_summarize([JetCLISolverEvidence]{item})
+    assert_eq(summary.selected, 1)
+    assert_eq(summary.proved, 0)
+    assert_eq(summary.disproved, 1)
+    assert_eq(summary.unknown, 0)
+    assert_eq(summary.unavailable, 0)
+    assert(jet_cli_solver_span_start("garbage") == (line: 1, column: 1))
+    assert(jet_cli_solver_span_start("0:0-2:1") == (line: 1, column: 1))
+}
+
+#Test("finite certificate JSON is canonical and independently checkable") {
+    records := [U8]{}
+    loop value in 0..<4 -> jet_cli_solver_append(&records, jet_cli_solver_finite_record("value", value))
+    hash :: mir_sha256_hex_bytes(mir_sha256_bytes(records))
+    certificate :: "{{\"assignmentCount\":4,\"domainManifest\":[{{\"lower\":\"0\",\"name\":\"value\",\"upper\":\"3\"}}],\"rollingResultSha256\":\"{hash}\"}}"
+    parsed :: solver_json.parse(certificate) ?? panic("finite certificate parse failed")
+    assert_eq(jet_cli_solver_canonical_json_value(parsed) ?? panic("canonical failed"), certificate)
+    bounds :: jet_cli_solver_inclusive_bounds(0, 3)
+    formula :: JetCLISolverFormula{assumptions: bounds, claim: bounds}
+    assert(jet_cli_solver_check_finite_certificate(formula, certificate) ?? panic(jet_cli_solver_error_message(err)))
+}
+
+#Test("satisfaction checks arithmetic in BTreeMap key order") {
+    terms := [String:Int]{}
+    terms["c"] = -170141183460469231731687303715884105727
+    terms["d"] = -1
+    terms["a"] = 170141183460469231731687303715884105727
+    terms["b"] = 1
+    assignment := [String:Int]{}
+    assignment["a"] = 1
+    assignment["b"] = 1
+    assignment["c"] = 1
+    assignment["d"] = 1
+    affine :: JetCLISolverAffine{constant: 0, terms: terms}
+    assert(!jet_cli_solver_satisfies([JetCLISolverInequality]{jet_cli_solver_inequality_le(affine)}, assignment))
+}
+
+#Test("solver identities frame UTF-8 byte lengths before each field") {
+    assert_eq(jet_cli_solver_framed_sha256([String]{"a", "bc"}), "3fafa1cf2f19a7c1129beb20cf0983f73a489a221fc0dd2f16d1be292d089205")
+    assert(jet_cli_solver_framed_sha256([String]{"a", "bc"}) != jet_cli_solver_framed_sha256([String]{"ab", "c"}))
+    assert_eq(jet_cli_solver_source_span_text("é\nx", Span{start: 3, end: 4}), "2:1-2:2")
+    assert(jet_cli_solver_span_start("2:4:5") == (line: 2, column: 1))
+}

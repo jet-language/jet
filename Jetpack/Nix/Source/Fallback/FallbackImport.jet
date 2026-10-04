@@ -7,7 +7,7 @@
 // Values are rendered as compact JSON by core.encoding.json (`to_string`),
 // which keeps object insertion order like the reference renderer.
 
-@NIX_FALLBACK_IMPORT_SCHEMA :: "jetpack.nix-fallback.v1"
+NIX_FALLBACK_IMPORT_SCHEMA :: prep { "jetpack.nix-fallback.v1" }
 
 // One required projection of a fallback document.
 pub enum NixFallbackProjection {
@@ -115,7 +115,7 @@ pub struct NixFallbackCanonical {
     // The facts retained in the producer record, key-ordered.
     fn imported(self) -> NixImportedState Never! {
         facts := [String: String]{}
-        facts["nix.fallback.schema"] = @NIX_FALLBACK_IMPORT_SCHEMA
+        facts["nix.fallback.schema"] = NIX_FALLBACK_IMPORT_SCHEMA
         facts["nix.fallback.document"] = self.document
         facts["nix.fallback.document.sha256"] = pkg_sha256_hex(self.document.bytes())
         facts["nix.fallback.proof.sha256"] = pkg_sha256_hex(self.proof.bytes())

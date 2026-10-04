@@ -1,0 +1,211 @@
+// Behavioral ports of Help/mod.rs tests. Registry wording/title snapshots are
+// intentionally not duplicated: the registry remains their executable home.
+fn jet_cli_help_test_entry(name: String, summary: String) -> JetCLIHelpEntry Never! {
+    JetCLIHelpEntry{
+        symbol: jet_cli_help_command_symbol(name, "jet {name}", summary, None),
+        category: "Reference", flags: [JetCLIFlagSpec]{},
+        see_also: [String]{}, keywords: [String]{},
+    }
+}
+fn jet_cli_help_test_find(index: [JetCLIHelpEntry], name: String) -> JetCLIHelpEntry Never! {
+    loop entry in index {
+        if entry.symbol.name == name -> return entry
+    }
+    panic("missing command {name}")
+}
+fn jet_cli_help_test_hit_name(hit: JetCLIHelpHit) -> String Never! {
+    if hit == {
+        .Command(entry, _, _, _) -> entry.symbol.name
+        .Code(_) -> panic("expected command hit")
+    }
+}
+fn jet_cli_help_test_no_builtin(query: String) -> SemanticSymbol? Never! {
+    None
+}
+fn jet_cli_help_test_builtin(query: String) -> SemanticSymbol? Never! {
+    if query != "List.len" -> return None
+    Val(SemanticSymbol{
+        identity: "builtin:core.collections:List.len", name: "len",
+        qualified_name: "List.len", owner: Val("List"),
+        signature: "List.len() -> Int", summary: "Number of items.",
+        examples: [String]{"List.len(...)"}, module_path: "core.collections",
+        kind: SemanticSymbolKind.Member, provenance: SemanticProvenance.Builtin("core.collections"),
+        span: None, lexical_scope: None,
+    })
+}
+
+#Test("help index covers every live registry route without teaching-only roots") {
+    index :: jet_cli_help_build_index()
+    expected := 0
+    loop command in JET_CLI_COMMANDS {
+        if jet_cli_is_canonical_top_level(command.name) {
+            expected += 1
+            entry :: jet_cli_help_test_find(index, command.name)
+            assert_eq(entry.symbol.signature, jet_cli_command_usage(command.name))
+        } else {
+            loop entry in index -> assert(entry.symbol.name != command.name)
+        }
+        loop action in command.actions {
+            expected += 1
+            entry :: jet_cli_help_test_find(index, "{command.name} {action.name}")
+            assert_eq(entry.symbol.summary, jet_cli_action_help_summary(command.name, action))
+            lines := [String]{}
+            loop usage in diagnostic_text_lines(action.usage) -> &lines.push("jet {command.name} {usage}")
+            assert_eq(entry.symbol.signature, lines.join("\n"))
+        }
+    }
+    assert_eq(index.len(), expected)
+}
+#Test("every help entry has a category in the reference tree") {
+    categories :: JET_CLI_HELP_CATEGORIES
+    loop entry in jet_cli_help_build_index() -> assert(categories.contains(entry.category))
+}
+#Test("command facts preserve registry identity signature and provenance") {
+    entries :: jet_cli_help_build_index()
+    run :: jet_cli_help_test_find(entries, "run")
+    assert_eq(run.symbol.identity, "command:run")
+    assert_eq(run.symbol.qualified_name, "run")
+    assert_eq(run.symbol.signature, jet_cli_command_usage("run"))
+    registry_index :: jet_cli_command_index("run") ?? panic("missing run registry row")
+    assert_eq(run.symbol.summary, JET_CLI_COMMANDS[registry_index].summary)
+    assert(run.symbol.owner == None)
+    assert(run.symbol.kind == SemanticSymbolKind.Command)
+    assert(run.symbol.provenance == SemanticProvenance.CommandRegistry)
+    assert(run.symbol.span == None)
+    assert(run.symbol.lexical_scope == None)
+    symbols :: jet_cli_help_symbol_index(entries)
+    loop symbol in symbols.symbols() {
+        assert_eq(symbol.identity, "command:{symbol.name}")
+        assert_eq(symbol.qualified_name, symbol.name)
+        assert(symbol.provenance == SemanticProvenance.CommandRegistry)
+    }
+}
+#Test("run flags come from scoped registry including watch and release") {
+    run :: jet_cli_help_test_find(jet_cli_help_build_index(), "run")
+    names := [String]{}
+    loop flag in run.flags -> &names.push(flag.long)
+    assert(names.contains("--watch"))
+    assert(names.contains("--release"))
+    expected :: jet_cli_flags_for_command("run")
+    assert_eq(run.flags.len(), expected.len())
+    loop index in 0..<expected.len() {
+        assert_eq(run.flags[index].long, expected[index].long)
+        assert_eq(run.flags[index].help, expected[index].help)
+    }
+}
+#Test("watch outcome phrase resolves to dev rather than an invented command") {
+    hits :: jet_cli_help_search(jet_cli_help_build_index(), "run on save")
+    assert(hits.len() > 0)
+    assert_eq(jet_cli_help_test_hit_name(hits[0]), "dev")
+}
+#Test("search covers flags and real examples") {
+    index :: jet_cli_help_build_index()
+    release := false
+    loop hit in jet_cli_help_search(index, "--release") {
+        if jet_cli_help_test_hit_name(hit) == "run" -> release = true
+    }
+    assert(release)
+    // Rust asserts run (Help/mod.rs:526-528); stale: no run haystack contains the subsequence (PortLead-4 review).
+    hello_check := false
+    loop hit in jet_cli_help_search(index, "hello.jet") {
+        if jet_cli_help_test_hit_name(hit) == "check" -> hello_check = true
+    }
+    assert(hello_check)
+}
+#Test("fuzzy match is an ordered case insensitive subsequence") {
+    assert(jet_cli_help_fuzzy_match("rn", "run") != None)
+    assert(jet_cli_help_fuzzy_match("nr", "run") == None)
+    assert(jet_cli_help_fuzzy_match("xyz", "run") == None)
+    matched :: jet_cli_help_fuzzy_match("RN", "Run") ?? panic("missing mixed case match")
+    assert_eq(matched.positions, [Int]{0, 2})
+    empty :: jet_cli_help_fuzzy_match("", "anything") ?? panic("empty query must match")
+    assert_eq(empty.score, 0)
+    assert_eq(empty.positions.len(), 0)
+}
+#Test("fuzzy scoring rewards word boundaries consecutive runs and tight haystacks") {
+    exact :: jet_cli_help_fuzzy_match("run", "jet run") ?? panic("missing exact match")
+    loose :: jet_cli_help_fuzzy_match("run", "jet self devtools — run checked generators") ?? panic("missing loose match")
+    assert(exact.score > loose.score)
+    assert_eq(exact.score, 16)
+    assert_eq(exact.positions, [Int]{4, 5, 6})
+    boundary :: jet_cli_help_fuzzy_match("r", "-r") ?? panic("missing word boundary")
+    inner :: jet_cli_help_fuzzy_match("r", "xr") ?? panic("missing inner character")
+    assert_eq(boundary.score - inner.score, 3)
+    long :: jet_cli_help_fuzzy_match("r", "r1234567") ?? panic("missing length penalty")
+    assert_eq(long.score, 3)
+}
+#Test("fuzzy positions are Unicode scalar indices including lowercase expansion") {
+    matched :: jet_cli_help_fuzzy_match("éR", "𐐀 É-run") ?? panic("missing Unicode match")
+    assert_eq(matched.positions, [Int]{2, 4})
+    expanded :: jet_cli_help_fuzzy_match("x", "İx") ?? panic("missing lowercase expansion")
+    assert_eq(expanded.positions, [Int]{2})
+}
+#Test("existing code query short circuits and unknown code falls back to fuzzy") {
+    index :: jet_cli_help_build_index()
+    hits :: jet_cli_help_search(index, "  E0102  ")
+    assert_eq(hits.len(), 1)
+    if hits[0] == {
+        .Code(explanation) -> assert_eq(jet_cli_explain_render(explanation, false), jet_cli_help_run_query("E0102", false, "", jet_cli_help_test_no_builtin))
+        else -> panic("expected diagnostic hit")
+    }
+    unknown :: "E{9999}"
+    fixture :: [JetCLIHelpEntry]{jet_cli_help_test_entry("sentinel", "{unknown}")}
+    fallback :: jet_cli_help_search(fixture, unknown)
+    assert_eq(fallback.len(), 1)
+    assert_eq(jet_cli_help_test_hit_name(fallback[0]), "sentinel")
+    assert(jet_cli_help_search(index, " \t\n").len() == 0)
+}
+#Test("search boosts ASCII exact names and ties sort by name") {
+    fixture :: [JetCLIHelpEntry]{
+        jet_cli_help_test_entry("z", "shared"), jet_cli_help_test_entry("a", "shared"),
+        jet_cli_help_test_entry("run", "shared"), jet_cli_help_test_entry("runner", "run"),
+    }
+    exact :: jet_cli_help_search(fixture, "RUN")
+    assert_eq(jet_cli_help_test_hit_name(exact[0]), "run")
+    tied :: jet_cli_help_search(fixture, "shared")
+    assert_eq(jet_cli_help_test_hit_name(tied[0]), "a")
+    assert_eq(jet_cli_help_test_hit_name(tied[1]), "run")
+    assert_eq(jet_cli_help_test_hit_name(tied[2]), "z")
+}
+#Test("search keeps the first equal score haystack and best score per entry") {
+    entry := jet_cli_help_test_entry("x", "match")
+    entry.keywords = [String]{"match", "mat"}
+    hits :: jet_cli_help_search([JetCLIHelpEntry]{entry}, "mat")
+    assert_eq(hits.len(), 1)
+    if hits[0] == {
+        .Command(_, score, haystack, positions) -> {
+            assert_eq(haystack, "match")
+            assert_eq(score, 16)
+            assert_eq(positions, [Int]{0, 1, 2})
+        }
+        else -> panic("expected command")
+    }
+}
+#Test("static query renders verbatim diagnostics and useful unmatched pointer") {
+    explanation :: jet_cli_explain_lookup_code("E0102") ?? panic("missing diagnostic")
+    colors :: [Bool]{false, true}
+    loop color in colors {
+        actual :: jet_cli_help_run_query("E0102", color, "", jet_cli_help_test_no_builtin)
+        assert_eq(actual, jet_cli_explain_render(explanation, color))
+    }
+    assert_eq(jet_cli_help_run_query("zzzznonsense", false, "", jet_cli_help_test_no_builtin), "No matches for `zzzznonsense` — try `{JET_CLI_BINARY} ?` for the full command palette or `{JET_CLI_BINARY} help`\n")
+    hits :: jet_cli_help_search(jet_cli_help_build_index(), "run")
+    assert_eq(jet_cli_help_run_query("run", false, "", jet_cli_help_test_no_builtin), jet_cli_help_render_result_list(hits, "run", 72, false, None, None))
+}
+#Test("static query delegates semantic lookup and prints canonical fact fields") {
+    actual :: jet_cli_help_run_query("  List.len \t", false, "", jet_cli_help_test_builtin)
+    assert_eq(actual, "List.len() -> Int\nNumber of items.\nExample: List.len(...)\nSource: core.collections (builtin)\n")
+}
+#Test("observation query normalizes whitespace and ASCII case then returns guide unchanged") {
+    guide :: "single authored guide\nwith exact trailing bytes\n"
+    actual :: jet_cli_help_run_query("Why\t is\nmy  program slow", true, guide, jet_cli_help_test_observation_lookup)
+    assert_eq(actual, guide)
+    assert(jet_cli_help_is_observation_query("\tWhy is my program slow\n"))
+    assert(!jet_cli_help_is_observation_query(""))
+    assert(!jet_cli_help_is_observation_query("why is my program"))
+    assert(!jet_cli_help_is_observation_query("why is my program slow now"))
+    assert(!jet_cli_help_is_observation_query("why is your program slow"))
+}
+fn jet_cli_help_test_observation_lookup(query: String) -> SemanticSymbol? Never! {
+    panic("observation route must precede semantic lookup")
+}

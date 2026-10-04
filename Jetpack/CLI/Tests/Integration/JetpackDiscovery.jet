@@ -1,0 +1,882 @@
+// PORT-PENDING 1084 tests-jetpack-discovery-module-group: tests/jetpack_discovery.rs:1-315
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! U26 package discovery process tests.
+//RS //!
+//RS //! These exercise the CLI against copied fixtures. `search`/`info` may read
+//RS //! provider fixture files and `.jet/discovery/index.jsonl`, but they must not
+//RS //! realize packages or fetch metadata.
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS 
+//RS mod common;
+//RS use common::{jetpack_bin, Scratch};
+//RS 
+//RS fn jetpack() -> Command {
+//RS     Command::new(jetpack_bin())
+//RS }
+//RS 
+//RS fn jet() -> Command {
+//RS     Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS fn fixture_root() -> PathBuf {
+//RS     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-typed")
+//RS }
+//RS 
+//RS fn copy_project(dst: &Path) {
+//RS     copy_dir(&fixture_root(), dst);
+//RS }
+//RS 
+//RS fn copy_dir(src: &Path, dst: &Path) {
+//RS     fs::create_dir_all(dst).unwrap();
+//RS     for entry in fs::read_dir(src).unwrap() {
+//RS         let entry = entry.unwrap();
+//RS         let from = entry.path();
+//RS         let to = dst.join(entry.file_name());
+//RS         if from.is_dir() {
+//RS             copy_dir(&from, &to);
+//RS         } else {
+//RS             fs::copy(&from, &to).unwrap();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn search_reads_local_fixture_metadata_offline() {
+//RS     let project = Scratch::new("project");
+//RS     let root = Scratch::new("root");
+//RS     copy_project(&project.path);
+//RS 
+//RS     let out = jetpack()
+//RS         .args([
+//RS             "search",
+//RS             "rip",
+//RS             "--no-color",
+//RS             "--offline",
+//RS             "--fixtures",
+//RS             "fixtures",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(stdout.contains("default.ripgrep"), "stdout: {stdout}");
+//RS     assert!(stdout.contains("14.1.0"), "stdout: {stdout}");
+//RS     assert!(
+//RS         project.path.join(".jet/discovery/index.jsonl").is_file(),
+//RS         "search should persist the local discovery index"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn info_json_is_stable_and_includes_service_options() {
+//RS     let project = Scratch::new("project");
+//RS     let root = Scratch::new("root");
+//RS     copy_project(&project.path);
+//RS 
+//RS     let out = jetpack()
+//RS         .args([
+//RS             "info",
+//RS             "default.ripgrep",
+//RS             "--json",
+//RS             "--no-color",
+//RS             "--offline",
+//RS             "--fixtures",
+//RS             "fixtures",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(
+//RS         stdout.contains("\"reference\":\"ripgrep@default\""),
+//RS         "{stdout}"
+//RS     );
+//RS     assert!(stdout.contains("\"version\":\"14.1.0\""), "{stdout}");
+//RS     assert!(
+//RS         stdout.contains("\"maintainer_liveness\":\"not-applicable\""),
+//RS         "{stdout}"
+//RS     );
+//RS     assert!(stdout.contains("\"name\":\"enable\""), "{stdout}");
+//RS     assert!(stdout.contains("\"name\":\"ready\""), "{stdout}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_inspect_info_shows_registry_maintainer_liveness() {
+//RS     let project = Scratch::new("registry-info-project");
+//RS     let root = Scratch::new("registry-info-root");
+//RS     fs::create_dir_all(project.path.join(".jet")).unwrap();
+//RS     fs::write(
+//RS         project.path.join(".jet/lock"),
+//RS         "version = 1\n\n[[package]]\nname = \"textkit\"\nversion = \"1.2.0\"\nsource = { registry = \"jet\", reference = \"textkit@jet\", output = \"out\", source-hash = \"sha256-tree\", repository = \"https://registry\", authority = \"jet-registry-index\", tier = \"community\", gate-status = \"signature=passed;audit=passed;name=passed;liveness=passed;review=not-required\" }\nfingerprint = \"fp\"\ndependencies = []\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let json = jet()
+//RS         .args([
+//RS             "inspect",
+//RS             "info",
+//RS             "jet.textkit",
+//RS             "--json",
+//RS             "--offline",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         json.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&json.stderr)
+//RS     );
+//RS     let json = String::from_utf8_lossy(&json.stdout);
+//RS     assert!(
+//RS         json.contains("\"maintainer_liveness\":\"passed\""),
+//RS         "{json}"
+//RS     );
+//RS 
+//RS     let human = jet()
+//RS         .args(["inspect", "info", "jet.textkit", "--offline", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         human.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&human.stderr)
+//RS     );
+//RS     let human = String::from_utf8_lossy(&human.stdout);
+//RS     assert!(human.contains("maintainer liveness: passed"), "{human}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn search_matches_typed_service_options_offline() {
+//RS     let project = Scratch::new("project");
+//RS     let root = Scratch::new("root");
+//RS     copy_project(&project.path);
+//RS 
+//RS     let out = jetpack()
+//RS         .args([
+//RS             "search",
+//RS             "ready",
+//RS             "--no-color",
+//RS             "--offline",
+//RS             "--fixtures",
+//RS             "fixtures",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(stdout.contains("default.ripgrep"), "stdout: {stdout}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn top_level_jet_search_routes_typed_option_queries_through_main() {
+//RS     let project = Scratch::new("project");
+//RS     let root = Scratch::new("root");
+//RS     copy_project(&project.path);
+//RS 
+//RS     let out = jet()
+//RS         .args([
+//RS             "search",
+//RS             "ready",
+//RS             "--no-color",
+//RS             "--offline",
+//RS             "--fixtures",
+//RS             "fixtures",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(stdout.contains("default.ripgrep"), "stdout: {stdout}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn search_without_local_index_fails_closed() {
+//RS     let project = Scratch::new("empty-project");
+//RS     let root = Scratch::new("root");
+//RS 
+//RS     let out = jetpack()
+//RS         .args(["search", "ready", "--no-color", "--offline"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("no local discovery index"),
+//RS         "stderr: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn top_level_jet_search_dispatches_to_jetpack() {
+//RS     let project = Scratch::new("project");
+//RS     let root = Scratch::new("root");
+//RS     copy_project(&project.path);
+//RS 
+//RS     let out = jet()
+//RS         .args([
+//RS             "search",
+//RS             "jq",
+//RS             "--no-color",
+//RS             "--offline",
+//RS             "--fixtures",
+//RS             "fixtures",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(stdout.contains("default.jq"), "stdout: {stdout}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn top_level_jet_search_help_is_flat() {
+//RS     let out = jet().args(["search", "--help"]).output().unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(stdout.contains("jet search <query>"), "stdout: {stdout}");
+//RS     assert!(!stdout.contains("jet inspect search"), "stdout: {stdout}");
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(!stderr.contains("E2101"), "stderr: {stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_inspect_search_is_no_longer_a_canonical_route() {
+//RS     let project = Scratch::new("project");
+//RS     let root = Scratch::new("root");
+//RS     copy_project(&project.path);
+//RS 
+//RS     let out = jet()
+//RS         .args([
+//RS             "inspect",
+//RS             "search",
+//RS             "jq",
+//RS             "--no-color",
+//RS             "--offline",
+//RS             "--fixtures",
+//RS             "fixtures",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(2),
+//RS         "grouped search must be rejected"
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(stderr.contains("E2101"), "stderr: {stderr}");
+//RS     assert!(
+//RS         stderr.contains("isn't a jet inspect command"),
+//RS         "stderr: {stderr}"
+//RS     );
+//RS }
+// END-PORT-PENDING 1084 tests/jetpack_discovery.rs:1-315
+
+// PORT-PENDING 1084 tests-jetpack-discovery-module-group: tests/jetpack_dispatch.rs:1-559
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Top-level `jet` → `jetpack` command dispatch tests (Tower card #367
+//RS //! slice 6 split).
+//RS //!
+//RS //! These cover the CLI delegation surface — `jet clean`/`jet env`/
+//RS //! `jet outdated`/`jet run tool@nixpkgs` routing through to the `jetpack`
+//RS //! engine — as distinct from the engine mechanics themselves (see
+//RS //! `tests/jetpack_engine.rs`). Split out of the former `tests/jetpack.rs`.
+//RS 
+//RS use std::fs;
+//RS use std::process::Command;
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "support/jetpack_fixtures.rs"]
+//RS mod jetpack_fixtures;
+//RS use jetpack_fixtures::*;
+//RS 
+//RS #[test]
+//RS fn bare_jetpack_prints_help_without_entering_an_environment() {
+//RS     let project = Scratch::new("bare-jetpack-project");
+//RS     let root = Scratch::new("bare-jetpack-root");
+//RS     fs::write(project.join("env.jet"), "module broken { invalid }").unwrap();
+//RS 
+//RS     let output = jetpack()
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "bare `jetpack` should print help and exit successfully: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let help = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(help.contains("jet env"), "stderr: {help}");
+//RS     assert!(!project.join(".jet").exists(), "bare `jetpack` entered env");
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_clean_delegates_to_jetpack_clean() {
+//RS     let root = Scratch::new("root");
+//RS     let stale = write_hangar_meta(&root.path, "old-top", "oldtop", "1.0", Some(1)).0;
+//RS 
+//RS     let out = jet()
+//RS         .args(["clean", "--no-color", "--yes"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert!(!stale.exists(), "`jet clean` should collect via jetpack");
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(stderr.contains("cleaned hangar"), "stderr: {stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_shared_store_status_does_not_default_to_install() {
+//RS     let home = Scratch::new("shared-store-status-home");
+//RS     let data = Scratch::new("shared-store-status-data");
+//RS     let state = Scratch::new("shared-store-status-state");
+//RS     let legacy_hangar = state.join("jet/hangar");
+//RS     fs::create_dir_all(&legacy_hangar).unwrap();
+//RS     fs::write(legacy_hangar.join("marker"), "legacy").unwrap();
+//RS 
+//RS     let output = jet()
+//RS         .args(["shared-store", "status", "--no-color"])
+//RS         .env_remove("JETPACK_ROOT")
+//RS         .env("HOME", &home.path)
+//RS         .env("XDG_DATA_HOME", &data.path)
+//RS         .env("XDG_STATE_HOME", &state.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS 
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(
+//RS         stderr.contains("shared-store broker is not installed."),
+//RS         "stderr: {stderr}"
+//RS     );
+//RS     assert!(!stderr.contains("Error [E1340]"), "stderr: {stderr}");
+//RS     assert!(
+//RS         !stderr.contains("shared-store install failed"),
+//RS         "stderr: {stderr}"
+//RS     );
+//RS     assert!(!stderr.contains("sudo"), "stderr: {stderr}");
+//RS     assert!(
+//RS         !stderr.contains("jetpack hangar shared install"),
+//RS         "stderr: {stderr}"
+//RS     );
+//RS     assert!(legacy_hangar.join("marker").is_file());
+//RS     assert!(!data.path.join("jet/hangar").exists());
+//RS     assert!(!data.path.join("jet/shared-store").exists());
+//RS }
+//RS 
+//RS /// D-CLI-SURFACE3=B: `outdated` moved under `jet inspect` — bare
+//RS /// `jet outdated` is now a teaching error (E2101) naming the new spelling.
+//RS #[test]
+//RS fn bare_jet_outdated_is_a_teaching_error_naming_jet_inspect_outdated() {
+//RS     let proj = Scratch::new("proj");
+//RS     let root = Scratch::new("root");
+//RS     let fixtures = Scratch::new("fx");
+//RS     fs::write(
+//RS         proj.join("env.jet"),
+//RS         r#"
+//RS module dev {
+//RS     sources: { default: acme/tools@github#latest }
+//RS     env.dev: Env.{ packages: [default.greet] }
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::create_dir_all(proj.join(".jet")).unwrap();
+//RS     fs::write(
+//RS         proj.join(".jet/lock"),
+//RS         "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"latest\"\nexact = \"github:acme/tools#v1.2.0\"\n\n[root]\ndependencies = []\n",
+//RS     )
+//RS     .unwrap();
+//RS     write_channel_fixture(
+//RS         &fixtures.path,
+//RS         "github:acme/tools",
+//RS         "latest",
+//RS         "github:acme/tools#v1.3.0",
+//RS     );
+//RS 
+//RS     let out = jet()
+//RS         .args(["outdated", "--no-color", "--fixtures"])
+//RS         .arg(&fixtures.path)
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(2),
+//RS         "bare `jet outdated` must be rejected"
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(stderr.contains("E2101"), "stderr: {stderr}");
+//RS     assert!(stderr.contains("jet inspect outdated"), "stderr: {stderr}");
+//RS }
+//RS 
+//RS /// `jet inspect outdated` is the canonical top-level spelling and still
+//RS /// dispatches through to the jetpack engine.
+//RS #[test]
+//RS fn jet_inspect_outdated_dispatches_to_jetpack() {
+//RS     let proj = Scratch::new("proj");
+//RS     let root = Scratch::new("root");
+//RS     let fixtures = Scratch::new("fx");
+//RS     fs::write(
+//RS         proj.join("env.jet"),
+//RS         r#"
+//RS module dev {
+//RS     sources: { default: acme/tools@github#latest }
+//RS     env.dev: Env.{ packages: [default.greet] }
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::create_dir_all(proj.join(".jet")).unwrap();
+//RS     fs::write(
+//RS         proj.join(".jet/lock"),
+//RS         "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"latest\"\nexact = \"github:acme/tools#v1.2.0\"\n\n[root]\ndependencies = []\n",
+//RS     )
+//RS     .unwrap();
+//RS     write_channel_fixture(
+//RS         &fixtures.path,
+//RS         "github:acme/tools",
+//RS         "latest",
+//RS         "github:acme/tools#v1.3.0",
+//RS     );
+//RS 
+//RS     let out = jet()
+//RS         .args(["inspect", "outdated", "--no-color", "--fixtures"])
+//RS         .arg(&fixtures.path)
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(stderr.contains("v1.2.0"), "stderr: {stderr}");
+//RS     assert!(stderr.contains("v1.3.0"), "stderr: {stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_env_delegates_to_jetpack_env() {
+//RS     // Card #955 / D-DEV4 (ratified 2026-06-17): `jet env` is the friendly Scale-2 front door
+//RS     // into the project dev shell — it delegates straight to `jetpack env`,
+//RS     // forwarding flags and the trailing `-- cmd`. (`jet dev` is now reserved for
+//RS     // the E2-M4 watch/interpret loop.) Running through the `jet` binary must
+//RS     // reach the same composed env with no installed tool or network fallback.
+//RS     let (base, proj, root) = core_hello_project("jet-env");
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         // U19: same trust gate reached through `jet env`; `--trust` bypasses.
+//RS         .args(["env", "--no-color", "--trust", "--offline", "--", "hello"])
+//RS         .current_dir(&proj)
+//RS         .env("JETPACK_ROOT", &root)
+//RS         .env("HOME", base.join("home"))
+//RS         .env("PATH", "") // no installed tools, including nix, on PATH
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&output.stdout).trim(),
+//RS         "hello from jet-pkgs"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_run_without_nix_compatibility_output_reports_e1272() {
+//RS     let root = Scratch::new("jet-run-no-nix-root");
+//RS     let output = jet()
+//RS         .args(["run", "postgres@nixpkgs", "--no-color"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(output.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("E1272"), "stderr: {stderr}");
+//RS     assert!(stderr.contains("postgres@nixpkgs"), "stderr: {stderr}");
+//RS     assert!(
+//RS         stderr.contains("does not invoke an installed Nix executable"),
+//RS         "stderr: {stderr}"
+//RS     );
+//RS     assert!(!stderr.contains("couldn't run `nix`"), "stderr: {stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_env_sync_delegates_to_typed_managed_file_sync() {
+//RS     let project = Scratch::new("jet-env-sync");
+//RS     let root = Scratch::new("jet-env-sync-root");
+//RS     let home = Scratch::new("jet-env-sync-home");
+//RS     fs::write(
+//RS         project.join("env.jet"),
+//RS         r#"module env.dev {
+//RS     files: ["config/generated.txt": File{ content: "generated\n", mode: .Copy }]
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let output = jet()
+//RS         .args(["env", "sync", "--trust", "--yes", "--offline", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("HOME", &home.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(project.join("config/generated.txt")).unwrap(),
+//RS         "generated\n"
+//RS     );
+//RS     assert!(project.join(".jet/files/state").is_file());
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_env_info_discloses_typed_summary_without_realizing_or_starting_services() {
+//RS     let project = Scratch::new("jet-env-info");
+//RS     let root = Scratch::new("jet-env-info-root");
+//RS     fs::create_dir_all(project.join("scripts/githooks")).unwrap();
+//RS     fs::write(
+//RS         project.join("env.jet"),
+//RS         r#"module env.dev {
+//RS     prompt: $HOME
+//RS     packages: [nixpkgs.ripgrep]
+//RS     git_hooks_path: "scripts/githooks"
+//RS     services: {
+//RS         fixture: {
+//RS             enable: false,
+//RS             ports: [8080],
+//RS             run: ["fixture", "--port", "8080"],
+//RS             ready: "fixture --ready",
+//RS             data_dir: "state/fixture",
+//RS             watch: ["src"],
+//RS             after: ["database"],
+//RS             before_start: ["lint"],
+//RS             sockets: ["run/fixture.sock"]
+//RS         }
+//RS     }
+//RS     files: ["config/generated.txt": File{ content: "generated\n", mode: .Copy }]
+//RS }
+//RS module env.full {
+//RS     prompt: $FULL_ONLY
+//RS     packages: [nixpkgs.fd]
+//RS     services: {
+//RS         sibling: { enable: false, ports: [9090] }
+//RS     }
+//RS     checks: [{
+//RS         name: "full-only-check",
+//RS         command: "true",
+//RS     }]
+//RS     files: ["config/full.txt": File{ content: "full\n", mode: .Copy }]
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(project.join("run.jet"), "#Job\nfn lint() {}\n").unwrap();
+//RS 
+//RS     let output = jet()
+//RS         .args(["env", "info", "--json", "--offline", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("HOME", "/test/home")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         jetpack::JSON::parse(&stdout).is_ok(),
+//RS         "info JSON must parse: {stdout}"
+//RS     );
+//RS     for fact in [
+//RS         "\"packages\":[\"ripgrep@nixpkgs\"]",
+//RS         "\"name\":\"fixture\",\"enabled\":false",
+//RS         "\"run\":[\"fixture\",\"--port\",\"8080\"]",
+//RS         "\"ready\":\"fixture --ready\"",
+//RS         "\"after\":[\"database\"]",
+//RS         "\"before_start\":[\"lint\"]",
+//RS         "\"sockets\":[\"run/fixture.sock\"]",
+//RS         "\"checks\":[],\"jobs\":[\"lint\"]",
+//RS         "\"variables\":[{\"name\":\"HOME\",\"sources\":[\"environment\"]}]",
+//RS         "\"files\":[\"config/generated.txt\"]",
+//RS         "\"git_hooks_path\":\"scripts/githooks\"",
+//RS     ] {
+//RS         assert!(
+//RS             stdout.contains(fact),
+//RS             "missing {fact}; status={:?}; stderr={}; stdout={}",
+//RS             output.status.code(),
+//RS             String::from_utf8_lossy(&output.stderr),
+//RS             stdout
+//RS         );
+//RS     }
+//RS     assert!(!stdout.contains("\"name\":\"sibling\""));
+//RS     assert!(!stdout.contains("full-only-check"));
+//RS     assert!(!stdout.contains("FULL_ONLY"));
+//RS     assert!(!stdout.contains("config/full.txt"));
+//RS     assert!(
+//RS         !project.join(".jet/services").exists(),
+//RS         "env info must not start a service supervisor"
+//RS     );
+//RS 
+//RS     let human = jet()
+//RS         .args(["env", "info", "--offline", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("HOME", "/test/home")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         human.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&human.stderr)
+//RS     );
+//RS     let human_output = format!(
+//RS         "{}{}",
+//RS         String::from_utf8_lossy(&human.stdout),
+//RS         String::from_utf8_lossy(&human.stderr)
+//RS     );
+//RS     for fact in [
+//RS         "fixture (disabled",
+//RS         "ports=8080",
+//RS         "run=fixture --port 8080",
+//RS         "ready=fixture --ready",
+//RS         "data_dir=state/fixture",
+//RS         "watch=src",
+//RS         "after=database",
+//RS         "before_start=lint",
+//RS         "sockets=run/fixture.sock",
+//RS         "git hooks path: scripts/githooks",
+//RS     ] {
+//RS         assert!(
+//RS             human_output.contains(fact),
+//RS             "missing {fact}; output={human_output}"
+//RS         );
+//RS     }
+//RS     assert!(
+//RS         !project.join(".jet/services").exists(),
+//RS         "human env info must not start a service supervisor"
+//RS     );
+//RS 
+//RS     let full = jet()
+//RS         .args([
+//RS             "env",
+//RS             "info",
+//RS             "--json",
+//RS             "--offline",
+//RS             "--no-color",
+//RS             "--env",
+//RS             "full",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("HOME", "/test/home")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         full.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&full.stderr)
+//RS     );
+//RS     let full_stdout = String::from_utf8_lossy(&full.stdout);
+//RS     assert!(full_stdout.contains("\"active_environment\":\"full\""));
+//RS     assert!(full_stdout.contains("\"packages\":[\"fd@nixpkgs\"]"));
+//RS     assert!(full_stdout.contains("\"name\":\"sibling\",\"enabled\":false"));
+//RS     assert!(full_stdout.contains("\"checks\":[\"full-only-check\"]"));
+//RS     assert!(full_stdout.contains("\"name\":\"FULL_ONLY\""));
+//RS     assert!(full_stdout.contains("\"files\":[\"config/full.txt\"]"));
+//RS     assert!(!full_stdout.contains("\"name\":\"fixture\""));
+//RS     assert!(!full_stdout.contains("config/generated.txt"));
+//RS 
+//RS     let missing = jet()
+//RS         .args(["env", "info", "--offline", "--no-color", "--env", "missing"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         missing.status.code(),
+//RS         Some(2),
+//RS         "missing environment must fail"
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&missing.stderr);
+//RS     assert!(
+//RS         stderr.contains("E1337"),
+//RS         "missing environment lost its diagnostic: {stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("environment module `missing` is not declared"),
+//RS         "missing environment failure is not actionable: {stderr}"
+//RS     );
+//RS     assert!(
+//RS         !project.join(".jet/services").exists(),
+//RS         "failed env info must not leave a service supervisor"
+//RS     );
+//RS }
+//RS 
+//RS // ── U16: -p ad-hoc packages / --flake foreign-flake fallback ──
+//RS 
+//RS #[test]
+//RS fn top_level_jet_run_nixpkgs_suffix_tool_execs_tool() {
+//RS     // U16: `nix run nixpkgs#tool` parity at the public `jet` front door. The
+//RS     // top-level spelling uses CLI refs (`tool@nixpkgs`) and lowers to the
+//RS     // same jetpack realization path as `jetpack use tool@nixpkgs -- tool`.
+//RS     let root = Scratch::new("jet-run-nixpkgs-root");
+//RS     let proj = Scratch::new("jet-run-nixpkgs-proj");
+//RS     let fixtures = Scratch::new("jet-run-nixpkgs-fx");
+//RS     let out = Scratch::new("jet-run-nixpkgs-out");
+//RS     write_runnable_fixture(&fixtures.path, &root.path, &out.path);
+//RS     let output = jet()
+//RS         .args([
+//RS             "run",
+//RS             "greet@nixpkgs",
+//RS             "--no-color",
+//RS             "--offline",
+//RS             "--fixtures",
+//RS         ])
+//RS         .arg(&fixtures.path)
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&output.stdout).trim(),
+//RS         "hello from jetpack"
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert_eq!(
+//RS         stderr.matches("running greet@nixpkgs -> greet").count(),
+//RS         1,
+//RS         "stderr: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS // ── U16: `jet os bridge flake` → `jetpack bridge flake` ──
+//RS #[test]
+//RS fn jet_os_bridge_flake_delegates_to_jetpack() {
+//RS     let project = Scratch::new("jet-bridge-flake");
+//RS     let root = Scratch::new("jet-bridge-flake-root");
+//RS     fs::write(
+//RS         project.join("flake.nix"),
+//RS         "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.fd ]; }; }",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let output = jet()
+//RS         .args(["os", "bridge", "flake", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&output.stdout).contains("packages: [fd]"),
+//RS         "stdout: {}",
+//RS         String::from_utf8_lossy(&output.stdout)
+//RS     );
+//RS     assert!(
+//RS         project.join(".jet/lock").is_file(),
+//RS         "the production bridge must commit its typed foreign graph"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_os_bridge_flake_reports_missing_foreign_input() {
+//RS     let project = Scratch::new("jet-bridge-flake-missing");
+//RS     let root = Scratch::new("jet-bridge-flake-missing-root");
+//RS 
+//RS     let output = jet()
+//RS         .args(["os", "bridge", "flake", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(output.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("no foreign flake"), "stderr: {stderr}");
+//RS     assert!(
+//RS         !project.join(".jet/lock").exists(),
+//RS         "a failed bridge must not publish a misleading lock"
+//RS     );
+//RS }
+// END-PORT-PENDING 1084 tests/jetpack_dispatch.rs:1-559
+

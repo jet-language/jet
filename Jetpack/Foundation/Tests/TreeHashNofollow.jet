@@ -1,0 +1,135 @@
+// SHA256.rs read_file_nofollow/open_regular_nofollow (159-234), the moved
+// OCI availability-cause helper, and the registry host-path resolution policy
+// (Registry.rs:469-582,910-924). Real kernel files only: no fake FileReader,
+// Directory or error injection. FS cases remain gated by Core #3593.
+
+fn foundation_nofollow_test_root(label: String) -[FS, Env]> String Never! {
+    home :: sys.get("HOME") ?? panic("nofollow fixtures require HOME")
+    root :: files.join(home, ".cache/jet-test-scratch/jet-foundation-nofollow-{label}-{sys.pid()}")
+    files.remove_all(root).drop("a stale nofollow fixture may be absent")
+    files.create_dir_all(root) ?? panic("create nofollow fixture")
+    root
+}
+
+fn foundation_nofollow_test_refusal(path: String, max_bytes: Int, expected: IOError) Never! -[FS]> {
+    if foundation_read_file_nofollow(path, max_bytes) == {
+        .Ok(_) -> panic("unsafe nofollow read succeeded: {path}")
+        .Err(error) -> assert_eq(error, expected)
+    }
+}
+
+#Test("nofollow read returns exact bytes at its bound through symlinked parents") {
+    root :: foundation_nofollow_test_root("read")
+    real :: files.join(root, "real")
+    files.create_dir_all(real) ?? panic("real parent")
+    files.write(files.join(real, "input.jet"), "exact bytes") ?? panic("input")
+    files.symlink(real, files.join(root, "linked")) ?? panic("linked parent")
+    assert_eq(foundation_read_file_nofollow(files.join(real, "input.jet"), 11) ?? panic("read at bound"), "exact bytes".bytes())
+    // Rust opens the path with O_NOFOLLOW: only the final component is a refusal point.
+    assert_eq(foundation_read_file_nofollow(files.join(root, "linked/input.jet"), MAX_TREE_FILE_BYTES) ?? panic("read below linked parent"), "exact bytes".bytes())
+    assert_eq(foundation_read_file_nofollow(files.join(root, "linked/../real/input.jet"), MAX_TREE_FILE_BYTES) ?? panic("read normalized spelling"), "exact bytes".bytes())
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("nofollow read refuses excessive bounds, oversize files, links and non-files") {
+    root :: foundation_nofollow_test_root("refusals")
+    path :: files.join(root, "input.jet")
+    link :: files.join(root, "link.jet")
+    files.write(path, "twelve bytes") ?? panic("input")
+    files.symlink(path, link) ?? panic("final link")
+    foundation_nofollow_test_refusal(path, MAX_TREE_FILE_BYTES + 1, foundation_io_error(.Read, path, "file read bound exceeds the tree hashing bound"))
+    foundation_nofollow_test_refusal(path, 11, IOError.InvalidData(foundation_io_context(.Read, path, "file exceeds its read bound")))
+    foundation_nofollow_test_refusal(link, MAX_TREE_FILE_BYTES, IOError.InvalidData(foundation_io_context(.Read, link, "file is not a regular file")))
+    foundation_nofollow_test_refusal(root, MAX_TREE_FILE_BYTES, IOError.InvalidData(foundation_io_context(.Read, root, "file is not a regular file")))
+    assert(foundation_read_file_nofollow(files.join(root, "missing.jet"), MAX_TREE_FILE_BYTES) == .Err(.NotFound(_)))
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+// Read real handles directly to exercise the growth-path loop independently
+// of the metadata precheck. The descriptor offset proves it never consumed
+// more than max+1, both below a chunk and across a chunk boundary.
+#Test("bounded nofollow loop consumes at most bound plus one and preserves caller error kind") {
+    root :: foundation_nofollow_test_root("bounded-loop")
+    path :: files.join(root, "input.jet")
+    content := [U8]{}
+    loop _ in 0..<(FOUNDATION_READ_CHUNK * 2 + 11) -> &content.push(U8{97})
+    files.write_bytes(path, content) ?? panic("bounded loop input")
+    errors :: [IOError]{
+        IOError.InvalidData(foundation_io_context(.Read, path, "file exceeds its read bound")),
+        foundation_io_error(.Read, path, "file exceeds its read bound")
+    }
+    loop bound in ([Int]{0, 3, FOUNDATION_READ_CHUNK, FOUNDATION_READ_CHUNK + 3}) {
+        loop expected in errors {
+            reader :: files.open(path, links: .Refuse) ?? panic("real bounded handle")
+            if foundation_read_handle_bounded(reader, bound, expected) == {
+                .Ok(_) -> panic("oversize handle read must refuse")
+                .Err(error) -> assert_eq(error, expected)
+            }
+            remaining := 0
+            loop {
+                chunk :: reader.read(FOUNDATION_READ_CHUNK) ?? panic("read unconsumed bytes")
+                if chunk.len() == 0 -> break
+                remaining += chunk.len()
+            }
+            assert_eq(remaining, content.len() - bound - 1)
+        }
+    }
+    empty :: files.join(root, "empty.jet")
+    files.write(empty, "") ?? panic("empty input")
+    assert_eq(foundation_read_file_nofollow(empty, 0) ?? panic("empty zero-bound read"), [U8]{})
+    assert_eq(foundation_read_file_nofollow(path, content.len()) ?? panic("multi-chunk exact-bound read"), content)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("nofollow growth-path refusal is exact InvalidData before identity check") {
+    if !sys.is_linux() -> return
+    // proc reports a regular file of length zero but supplies more than one byte.
+    path :: "/proc/self/status"
+    foundation_nofollow_test_refusal(path, 0, IOError.InvalidData(foundation_io_context(.Read, path, "file exceeds its read bound")))
+}
+
+// A real kernel file whose metadata length (0) disagrees with its bytes: the
+// post-read length/identity check refuses it, as Rust does.
+#Test("nofollow read refuses a file whose length changed while reading") {
+    if !sys.is_linux() -> return
+    path :: "/proc/self/status"
+    foundation_nofollow_test_refusal(path, MAX_TREE_FILE_BYTES, IOError.Other(foundation_io_context(.Read, path, "file changed while reading")))
+}
+
+#Test("io error cause attachment preserves kind and context") {
+    context :: IOContext{operation: .Write, resource: Val("/registry/index"), os_code: Val(2), cause: Val("original")}
+    expected :: IOContext{operation: .Write, resource: Val("/registry/index"), os_code: Val(2), cause: Val("unavailable")}
+    assert_eq(foundation_io_error_with_cause(IOError.NotFound(context), "unavailable"), IOError.NotFound(expected))
+    assert_eq(foundation_io_error_with_cause(IOError.PermissionDenied(context), "unavailable"), IOError.PermissionDenied(expected))
+    assert_eq(foundation_io_error_with_cause(IOError.InvalidData(context), "unavailable"), IOError.InvalidData(expected))
+    assert_eq(foundation_io_error_with_cause(IOError.InvalidInput(context), "unavailable"), IOError.InvalidInput(expected))
+    assert_eq(foundation_io_error_with_cause(IOError.Other(context), "unavailable"), IOError.Other(expected))
+    assert(foundation_io_error_with_cause(IOError.NotFound(context), "unavailable") != IOError.Other(expected))
+}
+
+#Test("registry path resolution follows ancestors and keeps the final component") {
+    root :: foundation_nofollow_test_root("resolve")
+    real :: files.join(root, "real")
+    files.create_dir_all(files.join(real, "sub")) ?? panic("real tree")
+    files.symlink(real, files.join(root, "home")) ?? panic("linked home")
+    files.symlink(files.join(real, "sub"), files.join(root, "deep")) ?? panic("linked deep")
+    canonical_root :: files.canonicalize(root) ?? panic("canonical root")
+    canonical_real :: files.canonicalize(real) ?? panic("canonical real")
+    assert_eq(foundation_resolve_path_ancestors(files.join(root, "home/keys")) ?? panic("linked ancestor"), files.join(canonical_real, "keys"))
+    // The final link itself is never resolved, even with a trailing separator or `.`.
+    assert_eq(foundation_resolve_path_ancestors(files.join(root, "home")) ?? panic("final link"), files.join(canonical_root, "home"))
+    assert_eq(foundation_resolve_path_ancestors("{root}/home/") ?? panic("trailing separator"), files.join(canonical_root, "home"))
+    assert_eq(foundation_resolve_path_ancestors("{root}/home/.") ?? panic("trailing dot"), files.join(canonical_root, "home"))
+    // `..` after a link climbs from the link TARGET, as the OS resolves it.
+    assert_eq(foundation_resolve_path_ancestors("{root}/deep/../keys") ?? panic("dot-dot after link"), files.join(canonical_real, "keys"))
+    assert(foundation_resolve_path_ancestors(files.join(root, "missing/keys")) == .Err(.NotFound(_)))
+    assert(!files.exists(files.join(root, "missing")))
+    // create makes every missing ancestor through the held chain, never the final component.
+    created :: foundation_resolve_path_ancestors(files.join(root, "home/a/b/c"), true) ?? panic("create ancestors")
+    assert_eq(created, files.join(canonical_real, "a/b/c"))
+    info :: files.stat(files.join(real, "a/b")) ?? panic("created ancestor")
+    assert(info.is_dir && !info.is_symlink)
+    assert_eq(info.mode & 0o777, 0o700)
+    assert(!files.exists(files.join(real, "a/b/c")))
+    files.remove_all(root) ?? panic("cleanup")
+}

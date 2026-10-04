@@ -1,0 +1,268 @@
+// Rust user_flatpak_perf.rs has no embedded tests. Original fixtures below
+// port tests/jetpack_jetos.rs os_switch_activates_and_sets_current user apply,
+// Flatpak/AppImage and scheduler assertions, and config.jet's consumed options.
+// GATED native originals retain Studio #3593 followed metadata/permissions,
+// RootProjection #3593 enable-unit link/copy, and process #3594 explicitly.
+
+fn jetos_user_perf_test_system(options: [OptionPlan]) -> SystemPlan Never! {
+    SystemPlan{name: "halcyon", target: "linux.x64", packages: [Pkg]{}, services: [ServicePlan]{}, options: options}
+}
+
+fn jetos_user_perf_test_halcyon() -> SystemPlan Never! {
+    jetos_user_perf_test_system([OptionPlan]{
+        OptionPlan{key: "users.nate.normal", value: "true"},
+        OptionPlan{key: "users.nate.home", value: "\"/home/nate\""},
+        OptionPlan{key: "users.nate.shell", value: "packages.hello"},
+        OptionPlan{key: "user.nate.packages", value: "[packages.hello, packages.btop]"},
+        OptionPlan{key: "user.nate.services", value: "[\"syncthing\"]"},
+        OptionPlan{key: "user.nate.files.ghosttyConfig", value: "\"home/ghostty/config\""},
+        OptionPlan{key: "boot.loader", value: ".Limine"},
+        OptionPlan{key: "boot.kernel", value: ".CachyOS"},
+        OptionPlan{key: "boot.kernel.profile", value: ".CachyOSLatest"},
+        OptionPlan{key: "boot.kernel.params", value: "[\"quiet\"]"},
+        OptionPlan{key: "boot.initrd.systemd", value: "true"},
+        OptionPlan{key: "boot.initrd.verbosity", value: "\"quiet\""},
+        OptionPlan{key: "boot.loader.limine.maxGenerations", value: "7"},
+        OptionPlan{key: "boot.loader.efi.canTouchVariables", value: "false"},
+        OptionPlan{key: "performance.profile", value: ".Gaming"},
+        OptionPlan{key: "performance.sysctl.vm.swappiness", value: "10"},
+        OptionPlan{key: "performance.zram.memoryPercent", value: "50"},
+        OptionPlan{key: "performance.scheduler", value: ".ScxLavd"},
+        OptionPlan{key: "apps.flatpak.remotes.flathub", value: "\"https://flathub.org/repo/flathub.flatpakrepo\""},
+        OptionPlan{key: "apps.flatpak.reconcile", value: ".Exact"},
+        OptionPlan{key: "apps.flatpak.app.discord.ref", value: "\"com.discordapp.Discord\""},
+        OptionPlan{key: "apps.flatpak.app.discord.permissions.filesystem", value: ".Downloads"},
+        OptionPlan{key: "apps.appimage.app.obsidian.path", value: "\"/opt/apps/Obsidian.AppImage\""},
+        OptionPlan{key: "apps.appimage.app.obsidian.integrate", value: "true"}
+    })
+}
+
+fn jetos_user_perf_test_read(root: String, relative: String) -[FS]> String Never! {
+    files.read(files.join(root, relative)) ?? panic("read {relative}")
+}
+
+#Test("JetOS user manifests preserve input order duplicates and terminal newline") {
+    assert_eq(jetos_manifest_lines([String]{}), "")
+    assert_eq(jetos_manifest_lines([String]{"z", "a", "z", ""}), "z\na\nz\n\n")
+    assert_eq(jetos_manifest_lines([String]{"packages.hello", "packages.btop"}), "packages.hello\npackages.btop\n")
+}
+
+#Test("JetOS user file targets keep explicit paths and home source fallback") {
+    assert_eq(jetos_user_file_target("ghosttyConfig", "home/ghostty/config"), ".config/ghostty/config")
+    assert_eq(jetos_user_file_target("bare", "other/source"), ".config/bare")
+    assert_eq(jetos_user_file_target(".profile", "home/ignored"), ".profile")
+    assert_eq(jetos_user_file_target("/tmp/file", "home/ignored"), "/tmp/file")
+    assert_eq(jetos_user_file_target("nested/file", "home/ignored"), "nested/file")
+    assert_eq(jetos_user_file_target("", "home/"), ".config/")
+    assert_eq(jetos_user_file_manifest_name("///...config/ghostty/config"), "config__ghostty__config")
+    assert_eq(jetos_user_file_manifest_name("./x"), "__x")
+    assert_eq(jetos_user_file_manifest_name("...///x"), "______x")
+}
+
+#Test("JetOS Flatpak AppImage wire preserves string bool and defaults") {
+    system :: jetos_user_perf_test_halcyon()
+    assert_eq(jetos_flatpak_apps_json(system, jetos_collect_names(system, "apps.flatpak.app")), "{{\n  \"name\": \"discord\",\n  \"ref\": \"com.discordapp.Discord\",\n  \"pin\": \"tracking\"\n}}")
+    assert_eq(jetos_appimages_json(system, jetos_collect_names(system, "apps.appimage.app")), "{{\n  \"name\": \"obsidian\",\n  \"path\": \"/opt/apps/Obsidian.AppImage\",\n  \"integrate\": \"true\"\n}}")
+    empty :: jetos_user_perf_test_system([OptionPlan]{})
+    assert_eq(jetos_flatpak_reconcile(empty), "Exact")
+    assert_eq(jetos_flatpak_apps_json(empty, [String]{"bare"}), "{{\n  \"name\": \"bare\",\n  \"ref\": \"bare\",\n  \"pin\": \"tracking\"\n}}")
+    assert_eq(jetos_appimages_json(empty, [String]{"bare"}), "{{\n  \"name\": \"bare\",\n  \"path\": \"bare\",\n  \"integrate\": \"true\"\n}}")
+    assert_eq(jetos_flatpak_apps_json(empty, [String]{}), "")
+    assert_eq(jetos_appimages_json(empty, [String]{}), "")
+}
+
+#Test("JetOS Flatpak script exact reconcile order and nonexact policy") {
+    system :: jetos_user_perf_test_halcyon()
+    script :: jetos_flatpak_reconcile_script(system, [String]{"discord"}, "Exact")
+    assert_eq(script, "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\nflatpak=${{JETOS_FLATPAK_BIN:-flatpak}}\nproof_dir=${{JETOS_FLATPAK_PROOF_DIR:-$root/flatpak}}\nmkdir -p \"$proof_dir\"\nproof=\"$proof_dir/reconcile-proof.json\"\nrun() {{\n  printf '%s\\n' \"jetos flatpak: $*\"\n  \"$flatpak\" \"$@\"\n}}\nrun remote-add --if-not-exists 'flathub' 'https://flathub.org/repo/flathub.flatpakrepo'\nrun install -y 'flathub' 'com.discordapp.Discord'\nrun override 'com.discordapp.Discord' --filesystem='Downloads'\ndeclared='com.discordapp.Discord'\ninstalled=$(\"$flatpak\" list --app --columns=application 2>/dev/null || true)\nfor app in $installed; do\n  case \" $declared \" in\n    *\" $app \"*) ;;\n    *) run uninstall -y \"$app\" ;;\n  esac\ndone\nrun update -y\nprintf '{{\"state\":\"reconciled\",\"proofs\":[\"remotes\",\"apps\",\"permissions\"]}}\\n' > \"$proof\"\ncat \"$proof\"\n")
+    tracking :: jetos_flatpak_reconcile_script(system, [String]{"discord"}, "Tracking")
+    assert(!tracking.contains("installed=") && !tracking.contains("uninstall") && !tracking.contains("run update"))
+    assert(tracking.contains("run install -y"))
+}
+
+#Test("JetOS Flatpak quoting permission flag and raw option order") {
+    system :: jetos_user_perf_test_system([OptionPlan]{
+        OptionPlan{key: "apps.flatpak.remotes.z", value: "https://example.test/o'brien"},
+        OptionPlan{key: "apps.flatpak.remotes.a", value: "second"},
+        OptionPlan{key: "apps.flatpak.app.z.ref", value: "org.o'brien"},
+        OptionPlan{key: "apps.flatpak.app.z.remote", value: "o'brien"},
+        OptionPlan{key: "apps.flatpak.app.z.pin", value: "fixed"},
+        OptionPlan{key: "apps.flatpak.app.z.permissions.socket.x11", value: ".Yes"},
+        OptionPlan{key: "apps.appimage.app.a.integrate", value: "false"}
+    })
+    script :: jetos_flatpak_reconcile_script(system, [String]{"z"}, "Exact")
+    assert(script.contains("run remote-add --if-not-exists 'z' 'https://example.test/o'\\''brien'\nrun remote-add --if-not-exists 'a' 'second'\n"))
+    assert(script.contains("run install -y 'o'\\''brien' 'org.o'\\''brien'\nrun override 'org.o'\\''brien' --socket-x11='Yes'\n"))
+    assert(script.contains("declared='org.o'\\''brien'\n"))
+    assert(jetos_flatpak_apps_json(system, [String]{"z"}).contains("\"pin\": \"fixed\""))
+    assert(jetos_appimages_json(system, [String]{"a"}).contains("\"integrate\": \"false\""))
+}
+
+#Test("JetOS performance wire original halcyon all five exact files") {
+    rows :: jetos_performance_json_files(jetos_user_perf_test_halcyon(), Val("ScxLavd"))
+    assert_eq(rows.len(), 5)
+    assert_eq(rows[0].name, "profile.json")
+    assert_eq(rows[0].body, "{{\"kind\":\"jetos.performance-profile\",\"profile\":\"Gaming\",\"kernel_profile\":\"CachyOSLatest\",\"kernel_params\":[\"quiet\"],\"proof\":\"kernel-tuning-profile-ready\"}}")
+    assert_eq(rows[1].name, "bootloader.json")
+    assert_eq(rows[1].body, "{{\"kind\":\"jetos.bootloader-tuning\",\"limine_max_generations\":\"7\",\"efi_can_touch_variables\":false,\"proof\":\"bootloader-tuning-ready\"}}")
+    assert_eq(rows[2].name, "initrd.json")
+    assert_eq(rows[2].body, "{{\"kind\":\"jetos.initrd-tuning\",\"systemd\":true,\"verbosity\":\"quiet\",\"proof\":\"initrd-tuning-ready\"}}")
+    assert_eq(rows[3].name, "scheduler.json")
+    assert_eq(rows[3].body, "{{\"kind\":\"jetos.scheduler\",\"scheduler\":\"ScxLavd\",\"unit\":\"etc/systemd/system/jetos-performance-scheduler.service\",\"proof\":\"sched-ext-service-ready\"}}")
+    assert_eq(rows[4].name, "facts.json")
+    assert_eq(rows[4].body, "{{\"kind\":\"jetos.performance\",\"profile\":\"Gaming\",\"kernel_profile\":\"CachyOSLatest\",\"scheduler\":\"ScxLavd\",\"kernel_params\":[\"quiet\"],\"sysctl\":[{{\n  \"key\": \"vm.swappiness\",\n  \"value\": \"10\"\n}}],\"zram\":\"50\",\"initrd\":\"performance/initrd.json\",\"bootloader\":\"performance/bootloader.json\",\"risk\":\"explicit-overrides-proof-visible\"}}")
+}
+
+#Test("JetOS performance defaults precedence and scheduler ASCII quoting") {
+    rows :: jetos_performance_json_files(jetos_user_perf_test_system([OptionPlan]{}), None)
+    assert_eq(rows[0].body, "{{\"kind\":\"jetos.performance-profile\",\"profile\":\"Safe\",\"kernel_profile\":\"CachyOS\",\"kernel_params\":[],\"proof\":\"kernel-tuning-profile-ready\"}}")
+    assert_eq(rows[1].body, "{{\"kind\":\"jetos.bootloader-tuning\",\"limine_max_generations\":\"10\",\"efi_can_touch_variables\":false,\"proof\":\"bootloader-tuning-ready\"}}")
+    assert_eq(rows[2].body, "{{\"kind\":\"jetos.initrd-tuning\",\"systemd\":false,\"verbosity\":\"normal\",\"proof\":\"initrd-tuning-ready\"}}")
+    assert_eq(rows[3].body, "{{\"kind\":\"jetos.scheduler\",\"scheduler\":null,\"unit\":null,\"proof\":\"sched-ext-service-ready\"}}")
+    assert(rows[4].body.contains("\"sysctl\":[],\"zram\":null"))
+    fallback :: jetos_user_perf_test_system([OptionPlan]{OptionPlan{key: "performance.kernel.profile", value: ".Custom"}, OptionPlan{key: "performance.kernel.params", value: "[\"fallback\"]"}})
+    assert(jetos_performance_json_files(fallback, None)[0].body.contains("\"Custom\",\"kernel_params\":[\"fallback\"]"))
+    both :: jetos_user_perf_test_system([OptionPlan]{OptionPlan{key: "performance.kernel.profile", value: ".Ignored"}, OptionPlan{key: "boot.kernel.profile", value: ".First"}, OptionPlan{key: "performance.kernel.params", value: "[ignored]"}, OptionPlan{key: "boot.kernel.params", value: "[first]"}})
+    assert(jetos_performance_json_files(both, None)[0].body.contains("\"First\",\"kernel_params\":[\"first\"]"))
+    assert_eq(jetos_performance_scheduler_script("ScxLavd"), "#!/usr/bin/env sh\nset -eu\nscheduler=${{JETOS_SCHEDULER_BIN:-'scx_lavd'}}\nexec \"$scheduler\" \"$@\"\n")
+    assert_eq(jetos_performance_scheduler_script("ÄBC'O"), "#!/usr/bin/env sh\nset -eu\nscheduler=${{JETOS_SCHEDULER_BIN:-'Äbc'\\''o'}}\nexec \"$scheduler\" \"$@\"\n")
+}
+
+// Narrow ORIGINAL filesystem closure Rust :298-314, no permissions substitute.
+#Test("JetOS performance tuning original filesystem sysctl and zram bytes") {
+    root :: files.tmpdir("jetos-perf-tuning-") ?? panic("tuning scratch")
+    jetos_write_performance_tuning(root, jetos_user_perf_test_halcyon()) ?? panic("tuning write")
+    assert_eq(jetos_user_perf_test_read(root, "etc/sysctl.d/90-jetos-performance.conf"), "vm.swappiness = 10\n")
+    assert_eq(jetos_user_perf_test_read(root, "etc/systemd/zram-generator.conf.d/jetos.conf"), "[zram0]\nzram-size = ram * 50 / 100\n")
+    jetos_write_performance_tuning(root, jetos_user_perf_test_system([OptionPlan]{OptionPlan{key: "performance.sysctl.z", value: "2"}, OptionPlan{key: "performance.sysctl.a", value: "1"}})) ?? panic("tuning rewrite")
+    assert_eq(jetos_user_perf_test_read(root, "etc/sysctl.d/90-jetos-performance.conf"), "z = 2\na = 1\n")
+    // Rust does not delete an earlier sysctl/zram file when options disappear.
+    jetos_write_performance_tuning(root, jetos_user_perf_test_system([OptionPlan]{})) ?? panic("empty tuning")
+    assert_eq(jetos_user_perf_test_read(root, "etc/sysctl.d/90-jetos-performance.conf"), "z = 2\na = 1\n")
+    files.remove_all(root) ?? panic("tuning cleanup")
+}
+
+#Test("JetOS scripts preserve user home fallback and AppImage failure print exec") {
+    user :: jetos_user_apply_script()
+    assert(user.contains("home=${{JETOS_USER_HOME:-}}\nif [ -z \"$home\" ] && [ -f \"$profile_dir/home.txt\" ]; then\n  home=$(sed -n '1p' \"$profile_dir/home.txt\")\nfi\nif [ -z \"$home\" ]; then\n  home=\"$HOME\"\nfi\n"))
+    assert(user.contains("if [ -f \"$root/$source\" ]; then\n    cp \"$root/$source\" \"$dest\"\n  else\n    printf 'managed-by=jetos\\nuser=%s\\nsource=%s\\n'"))
+    assert(user.contains("name=${{package##*.}}") && user.contains("ln -sfn") && user.contains("$service.service"))
+    assert(user.contains("usage: jetos-user-apply <user>") && user.contains("jetos user: no profile for $user"))
+    app :: jetos_appimage_runner_script()
+    assert(app.contains("usage: jetos-appimage-run <name> [--print]") && app.contains("jetos appimage: no app named $name"))
+    assert(app.ends_with("if [ \"${{2:-}}\" = '--print' ]; then\n  printf '%s\\n' \"$app\"\n  exit 0\nfi\nexec \"$app\"\n"))
+}
+
+// GATED original user journey: #3593 make_executable; #3594 native process.
+#Test("JetOS user original generation and apply source fallback packages services proof") {
+    root :: files.tmpdir("jetos-user-original-") ?? panic("user scratch")
+    generation :: files.join(root, "generation")
+    jetos_write_user_environment_facts(generation, jetos_user_perf_test_halcyon()) ?? panic("user generation")
+    assert_eq(jetos_user_perf_test_read(generation, "users/nate/home.txt"), "/home/nate\n")
+    assert_eq(jetos_user_perf_test_read(generation, "users/nate/shell.txt"), "/run/current-system/sw/bin/hello\n")
+    assert_eq(jetos_user_perf_test_read(generation, "users/nate/packages.manifest"), "packages.hello\npackages.btop\n")
+    assert_eq(jetos_user_perf_test_read(generation, "users/nate/services.manifest"), "syncthing\n")
+    assert_eq(jetos_user_perf_test_read(generation, "users/nate/files/config__ghostty__config"), "source=home/ghostty/config\ntarget=.config/ghostty/config\n")
+    profile :: jetos_user_perf_test_read(generation, "users/nate/profile.json")
+    assert(profile.contains("\"kind\":\"jetos.user-generation\"") && profile.contains("\"user\":\"nate\"") && profile.contains("syncthing"))
+    assert_eq(jetos_user_perf_test_read(generation, "users/index.json"), "{{\"kind\":\"jetos.user-index\",\"host\":\"halcyon\",\"profiles\":[{profile}]}}")
+    assert_eq(jetos_user_perf_test_read(generation, "users/nate/proof.txt"), "user nate: pass\n")
+    assert_eq(jetos_user_perf_test_read(generation, "etc/systemd/user/jetos-user-nate.service"), "[Unit]\nDescription=jetos user environment for nate\n\n[Service]\nType=oneshot\nExecStart=/run/current-system/sw/bin/jetos-user-apply nate\n\n[Install]\nWantedBy=default.target\n")
+    files.write(files.join(generation, "sw/bin/hello"), "package-fixture") ?? panic("package fixture")
+    home :: files.join(root, "applied-home")
+    applied :: process.cmd([String]{files.join(generation, "sw/bin/jetos-user-apply"), "nate"}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_USER_HOME", home).stdout(.Capture).stderr(.Capture).run() ?? panic("apply user")
+    assert(applied.success, applied.errors)
+    assert_eq(jetos_user_perf_test_read(home, ".config/ghostty/config"), "managed-by=jetos\nuser=nate\nsource=home/ghostty/config\n")
+    assert(files.exists(files.join(home, ".jetos/profile/bin/hello")))
+    assert(files.is_file(files.join(home, ".config/systemd/user/syncthing.service")))
+    assert(jetos_user_perf_test_read(home, ".jetos/proof/user-nate.json").contains("\"state\":\"applied\""))
+    // Actual source wins over the original managed-by fallback on a second run.
+    files.create_dir_all(files.join(generation, "home/ghostty")) ?? panic("home source")
+    files.write(files.join(generation, "home/ghostty/config"), "actual source\n") ?? panic("home source")
+    copied :: process.cmd([String]{files.join(generation, "sw/bin/jetos-user-apply"), "nate"}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_USER_HOME", home).stdout(.Capture).stderr(.Capture).run() ?? panic("reapply")
+    assert(copied.success, copied.errors)
+    assert_eq(jetos_user_perf_test_read(home, ".config/ghostty/config"), "actual source\n")
+    files.remove_all(root) ?? panic("user cleanup")
+}
+
+// GATED original Flatpak/AppImage journey #3593/#3594. The fake-flatpak is
+// the ORIGINAL Rust test fixture, not a replacement production package engine.
+#Test("JetOS foreign apps original reconcile native steps and AppImage print") {
+    root :: files.tmpdir("jetos-foreign-original-") ?? panic("foreign scratch")
+    generation :: files.join(root, "generation")
+    jetos_write_flatpak_facts(generation, jetos_user_perf_test_halcyon()) ?? panic("foreign generation")
+    plan :: jetos_user_perf_test_read(generation, "flatpak/plan.json")
+    assert(plan.contains("com.discordapp.Discord") && plan.contains("flatpak-reconcile-planned") && plan.contains("obsidian"))
+    appimage :: jetos_user_perf_test_read(generation, "appimage/plan.json")
+    assert(appimage.contains("appimage-runtime-integrated") && appimage.contains("/opt/apps/Obsidian.AppImage"))
+    assert_eq(jetos_user_perf_test_read(generation, "flatpak/permissions.manifest"), "app.discord.permissions.filesystem\t.Downloads\n")
+    assert_eq(jetos_user_perf_test_read(generation, "appimage/obsidian.desktop"), "[Desktop Entry]\nName=obsidian\nType=Application\nExec=/run/current-system/sw/bin/jetos-appimage-run obsidian\n")
+    fixture :: files.join(root, "fake-flatpak")
+    log :: files.join(root, "flatpak.log")
+    files.write(fixture, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$JETOS_FLATPAK_LOG\"\nif [ \"$1\" = list ]; then\n  printf '%s\\n' com.discordapp.Discord com.spotify.Client\nfi\n") ?? panic("flatpak fixture")
+    jetos_make_executable(fixture) ?? panic("fixture mode")
+    reconciled :: process.cmd([String]{files.join(generation, "sw/bin/jetos-flatpak-reconcile")}).env("JETOS_SYSTEM_ROOT", generation).env("JETOS_FLATPAK_BIN", fixture).env("JETOS_FLATPAK_LOG", log).stdout(.Capture).stderr(.Capture).run() ?? panic("reconcile")
+    assert(reconciled.success, reconciled.errors)
+    steps :: files.read(log) ?? panic("flatpak steps")
+    assert(steps.contains("remote-add --if-not-exists flathub") && steps.contains("install -y flathub com.discordapp.Discord") && steps.contains("override com.discordapp.Discord --filesystem=Downloads") && steps.contains("uninstall -y com.spotify.Client") && steps.contains("update -y"))
+    printed :: process.cmd([String]{files.join(generation, "sw/bin/jetos-appimage-run"), "obsidian", "--print"}).env("JETOS_SYSTEM_ROOT", generation).stdout(.Capture).stderr(.Capture).run() ?? panic("appimage print")
+    assert(printed.success, printed.errors)
+    assert_eq(printed.output, "/opt/apps/Obsidian.AppImage\n")
+    files.remove_all(root) ?? panic("foreign cleanup")
+}
+
+// GATED original scheduler: #3593 Studio + Root enable_unit, #3594 process.
+#Test("JetOS performance original native scheduler unit tuning and launch") {
+    root :: files.tmpdir("jetos-performance-original-") ?? panic("performance scratch")
+    generation :: files.join(root, "generation")
+    system :: jetos_user_perf_test_halcyon()
+    jetos_write_performance_facts(generation, system) ?? panic("performance generation")
+    loop row in jetos_performance_json_files(system, Val("ScxLavd")) -> assert_eq(jetos_user_perf_test_read(generation, "performance/{row.name}"), row.body)
+    assert_eq(jetos_user_perf_test_read(generation, "etc/sysctl.d/90-jetos-performance.conf"), "vm.swappiness = 10\n")
+    assert_eq(jetos_user_perf_test_read(generation, "etc/systemd/zram-generator.conf.d/jetos.conf"), "[zram0]\nzram-size = ram * 50 / 100\n")
+    assert_eq(jetos_user_perf_test_read(generation, "etc/systemd/system/jetos-performance-scheduler.service"), "[Unit]\nDescription=jetos sched-ext scheduler\nAfter=multi-user.target\n\n[Service]\nExecStart=/run/current-system/sw/bin/jetos-performance-scheduler\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target\n")
+    assert(files.exists(files.join(generation, "etc/systemd/system/multi-user.target.wants/jetos-performance-scheduler.service")))
+    fixture :: files.join(root, "fake-scheduler")
+    log :: files.join(root, "scheduler.log")
+    files.write(fixture, "#!/bin/sh\nprintf '%s\\n' scheduler >> \"$JETOS_SCHEDULER_LOG\"\n") ?? panic("scheduler fixture")
+    jetos_make_executable(fixture) ?? panic("scheduler mode")
+    ran :: process.cmd([String]{files.join(generation, "sw/bin/jetos-performance-scheduler")}).env("JETOS_SCHEDULER_BIN", fixture).env("JETOS_SCHEDULER_LOG", log).stdout(.Capture).stderr(.Capture).run() ?? panic("scheduler launch")
+    assert(ran.success, ran.errors)
+    assert_eq(files.read(log) ?? panic("scheduler log"), "scheduler\n")
+    files.remove_all(root) ?? panic("performance cleanup")
+}
+
+// GATED #3593: real user writer defaults, namespace priority and explicit paths.
+#Test("JetOS user original writer defaults aliases and exact user file records") {
+    root :: files.tmpdir("jetos-user-alias-") ?? panic("alias scratch")
+    system :: jetos_user_perf_test_system([OptionPlan]{
+        OptionPlan{key: "users.zeta.normal", value: "true"},
+        OptionPlan{key: "user.alpha.normal", value: "true"},
+        OptionPlan{key: "users.alpha.home", value: "/ignored"},
+        OptionPlan{key: "user.alpha.home", value: "/chosen"},
+        OptionPlan{key: "user.alpha.shell", value: "/bin/fish"},
+        OptionPlan{key: "users.alpha.packages", value: "[z, a, z]"},
+        OptionPlan{key: "users.alpha.services", value: "[first, second]"},
+        OptionPlan{key: "users.alpha.files.ignored", value: "home/ignored"},
+        OptionPlan{key: "user.alpha.files..profile", value: "home/profile"},
+        OptionPlan{key: "user.alpha.files.nested/path", value: "home/ignored"},
+        OptionPlan{key: "user.alpha.files.bare", value: "elsewhere"}
+    })
+    jetos_write_user_environment_facts(root, system) ?? panic("alias generation")
+    assert_eq(jetos_user_perf_test_read(root, "users/alpha/home.txt"), "/chosen\n")
+    assert_eq(jetos_user_perf_test_read(root, "users/alpha/shell.txt"), "/bin/fish\n")
+    assert_eq(jetos_user_perf_test_read(root, "users/alpha/packages.manifest"), "z\na\nz\n")
+    assert_eq(jetos_user_perf_test_read(root, "users/alpha/services.manifest"), "first\nsecond\n")
+    assert_eq(jetos_user_perf_test_read(root, "users/alpha/files/profile"), "source=home/profile\ntarget=.profile\n")
+    assert_eq(jetos_user_perf_test_read(root, "users/alpha/files/nested__path"), "source=home/ignored\ntarget=nested/path\n")
+    assert_eq(jetos_user_perf_test_read(root, "users/alpha/files/config__bare"), "source=elsewhere\ntarget=.config/bare\n")
+    assert(!files.exists(files.join(root, "users/alpha/files/config__ignored")))
+    assert_eq(jetos_user_perf_test_read(root, "users/zeta/home.txt"), "/home/zeta\n")
+    assert_eq(jetos_user_perf_test_read(root, "users/zeta/shell.txt"), "/run/current-system/sw/bin/sh\n")
+    assert_eq(jetos_user_perf_test_read(root, "users/zeta/packages.manifest"), "")
+    assert_eq(jetos_user_perf_test_read(root, "users/zeta/services.manifest"), "")
+    alpha :: jetos_user_perf_test_read(root, "users/alpha/profile.json")
+    zeta :: jetos_user_perf_test_read(root, "users/zeta/profile.json")
+    assert_eq(jetos_user_perf_test_read(root, "users/index.json"), "{{\"kind\":\"jetos.user-index\",\"host\":\"halcyon\",\"profiles\":[{alpha},{zeta}]}}")
+    files.remove_all(root) ?? panic("alias cleanup")
+}

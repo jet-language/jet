@@ -1,3 +1,5 @@
+use jet_foundation.[BuildEffect]
+
 // Finite sandboxed staged plan actions, ported from jetpack::Recipe
 // (`run_staged_plan_action`, `lower_staged_plan_action`, `PlanSandbox`,
 // staged-plan artifact publication). The declaration, fragment validation,
@@ -66,7 +68,7 @@ pub struct PlanSandbox {
             .Ok(resolved) -> resolved
             .Err(error) -> { return Err(StagedPlanActionError.Failed("{error.code}: {error.what}")) }
         }
-        bytes :: if recipe_read_file_nofollow(source, @RECIPE_MAX_READ_BYTES) == {
+        bytes :: if recipe_read_file_nofollow(source, RECIPE_MAX_READ_BYTES) == {
             .Ok(read) -> read
             .Err(error) -> { return Err(StagedPlanActionError.Failed("could not read declared input `{path}`: {error.message()}")) }
         }
@@ -192,7 +194,7 @@ pub fn recipe_lower_staged_plan_action(action: StagedPlanAction, fragment: Build
         .with_env("STAGED_PLAN_BOUND", bound_text)
         .with_env("STAGED_PLAN_PLATFORM", action.authority.platform)
         .with_env_allowlist([String]{"STAGED_PLAN_STAGE", "STAGED_PLAN_BOUND", "STAGED_PLAN_PLATFORM"})
-        .with_helper_version("jet-staged-plan", @STAGED_PLAN_FORMAT)
+        .with_helper_version("jet-staged-plan", STAGED_PLAN_FORMAT)
         .with_label("staged.action", action.name)
         .with_label("staged.identity", identity)
         .with_label("staged.fragment-digest", fragment_digest)
@@ -405,15 +407,15 @@ struct StagedPlanWriteFailure {
 
 fn recipe_write_staged_plan_files(staging: String, fragment_bytes: [U8], lock_text: String, plan_fingerprint: String) StagedPlanWriteFailure! -[FS]> {
     if files.write_bytes(files.join(staging, "fragment.plan"), fragment_bytes) == {
-        .Err(error) -> { return Err(StagedPlanWriteFailure{what: "could not write staged-plan fragment", error: RecipeError.Io(error)}) }
+        .Err(error) -> { return Err(StagedPlanWriteFailure{what: "could not write staged-plan fragment", error: RecipeError.IO(error)}) }
         else -> {}
     }
     if files.write(files.join(staging, "lock"), lock_text) == {
-        .Err(error) -> { return Err(StagedPlanWriteFailure{what: "could not write staged-plan lock", error: RecipeError.Io(error)}) }
+        .Err(error) -> { return Err(StagedPlanWriteFailure{what: "could not write staged-plan lock", error: RecipeError.IO(error)}) }
         else -> {}
     }
     if files.write(files.join(staging, "plan.fingerprint"), plan_fingerprint) == {
-        .Err(error) -> { return Err(StagedPlanWriteFailure{what: "could not write staged-plan fingerprint", error: RecipeError.Io(error)}) }
+        .Err(error) -> { return Err(StagedPlanWriteFailure{what: "could not write staged-plan fingerprint", error: RecipeError.IO(error)}) }
         else -> {}
     }
 }

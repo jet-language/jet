@@ -1,0 +1,78 @@
+// ForeignBridge.rs1952–2036: sole captured-text sidecar decoder. `path` is
+// only a diagnostic label; this module neither opens nor reconstructs paths.
+pub struct ForeignProvenanceText {
+    pub schema: String
+    pub identity: String?
+    pub fields: [String: [String]]
+}
+
+pub struct ForeignProvenance {
+    pub schema: String
+    pub identity: String
+    pub fields: [String: [String]]
+
+    pub fn value(self, name: String) -> String? Never! {
+        values :: self.fields.get(name) ?? return None
+        if values.len() == 0 -> return None
+        Val(values[0])
+    }
+}
+
+pub fn pkg_bridge_parse_provenance_text(path: String, text: String) -> ForeignProvenanceText Err! {
+    schema := String?{None}
+    identity := String?{None}
+    fields := [String: [String]]{}
+    loop line in pkg_bridge_text_lines(text) {
+        parts :: line.split_once("=") ?? return Err("malformed bridge provenance line in {path}")
+        if parts.before == "" || parts.after == "" -> return Err("empty bridge provenance field in {path}")
+        if parts.before == {
+            "schema" -> {
+                if schema != None -> return Err("duplicate bridge provenance schema in {path}")
+                schema = Val(parts.after)
+            }
+            "identity" -> {
+                if identity != None -> return Err("duplicate bridge provenance identity in {path}")
+                identity = Val(parts.after)
+            }
+            else -> {
+                values := fields.get(parts.before) ?? [String]{}
+                &values.push(parts.after)
+                fields[parts.before] = values
+            }
+        }
+    }
+    found_schema :: schema ?? return Err("bridge provenance has no schema: {path}")
+    Ok(ForeignProvenanceText{schema: found_schema, identity: identity, fields: fields})
+}
+
+pub fn pkg_bridge_text_lines(text: String) -> [String] Never! {
+    carriage_return :: String.from_bytes([U8]{U8{13}}) ?? ""
+    lines := [String]{}
+    loop line in text.split("\n") -> &lines.push(line.removesuffix(carriage_return))
+    if lines.len() > 0 && lines[lines.len() - 1] == "" -> _ := &lines.pop()
+    lines
+}
+
+pub fn pkg_bridge_read_provenance_text(path: String, text: String) -> ForeignProvenance Err! {
+    parsed :: pkg_bridge_parse_provenance_text(path, text)
+    identity :: parsed.identity ?? return Err("bridge provenance has no identity: {path}")
+    if parsed.schema != FOREIGN_BRIDGE_PROVENANCE_SCHEMA -> return Err("unsupported bridge provenance schema `{parsed.schema}`")
+    Ok(ForeignProvenance{schema: parsed.schema, identity: identity, fields: parsed.fields})
+}
+
+pub fn pkg_bridge_read_boundary_provenance_text(path: String, text: String) -> ForeignProvenance Err! {
+    parsed :: pkg_bridge_parse_provenance_text(path, text)
+    schema_rows :: parsed.fields.get("boundary-schema") ?? [String]{}
+    if schema_rows.len() == 0 || schema_rows[0] != FOREIGN_BOUNDARY_SCHEMA -> return Err("foreign boundary provenance has no canonical boundary row: {path}")
+    digest_rows :: parsed.fields.get("boundary-digest") ?? [String]{}
+    if digest_rows.len() == 0 -> return Err("foreign boundary provenance has no digest: {path}")
+    Ok(ForeignProvenance{schema: FOREIGN_BOUNDARY_SCHEMA, identity: digest_rows[0], fields: parsed.fields})
+}
+
+// Shared provenance emission; receipt rendering and outward writers consume
+// the same checked line format.
+pub fn pkg_bridge_append_line(text: &String, name: String, value: String) ForeignBridgeError! {
+    carriage_return :: String.from_bytes([U8]{U8{13}}) ?? ""
+    if name == "" || value == "" || name.contains("\n") || name.contains(carriage_return) || name.contains("=") || value.contains("\n") || value.contains(carriage_return) -> return Err(pkg_bridge_error("bridge provenance fields cannot contain line breaks or `=`"))
+    text = "{text}{name}={value}\n"
+}

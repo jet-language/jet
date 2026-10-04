@@ -1,0 +1,239 @@
+// Behavior ports of crates/jet-cli/src/Help/Render.rs:674-916.
+fn help_render_test_code() -> DiagnosticExplanation Never! { jet_cli_explain_lookup_code("E0102") ?? panic("E0102 is registered") }
+fn help_render_test_run(index: [JetCLIHelpEntry]) -> JetCLIHelpEntry Never! {
+    loop entry in index { if entry.symbol.name == "run" -> return entry }
+    panic("run is registered")
+}
+fn help_render_test_name(hit: JetCLIHelpHit) -> String Never! {
+    if hit == {
+        .Command(entry, _, _, _) -> entry.symbol.name
+        .Code(_) -> panic("fuzzy query unexpectedly returned exact code")
+    }
+}
+fn help_render_test_has_width(out: String, width: Int) -> Bool Never! {
+    loop line in jet_cli_help_lines(out) {
+        if jet_cli_help_cols(line) != width -> return false
+    }
+    true
+}
+
+// Rust `categorized_view_lists_every_command_once`.
+#Test("categorized_view_lists_every_command_once") {
+    index :: jet_cli_help_build_index()
+    out :: jet_cli_help_render_categorized(index, 0, false, None, 72, false, None)
+    loop entry in index -> assert(!out.contains("jet {entry.symbol.name}"))
+}
+// Rust `categorized_view_box_is_well_formed_at_fixed_width`.
+#Test("categorized_view_box_is_well_formed_at_fixed_width") {
+    out :: jet_cli_help_render_categorized(jet_cli_help_build_index(), 0, true, Val("run"), 64, false, None)
+    lines :: jet_cli_help_lines(out)
+    assert(lines[0].starts_with("┌"))
+    assert(lines[lines.len() - 1].starts_with("└"))
+    assert(help_render_test_has_width(out, 64))
+}
+// Rust `categorized_view_expands_only_selected_category`.
+#Test("categorized_view_expands_only_selected_category") {
+    out :: jet_cli_help_render_categorized(jet_cli_help_build_index(), 0, true, Val("run"), 72, false, None)
+    assert(out.contains("jet run"))
+    assert(!out.contains("jet add"))
+}
+// Rust `color_mode_styles_header_and_selection_without_breaking_width`.
+#Test("color_mode_styles_header_and_selection_without_breaking_width") {
+    out :: jet_cli_help_render_categorized(jet_cli_help_build_index(), 0, true, Val("run"), 64, true, None)
+    assert(out.contains("{JET_CLI_HELP_ESCAPE}[1;96m"))
+    assert(out.contains("{JET_CLI_HELP_ESCAPE}[48;5;24;97;1m"))
+    assert(help_render_test_has_width(out, 64))
+}
+// Rust `categorized_order_covers_every_command_no_headers`.
+#Test("categorized_order_covers_every_command_no_headers") {
+    index :: jet_cli_help_build_index()
+    order :: jet_cli_help_categorized_order(index)
+    assert_eq(order.len(), index.len())
+    loop entry in index -> assert(order.contains(entry.symbol.name))
+}
+// Rust `result_list_no_color_uses_bracket_emphasis`.
+#Test("result_list_no_color_uses_bracket_emphasis") {
+    hits :: jet_cli_help_search(jet_cli_help_build_index(), "run")
+    out :: jet_cli_help_render_result_list(hits, "run", 64, false, None, None)
+    assert(out.contains("[run]"))
+}
+// Rust `result_list_styles_semantic_codes_and_no_match_with_shared_roles`.
+#Test("result_list_styles_semantic_codes_and_no_match_with_shared_roles") {
+    code :: jet_cli_help_search(jet_cli_help_build_index(), "E0102")
+    out :: jet_cli_help_render_result_list(code, "E0102", 64, true, None, None)
+    assert(out.contains("{JET_CLI_HELP_ESCAPE}[31mE0102{JET_CLI_HELP_ESCAPE}[0m"))
+    empty :: jet_cli_help_render_result_list([JetCLIHelpHit]{}, "definitely-not-a-command", 64, true, None, None)
+    assert(empty.contains("{JET_CLI_HELP_ESCAPE}[33mno matches{JET_CLI_HELP_ESCAPE}[0m"))
+}
+// Rust `selected_result_roles_reapply_invert_after_inner_resets`.
+#Test("selected_result_roles_reapply_invert_after_inner_resets") {
+    index :: jet_cli_help_build_index()
+    invert :: "{JET_CLI_HELP_ESCAPE}[{JET_CLI_HELP_INVERT_SGR}m"
+    code_out :: jet_cli_help_render_result_list(jet_cli_help_search(index, "E0102"), "E0102", 64, true, Val(0), None)
+    assert(code_out.contains("{invert}{JET_CLI_HELP_ESCAPE}[31mE0102{JET_CLI_HELP_ESCAPE}[0m{invert}"))
+    command_out :: jet_cli_help_render_result_list(jet_cli_help_search(index, "run"), "run", 64, true, Val(0), None)
+    assert(command_out.contains("{invert}jet {JET_CLI_HELP_ESCAPE}[{DIAGNOSTIC_THEME_ACCENT}mrun{JET_CLI_HELP_ESCAPE}[0m{invert}"))
+}
+// Rust `bounded_result_list_scrolls_selected_row_and_restores_top`.
+#Test("bounded_result_list_scrolls_selected_row_and_restores_top") {
+    hits :: jet_cli_help_search(jet_cli_help_build_index(), "E")
+    assert(hits.len() > 20)
+    selections :: [Int]{20, 0}
+    loop selected in selections {
+        out :: jet_cli_help_render_result_list(hits, "E", 80, false, Val(selected), Val(10))
+        assert_eq(jet_cli_help_lines(out).len(), 10)
+        found := false
+        loop line in jet_cli_help_lines(out) {
+            if line.starts_with("│> ") && line.replace("[", "").replace("]", "").contains("jet {help_render_test_name(hits[selected])}") -> found = true
+        }
+        assert(found)
+    }
+}
+// Rust `result_list_drops_optional_rows_to_fit_short_terminals`.
+#Test("result_list_drops_optional_rows_to_fit_short_terminals") {
+    hits :: jet_cli_help_search(jet_cli_help_build_index(), "run")
+    if hits[0] == {
+        .Command(entry, _, _, _) -> assert(entry.symbol.examples.len() > 0)
+        .Code(_) -> panic("run is a command")
+    }
+    loop height in 5..<8 {
+        out :: jet_cli_help_render_result_list(hits, "run", 32, false, Val(0), Val(height))
+        assert_eq(jet_cli_help_lines(out).len(), height)
+        loop line in jet_cli_help_lines(out) -> assert(jet_cli_help_cols(line) <= 32)
+    }
+}
+// Rust `code_page_is_verbatim_from_explain`.
+#Test("code_page_is_verbatim_from_explain") {
+    ex :: help_render_test_code()
+    colors :: [Bool]{false, true}
+    loop color in colors -> assert_eq(jet_cli_help_render_code_page(ex, color), jet_cli_explain_render(ex, color))
+}
+// Rust `detail_view_shows_real_run_watch_flag`.
+#Test("detail_view_shows_real_run_watch_flag") {
+    run :: help_render_test_run(jet_cli_help_build_index())
+    assert(jet_cli_help_render_detail(run, 70, false).contains("--watch"))
+}
+// Rust `reference_view_has_header_and_footer`.
+#Test("reference_view_has_header_and_footer") {
+    index :: jet_cli_help_build_index()
+    out :: jet_cli_help_render_reference(index, 0, Val(index[0]), 80, 12, false, "run")
+    assert(out.starts_with("jet ? Reference"))
+    assert(out.contains("Search: run"))
+    assert(out.contains("Esc back"))
+    assert_eq(jet_cli_help_lines(out).len(), 12)
+    assert(help_render_test_has_width(out, 80))
+    selected := JetCLIHelpEntry?{None}
+    category :: JET_CLI_HELP_CATEGORIES[0]
+    loop entry in index {
+        if entry.category == category {
+            selected = Val(entry)
+            break
+        }
+    }
+    colored :: jet_cli_help_render_reference(index, 0, selected, 80, 12, true, "run")
+    assert(colored.contains("{JET_CLI_HELP_ESCAPE}[1;96mjet ?{JET_CLI_HELP_ESCAPE}[0m"))
+    assert(colored.contains("{JET_CLI_HELP_ESCAPE}[48;5;24;97;1m"))
+    assert(colored.contains("{JET_CLI_HELP_ESCAPE}[2;37m↑↓ ·"))
+    assert(help_render_test_has_width(colored, 80))
+}
+// Rust `short_reference_view_scrolls_selected_left_row_into_view`.
+#Test("short_reference_view_scrolls_selected_left_row_into_view") {
+    index :: jet_cli_help_build_index()
+    category := -1
+    loop (i, name) in JET_CLI_HELP_CATEGORIES { if name == "Reference" -> category = i }
+    assert(category >= 0)
+    selected := JetCLIHelpEntry?{None}
+    loop entry in index { if entry.category == "Reference" -> selected = Val(entry) }
+    entry :: selected ?? panic("reference contains entries")
+    out :: jet_cli_help_render_reference(index, category, selected, 60, 8, false, "")
+    assert_eq(jet_cli_help_lines(out).len(), 8)
+    assert(out.contains(">   {entry.symbol.name}"))
+    assert(help_render_test_has_width(out, 60))
+}
+// Rust `canonical_code_viewport_never_exceeds_requested_rows_or_columns`.
+#Test("canonical_code_viewport_never_exceeds_requested_rows_or_columns") {
+    canonical :: jet_cli_help_render_code_page(help_render_test_code(), false)
+    out :: jet_cli_help_render_text_viewport(canonical, 50, 8, 0)
+    assert_eq(jet_cli_help_lines(out).len(), 8)
+    loop line in jet_cli_help_lines(out) -> assert(jet_cli_help_cols(line) <= 50)
+}
+// Rust `colored_canonical_wrap_preserves_sgr_atoms_and_source_bytes`.
+#Test("colored_canonical_wrap_preserves_sgr_atoms_and_source_bytes") {
+    canonical :: jet_cli_help_render_code_page(help_render_test_code(), true)
+    rows :: jet_cli_help_wrap_text_rows(canonical, 8)
+    reconstructed := [U8]{}
+    loop row in rows {
+        assert(jet_cli_help_cols(row.text) <= 8)
+        first := true
+        loop suffix in row.text.split(JET_CLI_HELP_ESCAPE) {
+            if first {
+                first = false
+                next
+            }
+            assert(suffix.starts_with("[1;96m") || suffix.starts_with("[1m") || suffix.starts_with("[0m"))
+        }
+        jet_cli_help_append(&reconstructed, row.text)
+        if row.hard_break -> &reconstructed.push(U8{10})
+    }
+    assert_eq(jet_cli_help_bytes(reconstructed), canonical)
+}
+
+#Test("help emphasis groups positions and ignores out of range scalar indices") {
+    assert_eq(jet_cli_help_emphasize("jet run <file>", [Int]{4, 5, 6}, false), "jet [run] <file>")
+    assert_eq(jet_cli_help_emphasize("é中x", [Int]{2, 0, 99, 0}, false), "[é]中[x]")
+    assert_eq(jet_cli_help_emphasize("plain", [Int]{}, true), "plain")
+    run :: help_render_test_run(jet_cli_help_build_index())
+    alias :: [JetCLIHelpHit]{JetCLIHelpHit.Command{entry: run, score: 1, haystack: "watch", positions: [Int]{0, 1}}}
+    assert(!jet_cli_help_render_result_list(alias, "wa", 72, false, None, None).contains("["))
+}
+#Test("help padding clips equal width and retains SGR resets") {
+    assert_eq(jet_cli_help_pad("abc", 4), "abc ")
+    assert_eq(jet_cli_help_pad("abcd", 4), "abc…")
+    assert_eq(jet_cli_help_truncate_visible("abcd", 0), "")
+    styled :: diagnostic_theme_accent(true, "abcdef")
+    clipped :: jet_cli_help_pad(styled, 4)
+    assert_eq(clipped, "{JET_CLI_HELP_ESCAPE}[1;96mabc…{JET_CLI_HELP_ESCAPE}[0m")
+    assert_eq(jet_cli_help_pad("中中中", 4), "中中中 ")
+    assert_eq(jet_cli_help_pad("éabcd", 4), "éa…")
+}
+#Test("help query widths match Rust scalar counts rather than grapheme columns") {
+    assert_eq(jet_cli_help_cols("日本"), 2)
+    assert_eq(jet_cli_help_cols("é"), 2)
+    assert_eq(jet_cli_help_cols("{JET_CLI_HELP_ESCAPE}[1m日本{JET_CLI_HELP_ESCAPE}[0m"), 2)
+    assert_eq(jet_cli_help_truncate_visible("日本abc", 4), "日本a…")
+    assert_eq(jet_cli_help_cols("a{JET_CLI_HELP_ESCAPE}hidden"), 1)
+    assert_eq(jet_cli_help_cols("a{JET_CLI_HELP_ESCAPE}hiddenmb"), 2)
+    out :: jet_cli_help_render_result_list([JetCLIHelpHit]{}, "日本", 40, false, None, None)
+    assert(out.contains("> 日本"))
+    assert(help_render_test_has_width(out, 40))
+}
+#Test("help viewports preserve source line ends clamp scroll and fill only text views") {
+    cr :: String.from_bytes([U8]{U8{13}}) ?? panic("CR is valid UTF-8")
+    assert_eq(jet_cli_help_render_lines_viewport("a{cr}\nb\nc\n", 2, 99), "b\nc")
+    assert_eq(jet_cli_help_render_lines_viewport("a\n", 5, 0), "a")
+    assert_eq(jet_cli_help_render_lines_viewport("", 0, 0), "")
+    assert_eq(jet_cli_help_render_text_viewport("", 1, 3, 99), " \n \n ")
+    assert_eq(jet_cli_help_render_text_viewport("a\nb\nc\n", 24, 2, 99), "b\nc")
+    assert_eq(jet_cli_help_render_text_viewport("a", 0, 0, 0), "a")
+    source :: "\nabc{cr}\né中xy\nlast"
+    rows :: jet_cli_help_wrap_text_rows(source, 2)
+    reconstructed := [U8]{}
+    loop row in rows {
+        jet_cli_help_append(&reconstructed, row.text)
+        if row.hard_break -> &reconstructed.push(U8{10})
+    }
+    assert_eq(jet_cli_help_bytes(reconstructed), source)
+}
+#Test("bounded categorized view keeps selected command and expanded errors teach code queries") {
+    index :: jet_cli_help_build_index()
+    out :: jet_cli_help_render_categorized(index, 0, true, Val("run"), 40, false, Val(6))
+    assert_eq(jet_cli_help_lines(out).len(), 6)
+    assert(out.contains("│> jet run"))
+    error_category :: JET_CLI_HELP_CATEGORIES.len() - 1
+    error_out :: jet_cli_help_render_categorized(index, error_category, true, None, 72, false, None)
+    assert(error_out.contains("type an E-code, such as E0102"))
+    assert_eq(jet_cli_help_lines(error_out).len(), JET_CLI_HELP_CATEGORIES.len() + 5)
+    reference :: jet_cli_help_render_reference(index, 0, None, 80, 3, false, "")
+    assert_eq(jet_cli_help_lines(reference).len(), 3)
+    assert(reference.contains("Select a command on the left"))
+}

@@ -1,0 +1,411 @@
+use core.time as headless_time
+
+// Behavior of Headless.rs:1-439 (Rust has no inline tests). Real help reducer
+// journeys and recording/tape round trips; this is not terminal/PTY proof.
+fn headless_test_identity(width: Int, height: Int, color: Bool) -> JetCLIRecordingIdentity Never! {
+    jet_cli_recording_identity_new("jet ?", width, height, color) ?? panic(jet_cli_recording_error_message(err))
+}
+fn headless_test_replay() -> JetCLIHeadlessReplay Never! {
+    jet_cli_headless_replay_new(headless_test_identity(80, 24, false)) ?? panic(jet_cli_recording_error_message(err))
+}
+fn headless_test_run(replay: &JetCLIHeadlessReplay, source: String) -> JetCLITapeRun Never! {
+    jet_cli_headless_replay_source(&replay, source) ?? panic(jet_cli_tape_error_message(err))
+}
+fn headless_test_cursor(cursor: JetCLIHeadlessCursor?, column: Int, row: Int) Never! {
+    found :: cursor ?? panic("missing semantic cursor")
+    assert_eq(found.column, column)
+    assert_eq(found.row, row)
+}
+fn headless_test_same_frame(left: JetCLIHeadlessFrame, right: JetCLIHeadlessFrame) Never! {
+    assert_eq(left.size.width, right.size.width)
+    assert_eq(left.size.height, right.size.height)
+    assert_eq(left.text, right.text)
+    assert_eq(left.focus, right.focus)
+    if left.cursor == .Val(cursor) -> headless_test_cursor(right.cursor, cursor.column, cursor.row)
+    else -> assert(right.cursor == None)
+}
+fn headless_test_compare_state(driver: JetCLIHeadlessDriver, state: JetCLIHelpState) Never! {
+    frame :: jet_cli_headless_render(driver)
+    assert_eq(frame.text, jet_cli_help_state_render(state))
+    assert_eq(frame.focus, jet_cli_help_state_focus_name(state))
+    assert_eq(frame.size.width, state.width)
+    assert_eq(frame.size.height, state.height)
+    if jet_cli_help_state_cursor(state) == .Val(cursor) -> headless_test_cursor(frame.cursor, cursor.column, cursor.row)
+    else -> assert(frame.cursor == None)
+}
+#Test("headless size cursor and frame lines use zero based LF CRLF semantics") {
+    size :: jet_cli_headless_size_new(80, 24)
+    assert_eq(jet_cli_headless_size_columns(size), 80)
+    assert_eq(jet_cli_headless_size_rows(size), 24)
+    cursor :: jet_cli_headless_cursor_new(7, 3)
+    assert_eq(jet_cli_headless_cursor_x(cursor), 7)
+    assert_eq(jet_cli_headless_cursor_y(cursor), 3)
+    cr :: String.from_bytes([U8]{U8{13}}) ?? panic("CR")
+    frame :: JetCLIHeadlessFrame{size: size, text: "é{cr}\n\n日本{cr}tail\n", focus: None, cursor: Val(cursor)}
+    assert_eq(jet_cli_headless_frame_lines(frame), [String]{"é", "", "日本{cr}tail"})
+    assert_eq(jet_cli_headless_frame_line(frame, 0), Val("é"))
+    assert_eq(jet_cli_headless_frame_line(frame, 1), Val(""))
+    assert_eq(jet_cli_headless_frame_line(frame, 2), Val("日本{cr}tail"))
+    assert_eq(jet_cli_headless_frame_line(frame, 3), None)
+    assert_eq(jet_cli_headless_frame_line(frame, -1), None)
+    empty :: JetCLIHeadlessFrame{size: size, text: "", focus: None, cursor: None}
+    assert_eq(jet_cli_headless_frame_lines(empty), [String]{})
+    assert_eq(jet_cli_headless_frame_line(empty, 0), None)
+    final_cr :: JetCLIHeadlessFrame{size: size, text: "last{cr}", focus: None, cursor: None}
+    assert_eq(jet_cli_headless_frame_lines(final_cr), [String]{"last{cr}"})
+    assert_eq(jet_cli_headless_frame_line(final_cr, 0), Val("last{cr}"))
+}
+#Test("headless construction and resize normalize viewport and preserve semantic state") {
+    driver := jet_cli_headless_new(jet_cli_headless_size_new(0, 0))
+    assert_eq(jet_cli_headless_size(driver).width, 1)
+    assert_eq(jet_cli_headless_size(driver).height, 1)
+    assert(jet_cli_headless_ready(driver, "categorized"))
+    assert(!jet_cli_headless_ready(driver, ""))
+    assert(!jet_cli_headless_ready(driver, "a substring in the frame"))
+    jet_cli_headless_send(&driver, jet_cli_headless_input_resize(80, 24))
+    headless_test_cursor(jet_cli_headless_cursor(driver), 0, 3)
+    jet_cli_headless_press(&driver, JetCLITermKey.Right)
+    focus :: jet_cli_headless_focus(driver)
+    before :: jet_cli_headless_render(driver)
+    jet_cli_headless_send(&driver, jet_cli_headless_input_wait())
+    headless_test_same_frame(before, jet_cli_headless_render(driver))
+    jet_cli_headless_resize(&driver, jet_cli_headless_size_new(32, 10))
+    assert_eq(jet_cli_headless_focus(driver), focus)
+    assert_eq(jet_cli_headless_size(driver).width, 32)
+    assert_eq(jet_cli_headless_size(driver).height, 10)
+    assert(jet_cli_headless_ready(driver, "categorized"))
+}
+#Test("headless every semantic event follows real help reducer including actions") {
+    driver := jet_cli_headless_new(jet_cli_headless_size_new(80, 24))
+    state := jet_cli_help_state_new(80, 24, false)
+    keys :: [JetCLITermKey]{JetCLITermKey.Char('r'), JetCLITermKey.Char('u'), JetCLITermKey.Char('n'), JetCLITermKey.Down, JetCLITermKey.Up,
+        JetCLITermKey.Tab, JetCLITermKey.Down, JetCLITermKey.F1, JetCLITermKey.Char('r'), JetCLITermKey.Char('u'), JetCLITermKey.Char('n'),
+        JetCLITermKey.Enter, JetCLITermKey.Escape, JetCLITermKey.Enter, JetCLITermKey.CtrlC}
+    loop key in keys {
+        jet_cli_headless_send(&driver, jet_cli_headless_input_key(key))
+        action :: jet_cli_help_state_apply_key(&state, key)
+        if key == JetCLITermKey.F1 -> assert_eq(action, JetCLIHelpAction.EnterReference)
+        if key == JetCLITermKey.CtrlC -> assert_eq(action, JetCLIHelpAction.Quit)
+        headless_test_compare_state(driver, state)
+    }
+    assert_eq(state.mode, JetCLIHelpMode.Results)
+    assert_eq(state.query, "run")
+    assert_eq(jet_cli_headless_focus(driver), Val("run"))
+    assert_eq(jet_cli_help_state_apply_key(&state, JetCLITermKey.Enter), JetCLIHelpAction.Submit(Val("jet run")))
+    jet_cli_headless_resize(&driver, jet_cli_headless_size_new(32, 10))
+    jet_cli_help_state_resize(&state, 32, 10)
+    headless_test_compare_state(driver, state)
+}
+#Test("headless click uses semantic geometry ignores borders and viewport misses") {
+    driver := jet_cli_headless_new(jet_cli_headless_size_new(80, 24))
+    before :: jet_cli_headless_render(driver)
+    jet_cli_headless_click(&driver, 80, 3)
+    jet_cli_headless_click(&driver, 0, 24)
+    jet_cli_headless_click(&driver, 0, 2)
+    headless_test_same_frame(before, jet_cli_headless_render(driver))
+    jet_cli_headless_click(&driver, 79, 4)
+    assert_eq(jet_cli_headless_focus(driver), Val(JET_CLI_HELP_CATEGORIES[1]))
+    headless_test_cursor(jet_cli_headless_cursor(driver), 0, 4)
+    jet_cli_headless_click(&driver, 0, 3)
+    jet_cli_headless_press(&driver, JetCLITermKey.Right)
+    jet_cli_headless_click(&driver, 5, 5)
+    headless_test_cursor(jet_cli_headless_cursor(driver), 0, 5)
+    state := jet_cli_help_state_new(80, 24, false)
+    _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Right)
+    _ := jet_cli_help_state_click(&state, 5, 5)
+    headless_test_compare_state(driver, state)
+}
+#Test("headless custom real help target receives initial normalized resize") {
+    target :: JetCLIHeadlessStateTarget{state: jet_cli_help_state_new(99, 50, true)}
+    driver :: jet_cli_headless_with_target(jet_cli_headless_size_new(0, 10), ^target)
+    state :: jet_cli_help_state_new(1, 10, true)
+    headless_test_compare_state(driver, state)
+    assert(jet_cli_headless_ready(driver, "categorized"))
+}
+// A custom adapter delegates every transition/render to the production help
+// target; it deliberately inherits RenderTarget's conservative readiness.
+// #4365: trait default omitted from MIR impl. Scratch excludes this adapter
+// and its test only; both stay in the shipping behavior suite.
+struct HeadlessTestPassiveHelpTarget {
+    inner: JetCLIHeadlessStateTarget
+    impl JetCLIHeadlessRenderTarget {
+        fn render(self) -> String Never! { self.inner.render() }
+        fn send(&self, event: JetCLIHeadlessInputEvent) Never! { &self.inner.send(event) }
+        fn resize(&self, size: JetCLIHeadlessSize) Never! { &self.inner.resize(size) }
+        fn wait(&self) Never! { &self.inner.wait() }
+        fn focus(self) -> String? Never! { self.inner.focus() }
+        fn cursor(self) -> JetCLIHeadlessCursor? Never! { self.inner.cursor() }
+    }
+}
+#Test("headless custom target default readiness fails closed despite matching focus and render") {
+    custom :: HeadlessTestPassiveHelpTarget{inner: JetCLIHeadlessStateTarget{state: jet_cli_help_state_new(80, 24, false)}}
+    replay := jet_cli_headless_replay_with_driver(headless_test_identity(80, 24, false),
+        jet_cli_headless_with_target(jet_cli_headless_size_new(80, 24), ^custom)) ?? panic(jet_cli_recording_error_message(err))
+    _ := headless_test_run(&replay, "Type run")
+    assert_eq(jet_cli_headless_focus(replay.driver), Val("run"))
+    state := jet_cli_help_state_new(80, 24, false)
+    loop character in "run".chars() {
+        _ := jet_cli_help_state_apply_key(&state, JetCLITermKey.Char(character))
+    }
+    headless_test_compare_state(replay.driver, state)
+    if jet_cli_headless_replay_source(&replay, "Wait run") == {
+        .Ok(_) -> panic("default readiness accepted a marker")
+        .Err(error) -> assert_eq(jet_cli_tape_error_message(error), "tape step 1 (Wait) failed: readiness marker `run` was not observed")
+    }
+    assert_eq(replay.recording.events.len(), 3)
+}
+// Explicit form of the same conservative default, so other behavior stays
+// provable while the default-method dispatch compiler defect is open.
+struct HeadlessTestExplicitHelpTarget {
+    inner: JetCLIHeadlessStateTarget
+    impl JetCLIHeadlessRenderTarget {
+        fn render(self) -> String Never! { self.inner.render() }
+        fn send(&self, event: JetCLIHeadlessInputEvent) Never! { &self.inner.send(event) }
+        fn resize(&self, size: JetCLIHeadlessSize) Never! { &self.inner.resize(size) }
+        fn wait(&self) Never! { &self.inner.wait() }
+        fn focus(self) -> String? Never! { self.inner.focus() }
+        fn cursor(self) -> JetCLIHeadlessCursor? Never! { self.inner.cursor() }
+        fn ready(self, marker: String) -> Bool Never! { false }
+    }
+}
+#Test("headless custom explicit conservative readiness rejects a rendered focus") {
+    custom :: HeadlessTestExplicitHelpTarget{inner: JetCLIHeadlessStateTarget{state: jet_cli_help_state_new(80, 24, false)}}
+    replay := jet_cli_headless_replay_with_driver(headless_test_identity(80, 24, false),
+        jet_cli_headless_with_target(jet_cli_headless_size_new(80, 24), ^custom)) ?? panic(jet_cli_recording_error_message(err))
+    _ := headless_test_run(&replay, "Type run")
+    assert_eq(jet_cli_headless_focus(replay.driver), Val("run"))
+    if jet_cli_headless_replay_source(&replay, "Wait run") == {
+        .Ok(_) -> panic("conservative readiness accepted a marker")
+        .Err(error) -> assert_eq(jet_cli_tape_error_message(error), "tape step 1 (Wait) failed: readiness marker `run` was not observed")
+    }
+    assert_eq(replay.recording.events.len(), 3)
+}
+#Test("headless replay constructor records initial frame and rejects dimension mismatch first") {
+    replay :: headless_test_replay()
+    assert_eq(replay.recording.events.len(), 1)
+    frame :: jet_cli_headless_render(replay.driver)
+    assert(replay.recording.events[0] == JetCLIRecordingEvent.Frame{width: 80, height: 24, text: frame.text})
+    assert_eq(replay.environment.len(), 0)
+    assert_eq(replay.elapsed_ns, 0)
+    invalid :: JetCLIRecordingIdentity{command: "", width: 0, height: 24, color: false}
+    if jet_cli_headless_replay_with_driver(invalid, jet_cli_headless_new(jet_cli_headless_size_new(80, 24))) == {
+        .Ok(_) -> panic("accepted dimension mismatch")
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "headless driver dimensions do not match recording identity")
+    }
+    if jet_cli_headless_replay_new(invalid) == {
+        .Ok(_) -> panic("accepted zero dimension")
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "headless driver dimensions do not match recording identity")
+    }
+    bad_name :: JetCLIRecordingIdentity{command: "", width: 80, height: 24, color: false}
+    if jet_cli_headless_replay_new(bad_name) == {
+        .Ok(_) -> panic("accepted empty identity")
+        .Err(error) -> assert_eq(jet_cli_recording_error_message(error), "recording command identity must contain 1..=4096 bytes")
+    }
+}
+#Test("headless replay query selection detail reference resize submit quit journey") {
+    replay := headless_test_replay()
+    run :: headless_test_run(&replay, "Wait categorized\nType run\nWait results\nWait run\nWait \"jet run\"\nSleep 2ms\nSet HEADLESS_MODE local")
+    assert_eq(run.steps_executed, 7)
+    assert_eq(replay.recording.events.len(), 15)
+    assert_eq(replay.elapsed_ns, 2000000)
+    assert_eq(replay.environment["HEADLESS_MODE"], "local")
+    assert_eq(jet_cli_headless_focus(replay.driver), Val("run"))
+    headless_test_cursor(jet_cli_headless_cursor(replay.driver), 0, 3)
+    jet_cli_headless_press(&replay.driver, JetCLITermKey.Down)
+    assert(jet_cli_headless_focus(replay.driver) != Val("run"))
+    jet_cli_headless_press(&replay.driver, JetCLITermKey.Up)
+    assert_eq(jet_cli_headless_focus(replay.driver), Val("run"))
+    jet_cli_headless_press(&replay.driver, JetCLITermKey.Tab)
+    _ := headless_test_run(&replay, "Wait detail")
+    jet_cli_headless_press(&replay.driver, JetCLITermKey.F1)
+    _ := headless_test_run(&replay, "Wait reference\nType run\nWait run")
+    assert_eq(jet_cli_headless_focus(replay.driver), Val("run"))
+    jet_cli_headless_resize(&replay.driver, jet_cli_headless_size_new(32, 10))
+    frame :: jet_cli_headless_render(replay.driver)
+    assert_eq(frame.size.width, 32)
+    assert_eq(frame.size.height, 10)
+    assert_eq(frame.focus, Val("run"))
+    _ := headless_test_run(&replay, "Enter\nWait reference")
+    jet_cli_headless_press(&replay.driver, JetCLITermKey.Escape)
+    _ := headless_test_run(&replay, "Wait results\nEnter\nWait run")
+    before_quit :: jet_cli_headless_render(replay.driver)
+    jet_cli_headless_press(&replay.driver, JetCLITermKey.CtrlC)
+    headless_test_same_frame(before_quit, jet_cli_headless_render(replay.driver))
+}
+#Test("headless recorded tape round trip preserves exact frames digest output and virtual clock") {
+    first := headless_test_replay()
+    _ := headless_test_run(&first, "Type run\nEnter\nWait run\nSleep 3ms\nSet HEADLESS_MODE one\nSet HEADLESS_MODE two")
+    output :: jet_cli_headless_capture_output(&first) ?? panic(jet_cli_recording_error_message(err))
+    assert_eq(output, jet_cli_headless_render(first.driver).text)
+    assert_eq(first.recording.events.len(), 15)
+    assert(first.recording.events[13] == JetCLIRecordingEvent.Output(output))
+    tape :: jet_cli_recording_interaction_tape(first.recording) ?? panic(jet_cli_recording_error_message(err))
+    encoded :: jet_cli_recording_encode(first.recording) ?? panic(jet_cli_recording_error_message(err))
+    decoded :: jet_cli_recording_decode(encoded) ?? panic(jet_cli_recording_error_message(err))
+    second := headless_test_replay()
+    run :: jet_cli_headless_replay(&second, tape) ?? panic(jet_cli_tape_error_message(err))
+    assert_eq(run.steps_executed, 7)
+    assert_eq(run.outputs, [String]{output})
+    assert_eq(second.environment["HEADLESS_MODE"], "two")
+    assert_eq(second.elapsed_ns, 3000000)
+    assert_eq(jet_cli_recording_normalized_text(first.recording), jet_cli_recording_normalized_text(second.recording))
+    assert_eq(jet_cli_recording_digest(first.recording), jet_cli_recording_digest(second.recording))
+    assert_eq(jet_cli_recording_digest(first.recording), jet_cli_recording_digest(decoded))
+    assert_eq(encoded, jet_cli_recording_encode(second.recording) ?? panic(jet_cli_recording_error_message(err)))
+    headless_test_same_frame(jet_cli_headless_render(first.driver), jet_cli_headless_render(second.driver))
+    parts :: jet_cli_headless_into_parts(^second)
+    assert_eq(parts.recording.events.len(), 15)
+    assert_eq(jet_cli_headless_focus(parts.driver), Val("run"))
+}
+#Test("headless color policy records normalized frames while semantic capture stays styled") {
+    replay := jet_cli_headless_replay_new(headless_test_identity(80, 24, true)) ?? panic(jet_cli_recording_error_message(err))
+    plain := headless_test_replay()
+    _ := headless_test_run(&replay, "Type run\nEnter\nWait run")
+    _ := headless_test_run(&plain, "Type run\nEnter\nWait run")
+    frame :: jet_cli_headless_render(replay.driver)
+    assert(frame.text != jet_cli_headless_render(plain.driver).text)
+    captured :: jet_cli_headless_capture_output(&replay) ?? panic(jet_cli_recording_error_message(err))
+    assert_eq(captured, jet_cli_tape_normalize_terminal_text(frame.text))
+    assert(!captured.contains(JET_CLI_HELP_ESCAPE))
+    // Rust selected_row/emphasize deliberately change plain markers/brackets:
+    // stripping SGR from a colored frame is not the no-color render.
+    assert(captured != (jet_cli_headless_capture_output(&plain) ?? panic(jet_cli_recording_error_message(err))))
+    assert(replay.recording.events[7] == JetCLIRecordingEvent.Output(captured))
+    assert(replay.recording.events[8] == JetCLIRecordingEvent.Frame{width: 80, height: 24, text: captured})
+    assert_eq(jet_cli_headless_focus(replay.driver), Val("run"))
+}
+#Test("headless readiness errors use semantic identity not rendered text and stop replay") {
+    replay := headless_test_replay()
+    if jet_cli_headless_replay_source(&replay, "Type run\nWait \"jet build\"\nType x") == {
+        .Ok(_) -> panic("accepted wrong canonical focus")
+        .Err(error) -> assert_eq(jet_cli_tape_error_message(error), "tape step 2 (Wait) failed: readiness marker `jet build` was not observed")
+    }
+    assert_eq(replay.recording.events.len(), 3)
+    assert_eq(jet_cli_headless_focus(replay.driver), Val("run"))
+    assert(jet_cli_headless_ready(replay.driver, "jet run"))
+    assert(!jet_cli_headless_ready(replay.driver, "un"))
+    if jet_cli_headless_replay_source(&replay, "Output wrong") == {
+        .Ok(_) -> panic("accepted output mismatch")
+        .Err(error) -> {
+            if error == .OutputMismatch(step, expected, actual) {
+                assert_eq(step, 1)
+                assert_eq(expected, "wrong")
+                assert_eq(actual, jet_cli_headless_render(replay.driver).text)
+            } else { panic("wrong error") }
+        }
+    }
+    assert_eq(replay.recording.events.len(), 5)
+}
+#Test("headless requirements preflight before mutation and direct require revalidates") {
+    replay := headless_test_replay()
+    if jet_cli_headless_replay_source(&replay, "Type run\nRequire /__jet_headless_missing__") == {
+        .Ok(_) -> panic("missing program passed")
+        .Err(error) -> assert_eq(jet_cli_tape_error_message(error), "required program `/__jet_headless_missing__` is unavailable")
+    }
+    assert_eq(replay.recording.events.len(), 1)
+    assert(jet_cli_headless_ready(replay.driver, "categorized"))
+    if (&replay.require("/__jet_headless_missing__")) == {
+        .Ok(_) -> panic("direct missing program passed")
+        .Err(error) -> assert_eq(error.message, "required program `/__jet_headless_missing__` is unavailable")
+    }
+    if (&replay.require("")) == {
+        .Ok(_) -> panic("empty program passed")
+        .Err(error) -> assert_eq(error.message, "tape step 1: Require needs a non-empty program name")
+    }
+    program :: tape_sys.executable()
+    &replay.require(program) ?? panic(err.message)
+    assert_eq(replay.recording.events.len(), 3)
+    assert(replay.recording.events[1] == JetCLIRecordingEvent.Require(program))
+}
+#Test("headless set validates tape then recording privacy and publishes override only after frame") {
+    replay := headless_test_replay()
+    if (&replay.set("9BAD", "value")) == {
+        .Ok(_) -> panic("invalid name passed")
+        .Err(error) -> assert_eq(error.message, "tape step 1: invalid environment name `9BAD`")
+    }
+    if (&replay.set("API_TOKEN", "value")) == {
+        .Ok(_) -> panic("sensitive name passed")
+        .Err(error) -> assert_eq(error.message, "refusing to record sensitive environment name `API_TOKEN`")
+    }
+    assert_eq(replay.environment.len(), 0)
+    assert_eq(replay.recording.events.len(), 1)
+    jet_cli_headless_resize(&replay.driver, jet_cli_headless_size_new(65536, 24))
+    if (&replay.set("HEADLESS_MODE", "value")) == {
+        .Ok(_) -> panic("oversized frame passed")
+        .Err(error) -> assert_eq(error.message, "headless frame width exceeds recording limits")
+    }
+    assert_eq(replay.environment.len(), 0)
+    assert_eq(replay.recording.events.len(), 2)
+    assert(replay.recording.events[1] == JetCLIRecordingEvent.Set{name: "HEADLESS_MODE", value: "value"})
+    if jet_cli_headless_capture_output(&replay) == {
+        .Ok(_) -> panic("oversized output frame passed")
+        .Err(error) -> {
+            assert(error == JetCLIRecordingError.Event("recording text bytes exceeds the 1048576 item limit"))
+        }
+    }
+    // The oversized output event fails before it can be appended.
+    assert_eq(replay.recording.events.len(), 2)
+}
+#Test("headless clock retains submillisecond precision saturates and mutates before record failure") {
+    replay := headless_test_replay()
+    &replay.sleep(headless_time.duration_ns(999999)) ?? panic(err.message)
+    assert_eq(replay.elapsed_ns, 999999)
+    assert(replay.recording.events[1] == JetCLIRecordingEvent.Sleep(U64{0}))
+    replay.elapsed_ns = JET_CLI_HEADLESS_MAX_ELAPSED_NS - 1
+    &replay.sleep(headless_time.duration_ns(2)) ?? panic(err.message)
+    assert_eq(replay.elapsed_ns, JET_CLI_HEADLESS_MAX_ELAPSED_NS)
+    replay.elapsed_ns = 0
+    if (&replay.sleep(headless_time.duration_ns(3600001000000))) == {
+        .Ok(_) -> panic("oversized direct sleep passed")
+        .Err(error) -> assert_eq(error.message, "recording Sleep exceeds one hour")
+    }
+    assert_eq(replay.elapsed_ns, 3600001000000)
+    assert_eq(replay.recording.events.len(), 5)
+    if jet_cli_headless_replay_source(&replay, "Sleep 3600001ms") == {
+        .Ok(_) -> panic("oversized tape sleep passed")
+        .Err(error) -> assert_eq(jet_cli_tape_error_message(error), "tape line 1: duration `3600001ms` exceeds the one-hour limit")
+    }
+    assert_eq(replay.elapsed_ns, 3600001000000)
+}
+#Test("headless repeated tapes accumulate several maximum bounded sleeps exactly") {
+    replay := headless_test_replay()
+    run :: headless_test_run(&replay, "Sleep 3600000ms\nSleep 3600000ms")
+    assert_eq(run.steps_executed, 2)
+    _ := headless_test_run(&replay, "Sleep 3600000ms")
+    assert_eq(replay.elapsed_ns, 10800000000000)
+    assert_eq(replay.recording.events.len(), 7)
+    assert(replay.recording.events[1] == JetCLIRecordingEvent.Sleep(U64{3600000}))
+    assert(replay.recording.events[3] == JetCLIRecordingEvent.Sleep(U64{3600000}))
+    assert(replay.recording.events[5] == JetCLIRecordingEvent.Sleep(U64{3600000}))
+}
+#Test("headless recording frame count errors preserve preceding event and applied reducer") {
+    replay := headless_test_replay()
+    loop _ in 1..<JET_CLI_MAX_RECORDING_FRAMES - 1 -> &replay.recording.events.push(JetCLIRecordingEvent.Enter)
+    if (&replay.type_text("run")) == {
+        .Ok(_) -> panic("frame count passed")
+        .Err(error) -> assert_eq(error.message, "recording frame count exceeds the 100000 item limit")
+    }
+    assert_eq(replay.recording.events.len(), JET_CLI_MAX_RECORDING_FRAMES)
+    assert(replay.recording.events[JET_CLI_MAX_RECORDING_FRAMES - 1] == JetCLIRecordingEvent.Type("run"))
+    assert_eq(jet_cli_headless_focus(replay.driver), Val("run"))
+    before :: jet_cli_headless_render(replay.driver)
+    if (&replay.enter()) == {
+        .Ok(_) -> panic("full recording passed")
+        .Err(error) -> assert_eq(error.message, "recording frame count exceeds the 100000 item limit")
+    }
+    headless_test_same_frame(before, jet_cli_headless_render(replay.driver))
+    loop _ in 0..<2 {
+        if jet_cli_headless_replay_source(&replay, "Sleep 3600000ms") == {
+            .Ok(_) -> panic("full recording accepted sleep")
+            .Err(error) -> assert_eq(jet_cli_tape_error_message(error), "tape step 1 (Sleep) failed: recording frame count exceeds the 100000 item limit")
+        }
+    }
+    assert_eq(replay.elapsed_ns, 7200000000000)
+    replay.elapsed_ns = JET_CLI_HEADLESS_MAX_ELAPSED_NS - 1
+    if (&replay.sleep(headless_time.duration_ns(2))) == {
+        .Ok(_) -> panic("full recording accepted saturation sleep")
+        .Err(error) -> assert_eq(error.message, "recording frame count exceeds the 100000 item limit")
+    }
+    assert_eq(replay.elapsed_ns, JET_CLI_HEADLESS_MAX_ELAPSED_NS)
+    assert_eq(replay.recording.events.len(), JET_CLI_MAX_RECORDING_FRAMES)
+}

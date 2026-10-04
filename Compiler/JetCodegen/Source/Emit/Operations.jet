@@ -71,7 +71,9 @@ use jet_foundation.[
     MIRValueID,
     MIRVariantPayload,
     Span,
+    Type,
     core_call_symbol_name,
+    core_call_typed_signature,
     mir_measure_literal_value,
     mir_nominal_ref,
     mir_symbol_name,
@@ -2117,7 +2119,145 @@ fn jet_rust_emit_core_shape_expression(ctx: &JetRustEmitContext, function: MIRFu
     None
 }
 
-fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRCoreCallID, route: MIRPreludeCallID, args: [MIRCallArg], type_args: [MIRType], fallibility: MIRCallFallibility, data_plan: MIRDataPlan?, result: MIRValueID?) -> String Never! {
+// MIRRust exact_int_argument: an exact-carrier Core slot keeps a checked Int
+// and widens a fixed-width integer into it.
+fn jet_rust_emit_exact_int_argument(ctx: &JetRustEmitContext, ty: MIRType, value: String) -> String? {
+    if ty.kind == {
+        .Int -> return Val(value)
+        .IntN(_, _) -> return Val("{ctx.config.root_prefix}jet_std::jet_int_owned_from_i128(({value}) as i128)")
+        .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> return jet_rust_emit_exact_int_argument(&ctx, base, value)
+        else -> return None
+    }
+}
+
+// MIRRust core_call_symbol_for_function: a Core kernel takes host `i64` for a
+// checked `Int` parameter (and `Vec<i64>` for `[Int]`), so the exact Int
+// narrows at the call with a checked range stop. `core.reactive.signal`
+// constructs `JetSignal<JetInt>` and keeps the exact carrier.
+fn jet_rust_emit_core_call_argument(ctx: &JetRustEmitContext, function: MIRFunction, module_name: String, member: String, symbol: String, index: Int, arg: MIRCallArg, borrowed: Bool, declared: Type?, location: MIRPanicLoc?) -> String Never! {
+    value_type :: jet_rust_emit_value_type(ctx, function, arg.value)
+    value_is_int :: value_type.kind == MIRTypeKind.Int
+    exact_int_carrier :: module_name == "core.reactive" && member == "signal"
+    if !exact_int_carrier && module_name == "core.tasks" && symbol == "jet_std::channel_bounded" && index == 0 && !borrowed && value_is_int {
+        value :: jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, false)
+        return jet_rust_emit_native_int_argument(&ctx, value, location)
+    }
+    if exact_int_carrier {
+        value :: jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, false)
+        if jet_rust_emit_exact_int_argument(&ctx, value_type, value) == .Val(lifted) -> return lifted
+    }
+    if declared == .Val(ty) {
+        if ty == {
+            .Int -> {
+                if !exact_int_carrier && value_is_int {
+                    value :: jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, true)
+                    narrowed :: jet_rust_emit_native_int_argument(&ctx, value, location)
+                    if borrowed -> return "&({narrowed})"
+                    return narrowed
+                }
+            }
+            .List(element) -> {
+                if element == {
+                    .Int -> {
+                        value :: jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, true)
+                        element_value :: jet_rust_emit_native_int_argument(&ctx, "__jet_value", location)
+                        values :: "({value}).iter().map(|__jet_value| {element_value}).collect::<Vec<_>>()"
+                        if borrowed -> return "&({values})"
+                        return values
+                    }
+                    else -> {}
+                }
+            }
+            else -> {}
+        }
+    }
+    // MIRRust core_call_path_argument (D-CORE-PATH1): a Path value in a formal
+    // that admits Path crosses as the native kernel's String carrier, never as
+    // the checked union value.
+    if jet_rust_emit_nominal_name(value_type) == (Val("Path")) && jet_rust_emit_core_formal_admits_path(declared) {
+        path_arg := arg
+        path_arg.widen_to_union = None
+        value :: jet_rust_emit_call_arg_with_borrow(&ctx, function, path_arg, borrowed)
+        path :: "({value}).inner.to_string_lossy().into_owned()"
+        if borrowed -> return "&{path}"
+        return path
+    }
+    jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, borrowed)
+}
+
+fn jet_rust_emit_core_formal_admits_path(declared: Type?) -> Bool Never! {
+    ty :: declared ?? return false
+    if ty == {
+        .Named(name) -> return name == "Path"
+        .Union(members) -> {
+            loop member in members {
+                if member == .Named(name) {
+                    if name == "Path" -> return true
+                }
+            }
+            return false
+        }
+        else -> return false
+    }
+}
+
+// MIRRust core_call_symbol_for_function reads `Sema::core_call_signature`: a
+// polymorphic Core special has no fixed row projection, and these have no
+// fixed default shape either, so the reference renders their arguments with
+// no declared formal type (no host-Int narrowing). Generated from
+// `fixed_sigs.rs`: `is_polymorphic_core_special` minus `core_fixed_sig_impl` arms.
+fn jet_rust_emit_core_call_untyped(module_name: String, member: String) -> Bool Never! {
+    if {
+        module_name == "core.compute" -> [String]{"gradient", "jvp", "value_and_gradient", "vjp"}.contains(member)
+        module_name == "core.crypto.vault" -> [String]{"authorize_wrapped_import", "authorize_write", "commit_generate", "commit_import_wrapped", "commit_retire", "commit_revoke", "commit_rotate", "commit_store", "current", "export_to_passphrase", "export_to_recipients", "load", "prepare_generate", "prepare_import_wrapped", "prepare_retire", "prepare_revoke", "prepare_rotate", "prepare_store", "status", "versions"}.contains(member)
+        module_name == "core.db" || module_name == "core.sys" -> member == "decode"
+        module_name == "core.encoding.cbor" -> [String]{"decode", "parse", "to_bytes", "to_bytes_canonical"}.contains(member)
+        module_name == "core.encoding.csv" -> member == "query"
+        module_name == "core.encoding.xml" -> [String]{"decode", "decode_bytes", "expanded_name"}.contains(member)
+        module_name == "core.math" -> [String]{
+            "abs", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "binomial", "cbrt", "checked_abs", "checked_add",
+            "checked_div", "checked_mul", "checked_neg", "checked_pow", "checked_rem", "checked_sub", "clamp", "cmp", "conj", "copy", "copysign", "cos",
+            "cosh", "cot", "degrees", "digits", "div_mod", "div_rem", "erf", "erfc", "exp", "exp2", "exp_m1", "float32",
+            "float64", "fma", "fract", "frexp", "from_bits", "gamma", "gcd", "hypot", "ilogb", "imag", "int_pow", "inv",
+            "is_canonical", "is_even", "is_finite", "is_inf", "is_integer", "is_nan", "is_normal", "is_odd", "is_signed", "is_subnormal", "is_zero", "lcm",
+            "ldexp", "leading_ones", "lerp", "lgamma", "ln", "ln_1p", "log", "log10", "log2", "logb", "max", "min",
+            "modf", "muladd", "next_after", "next_down", "next_up", "nextafter", "radians", "radix", "real", "saturating_add", "saturating_mul", "saturating_sub",
+            "scaleb", "sign", "sign_bit", "significand", "signum", "sin", "sin_cos", "sinh", "tan", "tanh", "to_bits", "trailing_ones",
+            "trunc", "truncate", "ulp", "zero",
+        }.contains(member)
+        module_name == "core.math.random" -> [String]{"pick", "sample", "shuffle", "weighted_pick"}.contains(member)
+        module_name == "core.prelude" -> member == "keep"
+        module_name == "core.reactive" -> member == "derived" || member == "signal"
+        module_name == "core.tasks" -> member == "after"
+        module_name == "core.term" -> member == "eprint" || member == "print"
+        module_name == "core.testing" -> member == "histories"
+        module_name == "core.text" -> member == "display_width"
+        module_name == "core.text.fmt" -> member == "pretty"
+        else -> false
+    }
+}
+
+fn jet_rust_emit_core_call_arguments(ctx: &JetRustEmitContext, function: MIRFunction, module_name: String, member: String, symbol: String, args: [MIRCallArg], borrow_mask: [Bool], location: MIRPanicLoc?) -> String Never! {
+    if borrow_mask.len() < args.len() {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "call ABI borrow metadata does not cover its arguments", "checked call routes must provide one borrow convention for every emitted argument", Val(function.span))
+        return ""
+    }
+    declared := [Type]{}
+    if !jet_rust_emit_core_call_untyped(module_name, member) {
+        if core_call_typed_signature(module_name, member, args.len()) == .Val(signature) {
+            loop parameter in signature.parameters -> &declared.push(parameter.ty)
+        }
+    }
+    rendered := [String]{}
+    loop (index, arg) in args {
+        parameter := Type?{None}
+        if index < declared.len() -> parameter = Val(declared[index])
+        &rendered.push(jet_rust_emit_core_call_argument(&ctx, function, module_name, member, symbol, index, arg, borrow_mask[index], parameter, location))
+    }
+    rendered.join(", ")
+}
+
+fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRCoreCallID, route: MIRPreludeCallID, args: [MIRCallArg], type_args: [MIRType], fallibility: MIRCallFallibility, data_plan: MIRDataPlan?, result: MIRValueID?, location: MIRPanicLoc?) -> String Never! {
     core_found := false
     module_name := ""
     member := ""
@@ -2135,6 +2275,12 @@ fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MIRFunction,
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Core call is missing from the canonical Core registry", "checked Core calls must retain their source-owned symbol and ABI row", Val(function.span))
         return "unreachable!(\"missing MIR Core call\")"
     }
+    // MIRRust core_call routes `core.testing.histories` to history_call_expression
+    // (seed/case bounds become `to_i64` with the history error carrier) before
+    // any ordinary Core marshalling. That adapter has no Jet port, and
+    // jet_rust_emit_reject_history_strategies already fails this program closed,
+    // so the ordinary renderer never narrows these arguments.
+    if module_name == "core.testing" && member == "histories" -> return "unreachable!(\"core.testing.histories has no Jet emission port\")"
     // MIRRust source_math_call: these core.math members are routed through their
     // Jet source function unless the row is an AOT-direct Prelude kernel.
     source_math :: [String]{"checked_abs", "checked_neg", "checked_add", "checked_sub", "checked_mul", "checked_div", "checked_rem", "checked_pow", "saturating_add", "saturating_mul", "int_pow", "sum_int", "prod_int", "abs_diff", "div_mod", "div_rem"}
@@ -2168,7 +2314,7 @@ fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MIRFunction,
     source :: jet_rust_emit_core_symbol(&ctx, call)
     target :: jet_rust_emit_exact_adapter(&ctx, Val(function), source, args)
     mask :: jet_rust_emit_exact_adapter_mask(args, source, route_info.signature.borrow_mask, target)
-    rendered :: jet_rust_emit_call_arguments(&ctx, function, args, mask)
+    rendered :: if source != target -> jet_rust_emit_call_arguments(&ctx, function, args, mask) else -> jet_rust_emit_core_call_arguments(&ctx, function, module_name, member, source, args, mask, location)
     generic :: jet_rust_emit_generic_call_args(&ctx, type_args)
     expression := "{target}{generic}({rendered})"
     special := jet_rust_emit_core_shape_expression(&ctx, function, module_name, member, route_info, args, type_args)
@@ -4340,7 +4486,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
         .Deref(value) -> return jet_rust_emit_deref(&ctx, function, value)
         .RawAddressOf(place) -> return jet_rust_emit_raw_address_of(&ctx, function, place, result)
         .AddressOf(place, access) -> return jet_rust_emit_place_reference(&ctx, function, place, access)
-.CoreCall(call, route, args, type_args, fallibility, data_plan) -> return jet_rust_emit_core_operation(&ctx, function, call, route, args, type_args, fallibility, data_plan, result)
+.CoreCall(call, route, args, type_args, fallibility, data_plan) -> return jet_rust_emit_core_operation(&ctx, function, call, route, args, type_args, fallibility, data_plan, result, location)
         .AttachTag(value, _) -> return jet_rust_emit_value_move(value)
         .Semantic(semantic) -> {
             if semantic == {

@@ -1,0 +1,161 @@
+// PORT-PENDING 2166 crates-jet-pkg-model-src-lib: crates/jet-pkg-model/src/lib.rs:1-157
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! `jet-pkg-model` — the shared, read-only package/config data model (card
+//RS //! #367, D-PRODUCT-SPLIT1=C).
+//RS //!
+//RS //! This crate is the manifest/lock/store/ref/workspace/script *data* layer:
+//RS //! parsing `package.jet`, the compiler-facing `Manifest`/`Lock` types, the C FFI
+//RS //! binding-generation surface, inline script dependencies, and the read-only
+//RS //! subset of the Jetpack hangar store (root resolution + listing already
+//RS //! recorded entries). It holds no network/provider/shell engine code — that
+//RS //! stays in the `jetpack` crate, which re-exports every module here under
+//RS //! its historical paths so its own internal call sites are unchanged.
+//RS //!
+//RS //! `jet-driver` (the compiler's module loader) depends on this crate instead
+//RS //! of the full `jetpack` engine, so the compiler's dependency graph never
+//RS //! needs Jetpack's provider/network/shell machinery to resolve `use <pkg>`
+//RS //! imports against already-realized packages.
+//RS 
+//RS #![allow(non_snake_case)]
+//RS #![deny(warnings)]
+//RS 
+//RS // Re-export lower seams so files in this crate can use `crate::Diagnostics`,
+//RS // `crate::SHA256`, and, in the host compiler build, `crate::AST`,
+//RS // `crate::Lexer`, `crate::Parser`, `crate::Policy`, `crate::Sema`,
+//RS // `crate::Syntax`, and `crate::TargetMachine` without cross-crate path
+//RS // changes.  The model/provider runtime deliberately does not pull the
+//RS // compiler-only semantic preparation graph.
+//RS pub use jet_foundation::{Diagnostics, SHA256};
+//RS #[cfg(feature = "compiler")]
+//RS pub use jet_sema::{AST, Lexer, Parser, Policy, Sema, Syntax, TargetMachine};
+//RS 
+//RS #[cfg(feature = "compiler")]
+//RS pub mod AdaBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod Authority;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod Bindgen;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod CBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod CFFI;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod CobolBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod ComBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod CppBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod DartBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod DotNetBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod FortranBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod GoBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod JavaBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod JavaScriptBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod LuaBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod OctaveBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod PascalBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod PerlBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod PhpBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod PowerShellBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod PythonBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod RBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod RubyBind;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod TclBind;
+//RS 
+//RS // Card #367 / D-PRODUCT-SPLIT1=C slice 3: pure policy computation over the
+//RS // manifest/effect-fixpoint data (no network/provider/shell engine code, same
+//RS // bar as the rest of this crate) — moved here from `jetpack` so `jet`'s own
+//RS // `build`/`run` effect-budget summary and lint-policy enforcement no longer
+//RS // need the full Jetpack engine, only this read-only-adjacent data/policy
+//RS // layer. `jetpack` re-exports both under their historical paths.
+//RS #[cfg(feature = "compiler")]
+//RS pub mod EffectBudget;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod Envelope;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod ForeignBridge;
+//RS // D-DX5-HOOK1=A / Tower #549: pure compiler-extension protocol/snapshot model.
+//RS // The Wasmtime host source stays beside `Prelude/Plugin.rs`, but only the
+//RS // isolated `jetpack` binary compiles it; the compiler never links Wasmtime.
+//RS #[cfg(feature = "compiler")]
+//RS pub mod CompilerExtension;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod FFI;
+//RS // Card #1421 criteria 2-3: `.jetlib` loadable-library artifact stamp and the
+//RS // load-time trust boundary (D-LIB-REUSE1=B compiler-identity pin,
+//RS // D-LIB-DYNTRUST1=A declared-effect grant). The driver and embedded Prelude
+//RS // consume this pure data/check machinery; no second loader policy is allowed.
+//RS #[cfg(feature = "compiler")]
+//RS pub mod JetLib;
+//RS pub use jet_foundation::JSON;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod LintPolicy;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod Lock;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod Manifest;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod MCP;
+//RS // Card #367 slice 4: `Merge` (§6 structural merge, pure/std-only) sunk from
+//RS // `jetpack` — `ModuleEval` (jet-env-model, L2) and both realizers need it, so
+//RS // it belongs at the plan-model's foundation, not inside one engine crate.
+//RS #[cfg(feature = "compiler")]
+//RS pub mod Merge;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod Package;
+//RS // Deterministic desktop/game bundle layout data; platform packers stay in adapters.
+//RS #[cfg(feature = "compiler")]
+//RS pub mod Bundler;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod Public;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod Platform;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod ProviderFacts;
+//RS // selection. Pure data/matching — jetpack + BuildPlan action keys consume it.
+//RS #[cfg(feature = "compiler")]
+//RS pub mod Variant;
+//RS // build engine (validate/run/fetch/exec/sandbox) stays in `jetpack`'s
+//RS // `Recipe.rs`, which imports these types from here (data-down / engine-up,
+//RS // same pattern as `EffectBudget`/`LintPolicy`).
+//RS #[cfg(feature = "compiler")]
+//RS pub mod Recipe;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod RefSpec;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod ScriptDeps;
+//RS // Envelope's canonical-archive walker: the walk dominates once hashing is
+//RS // fast, so it lives in this opt-level=3 crate.
+//RS #[cfg(feature = "compiler")]
+//RS pub mod SealWalk;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod Store;
+//RS // types, and lock read API — moved here from `jetpack` so Canvas / devserver
+//RS // can scan workspaces via `jet-env-model` / `jet-pkg-model` without pulling in
+//RS // the full engine crate.  `jetpack` re-exports all three under their historical
+//RS // paths so its own internal call sites are unchanged.
+//RS #[cfg(feature = "compiler")]
+//RS pub mod Overlay;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod WorkspaceLock;
+//RS #[cfg(feature = "compiler")]
+//RS pub mod WorkspacePlan;
+//RS 
+// END-PORT-PENDING 2166 crates/jet-pkg-model/src/lib.rs:1-157
+

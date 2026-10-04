@@ -1,0 +1,257 @@
+// Rust crates/jetpack/src/JetOS/user_flatpak_perf.rs:13-413.
+// Canonical OptionsRendering/SystemPlan/Foundation JSON dependencies only.
+// StudioProjection owns jetos_make_executable (Rust :832-842): Unix followed
+// metadata -> permissions mode | 0o111 -> set_permissions; non-Unix success.
+// That declaration stays withheld under #4479/#3593 until the actual Core
+// followed metadata/permissions contracts exist; no copy leaf or local helper.
+// RootProjection jetos_enable_unit retains its own #3593 native link/copy gate.
+
+pub fn jetos_write_user_environment_facts(dir: String, system: SystemPlan) IOError! -[FS, Env]> {
+    users_dir :: files.join(dir, "users")
+    unit_dir :: files.join(dir, "etc/systemd/user")
+    files.create_dir_all(users_dir)
+    files.create_dir_all(unit_dir)
+    index := [String]{}
+    loop name in jetos_user_names(system) {
+        profile_dir :: files.join(users_dir, name)
+        files.create_dir_all(files.join(profile_dir, "files"))
+        home :: jetos_option_value(system, [String]{"user.{name}.home", "users.{name}.home"}) ?? "/home/{name}"
+        shell :: if jetos_option_value(system, [String]{"user.{name}.shell", "users.{name}.shell"}) == {
+            .Val(value) -> jetos_package_path_or_literal(value)
+            .None -> "/run/current-system/sw/bin/sh"
+        }
+        packages :: if jetos_option_value(system, [String]{"user.{name}.packages", "users.{name}.packages"}) == {
+            .Val(value) -> jetos_parse_list_items(value)
+            .None -> [String]{}
+        }
+        services :: if jetos_option_value(system, [String]{"user.{name}.services", "users.{name}.services"}) == {
+            .Val(value) -> jetos_parse_list_items(value)
+            .None -> [String]{}
+        }
+        user_files :: jetos_prefixed_options(system, "user.{name}.files.")
+        files_json := [String]{}
+        loop row in user_files {
+            target :: jetos_user_file_target(row.key, row.value)
+            &files_json.push("{{\n  \"path\": {foundation_json_quote(target)},\n  \"source\": {foundation_json_quote(row.value)}\n}}")
+        }
+        files.write(files.join(profile_dir, "home.txt"), "{home}\n")
+        files.write(files.join(profile_dir, "shell.txt"), "{shell}\n")
+        files.write(files.join(profile_dir, "packages.manifest"), jetos_manifest_lines(packages))
+        files.write(files.join(profile_dir, "services.manifest"), jetos_manifest_lines(services))
+        loop row in user_files {
+            target :: jetos_user_file_target(row.key, row.value)
+            safe :: jetos_user_file_manifest_name(target)
+            files.write(files.join(files.join(profile_dir, "files"), safe), "source={row.value}\ntarget={target}\n")
+        }
+        facts :: jetos_render_user_profile_json_parts(name, home, shell, jetos_strings_json(packages), jetos_strings_json(services), files_json.join(","))
+        files.write(files.join(profile_dir, "profile.json"), facts)
+        files.write(files.join(profile_dir, "proof.txt"), "user {name}: pass\n")
+        files.write(files.join(unit_dir, "jetos-user-{name}.service"), "[Unit]\nDescription=jetos user environment for {name}\n\n[Service]\nType=oneshot\nExecStart=/run/current-system/sw/bin/jetos-user-apply {name}\n\n[Install]\nWantedBy=default.target\n")
+        &index.push(facts)
+    }
+    bin_dir :: files.join(dir, "sw/bin")
+    files.create_dir_all(bin_dir)
+    apply_path :: files.join(bin_dir, "jetos-user-apply")
+    files.write(apply_path, jetos_user_apply_script())
+    jetos_make_executable(apply_path)
+    files.write(files.join(users_dir, "index.json"), "{{\"kind\":\"jetos.user-index\",\"host\":{foundation_json_quote(system.name)},\"profiles\":[{index.join(",")}]}}")
+}
+
+// Rust user_file_target: explicit target first; only a bare key uses home/.
+fn jetos_user_file_target(key: String, source: String) -> String Never! {
+    if key.starts_with(".") || key.starts_with("/") || key.contains("/") -> return ~key
+    if source.starts_with("home/") -> return ".config/{source.removeprefix("home/")}"
+    ".config/{key}"
+}
+
+// Rust trims ALL leading slashes, then ALL leading dots, in that order.
+fn jetos_user_file_manifest_name(target: String) -> String Never! {
+    safe := target
+    loop safe.starts_with("/") -> safe = safe.removeprefix("/")
+    loop safe.starts_with(".") -> safe = safe.removeprefix(".")
+    safe.replace("/", "__")
+}
+
+pub fn jetos_manifest_lines(items: [String]) -> String Never! {
+    if items.len() == 0 -> "" else -> "{items.join("\n")}\n"
+}
+
+pub fn jetos_write_flatpak_facts(dir: String, system: SystemPlan) IOError! -[FS, Env]> {
+    flatpak_dir :: files.join(dir, "flatpak")
+    appimage_dir :: files.join(dir, "appimage")
+    bin_dir :: files.join(dir, "sw/bin")
+    files.create_dir_all(flatpak_dir)
+    files.create_dir_all(appimage_dir)
+    files.create_dir_all(bin_dir)
+    options :: jetos_prefixed_options(system, "apps.flatpak.")
+    apps :: jetos_collect_names(system, "apps.flatpak.app")
+    appimages :: jetos_collect_names(system, "apps.appimage.app")
+    apps_json :: jetos_flatpak_apps_json(system, apps)
+    appimages_json :: jetos_appimages_json(system, appimages)
+    reconcile :: jetos_flatpak_reconcile(system)
+    files.write(files.join(flatpak_dir, "plan.json"), "{{\"kind\":\"jetos.flatpak-plan\",\"reconcile\":{foundation_json_quote(reconcile)},\"apps\":[{apps_json}],\"appimages\":[{appimages_json}],\"options\":[{jetos_option_rows_json(options)}],\"proof\":\"flatpak-reconcile-planned\"}}")
+    files.write(files.join(appimage_dir, "plan.json"), "{{\"kind\":\"jetos.appimage-plan\",\"apps\":[{appimages_json}],\"runner\":\"sw/bin/jetos-appimage-run\",\"proof\":\"appimage-runtime-integrated\"}}")
+    permissions := [String]{}
+    loop row in options {
+        if row.key.contains(".permissions.") -> &permissions.push("{row.key}\t{row.value}\n")
+    }
+    files.write(files.join(flatpak_dir, "permissions.manifest"), permissions.join(""))
+    reconcile_path :: files.join(bin_dir, "jetos-flatpak-reconcile")
+    files.write(reconcile_path, jetos_flatpak_reconcile_script(system, apps, reconcile))
+    jetos_make_executable(reconcile_path)
+    loop name in appimages {
+        path :: jetos_option_value(system, [String]{"apps.appimage.app.{name}.path"}) ?? name
+        files.write(files.join(appimage_dir, "{jetos_safe_filename(name)}.desktop"), "[Desktop Entry]\nName={name}\nType=Application\nExec=/run/current-system/sw/bin/jetos-appimage-run {name}\n")
+        files.write(files.join(appimage_dir, "{jetos_safe_filename(name)}.path"), "{path}\n")
+    }
+    appimage_path :: files.join(bin_dir, "jetos-appimage-run")
+    files.write(appimage_path, jetos_appimage_runner_script())
+    jetos_make_executable(appimage_path)
+}
+
+fn jetos_flatpak_reconcile(system: SystemPlan) -> String Never! {
+    if jetos_option_value(system, [String]{"apps.flatpak.reconcile"}) == {
+        .Val(value) -> jetos_clean_symbol(value)
+        .None -> "Exact"
+    }
+}
+
+fn jetos_flatpak_apps_json(system: SystemPlan, apps: [String]) -> String Never! {
+    rows := [String]{}
+    loop name in apps {
+        ref_id :: jetos_option_value(system, [String]{"apps.flatpak.app.{name}.ref"}) ?? name
+        pin :: jetos_option_value(system, [String]{"apps.flatpak.app.{name}.pin"}) ?? "tracking"
+        &rows.push("{{\n  \"name\": {foundation_json_quote(name)},\n  \"ref\": {foundation_json_quote(ref_id)},\n  \"pin\": {foundation_json_quote(pin)}\n}}")
+    }
+    rows.join(",")
+}
+
+fn jetos_appimages_json(system: SystemPlan, apps: [String]) -> String Never! {
+    rows := [String]{}
+    loop name in apps {
+        path :: jetos_option_value(system, [String]{"apps.appimage.app.{name}.path"}) ?? name
+        integrate :: jetos_option_value(system, [String]{"apps.appimage.app.{name}.integrate"}) ?? "true"
+        // JSON::object_of quotes even clean_bool_json: original wire is a STRING.
+        &rows.push("{{\n  \"name\": {foundation_json_quote(name)},\n  \"path\": {foundation_json_quote(path)},\n  \"integrate\": {foundation_json_quote(jetos_clean_bool_json(integrate))}\n}}")
+    }
+    rows.join(",")
+}
+
+fn jetos_flatpak_reconcile_script(system: SystemPlan, apps: [String], reconcile: String) -> String Never! {
+    parts := [String]{"#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\nflatpak=${{JETOS_FLATPAK_BIN:-flatpak}}\nproof_dir=${{JETOS_FLATPAK_PROOF_DIR:-$root/flatpak}}\nmkdir -p \"$proof_dir\"\nproof=\"$proof_dir/reconcile-proof.json\"\nrun() {{\n  printf '%s\\n' \"jetos flatpak: $*\"\n  \"$flatpak\" \"$@\"\n}}\n"}
+    declared_refs := [String]{}
+    loop row in jetos_prefixed_options(system, "apps.flatpak.remotes.") -> &parts.push("run remote-add --if-not-exists {jetos_shell_single_quote(row.key)} {jetos_shell_single_quote(row.value)}\n")
+    loop app in apps {
+        ref_id :: jetos_option_value(system, [String]{"apps.flatpak.app.{app}.ref"}) ?? app
+        &declared_refs.push(ref_id)
+        remote :: jetos_option_value(system, [String]{"apps.flatpak.app.{app}.remote"}) ?? "flathub"
+        &parts.push("run install -y {jetos_shell_single_quote(remote)} {jetos_shell_single_quote(ref_id)}\n")
+        loop row in jetos_prefixed_options(system, "apps.flatpak.app.{app}.permissions.") {
+            flag :: row.key.replace(".", "-")
+            &parts.push("run override {jetos_shell_single_quote(ref_id)} --{flag}={jetos_shell_single_quote(jetos_clean_symbol(row.value))}\n")
+        }
+    }
+    if reconcile == "Exact" {
+        &parts.push("declared={jetos_shell_single_quote(declared_refs.join(" "))}\ninstalled=$(\"$flatpak\" list --app --columns=application 2>/dev/null || true)\nfor app in $installed; do\n  case \" $declared \" in\n    *\" $app \"*) ;;\n    *) run uninstall -y \"$app\" ;;\n  esac\ndone\n")
+        &parts.push("run update -y\n")
+    }
+    &parts.push("printf '{{\"state\":\"reconciled\",\"proofs\":[\"remotes\",\"apps\",\"permissions\"]}}\\n' > \"$proof\"\ncat \"$proof\"\n")
+    parts.join("")
+}
+
+pub fn jetos_write_performance_facts(dir: String, system: SystemPlan) IOError! -[FS, Env]> {
+    perf_dir :: files.join(dir, "performance")
+    bin_dir :: files.join(dir, "sw/bin")
+    unit_dir :: files.join(dir, "etc/systemd/system")
+    files.create_dir_all(perf_dir)
+    files.create_dir_all(bin_dir)
+    files.create_dir_all(unit_dir)
+    jetos_write_performance_tuning(dir, system)
+    scheduler :: if jetos_option_value(system, [String]{"performance.scheduler"}) == {
+        .Val(value) -> Val(jetos_clean_symbol(value))
+        .None -> None
+    }
+    if scheduler == .Val(value) {
+        launcher :: files.join(bin_dir, "jetos-performance-scheduler")
+        files.write(launcher, jetos_performance_scheduler_script(value))
+        jetos_make_executable(launcher)
+        files.write(files.join(unit_dir, "jetos-performance-scheduler.service"), "[Unit]\nDescription=jetos sched-ext scheduler\nAfter=multi-user.target\n\n[Service]\nExecStart=/run/current-system/sw/bin/jetos-performance-scheduler\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target\n")
+        jetos_enable_unit(unit_dir, "multi-user.target", "jetos-performance-scheduler.service")
+    }
+    loop row in jetos_performance_json_files(system, scheduler) -> files.write(files.join(perf_dir, row.name), row.body)
+}
+
+// Rust write_performance_facts:298-314, factored without changing write order.
+fn jetos_write_performance_tuning(dir: String, system: SystemPlan) IOError! -[FS]> {
+    sysctl_conf := [String]{}
+    loop row in jetos_prefixed_options(system, "performance.sysctl.") -> &sysctl_conf.push("{row.key} = {row.value}\n")
+    if sysctl_conf.len() != 0 {
+        sysctl_dir :: files.join(dir, "etc/sysctl.d")
+        files.create_dir_all(sysctl_dir)
+        files.write(files.join(sysctl_dir, "90-jetos-performance.conf"), sysctl_conf.join(""))
+    }
+    if jetos_option_value(system, [String]{"performance.zram.memoryPercent"}) == .Val(percent) {
+        zram_dir :: files.join(dir, "etc/systemd/zram-generator.conf.d")
+        files.create_dir_all(zram_dir)
+        files.write(files.join(zram_dir, "jetos.conf"), "[zram0]\nzram-size = ram * {percent} / 100\n")
+    }
+}
+
+fn jetos_performance_scheduler_script(scheduler: String) -> String Never! {
+    // Rust to_ascii_lowercase, not Unicode lowercasing.
+    scheduler_bin :: if scheduler == "ScxLavd" -> "scx_lavd" else -> {
+        bytes := scheduler.bytes()
+        loop i in 0..<bytes.len() {
+            code :: Int.from_u8(bytes[i])
+            if code >= 65 && code <= 90 -> bytes[i] = U8{code + 32}
+        }
+        String.from_bytes(bytes) ?? panic("ASCII lowercase preserves UTF-8")
+    }
+    "#!/usr/bin/env sh\nset -eu\nscheduler=${{JETOS_SCHEDULER_BIN:-{jetos_shell_single_quote(scheduler_bin)}}}\nexec \"$scheduler\" \"$@\"\n"
+}
+
+// Rust :288-296,340-412: keep all five JSON files in original write order.
+fn jetos_performance_json_files(system: SystemPlan, scheduler: String?) -> [(name: String, body: String)] Never! {
+    profile :: if jetos_option_value(system, [String]{"performance.profile"}) == {
+        .Val(value) -> jetos_clean_symbol(value)
+        .None -> "Safe"
+    }
+    kernel_profile :: if jetos_option_value(system, [String]{"boot.kernel.profile", "performance.kernel.profile"}) == {
+        .Val(value) -> jetos_clean_symbol(value)
+        .None -> jetos_boot_profile(system).kernel
+    }
+    params :: if jetos_option_value(system, [String]{"boot.kernel.params", "performance.kernel.params"}) == {
+        .Val(value) -> jetos_parse_list_items(value)
+        .None -> [String]{}
+    }
+    params_json :: jetos_strings_json(params)
+    initrd_systemd :: jetos_option_value(system, [String]{"boot.initrd.systemd"}) ?? "false"
+    initrd_verbosity :: jetos_option_value(system, [String]{"boot.initrd.verbosity"}) ?? "normal"
+    limine_max :: jetos_option_value(system, [String]{"boot.loader.limine.maxGenerations"}) ?? "10"
+    efi_vars :: jetos_option_value(system, [String]{"boot.loader.efi.canTouchVariables"}) ?? "false"
+    scheduler_json :: if scheduler == {
+        .Val(value) -> foundation_json_quote(value)
+        .None -> "null"
+    }
+    unit_json :: if scheduler != None -> foundation_json_quote("etc/systemd/system/jetos-performance-scheduler.service") else -> "null"
+    zram_json :: if jetos_option_value(system, [String]{"performance.zram.memoryPercent"}) == {
+        .Val(value) -> foundation_json_quote(value)
+        .None -> "null"
+    }
+    sysctl_json :: jetos_option_rows_json(jetos_prefixed_options(system, "performance.sysctl."))
+    [(name: String, body: String)]{
+        (name: "profile.json", body: "{{\"kind\":\"jetos.performance-profile\",\"profile\":{foundation_json_quote(profile)},\"kernel_profile\":{foundation_json_quote(kernel_profile)},\"kernel_params\":[{params_json}],\"proof\":\"kernel-tuning-profile-ready\"}}"),
+        (name: "bootloader.json", body: "{{\"kind\":\"jetos.bootloader-tuning\",\"limine_max_generations\":{foundation_json_quote(limine_max)},\"efi_can_touch_variables\":{jetos_clean_bool_json(efi_vars)},\"proof\":\"bootloader-tuning-ready\"}}"),
+        (name: "initrd.json", body: "{{\"kind\":\"jetos.initrd-tuning\",\"systemd\":{jetos_clean_bool_json(initrd_systemd)},\"verbosity\":{foundation_json_quote(initrd_verbosity)},\"proof\":\"initrd-tuning-ready\"}}"),
+        (name: "scheduler.json", body: "{{\"kind\":\"jetos.scheduler\",\"scheduler\":{scheduler_json},\"unit\":{unit_json},\"proof\":\"sched-ext-service-ready\"}}"),
+        (name: "facts.json", body: "{{\"kind\":\"jetos.performance\",\"profile\":{foundation_json_quote(profile)},\"kernel_profile\":{foundation_json_quote(kernel_profile)},\"scheduler\":{scheduler_json},\"kernel_params\":[{params_json}],\"sysctl\":[{sysctl_json}],\"zram\":{zram_json},\"initrd\":\"performance/initrd.json\",\"bootloader\":\"performance/bootloader.json\",\"risk\":\"explicit-overrides-proof-visible\"}}")
+    }
+}
+
+fn jetos_appimage_runner_script() -> String Never! {
+    "#!/usr/bin/env sh\nset -eu\nname=${{1:-}}\nif [ -z \"$name\" ]; then\n  echo 'usage: jetos-appimage-run <name> [--print]' >&2\n  exit 2\nfi\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\npath_file=\"$root/appimage/$name.path\"\nif [ ! -f \"$path_file\" ]; then\n  echo \"jetos appimage: no app named $name\" >&2\n  exit 2\nfi\napp=$(sed -n '1p' \"$path_file\")\nif [ \"${{2:-}}\" = '--print' ]; then\n  printf '%s\\n' \"$app\"\n  exit 0\nfi\nexec \"$app\"\n"
+}
+
+fn jetos_user_apply_script() -> String Never! {
+    "#!/usr/bin/env sh\nset -eu\nuser=${{1:-}}\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\nif [ -z \"$user\" ]; then\n  echo 'usage: jetos-user-apply <user>' >&2\n  exit 2\nfi\nprofile_dir=\"$root/users/$user\"\nprofile=\"$profile_dir/profile.json\"\nif [ ! -f \"$profile\" ]; then\n  echo \"jetos user: no profile for $user\" >&2\n  exit 2\nfi\nhome=${{JETOS_USER_HOME:-}}\nif [ -z \"$home\" ] && [ -f \"$profile_dir/home.txt\" ]; then\n  home=$(sed -n '1p' \"$profile_dir/home.txt\")\nfi\nif [ -z \"$home\" ]; then\n  home=\"$HOME\"\nfi\nmkdir -p \"$home/.jetos/profile/bin\" \"$home/.jetos/proof\" \"$home/.config/systemd/user\"\nfor entry in \"$profile_dir\"/files/*; do\n  [ -f \"$entry\" ] || continue\n  target=$(sed -n 's/^target=//p' \"$entry\")\n  source=$(sed -n 's/^source=//p' \"$entry\")\n  [ -n \"$target\" ] || continue\n  case \"$target\" in\n    /*) dest=\"$target\" ;;\n    *) dest=\"$home/$target\" ;;\n  esac\n  dir=${{dest%/*}}\n  [ \"$dir\" = \"$dest\" ] || mkdir -p \"$dir\"\n  if [ -f \"$root/$source\" ]; then\n    cp \"$root/$source\" \"$dest\"\n  else\n    printf 'managed-by=jetos\\nuser=%s\\nsource=%s\\n' \"$user\" \"$source\" > \"$dest\"\n  fi\ndone\nif [ -f \"$profile_dir/packages.manifest\" ]; then\n  while IFS= read -r package; do\n    [ -n \"$package\" ] || continue\n    name=${{package##*.}}\n    src=\"$root/sw/bin/$name\"\n    if [ -e \"$src\" ]; then\n      ln -sfn \"$src\" \"$home/.jetos/profile/bin/$name\"\n    fi\n  done < \"$profile_dir/packages.manifest\"\nfi\nif [ -f \"$profile_dir/services.manifest\" ]; then\n  while IFS= read -r service; do\n    [ -n \"$service\" ] || continue\n    unit=\"$home/.config/systemd/user/$service.service\"\n    printf '[Unit]\\nDescription=jetos user service %s\\n\\n[Service]\\nExecStart=/run/current-system/sw/bin/%s\\n\\n[Install]\\nWantedBy=default.target\\n' \"$service\" \"$service\" > \"$unit\"\n  done < \"$profile_dir/services.manifest\"\nfi\nprintf '{{\"state\":\"applied\",\"user\":\"%s\",\"home\":\"%s\",\"profile\":\"%s\"}}\\n' \"$user\" \"$home\" \"$profile\" > \"$home/.jetos/proof/user-$user.json\"\ncat \"$home/.jetos/proof/user-$user.json\"\n"
+}

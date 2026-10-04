@@ -1,0 +1,105 @@
+// crates/jet-store/src/records.rs: one canonical codec, nine typed schemas.
+pub enum ArtifactRecordKind {
+    PkgCheck
+    Iface
+    Diags
+    Items
+    Body
+    Program
+    PkgObject
+    ItemCheck
+    ComptimeValue
+
+    fn schema(self) -> String Never! {
+        if self == {
+            .PkgCheck -> "jet.pkg-check/v1"
+            .Iface -> "jet.iface/v1"
+            .Diags -> "jet.diags/v1"
+            .Items -> "jet.items/v1"
+            .Body -> "jet.body/v1"
+            .Program -> "jet.program/v1"
+            .PkgObject -> "jet.pkg-object/v1"
+            .ItemCheck -> "jet.item-check/v1"
+            .ComptimeValue -> "jet.comptime-value/v1"
+        }
+    }
+
+    fn from_schema(schema: String) -> ArtifactRecordKind? Never! {
+        loop kind in store_artifact_record_kinds() {
+            if kind.schema() == schema -> return Val(kind)
+        }
+        None
+    }
+
+    fn is_action(self) -> Bool Never! {
+        if self == {
+            .PkgCheck | .Program | .PkgObject | .ItemCheck | .ComptimeValue -> true
+            else -> false
+        }
+    }
+
+    fn action(self, key: String) -> ActionHandle Never! {
+        framed := self.schema().bytes()
+        &framed.push(U8{0})
+        loop byte in key.bytes() -> &framed.push(byte)
+        ActionHandle.from_bytes(framed)
+    }
+}
+
+pub fn store_artifact_record_kinds() -> [ArtifactRecordKind] Never! {
+    [ArtifactRecordKind.PkgCheck, ArtifactRecordKind.Iface, ArtifactRecordKind.Diags, ArtifactRecordKind.Items, ArtifactRecordKind.Body, ArtifactRecordKind.Program, ArtifactRecordKind.PkgObject, ArtifactRecordKind.ItemCheck, ArtifactRecordKind.ComptimeValue]
+}
+
+pub struct ArtifactRecordPublication {
+    pub key: String
+    pub bytes: [U8]
+}
+
+impl ArtifactStore {
+    fn put_record(self, kind: ArtifactRecordKind, key: String, bytes: [U8]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
+        opened :: record_open_schema(bytes, kind.schema())
+        if opened.problem == {
+            .Val(problem) -> return Err(ArtifactStoreError.Config("{kind.schema()} record is not publishable: {problem}"))
+            .None -> {}
+        }
+        if kind.is_action() -> return self.publish_action(kind.action(key), bytes)
+        object :: self.publish_blob(bytes)
+        if object.key() != key -> return Err(ArtifactStoreError.Config("{kind.schema()} record key `{key}` is not its content digest `{object.key()}`"))
+    }
+
+    fn record(self, kind: ArtifactRecordKind, key: String) -[FS, Env, Exec, Time, Rand]> [U8]? ArtifactStoreError! {
+        bytes :: if kind.is_action() -> self.get_action(kind.action(key)) else -> {
+            digest :: if ArtifactDigest.from_hex(key) == {
+                .Ok(value) -> value
+                .Err(_) -> return Ok(None)
+            }
+            self.blob_by_digest(digest)
+        }
+        payload :: bytes ?? return Ok(None)
+        if record_open_schema(payload, kind.schema()).problem != None -> return Ok(None)
+        Ok(Val(payload))
+    }
+
+    fn record_untouched(self, kind: ArtifactRecordKind, key: String) -[FS, Env, Exec, Time, Rand]> [U8]? ArtifactStoreError! {
+        if !kind.is_action() -> return self.record(kind, key)
+        bytes :: self.get_action_untouched(kind.action(key)) ?? return Ok(None)
+        if record_open_schema(bytes, kind.schema()).problem != None -> return Ok(None)
+        Ok(Val(bytes))
+    }
+
+    fn touch_records(self, kind: ArtifactRecordKind, keys: [String]) Never! -[FS, Env, Exec, Time, Rand]> {
+        if !kind.is_action() -> return
+        actions := [ActionHandle]{}
+        loop key in keys -> &actions.push(kind.action(key))
+        self.touch_actions(actions)
+    }
+
+    fn put_records(self, kind: ArtifactRecordKind, records: [ArtifactRecordPublication]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
+        if !kind.is_action() -> return Err(ArtifactStoreError.Config("{kind.schema()} records are content addressed; publish them one by one"))
+        actions := [ArtifactActionPublication]{}
+        loop record in records {
+            if record_open_schema(record.bytes, kind.schema()).problem == None -> &actions.push(ArtifactActionPublication{action: kind.action(record.key), bytes: record.bytes})
+        }
+        self.publish_actions(actions)
+    }
+}

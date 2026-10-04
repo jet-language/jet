@@ -1,0 +1,75 @@
+// Module evaluation: static package sugar uses PackageSugar; computed fields
+// use ComputedFields and the shared comptime evaluator before the merge engine.
+// This Rust module contains module declarations and public imports, not a
+// second evaluator. Jet's package source discovery publishes the canonical
+// declarations below directly; do not duplicate them or add re-export shims.
+// Test anchors and the remaining full-strength claim are in
+// Tests/ModuleEval/EnvPlanBuilder01.jet.
+
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:21
+// Computed -> ComputedFields.jet.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:22
+// DevService -> DevServiceEval.jet.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:23
+// Diagnostics -> Diagnostics.jet.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:24
+// Environment -> ../Environment/*.jet (canonical environment fact owners).
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:25
+// Eval -> ModuleEval.jet.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:26
+// PackageOutput -> PackageOutput.jet.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:27
+// Source -> EnvPlanBuilder.jet and SourceLoader.jet.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:28
+// System -> SystemFleetEval.jet and ImageEval.jet.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:29
+// Types -> Plans.jet.
+
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:31
+// merge_error_to_diagnostic -> envmodel_merge_error_to_diagnostic in Diagnostics.jet.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:32
+// checked_dotenv_snapshot -> envmodel_checked_dotenv_snapshot and
+// valid_env_name -> envmodel_valid_env_name in ../Environment/FactReaders.jet.
+// DotenvSpec, EnvironmentLifecycle, FormatterSpec, HookAction, HookSpec,
+// ReloadPolicy -> ../Environment/Lifecycle.jet.
+// EnvironmentIntegration, IntegrationKind -> ../Environment/Integrations.jet.
+// FileConflict, FileMode, ManagedFile, ManagedFileError -> ../Environment/ManagedFiles.jet.
+// LanguageExpansion, LanguagePack, LanguagePackCatalog, LanguageProjection,
+// LanguageSpec -> ../Environment/LanguagePacks.jet.
+// PackageProfileError, PackageProfileFact, PackageProfilePackage,
+// PackageProfilePlan, PackageProfileSet, PackageProfileSpec,
+// ResolvedPackageProfile -> ../Environment/PackageProfiles.jet.
+// PresetError, PresetSet, PresetSpec, ResolvedPreset -> ../Environment/Presets.jet.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:41
+// evaluate_modules -> envmodel_evaluate_modules, evaluate_source ->
+// envmodel_evaluate_source, merge_all -> envmodel_merge_all, pkg_ref ->
+// envmodel_pkg_ref in ModuleEval.jet.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:42
+// env_plan_from_package_outputs -> envmodel_env_plan_from_package_outputs,
+// project_package_outputs -> envmodel_project_package_outputs;
+// PackageOutputError and PackageOutputPlan retain their names in PackageOutput.jet.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:45
+// evaluate_env -> envmodel_evaluate_env;
+// evaluate_env_with_environment -> envmodel_evaluate_env_with_environment;
+// evaluate_env_with_preset -> envmodel_evaluate_env_with_preset;
+// evaluate_env_with_selections -> envmodel_evaluate_env_with_selections;
+// evaluate_env_with_source_loader -> envmodel_evaluate_env_with_source_loader;
+// evaluate_package_profile -> envmodel_evaluate_package_profile;
+// is_module_surface -> envmodel_is_module_surface, all in EnvPlanBuilder.jet.
+// SourceLoader retains its name in SourceLoader.jet.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:50
+// Plans.jet owns AdapterPlan, AdapterRecipe, DevServicePlan, EnvPlan,
+// EnvironmentFacts, EnvironmentRead, EvaluatedModule, FleetPlan, HostOverride,
+// HostOverrideProvenance, HostOverrideValue, HostPlan, ImageKind, ImagePlan,
+// OptionPlan, PromptPathMode, PromptStripMode, ReadyProbe, RestartPolicy,
+// SecretDeclaration, SecretDefault, SecretGenerator, SecretRotationPolicy,
+// SecretSpec, ServicePlan, ShutdownPolicy, SystemPlan, VmTestPlan.
+
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:58
+// Test-only Path/PathBuf operations -> files in ModuleEvalSupport.jet.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:61
+// Merge, FactValue -> canonical merge declarations; ProviderKind -> RefSpec;
+// Namespace -> AST. The existing test bodies use these canonical Jet names.
+// Rust: crates/jet-env-model/src/ModuleEval/mod.rs:68
+// Test module -> Tests/ModuleEvalEnv.jet, ModuleEvalFleet.jet,
+// ModuleEvalImages.jet, ModuleEvalSupport.jet, and ModuleEval/EnvPlanBuilder01.jet.

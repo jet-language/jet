@@ -1,0 +1,41 @@
+// Behavioral controls; Rust range 10270-11988 has no inline #[test] items.
+use jet_cli.[stem, build_artifact_path, bin_path, test_bin_path, fuzz_bin_path, setting_overrides_tag, native_cache_salt_with_schema, application_authority_cache_identity, inject_game_crash_reporter_bootstrap]
+use std.process.id
+
+// Rust: Source/CmdCompile.rs:10554-10612.
+#Test("native_artifact_paths_are_component_checked_and_process_private") {
+    root :: OSPath.new("project")
+    source :: OSPath.new("src/hello.world.jet")
+    assert(stem(source.to_string_lossy()) == "hello_world")
+    assert(build_artifact_path(root, "src/hello.world.jet", .Val("named")) == root.join(".jet/build/named"))
+    assert(build_artifact_path(root, "src/hello.world.jet", .Val("../outside")) == bin_path(root, "src/hello.world.jet"))
+    assert(test_bin_path(root, source) == root.join(".jet/build/.test_hello_world.{id()}"))
+    assert(fuzz_bin_path(root, source) == root.join(".jet/build/.fuzz_hello_world.{id()}"))
+}
+// Rust: Source/CmdCompile.rs:11127-11139.
+#Test("native_settings_tag_sorted_byte_lengths") {
+    assert(setting_overrides_tag([String:String]{}) == "settings=default")
+    assert(setting_overrides_tag([String:String]{"z": "é", "a": "bc"}) == "settings=1:a2:bc1:z2:é")
+}
+// Rust: Source/CmdCompile.rs:10863-10912.
+#Test("native_salt_sorts_instances_and_frames_authority") {
+    schema :: "schema".bytes()
+    first :: native_cache_salt_with_schema(schema, "compiler", "deps", "runtime", "core", "run", "target", ["b", "a"], .None, [], .None)
+    reordered :: native_cache_salt_with_schema(schema, "compiler", "deps", "runtime", "core", "run", "target", ["a", "b"], .None, [], .None)
+    granted :: native_cache_salt_with_schema(schema, "compiler", "deps", "runtime", "core", "run", "target", ["a", "b"], .None, [], .Val("authority"))
+    assert(first == reordered)
+    assert(first != granted)
+    assert(application_authority_cache_identity(.None) == .None)
+}
+// Rust: Source/CmdCompile.rs:11452-11473.
+#Test("game_bootstrap_insertion_is_idempotent_and_opt_in") {
+    source := "fn main() {\n    run();\n}\n"
+    inject_game_crash_reporter_bootstrap(&source, false)
+    assert(source == "fn main() {\n    run();\n}\n")
+    inject_game_crash_reporter_bootstrap(&source, true)
+    first :: source.clone()
+    inject_game_crash_reporter_bootstrap(&source, true)
+    assert(source == first)
+    assert(source.contains("JET_GAME_CRASH_REPORTER_BOOTSTRAP_MARKER"))
+    assert(source.contains("fn main() {\n    jet_game_crash_reporter_install_from_manifest();\n"))
+}

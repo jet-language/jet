@@ -1,0 +1,349 @@
+use jet_foundation.[AUTHORITY_FIELD_GRANTS, AUTHORITY_FIELD_HOLDS, AUTHORITY_FIELD_NEEDS, AUTHORITY_FIELD_PROVIDERS, AUTHORITY_FIELD_TRUST, AUTHORITY_HOLDS_FIELD_ALLOW, AUTHORITY_HOLDS_FIELD_DENY, AUTHORITY_TRUST_DECISION_ALLOW, AUTHORITY_TRUST_DECISION_DENY, AUTHORITY_TRUST_DECISION_PROMPT, AUTHORITY_TRUST_FIELD_CI, AUTHORITY_TRUST_FIELD_DEFAULT, AUTHORITY_TRUST_FIELD_PROMPT, AUTHORITY_TRUST_FIELD_REQUIRE, AUTHORITY_TRUST_FIELD_SERVICES, AUTHORITY_TRUST_REQUIRE_ATTESTED, AUTHORITY_TRUST_REQUIRE_LOGGED, AUTHORITY_TRUST_REQUIRE_NONE, PROVIDER_FIELD_ALLOW, PROVIDER_FIELD_DENY, PROVIDER_FIELD_REGISTRY, authority_parse_root, authority_root, syntax_is_ui_capability]
+
+// `authority: { holds, needs, grants, trust, providers }`
+// (D-AUTHORITY-MANIFEST1, D-BOUND-PROV1, D-JPK-GRANTSCHEMA1,
+// D-JPK-PROVIDERAUTH1) and the effect-list readers they share with
+// `build.allow` (Package/Blocks.rs).
+
+pub enum TrustDecision {
+    Allow
+    Prompt
+    Deny
+}
+
+// The package's own authority bound.
+pub struct AuthorityHolds {
+    pub allow: [String]?
+    pub deny: [String]?
+
+    pub fn default() -> AuthorityHolds Never! {
+        AuthorityHolds{allow: None, deny: None}
+    }
+}
+
+// One audited per-dependency grant: `grants: { "dep": [DB, Net] }`.
+pub struct PackageGrant {
+    pub package: String
+    pub rights: [String]
+}
+
+// One named service trust decision.
+pub struct ServiceTrust {
+    pub service: String
+    pub decision: TrustDecision
+}
+
+pub struct TrustPolicy {
+    pub default: TrustDecision?
+    pub ci_prompt: TrustDecision?
+    pub services: [ServiceTrust]
+    // D-BOUND-PROV1: optional provenance floor for dependency resolution.
+    pub require: ProvenanceRequirement?
+
+}
+
+// Rust `ProvenanceRequirement::None` is spelled `Unrequired`: `None` is
+// reserved in Jet.
+pub enum ProvenanceRequirement {
+    Unrequired
+    Logged
+    Attested
+
+    pub fn label(self) -> String Never! {
+        if self == {
+            .Unrequired -> AUTHORITY_TRUST_REQUIRE_NONE
+            .Logged -> AUTHORITY_TRUST_REQUIRE_LOGGED
+            .Attested -> AUTHORITY_TRUST_REQUIRE_ATTESTED
+        }
+    }
+}
+
+pub struct ProviderAuthority {
+    pub provider: String
+    pub registry: String
+    pub allow: [String]
+    pub deny: [String]
+}
+
+// One parsed authority block; `needs` is a guest declaration, not a second
+// grant store.
+pub struct AuthorityBlock {
+    pub holds: AuthorityHolds
+    pub needs: [String]
+    pub grants: [PackageGrant]
+    pub trust: TrustPolicy?
+    pub providers: [ProviderAuthority]
+
+    pub fn default() -> AuthorityBlock Never! {
+        AuthorityBlock{holds: AuthorityHolds.default(), needs: [String]{}, grants: [PackageGrant]{}, trust: None, providers: [ProviderAuthority]{}}
+    }
+}
+
+// `Sema::Effect::parse(root).is_some()`: `root` is one canonical closed
+// effect root (D-EFFTREE1).
+pub fn pkg_effect_root_known(root: String) -> Bool Never! {
+    if (authority_parse_root(root) ?? "") != root -> return false
+    if root == {
+        "Net" | "FS" | "IO" | "DB" | "Time" | "Rand" | "Env" | "Exec" | "Log" | "GPU" | "Panic" | "FFI" | "Browser" | "Secret" | "Mem" -> true
+        else -> false
+    }
+}
+
+// `Sema::memory_allocation_bound(name).is_some()`: `Mem.Alloc` or
+// `Mem.Alloc(above: <positive bytes>)` (D-AUTHORITY-MEM2).
+pub fn pkg_memory_allocation_bound_valid(name: String) -> Bool Never! {
+    if name == "Mem.Alloc" -> return true
+    parts :: name.split_once("(") ?? return false
+    if parts.before != "Mem.Alloc" || !parts.after.ends_with(")") -> return false
+    args :: parts.after.removesuffix(")").trim()
+    if !args.starts_with("above:") -> return false
+    bytes :: pkg_parse_u64(args.removeprefix("above:").trim()) ?? return false
+    bytes > 0
+}
+
+fn pkg_authority_bad(detail: String) -> PackageParseError Never! {
+    PackageParseError.BadEffectsBlock("malformed `authority:` block: {detail}")
+}
+
+// `authority_error`: a composition failure inside `authority:` reads as a
+// malformed authority block.
+fn pkg_authority_error(error: PackageParseError) -> PackageParseError Never! {
+    if error == {
+        .Composition(detail) -> pkg_authority_bad(detail)
+        else -> error
+    }
+}
+
+fn pkg_authority_entries(body: String) -> [ManifestEntry] PackageParseError! {
+    if pkg_key_value_entries(body) == {
+        .Ok(entries) -> Ok(entries)
+        .Err(error) -> Err(pkg_authority_error(error))
+    }
+}
+
+fn pkg_authority_object_body(input: String, field: String) -> String PackageParseError! {
+    value :: input.trim()
+    open :: pkg_text_find_byte(value, 123) ?? return Err(pkg_authority_bad("`authority.{field}` must be a record"))
+    close :: pkg_text_rfind_byte(value, 125) ?? return Err(pkg_authority_bad("`authority.{field}` is missing `}}`"))
+    if close <= open || pkg_binder_tail(value, close + 1).trim() != "" -> return Err(pkg_authority_bad("`authority.{field}` must contain one complete record"))
+    Ok(pkg_binder_slice(value, open + 1, close))
+}
+
+fn pkg_parse_authority_holds(body: String) -> AuthorityHolds PackageParseError! {
+    holds := AuthorityHolds.default()
+    seen := [String]{}
+    loop entry in pkg_authority_entries(body) {
+        if seen.contains(entry.key) -> return Err(pkg_authority_bad("authority.holds.{entry.key} is declared more than once"))
+        &seen.push(entry.key)
+        if entry.key == {
+            AUTHORITY_HOLDS_FIELD_ALLOW -> holds.allow = Val(pkg_authority_effect_list("authority.holds.allow", entry.value.trim()))
+            AUTHORITY_HOLDS_FIELD_DENY -> holds.deny = Val(pkg_authority_effect_list("authority.holds.deny", entry.value.trim()))
+            else -> return Err(pkg_authority_bad("unknown `authority.holds` field `{entry.key}` — allowed: `{AUTHORITY_HOLDS_FIELD_ALLOW}`, `{AUTHORITY_HOLDS_FIELD_DENY}`"))
+        }
+    }
+    Ok(holds)
+}
+
+fn pkg_authority_effect_list(field: String, value: String) -> [String] PackageParseError! {
+    if pkg_parse_effect_list(field, value) == {
+        .Ok(names) -> Ok(names)
+        .Err(error) -> Err(pkg_authority_error(error))
+    }
+}
+
+// Parse the body of `authority: { … }`.
+pub fn pkg_parse_authority(body: String) -> AuthorityBlock PackageParseError! {
+    authority := AuthorityBlock.default()
+    seen := [String]{}
+    loop entry in pkg_authority_entries(body) {
+        if seen.contains(entry.key) -> return Err(pkg_authority_bad("authority.{entry.key} is declared more than once"))
+        &seen.push(entry.key)
+        if entry.key == {
+            AUTHORITY_FIELD_HOLDS -> authority.holds = pkg_parse_authority_holds(pkg_authority_object_body(entry.value, "holds"))
+            AUTHORITY_FIELD_NEEDS -> {
+                if pkg_parse_authority_needs(entry.value) == {
+                    .Ok(needs) -> authority.needs = needs
+                    .Err(error) -> return Err(pkg_authority_error(error))
+                }
+            }
+            AUTHORITY_FIELD_GRANTS -> {
+                if pkg_parse_grants(pkg_authority_object_body(entry.value, "grants")) == {
+                    .Ok(grants) -> authority.grants = grants
+                    .Err(error) -> return Err(pkg_authority_error(error))
+                }
+            }
+            AUTHORITY_FIELD_TRUST -> authority.trust = Val(pkg_parse_authority_trust_body(pkg_authority_object_body(entry.value, "trust")))
+            AUTHORITY_FIELD_PROVIDERS -> authority.providers = pkg_parse_provider_authority_body(pkg_authority_object_body(entry.value, "providers"))
+            else -> return Err(pkg_authority_bad("unknown `authority` field `{entry.key}` — allowed: `{AUTHORITY_FIELD_HOLDS}`, `{AUTHORITY_FIELD_NEEDS}`, `{AUTHORITY_FIELD_GRANTS}`, `{AUTHORITY_FIELD_TRUST}`, `{AUTHORITY_FIELD_PROVIDERS}`"))
+        }
+    }
+    Ok(authority)
+}
+
+// Parse the complete `authority:` value, so a missing or non-record outer
+// value uses the same malformed-authority error as nested fields.
+pub fn pkg_parse_authority_value(value: String) -> AuthorityBlock PackageParseError! {
+    pkg_parse_authority(pkg_authority_object_body(value, "authority"))
+}
+
+fn pkg_parse_authority_trust_body(body: String) -> TrustPolicy PackageParseError! {
+    policy := TrustPolicy{default: None, ci_prompt: None, services: [ServiceTrust]{}, require: None}
+    seen := [String]{}
+    loop entry in pkg_authority_entries(body) {
+        if seen.contains(entry.key) -> return Err(pkg_authority_bad("authority.trust.{entry.key} is declared more than once"))
+        &seen.push(entry.key)
+        if entry.key == {
+            AUTHORITY_TRUST_FIELD_DEFAULT -> {
+                if pkg_parse_trust_decision(entry.value) == {
+                    .Ok(decision) -> policy.default = Val(decision)
+                    .Err(error) -> return Err(pkg_authority_error(error))
+                }
+            }
+            AUTHORITY_TRUST_FIELD_CI -> {
+                if pkg_parse_ci_trust_prompt(entry.value) == {
+                    .Ok(decision) -> policy.ci_prompt = Val(decision)
+                    .Err(error) -> return Err(pkg_authority_error(error))
+                }
+            }
+            AUTHORITY_TRUST_FIELD_SERVICES -> {
+                if pkg_parse_service_trust(entry.value) == {
+                    .Ok(services) -> policy.services = services
+                    .Err(error) -> return Err(pkg_authority_error(error))
+                }
+            }
+            AUTHORITY_TRUST_FIELD_REQUIRE -> {
+                if pkg_parse_provenance_requirement(entry.value) == {
+                    .Ok(requirement) -> policy.require = Val(requirement)
+                    .Err(error) -> return Err(pkg_authority_error(error))
+                }
+            }
+            else -> return Err(pkg_authority_bad("unknown `authority.trust` field `{entry.key}` — allowed: `{AUTHORITY_TRUST_FIELD_DEFAULT}`, `{AUTHORITY_TRUST_FIELD_CI}`, `{AUTHORITY_TRUST_FIELD_SERVICES}`, `{AUTHORITY_TRUST_FIELD_REQUIRE}`"))
+        }
+    }
+    Ok(policy)
+}
+
+fn pkg_parse_provider_authority_body(providers: String) -> [ProviderAuthority] PackageParseError! {
+    out := [ProviderAuthority]{}
+    seen_providers := [String]{}
+    loop entry in pkg_authority_entries(providers) {
+        provider :: pkg_unquote(entry.key)
+        if seen_providers.contains(provider) -> return Err(pkg_authority_bad("authority.providers.{provider} is declared more than once"))
+        &seen_providers.push(provider)
+        body :: pkg_authority_object_body(entry.value, "providers.{provider}")
+        registry := String?{None}
+        allow := [String]{}
+        deny := [String]{}
+        seen_fields := [String]{}
+        loop field in pkg_authority_entries(body) {
+            if seen_fields.contains(field.key) -> return Err(pkg_authority_bad("authority.providers.{provider}.{field.key} is declared more than once"))
+            &seen_fields.push(field.key)
+            if field.key == {
+                PROVIDER_FIELD_REGISTRY -> {
+                    value :: field.value.trim()
+                    if !value.starts_with("\"") || !value.ends_with("\"") || value.bytes().len() < 2 -> return Err(pkg_authority_bad("authority.providers.{provider}.registry must be a string"))
+                    registry = Val(pkg_unquote(value))
+                }
+                PROVIDER_FIELD_ALLOW -> allow = pkg_parse_string_list(field.value) ?? return Err(pkg_authority_bad("authority.providers.{provider}.allow must be a list"))
+                PROVIDER_FIELD_DENY -> deny = pkg_parse_string_list(field.value) ?? return Err(pkg_authority_bad("authority.providers.{provider}.deny must be a list"))
+                else -> return Err(pkg_authority_bad("unknown authority.providers.{provider} field `{field.key}`"))
+            }
+        }
+        found :: registry ?? return Err(pkg_authority_bad("authority.providers.{provider} needs registry"))
+        &out.push(ProviderAuthority{provider: provider, registry: found, allow: allow, deny: deny})
+    }
+    Ok(out)
+}
+
+fn pkg_parse_provenance_requirement(value: String) -> ProvenanceRequirement PackageParseError! {
+    spelled :: pkg_unquote(value)
+    if spelled == {
+        AUTHORITY_TRUST_REQUIRE_NONE -> Ok(ProvenanceRequirement.Unrequired)
+        AUTHORITY_TRUST_REQUIRE_LOGGED -> Ok(ProvenanceRequirement.Logged)
+        AUTHORITY_TRUST_REQUIRE_ATTESTED -> Ok(ProvenanceRequirement.Attested)
+        else -> Err(PackageParseError.Composition("`authority.trust.require` must be `{AUTHORITY_TRUST_REQUIRE_NONE}`, `{AUTHORITY_TRUST_REQUIRE_LOGGED}`, or `{AUTHORITY_TRUST_REQUIRE_ATTESTED}`, not `{spelled}`"))
+    }
+}
+
+// `{ … }` after an optional leading dot.
+fn pkg_dotted_record_body(input: String) -> String? Never! {
+    value :: input.trim()
+    rest :: (if value.starts_with(".") -> value.removeprefix(".") else -> value).trim_start()
+    pkg_strip_wrapped(rest, "{{", "}}")
+}
+
+fn pkg_parse_ci_trust_prompt(value: String) -> TrustDecision PackageParseError! {
+    body :: pkg_dotted_record_body(value) ?? return Err(PackageParseError.Composition("`authority.trust.ci` must be `{{ prompt: allow|prompt|deny }}`"))
+    prompt := TrustDecision?{None}
+    seen := [String]{}
+    loop entry in pkg_key_value_entries(body) {
+        if seen.contains(entry.key) -> return Err(PackageParseError.Composition("authority.trust.ci.{entry.key} is declared more than once"))
+        &seen.push(entry.key)
+        if entry.key != AUTHORITY_TRUST_FIELD_PROMPT -> return Err(PackageParseError.Composition("unknown `authority.trust.ci` field `{entry.key}` — allowed: `prompt`"))
+        prompt = Val(pkg_parse_trust_decision(entry.value))
+    }
+    decision :: prompt ?? return Err(PackageParseError.Composition("`authority.trust.ci` needs `prompt:`"))
+    Ok(decision)
+}
+
+fn pkg_parse_service_trust(value: String) -> [ServiceTrust] PackageParseError! {
+    body :: pkg_dotted_record_body(value) ?? return Err(PackageParseError.Composition("`authority.trust.services` must be `{{ name: allow|prompt|deny }}`"))
+    services := [ServiceTrust]{}
+    seen := [String]{}
+    loop entry in pkg_key_value_entries(body) {
+        name :: pkg_unquote(entry.key)
+        if seen.contains(name) -> return Err(PackageParseError.Composition("authority.trust.services.{name} is declared more than once"))
+        &seen.push(name)
+        &services.push(ServiceTrust{service: name, decision: pkg_parse_trust_decision(entry.value)})
+    }
+    Ok(services)
+}
+
+fn pkg_parse_trust_decision(value: String) -> TrustDecision PackageParseError! {
+    spelled :: pkg_unquote(value)
+    if spelled == {
+        AUTHORITY_TRUST_DECISION_ALLOW -> Ok(TrustDecision.Allow)
+        AUTHORITY_TRUST_DECISION_PROMPT -> Ok(TrustDecision.Prompt)
+        AUTHORITY_TRUST_DECISION_DENY -> Ok(TrustDecision.Deny)
+        else -> Err(PackageParseError.Composition("`{spelled}` is not a trust decision — use `allow`, `prompt`, or `deny`"))
+    }
+}
+
+// `grants: { "dep": [DB, Net] }` (D-EFFBUDGET1 / D-JPK-GRANTSCHEMA1).
+pub fn pkg_parse_grants(body: String) -> [PackageGrant] PackageParseError! {
+    out := [PackageGrant]{}
+    seen := [String]{}
+    loop entry in pkg_key_value_entries(body) {
+        dep :: pkg_unquote(entry.key)
+        if seen.contains(dep) -> return Err(PackageParseError.Composition("grant `{dep}` is declared more than once"))
+        &seen.push(dep)
+        &out.push(PackageGrant{package: dep, rights: pkg_parse_effect_list(dep, entry.value.trim())})
+    }
+    Ok(out)
+}
+
+fn pkg_parse_effect_list(field: String, value: String) -> [String] PackageParseError! {
+    names :: pkg_parse_string_list(value) ?? return Err(PackageParseError.BadEffectsBlock("`{field}:` must be a list like `[DB, Net]`"))
+    loop name in names {
+        if !pkg_effect_root_known(authority_root(name)) -> return Err(PackageParseError.BadEffectsBlock("`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"))
+        if name.contains("(") {
+            if !field.ends_with("deny") -> return Err(PackageParseError.BadEffectsBlock("`{name}` is a parameterized memory denial and belongs only in an `authority.holds.deny` list — use `Mem.Alloc(above: 65536)` there"))
+            if !pkg_memory_allocation_bound_valid(name) -> return Err(PackageParseError.BadEffectsBlock("`{name}` has an invalid parameterized rights entry — use `Mem.Alloc(above: 65536)`"))
+        }
+    }
+    Ok(names)
+}
+
+fn pkg_parse_authority_needs(value: String) -> [String] PackageParseError! {
+    needs :: pkg_parse_string_list(value) ?? return Err(PackageParseError.BadEffectsBlock("`authority.needs:` must be a list like `[DB, Net, UI.Clipboard]`"))
+    loop name in needs {
+        if syntax_is_ui_capability(name) -> next
+        if !pkg_effect_root_known(authority_root(name)) -> return Err(PackageParseError.BadEffectsBlock("`{name}` isn't a known effect or UI capability"))
+        if name.contains("(") -> return Err(PackageParseError.BadEffectsBlock("`{name}` is a parameterized memory denial and cannot be declared in `authority.needs`"))
+    }
+    loop right in needs {
+        root :: authority_root(right)
+        if root == "Panic" || root == "Mem" -> return Err(PackageParseError.BadEffectsBlock("`{right}` is deny-only and cannot be declared in `authority.needs`"))
+    }
+    Ok(needs)
+}

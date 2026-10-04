@@ -1,0 +1,73 @@
+// D-EXEC1 execution boundary shared by run, dev and the canonical test harness.
+// Source/CmdCompile.rs NativeExecutionRequest and CmdDevTools.rs run_dev supply
+// command policy; the backend owns O0 code generation, runtime and sessions.
+use jet_foundation.[MIRProgram, MIRFunctionID, WatchPolicy]
+use jet_driver.[JetDriverAuthorizedSourceSnapshot]
+
+pub enum JetCLIExecutionStdio { Inherit Capture }
+pub struct JetCLIExecutionSession { pub identity: Int }
+pub struct JetCLIExecutionRequest {
+    // Already checked, lowered and optimized once by the canonical Driver.
+    pub program: MIRProgram
+    pub entry: MIRFunctionID
+    pub artifact_identity: String
+    pub sources: JetDriverAuthorizedSourceSnapshot
+    pub cwd: String
+    // argv[0] is the resolved source entry, not the compiler executable.
+    pub argv: [String]
+    // Explicit overrides only. None removes a binding; inherited environment
+    // stays host-owned and is never copied into reports or receipt payloads.
+    pub environment: [String:String?]
+    pub stdio: JetCLIExecutionStdio
+}
+pub struct JetCLIExecutionResult {
+    pub exit_code: Int
+    pub stdout: String
+    pub stderr: String
+}
+#Error
+pub struct JetCLIExecutionError { pub operation: String, pub message: String }
+pub enum JetCLIExecutionChange { Changed Stop }
+
+// Native integration contract (Main authorized 2026-10-03):
+// - launch executes O0 in memory against the version-pinned shared runtime;
+//   never emit/spawn a static image or silently select rustc/interpreter.
+// - sources/entry/artifact identity stay pinned through launch and execution;
+//   checked source names are not reopened to choose a different program.
+// - argv/environment use exact transport. Refuse unrepresentable OS bytes,
+//   never lossy-convert; captured streams are concurrently drained and reaped.
+// - Capture returns both complete streams; Inherit returns empty stream fields
+//   (bytes have already reached inherited handles). Exit status is preserved.
+// - a session identity is a host-owned non-reusable live token, not a code
+//   address. Stop/panic/cancel cannot end the compiler or orphan workers.
+// - reload is transactional: check/lower failure leaves the last-good image
+//   installed; failed swap leaves the old generation callable. Restart joins
+//   the old execution before installing the new one. Auto chooses only from
+//   checked reload facts; no CLI-local state preservation guesses.
+// - next_change watches the pinned closure, includes imported source changes,
+//   coalesces OS notifications and returns Stop on explicit cancellation.
+// - close drains/reaps/releases on every path, including failed wait/reload;
+//   no frame can return into released executable memory after it returns.
+pub trait JetCLIExecutionHost {
+    fn launch(&self, request: JetCLIExecutionRequest) -> JetCLIExecutionSession JetCLIExecutionError!
+    fn wait(&self, session: JetCLIExecutionSession) -> JetCLIExecutionResult JetCLIExecutionError!
+    fn reload(&self, session: JetCLIExecutionSession, request: JetCLIExecutionRequest, policy: WatchPolicy) JetCLIExecutionError!
+    fn next_change(&self, session: JetCLIExecutionSession) -> JetCLIExecutionChange JetCLIExecutionError!
+    fn close(&self, session: JetCLIExecutionSession) JetCLIExecutionError!
+}
+
+// One finite execution used by run and test. Even an unsuccessful wait must
+// close the session; a child nonzero exit is a result, not a launch failure.
+pub fn jet_cli_execute_once<H: JetCLIExecutionHost>(request: JetCLIExecutionRequest, host: &H) -> JetCLIExecutionResult JetCLIExecutionError! {
+    session :: &host.launch(request) ?? return Err(err)
+    if &host.wait(session) == {
+        .Err(failure) -> {
+            &host.close(session).drop("preserve primary execution failure")
+            return Err(~failure)
+        }
+        .Ok(result) -> {
+            &host.close(session) ?? return Err(err)
+            return Ok(~result)
+        }
+    }
+}

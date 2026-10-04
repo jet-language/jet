@@ -6,7 +6,7 @@
 // mean one thing (I9).
 
 // jet-foundation Syntax `BINARY_NAME` and `LANG_NAME`; the `jet` package version.
-pub JET_CLI_BINARY :: "jet"
+pub JET_CLI_BINARY :: prep { BINARY_NAME }
 pub JET_CLI_LANG_NAME :: "Jet"
 pub JET_CLI_VERSION :: "0.0.1"
 
@@ -19,31 +19,62 @@ pub struct JetCLIActionRef {
     pub action: Int
 }
 
-// One retired command route (D-ONCE-RETIRE1=C). Every row is a semantic
-// retirement that teaches E2101 with its current home.
-struct JetCLIRetiredSpec {
-    spelling: String
-    why: String
-    fix: String
+// Rust `RetirementCategory` (CLI.rs:1718-1722).
+pub enum JetCLIRetirementCategory {
+    Rename
+    Semantic
 }
 
-JET_CLI_RETIRED :: prep { [JetCLIRetiredSpec]{
-    JetCLIRetiredSpec{spelling: "facts", why: "the typed facts ledger is now the `inspect types` plane (D-CLI-ONE1=A)", fix: "jet inspect types"},
-    JetCLIRetiredSpec{spelling: "authority", why: "authority inspection is the `inspect rights` plane (D-CLI-ONE1=A)", fix: "jet inspect rights"},
-    JetCLIRetiredSpec{spelling: "unsafe", why: "unsafe inspection is the `inspect gates` plane (D-CLI-ONE1=A)", fix: "jet inspect gates"},
-    JetCLIRetiredSpec{spelling: "guarantees", why: "guarantees inspection is the `inspect rights` plane (D-CLI-ONE1=A)", fix: "jet inspect rights"},
-    JetCLIRetiredSpec{spelling: "report", why: "build inspection is the `inspect build` plane (D-CLI-ONE1=A)", fix: "jet inspect build"},
-    JetCLIRetiredSpec{spelling: "dossier", why: "build inspection is the `inspect build` plane (D-CLI-ONE1=A)", fix: "jet inspect build"},
-    JetCLIRetiredSpec{spelling: "bench", why: "measurement is a mode of the test harness now (D-CLAIM-BENCH1=A)", fix: "jet test --measure"},
-    JetCLIRetiredSpec{spelling: "serve", why: "`jet dev` is the only dev loop now; `--swap` forces its hot-swap path (D-CLI-DEVSERVE1=A)", fix: "jet dev <file.jet> --swap"},
-    JetCLIRetiredSpec{spelling: "store", why: "the store group is owned by Jetpack; project commands stay with Jet (D-VERDICT-2188-1)", fix: "jetpack hangar / jet clean / jet fetch"},
-    JetCLIRetiredSpec{spelling: "store fetch", why: "dependency fetching is the flat `jet fetch` command (D-CLI-STORE2=A)", fix: "jet fetch"},
-    JetCLIRetiredSpec{spelling: "store verify", why: "package-store integrity checks belong to Jetpack's Hangar (D-VERDICT-2188-1)", fix: "jetpack hangar verify"},
-    JetCLIRetiredSpec{spelling: "store generations", why: "package-store generations belong to Jetpack's Hangar (D-VERDICT-2188-1)", fix: "jetpack hangar"},
-    JetCLIRetiredSpec{spelling: "store rollback", why: "package-store rollback belongs to Jetpack's Hangar (D-VERDICT-2188-1)", fix: "jetpack hangar"},
-    JetCLIRetiredSpec{spelling: "store gc", why: "package-store cleanup is the sole `jet clean` intent (D-CLI-STORE2=A)", fix: "jet clean"},
-    JetCLIRetiredSpec{spelling: "store lock", why: "script locking is a `jet fetch` flag, not a separate command (D-CLI-STORE2=A)", fix: "jet fetch --lock <script.jet>"},
-    JetCLIRetiredSpec{spelling: "lock", why: "script locking is a `jet fetch` flag, not a separate command (D-CLI-STORE2=A)", fix: "jet fetch --lock <script.jet>"},
+// The literal forms of Rust's fix callbacks: function values cannot cross `prep`.
+pub enum JetCLIRetiredFix {
+    Fixed(String)
+    Serve
+    Lock(Int)
+}
+
+// Rust `RetiredCommandSpec` (CLI.rs:1724-1731).
+// Semantic rows teach a hard error; the optional rewrite is only for renames.
+pub struct JetCLIRetiredSpec {
+    pub spelling: String
+    pub category: JetCLIRetirementCategory
+    pub error_code: String
+    pub why: String
+    pub fix: JetCLIRetiredFix
+    pub rewrite: [String]?
+}
+
+
+// Rust `RETIRED_COMMANDS` (CLI.rs:1808-1937), in registry order.
+pub JET_CLI_RETIRED :: prep { [JetCLIRetiredSpec]{
+    // Rust `retired_facts_fix` (CLI.rs:1783-1785).
+    JetCLIRetiredSpec{spelling: "facts", category: JetCLIRetirementCategory.Semantic, error_code: "E2101", why: "the typed facts ledger is now the `inspect types` plane (D-CLI-ONE1=A)", fix: JetCLIRetiredFix.Fixed("jet inspect types"), rewrite: None},
+    // Rust `retired_authority_fix` (CLI.rs:1787-1789).
+    JetCLIRetiredSpec{spelling: "authority", category: JetCLIRetirementCategory.Semantic, error_code: "E2101", why: "authority inspection is the `inspect rights` plane (D-CLI-ONE1=A)", fix: JetCLIRetiredFix.Fixed("jet inspect rights"), rewrite: None},
+    // Rust `retired_unsafe_fix` (CLI.rs:1791-1793).
+    JetCLIRetiredSpec{spelling: "unsafe", category: JetCLIRetirementCategory.Semantic, error_code: "E2101", why: "unsafe inspection is the `inspect gates` plane (D-CLI-ONE1=A)", fix: JetCLIRetiredFix.Fixed("jet inspect gates"), rewrite: None},
+    // Rust `retired_guarantees_fix` (CLI.rs:1795-1797).
+    JetCLIRetiredSpec{spelling: "guarantees", category: JetCLIRetirementCategory.Semantic, error_code: "E2101", why: "guarantees inspection is the `inspect rights` plane (D-CLI-ONE1=A)", fix: JetCLIRetiredFix.Fixed("jet inspect rights"), rewrite: None},
+    // Rust `retired_report_fix` (CLI.rs:1799-1801).
+    JetCLIRetiredSpec{spelling: "report", category: JetCLIRetirementCategory.Semantic, error_code: "E2101", why: "build inspection is the `inspect build` plane (D-CLI-ONE1=A)", fix: JetCLIRetiredFix.Fixed("jet inspect build"), rewrite: None},
+    // Rust `retired_dossier_fix` (CLI.rs:1803-1805).
+    JetCLIRetiredSpec{spelling: "dossier", category: JetCLIRetirementCategory.Semantic, error_code: "E2101", why: "build inspection is the `inspect build` plane (D-CLI-ONE1=A)", fix: JetCLIRetiredFix.Fixed("jet inspect build"), rewrite: None},
+    // Rust `retired_bench_fix` (CLI.rs:1748-1750).
+    JetCLIRetiredSpec{spelling: "bench", category: JetCLIRetirementCategory.Semantic, error_code: "E2101", why: "measurement is a mode of the test harness now (D-CLAIM-BENCH1=A)", fix: JetCLIRetiredFix.Fixed("jet test --measure"), rewrite: None},
+    JetCLIRetiredSpec{spelling: "serve", category: JetCLIRetirementCategory.Semantic, error_code: "E2101", why: "`jet dev` is the only dev loop now; `--swap` forces its hot-swap path (D-CLI-DEVSERVE1=A)", fix: JetCLIRetiredFix.Serve, rewrite: None},
+    // Rust `retired_store_fix` (CLI.rs:1752-1754).
+    JetCLIRetiredSpec{spelling: "store", category: JetCLIRetirementCategory.Semantic, error_code: "E2101", why: "the store group is owned by Jetpack; project commands stay with Jet (D-VERDICT-2188-1)", fix: JetCLIRetiredFix.Fixed("jetpack hangar / jet clean / jet fetch"), rewrite: None},
+    // Rust `retired_store_fetch_fix` (CLI.rs:1756-1758).
+    JetCLIRetiredSpec{spelling: "store fetch", category: JetCLIRetirementCategory.Semantic, error_code: "E2101", why: "dependency fetching is the flat `jet fetch` command (D-CLI-STORE2=A)", fix: JetCLIRetiredFix.Fixed("jet fetch"), rewrite: None},
+    // Rust `retired_store_verify_fix` (CLI.rs:1760-1762).
+    JetCLIRetiredSpec{spelling: "store verify", category: JetCLIRetirementCategory.Semantic, error_code: "E2101", why: "package-store integrity checks belong to Jetpack's Hangar (D-VERDICT-2188-1)", fix: JetCLIRetiredFix.Fixed("jetpack hangar verify"), rewrite: None},
+    // Rust `retired_store_generations_fix` (CLI.rs:1764-1766).
+    JetCLIRetiredSpec{spelling: "store generations", category: JetCLIRetirementCategory.Semantic, error_code: "E2101", why: "package-store generations belong to Jetpack's Hangar (D-VERDICT-2188-1)", fix: JetCLIRetiredFix.Fixed("jetpack hangar"), rewrite: None},
+    // Rust `retired_store_rollback_fix` (CLI.rs:1768-1770).
+    JetCLIRetiredSpec{spelling: "store rollback", category: JetCLIRetirementCategory.Semantic, error_code: "E2101", why: "package-store rollback belongs to Jetpack's Hangar (D-VERDICT-2188-1)", fix: JetCLIRetiredFix.Fixed("jetpack hangar"), rewrite: None},
+    // Rust `retired_store_gc_fix` (CLI.rs:1772-1774).
+    JetCLIRetiredSpec{spelling: "store gc", category: JetCLIRetirementCategory.Semantic, error_code: "E2101", why: "package-store cleanup is the sole `jet clean` intent (D-CLI-STORE2=A)", fix: JetCLIRetiredFix.Fixed("jet clean"), rewrite: None},
+    JetCLIRetiredSpec{spelling: "store lock", category: JetCLIRetirementCategory.Semantic, error_code: "E2101", why: "script locking is a `jet fetch` flag, not a separate command (D-CLI-STORE2=A)", fix: JetCLIRetiredFix.Lock(2), rewrite: None},
+    JetCLIRetiredSpec{spelling: "lock", category: JetCLIRetirementCategory.Semantic, error_code: "E2101", why: "script locking is a `jet fetch` flag, not a separate command (D-CLI-STORE2=A)", fix: JetCLIRetiredFix.Lock(1), rewrite: None},
 } }
 
 // `text` left-aligned in `width` characters (Rust `{:<width}`).
@@ -103,22 +134,23 @@ pub fn jet_cli_moved_command(name: String) -> JetCLIActionRef? Never! {
     None
 }
 
-fn jet_cli_retired_matches(spelling: String, argv: [String]) -> Bool Never! {
-    words :: spelling.split(" ").to_list()
-    if words.len() > argv.len() -> return false
-    loop (index, word) in words {
-        if argv[index] != word -> return false
+// Rust `retired_command` prefix filter/key (CLI.rs:1943-1949).
+// Registry spellings use single spaces; count while matching, without a word list.
+fn jet_cli_retired_match_length(spelling: String, argv: [String]) -> Int? Never! {
+    count := 0
+    loop word in spelling.split(" ") {
+        if count >= argv.len() || argv[count] != word -> return None
+        count += 1
     }
-    true
+    Val(count)
 }
 
-// The longest retired spelling that prefixes `argv`.
-fn jet_cli_retired_command(argv: [String]) -> Int? Never! {
+// Rust `retired_command` (CLI.rs:1940-1950). Last equal-length match wins.
+pub fn jet_cli_retired_command(argv: [String]) -> Int? Never! {
     best := -1
     best_words := 0
     loop (index, retired) in JET_CLI_RETIRED {
-        if !jet_cli_retired_matches(retired.spelling, argv) -> next
-        words :: retired.spelling.split(" ").to_list().len()
+        words :: jet_cli_retired_match_length(retired.spelling, argv) ?? next
         if words >= best_words {
             best = index
             best_words = words
@@ -128,15 +160,21 @@ fn jet_cli_retired_command(argv: [String]) -> Int? Never! {
     Val(best)
 }
 
-// The fix line names the file or script the retired spelling was given.
-fn jet_cli_retired_fix(retired: JetCLIRetiredSpec, argv: [String]) -> String Never! {
-    if {
-        retired.spelling == "serve" && argv.len() > 1 -> return "jet dev {argv[1]} --swap"
-        retired.spelling == "lock" && argv.len() > 1 -> return "jet fetch --lock {argv[1]}"
-        retired.spelling == "store lock" && argv.len() > 2 -> return "jet fetch --lock {argv[2]}"
-        else -> {}
+// Invoke the fix stored in the row; no second spelling switch.
+pub fn jet_cli_retired_fix(retired: JetCLIRetiredSpec, argv: [String]) -> String Never! {
+    if retired.fix == {
+        .Fixed(text) -> ~text
+        // Rust `retired_serve_fix` (CLI.rs:1734-1739).
+        .Serve -> {
+            if argv.len() > 1 -> return "jet dev {argv[1]} --swap"
+            "jet dev <file.jet> --swap"
+        }
+        // Rust `retired_lock_fix` and `retired_store_lock_fix` (CLI.rs:1741-1746,1776-1781).
+        .Lock(index) -> {
+            if argv.len() > index -> return "jet fetch --lock {argv[index]}"
+            "jet fetch --lock <script.jet>"
+        }
     }
-    ~retired.fix
 }
 
 // E2101 for a retired route, or None when `argv` names no retired spelling.
@@ -144,7 +182,7 @@ pub fn jet_cli_retired_report(argv: [String], color: Bool) -> String? Never! {
     index :: jet_cli_retired_command(argv) ?? return None
     retired :: JET_CLI_RETIRED[index]
     Val(jet_cli_report(
-        "E2101",
+        retired.error_code,
         "`{retired.spelling}` isn't a jet command",
         retired.why,
         "run `{jet_cli_retired_fix(retired, argv)}`",
@@ -152,15 +190,17 @@ pub fn jet_cli_retired_report(argv: [String], color: Bool) -> String? Never! {
     ))
 }
 
-fn jet_cli_is_retired_root(name: String) -> Bool Never! {
+// Rust `is_retired_root` (CLI.rs:1952-1957); every row uses single spaces.
+pub fn jet_cli_is_retired_root(name: String) -> Bool Never! {
     loop retired in JET_CLI_RETIRED {
-        if retired.spelling == name -> return true
+        if !retired.spelling.contains(" ") && retired.spelling == name -> return true
     }
     false
 }
 
 // Canonical top-level spellings: never a moved action, a retired root, or
 // the E0043 teaching-only `install`.
+// Rust `is_canonical_top_level` (CLI.rs:1963-1965).
 pub fn jet_cli_is_canonical_top_level(name: String) -> Bool Never! {
     jet_cli_moved_command(name) == None && !jet_cli_is_retired_root(name) && name != "install"
 }
@@ -442,4 +482,168 @@ pub fn jet_cli_command_help(name: String) -> String Never! {
     }
     index :: jet_cli_command_index(name) ?? return "{JET_CLI_BINARY} {name}\n\nRun `{JET_CLI_BINARY} help` to see every command.\n"
     "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n\n  {jet_cli_command_usage(name)}\n{jet_cli_flag_rows(jet_cli_flags_for_command(name))}"
+}
+
+// Rust `parser_inventory_violations` (CLI.rs:2412-2414).
+pub fn jet_cli_parser_inventory_violations() -> [String] Never! {
+    jet_cli_parser_inventory_violations_with_host(None)
+}
+
+// Rust `parser_inventory_violations_against` (CLI.rs:2416-2426).
+pub fn jet_cli_parser_inventory_violations_against(host_dispatch_words: [String]?) -> [String] Never! {
+    if host_dispatch_words == .Val(words) {
+        return jet_cli_parser_inventory_violations_with_host(Val([[String]]{words}))
+    }
+    jet_cli_parser_inventory_violations_with_host(None)
+}
+
+// Rust `parser_inventory_violations_against_slices` (CLI.rs:2428-2432).
+pub fn jet_cli_parser_inventory_violations_against_slices(host_dispatch_words: [[String]]?) -> [String] Never! {
+    jet_cli_parser_inventory_violations_with_host(host_dispatch_words)
+}
+
+// Rust `parser_inventory_violations_with_host::host_has` (CLI.rs:2437-2443).
+fn jet_cli_inventory_host_has(groups: [[String]]?, word: String) -> Bool Never! {
+    if groups == .Val(slices) {
+        loop words in slices { if words.contains(word) -> return true }
+        return false
+    }
+    true
+}
+
+// Rust `parser_inventory_violations_with_host::registry_has_dispatch` (CLI.rs:2444-2458).
+fn jet_cli_inventory_registry_has_dispatch(word: String) -> Bool Never! {
+    if word == "install" -> return true
+    loop command in JET_CLI_COMMANDS {
+        if command.name == word && (command.actions.len() == 0 || !command.exhaustive) -> return true
+        loop action in command.actions {
+            handler :: jet_cli_handler_index(action.handler) ?? next
+            if JET_CLI_HANDLERS[handler].dispatch_word == word -> return true
+        }
+    }
+    false
+}
+
+// Rust `parser_inventory_violations_with_host` (CLI.rs:2434-2626).
+// Host dispatch words are supplied by the caller, never copied from a second registry.
+fn jet_cli_parser_inventory_violations_with_host(host_dispatch_words: [[String]]?) -> [String] Never! {
+    violations := [String]{}
+    inspect_group := Int?{None}
+    loop (index, command) in JET_CLI_COMMANDS {
+        if command.name.trim().is_empty() -> &violations.push("command row {index} has an empty name")
+        if command.summary.trim().is_empty() -> &violations.push("command `{command.name}` has an empty summary")
+        loop previous in 0..<index {
+            if JET_CLI_COMMANDS[previous].name == command.name {
+                &violations.push("duplicate command row `{command.name}`")
+                break
+            }
+        }
+        if command.name == "inspect" -> inspect_group = Val(index)
+        if host_dispatch_words != None && command.actions.len() == 0 && jet_cli_is_canonical_top_level(command.name) && !jet_cli_inventory_host_has(host_dispatch_words, command.name) {
+            &violations.push("canonical command `{command.name}` has no host dispatch route")
+        }
+        actions := [String]{}
+        loop action in command.actions {
+            if action.name.trim().is_empty() -> &violations.push("command `{command.name}` has a nested action with an empty name")
+            if action.usage.trim().is_empty() -> &violations.push("nested action `{command.name} {action.name}` has empty usage")
+            if action.summary.trim().is_empty() -> &violations.push("nested action `{command.name} {action.name}` has empty summary")
+            if !actions.contains(action.name) {
+                &actions.push(action.name)
+            } else {
+                &violations.push("duplicate nested action `{command.name} {action.name}`")
+            }
+            // Rust's HandlerKey enum guarantees a registered dispatch seam.
+            handler_index :: jet_cli_handler_index(action.handler) ?? panic("unregistered CLI handler `{action.handler}`")
+            handler :: JET_CLI_HANDLERS[handler_index]
+            dispatch_word :: handler.dispatch_word
+            keeps_group :: handler.keeps_group
+            if dispatch_word.trim().is_empty() -> &violations.push("nested action `{command.name} {action.name}` has an empty dispatch word")
+            if host_dispatch_words != None && !jet_cli_inventory_host_has(host_dispatch_words, dispatch_word) {
+                &violations.push("nested action `{command.name} {action.name}` routes to missing host dispatch `{dispatch_word}`")
+            }
+            consumes_pair :: command.name == "inspect" && action.name == "env"
+            if keeps_group && dispatch_word != command.name && !consumes_pair {
+                &violations.push("nested action `{command.name} {action.name}` keeps a mismatched group for `{dispatch_word}`")
+            }
+            if !keeps_group && dispatch_word == command.name {
+                &violations.push("nested action `{command.name} {action.name}` strips to its owning group `{dispatch_word}`")
+            }
+            if action.handler == "InspectPlane" {
+                if command.name != "inspect" {
+                    &violations.push("inspect plane `{action.name}` is registered under `{command.name}`")
+                } else {
+                    args :: [String]{"inspect", action.name}
+                    if jet_cli_parse_inspect_args(args) == {
+                        .Ok(request) -> {
+                            if jet_cli_inspect_plane_name(request.plane) != action.name || request.scope != JetCLIInspectScope.Package || request.options.len() != 0 {
+                                &violations.push("inspect parser normalized plane `{action.name}` inconsistently")
+                            }
+                        }
+                        .Err(error) -> &violations.push("inspect parser rejected registered plane `{action.name}`: {error.message}")
+                    }
+                }
+            }
+        }
+    }
+    if host_dispatch_words == .Val(groups) {
+        loop words in groups {
+            loop word in words {
+                if !jet_cli_inventory_registry_has_dispatch(word) -> &violations.push("host dispatch `{word}` has no registered parser route")
+            }
+        }
+    }
+    inspect_index :: inspect_group ?? {
+        &violations.push("missing `inspect` command registry row")
+        return violations
+    }
+    inspect :: JET_CLI_COMMANDS[inspect_index]
+    loop plane in JET_CLI_INSPECT_PLANES {
+        name :: jet_cli_inspect_plane_name(plane)
+        count := 0
+        loop action in inspect.actions {
+            if action.handler == "InspectPlane" && action.name == name -> count += 1
+        }
+        if count != 1 -> &violations.push("inspect plane `{name}` has {count} registry rows")
+    }
+    loop (index, flag) in JET_CLI_FLAGS {
+        if flag.long.trim().is_empty() -> &violations.push("flag row {index} has an empty name")
+        loop previous in 0..<index {
+            if JET_CLI_FLAGS[previous].long == flag.long {
+                &violations.push("duplicate flag row `{flag.long}`")
+                break
+            }
+        }
+    }
+    loop retired in JET_CLI_RETIRED {
+        live := false
+        loop command in JET_CLI_COMMANDS {
+            if command.name == retired.spelling -> live = true
+            loop action in command.actions {
+                route :: "{command.name} {action.name}"
+                if route == retired.spelling -> live = true
+            }
+        }
+        if live -> &violations.push("retired route `{retired.spelling}` remains live")
+    }
+    violations
+}
+
+// Rust `owns_flag_vocabulary` (CLI.rs:2632-2690).
+pub fn jet_cli_owns_flag_vocabulary(name: String) -> Bool Never! {
+    if name == {
+        "env" | "cc" | "c++" | "remote" | "shared-store" | "dev" | "devtools" |
+        "push" | "trust" | "bridge" | "services" | "image" | "new" | "flash" |
+        "os" | "add" | "remove" | "bind" | "lsp" | "config" | "update" |
+        "outdated" | "search" | "info" | "import" | "explain" | "logs" | "clean" |
+        "fetch" | "publish" | "yank" | "keygen" | "key" | "vendor" | "audit" |
+        "sbom" | "repl" | "notebook" | "schema" | "db" | "semindex" | "impact" |
+        "codemod" | "generate" | "expand" | "diff" | "merge" | "review" |
+        "prove" | "budget" | "perf" | "completions" | "self-update" -> true
+        else -> false
+    }
+}
+
+// Rust `is_help_flag` (CLI.rs:2700-2702).
+pub fn jet_cli_is_help_flag(argument: String) -> Bool Never! {
+    argument == "--help" || argument == "-h"
 }

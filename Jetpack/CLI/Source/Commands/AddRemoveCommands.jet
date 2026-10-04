@@ -6,14 +6,15 @@
 // exact, case-sensitive catalog name) is checked first and copies real
 // `.jet` source into `./components/` instead; source names are always
 // lowercase, so an exact-case `Button`-style name can only be a component.
-pub fn cli_cmd_add(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+pub fn cli_cmd_add(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    cache := WorkspaceDeclarationCache.new()
     if parsed.flags.offline -> return cli_offline_refusal(theme, "add")
     raw :: parsed.positional.get(0) ?? {
         theme.error("add what?", "`jetpack add` needs a ref or a starter component to add.", "try `jetpack add ripgrep@nixpkgs` or `jetpack add Button`.")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     if env_component_find(raw) == .Val(component) -> return cli_add_component(theme, component)
-    if parsed.flags.adapt -> return cli_add_adapt(theme, raw)
+    if parsed.flags.adapt -> return cli_add_adapt(&cache, theme, raw)
     dir :: cli_current_dir()
     // Classify against the env's declared sources so `add fd@unstable` works
     // when `unstable` is already declared.
@@ -24,52 +25,52 @@ pub fn cli_cmd_add(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Ti
     cli_ensure_builtin_sources(&table)
     spec :: RefSpec.classify_in(raw, table) ?? {
         cli_ref_error(theme, err)
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     // Tier 1 is still real work: resolve before editing the manifest, so the
     // quiet `✓ package version` row is a verified package fact. A failed
     // resolution leaves env.jet intact.
     roots :: pkg_resolve_roots()
-    no_live := None
+    no_live := LiveRegion?{None}
     name_w :: if spec.package.len() > 8 -> spec.package.len() else -> 8
-    lease :: if cli_realize_ref_outcome(theme, roots, parsed.flags, table, spec, name_w, RowStyle.Ready, &no_live, RealizeScope.Project) == {
+    lease :: if cli_realize_ref_outcome(&verification, theme, roots, parsed.flags, table, spec, name_w, RowStyle.Ready, &no_live, RealizeScope.Project) == {
         .Realized(_, _, _, realized_lease) -> realized_lease
         .NeedsNix(need) -> {
             cli_report_nix_bridge_required(theme, parsed.flags, [NixBridgeNeed]{need}, [String]{})
-            return @EXIT_USAGE
+            return EXIT_USAGE
         }
         .Unavailable | .Failed -> {
-            return @EXIT_USER_ERROR
+            return EXIT_USER_ERROR
         }
     }
     // The lease keeps the verified entry consumable until the command ends.
     defer close(^lease)
     edited :: EnvFile.add(dir, spec) ?? {
         theme.error("could not edit the env file", err.message(), "check write permissions here.")
-        return @EXIT_USER_ERROR
+        return EXIT_USER_ERROR
     }
-    theme.ok("added {theme.bold(spec.package)} to {@ENV_FILE}")
+    theme.ok("added {theme.bold(spec.package)} to {ENV_FILE}")
     theme.detail(theme.gray("now: {edited.packages.join(", ")}"))
-    if cli_load_project_plan(theme) == .Ok(plan) {
+    if cli_load_project_plan(&cache, theme) == .Ok(plan) {
         loop source in cli_channel_sources(plan.table) {
             exact :: cli_resolve_source_channel(source, parsed.flags) ?? next
             channel :: LockedSourceChannel{name: source.name, channel: source.lock_channel, exact: exact}
             if pkg_lock_record_source_channel(dir, channel) == {
                 .Err(error) -> {
                     theme.error_coded("E1206", "couldn't write source channel `{source.name}` to the lock", error.message(), "fix the project lock permissions and rerun the add command")
-                    return @EXIT_USER_ERROR
+                    return EXIT_USER_ERROR
                 }
                 .Ok(_) -> {}
             }
         }
     }
-    @EXIT_OK
+    EXIT_OK
 }
 
 // Where a `--adapt` source's bytes come from, or the refusal for a source
 // that names a registry package rather than a source tree.
-fn cli_adapter_source(theme: Theme, raw: String) -[IO, FS, Env, Exec]> String? Never! {
-    if raw.contains(@REF_PROVIDER_AT) {
+fn cli_adapter_source(cache: &WorkspaceDeclarationCache, theme: Theme, raw: String) -[IO, FS, Env, Exec, Time.Wait]> String? Never! {
+    if raw.contains(REF_PROVIDER_AT) {
         if ProviderRef.classify(raw) == {
             .Ok(reference) -> return Val(reference.raw)
             .Err(error) -> {
@@ -78,7 +79,7 @@ fn cli_adapter_source(theme: Theme, raw: String) -[IO, FS, Env, Exec]> String? N
             }
         }
     }
-    table :: cli_cwd_table()
+    table :: cli_cwd_table(&cache)
     spec :: RefSpec.classify_in(raw, table) ?? {
         cli_ref_error(theme, err)
         return None
@@ -128,8 +129,8 @@ fn cli_trim_end_matches(text: String, suffix: String) -> String Never! {
 }
 
 // U20: print a `Pkg.adapt(...)` declaration draft instead of editing env.jet.
-fn cli_add_adapt(theme: Theme, raw: String) -[IO, FS, Env, Exec]> Int Never! {
-    source :: cli_adapter_source(theme, raw) ?? return @EXIT_USAGE
+fn cli_add_adapt(cache: &WorkspaceDeclarationCache, theme: Theme, raw: String) -[IO, FS, Env, Exec, Time.Wait]> Int Never! {
+    source :: cli_adapter_source(&cache, theme, raw) ?? return EXIT_USAGE
     // The last non-empty `/ : @ #` segment names the adapter.
     last := ""
     current := ""
@@ -146,34 +147,34 @@ fn cli_add_adapt(theme: Theme, raw: String) -[IO, FS, Env, Exec]> Int Never! {
     name :: cli_trim_end_matches(if last == "" -> "tool" else -> last, ".git")
     quoted :: if source.starts_with("./") || source.starts_with("../") || source.starts_with("/") -> "\"{source}\"" else -> source
     print("Pkg.adapt(\n    name: \"{name}\",\n    source: {quoted},\n    recipe: Recipe.copy(),\n)")
-    @EXIT_OK
+    EXIT_OK
 }
 
 // Copy a starter component's source into `./components/<Name>.jet`.
-fn cli_add_component(theme: Theme, component: StarterComponent) -[IO, FS, Env]> Int Never! {
+fn cli_add_component(theme: Theme, component: StarterComponent) -[IO, FS, Env, Time.Wait]> Int Never! {
     dir :: cli_current_dir()
     if env_component_add(dir, component) == {
         .Ok(dest) -> {
-            theme.ok("added {theme.bold(component.name)} to {@COMPONENTS_DIR}")
+            theme.ok("added {theme.bold(component.name)} to {COMPONENTS_DIR}")
             theme.detail(theme.gray("wrote {dest}"))
             theme.detail("it's yours now — edit it freely.")
-            @EXIT_OK
+            EXIT_OK
         }
         .Err(error) -> {
             if error == {
                 .AlreadyExists(path) -> theme.error("{path} already exists", "it may already be customized — `jetpack add` never overwrites a component you own.", "edit it directly, or remove it first if you want a fresh copy.")
                 else -> theme.error("could not add that component", error.message(), "check write permissions here.")
             }
-            @EXIT_USER_ERROR
+            EXIT_USER_ERROR
         }
     }
 }
 
 // `jetpack remove <ref>`: a confirmed env-file edit.
-pub fn cli_cmd_remove(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+pub fn cli_cmd_remove(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     raw :: parsed.positional.get(0) ?? {
         theme.error("remove what?", "`jetpack remove` needs a ref to remove.", "try `jetpack remove ripgrep@nixpkgs`.")
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     dir :: cli_current_dir()
     table := if EnvFile.load(dir) == {
@@ -183,25 +184,25 @@ pub fn cli_cmd_remove(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net,
     cli_ensure_builtin_sources(&table)
     spec :: RefSpec.classify_in(raw, table) ?? {
         cli_ref_error(theme, err)
-        return @EXIT_USAGE
+        return EXIT_USAGE
     }
     theme.status("Plan env edit")
     name_w :: if spec.package.len() > 8 -> spec.package.len() else -> 8
-    theme.plan_row(PlanMark.Remove, spec.package, name_w, raw, @ENV_FILE)
+    theme.plan_row(PlanMark.Remove, spec.package, name_w, raw, ENV_FILE)
     theme.download_line(0)
-    if !theme.confirm_apply(parsed.flags.assume_yes) -> return @EXIT_OK
+    if !theme.confirm_apply(parsed.flags.assume_yes) -> return EXIT_OK
     if EnvFile.remove(dir, spec) == {
         .Ok(result) -> {
             if result.removed {
-                theme.ok("removed {theme.bold(spec.package)} from {@ENV_FILE}")
+                theme.ok("removed {theme.bold(spec.package)} from {ENV_FILE}")
             } else {
-                theme.status("{spec.package} was not in {@ENV_FILE}.")
+                theme.status("{spec.package} was not in {ENV_FILE}.")
             }
-            @EXIT_OK
+            EXIT_OK
         }
         .Err(error) -> {
             theme.error("could not edit the env file", error.message(), "check write permissions here.")
-            @EXIT_USER_ERROR
+            EXIT_USER_ERROR
         }
     }
 }

@@ -1,0 +1,262 @@
+// Source/CmdSupply.rs has no inline/macro/included tests. These behavioral
+// controls cover its actual command decisions and bytes without fake native
+// providers. Native publish/audit/yank integration originals live in separately
+// assigned tests/pkg.rs packets; none are replaced by the scalar cases below.
+use jet_foundation.[diagnostic_from_registry, diagnostic_render_all, PACKAGE_FILE, Diagnostic, Span, StatusValue]
+use core.files.runtime.kernel_path_components as supply_test_paths
+
+#Test("supply git dirty filtering preserves porcelain bytes and clean failures") {
+    assert(jet_cli_supply_dirty_lines(false, " M changed.jet\n") == None)
+    assert(jet_cli_supply_dirty_lines(true, "\n  \n\t\r\n") == None)
+    rows :: jet_cli_supply_dirty_lines(true, " M α.jet\r\n\n?? new.jet\n") ?? panic("dirty output lost")
+    assert_eq(rows.len(), 2)
+    assert_eq(rows[0], " M α.jet")
+    assert_eq(rows[1], "?? new.jet")
+}
+
+#Test("supply dirty force shows five lines while refusal shows ten") {
+    rows :: [String]{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"}
+    forced :: jet_cli_supply_dirty_output("app", "1.2.3", rows, true)
+    assert_eq(forced.stdout, "")
+    assert_eq(forced.exit_code, 0)
+    assert_eq(forced.stderr, "warning [--force]: working tree has 11 uncommitted change(s) — publishing anyway.\n  1\n  2\n  3\n  4\n  5\n  … and 6 more\n")
+    refused :: jet_cli_supply_dirty_output("app", "1.2.3", rows, false)
+    assert_eq(refused.exit_code, 1)
+    assert(refused.stderr.starts_with("Error [E2605]: `app` v1.2.3 cannot be published from a dirty working tree.\n"))
+    assert(refused.stderr.ends_with("    10\n    … and 1 more\n"))
+    assert(refused.stderr.contains("More: jet-lang.dev/e/E2605\n"))
+    clean :: jet_cli_supply_dirty_output("app", "1", [String]{}, false)
+    assert_eq(clean.stderr, "")
+    assert_eq(clean.exit_code, 0)
+}
+
+#Test("supply publication tests use real command argv and forward both streams") {
+    args :: jet_cli_supply_test_arguments("src/α.jet")
+    assert_eq(args, [String]{"test", "src/α.jet", "--show-default"})
+    ok :: jet_cli_supply_test_output("child stdout\n", "child stderr\n", true, Val(0))
+    assert_eq(ok.stdout, "child stdout\n  tests: ok\n")
+    assert_eq(ok.stderr, "child stderr\n")
+    assert_eq(ok.exit_code, 0)
+    signal :: jet_cli_supply_test_output("partial", "panic\n", false, None)
+    assert_eq(signal.stdout, "partial")
+    assert_eq(signal.stderr, "panic\n  tests: failed (`jet test` exited with a signal)\n")
+    assert_eq(signal.exit_code, 1)
+    nonzero :: jet_cli_supply_test_output("", "", false, Val(37))
+    assert_eq(nonzero.stderr, "  tests: failed (`jet test` exited with 37)\n")
+    assert_eq(jet_cli_supply_test_missing("entry.jet").stderr, "  tests: failed — no project entry `entry.jet` was found\n")
+    assert_eq(jet_cli_supply_test_spawn_error("denied").stderr, "  tests: failed — couldn't start `jet test`: denied\n")
+    assert_eq(jet_cli_supply_test_executable_error("gone").stderr, "  tests: failed — couldn't locate the running Jet executable: gone\n")
+}
+
+#Test("supply signing entropy reuses the canonical registry instead of a prose twin") {
+    diagnostic :: diagnostic_from_registry("E1292", None, "ignored", "ignored", "ignored")
+    expected :: diagnostic_render_all(PACKAGE_FILE, "", [Diagnostic]{publication_e1292()}, false)
+    assert_eq(jet_cli_supply_signing_diagnostic(diagnostic, false), expected)
+    colored :: diagnostic_render_all(PACKAGE_FILE, "", [Diagnostic]{publication_e1292()}, true)
+    assert_eq(jet_cli_supply_signing_diagnostic(diagnostic, true), colored)
+}
+
+#Test("supply no-sign bypasses all keygen and refreshes established registries only") {
+    assert(jet_cli_supply_needs_keygen(false, false))
+    assert(!jet_cli_supply_needs_keygen(false, true))
+    assert(!jet_cli_supply_needs_keygen(true, false))
+    assert(!jet_cli_supply_needs_keygen(true, true))
+    assert(jet_cli_supply_needs_metadata_refresh(false, false))
+    assert(jet_cli_supply_needs_metadata_refresh(false, true))
+    assert(!jet_cli_supply_needs_metadata_refresh(true, false))
+    assert(jet_cli_supply_needs_metadata_refresh(true, true))
+    assert_eq(jet_cli_supply_signing_public_field(Val("ab"), " ab\n"), "")
+    assert_eq(jet_cli_supply_signing_public_field(Val("ab"), "cd\n"), "cd\n")
+    assert_eq(jet_cli_supply_signing_public_field(None, "ab\n"), "ab\n")
+}
+
+#Test("supply metadata detection fails closed for every non-NotFound error") {
+    assert(!jet_cli_supply_checkpoint_established(false, true))
+    assert(jet_cli_supply_checkpoint_established(false, false))
+    assert(jet_cli_supply_checkpoint_established(true, false))
+    assert(!jet_cli_supply_metadata_established(false, true, false, false, false, false))
+    assert(jet_cli_supply_metadata_established(false, false, false, false, false, false))
+    assert(!jet_cli_supply_metadata_established(true, false, false, true, false, false))
+    assert(jet_cli_supply_metadata_established(true, false, true, true, false, false))
+    assert(jet_cli_supply_metadata_established(true, false, false, false, false, false))
+    assert(jet_cli_supply_metadata_established(true, false, false, true, true, false))
+    // Some(Err(entry_error)) is a present first read_dir result in Rust.
+    assert(jet_cli_supply_metadata_established(true, false, false, true, false, true))
+}
+
+#Test("supply failed build OR failed tests blocks unless forced") {
+    loop build in [Bool]{false, true} {
+        loop tests in [Bool]{false, true} {
+            ordinary :: jet_cli_supply_gate_failed(build, tests, false)
+            forced :: jet_cli_supply_gate_failed(build, tests, true)
+            assert_eq(ordinary.exit_code, if build && tests -> 0 else -> 1)
+            assert_eq(forced.exit_code, 0)
+            assert_eq(ordinary.stderr, "")
+            assert_eq(forced.stderr, if build && tests -> "" else -> "warning [--force]: pre-publish gate failed but continuing anyway.\n  this publish would be rejected by a registry that enforces D-PKGS4.\n")
+        }
+    }
+}
+
+#Test("supply SemVer parsing failure stays Same and quiet does not hide refusal") {
+    assert(jet_cli_supply_semver_bump("bad", "2.0.0") == PublicationBumpKind.Same)
+    assert(jet_cli_supply_semver_bump("1.0.0", "bad") == PublicationBumpKind.Same)
+    assert(jet_cli_supply_semver_bump("1.0.0", "2.0.0") == PublicationBumpKind.Major)
+    changes :: [PublicationBreakingChange]{PublicationBreakingChange{description: "fn removed", item_name: "f"}}
+    quiet :: JetCLIOutputMode{json: false, color: false, quiet: true}
+    refused :: jet_cli_supply_semver_output("1.0.0", "1.1.0", changes, false, quiet)
+    assert_eq(refused.stdout, "")
+    assert_eq(refused.exit_code, 1)
+    assert(refused.stderr.contains("E1218"))
+    assert(refused.stderr.ends_with("\nerror: breaking public API change since 1.0.0 requires a major version bump.\n use `jet registry publish --force` to override with a warning banner\n"))
+    forced :: jet_cli_supply_semver_output("1.0.0", "1.1.0", changes, true, quiet)
+    assert_eq(forced.exit_code, 0)
+    assert_eq(forced.stderr, "warning [--force]: 1 breaking API change(s) under a non-major bump — publishing anyway.\n")
+    major :: jet_cli_supply_semver_output("1.0.0", "2.0.0", changes, false, quiet)
+    assert_eq(major.exit_code, 0)
+    assert_eq(major.stdout, "")
+    assert_eq(major.stderr, "")
+}
+
+#Test("supply locked hash selects first root-or-name and empty fingerprint stops search") {
+    lock := LockFile.empty()
+    &lock.packages.push(LockedPackage{name: "different-root", version: "1", source: LockSource.Root, fingerprint: "", content_hash: Val("hash")})
+    &lock.packages.push(LockedPackage{name: "app", version: "1", source: LockSource.Path("."), fingerprint: "later", content_hash: Val("later-hash")})
+    assert(jet_cli_supply_locked_hash_index(lock, "app") == None)
+    lock.packages[0].fingerprint = "root-plan"
+    assert(jet_cli_supply_locked_hash_index(lock, "app") == Val(0))
+    assert(jet_cli_supply_recorded_content_hash(lock.packages[0]) == Val("hash"))
+    lock.packages[0].content_hash = Val("")
+    assert(jet_cli_supply_recorded_content_hash(lock.packages[0]) == None)
+    lock.packages[0].content_hash = None
+    assert(jet_cli_supply_recorded_content_hash(lock.packages[0]) == None)
+}
+
+#Test("supply vendor output preserves dependency order and empty behavior") {
+    assert_eq(jet_cli_supply_vendor_output([String]{}, "vendor"), "vendor: no dependencies to copy\n")
+    assert_eq(jet_cli_supply_vendor_output([String]{"z", "a"}, "deps"), "vendored: z\nvendored: a\nok: 2 dependencies copied to deps/\ntip: commit deps/ and use `jet fetch --locked` for reproducible offline builds.\n")
+}
+
+fn supply_test_audit_report() -> PublicationPolicyAudit Never! {
+    PublicationPolicyAudit{receipt: PublicationAdvisoryReceipt{sequence: 7, digest: "sha256-x", key_id: "key", issued_at: 10, expires_at: 20, maturity_seconds: 86400}, matches: [PublicationAuditMatch]{}, maturity: [Diagnostic]{}, source_exceptions: [String]{}}
+}
+#Test("supply audit distinguishes advisory severity from maturity failures") {
+    report := supply_test_audit_report()
+    clean :: jet_cli_supply_audit_output(report, 3, false)
+    assert_eq(clean.exit_code, 0)
+    assert_eq(clean.stderr, "")
+    assert(clean.stdout.ends_with("3 dependencies checked.\naudit: no advisories found.\n"))
+    diagnostic :: publication_e2610("advisory feed", "blocked")
+    &report.matches.push(PublicationAuditMatch{severity: PublicationSeverity.High, diagnostic: diagnostic})
+    high :: jet_cli_supply_audit_output(report, 3, false)
+    assert_eq(high.exit_code, 0)
+    assert(high.stderr.ends_with("\n1 advisory match(es) found (0 critical)\n"))
+    assert(!high.stdout.contains("no advisories"))
+    report.matches[0].severity = PublicationSeverity.Critical
+    critical :: jet_cli_supply_audit_output(report, 3, false)
+    assert_eq(critical.exit_code, 1)
+    assert(critical.stderr.contains("1 advisory match(es) found (1 critical)"))
+    report.matches = [PublicationAuditMatch]{}
+    &report.maturity.push(diagnostic)
+    &report.source_exceptions.push("app#1.0.0: reviewed")
+    maturity :: jet_cli_supply_audit_output(report, 3, false)
+    assert_eq(maturity.exit_code, 1)
+    assert(maturity.stdout.contains("audit: source policy exception applied: app#1.0.0: reviewed\n"))
+    assert(maturity.stderr.contains("0 advisory match(es) found (0 critical)"))
+}
+
+#Test("supply copy arguments keep original first-non-dash semantics") {
+    assert(jet_cli_supply_copy_argument([String]{"--json", "--", "later.jet"}) == Val("later.jet"))
+    assert(jet_cli_supply_copy_argument([String]{"--unknown", "value", "entry.jet"}) == Val("value"))
+    assert(jet_cli_supply_copy_argument([String]{"-entry", "--json"}) == None)
+    assert(jet_cli_supply_copy_argument([String]{""}) == Val(""))
+}
+
+#Test("supply copy audit sorts byte paths then byte offsets and retains coordinates") {
+    rows := [JetCLISupplyCopyRow]{
+        JetCLISupplyCopyRow{path: "z.jet", line: 8, column: 2, span: Span{start: 11, end: 15}},
+        JetCLISupplyCopyRow{path: "a.jet", line: 4, column: 7, span: Span{start: 9, end: 12}},
+        JetCLISupplyCopyRow{path: "a.jet", line: 1, column: 3, span: Span{start: 2, end: 8}},
+    }
+    output :: jet_cli_supply_copy_output(^rows, false)
+    assert_eq(output.exit_code, 0)
+    assert_eq(output.stderr, "")
+    assert_eq(output.stdout, "implicit read-view copies: 3\n  a.jet:1:3  span=2..8  size=dynamic  kind=implicit\n  a.jet:4:7  span=9..12  size=dynamic  kind=implicit\n  z.jet:8:2  span=11..15  size=dynamic  kind=implicit\n")
+}
+
+#Test("supply copy machine output uses only canonical status and nested span fields") {
+    rows := [JetCLISupplyCopyRow]{JetCLISupplyCopyRow{path: "α\".jet", line: 2, column: 3, span: Span{start: 5, end: 13}}}
+    output :: jet_cli_supply_copy_output(^rows, true)
+    assert_eq(output.exit_code, 0)
+    assert_eq(output.stderr, "")
+    assert(output.stdout.ends_with("\n"))
+    tree :: StatusValue.parse(output.stdout) ?? panic("canonical JSON refused")
+    assert(output.stdout.contains("\"schema\":\"jet.status/v1\""))
+    assert(output.stdout.contains("\"action\":\"audit.copies\""))
+    assert(output.stdout.contains("\"span\":{{\"start\":5,\"end\":13}}"))
+    assert(output.stdout.contains("\"size\":\"dynamic\",\"kind\":\"implicit\""))
+    if tree == { .Object(_) -> {}; else -> panic("expected status object") }
+}
+
+#Test("supply yank validates before IO and preserves empty versus whitespace") {
+    absent :: jet_cli_supply_yank_validate(None, false) ?? panic("missing version accepted")
+    empty :: jet_cli_supply_yank_validate(Val(""), false) ?? panic("empty version accepted")
+    assert_eq(absent.stderr, empty.stderr)
+    assert_eq(absent.exit_code, 1)
+    assert(absent.stderr.starts_with("Error [E2606]:"))
+    spaces :: jet_cli_supply_yank_validate(Val(" "), false) ?? panic("invalid SemVer accepted")
+    assert(spaces.stderr.contains("E2104"))
+    assert(!spaces.stderr.contains("E2606"))
+    assert(jet_cli_supply_yank_validate(Val("1.2.3"), false) == None)
+    assert(jet_cli_supply_yank_validate(Val("v1.2.3"), false) == None)
+}
+
+#Test("supply yank success redacts URL credentials and keeps empty reason") {
+    ordinary :: jet_cli_supply_yank_output("app", "1.2.3", "https://user:secret@example.test/index?token=x#fragment", None)
+    assert_eq(ordinary, "ok: yanked `app` v1.2.3 in https://example.test/index\n  the version stays reserved (immutable); it is hidden from new resolution.\n")
+    empty :: jet_cli_supply_yank_output("app", "1", "local", Val(""))
+    assert(empty.contains("  reason: \n"))
+}
+
+#Test("supply vendor targets preserve relative absolute and component-prefix laws") {
+    unix :: supply_test_paths.PathPlatform.Unix
+    root :: supply_test_paths.from_text("/project", unix)
+    default :: jet_cli_supply_vendor_target(root, None)
+    assert_eq(supply_test_paths.display(default), "/project/vendor")
+    assert_eq(jet_cli_supply_vendor_display(root, default), "vendor")
+    relative :: jet_cli_supply_vendor_target(root, Val("../deps"))
+    assert_eq(supply_test_paths.display(relative), "/project/../deps")
+    assert_eq(jet_cli_supply_vendor_display(root, relative), "../deps")
+    absolute :: jet_cli_supply_vendor_target(root, Val("/project-other/deps"))
+    assert_eq(supply_test_paths.display(absolute), "/project-other/deps")
+    assert_eq(jet_cli_supply_vendor_display(root, absolute), "/project-other/deps")
+    windows :: supply_test_paths.PathPlatform.Windows
+    win_root :: supply_test_paths.from_text("C:\\project", windows)
+    win_absolute :: jet_cli_supply_vendor_target(win_root, Val("D:\\deps"))
+    assert_eq(supply_test_paths.display(win_absolute), "D:\\deps")
+    assert_eq(jet_cli_supply_vendor_display(win_root, win_absolute), "D:\\deps")
+    // Rooted but not absolute on Windows: std PathBuf::push retains C:.
+    win_rooted :: jet_cli_supply_vendor_target(win_root, Val("\\deps"))
+    assert_eq(supply_test_paths.display(win_rooted), "C:\\deps")
+}
+
+#Test("supply foreign JSON escapes data and wins over quiet without human narration") {
+    mode :: JetCLIOutputMode{json: true, color: false, quiet: true}
+    output :: jet_cli_supply_foreign_output("npm", "a\".tgz", "sha256-x", "release\nid", mode)
+    assert_eq(output.stdout, "{{\"registry\":\"npm\",\"artifact\":\"a\\\".tgz\",\"digest\":\"sha256-x\",\"releaseIdentity\":\"release\\nid\",\"uploaded\":true}}\n")
+    assert_eq(output.stderr, "")
+    assert_eq(output.exit_code, 0)
+    quiet :: jet_cli_supply_foreign_output("npm", "a.tgz", "hash", "id", JetCLIOutputMode{json: false, color: false, quiet: true})
+    assert_eq(quiet.stdout, "")
+    human :: jet_cli_supply_foreign_output("npm", "a.tgz", "hash", "id", JetCLIOutputMode{json: false, color: false, quiet: false})
+    assert_eq(human.stdout, "published a.tgz to npm (hash)\n")
+    assert_eq(jet_cli_supply_publish_output("app", "1", "https://user:secret@registry.test/index?token=hidden", false), "ok: published `app` v1 to https://registry.test/index\n")
+    assert_eq(jet_cli_supply_publish_output("app", "1", "registry", true), "")
+}
+
+#Test("supply key and backup output retains recovery and unencrypted-copy warnings") {
+    generated :: PublicationGeneratedKey{seed_path: "/keys/jet.ed25519", public_key_path: "/keys/jet.ed25519.pub", public_key_hex: "abcd"}
+    text :: jet_cli_supply_keygen_output("jet", generated)
+    assert(text.starts_with("created a signing key for registry `jet`.\n  public key:  abcd\n"))
+    assert(text.ends_with("losing it means losing your ability to publish signed updates.\n"))
+    assert_eq(jet_cli_supply_key_backup_output("jet", "./jet-signing-key.backup"), "backed up the `jet` signing key to ./jet-signing-key.backup\nwarning: store this file somewhere safe (e.g. a password manager). Anyone who has it can publish signed updates as you.\n")
+}

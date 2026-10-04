@@ -1,0 +1,95 @@
+// Reserved-language reports (crates/jet-cli/src/CLI.rs:70-198).
+// Spellings come from the shared Syntax registry, not a CLI-owned catalog.
+use jet_foundation.[
+    KW_COPY, KW_MUTATE, KW_MOVE, KW_CONST, FOREIGN_UNSAFE,
+    SIGIL_BIND_IMMUT, SIGIL_BIND_MUT, SIGIL_WRITE, SIGIL_MOVE, SIGIL_COPY,
+    COMPTIME_MARK, SIGIL_FENCE_OPEN, SIGIL_FENCE_CLOSE, SIGIL_SPREAD, jet_keyword_names,
+]
+
+// Rust `ReservedEntry` (CLI.rs:71-75).
+pub struct JetCLIReservedEntry {
+    pub spelling: String
+    pub kind: String
+    pub note: String
+}
+
+// Rust `TEACHING_RESERVED` (CLI.rs:81-87).
+pub JET_CLI_TEACHING_RESERVED :: prep { [JetCLIReservedEntry]{
+    JetCLIReservedEntry{spelling: KW_COPY, kind: "teaching-reserved word", note: "retired; write `~value` instead (E0991)"},
+    JetCLIReservedEntry{spelling: KW_MUTATE, kind: "teaching-reserved word", note: "retired; write `&value` instead (E0056)"},
+    JetCLIReservedEntry{spelling: KW_MOVE, kind: "teaching-reserved word", note: "retired as a bare prefix; write `^value` instead (E0057); `.take(n)` stays a valid method"},
+    JetCLIReservedEntry{spelling: KW_CONST, kind: "teaching-reserved word", note: "retired; write `@name` instead (E0374)"},
+    JetCLIReservedEntry{spelling: FOREIGN_UNSAFE, kind: "teaching-reserved word", note: "the foreign spelling; write `#Unsafe(\"reason\") {{ … }}` instead (E0031/E0003)"},
+} }
+
+// Rust `RESERVED_SIGILS` (CLI.rs:90-136).
+pub JET_CLI_RESERVED_SIGILS :: prep { [JetCLIReservedEntry]{
+    JetCLIReservedEntry{spelling: SIGIL_BIND_IMMUT, kind: "sigil", note: "bind an immutable local"},
+    JetCLIReservedEntry{spelling: SIGIL_BIND_MUT, kind: "sigil", note: "bind a mutable local"},
+    JetCLIReservedEntry{spelling: SIGIL_WRITE, kind: "sigil", note: "borrow for write (D-MEM1)"},
+    JetCLIReservedEntry{spelling: SIGIL_MOVE, kind: "sigil", note: "take/move ownership (D-MEM1)"},
+    JetCLIReservedEntry{spelling: SIGIL_COPY, kind: "sigil", note: "produce an owned copy (D-SHAPE-COPY1)"},
+    JetCLIReservedEntry{spelling: COMPTIME_MARK, kind: "sigil", note: "compiler fact: `T.$layout`, `$build.os`, `$sites:` (D-COMPILER-NS1)"},
+    JetCLIReservedEntry{spelling: SIGIL_FENCE_OPEN, kind: "sigil", note: "open a statement-expansion fence (D-FENCE2)"},
+    JetCLIReservedEntry{spelling: SIGIL_FENCE_CLOSE, kind: "sigil", note: "close a statement-expansion fence (D-FENCE2)"},
+    JetCLIReservedEntry{spelling: SIGIL_SPREAD, kind: "sigil", note: "spread elements"},
+} }
+
+fn jet_cli_reserved_append(out: &[U8], text: String) Never! {
+    loop byte in text.bytes() -> &out.push(byte)
+}
+
+// Rust `reserved_report_text` entry loop (CLI.rs:145-151).
+fn jet_cli_reserved_append_text(out: &[U8], entries: [JetCLIReservedEntry]) Never! {
+    loop entry in entries {
+        jet_cli_reserved_append(&out, "  ")
+        jet_cli_reserved_append(&out, entry.spelling)
+        loop padding in entry.spelling.len()..<10 -> &out.push(U8{32})
+        &out.push(U8{32})
+        jet_cli_reserved_append(&out, entry.note)
+        &out.push(U8{10})
+    }
+}
+
+// Rust `reserved_report_text` (CLI.rs:139-153).
+pub fn jet_cli_reserved_report_text() -> String Never! {
+    out := [U8]{}
+    jet_cli_reserved_append(&out, "keywords:\n")
+    names :: jet_keyword_names()
+    loop word in names {
+        jet_cli_reserved_append(&out, "  ")
+        jet_cli_reserved_append(&out, word)
+        &out.push(U8{10})
+    }
+    jet_cli_reserved_append(&out, "\nteaching-reserved words (not valid identifiers):\n")
+    jet_cli_reserved_append_text(&out, JET_CLI_TEACHING_RESERVED)
+    jet_cli_reserved_append(&out, "\nsigils:\n")
+    jet_cli_reserved_append_text(&out, JET_CLI_RESERVED_SIGILS)
+    String.from_bytes(out) ?? panic("reserved report is valid UTF-8")
+}
+
+// Rust `reserved_report_json::render_entries` (CLI.rs:171-184).
+// The canonical status fields retain Rust's spelling/kind/note order.
+fn jet_cli_reserved_entries_value(entries: [JetCLIReservedEntry]) -> StatusValue Never! {
+    rows := [StatusValue]{}
+    loop entry in entries {
+        row :: StatusFields.new()
+            .with("spelling", StatusValue.String{value: entry.spelling})
+            .with("kind", StatusValue.String{value: entry.kind})
+            .with("note", StatusValue.String{value: entry.note})
+        &rows.push(StatusValue.Object{fields: row})
+    }
+    StatusValue.Array{values: rows}
+}
+
+// Rust `reserved_report_json` (CLI.rs:156-197).
+pub fn jet_cli_reserved_report_json() -> String Never! {
+    names :: jet_keyword_names()
+    keywords := [StatusValue]{}
+    loop word in names -> &keywords.push(StatusValue.String{value: word})
+    reserved :: StatusFields.new()
+        .with("keywords", StatusValue.Array{values: keywords})
+        .with("teaching_reserved", jet_cli_reserved_entries_value(JET_CLI_TEACHING_RESERVED))
+        .with("sigils", jet_cli_reserved_entries_value(JET_CLI_RESERVED_SIGILS))
+    StatusEnvelope.new("inspect.reserved", true).with_field("reserved", StatusValue.Object{fields: reserved}).json()
+}

@@ -1,0 +1,532 @@
+// Pure record-index policy and canonical JSONL rows (Source/RecordIndex.rs RI01).
+// Paths are UTF-8 project-relative strings; filesystem authority belongs to RI02-RI04.
+use core.encoding.[DataTree]
+
+// Rust constants (RecordIndex.rs:21-34); lock timing is expressed in seconds.
+pub JET_CLI_RECORD_INDEX_FILE :: "index.jsonl"
+pub JET_CLI_RECORD_INDEX_VERSION :: 1
+pub JET_CLI_RECORD_LINK_VERSION :: 1
+pub JET_CLI_RECORD_INDEX_LOCK_FILE :: ".index.lock"
+pub JET_CLI_RECORD_INDEX_LOCK_ATTEMPTS :: 2000
+pub JET_CLI_RECORD_INDEX_LOCK_STALE_SECONDS :: 60
+pub JET_CLI_DEFAULT_RECORD_BUDGET_BYTES :: 268435456
+pub JET_CLI_MAX_INDEX_LINE_BYTES :: 1048576
+pub JET_CLI_MAX_INDEX_BYTES :: 268435456
+pub JET_CLI_MAX_IDENTITY_FIELD_BYTES :: 512
+pub JET_CLI_MAX_ARTIFACT_ID_BYTES :: 512
+pub JET_CLI_MAX_RECORD_PATH_BYTES :: 4096
+pub JET_CLI_MAX_LINKS_PER_ENTRY :: 1024
+pub JET_CLI_MAX_LINKS_TOTAL :: 100000
+
+// Rust RecordIndexError (RecordIndex.rs:37-52).
+#Error
+pub enum JetCLIRecordIndexError { RecordedSequenceOverflow }
+// Rust RecordIndexError::fmt (RecordIndex.rs).
+pub fn jet_cli_record_index_error_message(error: JetCLIRecordIndexError) -> String Never! {
+    if error == { .RecordedSequenceOverflow -> "recorded_sequence exhausted" }
+}
+// Rust String validation errors, separate from the sequence-overflow error.
+#Error
+pub struct JetCLIRecordError { pub message: String }
+fn jet_cli_record_error(message: String) -> JetCLIRecordError Never! { JetCLIRecordError{message: message} }
+
+// Rust RecordIdentity (RecordIndex.rs).
+pub struct JetCLIRecordIdentity {
+    pub target_inputs_sha256: String
+    pub tool_version: String
+    pub engine: String
+}
+// Rust RecordIdentity::new (RecordIndex.rs).
+pub fn jet_cli_record_identity_new(target_inputs_sha256: String, tool_version: String, engine: String) -> JetCLIRecordIdentity JetCLIRecordError! {
+    identity :: JetCLIRecordIdentity{target_inputs_sha256: target_inputs_sha256, tool_version: tool_version, engine: engine}
+    jet_cli_record_identity_validate(identity)
+    Ok(identity)
+}
+// Rust RecordIdentity::validate (RecordIndex.rs).
+pub fn jet_cli_record_identity_validate(identity: JetCLIRecordIdentity) JetCLIRecordError! {
+    jet_cli_record_validate_digest(identity.target_inputs_sha256, "target_inputs_sha256")
+    jet_cli_record_validate_text(identity.tool_version, "tool_version", JET_CLI_MAX_IDENTITY_FIELD_BYTES)
+    jet_cli_record_validate_text(identity.engine, "engine", JET_CLI_MAX_IDENTITY_FIELD_BYTES)
+}
+// Rust RecordIdentity::key (RecordIndex.rs).
+pub fn jet_cli_record_identity_key(identity: JetCLIRecordIdentity) -> String Never! {
+    nul :: String.from_bytes([U8]{U8{0}}) ?? panic("NUL is valid UTF-8")
+    "{identity.target_inputs_sha256}{nul}{identity.tool_version}{nul}{identity.engine}"
+}
+// Rust RecordKind (RecordIndex.rs).
+pub enum JetCLIRecordKind { Receipt Replay Proof Evidence Comparison Trust }
+// Rust RecordKind::ALL (RecordIndex.rs).
+pub JET_CLI_RECORD_KINDS :: [JetCLIRecordKind]{.Receipt, .Replay, .Proof, .Evidence, .Comparison, .Trust}
+// Rust RecordKind::as_str / Display (RecordIndex.rs).
+pub fn jet_cli_record_kind_name(kind: JetCLIRecordKind) -> String Never! {
+    if kind == {
+        .Receipt -> "receipt"
+        .Replay -> "replay"
+        .Proof -> "proof"
+        .Evidence -> "evidence"
+        .Comparison -> "comparison"
+        .Trust -> "trust"
+    }
+}
+// Rust RecordKind::parse (RecordIndex.rs).
+pub fn jet_cli_record_kind_parse(value: String) -> JetCLIRecordKind JetCLIRecordError! {
+    if value == {
+        "receipt" -> Ok(.Receipt)
+        "replay" -> Ok(.Replay)
+        "proof" -> Ok(.Proof)
+        "evidence" -> Ok(.Evidence)
+        "comparison" -> Ok(.Comparison)
+        "trust" -> Ok(.Trust)
+        else -> Err(jet_cli_record_error("unknown record kind `{value}`"))
+    }
+}
+// Rust RecordKind::rank (RecordIndex.rs).
+pub fn jet_cli_record_kind_rank(kind: JetCLIRecordKind) -> Int Never! {
+    if kind == {
+        .Receipt -> 0
+        .Replay -> 1
+        .Proof -> 2
+        .Evidence -> 3
+        .Comparison -> 4
+        .Trust -> 5
+    }
+}
+// Rust RecordLink (RecordIndex.rs).
+pub struct JetCLIRecordLink {
+    pub artifact_id: String
+    pub kind: JetCLIRecordKind
+}
+// Rust RecordLink::new (RecordIndex.rs).
+pub fn jet_cli_record_link_new(kind: JetCLIRecordKind, artifact_id: String) -> JetCLIRecordLink JetCLIRecordError! {
+    link :: JetCLIRecordLink{artifact_id: artifact_id, kind: kind}
+    jet_cli_record_link_validate(link)
+    Ok(link)
+}
+// Rust RecordLink::validate (RecordIndex.rs).
+pub fn jet_cli_record_link_validate(link: JetCLIRecordLink) JetCLIRecordError! {
+    jet_cli_record_validate_component(link.artifact_id, "record link artifact_id", JET_CLI_MAX_ARTIFACT_ID_BYTES)
+}
+// Rust RecordLink::id (RecordIndex.rs): consumers use the public artifact_id field.
+// Rust RecordCapture (RecordIndex.rs); the default is Safe.
+pub enum JetCLIRecordCapture { Safe Sensitive }
+// Rust RecordCapture::default (RecordIndex.rs).
+pub fn jet_cli_record_capture_default() -> JetCLIRecordCapture Never! { .Safe }
+// Rust RecordCapture::as_str (RecordIndex.rs).
+pub fn jet_cli_record_capture_name(capture: JetCLIRecordCapture) -> String Never! {
+    if capture == {
+        .Safe -> "safe"
+        .Sensitive -> "sensitive"
+    }
+}
+// Rust RecordCapture::parse (RecordIndex.rs).
+pub fn jet_cli_record_capture_parse(value: String) -> JetCLIRecordCapture JetCLIRecordError! {
+    if value == {
+        "safe" -> Ok(.Safe)
+        "sensitive" -> Ok(.Sensitive)
+        else -> Err(jet_cli_record_error("unknown record capture mode `{value}`"))
+    }
+}
+// Rust RecordCapture::is_sensitive (RecordIndex.rs).
+pub fn jet_cli_record_capture_is_sensitive(capture: JetCLIRecordCapture) -> Bool Never! { capture == .Sensitive }
+// Rust RecordBudget (RecordIndex.rs).
+pub struct JetCLIRecordBudget { pub max_bytes: Int }
+// Rust RecordBudget::default (RecordIndex.rs).
+pub fn jet_cli_record_budget_default() -> JetCLIRecordBudget Never! { JetCLIRecordBudget{max_bytes: JET_CLI_DEFAULT_RECORD_BUDGET_BYTES} }
+// Rust RecordBudget::new (RecordIndex.rs); enforce the u64 domain at the Jet boundary.
+pub fn jet_cli_record_budget_new(max_bytes: Int) -> JetCLIRecordBudget JetCLIRecordError! {
+    if max_bytes == 0 -> return Err(jet_cli_record_error("record budget byte limit must be greater than zero"))
+    jet_cli_record_validate_u64(max_bytes, "record budget byte limit")
+    Ok(JetCLIRecordBudget{max_bytes: max_bytes})
+}
+// Rust RecordIndexEntry (RecordIndex.rs).
+pub struct JetCLIRecordIndexEntry {
+    pub identity: JetCLIRecordIdentity
+    pub kind: JetCLIRecordKind
+    pub artifact_id: String
+    pub path: String
+    pub consumed: [JetCLIRecordLink]
+    pub produced: [JetCLIRecordLink]
+    pub capture: JetCLIRecordCapture
+    pub size: Int
+    pub recorded_sequence: Int
+    pub saved: Bool
+}
+// Rust RecordIndexEntry::new (RecordIndex.rs).
+pub fn jet_cli_record_entry_new(identity: JetCLIRecordIdentity, kind: JetCLIRecordKind, artifact_id: String, path: String) -> JetCLIRecordIndexEntry JetCLIRecordError! {
+    entry :: JetCLIRecordIndexEntry{identity: identity, kind: kind, artifact_id: artifact_id, path: path, consumed: [JetCLIRecordLink]{}, produced: [JetCLIRecordLink]{}, capture: .Safe, size: 0, recorded_sequence: 0, saved: false}
+    jet_cli_record_entry_validate(entry)
+    Ok(entry)
+}
+// Rust RecordIndexEntry::with_links (RecordIndex.rs); mutate the owned entry without copying its links.
+pub fn jet_cli_record_entry_with_links(entry: &JetCLIRecordIndexEntry, consumed: ^[JetCLIRecordLink], produced: ^[JetCLIRecordLink]) JetCLIRecordError! {
+    entry.consumed = ^consumed
+    entry.produced = ^produced
+    jet_cli_record_entry_normalize(&entry)
+}
+// Rust RecordIndexEntry::with_capture (RecordIndex.rs).
+pub fn jet_cli_record_entry_with_capture(entry: &JetCLIRecordIndexEntry, capture: JetCLIRecordCapture) Never! { entry.capture = capture }
+// Rust RecordIndexEntry::with_size (RecordIndex.rs).
+pub fn jet_cli_record_entry_with_size(entry: &JetCLIRecordIndexEntry, size: Int) JetCLIRecordError! {
+    jet_cli_record_validate_u64(size, "record size")
+    entry.size = size
+}
+// Rust RecordIndexEntry::with_recorded_sequence (RecordIndex.rs).
+pub fn jet_cli_record_entry_with_recorded_sequence(entry: &JetCLIRecordIndexEntry, recorded_sequence: Int) JetCLIRecordError! {
+    jet_cli_record_validate_u64(recorded_sequence, "recorded_sequence")
+    entry.recorded_sequence = recorded_sequence
+}
+// Rust RecordIndexEntry::with_saved (RecordIndex.rs).
+pub fn jet_cli_record_entry_with_saved(entry: &JetCLIRecordIndexEntry, saved: Bool) Never! { entry.saved = saved }
+// Rust RecordIndexEntry::is_sensitive (RecordIndex.rs).
+pub fn jet_cli_record_entry_is_sensitive(entry: JetCLIRecordIndexEntry) -> Bool Never! { jet_cli_record_capture_is_sensitive(entry.capture) }
+// Rust RecordIndexEntry::is_disposable (RecordIndex.rs).
+pub fn jet_cli_record_entry_is_disposable(entry: JetCLIRecordIndexEntry) -> Bool Never! {
+    if entry.saved || jet_cli_record_entry_is_sensitive(entry) -> return false
+    prefix :: if entry.kind == {
+        .Replay -> "replays"
+        .Receipt -> "receipts"
+        .Comparison -> "receipts"
+        .Evidence -> "evidence"
+        .Proof -> { return false }
+        .Trust -> { return false }
+    }
+    bytes :: entry.path.bytes()
+    first :: jet_cli_record_next_path_component(bytes, 0)
+    if bytes[first.start..<first.end] != ".jet".bytes() -> return false
+    second :: jet_cli_record_next_path_component(bytes, first.next)
+    bytes[second.start..<second.end] == prefix.bytes()
+}
+// Rust RecordIndexEntry::key (RecordIndex.rs).
+pub fn jet_cli_record_entry_key(entry: JetCLIRecordIndexEntry) -> JetCLIRecordLink Never! {
+    JetCLIRecordLink{artifact_id: ~entry.artifact_id, kind: entry.kind}
+}
+// Rust RecordIndexEntry::normalize (RecordIndex.rs).
+pub fn jet_cli_record_entry_normalize(entry: &JetCLIRecordIndexEntry) JetCLIRecordError! {
+    jet_cli_record_entry_validate(entry)
+    jet_cli_record_sort_links(&entry.consumed)
+    jet_cli_record_sort_links(&entry.produced)
+    jet_cli_record_reject_duplicate_links(entry.consumed, "consumed")
+    jet_cli_record_reject_duplicate_links(entry.produced, "produced")
+}
+// Rust derived RecordLink::Ord: artifact_id precedes kind (not the reverse).
+fn jet_cli_record_sort_links(links: &[JetCLIRecordLink]) Never! {
+    &links.sort_by((left: JetCLIRecordLink, right: JetCLIRecordLink) -> {
+        if {
+            left.artifact_id != right.artifact_id -> left.artifact_id <=> right.artifact_id
+            else -> jet_cli_record_kind_rank(left.kind) <=> jet_cli_record_kind_rank(right.kind)
+        }
+    })
+}
+// Rust RecordIndexEntry::validate (RecordIndex.rs).
+pub fn jet_cli_record_entry_validate(entry: JetCLIRecordIndexEntry) JetCLIRecordError! {
+    jet_cli_record_identity_validate(entry.identity)
+    jet_cli_record_validate_component(entry.artifact_id, "record artifact_id", JET_CLI_MAX_ARTIFACT_ID_BYTES)
+    jet_cli_record_validate_index_path(entry.path)
+    jet_cli_record_validate_links(entry.consumed, "consumed")
+    jet_cli_record_validate_links(entry.produced, "produced")
+    jet_cli_record_validate_u64(entry.size, "record size")
+    jet_cli_record_validate_u64(entry.recorded_sequence, "recorded_sequence")
+}
+// Rust RecordIndexEntry::to_jsonl (RecordIndex.rs). No trailing newline in a row.
+pub fn jet_cli_record_entry_to_jsonl(entry: JetCLIRecordIndexEntry) -> String JetCLIRecordError! {
+    normalized := ~entry
+    jet_cli_record_entry_normalize(&normalized)
+    out := "{{\"capture\":\"{jet_cli_record_capture_name(normalized.capture)}\",\"consumed\":".bytes()
+    jet_cli_record_append_links(&out, normalized.consumed)
+    jet_cli_record_append(&out, ",\"engine\":\"{json_escape(normalized.identity.engine)}\",\"id\":\"{json_escape(normalized.artifact_id)}\",\"kind\":\"{jet_cli_record_kind_name(normalized.kind)}\",\"links_version\":{JET_CLI_RECORD_LINK_VERSION},\"path\":\"{json_escape(normalized.path)}\",\"produced\":")
+    jet_cli_record_append_links(&out, normalized.produced)
+    jet_cli_record_append(&out, ",\"recorded_sequence\":{normalized.recorded_sequence},\"saved\":{normalized.saved},\"size\":{normalized.size},\"target_inputs_sha256\":\"{json_escape(normalized.identity.target_inputs_sha256)}\",\"tool_version\":\"{json_escape(normalized.identity.tool_version)}\",\"version\":{JET_CLI_RECORD_INDEX_VERSION}}}")
+    Ok(String.from_bytes(out) ?? panic("record row encoder produced invalid UTF-8"))
+}
+// Rust RecordIndexEntry::parse_line (RecordIndex.rs).
+pub fn jet_cli_record_entry_parse_line(line: String) -> JetCLIRecordIndexEntry JetCLIRecordError! {
+    if line.bytes().len() > JET_CLI_MAX_INDEX_LINE_BYTES -> return Err(jet_cli_record_error("record index line exceeds the 1 MiB limit"))
+    // Reject protocol depth before tree growth; preserve the helper's #3598 gate.
+    tree :: foundation_parse_protocol_json(line) ?? return Err(jet_cli_record_error("record index line is not valid JSON"))
+    fields :: if tree == {
+        .Object(values) -> ~values
+        else -> { return Err(jet_cli_record_error("record index line must be a JSON object")) }
+    }
+    keys :: [String]{"capture", "consumed", "engine", "id", "kind", "links_version", "path", "produced", "recorded_sequence", "saved", "size", "target_inputs_sha256", "tool_version", "version"}
+    loop key in fields.keys() {
+        if !keys.contains(key) -> return Err(jet_cli_record_error("record index line contains an unknown field"))
+    }
+    version :: jet_cli_record_integer_field(fields, "version")
+    if version != JET_CLI_RECORD_INDEX_VERSION -> return Err(jet_cli_record_error("unsupported record index version {version}"))
+    links_version :: jet_cli_record_integer_field(fields, "links_version")
+    if links_version != JET_CLI_RECORD_LINK_VERSION -> return Err(jet_cli_record_error("unsupported record links version {links_version}"))
+    identity :: jet_cli_record_identity_new(jet_cli_record_string_field(fields, "target_inputs_sha256"), jet_cli_record_string_field(fields, "tool_version"), jet_cli_record_string_field(fields, "engine"))
+    kind :: jet_cli_record_kind_parse(jet_cli_record_string_field(fields, "kind"))
+    artifact_id :: jet_cli_record_string_field(fields, "id")
+    path :: jet_cli_record_string_field(fields, "path")
+    capture :: jet_cli_record_capture_parse(jet_cli_record_string_field(fields, "capture"))
+    size :: jet_cli_record_unsigned_field(fields, "size")
+    recorded_sequence :: jet_cli_record_unsigned_field(fields, "recorded_sequence")
+    saved :: jet_cli_record_bool_field(fields, "saved")
+    consumed :: jet_cli_record_links_field(fields, "consumed")
+    produced :: jet_cli_record_links_field(fields, "produced")
+    entry := JetCLIRecordIndexEntry{identity: identity, kind: kind, artifact_id: artifact_id, path: path, capture: capture, size: size, recorded_sequence: recorded_sequence, saved: saved, consumed: consumed, produced: produced}
+    jet_cli_record_entry_normalize(&entry)
+    Ok(entry)
+}
+// Rust entries_linked (RecordIndex.rs).
+pub fn jet_cli_record_entries_linked(left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) -> Bool Never! {
+    jet_cli_record_entry_links_to(left, right) || jet_cli_record_entry_links_to(right, left)
+}
+// Rust entry_links_to (RecordIndex.rs).
+pub fn jet_cli_record_entry_links_to(entry: JetCLIRecordIndexEntry, target: JetCLIRecordIndexEntry) -> Bool Never! {
+    loop link in entry.consumed { if link.kind == target.kind && link.artifact_id == target.artifact_id -> return true }
+    loop link in entry.produced { if link.kind == target.kind && link.artifact_id == target.artifact_id -> return true }
+    false
+}
+// Rust compare_entries (RecordIndex.rs): identity tuple order, not its NUL key.
+pub fn jet_cli_record_compare_entries(left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) -> Ordering Never! {
+    if {
+        left.kind != right.kind -> jet_cli_record_kind_rank(left.kind) <=> jet_cli_record_kind_rank(right.kind)
+        left.artifact_id != right.artifact_id -> left.artifact_id <=> right.artifact_id
+        left.identity.target_inputs_sha256 != right.identity.target_inputs_sha256 -> left.identity.target_inputs_sha256 <=> right.identity.target_inputs_sha256
+        left.identity.tool_version != right.identity.tool_version -> left.identity.tool_version <=> right.identity.tool_version
+        left.identity.engine != right.identity.engine -> left.identity.engine <=> right.identity.engine
+        else -> jet_cli_record_compare_paths(left.path, right.path)
+    }
+}
+// Rust validate_digest (RecordIndex.rs).
+pub fn jet_cli_record_validate_digest(value: String, field: String) JetCLIRecordError! {
+    bytes :: value.bytes()
+    start :: if value.starts_with("sha256-") -> 7 else -> 0
+    if bytes.len() - start != 64 -> return Err(jet_cli_record_error("{field} must be a lowercase SHA-256 digest"))
+    loop index in start..<bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return Err(jet_cli_record_error("{field} must be a lowercase SHA-256 digest"))
+    }
+}
+// Rust validate_text (RecordIndex.rs). Limits count UTF-8 bytes, not characters.
+pub fn jet_cli_record_validate_text(value: String, field: String, max_bytes: Int) JetCLIRecordError! {
+    if value.len() == 0 || value.bytes().len() > max_bytes || jet_cli_has_control(value) -> return Err(jet_cli_record_error("{field} is empty, too large, or contains control characters"))
+}
+// Rust validate_component (RecordIndex.rs).
+pub fn jet_cli_record_validate_component(value: String, field: String, max_bytes: Int) JetCLIRecordError! {
+    jet_cli_record_validate_text(value, field, max_bytes)
+    if value == "." || value == ".." || value.contains("/") || value.contains("\\") -> return Err(jet_cli_record_error("{field} contains an unsafe path component"))
+}
+// CLI-internal Rust Unix Path::components law (#4378 Core publication gated):
+// retain root/leading `.`, omit interior dots and repeated/trailing separators.
+// Bounds reuse each path's byte projection without component arrays or strings.
+fn jet_cli_record_next_path_component(bytes: [U8], offset: Int) -> (start: Int, end: Int, next: Int) Never! {
+    cursor := offset
+    if offset == 0 && bytes.len() > 0 && Int.from_u8(bytes[0]) == 47 -> return (start: 0, end: 1, next: 1)
+    loop cursor < bytes.len() {
+        if Int.from_u8(bytes[cursor]) == 47 {
+            cursor += 1
+            next
+        }
+        start :: cursor
+        loop cursor < bytes.len() && Int.from_u8(bytes[cursor]) != 47 -> cursor += 1
+        end :: cursor
+        after :: if cursor < bytes.len() -> cursor + 1 else -> cursor
+        if start != 0 && end - start == 1 && Int.from_u8(bytes[start]) == 46 {
+            cursor = after
+            next
+        }
+        return (start: start, end: end, next: after)
+    }
+    (start: bytes.len(), end: bytes.len(), next: bytes.len())
+}
+// Rust Component order: RootDir < CurDir < ParentDir < Normal (UTF-8 bytes).
+// Compare bounded bytes directly rather than materializing component slices.
+fn jet_cli_record_path_component_rank(bytes: [U8], start: Int, end: Int) -> Int Never! {
+    if end - start == 1 {
+        if Int.from_u8(bytes[start]) == 47 -> return 0
+        if Int.from_u8(bytes[start]) == 46 -> return 1
+    }
+    if end - start == 2 && Int.from_u8(bytes[start]) == 46 && Int.from_u8(bytes[start + 1]) == 46 -> return 2
+    3
+}
+// Rust Path::cmp (RecordIndex.rs compare_entries / CmdTry.rs BTreeMap).
+fn jet_cli_record_compare_paths(left: String, right: String) -> Ordering Never! {
+    lbytes :: left.bytes()
+    rbytes :: right.bytes()
+    loffset := 0
+    roffset := 0
+    loop {
+        lpart :: jet_cli_record_next_path_component(lbytes, loffset)
+        rpart :: jet_cli_record_next_path_component(rbytes, roffset)
+        if lpart.start == lpart.end {
+            if rpart.start == rpart.end -> return Ordering.Equal
+            return Ordering.Less
+        }
+        if rpart.start == rpart.end -> return Ordering.Greater
+        rank :: jet_cli_record_path_component_rank(lbytes, lpart.start, lpart.end) <=> jet_cli_record_path_component_rank(rbytes, rpart.start, rpart.end)
+        if rank != Ordering.Equal -> return rank
+        llen :: lpart.end - lpart.start
+        rlen :: rpart.end - rpart.start
+        index := 0
+        loop index < llen && index < rlen {
+            order :: lbytes[lpart.start + index] <=> rbytes[rpart.start + index]
+            if order != Ordering.Equal -> return order
+            index += 1
+        }
+        length_order :: llen <=> rlen
+        if length_order != Ordering.Equal -> return length_order
+        loffset = lpart.next
+        roffset = rpart.next
+    }
+}
+// Canonical component key for map grouping. One required key buffer, never a
+// split/component-string array; the original path spelling remains the value.
+fn jet_cli_record_path_key(path: String) -> String Never! {
+    bytes :: path.bytes()
+    key := [U8]{}
+    offset := 0
+    loop {
+        part :: jet_cli_record_next_path_component(bytes, offset)
+        if part.start == part.end -> break
+        if key.len() > 0 -> &key.push(U8{47})
+        loop index in part.start..<part.end -> &key.push(bytes[index])
+        offset = part.next
+    }
+    String.from_bytes(key) ?? panic("path component key UTF-8")
+}
+// Rust validate_index_path (RecordIndex.rs). String makes the UTF-8 premise explicit.
+pub fn jet_cli_record_validate_index_path(path: String) JetCLIRecordError! {
+    bytes :: path.bytes()
+    if bytes.len() == 0 || bytes.len() > JET_CLI_MAX_RECORD_PATH_BYTES || bytes.contains(U8{0}) || bytes.contains(U8{92}) -> return Err(jet_cli_record_error("record index path is empty, too large, or uses unsafe separators"))
+    if bytes[0] == (U8{47}) -> return Err(jet_cli_record_error("record index path must be project-relative"))
+    first :: jet_cli_record_next_path_component(bytes, 0)
+    count := 0
+    unsafe_component := false
+    offset := 0
+    loop {
+        part :: jet_cli_record_next_path_component(bytes, offset)
+        if part.start == part.end -> break
+        rank :: jet_cli_record_path_component_rank(bytes, part.start, part.end)
+        if rank == 1 || rank == 2 -> unsafe_component = true
+        count += 1
+        offset = part.next
+    }
+    if count < 3 || first.end - first.start != 4 || bytes[first.start] != (U8{46}) || bytes[first.start + 1] != (U8{106}) || bytes[first.start + 2] != (U8{101}) || bytes[first.start + 3] != (U8{116}) -> return Err(jet_cli_record_error("record index path must stay under `.jet/<artifact-kind>`"))
+    if unsafe_component -> return Err(jet_cli_record_error("record index path contains an unsafe component"))
+}
+// u64 parameters were statically bounded in Rust; Jet checks that domain explicitly.
+fn jet_cli_record_validate_u64(value: Int, field: String) JetCLIRecordError! {
+    if value < 0 || value > 18446744073709551615 -> return Err(jet_cli_record_error("{field} must fit an unsigned 64-bit integer"))
+}
+// Rust validate_links (RecordIndex.rs).
+pub fn jet_cli_record_validate_links(links: [JetCLIRecordLink], field: String) JetCLIRecordError! {
+    if links.len() > JET_CLI_MAX_LINKS_PER_ENTRY -> return Err(jet_cli_record_error("record {field} has too many links"))
+    loop link in links -> jet_cli_record_link_validate(link)
+}
+// Rust reject_duplicate_links (RecordIndex.rs); links must already be sorted.
+pub fn jet_cli_record_reject_duplicate_links(links: [JetCLIRecordLink], field: String) JetCLIRecordError! {
+    loop index in 1..<links.len() {
+        if links[index - 1] == links[index] -> return Err(jet_cli_record_error("record {field} contains duplicate link"))
+    }
+}
+// Graph keys preserve Rust (RecordKind, artifact_id) BTreeMap ordering.
+fn jet_cli_record_graph_key(kind: JetCLIRecordKind, artifact_id: String) -> String Never! { "{jet_cli_record_kind_rank(kind)}/{artifact_id}" }
+// Rust reject_cycles (RecordIndex.rs).
+pub fn jet_cli_record_reject_cycles(entries: [JetCLIRecordIndexEntry]) JetCLIRecordError! {
+    graph := [String:[String]]{}
+    labels := [String:String]{}
+    loop entry in entries {
+        key :: jet_cli_record_graph_key(entry.kind, entry.artifact_id)
+        if !graph.has_key(key) -> graph[key] = [String]{}
+        labels[key] = "{jet_cli_record_kind_name(entry.kind)}/{entry.artifact_id}"
+        loop link in entry.consumed -> &graph[key].push(jet_cli_record_graph_key(link.kind, link.artifact_id))
+        loop link in entry.produced -> &graph[key].push(jet_cli_record_graph_key(link.kind, link.artifact_id))
+    }
+    visiting := [String:Bool]{}
+    visited := [String:Bool]{}
+    keys := graph.keys().to_list()
+    &keys.sort()
+    loop key in keys {
+        if jet_cli_record_visit_cycle(key, graph, &visiting, &visited) -> return Err(jet_cli_record_error("record links contain a cycle at `{labels[key]}`"))
+    }
+}
+// Rust visit_cycle (RecordIndex.rs). Mark visited on entry, then check visiting first.
+fn jet_cli_record_visit_cycle(key: String, graph: [String:[String]], visiting: &[String:Bool], visited: &[String:Bool]) -> Bool Never! {
+    if visiting.has_key(key) -> return true
+    if visited.has_key(key) -> return false
+    visited[key] = true
+    visiting[key] = true
+    if graph.has_key(key) {
+        loop edge in graph[key] {
+            if jet_cli_record_visit_cycle(edge, graph, &visiting, &visited) -> return true
+        }
+    }
+    _ :: &visiting.remove(key)
+    false
+}
+fn jet_cli_record_append(out: &[U8], text: String) Never! { loop byte in text.bytes() -> &out.push(byte) }
+// Rust links_json (RecordIndex.rs); append into the row's single byte buffer.
+pub fn jet_cli_record_links_json(links: [JetCLIRecordLink]) -> String Never! {
+    sorted := ~links
+    jet_cli_record_sort_links(&sorted)
+    out := [U8]{}
+    jet_cli_record_append_links(&out, sorted)
+    String.from_bytes(out) ?? panic("record links encoder produced invalid UTF-8")
+}
+fn jet_cli_record_append_links(out: &[U8], sorted: [JetCLIRecordLink]) Never! {
+    jet_cli_record_append(&out, "[")
+    loop (index, link) in sorted {
+        if index > 0 -> jet_cli_record_append(&out, ",")
+        jet_cli_record_append(&out, "{{\"artifact_id\":\"{json_escape(link.artifact_id)}\",\"kind\":\"{jet_cli_record_kind_name(link.kind)}\"}}")
+    }
+    jet_cli_record_append(&out, "]")
+}
+// Rust field (RecordIndex.rs).
+pub fn jet_cli_record_field(fields: [String:DataTree], name: String) -> DataTree? Never! { fields.get(name) }
+// Rust string_field (RecordIndex.rs); Core DataTree has Text, no TypedText variant.
+pub fn jet_cli_record_string_field(fields: [String:DataTree], name: String) -> String JetCLIRecordError! {
+    value :: jet_cli_record_field(fields, name) ?? return Err(jet_cli_record_error("record index is missing `{name}`"))
+    if value == {
+        .Text(text) -> Ok(~text)
+        else -> Err(jet_cli_record_error("record index field `{name}` must be a string"))
+    }
+}
+// Rust integer_field (RecordIndex.rs); parser-produced integers must fit i64.
+pub fn jet_cli_record_integer_field(fields: [String:DataTree], name: String) -> Int JetCLIRecordError! {
+    value :: jet_cli_record_field(fields, name) ?? return Err(jet_cli_record_error("record index is missing `{name}`"))
+    if value == .Int(number) {
+        if number >= -9223372036854775808 && number <= 9223372036854775807 -> return Ok(number)
+    }
+    Err(jet_cli_record_error("record index field `{name}` must be an integer"))
+}
+// Rust unsigned_field (RecordIndex.rs): JSON numbers go through i64 before u64.
+pub fn jet_cli_record_unsigned_field(fields: [String:DataTree], name: String) -> Int JetCLIRecordError! {
+    value :: jet_cli_record_integer_field(fields, name)
+    if value < 0 -> return Err(jet_cli_record_error("record index field `{name}` must be non-negative"))
+    Ok(value)
+}
+// Rust bool_field (RecordIndex.rs).
+pub fn jet_cli_record_bool_field(fields: [String:DataTree], name: String) -> Bool JetCLIRecordError! {
+    value :: jet_cli_record_field(fields, name) ?? return Err(jet_cli_record_error("record index is missing `{name}`"))
+    if value == {
+        .Bool(boolean) -> Ok(boolean)
+        else -> Err(jet_cli_record_error("record index field `{name}` must be a boolean"))
+    }
+}
+// Rust links_field (RecordIndex.rs).
+pub fn jet_cli_record_links_field(fields: [String:DataTree], name: String) -> [JetCLIRecordLink] JetCLIRecordError! {
+    tree :: jet_cli_record_field(fields, name) ?? return Err(jet_cli_record_error("record index field `{name}` must be an array"))
+    values :: if tree == {
+        .Array(items) -> ~items
+        else -> { return Err(jet_cli_record_error("record index field `{name}` must be an array")) }
+    }
+    if values.len() > JET_CLI_MAX_LINKS_PER_ENTRY -> return Err(jet_cli_record_error("record index field `{name}` has too many links"))
+    links := [JetCLIRecordLink]{}
+    loop value in values {
+        object :: if value == {
+            .Object(items) -> ~items
+            else -> { return Err(jet_cli_record_error("record index {name} link must be an object")) }
+        }
+        loop key in object.keys() {
+            if key != "artifact_id" && key != "kind" -> return Err(jet_cli_record_error("record index {name} link contains an unknown field"))
+        }
+        kind :: jet_cli_record_kind_parse(jet_cli_record_string_field(object, "kind"))
+        &links.push(jet_cli_record_link_new(kind, jet_cli_record_string_field(object, "artifact_id")))
+    }
+    jet_cli_record_sort_links(&links)
+    jet_cli_record_reject_duplicate_links(links, name)
+    Ok(links)
+}

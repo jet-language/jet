@@ -1,0 +1,297 @@
+// Behavioral ports of PerformanceBudget.rs:2453-2570 and the math portion
+// of wire_reader_recomputes_decision_confidence_trend_and_history:2630-2657.
+// Reader/schema assertions belong to CLI-28B, not this pure math unit.
+fn perf_test_q(value: Int) -> PerfRational Never! { perf_rational_integer(value) }
+fn perf_test_r(num: Int, den: Int) -> PerfRational Never! {
+    perf_rational_new(num, den) ?? panic("rational failed: {err.message}")
+}
+fn perf_test_stats(samples: [PerfRational]) -> PerfStatistics Never! {
+    perf_statistics(samples) ?? panic("statistics failed: {err.message}")
+}
+fn perf_test_eval(candidate: [PerfRational], baseline: [PerfRational], comparison: PerfComparison, direction: PerfDirection, enforcement: PerfEnforcement, policy: PerfMeasurementPolicy?) -> PerfEvaluation PerfBudgetError! {
+    perf_evaluate("e", "c", [String]{}, candidate, baseline, None, comparison, direction, enforcement, policy)
+}
+fn perf_test_policy(count: Int, lower: Int, upper: Int) -> PerfMeasurementPolicy Never! {
+    PerfMeasurementPolicy{bootstrap_resamples: count, lower_rank: lower, upper_rank: upper}
+}
+#Test("rational_statistics_are_reduced_and_nearest_rank_exact") {
+    assert_eq(perf_test_r(20, -30), perf_test_r(-2, 3))
+    stats :: perf_test_stats([PerfRational]{perf_test_q(1), perf_test_q(2), perf_test_q(3), perf_test_q(4), perf_test_q(100)})
+    assert_eq(stats.p50, perf_test_q(3))
+    assert_eq(stats.p90, perf_test_q(100))
+    assert_eq(stats.p95, perf_test_q(100))
+    assert_eq(stats.p99, perf_test_q(100))
+    assert_eq(stats.p999, perf_test_q(100))
+    assert_eq(stats.mean, perf_test_q(22))
+    assert_eq(stats.mad, perf_test_q(1))
+}
+#Test("arbitrary_precision_rationals_are_total_and_reduce_exactly") {
+    huge :: "999999999999999999999999999999999999999999999999999999999999999999999999"
+    value :: perf_rational_parse(huge, "300000000000000000000000000000000000000000000000000000000000000000000000") ?? panic(err.message)
+    assert_eq("{value.den}", "100000000000000000000000000000000000000000000000000000000000000000000000")
+    assert_eq("{value.num}", "333333333333333333333333333333333333333333333333333333333333333333333333")
+    squared :: perf_rational_mul(value, value) ?? panic(err.message)
+    assert("{squared.num}".len() > 140)
+    assert_eq(perf_rational_div(squared, value) ?? panic(err.message), value)
+    if perf_rational_parse("-0", "1") == {
+        .Ok(_) -> panic("accepted negative zero")
+        .Err(error) -> assert_eq(error.message, "non-canonical integer `-0`")
+    }
+}
+#Test("integer canonical and source parsing preserves errors and bases") {
+    bad :: [String]{"", "-", "01", "-0", "+1", " 1", "1_0", "é"}
+    loop value in bad {
+        if perf_integer_parse(value) == {
+            .Ok(_) -> panic("accepted noncanonical integer")
+            .Err(error) -> assert_eq(error.message, "non-canonical integer `{value}`")
+        }
+    }
+    assert_eq(perf_integer_parse("-123") ?? panic(err.message), -123)
+    assert_eq(perf_integer_parse_source("-0xF_f") ?? panic(err.message), -255)
+    assert_eq(perf_integer_parse_source("0o1_7") ?? panic(err.message), 15)
+    assert_eq(perf_integer_parse_source("0b10_01") ?? panic(err.message), 9)
+    assert_eq(perf_integer_parse_source("_00_10_") ?? panic(err.message), 10)
+    assert_eq(perf_integer_parse_source("-0") ?? panic(err.message), 0)
+    if perf_integer_parse_source("0b2") == {
+        .Ok(_) -> panic("accepted binary 2")
+        .Err(error) -> assert_eq(error.message, "invalid base-2 integer `0b2`")
+    }
+    if perf_integer_parse_source("0x__") == {
+        .Ok(_) -> panic("accepted no digits")
+        .Err(error) -> assert_eq(error.message, "invalid integer `0x__`")
+    }
+    if perf_integer_parse_source("é") == {
+        .Ok(_) -> panic("accepted Unicode digit")
+        .Err(error) -> assert_eq(error.message, "invalid base-10 integer `é`")
+    }
+    assert_eq(perf_rational_parse_source("0x10", "-0b110") ?? panic(err.message), perf_test_r(-8, 3))
+}
+#Test("integer div rem exact division and gcd") {
+    result :: perf_integer_div_rem_abs(-17, -5) ?? panic(err.message)
+    assert_eq(result.quotient, 3)
+    assert_eq(result.remainder, 2)
+    assert_eq(perf_integer_exact_div(-20, -5) ?? panic(err.message), 4)
+    assert_eq(perf_integer_exact_div(20, -5) ?? panic(err.message), -4)
+    assert_eq(perf_integer_gcd(-20, 30), 10)
+    assert_eq(perf_integer_gcd(0, 0), 0)
+    if perf_integer_exact_div(3, 2) == {
+        .Ok(_) -> panic("accepted inexact division")
+        .Err(error) -> assert_eq(error.message, "integer division is not exact")
+    }
+    if perf_integer_div_rem_abs(1, 0) == {
+        .Ok(_) -> panic("accepted zero divisor")
+        .Err(error) -> assert_eq(error.message, "integer division by zero")
+    }
+}
+#Test("rational arithmetic display ordering JSON and zero errors") {
+    a :: perf_test_r(1, 2)
+    b :: perf_test_r(1, 3)
+    assert_eq(perf_rational_add(a, b) ?? panic(err.message), perf_test_r(5, 6))
+    assert_eq(perf_rational_sub(a, b) ?? panic(err.message), perf_test_r(1, 6))
+    assert_eq(perf_rational_mul(a, b) ?? panic(err.message), perf_test_r(1, 6))
+    assert_eq(perf_rational_div(a, b) ?? panic(err.message), perf_test_r(3, 2))
+    assert_eq(perf_rational_text(a), "1/2")
+    assert_eq(perf_rational_text(perf_test_r(4, 2)), "2")
+    assert_eq(perf_rational_text(perf_test_r(0, -9)), "0")
+    assert_eq(perf_rational_text(perf_rational_neg(a)), "-1/2")
+    assert_eq(perf_rational_abs(perf_rational_neg(a)), a)
+    assert_eq(perf_rational_max_zero(perf_rational_neg(a)), perf_rational_zero())
+    assert(perf_rational_cmp(a, b) == Ordering.Greater)
+    assert(perf_rational_cmp(perf_rational_neg(a), perf_rational_neg(b)) == Ordering.Less)
+    assert_eq(String.from_bytes(canonical_json_bytes(perf_rational_to_json(a))) ?? panic("UTF8"), "{{\"den\":2,\"num\":1}}\n")
+    if perf_rational_new(0, 0) == {
+        .Ok(_) -> panic("accepted zero denominator")
+        .Err(error) -> assert_eq(error.message, "rational denominator is zero")
+    }
+    if perf_rational_div(a, perf_rational_zero()) == {
+        .Ok(_) -> panic("accepted rational zero divisor")
+        .Err(error) -> assert_eq(error.message, "rational division by zero")
+    }
+}
+#Test("statistics empty ranks singleton fractional median and estimator percentiles") {
+    if perf_statistics([PerfRational]{}) == {
+        .Ok(_) -> panic("accepted empty statistics")
+        .Err(error) -> assert_eq(error.message, "statistics require at least one sample")
+    }
+    if perf_nearest_rank([PerfRational]{}, 1, 2) == {
+        .Ok(_) -> panic("accepted empty rank")
+        .Err(error) -> assert_eq(error.message, "rank requires at least one value")
+    }
+    values :: [PerfRational]{perf_test_q(1), perf_test_q(2)}
+    assert_eq(perf_nearest_rank(values, 0, 1000) ?? panic(err.message), perf_test_q(1))
+    if perf_nearest_rank(values, 18446744073709551615, 1) == {
+        .Ok(_) -> panic("accepted usize rank overflow")
+        .Err(error) -> assert_eq(error.message, "rank overflow")
+    }
+    stats :: perf_test_stats([PerfRational]{perf_test_r(3, 2), perf_test_r(1, 2)})
+    assert_eq(stats.p50, perf_test_r(1, 2))
+    assert_eq(stats.mean, perf_test_q(1))
+    assert_eq(stats.mad, perf_rational_zero())
+    assert_eq(perf_estimator([PerfRational]{perf_test_q(7)}, None) ?? panic(err.message), perf_test_q(7))
+    assert_eq(perf_estimator(values, Val(PerfPercentile.P50)) ?? panic(err.message), perf_test_q(1))
+    percentiles :: [PerfPercentile]{PerfPercentile.P90, PerfPercentile.P95, PerfPercentile.P99, PerfPercentile.P999}
+    loop percentile in percentiles -> assert_eq(perf_estimator(values, Val(percentile)) ?? panic(err.message), perf_test_q(2))
+}
+#Test("deterministic_absolute_and_trend_follow_direction") {
+    evaluation :: perf_test_eval([PerfRational]{perf_test_q(9)}, [PerfRational]{}, PerfComparison.Absolute{limit: perf_test_q(10), direction: PerfLimitDirection.AtMost}, PerfDirection.LowerIsBetter, PerfEnforcement.Fail, None) ?? panic(err.message)
+    assert(evaluation.evidence == PerfEvidence.Pass)
+    assert(evaluation.outcome == PerfPolicyOutcome.Pass)
+    assert(evaluation.lower95 == None && evaluation.upper95 == None)
+    assert_eq(evaluation.bootstrap.len(), 0)
+    ids :: [String]{"old", "mid", "new"}
+    got :: perf_trend(ids, [PerfRational]{perf_test_q(12), perf_test_q(10), perf_test_q(8)}, PerfDirection.LowerIsBetter) ?? panic(err.message)
+    assert(got.label == PerfTrendLabel.Improving)
+    assert_eq(got.score ?? panic("missing score"), perf_test_q(2))
+    assert_eq(got.report_ids, ids)
+}
+#Test("absolute comparisons inclusive boundaries and enforcement") {
+    limit_directions :: [PerfLimitDirection]{PerfLimitDirection.AtMost, PerfLimitDirection.AtLeast}
+    loop limit_direction in limit_directions {
+        exact :: perf_test_eval([PerfRational]{perf_test_q(10)}, [PerfRational]{}, PerfComparison.Absolute{limit: perf_test_q(10), direction: limit_direction}, PerfDirection.HigherIsBetter, PerfEnforcement.Warn, None) ?? panic(err.message)
+        assert(exact.evidence == PerfEvidence.Pass && exact.outcome == PerfPolicyOutcome.Pass)
+        failing :: if { limit_direction == PerfLimitDirection.AtMost -> 11 else -> 9 }
+        got :: perf_test_eval([PerfRational]{perf_test_q(failing)}, [PerfRational]{}, PerfComparison.Absolute{limit: perf_test_q(10), direction: limit_direction}, PerfDirection.LowerIsBetter, PerfEnforcement.Warn, None) ?? panic(err.message)
+        assert(got.evidence == PerfEvidence.Regression && got.outcome == PerfPolicyOutcome.Warn)
+    }
+}
+#Test("bootstrap_is_deterministic math portion of Rust reader test") {
+    policy :: perf_test_policy(20, 1, 20)
+    comparison :: PerfComparison.RelativeTo{limit_basis_points: 500, goal: PerfRelativeGoal.RegressionAtMost}
+    ids :: [String]{"0".repeat(64)}
+    candidate :: [PerfRational]{perf_test_q(90), perf_test_q(91), perf_test_q(92)}
+    baseline :: [PerfRational]{perf_test_q(100), perf_test_q(101), perf_test_q(102)}
+    got :: perf_evaluate("1".repeat(64), "2".repeat(64), ids, candidate, baseline, Val(PerfPercentile.P50), comparison, PerfDirection.LowerIsBetter, PerfEnforcement.Fail, Val(policy)) ?? panic(err.message)
+    again :: perf_evaluate("1".repeat(64), "2".repeat(64), ids, candidate, baseline, Val(PerfPercentile.P50), comparison, PerfDirection.LowerIsBetter, PerfEnforcement.Fail, Val(policy)) ?? panic(err.message)
+    assert_eq(got, again)
+    assert(got.evidence == PerfEvidence.Pass)
+    assert_eq(got.point, perf_test_q(-500))
+    assert_eq(got.bootstrap.len(), 20)
+    loop value in got.bootstrap -> assert_eq(value, perf_test_q(-500))
+}
+#Test("relative statistic all goal and measurement directions") {
+    assert_eq(perf_relative_stat(perf_test_q(110), perf_test_q(100), 500, PerfRelativeGoal.RegressionAtMost, PerfDirection.LowerIsBetter) ?? panic(err.message), perf_test_q(500))
+    assert_eq(perf_relative_stat(perf_test_q(90), perf_test_q(100), 500, PerfRelativeGoal.RegressionAtMost, PerfDirection.HigherIsBetter) ?? panic(err.message), perf_test_q(500))
+    assert_eq(perf_relative_stat(perf_test_q(90), perf_test_q(100), 500, PerfRelativeGoal.ImprovementAtLeast, PerfDirection.LowerIsBetter) ?? panic(err.message), perf_test_q(-500))
+    assert_eq(perf_relative_stat(perf_test_q(110), perf_test_q(100), 500, PerfRelativeGoal.ImprovementAtLeast, PerfDirection.HigherIsBetter) ?? panic(err.message), perf_test_q(-500))
+    assert_eq(perf_relative_stat(perf_test_q(110), perf_test_q(100), 500, PerfRelativeGoal.ImprovementAtLeast, PerfDirection.LowerIsBetter) ?? panic(err.message), perf_test_q(500))
+}
+#Test("statistical evidence confidence bounds and zero baseline precedence") {
+    policy :: Val(perf_test_policy(4, 1, 4))
+    pass :: perf_test_eval([PerfRational]{perf_test_q(10)}, [PerfRational]{}, PerfComparison.AbsoluteFrom{limit: perf_test_q(10), direction: PerfLimitDirection.AtMost}, PerfDirection.LowerIsBetter, PerfEnforcement.Fail, policy) ?? panic(err.message)
+    assert(pass.evidence == PerfEvidence.Pass)
+    assert_eq(pass.lower95 ?? panic("lower"), perf_rational_zero())
+    regression :: perf_test_eval([PerfRational]{perf_test_q(9)}, [PerfRational]{}, PerfComparison.AbsoluteFrom{limit: perf_test_q(10), direction: PerfLimitDirection.AtLeast}, PerfDirection.LowerIsBetter, PerfEnforcement.Fail, policy) ?? panic(err.message)
+    assert(regression.evidence == PerfEvidence.Regression && regression.outcome == PerfPolicyOutcome.Fail)
+    unavailable :: perf_test_eval([PerfRational]{perf_test_q(1)}, [PerfRational]{perf_test_q(0)}, PerfComparison.RelativeTo{limit_basis_points: 10, goal: PerfRelativeGoal.RegressionAtMost}, PerfDirection.LowerIsBetter, PerfEnforcement.Warn, None) ?? panic(err.message)
+    assert(unavailable.evidence == PerfEvidence.Unavailable && unavailable.outcome == PerfPolicyOutcome.Warn)
+    assert(unavailable.lower95 == None)
+    assert_eq(unavailable.bootstrap.len(), 0)
+    inconclusive :: perf_test_eval([PerfRational]{perf_test_q(0), perf_test_q(100)}, [PerfRational]{}, PerfComparison.AbsoluteFrom{limit: perf_test_q(50), direction: PerfLimitDirection.AtMost}, PerfDirection.LowerIsBetter, PerfEnforcement.Fail, Val(perf_test_policy(40, 1, 40))) ?? panic(err.message)
+    assert(inconclusive.evidence == PerfEvidence.Inconclusive)
+    assert_eq(inconclusive.lower95 ?? panic("lower"), perf_test_q(-50))
+    assert_eq(inconclusive.upper95 ?? panic("upper"), perf_test_q(50))
+}
+#Test("evaluation errors preserve missing input policy replicate and rank precedence") {
+    absolute :: PerfComparison.Absolute{limit: perf_test_q(1), direction: PerfLimitDirection.AtMost}
+    relative :: PerfComparison.RelativeTo{limit_basis_points: 10, goal: PerfRelativeGoal.RegressionAtMost}
+    statistical :: PerfComparison.AbsoluteFrom{limit: perf_test_q(1), direction: PerfLimitDirection.AtMost}
+    empty :: [PerfRational]{}
+    one :: [PerfRational]{perf_test_q(1)}
+    if perf_test_eval(empty, empty, absolute, PerfDirection.LowerIsBetter, PerfEnforcement.Fail, None) == {
+        .Ok(_) -> panic("accepted empty candidate")
+        .Err(error) -> assert_eq(error.message, "candidate samples are empty")
+    }
+    if perf_test_eval(one, empty, relative, PerfDirection.LowerIsBetter, PerfEnforcement.Fail, None) == {
+        .Ok(_) -> panic("accepted empty baseline")
+        .Err(error) -> assert_eq(error.message, "RelativeTo baseline samples are empty")
+    }
+    if perf_test_eval(one, one, relative, PerfDirection.LowerIsBetter, PerfEnforcement.Fail, None) == {
+        .Ok(_) -> panic("accepted missing relative policy")
+        .Err(error) -> assert_eq(error.message, "RelativeTo requires a measurement policy")
+    }
+    if perf_test_eval(one, empty, statistical, PerfDirection.LowerIsBetter, PerfEnforcement.Fail, None) == {
+        .Ok(_) -> panic("accepted missing absolute-from policy")
+        .Err(error) -> assert_eq(error.message, "AbsoluteFrom requires a measurement policy")
+    }
+    if perf_test_eval(one, empty, statistical, PerfDirection.LowerIsBetter, PerfEnforcement.Fail, Val(perf_test_policy(0, 0, 0))) == {
+        .Ok(_) -> panic("accepted zero replicates")
+        .Err(error) -> assert_eq(error.message, "bootstrap requires at least one replicate")
+    }
+    bad_ranks :: [PerfMeasurementPolicy]{perf_test_policy(2, 0, 1), perf_test_policy(2, 1, 0), perf_test_policy(2, 3, 1), perf_test_policy(2, 1, 3)}
+    loop policy in bad_ranks {
+        if perf_test_eval(one, empty, statistical, PerfDirection.LowerIsBetter, PerfEnforcement.Fail, Val(policy)) == {
+            .Ok(_) -> panic("accepted out of range ranks")
+            .Err(error) -> assert_eq(error.message, "bootstrap ranks are outside the replicate set")
+        }
+    }
+    if perf_bootstrap_values("e", "c", [String]{}, one, empty, None, absolute, PerfDirection.LowerIsBetter, perf_test_policy(1, 1, 1)) == {
+        .Ok(_) -> panic("bootstrapped absolute")
+        .Err(error) -> assert_eq(error.message, "Absolute does not bootstrap")
+    }
+}
+#Test("SHA stream rejection sampling empty population and resample") {
+    stream := perf_sha_stream_new("e", "c", [String]{}, 0)
+    if perf_sha_stream_index(&stream, 0) == {
+        .Ok(_) -> panic("sampled empty population")
+        .Err(error) -> assert_eq(error.message, "cannot sample an empty population")
+    }
+    stream.words = [Int]{18446744073709551615, 18446744073709551615}
+    // 2^64-1 is rejected for a population of 3; the next SHA word must be used.
+    assert((perf_sha_stream_index(&stream, 3) ?? panic(err.message)) < 3)
+    assert_eq(stream.words.len(), 3)
+    values :: perf_resample([PerfRational]{perf_test_q(9)}, 5, &stream) ?? panic(err.message)
+    assert_eq(values.len(), 5)
+    loop value in values -> assert_eq(value, perf_test_q(9))
+}
+#Test("trend stable regressing insufficient mismatch and slope ranks") {
+    ids :: [String]{"a", "b", "c"}
+    descending :: [PerfRational]{perf_test_q(12), perf_test_q(10), perf_test_q(8)}
+    got :: perf_trend(ids, descending, PerfDirection.HigherIsBetter) ?? panic(err.message)
+    assert(got.label == PerfTrendLabel.Regressing)
+    assert_eq(got.score ?? panic("score"), perf_test_q(-2))
+    stable :: perf_trend(ids, [PerfRational]{perf_test_q(1), perf_test_q(1), perf_test_q(1)}, PerfDirection.LowerIsBetter) ?? panic(err.message)
+    assert(stable.label == PerfTrendLabel.Stable)
+    assert_eq(stable.score ?? panic("score"), perf_rational_zero())
+    short :: perf_trend([String]{"a", "b"}, [PerfRational]{perf_test_q(1), perf_test_q(2)}, PerfDirection.LowerIsBetter) ?? panic(err.message)
+    assert(short.label == PerfTrendLabel.Insufficient && short.score == None)
+    if perf_trend([String]{}, descending, PerfDirection.LowerIsBetter) == {
+        .Ok(_) -> panic("accepted mismatched trend")
+        .Err(error) -> assert_eq(error.message, "trend ids and estimators differ in length")
+    }
+}
+#Test("wire_reader math fixture computes confidence with its requested ranks") {
+    got :: perf_evaluate("1".repeat(64), "2".repeat(64), [String]{"3".repeat(64)}, [PerfRational]{perf_test_q(1), perf_test_q(10), perf_test_q(100), perf_test_q(1000)}, [PerfRational]{}, Val(PerfPercentile.P50), PerfComparison.AbsoluteFrom{limit: perf_test_q(50), direction: PerfLimitDirection.AtMost}, PerfDirection.LowerIsBetter, PerfEnforcement.Fail, Val(perf_test_policy(100, 50, 51))) ?? panic(err.message)
+    assert_eq(got.point, perf_test_q(-40))
+    assert_eq(got.lower95 ?? panic("lower"), got.bootstrap[49])
+    assert_eq(got.upper95 ?? panic("upper"), got.bootstrap[50])
+    assert_eq(got.lower95 ?? panic("lower"), perf_test_q(-40))
+    assert_eq(got.upper95 ?? panic("upper"), perf_test_q(-40))
+    assert(got.evidence == PerfEvidence.Pass && got.outcome == PerfPolicyOutcome.Pass)
+    // Independent Node crypto resampling oracle: counts 36,33,26,5.
+    loop index in 0..<100 {
+        expected :: if {
+            index < 36 -> -49
+            index < 69 -> -40
+            index < 95 -> 50
+            else -> 950
+        }
+        assert_eq(got.bootstrap[index], perf_test_q(expected))
+    }
+}
+
+#Test("SHA stream words match independently hashed big endian blocks") {
+    // Node crypto SHA-256 oracle: domain+NUL+'e'+'c'+u64be(0)+u64be(block).
+    stream := perf_sha_stream_new("e", "c", [String]{}, 0)
+    expected :: [Int]{12507569605881836145, 14331031805886600008, 3714902919731574179, 5608889793735127795, 18171700607084649799, 17766548609054757150, 1282493087975744721, 1148283196894625442}
+    loop word in expected -> assert_eq(perf_sha_stream_word(&stream), word)
+    assert_eq(stream.block, 2)
+    salted := perf_sha_stream_new("e", "c", [String]{"k1", "k2"}, 7)
+    assert_eq(perf_sha_stream_word(&salted), 16819815628960581258)
+}
+
+#Test("relative bootstrap zero baseline estimator is an error") {
+    if perf_bootstrap_values("e", "c", [String]{}, [PerfRational]{perf_test_q(1)}, [PerfRational]{perf_test_q(0)}, None, PerfComparison.RelativeTo{limit_basis_points: 10, goal: PerfRelativeGoal.RegressionAtMost}, PerfDirection.LowerIsBetter, perf_test_policy(1, 1, 1)) == {
+        .Ok(_) -> panic("accepted zero bootstrap baseline")
+        .Err(error) -> assert_eq(error.message, "RelativeTo bootstrap baseline estimator is zero")
+    }
+}

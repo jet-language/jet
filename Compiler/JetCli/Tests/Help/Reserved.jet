@@ -1,0 +1,66 @@
+// Behavioral coverage of CLI.rs:70-198; Rust cfg(test) has no dedicated
+// reserved-report tests. Reports must retain ordering, notes and JSON framing.
+use core.encoding.json as json
+
+#Test("reserved text reports canonical keywords followed by teaching words and sigils") {
+    report :: jet_cli_reserved_report_text()
+    lines := [String]{"keywords:\n"}
+    names :: jet_keyword_names()
+    loop word in names -> &lines.push("  {word}\n")
+    prefix :: lines.join("")
+    expected :: "\nteaching-reserved words (not valid identifiers):\n  copy       retired; write `~value` instead (E0991)\n  mut        retired; write `&value` instead (E0056)\n  take       retired as a bare prefix; write `^value` instead (E0057); `.take(n)` stays a valid method\n  const      retired; write `@name` instead (E0374)\n  unsafe     the foreign spelling; write `#Unsafe(\"reason\") {{ … }}` instead (E0031/E0003)\n\nsigils:\n  ::         bind an immutable local\n  :=         bind a mutable local\n  &          borrow for write (D-MEM1)\n  ^          take/move ownership (D-MEM1)\n  ~          produce an owned copy (D-SHAPE-COPY1)\n  $          compiler fact: `T.$layout`, `$build.os`, `$sites:` (D-COMPILER-NS1)\n  <:         open a statement-expansion fence (D-FENCE2)\n  :>         close a statement-expansion fence (D-FENCE2)\n  ...        spread elements\n"
+    assert_eq(report, "{prefix}{expected}")
+    assert_eq(JET_CLI_TEACHING_RESERVED.len(), 5)
+    assert_eq(JET_CLI_RESERVED_SIGILS.len(), 9)
+    loop entry in JET_CLI_TEACHING_RESERVED -> assert(!names.contains(entry.spelling))
+}
+
+#Test("reserved JSON uses the shared status envelope and exact entry field order") {
+    report :: jet_cli_reserved_report_json()
+    assert(report.starts_with("{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.reserved\",\"ok\":true,\"reports\":[],\"reserved\":{{\"keywords\":["))
+    assert(report.ends_with("]}}}}"))
+    assert(!report.ends_with("\n"))
+    assert(report.contains("{{\"spelling\":\"unsafe\",\"kind\":\"teaching-reserved word\",\"note\":\"the foreign spelling; write `#Unsafe(\\\"reason\\\") {{ … }}` instead (E0031/E0003)\"}}"))
+    // Frozen CLI.rs:156-197 bytes: every object retains insertion order.
+    expected_keywords :: "\"fn\",\"pub\",\"priv\",\"use\",\"as\",\"extern\",\"module\",\"if\",\"else\",\"loop\",\"in\",\"break\",\"return\",\"defer\",\"struct\",\"enum\",\"alias\",\"impl\",\"policy\",\"wrap\",\"trait\",\"tag\",\"effect\",\"derive\",\"distinct\",\"migration\",\"rename\",\"add\",\"remove\",\"change\",\"via\",\"self\",\"Unsafe\",\"Impure\",\"Context\",\"task\",\"freeze\",\"shared\",\"Transact\",\"Job\",\"Test\",\"Todo\",\"State\",\"Transition\",\"state\",\"protocol\",\"client\",\"server\",\"marker\",\"validate\",\"check\",\"true\",\"false\",\"None\",\"it\""
+    expected_teaching :: "{{\"spelling\":\"copy\",\"kind\":\"teaching-reserved word\",\"note\":\"retired; write `~value` instead (E0991)\"}},{{\"spelling\":\"mut\",\"kind\":\"teaching-reserved word\",\"note\":\"retired; write `&value` instead (E0056)\"}},{{\"spelling\":\"take\",\"kind\":\"teaching-reserved word\",\"note\":\"retired as a bare prefix; write `^value` instead (E0057); `.take(n)` stays a valid method\"}},{{\"spelling\":\"const\",\"kind\":\"teaching-reserved word\",\"note\":\"retired; write `@name` instead (E0374)\"}},{{\"spelling\":\"unsafe\",\"kind\":\"teaching-reserved word\",\"note\":\"the foreign spelling; write `#Unsafe(\\\"reason\\\") {{ … }}` instead (E0031/E0003)\"}}"
+    expected_sigils :: "{{\"spelling\":\"::\",\"kind\":\"sigil\",\"note\":\"bind an immutable local\"}},{{\"spelling\":\":=\",\"kind\":\"sigil\",\"note\":\"bind a mutable local\"}},{{\"spelling\":\"&\",\"kind\":\"sigil\",\"note\":\"borrow for write (D-MEM1)\"}},{{\"spelling\":\"^\",\"kind\":\"sigil\",\"note\":\"take/move ownership (D-MEM1)\"}},{{\"spelling\":\"~\",\"kind\":\"sigil\",\"note\":\"produce an owned copy (D-SHAPE-COPY1)\"}},{{\"spelling\":\"$\",\"kind\":\"sigil\",\"note\":\"compiler fact: `T.$layout`, `$build.os`, `$sites:` (D-COMPILER-NS1)\"}},{{\"spelling\":\"<:\",\"kind\":\"sigil\",\"note\":\"open a statement-expansion fence (D-FENCE2)\"}},{{\"spelling\":\":>\",\"kind\":\"sigil\",\"note\":\"close a statement-expansion fence (D-FENCE2)\"}},{{\"spelling\":\"...\",\"kind\":\"sigil\",\"note\":\"spread elements\"}}"
+    assert_eq(report, "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.reserved\",\"ok\":true,\"reports\":[],\"reserved\":{{\"keywords\":[{expected_keywords}],\"teaching_reserved\":[{expected_teaching}],\"sigils\":[{expected_sigils}]}}}}")
+    tree :: json.parse(report) ?? panic("reserved JSON must parse")
+    if tree == {
+        .Object(envelope) -> {
+            assert_eq(json.to_string(envelope["schema"]), "\"jet.status/v1\"")
+            assert_eq(json.to_string(envelope["action"]), "\"inspect.reserved\"")
+            assert_eq(json.to_string(envelope["ok"]), "true")
+            assert_eq(json.to_string(envelope["reports"]), "[]")
+            if envelope["reserved"] == {
+                .Object(reserved) -> {
+                    keywords := [DataTree]{}
+                    names :: jet_keyword_names()
+                    loop word in names -> &keywords.push(DataTree.Text(word))
+                    assert_eq(json.to_string(reserved["keywords"]), json.to_string(DataTree.Array(keywords)))
+                    if reserved["teaching_reserved"] == {
+                        .Array(entries) -> {
+                            assert_eq(entries.len(), 5)
+                            if entries[4] == {
+                                .Object(entry) -> {
+                                    assert_eq(json.to_string(entry["spelling"]), "\"unsafe\"")
+                                    assert_eq(json.to_string(entry["kind"]), "\"teaching-reserved word\"")
+                                    assert_eq(json.to_string(entry["note"]), json.to_string(DataTree.Text("the foreign spelling; write `#Unsafe(\"reason\") {{ … }}` instead (E0031/E0003)")))
+                                }
+                                else -> panic("reserved entry must be an object")
+                            }
+                        }
+                        else -> panic("teaching_reserved must be an array")
+                    }
+                    if reserved["sigils"] == {
+                        .Array(entries) -> assert_eq(entries.len(), 9)
+                        else -> panic("sigils must be an array")
+                    }
+                }
+                else -> panic("reserved payload must be an object")
+            }
+        }
+        else -> panic("reserved envelope must be an object")
+    }
+}

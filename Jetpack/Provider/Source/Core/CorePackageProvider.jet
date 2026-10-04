@@ -16,7 +16,7 @@ pub struct CoreProvider {
         !upstream.starts_with("path:")
     }
 
-    fn cache_expectation(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
+    fn cache_expectation(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
         provider_core_cache_expectation(spec, table, ctx)
     }
 
@@ -24,7 +24,7 @@ pub struct CoreProvider {
         provider_core_approval_facts(spec, table, ctx)
     }
 
-    fn plan_downloads(self, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
+    fn plan_downloads(self, verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
         plan := DownloadPlan.empty()
         loop spec in specs {
             if self.requires_acquisition(spec, table) -> &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
@@ -32,14 +32,14 @@ pub struct CoreProvider {
         Ok(plan)
     }
 
-    fn realize(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+    fn realize(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
         source_name :: spec.source.label()
         upstream :: table.upstream(source_name) ?? return Err(ProviderError.CoreBuild("source `{source_name}` has no upstream"))
         repo :: provider_source_repo(upstream, spec.package, ctx)
         canonical_package :: provider_find_canonical_package(repo, spec.package) ?? return Err(ProviderError.CoreBuild(err.message))
         src_dir := ""
-        canonical := None
-        canonical_kind := None
+        canonical := PackageFacts?{None}
+        canonical_kind := PackageKind?{None}
         canonical_version := ""
         if canonical_package == {
             .Val(found) -> {
@@ -86,7 +86,7 @@ pub struct CoreProvider {
         }
         producer_facts := [String: String]{
             "source.kind": "core-package-tree",
-            "source.tree_schema": @PROVIDER_CORE_TREE_SCHEMA,
+            "source.tree_schema": PROVIDER_CORE_TREE_SCHEMA,
             "source.tree_fingerprint": fingerprint,
             "artifact.kind": artifact.recipe_id,
             "execution.platform": pkg_host_platform(),
@@ -147,7 +147,7 @@ fn provider_core_artifact(kind: PackageKind, out_dir: String, toolchain: BuildTo
 // The source file declaring `module <name>`, as a core build error.
 fn provider_core_discovery_error(repo: String, error: DiscoveryError) -> ProviderError Never! {
     if error == {
-        .NotFound(name) -> ProviderError.CoreBuild("source repo at {repo} has no `module {name}` — add a .{@FILE_EXT} file declaring it")
+        .NotFound(name) -> ProviderError.CoreBuild("source repo at {repo} has no `module {name}` — add a .{FILE_EXT} file declaring it")
         .Ambiguous(name, paths) -> ProviderError.CoreBuild("source repo at {repo} has `module {name}` in multiple files: {paths.join(", ")}")
     }
 }
@@ -245,7 +245,7 @@ struct CargoBuildScratch {
         if key == "" || key.contains("/") || key.contains("\\") || key == "." || key == ".." {
             return Err(CargoBuildError.Failed("cargo scratch key is not a safe single path component"))
         }
-        root :: files.join(hangar_dir, @STORE_BUILD_SCRATCH_DIR)
+        root :: files.join(hangar_dir, STORE_BUILD_SCRATCH_DIR)
         if files.stat(root) == {
             .Ok(info) -> {
                 if info.is_symlink || !info.is_dir -> return Err(CargoBuildError.Failed("build scratch root is not a directory: {root}"))
@@ -269,7 +269,7 @@ struct CargoBuildScratch {
         }
         files.create_dir(path) ?? return Err(CargoBuildError.Failed("could not create build scratch: {err}"))
         started :: time.instant().unix_ns /% 1000000000
-        files.write(files.join(path, @STORE_ACTIVE_TMP_MARKER), "pid={pid}\nstarted={started}\n") ?? return Err(CargoBuildError.Failed("could not mark build scratch active: {err}"))
+        files.write(files.join(path, STORE_ACTIVE_TMP_MARKER), "pid={pid}\nstarted={started}\n") ?? return Err(CargoBuildError.Failed("could not mark build scratch active: {err}"))
         Ok(CargoBuildScratch{path})
     }
 

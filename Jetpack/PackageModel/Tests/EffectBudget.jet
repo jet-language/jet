@@ -11,10 +11,10 @@ fn pkg_test_effect_program() -> EffectBudgetProgram Never! {
     EffectBudgetProgram{
         entry: 0,
         modules: [EffectBudgetModule]{
-            EffectBudgetModule{path: "/workspace/app/run.jet", alias: "run", function_keys: [String]{"run"}, imports: [EffectBudgetImport]{}, has_build_entry: false},
-            EffectBudgetModule{path: "/workspace/deps/email/src/crypto.jet", alias: "crypto", function_keys: [String]{"migrate_v1", "seal", "unused"}, imports: [EffectBudgetImport]{}, has_build_entry: false}
+            EffectBudgetModule{path: path_components.from_text("/workspace/app/run.jet", PathPlatform.Unix), alias: "run", function_keys: [String]{"run"}, imports: [EffectBudgetImport]{}, has_build_entry: false},
+            EffectBudgetModule{path: path_components.from_text("/workspace/deps/email/src/crypto.jet", PathPlatform.Unix), alias: "crypto", function_keys: [String]{"migrate_v1", "seal", "unused"}, imports: [EffectBudgetImport]{}, has_build_entry: false}
         },
-        dep_roots: [String: String]{"email": "/workspace/deps/email"},
+        dep_roots: [String: OSPath]{"email": path_components.from_text("/workspace/deps/email", PathPlatform.Unix)},
         selected_output: None
     }
 }
@@ -231,7 +231,7 @@ fn pkg_test_package_effects(name: String, effects: [String], sites: [String: Str
     diagnostic :: pkg_application_policy_diagnostic(projection, [String]{}, Val(ScriptEntry{path: "tools/gradient.jet", source: source, command: "run"}))
     assert(diagnostic.fix.starts_with("run `jet run --allow=FS tools/gradient.jet`"))
     edit :: diagnostic.edit ?? panic("a manifest-less E1803 carries an edit")
-    assert_eq(diagnostic.safety, Val(DiagnosticFixSafety.NeedsReview))
+    assert_eq(diagnostic.safety, Val(FixSafety.NeedsReview))
     raw :: source.bytes()
     fixed :: "{pkg_bytes_text(raw, 0, edit.span.start)}{edit.new_text}{pkg_bytes_text(raw, edit.span.end, raw.len())}"
     assert(fixed.starts_with("// tool header\npackage {{\n    name: \"gradient\"\n"))

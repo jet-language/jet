@@ -1,0 +1,97 @@
+// New regression coverage derived from Source/CmdBackendScaffold.rs bodies
+// 1773-1777 and 1894-1998, not an existing Rust test suite (there is none).
+// Expected bodies are independent literals; equality covers every UTF-8 byte,
+// indentation, blank line, brace and final LF. No generated program is run.
+
+#Test("backend identifiers use ASCII and reject empty or numeric heads") {
+    nul :: String.from_bytes([U8]{0}) ?? panic("NUL is UTF-8")
+    valid :: [String]{"_", "a", "Z", "_0", "Notifications", "order_items", "a0_Z", "__"}
+    invalid :: [String]{"", "0", "0abc", "-a", "a-b", "a b", "a.b", "a/b", "a\n", "é", "aé", "Ａ", "a９", "🙂", "é", "a{nul}"}
+    loop value in valid -> assert(jet_cli_backend_valid_identifier(value))
+    loop value in invalid -> assert(!jet_cli_backend_valid_identifier(value))
+}
+
+#Test("backend slug lowercase transitions preserve acronyms and numeric boundaries") {
+    inputs :: [String]{"Notifications", "orderItems", "HTTPServer", "httpServer", "aBCdE", "ABcD", "a1B", "1ABC", "A1bC", "a_B", "a--B", "a___B", "_Notifications", "--A", "a-_-"}
+    expected :: [String]{"notifications", "order_items", "httpserver", "http_server", "a_bcd_e", "abc_d", "a1b", "1abc", "a1b_c", "a_b", "a_b", "a_b", "_notifications", "_a", "a"}
+    loop index in 0..<inputs.len() -> assert_eq(jet_cli_backend_slugify(inputs[index]), expected[index])
+}
+
+#Test("backend slug coalesces Unicode scalars and strips all trailing separators") {
+    nul :: String.from_bytes([U8]{0}) ?? panic("NUL is UTF-8")
+    inputs :: [String]{"", "a", "A", "1", "_", "___", "...", "a___", "___a___", "é", "🙂", "éA", "aéB", "aé🙂B", "áB", "a{nul}B", "Ａa９B", "é"}
+    expected :: [String]{"", "a", "a", "1", "", "", "", "a", "_a", "", "", "_a", "a_b", "a_b", "a_b", "a_b", "_a_b", "e"}
+    loop index in 0..<inputs.len() -> assert_eq(jet_cli_backend_slugify(inputs[index]), expected[index])
+}
+
+#Test("backend model naming preserves case and singularizes only literal lowercase suffixes") {
+    inputs :: [String]{"Notifications", "order_items", "orderItems", "HTTPServices", "http_services", "aBC", "ABc", "1orders", "a1b", "-foo--bar_", "aéB", "éfoo🙂bar", "é", "Ａa９b"}
+    expected :: [String]{"Notification", "OrderItem", "OrderItem", "HTTPService", "HttpService", "ABC", "ABc", "1order", "A1b", "FooBar", "AB", "FooBar", "E", "AB"}
+    loop index in 0..<inputs.len() -> assert_eq(jet_cli_backend_model_name(inputs[index]), expected[index])
+}
+
+#Test("backend model plural ies s ss boundaries empty and single scalar") {
+    inputs :: [String]{"", "_", "é", "a", "s", "S", "1", "ies", "ties", "cities", "IES", "TIES", "Ies", "as", "ss", "class", "classes", "boss", "bosses", "s-s", "SS", "party", "pies", "a_ies", "éies"}
+    expected :: [String]{"", "", "", "A", "S", "S", "1", "Ie", "Ty", "City", "IES", "TIES", "Ie", "A", "S", "Class", "Classe", "Boss", "Bosse", "SS", "SS", "Party", "Py", "AIe", "Ie"}
+    loop index in 0..<inputs.len() -> assert_eq(jet_cli_backend_model_name(inputs[index]), expected[index])
+}
+
+#Test("backend Notifications service source is the entire Rust literal") {
+    expected :: "use core.service as service\nuse job_notifications as job\n\nfn notifications_worker() {{\n    job.enqueue(\"Notifications job\")\n}}\n\npub fn run() {{\n    tree := service.tree(\"notifications\")\n    tree.set_delivery(service.delivery_durable()) ?? panic(\"delivery\")\n    endpoint :: tree.worker(\"notifications\", notifications_worker, capacity: 1) ?? panic(\"worker\")\n    tree.start() ?? panic(\"start\")\n    print(tree.show())\n    tree.stop() ?? panic(\"stop\")\n}}\n"
+    assert_eq(jet_cli_backend_service_source("Notifications", "notifications"), expected)
+}
+
+#Test("backend order_items route source retains the exact custom route") {
+    expected :: "use core.web as web\n\nfn page() -> WebPage -> web.page(\"order_items\", \"<main><h1>order_items</h1></main>\")\n\n// route: /orders/:id?sort=asc#items\n"
+    assert_eq(jet_cli_backend_route_source("order_items", "/orders/:id?sort=asc#items"), expected)
+}
+
+#Test("backend Notifications job source includes the complete durable queue body") {
+    expected :: "use core.jobs as jobs\n\n#Codable\npub struct NotificationJobPayload {{\n    message: String\n}}\n\n#Job\npub fn notifications_job(payload: NotificationJobPayload) {{\n    print(payload.message)\n}}\n\npub fn enqueue(message: String) {{\n    queue := jobs.queue() ?? panic(\"queue\")\n    payload :: NotificationJobPayload{{message: message}}\n    receipt :: queue.enqueue(notifications_job, payload) ?? panic(\"enqueue\")\n    print(receipt)\n}}\n"
+    assert_eq(jet_cli_backend_job_source("Notifications", "notifications"), expected)
+}
+
+#Test("backend order_items model source preserves Codable public id and final LF") {
+    expected :: "#Codable\npub struct OrderItem {{\n    pub id: Int\n}}\n"
+    assert_eq(jet_cli_backend_model_source("OrderItem"), expected)
+}
+
+#Test("backend order_items test source uses shipping slugify on the model") {
+    expected :: "use model_order_item as model\n\n#Test(\"order_items model\") {{\n    value := model.OrderItem{{id: 1}}\n    assert_eq(value.id, 1)\n}}\n"
+    assert_eq(jet_cli_backend_test_source("order_items", "OrderItem"), expected)
+}
+
+#Test("backend service source perturbs name and every slug insertion without escaping") {
+    expected :: "use core.service as service\nuse job_X-Y as job\n\nfn X-Y_worker() {{\n    job.enqueue(\"é\"{{n}}\n job\")\n}}\n\npub fn run() {{\n    tree := service.tree(\"X-Y\")\n    tree.set_delivery(service.delivery_durable()) ?? panic(\"delivery\")\n    endpoint :: tree.worker(\"X-Y\", X-Y_worker, capacity: 1) ?? panic(\"worker\")\n    tree.start() ?? panic(\"start\")\n    print(tree.show())\n    tree.stop() ?? panic(\"stop\")\n}}\n"
+    assert_eq(jet_cli_backend_service_source("é\"{{n}}\n", "X-Y"), expected)
+}
+
+#Test("backend route source inserts raw name twice and route including newline") {
+    expected :: "use core.web as web\n\nfn page() -> WebPage -> web.page(\"é\"{{n}}\", \"<main><h1>é\"{{n}}</h1></main>\")\n\n// route: /custom\n// raw\n"
+    assert_eq(jet_cli_backend_route_source("é\"{{n}}", "/custom\n// raw"), expected)
+}
+
+#Test("backend job source changes payload in all three places and slug in both places") {
+    expected :: "use core.jobs as jobs\n\n#Codable\npub struct OrderItemJobPayload {{\n    message: String\n}}\n\n#Job\npub fn raw-Slug_job(payload: OrderItemJobPayload) {{\n    print(payload.message)\n}}\n\npub fn enqueue(message: String) {{\n    queue := jobs.queue() ?? panic(\"queue\")\n    payload :: OrderItemJobPayload{{message: message}}\n    receipt :: queue.enqueue(raw-Slug_job, payload) ?? panic(\"enqueue\")\n    print(receipt)\n}}\n"
+    assert_eq(jet_cli_backend_job_source("order_items", "raw-Slug"), expected)
+}
+
+#Test("backend model and test renderers insert model verbatim but slug only the module") {
+    model_expected :: "#Codable\npub struct HTTP-éModel {{\n    pub id: Int\n}}\n"
+    test_expected :: "use model_http_model as model\n\n#Test(\"é\"{{n}} model\") {{\n    value := model.HTTP-éModel{{id: 1}}\n    assert_eq(value.id, 1)\n}}\n"
+    assert_eq(jet_cli_backend_model_source("HTTP-éModel"), model_expected)
+    assert_eq(jet_cli_backend_test_source("é\"{{n}}", "HTTP-éModel"), test_expected)
+}
+
+#Test("backend renderers do not validate or replace empty parameters") {
+    service_expected :: "use core.service as service\nuse job_ as job\n\nfn _worker() {{\n    job.enqueue(\" job\")\n}}\n\npub fn run() {{\n    tree := service.tree(\"\")\n    tree.set_delivery(service.delivery_durable()) ?? panic(\"delivery\")\n    endpoint :: tree.worker(\"\", _worker, capacity: 1) ?? panic(\"worker\")\n    tree.start() ?? panic(\"start\")\n    print(tree.show())\n    tree.stop() ?? panic(\"stop\")\n}}\n"
+    route_expected :: "use core.web as web\n\nfn page() -> WebPage -> web.page(\"\", \"<main><h1></h1></main>\")\n\n// route: \n"
+    job_expected :: "use core.jobs as jobs\n\n#Codable\npub struct JobPayload {{\n    message: String\n}}\n\n#Job\npub fn _job(payload: JobPayload) {{\n    print(payload.message)\n}}\n\npub fn enqueue(message: String) {{\n    queue := jobs.queue() ?? panic(\"queue\")\n    payload :: JobPayload{{message: message}}\n    receipt :: queue.enqueue(_job, payload) ?? panic(\"enqueue\")\n    print(receipt)\n}}\n"
+    model_expected :: "#Codable\npub struct  {{\n    pub id: Int\n}}\n"
+    test_expected :: "use model_ as model\n\n#Test(\" model\") {{\n    value := model.{{id: 1}}\n    assert_eq(value.id, 1)\n}}\n"
+    assert_eq(jet_cli_backend_service_source("", ""), service_expected)
+    assert_eq(jet_cli_backend_route_source("", ""), route_expected)
+    assert_eq(jet_cli_backend_job_source("", ""), job_expected)
+    assert_eq(jet_cli_backend_model_source(""), model_expected)
+    assert_eq(jet_cli_backend_test_source("", ""), test_expected)
+}

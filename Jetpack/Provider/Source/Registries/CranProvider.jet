@@ -4,8 +4,8 @@
 // tarball, install the closure with `R CMD INSTALL` into one library, and hand
 // a sealed output plus an `Rscript` wrapper to Store.
 
-@CRAN_RECIPE_ID :: "cran-provider-v1"
-@CRAN_DEFAULT_REPOSITORY :: "https://cloud.r-project.org"
+CRAN_RECIPE_ID :: prep { "cran-provider-v1" }
+CRAN_DEFAULT_REPOSITORY :: prep { "https://cloud.r-project.org" }
 
 // One `Depends`/`Imports`/`LinkingTo` entry: a package and an optional
 // `(operator version)` requirement.
@@ -32,31 +32,31 @@ pub struct CranSourceArtifact {
 pub struct CranProvider {
     // A locked CRAN realization must still match `authority.providers`.
     fn validate_cache_authority(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env]> {
-        project :: ctx.project_dir ?? return Ok()
-        locked :: pkg_lock_cran_realization(project, spec.raw) ?? return Ok()
+        project :: ctx.project_dir ?? return
+        locked :: pkg_lock_cran_realization(project, spec.raw) ?? return
         current :: provider_cran_cache_authority(ctx)
         provider_ensure_locked_authority("CRAN", locked.repository, locked.authority, current)
     }
 
     // The exact identity a cached CRAN output must carry, from the lock.
-    fn cache_expectation(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
+    fn cache_expectation(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
         project :: ctx.project_dir ?? return None
         locked :: pkg_lock_cran_realization(project, spec.raw) ?? return None
         authority :: provider_cran_cache_authority(ctx) ?? return None
-        identity := provider_cache_identity(locked.source_hash, @CRAN_RECIPE_ID, ctx, authority.provenance())
+        identity := provider_cache_identity(locked.source_hash, CRAN_RECIPE_ID, ctx, authority.provenance())
         identity.platform = provider_registry_locked_platform(locked.envelope)
         Val(CacheExpectation{identity, owned_output: Val(locked.output), allow_unsigned_local: true})
     }
 
     // CRAN metadata carries no trusted sizes: every ref is a new item of
     // unknown size.
-    fn plan_downloads(self, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
+    fn plan_downloads(self, verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
         plan := DownloadPlan.empty()
         loop spec in specs -> &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
         Ok(plan)
     }
 
-    fn realize(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+    fn realize(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
         if ctx.offline -> return Err(ProviderError.Offline("`{spec.raw}` is not in the verified hangar and --offline forbids CRAN metadata or source fetches"))
         realized :: provider_cran_realize(spec, ctx) ?? return Err(err.into_provider(RegistryErrorKind.Cran))
         Ok(realized)
@@ -66,7 +66,7 @@ pub struct CranProvider {
 // The CRAN fetch authority: the configured `authority.providers.cran`, else
 // the public CRAN mirrors.
 fn provider_cran_authority(ctx: ProviderCtx) -[FS, Env]> RegistryAuthority RegistryError! {
-    RegistryAuthority.load(ctx, "cran", @CRAN_DEFAULT_REPOSITORY, [String]{"cran.r-project.org", "cloud.r-project.org"})
+    RegistryAuthority.load(ctx, "cran", CRAN_DEFAULT_REPOSITORY, [String]{"cran.r-project.org", "cloud.r-project.org"})
 }
 
 pub fn provider_cran_cache_authority(ctx: ProviderCtx) -[FS, Env]> RegistryAuthority ProviderError! {
@@ -74,7 +74,7 @@ pub fn provider_cran_cache_authority(ctx: ProviderCtx) -[FS, Env]> RegistryAutho
     Ok(authority)
 }
 
-fn provider_cran_realize(spec: RefSpec, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized RegistryError! {
+fn provider_cran_realize(spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized RegistryError! {
     authority :: provider_cran_authority(ctx)
     repository :: authority.registry()
     fetch_authority :: authority.provenance()
@@ -127,21 +127,21 @@ fn provider_cran_realize(spec: RefSpec, ctx: ProviderCtx) -[FS, Env, Exec, Net, 
     provider_cran_write_runtime_wrapper(out_dir)
     provider_registry_write_text(files.join(out_dir, "cran.provenance"), provider_cran_render_provenance(repository, fetch_authority, source_hash, artifacts), "could not write CRAN provenance")
     provider_registry_seal(out_dir, "could not seal CRAN output")
-    envelope :: Envelope.for_output(out_dir, spec.raw, @CRAN_RECIPE_ID)
+    envelope :: Envelope.for_output(out_dir, spec.raw, CRAN_RECIPE_ID)
     dependencies := [String]{}
     loop dependency in root.dependencies -> &dependencies.push(dependency.name)
     if ctx.project_dir == {
         .Val(project) -> pkg_lock_record_cran_realization(project, root.name, root.version, spec.raw, out_dir, source_hash, repository, fetch_authority, dependencies, provider_registry_lock_envelope(envelope))
         .None -> {}
     }
-    identity :: provider_cache_identity(source_hash, @CRAN_RECIPE_ID, ctx, fetch_authority)
+    identity :: provider_cache_identity(source_hash, CRAN_RECIPE_ID, ctx, fetch_authority)
     objects := [RegistrySourceObject]{}
     loop artifact in artifacts -> &objects.push(RegistrySourceObject{name: artifact.record.name, sha256: artifact.hash, file_name: files.basename(artifact.path)})
     edges :: provider_registry_dependency_objects(root.name, objects)
     facts := edges.facts
     facts["repository"] = repository
     facts["fetch.authority"] = fetch_authority
-    producer :: provider_registry_producer("cran", "cran-install", source_hash, repository, fetch_authority, root.version, [String: String]{}, @CRAN_RECIPE_ID, identity, facts)
+    producer :: provider_registry_producer("cran", "cran-install", source_hash, repository, fetch_authority, root.version, [String: String]{}, CRAN_RECIPE_ID, identity, facts)
     Ok(Realized{
         name: root.name,
         version: root.version,
@@ -276,7 +276,7 @@ struct CranOrderWalk {
     out: [String]
 
     fn visit(&self, name: String) RegistryError! {
-        if self.done.contains(name) -> return Ok()
+        if self.done.contains(name) -> return
         if self.active.contains(name) -> return Err(RegistryError.Reason("CRAN dependency cycle includes `{name}`"))
         &self.active.push(name)
         record :: self.records.get(name) ?? return Err(RegistryError.Reason("CRAN dependency `{name}` is absent from repository metadata"))

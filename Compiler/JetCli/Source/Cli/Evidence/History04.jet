@@ -1,0 +1,1821 @@
+// PORT-PENDING 0719 source-store-slice-1: Source/Store.rs:1-1817
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Nix-style package store (M12.1, D-PM1/5).
+//RS //!
+//RS //! Store layout: `~/.jet/store/<name>-<version>-<fingerprint>/`
+//RS //! Full plan fingerprint is the path suffix. Lookups use the lockfile,
+//RS //! not dirname parsing. Hardlinks into project `.jet/build/deps/`
+//RS //! on same device; falls back to copy cross-device. Append-only; `jet clean`
+//RS //! removes unreferenced entries (stub in M12.1).
+//RS 
+//RS use crate::Diagnostics::Diagnostic;
+//RS use crate::Syntax;
+//RS use crate::SHA256::StreamingSha256;
+//RS use std::ffi::{OsStr, OsString};
+//RS use std::fs;
+//RS use std::io::{self, Read, Write};
+//RS use std::path::{Path, PathBuf};
+//RS use std::time::{SystemTime, UNIX_EPOCH};
+//RS 
+//RS 
+//RS #[cfg(test)]
+//RS type StoreWalkHook = std::sync::Arc<dyn Fn(&Path, &OsStr) + Send + Sync + 'static>;
+//RS 
+//RS #[cfg(test)]
+//RS static STORE_WALK_HOOK: std::sync::Mutex<Option<StoreWalkHook>> = std::sync::Mutex::new(None);
+//RS 
+//RS #[cfg(test)]
+//RS fn before_store_child_open(path: &Path, name: &OsStr) {
+//RS     let hook = STORE_WALK_HOOK
+//RS         .lock()
+//RS         .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS         .clone();
+//RS     if let Some(hook) = hook {
+//RS         hook(path, name);
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS fn install_store_walk_hook(hook: StoreWalkHook) -> StoreWalkHookGuard {
+//RS     *STORE_WALK_HOOK
+//RS         .lock()
+//RS         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(hook);
+//RS     StoreWalkHookGuard
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS struct StoreWalkHookGuard;
+//RS 
+//RS #[cfg(test)]
+//RS impl Drop for StoreWalkHookGuard {
+//RS     fn drop(&mut self) {
+//RS         *STORE_WALK_HOOK
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios"
+//RS ))]
+//RS use std::os::fd::{AsRawFd, FromRawFd};
+//RS 
+//RS #[cfg(not(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios"
+//RS )))]
+//RS const DESCRIPTOR_PLATFORMS: &str = "linux, Android, macOS, or iOS";
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum AuthorityReplaceStatus {
+//RS     NotPublished,
+//RS     Published,
+//RS }
+//RS 
+//RS #[derive(Debug)]
+//RS pub struct AuthorityReplaceError {
+//RS     status: AuthorityReplaceStatus,
+//RS     error: io::Error,
+//RS }
+//RS 
+//RS impl AuthorityReplaceError {
+//RS     pub fn status(&self) -> AuthorityReplaceStatus {
+//RS         self.status
+//RS     }
+//RS 
+//RS     pub fn is_published(&self) -> bool {
+//RS         self.status == AuthorityReplaceStatus::Published
+//RS     }
+//RS 
+//RS     fn not_published(error: io::Error) -> Self {
+//RS         Self {
+//RS             status: AuthorityReplaceStatus::NotPublished,
+//RS             error,
+//RS         }
+//RS     }
+//RS 
+//RS     fn published(error: io::Error) -> Self {
+//RS         Self {
+//RS             status: AuthorityReplaceStatus::Published,
+//RS             error,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::fmt::Display for AuthorityReplaceError {
+//RS     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//RS         self.error.fmt(formatter)
+//RS     }
+//RS }
+//RS 
+//RS impl std::error::Error for AuthorityReplaceError {
+//RS     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+//RS         Some(&self.error)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug)]
+//RS pub struct DirectoryAuthority {
+//RS     path: PathBuf,
+//RS     #[cfg(any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios"
+//RS     ))]
+//RS     handle: fs::File,
+//RS }
+//RS 
+//RS impl DirectoryAuthority {
+//RS     pub(crate) fn open(path: &Path) -> io::Result<Self> {
+//RS         #[cfg(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         ))]
+//RS         let handle = directory_platform::open_path(path)?;
+//RS         #[cfg(not(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         )))]
+//RS         directory_platform::open_path(path)?;
+//RS         Ok(Self {
+//RS             path: effective_directory_path(path),
+//RS             #[cfg(any(
+//RS                 target_os = "linux",
+//RS                 target_os = "android",
+//RS                 target_os = "macos",
+//RS                 target_os = "ios"
+//RS             ))]
+//RS             handle,
+//RS         })
+//RS     }
+//RS 
+//RS     pub(crate) fn create(path: &Path) -> io::Result<Self> {
+//RS         #[cfg(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         ))]
+//RS         let handle = directory_platform::create_path(path)?;
+//RS         #[cfg(not(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         )))]
+//RS         directory_platform::create_path(path)?;
+//RS         Ok(Self {
+//RS             path: effective_directory_path(path),
+//RS             #[cfg(any(
+//RS                 target_os = "linux",
+//RS                 target_os = "android",
+//RS                 target_os = "macos",
+//RS                 target_os = "ios"
+//RS             ))]
+//RS             handle,
+//RS         })
+//RS     }
+//RS 
+//RS     fn from_opened(path: PathBuf, file: fs::File) -> Self {
+//RS         #[cfg(not(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         )))]
+//RS         let _ = file;
+//RS         Self {
+//RS             path,
+//RS             #[cfg(any(
+//RS                 target_os = "linux",
+//RS                 target_os = "android",
+//RS                 target_os = "macos",
+//RS                 target_os = "ios"
+//RS             ))]
+//RS             handle: file,
+//RS         }
+//RS     }
+//RS 
+//RS 
+//RS     pub(crate) fn path(&self) -> &Path {
+//RS         &self.path
+//RS     }
+//RS 
+//RS     fn try_clone(&self) -> io::Result<Self> {
+//RS         #[cfg(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         ))]
+//RS         {
+//RS             return Ok(Self {
+//RS                 path: self.path.clone(),
+//RS                 handle: self.handle.try_clone()?,
+//RS             });
+//RS         }
+//RS         #[cfg(not(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         )))]
+//RS         {
+//RS             Err(unsupported_descriptor_error())
+//RS         }
+//RS     }
+//RS 
+//RS     fn open_child(&self, name: &OsStr) -> io::Result<fs::File> {
+//RS         directory_platform::open_child(&self.handle_ref(), name, false)
+//RS     }
+//RS 
+//RS     pub(crate) fn open_child_directory(&self, name: &OsStr) -> io::Result<Self> {
+//RS         let handle = directory_platform::open_child(&self.handle_ref(), name, true)?;
+//RS         Ok(Self {
+//RS             path: self.path.join(name),
+//RS             #[cfg(any(
+//RS                 target_os = "linux",
+//RS                 target_os = "android",
+//RS                 target_os = "macos",
+//RS                 target_os = "ios"
+//RS             ))]
+//RS             handle,
+//RS         })
+//RS     }
+//RS 
+//RS     fn create_child_directory(&self, name: &OsStr) -> io::Result<Self> {
+//RS         directory_platform::mkdir_child(&self.handle_ref(), name)?;
+//RS         self.open_child_directory(name)
+//RS     }
+//RS 
+//RS     fn open_relative_parent(&self, relative: &Path) -> io::Result<(Self, OsString)> {
+//RS         let mut components = authority_path_components(relative)?;
+//RS         let name = components.pop().ok_or_else(|| {
+//RS             io::Error::new(
+//RS                 io::ErrorKind::InvalidInput,
+//RS                 "authority path has no file name",
+//RS             )
+//RS         })?;
+//RS         let mut parent = self.try_clone()?;
+//RS         for component in components {
+//RS             parent = parent.open_child_directory(&component)?;
+//RS         }
+//RS         Ok((parent, name))
+//RS     }
+//RS 
+//RS     fn ensure_relative_parent(&self, relative: &Path) -> io::Result<(Self, OsString)> {
+//RS         let mut components = authority_path_components(relative)?;
+//RS         let name = components.pop().ok_or_else(|| {
+//RS             io::Error::new(
+//RS                 io::ErrorKind::InvalidInput,
+//RS                 "authority path has no file name",
+//RS             )
+//RS         })?;
+//RS         let mut parent = self.try_clone()?;
+//RS         for component in components {
+//RS             parent = match parent.open_child_directory(&component) {
+//RS                 Ok(directory) => directory,
+//RS                 Err(error) if error.kind() == io::ErrorKind::NotFound => {
+//RS                     parent.create_child_directory(&component)?
+//RS                 }
+//RS                 Err(error) => return Err(error),
+//RS             };
+//RS         }
+//RS         Ok((parent, name))
+//RS     }
+//RS 
+//RS     fn snapshot_child_file(
+//RS         &self,
+//RS         name: OsString,
+//RS         path: PathBuf,
+//RS         relative: PathBuf,
+//RS         root_metadata: fs::Metadata,
+//RS     ) -> io::Result<AuthorityFileSnapshot> {
+//RS         self.revalidate()?;
+//RS         let file = self.open_child(&name)?;
+//RS         let metadata = file.metadata()?;
+//RS         validate_authority_file(&metadata)?;
+//RS         let bytes = read_authority_handle(&file, &metadata)?;
+//RS         self.revalidate()?;
+//RS         Ok(AuthorityFileSnapshot {
+//RS             authority: self.try_clone()?,
+//RS             name,
+//RS             path,
+//RS             relative,
+//RS             root_metadata,
+//RS             file,
+//RS             metadata,
+//RS             bytes,
+//RS         })
+//RS     }
+//RS     pub(crate) fn snapshot_file(&self, relative: &Path) -> io::Result<AuthorityFileSnapshot> {
+//RS         let (parent, name) = self.open_relative_parent(relative)?;
+//RS         #[cfg(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         ))]
+//RS         let root_metadata = self.handle.metadata()?;
+//RS         #[cfg(not(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         )))]
+//RS         let root_metadata = return Err(unsupported_descriptor_error());
+//RS         parent.snapshot_child_file(
+//RS             name,
+//RS             self.path.join(relative),
+//RS             relative.to_path_buf(),
+//RS             root_metadata,
+//RS         )
+//RS     }
+//RS 
+//RS 
+//RS 
+//RS     pub(crate) fn create_private_child(&self, prefix: &str) -> io::Result<(OsString, Self)> {
+//RS         let path = directory_platform::create_private_child(&self.handle_ref(), prefix)?;
+//RS         let name = path
+//RS             .file_name()
+//RS             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "temporary directory has no name"))?
+//RS             .to_os_string();
+//RS         let child = self.open_child_directory(&name)?;
+//RS         Ok((name, child))
+//RS     }
+//RS 
+//RS     pub(crate) fn list_names(&self) -> io::Result<Vec<OsString>> {
+//RS         let mut names = directory_platform::read_names(&self.handle_ref())?;
+//RS         names.sort_unstable();
+//RS         Ok(names)
+//RS     }
+//RS 
+//RS     fn create_child_file(&self, name: &OsStr) -> io::Result<fs::File> {
+//RS         directory_platform::create_child_file(&self.handle_ref(), name)
+//RS     }
+//RS 
+//RS     pub(crate) fn write_child_file(&self, name: &OsStr, bytes: &[u8]) -> io::Result<()> {
+//RS         let mut file = match directory_platform::open_child_write(&self.handle_ref(), name) {
+//RS             Ok(file) => file,
+//RS             Err(error) if error.kind() == io::ErrorKind::NotFound => {
+//RS                 directory_platform::create_child_file(&self.handle_ref(), name)?
+//RS             }
+//RS             Err(error) => return Err(error),
+//RS         };
+//RS         let metadata = file.metadata()?;
+//RS         if !metadata.is_file() {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::InvalidInput,
+//RS                 "destination is not a regular file",
+//RS             ));
+//RS         }
+//RS         if file_nlink(&metadata) > 1 {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::PermissionDenied,
+//RS                 "refusing to overwrite a multiply linked destination file",
+//RS             ));
+//RS         }
+//RS         file.set_len(0)?;
+//RS         file.write_all(bytes)?;
+//RS         file.sync_all()
+//RS     }
+//RS     fn append_child_file_unlocked(&self, name: &OsStr, bytes: &[u8]) -> io::Result<()> {
+//RS         if bytes.len() as u64 > crate::SHA256::MAX_TREE_FILE_BYTES {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::InvalidData,
+//RS                 "authority file exceeds the tree-file size bound",
+//RS             ));
+//RS         }
+//RS         self.revalidate()?;
+//RS         let mut file = match directory_platform::open_child_append(&self.handle_ref(), name) {
+//RS             Ok(file) => file,
+//RS             Err(error) if error.kind() == io::ErrorKind::NotFound => {
+//RS                 match directory_platform::create_child_append(&self.handle_ref(), name) {
+//RS                     Ok(file) => file,
+//RS                     Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+//RS                         directory_platform::open_child_append(&self.handle_ref(), name)?
+//RS                     }
+//RS                     Err(error) => return Err(error),
+//RS                 }
+//RS             }
+//RS             Err(error) => return Err(error),
+//RS         };
+//RS         let before = file.metadata()?;
+//RS         validate_authority_file(&before)?;
+//RS         if before
+//RS             .len()
+//RS             .checked_add(bytes.len() as u64)
+//RS             .is_none_or(|length| length > crate::SHA256::MAX_TREE_FILE_BYTES)
+//RS         {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::InvalidData,
+//RS                 "authority file exceeds the tree-file size bound",
+//RS             ));
+//RS         }
+//RS         file.write_all(bytes)?;
+//RS         file.sync_all()?;
+//RS         let after = file.metadata()?;
+//RS         validate_authority_file(&after)?;
+//RS         if !same_store_object_identity(&before, &after)
+//RS             || after.len() != before.len().saturating_add(bytes.len() as u64)
+//RS         {
+//RS             return Err(io::Error::other(
+//RS                 "authority file changed while appending the receipt",
+//RS             ));
+//RS         }
+//RS         let current = self.open_child(name)?;
+//RS         let current_metadata = current.metadata()?;
+//RS         validate_authority_file(&current_metadata)?;
+//RS         if !same_store_object_identity(&after, &current_metadata) {
+//RS             return Err(io::Error::other(
+//RS                 "authority receipt target changed during append",
+//RS             ));
+//RS         }
+//RS         self.sync_all()?;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn append_child_file(&self, name: &OsStr, bytes: &[u8]) -> io::Result<()> {
+//RS         self.revalidate()?;
+//RS         self.lock_exclusive()?;
+//RS         let result = self.append_child_file_unlocked(name, bytes);
+//RS         let unlock = self.unlock_exclusive();
+//RS         match (result, unlock) {
+//RS             (Err(error), _) => Err(error),
+//RS             (Ok(()), Err(error)) => Err(error),
+//RS             (Ok(()), Ok(())) => Ok(()),
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn remove_child_tree(&self, name: &OsStr) -> io::Result<()> {
+//RS         match self.open_child_directory(name) {
+//RS             Ok(child) => {
+//RS                 child.remove_all_children()?;
+//RS                 directory_platform::unlink_directory(&self.handle_ref(), name)
+//RS             }
+//RS             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+//RS             Err(error) if error.kind() == io::ErrorKind::NotADirectory => {
+//RS                 directory_platform::unlink_any(&self.handle_ref(), name)
+//RS             }
+//RS             Err(error) => {
+//RS                 // A no-follow open rejects links. Removing the entry itself is
+//RS                 // safe, while following it would not be.
+//RS                 if is_no_follow_error(&error) {
+//RS                     directory_platform::unlink_any(&self.handle_ref(), name)
+//RS                 } else {
+//RS                     Err(error)
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn remove_all_children(&self) -> io::Result<()> {
+//RS         let names = self.list_names()?;
+//RS         for name in names {
+//RS             self.remove_child_tree(&name)?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn revalidate(&self) -> io::Result<()> {
+//RS         #[cfg(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         ))]
+//RS         {
+//RS             let current = directory_platform::open_path(&self.path)?;
+//RS             let held = self.handle.metadata()?;
+//RS             let observed = current.metadata()?;
+//RS             if !same_store_object_identity(&held, &observed) {
+//RS                 return Err(io::Error::other(
+//RS                     "authority directory changed while it was in use",
+//RS                 ));
+//RS             }
+//RS             return Ok(());
+//RS         }
+//RS         #[cfg(not(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         )))]
+//RS         {
+//RS             Err(unsupported_descriptor_error())
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn sync_all(&self) -> io::Result<()> {
+//RS         #[cfg(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         ))]
+//RS         {
+//RS             return self.handle.sync_all();
+//RS         }
+//RS         #[cfg(not(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         )))]
+//RS         {
+//RS             Err(unsupported_descriptor_error())
+//RS         }
+//RS     }
+//RS     fn handle_metadata(&self) -> io::Result<fs::Metadata> {
+//RS         #[cfg(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         ))]
+//RS         {
+//RS             return self.handle.metadata();
+//RS         }
+//RS         #[cfg(not(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         )))]
+//RS         {
+//RS             Err(unsupported_descriptor_error())
+//RS         }
+//RS     }
+//RS 
+//RS 
+//RS     fn lock_exclusive(&self) -> io::Result<()> {
+//RS         #[cfg(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         ))]
+//RS         {
+//RS             return directory_platform::lock_exclusive(&self.handle);
+//RS         }
+//RS         #[cfg(not(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         )))]
+//RS         {
+//RS             Err(unsupported_descriptor_error())
+//RS         }
+//RS     }
+//RS 
+//RS     fn unlock_exclusive(&self) -> io::Result<()> {
+//RS         #[cfg(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         ))]
+//RS         {
+//RS             return directory_platform::unlock(&self.handle);
+//RS         }
+//RS         #[cfg(not(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         )))]
+//RS         {
+//RS             Err(unsupported_descriptor_error())
+//RS         }
+//RS     }
+//RS 
+//RS     #[cfg(any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios"
+//RS     ))]
+//RS     pub(crate) fn inheritable_clone(&self) -> io::Result<fs::File> {
+//RS         directory_platform::duplicate_inheritable(&self.handle)
+//RS     }
+//RS 
+//RS     #[cfg(any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios"
+//RS     ))]
+//RS     fn handle_ref(&self) -> fs::File {
+//RS         self.handle.try_clone().expect("authority descriptor clone")
+//RS     }
+//RS 
+//RS     #[cfg(not(any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios"
+//RS     )))]
+//RS     fn handle_ref(&self) -> fs::File {
+//RS         unreachable!("unsupported descriptor authority has no handle")
+//RS     }
+//RS }
+//RS pub struct AuthorityTransaction {
+//RS     root: DirectoryAuthority,
+//RS     locked: bool,
+//RS }
+//RS 
+//RS impl AuthorityTransaction {
+//RS     pub fn begin(root_path: &Path) -> io::Result<Self> {
+//RS         let root = DirectoryAuthority::open(root_path)?;
+//RS         root.revalidate()?;
+//RS         root.lock_exclusive()?;
+//RS         Ok(Self {
+//RS             root,
+//RS             locked: true,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn snapshot_file(&self, relative: &Path) -> io::Result<AuthorityFileSnapshot> {
+//RS         self.root.snapshot_file(relative)
+//RS     }
+//RS 
+//RS     pub fn append_file(&self, relative: &Path, bytes: &[u8]) -> io::Result<()> {
+//RS         let (parent, name) = self.root.ensure_relative_parent(relative)?;
+//RS         parent.append_child_file_unlocked(&name, bytes)
+//RS     }
+//RS 
+//RS     pub fn replace_file(
+//RS         &self,
+//RS         snapshot: &AuthorityFileSnapshot,
+//RS         replacement: &[u8],
+//RS     ) -> Result<(), AuthorityReplaceError> {
+//RS         let root_metadata = self.root.handle_metadata().map_err(|error| {
+//RS             AuthorityReplaceError::not_published(error)
+//RS         })?;
+//RS         if !same_store_object_identity(&root_metadata, &snapshot.root_metadata) {
+//RS             return Err(AuthorityReplaceError::not_published(io::Error::other(
+//RS                 "authority project root changed while approval was pending",
+//RS             )));
+//RS         }
+//RS         let (parent, name) = self
+//RS             .root
+//RS             .open_relative_parent(&snapshot.relative)
+//RS             .map_err(AuthorityReplaceError::not_published)?;
+//RS         let result = replace_authority_file_unlocked(&parent, &name, snapshot, replacement);
+//RS         if result.is_ok() {
+//RS             if let Err(error) = self.root.sync_all() {
+//RS                 return Err(AuthorityReplaceError::published(error));
+//RS             }
+//RS         }
+//RS         result
+//RS     }
+//RS 
+//RS     pub fn finish(mut self) -> io::Result<()> {
+//RS         if !self.locked {
+//RS             return Ok(());
+//RS         }
+//RS         self.locked = false;
+//RS         self.root.unlock_exclusive()
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for AuthorityTransaction {
+//RS     fn drop(&mut self) {
+//RS         if self.locked {
+//RS             let _ = self.root.unlock_exclusive();
+//RS             self.locked = false;
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS pub struct AuthorityFileSnapshot {
+//RS     authority: DirectoryAuthority,
+//RS     name: OsString,
+//RS     path: PathBuf,
+//RS     relative: PathBuf,
+//RS     root_metadata: fs::Metadata,
+//RS     file: fs::File,
+//RS     metadata: fs::Metadata,
+//RS     bytes: Vec<u8>,
+//RS }
+//RS 
+//RS impl AuthorityFileSnapshot {
+//RS     pub fn path(&self) -> &Path {
+//RS         &self.path
+//RS     }
+//RS 
+//RS     pub fn bytes(&self) -> &[u8] {
+//RS         &self.bytes
+//RS     }
+//RS 
+//RS     pub fn text(&self) -> io::Result<&str> {
+//RS         std::str::from_utf8(&self.bytes).map_err(|error| {
+//RS             io::Error::new(
+//RS                 io::ErrorKind::InvalidData,
+//RS                 format!("authority file is not UTF-8: {error}"),
+//RS             )
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS fn validate_authority_file(metadata: &fs::Metadata) -> io::Result<()> {
+//RS     if !metadata.is_file() {
+//RS         return Err(io::Error::new(
+//RS             io::ErrorKind::InvalidInput,
+//RS             "authority target is not a regular file",
+//RS         ));
+//RS     }
+//RS     if file_nlink(metadata) > 1 {
+//RS         return Err(io::Error::new(
+//RS             io::ErrorKind::PermissionDenied,
+//RS             "refusing a multiply linked authority file",
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn read_authority_handle(
+//RS     file: &fs::File,
+//RS     initial: &fs::Metadata,
+//RS ) -> io::Result<Vec<u8>> {
+//RS     if initial.len() > crate::SHA256::MAX_TREE_FILE_BYTES {
+//RS         return Err(io::Error::new(
+//RS             io::ErrorKind::InvalidData,
+//RS             "authority file exceeds the tree-file size bound",
+//RS         ));
+//RS     }
+//RS     let mut bytes = Vec::new();
+//RS     let mut limited = file.take(crate::SHA256::MAX_TREE_FILE_BYTES.saturating_add(1));
+//RS     limited.read_to_end(&mut bytes)?;
+//RS     if bytes.len() as u64 > crate::SHA256::MAX_TREE_FILE_BYTES {
+//RS         return Err(io::Error::new(
+//RS             io::ErrorKind::InvalidData,
+//RS             "authority file grew beyond the tree-file size bound",
+//RS         ));
+//RS     }
+//RS     let observed = file.metadata()?;
+//RS     validate_authority_file(&observed)?;
+//RS     if !same_store_file_identity(initial, &observed) || observed.len() != bytes.len() as u64 {
+//RS         return Err(io::Error::other(
+//RS             "authority file changed while it was being read",
+//RS         ));
+//RS     }
+//RS     Ok(bytes)
+//RS }
+//RS 
+//RS fn authority_path_components(path: &Path) -> io::Result<Vec<OsString>> {
+//RS     if path.is_absolute() {
+//RS         return Err(io::Error::new(
+//RS             io::ErrorKind::InvalidInput,
+//RS             "authority path must be relative to its retained root",
+//RS         ));
+//RS     }
+//RS     let mut components = Vec::new();
+//RS     for component in path.components() {
+//RS         match component {
+//RS             std::path::Component::CurDir => {}
+//RS             std::path::Component::Normal(name) => components.push(name.to_os_string()),
+//RS             std::path::Component::ParentDir
+//RS             | std::path::Component::RootDir
+//RS             | std::path::Component::Prefix(_) => {
+//RS                 return Err(io::Error::new(
+//RS                     io::ErrorKind::InvalidInput,
+//RS                     "authority path contains unsupported components",
+//RS                 ))
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(components)
+//RS }
+//RS 
+//RS pub fn read_authority_file(path: &Path) -> io::Result<AuthorityFileSnapshot> {
+//RS     let parent = path
+//RS         .parent()
+//RS         .filter(|parent| !parent.as_os_str().is_empty())
+//RS         .unwrap_or_else(|| Path::new("."));
+//RS     let name = path
+//RS         .file_name()
+//RS         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "authority path has no file name"))?
+//RS         .to_os_string();
+//RS     let authority = DirectoryAuthority::open(parent)?;
+//RS     #[cfg(any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios"
+//RS     ))]
+//RS     let root_metadata = authority.handle.metadata()?;
+//RS     #[cfg(not(any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios"
+//RS     )))]
+//RS     let root_metadata = return Err(unsupported_descriptor_error());
+//RS     authority.snapshot_child_file(
+//RS         name,
+//RS         path.to_path_buf(),
+//RS         PathBuf::from(path.file_name().unwrap()),
+//RS         root_metadata,
+//RS     )
+//RS }
+//RS 
+//RS 
+//RS pub fn append_authority_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+//RS     let parent = path
+//RS         .parent()
+//RS         .filter(|parent| !parent.as_os_str().is_empty())
+//RS         .unwrap_or_else(|| Path::new("."));
+//RS     let name = path
+//RS         .file_name()
+//RS         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "authority path has no file name"))?;
+//RS     DirectoryAuthority::create(parent)?.append_child_file(name, bytes)
+//RS }
+//RS 
+//RS fn verify_authority_snapshot_target(
+//RS     authority: &DirectoryAuthority,
+//RS     name: &OsStr,
+//RS     expected_metadata: &fs::Metadata,
+//RS     expected_bytes: &[u8],
+//RS ) -> io::Result<()> {
+//RS     let file = authority.open_child(name)?;
+//RS     let metadata = file.metadata()?;
+//RS     validate_authority_file(&metadata)?;
+//RS     if !same_store_object_identity(expected_metadata, &metadata) {
+//RS         return Err(io::Error::other(
+//RS             "authority target changed while approval was pending",
+//RS         ));
+//RS     }
+//RS     let bytes = read_authority_handle(&file, &metadata)?;
+//RS     if bytes != expected_bytes {
+//RS         return Err(io::Error::other(
+//RS             "authority target contents changed while approval was pending",
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn replace_authority_file_unlocked(
+//RS     authority: &DirectoryAuthority,
+//RS     name: &OsStr,
+//RS     snapshot: &AuthorityFileSnapshot,
+//RS     replacement: &[u8],
+//RS ) -> Result<(), AuthorityReplaceError> {
+//RS     if replacement.len() as u64 > crate::SHA256::MAX_TREE_FILE_BYTES {
+//RS         return Err(AuthorityReplaceError::not_published(io::Error::new(
+//RS             io::ErrorKind::InvalidData,
+//RS             "authority replacement exceeds the tree-file size bound",
+//RS         )));
+//RS     }
+//RS     let held_metadata = snapshot
+//RS         .file
+//RS         .metadata()
+//RS         .map_err(AuthorityReplaceError::not_published)?;
+//RS     if !same_store_object_identity(&snapshot.metadata, &held_metadata)
+//RS         || held_metadata.len() != snapshot.metadata.len()
+//RS     {
+//RS         return Err(AuthorityReplaceError::not_published(io::Error::other(
+//RS             "authority snapshot changed before approval could be published",
+//RS         )));
+//RS     }
+//RS     authority
+//RS         .revalidate()
+//RS         .map_err(AuthorityReplaceError::not_published)?;
+//RS     let mut renamed = false;
+//RS     let mut temp_name = None;
+//RS     let result = (|| {
+//RS         verify_authority_snapshot_target(authority, name, &snapshot.metadata, &snapshot.bytes)?;
+//RS         let stamp = SystemTime::now()
+//RS             .duration_since(UNIX_EPOCH)
+//RS             .unwrap_or_default()
+//RS             .as_nanos();
+//RS         let pid = std::process::id();
+//RS         let mut stage = None;
+//RS         for attempt in 0..32u32 {
+//RS             let candidate = OsString::from(format!(
+//RS                 ".jet-authority-replace-{pid}-{stamp}-{attempt}"
+//RS             ));
+//RS             match authority.create_child_file(&candidate) {
+//RS                 Ok(file) => {
+//RS                     temp_name = Some(candidate);
+//RS                     stage = Some(file);
+//RS                     break;
+//RS                 }
+//RS                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+//RS                 Err(error) => return Err(error),
+//RS             }
+//RS         }
+//RS         let temp_name = temp_name.as_ref().ok_or_else(|| {
+//RS             io::Error::new(
+//RS                 io::ErrorKind::AlreadyExists,
+//RS                 "could not reserve an authority replacement",
+//RS             )
+//RS         })?;
+//RS         let mut stage = stage.expect("authority replacement stage");
+//RS         stage.write_all(replacement)?;
+//RS         stage.sync_all()?;
+//RS         let staged_metadata = stage.metadata()?;
+//RS         validate_authority_file(&staged_metadata)?;
+//RS         drop(stage);
+//RS         verify_authority_snapshot_target(authority, name, &snapshot.metadata, &snapshot.bytes)?;
+//RS         directory_platform::rename_replace(
+//RS             &authority.handle_ref(),
+//RS             temp_name,
+//RS             &authority.handle_ref(),
+//RS             name,
+//RS         )?;
+//RS         renamed = true;
+//RS         authority.sync_all()?;
+//RS         let final_file = authority.open_child(name)?;
+//RS         let final_metadata = final_file.metadata()?;
+//RS         validate_authority_file(&final_metadata)?;
+//RS         if !same_store_object_identity(&staged_metadata, &final_metadata) {
+//RS             return Err(io::Error::other(
+//RS                 "authority replacement target changed after publication",
+//RS             ));
+//RS         }
+//RS         let final_bytes = read_authority_handle(&final_file, &final_metadata)?;
+//RS         if final_bytes != replacement {
+//RS             return Err(io::Error::other(
+//RS                 "authority replacement contents changed after publication",
+//RS             ));
+//RS         }
+//RS         Ok(())
+//RS     })();
+//RS     if !renamed {
+//RS         if let Some(temp_name) = temp_name.as_ref() {
+//RS             let _ = authority.remove_child_tree(temp_name);
+//RS         }
+//RS     }
+//RS     match result {
+//RS         Ok(()) => Ok(()),
+//RS         Err(error) if renamed => Err(AuthorityReplaceError::published(error)),
+//RS         Err(error) => Err(AuthorityReplaceError::not_published(error)),
+//RS     }
+//RS }
+//RS 
+//RS pub fn replace_authority_file(
+//RS     snapshot: &AuthorityFileSnapshot,
+//RS     replacement: &[u8],
+//RS ) -> Result<(), AuthorityReplaceError> {
+//RS     let authority = &snapshot.authority;
+//RS     authority
+//RS         .revalidate()
+//RS         .map_err(AuthorityReplaceError::not_published)?;
+//RS     authority
+//RS         .lock_exclusive()
+//RS         .map_err(AuthorityReplaceError::not_published)?;
+//RS     let result = replace_authority_file_unlocked(authority, &snapshot.name, snapshot, replacement);
+//RS     let unlock = authority.unlock_exclusive();
+//RS     match (result, unlock) {
+//RS         (Err(error), _) => Err(error),
+//RS         (Ok(()), Err(error)) => Err(AuthorityReplaceError::published(error)),
+//RS         (Ok(()), Ok(())) => Ok(()),
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios"
+//RS ))]
+//RS pub(crate) fn descriptor_path_for(file: &fs::File) -> PathBuf {
+//RS     directory_platform::descriptor_path(file)
+//RS }
+//RS 
+//RS #[cfg(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios"
+//RS ))]
+//RS pub(crate) fn directory_authority_from_file(
+//RS     path: &Path,
+//RS     file: &fs::File,
+//RS ) -> io::Result<DirectoryAuthority> {
+//RS     Ok(DirectoryAuthority {
+//RS         path: effective_directory_path(path),
+//RS         handle: file.try_clone()?,
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn open_directory_authority(path: &Path) -> io::Result<DirectoryAuthority> {
+//RS     DirectoryAuthority::open(path)
+//RS }
+//RS 
+//RS pub(crate) fn ensure_directory_authority(path: &Path) -> io::Result<DirectoryAuthority> {
+//RS     DirectoryAuthority::create(path)
+//RS }
+//RS 
+//RS pub(crate) fn publish_directory(
+//RS     source_parent: &DirectoryAuthority,
+//RS     source_name: &OsStr,
+//RS     destination_parent: &DirectoryAuthority,
+//RS     destination_name: &OsStr,
+//RS ) -> io::Result<()> {
+//RS     directory_platform::rename_no_replace(
+//RS         &source_parent.handle_ref(),
+//RS         source_name,
+//RS         &destination_parent.handle_ref(),
+//RS         destination_name,
+//RS     )
+//RS }
+//RS 
+//RS fn effective_directory_path(path: &Path) -> PathBuf {
+//RS     if path.as_os_str().is_empty() {
+//RS         PathBuf::from(".")
+//RS     } else {
+//RS         path.to_path_buf()
+//RS     }
+//RS }
+//RS 
+//RS pub fn begin_authority_transaction(path: &Path) -> io::Result<AuthorityTransaction> {
+//RS     AuthorityTransaction::begin(path)
+//RS }
+//RS 
+//RS mod directory_platform {
+//RS     use super::*;
+//RS     use std::ffi::{c_char, CString};
+//RS     use std::os::unix::ffi::OsStrExt;
+//RS     use std::os::unix::fs::OpenOptionsExt;
+//RS 
+//RS     const O_RDONLY: i32 = 0;
+//RS     const O_WRONLY: i32 = 1;
+//RS     const O_APPEND: i32 = if cfg!(any(target_os = "linux", target_os = "android")) {
+//RS         0o2000
+//RS     } else {
+//RS         0x0008
+//RS     };
+//RS     const O_CLOEXEC: i32 = if cfg!(any(target_os = "linux", target_os = "android")) {
+//RS         0o2000000
+//RS     } else {
+//RS         0x01000000
+//RS     };
+//RS     const O_DIRECTORY: i32 = if cfg!(any(target_os = "linux", target_os = "android")) {
+//RS         0o200000
+//RS     } else {
+//RS         0x00100000
+//RS     };
+//RS     const O_NOFOLLOW: i32 = if cfg!(any(target_os = "linux", target_os = "android")) {
+//RS         0o400000
+//RS     } else {
+//RS         0x0100
+//RS     };
+//RS     const O_NONBLOCK: i32 = 0o4000;
+//RS     const O_CREAT: i32 = 0o100;
+//RS     const O_EXCL: i32 = 0o200;
+//RS     const AT_REMOVEDIR: i32 = 0x200;
+//RS     const LOCK_EX: i32 = 2;
+//RS     const LOCK_UN: i32 = 8;
+//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS     const AT_EMPTY_PATH: i32 = 0x1000;
+//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS     const RENAME_NOREPLACE: u32 = 1;
+//RS     #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS     const RENAME_EXCL: u32 = 0x0004;
+//RS 
+//RS     unsafe extern "C" {
+//RS         fn openat(directory: i32, path: *const c_char, flags: i32, mode: u32) -> i32;
+//RS         fn mkdirat(directory: i32, path: *const c_char, mode: u32) -> i32;
+//RS         fn unlinkat(directory: i32, path: *const c_char, flags: i32) -> i32;
+//RS         #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS         fn renameat2(
+//RS             old_directory: i32,
+//RS             old_path: *const c_char,
+//RS             new_directory: i32,
+//RS             new_path: *const c_char,
+//RS             flags: u32,
+//RS         ) -> i32;
+//RS         #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS         fn renameatx_np(
+//RS             old_directory: i32,
+//RS             old_path: *const c_char,
+//RS             new_directory: i32,
+//RS             new_path: *const c_char,
+//RS             flags: u32,
+//RS         ) -> i32;
+//RS         #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS         fn linkat(
+//RS             old_directory: i32,
+//RS             old_path: *const c_char,
+//RS             new_directory: i32,
+//RS             new_path: *const c_char,
+//RS             flags: i32,
+//RS         ) -> i32;
+//RS         fn fcntl(file: i32, command: i32, ...) -> i32;
+//RS         fn renameat(
+//RS             old_directory: i32,
+//RS             old_path: *const c_char,
+//RS             new_directory: i32,
+//RS             new_path: *const c_char,
+//RS         ) -> i32;
+//RS         fn flock(file: i32, operation: i32) -> i32;
+//RS     }
+//RS 
+//RS     fn name(value: &OsStr) -> io::Result<CString> {
+//RS         let bytes = value.as_bytes();
+//RS         if bytes.is_empty() || bytes == b"." || bytes == b".." || bytes.contains(&b'/') {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::InvalidInput,
+//RS                 "authority child name is not one safe path component",
+//RS             ));
+//RS         }
+//RS         CString::new(bytes).map_err(|_| {
+//RS             io::Error::new(
+//RS                 io::ErrorKind::InvalidInput,
+//RS                 "authority child name contains NUL",
+//RS             )
+//RS         })
+//RS     }
+//RS 
+//RS     fn open_anchor(path: &Path) -> io::Result<fs::File> {
+//RS         let anchor = if path.is_absolute() {
+//RS             Path::new("/")
+//RS         } else {
+//RS             Path::new(".")
+//RS         };
+//RS         let mut options = fs::OpenOptions::new();
+//RS         options.read(true).custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+//RS         let file = options.open(anchor)?;
+//RS         if !file.metadata()?.is_dir() {
+//RS             return Err(io::Error::other("authority anchor is not a directory"));
+//RS         }
+//RS         Ok(file)
+//RS     }
+//RS 
+//RS     fn components(path: &Path) -> io::Result<Vec<OsString>> {
+//RS         let mut out = Vec::new();
+//RS         for component in path.components() {
+//RS             match component {
+//RS                 std::path::Component::RootDir | std::path::Component::CurDir => {}
+//RS                 std::path::Component::Normal(name) => out.push(name.to_os_string()),
+//RS                 std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+//RS                     return Err(io::Error::new(
+//RS                         io::ErrorKind::InvalidInput,
+//RS                         "authority path contains unsupported components",
+//RS                     ))
+//RS                 }
+//RS             }
+//RS         }
+//RS         if out.is_empty() && path.as_os_str().is_empty() {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::InvalidInput,
+//RS                 "authority path is empty",
+//RS             ));
+//RS         }
+//RS         Ok(out)
+//RS     }
+//RS 
+//RS     fn open_at(directory: &fs::File, value: &OsStr, want_directory: bool) -> io::Result<fs::File> {
+//RS         let value = name(value)?;
+//RS         let flags = if want_directory {
+//RS             O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+//RS         } else {
+//RS             O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK
+//RS         };
+//RS         let fd = unsafe { openat(directory.as_raw_fd(), value.as_ptr(), flags, 0) };
+//RS         if fd < 0 {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         Ok(unsafe { fs::File::from_raw_fd(fd) })
+//RS     }
+//RS 
+//RS     pub(super) fn open_path(path: &Path) -> io::Result<fs::File> {
+//RS         let mut current = open_anchor(path)?;
+//RS         for component in components(path)? {
+//RS             current = open_at(&current, &component, true)?;
+//RS         }
+//RS         Ok(current)
+//RS     }
+//RS 
+//RS     pub(super) fn create_path(path: &Path) -> io::Result<fs::File> {
+//RS         let mut current = open_anchor(path)?;
+//RS         for component in components(path)? {
+//RS             match open_at(&current, &component, true) {
+//RS                 Ok(next) => current = next,
+//RS                 Err(error) if error.kind() == io::ErrorKind::NotFound => {
+//RS                     let component_name = name(&component)?;
+//RS                     if unsafe { mkdirat(current.as_raw_fd(), component_name.as_ptr(), 0o700) } != 0 {
+//RS                         let mkdir_error = io::Error::last_os_error();
+//RS                         if mkdir_error.kind() != io::ErrorKind::AlreadyExists {
+//RS                             return Err(mkdir_error);
+//RS                         }
+//RS                     } else {
+//RS                         current.sync_all()?;
+//RS                     }
+//RS                     current = open_at(&current, &component, true)?;
+//RS                 }
+//RS                 Err(error) => return Err(error),
+//RS             }
+//RS         }
+//RS         Ok(current)
+//RS     }
+//RS 
+//RS     pub(super) fn open_child(
+//RS         directory: &fs::File,
+//RS         child: &OsStr,
+//RS         want_directory: bool,
+//RS     ) -> io::Result<fs::File> {
+//RS         open_at(directory, child, want_directory)
+//RS     }
+//RS 
+//RS     pub(super) fn mkdir_child(directory: &fs::File, child: &OsStr) -> io::Result<()> {
+//RS         let child = name(child)?;
+//RS         if unsafe { mkdirat(directory.as_raw_fd(), child.as_ptr(), 0o700) } != 0 {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         directory.sync_all()
+//RS     }
+//RS 
+//RS     pub(super) fn create_private_child(directory: &fs::File, prefix: &str) -> io::Result<PathBuf> {
+//RS         let stamp = SystemTime::now()
+//RS             .duration_since(UNIX_EPOCH)
+//RS             .unwrap_or_default()
+//RS             .as_nanos();
+//RS         let pid = std::process::id();
+//RS         for attempt in 0..128u32 {
+//RS             let candidate = OsString::from(format!(".jet-{prefix}-{pid}-{stamp}-{attempt}"));
+//RS             let candidate_name = name(&candidate)?;
+//RS             if unsafe { mkdirat(directory.as_raw_fd(), candidate_name.as_ptr(), 0o700) } == 0 {
+//RS                 directory.sync_all()?;
+//RS                 return Ok(PathBuf::from(candidate));
+//RS             }
+//RS             let error = io::Error::last_os_error();
+//RS             if error.kind() == io::ErrorKind::AlreadyExists {
+//RS                 continue;
+//RS             }
+//RS             return Err(error);
+//RS         }
+//RS         Err(io::Error::new(
+//RS             io::ErrorKind::AlreadyExists,
+//RS             "could not allocate a private authority directory",
+//RS         ))
+//RS     }
+//RS 
+//RS     pub(super) fn read_names(directory: &fs::File) -> io::Result<Vec<OsString>> {
+//RS         fs::read_dir(descriptor_path(directory))?
+//RS             .map(|entry| entry.map(|entry| entry.file_name()))
+//RS             .collect()
+//RS     }
+//RS 
+//RS     pub(super) fn create_child_file(directory: &fs::File, child: &OsStr) -> io::Result<fs::File> {
+//RS         let child = name(child)?;
+//RS         let fd = unsafe {
+//RS             openat(
+//RS                 directory.as_raw_fd(),
+//RS                 child.as_ptr(),
+//RS                 O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+//RS                 0o600,
+//RS             )
+//RS         };
+//RS         if fd < 0 {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         Ok(unsafe { fs::File::from_raw_fd(fd) })
+//RS     }
+//RS 
+//RS     pub(super) fn open_child_write(directory: &fs::File, child: &OsStr) -> io::Result<fs::File> {
+//RS         let child = name(child)?;
+//RS         let fd = unsafe {
+//RS             openat(
+//RS                 directory.as_raw_fd(),
+//RS                 child.as_ptr(),
+//RS                 O_WRONLY | O_NOFOLLOW | O_CLOEXEC,
+//RS                 0,
+//RS             )
+//RS         };
+//RS         if fd < 0 {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         Ok(unsafe { fs::File::from_raw_fd(fd) })
+//RS     }
+//RS     pub(super) fn open_child_append(
+//RS         directory: &fs::File,
+//RS         child: &OsStr,
+//RS     ) -> io::Result<fs::File> {
+//RS         let child = name(child)?;
+//RS         let fd = unsafe {
+//RS             openat(
+//RS                 directory.as_raw_fd(),
+//RS                 child.as_ptr(),
+//RS                 O_WRONLY | O_APPEND | O_NOFOLLOW | O_CLOEXEC,
+//RS                 0,
+//RS             )
+//RS         };
+//RS         if fd < 0 {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         Ok(unsafe { fs::File::from_raw_fd(fd) })
+//RS     }
+//RS 
+//RS     pub(super) fn create_child_append(
+//RS         directory: &fs::File,
+//RS         child: &OsStr,
+//RS     ) -> io::Result<fs::File> {
+//RS         let child = name(child)?;
+//RS         let fd = unsafe {
+//RS             openat(
+//RS                 directory.as_raw_fd(),
+//RS                 child.as_ptr(),
+//RS                 O_WRONLY | O_APPEND | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+//RS                 0o600,
+//RS             )
+//RS         };
+//RS         if fd < 0 {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         Ok(unsafe { fs::File::from_raw_fd(fd) })
+//RS     }
+//RS 
+//RS     pub(super) fn lock_exclusive(directory: &fs::File) -> io::Result<()> {
+//RS         if unsafe { flock(directory.as_raw_fd(), LOCK_EX) } != 0 {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub(super) fn unlock(directory: &fs::File) -> io::Result<()> {
+//RS         if unsafe { flock(directory.as_raw_fd(), LOCK_UN) } != 0 {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub(super) fn unlink_directory(directory: &fs::File, child: &OsStr) -> io::Result<()> {
+//RS         unlink(directory, child, AT_REMOVEDIR)
+//RS     }
+//RS 
+//RS     pub(super) fn unlink_any(directory: &fs::File, child: &OsStr) -> io::Result<()> {
+//RS         unlink(directory, child, 0)
+//RS     }
+//RS 
+//RS     fn unlink(directory: &fs::File, child: &OsStr, flags: i32) -> io::Result<()> {
+//RS         let child = name(child)?;
+//RS         if unsafe { unlinkat(directory.as_raw_fd(), child.as_ptr(), flags) } != 0 {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub(super) fn rename_no_replace(
+//RS         source_parent: &fs::File,
+//RS         source_name: &OsStr,
+//RS         destination_parent: &fs::File,
+//RS         destination_name: &OsStr,
+//RS     ) -> io::Result<()> {
+//RS         let source_name = name(source_name)?;
+//RS         let destination_name = name(destination_name)?;
+//RS         let result = unsafe {
+//RS             #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS             {
+//RS                 renameat2(
+//RS                     source_parent.as_raw_fd(),
+//RS                     source_name.as_ptr(),
+//RS                     destination_parent.as_raw_fd(),
+//RS                     destination_name.as_ptr(),
+//RS                     RENAME_NOREPLACE,
+//RS                 )
+//RS             }
+//RS             #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS             {
+//RS                 renameatx_np(
+//RS                     source_parent.as_raw_fd(),
+//RS                     source_name.as_ptr(),
+//RS                     destination_parent.as_raw_fd(),
+//RS                     destination_name.as_ptr(),
+//RS                     RENAME_EXCL,
+//RS                 )
+//RS             }
+//RS         };
+//RS         if result != 0 {
+//RS             Err(io::Error::last_os_error())
+//RS         } else {
+//RS             Ok(())
+//RS         }
+//RS     }
+//RS     pub(super) fn rename_replace(
+//RS         source_parent: &fs::File,
+//RS         source_name: &OsStr,
+//RS         destination_parent: &fs::File,
+//RS         destination_name: &OsStr,
+//RS     ) -> io::Result<()> {
+//RS         let source_name = name(source_name)?;
+//RS         let destination_name = name(destination_name)?;
+//RS         if unsafe {
+//RS             renameat(
+//RS                 source_parent.as_raw_fd(),
+//RS                 source_name.as_ptr(),
+//RS                 destination_parent.as_raw_fd(),
+//RS                 destination_name.as_ptr(),
+//RS             )
+//RS         } != 0
+//RS         {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS 
+//RS     pub(super) fn duplicate_inheritable(file: &fs::File) -> io::Result<fs::File> {
+//RS         const F_DUPFD: i32 = 0;
+//RS         let fd = unsafe { fcntl(file.as_raw_fd(), F_DUPFD, 3) };
+//RS         if fd < 0 {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         Ok(unsafe { fs::File::from_raw_fd(fd) })
+//RS     }
+//RS 
+//RS     pub(super) fn descriptor_path(file: &fs::File) -> PathBuf {
+//RS         #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS         let prefix = "/proc/self/fd/";
+//RS         #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS         let prefix = "/dev/fd/";
+//RS         PathBuf::from(format!("{prefix}{}", file.as_raw_fd()))
+//RS     }
+//RS 
+//RS 
+//RS     pub(super) fn link_file(
+//RS         source: &fs::File,
+//RS         destination: &fs::File,
+//RS         child: &OsStr,
+//RS     ) -> io::Result<bool> {
+//RS         #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS         {
+//RS             let destination_name = name(child)?;
+//RS             let empty = CString::new("").expect("empty C string");
+//RS             if unsafe {
+//RS                 linkat(
+//RS                     source.as_raw_fd(),
+//RS                     empty.as_ptr(),
+//RS                     destination.as_raw_fd(),
+//RS                     destination_name.as_ptr(),
+//RS                     AT_EMPTY_PATH,
+//RS                 )
+//RS             } == 0
+//RS             {
+//RS                 return Ok(true);
+//RS             }
+//RS             let error = io::Error::last_os_error();
+//RS             if matches!(
+//RS                 error.raw_os_error(),
+//RS                 Some(value) if value == libc_errno::EXDEV
+//RS                     || value == libc_errno::EPERM
+//RS                     || value == libc_errno::EOPNOTSUPP
+//RS             ) {
+//RS                 return Ok(false);
+//RS             }
+//RS             return Err(error);
+//RS         }
+//RS         #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS         {
+//RS             let _ = (source, destination, child);
+//RS             Ok(false)
+//RS         }
+//RS     }
+//RS 
+//RS     mod libc_errno {
+//RS         pub(super) const EXDEV: i32 = 18;
+//RS         pub(super) const EPERM: i32 = 1;
+//RS         pub(super) const EOPNOTSUPP: i32 = 95;
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(not(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios"
+//RS )))]
+//RS mod directory_platform {
+//RS     use super::*;
+//RS 
+//RS     fn unsupported() -> io::Error {
+//RS         unsupported_descriptor_error()
+//RS     }
+//RS 
+//RS     pub(super) fn open_path(_path: &Path) -> io::Result<fs::File> {
+//RS         Err(unsupported())
+//RS     }
+//RS     pub(super) fn create_path(_path: &Path) -> io::Result<fs::File> {
+//RS         Err(unsupported())
+//RS     }
+//RS     pub(super) fn open_child(
+//RS         _directory: &fs::File,
+//RS         _child: &OsStr,
+//RS         _want_directory: bool,
+//RS     ) -> io::Result<fs::File> {
+//RS         Err(unsupported())
+//RS     }
+//RS     pub(super) fn mkdir_child(_directory: &fs::File, _child: &OsStr) -> io::Result<()> {
+//RS         Err(unsupported())
+//RS     }
+//RS     pub(super) fn create_private_child(
+//RS         _directory: &fs::File,
+//RS         _prefix: &str,
+//RS     ) -> io::Result<PathBuf> {
+//RS         Err(unsupported())
+//RS     }
+//RS     pub(super) fn read_names(_directory: &fs::File) -> io::Result<Vec<OsString>> {
+//RS         Err(unsupported())
+//RS     }
+//RS     pub(super) fn create_child_file(
+//RS         _directory: &fs::File,
+//RS         _child: &OsStr,
+//RS     ) -> io::Result<fs::File> {
+//RS         Err(unsupported())
+//RS     }
+//RS     pub(super) fn open_child_write(
+//RS         _directory: &fs::File,
+//RS         _child: &OsStr,
+//RS     ) -> io::Result<fs::File> {
+//RS         Err(unsupported())
+//RS     }
+//RS     pub(super) fn open_child_append(
+//RS         _directory: &fs::File,
+//RS         _child: &OsStr,
+//RS     ) -> io::Result<fs::File> {
+//RS         Err(unsupported())
+//RS     }
+//RS     pub(super) fn create_child_append(
+//RS         _directory: &fs::File,
+//RS         _child: &OsStr,
+//RS     ) -> io::Result<fs::File> {
+//RS         Err(unsupported())
+//RS     }
+//RS     pub(super) fn lock_exclusive(_directory: &fs::File) -> io::Result<()> {
+//RS         Err(unsupported())
+//RS     }
+//RS     pub(super) fn unlock(_directory: &fs::File) -> io::Result<()> {
+//RS         Err(unsupported())
+//RS     }
+//RS     pub(super) fn unlink_directory(_directory: &fs::File, _child: &OsStr) -> io::Result<()> {
+//RS         Err(unsupported())
+//RS     }
+//RS     pub(super) fn unlink_any(_directory: &fs::File, _child: &OsStr) -> io::Result<()> {
+//RS         Err(unsupported())
+//RS     }
+//RS     pub(super) fn rename_no_replace(
+//RS         _source_parent: &fs::File,
+//RS         _source_name: &OsStr,
+//RS         _destination_parent: &fs::File,
+//RS         _destination_name: &OsStr,
+//RS     ) -> io::Result<()> {
+//RS         Err(unsupported())
+//RS     }
+//RS     pub(super) fn link_file(
+//RS         _source: &fs::File,
+//RS         _destination: &fs::File,
+//RS         _name: &OsStr,
+//RS     ) -> io::Result<bool> {
+//RS         Err(unsupported())
+//RS     }
+//RS     pub(super) fn rename_replace(
+//RS         _source_parent: &fs::File,
+//RS         _source_name: &OsStr,
+//RS         _destination_parent: &fs::File,
+//RS         _destination_name: &OsStr,
+//RS     ) -> io::Result<()> {
+//RS         Err(unsupported())
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(not(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios"
+//RS )))]
+//RS fn unsupported_descriptor_error() -> io::Error {
+//RS     io::Error::new(
+//RS         io::ErrorKind::Unsupported,
+//RS         format!("descriptor-relative authority is unavailable outside {DESCRIPTOR_PLATFORMS}"),
+//RS     )
+//RS }
+//RS 
+//RS fn is_no_follow_error(error: &io::Error) -> bool {
+//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS     {
+//RS         return error.raw_os_error() == Some(40);
+//RS     }
+//RS     #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS     {
+//RS         return error.raw_os_error() == Some(62);
+//RS     }
+//RS     #[cfg(not(any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios"
+//RS     )))]
+//RS     {
+//RS         let _ = error;
+//RS         false
+//RS     }
+//RS }
+//RS 
+//RS fn file_nlink(metadata: &fs::Metadata) -> u64 {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::MetadataExt;
+//RS         return metadata.nlink();
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = metadata;
+//RS         1
+//RS     }
+//RS }
+//RS 
+//RS fn same_store_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::MetadataExt;
+//RS         return left.dev() == right.dev()
+//RS             && left.ino() == right.ino()
+//RS             && left.len() == right.len()
+//RS             && left.modified().ok() == right.modified().ok();
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         left.file_type() == right.file_type()
+//RS             && left.len() == right.len()
+//RS             && left.modified().ok() == right.modified().ok()
+//RS     }
+//RS }
+//RS fn same_store_object_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::MetadataExt;
+//RS         return left.dev() == right.dev() && left.ino() == right.ino();
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         left.file_type() == right.file_type()
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn copy_open_file(source: &mut fs::File, destination: &mut fs::File) -> io::Result<()> {
+//RS     io::copy(source, destination)?;
+//RS     destination.sync_all()
+//RS }
+//RS 
+//RS fn ignored_tree_name(name: &str) -> bool {
+//RS     name.starts_with('.') || name == "build" || name == "target"
+//RS }
+//RS 
+//RS struct AuthorityTreeFile {
+//RS     relative: String,
+//RS     file: fs::File,
+//RS     metadata: fs::Metadata,
+//RS }
+//RS 
+//RS fn collect_authority_tree(
+//RS     directory: &DirectoryAuthority,
+//RS     relative: &Path,
+//RS     files: &mut Vec<AuthorityTreeFile>,
+//RS     depth: usize,
+//RS     reject_hardlinks: bool,
+//RS ) -> io::Result<()> {
+//RS     if depth > crate::SHA256::MAX_TREE_DEPTH {
+//RS         return Err(io::Error::new(
+//RS             io::ErrorKind::InvalidData,
+//RS             "package tree exceeds the maximum directory depth",
+//RS         ));
+//RS     }
+//RS     let names = directory.list_names()?;
+//RS     for name in &names {
+//RS         #[cfg(test)]
+//RS         before_store_child_open(directory.path(), name);
+//RS         let file = directory.open_child(name)?;
+//RS         let metadata = file.metadata()?;
+//RS         let name_str = name.to_str().ok_or_else(|| {
+//RS             io::Error::new(
+//RS                 io::ErrorKind::InvalidData,
+//RS                 "package tree contains a non-UTF-8 name",
+//RS             )
+//RS         })?;
+//RS         let child_relative = relative.join(name);
+//RS         if metadata.is_dir() {
+//RS             if ignored_tree_name(name_str) {
+//RS                 continue;
+//RS             }
+//RS             let child = DirectoryAuthority::from_opened(directory.path.join(name), file);
+//RS             collect_authority_tree(
+//RS                 &child,
+//RS                 &child_relative,
+//RS                 files,
+//RS                 depth + 1,
+//RS                 reject_hardlinks,
+//RS             )?;
+//RS         } else if metadata.is_file() {
+//RS             if reject_hardlinks && file_nlink(&metadata) > 1 {
+//RS                 return Err(io::Error::new(
+//RS                     io::ErrorKind::PermissionDenied,
+//RS                     format!("refusing multiply linked source file `{}`", child_relative.display()),
+//RS                 ));
+//RS             }
+//RS             if ignored_tree_name(name_str) {
+//RS                 continue;
+//RS             }
+//RS             if files.len() >= crate::SHA256::MAX_TREE_FILES {
+//RS                 return Err(io::Error::new(
+//RS                     io::ErrorKind::InvalidData,
+//RS                     "package tree contains too many files",
+//RS                 ));
+//RS             }
+//RS             files.push(AuthorityTreeFile {
+//RS                 relative: child_relative.to_string_lossy().replace('\\', "/"),
+//RS                 file,
+//RS                 metadata,
+//RS             });
+//RS         } else {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::InvalidInput,
+//RS                 format!("package tree contains a special entry `{}`", child_relative.display()),
+//RS             ));
+//RS         }
+//RS     }
+//RS     let after = directory.list_names()?;
+//RS     if names != after {
+//RS         return Err(io::Error::new(
+//RS             io::ErrorKind::Other,
+//RS             format!("package source changed while inspecting `{}`", directory.path.display()),
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub(crate) fn hash_directory_authority(
+//RS     root: &DirectoryAuthority,
+//RS     reject_hardlinks: bool,
+//RS ) -> io::Result<String> {
+//RS     let mut files = Vec::new();
+//RS     collect_authority_tree(root, Path::new(""), &mut files, 0, reject_hardlinks)?;
+//RS     files.sort_by(|left, right| left.relative.cmp(&right.relative));
+//RS     let mut hasher = StreamingSha256::new();
+//RS     let mut total_bytes = 0u64;
+//RS     for entry in files {
+//RS         hasher.update(entry.relative.as_bytes());
+//RS         hasher.update(&[0]);
+//RS         let length = entry.metadata.len();
+//RS         if length > crate::SHA256::MAX_TREE_FILE_BYTES
+//RS             || total_bytes.saturating_add(length) > crate::SHA256::MAX_TREE_TOTAL_BYTES
+//RS         {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::InvalidData,
+//RS                 "package tree exceeds the hashing size bound",
+//RS             ));
+//RS         }
+//RS         hasher.update(&length.to_be_bytes());
+//RS         let mut file = entry.file;
+//RS         let mut limited = (&mut file).take(length.saturating_add(1));
+//RS         let mut actual = 0u64;
+//RS         let mut buffer = [0u8; 64 * 1024];
+//RS         loop {
+//RS             let count = limited.read(&mut buffer)?;
+//RS             if count == 0 {
+//RS                 break;
+//RS             }
+//RS             actual = actual.saturating_add(count as u64);
+//RS             if actual > length {
+//RS                 return Err(io::Error::new(
+//RS                     io::ErrorKind::InvalidData,
+//RS                     "package source file grew while hashing",
+//RS                 ));
+//RS             }
+//RS             hasher.update(&buffer[..count]);
+//RS         }
+//RS         let after = file.metadata()?;
+//RS         if actual != length || !same_store_file_identity(&entry.metadata, &after) {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::Other,
+//RS                 format!("package source file changed while hashing `{}`", entry.relative),
+//RS             ));
+//RS         }
+//RS         total_bytes = total_bytes.saturating_add(length);
+//RS     }
+//RS     let digest = hasher.finalize();
+//RS     let mut hex = String::with_capacity(64);
+//RS     for byte in digest {
+//RS         use std::fmt::Write as _;
+//RS         let _ = write!(hex, "{byte:02x}");
+//RS     }
+//RS     Ok(format!("sha256-{hex}"))
+//RS }
+//RS 
+// END-PORT-PENDING 0719 Source/Store.rs:1-1817
+

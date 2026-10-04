@@ -1,0 +1,205 @@
+// Source/CmdBackendScaffold.rs:25,81-86,537-713,1475-1479,1746-1771,2004-2007.
+// Native activation remains OPEN: retained_descriptor path lstat/read + typed
+// ErrorKind (#4494/#4392/#4483/#4409), native request acquisition (#4381),
+// Driver public loaded-program exposure and native OsPath propagation. Main
+// must select with W44, validate parents, lstat/read the separate path, then
+// acquire a REAL request for Loader; acquire another request ONLY after the
+// receipt digest matches. No snapshot is reconstructed from `before` here.
+use core.files.runtime.kernel_path_components as backend_app_paths
+use core.files.runtime.descriptor_metadata.[DescriptorStat]
+use jet_driver.[JetDriverCompileRequest, jet_driver_load, JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
+use jet_foundation.[app_entry_run_fn, mir_sha256_bytes, mir_sha256_hex_bytes]
+
+pub JET_CLI_BACKEND_ROUTE_REGISTRATION :: ".routes(from: \"routes\")"
+
+// Rust PlannedFile and ReceiptFile. Future scaffold plan/receipt/apply/remove
+// consumers MUST use these canonical models, including encoded absolute paths.
+pub struct JetCLIBackendPlannedFile {
+    pub relative: String
+    pub absolute: backend_app_paths.OsPath
+    pub bytes: [U8]
+    pub before: [U8]?
+}
+pub struct JetCLIBackendReceiptFile {
+    pub relative: String
+    pub digest: String
+    pub before: [U8]?
+}
+#Error
+pub struct JetCLIBackendAppError {
+    pub code: String
+    pub message: String
+    pub fix: String
+}
+fn jet_cli_backend_app_error(code: String, message: String, fix: String) -> JetCLIBackendAppError Never! {
+    JetCLIBackendAppError{code: code, message: message, fix: fix}
+}
+
+// Rust fail: same canonical refusal/output adapter, but USER_ERROR not USAGE.
+// Main host writes these channels unchanged and exits exactly once.
+pub fn jet_cli_backend_app_error_output(error: JetCLIBackendAppError, profile: JetCLIOutputProfile) -> JetDriverVerbOutput Never! {
+    refusal :: jet_cli_args_refuse(error.code, error.message, "backend scaffolds use one deterministic source transaction", error.fix, profile.machine_enabled)
+    stderr :: if !profile.machine_enabled && profile.ansi_enabled -> jet_cli_report(refusal.code, refusal.what, refusal.why, refusal.fix, true) else -> refusal.stderr
+    JetDriverVerbOutput{stdout: refusal.stdout, stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+}
+
+// Rust app_routes_registration: sole existing real project selector. Parent
+// validation and read acquisition are not replaced by CT01's pinned policy.
+pub fn jet_cli_backend_app_entry(root: backend_app_paths.OsPath) -[FS, Env, IO]> backend_app_paths.OsPath JetCLIProjectEntryError! {
+    jet_cli_find_project_entry(root)
+}
+
+// Rust validate_destination, lexical phase. Parent lstat is a DISTINCT native
+// phase: visit each component of relative.parent() from root; successful lstat
+// rejects links/non-directories, while EVERY lstat error is deliberately ignored.
+// No root lstat, extension restriction, canonicalize, or hardlink restriction.
+pub fn jet_cli_backend_destination_relative(root: backend_app_paths.OsPath, path: backend_app_paths.OsPath) -> backend_app_paths.OsPath JetCLIBackendAppError! {
+    extent :: backend_app_paths.strip_prefix_span(path, root) ?? return Err(jet_cli_backend_app_error("E2456", "scaffold destination `{backend_app_paths.display(path)}` escapes the project", "use a project-relative backend scaffold"))
+    relative :: backend_app_paths.owned_span(path, extent)
+    cursor := backend_app_paths.components(relative)
+    first := true
+    loop {
+        component :: backend_app_paths.next(relative, &cursor) ?? break
+        reserved :: first && jet_cli_backend_reserved_component(relative, component)
+        if component.kind != backend_app_paths.ComponentKind.Normal || reserved -> return Err(jet_cli_backend_app_error("E2456", "scaffold destination `{backend_app_paths.display(relative)}` is not a source path", "keep generated backend source outside compiler state"))
+        first = false
+    }
+    Ok(relative)
+}
+fn jet_cli_backend_reserved_component(path: backend_app_paths.OsPath, component: backend_app_paths.PathComponent) -> Bool Never! {
+    size :: component.span.end - component.span.start
+    at :: component.span.start
+    if size == 4 {
+        return path.encoded[at] == (U8{46}) && ((path.encoded[at + 1] == (U8{103}) && path.encoded[at + 2] == (U8{105}) && path.encoded[at + 3] == (U8{116})) || (path.encoded[at + 1] == (U8{106}) && path.encoded[at + 2] == (U8{101}) && path.encoded[at + 3] == (U8{116})))
+    }
+    if size != 6 -> return false
+    path.encoded[at] == (U8{116}) && path.encoded[at + 1] == (U8{97}) && path.encoded[at + 2] == (U8{114}) && path.encoded[at + 3] == (U8{103}) && path.encoded[at + 4] == (U8{101}) && path.encoded[at + 5] == (U8{116})
+}
+// Rust validate_destination, successful parent-lstat policy. Acquisition
+// remains the native provider's work, never a CLI metadata fabrication.
+fn jet_cli_backend_parent_kind(path: backend_app_paths.OsPath, is_symlink: Bool, is_dir: Bool) JetCLIBackendAppError! {
+    if is_symlink || !is_dir -> return Err(jet_cli_backend_app_error("E2456", "scaffold parent `{backend_app_paths.display(path)}` is not a real directory", "replace the link or special file with a normal source directory"))
+    Ok()
+}
+// Rust `if let Ok(metadata) = symlink_metadata(parent)`: ALL errors, including
+// permissions/invalid names, are ignored, unlike read_regular's NotFound split.
+pub fn jet_cli_backend_parent_metadata(path: backend_app_paths.OsPath, metadata: DescriptorStat IOError!) JetCLIBackendAppError! {
+    if metadata == {
+        .Ok(info) -> jet_cli_backend_parent_kind(path, info.is_symlink, info.is_dir)
+        .Err(_) -> Ok()
+    }
+}
+// Rust read_regular, successful lstat policy only. This does NOT perform IO or
+// claim to distinguish NotFound; do not substitute Authority's stronger read.
+fn jet_cli_backend_regular_kind(path: backend_app_paths.OsPath, is_symlink: Bool, is_file: Bool) JetCLIBackendAppError! {
+    if is_symlink || !is_file -> return Err(jet_cli_backend_app_error("E2456", "scaffold path `{backend_app_paths.display(path)}` is not a regular file", "move the link or special file aside before scaffolding"))
+    Ok()
+}
+fn jet_cli_backend_read_error(path: backend_app_paths.OsPath, detail: String) -> JetCLIBackendAppError Never! {
+    jet_cli_backend_app_error("E2105", "couldn't read scaffold path `{backend_app_paths.display(path)}`: {detail}", "check project read authority and retry")
+}
+fn jet_cli_backend_inspect_error(path: backend_app_paths.OsPath, detail: String) -> JetCLIBackendAppError Never! {
+    jet_cli_backend_app_error("E2105", "couldn't inspect scaffold path `{backend_app_paths.display(path)}`: {detail}", "check project permissions and retry")
+}
+
+// Rust str::get(start..end): positions are BYTES, bounds checked before a loan;
+// strict decode rejects mid-scalar boundaries, including empty mid-scalar spans.
+fn jet_cli_backend_function_source(bytes: [U8], start: Int, end: Int) -> String? Never! {
+    if start < 0 || end < start || end > bytes.len() -> return None
+    if start < bytes.len() && Int.from_u8(bytes[start]) >= 128 && Int.from_u8(bytes[start]) < 192 -> return None
+    if end < bytes.len() && Int.from_u8(bytes[end]) >= 128 && Int.from_u8(bytes[end]) < 192 -> return None
+    String.from_bytes(bytes[start..<end])
+}
+fn jet_cli_backend_recorded_file(files: [JetCLIBackendReceiptFile]?, relative: String) -> Int? Never! {
+    if files == .Val(rows) {
+        loop index in 0..<rows.len() {
+            if rows[index].relative == relative && rows[index].before != None -> return Val(index)
+        }
+    }
+    None
+}
+fn jet_cli_backend_insert(bytes: [U8], at: Int) -> [U8] Never! {
+    after := [U8]{}
+    loop index in 0..<at -> &after.push(bytes[index])
+    loop byte in JET_CLI_BACKEND_ROUTE_REGISTRATION.bytes() -> &after.push(byte)
+    loop index in at..<bytes.len() -> &after.push(bytes[index])
+    after
+}
+
+// Rust app_routes_registration, read/load/registration phase. The supplied
+// entry/before and requests are REAL host acquisitions, not checked callbacks.
+// `before == None` represents read_regular's NotFound ONLY. This prepared-input
+// library preserves Loader/digest/AST/byte branches, NOT native acquisition
+// timing: a host cannot prepare the inverse request eagerly and claim parity.
+// Native cutover must place acquisition inside the digest-success branch at
+// the original load site once the sole Driver provider publishes that ABI.
+pub fn jet_cli_backend_app_routes_registration(root: backend_app_paths.OsPath, entry: backend_app_paths.OsPath, before: [U8]?, request: JetDriverCompileRequest, inverse_request: JetDriverCompileRequest, existing_files: [JetCLIBackendReceiptFile]?) -> JetCLIBackendPlannedFile? JetCLIBackendAppError! {
+    current :: before ?? return Err(jet_cli_backend_app_error("E2105", "couldn't read selected App entry `{backend_app_paths.display(entry)}`", "check project read authority and retry"))
+    source :: String.from_bytes(current) ?? return Err(jet_cli_backend_app_error("E2456", "selected App entry `{backend_app_paths.display(entry)}` is not valid UTF-8", "keep the checked App entry in UTF-8 source"))
+    extent :: backend_app_paths.strip_prefix_span(entry, root) ?? return Err(jet_cli_backend_app_error("E2456", "selected App entry `{backend_app_paths.display(entry)}` escapes the project", "run scaffolding from the selected project root"))
+    relative :: backend_app_paths.display_span(entry, extent).replace("\\", "/")
+    bundle :: jet_driver_load(request)
+    if !bundle.complete {
+        detail :: if bundle.diagnostics.len() > 0 -> bundle.diagnostics[0].what else -> "the loader returned no diagnostic"
+        return Err(jet_cli_backend_app_error("E2456", "selected project entry `{backend_app_paths.display(entry)}` is not a checked App root: {detail}", "define one checked `fn run() App` entry before generating routes"))
+    }
+    module_index := Int?{None}
+    loop index in 0..<bundle.modules.len() {
+        if bundle.modules[index].module_identity == bundle.entry_module_identity {
+            module_index = Val(index)
+            break
+        }
+    }
+    index :: module_index ?? return Err(jet_cli_backend_app_error("E2456", "selected project entry `{backend_app_paths.display(entry)}` has no loaded source module", "repair the checked project entry before generating routes"))
+    run :: app_entry_run_fn(bundle.modules[index].program.items) ?? return Err(jet_cli_backend_app_error("E2456", "selected project entry `{backend_app_paths.display(entry)}` has no checked `fn run() App`", "define one checked `fn run() App` entry before generating routes"))
+    start :: run.span.start
+    function_source := jet_cli_backend_function_source(current, start, run.span.end) ?? return Err(jet_cli_backend_app_error("E2456", "checked App span for `{backend_app_paths.display(entry)}` does not match its source", "restore the selected App entry and retry scaffolding")) // #4303
+    recorded :: jet_cli_backend_recorded_file(existing_files, relative)
+    if jet_cli_backend_has_routes_registration(function_source) {
+        recorded_index :: recorded ?? return Ok(None)
+        rows :: existing_files ?? return Ok(None)
+        receipt :: rows[recorded_index]
+        receipt_before :: receipt.before ?? return Ok(None)
+        // Keep digest FIRST; a mismatch never invokes the inverse Loader.
+        if receipt.digest != mir_sha256_hex_bytes(mir_sha256_bytes(current)) -> return Err(jet_cli_backend_app_error("E2456", "selected App entry `{backend_app_paths.display(entry)}` drifted after scaffold apply", "restore the recorded App route registration or remove the scaffold after review"))
+        if !jet_cli_backend_app_registration_inverse(entry, current, receipt_before, inverse_request) -> return Err(jet_cli_backend_app_error("E2456", "selected App entry `{backend_app_paths.display(entry)}` drifted after scaffold apply", "restore the recorded App route registration or remove the scaffold after review"))
+        return Ok(Val(JetCLIBackendPlannedFile{relative: relative, absolute: entry, bytes: current, before: Val(receipt_before)}))
+    }
+    if recorded != None -> return Err(jet_cli_backend_app_error("E2456", "recorded App route registration `{backend_app_paths.display(entry)}` is missing", "restore the recorded App route registration before rerunning the scaffold"))
+    constructor_end :: jet_cli_backend_app_constructor_end(function_source) ?? return Err(jet_cli_backend_app_error("E2456", "selected App entry `{backend_app_paths.display(entry)}` cannot register route discovery: {err.message}", "return one canonical `web.app()` builder from `fn run() App`"))
+    Ok(Val(JetCLIBackendPlannedFile{relative: relative, absolute: entry, bytes: jet_cli_backend_insert(current, start + constructor_end), before: Val(current)}))
+}
+
+// Rust app_registration_inverse. No guessed AST, second semacheck or scan;
+// the second REAL native request is acquired at this original Loader site.
+pub fn jet_cli_backend_app_registration_inverse(path: backend_app_paths.OsPath, current: [U8], before: [U8], request: JetDriverCompileRequest) -> Bool Never! {
+    source :: String.from_bytes(current) ?? return false
+    bundle :: jet_driver_load(request)
+    if !bundle.complete -> return false
+    loop module in bundle.modules {
+        if module.module_identity != bundle.entry_module_identity -> next
+        run :: app_entry_run_fn(module.program.items) ?? return false
+        function_source := jet_cli_backend_function_source(current, run.span.start, run.span.end) ?? return false // #4303
+        constructor_end :: jet_cli_backend_app_constructor_end(function_source) ?? return false
+        return jet_cli_backend_inverse_bytes(current, before, run.span.start + constructor_end)
+    }
+    false
+}
+// Rust checked_add/get/remove/equality. Length subtraction guards the addition
+// even on native usize; compare borrowed bytes, no restored allocation.
+fn jet_cli_backend_inverse_bytes(current: [U8], before: [U8], insert_at: Int) -> Bool Never! {
+    route :: JET_CLI_BACKEND_ROUTE_REGISTRATION.bytes()
+    if insert_at < 0 || insert_at > current.len() || route.len() > current.len() - insert_at -> return false
+    registration_end :: insert_at + route.len()
+    if before.len() != current.len() - route.len() -> return false
+    loop index in 0..<route.len() {
+        if current[insert_at + index] != route[index] -> return false
+    }
+    loop index in 0..<insert_at {
+        if current[index] != before[index] -> return false
+    }
+    loop index in registration_end..<current.len() {
+        if current[index] != before[index - route.len()] -> return false
+    }
+    true
+}

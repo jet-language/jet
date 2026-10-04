@@ -1,0 +1,107 @@
+fn jet_cli_test_report_test_cases(stdout: String) -> [JetCLIHarnessTestCase] {
+    if jet_cli_test_harness_cases(stdout) == {
+        .Ok(value) -> value ?? panic("no cases")
+        .Err(error) -> panic(error.message)
+    }
+}
+fn jet_cli_test_report_test_error(stdout: String, message: String) {
+    if jet_cli_test_harness_cases(stdout) == {
+        .Ok(_) -> panic("invalid report accepted")
+        .Err(error) -> assert_eq(error.message, message)
+    }
+}
+#Test("harness result normalization preserves expected failure and skip states") {
+    cases :: jet_cli_test_report_test_cases("regular: pass\nknown: expected-fail\nignored: skip\nwrong: FAIL\ngreen: UNEXPECTED-PASS (remove expected_fail: true)\n")
+    assert_eq(cases.len(), 5)
+    assert_eq(jet_cli_test_harness_state(cases[0]), 0)
+    assert_eq(jet_cli_test_harness_state(cases[1]), 1)
+    assert_eq(jet_cli_test_harness_state(cases[2]), 2)
+    assert_eq(jet_cli_test_harness_state(cases[3]), 1)
+    assert_eq(jet_cli_test_harness_state(cases[4]), 0)
+    assert_eq(cases[3].message, "FAIL")
+    assert_eq(cases[4].message, "UNEXPECTED-PASS (remove expected_fail: true)")
+}
+#Test("human harness parsing uses final colon and Rust line endings") {
+    cr :: String.from_bytes([U8]{U8{13}}) ?? panic("CR")
+    cases :: jet_cli_test_report_test_cases("name: inner: pass{cr}\n: pass\nrandom output\nend: pass{cr}")
+    assert_eq(cases.len(), 1)
+    assert_eq(cases[0].name, "name: inner")
+    // #4376: consume fallible optional results through a result match.
+    if jet_cli_test_harness_cases("noise\n: pass\n") == {
+        .Ok(absent) -> assert(absent == None)
+        .Err(error) -> panic(error.message)
+    }
+}
+#Test("canonical whole report precedes lines and last recognized line wins") {
+    first :: "{{\"schema\":\"jet.test.v1\",\"tests\":[]}}"
+    last :: "{{\"schema\":\"jet-test-v1\",\"tests\":[]}}"
+    assert_eq(jet_cli_test_canonical_json(" \n{first}\n ", true), Val(first))
+    assert_eq(jet_cli_test_canonical_json("noise\n{first}\n{last}\nnoise", true), Val(last))
+    assert(jet_cli_test_canonical_json("{{\"schema\":\"jet.test.v1\",\"tests\":false}}", true) == None)
+    status :: "{{\"schema\":\"jet.status/v1\"}}"
+    assert_eq(jet_cli_test_canonical_json(status, false), Val(status))
+    // lines().rev(): a later status line wins; whole-document trim first.
+    second_status :: "{{\"schema\":\"jet.status/v1\",\"ok\":true}}"
+    cr :: String.from_bytes([U8]{U8{13}}) ?? panic("CR")
+    assert_eq(jet_cli_test_canonical_json("{status}{cr}\nnoise\n  {second_status}{cr}\n\n", false), Val(second_status))
+    assert(jet_cli_test_canonical_json("noise\n{status}", true) == None)
+}
+#Test("canonical harness cases strictly type result expectation skip and name") {
+    cases :: jet_cli_test_report_test_cases("{{\"schema\":\"jet.test.v1\",\"tests\":[{{\"name\":\"é\",\"ok\":false}},{{\"name\":\"known\",\"ok\":true,\"expectedFailure\":true,\"stderr\":\"assertion\"}},{{\"name\":\"green\",\"ok\":false,\"expectedFailure\":true}}]}}")
+    assert_eq(cases[0].name, "é")
+    assert_eq(cases[0].message, "test failed")
+    assert_eq(cases[1].message, "assertion")
+    assert_eq(jet_cli_test_harness_state(cases[1]), 1)
+    assert_eq(jet_cli_test_harness_state(cases[2]), 0)
+    jet_cli_test_report_test_error("{{\"schema\":\"jet.test.v1\",\"tests\":[{{\"ok\":true}}]}}", "the test harness report has an invalid name: missing key `name`")
+    jet_cli_test_report_test_error("{{\"schema\":\"jet.test.v1\",\"tests\":[{{\"name\":0,\"ok\":true}}]}}", "the test harness report has an invalid name: expected a DataTree string")
+    jet_cli_test_report_test_error("{{\"schema\":\"jet.test.v1\",\"tests\":[{{\"name\":\"x\"}}]}}", "test `x` has no result: missing key `ok`")
+    jet_cli_test_report_test_error("{{\"schema\":\"jet.test.v1\",\"tests\":[{{\"name\":\"x\",\"ok\":1}}]}}", "test `x` has a non-boolean result")
+    jet_cli_test_report_test_error("{{\"schema\":\"jet.test.v1\",\"tests\":[{{\"name\":\"x\",\"ok\":true,\"expectedFailure\":0}}]}}", "test `x` has a non-boolean expectation")
+    jet_cli_test_report_test_error("{{\"schema\":\"jet.test.v1\",\"tests\":[{{\"name\":\"x\",\"ok\":true,\"skipped\":0}}]}}", "test `x` has a non-boolean skip flag")
+}
+#Test("capture defaults quiet passes human streams and protects machine stdout") {
+    result :: JetCLITestResultCache{ok: true, stdout: "hello", stderr: "warning"}
+    hidden :: jet_cli_test_capture_output(result, JetCLITestCapturePolicy.Failed, false)
+    assert_eq(hidden.stdout, "")
+    shown :: jet_cli_test_capture_output(result, JetCLITestCapturePolicy.All, false)
+    assert_eq(shown.stdout, "hello")
+    assert_eq(shown.stderr, "warning")
+    machine :: jet_cli_test_capture_output(result, JetCLITestCapturePolicy.Off, true)
+    assert_eq(machine.stdout, "")
+    assert_eq(machine.stderr, "hellowarning")
+    document :: "{{\"schema\":\"jet.test.v1\",\"tests\":[]}}"
+    record :: jet_cli_test_capture_output(JetCLITestResultCache{ok: false, stdout: "noise\n{document}\n", stderr: "warning"}, JetCLITestCapturePolicy.Failed, true)
+    assert_eq(record.stdout, "{document}\n")
+    assert_eq(record.stderr, "")
+    human :: JetCLIOutputMode{json: false, color: false, quiet: false}
+    doctest :: jet_cli_test_doctest_output("doc:1", JetCLITestResultCache{ok: false, stdout: "value", stderr: "assertion"}, JetCLITestCapturePolicy.Failed, human)
+    assert_eq(doctest.stdout, "value")
+    assert_eq(doctest.stderr, "doc:1: FAIL\nassertion")
+    // Rust write_mode_status hides only the label under --quiet.
+    quiet :: jet_cli_test_doctest_output("doc:1", JetCLITestResultCache{ok: false, stdout: "value", stderr: "assertion"}, JetCLITestCapturePolicy.Failed, JetCLIOutputMode{json: false, color: false, quiet: true})
+    assert_eq(quiet.stdout, "value")
+    assert_eq(quiet.stderr, "assertion")
+    machine_doctest :: jet_cli_test_doctest_output("doc:1", JetCLITestResultCache{ok: false, stdout: "value", stderr: "assertion"}, JetCLITestCapturePolicy.All, JetCLIOutputMode{json: true, color: false, quiet: false})
+    assert_eq(machine_doctest.stdout, "")
+    assert_eq(machine_doctest.stderr, "")
+}
+#Test("watch failure names order structured first then human stable dedupe") {
+    test :: "{{\"schema\":\"jet.test.v1\",\"tests\":[{{\"name\":\"failed\",\"ok\":false}},{{\"name\":\"success\",\"ok\":true,\"status\":\"failed\"}},{{\"name\":\"fallback\",\"passed\":false}},{{\"name\":\"panic\",\"status\":\"PANIC\"}}]}}"
+    status :: "{{\"schema\":\"jet.status/v1\",\"evidence\":{{\"evidence\":[{{\"claim\":\"unavailable\",\"outcome\":\"unavailable\"}},{{\"claim\":\"failed\",\"outcome\":\"failed\"}}]}}}}"
+    assert_eq(jet_cli_test_watch_failure_names("human: FAIL\n{test}\nFAIL failed", "{status}\nFAIL tail"), [String]{"failed", "fallback", "panic", "unavailable", "human", "tail"})
+}
+
+#Test("report parser enforces canonical one MiB UTF8 input cap") {
+    // Include JSON quotes in the limit; multi-byte text is bounded by bytes,
+    // not String.len() (which counts Unicode scalars).
+    boundary :: "\"{"é".repeat(524287)}\""
+    assert_eq(boundary.bytes().len(), 1048576)
+    assert(!(jet_cli_test_report_parse(boundary) == None))
+    assert(jet_cli_test_report_parse("\"{"é".repeat(524288)}\"") == None)
+    assert(jet_cli_test_report_parse("\"{"a".repeat(1048575)}\"") == None)
+    assert(!(jet_cli_test_report_parse("9223372036854775807") == None))
+    assert(!(jet_cli_test_report_parse("-9223372036854775808") == None))
+    assert(jet_cli_test_report_parse("[9223372036854775808]") == None)
+    assert(jet_cli_test_report_parse("{{\"n\":-9223372036854775809}}") == None)
+}

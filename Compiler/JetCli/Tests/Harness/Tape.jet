@@ -1,0 +1,204 @@
+// Tape.rs has no #[cfg(test)] module. Behavioral TP01 codec/bounds/seam claims.
+fn tape_test_parse(source: String) -> JetCLITape {
+    jet_cli_tape_parse(source) ?? panic(jet_cli_tape_error_message(err))
+}
+fn tape_test_error(source: String) -> String {
+    if jet_cli_tape_parse(source) == {
+        .Ok(_) -> panic("expected tape parse refusal")
+        .Err(error) -> jet_cli_tape_error_message(error)
+    }
+}
+fn tape_test_new_error(steps: [JetCLITapeStep]) -> String {
+    if jet_cli_tape_new(steps) == {
+        .Ok(_) -> panic("expected tape step refusal")
+        .Err(error) -> jet_cli_tape_error_message(error)
+    }
+}
+
+fn tape_test_byte(code: Int) -> String {
+    String.from_bytes([U8]{U8{code}}) ?? panic("test ASCII byte")
+}
+fn tape_test_repeat(text: String, count: Int) -> String {
+    bytes := [U8]{}
+    raw :: text.bytes()
+    loop index in 0..<count {
+        loop byte in raw -> &bytes.push(byte)
+    }
+    String.from_bytes(bytes) ?? panic("test repeated UTF-8")
+}
+
+#Test("tape canonical text round trips all seven steps") {
+    cr :: tape_test_byte(13)
+    source :: "# ignored{cr}\nType hello{cr}\nEnter\nSleep 1500us\nWait ready\nRequire program\nSet NAME=value\nOutput \"line\\n\"\n"
+    tape :: tape_test_parse(source)
+    canonical :: "Type \"hello\"\nEnter\nSleep 1ms\nWait \"ready\"\nRequire \"program\"\nSet NAME \"value\"\nOutput \"line\\n\"\n"
+    assert_eq(jet_cli_tape_to_text(tape), canonical)
+    assert(tape == tape_test_parse(canonical))
+    assert_eq(jet_cli_tape_to_bytes(tape), canonical.bytes())
+    assert_eq(jet_cli_tape_digest(tape), mir_sha256_hex_bytes(mir_sha256_bytes(canonical.bytes())))
+    assert_eq(jet_cli_tape_steps(tape).len(), 7)
+    first :: jet_cli_tape_step(tape, 0) ?? panic("missing first step")
+    assert(first == JetCLITapeStep.Type("hello"))
+    assert(jet_cli_tape_step(tape, 7) == None)
+    assert_eq(jet_cli_tape_to_text(jet_cli_tape_default()), "")
+}
+#Test("tape exact parse refusals retain source line numbers") {
+    bom :: String.from_bytes([U8]{U8{239}, U8{187}, U8{191}}) ?? panic("BOM")
+    assert_eq(tape_test_error("{bom}Enter"), "tape line 1: tape must not contain a UTF-8 BOM")
+    assert_eq(tape_test_error("Type a{tape_test_byte(0)}b"), "tape line 1: tape must not contain NUL bytes")
+    assert_eq(tape_test_error("# comment\n\nBogus"), "tape line 3: unknown tape command `Bogus`")
+    assert_eq(tape_test_error("Enter extra"), "tape line 1: Enter does not accept arguments")
+    assert_eq(tape_test_error("Wait"), "tape line 1: Wait needs a readiness marker")
+    assert_eq(tape_test_error("Require \"\""), "tape line 1: Require needs a program name")
+    assert_eq(tape_test_error("Set 9BAD x"), "tape line 1: invalid environment name `9BAD`")
+    nbsp :: String.from_bytes([U8]{U8{194}, U8{160}}) ?? panic("NBSP")
+    assert_eq(tape_test_error("Type{nbsp}x"), "tape line 1: unknown tape command `Type{nbsp}x`")
+    // '=' is deliberately found before whitespace, even inside quoted input.
+    assert_eq(tape_test_error("Set NAME \"a=b\""), "tape line 1: invalid environment name `NAME \"a`")
+}
+#Test("quoted tape strings enforce Rust A-canonical grammar and errors") {
+    assert_eq(tape_test_error("Type \"\\/\""), "tape line 1: invalid JSON string escape")
+    assert_eq(tape_test_error("Type \"\\u0061\""), "tape line 1: JSON is valid but not A-canonical")
+    assert_eq(tape_test_error("Type \"\\u+001\""), "tape line 1: JSON is valid but not A-canonical")
+    assert_eq(tape_test_error("Type \"\\u+001\\q\""), "tape line 1: invalid JSON string escape")
+    assert_eq(tape_test_error("Type \"\\uD800\""), "tape line 1: unpaired surrogate in JSON string")
+    assert_eq(tape_test_error("Type \"\\u0\""), "tape line 1: short Unicode escape")
+    assert_eq(tape_test_error("Type \"\\uQQQQ\""), "tape line 1: invalid Unicode escape")
+    assert_eq(tape_test_error("Type \"a\" x"), "tape line 1: trailing bytes after canonical JSON value")
+    assert_eq(tape_test_error("Type \"a"), "tape line 1: unterminated JSON string")
+    assert_eq(tape_test_error("Type \"a\t\""), "tape line 1: unescaped control in JSON string")
+    assert_eq(jet_cli_tape_to_text(tape_test_parse("Type \"é\\u001b\\b\\f\\r\\t\"")), "Type \"é\\u001b\\b\\f\\r\\t\"\n")
+    assert_eq(tape_test_error("Type \"\\u001B\""), "tape line 1: JSON is valid but not A-canonical")
+    assert_eq(tape_test_error("Type \"a\\"), "tape line 1: invalid JSON string escape")
+    assert_eq(jet_cli_tape_to_bytes(tape_test_parse("Type \"文😀/\\\\\\\"\"")), "Type \"文😀/\\\\\\\"\"\n".bytes())
+    assert_eq(jet_cli_tape_to_bytes(tape_test_parse("Type unquoted  ")), "Type \"unquoted\"\n".bytes())
+}
+#Test("sleep parses checked u64 units and one-hour boundary") {
+    assert_eq(jet_cli_tape_to_text(tape_test_parse("Sleep 1\nSleep 2s\nSleep 999us\nSleep 1999999ns\nSleep 3600000ms")), "Sleep 1ms\nSleep 2000ms\nSleep 0ms\nSleep 1ms\nSleep 3600000ms\n")
+    assert_eq(tape_test_error("Sleep"), "tape line 1: Sleep needs a duration")
+    assert_eq(tape_test_error("Sleep 1.5s"), "tape line 1: invalid duration `1.5s`")
+    assert_eq(tape_test_error("Sleep -1"), "tape line 1: invalid duration `-1`")
+    assert_eq(tape_test_error("Sleep ms"), "tape line 1: invalid duration `ms`")
+    assert_eq(tape_test_error("Sleep 3600001"), "tape line 1: duration `3600001` exceeds the one-hour limit")
+    assert_eq(jet_cli_tape_to_text(tape_test_parse("Sleep 3600000999us\nSleep 000001s")), "Sleep 3600000ms\nSleep 1000ms\n")
+    assert_eq(tape_test_error("Sleep 3600001000us"), "tape line 1: duration `3600001000us` exceeds the one-hour limit")
+    assert_eq(tape_test_error("Sleep 18446744073709551615ns"), "tape line 1: duration `18446744073709551615ns` exceeds the one-hour limit")
+    assert_eq(tape_test_error("Sleep 18446744073709551616ns"), "tape line 1: duration `18446744073709551616ns` is too large")
+    assert_eq(tape_test_error("Sleep 18446744073709551615s"), "tape line 1: duration `18446744073709551615s` is too large")
+    // Parsing floors to ms, while programmatic Sleep retains the precise duration.
+    assert_eq(jet_cli_tape_to_text(jet_cli_tape_new([JetCLITapeStep]{JetCLITapeStep.Sleep(tape_time.duration_ns(1001))}) ?? panic("new")), "Sleep 0ms\n")
+    assert_eq(tape_test_new_error([JetCLITapeStep]{JetCLITapeStep.Sleep(tape_time.duration_ns(JET_CLI_TAPE_MAX_SLEEP_NS + 1))}), "tape step 1: Sleep duration exceeds the one-hour limit")
+    assert_eq(jet_cli_tape_max_sleep().ns, 3600000000000)
+}
+#Test("tape step limits count bytes and enforce programmatic invariants") {
+    text := tape_test_repeat("a", JET_CLI_MAX_STEP_TEXT_BYTES)
+    assert(jet_cli_tape_new([JetCLITapeStep]{JetCLITapeStep.Type(text)}) == .Ok(_))
+    text = "{text}é"
+    assert_eq(tape_test_new_error([JetCLITapeStep]{JetCLITapeStep.Output(text)}), "tape step 1: text payload exceeds the 1048576-byte limit")
+    assert_eq(tape_test_new_error([JetCLITapeStep]{JetCLITapeStep.Wait(text)}), "tape step 1: readiness exceeds the 1048576-byte limit")
+    assert_eq(tape_test_new_error([JetCLITapeStep]{JetCLITapeStep.Set{name: "NAME", value: ~text}}), "tape step 1: environment value exceeds the 1048576-byte limit")
+    assert_eq(tape_test_new_error([JetCLITapeStep]{JetCLITapeStep.Require("x{tape_test_byte(0)}y")}), "tape step 1: Require needs a non-empty program name")
+    assert_eq(tape_test_new_error([JetCLITapeStep]{JetCLITapeStep.Wait("")}), "tape step 1: Wait needs a readiness marker")
+    assert_eq(tape_test_new_error([JetCLITapeStep]{JetCLITapeStep.Set{name: "é", value: "x"}}), "tape step 1: invalid environment name `é`")
+    program :: tape_test_repeat("x", 4097)
+    assert_eq(tape_test_new_error([JetCLITapeStep]{JetCLITapeStep.Require(program)}), "tape step 1: required program name exceeds the 4096-byte limit")
+}
+#Test("tape source and step-count bounds have exact limits") {
+    steps := [JetCLITapeStep]{}
+    loop index in 0..<JET_CLI_MAX_TAPE_STEPS -> &steps.push(JetCLITapeStep.Enter)
+    assert(jet_cli_tape_new(steps) == .Ok(_))
+    &steps.push(JetCLITapeStep.Enter)
+    assert_eq(tape_test_new_error(steps), "tape step count exceeds the 100000 item limit")
+    source := "#{tape_test_repeat("a", JET_CLI_MAX_TAPE_BYTES - 1)}"
+    assert(jet_cli_tape_parse(source) == .Ok(_))
+    source = "{source}a"
+    assert_eq(tape_test_error(source), "tape source bytes exceeds the 4194304 item limit")
+    commands :: tape_test_repeat("Enter\n", JET_CLI_MAX_TAPE_STEPS + 1)
+    assert_eq(tape_test_error(commands), "tape step count exceeds the 100000 item limit")
+}
+#Test("terminal normalization removes CSI OSC BEL and preserves Unicode") {
+    esc :: tape_test_byte(27)
+    cr :: tape_test_byte(13)
+    bel :: tape_test_byte(7)
+    assert_eq(jet_cli_tape_normalize_terminal_text("{esc}[31mé{esc}[0m{cr}\nB{cr}C{bel}"), "é\nB\nC")
+    assert_eq(jet_cli_tape_normalize_terminal_text("a{esc}]title{bel}b{esc}]link{esc}\\c"), "abc")
+    assert_eq(jet_cli_tape_normalize_terminal_text("a{esc}éb"), "ab")
+    assert_eq(jet_cli_tape_normalize_terminal_text("a{esc}[unterminated"), "anterminated")
+    assert_eq(jet_cli_tape_normalize_terminal_text("a{esc}]unfinished"), "a")
+    assert_eq(jet_cli_tape_normalize_terminal_text("{cr}{esc}[0m\n"), "\n\n")
+    assert_eq(jet_cli_tape_normalize_terminal_text("{cr}{cr}\n"), "\n\n")
+}
+
+struct TapeTestExecutor {
+    calls: [String]
+    output: String
+    fail: String
+    impl JetCLITapeExecutor {
+        fn type_text(&self, text: String) JetCLITapeExecutorError! {
+            &self.calls.push("Type {text}")
+            if self.fail == "Type" -> return Err(JetCLITapeExecutorError{message: "rejected"})
+        }
+        fn enter(&self) JetCLITapeExecutorError! { &self.calls.push("Enter") }
+        fn sleep(&self, duration: Duration) JetCLITapeExecutorError! { &self.calls.push("Sleep {duration.ns}") }
+        fn wait(&self, readiness: String) JetCLITapeExecutorError! { &self.calls.push("Wait {readiness}") }
+        fn require(&self, program: String) JetCLITapeExecutorError! { &self.calls.push("Require {program}") }
+        fn set(&self, name: String, value: String) JetCLITapeExecutorError! { &self.calls.push("Set {name}={value}") }
+        fn observe_output(&self) -> String JetCLITapeExecutorError! {
+            &self.calls.push("Output")
+            if self.fail == "Output" -> return Err(JetCLITapeExecutorError{message: "capture failed"})
+            Ok(~self.output)
+        }
+    }
+}
+fn tape_test_executor(output: String, fail: String) -> TapeTestExecutor {
+    TapeTestExecutor{calls: [String]{}, output: output, fail: fail}
+}
+#Test("tape replay routes steps in order and returns normalized observations") {
+    esc :: tape_test_byte(27)
+    executor := tape_test_executor("{esc}[32mok{esc}[0m{tape_test_byte(13)}\n", "")
+    run :: jet_cli_tape_replay_source("Type hello\nEnter\nSleep 1ms\nWait ready\nSet X y\nOutput \"ok\\n\"", &executor) ?? panic(jet_cli_tape_error_message(err))
+    assert_eq(run.steps_executed, 6)
+    assert_eq(run.outputs, [String]{"ok\n"})
+    assert_eq(executor.calls, [String]{"Type hello", "Enter", "Sleep 1000000", "Wait ready", "Set X=y", "Output"})
+}
+#Test("tape replay failures preserve action index and normalized mismatch") {
+    executor := tape_test_executor("bad{tape_test_byte(13)}\n", "Type")
+    if jet_cli_tape_replay_source("Enter\nType x\nEnter", &executor) == {
+        .Ok(_) -> panic("expected failure")
+        .Err(error) -> assert_eq(jet_cli_tape_error_message(error), "tape step 2 (Type) failed: rejected")
+    }
+    assert_eq(executor.calls, [String]{"Enter", "Type x"})
+    mismatch := tape_test_executor("bad{tape_test_byte(13)}\n", "")
+    if jet_cli_tape_replay_source("Output \"good\\n\"", &mismatch) == {
+        .Ok(_) -> panic("expected mismatch")
+        .Err(error) -> assert_eq(jet_cli_tape_error_message(error), "tape step 1 output mismatch: expected \"good\\n\", observed \"bad\\n\"")
+    }
+    capture := tape_test_executor("", "Output")
+    if jet_cli_tape_replay_source("Output x", &capture) == {
+        .Ok(_) -> panic("expected capture refusal")
+        .Err(error) -> assert_eq(jet_cli_tape_error_message(error), "tape step 1 (Output) failed: capture failed")
+    }
+}
+#Test("requirements deduplicate sort and refuse before any executor call") {
+    tape :: tape_test_parse("Type x\nRequire /__jet_tape_missing_z__\nRequire /__jet_tape_missing_a__\nRequire /__jet_tape_missing_z__")
+    assert_eq(jet_cli_tape_required_programs(tape), [String]{"/__jet_tape_missing_a__", "/__jet_tape_missing_z__"})
+    assert_eq(jet_cli_tape_missing_requirements(tape), [String]{"/__jet_tape_missing_a__", "/__jet_tape_missing_z__"})
+    executor := tape_test_executor("", "")
+    if jet_cli_tape_replay(tape, &executor) == {
+        .Ok(_) -> panic("expected preflight failure")
+        .Err(error) -> assert_eq(jet_cli_tape_error_message(error), "required program `/__jet_tape_missing_a__` is unavailable")
+    }
+    assert_eq(executor.calls.len(), 0)
+    assert(!jet_cli_tape_program_available(""))
+    assert(!jet_cli_tape_program_available("x{tape_test_byte(0)}y"))
+}
+
+#Test("requirement preflight resolves the running executable without launching it") {
+    program :: tape_sys.executable()
+    assert(jet_cli_tape_program_available(program))
+    tape :: jet_cli_tape_new([JetCLITapeStep]{JetCLITapeStep.Require(program)}) ?? panic("new")
+    executor := tape_test_executor("", "")
+    run :: jet_cli_tape_replay(tape, &executor) ?? panic(jet_cli_tape_error_message(err))
+    assert_eq(run.steps_executed, 1)
+    assert_eq(executor.calls, [String]{"Require {program}"})
+}

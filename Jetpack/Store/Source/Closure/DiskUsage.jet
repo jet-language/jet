@@ -50,11 +50,11 @@ struct PhysicalNode {
     owners: [String]
 }
 
-pub fn store_du(roots: HangarRoots) -> DuReport StoreError! {
+pub fn store_du(verification: &StoreVerification, roots: HangarRoots) -> DuReport StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
     // Do not migrate here: a damaged metadata path must be compared with the
     // committed journal, not promoted into a new projection.
-    graph :: store_recover_closure_journal_graph_unlocked(roots).graph
+    graph :: store_recover_closure_journal_graph_unlocked(&verification, roots).graph
     entries :: store_list_unlocked(roots)
     entry_ids := [String: Bool]{}
     loop entry in entries -> entry_ids[entry.id] = true
@@ -133,7 +133,7 @@ pub fn store_du(roots: HangarRoots) -> DuReport StoreError! {
 }
 
 fn store_du_checked_add(total: Int, bytes: Int, message: String) -> Int StoreError! {
-    if total > @STORE_INT_MAX - bytes -> return Err(StoreError.InvalidData(message))
+    if total > STORE_INT_MAX - bytes -> return Err(StoreError.InvalidData(message))
     Ok(total + bytes)
 }
 
@@ -141,7 +141,7 @@ fn store_du_checked_add(total: Int, bytes: Int, message: String) -> Int StoreErr
 // root. One identity set spans all roots, so cross-root hardlinks are
 // counted once.
 pub fn store_du_all() -> MachineDuReport StoreError! {
-    seen := [FileId: Bool]{}
+    seen := [FileID: Bool]{}
     shared_cas_path :: pkg_shared_cas_dir()
     shared_cas :: if files.stat(shared_cas_path) == {
         .Ok(metadata) -> {
@@ -151,7 +151,7 @@ pub fn store_du_all() -> MachineDuReport StoreError! {
             Val(MachineDuPool{path: shared_cas_path, bytes: store_measure_machine_tree(shared_cas_path, &seen)})
         }
         .Err(error) -> {
-            if !StoreError.Io(error).is_not_found() -> return Err(StoreError.Io(error))
+            if !StoreError.IO(error).is_not_found() -> return Err(StoreError.IO(error))
             None
         }
     }
@@ -166,8 +166,8 @@ pub fn store_du_all() -> MachineDuReport StoreError! {
         metadata :: if files.stat(hangar) == {
             .Ok(metadata) -> metadata
             .Err(error) -> {
-                if StoreError.Io(error).is_not_found() -> next
-                return Err(StoreError.Io(error))
+                if StoreError.IO(error).is_not_found() -> next
+                return Err(StoreError.IO(error))
             }
         }
         if metadata.is_symlink || !metadata.is_dir -> return Err(StoreError.InvalidData("Hangar root is not a real directory: {hangar}"))
@@ -179,7 +179,7 @@ pub fn store_du_all() -> MachineDuReport StoreError! {
     Ok(MachineDuReport{shared_cas: shared_cas, roots: roots_found, total_bytes: total})
 }
 
-fn store_measure_machine_tree(path: String, seen: &[FileId: Bool]) -> Int StoreError! {
+fn store_measure_machine_tree(path: String, seen: &[FileID: Bool]) -> Int StoreError! {
     metadata :: files.stat(path)
     if seen.has_key(metadata.id) -> return Ok(0)
     seen[metadata.id] = true
@@ -193,9 +193,9 @@ fn store_measure_machine_tree(path: String, seen: &[FileId: Bool]) -> Int StoreE
 }
 
 fn store_measure_physical(object_paths: [String: String], object_owners: [String: [String]]) -> PhysicalMeasurement StoreError! {
-    nodes := [FileId: PhysicalNode]{}
-    object_nodes := [String: [FileId]]{}
-    expanded := [FileId: Bool]{}
+    nodes := [FileID: PhysicalNode]{}
+    object_nodes := [String: [FileID]]{}
+    expanded := [FileID: Bool]{}
     loop digest in store_sorted_keys(object_paths) {
         owners :: object_owners.get(digest) ?? return Err(StoreError.InvalidData("closure object `{digest}` has no package owner"))
         store_measure_physical_walk(digest, object_paths[digest], owners, &nodes, &object_nodes, &expanded)
@@ -221,7 +221,7 @@ fn store_measure_physical(object_paths: [String: String], object_owners: [String
     Ok(measurement)
 }
 
-fn store_measure_physical_walk(digest: String, path: String, owners: [String], nodes: &[FileId: PhysicalNode], object_nodes: &[String: [FileId]], expanded: &[FileId: Bool]) StoreError! {
+fn store_measure_physical_walk(digest: String, path: String, owners: [String], nodes: &[FileID: PhysicalNode], object_nodes: &[String: [FileID]], expanded: &[FileID: Bool]) StoreError! {
     metadata :: files.stat(path)
     if !metadata.is_symlink && !metadata.is_dir && !metadata.is_file {
         return Err(StoreError.InvalidData("closure node `{path}` is not a supported filesystem node"))
@@ -234,7 +234,7 @@ fn store_measure_physical_walk(digest: String, path: String, owners: [String], n
     loop owner in owners -> &all_owners.push(owner)
     node.owners = store_sorted_unique(all_owners)
     nodes[key] = node
-    keys := object_nodes.get(digest) ?? [FileId]{}
+    keys := object_nodes.get(digest) ?? [FileID]{}
     if !keys.contains(key) -> &keys.push(key)
     object_nodes[digest] = keys
     if metadata.is_dir && !expanded.has_key(key) {

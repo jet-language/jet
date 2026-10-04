@@ -204,7 +204,7 @@ fn sema_call_static_registered_targets(graph: SemaRegistrationGraph, nominal: Se
 fn sema_call_static_local_target(owner_symbol: Symbol, owner_name: String, declared_owner: Type, owner_params: [SemaInferenceTypeParam], owner_type_args: [Type], function: Func, type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> SemaStaticMethodTarget? {
     if function.params.len() > 0 && function.params[0].name == "self" -> return None
     method_id :: symbol_id(SymbolKind.Function, environment.module_identity, owner_name, function.name)
-    signature :: sema_function_symbol_type(function, method_id, environment.source_file, environment.source_origin, environment.source_segments)
+    signature :: sema_function_symbol_type(function, false, method_id, environment.source_file, environment.source_origin, environment.source_segments)
     visibility :: if function.is_pub -> 2 else -> if function.is_package_pub -> 1 else -> 0
     method_symbol := Symbol{id: method_id, kind: SymbolKind.Function, name: function.name, module_name: environment.module_identity, owner: Val(owner_symbol.id.key), span: function.name_span, ty: Val(signature), visibility: visibility}
     target := sema_call_static_function_target(method_symbol, signature, sema_inference_type_params(function.type_params), type_args, environment, span, &diagnostics) ?? return None

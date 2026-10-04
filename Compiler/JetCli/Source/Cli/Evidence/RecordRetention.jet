@@ -1,0 +1,189 @@
+// Retention and authenticated link projection (Source/RecordIndex.rs RI03).
+// RI01 owns entry/link validation, comparison, cycle detection and row codecs.
+use core.files as record_retention_files
+
+// Rust RecordIndex::validate_all (RecordIndex.rs:1015-1067).
+pub fn jet_cli_record_validate_all(entries: [JetCLIRecordIndexEntry], budget: JetCLIRecordBudget) JetCLIRecordError! {
+    keys := [String:Bool]{}
+    total_disposable_size := 0
+    total_links := 0
+    previous_sequence := -1
+    loop entry in entries {
+        jet_cli_record_entry_validate(entry)
+        if entry.recorded_sequence <= previous_sequence -> return Err(JetCLIRecordError{message: "recorded_sequence values must be unique and strictly increasing"})
+        previous_sequence = entry.recorded_sequence
+        key :: jet_cli_record_graph_key(entry.kind, entry.artifact_id)
+        if keys.has_key(key) -> return Err(JetCLIRecordError{message: "duplicate record identity `{jet_cli_record_kind_name(entry.kind)}/{entry.artifact_id}`"})
+        keys[key] = true
+        if jet_cli_record_entry_is_disposable(entry) {
+            total_disposable_size += entry.size
+            if total_disposable_size > 18446744073709551615 -> return Err(JetCLIRecordError{message: "record budget byte count overflows"})
+        }
+        total_links += entry.consumed.len() + entry.produced.len()
+        if total_links > 18446744073709551615 -> return Err(JetCLIRecordError{message: "record link count overflows"})
+    }
+    if total_disposable_size > budget.max_bytes -> return Err(JetCLIRecordError{message: "disposable record size {total_disposable_size} exceeds budget {budget.max_bytes}"})
+    if total_links > JET_CLI_MAX_LINKS_TOTAL -> return Err(JetCLIRecordError{message: "record index has too many links"})
+    loop entry in entries {
+        jet_cli_record_validate_targets(entry, entry.consumed, keys)
+        jet_cli_record_validate_targets(entry, entry.produced, keys)
+    }
+    jet_cli_record_reject_cycles(entries)
+}
+// Rust RecordIndex::validate_all missing-target pass (RecordIndex.rs:1056-1065).
+fn jet_cli_record_validate_targets(entry: JetCLIRecordIndexEntry, links: [JetCLIRecordLink], keys: [String:Bool]) JetCLIRecordError! {
+    loop link in links {
+        if !keys.has_key(jet_cli_record_graph_key(link.kind, link.artifact_id)) -> return Err(JetCLIRecordError{message: "record `{jet_cli_record_kind_name(entry.kind)}/{entry.artifact_id}` links to missing `{jet_cli_record_kind_name(link.kind)}/{link.artifact_id}`"})
+    }
+}
+// Rust RecordIndex::apply_eviction (RecordIndex.rs:1069-1116).
+// Only index rows are removed here; publication/artifact cleanup belongs to RI02/RI04.
+pub fn jet_cli_record_apply_eviction(entries: &[JetCLIRecordIndexEntry], budget: JetCLIRecordBudget) JetCLIRecordError! {
+    loop {
+        total := 0
+        loop entry in entries {
+            if !jet_cli_record_entry_is_disposable(entry) -> next
+            total += entry.size
+            if total > 18446744073709551615 -> return Err(JetCLIRecordError{message: "record budget byte count overflows"})
+        }
+        if total <= budget.max_bytes -> return
+        groups :: jet_cli_record_eviction_groups(entries)
+        chosen := -1
+        sequence := 18446744073709551616
+        artifact_id := ""
+        loop (index, group) in groups {
+            loop position in group {
+                entry :: entries[position]
+                if chosen < 0 || entry.recorded_sequence < sequence || (entry.recorded_sequence == sequence && entry.artifact_id < artifact_id) {
+                    chosen = index
+                    sequence = entry.recorded_sequence
+                    artifact_id = ~entry.artifact_id
+                }
+            }
+        }
+        if chosen < 0 -> return Err(JetCLIRecordError{message: "disposable history budget exceeded; no unreferenced FIFO record group can be evicted"})
+        group :: groups[chosen]
+        // Rust Vec::remove per position (1112-1114); #4367 blocks
+        // list.remove(i, .Slot) — single order-preserving pass instead.
+        removed := [Bool]{}
+        loop _ in entries -> &removed.push(false)
+        loop position in group -> removed[position] = true
+        kept := [JetCLIRecordIndexEntry]{}
+        loop (position, entry) in entries {
+            if !removed[position] -> &kept.push(~entry)
+        }
+        entries = ^kept
+    }
+}
+// Rust RecordIndex::eviction_groups (RecordIndex.rs:1118-1162).
+// Connected disposable components can be removed only without incoming external links.
+pub fn jet_cli_record_eviction_groups(entries: [JetCLIRecordIndexEntry]) -> [[Int]] Never! {
+    disposable := [Int]{}
+    loop (index, entry) in entries {
+        if jet_cli_record_entry_is_disposable(entry) -> &disposable.push(index)
+    }
+    visited := [Int:Bool]{}
+    groups := [[Int]]{}
+    loop start in disposable {
+        if visited.has_key(start) -> next
+        visited[start] = true
+        members := [Int:Bool]{}
+        members[start] = true
+        loop {
+            changed := false
+            loop candidate in disposable {
+                if members.has_key(candidate) -> next
+                linked := false
+                loop member in members.keys() {
+                    if jet_cli_record_entries_linked(entries[member], entries[candidate]) {
+                        linked = true
+                        break
+                    }
+                }
+                if linked {
+                    members[candidate] = true
+                    visited[candidate] = true
+                    changed = true
+                }
+            }
+            if !changed -> break
+        }
+        externally_referenced := false
+        loop (index, entry) in entries {
+            if members.has_key(index) -> next
+            loop target in members.keys() {
+                if jet_cli_record_entry_links_to(entry, entries[target]) {
+                    externally_referenced = true
+                    break
+                }
+            }
+            if externally_referenced -> break
+        }
+        if !externally_referenced {
+            group := members.keys().to_list()
+            &group.sort()
+            &groups.push(^group)
+        }
+    }
+    groups
+}
+// C-FS seam for Rust symlink_metadata/remove_file (RecordIndex.rs:1175-1192).
+// Metadata MUST be no-follow. Regular excludes symlinks, directories and special files.
+// The store caller supplies root.parent().and_then(Path::parent) as project_root;
+// None represents either absent parent, retaining Rust's no-op in that case.
+pub enum JetCLIRecordArtifactMetadata { Missing Regular Other }
+#Error
+pub enum JetCLIRecordRetentionIOError { NotFound Other(String) }
+pub trait JetCLIRecordRetentionHost {
+    fn symlink_metadata(&self, path: String) -[FS.Read]> JetCLIRecordArtifactMetadata JetCLIRecordRetentionIOError!
+    fn remove_file(&self, path: String) JetCLIRecordRetentionIOError! -[FS.Write]>
+}
+// Rust RecordIndex::remove_disposable_artifact (RecordIndex.rs:1164-1194).
+pub fn jet_cli_record_remove_disposable_artifact<H: JetCLIRecordRetentionHost>(entries: [JetCLIRecordIndexEntry], entry: JetCLIRecordIndexEntry, project_root: String?, host: &H) JetCLIRecordError! -[FS.Read, FS.Write]> {
+    loop other in entries {
+        if jet_cli_record_compare_paths(other.path, entry.path) == (0 <=> 0) -> return
+    }
+    root :: project_root ?? return
+    path :: record_retention_files.join(root, entry.path)
+    // #4368: generic ?? block with all-return match fails MIR lowering.
+    metadata :: &host.symlink_metadata(path) ?? return jet_cli_record_retention_io_error(err, path, "inspect")
+    if metadata == .Missing -> return
+    if metadata == .Other -> return Err(JetCLIRecordError{message: "disposable artifact is not a regular file: {path}"})
+    &host.remove_file(path) ?? return jet_cli_record_retention_io_error(err, path, "evict")
+}
+// Rust remove_disposable_artifact NotFound/error branches (RecordIndex.rs:1179-1191).
+fn jet_cli_record_retention_io_error(error: JetCLIRecordRetentionIOError, path: String, operation: String) JetCLIRecordError! {
+    if error == .Other(message) -> return Err(JetCLIRecordError{message: "could not {operation} disposable artifact `{path}`: {message}"})
+}
+// Rust RecordIndex::visible_entry (RecordIndex.rs:1196-1204).
+pub fn jet_cli_record_visible_entry(entries: [JetCLIRecordIndexEntry], entry: JetCLIRecordIndexEntry, authenticated: Bool) -> JetCLIRecordIndexEntry Never! {
+    if authenticated -> return ~entry
+    // Copy retained links once, rather than cloning both arrays before filtering.
+    JetCLIRecordIndexEntry{
+        identity: ~entry.identity,
+        kind: entry.kind,
+        artifact_id: ~entry.artifact_id,
+        path: ~entry.path,
+        consumed: jet_cli_record_visible_links(entries, entry.consumed),
+        produced: jet_cli_record_visible_links(entries, entry.produced),
+        capture: entry.capture,
+        size: entry.size,
+        recorded_sequence: entry.recorded_sequence,
+        saved: entry.saved,
+    }
+}
+// Rust RecordIndex::visible_entry retain passes (RecordIndex.rs:1201-1202).
+fn jet_cli_record_visible_links(entries: [JetCLIRecordIndexEntry], links: [JetCLIRecordLink]) -> [JetCLIRecordLink] Never! {
+    visible := [JetCLIRecordLink]{}
+    loop link in links {
+        if jet_cli_record_link_visible(entries, link) -> &visible.push(~link)
+    }
+    visible
+}
+// Rust RecordIndex::link_visible (RecordIndex.rs:1206-1211).
+pub fn jet_cli_record_link_visible(entries: [JetCLIRecordIndexEntry], link: JetCLIRecordLink) -> Bool Never! {
+    loop entry in entries {
+        if entry.kind == link.kind && entry.artifact_id == link.artifact_id -> return !jet_cli_record_entry_is_sensitive(entry)
+    }
+    false
+}

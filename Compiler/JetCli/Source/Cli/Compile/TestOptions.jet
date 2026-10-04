@@ -1,0 +1,246 @@
+// Rust Source/CmdCompile.rs:5923-5955,7111-7392. Pure invocation policy.
+// Time and settings are explicit inputs; only the process host owns environment
+// reads and diagnostics. The caller samples Unix nanoseconds once for shuffle.
+use core.math as test_options_math
+
+// Rust None is named Off because None is a reserved option constructor.
+pub enum JetCLITestCapturePolicy {
+    Failed
+    All
+    Off
+}
+
+#Error
+pub struct JetCLITestError {
+    pub code: String
+    pub message: String
+    pub fix: String
+    pub exit_code: Int
+}
+
+// Rust invalid_test_run_option (CmdCompile.rs:7385-7392).
+fn jet_cli_test_option_error(message: String) -> JetCLITestError Never! {
+    JetCLITestError{code: "E2104", message: message, fix: "use the canonical `jet test` flag spelling", exit_code: 2}
+}
+
+// Rust str::to_ascii_lowercase, shared by test flag and fact parsing.
+fn jet_cli_test_ascii_lower(value: String) -> String Never! {
+    bytes := value.bytes()
+    loop index in 0..<bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if code >= 65 && code <= 90 -> bytes[index] = U8{code + 32}
+    }
+    String.from_bytes(bytes) ?? panic("ASCII conversion preserves UTF-8")
+}
+
+// Rust TestCapturePolicy::as_str (CmdCompile.rs:5931-5939).
+pub fn jet_cli_test_capture_name(policy: JetCLITestCapturePolicy) -> String Never! {
+    if policy == {
+        .Failed -> "failed"
+        .All -> "all"
+        .Off -> "none"
+    }
+}
+
+// Rust parse_test_capture (CmdCompile.rs:5941-5955). Unlike parser errors,
+// this diagnostic exits with USER_ERROR (1), not USAGE (2).
+pub fn jet_cli_test_parse_capture(value: String) -> JetCLITestCapturePolicy JetCLITestError! {
+    if jet_cli_test_ascii_lower(~value.trim()) == {
+        "failed" | "failure" | "failures" -> Ok(JetCLITestCapturePolicy.Failed)
+        "all" -> Ok(JetCLITestCapturePolicy.All)
+        "none" | "off" -> Ok(JetCLITestCapturePolicy.Off)
+        else -> Err(JetCLITestError{code: "E2104", message: "invalid --capture value `{value}` (expected failed, all, or none)", fix: "", exit_code: 1})
+    }
+}
+
+// Rust TestRunOpts (CmdCompile.rs:7112-7166).
+pub struct JetCLITestRunOptions {
+    pub show_default: Bool
+    pub watch: Bool
+    pub fresh: Bool
+    pub docs: Bool
+    pub where_expr: String?
+    pub capture: JetCLITestCapturePolicy
+    pub update_snapshots: Bool
+    pub coverage: Bool
+    pub release: Bool
+    pub profile: String?
+    pub setting_overrides: [String: String]
+    pub trace_tiers: Bool
+    pub filter: String?
+    pub shuffle_seed: Int?
+    pub serial: Bool
+    pub grade_generated: Bool
+    pub generated_test_name: String?
+    pub generated_iterations: Int?
+    pub generated_time_budget_ms: Int?
+    pub generated_seed: Int?
+    pub generated_corpus: String?
+    pub measure: Bool
+    pub record: String?
+    pub browser_engines: String?
+    pub browser_retries: Int?
+    pub browser_reporter: String?
+    pub browser_ui: Bool
+    pub browser_visual: Bool
+    pub browser_trace: Bool
+}
+
+// Rust TestRunOpts::default (CmdCompile.rs:7111).
+pub fn jet_cli_test_options_default() -> JetCLITestRunOptions Never! {
+    JetCLITestRunOptions{show_default: false, watch: false, fresh: false, docs: false,
+        where_expr: None, capture: JetCLITestCapturePolicy.Failed, update_snapshots: false,
+        coverage: false, release: false, profile: None, setting_overrides: [String: String]{},
+        trace_tiers: false, filter: None, shuffle_seed: None, serial: false,
+        grade_generated: false, generated_test_name: None, generated_iterations: None,
+        generated_time_budget_ms: None, generated_seed: None, generated_corpus: None,
+        measure: false, record: None, browser_engines: None, browser_retries: None,
+        browser_reporter: None, browser_ui: false, browser_visual: false, browser_trace: false}
+}
+
+// Rust u64::from_str accepts a leading '+' but no whitespace or separators.
+fn jet_cli_test_unsigned(value: String) -> Int? Never! {
+    bytes :: value.bytes()
+    start :: if bytes.len() > 0 && bytes[0] == (U8{43}) -> 1 else -> 0
+    if start == bytes.len() -> return None
+    number := 0
+    loop index in start..<bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if code < 48 || code > 57 -> return None
+        number = number * 10 + code - 48
+        if number > 18446744073709551615 -> return None
+    }
+    Val(number)
+}
+
+// Rust test_run_option_value (CmdCompile.rs:7350-7364).
+fn jet_cli_test_option_value(argv: [String], index: &Int, name: String, inline: String?) -> String JetCLITestError! {
+    if inline == .Val(value) -> return Ok(~value)
+    if index + 1 >= argv.len() -> return Err(jet_cli_test_option_error("`{name}` needs a value"))
+    index += 1
+    Ok(argv[index])
+}
+
+// Rust merge_test_filter (CmdCompile.rs:7366-7376).
+fn jet_cli_test_merge_filter(options: &JetCLITestRunOptions, value: String) JetCLITestError! {
+    if options.filter == {
+        .Val(previous) -> {
+            if previous != value -> return Err(jet_cli_test_option_error("conflicting test filters `{previous}` and `{value}`"))
+        }
+        .None -> options.filter = Val(value)
+    }
+}
+
+// Rust test_shuffle_seed (CmdCompile.rs:7378-7383): as_nanos() as u64.
+pub fn jet_cli_test_shuffle_seed(unix_ns: Int) -> Int Never! {
+    if unix_ns < 0 -> return 0
+    unix_ns % 18446744073709551616
+}
+
+// Rust TestRunOpts::parse (CmdCompile.rs:7171-7348). Positionals select the
+// target elsewhere, but are counted here and feed the optional second filter.
+pub fn jet_cli_test_parse_options(argv: [String], settings: [String: String], unix_ns: Int) -> JetCLITestRunOptions JetCLITestError! {
+    options := jet_cli_test_options_default()
+    options.setting_overrides = ~settings
+    positionals := [String]{}
+    index := 0
+    loop index < argv.len() {
+        argument :: argv[index]
+        if index == 0 && argument == "test" {
+            index += 1
+            next
+        }
+        if argument == "--" -> break
+        name := ~argument
+        inline := String?{None}
+        bytes :: argument.bytes()
+        loop at in 0..<bytes.len() {
+            if bytes[at] == (U8{61}) {
+                name = String.from_bytes(bytes[0..<at]) ?? panic("ASCII '=' is a UTF-8 boundary")
+                inline = Val(String.from_bytes(bytes[at + 1..<bytes.len()]) ?? panic("ASCII '=' is a UTF-8 boundary"))
+                break
+            }
+        }
+        if name == {
+            "--show-default" -> options.show_default = true
+            "--watch" -> options.watch = inline != Val("off") && inline != Val("false") && inline != Val("0")
+            "--fresh" -> options.fresh = true
+            "--update-snapshots" | "-u" -> options.update_snapshots = true
+            "--coverage" -> options.coverage = true
+            "--release" -> options.release = true
+            "--trace-tiers" -> options.trace_tiers = true
+            "--serial" -> options.serial = true
+            "--docs" -> options.docs = true
+            "--measure" -> options.measure = true
+            "--grade" -> {
+                value :: jet_cli_test_option_value(argv, &index, name, inline)
+                if value != "generated" -> return Err(jet_cli_test_option_error("`--grade={value}` is not supported by `jet test`"))
+                options.grade_generated = true
+            }
+            "--iterations" | "--seed" -> {
+                value :: jet_cli_test_option_value(argv, &index, name, inline)
+                number :: jet_cli_test_unsigned(value) ?? return Err(jet_cli_test_option_error("`{name}={value}` isn't a number"))
+                if name == "--seed" -> options.generated_seed = Val(number) else -> options.generated_iterations = Val(number)
+            }
+            "--time" -> {
+                value :: jet_cli_test_option_value(argv, &index, name, inline)
+                seconds :: Float.parse(value) ?? return Err(jet_cli_test_option_error("`--time={value}` must be a non-negative number"))
+                if !test_options_math.is_finite(seconds) || seconds < (Float{0.0}) -> return Err(jet_cli_test_option_error("`--time={value}` must be a non-negative number"))
+                millis :: seconds * (Float{1000.0})
+                // Rust float-to-u64 conversion truncates and saturates, even
+                // when finite seconds multiply to infinity.
+                options.generated_time_budget_ms = Val(if millis >= (Float{18446744073709551616.0}) -> 18446744073709551615 else -> Int.from_float(test_options_math.trunc(millis)) ?? panic("finite integral milliseconds below u64::MAX fit Int"))
+            }
+            "--corpus" -> options.generated_corpus = Val(jet_cli_test_option_value(argv, &index, name, inline))
+            "--browser-ui" -> options.browser_ui = inline != Val("off") && inline != Val("false") && inline != Val("0")
+            "--browser-visual" -> options.browser_visual = inline != Val("off") && inline != Val("false") && inline != Val("0")
+            "--browser-trace" -> options.browser_trace = inline != Val("off") && inline != Val("false") && inline != Val("0")
+            "--where" -> options.where_expr = Val(jet_cli_test_option_value(argv, &index, name, inline))
+            "--capture" -> options.capture = jet_cli_test_parse_capture(jet_cli_test_option_value(argv, &index, name, inline))
+            "--filter" -> jet_cli_test_merge_filter(&options, jet_cli_test_option_value(argv, &index, name, inline))
+            "--profile" -> options.profile = Val(jet_cli_test_option_value(argv, &index, name, inline))
+            "--set" | "--color" -> {
+                if inline == None -> _ :: jet_cli_test_option_value(argv, &index, name, inline)
+            }
+            "--shuffle" -> {
+                if inline == {
+                    .Val(value) -> options.shuffle_seed = Val(jet_cli_test_unsigned(value) ?? return Err(jet_cli_test_option_error("`--shuffle={value}` isn't a number")))
+                    .None -> options.shuffle_seed = Val(jet_cli_test_shuffle_seed(unix_ns))
+                }
+            }
+            "--record" -> {
+                value :: inline ?? return Err(jet_cli_test_option_error("`--record` needs a closed `=NAME` value"))
+                // The existing Args parser owns replay NAME validation.
+                if !jet_cli_args_replay_name_valid(value) -> return Err(jet_cli_test_option_error("replay NAME must be non-empty and contain only ASCII letters, digits, `-`, or `_`"))
+                options.record = Val(value)
+            }
+            "--browser" -> options.browser_engines = Val(jet_cli_test_option_value(argv, &index, name, inline))
+            "--browser-retries" -> {
+                value :: jet_cli_test_option_value(argv, &index, name, inline)
+                retries :: Int.parse(value) ?? return Err(jet_cli_test_option_error("`--browser-retries={value}` must be between 0 and 5"))
+                // Rust i64 parsing also rejects whitespace and underscores.
+                valid := value != ""
+                loop (at, byte) in value.bytes() {
+                    code :: Int.from_u8(byte)
+                    if !(code >= 48 && code <= 57) && !(at == 0 && (code == 43 || code == 45)) -> valid = false
+                }
+                if !valid || retries < 0 || retries > 5 -> return Err(jet_cli_test_option_error("`--browser-retries={value}` must be between 0 and 5"))
+                options.browser_retries = Val(retries)
+            }
+            "--browser-reporter" -> {
+                value :: jet_cli_test_option_value(argv, &index, name, inline)
+                if value != "text" && value != "json" && value != "html" -> return Err(jet_cli_test_option_error("`--browser-reporter={value}` is not supported"))
+                options.browser_reporter = Val(value)
+            }
+            "--json" | "--machine" | "--quiet" | "--verbose" | "--no-color" -> {}
+            else -> { if !argument.starts_with("-") -> &positionals.push(argument) }
+        }
+        index += 1
+    }
+    if positionals.len() > 2 -> return Err(jet_cli_test_option_error("`jet test` accepts one target and one positional filter, got {positionals.len()} positionals"))
+    if positionals.len() > 1 {
+        if options.grade_generated -> options.generated_test_name = Val(positionals[1]) else -> jet_cli_test_merge_filter(&options, positionals[1])
+    }
+    if options.release -> options.profile = Val("release")
+    Ok(options)
+}

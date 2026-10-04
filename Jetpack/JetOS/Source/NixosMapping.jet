@@ -1,0 +1,475 @@
+// Pure migration comparison leaf: nixos_backend.rs:26,30-54,87-895.
+// No provider, filesystem, VM or migration command operations live here.
+// #4482: accepted-but-unprojected Rust options refuse in source order; this
+// deliberate cutover is exercised separately from the original mapped cases.
+
+JETOS_NIXOS_STATE_VERSION :: prep { "26.05" }
+JETOS_NIXOS_MISSING_PIN :: prep { "no declared source resolves to `NixOS/nixpkgs/<rev-or-ref>@github` (the real tier needs exactly one nixpkgs pin)" }
+
+pub struct JetOSNixosInput {
+    pub owner: String
+    pub repo: String
+    pub rev: String
+}
+
+pub struct JetOSNixosMapping {
+    pub nixpkgs_owner: String
+    pub nixpkgs_repo: String
+    pub nixpkgs_rev: String
+    pub body_lines: [String]
+    pub system_packages: [String]
+    pub kernel_input: JetOSNixosInput?
+    pub desktop_shell_process: String
+}
+
+// Exact aggregate reasons, not a diagnostic or a validation model.
+pub enum JetOSNixosMappingResult {
+    Mapped(mapping: JetOSNixosMapping)
+    Unmapped(reasons: [String])
+}
+
+pub fn jetos_nixos_locked_inputs(mapping: JetOSNixosMapping) -> [String] Never! {
+    inputs := [String]{"github:{mapping.nixpkgs_owner}/{mapping.nixpkgs_repo}/{mapping.nixpkgs_rev}"}
+    if mapping.kernel_input == .Val(input) -> &inputs.push("github:{input.owner}/{input.repo}/{input.rev}")
+    inputs
+}
+
+fn jetos_nixos_string(value: String) -> String Never! {
+    parts := [String]{"\""}
+    loop scalar in value.chars() {
+        text :: "{scalar}"
+        &parts.push(if text == {
+            "\\" -> "\\\\"
+            "\"" -> "\\\""
+            "$" -> "\\$"
+            else -> text
+        })
+    }
+    &parts.push("\"")
+    parts.join("")
+}
+
+fn jetos_nixos_string_list(values: [String]) -> String Never! {
+    if values.len() == 0 -> return "[ ]"
+    parts := [String]{}
+    loop value in values -> &parts.push(jetos_nixos_string(value))
+    "[ {parts.join(" ")} ]"
+}
+
+fn jetos_nixos_int_list(values: [Int]) -> String Never! {
+    if values.len() == 0 -> return "[ ]"
+    parts := [String]{}
+    loop value in values -> &parts.push("{value}")
+    "[ {parts.join(" ")} ]"
+}
+
+fn jetos_nixos_parse_int_list(value: String) -> [Int] Never! {
+    values := [Int]{}
+    loop item in jetos_parse_list_items(value) {
+        if jetos_parse_i64(item) == .Val(number) -> &values.push(number)
+    }
+    values
+}
+
+fn jetos_nixos_owner_repo_rev(upstream: String) -> JetOSNixosInput? Never! {
+    if !upstream.starts_with("github:") -> return None
+    first :: upstream.removeprefix("github:").split_once("/") ?? return None
+    second :: first.after.split_once("/") ?? return None
+    if !jetos_nixos_ascii_equal(second.before, "nixpkgs") -> return None
+    Val(JetOSNixosInput{owner: first.before, repo: second.before, rev: second.after})
+}
+
+fn jetos_nixos_pin(table: SourceTable) -> JetOSNixosInput? Never! {
+    loop decl in table.declarations() {
+        if jetos_nixos_owner_repo_rev(decl.upstream) == .Val(pin) -> return Val(pin)
+    }
+    None
+}
+
+fn jetos_nixos_is_source(source: RefSource, table: SourceTable) -> Bool Never! {
+    if source == {
+        .Jetpack | .Nixpkgs -> true
+        .Named(name) -> {
+            upstream :: table.upstream(name) ?? return false
+            jetos_nixos_owner_repo_rev(upstream) != None
+        }
+        else -> false
+    }
+}
+
+fn jetos_nixos_is_known_option_key(key: String) -> Bool Never! {
+    if jetos_is_option_priority_metadata(key) -> return true
+    if key.starts_with("users.") {
+        pair :: key.removeprefix("users.").split_once(".") ?? return false
+        return if pair.after == {
+            "normal" | "home" | "groups" | "initialPassword" | "shell" -> true
+            else -> false
+        }
+    }
+    if key.starts_with("user.") {
+        pair :: key.removeprefix("user.").split_once(".") ?? return false
+        return pair.after == "packages" || pair.after == "homeManager"
+    }
+    if key.starts_with("apps.program.") -> return key.removeprefix("apps.program.").contains(".")
+    if key.starts_with("groups.") {
+        pair :: key.removeprefix("groups.").split_once(".") ?? return false
+        return pair.after == "members"
+    }
+    if key.starts_with("performance.sysctl.") -> return true
+    if key == {
+        "network.hostName" | "network.networkmanager.enable" | "network.firewall.allowedTcpPorts"
+        | "network.firewall.allowedUdpPorts" | "network.dns" | "filesystem.timeZone"
+        | "services.localization.locale" | "services.localization.keyboardLayout" | "boot.loader"
+        | "boot.loader.efi.canTouchVariables" | "boot.kernel" | "boot.kernel.profile" | "boot.kernel.params"
+        | "init.defaultTarget" | "performance.zram.memoryPercent" | "services.desktop.profile"
+        | "services.desktop.plasma.enable" | "services.displayManager" | "services.desktop.autoLogin.user"
+        | "services.audio.pipewire.enable" | "services.audio.rtkit.enable" | "services.virtualization.libvirtd.enable"
+        | "services.virtualization.docker.enable" | "services.gaming.steam.enable" | "services.gaming.gamemode.enable"
+        | "services.smartcard.pcscd.enable" | "hardware.bluetooth.enable" | "apps.flatpak.enable" -> true
+        else -> false
+    }
+}
+
+fn jetos_nixos_shell_package_attr(value: String) -> String Never! {
+    cleaned :: jetos_clean_value(value)
+    if cleaned.cut_last(".") == {
+        .Val(pair) -> pair.after
+        .None -> cleaned
+    }
+}
+
+fn jetos_nixos_parse_package_ref_names(value: String) -> [String] Never! {
+    names := [String]{}
+    raw :: value.bytes()
+    start := 0
+    loop index in 0..<(raw.len() + 1) {
+        if index != raw.len() && raw[index] != 91 && raw[index] != 93 && raw[index] != 44 -> next
+        // ASCII separators are UTF-8 boundaries, including for Unicode names.
+        part :: String.from_bytes(raw.slice(start, index)) ?? panic("UTF-8 package reference")
+        start = index + 1
+        trimmed := part.trim() // #4303
+        if trimmed == "" -> next
+        attr :: if trimmed.cut_last(".") == {
+            .Val(pair) -> pair.after
+            .None -> trimmed
+        }
+        name := attr.trim() // #4303
+        if name != "" && name != "nixpkgs" -> &names.push(name)
+    }
+    names
+}
+
+pub fn jetos_nixos_map_system(system: SystemPlan, table: SourceTable) -> JetOSNixosMappingResult Never! {
+    option_refusals := [String?]{}
+    option_values := [String: String]{}
+    package_refusals := [String]{}
+    service_refusals := [String]{}
+    users :: jetos_collect_names(system, "users")
+    loop option in system.options {
+        if !jetos_nixos_is_known_option_key(option.key) {
+            &option_refusals.push(Val("option `{option.key}`"))
+            next
+        }
+        // #4482: accepted-but-unprojected declarations must fail closed.
+        if jetos_is_option_priority_metadata(option.key) {
+            &option_refusals.push(None)
+            next
+        }
+        omitted := option.key == "init.defaultTarget"
+        if option.key.starts_with("user.") {
+            pair :: option.key.removeprefix("user.").split_once(".")
+            if pair == .Val(field) {
+                if field.after == "homeManager" -> omitted = true
+                if field.after == "packages" && !users.contains(field.before) -> omitted = true
+            }
+        }
+        if option.key.starts_with("apps.program.") {
+            pair :: option.key.removeprefix("apps.program.").split_once(".")
+            if pair == .Val(field) {
+                if field.after != "enable" || jetos_clean_bool_json(option.value) != "true" -> omitted = true
+            }
+        }
+        &option_refusals.push(if omitted -> Val("option `{option.key}` (no NixOS projection)") else -> None)
+    }
+    pin :: jetos_nixos_pin(table)
+    packages := [String]{}
+    loop pkg in system.packages {
+        raw :: if pkg.source == "" -> pkg.name else -> "{pkg.name}@{pkg.source}"
+        accepted :: if RefSpec.classify_in(raw, table) == {
+            .Ok(spec) -> jetos_nixos_is_source(spec.source, table)
+            .Err(_) -> false
+        }
+        if accepted -> &packages.push(pkg.name)
+        else {
+            label :: if pkg.source == "" -> pkg.name else -> "{pkg.source}.{pkg.name}"
+            &package_refusals.push("package `{label}` (non-nixpkgs source in real tier)")
+        }
+    }
+    body := [String]{}
+    if jetos_resolved_option_value(system, "network.hostName") == .Val(v) -> &body.push("  networking.hostName = {jetos_nixos_string(v)};")
+    if jetos_resolved_option_value(system, "network.networkmanager.enable") == .Val(v) -> &body.push("  networking.networkmanager.enable = {jetos_clean_bool_json(v)};")
+    if jetos_resolved_option_value(system, "network.firewall.allowedTcpPorts") == .Val(v) -> &body.push("  networking.firewall.allowedTCPPorts = {jetos_nixos_int_list(jetos_nixos_parse_int_list(v))};")
+    if jetos_resolved_option_value(system, "network.dns") == .Val(v) -> &body.push("  networking.nameservers = {jetos_nixos_string_list(jetos_parse_list_items(v))};")
+    if jetos_resolved_option_value(system, "filesystem.timeZone") == .Val(v) -> &body.push("  time.timeZone = {jetos_nixos_string(v)};")
+    if jetos_resolved_option_value(system, "services.localization.locale") == .Val(v) -> &body.push("  i18n.defaultLocale = {jetos_nixos_string(v)};")
+    if jetos_resolved_option_value(system, "services.localization.keyboardLayout") == .Val(v) -> &body.push("  services.xserver.xkb.layout = {jetos_nixos_string(v)};")
+    if jetos_resolved_option_value(system, "boot.loader") == .Val(v) {
+        symbol :: jetos_clean_symbol(v)
+        if symbol == {
+            "SystemdBoot" -> &body.push("  boot.loader.systemd-boot.enable = true;")
+            "Limine" -> &body.push("  boot.loader.limine.enable = true;")
+            else -> option_values["boot.loader"] = "option `boot.loader` value `.{symbol}` has no NixOS mapping (supported: .SystemdBoot, .Limine)"
+        }
+    }
+    if jetos_resolved_option_value(system, "boot.loader.efi.canTouchVariables") == .Val(v) -> &body.push("  boot.loader.efi.canTouchEfiVariables = {jetos_clean_bool_json(v)};")
+    params := if jetos_resolved_option_value(system, "boot.kernel.params") == {
+        .Val(v) -> jetos_parse_list_items(v)
+        .None -> [String]{}
+    }
+    &params.push("console=ttyS0,115200")
+    &params.push("console=tty0")
+    &body.push("  boot.kernelParams = {jetos_nixos_string_list(params)};")
+    kernel_input := JetOSNixosInput?{None}
+    if jetos_resolved_option_value(system, "boot.kernel") == .Val(v) {
+        symbol :: jetos_clean_symbol(v)
+        if symbol == "CachyOS" {
+            loop decl in table.declarations() {
+                if !decl.upstream.starts_with("github:") -> next
+                first :: decl.upstream.removeprefix("github:").split_once("/") ?? next
+                second :: first.after.split_once("/")
+                repo :: if second == {
+                    .Val(pair) -> pair.before
+                    .None -> first.after
+                }
+                if !jetos_nixos_ascii_equal(repo, "nix-cachyos-kernel") -> next
+                rev :: if second == {
+                    .Val(pair) -> pair.after
+                    .None -> "release"
+                }
+                kernel_input = Val(JetOSNixosInput{owner: first.before, repo: repo, rev: rev})
+                break
+            }
+            if kernel_input != None {
+                profile :: if jetos_resolved_option_value(system, "boot.kernel.profile") == {
+                    .Val(p) -> jetos_clean_symbol(p)
+                    .None -> ""
+                }
+                attr :: if profile == "CachyOSLts" -> "linuxPackages-cachyos-lts" else -> "linuxPackages-cachyos-latest"
+                &body.push("  boot.kernelPackages = pkgs.cachyosKernels.{attr};")
+            } else {
+                option_values["boot.kernel"] = "option `boot.kernel` `.CachyOS` needs a declared `<owner>/nix-cachyos-kernel/<rev>@github` source for the kernel overlay"
+            }
+        } else {
+            option_values["boot.kernel"] = "option `boot.kernel` value `.{symbol}` has no NixOS mapping (supported: .CachyOS)"
+        }
+    }
+    if jetos_resolved_option_value(system, "network.firewall.allowedUdpPorts") == .Val(v) -> &body.push("  networking.firewall.allowedUDPPorts = {jetos_nixos_int_list(jetos_nixos_parse_int_list(v))};")
+    has_sysctl := false
+    loop option in system.options {
+        if !option.key.starts_with("performance.sysctl.") -> next
+        if !has_sysctl {
+            &body.push("  boot.kernel.sysctl = {{")
+            has_sysctl = true
+        }
+        key :: option.key.removeprefix("performance.sysctl.")
+        cleaned :: jetos_clean_value(option.value)
+        numeric :: jetos_nixos_is_float(cleaned)
+        rendered :: if cleaned == "true" || cleaned == "false" || numeric -> cleaned else -> jetos_nixos_string(cleaned)
+        &body.push("    \"{key}\" = lib.mkForce {rendered};")
+    }
+    if has_sysctl -> &body.push("  }};")
+    if jetos_resolved_option_value(system, "performance.zram.memoryPercent") == .Val(v) {
+        &body.push("  zramSwap = {{")
+        &body.push("    enable = true;")
+        &body.push("    memoryPercent = {jetos_clean_value(v)};")
+        &body.push("  }};")
+    }
+    if jetos_resolved_option_value(system, "services.virtualization.libvirtd.enable") == .Val(v) -> &body.push("  virtualisation.libvirtd.enable = {jetos_clean_bool_json(v)};")
+    if jetos_resolved_option_value(system, "services.virtualization.docker.enable") == .Val(v) -> &body.push("  virtualisation.docker.enable = {jetos_clean_bool_json(v)};")
+    if jetos_resolved_option_value(system, "services.gaming.steam.enable") == .Val(v) -> &body.push("  programs.steam.enable = {jetos_clean_bool_json(v)};")
+    if jetos_resolved_option_value(system, "services.gaming.gamemode.enable") == .Val(v) -> &body.push("  programs.gamemode.enable = {jetos_clean_bool_json(v)};")
+    if jetos_resolved_option_value(system, "services.smartcard.pcscd.enable") == .Val(v) -> &body.push("  services.pcscd.enable = {jetos_clean_bool_json(v)};")
+    if jetos_resolved_option_value(system, "hardware.bluetooth.enable") == .Val(v) -> &body.push("  hardware.bluetooth.enable = {jetos_clean_bool_json(v)};")
+    if jetos_resolved_option_value(system, "apps.flatpak.enable") == .Val(v) -> &body.push("  services.flatpak.enable = {jetos_clean_bool_json(v)};")
+    loop group in jetos_collect_names(system, "groups") {
+        if jetos_resolved_option_value(system, "groups.{group}.members") == .Val(v) {
+            members := [String]{}
+            loop member in jetos_parse_list_items(v) -> &members.push(member.removeprefix("users."))
+            &body.push("  users.groups.{group}.members = {jetos_nixos_string_list(members)};")
+        }
+    }
+    desktop_default := false
+    if jetos_resolved_option_value(system, "services.desktop.profile") == .Val(v) {
+        symbol :: jetos_clean_symbol(v)
+        desktop_default = symbol == "Default"
+        if !desktop_default -> option_values["services.desktop.profile"] = "option `services.desktop.profile` value `.{symbol}` has no NixOS mapping (supported: .Default)"
+    }
+    plasma :: if jetos_resolved_option_value(system, "services.desktop.plasma.enable") == {
+        .Val(v) -> jetos_clean_bool_json(v) == "true"
+        .None -> false
+    }
+    dm :: if jetos_resolved_option_value(system, "services.displayManager") == {
+        .Val(v) -> Val(jetos_clean_value(v))
+        .None -> if desktop_default -> Val("gdm") else if plasma -> Val("sddm") else -> None
+    }
+    if desktop_default -> &body.push("  services.desktopManager.gnome.enable = true;")
+    if plasma -> &body.push("  services.desktopManager.plasma6.enable = true;")
+    if dm == .Val(manager) {
+        if manager == {
+            "gdm" -> &body.push("  services.displayManager.gdm.enable = true;")
+            "sddm" -> &body.push("  services.displayManager.sddm.enable = true;")
+            else -> option_values["services.displayManager"] = "option `services.displayManager` value `{manager}` has no NixOS mapping (supported: gdm, sddm)"
+        }
+    }
+    if jetos_resolved_option_value(system, "services.desktop.autoLogin.user") == .Val(user) {
+        &body.push("  services.displayManager.autoLogin = {{")
+        &body.push("    enable = true;")
+        &body.push("    user = {jetos_nixos_string(user)};")
+        &body.push("  }};")
+        &body.push("  systemd.services.\"getty@tty1\".enable = false;")
+        &body.push("  systemd.services.\"autovt@tty1\".enable = false;")
+    }
+    if jetos_resolved_option_value(system, "services.audio.pipewire.enable") == .Val(v) {
+        enabled :: jetos_clean_bool_json(v)
+        &body.push("  services.pipewire = {{")
+        &body.push("    enable = {enabled};")
+        &body.push("    alsa.enable = {enabled};")
+        &body.push("    pulse.enable = {enabled};")
+        &body.push("  }};")
+    }
+    if jetos_resolved_option_value(system, "services.audio.rtkit.enable") == .Val(v) -> &body.push("  security.rtkit.enable = {jetos_clean_bool_json(v)};")
+    fish := false
+    loop name in users {
+        &body.push("  users.users.{name} = {{")
+        if jetos_resolved_option_value(system, "users.{name}.normal") == .Val(v) -> &body.push("    isNormalUser = {jetos_clean_bool_json(v)};")
+        if jetos_resolved_option_value(system, "users.{name}.home") == .Val(v) -> &body.push("    home = {jetos_nixos_string(v)};")
+        if jetos_resolved_option_value(system, "users.{name}.groups") == .Val(v) -> &body.push("    extraGroups = {jetos_nixos_string_list(jetos_parse_list_items(v))};")
+        if jetos_resolved_option_value(system, "users.{name}.initialPassword") == .Val(v) -> &body.push("    initialPassword = {jetos_nixos_string(v)};")
+        if jetos_resolved_option_value(system, "users.{name}.shell") == .Val(v) {
+            attr :: jetos_nixos_shell_package_attr(v)
+            &body.push("    shell = pkgs.{attr};")
+            if attr == "fish" -> fish = true
+        }
+        if jetos_resolved_option_value(system, "user.{name}.packages") == .Val(v) {
+            attrs :: jetos_nixos_parse_package_ref_names(v)
+            if attrs.len() != 0 -> &body.push("    packages = map jetosPkg {jetos_nixos_string_list(attrs)};")
+        }
+        &body.push("  }};")
+    }
+    loop option in system.options {
+        if !option.key.starts_with("apps.program.") -> next
+        pair :: option.key.removeprefix("apps.program.").split_once(".") ?? next
+        if pair.after != "enable" || jetos_clean_bool_json(option.value) != "true" -> next
+        program :: pair.before
+        if program == {
+            "git" -> &body.push("  programs.git.enable = true;")
+            "fish" -> fish = true
+            "starship" | "helix" | "ghostty" | "vscode" | "yazi" | "btop" | "bat" | "eza"
+            | "fzf" | "zoxide" | "ripgrep" | "tealdeer" | "fastfetch" | "cursor" | "discord"
+            | "spicetify" | "browser" | "ssh" -> {
+                if !packages.contains(program) -> &packages.push(program)
+            }
+            else -> option_values[option.key] = "option `apps.program.{program}.enable` has no NixOS mapping yet"
+        }
+    }
+    if fish -> &body.push("  programs.fish.enable = true;")
+    loop service in system.services {
+        enabled :: if service.enable -> "true" else -> "false"
+        if service.name == "openssh" {
+            &body.push("  services.openssh.enable = {enabled};")
+            if jetos_service_extra(service, [String]{"ports"}) == .Val(v) {
+                ports :: jetos_nixos_parse_int_list(v)
+                if ports.len() != 0 -> &body.push("  services.openssh.ports = {jetos_nixos_int_list(ports)};")
+            }
+        } else if service.name == "tailscale" {
+            &body.push("  services.tailscale.enable = {enabled};")
+        } else if jetos_service_extra(service, [String]{"exec"}) == .Val(exec) {
+            attr :: jetos_nixos_string(service.name)
+            &body.push("  systemd.services.{attr} = {{")
+            &body.push("    enable = {enabled};")
+            &body.push("    serviceConfig.ExecStart = {jetos_nixos_string(exec)};")
+            &body.push("  }};")
+            if jetos_service_extra(service, [String]{"timer"}) == .Val(timer) {
+                &body.push("  systemd.timers.{attr} = {{")
+                &body.push("    wantedBy = [ \"timers.target\" ];")
+                &body.push("    timerConfig.OnCalendar = {jetos_nixos_string(timer)};")
+                &body.push("  }};")
+            }
+        } else {
+            &service_refusals.push("service `{service.name}` (unknown service with no `exec:` field)")
+        }
+    }
+    // #4482: each rejected declaration in source order, not sorted/deduped.
+    reasons := [String]{}
+    loop index in 0..<system.options.len() {
+        if option_refusals[index] == .Val(reason) -> &reasons.push(reason)
+        else if option_values.get(system.options[index].key) == .Val(reason) -> &reasons.push(reason)
+    }
+    if pin == None -> &reasons.push(JETOS_NIXOS_MISSING_PIN)
+    loop reason in package_refusals -> &reasons.push(reason)
+    loop reason in service_refusals -> &reasons.push(reason)
+    if reasons.len() != 0 -> return JetOSNixosMappingResult.Unmapped{reasons: reasons}
+    resolved :: pin ?? return JetOSNixosMappingResult.Unmapped{reasons: [String]{JETOS_NIXOS_MISSING_PIN}}
+    JetOSNixosMappingResult.Mapped{mapping: JetOSNixosMapping{
+        nixpkgs_owner: resolved.owner, nixpkgs_repo: resolved.repo, nixpkgs_rev: resolved.rev,
+        body_lines: body, system_packages: packages, kernel_input: kernel_input,
+        desktop_shell_process: if plasma -> "plasmashell" else -> "gnome-shell"
+    }}
+}
+
+pub fn jetos_nixos_render_flake(host: String, mapping: JetOSNixosMapping) -> String Never! {
+    extra_inputs := ""
+    extra_modules := ""
+    if mapping.kernel_input == .Val(input) {
+        extra_inputs = "  inputs.cachyos.url = \"github:{input.owner}/{input.repo}/{input.rev}\";\n  inputs.cachyos.inputs.nixpkgs.follows = \"nixpkgs\";\n"
+        extra_modules = " {{ nixpkgs.overlays = [ inputs.cachyos.overlays.default ]; }}"
+    }
+    jetos_nixos_flake_template().replace("@@HOST@@", host).replace("@@OWNER@@", mapping.nixpkgs_owner).replace("@@REPO@@", mapping.nixpkgs_repo).replace("@@REV@@", mapping.nixpkgs_rev).replace("@@EXTRA_INPUTS@@", extra_inputs).replace("@@EXTRA_MODULES@@", extra_modules)
+}
+
+pub fn jetos_nixos_render_configuration(system: SystemPlan, mapping: JetOSNixosMapping) -> String Never! {
+    parts := [String]{jetos_nixos_configuration_head().replace("@@STATEVERSION@@", JETOS_NIXOS_STATE_VERSION), "\n"}
+    loop line in mapping.body_lines -> &parts.push("{line}\n")
+    packages := [String]{}
+    loop package in mapping.system_packages -> &packages.push(jetos_nixos_string(package))
+    &parts.push("\n  environment.systemPackages = map jetosPkg [ {packages.join(" ")} ];\n")
+    user :: if jetos_resolved_option_value(system, "services.desktop.autoLogin.user") == {
+        .Val(value) -> value
+        .None -> {
+            names :: jetos_collect_names(system, "users")
+            if names.len() == 0 -> "root" else -> names[0]
+        }
+    }
+    desktop :: if mapping.desktop_shell_process == "plasmashell" -> "plasma" else -> "gnome"
+    &parts.push(jetos_nixos_configuration_proof_service().replace("@@USER@@", user).replace("@@DESKTOP_SHELL_PROCESS@@", mapping.desktop_shell_process).replace("@@DESKTOP_NAME@@", desktop).replace("@@HOST@@", system.name))
+    parts.join("")
+}
+
+fn jetos_nixos_flake_template() -> String Never! {
+    "{{\n  description = \"NixOS comparison for @@HOST@@ (generated by `jet os migrate compare-nixos`; do not hand-edit)\";\n\n  inputs.nixpkgs.url = \"github:@@OWNER@@/@@REPO@@/@@REV@@\";\n@@EXTRA_INPUTS@@\n  outputs = {{ self, nixpkgs, ... }}@inputs:\n    let\n      system = \"x86_64-linux\";\n      pkgs = nixpkgs.legacyPackages.${{system}};\n      lib = nixpkgs.lib;\n    in {{\n      nixosConfigurations.@@HOST@@ = lib.nixosSystem {{\n        inherit system;\n        modules = [ ./configuration.nix@@EXTRA_MODULES@@ ];\n      }};\n\n      packages.${{system}} = {{\n        disk = import (nixpkgs + \"/nixos/lib/make-disk-image.nix\") {{\n          inherit lib pkgs;\n          config = self.nixosConfigurations.@@HOST@@.config;\n          format = \"qcow2\";\n          diskSize = \"auto\";\n          additionalSpace = \"12G\";\n          partitionTableType = \"efi\";\n        }};\n        firmware = pkgs.OVMF.fd;\n      }};\n    }};\n}}\n"
+}
+
+fn jetos_nixos_configuration_head() -> String Never! {
+    "{{ config, pkgs, lib, ... }}:\nlet\n  # jetos package resolver: names come from imported package sets whose\n  # attribute may live under a package group (KDE apps live in\n  # `kdePackages.*`). A miss is a hard eval error, never a silent drop.\n  jetosPkg = name:\n    let\n      # `gnome-shell-extension-user-themes` (pname) lives at\n      # `gnomeExtensions.user-themes`; `dejavu-fonts` at `dejavu_fonts`.\n      extension = lib.removePrefix \"gnome-shell-extension-\" name;\n      underscored = builtins.replaceStrings [\"-\"] [\"_\"] name;\n      # Removed-alias attrs exist but throw on access — tryEval skips them\n      # so lookup falls through to the real location (e.g. kdePackages).\n      tryAttr = attrs: n:\n        if attrs ? ${{n}} then\n          let r = builtins.tryEval attrs.${{n}}; in\n          if r.success then [ r.value ] else [ ]\n        else [ ];\n      found = (tryAttr pkgs name) ++ (tryAttr pkgs underscored)\n        ++ (tryAttr (pkgs.kdePackages or {{ }}) name)\n        ++ (tryAttr (pkgs.gnomeExtensions or {{ }}) extension);\n    in\n    if builtins.length found > 0 then builtins.head found\n    else throw \"jetos: package `${{name}}` is not in nixpkgs, kdePackages, or gnomeExtensions at the pinned revision\";\nin\n{{\n  system.stateVersion = \"@@STATEVERSION@@\";\n  # Imported package sets routinely include unfree software (steam, discord,\n  # editors); nixpkgs' license gate is a nixpkgs-ism, not a jetos policy.\n  nixpkgs.config.allowUnfree = true;\n\n  boot.loader.timeout = 1;\n  boot.growPartition = true;\n  boot.initrd.availableKernelModules = [\n    \"virtio_pci\" \"virtio_blk\" \"virtio_scsi\" \"virtio_net\"\n    \"ahci\" \"xhci_pci\" \"nvme\" \"sd_mod\" \"sr_mod\"\n  ];\n\n  fileSystems.\"/\" = {{\n    device = \"/dev/disk/by-label/nixos\";\n    fsType = \"ext4\";\n    autoResize = true;\n  }};\n  fileSystems.\"/boot\" = {{\n    device = \"/dev/disk/by-label/ESP\";\n    fsType = \"vfat\";\n  }};\n\n  environment.variables.NIXOS_COMPARISON = \"1\";\n  programs.bash.promptInit = lib.mkAfter ''\n    PS1='NixOS comparison $ '\n    export PS1\n  '';\n  environment.etc.issue.text = \"NixOS comparison guest\\n\";\n  environment.etc.motd.text = \"NixOS comparison guest for A/B migration checks\\n\";\n"
+}
+
+fn jetos_nixos_configuration_proof_service() -> String Never! {
+    "\n  # NixOS comparison proof: emit one fact only after identity and desktop checks.\n  systemd.services.nixos-comparison-proof = {{\n    description = \"NixOS comparison guest proof emitter\";\n    wantedBy = [ \"multi-user.target\" ];\n    after = [ \"multi-user.target\" ];\n    serviceConfig = {{\n      Type = \"oneshot\";\n      RemainAfterExit = true;\n    }};\n    path = [ pkgs.bash pkgs.util-linux pkgs.systemd pkgs.procps pkgs.jq pkgs.gawk pkgs.gnused pkgs.coreutils ];\n    script = ''\n      deadline=$((SECONDS + 300))\n      while [ \"$SECONDS\" -lt \"$deadline\" ]; do\n        dm=$(systemctl is-active display-manager.service || true)\n        # NixOS wraps gnome-shell (comm = \".gnome-shell-wr…\"), so match the\n        # full command line rather than the truncated process name.\n        shell_pid=$(pgrep -u @@USER@@ -f @@DESKTOP_SHELL_PROCESS@@ | head -n1 || true)\n        session=$(loginctl list-sessions --no-legend | awk '$3==\"@@USER@@\" {{print $1; exit}}')\n        stype=\"\"\n        if [ -n \"$session\" ]; then\n          stype=$(loginctl show-session \"$session\" -p Type --value || true)\n        fi\n        echo \"NIXOS_COMPARISON_DEBUG dm=$dm shell=$shell_pid session=$session stype=$stype\" > /dev/ttyS0 || true\n        if [ \"$dm\" = \"active\" ] && [ -n \"$shell_pid\" ] && [ \"$stype\" = \"wayland\" ]; then\n          os_name=$(. /etc/os-release; printf '%s' \"$NAME\")\n          prompt=$(runuser -u @@USER@@ -- bash --noprofile --rcfile /etc/bashrc -i -c 'printf \"%s\" \"$PS1\"' </dev/null 2>/dev/null)\n          banner=$(head -n1 /etc/issue)\n          jq -cn \\\n            --arg host \"$(cat /proc/sys/kernel/hostname)\" \\\n            --arg kernel \"$(uname -r)\" \\\n            --arg dm \"$dm\" \\\n            --arg session_type \"$stype\" \\\n            --arg shell_pid \"$shell_pid\" \\\n            --arg user \"@@USER@@\" \\\n            --arg os_release \"$os_name\" \\\n            --arg prompt \"$prompt\" \\\n            --arg banner \"$banner\" \\\n            '{{host:$host,kernel:$kernel,display_manager:$dm,session_type:$session_type,shell_pid:$shell_pid,user:$user,desktop:\"@@DESKTOP_NAME@@\",os_release:$os_release,prompt:$prompt,banner:$banner,proof:\"live-desktop\"}}' \\\n            | sed 's/^/NIXOS_COMPARISON_PROOF:/' > /dev/ttyS0\n          exit 0\n        fi\n        sleep 2\n      done\n      echo 'NIXOS_COMPARISON_PROOF:{{\"proof\":\"failed\",\"reason\":\"desktop-not-live-within-300s\"}}' > /dev/ttyS0\n      exit 1\n    '';\n  }};\n}}\n"
+}
+
+fn jetos_nixos_ascii_equal(value: String, expected: String) -> Bool Never! {
+    left :: value.bytes()
+    right :: expected.bytes()
+    if left.len() != right.len() -> return false
+    loop index in 0..<left.len() {
+        code :: Int.from_u8(left[index])
+        lower :: if code >= 65 && code <= 90 -> code + 32 else -> code
+        if lower != Int.from_u8(right[index]) -> return false
+    }
+    true
+}
+
+fn jetos_nixos_is_float(value: String) -> Bool Never! {
+    _ :: Float.parse(value) ?? return false
+    true
+}

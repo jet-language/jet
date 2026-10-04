@@ -140,7 +140,9 @@ use jet_sema.[
     sema_comptime_reflection_declared_function_facts,
 ]
 
-JET_COMPILER_SERVICES_SCHEMA_VERSION :: 1
+// Rust Source/Compiler.rs:15-16: one version authority for every consumer.
+pub API_VERSION :: prep { 1 }
+pub SCHEMA_VERSION :: prep { 1 }
 
 pub enum JetCompilerServicesSourcePreparation {
     Masked(source: String)
@@ -349,12 +351,14 @@ pub fn jet_eval_compiler_services_source_map(source: String) -> JetCompilerServi
     current_source := String?{None}
     source_prefix := "// jet:source-map source="
     line_prefix := "// jet:line "
+    // Rust `str::lines`: a `\r` is dropped only as part of a `\r\n`
+    // terminator, so the final unterminated segment keeps a bare `\r`.
     lines := source.split("\n").to_list()
     loop index in 0..<lines.len() {
         line := lines[index].trim_start()
         bytes := line.bytes()
-        if bytes.len() > 0 && bytes[bytes.len() - 1] == 13 {
-            line = String.from_bytes(bytes[0..bytes.len() - 1]) ?? line
+        if index + 1 < lines.len() && bytes.len() > 0 && bytes[bytes.len() - 1] == 13 {
+            line = String.from_bytes(bytes[0..<bytes.len() - 1]) ?? line
         }
         if line.starts_with(source_prefix) {
             source_name := line.slice(source_prefix.len(), line.len())
@@ -367,7 +371,10 @@ pub fn jet_eval_compiler_services_source_map(source: String) -> JetCompilerServi
             next
         }
         if !line.starts_with(line_prefix) -> next
-        source_line :: Int.parse(line.slice(line_prefix.len(), line.len()).trim()) ?? next
+        // Rust parses the line number as `usize`: a signed spelling is not a row.
+        line_text :: line.slice(line_prefix.len(), line.len()).trim()
+        if line_text.starts_with("-") -> next
+        source_line :: Int.parse(line_text) ?? next
         &generated_lines.push(TComptimeValue.Struct{type_name: "CompilerGeneratedLine", fields: [TComptimeField]{
             TComptimeField{name: "generated_line", value: jet_eval_compiler_services_int(index + 1)},
             TComptimeField{name: "source", value: jet_eval_compiler_services_option_string(current_source)},
@@ -375,7 +382,7 @@ pub fn jet_eval_compiler_services_source_map(source: String) -> JetCompilerServi
         }})
     }
     value := TComptimeValue.Struct{type_name: "CompilerSourceMap", fields: [TComptimeField]{
-        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(SCHEMA_VERSION)},
         TComptimeField{name: "sources", value: jet_eval_compiler_services_string_values(sources)},
         TComptimeField{name: "generated_lines", value: TComptimeValue.List{values: generated_lines}},
     }}
@@ -398,7 +405,7 @@ fn jet_eval_compiler_services_lex_value(source: String, lexed: Lexed) -> TCompti
         &tokens.push(value)
     }
     TComptimeValue.Struct{type_name: "CompilerLexed", fields: [TComptimeField]{
-        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(SCHEMA_VERSION)},
         TComptimeField{name: "source", value: jet_eval_compiler_services_string(source)},
         TComptimeField{name: "tokens", value: TComptimeValue.List{values: tokens}},
         TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(lexed.diagnostics)},
@@ -568,7 +575,7 @@ fn jet_eval_compiler_services_syntax_value(source: String, parsed: ParseResult) 
         loop item in parsed.program.items -> &items.push(jet_eval_compiler_services_syntax_node(item))
     }
     TComptimeValue.Struct{type_name: "CompilerSyntaxTree", fields: [TComptimeField]{
-        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(SCHEMA_VERSION)},
         TComptimeField{name: "source", value: jet_eval_compiler_services_string(source)},
         TComptimeField{name: "items", value: TComptimeValue.List{values: items}},
         TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(parsed.diagnostics)},
@@ -666,7 +673,7 @@ pub fn jet_eval_compiler_services_checked(input: JetCompilerServicesCheckedInput
     semantic_index := TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "CompilerSemanticIndex"}}}
     if !has_errors && index.complete -> semantic_index = TComptimeValue.Present{value: index.value}
     value := TComptimeValue.Struct{type_name: "CompilerChecked", fields: [TComptimeField]{
-        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(SCHEMA_VERSION)},
         TComptimeField{name: "source", value: jet_eval_compiler_services_string(input.parsed.source)},
         TComptimeField{name: "syntax", value: input.parsed.value},
         TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(diagnostics)},

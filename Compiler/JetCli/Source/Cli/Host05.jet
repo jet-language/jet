@@ -1,0 +1,497 @@
+// Canonical Cli.Host private fragment; pure test policy stays in Compile/*.
+use jet as jet
+use jet_foundation.[Evidence, StatusValue, StatusFields, StatusEnvelope, ExitCodes, Syntax]
+use jet_cli.[ProveReplay, OutputAdapter, JetCLITestRunOptions, JetCLITestCapturePolicy, JetCLITestResultCache, jet_cli_test_doctest_output, jet_cli_test_watch_flags, jet_cli_test_watch_failure_names, jet_cli_test_capture_name, jet_cli_test_shuffle_seed]
+// GATE #4494: real process/files/environment/time/thread/channel/stdio primitives.
+use std.process.[Command, Stdio, exit, id]
+use std.env as env
+use std.fs as fs
+use std.time.[SystemTime, UNIX_EPOCH]
+use std.thread as thread
+use std.sync.mpsc as mpsc
+use std.io as io
+
+// Rust: Source/CmdCompile.rs:6844
+fn finish_test_evidence(report_path: &OSPath, report_id: String, file: String, toolchain: String, target: String, profile: String, source_revision: String, build_revision: String, revision: String, harness_stdout: String?, child_ok: Bool, preserve_report: Bool, mode: OutputMode) -> Bool? Err! {
+    report := read_or_create_test_evidence_report(report_path, report_id, file, toolchain, target, profile, source_revision, build_revision, revision) ?? {
+        if preserve_report -> return Err(err)
+        jet.ReceiptStore.optional_history_notice("reading test evidence", err)
+        fresh_test_evidence_report(report_id, file, toolchain, target, profile, source_revision, build_revision, revision)
+    }
+    build :: Evidence.EvidenceBuild.new(toolchain, target, profile)
+    evidence_revision :: Evidence.EvidenceRevision.new(source_revision, build_revision, revision)
+    persist := true
+    if harness_stdout == .Val(stdout) {
+        if append_harness_test_evidence(&report, stdout, file, report_id, build, evidence_revision, child_ok) == .Err(error) {
+            if preserve_report -> return Err(error)
+            jet.ReceiptStore.optional_history_notice("assembling test evidence", error)
+            persist = false
+        }
+    }
+    if report.records.is_empty() && persist {
+        if !preserve_report -> _ :: fs.remove_file(report_path)
+        return Ok(.None)
+    }
+    test_projection :: jet.Codegen.test_report.JetTestOutcomeProjection.from_records(report.records.map(fn(record) {
+        terminal :: if record.kind == { .Unit, .Property, .Doctest -> true; _ -> false }
+        outcome :: if record.outcome == {
+            .Passed -> .Passed
+            .Failed -> .Failed
+            .Error -> .Error
+            .Skipped -> .Skipped
+            _ -> .Other
+        }
+        jet.Codegen.test_report.JetTestOutcomeRecord{terminal: terminal, outcome: outcome, expected_failure: record.expectation == .ExpectedFailure}
+    }))
+    projection :: jet.Package.ClaimsProjection.from_records(report.records)
+    floor :: jet.Loader.package_facts_for_entry(OSPath.new(file)).ok().flatten().and_then(fn(facts) { facts.policy.claims_min })
+    floor_met :: projection.floor_met(floor)
+    grade :: projection.grade.render()
+    claims :: StatusValue.object(StatusFields.new().with("grade", grade.clone()).with("floor", floor.map(fn(value) { StatusValue.String(value.render()) }).unwrap_or(.Null)).with("floorMet", floor_met).with("generatedAttempts", projection.generated_attempts).with("generated", projection.generated_successes).with("examples", projection.examples_successes))
+    summaries :: StatusValue.object(StatusFields.new().with("claims", StatusValue.object(StatusFields.new().with("grade", grade))))
+    test :: StatusValue.object(StatusFields.new().with("failed", test_projection.failed).with("passed", test_projection.passed).with("skipped", test_projection.skipped).with("selected", test_projection.selected()).with("expectedFailures", test_projection.expected_failures).with("unexpectedPasses", test_projection.unexpected_passes))
+    evidence :: StatusValue.parse(report.json()) ?? {
+        if preserve_report -> return Err(err.to_string())
+        jet.ReceiptStore.optional_history_notice("encoding test evidence", err.to_string())
+        persist = false
+        StatusValue.Null
+    }
+    status := StatusEnvelope.new("test", test_projection.failed == 0 && test_projection.unexpected_passes == 0).with_field("test", test).with_field("evidence", evidence).with_field("grade", projection.grade.render()).with_field("claims", claims).with_field("summaries", summaries)
+    status.ok = status.ok && child_ok && floor_met
+    if preserve_report {
+        persist_evidence_report(report) ?? return Err(err)
+    } else if persist {
+        target_inputs_sha256 :: report.revision.source.clone()
+        jet.ReceiptStore.enqueue_optional_history("writing test evidence", fn() {
+            if persist_optional_evidence_report_for_inputs(report, target_inputs_sha256) == .Err(error) -> jet.ReceiptStore.optional_history_notice("writing test evidence", error)
+        })
+    }
+    if mode.json -> write_mode_machine(mode, "{status.json()}\n")
+    ok :: status.ok
+    if !preserve_report -> _ :: fs.remove_file(report_path)
+    Ok(.Val(ok))
+}
+
+// Rust: Source/CmdCompile.rs:7031 canonical_test_json -> Compile/TestReport.jet jet_cli_test_canonical_json(stdout, true).
+// Rust: Source/CmdCompile.rs:7044 object_field -> Compile/TestReport.jet map lookup helpers jet_cli_test_report_text/bool.
+// Rust: Source/CmdCompile.rs:7051 is_canonical_test_report -> Compile/TestReport.jet jet_cli_test_report_recognized(candidate, true).
+// Rust: Source/CmdCompile.rs:7059 canonical_status_json -> Compile/TestReport.jet jet_cli_test_canonical_json(stdout, false).
+// Rust: Source/CmdCompile.rs:7072 is_canonical_status_report -> Compile/TestReport.jet jet_cli_test_report_recognized(candidate, false).
+// Rust: Source/CmdCompile.rs:7081
+fn emit_doctest_result(label: String, ok: Bool, stdout: String, stderr: String, policy: JetCLITestCapturePolicy, mode: OutputMode) {
+    // The existing pure projector owns capture/quiet/json policy, the host writes.
+    output :: jet_cli_test_doctest_output(label, JetCLITestResultCache{ok: ok, stdout: stdout, stderr: stderr}, policy, mode)
+    if !output.stdout.is_empty() -> io.print(output.stdout)
+    if !output.stderr.is_empty() -> io.eprint(output.stderr)
+}
+
+// Rust: Source/CmdCompile.rs:7112 TestRunOpts -> Compile/TestOptions.jet JetCLITestRunOptions (all fields, no duplicate carrier).
+// Rust: Source/CmdCompile.rs:7171 TestRunOpts.parse -> Compile/TestOptions.jet jet_cli_test_parse_options(argv, settings, unix_ns).
+// Rust: Source/CmdCompile.rs:7350 test_run_option_value -> Compile/TestOptions.jet jet_cli_test_option_value.
+// Rust: Source/CmdCompile.rs:7366 merge_test_filter -> Compile/TestOptions.jet jet_cli_test_merge_filter.
+// Rust: Source/CmdCompile.rs:7378
+fn test_shuffle_seed() -> Int {
+    nanos :: SystemTime.now().duration_since(UNIX_EPOCH).map(fn(duration) { duration.as_nanos() }).unwrap_or(0)
+    jet_cli_test_shuffle_seed(nanos)
+}
+// Rust: Source/CmdCompile.rs:7385
+fn invalid_test_run_option(message: String) -> Never {
+    cli_error_fix("E2104", message, "use the canonical `jet test` flag spelling")
+    exit(ExitCodes.USAGE)
+}
+
+// Rust: Source/CmdCompile.rs:7397
+fn run_generated_test(path: String, opts: JetCLITestRunOptions, mode: OutputMode) -> Never {
+    source_path :: OSPath.new(path)
+    if !source_path.is_file() {
+        cli_error("E2105", "can't find `{path}`")
+        exit(ExitCodes.USER_ERROR)
+    }
+    source :: fs.read_to_string(source_path) ?? {
+        cli_error("E2105", "couldn't read `{path}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    project_root :: jet.build_project_root(path) ?? {
+        report_problems(mode, path, source, err)
+        exit(ExitCodes.USER_ERROR)
+    }
+    (rust_code, ffi_link) :: jet.compile_fuzz_with_path(path, opts.generated_test_name) ?? {
+        if err == {
+            .Diagnostics(diags) -> {
+                report_problems(mode, path, source, diags)
+                exit(ExitCodes.USER_ERROR)
+            }
+            .Target(message) -> {
+                cli_error_fix("E2104", message, "name one property test with `jet test --grade=generated <file> <name>`")
+                exit(ExitCodes.USAGE)
+            }
+        }
+    }
+    profile :: if opts.profile == .Val(name) { resolve_named_profile(name, path, mode) } else if opts.release { BuildProfile.Release } else { BuildProfile.Default }
+    bin :: fuzz_bin_path(project_root, source_path)
+    build(path, rust_code, .None, bin.clone(), profile, ffi_link, [], false, .None, .None, .None, mode, false, .None)
+    corpus :: opts.generated_corpus.unwrap_or_else(fn() {
+        corpus_name :: opts.generated_test_name.map(fn(name) { name.chars().map(fn(ch) { if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' { ch } else { '_' } }).collect_string() }).filter(fn(name) { !name.is_empty() }).unwrap_or_else(fn() { stem(path) })
+        ".jet/fuzz/{corpus_name}"
+    })
+    command := Command.new(bin)
+    &command.env("JET_FUZZ_CORPUS", corpus)
+    &command.env("JET_FUZZ_ITERATIONS", opts.generated_iterations.unwrap_or(1000).to_string())
+    &command.env("JET_FUZZ_TIME_MS", opts.generated_time_budget_ms.unwrap_or(0).to_string())
+    &command.env("JET_FUZZ_SEED", opts.generated_seed.unwrap_or(0x5EED_1234_ABCD_0001).to_string())
+    status :: &command.status() ?? {
+        _ :: fs.remove_file(bin)
+        cli_error("E2105", "couldn't run generated tests in `{path}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    _ :: fs.remove_file(bin)
+    exit(if status.success() { ExitCodes.OK } else { child_exit_code(status) })
+}
+
+// Rust: Source/CmdCompile.rs:7513
+pub fn run_test_opts(path: String, opts: JetCLITestRunOptions, mode: OutputMode) {
+    p :: OSPath.new(path)
+    require_project_environment("test", p, mode)
+    if !p.exists() {
+        cli_error("E2105", "can't find `{path}`")
+        exit(ExitCodes.USER_ERROR)
+    }
+    if opts.grade_generated -> run_generated_test(path, opts, mode)
+    if opts.where_expr == .Val(expression) {
+        parse_test_where(expression) ?? {
+            cli_error("E2104", "invalid --where expression: {err}")
+            exit(ExitCodes.USER_ERROR)
+        }
+    }
+    if opts.watch {
+        run_test_watch(path, opts, mode)
+        return
+    }
+    if opts.fresh && !mode.quiet -> write_mode_status(mode, "jet test: fresh result run (test-result cache bypassed; build cache reusable)\n")
+    if p.is_dir() {
+        root :: jet.Loader.find_manifest_root(p).unwrap_or(p.clone())
+        if p.join(Syntax.PACKAGE_FILE).is_file() {
+            run_test_package(root, opts, mode)
+            return
+        }
+        if !opts.show_default && resolve_package_command_override(root, "test", mode) == .Val(override_file) {
+            outcome :: run_test_target(override_file, opts, mode, false)
+            ok :: outcome == .Ran(true) || outcome == .Override(true) || outcome == .NoTests
+            exit(if ok { ExitCodes.OK } else { ExitCodes.USER_ERROR })
+        }
+        ext :: Syntax.FILE_EXT
+        files := [OSPath]{}
+        collect_source_files_recursive(p, ext, &files)
+        &files.sort()
+        if files.is_empty() {
+            cli_error("E2104", "no .{ext} files in `{path}` (searched subdirectories too)")
+            exit(ExitCodes.USER_ERROR)
+        }
+        any_fail := false
+        loop f in files {
+            if !run_test_file(f, opts, mode) -> any_fail = true
+        }
+        exit(if any_fail { ExitCodes.USER_ERROR } else { ExitCodes.OK })
+    }
+    exit(if run_test_file(p, opts, mode) { ExitCodes.OK } else { ExitCodes.USER_ERROR })
+}
+
+// Rust: Source/CmdCompile.rs:7604
+pub fn run_test_package(root: &OSPath, opts: JetCLITestRunOptions, mode: OutputMode) {
+    require_project_environment("test", root, mode)
+    entry :: find_project_entry(root)
+    ran := 0
+    any_fail := false
+    if !opts.show_default && resolve_package_command_override(root, "test", mode) == .Val(override_file) {
+        outcome :: run_test_target(override_file, opts, mode, false)
+        ok :: outcome == .Ran(true) || outcome == .Override(true) || outcome == .NoTests
+        exit(if ok { ExitCodes.OK } else { ExitCodes.USER_ERROR })
+    }
+    if entry.is_file() {
+        if run_test_target(entry, opts, mode, true) == {
+            .Override(ok) -> exit(if ok { ExitCodes.OK } else { ExitCodes.USER_ERROR })
+            .Ran(ok) -> { ran += 1; any_fail = !ok }
+            .NoTests -> {}
+        }
+    }
+    loop target in jet.ProjectParts.source_files(root) {
+        if target == entry || is_reserved_target_file(target) -> next
+        if run_test_target(target, opts, mode, true) == {
+            .Ran(ok), .Override(ok) -> { ran += 1; any_fail = any_fail || !ok }
+            .NoTests -> {}
+        }
+    }
+    if ran == 0 -> run_test_opts(entry.to_string_lossy(), opts, mode)
+    exit(if any_fail { ExitCodes.USER_ERROR } else { ExitCodes.OK })
+}
+
+// Rust: Source/CmdCompile.rs:7669
+pub fn collect_source_files_recursive(dir: &OSPath, ext: String, out: &[OSPath]) {
+    entries :: fs.read_dir(dir) ?? return
+    loop entry_result in entries {
+        entry :: entry_result ?? next
+        path :: entry.path()
+        if path.is_dir() {
+            name :: path.file_name().and_then(fn(n) { n.to_str() }).unwrap_or("")
+            if name == "build" || name.starts_with(".") -> next
+            collect_source_files_recursive(path, ext, &out)
+        } else if path.extension().and_then(fn(e) { e.to_str() }) == .Val(ext) && !is_reserved_target_file(path) {
+            &out.push(path)
+        }
+    }
+}
+// Rust: Source/CmdCompile.rs:7692
+fn is_reserved_target_file(path: &OSPath) -> Bool {
+    path.file_name().and_then(fn(name) { name.to_str() }).is_some_and(fn(name) {
+        name == Syntax.PACKAGE_FILE || name == Syntax.ENV_FILE || name == Syntax.WORKSPACE_FILE || name == Syntax.CONFIG_FILE || Syntax.COMMAND_ROLE_FILES.contains(name)
+    })
+}
+// Rust: Source/CmdCompile.rs:7707
+enum TestTargetOutcome { Ran(Bool) NoTests Override(Bool) }
+// Rust: Source/CmdCompile.rs:7714
+fn run_test_file(path: &OSPath, opts: &JetCLITestRunOptions, mode: OutputMode) -> Bool {
+    outcome :: run_test_target(path, opts, mode, false)
+    outcome == .Ran(true) || outcome == .Override(true) || outcome == .NoTests
+}
+
+// Rust: Source/CmdCompile.rs:7725
+fn run_test_target(path: &OSPath, opts: &JetCLITestRunOptions, mode: OutputMode, package: Bool) -> TestTargetOutcome {
+    update_snapshots :: opts.update_snapshots
+    coverage :: opts.coverage
+    shown :: path.to_string_lossy()
+    profile :: if opts.profile == .Val(name) { resolve_named_profile(name, shown, mode) } else if opts.release || opts.measure { BuildProfile.Release } else { BuildProfile.Default }
+    profile_tag :: "{profile.cache_tag()};{setting_overrides_tag(opts.setting_overrides)};aot-target=native"
+    src :: fs.read_to_string(path) ?? {
+        cli_error("E2105", "couldn't read `{shown}`: {err}")
+        return .Ran(false)
+    }
+    project_root :: jet.build_project_root(shown) ?? {
+        report_problems(mode, shown, src, err)
+        return .Ran(false)
+    }
+    computed_source_revision :: jet.SHA256.sha256_hex(src.bytes())
+    source_revision :: env.var(Evidence.EVIDENCE_SOURCE_REVISION_ENV).ok().filter(fn(value) { !value.is_empty() }).unwrap_or(computed_source_revision)
+    report_id :: env.var(Evidence.EVIDENCE_REPORT_ID_ENV).ok().filter(fn(value) { !value.is_empty() }).unwrap_or_else(fn() {
+        run :: SystemTime.now().duration_since(UNIX_EPOCH).expect("test execution starts after the Unix epoch").as_nanos()
+        prefix :: source_revision.get(0..<16).unwrap_or(source_revision)
+        "test:{prefix}:{id()}:{run}"
+    })
+    build_revision :: env.var(Evidence.EVIDENCE_BUILD_REVISION_ENV).ok().filter(fn(value) { !value.is_empty() }).unwrap_or_else(fn() { jet.SHA256.sha256_hex("jet-test-build-v1:{source_revision}:{profile_tag}".bytes()) })
+    revision :: env.var(Evidence.EVIDENCE_REVISION_ENV).ok().filter(fn(value) { !value.is_empty() }).unwrap_or_else(fn() { jet.SHA256.sha256_hex("jet-test-mir-v1:{source_revision}:{profile_tag}".bytes()) })
+    inherited_report_path :: env.var_os(Evidence.EVIDENCE_REPORT_ENV).filter(fn(value) { !value.is_empty() }).map(OSPath.from)
+    preserve_report :: inherited_report_path.is_some()
+    report_path :: inherited_report_path.unwrap_or_else(fn() { env.temp_dir().join("jet_test_{id()}_{source_revision.get(0..<16).unwrap_or(source_revision)}.bin") })
+    evidence_toolchain :: env.var(Evidence.EVIDENCE_TOOLCHAIN_ENV).ok().filter(fn(value) { !value.is_empty() }).unwrap_or(jet.VERSION)
+    evidence_target :: env.var(Evidence.EVIDENCE_TARGET_ENV).ok().filter(fn(value) { !value.is_empty() }).unwrap_or_else(host_target_triple)
+    evidence_profile :: env.var(Evidence.EVIDENCE_PROFILE_ENV).ok().filter(fn(value) { !value.is_empty() }).unwrap_or_else(fn() { profile.budget_name() })
+    _ :: fs.remove_file(report_path)
+    if opts.where_expr == .Val(expression) {
+        facts :: test_target_facts(path, src, opts, package)
+        if !test_where_matches(expression, facts) -> return .NoTests
+    }
+    has_doctests :: !jet.Doctest.discover(src).is_empty()
+    override_entry :: !opts.show_default && jet.has_entry_fn(shown, "test")
+    doctests_ok :: with_test_evidence_environment(report_path, report_id, evidence_toolchain, evidence_target, evidence_profile, source_revision, build_revision, revision, fn() {
+        run_doctests(path, shown, src, update_snapshots, profile, opts.setting_overrides, opts.capture, mode)
+    })
+    // Rust: Source/CmdCompile.rs:7856 nested finish_doctest_report.
+    finish_doctest_report :: fn() -> Bool {
+        result :: finish_test_evidence(report_path, report_id, shown, evidence_toolchain, evidence_target, evidence_profile, source_revision, build_revision, revision, .None, doctests_ok, preserve_report, mode) ?? {
+            if !preserve_report -> _ :: fs.remove_file(report_path)
+            cli_error("E2105", "couldn't finalize test evidence for `{shown}`: {err}")
+            return false
+        }
+        result.unwrap_or(doctests_ok)
+    }
+    if opts.docs {
+        if !has_doctests {
+            _ :: fs.remove_file(report_path)
+            return .NoTests
+        }
+        return .Ran(finish_doctest_report())
+    }
+    if !override_entry {
+        if package {
+            if !jet.has_test_blocks(shown) && !jet.has_test_contracts(shown) {
+                if has_doctests -> return .Ran(finish_doctest_report())
+                _ :: fs.remove_file(report_path)
+                return .NoTests
+            }
+        } else if has_doctests && !jet.has_test_blocks(shown) && !jet.has_test_contracts(shown) {
+            return .Ran(finish_doctest_report())
+        }
+    }
+    cacheable :: test_result_cache_write_allowed(opts) && !has_doctests && !override_entry
+    if cacheable && !opts.fresh && !OutputAdapter.advisory_lints_visible() {
+        if test_result_cache_read(path, opts, package) == .Val(cached) {
+            evidence_ok := cached.ok
+            if finish_test_evidence(report_path, report_id, shown, evidence_toolchain, evidence_target, evidence_profile, source_revision, build_revision, revision, .Val(cached.stdout), cached.ok, preserve_report, mode) == {
+                .Ok(value) -> evidence_ok = value.unwrap_or(cached.ok)
+                .Err(error) -> {
+                    if !preserve_report -> _ :: fs.remove_file(report_path)
+                    cli_error("E2105", "couldn't finalize test evidence for `{shown}`: {error}")
+                    evidence_ok = false
+                }
+            }
+            if !mode.json -> emit_test_capture(cached, opts.capture, mode)
+            return .Ran(cached.ok && evidence_ok)
+        }
+    }
+    compilation :: if override_entry {
+        if opts.capture == .All -> write_mode_status(mode, "jet test: using fn test override\n")
+        jet.compile_test_override_with_path_and_profile(src, shown, coverage, profile.budget_name(), opts.setting_overrides)
+    } else {
+        jet.compile_tests_with_path_cov_and_profile(src, shown, coverage, profile.budget_name(), opts.setting_overrides)
+    }
+    (rust_code, ffi_link, lints) :: compilation ?? {
+        report_problems(mode, shown, src, err)
+        if finish_test_evidence(report_path, report_id, shown, evidence_toolchain, evidence_target, evidence_profile, source_revision, build_revision, revision, .None, false, preserve_report, mode) == .Err(error) -> cli_error("E2105", "couldn't finalize test evidence for `{shown}`: {error}")
+        if !preserve_report -> _ :: fs.remove_file(report_path)
+        return if override_entry { .Override(false) } else { .Ran(false) }
+    }
+    render_native_lints(shown, src, mode, lints)
+    bin :: test_bin_path(project_root, path)
+    cache_mode :: if override_entry { if coverage { "testcov-override" } else { "test-override" } } else if coverage { "testcov" } else { "test" }
+    cache_key :: native_cache_key(shown, profile.budget_name(), profile_tag, cache_mode, .None)
+    record_request :: opts.record.map(fn(name) { (name, profile.budget_name()) })
+    coverage_profile :: if coverage { .Val(profile.budget_name()) } else { .None }
+    build(shown, rust_code, .None, bin.clone(), profile, ffi_link, [], false, .None, .None, .None, mode, false, cache_key)
+    cov_out :: if coverage { .Val(bin.with_extension("cov")) } else { .None }
+    cmd := Command.new(bin)
+    if path.parent().and_then(jet.Loader.find_manifest_root) == .Val(root) -> &cmd.env("JET_PROJECT_ROOT", root)
+    if update_snapshots -> &cmd.env("JET_UPDATE_SNAPSHOTS", "1")
+    if cov_out == .Val(co) {
+        _ :: fs.remove_file(co)
+        &cmd.env("JET_COV_OUT", co)
+    }
+    if opts.browser_engines == .Val(engines) -> &cmd.env("JET_TEST_BROWSERS", engines)
+    if opts.browser_retries == .Val(retries) -> &cmd.env("JET_TEST_RETRIES", retries.to_string())
+    if opts.browser_reporter == .Val(reporter) -> &cmd.env("JET_TEST_REPORTER", reporter)
+    if opts.browser_ui -> &cmd.env("JET_TEST_BROWSER_UI", "1")
+    if opts.browser_visual -> &cmd.env("JET_TEST_BROWSER_VISUAL", "1")
+    if opts.browser_trace {
+        &cmd.env("JET_TEST_TRACE", "1")
+        &cmd.env("JET_TEST_TRACE_ON_RETRY", "1")
+    }
+    if opts.filter == .Val(filter) -> &cmd.env("JET_TEST_FILTER", filter)
+    if opts.shuffle_seed == .Val(seed) -> &cmd.env("JET_TEST_SHUFFLE_SEED", seed.to_string())
+    if opts.serial -> &cmd.env("JET_TEST_SERIAL", "1")
+    if opts.trace_tiers -> &cmd.env("JET_TEST_TRACE_TIERS", "1")
+    if opts.measure -> &cmd.env("JET_TEST_MEASURE", "1")
+    &cmd.env("JET_TEST_CAPTURE", jet_cli_test_capture_name(opts.capture))
+    if mode.json -> &cmd.env("JET_TEST_JSON", "1")
+    &cmd.env(Evidence.EVIDENCE_REPORT_ENV, report_path)
+    &cmd.env(Evidence.EVIDENCE_REPORT_ID_ENV, report_id)
+    &cmd.env(Evidence.EVIDENCE_TOOLCHAIN_ENV, evidence_toolchain)
+    &cmd.env(Evidence.EVIDENCE_TARGET_ENV, evidence_target)
+    &cmd.env(Evidence.EVIDENCE_PROFILE_ENV, evidence_profile)
+    &cmd.env(Evidence.EVIDENCE_SOURCE_REVISION_ENV, source_revision)
+    &cmd.env(Evidence.EVIDENCE_BUILD_REVISION_ENV, build_revision)
+    &cmd.env(Evidence.EVIDENCE_REVISION_ENV, revision)
+    record :: record_request.map(fn((name, budget)) { ProveReplay.begin_named_capture(shown, name, budget, opts.setting_overrides, mode.json) ?? exit(err) })
+    out :: &cmd.output() ?? {
+        _ :: fs.remove_file(bin)
+        if cov_out == .Val(co) -> _ :: fs.remove_file(co)
+        if finish_test_evidence(report_path, report_id, shown, evidence_toolchain, evidence_target, evidence_profile, source_revision, build_revision, revision, .None, false, preserve_report, mode) == .Err(error) -> cli_error("E2105", "couldn't finalize test evidence for `{shown}`: {error}")
+        if !preserve_report -> _ :: fs.remove_file(report_path)
+        cli_error("E2105", "couldn't run tests in `{shown}`: {err}")
+        exit(ExitCodes.USER_ERROR)
+    }
+    child_ok :: out.status.success()
+    stdout :: String.from_utf8_lossy(out.stdout)
+    stderr :: String.from_utf8_lossy(out.stderr)
+    evidence_ok := child_ok
+    if finish_test_evidence(report_path, report_id, shown, evidence_toolchain, evidence_target, evidence_profile, source_revision, build_revision, revision, .Val(stdout), child_ok, preserve_report, mode) == {
+        .Ok(value) -> evidence_ok = value.unwrap_or(child_ok)
+        .Err(error) -> {
+            if !preserve_report -> _ :: fs.remove_file(report_path)
+            cli_error("E2105", "couldn't finalize test evidence for `{shown}`: {error}")
+            evidence_ok = false
+        }
+    }
+    ok :: child_ok && doctests_ok && evidence_ok
+    result :: JetCLITestResultCache{ok: ok, stdout: stdout, stderr: stderr}
+    if !mode.json -> emit_test_capture(result, opts.capture, mode)
+    if cacheable -> test_result_cache_write(path, opts, package, result)
+    if cov_out == .Val(co) {
+        report_coverage(shown, co, mode, coverage_profile.expect("coverage profile retained before build"), opts.setting_overrides)
+        _ :: fs.remove_file(co)
+    }
+    _ :: fs.remove_file(bin)
+    status :: if ok { ExitCodes.OK } else if child_ok { ExitCodes.USER_ERROR } else { child_exit_code(out.status) }
+    finish_recorded_artifacts(record, opts.record, .None, status, mode)
+    if override_entry { .Override(ok) } else { .Ran(ok) }
+}
+
+// Rust: Source/CmdCompile.rs:8266
+fn spawn_test_watch_input() -> mpsc.Receiver<U8> {
+    (sender, receiver) :: mpsc.channel()
+    _ :: thread.spawn(fn() {
+        stdin := io.stdin()
+        byte := [U8]{0}
+        loop &stdin.read(&byte).ok().is_some_and(fn(count) { count != 0 }) {
+            if sender.send(byte[0]).is_err() -> break
+        }
+    })
+    receiver
+}
+// Rust: Source/CmdCompile.rs:8280 test_watch_failure_names -> Compile/TestReport.jet jet_cli_test_watch_failure_names.
+// Rust: Source/CmdCompile.rs:8315 is_canonical_test_value -> Compile/TestReport.jet jet_cli_test_is_canonical_test_value.
+// Rust: Source/CmdCompile.rs:8324 is_canonical_status_value -> Compile/TestReport.jet jet_cli_test_is_canonical_status_value.
+// Rust: Source/CmdCompile.rs:8334 append_status_report_failures -> Compile/TestReport.jet jet_cli_test_append_failures(value, false, names, seen).
+// Rust: Source/CmdCompile.rs:8368 append_test_report_failures -> Compile/TestReport.jet jet_cli_test_append_failures(value, true, names, seen).
+// Rust: Source/CmdCompile.rs:8417 append_test_watch_flags -> Compile/TestWatch.jet jet_cli_test_watch_flags.
+
+// Rust: Source/CmdCompile.rs:8481
+fn run_test_watch_child(path: String, opts: &JetCLITestRunOptions, filter: String?, mode: OutputMode) -> (Int, JetCLITestResultCache) {
+    executable :: env.current_exe().unwrap_or(OSPath.new(Syntax.BINARY_NAME))
+    command := Command.new(executable)
+    &command.arg("test")
+    &command.arg(path)
+    &command.stdin(Stdio.null())
+    &command.stdout(Stdio.piped())
+    &command.stderr(Stdio.piped())
+    if mode.json -> &command.arg("--json")
+    if OutputAdapter.advisory_lints_visible() -> &command.arg("--verbose")
+    &command.args(jet_cli_test_watch_flags(opts, filter))
+    &command.env("JET_TEST_CAPTURE", "all")
+    if mode.json -> &command.env("JET_TEST_JSON", "1")
+    output :: &command.output() ?? return (ExitCodes.USER_ERROR, JetCLITestResultCache{ok: false, stdout: "", stderr: "jet test watcher: couldn't run child: {err}\n"})
+    status :: child_exit_code(output.status)
+    (status, JetCLITestResultCache{ok: output.status.success(), stdout: String.from_utf8_lossy(output.stdout), stderr: String.from_utf8_lossy(output.stderr)})
+}
+// Rust: Source/CmdCompile.rs:8534
+fn append_test_watch_failures(failures: &[String], seen: &[String:Bool], found: [String]) {
+    loop name in found {
+        if !seen.has_key(name) {
+            seen[name] = true
+            &failures.push(name)
+        }
+    }
+}
+// Rust: Source/CmdCompile.rs:8546
+fn run_test_watch_selection(path: String, opts: &JetCLITestRunOptions, policy: JetCLITestCapturePolicy, failed: [String]?, mode: OutputMode) -> (Int, [String]) {
+    status := ExitCodes.OK
+    failures := [String]{}
+    seen := [String:Bool]{}
+    if failed == {
+        .Val(names) -> {
+            loop name in names {
+                (child_status, result) :: run_test_watch_child(path, opts, .Val(name), mode)
+                emit_test_capture(result, policy, mode)
+                if child_status != ExitCodes.OK {
+                    status = child_status
+                    found :: jet_cli_test_watch_failure_names(result.stdout, result.stderr)
+                    append_test_watch_failures(&failures, &seen, if found.is_empty() { [name] } else { found })
+                }
+            }
+        }
+        .None -> {
+            (child_status, result) :: run_test_watch_child(path, opts, .None, mode)
+            emit_test_capture(result, policy, mode)
+            status = child_status
+            append_test_watch_failures(&failures, &seen, jet_cli_test_watch_failure_names(result.stdout, result.stderr))
+        }
+    }
+    (status, failures)
+}

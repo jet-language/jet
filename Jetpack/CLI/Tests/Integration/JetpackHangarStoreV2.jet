@@ -1,0 +1,1862 @@
+// PORT-PENDING 1092 tests-jetpack-hangar-store-v2: tests/jetpack_hangar_store_v2.rs:1-1858
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! E4-JP1 Hangar Store v2 — atomic ingest, path law (E1299), verify (E1315).
+//RS 
+//RS use std::fs;
+//RS use jet_foundation::DataTree::DataTree;
+//RS use std::io::Write;
+//RS use std::path::Path;
+//RS use std::process::Stdio;
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "support/jetpack_fixtures.rs"]
+//RS mod jetpack_fixtures;
+//RS use jetpack_fixtures::*;
+//RS 
+//RS #[path = "support/nix_index_cache_server.rs"]
+//RS mod nix_index_cache_server;
+//RS 
+//RS #[test]
+//RS fn hangar_ingest_path_law_reserved_is_e1299() {
+//RS     let root = Scratch::new("hangar-v2-path-root");
+//RS     let proj = Scratch::new("hangar-v2-path-proj");
+//RS     let src = Scratch::new("hangar-v2-path-src");
+//RS     fs::write(src.path.join("CON"), "nope").unwrap();
+//RS     let output = jetpack()
+//RS         .args([
+//RS             "hangar",
+//RS             "ingest",
+//RS             src.path.to_str().unwrap(),
+//RS             "--name",
+//RS             "bad",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(output.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     let diagnostic = stderr
+//RS         .find("Error [E1299]:")
+//RS         .map(|idx| &stderr[idx..])
+//RS         .unwrap_or(&stderr);
+//RS     assert_jetos_stderr_snapshot("hangar_path_law_reserved", diagnostic);
+//RS }
+//RS 
+//RS #[test]
+//RS fn hangar_ingest_missing_output_is_atomic_and_retryable() {
+//RS     let root = Scratch::new("hangar-v2-missing-root");
+//RS     let proj = Scratch::new("hangar-v2-missing-proj");
+//RS     let source = root.path.join("late-output");
+//RS     let ingest = || {
+//RS         jetpack()
+//RS             .args([
+//RS                 "hangar",
+//RS                 "ingest",
+//RS                 source.to_str().unwrap(),
+//RS                 "--name",
+//RS                 "late",
+//RS                 "--no-color",
+//RS             ])
+//RS             .current_dir(&proj.path)
+//RS             .env("JETPACK_ROOT", &root.path)
+//RS             .output()
+//RS             .unwrap()
+//RS     };
+//RS 
+//RS     let failed = ingest();
+//RS     assert_eq!(failed.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&failed.stderr);
+//RS     assert!(stderr.contains("Error [E1315]"), "{stderr}");
+//RS     assert!(stderr.contains("does not exist"), "{stderr}");
+//RS     assert!(
+//RS         !stderr.contains("ingested"),
+//RS         "failure emitted a success receipt: {stderr}"
+//RS     );
+//RS 
+//RS     let roots = jetpack::Store::Roots {
+//RS         root: root.path.clone(),
+//RS         dev_mode: false,
+//RS     };
+//RS     assert!(jetpack::Store::list_checked(&roots).unwrap().is_empty());
+//RS     assert!(jetpack::Store::closure_graph(&roots)
+//RS         .unwrap()
+//RS         .records
+//RS         .is_empty());
+//RS     assert!(!root.path.join("leases").exists());
+//RS 
+//RS     fs::create_dir_all(&source).unwrap();
+//RS     fs::write(source.join("payload"), "now-real").unwrap();
+//RS     let retried = ingest();
+//RS     assert!(
+//RS         retried.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&retried.stderr)
+//RS     );
+//RS     assert!(String::from_utf8_lossy(&retried.stderr).contains("ingested"));
+//RS     assert_eq!(jetpack::Store::list_checked(&roots).unwrap().len(), 1);
+//RS }
+//RS 
+//RS #[test]
+//RS fn hangar_ingest_verify_and_dedupe_roundtrip() {
+//RS     let root = Scratch::new("hangar-v2-ingest-root");
+//RS     let proj = Scratch::new("hangar-v2-ingest-proj");
+//RS     let src = Scratch::new("hangar-v2-ingest-src");
+//RS     fs::create_dir_all(src.path.join("bin")).unwrap();
+//RS     fs::write(src.path.join("bin/hello"), "#!/bin/sh\necho hi\n").unwrap();
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::PermissionsExt as _;
+//RS         fs::set_permissions(
+//RS             src.path.join("bin/hello"),
+//RS             fs::Permissions::from_mode(0o755),
+//RS         )
+//RS         .unwrap();
+//RS     }
+//RS     let ingest = jetpack()
+//RS         .args([
+//RS             "hangar",
+//RS             "ingest",
+//RS             src.path.to_str().unwrap(),
+//RS             "--name",
+//RS             "hello",
+//RS             "--version",
+//RS             "1.0.0",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         ingest.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&ingest.stderr)
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&ingest.stderr);
+//RS     assert!(stderr.contains("ingested"), "{stderr}");
+//RS     assert!(stderr.contains("sha256-"), "{stderr}");
+//RS 
+//RS     // Second ingest of identical bytes dedupes.
+//RS     let src2 = Scratch::new("hangar-v2-ingest-src2");
+//RS     fs::create_dir_all(src2.path.join("bin")).unwrap();
+//RS     fs::write(src2.path.join("bin/hello"), "#!/bin/sh\necho hi\n").unwrap();
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::PermissionsExt as _;
+//RS         fs::set_permissions(
+//RS             src2.path.join("bin/hello"),
+//RS             fs::Permissions::from_mode(0o755),
+//RS         )
+//RS         .unwrap();
+//RS     }
+//RS     let ingest2 = jetpack()
+//RS         .args([
+//RS             "hangar",
+//RS             "ingest",
+//RS             src2.path.to_str().unwrap(),
+//RS             "--name",
+//RS             "hello2",
+//RS             "--version",
+//RS             "1.0.0",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(ingest2.status.success());
+//RS     let stderr2 = String::from_utf8_lossy(&ingest2.stderr);
+//RS     assert!(stderr2.contains("deduplicated"), "{stderr2}");
+//RS 
+//RS     let list = jetpack()
+//RS         .args(["hangar", "list", "--no-color"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(list.status.success());
+//RS     let listed = String::from_utf8_lossy(&list.stderr);
+//RS     assert!(listed.contains("hello"), "{listed}");
+//RS 
+//RS     let list_json = jetpack()
+//RS         .args(["hangar", "list", "--json", "--no-color"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(list_json.status.success(), "stderr: {:?}", list_json.stderr);
+//RS     assert!(
+//RS         list_json.stderr.is_empty(),
+//RS         "JSON list leaked stderr: {:?}",
+//RS         list_json.stderr
+//RS     );
+//RS     let list_report = jetpack::JSON::parse(String::from_utf8_lossy(&list_json.stdout).trim())
+//RS         .expect("list JSON report");
+//RS     assert_eq!(json_string(&list_report, "schema"), "jet.report/v1");
+//RS     assert_eq!(json_string(&list_report, "action"), "list");
+//RS     assert!(String::from_utf8_lossy(&list_json.stdout).contains("\"packages\":["));
+//RS 
+//RS     // Verify via digest from first ingest line.
+//RS     let digest = stderr
+//RS         .split_whitespace()
+//RS         .find(|tok| tok.starts_with("sha256-"))
+//RS         .expect("digest in ingest status");
+//RS     let verify = jetpack()
+//RS         .args(["hangar", "verify", digest, "--no-color"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         verify.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&verify.stderr)
+//RS     );
+//RS     let verify_stderr = String::from_utf8_lossy(&verify.stderr);
+//RS     assert!(verify_stderr.contains("verified"), "{verify_stderr}");
+//RS     assert!(
+//RS         !String::from_utf8_lossy(&verify.stdout).contains("hangar is empty"),
+//RS         "Jetpack Hangar verification reported an empty store: {}",
+//RS         String::from_utf8_lossy(&verify.stdout)
+//RS     );
+//RS 
+//RS     let roots = jetpack::Store::Roots {
+//RS         root: root.path.clone(),
+//RS         dev_mode: false,
+//RS     };
+//RS     // Finish the parent-side read before spawning the recovery process. The
+//RS     // child owns recovery locking; no parent store value or guard spans it.
+//RS     let meta = {
+//RS         let entry = jetpack::Store::list(&roots)
+//RS             .into_iter()
+//RS             .find(|entry| entry.name == "hello")
+//RS             .unwrap();
+//RS         roots.hangar_dir().join(entry.id).join("meta.json")
+//RS     };
+//RS     fs::remove_file(&meta).unwrap();
+//RS 
+//RS     let recover = jetpack()
+//RS         .args(["hangar", "recover", "--no-color"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         recover.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&recover.stderr)
+//RS     );
+//RS     assert!(
+//RS         meta.is_file(),
+//RS         "CLI recovery must replay committed package metadata"
+//RS     );
+//RS     let _ = Path::new("."); // keep Path import used on all cfgs
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn distinct_hangar_roots_share_one_cas_object_and_file_bytes() {
+//RS     use std::collections::BTreeMap;
+//RS     use std::os::unix::fs::MetadataExt;
+//RS 
+//RS     fn physical_files(paths: &[&Path]) -> (usize, u64) {
+//RS         fn walk(path: &Path, files: &mut BTreeMap<(u64, u64), u64>) {
+//RS             let metadata = fs::symlink_metadata(path).unwrap();
+//RS             if metadata.file_type().is_symlink() {
+//RS                 return;
+//RS             }
+//RS             if metadata.is_file() {
+//RS                 files.insert(
+//RS                     (metadata.dev(), metadata.ino()),
+//RS                     metadata.blocks().saturating_mul(512),
+//RS                 );
+//RS                 return;
+//RS             }
+//RS             for entry in fs::read_dir(path).unwrap() {
+//RS                 walk(&entry.unwrap().path(), files);
+//RS             }
+//RS         }
+//RS 
+//RS         let mut files = BTreeMap::new();
+//RS         for path in paths {
+//RS             walk(path, &mut files);
+//RS         }
+//RS         (files.len(), files.values().sum())
+//RS     }
+//RS 
+//RS     let shared = Scratch::new("hangar-shared-cas");
+//RS     let left_root = Scratch::new("hangar-shared-left");
+//RS     let right_root = Scratch::new("hangar-shared-right");
+//RS     let project = Scratch::new("hangar-shared-project");
+//RS     let source = Scratch::new("hangar-shared-source");
+//RS     fs::create_dir_all(source.join("bin")).unwrap();
+//RS     fs::write(source.join("bin/tool"), "shared package bytes\n").unwrap();
+//RS     fs::create_dir_all(source.join("share")).unwrap();
+//RS     fs::write(source.join("share/data"), "second shared object\n").unwrap();
+//RS 
+//RS     let ingest = |root: &Scratch| {
+//RS         jetpack()
+//RS             .args([
+//RS                 "hangar",
+//RS                 "ingest",
+//RS                 source.path.to_str().unwrap(),
+//RS                 "--name",
+//RS                 "shared-tool",
+//RS                 "--version",
+//RS                 "1.0.0",
+//RS                 "--ref",
+//RS                 "shared-tool@fixture#1.0.0",
+//RS                 "--no-color",
+//RS             ])
+//RS             .current_dir(&project.path)
+//RS             .env("JETPACK_ROOT", &root.path)
+//RS             .env("JETPACK_SHARED_CAS", &shared.path)
+//RS             .output()
+//RS             .unwrap()
+//RS     };
+//RS 
+//RS     for root in [&left_root, &right_root] {
+//RS         let output = ingest(root);
+//RS         assert!(
+//RS             output.status.success(),
+//RS             "stderr: {}",
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS     }
+//RS 
+//RS     let left = jetpack::Store::Roots::at(left_root.path.clone());
+//RS     let right = jetpack::Store::Roots::at(right_root.path.clone());
+//RS     let left_entry = jetpack::Store::find_by_reference(&left, "shared-tool@fixture#1.0.0").unwrap();
+//RS     let right_entry =
+//RS         jetpack::Store::find_by_reference(&right, "shared-tool@fixture#1.0.0").unwrap();
+//RS     assert_eq!(
+//RS         left_entry.envelope.output_hash,
+//RS         right_entry.envelope.output_hash
+//RS     );
+//RS     assert_ne!(left_entry.out, right_entry.out);
+//RS 
+//RS     let shared_objects = fs::read_dir(&shared.path)
+//RS         .unwrap()
+//RS         .filter_map(Result::ok)
+//RS         .filter(|entry| entry.file_type().unwrap().is_file())
+//RS         .map(|entry| entry.path())
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(shared_objects.len(), 2, "shared CAS object count");
+//RS 
+//RS     let shared_paths = shared_objects
+//RS         .iter()
+//RS         .map(|path| path.as_path())
+//RS         .collect::<Vec<_>>();
+//RS     let expected = physical_files(&shared_paths);
+//RS     let mut all_paths = vec![Path::new(&left_entry.out), Path::new(&right_entry.out)];
+//RS     all_paths.extend(shared_paths);
+//RS     let actual = physical_files(&all_paths);
+//RS     assert_eq!(actual, expected, "shared CAS physical file count and bytes");
+//RS }
+//RS 
+//RS #[test]
+//RS fn hangar_sign_and_verify_production_path_rejects_tamper() {
+//RS     let root = Scratch::new("hangar-sign-verify-root");
+//RS     let project = Scratch::new("hangar-sign-verify-project");
+//RS     let source = Scratch::new("hangar-sign-verify-source");
+//RS     fs::write(source.join("payload"), "signed bytes\n").unwrap();
+//RS 
+//RS     let ingest = jetpack()
+//RS         .args([
+//RS             "hangar",
+//RS             "ingest",
+//RS             source.path.to_str().unwrap(),
+//RS             "--name",
+//RS             "signed",
+//RS             "--ref",
+//RS             "signed@fixture",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         ingest.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&ingest.stderr)
+//RS     );
+//RS 
+//RS     let sign = jet()
+//RS         .args([
+//RS             "hangar",
+//RS             "sign",
+//RS             "signed@fixture",
+//RS             "--yes",
+//RS             "--json",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         sign.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&sign.stderr)
+//RS     );
+//RS     let sign_stdout = String::from_utf8_lossy(&sign.stdout);
+//RS     assert!(
+//RS         sign_stdout.contains("\"schema\":\"jet.report/v1\""),
+//RS         "{sign_stdout}"
+//RS     );
+//RS     assert!(sign_stdout.contains("\"action\":\"sign\""), "{sign_stdout}");
+//RS     assert!(sign_stdout.contains("\"signed\":true"), "{sign_stdout}");
+//RS     let sign_report = jetpack::JSON::parse(sign_stdout.trim()).expect("sign JSON report");
+//RS     assert_eq!(json_string(&sign_report, "schema"), "jet.report/v1");
+//RS     assert_eq!(json_string(&sign_report, "moment"), "tool");
+//RS     assert_eq!(json_string(&sign_report, "status"), "ok");
+//RS     assert_eq!(json_string(&sign_report, "action"), "sign");
+//RS     assert!(
+//RS         sign.stderr.is_empty(),
+//RS         "JSON sign leaked stderr: {:?}",
+//RS         sign.stderr
+//RS     );
+//RS 
+//RS     let dump_json = jet()
+//RS         .args(["hangar", "dump", "signed@fixture", "--json", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(dump_json.status.code(), Some(2));
+//RS     assert!(
+//RS         dump_json.stderr.is_empty(),
+//RS         "JSON dump leaked stderr: {:?}",
+//RS         dump_json.stderr
+//RS     );
+//RS     let dump_report = jetpack::JSON::parse(String::from_utf8_lossy(&dump_json.stdout).trim())
+//RS         .expect("dump JSON report");
+//RS     assert_eq!(json_string(&dump_report, "schema"), "jet.report/v1");
+//RS     assert_eq!(json_string(&dump_report, "moment"), "compile");
+//RS     assert_eq!(json_string(&dump_report, "severity"), "error");
+//RS     assert_eq!(json_string(&dump_report, "code"), "E1340");
+//RS 
+//RS     let roots = jetpack::Store::Roots {
+//RS         root: root.path.clone(),
+//RS         dev_mode: false,
+//RS     };
+//RS     let entry = jetpack::Store::find_by_reference(&roots, "signed@fixture").unwrap();
+//RS     let sidecar = roots.hangar_dir().join(&entry.id).join(".hangar");
+//RS     assert!(
+//RS         sidecar.is_file(),
+//RS         "sign must publish the detached archive sidecar"
+//RS     );
+//RS 
+//RS     let verify = jet()
+//RS         .args(["hangar", "verify", "signed@fixture", "--json", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         verify.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&verify.stderr)
+//RS     );
+//RS     let verify_stdout = String::from_utf8_lossy(&verify.stdout);
+//RS     assert!(
+//RS         verify_stdout.contains("\"schema\":\"jet.report/v1\""),
+//RS         "{verify_stdout}"
+//RS     );
+//RS     assert!(
+//RS         verify_stdout.contains("\"action\":\"verify\""),
+//RS         "{verify_stdout}"
+//RS     );
+//RS     assert!(verify_stdout.contains("\"signed\":true"), "{verify_stdout}");
+//RS 
+//RS     let unsigned_archive = root.path.join("unsigned.hangar");
+//RS     let signed_archive_path = root.path.join("signed.hangar");
+//RS     fs::write(
+//RS         &unsigned_archive,
+//RS         jetpack::Store::export_unsigned_archive(&roots, &entry.id, false).unwrap(),
+//RS     )
+//RS     .unwrap();
+//RS     let sign_archive = jet()
+//RS         .args([
+//RS             "hangar",
+//RS             "sign",
+//RS             unsigned_archive.to_str().unwrap(),
+//RS             "--to",
+//RS             signed_archive_path.to_str().unwrap(),
+//RS             "--yes",
+//RS             "--json",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         sign_archive.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&sign_archive.stderr)
+//RS     );
+//RS     assert!(signed_archive_path.is_file());
+//RS     let verify_archive = jet()
+//RS         .args([
+//RS             "hangar",
+//RS             "verify",
+//RS             signed_archive_path.to_str().unwrap(),
+//RS             "--json",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         verify_archive.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&verify_archive.stderr)
+//RS     );
+//RS 
+//RS     let mut corrupt_unsigned = fs::read(&unsigned_archive).unwrap();
+//RS     let payload = b"signed bytes\n";
+//RS     let offset = corrupt_unsigned
+//RS         .windows(payload.len())
+//RS         .position(|window| window == payload)
+//RS         .expect("archive carries the fixture payload");
+//RS     corrupt_unsigned[offset] ^= 1;
+//RS     fs::write(&unsigned_archive, corrupt_unsigned).unwrap();
+//RS     let corrupt_signed_path = root.path.join("corrupt-signed.hangar");
+//RS     let reject_corrupt_sign = jet()
+//RS         .args([
+//RS             "hangar",
+//RS             "sign",
+//RS             unsigned_archive.to_str().unwrap(),
+//RS             "--to",
+//RS             corrupt_signed_path.to_str().unwrap(),
+//RS             "--yes",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(reject_corrupt_sign.status.code(), Some(2));
+//RS     assert!(!corrupt_signed_path.exists());
+//RS 
+//RS     let all_verify = jet()
+//RS         .args(["hangar", "verify", "--json", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         all_verify.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&all_verify.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&all_verify.stdout).contains("\"objects\":1"),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&all_verify.stdout)
+//RS     );
+//RS 
+//RS     let signed_archive = fs::read(&sidecar).unwrap();
+//RS     let mut corrupted_archive = signed_archive.clone();
+//RS     *corrupted_archive.last_mut().unwrap() ^= 1;
+//RS     fs::write(&sidecar, corrupted_archive).unwrap();
+//RS     let rejected_signature = jet()
+//RS         .args(["hangar", "verify", "signed@fixture", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         rejected_signature.status.code(),
+//RS         Some(2),
+//RS         "stderr: {}\nstdout: {}",
+//RS         String::from_utf8_lossy(&rejected_signature.stderr),
+//RS         String::from_utf8_lossy(&rejected_signature.stdout)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&rejected_signature.stderr).contains("Hangar verify failed"),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&rejected_signature.stderr)
+//RS     );
+//RS     let rejected_signature_json = jet()
+//RS         .args(["hangar", "verify", "signed@fixture", "--json", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(rejected_signature_json.status.code(), Some(2));
+//RS     let rejected_signature_json_stdout = String::from_utf8_lossy(&rejected_signature_json.stdout);
+//RS     assert!(
+//RS         rejected_signature_json_stdout.contains("\"schema\":\"jet.report/v1\""),
+//RS         "{rejected_signature_json_stdout}"
+//RS     );
+//RS     assert!(
+//RS         rejected_signature_json_stdout.contains("\"code\":\"E1340\""),
+//RS         "{rejected_signature_json_stdout}"
+//RS     );
+//RS     assert!(rejected_signature_json.stderr.is_empty());
+//RS     let rejected_report =
+//RS         jetpack::JSON::parse(rejected_signature_json_stdout.trim()).expect("verify JSON report");
+//RS     assert_eq!(json_string(&rejected_report, "schema"), "jet.report/v1");
+//RS     assert_eq!(json_string(&rejected_report, "moment"), "compile");
+//RS     assert_eq!(json_string(&rejected_report, "severity"), "error");
+//RS     fs::write(&sidecar, signed_archive).unwrap();
+//RS 
+//RS     make_tree_writable(Path::new(&entry.out));
+//RS     let payload = Path::new(&entry.out).join("payload");
+//RS     fs::write(&payload, "tampered bytes\n").unwrap();
+//RS     let rejected_contents = jet()
+//RS         .args(["hangar", "verify", "signed@fixture", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(rejected_contents.status.code(), Some(2));
+//RS     assert!(
+//RS         String::from_utf8_lossy(&rejected_contents.stderr).contains("E1315"),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&rejected_contents.stderr)
+//RS     );
+//RS     assert_eq!(fs::read_to_string(payload).unwrap(), "tampered bytes\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn hangar_export_plan_does_not_create_archive_or_signer() {
+//RS     let root = Scratch::new("hangar-export-plan-root");
+//RS     let project = Scratch::new("hangar-export-plan-project");
+//RS     let source = Scratch::new("hangar-export-plan-source");
+//RS     fs::write(source.join("payload"), "plan only\n").unwrap();
+//RS 
+//RS     let ingest = jetpack()
+//RS         .args([
+//RS             "hangar",
+//RS             "ingest",
+//RS             source.path.to_str().unwrap(),
+//RS             "--name",
+//RS             "planned",
+//RS             "--ref",
+//RS             "planned@fixture",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         ingest.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&ingest.stderr)
+//RS     );
+//RS 
+//RS     let archive = root.path.join("planned.hangar");
+//RS     let planned = jet()
+//RS         .args([
+//RS             "hangar",
+//RS             "export",
+//RS             "planned@fixture",
+//RS             "--to",
+//RS             archive.to_str().unwrap(),
+//RS             "--json",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         planned.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&planned.stderr)
+//RS     );
+//RS     assert!(
+//RS         planned.stderr.is_empty(),
+//RS         "JSON plan leaked stderr: {:?}",
+//RS         planned.stderr
+//RS     );
+//RS     let planned_stdout = String::from_utf8_lossy(&planned.stdout);
+//RS     let planned_report = jetpack::JSON::parse(planned_stdout.trim()).expect("export plan JSON");
+//RS     assert_eq!(json_string(&planned_report, "schema"), "jet.report/v1");
+//RS     assert_eq!(json_string(&planned_report, "moment"), "tool");
+//RS     assert_eq!(json_string(&planned_report, "status"), "plan");
+//RS     assert_eq!(json_string(&planned_report, "action"), "export");
+//RS     assert!(matches!(
+//RS         planned_report.get("applied").unwrap(),
+//RS         DataTree::Bool(false)
+//RS     ));
+//RS     assert!(!archive.exists());
+//RS     assert!(!root.path.join("trust/hangar.key").exists());
+//RS }
+//RS 
+//RS #[test]
+//RS fn hangar_export_import_rekeys_and_rejects_corruption_without_mutation() {
+//RS     let source_root = Scratch::new("hangar-archive-source-root");
+//RS     let destination_root = Scratch::new("hangar-archive-destination-root");
+//RS     let project = Scratch::new("hangar-archive-project");
+//RS     let source = Scratch::new("hangar-archive-source");
+//RS     fs::write(source.join("payload"), "portable bytes\n").unwrap();
+//RS 
+//RS     let ingest = jetpack()
+//RS         .args([
+//RS             "hangar",
+//RS             "ingest",
+//RS             source.path.to_str().unwrap(),
+//RS             "--name",
+//RS             "portable",
+//RS             "--ref",
+//RS             "portable@fixture",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &source_root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         ingest.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&ingest.stderr)
+//RS     );
+//RS 
+//RS     let source_roots = jetpack::Store::Roots {
+//RS         root: source_root.path.clone(),
+//RS         dev_mode: false,
+//RS     };
+//RS     let source_entry =
+//RS         jetpack::Store::find_by_reference(&source_roots, "portable@fixture").unwrap();
+//RS     let archive = source_root.path.join("portable.hangar");
+//RS     let export = jet()
+//RS         .args([
+//RS             "hangar",
+//RS             "export",
+//RS             "portable@fixture",
+//RS             "--to",
+//RS             archive.to_str().unwrap(),
+//RS             "--yes",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &source_root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     let export_stderr = String::from_utf8_lossy(&export.stderr);
+//RS     assert!(export.status.success(), "stderr: {export_stderr}");
+//RS     assert!(export_stderr.contains("export: ") && export_stderr.contains(" object(s)"));
+//RS     assert!(archive.is_file());
+//RS 
+//RS     let key = source_root.path.join("trust/hangar.key");
+//RS     assert!(key.is_file());
+//RS     let import = || {
+//RS         jet()
+//RS             .args([
+//RS                 "hangar",
+//RS                 "import",
+//RS                 archive.to_str().unwrap(),
+//RS                 "--key",
+//RS                 key.to_str().unwrap(),
+//RS                 "--yes",
+//RS                 "--no-color",
+//RS             ])
+//RS             .current_dir(&project.path)
+//RS             .env("JETPACK_ROOT", &destination_root.path)
+//RS             .output()
+//RS             .unwrap()
+//RS     };
+//RS     let imported = import();
+//RS     assert!(
+//RS         imported.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&imported.stderr)
+//RS     );
+//RS 
+//RS     let destination_roots = jetpack::Store::Roots {
+//RS         root: destination_root.path.clone(),
+//RS         dev_mode: false,
+//RS     };
+//RS     let destination_entry =
+//RS         jetpack::Store::find_by_reference(&destination_roots, "portable@fixture").unwrap();
+//RS     assert_eq!(
+//RS         destination_entry.envelope.output_hash,
+//RS         source_entry.envelope.output_hash
+//RS     );
+//RS     let expected_destination_id = jetpack::Store::entry_id(
+//RS         &destination_entry.name,
+//RS         &destination_entry.version,
+//RS         &destination_entry.reference,
+//RS         &destination_entry.out,
+//RS     );
+//RS     assert_eq!(
+//RS         destination_entry.id, expected_destination_id,
+//RS         "source id: {}; source out: {}; destination out: {}",
+//RS         source_entry.id, source_entry.out, destination_entry.out
+//RS     );
+//RS     assert_ne!(destination_entry.id, source_entry.id);
+//RS     assert_eq!(
+//RS         destination_entry.id,
+//RS         jetpack::Store::entry_id(
+//RS             &destination_entry.name,
+//RS             &destination_entry.version,
+//RS             &destination_entry.reference,
+//RS             &destination_entry.out,
+//RS         )
+//RS     );
+//RS     jetpack::Store::verify_hangar_object(&destination_roots, &destination_entry).unwrap();
+//RS     let graph = jetpack::Store::closure_graph(&destination_roots).unwrap();
+//RS     assert_eq!(
+//RS         graph.records.get(&destination_entry.id).unwrap().primary,
+//RS         destination_entry.envelope.output_hash
+//RS     );
+//RS     assert!(!destination_entry.receipt.is_empty());
+//RS     assert!(destination_roots
+//RS         .hangar_dir()
+//RS         .join("receipts")
+//RS         .join(&destination_entry.receipt)
+//RS         .is_file());
+//RS 
+//RS     let repeated = import();
+//RS     assert!(
+//RS         repeated.status.success(),
+//RS         "repeated import stderr: {}",
+//RS         String::from_utf8_lossy(&repeated.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         jetpack::Store::list_checked(&destination_roots)
+//RS             .unwrap()
+//RS             .len(),
+//RS         1
+//RS     );
+//RS 
+//RS     let corrupted = source_root.path.join("portable-corrupt.hangar");
+//RS     let mut bytes = fs::read(&archive).unwrap();
+//RS     let last = bytes.last_mut().unwrap();
+//RS     *last ^= 1;
+//RS     fs::write(&corrupted, bytes).unwrap();
+//RS     let rejected = jet()
+//RS         .args([
+//RS             "hangar",
+//RS             "import",
+//RS             corrupted.to_str().unwrap(),
+//RS             "--key",
+//RS             key.to_str().unwrap(),
+//RS             "--yes",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &destination_root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         rejected.status.code(),
+//RS         Some(2),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&rejected.stdout),
+//RS         String::from_utf8_lossy(&rejected.stderr)
+//RS     );
+//RS     assert!(String::from_utf8_lossy(&rejected.stderr).contains("Hangar import failed"));
+//RS     let after = jetpack::Store::find_by_reference(&destination_roots, "portable@fixture").unwrap();
+//RS     assert_eq!(after.id, destination_entry.id);
+//RS     assert_eq!(
+//RS         after.envelope.output_hash,
+//RS         destination_entry.envelope.output_hash
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(Path::new(&after.out).join("payload")).unwrap(),
+//RS         "portable bytes\n"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn hangar_dump_restore_streams_one_archive_and_preserves_live_data_on_corruption() {
+//RS     let source_root = Scratch::new("hangar-dump-source-root");
+//RS     let destination_root = Scratch::new("hangar-dump-destination-root");
+//RS     let project = Scratch::new("hangar-dump-project");
+//RS     let source = Scratch::new("hangar-dump-source");
+//RS     fs::write(source.join("payload"), "streamed bytes\n").unwrap();
+//RS 
+//RS     let ingest = jetpack()
+//RS         .args([
+//RS             "hangar",
+//RS             "ingest",
+//RS             source.path.to_str().unwrap(),
+//RS             "--name",
+//RS             "streamed",
+//RS             "--ref",
+//RS             "streamed@fixture",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &source_root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         ingest.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&ingest.stderr)
+//RS     );
+//RS 
+//RS     let dumped = jet()
+//RS         .args(["hangar", "dump", "streamed@fixture", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &source_root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         dumped.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&dumped.stderr)
+//RS     );
+//RS     assert!(
+//RS         dumped.stdout.starts_with(b"jet-hangar-archive-v1\0"),
+//RS         "dump must emit the canonical archive bytes"
+//RS     );
+//RS     let key = source_root.path.join("trust/hangar.key");
+//RS     assert!(key.is_file(), "dump must create the source Hangar signer");
+//RS 
+//RS     let restore = |bytes: &[u8]| {
+//RS         let mut child = jet()
+//RS             .args([
+//RS                 "hangar",
+//RS                 "restore",
+//RS                 "--key",
+//RS                 key.to_str().unwrap(),
+//RS                 "--yes",
+//RS                 "--no-color",
+//RS             ])
+//RS             .current_dir(&project.path)
+//RS             .env("JETPACK_ROOT", &destination_root.path)
+//RS             .stdin(Stdio::piped())
+//RS             .spawn()
+//RS             .unwrap();
+//RS         child.stdin.as_mut().unwrap().write_all(bytes).unwrap();
+//RS         drop(child.stdin.take());
+//RS         child.wait_with_output().unwrap()
+//RS     };
+//RS 
+//RS     let restored = restore(&dumped.stdout);
+//RS     assert!(
+//RS         restored.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&restored.stderr)
+//RS     );
+//RS     let roots = jetpack::Store::Roots {
+//RS         root: destination_root.path.clone(),
+//RS         dev_mode: false,
+//RS     };
+//RS     let entry = jetpack::Store::find_by_reference(&roots, "streamed@fixture").unwrap();
+//RS     assert_eq!(
+//RS         fs::read_to_string(Path::new(&entry.out).join("payload")).unwrap(),
+//RS         "streamed bytes\n"
+//RS     );
+//RS 
+//RS     let repeated = restore(&dumped.stdout);
+//RS     assert!(
+//RS         repeated.status.success(),
+//RS         "repeated restore stderr: {}",
+//RS         String::from_utf8_lossy(&repeated.stderr)
+//RS     );
+//RS     assert_eq!(jetpack::Store::list_checked(&roots).unwrap().len(), 1);
+//RS 
+//RS     let mut corrupt = dumped.stdout.clone();
+//RS     *corrupt.last_mut().unwrap() ^= 1;
+//RS     let rejected = restore(&corrupt);
+//RS     assert_eq!(rejected.status.code(), Some(2));
+//RS     assert_eq!(
+//RS         fs::read_to_string(Path::new(&entry.out).join("payload")).unwrap(),
+//RS         "streamed bytes\n"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn hangar_copy_roundtrip_is_idempotent_and_conflict_safe() {
+//RS     let source_root = Scratch::new("hangar-copy-source-root");
+//RS     let destination_root = Scratch::new("hangar-copy-destination-root");
+//RS     let project = Scratch::new("hangar-copy-project");
+//RS     let source = Scratch::new("hangar-copy-source");
+//RS     fs::write(source.join("payload"), "copy me\n").unwrap();
+//RS 
+//RS     let ingest = jetpack()
+//RS         .args([
+//RS             "hangar",
+//RS             "ingest",
+//RS             source.path.to_str().unwrap(),
+//RS             "--name",
+//RS             "copyable",
+//RS             "--ref",
+//RS             "copyable@fixture",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &source_root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         ingest.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&ingest.stderr)
+//RS     );
+//RS     let source_roots = jetpack::Store::Roots {
+//RS         root: source_root.path.clone(),
+//RS         dev_mode: false,
+//RS     };
+//RS     let source_entry = jetpack::Store::find_by_reference(&source_roots, "copyable@fixture")
+//RS         .expect("ingest must publish the source package record");
+//RS     let source_payload = Path::new(&source_entry.out).join("payload");
+//RS 
+//RS     let copy = || {
+//RS         jet()
+//RS             .args([
+//RS                 "hangar",
+//RS                 "copy",
+//RS                 "copyable@fixture",
+//RS                 "--to",
+//RS                 destination_root.path.to_str().unwrap(),
+//RS                 "--yes",
+//RS                 "--json",
+//RS                 "--no-color",
+//RS             ])
+//RS             .current_dir(&project.path)
+//RS             .env("JETPACK_ROOT", &source_root.path)
+//RS             .output()
+//RS             .unwrap()
+//RS     };
+//RS 
+//RS     let first = copy();
+//RS     assert!(
+//RS         first.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&first.stderr)
+//RS     );
+//RS     let first_stdout = String::from_utf8_lossy(&first.stdout).into_owned();
+//RS     assert!(
+//RS         first_stdout.contains("\"schema\":\"jet.report/v1\""),
+//RS         "{first_stdout}"
+//RS     );
+//RS     assert!(
+//RS         first_stdout.contains("\"action\":\"copy\""),
+//RS         "{first_stdout}"
+//RS     );
+//RS 
+//RS     let destination_roots = jetpack::Store::Roots {
+//RS         root: destination_root.path.clone(),
+//RS         dev_mode: false,
+//RS     };
+//RS     let destination_entry =
+//RS         jetpack::Store::find_by_reference(&destination_roots, "copyable@fixture")
+//RS             .expect("copy must publish the destination package record");
+//RS     jetpack::Store::verify_hangar_object(&destination_roots, &destination_entry).unwrap();
+//RS     assert_eq!(
+//RS         fs::read_to_string(Path::new(&destination_entry.out).join("payload")).unwrap(),
+//RS         "copy me\n"
+//RS     );
+//RS 
+//RS     let repeated = copy();
+//RS     assert!(
+//RS         repeated.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&repeated.stderr)
+//RS     );
+//RS     assert_eq!(first_stdout, String::from_utf8_lossy(&repeated.stdout));
+//RS     assert_eq!(
+//RS         jetpack::Store::list_checked(&destination_roots)
+//RS             .unwrap()
+//RS             .len(),
+//RS         1
+//RS     );
+//RS 
+//RS     make_tree_writable(Path::new(&destination_entry.out));
+//RS     let destination_payload = Path::new(&destination_entry.out).join("payload");
+//RS     fs::write(&destination_payload, "keep corrupt bytes\n").unwrap();
+//RS     let rejected = copy();
+//RS     assert_eq!(rejected.status.code(), Some(2));
+//RS     let rejected_stderr = String::from_utf8_lossy(&rejected.stderr);
+//RS     let rejected_stdout = String::from_utf8_lossy(&rejected.stdout);
+//RS     assert!(
+//RS         rejected_stdout.contains("conflicting digest"),
+//RS         "stderr: {rejected_stderr}\nstdout: {rejected_stdout}"
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(destination_payload).unwrap(),
+//RS         "keep corrupt bytes\n"
+//RS     );
+//RS     assert_eq!(fs::read_to_string(source_payload).unwrap(), "copy me\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn hangar_repair_uses_jet_dispatch_and_restores_or_preserves_the_object() {
+//RS     let root = Scratch::new("hangar-repair-root");
+//RS     let project = Scratch::new("hangar-repair-project");
+//RS     let source = Scratch::new("hangar-repair-source");
+//RS     fs::write(source.join("payload"), "trusted bytes\n").unwrap();
+//RS 
+//RS     let ingest = jetpack()
+//RS         .args([
+//RS             "hangar",
+//RS             "ingest",
+//RS             source.path.to_str().unwrap(),
+//RS             "--name",
+//RS             "repairable",
+//RS             "--ref",
+//RS             "repairable@fixture",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         ingest.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&ingest.stderr)
+//RS     );
+//RS 
+//RS     let roots = jetpack::Store::Roots {
+//RS         root: root.path.clone(),
+//RS         dev_mode: false,
+//RS     };
+//RS     let entry = jetpack::Store::find_by_reference(&roots, "repairable@fixture").unwrap();
+//RS     let archive = root.join("repairable.hangar");
+//RS     let export = jetpack()
+//RS         .args([
+//RS             "hangar",
+//RS             "export",
+//RS             "repairable@fixture",
+//RS             "--to",
+//RS             archive.to_str().unwrap(),
+//RS             "--yes",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         export.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&export.stderr)
+//RS     );
+//RS     let unsigned_archive = root.join("unsigned.hangar");
+//RS     fs::write(
+//RS         &unsigned_archive,
+//RS         jetpack::Store::export_unsigned_archive(&roots, &entry.id, false).unwrap(),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let payload = Path::new(&entry.out).join("payload");
+//RS     make_tree_writable(Path::new(&entry.out));
+//RS     fs::write(&payload, "tampered bytes\n").unwrap();
+//RS     let rejected = jet()
+//RS         .args([
+//RS             "hangar",
+//RS             "repair",
+//RS             "repairable@fixture",
+//RS             "--from",
+//RS             unsigned_archive.to_str().unwrap(),
+//RS             "--yes",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(rejected.status.code(), Some(2));
+//RS     assert!(
+//RS         String::from_utf8_lossy(&rejected.stderr).contains("unsigned Hangar archives"),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&rejected.stderr)
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&payload).unwrap(), "tampered bytes\n");
+//RS 
+//RS     let repair = |archive: &Path| {
+//RS         jet()
+//RS             .args([
+//RS                 "hangar",
+//RS                 "repair",
+//RS                 "repairable@fixture",
+//RS                 "--from",
+//RS                 archive.to_str().unwrap(),
+//RS                 "--yes",
+//RS                 "--no-color",
+//RS             ])
+//RS             .current_dir(&project.path)
+//RS             .env("JETPACK_ROOT", &root.path)
+//RS             .output()
+//RS             .unwrap()
+//RS     };
+//RS     let repaired = repair(&archive);
+//RS     assert!(
+//RS         repaired.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&repaired.stderr)
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&payload).unwrap(), "trusted bytes\n");
+//RS     jetpack::Store::verify_hangar_object(
+//RS         &roots,
+//RS         &jetpack::Store::find_by_reference(&roots, "repairable@fixture").unwrap(),
+//RS     )
+//RS     .unwrap();
+//RS     let repeated = repair(&archive);
+//RS     assert!(
+//RS         repeated.status.success(),
+//RS         "repeated repair should be idempotent: {}",
+//RS         String::from_utf8_lossy(&repeated.stderr)
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&payload).unwrap(), "trusted bytes\n");
+//RS 
+//RS     let quarantine = root.path.join("hangar").join("quarantine");
+//RS     fs::create_dir_all(&quarantine).unwrap();
+//RS 
+//RS     // A crash after quarantine can leave the already-corrupt object under a
+//RS     // repair-* name. Recovery preserves that evidence and leaves the signed
+//RS     // archive as the next repair source.
+//RS     make_tree_writable(Path::new(&entry.out));
+//RS     fs::write(&payload, "crashed corrupt bytes\n").unwrap();
+//RS     let corrupt_backup = quarantine.join(format!("repair-{}-corrupt", entry.envelope.output_hash));
+//RS     fs::rename(&entry.out, &corrupt_backup).unwrap();
+//RS     seal_tree(&corrupt_backup);
+//RS     let recovered_corrupt = jet()
+//RS         .args(["hangar", "recover", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         recovered_corrupt.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&recovered_corrupt.stderr)
+//RS     );
+//RS     assert!(!Path::new(&entry.out).exists());
+//RS     assert!(fs::read_dir(&quarantine).unwrap().flatten().any(|item| item
+//RS         .file_name()
+//RS         .to_string_lossy()
+//RS         .starts_with("rejected-repair-")));
+//RS     let repaired_after_crash = repair(&archive);
+//RS     assert!(
+//RS         repaired_after_crash.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&repaired_after_crash.stderr)
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&payload).unwrap(), "trusted bytes\n");
+//RS 
+//RS     make_tree_writable(Path::new(&entry.out));
+//RS     let crash_backup = quarantine.join(format!("repair-{}-crash", entry.envelope.output_hash));
+//RS     fs::rename(&entry.out, &crash_backup).unwrap();
+//RS     seal_tree(&crash_backup);
+//RS     let recovered = jet()
+//RS         .args(["hangar", "recover", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         recovered.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&recovered.stderr)
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&payload).unwrap(), "trusted bytes\n");
+//RS     jetpack::Store::verify_hangar_object(
+//RS         &roots,
+//RS         &jetpack::Store::find_by_reference(&roots, "repairable@fixture").unwrap(),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     make_tree_writable(Path::new(&entry.out));
+//RS     fs::remove_dir_all(&entry.out).unwrap();
+//RS     let repaired_missing = repair(&archive);
+//RS     assert!(
+//RS         repaired_missing.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&repaired_missing.stderr)
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&payload).unwrap(), "trusted bytes\n");
+//RS     jetpack::Store::verify_hangar_object(
+//RS         &roots,
+//RS         &jetpack::Store::find_by_reference(&roots, "repairable@fixture").unwrap(),
+//RS     )
+//RS     .unwrap();
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn seal_tree(path: &Path) {
+//RS     use std::os::unix::fs::PermissionsExt as _;
+//RS 
+//RS     let metadata = fs::symlink_metadata(path).unwrap();
+//RS     if metadata.is_dir() {
+//RS         for child in fs::read_dir(path).unwrap() {
+//RS             seal_tree(&child.unwrap().path());
+//RS         }
+//RS     }
+//RS     let mut permissions = metadata.permissions();
+//RS     permissions.set_mode(permissions.mode() & !0o222);
+//RS     fs::set_permissions(path, permissions).unwrap();
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn seal_tree(path: &Path) {
+//RS     let metadata = fs::metadata(path).unwrap();
+//RS     if metadata.is_dir() {
+//RS         for child in fs::read_dir(path).unwrap() {
+//RS             seal_tree(&child.unwrap().path());
+//RS         }
+//RS     }
+//RS     let mut permissions = metadata.permissions();
+//RS     permissions.set_readonly(true);
+//RS     fs::set_permissions(path, permissions).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn real_core_provider_registers_canonical_object_and_action_relation() {
+//RS     let (_base, project, root) = core_hello_project("hangar-v2-core-closure");
+//RS     let built = jetpack()
+//RS         .args(["build", "--no-color"])
+//RS         .current_dir(&project)
+//RS         .env("JETPACK_ROOT", &root)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         built.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&built.stderr)
+//RS     );
+//RS 
+//RS     let roots = jetpack::Store::Roots {
+//RS         root: root.clone(),
+//RS         dev_mode: false,
+//RS     };
+//RS     let entry = jetpack::Store::find_by_reference(&roots, "hello@mine").unwrap();
+//RS     assert_eq!(
+//RS         Path::new(&entry.out).parent(),
+//RS         Some(root.join("hangar/objects").as_path())
+//RS     );
+//RS     assert_eq!(
+//RS         Path::new(&entry.out)
+//RS             .file_name()
+//RS             .and_then(|name| name.to_str()),
+//RS         Some(entry.envelope.output_hash.as_str())
+//RS     );
+//RS     let graph = jetpack::Store::closure_graph(&roots).unwrap();
+//RS     let record = graph.records.get(&entry.id).unwrap();
+//RS     assert_eq!(record.primary, entry.envelope.output_hash);
+//RS     assert_eq!(
+//RS         graph.action_outputs(&record.action_key).get("out"),
+//RS         Some(&record.primary)
+//RS     );
+//RS     jetpack::Store::verify_hangar_object(&roots, &entry).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn manual_external_root_cli_is_atomic_and_reports_stale_etag() {
+//RS     let root = Scratch::new("hangar-v2-manual-root");
+//RS     let project = Scratch::new("hangar-v2-manual-project");
+//RS     let source = Scratch::new("hangar-v2-manual-source");
+//RS     fs::write(source.join("payload"), "manual-root-bytes").unwrap();
+//RS 
+//RS     let ingest = jetpack()
+//RS         .args([
+//RS             "hangar",
+//RS             "ingest",
+//RS             source.path.to_str().unwrap(),
+//RS             "--name",
+//RS             "manual",
+//RS             "--ref",
+//RS             "manual@fixture",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         ingest.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&ingest.stderr)
+//RS     );
+//RS 
+//RS     let register = jetpack()
+//RS         .args([
+//RS             "hangar",
+//RS             "register-external-root",
+//RS             "backup-sdk",
+//RS             "manual@fixture",
+//RS             "--expires-in",
+//RS             "1w",
+//RS             "--yes",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_PRINCIPAL", "manual-root-cli")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         register.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&register.stderr)
+//RS     );
+//RS     assert!(String::from_utf8_lossy(&register.stderr).contains("etag 1.1"));
+//RS 
+//RS     let listed = jetpack()
+//RS         .args(["hangar", "list-external-roots", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_PRINCIPAL", "manual-root-cli")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(listed.status.success());
+//RS     let listed_stderr = String::from_utf8_lossy(&listed.stderr);
+//RS     assert!(listed_stderr.contains("backup-sdk"));
+//RS     assert!(listed_stderr.contains("etag 1.1"));
+//RS 
+//RS     let stale = jetpack()
+//RS         .args([
+//RS             "hangar",
+//RS             "register-external-root",
+//RS             "backup-sdk",
+//RS             "manual@fixture",
+//RS             "--if-etag",
+//RS             "1.0",
+//RS             "--yes",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_PRINCIPAL", "manual-root-cli")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(stale.status.code(), Some(2));
+//RS     let stale_stderr = String::from_utf8_lossy(&stale.stderr);
+//RS     assert!(stale_stderr.contains("Error [E1320]"), "{stale_stderr}");
+//RS     assert!(stale_stderr.contains("No requested root mutation was applied."));
+//RS     let diagnostic = stale_stderr
+//RS         .find("Error [E1320]")
+//RS         .map(|index| &stale_stderr[index..])
+//RS         .unwrap_or(&stale_stderr);
+//RS     assert_jetos_stderr_snapshot_trimmed("external_root_stale_etag", diagnostic);
+//RS 
+//RS     let unregister = jetpack()
+//RS         .args([
+//RS             "hangar",
+//RS             "unregister-external-root",
+//RS             "backup-sdk",
+//RS             "--etag",
+//RS             "1.1",
+//RS             "--yes",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_PRINCIPAL", "manual-root-cli")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         unregister.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&unregister.stderr)
+//RS     );
+//RS     assert!(String::from_utf8_lossy(&unregister.stderr).contains("Removed external root"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn hangar_recovery_reclaims_crashed_stages_and_idle_leases_without_following_escape() {
+//RS     let root = Scratch::new("hangar-v2-recovery-root");
+//RS     let roots = jetpack::Store::Roots {
+//RS         root: root.path.clone(),
+//RS         dev_mode: false,
+//RS     };
+//RS     let archive_stage = roots.hangar_dir().join(".archive-stage/abandoned");
+//RS     fs::create_dir_all(&archive_stage).unwrap();
+//RS     fs::write(archive_stage.join("payload"), "partial archive").unwrap();
+//RS     let dead_lease = roots.root.join("leases/4294967295-0-abandoned");
+//RS     fs::create_dir_all(&dead_lease).unwrap();
+//RS     fs::write(dead_lease.join("payload"), "lease snapshot").unwrap();
+//RS 
+//RS     assert_eq!(jetpack::Store::recover_hangar(&roots).unwrap(), 2);
+//RS     assert!(!roots.hangar_dir().join(".archive-stage/abandoned").exists());
+//RS     assert!(!dead_lease.exists());
+//RS 
+//RS     #[cfg(unix)]
+//RS     {
+//RS         let outside = Scratch::new("hangar-v2-recovery-outside");
+//RS         fs::write(outside.join("must-survive"), "live data").unwrap();
+//RS         let stage_root = roots.hangar_dir().join(".archive-stage");
+//RS         fs::remove_dir_all(&stage_root).unwrap();
+//RS         std::os::unix::fs::symlink(&outside.path, &stage_root).unwrap();
+//RS         let error = jetpack::Store::recover_hangar(&roots).unwrap_err();
+//RS         assert!(error.to_string().contains("archive staging"), "{error}");
+//RS         assert_eq!(
+//RS             fs::read_to_string(outside.join("must-survive")).unwrap(),
+//RS             "live data"
+//RS         );
+//RS         fs::remove_file(stage_root).unwrap();
+//RS 
+//RS         let lease_root = roots.root.join("leases");
+//RS         fs::remove_dir_all(&lease_root).unwrap();
+//RS         std::os::unix::fs::symlink(&outside.path, &lease_root).unwrap();
+//RS         let error = jetpack::Store::recover_hangar(&roots).unwrap_err();
+//RS         assert!(error.to_string().contains("lease directory"), "{error}");
+//RS         assert_eq!(
+//RS             fs::read_to_string(outside.join("must-survive")).unwrap(),
+//RS             "live data"
+//RS         );
+//RS         fs::remove_file(lease_root).unwrap();
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn hangar_verify_reports_corrupt_store_instead_of_empty_success() {
+//RS     let root = Scratch::new("hangar-v2-verify-corrupt-root");
+//RS     let project = Scratch::new("hangar-v2-verify-corrupt-project");
+//RS     let source = Scratch::new("hangar-v2-verify-corrupt-source");
+//RS     fs::write(source.join("payload"), "live bytes").unwrap();
+//RS 
+//RS     let ingest = jetpack()
+//RS         .args([
+//RS             "hangar",
+//RS             "ingest",
+//RS             source.path.to_str().unwrap(),
+//RS             "--name",
+//RS             "verify-corrupt",
+//RS             "--ref",
+//RS             "verify-corrupt@fixture",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(ingest.status.success(), "stderr: {:?}", ingest.stderr);
+//RS 
+//RS     let roots = jetpack::Store::Roots {
+//RS         root: root.path.clone(),
+//RS         dev_mode: false,
+//RS     };
+//RS     let journal = roots.hangar_dir().join("closure-db/journal");
+//RS     let journal_entry = fs::read_dir(&journal)
+//RS         .unwrap()
+//RS         .map(|entry| entry.unwrap().path())
+//RS         .find(|path| path.extension().and_then(|value| value.to_str()) == Some("txn"))
+//RS         .expect("committed closure transaction");
+//RS     let journal_bytes = fs::read(&journal_entry).unwrap();
+//RS     fs::write(&journal_entry, b"corrupt closure journal").unwrap();
+//RS 
+//RS     let verify = jet()
+//RS         .args([
+//RS             "hangar",
+//RS             "verify",
+//RS             "verify-corrupt@fixture",
+//RS             "--json",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     fs::write(&journal_entry, journal_bytes).unwrap();
+//RS     assert_eq!(
+//RS         verify.status.code(),
+//RS         Some(2),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&verify.stdout),
+//RS         String::from_utf8_lossy(&verify.stderr)
+//RS     );
+//RS     assert!(
+//RS         verify.stderr.is_empty(),
+//RS         "JSON verify leaked stderr: {:?}",
+//RS         verify.stderr
+//RS     );
+//RS     let report = jetpack::JSON::parse(String::from_utf8_lossy(&verify.stdout).trim())
+//RS         .expect("corrupt store report");
+//RS     assert_eq!(json_string(&report, "schema"), "jet.report/v1");
+//RS     assert_eq!(json_string(&report, "code"), "E1340");
+//RS     assert_eq!(json_string(&report, "what"), "could not read the Hangar");
+//RS     assert!(!String::from_utf8_lossy(&verify.stdout).contains("no hangar object"));
+//RS     assert_eq!(
+//RS         fs::read_to_string(source.join("payload")).unwrap(),
+//RS         "live bytes"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn hangar_du_rejects_corrupt_output_projection_without_following_escape() {
+//RS     let root = Scratch::new("hangar-v2-du-root");
+//RS     let project = Scratch::new("hangar-v2-du-project");
+//RS     let source = Scratch::new("hangar-v2-du-source");
+//RS     fs::write(source.join("payload"), "owned bytes").unwrap();
+//RS 
+//RS     let ingest = jetpack()
+//RS         .args([
+//RS             "hangar",
+//RS             "ingest",
+//RS             source.path.to_str().unwrap(),
+//RS             "--name",
+//RS             "du-proof",
+//RS             "--ref",
+//RS             "du-proof@fixture",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         ingest.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&ingest.stderr)
+//RS     );
+//RS 
+//RS     let roots = jetpack::Store::Roots {
+//RS         root: root.path.clone(),
+//RS         dev_mode: false,
+//RS     };
+//RS     let entry = jetpack::Store::find_by_reference(&roots, "du-proof@fixture").unwrap();
+//RS     let entry_dir = roots.hangar_dir().join(&entry.id);
+//RS     make_tree_writable(&entry_dir);
+//RS     let outside = Scratch::new("hangar-v2-du-outside");
+//RS     fs::write(outside.join("must-survive"), "outside bytes").unwrap();
+//RS     let meta = entry_dir.join("meta.json");
+//RS     let original = fs::read_to_string(&meta).unwrap();
+//RS     let escaped = original.replace(&entry.out, &outside.path.to_string_lossy());
+//RS     assert_ne!(escaped, original);
+//RS     fs::write(&meta, escaped).unwrap();
+//RS     let journal = roots.hangar_dir().join("closure-db/journal");
+//RS     let journal_backup = roots.hangar_dir().join("closure-db/journal.corrupt-backup");
+//RS     fs::rename(&journal, &journal_backup).unwrap();
+//RS 
+//RS     let du = jetpack()
+//RS         .args(["hangar", "du", "--json", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     fs::rename(&journal_backup, &journal).unwrap();
+//RS     assert_eq!(
+//RS         du.status.code(),
+//RS         Some(2),
+//RS         "du stdout: {}; stderr: {}",
+//RS         String::from_utf8_lossy(&du.stdout),
+//RS         String::from_utf8_lossy(&du.stderr)
+//RS     );
+//RS     assert!(
+//RS         du.stderr.is_empty(),
+//RS         "JSON disk-usage failure leaked stderr: {:?}",
+//RS         du.stderr
+//RS     );
+//RS     let report = jetpack::JSON::parse(String::from_utf8_lossy(&du.stdout).trim())
+//RS         .expect("du corruption report");
+//RS     assert_eq!(json_string(&report, "schema"), "jet.report/v1");
+//RS     assert_eq!(json_string(&report, "moment"), "compile");
+//RS     assert_eq!(json_string(&report, "code"), "E1340");
+//RS     assert!(entry.out.starts_with(root.path.to_str().unwrap()));
+//RS     assert!(Path::new(&entry.out).is_dir());
+//RS     assert_eq!(
+//RS         fs::read_to_string(outside.path.join("must-survive")).unwrap(),
+//RS         "outside bytes"
+//RS     );
+//RS 
+//RS     let repair = jetpack()
+//RS         .args(["hangar", "recover", "--json", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         repair.status.success(),
+//RS         "repair stderr: {}",
+//RS         String::from_utf8_lossy(&repair.stderr)
+//RS     );
+//RS     assert!(repair.stderr.is_empty(), "JSON repair leaked stderr");
+//RS     let repair_report = jetpack::JSON::parse(String::from_utf8_lossy(&repair.stdout).trim())
+//RS         .expect("repair report");
+//RS     assert_eq!(json_string(&repair_report, "schema"), "jet.report/v1");
+//RS     assert_eq!(json_string(&repair_report, "action"), "recover");
+//RS     assert_eq!(fs::read_to_string(&meta).unwrap(), original);
+//RS     assert_eq!(
+//RS         fs::read_to_string(outside.path.join("must-survive")).unwrap(),
+//RS         "outside bytes"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn explain_json_uses_the_report_schema_for_registered_queries() {
+//RS     let project = Scratch::new("hangar-v2-explain-project");
+//RS     for command in ["jet", "jetpack"] {
+//RS         let mut process = if command == "jet" { jet() } else { jetpack() };
+//RS         let output = process
+//RS             .args(["explain", "@", "--json", "--no-color"])
+//RS             .current_dir(&project.path)
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(
+//RS             output.status.success(),
+//RS             "{command} explain stderr: {}",
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS         assert!(
+//RS             output.stderr.is_empty(),
+//RS             "{command} JSON explain leaked stderr"
+//RS         );
+//RS         let stdout = String::from_utf8_lossy(&output.stdout);
+//RS         assert!(
+//RS             !stdout.contains("schema_version"),
+//RS             "legacy explain schema: {stdout}"
+//RS         );
+//RS         let report = jetpack::JSON::parse(stdout.trim()).expect("explain report");
+//RS         assert_eq!(json_string(&report, "schema"), "jet.report/v1");
+//RS         assert_eq!(json_string(&report, "moment"), "tool");
+//RS         assert_eq!(json_string(&report, "action"), "explain");
+//RS         assert_eq!(json_string(&report, "status"), "ok");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn hangar_quota_evicts_oldest_unreferenced_before_publishing_past_ceiling() {
+//RS     fn logical_bytes(path: &Path) -> u64 {
+//RS         let metadata = fs::symlink_metadata(path).unwrap();
+//RS         if metadata.is_dir() {
+//RS             fs::read_dir(path)
+//RS                 .unwrap()
+//RS                 .map(|entry| logical_bytes(&entry.unwrap().path()))
+//RS                 .sum()
+//RS         } else {
+//RS             metadata.len()
+//RS         }
+//RS     }
+//RS 
+//RS     fn quota_fixture(
+//RS         roots: &jetpack::Store::Roots,
+//RS         name: &str,
+//RS         fill: u8,
+//RS         bytes: usize,
+//RS     ) -> jetpack::Store::StoreEntry {
+//RS         let source = roots.root.join(format!("quota-source-{name}"));
+//RS         fs::create_dir_all(&source).unwrap();
+//RS         fs::write(source.join("payload"), vec![fill; bytes]).unwrap();
+//RS         let entry = jetpack::Store::ingest_tree(
+//RS             roots,
+//RS             &jetpack::Store::IngestRequest {
+//RS                 name: format!("quota-{name}"),
+//RS                 version: "1".into(),
+//RS                 reference: format!("quota@fixture#{name}"),
+//RS                 cache_identity: jetpack::Store::CacheIdentity::default(),
+//RS                 references: Vec::new(),
+//RS                 outputs: std::collections::BTreeMap::from([("out".into(), source.clone())]),
+//RS                 signature: String::new(),
+//RS                 provenance: "quota-test".into(),
+//RS                 platform_artifact_kind: String::new(),
+//RS             },
+//RS         )
+//RS         .unwrap()
+//RS         .entry;
+//RS         fs::remove_dir_all(source).unwrap();
+//RS         entry
+//RS     }
+//RS 
+//RS     let root = Scratch::new("hangar-quota-root");
+//RS     let roots = jetpack::Store::Roots::at(root.path.clone());
+//RS     let oldest = quota_fixture(&roots, "oldest", b'a', 4 * 1024 * 1024);
+//RS     let newer = quota_fixture(&roots, "newer", b'b', 4 * 1024 * 1024);
+//RS     jetpack::Store::test_backdate_last_used_at(&roots, &oldest.id, 1).unwrap();
+//RS     jetpack::Store::test_backdate_last_used_at(&roots, &newer.id, 2).unwrap();
+//RS 
+//RS     let before = logical_bytes(&roots.hangar_dir());
+//RS     let limit = before - 2 * 1024 * 1024;
+//RS     fs::create_dir_all(root.path.join("config")).unwrap();
+//RS     fs::write(
+//RS         root.path.join("config/hangar-max-bytes"),
+//RS         format!("{limit}\n"),
+//RS     )
+//RS     .unwrap();
+//RS     assert!(before > limit);
+//RS 
+//RS     let admitted = quota_fixture(&roots, "admitted", b'c', 64 * 1024);
+//RS     let after = logical_bytes(&roots.hangar_dir());
+//RS     assert!(
+//RS         after <= limit,
+//RS         "quota admitted {after} logical bytes above ceiling {limit}"
+//RS     );
+//RS     assert!(!root.path.join("hangar").join(&oldest.id).exists());
+//RS     assert!(root.path.join("hangar").join(&newer.id).exists());
+//RS     assert!(root.path.join("hangar").join(&admitted.id).exists());
+//RS }
+//RS 
+//RS #[test]
+//RS fn nix_project_cas_bundle_rejects_tamper_and_missing_bytes() {
+//RS     let root = Scratch::new("nix-cas-bundle-root");
+//RS     let project = Scratch::new("nix-cas-bundle-project");
+//RS     let server = nix_index_cache_server::NixIndexCacheServer::start_ripgrep(&project.path);
+//RS     server.install(&root.path);
+//RS     fs::write(
+//RS         project.join("env.jet"),
+//RS         "module dev {\n    sources: { default: NixOS/nixpkgs/nixpkgs-unstable@github }\n    env.dev: Env{ packages: [default.ripgrep] }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::create_dir_all(project.join(".jet")).unwrap();
+//RS     fs::write(
+//RS         project.join(".jet/lock"),
+//RS         format!(
+//RS             "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"{}\"\nexact = \"github:NixOS/nixpkgs#{}\"\n\n[root]\ndependencies = []\n",
+//RS             nix_index_cache_server::CHANNEL,
+//RS             nix_index_cache_server::REVISION,
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     let build = jetpack()
+//RS         .args(["env", "--prep", "--no-color", "--trust", "--yes"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         build.status.success(),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&build.stdout),
+//RS         String::from_utf8_lossy(&build.stderr)
+//RS     );
+//RS     let roots = jetpack::Store::Roots::at(root.path.clone());
+//RS     let entry = jetpack::Store::list_checked(&roots)
+//RS         .unwrap()
+//RS         .into_iter()
+//RS         .find(|entry| entry.name == "ripgrep")
+//RS         .expect("index-backed Nix entry");
+//RS     let producer =
+//RS         jetpack::Store::ProducerRecord::decode(&entry.producer_record).expect("Nix producer");
+//RS     assert_eq!(producer.provider, "nix");
+//RS     assert_eq!(
+//RS         producer.facts.get("nix.index.revision").map(String::as_str),
+//RS         Some(nix_index_cache_server::REVISION)
+//RS     );
+//RS     assert_eq!(
+//RS         producer.facts.get("nix.index.system").map(String::as_str),
+//RS         Some(nix_index_cache_server::SYSTEM)
+//RS     );
+//RS     assert!(producer
+//RS         .facts
+//RS         .get("nix.cache.key")
+//RS         .is_some_and(|value| value.len() == 64));
+//RS 
+//RS     let digest =
+//RS         jetpack::Store::publish_nix_cas_bundle(&project.path, &roots, &entry.id).unwrap();
+//RS     let bundle = project.path.join(".jet/nix-cas").join(&digest);
+//RS     let mut bytes = fs::read(&bundle).unwrap();
+//RS     let last = bytes.len() - 1;
+//RS     bytes[last] ^= 1;
+//RS     fs::write(&bundle, bytes).unwrap();
+//RS     let imported_root = Scratch::new("nix-cas-bundle-import");
+//RS     let imported = jetpack::Store::Roots::at(imported_root.path.clone());
+//RS     assert!(
+//RS         jetpack::Store::import_nix_cas_bundle(&project.path, &imported, &digest).is_err(),
+//RS         "tampered project CAS bytes must fail closed"
+//RS     );
+//RS     fs::remove_file(bundle).unwrap();
+//RS     assert!(
+//RS         jetpack::Store::import_nix_cas_bundle(&project.path, &imported, &digest).is_err(),
+//RS         "missing project CAS bytes must fail closed"
+//RS     );
+//RS }
+// END-PORT-PENDING 1092 tests/jetpack_hangar_store_v2.rs:1-1858
+

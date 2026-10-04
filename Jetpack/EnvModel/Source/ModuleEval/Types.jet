@@ -1,0 +1,644 @@
+// PORT-PENDING 2140 crates-jet-env-model-src-moduleeval-types: crates/jet-env-model/src/ModuleEval/Types.rs:1-640
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Captured plans (derive-only data) produced by module evaluation: the
+//RS //! per-module `EvaluatedModule`, the jetos-tier `SystemPlan`/`ServicePlan`/
+//RS //! `OptionPlan`/`ImagePlan`, and the runnable `EnvPlan`.
+//RS 
+//RS use crate::AST::Namespace;
+//RS use std::collections::BTreeMap;
+//RS use std::fmt;
+//RS 
+//RS use super::super::Merge::{self, EntryContribution};
+//RS use super::super::Recipe::BuildRecipe;
+//RS use super::super::RefSpec::SourceTable;
+//RS use super::Environment::{
+//RS     EnvironmentIntegration, EnvironmentLifecycle, IntegrationFactProjection, LanguageExpansion,
+//RS     LanguagePack, LanguageProjection, LanguageSpec, PackageProfileSpec, PresetSpec, ResolvedPreset,
+//RS };
+//RS 
+//RS /// One `$NAME` read captured from a config surface. Environment variables are
+//RS /// always text, so the type is explicit in the plan instead of being inferred
+//RS /// again by an inspect or deploy consumer.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct EnvironmentRead {
+//RS     pub name: String,
+//RS     pub ty: String,
+//RS }
+//RS 
+//RS /// One typed entry in an environment's `secrets:` map.
+//RS ///
+//RS /// The declaration is deliberately a plan fact, not a decrypted value. The
+//RS /// activation tier checks the policy against the encrypted store and the
+//RS /// Prelude resolves a composed value only for the individual read that asks
+//RS /// for it.
+//RS #[derive(Clone, PartialEq, Eq)]
+//RS pub struct SecretSpec {
+//RS     pub name: String,
+//RS     pub description: Option<String>,
+//RS     pub required: bool,
+//RS     pub allowed_environments: Vec<String>,
+//RS     pub rotation: SecretRotationPolicy,
+//RS     pub default: SecretDefault,
+//RS     pub generate: SecretGenerator,
+//RS     pub declaration: SecretDeclaration,
+//RS     /// Integration imports contribute an implicit required source name. It is
+//RS     /// not a second author spelling; an explicit map entry replaces it.
+//RS     pub implicit: bool,
+//RS }
+//RS 
+//RS #[derive(Clone, PartialEq, Eq)]
+//RS pub enum SecretDeclaration {
+//RS     Stored,
+//RS     Compose { template: String, from: Vec<String> },
+//RS }
+//RS 
+//RS #[derive(Clone, PartialEq, Eq)]
+//RS pub enum SecretRotationPolicy {
+//RS     None,
+//RS     MaxAge { seconds: u64 },
+//RS }
+//RS 
+//RS #[derive(Clone, PartialEq, Eq)]
+//RS pub enum SecretDefault {
+//RS     None,
+//RS     PerProfile(BTreeMap<String, String>),
+//RS }
+//RS 
+//RS #[derive(Clone, PartialEq, Eq)]
+//RS pub enum SecretGenerator {
+//RS     None,
+//RS     Random { length: u64 },
+//RS }
+//RS 
+//RS impl SecretSpec {
+//RS     pub fn stored(name: impl Into<String>) -> SecretSpec {
+//RS         SecretSpec {
+//RS             name: name.into(),
+//RS             description: None,
+//RS             required: true,
+//RS             allowed_environments: Vec::new(),
+//RS             rotation: SecretRotationPolicy::None,
+//RS             default: SecretDefault::None,
+//RS             generate: SecretGenerator::None,
+//RS             declaration: SecretDeclaration::Stored,
+//RS             implicit: false,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn implicit(name: impl Into<String>) -> SecretSpec {
+//RS         let mut spec = SecretSpec::stored(name);
+//RS         spec.implicit = true;
+//RS         spec
+//RS     }
+//RS 
+//RS     pub fn is_composed(&self) -> bool {
+//RS         matches!(self.declaration, SecretDeclaration::Compose { .. })
+//RS     }
+//RS 
+//RS     /// Stable trust identity. Secret defaults and generator recipes can carry
+//RS     /// sensitive material, so only their non-value shape enters the hash.
+//RS     pub fn trust_fingerprint(&self) -> String {
+//RS         let declaration = match &self.declaration {
+//RS             SecretDeclaration::Stored => "stored".to_string(),
+//RS             SecretDeclaration::Compose { from, .. } => {
+//RS                 let mut from = from.clone();
+//RS                 from.sort();
+//RS                 format!("compose:{}", from.join(","))
+//RS             }
+//RS         };
+//RS         let mut allowed = self.allowed_environments.clone();
+//RS         allowed.sort();
+//RS         let rotation = match self.rotation {
+//RS             SecretRotationPolicy::None => "none".to_string(),
+//RS             SecretRotationPolicy::MaxAge { seconds } => format!("max_age:{seconds}"),
+//RS         };
+//RS         let default_profiles = match &self.default {
+//RS             SecretDefault::None => String::new(),
+//RS             SecretDefault::PerProfile(values) => {
+//RS                 values.keys().cloned().collect::<Vec<_>>().join(",")
+//RS             }
+//RS         };
+//RS         let generator = match self.generate {
+//RS             SecretGenerator::None => "none".to_string(),
+//RS             SecretGenerator::Random { length } => format!("random:{length}"),
+//RS         };
+//RS         format!(
+//RS             "{}|{}|{}|{}|{}|{}|{}",
+//RS             self.name,
+//RS             declaration,
+//RS             self.required,
+//RS             allowed.join(","),
+//RS             rotation,
+//RS             default_profiles,
+//RS             generator,
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS impl fmt::Debug for SecretSpec {
+//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         formatter
+//RS             .debug_struct("SecretSpec")
+//RS             .field("name", &self.name)
+//RS             .field(
+//RS                 "description",
+//RS                 &self.description.as_ref().map(|_| "<redacted>"),
+//RS             )
+//RS             .field("required", &self.required)
+//RS             .field("allowed_environments", &self.allowed_environments)
+//RS             .field("rotation", &self.rotation)
+//RS             .field("default", &self.default)
+//RS             .field("generate", &self.generate)
+//RS             .field("declaration", &self.declaration)
+//RS             .field("implicit", &self.implicit)
+//RS             .finish()
+//RS     }
+//RS }
+//RS 
+//RS impl fmt::Debug for SecretDeclaration {
+//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         match self {
+//RS             SecretDeclaration::Stored => formatter.write_str("Stored"),
+//RS             SecretDeclaration::Compose { from, .. } => formatter
+//RS                 .debug_struct("Compose")
+//RS                 .field("from", from)
+//RS                 .finish(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl fmt::Debug for SecretRotationPolicy {
+//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         match self {
+//RS             SecretRotationPolicy::None => formatter.write_str("None"),
+//RS             SecretRotationPolicy::MaxAge { seconds } => formatter
+//RS                 .debug_struct("MaxAge")
+//RS                 .field("seconds", seconds)
+//RS                 .finish(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl fmt::Debug for SecretDefault {
+//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         match self {
+//RS             SecretDefault::None => formatter.write_str("None"),
+//RS             SecretDefault::PerProfile(values) => formatter
+//RS                 .debug_struct("PerProfile")
+//RS                 .field("profiles", &values.keys().collect::<Vec<_>>())
+//RS                 .finish(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl fmt::Debug for SecretGenerator {
+//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         match self {
+//RS             SecretGenerator::None => formatter.write_str("None"),
+//RS             SecretGenerator::Random { length } => formatter
+//RS                 .debug_struct("Random")
+//RS                 .field("length", length)
+//RS                 .finish(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum PromptPathMode {
+//RS     Short,
+//RS     Full,
+//RS }
+//RS 
+//RS impl Default for PromptPathMode {
+//RS     fn default() -> PromptPathMode {
+//RS         PromptPathMode::Short
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum PromptStripMode {
+//RS     Off,
+//RS     On,
+//RS }
+//RS 
+//RS impl Default for PromptStripMode {
+//RS     fn default() -> PromptStripMode {
+//RS         PromptStripMode::Off
+//RS     }
+//RS }
+//RS 
+//RS /// One environment's non-entry facts from one source module. Keeping these
+//RS /// facts beside the environment name prevents sibling `env.<name>` modules
+//RS /// from leaking services, lifecycle, files, or variable reads into the one
+//RS /// selected runtime plan.
+//RS #[derive(Debug, Clone)]
+//RS pub(super) struct EnvironmentContribution {
+//RS     pub(super) name: String,
+//RS     pub(super) environment_reads: Vec<EnvironmentRead>,
+//RS     pub(super) dev_services: Vec<DevServicePlan>,
+//RS     pub(super) secrets: Vec<SecretSpec>,
+//RS     pub(super) adapters: Vec<AdapterPlan>,
+//RS     pub(super) lifecycle: EnvironmentLifecycle,
+//RS     pub(super) presets: Vec<PresetSpec>,
+//RS     pub(super) languages: Vec<LanguageSpec>,
+//RS     pub(super) files: Vec<super::Environment::ManagedFile>,
+//RS }
+//RS 
+//RS /// One module's contributions, keyed by `(namespace, path)` so `merge_all`
+//RS /// can combine same-keyed contributions from different modules.
+//RS #[derive(Debug)]
+//RS pub struct EvaluatedModule {
+//RS     pub name: String,
+//RS     pub entries: Vec<((Namespace, String), EntryContribution)>,
+//RS     /// U11: `system.<name>:` contributions, captured for the jetos tier (gap #4
+//RS     /// realizes them; gap #5 only field-checks + captures).
+//RS     pub systems: Vec<SystemPlan>,
+//RS     /// U14: `image.<name>:` contributions, captured for the jetos tier.
+//RS     pub images: Vec<ImagePlan>,
+//RS     /// U15: `fleet.<name>:` contributions, captured (parse/cross-check now;
+//RS     /// ssh realization rides single-host jetos, Phase D).
+//RS     pub fleets: Vec<FleetPlan>,
+//RS     /// D-JOS-VMTEST1: `vmtest.<name>:` contributions, captured as runnable VM
+//RS     /// scenarios over known systems.
+//RS     pub vmtests: Vec<VmTestPlan>,
+//RS     /// Environment-scoped facts. Source evaluation selects one name before
+//RS     /// projecting these into `EnvPlan`.
+//RS     pub(super) environment_contributions: Vec<EnvironmentContribution>,
+//RS     /// D-ENV-INTEGRATIONS1: typed first-party integrations imported by this
+//RS     /// module and lowered into ordinary environment facts.
+//RS     pub integrations: Vec<EnvironmentIntegration>,
+//RS     /// D-JPK-PROFILE1=D: source-backed package generation declarations. These
+//RS     /// are not environment presets and never affect shell selection.
+//RS     pub package_profiles: Vec<PackageProfileSpec>,
+//RS }
+//RS 
+//RS /// U20: an ad-hoc adapter package declared with `Pkg.adapt(...)`.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct AdapterPlan {
+//RS     pub name: String,
+//RS     /// A source ref string such as `"./vendor/weirdctl"`.
+//RS     pub source: String,
+//RS     pub deps: Vec<Merge::Pkg>,
+//RS     pub recipe: AdapterRecipe,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub enum AdapterRecipe {
+//RS     /// `Recipe.copy(...)`: copy the staged source tree as-is.
+//RS     Copy,
+//RS     /// `Recipe.prebuilt(bin: "...", as: "...")`: install one executable under
+//RS     /// `bin/<as>`.
+//RS     Prebuilt { bin: String, as_name: String },
+//RS     /// `Recipe.build(steps: […])`: a finite, digestable executable action graph.
+//RS     Build(BuildRecipe),
+//RS }
+//RS 
+//RS /// U11: a field-checked `system.<name>: { … }` contribution, captured so the
+//RS /// jetos tier (gap #4) can realize it. Pure data — no realize logic here.
+//RS #[derive(Debug, Clone, PartialEq)]
+//RS pub struct SystemPlan {
+//RS     /// The contribution path — the `<name>` in `system.<name>`.
+//RS     pub name: String,
+//RS     /// U13: the typed target platform, e.g. `linux.x64`.
+//RS     pub target: String,
+//RS     /// U6: the packages to install, as `Pkg`s (source-qualified).
+//RS     pub packages: Vec<Merge::Pkg>,
+//RS     /// U12: the enabled/typed services, in source order.
+//RS     pub services: Vec<ServicePlan>,
+//RS     /// U13: the ordered option entries (`network.hostName: laptop`), in source order.
+//RS     pub options: Vec<OptionPlan>,
+//RS }
+//RS 
+//RS /// U12: one captured `Service` record under a `System`'s `services:` map.
+//RS #[derive(Debug, Clone, PartialEq)]
+//RS pub struct ServicePlan {
+//RS     /// The service name (the map key), e.g. `openssh`.
+//RS     pub name: String,
+//RS     /// The required `enable` flag (U12).
+//RS     pub enable: bool,
+//RS     /// Any further open-record fields, rendered to display strings, in source
+//RS     /// order. (e.g. `ports: [22]`.)
+//RS     pub extra: Vec<(String, String)>,
+//RS }
+//RS 
+//RS /// U12: one captured dev-supervised `Service` record under an `env.<name>`
+//RS /// role-module's `services:` map (`ContribValue::Env`/`EnvLit::services`).
+//RS /// Distinct from `ServicePlan` (the jetos `system.*.services` capture): same
+//RS /// ratified `Service` grammar (open record, required `enable`), but jetpack's
+//RS /// dev-runtime tier (`Jetpack::Services`) owns and interprets every field
+//RS /// here — there is no downstream Nix-option consumer the way jetos services
+//RS /// have (Phase D), so an unrecognized `extra` key is a supervision-time
+//RS /// error (E1262), not silently-forwarded metadata.
+//RS #[derive(Debug, Clone, PartialEq, Eq, Default)]
+//RS pub struct DevServicePlan {
+//RS     /// The service name (the map key), e.g. `redis`.
+//RS     pub name: String,
+//RS     /// The required `enable` flag (U12) — `false` captures the service
+//RS     /// (so `jet services logs` etc still knows its name) without supervising it.
+//RS     pub enable: bool,
+//RS     /// `ports: [Int]` — TCP ports the service listens on. The first port is
+//RS     /// the default readiness probe target when no explicit `ready:` is given.
+//RS     pub ports: Vec<i64>,
+//RS     /// `run: ["program", "arg", …]` — the executable and argv that start the
+//RS     /// service. Falls back to the built-in catalog when the name matches a
+//RS     /// known service and this is unset.
+//RS     pub run: Option<Vec<String>>,
+//RS     /// `shutdown: .Term(...)`/`.Kill` — typed process shutdown policy. Falls
+//RS     /// back to a bounded TERM-then-KILL sequence when unset.
+//RS     pub shutdown: Option<ShutdownPolicy>,
+//RS     /// `data_dir: "…"` — override for the persisted-state directory, which
+//RS     /// otherwise defaults to `.jet/services/<name>/data`.
+//RS     pub data_dir: Option<String>,
+//RS     /// `ready: "…"` — a shell command polled until it exits 0; the readiness
+//RS     /// contract. Falls back to a TCP connect on `ports[0]` when unset and
+//RS     /// `ports` is non-empty, else to a bare process-alive check.
+//RS     pub ready: Option<String>,
+//RS     /// D-JPK-SERVICEDEPTH1: typed readiness without shell-command parsing.
+//RS     pub ready_probe: Option<ReadyProbe>,
+//RS     /// D-JPK-SERVICEDEPTH1: bounded restart behavior.
+//RS     pub restart: Option<RestartPolicy>,
+//RS     /// Files whose changes may trigger a bounded restart.
+//RS     pub watch: Vec<String>,
+//RS     /// Service names that must be healthy before this service starts.
+//RS     pub after: Vec<String>,
+//RS     /// Ordinary `#Job` names to run successfully immediately before start.
+//RS     pub before_start: Vec<String>,
+//RS     /// Named sockets reserved by the service.
+//RS     pub sockets: Vec<String>,
+//RS     /// Any further field, captured verbatim as a display string (open record,
+//RS     /// U12) — checked against the known keys above at supervision time, not
+//RS     /// at field-check time (E1262). This includes retired spellings such as
+//RS     /// `depends_on`; `after` is the only dependency field.
+//RS     pub extra: Vec<(String, String)>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub enum ReadyProbe {
+//RS     Exec(String),
+//RS     Http { url: String, status: Option<u16> },
+//RS     Notify { path: String },
+//RS     Tcp { host: String, port: u16 },
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub enum RestartPolicy {
+//RS     Never,
+//RS     OnFailure {
+//RS         max: u32,
+//RS         backoff_ms: u64,
+//RS         exponential: bool,
+//RS     },
+//RS     Always {
+//RS         max: u32,
+//RS         backoff_ms: u64,
+//RS         exponential: bool,
+//RS     },
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub enum ShutdownPolicy {
+//RS     /// Send TERM, wait up to `grace_ms`, then use the bounded KILL fallback.
+//RS     Term { grace_ms: u64 },
+//RS     /// Skip the graceful signal and terminate the verified process group.
+//RS     Kill,
+//RS }
+//RS 
+//RS /// U13: one captured `options:` entry — a dotted key path and its value, rendered
+//RS /// to a display string.
+//RS #[derive(Debug, Clone, PartialEq)]
+//RS pub struct OptionPlan {
+//RS     pub key: String,
+//RS     pub value: String,
+//RS }
+//RS 
+//RS /// D-JPK-IMAGE1 (=A, ratified 2026-07-01): which referent an `Image`'s `from:`
+//RS /// names, and so which realize tier owns it. `Iso` is the original U14 shape
+//RS /// (disk images from a `System`, Phase D jetos installer tier, owner-gated,
+//RS /// untouched by this slice). `Oci` is the new container tier (built from a
+//RS /// `Package`, native — no jetos/Phase D gate).
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub enum ImageKind {
+//RS     Iso,
+//RS     Oci,
+//RS }
+//RS 
+//RS /// U14/D-JPK-IMAGE1: a field-checked `image.<name>: { … }` contribution.
+//RS /// `Iso`: `target`/`packages`/`services`/`options` are inherited from the
+//RS /// referenced `System` at realize time (Phase D, gap #4), so they are not
+//RS /// stored here. `Oci`: built natively now (no jetos tier involved) from the
+//RS /// referenced `Package` or `Environment`'s realized Hangar output plus
+//RS /// `expose`/`env_vars`/`files`/`base`.
+//RS #[derive(Debug, Clone, PartialEq)]
+//RS pub struct ImagePlan {
+//RS     /// The contribution path — the `<name>` in `image.<name>`.
+//RS     pub name: String,
+//RS     /// Which referent `from:` names, and which tier realizes this image.
+//RS     pub kind: ImageKind,
+//RS     /// `Iso`: the source system's name (`from: system.<name>`).
+//RS     /// `Oci`: the source package's name (`from: packages.<name>`).
+//RS     pub from: String,
+//RS     /// D-ENV-IMAGE1: true when `from:` projects an `env.<name>` into an OCI
+//RS     /// shell image. The source kind stays explicit in the plan so realization
+//RS     /// cannot confuse an environment with an executable package.
+//RS     pub from_environment: bool,
+//RS     /// `Iso` only: the disk-image format (`iso` default / `qcow` / `raw`).
+//RS     /// Empty for `Oci`.
+//RS     pub format: String,
+//RS     /// An explicit target platform, if any. ISO realizes it through its
+//RS     /// referenced system; OCI records it for the image realization path.
+//RS     pub target: Option<String>,
+//RS     /// `Oci` only: `expose: [Int]` — TCP ports recorded as `ExposedPorts` in
+//RS     /// the OCI image config. Sorted + deduped for reproducibility.
+//RS     pub expose: Vec<i64>,
+//RS     /// `Oci` only: `env_vars: [KEY: "value"]` — baked into the OCI image
+//RS     /// config's `Env` list. Source order follows the map's key order
+//RS     /// (`CtValue::Map` is a `BTreeMap`, so this is already sorted by key).
+//RS     pub env_vars: Vec<(String, String)>,
+//RS     /// `Oci` only: `files: ["path", …]` — extra project-relative paths layered
+//RS     /// into the image alongside the package binary. Sorted before layering so
+//RS     /// the tar layer is byte-identical regardless of declaration order.
+//RS     pub files: Vec<String>,
+//RS     /// `Oci` only: `base: oci("<ref>")` — a base-image escape hatch (D-JPK-
+//RS     /// IMAGE1 option A). Local `file://` layouts are admitted by digest; remote
+//RS     /// refs stay explicit until a verified registry transport is configured.
+//RS     pub base: Option<String>,
+//RS     /// D-ENV-IMAGE1 expert projection fields. Empty/None uses the safe shell
+//RS     /// default for an environment image. Cache, signing, and provenance stay
+//RS     /// on Hangar and `.jet/lock`; this record does not duplicate those stores.
+//RS     pub services: Vec<String>,
+//RS     pub health: Option<String>,
+//RS     pub entrypoint: Option<String>,
+//RS     pub user: Option<u32>,
+//RS }
+//RS 
+//RS /// U15: a field-checked `fleet.<name>: { hosts: { … } }` contribution, captured
+//RS /// for the jetos deployment tier. Pure data — ssh/rollout realization lives in
+//RS /// Phase D (gated). Each host's `system` ref is cross-checked against the known
+//RS /// systems at plan-assembly time (E1242).
+//RS #[derive(Debug, Clone, PartialEq)]
+//RS pub struct FleetPlan {
+//RS     /// The contribution path — the `<name>` in `fleet.<name>`.
+//RS     pub name: String,
+//RS     /// The hosts this fleet deploys, in source order.
+//RS     pub hosts: Vec<HostPlan>,
+//RS }
+//RS 
+//RS /// U15: one `<host>: system.<name>.{ overrides }` entry in a fleet's `hosts:` map.
+//RS #[derive(Debug, Clone, PartialEq)]
+//RS pub struct HostPlan {
+//RS     /// The host name (the map key), e.g. `web1`.
+//RS     pub name: String,
+//RS     /// The referenced `System`'s role name (the `<name>` in `system.<name>`).
+//RS     pub system: String,
+//RS     /// The typed `.{ … }` copy-with-update override, if written. Every field
+//RS     /// is evaluated through the same pure comptime path as a `System` field.
+//RS     pub overrides: Option<HostOverride>,
+//RS     /// Exact source text retained as provenance for explain/round-trip output.
+//RS     pub override_source: Option<String>,
+//RS }
+//RS 
+//RS /// One host-local copy-with-update record. The value variants preserve the
+//RS /// closed System field shapes while still allowing future fleet-only fields
+//RS /// such as `region` to remain typed comptime values. `source` is provenance;
+//RS /// consumers use `fields`, never deferred source evaluation.
+//RS #[derive(Debug, Clone, PartialEq)]
+//RS pub struct HostOverride {
+//RS     pub fields: Vec<(String, HostOverrideValue)>,
+//RS     pub source: String,
+//RS     /// The dependency/purity facts used to produce each typed field. Consumers
+//RS     /// can explain why a host value changed without re-evaluating source text.
+//RS     pub provenance: Vec<HostOverrideProvenance>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct HostOverrideProvenance {
+//RS     pub field: String,
+//RS     pub dependencies: Vec<String>,
+//RS     pub pure: bool,
+//RS     pub source: String,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq)]
+//RS pub enum HostOverrideValue {
+//RS     Platform(String),
+//RS     Packages(Vec<Merge::Pkg>),
+//RS     Services(Vec<ServicePlan>),
+//RS     Options(Vec<OptionPlan>),
+//RS     Value(crate::Comptime::CtValue),
+//RS }
+//RS 
+//RS /// D-JOS-VMTEST1/D-JOS-VMASSERT1: a declarative VM test scenario.
+//RS #[derive(Debug, Clone, PartialEq)]
+//RS pub struct VmTestPlan {
+//RS     pub name: String,
+//RS     pub hosts: Vec<HostPlan>,
+//RS     pub run: String,
+//RS     pub assertions: Vec<String>,
+//RS }
+//RS 
+//RS /// The runnable shape of a typed `env.jet`, ready for the CLI run/build path:
+//RS /// the named-source table, the package refs to realize (`package@source`),
+//RS /// and the prompt label. Only the `env` namespace is consulted — `system`/`image`
+//RS /// are the jetos tiers and have no meaning for `jetpack`.
+//RS #[derive(Debug)]
+//RS pub struct EnvPlan {
+//RS     pub table: SourceTable,
+//RS     /// The source files that contributed to this graph, relative to the
+//RS     /// environment root and in deterministic discovery order.
+//RS     pub source_files: Vec<String>,
+//RS     /// The semantic identity of the Package graph that produced this plan.
+//RS     /// Legacy environment plans have no Package authority and keep this None.
+//RS     pub graph_identity: Option<String>,
+//RS     /// Every typed environment read in the selected environment's root and
+//RS     /// discovered module contributions, in source/discovery order.
+//RS     pub environment_reads: Vec<EnvironmentRead>,
+//RS     pub package_refs: Vec<String>,
+//RS     /// U20 adapter packages declared in `packages:`. Kept separate from refs
+//RS     /// because they have inline build identity and no provider selector.
+//RS     pub adapters: Vec<AdapterPlan>,
+//RS     pub prompt: Option<String>,
+//RS     pub prompt_path: PromptPathMode,
+//RS     pub prompt_strip: PromptStripMode,
+//RS     /// U11: every captured `System` across all evaluated modules, in source order.
+//RS     /// The jetos tier (gap #4) realizes these; the dev-shell path ignores them.
+//RS     pub systems: Vec<SystemPlan>,
+//RS     /// U14: every captured `Image`, validated so each `from` names a known system.
+//RS     pub images: Vec<ImagePlan>,
+//RS     /// U15: every captured `Fleet`, validated so each host names a known system.
+//RS     pub fleets: Vec<FleetPlan>,
+//RS     /// D-JOS-VMTEST1: every captured VM scenario, validated so each host names a
+//RS     /// known system.
+//RS     pub vmtests: Vec<VmTestPlan>,
+//RS     /// U12: every captured dev-supervised `Service` in the selected environment,
+//RS     /// in source order. `jetpack services <verb>`'s health gate
+//RS     /// are the only consumers — the jetos tier never reads this.
+//RS     pub dev_services: Vec<DevServicePlan>,
+//RS     /// D-JPK-SECRETMETA1=B / D-JPK-SECRETCOMPOSE1=D: every typed declaration
+//RS     /// in the selected environment's one `secrets:` map, in source order.
+//RS     /// Activation validates policy and source presence; the runtime Prelude
+//RS     /// resolves composed declarations on each `get` read.
+//RS     pub secrets: Vec<SecretSpec>,
+//RS     /// Typed lifecycle facts for activation, checks, and reload.
+//RS     pub lifecycle: EnvironmentLifecycle,
+//RS     /// Named preset compositions from the selected environment before
+//RS     /// CLI/host selection.
+//RS     pub presets: Vec<PresetSpec>,
+//RS     /// Typed language-pack selections from the selected environment before
+//RS     /// catalog expansion.
+//RS     pub languages: Vec<LanguageSpec>,
+//RS     /// The preset selected by the evaluator/runtime, if one was requested.
+//RS     pub selected_preset: Option<ResolvedPreset>,
+//RS     /// One evaluator-owned expansion shared by realization and trust. The
+//RS     /// `language_packs` field remains as a compatibility view for existing
+//RS     /// environment consumers; it is populated from this expansion.
+//RS     pub language_expansion: LanguageExpansion,
+//RS     /// Expanded language packs, kept in the plan for disclosure and hashing.
+//RS     pub language_packs: Vec<LanguagePack>,
+//RS     /// Exact typed language projection, including included/omitted tools and
+//RS     /// changed selection facts. Consumers must use this instead of reparsing
+//RS     /// the source or reconstructing pack defaults.
+//RS     pub language_projections: Vec<LanguageProjection>,
+//RS     /// Managed environment-file declarations from the selected environment
+//RS     /// before `jet env sync` applies them.
+//RS     pub files: Vec<super::Environment::ManagedFile>,
+//RS     /// D-ENV-INTEGRATIONS1: typed integrations from the selected environment
+//RS     /// before host realization.
+//RS     pub integrations: Vec<EnvironmentIntegration>,
+//RS     pub integration_facts: IntegrationFactProjection,
+//RS     /// D-JPK-PROFILE1=D: source-backed package-generation declarations. These
+//RS     /// remain separate from the selected environment preset.
+//RS     pub package_profiles: Vec<PackageProfileSpec>,
+//RS     pub environment_names: Vec<String>,
+//RS     /// The one environment module whose packages/settings are active for this
+//RS     /// plan. `dev` is the deterministic beginner default when present.
+//RS     pub active_environment: Option<String>,
+//RS     /// Module names that contributed the selected environment module, in source order.
+//RS     pub active_environment_provenance: Vec<String>,
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq, Default)]
+//RS pub struct EnvironmentFacts {
+//RS     pub environment_names: Vec<String>,
+//RS     pub active_environment: Option<String>,
+//RS     pub active_environment_provenance: Vec<String>,
+//RS     pub source_files: Vec<String>,
+//RS     /// Every typed environment read retained for discovery and reporting from
+//RS     /// the selected environment.
+//RS     /// Consumers must use this projection instead of lexing `env.jet` again.
+//RS     pub environment_reads: Vec<EnvironmentRead>,
+//RS     pub dev_services: Vec<DevServicePlan>,
+//RS     pub lifecycle: EnvironmentLifecycle,
+//RS     pub presets: Vec<PresetSpec>,
+//RS     pub languages: Vec<LanguageSpec>,
+//RS     pub selected_preset: Option<ResolvedPreset>,
+//RS     pub language_expansion: LanguageExpansion,
+//RS     pub language_packs: Vec<LanguagePack>,
+//RS     pub language_projections: Vec<LanguageProjection>,
+//RS     pub files: Vec<super::Environment::ManagedFile>,
+//RS     pub integrations: Vec<EnvironmentIntegration>,
+//RS     pub integration_facts: IntegrationFactProjection,
+//RS     pub package_profiles: Vec<PackageProfileSpec>,
+//RS }
+//RS 
+// END-PORT-PENDING 2140 crates/jet-env-model/src/ModuleEval/Types.rs:1-640
+

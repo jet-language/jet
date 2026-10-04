@@ -1,0 +1,342 @@
+// Flash-only raw escaped-token identity scan (Source/CmdFlash.rs:869-1381).
+// This is not a JSON value parser: no decoded key or value escapes this file.
+// Only the flash plan builder uses the private scan/identity verification.
+use core.files as flash_files
+
+pub struct JetCLIFlashOptions { pub target: String?, pub image: Path?, pub audit: Path?, pub adapter: JetCLIFlashAdapter? }
+pub enum JetCLIFlashParse { Help Options(JetCLIFlashOptions) }
+// Rust parse_flash_args (CmdFlash.rs:881-924).
+pub fn jet_cli_flash_parse_args(args: [String]) -> JetCLIFlashParse JetCLIFlashError! {
+    options := JetCLIFlashOptions{target: None, image: None, audit: None, adapter: None}
+    index := if args.len() > 0 && args[0] == "flash" -> 1 else -> 0
+    loop index < args.len() {
+        argument :: args[index]
+        if argument == "--json" || argument == "--quiet" {
+            index += 1
+            next
+        }
+        if argument == "--help" || argument == "help" -> return Ok(JetCLIFlashParse.Help)
+        raw :: argument.bytes()
+        equal := -1
+        loop (at, byte) in raw {
+            if Int.from_u8(byte) == 61 {
+                equal = at
+                break
+            }
+        }
+        flag :: if equal >= 0 -> String.from_bytes(~raw[0..<equal]) ?? panic("UTF-8 flag") else -> ~argument
+        inline :: if equal >= 0 -> Val(String.from_bytes(~raw[equal + 1..<raw.len()]) ?? panic("UTF-8 value")) else -> None
+        if flag != "--target" && flag != "--image" && flag != "--audit" && flag != "--adapter" -> return Err(jet_cli_flash_error("unexpected flash argument `{argument}`"))
+        value := ""
+        if inline == {
+            .Val(text) -> {
+                if text.is_empty() -> return Err(jet_cli_flash_error("`{flag}` needs a value"))
+                value = ~text
+            }
+            .None -> {
+                index += 1
+                if index >= args.len() || args[index].starts_with("-") -> return Err(jet_cli_flash_error("`{flag}` needs a value"))
+                value = ~args[index]
+            }
+        }
+        if flag == {
+            "--target" -> options.target = Val(^value)
+            "--image" -> options.image = Val(flash_paths.of(value))
+            "--audit" -> options.audit = Val(flash_paths.of(value))
+            else -> options.adapter = Val(jet_cli_flash_adapter_parse(value) ?? return Err(jet_cli_flash_error("unknown flash adapter `{value}` (use probe-rs, openocd, or emulator)")))
+        }
+        index += 1
+    }
+    Ok(JetCLIFlashParse.Options(options))
+}
+// Rust canonical_flash_args (CmdFlash.rs:926-934).
+pub fn jet_cli_flash_canonical_args(args: [String]) -> [String] Never! {
+    if args.len() > 0 && args[0] == "flash" -> return ~args
+    result := [String]{"flash"}
+    loop word in args -> &result.push(~word)
+    result
+}
+// Rust flash_help (CmdFlash.rs:1379-1381).
+pub fn jet_cli_flash_help() -> String Never! {
+    "jet flash --target <board.name> [--image <firmware.elf>] [--audit <target.json>] [--adapter <probe-rs|openocd|emulator>]"
+}
+// Rust resolve_declared_tool/resolve_audit_path skip ordinary inspect errors;
+// #4378's typed raw-address refusal is never treated as an absent candidate.
+fn jet_cli_flash_candidate_metadata<H: JetCLIFlashHost>(host: &H, path: Path) -> JetCLIFlashMetadata? JetCLIFlashError! {
+    if &host.symlink_metadata(path) == {
+        .Ok(metadata) -> Ok(Val(~metadata))
+        .Err(cause) -> {
+            if cause.byte_offset != None -> return Err(~cause)
+            Ok(jet_cli_flash_no_metadata())
+        }
+    }
+}
+fn jet_cli_flash_no_metadata() -> JetCLIFlashMetadata? Never! { None }
+// Rust resolve_declared_tool (CmdFlash.rs:945-967).
+fn jet_cli_flash_resolve_tool<H: JetCLIFlashHost>(host: &H, name: String) -> Path JetCLIFlashError! {
+    if name.is_empty() || name.contains("/") || name.contains("\\") -> return Err(jet_cli_flash_error("declared flash tool `{name}` is not a bare executable"))
+    // #4376: a result match retains the checked owner of fallible optional Core Paths.
+    snapshot :: if &host.path_snapshot() == {
+        .Ok(value) -> ^value
+        .Err(cause) -> { return Err(~cause) }
+    }
+    directories :: snapshot ?? return Err(jet_cli_flash_error("cannot resolve declared flash tool without a PATH snapshot"))
+    loop directory in directories {
+        candidate :: flash_paths.join(directory, name)
+        inspected :: jet_cli_flash_candidate_metadata<H>(&host, candidate)
+        metadata :: inspected ?? next
+        if metadata.symlink || !metadata.regular -> next
+        canonical :: &host.canonicalize(candidate) ?? return Err(jet_cli_flash_context_error("cannot canonicalize declared flash tool `{name}`: {err.message}", err))
+        // #4381: preserve canonical Core Path identity; never nominally rewrap.
+        return Ok(^canonical)
+    }
+    Err(jet_cli_flash_error("declared flash tool `{name}` was not found in the captured PATH"))
+}
+// Rust regular_file (CmdFlash.rs:969-977).
+// #4376: exact Core text projection keeps error paths independent of external owner fields.
+fn jet_cli_flash_regular_file<H: JetCLIFlashHost>(host: &H, path: Path, label: String) -> Path JetCLIFlashError! {
+    metadata :: &host.symlink_metadata(path) ?? return Err(jet_cli_flash_context_error("cannot inspect {label} `{flash_paths.show(path)}`: {err.message}", err))
+    if metadata.symlink || !metadata.regular -> return Err(jet_cli_flash_error("{label} `{flash_paths.show(path)}` is not a regular file"))
+    canonical :: &host.canonicalize(path) ?? return Err(jet_cli_flash_context_error("cannot canonicalize {label} `{flash_paths.show(path)}`: {err.message}", err))
+    // #4381: ownership-preserving Core Path nominal rewrap.
+    Ok(Path{raw: ^canonical.raw})
+}
+// Rust resolve_audit_path (CmdFlash.rs:979-1010).
+fn jet_cli_flash_resolve_audit<H: JetCLIFlashHost>(host: &H, image: Path, target: String, explicit: Path?) -> Path JetCLIFlashError! {
+    if explicit == .Val(path) -> return jet_cli_flash_regular_file<H>(&host, path, "target audit")
+    parent :: flash_paths.parent(image)
+    candidates := [Path]{flash_paths.with_suffix(image, ".target.json")}
+    safe_bytes := [U8]{}
+    loop byte in target.bytes() {
+        code :: Int.from_u8(byte)
+        if code >= 128 && code < 192 -> next
+        &safe_bytes.push(if jet_cli_flash_ascii_alnum(code) -> byte else -> U8{95})
+    }
+    safe :: String.from_bytes(safe_bytes) ?? panic("ASCII target name")
+    named :: flash_paths.join(parent, "{safe}.target.json")
+    if named.raw != candidates[0].raw -> &candidates.push(named)
+    existing := [Path]{}
+    loop candidate in candidates {
+        inspected :: jet_cli_flash_candidate_metadata<H>(&host, candidate)
+        _ :: inspected ?? next
+        &existing.push(jet_cli_flash_regular_file<H>(&host, candidate, "target audit"))
+    }
+    if existing.len() == 1 -> return Ok(~existing[0])
+    if existing.is_empty() -> return Err(jet_cli_flash_error("no target audit sidecar found beside `{flash_paths.show(image)}`; pass `--audit <target.json>`"))
+    Err(jet_cli_flash_error("multiple target audit sidecars found beside `{flash_paths.show(image)}`; pass one with `--audit`"))
+}
+// Rust read_audit (CmdFlash.rs:1012-1023).
+// #4376: Core's exact-text projection avoids missing external Path owner lowering.
+fn jet_cli_flash_read_audit<H: JetCLIFlashHost>(host: &H, path: Path) -> String JetCLIFlashError! {
+    metadata :: &host.metadata(path) ?? return Err(jet_cli_flash_context_error("cannot inspect target audit `{flash_paths.show(path)}`: {err.message}", err))
+    if metadata.bytes > JET_CLI_FLASH_MAX_AUDIT_BYTES -> return Err(jet_cli_flash_error("target audit `{flash_paths.show(path)}` exceeds the {JET_CLI_FLASH_MAX_AUDIT_BYTES}-byte limit"))
+    text :: &host.read_audit_text(path) ?? return Err(jet_cli_flash_context_error("cannot read target audit `{flash_paths.show(path)}`: {err.message}", err))
+    Ok(text)
+}
+// Rust verify_audit_identity (CmdFlash.rs:1025-1059); tokens are never decoded.
+fn jet_cli_flash_verify_audit(fields: [String:String], machine: MIRTargetMachine, digest: String) JetCLIFlashError! {
+    keys :: [String]{"name", "triple", "environment", "provider_identity"}
+    expected :: [String]{~machine.name, ~machine.triple, jet_target_environment_identity(machine), jet_target_provider_identity(machine)}
+    loop (index, key) in keys {
+        actual :: fields.get(key) ?? return Err(jet_cli_flash_error("target audit has no `{key}` identity field"))
+        token :: jet_cli_flash_json_string_token(expected[index])
+        if actual != token -> return Err(jet_cli_flash_error("target audit `{key}` does not match selected target `{machine.name}`"))
+    }
+    digest_keys :: [String]{"image_sha256", "artifact_sha256", "image_digest"}
+    loop key in digest_keys {
+        if fields.get(key) == .Val(actual) {
+            token :: jet_cli_flash_json_string_token(digest)
+            prefixed :: jet_cli_flash_json_string_token("sha256:{digest}")
+            if actual != token && actual != prefixed -> return Err(jet_cli_flash_error("target audit `{key}` does not match the image digest"))
+            break
+        }
+    }
+}
+struct JetCLIFlashTokenCursor { bytes: [U8], at: Int }
+fn jet_cli_flash_token_peek(cursor: JetCLIFlashTokenCursor) -> Int Never! {
+    if cursor.at >= cursor.bytes.len() -> return -1
+    Int.from_u8(cursor.bytes[cursor.at])
+}
+fn jet_cli_flash_token_space(byte: Int) -> Bool Never! { byte == 32 || byte == 9 || byte == 10 || byte == 12 || byte == 13 }
+// Rust skip_json_space (CmdFlash.rs:1219-1226).
+fn jet_cli_flash_skip_json_space(cursor: &JetCLIFlashTokenCursor) Never! {
+    loop jet_cli_flash_token_space(jet_cli_flash_token_peek(cursor)) -> cursor.at += 1
+}
+// Rust parse_top_level_string_fields (CmdFlash.rs:1064-1120).
+fn jet_cli_flash_parse_top_level_string_fields(text: String) -> [String:String] JetCLIFlashError! {
+    cursor := JetCLIFlashTokenCursor{bytes: text.bytes(), at: 0}
+    jet_cli_flash_skip_json_space(&cursor)
+    if jet_cli_flash_token_peek(cursor) != 123 -> return Err(jet_cli_flash_error("top-level value is not an object"))
+    cursor.at += 1
+    fields := [String:String]{}
+    loop {
+        jet_cli_flash_skip_json_space(&cursor)
+        if jet_cli_flash_token_peek(cursor) == 125 {
+            cursor.at += 1
+            break
+        }
+        key :: jet_cli_flash_parse_json_string_token(&cursor)
+        if key.contains("\\") -> return Err(jet_cli_flash_error("escaped object keys are not supported"))
+        jet_cli_flash_skip_json_space(&cursor)
+        if jet_cli_flash_token_peek(cursor) != 58 -> return Err(jet_cli_flash_error("object key is not followed by `:`"))
+        cursor.at += 1
+        jet_cli_flash_skip_json_space(&cursor)
+        value := ""
+        if jet_cli_flash_token_peek(cursor) == 34 -> value = jet_cli_flash_parse_json_string_token(&cursor) else -> jet_cli_flash_skip_json_value(&cursor)
+        if fields.has_key(key) -> return Err(jet_cli_flash_error("duplicate top-level field `{key}`"))
+        fields[key] = ^value
+        jet_cli_flash_skip_json_space(&cursor)
+        byte :: jet_cli_flash_token_peek(cursor)
+        if byte == 44 {
+            cursor.at += 1
+            jet_cli_flash_skip_json_space(&cursor)
+            if jet_cli_flash_token_peek(cursor) == 125 -> return Err(jet_cli_flash_error("object has a trailing comma"))
+        } else {
+            if byte != 125 -> return Err(jet_cli_flash_error("object field is not followed by `,` or `}}`"))
+            cursor.at += 1
+            break
+        }
+    }
+    jet_cli_flash_skip_json_space(&cursor)
+    if cursor.at != cursor.bytes.len() -> return Err(jet_cli_flash_error("trailing bytes after target audit object"))
+    Ok(fields)
+}
+// Rust parse_json_string_token (CmdFlash.rs:1122-1154): escaped text verbatim.
+fn jet_cli_flash_parse_json_string_token(cursor: &JetCLIFlashTokenCursor) -> String JetCLIFlashError! {
+    if jet_cli_flash_token_peek(cursor) != 34 -> return Err(jet_cli_flash_error("expected a JSON string"))
+    cursor.at += 1
+    start :: cursor.at
+    escaped := false
+    loop cursor.at < cursor.bytes.len() {
+        byte :: jet_cli_flash_token_peek(cursor)
+        cursor.at += 1
+        if escaped {
+            escaped = false
+            if byte == 117 {
+                loop _ in 0..<4 {
+                    digit :: jet_cli_flash_token_peek(cursor)
+                    if !((digit >= 48 && digit <= 57) || (digit >= 65 && digit <= 70) || (digit >= 97 && digit <= 102)) -> return Err(jet_cli_flash_error("malformed JSON unicode escape"))
+                    cursor.at += 1
+                }
+            }
+            next
+        }
+        if byte == 92 -> escaped = true
+        if byte == 34 -> return Ok(String.from_bytes(~cursor.bytes[start..<cursor.at - 1]) ?? return Err(jet_cli_flash_error("JSON string is not UTF-8")))
+        if byte <= 31 -> return Err(jet_cli_flash_error("JSON string contains a control character"))
+    }
+    Err(jet_cli_flash_error("unterminated JSON string"))
+}
+// Rust skip_json_value (CmdFlash.rs:1156-1217): delimiter scan, not validation.
+fn jet_cli_flash_skip_json_value(cursor: &JetCLIFlashTokenCursor) JetCLIFlashError! {
+    first :: jet_cli_flash_token_peek(cursor)
+    if first == -1 -> return Err(jet_cli_flash_error("missing JSON value"))
+    if first == 34 {
+        _ :: jet_cli_flash_parse_json_string_token(&cursor)
+        return
+    }
+    if first == 123 || first == 91 {
+        stack := [Int]{first}
+        cursor.at += 1
+        escaped := false
+        loop cursor.at < cursor.bytes.len() {
+            byte :: jet_cli_flash_token_peek(cursor)
+            cursor.at += 1
+            if escaped {
+                escaped = false
+                next
+            }
+            if byte == 92 {
+                escaped = true
+                next
+            }
+            if byte == 34 {
+                loop cursor.at < cursor.bytes.len() {
+                    inner :: jet_cli_flash_token_peek(cursor)
+                    cursor.at += 1
+                    if inner == 92 -> cursor.at += 1
+                    if inner == 34 -> break
+                }
+                next
+            }
+            if byte == 123 || byte == 91 -> &stack.push(byte)
+            if byte == 125 || byte == 93 {
+                open :: &stack.pop() ?? return Err(jet_cli_flash_error("unbalanced JSON value"))
+                if (open == 123 && byte != 125) || (open == 91 && byte != 93) -> return Err(jet_cli_flash_error("mismatched JSON delimiters"))
+                if stack.is_empty() -> return
+            }
+        }
+        return Err(jet_cli_flash_error("unterminated JSON value"))
+    }
+    start :: cursor.at
+    loop cursor.at < cursor.bytes.len() {
+        byte :: jet_cli_flash_token_peek(cursor)
+        if byte == 44 || byte == 125 || byte == 93 || jet_cli_flash_token_space(byte) -> break
+        cursor.at += 1
+    }
+    if cursor.at == start -> return Err(jet_cli_flash_error("empty JSON value"))
+}
+// Rust json_string_token (CmdFlash.rs:1228-1231).
+fn jet_cli_flash_json_string_token(value: String) -> String Never! {
+    bytes :: canonical_json_bytes(CanonicalJSON.String(value))
+    String.from_bytes(~bytes[1..<bytes.len() - 2]) ?? panic("canonical JSON string is UTF-8")
+}
+pub struct JetCLIFlashCapture { pub bytes: [U8], pub truncated: Bool }
+// Rust bound_capture (CmdFlash.rs:1233-1242).
+pub fn jet_cli_flash_bound_capture(bytes: [U8]) -> JetCLIFlashCapture Never! {
+    if bytes.len() <= JET_CLI_FLASH_MAX_CAPTURE_BYTES -> return JetCLIFlashCapture{bytes: ~bytes, truncated: false}
+    marker :: "\n<output truncated>\n".bytes()
+    bounded := ~bytes[0..<JET_CLI_FLASH_MAX_CAPTURE_BYTES - marker.len()]
+    loop byte in marker -> &bounded.push(byte)
+    JetCLIFlashCapture{bytes: bounded, truncated: true}
+}
+fn jet_cli_flash_ascii_alnum(code: Int) -> Bool Never! { (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) }
+// Rust safe_openocd_image_name (CmdFlash.rs:1244-1251).
+pub fn jet_cli_flash_safe_openocd_image_name(name: String) -> Bool Never! {
+    if name.is_empty() || name == "." || name == ".." -> return false
+    loop byte in name.bytes() {
+        code :: Int.from_u8(byte)
+        if !jet_cli_flash_ascii_alnum(code) && code != 46 && code != 45 && code != 95 -> return false
+    }
+    true
+}
+// Rust status_value (CmdFlash.rs:1253-1272); Report uses Core DataTree.
+pub fn jet_cli_flash_status_value(value: CanonicalJSON) -> DataTree Never! {
+    if value == {
+        .Null -> DataTree.Null
+        .Bool(flag) -> DataTree.Bool(flag)
+        .Integer(text) -> DataTree.Int(Int.parse(text) ?? panic("canonical flash integer must fit status integer"))
+        .String(text) -> DataTree.Text(~text)
+        .Array(values) -> {
+            rows := [DataTree]{}
+            loop row in values -> &rows.push(jet_cli_flash_status_value(row))
+            DataTree.Array(rows)
+        }
+        .Object(values) -> {
+            fields := [String:DataTree]{}
+            loop row in values -> fields[row.key] = jet_cli_flash_status_value(row.value)
+            DataTree.Object(fields)
+        }
+    }
+}
+// Rust programmer_json (CmdFlash.rs:1338-1377).
+pub fn jet_cli_flash_programmer_json(facts: MIRTargetProgrammerFacts) -> CanonicalJSON Never! {
+    config := [CanonicalJSON]{}
+    loop value in facts.config -> &config.push(CanonicalJSON.String(~value))
+    CanonicalJSON.Object([CanonicalJSONField]{
+        CanonicalJSONField{key: "adapter", value: CanonicalJSON.String(jet_target_programmer_adapter_name(facts.adapter))},
+        CanonicalJSONField{key: "chip", value: jet_cli_flash_optional_json(facts.chip)},
+        CanonicalJSONField{key: "config", value: CanonicalJSON.Array(config)},
+        CanonicalJSONField{key: "cpu", value: jet_cli_flash_optional_json(facts.cpu)},
+        CanonicalJSONField{key: "executable", value: CanonicalJSON.String(~facts.executable)},
+        CanonicalJSONField{key: "interface", value: jet_cli_flash_optional_json(facts.interface)},
+        CanonicalJSONField{key: "machine", value: jet_cli_flash_optional_json(facts.machine)},
+        CanonicalJSONField{key: "reset", value: CanonicalJSON.Bool(facts.reset)},
+        CanonicalJSONField{key: "speed_khz", value: if facts.speed_khz == .Val(speed) -> CanonicalJSON.Integer("{speed}") else -> CanonicalJSON.Null},
+    })
+}
+fn jet_cli_flash_optional_json(value: String?) -> CanonicalJSON Never! { if value == .Val(text) -> CanonicalJSON.String(~text) else -> CanonicalJSON.Null }
+// Rust programmer_value (CmdFlash.rs:1303-1336).
+pub fn jet_cli_flash_programmer_value(facts: MIRTargetProgrammerFacts) -> DataTree Never! { jet_cli_flash_status_value(jet_cli_flash_programmer_json(facts)) }
+// Rust plan_value (CmdFlash.rs:1274-1301).
+pub fn jet_cli_flash_plan_value(plan: JetCLIFlashPlan) -> DataTree Never! { jet_cli_flash_status_value(jet_cli_flash_plan_json(plan)) }

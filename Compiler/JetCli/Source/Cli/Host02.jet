@@ -1,0 +1,742 @@
+// Rust: Source/CmdCompile.rs:1
+// Compile host: progress, artifact indexing, build inspection and authority.
+use core.files as compile_files
+use core.process as compile_process
+use core.sys as compile_sys
+use core.time as compile_time
+use core.io as compile_io
+use jet_foundation.[DataTree, Diagnostic, ReportPath, StatusFields, StatusValue, json_escape, parse_json, ApplicationAuthority, FactRegistry]
+use jet_foundation.report_render_status as render_status
+use jet_foundation.report_render_status_with_reports as render_status_with_reports
+use jet_pkg_model.[EffectProjection, PackageFacts, ScriptEntry, pkg_application_policy_diagnostic, pkg_effect_show_set]
+use jet_driver.[check_file_with_effect_facts, check_file_with_effect_facts_for_run_and_entry_with_source_closure, query_build_nodes, query_build_plan, evaluate_build_query, BuildQueryExpression, build_plan_json, lower_checked_semantic_mir_program_for, build_project_root]
+use jet_cli.[OutputMode, NamedCapture, ProductionReceiptContext, AuthorityTransaction, AuthorityFileSnapshot, begin_authority_transaction, write_mode_diagnostic, write_mode_machine, write_mode_progress, write_mode_renderable, report_problems, cli_error, jet_cli_record_index_load_for_project, jet_cli_record_index_find, jet_cli_record_index_next_recorded_sequence, jet_cli_record_entry_new, jet_cli_record_entry_with_links, jet_cli_record_index_supersede_and_store, jet_cli_record_index_update_and_store, jet_cli_progress_new, jet_cli_progress_add_unknown, jet_cli_progress_set_custom_column, jet_cli_progress_finish, jet_cli_progress_frame]
+use jet_cli.JetCLIMultiProgress as MultiProgress
+use jet_cli.JetCLITaskID as TaskId
+use jet_cli.JetCLIOutputProfile as OutputProfile
+use jet_cli.JetCLIRecordIdentity as RecordIdentity
+use jet_cli.JetCLIRecordKind as RecordKind
+use jet_cli.JetCLIRecordCapture as RecordCapture
+use jet_cli.JetCLIRecordLink as RecordLink
+use jet_store.[Store, BuildNodeRecord]
+use jet.[ExitCodes, Receipt, read_receipt_path, sha256_hex, sha256_file_hex, record_run, report_clear_counts, render_ice_report, run_compiler_work, MirArtifactRequest, MirArtifactTarget, MirArtifactKind, MirArtifactBuildMode, MirOptimizationDecision, AuthorityDelegation, PackageEffects, CheckedBundle, EffectSummary, effect_root, effect_action, authority_answer, authority_covers, Verdict, compute_package_effects, enforce_lint_policy, enforce_effect_budget, parse_effect_name, resolve_effect_name, undeclared_effect, add_authority_hold, manifest_path, e1258, lock_path, parse_lock, write_lock, update_lock_provenance]
+use jet.Compiler as jet_compiler
+
+// Rust: Source/CmdCompile.rs:30
+struct BuildProgress {
+    enabled: Bool
+    verbose: Bool
+    started: compile_time.Instant
+    mode: OutputMode
+    progress: MultiProgress?
+    task: TaskId?
+
+    // Rust: Source/CmdCompile.rs:40
+    fn new(cmd: String, emit_rust: Bool, verbose: Bool, mode: OutputMode, profile: OutputProfile?) -> BuildProgress {
+        enabled :: cmd == "build" && !emit_rust && !mode.quiet && !mode.json
+        progress := MultiProgress?{None}
+        task := TaskId?{None}
+        if enabled && profile == .Val(selected) {
+            progress = Val(jet_cli_progress_new(selected))
+            if progress == .Val(current) {
+                task = jet_cli_progress_add_unknown(&current, "build").ok()
+            }
+        }
+        BuildProgress{enabled: enabled, verbose: verbose, started: compile_time.Instant.now(), mode: mode, progress: ^progress, task: task}
+    }
+    // Rust: Source/CmdCompile.rs:65
+    fn render(&self, phase: String, detail: String) {
+        progress :: &self.progress ?? return
+        task :: self.task ?? return
+        jet_cli_progress_set_custom_column(&progress, task, "phase", phase) ?? return
+        jet_cli_progress_set_custom_column(&progress, task, "detail", detail) ?? return
+        if jet_cli_progress_frame(progress).ok() == .Val(Val(frame)) {
+            if !frame.text.is_empty() -> write_mode_progress(self.mode, "{frame.text}\n")
+        }
+    }
+    // Rust: Source/CmdCompile.rs:82
+    fn major(&self, label: String, detail: String) {
+        if self.enabled -> &self.render(label, detail)
+    }
+    // Rust: Source/CmdCompile.rs:88
+    fn minor(&self, label: String, detail: String) {
+        if self.enabled && self.verbose -> &self.render(label, detail)
+    }
+    // Rust: Source/CmdCompile.rs:94
+    fn finish(&self, artifact: String) {
+        if !self.enabled -> return
+        elapsed :: self.started.elapsed()
+        duration :: if elapsed.as_secs() == 0 -> "{elapsed.as_millis()}ms" else -> "{elapsed.as_secs_f64():.1}s"
+        if self.progress == .Val(progress) && self.task == .Val(task) {
+            _ :: jet_cli_progress_set_custom_column(&progress, task, "artifact", artifact)
+            _ :: jet_cli_progress_set_custom_column(&progress, task, "elapsed", duration)
+            _ :: jet_cli_progress_finish(&progress, task)
+            if jet_cli_progress_frame(progress).ok() == .Val(Val(frame)) {
+                if !frame.text.is_empty() -> write_mode_progress(self.mode, "{frame.text}\n")
+            }
+        }
+    }
+}
+
+// Rust: Source/CmdCompile.rs:121
+// Flush stdout before stderr so non-TTY shared sinks preserve Prelude ordering.
+fn emit_run_output(stdout: String, stderr: String) {
+    compile_io.stdout().write_all(stdout.bytes())
+    if !stderr.is_empty() {
+        _ :: compile_io.stdout().flush() // GATE #4494 native stream flush
+        compile_io.stderr().write_all(stderr.bytes())
+    }
+}
+// Rust: Source/CmdCompile.rs:128
+fn render_diagnostic_status(action: String, ok: Bool, file: ReportPath, source: String, diagnostics: [Diagnostic]) -> String {
+    clears :: report_clear_counts(diagnostics)
+    reports := []
+    loop (index, diagnostic) in diagnostics {
+        &reports.push(diagnostic.to_report_with_clears(file, source, clears[index]))
+    }
+    "{render_status_with_reports(action, ok, reports, StatusFields.new())}\n"
+}
+// Rust: Source/CmdCompile.rs:146
+fn index_compile_artifact(identity: RecordIdentity, kind: RecordKind, artifact_id: String, path: OSPath, size: U64, capture: RecordCapture, consumed: [RecordLink], produced: [RecordLink], protected: Bool) Err! {
+    absolute :: if path.is_absolute() -> ^path else -> (compile_sys.current_dir() ?? return Err("{err}")).join(path)
+    project_root :: build_project_root(absolute.to_string_lossy()) ?? return Err("could not resolve record project root: {err:?}")
+    index_compile_artifact_at(project_root, ^identity, kind, ^artifact_id, ^absolute, size, capture, ^consumed, ^produced, protected)
+}
+// Rust: Source/CmdCompile.rs:183
+// Caller-selected root is essential: deriving it from .jet/<kind> is wrong.
+fn index_compile_artifact_at(project_root: OSPath, identity: RecordIdentity, kind: RecordKind, artifact_id: String, absolute: OSPath, size: U64, capture: RecordCapture, consumed: [RecordLink], produced: [RecordLink], protected: Bool) Err! {
+    path :: absolute.strip_prefix(project_root) ?? return Err("record artifact is outside the project: {absolute.display()}")
+    // GATE #4494 canonical native adapters for the held index/retention seams.
+    host :: compile_sys.record_index_file_host()
+    retention :: compile_sys.record_retention_host()
+    index := jet_cli_record_index_load_for_project(project_root, &host) ?? return Err("could not load record index: {err.message}")
+    recorded_sequence := U64{0}
+    saved := false
+    if jet_cli_record_index_find(index, kind, artifact_id, true) == .Val(entry) {
+        recorded_sequence = entry.recorded_sequence
+        saved = entry.saved
+    } else {
+        recorded_sequence = jet_cli_record_index_next_recorded_sequence(index) ?? return Err("could not allocate record sequence: {err}")
+    }
+    entry := jet_cli_record_entry_new(^identity, kind, artifact_id, path.to_string_lossy()) ?? return Err("could not construct {kind} record: {err.message}")
+    jet_cli_record_entry_with_links(&entry, ^consumed, ^produced) ?? return Err("could not link {kind} record `{artifact_id}`: {err.message}")
+    entry.capture = capture
+    entry.size = size
+    entry.recorded_sequence = recorded_sequence
+    entry.saved = saved || protected
+    // Production receipts rewrite one row: imported modules can change even
+    // when receipt bytes remain identical, so latest provenance supersedes it.
+    published :: if kind == RecordKind.Receipt -> jet_cli_record_index_supersede_and_store(&index, ^entry, &host, &retention) else -> jet_cli_record_index_update_and_store(&index, ^entry, &host, &retention)
+    published ?? return Err("could not store {kind} record `{artifact_id}`: {err.message}")
+    Ok(())
+}
+// Rust: Source/CmdCompile.rs:230
+fn replay_artifact_id(bytes: [U8]) -> String Err! {
+    if bytes.len() < 16 -> return Err("replay artifact is truncated before its header")
+    header_len :: U32.from_le_bytes(bytes[12..<16]) ?? return Err("replay header length is invalid")
+    header_end :: USize{16}.checked_add(USize{header_len}) ?? return Err("replay header length overflows")
+    if header_end > bytes.len() -> return Err("replay artifact header is truncated")
+    header :: String.from_bytes(bytes[16..<header_end]) ?? return Err("replay artifact header is not UTF-8")
+    tree :: parse_json(header) ?? return Err("replay artifact header is not valid JSON")
+    if tree == .Object(fields) {
+        loop (key, value) in fields {
+            if key == "artifact_id" {
+                if value.as_str().ok() == .Val(id) -> return Ok(id)
+                break
+            }
+        }
+        return Err("replay artifact header has no artifact_id")
+    }
+    Err("replay artifact header is not a JSON object")
+}
+// Rust: Source/CmdCompile.rs:263
+fn index_named_capture(capture: NamedCapture, _name: String, capture_mode: RecordCapture) Err! {
+    path :: capture.artifact_path() ?? return Err("named capture has no artifact path")
+    bytes :: compile_files.read_bytes(path) ?? return Err("could not read replay artifact `{path.display()}`: {err}")
+    artifact_id :: replay_artifact_id(bytes)?
+    identity :: capture.record_identity()?
+    size :: U64.try_from(bytes.len()) ?? return Err("replay artifact is too large")
+    index_compile_artifact(^identity, RecordKind.Replay, ^artifact_id, path, size, capture_mode, [], [], true)
+}
+// Rust: Source/CmdCompile.rs:295
+fn index_production_receipt(context: ProductionReceiptContext) Err! {
+    directory :: compile_sys.var_os(jet.JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV) ?? return Ok(())
+    absolute_path :: OSPath.from(directory).join("receipt")
+    metadata :: compile_files.symlink_metadata(absolute_path) ?? {
+        if err.kind() == .NotFound -> return Ok(())
+        return Err("could not inspect production receipt: {err}")
+    }
+    if metadata.file_type().is_symlink() || !metadata.is_file() -> return Err("production receipt is not a regular file: {absolute_path.display()}")
+    bytes :: compile_files.read_bytes(absolute_path) ?? return Err("could not read production receipt: {err}")
+    identity :: context.record_identity()?
+    artifact_id :: "sha256-{sha256_hex(bytes)}"
+    size :: U64.try_from(bytes.len()) ?? return Err("production receipt is too large")
+    index_compile_artifact_at(context.project_root(), ^identity, RecordKind.Receipt, ^artifact_id, absolute_path, size, RecordCapture.Safe, [], [], true)
+}
+// Rust: Source/CmdCompile.rs:333
+fn fail_record_index(error: String) -> Never {
+    cli_error("E2105", "record index update failed: {error}")
+    compile_process.exit(ExitCodes.ICE)
+}
+// Rust: Source/CmdCompile.rs:342
+pub fn run_build_verify(artifact_id: String, mode: OutputMode) -> Never {
+    fail :: fn(message: String) -> Never {
+        if mode.json {
+            diagnostic :: Diagnostic.error("E2105", "build verification failed: {message}", "the indexed receipt could not be verified", "repair the receipt or rerun the producing build", None)
+            write_mode_machine(mode, render_diagnostic_status("build.verify", false, ReportPath.from_process("<cli>"), "", [diagnostic]))
+        } else -> cli_error("E2105", "build verification failed: {message}")
+        compile_process.exit(ExitCodes.USER_ERROR)
+    }
+    project_root :: build_project_root(".") ?? fail("could not resolve record project root: {err:?}")
+    host :: compile_sys.record_index_file_host() // GATE #4494 native held-index adapter
+    index :: jet_cli_record_index_load_for_project(project_root, &host) ?? fail("could not load record index: {err.message}")
+    indexed :: jet_cli_record_index_find(index, RecordKind.Receipt, artifact_id, true) ?? fail("receipt `{artifact_id}` is not indexed")
+    receipt_path :: project_root.join(indexed.path)
+    receipt :: read_receipt_path(receipt_path) ?? fail("could not read indexed receipt: {err}")
+    loop input in receipt.claim.inputs {
+        digest :: sha256_file_hex(input.path) ?? fail("first differing input `{input.path.display()}` is unavailable: {err}")
+        if digest != input.digest -> fail("first differing input `{input.path.display()}`: expected sha256-{input.digest}, found sha256-{digest}")
+    }
+    target :: indexed_receipt_target(receipt, indexed.identity) ?? fail(err)
+    project_root :: build_project_root(target.to_string_lossy()) ?? fail("could not resolve target project root: {err:?}")
+    artifact :: receipt_artifact_path(receipt, project_root, target)
+    before :: compile_files.read_bytes(artifact) ?? fail("recorded build output `{artifact.display()}` is unavailable: {err}")
+    rebuild_indexed_target(target, mode) ?? fail(err)
+    after :: compile_files.read_bytes(artifact) ?? fail("rebuilt output `{artifact.display()}` is unavailable: {err}")
+    if before != after -> fail("rebuilt output `{artifact.display()}` differs although all {receipt.claim.inputs.len()} receipt inputs matched; the native toolchain/output diverged")
+    if mode.json {
+        rendered :: render_status("build.verify", true, StatusFields.new().with("status", "identical").with("inputs", receipt.claim.inputs.len()).with("outputs", 1).with("sha256", sha256_hex(after)))
+        write_mode_machine(mode, "{rendered}\n")
+    } else -> write_mode_renderable(mode, "identical: {receipt.claim.inputs.len()} inputs, 1 output, sha256 match\n")
+    compile_process.exit(ExitCodes.OK)
+}
+// Rust: Source/CmdCompile.rs:448
+fn indexed_receipt_target(receipt: Receipt, identity: RecordIdentity) -> OSPath Err! {
+    loop input in receipt.claim.inputs {
+        if input.path.extension().and_then(fn(extension) { extension.to_str() }) == Val("jet") {
+            if jet_cli.target_input_sha256_for_file(input.path.to_string_lossy()).ok() == .Val(digest) {
+                if digest == identity.target_inputs_sha256 -> return Ok(input.path)
+            }
+        }
+    }
+    Err("indexed receipt does not identify a rebuildable Jet target in its inputs")
+}
+// Rust: Source/CmdCompile.rs:475
+fn receipt_artifact_path(receipt: Receipt, project_root: OSPath, target: OSPath) -> OSPath {
+    output :: String.from_utf8_lossy(receipt.stdout)
+    loop line in output.lines() {
+        if line.strip_prefix("built: ") == .Val(built) {
+            path := built.split_once(" (").map(fn(parts) { parts.0 }) ?? built
+            path = path.trim() // #4303
+            if !path.is_empty() -> return OSPath.from(path)
+            break
+        }
+    }
+    build_artifact_path(project_root, target.to_string_lossy(), None)
+}
+// Rust: Source/CmdCompile.rs:495
+fn rebuild_indexed_target(target: OSPath, mode: OutputMode) Err! {
+    executable :: compile_sys.current_exe() ?? return Err("could not locate the current jet executable: {err}")
+    // GATE #4494 native child execution and inherited environment.
+    output :: compile_process.Command.new(executable).arg("build").arg(target).env("JET_RECEIPT_BYPASS", "1").output() ?? return Err("could not rebuild `{target.display()}`: {err}")
+    if !output.status.success() {
+        stderr :: String.from_utf8_lossy(output.stderr)
+        trimmed := stderr.trim() // #4303
+        detail :: if trimmed.is_empty() -> "child build exited with {output.status}" else -> "child build exited with {output.status}: {trimmed}"
+        if !mode.quiet -> write_mode_diagnostic(mode, "{detail}\n")
+        return Err(detail)
+    }
+    Ok(())
+}
+// Rust: Source/CmdCompile.rs:523
+fn finish_recorded_artifacts(record: NamedCapture?, record_name: String?, production_receipt: ProductionReceiptContext?, exit_code: I32, mode: OutputMode) {
+    if record == .Val(capture) {
+        jet_cli.finish_named_capture(capture, exit_code, mode.json) ?? compile_process.exit(err)
+        if record_name == .Val(name) -> index_named_capture(capture, name, RecordCapture.Safe) ?? fail_record_index(err)
+    }
+    if production_receipt == .Val(context) -> index_production_receipt(context) ?? fail_record_index(err)
+}
+// Rust: Source/CmdCompile.rs:543
+fn try_recorded_run(file: String, program_args: [String], capture: NamedCapture, record_name: String?, production_receipt: ProductionReceiptContext?, mode: OutputMode) -> Bool {
+    execution :: record_run(file, program_args) ?? return false
+    emit_run_output(execution.stdout, execution.stderr)
+    jet_cli.finish_named_capture_with_run(capture, execution.exit_code, mode.json, execution.run) ?? compile_process.exit(err)
+    if record_name == .Val(name) -> index_named_capture(capture, name, RecordCapture.Safe) ?? fail_record_index(err)
+    if production_receipt == .Val(context) -> index_production_receipt(context) ?? fail_record_index(err)
+    compile_process.exit(execution.exit_code)
+}
+// Rust: Source/CmdCompile.rs:572
+fn render_internal_fault(what: String) -> String { render_ice_report(what, "", false) }
+// Rust: Source/CmdCompile.rs:576
+fn emit_internal_fault(stdout: String, what: String, mode: OutputMode) -> Never {
+    emit_run_output(stdout, "")
+    _ :: compile_io.stdout().flush() // GATE #4494
+    write_mode_diagnostic(mode, render_internal_fault(what))
+    compile_process.exit(ExitCodes.ICE)
+}
+// Rust: Source/CmdCompile.rs:583
+fn exit_if_internal_fault(diagnostics: [Diagnostic], mode: OutputMode) {
+    loop diagnostic in diagnostics {
+        if diagnostic.runtime_host_fault_parts() == .Val(parts) -> emit_internal_fault(parts.0, parts.1, mode)
+    }
+}
+// Rust: Source/CmdCompile.rs:597
+// Relay runtime-boundary status; signals have no numeric code.
+pub fn child_exit_code(status: compile_process.ExitStatus) -> I32 { status.code() ?? ExitCodes.USER_ERROR }
+
+// Rust: Source/CmdCompile.rs:601
+fn vector_build_projection(file: String) -> [(String, USize, USize, String, String, String, String)] {
+    (diagnostics, bundle, _) :: check_file_with_effect_facts(file, None, false)
+    loop diagnostic in diagnostics {
+        if diagnostic.severity == .Error -> return []
+    }
+    checked :: bundle ?? return []
+    (mir, _) :: lower_checked_semantic_mir_program_for(checked, MirArtifactRequest.new(MirArtifactTarget.RustAot, MirArtifactKind.NativeExecutable, MirArtifactBuildMode.Dev))
+    rows := [(String, USize, USize, String, String, String, String)]{}
+    loop function in mir.functions {
+        loop fact in function.optimization.vector_facts {
+            decision :: if fact.decision == {
+                .Eligible -> "accepted"
+                .Rejected(reason) -> reason.as_str()
+            }
+            &rows.push((function.key, fact.span.start, fact.span.end, fact.rule.as_str(), fact.layout.as_str(), fact.lane_width.map(fn(lane) { "{lane}" }) ?? "none", decision))
+        }
+    }
+    rows
+}
+// Rust: Source/CmdCompile.rs:650
+fn vector_build_projection_json(rows: [(String, USize, USize, String, String, String, String)]) -> String {
+    rendered := [String]{}
+    loop (function, start, end, rule, layout, lane, decision) in rows {
+        &rendered.push("{{\"function\":\"{json_escape(function)}\",\"span\":{{\"start\":{start},\"end\":{end}}},\"rule\":\"{json_escape(rule)}\",\"layout\":\"{json_escape(layout)}\",\"lane\":\"{json_escape(lane)}\",\"decision\":\"{json_escape(decision)}\"}}")
+    }
+    "[{rendered.join(",")}]"
+}
+// Rust: Source/CmdCompile.rs:672
+fn vector_build_projection_text(rows: [(String, USize, USize, String, String, String, String)]) -> String {
+    out := String.builder()
+    loop (function, start, end, rule, layout, lane, decision) in rows -> &out.push("vector\t{function}\t{start}..{end}\t{rule}\t{layout}\t{lane}\t{decision}\n")
+    out.finish()
+}
+// Rust: Source/CmdCompile.rs:682
+pub fn run_build_query(command: String, args: [String], mode: OutputMode) {
+    explain_nodes :: command == "explain-build" && args.len() <= 1
+    subject := String?{None}
+    file := String?{None}
+    if command == {
+        "graph" -> file = args.first()
+        "query" -> { if args.first() == Val("build") -> file = args.get(1) }
+        "explain-build" -> {
+            if explain_nodes -> file = args.first()
+            else { subject = args.first(); file = args.get(1) }
+        }
+        else -> ()
+    }
+    selected :: file ?? {
+        prefix :: if command == "explain-build" -> "<target|action|file> " else -> ""
+        write_mode_diagnostic(mode, "usage: jet {command} {prefix}<file.jet>\n")
+        compile_process.exit(ExitCodes.USAGE)
+    }
+    src :: compile_files.read(selected) ?? ""
+    if explain_nodes {
+        nodes :: query_build_nodes(selected) ?? {
+            report_problems(mode, selected, src, err)
+            compile_process.exit(ExitCodes.USER_ERROR)
+        }
+        print_build_nodes(selected, nodes, mode)
+        return
+    }
+    queried :: if command == "query" -> evaluate_build_query(selected, BuildQueryExpression.Build) else -> query_build_plan(selected)
+    optional_plan :: queried ?? {
+        report_problems(mode, selected, src, err)
+        compile_process.exit(ExitCodes.USER_ERROR)
+    }
+    plan :: optional_plan ?? {
+        if mode.json -> write_mode_machine(mode, "{render_status("inspect.build", true, StatusFields.new().with("build", StatusValue.Null))}\n")
+        else -> write_mode_renderable(mode, "default pipeline: no root fn build\n")
+        return
+    }
+    if subject == .Val(name) {
+        if plan.explain_target_named(name) == .Val(explanation) { print_build_explanation(explanation, mode); return }
+        if plan.explain_action_named(name) == .Val(explanation) { print_build_explanation(explanation, mode); return }
+        print_build_explanation(plan.explain_file(name), mode)
+        return
+    }
+    graph :: plan.graph()
+    vector_rows :: vector_build_projection(selected)
+    if mode.json {
+        payload := build_plan_json(plan, None)
+        if payload.strip_suffix("}") == .Val(prefix) -> payload = "{prefix},\"vector\":{vector_build_projection_json(vector_rows)}}}"
+        build :: StatusValue.parse(payload) ?? panic("build plan projection must be valid JSON")
+        write_mode_machine(mode, "{render_status("inspect.build", true, StatusFields.new().with("build", build))}\n")
+    } else {
+        loop target in graph.targets -> write_mode_renderable(mode, "target\t{target.name}\t{target.kind:?}\n")
+        loop action in graph.actions -> write_mode_renderable(mode, "action\t{action.name}\t{action.outputs.join(",")}\n")
+        write_mode_renderable(mode, vector_build_projection_text(vector_rows))
+    }
+}
+// Rust: Source/CmdCompile.rs:807
+fn print_build_nodes(file: String, static_nodes: [jet.BuildPlanNode], mode: OutputMode) {
+    program :: build_record_program(file)
+    workspace :: build_project_root(file).ok()
+    records := [BuildNodeRecord]?{None}
+    if Store.from_env().ok() == .Val(store) && workspace == .Val(root) {
+        if store.last_build_record(root, program).ok() == .Val(Val(record)) -> records = Val(record.nodes)
+    }
+    if records == None {
+        fallback := [BuildNodeRecord]{}
+        loop node in static_nodes -> &fallback.push(BuildNodeRecord{kind: node.kind.as_str(), key: node.key, subject: node.subject, duration_ms: 0.0, why_ran: "first-run", inputs: node.inputs})
+        records = Val(^fallback)
+    }
+    rows :: records ?? panic("build node projection assigned")
+    if mode.json {
+        nodes := [String]{}
+        loop node in rows -> &nodes.push("{{\"kind\":\"{json_escape(node.kind)}\",\"key\":\"{json_escape(node.key)}\",\"subject\":\"{json_escape(node.subject)}\",\"duration_ms\":{node.duration_ms:.3},\"why_ran\":\"{json_escape(node.why_ran)}\",\"inputs\":{json_strings(node.inputs)}}}")
+        write_mode_machine(mode, "{{\"schema\":\"jet.explain-build/v1\",\"program\":\"{json_escape(program)}\",\"nodes\":[{nodes.join(",")}]}}\n")
+    } else {
+        loop node in rows -> write_mode_renderable(mode, "{node.kind}\t{node.key}\t{node.subject}\t{node.duration_ms:.3}\t{node.why_ran}\t{node.inputs.join(",")}\n")
+    }
+}
+// Rust: Source/CmdCompile.rs:880
+pub fn run_compiler_api(operation: String, file: String, mode: OutputMode) {
+    debug_assert(mode.json, "inspect compiler must use the shared machine-output mode")
+    document := ""
+    if operation == {
+        "lex" | "parse" | "source-map" | "source_map" -> {
+            if compile_files.read(OSPath.from(file)) == {
+                .Ok(source) -> {
+                    document = if operation == {
+                        "lex" -> jet_compiler.lex_source_json(source)
+                        "parse" -> jet_compiler.parse_source_json(source)
+                        else -> jet_compiler.source_map_json(source)
+                    }
+                }
+                .Err(error) -> document = jet_compiler.compiler_api_error_json(operation, file, "E0956", "could not read compiler input: {error}")
+            }
+        }
+        "check" -> document = jet_compiler.check_file_json(OSPath.from(file))
+        else -> document = jet_compiler.compiler_api_error_json(operation, file, "E0956", "unsupported compiler operation; choose lex, parse, check, or source-map")
+    }
+    write_mode_machine(mode, "{document}\n")
+}
+// Rust: Source/CmdCompile.rs:924
+fn print_build_explanation(explanation: jet.BuildExplanation, mode: OutputMode) {
+    if mode.json {
+        provenance := [StatusValue]{}
+        loop fact in explanation.provenance -> &provenance.push(StatusValue.from(fact))
+        rendered :: render_status("inspect.build", true, StatusFields.new().with("label", explanation.label).with("provenance", StatusValue.array(provenance)))
+        write_mode_machine(mode, "{rendered}\n")
+    } else {
+        write_mode_renderable(mode, "{explanation.label}\n")
+        loop fact in explanation.provenance -> write_mode_renderable(mode, "  {fact}\n")
+    }
+}
+// Rust: Source/CmdCompile.rs:956
+fn json_strings(values: [String]) -> String {
+    quoted := [String]{}
+    loop value in values -> &quoted.push("\"{json_escape(value)}\"")
+    "[{quoted.join(",")}]"
+}
+// Rust: Source/CmdCompile.rs:967
+fn env_truthy(name: String) -> Bool {
+    value :: compile_sys.var(name).ok() ?? return false
+    trimmed := value.trim() // #4303
+    normalized :: trimmed.to_ascii_lowercase()
+    normalized == "1" || normalized == "true" || normalized == "yes"
+}
+// Rust: Source/CmdCompile.rs:976
+fn authority_prompt_is_interactive(mode: OutputMode) -> Bool {
+    // GATE #4494 native descriptor terminal predicates.
+    !mode.json && !env_truthy("CI") && compile_io.stdin().is_terminal() && compile_io.stderr().is_terminal()
+}
+// Rust: Source/CmdCompile.rs:983
+fn append_authority_receipt(transaction: &AuthorityTransaction, bytes: [U8], kind: String) Err! {
+    &transaction.append_file(OSPath.from(".jet").join("receipts").join("authority.jsonl"), bytes) ?? return Err("could not write {kind}: {err}")
+    Ok(())
+}
+// Rust: Source/CmdCompile.rs:998
+enum PendingAuthorityProjectUpdate {
+    Inline(snapshot: AuthorityFileSnapshot, replacement: [U8], manifest: PackageFacts)
+    Manifest(snapshot: AuthorityFileSnapshot, replacement: [U8], manifest: PackageFacts)
+}
+// Rust: Source/CmdCompile.rs:1010
+fn fail_authority_transaction(mode: OutputMode, file: String, src: String, title: String, detail: String, error: String) -> Never {
+    diagnostic :: Diagnostic.error("E2105", title, detail, error, None)
+    report_problems(mode, file, src, [diagnostic])
+    compile_process.exit(ExitCodes.USER_ERROR)
+}
+// Rust: Source/CmdCompile.rs:1023
+fn authority_relative_path(root: OSPath, path: OSPath) -> OSPath? {
+    normalized :: if root.as_os_str().is_empty() -> OSPath.from(".") else -> root
+    if path.strip_prefix(normalized).ok() == .Val(relative) {
+        if !relative.as_os_str().is_empty() -> return Val(relative)
+    }
+    if normalized == OSPath.from(".") || normalized.as_os_str().is_empty() -> return Val(path)
+    None
+}
+// Rust: Source/CmdCompile.rs:1038
+fn write_authority_receipt(transaction: &AuthorityTransaction, source: String, operation: String, scope: String, projection: EffectProjection, policy_source: String) Err! {
+    required :: projection.required_effects
+    granted :: projection.granted_effects
+    denied :: projection.denied_effects
+    // Canonical EffectProjection sets are already sorted and duplicate-free.
+    // Preserve Rust JSON escaping, including its unquoted json_escape fields.
+    text :: "{{\"schema\":\"jet.authority.receipt/v1\",\"kind\":\"approval\",\"scope\":{json_escape(scope)},\"resource\":\"application\",\"operation\":{json_escape(operation)},\"source\":{json_escape(source)},\"authority\":{json_escape(projection.authority)},\"policy_source\":{json_escape(policy_source)},\"required_effects\":{json_strings(required)},\"granted_effects\":{json_strings(granted)},\"denied_effects\":{json_strings(denied)}}}\n"
+    append_authority_receipt(&transaction, text.bytes(), "authority receipt")
+}
+// Rust: Source/CmdCompile.rs:1078
+fn write_authority_delegation_receipts(transaction: &AuthorityTransaction, source: String, projection: EffectProjection, delegations: [AuthorityDelegation], policy_source: String) Err! {
+    if delegations.is_empty() -> return Ok(())
+    required :: projection.required_effects
+    granted :: projection.granted_effects
+    denied :: projection.denied_effects
+    // Preserve BTreeSet order without sorting the canonical ordered sets again.
+    bytes := String.builder()
+    loop delegation in delegations {
+        scope :: "{delegation.binding}@{delegation.scope_span.start}..{delegation.scope_span.end}"
+        policy :: "#FX; {policy_source}"
+        &bytes.push("{{\"schema\":\"jet.authority.receipt/v1\",\"kind\":\"delegation\",\"scope\":{json_escape(scope)},\"resource\":{json_escape(delegation.resource)},\"operation\":{json_escape(delegation.operation)},\"source\":{json_escape(source)},\"source_span\":{{\"start\":{delegation.span.start},\"end\":{delegation.span.end}}},\"authority\":{json_escape(delegation.binding)},\"policy_source\":{json_escape(policy)},\"required_effects\":{json_strings(required)},\"granted_effects\":{json_strings(granted)},\"denied_effects\":{json_strings(denied)}}}\n")
+    }
+    append_authority_receipt(&transaction, bytes.finish().bytes(), "authority delegation receipt")
+}
+// Rust: Source/CmdCompile.rs:1130
+fn resolve_run_authority_before_execution(file: String, src: String, mode: OutputMode, profile: String, setting_overrides: [String:String], entry_fn: String?, package_manifest: &(OSPath, PackageFacts)?, source_closure: [(OSPath, String)], source_snapshot: AuthorityFileSnapshot?, invocation_authority: ApplicationAuthority?) -> ApplicationAuthority? {
+    if source_closure.is_empty() -> fail_authority_transaction(mode, file, src, "could not establish the checked source authority", "authority checks must use the immutable source checked for this compile", "the checked source closure is empty")
+    (diagnostics, optional_bundle, facts) :: run_compiler_work(fn() { check_file_with_effect_facts_for_run_and_entry_with_source_closure(file, source_closure, profile, setting_overrides, entry_fn) })
+    loop diagnostic in diagnostics {
+        if diagnostic.severity == .Error {
+            report_problems(mode, file, src, diagnostics)
+            compile_process.exit(ExitCodes.USER_ERROR)
+        }
+    }
+    bundle :: optional_bundle ?? {
+        report_problems(mode, file, src, diagnostics)
+        compile_process.exit(ExitCodes.USER_ERROR)
+    }
+    (projection, delegations) := native_effect_projection(bundle, facts.summaries, entry_fn, package_manifest.map(fn(pair) { pair.1 }))
+    entries :: compute_package_effects(bundle, facts.solved, facts.summaries)
+    lints :: jet_cli.visible_lints(diagnostics)
+    apply_native_effect_policy("run", file, src, mode, false, lints, entries, facts.fact_registry, &projection, &package_manifest, delegations, source_snapshot, invocation_authority)
+}
+// Rust: Source/CmdCompile.rs:1198
+fn merge_invocation_authority(projection: &EffectProjection, invocation_authority: ApplicationAuthority?) {
+    invocation :: invocation_authority ?? return
+    // Effect sets remain sorted and duplicate-free; do not rescan for each item.
+    granted := [String:Bool]{}
+    loop effect in projection.granted_effects -> granted[effect] = true
+    loop effect in invocation.granted_effects -> granted[effect] = true
+    denied := [String:Bool]{}
+    loop effect in projection.denied_effects -> denied[effect] = true
+    loop effect in invocation.denied_effects -> denied[effect] = true
+    projection.granted_effects = granted.keys().to_list()
+    projection.denied_effects = denied.keys().to_list()
+    &projection.granted_effects.sort(); &projection.denied_effects.sort()
+    if !projection.authority.is_empty() && !invocation.authority.is_empty() -> projection.authority = "{projection.authority} + "
+    projection.authority = "{projection.authority}{invocation.authority}"
+}
+// Rust: Source/CmdCompile.rs:1219
+fn resolve_application_authority(cmd: String, file: String, src: String, mode: OutputMode, projection: &EffectProjection, package_manifest: &(OSPath, PackageFacts)?, delegations: [AuthorityDelegation], source_snapshot: AuthorityFileSnapshot?, transaction: &AuthorityTransaction, invocation_authority: ApplicationAuthority?) -> ApplicationAuthority? {
+    if cmd != "build" && cmd != "run" -> return None
+    merge_invocation_authority(&projection, invocation_authority)
+    denied := [String]{}
+    loop effect in projection.required_effects {
+        if authority_answer(projection.granted_effects, projection.denied_effects, effect) == Verdict.Denied -> &denied.push(effect)
+    }
+    if !denied.is_empty() {
+        report_problems(mode, file, src, [pkg_application_policy_diagnostic(projection, denied, None)])
+        compile_process.exit(ExitCodes.USER_ERROR)
+    }
+    root :: package_manifest.map(fn(pair) { pair.0 }) ?? OSPath.from(file).parent().filter(fn(parent) { !parent.as_os_str().is_empty() }) ?? OSPath.from(".")
+    undecided :: projection.undecided()
+    if undecided.is_empty() {
+        write_authority_delegation_receipts(&transaction, file, projection, delegations, "declared policy") ?? fail_authority_transaction(mode, file, src, "could not record the Authority delegation receipt", "every Authority delegation is source-linked before the effect runs", err)
+        return invocation_authority.map(fn(_) { projection.application_authority() })
+    }
+    if !authority_prompt_is_interactive(mode) {
+        script :: if package_manifest == None -> Val(ScriptEntry{path: file, source: src, command: cmd}) else -> None
+        report_problems(mode, file, src, [pkg_application_policy_diagnostic(projection, [], script)])
+        compile_process.exit(ExitCodes.USER_ERROR)
+    }
+    write_mode_diagnostic(mode, authority_confirmation_prompt(file, undecided))
+    _ :: compile_io.stderr().flush() // GATE #4494
+    answer := ""
+    answered :: (compile_io.stdin().read_line(&answer).ok() ?? 0) > 0 // GATE #4494
+    trimmed := answer.trim() // #4303
+    normalized :: trimmed.to_ascii_lowercase()
+    choice :: if !answered -> "n" else if normalized == "" || normalized == "y" || normalized == "yes" -> "y" else if normalized == "always" -> "always" else -> "n"
+    pending := PendingAuthorityProjectUpdate?{None}
+    scope := ""
+    policy_source := ""
+    if choice == {
+        "y" -> { scope = "invocation"; policy_source = "interactive.once" }
+        "always" -> {
+            scope = "project"
+            if package_manifest == None {
+                grant :: pkg_application_policy_diagnostic(projection, [], Val(ScriptEntry{path: file, source: src, command: cmd}))
+                edit :: grant.edit ?? fail_authority_transaction(mode, file, src, "can't save authority for this script", "the grant is written as a leading `package { … }` block", "no package block could be derived for this source")
+                if source_snapshot == None -> fail_authority_transaction(mode, file, src, "can't save authority for this source", "saving a grant requires a checked source file, not a virtual overlay", "the source has no descriptor-relative identity")
+                relative :: authority_relative_path(root, OSPath.from(file)) ?? fail_authority_transaction(mode, file, src, "can't save authority for this source", "the checked source must sit beneath its own directory", "source `{file}` is outside `{root.display()}`")
+                snapshot :: &transaction.snapshot_file(relative) ?? fail_authority_transaction(mode, file, src, "can't snapshot the script for saving authority", "the saved grant must edit the same immutable source checked for this run", "could not snapshot `{relative.display()}`: {err}")
+                updated_source := src
+                &updated_source.replace_range(edit.span.start..<edit.span.end, edit.new_text)
+                reparsed :: PackageFacts.parse_inline(updated_source, file).ok().flatten() ?? {
+                    report_problems(mode, file, src, [Diagnostic.error("E1221", "saving authority produced an invalid `{file}`", "the inserted package block did not parse as a leading Package", "declare the package block by hand with `jet fix --all`", None)])
+                    compile_process.exit(ExitCodes.USER_ERROR)
+                }
+                pending = Val(PendingAuthorityProjectUpdate.Inline(^snapshot, updated_source.bytes(), reparsed.0))
+                policy_source = "inline Package authority.holds"
+            } else {
+                inline :: PackageFacts.parse_inline(src, file) ?? {
+                    report_problems(mode, file, src, [Diagnostic.error("E1362", "the inline Package body is malformed", "{err}", "fix the inline Package fields before approving authority", None)])
+                    compile_process.exit(ExitCodes.USER_ERROR)
+                }
+                if inline == .Val((_, block)) {
+                    checked_snapshot :: source_snapshot ?? fail_authority_transaction(mode, file, src, "can't persist project authority for this source", "project approval requires a checked source file, not a virtual overlay", "the source has no descriptor-relative identity")
+                    relative :: authority_relative_path(root, OSPath.from(file)) ?? fail_authority_transaction(mode, file, src, "can't persist project authority for this source", "project approval requires the checked source beneath the project root", "source `{checked_snapshot.path().display()}` is outside project root `{root.display()}`")
+                    snapshot :: &transaction.snapshot_file(relative) ?? fail_authority_transaction(mode, file, src, "can't snapshot project authority", "project approval must edit the same immutable source checked for this run", "could not snapshot `{relative.display()}`: {err}")
+                    updated_body := block.body(src)
+                    loop effect in undecided -> updated_body = add_authority_hold(updated_body, effect)
+                    updated_source := src
+                    &updated_source.replace_range(block.body_span.start..<block.body_span.end, updated_body)
+                    reparsed :: PackageFacts.parse(updated_body, file) ?? {
+                        report_problems(mode, file, src, [Diagnostic.error("E1221", "project approval produced an invalid `{file}`", "{err}", "edit the inline Package authority.holds with the canonical manifest editor", None)])
+                        compile_process.exit(ExitCodes.USER_ERROR)
+                    }
+                    pending = Val(PendingAuthorityProjectUpdate.Inline(^snapshot, updated_source.bytes(), ^reparsed))
+                    policy_source = "inline Package authority.holds"
+                } else {
+                    manifest_file :: manifest_path(root) ?? {
+                        report_problems(mode, file, src, [pkg_application_policy_diagnostic(projection, [], None)])
+                        compile_process.exit(ExitCodes.USER_ERROR)
+                    }
+                    relative :: authority_relative_path(root, manifest_file) ?? fail_authority_transaction(mode, file, src, "can't snapshot project authority", "project approval must edit the canonical manifest beneath the project root", "manifest `{manifest_file.display()}` is outside project root `{root.display()}`")
+                    snapshot :: &transaction.snapshot_file(relative) ?? fail_authority_transaction(mode, file, src, "can't read `{manifest_file.display()}` for project approval", "project approval must edit the same immutable manifest checked for this run", "could not snapshot `{relative.display()}`: {err}")
+                    updated := snapshot.text() ?? fail_authority_transaction(mode, file, src, "can't read `{manifest_file.display()}` for project approval", "project approval requires a UTF-8 canonical package manifest", "{err}")
+                    loop effect in undecided -> updated = add_authority_hold(updated, effect)
+                    reparsed :: PackageFacts.parse(updated, manifest_file.display()) ?? {
+                        report_problems(mode, file, src, [Diagnostic.error("E1221", "project approval produced an invalid `{manifest_file.display()}`", "{err}", "edit `authority.holds.allow` with the canonical manifest editor", None)])
+                        compile_process.exit(ExitCodes.USER_ERROR)
+                    }
+                    pending = Val(PendingAuthorityProjectUpdate.Manifest(^snapshot, updated.bytes(), ^reparsed))
+                    policy_source = "package.jet authority.holds"
+                }
+            }
+        }
+        else -> {
+            all_denied := [String:Bool]{}
+            loop effect in projection.denied_effects -> all_denied[effect] = true
+            loop effect in undecided -> all_denied[effect] = true
+            projection.denied_effects = all_denied.keys().to_list()
+            &projection.denied_effects.sort()
+            report_problems(mode, file, src, [pkg_application_policy_diagnostic(projection, undecided, None)])
+            compile_process.exit(ExitCodes.USER_ERROR)
+        }
+    }
+    write_authority_receipt(&transaction, file, cmd, scope, projection, policy_source) ?? fail_authority_transaction(mode, file, src, "could not record the application authority receipt", "every authority approval is source-linked before the effect runs", err)
+    write_authority_delegation_receipts(&transaction, file, projection, delegations, policy_source) ?? fail_authority_transaction(mode, file, src, "could not record the Authority delegation receipt", "every Authority delegation is source-linked before the effect runs", err)
+    if pending == .Val(update) {
+        if update == {
+            .Inline(snapshot, replacement, manifest) | .Manifest(snapshot, replacement, manifest) -> {
+                &transaction.replace_file(snapshot, replacement) ?? {
+                    detail :: if err.is_published() -> "the authority rename committed, but post-commit verification or durability failed; the canonical state is committed or uncertain and execution is forbidden" else -> "the approval receipt is durable, but the canonical authority file was not published; execution is forbidden"
+                    fail_authority_transaction(mode, file, src, "could not persist project authority", detail, "{err}")
+                }
+                if package_manifest == .Val((existing_root, _)) -> package_manifest = Val((existing_root, ^manifest))
+                else -> package_manifest = Val((root, ^manifest))
+            }
+        }
+    }
+    if scope == "invocation" -> Val(projection.application_authority()) else -> None
+}
+// Rust: Source/CmdCompile.rs:1637
+fn authority_confirmation_prompt(file: String, undecided: [String]) -> String {
+    rights :: undecided
+    // undecided() preserves canonical BTreeSet order.
+    rows := [(String, String)]{}
+    width := 0
+    loop right in rights {
+        action :: effect_action(right)
+        width = width.max(action.len())
+        &rows.push((action, right))
+    }
+    out := String.builder()
+    &out.push("{file} will:\n")
+    loop (action, right) in rows -> &out.push("  {action}{" ".repeat(width - action.len())}  {right}\n")
+    &out.push("Run it? [Y/n/always] ")
+    out.finish()
+}
+// Rust: Source/CmdCompile.rs:1654
+fn apply_native_effect_policy(cmd: String, file: String, src: String, mode: OutputMode, is_plugin: Bool, lints: [Diagnostic], entries: [PackageEffects], fact_registry: FactRegistry, projection: &EffectProjection, package_manifest: &(OSPath, PackageFacts)?, delegations: [AuthorityDelegation], source_snapshot: AuthorityFileSnapshot?, invocation_authority: ApplicationAuthority?) -> ApplicationAuthority? {
+    authority_root :: package_manifest.map(fn(pair) { pair.0 }) ?? OSPath.from(file).parent().filter(fn(parent) { !parent.as_os_str().is_empty() }) ?? OSPath.from(".")
+    // GATE #4494 retained-descriptor transaction: root lock, no-follow snapshots,
+    // atomic publication and durability remain in the canonical Store owner.
+    transaction :: begin_authority_transaction(authority_root) ?? fail_authority_transaction(mode, file, src, "could not establish the authority transaction", "authority receipts and grants must use one locked project root", "could not lock authority root `{authority_root.display()}`: {err}")
+    if is_plugin {
+        loop package in entries {
+            if package.name != "root" -> next
+            declared_needs :: package_manifest.map(fn(pair) { pair.1.authority.needs }) ?? []
+            forbidden := [String]{}
+            loop effect in package.effects {
+                covered := false
+                loop need in declared_needs { if authority_covers(need, effect) { covered = true; break } }
+                if effect_root(effect) != "Mem" && !covered -> &forbidden.push("{effect} (declare authority.needs `{effect}`)")
+            }
+            if !forbidden.is_empty() {
+                &forbidden.sort()
+                report_problems(mode, file, src, [e1258(pkg_effect_show_set(forbidden))])
+                compile_process.exit(ExitCodes.USER_ERROR)
+            }
+            break
+        }
+    }
+    authority :: resolve_application_authority(cmd, file, src, mode, &projection, &package_manifest, delegations, source_snapshot, &transaction, invocation_authority)
+    if package_manifest == .Val((root, manifest)) {
+        lint_violations :: enforce_lint_policy(lints, manifest)
+        if !lint_violations.is_empty() {
+            report_problems(mode, file, src, lint_violations)
+            compile_process.exit(ExitCodes.USER_ERROR)
+        }
+        configured_names := [String]{}
+        if manifest.authority.holds.allow == .Val(names) -> &configured_names.extend(names)
+        if manifest.authority.holds.deny == .Val(names) -> &configured_names.extend(names)
+        // BTreeMap iteration preserves configured-name error precedence.
+        grant_keys := manifest.authority.grants.keys().to_list()
+        &grant_keys.sort()
+        loop key in grant_keys -> &configured_names.extend(manifest.authority.grants[key])
+        violations := [Diagnostic]{}
+        loop name in configured_names {
+            if parse_effect_name(name) != None {
+                resolve_effect_name(name, fact_registry) ?? { &violations.push(undeclared_effect(name, err, None)); () }
+            }
+        }
+        &violations.extend(enforce_effect_budget(entries, manifest))
+        if !violations.is_empty() {
+            report_problems(mode, file, src, violations)
+            compile_process.exit(ExitCodes.USER_ERROR)
+        }
+        // fetch owns lock creation; execution updates existing provenance only.
+        lock_file :: lock_path(root)
+        relative :: authority_relative_path(root, lock_file) ?? fail_authority_transaction(mode, file, src, "can't read project lock `{lock_file.display()}`", "native execution must preserve the canonical lock authority", "lock `{lock_file.display()}` is outside authority root `{root.display()}`")
+        lock_snapshot := AuthorityFileSnapshot?{None}
+        if &transaction.snapshot_file(relative) == {
+            .Ok(snapshot) -> lock_snapshot = Val(^snapshot)
+            .Err(error) -> {
+                if error.kind() != .NotFound -> fail_authority_transaction(mode, file, src, "can't read project lock `{lock_file.display()}`", "native execution must preserve the canonical lock authority", "fix the lock permissions and retry: {error}")
+            }
+        }
+        if lock_snapshot == .Val(snapshot) {
+            raw :: snapshot.text() ?? fail_authority_transaction(mode, file, src, "can't read project lock `{lock_file.display()}`", "native execution requires a UTF-8 canonical lockfile", "{err}")
+            lock := parse_lock(raw) ?? fail_authority_transaction(mode, file, src, "can't parse project lock `{lock_file.display()}`", "native execution cannot update a corrupt lockfile", err)
+            update_lock_provenance(&lock, entries, manifest)
+            replacement :: write_lock(lock)
+            &transaction.replace_file(snapshot, replacement.bytes()) ?? {
+                detail :: if err.is_published() -> "the lockfile rename committed, but post-commit verification or durability failed; canonical lock authority is committed or uncertain and execution is forbidden" else -> "the canonical lockfile was not published; execution is forbidden"
+                fail_authority_transaction(mode, file, src, "can't write project lock `{lock_file.display()}`", detail, "{err}")
+            }
+        }
+    }
+    &transaction.finish() ?? fail_authority_transaction(mode, file, src, "could not finish the authority transaction", "authority receipts or grants may be committed, but durability state is uncertain; execution is forbidden", "{err}")
+    authority
+}
+// Rust: Source/CmdCompile.rs:1857
+// D-BUILDPROFILE1: profile loading continues in the next compile-host packet.

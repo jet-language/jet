@@ -1,0 +1,458 @@
+// Source/CmdSupply.rs. Command policy and output at the existing CLI owner.
+// This file does NOT activate a native publication command. The missing producer
+// bodies remain explicit integration gates, rather than host traits or fake IO:
+// 0813/0814 Fetch; 0815 checked PublicAPI; 0817 Compiler ApiFreeze IO;
+// 0818/0819 ForeignPackage; 0821/0822 checkout/cleanup/push/artifact/hash;
+// 0824 Schema snapshot IO; 0827 Vendor. Publication scalar owners are reused.
+// Core retained_descriptor/native process ingress: #4494/#4483/#4409/#4500.
+// Report linear builders require external:CP-REPORT-LINEAR-BUILDERS (^self).
+// Main publishes the Publication and Compiler ApiFreeze dependency closure.
+use jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+use jet_foundation.[
+    Diagnostic, Span, StatusValue, StatusFields, StatusEnvelope, PACKAGE_FILE,
+    diagnostic_render_all, diagnostic_render_all_json, ReportPath, DIAGNOSTIC_ERROR,
+]
+use core.files.runtime.kernel_path_components as supply_paths
+use core.files.host.retained_descriptor as supply_native
+
+fn jet_cli_supply_output(stdout: String, stderr: String, exit_code: Int) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: exit_code}
+}
+fn jet_cli_supply_append(out: &[U8], text: String) Never! {
+    loop byte in text.bytes() -> &out.push(byte)
+}
+fn jet_cli_supply_text(out: [U8]) -> String Never! {
+    String.from_bytes(out) ?? panic("supply command rendering preserves UTF-8")
+}
+
+// package_input:16-88 uses the SAME JetCLIPackageInput/jet_cli_package_input
+// as CmdPkg; it has no second manifest parser/carrier here. Its native loading
+// phase still needs Driver package_facts_for_entry and manifest_path publication.
+// On entry file: read -> extract inline -> composed facts -> convert inline body;
+// otherwise load_checked(root); only after absent inline resolve/read manifest.
+
+// git_dirty_files:97-116, after an actual captured git output and canonical
+// lossy UTF-8 decode. Spawn failure/nonzero status is clean, NOT a CLI error.
+// Only the retained dirty lines own copies; trimming never changes the lines.
+pub fn jet_cli_supply_dirty_lines(success: Bool, stdout: String) -> [String]? Never! {
+    if !success -> return None
+    dirty := [String]{}
+    loop line in stdout.lines() {
+        if line.trim() != "" -> &dirty.push(~line)
+    }
+    if dirty.len() == 0 -> None else -> Val(^dirty)
+}
+
+// run_publish:304-344. --quiet never hides these refusal/warning bytes.
+pub fn jet_cli_supply_dirty_output(name: String, version: String, dirty: [String], force: Bool) -> JetDriverVerbOutput Never! {
+    if dirty.len() == 0 -> return jet_cli_supply_output("", "", JET_DRIVER_EXIT_OK)
+    out := [U8]{}
+    if force {
+        jet_cli_supply_append(&out, "warning [--force]: working tree has {dirty.len()} uncommitted change(s) — publishing anyway.\n")
+        loop index in 0..<dirty.len() {
+            if index == 5 -> break
+            jet_cli_supply_append(&out, "  {dirty[index]}\n")
+        }
+        if dirty.len() > 5 -> jet_cli_supply_append(&out, "  … and {dirty.len() - 5} more\n")
+        return jet_cli_supply_output("", jet_cli_supply_text(^out), JET_DRIVER_EXIT_OK)
+    }
+    jet_cli_supply_append(&out, "Error [E2605]: `{name}` v{version} cannot be published from a dirty working tree.\n")
+    jet_cli_supply_append(&out, " Why: The registry records the exact source revision. Uncommitted changes would be silently excluded, making the published package unreproducible.\n")
+    jet_cli_supply_append(&out, " Fix: Commit or stash all uncommitted changes, then run `jet registry publish` again.\n")
+    jet_cli_supply_append(&out, "More: jet-lang.dev/e/E2605\n")
+    jet_cli_supply_append(&out, "      use `jet registry publish --force` to bypass with an explicit warning banner.\n\n")
+    jet_cli_supply_append(&out, "  uncommitted changes ({dirty.len()}):\n")
+    loop index in 0..<dirty.len() {
+        if index == 10 -> break
+        jet_cli_supply_append(&out, "    {dirty[index]}\n")
+    }
+    if dirty.len() > 10 -> jet_cli_supply_append(&out, "    … and {dirty.len() - 10} more\n")
+    jet_cli_supply_output("", jet_cli_supply_text(^out), JET_DRIVER_EXIT_USER_ERROR)
+}
+
+// run_publish_tests:123-173. Native spawn is current_exe with these exact argv,
+// cwd=root and captured stdout/stderr; no check-only or semantic-test substitute.
+pub fn jet_cli_supply_test_arguments(entry: String) -> [String] Never! {
+    [String]{"test", ~entry, "--show-default"}
+}
+pub fn jet_cli_supply_test_missing(entry: String) -> JetDriverVerbOutput Never! {
+    jet_cli_supply_output("", "  tests: failed — no project entry `{entry}` was found\n", JET_DRIVER_EXIT_USER_ERROR)
+}
+pub fn jet_cli_supply_test_executable_error(error: String) -> JetDriverVerbOutput Never! {
+    jet_cli_supply_output("", "  tests: failed — couldn't locate the running Jet executable: {error}\n", JET_DRIVER_EXIT_USER_ERROR)
+}
+pub fn jet_cli_supply_test_spawn_error(error: String) -> JetDriverVerbOutput Never! {
+    jet_cli_supply_output("", "  tests: failed — couldn't start `jet test`: {error}\n", JET_DRIVER_EXIT_USER_ERROR)
+}
+// Success is the actual OS status, not an inferred zero when killed by a signal.
+// Captured streams are forwarded even under quiet; stdout is NOT JSON-filtered.
+pub fn jet_cli_supply_test_output(stdout: String, stderr: String, success: Bool, code: Int?) -> JetDriverVerbOutput Never! {
+    if success -> return jet_cli_supply_output("{stdout}  tests: ok\n", ~stderr, JET_DRIVER_EXIT_OK)
+    shown :: if code == { .Val(value) -> "{value}"; .None -> "a signal" }
+    jet_cli_supply_output(~stdout, "{stderr}  tests: failed (`jet test` exited with {shown})\n", JET_DRIVER_EXIT_USER_ERROR)
+}
+
+// render_signing_diagnostic:175-188. Reuse Sign.jet:173-177's Main tandem:
+// E1292 static prose belongs to the canonical registry, not a CLI text twin.
+pub fn jet_cli_supply_signing_diagnostic(diagnostic: Diagnostic, color: Bool) -> String Never! {
+    if diagnostic.code == "E1292" -> return diagnostic_render_all(PACKAGE_FILE, "", [Diagnostic]{publication_e1292()}, color)
+    diagnostic_render_all(PACKAGE_FILE, "", [Diagnostic]{~diagnostic}, color)
+}
+
+// registry_has_metadata_chain:190-206, fail-closed decision over the two
+// ORIGINAL symlink_metadata queries. None means an actual NotFound only.
+// The metadata directory's first read_dir result counts even when it is Err.
+// This takes scalar query projections, never manufactures successful queries.
+pub fn jet_cli_supply_checkpoint_established(found: Bool, not_found: Bool) -> Bool Never! {
+    found || !not_found
+}
+pub fn jet_cli_supply_metadata_established(found: Bool, not_found: Bool, symlink: Bool, directory: Bool, enumeration_failed: Bool, first_entry_present: Bool) -> Bool Never! {
+    if !found -> return !not_found
+    symlink || !directory || enumeration_failed || first_entry_present
+}
+
+// fail_publish_checkout:209-220: caller MUST actually cleanup first, then emit
+// this cleanup diagnostic if it failed, then the original report, then exit1.
+// Native resource cleanup belongs to 0821/0822, not a path-only CLI owner.
+pub fn jet_cli_supply_checkout_error(path: String, error: String, color: Bool) -> String Never! {
+    jet_cli_report("E2105", "couldn't remove registry checkout `{path}`: {error}", jet_cli_why("E2105"), "", color)
+}
+
+// run_publish:346-375,379-416,534-541,648-680,785-788. These decisions
+// preserve short-circuiting: --no-sign must NEVER call keygen/sign. A public
+// key is root-pinned whenever present, even on a no-sign release.
+pub fn jet_cli_supply_needs_keygen(no_sign: Bool, existing_key: Bool) -> Bool Never! {
+    !no_sign && !existing_key
+}
+pub fn jet_cli_supply_needs_metadata_refresh(no_sign: Bool, established: Bool) -> Bool Never! {
+    !no_sign || established
+}
+pub fn jet_cli_supply_gate_failed(build_ok: Bool, tests_ok: Bool, force: Bool) -> JetDriverVerbOutput Never! {
+    if build_ok && tests_ok -> return jet_cli_supply_output("", "", JET_DRIVER_EXIT_OK)
+    if !force -> return jet_cli_supply_output("", "", JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_supply_output("", "warning [--force]: pre-publish gate failed but continuing anyway.\n  this publish would be rejected by a registry that enforces D-PKGS4.\n", JET_DRIVER_EXIT_OK)
+}
+pub fn jet_cli_supply_build_missing(entry: String) -> String Never! {
+    "  build: failed — no project entry `{entry}` was found\n"
+}
+pub fn jet_cli_supply_build_errors(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
+    errors := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> &errors.push(~diagnostic)
+    }
+    ^errors
+}
+pub fn jet_cli_supply_signing_public_field(pinned: String?, local_public_key: String) -> String Never! {
+    if pinned == .Val(key) {
+        if key == local_public_key.trim() -> return ""
+    }
+    ~local_public_key
+}
+
+// run_publish:439-505. Compiler is the canonical snapshot/type-name owner.
+// 0817 must publish legacy_api_name/legacy_api_signature for api_version<3;
+// this module does not recreate that migration. `breaking` is computed by the
+// canonical Publication diff AFTER that normalization. Parsing failure is Same.
+pub fn jet_cli_supply_semver_bump(previous: String, version: String) -> PublicationBumpKind Never! {
+    old :: publication_parse_semver(previous) ?? return PublicationBumpKind.Same
+    new :: publication_parse_semver(version) ?? return PublicationBumpKind.Same
+    publication_classify_bump(old, new)
+}
+pub fn jet_cli_supply_semver_output(previous: String, version: String, breaking: [PublicationBreakingChange], force: Bool, mode: JetCLIOutputMode) -> JetDriverVerbOutput Never! {
+    bump :: jet_cli_supply_semver_bump(previous, version)
+    if breaking.len() > 0 && bump != PublicationBumpKind.Major {
+        if force -> return jet_cli_supply_output("", "warning [--force]: {breaking.len()} breaking API change(s) under a non-major bump — publishing anyway.\n", JET_DRIVER_EXIT_OK)
+        next_major :: if publication_parse_semver(previous) == .Val(old) -> old.major + 1 else -> 1
+        out := [U8]{}
+        first := true
+        loop change in breaking {
+            if !first -> &out.push(U8{10})
+            first = false
+            diagnostic :: publication_e1218(previous, version, bump, change, next_major)
+            jet_cli_supply_append(&out, diagnostic_render_all(PACKAGE_FILE, "", [Diagnostic]{diagnostic}, mode.color))
+        }
+        jet_cli_supply_append(&out, "\nerror: breaking public API change since {previous} requires a major version bump.\n use `jet registry publish --force` to override with a warning banner\n")
+        return jet_cli_supply_output("", jet_cli_supply_text(^out), JET_DRIVER_EXIT_USER_ERROR)
+    }
+    stdout :: if mode.quiet -> "" else -> "  semver: ok — public API compatible with the {previous} snapshot\n"
+    jet_cli_supply_output(stdout, "", JET_DRIVER_EXIT_OK)
+}
+
+// publish_index_hashes:837-860. Returns the FIRST matching package, including
+// a root whose name differs. An empty fingerprint stops the lock search and
+// falls back to artifact hash + computed fingerprint; later matches don't win.
+// Hash IO fallback (artifact_hash error -> SHA256.tree_hash) is gated 0822.
+// Return an index so callers copy only the two selected fields, not the package.
+pub fn jet_cli_supply_locked_hash_index(lock: LockFile, name: String) -> Int? Never! {
+    loop index in 0..<lock.packages.len() {
+        package :: lock.packages[index]
+        if package.name == name || package.source == LockSource.Root {
+            if package.fingerprint == "" -> return None
+            return Val(index)
+        }
+    }
+    None
+}
+pub fn jet_cli_supply_recorded_content_hash(package: LockedPackage) -> String? Never! {
+    if package.content_hash == .Val(hash) {
+        if hash != "" -> return Val(~hash)
+    }
+    None
+}
+
+// run_keygen:866-883, output of an actually completed canonical keygen.
+pub fn jet_cli_supply_keygen_output(registry: String, generated: PublicationGeneratedKey) -> String Never! {
+    "created a signing key for registry `{registry}`.\n  public key:  {generated.public_key_hex}\n  secret key:  {generated.seed_path}\n  public file: {generated.public_key_path}\n`jet registry key backup` writes this to {generated.seed_path} — losing it means losing your ability to publish signed updates.\n"
+}
+
+// run_keygen:866-883 complete command body against the existing Sign owner.
+// Native/crypto closure remains gated at Sign; this is not a Rust helper call.
+pub fn jet_cli_supply_run_keygen(registry: String?, force: Bool, color: Bool) -[FS, Env, Time, Rand]> JetDriverVerbOutput Never! {
+    reg :: registry ?? PUBLICATION_DEFAULT_REGISTRY
+    if publication_keygen(reg, force) == {
+        .Ok(generated) -> jet_cli_supply_output(jet_cli_supply_keygen_output(reg, generated), "", JET_DRIVER_EXIT_OK)
+        .Err(error) -> jet_cli_supply_output("", jet_cli_supply_signing_diagnostic(error.diagnostic, color), JET_DRIVER_EXIT_USER_ERROR)
+    }
+}
+// run_key_backup:890-920. Actual fs::copy (including permissions) belongs to
+// retained_descriptor.copy (#4494), NOT core.files.copy2 (different semantics).
+pub fn jet_cli_supply_key_backup_missing(registry: String, color: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_supply_output("", jet_cli_report("E2105", "no signing key for registry `{registry}` — run `jet registry keygen` first", jet_cli_why("E2105"), "", color), JET_DRIVER_EXIT_USER_ERROR)
+}
+pub fn jet_cli_supply_key_backup_output(registry: String, destination: String) -> String Never! {
+    "backed up the `{registry}` signing key to {destination}\nwarning: store this file somewhere safe (e.g. a password manager). Anyone who has it can publish signed updates as you.\n"
+}
+pub fn jet_cli_supply_key_backup_error(destination: String, error: String, color: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_supply_output("", jet_cli_report("E2105", "couldn't copy the signing key to {destination}: {error}", jet_cli_why("E2105"), "", color), JET_DRIVER_EXIT_USER_ERROR)
+}
+
+// run_vendor:927-997, faithful post-copy rendering; shown is the original
+// strip_prefix(root).unwrap_or(target_dir) display, NOT a text prefix trim.
+// FetchOptions: locked=false/update=false/update_dep=None/Conservative (0813).
+// Default target=root/vendor; absolute argument stays; relative joins root.
+pub fn jet_cli_supply_vendor_output(copied: [String], shown: String) -> String Never! {
+    if copied.len() == 0 -> return "vendor: no dependencies to copy\n"
+    out := [U8]{}
+    loop name in copied -> jet_cli_supply_append(&out, "vendored: {name}\n")
+    jet_cli_supply_append(&out, "ok: {copied.len()} dependencies copied to {shown}/\n")
+    jet_cli_supply_append(&out, "tip: commit {shown}/ and use `jet fetch --locked` for reproducible offline builds.\n")
+    jet_cli_supply_text(^out)
+}
+
+// audit_fail:1160-1166; display is used only for diagnostics, never native IO.
+pub fn jet_cli_supply_audit_fail(path: String, raw: String, diagnostic: Diagnostic, color: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_supply_output("", diagnostic_render_all(path, raw, [Diagnostic]{~diagnostic}, color), JET_DRIVER_EXIT_USER_ERROR)
+}
+// run_audit:1113-1157, consumes actual verified policy results. No unsigned or
+// stale-feed clean path. Maturity diagnoses precede match diagnoses. Only
+// Critical matches or ANY maturity failure cause exit1; lower severities don't.
+pub fn jet_cli_supply_audit_output(report: PublicationPolicyAudit, dependencies: Int, color: Bool) -> JetDriverVerbOutput Never! {
+    out := [U8]{}
+    jet_cli_supply_append(&out, "audit: feed sequence {report.receipt.sequence} verified (key {report.receipt.key_id}, digest {report.receipt.digest}, offline local feed).\n")
+    jet_cli_supply_append(&out, "audit: policy maturity {report.receipt.maturity_seconds}s; exact exceptions use package#version; {dependencies} dependencies checked.\n")
+    loop exception in report.source_exceptions -> jet_cli_supply_append(&out, "audit: source policy exception applied: {exception}\n")
+    if report.maturity.len() == 0 && report.matches.len() == 0 {
+        jet_cli_supply_append(&out, "audit: no advisories found.\n")
+        return jet_cli_supply_output(jet_cli_supply_text(^out), "", JET_DRIVER_EXIT_OK)
+    }
+    errors := [U8]{}
+    first := true
+    loop diagnostic in report.maturity {
+        if !first -> &errors.push(U8{10})
+        first = false
+        jet_cli_supply_append(&errors, diagnostic_render_all(PACKAGE_FILE, "", [Diagnostic]{~diagnostic}, color))
+    }
+    critical := 0
+    loop matched in report.matches {
+        if !first -> &errors.push(U8{10})
+        first = false
+        jet_cli_supply_append(&errors, diagnostic_render_all(PACKAGE_FILE, "", [Diagnostic]{~matched.diagnostic}, color))
+        if matched.severity == PublicationSeverity.Critical -> critical += 1
+    }
+    jet_cli_supply_append(&errors, "\n{report.matches.len()} advisory match(es) found ({critical} critical)\n")
+    failed :: critical > 0 || report.maturity.len() > 0
+    if failed -> jet_cli_supply_append(&errors, "audit: policy checks failed. Upgrade the affected dependencies or wait for an approved exception.\n")
+    jet_cli_supply_output(jet_cli_supply_text(^out), jet_cli_supply_text(^errors), if failed -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_OK)
+}
+
+// run_copy_audit:1225-1266. Compiler owns checking/implicit-copy-span
+// extraction (CmdCompile packet); the CLI owns only these outward rows.
+pub struct JetCLISupplyCopyRow { pub path: String, pub line: Int, pub column: Int, pub span: Span }
+// Consume rows. Sort only indices: no repeatedly copied paths or whole rows.
+// Rust sort_by is stable for equal path/start; preserve that tie ordering.
+pub fn jet_cli_supply_copy_output(rows: ^[JetCLISupplyCopyRow], json: Bool) -> JetDriverVerbOutput Never! {
+    order := [Int]{}
+    loop index in 0..<rows.len() -> &order.push(index)
+    &order.sort_by((left: Int, right: Int) -> (rows[left].path.bytes() <=> rows[right].path.bytes()).then(rows[left].span.start <=> rows[right].span.start))
+    if json {
+        copies := [StatusValue]{}
+        loop index in order {
+            row :: rows[index]
+            fields := StatusFields.new()
+            fields = ^fields.with("path", StatusValue.String{value: ~row.path})
+            fields = ^fields.with("line", StatusValue.Integer{value: row.line})
+            fields = ^fields.with("column", StatusValue.Integer{value: row.column})
+            span := StatusFields.new()
+            span = ^span.with("start", StatusValue.Integer{value: row.span.start})
+            span = ^span.with("end", StatusValue.Integer{value: row.span.end})
+            fields = ^fields.with("span", StatusValue.object(^span))
+            fields = ^fields.with("size", StatusValue.String{value: "dynamic"})
+            fields = ^fields.with("kind", StatusValue.String{value: "implicit"})
+            &copies.push(StatusValue.object(^fields))
+        }
+        envelope := StatusEnvelope.new("audit.copies", true)
+        envelope = ^envelope.with_field("copies", StatusValue.array(^copies))
+        return jet_cli_supply_output("{envelope.json()}\n", "", JET_DRIVER_EXIT_OK)
+    }
+    out := [U8]{}
+    jet_cli_supply_append(&out, "implicit read-view copies: {rows.len()}\n")
+    loop index in order {
+        row :: rows[index]
+        jet_cli_supply_append(&out, "  {row.path}:{row.line}:{row.column}  span={row.span.start}..{row.span.end}  size=dynamic  kind=implicit\n")
+    }
+    jet_cli_supply_output(jet_cli_supply_text(^out), "", JET_DRIVER_EXIT_OK)
+}
+
+// run_sbom:1280-1293, actual publication codec only; never a local SBOM twin.
+pub fn jet_cli_supply_sbom_output(lock: LockFile, name: String, version: String, cyclonedx: Bool) -> String Never! {
+    if cyclonedx -> publication_emit_cyclonedx(lock, name, version) else -> publication_emit_spdx(lock, name, version)
+}
+pub fn jet_cli_supply_sbom_missing(color: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_supply_output("", jet_cli_report("E1202", "no lockfile found — run `jet fetch` first", jet_cli_why("E1202"), "", color), JET_DRIVER_EXIT_USER_ERROR)
+}
+
+// run_yank:1302-1318 validation runs BEFORE cwd/root/package/key/checkout IO.
+// Empty version is not whitespace-trimmed before the missing-argument check.
+pub fn jet_cli_supply_yank_validate(version: String?, color: Bool) -> JetDriverVerbOutput? Never! {
+    value :: version ?? return Val(jet_cli_supply_yank_missing())
+    if value == "" -> return Val(jet_cli_supply_yank_missing())
+    if publication_parse_semver(value) == None {
+        return Val(jet_cli_supply_output("", jet_cli_report("E2104", "`{value}` is not a valid SemVer version (expected major.minor.patch)", jet_cli_why("E2104"), "use a version like `1.2.3`", color), JET_DRIVER_EXIT_USER_ERROR))
+    }
+    None
+}
+fn jet_cli_supply_yank_missing() -> JetDriverVerbOutput Never! {
+    jet_cli_supply_output("", "Error [E2606]: `jet registry yank` requires a version argument.\n Why: A yank marks one specific published version as deprecated;\n      Without a version the command doesn't know which one to yank.\n Fix: Run `jet registry yank <version>`, e.g. `jet registry yank 1.2.3`.\nMore: jet-lang.dev/e/E2606\n", JET_DRIVER_EXIT_USER_ERROR)
+}
+// run_yank:1352-1370, distinguish missing version, index IO, disappearance.
+pub fn jet_cli_supply_yank_unpublished(name: String, version: String, color: Bool) -> String Never! {
+    jet_cli_report("E2105", "`{name}` v{version} is not published in the registry index — nothing to yank", jet_cli_why("E2105"), "run `jet registry publish` for the version first, or check the version number", color)
+}
+// run_yank:1412-1421. Emit ONLY after metadata refresh, push and cleanup succeed.
+pub fn jet_cli_supply_yank_output(name: String, version: String, registry_url: String, message: String?) -> String Never! {
+    out := [U8]{}
+    jet_cli_supply_append(&out, "ok: yanked `{name}` v{version} in {publication_redact_registry_url(registry_url)}\n")
+    if message == .Val(reason) -> jet_cli_supply_append(&out, "  reason: {reason}\n")
+    jet_cli_supply_append(&out, "  the version stays reserved (immutable); it is hidden from new resolution.\n")
+    jet_cli_supply_text(^out)
+}
+
+// run_audit:1037-1112 after actual successful reads. Parsing and verification
+// use the canonical lock/advisory owners, retaining their diagnostic source.
+// Missing/read-error paths stay in native orchestration before this boundary.
+pub fn jet_cli_supply_audit_documents(lock_path: String, lock_text: String, feed_path: String, feed_text: String, trust_path: String, trust_text: String, exceptions: [PackagePolicyException], now: Int, color: Bool) -> JetDriverVerbOutput Never! {
+    lock :: pkg_lock_parse(lock_text) ?? return jet_cli_supply_audit_fail(lock_path, lock_text, publication_e2611("a valid unified lockfile", "repair `{lock_path}`: {err.message()}"), color)
+    feed :: publication_parse_advisory_feed(feed_text) ?? return jet_cli_supply_audit_fail(feed_path, feed_text, err.diagnostic, color)
+    trust :: publication_parse_advisory_trust(trust_text) ?? return jet_cli_supply_audit_fail(trust_path, trust_text, err.diagnostic, color)
+    report :: publication_audit_advisory_feed_with_source_exceptions(lock, feed, trust, now, exceptions) ?? return jet_cli_supply_audit_fail(feed_path, feed_text, err.diagnostic, color)
+    jet_cli_supply_audit_output(report, lock.packages.len(), color)
+}
+
+// run_copy_audit:1173-1179. First non-dash argument, not flag-value parsing:
+// '--' itself is skipped but a later plain word is still selected.
+pub fn jet_cli_supply_copy_argument(args: [String]) -> String? Never! {
+    loop argument in args {
+        if !argument.starts_with("-") -> return Val(~argument)
+    }
+    None
+}
+// run_copy_audit:1188-1224. JSON diagnostics use the one Foundation report
+// path selected for the process; all emitted diagnostics go to stderr.
+pub fn jet_cli_supply_copy_diagnostics(entry: String, report_file: ReportPath, source: String, diagnostics: [Diagnostic], json: Bool, color: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
+    text :: if json -> diagnostic_render_all_json(report_file, source, diagnostics) else -> diagnostic_render_all(entry, source, diagnostics, color)
+    jet_cli_supply_output("", text, JET_DRIVER_EXIT_USER_ERROR)
+}
+
+// run_audit:1013-1094, original missing/read error precedence and fix bytes.
+pub fn jet_cli_supply_audit_missing_lock(path: String, color: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_supply_audit_fail(path, "", publication_e2611("the unified lockfile", "run `jet fetch`, review the lock, then run `jet inspect audit` again"), color)
+}
+pub fn jet_cli_supply_audit_lock_read_error(path: String, error: String, color: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_supply_audit_fail(path, "", publication_e2611("a readable unified lockfile", "repair `{path}` and run `jet inspect audit` again: {error}"), color)
+}
+pub fn jet_cli_supply_audit_missing_feed(root: String, color: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_supply_audit_fail(root, "", publication_e2611("a signed advisory database", "pass --advisory-db <path>, set JET_ADVISORY_DB, or add .jet/advisories.db"), color)
+}
+pub fn jet_cli_supply_audit_feed_read_error(path: String, error: String, color: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_supply_audit_fail(path, "", publication_e2611("a readable signed advisory database", "repair `{path}` and retry: {error}"), color)
+}
+pub fn jet_cli_supply_audit_trust_read_error(path: String, error: String, color: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_supply_audit_fail(path, "", publication_e2610("advisory trust root", "could not read `{path}`: {error}"), color)
+}
+
+// registry_has_metadata_chain:190-206 complete native consumer; calls ONLY
+// the published REQUIRED retained ABI. Its producers are undelivered #4494.
+// No-follow metadata is essential: symlinks and unreadable entries establish
+// a chain. Ignore ReadDir close errors just as Rust's destructor does.
+pub fn jet_cli_supply_registry_has_metadata_chain(repo: supply_paths.OSPath) -[FS]> Bool Never! {
+    checkpoint := ~repo
+    supply_paths.push(&checkpoint, supply_paths.from_text("transparency", repo.platform))
+    supply_paths.push(&checkpoint, supply_paths.from_text("checkpoint", repo.platform))
+    if supply_native.symlink_metadata(checkpoint) == {
+        .Ok(_) -> return true
+        .Err(error) -> {
+            if error == { .NotFound(_) -> {}; else -> return true }
+        }
+    }
+    metadata := ~repo
+    supply_paths.push(&metadata, supply_paths.from_text("metadata", repo.platform))
+    if supply_native.symlink_metadata(metadata) == {
+        .Ok(file) -> {
+            if file.is_symlink || !file.is_dir -> return true
+            entries := supply_native.read_dir(metadata) ?? return true
+            present :: if entries.next() == {
+                .Ok(entry) -> if entry == { .None -> false; .Val(_) -> true }
+                .Err(_) -> true
+            }
+            ^entries.close().drop("Rust ReadDir drop does not surface close errors")
+            present
+        }
+        .Err(error) -> if error == { .NotFound(_) -> false; else -> true }
+    }
+}
+
+// run_vendor:957-975. Actual target-selected raw root keeps native spelling;
+// Path strip_prefix uses components, NOT starts_with on displayed Strings.
+pub fn jet_cli_supply_vendor_target(root: supply_paths.OSPath, vendor_dir: String?) -> supply_paths.OSPath Never! {
+    path :: supply_paths.from_text(vendor_dir ?? "vendor", root.platform)
+    if supply_paths.is_absolute(path) -> return path
+    target := ~root
+    supply_paths.push(&target, path)
+    ^target
+}
+pub fn jet_cli_supply_vendor_display(root: supply_paths.OSPath, target: supply_paths.OSPath) -> String Never! {
+    if supply_paths.strip_prefix_span(target, root) == .Val(extent) -> return supply_paths.display_span(target, extent)
+    supply_paths.display(target)
+}
+
+// run_publish:257-275 successful ForeignPackage output. Report scalar fields
+// must come from the actual completed 0818/0819 provider, never a logical plan.
+// Foundation StatusValue is the only JSON emitter; preserve original field order.
+pub fn jet_cli_supply_foreign_output(registry: String, artifact: String, digest: String, release_identity: String, mode: JetCLIOutputMode) -> JetDriverVerbOutput Never! {
+    if mode.json {
+        fields := StatusFields.new()
+        fields = ^fields.with("registry", StatusValue.String{value: ~registry})
+        fields = ^fields.with("artifact", StatusValue.String{value: ~artifact})
+        fields = ^fields.with("digest", StatusValue.String{value: ~digest})
+        fields = ^fields.with("releaseIdentity", StatusValue.String{value: ~release_identity})
+        fields = ^fields.with("uploaded", StatusValue.Bool{value: true})
+        return jet_cli_supply_output("{StatusValue.object(^fields).json()}\n", "", JET_DRIVER_EXIT_OK)
+    }
+    jet_cli_supply_output(if mode.quiet -> "" else -> "published {artifact} to {registry} ({digest})\n", "", JET_DRIVER_EXIT_OK)
+}
+
+// run_publish:825-830. Successful output requires actual push AND cleanup,
+// and quiet hides ONLY progress/success, never any refusal or test stream.
+pub fn jet_cli_supply_publish_output(name: String, version: String, registry_url: String, quiet: Bool) -> String Never! {
+    if quiet -> "" else -> "ok: published `{name}` v{version} to {publication_redact_registry_url(registry_url)}\n"
+}

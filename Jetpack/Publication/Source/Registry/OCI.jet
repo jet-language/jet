@@ -1,0 +1,346 @@
+// Source/Publish/Registry.rs:21-27,1671-2230. Immutable OCI evidence.
+// JSON is the canonical Compiler protocol kernel (#3598); native held IO
+// remains #3593 and exact InvalidData #4409. Artifacts/Fetch composition #4262
+// supplies publication_artifact_path/publication_load_publish_lock and the
+// shared publication_ensure_real_directory; no substitute artifact provider.
+// Staging belongs solely to Foundation's protected publisher: no second
+// unique_suffix; Cache.publication_registry_unique_suffix is the canonical one.
+PUBLICATION_OCI_SBOM_TYPE :: prep { "application/vnd.jet.sbom.v1" }
+PUBLICATION_OCI_SIGNATURE_TYPE :: prep { "application/vnd.jet.signature.v1" }
+PUBLICATION_OCI_PROVENANCE_TYPE :: prep { "application/vnd.jet.provenance.v1" }
+PUBLICATION_OCI_REPRODUCIBILITY_TYPE :: prep { "application/vnd.jet.reproducibility.v1" }
+PUBLICATION_OCI_REFERRER_INDEX :: prep { "index.json" }
+PUBLICATION_OCI_PENDING_SBOM :: prep { ".sbom.pending" }
+PUBLICATION_MAX_OCI_REFERRER_BYTES :: prep { 4194304 }
+
+#Equatable
+struct PublicationOCIDescriptor {
+    artifact_type: String
+    digest: String
+    size: Int
+}
+fn publication_oci_context(path: String, detail: String) -> IOContext Never! {
+    IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val(detail)}
+}
+fn publication_invalid_oci(detail: String) -> IOError Never! {
+    IOError.InvalidData(publication_oci_context("", detail))
+}
+pub fn publication_validate_oci_digest(value: String) IOError! {
+    if !value.starts_with("sha256-") -> return Err(publication_invalid_oci("OCI referrer subject is not a sha256- digest"))
+    digest_hex :: value.removeprefix("sha256-")
+    if digest_hex.bytes().len() != 64 -> return Err(publication_invalid_oci("OCI referrer subject is not a complete sha256- digest"))
+    loop byte in digest_hex.bytes() {
+        code :: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) -> return Err(publication_invalid_oci("OCI referrer subject is not a complete sha256- digest"))
+    }
+}
+pub fn publication_oci_referrer_root(repo: String, subject: String) -[FS, Env]> String IOError! {
+    publication_validate_oci_digest(subject)
+    root :: files.join(repo, "referrers")
+    if files.stat(root) == {
+        .Ok(info) -> if info.is_symlink || !info.is_dir -> return Err(publication_invalid_oci("registry OCI referrer root is not a real directory"))
+        .Err(error) -> if error == {
+            .NotFound(_) -> files.create_dir_all(root)
+            else -> return Err(error)
+        }
+    }
+    info :: files.stat(root)
+    if info.is_symlink || !info.is_dir -> return Err(publication_invalid_oci("registry OCI referrer root is not a real directory"))
+    root_authority :: foundation_open_directory_authority(root)
+    subject_root :: files.join(root, subject)
+    if files.stat(subject_root) == {
+        .Ok(subject_info) -> if subject_info.is_symlink || !subject_info.is_dir -> return Err(publication_invalid_oci("registry OCI subject referrers are not a real directory"))
+        .Err(error) -> if error == {
+            .NotFound(_) -> files.create_dir(subject_root)
+            else -> return Err(error)
+        }
+    }
+    root_authority.revalidate()
+    _ :: foundation_open_directory_authority(subject_root)
+    Ok(subject_root)
+}
+pub fn publication_existing_oci_referrer_root(repo: String, subject: String) -[FS, Env]> String IOError! {
+    publication_validate_oci_digest(subject)
+    root :: files.join(repo, "referrers")
+    info :: files.stat(root)
+    if info.is_symlink || !info.is_dir -> return Err(publication_invalid_oci("registry OCI referrer root is not a real directory"))
+    subject_root :: files.join(root, subject)
+    subject_info :: files.stat(subject_root)
+    if subject_info.is_symlink || !subject_info.is_dir -> return Err(publication_invalid_oci("registry OCI subject referrers are not a real directory"))
+    _ :: foundation_open_directory_authority(subject_root)
+    Ok(subject_root)
+}
+pub fn publication_stage_oci_sbom(repo: String, source: String, name: String, version: String, subject: String) IOError! -[FS, Env, Time]> {
+    root :: publication_oci_referrer_root(repo, subject)
+    lock :: publication_load_publish_lock(source)
+    sbom :: publication_registry_spdx(lock, name, version, subject)
+    publication_write_oci_file(files.join(root, PUBLICATION_OCI_PENDING_SBOM), sbom.bytes(), "pending OCI SBOM")
+}
+pub fn publication_finalize_oci_referrers_for_package(repo: String, name: String, version: String) IOError! -[FS, Env, Time]> {
+    entry :: publication_find_entry(repo, name, version) ?? return
+    publication_finalize_oci_referrers(repo, entry)
+}
+pub fn publication_finalize_oci_referrers(repo: String, entry: PublicationIndexEntry) IOError! -[FS, Env, Time]> {
+    artifact :: publication_artifact_path(repo, entry.name, entry.version)
+    info :: if files.stat(artifact) == {
+        .Ok(info) -> info
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> return
+                else -> return Err(error)
+            }
+        }
+    }
+    if info.is_symlink || !info.is_dir -> return Err(publication_invalid_oci("registry OCI referrers require a real source artifact"))
+    publication_validate_oci_digest(entry.content_hash)
+    root :: publication_oci_referrer_root(repo, entry.content_hash)
+    pending :: files.join(root, PUBLICATION_OCI_PENDING_SBOM)
+    sbom :: if publication_read_oci_file(pending, PUBLICATION_MAX_OCI_REFERRER_BYTES) == {
+        .Ok(bytes) -> String.from_bytes(bytes) ?? return Err(publication_invalid_oci("registry OCI SBOM is not UTF-8"))
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> {
+                    if files.is_file(files.join(root, PUBLICATION_OCI_REFERRER_INDEX)) {
+                        publication_verify_oci_referrers(repo, entry)
+                        return
+                    }
+                    return Err(publication_invalid_oci("registry OCI SBOM evidence was not staged; restore or rebuild the immutable evidence set"))
+                }
+                else -> return Err(error)
+            }
+        }
+    }
+    if !publication_oci_sbom_bound(sbom, entry) -> return Err(publication_invalid_oci("registry OCI SBOM is not bound to its package subject"))
+    payloads :: [String]{sbom, publication_oci_signature_payload(entry), publication_oci_provenance_payload(entry), publication_oci_reproducibility_payload(entry)}
+    types :: [String]{PUBLICATION_OCI_SBOM_TYPE, PUBLICATION_OCI_SIGNATURE_TYPE, PUBLICATION_OCI_PROVENANCE_TYPE, PUBLICATION_OCI_REPRODUCIBILITY_TYPE}
+    descriptors := [PublicationOCIDescriptor]{}
+    loop index in 0..<payloads.len() {
+        bytes :: payloads[index].bytes()
+        digest :: "sha256-{pkg_sha256_hex(bytes)}"
+        publication_write_oci_file(files.join(files.join(root, "blobs"), digest), bytes, "OCI referrer blob")
+        &descriptors.push(PublicationOCIDescriptor{artifact_type: types[index], digest: digest, size: bytes.len()})
+    }
+    publication_write_oci_file(files.join(root, PUBLICATION_OCI_REFERRER_INDEX), publication_render_oci_index(entry.content_hash, descriptors).bytes(), "OCI referrer index")
+    if files.stat(pending) == .Ok(_) {
+        authority :: foundation_open_directory_authority(root)
+        authority.remove(PUBLICATION_OCI_PENDING_SBOM)
+    }
+}
+fn publication_oci_sbom_bound(sbom: String, entry: PublicationIndexEntry) -> Bool Never! {
+    sbom.contains("# JetSubject: {entry.content_hash}\n") && sbom.contains("PackageName: {entry.name}\n") && sbom.contains("PackageVersion: {entry.version}\n")
+}
+fn publication_validate_evidence_value(value: String, label: String) IOError! {
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if code == 10 || code == 13 -> return Err(publication_invalid_oci("registry {label} contains a line break"))
+    }
+}
+fn publication_oci_signature_payload(entry: PublicationIndexEntry) -> String IOError! {
+    publication_validate_evidence_value(entry.name, "package name")
+    publication_validate_evidence_value(entry.version, "package version")
+    publication_validate_evidence_value(entry.public_key, "publisher key")
+    publication_validate_evidence_value(entry.signature, "publisher signature")
+    Ok("jet-oci-signature-v1\nsubject={entry.content_hash}\nname={entry.name}\nversion={entry.version}\npublic-key={entry.public_key}\nsignature={entry.signature}\nstatus={if entry.signature == "" -> "unsigned" else -> "signed"}\n")
+}
+fn publication_oci_provenance_payload(entry: PublicationIndexEntry) -> String IOError! {
+    tier :: publication_tier_label(entry.tier)
+    status :: publication_gate_summary(entry.gate_status)
+    publication_validate_evidence_value(tier, "registry tier")
+    publication_validate_evidence_value(status, "registry gate status")
+    Ok("jet-oci-provenance-v1\nsubject={entry.content_hash}\npackage={entry.name}#{entry.version}\ncontent-hash={entry.content_hash}\nfingerprint={entry.fingerprint}\ntier={tier}\ngate-status={status}\n")
+}
+fn publication_oci_reproducibility_payload(entry: PublicationIndexEntry) -> String IOError! {
+    publication_validate_evidence_value(entry.fingerprint, "package fingerprint")
+    Ok("jet-oci-reproducibility-v1\nsubject={entry.content_hash}\nsource-hash={entry.content_hash}\nfingerprint={entry.fingerprint}\nstatus=verified\n")
+}
+// Both an existing target and an atomic CreateNew loser use the same check.
+// Only the publisher's typed AlreadyExists collision permits reconciliation.
+// Durability/identity/other IO refusals survive without cause-text classification.
+fn publication_oci_check_existing(path: String, bytes: [U8], label: String) -[FS, Env]> Bool IOError! {
+    info :: if files.stat(path) == {
+        .Ok(info) -> info
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> return Ok(false)
+                else -> return Err(error)
+            }
+        }
+    }
+    if info.is_symlink || !info.is_file -> return Err(publication_invalid_oci("{label} path is not a regular file"))
+    existing :: publication_read_oci_file(path, PUBLICATION_MAX_OCI_REFERRER_BYTES)
+    if existing != bytes -> return Err(IOError.AlreadyExists(publication_oci_context(path, "immutable {label} changed")))
+    Ok(true)
+}
+pub fn publication_write_oci_file(path: String, bytes: [U8], label: String) IOError! -[FS, Env, Time]> {
+    if bytes.len() > PUBLICATION_MAX_OCI_REFERRER_BYTES -> return Err(publication_invalid_oci("{label} exceeds the 4 MiB limit"))
+    if publication_oci_check_existing(path, bytes, label) -> return
+    parent :: files.dirname(path)
+    // Rust's single relative basename has an empty (but present) parent.
+    if path == "" || path == "/" -> return Err(IOError.InvalidInput(publication_oci_context(path, "{label} has no parent")))
+    files.create_dir_all(parent)
+    publication_ensure_real_directory(parent, "OCI referrer parent")
+    authority :: foundation_open_directory_authority(parent, true)
+    if foundation_write_file_nofollow_at_root(parent, files.basename(path), bytes, None, FoundationPublicationPolicy{create: .CreateNew, create_root: true}) == {
+        .Ok(_) -> {}
+        .Err(error) -> {
+            publication_oci_reconcile_winner(authority, path, bytes, label, error)
+        }
+    }
+}
+fn publication_oci_reconcile_winner(authority: FoundationDirectoryAuthority, path: String, bytes: [U8], label: String, error: IOError) IOError! -[FS, Env]> {
+    collision :: if error == {
+        .AlreadyExists(_) -> true
+        else -> false
+    }
+    if !collision -> return Err(error)
+    // Retain the original ancestor chain across publication and winner read.
+    // A newly opened reader alone cannot authenticate a swapped parent tree.
+    authority.revalidate()
+    // An unobservable/nonregular pathname is not an authenticated winner.
+    // Preserve the publisher's refusal BEFORE acquiring a winner file handle.
+    candidate :: if files.stat(path) == {
+        .Ok(info) -> info
+        .Err(_) -> {
+            authority.revalidate()
+            return Err(error)
+        }
+    }
+    if candidate.is_symlink || !candidate.is_file {
+        authority.revalidate()
+        return Err(error)
+    }
+    identical :: if publication_oci_check_existing(path, bytes, label) == {
+        .Ok(matches) -> matches
+        .Err(check_error) -> {
+            // Once the protected winner reader runs, preserve EVERY failure
+            // (including a file/ancestor identity refusal) without flattening.
+            // Its different-byte immutable conflict also propagates unchanged.
+            authority.revalidate()
+            return Err(check_error)
+        }
+    }
+    authority.revalidate()
+    if !identical -> return Err(error)
+}
+pub fn publication_read_oci_file(path: String, limit: Int) -[FS, Env]> [U8] IOError! {
+    info :: files.stat(path)
+    if info.is_symlink || !info.is_file -> return Err(publication_invalid_oci("OCI referrer payload is not a regular file"))
+    if info.size > limit -> return Err(publication_invalid_oci("OCI referrer payload exceeds its size limit"))
+    held :: foundation_open_file_authority(files.dirname(path), files.basename(path))
+    bytes :: if held.read_bounded(limit) == {
+        .Ok(bytes) -> bytes
+        .Err(error) -> {
+            if error == {
+                .InvalidInput(context) -> {
+                    if (context.cause ?? "") == "file exceeds its read bound" -> return Err(publication_invalid_oci("OCI referrer payload exceeds its size limit"))
+                    return Err(error)
+                }
+                else -> return Err(error)
+            }
+        }
+    }
+    held.revalidate()
+    Ok(bytes)
+}
+pub fn publication_referrer_index_digest(repo: String, entry: PublicationIndexEntry) -[FS, Env]> String IOError! {
+    root :: publication_existing_oci_referrer_root(repo, entry.content_hash) ?? return Err(foundation_io_error_with_cause(err, "OCI referrer index is unavailable: {err}"))
+    bytes :: publication_read_oci_file(files.join(root, PUBLICATION_OCI_REFERRER_INDEX), PUBLICATION_MAX_OCI_REFERRER_BYTES) ?? return Err(foundation_io_error_with_cause(err, "OCI referrer index is unavailable: {err}"))
+    Ok("sha256-{pkg_sha256_hex(bytes)}")
+}
+fn publication_render_oci_index(subject: String, descriptors: [PublicationOCIDescriptor]) -> String Never! {
+    manifests := [String]{}
+    loop descriptor in descriptors -> &manifests.push("{{\"artifactType\":{foundation_json_quote(descriptor.artifact_type)},\"digest\":{foundation_json_quote(descriptor.digest)},\"mediaType\":{foundation_json_quote(descriptor.artifact_type)},\"size\":{descriptor.size}}}")
+    "{{\"schemaVersion\":2,\"subject\":{{\"digest\":{foundation_json_quote(subject)}}},\"manifests\":[{manifests.join(",")}]}}\n"
+}
+pub fn publication_verify_oci_referrers(repo: String, entry: PublicationIndexEntry) IOError! -[FS, Env]> {
+    publication_validate_oci_digest(entry.content_hash)
+    root :: publication_existing_oci_referrer_root(repo, entry.content_hash) ?? return Err(foundation_io_error_with_cause(err, "OCI referrer set is unavailable: {err}; restore it from the registry or republish the immutable package"))
+    root_authority :: foundation_open_directory_authority(root)
+    descriptors :: publication_parse_oci_index(publication_read_oci_file(files.join(root, PUBLICATION_OCI_REFERRER_INDEX), PUBLICATION_MAX_OCI_REFERRER_BYTES), entry.content_hash)
+    blobs :: files.join(root, "blobs")
+    publication_ensure_real_directory(blobs, "OCI referrer blob store")
+    blob_authority :: foundation_open_directory_authority(blobs)
+    referenced := [String]{}
+    loop descriptor in descriptors {
+        if referenced.contains(descriptor.digest) -> return Err(publication_invalid_oci("OCI referrer index repeats a blob digest"))
+        &referenced.push(descriptor.digest)
+        bytes :: publication_read_oci_file(files.join(blobs, descriptor.digest), PUBLICATION_MAX_OCI_REFERRER_BYTES)
+        if bytes.len() != descriptor.size -> return Err(publication_invalid_oci("OCI referrer {descriptor.artifact_type} has the wrong blob size"))
+        if "sha256-{pkg_sha256_hex(bytes)}" != descriptor.digest -> return Err(publication_invalid_oci("OCI referrer {descriptor.artifact_type} failed its blob digest"))
+        expected :: if descriptor.artifact_type == {
+            PUBLICATION_OCI_SBOM_TYPE -> None
+            PUBLICATION_OCI_SIGNATURE_TYPE -> Val(publication_oci_signature_payload(entry).bytes())
+            PUBLICATION_OCI_PROVENANCE_TYPE -> Val(publication_oci_provenance_payload(entry).bytes())
+            PUBLICATION_OCI_REPRODUCIBILITY_TYPE -> Val(publication_oci_reproducibility_payload(entry).bytes())
+            else -> { return Err(publication_invalid_oci("OCI referrer index contains an unknown artifact type")) }
+        }
+        if expected == {
+            .Val(payload) -> if bytes != payload -> return Err(publication_invalid_oci("OCI referrer {descriptor.artifact_type} is not bound to the index entry"))
+            .None -> {
+                sbom :: String.from_bytes(bytes) ?? return Err(publication_invalid_oci("OCI SBOM referrer is not UTF-8"))
+                if !publication_oci_sbom_bound(sbom, entry) -> return Err(publication_invalid_oci("OCI SBOM referrer is not bound to the index entry"))
+            }
+        }
+    }
+    loop child in files.list_dir(blobs) {
+        metadata :: blob_authority.entry_stat(child.name)
+        if metadata.is_symlink || !metadata.is_file || !referenced.contains(child.name) -> return Err(publication_invalid_oci("OCI referrer blob store contains an unreferenced or unsafe blob"))
+    }
+    loop child in files.list_dir(root) {
+        if child.name != PUBLICATION_OCI_REFERRER_INDEX && child.name != "blobs" -> return Err(publication_invalid_oci("OCI subject referrer directory contains unexpected metadata"))
+    }
+    blob_authority.revalidate()
+    root_authority.revalidate()
+}
+fn publication_require_oci_keys(object: [String: DataTree], keys: [String], label: String) IOError! {
+    if object.len() != keys.len() -> return Err(publication_invalid_oci("OCI {label} has unknown or missing fields"))
+    loop key in object.keys() {
+        if !keys.contains(key) -> return Err(publication_invalid_oci("OCI {label} has unknown or missing fields"))
+    }
+}
+fn publication_parse_oci_index(bytes: [U8], subject: String) -> [PublicationOCIDescriptor] IOError! {
+    text :: String.from_bytes(bytes) ?? return Err(publication_invalid_oci("OCI referrer index is not UTF-8"))
+    value :: foundation_parse_protocol_json(text) ?? return Err(publication_invalid_oci("OCI referrer index is malformed"))
+    object :: pkg_json_object(value) ?? return Err(publication_invalid_oci("OCI referrer index is not an object"))
+    publication_require_oci_keys(object, [String]{"schemaVersion", "subject", "manifests"}, "index")
+    schema_value :: object.get("schemaVersion") ?? return Err(publication_invalid_oci("OCI referrer index has an unsupported schema version"))
+    supported_schema :: if schema_value == {
+        .Int(schema) -> schema == 2
+        else -> false
+    }
+    if !supported_schema -> return Err(publication_invalid_oci("OCI referrer index has an unsupported schema version"))
+    subject_value :: object.get("subject") ?? return Err(publication_invalid_oci("OCI referrer index has no subject"))
+    subject_object :: pkg_json_object(subject_value) ?? return Err(publication_invalid_oci("OCI referrer subject is not an object"))
+    publication_require_oci_keys(subject_object, [String]{"digest"}, "subject")
+    recorded :: subject_object.get("digest") ?? return Err(publication_invalid_oci("OCI referrer subject has no digest"))
+    recorded_subject :: pkg_json_text(recorded) ?? return Err(publication_invalid_oci("OCI referrer subject digest is not a string"))
+    if recorded_subject != subject -> return Err(publication_invalid_oci("OCI referrer subject does not match the index entry"))
+    manifests_value :: object.get("manifests") ?? return Err(publication_invalid_oci("OCI referrer index has no manifests"))
+    manifests :: pkg_json_array(manifests_value) ?? return Err(publication_invalid_oci("OCI referrer manifests is not an array"))
+    if manifests.len() != 4 -> return Err(publication_invalid_oci("OCI referrer index must contain SBOM, signature, provenance, and reproducibility"))
+    seen := [String]{}
+    descriptors := [PublicationOCIDescriptor]{}
+    loop manifest_value in manifests {
+        manifest :: pkg_json_object(manifest_value) ?? return Err(publication_invalid_oci("OCI referrer descriptor is not an object"))
+        publication_require_oci_keys(manifest, [String]{"artifactType", "digest", "mediaType", "size"}, "descriptor")
+        type_value :: manifest.get("artifactType") ?? return Err(publication_invalid_oci("OCI referrer descriptor has no artifact type"))
+        artifact_type :: pkg_json_text(type_value) ?? return Err(publication_invalid_oci("OCI referrer artifact type is not a string"))
+        media_value :: manifest.get("mediaType") ?? return Err(publication_invalid_oci("OCI referrer descriptor has no media type"))
+        media_type :: pkg_json_text(media_value) ?? return Err(publication_invalid_oci("OCI referrer media type is not a string"))
+        if media_type != artifact_type || !([String]{PUBLICATION_OCI_SBOM_TYPE, PUBLICATION_OCI_SIGNATURE_TYPE, PUBLICATION_OCI_PROVENANCE_TYPE, PUBLICATION_OCI_REPRODUCIBILITY_TYPE}).contains(artifact_type) || seen.contains(artifact_type) -> return Err(publication_invalid_oci("OCI referrer descriptor has an unknown or repeated artifact type"))
+        &seen.push(artifact_type)
+        digest_value :: manifest.get("digest") ?? return Err(publication_invalid_oci("OCI referrer descriptor has no digest"))
+        digest :: pkg_json_text(digest_value) ?? return Err(publication_invalid_oci("OCI referrer digest is not a string"))
+        publication_validate_oci_digest(digest)
+        size_value :: manifest.get("size") ?? return Err(publication_invalid_oci("OCI referrer descriptor size is not a non-negative integer"))
+        size :: if size_value == {
+            .Int(recorded_size) -> {
+                if recorded_size < 0 -> return Err(publication_invalid_oci("OCI referrer descriptor size is not a non-negative integer"))
+                recorded_size
+            }
+            else -> { return Err(publication_invalid_oci("OCI referrer descriptor size is not a non-negative integer")) }
+        }
+        &descriptors.push(PublicationOCIDescriptor{artifact_type: artifact_type, digest: digest, size: size})
+    }
+    Ok(descriptors)
+}

@@ -176,7 +176,7 @@ fn sema_call_method_owner_type(name: String, type_args: [Type]) -> Type Never! {
 fn sema_call_method_candidate_from_func(func: Func, module_name: String, owner_name: String, owner_type: Type, trait_name: String?, type_args: [Type], fallback_source_file: String, fallback_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> SemaCallMethodCandidate? {
     if func.params.len() == 0 || func.params[0].name != "self" -> return None
     symbol :: symbol_id(SymbolKind.Function, module_name, owner_name, func.name)
-    raw_signature :: sema_function_symbol_type(func, symbol, fallback_source_file, fallback_origin, source_segments)
+    raw_signature :: sema_function_symbol_type(func, sema_raw_protocol_function_return(trait_name, false, func), symbol, fallback_source_file, fallback_origin, source_segments)
     signature := raw_signature
     if raw_signature == {
         .Fn(params, ret, effects, contract, metadata, provenance) -> {
@@ -483,7 +483,7 @@ fn sema_call_typecheck_host_bound_arguments(callee: String, params: [SemaCallPar
         &slots.push(slot)
         &required_types.push(required)
     }
-    Val(SemaCallTypedArguments{values: values, slots: slots, required_types: required_types})
+    Val(SemaCallTypedArguments{values: values, slots: slots, required_types: required_types, source_indices: loop _ in values -> -1})
 }
 
 fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Expr, receiver_value: TExpr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
@@ -543,6 +543,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
     ownership :: sema_ownership_check_method_call(&state, resolved_candidate.method.name, receiver, resolved_candidate.receiver_convention, params, &checked_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
     lowered := sema_call_lower_bound_arguments(typed, params, &checked_args, environment)
+    pins :: sema_call_pin_binder_arguments(typed, params, &lowered, environment, scopes, span)
     result_type_raw :: sema_call_signature_return(resolved_candidate.signature) ?? return None
     result_type_declared :: sema_call_resolved_type(result_type_raw, environment)
     transaction_depth :: scopes.transaction_depth
@@ -580,7 +581,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
         callback_name :: sema_shared_access_host_method_name(receiver_value.ty, resolved_candidate.method.name)
         call_value = sema_tir_expr(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: call_receiver, method: callback_name, args: [TExpr]{callback}}}, span)
     }
-    value :: if {
+    contracted :: if {
         contract_nodes.len() > 0 -> {
             wrapped := contract_bindings
             loop contract in contract_nodes -> &wrapped.push(TStmt.Contract{contract: contract})
@@ -589,6 +590,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
         }
         else -> call_value
     }
+    value :: sema_call_with_binder_pins(^pins, ^contracted, span)
     checked :: sema_expression_call_expected(value, expected, environment, context, &diagnostics) ?? return None
     facts :: sema_call_facts(resolved_candidate.signature, resolved_candidate.type_args, resolved_binding) ?? return None
     return_view_facts :: sema_call_return_view_facts(resolved_candidate.signature, Val(receiver), checked_args, resolved_binding, scopes, &state, span)

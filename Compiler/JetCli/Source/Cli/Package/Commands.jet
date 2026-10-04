@@ -1,0 +1,183 @@
+// Package command policy (Source/CmdPkg.rs). Package facts, dependency edits,
+// and lock records belong to the canonical Jetpack PackageModel. This module
+// prepares intents and source edits; successful fetch output is rendered only
+// from a completed provider lock, never from preparation of an intent.
+
+#Error
+pub struct JetCLIPackageRefusal {
+    pub code: String
+    pub what: String
+    pub fix: String
+}
+
+// Rust `run_add` (CmdPkg.rs:165-228), its argument projection.
+pub struct JetCLIPackageAdd {
+    pub name: String
+    pub spec: DepSpec
+}
+
+// Rust `run_fetch`, `run_update`, and their main.rs dispatch. Script locking
+// and toolchain updates remain distinct routes, not dependency operations.
+pub enum JetCLIPackageIntent {
+    Add(JetCLIPackageAdd)
+    Remove(String)
+    Fetch(locked: Bool)
+    Update(dependency: String?)
+    LockScript(String)
+    UpdateToolchain(channel: String?)
+}
+
+// Rust `run_add` (CmdPkg.rs:172-214). Only `--` prefixes are filtered for
+// the name: values and single-dash words still count, exactly as in Rust.
+pub fn jet_cli_package_parse_add(raw_args: [String]) -> JetCLIPackageAdd JetCLIPackageRefusal! {
+    non_flag_index := 0
+    name := String?{None}
+    loop argument in raw_args {
+        if argument.starts_with("--") -> next
+        if non_flag_index == 1 {
+            name = Val(argument)
+            break
+        }
+        non_flag_index += 1
+    }
+    dependency :: name ?? return Err(JetCLIPackageRefusal{code: "E2104", what: "`jet add` needs a dependency name", fix: "try `jet add mylib --path ../mylib`"})
+    if jet_cli_args_flag_value(raw_args, "--path") == .Val(path) {
+        return Ok(JetCLIPackageAdd{name: dependency, spec: DepSpec.Path{path: path}})
+    }
+    if jet_cli_args_flag_value(raw_args, "--git") == .Val(url) {
+        selector :: if {
+            jet_cli_args_flag_value(raw_args, "--tag") == .Val(label) -> GitSelector.Tag(label)
+            jet_cli_args_flag_value(raw_args, "--branch") == .Val(branch) -> GitSelector.Branch(branch)
+            jet_cli_args_flag_value(raw_args, "--rev") == .Val(rev) -> GitSelector.Rev(rev)
+            else -> {
+                return Err(JetCLIPackageRefusal{code: "E2104", what: "git dependency `{dependency}` needs one of: --tag, --branch, --rev", fix: ""})
+            }
+        }
+        return Ok(JetCLIPackageAdd{name: dependency, spec: DepSpec.Git{url: url, selector: selector}})
+    }
+    Err(JetCLIPackageRefusal{code: "E2104", what: "`jet add {dependency}` needs --path or --git", fix: "try `jet add {dependency} --path ../{dependency}` or `jet add {dependency} --git <url> --tag <tag>`"})
+}
+
+// Rust `main` (main.rs:3638-3656,4787-4792). `words` is the already
+// selected positional argv including the verb; `raw` retains flag values.
+// Remove's required target is selected by the front door before this call.
+pub fn jet_cli_package_intent(raw: [String], words: [String], target: String, locked: Bool) -> JetCLIPackageIntent JetCLIPackageRefusal! {
+    verb :: words.get(0) ?? return Err(JetCLIPackageRefusal{code: "E2104", what: "package command is missing", fix: ""})
+    if verb == {
+        "add" -> Ok(JetCLIPackageIntent.Add(jet_cli_package_parse_add(raw)))
+        "remove" -> Ok(JetCLIPackageIntent.Remove(target))
+        "fetch" -> {
+            if jet_cli_args_flag_value(raw, "--lock") == .Val(script) -> return Ok(JetCLIPackageIntent.LockScript(script))
+            Ok(JetCLIPackageIntent.Fetch{locked: locked || raw.contains("--offline")})
+        }
+        "update" -> {
+            if words.get(1) == .Val(dependency) {
+                if dependency == "jet" -> return Ok(JetCLIPackageIntent.UpdateToolchain{channel: words.get(2)})
+            }
+            Ok(JetCLIPackageIntent.Update{dependency: words.get(1)})
+        }
+        else -> Err(JetCLIPackageRefusal{code: "E2104", what: "`jet {verb}` is not a package dependency command", fix: ""})
+    }
+}
+
+// Rust `PackageInput` (CmdPkg.rs:12-17). `facts` passed to the constructor
+// must be the loader's composed package facts for this carrier, not a second
+// CLI manifest parser or the compiler's reduced package projection.
+pub struct JetCLIPackageInput {
+    pub path: String
+    pub raw: String
+    pub inline: InlinePackageBlock?
+    pub manifest: Manifest
+}
+
+// Rust `package_input` (CmdPkg.rs:56-92), after the loader has resolved
+// the entry/manifest carrier and its composed facts. IO/loader diagnostics
+// stay with the host and retain their original source file and spans.
+pub fn jet_cli_package_input(path: String, raw: String, inline: InlinePackageBlock?, facts: PackageFacts) -> JetCLIPackageInput ManifestError! {
+    body :: if inline == {
+        .Val(block) -> block.body(raw)
+        .None -> raw
+    }
+    manifest :: pkg_to_manifest(facts, body)
+    Ok(JetCLIPackageInput{path: path, raw: raw, inline: inline, manifest: manifest})
+}
+
+// Rust `edited_package_source` (CmdPkg.rs:95-103). Inline spans are byte
+// offsets; preserve every surrounding source byte, including Unicode.
+fn jet_cli_package_replace_body(input: JetCLIPackageInput, body: String) -> String Never! {
+    if input.inline == .Val(block) {
+        bytes :: input.raw.bytes()
+        before :: String.from_bytes(bytes[0..<block.body_span.start]) ?? panic("invalid inline package prefix")
+        after :: String.from_bytes(bytes[block.body_span.end..<bytes.len()]) ?? panic("invalid inline package suffix")
+        return "{before}{body}{after}"
+    }
+    body
+}
+
+// Rust `run_add` (CmdPkg.rs:216-219), using the one comment-preserving editor.
+pub fn jet_cli_package_add_source(input: JetCLIPackageInput, addition: JetCLIPackageAdd) -> String Never! {
+    body :: if input.inline == {
+        .Val(block) -> block.body(input.raw)
+        .None -> input.raw
+    }
+    jet_cli_package_replace_body(input, pkg_add_dependency(body, addition.name, addition.spec))
+}
+
+// Rust `run_remove` (CmdPkg.rs:234-245). Absence is refused before editing
+// or writing anything, so neither a removed nor a fetched message is emitted.
+pub fn jet_cli_package_remove_source(input: JetCLIPackageInput, dependency: String) -> String JetCLIPackageRefusal! {
+    if !input.manifest.dependencies.has_key(dependency) {
+        return Err(JetCLIPackageRefusal{code: "E2104", what: "dependency `{dependency}` is not present in package.jet", fix: "remove a dependency listed in package.jet, or add `{dependency}` first"})
+    }
+    body :: if input.inline == {
+        .Val(block) -> block.body(input.raw)
+        .None -> input.raw
+    }
+    Ok(jet_cli_package_replace_body(input, pkg_remove_dependency(body, dependency)))
+}
+
+// Rust `write_package_source` (CmdPkg.rs:124-129). This comparison must be
+// made on text from the held CheckedFile; it is not permission to publish by
+// pathname without the resolver's second prepublication revalidation.
+pub fn jet_cli_package_require_unchanged(input: JetCLIPackageInput, current: String) -> () JetCLIPackageRefusal! {
+    if current != input.raw {
+        return Err(JetCLIPackageRefusal{code: "E2105", what: "{input.path} changed while the package edit was prepared", fix: ""})
+    }
+    Ok()
+}
+
+// Rust `print_registry_tiers` (CmdPkg.rs:330-346), preserving lock order.
+pub fn jet_cli_package_registry_tiers(lock: LockFile) -> String Never! {
+    lines := [String]{}
+    loop package in lock.packages {
+        if package.source == .Registry(registry, _, _, _, _, _, tier, gate_status) {
+            &lines.push("resolved `{package.name}` {package.version} from registry `{registry}` (tier: {tier}; gate status: {gate_status})\n")
+        }
+    }
+    lines.join("")
+}
+
+// Rust `run_add` / `run_remove` (CmdPkg.rs:224,250): emit only after the
+// checked source publication succeeds, before the automatic fetch begins.
+pub fn jet_cli_package_edit_message(intent: JetCLIPackageIntent, path: String) -> String Never! {
+    if intent == {
+        .Add(addition) -> "added `{addition.name}` to {path}\n"
+        .Remove(name) -> "removed `{name}` from {path}\n"
+        else -> ""
+    }
+}
+
+// Rust `run_update` / `do_fetch` (CmdPkg.rs:280-286,312-318): call only
+// after the canonical provider has returned a successful complete lock.
+pub fn jet_cli_package_fetch_message(intent: JetCLIPackageIntent, lock: LockFile) -> String Never! {
+    finish :: if intent == {
+        .Update(dependency) -> if dependency == {
+            .Val(name) -> "updated `{name}`\n"
+            .None -> "updated all moving selectors\n"
+        }
+        .Fetch(locked) -> if locked -> "lock verified\n" else -> "fetched all dependencies\n"
+        .Add(_) | .Remove(_) -> "fetched all dependencies\n"
+        else -> ""
+    }
+    "{jet_cli_package_registry_tiers(lock)}{finish}"
+}

@@ -85,7 +85,7 @@ pub fn envmodel_evaluate_package_profile(src: String, base_dir: String, name: St
         // Keep the source token from the declaration. `default` is the
         // package-sugar spelling for nixpkgs, but changing it to `nixpkgs`
         // here would erase source identity from the plan and later lock views.
-        source :: package.raw.cut_last(@REF_PROVIDER_AT)?.after ?? spec.source.label()
+        source :: package.raw.cut_last(REF_PROVIDER_AT)?.after ?? spec.source.label()
         provider :: envmodel_profile_provider_label(spec.source, source, env.table)
         upstream :: env.table.upstream(source)
         facts := ProviderFacts.for_reference(provider, package.raw)
@@ -176,20 +176,20 @@ fn envmodel_profile_provider_label(source: RefSource, source_name: String, table
 // shared carrier uses `target@provider#selector` so identity and selectors
 // remain parseable and comparable.
 fn envmodel_provider_reference_from_upstream(upstream: String, provider: String) -> String Never! {
-    halves :: upstream.split_once(@REF_SEPARATOR) ?? return upstream
-    MigratedRef.persisted("{halves.after}{@REF_PROVIDER_AT}{provider}").canonical
+    halves :: upstream.split_once(REF_SEPARATOR) ?? return upstream
+    MigratedRef.persisted("{halves.after}{REF_PROVIDER_AT}{provider}").canonical
 }
 
 fn envmodel_classify_profile_ref(raw: String, table: SourceTable) -> RefSpec RefError! {
-    if raw.cut_last(@REF_PROVIDER_AT) == {
+    if raw.cut_last(REF_PROVIDER_AT) == {
         .Val(halves) -> {
             package :: halves.before
             source_with_selector :: halves.after
-            selector_split :: source_with_selector.split_once(@REF_CHANNEL_MARKER)
+            selector_split :: source_with_selector.split_once(REF_CHANNEL_MARKER)
             source :: selector_split?.before ?? source_with_selector
-            if source == @DEFAULT_SOURCE && !package.contains(@REF_CHANNEL_MARKER) {
+            if source == DEFAULT_SOURCE && !package.contains(REF_CHANNEL_MARKER) {
                 qualified :: if selector_split == {
-                    .Val(parts) -> "{package}{@REF_CHANNEL_MARKER}{parts.after}"
+                    .Val(parts) -> "{package}{REF_CHANNEL_MARKER}{parts.after}"
                     .None -> package
                 }
                 return Ok(RefSpec{source: RefSource.Jetpack, package: qualified, raw: pkg_with_default_source(qualified)})
@@ -210,7 +210,7 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
     // The root `env.jet` plus every file reachable through `imports: find(…)`
     // (U4). Each unit owns its source text (spans index into it) and the dir
     // its relative refs / `embed_file` resolve against.
-    units := [EvalUnit]{EvalUnit{items: program.items, src: src, base_dir: environment_root, source_path: files.join(environment_root, @ENV_FILE)}}
+    units := [EvalUnit]{EvalUnit{items: program.items, src: src, base_dir: environment_root, source_path: files.join(environment_root, ENV_FILE)}}
     loop unit in envmodel_discover_imports(units[0], environment_root, &loader) -> { &units.push(unit) }
     source_files := [String]{}
     loop unit in units {
@@ -226,6 +226,8 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
         loop evaluated in envmodel_evaluate_modules(unit.items, unit.src, unit.base_dir) -> { &modules.push(evaluated) }
     }
     images := [ImagePlan]{}
+    systems := [SystemPlan]{}
+    fleets := [FleetPlan]{}
     env_reads := [EnvironmentRead]{}
     dev_services := [DevServicePlan]{}
     secrets := [SecretSpec]{}
@@ -251,6 +253,8 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
     active_environment :: envmodel_select_active_environment(environment_names, requested_environment)
     loop evaluated in modules {
         loop image in evaluated.images -> { &images.push(image) }
+        loop system in evaluated.systems -> { &systems.push(system) }
+        loop fleet in evaluated.fleets -> { &fleets.push(fleet) }
         loop profile in evaluated.package_profiles {
             &package_profiles.insert_checked(profile) ?? return Err(envmodel_error("E1332", "package generation composition failed: {err.message()}", "one source-backed package generation cannot silently choose different inheritance, package, or collision facts", "merge the declarations so they agree, or give the generations different names", None))
         }
@@ -284,7 +288,7 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
                 &presets.insert_checked(preset) ?? return Err(envmodel_error("E1332", "environment preset composition failed: {err.message()}", "one environment graph cannot silently choose between different facts for the same preset", "merge the preset declarations so they are identical, or give them different names", None))
             }
             loop language in contribution.languages {
-                existing := None
+                existing := LanguageSpec?{None}
                 loop candidate in languages {
                     if candidate.key() == language.key() -> existing = Val(candidate)
                 }
@@ -300,7 +304,7 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
             loop file in contribution.files -> envmodel_merge_managed_file(&managed_files, file)
         }
         loop integration in evaluated.integrations {
-            existing := None
+            existing := EnvironmentIntegration?{None}
             loop candidate in integrations {
                 if candidate.name == integration.name -> existing = Val(candidate)
             }
@@ -333,24 +337,31 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
         }
     }
     integration_facts.validate() ?? return Err(envmodel_error("E1335", "environment integration lowering was lossy", err.message, "use named secret references and supported typed integration arguments", None))
+    // Source order is observable in cross-reference diagnostic hints.
+    system_names := [String]{}
+    loop system in systems -> { &system_names.push(system.name) }
     // D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` cross-checks
     // against this project's own package manifest (E1267) — a different
     // manifest than the environment this pass evaluates, so it is loaded here
     // rather than threaded through as a plan field.
     needs_package_facts := false
     loop image in images {
-        if !image.from_environment -> needs_package_facts = true
+        if image.kind == ImageKind.OCI && !image.from_environment -> needs_package_facts = true
     }
-    manifest := None
+    manifest := PackageFacts?{None}
     if needs_package_facts -> manifest = &loader.package_facts()
     loop image in images {
+        if image.kind == ImageKind.Iso {
+            if !system_names.contains(image.from) -> return Err(envmodel_image_from_unknown_system(image.name, image.from, system_names))
+            next
+        }
         if image.from_environment {
             if !environment_names.contains(image.from) {
                 return Err(envmodel_error("E1327", "the image `{image.name}` names unknown environment `{image.from}`", "D-ENV-IMAGE1: an environment image projects one declared `env.<name>` fact graph into a runnable OCI image", "declare `module env.{image.from} {{ … }}`, or point `from:` at an existing environment", None))
             }
             next
         }
-        kind := None
+        kind := PackageKind?{None}
         if manifest == {
             .Val(facts) -> kind = facts.package_kind(image.from)
             .None -> {}
@@ -368,6 +379,11 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
         }
         if !is_executable -> return Err(envmodel_oci_from_non_executable(image.name, image.from, is_library))
     }
+    loop fleet in fleets {
+        loop host in fleet.hosts {
+            if !system_names.contains(host.system) -> return Err(envmodel_fleet_unknown_system(fleet.name, host.name, host.system, system_names))
+        }
+    }
     envmodel_validate_secret_graph(secrets, Span{start: 0, end: 0})
     if requested_environment != None {
         loop secret in secrets {
@@ -384,7 +400,7 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
     // instead of silently merging sibling modules.
     active_environment_provenance := [String]{}
     package_refs := integration_packages
-    prompt := None
+    prompt := String?{None}
     prompt_path := PromptPathMode.Short
     prompt_strip := PromptStripMode.Off
     if active_environment == {
@@ -399,15 +415,15 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
             }
             entry :: envmodel_merged_entry(merged, key) ?? panic("the active environment is a merged entry key")
             loop pkg in entry.packages -> envmodel_push_unique(&package_refs, envmodel_pkg_ref(pkg))
-            if entry.settings.get(@ENV_FIELD_PROMPT) == {
+            if entry.settings.get(ENV_FIELD_PROMPT) == {
                 .Val(label) -> prompt = Val(label)
                 .None -> {}
             }
-            if entry.settings.get(@PROMPT_SETTING_PATH) == {
+            if entry.settings.get(PROMPT_SETTING_PATH) == {
                 .Val(path) -> prompt_path = envmodel_prompt_path_mode(path)
                 .None -> {}
             }
-            if entry.settings.get(@PROMPT_SETTING_STRIP) == {
+            if entry.settings.get(PROMPT_SETTING_STRIP) == {
                 .Val(strip) -> prompt_strip = envmodel_prompt_strip_mode(strip)
                 .None -> {}
             }
@@ -418,7 +434,7 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
         .Val(name) -> [String]{name}
         .None -> presets.auto_select_many(sys.get("HOSTNAME") ?? "", sys.get("USER") ?? (sys.get("USERNAME") ?? ""))
     }
-    selected_preset := None
+    selected_preset := ResolvedPreset?{None}
     if selected_names.len() > 0 {
         resolved :: presets.resolve_many(selected_names) ?? return Err(envmodel_error("E1332", "environment preset could not be resolved: {err.message()}", "preset inheritance is resolved parent-first and must remain acyclic", "fix the preset name, parent reference, or inheritance cycle", None))
         loop package in resolved.packages -> envmodel_push_unique(&package_refs, package)
@@ -441,6 +457,8 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
         prompt_path: prompt_path,
         prompt_strip: prompt_strip,
         images: images,
+        systems: systems,
+        fleets: fleets,
         dev_services: dev_services,
         secrets: secrets,
         lifecycle: lifecycle,
@@ -523,14 +541,14 @@ fn envmodel_merge_secret_spec(specs: &[SecretSpec], incoming: SecretSpec) EnvMod
 
 fn envmodel_prompt_path_mode(value: String) -> PromptPathMode Never! {
     if value == {
-        @PROMPT_PATH_FULL -> PromptPathMode.Full
+        PROMPT_PATH_FULL -> PromptPathMode.Full
         else -> PromptPathMode.Short
     }
 }
 
 fn envmodel_prompt_strip_mode(value: String) -> PromptStripMode Never! {
     if value == {
-        @PROMPT_STRIP_ON -> PromptStripMode.On
+        PROMPT_STRIP_ON -> PromptStripMode.On
         else -> PromptStripMode.Off
     }
 }

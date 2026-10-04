@@ -1,0 +1,630 @@
+// PORT-PENDING 0706 source-cmdremote-module-group: Source/CmdTest.rs:1-626
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! `jet test-compare` command: replay a recorded reference/candidate corpus.
+//RS //!
+//RS //! The command deliberately consumes observations rather than inventing a second
+//RS //! execution engine.  A compiler/editor/plugin can write the same bounded JSON
+//RS //! record and this command applies the canonical Foundation verdict to it.
+//RS 
+//RS use crate::OutputAdapter::OutputMode;
+//RS use std::process::exit;
+//RS 
+//RS use jet::ExitCodes;
+//RS use jet::RecordIndex::{RecordKind, RecordLink};
+//RS use jet::ReceiptStore::{
+//RS     input_paths_for, receipt_root_for, ReceiptSection, ReceiptStore,
+//RS };
+//RS use jet_foundation::DataTree::DataTree;
+//RS use jet_foundation::Evidence::{
+//RS     EvidenceBuild, EvidenceKind, EvidenceOutcome, EvidenceProducerKind, EvidenceRecord,
+//RS     EvidenceReport, EvidenceRevision, EvidenceSource, EvidenceAttachment, EvidenceIdentity,
+//RS };
+//RS use jet_foundation::JSON::{json_escape, parse_json};
+//RS use jet_foundation::TestingComparison::{
+//RS     compare_samples_with_discarded, ComparisonIdentity, ComparisonObservation, ComparisonRecord,
+//RS     ComparisonSample, ComparisonStatus, ObservationRelation,
+//RS };
+//RS const DEFAULT_SOURCE: &str = "jet.test-compare";
+//RS const DEFAULT_TOOL: &str = "jet";
+//RS const DEFAULT_TARGET: &str = "recorded-corpus";
+//RS #[derive(Clone, Debug, Default)]
+//RS struct ComparisonBinding {
+//RS     boundary_digest: Option<String>,
+//RS     source_identity: Option<String>,
+//RS     replacement_identity: Option<String>,
+//RS     tool_identity: Option<String>,
+//RS     target_identity: Option<String>,
+//RS     coverage_digest: Option<String>,
+//RS     assumptions: Vec<String>,
+//RS }
+//RS 
+//RS fn validate_binding_shape(root: &DataTree) -> Result<(), String> {
+//RS     for key in [
+//RS         "foreign",
+//RS         "foreign-binding",
+//RS         "boundary_digest",
+//RS         "boundary-digest",
+//RS         "boundary",
+//RS         "source_identity",
+//RS         "source-identity",
+//RS         "replacement_identity",
+//RS         "replacement-identity",
+//RS         "tool_identity",
+//RS         "tool-identity",
+//RS         "target_identity",
+//RS         "target-identity",
+//RS         "coverage_digest",
+//RS         "coverage-digest",
+//RS         "coverage",
+//RS         "assumptions",
+//RS     ] {
+//RS         if object_value(root, key).is_some() {
+//RS             return Err(format!(
+//RS                 "foreign binding field `{key}` must be nested under `foreign_binding`"
+//RS             ));
+//RS         }
+//RS     }
+//RS     let Some(binding) = object_value(root, "foreign_binding") else {
+//RS         return Ok(());
+//RS     };
+//RS     binding
+//RS         .as_object()
+//RS         .map_err(|_| "`foreign_binding` must be an object".to_string())?;
+//RS     for key in [
+//RS         "foreign",
+//RS         "foreign-binding",
+//RS         "foreign_binding",
+//RS         "boundary-digest",
+//RS         "boundary",
+//RS         "source-identity",
+//RS         "source",
+//RS         "replacement-identity",
+//RS         "replacement",
+//RS         "tool-identity",
+//RS         "tool",
+//RS         "target-identity",
+//RS         "target",
+//RS         "coverage-digest",
+//RS         "coverage",
+//RS     ] {
+//RS         if object_value(binding, key).is_some() {
+//RS             return Err(format!(
+//RS                 "foreign binding field `{key}` is not a canonical snake_case field"
+//RS             ));
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS impl ComparisonBinding {
+//RS     fn from_root(root: &DataTree) -> Result<Self, String> {
+//RS         validate_binding_shape(root)?;
+//RS         let binding = Self {
+//RS             boundary_digest: binding_text(root, "boundary_digest")?,
+//RS             source_identity: binding_text(root, "source_identity")?,
+//RS             replacement_identity: binding_text(root, "replacement_identity")?,
+//RS             tool_identity: binding_text(root, "tool_identity")?,
+//RS             target_identity: binding_text(root, "target_identity")?,
+//RS             coverage_digest: binding_text(root, "coverage_digest")?,
+//RS             assumptions: binding_strings(root, "assumptions")?,
+//RS         };
+//RS         if binding.boundary_digest.is_none()
+//RS             || binding.source_identity.is_none()
+//RS             || binding.replacement_identity.is_none()
+//RS             || binding.tool_identity.is_none()
+//RS             || binding.target_identity.is_none()
+//RS             || binding.coverage_digest.is_none()
+//RS         {
+//RS             return Err(
+//RS                 "`foreign_binding` requires boundary_digest, source_identity, replacement_identity, tool_identity, target_identity, and coverage_digest"
+//RS                     .into(),
+//RS             );
+//RS         }
+//RS         Ok(binding)
+//RS     }
+//RS 
+//RS     fn attachments(&self) -> Vec<EvidenceAttachment> {
+//RS         let mut attachments = Vec::new();
+//RS         for (name, value) in [
+//RS             ("boundary", self.boundary_digest.as_ref()),
+//RS             ("source-identity", self.source_identity.as_ref()),
+//RS             ("replacement-identity", self.replacement_identity.as_ref()),
+//RS             ("tool-identity", self.tool_identity.as_ref()),
+//RS             ("target-identity", self.target_identity.as_ref()),
+//RS             ("coverage", self.coverage_digest.as_ref()),
+//RS         ] {
+//RS             if let Some(value) = value {
+//RS                 attachments.push(EvidenceAttachment::new(name, value.clone()));
+//RS             }
+//RS         }
+//RS         attachments.extend(
+//RS             self.assumptions
+//RS                 .iter()
+//RS                 .cloned()
+//RS                 .map(|value| EvidenceAttachment::new("assumption", value)),
+//RS         );
+//RS         attachments
+//RS     }
+//RS }
+//RS 
+//RS fn binding_value<'a>(root: &'a DataTree, key: &str) -> Option<&'a DataTree> {
+//RS     object_value(root, "foreign_binding")
+//RS         .and_then(|binding| object_value(binding, key))
+//RS }
+//RS 
+//RS fn binding_text(root: &DataTree, key: &str) -> Result<Option<String>, String> {
+//RS     let Some(value) = binding_value(root, key) else {
+//RS         return Ok(None);
+//RS     };
+//RS     match value {
+//RS         DataTree::Text(value) | DataTree::TypedText(value) if !value.trim().is_empty() => {
+//RS             Ok(Some(value.clone()))
+//RS         }
+//RS         DataTree::Text(_) | DataTree::TypedText(_) => {
+//RS             Err(format!("foreign binding `{key}` must not be empty"))
+//RS         }
+//RS         _ => Err(format!("foreign binding `{key}` must be a string")),
+//RS     }
+//RS }
+//RS 
+//RS fn binding_strings(root: &DataTree, key: &str) -> Result<Vec<String>, String> {
+//RS     let Some(value) = binding_value(root, key) else {
+//RS         return Ok(Vec::new());
+//RS     };
+//RS     let mut values = value
+//RS         .as_array()
+//RS         .map_err(|_| format!("foreign binding `{key}` must be an array"))?
+//RS         .iter()
+//RS         .map(|value| match value {
+//RS             DataTree::Text(value) | DataTree::TypedText(value) if !value.trim().is_empty() => {
+//RS                 Ok(value.clone())
+//RS             }
+//RS             DataTree::Text(_) | DataTree::TypedText(_) => {
+//RS                 Err(format!("foreign binding `{key}` entries must not be empty"))
+//RS             }
+//RS             _ => Err(format!("foreign binding `{key}` entries must be strings")),
+//RS         })
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     values.sort();
+//RS     values.dedup();
+//RS     Ok(values)
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS pub(crate) fn run_test_compare(target: &str, args: &[String], mode: OutputMode) -> ! {
+//RS     let json_output = mode.json || args.iter().any(|arg| arg == "--json");
+//RS     let relation_override = args
+//RS         .iter()
+//RS         .find_map(|arg| arg.strip_prefix("--relation="));
+//RS     let input = match std::fs::read_to_string(target) {
+//RS         Ok(input) => input,
+//RS         Err(error) => {
+//RS             emit_error(json_output, &format!("cannot read comparison corpus `{target}`: {error}"));
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS     };
+//RS     let root = match parse_json(&input) {
+//RS         Ok(root) => root,
+//RS         Err(_) => {
+//RS             emit_error(json_output, &format!("invalid comparison corpus `{target}`: record is not valid JSON"));
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS     };
+//RS     let binding = match ComparisonBinding::from_root(&root) {
+//RS         Ok(binding) => binding,
+//RS         Err(error) => {
+//RS             emit_error(
+//RS                 json_output,
+//RS                 &format!("invalid comparison corpus `{target}`: {error}"),
+//RS             );
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS     };
+//RS     let mut record = match parse_record(&input, relation_override) {
+//RS         Ok(record) => record,
+//RS         Err(error) => {
+//RS             emit_error(json_output, &format!("invalid comparison corpus `{target}`: {error}"));
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS     };
+//RS     // The source record may explicitly report a terminal execution outcome.
+//RS     // Such outcomes are never promoted to a pass, even if stale samples happen
+//RS     // to compare equal.
+//RS     if let Some(status) = object_text(&root, "status")
+//RS         .and_then(|value| comparison_status(value))
+//RS         .filter(|status| !matches!(status, ComparisonStatus::Matched | ComparisonStatus::Mismatch))
+//RS     {
+//RS         record.status = status;
+//RS         record.reason = Some(format!("recorded runner outcome is {}", status.as_str()));
+//RS         record.universal_proof = false;
+//RS     }
+//RS     let target = target.to_string();
+//RS     let args = args.to_vec();
+//RS     let record_for_history = record.clone();
+//RS     let binding_for_history = binding.clone();
+//RS     jet::ReceiptStore::enqueue_optional_history("writing a comparison record", move || {
+//RS         if let Err(error) =
+//RS             persist_comparison_artifacts(&target, &args, &record_for_history, &binding_for_history)
+//RS         {
+//RS             jet::ReceiptStore::optional_history_notice("writing a comparison record", &error);
+//RS         }
+//RS     });
+//RS     let rendered = render_record(&record, json_output);
+//RS     println!("{rendered}");
+//RS     exit(if record.status.is_success() {
+//RS         ExitCodes::OK
+//RS     } else {
+//RS         ExitCodes::USER_ERROR
+//RS     });
+//RS }
+//RS 
+//RS fn parse_record(input: &str, relation_override: Option<&str>) -> Result<ComparisonRecord, String> {
+//RS     let root = parse_json(input).map_err(|_| "record is not valid JSON".to_string())?;
+//RS     let object = root
+//RS         .as_object()
+//RS         .map_err(|_| "record root must be an object".to_string())?;
+//RS     let relation_name = relation_override
+//RS         .map(str::to_string)
+//RS         .or_else(|| object_text(&root, "relation").map(str::to_string))
+//RS         .unwrap_or_else(|| "typed_equality".to_string());
+//RS     let relation = match relation_name.as_str() {
+//RS         "typed_equality" => ObservationRelation::TypedEquality,
+//RS         "ordered_effects" => ObservationRelation::OrderedEffects,
+//RS         "typed_failure" => ObservationRelation::TypedFailure,
+//RS         other => ObservationRelation::Custom(other.to_string()),
+//RS     };
+//RS     let source = object_text(&root, "source").unwrap_or(DEFAULT_SOURCE).to_string();
+//RS     let tool = object_text(&root, "tool").unwrap_or(DEFAULT_TOOL).to_string();
+//RS     let target = object_text(&root, "target").unwrap_or(DEFAULT_TARGET).to_string();
+//RS     let seed = object_int(&root, "seed").and_then(|value| u64::try_from(value).ok());
+//RS     let discarded = object_int(&root, "discarded_cases")
+//RS         .or_else(|| object_int(&root, "discarded"))
+//RS         .map(|value| usize::try_from(value).map_err(|_| "discarded_cases must be nonnegative"))
+//RS         .transpose()?
+//RS         .unwrap_or(0);
+//RS     let cases = object_value(&root, "cases")
+//RS         .ok_or_else(|| "record is missing `cases`".to_string())?
+//RS         .as_array()
+//RS         .map_err(|_| "record `cases` must be an array".to_string())?;
+//RS     let mut samples = Vec::with_capacity(cases.len());
+//RS     for (index, case) in cases.iter().enumerate() {
+//RS         samples.push(parse_sample(
+//RS             case,
+//RS             index,
+//RS             seed,
+//RS             &source,
+//RS             &tool,
+//RS             &target,
+//RS             &relation,
+//RS         )?);
+//RS     }
+//RS     Ok(compare_samples_with_discarded(relation, samples, discarded))
+//RS }
+//RS 
+//RS fn persist_comparison_artifacts(
+//RS     target: &str,
+//RS     args: &[String],
+//RS     record: &ComparisonRecord,
+//RS     binding: &ComparisonBinding,
+//RS ) -> Result<(), String> {
+//RS     let payload = record.to_json()?;
+//RS     let artifact_id = payload.sha256();
+//RS     let sample_count = u64::try_from(record.samples.len())
+//RS         .map_err(|_| "comparison sample count is too large".to_string())?;
+//RS     let first_identity = record.samples.first().map(|sample| &sample.identity);
+//RS     let source = first_identity
+//RS         .map(|identity| identity.source.clone())
+//RS         .unwrap_or_else(|| DEFAULT_SOURCE.to_string());
+//RS     let tool = first_identity
+//RS         .map(|identity| identity.tool.clone())
+//RS         .unwrap_or_else(|| DEFAULT_TOOL.to_string());
+//RS     let comparison_target = first_identity
+//RS         .map(|identity| identity.target.clone())
+//RS         .unwrap_or_else(|| target.to_string());
+//RS     let detail = record
+//RS         .reason
+//RS         .clone()
+//RS         .unwrap_or_else(|| format!("comparison record is {}", record.status.as_str()));
+//RS     let source_ref = EvidenceSource::new(source, 0, 1);
+//RS     let build = EvidenceBuild::new(tool, comparison_target, "comparison");
+//RS     let revision = EvidenceRevision::new(
+//RS         artifact_id.clone(),
+//RS         "jet-comparison-v1",
+//RS         artifact_id.clone(),
+//RS     );
+//RS     let report_id = format!("test-compare-{artifact_id}");
+//RS     let identity = EvidenceIdentity::for_record(
+//RS         &report_id,
+//RS         "comparison",
+//RS         EvidenceProducerKind::Test,
+//RS         EvidenceKind::Unit,
+//RS         &source_ref,
+//RS         sample_count,
+//RS         &detail,
+//RS     );
+//RS     let mut evidence = EvidenceRecord::new(
+//RS         identity,
+//RS         EvidenceKind::Unit,
+//RS         EvidenceProducerKind::Test,
+//RS         comparison_evidence_outcome(record.status),
+//RS         sample_count,
+//RS         source_ref.clone(),
+//RS         build.clone(),
+//RS         revision.clone(),
+//RS     );
+//RS     evidence.attachments.extend(binding.attachments());
+//RS     evidence.attachments.push(EvidenceAttachment::new(
+//RS         "comparison-artifact",
+//RS         artifact_id.clone(),
+//RS     ));
+//RS     let derivation = evidence.checked_derivation();
+//RS     let mut report = EvidenceReport::new(
+//RS         report_id.clone(),
+//RS         EvidenceProducerKind::Test,
+//RS         source_ref,
+//RS         build,
+//RS         revision,
+//RS     );
+//RS     report
+//RS         .add_record_with_derivation(evidence, derivation)
+//RS         .map_err(|error| error.to_string())?;
+//RS     crate::CmdCompile::persist_evidence_report(&report)?;
+//RS 
+//RS     let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+//RS     let argv = args.to_vec();
+//RS     let input_paths = input_paths_for("test-compare", &argv, &cwd);
+//RS     if input_paths.is_empty() {
+//RS         return Err("comparison corpus has no current input path".to_string());
+//RS     }
+//RS     let root = receipt_root_for("test-compare", &argv, &cwd);
+//RS     let store = ReceiptStore::new(root);
+//RS     let section = ReceiptSection::from_json("comparison", "ComparisonRecord", payload)?;
+//RS     let evidence_link = RecordLink::new(RecordKind::Evidence, report_id)?;
+//RS     let comparison_link = RecordLink::new(RecordKind::Comparison, artifact_id)?;
+//RS     let status = if record.status.is_success() { 0 } else { 1 };
+//RS     store.record_with_sections_and_links(
+//RS         "test-compare",
+//RS         &argv,
+//RS         &input_paths,
+//RS         status,
+//RS         &[],
+//RS         &[],
+//RS         &[section],
+//RS         &[evidence_link],
+//RS         &[comparison_link],
+//RS     )?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn comparison_evidence_outcome(status: ComparisonStatus) -> EvidenceOutcome {
+//RS     match status {
+//RS         ComparisonStatus::Matched => EvidenceOutcome::Passed,
+//RS         ComparisonStatus::Mismatch => EvidenceOutcome::Failed,
+//RS         ComparisonStatus::InvalidOracle | ComparisonStatus::Contaminated => EvidenceOutcome::Error,
+//RS         ComparisonStatus::Empty
+//RS         | ComparisonStatus::Unsupported
+//RS         | ComparisonStatus::Unavailable
+//RS         | ComparisonStatus::Timeout
+//RS         | ComparisonStatus::Cancelled => EvidenceOutcome::Unavailable,
+//RS     }
+//RS }
+//RS 
+//RS fn parse_sample(
+//RS     value: &DataTree,
+//RS     index: usize,
+//RS     seed: Option<u64>,
+//RS     source: &str,
+//RS     tool: &str,
+//RS     target: &str,
+//RS     relation: &ObservationRelation,
+//RS ) -> Result<ComparisonSample, String> {
+//RS     let case_id = object_text(value, "case_id")
+//RS         .or_else(|| object_text(value, "caseId"))
+//RS         .ok_or_else(|| format!("case {index} is missing `case_id`"))?;
+//RS     let input_id = object_text(value, "input_id")
+//RS         .or_else(|| object_text(value, "inputId"))
+//RS         .ok_or_else(|| format!("case `{case_id}` is missing `input_id`"))?;
+//RS     let mut identity = ComparisonIdentity::new(case_id, input_id, source, tool, target);
+//RS     identity.seed = object_int(value, "seed")
+//RS         .and_then(|value| u64::try_from(value).ok())
+//RS         .or(seed);
+//RS     let reference = parse_observation(value, "reference", relation)?;
+//RS     let candidate = parse_observation(value, "candidate", relation)?;
+//RS     let mut sample = ComparisonSample::new(identity, reference, candidate);
+//RS     if let (Some(reference), Some(candidate)) = (
+//RS         optional_observation(value, "reference_replay", relation)?,
+//RS         optional_observation(value, "candidate_replay", relation)?,
+//RS     ) {
+//RS         sample = sample.with_replays(reference, candidate);
+//RS     } else if object_value(value, "reference_replay").is_some()
+//RS         || object_value(value, "candidate_replay").is_some()
+//RS     {
+//RS         return Err(format!("case `{case_id}` must provide both replay observations"));
+//RS     }
+//RS     if let Some(declared_equal) = object_bool(value, "declared_equal") {
+//RS         sample = sample.with_declared_equal(declared_equal);
+//RS     }
+//RS     Ok(sample)
+//RS }
+//RS 
+//RS fn parse_observation(
+//RS     object: &DataTree,
+//RS     prefix: &str,
+//RS     relation: &ObservationRelation,
+//RS ) -> Result<ComparisonObservation, String> {
+//RS     let raw_value = object_value(object, prefix)
+//RS         .ok_or_else(|| format!("case observation `{prefix}` is missing"))?;
+//RS     let raw = match raw_value {
+//RS         DataTree::Text(value) | DataTree::TypedText(value) => value.clone(),
+//RS         value => canonical_data_tree(value),
+//RS     };
+//RS     let failure = object_text(object, &format!("{prefix}_failure"));
+//RS     let mut observation = failure
+//RS         .map(|failure| ComparisonObservation::failure(raw.clone(), failure))
+//RS         .unwrap_or_else(|| ComparisonObservation::value(raw));
+//RS     if matches!(relation, ObservationRelation::OrderedEffects) {
+//RS         let effects = object_strings(object, &format!("{prefix}_effects"))?;
+//RS         let cleanup = object_strings(object, &format!("{prefix}_cleanup"))?;
+//RS         observation = observation.with_effects(effects).with_cleanup(cleanup);
+//RS     }
+//RS     if let Some(mutation) = object_text(object, &format!("{prefix}_mutation")) {
+//RS         observation = observation.with_mutation(mutation);
+//RS     }
+//RS     Ok(observation)
+//RS }
+//RS 
+//RS fn optional_observation(
+//RS     object: &DataTree,
+//RS     prefix: &str,
+//RS     relation: &ObservationRelation,
+//RS ) -> Result<Option<ComparisonObservation>, String> {
+//RS     if object_value(object, prefix).is_none() {
+//RS         return Ok(None);
+//RS     }
+//RS     parse_observation(object, prefix, relation).map(Some)
+//RS }
+//RS 
+//RS fn render_record(record: &ComparisonRecord, json_output: bool) -> String {
+//RS     let status = record.status.as_str();
+//RS     let relation = record.relation.as_str();
+//RS     let reason = record.reason.as_deref().unwrap_or("comparison has no reason");
+//RS     if json_output {
+//RS         let first_difference = record
+//RS             .first_difference
+//RS             .map(|index| index.to_string())
+//RS             .unwrap_or_else(|| "null".to_string());
+//RS         return format!(
+//RS             "{{\"schema_version\":{},\"status\":\"{}\",\"relation\":\"{}\",\"samples\":{},\"discarded_cases\":{},\"first_difference\":{},\"universal_proof\":false,\"reason\":\"{}\"}}",
+//RS             record.schema_version,
+//RS             json_escape(status),
+//RS             json_escape(relation),
+//RS             record.samples.len(),
+//RS             record.discarded_cases,
+//RS             first_difference,
+//RS             json_escape(reason),
+//RS         );
+//RS     }
+//RS     let mut output = format!("status={status} relation={relation} samples={} reason={reason}", record.samples.len());
+//RS     if let Some(sample) = record.first_mismatch() {
+//RS         output.push_str(&format!(
+//RS             "\nreplay case={} input={} source={} tool={} target={}",
+//RS             sample.identity.case_id,
+//RS             sample.identity.input_id,
+//RS             sample.identity.source,
+//RS             sample.identity.tool,
+//RS             sample.identity.target,
+//RS         ));
+//RS         output.push_str(&format!(
+//RS             "\nreference={}\ncandidate={}",
+//RS             sample.reference.raw, sample.candidate.raw
+//RS         ));
+//RS     }
+//RS     output
+//RS }
+//RS 
+//RS fn emit_error(json_output: bool, message: &str) {
+//RS     if json_output {
+//RS         println!(
+//RS             "{{\"status\":\"invalid_oracle\",\"universal_proof\":false,\"error\":\"{}\"}}",
+//RS             json_escape(message)
+//RS         );
+//RS     } else {
+//RS         eprintln!("{message}");
+//RS     }
+//RS }
+//RS 
+//RS fn comparison_status(value: &str) -> Option<ComparisonStatus> {
+//RS     Some(match value {
+//RS         "matched" => ComparisonStatus::Matched,
+//RS         "mismatch" => ComparisonStatus::Mismatch,
+//RS         "empty" => ComparisonStatus::Empty,
+//RS         "unsupported" => ComparisonStatus::Unsupported,
+//RS         "unavailable" => ComparisonStatus::Unavailable,
+//RS         "timeout" => ComparisonStatus::Timeout,
+//RS         "cancelled" => ComparisonStatus::Cancelled,
+//RS         "invalid_oracle" => ComparisonStatus::InvalidOracle,
+//RS         "contaminated" => ComparisonStatus::Contaminated,
+//RS         _ => return None,
+//RS     })
+//RS }
+//RS 
+//RS fn object_value<'a>(value: &'a DataTree, key: &str) -> Option<&'a DataTree> {
+//RS     value
+//RS         .as_object()
+//RS         .ok()?
+//RS         .iter()
+//RS         .find_map(|(name, value)| (name == key).then_some(value))
+//RS }
+//RS 
+//RS fn object_text<'a>(value: &'a DataTree, key: &str) -> Option<&'a str> {
+//RS     match object_value(value, key)? {
+//RS         DataTree::Text(value) | DataTree::TypedText(value) => Some(value),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn object_int(value: &DataTree, key: &str) -> Option<i64> {
+//RS     match object_value(value, key)? {
+//RS         DataTree::Int(value) => Some(*value),
+//RS         DataTree::Number(value) => value.parse().ok(),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn object_bool(value: &DataTree, key: &str) -> Option<bool> {
+//RS     match object_value(value, key)? {
+//RS         DataTree::Bool(value) => Some(*value),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn object_strings(value: &DataTree, key: &str) -> Result<Vec<String>, String> {
+//RS     let Some(value) = object_value(value, key) else {
+//RS         return Ok(Vec::new());
+//RS     };
+//RS     value
+//RS         .as_array()
+//RS         .map_err(|_| format!("`{key}` must be an array"))?
+//RS         .iter()
+//RS         .map(|value| match value {
+//RS             DataTree::Text(value) | DataTree::TypedText(value) => Ok(value.clone()),
+//RS             _ => Err(format!("`{key}` entries must be strings")),
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn canonical_data_tree(value: &DataTree) -> String {
+//RS     match value {
+//RS         DataTree::Null => "null".to_string(),
+//RS         DataTree::Bool(value) => value.to_string(),
+//RS         DataTree::Int(value) => value.to_string(),
+//RS         DataTree::Float(value) => value.to_string(),
+//RS         DataTree::Number(value) => value.clone(),
+//RS         DataTree::TypedText(value) | DataTree::Text(value) => {
+//RS             format!("\"{}\"", json_escape(value))
+//RS         }
+//RS         DataTree::Bytes(value) => format!("bytes:{}", value.len()),
+//RS         DataTree::Array(values) => format!(
+//RS             "[{}]",
+//RS             values
+//RS                 .iter()
+//RS                 .map(canonical_data_tree)
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",")
+//RS         ),
+//RS         DataTree::Object(values) => format!(
+//RS             "{{{}}}",
+//RS             values
+//RS                 .iter()
+//RS                 .map(|(key, value)| {
+//RS                     format!("\"{}\":{}", json_escape(key), canonical_data_tree(value))
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",")
+//RS         ),
+//RS     }
+//RS }
+// END-PORT-PENDING 0706 Source/CmdTest.rs:1-626
+

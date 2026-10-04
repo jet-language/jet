@@ -1,0 +1,225 @@
+// Rust crates/jetpack/src/JetOS/system_facts.rs.
+//
+// Canonical dependencies: RootProjection jetos_copy_file_replace /
+// jetos_enable_unit, GenerationFiles jetos_relative_path, Studio
+// jetos_make_executable (studio_projection.rs:831-842), EtcBootFacts
+// jetos_boot_artifact / jetos_kernel_package_json and OptionsRendering.
+//
+// WITHHELD native seam (#3593, Main ruling; see RootProjection.jet):
+// - jetos_link_or_copy_unit(src, dst) IOError! (Rust :123-140, both cfg forms)
+// #3593: native copy-with-permissions seam
+//   Unix: best-effort remove `dst`; parent or Other("system unit link has no
+//   parent"); jetos_relative_path(parent, src)?; symlink(target, dst), and on
+//   ANY symlink failure native fs::copy(src, dst). Non-Unix: remove, fs::copy.
+
+// Rust write_init_facts.
+pub fn jetos_write_init_facts(dir: String, system: SystemPlan, realized: [JetOSRealizedPackage]) IOError! -[FS, Env, Rand]> {
+    init_dir :: files.join(dir, "init")
+    files.create_dir_all(init_dir)
+    default_target :: jetos_option_value(system, [String]{"init.defaultTarget"}) ?? "multi-user.target"
+    init_entry :: jetos_systemd_init_entry(realized)
+    init_package :: if init_entry == {
+        .Val(entry) -> {
+            sbin :: files.join(dir, "sbin")
+            files.create_dir_all(sbin)
+            init_path :: if jetos_boot_artifact(entry, [String]{"bin/systemd", "lib/systemd/systemd", "sbin/init"}) == {
+                .Val(path) -> path
+                // Rust: consumption projection, else the recorded output, + bin/systemd.
+                .None -> files.join(entry.consumption_path(entry.entry.out) ?? entry.entry.out, "bin/systemd")
+            }
+            jetos_copy_file_replace(init_path, files.join(sbin, "init"))
+            jetos_write_systemd_unit_library(dir, entry, default_target)
+            jetos_kernel_package_json(entry)
+        }
+        .None -> "null"
+    }
+    files.write(files.join(init_dir, "systemd.json"), "{{\"init\":\"systemd\",\"default_target\":{foundation_json_quote(default_target)},\"unit_dir\":\"etc/systemd/system\",\"init_package\":{init_package}}}")
+}
+
+// Rust `realized.iter().find(|entry| entry.name == SYSTEMD_INIT_PACKAGE)`:
+// the first match, never a later or fallback package.
+fn jetos_systemd_init_entry(realized: [JetOSRealizedPackage]) -> JetOSRealizedPackage? Never! {
+    loop entry in realized {
+        if entry.entry.name == JETOS_SYSTEMD_INIT_PACKAGE -> return Val(entry)
+    }
+    None
+}
+
+// Rust write_systemd_unit_library.
+fn jetos_write_systemd_unit_library(dir: String, entry: JetOSRealizedPackage, default_target: String) IOError! -[FS, Env, Rand]> {
+    unit_roots :: [String]{files.join(dir, "etc/systemd/system"), files.join(dir, "usr/lib/systemd/system"), files.join(dir, "lib/systemd/system"), files.join(dir, "systemd/lib/systemd/system")}
+    loop unit_root in unit_roots -> jetos_write_minimal_systemd_units(unit_root)
+    if jetos_boot_artifact(entry, [String]{"lib/systemd/systemd", "bin/systemd"}) == .Val(systemd_bin) {
+        jetos_copy_file_replace(systemd_bin, files.join(dir, "systemd/lib/systemd/systemd"))
+    }
+    etc_units :: files.join(dir, "etc/systemd/system")
+    jetos_link_or_copy_unit(files.join(etc_units, default_target), files.join(etc_units, "default.target"))
+}
+
+// Rust write_minimal_systemd_units: fixed order and exact unit bodies.
+pub fn jetos_write_minimal_systemd_units(unit_dir: String) IOError! -[FS]> {
+    files.create_dir_all(unit_dir)
+    units :: [(name: String, body: String)]{
+        (name: "graphical.target", body: "[Unit]\nDescription=JetOS graphical interface\nRequires=multi-user.target\nWants=display-manager.service\nAfter=multi-user.target display-manager.service\nAllowIsolate=yes\n"),
+        (name: "multi-user.target", body: "[Unit]\nDescription=JetOS multi-user system\nRequires=basic.target\nAfter=basic.target\nAllowIsolate=yes\n"),
+        (name: "basic.target", body: "[Unit]\nDescription=JetOS basic system\nRequires=sysinit.target\nWants=sockets.target timers.target paths.target slices.target\nAfter=sysinit.target sockets.target paths.target slices.target\n"),
+        (name: "sysinit.target", body: "[Unit]\nDescription=JetOS system initialization\nWants=local-fs.target swap.target\nAfter=local-fs.target swap.target\n"),
+        (name: "local-fs.target", body: "[Unit]\nDescription=JetOS local filesystems\nDefaultDependencies=no\n"),
+        (name: "swap.target", body: "[Unit]\nDescription=JetOS swap\n"),
+        (name: "sockets.target", body: "[Unit]\nDescription=JetOS sockets\n"),
+        (name: "timers.target", body: "[Unit]\nDescription=JetOS timers\n"),
+        (name: "paths.target", body: "[Unit]\nDescription=JetOS paths\n"),
+        (name: "slices.target", body: "[Unit]\nDescription=JetOS slices\n"),
+        (name: "getty.target", body: "[Unit]\nDescription=JetOS login prompts\n"),
+        (name: "rescue.target", body: "[Unit]\nDescription=JetOS rescue mode\nRequires=sysinit.target\nAfter=sysinit.target\nAllowIsolate=yes\n"),
+        (name: "emergency.target", body: "[Unit]\nDescription=JetOS emergency mode\nAllowIsolate=yes\n")
+    }
+    loop unit in units -> files.write(files.join(unit_dir, unit.name), unit.body)
+}
+
+// Rust write_secret_manifest: ciphertext source and tmpfs-only plaintext path.
+pub fn jetos_write_secret_manifest(dir: String, system: SystemPlan) IOError! -[FS]> {
+    manifest := [String]{"repo ciphertext + host key; activation decrypts into tmpfs only\n"}
+    loop name in jetos_collect_names(system, "secrets") {
+        source :: jetos_option_value(system, [String]{"secrets.{name}.source"}) ?? "secrets/{name}.age"
+        &manifest.push("{name}\t{source}\t/run/jetos-secrets/{name}\n")
+    }
+    files.write(files.join(dir, "secrets.tmpfs.manifest"), manifest.join(""))
+}
+
+// Rust write_network_facts: networkd unit, nftables policy and facts wire.
+pub fn jetos_write_network_facts(dir: String, system: SystemPlan) IOError! -[FS]> {
+    network_dir :: files.join(dir, "etc/systemd/network")
+    files.create_dir_all(network_dir)
+    interface :: jetos_option_value(system, [String]{"network.interface"}) ?? "eth0"
+    address :: jetos_option_value(system, [String]{"network.address"})
+    gateway :: jetos_option_value(system, [String]{"network.gateway"})
+    dns :: if jetos_option_value(system, [String]{"network.dns"}) == {
+        .Val(value) -> jetos_parse_list_items(value)
+        .None -> [String]{}
+    }
+    wireless_ssid :: jetos_option_value(system, [String]{"network.wireless.ssid"})
+    firewall_ports :: if jetos_option_value(system, [String]{"network.firewall.allowedTcpPorts"}) == {
+        .Val(value) -> jetos_parse_list_items(value)
+        .None -> [String]{}
+    }
+    network := [String]{"[Match]\n", "Name={interface}\n\n[Network]\n"}
+    if address == {
+        .Val(a) -> &network.push("Address={a}\n")
+        .None -> &network.push("DHCP=yes\n")
+    }
+    if gateway == .Val(g) -> &network.push("Gateway={g}\n")
+    loop d in dns -> &network.push("DNS={d}\n")
+    files.write(files.join(network_dir, "10-jetos.network"), network.join(""))
+
+    nft_dir :: files.join(dir, "etc/nftables")
+    files.create_dir_all(nft_dir)
+    ports :: if firewall_ports.len() == 0 -> "drop" else -> "tcp dport {{ {firewall_ports.join(", ")} }} accept"
+    files.write(files.join(nft_dir, "jetos-firewall.nft"), "table inet jetos {{\n  chain input {{\n    type filter hook input priority 0;\n    {ports}\n  }}\n}}\n")
+
+    // Rust JSON::object_of emits its ordered fields with these newlines.
+    wireless :: if wireless_ssid == {
+        .Val(ssid) -> "{{\n  \"ssid\": {foundation_json_quote(ssid)},\n  \"secret\": {foundation_json_quote("/run/jetos-secrets/wifi")}\n}}"
+        .None -> "null"
+    }
+    facts_dir :: files.join(dir, "network")
+    files.create_dir_all(facts_dir)
+    files.write(files.join(facts_dir, "facts.json"), "{{\"backend\":\"systemd-networkd\",\"interface\":{foundation_json_quote(interface)},\"dns\":[{jetos_strings_json(dns)}],\"firewall_allowed_tcp_ports\":[{jetos_strings_json(firewall_ports)}],\"wireless\":{wireless}}}")
+}
+
+// Rust write_systemd_timer_socket_units: enabled services only, timer before
+// socket, each written then wanted by its target.
+pub fn jetos_write_systemd_timer_socket_units(dir: String, system: SystemPlan) IOError! -[FS, Env]> {
+    unit_dir :: files.join(dir, "etc/systemd/system")
+    files.create_dir_all(unit_dir)
+    loop svc in system.services {
+        if !svc.enable -> next
+        if jetos_service_extra(svc, [String]{"timer", "schedule"}) == .Val(calendar) {
+            files.write(files.join(unit_dir, "{svc.name}.timer"), "[Unit]\nDescription=jetos timer for {svc.name}\n\n[Timer]\nOnCalendar={calendar}\nUnit={svc.name}.service\n\n[Install]\nWantedBy=timers.target\n")
+            jetos_enable_unit(unit_dir, "timers.target", "{svc.name}.timer")
+        }
+        if jetos_service_extra(svc, [String]{"socket", "listen"}) == .Val(listen) {
+            files.write(files.join(unit_dir, "{svc.name}.socket"), "[Unit]\nDescription=jetos socket for {svc.name}\n\n[Socket]\nListenStream={listen}\n\n[Install]\nWantedBy=sockets.target\n")
+            jetos_enable_unit(unit_dir, "sockets.target", "{svc.name}.socket")
+        }
+    }
+}
+
+// Rust write_hardware_facts: declared firmware/drivers/profiles/specialisation
+// facts, generated hardware source, boot variants and the scan/doctor tools.
+pub fn jetos_write_hardware_facts(dir: String, system: SystemPlan) IOError! -[FS, Env]> {
+    hw_dir :: files.join(dir, "hardware")
+    bin_dir :: files.join(dir, "sw/bin")
+    boot_spec_dir :: files.join(dir, "boot/specialisations")
+    files.create_dir_all(hw_dir)
+    files.create_dir_all(bin_dir)
+    files.create_dir_all(boot_spec_dir)
+    firmware :: if jetos_option_value(system, [String]{"kernel.firmware"}) == {
+        .Val(value) -> jetos_parse_list_items(value)
+        .None -> [String]{}
+    }
+    drivers :: if jetos_option_value(system, [String]{"kernel.drivers"}) == {
+        .Val(value) -> jetos_parse_list_items(value)
+        .None -> [String]{}
+    }
+    firmware_json :: jetos_strings_json(firmware)
+    drivers_json :: jetos_strings_json(drivers)
+    hardware_options :: jetos_prefixed_options(system, "hardware.")
+    declared_profiles :: if jetos_option_value(system, [String]{"hardware.{system.name}.profile", "hardware.profile"}) == {
+        .Val(value) -> jetos_parse_list_items(value)
+        .None -> [String]{}
+    }
+    profiles :: if declared_profiles.len() == 0 -> [String]{"generic-pc"} else -> declared_profiles
+    profiles_json :: jetos_strings_json(profiles)
+    specialisations :: jetos_prefixed_options(system, "hardware.{system.name}.specialisation.")
+    specialisation_rows := [String]{}
+    // Rust JSON::object_of emits its ordered fields with these newlines.
+    loop row in specialisations -> &specialisation_rows.push("{{\n  \"name\": {foundation_json_quote(row.key)},\n  \"enabled\": {foundation_json_quote(row.value)},\n  \"boot_entry\": {foundation_json_quote("boot/specialisations/{row.key}.conf")}\n}}")
+    specialisations_json :: specialisation_rows.join(",")
+    files.write(files.join(hw_dir, "facts.json"), "{{\"kind\":\"jetos.hardware\",\"host\":{foundation_json_quote(system.name)},\"firmware\":[{firmware_json}],\"drivers\":[{drivers_json}],\"profiles\":[{profiles_json}],\"specialisations\":[{specialisations_json}],\"scan_source\":\"hardware/{system.name}.jet\",\"doctor\":\"sw/bin/jetos-hardware-doctor\",\"audit\":\"declared hardware facts enter generation proof before activation\"}}")
+    firmware_manifest := [String]{}
+    loop f in firmware -> &firmware_manifest.push("{f}\tdeclared\n")
+    files.write(files.join(hw_dir, "firmware.manifest"), firmware_manifest.join(""))
+    drivers_manifest := [String]{}
+    loop d in drivers -> &drivers_manifest.push("{d}\tdeclared\n")
+    files.write(files.join(hw_dir, "drivers.manifest"), drivers_manifest.join(""))
+    profiles_manifest := [String]{}
+    loop p in profiles -> &profiles_manifest.push("{p}\tdeclared\n")
+    files.write(files.join(hw_dir, "profiles.manifest"), profiles_manifest.join(""))
+    loop profile in profiles {
+        files.write(files.join(hw_dir, "profile-{jetos_safe_filename(profile)}.json"), "{{\"kind\":\"jetos.hardware-profile\",\"name\":{foundation_json_quote(profile)},\"source\":\"first-party hardware profile\",\"applies_to\":{foundation_json_quote(system.name)},\"drivers\":[{drivers_json}],\"firmware\":[{firmware_json}],\"proof\":\"profile-applied\"}}")
+    }
+    source := [String]{"// generated by jetos-hardware-scan; canonical source may be copied into config.jet\nmodule hardware_{jetos_safe_identifier(system.name)} {{\n", "    hardware.{system.name}.scan.generated: true\n"}
+    loop driver in drivers -> &source.push("    hardware.{system.name}.driver.{jetos_safe_identifier(driver)}: true\n")
+    loop item in firmware -> &source.push("    hardware.{system.name}.firmware.{jetos_safe_identifier(item)}: true\n")
+    loop profile in profiles -> &source.push("    hardware.{system.name}.profile: \"{profile}\"\n")
+    &source.push("}}\n")
+    files.write(files.join(hw_dir, "{system.name}.jet"), source.join(""))
+    files.write(files.join(hw_dir, "declared-options.json"), "{{\"kind\":\"jetos.hardware-options\",\"options\":[{jetos_option_rows_json(hardware_options)}]}}")
+    files.write(files.join(hw_dir, "specialisations.json"), "{{\"kind\":\"jetos.hardware-specialisations\",\"host\":{foundation_json_quote(system.name)},\"items\":[{specialisations_json}],\"proof\":\"boot-selectable-variants\"}}")
+    loop row in specialisations {
+        files.write(files.join(boot_spec_dir, "{row.key}.conf"), "title {jetos_release_label(false)} — {system.name} ({row.key})\nhost {system.name}\nenabled {row.value}\ngeneration /run/current-system\nproof hardware-specialisation\n")
+    }
+    scanner :: jetos_hardware_scanner_script(system)
+    scanner_path :: files.join(bin_dir, "jetos-hardware-scan")
+    files.write(scanner_path, scanner)
+    jetos_make_executable(scanner_path)
+    doctor :: jetos_hardware_doctor_script()
+    doctor_path :: files.join(bin_dir, "jetos-hardware-doctor")
+    files.write(doctor_path, doctor)
+    jetos_make_executable(doctor_path)
+}
+
+// Rust write_hardware_facts's literal doctor script (no interpolation; its
+// braces are doubled only because Jet strings interpolate).
+fn jetos_hardware_doctor_script() -> String Never! {
+    "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\nscan_root=${{JETOS_HW_ROOT:-/}}\nreport=${{JETOS_HARDWARE_REPORT:-$root/hardware/drift-report.json}}\nmkdir -p \"$(dirname \"$report\")\"\nmissing=''\nif [ -f \"$root/hardware/drivers.manifest\" ]; then\n  while IFS='\t' read -r driver _state; do\n    [ -n \"$driver\" ] || continue\n    if [ -r \"$scan_root/proc/modules\" ]; then\n      if ! awk '{{print $1}}' \"$scan_root/proc/modules\" | grep -qx \"$driver\"; then\n        missing=\"$missing $driver\"\n      fi\n    fi\n  done < \"$root/hardware/drivers.manifest\"\nfi\nstate=match\nif [ -n \"$missing\" ]; then state=drift; fi\nprintf '{{\"kind\":\"jetos.hardware-doctor\",\"state\":\"%s\",\"missing_drivers\":\"%s\",\"proof\":\"hardware-drift-checked\"}}\\n' \"$state\" \"${{missing# }}\" > \"$report\"\ncat \"$report\"\n"
+}
+
+// Rust write_hardware_facts's interpolated scanner script; only the
+// shell-quoted host is substituted.
+fn jetos_hardware_scanner_script(system: SystemPlan) -> String Never! {
+    host :: jetos_shell_single_quote(system.name)
+    scanner :: "#!/usr/bin/env sh\nset -eu\nhost=${{1:-{host}}}\nscan_root=${{JETOS_HW_ROOT:-/}}\nout=${{JETOS_HARDWARE_OUT:-$PWD/hardware-$host.jet}}\nmkdir -p \"$(dirname \"$out\")\"\nmods=''\nif [ -r \"$scan_root/proc/modules\" ]; then\n  mods=$(awk '{{print $1}}' \"$scan_root/proc/modules\" | sort -u | paste -sd, -)\nfi\nblocks=''\nif [ -d \"$scan_root/sys/class/block\" ]; then\n  blocks=$(find \"$scan_root/sys/class/block\" -mindepth 1 -maxdepth 1 -printf '%f\\n' | sort | paste -sd, -)\nfi\ngpus=''\nif [ -d \"$scan_root/sys/class/drm\" ]; then\n  gpus=$(find \"$scan_root/sys/class/drm\" -mindepth 1 -maxdepth 1 -name 'card*' -printf '%f\\n' | sort | paste -sd, -)\nfi\n{{\n  printf '%s\\n' \"// generated by jetos-hardware-scan\"\n  printf '%s\\n' \"module hardware_$host {{\"\n  printf '    hardware.%s.scan.modules: \"%s\"\\n' \"$host\" \"$mods\"\n  printf '    hardware.%s.scan.blockDevices: \"%s\"\\n' \"$host\" \"$blocks\"\n  printf '    hardware.%s.scan.gpus: \"%s\"\\n' \"$host\" \"$gpus\"\n  printf '%s\\n' \"}}\"\n}} > \"$out\"\nprintf '{{\"kind\":\"jetos.hardware-scan\",\"host\":\"%s\",\"out\":\"%s\",\"modules\":\"%s\",\"block_devices\":\"%s\",\"gpus\":\"%s\"}}\\n' \"$host\" \"$out\" \"$mods\" \"$blocks\" \"$gpus\"\n"
+    scanner
+}

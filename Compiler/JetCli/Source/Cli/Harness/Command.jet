@@ -1,0 +1,248 @@
+// In-process command execution and deterministic capture (CommandHarness.rs).
+// The caller supplies the real dispatcher; this module never spawns a child,
+// reads ambient environment, or owns a terminal. Output stays split by stream.
+
+pub JET_CLI_MAX_COMMAND_STREAM_BYTES :: 16777216
+pub JET_CLI_MAX_COMMAND_DIAGNOSTICS :: 100000
+
+// Rust `DiagnosticSeverity` (CommandHarness.rs:20-27).
+pub enum JetCLIDiagnosticSeverity {
+    Info
+    Warning
+    Error
+}
+// Rust `DiagnosticSeverity::as_str` (CommandHarness.rs:31-37).
+pub fn jet_cli_command_severity_name(severity: JetCLIDiagnosticSeverity) -> String Never! {
+    if severity == {
+        .Info -> "info"
+        .Warning -> "warning"
+        .Error -> "error"
+    }
+}
+// Rust `CommandDiagnostic` (CommandHarness.rs:42-53).
+pub struct JetCLICommandDiagnostic {
+    pub code: String
+    pub severity: JetCLIDiagnosticSeverity
+    pub what: String
+    pub why: String
+    pub fix: String
+}
+// Rust `CommandDiagnostic::error` (CommandHarness.rs:57-70).
+pub fn jet_cli_command_diagnostic_error(code: String, what: String, why: String, fix: String) -> JetCLICommandDiagnostic Never! {
+    jet_cli_command_diagnostic_new(code, JetCLIDiagnosticSeverity.Error, what, why, fix)
+}
+// Rust `CommandDiagnostic::new` (CommandHarness.rs:73-87).
+pub fn jet_cli_command_diagnostic_new(code: String, severity: JetCLIDiagnosticSeverity, what: String, why: String, fix: String) -> JetCLICommandDiagnostic Never! {
+    JetCLICommandDiagnostic{code: code, severity: severity, what: what, why: why, fix: fix}
+}
+// Rust `CommandDiagnostic::to_json` (CommandHarness.rs:90-113).
+pub fn jet_cli_command_diagnostic_to_json(diagnostic: JetCLICommandDiagnostic) -> CanonicalJSON Never! {
+    CanonicalJSON.Object([CanonicalJSONField]{
+        CanonicalJSONField{key: "code", value: CanonicalJSON.String(~diagnostic.code)},
+        CanonicalJSONField{key: "fix", value: CanonicalJSON.String(~diagnostic.fix)},
+        CanonicalJSONField{key: "severity", value: CanonicalJSON.String(jet_cli_command_severity_name(diagnostic.severity))},
+        CanonicalJSONField{key: "what", value: CanonicalJSON.String(~diagnostic.what)},
+        CanonicalJSONField{key: "why", value: CanonicalJSON.String(~diagnostic.why)},
+    })
+}
+// Rust `CommandResult` (CommandHarness.rs:118-127).
+pub struct JetCLICommandResult {
+    pub stdout: String
+    pub stderr: String
+    pub diagnostics: [JetCLICommandDiagnostic]
+    pub exit_code: Int
+}
+// Rust `CommandResult::succeeded` (CommandHarness.rs:131-137).
+pub fn jet_cli_command_result_succeeded(result: JetCLICommandResult) -> Bool Never! {
+    if result.exit_code != 0 -> return false
+    loop diagnostic in result.diagnostics {
+        if diagnostic.severity == JetCLIDiagnosticSeverity.Error -> return false
+    }
+    true
+}
+// Rust `CommandResult::normalized` (CommandHarness.rs:140-157).
+pub fn jet_cli_command_result_normalized(result: JetCLICommandResult) -> JetCLICommandResult Never! {
+    diagnostics := [JetCLICommandDiagnostic]{}
+    loop diagnostic in result.diagnostics {
+        &diagnostics.push(JetCLICommandDiagnostic{
+            code: ~diagnostic.code,
+            severity: diagnostic.severity,
+            what: jet_cli_command_normalize_terminal_text(diagnostic.what),
+            why: jet_cli_command_normalize_terminal_text(diagnostic.why),
+            fix: jet_cli_command_normalize_terminal_text(diagnostic.fix),
+        })
+    }
+    JetCLICommandResult{
+        stdout: jet_cli_command_normalize_terminal_text(result.stdout),
+        stderr: jet_cli_command_normalize_terminal_text(result.stderr),
+        diagnostics: diagnostics,
+        exit_code: result.exit_code,
+    }
+}
+// Rust `CommandResult::to_json` (CommandHarness.rs:160-184).
+pub fn jet_cli_command_result_to_json(result: JetCLICommandResult) -> CanonicalJSON Never! {
+    diagnostics := [CanonicalJSON]{}
+    loop diagnostic in result.diagnostics -> &diagnostics.push(jet_cli_command_diagnostic_to_json(diagnostic))
+    CanonicalJSON.Object([CanonicalJSONField]{
+        CanonicalJSONField{key: "diagnostics", value: CanonicalJSON.Array(diagnostics)},
+        CanonicalJSONField{key: "exit_code", value: CanonicalJSON.Integer("{result.exit_code}")},
+        CanonicalJSONField{key: "stderr", value: CanonicalJSON.String(~result.stderr)},
+        CanonicalJSONField{key: "stdout", value: CanonicalJSON.String(~result.stdout)},
+    })
+}
+// Rust `CommandResult::canonical_bytes` (CommandHarness.rs:187-189).
+pub fn jet_cli_command_result_canonical_bytes(result: JetCLICommandResult) -> [U8] Never! {
+    canonical_json_bytes(jet_cli_command_result_to_json(result))
+}
+// Rust `CommandResult::digest` (CommandHarness.rs:192-194).
+pub fn jet_cli_command_result_digest(result: JetCLICommandResult) -> String Never! {
+    normalized :: jet_cli_command_result_normalized(result)
+    canonical_json_sha256(jet_cli_command_result_to_json(normalized))
+}
+// Rust `CommandCapture` (CommandHarness.rs:199-203).
+pub struct JetCLICommandCapture {
+    stdout: [U8]
+    stderr: [U8]
+    // Rust `CommandCapture::diagnostics` (CommandHarness.rs:232-234): read place.
+    pub diagnostics: [JetCLICommandDiagnostic]
+}
+// Rust `CommandCapture::new` / Default (CommandHarness.rs:207-209).
+pub fn jet_cli_command_capture_new() -> JetCLICommandCapture Never! {
+    JetCLICommandCapture{stdout: [U8]{}, stderr: [U8]{}, diagnostics: [JetCLICommandDiagnostic]{}}
+}
+// Rust `CommandCapture::stdout` (CommandHarness.rs:212-214).
+pub fn jet_cli_command_capture_stdout(capture: &JetCLICommandCapture, text: String) Never! {
+    loop byte in text.bytes() -> &capture.stdout.push(byte)
+}
+// Rust `CommandCapture::stderr` (CommandHarness.rs:217-219).
+pub fn jet_cli_command_capture_stderr(capture: &JetCLICommandCapture, text: String) Never! {
+    loop byte in text.bytes() -> &capture.stderr.push(byte)
+}
+// Rust `CommandCapture::diagnostic` (CommandHarness.rs:222-224).
+pub fn jet_cli_command_capture_diagnostic(capture: &JetCLICommandCapture, diagnostic: JetCLICommandDiagnostic) Never! { &capture.diagnostics.push(diagnostic) }
+// Rust `CommandCapture::stderr_text` (CommandHarness.rs:227-229).
+// Core has no borrowed UTF-8 view of a byte buffer; materialize only on lookup.
+pub fn jet_cli_command_capture_stderr_text(capture: JetCLICommandCapture) -> String Never! {
+    String.from_bytes(~capture.stderr) ?? panic("captured stderr must remain UTF-8")
+}
+// Rust `CommandCapture::finish` (CommandHarness.rs:236-261).
+// Bounds are checked only after dispatch, in stdout/stderr/diagnostics order.
+pub fn jet_cli_command_capture_finish(^capture: JetCLICommandCapture, exit_code: Int) -> JetCLICommandResult JetCLIHarnessError! {
+    sink := ^capture
+    if sink.stdout.len() > JET_CLI_MAX_COMMAND_STREAM_BYTES -> return Err(JetCLIHarnessError.Limit{what: "stdout bytes", limit: JET_CLI_MAX_COMMAND_STREAM_BYTES})
+    if sink.stderr.len() > JET_CLI_MAX_COMMAND_STREAM_BYTES -> return Err(JetCLIHarnessError.Limit{what: "stderr bytes", limit: JET_CLI_MAX_COMMAND_STREAM_BYTES})
+    if sink.diagnostics.len() > JET_CLI_MAX_COMMAND_DIAGNOSTICS -> return Err(JetCLIHarnessError.Limit{what: "structured diagnostic count", limit: JET_CLI_MAX_COMMAND_DIAGNOSTICS})
+    stdout :: String.from_bytes(^sink.stdout) ?? panic("captured stdout must remain UTF-8")
+    stderr :: String.from_bytes(^sink.stderr) ?? panic("captured stderr must remain UTF-8")
+    Ok(JetCLICommandResult{stdout: stdout, stderr: stderr, diagnostics: ^sink.diagnostics, exit_code: exit_code})
+}
+// Rust `JetCommand` (CommandHarness.rs:266-269).
+pub struct JetCLICommand {
+    // Rust `JetCommand::args` (CommandHarness.rs:301-303): borrowed field place.
+    pub args: [String]
+    environment: [String:String]
+}
+// Rust `JetCommand::new` (CommandHarness.rs:273-282).
+pub fn jet_cli_command_new(args: [String]) -> JetCLICommand Never! {
+    JetCLICommand{args: args, environment: [String:String]{}}
+}
+// Rust `JetCommand::default` (CommandHarness.rs:265).
+pub fn jet_cli_command_default() -> JetCLICommand Never! { jet_cli_command_new([String]{}) }
+// Rust `JetCommand::arg` (CommandHarness.rs:285-288). Builder consumes its owner.
+pub fn jet_cli_command_arg(^command: JetCLICommand, argument: String) -> JetCLICommand Never! {
+    out := ^command
+    &out.args.push(argument)
+    ^out
+}
+// Rust `JetCommand::env` (CommandHarness.rs:291-298).
+pub fn jet_cli_command_env(^command: JetCLICommand, name: String, value: String) -> JetCLICommand JetCLIHarnessError! {
+    if !jet_cli_command_valid_env_name(name) -> return Err(JetCLIHarnessError.InvalidEnvironmentName(name))
+    out := ^command
+    out.environment[name] = value
+    Ok(^out)
+}
+// Rust `JetCommand::environment` (CommandHarness.rs:306-308).
+// Core maps are COW BTreeMaps: returning a map shares storage, in lexical order.
+pub fn jet_cli_command_environment(command: JetCLICommand) -> [String:String] Never! { command.environment }
+// Rust FnOnce/FnMut raw dispatcher bounds (CommandHarness.rs:313,364).
+// A typed trait retains the sink's write window: Jet fn-value types cannot
+// express a write-window parameter, so a callback must implement this seam.
+pub trait JetCLICommandDispatch {
+    fn dispatch(&self, args: [String], environment: [String:String], capture: &JetCLICommandCapture) -> Int Never!
+}
+// Rust `JetCommand::run` (CommandHarness.rs:311-318).
+pub fn jet_cli_command_run<D: JetCLICommandDispatch>(command: JetCLICommand, dispatch: &D) -> JetCLICommandResult JetCLIHarnessError! {
+    capture := jet_cli_command_capture_new()
+    exit_code :: &dispatch.dispatch(command.args, command.environment, &capture)
+    jet_cli_command_capture_finish(^capture, exit_code)
+}
+// Rust `CommandExecutor` (CommandHarness.rs:329-332). Caller owns mutable state.
+pub trait JetCLICommandExecutor {
+    fn execute(&self, command: JetCLICommand, capture: &JetCLICommandCapture) -> Int Never!
+}
+// Rust `JetCommand::run_with` (CommandHarness.rs:321-325).
+pub fn jet_cli_command_run_with<E: JetCLICommandExecutor>(command: JetCLICommand, executor: &E) -> JetCLICommandResult JetCLIHarnessError! {
+    capture := jet_cli_command_capture_new()
+    exit_code :: &executor.execute(command, &capture)
+    jet_cli_command_capture_finish(^capture, exit_code)
+}
+// Rust blanket `CommandExecutor for F` (CommandHarness.rs:334-341) is supplied
+// by the caller's JetCLICommandExecutor impl, preserving mutable captured state.
+// Rust `CommandExecutorAdapter` (CommandHarness.rs:346-348).
+pub struct JetCLICommandExecutorAdapter {
+    dispatch: JetCLICommandDispatch
+    // Rust `CommandExecutorAdapter::execute` (CommandHarness.rs:366-368).
+    impl JetCLICommandExecutor {
+        fn execute(&self, command: JetCLICommand, capture: &JetCLICommandCapture) -> Int Never! { &self.dispatch.dispatch(command.args, command.environment, &capture) }
+    }
+}
+// Rust `CommandExecutorAdapter::new` (CommandHarness.rs:352-354).
+pub fn jet_cli_command_executor_adapter_new(^dispatch: JetCLICommandDispatch) -> JetCLICommandExecutorAdapter {
+    JetCLICommandExecutorAdapter{dispatch: ^dispatch}
+}
+// Rust `CommandExecutorAdapter::into_inner` (CommandHarness.rs:357-359).
+pub fn jet_cli_command_executor_adapter_into_inner(^adapter: JetCLICommandExecutorAdapter) -> JetCLICommandDispatch {
+    out := ^adapter
+    ^out.dispatch
+}
+// Rust `HarnessError` (CommandHarness.rs:374-379).
+#Error
+pub enum JetCLIHarnessError {
+    Limit(what: String, limit: Int)
+    InvalidEnvironmentName(String)
+}
+// Rust `HarnessError::fmt` (CommandHarness.rs:382-390).
+pub fn jet_cli_command_error_message(error: JetCLIHarnessError) -> String Never! {
+    if error == {
+        .Limit(what, limit) -> "{what} exceeds the {limit} item limit"
+        .InvalidEnvironmentName(name) -> "invalid command environment name `{name}`"
+    }
+}
+// Rust `normalize_terminal_text` (CommandHarness.rs:395-451).
+// Its state machine is identical to Tape.rs:552-610, so use the one port.
+pub fn jet_cli_command_normalize_terminal_text(value: String) -> String Never! { jet_cli_tape_normalize_terminal_text(value) }
+// Rust `valid_env_name` (CommandHarness.rs:453-457).
+pub fn jet_cli_command_valid_env_name(name: String) -> Bool Never! {
+    bytes :: name.bytes()
+    if bytes.len() == 0 -> return false
+    first :: Int.from_u8(bytes[0])
+    if !((first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95) -> return false
+    loop byte in bytes {
+        code :: Int.from_u8(byte)
+        if !((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 95) -> return false
+    }
+    true
+}
+
+// Rust `CommandExecutorAdapter::execute` (CommandHarness.rs:366-368), bound to
+// Host.jet's canonical argv/facts dispatcher. This byte-capture entry takes
+// explicit process facts, not JetCommand, because the current host seam has
+// neither an explicit environment map nor a structured diagnostic sink.
+// Full command executors retain those inputs through JetCLICommandDispatch.
+pub fn jet_cli_command_dispatch(args: [String], facts: JetCLIProcessFacts) -> JetCLICommandResult {
+    output :: jet_cli_dispatch(args, facts)
+    capture := jet_cli_command_capture_new()
+    jet_cli_command_capture_stdout(&capture, output.stdout)
+    jet_cli_command_capture_stderr(&capture, output.stderr)
+    jet_cli_command_capture_finish(^capture, output.exit_code)
+}

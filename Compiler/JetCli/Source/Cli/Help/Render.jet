@@ -1,0 +1,394 @@
+// Pure bounded help frames (crates/jet-cli/src/Help/Render.rs). No terminal IO.
+// Index owns command facts; Explain owns canonical essays and ANSI roles.
+
+JET_CLI_HELP_MIN_WIDTH :: 24
+JET_CLI_HELP_INVERT_SGR :: "48;5;24;97;1"
+JET_CLI_HELP_ESCAPE :: prep { String.from_bytes([U8]{U8{27}}) ?? panic("ESC is valid UTF-8") }
+
+// Rust `w` (Render.rs:13-15).
+fn jet_cli_help_width(width: Int) -> Int Never! { if width < JET_CLI_HELP_MIN_WIDTH -> JET_CLI_HELP_MIN_WIDTH else -> width }
+// Rust `cols` (Render.rs:19-36). Help counts scalars, not grapheme columns;
+// an escape hides every scalar from ESC through the next `m`, inclusive.
+fn jet_cli_help_cols(text: String) -> Int Never! {
+    raw :: text.bytes()
+    at := 0
+    count := 0
+    escaped := false
+    loop at < raw.len() {
+        scalar :: jet_cli_table_decode_scalar(raw, at)
+        if escaped {
+            if scalar.code == 109 -> escaped = false
+        } else {
+            if scalar.code == 27 -> escaped = true else -> count += 1
+        }
+        at = scalar.end
+    }
+    count
+}
+fn jet_cli_help_sub(left: Int, right: Int) -> Int Never! { if left > right -> left - right else -> 0 }
+fn jet_cli_help_min(left: Int, right: Int) -> Int Never! { if left < right -> left else -> right }
+fn jet_cli_help_max(left: Int, right: Int) -> Int Never! { if left > right -> left else -> right }
+fn jet_cli_help_name_selected(selected: String?, name: String) -> Bool Never! {
+    if selected == .Val(value) -> return value == name
+    false
+}
+fn jet_cli_help_append(out: &[U8], text: String) Never! { loop byte in text.bytes() -> &out.push(byte) }
+fn jet_cli_help_bytes(out: [U8]) -> String Never! { String.from_bytes(out) ?? panic("help frames are valid UTF-8") }
+fn jet_cli_help_border(color: Bool, text: String) -> String Never! { diagnostic_theme_paint(color, "90", text) }
+fn jet_cli_help_invert(color: Bool, text: String) -> String Never! { diagnostic_theme_paint(color, JET_CLI_HELP_INVERT_SGR, text) }
+
+// Rust `truncate_visible` (Render.rs:47-76). Keep width-1 visible scalars,
+// retain complete ESC..m runs, and reset after the ellipsis on styled input.
+fn jet_cli_help_truncate_visible(text: String, width: Int) -> String Never! {
+    if width <= 0 -> return ""
+    keep :: jet_cli_help_sub(width, 1)
+    raw :: text.bytes()
+    out := [U8]{}
+    at := 0
+    visible := 0
+    loop at < raw.len() {
+        if raw[at] == (U8{27}) {
+            loop at < raw.len() {
+                control :: raw[at]
+                &out.push(control)
+                at += 1
+                if control == (U8{109}) -> break
+            }
+        } else {
+            if visible >= keep -> break
+            scalar :: jet_cli_table_decode_scalar(raw, at)
+            loop byte in at..<scalar.end -> &out.push(raw[byte])
+            visible += 1
+            at = scalar.end
+        }
+    }
+    jet_cli_help_append(&out, "…")
+    if text.contains(JET_CLI_HELP_ESCAPE) -> jet_cli_help_append(&out, "{JET_CLI_HELP_ESCAPE}[0m")
+    jet_cli_help_bytes(out)
+}
+// Rust `pad` (Render.rs:38-45). Equality deliberately clips, as in Rust.
+fn jet_cli_help_pad(text: String, width: Int) -> String Never! {
+    columns :: jet_cli_help_cols(text)
+    if columns >= width -> return jet_cli_help_truncate_visible(text, width)
+    "{text}{" ".repeat(width - columns)}"
+}
+// Rust `top` (Render.rs:78-93).
+fn jet_cli_help_top(requested_width: Int, label: String, color: Bool) -> String Never! {
+    width :: jet_cli_help_width(requested_width)
+    plain :: "┌─ {label} "
+    fill :: "─".repeat(jet_cli_help_sub(width, jet_cli_help_cols(plain) + 1))
+    if color -> return "{jet_cli_help_border(true, "┌─ ")}{diagnostic_theme_accent(true, label)}{jet_cli_help_border(true, " {fill}┐")}"
+    "{plain}{fill}┐"
+}
+// Rust `mid` (Render.rs:95-98).
+fn jet_cli_help_mid(width: Int, color: Bool) -> String Never! { jet_cli_help_border(color, "├{"─".repeat(jet_cli_help_width(width) - 2)}┤") }
+// Rust `bottom` (Render.rs:100-103).
+fn jet_cli_help_bottom(width: Int, color: Bool) -> String Never! { jet_cli_help_border(color, "└{"─".repeat(jet_cli_help_width(width) - 2)}┘") }
+// Rust `row` (Render.rs:107-112).
+fn jet_cli_help_row(width: Int, text: String, selected: Bool) -> String Never! {
+    marker :: if selected -> "> " else -> "  "
+    "│{marker}{jet_cli_help_pad(text, jet_cli_help_width(width) - 4)}│"
+}
+// Rust `selected_row` (Render.rs:114-138).
+fn jet_cli_help_selected_row(requested_width: Int, text: String, selected: Bool, color: Bool) -> String Never! {
+    width :: jet_cli_help_width(requested_width)
+    if selected && color {
+        reapply :: "{JET_CLI_HELP_ESCAPE}[0m{JET_CLI_HELP_ESCAPE}[{JET_CLI_HELP_INVERT_SGR}m"
+        padded :: jet_cli_help_pad(text, width - 2).replace("{JET_CLI_HELP_ESCAPE}[0m", reapply)
+        return "{jet_cli_help_border(true, "│")}{jet_cli_help_invert(true, padded)}{jet_cli_help_border(true, "│")}"
+    }
+    if color -> return "{jet_cli_help_border(true, "│")}  {jet_cli_help_pad(text, width - 4)}{jet_cli_help_border(true, "│")}"
+    jet_cli_help_row(width, text, selected)
+}
+// Rust `bracket_matches`, `color_matches`, `emphasize` (Render.rs:143-208).
+// Positions are Unicode scalar indices, not UTF-8 byte offsets.
+fn jet_cli_help_emphasize(text: String, positions: [Int], color: Bool) -> String Never! {
+    if positions.len() == 0 -> return ~text
+    marked := [Bool]{}
+    loop i in 0..<text.len() -> &marked.push(false)
+    loop position in positions {
+        if position >= 0 && position < marked.len() -> marked[position] = true
+    }
+    raw :: text.bytes()
+    out := [U8]{}
+    at := 0
+    index := 0
+    in_match := false
+    loop at < raw.len() {
+        if marked[index] != in_match {
+            if marked[index] {
+                jet_cli_help_append(&out, if color -> "{JET_CLI_HELP_ESCAPE}[{DIAGNOSTIC_THEME_ACCENT}m" else -> "[")
+            } else {
+                jet_cli_help_append(&out, if color -> "{JET_CLI_HELP_ESCAPE}[0m" else -> "]")
+            }
+            in_match = marked[index]
+        }
+        scalar :: jet_cli_table_decode_scalar(raw, at)
+        loop byte in at..<scalar.end -> &out.push(raw[byte])
+        at = scalar.end
+        index += 1
+    }
+    if in_match -> jet_cli_help_append(&out, if color -> "{JET_CLI_HELP_ESCAPE}[0m" else -> "]")
+    jet_cli_help_bytes(out)
+}
+struct JetCLIHelpBodyRow { text: String, selected: Bool }
+fn jet_cli_help_push_row(out: &[U8], width: Int, text: String, selected: Bool, color: Bool) Never! {
+    jet_cli_help_append(&out, jet_cli_help_selected_row(width, text, selected, color))
+    &out.push(U8{10})
+}
+
+// Rust `render_categorized` (Render.rs:215-301).
+pub fn jet_cli_help_render_categorized(index: [JetCLIHelpEntry], selected_category: Int, expanded: Bool, selected_cmd: String?, requested_width: Int, color: Bool, height: Int?) -> String Never! {
+    width :: jet_cli_help_width(requested_width)
+    out := [U8]{}
+    jet_cli_help_append(&out, jet_cli_help_top(width, "jet ? — Command Palette", color))
+    &out.push(U8{10})
+    jet_cli_help_push_row(&out, width, diagnostic_theme_dim(color, "Type to search · ↑↓ · ⏎ command · Alt+⏎ example · ⇥ detail · F1"), false, color)
+    jet_cli_help_append(&out, jet_cli_help_mid(width, color))
+    &out.push(U8{10})
+    body := [JetCLIHelpBodyRow]{}
+    selected_header := Int?{None}
+    loop (ci, category) in JET_CLI_HELP_CATEGORIES {
+        has_entries := false
+        loop entry in index { if entry.category == category -> has_entries = true }
+        if !has_entries && category != "Error Codes" -> next
+        is_expanded :: ci == selected_category && expanded
+        marker :: if is_expanded -> "▾" else -> "▸"
+        plain :: "{marker} {category}"
+        label :: if ci == selected_category -> diagnostic_theme_accent(color, plain) else -> diagnostic_theme_bold(color, plain)
+        if ci == selected_category -> selected_header = Val(body.len())
+        &body.push(JetCLIHelpBodyRow{text: label, selected: ci == selected_category && !is_expanded})
+        if is_expanded {
+            if category == "Error Codes" -> &body.push(JetCLIHelpBodyRow{text: diagnostic_theme_dim(color, "type an E-code, such as E0102, for verbatim help"), selected: false})
+            loop entry in index {
+                if entry.category != category -> next
+                command_col :: "{entry.symbol.name}{" ".repeat(jet_cli_help_sub(20, entry.symbol.name.len()))}"
+                line :: "{diagnostic_theme_accent(color, "jet")} {diagnostic_theme_bold(color, command_col)} {diagnostic_theme_dim(color, entry.symbol.summary)}"
+                &body.push(JetCLIHelpBodyRow{text: line, selected: jet_cli_help_name_selected(selected_cmd, entry.symbol.name)})
+            }
+        }
+    }
+    visible_rows :: if height == {
+        .Val(rows) -> jet_cli_help_max(jet_cli_help_sub(rows, 4), 1)
+        None -> body.len()
+    }
+    selected_body := selected_header ?? 0
+    loop (i, line) in body {
+        if line.selected {
+            selected_body = i
+            break
+        }
+    }
+    start :: jet_cli_help_min(jet_cli_help_sub(selected_body, jet_cli_help_sub(visible_rows, 1)), jet_cli_help_sub(body.len(), visible_rows))
+    loop i in start..<jet_cli_help_min(start + visible_rows, body.len()) -> jet_cli_help_push_row(&out, width, body[i].text, body[i].selected, color)
+    jet_cli_help_append(&out, jet_cli_help_bottom(width, color))
+    jet_cli_help_bytes(out)
+}
+// Rust `categorized_order` (Render.rs:305-315).
+pub fn jet_cli_help_categorized_order(index: [JetCLIHelpEntry]) -> [String] Never! {
+    order := [String]{}
+    loop category in JET_CLI_HELP_CATEGORIES {
+        loop entry in index { if entry.category == category -> &order.push(entry.symbol.name) }
+    }
+    order
+}
+
+// Rust `render_result_list` (Render.rs:319-414).
+pub fn jet_cli_help_render_result_list(hits: [JetCLIHelpHit], query: String, requested_width: Int, color: Bool, selected: Int?, height: Int?) -> String Never! {
+    width :: jet_cli_help_width(requested_width)
+    out := [U8]{}
+    jet_cli_help_append(&out, jet_cli_help_top(width, "Find a Command", color))
+    &out.push(U8{10})
+    jet_cli_help_push_row(&out, width, "{diagnostic_theme_accent(color, ">")} {diagnostic_theme_bold(color, query)}", false, color)
+    jet_cli_help_append(&out, jet_cli_help_mid(width, color))
+    &out.push(U8{10})
+    if hits.len() == 0 -> jet_cli_help_push_row(&out, width, diagnostic_theme_paint(color, DIAGNOSTIC_THEME_WARN, "no matches"), false, color)
+    example := String?{None}
+    if hits.len() > 0 {
+        if hits[0] == {
+            .Command(entry, _, _, _) -> { if entry.symbol.examples.len() > 0 -> example = Val(entry.symbol.examples[0]) }
+            .Code(_) -> {}
+        }
+    }
+    rows :: height ?? 8
+    show_footer :: rows >= 6
+    show_lower_rule :: rows >= 7
+    show_example :: example != None && rows >= 8
+    fixed_rows := 4
+    if show_footer -> fixed_rows += 1
+    if show_lower_rule -> fixed_rows += 1
+    if show_example -> fixed_rows += 1
+    visible_hits :: if height == {
+        .Val(count) -> jet_cli_help_max(jet_cli_help_sub(count, fixed_rows), 1)
+        None -> hits.len()
+    }
+    selected_index :: jet_cli_help_min(selected ?? 0, jet_cli_help_sub(hits.len(), 1))
+    start :: jet_cli_help_min(jet_cli_help_sub(selected_index, jet_cli_help_sub(visible_hits, 1)), jet_cli_help_sub(hits.len(), visible_hits))
+    loop i in start..<jet_cli_help_min(start + visible_hits, hits.len()) {
+        is_selected :: (selected ?? 0) == i
+        line :: if hits[i] == {
+            .Command(entry, _, haystack, positions) -> {
+                display :: "jet {entry.symbol.name}   {entry.symbol.summary}"
+                if haystack.starts_with("jet ") -> jet_cli_help_emphasize(display, positions, color) else -> display
+            }
+            .Code(ex) -> "{diagnostic_theme_paint(color, DIAGNOSTIC_THEME_ERROR, ex.code)}   {diagnostic_theme_dim(color, ex.meaning)}"
+        }
+        jet_cli_help_push_row(&out, width, line, is_selected, color)
+    }
+    if show_lower_rule {
+        jet_cli_help_append(&out, jet_cli_help_mid(width, color))
+        &out.push(U8{10})
+    }
+    if show_example {
+        ex :: example ?? ""
+        line :: if color -> "{diagnostic_theme_dim(true, "Example")} {diagnostic_theme_bold(true, ex)}" else -> "Example  {ex}"
+        jet_cli_help_push_row(&out, width, line, false, color)
+    }
+    if show_footer -> jet_cli_help_push_row(&out, width, diagnostic_theme_dim(color, "↑↓ · ⏎ command · Alt+⏎ example · ⇥ detail · F1"), false, color)
+    jet_cli_help_append(&out, jet_cli_help_bottom(width, color))
+    jet_cli_help_bytes(out)
+}
+// Rust `render_detail` (Render.rs:418-484).
+pub fn jet_cli_help_render_detail(entry: JetCLIHelpEntry, requested_width: Int, color: Bool) -> String Never! {
+    width :: jet_cli_help_width(requested_width)
+    out := [U8]{}
+    jet_cli_help_append(&out, jet_cli_help_top(width, "jet {entry.symbol.name}  ⇥ Collapse", color))
+    &out.push(U8{10})
+    jet_cli_help_push_row(&out, width, "Usage   {entry.symbol.signature}", false, color)
+    jet_cli_help_push_row(&out, width, entry.symbol.summary, false, color)
+    if entry.flags.len() == 0 -> jet_cli_help_push_row(&out, width, "Flags   (none)", false, color)
+    loop (i, flag) in entry.flags {
+        label :: if i == 0 -> "Flags   " else -> "        "
+        jet_cli_help_push_row(&out, width, "{label}{flag.long}  {flag.help}", false, color)
+    }
+    if entry.symbol.examples.len() > 0 -> jet_cli_help_push_row(&out, width, "Example {entry.symbol.examples[0]}", false, color)
+    if entry.see_also.len() > 0 -> jet_cli_help_push_row(&out, width, "See Also  {entry.see_also.join(" · ")}", false, color)
+    jet_cli_help_append(&out, jet_cli_help_mid(width, color))
+    &out.push(U8{10})
+    jet_cli_help_push_row(&out, width, diagnostic_theme_dim(color, "⏎ jet {entry.symbol.name} · Alt+⏎ example · F1 open in reference"), false, color)
+    jet_cli_help_append(&out, jet_cli_help_bottom(width, color))
+    jet_cli_help_bytes(out)
+}
+// Rust `render_code_page` (Render.rs:488-490): never reconstruct the essay.
+pub fn jet_cli_help_render_code_page(explanation: DiagnosticExplanation, color: Bool) -> String Never! { jet_cli_explain_render(explanation, color) }
+
+// Rust `WrappedRow` (Render.rs:529-534).
+struct JetCLIHelpWrappedRow { text: String, hard_break: Bool }
+// Rust `wrap_text_rows` (Render.rs:536-574). Scalar-based source wrapping,
+// including complete SGR atoms, retains the exact canonical source bytes.
+fn jet_cli_help_wrap_text_rows(text: String, requested_width: Int) -> [JetCLIHelpWrappedRow] Never! {
+    width :: jet_cli_help_max(requested_width, 1)
+    raw :: text.bytes()
+    rows := [JetCLIHelpWrappedRow]{}
+    row := [U8]{}
+    visible := 0
+    at := 0
+    has_source := false
+    loop at < raw.len() {
+        has_source = true
+        if raw[at] == (U8{10}) {
+            &rows.push(JetCLIHelpWrappedRow{text: jet_cli_help_bytes(row), hard_break: true})
+            row = [U8]{}
+            visible = 0
+            has_source = false
+            at += 1
+            next
+        }
+        if raw[at] == (U8{27}) {
+            loop at < raw.len() && raw[at] != (U8{10}) {
+                control :: raw[at]
+                &row.push(control)
+                at += 1
+                if control == (U8{109}) -> break
+            }
+            next
+        }
+        if visible == width {
+            &rows.push(JetCLIHelpWrappedRow{text: jet_cli_help_bytes(row), hard_break: false})
+            row = [U8]{}
+            visible = 0
+        }
+        scalar :: jet_cli_table_decode_scalar(raw, at)
+        loop byte in at..<scalar.end -> &row.push(raw[byte])
+        at = scalar.end
+        visible += 1
+    }
+    if has_source -> &rows.push(JetCLIHelpWrappedRow{text: jet_cli_help_bytes(row), hard_break: false})
+    rows
+}
+// Rust `str::lines` used by `render_lines_viewport`/`render_reference`.
+fn jet_cli_help_lines(text: String) -> [String] Never! { diagnostic_text_lines(text) }
+// Rust `render_text_viewport` (Render.rs:494-514).
+pub fn jet_cli_help_render_text_viewport(text: String, width: Int, requested_height: Int, scroll: Int) -> String Never! {
+    height :: jet_cli_help_max(requested_height, 1)
+    rows :: jet_cli_help_wrap_text_rows(text, jet_cli_help_width(width))
+    start :: jet_cli_help_min(scroll, jet_cli_help_sub(rows.len(), height))
+    out := [U8]{}
+    loop offset in 0..<height {
+        if offset > 0 -> &out.push(U8{10})
+        at :: start + offset
+        jet_cli_help_append(&out, if at < rows.len() -> rows[at].text else -> " ")
+    }
+    jet_cli_help_bytes(out)
+}
+// Rust `render_lines_viewport` (Render.rs:517-527).
+pub fn jet_cli_help_render_lines_viewport(text: String, requested_height: Int, scroll: Int) -> String Never! {
+    lines :: jet_cli_help_lines(text)
+    height :: jet_cli_help_max(requested_height, 1)
+    start :: jet_cli_help_min(scroll, jet_cli_help_sub(lines.len(), height))
+    out := [U8]{}
+    loop at in start..<jet_cli_help_min(start + height, lines.len()) {
+        if at > start -> &out.push(U8{10})
+        jet_cli_help_append(&out, lines[at])
+    }
+    jet_cli_help_bytes(out)
+}
+// Rust `render_reference` (Render.rs:581-667).
+pub fn jet_cli_help_render_reference(index: [JetCLIHelpEntry], selected_category: Int, selected_entry: JetCLIHelpEntry?, requested_width: Int, requested_height: Int, color: Bool, query: String) -> String Never! {
+    width :: jet_cli_help_width(requested_width)
+    height :: jet_cli_help_max(requested_height, 3)
+    left_width :: jet_cli_help_max(width /% 3, 18)
+    right_width :: width - left_width - 2
+    search :: if query.len() == 0 -> "" else -> " · Search: {diagnostic_theme_bold(color, query)}"
+    out := [U8]{}
+    jet_cli_help_append(&out, jet_cli_help_pad("{diagnostic_theme_accent(color, "jet ?")} Reference{search}", width))
+    left_rows := [String]{}
+    selected_row := Int?{None}
+    selected_name :: if selected_entry == {
+        .Val(entry) -> Val(entry.symbol.name)
+        None -> None
+    }
+    loop (ci, category) in JET_CLI_HELP_CATEGORIES {
+        marker :: if ci == selected_category -> "▾" else -> "▸"
+        label :: "{marker} {category}"
+        &left_rows.push(if ci == selected_category -> diagnostic_theme_accent(color, label) else -> diagnostic_theme_bold(color, label))
+        if ci != selected_category -> next
+        loop entry in index {
+            if entry.category != category -> next
+            selected :: jet_cli_help_name_selected(selected_name, entry.symbol.name)
+            prefix :: if selected -> "> " else -> "  "
+            if selected -> selected_row = Val(left_rows.len())
+            &left_rows.push(jet_cli_help_invert(color && selected, "{prefix}  {entry.symbol.name}"))
+        }
+    }
+    right_rows :: if selected_entry == {
+        .Val(entry) -> jet_cli_help_lines(jet_cli_help_render_detail(entry, right_width, color))
+        None -> [String]{diagnostic_theme_dim(color, "Select a command on the left")}
+    }
+    body_rows :: height - 2
+    selected_start :: if selected_row == {
+        .Val(row) -> jet_cli_help_sub(row, jet_cli_help_sub(body_rows, 1))
+        None -> 0
+    }
+    left_start :: jet_cli_help_min(selected_start, jet_cli_help_sub(left_rows.len(), body_rows))
+    loop i in 0..<body_rows {
+        at :: left_start + i
+        left :: if at < left_rows.len() -> jet_cli_help_pad(left_rows[at], left_width) else -> " ".repeat(left_width)
+        right :: jet_cli_help_pad(if i < right_rows.len() -> right_rows[i] else -> "", right_width)
+        &out.push(U8{10})
+        jet_cli_help_append(&out, "{jet_cli_help_border(color, "│")}{left}{jet_cli_help_border(color, "│")}{right}")
+    }
+    &out.push(U8{10})
+    jet_cli_help_append(&out, jet_cli_help_pad(diagnostic_theme_dim(color, "↑↓ · → into · ⏎ command · Alt+⏎ example · Esc back"), width))
+    jet_cli_help_bytes(out)
+}

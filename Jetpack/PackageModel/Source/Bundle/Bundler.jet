@@ -1,0 +1,1804 @@
+// PORT-PENDING 2080 crates-jet-pkg-model-src-bundler-slice-1: crates/jet-pkg-model/src/Bundler.rs:1-1800
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Deterministic package bundle plans and layout artifacts.
+//RS //!
+//RS //! This module owns the data side of desktop and game packaging.  It does not
+//RS //! invoke platform packers, signers, launchers, or update services.  A caller
+//RS //! supplies an explicit target and executable bytes; the resulting plan is a
+//RS //! complete, typed file layout that a later platform adapter may materialize.
+//RS //!
+//RS //! The same model is used for desktop and game packages.  `BundleKind` records
+//RS //! that intent for receipts without creating a second game-specific bundler.
+//RS 
+//RS use crate::SHA256;
+//RS use jet_foundation::Hex::nibble as hex_nibble;
+//RS use jet_foundation::PerformanceBudget::CanonicalJson;
+//RS use std::collections::BTreeSet;
+//RS use std::fmt;
+//RS use std::fmt::Write as _;
+//RS 
+//RS pub const PACKAGE_BUNDLE_SCHEMA_VERSION: u32 = 1;
+//RS pub const PACKAGE_BUNDLE_FORMAT: &str = "jet.package.bundle";
+//RS pub const PACKAGE_BUNDLE_RECEIPT_SCHEMA: &str = "jet.package.receipt";
+//RS pub const PACKAGE_UPDATE_MANIFEST_SCHEMA: &str = "jet.package.update";
+//RS 
+//RS /// The explicit package target.  No value is inferred from the host process.
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum BundleTarget {
+//RS     LinuxAppImage,
+//RS     MacOSApp,
+//RS     WindowsMsix,
+//RS }
+//RS 
+//RS impl BundleTarget {
+//RS     pub const ALL: [Self; 3] = [Self::LinuxAppImage, Self::MacOSApp, Self::WindowsMsix];
+//RS 
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::LinuxAppImage => "linux-appimage",
+//RS             Self::MacOSApp => "macos-app",
+//RS             Self::WindowsMsix => "windows-msix",
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn parse(value: &str) -> Option<Self> {
+//RS         match value.trim().to_ascii_lowercase().as_str() {
+//RS             "linux-appimage" | "linux" | "appimage" => Some(Self::LinuxAppImage),
+//RS             "macos-app" | "macos" | "mac" | "app" => Some(Self::MacOSApp),
+//RS             "windows-msix" | "windows" | "msix" => Some(Self::WindowsMsix),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn artifact_suffix(self) -> &'static str {
+//RS         match self {
+//RS             Self::LinuxAppImage => ".AppImage",
+//RS             Self::MacOSApp => ".app",
+//RS             Self::WindowsMsix => ".msix",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Whether the shared bundle is for a desktop application or a game.
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum BundleKind {
+//RS     Desktop,
+//RS     Game,
+//RS }
+//RS 
+//RS impl BundleKind {
+//RS 
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Desktop => "desktop",
+//RS             Self::Game => "game",
+//RS         }
+//RS     }
+//RS }
+//RS impl Default for BundleKind {
+//RS     fn default() -> Self {
+//RS         Self::Desktop
+//RS     }
+//RS }
+//RS 
+//RS /// Input executable supplied by the compiler/build adapter.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct BundleExecutable {
+//RS     /// File name used inside the target layout.
+//RS     pub name: String,
+//RS     /// Source path recorded in the receipt; it is never resolved by this model.
+//RS     pub source: String,
+//RS     /// Exact executable bytes to place in the layout.
+//RS     pub bytes: Vec<u8>,
+//RS }
+//RS 
+//RS impl BundleExecutable {
+//RS     pub fn new(
+//RS         name: impl Into<String>,
+//RS         source: impl Into<String>,
+//RS         bytes: impl Into<Vec<u8>>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             name: name.into(),
+//RS             source: source.into(),
+//RS             bytes: bytes.into(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn digest(&self) -> String {
+//RS         SHA256::sha256_hex(&self.bytes)
+//RS     }
+//RS }
+//RS 
+//RS /// Icon payload and its deterministic target-independent identity.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct BundleIcon {
+//RS     pub name: String,
+//RS     pub format: IconFormat,
+//RS     pub size: u32,
+//RS     /// Optional source path for receipt provenance.  The bytes remain the
+//RS     /// authority for the emitted artifact.
+//RS     pub source: Option<String>,
+//RS     pub bytes: Vec<u8>,
+//RS }
+//RS 
+//RS impl BundleIcon {
+//RS     pub fn new(
+//RS         name: impl Into<String>,
+//RS         format: IconFormat,
+//RS         size: u32,
+//RS         bytes: impl Into<Vec<u8>>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             name: name.into(),
+//RS             format,
+//RS             size,
+//RS             source: None,
+//RS             bytes: bytes.into(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn with_source(mut self, source: impl Into<String>) -> Self {
+//RS         self.source = Some(source.into());
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn digest(&self) -> String {
+//RS         SHA256::sha256_hex(&self.bytes)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum IconFormat {
+//RS     Png,
+//RS     Icns,
+//RS     Ico,
+//RS     Svg,
+//RS }
+//RS 
+//RS impl IconFormat {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Png => "png",
+//RS             Self::Icns => "icns",
+//RS             Self::Ico => "ico",
+//RS             Self::Svg => "svg",
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn extension(self) -> &'static str {
+//RS         self.as_str()
+//RS     }
+//RS 
+//RS     pub fn parse(value: &str) -> Option<Self> {
+//RS         match value.trim().trim_start_matches('.').to_ascii_lowercase().as_str() {
+//RS             "png" => Some(Self::Png),
+//RS             "icns" => Some(Self::Icns),
+//RS             "ico" => Some(Self::Ico),
+//RS             "svg" => Some(Self::Svg),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// A signer/verification adapter input.  The adapter owns the actual command.
+//RS #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+//RS pub struct SigningHookInput {
+//RS     pub path: String,
+//RS     pub digest: String,
+//RS }
+//RS 
+//RS impl SigningHookInput {
+//RS     pub fn new(path: impl Into<String>, digest: impl Into<String>) -> Self {
+//RS         Self {
+//RS             path: path.into(),
+//RS             digest: digest.into(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum SigningPhase {
+//RS     PreSign,
+//RS     PostSign,
+//RS     Verify,
+//RS }
+//RS 
+//RS impl SigningPhase {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::PreSign => "pre-sign",
+//RS             Self::PostSign => "post-sign",
+//RS             Self::Verify => "verify",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// A typed signing hook declaration.  No hook is executed by this module.
+//RS #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+//RS pub struct SigningHook {
+//RS     pub name: String,
+//RS     pub phase: SigningPhase,
+//RS     pub program: String,
+//RS     pub args: Vec<String>,
+//RS     pub inputs: Vec<SigningHookInput>,
+//RS }
+//RS 
+//RS impl SigningHook {
+//RS     pub fn new(
+//RS         name: impl Into<String>,
+//RS         phase: SigningPhase,
+//RS         program: impl Into<String>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             name: name.into(),
+//RS             phase,
+//RS             program: program.into(),
+//RS             args: Vec::new(),
+//RS             inputs: Vec::new(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// User-declared updater endpoint.  The manifest's artifact and payload facts
+//RS /// are filled from the exact executable payload by the checked plan; the
+//RS /// receipt carries the final materialized artifact digest.
+//RS #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+//RS pub struct UpdaterSpec {
+//RS     pub channel: String,
+//RS     pub url: String,
+//RS     pub signature_url: Option<String>,
+//RS     pub release_notes_url: Option<String>,
+//RS }
+//RS 
+//RS impl UpdaterSpec {
+//RS     pub fn new(channel: impl Into<String>, url: impl Into<String>) -> Self {
+//RS         Self {
+//RS             channel: channel.into(),
+//RS             url: url.into(),
+//RS             signature_url: None,
+//RS             release_notes_url: None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// All inputs needed to produce one target-specific bundle layout.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct BundleSpec {
+//RS     pub kind: BundleKind,
+//RS     pub target: BundleTarget,
+//RS     pub package: String,
+//RS     pub version: String,
+//RS     pub executable: BundleExecutable,
+//RS     pub metadata: BundleMetadata,
+//RS     pub icons: Vec<BundleIcon>,
+//RS     pub signing_hooks: Vec<SigningHook>,
+//RS     pub updater: Option<UpdaterSpec>,
+//RS     pub game: Option<GameBundleSpec>,
+//RS }
+//RS 
+//RS impl BundleSpec {
+//RS     pub fn new(
+//RS         kind: BundleKind,
+//RS         target: BundleTarget,
+//RS         package: impl Into<String>,
+//RS         version: impl Into<String>,
+//RS         executable: BundleExecutable,
+//RS         metadata: BundleMetadata,
+//RS     ) -> Self {
+//RS         Self {
+//RS             kind,
+//RS             target,
+//RS             package: package.into(),
+//RS             version: version.into(),
+//RS             executable,
+//RS             metadata,
+//RS             icons: Vec::new(),
+//RS             signing_hooks: Vec::new(),
+//RS             updater: None,
+//RS             game: None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn desktop(
+//RS         target: BundleTarget,
+//RS         package: impl Into<String>,
+//RS         version: impl Into<String>,
+//RS         executable: BundleExecutable,
+//RS         metadata: BundleMetadata,
+//RS     ) -> Self {
+//RS         Self::new(
+//RS             BundleKind::Desktop,
+//RS             target,
+//RS             package,
+//RS             version,
+//RS             executable,
+//RS             metadata,
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn game(
+//RS         target: BundleTarget,
+//RS         package: impl Into<String>,
+//RS         version: impl Into<String>,
+//RS         executable: BundleExecutable,
+//RS         metadata: BundleMetadata,
+//RS     ) -> Self {
+//RS         Self::new(
+//RS             BundleKind::Game,
+//RS             target,
+//RS             package,
+//RS             version,
+//RS             executable,
+//RS             metadata,
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS /// Human-facing and platform-facing metadata.  `identifier` is the stable
+//RS /// package identity; display text can contain spaces and Unicode.
+//RS #[derive(Clone, Debug, PartialEq, Eq, Default)]
+//RS pub struct BundleMetadata {
+//RS     pub identifier: String,
+//RS     pub display_name: String,
+//RS     pub publisher: String,
+//RS     pub description: String,
+//RS     pub categories: Vec<String>,
+//RS }
+//RS 
+//RS impl BundleMetadata {
+//RS     pub fn new(identifier: impl Into<String>, display_name: impl Into<String>) -> Self {
+//RS         Self {
+//RS             identifier: identifier.into(),
+//RS             display_name: display_name.into(),
+//RS             publisher: String::new(),
+//RS             description: String::new(),
+//RS             categories: Vec::new(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum BundleFileKind {
+//RS     Executable,
+//RS     Launcher,
+//RS     Metadata,
+//RS     Manifest,
+//RS     Icon,
+//RS     Updater,
+//RS     ContentTypes,
+//RS     BlockMap,
+//RS     GameManifest,
+//RS     GameAsset,
+//RS }
+//RS 
+//RS impl BundleFileKind {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Executable => "executable",
+//RS             Self::Launcher => "launcher",
+//RS             Self::Metadata => "metadata",
+//RS             Self::Manifest => "manifest",
+//RS             Self::Icon => "icon",
+//RS             Self::Updater => "updater",
+//RS             Self::ContentTypes => "content-types",
+//RS             Self::BlockMap => "block-map",
+//RS             Self::GameManifest => "game-manifest",
+//RS             Self::GameAsset => "game-asset",
+//RS         }
+//RS     }
+//RS }
+//RS  
+//RS /// One deterministic asset payload carried by a game bundle plan.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct GameBundleAsset {
+//RS     pub path: String,
+//RS     pub mode: u32,
+//RS     pub bytes: Vec<u8>,
+//RS }
+//RS 
+//RS impl GameBundleAsset {
+//RS     pub fn new(path: impl Into<String>, mode: u32, bytes: impl Into<Vec<u8>>) -> Self {
+//RS         Self {
+//RS             path: path.into(),
+//RS             mode,
+//RS             bytes: bytes.into(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn digest(&self) -> String {
+//RS         SHA256::sha256_hex(&self.bytes)
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS /// Canonical bounds shared by the package receipt and the generated game
+//RS /// crash reporter.  The reporter keeps these values in memory and persists at
+//RS /// most one latest report; upload remains disabled unless a transport is
+//RS /// explicitly added by a later adapter.
+//RS pub const GAME_CRASH_MAX_STACKS: u32 = 32;
+//RS pub const GAME_CRASH_MAX_LOGS: u32 = 256;
+//RS pub const GAME_CRASH_MAX_PERSISTED: u32 = 1;
+//RS pub const GAME_CRASH_REPORTER_ABI: &str = "jet-game-crash-reporter-v1";
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct GameCrashReporterSpec {
+//RS     pub installation: String,
+//RS     pub upload_policy: String,
+//RS     pub routing: String,
+//RS     pub memory_stacks: u32,
+//RS     pub memory_logs: u32,
+//RS     pub retention_mode: String,
+//RS     pub retention_path: String,
+//RS     pub retention_limit: u32,
+//RS }
+//RS 
+//RS impl GameCrashReporterSpec {
+//RS     pub fn not_installed() -> Self {
+//RS         Self {
+//RS             installation: "not-installed".into(),
+//RS             upload_policy: "never".into(),
+//RS             routing: "local".into(),
+//RS             memory_stacks: GAME_CRASH_MAX_STACKS,
+//RS             memory_logs: GAME_CRASH_MAX_LOGS,
+//RS             retention_mode: "none".into(),
+//RS             retention_path: String::new(),
+//RS             retention_limit: 0,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn planned() -> Self {
+//RS         Self {
+//RS             installation: "planned".into(),
+//RS             upload_policy: "never".into(),
+//RS             routing: "local".into(),
+//RS             memory_stacks: GAME_CRASH_MAX_STACKS,
+//RS             memory_logs: GAME_CRASH_MAX_LOGS,
+//RS             retention_mode: "bounded-persisted".into(),
+//RS             retention_path: "crash-reports".into(),
+//RS             retention_limit: GAME_CRASH_MAX_PERSISTED,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn installed() -> Self {
+//RS         Self {
+//RS             installation: "installed".into(),
+//RS             upload_policy: "never".into(),
+//RS             routing: "local".into(),
+//RS             memory_stacks: GAME_CRASH_MAX_STACKS,
+//RS             memory_logs: GAME_CRASH_MAX_LOGS,
+//RS             retention_mode: "bounded-persisted".into(),
+//RS             retention_path: "crash-reports".into(),
+//RS             retention_limit: GAME_CRASH_MAX_PERSISTED,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Game-only facts attached to the shared package plan.  The package command
+//RS /// computes these facts; the bundler owns their canonical layout and receipt.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct GameBundleSpec {
+//RS     pub profile: String,
+//RS     pub export_preset: String,
+//RS     pub source_revision: String,
+//RS     pub build_identity: String,
+//RS     pub backend: String,
+//RS     pub renderer: String,
+//RS     pub cook_mode: String,
+//RS     pub development_stripping: bool,
+//RS     pub crash_reporter: String,
+//RS     pub crash_consent: String,
+//RS     pub crash_runtime: GameCrashReporterSpec,
+//RS     pub assets: Vec<GameBundleAsset>,
+//RS }
+//RS 
+//RS impl GameBundleSpec {
+//RS     pub fn new(
+//RS         profile: impl Into<String>,
+//RS         export_preset: impl Into<String>,
+//RS         source_revision: impl Into<String>,
+//RS         backend: impl Into<String>,
+//RS         renderer: impl Into<String>,
+//RS         cook_mode: impl Into<String>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             profile: profile.into(),
+//RS             export_preset: export_preset.into(),
+//RS             source_revision: source_revision.into(),
+//RS             build_identity: "planned".into(),
+//RS             backend: backend.into(),
+//RS             renderer: renderer.into(),
+//RS             cook_mode: cook_mode.into(),
+//RS             development_stripping: false,
+//RS             crash_reporter: "off".into(),
+//RS             crash_consent: "not-requested".into(),
+//RS             crash_runtime: GameCrashReporterSpec::not_installed(),
+//RS             assets: Vec::new(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS 
+//RS /// One exact file in a plan or emitted artifact.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct BundleFile {
+//RS     pub path: String,
+//RS     pub kind: BundleFileKind,
+//RS     pub mode: u32,
+//RS     pub bytes: Vec<u8>,
+//RS }
+//RS 
+//RS impl BundleFile {
+//RS     fn new(path: impl Into<String>, kind: BundleFileKind, mode: u32, bytes: Vec<u8>) -> Self {
+//RS         Self {
+//RS             path: path.into(),
+//RS             kind,
+//RS             mode,
+//RS             bytes,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn digest(&self) -> String {
+//RS         SHA256::sha256_hex(&self.bytes)
+//RS     }
+//RS }
+//RS 
+//RS /// The exact launch paths a later adapter must preserve.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct LaunchDescriptor {
+//RS     pub launcher: String,
+//RS     pub executable: String,
+//RS     pub arguments_passthrough: bool,
+//RS }
+//RS 
+//RS impl LaunchDescriptor {
+//RS     fn new(launcher: impl Into<String>, executable: impl Into<String>) -> Self {
+//RS         Self {
+//RS             launcher: launcher.into(),
+//RS             executable: executable.into(),
+//RS             arguments_passthrough: true,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// A complete, deterministic target layout.  It contains no host-derived
+//RS /// values and can be handed to a platform adapter without re-planning.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct BundlePlan {
+//RS     pub schema_version: u32,
+//RS     pub kind: BundleKind,
+//RS     pub target: BundleTarget,
+//RS     pub package: String,
+//RS     pub version: String,
+//RS     /// Source path of the executable input, retained for receipt provenance.
+//RS     pub executable_source: String,
+//RS     pub artifact_name: String,
+//RS     pub metadata: BundleMetadata,
+//RS     pub files: Vec<BundleFile>,
+//RS     pub launch: LaunchDescriptor,
+//RS     pub inputs: Vec<BundleInputFact>,
+//RS     pub signing_hooks: Vec<SigningHook>,
+//RS     pub updater: Option<UpdaterManifest>,
+//RS     pub game: Option<GameBundleSpec>,
+//RS     pub identity: String,
+//RS }
+//RS 
+//RS impl BundlePlan {
+//RS     pub fn new(spec: &BundleSpec) -> Result<Self, BundleError> {
+//RS         Self::from_spec(spec)
+//RS     }
+//RS 
+//RS     pub fn from_spec(spec: &BundleSpec) -> Result<Self, BundleError> {
+//RS         let mut normalized_spec = spec.clone();
+//RS         normalized_spec.version = if normalized_spec.target == BundleTarget::WindowsMsix {
+//RS             windows_version(&normalized_spec.version)?
+//RS         } else {
+//RS             normalized_spec.version.trim().to_owned()
+//RS         };
+//RS         let spec = &normalized_spec;
+//RS         validate_spec(spec)?;
+//RS         let mut icons = spec.icons.clone();
+//RS         icons.sort_by(|left, right| {
+//RS             left.name
+//RS                 .cmp(&right.name)
+//RS                 .then(left.format.cmp(&right.format))
+//RS                 .then(left.size.cmp(&right.size))
+//RS                 .then(left.digest().cmp(&right.digest()))
+//RS         });
+//RS         let mut hooks = spec.signing_hooks.clone();
+//RS         hooks.sort();
+//RS         let mut categories = spec.metadata.categories.clone();
+//RS         categories.sort();
+//RS 
+//RS         let mut metadata = spec.metadata.clone();
+//RS         metadata.categories = categories;
+//RS         let executable_digest = spec.executable.digest();
+//RS         let mut game = spec.game.clone();
+//RS         if let Some(game) = game.as_mut() {
+//RS             game.assets.sort_by(|left, right| {
+//RS                 left.path
+//RS                     .cmp(&right.path)
+//RS                     .then(left.digest().cmp(&right.digest()))
+//RS             });
+//RS         }
+//RS         let metadata_json = bundle_metadata_json(spec, &metadata, &executable_digest, &icons, &hooks);
+//RS         let mut input_facts = vec![BundleInputFact {
+//RS             role: "executable".into(),
+//RS             path: spec.executable.source.clone(),
+//RS             digest: executable_digest.clone(),
+//RS             bytes: spec.executable.bytes.len() as u64,
+//RS         }];
+//RS         for icon in &icons {
+//RS             if let Some(source) = icon.source.as_ref() {
+//RS                 input_facts.push(BundleInputFact {
+//RS                     role: "icon".into(),
+//RS                     path: source.clone(),
+//RS                     digest: icon.digest(),
+//RS                     bytes: icon.bytes.len() as u64,
+//RS                 });
+//RS             }
+//RS         }
+//RS         if let Some(game) = game.as_ref() {
+//RS             input_facts.push(BundleInputFact {
+//RS                 role: "game-source".into(),
+//RS                 path: "<project>".into(),
+//RS                 digest: game.source_revision.clone(),
+//RS                 bytes: 0,
+//RS             });
+//RS             for asset in &game.assets {
+//RS                 input_facts.push(BundleInputFact {
+//RS                     role: "game-asset".into(),
+//RS                     path: asset.path.clone(),
+//RS                     digest: asset.digest(),
+//RS                     bytes: asset.bytes.len() as u64,
+//RS                 });
+//RS             }
+//RS         }
+//RS         input_facts.sort_by(|left, right| left.role.cmp(&right.role).then(left.path.cmp(&right.path)));
+//RS         let metadata_bytes = metadata_json.bytes();
+//RS         let mut files = Vec::new();
+//RS         let (artifact_name, launch) = match spec.target {
+//RS             BundleTarget::LinuxAppImage => {
+//RS                 let executable = format!("usr/bin/{}", spec.executable.name);
+//RS                 files.push(BundleFile::new(
+//RS                     "AppRun",
+//RS                     BundleFileKind::Launcher,
+//RS                     0o755,
+//RS                     linux_launcher(&spec.executable.name),
+//RS                 ));
+//RS                 files.push(BundleFile::new(
+//RS                     executable.clone(),
+//RS                     BundleFileKind::Executable,
+//RS                     0o755,
+//RS                     spec.executable.bytes.clone(),
+//RS                 ));
+//RS                 let icon_name = icons.first().map(|icon| icon.name.as_str());
+//RS                 files.push(BundleFile::new(
+//RS                     format!("usr/share/applications/{}.desktop", spec.metadata.identifier),
+//RS                     BundleFileKind::Manifest,
+//RS                     0o644,
+//RS                     linux_desktop_file(&metadata, icon_name),
+//RS                 ));
+//RS                 files.push(BundleFile::new(
+//RS                     format!("usr/share/{}/jet-bundle.json", spec.metadata.identifier),
+//RS                     BundleFileKind::Metadata,
+//RS                     0o644,
+//RS                     metadata_bytes.clone(),
+//RS                 ));
+//RS                 for icon in &icons {
+//RS                     let path = format!(
+//RS                         "usr/share/icons/hicolor/{}x{}/apps/{}.{}",
+//RS                         icon.size,
+//RS                         icon.size,
+//RS                         icon.name,
+//RS                         icon.format.extension()
+//RS                     );
+//RS                     files.push(BundleFile::new(
+//RS                         path,
+//RS                         BundleFileKind::Icon,
+//RS                         0o644,
+//RS                         icon.bytes.clone(),
+//RS                     ));
+//RS                 }
+//RS                 if let Some(icon) = icons.first() {
+//RS                     files.push(BundleFile::new(
+//RS                         ".DirIcon",
+//RS                         BundleFileKind::Icon,
+//RS                         0o644,
+//RS                         icon.bytes.clone(),
+//RS                     ));
+//RS                 }
+//RS                 let update_path = format!("usr/share/{}/jet-update.json", spec.metadata.identifier);
+//RS                 if let Some(updater) = spec.updater.as_ref() {
+//RS                     let manifest = updater_manifest(spec, updater, &executable_digest);
+//RS                     files.push(BundleFile::new(
+//RS                         update_path,
+//RS                         BundleFileKind::Updater,
+//RS                         0o644,
+//RS                         manifest.json_bytes(),
+//RS                     ));
+//RS                 }
+//RS                 (
+//RS                     format!("{}{}", spec.metadata.identifier, spec.target.artifact_suffix()),
+//RS                     LaunchDescriptor::new("AppRun", executable),
+//RS                 )
+//RS             },
+//RS             BundleTarget::MacOSApp => {
+//RS                 let root = format!("{}.app", spec.metadata.identifier);
+//RS                 let executable = format!("{root}/Contents/MacOS/{}", spec.executable.name);
+//RS                 files.push(BundleFile::new(
+//RS                     executable.clone(),
+//RS                     BundleFileKind::Executable,
+//RS                     0o755,
+//RS                     spec.executable.bytes.clone(),
+//RS                 ));
+//RS                 let icon_name = icons.first().map(|icon| format!("{}.{}", icon.name, icon.format.extension()));
+//RS                 files.push(BundleFile::new(
+//RS                     format!("{root}/Contents/Info.plist"),
+//RS                     BundleFileKind::Manifest,
+//RS                     0o644,
+//RS                     mac_info_plist(spec, icon_name.as_deref()),
+//RS                 ));
+//RS                 files.push(BundleFile::new(
+//RS                     format!("{root}/Contents/Resources/jet-bundle.json"),
+//RS                     BundleFileKind::Metadata,
+//RS                     0o644,
+//RS                     metadata_bytes.clone(),
+//RS                 ));
+//RS                 for icon in &icons {
+//RS                     files.push(BundleFile::new(
+//RS                         format!(
+//RS                             "{root}/Contents/Resources/{}.{}",
+//RS                             icon.name,
+//RS                             icon.format.extension()
+//RS                         ),
+//RS                         BundleFileKind::Icon,
+//RS                         0o644,
+//RS                         icon.bytes.clone(),
+//RS                     ));
+//RS                 }
+//RS                 if let Some(updater) = spec.updater.as_ref() {
+//RS                     let manifest = updater_manifest(spec, updater, &executable_digest);
+//RS                     files.push(BundleFile::new(
+//RS                         format!("{root}/Contents/Resources/jet-update.json"),
+//RS                         BundleFileKind::Updater,
+//RS                         0o644,
+//RS                         manifest.json_bytes(),
+//RS                     ));
+//RS                 }
+//RS                 (
+//RS                     format!("{}{}", spec.metadata.identifier, spec.target.artifact_suffix()),
+//RS                     LaunchDescriptor::new(
+//RS                         format!("{root}/Contents/MacOS/{}", spec.executable.name),
+//RS                         executable,
+//RS                     ),
+//RS                 )
+//RS             },
+//RS             BundleTarget::WindowsMsix => {
+//RS                 let executable_name = windows_executable_name(&spec.executable.name);
+//RS                 let executable = executable_name.clone();
+//RS                 files.push(BundleFile::new(
+//RS                     executable.clone(),
+//RS                     BundleFileKind::Executable,
+//RS                     0o755,
+//RS                     spec.executable.bytes.clone(),
+//RS                 ));
+//RS                 let logo = icons.first().map(|icon| {
+//RS                     format!("Assets/{}.{}", icon.name, icon.format.extension())
+//RS                 });
+//RS                 files.push(BundleFile::new(
+//RS                     "AppxManifest.xml",
+//RS                     BundleFileKind::Manifest,
+//RS                     0o644,
+//RS                     windows_manifest(spec, &executable, logo.as_deref())?,
+//RS                 ));
+//RS                 let content_types = windows_content_types(&files);
+//RS                 files.push(BundleFile::new(
+//RS                     "[Content_Types].xml",
+//RS                     BundleFileKind::ContentTypes,
+//RS                     0o644,
+//RS                     content_types,
+//RS                 ));
+//RS                 files.push(BundleFile::new(
+//RS                     "jet/jet-bundle.json",
+//RS                     BundleFileKind::Metadata,
+//RS                     0o644,
+//RS                     metadata_bytes,
+//RS                 ));
+//RS                 for icon in &icons {
+//RS                     files.push(BundleFile::new(
+//RS                         format!("Assets/{}.{}", icon.name, icon.format.extension()),
+//RS                         BundleFileKind::Icon,
+//RS                         0o644,
+//RS                         icon.bytes.clone(),
+//RS                     ));
+//RS                 }
+//RS                 if let Some(updater) = spec.updater.as_ref() {
+//RS                     let manifest = updater_manifest(spec, updater, &executable_digest);
+//RS                     files.push(BundleFile::new(
+//RS                         "jet/jet-update.json",
+//RS                         BundleFileKind::Updater,
+//RS                         0o644,
+//RS                         manifest.json_bytes(),
+//RS                     ));
+//RS                 }
+//RS                 (
+//RS                     format!("{}{}", spec.metadata.identifier, spec.target.artifact_suffix()),
+//RS                     LaunchDescriptor::new(executable.clone(), executable),
+//RS                 )
+//RS             }
+//RS         };
+//RS         if let Some(game) = game.as_ref() {
+//RS             files.push(BundleFile::new(
+//RS                 game_manifest_path(spec),
+//RS                 BundleFileKind::GameManifest,
+//RS                 0o644,
+//RS                 game_manifest_json(spec, game).bytes(),
+//RS             ));
+//RS             for asset in &game.assets {
+//RS                 files.push(BundleFile::new(
+//RS                     game_asset_path(spec, &asset.path),
+//RS                     BundleFileKind::GameAsset,
+//RS                     asset.mode,
+//RS                     asset.bytes.clone(),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         if spec.target == BundleTarget::WindowsMsix {
+//RS             let content_types = windows_content_types(&files);
+//RS             if let Some(file) = files.iter_mut().find(|file| file.kind == BundleFileKind::ContentTypes) {
+//RS                 file.bytes = content_types;
+//RS             }
+//RS             let block_map = windows_block_map(&files);
+//RS             files.push(BundleFile::new(
+//RS                 "AppxBlockMap.xml",
+//RS                 BundleFileKind::BlockMap,
+//RS                 0o644,
+//RS                 block_map,
+//RS             ));
+//RS         }
+//RS 
+//RS         let mut paths = BTreeSet::new();
+//RS         for file in &files {
+//RS             if !paths.insert(file.path.clone()) {
+//RS                 return Err(BundleError::DuplicatePath(file.path.clone()));
+//RS             }
+//RS         }
+//RS         files.sort_by(|left, right| left.path.cmp(&right.path));
+//RS         let mut plan = Self {
+//RS             schema_version: PACKAGE_BUNDLE_SCHEMA_VERSION,
+//RS             kind: spec.kind,
+//RS             target: spec.target,
+//RS             package: spec.package.clone(),
+//RS             version: spec.version.clone(),
+//RS             executable_source: spec.executable.source.clone(),
+//RS             artifact_name,
+//RS             metadata,
+//RS             files,
+//RS             launch,
+//RS             inputs: input_facts,
+//RS             signing_hooks: hooks,
+//RS             updater: spec
+//RS                 .updater
+//RS                 .as_ref()
+//RS                 .map(|updater| updater_manifest(spec, updater, &executable_digest)),
+//RS             game: game.clone(),
+//RS             identity: String::new(),
+//RS         };
+//RS         plan.identity = format!("jet-bundle-plan-sha256:{}", SHA256::sha256_hex(&plan.canonical_bytes()));
+//RS         Ok(plan)
+//RS     }
+//RS 
+//RS     /// Return the deterministic logical artifact view used by callers that do
+//RS     /// not have a platform transport.  The package command uses
+//RS     /// [`Self::materialized_artifact`] after writing the target artifact.
+//RS     pub fn emit(&self) -> BundleArtifact {
+//RS         self.materialized_artifact(self.logical_artifact_sha256(), self.logical_artifact_bytes())
+//RS     }
+//RS 
+//RS     /// Digest of the checked plan's sorted file set.  Platform adapters may
+//RS     /// replace this with the digest of their actual transport bytes.
+//RS     pub fn logical_artifact_sha256(&self) -> String {
+//RS         artifact_digest(&self.files)
+//RS     }
+//RS 
+//RS     /// Sum of the checked plan's file payloads.
+//RS     pub fn logical_artifact_bytes(&self) -> u64 {
+//RS         self.files
+//RS             .iter()
+//RS             .map(|file| file.bytes.len() as u64)
+//RS             .sum()
+//RS     }
+//RS 
+//RS     /// Build an artifact and typed receipt from an adapter's materialized
+//RS     /// digest and byte count.  The plan remains the semantic authority; the
+//RS     /// adapter contributes only transport facts.
+//RS     pub fn materialized_artifact(
+//RS         &self,
+//RS         artifact_sha256: impl Into<String>,
+//RS         artifact_bytes: u64,
+//RS     ) -> BundleArtifact {
+//RS         let artifact_sha256 = artifact_sha256.into();
+//RS         let receipt = BundleReceipt::from_plan_with_bytes(self, &artifact_sha256, artifact_bytes);
+//RS         BundleArtifact {
+//RS             schema_version: self.schema_version,
+//RS             kind: self.kind,
+//RS             target: self.target,
+//RS             package: self.package.clone(),
+//RS             version: self.version.clone(),
+//RS             artifact_name: self.artifact_name.clone(),
+//RS             files: self.files.clone(),
+//RS             launch: self.launch.clone(),
+//RS             receipt,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn artifact(&self) -> BundleArtifact {
+//RS         self.emit()
+//RS     }
+//RS 
+//RS     pub fn file_paths(&self) -> Vec<String> {
+//RS         self.files.iter().map(|file| file.path.clone()).collect()
+//RS     }
+//RS 
+//RS     pub fn identity(&self) -> String {
+//RS         let mut identity_plan = self.clone();
+//RS         identity_plan.identity.clear();
+//RS         format!(
+//RS             "jet-bundle-plan-sha256:{}",
+//RS             SHA256::sha256_hex(&identity_plan.canonical_bytes())
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn canonical_bytes(&self) -> Vec<u8> {
+//RS         let mut canonical_plan = self.clone();
+//RS         canonical_plan.identity.clear();
+//RS         // Source paths are receipt provenance, not package meaning.  Keep the
+//RS         // role, digest, and byte count in the identity so identical inputs
+//RS         // from different checkouts produce one cache key.
+//RS         canonical_plan.executable_source.clear();
+//RS         for input in &mut canonical_plan.inputs {
+//RS             if matches!(input.role.as_str(), "executable" | "icon") {
+//RS                 input.path.clear();
+//RS             }
+//RS         }
+//RS         bundle_plan_json(&canonical_plan).bytes()
+//RS     }
+//RS 
+//RS     pub fn json(&self) -> String {
+//RS         String::from_utf8(self.to_json().bytes()).expect("canonical bundle JSON is UTF-8")
+//RS     }
+//RS 
+//RS     pub fn to_json(&self) -> CanonicalJson {
+//RS         bundle_plan_json(self)
+//RS     }
+//RS }
+//RS 
+//RS /// Bytes plus receipt facts ready for a platform adapter to materialize.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct BundleArtifact {
+//RS     pub schema_version: u32,
+//RS     pub kind: BundleKind,
+//RS     pub target: BundleTarget,
+//RS     pub package: String,
+//RS     pub version: String,
+//RS     pub artifact_name: String,
+//RS     pub files: Vec<BundleFile>,
+//RS     pub launch: LaunchDescriptor,
+//RS     pub receipt: BundleReceipt,
+//RS }
+//RS 
+//RS impl BundleArtifact {
+//RS     pub fn digest(&self) -> String {
+//RS         self.receipt.artifact_sha256.clone()
+//RS     }
+//RS 
+//RS     pub fn bytes(&self) -> u64 {
+//RS         self.receipt.artifact_bytes
+//RS     }
+//RS 
+//RS     pub fn file_paths(&self) -> Vec<String> {
+//RS         self.files.iter().map(|file| file.path.clone()).collect()
+//RS     }
+//RS 
+//RS     pub fn canonical_bytes(&self) -> Vec<u8> {
+//RS         self.to_json().bytes()
+//RS     }
+//RS 
+//RS     pub fn json(&self) -> String {
+//RS         String::from_utf8(self.canonical_bytes()).expect("canonical bundle artifact JSON is UTF-8")
+//RS     }
+//RS 
+//RS     pub fn to_json(&self) -> CanonicalJson {
+//RS         CanonicalJson::object([
+//RS             ("artifact_name".into(), text(&self.artifact_name)),
+//RS             ("artifact_sha256".into(), text(&self.digest())),
+//RS             ("format".into(), text(PACKAGE_BUNDLE_FORMAT)),
+//RS             ("kind".into(), text(self.kind.as_str())),
+//RS             ("package".into(), text(&self.package)),
+//RS             ("receipt".into(), self.receipt.to_json()),
+//RS             ("schema_version".into(), integer(self.schema_version)),
+//RS             ("target".into(), text(self.target.as_str())),
+//RS             ("version".into(), text(&self.version)),
+//RS         ])
+//RS         .expect("fixed bundle artifact JSON keys")
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS /// Updater manifest generated from the exact executable payload.
+//RS #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+//RS pub struct UpdaterManifest {
+//RS     pub schema: String,
+//RS     pub package: String,
+//RS     pub version: String,
+//RS     pub target: BundleTarget,
+//RS     pub channel: String,
+//RS     pub artifact: String,
+//RS     pub url: String,
+//RS     pub signature_url: Option<String>,
+//RS     pub release_notes_url: Option<String>,
+//RS     pub payload_sha256: String,
+//RS     pub payload_bytes: u64,
+//RS }
+//RS 
+//RS impl UpdaterManifest {
+//RS     pub fn to_json(&self) -> CanonicalJson {
+//RS         CanonicalJson::object([
+//RS             ("artifact".into(), text(&self.artifact)),
+//RS             ("channel".into(), text(&self.channel)),
+//RS             ("package".into(), text(&self.package)),
+//RS             ("payload_bytes".into(), integer(self.payload_bytes)),
+//RS             ("payload_sha256".into(), text(&self.payload_sha256)),
+//RS             ("release_notes_url".into(), optional_text(self.release_notes_url.as_deref())),
+//RS             ("schema".into(), text(&self.schema)),
+//RS             ("signature_url".into(), optional_text(self.signature_url.as_deref())),
+//RS             ("target".into(), text(self.target.as_str())),
+//RS             ("url".into(), text(&self.url)),
+//RS             ("version".into(), text(&self.version)),
+//RS         ])
+//RS         .expect("fixed updater manifest JSON keys")
+//RS     }
+//RS 
+//RS     pub fn json_bytes(&self) -> Vec<u8> {
+//RS         self.to_json().bytes()
+//RS     }
+//RS 
+//RS     pub fn json(&self) -> String {
+//RS         String::from_utf8(self.json_bytes()).expect("canonical updater JSON is UTF-8")
+//RS     }
+//RS }
+//RS 
+//RS /// Whether the artifact facts describe only the checked plan or a transport
+//RS /// produced by a platform adapter.
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum BundleArtifactStatus {
+//RS     Planned,
+//RS     Materialized,
+//RS }
+//RS 
+//RS impl BundleArtifactStatus {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Planned => "planned",
+//RS             Self::Materialized => "materialized",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Signing state recorded by an adapter.  A declared hook is only
+//RS /// `Requested`; it never implies that a signer ran or produced a signature.
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum BundleSigningStatus {
+//RS     NotRequested,
+//RS     Requested,
+//RS     Signed,
+//RS     Failed,
+//RS }
+//RS 
+//RS impl BundleSigningStatus {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::NotRequested => "not-requested",
+//RS             Self::Requested => "requested",
+//RS             Self::Signed => "signed",
+//RS             Self::Failed => "failed",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Signing execution facts attached after a platform adapter runs.
+//RS #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+//RS pub struct BundleSigningFact {
+//RS     pub status: BundleSigningStatus,
+//RS     pub tool: Option<String>,
+//RS     pub tool_identity: Option<String>,
+//RS     pub tool_version: Option<String>,
+//RS     pub diagnostic: Option<String>,
+//RS }
+//RS 
+//RS impl BundleSigningFact {
+//RS     pub fn signed() -> Self {
+//RS         Self {
+//RS             status: BundleSigningStatus::Signed,
+//RS             tool: None,
+//RS             tool_identity: None,
+//RS             tool_version: None,
+//RS             diagnostic: None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn failed(diagnostic: impl Into<String>) -> Self {
+//RS         Self {
+//RS             status: BundleSigningStatus::Failed,
+//RS             tool: None,
+//RS             tool_identity: None,
+//RS             tool_version: None,
+//RS             diagnostic: Some(diagnostic.into()),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn with_tool(
+//RS         mut self,
+//RS         tool: impl Into<String>,
+//RS         tool_identity: impl Into<String>,
+//RS         tool_version: impl Into<String>,
+//RS     ) -> Self {
+//RS         self.tool = Some(tool.into());
+//RS         self.tool_identity = Some(tool_identity.into());
+//RS         self.tool_version = Some(tool_version.into());
+//RS         self
+//RS     }
+//RS }
+//RS 
+//RS /// Installability verdict derived from materialization and signing evidence.
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum BundleInstallability {
+//RS     NotMaterialized,
+//RS     Installable,
+//RS     RequiresSigning,
+//RS     NotInstallable,
+//RS }
+//RS 
+//RS impl BundleInstallability {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::NotMaterialized => "not-materialized",
+//RS             Self::Installable => "installable",
+//RS             Self::RequiresSigning => "requires-signing",
+//RS             Self::NotInstallable => "not-installable",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl BundleSigningFact {
+//RS     fn to_json(&self) -> CanonicalJson {
+//RS         CanonicalJson::object([
+//RS             ("diagnostic".into(), optional_receipt_text(self.diagnostic.as_deref())),
+//RS             ("status".into(), text(self.status.as_str())),
+//RS             ("tool".into(), optional_receipt_text(self.tool.as_deref())),
+//RS             ("tool_identity".into(), optional_receipt_text(self.tool_identity.as_deref())),
+//RS             ("tool_version".into(), optional_receipt_text(self.tool_version.as_deref())),
+//RS         ])
+//RS         .expect("fixed bundle signing JSON keys")
+//RS     }
+//RS }
+//RS 
+//RS /// Machine-readable facts carried beside a packaged artifact.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct BundleReceipt {
+//RS     pub schema: String,
+//RS     pub plan_identity: String,
+//RS     pub kind: BundleKind,
+//RS     pub target: BundleTarget,
+//RS     pub package: String,
+//RS     pub version: String,
+//RS     pub executable_source: String,
+//RS     pub artifact_name: String,
+//RS     pub artifact_sha256: String,
+//RS     pub artifact_bytes: u64,
+//RS     pub files: Vec<BundleFileFact>,
+//RS     pub launch: LaunchDescriptor,
+//RS     pub inputs: Vec<BundleInputFact>,
+//RS     pub signing_hooks: Vec<SigningHook>,
+//RS     pub updater: Option<UpdaterManifest>,
+//RS     pub game: Option<GameBundleSpec>,
+//RS     pub materializer: Option<BundleMaterializerFact>,
+//RS     pub signing: Option<BundleSigningFact>,
+//RS 
+//RS }
+//RS impl BundleReceipt {
+//RS     pub fn from_plan(plan: &BundlePlan, artifact_sha256: &str) -> Self {
+//RS         Self::from_plan_with_bytes(plan, artifact_sha256, plan.logical_artifact_bytes())
+//RS     }
+//RS 
+//RS     pub fn from_plan_with_bytes(
+//RS         plan: &BundlePlan,
+//RS         artifact_sha256: &str,
+//RS         artifact_bytes: u64,
+//RS     ) -> Self {
+//RS         let mut files = plan
+//RS             .files
+//RS             .iter()
+//RS             .map(|file| BundleFileFact {
+//RS                 path: file.path.clone(),
+//RS                 kind: file.kind,
+//RS                 mode: file.mode,
+//RS                 bytes: file.bytes.len() as u64,
+//RS                 sha256: file.digest(),
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         files.sort_by(|left, right| left.path.cmp(&right.path));
+//RS 
+//RS         Self {
+//RS             schema: PACKAGE_BUNDLE_RECEIPT_SCHEMA.into(),
+//RS             plan_identity: plan.identity.clone(),
+//RS             kind: plan.kind,
+//RS             target: plan.target,
+//RS             package: plan.package.clone(),
+//RS             version: plan.version.clone(),
+//RS             executable_source: plan.executable_source.clone(),
+//RS             artifact_name: plan.artifact_name.clone(),
+//RS             artifact_sha256: artifact_sha256.into(),
+//RS             artifact_bytes,
+//RS             files,
+//RS             launch: plan.launch.clone(),
+//RS             inputs: plan.inputs.clone(),
+//RS             signing_hooks: plan.signing_hooks.clone(),
+//RS             updater: plan.updater.clone(),
+//RS             game: plan.game.clone(),
+//RS             materializer: None,
+//RS             signing: None,
+//RS         }
+//RS }
+//RS 
+//RS     pub fn with_materializer(mut self, materializer: BundleMaterializerFact) -> Self {
+//RS         self.materializer = Some(materializer);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_signing(mut self, signing: BundleSigningFact) -> Self {
+//RS         self.signing = Some(signing);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn record_materializer(&mut self, materializer: BundleMaterializerFact) {
+//RS         self.materializer = Some(materializer);
+//RS     }
+//RS 
+//RS     pub fn record_signing(&mut self, signing: BundleSigningFact) {
+//RS         self.signing = Some(signing);
+//RS     }
+//RS 
+//RS     pub fn artifact_status(&self) -> BundleArtifactStatus {
+//RS         if self.materializer.is_some() {
+//RS             BundleArtifactStatus::Materialized
+//RS         } else {
+//RS             BundleArtifactStatus::Planned
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn signing_status(&self) -> BundleSigningStatus {
+//RS         self.signing.as_ref().map_or_else(
+//RS             || {
+//RS                 if self.signing_hooks.is_empty() {
+//RS                     BundleSigningStatus::NotRequested
+//RS                 } else {
+//RS                     BundleSigningStatus::Requested
+//RS                 }
+//RS             },
+//RS             |fact| fact.status,
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn installability(&self) -> BundleInstallability {
+//RS         if self.materializer.is_none() {
+//RS             return BundleInstallability::NotMaterialized;
+//RS         }
+//RS         match self.signing_status() {
+//RS             BundleSigningStatus::Failed => BundleInstallability::NotInstallable,
+//RS             BundleSigningStatus::Requested => BundleInstallability::RequiresSigning,
+//RS             BundleSigningStatus::Signed => BundleInstallability::Installable,
+//RS             BundleSigningStatus::NotRequested if self.target == BundleTarget::WindowsMsix => {
+//RS                 BundleInstallability::NotInstallable
+//RS             }
+//RS             BundleSigningStatus::NotRequested => BundleInstallability::Installable,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn to_json(&self) -> CanonicalJson {
+//RS         CanonicalJson::object([
+//RS             ("artifact_bytes".into(), integer(self.artifact_bytes)),
+//RS             ("artifact_name".into(), text(&self.artifact_name)),
+//RS             ("artifact_sha256".into(), text(&self.artifact_sha256)),
+//RS             ("artifact_status".into(), text(self.artifact_status().as_str())),
+//RS             ("executable_source".into(), text(&receipt_source(&self.executable_source))),
+//RS             ("files".into(), CanonicalJson::Array(self.files.iter().map(bundle_file_receipt_json).collect())),
+//RS             ("game".into(), self.game.as_ref().map(game_spec_receipt_json).unwrap_or(CanonicalJson::Null)),
+//RS             ("inputs".into(), CanonicalJson::Array(self.inputs.iter().map(bundle_input_receipt_json).collect())),
+//RS             ("installability".into(), text(self.installability().as_str())),
+//RS             ("kind".into(), text(self.kind.as_str())),
+//RS             ("launch".into(), launch_json(&self.launch)),
+//RS             (
+//RS                 "materializer".into(),
+//RS                 self.materializer
+//RS                     .as_ref()
+//RS                     .map(BundleMaterializerFact::to_json)
+//RS                     .unwrap_or(CanonicalJson::Null),
+//RS             ),
+//RS             ("package".into(), text(&self.package)),
+//RS             ("plan_identity".into(), text(&self.plan_identity)),
+//RS             ("schema".into(), text(&self.schema)),
+//RS             (
+//RS                 "signing".into(),
+//RS                 self.signing
+//RS                     .as_ref()
+//RS                     .map(BundleSigningFact::to_json)
+//RS                     .unwrap_or(CanonicalJson::Null),
+//RS             ),
+//RS             (
+//RS                 "signing_hooks".into(),
+//RS                 CanonicalJson::Array(self.signing_hooks.iter().map(signing_hook_receipt_json).collect()),
+//RS             ),
+//RS             ("signing_status".into(), text(self.signing_status().as_str())),
+//RS             ("target".into(), text(self.target.as_str())),
+//RS             (
+//RS                 "updater".into(),
+//RS                 self.updater
+//RS                     .as_ref()
+//RS                     .map(updater_receipt_json)
+//RS                     .unwrap_or(CanonicalJson::Null),
+//RS             ),
+//RS             ("version".into(), text(&self.version)),
+//RS         ])
+//RS         .expect("fixed bundle receipt JSON keys")
+//RS 
+//RS     }
+//RS     pub fn canonical_bytes(&self) -> Vec<u8> {
+//RS         self.to_json().bytes()
+//RS     }
+//RS 
+//RS     pub fn json(&self) -> String {
+//RS         String::from_utf8(self.canonical_bytes()).expect("canonical bundle receipt JSON is UTF-8")
+//RS     }
+//RS }
+//RS 
+//RS /// Identity and authority facts for the adapter that produced the transport.
+//RS /// `tool_identity` is the SHA-256 digest of the resolved executable.
+//RS #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+//RS pub struct BundleMaterializerFact {
+//RS     pub tool: String,
+//RS     pub tool_identity: String,
+//RS     pub tool_version: String,
+//RS     pub executable: String,
+//RS     pub authority: String,
+//RS     pub mechanism: String,
+//RS     pub policy: String,
+//RS }
+//RS 
+//RS impl BundleMaterializerFact {
+//RS     pub fn to_json(&self) -> CanonicalJson {
+//RS         CanonicalJson::object([
+//RS             ("authority".into(), text(&receipt_safe_text(&self.authority))),
+//RS             ("executable".into(), text(&receipt_safe_text(&self.executable))),
+//RS             ("mechanism".into(), text(&receipt_safe_text(&self.mechanism))),
+//RS             ("policy".into(), text(&receipt_safe_text(&self.policy))),
+//RS             ("tool".into(), text(&receipt_safe_text(&self.tool))),
+//RS             ("tool_identity".into(), text(&receipt_safe_text(&self.tool_identity))),
+//RS             ("tool_version".into(), text(&receipt_safe_text(&self.tool_version))),
+//RS         ])
+//RS         .expect("fixed bundle materializer JSON keys")
+//RS     }
+//RS }
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct BundleFileFact {
+//RS     pub path: String,
+//RS     pub kind: BundleFileKind,
+//RS     pub mode: u32,
+//RS     pub bytes: u64,
+//RS     pub sha256: String,
+//RS }
+//RS 
+//RS fn bundle_file_receipt_json(file: &BundleFileFact) -> CanonicalJson {
+//RS     CanonicalJson::object([
+//RS         ("bytes".into(), integer(file.bytes)),
+//RS         ("kind".into(), text(file.kind.as_str())),
+//RS         ("mode".into(), integer(file.mode)),
+//RS         ("path".into(), text(&receipt_source(&file.path))),
+//RS         ("sha256".into(), text(&file.sha256)),
+//RS     ])
+//RS     .expect("fixed receipt bundle file fact JSON keys")
+//RS }
+//RS 
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct BundleInputFact {
+//RS     pub role: String,
+//RS     pub path: String,
+//RS     pub digest: String,
+//RS     pub bytes: u64,
+//RS }
+//RS 
+//RS impl BundleInputFact {
+//RS     fn to_json(&self) -> CanonicalJson {
+//RS         CanonicalJson::object([
+//RS             ("bytes".into(), integer(self.bytes)),
+//RS             ("digest".into(), text(&self.digest)),
+//RS             ("path".into(), text(&self.path)),
+//RS             ("role".into(), text(&self.role)),
+//RS         ])
+//RS         .expect("fixed bundle input fact JSON keys")
+//RS     }
+//RS }
+//RS 
+//RS /// Alias used by command adapters and game packaging callers.
+//RS pub type PackageBundleSpec = BundleSpec;
+//RS pub type PackageBundlePlan = BundlePlan;
+//RS pub type BundleFilePlan = BundleFile;
+//RS pub type PackageTarget = BundleTarget;
+//RS pub type PackageKind = BundleKind;
+//RS pub type PackageBundleArtifact = BundleArtifact;
+//RS pub type PackageBundleReceipt = BundleReceipt;
+//RS pub type UpdateManifest = UpdaterManifest;
+//RS pub type SigningInput = SigningHookInput;
+//RS 
+//RS pub fn package_bundle_plan(spec: &BundleSpec) -> Result<BundlePlan, BundleError> {
+//RS     BundlePlan::from_spec(spec)
+//RS }
+//RS 
+//RS pub fn emit_package_bundle(spec: &BundleSpec) -> Result<BundleArtifact, BundleError> {
+//RS     Ok(BundlePlan::from_spec(spec)?.emit())
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub enum BundleError {
+//RS     EmptyField(&'static str),
+//RS     InvalidField { field: String, reason: String },
+//RS     InvalidPath { field: String, path: String },
+//RS     DuplicatePath(String),
+//RS     InvalidWindowsVersion(String),
+//RS }
+//RS 
+//RS impl fmt::Display for BundleError {
+//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         match self {
+//RS             Self::EmptyField(field) => write!(formatter, "bundle field `{field}` is empty"),
+//RS             Self::InvalidField { field, reason } => write!(formatter, "bundle field `{field}` {reason}"),
+//RS             Self::InvalidPath { field, path } => write!(formatter, "bundle {field} path `{path}` is invalid"),
+//RS             Self::DuplicatePath(path) => write!(formatter, "bundle emits duplicate path `{path}`"),
+//RS             Self::InvalidWindowsVersion(version) => write!(formatter, "bundle version `{version}` is not a Windows MSIX version"),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::error::Error for BundleError {}
+//RS 
+//RS fn validate_spec(spec: &BundleSpec) -> Result<(), BundleError> {
+//RS     validate_component("package", &spec.package)?;
+//RS     validate_component("version", &spec.version)?;
+//RS     validate_component("executable.name", &spec.executable.name)?;
+//RS     validate_source("executable.source", &spec.executable.source)?;
+//RS     validate_component("metadata.identifier", &spec.metadata.identifier)?;
+//RS     validate_text("metadata.display_name", &spec.metadata.display_name)?;
+//RS     validate_text("metadata.publisher", &spec.metadata.publisher)?;
+//RS     validate_text("metadata.description", &spec.metadata.description)?;
+//RS     for category in &spec.metadata.categories {
+//RS         validate_text("metadata.category", category)?;
+//RS     }
+//RS     if spec.target == BundleTarget::WindowsMsix {
+//RS         if spec.metadata.publisher.trim().is_empty() {
+//RS             return Err(BundleError::EmptyField("metadata.publisher"));
+//RS         }
+//RS         windows_version(&spec.version)?;
+//RS     }
+//RS     for icon in &spec.icons {
+//RS         validate_component("icon.name", &icon.name)?;
+//RS         if icon.size == 0 {
+//RS             return Err(BundleError::InvalidField {
+//RS                 field: "icon.size".into(),
+//RS                 reason: "must be greater than zero".into(),
+//RS             });
+//RS         }
+//RS         if let Some(source) = icon.source.as_deref() {
+//RS             validate_source("icon.source", source)?;
+//RS         }
+//RS     }
+//RS     validate_target_metadata(spec)?;
+//RS     for hook in &spec.signing_hooks {
+//RS         validate_component("signing_hook.name", &hook.name)?;
+//RS         validate_source("signing_hook.program", &hook.program)?;
+//RS         for argument in &hook.args {
+//RS             validate_text("signing_hook.argument", argument)?;
+//RS         }
+//RS         for input in &hook.inputs {
+//RS             validate_source("signing_hook.input.path", &input.path)?;
+//RS             validate_component("signing_hook.input.digest", &input.digest)?;
+//RS         }
+//RS     }
+//RS     if let Some(game) = &spec.game {
+//RS         if spec.kind != BundleKind::Game {
+//RS             return Err(BundleError::InvalidField {
+//RS                 field: "game".into(),
+//RS                 reason: "is only valid for a game bundle".into(),
+//RS             });
+//RS         }
+//RS         validate_component("game.profile", &game.profile)?;
+//RS         validate_component("game.export_preset", &game.export_preset)?;
+//RS         validate_text("game.source_revision", &game.source_revision)?;
+//RS         validate_text("game.build_identity", &game.build_identity)?;
+//RS         validate_component("game.backend", &game.backend)?;
+//RS         validate_component("game.renderer", &game.renderer)?;
+//RS         validate_component("game.cook_mode", &game.cook_mode)?;
+//RS         validate_component("game.crash_reporter", &game.crash_reporter)?;
+//RS         validate_component("game.crash_consent", &game.crash_consent)?;
+//RS         validate_game_crash_runtime(&game.crash_reporter, &game.crash_consent, &game.crash_runtime)?;
+//RS         let mut asset_paths = BTreeSet::new();
+//RS         for asset in &game.assets {
+//RS             validate_game_asset_path(&asset.path)?;
+//RS             if !asset_paths.insert(asset.path.clone()) {
+//RS                 return Err(BundleError::DuplicatePath(asset.path.clone()));
+//RS             }
+//RS         }
+//RS     } else if spec.kind == BundleKind::Game {
+//RS         return Err(BundleError::InvalidField {
+//RS             field: "game".into(),
+//RS             reason: "game bundles need game profile and asset facts".into(),
+//RS         });
+//RS     }
+//RS     if let Some(updater) = &spec.updater {
+//RS         validate_component("updater.channel", &updater.channel)?;
+//RS         validate_url("updater.url", &updater.url)?;
+//RS         if let Some(url) = updater.signature_url.as_deref() {
+//RS             validate_url("updater.signature_url", url)?;
+//RS         }
+//RS         if let Some(url) = updater.release_notes_url.as_deref() {
+//RS             validate_url("updater.release_notes_url", url)?;
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS fn validate_target_metadata(spec: &BundleSpec) -> Result<(), BundleError> {
+//RS     match spec.target {
+//RS         BundleTarget::LinuxAppImage => {
+//RS             if spec.icons.iter().any(|icon| matches!(icon.format, IconFormat::Icns | IconFormat::Ico)) {
+//RS                 return Err(BundleError::InvalidField {
+//RS                     field: "icon.format".into(),
+//RS                     reason: "is not supported by linux-appimage".into(),
+//RS                 });
+//RS             }
+//RS         }
+//RS         BundleTarget::MacOSApp => {
+//RS             if spec.icons.iter().any(|icon| icon.format != IconFormat::Icns) {
+//RS                 return Err(BundleError::InvalidField {
+//RS                     field: "icon.format".into(),
+//RS                     reason: "macos-app requires icns icons".into(),
+//RS                 });
+//RS             }
+//RS         }
+//RS         BundleTarget::WindowsMsix => {
+//RS             if spec.metadata.identifier.len() > 50
+//RS                 || !spec.metadata.identifier.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-'))
+//RS                 || !spec.metadata.identifier.as_bytes().first().is_some_and(|byte| byte.is_ascii_alphanumeric())
+//RS             {
+//RS                 return Err(BundleError::InvalidField {
+//RS                     field: "metadata.identifier".into(),
+//RS                     reason: "must be an MSIX-safe identifier (ASCII letters, digits, dots, or hyphens; max 50 bytes)".into(),
+//RS                 });
+//RS             }
+//RS             if !spec.metadata.publisher.trim_start().starts_with("CN=") {
+//RS                 return Err(BundleError::InvalidField {
+//RS                     field: "metadata.publisher".into(),
+//RS                     reason: "must be a distinguished name beginning with `CN=` for windows-msix".into(),
+//RS                 });
+//RS             }
+//RS             if spec.icons.iter().any(|icon| !matches!(icon.format, IconFormat::Png | IconFormat::Ico)) {
+//RS                 return Err(BundleError::InvalidField {
+//RS                     field: "icon.format".into(),
+//RS                     reason: "windows-msix supports png or ico icons".into(),
+//RS                 });
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_game_crash_runtime(
+//RS     reporter: &str,
+//RS     consent: &str,
+//RS     runtime: &GameCrashReporterSpec,
+//RS ) -> Result<(), BundleError> {
+//RS     if !matches!(reporter, "off" | "on" | "opt-in") {
+//RS         return Err(BundleError::InvalidField {
+//RS             field: "game.crash_reporter".into(),
+//RS             reason: "must be `off`, `on`, or `opt-in`".into(),
+//RS         });
+//RS     }
+//RS     if !matches!(consent, "not-requested" | "granted" | "denied") {
+//RS         return Err(BundleError::InvalidField {
+//RS             field: "game.crash_consent".into(),
+//RS             reason: "must be `not-requested`, `granted`, or `denied`".into(),
+//RS         });
+//RS     }
+//RS     if reporter == "on" && consent != "granted" {
+//RS         return Err(BundleError::InvalidField {
+//RS             field: "game.crash_consent".into(),
+//RS             reason: "must be `granted` when game crash reporter is `on`".into(),
+//RS         });
+//RS     }
+//RS     if reporter == "off" && consent == "granted" {
+//RS         return Err(BundleError::InvalidField {
+//RS             field: "game.crash_consent".into(),
+//RS             reason: "cannot be `granted` when game crash reporter is `off`".into(),
+//RS         });
+//RS     }
+//RS     if !matches!(
+//RS         runtime.installation.as_str(),
+//RS         "not-installed" | "planned" | "installed"
+//RS     ) {
+//RS         return Err(BundleError::InvalidField {
+//RS             field: "game.crash_runtime.installation".into(),
+//RS             reason: "must be `not-installed`, `planned`, or `installed`".into(),
+//RS         });
+//RS     }
+//RS     if runtime.upload_policy != "never" {
+//RS         return Err(BundleError::InvalidField {
+//RS             field: "game.crash_runtime.upload_policy".into(),
+//RS             reason: "must be `never` until an explicit upload transport is authorized".into(),
+//RS         });
+//RS     }
+//RS     if runtime.routing != "local" {
+//RS         return Err(BundleError::InvalidField {
+//RS             field: "game.crash_runtime.routing".into(),
+//RS             reason: "must be `local` until an explicit upload transport is authorized".into(),
+//RS         });
+//RS     }
+//RS     if runtime.memory_stacks != GAME_CRASH_MAX_STACKS {
+//RS         return Err(BundleError::InvalidField {
+//RS             field: "game.crash_runtime.memory_stacks".into(),
+//RS             reason: format!("must equal the canonical bound {GAME_CRASH_MAX_STACKS}"),
+//RS         });
+//RS     }
+//RS     if runtime.memory_logs != GAME_CRASH_MAX_LOGS {
+//RS         return Err(BundleError::InvalidField {
+//RS             field: "game.crash_runtime.memory_logs".into(),
+//RS             reason: format!("must equal the canonical bound {GAME_CRASH_MAX_LOGS}"),
+//RS         });
+//RS     }
+//RS     let active = reporter != "off" && consent == "granted";
+//RS     if active {
+//RS         if !matches!(runtime.installation.as_str(), "planned" | "installed") {
+//RS             return Err(BundleError::InvalidField {
+//RS                 field: "game.crash_runtime.installation".into(),
+//RS                 reason: "an active reporter must be planned or installed".into(),
+//RS             });
+//RS         }
+//RS         if runtime.retention_mode != "bounded-persisted"
+//RS             || runtime.retention_limit != GAME_CRASH_MAX_PERSISTED
+//RS         {
+//RS             return Err(BundleError::InvalidField {
+//RS                 field: "game.crash_runtime.retention".into(),
+//RS                 reason: format!(
+//RS                     "active reporter must persist exactly {GAME_CRASH_MAX_PERSISTED} latest report"
+//RS                 ),
+//RS             });
+//RS         }
+//RS         validate_game_asset_path(&runtime.retention_path)?;
+//RS         if runtime.retention_path != "crash-reports" {
+//RS             return Err(BundleError::InvalidField {
+//RS                 field: "game.crash_runtime.retention_path".into(),
+//RS                 reason: "must use the package-local `crash-reports` directory".into(),
+//RS             });
+//RS         }
+//RS     } else if runtime.installation == "installed" {
+//RS         return Err(BundleError::InvalidField {
+//RS             field: "game.crash_runtime.installation".into(),
+//RS             reason: "a non-active reporter cannot be installed".into(),
+//RS         });
+//RS     } else if runtime.retention_mode != "none"
+//RS         || !runtime.retention_path.is_empty()
+//RS         || runtime.retention_limit != 0
+//RS     {
+//RS         return Err(BundleError::InvalidField {
+//RS             field: "game.crash_runtime.retention".into(),
+//RS             reason: "non-active reporter must not retain reports".into(),
+//RS         });
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_game_asset_path(path: &str) -> Result<(), BundleError> {
+//RS     if path.is_empty() || path.contains('\\') || path.chars().any(char::is_control) {
+//RS         return Err(BundleError::InvalidPath {
+//RS             field: "game.asset".into(),
+//RS             path: path.into(),
+//RS         });
+//RS     }
+//RS     for component in path.split('/') {
+//RS         if component.is_empty() || component == "." || component == ".." {
+//RS             return Err(BundleError::InvalidPath {
+//RS                 field: "game.asset".into(),
+//RS                 path: path.into(),
+//RS             });
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS fn validate_component(field: &'static str, value: &str) -> Result<(), BundleError> {
+//RS     if value.trim().is_empty() {
+//RS         return Err(BundleError::EmptyField(field));
+//RS     }
+//RS     if value.chars().any(|character| {
+//RS         character.is_control()
+//RS             || matches!(character, '/' | '\\' | ':' | '<' | '>' | '"' | '|' | '?' | '*')
+//RS     }) {
+//RS         return Err(BundleError::InvalidField {
+//RS             field: field.into(),
+//RS             reason: "contains a path or control character".into(),
+//RS         });
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_text(field: &'static str, value: &str) -> Result<(), BundleError> {
+//RS     if value.chars().any(char::is_control) {
+//RS         return Err(BundleError::InvalidField {
+//RS             field: field.into(),
+//RS             reason: "contains a control character".into(),
+//RS         });
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_source(field: &'static str, value: &str) -> Result<(), BundleError> {
+//RS     if value.trim().is_empty() {
+//RS         return Err(BundleError::EmptyField(field));
+//RS     }
+//RS     if value.chars().any(char::is_control) {
+//RS         return Err(BundleError::InvalidPath {
+//RS             field: field.into(),
+//RS             path: value.into(),
+//RS         });
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_url(field: &'static str, value: &str) -> Result<(), BundleError> {
+//RS     validate_source(field, value)
+//RS }
+//RS 
+//RS fn windows_version(version: &str) -> Result<String, BundleError> {
+//RS     let parts = version.split('.').collect::<Vec<_>>();
+//RS     if parts.is_empty() || parts.len() > 4 || parts.iter().any(|part| part.is_empty()) {
+//RS         return Err(BundleError::InvalidWindowsVersion(version.into()));
+//RS     }
+//RS     let mut normalized = Vec::with_capacity(4);
+//RS     for part in parts {
+//RS         if !part.bytes().all(|byte| byte.is_ascii_digit()) {
+//RS             return Err(BundleError::InvalidWindowsVersion(version.into()));
+//RS         }
+//RS         let value = part
+//RS             .parse::<u64>()
+//RS             .map_err(|_| BundleError::InvalidWindowsVersion(version.into()))?;
+//RS         if value > u16::MAX as u64 {
+//RS             return Err(BundleError::InvalidWindowsVersion(version.into()));
+//RS         }
+//RS         normalized.push(value.to_string());
+//RS     }
+//RS     while normalized.len() < 4 {
+//RS         normalized.push("0".into());
+//RS     }
+//RS     Ok(normalized.join("."))
+//RS }
+//RS 
+//RS fn updater_manifest(spec: &BundleSpec, updater: &UpdaterSpec, payload_sha256: &str) -> UpdaterManifest {
+//RS     UpdaterManifest {
+//RS         schema: PACKAGE_UPDATE_MANIFEST_SCHEMA.into(),
+//RS         package: spec.package.clone(),
+//RS         version: spec.version.clone(),
+//RS         target: spec.target,
+//RS         channel: updater.channel.clone(),
+//RS         artifact: format!("{}{}", spec.metadata.identifier, spec.target.artifact_suffix()),
+//RS         url: updater.url.clone(),
+// END-PORT-PENDING 2080 crates/jet-pkg-model/src/Bundler.rs:1-1800
+

@@ -15,27 +15,27 @@ pub enum DiscoveryError {
 // The directory holding the one file declaring `module <name>`. An explicit
 // named lookup, so D-SHAPE-MODULEINTERNAL1 does not filter `_name`.
 pub fn pkg_discover_module_in(root: String, name: String) -[FS, Env]> String DiscoveryError! {
-    resolver :: AuthorityResolver.open(root) ?? return Err(DiscoveryError.NotFound(name))
-    listed :: resolver.discover_source_files() ?? return Err(DiscoveryError.NotFound(name))
+    resolver :: AuthorityResolver.open(root) ?? return Err(DiscoveryError.NotFound{name: name})
+    listed :: resolver.discover_source_files() ?? return Err(DiscoveryError.NotFound{name: name})
     matches := [String]{}
     loop file in listed {
         file_name :: pkg_path_file_name(file.relative)
-        if file_name == @PACKAGE_FILE || file_name == @PAYLOAD_FILE -> next
+        if file_name == PACKAGE_FILE || file_name == PAYLOAD_FILE -> next
         text :: file.text() ?? next
         if pkg_file_declares_module(text, name) {
-            if resolver.revalidate_file(file) == .Err(_) -> return Err(DiscoveryError.NotFound(name))
+            if resolver.revalidate_file(file) == .Err(_) -> return Err(DiscoveryError.NotFound{name: name})
             &matches.push(file.path)
         }
     }
-    if resolver.revalidate_root() == .Err(_) -> return Err(DiscoveryError.NotFound(name))
+    if resolver.revalidate_root() == .Err(_) -> return Err(DiscoveryError.NotFound{name: name})
     if matches.len() == {
-        0 -> Err(DiscoveryError.NotFound(name))
+        0 -> Err(DiscoveryError.NotFound{name: name})
         1 -> {
             parent :: pkg_path_parent(matches[0])
             Ok(if parent == "" -> root else -> parent)
         }
         else -> {
-            prefix :: "{resolver.root()}/"
+            prefix :: "{resolver.root}/"
             relative := [String]{}
             loop path in matches -> &relative.push(if path.starts_with(prefix) -> path.removeprefix(prefix) else -> path)
             Err(DiscoveryError.Ambiguous{name: name, paths: relative})
@@ -67,7 +67,7 @@ pub fn pkg_discover_jobs_in(root: String) -[FS, Env]> JobRegistry JobDiscoveryEr
     registry := JobRegistry.default()
     loop file in listed {
         file_name :: pkg_path_file_name(file.relative)
-        if file_name == @PACKAGE_FILE || file_name == @PAYLOAD_FILE -> next
+        if file_name == PACKAGE_FILE || file_name == PAYLOAD_FILE -> next
         text :: if file.text() == {
             .Ok(read) -> read
             .Err(error) -> {
@@ -102,7 +102,7 @@ fn pkg_diagnostic_codes(diagnostics: [Diagnostic]) -> String Never! {
 // stripped; `module` followed by space, tab, CR, or LF).
 pub fn pkg_file_declares_module(input: String, name: String) -> Bool Never! {
     bytes :: pkg_strip_comments(input).bytes()
-    keyword :: @KW_MODULE.bytes()
+    keyword :: KW_MODULE.bytes()
     wanted :: name.bytes()
     depth := 0
     loop index in 0..<bytes.len() {

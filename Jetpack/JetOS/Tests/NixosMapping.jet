@@ -1,0 +1,282 @@
+// nixos_backend.rs:1622-1829: three fixtures and all six original tests.
+// #4482 authorized fixture cutover: Rust :1679 init.defaultTarget alone is
+// removed from full_system; its exact declaration is retained in the refusal
+// witness below. Original mapped assertions are unchanged. Aggregate order
+// and repeated declarations intentionally follow Main's #4482 ruling.
+
+fn jetos_nixos_test_table() -> SourceTable Never! {
+    SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "default", upstream: "github:NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51", via: ProviderKind.Nix}})
+}
+
+fn jetos_nixos_test_opt(key: String, value: String) -> OptionPlan Never! { OptionPlan{key: key, value: value} }
+
+fn jetos_nixos_test_empty(options: [OptionPlan]) -> SystemPlan Never! {
+    SystemPlan{name: "halcyon-gnome", target: "linux.x64", packages: [Pkg]{}, services: [ServicePlan]{}, options: options}
+}
+
+fn jetos_nixos_test_full_system() -> SystemPlan Never! {
+    SystemPlan{
+        name: "halcyon-gnome", target: "linux.x64",
+        packages: [Pkg]{Pkg.new("default", "firefox"), Pkg.new("default", "btop")},
+        services: [ServicePlan]{
+            ServicePlan{name: "openssh", enable: true, extra: [ServicePlanExtra]{ServicePlanExtra{key: "ports", value: "[22]"}}},
+            ServicePlan{name: "backup", enable: true, extra: [ServicePlanExtra]{ServicePlanExtra{key: "exec", value: "/run/current-system/sw/bin/hello"}, ServicePlanExtra{key: "timer", value: "daily"}}}
+        },
+        options: [OptionPlan]{
+            jetos_nixos_test_opt("network.hostName", "halcyon-gnome"),
+            jetos_nixos_test_opt("network.networkmanager.enable", "true"),
+            jetos_nixos_test_opt("network.firewall.allowedTcpPorts", "[22, 443]"),
+            jetos_nixos_test_opt("network.dns", "[\"1.1.1.1\", \"8.8.8.8\"]"),
+            jetos_nixos_test_opt("filesystem.timeZone", "\"America/New_York\""),
+            jetos_nixos_test_opt("services.localization.locale", "\"en_US.UTF-8\""),
+            jetos_nixos_test_opt("services.localization.keyboardLayout", "\"us\""),
+            jetos_nixos_test_opt("users.nate.normal", "true"),
+            jetos_nixos_test_opt("users.nate.home", "\"/home/nate\""),
+            jetos_nixos_test_opt("users.nate.groups", "[\"wheel\", \"networkmanager\"]"),
+            jetos_nixos_test_opt("users.nate.initialPassword", "\"jetos\""),
+            jetos_nixos_test_opt("users.nate.shell", "default.fish"),
+            jetos_nixos_test_opt("boot.loader", ".SystemdBoot"),
+            jetos_nixos_test_opt("boot.loader.efi.canTouchVariables", "false"),
+            jetos_nixos_test_opt("boot.kernel.params", "[\"quiet\"]"),
+            jetos_nixos_test_opt("services.desktop.profile", ".Default"),
+            jetos_nixos_test_opt("services.displayManager", "\"gdm\""),
+            jetos_nixos_test_opt("services.desktop.autoLogin.user", "\"nate\""),
+            jetos_nixos_test_opt("services.audio.pipewire.enable", "true"),
+            jetos_nixos_test_opt("services.audio.rtkit.enable", "true")
+        }
+    }
+}
+
+fn jetos_nixos_test_mapped(system: SystemPlan, table: SourceTable) -> JetOSNixosMapping Never! {
+    if jetos_nixos_map_system(system, table) == {
+        .Mapped(mapping) -> mapping
+        .Unmapped(_) -> panic("fully mapped system")
+    }
+}
+
+fn jetos_nixos_test_reasons(system: SystemPlan, table: SourceTable) -> [String] Never! {
+    if jetos_nixos_map_system(system, table) == {
+        .Unmapped(reasons) -> reasons
+        .Mapped(_) -> panic("expected aggregate E1291 refusal")
+    }
+}
+
+#Test("maps_full_system_to_nixos") {
+    mapping :: jetos_nixos_test_mapped(jetos_nixos_test_full_system(), jetos_nixos_test_table())
+    assert_eq(mapping.nixpkgs_owner, "NixOS")
+    assert_eq(mapping.nixpkgs_repo, "nixpkgs")
+    assert_eq(mapping.nixpkgs_rev, "fef9403a3e4d31b0a23f0bacebbec52c248fbb51")
+    assert_eq(mapping.system_packages, [String]{"firefox", "btop"})
+    assert(mapping.body_lines.contains("  networking.hostName = \"halcyon-gnome\";"))
+    assert(mapping.body_lines.contains("  boot.loader.systemd-boot.enable = true;"))
+    assert(mapping.body_lines.contains("  services.desktopManager.gnome.enable = true;"))
+    assert(mapping.body_lines.contains("  services.displayManager.gdm.enable = true;"))
+    body :: mapping.body_lines.join("\n")
+    assert(body.contains("shell = pkgs.fish;"))
+    assert(mapping.body_lines.contains("  programs.fish.enable = true;"))
+    assert(body.contains("services.openssh.enable = true;"))
+    assert(body.contains("systemd.services.\"backup\""))
+    assert(body.contains("systemd.timers.\"backup\""))
+}
+
+#Test("flake_and_configuration_render_expected_nix") {
+    system :: jetos_nixos_test_full_system()
+    mapping :: jetos_nixos_test_mapped(system, jetos_nixos_test_table())
+    flake :: jetos_nixos_render_flake(system.name, mapping)
+    assert(flake.contains("inputs.nixpkgs.url = \"github:NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51\";"))
+    assert(flake.contains("nixosConfigurations.halcyon-gnome = lib.nixosSystem {{"))
+    assert(flake.contains("config = self.nixosConfigurations.halcyon-gnome.config;"))
+    assert(flake.contains("firmware = pkgs.OVMF.fd;"))
+    configuration :: jetos_nixos_render_configuration(system, mapping)
+    assert(configuration.contains("system.stateVersion = \"26.05\";"))
+    assert(!configuration.contains("system.nixos.distroName"))
+    assert(!configuration.contains("system.nixos.distroId"))
+    assert(configuration.contains("environment.systemPackages = map jetosPkg [ \"firefox\" \"btop\" ];"))
+    assert(configuration.contains("programs.bash.promptInit = lib.mkAfter"))
+    assert(configuration.contains("PS1='NixOS comparison $ '"))
+    assert(configuration.contains("environment.etc.issue.text = \"NixOS comparison guest"))
+    assert(configuration.contains("systemd.services.nixos-comparison-proof = {{"))
+    assert(configuration.contains("path = [ pkgs.bash pkgs.util-linux pkgs.systemd"))
+    assert(configuration.contains("prompt=$(runuser -u nate -- bash --noprofile --rcfile /etc/bashrc -i -c 'printf \"%s\" \"$PS1\"'"))
+    assert(configuration.contains("pgrep -u nate -f gnome-shell"))
+    assert(configuration.contains("NIXOS_COMPARISON_PROOF:"))
+    assert(flake.contains("legacyPackages.${{system}}"))
+    assert(configuration.contains("attrs.${{n}}"))
+    assert(configuration.contains("guest\\n\";"))
+}
+
+#Test("unmapped_option_key_is_rejected") {
+    system := jetos_nixos_test_full_system()
+    &system.options.push(jetos_nixos_test_opt("apps.workload.bogusFeature", "true"))
+    assert(jetos_nixos_test_reasons(system, jetos_nixos_test_table()).join("\n").contains("option `apps.workload.bogusFeature`"))
+}
+
+#Test("non_nixpkgs_package_is_rejected") {
+    system := jetos_nixos_test_full_system()
+    &system.packages.push(Pkg.new("mine", "hello"))
+    assert(jetos_nixos_test_reasons(system, jetos_nixos_test_table()).join("\n").contains("package `mine.hello`"))
+}
+
+#Test("unknown_service_without_exec_is_rejected") {
+    system := jetos_nixos_test_full_system()
+    &system.services.push(ServicePlan{name: "mystery", enable: true, extra: [ServicePlanExtra]{}})
+    assert(jetos_nixos_test_reasons(system, jetos_nixos_test_table()).join("\n").contains("service `mystery`"))
+}
+
+#Test("missing_nixpkgs_pin_is_rejected") {
+    system :: jetos_nixos_test_empty([OptionPlan]{})
+    assert(jetos_nixos_test_reasons(system, SourceTable.from_decls([NamedSourceDecl]{})).join("\n").contains("needs exactly one nixpkgs pin"))
+}
+
+#Test("Nixos aggregate keeps each unsupported declaration in source order #4482") {
+    system := jetos_nixos_test_empty([OptionPlan]{jetos_nixos_test_opt("zzz", "1"), jetos_nixos_test_opt("aaa", "1"), jetos_nixos_test_opt("zzz", "2")})
+    system.packages = [Pkg]{Pkg.new("mine", "z"), Pkg.new("mine", "a"), Pkg.new("mine", "z")}
+    system.services = [ServicePlan]{ServicePlan{name: "z", enable: true, extra: [ServicePlanExtra]{}}, ServicePlan{name: "a", enable: false, extra: [ServicePlanExtra]{}}, ServicePlan{name: "z", enable: false, extra: [ServicePlanExtra]{}}}
+    assert_eq(jetos_nixos_test_reasons(system, SourceTable.empty()), [String]{
+        "option `zzz`", "option `aaa`", "option `zzz`", JETOS_NIXOS_MISSING_PIN,
+        "package `mine.z` (non-nixpkgs source in real tier)", "package `mine.a` (non-nixpkgs source in real tier)", "package `mine.z` (non-nixpkgs source in real tier)",
+        "service `z` (unknown service with no `exec:` field)", "service `a` (unknown service with no `exec:` field)", "service `z` (unknown service with no `exec:` field)"
+    })
+}
+
+#Test("Nixos accepted-but-unprojected options refuse #4482") {
+    system :: jetos_nixos_test_empty([OptionPlan]{
+        jetos_nixos_test_opt("init.defaultTarget", "\"graphical.target\""),
+        jetos_nixos_test_opt("user.nate.homeManager", "true"),
+        jetos_nixos_test_opt("apps.program.git.extraConfig", "value"),
+        jetos_nixos_test_opt("apps.program.mystery.enable", "false"),
+        jetos_nixos_test_opt("user.only.packages", "[default.hello]")
+    })
+    assert_eq(jetos_nixos_test_reasons(system, jetos_nixos_test_table()), [String]{
+        "option `init.defaultTarget` (no NixOS projection)", "option `user.nate.homeManager` (no NixOS projection)",
+        "option `apps.program.git.extraConfig` (no NixOS projection)", "option `apps.program.mystery.enable` (no NixOS projection)",
+        "option `user.only.packages` (no NixOS projection)"
+    })
+}
+
+#Test("Nixos quotes only backslash quote dollar and preserves other scalars") {
+    assert_eq(jetos_nixos_string("a\\\"${{b}}\n雪"), "\"a\\\\\\\"\\${{b}}\n雪\"")
+    assert_eq(jetos_nixos_string_list([String]{}), "[ ]")
+    assert_eq(jetos_nixos_int_list([Int]{}), "[ ]")
+    assert_eq(jetos_nixos_string_list([String]{"$", "\\", "\""}), "[ \"\\$\" \"\\\\\" \"\\\"\" ]")
+    assert_eq(jetos_nixos_parse_int_list("[1, bad, -2, 3.5, +7, 9223372036854775808, １２]"), [Int]{1, -2, 7})
+}
+
+#Test("Nixos pin is first name-ordered declaration with slash revision and strict Github form") {
+    table :: SourceTable.from_decls([NamedSourceDecl]{
+        NamedSourceDecl{name: "z", upstream: "github:Later/nixpkgs/last", via: ProviderKind.Nix},
+        NamedSourceDecl{name: "a", upstream: "github:First/NIXPKGS/refs/heads/main", via: ProviderKind.Core},
+        NamedSourceDecl{name: "0", upstream: "https://github.com/NixOS/nixpkgs/rev", via: ProviderKind.Nix}
+    })
+    mapping :: jetos_nixos_test_mapped(jetos_nixos_test_empty([OptionPlan]{}), table)
+    assert_eq(mapping.nixpkgs_owner, "First")
+    assert_eq(mapping.nixpkgs_repo, "NIXPKGS")
+    assert_eq(mapping.nixpkgs_rev, "refs/heads/main")
+    assert_eq(jetos_nixos_locked_inputs(mapping), [String]{"github:First/NIXPKGS/refs/heads/main"})
+    assert_eq(jetos_nixos_owner_repo_rev("Github:NixOS/nixpkgs/rev"), None)
+    assert_eq(jetos_nixos_owner_repo_rev("github:NixOS/nixpkgs"), None)
+    assert_eq(jetos_nixos_owner_repo_rev("github:NixOS/nixpKgs/rev"), None)
+}
+
+#Test("Nixos CachyOS default release LTS overlay and missing-source refusal") {
+    table := jetos_nixos_test_table()
+    &table.ensure_decl("kernel", "github:Owner/NIX-CACHYOS-KERNEL", ProviderKind.Nix)
+    system := jetos_nixos_test_empty([OptionPlan]{jetos_nixos_test_opt("boot.kernel", ".CachyOS")})
+    latest :: jetos_nixos_test_mapped(system, table)
+    assert(latest.body_lines.contains("  boot.kernelPackages = pkgs.cachyosKernels.linuxPackages-cachyos-latest;"))
+    assert_eq(jetos_nixos_locked_inputs(latest), [String]{"github:NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51", "github:Owner/NIX-CACHYOS-KERNEL/release"})
+    flake :: jetos_nixos_render_flake(system.name, latest)
+    assert(flake.contains("inputs.cachyos.url = \"github:Owner/NIX-CACHYOS-KERNEL/release\";"))
+    assert(flake.contains("inputs.cachyos.inputs.nixpkgs.follows = \"nixpkgs\";"))
+    assert(flake.contains("./configuration.nix {{ nixpkgs.overlays = [ inputs.cachyos.overlays.default ]; }}"))
+    &system.options.push(jetos_nixos_test_opt("boot.kernel.profile", ".CachyOSLts"))
+    lts :: jetos_nixos_test_mapped(system, table)
+    assert(lts.body_lines.contains("  boot.kernelPackages = pkgs.cachyosKernels.linuxPackages-cachyos-lts;"))
+    assert_eq(jetos_nixos_test_reasons(system, jetos_nixos_test_table()), [String]{"option `boot.kernel` `.CachyOS` needs a declared `<owner>/nix-cachyos-kernel/<rev>@github` source for the kernel overlay"})
+    empty :: jetos_nixos_test_mapped(jetos_nixos_test_empty([OptionPlan]{}), table)
+    assert_eq(empty.kernel_input, None)
+    assert(!jetos_nixos_render_flake("host", empty).contains("inputs.cachyos"))
+}
+
+#Test("Nixos desktop fallback precedence shell selection and proof-user defaults") {
+    plasma_system :: jetos_nixos_test_empty([OptionPlan]{jetos_nixos_test_opt("services.desktop.plasma.enable", "true")})
+    plasma :: jetos_nixos_test_mapped(plasma_system, jetos_nixos_test_table())
+    assert(plasma.body_lines.contains("  services.desktopManager.plasma6.enable = true;"))
+    assert(plasma.body_lines.contains("  services.displayManager.sddm.enable = true;"))
+    assert_eq(plasma.desktop_shell_process, "plasmashell")
+    configuration :: jetos_nixos_render_configuration(plasma_system, plasma)
+    assert(configuration.contains("pgrep -u root -f plasmashell"))
+    assert(configuration.contains("desktop:\"plasma\""))
+    gnome_system := jetos_nixos_test_empty([OptionPlan]{jetos_nixos_test_opt("services.desktop.profile", ".Default"), jetos_nixos_test_opt("users.z.home", "/home/z"), jetos_nixos_test_opt("users.a.normal", "true")})
+    gnome :: jetos_nixos_test_mapped(gnome_system, jetos_nixos_test_table())
+    assert(gnome.body_lines.contains("  services.displayManager.gdm.enable = true;"))
+    assert_eq(gnome.desktop_shell_process, "gnome-shell")
+    assert(jetos_nixos_render_configuration(gnome_system, gnome).contains("pgrep -u a -f gnome-shell"))
+    &gnome_system.options.push(jetos_nixos_test_opt("services.desktop.plasma.enable", "true"))
+    both :: jetos_nixos_test_mapped(gnome_system, jetos_nixos_test_table())
+    assert(both.body_lines.contains("  services.displayManager.gdm.enable = true;"))
+    assert_eq(both.desktop_shell_process, "plasmashell")
+}
+
+#Test("Nixos packages retain duplicates reject sibling sources and infer supported programs") {
+    table := jetos_nixos_test_table()
+    &table.ensure_decl("sibling", "github:Owner/other/rev", ProviderKind.Nix)
+    system := jetos_nixos_test_empty([OptionPlan]{jetos_nixos_test_opt("apps.program.btop.enable", "true"), jetos_nixos_test_opt("apps.program.helix.enable", "true"), jetos_nixos_test_opt("apps.program.git.enable", "true"), jetos_nixos_test_opt("apps.program.fish.enable", "true")})
+    system.packages = [Pkg]{Pkg.new("default", "btop"), Pkg.new("default", "btop"), Pkg.new("", "hello")}
+    mapping :: jetos_nixos_test_mapped(system, table)
+    assert_eq(mapping.system_packages, [String]{"btop", "btop", "hello", "helix"})
+    assert(mapping.body_lines.contains("  programs.git.enable = true;"))
+    assert(mapping.body_lines.contains("  programs.fish.enable = true;"))
+    &system.packages.push(Pkg.new("sibling", "hello"))
+    assert_eq(jetos_nixos_test_reasons(system, table), [String]{"package `sibling.hello` (non-nixpkgs source in real tier)"})
+}
+
+#Test("Nixos sysctl bool numeric string zram groups user packages and service branches") {
+    system := jetos_nixos_test_empty([OptionPlan]{
+        jetos_nixos_test_opt("performance.sysctl.a", "true"), jetos_nixos_test_opt("performance.sysctl.b", "1.25e2"), jetos_nixos_test_opt("performance.sysctl.c", "\"text\""),
+        jetos_nixos_test_opt("performance.zram.memoryPercent", "50"), jetos_nixos_test_opt("groups.wheel.members", "[users.nate, .users.other]"),
+        jetos_nixos_test_opt("users.nate.normal", "true"), jetos_nixos_test_opt("user.nate.packages", "[default.hello, nixpkgs.btop, nixpkgs]"),
+        jetos_nixos_test_opt("boot.loader", ".Limine"), jetos_nixos_test_opt("network.firewall.allowedUdpPorts", "[53, invalid, 67]"),
+        jetos_nixos_test_opt("services.virtualization.libvirtd.enable", "true"), jetos_nixos_test_opt("services.virtualization.docker.enable", "false"),
+        jetos_nixos_test_opt("services.gaming.steam.enable", "true"), jetos_nixos_test_opt("services.gaming.gamemode.enable", "true"),
+        jetos_nixos_test_opt("services.smartcard.pcscd.enable", "true"), jetos_nixos_test_opt("hardware.bluetooth.enable", "true"), jetos_nixos_test_opt("apps.flatpak.enable", "true"),
+        jetos_nixos_test_opt("network.hostName", "first"), jetos_nixos_test_opt("network.hostName", "last"), jetos_nixos_test_opt("network.hostName.priority", "5")
+    })
+    system.services = [ServicePlan]{ServicePlan{name: "openssh", enable: false, extra: [ServicePlanExtra]{ServicePlanExtra{key: "ports", value: "[bad]"}}}, ServicePlan{name: "tailscale", enable: false, extra: [ServicePlanExtra]{}}, ServicePlan{name: "worker", enable: false, extra: [ServicePlanExtra]{ServicePlanExtra{key: "exec", value: "echo $HOME"}}}}
+    mapping :: jetos_nixos_test_mapped(system, jetos_nixos_test_table())
+    body :: mapping.body_lines.join("\n")
+    assert(body.contains("\"a\" = lib.mkForce true;"))
+    assert(body.contains("\"b\" = lib.mkForce 1.25e2;"))
+    assert(body.contains("\"c\" = lib.mkForce \"text\";"))
+    assert(body.contains("memoryPercent = 50;"))
+    assert(body.contains("users.groups.wheel.members = [ \"nate\" \"other\" ];"))
+    assert(body.contains("packages = map jetosPkg [ \"hello\" \"btop\" ];"))
+    assert(body.contains("boot.loader.limine.enable = true;"))
+    assert(body.contains("allowedUDPPorts = [ 53 67 ];"))
+    assert(body.contains("virtualisation.libvirtd.enable = true;"))
+    assert(body.contains("virtualisation.docker.enable = false;"))
+    assert(body.contains("programs.steam.enable = true;"))
+    assert(body.contains("programs.gamemode.enable = true;"))
+    assert(body.contains("services.pcscd.enable = true;"))
+    assert(body.contains("hardware.bluetooth.enable = true;"))
+    assert(body.contains("services.flatpak.enable = true;"))
+    assert(body.contains("networking.hostName = \"last\";"))
+    assert(body.contains("console=ttyS0,115200"))
+    assert(body.contains("console=tty0"))
+    assert(body.contains("services.openssh.enable = false;"))
+    assert(!body.contains("services.openssh.ports"))
+    assert(body.contains("services.tailscale.enable = false;"))
+    assert(body.contains("serviceConfig.ExecStart = \"echo \\$HOME\";"))
+    assert(!body.contains("systemd.timers.\"worker\""))
+}
+
+#Test("Nixos unknown loader kernel desktop manager and enabled program values aggregate") {
+    system :: jetos_nixos_test_empty([OptionPlan]{jetos_nixos_test_opt("services.displayManager", "other"), jetos_nixos_test_opt("boot.kernel", ".Other"), jetos_nixos_test_opt("boot.loader", ".Other"), jetos_nixos_test_opt("services.desktop.profile", ".Other"), jetos_nixos_test_opt("apps.program.other.enable", "true")})
+    assert_eq(jetos_nixos_test_reasons(system, jetos_nixos_test_table()), [String]{
+        "option `services.displayManager` value `other` has no NixOS mapping (supported: gdm, sddm)",
+        "option `boot.kernel` value `.Other` has no NixOS mapping (supported: .CachyOS)",
+        "option `boot.loader` value `.Other` has no NixOS mapping (supported: .SystemdBoot, .Limine)",
+        "option `services.desktop.profile` value `.Other` has no NixOS mapping (supported: .Default)",
+        "option `apps.program.other.enable` has no NixOS mapping yet"
+    })
+}

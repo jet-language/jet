@@ -1,0 +1,95 @@
+// Behavioral flag/selection contracts from CmdCompile.rs TestRunOpts::parse;
+// tests/jet_test.rs filter/shuffle/serial/generated/browser flag journeys.
+fn jet_cli_test_options_test_parse(argv: [String]) -> JetCLITestRunOptions {
+    jet_cli_test_parse_options(argv, [String: String]{}, 18446744073709551619) ?? panic(err.message)
+}
+fn jet_cli_test_options_test_error(argv: [String], message: String, exit_code: Int) {
+    if jet_cli_test_parse_options(argv, [String: String]{}, 0) == {
+        .Ok(_) -> panic("invalid options accepted")
+        .Err(error) -> {
+            assert_eq(error.message, message)
+            assert_eq(error.code, "E2104")
+            assert_eq(error.exit_code, exit_code)
+        }
+    }
+}
+#Test("test flags use complete defaults and stop at separator") {
+    options :: jet_cli_test_options_test_parse([String]{"test", "file.jet", "--", "ignored", "--release", "--filter=x"})
+    assert(!options.show_default && !options.watch && !options.fresh && !options.docs)
+    assert(options.capture == JetCLITestCapturePolicy.Failed)
+    assert(options.profile == None && options.filter == None && options.shuffle_seed == None)
+    assert(!options.release && !options.measure && !options.serial && !options.grade_generated)
+}
+#Test("test filters merge rather than silently overwrite") {
+    assert_eq(jet_cli_test_options_test_parse([String]{"test", "file.jet", "needle", "--filter=needle", "--filter", "needle"}).filter, Val("needle"))
+    jet_cli_test_options_test_error([String]{"test", "file.jet", "needle", "--filter=other"}, "conflicting test filters `other` and `needle`", 2)
+    jet_cli_test_options_test_error([String]{"test", "--filter=one", "--filter=two"}, "conflicting test filters `one` and `two`", 2)
+    jet_cli_test_options_test_error([String]{"test", "one", "two", "three"}, "`jet test` accepts one target and one positional filter, got 3 positionals", 2)
+}
+#Test("release profile wins and supplied setting carrier survives") {
+    options :: jet_cli_test_parse_options([String]{"test", "--release", "--profile", "other", "--set=key=value", "--set", "key=again"}, [String: String]{"key": "resolved"}, 0) ?? panic(err.message)
+    assert_eq(options.profile, Val("release"))
+    assert_eq(options.setting_overrides["key"], "resolved")
+}
+#Test("test capture uses aliases ASCII case and the user-error exit") {
+    failed :: jet_cli_test_parse_capture(" FailureS \n") ?? panic(err.message)
+    off :: jet_cli_test_parse_capture("OFF") ?? panic(err.message)
+    all :: jet_cli_test_parse_capture("all") ?? panic(err.message)
+    assert(failed == JetCLITestCapturePolicy.Failed)
+    assert(off == JetCLITestCapturePolicy.Off)
+    assert(all == JetCLITestCapturePolicy.All)
+    jet_cli_test_options_test_error([String]{"test", "--capture=bad"}, "invalid --capture value `bad` (expected failed, all, or none)", 1)
+}
+#Test("boolean inline off is exact and other values remain enabled") {
+    options :: jet_cli_test_options_test_parse([String]{"test", "--watch=false", "--browser-ui=0", "--browser-visual=off", "--browser-trace=OFF", "--fresh=false", "--show-default=off", "-u", "--serial", "--docs", "--coverage", "--trace-tiers", "--measure"})
+    assert(!options.watch && !options.browser_ui && !options.browser_visual)
+    assert(options.browser_trace && options.fresh && options.show_default)
+    assert(options.update_snapshots && options.serial && options.docs && options.coverage && options.trace_tiers && options.measure)
+}
+#Test("shuffle time seed truncates like Rust u64 and explicit seeds are bounded") {
+    assert_eq(jet_cli_test_options_test_parse([String]{"test", "--shuffle"}).shuffle_seed, Val(3))
+    assert_eq(jet_cli_test_options_test_parse([String]{"test", "--shuffle=+18446744073709551615"}).shuffle_seed, Val(18446744073709551615))
+    assert_eq(jet_cli_test_shuffle_seed(-1), 0)
+    jet_cli_test_options_test_error([String]{"test", "--shuffle=18446744073709551616"}, "`--shuffle=18446744073709551616` isn't a number", 2)
+    jet_cli_test_options_test_error([String]{"test", "--seed=1_000"}, "`--seed=1_000` isn't a number", 2)
+}
+#Test("generated grade keeps name separate from ordinary filter") {
+    options :: jet_cli_test_options_test_parse([String]{"test", "file.jet", "property", "--grade=generated", "--iterations=+0", "--seed=7", "--time=0.0019", "--corpus", "seeds", "--filter=ordinary"})
+    assert(options.grade_generated)
+    assert_eq(options.generated_test_name, Val("property"))
+    assert_eq(options.filter, Val("ordinary"))
+    assert_eq(options.generated_iterations, Val(0))
+    assert_eq(options.generated_seed, Val(7))
+    assert_eq(options.generated_time_budget_ms, Val(1))
+    assert_eq(options.generated_corpus, Val("seeds"))
+    jet_cli_test_options_test_error([String]{"test", "--grade=other"}, "`--grade=other` is not supported by `jet test`", 2)
+    jet_cli_test_options_test_error([String]{"test", "--iterations=-1"}, "`--iterations=-1` isn't a number", 2)
+}
+#Test("generated time rejects negatives nonfinite and saturates milliseconds") {
+    jet_cli_test_options_test_error([String]{"test", "--time=-1"}, "`--time=-1` must be a non-negative number", 2)
+    jet_cli_test_options_test_error([String]{"test", "--time=inf"}, "`--time=inf` must be a non-negative number", 2)
+    jet_cli_test_options_test_error([String]{"test", "--time=NaN"}, "`--time=NaN` must be a non-negative number", 2)
+    assert_eq(jet_cli_test_options_test_parse([String]{"test", "--time=1e308"}).generated_time_budget_ms, Val(18446744073709551615))
+}
+#Test("browser options preserve exact engines reporter and retries bounds") {
+    options :: jet_cli_test_options_test_parse([String]{"test", "--browser=firefox,chromium", "--browser-retries=+5", "--browser-reporter=html", "--browser-ui", "--browser-visual", "--browser-trace"})
+    assert_eq(options.browser_engines, Val("firefox,chromium"))
+    assert_eq(options.browser_retries, Val(5))
+    assert_eq(options.browser_reporter, Val("html"))
+    assert(options.browser_ui && options.browser_visual && options.browser_trace)
+    jet_cli_test_options_test_error([String]{"test", "--browser-retries=6"}, "`--browser-retries=6` must be between 0 and 5", 2)
+    jet_cli_test_options_test_error([String]{"test", "--browser-retries= 1"}, "`--browser-retries= 1` must be between 0 and 5", 2)
+    jet_cli_test_options_test_error([String]{"test", "--browser-reporter=HTML"}, "`--browser-reporter=HTML` is not supported", 2)
+}
+#Test("value-taking test options consume next words including hyphens") {
+    assert_eq(jet_cli_test_options_test_parse([String]{"test", "--filter", "-value"}).filter, Val("-value"))
+    jet_cli_test_options_test_error([String]{"test", "--filter"}, "`--filter` needs a value", 2)
+    jet_cli_test_options_test_error([String]{"test", "--set"}, "`--set` needs a value", 2)
+    jet_cli_test_options_test_error([String]{"test", "--color"}, "`--color` needs a value", 2)
+    assert_eq(jet_cli_test_options_test_parse([String]{"test", "--color=always", "--json", "--machine", "--quiet", "--verbose", "--no-color", "--future-flag", "file.jet", "needle"}).filter, Val("needle"))
+}
+#Test("record uses closed value and shared canonical replay name validation") {
+    assert_eq(jet_cli_test_options_test_parse([String]{"test", "--record=valid_Name-1"}).record, Val("valid_Name-1"))
+    jet_cli_test_options_test_error([String]{"test", "--record", "name"}, "`--record` needs a closed `=NAME` value", 2)
+    jet_cli_test_options_test_error([String]{"test", "--record=../bad"}, "replay NAME must be non-empty and contain only ASCII letters, digits, `-`, or `_`", 2)
+}

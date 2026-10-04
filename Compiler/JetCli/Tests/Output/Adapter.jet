@@ -1,0 +1,119 @@
+// Claims for host output selection (Source/OutputAdapter.rs) and the output
+// flags (crates/jet-cli/src/CLI.rs `OutputFlags`).
+
+fn output_adapter_test_facts() -> JetCLIProcessFacts {
+    JetCLIProcessFacts{
+        stdout_terminal: true,
+        stderr_terminal: true,
+        shell_prefill: false,
+        term: Val("xterm-256color"),
+        no_color: false,
+        force_color: false,
+        columns: None,
+        locale: Val("en_US.UTF-8"),
+    }
+}
+
+fn output_adapter_test_select(args: [String], facts: JetCLIProcessFacts) -> JetCLIOutputAdapter {
+    jet_cli_output_adapter_select(args, facts) ?? panic("output selection failed: {jet_cli_output_profile_error_message(err)}")
+}
+
+#Test("output flags read only the words before the separator") {
+    flags :: jet_cli_output_flags_parse([String]{"run", "main.jet", "--", "--json", "--quiet", "--color=sometimes"}) ?? panic("flags after `--` were parsed")
+    assert(!flags.json)
+    assert(!flags.quiet)
+    assert(flags.color == JetCLIColorRequest.Auto)
+}
+
+#Test("the last color spelling wins and a bare --color forces styling") {
+    always :: jet_cli_output_flags_parse([String]{"check", "--color=never", "--color"}) ?? panic("bare --color refused")
+    assert(always.color == JetCLIColorRequest.Always)
+    never :: jet_cli_output_flags_parse([String]{"check", "--color", "--color=never"}) ?? panic("--color=never refused")
+    assert(never.color == JetCLIColorRequest.Never)
+    verbose :: jet_cli_output_flags_parse([String]{"check", "-v"}) ?? panic("-v refused")
+    assert(verbose.verbose)
+}
+
+#Test("an unknown color mode is the Rust error") {
+    if jet_cli_output_flags_parse([String]{"check", "--color=sometimes"}) == {
+        .Ok(_) -> panic("`sometimes` accepted")
+        .Err(error) -> assert_eq(jet_cli_output_profile_error_message(error), "invalid color request \"sometimes\"; expected auto, always, or never")
+    }
+}
+
+#Test("compiler routes and --json select machine output") {
+    assert(jet_cli_machine_output_requested([String]{"compiler", "x"}))
+    assert(jet_cli_machine_output_requested([String]{"inspect", "compiler"}))
+    assert(jet_cli_machine_output_requested([String]{"check", "--json"}))
+    assert(!jet_cli_machine_output_requested([String]{"run", "x.jet", "--", "--json"}))
+    assert(!jet_cli_machine_output_requested([String]{"run", "compiler"}))
+}
+
+#Test("a redirected stream disables automatic styling for the whole invocation") {
+    facts := output_adapter_test_facts()
+    assert(output_adapter_test_select([String]{"check"}, facts).profile.ansi_enabled)
+    facts.stderr_terminal = false
+    redirected :: output_adapter_test_select([String]{"check"}, facts)
+    assert(!redirected.profile.ansi_enabled)
+    assert(!redirected.profile.progress_enabled)
+    forced :: output_adapter_test_select([String]{"check", "--color=always"}, facts)
+    assert(forced.profile.ansi_enabled)
+}
+
+#Test("COLUMNS is a positive usize or the default width") {
+    facts := output_adapter_test_facts()
+    facts.columns = Val("+120")
+    assert_eq(output_adapter_test_select([String]{}, facts).profile.width, 120)
+    facts.columns = Val("0")
+    assert_eq(output_adapter_test_select([String]{}, facts).profile.width, 80)
+    facts.columns = Val(" 90")
+    assert_eq(output_adapter_test_select([String]{}, facts).profile.width, 80)
+    facts.columns = Val("-5")
+    assert_eq(output_adapter_test_select([String]{}, facts).profile.width, 80)
+}
+
+#Test("an empty TERM is absent and the C locale is not Unicode") {
+    facts := output_adapter_test_facts()
+    facts.term = Val("")
+    assert(output_adapter_test_select([String]{}, facts).profile.unicode_enabled)
+    facts.locale = Val("posix")
+    assert(!output_adapter_test_select([String]{}, facts).profile.unicode_enabled)
+    facts.locale = Val("en_US.us-ascii")
+    assert(!output_adapter_test_select([String]{}, facts).profile.unicode_enabled)
+    facts.locale = None
+    assert(output_adapter_test_select([String]{}, facts).profile.unicode_enabled)
+}
+
+#Test("the help palette needs stdin and stdout, or the shell widget on stderr") {
+    facts := output_adapter_test_facts()
+    facts.stdout_terminal = false
+    assert(!jet_cli_help_interactive(output_adapter_test_select([String]{}, facts), true))
+    facts.shell_prefill = true
+    assert(jet_cli_help_interactive(output_adapter_test_select([String]{}, facts), true))
+    assert(!jet_cli_help_interactive(output_adapter_test_select([String]{}, facts), false))
+}
+
+#Test("advisory lints hide in run, dev, and test unless verbose") {
+    assert(jet_cli_advisory_lints_visible("check", false))
+    assert(!jet_cli_advisory_lints_visible("run", false))
+    assert(!jet_cli_advisory_lints_visible("test", false))
+    assert(jet_cli_advisory_lints_visible("dev", true))
+}
+
+#Test("machine mode keeps human text off stdout and quiet drops status") {
+    facts :: output_adapter_test_facts()
+    machine :: jet_cli_output_mode(output_adapter_test_select([String]{"check", "--json"}, facts))
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}
+    jet_cli_write_mode_renderable(&output, machine, "human")
+    jet_cli_write_mode_status(&output, machine, "status")
+    jet_cli_write_mode_machine(&output, machine, "{{}}")
+    jet_cli_write_mode_diagnostic(&output, "diagnostic")
+    assert_eq(output.stdout, "{{}}")
+    assert_eq(output.stderr, "diagnostic")
+    quiet :: jet_cli_output_mode(output_adapter_test_select([String]{"check", "--quiet"}, facts))
+    human := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}
+    jet_cli_write_mode_status(&human, quiet, "status")
+    jet_cli_write_mode_renderable(&human, quiet, "page")
+    assert_eq(human.stdout, "page")
+    assert_eq(human.stderr, "")
+}

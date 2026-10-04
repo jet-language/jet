@@ -5,17 +5,17 @@
 // Jet core types, enums map to Int, repeated fields become lists, and each
 // field number stays in a comment.
 
-@PROTO_MAX_FIELD_NUMBER :: 536870911
-@PROTO_INT32_MIN :: -2147483648
-@PROTO_INT32_MAX :: 2147483647
-@PROTO_SYMBOLS :: "{{}}[]()=;,.<>:+-"
+PROTO_MAX_FIELD_NUMBER :: prep { 536870911 }
+PROTO_INT32_MIN :: prep { -2147483648 }
+PROTO_INT32_MAX :: prep { 2147483647 }
+PROTO_SYMBOLS :: prep { "{{}}[]()=;,.<>:+-" }
 
-@PROTO_KEYWORDS :: [String]{
+PROTO_KEYWORDS :: prep { [String]{
     "syntax", "package", "import", "option", "message", "enum", "service", "rpc", "returns", "stream",
     "reserved", "extensions", "extend", "oneof", "group", "required", "optional", "repeated", "double",
     "float", "int32", "sint32", "sfixed32", "int64", "sint64", "sfixed64", "uint32", "uint64", "fixed32",
     "fixed64", "bool", "string", "bytes", "to", "max", "public", "weak"
-}
+} }
 
 fn pkg_data_bind_proto(input: String, root_name: String?) -> SchemaBuilder DataBindError! {
     parser := ProtoParser.new(input)
@@ -156,7 +156,7 @@ fn pkg_data_lex_proto(input: String) -> [ProtoToken] DataBindError! {
             &tokens.push(ProtoToken.StringLiteral(literal.value))
             next
         }
-        if @PROTO_SYMBOLS.contains(ch) {
+        if PROTO_SYMBOLS.contains(ch) {
             &tokens.push(ProtoToken.Symbol(ch))
             index += 1
             next
@@ -233,8 +233,8 @@ fn pkg_data_proto_octal(digits: String) -> Int Never! {
 // A decimal or `0x` hexadecimal integer literal within the Int range.
 fn pkg_data_parse_proto_integer_literal(value: String) -> Int? Never! {
     if value.starts_with("0x") || value.starts_with("0X") {
-        hex :: if value.starts_with("0x") -> value.removeprefix("0x") else -> value.removeprefix("0X")
-        raw :: hex.bytes()
+        hex_digits :: if value.starts_with("0x") -> value.removeprefix("0x") else -> value.removeprefix("0X")
+        raw :: hex_digits.bytes()
         if raw.len() == 0 -> return None
         total := 0
         loop byte in raw {
@@ -246,7 +246,7 @@ fn pkg_data_parse_proto_integer_literal(value: String) -> Int? Never! {
                 else -> -1
             }
             if digit < 0 -> return None
-            if total > (9223372036854775807 - digit) / 16 -> return None
+            if total > (9223372036854775807 - digit) /% 16 -> return None
             total = total * 16 + digit
         }
         return Val(total)
@@ -274,7 +274,7 @@ fn pkg_data_is_proto_identifier(value: String) -> Bool Never! {
 }
 
 fn pkg_data_is_proto_keyword(value: String) -> Bool Never! {
-    @PROTO_KEYWORDS.contains(value)
+    PROTO_KEYWORDS.contains(value)
 }
 
 // The Jet type a proto scalar or well-known wrapper type maps to.
@@ -563,7 +563,7 @@ struct ProtoParser {
                 next
             }
             &self.expect_symbol("]", "the end of field options")
-            return Ok()
+            return
         }
     }
 
@@ -589,7 +589,7 @@ struct ProtoParser {
         _ :: &self.take_word("reserved")
         reserved := ProtoReserved.empty()
         loop {
-            literal := None
+            literal := String?{None}
             if self.token_at(0) == {
                 .Val(token) -> {
                     if token == {
@@ -618,7 +618,7 @@ struct ProtoParser {
                             end = &self.parse_integer("a reserved range end", signed)
                         }
                     }
-                    minimum :: if signed -> @PROTO_INT32_MIN else -> 1
+                    minimum :: if signed -> PROTO_INT32_MIN else -> 1
                     if start < minimum || end < minimum || start > end || end > maximum -> return Err(DataBindError{message: "proto reserved range is out of range"})
                     if pkg_data_proto_range_has_prohibited_number((start: start, end: end)) -> return Err(DataBindError{message: "proto reserved range uses prohibited field numbers"})
                     loop old in reserved.ranges {
@@ -646,19 +646,19 @@ struct ProtoParser {
                 self.pos += 1
                 if self.is_word(0, "max") {
                     self.pos += 1
-                    end = @PROTO_MAX_FIELD_NUMBER
+                    end = PROTO_MAX_FIELD_NUMBER
                 } else {
                     end = &self.parse_integer("an extension range end", false)
                 }
             }
-            if start == 0 || start > end || end > @PROTO_MAX_FIELD_NUMBER -> return Err(DataBindError{message: "proto extension range is out of range"})
+            if start == 0 || start > end || end > PROTO_MAX_FIELD_NUMBER -> return Err(DataBindError{message: "proto extension range is out of range"})
             if pkg_data_proto_range_has_prohibited_number((start: start, end: end)) -> return Err(DataBindError{message: "proto extension range uses prohibited field numbers"})
             if self.symbol_at(0, ",") {
                 self.pos += 1
                 next
             }
             &self.expect_symbol(";", "an extensions semicolon")
-            return Ok()
+            return
         }
     }
 
@@ -693,7 +693,7 @@ struct ProtoParser {
         if literal.contains(".") || literal.contains("e") || literal.contains("E") -> return Err(DataBindError{message: "proto field number must be an integer"})
         number :: pkg_data_parse_proto_integer_literal(literal) ?? return Err(DataBindError{message: "proto field number is invalid"})
         if number > 4294967295 -> return Err(DataBindError{message: "proto field number is invalid"})
-        if number == 0 || number > @PROTO_MAX_FIELD_NUMBER -> return Err(DataBindError{message: "proto field number {number} is out of range"})
+        if number == 0 || number > PROTO_MAX_FIELD_NUMBER -> return Err(DataBindError{message: "proto field number {number} is out of range"})
         if number >= 19000 && number <= 19999 -> return Err(DataBindError{message: "proto field number {number} is prohibited"})
         if self.symbol_at(0, "[") -> &self.parse_field_options()
         &self.expect_symbol(";", "a field semicolon")
@@ -756,7 +756,7 @@ struct ProtoParser {
                 next
             }
             if self.is_word(0, "reserved") {
-                parsed :: &self.parse_reserved(false, @PROTO_MAX_FIELD_NUMBER)
+                parsed :: &self.parse_reserved(false, PROTO_MAX_FIELD_NUMBER)
                 loop name in parsed.names {
                     if reserved.names.contains(name) -> return Err(DataBindError{message: "proto reserved name is repeated"})
                     &reserved.names.push(name)
@@ -825,7 +825,7 @@ struct ProtoParser {
                 next
             }
             if self.is_word(0, "reserved") {
-                parsed :: &self.parse_reserved(true, @PROTO_INT32_MAX)
+                parsed :: &self.parse_reserved(true, PROTO_INT32_MAX)
                 loop name in parsed.names {
                     if reserved.names.contains(name) -> return Err(DataBindError{message: "proto enum reserved name is repeated"})
                     &reserved.names.push(name)
@@ -848,7 +848,7 @@ struct ProtoParser {
             &names.push(value_name)
             &self.expect_symbol("=", "an enum value equals sign")
             number :: &self.parse_integer("an enum value number", true)
-            if number < @PROTO_INT32_MIN || number > @PROTO_INT32_MAX -> return Err(DataBindError{message: "proto enum value number is out of int32 range"})
+            if number < PROTO_INT32_MIN || number > PROTO_INT32_MAX -> return Err(DataBindError{message: "proto enum value number is out of int32 range"})
             if number >= 19000 && number <= 19999 -> return Err(DataBindError{message: "proto enum value uses a prohibited number"})
             if !allow_alias {
                 if numbers.contains(number) -> return Err(DataBindError{message: "proto enum has duplicate value number {number}"})

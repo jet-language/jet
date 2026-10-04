@@ -1,0 +1,257 @@
+// Rust LintPolicy.rs: the canonical named-selection parser and registered-name law.
+use core.text as lint_unicode
+
+#Error
+pub struct LintPolicyError {
+    pub detail: String
+    pub code: String?
+    pub name: String?
+
+    pub fn message(self) -> String Never! { self.detail }
+}
+
+pub fn lint_policy_error(detail: String) -> LintPolicyError Never! {
+    LintPolicyError{detail: detail, code: None, name: None}
+}
+
+pub fn lint_policy_code_error(detail: String, code: String, name: String?) -> LintPolicyError Never! {
+    LintPolicyError{detail: detail, code: Val(code), name: name}
+}
+
+pub fn lint_registered_lints() -> [DiagnosticRegistryRow] Never! {
+    rows := [DiagnosticRegistryRow]{}
+    loop row in DIAGNOSTIC_ROWS {
+        if row.lint_name != None -> &rows.push(row)
+    }
+    rows
+}
+
+pub fn lint_by_name(name: String) -> DiagnosticRegistryRow? Never! {
+    loop row in DIAGNOSTIC_ROWS {
+        if row.lint_name == Val(name) -> return Val(row)
+    }
+    None
+}
+
+pub fn lint_code_for_name(name: String) -> String? Never! {
+    row :: lint_by_name(name) ?? return None
+    Val(row.code)
+}
+
+pub fn lint_name_for_code(code: String) -> String? Never! {
+    row :: diagnostic_registry_row(code) ?? return None
+    row.lint_name
+}
+
+pub fn lint_auto_derive_lint() -> DiagnosticRegistryRow Never! {
+    lint_by_name("auto_derive") ?? panic("auto_derive must stay registered")
+}
+
+pub fn lint_auto_derive_name() -> String Never! {
+    lint_auto_derive_lint().lint_name ?? panic("lint rows have names")
+}
+
+pub fn lint_is_diagnostic_code_shape(value: String) -> Bool Never! {
+    raw :: value.bytes()
+    if raw.len() != 5 -> return false
+    first :: Int.from_u8(raw[0])
+    if first != 69 && first != 76 && first != 87 -> return false
+    loop index in 1..<5 {
+        code :: Int.from_u8(raw[index])
+        if code < 48 || code > 57 -> return false
+    }
+    true
+}
+
+pub fn lint_selection_code_error(value: String, surface: String, span: Span?) -> Diagnostic? Never! {
+    if !lint_is_diagnostic_code_shape(value) -> return None
+    name :: lint_name_for_code(value)
+    what :: if name == {
+        .Val(_) -> "`{value}` is a diagnostic code; {surface} takes lint names"
+        .None -> "`{value}` is a diagnostic code; {surface} takes registered lint names"
+    }
+    fix :: if name == {
+        .Val(canonical) -> "write `{canonical}` in {surface} instead of `{value}`"
+        .None -> "write a registered lint name in {surface} instead of `{value}`"
+    }
+    Val(diagnostic_from_registry("E0927", span, what,
+        "lint selectors use stable snake_case names; diagnostic codes are rendered report identities", fix))
+}
+
+pub fn lint_parse_policy_lints(body: String) -> [String]? LintPolicyError! {
+    lints :: lint_block_body(body, POLICY_FIELD_LINTS, 123, 125) ?? return Ok(None)
+    deny := [String]{}
+    loop entry in lint_key_value_entries(lints) {
+        if entry.key != "deny" -> return Err(lint_policy_error("unknown `policy.lints` field `{entry.key}` — allowed: `deny`"))
+        deny = lint_parse_name_list(entry.value)
+    }
+    Ok(Val(deny))
+}
+
+pub fn lint_parse_package_source(source: String) -> [String]? LintPolicyError! {
+    stripped :: lint_strip_comments(source)
+    body :: lint_block_body(stripped, MANIFEST_BLOCK_POLICY, 123, 125) ?? return Ok(None)
+    lint_parse_policy_lints(body)
+}
+
+pub fn lint_known_policy_names() -> String Never! {
+    names := [String]{}
+    loop row in DIAGNOSTIC_ROWS {
+        if row.lint_name == .Val(name) -> &names.push("`{name}`")
+    }
+    names.join(", ")
+}
+
+pub fn lint_parse_name_list(value: String) -> [String] LintPolicyError! {
+    text := value.trim() // #4303
+    if !text.starts_with("[") || !text.ends_with("]") -> return Err(lint_policy_error("`deny:` must be a list like `[same_enum_guard_table, float_money]`"))
+    inner :: lint_slice(text.bytes(), 1, text.bytes().len() - 1)
+    names := [String]{}
+    loop item in lint_top_level_commas(inner) {
+        entry := item.trim() // #4303
+        if entry == "" -> next
+        name :: lint_unquote(entry)
+        if lint_code_for_name(name) == None {
+            if lint_name_for_code(name) == .Val(canonical) -> return Err(lint_policy_code_error("`{name}` is a diagnostic code; use `{canonical}` in `policy.lints.deny`", name, Val(canonical)))
+            if lint_is_diagnostic_code_shape(name) -> return Err(lint_policy_code_error("`{name}` is a diagnostic code; `policy.lints.deny` takes named lint values", name, None))
+            return Err(lint_policy_error("`{name}` isn't a registered lint policy name; allowed: {lint_known_policy_names()}"))
+        }
+        &names.push(name)
+    }
+    Ok(names)
+}
+
+fn lint_slice(raw: [U8], start: Int, end: Int) -> String Never! {
+    String.from_bytes(raw[start..<end]) ?? panic("lint reader cuts at scalar boundaries")
+}
+
+fn lint_byte(raw: [U8], at: Int) -> Int Never! {
+    if at < 0 || at >= raw.len() -> return -1
+    Int.from_u8(raw[at])
+}
+
+// Rust block_body: ignore quoted keys and require a Unicode word boundary.
+fn lint_block_body(text: String, key: String, open: Int, close: Int) -> String? Never! {
+    raw :: text.bytes()
+    pattern :: key.bytes()
+    at := 0
+    quoted := false
+    escaped := false
+    loop at < raw.len() {
+        code :: lint_byte(raw, at)
+        width :: diagnostic_utf8_width(raw, at)
+        if quoted {
+            if { escaped -> escaped = false; code == 92 -> escaped = true; code == 34 -> quoted = false; else -> {} }
+            at += width
+            next
+        }
+        if code == 34 { quoted = true; at += width; next }
+        matches := at + pattern.len() <= raw.len()
+        if matches {
+            loop offset in 0..<pattern.len() {
+                if raw[at + offset] != pattern[offset] { matches = false; break }
+            }
+        }
+        if matches {
+            preceded_ok := at == 0
+            if at > 0 {
+                previous := at - 1
+                loop previous > 0 && lint_byte(raw, previous) >= 128 && lint_byte(raw, previous) <= 191 -> previous -= 1
+                scalar :: lint_slice(raw, previous, at)
+                preceded_ok = scalar != "_" && !lint_unicode.is_alphabetic(scalar) && !lint_unicode.is_numeric(scalar)
+            }
+            after := lint_slice(raw, at + pattern.len(), raw.len()).trim_start() // #4303
+            if preceded_ok && after.starts_with(":") {
+                rest := after.removeprefix(":").trim_start() // #4303
+                if rest.starts_with(".") -> rest = rest.removeprefix(".").trim_start()
+                bytes :: rest.bytes()
+                if lint_byte(bytes, 0) == open -> return Val(lint_balanced(bytes, open, close))
+            }
+        }
+        at += width
+    }
+    None
+}
+
+fn lint_balanced(raw: [U8], open: Int, close: Int) -> String Never! {
+    depth := 1
+    quoted := false
+    escaped := false
+    at := 1
+    loop at < raw.len() {
+        code :: lint_byte(raw, at)
+        if quoted {
+            if { escaped -> escaped = false; code == 92 -> escaped = true; code == 34 -> quoted = false; else -> {} }
+        } else if code == 34 { quoted = true
+        } else if code == open { depth += 1
+        } else if code == close {
+            depth -= 1
+            if depth == 0 -> return lint_slice(raw, 1, at)
+        }
+        at += 1
+    }
+    lint_slice(raw, 1, raw.len())
+}
+
+fn lint_top_level_commas(body: String) -> [String] Never! {
+    raw :: body.bytes()
+    out := [String]{}
+    depth := 0
+    quoted := false
+    escaped := false
+    start := 0
+    loop at in 0..<raw.len() {
+        code :: lint_byte(raw, at)
+        if quoted {
+            if { escaped -> escaped = false; code == 92 -> escaped = true; code == 34 -> quoted = false; else -> {} }
+            next
+        }
+        if code == {
+            34 -> quoted = true
+            40 | 91 | 123 -> depth += 1
+            41 | 93 | 125 -> depth -= 1
+            44 -> if depth == 0 { &out.push(lint_slice(raw, start, at)); start = at + 1 }
+            else -> {}
+        }
+    }
+    tail :: lint_slice(raw, start, raw.len())
+    if tail.trim() != "" -> &out.push(tail)
+    out
+}
+
+fn lint_key_value_entries(body: String) -> [(key: String, value: String)] Never! {
+    out := [(key: String, value: String)]{}
+    loop entry in lint_top_level_commas(body) {
+        parts :: entry.trim().split_once(":") ?? next
+        &out.push((key: parts.before.trim(), value: parts.after.trim()))
+    }
+    out
+}
+
+fn lint_unquote(value: String) -> String Never! {
+    text := value.trim() // #4303
+    if text.bytes().len() >= 2 && text.starts_with("\"") && text.ends_with("\"") -> return lint_slice(text.bytes(), 1, text.bytes().len() - 1)
+    text
+}
+
+fn lint_strip_comments(value: String) -> String Never! {
+    raw :: value.bytes()
+    out := [U8]{}
+    quoted := false
+    escaped := false
+    at := 0
+    loop at < raw.len() {
+        code :: lint_byte(raw, at)
+        if quoted {
+            &out.push(raw[at])
+            if { escaped -> escaped = false; code == 92 -> escaped = true; code == 34 -> quoted = false; else -> {} }
+        } else if code == 34 { quoted = true; &out.push(raw[at])
+        } else if code == 47 && lint_byte(raw, at + 1) == 47 {
+            at += 2
+            loop at < raw.len() && lint_byte(raw, at) != 10 -> at += 1
+            if at < raw.len() -> &out.push(raw[at])
+        } else { &out.push(raw[at]) }
+        at += 1
+    }
+    String.from_bytes(out) ?? panic("comment removal preserves UTF-8")
+}

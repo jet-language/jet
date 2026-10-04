@@ -1,0 +1,561 @@
+// Source/CmdNotebook.rs transport policy; Notebook engine remains at its own owner.
+// Native integration gates: #4494 TCP/stream, shared Mutex/Arc/atomic admission,
+// CSPRNG (/dev/urandom open/read_exact), browser process and stdio; #4483 selected
+// usize width/OS facts; #4409 native IO error kinds. No native provider is supplied
+// by the retained-descriptor ABI. Host traits below are the existing explicit
+// seams, not implementations or Rust bridges. Kernel/document bindings below
+// use Rust-faithful names pending NOTEBOOK-KERNEL-ABI reconciliation by Main
+// (packets0801/0802/0803); no second evaluator or document carrier is defined.
+use jet_foundation.[StatusFields, StatusValue, diagnostic_utf8_width, diagnostic_is_whitespace_at]
+pub JET_CLI_NOTEBOOK_MAX_REQUEST_HEADERS :: 65536
+pub JET_CLI_NOTEBOOK_MAX_REQUEST_BODY :: 8388608
+pub JET_CLI_NOTEBOOK_MAX_CONNECTIONS :: 64
+pub JET_CLI_NOTEBOOK_REQUEST_TIMEOUT_NS :: 10000000000
+pub JET_CLI_NOTEBOOK_BOOTSTRAP_TTL_NS :: 30000000000
+pub JET_CLI_NOTEBOOK_BOOTSTRAP_ROUTE :: "/__jet_notebook_bootstrap"
+JET_CLI_NOTEBOOK_CR :: prep { String.from_bytes([U8]{U8{13}}) ?? panic("CR") }
+
+// Rust's Result<_, String> uses the canonical Err rail, including host messages.
+// Timeout retains the native read error text, just like Rust Read::read.
+pub enum JetCLINotebookRead {
+    Bytes([U8])
+    Timeout(String)
+    Closed
+}
+pub trait JetCLINotebookHTTPHost {
+    // Same monotonic clock domain as deadline_ns/expires_at_ns; never wall time.
+    fn now(&self) -[Time]> Int Never!
+    // Set the remaining timeout and read at most max_bytes. Never extend deadline.
+    // Bytes must be nonempty; zero-byte reads are Closed. IO includes timeout-set errors.
+    fn read_until(&self, deadline_ns: Int, max_bytes: Int) -[Net, Time]> JetCLINotebookRead Err!
+    fn write_all(&self, bytes: [U8]) Err! -[Net]>
+}
+pub trait JetCLINotebookRandomHost {
+    // Exactly 16 fresh OS CSPRNG bytes or the native error; no fallback generator.
+    fn random_16(&self) -[Rand]> [U8] Err!
+}
+// Rust `Request` (CmdNotebook.rs:348-353).
+pub struct JetCLINotebookRequest {
+    pub method: String
+    pub target: String
+    pub headers: [String:String]
+    pub body: String
+}
+// Rust `ClientKind` (jet-repl Notebook/kernel.rs:56-60), used by parse_client.
+pub enum JetCLINotebookClientKind {
+    FirstParty
+    CanvasLens
+    JupyterAdapter
+}
+// Rust `BootstrapGrant` (CmdNotebook.rs:283-286).
+pub struct JetCLINotebookBootstrapGrant { pub nonce: String, pub expires_at_ns: Int }
+
+// Rust `flag_value` (CmdNotebook.rs:132-140). Equals forms win globally.
+pub fn jet_cli_notebook_flag_value(raw: [String], name: String) -> String? Never! {
+    prefix :: "{name}="
+    loop arg in raw {
+        if arg.starts_with(prefix) -> return Val(String.from_bytes(arg.bytes()[prefix.bytes().len()..<arg.bytes().len()]) ?? panic("flag UTF-8"))
+    }
+    loop (index, arg) in raw {
+        if arg == name -> return if index + 1 < raw.len() -> Val(~raw[index + 1]) else -> None
+    }
+    None
+}
+// Rust `notebook_path` (CmdNotebook.rs:142-160). Path spelling stays unnormalized.
+pub fn jet_cli_notebook_path(raw: [String]) -> String? Never! {
+    start := -1
+    loop (index, arg) in raw {
+        if arg == "notebook" {
+            start = index + 1
+            break
+        }
+    }
+    if start < 0 -> return None
+    consumes_value := false
+    loop index in start..<raw.len() {
+        arg :: raw[index]
+        if consumes_value {
+            consumes_value = false
+            next
+        }
+        if arg == "--bind" || arg == "--token" {
+            consumes_value = true
+            next
+        }
+        if arg.starts_with("-") -> next
+        return Val(~arg)
+    }
+    None
+}
+// Rust `mint_token` (CmdNotebook.rs:162-169). Native source is gated #4494.
+pub fn jet_cli_notebook_mint_token<H: JetCLINotebookRandomHost>(host: &H) -[Rand]> String Err! {
+    bytes :: &host.random_16()
+    out := [U8]{}
+    digits :: "0123456789abcdef".bytes()
+    loop byte in bytes {
+        number :: Int.from_u8(byte)
+        &out.push(digits[number >> 4])
+        &out.push(digits[number & 15])
+    }
+    Ok(String.from_bytes(out) ?? panic("token hex UTF-8"))
+}
+// Rust `is_loopback` (CmdNotebook.rs:171-179), deliberately the same lexical test.
+pub fn jet_cli_notebook_is_loopback(addr: String) -> Bool Never! {
+    addr.starts_with("127.") || addr.starts_with("localhost:") || addr == "localhost" || addr.starts_with("[::1]:") || addr == "[::1]" || addr.starts_with("::1:") || addr == "::1"
+}
+// Rust `listener_notice` (CmdNotebook.rs:288-290). bound is host SocketAddr display.
+pub fn jet_cli_notebook_listener_notice(bound: String) -> String Never! {
+    "jet notebook listening on http://{bound}/ (authentication token withheld)"
+}
+// Rust `bootstrap_url` (CmdNotebook.rs:292-297).
+pub fn jet_cli_notebook_bootstrap_url(bound: String, nonce: String) -> String Never! {
+    "http://{bound}{JET_CLI_NOTEBOOK_BOOTSTRAP_ROUTE}?nonce={jet_cli_notebook_fragment_component(nonce)}"
+}
+// Rust `redirect_location` (CmdNotebook.rs:299-301).
+pub fn jet_cli_notebook_redirect_location(token: String) -> String Never! { "/#token={jet_cli_notebook_fragment_component(token)}" }
+// Rust `fragment_component` (CmdNotebook.rs:303-312), UTF-8 bytes, uppercase hex.
+pub fn jet_cli_notebook_fragment_component(value: String) -> String Never! {
+    out := [U8]{}
+    digits :: "0123456789ABCDEF".bytes()
+    loop byte in value.bytes() {
+        number :: Int.from_u8(byte)
+        if (number >= 48 && number <= 57) || (number >= 65 && number <= 90) || (number >= 97 && number <= 122) || number == 45 || number == 46 || number == 95 || number == 126 {
+            &out.push(byte)
+        } else {
+            &out.push(U8{37})
+            &out.push(digits[number >> 4])
+            &out.push(digits[number & 15])
+        }
+    }
+    String.from_bytes(out) ?? panic("fragment ASCII")
+}
+// Rust `parse_client` (CmdNotebook.rs:607-614).
+pub fn jet_cli_notebook_parse_client(name: String) -> JetCLINotebookClientKind Err! {
+    if name == {
+        "" | "first" | "first-party" -> Ok(JetCLINotebookClientKind.FirstParty)
+        "canvas" | "lens" -> Ok(JetCLINotebookClientKind.CanvasLens)
+        "jupyter" | "jp" -> Ok(JetCLINotebookClientKind.JupyterAdapter)
+        else -> Err("unknown client `{name}`")
+    }
+}
+// Rust `read_request` (CmdNotebook.rs:629-631).
+// max_usize MUST be the selected target's usize::MAX, not the running host.
+// Planned producer: core.sys.usize_max()->U64 (#4483); not callable yet.
+pub fn jet_cli_notebook_read_request<H: JetCLINotebookHTTPHost>(host: &H, max_usize: U64) -[Net, Time]> JetCLINotebookRequest Err! {
+    deadline_ns :: &host.now() + JET_CLI_NOTEBOOK_REQUEST_TIMEOUT_NS
+    jet_cli_notebook_read_request_until(&host, deadline_ns, max_usize)
+}
+// Rust `read_request_until` (CmdNotebook.rs:633-701). Search only newly available
+// header terminators (including the prior chunk's last three bytes), not the prefix.
+pub fn jet_cli_notebook_read_request_until<H: JetCLINotebookHTTPHost>(host: &H, deadline_ns: Int, max_usize: U64) -[Net, Time]> JetCLINotebookRequest Err! {
+    bytes := [U8]{}
+    scan := 0
+    header_end := -1
+    loop header_end < 0 {
+        chunk :: jet_cli_notebook_read_chunk(&host, deadline_ns, "request ended before headers")
+        loop byte in chunk -> &bytes.push(byte)
+        if bytes.len() > JET_CLI_NOTEBOOK_MAX_REQUEST_HEADERS -> return Err("request headers exceed 64 KiB")
+        loop scan + 4 <= bytes.len() {
+            if bytes[scan] == (U8{13}) && bytes[scan + 1] == (U8{10}) && bytes[scan + 2] == (U8{13}) && bytes[scan + 3] == (U8{10}) {
+                header_end = scan + 4
+                break
+            }
+            scan += 1
+        }
+    }
+    header :: String.from_bytes(bytes[0..<header_end]) ?? return Err("headers are not UTF-8")
+    lines :: header.lines()
+    if lines.is_empty() -> return Err("missing request line")
+    words :: jet_cli_notebook_request_words(lines[0])
+    method :: if words.len() > 0 -> ~words[0] else -> ""
+    target :: if words.len() > 1 -> ~words[1] else -> ""
+    headers := [String:String]{}
+    loop index in 1..<lines.len() {
+        if lines[index].split_once(":") == .Val(parts) {
+            name :: parts.before.trim().to_ascii_lower()
+            value := parts.after.trim() // #4303
+            headers[name] = ~value
+        }
+    }
+    length := 0
+    if headers.get("content-length") == .Val(value) -> length = jet_cli_notebook_content_length(value, max_usize)
+    if length > JET_CLI_NOTEBOOK_MAX_REQUEST_BODY -> return Err("request body exceeds 8 MiB")
+    loop bytes.len() < header_end + length {
+        chunk :: jet_cli_notebook_read_chunk(&host, deadline_ns, "request ended before body")
+        loop byte in chunk -> &bytes.push(byte)
+    }
+    body :: String.from_bytes(bytes[header_end..<header_end + length]) ?? return Err("request body is not UTF-8")
+    Ok(JetCLINotebookRequest{method: method, target: target, headers: ^headers, body: body})
+}
+// Rust `read_request_until` request-line split_whitespace; only two fields used.
+fn jet_cli_notebook_request_words(line: String) -> [String] Never! {
+    bytes :: line.bytes()
+    words := [String]{}
+    at := 0
+    loop at < bytes.len() && words.len() < 2 {
+        loop at < bytes.len() && diagnostic_is_whitespace_at(bytes, at) -> at += diagnostic_utf8_width(bytes, at)
+        start :: at
+        loop at < bytes.len() && !diagnostic_is_whitespace_at(bytes, at) -> at += diagnostic_utf8_width(bytes, at)
+        if at > start -> &words.push(String.from_bytes(bytes[start..<at]) ?? panic("request word UTF-8"))
+    }
+    words
+}
+// Rust usize::parse: +/digits/overflow on the SELECTED width before body limit.
+pub fn jet_cli_notebook_content_length(value: String, max_usize: U64) -> Int Err! {
+    bytes :: value.bytes()
+    start :: if value.starts_with("+") -> 1 else -> 0
+    if start == bytes.len() -> return Err("invalid content length")
+    number := U64{0}
+    loop at in start..<bytes.len() {
+        digit :: Int.from_u8(bytes[at]) - 48
+        if digit < 0 || digit > 9 -> return Err("invalid content length")
+        scaled :: number.checked_mul(U64{10}) ?? return Err("invalid content length")
+        number = scaled.checked_add(U64{digit}) ?? return Err("invalid content length")
+        if number > max_usize -> return Err("invalid content length")
+    }
+    // Lengths beyond the policy limit need not be narrowed to signed Int.
+    if number > (U64{8388608}) -> return Ok(JET_CLI_NOTEBOOK_MAX_REQUEST_BODY + 1)
+    Ok(Int.from_u64(number))
+}
+// Rust `read_request_until` remaining/deadline/read error and EOF branches.
+fn jet_cli_notebook_read_chunk<H: JetCLINotebookHTTPHost>(host: &H, deadline_ns: Int, ended: String) -[Net, Time]> [U8] Err! {
+    if &host.now() >= deadline_ns -> return Err("request deadline exceeded")
+    result :: &host.read_until(deadline_ns, 4096)
+    if result == {
+        .Bytes(bytes) -> Ok(^bytes)
+        .Timeout(message) -> Err(^message)
+        .Closed -> Err(^ended)
+    }
+}
+// Rust `split_target` (CmdNotebook.rs:703-705).
+pub fn jet_cli_notebook_split_target(target: String) -> (route: String, query: String) Never! {
+    parts :: target.split_once("?") ?? return (route: ~target, query: "")
+    (route: ~parts.before, query: ~parts.after)
+}
+// Rust `authorized` (CmdNotebook.rs:707-713). Query values never authenticate.
+pub fn jet_cli_notebook_authorized(request: JetCLINotebookRequest, token: String) -> Bool Never! {
+    expected :: "Bearer {token}"
+    value :: request.headers.get("authorization") ?? return false
+    jet_cli_notebook_constant_time_eq(value.bytes(), expected.bytes())
+}
+// Rust `constant_time_eq` (CmdNotebook.rs:715-724). No data-dependent early exit.
+pub fn jet_cli_notebook_constant_time_eq(left: [U8], right: [U8]) -> Bool Never! {
+    difference := left.len() ~| right.len()
+    count :: if left.len() > right.len() -> left.len() else -> right.len()
+    loop index in 0..<count {
+        a :: if index < left.len() -> Int.from_u8(left[index]) else -> 0
+        b :: if index < right.len() -> Int.from_u8(right[index]) else -> 0
+        difference = difference | (a ~| b)
+    }
+    difference == 0
+}
+// Rust `consume_bootstrap_at` (CmdNotebook.rs:730-745). Caller holds the exclusive
+// grant lock for this entire call; a failed/poisoned lock must refuse before entry.
+pub fn jet_cli_notebook_consume_bootstrap_at(grant: &JetCLINotebookBootstrapGrant?, nonce: String, now_ns: Int) -> Bool Never! {
+    current :: grant ?? return false
+    if now_ns >= current.expires_at_ns {
+        grant = None
+        return false
+    }
+    matches :: jet_cli_notebook_constant_time_eq(current.nonce.bytes(), nonce.bytes())
+    if matches -> grant = None
+    matches
+}
+// Rust `form_value` (CmdNotebook.rs:747-754). Skip malformed pairs, keep first valid.
+pub fn jet_cli_notebook_form_value(body: String, key: String) -> String? Never! {
+    loop part in body.split("&") {
+        pair :: part.split_once("=") ?? next
+        name :: jet_cli_notebook_decode_component(pair.before) ?? next
+        if name == key {
+            value :: jet_cli_notebook_decode_component(pair.after) ?? next
+            return Val(value)
+        }
+    }
+    None
+}
+// Rust `decode_component` (CmdNotebook.rs:756-773).
+pub fn jet_cli_notebook_decode_component(value: String) -> String Err! {
+    bytes :: value.bytes()
+    out := [U8]{}
+    at := 0
+    loop at < bytes.len() {
+        byte :: bytes[at]
+        at += 1
+        if byte == (U8{43}) -> &out.push(U8{32})
+        else {
+            if byte == (U8{37}) {
+                if at + 2 > bytes.len() -> return Err("incomplete percent escape")
+                high :: if bytes[at] == (U8{43}) -> 0 else -> jet_cli_notebook_hex_digit(bytes[at])
+                low :: jet_cli_notebook_hex_digit(bytes[at + 1])
+                if high < 0 || low < 0 -> return Err("invalid percent escape")
+                &out.push(U8{high * 16 + low})
+                at += 2
+            } else { &out.push(byte) }
+        }
+    }
+    Ok(String.from_bytes(out) ?? return Err("form value is not UTF-8"))
+}
+fn jet_cli_notebook_hex_digit(byte: U8) -> Int Never! {
+    number :: Int.from_u8(byte)
+    if {
+        number >= 48 && number <= 57 -> number - 48
+        number >= 65 && number <= 70 -> number - 55
+        number >= 97 && number <= 102 -> number - 87
+        else -> -1
+    }
+}
+// Rust `write_response` (CmdNotebook.rs:775-788). Content-Length counts BYTES.
+pub fn jet_cli_notebook_write_response<H: JetCLINotebookHTTPHost>(host: &H, status: String, content_type: String, body: String) Err! -[Net]> {
+    response :: "HTTP/1.1 {status}{JET_CLI_NOTEBOOK_CR}\nContent-Type: {content_type}{JET_CLI_NOTEBOOK_CR}\nContent-Length: {body.bytes().len()}{JET_CLI_NOTEBOOK_CR}\nConnection: close{JET_CLI_NOTEBOOK_CR}\n{JET_CLI_NOTEBOOK_CR}\n{body}"
+    &host.write_all(response.bytes())
+}
+// Rust `write_redirect` (CmdNotebook.rs:790-798).
+pub fn jet_cli_notebook_write_redirect<H: JetCLINotebookHTTPHost>(host: &H, token: String) Err! -[Net]> {
+    location :: jet_cli_notebook_redirect_location(token)
+    response :: "HTTP/1.1 303 See Other{JET_CLI_NOTEBOOK_CR}\nLocation: {location}{JET_CLI_NOTEBOOK_CR}\nCache-Control: no-store{JET_CLI_NOTEBOOK_CR}\nReferrer-Policy: no-referrer{JET_CLI_NOTEBOOK_CR}\nContent-Length: 0{JET_CLI_NOTEBOOK_CR}\nConnection: close{JET_CLI_NOTEBOOK_CR}\n{JET_CLI_NOTEBOOK_CR}\n"
+    &host.write_all(response.bytes())
+}
+// Rust `json_error` (CmdNotebook.rs:800-802), canonical ordered Report emitter.
+pub fn jet_cli_notebook_json_error(message: String) -> String Never! {
+    fields := StatusFields.new()
+    fields = ^fields.with("ok", StatusValue.Bool{value: false})
+    fields = ^fields.with("error", StatusValue.String{value: message})
+    StatusValue.object(^fields).json()
+}
+
+// Rust `export_message` (CmdNotebook.rs:598-605); field order is observable.
+pub fn jet_cli_notebook_export_message(filename: String, content: String, loss: String) -> String Never! {
+    fields := StatusFields.new()
+    fields = ^fields.with("ok", StatusValue.Bool{value: true})
+    fields = ^fields.with("filename", StatusValue.String{value: filename})
+    fields = ^fields.with("content", StatusValue.String{value: content})
+    fields = ^fields.with("loss", StatusValue.String{value: loss})
+    StatusValue.object(^fields).json()
+}
+
+// CmdNotebook.rs:563-569 encoding fragment; the canonical Kernel must produce
+// the typed client-specific state. This is not a replacement Kernel API.
+pub fn jet_cli_notebook_state_message_value(message: String, state: StatusValue) -> StatusValue Never! {
+    fields := StatusFields.new()
+    fields = ^fields.with("ok", StatusValue.Bool{value: true})
+    fields = ^fields.with("message", StatusValue.String{value: message})
+    fields = ^fields.with("state", ^state)
+    StatusValue.object(^fields)
+}
+
+// CmdNotebook.rs:593-596 form selection; conversion to native PathBuf remains
+// with the missing canonical OSPath/Notebook document owner, not String-backed IO.
+pub fn jet_cli_notebook_nonempty_path_value(body: String, key: String) -> String? Never! {
+    path :: jet_cli_notebook_form_value(body, key) ?? return None
+    if path.is_empty() -> None else -> Val(^path)
+}
+
+// Original native tests are not replaced by seam mocks:
+// :850-861 browser_process_receives_bootstrap_nonce_without_bearer needs raw
+// OsString argv and null-stdio process spawn on macOS/Windows/other (#4494/#4483).
+// :896-903 minted_bootstrap_nonce_is_fresh_and_hex_encoded needs two REAL
+// /dev/urandom reads; deterministic random fixtures are not freshness evidence.
+// :935-958 partial_notebook_request_cannot_extend_the_absolute_deadline needs a
+// real TCP pair, 200 writes of G at 5ms, deadline80ms, elapsed<500ms, close+join.
+// :961-1096 notebook_listener_serves_valid_client_behind_bounded_partial_preauth_clients
+// needs canonical Kernel plus native listener/thread/Mutex/Arc and AcqRel counters:
+// 65 partial clients; accepted65, active64, peak64; close admitted clients until
+// active<64; authenticated GET /health => 200, ok:true in <2s; active0 after
+// closing every client; release stop, wake accept, join => ExitCodes::OK.
+// NotebookServerGuard :807-825 must stop+wake, wait at most2s for active0 and
+// join on all unwind/early-assert paths. Native Close/field cleanup gated #4494.
+// #4499 not applicable: Request :348-353 keys are Strings, no composite map keys.
+
+// CmdNotebook.rs:442-445. Errors here are API data, not HTTP IO failures.
+pub enum JetCLINotebookApiResponse { Ok(String) Error(String) }
+
+fn jet_cli_notebook_api_value(body: String, name: String) -> String Never! {
+    jet_cli_notebook_form_value(body, name) ?? ""
+}
+
+// CmdNotebook.rs:447-561. Kernel/CellKind/document functions below are binding
+// sites pending NOTEBOOK-KERNEL-ABI reconciliation, not substitute providers.
+pub fn jet_cli_notebook_api_message(kernel: &Kernel, route: String, body: String, interrupt_was_active: Bool) -> JetCLINotebookApiResponse Never! {
+    client_name :: jet_cli_notebook_api_value(body, "client")
+    selected_client :: jet_cli_notebook_parse_client(client_name) ?? JetCLINotebookClientKind.FirstParty
+    if route == "/api/state" -> return JetCLINotebookApiResponse.Ok(&kernel.state_json_for(selected_client))
+    if route == "/api/add" {
+        kind :: if jet_cli_notebook_api_value(body, "kind") == "markdown" -> CellKind.Markdown else -> CellKind.Jet
+        cell_id :: ~(&kernel.notebook.add_cell(kind, jet_cli_notebook_api_value(body, "source"))).id
+        return jet_cli_notebook_state_message_for(&kernel, "added={cell_id}", selected_client)
+    }
+    if route == "/api/export/ipynb" {
+        result :: export_ipynb(kernel.notebook) ?? return JetCLINotebookApiResponse.Error(err.message)
+        return JetCLINotebookApiResponse.Ok(jet_cli_notebook_export_message("notebook.ipynb", result.content, result.loss.render()))
+    }
+    if route == "/api/export/jet" {
+        result :: export_jet(kernel.notebook)
+        return JetCLINotebookApiResponse.Ok(jet_cli_notebook_export_message("notebook.jet", result.content, result.loss.render()))
+    }
+    message :: jet_cli_notebook_api_action(&kernel, route, body, client_name, interrupt_was_active) ?? return JetCLINotebookApiResponse.Error(err.message)
+    jet_cli_notebook_state_message_for(&kernel, message, selected_client)
+}
+
+// Rust :466-555; retain error precedence and attach-before-parse for profiling.
+// Invalid clients default ONLY in state/debug/inspect/grant, never run/profile.
+fn jet_cli_notebook_api_action(kernel: &Kernel, route: String, body: String, client_name: String, interrupt_was_active: Bool) -> String Err! {
+    if route == {
+        "/api/edit" -> {
+            &kernel.edit_cell(jet_cli_notebook_api_value(body, "cell_id"), jet_cli_notebook_api_value(body, "source"))
+            Ok("edited")
+        }
+        "/api/run" -> {
+            id :: jet_cli_notebook_api_value(body, "cell_id")
+            client :: jet_cli_notebook_parse_client(client_name)
+            result :: &kernel.execute_cell(client, id)
+            // Pending0802 canonical REPL owner: exact Rust Debug, not display.
+            status :: repl_turn_status_debug(result.eval.status)
+            Ok("ran={id};status={status};elapsed_ms={result.elapsed_ms}")
+        }
+        "/api/profile" -> {
+            &kernel.attach_perf()
+            id :: jet_cli_notebook_api_value(body, "cell_id")
+            client :: jet_cli_notebook_parse_client(client_name)
+            result :: &kernel.execute_cell(client, id)
+            Ok("profiled={id};elapsed_ms={result.elapsed_ms}")
+        }
+        "/api/debug" -> {
+            &kernel.attach_debug()
+            client :: jet_cli_notebook_parse_client(client_name) ?? JetCLINotebookClientKind.FirstParty
+            message :: jet_cli_notebook_inspect_message(kernel, jet_cli_notebook_api_value(body, "cell_id"), client)
+            Ok("debug_attached;{message}")
+        }
+        "/api/inspect" -> {
+            client :: jet_cli_notebook_parse_client(client_name) ?? JetCLINotebookClientKind.FirstParty
+            jet_cli_notebook_inspect_message(kernel, jet_cli_notebook_api_value(body, "cell_id"), client)
+        }
+        "/api/complete" -> {
+            prefix :: jet_cli_notebook_api_value(body, "prefix")
+            names := [String]{}
+            loop name in kernel.session.scope.keys() {
+                if name.starts_with(prefix) -> &names.push(~name)
+            }
+            &names.sort()
+            Ok("completions={names.join(",")}")
+        }
+        "/api/interrupt" -> {
+            if !interrupt_was_active -> &kernel.request_interrupt()
+            Ok("interrupt_requested")
+        }
+        "/api/stdin" -> {
+            &kernel.push_stdin(jet_cli_notebook_api_value(body, "line"))
+            Ok("stdin_queued={kernel.stdin_queue.len()}")
+        }
+        "/api/open" -> {
+            &kernel.open_document(Path.new(jet_cli_notebook_api_value(body, "path")))
+            Ok("opened")
+        }
+        "/api/reopen" -> {
+            &kernel.reopen_document()
+            Ok("reopened")
+        }
+        "/api/save" -> {
+            path :: jet_cli_notebook_nonempty_path(body, "path")
+            saved :: &kernel.save_document(path)
+            Ok("saved={saved.display()}")
+        }
+        "/api/merge" -> jet_cli_notebook_merge_path(&kernel, Path.new(jet_cli_notebook_api_value(body, "path")))
+        "/api/import" -> {
+            imported :: import_ipynb(jet_cli_notebook_api_value(body, "text"))
+            &kernel.replace_notebook(imported.notebook)
+            Ok("imported;{imported.loss.render().replace("\n", " | ")}")
+        }
+        "/api/grant" -> {
+            client :: jet_cli_notebook_parse_client(client_name) ?? JetCLINotebookClientKind.FirstParty
+            // Pending0803 canonical ClientKind::renderer, never a second table.
+            &kernel.grant_capability(jet_cli_notebook_api_value(body, "cell_id"), client.renderer())
+            Ok("granted")
+        }
+        else -> Err("unknown notebook route `{route}`")
+    }
+}
+
+// CmdNotebook.rs:563-569. Pending Kernel.state_value_for(client)->StatusValue:
+// canonical typed state avoids serializing and parsing the entire state again.
+fn jet_cli_notebook_state_message_for(kernel: &Kernel, message: String, client: JetCLINotebookClientKind) -> JetCLINotebookApiResponse Never! {
+    value :: jet_cli_notebook_state_message_value(message, &kernel.state_value_for(client))
+    JetCLINotebookApiResponse.Ok(value.json())
+}
+
+// CmdNotebook.rs:571-591. Cell.source length is UTF8 BYTES, not scalar count.
+fn jet_cli_notebook_inspect_message(kernel: &Kernel, cell_id: String, client: JetCLINotebookClientKind) -> String Err! {
+    loop cell in kernel.notebook.cells {
+        if cell.id != cell_id -> next
+        visible :: if client == {
+            .FirstParty -> &kernel.first_party_visible_output(cell_id)
+            .CanvasLens -> &kernel.canvas_visible_output(cell_id)
+            .JupyterAdapter -> &kernel.jupyter_visible_output(cell_id)
+        }
+        output :: if visible == .Val(bundle) -> ~bundle.text_plain else -> "(no live output)"
+        return Ok("inspected={cell.id};source_len={cell.source.bytes().len()};output={output}")
+    }
+    Err("unknown cell `{cell_id}`")
+}
+
+// CmdNotebook.rs:593-596. Path.new is the document owner's native path ingress,
+// pending0801 ABI; must not bind this spelling to String-backed filesystem IO.
+fn jet_cli_notebook_nonempty_path(body: String, key: String) -> Path? Never! {
+    value :: jet_cli_notebook_nonempty_path_value(body, key) ?? return None
+    Val(Path.new(value))
+}
+
+// CmdNotebook.rs:616-627. Load failure precedes merge; use stable cell-ID owner.
+fn jet_cli_notebook_merge_path(kernel: &Kernel, path: Path) -> String Err! {
+    notebook :: load_jetnb(path)
+    &kernel.merge_notebook(^notebook)
+    Ok("merged by stable cell ID;conflicts={kernel.notebook.merge_conflicts.len()}")
+}
+
+// Native orchestration bodies remain explicit capability gates, not callable
+// declarations or successful fallbacks:
+// run_notebook :41-107 must open Kernel BEFORE selecting protocol. Explicit bind
+// remains server even with nonTTY stdin; protocol/headless or unbound nonTTY
+// selects run_headless and ExitCodes::OK. Native Path::parent default"." and
+// Kernel.environment_hash/open pending0801/0803; open error E2105/user-error.
+// Nonloopback explicit bind + empty/missing explicit token => E2104/user-error
+// with original what/why/fix; empty token otherwise mints CSPRNG, failure
+// E2105/ICE. auto_open = stdin.is_terminal && lexical is_loopback. Server error
+// E2105/ICE; preserve returned code, sole process exit with canonical CLI owner.
+// run_headless :109-130 locks stdout for entire loop, reads stdin lines until
+// read error/EOF; trim(#4303), skip empty, quit/:quit stops; call pending0802
+// run_headless_script(kernel,[line]); write_all THEN flush, break on either
+// failure; no extra response/newline/retry.
+// serve_loopback :181-281 sets authority BEFORE bind; native listener owns
+// bind/local_addr errors. Test readiness send failure has exact message
+// "notebook listener readiness receiver dropped". Bootstrap only for auto_open,
+// fresh nonce + monotonic30s grant under ONE Mutex, browser receives nonce URL
+// never bearer. Publish original listener/document/client/control notices.
+// Share ONE kernel Mutex/Arc; admit via atomic fetch_update(AcqRel,Acquire),
+// count<64 => count+1, reject closes stream; accepted increments for both;
+// peak fetch_max(previous+1). Check stop Acquire before AND after accept.
+// Clone shared owners + token for admitted worker, native spawn; set10s write
+// timeout ignoring error; handle_connection ignoring error; decrement AcqRel
+// once after worker and once on spawn failure, not both; stopped => OK.
+// browser_launch_spec/open_notebook_browser :314-346 must preserve native
+// OsString: nonempty JET_CANVAS_BROWSER precedes nonempty BROWSER; explicit
+// browser + exactly[URL], else selected macOS open/windows explorer.exe/other
+// xdg-open. No shell or cmd/C; stdout/stderr null. Spawn error prints EXACT
+// "jet notebook browser handoff failed: {error}; set JET_CANVAS_BROWSER or BROWSER".
+// handle_connection :355-440 initially sets10s read timeout, THEN read_request.
+// GET bootstrap route consumes nonce under grant lock (poison=>false), single
+// use before redirect. Refusal401 JSON "invalid or expired notebook bootstrap".
+// GET / or /index.html public and serves canonical client.html asset; every
+// other route authenticates BEFORE health/404/API. Missing bearer401 JSON
+// "missing bearer token". GET /health locks kernel (poison=>"notebook kernel
+// lock poisoned") and Report fields ok/cells/turns. NonPOST or non/api =>404
+// text/plain "not found". Interrupt records active flag THEN note_repl_interrupt
+// BEFORE kernel lock to interrupt ongoing turn; API under lock, success200,
+// error400+json_error, all responses JSON UTF8. Do not move interrupt after lock.
+// consume_bootstrap :726-745 uses actual monotonic clock + one exclusive grant
+// mutex acquisition; poisoned lock refuses WITHOUT consuming. The existing
+// consume_bootstrap_at helper assumes that SAME loan, not an unlocked copied
+// grant. Arc/Mutex, actual target OS, retained resource Close/unwind, raw stdio,
+// CSPRNG, TCP deadlines and process spawn are missing #4494/#4483/#4409; no
+// canonical callable native seam for them is published by retained-descriptor.
+// Asset owner stays crates/jet-repl/src/Notebook/client.html; Main must include
+// the original full asset, never a replacement page or transport-owned copy.

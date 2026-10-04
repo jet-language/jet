@@ -1,0 +1,147 @@
+// D-TEST4 doctests (Source/Doctest.rs): runnable examples inside `///` doc
+// comments. A fenced ```` ```jet ```` block runs as a test under `jet test`; an
+// expected value is a `// =>` trailing comment on the line that produces it,
+// and a mismatch fires E2901. Discovery is textual so the producing-line
+// numbers stay exact. Each block becomes one self-contained program: setup
+// lines verbatim inside `fn run()`, then one `print("{EXPR}")` per expectation
+// so its `JetShow` rendering can be compared with the claimed value.
+use jet_foundation.[
+    Diagnostic,
+    Span,
+    diagnostic_from_registry,
+    diagnostic_text_lines,
+]
+
+// Rust `EXPECT_MARKER`.
+JET_CLI_DOCTEST_EXPECT_MARKER :: "// =>"
+
+// One `EXPR // => VALUE` expectation inside a doctest block (Rust `DocExpect`).
+pub struct JetCLIDoctestExpect {
+    // The expression text left of `// =>`, trimmed.
+    pub expr: String
+    // The expected `JetShow` rendering right of `// =>`, trimmed.
+    pub expected: String
+    // 1-based source line of the producing line.
+    pub line: Int
+}
+
+// One ```` ```jet ```` fenced block inside a run of `///` doc comments
+// (Rust `DocBlock`).
+pub struct JetCLIDoctestBlock {
+    // 1-based source line of the opening fence.
+    pub fence_line: Int
+    // Lines that are not `// =>` expectations, verbatim.
+    pub setup: [String]
+    // The `// =>` expectations in source order.
+    pub expects: [JetCLIDoctestExpect]
+}
+
+// Rust `is_doc_line`.
+fn jet_cli_doctest_is_doc_line(trimmed_line: String) -> Bool Never! {
+    trimmed_line.starts_with("///")
+}
+
+// Rust `doc_inner`: the text after `///`, without one following space.
+fn jet_cli_doctest_doc_inner(trimmed_line: String) -> String Never! {
+    bytes :: trimmed_line.bytes()
+    start := 3
+    if bytes.len() > 3 && bytes[3] == (U8{32}) -> start = 4
+    String.from_bytes(bytes[start..<bytes.len()]) ?? ""
+}
+
+// Rust `fence_lang_is_jet`: a bare fence or one tagged `jet` (ASCII case-insensitive).
+fn jet_cli_doctest_fence_lang_is_jet(fence: String) -> Bool Never! {
+    bytes :: fence.bytes()
+    start := 0
+    loop start < bytes.len() && bytes[start] == (U8{96}) -> start += 1
+    lang := (String.from_bytes(bytes[start..<bytes.len()]) ?? "").trim() // #4303
+    lang == "" || lang.to_ascii_lower() == "jet"
+}
+
+// Rust `find_expect_marker`: the byte offset of `// =>` outside a `"…"`
+// literal. Rust compares `&s[i..i + 5]`, which panics when `i` splits a
+// multi-byte character; this compares bytes, so such a line finds no false
+// marker instead of aborting.
+fn jet_cli_doctest_find_expect_marker(text: String) -> Int? Never! {
+    bytes :: text.bytes()
+    marker :: JET_CLI_DOCTEST_EXPECT_MARKER.bytes()
+    in_string := false
+    index := 0
+    loop index + marker.len() <= bytes.len() {
+        if bytes[index] == (U8{34}) && (index == 0 || bytes[index - 1] != (U8{92})) -> in_string = !in_string
+        if !in_string {
+            matched := true
+            loop offset in 0..<marker.len() {
+                if bytes[index + offset] != marker[offset] {
+                    matched = false
+                    break
+                }
+            }
+            if matched -> return Val(index)
+        }
+        index += 1
+    }
+    None
+}
+
+// Rust `discover`: every ```` ```jet ```` fence inside a `///` run. A line
+// that is not a doc comment ends the run and drops an unclosed block.
+pub fn jet_cli_doctest_discover(source: String) -> [JetCLIDoctestBlock] Never! {
+    blocks := [JetCLIDoctestBlock]{}
+    lines :: diagnostic_text_lines(source)
+    index := 0
+    loop index < lines.len() {
+        trimmed := lines[index].trim_start() // #4303
+        if jet_cli_doctest_is_doc_line(trimmed) {
+            inner := jet_cli_doctest_doc_inner(trimmed).trim_start() // #4303
+            if inner.starts_with("```") && jet_cli_doctest_fence_lang_is_jet(inner) {
+                fence_line :: index + 1
+                setup := [String]{}
+                expects := [JetCLIDoctestExpect]{}
+                index += 1
+                loop index < lines.len() {
+                    line := lines[index].trim_start() // #4303
+                    if !jet_cli_doctest_is_doc_line(line) -> break
+                    content :: jet_cli_doctest_doc_inner(line)
+                    if content.trim_start().starts_with("```") {
+                        &blocks.push(JetCLIDoctestBlock{fence_line: fence_line, setup: setup, expects: expects})
+                        index += 1
+                        break
+                    }
+                    if jet_cli_doctest_find_expect_marker(content) == .Val(at) {
+                        bytes :: content.bytes()
+                        expr := (String.from_bytes(bytes[0..<at]) ?? "").trim() // #4303
+                        expected := (String.from_bytes(bytes[at + JET_CLI_DOCTEST_EXPECT_MARKER.bytes().len()..<bytes.len()]) ?? "").trim() // #4303
+                        if expr != "" -> &expects.push(JetCLIDoctestExpect{expr: expr, expected: expected, line: index + 1})
+                    } else {
+                        if content.trim() != "" -> &setup.push(content.trim_end())
+                    }
+                    index += 1
+                }
+                next
+            }
+        }
+        index += 1
+    }
+    blocks
+}
+
+// Rust `synth_program`: setup lines inside `fn run()`, then one interpolated
+// `print` per expectation, so stdout has one line per expectation.
+pub fn jet_cli_doctest_synth_program(block: JetCLIDoctestBlock) -> String Never! {
+    out := "fn run() {{\n"
+    loop line in block.setup -> out = "{out}    {line}\n"
+    loop expect in block.expects -> out = "{out}    print(\"{{{expect.expr}}}\")\n"
+    "{out}}}\n"
+}
+
+// Rust `mismatch_diag`: E2901 at the producing line in the original source.
+pub fn jet_cli_doctest_mismatch_diagnostic(expect: JetCLIDoctestExpect, actual: String, span: Span?) -> Diagnostic Never! {
+    diagnostic_from_registry(
+        "E2901",
+        span,
+        "doctest output mismatch. Expected: `{expect.expected}` Got: `{actual}`",
+        "the example in the doc comment claims a different result from what the code produces; docs cannot lie (D-TEST4)",
+        "run `jet test --update-snapshots` to update the claimed output, or fix the code to match it",
+    )
+}

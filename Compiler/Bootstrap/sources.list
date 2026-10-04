@@ -16,14 +16,19 @@ Compiler/JetLexer/Source/Lexer/Payload.jet
 Compiler/JetFoundation/Source/Registry/CoreCalls.jet
 Compiler/JetFoundation/Source/Registry/CoreModules.jet
 Compiler/JetFoundation/Source/Registry/CoreCallRows.jet
+Compiler/JetFoundation/Source/Registry/CoreEnumRows.jet
+Compiler/JetFoundation/Source/Registry/FactReads.jet
 Compiler/JetFoundation/Source/Registry/Diagnostics.jet
 Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet
 Compiler/JetFoundation/Source/Diagnostics/Render.jet
 Compiler/JetFoundation/Source/Registry/Explain.jet
+Compiler/JetFoundation/Source/Registry/EmbeddedCore.jet
+Compiler/JetFoundation/Source/Registry/EmbeddedCoreData.jet
 Compiler/JetFoundation/Source/Types/Types.jet
 Compiler/JetFoundation/Source/Types/IntegerKinds.jet
 Compiler/JetFoundation/Source/Types/TupleNames.jet
 Compiler/JetFoundation/Source/MIR/MIR.jet
+Compiler/JetFoundation/Source/MIR/AccelerationReceipt.jet
 Compiler/JetFoundation/Source/MIR/Digest/Digest.jet
 Compiler/JetFoundation/Source/MIR/Reachability.jet
 Compiler/JetFoundation/Source/Derivations.jet
@@ -61,6 +66,31 @@ Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet
 Compiler/JetFoundation/Source/Registry/WebCoreSignatures.jet
 Compiler/JetFoundation/Source/Policy/CoreMenus.jet
 Compiler/JetFoundation/Source/Policy/AppliedRules.jet
+Compiler/JetFoundation/Source/Policy/Policy.jet
+Compiler/JetFoundation/Source/Execution/WatchPolicy.jet
+Compiler/JetFoundation/Source/Syntax/Spellings.jet
+Compiler/JetFoundation/Source/Syntax/Retirements.jet
+Compiler/JetFoundation/Source/Encoding/CanonicalJson.jet
+Compiler/JetFoundation/Source/Encoding/Json.jet
+Compiler/JetFoundation/Source/CLI/Schema.jet
+Compiler/JetFoundation/Source/Performance/Budget.jet
+Compiler/JetFoundation/Source/Performance/BudgetReport.jet
+
+# jet_foundation ports that live under Jetpack/Foundation (D1/D2, port-main only;
+# integration decides their shared home).
+Jetpack/Foundation/Source/BuildEffect.jet
+Jetpack/Foundation/Source/Authority.jet
+Jetpack/Foundation/Source/Report.jet
+
+# Canonical Jetpack desktop bundle model (Main D1 ruling). These are refreshed
+# root snapshots, owned by Jetpack; never copied or edited by the CLI lane.
+Jetpack/PackageModel/Source/Text/ByteText.jet
+Jetpack/PackageModel/Source/Text/Digest.jet
+Jetpack/PackageModel/Source/Bundle/BundleSpec.jet
+Jetpack/PackageModel/Source/Bundle/BundlePlan.jet
+
+# Canonical Jetpack immutable build record consumed by CR02 package-node evidence.
+Jetpack/Store/Source/ArtifactStore/BuildRecord.jet
 
 # Jet-native backend: LIR, MIR -> LIR lowering, x86-64 generator, images,
 # the Jet OS layer and the in-process loader
@@ -298,8 +328,69 @@ Compiler/JetDriver/Source/Driver/CompilerQueries.jet
 Compiler/JetDriver/Source/Driver/Verbs.jet
 Compiler/JetCli/Source/Cli/Commands.jet
 Compiler/JetCli/Source/Cli/Registry.jet
+Compiler/JetCli/Source/Cli/Output/Profile.jet
+Compiler/JetCli/Source/Cli/Output/Adapter.jet
+Compiler/JetCli/Source/Cli/Output/Table.jet
+Compiler/JetCli/Source/Cli/Jobs.jet
+Compiler/JetCli/Source/Cli/Inspect/Planes.jet
+Compiler/JetCli/Source/Cli/Inspect/Projection.jet
+Compiler/JetCli/Source/Cli/Help/Reserved.jet
+Compiler/JetCli/Source/Cli/Help/Explain.jet
+Compiler/JetCli/Source/Cli/Change/Json.jet
+Compiler/JetCli/Source/Cli/Change/Commands.jet
+Compiler/JetCli/Source/Cli/Change/ImportHeaders.jet
+Compiler/JetCli/Source/Cli/Change/ImportExpressions.jet
+Compiler/JetCli/Source/Cli/Change/ImportBindings.jet
+Compiler/JetCli/Source/Cli/Change/ImportFiles.jet
+Compiler/JetCli/Source/Cli/Change/Try.jet
+Compiler/JetCli/Source/Cli/Compile/Doctest.jet
+Compiler/JetCli/Source/Cli/Host/Execution.jet
+Compiler/JetCli/Source/Cli/Compile/Run.jet
+Compiler/JetCli/Source/Cli/Compile/Format.jet
+Compiler/JetCli/Source/Cli/Compile/TestOptions.jet
+Compiler/JetCli/Source/Cli/Compile/TestSelection.jet
+Compiler/JetCli/Source/Cli/Compile/TestCache.jet
+Compiler/JetCli/Source/Cli/Compile/TestReport.jet
+Compiler/JetCli/Source/Cli/Compile/TestComparisonBindings.jet
+Compiler/JetCli/Source/Cli/Compile/TestSnapshots.jet
+Compiler/JetCli/Source/Cli/Compile/TestCoverage.jet
+Compiler/JetCli/Source/Cli/Compile/TestWatch.jet
+Compiler/JetCli/Source/Cli/Compile/TestRunner.jet
+Compiler/JetCli/Source/Cli/Evidence/Solver.jet
+Compiler/JetCli/Source/Cli/Evidence/SolverObligations.jet
+Compiler/JetCli/Source/Cli/Evidence/ReceiptSections.jet
+Compiler/JetCli/Source/Cli/Evidence/RecordTypes.jet
+Compiler/JetCli/Source/Cli/Evidence/ReceiptTypes.jet
+Compiler/JetCli/Source/Cli/Evidence/ReceiptCodec.jet
+Compiler/JetCli/Source/Cli/Evidence/RecordRetention.jet
+Compiler/JetCli/Source/Cli/Evidence/PackageNodes.jet
+Compiler/JetCli/Source/Cli/Inspect/Status.jet
+Compiler/JetCli/Source/Cli/Evidence/Budget.jet
+Compiler/JetCli/Source/Cli/Evidence/BudgetManifest.jet
+Compiler/JetCli/Source/Cli/Harness/Tape.jet
+Compiler/JetCli/Source/Cli/Harness/Command.jet
+Compiler/JetCli/Source/Cli/Harness/Recording.jet
+Compiler/JetCli/Source/Cli/Harness/Headless.jet
+Compiler/JetCli/Source/Cli/Help/Completions.jet
+Compiler/JetCli/Source/Cli/Help/Index.jet
+Compiler/JetCli/Source/Cli/Help/Render.jet
+Compiler/JetCli/Source/Cli/Host/TermKey.jet
+Compiler/JetCli/Source/Cli/Help/State.jet
+Compiler/JetCli/Source/Cli/Help/CompletionPaths.jet
+Compiler/JetCli/Source/Cli/Help/DynamicCompletions.jet
+Compiler/JetCli/Source/Cli/Host/NativeLinker.jet
+Compiler/JetCli/Source/Cli/Host/EngineDispatch.jet
+Compiler/JetCli/Source/Cli/Dev/NotebookHttp.jet
+Compiler/JetCli/Source/Cli/Dev/DbOptions.jet
+Compiler/JetCli/Source/Cli/Dev/DbSession.jet
+Compiler/JetCli/Source/Cli/Dev/DbRows.jet
+Compiler/JetCli/Source/Cli/Dev/LearnCurriculum.jet
+Compiler/JetCli/Source/Cli/Dev/Commands.jet
+Compiler/JetCli/Source/Cli/Package/FlashPlan.jet
+Compiler/JetCli/Source/Cli/Package/FlashAudit.jet
+Compiler/JetCli/Source/Cli/Package/Bundle.jet
+Compiler/JetCli/Source/Cli/Args.jet
 Compiler/JetCli/Source/Cli/Front.jet
-Compiler/JetCli/Source/Cli/CoreSources.jet
 Compiler/JetCli/Source/Cli/Request.jet
 Compiler/JetCli/Source/Cli/Host.jet
 

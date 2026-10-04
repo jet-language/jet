@@ -1,0 +1,283 @@
+// PORT-PENDING 0948 crates-jetpack-src-store-sealtests-module-group: crates/jetpack/src/Store/SealTests.rs:1-279
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS use std::collections::BTreeMap;
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS use std::sync::atomic::{AtomicU64, Ordering};
+//RS 
+//RS static TEST_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+//RS 
+//RS struct TestRoot {
+//RS     path: PathBuf,
+//RS }
+//RS 
+//RS impl Drop for TestRoot {
+//RS     fn drop(&mut self) {
+//RS         let _ = fs::remove_dir_all(&self.path);
+//RS     }
+//RS }
+//RS 
+//RS fn temp_roots() -> (Roots, TestRoot) {
+//RS     let path = std::env::temp_dir().join(format!(
+//RS         "jetpack-seal-{}-{}",
+//RS         std::process::id(),
+//RS         TEST_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+//RS     ));
+//RS     fs::create_dir_all(&path).unwrap();
+//RS     let guard = TestRoot { path };
+//RS     let roots = Roots {
+//RS         root: guard.path.clone(),
+//RS         dev_mode: true,
+//RS     };
+//RS     (roots, guard)
+//RS }
+//RS 
+//RS fn fixture(roots: &Roots, name: &str) -> IngestedObject {
+//RS     fixture_with_platform_artifact_kind(roots, name, "seal-test")
+//RS }
+//RS 
+//RS fn fixture_with_platform_artifact_kind(
+//RS     roots: &Roots,
+//RS     name: &str,
+//RS     platform_artifact_kind: &str,
+//RS ) -> IngestedObject {
+//RS     let source = roots.root.join(format!("seal-source-{name}"));
+//RS     fs::create_dir_all(&source).unwrap();
+//RS     fs::write(source.join("payload"), b"trusted").unwrap();
+//RS     ingest_tree(
+//RS         roots,
+//RS         &IngestRequest {
+//RS             name: name.to_string(),
+//RS             version: "1".to_string(),
+//RS             reference: format!("path:{name}"),
+//RS             cache_identity: CacheIdentity {
+//RS                 source_fingerprint: "seal-source".to_string(),
+//RS                 recipe_fingerprint: "seal-recipe".to_string(),
+//RS                 policy_fingerprint: "seal-policy".to_string(),
+//RS                 platform: crate::Envelope::host_platform(),
+//RS             },
+//RS             references: Vec::new(),
+//RS             outputs: BTreeMap::from([(String::from("out"), source)]),
+//RS             signature: String::new(),
+//RS             provenance: "seal-test".to_string(),
+//RS             platform_artifact_kind: platform_artifact_kind.to_string(),
+//RS         },
+//RS     )
+//RS     .unwrap()
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn native_admission_seals_after_shared_cas_hardlinking() {
+//RS     let (roots, _guard) = temp_roots();
+//RS     let ingested = fixture_with_platform_artifact_kind(&roots, "native", "");
+//RS     let object = PathBuf::from(&ingested.entry.out);
+//RS     let digest = &ingested.entry.envelope.output_hash;
+//RS     assert!(roots.hangar_dir().join("cas").is_dir());
+//RS     assert_eq!(
+//RS         check_seal(&object, &roots.hangar_dir()).unwrap(),
+//RS         Some(digest.clone())
+//RS     );
+//RS 
+//RS     reset_verified_digest_hash_count(&object);
+//RS     assert_eq!(
+//RS         try_entry_output_hash(&roots, &ingested.entry).unwrap(),
+//RS         *digest
+//RS     );
+//RS     assert_eq!(verified_digest_hash_count(&object), 0);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn mtime(metadata: &fs::Metadata) -> (i64, i64) {
+//RS     use std::os::unix::fs::MetadataExt as _;
+//RS     (metadata.mtime(), metadata.mtime_nsec())
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn set_mtime(path: &Path, seconds: i64, nanos: i64) {
+//RS     let stamp = format!("@{seconds}.{nanos:09}");
+//RS     assert!(
+//RS         Command::new("touch")
+//RS             .arg("-m")
+//RS             .arg("-d")
+//RS             .arg(stamp)
+//RS             .arg(path)
+//RS             .status()
+//RS             .unwrap()
+//RS             .success(),
+//RS         "touch failed for {}",
+//RS         path.display()
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn make_writable(path: &Path) {
+//RS     let mut permissions = fs::metadata(path).unwrap().permissions();
+//RS     use std::os::unix::fs::PermissionsExt as _;
+//RS     permissions.set_mode(permissions.mode() | 0o200);
+//RS     fs::set_permissions(path, permissions).unwrap();
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn seal_written_at_admission_and_warm_verification_skips_content_hash() {
+//RS     let (roots, _guard) = temp_roots();
+//RS     let ingested = fixture(&roots, "warm");
+//RS     let object = PathBuf::from(&ingested.entry.out);
+//RS     let digest = &ingested.entry.envelope.output_hash;
+//RS     let seal = roots.hangar_dir().join(SEALS_DIR).join(digest);
+//RS     assert!(seal.is_file(), "admission must write {seal:?}");
+//RS 
+//RS     reset_verified_digest_hash_count(&object);
+//RS     assert_eq!(
+//RS         try_entry_output_hash(&roots, &ingested.entry).unwrap(),
+//RS         *digest
+//RS     );
+//RS     assert_eq!(verified_digest_hash_count(&object), 0);
+//RS 
+//RS     // Owner-ratified verify-once tradeoff: bytes can change without a tuple
+//RS     // change and remain trusted until an explicit `hangar verify` audit.
+//RS     let payload = object.join("payload");
+//RS     let before = fs::metadata(&payload).unwrap();
+//RS     make_writable(&payload);
+//RS     fs::write(&payload, b"tamper!").unwrap();
+//RS     let (seconds, nanos) = mtime(&before);
+//RS     set_mtime(&payload, seconds, nanos);
+//RS     let after = fs::metadata(&payload).unwrap();
+//RS     assert_eq!(before.len(), after.len());
+//RS     assert_eq!(mtime(&before), mtime(&after));
+//RS 
+//RS     reset_verified_digest_hash_count(&object);
+//RS     assert_eq!(list_checked(&roots).unwrap().len(), 1);
+//RS     assert_eq!(verified_digest_hash_count(&object), 0);
+//RS     assert_eq!(
+//RS         check_seal(&object, &roots.hangar_dir()).unwrap(),
+//RS         Some(digest.clone())
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn seal_mtime_drift_rehashes_once_and_reseals() {
+//RS     let (roots, _guard) = temp_roots();
+//RS     let ingested = fixture(&roots, "drift");
+//RS     let object = PathBuf::from(&ingested.entry.out);
+//RS     let digest = &ingested.entry.envelope.output_hash;
+//RS     let seal = roots.hangar_dir().join(SEALS_DIR).join(digest);
+//RS     let before = fs::read(&seal).unwrap();
+//RS     let payload = object.join("payload");
+//RS     let metadata = fs::metadata(&payload).unwrap();
+//RS     let (seconds, nanos) = mtime(&metadata);
+//RS     set_mtime(&payload, seconds + 1, nanos);
+//RS 
+//RS     reset_verified_digest_hash_count(&object);
+//RS     assert_eq!(
+//RS         try_entry_output_hash(&roots, &ingested.entry).unwrap(),
+//RS         *digest
+//RS     );
+//RS     assert_eq!(verified_digest_hash_count(&object), 1);
+//RS     assert_ne!(before, fs::read(&seal).unwrap());
+//RS 
+//RS     assert_eq!(
+//RS         try_entry_output_hash(&roots, &ingested.entry).unwrap(),
+//RS         *digest
+//RS     );
+//RS     assert_eq!(verified_digest_hash_count(&object), 1);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn seal_digest_mismatch_quarantines_the_tampered_object() {
+//RS     let (roots, _guard) = temp_roots();
+//RS     let ingested = fixture(&roots, "quarantine");
+//RS     let object = PathBuf::from(&ingested.entry.out);
+//RS     let payload = object.join("payload");
+//RS     make_writable(&payload);
+//RS     fs::write(&payload, b"tamper!").unwrap();
+//RS 
+//RS     let expectation = CacheExpectation {
+//RS         identity: ingested.entry.cache_identity.clone(),
+//RS         owned_output: Some(object.clone()),
+//RS         allow_unsigned_local: true,
+//RS     };
+//RS     quarantine_invalid_entry(&roots, &ingested.entry, &expectation).unwrap();
+//RS 
+//RS     assert!(!object.exists());
+//RS     let quarantine = roots.hangar_dir().join("quarantine");
+//RS     assert!(fs::read_dir(quarantine)
+//RS         .unwrap()
+//RS         .flatten()
+//RS         .any(|entry| entry.file_name().to_string_lossy().starts_with("output-")));
+//RS     assert!(!roots
+//RS         .hangar_dir()
+//RS         .join(SEALS_DIR)
+//RS         .join(&ingested.entry.envelope.output_hash)
+//RS         .exists());
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn hangar_verify_rehashes_despite_valid_seal_and_catches_content_corruption() {
+//RS     let (roots, _guard) = temp_roots();
+//RS     let ingested = fixture(&roots, "audit");
+//RS     let object = PathBuf::from(&ingested.entry.out);
+//RS     let digest = ingested.entry.envelope.output_hash.clone();
+//RS     assert_eq!(
+//RS         check_seal(&object, &roots.hangar_dir()).unwrap(),
+//RS         Some(digest)
+//RS     );
+//RS 
+//RS     let payload = object.join("payload");
+//RS     let before = fs::metadata(&payload).unwrap();
+//RS     make_writable(&payload);
+//RS     fs::write(&payload, b"tamper!").unwrap();
+//RS     let (seconds, nanos) = mtime(&before);
+//RS     set_mtime(&payload, seconds, nanos);
+//RS     assert_eq!(mtime(&before), mtime(&fs::metadata(&payload).unwrap()));
+//RS 
+//RS     reset_verified_digest_hash_count(&object);
+//RS     assert!(verify_hangar_object(&roots, &ingested.entry).is_err());
+//RS     assert_eq!(verified_digest_hash_count(&object), 1);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn armed_command_memo_checks_identity_once_and_stays_thread_local() {
+//RS     let (roots, _guard) = temp_roots();
+//RS     let ingested = fixture(&roots, "memo");
+//RS     let object = PathBuf::from(&ingested.entry.out);
+//RS     let digest = ingested.entry.envelope.output_hash.clone();
+//RS     let hangar = roots.hangar_dir();
+//RS 
+//RS     // Run the armed command window on its own thread so the memo can never
+//RS     // leak into sibling tests on this harness thread.
+//RS     let armed = {
+//RS         let object = object.clone();
+//RS         let hangar = hangar.clone();
+//RS         let digest = digest.clone();
+//RS         std::thread::spawn(move || {
+//RS             Seal::arm_command_memo();
+//RS             assert_eq!(check_seal(&object, &hangar).unwrap(), Some(digest.clone()));
+//RS             // Drift the tuple identity mid-command: one command holds one
+//RS             // coherent verified view (D-JPK-VERIFYONCE1=A), so the memoized
+//RS             // verdict stands without another identity walk.
+//RS             let payload = object.join("payload");
+//RS             let metadata = fs::metadata(&payload).unwrap();
+//RS             let (seconds, nanos) = mtime(&metadata);
+//RS             set_mtime(&payload, seconds + 7, nanos);
+//RS             assert_eq!(check_seal(&object, &hangar).unwrap(), Some(digest.clone()));
+//RS             // Forgetting the seal forgets the memo too.
+//RS             Seal::remove(&object, &hangar).unwrap();
+//RS             assert_eq!(check_seal(&object, &hangar).unwrap(), None);
+//RS         })
+//RS     };
+//RS     armed.join().unwrap();
+//RS 
+//RS     // A fresh (unarmed) thread keeps strict per-use drift detection: the seal
+//RS     // was removed and the tuples drifted, so nothing is trusted.
+//RS     assert_eq!(check_seal(&object, &hangar).unwrap(), None);
+//RS }
+// END-PORT-PENDING 0948 crates/jetpack/src/Store/SealTests.rs:1-279
+

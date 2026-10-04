@@ -1,0 +1,377 @@
+fn jet_cli_test_comparison_corpus_case(reference: DataTree, candidate: DataTree) -> DataTree Never! {
+    DataTree.Object([String:DataTree]{"case_id": DataTree.Text("c"), "input_id": DataTree.Text("i"), "reference": reference, "candidate": candidate})
+}
+fn jet_cli_test_comparison_corpus_root(cases: ^[DataTree]) -> DataTree Never! {
+    DataTree.Object([String:DataTree]{"cases": DataTree.Array(cases)})
+}
+fn jet_cli_test_comparison_corpus_binding() -> DataTree Never! {
+    DataTree.Object([String:DataTree]{"boundary_digest": DataTree.Text("boundary"), "source_identity": DataTree.Text("source"), "replacement_identity": DataTree.Text("replacement"), "tool_identity": DataTree.Text("tool"), "target_identity": DataTree.Text("target"), "coverage_digest": DataTree.Text("coverage"), "assumptions": DataTree.Array([DataTree]{DataTree.Text("z"), DataTree.Text("a"), DataTree.Text("z")})})
+}
+fn jet_cli_test_comparison_corpus_parse(root: DataTree, relation: String?) -> ComparisonRecord Never! {
+    jet_cli_test_comparison_parse_root(root, relation) ?? panic(err.message)
+}
+fn jet_cli_test_comparison_corpus_refused(root: DataTree, message: String) Never! {
+    if jet_cli_test_comparison_parse_root(root, None) == {
+        .Ok(_) -> panic("invalid comparison corpus accepted")
+        .Err(error) -> {
+            assert_eq(error.message, message)
+            assert_eq(error.exit_code, 1)
+        }
+    }
+}
+
+#Test("comparison corpus defaults use the canonical finite verdict") {
+    record :: jet_cli_test_comparison_corpus_parse(jet_cli_test_comparison_corpus_root([DataTree]{jet_cli_test_comparison_corpus_case(DataTree.Int(7), DataTree.Int(7))}), None)
+    assert_eq(record.status, ComparisonStatus.Matched)
+    assert(!record.universal_proof)
+    assert_eq(record.samples[0].reference.raw, "7")
+    assert_eq(record.samples[0].identity.source, "jet.test-compare")
+    assert_eq(record.samples[0].identity.tool, "jet")
+    assert_eq(record.samples[0].identity.target, "recorded-corpus")
+    assert_eq(record.samples[0].identity.seed, None)
+    assert_eq(jet_cli_test_comparison_record_output(record, false).exit_code, 0)
+}
+#Test("comparison record rejects malformed roots cases and identities in order") {
+    jet_cli_test_comparison_corpus_refused(DataTree.Null, "record root must be an object")
+    jet_cli_test_comparison_corpus_refused(DataTree.Object([String:DataTree]{}), "record is missing `cases`")
+    jet_cli_test_comparison_corpus_refused(DataTree.Object([String:DataTree]{"cases": DataTree.Null}), "record `cases` must be an array")
+    jet_cli_test_comparison_corpus_refused(jet_cli_test_comparison_corpus_root([DataTree]{DataTree.Null}), "case 0 is missing `case_id`")
+    jet_cli_test_comparison_corpus_refused(jet_cli_test_comparison_corpus_root([DataTree]{DataTree.Object([String:DataTree]{"case_id": DataTree.Text("x")})}), "case `x` is missing `input_id`")
+    jet_cli_test_comparison_corpus_refused(jet_cli_test_comparison_corpus_root([DataTree]{DataTree.Object([String:DataTree]{"case_id": DataTree.Text("x"), "input_id": DataTree.Text("y")})}), "case observation `reference` is missing")
+    jet_cli_test_comparison_corpus_refused(jet_cli_test_comparison_corpus_root([DataTree]{DataTree.Object([String:DataTree]{"case_id": DataTree.Text("x"), "input_id": DataTree.Text("y"), "reference": DataTree.Null})}), "case observation `candidate` is missing")
+}
+#Test("comparison discarded precedence and empty corpora remain unsuccessful") {
+    jet_cli_test_comparison_corpus_refused(DataTree.Object([String:DataTree]{"discarded_cases": DataTree.Int(-1)}), "discarded_cases must be nonnegative")
+    empty :: jet_cli_test_comparison_corpus_parse(jet_cli_test_comparison_corpus_root([DataTree]{}), None)
+    assert_eq(empty.status, ComparisonStatus.Empty)
+    assert_eq(empty.reason, Val("comparison corpus is empty"))
+    all :: jet_cli_test_comparison_corpus_parse(DataTree.Object([String:DataTree]{"cases": DataTree.Array([DataTree]{}), "discarded": DataTree.Int(3)}), None)
+    assert_eq(all.reason, Val("all comparison cases were discarded"))
+    case :: jet_cli_test_comparison_corpus_case(DataTree.Int(1), DataTree.Int(1))
+    discarded :: jet_cli_test_comparison_corpus_parse(DataTree.Object([String:DataTree]{"cases": DataTree.Array([DataTree]{case}), "discarded_cases": DataTree.Int(2), "discarded": DataTree.Int(9)}), None)
+    assert_eq(discarded.discarded_cases, 2)
+    assert_eq(discarded.status, ComparisonStatus.InvalidOracle)
+    assert_eq(jet_cli_test_comparison_record_output(discarded, true).exit_code, 1)
+    ignored :: jet_cli_test_comparison_corpus_parse(DataTree.Object([String:DataTree]{"cases": DataTree.Array([DataTree]{case}), "discarded_cases": DataTree.Text("not an integer"), "discarded": DataTree.Int(0)}), None)
+    assert_eq(ignored.status, ComparisonStatus.Matched)
+}
+#Test("comparison aliases and case seed override preserve frozen field domains") {
+    case :: DataTree.Object([String:DataTree]{"caseId": DataTree.Text("alias"), "inputId": DataTree.Text("input"), "seed": DataTree.Int(-1), "reference": DataTree.Null, "candidate": DataTree.Null})
+    record :: jet_cli_test_comparison_corpus_parse(DataTree.Object([String:DataTree]{"cases": DataTree.Array([DataTree]{case}), "seed": DataTree.Int(12), "source": DataTree.Text("s"), "tool": DataTree.Text("t"), "target": DataTree.Text("p")}), None)
+    assert_eq(record.samples[0].identity.case_id, "alias")
+    assert_eq(record.samples[0].identity.input_id, "input")
+    assert_eq(record.samples[0].identity.seed, Val(U64{12}))
+    local :: jet_cli_test_comparison_parse_sample(DataTree.Object([String:DataTree]{"case_id": DataTree.Text("primary"), "caseId": DataTree.Text("alias"), "input_id": DataTree.Text("i"), "seed": DataTree.Int(9), "reference": DataTree.Null, "candidate": DataTree.Null}), 0, Val(U64{12}), "s", "t", "p", ObservationRelation.TypedEquality) ?? panic(err.message)
+    assert_eq(local.identity.case_id, "primary")
+    assert_eq(local.identity.seed, Val(U64{9}))
+    assert_eq(jet_cli_test_comparison_int(DataTree.Object([String:DataTree]{"seed": DataTree.Int(9223372036854775808)}), "seed"), None)
+}
+// #4452: retain the full original Bytes assertion while Core's carrier owner
+// decides whether to publish Bytes. This test must not be replaced by a mock.
+#Test("observation rendering retains nested insertion order raw text and bytes") {
+    value :: DataTree.Object([String:DataTree]{"z": DataTree.Array([DataTree]{DataTree.Null, DataTree.Bool(true), DataTree.Int(-2), DataTree.Text("\n\"\\")}), "a": DataTree.Bytes([U8]{U8{0}, U8{255}})})
+    assert_eq(jet_cli_test_comparison_canonical_data_tree(value), "{{\"z\":[null,true,-2,\"\\n\\\"\\\\\"],\"a\":bytes:2}}")
+}
+// #4306: actual Core object iteration currently sorts keys. Keep this authored
+// insertion-order golden unchanged until the canonical object owner fixes it.
+#Test("nonbyte observation rendering preserves authored object order and raw text") {
+    value :: DataTree.Object([String:DataTree]{"z": DataTree.Array([DataTree]{DataTree.Null, DataTree.Bool(true), DataTree.Int(-2), DataTree.Text("\n\"\\")}), "a": DataTree.Float(1.5)})
+    assert_eq(jet_cli_test_comparison_canonical_data_tree(value), "{{\"z\":[null,true,-2,\"\\n\\\"\\\\\"],\"a\":1.5}}")
+    sample :: jet_cli_test_comparison_parse_sample(jet_cli_test_comparison_corpus_case(DataTree.Text("{{raw}}"), DataTree.Text("{{raw}}")), 0, None, "s", "t", "p", ObservationRelation.TypedEquality) ?? panic(err.message)
+    assert_eq(sample.reference.raw, "{{raw}}")
+    assert_eq(jet_cli_test_comparison_canonical_data_tree(DataTree.Float(1.5)), "1.5")
+}
+#Test("ordered effects preserve duplicates cleanup mutation and error precedence") {
+    case :: DataTree.Object([String:DataTree]{"case_id": DataTree.Text("c"), "input_id": DataTree.Text("i"), "reference": DataTree.Null, "candidate": DataTree.Null, "reference_effects": DataTree.Array([DataTree]{DataTree.Text("a"), DataTree.Text("a")}), "candidate_effects": DataTree.Array([DataTree]{DataTree.Text("a")}), "reference_cleanup": DataTree.Array([DataTree]{DataTree.Text("close")}), "reference_mutation": DataTree.Text("write")})
+    ordered :: jet_cli_test_comparison_corpus_parse(jet_cli_test_comparison_corpus_root([DataTree]{case}), Val("ordered_effects"))
+    assert_eq(ordered.status, ComparisonStatus.Mismatch)
+    assert_eq(ordered.samples[0].reference.ordered_effects, [String]{"a", "a"})
+    assert_eq(ordered.samples[0].reference.cleanup, [String]{"close"})
+    assert_eq(ordered.samples[0].reference.mutation, Val("write"))
+    plain :: jet_cli_test_comparison_corpus_parse(jet_cli_test_comparison_corpus_root([DataTree]{case}), None)
+    assert_eq(plain.status, ComparisonStatus.Matched)
+    assert_eq(plain.samples[0].reference.ordered_effects, [String]{})
+    invalid :: DataTree.Object([String:DataTree]{"case_id": DataTree.Text("c"), "input_id": DataTree.Text("i"), "reference": DataTree.Null, "candidate": DataTree.Null, "reference_effects": DataTree.Int(1), "reference_cleanup": DataTree.Int(1)})
+    if jet_cli_test_comparison_parse_root(jet_cli_test_comparison_corpus_root([DataTree]{invalid}), Val("ordered_effects")) == {
+        .Ok(_) -> panic("invalid effects accepted")
+        .Err(error) -> assert_eq(error.message, "`reference_effects` must be an array")
+    }
+    if jet_cli_test_comparison_strings(DataTree.Object([String:DataTree]{"effects": DataTree.Array([DataTree]{DataTree.Text("a"), DataTree.Int(1)})}), "effects") == {
+        .Ok(_) -> panic("invalid effect entry accepted")
+        .Err(error) -> assert_eq(error.message, "`effects` entries must be strings")
+    }
+}
+#Test("typed failures custom declarations and relation overrides reuse Foundation policy") {
+    case :: DataTree.Object([String:DataTree]{"case_id": DataTree.Text("c"), "input_id": DataTree.Text("i"), "reference": DataTree.Text("same"), "candidate": DataTree.Text("same"), "reference_failure": DataTree.Text("A"), "candidate_failure": DataTree.Text("B"), "declared_equal": DataTree.Bool(true)})
+    root :: DataTree.Object([String:DataTree]{"cases": DataTree.Array([DataTree]{case}), "relation": DataTree.Text("typed_failure")})
+    assert_eq(jet_cli_test_comparison_corpus_parse(root, None).status, ComparisonStatus.Mismatch)
+    assert_eq(jet_cli_test_comparison_corpus_parse(root, Val("typed_equality")).status, ComparisonStatus.Matched)
+    assert_eq(jet_cli_test_comparison_corpus_parse(root, Val("custom")).status, ComparisonStatus.Matched)
+    undeclared :: jet_cli_test_comparison_corpus_parse(jet_cli_test_comparison_corpus_root([DataTree]{jet_cli_test_comparison_corpus_case(DataTree.Null, DataTree.Null)}), Val("custom"))
+    assert_eq(undeclared.status, ComparisonStatus.InvalidOracle)
+    assert_eq(undeclared.reason, Val("custom comparison relation did not declare an observation result"))
+    assert_eq(jet_cli_test_comparison_relation_override([String]{"--relation=custom", "--relation=typed_equality"}), Val("custom"))
+    assert_eq(jet_cli_test_comparison_relation_override([String]{"--relation="}), Val(""))
+    assert(jet_cli_test_comparison_json_output([String]{"--json"}, false))
+    assert(jet_cli_test_comparison_json_output([String]{}, true))
+    assert(!jet_cli_test_comparison_json_output([String]{}, false))
+}
+#Test("replay pairs are eagerly parsed and contamination is never matched") {
+    half :: DataTree.Object([String:DataTree]{"case_id": DataTree.Text("c"), "input_id": DataTree.Text("i"), "reference": DataTree.Null, "candidate": DataTree.Null, "reference_replay": DataTree.Null})
+    jet_cli_test_comparison_corpus_refused(jet_cli_test_comparison_corpus_root([DataTree]{half}), "case `c` must provide both replay observations")
+    invalid :: DataTree.Object([String:DataTree]{"case_id": DataTree.Text("c"), "input_id": DataTree.Text("i"), "reference": DataTree.Null, "candidate": DataTree.Null, "candidate_replay": DataTree.Null, "candidate_replay_effects": DataTree.Int(1)})
+    if jet_cli_test_comparison_parse_root(jet_cli_test_comparison_corpus_root([DataTree]{invalid}), Val("ordered_effects")) == {
+        .Ok(_) -> panic("invalid unpaired replay accepted")
+        .Err(error) -> assert_eq(error.message, "`candidate_replay_effects` must be an array")
+    }
+    contaminated :: jet_cli_test_comparison_corpus_parse(jet_cli_test_comparison_corpus_root([DataTree]{DataTree.Object([String:DataTree]{"case_id": DataTree.Text("c"), "input_id": DataTree.Text("i"), "reference": DataTree.Int(1), "candidate": DataTree.Int(1), "reference_replay": DataTree.Int(2), "candidate_replay": DataTree.Int(1)})}), None)
+    assert_eq(contaminated.status, ComparisonStatus.Contaminated)
+    assert_eq(contaminated.reason, Val("reference observation changed on replay for case `c`"))
+}
+#Test("every terminal recorded runner outcome overrides stale matching samples") {
+    names :: [String]{"empty", "unsupported", "unavailable", "timeout", "cancelled", "invalid_oracle", "contaminated"}
+    loop name in names {
+        root :: DataTree.Object([String:DataTree]{"foreign_binding": jet_cli_test_comparison_corpus_binding(), "cases": DataTree.Array([DataTree]{jet_cli_test_comparison_corpus_case(DataTree.Int(1), DataTree.Int(1))}), "status": DataTree.Text(name)})
+        record :: jet_cli_test_comparison_prepare_root(root, None) ?? panic(err.message)
+        assert_eq(record.status, jet_cli_test_comparison_status(name) ?? panic("known status absent"))
+        assert_eq(record.reason, Val("recorded runner outcome is {name}"))
+        assert(!record.universal_proof)
+        assert_eq(jet_cli_test_comparison_record_output(record, false).exit_code, 1)
+    }
+    ignored :: [String]{"matched", "mismatch", "unknown"}
+    loop name in ignored {
+        root :: DataTree.Object([String:DataTree]{"foreign_binding": jet_cli_test_comparison_corpus_binding(), "cases": DataTree.Array([DataTree]{jet_cli_test_comparison_corpus_case(DataTree.Int(1), DataTree.Int(1))}), "status": DataTree.Text(name)})
+        assert_eq((jet_cli_test_comparison_prepare_root(root, None) ?? panic(err.message)).status, ComparisonStatus.Matched)
+    }
+    if jet_cli_test_comparison_prepare_root(DataTree.Object([String:DataTree]{"cases": DataTree.Null}), None) == {
+        .Ok(_) -> panic("missing binding accepted")
+        .Err(error) -> assert_eq(error.message, "`foreign_binding` requires boundary_digest, source_identity, replacement_identity, tool_identity, target_identity, and coverage_digest")
+    }
+}
+#Test("terminal mismatch preserves replay and nonfatal publication refusal") {
+    root :: DataTree.Object([String:DataTree]{"foreign_binding": jet_cli_test_comparison_corpus_binding(), "cases": DataTree.Array([DataTree]{jet_cli_test_comparison_corpus_case(DataTree.Int(1), DataTree.Int(2))}), "status": DataTree.Text("timeout")})
+    record :: jet_cli_test_comparison_prepare_root(root, None) ?? panic(err.message)
+    binding :: jet_cli_test_comparison_binding_from_root(root) ?? panic(err.message)
+    assert_eq(record.status, ComparisonStatus.Timeout)
+    assert_eq(record.first_difference, Val(0))
+    assert(record.reduced_counterexample != None)
+    if jet_cli_test_comparison_evidence_report("corpus.json", record, binding) == {
+        .Ok(_) -> panic("invalid terminal reduced counterexample was published")
+        .Err(error) -> assert_eq(error.message, "comparison reduced_counterexample is only valid for a mismatch")
+    }
+    output :: jet_cli_test_comparison_record_output(record, false)
+    assert_eq(output.exit_code, 1)
+    assert_eq(output.stderr, "")
+    assert(output.stdout.contains("status=timeout"))
+    assert(output.stdout.contains("\nreplay case=c input=i"))
+}
+// Keep the exact machine golden/order: #4306 generic sorted-key renderers must
+// not replace the frozen command's explicitly ordered summary wire surface.
+#Test("comparison render mismatch replay and exact machine summary order") {
+    record :: jet_cli_test_comparison_corpus_parse(jet_cli_test_comparison_corpus_root([DataTree]{jet_cli_test_comparison_corpus_case(DataTree.Text("a"), DataTree.Text("b"))}), None)
+    assert_eq(jet_cli_test_comparison_render_record(record, false), "status=mismatch relation=typed_equality samples=1 reason=first differing observation is case `c`\nreplay case=c input=i source=jet.test-compare tool=jet target=recorded-corpus\nreference=a\ncandidate=b")
+    assert_eq(jet_cli_test_comparison_render_record(record, true), "{{\"schema_version\":1,\"status\":\"mismatch\",\"relation\":\"typed_equality\",\"samples\":1,\"discarded_cases\":0,\"first_difference\":0,\"universal_proof\":false,\"reason\":\"first differing observation is case `c`\"}}")
+    assert_eq(jet_cli_test_comparison_record_output(record, true).exit_code, 1)
+    assert_eq(jet_cli_test_comparison_record_output(record, true).stderr, "")
+    terminal :: comparison_record_terminal(ObservationRelation.Custom("\"\n"), ComparisonStatus.Timeout, "reason\n")
+    assert_eq(jet_cli_test_comparison_render_record(terminal, true), "{{\"schema_version\":1,\"status\":\"timeout\",\"relation\":\"\\\"\\n\",\"samples\":0,\"discarded_cases\":0,\"first_difference\":null,\"universal_proof\":false,\"reason\":\"reason\\n\"}}")
+}
+#Test("comparison errors preserve JSON escaping stderr routing and USER_ERROR") {
+    machine :: jet_cli_test_comparison_error_output(true, "cannot read `a`:\n\"")
+    assert_eq(machine.stdout, "{{\"status\":\"invalid_oracle\",\"universal_proof\":false,\"error\":\"cannot read `a`:\\n\\\"\"}}\n")
+    assert_eq(machine.stderr, "")
+    assert_eq(machine.exit_code, 1)
+    human :: jet_cli_test_comparison_error_output(false, "error")
+    assert_eq(human.stdout, "")
+    assert_eq(human.stderr, "error\n")
+    assert_eq(human.exit_code, 1)
+}
+#Test("comparison outcome mapping is exhaustive and conservative") {
+    assert_eq(jet_cli_test_comparison_evidence_outcome(ComparisonStatus.Matched), EvidenceOutcome.Passed)
+    assert_eq(jet_cli_test_comparison_evidence_outcome(ComparisonStatus.Mismatch), EvidenceOutcome.Failed)
+    assert_eq(jet_cli_test_comparison_evidence_outcome(ComparisonStatus.InvalidOracle), EvidenceOutcome.Error)
+    assert_eq(jet_cli_test_comparison_evidence_outcome(ComparisonStatus.Contaminated), EvidenceOutcome.Error)
+    statuses :: [ComparisonStatus]{ComparisonStatus.Empty, ComparisonStatus.Unsupported, ComparisonStatus.Unavailable, ComparisonStatus.Timeout, ComparisonStatus.Cancelled}
+    loop status in statuses -> assert_eq(jet_cli_test_comparison_evidence_outcome(status), EvidenceOutcome.Unavailable)
+    assert_eq(jet_cli_test_comparison_status("other"), None)
+}
+#Test("comparison publication report uses canonical artifact identity and checked derivation") {
+    root :: DataTree.Object([String:DataTree]{"foreign_binding": jet_cli_test_comparison_corpus_binding(), "cases": DataTree.Array([DataTree]{jet_cli_test_comparison_corpus_case(DataTree.Int(1), DataTree.Int(1))})})
+    binding :: jet_cli_test_comparison_binding_from_root(root) ?? panic(err.message)
+    record :: jet_cli_test_comparison_prepare_root(root, None) ?? panic(err.message)
+    report :: jet_cli_test_comparison_evidence_report("corpus.json", record, binding) ?? panic(err.message)
+    artifact :: comparison_record_artifact_id(record) ?? panic(err.message)
+    expected_report_id :: "test-compare-{artifact}"
+    assert_eq(report.identity.report_id, expected_report_id)
+    assert_eq(report.records.len(), 1)
+    assert_eq(report.derivations.len(), 1)
+    evidence :: report.records[0]
+    assert_eq(evidence.outcome, EvidenceOutcome.Passed)
+    assert_eq(evidence.count, U64{1})
+    assert_eq(evidence.build.profile, "comparison")
+    assert_eq(evidence.revision.source, artifact)
+    assert_eq(evidence.revision.build, "jet-comparison-v1")
+    assert_eq(evidence.detail, "")
+    assert_eq(evidence.attachments.len(), 9)
+    assert_eq(evidence.attachments[0].name, "boundary")
+    assert_eq(evidence.attachments[5].name, "coverage")
+    assert_eq(evidence.attachments[6].value, "a")
+    assert_eq(evidence.attachments[7].value, "z")
+    assert_eq(evidence.attachments[8].name, "comparison-artifact")
+    assert_eq(evidence.attachments[8].value, artifact)
+    assert_eq(evidence.derivation, Val(derivation_record_reference(report.derivations[0])))
+    assert(derivation_record_validate(report.derivations[0]))
+    test_evidence_validate(report) ?? panic(test_evidence_error_text(err))
+    encoded :: evidence_report_encode(report) ?? panic(err.message)
+    decoded :: evidence_report_from_bytes(encoded) ?? panic(err.message)
+    // The canonical codec sorts attachment rows; authored CLI attachment order
+    // above is intentionally distinct from the canonical persisted projection.
+    assert_eq(decoded.records.len(), 1)
+    assert_eq(decoded.records[0].attachments, [EvidenceAttachment]{
+        EvidenceAttachment{name: "assumption", value: "a"},
+        EvidenceAttachment{name: "assumption", value: "z"},
+        EvidenceAttachment{name: "boundary", value: "boundary"},
+        EvidenceAttachment{name: "comparison-artifact", value: artifact},
+        EvidenceAttachment{name: "coverage", value: "coverage"},
+        EvidenceAttachment{name: "replacement-identity", value: "replacement"},
+        EvidenceAttachment{name: "source-identity", value: "source"},
+        EvidenceAttachment{name: "target-identity", value: "target"},
+        EvidenceAttachment{name: "tool-identity", value: "tool"}
+    })
+    assert_eq(evidence_record_json(decoded.records[0]), evidence_record_json(evidence))
+    assert_eq(evidence_report_encode(decoded) ?? panic(err.message), encoded)
+    assert_eq(decoded.derivations, report.derivations)
+    empty :: comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Empty, "empty")
+    empty_report :: jet_cli_test_comparison_evidence_report("corpus.json", empty, binding) ?? panic(err.message)
+    assert_eq(empty_report.build.target, "corpus.json")
+    assert_eq(empty_report.source.path, "jet.test-compare")
+    assert_eq(empty_report.records[0].count, U64{0})
+    assert_eq(empty_report.records[0].outcome, EvidenceOutcome.Unavailable)
+}
+// Literal Foundation/Core parser, not a private parser or serializing adapter.
+// #4306: preserve the real parser/object insertion-order observation golden.
+#Test("comparison corpus parses real JSON and maps parser failure exactly") {
+    record :: jet_cli_test_comparison_parse_record("{{\"cases\":[{{\"case_id\":\"c\",\"input_id\":\"i\",\"reference\":{{\"z\":1,\"a\":2}},\"candidate\":{{\"z\":1,\"a\":2}}}}]}}", None) ?? panic(err.message)
+    assert_eq(record.status, ComparisonStatus.Matched)
+    assert_eq(record.samples[0].reference.raw, "{{\"z\":1,\"a\":2}}")
+    if jet_cli_test_comparison_parse_record("{{", None) == {
+        .Ok(_) -> panic("invalid JSON accepted")
+        .Err(error) -> assert_eq(error.message, "record is not valid JSON")
+    }
+}
+#Test("comparison real parser preserves scalar observations and exact JSON refusal") {
+    record :: jet_cli_test_comparison_parse_record("{{\"cases\":[{{\"case_id\":\"c\",\"input_id\":\"i\",\"reference\":9223372036854775807,\"candidate\":9223372036854775807}}]}}", None) ?? panic(err.message)
+    assert_eq(record.status, ComparisonStatus.Matched)
+    assert_eq(record.samples[0].reference.raw, "9223372036854775807")
+    text :: jet_cli_test_comparison_parse_record("{{\"cases\":[{{\"case_id\":\"c\",\"input_id\":\"i\",\"reference\":\"line\\nvalue\",\"candidate\":\"line\\nvalue\"}}]}}", None) ?? panic(err.message)
+    assert_eq(text.samples[0].reference.raw, "line\nvalue")
+    if jet_cli_test_comparison_parse_record("{{", None) == {
+        .Ok(_) -> panic("invalid JSON accepted")
+        .Err(error) -> assert_eq(error.message, "record is not valid JSON")
+    }
+}
+// Rust canonical_data_tree (CmdTest.rs:601) uses f64 Display, not Debug.
+#Test("comparison Float observations retain frozen fixed decimal Display law") {
+    assert_eq(jet_cli_test_comparison_canonical_data_tree(DataTree.Float(1.0)), "1")
+    assert_eq(jet_cli_test_comparison_canonical_data_tree(DataTree.Float(-0.0)), "-0")
+    large :: Float.parse("1e20") ?? panic("Float oracle")
+    tiny :: Float.parse("1e-7") ?? panic("Float oracle")
+    assert_eq(jet_cli_test_comparison_canonical_data_tree(DataTree.Float(large)), "100000000000000000000")
+    assert_eq(jet_cli_test_comparison_canonical_data_tree(DataTree.Float(tiny)), "0.0000001")
+    assert_eq(jet_cli_db_render_float(1.0), "1.0")
+    assert_eq(jet_cli_db_render_float(-0.0), "-0.0")
+    assert_eq(jet_cli_db_render_float(large), "100000000000000000000.0")
+    assert_eq(jet_cli_db_render_float(tiny), "0.0000001")
+}
+
+fn jet_cli_test_comparison_corpus_json(observation: String) -> String Never! {
+    "{{\"cases\":[{{\"case_id\":\"c\",\"input_id\":\"i\",\"reference\":{observation},\"candidate\":{observation}}}]}}"
+}
+fn jet_cli_test_comparison_corpus_json_refused(input: String, message: String) Never! {
+    if jet_cli_test_comparison_parse_record(input, None) == {
+        .Ok(_) -> panic("invalid protocol corpus accepted")
+        .Err(error) -> {
+            assert_eq(error.message, message)
+            assert_eq(error.exit_code, 1)
+        }
+    }
+}
+// Rust run_test_compare parses once before binding/record policy. Exercise the
+// canonical boundary and actual prepare_root; this is not a native command host.
+fn jet_cli_test_comparison_corpus_prepare_json(input: String) -> ComparisonRecord JetCLITestError! {
+    root :: foundation_parse_protocol_json(input) ?? return Err(jet_cli_test_comparison_error("record is not valid JSON"))
+    jet_cli_test_comparison_prepare_root(root, None)
+}
+fn jet_cli_test_comparison_corpus_prepare_refused(input: String, message: String) Never! {
+    if jet_cli_test_comparison_corpus_prepare_json(input) == {
+        .Ok(_) -> panic("invalid prepared corpus accepted")
+        .Err(error) -> assert_eq(error.message, message)
+    }
+}
+
+// Preserve the real helper's #3598 export gate: no old-parser proof qualifies
+// these boundaries. Rust parse_record applies them even to ignored subtrees.
+#Test("comparison protocol byte ceiling counts Unicode at exact one MiB") {
+    prefix :: "{{\"cases\":[],\"ignored\":\""
+    suffix :: "\"}}"
+    remaining :: 1048576 - prefix.bytes().len() - suffix.bytes().len()
+    padding :: "é".repeat(remaining /% 2)
+    odd :: "x".repeat(remaining % 2)
+    exact :: "{prefix}{padding}{odd}{suffix}"
+    assert_eq(exact.bytes().len(), 1048576)
+    assert_eq((jet_cli_test_comparison_parse_record(exact, None) ?? panic(err.message)).status, ComparisonStatus.Empty)
+    jet_cli_test_comparison_corpus_json_refused("{exact} ", "record is not valid JSON")
+    jet_cli_test_comparison_corpus_prepare_refused(exact, "`foreign_binding` requires boundary_digest, source_identity, replacement_identity, tool_identity, target_identity, and coverage_digest")
+    jet_cli_test_comparison_corpus_prepare_refused("{exact} ", "record is not valid JSON")
+    // The same limit also covers observation text, not merely metadata.
+    observation_prefix :: "{{\"cases\":[{{\"case_id\":\"c\",\"input_id\":\"i\",\"reference\":\""
+    observation_suffix :: "\",\"candidate\":null}}]}}"
+    observation_remaining :: 1048576 - observation_prefix.bytes().len() - observation_suffix.bytes().len()
+    observation :: "é".repeat(observation_remaining /% 2)
+    observation_odd :: "x".repeat(observation_remaining % 2)
+    observation_exact :: "{observation_prefix}{observation}{observation_odd}{observation_suffix}"
+    assert_eq(observation_exact.bytes().len(), 1048576)
+    record :: jet_cli_test_comparison_parse_record(observation_exact, None) ?? panic(err.message)
+    assert_eq(record.samples[0].reference.raw, "{observation}{observation_odd}")
+    jet_cli_test_comparison_corpus_json_refused("{observation_exact} ", "record is not valid JSON")
+}
+
+#Test("comparison protocol depth 64 accepts observations and ignored fields but 65 refuses") {
+    // Root, cases array and case object consume three container levels.
+    observation :: "{"[".repeat(61)}0{"]".repeat(61)}"
+    record :: jet_cli_test_comparison_parse_record(jet_cli_test_comparison_corpus_json(observation), None) ?? panic(err.message)
+    assert_eq(record.status, ComparisonStatus.Matched)
+    assert_eq(record.samples[0].reference.raw, observation)
+    jet_cli_test_comparison_corpus_json_refused(jet_cli_test_comparison_corpus_json("[{observation}]"), "record is not valid JSON")
+    ignored :: "{"[".repeat(63)}0{"]".repeat(63)}"
+    assert_eq((jet_cli_test_comparison_parse_record("{{\"cases\":[],\"ignored\":{ignored}}}", None) ?? panic(err.message)).status, ComparisonStatus.Empty)
+    jet_cli_test_comparison_corpus_json_refused("{{\"cases\":[],\"ignored\":[{ignored}]}}", "record is not valid JSON")
+}
+
+#Test("comparison protocol accepts both i64 endpoints and refuses outside tokens everywhere") {
+    endpoints :: [String]{"-9223372036854775808", "9223372036854775807"}
+    loop number in endpoints {
+        record :: jet_cli_test_comparison_parse_record(jet_cli_test_comparison_corpus_json(number), None) ?? panic(err.message)
+        assert_eq(record.status, ComparisonStatus.Matched)
+        assert_eq(record.samples[0].reference.raw, number)
+        assert_eq((jet_cli_test_comparison_parse_record("{{\"cases\":[],\"ignored\":{number}}}", None) ?? panic(err.message)).status, ComparisonStatus.Empty)
+    }
+    outside :: [String]{"-9223372036854775809", "9223372036854775808"}
+    loop number in outside {
+        jet_cli_test_comparison_corpus_json_refused(jet_cli_test_comparison_corpus_json(number), "record is not valid JSON")
+        jet_cli_test_comparison_corpus_json_refused("{{\"cases\":[],\"ignored\":{number}}}", "record is not valid JSON")
+        jet_cli_test_comparison_corpus_json_refused("{{\"discarded_cases\":-1,\"ignored\":{number}}}", "record is not valid JSON")
+    }
+}
+
+#Test("comparison protocol refusal precedes binding and record policy errors") {
+    missing_binding :: "`foreign_binding` requires boundary_digest, source_identity, replacement_identity, tool_identity, target_identity, and coverage_digest"
+    jet_cli_test_comparison_corpus_prepare_refused("{{\"cases\":null}}", missing_binding)
+    jet_cli_test_comparison_corpus_prepare_refused("{{\"cases\":null,\"ignored\":9223372036854775808}}", "record is not valid JSON")
+    jet_cli_test_comparison_corpus_prepare_refused("{{\"foreign_binding\":null,\"ignored\":-9223372036854775809}}", "record is not valid JSON")
+    deep :: "{"[".repeat(64)}0{"]".repeat(64)}"
+    jet_cli_test_comparison_corpus_prepare_refused("{{\"cases\":null,\"ignored\":{deep}}}", "record is not valid JSON")
+    jet_cli_test_comparison_corpus_prepare_refused("{{\"cases\":null", "record is not valid JSON")
+    jet_cli_test_comparison_corpus_json_refused("{{\"discarded_cases\":-1}}", "discarded_cases must be nonnegative")
+    jet_cli_test_comparison_corpus_json_refused("{{\"discarded_cases\":-1,\"ignored\":9223372036854775808}}", "record is not valid JSON")
+}

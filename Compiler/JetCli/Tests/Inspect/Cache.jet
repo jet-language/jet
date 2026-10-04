@@ -1,0 +1,233 @@
+// Source/CmdStatus.rs cache contracts and tests/cli_compiler_speed.rs:1424-1492.
+// self doctor snapshot (1494-1502) belongs to its command owner, not cache.
+// Keep byte-order goldens intact: #4306 tracks Core DataTree insertion order.
+// #4303 tracks canonical StoreConfig borrowed-trim execution; no parser copy.
+use core.files as cache_test_files
+use core.sys as cache_test_sys
+use core.crypto.random as cache_test_random
+
+fn cache_test_parse_error(args: [String], expected: String) Never! {
+    if jet_cli_cache_parse_request(args) == {
+        .Ok(_) -> panic("cache request unexpectedly accepted")
+        .Err(error) -> assert_eq(error.message, expected)
+    }
+}
+fn cache_test_entry(kind: ArtifactEntryKind) -> ArtifactEntryStatus Never! {
+    ArtifactEntryStatus{kind, key: "key", namespace: None, size_bytes: 2048, last_use: 0, pinned: false, path: "/store/object"}
+}
+fn cache_test_status() -> ArtifactStoreStatus Never! {
+    ArtifactStoreStatus{root: "/store", footprint_bytes: 2048, limit_bytes: 21474836480, reserve_bytes: 2147483648, available_bytes: None, live_leases: 0, host_limit_bytes: None, entries: [ArtifactEntryStatus]{cache_test_entry(ArtifactEntryKind.Blob)}, tiers: [String]{"local"}}
+}
+fn cache_test_prune() -> ArtifactPruneReport Never! {
+    ArtifactPruneReport{target_bytes: 1024, before_bytes: 2048, after_bytes: 0, removed: [ArtifactEntryStatus]{cache_test_entry(ArtifactEntryKind.Blob)}, pinned_bytes: 0, blocked: false}
+}
+
+#Test("cache parser accepts exactly the three commands and size placements") {
+    assert((jet_cli_cache_parse_request(["status"]) ?? panic("status")) == .Status)
+    assert_eq(jet_cli_cache_parse_request(["prune", "--to", "1K"]) ?? panic("prune"), JetCLICacheRequest.Prune(1024))
+    assert_eq(jet_cli_cache_parse_request(["--to=1K", "prune"]) ?? panic("prune"), JetCLICacheRequest.Prune(1024))
+    assert_eq(jet_cli_cache_parse_request(["limit", "--host", "4G"]) ?? panic("limit"), JetCLICacheRequest.Limit(4294967296))
+    assert_eq(jet_cli_cache_parse_request(["--host=4G", "limit"]) ?? panic("limit"), JetCLICacheRequest.Limit(4294967296))
+    assert_eq(jet_cli_cache_parse_request(["prune", "--to=0"]) ?? panic("prune"), JetCLICacheRequest.Prune(0))
+}
+#Test("cache parser ignores output flags and deliberately does not validate color") {
+    assert((jet_cli_cache_parse_request(["--quiet", "--json", "--no-color", "--color=invalid", "status"]) ?? panic("status")) == .Status)
+    assert((jet_cli_cache_parse_request(["--color", "invalid", "status"]) ?? panic("status")) == .Status)
+    // A flag-looking value is still consumed, as in Rust.
+    assert((jet_cli_cache_parse_request(["status", "--color", "--host"]) ?? panic("status")) == .Status)
+    cache_test_parse_error(["status", "--color"], "`jet cache --color` needs auto, always, or never")
+}
+#Test("cache parser missing commands and unknown flags preserve bytes") {
+    cache_test_parse_error([String]{}, "missing `jet cache` command")
+    cache_test_parse_error(["--quiet"], "missing `jet cache` command")
+    cache_test_parse_error(["unknown"], "`unknown` isn't a jet cache command")
+    cache_test_parse_error(["status", "-"], "unknown `jet cache` flag `-`")
+    cache_test_parse_error(["--help"], "unknown `jet cache` flag `--help`")
+    cache_test_parse_error(["status", "--bad"], "unknown `jet cache` flag `--bad`")
+    cache_test_parse_error(["status", "prune"], "`jet cache` accepts one command")
+}
+#Test("cache parser size option precedence matches Rust") {
+    cache_test_parse_error(["status", "--to=bad"], "`jet cache status` does not take a size option")
+    cache_test_parse_error(["prune"], "`jet cache prune` requires `--to <size>`")
+    cache_test_parse_error(["prune", "--host=bad"], "`jet cache prune` requires `--to <size>`")
+    cache_test_parse_error(["limit"], "`jet cache limit` requires `--host <size>`")
+    cache_test_parse_error(["limit", "--to=bad"], "`jet cache limit` requires `--host <size>`")
+    cache_test_parse_error(["unknown", "--to=bad"], "`unknown` isn't a jet cache command")
+    cache_test_parse_error(["status", "--to"], "`jet cache --to` needs a size")
+    cache_test_parse_error(["status", "--host"], "`jet cache --host` needs a size")
+    cache_test_parse_error(["prune", "--to=1", "--host=2"], "`jet cache` accepts one size option")
+    cache_test_parse_error(["limit", "--host", "1", "--host", "2"], "`jet cache` accepts one size option")
+    // Missing second option value is diagnosed before duplication.
+    cache_test_parse_error(["limit", "--host=1", "--to"], "`jet cache --to` needs a size")
+}
+#Test("cache size errors delegate exact canonical StoreConfig reasons") {
+    cache_test_parse_error(["prune", "--to="], "invalid cache size ``: size cannot be empty")
+    cache_test_parse_error(["prune", "--to=  "], "invalid cache size `  `: size cannot be empty")
+    cache_test_parse_error(["limit", "--host=nope"], "invalid cache size `nope`: invalid byte size `nope`")
+    cache_test_parse_error(["prune", "--to", "--json"], "invalid cache size `--json`: invalid byte size `--json`")
+    cache_test_parse_error(["prune", "--to=1.5K"], "invalid cache size `1.5K`: invalid byte size `1.5K`")
+    cache_test_parse_error(["prune", "--to=-1"], "invalid cache size `-1`: invalid byte size `-1`")
+    assert_eq(jet_cli_cache_parse_size(" +2 kb ") ?? panic("size"), 2048)
+    assert_eq(jet_cli_cache_parse_size("3MiB") ?? panic("size"), 3145728)
+}
+#Test("cache size preserves Rust u64 boundary and overflow reasons") {
+    assert_eq(jet_cli_cache_parse_size("18446744073709551615") ?? panic("u64 max"), 18446744073709551615)
+    assert_eq(jet_cli_cache_parse_size("18014398509481983K") ?? panic("scaled max"), 18446744073709550592)
+    cache_test_parse_error(["prune", "--to=18446744073709551616"], "invalid cache size `18446744073709551616`: invalid byte size `18446744073709551616`")
+    cache_test_parse_error(["prune", "--to=18014398509481984K"], "invalid cache size `18014398509481984K`: byte size `18014398509481984K` is too large")
+}
+#Test("cache human size unit and precision boundaries") {
+    assert_eq(jet_cli_cache_format_size(0), "0 B")
+    assert_eq(jet_cli_cache_format_size(1023), "1023 B")
+    assert_eq(jet_cli_cache_format_size(1024), "1 KiB")
+    assert_eq(jet_cli_cache_format_size(1536), "1.5 KiB")
+    assert_eq(jet_cli_cache_format_size(10239), "10.0 KiB")
+    assert_eq(jet_cli_cache_format_size(10240), "10 KiB")
+    assert_eq(jet_cli_cache_format_size(1048576), "1 MiB")
+    assert_eq(jet_cli_cache_format_size(1073741824), "1 GiB")
+    assert_eq(jet_cli_cache_format_size(1099511627776), "1 TiB")
+    assert_eq(jet_cli_cache_format_size(18446744073709551615), "16777216 TiB")
+}
+#Test("cache canonical Fixed rounding preserves Rust ties even #4407") {
+    assert_eq(jet_cli_cache_format_size(12800), "12 KiB")
+    assert_eq(jet_cli_cache_format_size(13824), "14 KiB")
+    assert_eq(jet_cli_cache_format_size(1280), "1.2 KiB")
+    assert_eq(jet_cli_cache_format_size(1792), "1.8 KiB")
+}
+#Test("cache status snapshot counts and policy precedence") {
+    status := cache_test_status()
+    expected :: "store      /store\nlimit      20 GiB (JET_STORE_CAP_BYTES)\nreserve    keep 2 GiB free on that filesystem\nused       2 KiB · 1 blobs · 0 records · 0 ThinLTO caches\nleases     0 live\ntiers      local\n"
+    out :: jet_cli_cache_render_status(status, Val(21474836480), false)
+    assert_eq(out.stdout, expected)
+    assert_eq(out.stderr, "")
+    assert_eq(out.exit_code, 0)
+    assert(jet_cli_cache_render_status(status, None, false).stdout.contains("(adaptive rule)"))
+    status.host_limit_bytes = Val(4294967296)
+    status.limit_bytes = 4294967296
+    &status.entries.push(cache_test_entry(ArtifactEntryKind.Action))
+    &status.entries.push(cache_test_entry(ArtifactEntryKind.LTO))
+    status.live_leases = 2
+    status.tiers = ["local", "remote"]
+    rendered :: jet_cli_cache_render_status(status, Val(21474836480), false).stdout
+    assert(rendered.contains("limit      4 GiB (host policy)"))
+    assert(rendered.contains("1 blobs · 1 records · 1 ThinLTO caches"))
+    assert(rendered.contains("leases     2 live\ntiers      local · remote\n"))
+}
+#Test("cache status JSON snapshot contains nulls and canonical entry counts") {
+    status :: cache_test_status()
+    expected :: "{{\"schema\":\"jet.status/v1\",\"action\":\"cache.status\",\"ok\":true,\"reports\":[],\"cache\":{{\"available_bytes\":null,\"blobs\":1,\"entries\":1,\"footprint_bytes\":2048,\"host_limit_bytes\":null,\"limit_bytes\":21474836480,\"live_leases\":0,\"records\":0,\"reserve_bytes\":2147483648,\"root\":\"/store\",\"tiers\":[\"local\"],\"thinlto_caches\":0}}}}\n"
+    out :: jet_cli_cache_render_status(status, None, true)
+    assert_eq(out.stdout, expected)
+    assert_eq(out.stderr, "")
+    assert_eq(out.exit_code, 0)
+}
+#Test("cache status JSON represents present disk facts and host limits") {
+    status := cache_test_status()
+    status.available_bytes = Val(123)
+    status.host_limit_bytes = Val(456)
+    status.tiers = [String]{}
+    out :: jet_cli_cache_render_status(status, None, true)
+    assert(out.stdout.contains("\"available_bytes\":123"))
+    assert(out.stdout.contains("\"host_limit_bytes\":456"))
+    assert(out.stdout.contains("\"tiers\":[]"))
+}
+#Test("cache prune and limit exact human snapshots") {
+    report :: cache_test_prune()
+    out :: jet_cli_cache_render_prune(report, false)
+    assert_eq(out.stdout, "prune      2 KiB -> 0 B (target 1 KiB)\nremoved    1 entries · freed 2 KiB\npinned     0 B\n")
+    assert_eq(out.exit_code, 0)
+    assert_eq(out.stderr, "")
+    assert_eq(jet_cli_cache_render_limit("/store", 4294967296, false).stdout, "host limit 4 GiB (persisted)\nstore      /store\n")
+}
+#Test("cache prune JSON saturation and blocked result remain successful") {
+    report := cache_test_prune()
+    assert_eq(jet_cli_cache_render_prune(report, true).stdout, "{{\"schema\":\"jet.status/v1\",\"action\":\"cache.prune\",\"ok\":true,\"reports\":[],\"cache\":{{\"after_bytes\":0,\"before_bytes\":2048,\"blocked\":false,\"freed_bytes\":2048,\"pinned_bytes\":0,\"removed_entries\":1,\"target_bytes\":1024}}}}\n")
+    report.after_bytes = 4096
+    report.pinned_bytes = 4096
+    report.blocked = true
+    out :: jet_cli_cache_render_prune(report, false)
+    assert(out.stdout.ends_with("result     target blocked by live leases\n"))
+    assert(out.stdout.contains("freed 0 B"))
+    assert_eq(out.exit_code, 0)
+    assert(jet_cli_cache_render_prune(report, true).stdout.contains("\"freed_bytes\":0"))
+}
+#Test("cache limit JSON snapshot escapes root and carries no reports") {
+    assert_eq(jet_cli_cache_render_limit("/store", 4294967296, true).stdout, "{{\"schema\":\"jet.status/v1\",\"action\":\"cache.limit\",\"ok\":true,\"reports\":[],\"cache\":{{\"host_limit_bytes\":4294967296,\"root\":\"/store\"}}}}\n")
+    assert(jet_cli_cache_render_limit("/a\"b", 0, true).stdout.contains("\"root\":\"/a\\\"b\""))
+}
+// Rust emit_report builds Diagnostic::error, which sentence-cases what/why/fix
+// (Outcome::jet_sentence_case_line) before both the human and JSON renderers.
+#Test("cache usage diagnostic exact human text") {
+    out :: jet_cli_cache_usage_error("missing `jet cache` command", false)
+    assert_eq(out.stdout, "")
+    assert_eq(out.exit_code, 2)
+    assert_eq(out.stderr, "Error [E2102]: Missing `jet cache` command\n Why: `jet cache` has one read-only status command and two explicit mutations\n Fix: Run `jet cache status`, `jet cache prune --to <size>`, or `jet cache limit --host <size>`\nMore: jet-lang.dev/e/E2102\n")
+}
+#Test("cache usage diagnostic exact JSON newline contract") {
+    machine :: jet_cli_cache_usage_error("missing `jet cache` command", true)
+    assert_eq(machine.stderr, "")
+    assert_eq(machine.exit_code, 2)
+    assert(!machine.stdout.ends_with("\n"))
+    assert(machine.stdout.contains("\"action\":\"status\""))
+    assert(machine.stdout.contains("\"ok\":false"))
+    assert(machine.stdout.contains("\"code\":\"E2102\""))
+    expected :: "{{\"schema\":\"jet.status/v1\",\"action\":\"status\",\"ok\":false,\"reports\":[{{\"schema\":\"jet.report/v3\",\"moment\":\"compile\",\"severity\":\"error\",\"code\":\"E2102\",\"what\":\"Missing `jet cache` command\",\"why\":\"`jet cache` has one read-only status command and two explicit mutations\",\"fix\":\"Run `jet cache status`, `jet cache prune --to <size>`, or `jet cache limit --host <size>`\",\"detail\":null,\"denial_kind\":null,\"call_chain\":[],\"scope_chain\":[],\"nearest_granting_scope\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"no_fix_reason\":{{\"kind\":\"ambiguous\",\"next\":\"Use the suggested flag spelling or run `jet help` to select a supported flag.\"}},\"cause\":[],\"clears\":0}}]}}"
+    assert_eq(machine.stdout, expected)
+}
+#Test("cache store failure operations and diagnostics preserve exact text") {
+    operations :: [String]{"open the machine-wide store", "read the machine-wide store", "prune the machine-wide store", "set the host store limit"}
+    loop operation in operations {
+        out :: jet_cli_cache_store_error(operation, ArtifactStoreError.Config("denied"), false)
+        assert_eq(out.exit_code, 1)
+        assert_eq(out.stdout, "")
+        expected :: "Error [E2105]: Could not {operation}: denied\n Why: Cache commands use one machine-wide store with atomic, verified entries\n Fix: Check the JET_STORE_DIR path and permissions, then retry the cache command\nMore: jet-lang.dev/e/E2105\n"
+        assert_eq(out.stderr, expected)
+    }
+}
+#Test("cache store failure operations and JSON diagnostics preserve exact text") {
+    operations :: [String]{"open the machine-wide store", "read the machine-wide store", "prune the machine-wide store", "set the host store limit"}
+    loop operation in operations {
+        machine :: jet_cli_cache_store_error(operation, ArtifactStoreError.Config("denied"), true)
+        assert_eq(machine.exit_code, 1)
+        assert_eq(machine.stderr, "")
+        assert(!machine.stdout.ends_with("\n"))
+        assert(machine.stdout.contains("\"code\":\"E2105\""))
+        assert(machine.stdout.contains("\"ok\":false"))
+        expected_json :: "{{\"schema\":\"jet.status/v1\",\"action\":\"status\",\"ok\":false,\"reports\":[{{\"schema\":\"jet.report/v3\",\"moment\":\"compile\",\"severity\":\"error\",\"code\":\"E2105\",\"what\":\"Could not {operation}: denied\",\"why\":\"Cache commands use one machine-wide store with atomic, verified entries\",\"fix\":\"Check the JET_STORE_DIR path and permissions, then retry the cache command\",\"detail\":null,\"denial_kind\":null,\"call_chain\":[],\"scope_chain\":[],\"nearest_granting_scope\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"no_fix_reason\":{{\"kind\":\"behavior\",\"next\":\"Correct the named problem, then run the command again.\"}},\"cause\":[],\"clears\":0}}]}}"
+        assert_eq(machine.stdout, expected_json)
+    }
+}
+
+// Real canonical store journey, not an in-memory duplicate store. The opened
+// store supplies the Rust cache_cli environment facts without global sys.set.
+// Native gates #3593/#3598 and Store/compiler gates #4303/#4415/#4417 remain
+// explicit; canonical renderer proofs do not replace these store operations.
+#Test("cache CLI status prune limit canonical store sequence") {
+    token :: cache_test_random.token_hex(8) ?? panic("cache scratch token")
+    root :: cache_test_files.join(cache_test_sys.temp_dir(), "jet-cli-cache-{token}")
+    config :: ArtifactStoreConfig.new(root).with_cap_bytes(21474836480).with_reserve_bytes(2147483648)
+    store :: ArtifactStore.open(config) ?? panic("open canonical store: {err.message()}")
+    bytes := [U8]{}
+    loop _ in 0..<2048 -> &bytes.push(U8{0})
+    store.publish_blob(bytes) ?? panic("publish canonical blob: {err.message()}")
+    status :: jet_cli_cache_execute(store, jet_cli_cache_parse_request(["status"]) ?? panic("status request"), false)
+    assert_eq(status.exit_code, 0)
+    assert_eq(status.stderr, "")
+    assert_eq(status.stdout, "store      {root}\nlimit      20 GiB (JET_STORE_CAP_BYTES)\nreserve    keep 2 GiB free on that filesystem\nused       2 KiB · 1 blobs · 0 records · 0 ThinLTO caches\nleases     0 live\ntiers      local\n")
+    prune :: jet_cli_cache_execute(store, jet_cli_cache_parse_request(["prune", "--to", "1K"]) ?? panic("prune request"), false)
+    assert_eq(prune.exit_code, 0)
+    assert_eq(prune.stdout, "prune      2 KiB -> 0 B (target 1 KiB)\nremoved    1 entries · freed 2 KiB\npinned     0 B\n")
+    limit :: jet_cli_cache_execute(store, jet_cli_cache_parse_request(["limit", "--host", "4G"]) ?? panic("limit request"), false)
+    assert_eq(limit.exit_code, 0)
+    assert_eq(limit.stdout, "host limit 4 GiB (persisted)\nstore      {root}\n")
+    reopened :: ArtifactStore.open(config) ?? panic("reopen canonical store")
+    limited :: jet_cli_cache_execute(reopened, JetCLICacheRequest.Status, false)
+    assert_eq(limited.exit_code, 0)
+    assert_eq(limited.stdout, "store      {root}\nlimit      4 GiB (host policy)\nreserve    keep 2 GiB free on that filesystem\nused       0 B · 0 blobs · 0 records · 0 ThinLTO caches\nleases     0 live\ntiers      local\n")
+    cache_test_files.remove_all(root).drop("cache test scratch cleanup")
+}
+#Test("cache invalid real request is rejected before opening environment store") {
+    out :: jet_cli_cache_run([String]{}, true)
+    assert_eq(out.exit_code, 2)
+    assert(out.stdout.contains("\"what\":\"Missing `jet cache` command\""))
+}

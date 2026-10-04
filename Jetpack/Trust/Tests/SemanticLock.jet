@@ -49,7 +49,7 @@ fn trust_test_has_issue(issues: [ValidationIssue], expected: String) -> Bool {
     false
 }
 
-@TRUST_TEST_MACHINE_LOCK :: `version = 1
+TRUST_TEST_MACHINE_LOCK :: prep { `version = 1
 
 [[package]]
 name = "app"
@@ -60,7 +60,7 @@ dependencies = []
 
 [root]
 dependencies = ["app"]
-`
+` }
 
 #Test("live lock text keeps machine sections beside semantic sections") {
     semantic := SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
@@ -70,7 +70,7 @@ dependencies = ["app"]
     }
     semantic.source_maps = [SourceMapEntry]{SourceMapEntry{pattern: "core.*", sources: [String]{"catalog:core.log", "core"}}}
     assert_eq(trust_semantic_lock_issues(semantic).len(), 0)
-    raw :: "{@TRUST_TEST_MACHINE_LOCK.trim_end()}\n\n{trust_write_semantic_lock(semantic)}"
+    raw :: "{TRUST_TEST_MACHINE_LOCK.trim_end()}\n\n{trust_write_semantic_lock(semantic)}"
     assert(raw.contains("[[package]]"))
     assert(raw.contains("name = \"app\""))
     assert(raw.contains("[[semantic_record]]"))
@@ -197,7 +197,7 @@ dependencies = ["app"]
     right :: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.http", "2.0.0", "sha256-http")})
     merged :: trust_merge_for_commit(SemanticLockFile.empty(), left, right) ?? panic("clean merge should commit")
     assert_eq(merged.records.len(), 2)
-    raw :: "{@TRUST_TEST_MACHINE_LOCK.trim_end()}\n\n{trust_write_semantic_lock(merged)}"
+    raw :: "{TRUST_TEST_MACHINE_LOCK.trim_end()}\n\n{trust_write_semantic_lock(merged)}"
     assert_eq(trust_parse_semantic_lock(raw).records.len(), 2)
     machine :: trust_strip_semantic_sections(raw)
     assert(!machine.contains("semantic_record"))

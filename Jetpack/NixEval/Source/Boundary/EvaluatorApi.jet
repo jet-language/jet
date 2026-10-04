@@ -6,13 +6,13 @@
 // and external flakes fail closed. An answer may read project files (`FS`),
 // so an evaluation that consults an authority carries that effect.
 
-@NIXEVAL_INPUT_BYTES :: 1048576
-@NIXEVAL_TOKEN_LIMIT :: 65536
-@NIXEVAL_EXPRESSION_LIMIT :: 256
-@NIXEVAL_IMPORT_LIMIT :: 64
-@NIXEVAL_STRING_BYTES :: 1048576
-@NIXEVAL_MEMORY_BYTES :: 16777216
-@NIXEVAL_LATENCY_MICROS :: 1000000
+NIXEVAL_INPUT_BYTES :: prep { 1048576 }
+NIXEVAL_TOKEN_LIMIT :: prep { 65536 }
+NIXEVAL_EXPRESSION_LIMIT :: prep { 256 }
+NIXEVAL_IMPORT_LIMIT :: prep { 64 }
+NIXEVAL_STRING_BYTES :: prep { 1048576 }
+NIXEVAL_MEMORY_BYTES :: prep { 16777216 }
+NIXEVAL_LATENCY_MICROS :: prep { 1000000 }
 
 // The one failure carrier of the NixEval area. Public evaluation entry points
 // return only `InputTooLarge`, `UnsupportedSystem`, `Unsupported`, `Invalid`
@@ -31,12 +31,12 @@ pub enum NixEvalError {
     TypeMismatch(expected: String, actual: String)
     Cycle
     Denied(String)
-    Json(String)
+    JSON(String)
     Manifest(String)
     Evaluation(String)
     UnsupportedOracleSystem(String)
     MissingOracleIdentity(system: String, field: String)
-    MalformedSri(String)
+    MalformedSRI(String)
     OracleIdentityMismatch(system: String, field: String, expected: String, actual: String)
     OracleBuildBlocked(system: String, status: String)
 
@@ -52,12 +52,12 @@ pub enum NixEvalError {
             .TypeMismatch(expected, actual) -> "expected {expected} in foreign flake, got {actual}"
             .Cycle -> "cyclic foreign flake evaluation"
             .Denied(reason) -> reason
-            .Json(reason) -> reason
+            .JSON(reason) -> reason
             .Manifest(reason) -> "invalid pinned Nix oracle manifest: {reason}"
             .Evaluation(reason) -> "native Nix evaluation failed: {reason}"
             .UnsupportedOracleSystem(system) -> "unsupported pinned Nix oracle system `{system}`"
             .MissingOracleIdentity(system, field) -> "pinned Nix oracle `{system}` is missing `{field}`"
-            .MalformedSri(field) -> "observed Nix oracle `{field}` is not canonical SHA-256 SRI"
+            .MalformedSRI(field) -> "observed Nix oracle `{field}` is not canonical SHA-256 SRI"
             .OracleIdentityMismatch(system, field, expected, actual) -> "pinned Nix oracle `{system}` `{field}` mismatch: expected `{expected}`, got `{actual}`"
             .OracleBuildBlocked(system, status) -> "pinned Nix oracle `{system}` is `{status}`"
         }
@@ -136,11 +136,11 @@ pub struct NixEvalBudget {
 
 pub fn nixeval_budget() -> NixEvalBudget Never! {
     NixEvalBudget{
-        input_bytes: @NIXEVAL_INPUT_BYTES,
-        tokens: @NIXEVAL_TOKEN_LIMIT,
-        expression_steps: @NIXEVAL_EXPRESSION_LIMIT,
-        imports: @NIXEVAL_IMPORT_LIMIT,
-        string_bytes: @NIXEVAL_STRING_BYTES,
+        input_bytes: NIXEVAL_INPUT_BYTES,
+        tokens: NIXEVAL_TOKEN_LIMIT,
+        expression_steps: NIXEVAL_EXPRESSION_LIMIT,
+        imports: NIXEVAL_IMPORT_LIMIT,
+        string_bytes: NIXEVAL_STRING_BYTES,
     }
 }
 
@@ -185,7 +185,7 @@ pub struct NixEvalDerivation {
 }
 
 fn nixeval_check_request(source: String, system: String) NixEvalError! {
-    if source.bytes().len() > @NIXEVAL_INPUT_BYTES -> return Err(NixEvalError.InputTooLarge)
+    if source.bytes().len() > NIXEVAL_INPUT_BYTES -> return Err(NixEvalError.InputTooLarge)
     if !nixeval_is_required_system(system) -> return Err(NixEvalError.UnsupportedSystem(system))
 }
 

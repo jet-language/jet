@@ -1,0 +1,146 @@
+// ReceiptSections.rs has no inline #[cfg(test)] tests. These behavior claims
+// cover its codec, limits, canonical validation, queries and diff semantics.
+fn receipt_sections_test_section(name: String, type_name: String, text: String) -> JetCLIReceiptSection Never! {
+    jet_cli_receipt_section_new(name, type_name, text.bytes()) ?? panic("section refused: {err.message}")
+}
+fn receipt_sections_test_refuses(name: String, type_name: String, text: String, message: String) Never! {
+    if jet_cli_receipt_section_new(name, type_name, text.bytes()) == {
+        .Ok(_) -> panic("invalid section accepted")
+        .Err(error) -> assert_eq(error.message, message)
+    }
+}
+#Test("receipt sections validate names types canonical objects and digests") {
+    receipt_sections_test_refuses("", "T", "{{}}\n", "receipt section name is empty")
+    receipt_sections_test_refuses("a/b", "T", "{{}}\n", "receipt section name `a/b` is invalid")
+    receipt_sections_test_refuses("a\\b", "T", "{{}}\n", "receipt section name `a\\b` is invalid")
+    receipt_sections_test_refuses("x", "", "{{}}\n", "receipt section type name is empty")
+    c1 :: String.from_bytes([U8]{U8{97}, U8{194}, U8{128}}) ?? panic("C1 UTF8 construction failed")
+    receipt_sections_test_refuses("x", c1, "{{}}\n", "receipt section type name is invalid")
+    receipt_sections_test_refuses("x", "T", "[]\n", "receipt section `x` has an invalid schema: typed section value must be a canonical JSON object")
+    receipt_sections_test_refuses("x", "T", "{{}}", "receipt section `x` has an invalid schema: canonical JSON is invalid: canonical JSON must end in exactly one LF")
+    receipt_sections_test_refuses("x".repeat(129), "T", "{{}}\n", "receipt section name is too long (maximum 128 bytes)")
+    receipt_sections_test_refuses("x", "é".repeat(129), "{{}}\n", "receipt section type name is too long (maximum 256 bytes)")
+    section :: receipt_sections_test_section("é".repeat(64), "T".repeat(256), "{{}}\n")
+    assert_eq(section.schema_digest, jet_cli_receipt_payload_digest(section.type_name.bytes()))
+    if jet_cli_receipt_section_new_with_digests("x", "T", "0".repeat(64), "0".repeat(64), "{{}}\n".bytes()) == {
+        .Ok(_) -> panic("bad payload digest accepted")
+        .Err(error) -> assert_eq(error.message, "receipt section `x` payload digest does not match its bytes")
+    }
+    if jet_cli_receipt_section_new_with_digests("x", "T", "A".repeat(64), "0".repeat(64), "{{}}\n".bytes()) == {
+        .Ok(_) -> panic("uppercase digest accepted")
+        .Err(error) -> assert_eq(error.message, "receipt section schema digest is malformed")
+    }
+}
+#Test("receipt section record roundtrip staging identity framing and redaction") {
+    section :: receipt_sections_test_section("regression", "Results", "{{\"secret\":\"do-not-print\"}}\n")
+    record :: jet_cli_receipt_section_record_new("a".repeat(64), "", section) ?? panic("record refused")
+    encoded :: jet_cli_receipt_encode_section_record(record) ?? panic("encoding failed")
+    decoded :: jet_cli_receipt_decode_section_record(encoded) ?? panic("decoding failed")
+    assert(decoded == record)
+    offset :: JET_CLI_RECEIPT_SECTION_RECORD_WIRE_MAGIC.len()
+    loop index in 0..<7 -> assert_eq(encoded[offset + index], U8{0})
+    assert_eq(encoded[offset + 7], U8{64})
+    // Independent Node crypto SHA-256 oracle over domain + six u64-BE frames.
+    assert_eq(jet_cli_receipt_section_record_identity(record), "ea1676fa2d96201cbc053fcd442b9b43d9d80dff15e21a036cc050ac47a50976")
+    published :: jet_cli_receipt_section_record_new("a".repeat(64), "b".repeat(64), section) ?? panic("published record refused")
+    assert(jet_cli_receipt_section_record_identity(record) != jet_cli_receipt_section_record_identity(published))
+    assert(!jet_cli_receipt_section_record_debug(record).contains("do-not-print"))
+    corrupt := ~encoded
+    &corrupt.push(U8{0})
+    if jet_cli_receipt_decode_section_record(corrupt) == {
+        .Ok(_) -> panic("trailing record bytes accepted")
+        .Err(error) -> assert_eq(error.message, "receipt section record has trailing bytes")
+    }
+    truncated :: ~encoded[0..<offset + 7]
+    if jet_cli_receipt_decode_section_record(truncated) == {
+        .Ok(_) -> panic("short frame header accepted")
+        .Err(error) -> assert_eq(error.message, "receipt section record frame length is truncated")
+    }
+    oversized := ~JET_CLI_RECEIPT_SECTION_RECORD_WIRE_MAGIC
+    loop _ in 0..<8 -> &oversized.push(U8{255})
+    if jet_cli_receipt_decode_section_record(oversized) == {
+        .Ok(_) -> panic("u64 maximum frame accepted")
+        .Err(error) -> assert_eq(error.message, "receipt section record frame is too large")
+    }
+    invalid_utf8 := ~encoded
+    invalid_utf8[offset + 8] = U8{255}
+    if jet_cli_receipt_decode_section_record(invalid_utf8) == {
+        .Ok(_) -> panic("invalid UTF8 claim accepted")
+        .Err(error) -> assert_eq(error.message, "receipt section claim key is not UTF-8")
+    }
+    short_value :: ~encoded[0..<encoded.len() - 1]
+    if jet_cli_receipt_decode_section_record(short_value) == {
+        .Ok(_) -> panic("truncated value accepted")
+        .Err(error) -> assert_eq(error.message, "receipt section record frame is truncated")
+    }
+}
+#Test("receipt query sorts sections filters missing names and refuses duplicates") {
+    a :: receipt_sections_test_section("a", "T", "{{\"v\":null}}\n")
+    z :: receipt_sections_test_section("z", "T", "{{}}\n")
+    sections :: [JetCLIReceiptSection]{z, a}
+    result :: jet_cli_receipt_query_sections(sections, None) ?? panic("query failed")
+    assert_eq(canonical_json_bytes(result), "{{\"a\":{{\"v\":null}},\"z\":{{}}}}\n".bytes())
+    empty :: jet_cli_receipt_query_sections(sections, Val([String]{})) ?? panic("empty selection failed")
+    assert(empty == result)
+    missing :: jet_cli_receipt_query_sections(sections, Val([String]{"missing"})) ?? panic("missing query failed")
+    assert_eq(canonical_json_bytes(missing), "{{}}\n".bytes())
+    if jet_cli_receipt_query_sections(sections, Val([String]{"a", "a"})) == {
+        .Ok(_) -> panic("duplicate query accepted")
+        .Err(error) -> assert_eq(error.message, "receipt section `a` is duplicated in query")
+    }
+    if jet_cli_receipt_normalized_sections([JetCLIReceiptSection]{a, a}) == {
+        .Ok(_) -> panic("duplicate section accepted")
+        .Err(error) -> assert_eq(error.message, "receipt section `a` is duplicated")
+    }
+    many := [JetCLIReceiptSection]{}
+    loop _ in 0..<257 -> &many.push(a)
+    if jet_cli_receipt_normalized_sections(many) == {
+        .Ok(_) -> panic("too many sections accepted")
+        .Err(error) -> assert_eq(error.message, "receipt has too many sections (maximum 256)")
+    }
+}
+#Test("borrowed receipt section validation keeps order payloads and error precedence") {
+    a :: receipt_sections_test_section("a", "T", "{{}}\n")
+    z :: receipt_sections_test_section("z", "T", "{{\"payload\":\"unchanged\"}}\n")
+    sections :: [JetCLIReceiptSection]{z, a}
+    jet_cli_receipt_validate_sections(sections) ?? panic("valid borrowed sections: {err.message}")
+    assert_eq(sections[0].name, "z")
+    assert_eq(sections[0].bytes, "{{\"payload\":\"unchanged\"}}\n".bytes())
+    if jet_cli_receipt_validate_sections([JetCLIReceiptSection]{z, z, a, a}) == {
+        .Ok(_) -> panic("duplicate sections accepted")
+        .Err(error) -> assert_eq(error.message, "receipt section `a` is duplicated")
+    }
+    invalid := ~z
+    invalid.name = ""
+    if jet_cli_receipt_validate_sections([JetCLIReceiptSection]{z, z, invalid}) == {
+        .Ok(_) -> panic("invalid section accepted")
+        .Err(error) -> assert_eq(error.message, "receipt section name is empty")
+    }
+    normalized :: jet_cli_receipt_normalized_sections(sections) ?? panic("normalization: {err.message}")
+    assert_eq(normalized[0].name, "a")
+    assert_eq(normalized[1].name, "z")
+    owned := ~sections
+    jet_cli_receipt_normalize_sections(&owned) ?? panic("owned normalization: {err.message}")
+    assert_eq(owned, normalized)
+}
+#Test("receipt diffs distinguish missing null type nested and whole section changes") {
+    before :: receipt_sections_test_section("x", "Old", "{{\"a\":null,\"nested\":{{\"v\":1}},\"removed\":{{\"z\":0}}}}\n")
+    after :: receipt_sections_test_section("x", "New", "{{\"added\":null,\"nested\":{{\"v\":2}}}}\n")
+    diffs :: jet_cli_receipt_diff_sections([JetCLIReceiptSection]{before}, [JetCLIReceiptSection]{after}) ?? panic("diff failed")
+    assert_eq(diffs.len(), 5)
+    assert_eq(jet_cli_receipt_field_diff_render(diffs[0]), "x.@type: \"Old\" -> \"New\"")
+    assert_eq(jet_cli_receipt_field_diff_render(diffs[1]), "x.a: null -> <missing>")
+    assert_eq(jet_cli_receipt_field_diff_render(diffs[2]), "x.added: <missing> -> null")
+    assert_eq(jet_cli_receipt_field_diff_render(diffs[3]), "x.nested.v: 1 -> 2")
+    assert_eq(jet_cli_receipt_field_diff_render(diffs[4]), "x.removed: {{\"z\":0}} -> <missing>")
+    expected_null :: Val(CanonicalJSON.Null)
+    assert(diffs[1].before == expected_null)
+    assert(diffs[1].after == None)
+    added :: jet_cli_receipt_diff_sections([JetCLIReceiptSection]{}, [JetCLIReceiptSection]{before}) ?? panic("addition diff failed")
+    assert_eq(added.len(), 3)
+    assert_eq(jet_cli_receipt_field_diff_path(added[2]), "x.removed.z")
+    empty :: receipt_sections_test_section("empty", "T", "{{}}\n")
+    removed :: jet_cli_receipt_diff_sections([JetCLIReceiptSection]{empty}, [JetCLIReceiptSection]{}) ?? panic("removal diff failed")
+    assert_eq(jet_cli_receipt_field_diff_render(removed[0]), "empty: {{}} -> <missing>")
+    assert_eq(canonical_json_bytes(jet_cli_receipt_diff_projection(removed)), "[{{\"after\":null,\"before\":{{}},\"field\":\"$\",\"section\":\"empty\"}}]\n".bytes())
+}

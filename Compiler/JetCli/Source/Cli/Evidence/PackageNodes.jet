@@ -1,0 +1,96 @@
+// Package reuse evidence (Source/CheckReceipt.rs). This leaf projects already
+// computed package keys; graph construction, persistence and invocation sealing
+// remain with their canonical compiler/store owners.
+
+// Rust `WHY_REUSED` (CheckReceipt.rs).
+pub JET_CLI_PACKAGE_WHY_REUSED :: "reused"
+
+// Rust `PACKAGE_NODE` (CheckReceipt.rs).
+pub JET_CLI_PACKAGE_NODE :: "package"
+
+// Rust `PackageRow` (CheckReceipt.rs); dependencies use the canonical key row.
+pub struct JetCLIPackageRow {
+    pub identity: String
+    pub key: String
+    pub source: String
+    pub interface: String
+    pub target: String
+    pub compiler: String
+    pub dependencies: [PackageKeyDependency]
+}
+
+// Rust `PackageRow::inputs` (CheckReceipt.rs). Dependency order is supplied by
+// the graph, not re-sorted here; these are the exact store-log input bytes.
+pub fn jet_cli_package_row_inputs(row: JetCLIPackageRow) -> [String] Never! {
+    inputs := [String]{
+        "compiler:{row.compiler}",
+        "target:{row.target}",
+        "source:{row.source}",
+        "interface:{row.interface}",
+    }
+    loop dependency in row.dependencies {
+        &inputs.push("dep:{dependency.identity}={dependency.interface_digest}")
+    }
+    inputs
+}
+
+// Rust `PackageRow::node` (CheckReceipt.rs). `previous` contains package nodes.
+// Match the first subject, then key, source, first changed dependency, toolchain.
+pub fn jet_cli_package_row_node(row: JetCLIPackageRow, has_previous: Bool, previous: [BuildNodeRecord]) -> BuildNodeRecord Never! {
+    inputs :: jet_cli_package_row_inputs(row)
+    why_ran := if has_previous -> "red:new" else -> "first-run"
+    loop old in previous {
+        if old.subject != row.identity -> next
+        if old.key == row.key {
+            why_ran = "green:key"
+        } else {
+            reason := "red:toolchain"
+            if !old.inputs.contains(inputs[2]) {
+                reason = "red:source"
+            } else {
+                loop index in 0..<row.dependencies.len() {
+                    if !old.inputs.contains(inputs[index + 4]) {
+                        reason = "red:dependency:{row.dependencies[index].identity}"
+                        break
+                    }
+                }
+            }
+            why_ran = if old.inputs.contains(inputs[3]) -> "{reason}+cutoff" else -> reason
+        }
+        break
+    }
+    BuildNodeRecord{
+        kind: JET_CLI_PACKAGE_NODE,
+        key: ~row.key,
+        subject: ~row.identity,
+        duration_ms: 0.0,
+        why_ran,
+        inputs,
+    }
+}
+
+// Rust `package_nodes` (CheckReceipt.rs). Replays ignore this run's rows and
+// carry only the previous package nodes forward, retaining order and all inputs.
+pub fn jet_cli_package_nodes(packages: [JetCLIPackageRow], previous: BuildRecord?, reused: Bool) -> [BuildNodeRecord] Never! {
+    previous_packages := [BuildNodeRecord]{}
+    has_previous := false
+    if previous == Val(record) {
+        has_previous = true
+        loop node in record.nodes {
+            if node.kind != JET_CLI_PACKAGE_NODE -> next
+            &previous_packages.push(~node)
+        }
+    }
+    if reused {
+        loop index in 0..<previous_packages.len() {
+            previous_packages[index].duration_ms = 0.0
+            previous_packages[index].why_ran = JET_CLI_PACKAGE_WHY_REUSED
+        }
+        return previous_packages
+    }
+    nodes := [BuildNodeRecord]{}
+    loop row in packages {
+        &nodes.push(jet_cli_package_row_node(row, has_previous, previous_packages))
+    }
+    nodes
+}

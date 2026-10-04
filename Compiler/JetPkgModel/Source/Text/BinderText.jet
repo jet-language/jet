@@ -1,0 +1,122 @@
+use jet_foundation.[pkg_bytes_starts_with, pkg_bytes_text]
+// Shared pure Rust-str helpers used by package parsing and foreign binders.
+// ── Text helpers over Rust `str` semantics ──
+
+// `str::lines`: split on `\n`, drop one trailing `\r` per line, and no final
+// empty line after a trailing newline.
+pub fn pkg_binder_lines(text: String) -> [String] Never! {
+    out := [String]{}
+    if text == "" -> return out
+    parts :: text.split("\n").to_list()
+    loop index in 0..<parts.len() {
+        if index == parts.len() - 1 && parts[index] == "" -> break
+        raw :: parts[index].bytes()
+        cut :: if raw.len() > 0 && Int.from_u8(raw[raw.len() - 1]) == 13 -> raw.len() - 1 else -> raw.len()
+        &out.push(pkg_bytes_text(raw, 0, cut))
+    }
+    out
+}
+
+// `str::split_whitespace`.
+pub fn pkg_binder_words(text: String) -> [String] Never! {
+    raw :: text.bytes()
+    out := [String]{}
+    cursor := 0
+    loop cursor < raw.len() {
+        cursor = pkg_bytes_skip_space(raw, cursor)
+        if cursor >= raw.len() -> break
+        start :: cursor
+        loop cursor < raw.len() && pkg_bytes_space_width(raw, cursor) == 0 -> cursor += 1
+        &out.push(pkg_bytes_text(raw, start, cursor))
+    }
+    out
+}
+
+// The byte index of the first `needle` at or after `from`, or -1.
+pub fn pkg_binder_find(text: String, needle: String, from: Int) -> Int Never! {
+    raw :: text.bytes()
+    pattern :: needle.bytes()
+    cursor := if from < 0 -> 0 else -> from
+    loop cursor + pattern.len() <= raw.len() {
+        if pkg_bytes_starts_with(raw, cursor, pattern) -> return cursor
+        cursor += 1
+    }
+    -1
+}
+
+// The byte index of the last `needle`, or -1.
+pub fn pkg_binder_rfind(text: String, needle: String) -> Int Never! {
+    raw :: text.bytes()
+    pattern :: needle.bytes()
+    cursor := raw.len() - pattern.len()
+    loop cursor >= 0 {
+        if pkg_bytes_starts_with(raw, cursor, pattern) -> return cursor
+        cursor -= 1
+    }
+    -1
+}
+
+// `text[start..end]` by byte offsets.
+pub fn pkg_binder_slice(text: String, start: Int, end: Int) -> String Never! {
+    pkg_bytes_text(text.bytes(), start, end)
+}
+
+// `text[start..]` by byte offset.
+pub fn pkg_binder_tail(text: String, start: Int) -> String Never! {
+    raw :: text.bytes()
+    pkg_bytes_text(raw, start, raw.len())
+}
+
+// The first `count` characters.
+pub fn pkg_binder_take_chars(text: String, count: Int) -> String Never! {
+    out := [String]{}
+    loop scalar in text.chars() {
+        if out.len() >= count -> break
+        &out.push("{scalar}")
+    }
+    out.join("")
+}
+
+// `str::trim_end_matches(pattern)` for a non-empty pattern.
+pub fn pkg_binder_trim_end_matches(text: String, pattern: String) -> String Never! {
+    out := text
+    loop pattern != "" && out.ends_with(pattern) -> out = out.removesuffix(pattern)
+    out
+}
+
+// `str::trim_matches(pattern)` for a non-empty pattern.
+pub fn pkg_binder_trim_matches(text: String, pattern: String) -> String Never! {
+    out := text
+    loop pattern != "" && out.starts_with(pattern) -> out = out.removeprefix(pattern)
+    pkg_binder_trim_end_matches(out, pattern)
+}
+
+// ASCII-only uppercase (`str::to_ascii_uppercase`).
+pub fn pkg_binder_ascii_upper(value: String) -> String Never! {
+    out := [U8]{}
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if {
+            code >= 97 && code <= 122 -> &out.push(U8.from_int(code - 32) ?? byte)
+            else -> &out.push(byte)
+        }
+    }
+    String.from_bytes(out) ?? value
+}
+
+// A `u64` length field in little-endian bytes (`(n as u64).to_le_bytes()`).
+pub fn pkg_binder_u64_le(value: Int) -> [U8] Never! {
+    out := [U8]{}
+    rest := value
+    loop index in 0..<8 {
+        &out.push(U8.from_int(rest % 256) ?? U8{0})
+        rest = rest /% 256
+    }
+    out
+}
+
+// The bytes of `text` followed by one NUL separator.
+pub fn pkg_binder_append_field(identity: &[U8], text: [U8]) {
+    loop byte in text -> &identity.push(byte)
+    &identity.push(U8{0})
+}

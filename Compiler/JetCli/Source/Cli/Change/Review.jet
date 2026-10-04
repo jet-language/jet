@@ -1,0 +1,1256 @@
+// Source/CmdReview.rs — D-DEVR-REVIEW1=A. One verdict over meaning,
+// authority and proof. Native ingress is deliberately NOT replaced by a host
+// facade. See the precise producer gates at the end of this owner.
+use core.encoding.[DataTree]
+use core.files.runtime.kernel_path_components.[OSPath]
+use jet_foundation.[StatusEnvelope, StatusFields, StatusValue, Diagnostic, Span,
+    DiagnosticOrigin, DiagnosticCause, DIAGNOSTIC_ERROR, DerivationIdentity,
+    DerivationObservation, foundation_json_parse, foundation_json_quote,
+    foundation_json_write_quote, GateEntry]
+use jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JET_DRIVER_EXIT_OK]
+use jet_semindex.[SemIndex, SemanticOp, ReviewSemanticOp, EffectFact, review_semantic_ops_with_receipts]
+
+#Error
+pub struct JetCLIReviewError { pub message: String }
+
+// Rust private carriers remain here; shared diagnostics, derivations, semantic
+// operations and ledger entries remain at their canonical owners.
+pub struct JetCLIReviewSnapshotInput { pub path: String, pub digest: String }
+pub struct JetCLIReviewProofReceipt { pub path: String, pub digest: String }
+pub struct JetCLIReviewSide {
+    pub path: OSPath
+    pub entry: String
+    pub inputs: [JetCLIReviewSnapshotInput]
+    pub closure: String
+    pub index: SemIndex
+    pub authority: [String:JetCLIReviewAuthorityFact]
+    pub source_hash: String
+    pub semantic_ops: [SemanticOp]
+}
+pub struct JetCLIReviewDiagnosticSide {
+    pub path: OSPath
+    pub display: String
+    pub source_hash: String
+    pub scope_root: OSPath?
+    pub entry_scope: String
+    pub input_revisions: [String:String]
+    pub diagnostics: [Diagnostic]
+    // Native scope-key producer resolves the entry AND every origin once.
+    // Lookup does not reread/canonicalize paths for each comparison.
+    pub source_scopes: [String:String]
+    pub valid: Bool
+    pub complete: Bool
+}
+pub struct JetCLIReviewDiagnosticOccurrence { pub diagnostic: Diagnostic, pub scope: String, pub identity: String? }
+pub struct JetCLIReviewDiagnosticRelation {
+    pub status: String, pub reason: String
+    pub base: JetCLIReviewDiagnosticOccurrence?, pub head: JetCLIReviewDiagnosticOccurrence?
+}
+pub struct JetCLIReviewDiagnosticDiff {
+    pub new: [JetCLIReviewDiagnosticRelation], pub existing: [JetCLIReviewDiagnosticRelation]
+    pub resolved: [JetCLIReviewDiagnosticRelation], pub unknown: [JetCLIReviewDiagnosticRelation]
+}
+pub struct JetCLIReviewAuthorityChange { pub status: String, pub key: String, pub before: String?, pub after: String? }
+pub struct JetCLIReviewAuthorityFact {
+    pub display: [String:Bool], pub granted: [String:Bool]
+    pub denied: [String:Bool], pub terms: [String:Bool]
+}
+pub struct JetCLIReviewDerivationClaim {
+    pub id: String, pub subject: String, pub claim: String, pub producer: String
+    pub method: String, pub rule: String, pub premises: [String]
+    pub identity: DerivationIdentity, pub assumptions: [String]
+    pub disposition: String, pub observation: DerivationObservation?
+}
+pub struct JetCLIReviewObservation {
+    pub contract: String, pub inputs: String, pub environment: String, pub premises: String
+    pub event: String?, pub result: String, pub source: String
+    pub identity: DerivationIdentity?, pub order: Int
+}
+pub struct JetCLIReviewClaim {
+    pub label: String, pub outcome: String, pub state: String, pub proven: Bool
+    pub derivation: JetCLIReviewDerivationClaim?, pub observation: JetCLIReviewObservation?, pub order: Int
+}
+pub struct JetCLIReviewReceipt {
+    pub recorded: Bool, pub claims: [String:JetCLIReviewClaim]
+    pub derivations: [String:JetCLIReviewDerivationClaim], pub claim_key: String?
+    pub proof_receipt: JetCLIReviewProofReceipt?
+}
+pub struct JetCLIReviewReceiptChange {
+    pub status: String, pub key: String, pub before: JetCLIReviewClaim?, pub after: JetCLIReviewClaim?
+}
+pub struct JetCLIReviewObservationComparison {
+    pub status: String, pub key: String, pub reason: String
+    pub before: JetCLIReviewObservation?, pub after: JetCLIReviewObservation?
+    pub subject: String?, pub source_operation: String?
+}
+pub struct JetCLIReviewReceiptDiff {
+    pub base_recorded: Bool, pub head_recorded: Bool
+    pub gained: Int, pub lost: Int, pub changed: Int, pub retained: Int
+    pub changes: [JetCLIReviewReceiptChange], pub preserved: [JetCLIReviewReceiptChange]
+    pub changed_contracts: [JetCLIReviewReceiptChange]
+    pub first_difference: JetCLIReviewObservationComparison?
+    pub sampled_agreements: [JetCLIReviewObservationComparison]
+    pub unknown: [JetCLIReviewObservationComparison], pub unproved: [JetCLIReviewObservationComparison]
+}
+
+// Sorted keys are the BTree iteration boundary, not a linear-array map.
+fn jet_cli_review_keys<V>(table: [String:V]) -> [String] Never! {
+    keys := table.keys().to_list()
+    &keys.sort()
+    keys
+}
+fn jet_cli_review_union_keys<V>(left: [String:V], right: [String:V]) -> [String] Never! {
+    keys := [String:Bool]{}
+    loop key in left.keys() -> keys[key] = true
+    loop key in right.keys() -> keys[key] = true
+    jet_cli_review_keys(keys)
+}
+fn jet_cli_review_subset(left: [String:Bool], right: [String:Bool]) -> Bool Never! {
+    loop key in left.keys() { if !right.has_key(key) -> return false }
+    true
+}
+fn jet_cli_review_set_equal(left: [String:Bool], right: [String:Bool]) -> Bool Never! {
+    left.len() == right.len() && jet_cli_review_subset(left, right)
+}
+pub fn jet_cli_review_authority_empty() -> JetCLIReviewAuthorityFact Never! {
+    JetCLIReviewAuthorityFact{display: [String:Bool]{}, granted: [String:Bool]{}, denied: [String:Bool]{}, terms: [String:Bool]{}}
+}
+// Rust AuthorityFact::{same_authority,display}, 95/99.
+pub fn jet_cli_review_same_authority(left: JetCLIReviewAuthorityFact, right: JetCLIReviewAuthorityFact) -> Bool Never! {
+    jet_cli_review_set_equal(left.granted, right.granted) && jet_cli_review_set_equal(left.denied, right.denied) && jet_cli_review_set_equal(left.terms, right.terms)
+}
+pub fn jet_cli_review_authority_display(fact: JetCLIReviewAuthorityFact) -> String Never! {
+    jet_cli_review_keys(fact.display).join(" | ")
+}
+// Rust effect_list/add_detail_facts, 972/956. Preserve whitespace after stripping
+// the checkout path only in authority clauses; retain all display provenance.
+pub fn jet_cli_review_effect_list(list: String) -> [String] Never! {
+    out := [String]{}
+    loop part in list.split(",") {
+        name := part.trim() // #4303
+        if name != "" && name != "none" -> &out.push(~name)
+    }
+    out
+}
+pub fn jet_cli_review_add_detail_facts(fact: &JetCLIReviewAuthorityFact, detail: String, source: String) Never! {
+    loop clause in detail.split("; ") {
+        split :: clause.find(": ")
+        if split == .Val(position) {
+            name := clause[0..<position] // #4303
+            value := clause[position + 2..<clause.len()] // #4303
+            if name == "granted effects" {
+                loop effect in jet_cli_review_effect_list(value) -> fact.granted[effect] = true
+            } else if name == "denied effects" {
+                loop effect in jet_cli_review_effect_list(value) -> fact.denied[effect] = true
+            } else if name == "authority" {
+                origin := value // #4303
+                if origin.starts_with(source) -> origin = origin[source.len()..<origin.len()].trim_start()
+                fact.terms["authority: {origin}"] = true
+            } else -> fact.terms[~clause] = true
+        } else -> fact.terms[~clause] = true
+    }
+}
+// Rust authority_facts, 909. GateLedger collects/sorts at 0428, never here.
+pub fn jet_cli_review_authority_facts(entries: [GateEntry], effects: [EffectFact]) -> [String:JetCLIReviewAuthorityFact] Never! {
+    facts := [String:JetCLIReviewAuthorityFact]{}
+    loop entry in entries {
+        key :: "{entry.kind.name()}:{entry.domain}:{entry.scope}:{entry.subject}"
+        fact := facts.remove(key) ?? jet_cli_review_authority_empty()
+        status :: entry.status ?? ""
+        reason :: entry.reason ?? ""
+        fact.display["status={status};detail={entry.detail};reason={reason}"] = true
+        fact.terms["status={status}"] = true
+        fact.terms["reason={reason}"] = true
+        jet_cli_review_add_detail_facts(&fact, entry.detail, entry.source)
+        facts[key] = ^fact
+    }
+    loop effect in effects {
+        key :: "effect:{effect.function}"
+        fact := facts.remove(key) ?? jet_cli_review_authority_empty()
+        fact.display["direct={jet_cli_review_sorted_join(effect.direct)};inferred={jet_cli_review_sorted_join(effect.inferred)};maximal={effect.maximal}"] = true
+        loop name in effect.direct -> fact.granted["direct:{name}"] = true
+        loop name in effect.inferred -> fact.granted["inferred:{name}"] = true
+        if effect.maximal -> fact.granted["maximal"] = true
+        facts[key] = ^fact
+    }
+    facts
+}
+pub fn jet_cli_review_classify_authority_change(before: JetCLIReviewAuthorityFact?, after: JetCLIReviewAuthorityFact?) -> String? Never! {
+    old :: before ?? jet_cli_review_authority_empty()
+    new :: after ?? jet_cli_review_authority_empty()
+    if before != None && after != None {
+        if jet_cli_review_same_authority(old, new) -> return None
+        if !jet_cli_review_set_equal(old.terms, new.terms) -> return Val("changed")
+    }
+    widens :: !jet_cli_review_subset(new.granted, old.granted) || !jet_cli_review_subset(old.denied, new.denied)
+    narrows :: !jet_cli_review_subset(old.granted, new.granted) || !jet_cli_review_subset(new.denied, old.denied)
+    if widens && narrows -> return Val("changed")
+    if widens -> return Val("widened")
+    if narrows -> return Val("narrowed")
+    if before == None && after != None -> return Val("widened")
+    if before != None && after == None -> return Val("narrowed")
+    None
+}
+pub fn jet_cli_review_authority_diff(before: [String:JetCLIReviewAuthorityFact], after: [String:JetCLIReviewAuthorityFact]) -> [JetCLIReviewAuthorityChange] Never! {
+    out := [JetCLIReviewAuthorityChange]{}
+    loop key in jet_cli_review_union_keys(before, after) {
+        old :: before.get(key)
+        new :: after.get(key)
+        status :: jet_cli_review_classify_authority_change(old, new) ?? next
+        old_display :: if old == { Val(fact) -> Val(jet_cli_review_authority_display(fact)); None -> None }
+        new_display :: if new == { Val(fact) -> Val(jet_cli_review_authority_display(fact)); None -> None }
+        &out.push(JetCLIReviewAuthorityChange{status, key, before: old_display, after: new_display})
+    }
+    out
+}
+pub fn jet_cli_review_widens_authority(change: JetCLIReviewAuthorityChange) -> Bool Never! {
+    change.status == "widened" || change.status == "changed"
+}
+
+// Rust positional/option_value, 2305/2336. First occurrence wins; = accepts
+// empty/option-looking values, separated syntax rejects a leading hyphen.
+pub fn jet_cli_review_positional(args: [String]) -> [String] Never! {
+    out := [String]{}
+    skip := false
+    loop (index, argument) in args {
+        if index == 0 -> next
+        if skip { skip = false; next }
+        if argument == "--base-receipt" || argument == "--receipt" || argument == "--head-receipt" || argument == "--after-receipt" { skip = true; next }
+        if argument.starts_with("--base-receipt=") || argument.starts_with("--receipt=") || argument.starts_with("--head-receipt=") || argument.starts_with("--after-receipt=") || argument.starts_with("-") -> next
+        &out.push(~argument)
+    }
+    out
+}
+pub fn jet_cli_review_option_value(args: [String], names: [String]) -> String? JetCLIReviewError! {
+    loop (index, argument) in args {
+        loop name in names {
+            prefix :: "{name}="
+            if argument.starts_with(prefix) {
+                value := argument[prefix.len()..<argument.len()] // #4303
+                return Ok(Val(~value))
+            }
+            if argument == name {
+                if index + 1 >= args.len() || args[index + 1].starts_with("-") -> return Err(JetCLIReviewError{message: "`{name}` needs a receipt path"})
+                return Ok(Val(~args[index + 1]))
+            }
+        }
+    }
+    Ok(None)
+}
+pub fn jet_cli_review_sorted_join(values: [String]) -> String Never! {
+    set := [String:Bool]{}
+    loop value in values -> set[value] = true
+    jet_cli_review_keys(set).join(",")
+}
+
+// Rust object_field/string_field, 2290/2294. Core ordered objects are the one
+// canonical DataTree carrier after D-JSON=C; no second JSON parser.
+fn jet_cli_review_object_field(object: [String:DataTree], field: String) -> DataTree? Never! { object.get(field) }
+fn jet_cli_review_string_field(object: [String:DataTree], field: String) -> String? Never! {
+    value :: object.get(field) ?? return None
+    if value == .Text(text) -> return Val(~text)
+    None
+}
+fn jet_cli_review_get(value: DataTree, field: String) -> DataTree? Never! {
+    if value == .Object(object) -> return jet_cli_review_object_field(object, field)
+    None
+}
+fn jet_cli_review_text_from(value: DataTree?) -> String? Never! {
+    if value == .Val(.Text(text)) -> return Val(~text)
+    None
+}
+// Rust canonical_json, 2258. Its object identity form intentionally omits
+// braces, and retains insertion order. This is a claim fingerprint, NOT JSON
+// output. Append to one byte buffer, avoiding repeated ancestor string copies.
+fn jet_cli_review_append(out: &[U8], text: String) Never! { loop byte in text.bytes() -> &out.push(byte) }
+fn jet_cli_review_canonical_write(out: &[U8], value: DataTree) Never! {
+    if value == {
+        .Null -> jet_cli_review_append(&out, "null")
+        .Bool(flag) -> jet_cli_review_append(&out, "{flag}")
+        .Int(number) -> jet_cli_review_append(&out, "{number}")
+        .Float(number) -> jet_cli_review_append(&out, "{number}")
+        .Text(text) -> foundation_json_write_quote(&out, text)
+        .Bytes(values) -> {
+            &out.push(U8{91})
+            loop (index, byte) in values {
+                if index != 0 -> &out.push(U8{44})
+                jet_cli_review_append(&out, "{Int.from_u8(byte)}")
+            }
+            &out.push(U8{93})
+        }
+        .Array(values) -> {
+            &out.push(U8{91})
+            loop (index, item) in values {
+                if index != 0 -> &out.push(U8{44})
+                jet_cli_review_canonical_write(&out, item)
+            }
+            &out.push(U8{93})
+        }
+        .Object(values) -> {
+            first := true
+            loop entry in values {
+                if !first -> &out.push(U8{44})
+                first = false
+                foundation_json_write_quote(&out, entry.key)
+                &out.push(U8{58})
+                jet_cli_review_canonical_write(&out, entry.value)
+            }
+        }
+    }
+}
+pub fn jet_cli_review_canonical_json(value: DataTree) -> String Never! {
+    out := [U8]{}
+    jet_cli_review_canonical_write(&out, value)
+    String.from_bytes(^out) ?? panic("review identity rendering preserves UTF-8")
+}
+pub fn jet_cli_review_contract_identity(value: DataTree) -> String Never! {
+    if value == .Object(object) {
+        marker :: jet_cli_review_string_field(object, "marker") ?? ""
+        observation :: jet_cli_review_string_field(object, "observation") ?? ""
+        if marker != "" || observation != "" -> return "marker={marker}|observation={observation}"
+    }
+    jet_cli_review_canonical_json(value)
+}
+pub fn jet_cli_review_claim_key(object: [String:DataTree]) -> String Never! {
+    loop field in [String]{"claimId", "claim"} {
+        if jet_cli_review_string_field(object, field) == .Val(value) -> return "{field}:{value}"
+    }
+    parts := [String]{}
+    loop field in [String]{"kind", "facet", "producer", "contract", "budget", "property", "reason", "solver"} {
+        if object.get(field) == .Val(value) {
+            rendered :: if field == "contract" -> jet_cli_review_contract_identity(value) else -> jet_cli_review_canonical_json(value)
+            &parts.push("{field}={rendered}")
+        }
+    }
+    if object.get("source") == .Val(source) {
+        if jet_cli_review_get(source, "path") == .Val(path) -> &parts.push("source.path={jet_cli_review_canonical_json(path)}")
+    }
+    if parts.len() == 0 {
+        if jet_cli_review_string_field(object, "id") == .Val(id) -> return "id:{id}"
+        return "anonymous"
+    }
+    parts.join("|")
+}
+pub fn jet_cli_review_parse_derivation_identity(value: DataTree?) -> DerivationIdentity JetCLIReviewError! {
+    if value == None || value == .Val(.Null) -> return Ok(DerivationIdentity{source: "", build: "", run: "", target: ""})
+    if value == .Val(.Object(object)) {
+        return Ok(DerivationIdentity{source: jet_cli_review_string_field(object, "source") ?? "", build: jet_cli_review_string_field(object, "build") ?? "", run: jet_cli_review_string_field(object, "run") ?? "", target: jet_cli_review_string_field(object, "target") ?? ""})
+    }
+    Err(JetCLIReviewError{message: "derivation identity is invalid: expected a DataTree object"})
+}
+pub fn jet_cli_review_parse_derivation_observation(value: DataTree?) -> DerivationObservation? JetCLIReviewError! {
+    if value == None || value == .Val(.Null) -> return Ok(None)
+    if value == .Val(.Object(object)) {
+        if jet_cli_review_string_field(object, "event") == .Val(event) -> return Ok(Val(DerivationObservation{event_id: Val(event), counterexample_id: None}))
+        if jet_cli_review_string_field(object, "counterexample") == .Val(counterexample) -> return Ok(Val(DerivationObservation{event_id: None, counterexample_id: Val(counterexample)}))
+        return Ok(None)
+    }
+    Err(JetCLIReviewError{message: "derivation observation is invalid: expected a DataTree object"})
+}
+pub fn jet_cli_review_string_array_field(object: [String:DataTree], field: String) -> [String] JetCLIReviewError! {
+    value :: object.get(field) ?? return Ok([String]{})
+    if value == .Array(values) {
+        out := [String]{}
+        loop item in values {
+            if item == .Text(text) -> &out.push(~text)
+            else -> return Err(JetCLIReviewError{message: "{field} has a non-text item"})
+        }
+        return Ok(^out)
+    }
+    Err(JetCLIReviewError{message: "{field} is invalid: expected a DataTree array"})
+}
+pub fn jet_cli_review_parse_derivation_claim(object: [String:DataTree]) -> JetCLIReviewDerivationClaim JetCLIReviewError! {
+    id :: jet_cli_review_string_field(object, "id") ?? return Err(JetCLIReviewError{message: "derivation has no id"})
+    Ok(JetCLIReviewDerivationClaim{id, subject: jet_cli_review_string_field(object, "subject") ?? "", claim: jet_cli_review_string_field(object, "claim") ?? "", producer: jet_cli_review_string_field(object, "producer") ?? "", method: jet_cli_review_string_field(object, "method") ?? "unknown", rule: jet_cli_review_string_field(object, "rule") ?? "", premises: jet_cli_review_string_array_field(object, "premises"), identity: jet_cli_review_parse_derivation_identity(object.get("identity")), assumptions: jet_cli_review_string_array_field(object, "assumptions"), disposition: jet_cli_review_string_field(object, "disposition") ?? "unknown", observation: jet_cli_review_parse_derivation_observation(object.get("observation"))})
+}
+pub fn jet_cli_review_derivation_for_evidence(object: [String:DataTree], table: [String:JetCLIReviewDerivationClaim]) -> JetCLIReviewDerivationClaim? JetCLIReviewError! {
+    value :: object.get("derivation") ?? return Ok(None)
+    if value == .Null -> return Ok(None)
+    if value == .Object(derivation) {
+        id :: jet_cli_review_string_field(derivation, "id") ?? return Err(JetCLIReviewError{message: "evidence derivation has no id"})
+        if table.get(id) == .Val(record) -> return Ok(Val(~record))
+        return Ok(Val(jet_cli_review_parse_derivation_claim(derivation)))
+    }
+    Err(JetCLIReviewError{message: "evidence has invalid derivation: expected a DataTree object"})
+}
+pub fn jet_cli_review_is_proven_derivation(derivation: JetCLIReviewDerivationClaim) -> Bool Never! {
+    derivation.disposition == "current" && (derivation.method == "static_derivation" || derivation.method == "formal_proof")
+}
+pub fn jet_cli_review_derivation_key(claim: JetCLIReviewClaim) -> String? Never! {
+    if claim.derivation == .Val(derivation) -> return Val(derivation.id)
+    None
+}
+pub fn jet_cli_review_observation_for_evidence(object: [String:DataTree], derivation: JetCLIReviewDerivationClaim?, outcome: String, state: String, order: Int) -> JetCLIReviewObservation? Never! {
+    record :: derivation ?? return None
+    contract :: if object.get("contract") == { Val(value) -> jet_cli_review_canonical_json(value); None -> if jet_cli_review_string_field(object, "claim") == { Val(value) -> foundation_json_quote(value); None -> "" } }
+    inputs_value :: object.get("inputs") ?? object.get("property")
+    inputs :: if inputs_value == { Val(value) -> jet_cli_review_canonical_json(value); None -> "" }
+    environment_value :: object.get("environment") ?? object.get("target") ?? object.get("build")
+    environment :: if environment_value == {
+        Val(value) -> jet_cli_review_canonical_json(value)
+        None -> if record.identity.build == "" && record.identity.target == "" -> "" else -> "{{\"build\":{foundation_json_quote(record.identity.build)},\"target\":{foundation_json_quote(record.identity.target)}}}"
+    }
+    premises := [String]{}
+    loop value in record.premises -> &premises.push(~value)
+    loop value in record.assumptions -> &premises.push(~value)
+    loop field in [String]{"premises", "numerical", "scheduling", "schedule"} {
+        if object.get(field) == .Val(value) -> &premises.push(jet_cli_review_canonical_json(value))
+    }
+    &premises.sort()
+    event := String?{None}
+    if record.observation == .Val(observation) -> event = observation.event_id ?? observation.counterexample_id
+    if event == None -> event = jet_cli_review_string_field(object, "event") ?? jet_cli_review_string_field(object, "observation")
+    source :: if object.get("source") == { Val(value) -> jet_cli_review_canonical_json(value); None -> "" }
+    Val(JetCLIReviewObservation{contract, inputs, environment, premises: premises.join(","), event, result: "{outcome}:{state}", source, identity: Val(~record.identity), order})
+}
+pub fn jet_cli_review_missing_receipt() -> JetCLIReviewReceipt Never! {
+    JetCLIReviewReceipt{recorded: false, claims: [String:JetCLIReviewClaim]{}, derivations: [String:JetCLIReviewDerivationClaim]{}, claim_key: None, proof_receipt: None}
+}
+// Pure decoding half of read_receipt (1045–1160). Native reader owns original
+// bytes and digest; this does not substitute a String-native filesystem call.
+pub fn jet_cli_review_decode_receipt(raw: String, path: String, proof: JetCLIReviewProofReceipt) -> JetCLIReviewReceipt JetCLIReviewError! {
+    root :: foundation_json_parse(raw) ?? return Err(JetCLIReviewError{message: "could not parse receipt `{path}`: {err.message}"})
+    report :: jet_cli_review_get(root, "proofReport") ?? jet_cli_review_get(root, "proof_report") ?? root
+    claim_key := jet_cli_review_text_from(jet_cli_review_get(root, "claim_key") ?? jet_cli_review_get(root, "claimKey") ?? jet_cli_review_get(report, "claim_key") ?? jet_cli_review_get(report, "claimKey"))
+    if claim_key == .Val("") -> claim_key = None
+    derivations := [String:JetCLIReviewDerivationClaim]{}
+    if jet_cli_review_get(report, "derivations") == .Val(value) {
+        if value == .Array(values) {
+            loop item in values {
+                object :: if item == { .Object(fields) -> fields; else -> { return Err(JetCLIReviewError{message: "receipt `{path}` has invalid derivation: expected a DataTree object"}) } }
+                record :: jet_cli_review_parse_derivation_claim(object) ?? return Err(JetCLIReviewError{message: "receipt `{path}` has invalid derivation: {err.message}"})
+                if derivations.has_key(record.id) -> return Err(JetCLIReviewError{message: "receipt `{path}` has duplicate derivation ids"})
+                derivations[record.id] = record
+            }
+        } else -> return Err(JetCLIReviewError{message: "receipt `{path}` has invalid derivations: expected a DataTree array"})
+    }
+    claims := [String:JetCLIReviewClaim]{}
+    evidence :: jet_cli_review_get(report, "evidence") ?? jet_cli_review_get(report, "claims")
+    if evidence == .Val(value) {
+        if value == .Array(values) {
+            loop (order, item) in values {
+                object :: if item == { .Object(fields) -> fields; else -> { return Err(JetCLIReviewError{message: "receipt `{path}` has invalid evidence item: expected a DataTree object"}) } }
+                key :: jet_cli_review_claim_key(object)
+                if claims.has_key(key) -> return Err(JetCLIReviewError{message: "receipt `{path}` has duplicate evidence claim `{key}`"})
+                outcome :: jet_cli_review_string_field(object, "outcome") ?? jet_cli_review_string_field(object, "result") ?? "unknown"
+                completeness :: object.get("completeness")
+                nested_state :: if completeness == { Val(item) -> jet_cli_review_text_from(jet_cli_review_get(item, "state")); None -> None }
+                state :: jet_cli_review_string_field(object, "state") ?? nested_state ?? "unknown"
+                label :: jet_cli_review_string_field(object, "claimId") ?? jet_cli_review_string_field(object, "claim") ?? jet_cli_review_string_field(object, "id") ?? jet_cli_review_string_field(object, "property") ?? ~key
+                derivation :: jet_cli_review_derivation_for_evidence(object, derivations)
+                proven :: if derivation == { Val(record) -> jet_cli_review_is_proven_derivation(record); None -> false }
+                observation :: jet_cli_review_observation_for_evidence(object, derivation, outcome, state, order)
+                claims[key] = JetCLIReviewClaim{label, outcome, state, proven, derivation, observation, order}
+            }
+        } else -> return Err(JetCLIReviewError{message: "receipt `{path}` has invalid evidence: expected a DataTree array"})
+    }
+    Ok(JetCLIReviewReceipt{recorded: true, claims: ^claims, derivations: ^derivations, claim_key, proof_receipt: Val(proof)})
+}
+
+// Rust observation_mismatches, 1643. Missing-vs-different precedence and order
+// are observable receipt policy. Source identity intentionally is NOT compared.
+pub fn jet_cli_review_observation_mismatches(before: JetCLIReviewObservation, after: JetCLIReviewObservation) -> [String] Never! {
+    mismatches := [String]{}
+    if before.contract == "" || after.contract == "" -> &mismatches.push("observation contract is missing")
+    else if before.contract != after.contract -> &mismatches.push("observation contract differs")
+    if before.inputs == "" || after.inputs == "" -> &mismatches.push("declared inputs are missing")
+    else if before.inputs != after.inputs -> &mismatches.push("declared inputs differ")
+    if before.environment == "" || after.environment == "" -> &mismatches.push("relevant environment identity is missing")
+    else if before.environment != after.environment -> &mismatches.push("relevant environment identity differs")
+    if before.premises == "" || after.premises == "" -> &mismatches.push("numerical or scheduling premises are missing")
+    else if before.premises != after.premises -> &mismatches.push("numerical or scheduling premises differ")
+    loop name in [String]{"build", "run", "target"} {
+        if before.identity == .Val(old) {
+            if after.identity == .Val(new) {
+                old_value :: if name == { "build" -> old.build; "run" -> old.run; else -> old.target }
+                new_value :: if name == { "build" -> new.build; "run" -> new.run; else -> new.target }
+                if old_value != new_value -> &mismatches.push("{name} identity differs")
+            } else -> &mismatches.push("{name} identity is missing")
+        } else -> &mismatches.push("{name} identity is missing")
+    }
+    mismatches
+}
+pub fn jet_cli_review_compare_observations(key: String, before: JetCLIReviewClaim, after: JetCLIReviewClaim) -> JetCLIReviewObservationComparison? Never! {
+    subject := String?{None}
+    if before.derivation == .Val(record) { if record.subject != "" -> subject = Val(record.subject) }
+    if subject == None {
+        if after.derivation == .Val(record) { if record.subject != "" -> subject = Val(record.subject) }
+    }
+    status := "unknown"
+    reason := ""
+    if before.observation == .Val(old) {
+        if after.observation == .Val(new) {
+            mismatches :: jet_cli_review_observation_mismatches(old, new)
+            if mismatches.len() != 0 -> reason = mismatches.join("; ")
+            else if old.result == "" || new.result == "" || old.result.ends_with(":unknown") || new.result.ends_with(":unknown") -> reason = "comparable event result is missing"
+            else if old.result != new.result || old.event != new.event {
+                status = "first_difference"
+                reason = "first differing comparable event or result"
+            } else {
+                old_sampled :: if before.derivation == { Val(record) -> record.method == "sampled_agreement"; None -> false }
+                new_sampled :: if after.derivation == { Val(record) -> record.method == "sampled_agreement"; None -> false }
+                if old_sampled || new_sampled {
+                    status = "sampled_agreement"
+                    reason = "equal sampled traces do not establish universal equivalence"
+                } else if !before.proven || !after.proven {
+                    status = "unproved"
+                    old_disposition :: if before.derivation == { Val(record) -> record.disposition; None -> "missing" }
+                    new_disposition :: if after.derivation == { Val(record) -> record.disposition; None -> "missing" }
+                    reason = "recorded agreement is not a checked universal contract (base disposition: {old_disposition}; reviewed disposition: {new_disposition})"
+                } else -> return None
+            }
+        } else -> reason = "reviewed observation is missing"
+    } else -> reason = "base observation is missing"
+    Val(JetCLIReviewObservationComparison{status, key: ~key, reason, before: ~before.observation, after: ~after.observation, subject, source_operation: None})
+}
+fn jet_cli_review_comparison_order(comparison: JetCLIReviewObservationComparison) -> Int? Never! {
+    if comparison.before == .Val(observation) -> return Val(observation.order)
+    None
+}
+fn jet_cli_review_sort_comparisons(comparisons: &[JetCLIReviewObservationComparison]) Never! {
+    // None sorts LAST without guessing a selected-target usize::MAX.
+    &comparisons.sort_by((left: JetCLIReviewObservationComparison, right: JetCLIReviewObservationComparison) -> {
+        old :: jet_cli_review_comparison_order(left)
+        new :: jet_cli_review_comparison_order(right)
+        if old == .Val(a) {
+            if new == .Val(b) -> return a <=> b
+            return Ordering.Less
+        }
+        if new == None -> Ordering.Equal else -> Ordering.Greater
+    })
+}
+pub fn jet_cli_review_receipt_diff(before: JetCLIReviewReceipt, after: JetCLIReviewReceipt) -> JetCLIReviewReceiptDiff Never! {
+    diff := JetCLIReviewReceiptDiff{base_recorded: before.recorded, head_recorded: after.recorded, gained: 0, lost: 0, changed: 0, retained: 0, changes: [JetCLIReviewReceiptChange]{}, preserved: [JetCLIReviewReceiptChange]{}, changed_contracts: [JetCLIReviewReceiptChange]{}, first_difference: None, sampled_agreements: [JetCLIReviewObservationComparison]{}, unknown: [JetCLIReviewObservationComparison]{}, unproved: [JetCLIReviewObservationComparison]{}}
+    first_order := Int?{None}
+    loop key in jet_cli_review_union_keys(before.claims, after.claims) {
+        old :: before.claims.get(key)
+        new :: after.claims.get(key)
+        status := String?{None}
+        if old == .Val(a) {
+            if new == .Val(b) {
+                if a.proven && !b.proven -> status = Val("lost")
+                else if !a.proven && b.proven -> status = Val("gained")
+                else if a.outcome != b.outcome || a.state != b.state || jet_cli_review_derivation_key(a) != jet_cli_review_derivation_key(b) -> status = Val("changed")
+                if jet_cli_review_compare_observations(key, a, b) == .Val(comparison) {
+                    if comparison.status == "first_difference" {
+                        if jet_cli_review_comparison_order(comparison) == .Val(order) {
+                            if first_order == None || order < (first_order ?? order) {
+                                first_order = Val(order)
+                                diff.first_difference = Val(^comparison)
+                            }
+                        }
+                    } else if comparison.status == "sampled_agreement" -> &diff.sampled_agreements.push(^comparison)
+                    else if comparison.status == "unproved" -> &diff.unproved.push(^comparison)
+                    else -> &diff.unknown.push(^comparison)
+                }
+            } else if a.proven -> status = Val("lost")
+        } else if new == .Val(b) { if b.proven -> status = Val("gained") }
+        if status == None {
+            diff.retained += 1
+            if old == .Val(a) {
+                if new == .Val(b) {
+                    if a.proven && b.proven && jet_cli_review_derivation_key(a) == jet_cli_review_derivation_key(b) -> &diff.preserved.push(JetCLIReviewReceiptChange{status: "preserved_checked", key: ~key, before: Val(~a), after: Val(~b)})
+                }
+            }
+            next
+        }
+        word :: status ?? panic("receipt change status established")
+        if word == "gained" -> diff.gained += 1
+        else if word == "lost" -> diff.lost += 1
+        else -> diff.changed += 1
+        change :: JetCLIReviewReceiptChange{status: word, key: ~key, before: ~old, after: ~new}
+        &diff.changed_contracts.push(~change)
+        &diff.changes.push(change)
+    }
+    jet_cli_review_sort_comparisons(&diff.sampled_agreements)
+    jet_cli_review_sort_comparisons(&diff.unknown)
+    jet_cli_review_sort_comparisons(&diff.unproved)
+    diff
+}
+// Rust link_source_operations, 1714. Retain FIRST source-operation match and
+// suffix matching, not a synthesized alignment or textual equivalence.
+// A reversed-byte trie indexes all three identities. Minimum operation rank
+// retains Rust's first-match law, including "::subject" and raw key suffixes,
+// with O(total identity bytes + total compared key/subject bytes), not O(M*C).
+struct JetCLIReviewLinkNode { children: [U8:Int], terminal: Int?, subject_suffix: Int? }
+fn jet_cli_review_link_node() -> JetCLIReviewLinkNode Never! {
+    JetCLIReviewLinkNode{children: [U8:Int]{}, terminal: None, subject_suffix: None}
+}
+fn jet_cli_review_min_rank(left: Int?, right: Int?) -> Int? Never! {
+    if left == .Val(a) {
+        if right == .Val(b) -> return Val(if a < b -> a else -> b)
+        return left
+    }
+    right
+}
+fn jet_cli_review_link_insert(nodes: &[JetCLIReviewLinkNode], identity: String, rank: Int) Never! {
+    bytes :: identity.bytes()
+    node := 0
+    position := bytes.len()
+    loop {
+        if position >= 2 && bytes[position - 1] == U8{58} && bytes[position - 2] == U8{58} -> nodes[node].subject_suffix = jet_cli_review_min_rank(nodes[node].subject_suffix, Val(rank))
+        if position == 0 {
+            nodes[node].terminal = jet_cli_review_min_rank(nodes[node].terminal, Val(rank))
+            return
+        }
+        position -= 1
+        byte :: bytes[position]
+        child := nodes[node].children.get(byte) ?? -1
+        if child == -1 {
+            child = nodes.len()
+            nodes[node].children[byte] = child
+            &nodes.push(jet_cli_review_link_node())
+        }
+        node = child
+    }
+}
+fn jet_cli_review_link_comparison(comparison: &JetCLIReviewObservationComparison, meaning: [ReviewSemanticOp], nodes: [JetCLIReviewLinkNode]) Never! {
+    subject :: comparison.subject ?? return
+    subject_bytes :: subject.bytes()
+    node := 0
+    position := subject_bytes.len()
+    reached := true
+    loop position > 0 {
+        position -= 1
+        child :: nodes[node].children.get(subject_bytes[position])
+        if child == .Val(index) -> node = index
+        else { reached = false; break }
+    }
+    best := if reached -> jet_cli_review_min_rank(nodes[node].terminal, nodes[node].subject_suffix) else -> None
+    key_bytes :: comparison.key.bytes()
+    node = 0
+    position = key_bytes.len()
+    best = jet_cli_review_min_rank(best, nodes[0].terminal)
+    loop position > 0 {
+        position -= 1
+        child :: nodes[node].children.get(key_bytes[position]) ?? break
+        node = child
+        best = jet_cli_review_min_rank(best, nodes[node].terminal)
+    }
+    if best == .Val(index) {
+        operation :: meaning[index]
+        comparison.source_operation = Val(~(operation.source_operation ?? operation.kind.name()))
+    }
+}
+pub fn jet_cli_review_link_source_operations(receipts: &JetCLIReviewReceiptDiff, meaning: [ReviewSemanticOp]) Never! {
+    nodes := [JetCLIReviewLinkNode]{jet_cli_review_link_node()}
+    loop (rank, operation) in meaning {
+        jet_cli_review_link_insert(&nodes, operation.identity, rank)
+        if operation.before_identity == .Val(identity) -> jet_cli_review_link_insert(&nodes, identity, rank)
+        if operation.after_identity == .Val(identity) -> jet_cli_review_link_insert(&nodes, identity, rank)
+    }
+    if receipts.first_difference == .Val(comparison) {
+        updated := ^comparison
+        jet_cli_review_link_comparison(&updated, meaning, nodes)
+        receipts.first_difference = Val(^updated)
+    }
+    loop index in 0..<receipts.sampled_agreements.len() -> jet_cli_review_link_comparison(&receipts.sampled_agreements[index], meaning, nodes)
+    loop index in 0..<receipts.unknown.len() -> jet_cli_review_link_comparison(&receipts.unknown[index], meaning, nodes)
+    loop index in 0..<receipts.unproved.len() -> jet_cli_review_link_comparison(&receipts.unproved[index], meaning, nodes)
+}
+pub fn jet_cli_review_verdict(authority: [JetCLIReviewAuthorityChange], receipts: JetCLIReviewReceiptDiff) -> String Never! {
+    widened := false
+    loop change in authority { if jet_cli_review_widens_authority(change) { widened = true; break } }
+    if widened && receipts.lost > 0 -> "authority widened and proof lost"
+    else if widened -> "authority widened"
+    else if receipts.lost > 0 -> "proof lost"
+    else -> "reviewable"
+}
+
+// Rust diagnostic_occurrences, 335. Scope keys originate only in the native
+// scope resolver; callers cannot silently replace a missing key with display.
+pub fn jet_cli_review_diagnostic_occurrences(side: JetCLIReviewDiagnosticSide) -> [JetCLIReviewDiagnosticOccurrence] Never! {
+    out := [JetCLIReviewDiagnosticOccurrence]{}
+    loop diagnostic in side.diagnostics {
+        origin_path := side.display
+        if diagnostic.origin == .Val(origin) { if origin.path != "" -> origin_path = origin.path }
+        scope :: side.source_scopes.get(origin_path) ?? panic("native review scope resolver omitted diagnostic origin")
+        identity :: if diagnostic.span == { Val(span) -> Val("{diagnostic.code}|{scope}|{span.start}:{span.end}"); None -> None }
+        &out.push(JetCLIReviewDiagnosticOccurrence{diagnostic: ~diagnostic, scope: ~scope, identity})
+    }
+    out
+}
+pub fn jet_cli_review_diagnostic_identity_map(occurrences: [JetCLIReviewDiagnosticOccurrence]) -> [String:[Int]] Never! {
+    map := [String:[Int]]{}
+    loop (index, occurrence) in occurrences {
+        if occurrence.identity == .Val(identity) {
+            bucket := map.remove(identity) ?? [Int]{}
+            &bucket.push(index)
+            map[identity] = ^bucket
+        }
+    }
+    map
+}
+pub fn jet_cli_review_compatible_code_occurrence(occurrence: JetCLIReviewDiagnosticOccurrence, other: [JetCLIReviewDiagnosticOccurrence]) -> Bool Never! {
+    loop candidate in other { if candidate.diagnostic.code == occurrence.diagnostic.code && candidate.scope == occurrence.scope -> return true }
+    false
+}
+pub fn jet_cli_review_input_changed_for_occurrence(occurrence: JetCLIReviewDiagnosticOccurrence, side: JetCLIReviewDiagnosticSide, other: JetCLIReviewDiagnosticSide) -> Bool Never! {
+    if occurrence.scope == side.entry_scope -> return false
+    old :: side.input_revisions.get(occurrence.scope) ?? return true
+    new :: other.input_revisions.get(occurrence.scope) ?? return true
+    old != new
+}
+// Indexed compatible-code lookup avoids per-unmatched-row full-side scans.
+// This is an actual composite key, not an encoded-string/array substitute.
+// #4499: exact composite map-key equality/hash/order remains a source gate.
+struct JetCLIReviewDiagnosticCodeScope { code: String, scope: String }
+struct JetCLIReviewDiagnosticCodes {
+    scoped: [JetCLIReviewDiagnosticCodeScope:Bool], codes: [String:Bool]
+}
+fn jet_cli_review_diagnostic_codes(occurrences: [JetCLIReviewDiagnosticOccurrence]) -> JetCLIReviewDiagnosticCodes Never! {
+    scoped := [JetCLIReviewDiagnosticCodeScope:Bool]{}
+    codes := [String:Bool]{}
+    loop occurrence in occurrences {
+        scoped[JetCLIReviewDiagnosticCodeScope{code: occurrence.diagnostic.code, scope: occurrence.scope}] = true
+        codes[occurrence.diagnostic.code] = true
+    }
+    JetCLIReviewDiagnosticCodes{scoped: ^scoped, codes: ^codes}
+}
+fn jet_cli_review_unmatched_with_codes(occurrence: ^JetCLIReviewDiagnosticOccurrence, side_complete: Bool, other_complete: Bool, other: JetCLIReviewDiagnosticCodes, input_changed: Bool, status: String) -> JetCLIReviewDiagnosticRelation Never! {
+    reason := ""
+    if occurrence.identity == None -> reason = "diagnostic occurrence has no proven source span"
+    else if !side_complete || !other_complete -> reason = "one side has incomplete checker coverage"
+    else if input_changed -> reason = "diagnostic source snapshot changed in a dependency scope"
+    else if other.scoped.has_key(JetCLIReviewDiagnosticCodeScope{code: occurrence.diagnostic.code, scope: occurrence.scope}) -> reason = "same-code occurrence has a different location in the compatible scope"
+    else if other.codes.has_key(occurrence.diagnostic.code) -> reason = "same-code occurrence has an incompatible scope"
+    relation_status :: if reason == "" -> status else -> "unknown"
+    if reason == "" -> reason = if status == "new" -> "diagnostic is present only on the reviewed side" else -> "diagnostic is present only on the baseline side"
+    base :: if status == "resolved" -> Val(~occurrence) else -> None
+    head :: if status == "new" -> Val(^occurrence) else -> None
+    JetCLIReviewDiagnosticRelation{status: relation_status, reason, base, head}
+}
+pub fn jet_cli_review_unmatched_diagnostic_relation(occurrence: ^JetCLIReviewDiagnosticOccurrence, side_complete: Bool, other_complete: Bool, other: [JetCLIReviewDiagnosticOccurrence], input_changed: Bool, status: String) -> JetCLIReviewDiagnosticRelation Never! {
+    jet_cli_review_unmatched_with_codes(^occurrence, side_complete, other_complete, jet_cli_review_diagnostic_codes(other), input_changed, status)
+}
+pub fn jet_cli_review_compare_diagnostics(base: JetCLIReviewDiagnosticSide, head: JetCLIReviewDiagnosticSide) -> JetCLIReviewDiagnosticDiff Never! {
+    old_occurrences :: jet_cli_review_diagnostic_occurrences(base)
+    new_occurrences :: jet_cli_review_diagnostic_occurrences(head)
+    old_map :: jet_cli_review_diagnostic_identity_map(old_occurrences)
+    new_map :: jet_cli_review_diagnostic_identity_map(new_occurrences)
+    old_codes :: jet_cli_review_diagnostic_codes(old_occurrences)
+    new_codes :: jet_cli_review_diagnostic_codes(new_occurrences)
+    old_seen := [Int:Bool]{}
+    new_seen := [Int:Bool]{}
+    diff := JetCLIReviewDiagnosticDiff{new: [JetCLIReviewDiagnosticRelation]{}, existing: [JetCLIReviewDiagnosticRelation]{}, resolved: [JetCLIReviewDiagnosticRelation]{}, unknown: [JetCLIReviewDiagnosticRelation]{}}
+    loop key in jet_cli_review_union_keys(old_map, new_map) {
+        old :: old_map.get(key) ?? [Int]{}
+        new :: new_map.get(key) ?? [Int]{}
+        if old.len() == 1 && new.len() == 1 {
+            old_seen[old[0]] = true
+            new_seen[new[0]] = true
+            a :: old_occurrences[old[0]]
+            b :: new_occurrences[new[0]]
+            changed :: jet_cli_review_input_changed_for_occurrence(a, base, head) || jet_cli_review_input_changed_for_occurrence(b, head, base)
+            relation :: JetCLIReviewDiagnosticRelation{status: if changed -> "unknown" else -> "existing", reason: if changed -> "diagnostic source snapshot changed in a dependency scope" else -> "diagnostic occurrence identity matches on both sides", base: Val(~a), head: Val(~b)}
+            if changed -> &diff.unknown.push(relation) else -> &diff.existing.push(relation)
+        } else if old.len() != 0 && new.len() != 0 {
+            loop index in old {
+                old_seen[index] = true
+                &diff.unknown.push(JetCLIReviewDiagnosticRelation{status: "unknown", reason: "diagnostic occurrence identity is ambiguous", base: Val(~old_occurrences[index]), head: None})
+            }
+            loop index in new {
+                new_seen[index] = true
+                &diff.unknown.push(JetCLIReviewDiagnosticRelation{status: "unknown", reason: "diagnostic occurrence identity is ambiguous", base: None, head: Val(~new_occurrences[index])})
+            }
+        } else if new.len() == 0 {
+            loop index in old {
+                old_seen[index] = true
+                occurrence :: old_occurrences[index]
+                relation :: jet_cli_review_unmatched_with_codes(~occurrence, base.complete, head.complete, new_codes, jet_cli_review_input_changed_for_occurrence(occurrence, base, head), "resolved")
+                if relation.status == "resolved" -> &diff.resolved.push(relation) else -> &diff.unknown.push(relation)
+            }
+        } else {
+            loop index in new {
+                new_seen[index] = true
+                occurrence :: new_occurrences[index]
+                relation :: jet_cli_review_unmatched_with_codes(~occurrence, head.complete, base.complete, old_codes, jet_cli_review_input_changed_for_occurrence(occurrence, head, base), "new")
+                if relation.status == "new" -> &diff.new.push(relation) else -> &diff.unknown.push(relation)
+            }
+        }
+    }
+    loop (index, occurrence) in old_occurrences {
+        if !old_seen.has_key(index) -> &diff.unknown.push(JetCLIReviewDiagnosticRelation{status: "unknown", reason: "diagnostic occurrence identity is unavailable", base: Val(~occurrence), head: None})
+    }
+    loop (index, occurrence) in new_occurrences {
+        if !new_seen.has_key(index) -> &diff.unknown.push(JetCLIReviewDiagnosticRelation{status: "unknown", reason: "diagnostic occurrence identity is unavailable", base: None, head: Val(~occurrence)})
+    }
+    diff
+}
+
+// StatusValue serialization is the canonical Foundation mechanism; named
+// builders consume ^fields, never clone a whole accumulated object.
+fn jet_cli_review_string_value(text: String) -> StatusValue Never! { StatusValue.String{value: ~text} }
+fn jet_cli_review_optional_string(value: String?) -> StatusValue Never! {
+    if value == { Val(text) -> jet_cli_review_string_value(text); None -> StatusValue.Null }
+}
+fn jet_cli_review_strings(values: [String]) -> StatusValue Never! {
+    out := [StatusValue]{}
+    loop text in values -> &out.push(jet_cli_review_string_value(text))
+    StatusValue.array(^out)
+}
+pub fn jet_cli_review_identity_value(identity: DerivationIdentity) -> StatusValue Never! {
+    StatusValue.object(StatusFields.new()
+        .with("source", jet_cli_review_string_value(identity.source))
+        .with("build", jet_cli_review_string_value(identity.build))
+        .with("run", jet_cli_review_string_value(identity.run))
+        .with("target", jet_cli_review_string_value(identity.target)))
+}
+pub fn jet_cli_review_derivation_observation_value(observation: DerivationObservation?) -> StatusValue Never! {
+    item :: observation ?? return StatusValue.Null
+    StatusValue.object(StatusFields.new()
+        .with("event", jet_cli_review_optional_string(item.event_id))
+        .with("counterexample", jet_cli_review_optional_string(item.counterexample_id)))
+}
+pub fn jet_cli_review_derivation_value(derivation: JetCLIReviewDerivationClaim) -> StatusValue Never! {
+    StatusValue.object(StatusFields.new()
+        .with("id", jet_cli_review_string_value(derivation.id))
+        .with("subject", jet_cli_review_string_value(derivation.subject))
+        .with("claim", jet_cli_review_string_value(derivation.claim))
+        .with("producer", jet_cli_review_string_value(derivation.producer))
+        .with("method", jet_cli_review_string_value(derivation.method))
+        .with("rule", jet_cli_review_string_value(derivation.rule))
+        .with("premises", jet_cli_review_strings(derivation.premises))
+        .with("identity", jet_cli_review_identity_value(derivation.identity))
+        .with("assumptions", jet_cli_review_strings(derivation.assumptions))
+        .with("disposition", jet_cli_review_string_value(derivation.disposition))
+        .with("observation", jet_cli_review_derivation_observation_value(derivation.observation)))
+}
+pub fn jet_cli_review_receipt_observation_value(observation: JetCLIReviewObservation) -> StatusValue Never! {
+    identity :: if observation.identity == { Val(value) -> jet_cli_review_identity_value(value); None -> StatusValue.Null }
+    StatusValue.object(StatusFields.new()
+        .with("contract", jet_cli_review_string_value(observation.contract))
+        .with("inputs", jet_cli_review_string_value(observation.inputs))
+        .with("environment", jet_cli_review_string_value(observation.environment))
+        .with("premises", jet_cli_review_string_value(observation.premises))
+        .with("event", jet_cli_review_optional_string(observation.event))
+        .with("result", jet_cli_review_string_value(observation.result))
+        .with("source", jet_cli_review_string_value(observation.source))
+        .with("identity", identity)
+        .with("order", StatusValue.Integer{value: observation.order}))
+}
+pub fn jet_cli_review_comparison_value(comparison: JetCLIReviewObservationComparison) -> StatusValue Never! {
+    before :: if comparison.before == { Val(value) -> jet_cli_review_receipt_observation_value(value); None -> StatusValue.Null }
+    after :: if comparison.after == { Val(value) -> jet_cli_review_receipt_observation_value(value); None -> StatusValue.Null }
+    StatusValue.object(StatusFields.new()
+        .with("status", jet_cli_review_string_value(comparison.status))
+        .with("key", jet_cli_review_string_value(comparison.key))
+        .with("reason", jet_cli_review_string_value(comparison.reason))
+        .with("before", before).with("after", after)
+        .with("subject", jet_cli_review_optional_string(comparison.subject))
+        .with("source_operation", jet_cli_review_optional_string(comparison.source_operation)))
+}
+pub fn jet_cli_review_claim_value(claim: JetCLIReviewClaim) -> StatusValue Never! {
+    derivation :: if claim.derivation == { Val(value) -> jet_cli_review_derivation_value(value); None -> StatusValue.Null }
+    observation :: if claim.observation == { Val(value) -> jet_cli_review_receipt_observation_value(value); None -> StatusValue.Null }
+    StatusValue.object(StatusFields.new()
+        .with("label", jet_cli_review_string_value(claim.label))
+        .with("outcome", jet_cli_review_string_value(claim.outcome))
+        .with("state", jet_cli_review_string_value(claim.state))
+        .with("proven", StatusValue.Bool{value: claim.proven})
+        .with("derivation", derivation).with("observation", observation))
+}
+pub fn jet_cli_review_receipt_change_value(change: JetCLIReviewReceiptChange) -> StatusValue Never! {
+    before :: if change.before == { Val(value) -> jet_cli_review_claim_value(value); None -> StatusValue.Null }
+    after :: if change.after == { Val(value) -> jet_cli_review_claim_value(value); None -> StatusValue.Null }
+    StatusValue.object(StatusFields.new()
+        .with("status", jet_cli_review_string_value(change.status))
+        .with("key", jet_cli_review_string_value(change.key))
+        .with("before", before).with("after", after))
+}
+pub fn jet_cli_review_snapshot_value(side: JetCLIReviewSide, receipt: JetCLIReviewReceipt) -> StatusValue Never! {
+    inputs := [StatusValue]{}
+    loop input in side.inputs -> &inputs.push(StatusValue.object(StatusFields.new()
+        .with("path", jet_cli_review_string_value(input.path))
+        .with("digest", jet_cli_review_string_value(input.digest))))
+    proof :: if receipt.proof_receipt == {
+        Val(value) -> StatusValue.object(StatusFields.new()
+            .with("path", jet_cli_review_string_value(value.path))
+            .with("digest", jet_cli_review_string_value(value.digest)))
+        None -> StatusValue.Null
+    }
+    closure :: if side.inputs.len() == 0 || receipt.proof_receipt == None -> "unknown" else -> side.closure
+    StatusValue.object(StatusFields.new()
+        .with("entry", jet_cli_review_string_value(side.entry))
+        .with("inputs", StatusValue.array(^inputs))
+        .with("claim_key", jet_cli_review_optional_string(receipt.claim_key))
+        .with("closure", jet_cli_review_string_value(closure))
+        .with("proof_receipt", proof))
+}
+fn jet_cli_review_changes_value(changes: [JetCLIReviewReceiptChange]) -> StatusValue Never! {
+    values := [StatusValue]{}
+    loop change in changes -> &values.push(jet_cli_review_receipt_change_value(change))
+    StatusValue.array(^values)
+}
+fn jet_cli_review_comparisons_value(comparisons: [JetCLIReviewObservationComparison]) -> StatusValue Never! {
+    values := [StatusValue]{}
+    loop comparison in comparisons -> &values.push(jet_cli_review_comparison_value(comparison))
+    StatusValue.array(^values)
+}
+pub fn jet_cli_review_render_json(base: JetCLIReviewSide, head: JetCLIReviewSide, base_receipt: JetCLIReviewReceipt, head_receipt: JetCLIReviewReceipt, meaning: [ReviewSemanticOp], authority: [JetCLIReviewAuthorityChange], receipts: JetCLIReviewReceiptDiff, verdict: String) -> String Never! {
+    operations := [StatusValue]{}
+    loop operation in meaning -> &operations.push(StatusValue.object(StatusFields.new()
+        .with("kind", jet_cli_review_string_value(operation.kind.name()))
+        .with("stable_id", jet_cli_review_string_value(operation.stable_id))
+        .with("identity", jet_cli_review_string_value(operation.identity))
+        .with("before", jet_cli_review_optional_string(operation.before))
+        .with("after", jet_cli_review_optional_string(operation.after))
+        .with("before_identity", jet_cli_review_optional_string(operation.before_identity))
+        .with("after_identity", jet_cli_review_optional_string(operation.after_identity))
+        .with("alignment", jet_cli_review_string_value(operation.alignment.name()))
+        .with("source_operation", jet_cli_review_optional_string(operation.source_operation))))
+    changes := [StatusValue]{}
+    loop change in authority -> &changes.push(StatusValue.object(StatusFields.new()
+        .with("status", jet_cli_review_string_value(change.status))
+        .with("key", jet_cli_review_string_value(change.key))
+        .with("before", jet_cli_review_optional_string(change.before))
+        .with("after", jet_cli_review_optional_string(change.after))))
+    first_difference :: if receipts.first_difference == { Val(value) -> jet_cli_review_comparison_value(value); None -> StatusValue.Null }
+    receipt_value :: StatusValue.object(StatusFields.new()
+        .with("base_recorded", StatusValue.Bool{value: receipts.base_recorded})
+        .with("head_recorded", StatusValue.Bool{value: receipts.head_recorded})
+        .with("gained", StatusValue.Integer{value: receipts.gained})
+        .with("lost", StatusValue.Integer{value: receipts.lost})
+        .with("changed", StatusValue.Integer{value: receipts.changed})
+        .with("retained", StatusValue.Integer{value: receipts.retained})
+        .with("changes", jet_cli_review_changes_value(receipts.changes))
+        .with("preserved", jet_cli_review_changes_value(receipts.preserved))
+        .with("changed_contracts", jet_cli_review_changes_value(receipts.changed_contracts))
+        .with("first_difference", first_difference)
+        .with("sampled_agreements", jet_cli_review_comparisons_value(receipts.sampled_agreements))
+        .with("unknown", jet_cli_review_comparisons_value(receipts.unknown))
+        .with("unproved", jet_cli_review_comparisons_value(receipts.unproved)))
+    snapshots :: StatusValue.object(StatusFields.new()
+        .with("base", jet_cli_review_snapshot_value(base, base_receipt))
+        .with("head", jet_cli_review_snapshot_value(head, head_receipt)))
+    review :: StatusValue.object(StatusFields.new()
+        .with("schema", jet_cli_review_string_value("jet.review/v2"))
+        .with("kind", jet_cli_review_string_value("review"))
+        .with("snapshots", snapshots)
+        .with("meaning", StatusValue.object(StatusFields.new().with("semantic_ops", StatusValue.array(^operations))))
+        .with("authority", StatusValue.object(StatusFields.new().with("changes", StatusValue.array(^changes))))
+        .with("receipts", receipt_value).with("verdict", jet_cli_review_string_value(verdict)))
+    StatusEnvelope.new("review", true).with_field("review", review).json_line()
+}
+pub fn jet_cli_review_observation_text(observation: JetCLIReviewObservation) -> String Never! {
+    "contract={observation.contract} inputs={observation.inputs} environment={observation.environment} premises={observation.premises} event={observation.event ?? "none"} result={observation.result} source={observation.source} order={observation.order}"
+}
+pub fn jet_cli_review_observation_comparison_text(comparison: JetCLIReviewObservationComparison) -> String Never! {
+    before :: if comparison.before == { Val(value) -> jet_cli_review_observation_text(value); None -> "none" }
+    after :: if comparison.after == { Val(value) -> jet_cli_review_observation_text(value); None -> "none" }
+    "{comparison.status}: {comparison.key} reason={comparison.reason} subject={comparison.subject ?? "none"} source_operation={comparison.source_operation ?? "none"} before=[{before}] after=[{after}]"
+}
+pub fn jet_cli_review_render_text(meaning: [ReviewSemanticOp], authority: [JetCLIReviewAuthorityChange], receipts: JetCLIReviewReceiptDiff, verdict: String) -> String Never! {
+    lines := [String]{}
+    if meaning.len() == 0 -> &lines.push("meaning    no semantic changes")
+    else {
+        &lines.push("meaning    {meaning.len()} semantic change(s)")
+        loop operation in meaning -> &lines.push("  {operation.kind.name()}: {operation.identity} [{operation.stable_id}] alignment={operation.alignment.name()} before_identity={operation.before_identity ?? "none"} after_identity={operation.after_identity ?? "none"} source_operation={operation.source_operation ?? "none"}")
+    }
+    if authority.len() == 0 -> &lines.push("authority  no authority changes")
+    else {
+        &lines.push("authority  {authority.len()} authority change(s)")
+        loop change in authority -> &lines.push("  {change.status}: {change.key}")
+    }
+    base_recorded :: if receipts.base_recorded -> "recorded" else -> "missing"
+    head_recorded :: if receipts.head_recorded -> "recorded" else -> "missing"
+    &lines.push("claims     +{receipts.gained} gained · {receipts.lost} lost · {receipts.changed} changed · {receipts.retained} retained (base={base_recorded} head={head_recorded})")
+    loop change in receipts.changes -> &lines.push("  {change.status}: {change.key}")
+    &lines.push("proof      preserved={receipts.preserved.len()} changed_contracts={receipts.changed_contracts.len()} first_difference={receipts.first_difference != None} sampled_agreements={receipts.sampled_agreements.len()} unknown={receipts.unknown.len()} unproved={receipts.unproved.len()}")
+    if receipts.first_difference == .Val(comparison) -> &lines.push("  {jet_cli_review_observation_comparison_text(comparison)}")
+    loop comparison in receipts.sampled_agreements -> &lines.push("  {jet_cli_review_observation_comparison_text(comparison)}")
+    loop comparison in receipts.unknown -> &lines.push("  {jet_cli_review_observation_comparison_text(comparison)}")
+    loop comparison in receipts.unproved -> &lines.push("  {jet_cli_review_observation_comparison_text(comparison)}")
+    loop change in receipts.preserved -> &lines.push("  {change.status}: {change.key}")
+    loop change in receipts.changed_contracts -> &lines.push("  {change.status}: {change.key}")
+    &lines.push("verdict    {verdict}")
+    "{lines.join("\n")}\n"
+}
+
+fn jet_cli_review_span_value(span: Span?) -> StatusValue Never! {
+    if span == .Val(value) -> return StatusValue.object(StatusFields.new()
+        .with("start", StatusValue.Integer{value: value.start})
+        .with("end", StatusValue.Integer{value: value.end}))
+    StatusValue.Null
+}
+pub fn jet_cli_review_diagnostic_origin_value(origin: DiagnosticOrigin?, side: JetCLIReviewDiagnosticSide, has_span: Bool) -> StatusValue Never! {
+    fields := StatusFields.new()
+    if origin == .Val(value) {
+        fields = ^fields.with("display", jet_cli_review_string_value(value.display))
+            .with("path", jet_cli_review_string_value(value.path))
+            .with("revision", jet_cli_review_string_value(value.revision))
+            .with("inferred", StatusValue.Bool{value: false})
+    } else if has_span {
+        fields = ^fields.with("display", jet_cli_review_string_value(side.display))
+            .with("path", jet_cli_review_string_value(side.display))
+            .with("revision", jet_cli_review_string_value(side.source_hash))
+            .with("inferred", StatusValue.Bool{value: true})
+    } else -> return StatusValue.Null
+    StatusValue.object(^fields)
+}
+pub fn jet_cli_review_diagnostic_cause_value(cause: DiagnosticCause) -> StatusValue Never! {
+    origin :: if cause.origin == {
+        Val(value) -> StatusValue.object(StatusFields.new()
+            .with("display", jet_cli_review_string_value(value.display))
+            .with("path", jet_cli_review_string_value(value.path))
+            .with("revision", jet_cli_review_string_value(value.revision)))
+        None -> StatusValue.Null
+    }
+    StatusValue.object(StatusFields.new()
+        .with("code", jet_cli_review_string_value(cause.code))
+        .with("span", jet_cli_review_span_value(cause.span))
+        .with("origin", origin))
+}
+pub fn jet_cli_review_diagnostic_value(diagnostic: Diagnostic, side: JetCLIReviewDiagnosticSide) -> StatusValue Never! {
+    causes := [StatusValue]{}
+    loop cause in diagnostic.cause -> &causes.push(jet_cli_review_diagnostic_cause_value(cause))
+    severity :: if diagnostic.severity == DIAGNOSTIC_ERROR -> "error" else -> "warning"
+    StatusValue.object(StatusFields.new()
+        .with("code", jet_cli_review_string_value(diagnostic.code))
+        .with("severity", jet_cli_review_string_value(severity))
+        .with("moment", jet_cli_review_string_value(diagnostic.moment.as_str()))
+        .with("what", jet_cli_review_string_value(diagnostic.what))
+        .with("why", jet_cli_review_string_value(diagnostic.why))
+        .with("fix", jet_cli_review_string_value(diagnostic.fix))
+        .with("span", jet_cli_review_span_value(diagnostic.span))
+        .with("origin", jet_cli_review_diagnostic_origin_value(diagnostic.origin, side, diagnostic.span != None))
+        .with("cause", StatusValue.array(^causes))
+        .with("detail", jet_cli_review_optional_string(diagnostic.detail)))
+}
+pub fn jet_cli_review_diagnostic_relation_value(relation: JetCLIReviewDiagnosticRelation, base: JetCLIReviewDiagnosticSide, head: JetCLIReviewDiagnosticSide) -> StatusValue Never! {
+    identity := String?{None}
+    before := StatusValue.Null
+    after := StatusValue.Null
+    if relation.base == .Val(occurrence) {
+        identity = occurrence.identity
+        before = jet_cli_review_diagnostic_value(occurrence.diagnostic, base)
+    }
+    if relation.head == .Val(occurrence) {
+        if identity == None -> identity = occurrence.identity
+        after = jet_cli_review_diagnostic_value(occurrence.diagnostic, head)
+    }
+    StatusValue.object(StatusFields.new()
+        .with("status", jet_cli_review_string_value(relation.status))
+        .with("reason", jet_cli_review_string_value(relation.reason))
+        .with("identity", jet_cli_review_optional_string(identity))
+        .with("base", ^before).with("head", ^after))
+}
+pub fn jet_cli_review_diagnostic_relation_list(relations: [JetCLIReviewDiagnosticRelation], base: JetCLIReviewDiagnosticSide, head: JetCLIReviewDiagnosticSide) -> StatusValue Never! {
+    values := [StatusValue]{}
+    loop relation in relations -> &values.push(jet_cli_review_diagnostic_relation_value(relation, base, head))
+    StatusValue.array(^values)
+}
+pub fn jet_cli_review_diagnostic_side_value(side: JetCLIReviewDiagnosticSide) -> StatusValue Never! {
+    diagnostics := [StatusValue]{}
+    loop diagnostic in side.diagnostics -> &diagnostics.push(jet_cli_review_diagnostic_value(diagnostic, side))
+    validity :: if side.valid -> "valid" else -> "invalid"
+    completeness :: if side.complete -> "complete" else -> "incomplete"
+    coverage :: StatusValue.object(StatusFields.new()
+        .with("status", jet_cli_review_string_value(completeness))
+        .with("basis", jet_cli_review_string_value("checker-bundle")))
+    StatusValue.object(StatusFields.new()
+        .with("path", jet_cli_review_string_value(side.display))
+        .with("revision", jet_cli_review_string_value(side.source_hash))
+        .with("scope", jet_cli_review_string_value("explicit-file"))
+        .with("valid", StatusValue.Bool{value: side.valid})
+        .with("validity", jet_cli_review_string_value(validity))
+        .with("complete", StatusValue.Bool{value: side.complete})
+        .with("completeness", jet_cli_review_string_value(completeness))
+        .with("coverage", coverage).with("diagnostics", StatusValue.array(^diagnostics)))
+}
+pub fn jet_cli_review_render_diagnostic_json(base: JetCLIReviewDiagnosticSide, head: JetCLIReviewDiagnosticSide, diff: JetCLIReviewDiagnosticDiff) -> String Never! {
+    counts :: StatusValue.object(StatusFields.new()
+        .with("new", StatusValue.Integer{value: diff.new.len()})
+        .with("existing", StatusValue.Integer{value: diff.existing.len()})
+        .with("resolved", StatusValue.Integer{value: diff.resolved.len()})
+        .with("unknown", StatusValue.Integer{value: diff.unknown.len()}))
+    comparison :: StatusValue.object(StatusFields.new()
+        .with("new", jet_cli_review_diagnostic_relation_list(diff.new, base, head))
+        .with("existing", jet_cli_review_diagnostic_relation_list(diff.existing, base, head))
+        .with("resolved", jet_cli_review_diagnostic_relation_list(diff.resolved, base, head))
+        .with("unknown", jet_cli_review_diagnostic_relation_list(diff.unknown, base, head))
+        .with("counts", counts))
+    issues := [StatusValue]{}
+    loop relation in diff.new -> &issues.push(jet_cli_review_diagnostic_relation_value(relation, base, head))
+    loop relation in diff.existing -> &issues.push(jet_cli_review_diagnostic_relation_value(relation, base, head))
+    loop relation in diff.resolved -> &issues.push(jet_cli_review_diagnostic_relation_value(relation, base, head))
+    loop relation in diff.unknown -> &issues.push(jet_cli_review_diagnostic_relation_value(relation, base, head))
+    review :: StatusValue.object(StatusFields.new()
+        .with("schema", jet_cli_review_string_value("jet.diagnostic-review/v1"))
+        .with("kind", jet_cli_review_string_value("diagnostic-review"))
+        .with("mode", jet_cli_review_string_value("diagnostics"))
+        .with("status", jet_cli_review_string_value("completed"))
+        .with("limitations", jet_cli_review_strings([String]{"checker projection has no explicit truncation marker; incomplete means no final bundle"}))
+        .with("base", jet_cli_review_diagnostic_side_value(base))
+        .with("head", jet_cli_review_diagnostic_side_value(head))
+        .with("comparison", comparison).with("issues", StatusValue.array(^issues)))
+    StatusEnvelope.new("review", true).with_field("review", review).json_line()
+}
+fn jet_cli_review_diagnostic_text_lines(lines: &[String], status: String, relations: [JetCLIReviewDiagnosticRelation]) Never! {
+    loop relation in relations {
+        occurrence :: relation.head ?? relation.base
+        code :: if occurrence == { Val(value) -> value.diagnostic.code; None -> "unknown" }
+        &lines.push("diagnostic {status} {code}: {relation.reason}")
+    }
+}
+pub fn jet_cli_review_render_diagnostic_text(base: JetCLIReviewDiagnosticSide, head: JetCLIReviewDiagnosticSide, diff: JetCLIReviewDiagnosticDiff) -> String Never! {
+    lines := [String]{
+        "diagnostics base valid={base.valid} complete={base.complete} count={base.diagnostics.len()}",
+        "diagnostics head valid={head.valid} complete={head.complete} count={head.diagnostics.len()}"}
+    jet_cli_review_diagnostic_text_lines(&lines, "new", diff.new)
+    jet_cli_review_diagnostic_text_lines(&lines, "existing", diff.existing)
+    jet_cli_review_diagnostic_text_lines(&lines, "resolved", diff.resolved)
+    jet_cli_review_diagnostic_text_lines(&lines, "unknown", diff.unknown)
+    "{lines.join("\n")}\n"
+}
+
+// EXACT UNAVAILABLE PRODUCER BOUNDARIES (not callable substitutes):
+// run_review184/run_diagnostic_review260/load_diagnostic_side285/load_side844:
+//   Inspect/Projection.jet owns jet_cli_check_projection/check_diagnostics over
+//   actual JetDriverCompilerCheckInput, retaining ONE Driver result/bundle.
+//   Native preparation of that input, loaded-source/module iteration, external
+//   writer append (CmdGates packet 0676/its canonical Gates owner), and
+//   GateLedger.collect/diagnostics/sort (Sema packet 0428) must be published.
+//   The real SemIndex/ReviewSemanticOp owners are port-tools:
+//   jet_semindex Source/SemIndex/{Facts,Queries}.jet and Receipts/Review.jet;
+//   semantic_ops_for_file/applicability: Receipts/SemanticOps.jet. Their current
+//   String-based native paths cannot replace the retained OSPath ABI.
+// diagnostic_scope_root309/diagnostic_scope_key318/normalized_snapshot_path897:
+//   #4494/#4483: canonical retained_descriptor.canonicalize, native current_dir,
+//   native Path parent/is_absolute/join/strip_prefix and lossless OSPath ingress.
+//   Preserve find_package_root_checked(parent).ok().flatten(), root canonicalize
+//   fallback, relative-root join before canonicalize, and '\\' -> '/' DISPLAY.
+//   Scope resolver fills source_scopes for entry plus every diagnostic origin;
+//   it never guesses a dependency scope from text or source span.
+// read_receipt1045 native half:
+//   retained_descriptor.read_bytes(OSPath), canonical UTF8 decoding with exact
+//   FromUtf8Error text, sha256_hex over SAME bytes, then decode_receipt above.
+//   Invalid UTF8 filesystem read-to-string must keep InvalidData (#4409), not
+//   lossy decode, fabricated digest, Rust bridge or second filesystem provider.
+// #4500: retained field loans/linear Driver result transfer for bundle/index.
+// #4499: JetCLIReviewDiagnosticCodeScope real composite maps, no encoding shim.
+// Target-dependent usize::MAX is avoided in pure sorting through optional rank;
+// no host word size/endian/alignment guesses or private native declarations.
+
+// Rust's four terminal CLI error branches become the existing Driver output
+// carrier; the canonical process entry owns writing and exit, not this module.
+fn jet_cli_review_refusal(code: String, message: String, fix: String, exit_code: Int, json: Bool) -> JetDriverVerbOutput Never! {
+    refusal :: jet_cli_args_refuse(code, message, jet_cli_why(code), fix, json)
+    JetDriverVerbOutput{stdout: refusal.stdout, stderr: refusal.stderr, exit_code}
+}
+pub fn jet_cli_review_diagnostic_usage_error(message: String, json: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_review_refusal("E2104", message, "provide a base and reviewed Jet file after `--diagnostics`", JET_DRIVER_EXIT_USAGE, json)
+}
+pub fn jet_cli_review_usage_error(message: String, json: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_review_refusal("E2104", message, "provide a path after the receipt flag", JET_DRIVER_EXIT_USAGE, json)
+}
+pub fn jet_cli_review_input_error(path_display: String, message: String, json: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_review_refusal("E2105", "could not review `{path_display}`: {message}", "fix the checked input and run `jet review` again", JET_DRIVER_EXIT_USER_ERROR, json)
+}
+pub fn jet_cli_review_receipt_error(message: String, json: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_review_refusal("E2105", message, "provide a readable `.jetproof` receipt", JET_DRIVER_EXIT_USER_ERROR, json)
+}
+
+// The argument half of run_review184/run_diagnostic_review260; selected mode
+// precedes receipt validation, including deliberately malformed receipt flags.
+// Raw user text is NOT an OSPath; native argv/path ingress stays at the gate.
+pub enum JetCLIReviewRequest {
+    Diagnostics(base: String, head: String)
+    Meaning(base: String, head: String, base_receipt: String?, head_receipt: String?)
+}
+pub enum JetCLIReviewArgumentPlan {
+    Request(request: JetCLIReviewRequest)
+    Refused(output: JetDriverVerbOutput)
+}
+pub fn jet_cli_review_arguments(args: [String], json: Bool) -> JetCLIReviewArgumentPlan Never! {
+    diagnostics := false
+    loop argument in args { if argument == "--diagnostics" { diagnostics = true; break } }
+    paths :: jet_cli_review_positional(args)
+    if paths.len() != 2 {
+        if diagnostics -> return .Refused{output: jet_cli_review_diagnostic_usage_error("`jet review --diagnostics` needs a base and a reviewed Jet file", json)}
+        return .Refused{output: jet_cli_review_refusal("E2104", "`jet review` needs a base and a reviewed Jet file", "run `jet review base.jet head.jet --base-receipt base.jetproof --receipt head.jetproof`", JET_DRIVER_EXIT_USAGE, json)}
+    }
+    if diagnostics -> return .Request{request: .Diagnostics{base: ~paths[0], head: ~paths[1]}}
+    base_receipt :: jet_cli_review_option_value(args, [String]{"--base-receipt"}) ?? return .Refused{output: jet_cli_review_usage_error(err.message, json)}
+    head_receipt :: jet_cli_review_option_value(args, [String]{"--receipt", "--head-receipt", "--after-receipt"}) ?? return .Refused{output: jet_cli_review_usage_error(err.message, json)}
+    .Request{request: .Meaning{base: ~paths[0], head: ~paths[1], base_receipt, head_receipt}}
+}
+
+// Checked/pure half of run_review239–258. recorded must be the canonical
+// SemIndex receipt applicability selection over BOTH native paths and their
+// before/after hashes. No inference from same-shaped source text is permitted.
+pub fn jet_cli_review_checked(base: JetCLIReviewSide, head: JetCLIReviewSide, base_proof: JetCLIReviewReceipt, head_proof: JetCLIReviewReceipt, recorded: [SemanticOp], json: Bool) -> JetDriverVerbOutput Never! {
+    meaning :: review_semantic_ops_with_receipts(base.index, head.index, recorded)
+    authority :: jet_cli_review_authority_diff(base.authority, head.authority)
+    receipts := jet_cli_review_receipt_diff(base_proof, head_proof)
+    jet_cli_review_link_source_operations(&receipts, meaning)
+    verdict :: jet_cli_review_verdict(authority, receipts)
+    stdout :: if json -> jet_cli_review_render_json(base, head, base_proof, head_proof, meaning, authority, receipts, verdict) else -> jet_cli_review_render_text(meaning, authority, receipts, verdict)
+    JetDriverVerbOutput{stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+// Checked/pure half of run_diagnostic_review277–282.
+pub fn jet_cli_review_diagnostic_checked(base: JetCLIReviewDiagnosticSide, head: JetCLIReviewDiagnosticSide, json: Bool) -> JetDriverVerbOutput Never! {
+    diff :: jet_cli_review_compare_diagnostics(base, head)
+    stdout :: if json -> jet_cli_review_render_diagnostic_json(base, head, diff) else -> jet_cli_review_render_diagnostic_text(base, head, diff)
+    JetDriverVerbOutput{stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// SOURCE HANDOFF MAP — same owner/import: jet_cli Cli/Change/Review.jet.
+// Rust types22–182:
+// SnapshotInput -> JetCLIReviewSnapshotInput; ProofReceipt -> JetCLIReviewProofReceipt;
+// ReviewSide -> JetCLIReviewSide; DiagnosticSide -> JetCLIReviewDiagnosticSide;
+// DiagnosticOccurrence/Relation/Diff -> JetCLIReviewDiagnosticOccurrence/Relation/Diff;
+// AuthorityChange/Fact -> JetCLIReviewAuthorityChange/Fact;
+// DerivationClaim -> JetCLIReviewDerivationClaim; Observation -> JetCLIReviewObservation;
+// Claim -> JetCLIReviewClaim; Receipt -> JetCLIReviewReceipt;
+// ReceiptChange -> JetCLIReviewReceiptChange;
+// ObservationComparison -> JetCLIReviewObservationComparison;
+// ReceiptDiff -> JetCLIReviewReceiptDiff.
+// All following function names have the jet_cli_review_ prefix:
+// 95 same_authority -> same_authority; 99 display -> authority_display;
+// 184 run_review -> arguments + checked (native load/applicability gated above);
+// 260 run_diagnostic_review -> arguments + diagnostic_checked (native load gated);
+// 285 load_diagnostic_side -> native/Driver scope producer gate above;
+// 309 diagnostic_scope_root / 318 diagnostic_scope_key -> native-path gate above;
+// 335 diagnostic_occurrences -> diagnostic_occurrences (retained scope map);
+// 361 diagnostic_identity_map -> diagnostic_identity_map;
+// 375 compatible_code_occurrence -> compatible_code_occurrence;
+// 385 input_changed_for_occurrence -> input_changed_for_occurrence;
+// 402 unmatched_diagnostic_relation -> unmatched_diagnostic_relation;
+// 463 compare_diagnostics -> compare_diagnostics (preindexed composite codes);
+// 602 diagnostic_origin_json -> diagnostic_origin_value;
+// 624 diagnostic_cause_json -> diagnostic_cause_value;
+// 649 diagnostic_json -> diagnostic_value;
+// 688 diagnostic_relation_json -> diagnostic_relation_value;
+// 725 diagnostic_relation_list -> diagnostic_relation_list;
+// 737 diagnostic_side_json -> diagnostic_side_value;
+// 763 render_diagnostic_json / 809 render_diagnostic_text -> same suffix;
+// 844 load_side / 897 normalized_snapshot_path -> exact native/ledger gate above;
+// 909 authority_facts -> authority_facts (canonical GateEntry + EffectFact);
+// 956 add_detail_facts / 972 effect_list / 979 authority_diff -> same suffix;
+// 1010 classify_authority_change / 1041 widens_authority -> same suffix;
+// 1045 read_receipt -> missing_receipt + decode_receipt (native bytes/UTF8 gated);
+// 1162 parse_derivation_claim / 1179 parse_derivation_identity -> same suffix;
+// 1199 parse_derivation_observation / 1222 string_array_field -> same suffix;
+// 1242 derivation_for_evidence / 1266 observation_for_evidence -> same suffix;
+// 1335 derivation_key / 1339 is_proven_derivation / 1354 claim_key -> same suffix;
+// 1386 contract_identity / 1398 receipt_diff / 1518 compare_observations -> same suffix;
+// 1643 observation_mismatches / 1714 link_source_operations -> same suffix;
+// 1756 verdict / 1769 render_text / 1848 observation_text -> same suffix;
+// 1862 observation_comparison_text / 1882 identity_value -> same suffix;
+// 1892 derivation_observation_value / 1920 derivation_value -> same suffix;
+// 1956 receipt_observation_value / 1985 comparison_value -> same suffix;
+// 2026 receipt_change_value / 2051 snapshot_value / 2092 render_json -> same suffix;
+// 2233 claim_value / 2258 canonical_json / 2290 object_field -> same suffix;
+// 2294 string_field / 2298 sorted_join / 2305 positional / 2336 option_value -> same suffix;
+// 2355 diagnostic_usage_error / 2364 usage_error / 2369 input_error / 2374 receipt_error -> same suffix.
+// Constants: no private Rust constants in this scope. Schema literals remain
+// action payload values; exit codes reuse Driver/Verbs (Foundation ExitCodes).
+// Tests: original inline/included/macro tests NONE in CmdReview.rs; supplemental
+// pure controls live Tests/Change/Review.jet. Original integration: packet1142.
+// Main wiring (only after dependencies/native ingress are complete):
+// existing JetCli source assembly for Cli/Change: add `module Review`;
+// its current tests source list: add `Tests/Change/Review.jet`;
+// retain package dependencies jet_foundation/jet_semindex/jet_driver already
+// named by JetCli/package.jet. Host/Registry/Front must route review using the
+// ONE authorized native input producer; do not activate a gated command fallback.

@@ -1,0 +1,261 @@
+// Host-side output selection (Source/OutputAdapter.rs) and the output flags
+// it parses (crates/jet-cli/src/CLI.rs `OutputFlags`). The process boundary
+// reads terminal and environment facts once (`jet_cli_process_facts`);
+// everything after it is a pure projection of those facts, so commands never
+// perform a second output-policy lookup. The Rust host publishes the profile
+// in process-wide cells (`activate`, `activate_command`); the Jet host passes
+// the adapter to the code that needs it instead.
+use core.sys as output_sys
+use core.term as output_term
+use jet_driver.[
+    JetDriverVerbOutput,
+]
+
+// Source/OutputAdapter.rs `MACHINE_OUTPUT_ENV`.
+JET_CLI_MACHINE_OUTPUT_ENV :: "JET_MACHINE_OUTPUT"
+
+// The one spelling that selects machine-readable output (CLI.rs `MACHINE_OUTPUT_FLAG`).
+pub JET_CLI_MACHINE_OUTPUT_FLAG :: "--json"
+
+// Output flags parsed once before command dispatch (CLI.rs `OutputFlags`).
+// These are only the caller's choices; terminal and environment facts are
+// resolved by the output profile.
+pub struct JetCLIOutputFlags {
+    pub json: Bool
+    pub quiet: Bool
+    pub verbose: Bool
+    pub color: JetCLIColorRequest
+}
+
+// CLI.rs `before_argument_separator`: the words before the first `--`.
+pub fn jet_cli_before_argument_separator(args: [String]) -> [String] Never! {
+    owned := [String]{}
+    loop argument in args {
+        if argument == "--" -> break
+        &owned.push(argument)
+    }
+    owned
+}
+
+// CLI.rs `machine_output_requested`: `--json`, or a `compiler` /
+// `inspect compiler` route, before the separator.
+pub fn jet_cli_machine_output_requested(args: [String]) -> Bool Never! {
+    owned :: jet_cli_before_argument_separator(args)
+    if owned.contains(JET_CLI_MACHINE_OUTPUT_FLAG) -> return true
+    if owned.len() > 0 && owned[0] == "compiler" -> return true
+    loop index in 1..<owned.len() {
+        if owned[index - 1] == "inspect" && owned[index] == "compiler" -> return true
+    }
+    false
+}
+
+// CLI.rs `OutputFlags::parse`. A bare `--color` enables styling; the last
+// `--color` spelling wins; an unknown `--color=<mode>` is an error.
+pub fn jet_cli_output_flags_parse(args: [String]) -> JetCLIOutputFlags JetCLIOutputProfileError! {
+    owned :: jet_cli_before_argument_separator(args)
+    color := JetCLIColorRequest.Auto
+    quiet := false
+    verbose := false
+    loop argument in owned {
+        if {
+            argument.starts_with("--color=") -> color = jet_cli_color_request_parse(argument.slice(8..<argument.len()))
+            argument == "--color" -> color = JetCLIColorRequest.Always
+            argument == "--quiet" -> quiet = true
+            argument == "--verbose" || argument == "-v" -> verbose = true
+            else -> {}
+        }
+    }
+    Ok(JetCLIOutputFlags{json: jet_cli_machine_output_requested(owned), quiet: quiet, verbose: verbose, color: color})
+}
+
+// The command ABI projection of the resolved profile (Rust `OutputMode`).
+// `color` is the resolved ANSI decision (Rust `ColorChoice::Always`/`Never`).
+pub struct JetCLIOutputMode {
+    pub json: Bool
+    pub color: Bool
+    pub quiet: Bool
+}
+
+// The raw process facts the host reads once (the reads inside Rust
+// `OutputAdapter::select` and `locale_supports_unicode`). Core exposes no
+// stdin terminal query yet (`StdinHandle` has no `is_tty`), so the stdin
+// fact is the caller's argument to `jet_cli_help_interactive` instead.
+pub struct JetCLIProcessFacts {
+    pub stdout_terminal: Bool
+    pub stderr_terminal: Bool
+    // `JET_HELP_SHELL_PREFILL` is present.
+    pub shell_prefill: Bool
+    pub term: String?
+    // `NO_COLOR` / `FORCE_COLOR` are present (any value, even empty).
+    pub no_color: Bool
+    pub force_color: Bool
+    pub columns: String?
+    // The first present of `LC_ALL`, `LC_CTYPE`, `LANG`.
+    pub locale: String?
+}
+
+// Read every output fact from the process, once.
+pub fn jet_cli_process_facts() -[IO, Env]> JetCLIProcessFacts Never! {
+    locale := output_sys.get("LC_ALL")
+    if locale == None -> locale = output_sys.get("LC_CTYPE")
+    if locale == None -> locale = output_sys.get("LANG")
+    JetCLIProcessFacts{
+        stdout_terminal: output_term.stdout().is_tty(),
+        stderr_terminal: output_term.stderr().is_tty(),
+        shell_prefill: output_sys.get("JET_HELP_SHELL_PREFILL") != None,
+        term: output_sys.get("TERM"),
+        no_color: output_sys.get("NO_COLOR") != None,
+        force_color: output_sys.get("FORCE_COLOR") != None,
+        columns: output_sys.get("COLUMNS"),
+        locale: locale,
+    }
+}
+
+// One invocation's facts and its resolved profile (Rust `OutputAdapter`).
+pub struct JetCLIOutputAdapter {
+    pub profile: JetCLIOutputProfile
+    pub flags: JetCLIOutputFlags
+    pub stdout_terminal: Bool
+    pub stderr_terminal: Bool
+    pub shell_prefill: Bool
+}
+
+fn jet_cli_ascii_upper(value: String) -> String Never! {
+    raw :: value.bytes()
+    upper := [U8]{}
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        if code >= 97 && code <= 122 {
+            &upper.push(U8{code - 32})
+            next
+        }
+        &upper.push(byte)
+    }
+    String.from_bytes(upper) ?? value
+}
+
+// Source/OutputAdapter.rs `locale_supports_unicode`: no locale means Unicode.
+fn jet_cli_locale_supports_unicode(locale: String?) -> Bool Never! {
+    value :: locale ?? return true
+    upper :: jet_cli_ascii_upper(value)
+    upper != "C" && upper != "POSIX" && !upper.contains("ASCII")
+}
+
+// Rust `str::parse::<usize>`: an optional `+`, then one or more ASCII
+// digits; anything else (or an overflow) is not a width.
+fn jet_cli_parse_usize(value: String) -> Int? Never! {
+    raw :: value.bytes()
+    start := 0
+    if raw.len() > 0 && Int.from_u8(raw[0]) == 43 -> start = 1
+    if start >= raw.len() -> return None
+    number := 0
+    loop index in start..<raw.len() {
+        digit :: Int.from_u8(raw[index]) - 48
+        if digit < 0 || digit > 9 -> return None
+        if number > (9223372036854775807 - digit) /% 10 -> return None
+        number = number * 10 + digit
+    }
+    Val(number)
+}
+
+// Rust `OutputAdapter::select` over facts the host already read. A single
+// profile must be safe for both human streams, so a redirected stdout or
+// stderr disables automatic styling and progress for the whole invocation.
+pub fn jet_cli_output_adapter_select(args: [String], facts: JetCLIProcessFacts) -> JetCLIOutputAdapter JetCLIOutputProfileError! {
+    flags :: jet_cli_output_flags_parse(args)
+    term := String?{None}
+    if facts.term == .Val(value) {
+        if value != "" -> term = Val(value)
+    }
+    width := Int?{None}
+    if facts.columns == .Val(columns) {
+        if jet_cli_parse_usize(columns) == .Val(parsed) {
+            if parsed > 0 -> width = Val(parsed)
+        }
+    }
+    profile :: jet_cli_output_profile_select(JetCLIOutputFacts{
+        tty: facts.stdout_terminal && facts.stderr_terminal,
+        term: term,
+        no_color: facts.no_color,
+        force_color: facts.force_color,
+        requested_color: flags.color,
+        json: flags.json,
+        width: width,
+        unicode: jet_cli_locale_supports_unicode(facts.locale),
+    })
+    Ok(JetCLIOutputAdapter{
+        profile: profile,
+        flags: flags,
+        stdout_terminal: facts.stdout_terminal,
+        stderr_terminal: facts.stderr_terminal,
+        shell_prefill: facts.shell_prefill,
+    })
+}
+
+// Rust `OutputMode::from_profile` (`OutputAdapter::mode`).
+pub fn jet_cli_output_mode(adapter: JetCLIOutputAdapter) -> JetCLIOutputMode Never! {
+    JetCLIOutputMode{json: adapter.profile.machine_enabled, color: adapter.profile.ansi_enabled, quiet: adapter.flags.quiet}
+}
+
+// Rust `OutputAdapter::apply_machine_mode`: publish the machine-output fact
+// to every child and in-process execution tier.
+pub fn jet_cli_apply_machine_mode(adapter: JetCLIOutputAdapter) Never! -[Env]> {
+    if adapter.profile.machine_enabled {
+        output_sys.set(JET_CLI_MACHINE_OUTPUT_ENV, "1")
+        return
+    }
+    output_sys.unset(JET_CLI_MACHINE_OUTPUT_ENV).drop("an absent machine-output variable is already unset")
+}
+
+// Rust `OutputAdapter::help_interactive`: the `jet ?` palette may draw on
+// stderr while stdout is captured for the shell widget. `stdin_terminal` is
+// the caller's fact (see `JetCLIProcessFacts`).
+pub fn jet_cli_help_interactive(adapter: JetCLIOutputAdapter, stdin_terminal: Bool) -> Bool Never! {
+    stdin_terminal && (adapter.stdout_terminal || (adapter.shell_prefill && adapter.stderr_terminal))
+}
+
+// Rust `advisory_lints_visible` over `CommandIdentity`: ordinary advisory
+// lints stay out of `run`, `dev`, and `test` output unless `--verbose`.
+pub fn jet_cli_advisory_lints_visible(command: String, verbose: Bool) -> Bool Never! {
+    verbose || !(command == "run" || command == "dev" || command == "test")
+}
+
+// Rust `write_renderable`: primary human content on its human channel only.
+pub fn jet_cli_write_renderable(output: &JetDriverVerbOutput, profile: JetCLIOutputProfile, text: String) Never! {
+    if jet_cli_output_profile_channel(profile, JetCLIOutputKind.Renderable) == {
+        .HumanStdout -> output.stdout = "{output.stdout}{text}"
+        .HumanStderr -> output.stderr = "{output.stderr}{text}"
+        else -> {}
+    }
+}
+
+// Rust `write_status`: a human status line only when the profile permits it.
+pub fn jet_cli_write_status(output: &JetDriverVerbOutput, profile: JetCLIOutputProfile, text: String) Never! {
+    if jet_cli_output_profile_channel(profile, JetCLIOutputKind.Status) == JetCLIOutputChannel.HumanStderr -> output.stderr = "{output.stderr}{text}"
+}
+
+// Rust `write_machine`: structured records only on machine stdout.
+pub fn jet_cli_write_machine(output: &JetDriverVerbOutput, profile: JetCLIOutputProfile, text: String) Never! {
+    if jet_cli_output_profile_channel(profile, JetCLIOutputKind.Machine) == JetCLIOutputChannel.MachineStdout -> output.stdout = "{output.stdout}{text}"
+}
+
+// Rust `write_mode_renderable`.
+pub fn jet_cli_write_mode_renderable(output: &JetDriverVerbOutput, mode: JetCLIOutputMode, text: String) Never! {
+    if !mode.json -> output.stdout = "{output.stdout}{text}"
+}
+
+// Rust `write_mode_status` (and `write_mode_progress`, which is the same
+// channel): never on machine stdout, never under `--quiet`.
+pub fn jet_cli_write_mode_status(output: &JetDriverVerbOutput, mode: JetCLIOutputMode, text: String) Never! {
+    if !mode.json && !mode.quiet -> output.stderr = "{output.stderr}{text}"
+}
+
+// Rust `write_mode_diagnostic`: diagnostics go to stderr in either mode.
+pub fn jet_cli_write_mode_diagnostic(output: &JetDriverVerbOutput, text: String) Never! {
+    output.stderr = "{output.stderr}{text}"
+}
+
+// Rust `write_mode_machine`.
+pub fn jet_cli_write_mode_machine(output: &JetDriverVerbOutput, mode: JetCLIOutputMode, text: String) Never! {
+    if mode.json -> output.stdout = "{output.stdout}{text}"
+}

@@ -1,0 +1,492 @@
+// DynamicCompletions.rs:1497-1524 and native bounded/hostile-path regressions.
+// #4494/#4483: fixtures exercise real retained descriptors and selected target.
+use core.sys.host.os_path_ingress as completion_test_os
+use core.sys.host.retained_counter as completion_test_counter
+use core.process.host.native_process as completion_test_process
+
+fn completion_test_input(kind: TCLIValueKind, field: String) -> TCLIInput Never! {
+    TCLIInput{field: ~field, flag: field.replace("_", "-"), short: Val("m"), env: None, help: "", metavar: None, shape: TCLIInputShape.Value{kind: kind, optional: false, default: None}, positional: Val(0), variadic: false}
+}
+fn completion_test_context(kind: TCLIValueKind, field: String) -> JetCLICompletionContext Never! {
+    schema :: CLICommandSchema{entry_type: "Args", description: None, inputs: [TCLIInput]{completion_test_input(kind, field)}, commands: [TCLICommand]{}, jobs: [CLIRecordJob]{}, standard: false, version: None}
+    jet_cli_completion_context_new(^schema, U64{3}, U64{7})
+}
+fn completion_test_request(source: String, cursor: Int, target: JetCLICompletionTarget, field: String?) -> JetCLICompletionRequest Never! {
+    jet_cli_completion_request_new(source, cursor, target, field, None, U64{3}, U64{7})
+}
+fn completion_test_enum(values: [String]) -> JetCLITypedCompletionFact Never! {
+    facts := [JetCLICompletionValueFact]{}
+    loop value in values -> &facts.push(jet_cli_completion_value_new(~value))
+    jet_cli_completion_fact_new("mode", JetCLITypedCompletionKind.Enum{type_name: "Mode", variants: facts}, None)
+}
+fn completion_test_result(request: JetCLICompletionRequest, context: JetCLICompletionContext) -[FS.Read]> JetCLICompletionResult Never! {
+    jet_cli_completion_query(request, context) ?? panic(jet_cli_completion_error_message(err))
+}
+fn completion_test_error(request: JetCLICompletionRequest, context: JetCLICompletionContext) -[FS.Read]> String Never! {
+    if jet_cli_completion_query(request, context) == {
+        .Ok(_) -> panic("completion unexpectedly succeeded")
+        .Err(error) -> jet_cli_completion_error_message(error)
+    }
+}
+fn completion_test_path(text: String) -> OSPath Never! { completion_paths.from_text(text, jet_cli_completion_path_platform()) }
+fn completion_test_join(root: OSPath, text: String) -> OSPath Never! {
+    child := ~root
+    completion_paths.push(&child, completion_test_path(text))
+    child
+}
+fn completion_test_separator() -> String Never! {
+    String.from_bytes([U8]{jet_cli_completion_main_separator()}) ?? panic("separator")
+}
+fn completion_test_directory() -[FS.Read, FS.Write, Env]> OSPath Never! {
+    root := completion_test_os.temp_dir()
+    completion_paths.push(&root, completion_test_path("jet-completion-{completion_test_process.id()}-{completion_test_counter.temp_counter_next()}"))
+    completion_fs.create_dir(root) ?? panic(err.message)
+    root
+}
+fn completion_test_file(root: OSPath, name: String) -[FS.Write]> Never! {
+    completion_fs.write(completion_test_join(root, name), [U8]{}) ?? panic(err.message)
+}
+fn completion_test_path_context(root: OSPath) -[FS.Read]> JetCLICompletionContext Never! {
+    context := completion_test_context(TCLIValueKind.Path, "path")
+    context.path_authority = Val(jet_cli_path_authority_new([OSPath]{~root}) ?? panic(jet_cli_path_authority_error_message(err)))
+    context
+}
+fn completion_test_query_path(prefix: String, context: JetCLICompletionContext) -[FS.Read]> JetCLICompletionResult Never! {
+    completion_test_result(completion_test_request(prefix, prefix.bytes().len(), JetCLICompletionTarget.Path, Val("path")), context)
+}
+fn completion_test_remove(root: OSPath) -[FS.Write]> Never! { completion_fs.remove_dir_all(root) ?? panic(err.message) }
+
+#Test("enum completion is typed filtered and span exact") {
+    context := completion_test_context(TCLIValueKind.String, "mode")
+    context.typed_facts = [JetCLITypedCompletionFact]{completion_test_enum([String]{"fast", "safe"})}
+    result :: completion_test_result(completion_test_request("--mode=sa", 9, JetCLICompletionTarget.Value, Val("mode")), context)
+    assert(result.token_span == Span{start: 0, end: 9})
+    assert(result.replacement_span == Span{start: 7, end: 9})
+    assert_eq(result.prefix, "sa")
+    assert_eq(result.candidates[0].label, "safe")
+    assert_eq(result.candidates[0].detail, "enum Mode")
+}
+#Test("stale revisions fail closed before cursor limits and filesystem") {
+    context :: completion_test_context(TCLIValueKind.Bool, "verbose")
+    request := completion_test_request("t", 100, JetCLICompletionTarget.Value, Val("verbose"))
+    request.schema_revision = U64{1}
+    request.revision = U64{4}
+    assert_eq(completion_test_error(request, context), "completion schema is stale (request 1, context 3)")
+    request.schema_revision = U64{3}
+    assert_eq(completion_test_error(request, context), "completion source is stale (request 4, context 7)")
+}
+#Test("UTF8 byte spans Unicode whitespace and split scalar refusal") {
+    context := completion_test_context(TCLIValueKind.String, "mode")
+    context.typed_facts = [JetCLITypedCompletionFact]{completion_test_enum([String]{"säte", "safe"})}
+    source :: "é --mode=sä tail"
+    cursor :: "é --mode=sä".bytes().len()
+    result :: completion_test_result(completion_test_request(source, cursor, JetCLICompletionTarget.Value, Val("mode")), context)
+    assert_eq(result.token_span.start, 5)
+    assert_eq(result.token_span.end, cursor)
+    assert_eq(result.replacement_span.start, 12)
+    assert_eq(result.prefix, "sä")
+    assert_eq(result.candidates[0].label, "säte")
+    assert(completion_test_error(completion_test_request(source, cursor - 1, JetCLICompletionTarget.Value, Val("mode")), context).starts_with("completion cursor"))
+    middle :: completion_test_result(completion_test_request("--mode=safe", 9, JetCLICompletionTarget.Value, Val("mode")), context)
+    assert_eq(middle.token_span.end, 11)
+    assert_eq(middle.replacement_span.end, 9)
+}
+#Test("source one MiB bound is byte based and inclusive") {
+    context :: completion_test_context(TCLIValueKind.Bool, "mode")
+    text := "x".repeat(1048576)
+    assert(jet_cli_completion_result_is_empty(completion_test_result(completion_test_request(text, text.bytes().len(), JetCLICompletionTarget.Value, Val("mode")), context)))
+    text = "{text}x"
+    assert(completion_test_error(completion_test_request(text, text.bytes().len(), JetCLICompletionTarget.Value, Val("mode")), context).starts_with("completion cursor"))
+}
+#Test("fact and value limits accept 4096 and reject 4097") {
+    context := completion_test_context(TCLIValueKind.String, "mode")
+    loop index in 0..<4096 -> &context.typed_facts.push(jet_cli_completion_fact_new("unused{index}", JetCLITypedCompletionKind.Bool, None))
+    request :: completion_test_request("", 0, JetCLICompletionTarget.Value, Val("mode"))
+    assert(jet_cli_completion_result_is_empty(completion_test_result(request, context)))
+    &context.typed_facts.push(completion_test_enum([String]{"safe"}))
+    assert_eq(completion_test_error(request, context), "invalid completion fact for `<context>`: more than 4096 typed facts")
+    values := [String]{}
+    loop index in 0..<4096 -> &values.push("v{index}")
+    context.typed_facts = [JetCLITypedCompletionFact]{completion_test_enum(values)}
+    result :: completion_test_result(request, context)
+    assert_eq(result.candidates.len(), 256)
+    assert(result.truncated)
+    &values.push("extra")
+    context.typed_facts = [JetCLITypedCompletionFact]{completion_test_enum(values)}
+    assert_eq(completion_test_error(request, context), "invalid completion fact for `mode`: more than 4096 values")
+}
+#Test("candidate cap stable declarations exact ranking provenance and dedup") {
+    context := completion_test_context(TCLIValueKind.String, "mode")
+    values := [JetCLICompletionValueFact]{jet_cli_completion_value_new("zebra"), jet_cli_completion_value_new("alpha"), jet_cli_completion_value_new("alpha")}
+    exact := jet_cli_completion_value_new("a")
+    exact.detail = Val("checked detail")
+    exact.source = Val("checked source")
+    exact.rank = U32{4294967295}
+    &values.push(exact)
+    context.typed_facts = [JetCLITypedCompletionFact]{jet_cli_completion_fact_new("mode", JetCLITypedCompletionKind.Tag{tag_name: "Mode", values: values}, None)}
+    result :: completion_test_result(completion_test_request("a", 1, JetCLICompletionTarget.Value, Val("mode")), context)
+    assert_eq(result.candidates.len(), 2)
+    assert_eq(result.candidates[0].label, "a")
+    assert_eq(result.candidates[0].rank, U32{999999})
+    assert_eq(result.candidates[0].source, "checked source")
+    assert_eq(result.candidates[0].detail, "checked detail")
+    assert(result.candidates[0].freshness == JetCLICompletionFreshness.Fresh)
+    context.typed_facts = [JetCLITypedCompletionFact]{completion_test_enum([String]{"zebra", "alpha", "alpha"})}
+    context.limits.max_candidates = 1
+    capped :: completion_test_result(completion_test_request("", 0, JetCLICompletionTarget.Value, Val("mode")), context)
+    assert_eq(capped.candidates[0].label, "zebra")
+    assert(capped.truncated)
+    bounded :: jet_cli_completion_limits_bounded(JetCLICompletionLimits{max_candidates: 9999, max_directory_entries: 9999, max_path_depth: 9999}) ?? panic("limits")
+    assert_eq(bounded.max_candidates, 256)
+    assert_eq(bounded.max_directory_entries, 4096)
+    assert_eq(bounded.max_path_depth, 64)
+}
+#Test("all zero limits refuse in Rust precedence") {
+    context := completion_test_context(TCLIValueKind.Bool, "mode")
+    request :: completion_test_request("", 0, JetCLICompletionTarget.Value, Val("mode"))
+    context.limits = JetCLICompletionLimits{max_candidates: 0, max_directory_entries: 0, max_path_depth: 0}
+    assert_eq(completion_test_error(request, context), "completion limit `max_candidates` must be non-zero")
+    context.limits.max_candidates = 1
+    assert_eq(completion_test_error(request, context), "completion limit `max_directory_entries` must be non-zero")
+    context.limits.max_directory_entries = 1
+    assert_eq(completion_test_error(request, context), "completion limit `max_path_depth` must be non-zero")
+}
+#Test("bool fallback literal domains and unsupported typed families") {
+    context := completion_test_context(TCLIValueKind.Bool, "mode")
+    request :: completion_test_request("", 0, JetCLICompletionTarget.Value, Val("mode"))
+    result :: completion_test_result(request, context)
+    assert_eq(result.candidates.len(), 2)
+    assert_eq(result.candidates[0].label, "false")
+    assert_eq(result.candidates[1].label, "true")
+    context.typed_facts = [JetCLITypedCompletionFact]{completion_test_enum([String]{"safe"})}
+    assert_eq(completion_test_error(request, context), "checked input `mode` has kind Bool, which cannot serve value completion")
+    context.typed_facts = [JetCLITypedCompletionFact]{jet_cli_completion_fact_new("mode", JetCLITypedCompletionKind.Literal{type_name: "Bool", values: [JetCLICompletionValueFact]{jet_cli_completion_value_new("false")}}, None)}
+    assert_eq(completion_test_result(request, context).candidates[0].label, "false")
+    context.schema.inputs[0].shape = TCLIInputShape.Value{kind: TCLIValueKind.String, optional: false, default: None}
+    context.typed_facts = [JetCLITypedCompletionFact]{jet_cli_completion_fact_new("mode", JetCLITypedCompletionKind.Bool, None)}
+    assert_eq(completion_test_error(request, context), "checked input `mode` has kind String, which cannot serve value completion")
+}
+#Test("canonical flags short aliases command scope and conflicts") {
+    context := completion_test_context(TCLIValueKind.String, "mode")
+    context.schema.commands = [TCLICommand]{TCLICommand{name: "build", description: None, function: None, receiver: None, inputs: [TCLIInput]{completion_test_input(TCLIValueKind.String, "mode")}}}
+    fact := completion_test_enum([String]{"safe"})
+    fact.command = Val("build")
+    context.typed_facts = [JetCLITypedCompletionFact]{fact}
+    request := completion_test_request("-m=sa", 5, JetCLICompletionTarget.Value, Val("-m"))
+    request.command = Val("build")
+    result :: completion_test_result(request, context)
+    assert_eq(result.replacement_span.start, 3)
+    assert_eq(result.candidates[0].label, "safe")
+    &context.typed_facts.push(~fact)
+    assert_eq(completion_test_error(request, context), "conflicting completion facts for `build.mode`")
+    request.command = None
+    assert(jet_cli_completion_result_is_empty(completion_test_result(request, context)))
+    request.command = Val("absent")
+    assert_eq(completion_test_error(request, context), "unknown checked completion command `absent`")
+    request.command = Val("build")
+    request.field = Val("absent")
+    assert_eq(completion_test_error(request, context), "unknown checked completion field `absent` for `build`")
+    request.field = None
+    assert_eq(completion_test_error(request, context), "completion target value needs a checked field")
+}
+#Test("malformed unmatching values still refuse and unrelated facts are not validated") {
+    context := completion_test_context(TCLIValueKind.String, "mode")
+    request :: completion_test_request("s", 1, JetCLICompletionTarget.Value, Val("mode"))
+    c1 :: String.from_bytes([U8]{U8{194}, U8{133}}) ?? panic("C1")
+    context.typed_facts = [JetCLITypedCompletionFact]{completion_test_enum([String]{"safe", "bad{c1}"})}
+    assert_eq(completion_test_error(request, context), "invalid completion fact for `mode`: value contains a control character")
+    fact := completion_test_enum([String]{"safe"})
+    fact.field = "unused"
+    fact.kind = JetCLITypedCompletionKind.Enum{type_name: "", variants: [JetCLICompletionValueFact]{}}
+    context.typed_facts = [JetCLITypedCompletionFact]{fact}
+    assert(jet_cli_completion_result_is_empty(completion_test_result(request, context)))
+    fact.field = "mode"
+    context.typed_facts = [JetCLITypedCompletionFact]{fact}
+    assert_eq(completion_test_error(request, context), "invalid completion fact for `mode`: enum type is empty, too large, or contains a control character")
+    value := jet_cli_completion_value_new("safe")
+    value.detail = Val("bad\n")
+    context.typed_facts = [JetCLITypedCompletionFact]{jet_cli_completion_fact_new("mode", JetCLITypedCompletionKind.Literal{type_name: "Mode", values: [JetCLICompletionValueFact]{value}}, None)}
+    assert_eq(completion_test_error(request, context), "invalid completion fact for `mode`: detail is too large or contains a control character")
+    value.detail = None
+    value.source = Val("bad\n")
+    context.typed_facts = [JetCLITypedCompletionFact]{jet_cli_completion_fact_new("mode", JetCLITypedCompletionKind.Literal{type_name: "Mode", values: [JetCLICompletionValueFact]{value}}, None)}
+    assert_eq(completion_test_error(request, context), "invalid completion fact for `mode`: source is too large or contains a control character")
+}
+#Test("native authority roots sorted deduplicated and capped before dedup") {
+    root :: completion_test_directory()
+    authority :: jet_cli_path_authority_new([OSPath]{completion_test_join(root, "."), ~root}) ?? panic("authority")
+    assert_eq(jet_cli_path_authority_roots(authority).len(), 1)
+    assert(completion_paths.equals(jet_cli_path_authority_roots(authority)[0], root))
+    roots := [OSPath]{}
+    loop _ in 0..<64 -> &roots.push(~root)
+    _ :: jet_cli_path_authority_new(roots) ?? panic("64 roots")
+    &roots.push(~root)
+    if jet_cli_path_authority_new(roots) == {
+        .Ok(_) -> panic("65 roots")
+        .Err(error) -> assert_eq(jet_cli_path_authority_error_message(error), "path authority has more than 64 roots")
+    }
+    if jet_cli_path_authority_new([OSPath]{completion_test_path("root")}) == {
+        .Ok(_) -> panic("relative root")
+        .Err(error) -> assert_eq(jet_cli_path_authority_error_message(error), "path authority root is not absolute: root")
+    }
+    completion_test_remove(root)
+}
+#Test("native path ordering Unicode labels and absolute replacements") {
+    root :: completion_test_directory()
+    completion_test_file(root, "z")
+    completion_test_file(root, "a")
+    completion_fs.create_dir(completion_test_join(root, "é")) ?? panic(err.message)
+    context :: completion_test_path_context(root)
+    result :: completion_test_query_path("", context)
+    assert_eq(result.candidates.len(), 3)
+    assert_eq(result.candidates[0].label, "a")
+    assert_eq(result.candidates[1].label, "z")
+    assert_eq(result.candidates[2].label, "é{completion_test_separator()}")
+    assert_eq(result.candidates[2].detail, "directory")
+    prefix :: completion_paths.to_str(completion_test_join(root, "é")) ?? panic("text fixture")
+    absolute :: completion_test_query_path(prefix, context)
+    assert_eq(absolute.candidates[0].replacement.text, "{prefix}{completion_test_separator()}")
+    completion_test_remove(root)
+}
+#Test("hostile traversal controls containment and native intermediate symlinks") {
+    root :: completion_test_directory()
+    context :: completion_test_path_context(root)
+    c1 :: String.from_bytes([U8]{U8{194}, U8{128}}) ?? panic("non-whitespace C1")
+    escape :: String.from_bytes([U8]{U8{27}}) ?? panic("escape")
+    outside :: completion_paths.display(root)
+    prefixes :: [String]{"..{completion_test_separator()}", "{outside}2{completion_test_separator()}", "bad{escape}", c1}
+    loop prefix in prefixes {
+        assert(completion_test_error(completion_test_request(prefix, prefix.bytes().len(), JetCLICompletionTarget.Path, Val("path")), context).starts_with("completion path is outside the granted roots:"))
+    }
+    assert(jet_cli_completion_result_is_empty(completion_test_query_path("bad\n", context)))
+    // Unix symlinks are real; Windows uses its original selected symlink_dir producer.
+    target :: completion_test_join(root, "target")
+    link :: completion_test_join(root, "link")
+    completion_fs.create_dir(target) ?? panic(err.message)
+    completion_fs.create_dir(completion_test_join(target, "sub")) ?? panic(err.message)
+    completion_test_file(completion_test_join(target, "sub"), "secret")
+    if completion_target.selected_os() == completion_target.NativeTargetOS.Windows {
+        completion_fs.symlink_dir(target, link) ?? panic(err.message)
+    } else { completion_fs.symlink(target, link) ?? panic(err.message) }
+    assert(jet_cli_completion_result_is_empty(completion_test_query_path("link{completion_test_separator()}sub{completion_test_separator()}", context)))
+    loop path in [OSPath]{~link, completion_test_join(link, "sub")} {
+        if jet_cli_path_authority_new([OSPath]{~path}) == {
+            .Ok(_) -> panic("symlink authority")
+            .Err(error) -> if error == {
+                .SymlinkRoot(rejected) -> assert(completion_paths.equals(rejected, path))
+                else -> panic(jet_cli_path_authority_error_message(error))
+            }
+        }
+    }
+    rows :: completion_test_query_path("", context)
+    assert_eq(rows.candidates.len(), 1)
+    assert_eq(rows.candidates[0].label, "target{completion_test_separator()}")
+    completion_test_remove(root)
+}
+#Test("path depth 64 inclusive hard cap and configured depth") {
+    root :: completion_test_directory()
+    context := completion_test_path_context(root)
+    prefix := "x{completion_test_separator()}".repeat(64)
+    assert(jet_cli_completion_result_is_empty(completion_test_query_path(prefix, context)))
+    prefix = "{prefix}x{completion_test_separator()}"
+    context.limits.max_path_depth = 1000
+    assert(completion_test_error(completion_test_request(prefix, prefix.bytes().len(), JetCLICompletionTarget.Path, Val("path")), context).contains("64-component bound"))
+    context.limits.max_path_depth = 1
+    prefix = "a{completion_test_separator()}b{completion_test_separator()}"
+    assert(completion_test_error(completion_test_request(prefix, prefix.bytes().len(), JetCLICompletionTarget.Path, Val("path")), context).contains("1-component bound"))
+    completion_test_remove(root)
+}
+#Test("native directory bound retains lexical minimum and 4096 exact boundary") {
+    root :: completion_test_directory()
+    loop index in 0..<4096 -> completion_test_file(root, "z{index}")
+    context := completion_test_path_context(root)
+    boundary :: completion_test_query_path("aaa", context)
+    assert(jet_cli_completion_result_is_empty(boundary))
+    assert(!boundary.truncated)
+    authority :: context.path_authority ?? panic("authority")
+    projection :: jet_cli_completion_path_candidates(authority, "", Span{start: 0, end: 0}, context.limits) ?? panic("projection")
+    assert_eq(projection.candidates.len(), 4096)
+    assert(!projection.truncated)
+    completion_test_file(root, "aaa")
+    context.limits.max_directory_entries = 10000
+    result :: completion_test_query_path("", context)
+    assert_eq(result.candidates[0].label, "aaa")
+    assert(result.truncated)
+    context.limits.max_directory_entries = 2
+    small :: completion_test_query_path("", context)
+    assert_eq(small.candidates.len(), 2)
+    assert_eq(small.candidates[0].label, "aaa")
+    assert_eq(small.candidates[1].label, "z0")
+    assert(small.truncated)
+    completion_test_remove(root)
+}
+#Test("missing native authority and unsupported path input fail closed") {
+    context := completion_test_context(TCLIValueKind.Path, "path")
+    request :: completion_test_request("", 0, JetCLICompletionTarget.Path, Val("path"))
+    assert_eq(completion_test_error(request, context), "path completion needs explicit filesystem authority")
+    context.schema.inputs[0].shape = TCLIInputShape.Value{kind: TCLIValueKind.Bool, optional: false, default: None}
+    assert_eq(completion_test_error(request, context), "checked input `path` has kind Bool, which cannot serve path completion")
+}
+#Test("component root order drives rank and normalized root has no parent") {
+    root :: completion_test_directory()
+    first :: completion_test_join(root, "a{completion_test_separator()}b")
+    second :: completion_test_join(root, "a-b")
+    completion_fs.create_dir_all(first) ?? panic(err.message)
+    completion_fs.create_dir(second) ?? panic(err.message)
+    completion_test_file(first, "z")
+    completion_test_file(first, ".dot")
+    completion_test_file(second, "a")
+    completion_test_file(second, "..dot")
+    authority :: jet_cli_path_authority_new([OSPath]{~second, ~first}) ?? panic("authority")
+    assert(completion_paths.equals(jet_cli_path_authority_roots(authority)[0], first))
+    context := completion_test_context(TCLIValueKind.Path, "path")
+    context.path_authority = Val(authority)
+    result :: completion_test_query_path("", context)
+    assert_eq(result.candidates[0].label, ".dot")
+    assert_eq(result.candidates[1].label, "z")
+    assert_eq(result.candidates[2].label, "..dot")
+    // Root-only normalized paths have no parent, so Rust queries every granted root.
+    filesystem_root := ~first
+    loop completion_paths.pop(&filesystem_root) {}
+    root_text :: completion_paths.display(filesystem_root)
+    dot :: completion_test_query_path("{root_text}.", context)
+    assert_eq(dot.candidates.len(), 2)
+    assert_eq(dot.candidates[0].label, "{root_text}.dot")
+    parent :: completion_test_query_path("{root_text}..", context)
+    assert_eq(parent.candidates.len(), 1)
+    assert_eq(parent.candidates[0].label, "{root_text}..dot")
+    completion_test_remove(root)
+}
+fn completion_test_job(name: String, scope: JobScope, doc: String?) -> CLIRecordJob Never! {
+    CLIRecordJob{name: name, scope: scope, doc: doc, arguments: [TJobArgumentFact]{}, after: [String]{}, packages: [String]{}, cwd: None, inputs: [String]{}, outputs: [String]{}, skip: None, cache: JobCachePolicy.Uncached, parallel: 1, limits: [String:String]{}, schedule: None}
+}
+#Test("jobs hide internal facts and use exact-first lexical ranking and checked docs") {
+    context := completion_test_context(TCLIValueKind.Bool, "mode")
+    context.schema.jobs = [CLIRecordJob]{completion_test_job("build-z", JobScope.Ship, None), completion_test_job("build-a", JobScope.Dev, Val("checked job")), completion_test_job("build", JobScope.Dev, None), completion_test_job("build-hidden", JobScope.Internal, None), completion_test_job("build-a", JobScope.Dev, Val("zzz"))}
+    result :: completion_test_result(completion_test_request("build", 5, JetCLICompletionTarget.Jobs, None), context)
+    assert_eq(result.candidates.len(), 3)
+    assert_eq(result.candidates[0].label, "build")
+    assert_eq(result.candidates[0].detail, "dev job")
+    assert_eq(result.candidates[1].label, "build-a")
+    assert_eq(result.candidates[1].detail, "checked job")
+    assert_eq(result.candidates[2].detail, "ship job")
+    assert_eq(result.candidates[0].source, "job-schema")
+}
+#Test("equals stripping only applies to the selected field spelling") {
+    assert_eq(jet_cli_completion_value_start("--other=x", Span{start: 0, end: 9}, 9, Val("mode")), 0)
+    assert_eq(jet_cli_completion_value_start("-other=x", Span{start: 0, end: 8}, 8, Val("mode")), 0)
+    assert_eq(jet_cli_completion_value_start("--mode=x", Span{start: 0, end: 8}, 8, Val("mode")), 7)
+    assert_eq(jet_cli_completion_value_start("-mode=x", Span{start: 0, end: 7}, 7, Val("mode")), 6)
+    assert_eq(jet_cli_completion_value_start("--mode=a=b", Span{start: 0, end: 10}, 10, Val("mode")), 0)
+}
+#Test("authority construction reports empty missing non-directory and native IO") {
+    root :: completion_test_directory()
+    if jet_cli_path_authority_new([OSPath]{}) == {
+        .Ok(_) -> panic("empty roots")
+        .Err(error) -> assert_eq(jet_cli_path_authority_error_message(error), "path authority needs at least one root")
+    }
+    missing :: completion_test_join(root, "missing")
+    if jet_cli_path_authority_new([OSPath]{~missing}) == {
+        .Ok(_) -> panic("missing roots")
+        .Err(error) -> assert_eq(jet_cli_path_authority_error_message(error), "path authority root does not exist: {completion_paths.display(missing)}")
+    }
+    file :: completion_test_join(root, "file")
+    completion_test_file(root, "file")
+    if jet_cli_path_authority_new([OSPath]{~file}) == {
+        .Ok(_) -> panic("file roots")
+        .Err(error) -> assert_eq(jet_cli_path_authority_error_message(error), "path authority root is not a directory: {completion_paths.display(file)}")
+    }
+    // Interior NUL reaches the actual native InvalidInput error, not a fabricated host denial.
+    invalid := ~root
+    &invalid.encoded.push(U8{0})
+    if jet_cli_path_authority_new([OSPath]{~invalid}) == {
+        .Ok(_) -> panic("native invalid path")
+        .Err(error) -> if error == {
+            .IO(path, message) -> {
+                assert(completion_paths.equals(path, invalid))
+                assert(!message.is_empty())
+            }
+            else -> panic(jet_cli_path_authority_error_message(error))
+        }
+    }
+    completion_test_remove(root)
+}
+#Test("candidate 256 boundary and dedup do not incorrectly mark truncation") {
+    context := completion_test_context(TCLIValueKind.String, "mode")
+    values := [String]{}
+    loop index in 0..<256 -> &values.push("value{index}")
+    &values.push("value0")
+    context.typed_facts = [JetCLITypedCompletionFact]{completion_test_enum(values)}
+    request :: completion_test_request("", 0, JetCLICompletionTarget.Value, Val("mode"))
+    result :: completion_test_result(request, context)
+    assert_eq(result.candidates.len(), 256)
+    assert(!result.truncated)
+    &values.push("extra")
+    context.typed_facts = [JetCLITypedCompletionFact]{completion_test_enum(values)}
+    assert(completion_test_result(request, context).truncated)
+}
+#Test("Unix nonUTF8 roots retain native authority and nonUTF8 names are excluded") {
+    if completion_target.selected_os() != completion_target.NativeTargetOS.Windows {
+        base :: completion_test_directory()
+        root := ~base
+        completion_paths.push(&root, completion_paths.from_encoded(^[U8]{U8{255}}, completion_paths.PathPlatform.Unix))
+        completion_fs.create_dir(root) ?? panic(err.message)
+        completion_test_file(root, "valid")
+        invalid := ~root
+        completion_paths.push(&invalid, completion_paths.from_encoded(^[U8]{U8{254}}, completion_paths.PathPlatform.Unix))
+        completion_fs.write(invalid, [U8]{}) ?? panic(err.message)
+        context :: completion_test_path_context(root)
+        authority :: context.path_authority ?? panic("authority")
+        assert_eq(jet_cli_path_authority_roots(authority)[0].encoded, root.encoded)
+        assert_eq(completion_test_query_path("", context).candidates.len(), 1)
+        assert_eq(completion_test_query_path("", context).candidates[0].label, "valid")
+        completion_test_remove(base)
+    }
+}
+#Test("Windows native drive UNC verbatim normalization and separator labels") {
+    platform :: completion_paths.PathPlatform.Windows
+    loop text in [String]{"C:\\root\\.\\child\\..", "\\\\server\\share\\root\\..", "\\\\?\\C:\\root\\.."} {
+        path :: completion_paths.from_text(text, platform)
+        normalized :: jet_cli_completion_normalize_absolute_path(path) ?? panic(err.message)
+        assert(completion_paths.is_absolute(normalized))
+        assert(completion_paths.equals(normalized, completion_paths.normalize_identity(path)))
+    }
+    assert(completion_paths.equals(jet_cli_completion_normalize_lexical_path(completion_paths.from_text("C:relative", platform)) ?? panic(err.message), completion_paths.from_text("C:relative", platform)))
+    if completion_target.selected_os() == completion_target.NativeTargetOS.Windows {
+        assert_eq(jet_cli_completion_replacement_label("parent\\", "child", true), "parent\\child\\")
+        root :: completion_test_directory()
+        child := ~root
+        completion_paths.push(&child, completion_paths.from_windows_wide([U16]{U16{55296}}))
+        completion_fs.create_dir(child) ?? panic(err.message)
+        authority :: jet_cli_path_authority_new([OSPath]{~child}) ?? panic("native surrogate root")
+        assert_eq(jet_cli_path_authority_roots(authority)[0].encoded, child.encoded)
+        assert(jet_cli_completion_result_is_empty(completion_test_query_path("", completion_test_path_context(root))))
+        completion_test_remove(root)
+    }
+}
+
+#Test("native Unix filesystem errors retain original path and error text") {
+    if completion_target.selected_os() != completion_target.NativeTargetOS.Windows {
+        root :: completion_test_directory()
+        completion_test_file(root, "file")
+        context :: completion_test_path_context(root)
+        prefix :: "file{completion_test_separator()}sub{completion_test_separator()}"
+        rejected :: completion_test_join(root, "file{completion_test_separator()}sub")
+        expected :: if completion_fs.symlink_metadata(rejected) == {
+            .Ok(_) -> panic("native ENOTDIR fixture")
+            .Err(error) -> ~error.message
+        }
+        request :: completion_test_request(prefix, prefix.bytes().len(), JetCLICompletionTarget.Path, Val("path"))
+        if jet_cli_completion_query(request, context) == {
+            .Ok(_) -> panic("native filesystem error swallowed")
+            .Err(error) -> if error == {
+                .Filesystem(path, message) -> {
+                    assert(completion_paths.equals(path, rejected))
+                    assert_eq(message, expected)
+                }
+                else -> panic(jet_cli_completion_error_message(error))
+            }
+        }
+        completion_test_remove(root)
+    }
+}

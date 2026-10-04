@@ -1,0 +1,173 @@
+// Redacted production-failure receipt context (Source/ProductionReceipt.rs,
+// D-DEVR-PROD1=A). This hashes the run closure and inputs; the receipt
+// environment carries digests and a project-relative entry, never source
+// text or argument values. The JET_DEVELOPMENT_RECEIPT_*_ENV names are the
+// canonical Jetpack/Foundation DevelopmentReceipt.jet constants (Rust
+// Prelude/DevelopmentReceipt.rs:80-90), consumed here, never redefined.
+use core.files.path as receipt_paths
+
+// Rust `TARGET` (ProductionReceipt.rs:11).
+pub JET_CLI_PRODUCTION_TARGET :: "native"
+
+// Rust `Context` (ProductionReceipt.rs:13-24).
+pub struct JetCLIProductionContext {
+    pub project_root: receipt_paths.Path
+    pub directory: receipt_paths.Path
+    pub source_file: receipt_paths.Path
+    pub entry: String
+    pub source_digest: String
+    pub closure_digest: String
+    pub input_digest: String
+    pub input_count: Int
+    pub input_count_digest: String
+    pub target_digest: String
+}
+
+// Rust `content_digest` (ProductionReceipt.rs:175-177).
+pub fn jet_cli_production_content_digest(bytes: [U8]) -> String Never! {
+    "sha256-{mir_sha256_hex_bytes(mir_sha256_bytes(bytes))}"
+}
+
+// Rust `project_relative_entry` (ProductionReceipt.rs:136-147).
+pub fn jet_cli_production_relative_entry(file: receipt_paths.Path, project_root: receipt_paths.Path) -> String Never! {
+    if jet_cli_receipt_strip_prefix(file, project_root) == Val(relative) {
+        text := relative.raw.replace("\\", "/")
+        if text != "" && text != "." -> return text
+    }
+    name := jet_cli_receipt_file_name(file)
+    if name != "" -> return name
+    "<unknown>"
+}
+
+// Rust `prepare` closure header (ProductionReceipt.rs:38-40).
+pub fn jet_cli_production_closure_start(entry: String, source_digest: String) -> [U8] Never! {
+    closure := "jet-production-closure-v1".bytes()
+    &closure.push(U8{0})
+    jet_cli_receipt_frame(&closure, entry.bytes())
+    jet_cli_receipt_frame(&closure, source_digest.bytes())
+    closure
+}
+
+// Rust `add_project_input` framing (ProductionReceipt.rs:166-172): the kind,
+// the project-relative path (the kind outside the project) and the digest.
+pub fn jet_cli_production_add_project_input(closure: &[U8], kind: String, path: receipt_paths.Path, bytes: [U8], project_root: receipt_paths.Path) Never! {
+    jet_cli_receipt_frame(&closure, kind.bytes())
+    relative := ~kind
+    if jet_cli_receipt_strip_prefix(path, project_root) == Val(inside) -> relative = ~inside.raw
+    jet_cli_receipt_frame(&closure, relative.bytes())
+    jet_cli_receipt_frame(&closure, jet_cli_production_content_digest(bytes).bytes())
+}
+
+// Rust `prepare` inputs, identity and receipt directory (ProductionReceipt.rs:43-80).
+pub fn jet_cli_production_context_finish(project_root: receipt_paths.Path, source_file: receipt_paths.Path, entry: String, source_digest: String, closure: [U8], program_args: [String]) -> JetCLIProductionContext Never! {
+    closure_digest :: jet_cli_production_content_digest(closure)
+    inputs := "jet-production-inputs-v1".bytes()
+    &inputs.push(U8{0})
+    loop argument in program_args -> jet_cli_receipt_frame(&inputs, argument.bytes())
+    input_digest :: jet_cli_production_content_digest(inputs)
+    input_count :: program_args.len()
+    input_count_digest :: jet_cli_production_content_digest("{input_count}".bytes())
+    target_digest :: jet_cli_production_content_digest(JET_CLI_PRODUCTION_TARGET.bytes())
+    identity := "jet-production-failure-v1".bytes()
+    &identity.push(U8{0})
+    jet_cli_receipt_frame(&identity, entry.bytes())
+    jet_cli_receipt_frame(&identity, source_digest.bytes())
+    jet_cli_receipt_frame(&identity, closure_digest.bytes())
+    jet_cli_receipt_frame(&identity, input_digest.bytes())
+    jet_cli_receipt_frame(&identity, JET_CLI_PRODUCTION_TARGET.bytes())
+    receipt_id :: jet_cli_production_content_digest(identity)
+    // `sha256-` is 7 ASCII bytes; the next 16 hex digits name the directory.
+    short := receipt_id.slice(7, 23) // #4303: view flows into the directory String
+    directory :: receipt_paths.join(receipt_paths.join(receipt_paths.join(project_root, ".jet"), "reports"), "production-{short}")
+    JetCLIProductionContext{
+        project_root: project_root,
+        directory: directory,
+        source_file: source_file,
+        entry: entry,
+        source_digest: source_digest,
+        closure_digest: closure_digest,
+        input_digest: input_digest,
+        input_count: input_count,
+        input_count_digest: input_count_digest,
+        target_digest: target_digest,
+    }
+}
+
+// Rust `add_project_input` path selection (ProductionReceipt.rs:155-162):
+// the checked package manifest (Loader::manifest_path) or `.jet/lock`.
+fn jet_cli_production_input_path(root: receipt_paths.Path, kind: String) -[FS, Env]> receipt_paths.Path? Never! {
+    if kind == "lock" -> return Val(receipt_paths.join(receipt_paths.join(root, ".jet"), "lock"))
+    if kind != "manifest" -> return None
+    if pkg_manifest_path_checked(root.raw) == {
+        .Ok(found) -> { if found == Val(manifest) -> return Val(receipt_paths.path(manifest)) }
+        .Err(_) -> {}
+    }
+    None
+}
+
+// Rust `add_project_input` (ProductionReceipt.rs:149-173). The package root is
+// Loader::find_manifest_root of the given file's parent (the authority seam's
+// `package_root`); a missing root, path or unreadable file adds nothing.
+fn jet_cli_production_observe_project_input<A: JetCLIReceiptAuthorityHost>(closure: &[U8], file: String, project_root: receipt_paths.Path, kind: String, authority: &A) Never! -[FS, Env]> {
+    start :: jet_cli_receipt_parent(receipt_paths.path(file)) ?? receipt_paths.path(".")
+    found := receipt_paths.Path?{None}
+    if &authority.package_root(start) == {
+        .Ok(value) -> found = value
+        .Err(_) -> {}
+    }
+    root :: found ?? return
+    path :: jet_cli_production_input_path(root, kind) ?? return
+    if receipt_paths.read_bytes(path) == {
+        .Ok(bytes) -> jet_cli_production_add_project_input(&closure, kind, path, bytes, project_root)
+        .Err(_) -> {}
+    }
+}
+
+// Rust `prepare` (ProductionReceipt.rs:26-81). The project root is
+// jet::build_project_root (the authority seam's `selected_project_root` of the
+// absolute entry's directory), falling back to the current directory.
+pub fn jet_cli_production_receipt_prepare<A: JetCLIReceiptAuthorityHost, P: JetCLIReceiptProcessHost>(file: String, source: String, program_args: [String], authority: &A, process_host: &P) -[FS, Env]> JetCLIProductionContext Never! {
+    cwd :: jet_cli_receipt_current_dir(&process_host)
+    given :: receipt_paths.path(file)
+    source_file :: if receipt_paths.is_absolute(given) -> ~given else -> receipt_paths.join_path(~cwd, ~given)
+    directory :: jet_cli_receipt_parent(source_file) ?? receipt_paths.path(".")
+    project_root :: &authority.selected_project_root(directory) ?? ~cwd
+    entry :: jet_cli_production_relative_entry(source_file, project_root)
+    source_digest :: jet_cli_production_content_digest(source.bytes())
+    closure := jet_cli_production_closure_start(entry, source_digest)
+    jet_cli_production_observe_project_input(&closure, file, project_root, "manifest", &authority)
+    jet_cli_production_observe_project_input(&closure, file, project_root, "lock", &authority)
+    jet_cli_production_context_finish(project_root, source_file, entry, source_digest, closure, program_args)
+}
+
+// Rust `Context::install` (ProductionReceipt.rs:84-121). The redacted receipt
+// environment becomes explicit child overrides on the execution request
+// (Host/Execution.jet JetCLIExecutionRequest.environment), not a mutation of
+// this process.
+pub fn jet_cli_production_receipt_install(context: JetCLIProductionContext, environment: &[String:String?]) Never! {
+    environment[JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV] = Val(~context.directory.raw)
+    environment[JET_DEVELOPMENT_RECEIPT_ENTRY_ENV] = Val(~context.entry)
+    environment[JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST_ENV] = Val(~context.source_digest)
+    environment[JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST_ENV] = Val(~context.closure_digest)
+    environment[JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST_ENV] = Val(~context.input_digest)
+    environment[JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_ENV] = Val("{context.input_count}")
+    environment[JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST_ENV] = Val(~context.input_count_digest)
+    environment[JET_DEVELOPMENT_RECEIPT_TARGET_ENV] = Val(JET_CLI_PRODUCTION_TARGET)
+    environment[JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST_ENV] = Val(~context.target_digest)
+}
+
+// Rust `Context::project_root` (ProductionReceipt.rs:122-124): retain the
+// selected project, never re-resolve from the report directory.
+pub fn jet_cli_production_project_root(context: JetCLIProductionContext) -> receipt_paths.Path Never! {
+    ~context.project_root
+}
+
+// Rust `Context::record_identity` construction (ProductionReceipt.rs:125-133).
+// This is only the RecordIdentity projection after the canonical CmdProve
+// target_input_sha256_for_file resolver succeeds. Resolving the source_file
+// remains gated on that resolver; a caller-supplied digest is not proof of it.
+// `tool_version` is the compiler's embedded CARGO_PKG_VERSION.
+pub fn jet_cli_production_record_identity(target_inputs_sha256: String, tool_version: String) -> JetCLIRecordIdentity JetCLIRecordError! {
+    identity :: jet_cli_record_identity_new(target_inputs_sha256, tool_version, JET_CLI_PRODUCTION_TARGET)
+    Ok(identity)
+}

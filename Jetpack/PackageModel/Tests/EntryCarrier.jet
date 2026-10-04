@@ -1,0 +1,466 @@
+// Loader.rs carrier/discovery regressions; tests/inline_package.rs:53-115,
+// 118-193,345-435,547-563. Compiler execution/graph checks remain in their
+// compiler lane; these assertions exercise the canonical composed facts API.
+
+fn pkg_entry_test_root(label: String) -[FS, Env]> String Never! {
+    root :: files.join(sys.temp_dir(), "jet-entry-carrier-{label}-{process.current_pid()}")
+    files.remove_all(root).drop("a stale fixture may be absent")
+    files.create_dir_all(root) ?? panic("create carrier fixture")
+    // Prevent unrelated outer source authority from affecting absence tests.
+    files.write(files.join(root, WORKSPACE_FILE), "module workspace {{ members: [] }}\n") ?? panic("write boundary")
+    root
+}
+
+fn pkg_entry_test_write(root: String, relative: String, text: String) Never! -[FS]> {
+    path :: files.join(root, relative)
+    files.create_dir_all(pkg_authority_effective_root(pkg_path_parent(path))) ?? panic("create fixture parent")
+    files.write(path, text) ?? panic("write carrier fixture")
+}
+
+fn pkg_entry_test_facts(cache: &WorkspaceDeclarationCache, entry: String) -[FS, Env]> PackageFacts Never! {
+    found :: pkg_package_facts_for_entry(&cache, entry) ?? panic("entry facts load")
+    found ?? panic("entry has a package")
+}
+
+fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS, Env]> Diagnostic Never! {
+    if pkg_package_facts_for_entry(&cache, entry) == {
+        .Err(error) -> error.diagnostic
+        .Ok(_) -> panic("carrier must fail closed")
+    }
+}
+
+#Test("conventional and inline entry carriers have identical composed facts") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("composed-parity")
+    body :: "name: \"inline-parity\"\nversion: \"1.2.3\"\njet: \">=0.1.0\"\nedition: \"2026\"\ndescription: \"one source of package facts\"\nlicense: \"MIT\"\nrepository: \"https://example.test/inline-parity\"\ndeps: {{ dep: ./deps/dep }}\nconfigs: [dev, \"release.jet\"]\ndefaults: {{ run: app }}\nauthority: {{ holds: {{ allow: [IO] }} }}\npolicy: {{ unsafe: .Deny }}\ndev :: Config{{ services: {{ db: {{}} }} }}\n"
+    loop name in [String]{"inline", "extracted"} {
+        dir :: files.join(root, name)
+        pkg_entry_test_write(dir, "deps/dep/package.jet", "name: \"dep\"\nversion: \"0.1.0\"\n")
+        pkg_entry_test_write(dir, "release.jet", "pub release :: Config{{ outputs: {{ app: .Executable{{ name: \"app\", entry: run }} }} }}\n")
+    }
+    inline_entry :: files.join(root, "inline/run.jet")
+    extracted_entry :: files.join(root, "extracted/run.jet")
+    pkg_entry_test_write(root, "inline/run.jet", "package {{\n{body}}}\nfn run() {{}}\n")
+    pkg_entry_test_write(root, "extracted/package.jet", body)
+    pkg_entry_test_write(root, "extracted/run.jet", "fn run() {{}}\n")
+    inline_facts :: pkg_entry_test_facts(&cache, inline_entry)
+    extracted_facts :: pkg_entry_test_facts(&cache, extracted_entry)
+    assert_eq(inline_facts.semantic_digest(), extracted_facts.semantic_digest())
+    assert_eq(inline_facts.defaults["run"], "app")
+    assert_eq((inline_facts.select_output("run", None, None) ?? panic("composed default")).name, "app")
+    assert_eq(inline_facts.resolved_config_paths, [String]{"release.jet"})
+    assert(inline_facts.services.has_key("db"))
+    assert_eq(inline_facts.origin, inline_entry)
+    assert_eq(extracted_facts.origin, files.join(root, "extracted/package.jet"))
+    root_facts :: (pkg_package_facts_for_root(&cache, files.join(root, "inline")) ?? panic("root facts")) ?? panic("inline root")
+    assert_eq(root_facts.semantic_digest(), inline_facts.semantic_digest())
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("inline arbitrary entry composes Config relative to its own directory") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("arbitrary-inline")
+    pkg_entry_test_write(root, "nested/launch.jet", "package {{ name: \"launch\", configs: [dev] }}\nfn run() {{}}\n")
+    pkg_entry_test_write(root, "nested/renamed.jet", "pub dev :: Config{{ version: \"selected\" }}\n")
+    facts :: pkg_entry_test_facts(&cache, files.join(root, "nested/launch.jet"))
+    assert_eq(facts.name, "launch")
+    assert_eq(facts.version, Val("selected"))
+    assert_eq(facts.resolved_config_paths, [String]{"renamed.jet"})
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("nonstock nested entry inherits parent stock inline Package") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("parent-inline")
+    pkg_entry_test_write(root, "run.jet", "package {{ name: \"parent\", configs: [dev] }}\nfn run() {{}}\n")
+    pkg_entry_test_write(root, "dev.jet", "pub dev :: Config{{ version: \"parent-config\" }}\n")
+    pkg_entry_test_write(root, "nested/other.jet", "fn run() {{}}\n")
+    facts :: pkg_entry_test_facts(&cache, files.join(root, "nested/other.jet"))
+    assert_eq(facts.name, "parent")
+    assert_eq(facts.version, Val("parent-config"))
+    assert_eq(facts.origin, files.join(root, "run.jet"))
+    // Root lookup does not invent a parent-inline fallback of its own.
+    assert((pkg_package_facts_for_root(&cache, files.join(root, "nested")) ?? panic("nested root")) == None)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("stock src run carrier is found after plain root run entry") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("src-stock")
+    pkg_entry_test_write(root, "run.jet", "fn run() {{}}\n")
+    pkg_entry_test_write(root, "src/run.jet", "package {{ name: \"src-inline\" }}\nfn run() {{}}\n")
+    facts :: pkg_entry_test_facts(&cache, files.join(root, "run.jet"))
+    assert_eq(facts.name, "src-inline")
+    assert_eq(facts.origin, files.join(root, "src/run.jet"))
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("stock root run inline carrier precedes src run inline carrier") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("stock-order")
+    pkg_entry_test_write(root, "run.jet", "package {{ name: \"root\" }}\nfn run() {{}}\n")
+    pkg_entry_test_write(root, "src/run.jet", "package {{ name: \"src\" }}\nfn run() {{}}\n")
+    facts :: (pkg_package_facts_for_root(&cache, root) ?? panic("load root")) ?? panic("root package")
+    assert_eq(facts.name, "root")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("entry and root without a Package return absence") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("absent")
+    pkg_entry_test_write(root, "run.jet", "fn run() {{}}\n")
+    assert((pkg_package_facts_for_entry(&cache, files.join(root, "run.jet")) ?? panic("plain entry")) == None)
+    assert((pkg_package_facts_for_root(&cache, root) ?? panic("plain root")) == None)
+    assert((pkg_manifest_path_checked(root) ?? panic("manifest probe")) == None)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("own inline manifest conflict retains block span and exact message") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("own-conflict")
+    source :: "// header\npackage {{ name: \"inline\" }}\nfn run() {{}}\n"
+    pkg_entry_test_write(root, "run.jet", source)
+    pkg_entry_test_write(root, "package.jet", "name: \"manifest\"\n")
+    block :: (pkg_extract_inline_package(source) ?? panic("extract")) ?? panic("carrier")
+    diagnostic :: pkg_entry_test_failure(&cache, files.join(root, "run.jet"))
+    assert_eq(diagnostic.code, "E1363")
+    assert_eq(diagnostic.what, "an inline Package conflicts with package.jet")
+    assert_eq(diagnostic.why, "one project cannot carry both an inline Package block and a package.jet manifest")
+    assert_eq(diagnostic.fix, "remove package.jet or remove the inline Package block")
+    assert_eq(diagnostic.span, Val(block.span))
+    if pkg_package_facts_for_root(&cache, root) == {
+        .Err(error) -> assert_eq(error.diagnostic.span, Val(block.span))
+        .Ok(_) -> panic("root conflict must fail")
+    }
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+// tests/inline_package.rs `inline_package_conflicts_with_manifest_for_every_entry`.
+#Test("inline manifest conflict applies to every entry and retains stock span") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("other-conflict")
+    source :: "// stock header\npackage {{ name: \"inline\" }}\nfn run() {{}}\n"
+    pkg_entry_test_write(root, "run.jet", source)
+    pkg_entry_test_write(root, "other.jet", "fn run() {{}}\n")
+    pkg_entry_test_write(root, "package.jet", "name: \"manifest\"\n")
+    diagnostic :: pkg_entry_test_failure(&cache, files.join(root, "other.jet"))
+    block :: (pkg_extract_inline_package(source) ?? panic("extract")) ?? panic("carrier")
+    assert_eq(diagnostic.code, "E1363")
+    assert_eq(diagnostic.span, Val(block.span))
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+// tests/inline_package.rs `nested_manifest_stops_outer_inline_package_discovery`.
+#Test("nested conventional manifest stops outer inline discovery") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("nested-manifest")
+    pkg_entry_test_write(root, "run.jet", "package {{ name: \"outer\" }}\nfn run() {{}}\n")
+    pkg_entry_test_write(root, "inner/package.jet", "name: \"inner\"\n")
+    pkg_entry_test_write(root, "inner/run.jet", "fn run() {{}}\n")
+    assert((pkg_find_inline_package_root_checked(&cache, files.join(root, "inner")) ?? panic("discover")) == None)
+    assert_eq(pkg_entry_test_facts(&cache, files.join(root, "inner/run.jet")).name, "inner")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("malformed inline body retains byte span and E1362 details") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("malformed-body")
+    source :: "// π header\npackage {{ version: \"1\" }}\nfn run() {{}}\n"
+    pkg_entry_test_write(root, "run.jet", source)
+    block :: (pkg_extract_inline_package(source) ?? panic("extract")) ?? panic("carrier")
+    diagnostic :: pkg_entry_test_failure(&cache, files.join(root, "run.jet"))
+    error :: if PackageFacts.parse_uncomposed(block.body(source), files.join(root, "run.jet")) == {
+        .Err(error) -> error
+        .Ok(_) -> panic("missing name is malformed")
+    }
+    assert_eq(diagnostic.code, "E1362")
+    assert_eq(diagnostic.what, "the inline Package body is malformed")
+    assert_eq(diagnostic.why, error.message())
+    assert_eq(diagnostic.fix, "fix the inline Package fields, then retry")
+    assert_eq(diagnostic.span, Val(block.body_span))
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("malformed file backed Config fails inline completion without mutation") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("malformed-config")
+    source :: "package {{ name: \"demo\", configs: [bad] }}\nfn run() {{}}\n"
+    config :: "pub bad :: Config{{ members: [\"child\"] }}\n"
+    pkg_entry_test_write(root, "run.jet", source)
+    pkg_entry_test_write(root, "bad.jet", config)
+    diagnostic :: pkg_entry_test_failure(&cache, files.join(root, "run.jet"))
+    block :: (pkg_extract_inline_package(source) ?? panic("extract")) ?? panic("carrier")
+    assert_eq(diagnostic.code, "E1362")
+    assert_eq(diagnostic.span, Val(block.body_span))
+    assert_eq(files.read(files.join(root, "run.jet")) ?? panic("read"), source)
+    assert_eq(files.read(files.join(root, "bad.jet")) ?? panic("read"), config)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("inline invalid default fails only after Config composition") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("bad-default")
+    source :: "package {{ name: \"demo\", configs: [dev], defaults: {{ run: missing }} }}\nfn run() {{}}\n"
+    pkg_entry_test_write(root, "run.jet", source)
+    pkg_entry_test_write(root, "dev.jet", "pub dev :: Config{{ outputs: {{ app: Executable{{ entry: run }} }} }}\n")
+    diagnostic :: pkg_entry_test_failure(&cache, files.join(root, "run.jet"))
+    assert_eq(diagnostic.code, "E1362")
+    assert(diagnostic.why.contains("missing"))
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("both carriers validate guarantees after composing dependencies") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("guarantees")
+    body :: "name: \"demo\"\npolicy: {{ contain: [missing] }}\n"
+    pkg_entry_test_write(root, "inline/run.jet", "package {{\n{body}}}\nfn run() {{}}\n")
+    pkg_entry_test_write(root, "conventional/run.jet", "fn run() {{}}\n")
+    pkg_entry_test_write(root, "conventional/package.jet", body)
+    inline_error :: pkg_entry_test_failure(&cache, files.join(root, "inline/run.jet"))
+    conventional_error :: pkg_entry_test_failure(&cache, files.join(root, "conventional/run.jet"))
+    assert_eq(inline_error.code, "E1362")
+    assert(inline_error.why.contains("deps:"))
+    assert_eq(conventional_error.code, "E1334")
+    assert(conventional_error.why.contains("deps:"))
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("inline and conventional carriers validate flat members") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("members")
+    body :: "name: \"root\"\nmembers: [\"child\"]\n"
+    loop name in [String]{"inline", "conventional"} {
+        pkg_entry_test_write(root, "{name}/child/package.jet", "name: \"child\"\n")
+    }
+    pkg_entry_test_write(root, "inline/run.jet", "package {{\n{body}}}\nfn run() {{}}\n")
+    pkg_entry_test_write(root, "conventional/package.jet", body)
+    pkg_entry_test_write(root, "conventional/run.jet", "fn run() {{}}\n")
+    left :: pkg_entry_test_facts(&cache, files.join(root, "inline/run.jet"))
+    right :: pkg_entry_test_facts(&cache, files.join(root, "conventional/run.jet"))
+    assert_eq(left.semantic_digest(), right.semantic_digest())
+    assert_eq(left.members.len(), 1)
+    // Nested membership is refused in both forms, not truncated.
+    loop name in [String]{"inline", "conventional"} {
+        pkg_entry_test_write(root, "{name}/child/package.jet", "name: \"child\"\nmembers: [\"grandchild\"]\n")
+    }
+    assert_eq(pkg_entry_test_failure(&cache, files.join(root, "inline/run.jet")).code, "E1362")
+    assert_eq(pkg_entry_test_failure(&cache, files.join(root, "conventional/run.jet")).code, "E1323")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+// tests/inline_package.rs path escape regression: retain the original input.
+#Test("inline Config path escape fails before state mutation") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("path-escape")
+    source :: "package {{\nname: \"escape\"\nconfigs: [\"../outside-config.jet\"]\n}}\nfn run() {{}}\n"
+    pkg_entry_test_write(root, "child/run.jet", source)
+    outside :: files.join(root, "outside-config.jet")
+    files.write(outside, "host-state\n") ?? panic("write outside")
+    diagnostic :: pkg_entry_test_failure(&cache, files.join(root, "child/run.jet"))
+    assert_eq(diagnostic.code, "E1362")
+    assert(diagnostic.span != None)
+    assert_eq(files.read(files.join(root, "child/run.jet")) ?? panic("read"), source)
+    assert_eq(files.read(outside) ?? panic("read outside"), "host-state\n")
+    files.remove(outside) ?? panic("cleanup outside")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+// tests/inline_package.rs duplicate carrier regression.
+#Test("duplicate inline Package rejects before changing source") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("duplicate")
+    source :: "package {{ name: \"first\" }}\nfn run() {{}}\npackage {{ name: \"second\" }}\n"
+    pkg_entry_test_write(root, "run.jet", source)
+    assert_eq(pkg_entry_test_failure(&cache, files.join(root, "run.jet")).code, "E1361")
+    assert_eq(files.read(files.join(root, "run.jet")) ?? panic("read"), source)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("unbalanced stock inline carrier cannot disappear into manifest fallback") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("unbalanced")
+    pkg_entry_test_write(root, "run.jet", "package {{ name: \"broken\"\nfn run() {{}}\n")
+    pkg_entry_test_write(root, "other.jet", "fn run() {{}}\n")
+    assert_eq(pkg_entry_test_failure(&cache, files.join(root, "other.jet")).code, "E1362")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+// Loader.rs:6110-6152. Filename-independent workspace declaration boundaries.
+#Test("declaration resolved workspace stops both outer carrier walks") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("declared-boundary")
+    pkg_entry_test_write(root, "package.jet", "name: \"outer\"\n")
+    pkg_entry_test_write(root, "run.jet", "package {{ name: \"outer-inline\" }}\nfn run() {{}}\n")
+    pkg_entry_test_write(root, "child/authority.jet", "module workspace {{ policy: {{ deny: #(FS) }} }}\n")
+    pkg_entry_test_write(root, "child/src/other.jet", "fn run() {{}}\n")
+    nested :: files.join(root, "child/src")
+    assert((pkg_find_manifest_root_checked(&cache, nested) ?? panic("manifest walk")) == None)
+    assert((pkg_find_inline_package_root_checked(&cache, nested) ?? panic("inline walk")) == None)
+    assert((pkg_package_facts_for_entry(&cache, files.join(nested, "other.jet")) ?? panic("boundary entry")) == None)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("ambiguous inner workspace cannot expose outer Package") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("ambiguous-boundary")
+    pkg_entry_test_write(root, "package.jet", "name: \"outer\"\nversion: \"0.1.0\"\n")
+    loop name in [String]{"a", "b"} {
+        pkg_entry_test_write(root, "child/{name}.jet", "module workspace {{ policy: {{ deny: #(FS) }} }}\n")
+    }
+    pkg_entry_test_write(root, "child/src/other.jet", "fn run() {{}}\n")
+    diagnostic :: pkg_entry_test_failure(&cache, files.join(root, "child/src/other.jet"))
+    assert_eq(diagnostic.code, "E1239")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("malformed canonical workspace stops outer package discovery") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("malformed-boundary")
+    pkg_entry_test_write(root, "package.jet", "name: \"outer\"\n")
+    pkg_entry_test_write(root, "child/workspace.jet", "fn ordinary() {{}}\n")
+    pkg_entry_test_write(root, "child/other.jet", "fn run() {{}}\n")
+    assert_eq(pkg_entry_test_failure(&cache, files.join(root, "child/other.jet")).code, "E0995")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+// Loader.rs:6155-6190, package-facts portion of explicit shared authority test.
+#Test("explicit shared package manifest keeps declared application authority") {
+    if !sys.is_unix() -> return
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("shared-package")
+    pkg_entry_test_write(root, "package.jet", "name: \"fixture\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [IO] }}, needs: [UI.FontShaping] }}\n")
+    pkg_entry_test_write(root, "run.jet", "fn run() {{}}\n")
+    files.set_mode(root, 0o777) ?? panic("chmod shared")
+    expected :: files.canonicalize(root) ?? panic("canonical root")
+    assert_eq(pkg_find_manifest_root_checked(&cache, root) ?? panic("explicit manifest"), Val(expected))
+    facts :: pkg_entry_test_facts(&cache, files.join(root, "run.jet"))
+    assert_eq(facts.authority.needs, [String]{"UI.FontShaping"})
+    files.set_mode(root, 0o700) ?? panic("restore mode")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("linked stock entry and linked manifest are refused as authority") {
+    if !sys.is_unix() -> return
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("linked-carriers")
+    pkg_entry_test_write(root, "target.txt", "package {{ name: \"linked\" }}\nfn run() {{}}\n")
+    files.symlink(files.join(root, "target.txt"), files.join(root, "run.jet")) ?? panic("link entry")
+    assert_eq(pkg_entry_test_failure(&cache, files.join(root, "run.jet")).code, "E1334")
+    files.remove(files.join(root, "run.jet")) ?? panic("remove link")
+    pkg_entry_test_write(root, "run.jet", "fn run() {{}}\n")
+    pkg_entry_test_write(root, "manifest.txt", "name: \"linked\"\n")
+    files.symlink(files.join(root, "manifest.txt"), files.join(root, "package.jet")) ?? panic("link manifest")
+    assert_eq(pkg_entry_test_failure(&cache, files.join(root, "run.jet")).code, "E1334")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+// tests/inline_package.rs:387-435, held metadata/no hidden host mutation.
+#Test("inline symlinked Config fails without changing host state") {
+    if !sys.is_unix() -> return
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("linked-config")
+    source :: "package {{ name: \"symlink\", configs: [\"config.jet\"] }}\nfn run() {{}}\n"
+    pkg_entry_test_write(root, "run.jet", source)
+    pkg_entry_test_write(root, "outside-config.txt", "description: \"host-state\"\n")
+    files.symlink(files.join(root, "outside-config.txt"), files.join(root, "config.jet")) ?? panic("link config")
+    diagnostic :: pkg_entry_test_failure(&cache, files.join(root, "run.jet"))
+    assert(diagnostic.code == "E1334" || diagnostic.code == "E1362")
+    assert_eq(files.read(files.join(root, "outside-config.txt")) ?? panic("read target"), "description: \"host-state\"\n")
+    assert((files.stat(files.join(root, "config.jet")) ?? panic("stat link")).is_symlink)
+    assert_eq(files.read(files.join(root, "run.jet")) ?? panic("read source"), source)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("inaccessible entry reports E1331 without becoming package absence") {
+    if !sys.is_unix() -> return
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("unreadable")
+    pkg_entry_test_write(root, "run.jet", "fn run() {{}}\n")
+    path :: files.join(root, "run.jet")
+    files.set_mode(path, 0o000) ?? panic("remove read access")
+    diagnostic :: pkg_entry_test_failure(&cache, path)
+    assert_eq(diagnostic.code, "E1331")
+    assert_eq(diagnostic.what, "entry `{path}` cannot be read")
+    assert_eq(diagnostic.fix, "restore the entry source, then retry")
+    assert(diagnostic.span == None)
+    files.set_mode(path, 0o600) ?? panic("restore access")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+// BLOCKED #4394, intentionally retains the original exact native detail.
+// This is not a relaxed authority-message assertion or a source-text test.
+#Test("missing entry retains exact native E1331 detail #4394") {
+    if !sys.is_linux() -> return
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("missing-native-detail")
+    path :: files.join(root, "missing.jet")
+    diagnostic :: pkg_entry_test_failure(&cache, path)
+    assert_eq(diagnostic.code, "E1331")
+    assert_eq(diagnostic.what, "entry `{path}` cannot be read")
+    assert_eq(diagnostic.why, "No such file or directory (os error 2)")
+    assert_eq(diagnostic.fix, "restore the entry source, then retry")
+    assert(diagnostic.span == None)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+// BLOCKED #4394: fs::read_to_string's original UTF-8 error must be retained
+// independently of the checked carrier's valid-UTF-8 authority diagnostic.
+#Test("invalid UTF8 entry retains exact E1331 read detail #4394") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("utf8-native-detail")
+    path :: files.join(root, "run.jet")
+    files.write_bytes(path, [U8]{U8{255}}) ?? panic("write invalid UTF8")
+    diagnostic :: pkg_entry_test_failure(&cache, path)
+    assert_eq(diagnostic.code, "E1331")
+    assert_eq(diagnostic.why, "stream did not contain valid UTF-8")
+    assert(diagnostic.span == None)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("missing inline member cannot be silently dropped") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("missing-member")
+    pkg_entry_test_write(root, "run.jet", "package {{ name: \"root\", members: [\"absent\"] }}\nfn run() {{}}\n")
+    assert_eq(pkg_entry_test_failure(&cache, files.join(root, "run.jet")).code, "E1362")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("duplicate inline member names are refused rather than merged") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("duplicate-member")
+    pkg_entry_test_write(root, "run.jet", "package {{ name: \"root\", members: [\"one\", \"two\"] }}\nfn run() {{}}\n")
+    loop name in [String]{"one", "two"} {
+        pkg_entry_test_write(root, "{name}/package.jet", "name: \"same\"\n")
+    }
+    diagnostic :: pkg_entry_test_failure(&cache, files.join(root, "run.jet"))
+    assert_eq(diagnostic.code, "E1362")
+    assert(diagnostic.why.contains("declared more than once"))
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("held entry identity is revalidated rather than reopened for new bytes") {
+    root :: pkg_entry_test_root("held-source")
+    pkg_entry_test_write(root, "run.jet", "package {{ name: \"held\" }}\nfn run() {{}}\n")
+    resolver :: AuthorityResolver.open(root) ?? panic("open authority")
+    held :: resolver.checked_file("run.jet") ?? panic("hold entry")
+    files.remove(files.join(root, "run.jet")) ?? panic("unlink held path")
+    pkg_entry_test_write(root, "run.jet", "package {{ name: \"replacement\" }}\nfn run() {{}}\n")
+    if pkg_package_facts_from_checked_entry(resolver, held, held.path, None) == {
+        .Err(error) -> assert_eq(error.diagnostic.code, "E1334")
+        .Ok(_) -> panic("replacement bytes must not become the held source")
+    }
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("entry carrier discovery reuses one workspace declaration cache") {
+    cache := WorkspaceDeclarationCache.new()
+    root :: pkg_entry_test_root("cache-session")
+    pkg_entry_test_write(root, "run.jet", "package {{ name: \"cached\" }}\nfn run() {{}}\n")
+    pkg_entry_test_write(root, "other.jet", "fn other() {{}}\n")
+    assert_eq(pkg_entry_test_facts(&cache, files.join(root, "other.jet")).name, "cached")
+    first :: cache.lexes
+    assert(first > 0)
+    assert_eq(pkg_entry_test_facts(&cache, files.join(root, "other.jet")).name, "cached")
+    assert_eq(cache.lexes, first)
+    files.remove_all(root) ?? panic("cleanup")
+}

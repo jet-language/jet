@@ -22,13 +22,13 @@ pub struct ForeignRealization {
 // fallback. The project lock is published only after every artifact passed
 // Hangar ingest and projection, so a later failure never leaves a lock that
 // claims an earlier dependency succeeded.
-pub fn provider_realize_foreign_dependencies(roots: HangarRoots, project_root: String, manifest: Manifest, ctx: ProviderCtx) -[FS, Env, Exec, Time, Time.Wait]> [ForeignRealization] ProviderError! {
+pub fn provider_realize_foreign_dependencies(verification: &StoreVerification, roots: HangarRoots, project_root: String, manifest: Manifest, ctx: ProviderCtx) -[FS, Env, Exec, Time, Time.Wait]> [ForeignRealization] ProviderError! {
     realized := [ForeignRealization]{}
     names := manifest.dependencies.keys().to_list()
     &names.sort()
     loop name in names {
         if manifest.dependencies[name] == {
-            .Foreign(language, reference) -> &realized.push(provider_realize_foreign_one(roots, project_root, name, language, reference, ctx))
+            .Foreign(language, reference) -> &realized.push(provider_realize_foreign_one(&verification, roots, project_root, name, language, reference, ctx))
             else -> {}
         }
     }
@@ -46,7 +46,7 @@ pub fn provider_realize_foreign_dependencies(roots: HangarRoots, project_root: S
     Ok(realized)
 }
 
-fn provider_realize_foreign_one(roots: HangarRoots, project_root: String, name: String, language: ForeignLanguage, reference: String, ctx: ProviderCtx) -[FS, Env, Time]> ForeignRealization ProviderError! {
+fn provider_realize_foreign_one(verification: &StoreVerification, roots: HangarRoots, project_root: String, name: String, language: ForeignLanguage, reference: String, ctx: ProviderCtx) -[FS, Env, Time]> ForeignRealization ProviderError! {
     provider_validate_library_name(name)
     spec :: ProviderRef.classify(reference) ?? return Err(ProviderError.ForeignProjection("foreign dependency {name} has an invalid provider ref {reference}: {err.message()}"))
     source :: provider_foreign_artifact_root(project_root, spec, ctx, name)
@@ -55,7 +55,7 @@ fn provider_realize_foreign_one(roots: HangarRoots, project_root: String, name: 
     descriptor :: pkg_binder_descriptor(language) ?? return Err(ProviderError.ForeignProjection("foreign dependency {name} has no binder descriptor for {language.root()}"))
     provider_require_descriptor_stamp(expected_binding, descriptor.stamp())
 
-    foreign_reference :: "{language.root()}{@REF_PROVIDER_AT}{reference}"
+    foreign_reference :: "{language.root()}{REF_PROVIDER_AT}{reference}"
     version :: provider_foreign_exact_version(spec) ?? return Err(ProviderError.ForeignProjection("foreign dependency {name} must pin its provider package with `#version=...`"))
     source_fingerprint :: foundation_try_tree_hash(source) ?? return Err(ProviderError.ForeignProjection("foreign dependency {name} source tree `{source}` could not be hashed: {err.message()}"))
     identity :: CacheIdentity{
@@ -75,7 +75,7 @@ fn provider_realize_foreign_one(roots: HangarRoots, project_root: String, name: 
         provenance: "foreign-provider-v1 language={language.root()} provider={spec.provider.label()} reference={reference}",
         platform_artifact_kind: "",
     }
-    ingested :: store_ingest_tree(roots, request) ?? return Err(ProviderError.Ingest(err.what()))
+    ingested :: store_ingest_tree(&verification, roots, request) ?? return Err(ProviderError.Ingest(err.what()))
     entry :: ingested.entry
     stored_binding :: provider_foreign_binding_in(entry.out, language, name)
     provider_require_regular_file(stored_binding, "verified foreign binding")
@@ -91,7 +91,7 @@ fn provider_realize_foreign_one(roots: HangarRoots, project_root: String, name: 
 
 // `<root>/.jet/bindings/<lang>/<name>.jet`.
 fn provider_foreign_binding_in(root: String, language: ForeignLanguage, name: String) -> String Never! {
-    files.join(files.join(files.join(root, @SOURCE_ROOT_DIR), language.bindings_subdir()), "{name}.{@FILE_EXT}")
+    files.join(files.join(files.join(root, SOURCE_ROOT_DIR), language.bindings_subdir()), "{name}.{FILE_EXT}")
 }
 
 // The project-side binding the compiler foreign loader reads.
@@ -101,7 +101,7 @@ pub fn provider_foreign_binding_path(project_root: String, language: ForeignLang
 
 // The provenance sidecar beside the project binding.
 pub fn provider_foreign_provenance_path(project_root: String, language: ForeignLanguage, name: String) -> String Never! {
-    files.join(files.join(files.join(project_root, @SOURCE_ROOT_DIR), language.bindings_subdir()), "{name}.provenance")
+    files.join(files.join(files.join(project_root, SOURCE_ROOT_DIR), language.bindings_subdir()), "{name}.provenance")
 }
 
 // A local `path` provider artifact, or the verified fixture artifact of any
@@ -162,7 +162,7 @@ fn provider_require_regular_file(path: String, label: String) ProviderError! -[F
 // descriptor stamp.
 fn provider_require_descriptor_stamp(path: String, expected: String) ProviderError! -[FS]> {
     source :: files.read(path) ?? return Err(ProviderError.ForeignProjection("could not read generated foreign binding {path}: {err}"))
-    actual := None
+    actual := String?{None}
     loop line in source.split("\n") {
         if actual == None && line.starts_with("// jet-ffi-descriptor=") -> actual = Val(line.removeprefix("// jet-ffi-descriptor="))
     }
@@ -199,7 +199,7 @@ fn provider_write_verified_file(destination: String, bytes: [U8]) ProviderError!
         }
     }
     if files.rename(temporary, destination) == {
-        .Ok(_) -> Ok()
+        .Ok(_) -> {}
         .Err(error) -> {
             files.remove(temporary).drop("the failed publish is reported; the temporary file may already be gone")
             Err(ProviderError.ForeignProjection("could not publish binding {destination}: {error}"))

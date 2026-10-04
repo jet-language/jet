@@ -29,6 +29,7 @@ use jet_foundation.[
     TExprKind,
     TFunc,
     THandleOp,
+    TLocal,
     TMapEntry,
     TStmt,
     Type,
@@ -239,16 +240,14 @@ fn jet_codegen_lower_container_encode(builder: &JetCodegenBuilder, expression: T
     _ := jet_codegen_emit(&builder, expression.span, None, MIROperation.WritePlace{place: output_place, value: empty})
 
     loop_body := [TStmt]{}
-    variable := "encode_item_{source_value.value}"
-    variable_two := String?{None}
+    variable := tir_user_local("encode_item_{source_value.value}", expression.span)
+    variable_two := TLocal?{None}
     encoded_value := if {
         map -> {
-            key_name := "encode_key_{source_value.value}"
-            value_name := "encode_value_{source_value.value}"
-            variable = key_name
-            variable_two = Val(value_name)
-            key_local := tir_user_local(key_name, expression.span)
-            item_local := tir_user_local(value_name, expression.span)
+            key_local := tir_user_local("encode_key_{source_value.value}", expression.span)
+            item_local := tir_user_local("encode_value_{source_value.value}", expression.span)
+            variable = key_local
+            variable_two = Val(item_local)
             key_expr := jet_codegen_data_expr(Type.String, expression.span, TExprKind.Local{local: key_local})
             item_expr := jet_codegen_data_expr(element, expression.span, TExprKind.Local{local: item_local})
             jet_codegen_data_expr(
@@ -257,8 +256,7 @@ fn jet_codegen_lower_container_encode(builder: &JetCodegenBuilder, expression: T
                 TExprKind.Tuple{values: [TExpr]{key_expr, jet_codegen_data_encode_node(item_expr)}},
             )
         } else -> {
-            item_local := tir_user_local(variable, expression.span)
-            item_expr := jet_codegen_data_expr(element, expression.span, TExprKind.Local{local: item_local})
+            item_expr := jet_codegen_data_expr(element, expression.span, TExprKind.Local{local: variable})
             jet_codegen_data_encode_node(item_expr)
         }
     }

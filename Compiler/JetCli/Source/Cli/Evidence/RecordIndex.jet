@@ -1,0 +1,614 @@
+// Record index store coordinator (Source/RecordIndex.rs RI02: 458-1014, the
+// validate/evict coordinator 1034-1078 and lock/secure-directory/sync 1435-1532).
+// RecordTypes.jet owns rows/codecs/the shared Unix component scanner and
+// RecordRetention.jet owns validate_all/apply_eviction/visibility/artifact removal.
+// Retired Rust aliases with no canonical callers: project, list, entries,
+// entries_authenticated, append, reload, query_identity and dead read_bounded.
+//
+// C-FS (#3593/#3598): JetCLIRecordIndexFileHost is the held native seam. There
+// is deliberately NO implementation until Core publishes the canonical
+// foundation_read_file_nofollow held reader, exclusive create, held fchmod/
+// sync_all and native error Display. read_nofollow delegates to that ONE reader:
+// no-follow open, same-file identity before/after, finite bound, held handle.
+// create_new is write+create_new/AlreadyExists; publication uses that same handle.
+// Every IO error message is native io::Error Display, never normalized.
+use core.files as record_index_files
+use core.files.path as record_index_paths
+use core.text as record_index_text
+use core.time as record_index_time
+use core.sys as record_index_sys
+
+#Error
+pub enum JetCLIRecordIndexIOError { NotFound(String) AlreadyExists(String) Other(String) }
+// Native io::Error Display carried by every seam error.
+pub fn jet_cli_record_index_io_message(error: JetCLIRecordIndexIOError) -> String Never! {
+    if error == {
+        .NotFound(message) -> message
+        .AlreadyExists(message) -> message
+        .Other(message) -> message
+    }
+}
+// Raw native observation, not a replacement Stat or a prechecked stale Bool.
+// Both fields come from ONE symlink_metadata result. None means modified() or
+// elapsed() failed; epoch mtime zero is valid and has an ordinary elapsed age.
+pub struct JetCLIRecordIndexLockMetadata {
+    pub metadata: record_index_files.Stat
+    pub modified_elapsed_ns: Int?
+}
+// Shared native filesystem seam (also adopted by ReceiptIO for receipt objects:
+// hard_link/create_directory_all/remove_directory are Rust fs::hard_link/
+// fs::create_dir_all/fs::remove_dir). next_temporary_id is Rust's process-global
+// NEXT_TEMP_ID.fetch_add(1); pid and cfg(unix) are Core sys facts.
+pub trait JetCLIRecordIndexFileHost {
+    fn next_temporary_id(&self) -[]> Int Never!
+    fn canonicalize(&self, path: record_index_paths.Path) -[FS.Read]> record_index_paths.Path JetCLIRecordIndexIOError!
+    fn metadata(&self, path: record_index_paths.Path) -[FS.Read]> record_index_files.Stat JetCLIRecordIndexIOError!
+    fn symlink_metadata(&self, path: record_index_paths.Path) -[FS.Read]> record_index_files.Stat JetCLIRecordIndexIOError!
+    fn lock_metadata(&self, path: record_index_paths.Path) -[FS.Read, Time]> JetCLIRecordIndexLockMetadata JetCLIRecordIndexIOError!
+    fn read_nofollow(&self, path: record_index_paths.Path, max_bytes: Int) -[FS.Read]> [U8] JetCLIRecordIndexIOError!
+    fn create_directory(&self, path: record_index_paths.Path) JetCLIRecordIndexIOError! -[FS.Write]>
+    fn create_directory_all(&self, path: record_index_paths.Path) JetCLIRecordIndexIOError! -[FS.Write]>
+    fn set_mode(&self, path: record_index_paths.Path, mode: Int) JetCLIRecordIndexIOError! -[FS.Write]>
+    fn create_new(&self, path: record_index_paths.Path) -[FS.Write]> Int JetCLIRecordIndexIOError!
+    fn set_handle_mode(&self, handle: Int, mode: Int) JetCLIRecordIndexIOError! -[FS.Write]>
+    fn write_all(&self, handle: Int, bytes: [U8]) JetCLIRecordIndexIOError! -[FS.Write]>
+    fn sync_all(&self, handle: Int) JetCLIRecordIndexIOError! -[FS.Write]>
+    fn close(&self, handle: Int) Never! -[FS.Write]>
+    fn rename(&self, from: record_index_paths.Path, to: record_index_paths.Path) JetCLIRecordIndexIOError! -[FS.Write]>
+    fn hard_link(&self, original: record_index_paths.Path, link: record_index_paths.Path) JetCLIRecordIndexIOError! -[FS.Write]>
+    fn remove_file(&self, path: record_index_paths.Path) JetCLIRecordIndexIOError! -[FS.Write]>
+    fn remove_directory(&self, path: record_index_paths.Path) JetCLIRecordIndexIOError! -[FS.Write]>
+    fn sync_directory(&self, path: record_index_paths.Path) JetCLIRecordIndexIOError! -[FS.Write]>
+}
+
+// Rust RecordIndex (RecordIndex.rs:457-462). root/budget are the Rust root()/
+// budget() facts; rows change only through the validated operations below.
+pub struct JetCLIRecordIndex {
+    pub root: record_index_paths.Path
+    pub budget: JetCLIRecordBudget
+    entries: [JetCLIRecordIndexEntry]
+}
+// Rust IndexWriteLock (RecordIndex.rs:1435-1443); release_lock is its Drop.
+pub struct JetCLIRecordIndexLock { pub path: record_index_paths.Path }
+
+fn jet_cli_record_index_error(message: String) -> JetCLIRecordError Never! { JetCLIRecordError{message: message} }
+
+// Rust RecordIndex::new (RecordIndex.rs:465-471).
+pub fn jet_cli_record_index_new(root: record_index_paths.Path) -> JetCLIRecordIndex Never! {
+    JetCLIRecordIndex{root: root, budget: jet_cli_record_budget_default(), entries: [JetCLIRecordIndexEntry]{}}
+}
+// Rust RecordIndex::for_project (RecordIndex.rs:473-477): a failed canonicalize keeps the input.
+pub fn jet_cli_record_index_for_project<H: JetCLIRecordIndexFileHost>(project_root: record_index_paths.Path, host: &H) -[FS.Read]> JetCLIRecordIndex Never! {
+    // Keep the actual Core Path result (#4381); never reconstruct a nominal carrier.
+    canonical :: if &host.canonicalize(project_root) == {
+        .Ok(path) -> path
+        .Err(_) -> ~project_root
+    }
+    jet_cli_record_index_new(record_index_paths.join(record_index_paths.join(canonical, ".jet"), "records"))
+}
+// Rust RecordIndex::load (RecordIndex.rs:484-486).
+pub fn jet_cli_record_index_load<H: JetCLIRecordIndexFileHost>(root: record_index_paths.Path, host: &H) -[FS.Read]> JetCLIRecordIndex JetCLIRecordError! {
+    jet_cli_record_index_load_with_budget(root, jet_cli_record_budget_default(), &host)
+}
+// Rust RecordIndex::load_for_project (RecordIndex.rs:488-490).
+pub fn jet_cli_record_index_load_for_project<H: JetCLIRecordIndexFileHost>(project_root: record_index_paths.Path, host: &H) -[FS.Read]> JetCLIRecordIndex JetCLIRecordError! {
+    index :: jet_cli_record_index_for_project(project_root, &host)
+    jet_cli_record_index_load(index.root, &host)
+}
+// Rust RecordIndex::load_with_budget (RecordIndex.rs:492-517).
+pub fn jet_cli_record_index_load_with_budget<H: JetCLIRecordIndexFileHost>(root: record_index_paths.Path, budget: JetCLIRecordBudget, host: &H) -[FS.Read]> JetCLIRecordIndex JetCLIRecordError! {
+    path :: jet_cli_record_index_path(root)
+    bytes := [U8]{}
+    if &host.symlink_metadata(path) == {
+        .Ok(metadata) -> {
+            if metadata.is_symlink || !metadata.is_file -> return Err(jet_cli_record_index_error("record index is not a regular file: {path.raw}"))
+            if metadata.size > JET_CLI_MAX_INDEX_BYTES -> return Err(jet_cli_record_index_error("record index exceeds the 256 MiB limit"))
+            bytes = jet_cli_record_index_read(path, &host)
+        }
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> {}
+                else -> { return Err(jet_cli_record_index_error("could not inspect record index {path.raw}: {jet_cli_record_index_io_message(error)}")) }
+            }
+        }
+    }
+    jet_cli_record_index_decode(root, bytes, budget)
+}
+// Main-approved correction to Rust's check-then-fs::read race. The native host
+// MUST call the one canonical foundation_read_file_nofollow. Its typed bound
+// failure producer remains held (JP-FOUNDATION-TYPED-BOUND-FAILURE); no local
+// cause-string classifier may stand in for that gate.
+fn jet_cli_record_index_read<H: JetCLIRecordIndexFileHost>(path: record_index_paths.Path, host: &H) -[FS.Read]> [U8] JetCLIRecordError! {
+    &host.read_nofollow(path, JET_CLI_MAX_INDEX_BYTES) ?? return Err(jet_cli_record_index_error("could not read record index {path.raw}: {jet_cli_record_index_io_message(err)}"))
+}
+// Rust RecordIndex::load_with_budget decode half (RecordIndex.rs:518-542).
+// Lines follow str::lines (split after LF, strip CR only before that LF);
+// Rust trim().is_empty() is Core White_Space; line limits count UTF-8 bytes.
+pub fn jet_cli_record_index_decode(root: record_index_paths.Path, bytes: [U8], budget: JetCLIRecordBudget) -> JetCLIRecordIndex JetCLIRecordError! {
+    if String.from_bytes(bytes) == .Err(_) -> return Err(jet_cli_record_index_error("record index is not valid UTF-8"))
+    entries := [JetCLIRecordIndexEntry]{}
+    start := 0
+    line_number := 0
+    loop start < bytes.len() {
+        end := start
+        loop end < bytes.len() && Int.from_u8(bytes[end]) != 10 -> end += 1
+        after :: if end < bytes.len() -> end + 1 else -> end
+        if end < bytes.len() && end > start && Int.from_u8(bytes[end - 1]) == 13 -> end -= 1
+        line_number += 1
+        line :: String.from_bytes(bytes[start..<end]) ?? panic("LF boundaries preserve UTF-8")
+        start = after
+        if line.len() == 0 || record_index_text.is_whitespace(line) -> next
+        if line.bytes().len() > JET_CLI_MAX_INDEX_LINE_BYTES -> return Err(jet_cli_record_index_error("record index line {line_number} exceeds the 1 MiB limit"))
+        entry :: jet_cli_record_entry_parse_line(line) ?? return Err(jet_cli_record_index_error("record index line {line_number} is invalid: {err.message}"))
+        &entries.push(entry)
+    }
+    jet_cli_record_validate_all(entries, budget)
+    Ok(JetCLIRecordIndex{root: root, budget: budget, entries: ^entries})
+}
+// Rust RecordIndex::index_path (RecordIndex.rs:555-557).
+pub fn jet_cli_record_index_path(root: record_index_paths.Path) -> record_index_paths.Path Never! {
+    record_index_paths.join(root, JET_CLI_RECORD_INDEX_FILE)
+}
+// Rust RecordIndex::next_recorded_sequence (RecordIndex.rs:563-575): u64 exhaustion, never wrap.
+pub fn jet_cli_record_index_next_recorded_sequence(index: JetCLIRecordIndex) -> Int JetCLIRecordIndexError! {
+    if index.entries.len() == 0 -> return Ok(1)
+    maximum := 0
+    loop entry in index.entries {
+        if entry.recorded_sequence > maximum -> maximum = entry.recorded_sequence
+    }
+    if maximum >= 18446744073709551615 -> return Err(.RecordedSequenceOverflow)
+    Ok(maximum + 1)
+}
+// Rust RecordIndex::set_budget (RecordIndex.rs:577-585).
+pub fn jet_cli_record_index_set_budget(index: &JetCLIRecordIndex, budget: JetCLIRecordBudget) JetCLIRecordError! {
+    candidate := ~index.entries
+    jet_cli_record_apply_eviction(&candidate, budget)
+    jet_cli_record_validate_all(candidate, budget)
+    index.budget = budget
+    index.entries = ^candidate
+}
+// Rust RecordIndex::query (RecordIndex.rs:592-604): deterministic (kind,id,identity,path) order.
+pub fn jet_cli_record_index_query(index: JetCLIRecordIndex, authenticated: Bool) -> [JetCLIRecordIndexEntry] Never! {
+    rows := [JetCLIRecordIndexEntry]{}
+    loop entry in index.entries {
+        if authenticated || !jet_cli_record_entry_is_sensitive(entry) -> &rows.push(jet_cli_record_visible_entry(index.entries, entry, authenticated))
+    }
+    // #4343: named comparator rejected by Rust emit; same compare_entries inline.
+    &rows.sort_by((left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) -> jet_cli_record_compare_entries(left, right))
+    rows
+}
+// Rust RecordIndex::query_kind (RecordIndex.rs:625-630).
+pub fn jet_cli_record_index_query_kind(index: JetCLIRecordIndex, kind: JetCLIRecordKind, authenticated: Bool) -> [JetCLIRecordIndexEntry] Never! {
+    rows := jet_cli_record_index_query(index, authenticated)
+    kept := [JetCLIRecordIndexEntry]{}
+    loop row in rows {
+        if row.kind == kind -> &kept.push(~row)
+    }
+    kept
+}
+// Rust RecordIndex::find (RecordIndex.rs:632-641). validate_all keeps (kind,id)
+// unique, so the first visible match of Rust's sorted query is that one row.
+pub fn jet_cli_record_index_find(index: JetCLIRecordIndex, kind: JetCLIRecordKind, artifact_id: String, authenticated: Bool) -> JetCLIRecordIndexEntry? Never! {
+    loop entry in index.entries {
+        if entry.kind == kind && entry.artifact_id == artifact_id {
+            if !authenticated && jet_cli_record_entry_is_sensitive(entry) -> return None
+            return Val(jet_cli_record_visible_entry(index.entries, entry, authenticated))
+        }
+    }
+    None
+}
+fn jet_cli_record_index_position(entries: [JetCLIRecordIndexEntry], kind: JetCLIRecordKind, artifact_id: String) -> Int Never! {
+    loop (position, entry) in entries {
+        if entry.kind == kind && entry.artifact_id == artifact_id -> return position
+    }
+    -1
+}
+fn jet_cli_record_index_max_sequence(entries: [JetCLIRecordIndexEntry]) -> Int Never! {
+    maximum := 0
+    loop entry in entries {
+        if entry.recorded_sequence > maximum -> maximum = entry.recorded_sequence
+    }
+    maximum
+}
+// Rust update/replace retained-after-eviction check (RecordIndex.rs:668-677, 709-718).
+fn jet_cli_record_index_commit(index: &JetCLIRecordIndex, candidate: ^[JetCLIRecordIndexEntry], kind: JetCLIRecordKind, artifact_id: String) JetCLIRecordError! {
+    rows := ^candidate
+    jet_cli_record_apply_eviction(&rows, index.budget)
+    jet_cli_record_validate_all(rows, index.budget)
+    if jet_cli_record_index_position(rows, kind, artifact_id) < 0 -> return Err(jet_cli_record_index_error("disposable record `{jet_cli_record_kind_name(kind)}/{artifact_id}` exceeds the byte budget and was not retained"))
+    index.entries = ^rows
+}
+// Rust RecordIndex::update (RecordIndex.rs:647-680): equal duplicate is idempotent.
+pub fn jet_cli_record_index_update(index: &JetCLIRecordIndex, entry: JetCLIRecordIndexEntry) JetCLIRecordError! {
+    normalized := ~entry
+    jet_cli_record_entry_normalize(&normalized)
+    position :: jet_cli_record_index_position(index.entries, normalized.kind, normalized.artifact_id)
+    if position >= 0 {
+        if index.entries[position] == normalized -> return
+        return Err(jet_cli_record_index_error("record `{jet_cli_record_kind_name(normalized.kind)}/{normalized.artifact_id}` conflicts with an existing identity"))
+    }
+    kind :: normalized.kind
+    artifact_id :: ~normalized.artifact_id
+    candidate := ~index.entries
+    &candidate.push(^normalized)
+    jet_cli_record_index_commit(&index, ^candidate, kind, artifact_id)
+}
+// Rust RecordIndex::replace (RecordIndex.rs:685-721): key and identity are preserved.
+pub fn jet_cli_record_index_replace(index: &JetCLIRecordIndex, entry: JetCLIRecordIndexEntry) JetCLIRecordError! {
+    normalized := ~entry
+    jet_cli_record_entry_normalize(&normalized)
+    kind :: normalized.kind
+    artifact_id :: ~normalized.artifact_id
+    position :: jet_cli_record_index_position(index.entries, kind, artifact_id)
+    if position < 0 -> return Err(jet_cli_record_index_error("record `{jet_cli_record_kind_name(kind)}/{artifact_id}` does not exist"))
+    if index.entries[position].identity != normalized.identity -> return Err(jet_cli_record_index_error("record `{jet_cli_record_kind_name(kind)}/{artifact_id}` conflicts with an existing identity"))
+    candidate := ~index.entries
+    candidate[position] = ^normalized
+    jet_cli_record_index_commit(&index, ^candidate, kind, artifact_id)
+}
+// Rust RecordIndex::save_replay (RecordIndex.rs:725-746).
+pub fn jet_cli_record_index_save_replay(index: &JetCLIRecordIndex, artifact_id: String, identity: JetCLIRecordIdentity, path: String, size: Int) -> JetCLIRecordIndexEntry JetCLIRecordError! {
+    existing :: jet_cli_record_index_find(index, .Replay, artifact_id, true) ?? return Err(jet_cli_record_index_error("replay `{artifact_id}` is not indexed"))
+    if existing.identity != identity -> return Err(jet_cli_record_index_error("replay `{artifact_id}` conflicts with the current target identity"))
+    saved := ~existing
+    saved.path = ~path
+    saved.size = size
+    saved.saved = true
+    jet_cli_record_index_replace(&index, saved)
+    Ok(saved)
+}
+// Rust RecordIndex::saved_replays (RecordIndex.rs:749-765): raw rows, capture order.
+pub fn jet_cli_record_index_saved_replays(index: JetCLIRecordIndex, identity: JetCLIRecordIdentity) -> [JetCLIRecordIndexEntry] Never! {
+    rows := [JetCLIRecordIndexEntry]{}
+    loop entry in index.entries {
+        if entry.kind == .Replay && entry.saved && entry.identity == identity -> &rows.push(~entry)
+    }
+    &rows.sort_by((left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) -> {
+        if {
+            left.recorded_sequence != right.recorded_sequence -> left.recorded_sequence <=> right.recorded_sequence
+            left.artifact_id != right.artifact_id -> left.artifact_id <=> right.artifact_id
+            else -> jet_cli_record_compare_paths(left.path, right.path)
+        }
+    })
+    rows
+}
+// Rust RecordIndex::remove_replay (RecordIndex.rs:769-782). #4367 blocks
+// list.remove(i, .Slot): one order-preserving rebuild instead.
+pub fn jet_cli_record_index_remove_replay(index: &JetCLIRecordIndex, artifact_id: String) -> JetCLIRecordIndexEntry JetCLIRecordError! {
+    position :: jet_cli_record_index_position(index.entries, .Replay, artifact_id)
+    if position < 0 -> return Err(jet_cli_record_index_error("replay `{artifact_id}` is not indexed"))
+    candidate := [JetCLIRecordIndexEntry]{}
+    loop (index_position, entry) in index.entries {
+        if index_position != position -> &candidate.push(~entry)
+    }
+    jet_cli_record_validate_all(candidate, index.budget)
+    removed :: ~index.entries[position]
+    index.entries = ^candidate
+    Ok(removed)
+}
+
+// Rust RecordIndex::update_and_store (RecordIndex.rs:787-789).
+pub fn jet_cli_record_index_update_and_store<H: JetCLIRecordIndexFileHost, R: JetCLIRecordRetentionHost>(index: &JetCLIRecordIndex, entry: JetCLIRecordIndexEntry, host: &H, retention: &R) JetCLIRecordError! -[FS, Env, Time]> {
+    jet_cli_record_index_publish_and_store(&index, entry, false, &host, &retention)
+}
+// Rust RecordIndex::supersede_and_store (RecordIndex.rs:791-799): latest producer owns the key.
+pub fn jet_cli_record_index_supersede_and_store<H: JetCLIRecordIndexFileHost, R: JetCLIRecordRetentionHost>(index: &JetCLIRecordIndex, entry: JetCLIRecordIndexEntry, host: &H, retention: &R) JetCLIRecordError! -[FS, Env, Time]> {
+    jet_cli_record_index_publish_and_store(&index, entry, true, &host, &retention)
+}
+// Rust RecordIndex::publish_and_store (RecordIndex.rs:801-837); the lock is
+// released on every result, as IndexWriteLock::drop does.
+fn jet_cli_record_index_publish_and_store<H: JetCLIRecordIndexFileHost, R: JetCLIRecordRetentionHost>(index: &JetCLIRecordIndex, entry: JetCLIRecordIndexEntry, supersede: Bool, host: &H, retention: &R) JetCLIRecordError! -[FS, Env, Time]> {
+    lock :: jet_cli_record_index_acquire_lock(index.root, &host)
+    if jet_cli_record_index_publish_locked(&index, entry, supersede, &host, &retention) == {
+        .Ok(_) -> jet_cli_record_index_release_lock(lock, &host)
+        .Err(error) -> {
+            jet_cli_record_index_release_lock(lock, &host)
+            return Err(error)
+        }
+    }
+}
+fn jet_cli_record_index_publish_locked<H: JetCLIRecordIndexFileHost, R: JetCLIRecordRetentionHost>(index: &JetCLIRecordIndex, entry: JetCLIRecordIndexEntry, supersede: Bool, host: &H, retention: &R) JetCLIRecordError! -[FS, Env]> {
+    candidate := jet_cli_record_index_locked_candidate(index, &host)
+    if supersede {
+        kept := [JetCLIRecordIndexEntry]{}
+        loop existing in candidate.entries {
+            if !(existing.kind == entry.kind && existing.artifact_id == entry.artifact_id) -> &kept.push(~existing)
+        }
+        candidate.entries = ^kept
+    }
+    published := ~entry
+    if jet_cli_record_index_position(candidate.entries, entry.kind, entry.artifact_id) < 0 && entry.recorded_sequence <= jet_cli_record_index_max_sequence(candidate.entries) {
+        jet_cli_record_index_allocate_sequence(&published, candidate)
+    }
+    jet_cli_record_index_update(&candidate, published)
+    jet_cli_record_index_store_unlocked(candidate, &host, &retention)
+    index = ^candidate
+}
+// Rust next_recorded_sequence map_err (RecordIndex.rs:825-829, 871-875).
+fn jet_cli_record_index_allocate_sequence(entry: &JetCLIRecordIndexEntry, candidate: JetCLIRecordIndex) JetCLIRecordError! {
+    sequence :: jet_cli_record_index_next_recorded_sequence(candidate) ?? return Err(jet_cli_record_index_error("could not allocate record sequence: {jet_cli_record_index_error_message(err)}"))
+    jet_cli_record_entry_with_recorded_sequence(&entry, sequence)
+}
+// Rust `if self.index_path().is_file() { load } else { self.clone() }` (803-807).
+fn jet_cli_record_index_locked_candidate<H: JetCLIRecordIndexFileHost>(index: JetCLIRecordIndex, host: &H) -[FS.Read]> JetCLIRecordIndex JetCLIRecordError! {
+    is_file :: if &host.metadata(jet_cli_record_index_path(index.root)) == {
+        .Ok(metadata) -> metadata.is_file
+        .Err(_) -> false
+    }
+    if is_file -> return jet_cli_record_index_load_with_budget(~index.root, index.budget, &host)
+    Ok(~index)
+}
+// Rust RecordIndex::upsert_many_and_store (RecordIndex.rs:839-884): one locked
+// history transition over the latest on-disk rows.
+pub fn jet_cli_record_index_upsert_many_and_store<H: JetCLIRecordIndexFileHost, R: JetCLIRecordRetentionHost>(index: &JetCLIRecordIndex, entries: [JetCLIRecordIndexEntry], host: &H, retention: &R) JetCLIRecordError! -[FS, Env, Time]> {
+    lock :: jet_cli_record_index_acquire_lock(index.root, &host)
+    if jet_cli_record_index_upsert_many_locked(&index, entries, &host, &retention) == {
+        .Ok(_) -> jet_cli_record_index_release_lock(lock, &host)
+        .Err(error) -> {
+            jet_cli_record_index_release_lock(lock, &host)
+            return Err(error)
+        }
+    }
+}
+fn jet_cli_record_index_upsert_many_locked<H: JetCLIRecordIndexFileHost, R: JetCLIRecordRetentionHost>(index: &JetCLIRecordIndex, entries: [JetCLIRecordIndexEntry], host: &H, retention: &R) JetCLIRecordError! -[FS, Env]> {
+    candidate := jet_cli_record_index_locked_candidate(index, &host)
+    loop entry in entries {
+        if jet_cli_record_index_position(candidate.entries, entry.kind, entry.artifact_id) >= 0 {
+            jet_cli_record_index_replace(&candidate, entry)
+            next
+        }
+        published := ~entry
+        if entry.recorded_sequence <= jet_cli_record_index_max_sequence(candidate.entries) -> jet_cli_record_index_allocate_sequence(&published, candidate)
+        jet_cli_record_index_update(&candidate, published)
+    }
+    jet_cli_record_index_store_unlocked(candidate, &host, &retention)
+    index = ^candidate
+}
+// Rust RecordIndex::save_replay_and_store (RecordIndex.rs:886-903).
+pub fn jet_cli_record_index_save_replay_and_store<H: JetCLIRecordIndexFileHost, R: JetCLIRecordRetentionHost>(index: &JetCLIRecordIndex, artifact_id: String, identity: JetCLIRecordIdentity, path: String, size: Int, host: &H, retention: &R) -[FS, Env, Time]> JetCLIRecordIndexEntry JetCLIRecordError! {
+    lock :: jet_cli_record_index_acquire_lock(index.root, &host)
+    if jet_cli_record_index_save_replay_locked(&index, artifact_id, identity, path, size, &host, &retention) == {
+        .Ok(saved) -> {
+            jet_cli_record_index_release_lock(lock, &host)
+            Ok(saved)
+        }
+        .Err(error) -> {
+            jet_cli_record_index_release_lock(lock, &host)
+            Err(error)
+        }
+    }
+}
+fn jet_cli_record_index_save_replay_locked<H: JetCLIRecordIndexFileHost, R: JetCLIRecordRetentionHost>(index: &JetCLIRecordIndex, artifact_id: String, identity: JetCLIRecordIdentity, path: String, size: Int, host: &H, retention: &R) -[FS, Env]> JetCLIRecordIndexEntry JetCLIRecordError! {
+    candidate := jet_cli_record_index_locked_candidate(index, &host)
+    saved :: jet_cli_record_index_save_replay(&candidate, artifact_id, identity, path, size)
+    jet_cli_record_index_store_unlocked(candidate, &host, &retention)
+    index = ^candidate
+    Ok(saved)
+}
+// Rust RecordIndex::replace_and_store (RecordIndex.rs:905-916).
+pub fn jet_cli_record_index_replace_and_store<H: JetCLIRecordIndexFileHost, R: JetCLIRecordRetentionHost>(index: &JetCLIRecordIndex, entry: JetCLIRecordIndexEntry, host: &H, retention: &R) JetCLIRecordError! -[FS, Env, Time]> {
+    lock :: jet_cli_record_index_acquire_lock(index.root, &host)
+    if jet_cli_record_index_replace_locked(&index, entry, &host, &retention) == {
+        .Ok(_) -> jet_cli_record_index_release_lock(lock, &host)
+        .Err(error) -> {
+            jet_cli_record_index_release_lock(lock, &host)
+            return Err(error)
+        }
+    }
+}
+fn jet_cli_record_index_replace_locked<H: JetCLIRecordIndexFileHost, R: JetCLIRecordRetentionHost>(index: &JetCLIRecordIndex, entry: JetCLIRecordIndexEntry, host: &H, retention: &R) JetCLIRecordError! -[FS, Env]> {
+    candidate := jet_cli_record_index_locked_candidate(index, &host)
+    jet_cli_record_index_replace(&candidate, entry)
+    jet_cli_record_index_store_unlocked(candidate, &host, &retention)
+    index = ^candidate
+}
+// Rust RecordIndex::remove_replay_and_store (RecordIndex.rs:918-932).
+pub fn jet_cli_record_index_remove_replay_and_store<H: JetCLIRecordIndexFileHost, R: JetCLIRecordRetentionHost>(index: &JetCLIRecordIndex, artifact_id: String, host: &H, retention: &R) -[FS, Env, Time]> JetCLIRecordIndexEntry JetCLIRecordError! {
+    lock :: jet_cli_record_index_acquire_lock(index.root, &host)
+    if jet_cli_record_index_remove_replay_locked(&index, artifact_id, &host, &retention) == {
+        .Ok(removed) -> {
+            jet_cli_record_index_release_lock(lock, &host)
+            Ok(removed)
+        }
+        .Err(error) -> {
+            jet_cli_record_index_release_lock(lock, &host)
+            Err(error)
+        }
+    }
+}
+fn jet_cli_record_index_remove_replay_locked<H: JetCLIRecordIndexFileHost, R: JetCLIRecordRetentionHost>(index: &JetCLIRecordIndex, artifact_id: String, host: &H, retention: &R) -[FS, Env]> JetCLIRecordIndexEntry JetCLIRecordError! {
+    candidate := jet_cli_record_index_locked_candidate(index, &host)
+    removed :: jet_cli_record_index_remove_replay(&candidate, artifact_id)
+    jet_cli_record_index_store_unlocked(candidate, &host, &retention)
+    index = ^candidate
+    Ok(removed)
+}
+// Rust RecordIndex::store (RecordIndex.rs:934-938).
+pub fn jet_cli_record_index_store<H: JetCLIRecordIndexFileHost, R: JetCLIRecordRetentionHost>(index: JetCLIRecordIndex, host: &H, retention: &R) JetCLIRecordError! -[FS, Env, Time]> {
+    lock :: jet_cli_record_index_acquire_lock(index.root, &host)
+    if jet_cli_record_index_store_unlocked(index, &host, &retention) == {
+        .Ok(_) -> jet_cli_record_index_release_lock(lock, &host)
+        .Err(error) -> {
+            jet_cli_record_index_release_lock(lock, &host)
+            return Err(error)
+        }
+    }
+}
+// Rust RecordIndex::store_unlocked byte encoding (RecordIndex.rs:956-964): one buffer.
+pub fn jet_cli_record_index_encode(entries: [JetCLIRecordIndexEntry]) -> [U8] JetCLIRecordError! {
+    bytes := [U8]{}
+    loop entry in entries {
+        line :: jet_cli_record_entry_to_jsonl(entry)
+        jet_cli_record_append(&bytes, line)
+        &bytes.push(U8{10})
+        if bytes.len() > JET_CLI_MAX_INDEX_BYTES -> return Err(jet_cli_record_index_error("record index exceeds the 256 MiB limit"))
+    }
+    Ok(bytes)
+}
+// Rust RecordIndex::store_unlocked (RecordIndex.rs:940-1013).
+fn jet_cli_record_index_store_unlocked<H: JetCLIRecordIndexFileHost, R: JetCLIRecordRetentionHost>(index: JetCLIRecordIndex, host: &H, retention: &R) JetCLIRecordError! -[FS, Env]> {
+    jet_cli_record_validate_all(index.entries, index.budget)
+    path :: jet_cli_record_index_path(index.root)
+    previous := [JetCLIRecordIndexEntry]{}
+    if &host.symlink_metadata(path) == {
+        .Ok(metadata) -> {
+            if metadata.is_symlink || !metadata.is_file -> return Err(jet_cli_record_index_error("record index is unsafe: {path.raw}"))
+            loaded :: jet_cli_record_index_load_with_budget(~index.root, index.budget, &host)
+            previous = ~loaded.entries
+        }
+        .Err(error) -> {
+            if error == {
+                .NotFound(_) -> {}
+                else -> { return Err(jet_cli_record_index_error("could not inspect record index {path.raw}: {jet_cli_record_index_io_message(error)}")) }
+            }
+        }
+    }
+    bytes :: jet_cli_record_index_encode(index.entries)
+    jet_cli_record_index_secure_create_dir(index.root, &host)
+    if &host.symlink_metadata(path) == .Ok(metadata) {
+        if metadata.is_symlink || !metadata.is_file -> return Err(jet_cli_record_index_error("record index is unsafe: {path.raw}"))
+    }
+    temporary_id :: &host.next_temporary_id()
+    temp :: record_index_paths.join(index.root, ".{JET_CLI_RECORD_INDEX_FILE}.{record_index_sys.pid()}.{temporary_id}")
+    if jet_cli_record_index_publish_bytes(temp, path, index.root, bytes, &host) == .Err(error) {
+        &host.remove_file(temp).drop("Rust ignores staging cleanup failure")
+        return Err(error)
+    }
+    project_root :: jet_cli_record_index_project_root(index.root)
+    loop entry in previous {
+        if !jet_cli_record_entry_is_disposable(entry) || jet_cli_record_index_has_path(index.entries, entry.path) -> next
+        jet_cli_record_remove_disposable_artifact(index.entries, entry, project_root, &retention)
+    }
+}
+// Rust PathBuf == (component equality) in store_unlocked (RecordIndex.rs:1006).
+fn jet_cli_record_index_has_path(entries: [JetCLIRecordIndexEntry], path: String) -> Bool Never! {
+    loop entry in entries {
+        if jet_cli_record_compare_paths(entry.path, path) == Ordering.Equal -> return true
+    }
+    false
+}
+// Rust root.parent().and_then(Path::parent) (RecordIndex.rs:1168-1173); the
+// shared Path::parent scanner, None retaining Rust's removal no-op.
+fn jet_cli_record_index_project_root(root: record_index_paths.Path) -> String? Never! {
+    jet_root :: jet_cli_history_evidence_parent(root.raw) ?? return None
+    jet_cli_history_evidence_parent(jet_root)
+}
+// Rust store_unlocked publication closure (RecordIndex.rs:978-999). The staged
+// handle stays open through rename and directory sync, then closes (Rust drop).
+fn jet_cli_record_index_publish_bytes<H: JetCLIRecordIndexFileHost>(temp: record_index_paths.Path, path: record_index_paths.Path, root: record_index_paths.Path, bytes: [U8], host: &H) JetCLIRecordError! -[FS.Write, Env]> {
+    handle :: &host.create_new(temp) ?? return Err(jet_cli_record_index_error("could not stage record index: {jet_cli_record_index_io_message(err)}"))
+    if jet_cli_record_index_publish_staged(handle, temp, path, root, bytes, &host) == {
+        .Ok(_) -> &host.close(handle)
+        .Err(error) -> {
+            &host.close(handle)
+            return Err(error)
+        }
+    }
+}
+fn jet_cli_record_index_publish_staged<H: JetCLIRecordIndexFileHost>(handle: Int, temp: record_index_paths.Path, path: record_index_paths.Path, root: record_index_paths.Path, bytes: [U8], host: &H) JetCLIRecordError! -[FS.Write, Env]> {
+    if record_index_sys.is_unix() -> &host.set_handle_mode(handle, 0o600) ?? return Err(jet_cli_record_index_error("could not secure record index: {jet_cli_record_index_io_message(err)}"))
+    &host.write_all(handle, bytes) ?? return Err(jet_cli_record_index_error("could not write record index: {jet_cli_record_index_io_message(err)}"))
+    &host.sync_all(handle) ?? return Err(jet_cli_record_index_error("could not flush record index: {jet_cli_record_index_io_message(err)}"))
+    &host.rename(temp, path) ?? return Err(jet_cli_record_index_error("could not publish record index: {jet_cli_record_index_io_message(err)}"))
+    &host.sync_directory(root) ?? return Err(jet_cli_record_index_error("could not flush record index directory: {jet_cli_record_index_io_message(err)}"))
+}
+
+// Rust acquire_index_lock (RecordIndex.rs:1445-1486).
+pub fn jet_cli_record_index_acquire_lock<H: JetCLIRecordIndexFileHost>(root: record_index_paths.Path, host: &H) -[FS, Env, Time]> JetCLIRecordIndexLock JetCLIRecordError! {
+    jet_cli_record_index_secure_create_dir(root, &host)
+    path :: record_index_paths.join(root, JET_CLI_RECORD_INDEX_LOCK_FILE)
+    loop _ in 0..<JET_CLI_RECORD_INDEX_LOCK_ATTEMPTS {
+        if &host.create_new(path) == {
+            .Ok(handle) -> {
+                if jet_cli_record_index_write_lock(handle, path, &host) == {
+                    .Ok(_) -> {
+                        &host.close(handle)
+                        return Ok(JetCLIRecordIndexLock{path: ~path})
+                    }
+                    .Err(error) -> {
+                        &host.close(handle)
+                        return Err(error)
+                    }
+                }
+            }
+            .Err(error) -> {
+                if error == {
+                    .AlreadyExists(_) -> {
+                        if &host.lock_metadata(path) == .Ok(observation) {
+                            if !observation.metadata.is_symlink && observation.metadata.is_file && jet_cli_record_index_lock_stale(observation.modified_elapsed_ns) -> &host.remove_file(path).drop("Rust ignores stale lock removal races")
+                        }
+                        record_index_time.sleep(record_index_time.duration_ms(5))
+                    }
+                    else -> { return Err(jet_cli_record_index_error("could not create record index lock: {jet_cli_record_index_io_message(error)}")) }
+                }
+            }
+        }
+    }
+    Err(jet_cli_record_index_error("timed out waiting for record index lock"))
+}
+// Rust acquire_index_lock Ok branch (RecordIndex.rs:1450-1463): remove, then drop the handle.
+fn jet_cli_record_index_write_lock<H: JetCLIRecordIndexFileHost>(handle: Int, path: record_index_paths.Path, host: &H) JetCLIRecordError! -[FS.Write, Env]> {
+    if record_index_sys.is_unix() {
+        if &host.set_handle_mode(handle, 0o600) == .Err(error) {
+            &host.remove_file(path).drop("Rust ignores lock cleanup failure")
+            return Err(jet_cli_record_index_error("could not secure record index lock: {jet_cli_record_index_io_message(error)}"))
+        }
+    }
+    if &host.write_all(handle, "{record_index_sys.pid()}".bytes()) == .Err(error) {
+        &host.remove_file(path).drop("Rust ignores lock cleanup failure")
+        return Err(jet_cli_record_index_error("could not write record index lock: {jet_cli_record_index_io_message(error)}"))
+    }
+}
+// Rust modified().ok().and_then(elapsed().ok()).is_some_and(age > 60s)
+// (RecordIndex.rs:1469-1473). Preserve the native optional elapsed duration
+// without rounding to milliseconds or using epoch zero as an absence sentinel.
+// Producing this observation is a real #3593 gate, never locally inferred.
+pub fn jet_cli_record_index_lock_stale(modified_elapsed_ns: Int?) -> Bool Never! {
+    age :: modified_elapsed_ns ?? return false
+    age > JET_CLI_RECORD_INDEX_LOCK_STALE_SECONDS * 1000000000
+}
+// Rust IndexWriteLock::drop (RecordIndex.rs:1439-1443): removal errors are ignored.
+pub fn jet_cli_record_index_release_lock<H: JetCLIRecordIndexFileHost>(lock: JetCLIRecordIndexLock, host: &H) Never! -[FS.Write]> {
+    &host.remove_file(lock.path).drop("Rust IndexWriteLock drop ignores removal errors")
+}
+// Rust secure_create_dir (RecordIndex.rs:1488-1528) over the shared component scanner:
+// RootDir restarts at `/`, CurDir is skipped, ParentDir is refused.
+pub fn jet_cli_record_index_secure_create_dir<H: JetCLIRecordIndexFileHost>(path: record_index_paths.Path, host: &H) JetCLIRecordError! -[FS, Env]> {
+    bytes :: path.raw.bytes()
+    current := ""
+    offset := 0
+    loop {
+        part :: jet_cli_record_next_path_component(bytes, offset)
+        if part.start == part.end -> break
+        offset = part.next
+        rank :: jet_cli_record_path_component_rank(bytes, part.start, part.end)
+        if rank == 0 {
+            current = "/"
+            next
+        }
+        if rank == 1 -> next
+        if rank == 2 -> return Err(jet_cli_record_index_error("record index directory contains an unsafe component"))
+        name :: String.from_bytes(bytes[part.start..<part.end]) ?? panic("component boundary is UTF-8")
+        current = if {
+            current.len() == 0 -> ~name
+            current == "/" -> "/{name}"
+            else -> "{current}/{name}"
+        }
+        directory :: record_index_paths.path(current)
+        if &host.symlink_metadata(directory) == {
+            .Ok(metadata) -> {
+                if metadata.is_symlink -> return Err(jet_cli_record_index_error("record index directory is a symlink: {current}"))
+                if !metadata.is_dir -> return Err(jet_cli_record_index_error("record index directory is not a directory: {current}"))
+            }
+            .Err(error) -> {
+                if error == {
+                    .NotFound(_) -> {
+                        &host.create_directory(directory) ?? return Err(jet_cli_record_index_error("could not create record index directory: {jet_cli_record_index_io_message(err)}"))
+                        if record_index_sys.is_unix() -> &host.set_mode(directory, 0o700) ?? return Err(jet_cli_record_index_error("could not secure record index directory: {jet_cli_record_index_io_message(err)}"))
+                    }
+                    else -> { return Err(jet_cli_record_index_error("could not inspect record index directory: {jet_cli_record_index_io_message(error)}")) }
+                }
+            }
+        }
+    }
+}

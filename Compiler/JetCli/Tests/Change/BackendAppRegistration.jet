@@ -1,0 +1,405 @@
+// New body-derived regressions: CmdBackendScaffold has no inline Rust suite.
+// Existing tests/web_app.rs:176-178 establishes the authored route spelling.
+// No AST/Func/App/loaded-bundle test doubles. Loader tests below use real
+// TempDir/Authority bytes, canonical embedded Core and the actual Driver parser.
+// ALL tests are unexercised. Native fixtures gate #4494/#4392/#4483/#4409;
+// whole Driver/Core assembly gates #3593/#3598/#4378/#4381/#4500. Private
+// Driver module/AST export and port-main native OsPath propagation are OPEN.
+use core.files as backend_app_test_files
+use core.files.[TempDir]
+use core.sys as backend_app_test_sys
+use jet_pkg_model.[AuthorityResolver, FileIdentity]
+use jet_driver.[JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompileTarget, JetDriverHostFacts, jet_driver_embedded_core_sources]
+use jet_foundation.[foundation_embedded_core]
+use jet_eval.[jet_eval_default_config]
+
+fn backend_app_test_path(text: String) -[Env]> backend_app_paths.OsPath Never! {
+    platform :: if backend_app_test_sys.is_windows() -> backend_app_paths.PathPlatform.Windows else -> backend_app_paths.PathPlatform.Unix
+    backend_app_paths.from_text(text, platform)
+}
+fn backend_app_test_unix(text: String) -> backend_app_paths.OsPath Never! {
+    backend_app_paths.from_text(text, backend_app_paths.PathPlatform.Unix)
+}
+fn backend_app_test_root(label: String) -[FS]> TempDir {
+    backend_app_test_files.temp_dir("jet-backend-app-{label}") ?? panic("fixture temp dir: {err}")
+}
+fn backend_app_test_write(root: String, relative: String, source: String) -[FS]> {
+    path :: backend_app_test_files.join(root, relative)
+    backend_app_test_files.create_dir_all(backend_app_test_files.dirname(path)) ?? panic("fixture parent: {err}")
+    backend_app_test_files.write(path, source) ?? panic("fixture write: {err}")
+}
+// IDs retain the actual captured native identity; neither a label nor path hash
+// is used as authority. This is TEST fixture acquisition, not backend read IO.
+fn backend_app_test_identity(identity: FileIdentity) -> String Never! {
+    "{identity.device}:{identity.inode}:{identity.length}:{identity.modified_ns}"
+}
+fn backend_app_test_request(root: String, entry: backend_app_paths.OsPath) -[FS, Env]> JetDriverCompileRequest {
+    resolver :: AuthorityResolver.open(backend_app_test_path(root)) ?? panic("fixture authority: {err}")
+    directory :: resolver.checked_directory(backend_app_paths.from_text(".", resolver.root.platform)) ?? panic("fixture root: {err}")
+    root_id :: backend_app_test_identity(directory.identity)
+    files := [JetDriverAuthorizedSourceFile]{}
+    paths :: resolver.discover_source_files() ?? panic("fixture walk: {err}")
+    loop file in paths {
+        &files.push(JetDriverAuthorizedSourceFile{path: file.path, relative_path: file.relative, identity: backend_app_test_identity(file.identity), source: file.text() ?? panic("fixture UTF-8: {err}")})
+    }
+    core :: foundation_embedded_core()
+    JetDriverCompileRequest{
+        authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: resolver.root, identity: root_id, allow_hardlinks: false, files: files, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}}}, entry_root_identity: root_id, entry_path: entry},
+        canonical_effect_source: core.effect_source(), core_sources: jet_driver_embedded_core_sources(core),
+        host_facts: JetDriverHostFacts{target_triple: None, active_os: None, compiler_identity: None},
+        eval_config: jet_eval_default_config(), target: JetDriverCompileTarget.Native,
+        record_store: None, trace_sink: None, mir_lint_every_pass: false,
+    }
+}
+fn backend_app_test_plan(root: String, current: [U8]?, files: [JetCLIBackendReceiptFile]?) -[FS, Env, IO]> JetCLIBackendPlannedFile? JetCLIBackendAppError! {
+    entry :: jet_cli_backend_app_entry(backend_app_test_path(root)) ?? panic("actual project selection: {err}")
+    request :: backend_app_test_request(root, entry)
+    inverse_request :: backend_app_test_request(root, entry)
+    jet_cli_backend_app_routes_registration(backend_app_test_path(root), entry, current, request, inverse_request, files)
+}
+fn backend_app_test_expect_error(result: JetCLIBackendPlannedFile? JetCLIBackendAppError!, code: String, message: String, fix: String) {
+    if result == {
+        .Err(error) -> { assert_eq(error.code, code); assert_eq(error.message, message); assert_eq(error.fix, fix) }
+        .Ok(_) -> panic("expected backend registration failure")
+    }
+}
+fn backend_app_test_receipt(relative: String, current: [U8], before: [U8]?) -> JetCLIBackendReceiptFile Never! {
+    JetCLIBackendReceiptFile{relative: relative, digest: mir_sha256_hex_bytes(mir_sha256_bytes(current)), before: before}
+}
+
+#Test("byte span uses UTF-8 bytes including Unicode before the App constructor") {
+    bytes :: "α🙂web.app()".bytes()
+    assert_eq(jet_cli_backend_function_source(bytes, 6, bytes.len()), Val("web.app()"))
+    assert_eq(jet_cli_backend_function_source(bytes, 0, 2), Val("α"))
+    assert_eq(jet_cli_backend_function_source(bytes, bytes.len(), bytes.len()), Val(""))
+}
+#Test("Rust str get rejects reversed outside and empty mid-scalar spans") {
+    bytes :: "aé🙂z".bytes()
+    assert(jet_cli_backend_function_source(bytes, -1, 0) == None)
+    assert(jet_cli_backend_function_source(bytes, 3, 2) == None)
+    assert(jet_cli_backend_function_source(bytes, 0, 9) == None)
+    assert(jet_cli_backend_function_source(bytes, 2, 2) == None)
+    assert(jet_cli_backend_function_source(bytes, 0, 2) == None)
+    assert(jet_cli_backend_function_source(bytes, 4, 7) == None)
+}
+#Test("receipt selection is first exact relative match having before Some") {
+    files :: [JetCLIBackendReceiptFile]{
+        backend_app_test_receipt("run.jet", "x".bytes(), None),
+        backend_app_test_receipt("Run.jet", "x".bytes(), Val("x".bytes())),
+        backend_app_test_receipt("run.jet", "x".bytes(), Val([U8]{})),
+        backend_app_test_receipt("run.jet", "y".bytes(), Val("y".bytes())),
+    }
+    assert_eq(jet_cli_backend_recorded_file(Val(files), "run.jet"), Val(2))
+    assert(jet_cli_backend_recorded_file(None, "run.jet") == None)
+    assert(jet_cli_backend_recorded_file(Val(files), "src/run.jet") == None)
+}
+#Test("insert exact canonical bytes preserves CRLF Unicode comments and every other byte") {
+    before :: "// α\r\nfn run() App {{ web.app() /* 🙂 */ }}\r\n".bytes()
+    function_source := String.from_bytes(before) ?? panic("fixture UTF-8") // #4303
+    at :: jet_cli_backend_app_constructor_end(function_source) ?? panic("constructor")
+    current :: jet_cli_backend_insert(before, at)
+    assert_eq(current, "// α\r\nfn run() App {{ web.app().routes(from: \"routes\") /* 🙂 */ }}\r\n".bytes())
+    assert(jet_cli_backend_inverse_bytes(current, before, at))
+}
+#Test("inverse exact location rather than search-anywhere") {
+    before :: "web.app() suffix".bytes()
+    current :: jet_cli_backend_insert(before, 9)
+    assert(jet_cli_backend_inverse_bytes(current, before, 9))
+    assert(!jet_cli_backend_inverse_bytes(current, before, 0))
+    assert(!jet_cli_backend_inverse_bytes(current, before, 10))
+    assert(!jet_cli_backend_inverse_bytes(current, before, -1))
+    assert(!jet_cli_backend_inverse_bytes(current, before, current.len() + 1))
+}
+#Test("inverse unrelated byte drift before after outside function and duplicate fragment") {
+    original :: "// before\nfn run() App {{ web.app() }}\n// after\n"
+    original_bytes :: original.bytes()
+    at :: jet_cli_backend_app_constructor_end(original) ?? panic("fixture constructor")
+    current :: jet_cli_backend_insert(original_bytes, at)
+    assert(!jet_cli_backend_inverse_bytes(current, "// Before\nfn run() App {{ web.app() }}\n// after\n".bytes(), at))
+    assert(!jet_cli_backend_inverse_bytes(current, "// before\nfn run() App {{ web.app() }}\n// After\n".bytes(), at))
+    assert(!jet_cli_backend_inverse_bytes(current, "// before\nfn run() App {{ web.app()  }}\n// after\n".bytes(), at))
+    assert(!jet_cli_backend_inverse_bytes(jet_cli_backend_insert(current, at), original_bytes, at))
+    assert(!jet_cli_backend_inverse_bytes(current, current, at))
+}
+#Test("inverse rejects truncated absent changed route bytes and length mismatch") {
+    before :: "web.app()".bytes()
+    assert(!jet_cli_backend_inverse_bytes(before, before, 9))
+    assert(!jet_cli_backend_inverse_bytes("web.app().routes(from: \"routes\"".bytes(), before, 9))
+    assert(!jet_cli_backend_inverse_bytes("web.app().routes(from: \"Routes\")".bytes(), before, 9))
+    assert(!jet_cli_backend_inverse_bytes(jet_cli_backend_insert(before, 9), [U8]{}, 9))
+}
+#Test("inverse removal at start and end empty original is length guarded") {
+    assert(jet_cli_backend_inverse_bytes(JET_CLI_BACKEND_ROUTE_REGISTRATION.bytes(), [U8]{}, 0))
+    assert(jet_cli_backend_inverse_bytes(jet_cli_backend_insert("α".bytes(), 0), "α".bytes(), 0))
+    assert(jet_cli_backend_inverse_bytes(jet_cli_backend_insert("α".bytes(), 2), "α".bytes(), 2))
+}
+#Test("destination component law is backend not CT01 extension or Examples policy") {
+    root :: backend_app_test_unix("/project")
+    relatives :: ["run.jet", "app/run.txt", "Examples/run.jet", "nested/.git/run.jet", "targeted/run.jet", ".jet-more/run.jet", "", "./run.jet", "a/./run.jet"]
+    loop relative in relatives {
+        path :: backend_app_test_unix("/project/{relative}")
+        assert(jet_cli_backend_destination_relative(root, path) == .Ok(_))
+    }
+}
+#Test("destination first reserved component rejects exact names only") {
+    root :: backend_app_test_unix("/project")
+    relatives :: [".git/run.jet", "target/run.jet", ".jet/run.jet", "../run.jet"]
+    loop relative in relatives {
+        path :: backend_app_test_unix("/project/{relative}")
+        assert(jet_cli_backend_destination_relative(root, path) == .Err(_))
+    }
+    assert(jet_cli_backend_destination_relative(root, backend_app_test_unix("/project-other/run.jet")) == .Err(_))
+}
+#Test("native paths remain encoded and receipt display is not an authority inverse") {
+    root :: backend_app_test_unix("/project")
+    encoded :: [U8{47}, U8{112}, U8{114}, U8{111}, U8{106}, U8{101}, U8{99}, U8{116}, U8{47}, U8{255}, U8{92}, U8{120}]
+    entry :: backend_app_paths.from_encoded(encoded, backend_app_paths.PathPlatform.Unix)
+    relative :: jet_cli_backend_destination_relative(root, entry) ?? panic("raw ordinary component")
+    assert_eq(relative.encoded, [U8{255}, U8{92}, U8{120}])
+    assert_eq(entry.encoded, encoded)
+    extent :: backend_app_paths.strip_prefix_span(entry, root) ?? panic("prefix")
+    assert_eq(backend_app_paths.display_span(entry, extent).replace("\\", "/"), "�/x")
+}
+#Test("regular and parent kind policies preserve original refusal wording") {
+    path :: backend_app_test_unix("/project/run.jet")
+    assert(jet_cli_backend_regular_kind(path, false, true) == .Ok(_))
+    if jet_cli_backend_regular_kind(path, true, true) == .Err(error) {
+        assert_eq(error.message, "scaffold path `/project/run.jet` is not a regular file")
+        assert_eq(error.fix, "move the link or special file aside before scaffolding")
+    } else { panic("symlink regular flag must still reject") }
+    assert(jet_cli_backend_regular_kind(path, false, false) == .Err(_))
+    assert(jet_cli_backend_parent_kind(path, false, true) == .Ok(_))
+    assert(jet_cli_backend_parent_kind(path, true, true) == .Err(_))
+    assert(jet_cli_backend_parent_kind(path, false, false) == .Err(_))
+}
+#Test("read and inspect IO failures retain exact distinct code message and fixes") {
+    path :: backend_app_test_unix("/project/run.jet")
+    read :: jet_cli_backend_read_error(path, "permission denied")
+    inspect :: jet_cli_backend_inspect_error(path, "permission denied")
+    assert_eq(read.code, "E2105")
+    assert_eq(read.message, "couldn't read scaffold path `/project/run.jet`: permission denied")
+    assert_eq(read.fix, "check project read authority and retry")
+    assert_eq(inspect.message, "couldn't inspect scaffold path `/project/run.jet`: permission denied")
+    assert_eq(inspect.fix, "check project permissions and retry")
+}
+#Test("backend refusal canonical adapter USER_ERROR human machine ANSI LF") {
+    error :: jet_cli_backend_app_error("E2456", "example", "repair")
+    cases :: [false, true]
+    loop machine in cases {
+        facts := jet_cli_output_facts_default()
+        facts.json = machine
+        profile :: jet_cli_output_profile_select(facts) ?? panic("profile")
+        output :: jet_cli_backend_app_error_output(error, profile)
+        expected :: jet_cli_args_refuse("E2456", "example", "backend scaffolds use one deterministic source transaction", "repair", machine)
+        assert_eq(output.stdout, expected.stdout)
+        assert_eq(output.stderr, expected.stderr)
+        assert_eq(output.exit_code, JET_DRIVER_EXIT_USER_ERROR)
+        if machine { assert(output.stdout.ends_with("\n")); assert_eq(output.stderr, "") }
+    }
+    facts := jet_cli_output_facts_default()
+    facts.requested_color = JetCLIColorRequest.Always
+    profile :: jet_cli_output_profile_select(facts) ?? panic("ANSI profile")
+    assert_eq(jet_cli_backend_app_error_output(error, profile).stderr, jet_cli_report(error.code, error.message, "backend scaffolds use one deterministic source transaction", error.fix, profile.ansi_enabled))
+}
+
+#Test("real loaded App exact insertion and independently loaded inverse") {
+    scratch :: backend_app_test_root("insert")
+    original :: "// α🙂\r\nuse core.web as web\r\nfn run() App {{ web.app() /* keep */ }}\r\n"
+    backend_app_test_write(scratch.path, "run.jet", original)
+    plan :: (backend_app_test_plan(scratch.path, Val(original.bytes()), None) ?? panic("register")) ?? panic("new App needs a plan")
+    expected :: "// α🙂\r\nuse core.web as web\r\nfn run() App {{ web.app().routes(from: \"routes\") /* keep */ }}\r\n"
+    assert_eq(plan.bytes, expected.bytes())
+    assert_eq(plan.before, Val(original.bytes()))
+    assert_eq(plan.relative, "run.jet")
+    backend_app_test_write(scratch.path, "run.jet", expected)
+    request :: backend_app_test_request(scratch.path, plan.absolute)
+    assert(jet_cli_backend_app_registration_inverse(plan.absolute, plan.bytes, original.bytes(), request))
+}
+#Test("real ordinary existing routes without recorded before returns None") {
+    scratch :: backend_app_test_root("existing")
+    source :: "use core.web as web\nfn run() App {{ web.app().routes(from: \"routes\") }}\n"
+    backend_app_test_write(scratch.path, "run.jet", source)
+    assert((backend_app_test_plan(scratch.path, Val(source.bytes()), None) ?? panic("ordinary existing")) == None)
+    receipt :: backend_app_test_receipt("run.jet", source.bytes(), None)
+    assert((backend_app_test_plan(scratch.path, Val(source.bytes()), Val([JetCLIBackendReceiptFile]{receipt})) ?? panic("before missing")) == None)
+}
+#Test("real recorded existing registration preserves current bytes and original before") {
+    scratch :: backend_app_test_root("recorded")
+    before :: "use core.web as web\nfn run() App {{ web.app() }}\n"
+    current :: "use core.web as web\nfn run() App {{ web.app().routes(from: \"routes\") }}\n"
+    backend_app_test_write(scratch.path, "run.jet", current)
+    receipt :: backend_app_test_receipt("run.jet", current.bytes(), Val(before.bytes()))
+    plan :: (backend_app_test_plan(scratch.path, Val(current.bytes()), Val([JetCLIBackendReceiptFile]{receipt})) ?? panic("recorded")) ?? panic("recorded needs a plan")
+    assert_eq(plan.bytes, current.bytes())
+    assert_eq(plan.before, Val(before.bytes()))
+}
+#Test("real digest mismatch and inverse mismatch are drift not reinsertion") {
+    scratch :: backend_app_test_root("drift")
+    before :: "use core.web as web\nfn run() App {{ web.app() }}\n"
+    current :: "use core.web as web\nfn run() App {{ web.app().routes(from: \"routes\") }}\n"
+    backend_app_test_write(scratch.path, "run.jet", current)
+    receipt := backend_app_test_receipt("run.jet", current.bytes(), Val(before.bytes()))
+    receipt.digest = "wrong"
+    first :: backend_app_test_plan(scratch.path, Val(current.bytes()), Val([JetCLIBackendReceiptFile]{receipt}))
+    assert(first == .Err(_))
+    wrong :: backend_app_test_receipt("run.jet", current.bytes(), Val("unrelated".bytes()))
+    if backend_app_test_plan(scratch.path, Val(current.bytes()), Val([JetCLIBackendReceiptFile]{wrong})) == .Err(error) {
+        assert_eq(error.code, "E2456")
+        assert(error.message.ends_with("drifted after scaffold apply"))
+        assert_eq(error.fix, "restore the recorded App route registration or remove the scaffold after review")
+    } else { panic("inverse drift accepted") }
+}
+#Test("real missing recorded registration refuses before constructor recognition") {
+    scratch :: backend_app_test_root("missing-registration")
+    current :: "use core.web as web\nfn run() App {{ web.app() }}\n"
+    backend_app_test_write(scratch.path, "run.jet", current)
+    receipt :: backend_app_test_receipt("run.jet", current.bytes(), Val(current.bytes()))
+    if backend_app_test_plan(scratch.path, Val(current.bytes()), Val([JetCLIBackendReceiptFile]{receipt})) == .Err(error) {
+        assert(error.message.ends_with("is missing"))
+        assert_eq(error.fix, "restore the recorded App route registration before rerunning the scaffold")
+    } else { panic("missing registration accepted") }
+}
+#Test("real loaded empty and unrelated source cannot fabricate fn run App") {
+    scratch :: backend_app_test_root("no-run")
+    sources :: ["", "fn unrelated() {{}}\n", "fn run() {{}}\n", "// fn run() App {{ web.app() }}\n"]
+    loop source in sources {
+        backend_app_test_write(scratch.path, "run.jet", source)
+        if backend_app_test_plan(scratch.path, Val(source.bytes()), None) == .Err(error) {
+            assert_eq(error.code, "E2456")
+            assert(error.message.ends_with("has no checked `fn run() App`"))
+        } else { panic("unrelated source accepted as an App") }
+    }
+}
+#Test("real Loader failure retains its first diagnostic and checked entry fix") {
+    scratch :: backend_app_test_root("load-error")
+    source :: "fn run( {{{{{{\n"
+    backend_app_test_write(scratch.path, "run.jet", source)
+    entry :: jet_cli_backend_app_entry(backend_app_test_path(scratch.path)) ?? panic("selection")
+    request :: backend_app_test_request(scratch.path, entry)
+    load :: jet_driver_load(request)
+    assert(!load.complete)
+    detail :: if load.diagnostics.len() > 0 -> load.diagnostics[0].what else -> "the loader returned no diagnostic"
+    backend_app_test_expect_error(backend_app_test_plan(scratch.path, Val(source.bytes()), None), "E2456", "selected project entry `{backend_app_paths.display(entry)}` is not a checked App root: {detail}", "define one checked `fn run() App` entry before generating routes")
+    assert(!jet_cli_backend_app_registration_inverse(entry, source.bytes(), source.bytes(), request))
+}
+#Test("missing read and invalid UTF-8 precede real Loader diagnostics") {
+    scratch :: backend_app_test_root("precedence")
+    backend_app_test_write(scratch.path, "run.jet", "fn run( {{{{{{\n")
+    entry :: jet_cli_backend_app_entry(backend_app_test_path(scratch.path)) ?? panic("selection")
+    backend_app_test_expect_error(backend_app_test_plan(scratch.path, None, None), "E2105", "couldn't read selected App entry `{backend_app_paths.display(entry)}`", "check project read authority and retry")
+    invalid :: [U8{255}]
+    backend_app_test_expect_error(backend_app_test_plan(scratch.path, Val(invalid), None), "E2456", "selected App entry `{backend_app_paths.display(entry)}` is not valid UTF-8", "keep the checked App entry in UTF-8 source")
+    assert(!jet_cli_backend_app_registration_inverse(entry, invalid, [U8]{}, backend_app_test_request(scratch.path, entry)))
+}
+#Test("real App AST span into independently read shorter bytes refuses not panics") {
+    scratch :: backend_app_test_root("span-race")
+    source :: "use core.web as web\nfn run() App {{ web.app() }}\n"
+    backend_app_test_write(scratch.path, "run.jet", source)
+    entry :: jet_cli_backend_app_entry(backend_app_test_path(scratch.path)) ?? panic("selection")
+    backend_app_test_expect_error(backend_app_test_plan(scratch.path, Val("x".bytes()), None), "E2456", "checked App span for `{backend_app_paths.display(entry)}` does not match its source", "restore the selected App entry and retry scaffolding")
+    assert(!jet_cli_backend_app_registration_inverse(entry, "x".bytes(), [U8]{}, backend_app_test_request(scratch.path, entry)))
+}
+#Test("real canonical constructor refusals no builder and duplicate builder") {
+    scratch :: backend_app_test_root("constructor")
+    sources :: ["use core.web as web\nfn run() App {{ panic(\"none\") }}\n", "use core.web as web\nfn run() App {{ other :: web.app(); web.app() }}\n"]
+    loop source in sources {
+        backend_app_test_write(scratch.path, "run.jet", source)
+        if backend_app_test_plan(scratch.path, Val(source.bytes()), None) == .Err(error) {
+            assert_eq(error.code, "E2456")
+            assert(error.message.contains("cannot register route discovery: the checked run function has"))
+            assert_eq(error.fix, "return one canonical `web.app()` builder from `fn run() App`")
+        } else { panic("noncanonical constructor accepted") }
+    }
+}
+#Test("real comments strings Unicode before App do not count counterfeit constructors") {
+    scratch :: backend_app_test_root("lexical")
+    source :: "// α🙂 web.app()\nuse core.web as web\nfn run() App {{ text :: \"web.app().routes(from: 'routes')\"; /* app() */ web.app() }}\n"
+    backend_app_test_write(scratch.path, "run.jet", source)
+    plan :: (backend_app_test_plan(scratch.path, Val(source.bytes()), None) ?? panic("register real constructor")) ?? panic("counterfeit routes incorrectly recognized")
+    assert_eq(plan.bytes, "// α🙂 web.app()\nuse core.web as web\nfn run() App {{ text :: \"web.app().routes(from: 'routes')\"; /* app() */ web.app().routes(from: \"routes\") }}\n".bytes())
+}
+#Test("real inverse rejects unrelated before after function edits and duplicate routes") {
+    scratch :: backend_app_test_root("inverse-drift")
+    before :: "// head\nuse core.web as web\nfn run() App {{ web.app() }}\n// tail\n"
+    valid :: "// head\nuse core.web as web\nfn run() App {{ web.app().routes(from: \"routes\") }}\n// tail\n"
+    variants :: ["// Head\nuse core.web as web\nfn run() App {{ web.app().routes(from: \"routes\") }}\n// tail\n", "// head\nuse core.web as web\nfn run() App {{ web.app().routes(from: \"routes\") }}\n// Tail\n", "// head\nuse core.web as web\nfn run() App {{ web.app().routes(from: \"routes\").routes(from: \"routes\") }}\n// tail\n"]
+    backend_app_test_write(scratch.path, "run.jet", valid)
+    entry :: jet_cli_backend_app_entry(backend_app_test_path(scratch.path)) ?? panic("selection")
+    assert(jet_cli_backend_app_registration_inverse(entry, valid.bytes(), before.bytes(), backend_app_test_request(scratch.path, entry)))
+    loop current in variants {
+        backend_app_test_write(scratch.path, "run.jet", current)
+        assert(!jet_cli_backend_app_registration_inverse(entry, current.bytes(), before.bytes(), backend_app_test_request(scratch.path, entry)))
+    }
+}
+
+#Test("real W44 typed Package callable chooses source but canonical AST still requires run App") {
+    scratch :: backend_app_test_root("typed-root")
+    backend_app_test_write(scratch.path, "package.jet", "name: \"typed-root\"\noutputs: {{ app: .Executable{{ entry: main.launch }} }}\ndefaults: {{ run: app }}\n")
+    source :: "use core.web as web\npub fn launch() App {{ web.app() }}\nfn run() App {{ web.app() }}\n"
+    backend_app_test_write(scratch.path, "app/main.jet", source)
+    plan :: (backend_app_test_plan(scratch.path, Val(source.bytes()), None) ?? panic("typed Package App")) ?? panic("typed App needs a plan")
+    assert_eq(plan.relative, "app/main.jet")
+    assert_eq(plan.bytes, "use core.web as web\npub fn launch() App {{ web.app() }}\nfn run() App {{ web.app().routes(from: \"routes\") }}\n".bytes())
+}
+#Test("real W44 library member and named file fallback remain the sole selector") {
+    scratch :: backend_app_test_root("library")
+    backend_app_test_write(scratch.path, "package.jet", "name: \"library\"\noutputs: {{ api: .Library{{}} }}\n")
+    source :: "use core.web as web\nfn run() App {{ web.app() }}\n"
+    backend_app_test_write(scratch.path, "member.jet", source)
+    plan :: (backend_app_test_plan(scratch.path, Val(source.bytes()), None) ?? panic("library member")) ?? panic("member App needs a plan")
+    assert_eq(plan.relative, "member.jet")
+    other :: backend_app_test_root("named")
+    backend_app_test_write(other.path, "package.jet", "name: \"named\"\noutputs: {{ api: .Library{{}} }}\n")
+    backend_app_test_write(other.path, "named.jet", source)
+    plan_named :: (backend_app_test_plan(other.path, Val(source.bytes()), None) ?? panic("named fallback")) ?? panic("named App needs a plan")
+    assert_eq(plan_named.relative, "named.jet")
+}
+#Test("real final link and special file kind refuses without changing backend path-read law") {
+    scratch :: backend_app_test_root("file-kind")
+    backend_app_test_write(scratch.path, "actual.jet", "fn run() {{}}\n")
+    link :: backend_app_test_files.join(scratch.path, "link.jet")
+    backend_app_test_files.symlink(backend_app_test_files.join(scratch.path, "actual.jet"), link) ?? panic("native symlink fixture: {err}")
+    metadata :: backend_app_test_files.stat(link) ?? panic("actual lstat fixture: {err}")
+    assert(jet_cli_backend_regular_kind(backend_app_test_path(link), metadata.is_symlink, metadata.is_file) == .Err(_))
+    metadata_dir :: backend_app_test_files.stat(scratch.path) ?? panic("actual directory lstat: {err}")
+    assert(jet_cli_backend_regular_kind(backend_app_test_path(scratch.path), metadata_dir.is_symlink, metadata_dir.is_file) == .Err(_))
+}
+#Test("real parent link and file reject while ordinary directory remains allowed") {
+    scratch :: backend_app_test_root("parent-kind")
+    directory :: backend_app_test_files.join(scratch.path, "directory")
+    backend_app_test_files.create_dir(directory) ?? panic("native directory: {err}")
+    link :: backend_app_test_files.join(scratch.path, "link")
+    backend_app_test_files.symlink(directory, link) ?? panic("native parent symlink: {err}")
+    metadata :: backend_app_test_files.stat(link) ?? panic("actual parent lstat: {err}")
+    assert(jet_cli_backend_parent_kind(backend_app_test_path(link), metadata.is_symlink, metadata.is_dir) == .Err(_))
+    backend_app_test_write(scratch.path, "file", "")
+    file :: backend_app_test_files.join(scratch.path, "file")
+    metadata_file :: backend_app_test_files.stat(file) ?? panic("actual parent file lstat: {err}")
+    assert(jet_cli_backend_parent_kind(backend_app_test_path(file), metadata_file.is_symlink, metadata_file.is_dir) == .Err(_))
+    metadata_dir :: backend_app_test_files.stat(directory) ?? panic("actual directory lstat: {err}")
+    assert(jet_cli_backend_parent_kind(backend_app_test_path(directory), metadata_dir.is_symlink, metadata_dir.is_dir) == .Ok(_))
+}
+
+#Test("parent lstat error policy deliberately ignores real NotFound and ENOTDIR failures") {
+    scratch :: backend_app_test_root("ignored-parent-errors")
+    backend_app_test_write(scratch.path, "file", "")
+    relatives :: ["missing/child", "file/child"]
+    loop relative in relatives {
+        path :: backend_app_test_files.join(scratch.path, relative)
+        if backend_app_test_files.stat(path) == {
+            .Err(error) -> assert(jet_cli_backend_parent_metadata(backend_app_test_path(path), Err(error)) == .Ok(_))
+            .Ok(_) -> panic("fixture expected actual parent lstat error")
+        }
+    }
+}
+#Test("real selector refuses symlink and non-directory project roots before App load") {
+    scratch :: backend_app_test_root("root-kind")
+    backend_app_test_write(scratch.path, "run.jet", "fn run() {{}}\n")
+    backend_app_test_write(scratch.path, "not-directory", "")
+    file :: backend_app_test_files.join(scratch.path, "not-directory")
+    assert(jet_cli_backend_app_entry(backend_app_test_path(file)) == .Err(_))
+    other :: backend_app_test_root("root-link")
+    link :: backend_app_test_files.join(other.path, "project")
+    backend_app_test_files.symlink(scratch.path, link) ?? panic("actual root symlink fixture: {err}")
+    assert(jet_cli_backend_app_entry(backend_app_test_path(link)) == .Err(_))
+}

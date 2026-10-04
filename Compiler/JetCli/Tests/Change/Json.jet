@@ -1,0 +1,96 @@
+// Claims for the restricted codemod JSON reader (Source/CmdCodemod/JSON.rs).
+
+fn codemod_json_test_parse(input: String) -> JetCLICodemodJSONValue {
+    jet_cli_codemod_json_parse(input) ?? panic("`{input}` did not parse: {err.message}")
+}
+
+fn codemod_json_test_error(input: String) -> String {
+    if jet_cli_codemod_json_parse(input) == {
+        .Ok(_) -> panic("`{input}` parsed but should be refused")
+        .Err(error) -> error.message
+    }
+}
+
+fn codemod_json_test_text(value: JetCLICodemodJSONValue?) -> String {
+    if value == {
+        .Val(.String(text)) -> text
+        else -> panic("expected a JSON string")
+    }
+}
+
+fn codemod_json_test_number(value: JetCLICodemodJSONValue?) -> U64 {
+    if value == {
+        .Val(.Number(number)) -> number
+        else -> panic("expected a JSON number")
+    }
+}
+
+#Test("objects come back in key order and fields are found by key") {
+    fields :: jet_cli_codemod_json_object_fields(codemod_json_test_parse(" {{\"zeta\": \"z\", \"alpha\": 7, \"mid\": [true, null, {{}}]}} ")) ?? panic("not an object")
+    assert_eq(fields.len(), 3)
+    assert_eq(fields[0].key, "alpha")
+    assert_eq(fields[1].key, "mid")
+    assert_eq(fields[2].key, "zeta")
+    assert(codemod_json_test_number(jet_cli_codemod_json_field(fields, "alpha")) == U64{7})
+    assert_eq(codemod_json_test_text(jet_cli_codemod_json_field(fields, "zeta")), "z")
+    assert(jet_cli_codemod_json_field(fields, "absent") == None)
+    if jet_cli_codemod_json_field(fields, "mid") == {
+        .Val(.Array(items)) -> {
+            assert_eq(items.len(), 3)
+            if items[0] == {
+                .Bool(flag) -> assert(flag)
+                else -> panic("expected true")
+            }
+            if items[1] == {
+                .Null -> {}
+                else -> panic("expected null")
+            }
+        }
+        else -> panic("expected an array")
+    }
+}
+
+#Test("numbers are unsigned 64-bit integers") {
+    assert(codemod_json_test_number(Val(codemod_json_test_parse("18446744073709551615"))) == U64{0xffffffffffffffff})
+    assert(codemod_json_test_number(Val(codemod_json_test_parse("007"))) == U64{7})
+    assert_eq(codemod_json_test_error("  18446744073709551616"), "invalid integer at byte 2")
+    assert_eq(codemod_json_test_error("-1"), "expected JSON value at byte 0")
+    assert_eq(codemod_json_test_error("1.5"), "unexpected data at byte 1")
+}
+
+#Test("a repeated object field is refused after its value parses") {
+    assert_eq(codemod_json_test_error("{{\"a\": 1, \"a\": 2}}"), "duplicate field `a`")
+    assert_eq(codemod_json_test_error("{{\"a\": 1, \"a\": tru}}"), "expected JSON value at byte 14")
+}
+
+#Test("string escapes follow the codemod reader") {
+    assert_eq(codemod_json_test_text(Val(codemod_json_test_parse("\"a\\\"b\\\\c\\/d\\n\\t\""))), "a\"b\\c/d\n\t")
+    assert_eq(codemod_json_test_text(Val(codemod_json_test_parse("\"\\u00e9\\u20AC\""))), "é€")
+    assert_eq(codemod_json_test_text(Val(codemod_json_test_parse("\"\\u+0e9\""))), "é")
+    assert_eq(codemod_json_test_text(Val(codemod_json_test_parse("\"héllo\""))), "héllo")
+    assert_eq(codemod_json_test_error("\"\\ud800\""), "bad unicode scalar")
+    assert_eq(codemod_json_test_error("\"\\uZZZZ\""), "bad unicode escape")
+    assert_eq(codemod_json_test_error("\"\\u12\""), "unfinished unicode escape")
+    assert_eq(codemod_json_test_error("\"\\q\""), "unknown JSON escape at byte 2")
+    assert_eq(codemod_json_test_error("\"\\"), "unfinished JSON escape")
+    assert_eq(codemod_json_test_error("\"a\nb\""), "control byte in JSON string")
+    assert_eq(codemod_json_test_error("\"open"), "unterminated JSON string")
+}
+
+#Test("structural errors name the byte offset") {
+    assert_eq(codemod_json_test_error(""), "expected JSON value at byte 0")
+    assert_eq(codemod_json_test_error("1 x"), "unexpected data at byte 2")
+    assert_eq(codemod_json_test_error("[1 2]"), "expected `,` or `]` at byte 3")
+    assert_eq(codemod_json_test_error("{{\"a\" 1}}"), "expected `:` at byte 5")
+    assert_eq(codemod_json_test_error("{{1: 2}}"), "expected object key at byte 1")
+    assert_eq(codemod_json_test_error("{{\"a\": 1 \"b\": 2}}"), "expected `,` or `}}` at byte 8")
+    assert_eq(codemod_json_test_error("[1,]"), "expected JSON value at byte 3")
+    assert_eq(codemod_json_test_error("nul"), "expected JSON value at byte 0")
+}
+
+#Test("only an object has fields") {
+    if jet_cli_codemod_json_object_fields(codemod_json_test_parse("[]")) == {
+        .Ok(_) -> panic("an array has no fields")
+        .Err(error) -> assert_eq(error.message, "expected JSON object")
+    }
+}

@@ -1,0 +1,182 @@
+// Stock project selection: Source/main.rs:6253-6265,6314-6316,6331-6432,
+// 6458-6478,6720-6723. Authority and Package output policy stay inward.
+use core.files.runtime.kernel_path_components as project_entry_paths
+use core.files.host.retained_descriptor as project_entry_native
+use jet_pkg_model.[
+    AuthorityResolver, AuthorityError, CheckedPackageEntry, PackageFacts,
+    PackageEntryError, WorkspaceDeclarationCache,
+    pkg_find_inline_package_root_checked, pkg_package_facts_for_root,
+]
+use jet_driver.[jet_driver_package_run_member, JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
+use jet_foundation.[
+    Diagnostic, ReportEnvelope, ReportPath, StatusFields,
+    FILE_EXT, PACKAGE_FILE, WORKSPACE_FILE, DEFAULT_ENTRY_FILE,
+    diagnostic_render_all, diagnostic_report_clear_counts,
+    diagnostic_to_report_with_clears, report_render_status_with_reports,
+]
+
+// Rust `ResolvedEntry`: preserve the canonical authority's original OsPath.
+// Display text is used only at the diagnostic boundary, never as native input.
+pub struct JetCLIResolvedEntry {
+    pub path: project_entry_paths.OsPath
+    pub callable: String?
+}
+
+// Retain real provider failures until the shared output boundary. No exit,
+// synthetic source, checked identity, or secondary loader is created here.
+#Error
+pub enum JetCLIProjectEntryError {
+    Authority(AuthorityError)
+    Output(error: PackageEntryError, fix: String)
+    Diagnostics(path: String, diagnostics: [Diagnostic])
+}
+
+// Rust `ResolvedEntry::file`.
+pub fn jet_cli_resolved_entry_file(path: project_entry_paths.OsPath) -> JetCLIResolvedEntry Never! {
+    JetCLIResolvedEntry{path: path, callable: None}
+}
+
+// Rust explicit `ResolvedEntry` constructors in the three output branches.
+fn jet_cli_resolved_package_entry(entry: CheckedPackageEntry) -> JetCLIResolvedEntry Never! {
+    JetCLIResolvedEntry{path: entry.file.path, callable: Val(entry.callable)}
+}
+
+// Rust `checked_project_entry`: only Missing is absence, and a selected file
+// is revalidated before its checked path leaves this boundary.
+pub fn jet_cli_checked_project_entry(resolver: AuthorityResolver, relative: project_entry_paths.OsPath) -[FS, Env]> project_entry_paths.OsPath? JetCLIProjectEntryError! {
+    if resolver.checked_file(relative) == {
+        .Ok(file) -> {
+            resolver.revalidate_file(file) ?? return Err(JetCLIProjectEntryError.Authority(err))
+            Ok(Val(file.path))
+        }
+        .Err(error) -> {
+            if error.is_missing() -> return Ok(None)
+            Err(JetCLIProjectEntryError.Authority(error))
+        }
+    }
+}
+
+// Rust `find_project_entry` (the callable-aware result remains available to
+// the real JetDriverCompileRequest/jet_driver_load consumer).
+pub fn jet_cli_find_project_entry(root: project_entry_paths.OsPath) -[FS, Env, IO]> project_entry_paths.OsPath JetCLIProjectEntryError! {
+    entry :: jet_cli_find_project_entry_with_callable(root)
+    Ok(entry.path)
+}
+
+// Rust `find_project_entry_with_callable`, including the library/member tail.
+pub fn jet_cli_find_project_entry_with_callable(root: project_entry_paths.OsPath) -[FS, Env, IO]> JetCLIResolvedEntry JetCLIProjectEntryError! {
+    resolver :: AuthorityResolver.open(root) ?? return Err(JetCLIProjectEntryError.Authority(err))
+    package :: if resolver.checked_package(project_entry_paths.from_text(".", root.platform)) == {
+        .Ok(checked) -> Val(checked)
+        .Err(error) -> {
+            if !error.is_missing() -> return Err(JetCLIProjectEntryError.Authority(error))
+            None
+        }
+    }
+    if package == .Val(checked) {
+        selected :: if checked.facts.resolve_run_entry_checked(resolver) == {
+            .Ok(entry) -> entry
+            .Err(error) -> return Err(JetCLIProjectEntryError.Output{error: error, fix: "repair the typed Package output or point at a `.jet` file directly"})
+        }
+        if selected == .Val(entry) -> return Ok(jet_cli_resolved_package_entry(entry))
+    }
+
+    cache := WorkspaceDeclarationCache.new()
+    inline :: if pkg_find_inline_package_root_checked(&cache, root) == {
+        .Ok(found) -> found
+        .Err(error) -> return Err(JetCLIProjectEntryError.Diagnostics{path: WORKSPACE_FILE, diagnostics: [Diagnostic]{error.diagnostic}})
+    }
+    if inline == .Val(inline_root) {
+        if project_entry_paths.equals(inline_root, resolver.root) {
+            facts :: if pkg_package_facts_for_root(&cache, inline_root) == {
+                .Ok(found) -> found
+                .Err(error) -> return Err(JetCLIProjectEntryError.Diagnostics{path: project_entry_paths.display(inline_root), diagnostics: [Diagnostic]{error.diagnostic}})
+            }
+            if facts == .Val(inline_facts) {
+                selected :: if inline_facts.resolve_run_entry_checked(resolver) == {
+                    .Ok(entry) -> entry
+                    .Err(error) -> return Err(JetCLIProjectEntryError.Output{error: error, fix: "repair the typed inline Package output or point at a `.jet` file directly"})
+                }
+                if selected == .Val(entry) -> return Ok(jet_cli_resolved_package_entry(entry))
+            }
+        }
+    }
+
+    selected :: if PackageFacts.default().resolve_run_entry_checked(resolver) == {
+        .Ok(entry) -> entry
+        .Err(error) -> return Err(JetCLIProjectEntryError.Output{error: error, fix: "keep one project entry, using `run.jet`, or point at a `.jet` file directly"})
+    }
+    if selected == .Val(entry) -> return Ok(jet_cli_resolved_package_entry(entry))
+
+    if package == .Val(checked) {
+        named := ~resolver.root
+        project_entry_paths.push(&named, project_entry_paths.from_text("{checked.facts.name}.{FILE_EXT}", root.platform))
+        // Use the canonical component-aware strip, matching Rust strip_prefix;
+        // checked_project_entry separately refuses unsafe relative components.
+        if project_entry_paths.strip_prefix_span(named, resolver.root) == .Val(extent) {
+            relative :: project_entry_paths.owned_span(named, extent)
+            found :: if jet_cli_checked_project_entry(resolver, relative) == {
+                .Ok(entry) -> entry
+                .Err(error) -> return Err(error)
+            }
+            if found == .Val(path) -> return Ok(jet_cli_resolved_entry_file(path))
+        }
+        // D-MOD-CYCLE1=A: only a package without the stock root run.jet
+        // consults the sole Driver parser's run member, then its first source.
+        stock := ~resolver.root
+        project_entry_paths.push(&stock, project_entry_paths.from_text(DEFAULT_ENTRY_FILE, root.platform))
+        has_stock :: if project_entry_native.metadata(stock) == {
+            .Ok(info) -> info.is_file
+            .Err(_) -> false
+        }
+        if !has_stock {
+            member :: jet_driver_package_run_member(resolver.root)
+            if member == .Val(path) -> return Ok(jet_cli_resolved_entry_file(path))
+            if resolver.discover_source_files() == .Ok(files) {
+                package_name :: project_entry_paths.from_text(PACKAGE_FILE, root.platform)
+                package_component :: project_entry_paths.PathComponent{kind: .Normal, span: project_entry_paths.PathSpan{start: 0, end: package_name.encoded.len()}}
+                loop file in files {
+                    excluded :: if project_entry_paths.file_name_span(file.relative) == {
+                        .Val(name) -> project_entry_paths.component_equal(file.relative, project_entry_paths.PathComponent{kind: .Normal, span: name}, package_name, package_component)
+                        .None -> false
+                    }
+                    if !excluded -> return Ok(jet_cli_resolved_entry_file(file.path))
+                }
+            }
+        }
+    }
+    // Intentionally return the real, possibly absent run.jet path. The native
+    // loader owns its missing-file diagnostic; selection does not invent IO.
+    fallback := ~resolver.root
+    project_entry_paths.push(&fallback, project_entry_paths.from_text(DEFAULT_ENTRY_FILE, root.platform))
+    Ok(jet_cli_resolved_entry_file(fallback))
+}
+
+// Rust `report_entry_authority_error`, `report_entry_diagnostic`, and the
+// inline parse-diagnostics branch. Same canonical diagnostics and USER_ERROR;
+// the host supplies its once-selected OutputAdapter profile instead of exit.
+pub fn jet_cli_project_entry_error_output(error: JetCLIProjectEntryError, profile: JetCLIOutputProfile) -[FS, Env]> JetDriverVerbOutput Never! {
+    if error == {
+        .Output(entry_error, fix) -> {
+            refusal :: jet_cli_args_refuse("E2105", entry_error.message, jet_cli_why("E2105"), fix, profile.machine_enabled)
+            stderr :: if !profile.machine_enabled && profile.ansi_enabled -> jet_cli_report(refusal.code, refusal.what, refusal.why, refusal.fix, true) else -> refusal.stderr
+            JetDriverVerbOutput{stdout: refusal.stdout, stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        }
+        .Authority(authority) -> jet_cli_project_entry_diagnostics_output(PACKAGE_FILE, [Diagnostic]{authority.diagnostic()}, profile)
+        .Diagnostics(path, diagnostics) -> jet_cli_project_entry_diagnostics_output(path, diagnostics, profile)
+    }
+}
+
+fn jet_cli_project_entry_diagnostics_output(path: String, diagnostics: [Diagnostic], profile: JetCLIOutputProfile) -[FS, Env]> JetDriverVerbOutput Never! {
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    if profile.machine_enabled {
+        reports := [ReportEnvelope]{}
+        clears :: diagnostic_report_clear_counts(diagnostics)
+        report_path :: ReportPath.from_process(path)
+        loop index in 0..<diagnostics.len() -> &reports.push(diagnostic_to_report_with_clears(diagnostics[index], report_path, "", clears[index]))
+        jet_cli_write_machine(&output, profile, "{report_render_status_with_reports("diagnostics", false, reports, StatusFields.new())}\n")
+    } else {
+        jet_cli_write_status(&output, profile, diagnostic_render_all(path, "", diagnostics, profile.ansi_enabled))
+    }
+    output
+}

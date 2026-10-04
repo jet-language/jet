@@ -1,0 +1,40 @@
+use jet.BudgetStore.[Lock, mutation_supported]
+use std.fs.File
+use std.ffi.CString
+use std.io.Error
+use core.sys.target as target
+use core.sys.host.unix_fd as unix_fd
+
+// Rust: Source/BudgetStore.rs:1792
+impl Lock {
+    fn take(dir: File, name: String) -> Lock Err! {
+        if target.selected_family() != "unix" -> return Err("advisory lock unavailable on this platform")
+        mutation_supported()
+        O_RDWR :: I32{2}
+        O_CREAT :: I32{0o100}
+        O_CLOEXEC :: I32{0o2000000}
+        O_NOFOLLOW :: I32{0o400000}
+        LOCK_EX :: I32{2}
+        // GATE #4494: retained C string and native openat/flock/owned File.
+        native_name :: CString.new(name) ?? return Err("NUL in lock")
+        fd :: unix_fd.openat(dir.as_raw_fd(), native_name.as_ptr(), O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, U32{0o600})
+        if fd < 0 -> return Err("cannot securely open lock: {Error.last_os_error()}")
+        file :: File.from_raw_fd(fd)
+        meta :: file.metadata() ?? return Err(err.to_string())
+        if !meta.is_file() || meta.nlink() != 1 -> return Err("baseline lock is linked or not regular")
+        if unix_fd.flock(file.as_raw_fd(), LOCK_EX) != 0 -> return Err("cannot lock baseline: {Error.last_os_error()}")
+        Ok(Lock{file: ^file})
+    }
+}
+
+// Rust: Source/BudgetStore.rs:1837
+impl Lock.Close {
+    fn close(^self) {
+        if target.selected_family() == "unix" {
+            // GATE #4494: unlock the owned descriptor before its File closes.
+            _ :: unix_fd.flock(self.file.as_raw_fd(), I32{8})
+        }
+    }
+}
+// Rust: Source/BudgetStore.rs:1850
+// The non-Unix take arm is dispatched at the start of Lock.take above.

@@ -1285,7 +1285,7 @@ fn parser_parse_prep_loop(state: &JetParserState) -> Stmt {
     keyword :: parser_expect(&state, TOKEN_KW_LOOP, "`loop` after `prep`")
     body :: parser_parse_loop_after_keyword(&state, keyword.span, None)
     end :: parser_lookahead(&state, -1).span
-    Stmt.ComptimeBlock{body: [Stmt]{body}, is_template_loop: false, span: parser_cover(start.span, end)}
+    Stmt.ComptimeBlock{body: [Stmt]{body}, is_template_loop: state.derive_template_depth > 0, span: parser_cover(start.span, end)}
 }
 
 fn parser_parse_binding_statement(state: &JetParserState) -> Stmt {

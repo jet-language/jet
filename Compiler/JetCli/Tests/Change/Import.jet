@@ -1,0 +1,350 @@
+// CmdImport.rs IM03/IM04 + expression engine behavioral parity.
+fn import_test_header(language: String, line: String) -> JetCLIImportForeignHeader Never! {
+    jet_cli_import_parse_foreign_header(language, line) ?? panic("header: {err.message}")
+}
+fn import_test_header_error(language: String, line: String) -> String Never! {
+    if jet_cli_import_parse_foreign_header(language, line) == {
+        .Ok(_) -> panic("header unexpectedly mapped: {language}: {line}")
+        .Err(error) -> ~error.message
+    }
+}
+fn import_test_params_error(language: String, raw: String) -> String Never! {
+    if jet_cli_import_parse_foreign_params(language, raw) == {
+        .Ok(_) -> panic("parameters unexpectedly mapped")
+        .Err(error) -> ~error.message
+    }
+}
+fn import_test_type_error(language: String, raw: String) -> String Never! {
+    if jet_cli_import_map_foreign_type(language, raw) == {
+        .Ok(_) -> panic("type unexpectedly mapped")
+        .Err(error) -> ~error.message
+    }
+}
+fn import_test_expression(language: String, raw: String, floats: Bool) -> String Never! {
+    jet_cli_import_foreign_expression(language, raw, floats) ?? panic("expression: {err.message}")
+}
+fn import_test_expression_error(language: String, raw: String) -> String Never! {
+    if jet_cli_import_foreign_expression(language, raw, false) == {
+        .Ok(_) -> panic("expression unexpectedly mapped")
+        .Err(error) -> ~error.message
+    }
+}
+fn import_test_body(result: String, text: String) -> JetCLIImportFunction Never! {
+    JetCLIImportFunction{name: "test", params: [], result: result, body: [JetCLIImportBodyLine{line: 17, text: text}]}
+}
+fn import_test_body_error(result: String, text: String) -> JetCLIImportBodyError Never! {
+    if jet_cli_import_translate_foreign_body("java", import_test_body(result, text), false, false) == {
+        .Ok(_) -> panic("body unexpectedly mapped")
+        .Err(error) -> error
+    }
+}
+
+#Test("foreign comments and candidates preserve exact prefix boundaries") {
+    comments :: [String]{"// note", "* doc", "<!-- note", "*/ tail", "/* open", "/* done */  "}
+    loop line in comments -> assert(jet_cli_import_foreign_comment_line(line))
+    assert(!jet_cli_import_foreign_comment_line("/* done */ public static int x() {{"))
+    assert(!jet_cli_import_foreign_comment_line(" // note"))
+    languages :: [String]{"java", "csharp"}
+    excluded :: [String]{"if ", "if(", "for ", "for(", "while ", "while(", "switch ", "switch(", "catch ", "catch("}
+    loop language in languages {
+        loop prefix in excluded -> assert(!jet_cli_import_foreign_function_candidate(language, "{prefix}(x)"))
+        assert(jet_cli_import_foreign_function_candidate(language, "public static int x() {{"))
+        assert(!jet_cli_import_foreign_function_candidate(language, "public static int x"))
+    }
+    assert(jet_cli_import_foreign_function_candidate("ts", "export function x()"))
+    assert(jet_cli_import_foreign_function_candidate("js", "const x = () => 2"))
+    assert(jet_cli_import_foreign_function_candidate("go", "func x()"))
+    assert(!jet_cli_import_foreign_function_candidate("go", "function x()"))
+    assert(!jet_cli_import_foreign_function_candidate("py", "def x():"))
+}
+
+#Test("foreign header errors and precedence are byte exact") {
+    cases :: [(language: String, line: String, error: String)]{
+        (language: "java", line: "x", error: "function declaration has no parameter list"),
+        (language: "java", line: "x(", error: "function declaration has no complete parameter list"),
+        (language: "java", line: ")x(", error: "function declaration has no complete parameter list"),
+        (language: "java", line: "() {{", error: "function declaration has no name"),
+        (language: "java", line: "public static int bad-name() {{", error: "function name `bad-name` is not a safe Jet identifier"),
+        (language: "java", line: "async int x() {{", error: "async methods need an explicit migration adapter"),
+        (language: "java", line: "static int x() {{", error: "only public static methods have a proven source-to-Jet mapping"),
+        (language: "java", line: "public int x() {{", error: "only static Java/C# methods have a proven source-to-Jet mapping"),
+        (language: "java", line: "public static int x() throws Error {{", error: "method modifiers or exception contracts need an explicit migration adapter"),
+        (language: "csharp", line: "public static int x() {{ where T: X", error: "method modifiers or exception contracts need an explicit migration adapter"),
+        (language: "java", line: "public static int x<T>() {{", error: "function name `x<T>` is not a safe Jet identifier"),
+        (language: "java", line: "public <T> static int x() {{", error: "generic functions need an explicit migration adapter"),
+        (language: "ts", line: "const asyncX = (): number => 1", error: "async arrow functions need an explicit migration adapter"),
+        (language: "ts", line: "x(): number => 1", error: "arrow function has no bound name"),
+        (language: "ts", line: "= (): number => 1", error: "arrow function has no bound name"),
+        (language: "ts", line: "const bad-name = (): number => 1", error: "function name `bad-name` is not a safe Jet identifier"),
+        (language: "ts", line: "const x = (): => 1", error: "arrow function has no complete return annotation"),
+        (language: "ts", line: "const x = () => 1", error: "TypeScript arrow function needs a return type"),
+        (language: "ts", line: "x(): number {{", error: "function declaration has no function keyword"),
+        (language: "js", line: "async function x() {{", error: "async functions need an explicit migration adapter"),
+        (language: "js", line: "function *x() {{", error: "generator functions need an explicit migration adapter"),
+        (language: "js", line: "function () {{", error: "function declaration has no name"),
+        (language: "js", line: "function 9x() {{", error: "function name `9x` is not a safe Jet identifier"),
+        (language: "ts", line: "function x() {{", error: "TypeScript function needs a return type"),
+        (language: "go", line: "x() {{", error: "Go function needs `func`"),
+        (language: "go", line: "func () {{", error: "Go function declaration has no name"),
+        (language: "go", line: "func 9x() {{", error: "function name `9x` is not a safe Jet identifier"),
+        (language: "ruby", line: "x() {{", error: "no source importer for ruby"),
+        (language: "java", line: "public static int x()", error: "function declaration needs a body")
+    }
+    loop row in cases -> assert_eq(import_test_header_error(row.language, row.line), row.error)
+    modifiers :: [String]{"abstract", "extern", "in", "out", "override", "ref", "synchronized", "unsafe", "virtual"}
+    loop modifier in modifiers -> assert_eq(import_test_header_error("java", "public static {modifier} int x() {{"), "method modifiers or exception contracts need an explicit migration adapter")
+    // Rust's no-return-type branch is unreachable: nonempty tokens + saturating_sub(2).
+    // Rust's receiver branch is also unreachable: prefix ends before the first '(';
+    // receiver syntax consequently reports the Go no-name error, not a fabricated mapping.
+    assert_eq(import_test_header_error("go", "func (r Receiver) x() int {{"), "Go function declaration has no name")
+    // Rust tests the literal interior \" where \", not a suffix-leading keyword.
+    assert_eq(import_test_header("csharp", "public static int x() where T: X {{").function.result, "Int")
+}
+
+#Test("scalar type families qualifiers and refusal messages") {
+    ints :: [(language: String, types: [String])]{
+        (language: "java", types: ["byte", "short", "int", "long"]),
+        (language: "csharp", types: ["byte", "short", "int", "long", "Int32", "Int64"]),
+        (language: "go", types: ["int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64"])
+    }
+    loop row in ints { loop ty in row.types -> assert_eq(jet_cli_import_map_foreign_type(row.language, ty) ?? panic("integer type"), "Int") }
+    cases :: [(language: String, raw: String, mapped: String)]{
+        (language: "java", raw: "float", mapped: "Float"), (language: "java", raw: "double", mapped: "Float"), (language: "java", raw: "boolean", mapped: "Bool"), (language: "java", raw: "String", mapped: "String"), (language: "java", raw: "void", mapped: "()"),
+        (language: "java", raw: " java.lang.String;;", mapped: "String"), (language: "csharp", raw: "System.Int32", mapped: "Int"),
+        (language: "csharp", raw: "float", mapped: "Float"), (language: "csharp", raw: "double", mapped: "Float"), (language: "csharp", raw: "Single", mapped: "Float"), (language: "csharp", raw: "Double", mapped: "Float"),
+        (language: "csharp", raw: "bool", mapped: "Bool"), (language: "csharp", raw: "Boolean", mapped: "Bool"), (language: "csharp", raw: "string", mapped: "String"), (language: "csharp", raw: "String", mapped: "String"), (language: "csharp", raw: "void", mapped: "()"),
+        (language: "ts", raw: "number", mapped: "Float"), (language: "ts", raw: "boolean", mapped: "Bool"), (language: "ts", raw: "string", mapped: "String"), (language: "ts", raw: "void", mapped: "()"),
+        (language: "go", raw: "float32", mapped: "Float"), (language: "go", raw: "float64", mapped: "Float"), (language: "go", raw: "bool", mapped: "Bool"), (language: "go", raw: "string", mapped: "String"), (language: "js", raw: "opaque", mapped: "__js__")
+    }
+    loop row in cases -> assert_eq(jet_cli_import_map_foreign_type(row.language, row.raw) ?? panic("scalar type"), row.mapped)
+    errors :: [(language: String, raw: String, error: String)]{
+        (language: "java", raw: "Object", error: "Java type `Object` has no proven Jet mapping"),
+        (language: "csharp", raw: "Object", error: "C# type `Object` has no proven Jet mapping"),
+        (language: "ts", raw: "object", error: "TypeScript type `object` has no proven Jet mapping"),
+        (language: "go", raw: "void", error: "Go type `void` has no proven Jet mapping"),
+        (language: "ruby", raw: "int", error: "no scalar type mapping for ruby"),
+        (language: "ts", raw: "number[]", error: "foreign type `number[]` is outside the scalar importer subset"),
+        (language: "go", raw: "*int", error: "foreign type `*int` is outside the scalar importer subset"),
+        (language: "csharp", raw: "int&", error: "foreign type `int&` is outside the scalar importer subset"),
+    }
+    loop row in errors -> assert_eq(import_test_type_error(row.language, row.raw), row.error)
+    assert_eq(jet_cli_import_map_foreign_type("java", "int; ") ?? panic("trim then semicolon"), "Int")
+}
+
+#Test("parameter boundaries grouped Go names and duplicate policy") {
+    assert((jet_cli_import_parse_foreign_params("go", " \t") ?? panic("empty params")).is_empty())
+    params :: jet_cli_import_parse_go_params("left, right int, name string") ?? panic("grouped params")
+    assert_eq(params.len(), 3)
+    assert_eq(params[0].name, "left")
+    assert_eq(params[0].ty, "Int")
+    assert_eq(params[1].name, "right")
+    assert_eq(params[1].ty, "Int")
+    assert_eq(params[2].name, "name")
+    assert_eq(params[2].ty, "String")
+    cases :: [(language: String, raw: String, error: String)]{
+        (language: "ts", raw: "x?: number", error: "optional, default, or variadic parameters need an explicit migration adapter"),
+        (language: "js", raw: "x = 2", error: "optional, default, or variadic parameters need an explicit migration adapter"),
+        (language: "java", raw: "int... x", error: "optional, default, or variadic parameters need an explicit migration adapter"),
+        (language: "ts", raw: "x", error: "TypeScript parameter needs a type"),
+        (language: "ts", raw: "9x: number", error: "parameter `9x` is not a safe Jet identifier"),
+        (language: "js", raw: "9x", error: "parameter `9x` is not a safe Jet identifier"),
+        (language: "java", raw: "int", error: "Java/C# parameters must use one scalar type and one name"),
+        (language: "java", raw: "int x-y", error: "parameter `x-y` has no safe scalar mapping"),
+        (language: "csharp", raw: "ref int x", error: "parameter `x` has no safe scalar mapping"),
+        (language: "csharp", raw: "out int x", error: "parameter `x` has no safe scalar mapping"),
+        (language: "csharp", raw: "in int x", error: "parameter `x` has no safe scalar mapping"),
+        (language: "go", raw: "a, a int", error: "duplicate Go parameter `a`"),
+        (language: "go", raw: "a int, a string", error: "duplicate Go parameter `a`"),
+        (language: "go", raw: "a", error: "Go parameter names need a scalar type"),
+        (language: "go", raw: "a b int", error: "Go parameters must use one or more names followed by one scalar type"),
+        (language: "go", raw: "9a int", error: "Go parameters must use one or more names followed by one scalar type"),
+        (language: "go", raw: "a int,", error: "Go parameters must use one or more names followed by one scalar type"),
+        (language: "ts", raw: "x: number,", error: "TypeScript parameter needs a type")
+    }
+    loop row in cases -> assert_eq(import_test_params_error(row.language, row.raw), row.error)
+    // Rust does not deduplicate non-Go parameters.
+    assert_eq((jet_cli_import_parse_foreign_params("js", "x, x") ?? panic("duplicate JS")).len(), 2)
+    assert_eq(jet_cli_import_split_commas("a(x,y), b[z,w], c").len(), 3)
+    assert_eq(jet_cli_import_split_commas("").len(), 1)
+}
+
+#Test("header empty main arrow and UTF-8 byte offsets") {
+    main :: import_test_header("java", "public static void main() {{")
+    assert_eq(main.function.name, "run")
+    assert_eq(main.function.result, "()")
+    assert_eq(import_test_header("java", "public static int main() {{").function.name, "main")
+    assert_eq(import_test_header("java", "public static void main(int x) {{").function.name, "main")
+    arrow :: import_test_header("ts", "export const twice = (x: number): number => x + 2;;")
+    assert_eq(arrow.expression_body ?? panic("expression body"), "x + 2")
+    assert_eq(arrow.function.params[0].ty, "Float")
+    assert(import_test_header("js", "const twice = (x) => {{ return x; }}").expression_body == None)
+    assert_eq(import_test_header("csharp", "public static int x() => 2;").expression_body ?? panic("C# expression body"), "2")
+    unicode :: import_test_header("java", "public static java.lang.String label() {{")
+    assert_eq(unicode.function.name, "label")
+    assert_eq(unicode.function.result, "String")
+    assert_eq(import_test_header("ts", "é function label(): string {{").function.result, "String")
+    assert_eq(import_test_header("go", "func main() {{").function.name, "run")
+}
+
+#Test("expression engine all errors and float literal mode") {
+    cases :: [(raw: String, error: String)]{
+        (raw: "", error: "empty expression"), (raw: "a b", error: "unsupported expression near b"),
+        (raw: "None", error: "None needs an explicit Option mapping"),
+        (raw: "null", error: "dynamic or reference value has no proven scalar mapping"),
+        (raw: "nil", error: "dynamic or reference value has no proven scalar mapping"),
+        (raw: "undefined", error: "dynamic or reference value has no proven scalar mapping"),
+        (raw: "new", error: "dynamic or reference value has no proven scalar mapping"),
+        (raw: "this", error: "dynamic or reference value has no proven scalar mapping"),
+        (raw: "1 2", error: "two adjacent expression values"), (raw: "1 'x'", error: "two adjacent expression values"),
+        (raw: "+ 1", error: "operator + needs a left operand"), (raw: "()", error: "unbalanced expression parentheses"),
+        (raw: "1)", error: "unbalanced expression parentheses"), (raw: "1, 2", error: "comma outside a call"),
+        (raw: "f(,1)", error: "comma outside a call"), (raw: "1 +", error: "incomplete expression"), (raw: "(1", error: "incomplete expression"),
+        (raw: "1.2.3", error: "malformed numeric literal"), (raw: "1.", error: "malformed numeric literal"),
+        (raw: "'open", error: "unterminated Python string"), (raw: "'escape\\", error: "unterminated Python string"),
+        (raw: "a.b", error: "unsupported Python expression token ."), (raw: "é", error: "unsupported Python expression token Ã")
+    }
+    loop row in cases {
+        if jet_cli_import_parse_expression(row.raw) == {
+            .Ok(_) -> panic("bad expression mapped")
+            .Err(error) -> assert_eq(error.message, row.error)
+        }
+    }
+    assert_eq(jet_cli_import_parse_expression_with_float("Add(2, 3.5)", true) ?? panic("float mode"), "add(2.0, 3.5)")
+    assert_eq(jet_cli_import_parse_expression("Add(2, 3.5)") ?? panic("int mode"), "add(2, 3.5)")
+    assert_eq(jet_cli_import_parse_expression("True and !False or -2 <= 3") ?? panic("operators"), "true && ! false || - 2 <= 3")
+    assert_eq(jet_cli_import_parse_expression("'é'") ?? panic("Unicode string"), "\"é\"")
+    assert_eq(jet_cli_import_parse_expression("'a\"b'") ?? panic("quote conversion"), "\"a\\\"b\"")
+}
+
+#Test("foreign scalar refusals runtime names and quoted names") {
+    assert_eq(import_test_expression_error("js", "`template`"), "raw/template strings need an explicit migration adapter")
+    languages :: [String]{"java", "csharp", "ts", "js", "go"}
+    loop language in languages {
+        assert_eq(import_test_expression_error(language, "a / b"), "foreign division or remainder semantics need an explicit migration adapter")
+        assert_eq(import_test_expression_error(language, "a % b"), "foreign division or remainder semantics need an explicit migration adapter")
+        assert_eq(import_test_expression(language, "\"a/b%\"", false), "\"a/b%\"")
+    }
+    character_languages :: [String]{"java", "csharp", "go"}
+    loop language in character_languages -> assert_eq(import_test_expression_error(language, "'a'"), "foreign character literals need an explicit migration adapter")
+    assert_eq(import_test_expression("js", "'a'", false), "\"a\"")
+    assert_eq(import_test_expression("js", "a !== b", false), "a != b")
+    assert_eq(import_test_expression("ts", "a === b", false), "a == b")
+    names :: [String]{"System.out.println(", "System.Console.WriteLine(", "Console.WriteLine(", "fmt.Println(", "println(", "console.log("}
+    loop name in names {
+        assert_eq(import_test_expression("js", "{name}2)", false), "print(2)")
+        assert_eq(import_test_expression("js", "\"{name}\"", false), "\"{name}\"")
+    }
+    // tests/source_import.rs::javascript_import_does_not_rewrite_foreign_names_inside_strings.
+    assert_eq(import_test_expression("js", "\"console.log(\"", false), "\"console.log(\"")
+    assert_eq(jet_cli_import_replace_unquoted("é console.log(x) 'console.log(' `console.log(`", "console.log(", "print("), "é print(x) 'console.log(' `console.log(`")
+    assert_eq(jet_cli_import_replace_unquoted("\"x\\\"console.log(\" console.log(x)", "console.log(", "print("), "\"x\\\"console.log(\" print(x)")
+}
+
+#Test("quote scanners UTF-8 escaping and nested braces") {
+    assert_eq(jet_cli_import_find_unquoted("é '{{' {{", "{{") ?? -1, 7)
+    assert(jet_cli_import_find_unquoted("\"/\" '/' `/`", "/") == None)
+    assert_eq(jet_cli_import_find_unquoted("\"é\" é", "é") ?? -1, 5)
+    assert(!jet_cli_import_has_unquoted_single_quote("\"'\" ` ' `"))
+    assert(jet_cli_import_has_unquoted_single_quote("\"'\" 'x'"))
+    assert_eq(jet_cli_import_strip_foreign_line_comment("é \"http://x\" // comment"), "é \"http://x\" ")
+    assert_eq(jet_cli_import_strip_foreign_line_comment("'//' `//`"), "'//' `//`")
+    assert_eq(jet_cli_import_brace_delta("{{ {{ \"}}\" '}}' `}}` }}"), 1)
+    assert_eq(jet_cli_import_strip_unquoted_braces("{{é {{\"}}\" '}}' `}}`}}}}"), "é \"}}\" '}}' `}}`")
+    statements :: jet_cli_import_split_foreign_statements("é; f('a;b', [x;y]); `a;b`; tail")
+    assert_eq(statements.len(), 4)
+    assert_eq(statements[0], "é")
+    assert_eq(statements[1], " f('a;b', [x;y])")
+    assert_eq(statements[2], " `a;b`")
+    assert_eq(statements[3], " tail")
+    assert(jet_cli_import_split_foreign_statements("").is_empty())
+    assert_eq(jet_cli_import_split_foreign_statements(";").len(), 1)
+    assert_eq(jet_cli_import_canonical_identifier("HTTPServerURL2Name"), "http_server_url2_name")
+    assert_eq(jet_cli_import_canonical_identifier("foo_Bar éABC"), "foo_bar éabc")
+    assert(jet_cli_import_identifier("_a9"))
+    assert(!jet_cli_import_identifier("é"))
+    assert(!jet_cli_import_identifier(""))
+    pair :: jet_cli_import_split_top("é(x=y) = 'a=b'", "=") ?? panic("split top")
+    assert_eq(pair.left, "é(x=y) ")
+    assert_eq(pair.right, " 'a=b'")
+}
+
+#Test("body errors report original line numbers and precedence") {
+    cases :: [(result: String, text: String, error: String)]{
+        (result: "Int", text: "return", error: "value-returning function has no return value"),
+        (result: "()", text: "return 1", error: "unit function cannot return a value"),
+        (result: "()", text: "assert true", error: "only equality assertions have a proven Jet mapping"),
+        (result: "()", text: "_ := 1", error: "binding target is not a safe Jet identifier"),
+        (result: "()", text: "x.y = 1", error: "assignment or declaration has no safe scalar mapping"),
+        (result: "Int", text: "x = 1", error: "value-returning function has no return statement"),
+        (result: "()", text: "return x / y", error: "unit function cannot return a value"),
+        (result: "Int", text: "return x / y", error: "foreign division or remainder semantics need an explicit migration adapter"),
+        (result: "()", text: "x = None", error: "None needs an explicit Option mapping"),
+        (result: "()", text: "assert x == None", error: "None needs an explicit Option mapping"),
+        (result: "()", text: "assert None == x", error: "None needs an explicit Option mapping"),
+        (result: "()", text: "x := None", error: "None needs an explicit Option mapping"),
+        (result: "()", text: "None", error: "None needs an explicit Option mapping")
+    }
+    loop row in cases {
+        error :: import_test_body_error(row.result, row.text)
+        assert_eq(error.line, 17)
+        assert_eq(error.message, row.error)
+    }
+    control :: [String]{"if x", "if(x)", "for x", "for(x)", "while x", "while(x)", "switch x", "switch(x)", "try", "catch", "finally", "throw x", "defer x", "go x", "select", "else", "case x", "default:", "x++", "x--"}
+    loop line in control -> assert_eq(import_test_body_error("()", line).message, "control flow, exceptions, and foreign runtime operations have no proven mapping in this importer")
+    empty := import_test_body("Int", "")
+    empty.body = []
+    if jet_cli_import_translate_foreign_body("java", empty, false, false) == {
+        .Ok(_) -> panic("empty value body accepted")
+        .Err(error) -> {
+            assert_eq(error.line, 1)
+            assert_eq(error.message, "a value-returning function has an empty body")
+        }
+    }
+    empty.result = "()"
+    assert((jet_cli_import_translate_foreign_body("java", empty, false, false) ?? panic("empty unit")).is_empty())
+}
+
+#Test("body bindings strings returns and enterprise fixture conversions") {
+    function := import_test_body("Int", "long total = left + right; total = total + 1; return total;")
+    translated :: jet_cli_import_translate_foreign_body("java", function, false, false) ?? panic("body translation")
+    assert_eq(translated.join("\n"), "total := left + right\ntotal = total + 1\nreturn total")
+    function.result = "String"
+    function.params = [(name: "someName", ty: "String")]
+    function.body = [JetCLIImportBodyLine{line: 3, text: "String localName = someName; return someName;"}]
+    assert_eq((jet_cli_import_translate_foreign_body("java", function, false, false) ?? panic("borrowed strings")).join("\n"), "local_name := ~some_name\nreturn ~some_name")
+    assert_eq(jet_cli_import_materialize_borrowed_string(function, "someName;", "^some_name"), "^some_name")
+    assert_eq(jet_cli_import_materialize_borrowed_string(function, "someName", "~some_name"), "~some_name")
+    assert_eq(jet_cli_import_materialize_borrowed_string(function, "someName + x", "some_name + x"), "some_name + x")
+    unit :: jet_cli_import_translate_foreign_body("js", import_test_body("()", "assert 2 == 2; return; // comment"), false, false) ?? panic("assert and unit")
+    assert_eq(unit.join("\n"), "assert_eq(2, 2)\nreturn")
+    assert_eq((jet_cli_import_translate_foreign_body("ts", import_test_body("Float", "2 + 3"), true, true) ?? panic("arrow body")).join("\n"), "2.0 + 3.0")
+    assert_eq(jet_cli_import_foreign_local_name("ts", "let x: number") ?? panic("TS local"), "x")
+    assert_eq(jet_cli_import_foreign_local_name("go", "var SomeName int") ?? panic("Go local"), "some_name")
+    assert_eq(jet_cli_import_foreign_local_name("csharp", "var SomeName") ?? panic("C# local"), "some_name")
+    assert(jet_cli_import_foreign_local_name("java", "Object x") == None)
+    assert(jet_cli_import_foreign_local_name("py", "int x") == None)
+    // tests/source_import.rs::enterprise_importers_match_scalar_behavior_fixtures_and_keep_source_unchanged,
+    // and ::enterprise_importers_match_foreign_oracle_where_toolchain_present (pure conversion half).
+    cases :: [(language: String, header: String, body: String, print: String, floats: Bool)]{
+        (language: "java", header: "public static long add(long left, long right) {{", body: "long total = left + right; return total;", print: "System.out.println(add(2, 3))", floats: false),
+        (language: "csharp", header: "public static long Add(long left, long right) {{", body: "long total = left + right; return total;", print: "Console.WriteLine(Add(2, 3))", floats: false),
+        (language: "ts", header: "export function add(left: number, right: number): number {{", body: "const total = left + right; return total;", print: "console.log(add(2, 3))", floats: true),
+        (language: "js", header: "function add(left, right) {{", body: "return left + right;", print: "console.log(add(2, 3))", floats: true),
+        (language: "go", header: "func Add(left int, right int) int {{", body: "total := left + right; return total", print: "fmt.Println(Add(2, 3))", floats: false)
+    }
+    loop row in cases {
+        header :: import_test_header(row.language, row.header)
+        body := ~header.function
+        body.body = [JetCLIImportBodyLine{line: 7, text: ~row.body}]
+        assert_eq(body.params.len(), 2)
+        assert_eq(jet_cli_import_canonical_identifier(body.name), "add")
+        out :: jet_cli_import_translate_foreign_body(row.language, body, row.floats, false) ?? panic("enterprise body")
+        assert_eq(out[out.len() - 1], if row.language == "js" -> "return left + right" else -> "return total")
+        assert_eq(import_test_expression(row.language, row.print, row.floats), if row.floats -> "print(add(2.0, 3.0))" else -> "print(add(2, 3))")
+    }
+    // ::enterprise_import_preserves_source_for_partial_failure: number[] refusal.
+    assert_eq(import_test_header_error("ts", "export function unsupported(values: number[]): number {{"), "foreign type `number[]` is outside the scalar importer subset")
+    // ::enterprise_import_reports_ambiguity_malformed_input_and_no_cpp_importer:
+    // only the unsupported scalar/body policy is owned here, not overload inventory or source retention.
+    assert_eq(import_test_expression_error("java", "values.length"), "unsupported Python expression token .")
+}

@@ -1,0 +1,547 @@
+// Selection portions of tests/cli_parts/expand.rs:1274,1374,1409,1434 and
+// tests/project_check.rs:416,459. Native tests use the actual checked authority
+// and sole Driver parser; they are not data-only or full-command receipts.
+// Full original command assertions are retained separately below, unqualified
+// until Main supplies the installed, composed CLI and retained Core providers.
+use core.files as project_entry_test_files
+use core.files.[TempDir]
+use core.process as project_entry_test_process
+use core.process.[ProcessReceipt]
+use core.sys as project_entry_test_sys
+
+fn project_entry_test_root(label: String) -[FS]> TempDir {
+    project_entry_test_files.temp_dir("jet-project-entry-{label}") ?? panic("project entry scratch: {err}")
+}
+
+// Genuine UTF-8 fixture ingress only. Production selection accepts the already
+// captured OsPath and never performs this text conversion or a display inverse.
+fn project_entry_test_path(text: String) -[Env]> project_entry_paths.OsPath Never! {
+    platform :: if project_entry_test_sys.is_windows() -> project_entry_paths.PathPlatform.Windows else -> project_entry_paths.PathPlatform.Unix
+    project_entry_paths.from_text(text, platform)
+}
+
+fn project_entry_test_native_join(root: project_entry_paths.OsPath, relative: String) -> project_entry_paths.OsPath Never! {
+    joined := ~root
+    project_entry_paths.push(&joined, project_entry_paths.from_text(relative, root.platform))
+    joined
+}
+
+fn project_entry_test_filename_is(path: project_entry_paths.OsPath, text: String) -> Bool Never! {
+    name :: project_entry_paths.file_name_span(path) ?? return false
+    path.encoded[name.start..<name.end] == text.bytes()
+}
+
+fn project_entry_test_write(root: String, relative: String, source: String) -[FS]> {
+    path :: project_entry_test_files.join(root, relative)
+    project_entry_test_files.create_dir_all(project_entry_test_files.dirname(path)) ?? panic("create fixture parent: {err}")
+    project_entry_test_files.write(path, source) ?? panic("write fixture: {err}")
+}
+
+fn project_entry_test_package(root: String, name: String) -[FS]> {
+    project_entry_test_write(root, "package.jet", "name: \"{name}\"\nversion: \"0.1.0\"\n")
+}
+
+fn project_entry_test_selected(root: String) -[FS, Env, IO]> JetCLIResolvedEntry {
+    jet_cli_find_project_entry_with_callable(project_entry_test_path(root)) ?? panic("project selection failed: {err}")
+}
+
+fn project_entry_test_expect(root: String, relative: String, callable: String?) -[FS, Env, IO]> {
+    resolver :: AuthorityResolver.open(project_entry_test_path(root)) ?? panic("fixture root authority: {err}")
+    entry :: project_entry_test_selected(root)
+    assert(project_entry_paths.equals(entry.path, project_entry_test_native_join(resolver.root, relative)))
+    assert_eq(entry.callable, callable)
+}
+
+fn project_entry_test_failure(root: String) -[FS, Env, IO]> JetCLIProjectEntryError {
+    if jet_cli_find_project_entry_with_callable(project_entry_test_path(root)) == {
+        .Err(error) -> error
+        .Ok(_) -> panic("invalid authority/output unexpectedly selected an entry")
+    }
+}
+
+fn project_entry_test_profile(machine: Bool) -> JetCLIOutputProfile {
+    facts := jet_cli_output_facts_default()
+    facts.json = machine
+    jet_cli_output_profile_select(facts) ?? panic("profile")
+}
+
+#Test("data-only resolved file constructor preserves path and no callable") {
+    path :: project_entry_paths.from_text("/project/run.jet", project_entry_paths.PathPlatform.Unix)
+    entry :: jet_cli_resolved_entry_file(path)
+    assert_eq(entry.path.encoded, path.encoded)
+    assert(entry.path.platform == path.platform)
+    assert(entry.callable == None)
+}
+
+#Test("typed package output preserves the selected qualified callable") {
+    scratch :: project_entry_test_root("typed-callable")
+    root :: scratch.path
+    project_entry_test_write(root, "package.jet", "name: \"project-check-entry\"\nversion: \"0.1.0\"\noutputs: {{ release: .Executable{{ entry: main.launch }} }}\ndefaults: {{ run: release }}\n")
+    project_entry_test_write(root, "app/main.jet", "pub fn launch() {{ print(\"named entry\") }}\n")
+    project_entry_test_expect(root, "app/main.jet", Val("launch"))
+}
+
+#Test("typed package composes actual Config outputs before entry selection") {
+    scratch :: project_entry_test_root("composed-output")
+    root :: scratch.path
+    project_entry_test_write(root, "package.jet", "name: \"composed\"\nconfigs: [release]\ndefaults: {{ run: app }}\n")
+    project_entry_test_write(root, "release.jet", "pub release :: Config{{ outputs: {{ app: .Executable{{ entry: launch }} }} }}\n")
+    project_entry_test_write(root, "app.jet", "pub fn launch() {{}}\n")
+    project_entry_test_expect(root, "app.jet", Val("launch"))
+}
+
+#Test("typed package output failure retains the exact Package repair fix") {
+    scratch :: project_entry_test_root("output-failure")
+    root :: scratch.path
+    project_entry_test_write(root, "package.jet", "name: \"demo\"\noutputs: {{ app: .Executable{{ entry: missing }} }}\n")
+    if project_entry_test_failure(root) == {
+        .Output(error, fix) -> {
+            assert(error.message.contains("no unique source entry"))
+            assert_eq(fix, "repair the typed Package output or point at a `.jet` file directly")
+        }
+        else -> panic("typed output failure lost its provider carrier")
+    }
+}
+
+#Test("stock default resolver precedes typed output and named filename") {
+    scratch :: project_entry_test_root("default-precedence")
+    root :: scratch.path
+    project_entry_test_write(root, "package.jet", "name: \"demo\"\noutputs: {{ app: .Executable{{ entry: launch }} }}\n")
+    project_entry_test_write(root, "demo.jet", "fn launch() {{}}\n")
+    project_entry_test_write(root, "src/run.jet", "fn run() {{}}\n")
+    project_entry_test_expect(root, "src/run.jet", Val("run"))
+    project_entry_test_write(root, "run.jet", "fn run() {{}}\n")
+    project_entry_test_expect(root, "run.jet", Val("run"))
+}
+
+#Test("same-root inline Package completes through the actual provider") {
+    scratch :: project_entry_test_root("inline-same-root")
+    root :: scratch.path
+    project_entry_test_write(root, "run.jet", "package {{ name: \"inline\", configs: [dev] }}\nfn run() {{}}\n")
+    project_entry_test_write(root, "dev.jet", "pub dev :: Config{{ outputs: {{ app: .Executable{{ entry: run }} }} }}\n")
+    project_entry_test_expect(root, "run.jet", Val("run"))
+}
+
+#Test("parent inline Package cannot supply a child project output") {
+    scratch :: project_entry_test_root("inline-parent")
+    root :: scratch.path
+    project_entry_test_write(root, "run.jet", "package {{ name: \"parent\", configs: [missing] }}\nfn run() {{}}\n")
+    child :: project_entry_test_files.join(root, "child")
+    project_entry_test_files.create_dir_all(child) ?? panic("child")
+    // Discovery finds the parent's carrier, but completion is forbidden when
+    // its canonical root is not the explicit child authority.
+    project_entry_test_expect(child, "run.jet", None)
+}
+
+#Test("workspace boundary prevents parent inline Package leakage") {
+    scratch :: project_entry_test_root("inline-workspace-boundary")
+    root :: scratch.path
+    project_entry_test_write(root, "run.jet", "package {{ name: \"parent\" }}\nfn run() {{}}\n")
+    project_entry_test_write(root, "child/workspace.jet", "module workspace {{ members: [] }}\n")
+    project_entry_test_write(root, "child/run.jet", "fn run() {{}}\n")
+    project_entry_test_expect(project_entry_test_files.join(root, "child"), "run.jet", Val("run"))
+}
+
+#Test("inline parse diagnostics retain actual root and empty-source rendering") {
+    scratch :: project_entry_test_root("inline-parse")
+    root :: scratch.path
+    project_entry_test_write(root, "run.jet", "package {{ name: \"demo\", configs: [bad] }}\nfn run() {{}}\n")
+    project_entry_test_write(root, "bad.jet", "pub bad :: Config{{ members: [\"child\"] }}\n")
+    if project_entry_test_failure(root) == {
+        .Diagnostics(path, diagnostics) -> {
+            canonical :: project_entry_paths.display((AuthorityResolver.open(project_entry_test_path(root)) ?? panic("authority")).root)
+            assert_eq(path, canonical)
+            assert_eq(diagnostics.len(), 1)
+            assert_eq(diagnostics[0].code, "E1362")
+            output :: jet_cli_project_entry_error_output(JetCLIProjectEntryError.Diagnostics{path: path, diagnostics: diagnostics}, project_entry_test_profile(false))
+            assert_eq(output.exit_code, 1)
+            assert_eq(output.stdout, "")
+            assert_eq(output.stderr, diagnostic_render_all(canonical, "", diagnostics, false))
+        }
+        else -> panic("inline parse error was narrowed to missing")
+    }
+}
+
+#Test("missing package alone is absence but malformed package is fatal") {
+    scratch :: project_entry_test_root("missing-malformed")
+    root :: scratch.path
+    project_entry_test_write(root, "run.jet", "fn run() {{}}\n")
+    project_entry_test_expect(root, "run.jet", Val("run"))
+    project_entry_test_write(root, "package.jet", "name: [\n")
+    if project_entry_test_failure(root) == {
+        .Authority(error) -> assert(!error.is_missing())
+        else -> panic("malformed package was not an authority failure")
+    }
+}
+
+#Test("data-only permission IO projection is not converted to missing") {
+    // Data-only canonical error/output projection, not a native permission
+    // proof (chmod tests are unreliable under elevated users).
+    native_error :: AuthorityError.IO{path: "/project/package.jet", operation: "open", detail: "Permission denied"}
+    assert(!native_error.is_missing())
+    output :: jet_cli_project_entry_error_output(JetCLIProjectEntryError.Authority(native_error), project_entry_test_profile(false))
+    assert_eq(output.exit_code, 1)
+    assert_eq(output.stderr, diagnostic_render_all(PACKAGE_FILE, "", [Diagnostic]{native_error.diagnostic()}, false))
+}
+
+#Test("data-only output failures preserve each exact E2105 fix and USER_ERROR") {
+    fixes :: [String]{
+        "repair the typed Package output or point at a `.jet` file directly",
+        "repair the typed inline Package output or point at a `.jet` file directly",
+        "keep one project entry, using `run.jet`, or point at a `.jet` file directly",
+    }
+    loop fix in fixes {
+        error :: JetCLIProjectEntryError.Output{error: PackageEntryError{message: "actual output failure"}, fix: fix}
+        human :: jet_cli_project_entry_error_output(error, project_entry_test_profile(false))
+        assert_eq(human.exit_code, 1)
+        assert_eq(human.stdout, "")
+        assert_eq(human.stderr, jet_cli_report("E2105", "actual output failure", jet_cli_why("E2105"), fix, false))
+        machine :: jet_cli_project_entry_error_output(error, project_entry_test_profile(true))
+        assert_eq(machine.exit_code, 1)
+        assert_eq(machine.stderr, "")
+        expected :: jet_cli_args_refuse("E2105", "actual output failure", jet_cli_why("E2105"), fix, true)
+        assert_eq(machine.stdout, expected.stdout)
+    }
+}
+
+#Test("data-only authority and workspace failures use the canonical diagnostic status envelope") {
+    authority :: AuthorityError.Changed("/project/package.jet")
+    diagnostic :: authority.diagnostic()
+    errors :: [JetCLIProjectEntryError]{
+        JetCLIProjectEntryError.Authority(authority),
+        JetCLIProjectEntryError.Diagnostics{path: WORKSPACE_FILE, diagnostics: [Diagnostic]{diagnostic}},
+    }
+    labels :: [String]{PACKAGE_FILE, WORKSPACE_FILE}
+    loop index in 0..<errors.len() {
+        machine :: jet_cli_project_entry_error_output(errors[index], project_entry_test_profile(true))
+        assert_eq(machine.exit_code, 1)
+        assert_eq(machine.stderr, "")
+        report :: diagnostic_to_report_with_clears(diagnostic, ReportPath.from_process(labels[index]), "", 0)
+        assert_eq(machine.stdout, "{report_render_status_with_reports("diagnostics", false, [ReportEnvelope]{report}, StatusFields.new())}\n")
+        human :: jet_cli_project_entry_error_output(errors[index], project_entry_test_profile(false))
+        assert_eq(human.exit_code, 1)
+        assert_eq(human.stdout, "")
+        assert_eq(human.stderr, diagnostic_render_all(labels[index], "", [Diagnostic]{diagnostic}, false))
+    }
+}
+
+#Test("named filename precedes parsed run member and preserves file-only callable") {
+    scratch :: project_entry_test_root("named-tail")
+    root :: scratch.path
+    project_entry_test_package(root, "hello")
+    project_entry_test_write(root, "hello.jet", "module hello {{ pub fn greeting() -> String {{ \"hello from the monorepo\" }} }}\nfn run() {{ print(hello.greeting()) }}\n")
+    project_entry_test_write(root, "a.jet", "fn run() {{}}\n")
+    project_entry_test_expect(root, "hello.jet", None)
+}
+
+#Test("parsed top-level run member precedes first library source") {
+    scratch :: project_entry_test_root("run-member")
+    root :: scratch.path
+    project_entry_test_package(root, "demo")
+    project_entry_test_write(root, "a.jet", "pub fn width(start: Int, end: Int) -> Int {{ end - start }}\n")
+    project_entry_test_write(root, "z.jet", "fn run() {{}}\n")
+    project_entry_test_expect(root, "z.jet", None)
+}
+
+#Test("run member parser ignores comments strings nested modules and methods") {
+    scratch :: project_entry_test_root("real-parser")
+    root :: scratch.path
+    project_entry_test_package(root, "demo")
+    project_entry_test_write(root, "a.jet", "// fn run() {{}}\ntext :: \"fn run()\"\nmodule nested {{ fn run() {{}} }}\nstruct Thing {{ fn run(self) {{}} }}\n")
+    project_entry_test_write(root, "z.jet", "pub fn run() {{}}\n")
+    project_entry_test_expect(root, "z.jet", None)
+}
+
+#Test("run member skips lexer and parser errors before a valid candidate") {
+    scratch :: project_entry_test_root("bad-candidate")
+    root :: scratch.path
+    project_entry_test_package(root, "demo")
+    project_entry_test_write(root, "a.jet", "\"unterminated\nfn run() {{}}\n")
+    project_entry_test_write(root, "b.jet", "fn run( {{\n")
+    project_entry_test_write(root, "z.jet", "fn run() {{}}\n")
+    project_entry_test_expect(root, "z.jet", None)
+}
+
+#Test("library package excludes package jet and preserves actual provider order") {
+    scratch :: project_entry_test_root("library-tail")
+    root :: scratch.path
+    project_entry_test_write(root, "package.jet", "name: \"library_only\"\noutputs: {{ core: .Library{{ name: \"library_only\" }} }}\n")
+    project_entry_test_write(root, "z.jet", "pub fn width(start: Int, end: Int) -> Int {{ end - start }}\n")
+    project_entry_test_write(root, "Sub/a.jet", "pub fn other() {{}}\n")
+    resolver :: AuthorityResolver.open(project_entry_test_path(root)) ?? panic("authority")
+    discovered :: resolver.discover_source_files() ?? panic("real source discovery")
+    expected := project_entry_paths.OsPath?{None}
+    loop file in discovered {
+        if !project_entry_test_filename_is(file.relative, PACKAGE_FILE) {
+            expected = Val(file.path)
+            break
+        }
+    }
+    first :: expected ?? panic("real library source missing")
+    entry :: project_entry_test_selected(root)
+    assert(project_entry_paths.equals(entry.path, first))
+    assert(entry.callable == None)
+}
+
+#Test("absent final stock path is returned for downstream native missing diagnostic") {
+    scratch :: project_entry_test_root("missing-final")
+    root :: scratch.path
+    project_entry_test_package(root, "missing-entry")
+    project_entry_test_expect(root, "run.jet", None)
+    assert(!project_entry_test_files.exists(project_entry_test_files.join(root, "run.jet")))
+}
+
+#Test("without actual package no arbitrary library file becomes entry") {
+    scratch :: project_entry_test_root("no-package-tail")
+    root :: scratch.path
+    project_entry_test_write(root, "a.jet", "fn run() {{}}\n")
+    project_entry_test_expect(root, "run.jet", None)
+}
+
+#Test("checked project entry suppresses only missing and preserves revalidation") {
+    scratch :: project_entry_test_root("checked-file")
+    root :: scratch.path
+    project_entry_test_write(root, "selected.jet", "fn run() {{}}\n")
+    resolver :: AuthorityResolver.open(project_entry_test_path(root)) ?? panic("authority")
+    if jet_cli_checked_project_entry(resolver, project_entry_paths.from_text("absent.jet", resolver.root.platform)) == {
+        .Ok(found) -> assert(found == None)
+        .Err(_) -> panic("missing should be None")
+    }
+    if jet_cli_checked_project_entry(resolver, project_entry_paths.from_text("selected.jet", resolver.root.platform)) == {
+        .Ok(found) -> assert(project_entry_paths.equals(found ?? panic("missing selected file"), project_entry_test_native_join(resolver.root, "selected.jet")))
+        .Err(_) -> panic("held selected file should pass revalidation")
+    }
+    if jet_cli_checked_project_entry(resolver, project_entry_paths.from_text("../outside.jet", resolver.root.platform)) == {
+        .Err(.Authority(error)) -> assert(!error.is_missing())
+        else -> panic("parent escape must not become absence")
+    }
+}
+
+#Test("native selected symlink and hardlink are refused") {
+    if !project_entry_test_sys.is_unix() -> return
+    scratch :: project_entry_test_root("linked-entry")
+    root :: scratch.path
+    project_entry_test_write(root, "target.jet", "fn run() {{}}\n")
+    resolver :: AuthorityResolver.open(project_entry_test_path(root)) ?? panic("authority")
+    project_entry_test_files.symlink("target.jet", project_entry_test_files.join(root, "selected.jet")) ?? panic("symlink")
+    if jet_cli_checked_project_entry(resolver, project_entry_paths.from_text("selected.jet", resolver.root.platform)) == {
+        .Err(.Authority(error)) -> assert(error == .Symlink(project_entry_paths.display(project_entry_test_native_join(resolver.root, "selected.jet"))))
+        else -> panic("symlink selected")
+    }
+    project_entry_test_files.hard_link(project_entry_test_files.join(root, "target.jet"), project_entry_test_files.join(root, "hard.jet")) ?? panic("hardlink")
+    if jet_cli_checked_project_entry(resolver, project_entry_paths.from_text("hard.jet", resolver.root.platform)) == {
+        .Err(.Authority(error)) -> assert(!error.is_missing())
+        else -> panic("multi-link selected")
+    }
+}
+
+#Test("native selected file and authority root replacement fail revalidation") {
+    scratch :: project_entry_test_root("replacement")
+    root :: project_entry_test_files.join(scratch.path, "root")
+    project_entry_test_write(root, "selected.jet", "fn run() {{}}\n")
+    resolver :: AuthorityResolver.open(project_entry_test_path(root)) ?? panic("authority")
+    held :: resolver.checked_file(project_entry_paths.from_text("selected.jet", resolver.root.platform)) ?? panic("checked file")
+    project_entry_test_files.rename(project_entry_test_files.join(root, "selected.jet"), project_entry_test_files.join(root, "old.jet")) ?? panic("move selected")
+    project_entry_test_write(root, "selected.jet", "fn different() {{}}\n")
+    assert(resolver.revalidate_file(held) == .Err(.Changed(project_entry_paths.display(held.path))))
+    project_entry_test_files.rename(root, project_entry_test_files.join(scratch.path, "old-root")) ?? panic("move root")
+    project_entry_test_write(root, "selected.jet", "fn run() {{}}\n")
+    if jet_cli_checked_project_entry(resolver, project_entry_paths.from_text("selected.jet", resolver.root.platform)) == {
+        .Err(.Authority(error)) -> assert(!error.is_missing())
+        else -> panic("replacement root selected")
+    }
+}
+
+#Test("malformed workspace selection retains workspace diagnostic path") {
+    scratch :: project_entry_test_root("workspace-no-fallback")
+    root :: scratch.path
+    project_entry_test_write(root, "workspace.jet", "module workspace {{ members: [\n")
+    project_entry_test_write(root, "run.jet", "fn run() {{ print(\"SHOULD-NOT-RUN\") }}\n")
+    if project_entry_test_failure(root) == {
+        .Diagnostics(path, diagnostics) -> {
+            assert_eq(path, WORKSPACE_FILE)
+            assert(diagnostics[0].code == "E0995" || diagnostics[0].code == "E0003")
+        }
+        else -> panic("malformed workspace fell through to ordinary entry")
+    }
+}
+
+// Complete original command journeys. Real installed CLI transport is supplied
+// explicitly; this is never used as a production fallback or proof of Jet-only
+// native completion. Keep every original status/message/output assertion.
+fn project_entry_test_copy(source: String, target: String) -[FS]> {
+    project_entry_test_files.create_dir_all(target) ?? panic("copy directory")
+    loop entry in project_entry_test_files.list_dir(source) ?? panic("fixture list") {
+        from :: project_entry_test_files.join(source, entry.name)
+        to :: project_entry_test_files.join(target, entry.name)
+        if project_entry_test_files.is_dir(from) {
+            project_entry_test_copy(from, to)
+        } else {
+            bytes :: project_entry_test_files.read_bytes(from) ?? panic("fixture bytes")
+            project_entry_test_files.write_bytes(to, bytes) ?? panic("fixture copy")
+        }
+    }
+}
+
+fn project_entry_test_repo() -[Env]> String {
+    project_entry_test_sys.get("JET_CLI_PROJECT_TEST_REPO") ?? panic("set JET_CLI_PROJECT_TEST_REPO to the real fixture repository")
+}
+
+fn project_entry_test_command(root: String, args: [String]) -[Exec, Env, Time.Wait]> ProcessReceipt {
+    binary :: project_entry_test_sys.get("JET_CLI_PROJECT_TEST_JET") ?? panic("set JET_CLI_PROJECT_TEST_JET to the composed CLI")
+    project_entry_test_process.cmd([String]{binary}).args_extend(args).cwd(root).env("NO_COLOR", "1").run() ?? panic("project CLI: {err}")
+}
+
+// tests/project_check.rs `run_uncached`: do not let receipt replay replace the
+// real check/default-run/build assertions of the original project witnesses.
+fn project_entry_test_uncached_command(root: String, args: [String]) -[Exec, Env, Time.Wait]> ProcessReceipt {
+    binary :: project_entry_test_sys.get("JET_CLI_PROJECT_TEST_JET") ?? panic("set JET_CLI_PROJECT_TEST_JET to the composed CLI")
+    project_entry_test_process.cmd([String]{binary}).args_extend(args).cwd(root).env("JET_RECEIPT_BYPASS", "1").env("NO_COLOR", "1").env("TERM", "dumb").run() ?? panic("uncached project CLI: {err}")
+}
+
+#Test("integration original monorepo bare entry honors D ILE1 search order") {
+    scratch :: project_entry_test_root("monorepo-journey")
+    root :: project_entry_test_files.join(scratch.path, "repo")
+    repo :: project_entry_test_repo()
+    project_entry_test_copy(project_entry_test_files.join(repo, "Examples/features/packages/monorepo"), root)
+    ambiguous :: project_entry_test_command(root, [String]{"run"})
+    assert_eq(ambiguous.code, 2)
+    assert(ambiguous.errors.contains("ambiguous"))
+    assert(ambiguous.errors.contains("hello") && ambiguous.errors.contains("ranker"))
+    assert(!ambiguous.errors.contains("hello\"") && !ambiguous.errors.contains("ranker\""))
+    hello :: project_entry_test_command(root, [String]{"run", "-p", "hello"})
+    assert_eq(hello.code, 0)
+    ranker :: project_entry_test_command(root, [String]{"run", "-p", "ranker"})
+    assert_eq(ranker.code, 0)
+    golden :: project_entry_test_files.read(project_entry_test_files.join(repo, "Examples/features/expected/packages/monorepo.out")) ?? panic("monorepo golden")
+    assert_eq("{hello.output}{ranker.output}", golden)
+    member :: project_entry_test_command(project_entry_test_files.join(root, "packages/hello"), [String]{"run"})
+    assert_eq(member.code, 0)
+    assert(member.output.contains("hello from the monorepo"))
+    outside :: project_entry_test_files.join(scratch.path, "outside")
+    project_entry_test_files.create_dir_all(outside) ?? panic("outside")
+    absent :: project_entry_test_command(outside, [String]{"run"})
+    assert_eq(absent.code, 2)
+    assert(absent.errors.contains("No file given and no `package.jet` found"))
+}
+
+#Test("integration original explicit workspace directory shared entry resolver") {
+    scratch :: project_entry_test_root("explicit-workspace-journey")
+    root :: scratch.path
+    project_entry_test_copy(project_entry_test_files.join(project_entry_test_repo(), "Examples/features/packages/monorepo"), root)
+    ambiguous :: project_entry_test_command(root, [String]{"run", "."})
+    assert_eq(ambiguous.code, 2)
+    assert(ambiguous.errors.contains("ambiguous") && ambiguous.errors.contains("hello") && ambiguous.errors.contains("ranker"))
+    selected :: project_entry_test_command(root, [String]{"run", ".", "-p", "hello"})
+    assert(selected.success)
+    assert(selected.output.contains("hello from the monorepo"))
+}
+
+#Test("integration original explicit project missing entry reports E2105 run jet") {
+    scratch :: project_entry_test_root("missing-project-journey")
+    root :: scratch.path
+    project_entry_test_package(root, "missing-entry")
+    output :: project_entry_test_command(root, [String]{"run", "."})
+    assert_eq(output.code, 1)
+    assert(output.errors.contains("E2105") && output.errors.contains("run.jet"))
+}
+
+#Test("integration original malformed workspace never falls back to ordinary entry") {
+    scratch :: project_entry_test_root("workspace-refusal-journey")
+    root :: scratch.path
+    project_entry_test_write(root, "workspace.jet", "module workspace {{ members: [\n")
+    project_entry_test_write(root, "run.jet", "fn run() {{ print(\"SHOULD-NOT-RUN\") }}\n")
+    output :: project_entry_test_command(root, [String]{"run"})
+    assert_eq(output.code, 1)
+    assert(!output.output.contains("SHOULD-NOT-RUN"))
+    assert(output.errors.contains("E0995") || output.errors.contains("E0003"))
+}
+
+#Test("integration original library package check needs no run entry") {
+    scratch :: project_entry_test_root("library-check-journey")
+    root :: scratch.path
+    project_entry_test_copy(project_entry_test_files.join(project_entry_test_repo(), "tests/project_check/fixtures/library_only"), root)
+    output :: project_entry_test_uncached_command(root, [String]{"check", "."})
+    assert(output.success)
+    assert(!output.errors.contains("E0101"))
+}
+
+#Test("integration original clean project check default run and AOT build stay clean") {
+    scratch :: project_entry_test_root("clean-project-journey")
+    names :: [String]{"frozen_dogfood", "entry_resolution", "module_graph", "core_closure"}
+    loop name in names {
+        root :: project_entry_test_files.join(scratch.path, name)
+        project_entry_test_copy(project_entry_test_files.join(project_entry_test_repo(), "tests/project_check/fixtures/{name}"), root)
+        check :: project_entry_test_uncached_command(root, [String]{"check"})
+        assert(check.success)
+        run :: project_entry_test_uncached_command(root, [String]{"run"})
+        assert(run.success)
+        build :: project_entry_test_uncached_command(root, [String]{"build"})
+        assert(build.success)
+    }
+}
+
+#Test("original frozen dogfood entry selection retains nested run callable") {
+    scratch :: project_entry_test_root("frozen-dogfood-selection")
+    root :: scratch.path
+    project_entry_test_copy(project_entry_test_files.join(project_entry_test_repo(), "tests/project_check/fixtures/frozen_dogfood"), root)
+    project_entry_test_expect(root, "src/cli/main.jet", Val("run"))
+}
+
+#Test("data-only resolved entry retains raw native bytes without display recovery") {
+    raw :: project_entry_paths.from_encoded([U8]{U8{47}, U8{112}, U8{255}, U8{47}, U8{114}, U8{117}, U8{110}, U8{46}, U8{106}, U8{101}, U8{116}}, project_entry_paths.PathPlatform.Unix)
+    entry :: jet_cli_resolved_entry_file(raw)
+    assert_eq(entry.path.encoded, raw.encoded)
+    assert(entry.path.platform == project_entry_paths.PathPlatform.Unix)
+    assert(entry.callable == None)
+    assert(project_entry_paths.to_str(entry.path) == None)
+    assert(project_entry_test_filename_is(entry.path, DEFAULT_ENTRY_FILE))
+}
+
+#Test("sole Driver selector excludes package jet even when it declares run") {
+    scratch :: project_entry_test_root("driver-package-exclusion")
+    root :: scratch.path
+    // This exercises discovery/parser only, not a fabricated checked manifest.
+    project_entry_test_write(root, "package.jet", "fn run() {{}}\n")
+    project_entry_test_write(root, "z.jet", "fn run() {{}}\n")
+    native_root :: project_entry_test_path(root)
+    selected :: jet_driver_package_run_member(native_root) ?? panic("actual Driver run member")
+    resolver :: AuthorityResolver.open(native_root) ?? panic("authority")
+    assert(project_entry_paths.equals(selected, project_entry_test_native_join(resolver.root, "z.jet")))
+}
+
+#Test("sole Driver selector skips held text UTF8 errors without a CLI scan") {
+    scratch :: project_entry_test_root("driver-held-utf8")
+    root :: scratch.path
+    project_entry_test_files.write_bytes(project_entry_test_files.join(root, "a.jet"), [U8]{U8{255}}) ?? panic("invalid UTF8 fixture")
+    project_entry_test_write(root, "z.jet", "fn run() {{}}\n")
+    native_root :: project_entry_test_path(root)
+    selected :: jet_driver_package_run_member(native_root) ?? panic("actual Driver run member")
+    resolver :: AuthorityResolver.open(native_root) ?? panic("authority")
+    assert(project_entry_paths.equals(selected, project_entry_test_native_join(resolver.root, "z.jet")))
+}
+
+#Test("native permission refusal does not become missing or ordinary entry") {
+    if !project_entry_test_sys.is_unix() -> return
+    scratch :: project_entry_test_root("native-permission")
+    root :: scratch.path
+    project_entry_test_package(root, "permission")
+    project_entry_test_write(root, "run.jet", "fn run() {{}}\n")
+    native_root :: project_entry_test_path(root)
+    info :: project_entry_native.metadata(native_root) ?? panic("actual metadata")
+    mode :: if info.native == {
+        .Unix(mode, uid) -> {
+            // Root bypasses chmod permissions; no native refusal is claimed.
+            if uid == U32{0} -> return
+            mode
+        }
+        else -> panic("Unix test requires actual Unix native facts")
+    }
+    project_entry_native.chmod(native_root, U32{0}) ?? panic("deny root access")
+    refused :: if jet_cli_find_project_entry_with_callable(native_root) == {
+        .Err(.Authority(error)) -> !error.is_missing()
+        else -> false
+    }
+    project_entry_native.chmod(native_root, mode) ?? panic("restore root permissions")
+    assert(refused, "permission refusal was suppressed as absence or ordinary entry")
+}

@@ -1,0 +1,683 @@
+// PORT-PENDING 2134 crates-jet-pkg-model-src-variant: crates/jet-pkg-model/src/Variant.rs:1-679
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Typed package variants (E4-JP15 / D-JPK-VARIANT1=D).
+//RS //!
+//RS //! Closed native axes only: build/host/target role, OS, arch, runtime/libc,
+//RS //! linkage, ABI, artifact kind, and feature set. Every axis has a context-
+//RS //! derived default so beginners never write variants. Matching is
+//RS //! exact-then-compatible under one total order; an ambiguous tie is E1316.
+//RS //! Selected variants enter action keys and the semantic lock. Provider facts
+//RS //! influence selection only through explicit `variant_map` entries.
+//RS 
+//RS use crate::Diagnostics::Diagnostic;
+//RS use crate::Platform::{self, PlatformKey};
+//RS use std::collections::{BTreeMap, BTreeSet};
+//RS 
+//RS /// Dependency / build graph role (Nix-style build/host/target).
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum VariantRole {
+//RS     Build,
+//RS     Host,
+//RS     Target,
+//RS }
+//RS 
+//RS impl VariantRole {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             VariantRole::Build => "build",
+//RS             VariantRole::Host => "host",
+//RS             VariantRole::Target => "target",
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn parse(raw: &str) -> Option<VariantRole> {
+//RS         match raw {
+//RS             "build" => Some(VariantRole::Build),
+//RS             "host" => Some(VariantRole::Host),
+//RS             "target" => Some(VariantRole::Target),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum VariantOs {
+//RS     Linux,
+//RS     MacOS,
+//RS     Windows,
+//RS }
+//RS 
+//RS impl VariantOs {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             VariantOs::Linux => Platform::OS_LINUX,
+//RS             VariantOs::MacOS => Platform::OS_MACOS,
+//RS             VariantOs::Windows => Platform::OS_WINDOWS,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn parse(raw: &str) -> Option<VariantOs> {
+//RS         match raw {
+//RS             Platform::OS_LINUX | "Linux" => Some(VariantOs::Linux),
+//RS             Platform::OS_MACOS | "MacOS" | "Darwin" | "darwin" => Some(VariantOs::MacOS),
+//RS             Platform::OS_WINDOWS | "Windows" => Some(VariantOs::Windows),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn from_platform_os(os: &str) -> VariantOs {
+//RS         VariantOs::parse(os).unwrap_or(VariantOs::Linux)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum VariantArch {
+//RS     X86_64,
+//RS     Aarch64,
+//RS }
+//RS 
+//RS impl VariantArch {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             VariantArch::X86_64 => Platform::ARCH_X64,
+//RS             VariantArch::Aarch64 => Platform::ARCH_ARM64,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn parse(raw: &str) -> Option<VariantArch> {
+//RS         match raw {
+//RS             Platform::ARCH_X64 | "x64" | "amd64" => Some(VariantArch::X86_64),
+//RS             Platform::ARCH_ARM64 | "arm64" | "Aarch64" => Some(VariantArch::Aarch64),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn from_platform_arch(arch: &str) -> VariantArch {
+//RS         VariantArch::parse(arch).unwrap_or(VariantArch::X86_64)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum VariantLibc {
+//RS     Gnu,
+//RS     Musl,
+//RS     Msvc,
+//RS     None,
+//RS }
+//RS 
+//RS impl VariantLibc {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             VariantLibc::Gnu => "gnu",
+//RS             VariantLibc::Musl => "musl",
+//RS             VariantLibc::Msvc => "msvc",
+//RS             VariantLibc::None => "none",
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn parse(raw: &str) -> Option<VariantLibc> {
+//RS         match raw {
+//RS             "gnu" | "glibc" => Some(VariantLibc::Gnu),
+//RS             "musl" => Some(VariantLibc::Musl),
+//RS             "msvc" => Some(VariantLibc::Msvc),
+//RS             "none" | "null" => Some(VariantLibc::None),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn default_for(os: VariantOs) -> VariantLibc {
+//RS         match os {
+//RS             VariantOs::Linux => VariantLibc::Gnu,
+//RS             VariantOs::MacOS => VariantLibc::None,
+//RS             VariantOs::Windows => VariantLibc::Msvc,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum VariantLinkage {
+//RS     Shared,
+//RS     Static,
+//RS }
+//RS 
+//RS impl VariantLinkage {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             VariantLinkage::Shared => "shared",
+//RS             VariantLinkage::Static => "static",
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn parse(raw: &str) -> Option<VariantLinkage> {
+//RS         match raw {
+//RS             "shared" | "dynamic" => Some(VariantLinkage::Shared),
+//RS             "static" => Some(VariantLinkage::Static),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum VariantAbi {
+//RS     Sysv,
+//RS     Ms,
+//RS     Unknown,
+//RS }
+//RS 
+//RS impl VariantAbi {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             VariantAbi::Sysv => "sysv",
+//RS             VariantAbi::Ms => "ms",
+//RS             VariantAbi::Unknown => "unknown",
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn parse(raw: &str) -> Option<VariantAbi> {
+//RS         match raw {
+//RS             "sysv" => Some(VariantAbi::Sysv),
+//RS             "ms" | "msvc" => Some(VariantAbi::Ms),
+//RS             "unknown" => Some(VariantAbi::Unknown),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn default_for(os: VariantOs) -> VariantAbi {
+//RS         match os {
+//RS             VariantOs::Windows => VariantAbi::Ms,
+//RS             VariantOs::Linux | VariantOs::MacOS => VariantAbi::Sysv,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum ArtifactKind {
+//RS     Library,
+//RS     Executable,
+//RS     Object,
+//RS     Archive,
+//RS     Headers,
+//RS     DevTool,
+//RS     Sysroot,
+//RS     Any,
+//RS }
+//RS 
+//RS impl ArtifactKind {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             ArtifactKind::Library => "library",
+//RS             ArtifactKind::Executable => "executable",
+//RS             ArtifactKind::Object => "object",
+//RS             ArtifactKind::Archive => "archive",
+//RS             ArtifactKind::Headers => "headers",
+//RS             ArtifactKind::DevTool => "dev-tool",
+//RS             ArtifactKind::Sysroot => "sysroot",
+//RS             ArtifactKind::Any => "any",
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn parse(raw: &str) -> Option<ArtifactKind> {
+//RS         match raw {
+//RS             "library" | "lib" => Some(ArtifactKind::Library),
+//RS             "executable" | "bin" => Some(ArtifactKind::Executable),
+//RS             "object" | "obj" => Some(ArtifactKind::Object),
+//RS             "archive" => Some(ArtifactKind::Archive),
+//RS             "headers" | "include" => Some(ArtifactKind::Headers),
+//RS             "dev-tool" | "tool" => Some(ArtifactKind::DevTool),
+//RS             "sysroot" => Some(ArtifactKind::Sysroot),
+//RS             "any" => Some(ArtifactKind::Any),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Closed typed variant (D-JPK-VARIANT1=D).
+//RS #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub struct PackageVariant {
+//RS     pub role: VariantRole,
+//RS     pub os: VariantOs,
+//RS     pub arch: VariantArch,
+//RS     pub libc: VariantLibc,
+//RS     pub linkage: VariantLinkage,
+//RS     pub abi: VariantAbi,
+//RS     pub artifact: ArtifactKind,
+//RS     pub features: BTreeSet<String>,
+//RS }
+//RS 
+//RS impl PackageVariant {
+//RS     /// Total defaults from requesting context: host platform, Host role,
+//RS     /// shared linkage, library artifact, empty features.
+//RS     pub fn defaults_for_context(platform: &PlatformKey) -> PackageVariant {
+//RS         let os = VariantOs::from_platform_os(&platform.os);
+//RS         let arch = VariantArch::from_platform_arch(&platform.arch);
+//RS         PackageVariant {
+//RS             role: VariantRole::Host,
+//RS             os,
+//RS             arch,
+//RS             libc: VariantLibc::default_for(os),
+//RS             linkage: VariantLinkage::Shared,
+//RS             abi: VariantAbi::default_for(os),
+//RS             artifact: ArtifactKind::Library,
+//RS             features: BTreeSet::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn host_defaults() -> PackageVariant {
+//RS         Self::defaults_for_context(&PlatformKey::host())
+//RS     }
+//RS 
+//RS     pub fn with_role(mut self, role: VariantRole) -> Self {
+//RS         self.role = role;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_os(mut self, os: VariantOs) -> Self {
+//RS         self.os = os;
+//RS         self.libc = VariantLibc::default_for(os);
+//RS         self.abi = VariantAbi::default_for(os);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_arch(mut self, arch: VariantArch) -> Self {
+//RS         self.arch = arch;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_libc(mut self, libc: VariantLibc) -> Self {
+//RS         self.libc = libc;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_linkage(mut self, linkage: VariantLinkage) -> Self {
+//RS         self.linkage = linkage;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_abi(mut self, abi: VariantAbi) -> Self {
+//RS         self.abi = abi;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_artifact(mut self, artifact: ArtifactKind) -> Self {
+//RS         self.artifact = artifact;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_feature(mut self, feature: impl Into<String>) -> Self {
+//RS         self.features.insert(feature.into());
+//RS         self
+//RS     }
+//RS 
+//RS     /// Canonical identity string for action keys and semantic lock `platform`.
+//RS     pub fn identity_key(&self) -> String {
+//RS         let mut feats: Vec<&str> = self.features.iter().map(String::as_str).collect();
+//RS         feats.sort_unstable();
+//RS         format!(
+//RS             "role={};os={};arch={};libc={};linkage={};abi={};artifact={};features={}",
+//RS             self.role.as_str(),
+//RS             self.os.as_str(),
+//RS             self.arch.as_str(),
+//RS             self.libc.as_str(),
+//RS             self.linkage.as_str(),
+//RS             self.abi.as_str(),
+//RS             self.artifact.as_str(),
+//RS             feats.join(",")
+//RS         )
+//RS     }
+//RS 
+//RS     /// Cross-compile need: Target role on a foreign triple.
+//RS     pub fn cross_target(os: VariantOs, arch: VariantArch, libc: VariantLibc) -> PackageVariant {
+//RS         PackageVariant {
+//RS             role: VariantRole::Target,
+//RS             os,
+//RS             arch,
+//RS             libc,
+//RS             linkage: VariantLinkage::Shared,
+//RS             abi: VariantAbi::default_for(os),
+//RS             artifact: ArtifactKind::Library,
+//RS             features: BTreeSet::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Exact match: every closed axis equal; features must be equal sets.
+//RS     pub fn matches_exact(&self, need: &PackageVariant) -> bool {
+//RS         self == need
+//RS     }
+//RS 
+//RS     /// Compatible under the total order: producer may be more specific on
+//RS     /// features (superset) and may use `ArtifactKind::Any` for any need.
+//RS     /// OS/arch/libc/linkage/abi/role must match exactly.
+//RS     pub fn matches_compatible(&self, need: &PackageVariant) -> bool {
+//RS         self.role == need.role
+//RS             && self.os == need.os
+//RS             && self.arch == need.arch
+//RS             && self.libc == need.libc
+//RS             && self.linkage == need.linkage
+//RS             && self.abi == need.abi
+//RS             && (self.artifact == need.artifact || self.artifact == ArtifactKind::Any)
+//RS             && need.features.is_subset(&self.features)
+//RS     }
+//RS 
+//RS     /// Axis-name order used for tie-break / ambiguity diagnostics.
+//RS     pub const AXIS_ORDER: &'static [&'static str] = &[
+//RS         "role", "os", "arch", "libc", "linkage", "abi", "artifact", "features",
+//RS     ];
+//RS 
+//RS     /// First axis where `a` and `b` differ under AXIS_ORDER.
+//RS     pub fn first_distinguishing_axis(a: &PackageVariant, b: &PackageVariant) -> &'static str {
+//RS         if a.role != b.role {
+//RS             return "role";
+//RS         }
+//RS         if a.os != b.os {
+//RS             return "os";
+//RS         }
+//RS         if a.arch != b.arch {
+//RS             return "arch";
+//RS         }
+//RS         if a.libc != b.libc {
+//RS             return "libc";
+//RS         }
+//RS         if a.linkage != b.linkage {
+//RS             return "linkage";
+//RS         }
+//RS         if a.abi != b.abi {
+//RS             return "abi";
+//RS         }
+//RS         if a.artifact != b.artifact {
+//RS             return "artifact";
+//RS         }
+//RS         "features"
+//RS     }
+//RS }
+//RS 
+//RS /// Candidate offered by a package producer, plus optional namespaced provider
+//RS /// facts that never influence native selection unless mapped.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct VariantCandidate {
+//RS     pub label: String,
+//RS     pub variant: PackageVariant,
+//RS     pub provider_facts: BTreeMap<String, String>,
+//RS }
+//RS 
+//RS impl VariantCandidate {
+//RS     pub fn new(label: impl Into<String>, variant: PackageVariant) -> Self {
+//RS         VariantCandidate {
+//RS             label: label.into(),
+//RS             variant,
+//RS             provider_facts: BTreeMap::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn with_provider_fact(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+//RS         self.provider_facts.insert(key.into(), value.into());
+//RS         self
+//RS     }
+//RS }
+//RS 
+//RS /// Explicit mapping from a provider fact key into a closed axis value.
+//RS /// Without a map, provider facts are ignored during selection.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct VariantMapEntry {
+//RS     pub provider_key: String,
+//RS     pub axis: String,
+//RS     pub value: String,
+//RS }
+//RS 
+//RS /// Apply `variant_map` entries onto a candidate's typed axes before matching.
+//RS pub fn apply_variant_map(candidate: &VariantCandidate, maps: &[VariantMapEntry]) -> PackageVariant {
+//RS     let mut v = candidate.variant.clone();
+//RS     for entry in maps {
+//RS         let Some(raw) = candidate.provider_facts.get(&entry.provider_key) else {
+//RS             continue;
+//RS         };
+//RS         // Mapped value may come from the fact or the declared map value.
+//RS         let use_val = if entry.value.is_empty() {
+//RS             raw.as_str()
+//RS         } else if raw == &entry.value || entry.value == "*" {
+//RS             if entry.value == "*" {
+//RS                 raw.as_str()
+//RS             } else {
+//RS                 entry.value.as_str()
+//RS             }
+//RS         } else {
+//RS             continue;
+//RS         };
+//RS         match entry.axis.as_str() {
+//RS             "role" => {
+//RS                 if let Some(role) = VariantRole::parse(use_val) {
+//RS                     v.role = role;
+//RS                 }
+//RS             }
+//RS             "os" => {
+//RS                 if let Some(os) = VariantOs::parse(use_val) {
+//RS                     v = v.with_os(os);
+//RS                 }
+//RS             }
+//RS             "arch" => {
+//RS                 if let Some(arch) = VariantArch::parse(use_val) {
+//RS                     v.arch = arch;
+//RS                 }
+//RS             }
+//RS             "libc" | "runtime" => {
+//RS                 if let Some(libc) = VariantLibc::parse(use_val) {
+//RS                     v.libc = libc;
+//RS                 }
+//RS             }
+//RS             "linkage" => {
+//RS                 if let Some(linkage) = VariantLinkage::parse(use_val) {
+//RS                     v.linkage = linkage;
+//RS                 }
+//RS             }
+//RS             "abi" => {
+//RS                 if let Some(abi) = VariantAbi::parse(use_val) {
+//RS                     v.abi = abi;
+//RS                 }
+//RS             }
+//RS             "artifact" => {
+//RS                 if let Some(kind) = ArtifactKind::parse(use_val) {
+//RS                     v.artifact = kind;
+//RS                 }
+//RS             }
+//RS             "features" => {
+//RS                 v.features.insert(use_val.to_string());
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     v
+//RS }
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub enum VariantSelectError {
+//RS     NoMatch {
+//RS         need: PackageVariant,
+//RS         candidate_count: usize,
+//RS     },
+//RS     Ambiguous {
+//RS         need: PackageVariant,
+//RS         axis: &'static str,
+//RS         labels: Vec<String>,
+//RS     },
+//RS }
+//RS 
+//RS impl VariantSelectError {
+//RS     pub fn to_diagnostic(&self) -> Diagnostic {
+//RS         match self {
+//RS             VariantSelectError::NoMatch {
+//RS                 need,
+//RS                 candidate_count,
+//RS             } => Diagnostic::error(
+//RS                 "E1316",
+//RS                 format!(
+//RS                     "no package variant matches need `{}` among {candidate_count} candidate(s)",
+//RS                     need.identity_key()
+//RS                 ),
+//RS                 "Native selection uses only the closed typed axes (D-JPK-VARIANT1); none of the offered producers are exact or compatible.".to_string(),
+//RS                 "Add a producer for this domain, loosen the need, or map provider facts with `variant_map`.".to_string(),
+//RS                 None,
+//RS             ),
+//RS             VariantSelectError::Ambiguous {
+//RS                 need,
+//RS                 axis,
+//RS                 labels,
+//RS             } => e1316_ambiguous(need, axis, labels),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// E1316 — ambiguous variant candidates after exact-then-compatible matching.
+//RS pub fn e1316_ambiguous(need: &PackageVariant, axis: &str, labels: &[String]) -> Diagnostic {
+//RS     let listed = labels.join(", ");
+//RS     Diagnostic::error(
+//RS         "E1316",
+//RS         format!(
+//RS             "ambiguous package variants for need `{}`: {listed} (first distinguishing axis: {axis})",
+//RS             need.identity_key()
+//RS         ),
+//RS         "Matching is exact-then-compatible under one total order; an ambiguous tie is never a silent pick (D-JPK-VARIANT1).".to_string(),
+//RS         "Add a `variant_map`, pin one candidate, or make the need more specific on the named axis.".to_string(),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS /// Select a producer variant: exact winners first, else compatible; one winner
+//RS /// only. Tie → Ambiguous naming the first distinguishing axis among survivors.
+//RS pub fn select_variant(
+//RS     need: &PackageVariant,
+//RS     candidates: &[VariantCandidate],
+//RS     maps: &[VariantMapEntry],
+//RS ) -> Result<VariantCandidate, VariantSelectError> {
+//RS     let mapped: Vec<(usize, PackageVariant)> = candidates
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(i, c)| (i, apply_variant_map(c, maps)))
+//RS         .collect();
+//RS 
+//RS     let exact: Vec<usize> = mapped
+//RS         .iter()
+//RS         .filter(|(_, v)| v.matches_exact(need))
+//RS         .map(|(i, _)| *i)
+//RS         .collect();
+//RS     let pool = if !exact.is_empty() {
+//RS         exact
+//RS     } else {
+//RS         mapped
+//RS             .iter()
+//RS             .filter(|(_, v)| v.matches_compatible(need))
+//RS             .map(|(i, _)| *i)
+//RS             .collect()
+//RS     };
+//RS 
+//RS     match pool.len() {
+//RS         0 => Err(VariantSelectError::NoMatch {
+//RS             need: need.clone(),
+//RS             candidate_count: candidates.len(),
+//RS         }),
+//RS         1 => Ok(candidates[pool[0]].clone()),
+//RS         _ => {
+//RS             let mut labels: Vec<String> =
+//RS                 pool.iter().map(|&i| candidates[i].label.clone()).collect();
+//RS             labels.sort();
+//RS             let a = &mapped.iter().find(|(i, _)| *i == pool[0]).unwrap().1;
+//RS             let b = &mapped.iter().find(|(i, _)| *i == pool[1]).unwrap().1;
+//RS             // If mapped variants are identical, distinguish via unmapped
+//RS             // provider facts that were not folded into axes — still ambiguous.
+//RS             let axis = if a == b {
+//RS                 "provider-facts"
+//RS             } else {
+//RS                 PackageVariant::first_distinguishing_axis(a, b)
+//RS             };
+//RS             Err(VariantSelectError::Ambiguous {
+//RS                 need: need.clone(),
+//RS                 axis,
+//RS                 labels,
+//RS             })
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Universal lock coverage: every declared supported domain must appear as a
+//RS /// selected variant identity. Returns missing domain identity keys.
+//RS pub fn missing_lock_domains(
+//RS     declared: &[PackageVariant],
+//RS     locked_identities: &BTreeSet<String>,
+//RS ) -> Vec<String> {
+//RS     declared
+//RS         .iter()
+//RS         .map(|v| v.identity_key())
+//RS         .filter(|k| !locked_identities.contains(k))
+//RS         .collect()
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn defaults_cover_every_axis() {
+//RS         let v = PackageVariant::defaults_for_context(&PlatformKey {
+//RS             arch: Platform::ARCH_ARM64.to_string(),
+//RS             os: Platform::OS_LINUX.to_string(),
+//RS         });
+//RS         assert_eq!(v.role, VariantRole::Host);
+//RS         assert_eq!(v.os, VariantOs::Linux);
+//RS         assert_eq!(v.arch, VariantArch::Aarch64);
+//RS         assert_eq!(v.libc, VariantLibc::Gnu);
+//RS         assert_eq!(v.linkage, VariantLinkage::Shared);
+//RS         assert_eq!(v.abi, VariantAbi::Sysv);
+//RS         assert_eq!(v.artifact, ArtifactKind::Library);
+//RS         assert!(v.features.is_empty());
+//RS         assert!(v.identity_key().contains("arch=aarch64"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn exact_beats_compatible_and_ambiguity_names_axis() {
+//RS         let need =
+//RS             PackageVariant::cross_target(VariantOs::Linux, VariantArch::Aarch64, VariantLibc::Musl)
+//RS                 .with_linkage(VariantLinkage::Static);
+//RS 
+//RS         let a = VariantCandidate::new("openssl-static-musl", need.clone());
+//RS         let _b = VariantCandidate::new(
+//RS             "openssl-static-musl-alt",
+//RS             need.clone().with_feature("legacy"),
+//RS         )
+//RS         .with_provider_fact("conan.compiler.runtime", "libstdc++11");
+//RS 
+//RS         // Exact unique.
+//RS         let got = select_variant(&need, &[a.clone()], &[]).unwrap();
+//RS         assert_eq!(got.label, "openssl-static-musl");
+//RS 
+//RS         // Two exact → ambiguous via unmapped provider facts.
+//RS         let b_exact = VariantCandidate::new("openssl-b", need.clone())
+//RS             .with_provider_fact("conan.compiler.runtime", "libstdc++11");
+//RS         let err = select_variant(&need, &[a, b_exact], &[]).unwrap_err();
+//RS         match err {
+//RS             VariantSelectError::Ambiguous { axis, labels, .. } => {
+//RS                 assert_eq!(axis, "provider-facts");
+//RS                 assert_eq!(labels.len(), 2);
+//RS             }
+//RS             other => panic!("expected Ambiguous, got {other:?}"),
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn variant_map_folds_provider_fact_into_libc() {
+//RS         let need =
+//RS             PackageVariant::cross_target(VariantOs::Linux, VariantArch::Aarch64, VariantLibc::Musl);
+//RS         let cand = VariantCandidate::new(
+//RS             "openssl",
+//RS             PackageVariant::cross_target(VariantOs::Linux, VariantArch::Aarch64, VariantLibc::Gnu),
+//RS         )
+//RS         .with_provider_fact("conan.compiler.libc", "musl");
+//RS         let maps = [VariantMapEntry {
+//RS             provider_key: "conan.compiler.libc".to_string(),
+//RS             axis: "libc".to_string(),
+//RS             value: "*".to_string(),
+//RS         }];
+//RS         let got = select_variant(&need, &[cand], &maps).unwrap();
+//RS         assert_eq!(got.label, "openssl");
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2134 crates/jet-pkg-model/src/Variant.rs:1-679
+

@@ -1,0 +1,506 @@
+// Deterministic interaction tapes (crates/jet-cli/src/Tape.rs).
+// Input, clock, environment, and observations are supplied by the real runner.
+use core.files as tape_files
+use core.sys as tape_sys
+use core.time as tape_time
+
+pub JET_CLI_TAPE_FORMAT :: "jet.tape"
+pub JET_CLI_TAPE_VERSION :: 1
+pub JET_CLI_MAX_TAPE_BYTES :: 4194304
+pub JET_CLI_MAX_TAPE_STEPS :: 100000
+pub JET_CLI_MAX_STEP_TEXT_BYTES :: 1048576
+// Rust `MAX_SLEEP` (Tape.rs:25), exact nanosecond bound and Duration projection.
+pub JET_CLI_TAPE_MAX_SLEEP_NS :: 3600000000000
+pub fn jet_cli_tape_max_sleep() -> Duration Never! {
+    tape_time.duration_ns(JET_CLI_TAPE_MAX_SLEEP_NS)
+}
+
+// Rust `TapeStep` (Tape.rs:29-44). Duration retains programmatic sub-ms precision.
+pub enum JetCLITapeStep {
+    Type(String)
+    Enter
+    Sleep(Duration)
+    Wait(String)
+    Require(String)
+    Set(name: String, value: String)
+    Output(String)
+}
+
+// Rust `Tape` (Tape.rs:48-50). Construct with new/parse to enforce invariants.
+pub struct JetCLITape { steps: [JetCLITapeStep] }
+// Rust `TapeRun` (Tape.rs:259-264).
+pub struct JetCLITapeRun {
+    pub steps_executed: Int
+    pub outputs: [String]
+}
+
+// Rust `TapeExecutor` (Tape.rs:271-286). Mutable borrowed production seam.
+#Error
+pub struct JetCLITapeExecutorError { pub message: String }
+pub trait JetCLITapeExecutor {
+    fn type_text(&self, text: String) JetCLITapeExecutorError!
+    fn enter(&self) JetCLITapeExecutorError!
+    fn sleep(&self, duration: Duration) JetCLITapeExecutorError!
+    fn wait(&self, readiness: String) JetCLITapeExecutorError!
+    fn require(&self, program: String) JetCLITapeExecutorError!
+    fn set(&self, name: String, value: String) JetCLITapeExecutorError!
+    fn observe_output(&self) -> String JetCLITapeExecutorError!
+}
+
+// Rust `TapeError` (Tape.rs:290-311).
+#Error
+pub enum JetCLITapeError {
+    Parse(line: Int, message: String)
+    Step(step: Int, message: String)
+    Limit(what: String, limit: Int)
+    MissingRequirement(String)
+    Execution(step: Int, action: String, message: String)
+    OutputMismatch(step: Int, expected: String, actual: String)
+}
+#Error
+struct JetCLITapeValueError { message: String }
+
+// Rust `TapeError::fmt` (Tape.rs:314-336).
+pub fn jet_cli_tape_error_message(error: JetCLITapeError) -> String Never! {
+    if error == {
+        .Parse(line, message) -> "tape line {line}: {message}"
+        .Step(step, message) -> "tape step {step}: {message}"
+        .Limit(what, limit) -> "{what} exceeds the {limit} item limit"
+        .MissingRequirement(program) -> "required program `{program}` is unavailable"
+        .Execution(step, action, message) -> "tape step {step} ({action}) failed: {message}"
+        .OutputMismatch(step, expected, actual) -> "tape step {step} output mismatch: expected {jet_cli_debug_quote(expected)}, observed {jet_cli_debug_quote(actual)}"
+    }
+}
+
+// Rust `Tape::new` (Tape.rs:54-68).
+pub fn jet_cli_tape_new(steps: [JetCLITapeStep]) -> JetCLITape JetCLITapeError! {
+    if steps.len() > JET_CLI_MAX_TAPE_STEPS -> return Err(JetCLITapeError.Limit{what: "tape step count", limit: JET_CLI_MAX_TAPE_STEPS})
+    loop index in 0..<steps.len() {
+        jet_cli_tape_validate_step(steps[index]) ?? return Err(JetCLITapeError.Step{step: index + 1, message: ~err.message})
+    }
+    Ok(JetCLITape{steps: steps})
+}
+
+// Rust `Tape::default` (Tape.rs:252-254).
+pub fn jet_cli_tape_default() -> JetCLITape Never! { JetCLITape{steps: [JetCLITapeStep]{}} }
+// Rust `Tape::steps` (Tape.rs:108-110); borrowed slice, no collection copy.
+pub fn jet_cli_tape_steps(tape: JetCLITape) -> View<JetCLITapeStep> from tape { tape.steps[0..tape.steps.len()] }
+// Rust `Tape::step` (Tape.rs:113-115).
+pub fn jet_cli_tape_step(tape: JetCLITape, index: Int) -> JetCLITapeStep? Never! {
+    if index < 0 || index >= tape.steps.len() -> return None
+    Val(~tape.steps[index])
+}
+
+// Rust `Tape::parse` (Tape.rs:71-105). Rust lines splits LF/CRLF, not bare CR.
+pub fn jet_cli_tape_parse(source: String) -> JetCLITape JetCLITapeError! {
+    raw :: source.bytes()
+    if raw.len() > JET_CLI_MAX_TAPE_BYTES -> return Err(JetCLITapeError.Limit{what: "tape source bytes", limit: JET_CLI_MAX_TAPE_BYTES})
+    if raw.len() >= 3 && raw[0] == (U8{239}) && raw[1] == (U8{187}) && raw[2] == (U8{191}) -> return Err(JetCLITapeError.Parse{line: 1, message: "tape must not contain a UTF-8 BOM"})
+    if raw.contains(U8{0}) -> return Err(JetCLITapeError.Parse{line: 1, message: "tape must not contain NUL bytes"})
+    steps := [JetCLITapeStep]{}
+    start := 0
+    line := 1
+    end := 0
+    loop end <= raw.len() {
+        if end == raw.len() || raw[end] == (U8{10}) {
+            if end == raw.len() && start == end { break }
+            stop := end
+            if end < raw.len() && stop > start && raw[stop - 1] == (U8{13}) -> stop -= 1
+            text :: jet_cli_tape_slice(raw, start, stop)
+            if jet_cli_tape_parse_line(text, line) == {
+                .Err(error) -> { return Err(error) }
+                .Ok(parsed) -> {
+                    if parsed == .Val(step) {
+                        &steps.push(step)
+                        if steps.len() > JET_CLI_MAX_TAPE_STEPS -> return Err(JetCLITapeError.Limit{what: "tape step count", limit: JET_CLI_MAX_TAPE_STEPS})
+                    }
+                }
+            }
+            start = end + 1
+            line += 1
+        }
+        end += 1
+    }
+    jet_cli_tape_new(steps)
+}
+
+// Rust `quote` (Tape.rs:509-513). CanonicalJSON includes a final LF; omit it here.
+fn jet_cli_tape_quote(value: String) -> String Never! {
+    bytes := canonical_json_bytes(CanonicalJSON.String(~value))
+    _ := &bytes.pop()
+    String.from_bytes(bytes) ?? panic("CanonicalJSON emits UTF-8")
+}
+fn jet_cli_tape_append(out: &[U8], text: String) Never! {
+    loop byte in text.bytes() -> &out.push(byte)
+}
+// Rust `Tape::to_text` (Tape.rs:118-154).
+pub fn jet_cli_tape_to_text(tape: JetCLITape) -> String Never! {
+    out := [U8]{}
+    loop step in tape.steps {
+        if step == {
+            .Type(text) -> {
+                jet_cli_tape_append(&out, "Type ")
+                jet_cli_tape_append(&out, jet_cli_tape_quote(text))
+            }
+            .Enter -> jet_cli_tape_append(&out, "Enter")
+            .Sleep(duration) -> jet_cli_tape_append(&out, "Sleep {duration.ns /% 1000000}ms")
+            .Wait(marker) -> {
+                jet_cli_tape_append(&out, "Wait ")
+                jet_cli_tape_append(&out, jet_cli_tape_quote(marker))
+            }
+            .Require(program) -> {
+                jet_cli_tape_append(&out, "Require ")
+                jet_cli_tape_append(&out, jet_cli_tape_quote(program))
+            }
+            .Set(name, value) -> {
+                jet_cli_tape_append(&out, "Set ")
+                jet_cli_tape_append(&out, name)
+                jet_cli_tape_append(&out, " ")
+                jet_cli_tape_append(&out, jet_cli_tape_quote(value))
+            }
+            .Output(text) -> {
+                jet_cli_tape_append(&out, "Output ")
+                jet_cli_tape_append(&out, jet_cli_tape_quote(text))
+            }
+        }
+        &out.push(U8{10})
+    }
+    String.from_bytes(out) ?? panic("canonical tape text must be UTF-8")
+}
+// Rust `Tape::to_bytes` (Tape.rs:157-159).
+pub fn jet_cli_tape_to_bytes(tape: JetCLITape) -> [U8] Never! { jet_cli_tape_to_text(tape).bytes() }
+// Rust `Tape::digest` (Tape.rs:162-164).
+pub fn jet_cli_tape_digest(tape: JetCLITape) -> String Never! { mir_sha256_hex_bytes(mir_sha256_bytes(jet_cli_tape_to_bytes(tape))) }
+
+// Rust `Tape::required_programs` (Tape.rs:167-177).
+pub fn jet_cli_tape_required_programs(tape: JetCLITape) -> [String] Never! {
+    unique := [String:Bool]{}
+    loop step in tape.steps {
+        if step == .Require(program) -> unique[program] = true
+    }
+    programs := unique.keys().to_list()
+    &programs.sort()
+    programs
+}
+// Rust `Tape::missing_requirements` (Tape.rs:180-185).
+pub fn jet_cli_tape_missing_requirements(tape: JetCLITape) -> [String] Never! {
+    missing := [String]{}
+    loop program in jet_cli_tape_required_programs(tape) {
+        if !jet_cli_tape_program_available(program) -> &missing.push(program)
+    }
+    missing
+}
+// Rust `Tape::preflight` (Tape.rs:188-193).
+pub fn jet_cli_tape_preflight(tape: JetCLITape) JetCLITapeError! {
+    missing :: jet_cli_tape_missing_requirements(tape)
+    if missing.len() > 0 -> return Err(JetCLITapeError.MissingRequirement(~missing[0]))
+}
+
+// Rust `Tape::replay_source` (Tape.rs:196-201).
+pub fn jet_cli_tape_replay_source<E: JetCLITapeExecutor>(source: String, executor: &E) -> JetCLITapeRun JetCLITapeError! {
+    tape :: jet_cli_tape_parse(source) ?? return Err(err)
+    jet_cli_tape_replay(tape, &executor)
+}
+// Rust `Tape::replay` (Tape.rs:204-248). Preflight precedes every executor call.
+pub fn jet_cli_tape_replay<E: JetCLITapeExecutor>(tape: JetCLITape, executor: &E) -> JetCLITapeRun JetCLITapeError! {
+    jet_cli_tape_preflight(tape) ?? return Err(err)
+    outputs := [String]{}
+    loop index in 0..<tape.steps.len() {
+        step :: tape.steps[index]
+        number :: index + 1
+        if step == .Output(expected_text) {
+            observed :: (&executor.observe_output()) ?? return Err(JetCLITapeError.Execution{step: number, action: "Output", message: ~err.message})
+            expected :: jet_cli_tape_normalize_terminal_text(expected_text)
+            actual :: jet_cli_tape_normalize_terminal_text(observed)
+            if expected != actual -> return Err(JetCLITapeError.OutputMismatch{step: number, expected: expected, actual: actual})
+            &outputs.push(actual)
+            next
+        }
+        jet_cli_tape_execute(step, &executor) ?? return Err(JetCLITapeError.Execution{step: number, action: jet_cli_tape_step_name(step), message: ~err.message})
+    }
+    Ok(JetCLITapeRun{steps_executed: tape.steps.len(), outputs: outputs})
+}
+
+// Rust `Tape::replay` non-output dispatch (Tape.rs:229-237). The helper keeps
+// the executor's own error carrier intact until replay adds the step context.
+fn jet_cli_tape_execute<E: JetCLITapeExecutor>(step: JetCLITapeStep, executor: &E) JetCLITapeExecutorError! {
+    if step == {
+        .Type(text) -> &executor.type_text(text)
+        .Enter -> &executor.enter()
+        .Sleep(duration) -> &executor.sleep(duration)
+        .Wait(marker) -> &executor.wait(marker)
+        .Require(program) -> &executor.require(program)
+        .Set(name, value) -> &executor.set(name, value)
+        .Output(_) -> panic("Output is handled above")
+    }
+}
+
+// Rust `parse_line` (Tape.rs:341-382).
+fn jet_cli_tape_parse_line(line: String, number: Int) -> JetCLITapeStep? JetCLITapeError! {
+    trimmed :: ~line.trim()
+    if trimmed == "" || trimmed.starts_with("#") -> return Ok(None)
+    fields :: jet_cli_tape_split_command(trimmed)
+    command :: fields.name
+    rest :: fields.value
+    step :: if command == {
+        "Type" -> JetCLITapeStep.Type(jet_cli_tape_parse_value(rest) ?? return Err(JetCLITapeError.Parse{line: number, message: ~err.message}))
+        "Enter" -> {
+            if rest.trim() != "" -> return Err(JetCLITapeError.Parse{line: number, message: "Enter does not accept arguments"})
+            JetCLITapeStep.Enter
+        }
+        "Sleep" -> JetCLITapeStep.Sleep(jet_cli_tape_parse_duration(rest) ?? return Err(JetCLITapeError.Parse{line: number, message: ~err.message}))
+        "Wait" -> {
+            marker :: jet_cli_tape_parse_value(rest) ?? return Err(JetCLITapeError.Parse{line: number, message: ~err.message})
+            if marker == "" -> return Err(JetCLITapeError.Parse{line: number, message: "Wait needs a readiness marker"})
+            JetCLITapeStep.Wait(marker)
+        }
+        "Require" -> {
+            program :: jet_cli_tape_parse_value(rest) ?? return Err(JetCLITapeError.Parse{line: number, message: ~err.message})
+            if program == "" -> return Err(JetCLITapeError.Parse{line: number, message: "Require needs a program name"})
+            JetCLITapeStep.Require(program)
+        }
+        "Set" -> jet_cli_tape_parse_set(rest) ?? return Err(JetCLITapeError.Parse{line: number, message: ~err.message})
+        "Output" -> JetCLITapeStep.Output(jet_cli_tape_parse_value(rest) ?? return Err(JetCLITapeError.Parse{line: number, message: ~err.message}))
+        else -> { return Err(JetCLITapeError.Parse{line: number, message: "unknown tape command `{command}`"}) }
+    }
+    jet_cli_tape_validate_step(step) ?? return Err(JetCLITapeError.Parse{line: number, message: ~err.message})
+    Ok(Val(step))
+}
+
+// Rust splitn(2, char::is_ascii_whitespace), followed by Unicode trim_start.
+fn jet_cli_tape_split_command(text: String) -> (name: String, value: String) Never! {
+    raw :: text.bytes()
+    loop index in 0..<raw.len() {
+        byte :: raw[index]
+        if byte == (U8{32}) || (byte >= (U8{9}) && byte <= (U8{13})) {
+            tail :: jet_cli_tape_slice(raw, index + 1, raw.len())
+            return (name: jet_cli_tape_slice(raw, 0, index), value: ~tail.trim_start())
+        }
+    }
+    (name: text, value: "")
+}
+fn jet_cli_tape_slice(raw: [U8], start: Int, end: Int) -> String Never! {
+    bytes := [U8]{}
+    loop index in start..<end -> &bytes.push(raw[index])
+    String.from_bytes(bytes) ?? panic("tape slice must be UTF-8")
+}
+
+// Rust `parse_set` (Tape.rs:384-401). '=' takes precedence even in quoted values.
+fn jet_cli_tape_parse_set(rest: String) -> JetCLITapeStep JetCLITapeValueError! {
+    text :: ~rest.trim()
+    raw :: text.bytes()
+    fields := jet_cli_tape_split_command(text)
+    loop index in 0..<raw.len() {
+        if raw[index] == (U8{61}) {
+            name :: jet_cli_tape_slice(raw, 0, index)
+            value :: jet_cli_tape_slice(raw, index + 1, raw.len())
+            fields = (name: ~name.trim(), value: ~value.trim_start())
+            break
+        }
+    }
+    if !jet_cli_tape_valid_env_name(fields.name) -> return Err(JetCLITapeValueError{message: "invalid environment name `{fields.name}`"})
+    value :: jet_cli_tape_parse_value(fields.value) ?? return Err(err)
+    Ok(JetCLITapeStep.Set{name: ~fields.name, value: value})
+}
+
+// Rust `parse_value` (Tape.rs:403-414). CanonicalJSON owns grammar and errors.
+fn jet_cli_tape_parse_value(value: String) -> String JetCLITapeValueError! {
+    text :: ~value.trim_end()
+    if !text.starts_with("\"") -> return Ok(text)
+    bytes := text.bytes()
+    &bytes.push(U8{10})
+    tree :: canonical_json_parse(bytes) ?? return Err(JetCLITapeValueError{message: ~err.message})
+    if tree == .String(decoded) -> return Ok(decoded)
+    Err(JetCLITapeValueError{message: "quoted tape value must be a JSON string"})
+}
+
+// Rust `parse_duration` (Tape.rs:416-454), checked u64 before unit conversion.
+fn jet_cli_tape_parse_duration(value: String) -> Duration JetCLITapeValueError! {
+    text :: ~value.trim()
+    if text == "" -> return Err(JetCLITapeValueError{message: "Sleep needs a duration"})
+    suffix := 0
+    multiplier := 1
+    divisor := 1
+    if {
+        text.ends_with("ms") -> suffix = 2
+        text.ends_with("us") -> {
+            suffix = 2
+            divisor = 1000
+        }
+        text.ends_with("ns") -> {
+            suffix = 2
+            divisor = 1000000
+        }
+        text.ends_with("s") -> {
+            suffix = 1
+            multiplier = 1000
+        }
+        else -> {}
+    }
+    raw :: text.bytes()
+    end :: raw.len() - suffix
+    if end == 0 -> return Err(JetCLITapeValueError{message: "invalid duration `{text}`"})
+    loop index in 0..<end {
+        if raw[index] < (U8{48}) || raw[index] > (U8{57}) -> return Err(JetCLITapeValueError{message: "invalid duration `{text}`"})
+    }
+    number := 0
+    loop index in 0..<end {
+        digit :: Int.from_u8(raw[index]) - 48
+        if number > (18446744073709551615 - digit) /% 10 -> return Err(JetCLITapeValueError{message: "duration `{text}` is too large"})
+        number = number * 10 + digit
+    }
+    if number > 18446744073709551615 /% multiplier -> return Err(JetCLITapeValueError{message: "duration `{text}` is too large"})
+    millis :: number * multiplier /% divisor
+    if millis > 3600000 -> return Err(JetCLITapeValueError{message: "duration `{text}` exceeds the one-hour limit"})
+    Ok(tape_time.duration_ms(millis))
+}
+
+// Rust `validate_step` (Tape.rs:456-495).
+fn jet_cli_tape_validate_step(step: JetCLITapeStep) JetCLITapeValueError! {
+    if step == {
+        .Type(text) | .Output(text) -> {
+            if text.bytes().len() > JET_CLI_MAX_STEP_TEXT_BYTES -> return Err(JetCLITapeValueError{message: "text payload exceeds the {JET_CLI_MAX_STEP_TEXT_BYTES}-byte limit"})
+        }
+        .Wait(marker) -> {
+            if marker == "" -> return Err(JetCLITapeValueError{message: "Wait needs a readiness marker"})
+            if marker.bytes().len() > JET_CLI_MAX_STEP_TEXT_BYTES -> return Err(JetCLITapeValueError{message: "readiness exceeds the {JET_CLI_MAX_STEP_TEXT_BYTES}-byte limit"})
+        }
+        .Require(program) -> {
+            if program == "" || program.bytes().contains(U8{0}) -> return Err(JetCLITapeValueError{message: "Require needs a non-empty program name"})
+            if program.bytes().len() > 4096 -> return Err(JetCLITapeValueError{message: "required program name exceeds the 4096-byte limit"})
+        }
+        .Set(name, value) -> {
+            if !jet_cli_tape_valid_env_name(name) -> return Err(JetCLITapeValueError{message: "invalid environment name `{name}`"})
+            if value.bytes().len() > JET_CLI_MAX_STEP_TEXT_BYTES -> return Err(JetCLITapeValueError{message: "environment value exceeds the {JET_CLI_MAX_STEP_TEXT_BYTES}-byte limit"})
+        }
+        .Enter -> {}
+        .Sleep(duration) -> {
+            if duration.ns > JET_CLI_TAPE_MAX_SLEEP_NS -> return Err(JetCLITapeValueError{message: "Sleep duration exceeds the one-hour limit"})
+        }
+    }
+}
+// Rust `step_name` (Tape.rs:497-507).
+fn jet_cli_tape_step_name(step: JetCLITapeStep) -> String Never! {
+    if step == {
+        .Type(_) -> "Type"
+        .Enter -> "Enter"
+        .Sleep(_) -> "Sleep"
+        .Wait(_) -> "Wait"
+        .Require(_) -> "Require"
+        .Set(_, _) -> "Set"
+        .Output(_) -> "Output"
+    }
+}
+// Rust `valid_env_name` (Tape.rs:515-519).
+fn jet_cli_tape_valid_env_name(name: String) -> Bool Never! {
+    raw :: name.bytes()
+    if raw.len() == 0 -> return false
+    loop index in 0..<raw.len() {
+        byte :: raw[index]
+        letter :: (byte >= U8{65} && byte <= U8{90}) || (byte >= U8{97} && byte <= U8{122}) || byte == U8{95}
+        digit :: byte >= U8{48} && byte <= U8{57}
+        if !letter && !(index > 0 && digit) -> return false
+    }
+    true
+}
+
+// Rust `program_available` (Tape.rs:521-533). No process launch during preflight.
+pub fn jet_cli_tape_program_available(program: String) -> Bool Never! {
+    if program == "" || program.bytes().contains(U8{0}) -> return false
+    family :: tape_sys.family()
+    windows :: family == "windows"
+    unix :: family == "unix"
+    separator :: if windows -> "\\" else -> "/"
+    absolute :: if windows -> tape_files.is_absolute(program) else -> program.starts_with("/")
+    if absolute || program.contains(separator) -> return jet_cli_tape_executable_file(program, unix)
+    path :: tape_sys.get("PATH") ?? return false
+    raw :: path.bytes()
+    directory := [U8]{}
+    quoted := false
+    index := 0
+    loop index <= raw.len() {
+        if index == raw.len() || ((!quoted || !windows) && raw[index] == (if windows -> U8{59} else -> U8{58})) {
+            name :: String.from_bytes(directory) ?? panic("PATH directory must be UTF-8")
+            // Core's platform-neutral join treats backslash/drive letters as
+            // separators even on Unix; Rust Path::join does not.
+            candidate :: if {
+                windows -> tape_files.join(name, program)
+                name == "" -> program
+                name.ends_with("/") -> "{name}{program}"
+                else -> "{name}/{program}"
+            }
+            if jet_cli_tape_executable_file(candidate, unix) -> return true
+            &directory.clear()
+        } else {
+            if windows && raw[index] == (U8{34}) -> quoted = !quoted
+            else -> &directory.push(raw[index])
+        }
+        index += 1
+    }
+    false
+}
+// Rust Unix/non-Unix `executable_file` (Tape.rs:536-546).
+fn jet_cli_tape_executable_file(path: String, unix: Bool) -> Bool Never! {
+    metadata :: tape_files.stat(path) ?? return false
+    metadata.is_file && (!unix || (metadata.mode & 73) != 0)
+}
+
+// Rust `normalize_terminal_text` (Tape.rs:552-610). Byte scanning preserves UTF-8;
+// only ASCII controls change, exactly matching the character state machine.
+pub fn jet_cli_tape_normalize_terminal_text(value: String) -> String Never! {
+    state := 0
+    previous_cr := false
+    out := [U8]{}
+    skip_utf8 := 0
+    loop byte in value.bytes() {
+        if skip_utf8 > 0 {
+            skip_utf8 -= 1
+            next
+        }
+        if (state == 1 || state == 4) && byte >= (U8{128}) {
+            skip_utf8 = if {
+                byte < (U8{224}) -> 1
+                byte < (U8{240}) -> 2
+                else -> 3
+            }
+        }
+        if state == {
+            0 -> {
+                if {
+                    byte == (U8{27}) -> {
+                        previous_cr = false
+                        state = 1
+                    }
+                    byte == (U8{13}) -> {
+                        &out.push(U8{10})
+                        previous_cr = true
+                    }
+                    byte == (U8{10}) -> {
+                        if previous_cr -> previous_cr = false
+                        else -> &out.push(byte)
+                    }
+                    byte == (U8{7}) -> previous_cr = false
+                    else -> {
+                        previous_cr = false
+                        &out.push(byte)
+                    }
+                }
+            }
+            1 -> {
+                if {
+                    byte == (U8{91}) -> state = 2
+                    byte == (U8{93}) -> state = 3
+                    else -> state = 0
+                }
+            }
+            2 -> { if byte >= (U8{64}) && byte <= (U8{126}) -> state = 0 }
+            3 -> {
+                if byte == (U8{7}) -> state = 0
+                if byte == (U8{27}) -> state = 4
+            }
+            4 -> { state = if byte == (U8{92}) -> 0 else -> 3 }
+            else -> panic("invalid tape normalization state")
+        }
+    }
+    String.from_bytes(out) ?? panic("normalized tape text must be UTF-8")
+}

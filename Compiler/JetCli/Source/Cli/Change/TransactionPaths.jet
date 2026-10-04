@@ -1,0 +1,168 @@
+// Source/CmdCodemod/Transaction.rs: destination policy over the sole lossless
+// Core OS-path component owner. Native authority is never inferred from text.
+use core.files.runtime.kernel_path_components as transaction_paths
+use core.files.host.retained_descriptor as transaction_io
+
+#Error
+pub struct JetCLITransactionError { pub message: String }
+
+// Rust Change (Transaction.rs:38–43).
+pub struct JetCLITransactionChange {
+    pub path: transaction_paths.OsPath
+    pub before: [U8]
+    pub after: [U8]
+}
+
+fn jet_cli_transaction_permission(message: String) -> IOError Never! {
+    IOError.PermissionDenied(IOContext{
+        operation: .Read, resource: None, os_code: None, cause: Val(message),
+    })
+}
+
+fn jet_cli_transaction_invalid_input(message: String) -> IOError Never! {
+    IOError.InvalidInput(IOContext{
+        operation: .Read, resource: None, os_code: None, cause: Val(message),
+    })
+}
+
+// Rust validate_destination:282–315 / validate_fix_destination:356–372.
+// Return a borrowed span into `path`, not a copied/lossy relative pathname.
+// Metadata, canonical equality and identity checks follow this lexical check;
+// this function alone never authorizes a destination or opens a file.
+fn jet_cli_transaction_destination_relative(project: transaction_paths.OsPath, path: transaction_paths.OsPath, allow_any_path: Bool) -> transaction_paths.PathSpan IOError! {
+    relative :: transaction_paths.strip_prefix_span(path, project) ?? return Err(jet_cli_transaction_permission("destination escapes project"))
+    cursor := transaction_paths.components_span(path, relative)
+    count := 0
+    examples := false
+    tests := false
+    ui := false
+    loop {
+        component :: transaction_paths.next(path, &cursor) ?? break
+        if component.kind != transaction_paths.ComponentKind.Normal -> return Err(jet_cli_transaction_invalid_input("non-normal destination path"))
+        if count == 0 {
+            examples = jet_cli_transaction_component_is(path, component.span, "Examples")
+            tests = jet_cli_transaction_component_is(path, component.span, "tests")
+        }
+        if count == 1 -> ui = tests && jet_cli_transaction_component_is(path, component.span, "ui")
+        count = count + 1
+    }
+    if allow_any_path {
+        if count == 0 -> return Err(jet_cli_transaction_invalid_input("non-normal destination path"))
+        return Ok(relative)
+    }
+    if (!examples && !ui) || count < 2 -> return Err(jet_cli_transaction_permission("destination must be beneath Examples/ or tests/ui/"))
+    if !jet_cli_transaction_source_suffix(path, ui) -> return Err(jet_cli_transaction_permission("destination must be a .jet source or paired tests/ui .stderr snapshot"))
+    Ok(relative)
+}
+
+// CLI allowlist over canonical Rust Path.extension spans. Interior nonUTF8
+// filename bytes need no display conversion, and dotfile laws stay in Core.
+fn jet_cli_transaction_source_suffix(path: transaction_paths.OsPath, allow_stderr: Bool) -> Bool Never! {
+    suffix :: transaction_paths.extension_span(path) ?? return false
+    jet_cli_transaction_component_is(path, suffix, "jet") || (allow_stderr && jet_cli_transaction_component_is(path, suffix, "stderr"))
+}
+
+fn jet_cli_transaction_component_is(path: transaction_paths.OsPath, span: transaction_paths.PathSpan, wanted: String) -> Bool Never! {
+    bytes :: wanted.bytes()
+    if span.end - span.start != bytes.len() -> return false
+    loop at in 0..<bytes.len() {
+        if path.encoded[span.start + at] != bytes[at] -> return false
+    }
+    true
+}
+
+// Rust canonical_project_io (Transaction.rs:271–280).
+fn jet_cli_transaction_canonical_project_io(project: transaction_paths.OsPath) -[FS.Read]> transaction_paths.OsPath IOError! {
+    metadata :: transaction_io.symlink_metadata(project)
+    if metadata.is_symlink || !metadata.is_dir -> return Err(jet_cli_transaction_permission("codemod project is not a real directory"))
+    transaction_io.canonicalize(project)
+}
+
+// Rust canonical_project (Transaction.rs:262–269); the command boundary owns
+// exit status, never this shared library.
+fn jet_cli_transaction_canonical_project(project: transaction_paths.OsPath) -[FS.Read]> transaction_paths.OsPath JetCLITransactionError! {
+    jet_cli_transaction_canonical_project_io(project) ?? return Err(JetCLITransactionError{
+        message: "could not open codemod project `{transaction_paths.display(project)}`: {jet_cli_transaction_io_message(err)}",
+    })
+}
+
+// Rust validate_destination (282–349).
+pub fn jet_cli_transaction_validate_destination(project: transaction_paths.OsPath, path: transaction_paths.OsPath, must_exist: Bool) -[FS.Read]> transaction_paths.OsPath IOError! {
+    jet_cli_transaction_validate_destination_with(project, path, must_exist, false)
+}
+
+// Rust validate_fix_destination (351–406).
+pub fn jet_cli_transaction_validate_fix_destination(project: transaction_paths.OsPath, path: transaction_paths.OsPath, must_exist: Bool) -[FS.Read]> transaction_paths.OsPath IOError! {
+    jet_cli_transaction_validate_destination_with(project, path, must_exist, true)
+}
+
+fn jet_cli_transaction_validate_destination_with(project: transaction_paths.OsPath, path: transaction_paths.OsPath, must_exist: Bool, allow_any_path: Bool) -[FS.Read]> transaction_paths.OsPath IOError! {
+    relative :: jet_cli_transaction_destination_relative(project, path, allow_any_path)
+    cursor := transaction_paths.components_span(path, relative)
+    current := ~project
+    // One component lookahead avoids materializing a copied parent path or
+    // component vector, while preserving Rust's first failing parent order.
+    pending := transaction_paths.next(path, &cursor)
+    loop {
+        component :: pending ?? break
+        pending = transaction_paths.next(path, &cursor)
+        if pending == None -> break
+        transaction_paths.push_component(&current, path, component)
+        metadata :: transaction_io.symlink_metadata(current)
+        if metadata.is_symlink || !metadata.is_dir -> return Err(jet_cli_transaction_permission("destination parent contains a link or non-directory"))
+    }
+    if !must_exist -> return Ok(~path)
+    metadata :: transaction_io.symlink_metadata(path)
+    if metadata.is_symlink || !metadata.is_file -> return Err(jet_cli_transaction_permission("destination is not a regular non-link file"))
+    canonical :: transaction_io.canonicalize(path)
+    if !transaction_paths.equals(canonical, path) -> return Err(jet_cli_transaction_permission("destination aliases a different canonical path"))
+    Ok(canonical)
+}
+
+// Rust validate_codemods_dir (408–432). exists follows links and masks IO
+// errors as the original Path::exists does; symlink_metadata still rejects
+// links, including dangling links, rather than replacing them.
+fn jet_cli_transaction_validate_codemods_dir(project: transaction_paths.OsPath, create: Bool) -[FS]> transaction_paths.OsPath IOError! {
+    jet := ~project
+    transaction_paths.push(&jet, transaction_paths.from_text(".jet", project.platform))
+    if !transaction_io.exists(jet) && create -> transaction_io.create_dir(jet)
+    jet_metadata :: transaction_io.symlink_metadata(jet)
+    if jet_metadata.is_symlink || !jet_metadata.is_dir -> return Err(jet_cli_transaction_permission(".jet is not a real directory"))
+    codemods := ^jet
+    transaction_paths.push(&codemods, transaction_paths.from_text("codemods", project.platform))
+    if !transaction_io.exists(codemods) && create -> transaction_io.create_dir(codemods)
+    metadata :: transaction_io.symlink_metadata(codemods)
+    if metadata.is_symlink || !metadata.is_dir -> return Err(jet_cli_transaction_permission("codemods is not a real directory"))
+    Ok(^codemods)
+}
+
+// Preserve the canonical IOError transport. Native causes are the actual
+// std::io::Error display text, including OS code, supplied by the sole Core
+// provider; custom policy errors carry exactly the Rust message.
+fn jet_cli_transaction_io_message(error: IOError) -> String Never! {
+    if error == {
+        .InvalidInput(context) -> context.cause ?? "{error}"
+        .NotFound(context) -> context.cause ?? "{error}"
+        .PermissionDenied(context) -> context.cause ?? "{error}"
+        .TimedOut(context) -> context.cause ?? "{error}"
+        .Cancelled(context) -> context.cause ?? "{error}"
+        .Closed(context) -> context.cause ?? "{error}"
+        .Protocol(context) -> context.cause ?? "{error}"
+        .Other(context) -> context.cause ?? "{error}"
+        .ResourceLimit(_) -> "{error}"
+    }
+}
+
+// Rust read_replay_log (234–256), path/type preconditions before the native
+// rooted read. The returned name borrows the original encoded path.
+fn jet_cli_transaction_replay_name(codemods: transaction_paths.OsPath, path: transaction_paths.OsPath) -[FS.Read]> transaction_paths.PathComponent IOError! {
+    parent :: transaction_paths.parent_span(path) ?? return Err(jet_cli_transaction_permission("replay log is not directly beneath the opened project codemod directory"))
+    root_span :: transaction_paths.PathSpan{start: 0, end: codemods.encoded.len()}
+    remainder :: transaction_paths.strip_prefix_spans(path, parent, codemods, root_span) ?? return Err(jet_cli_transaction_permission("replay log is not directly beneath the opened project codemod directory"))
+    cursor := transaction_paths.components_span(path, remainder)
+    if transaction_paths.next(path, &cursor) != None -> return Err(jet_cli_transaction_permission("replay log is not directly beneath the opened project codemod directory"))
+    metadata :: transaction_io.symlink_metadata(path)
+    if metadata.is_symlink || !metadata.is_file -> return Err(jet_cli_transaction_permission("replay log is not a regular non-link file"))
+    name :: transaction_paths.file_name_span(path) ?? return Err(jet_cli_transaction_invalid_input("replay log has no file name"))
+    Ok(transaction_paths.PathComponent{kind: transaction_paths.ComponentKind.Normal, span: name})
+}

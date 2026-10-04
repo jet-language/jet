@@ -135,7 +135,8 @@ pub struct PackageWhy {
         payload["disk"] = DataTree.Object(disk)
         payload["dependents"] = pkg_json_texts(self.dependents)
         payload["receipt"] = DataTree.Text(self.receipt)
-        StatusEnvelope.new("why", true).with_field("why", DataTree.Object(payload)).json()
+        value :: StatusValue.from_data_tree(DataTree.Object(payload)) ?? panic("package provenance facts are finite status fields")
+        StatusEnvelope.new("why", true).with_field("why", value).json()
     }
 
     fn text(self) -> String Never! {
@@ -164,7 +165,7 @@ pub fn store_why_package(roots: HangarRoots, query: String) -> PackageWhy? Store
 // The nearest `env.jet` line and lock line that request the package.
 fn store_why_requesting_projection(names: [String], qualified: [String]) -> WhyRequesting StoreError! {
     cwd :: sys.current_dir() ?? "."
-    env_file :: store_why_source_location(store_why_nearest_real_file(cwd, @ENV_FILE), names, qualified, false)
+    env_file :: store_why_source_location(store_why_nearest_real_file(cwd, ENV_FILE), names, qualified, false)
     lock_path :: store_nearest_lock_path(cwd)
     lock_file :: store_why_source_location(lock_path, names, qualified, true)
     Ok(WhyRequesting{env_file: env_file, lock_file: lock_file})

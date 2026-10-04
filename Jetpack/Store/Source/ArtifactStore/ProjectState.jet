@@ -1,0 +1,168 @@
+// crates/jet-store/src/project_state.rs: ONE workspace-root .jet state home.
+// Removing or failing to decode this state costs speed, never correctness.
+// RecordCodec owns the wire; Codec owns atomic publication.
+// Owner-approved: random exclusive sibling + cleanup + rename, no fsync, via
+// the sole replace_unsynced owner. Rust's colliding tmp-{pid} is not retained.
+use core.files as store_project_files
+use core.sys as store_project_sys
+
+pub fn store_project_state_dir(workspace_root: String) -> String Never! {
+    store_project_files.join(workspace_root, ".jet")
+}
+
+pub fn store_project_last_run_path(workspace_root: String, program: String) -> String Never! {
+    store_project_files.join(store_project_files.join(store_project_state_dir(workspace_root), "last-run"), record_blob_key(program.bytes()))
+}
+
+pub fn store_project_write_last_run(workspace_root: String, program: String, record_key: String) ArtifactStoreError! -[FS, Env, Rand]> {
+    encoded :: record_encode("jet.last-run/v1", [RecordSection{id: 1, elements: [RecordValue.Map{fields: [RecordField{name: "program", value: RecordValue.Str{value: program}}, RecordField{name: "record", value: RecordValue.Str{value: record_key}}]}]}])
+    bytes :: encoded.bytes ?? return Err(ArtifactStoreError.Corrupt{path: store_project_last_run_path(workspace_root, program), reason: encoded.problem ?? ""})
+    store_artifact_replace_unsynced(store_project_last_run_path(workspace_root, program), bytes)
+}
+
+fn store_project_last_run_from_bytes(bytes: [U8], program: String) -> String? Never! {
+    reader :: record_open_schema(bytes, "jet.last-run/v1").reader ?? return None
+    entry :: record_element(reader, 1, 0).value ?? return None
+    recorded_program :: record_value_field(entry, "program").value ?? return None
+    if record_value_as_str(recorded_program).value != Val(program) -> return None
+    recorded_key :: record_value_field(entry, "record").value ?? return None
+    record_value_as_str(recorded_key).value
+}
+
+pub fn store_project_last_run(workspace_root: String, program: String) -[FS]> String? Never! {
+    bytes :: store_project_files.read_bytes(store_project_last_run_path(workspace_root, program)) ?? return None
+    store_project_last_run_from_bytes(bytes, program)
+}
+
+pub struct ProjectFileStamp {
+    pub size: Int
+    pub modified_ns: Int
+    pub changed_ns: Int
+    pub inode: Int
+
+    fn text(self) -> String Never! { "{self.size}:{self.modified_ns}:{self.changed_ns}:{self.inode}" }
+}
+
+// #3593: the native Stat provider must expose exact Unix nanoseconds, change
+// time and inode. Millisecond mtime/creation time are NOT a valid substitute.
+// Also gated: Rust metadata follows final symlinks; current files.stat is
+// no-follow. Its canonical follow-metadata provider must land before this
+// native stamp call is usable. Do not replace it with open/readlink/realpath.
+fn store_project_stamp(path: String) -[FS, Env]> ProjectFileStamp? Never! {
+    if !store_project_sys.is_unix() -> return None
+    metadata :: store_project_files.stat(path) ?? return None
+    if !metadata.is_file -> return None
+    Val(ProjectFileStamp{size: metadata.size, modified_ns: metadata.modified_ns, changed_ns: metadata.changed_ns, inode: metadata.inode})
+}
+
+pub fn store_project_file_stamp(path: String) -[FS, Env]> String? Never! {
+    stamp :: store_project_stamp(path) ?? return None
+    Val(stamp.text())
+}
+
+struct ProjectStampedDigest {
+    stamp: ProjectFileStamp
+    digest: String
+}
+
+// Rust's wire casts unsigned size/inode through i64; Jet Int is wider.
+fn store_project_unsigned(value: Int) -> Int Never! {
+    if value < 0 -> value + 18446744073709551616 else -> value
+}
+
+fn store_project_signed(value: Int) -> Int Never! {
+    if value >= 9223372036854775808 -> value - 18446744073709551616 else -> value
+}
+
+fn store_project_entry_int(entry: RecordValue, name: String) -> Int? Never! {
+    value :: record_value_field(entry, name).value ?? return None
+    if value == { .Int(number) -> Val(number) else -> None }
+}
+
+fn store_project_entry_text(entry: RecordValue, name: String) -> String? Never! {
+    value :: record_value_field(entry, name).value ?? return None
+    record_value_as_str(value).value
+}
+
+pub struct StampTable {
+    entries: [String: ProjectStampedDigest]
+    changed: Bool
+
+    fn empty() -> StampTable Never! {
+        StampTable{entries: [String: ProjectStampedDigest]{}, changed: false}
+    }
+
+    fn from_bytes(bytes: [U8]) -> StampTable Never! {
+        table := StampTable.empty()
+        reader :: record_open_schema(bytes, "jet.stamps/v1").reader ?? return table
+        count :: record_element_count(reader, 1) ?? return table
+        // Rust elements() fails the whole section before importing any entries.
+        values := [RecordValue]{}
+        loop index in 0..<count {
+            value :: record_element(reader, 1, index).value ?? return table
+            &values.push(value)
+        }
+        loop entry in values {
+            path :: store_project_entry_text(entry, "path") ?? next
+            digest :: store_project_entry_text(entry, "digest") ?? next
+            size :: store_project_entry_int(entry, "size") ?? next
+            modified_ns :: store_project_entry_int(entry, "modified_ns") ?? next
+            changed_ns :: store_project_entry_int(entry, "changed_ns") ?? next
+            inode :: store_project_entry_int(entry, "inode") ?? next
+            table.entries[path] = ProjectStampedDigest{stamp: ProjectFileStamp{size: store_project_unsigned(size), modified_ns: modified_ns, changed_ns: changed_ns, inode: store_project_unsigned(inode)}, digest: digest}
+        }
+        table
+    }
+
+    // Read-only arguments borrow the pre-read stamp; file_digest consumes its
+    // local optional only once, when deciding whether the read stayed stable.
+    fn cached_digest(self, path: String, before: ProjectFileStamp?) -> String? Never! {
+        stamp :: before ?? return None
+        recorded :: self.entries.get(path) ?? return None
+        if stamp == recorded.stamp -> Val(recorded.digest) else -> None
+    }
+    fn to_bytes(self) -> RecordEncodeResult Never! {
+        paths := self.entries.keys().to_list()
+        &paths.sort()
+        entries := [RecordValue]{}
+        loop path in paths {
+            entry :: self.entries[path]
+            &entries.push(RecordValue.Map{fields: [RecordField{name: "path", value: RecordValue.Str{value: path}}, RecordField{name: "digest", value: RecordValue.Str{value: entry.digest}}, RecordField{name: "size", value: RecordValue.Int{value: store_project_signed(entry.stamp.size)}}, RecordField{name: "modified_ns", value: RecordValue.Int{value: entry.stamp.modified_ns}}, RecordField{name: "changed_ns", value: RecordValue.Int{value: entry.stamp.changed_ns}}, RecordField{name: "inode", value: RecordValue.Int{value: store_project_signed(entry.stamp.inode)}}]})
+        }
+        record_encode("jet.stamps/v1", [RecordSection{id: 1, elements: entries}])
+    }
+
+}
+
+impl StampTable {
+    fn load(workspace_root: String) -[FS]> StampTable Never! {
+        bytes :: store_project_files.read_bytes(store_project_files.join(store_project_state_dir(workspace_root), "stamps")) ?? return StampTable.empty()
+        StampTable.from_bytes(bytes)
+    }
+
+    fn file_digest(self: &StampTable, path: String) -[FS, Env]> String? Never! {
+        before :: store_project_stamp(path)
+        cached :: self.cached_digest(path, before)
+        if cached != None -> return cached
+        bytes :: store_project_files.read_bytes(path) ?? return None
+        digest :: record_blob_key(bytes)
+        // Only remember a digest whose pre-read stamp remains identical.
+        if before == {
+            .Val(stamp) -> {
+                if store_project_stamp(path) == Val(stamp) {
+                    self.entries[path] = ProjectStampedDigest{stamp: stamp, digest: digest}
+                    self.changed = true
+                }
+            }
+            .None -> {}
+        }
+        Val(digest)
+    }
+    fn save(self, workspace_root: String) ArtifactStoreError! -[FS, Env, Rand]> {
+        if !self.changed -> return
+        path :: store_project_files.join(store_project_state_dir(workspace_root), "stamps")
+        encoded :: self.to_bytes()
+        bytes :: encoded.bytes ?? return Err(ArtifactStoreError.Corrupt{path: path, reason: encoded.problem ?? ""})
+        store_artifact_replace_unsynced(path, bytes)
+    }
+}

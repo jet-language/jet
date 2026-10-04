@@ -1,0 +1,96 @@
+// Rust crates/jetpack/src/JetOS/types.rs:4-79. JetOS owns these carriers;
+// system/service/option plans remain the canonical EnvModel carriers.
+JETOS_CACHYOS_KERNEL_PACKAGE :: prep { "cachyos-kernel" }
+JETOS_SYSTEMD_INIT_PACKAGE :: prep { "systemd" }
+JETOS_GNOME_DESKTOP_PACKAGES :: prep { [String]{"gdm", "gnome-session", "gnome-shell"} }
+JETOS_VM_TOOLS :: prep { [String]{"qemu-system-x86_64", "qemu-img", "xorriso", "limine", "sfdisk", "blockdev", "mkfs.ext4", "mkfs.vfat", "mmd", "mcopy", "zstd"} }
+JETOS_VM_GUEST_PROOF_MARKER :: prep { "JETOS_GUEST_PROOF:" }
+JETOS_VM_PROOF_TIMEOUT_MS :: prep { 300000 }
+
+pub struct JetOSFlags {
+    pub fixtures: String?
+    pub offline: Bool
+    pub name: String?
+    pub manual_disk: String?
+    pub disk: String?
+    pub json: Bool
+    pub assume_yes: Bool
+    // Exact Core Cargo build identity's one-shot trust approval.
+    pub trust: Bool
+    // Shared global --host selection, also consumed by import.
+    pub host: String?
+    // The real VM backend supplies default boot packages itself.
+    pub real_tier: Bool
+}
+
+pub struct JetOSTarget {
+    pub config: String
+    pub host: String
+}
+
+pub struct JetOSGeneration {
+    pub name: String
+    pub host: String
+    pub path: String
+    pub created_at: Int
+}
+
+// Rust store_realize.rs:11-17. The held lease and original identity are not
+// flattened into metadata; realization/consumption owns their lifecycle.
+pub struct JetOSRealizedPackage {
+    pub entry: StoreEntry
+    pub lease: CacheLease
+    pub original_out: String
+    pub original_reference_text: String
+    pub consumption_override: String?
+
+    // Rust store_realize.rs:41-49; the held lease remains authoritative.
+    pub fn consumption_path(self, path: String) -[FS, Env, Rand]> String IOError! {
+        if self.consumption_override == .Val(root) {
+            relative :: store_path_strip_prefix(path, self.entry.out) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("package member escapes realized output")}))
+            return Ok(files.join(root, relative))
+        }
+        self.lease.stable_path(path)
+    }
+
+    // Rust store_realize.rs:55-60: provenance names durable provider output,
+    // never a process-scoped consumption projection.
+    pub fn original_output(self) -> String Never! { self.original_out }
+    pub fn original_reference(self) -> String Never! { self.original_reference_text }
+}
+
+pub struct JetOSBootProfile {
+    pub loader: String
+    pub kernel: String
+    pub init: String
+    pub initrd_modules: [String]
+
+    fn to_json(self) -> String Never! {
+        "{{\"loader\":{foundation_json_quote(self.loader)},\"kernel\":{foundation_json_quote(self.kernel)},\"init\":{foundation_json_quote(self.init)},\"initrd_modules\":[{jetos_strings_json(self.initrd_modules)}]}}"
+    }
+}
+
+pub struct JetOSOptionContender {
+    pub value: String
+    pub tier: String
+    pub priority: Int
+    pub source_order: Int
+    pub winner: Bool
+}
+
+pub struct JetOSResolvedOption {
+    pub key: String
+    pub value: String
+    pub tier: String
+    pub priority: Int
+    pub contenders: [JetOSOptionContender]
+
+    // Rust options_rendering.rs:52-78: field and contender order are stable.
+    fn to_json(self) -> String Never! {
+        rows := [String]{}
+        loop contender in self.contenders {
+            &rows.push("{{\"value\":{foundation_json_quote(contender.value)},\"tier\":{foundation_json_quote(contender.tier)},\"priority\":{contender.priority},\"source_order\":{contender.source_order},\"winner\":{if contender.winner -> "true" else -> "false"}}}")
+        }
+        "{{\"key\":{foundation_json_quote(self.key)},\"value\":{foundation_json_quote(self.value)},\"tier\":{foundation_json_quote(self.tier)},\"priority\":{self.priority},\"contenders\":[{rows.join(",")}]}}"
+    }
+}

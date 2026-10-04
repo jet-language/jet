@@ -1,0 +1,1296 @@
+// PORT-PENDING 2071 crates-jet-pkg-model-src-foreignbridge-slice-1801: crates/jet-pkg-model/src/ForeignBridge.rs:1801-3092
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS             .or_else(|| value("overlay-identity"))
+//RS             .unwrap_or("none");
+//RS         let generator = value("binder-schema")
+//RS             .or_else(|| value("descriptor"))
+//RS             .unwrap_or("not-recorded");
+//RS         let implementation = value("generated")
+//RS             .or_else(|| value("worker"))
+//RS             .or_else(|| value("archive"))
+//RS             .or_else(|| (!loaded_artifact.is_empty()).then_some(loaded_artifact.as_str()))
+//RS             .unwrap_or("not-recorded");
+//RS         let toolchain = value("toolchain")
+//RS             .or_else(|| value("runtime"))
+//RS             .or_else(|| value("cc"))
+//RS             .or_else(|| value("compiler"))
+//RS             .unwrap_or("not-recorded");
+//RS         let target = value("target")
+//RS             .or_else(|| value("foreign-host-target"))
+//RS             .map(str::to_string)
+//RS             .unwrap_or_else(foreign_host_target);
+//RS         let descriptor = crate::AST::binder_descriptor(language)
+//RS             .ok_or_else(|| format!("missing binder descriptor for {language:?}"))?;
+//RS         let boundary = ForeignBoundaryContract::new(
+//RS             *descriptor,
+//RS             library,
+//RS             ForeignBoundaryIdentity::new(
+//RS                 source,
+//RS                 overlay,
+//RS                 generator,
+//RS                 implementation,
+//RS                 toolchain,
+//RS                 target.clone(),
+//RS             ),
+//RS         )
+//RS         .with_artifact_coverage(ForeignArtifactCoverage::new(
+//RS             if loaded_artifact.is_empty() {
+//RS                 "not-recorded"
+//RS             } else {
+//RS                 loaded_artifact.as_str()
+//RS             },
+//RS             target,
+//RS             generator,
+//RS         ));
+//RS         for (name, value) in boundary.provenance_fields() {
+//RS             append_line(&mut text, &name, &value)?;
+//RS         }
+//RS         let capability = foreign_boundary_capability(language);
+//RS         append_line(
+//RS             &mut text,
+//RS             "boundary-mixed-debug",
+//RS             if capability.mixed_debug { "true" } else { "false" },
+//RS         )?;
+//RS         append_line(
+//RS             &mut text,
+//RS             "boundary-native-export",
+//RS             if capability.native_export { "true" } else { "false" },
+//RS         )?;
+//RS         append_line(
+//RS             &mut text,
+//RS             "boundary-build-host",
+//RS             if capability.build_host { "true" } else { "false" },
+//RS         )?;
+//RS         append_line(&mut text, "boundary-reason", capability.reason)?;
+//RS     }
+//RS     for (relative, digest) in artifacts {
+//RS         append_line(&mut text, &format!("artifact.{relative}"), digest)?;
+//RS     }
+//RS     Ok(text)
+//RS }
+//RS 
+//RS /// Append the canonical boundary row to a binder-owned provenance record.
+//RS ///
+//RS /// Adapters that use a legacy text writer call this at their producer boundary;
+//RS /// the row still names the same descriptor, artifact coverage, and evidence
+//RS /// vocabulary as adapters using [`render_provenance`].
+//RS pub fn append_boundary_provenance(
+//RS     text: &mut String,
+//RS     descriptor: BinderDescriptor,
+//RS     library: impl Into<String>,
+//RS     identity: ForeignBoundaryIdentity,
+//RS     coverage: ForeignArtifactCoverage,
+//RS ) -> Result<(), String> {
+//RS     if text
+//RS         .lines()
+//RS         .any(|line| line.starts_with("boundary-schema="))
+//RS     {
+//RS         return Ok(());
+//RS     }
+//RS     if !text.ends_with('\n') {
+//RS         text.push('\n');
+//RS     }
+//RS     let boundary = ForeignBoundaryContract::new(descriptor, library, identity)
+//RS         .with_artifact_coverage(coverage);
+//RS     for (name, value) in boundary.provenance_fields() {
+//RS         append_line(text, &name, &value)?;
+//RS     }
+//RS     let capability = foreign_boundary_capability(descriptor.language);
+//RS     append_line(
+//RS         text,
+//RS         "boundary-mixed-debug",
+//RS         if capability.mixed_debug { "true" } else { "false" },
+//RS     )?;
+//RS     append_line(
+//RS         text,
+//RS         "boundary-native-export",
+//RS         if capability.native_export { "true" } else { "false" },
+//RS     )?;
+//RS     append_line(
+//RS         text,
+//RS         "boundary-build-host",
+//RS         if capability.build_host { "true" } else { "false" },
+//RS     )?;
+//RS     append_line(text, "boundary-reason", capability.reason)?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Append a boundary for an adapter that publishes a legacy text record.
+//RS pub fn append_boundary_for_artifact(
+//RS     text: &mut String,
+//RS     descriptor: BinderDescriptor,
+//RS     library: impl Into<String>,
+//RS     source: &Path,
+//RS     archive: &Path,
+//RS     toolchain: impl Into<String>,
+//RS ) -> Result<(), String> {
+//RS     let source_digest = sha_file(source)?;
+//RS     let archive_digest = sha_file(archive)?;
+//RS     let archive_name = archive
+//RS         .file_name()
+//RS         .ok_or_else(|| "foreign artifact path has no file name".to_string())?
+//RS         .to_string_lossy()
+//RS         .into_owned();
+//RS     let target = foreign_host_target();
+//RS     append_boundary_provenance(
+//RS         text,
+//RS         descriptor,
+//RS         library,
+//RS         ForeignBoundaryIdentity::new(
+//RS             format!("source:{}:sha256-{source_digest}", source.display()),
+//RS             "none",
+//RS             descriptor.stamp(),
+//RS             format!("archive:{archive_name}:sha256-{archive_digest}"),
+//RS             toolchain,
+//RS             target.clone(),
+//RS         ),
+//RS         ForeignArtifactCoverage::new(
+//RS             format!("{archive_name}:sha256-{archive_digest}"),
+//RS             target,
+//RS             descriptor.stamp(),
+//RS         ),
+//RS     )
+//RS }
+//RS fn parse_provenance(
+//RS     path: &Path,
+//RS ) -> Result<(String, Option<String>, BTreeMap<String, Vec<String>>), String> {
+//RS     let text = fs::read_to_string(path)
+//RS         .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+//RS     let mut schema = None;
+//RS     let mut identity = None;
+//RS     let mut fields = BTreeMap::<String, Vec<String>>::new();
+//RS     for line in text.lines() {
+//RS         let (name, value) = line
+//RS             .split_once('=')
+//RS             .ok_or_else(|| format!("malformed bridge provenance line in {}", path.display()))?;
+//RS         if name.is_empty() || value.is_empty() {
+//RS             return Err(format!(
+//RS                 "empty bridge provenance field in {}",
+//RS                 path.display()
+//RS             ));
+//RS         }
+//RS         match name {
+//RS             "schema" => {
+//RS                 if schema.replace(value.to_string()).is_some() {
+//RS                     return Err(format!(
+//RS                         "duplicate bridge provenance schema in {}",
+//RS                         path.display()
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             "identity" => {
+//RS                 if identity.replace(value.to_string()).is_some() {
+//RS                     return Err(format!(
+//RS                         "duplicate bridge provenance identity in {}",
+//RS                         path.display()
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             _ => fields
+//RS                 .entry(name.to_string())
+//RS                 .or_default()
+//RS                 .push(value.to_string()),
+//RS         }
+//RS     }
+//RS     let schema =
+//RS         schema.ok_or_else(|| format!("bridge provenance has no schema: {}", path.display()))?;
+//RS     Ok((schema, identity, fields))
+//RS }
+//RS 
+//RS /// Read and validate a bridge provenance sidecar.
+//RS pub fn read_provenance(path: &Path) -> Result<Provenance, String> {
+//RS     let (schema, identity, fields) = parse_provenance(path)?;
+//RS     let identity =
+//RS         identity.ok_or_else(|| format!("bridge provenance has no identity: {}", path.display()))?;
+//RS     if schema != PROVENANCE_SCHEMA {
+//RS         return Err(format!("unsupported bridge provenance schema `{schema}`"));
+//RS     }
+//RS     Ok(Provenance {
+//RS         schema,
+//RS         identity,
+//RS         fields,
+//RS     })
+//RS }
+//RS 
+//RS /// Read the canonical boundary component embedded in a binder provenance sidecar.
+//RS pub fn read_boundary_provenance(path: &Path) -> Result<Provenance, String> {
+//RS     let (_, _, fields) = parse_provenance(path)?;
+//RS     if !fields
+//RS         .get("boundary-schema")
+//RS         .and_then(|values| values.first())
+//RS         .is_some_and(|value| value == FOREIGN_BOUNDARY_SCHEMA)
+//RS     {
+//RS         return Err(format!(
+//RS             "foreign boundary provenance has no canonical boundary row: {}",
+//RS             path.display()
+//RS         ));
+//RS     }
+//RS     let identity = fields
+//RS         .get("boundary-digest")
+//RS         .and_then(|values| values.first())
+//RS         .cloned()
+//RS         .ok_or_else(|| format!("foreign boundary provenance has no digest: {}", path.display()))?;
+//RS     Ok(Provenance {
+//RS         schema: FOREIGN_BOUNDARY_SCHEMA.to_string(),
+//RS         identity,
+//RS         fields,
+//RS     })
+//RS }
+//RS 
+//RS fn append_line(text: &mut String, name: &str, value: &str) -> Result<(), String> {
+//RS     if name.is_empty()
+//RS         || value.is_empty()
+//RS         || name
+//RS             .bytes()
+//RS             .any(|byte| matches!(byte, b'\n' | b'\r' | b'='))
+//RS         || value.bytes().any(|byte| matches!(byte, b'\n' | b'\r'))
+//RS     {
+//RS         return Err("bridge provenance fields cannot contain line breaks or `=`".into());
+//RS     }
+//RS     text.push_str(name);
+//RS     text.push('=');
+//RS     text.push_str(value);
+//RS     text.push('\n');
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Compile the one C ABI used by supervised scalar adapters. The worker owns
+//RS /// transport and language exceptions; this bridge only marshals scalars and
+//RS /// turns every non-OK response into a checked error code.
+//RS pub fn compile_scalar_sidecar(
+//RS     cache: &Path,
+//RS     abi: &str,
+//RS     runtime: &str,
+//RS     worker: &Path,
+//RS     source: &Path,
+//RS     descriptor: BinderDescriptor,
+//RS     functions: &[ScalarBridgeFunction],
+//RS ) -> Result<PathBuf, String> {
+//RS     validate_scalar_bridge(abi, descriptor, functions)?;
+//RS     let lib = scalar_bridge_library(abi, descriptor)?;
+//RS     let identity =
+//RS         scalar_bridge_identity(descriptor, lib, abi, runtime, source, worker, functions)?;
+//RS     compile_scalar_sidecar_with_identity(
+//RS         cache, &identity, abi, runtime, worker, source, descriptor, functions,
+//RS     )
+//RS }
+//RS 
+//RS /// Compile or reuse one content-addressed scalar sidecar. The returned path is
+//RS /// the stable projection consumed by the existing generated binding cache; the
+//RS /// actual build artifact lives below `.bridges/<identity>`.
+//RS pub fn compile_scalar_sidecar_with_identity(
+//RS     cache: &Path,
+//RS     identity: &str,
+//RS     abi: &str,
+//RS     runtime: &str,
+//RS     worker: &Path,
+//RS     source: &Path,
+//RS     descriptor: BinderDescriptor,
+//RS     functions: &[ScalarBridgeFunction],
+//RS ) -> Result<PathBuf, String> {
+//RS     compile_scalar_sidecar_with_identity_and_sources(
+//RS         cache,
+//RS         identity,
+//RS         abi,
+//RS         runtime,
+//RS         worker,
+//RS         source,
+//RS         descriptor,
+//RS         &[("source", source)],
+//RS         functions,
+//RS     )
+//RS }
+//RS 
+//RS /// Compile or reuse a scalar sidecar while checking an identity containing
+//RS /// additional exact source files (for example a JS declaration plus runtime).
+//RS pub fn compile_scalar_sidecar_with_identity_and_sources(
+//RS     cache: &Path,
+//RS     identity: &str,
+//RS     abi: &str,
+//RS     runtime: &str,
+//RS     worker: &Path,
+//RS     source: &Path,
+//RS     descriptor: BinderDescriptor,
+//RS     sources: &[BridgeSource<'_>],
+//RS     functions: &[ScalarBridgeFunction],
+//RS ) -> Result<PathBuf, String> {
+//RS     validate_scalar_bridge(abi, descriptor, functions)?;
+//RS     let lib = scalar_bridge_library(abi, descriptor)?;
+//RS     let expected_identity = scalar_bridge_identity_with_sources(
+//RS         descriptor,
+//RS         lib,
+//RS         abi,
+//RS         runtime,
+//RS         sources,
+//RS         worker,
+//RS         functions,
+//RS     )?;
+//RS     if expected_identity != identity {
+//RS         return Err("foreign bridge identity does not match its descriptor inputs".into());
+//RS     }
+//RS     fs::create_dir_all(cache)
+//RS         .map_err(|error| format!("could not create foreign binding cache: {error}"))?;
+//RS     let store = cache.join(".bridges").join(identity);
+//RS     let cached_archive = store.join(format!("lib{abi}.a"));
+//RS     let archive = cache.join(format!("lib{abi}.a"));
+//RS     if scalar_archive_valid(&cached_archive) {
+//RS         fs::copy(&cached_archive, &archive).map_err(|error| {
+//RS             format!(
+//RS                 "could not project cached foreign bridge {}: {error}",
+//RS                 archive.display()
+//RS             )
+//RS         })?;
+//RS         return Ok(archive);
+//RS     }
+//RS     fs::create_dir_all(&store)
+//RS         .map_err(|error| format!("could not create scalar bridge cache: {error}"))?;
+//RS     let c_path = store.join(format!("{abi}.c"));
+//RS     let object = store.join(format!("{abi}.o"));
+//RS     let staged_archive = store.join(format!(".{abi}.a.tmp.{}", std::process::id()));
+//RS     fs::write(
+//RS         &c_path,
+//RS         render_scalar_c(abi, runtime, worker, source, descriptor, functions)?,
+//RS     )
+//RS     .map_err(|error| format!("could not write foreign bridge: {error}"))?;
+//RS     let compile = Command::new("cc")
+//RS         .args(["-std=c11", "-D_POSIX_C_SOURCE=200809L", "-fPIC", "-c"])
+//RS         .arg(&c_path)
+//RS         .arg("-o")
+//RS         .arg(&object)
+//RS         .output()
+//RS         .map_err(|error| {
+//RS             if error.kind() == std::io::ErrorKind::NotFound {
+//RS                 "the provisioned cc tool was not found".to_string()
+//RS             } else {
+//RS                 format!("could not start cc: {error}")
+//RS             }
+//RS         })?;
+//RS     if !compile.status.success() {
+//RS         let detail = String::from_utf8_lossy(&compile.stderr).trim().to_string();
+//RS         let _ = fs::remove_file(&c_path);
+//RS         let _ = fs::remove_file(&object);
+//RS         return Err(format!("cc rejected the foreign bridge: {detail}"));
+//RS     }
+//RS     let archive_result = Command::new("ar")
+//RS         .arg("rcs")
+//RS         .arg(&staged_archive)
+//RS         .arg(&object)
+//RS         .output()
+//RS         .map_err(|error| {
+//RS             if error.kind() == std::io::ErrorKind::NotFound {
+//RS                 "the provisioned ar tool was not found".to_string()
+//RS             } else {
+//RS                 format!("could not start ar: {error}")
+//RS             }
+//RS         })?;
+//RS     let _ = fs::remove_file(&c_path);
+//RS     let _ = fs::remove_file(&object);
+//RS     if !archive_result.status.success() {
+//RS         let detail = String::from_utf8_lossy(&archive_result.stderr)
+//RS             .trim()
+//RS             .to_string();
+//RS         return Err(format!("ar rejected the foreign bridge: {detail}"));
+//RS     }
+//RS     if let Err(error) = fs::rename(&staged_archive, &cached_archive) {
+//RS         let _ = fs::remove_file(&staged_archive);
+//RS         return Err(format!("could not publish cached foreign bridge: {error}"));
+//RS     }
+//RS     fs::write(
+//RS         store.join(format!("lib{abi}.sha256")),
+//RS         crate::SHA256::sha256_hex(
+//RS             &fs::read(&cached_archive)
+//RS                 .map_err(|error| format!("could not read cached foreign bridge: {error}"))?,
+//RS         ),
+//RS     )
+//RS     .map_err(|error| format!("could not publish scalar bridge cache identity: {error}"))?;
+//RS     fs::copy(&cached_archive, &archive).map_err(|error| {
+//RS         format!(
+//RS             "could not project foreign bridge {}: {error}",
+//RS             archive.display()
+//RS         )
+//RS     })?;
+//RS     Ok(archive)
+//RS }
+//RS 
+//RS /// Publish a queryable descriptor/provenance record for a scalar adapter.
+//RS pub fn write_scalar_provenance(
+//RS     cache: &Path,
+//RS     lib: &str,
+//RS     descriptor: BinderDescriptor,
+//RS     runtime: &str,
+//RS     source: &Path,
+//RS     worker: &Path,
+//RS     archive: &Path,
+//RS ) -> Result<PathBuf, String> {
+//RS     write_scalar_provenance_with_sources(
+//RS         cache,
+//RS         lib,
+//RS         descriptor,
+//RS         runtime,
+//RS         source,
+//RS         &[("source", source)],
+//RS         worker,
+//RS         archive,
+//RS         &[],
+//RS     )
+//RS }
+//RS 
+//RS /// Publish scalar provenance using the exact function list used to build the
+//RS /// bridge. Binders call this variant so the sidecar identity cannot drift from
+//RS /// the cache key.
+//RS pub fn write_scalar_provenance_with_functions(
+//RS     cache: &Path,
+//RS     lib: &str,
+//RS     descriptor_row: BinderDescriptor,
+//RS     runtime: &str,
+//RS     source: &Path,
+//RS     worker: &Path,
+//RS     archive: &Path,
+//RS     functions: &[ScalarBridgeFunction],
+//RS ) -> Result<PathBuf, String> {
+//RS     write_scalar_provenance_with_sources(
+//RS         cache,
+//RS         lib,
+//RS         descriptor_row,
+//RS         runtime,
+//RS         source,
+//RS         &[("source", source)],
+//RS         worker,
+//RS         archive,
+//RS         functions,
+//RS     )
+//RS }
+//RS 
+//RS /// Publish scalar provenance from the exact source roles used by the bridge.
+//RS /// The common record carries a digest and path for every role, while the
+//RS /// identity itself carries the complete bytes.
+//RS pub fn write_scalar_provenance_with_sources(
+//RS     cache: &Path,
+//RS     lib: &str,
+//RS     descriptor_row: BinderDescriptor,
+//RS     runtime: &str,
+//RS     source: &Path,
+//RS     sources: &[BridgeSource<'_>],
+//RS     worker: &Path,
+//RS     archive: &Path,
+//RS     functions: &[ScalarBridgeFunction],
+//RS ) -> Result<PathBuf, String> {
+//RS     if !sources.iter().any(|(_, path)| *path == source) {
+//RS         return Err("foreign bridge provenance sources omit the primary source".into());
+//RS     }
+//RS     let contract = descriptor_row.contract;
+//RS     let descriptor = descriptor_row.stamp();
+//RS     let calling = format!("{:?}", contract.calling_convention);
+//RS     let layout = format!("{:?}", contract.layout);
+//RS     let ownership = format!("{:?}", contract.ownership);
+//RS     let errors = format!("{:?}", contract.errors);
+//RS     let callbacks = format!("{:?}", contract.callbacks);
+//RS     let async_completion = format!("{:?}", contract.async_completion);
+//RS     let task_boundary = format!("{:?}", contract.task_boundary);
+//RS     let safety = format!("{:?}", contract.safety);
+//RS     let provider = format!("{:?}", descriptor_row.provider);
+//RS     let language = descriptor_row.language;
+//RS     let abi = format!("jet_{}_{}", language.root(), lib);
+//RS     let identity = scalar_bridge_identity_with_sources(
+//RS         descriptor_row,
+//RS         lib,
+//RS         &abi,
+//RS         runtime,
+//RS         sources,
+//RS         worker,
+//RS         functions,
+//RS     )?;
+//RS     let runtime_toolchain = tool_identity(runtime);
+//RS     let cc = tool_identity("cc");
+//RS     let ar = tool_identity("ar");
+//RS     let worker_digest = sha_file(worker)?;
+//RS     let archive_digest = sha_file(archive)?;
+//RS     let source_identity = sources
+//RS         .iter()
+//RS         .map(|(role, path)| {
+//RS             Ok(format!(
+//RS                 "{role}:{}:{}",
+//RS                 path.display(),
+//RS                 sha_file(path)?
+//RS             ))
+//RS         })
+//RS         .collect::<Result<Vec<_>, String>>()?
+//RS         .join("|");
+//RS     let boundary_identity = ForeignBoundaryIdentity::new(
+//RS         source_identity,
+//RS         "none",
+//RS         format!("descriptor={descriptor}"),
+//RS         format!("worker:{}:{worker_digest}", worker.display()),
+//RS         format!("runtime={runtime_toolchain};cc={cc};ar={ar}"),
+//RS         foreign_host_target(),
+//RS     );
+//RS     let mut boundary = ForeignBoundaryContract::new(descriptor_row, lib, boundary_identity);
+//RS     let coverage = ForeignArtifactCoverage::new(
+//RS         format!("{}:sha256-{archive_digest}", archive.display()),
+//RS         foreign_host_target(),
+//RS         boundary.identity.generator.clone(),
+//RS     )
+//RS     .with_transitive_dependencies(Vec::<String>::new())
+//RS     .with_reachable_callbacks(Vec::<String>::new())
+//RS     .with_compiler_flags(Vec::<String>::new());
+//RS     boundary = boundary.with_artifact_coverage(coverage);
+//RS     for obligation in FOREIGN_BOUNDARY_OBLIGATIONS {
+//RS         boundary.set_obligation(
+//RS             (*obligation).to_string(),
+//RS             ForeignEvidenceBasis::Trusted,
+//RS             "scalar-sidecar-generator",
+//RS             [
+//RS                 "adapter implementation remains TRUSTED outside hardening".into(),
+//RS                 "loaded archive and generated worker identities are recorded".into(),
+//RS             ],
+//RS         )?;
+//RS     }
+//RS     let provenance = cache.join(format!("{lib}.provenance"));
+//RS     let mut fields = vec![
+//RS         ("language".to_string(), language.root().to_string()),
+//RS         ("abi".to_string(), abi),
+//RS         ("runtime".to_string(), runtime.to_string()),
+//RS         (
+//RS             "transport".to_string(),
+//RS             "supervised-scalar-sidecar".to_string(),
+//RS         ),
+//RS         ("descriptor".to_string(), descriptor),
+//RS         ("calling".to_string(), calling),
+//RS         ("layout".to_string(), layout),
+//RS         ("ownership".to_string(), ownership),
+//RS         ("errors".to_string(), errors),
+//RS         ("callbacks".to_string(), callbacks),
+//RS         ("async".to_string(), async_completion),
+//RS         ("tasks".to_string(), task_boundary),
+//RS         ("safety".to_string(), safety),
+//RS         ("provider".to_string(), provider),
+//RS         ("runtime-toolchain".to_string(), runtime_toolchain),
+//RS         ("cc".to_string(), cc),
+//RS         ("ar".to_string(), ar),
+//RS     ];
+//RS     fields.extend(boundary.provenance_fields());
+//RS     for (role, path) in sources {
+//RS         fields.push((role.to_string(), path.to_string_lossy().into_owned()));
+//RS         fields.push((
+//RS             format!("{role}-sha256"),
+//RS             sha_file(path)?,
+//RS         ));
+//RS     }
+//RS     fields.push(("worker".to_string(), worker.to_string_lossy().into_owned()));
+//RS     fields.push(("worker-sha256".to_string(), worker_digest.clone()));
+//RS     for function in functions {
+//RS         fields.push(("function".to_string(), function.name.clone()));
+//RS         fields.push((
+//RS             "function-params".to_string(),
+//RS             format!("{:?}", function.params),
+//RS         ));
+//RS         fields.push((
+//RS             "function-result".to_string(),
+//RS             format!("{:?}", function.result),
+//RS         ));
+//RS     }
+//RS     let field_refs: Vec<(&str, &str)> = fields
+//RS         .iter()
+//RS         .map(|(name, value)| (name.as_str(), value.as_str()))
+//RS         .collect();
+//RS     let artifacts = [
+//RS         (
+//RS             worker
+//RS                 .file_name()
+//RS                 .unwrap_or_default()
+//RS                 .to_string_lossy()
+//RS                 .into_owned(),
+//RS             worker_digest,
+//RS         ),
+//RS         (
+//RS             archive
+//RS                 .file_name()
+//RS                 .unwrap_or_default()
+//RS                 .to_string_lossy()
+//RS                 .into_owned(),
+//RS             archive_digest,
+//RS         ),
+//RS     ];
+//RS     let artifact_refs: Vec<(String, String)> = artifacts.into_iter().collect();
+//RS     write_provenance(&provenance, &identity, &field_refs, &artifact_refs)?;
+//RS     Ok(provenance)
+//RS }
+//RS 
+//RS /// Render the shared safe wrapper. Raw C symbols stay private to the generated
+//RS /// module and every public call checks the adapter's contained error slot.
+//RS pub fn render_scalar_jet(
+//RS     abi: &str,
+//RS     descriptor: BinderDescriptor,
+//RS     functions: &[ScalarBridgeFunction],
+//RS ) -> Result<String, String> {
+//RS     validate_scalar_bridge(abi, descriptor, functions)?;
+//RS     let effect = descriptor.effect_root;
+//RS     let contract = descriptor.stamp();
+//RS     let mut out = format!("// jet-ffi-descriptor={contract}\n#Import module c.{abi} {{\n");
+//RS     for function in functions {
+//RS         let _ = write!(out, "    fn {}(", function.name);
+//RS         for (index, scalar) in function.params.iter().enumerate() {
+//RS             if index > 0 {
+//RS                 out.push_str(", ");
+//RS             }
+//RS             let jet_type = scalar.jet_name().ok_or_else(|| {
+//RS                 format!("foreign scalar `{scalar:?}` is outside the checked sidecar ABI")
+//RS             })?;
+//RS             let _ = write!(out, "arg{index}: {jet_type}");
+//RS         }
+//RS         let result = function.result.jet_name().ok_or_else(|| {
+//RS             format!(
+//RS                 "foreign scalar `{:?}` is outside the checked sidecar ABI",
+//RS                 function.result
+//RS             )
+//RS         })?;
+//RS         let _ = writeln!(out, ") {result} = \"{abi}_{}\"", function.name);
+//RS     }
+//RS     let _ = writeln!(out, "    fn take_error() -> Int = \"{abi}_take_error\"\n}}");
+//RS     let _ = writeln!(out, "use c.{abi} as abi\n");
+//RS     for function in functions {
+//RS         let _ = write!(out, "pub fn {}(", function.name);
+//RS         for (index, scalar) in function.params.iter().enumerate() {
+//RS             if index > 0 {
+//RS                 out.push_str(", ");
+//RS             }
+//RS             let jet_type = scalar.jet_name().ok_or_else(|| {
+//RS                 format!("foreign scalar `{scalar:?}` is outside the checked sidecar ABI")
+//RS             })?;
+//RS             let _ = write!(out, "arg{index}: {jet_type}");
+//RS         }
+//RS         let result = function.result.jet_name().ok_or_else(|| {
+//RS             format!(
+//RS                 "foreign scalar `{:?}` is outside the checked sidecar ABI",
+//RS                 function.result
+//RS             )
+//RS         })?;
+//RS         let _ = writeln!(out, ") -[{effect}]> {result} !String {{",);
+//RS         let _ = write!(out, "    value :: abi.{}(", function.name);
+//RS         for index in 0..function.params.len() {
+//RS             if index > 0 {
+//RS                 out.push_str(", ");
+//RS             }
+//RS             let _ = write!(out, "arg{index}");
+//RS         }
+//RS         out.push_str(")\n    if abi.take_error() != 0 {\n        return Err(\"foreign call failed\")\n    }\n    return Ok(value)\n}\n\n");
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS fn render_scalar_c(
+//RS     abi: &str,
+//RS     runtime: &str,
+//RS     worker: &Path,
+//RS     source: &Path,
+//RS     descriptor: BinderDescriptor,
+//RS     functions: &[ScalarBridgeFunction],
+//RS ) -> Result<String, String> {
+//RS     let descriptor = descriptor.stamp();
+//RS     let worker = c_escape(&shell_quote(&worker.to_string_lossy()));
+//RS     let source = c_escape(&shell_quote(&source.to_string_lossy()));
+//RS     let runtime = c_escape(&shell_quote(runtime));
+//RS     let mut out = format!(
+//RS         "/* jet-ffi-descriptor={descriptor} */\n#include <ctype.h>\n#include <errno.h>\n#include <stdbool.h>\n#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\nstatic _Thread_local int64_t jet_failed;\nstatic int jet_invoke(const char *command, char *output, size_t capacity) {{\n    jet_failed = 0;\n    FILE *pipe = popen(command, \"r\");\n    if (!pipe) {{ jet_failed = 1; return 0; }}\n    if (!fgets(output, (int)capacity, pipe)) {{ jet_failed = 2; pclose(pipe); return 0; }}\n    int status = pclose(pipe);\n    if (status != 0 || strncmp(output, \"OK \", 3) != 0) {{ jet_failed = 3; return 0; }}\n    return 1;\n}}\n"
+//RS     );
+//RS     let _ = writeln!(
+//RS         out,
+//RS         "int64_t {abi}_take_error(void) {{ int64_t value = jet_failed; jet_failed = 0; return value; }}"
+//RS     );
+//RS     for function in functions {
+//RS         let result_type =
+//RS             c_type(function.result).ok_or_else(|| unsupported_scalar(function.result))?;
+//RS         let _ = write!(out, "{result_type} {abi}_{}(", function.name);
+//RS         for (index, scalar) in function.params.iter().enumerate() {
+//RS             if index > 0 {
+//RS                 out.push_str(", ");
+//RS             }
+//RS             let parameter_type = c_type(*scalar).ok_or_else(|| unsupported_scalar(*scalar))?;
+//RS             let _ = write!(out, "{parameter_type} arg{index}");
+//RS         }
+//RS         out.push_str(") {\n    char output[256];\n    char command[8192];\n    int written = snprintf(command, sizeof(command), \"");
+//RS         out.push_str(&runtime);
+//RS         out.push(' ');
+//RS         out.push_str(&worker);
+//RS         out.push(' ');
+//RS         out.push_str(&source);
+//RS         out.push(' ');
+//RS         out.push_str(&c_escape(&shell_quote(&function.name)));
+//RS         for scalar in &function.params {
+//RS             out.push_str(format_spec(*scalar).ok_or_else(|| unsupported_scalar(*scalar))?);
+//RS         }
+//RS         if function.params.is_empty() {
+//RS             out.push_str(" 2>/dev/null\");\n");
+//RS         } else {
+//RS             out.push_str(" 2>/dev/null\", ");
+//RS             for (index, scalar) in function.params.iter().enumerate() {
+//RS                 if index > 0 {
+//RS                     out.push_str(", ");
+//RS                 }
+//RS                 out.push_str(
+//RS                     &format_arg(*scalar, index).ok_or_else(|| unsupported_scalar(*scalar))?,
+//RS                 );
+//RS             }
+//RS             out.push_str(");\n");
+//RS         }
+//RS         out.push_str("    if (written < 0 || (size_t)written >= sizeof(command) || !jet_invoke(command, output, sizeof(output))) return (");
+//RS         out.push_str(
+//RS             zero_value(function.result).ok_or_else(|| unsupported_scalar(function.result))?,
+//RS         );
+//RS         out.push_str(");\n    char *end = NULL;\n    errno = 0;\n    ");
+//RS         match function.result {
+//RS             ForeignScalar::Int => out.push_str(
+//RS                 "long long value = strtoll(output + 3, &end, 10); if (errno || end == output + 3) { jet_failed = 4; return 0; }\n",
+//RS             ),
+//RS             ForeignScalar::Float => out.push_str(
+//RS                 "double value = strtod(output + 3, &end); if (errno || end == output + 3) { jet_failed = 4; return 0; }\n",
+//RS             ),
+//RS             ForeignScalar::Bool => out.push_str(
+//RS                 "bool value; if (strncmp(output + 3, \"true\", 4) == 0) { value = true; end = output + 7; } else if (strncmp(output + 3, \"false\", 5) == 0) { value = false; end = output + 8; } else { jet_failed = 4; return false; }\n",
+//RS             ),
+//RS             scalar => return Err(unsupported_scalar(scalar)),
+//RS         }
+//RS         out.push_str("    while (*end && isspace((unsigned char)*end)) end++;\n    if (*end) { jet_failed = 4; return ");
+//RS         out.push_str(
+//RS             zero_value(function.result).ok_or_else(|| unsupported_scalar(function.result))?,
+//RS         );
+//RS         out.push_str("; }\n    return value;\n}\n");
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS fn c_type(scalar: ForeignScalar) -> Option<&'static str> {
+//RS     match scalar {
+//RS         ForeignScalar::Int => Some("int64_t"),
+//RS         ForeignScalar::Float => Some("double"),
+//RS         ForeignScalar::Bool => Some("bool"),
+//RS         ForeignScalar::Char | ForeignScalar::String | ForeignScalar::Unsupported => None,
+//RS     }
+//RS }
+//RS 
+//RS fn format_spec(scalar: ForeignScalar) -> Option<&'static str> {
+//RS     match scalar {
+//RS         ForeignScalar::Int => Some(" %lld"),
+//RS         ForeignScalar::Float => Some(" %.17g"),
+//RS         ForeignScalar::Bool => Some(" %s"),
+//RS         ForeignScalar::Char | ForeignScalar::String | ForeignScalar::Unsupported => None,
+//RS     }
+//RS }
+//RS 
+//RS fn format_arg(scalar: ForeignScalar, index: usize) -> Option<String> {
+//RS     match scalar {
+//RS         ForeignScalar::Int => Some(format!("(long long)arg{index}")),
+//RS         ForeignScalar::Float => Some(format!("arg{index}")),
+//RS         ForeignScalar::Bool => Some(format!("arg{index} ? \"true\" : \"false\"")),
+//RS         ForeignScalar::Char | ForeignScalar::String | ForeignScalar::Unsupported => None,
+//RS     }
+//RS }
+//RS 
+//RS fn zero_value(scalar: ForeignScalar) -> Option<&'static str> {
+//RS     match scalar {
+//RS         ForeignScalar::Int => Some("0"),
+//RS         ForeignScalar::Float => Some("0.0"),
+//RS         ForeignScalar::Bool => Some("false"),
+//RS         ForeignScalar::Char | ForeignScalar::String | ForeignScalar::Unsupported => None,
+//RS     }
+//RS }
+//RS 
+//RS fn unsupported_scalar(scalar: ForeignScalar) -> String {
+//RS     format!("foreign scalar `{scalar:?}` is outside the checked sidecar ABI")
+//RS }
+//RS 
+//RS fn validate_scalar_bridge(
+//RS     abi: &str,
+//RS     descriptor: BinderDescriptor,
+//RS     functions: &[ScalarBridgeFunction],
+//RS ) -> Result<(), String> {
+//RS     scalar_bridge_library(abi, descriptor)?;
+//RS     if descriptor.contract != ForeignAbiContract::MESSAGE {
+//RS         return Err(format!(
+//RS             "foreign binder `{}` does not expose the checked adapter contract",
+//RS             descriptor.language.root()
+//RS         ));
+//RS     }
+//RS     for capability in [
+//RS         BinderCapability::TypedStub,
+//RS         BinderCapability::SafeWrapper,
+//RS         BinderCapability::OwnershipConversion,
+//RS         BinderCapability::LayoutValidation,
+//RS         BinderCapability::ErrorConversion,
+//RS         BinderCapability::CacheProvenance,
+//RS     ] {
+//RS         if !descriptor.capabilities.contains(&capability) {
+//RS             return Err(format!(
+//RS                 "foreign binder `{}` is missing capability `{capability:?}`",
+//RS                 descriptor.language.root()
+//RS             ));
+//RS         }
+//RS     }
+//RS     let mut names = BTreeMap::new();
+//RS     for function in functions {
+//RS         if !is_identifier(&function.name) {
+//RS             return Err(format!("invalid foreign function name `{}`", function.name));
+//RS         }
+//RS         if names.insert(&function.name, ()).is_some() {
+//RS             return Err(format!("duplicate foreign function `{}`", function.name));
+//RS         }
+//RS         for scalar in function
+//RS             .params
+//RS             .iter()
+//RS             .copied()
+//RS             .chain(std::iter::once(function.result))
+//RS         {
+//RS             if !matches!(
+//RS                 scalar,
+//RS                 ForeignScalar::Int | ForeignScalar::Float | ForeignScalar::Bool
+//RS             ) {
+//RS                 return Err(format!(
+//RS                     "foreign scalar `{scalar:?}` is outside the checked sidecar ABI"
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn scalar_bridge_library<'a>(
+//RS     abi: &'a str,
+//RS     descriptor: BinderDescriptor,
+//RS ) -> Result<&'a str, String> {
+//RS     let prefix = descriptor.language.bridge_prefix();
+//RS     let Some(lib) = abi.strip_prefix(prefix).filter(|lib| is_identifier(lib)) else {
+//RS         return Err(format!(
+//RS             "foreign bridge ABI name `{abi}` does not match `{prefix}<library>`"
+//RS         ));
+//RS     };
+//RS     Ok(lib)
+//RS }
+//RS 
+//RS fn is_identifier(value: &str) -> bool {
+//RS     let mut chars = value.chars();
+//RS     matches!(chars.next(), Some(first) if first == '_' || first.is_ascii_alphabetic())
+//RS         && chars.all(|character| character == '_' || character.is_ascii_alphanumeric())
+//RS }
+//RS 
+//RS fn scalar_archive_valid(archive: &Path) -> bool {
+//RS     let Some(store) = archive.parent() else {
+//RS         return false;
+//RS     };
+//RS     let Some(file_name) = archive.file_name().and_then(|name| name.to_str()) else {
+//RS         return false;
+//RS     };
+//RS     let Ok(expected) = fs::read_to_string(store.join(format!("{file_name}.sha256"))) else {
+//RS         return false;
+//RS     };
+//RS     let expected = expected.trim();
+//RS     expected.len() == 64
+//RS         && expected
+//RS             .bytes()
+//RS             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+//RS         && fs::read(archive)
+//RS             .ok()
+//RS             .is_some_and(|bytes| crate::SHA256::sha256_hex(&bytes) == expected)
+//RS }
+//RS 
+//RS fn shell_quote(value: &str) -> String {
+//RS     let mut out = String::from("'");
+//RS     for (index, part) in value.split('\'').enumerate() {
+//RS         if index > 0 {
+//RS             out.push_str("'\\''");
+//RS         }
+//RS         out.push_str(part);
+//RS     }
+//RS     out.push('\'');
+//RS     out
+//RS }
+//RS 
+//RS fn c_escape(value: &str) -> String {
+//RS     let mut out = String::with_capacity(value.len());
+//RS     for character in value.chars() {
+//RS         match character {
+//RS             '\\' => out.push_str("\\\\"),
+//RS             '"' => out.push_str("\\\""),
+//RS             '\n' => out.push_str("\\n"),
+//RS             '\r' => out.push_str("\\r"),
+//RS             _ => out.push(character),
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS const LOCAL_ARCHIVE_SUFFIXES: &[&str] = &[".a", ".so", ".dylib", ".dll", ".lib"];
+//RS 
+//RS /// Resolve each named native library to the first exact local archive found in
+//RS /// the declared search paths. Missing candidates remain records, so adding or
+//RS /// replacing a local archive changes the identity instead of silently reusing
+//RS /// a stale bridge.
+//RS pub fn local_archive_inputs(
+//RS     library_dirs: &[PathBuf],
+//RS     libraries: &[String],
+//RS ) -> Vec<ArchiveInput> {
+//RS     if library_dirs.is_empty() {
+//RS         return Vec::new();
+//RS     }
+//RS     libraries
+//RS         .iter()
+//RS         .map(|library| {
+//RS             let mut path = None;
+//RS             'directories: for directory in library_dirs {
+//RS                 for suffix in LOCAL_ARCHIVE_SUFFIXES {
+//RS                     let candidate = directory.join(format!("lib{library}{suffix}"));
+//RS                     if candidate.is_file() {
+//RS                         path = Some(candidate);
+//RS                         break 'directories;
+//RS                     }
+//RS                 }
+//RS             }
+//RS             let path = path.unwrap_or_else(|| {
+//RS                 library_dirs
+//RS                     .first()
+//RS                     .map(|directory| directory.join(format!("lib{library}.a")))
+//RS                     .unwrap_or_else(|| PathBuf::from(format!("lib{library}.a")))
+//RS             });
+//RS             let path = path.canonicalize().unwrap_or(path);
+//RS             let bytes = fs::read(&path).ok();
+//RS             ArchiveInput {
+//RS                 library: library.clone(),
+//RS                 path,
+//RS                 bytes,
+//RS             }
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS /// Add local archive path/byte records to a binding identity.
+//RS pub fn add_local_archive_inputs(
+//RS     identity: &mut IdentityBuilder,
+//RS     library_dirs: &[PathBuf],
+//RS     libraries: &[String],
+//RS ) {
+//RS     let inputs = local_archive_inputs(library_dirs, libraries);
+//RS     add_archive_inputs(identity, &inputs);
+//RS }
+//RS 
+//RS /// Add already-resolved archive records to an identity. Callers that have a
+//RS /// provider-specific notion of which libraries are local can use this without
+//RS /// manufacturing missing candidates for system or provisioned dependencies.
+//RS pub fn add_archive_inputs(identity: &mut IdentityBuilder, inputs: &[ArchiveInput]) {
+//RS     for input in inputs {
+//RS         identity.field("linked_library", input.library.as_bytes());
+//RS         identity.field("linked_archive_path", input.path.as_os_str().as_encoded_bytes());
+//RS         match &input.bytes {
+//RS             Some(bytes) => identity.field("linked_archive_bytes", bytes),
+//RS             None => identity.field("linked_archive_missing", b"true"),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Resolve one pinned host tool without relying on the shell's executable
+//RS /// suffix rules. Windows toolchains commonly expose `cc.exe`/`ar.exe`, while
+//RS /// POSIX toolchains expose the unsuffixed names.
+//RS pub fn tool_path(tool: &str) -> Option<PathBuf> {
+//RS     let paths = std::env::var_os("PATH")?;
+//RS     std::env::split_paths(&paths).find_map(|directory| {
+//RS         let candidate = directory.join(tool);
+//RS         if candidate.is_file() {
+//RS             return Some(candidate);
+//RS         }
+//RS         cfg!(windows)
+//RS             .then(|| directory.join(format!("{tool}.exe")))
+//RS             .filter(|candidate| candidate.is_file())
+//RS     })
+//RS }
+//RS 
+//RS pub fn tool_identity(tool: &str) -> String {
+//RS     let Some(path) = tool_path(tool) else {
+//RS         return "missing".to_string();
+//RS     };
+//RS     let path = path.canonicalize().unwrap_or(path);
+//RS     let version = Command::new(&path)
+//RS         .arg("--version")
+//RS         .output()
+//RS         .ok()
+//RS         .filter(|output| output.status.success())
+//RS         .map(|output| {
+//RS             format!(
+//RS                 "{}{}",
+//RS                 String::from_utf8_lossy(&output.stdout),
+//RS                 String::from_utf8_lossy(&output.stderr)
+//RS             )
+//RS             .lines()
+//RS             .map(str::trim)
+//RS             .filter(|line| !line.is_empty())
+//RS             .collect::<Vec<_>>()
+//RS             .join(" | ")
+//RS         })
+//RS         .filter(|version| !version.is_empty())
+//RS         .unwrap_or_else(|| "unavailable".to_string());
+//RS     format!("{};version={version}", path.display())
+//RS }
+//RS 
+//RS pub fn sha_file(path: &Path) -> Result<String, String> {
+//RS     let bytes =
+//RS         fs::read(path).map_err(|error| format!("could not read {}: {error}", path.display()))?;
+//RS     Ok(crate::SHA256::sha256_hex(&bytes))
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS     use crate::AST::ForeignLanguage;
+//RS 
+//RS     #[test]
+//RS     fn identity_is_stable_and_input_sensitive() {
+//RS         let mut first = IdentityBuilder::new(IDENTITY_SCHEMA);
+//RS         first.field("descriptor", b"one");
+//RS         let mut same = IdentityBuilder::new(IDENTITY_SCHEMA);
+//RS         same.field("descriptor", b"one");
+//RS         let mut changed = IdentityBuilder::new(IDENTITY_SCHEMA);
+//RS         changed.field("descriptor", b"two");
+//RS         let first = first.finish();
+//RS         assert_eq!(first, same.finish());
+//RS         assert_ne!(first, changed.finish());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn descriptor_drives_stub_and_binder_source() {
+//RS         let descriptor = *crate::AST::binder_descriptor(ForeignLanguage::Py).unwrap();
+//RS         let functions = [ScalarBridgeFunction {
+//RS             name: "probe".into(),
+//RS             params: vec![ForeignScalar::Int],
+//RS             result: ForeignScalar::Int,
+//RS         }];
+//RS         let stub = render_scalar_jet("jet_py_probe", descriptor, &functions).unwrap();
+//RS         let binder = render_scalar_c(
+//RS             "jet_py_probe",
+//RS             "python3",
+//RS             Path::new("worker.py"),
+//RS             Path::new("probe.py"),
+//RS             descriptor,
+//RS             &functions,
+//RS         )
+//RS         .unwrap();
+//RS 
+//RS         let mut changed = descriptor;
+//RS         changed.effect_root = "FFI.changed";
+//RS         let changed_stub = render_scalar_jet("jet_py_probe", changed, &functions).unwrap();
+//RS         let changed_binder = render_scalar_c(
+//RS             "jet_py_probe",
+//RS             "python3",
+//RS             Path::new("worker.py"),
+//RS             Path::new("probe.py"),
+//RS             changed,
+//RS             &functions,
+//RS         )
+//RS         .unwrap();
+//RS 
+//RS         assert!(stub.contains("-[FFI.Py]>"));
+//RS         assert!(changed_stub.contains("-[FFI.changed]>"));
+//RS         assert_ne!(stub, changed_stub);
+//RS         assert_ne!(binder, changed_binder);
+//RS         assert!(binder.contains(&descriptor.stamp()));
+//RS         assert!(changed_binder.contains(&changed.stamp()));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn unsupported_scalar_fails_closed_before_rendering() {
+//RS         let descriptor = *crate::AST::binder_descriptor(ForeignLanguage::Py).unwrap();
+//RS         let functions = [ScalarBridgeFunction {
+//RS             name: "bad".into(),
+//RS             params: vec![ForeignScalar::Unsupported],
+//RS             result: ForeignScalar::Int,
+//RS         }];
+//RS         let error = render_scalar_jet("jet_py_bad", descriptor, &functions).unwrap_err();
+//RS         assert!(error.contains("outside the checked sidecar ABI"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn descriptor_language_owns_scalar_bridge_abi_prefix() {
+//RS         let descriptor = *crate::AST::binder_descriptor(ForeignLanguage::Py).unwrap();
+//RS         let functions = [ScalarBridgeFunction {
+//RS             name: "probe".into(),
+//RS             params: vec![ForeignScalar::Int],
+//RS             result: ForeignScalar::Int,
+//RS         }];
+//RS         let error = render_scalar_jet("jet_js_probe", descriptor, &functions).unwrap_err();
+//RS         assert!(error.contains("does not match `jet_py_<library>`"));
+//RS         let error = scalar_bridge_identity(
+//RS             descriptor,
+//RS             "other",
+//RS             "jet_py_probe",
+//RS             "python3",
+//RS             Path::new("missing.py"),
+//RS             Path::new("missing_worker.py"),
+//RS             &functions,
+//RS         )
+//RS         .unwrap_err();
+//RS         assert!(error.contains("does not match its descriptor language"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn scalar_bridge_cache_reuses_identical_inputs_and_misses_source_changes() {
+//RS         if !Command::new("cc")
+//RS             .arg("--version")
+//RS             .output()
+//RS             .is_ok_and(|output| output.status.success())
+//RS             || !Command::new("ar")
+//RS                 .arg("--version")
+//RS                 .output()
+//RS                 .is_ok_and(|output| output.status.success())
+//RS         {
+//RS             return;
+//RS         }
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet_scalar_bridge_cache_{}_{}",
+//RS             std::process::id(),
+//RS             std::time::SystemTime::now()
+//RS                 .duration_since(std::time::UNIX_EPOCH)
+//RS                 .unwrap()
+//RS                 .as_nanos()
+//RS         ));
+//RS         fs::create_dir_all(&root).unwrap();
+//RS         let source = root.join("ops.py");
+//RS         let worker = root.join("ops_worker.py");
+//RS         fs::write(&source, "def probe(value): return value\n").unwrap();
+//RS         fs::write(&worker, "print('worker')\n").unwrap();
+//RS         let functions = [ScalarBridgeFunction {
+//RS             name: "probe".into(),
+//RS             params: vec![ForeignScalar::Int],
+//RS             result: ForeignScalar::Int,
+//RS         }];
+//RS         let descriptor = *crate::AST::binder_descriptor(ForeignLanguage::Py).unwrap();
+//RS         let identity = scalar_bridge_identity(
+//RS             descriptor,
+//RS             "ops",
+//RS             "jet_py_ops",
+//RS             "python3",
+//RS             &source,
+//RS             &worker,
+//RS             &functions,
+//RS         )
+//RS         .unwrap();
+//RS         let mut changed_descriptor = descriptor;
+//RS         changed_descriptor.effect_root = "FFI.changed";
+//RS         let descriptor_identity = scalar_bridge_identity(
+//RS             changed_descriptor,
+//RS             "ops",
+//RS             "jet_py_ops",
+//RS             "python3",
+//RS             &source,
+//RS             &worker,
+//RS             &functions,
+//RS         )
+//RS         .unwrap();
+//RS         assert_ne!(identity, descriptor_identity);
+//RS         let mut changed_capabilities = descriptor;
+//RS         changed_capabilities.capabilities = &[];
+//RS         let capability_error = scalar_bridge_identity(
+//RS             changed_capabilities,
+//RS             "ops",
+//RS             "jet_py_ops",
+//RS             "python3",
+//RS             &source,
+//RS             &worker,
+//RS             &functions,
+//RS         )
+//RS         .unwrap_err();
+//RS         assert!(capability_error.contains("missing capability"));
+//RS         let runtime_identity = scalar_bridge_identity(
+//RS             descriptor,
+//RS             "ops",
+//RS             "jet_py_ops",
+//RS             "python3-alt",
+//RS             &source,
+//RS             &worker,
+//RS             &functions,
+//RS         )
+//RS         .unwrap();
+//RS         assert_ne!(identity, runtime_identity);
+//RS         let worker_bytes = fs::read(&worker).unwrap();
+//RS         fs::write(&worker, b"print('changed worker')\n").unwrap();
+//RS         let worker_identity = scalar_bridge_identity(
+//RS             descriptor,
+//RS             "ops",
+//RS             "jet_py_ops",
+//RS             "python3",
+//RS             &source,
+//RS             &worker,
+//RS             &functions,
+//RS         )
+//RS         .unwrap();
+//RS         assert_ne!(identity, worker_identity);
+//RS         fs::write(&worker, worker_bytes).unwrap();
+//RS         let first = compile_scalar_sidecar_with_identity(
+//RS             &root,
+//RS             &identity,
+//RS             "jet_py_ops",
+//RS             "python3",
+//RS             &worker,
+//RS             &source,
+//RS             descriptor,
+//RS             &functions,
+//RS         )
+//RS         .unwrap();
+//RS         let store = root.join(".bridges").join(&identity);
+//RS         assert!(store.join("libjet_py_ops.a").is_file());
+//RS         fs::remove_file(&first).unwrap();
+//RS         let reused = compile_scalar_sidecar_with_identity(
+//RS             &root,
+//RS             &identity,
+//RS             "jet_py_ops",
+//RS             "python3",
+//RS             &worker,
+//RS             &source,
+//RS             descriptor,
+//RS             &functions,
+//RS         )
+//RS         .unwrap();
+//RS         assert_eq!(first, reused);
+//RS         assert!(reused.is_file());
+//RS 
+//RS         fs::write(&source, "def probe(value): return value + 1\n").unwrap();
+//RS         let stale = compile_scalar_sidecar_with_identity(
+//RS             &root,
+//RS             &identity,
+//RS             "jet_py_ops",
+//RS             "python3",
+//RS             &worker,
+//RS             &source,
+//RS             descriptor,
+//RS             &functions,
+//RS         )
+//RS         .unwrap_err();
+//RS         assert!(stale.contains("does not match its descriptor inputs"));
+//RS         let changed = scalar_bridge_identity(
+//RS             descriptor,
+//RS             "ops",
+//RS             "jet_py_ops",
+//RS             "python3",
+//RS             &source,
+//RS             &worker,
+//RS             &functions,
+//RS         )
+//RS         .unwrap();
+//RS         assert_ne!(identity, changed);
+//RS         compile_scalar_sidecar_with_identity(
+//RS             &root,
+//RS             &changed,
+//RS             "jet_py_ops",
+//RS             "python3",
+//RS             &worker,
+//RS             &source,
+//RS             descriptor,
+//RS             &functions,
+//RS         )
+//RS         .unwrap();
+//RS         assert!(root
+//RS             .join(".bridges")
+//RS             .join(changed)
+//RS             .join("libjet_py_ops.a")
+//RS             .is_file());
+//RS         let _ = fs::remove_dir_all(root);
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2071 crates/jet-pkg-model/src/ForeignBridge.rs:1801-3092
+

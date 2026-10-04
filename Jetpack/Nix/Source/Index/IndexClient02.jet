@@ -1,0 +1,2374 @@
+// PORT-PENDING 0889 crates-jetpack-src-nixindex-slice-1791: crates/jetpack/src/NixIndex.rs:1791-4160
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn encode_record(output: &mut String, record: &RecordWire) {
+//RS     output.push_str("{\"attrpath\":");
+//RS     encode_attrpath(output, &record.attrpath);
+//RS     output.push_str(",\"version\":\"");
+//RS     output.push_str(&json_escape(&record.version));
+//RS     output.push_str("\",\"drvPath\":\"");
+//RS     output.push_str(&json_escape(&record.drv_path));
+//RS     output.push_str("\",\"outputs\":[");
+//RS     for (index, output_wire) in record.outputs.iter().enumerate() {
+//RS         if index != 0 {
+//RS             output.push(',');
+//RS         }
+//RS         output.push_str("{\"name\":\"");
+//RS         output.push_str(&json_escape(&output_wire.name));
+//RS         output.push_str("\",\"storePath\":\"");
+//RS         output.push_str(&json_escape(&output_wire.store_path));
+//RS         output.push_str("\"}");
+//RS     }
+//RS     output.push_str("]}");
+//RS }
+//RS 
+//RS fn encode_attrpath(output: &mut String, attrpath: &[String]) {
+//RS     output.push('[');
+//RS     for (index, segment) in attrpath.iter().enumerate() {
+//RS         if index != 0 {
+//RS             output.push(',');
+//RS         }
+//RS         output.push('"');
+//RS         output.push_str(&json_escape(segment));
+//RS         output.push('"');
+//RS     }
+//RS     output.push(']');
+//RS }
+//RS 
+//RS fn canonical_manifest_bytes(manifest: &ChannelManifest) -> Result<Vec<u8>, NixIndexError> {
+//RS     validate_manifest(manifest)?;
+//RS     let mut targets = manifest.targets.clone();
+//RS     targets.sort_by(|left, right| {
+//RS         left.revision
+//RS             .as_bytes()
+//RS             .cmp(right.revision.as_bytes())
+//RS             .then_with(|| left.system.as_bytes().cmp(right.system.as_bytes()))
+//RS     });
+//RS     let mut output = String::new();
+//RS     output.push_str("{\"schema\":");
+//RS     output.push_str(&manifest.schema.to_string());
+//RS     output.push_str(",\"channel\":\"");
+//RS     output.push_str(&json_escape(&manifest.channel));
+//RS     output.push_str("\",\"generation\":");
+//RS     output.push_str(&manifest.generation.to_string());
+//RS     output.push_str(",\"issued_unix\":");
+//RS     output.push_str(&manifest.issued_unix.to_string());
+//RS     output.push_str(",\"expires_unix\":");
+//RS     output.push_str(&manifest.expires_unix.to_string());
+//RS     output.push_str(",\"targets\":[");
+//RS     for (index, target) in targets.iter().enumerate() {
+//RS         if index != 0 {
+//RS             output.push(',');
+//RS         }
+//RS         output.push_str("{\"revision\":\"");
+//RS         output.push_str(&json_escape(&target.revision));
+//RS         output.push_str("\",\"system\":\"");
+//RS         output.push_str(&json_escape(&target.system));
+//RS         output.push_str("\",\"url\":\"");
+//RS         output.push_str(&json_escape(&target.url));
+//RS         output.push_str("\",\"signature_url\":\"");
+//RS         output.push_str(&json_escape(&target.signature_url));
+//RS         output.push_str("\",\"sha256\":\"");
+//RS         output.push_str(&json_escape(&target.sha256));
+//RS         output.push_str("\",\"compressed_length\":");
+//RS         output.push_str(&target.compressed_length.to_string());
+//RS         output.push_str(",\"decoded_length\":");
+//RS         output.push_str(&target.decoded_length.to_string());
+//RS         output.push_str(",\"record_count\":");
+//RS         output.push_str(&target.record_count.to_string());
+//RS         output.push_str(",\"index_signature_sha256\":\"");
+//RS         output.push_str(&json_escape(&target.index_signature_sha256));
+//RS         output.push_str("\",\"discoverable\":");
+//RS         output.push_str(if target.discoverable { "true" } else { "false" });
+//RS         output.push('}');
+//RS     }
+//RS     output.push_str("]}");
+//RS     Ok(output.into_bytes())
+//RS }
+//RS 
+//RS fn canonical_signature_bytes(signature: &IndexSignature) -> Vec<u8> {
+//RS     format!(
+//RS         "{{\"schema\":{},\"key_id\":\"{}\",\"algorithm\":\"{}\",\"signature\":\"{}\"}}",
+//RS         signature.schema,
+//RS         json_escape(&signature.key_id),
+//RS         json_escape(&signature.algorithm),
+//RS         json_escape(&signature.signature)
+//RS     )
+//RS     .into_bytes()
+//RS }
+//RS 
+//RS fn parse_local_native_recipes(bytes: &[u8]) -> Result<Vec<NativeRecipe>, NixIndexError> {
+//RS     if bytes.len() as u64 > MAX_NATIVE_RECIPE_BYTES {
+//RS         return Err(NixIndexError::invalid(
+//RS             "local unofficial native catalog exceeds its size bound",
+//RS         ));
+//RS     }
+//RS     let text = std::str::from_utf8(bytes).map_err(|_| {
+//RS         NixIndexError::invalid("local unofficial native catalog is not UTF-8")
+//RS     })?;
+//RS     let value = parse_json_exact_numbers(text, true).map_err(|error| {
+//RS         NixIndexError::invalid(format!(
+//RS             "parse local unofficial native catalog JSON at line {}: {}",
+//RS             error.line, error.message
+//RS         ))
+//RS     })?;
+//RS     let map = object(value, "local unofficial native catalog")?;
+//RS     reject_unknown(&map, &["schema", "recipes"])?;
+//RS     if u64_field(&map, "schema")? != 1 {
+//RS         return Err(NixIndexError::invalid(
+//RS             "local unofficial native catalog schema is unsupported",
+//RS         ));
+//RS     }
+//RS     let values = array_field(&map, "recipes")?;
+//RS     if values.len() > MAX_RECORDS {
+//RS         return Err(NixIndexError::invalid(
+//RS             "local unofficial native catalog has too many recipes",
+//RS         ));
+//RS     }
+//RS     let mut recipes = values
+//RS         .iter()
+//RS         .map(parse_native_recipe)
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     recipes.sort_by(|left, right| {
+//RS         left.name
+//RS             .as_bytes()
+//RS             .cmp(right.name.as_bytes())
+//RS             .then_with(|| left.version.as_bytes().cmp(right.version.as_bytes()))
+//RS     });
+//RS     let mut identities = BTreeSet::new();
+//RS     for recipe in &recipes {
+//RS         if !identities.insert((recipe.name.clone(), recipe.version.clone())) {
+//RS             return Err(NixIndexError::invalid(format!(
+//RS                 "local unofficial native catalog repeats `{}` version `{}`",
+//RS                 recipe.name, recipe.version
+//RS             )));
+//RS         }
+//RS     }
+//RS     if canonical_native_recipes_bytes(&recipes) != bytes {
+//RS         return Err(NixIndexError::invalid(
+//RS             "local unofficial native catalog bytes are not canonical",
+//RS         ));
+//RS     }
+//RS     Ok(recipes)
+//RS }
+//RS 
+//RS fn parse_native_recipe(value: &DataTree) -> Result<NativeRecipe, NixIndexError> {
+//RS     let map = object(value.clone(), "local unofficial native recipe")?;
+//RS     reject_unknown(&map, &["name", "version", "kind", "url", "sha256", "bin"])?;
+//RS     let recipe = NativeRecipe {
+//RS         name: string_field(&map, "name")?.to_string(),
+//RS         version: string_field(&map, "version")?.to_string(),
+//RS         kind: string_field(&map, "kind")?.to_string(),
+//RS         url: string_field(&map, "url")?.to_string(),
+//RS         sha256: string_field(&map, "sha256")?.to_string(),
+//RS         bin: string_field(&map, "bin")?.to_string(),
+//RS     };
+//RS     valid_native_token(&recipe.name, "native recipe name")?;
+//RS     valid_native_token(&recipe.version, "native recipe version")?;
+//RS     if recipe.kind != "prebuilt" {
+//RS         return Err(NixIndexError::invalid(
+//RS             "local unofficial native recipe kind must be `prebuilt`",
+//RS         ));
+//RS     }
+//RS     validate_native_recipe_url(&recipe.url)?;
+//RS     if recipe.sha256.len() != 64
+//RS         || !recipe
+//RS             .sha256
+//RS             .bytes()
+//RS             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+//RS     {
+//RS         return Err(NixIndexError::invalid(
+//RS             "local unofficial native recipe sha256 is malformed",
+//RS         ));
+//RS     }
+//RS     if recipe.bin.is_empty()
+//RS         || recipe.bin == "."
+//RS         || recipe.bin == ".."
+//RS         || recipe.bin.contains('/')
+//RS         || recipe.bin.contains('\\')
+//RS         || recipe.bin.chars().any(|character| character.is_control())
+//RS     {
+//RS         return Err(NixIndexError::invalid(
+//RS             "local unofficial native recipe bin is malformed",
+//RS         ));
+//RS     }
+//RS     Ok(recipe)
+//RS }
+//RS 
+//RS fn valid_native_token(text: &str, label: &str) -> Result<(), NixIndexError> {
+//RS     if text.is_empty()
+//RS         || text.len() > 128
+//RS         || !text
+//RS             .bytes()
+//RS             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+//RS     {
+//RS         return Err(NixIndexError::invalid(format!("{label} is malformed")));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_native_recipe_url(url: &str) -> Result<(), NixIndexError> {
+//RS     if url.starts_with("file://") {
+//RS         if url.strip_prefix("file://").is_some_and(|path| !path.is_empty())
+//RS             && !url.chars().any(|character| character.is_control())
+//RS         {
+//RS             return Ok(());
+//RS         }
+//RS     }
+//RS     if (url.starts_with("https://") || url.starts_with("http://"))
+//RS         && !url
+//RS             .chars()
+//RS             .any(|character| character.is_control() || character == ' ')
+//RS     {
+//RS         if url.starts_with("http://") {
+//RS             let authority = url
+//RS                 .strip_prefix("http://")
+//RS                 .and_then(|value| value.split('/').next())
+//RS                 .unwrap_or_default();
+//RS             if !is_loopback_host(authority) {
+//RS                 return Err(NixIndexError::invalid(
+//RS                     "plain HTTP native recipe URLs must use loopback",
+//RS                 ));
+//RS             }
+//RS         }
+//RS         return Ok(());
+//RS     }
+//RS     Err(NixIndexError::invalid(
+//RS         "local unofficial native recipe URL must be HTTPS, loopback HTTP, or file",
+//RS     ))
+//RS }
+//RS 
+//RS fn canonical_native_recipes_bytes(recipes: &[NativeRecipe]) -> Vec<u8> {
+//RS     let mut recipes = recipes.to_vec();
+//RS     recipes.sort_by(|left, right| {
+//RS         left.name
+//RS             .as_bytes()
+//RS             .cmp(right.name.as_bytes())
+//RS             .then_with(|| left.version.as_bytes().cmp(right.version.as_bytes()))
+//RS     });
+//RS     let mut output = String::from("{\"schema\":1,\"recipes\":[");
+//RS     for (index, recipe) in recipes.iter().enumerate() {
+//RS         if index != 0 {
+//RS             output.push(',');
+//RS         }
+//RS         output.push_str(&recipe.canonical_json());
+//RS     }
+//RS     output.push_str("]}");
+//RS     output.into_bytes()
+//RS }
+//RS 
+//RS fn parse_index_strict(bytes: &[u8]) -> Result<IndexDocument, NixIndexError> {
+//RS     let text =
+//RS         std::str::from_utf8(bytes).map_err(|_| NixIndexError::invalid("nix index is not UTF-8"))?;
+//RS     let value = parse_json_exact_numbers(text, true).map_err(|error| {
+//RS         NixIndexError::invalid(format!(
+//RS             "parse nix index JSON at line {}: {}",
+//RS             error.line, error.message
+//RS         ))
+//RS     })?;
+//RS     let map = object(value, "nix index")?;
+//RS     reject_unknown(
+//RS         &map,
+//RS         &[
+//RS             "schema",
+//RS             "channel",
+//RS             "revision",
+//RS             "system",
+//RS             "released_unix",
+//RS             "records",
+//RS             "coverage",
+//RS         ],
+//RS     )?;
+//RS     let document = IndexDocument {
+//RS         schema: u64_field(&map, "schema")?,
+//RS         channel: string_field(&map, "channel")?.to_string(),
+//RS         revision: string_field(&map, "revision")?.to_string(),
+//RS         system: string_field(&map, "system")?.to_string(),
+//RS         released_unix: u64_field(&map, "released_unix")?,
+//RS         records: parse_records(field(&map, "records")?)?,
+//RS         coverage: parse_coverage(field(&map, "coverage")?)?,
+//RS     };
+//RS     validate_document(&document)?;
+//RS     if canonical_index_bytes(&document)? != bytes {
+//RS         return Err(NixIndexError::invalid("nix index bytes are not canonical"));
+//RS     }
+//RS     Ok(document)
+//RS }
+//RS 
+//RS fn parse_manifest_strict(bytes: &[u8]) -> Result<ChannelManifest, NixIndexError> {
+//RS     let text = std::str::from_utf8(bytes)
+//RS         .map_err(|_| NixIndexError::invalid("nix index manifest is not UTF-8"))?;
+//RS     let value = parse_json_exact_numbers(text, true).map_err(|error| {
+//RS         NixIndexError::invalid(format!(
+//RS             "parse nix index manifest JSON at line {}: {}",
+//RS             error.line, error.message
+//RS         ))
+//RS     })?;
+//RS     let map = object(value, "nix index manifest")?;
+//RS     reject_unknown(
+//RS         &map,
+//RS         &[
+//RS             "schema",
+//RS             "channel",
+//RS             "generation",
+//RS             "issued_unix",
+//RS             "expires_unix",
+//RS             "targets",
+//RS         ],
+//RS     )?;
+//RS     let targets = array_field(&map, "targets")?
+//RS         .iter()
+//RS         .map(parse_manifest_target)
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     let manifest = ChannelManifest {
+//RS         schema: u64_field(&map, "schema")?,
+//RS         channel: string_field(&map, "channel")?.to_string(),
+//RS         generation: u64_field(&map, "generation")?,
+//RS         issued_unix: u64_field(&map, "issued_unix")?,
+//RS         expires_unix: u64_field(&map, "expires_unix")?,
+//RS         targets,
+//RS     };
+//RS     validate_manifest(&manifest)?;
+//RS     if canonical_manifest_bytes(&manifest)? != bytes {
+//RS         return Err(NixIndexError::invalid(
+//RS             "nix index manifest bytes are not canonical",
+//RS         ));
+//RS     }
+//RS     Ok(manifest)
+//RS }
+//RS 
+//RS fn parse_signature_strict(bytes: &[u8]) -> Result<IndexSignature, NixIndexError> {
+//RS     let text = std::str::from_utf8(bytes)
+//RS         .map_err(|_| NixIndexError::invalid("nix index signature is not UTF-8"))?;
+//RS     let value = parse_json_exact_numbers(text, true).map_err(|error| {
+//RS         NixIndexError::invalid(format!("parse nix index signature: {}", error.message))
+//RS     })?;
+//RS     let map = object(value, "nix index signature")?;
+//RS     reject_unknown(&map, &["schema", "key_id", "algorithm", "signature"])?;
+//RS     let signature = IndexSignature {
+//RS         schema: u64_field(&map, "schema")?,
+//RS         key_id: string_field(&map, "key_id")?.to_string(),
+//RS         algorithm: string_field(&map, "algorithm")?.to_string(),
+//RS         signature: string_field(&map, "signature")?.to_string(),
+//RS     };
+//RS     if canonical_signature_bytes(&signature) != bytes {
+//RS         return Err(NixIndexError::invalid(
+//RS             "nix index signature bytes are not canonical",
+//RS         ));
+//RS     }
+//RS     Ok(signature)
+//RS }
+//RS 
+//RS fn parse_records(value: &DataTree) -> Result<Vec<RecordWire>, NixIndexError> {
+//RS     let values = value_array(value, "records")?;
+//RS     if values.len() > MAX_RECORDS {
+//RS         return Err(NixIndexError::invalid("nix index has too many records"));
+//RS     }
+//RS     values.iter().map(parse_record).collect()
+//RS }
+//RS 
+//RS fn parse_record(value: &DataTree) -> Result<RecordWire, NixIndexError> {
+//RS     let map = object(value.clone(), "nix index record")?;
+//RS     reject_unknown(&map, &["attrpath", "version", "drvPath", "outputs"])?;
+//RS     let outputs = array_field(&map, "outputs")?
+//RS         .iter()
+//RS         .map(parse_output)
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     Ok(RecordWire {
+//RS         attrpath: parse_attrpath(field(&map, "attrpath")?)?,
+//RS         version: string_field(&map, "version")?.to_string(),
+//RS         drv_path: string_field(&map, "drvPath")?.to_string(),
+//RS         outputs,
+//RS     })
+//RS }
+//RS 
+//RS fn parse_output(value: &DataTree) -> Result<OutputWire, NixIndexError> {
+//RS     let map = object(value.clone(), "nix index output")?;
+//RS     reject_unknown(&map, &["name", "storePath"])?;
+//RS     Ok(OutputWire {
+//RS         name: string_field(&map, "name")?.to_string(),
+//RS         store_path: string_field(&map, "storePath")?.to_string(),
+//RS     })
+//RS }
+//RS 
+//RS fn parse_oracle_outputs(value: &DataTree) -> Result<Vec<OutputWire>, NixIndexError> {
+//RS     match value {
+//RS         DataTree::Array(_) => value_array(value, "oracle outputs")?
+//RS             .iter()
+//RS             .map(parse_output)
+//RS             .collect(),
+//RS         DataTree::Object(outputs) => outputs
+//RS             .iter()
+//RS             .map(|(name, value)| {
+//RS                 let map = object(value.clone(), "oracle output")?;
+//RS                 reject_unknown(&map, &["path", "storePath"])?;
+//RS                 let store_path = map
+//RS                     .iter()
+//RS                     .find(|(key, _)| key == "path" || key == "storePath")
+//RS                     .map(|(_, value)| string_value(value, "oracle output path"))
+//RS                     .transpose()?
+//RS                     .ok_or_else(|| {
+//RS                         NixIndexError::invalid("oracle output is missing its store path")
+//RS                     })?;
+//RS                 Ok(OutputWire {
+//RS                     name: name.clone(),
+//RS                     store_path: store_path.to_string(),
+//RS                 })
+//RS             })
+//RS             .collect(),
+//RS         _ => Err(NixIndexError::invalid(
+//RS             "oracle outputs must be an array or object",
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn parse_coverage(value: &DataTree) -> Result<Coverage, NixIndexError> {
+//RS     let map = object(value.clone(), "nix index coverage")?;
+//RS     reject_unknown(&map, &["indexed", "notIndexed"])?;
+//RS     let indexed = array_field(&map, "indexed")?
+//RS         .iter()
+//RS         .map(parse_attrpath)
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     let not_indexed = array_field(&map, "notIndexed")?
+//RS         .iter()
+//RS         .map(|value| {
+//RS             let map = object(value.clone(), "nix index coverage miss")?;
+//RS             reject_unknown(&map, &["attrpath", "reason"])?;
+//RS             Ok(CoverageMiss {
+//RS                 attrpath: parse_attrpath(field(&map, "attrpath")?)?,
+//RS                 reason: string_field(&map, "reason")?.to_string(),
+//RS             })
+//RS         })
+//RS         .collect::<Result<Vec<_>, NixIndexError>>()?;
+//RS     Ok(Coverage {
+//RS         indexed,
+//RS         not_indexed,
+//RS     })
+//RS }
+//RS 
+//RS fn parse_attrpath(value: &DataTree) -> Result<Vec<String>, NixIndexError> {
+//RS     value_array(value, "attrpath")?
+//RS         .iter()
+//RS         .map(|value| Ok(string_value(value, "attrpath segment")?.to_string()))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn parse_manifest_target(value: &DataTree) -> Result<ManifestTarget, NixIndexError> {
+//RS     let map = object(value.clone(), "nix index manifest target")?;
+//RS     reject_unknown(
+//RS         &map,
+//RS         &[
+//RS             "revision",
+//RS             "system",
+//RS             "url",
+//RS             "signature_url",
+//RS             "sha256",
+//RS             "compressed_length",
+//RS             "decoded_length",
+//RS             "record_count",
+//RS             "index_signature_sha256",
+//RS             "discoverable",
+//RS         ],
+//RS     )?;
+//RS     Ok(ManifestTarget {
+//RS         revision: string_field(&map, "revision")?.to_string(),
+//RS         system: string_field(&map, "system")?.to_string(),
+//RS         url: string_field(&map, "url")?.to_string(),
+//RS         signature_url: string_field(&map, "signature_url")?.to_string(),
+//RS         sha256: string_field(&map, "sha256")?.to_string(),
+//RS         compressed_length: u64_field(&map, "compressed_length")?,
+//RS         decoded_length: u64_field(&map, "decoded_length")?,
+//RS         record_count: u64_field(&map, "record_count")?,
+//RS         index_signature_sha256: string_field(&map, "index_signature_sha256")?.to_string(),
+//RS         discoverable: bool_field(&map, "discoverable")?,
+//RS     })
+//RS }
+//RS 
+//RS fn validate_manifest(manifest: &ChannelManifest) -> Result<(), NixIndexError> {
+//RS     if manifest.schema != INDEX_SCHEMA {
+//RS         return Err(NixIndexError::invalid(
+//RS             "unsupported nix index manifest schema",
+//RS         ));
+//RS     }
+//RS     validate_channel(&manifest.channel)?;
+//RS     if manifest.expires_unix <= manifest.issued_unix {
+//RS         return Err(NixIndexError::invalid(
+//RS             "nix index manifest expiry is not after issue time",
+//RS         ));
+//RS     }
+//RS     let mut keys = BTreeSet::new();
+//RS     for target in &manifest.targets {
+//RS         validate_revision(&target.revision)?;
+//RS         validate_system(&target.system)?;
+//RS         if !keys.insert((target.revision.clone(), target.system.clone())) {
+//RS             return Err(NixIndexError::invalid(
+//RS                 "nix index manifest has duplicate targets",
+//RS             ));
+//RS         }
+//RS         if target.compressed_length == 0 || target.compressed_length as usize > MAX_COMPRESSED_BYTES
+//RS         {
+//RS             return Err(NixIndexError::invalid(
+//RS                 "nix index target exceeds compressed bound",
+//RS             ));
+//RS         }
+//RS         if target.decoded_length == 0 || target.decoded_length as usize > MAX_DECODED_BYTES {
+//RS             return Err(NixIndexError::invalid(
+//RS                 "nix index target exceeds decoded bound",
+//RS             ));
+//RS         }
+//RS         if target.record_count as usize > MAX_RECORDS {
+//RS             return Err(NixIndexError::invalid(
+//RS                 "nix index target exceeds record bound",
+//RS             ));
+//RS         }
+//RS         for (label, digest) in [
+//RS             ("nix index target", &target.sha256),
+//RS             ("nix index signature", &target.index_signature_sha256),
+//RS         ] {
+//RS             if digest.len() != 64
+//RS                 || !digest
+//RS                     .bytes()
+//RS                     .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+//RS             {
+//RS                 return Err(NixIndexError::invalid(format!(
+//RS                     "{label} digest is malformed"
+//RS                 )));
+//RS             }
+//RS         }
+//RS         validate_url(&target.url)?;
+//RS         validate_url(&target.signature_url)?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_url(url: &str) -> Result<(), NixIndexError> {
+//RS     if (url.starts_with("https://") || url.starts_with("http://"))
+//RS         && !url
+//RS             .chars()
+//RS             .any(|character| character.is_control() || character == ' ')
+//RS     {
+//RS         Ok(())
+//RS     } else {
+//RS         Err(NixIndexError::invalid(
+//RS             "nix index manifest contains an invalid URL",
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS fn verify_index_signature(
+//RS     public_key: &VerifyingKey,
+//RS     expected_key_id: &str,
+//RS     signature: &IndexSignature,
+//RS     bytes: &[u8],
+//RS ) -> Result<(), NixIndexError> {
+//RS     if signature.schema != INDEX_SCHEMA
+//RS         || signature.key_id != expected_key_id
+//RS         || signature.algorithm != "ed25519"
+//RS     {
+//RS         return Err(NixIndexError::invalid(
+//RS             "nix index signature key or algorithm is not trusted",
+//RS         ));
+//RS     }
+//RS     let signature = decode_signature(&signature.signature)?;
+//RS     let mut message = Vec::with_capacity(INDEX_DOMAIN.len() + bytes.len());
+//RS     message.extend_from_slice(INDEX_DOMAIN);
+//RS     message.extend_from_slice(bytes);
+//RS     public_key
+//RS         .verify(&message, &Signature::from_bytes(&signature))
+//RS         .map_err(|_| NixIndexError::invalid("nix index signature verification failed"))
+//RS }
+//RS 
+//RS fn verify_manifest_signature(
+//RS     public_key: &VerifyingKey,
+//RS     expected_key_id: &str,
+//RS     signature_bytes: &[u8],
+//RS     bytes: &[u8],
+//RS ) -> Result<(), NixIndexError> {
+//RS     let signature = parse_signature_strict(signature_bytes)?;
+//RS     if signature.schema != INDEX_SCHEMA
+//RS         || signature.key_id != expected_key_id
+//RS         || signature.algorithm != "ed25519"
+//RS     {
+//RS         return Err(NixIndexError::invalid(
+//RS             "nix index manifest signature key or algorithm is not trusted",
+//RS         ));
+//RS     }
+//RS     let signature = decode_signature(&signature.signature)?;
+//RS     let mut message = Vec::with_capacity(MANIFEST_DOMAIN.len() + bytes.len());
+//RS     message.extend_from_slice(MANIFEST_DOMAIN);
+//RS     message.extend_from_slice(bytes);
+//RS     public_key
+//RS         .verify(&message, &Signature::from_bytes(&signature))
+//RS         .map_err(|_| NixIndexError::invalid("nix index manifest signature verification failed"))
+//RS }
+//RS 
+//RS fn decode_signature(encoded: &str) -> Result<[u8; 64], NixIndexError> {
+//RS     let bytes = decode_base64(encoded, false, false)
+//RS         .map_err(|_| NixIndexError::invalid("nix index signature is not base64"))?;
+//RS     bytes
+//RS         .try_into()
+//RS         .map_err(|_| NixIndexError::invalid("nix index signature must be 64 bytes"))
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS fn signature_message(domain: &[u8], bytes: &[u8]) -> Vec<u8> {
+//RS     let mut message = Vec::with_capacity(domain.len() + bytes.len());
+//RS     message.extend_from_slice(domain);
+//RS     message.extend_from_slice(bytes);
+//RS     message
+//RS }
+//RS 
+//RS fn sha256_hex(bytes: &[u8]) -> String {
+//RS     crate::SHA256::sha256_hex(bytes)
+//RS }
+//RS 
+//RS fn verify_digest_and_length(
+//RS     bytes: &[u8],
+//RS     expected_length: u64,
+//RS     expected_digest: &str,
+//RS     label: &str,
+//RS ) -> Result<(), NixIndexError> {
+//RS     if bytes.len() as u64 != expected_length || sha256_hex(bytes) != expected_digest {
+//RS         return Err(NixIndexError::invalid(format!(
+//RS             "{label} digest or length mismatch"
+//RS         )));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn object(value: DataTree, label: &str) -> Result<Vec<(String, DataTree)>, NixIndexError> {
+//RS     match value {
+//RS         DataTree::Object(map) => Ok(map),
+//RS         _ => Err(NixIndexError::invalid(format!("{label} must be an object"))),
+//RS     }
+//RS }
+//RS 
+//RS fn field<'a>(map: &'a [(String, DataTree)], name: &str) -> Result<&'a DataTree, NixIndexError> {
+//RS     map.iter()
+//RS         .find(|(key, _)| key == name)
+//RS         .map(|(_, value)| value)
+//RS         .ok_or_else(|| NixIndexError::invalid(format!("nix index is missing `{name}`")))
+//RS }
+//RS 
+//RS fn reject_unknown(map: &[(String, DataTree)], known: &[&str]) -> Result<(), NixIndexError> {
+//RS     if let Some((key, _)) = map.iter().find(|(key, _)| !known.contains(&key.as_str())) {
+//RS         return Err(NixIndexError::invalid(format!(
+//RS             "nix index has unknown field `{key}`"
+//RS         )));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn string_value<'a>(value: &'a DataTree, label: &str) -> Result<&'a str, NixIndexError> {
+//RS     match value {
+//RS         DataTree::Text(value) => Ok(value),
+//RS         _ => Err(NixIndexError::invalid(format!("{label} must be a string"))),
+//RS     }
+//RS }
+//RS 
+//RS fn string_field<'a>(map: &'a [(String, DataTree)], name: &str) -> Result<&'a str, NixIndexError> {
+//RS     string_value(field(map, name)?, name)
+//RS }
+//RS 
+//RS fn u64_value(value: &DataTree, label: &str) -> Result<u64, NixIndexError> {
+//RS     let text = match value {
+//RS         DataTree::Number(text) => text,
+//RS         DataTree::Int(value) if *value >= 0 => return Ok(*value as u64),
+//RS         _ => {
+//RS             return Err(NixIndexError::invalid(format!(
+//RS                 "{label} must be an integer"
+//RS             )))
+//RS         }
+//RS     };
+//RS     if text.starts_with('-') || text.contains('.') || text.contains('e') || text.contains('E') {
+//RS         return Err(NixIndexError::invalid(format!(
+//RS             "{label} must be an unsigned integer"
+//RS         )));
+//RS     }
+//RS     text.parse::<u64>()
+//RS         .map_err(|_| NixIndexError::invalid(format!("{label} is out of range")))
+//RS }
+//RS 
+//RS fn u64_field(map: &[(String, DataTree)], name: &str) -> Result<u64, NixIndexError> {
+//RS     u64_value(field(map, name)?, name)
+//RS }
+//RS 
+//RS fn bool_field(map: &[(String, DataTree)], name: &str) -> Result<bool, NixIndexError> {
+//RS     match field(map, name)? {
+//RS         DataTree::Bool(value) => Ok(*value),
+//RS         _ => Err(NixIndexError::invalid(format!("{name} must be a boolean"))),
+//RS     }
+//RS }
+//RS 
+//RS fn value_array<'a>(value: &'a DataTree, label: &str) -> Result<&'a [DataTree], NixIndexError> {
+//RS     match value {
+//RS         DataTree::Array(values) => Ok(values),
+//RS         _ => Err(NixIndexError::invalid(format!("{label} must be an array"))),
+//RS     }
+//RS }
+//RS 
+//RS fn array_field<'a>(map: &'a [(String, DataTree)], name: &str) -> Result<&'a [DataTree], NixIndexError> {
+//RS     value_array(field(map, name)?, name)
+//RS }
+//RS 
+//RS fn nonempty_text<'a>(text: &'a str, label: &str) -> Result<&'a str, NixIndexError> {
+//RS     if text.is_empty()
+//RS         || text
+//RS             .chars()
+//RS             .any(|character| character.is_control() || character == ':')
+//RS     {
+//RS         Err(NixIndexError::invalid(format!("{label} is malformed")))
+//RS     } else {
+//RS         Ok(text)
+//RS     }
+//RS }
+//RS 
+//RS fn parse_endpoint(endpoint: &str) -> Result<String, NixIndexError> {
+//RS     validate_url(endpoint)?;
+//RS     if endpoint.starts_with("http://") {
+//RS         let authority = endpoint
+//RS             .strip_prefix("http://")
+//RS             .and_then(|value| value.split('/').next())
+//RS             .unwrap_or_default();
+//RS         if !is_loopback_host(authority) {
+//RS             return Err(NixIndexError::invalid(
+//RS                 "plain HTTP nix index endpoints must use loopback",
+//RS             ));
+//RS         }
+//RS     }
+//RS     Ok(endpoint.trim_end_matches('/').to_string())
+//RS }
+//RS 
+//RS fn is_loopback_host(authority: &str) -> bool {
+//RS     let host = authority
+//RS         .strip_prefix('[')
+//RS         .and_then(|value| value.split(']').next())
+//RS         .unwrap_or_else(|| authority.split(':').next().unwrap_or(authority));
+//RS     matches!(host, "127.0.0.1" | "localhost" | "::1")
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS fn base64_encode(bytes: &[u8]) -> String {
+//RS     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+//RS     let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
+//RS     for chunk in bytes.chunks(3) {
+//RS         let first = chunk[0];
+//RS         output.push(ALPHABET[(first >> 2) as usize] as char);
+//RS         output.push(
+//RS             ALPHABET[((first & 0x03) << 4 | chunk.get(1).copied().unwrap_or(0) >> 4) as usize]
+//RS                 as char,
+//RS         );
+//RS         if let Some(second) = chunk.get(1) {
+//RS             output.push(
+//RS                 ALPHABET[((second & 0x0f) << 2 | chunk.get(2).copied().unwrap_or(0) >> 6) as usize]
+//RS                     as char,
+//RS             );
+//RS         } else {
+//RS             output.push('=');
+//RS         }
+//RS         if let Some(third) = chunk.get(2) {
+//RS             output.push(ALPHABET[(third & 0x3f) as usize] as char);
+//RS         } else {
+//RS             output.push('=');
+//RS         }
+//RS     }
+//RS     output
+//RS }
+//RS 
+//RS // ponytail: raw Zstandard blocks preserve the required deterministic frame
+//RS // and avoid a new jetpack dependency; replace with #2156's native level-19
+//RS // one-thread seam when that handoff lands.
+//RS #[allow(dead_code)]
+//RS fn zstd_encode(bytes: &[u8]) -> Vec<u8> {
+//RS     const BLOCK: usize = 128 * 1024;
+//RS     let mut output = Vec::with_capacity(bytes.len() + bytes.len() / BLOCK * 3 + 32);
+//RS     output.extend_from_slice(&0xfd2f_b528u32.to_le_bytes());
+//RS     let descriptor = if bytes.len() <= 255 {
+//RS         0x24
+//RS     } else if bytes.len() <= 65_791 {
+//RS         0x64
+//RS     } else {
+//RS         0xa4
+//RS     };
+//RS     output.push(descriptor);
+//RS     match descriptor {
+//RS         0x24 => output.push(bytes.len() as u8),
+//RS         0x64 => output.extend_from_slice(&((bytes.len() - 256) as u16).to_le_bytes()),
+//RS         _ => output.extend_from_slice(&(bytes.len() as u32).to_le_bytes()),
+//RS     }
+//RS     if bytes.is_empty() {
+//RS         output.extend_from_slice(&1u32.to_le_bytes()[..3]);
+//RS     } else {
+//RS         let mut blocks = bytes.chunks(BLOCK).peekable();
+//RS         while let Some(block) = blocks.next() {
+//RS             let header = ((block.len() as u32) << 3) | u32::from(blocks.peek().is_none());
+//RS             output.extend_from_slice(&header.to_le_bytes()[..3]);
+//RS             output.extend_from_slice(block);
+//RS         }
+//RS     }
+//RS     output.extend_from_slice(&(xxh64(bytes) as u32).to_le_bytes());
+//RS     output
+//RS }
+//RS 
+//RS fn zstd_decode_bounded(bytes: &[u8], limit: usize) -> Result<Vec<u8>, NixIndexError> {
+//RS     let mut input = 0usize;
+//RS     let mut output = Vec::new();
+//RS     while input < bytes.len() {
+//RS         if bytes.get(input..input + 4) != Some(&0xfd2f_b528u32.to_le_bytes()) {
+//RS             return Err(NixIndexError::invalid(
+//RS                 "nix index target is not a Zstandard frame",
+//RS             ));
+//RS         }
+//RS         input += 4;
+//RS         let descriptor = *bytes
+//RS             .get(input)
+//RS             .ok_or_else(|| NixIndexError::invalid("truncated nix index Zstandard header"))?;
+//RS         input += 1;
+//RS         if descriptor & 0x1b != 0 || descriptor & 0x20 == 0 || descriptor & 0x04 == 0 {
+//RS             return Err(NixIndexError::invalid(
+//RS                 "nix index Zstandard frame must be single-segment and checksummed",
+//RS             ));
+//RS         }
+//RS         let fcs_size = match descriptor >> 6 {
+//RS             0 => 1,
+//RS             1 => 2,
+//RS             2 => 4,
+//RS             _ => 8,
+//RS         };
+//RS         let expected = read_le(bytes, input, fcs_size)
+//RS             .ok_or_else(|| NixIndexError::invalid("truncated nix index Zstandard content size"))?;
+//RS         input += fcs_size;
+//RS         let expected = if fcs_size == 2 {
+//RS             expected + 256
+//RS         } else {
+//RS             expected
+//RS         };
+//RS         if expected > limit as u64 {
+//RS             return Err(NixIndexError::invalid(
+//RS                 "nix index decoded bytes exceed bound",
+//RS             ));
+//RS         }
+//RS         let frame_start = output.len();
+//RS         loop {
+//RS             let header = read_le(bytes, input, 3)
+//RS                 .ok_or_else(|| NixIndexError::invalid("truncated nix index Zstandard block"))?
+//RS                 as u32;
+//RS             input += 3;
+//RS             let last = header & 1 != 0;
+//RS             let kind = (header >> 1) & 3;
+//RS             let size = (header >> 3) as usize;
+//RS             if kind > 1 || size > 128 * 1024 {
+//RS                 return Err(NixIndexError::invalid(
+//RS                     "nix index uses an unsupported Zstandard block",
+//RS                 ));
+//RS             }
+//RS             if output.len().saturating_add(size) > limit {
+//RS                 return Err(NixIndexError::invalid(
+//RS                     "nix index decoded bytes exceed bound",
+//RS                 ));
+//RS             }
+//RS             match kind {
+//RS                 0 => {
+//RS                     let end = input
+//RS                         .checked_add(size)
+//RS                         .filter(|end| *end <= bytes.len())
+//RS                         .ok_or_else(|| {
+//RS                             NixIndexError::invalid("truncated nix index Zstandard block")
+//RS                         })?;
+//RS                     output.extend_from_slice(&bytes[input..end]);
+//RS                     input = end;
+//RS                 }
+//RS                 1 => {
+//RS                     let value = *bytes
+//RS                         .get(input)
+//RS                         .ok_or_else(|| NixIndexError::invalid("truncated nix index RLE block"))?;
+//RS                     input += 1;
+//RS                     output.resize(output.len() + size, value);
+//RS                 }
+//RS                 _ => unreachable!(),
+//RS             }
+//RS             if last {
+//RS                 break;
+//RS             }
+//RS         }
+//RS         if output.len() - frame_start != expected as usize {
+//RS             return Err(NixIndexError::invalid(
+//RS                 "nix index Zstandard content size disagrees",
+//RS             ));
+//RS         }
+//RS         let checksum = read_le(bytes, input, 4)
+//RS             .ok_or_else(|| NixIndexError::invalid("truncated nix index Zstandard checksum"))?;
+//RS         input += 4;
+//RS         if checksum as u32 != xxh64(&output[frame_start..]) as u32 {
+//RS             return Err(NixIndexError::invalid(
+//RS                 "nix index Zstandard checksum failed",
+//RS             ));
+//RS         }
+//RS     }
+//RS     if output.is_empty() {
+//RS         return Err(NixIndexError::invalid(
+//RS             "nix index Zstandard stream is empty",
+//RS         ));
+//RS     }
+//RS     Ok(output)
+//RS }
+//RS 
+//RS fn read_le(bytes: &[u8], offset: usize, size: usize) -> Option<u64> {
+//RS     let bytes = bytes.get(offset..offset.checked_add(size)?)?;
+//RS     (size <= 8).then(|| {
+//RS         bytes.iter().enumerate().fold(0u64, |value, (shift, byte)| {
+//RS             value | (u64::from(*byte) << (shift * 8))
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn xxh64(data: &[u8]) -> u64 {
+//RS     const P1: u64 = 11_400_714_785_074_694_791;
+//RS     const P2: u64 = 14_029_467_366_897_019_727;
+//RS     const P3: u64 = 1_609_587_929_392_839_161;
+//RS     const P4: u64 = 9_650_029_242_287_828_579;
+//RS     const P5: u64 = 2_870_177_450_012_600_261;
+//RS     let round = |acc: u64, lane: u64| {
+//RS         acc.wrapping_add(lane.wrapping_mul(P2))
+//RS             .rotate_left(31)
+//RS             .wrapping_mul(P1)
+//RS     };
+//RS     let mut offset = 0usize;
+//RS     let mut hash = if data.len() >= 32 {
+//RS         let mut lanes = [P1.wrapping_add(P2), P2, 0, 0u64.wrapping_sub(P1)];
+//RS         while offset + 32 <= data.len() {
+//RS             for lane in &mut lanes {
+//RS                 *lane = round(
+//RS                     *lane,
+//RS                     u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap()),
+//RS                 );
+//RS                 offset += 8;
+//RS             }
+//RS         }
+//RS         let mut hash = lanes[0]
+//RS             .rotate_left(1)
+//RS             .wrapping_add(lanes[1].rotate_left(7))
+//RS             .wrapping_add(lanes[2].rotate_left(12))
+//RS             .wrapping_add(lanes[3].rotate_left(18));
+//RS         for lane in lanes {
+//RS             hash ^= round(0, lane);
+//RS             hash = hash.wrapping_mul(P1).wrapping_add(P4);
+//RS         }
+//RS         hash
+//RS     } else {
+//RS         P5
+//RS     };
+//RS     hash = hash.wrapping_add(data.len() as u64);
+//RS     while offset + 8 <= data.len() {
+//RS         let lane = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+//RS         hash ^= round(0, lane);
+//RS         hash = hash.rotate_left(27).wrapping_mul(P1).wrapping_add(P4);
+//RS         offset += 8;
+//RS     }
+//RS     if offset + 4 <= data.len() {
+//RS         hash ^= u64::from(u32::from_le_bytes(
+//RS             data[offset..offset + 4].try_into().unwrap(),
+//RS         ))
+//RS         .wrapping_mul(P1);
+//RS         hash = hash.rotate_left(23).wrapping_mul(P2).wrapping_add(P3);
+//RS         offset += 4;
+//RS     }
+//RS     while offset < data.len() {
+//RS         hash ^= u64::from(data[offset]).wrapping_mul(P5);
+//RS         hash = hash.rotate_left(11).wrapping_mul(P1);
+//RS         offset += 1;
+//RS     }
+//RS     hash ^= hash >> 33;
+//RS     hash = hash.wrapping_mul(P2);
+//RS     hash ^= hash >> 29;
+//RS     hash = hash.wrapping_mul(P3);
+//RS     hash ^ (hash >> 32)
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS fn generated_document(
+//RS     channel: String,
+//RS     revision: String,
+//RS     system: String,
+//RS     released_unix: u64,
+//RS     mut records: Vec<IndexRecord>,
+//RS     mut not_indexed: Vec<CoverageMiss>,
+//RS ) -> Result<IndexDocument, NixIndexError> {
+//RS     records.sort_by(|left, right| compare_attrpath(&left.attrpath, &right.attrpath));
+//RS     not_indexed.sort_by(|left, right| {
+//RS         compare_attrpath(&left.attrpath, &right.attrpath)
+//RS             .then_with(|| left.reason.as_bytes().cmp(right.reason.as_bytes()))
+//RS     });
+//RS     let document = IndexDocument {
+//RS         schema: INDEX_SCHEMA,
+//RS         channel,
+//RS         revision,
+//RS         system,
+//RS         released_unix,
+//RS         coverage: Coverage {
+//RS             indexed: records
+//RS                 .iter()
+//RS                 .map(|record| record.attrpath.clone())
+//RS                 .collect(),
+//RS             not_indexed,
+//RS         },
+//RS         records: records.iter().map(wire_from_record).collect(),
+//RS     };
+//RS     validate_document(&document)?;
+//RS     Ok(document)
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS fn parse_oracle(
+//RS     bytes: &[u8],
+//RS     system: &str,
+//RS     revision: &str,
+//RS ) -> Result<Vec<OracleRecord>, NixIndexError> {
+//RS     validate_revision(revision)?;
+//RS     let text = std::str::from_utf8(bytes)
+//RS         .map_err(|_| NixIndexError::invalid("oracle output is not UTF-8"))?;
+//RS     let value = parse_json_exact_numbers(text, true)
+//RS         .map_err(|error| NixIndexError::invalid(format!("parse oracle JSON: {}", error.message)))?;
+//RS     let records_value = match &value {
+//RS         DataTree::Object(_) => {
+//RS             let map = object(value.clone(), "oracle")?;
+//RS             reject_unknown(&map, &["revision", "system", "records"])?;
+//RS             if string_field(&map, "revision")? != revision {
+//RS                 return Err(NixIndexError::invalid(
+//RS                     "oracle has the wrong pinned revision",
+//RS                 ));
+//RS             }
+//RS             if string_field(&map, "system")? != system {
+//RS                 return Err(NixIndexError::invalid("oracle has the wrong system"));
+//RS             }
+//RS             field(&map, "records")?.clone()
+//RS         }
+//RS         _ => {
+//RS             return Err(NixIndexError::invalid(
+//RS                 "oracle output must be an object with revision, system, and records",
+//RS             ))
+//RS         }
+//RS     };
+//RS     let records = value_array(&records_value, "oracle records")?;
+//RS     records
+//RS         .iter()
+//RS         .map(|value| {
+//RS             let map = object(value.clone(), "oracle record")?;
+//RS             reject_unknown(
+//RS                 &map,
+//RS                 &[
+//RS                     "system", "attrpath", "version", "drvPath", "outputs", "cache",
+//RS                 ],
+//RS             )?;
+//RS             if let Some((_, value)) = map.iter().find(|(key, _)| key == "system") {
+//RS                 if string_value(value, "oracle record system")? != system {
+//RS                     return Err(NixIndexError::invalid("oracle record has the wrong system"));
+//RS                 }
+//RS             }
+//RS             let outputs = parse_oracle_outputs(field(&map, "outputs")?)?;
+//RS             let mut output_names = BTreeSet::new();
+//RS             let mut output_paths = BTreeSet::new();
+//RS             for output in &outputs {
+//RS                 if !output_names.insert(output.name.clone()) {
+//RS                     return Err(NixIndexError::invalid(
+//RS                         "oracle record repeats an output name",
+//RS                     ));
+//RS                 }
+//RS                 if !output_paths.insert(output.store_path.clone()) {
+//RS                     return Err(NixIndexError::invalid(
+//RS                         "oracle record repeats an output path",
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             let record = IndexRecord {
+//RS                 attrpath: parse_attrpath(field(&map, "attrpath")?)?,
+//RS                 version: string_field(&map, "version")?.to_string(),
+//RS                 drv_path: string_field(&map, "drvPath")?.to_string(),
+//RS                 outputs: outputs
+//RS                     .into_iter()
+//RS                     .map(|output| (output.name, output.store_path))
+//RS                     .collect(),
+//RS             };
+//RS             validate_oracle_record(&record)?;
+//RS             Ok(OracleRecord {
+//RS                 record,
+//RS                 cache_admitted: match map
+//RS                     .iter()
+//RS                     .find(|(key, _)| key == "cache")
+//RS                     .map(|(_, value)| value)
+//RS                 {
+//RS                     None => false,
+//RS                     Some(DataTree::Bool(value)) => *value,
+//RS                     Some(_) => {
+//RS                         return Err(NixIndexError::invalid("oracle cache field must be boolean"))
+//RS                     }
+//RS                 },
+//RS             })
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS fn validate_oracle_record(record: &IndexRecord) -> Result<(), NixIndexError> {
+//RS     validate_attrpath(&record.attrpath)?;
+//RS     if record
+//RS         .version
+//RS         .chars()
+//RS         .any(|character| character.is_control())
+//RS     {
+//RS         return Err(NixIndexError::invalid(
+//RS             "oracle record version contains a control character",
+//RS         ));
+//RS     }
+//RS     validate_store_path(&record.drv_path, true)?;
+//RS     if record.outputs.is_empty() {
+//RS         return Err(NixIndexError::invalid("oracle record has no outputs"));
+//RS     }
+//RS     let mut output_paths = BTreeSet::new();
+//RS     for (name, path) in &record.outputs {
+//RS         if name.is_empty() || name.chars().any(|character| character.is_control()) {
+//RS             return Err(NixIndexError::invalid(
+//RS                 "oracle record has an empty output name",
+//RS             ));
+//RS         }
+//RS         validate_store_path(path, false)?;
+//RS         if !output_paths.insert(path) {
+//RS             return Err(NixIndexError::invalid(
+//RS                 "oracle record repeats an output path",
+//RS             ));
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS pub(crate) fn producer_signature_request(index_bytes: &[u8]) -> Vec<u8> {
+//RS     signature_message(INDEX_DOMAIN, index_bytes)
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS pub(crate) fn manifest_signature_request(manifest_bytes: &[u8]) -> Vec<u8> {
+//RS     signature_message(MANIFEST_DOMAIN, manifest_bytes)
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS pub(crate) fn canonical_test_index(
+//RS     channel: &str,
+//RS     revision: &str,
+//RS     system: &str,
+//RS     released_unix: u64,
+//RS     records: Vec<IndexRecord>,
+//RS     not_indexed: Vec<(Vec<String>, String)>,
+//RS ) -> Result<(Vec<u8>, Vec<u8>), NixIndexError> {
+//RS     let misses = not_indexed
+//RS         .into_iter()
+//RS         .map(|(attrpath, reason)| CoverageMiss { attrpath, reason })
+//RS         .collect();
+//RS     let document = generated_document(
+//RS         channel.to_string(),
+//RS         revision.to_string(),
+//RS         system.to_string(),
+//RS         released_unix,
+//RS         records,
+//RS         misses,
+//RS     )?;
+//RS     let bytes = canonical_index_bytes(&document)?;
+//RS     Ok((bytes.clone(), zstd_encode(&bytes)))
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS pub(crate) fn canonical_manifest_for_test(
+//RS     channel: &str,
+//RS     generation: u64,
+//RS     issued_unix: u64,
+//RS     expires_unix: u64,
+//RS     targets: Vec<ManifestTarget>,
+//RS ) -> Result<Vec<u8>, NixIndexError> {
+//RS     canonical_manifest_bytes(&ChannelManifest {
+//RS         schema: INDEX_SCHEMA,
+//RS         channel: channel.to_string(),
+//RS         generation,
+//RS         issued_unix,
+//RS         expires_unix,
+//RS         targets,
+//RS     })
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS pub(crate) fn signature_sidecar_for_test(key_id: &str, signature: &[u8]) -> Vec<u8> {
+//RS     canonical_signature_bytes(&IndexSignature {
+//RS         schema: INDEX_SCHEMA,
+//RS         key_id: key_id.to_string(),
+//RS         algorithm: "ed25519".to_string(),
+//RS         signature: base64_encode(signature),
+//RS     })
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS pub(crate) fn index_target_for_test(
+//RS     revision: &str,
+//RS     system: &str,
+//RS     endpoint: &str,
+//RS     compressed: &[u8],
+//RS     decoded: &[u8],
+//RS     signature_bytes: &[u8],
+//RS     record_count: u64,
+//RS ) -> Result<ManifestTarget, NixIndexError> {
+//RS     validate_revision(revision)?;
+//RS     validate_system(system)?;
+//RS     let digest = sha256_hex(compressed);
+//RS     let url = format!("{endpoint}/index-v1/{revision}/{system}/{digest}.json.zst");
+//RS     Ok(ManifestTarget {
+//RS         revision: revision.to_string(),
+//RS         system: system.to_string(),
+//RS         url: url.clone(),
+//RS         signature_url: format!("{url}.sig.json"),
+//RS         sha256: digest,
+//RS         compressed_length: compressed.len() as u64,
+//RS         decoded_length: decoded.len() as u64,
+//RS         record_count,
+//RS         index_signature_sha256: sha256_hex(signature_bytes),
+//RS         discoverable: true,
+//RS     })
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS pub(crate) fn producer_generate(
+//RS     channel: &str,
+//RS     system: &str,
+//RS     revision: &str,
+//RS     released_unix: u64,
+//RS     oracle: &[OracleRecord],
+//RS     store_paths: &BTreeSet<String>,
+//RS ) -> Result<(Vec<u8>, Vec<u8>, String), NixIndexError> {
+//RS     producer_generate_with_hydra_paths(
+//RS         channel,
+//RS         system,
+//RS         revision,
+//RS         released_unix,
+//RS         oracle,
+//RS         store_paths,
+//RS         &BTreeSet::new(),
+//RS     )
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS pub(crate) fn producer_generate_with_hydra_paths(
+//RS     channel: &str,
+//RS     system: &str,
+//RS     revision: &str,
+//RS     released_unix: u64,
+//RS     oracle: &[OracleRecord],
+//RS     store_paths: &BTreeSet<String>,
+//RS     hydra_output_paths: &BTreeSet<String>,
+//RS ) -> Result<(Vec<u8>, Vec<u8>, String), NixIndexError> {
+//RS     validate_channel(channel)?;
+//RS     validate_system(system)?;
+//RS     validate_revision(revision)?;
+//RS     let mut records = Vec::new();
+//RS     let mut not_indexed = Vec::new();
+//RS     for candidate in oracle {
+//RS         let missing_path = candidate
+//RS             .record
+//RS             .outputs
+//RS             .values()
+//RS             .find(|path| !store_paths.contains(*path));
+//RS         let hydra_missing_path = if hydra_output_paths.is_empty() {
+//RS             None
+//RS         } else {
+//RS             candidate
+//RS                 .record
+//RS                 .outputs
+//RS                 .values()
+//RS                 .find(|path| !hydra_output_paths.contains(*path))
+//RS         };
+//RS         let reason = if missing_path.is_some() || hydra_missing_path.is_some() {
+//RS             Some("no-channel-build")
+//RS         } else if !candidate.cache_admitted {
+//RS             Some("missing-narinfo")
+//RS         } else if candidate.record.version.is_empty() {
+//RS             Some("missing-version")
+//RS         } else if !candidate.record.outputs.contains_key("out")
+//RS             && !candidate.record.outputs.contains_key("bin")
+//RS         {
+//RS             Some("missing-primary-output")
+//RS         } else {
+//RS             None
+//RS         };
+//RS         if let Some(reason) = reason {
+//RS             not_indexed.push(CoverageMiss {
+//RS                 attrpath: candidate.record.attrpath.clone(),
+//RS                 reason: reason.to_string(),
+//RS             });
+//RS         } else {
+//RS             records.push(candidate.record.clone());
+//RS         }
+//RS     }
+//RS     let document = generated_document(
+//RS         channel.to_string(),
+//RS         revision.to_string(),
+//RS         system.to_string(),
+//RS         released_unix,
+//RS         records,
+//RS         not_indexed,
+//RS     )?;
+//RS     let decoded = canonical_index_bytes(&document)?;
+//RS     let compressed = zstd_encode(&decoded);
+//RS     if compressed.len() > MAX_COMPRESSED_BYTES || decoded.len() > MAX_DECODED_BYTES {
+//RS         return Err(NixIndexError::invalid(
+//RS             "generated nix index exceeds format bounds",
+//RS         ));
+//RS     }
+//RS     let report = format_generation_report(&decoded, &compressed, &document);
+//RS     Ok((decoded, compressed, report))
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS fn format_generation_report(decoded: &[u8], compressed: &[u8], document: &IndexDocument) -> String {
+//RS     let output_count: usize = document
+//RS         .records
+//RS         .iter()
+//RS         .map(|record| record.outputs.len())
+//RS         .sum();
+//RS     let indexed = document.coverage.indexed.len();
+//RS     let not_indexed = document.coverage.not_indexed.len();
+//RS     format!(
+//RS         "{{\"schema\":1,\"channel\":\"{}\",\"revision\":\"{}\",\"system\":\"{}\",\"released_unix\":{},\"compressed_bytes\":{},\"decoded_bytes\":{},\"record_count\":{},\"output_count\":{},\"indexed_count\":{},\"not_indexed_count\":{}}}",
+//RS         json_escape(&document.channel),
+//RS         json_escape(&document.revision),
+//RS         json_escape(&document.system),
+//RS         document.released_unix,
+//RS         compressed.len(),
+//RS         decoded.len(),
+//RS         document.records.len(),
+//RS         output_count,
+//RS         indexed,
+//RS         not_indexed
+//RS     )
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS pub(crate) fn parse_oracle_for_producer(
+//RS     bytes: &[u8],
+//RS     system: &str,
+//RS     revision: &str,
+//RS ) -> Result<Vec<OracleRecord>, NixIndexError> {
+//RS     parse_oracle(bytes, system, revision)
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS pub(crate) fn producer_coverage_report(decoded: &[u8]) -> Result<String, NixIndexError> {
+//RS     let document = parse_index_strict(decoded)?;
+//RS     let mut output = String::new();
+//RS     output.push_str("{\"schema\":1,\"channel\":\"");
+//RS     output.push_str(&json_escape(&document.channel));
+//RS     output.push_str("\",\"revision\":\"");
+//RS     output.push_str(&json_escape(&document.revision));
+//RS     output.push_str("\",\"system\":\"");
+//RS     output.push_str(&json_escape(&document.system));
+//RS     output.push_str("\",\"indexed\":[");
+//RS     for (index, attrpath) in document.coverage.indexed.iter().enumerate() {
+//RS         if index != 0 {
+//RS             output.push(',');
+//RS         }
+//RS         encode_attrpath(&mut output, attrpath);
+//RS     }
+//RS     output.push_str("],\"notIndexed\":[");
+//RS     for (index, miss) in document.coverage.not_indexed.iter().enumerate() {
+//RS         if index != 0 {
+//RS             output.push(',');
+//RS         }
+//RS         output.push_str("{\"attrpath\":");
+//RS         encode_attrpath(&mut output, &miss.attrpath);
+//RS         output.push_str(",\"reason\":\"");
+//RS         output.push_str(&json_escape(&miss.reason));
+//RS         output.push_str("\"}");
+//RS     }
+//RS     output.push_str("],\"scope\":\"off-device packages-info.nix inventory only; overlays, overrides, user Nix config, custom flakes, custom package sets, local inputs, and impure evaluation are outside the denominator\"}");
+//RS     Ok(output)
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS pub(crate) fn decode_index_records_for_producer(
+//RS     bytes: &[u8],
+//RS ) -> Result<Vec<IndexRecord>, NixIndexError> {
+//RS     let decoded = if bytes.starts_with(&0xfd2f_b528u32.to_le_bytes()) {
+//RS         zstd_decode_bounded(bytes, MAX_DECODED_BYTES)?
+//RS     } else {
+//RS         bytes.to_vec()
+//RS     };
+//RS     Ok(parse_index_strict(&decoded)?
+//RS         .records
+//RS         .iter()
+//RS         .map(record_from_wire)
+//RS         .collect())
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS pub(crate) fn producer_index_identity(
+//RS     bytes: &[u8],
+//RS ) -> Result<(String, String, String), NixIndexError> {
+//RS     let decoded = if bytes.starts_with(&0xfd2f_b528u32.to_le_bytes()) {
+//RS         zstd_decode_bounded(bytes, MAX_DECODED_BYTES)?
+//RS     } else {
+//RS         bytes.to_vec()
+//RS     };
+//RS     let document = parse_index_strict(&decoded)?;
+//RS     Ok((document.channel, document.revision, document.system))
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS pub(crate) fn producer_target_measurements(bytes: &[u8]) -> Result<(u64, u64), NixIndexError> {
+//RS     let decoded = if bytes.starts_with(&0xfd2f_b528u32.to_le_bytes()) {
+//RS         zstd_decode_bounded(bytes, MAX_DECODED_BYTES)?
+//RS     } else {
+//RS         bytes.to_vec()
+//RS     };
+//RS     let document = parse_index_strict(&decoded)?;
+//RS     Ok((decoded.len() as u64, document.records.len() as u64))
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS pub(crate) fn producer_manifest_bytes(
+//RS     channel: &str,
+//RS     generation: u64,
+//RS     issued_unix: u64,
+//RS     expires_unix: u64,
+//RS     targets: Vec<(
+//RS         String,
+//RS         String,
+//RS         String,
+//RS         String,
+//RS         String,
+//RS         u64,
+//RS         u64,
+//RS         u64,
+//RS         String,
+//RS         bool,
+//RS     )>,
+//RS ) -> Result<Vec<u8>, NixIndexError> {
+//RS     let targets = targets
+//RS         .into_iter()
+//RS         .map(
+//RS             |(
+//RS                 revision,
+//RS                 system,
+//RS                 url,
+//RS                 signature_url,
+//RS                 sha256,
+//RS                 compressed_length,
+//RS                 decoded_length,
+//RS                 record_count,
+//RS                 index_signature_sha256,
+//RS                 discoverable,
+//RS             )| ManifestTarget {
+//RS                 revision,
+//RS                 system,
+//RS                 url,
+//RS                 signature_url,
+//RS                 sha256,
+//RS                 compressed_length,
+//RS                 decoded_length,
+//RS                 record_count,
+//RS                 index_signature_sha256,
+//RS                 discoverable,
+//RS             },
+//RS         )
+//RS         .collect();
+//RS     canonical_manifest_bytes(&ChannelManifest {
+//RS         schema: INDEX_SCHEMA,
+//RS         channel: channel.to_string(),
+//RS         generation,
+//RS         issued_unix,
+//RS         expires_unix,
+//RS         targets,
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS     use ed25519_dalek::{Signer, SigningKey};
+//RS     use std::sync::Mutex;
+//RS 
+//RS     const REVISION: &str = "c8f90650c15282fa8656a041bfbbd2403997a9a7";
+//RS     const RIPGREP_DRV: &str = "/nix/store/har68bdn10m05zxkvn680q37bdq0bpdx-ripgrep-15.2.0.drv";
+//RS     const RIPGREP_OUT: &str = "/nix/store/axp6zlky4x2v3jwcbq24a2cz25hzlw9b-ripgrep-15.2.0";
+//RS     const AUX_DRV: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a-1.drv";
+//RS     const AUX_OUT: &str = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-a-1";
+//RS 
+//RS     struct FixedClock(u64);
+//RS     impl IndexClock for FixedClock {
+//RS         fn now_unix(&self) -> u64 {
+//RS             self.0
+//RS         }
+//RS     }
+//RS 
+//RS     struct MutableClock(AtomicU64);
+//RS     impl IndexClock for MutableClock {
+//RS         fn now_unix(&self) -> u64 {
+//RS             self.0.load(Ordering::Relaxed)
+//RS         }
+//RS     }
+//RS 
+//RS     struct MapTransport {
+//RS         values: Mutex<BTreeMap<String, Vec<u8>>>,
+//RS     }
+//RS     impl IndexTransport for MapTransport {
+//RS         fn get_bounded(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, NixIndexError> {
+//RS             let value = self
+//RS                 .values
+//RS                 .lock()
+//RS                 .unwrap()
+//RS                 .get(url)
+//RS                 .cloned()
+//RS                 .ok_or_else(|| NixIndexError::Transport(format!("missing test URL {url}")))?;
+//RS             if value.len() as u64 > max_bytes {
+//RS                 return Err(NixIndexError::invalid("test response exceeded bound"));
+//RS             }
+//RS             Ok(value)
+//RS         }
+//RS     }
+//RS 
+//RS     fn ripgrep_record() -> IndexRecord {
+//RS         IndexRecord {
+//RS             attrpath: vec!["ripgrep".to_string()],
+//RS             version: "15.2.0".to_string(),
+//RS             drv_path: RIPGREP_DRV.to_string(),
+//RS             outputs: [("out".to_string(), RIPGREP_OUT.to_string())]
+//RS                 .into_iter()
+//RS                 .collect(),
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn local_channel_without_manifest_requires_one_intact_index_revision() {
+//RS         let serial = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-local-index-pin-{}-{serial}", std::process::id()
+//RS         ));
+//RS         let install = |revision: &str| {
+//RS             let (_, compressed) = canonical_test_index(
+//RS                 "nixos-unstable", revision, "x86_64-linux", 1,
+//RS                 vec![ripgrep_record()], Vec::new(),
+//RS             ).unwrap();
+//RS             let directory = root.join(LOCAL_INDEX_ROOT).join(revision).join("x86_64-linux");
+//RS             fs::create_dir_all(&directory).unwrap();
+//RS             let path = directory.join(format!("{}.json.zst", sha256_hex(&compressed)));
+//RS             fs::write(&path, &compressed).unwrap();
+//RS             (path, compressed)
+//RS         };
+//RS         let (path, original) = install(REVISION);
+//RS         let client = NixIndexClient::from_local_catalog(&root, true).unwrap();
+//RS         assert_eq!(
+//RS             client.local_channel_revision("nixos-unstable", "x86_64-linux").unwrap(),
+//RS             REVISION
+//RS         );
+//RS         let resolved = client.resolve(&IndexKey {
+//RS             channel: "nixos-unstable".into(),
+//RS             revision: REVISION.into(),
+//RS             system: "x86_64-linux".into(),
+//RS             attrpath: vec!["ripgrep".into()],
+//RS         }).unwrap();
+//RS         assert_eq!(resolved.record, ripgrep_record());
+//RS         assert_eq!(resolved.trust, IndexTrustTier::LocalUnofficial);
+//RS         fs::write(&path, b"corrupt").unwrap();
+//RS         assert!(matches!(
+//RS             client.local_channel_revision("nixos-unstable", "x86_64-linux"),
+//RS             Err(NixIndexError::Invalid(_))
+//RS         ));
+//RS         fs::write(&path, &original).unwrap();
+//RS         install("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+//RS         assert!(matches!(
+//RS             client.local_channel_revision("nixos-unstable", "x86_64-linux"),
+//RS             Err(NixIndexError::Invalid(_))
+//RS         ));
+//RS         let decoded = zstd_decode_bounded(&original, MAX_DECODED_BYTES).unwrap();
+//RS         let target = index_target_for_test(
+//RS             REVISION, "x86_64-linux", "https://catalog.invalid",
+//RS             &original, &decoded, &[], 1,
+//RS         ).unwrap();
+//RS         let manifest = canonical_manifest_for_test(
+//RS             "nixos-unstable", 1, 1, 1000, vec![target],
+//RS         ).unwrap();
+//RS         let manifest_dir = root.join("v1/nixos-unstable");
+//RS         fs::create_dir_all(&manifest_dir).unwrap();
+//RS         fs::write(manifest_dir.join("manifest.json"), manifest).unwrap();
+//RS         assert_eq!(
+//RS             client.local_channel_revision("nixos-unstable", "x86_64-linux").unwrap(),
+//RS             REVISION
+//RS         );
+//RS         fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn local_channel_rejects_index_identity_mismatches() {
+//RS         for (channel, system) in [
+//RS             ("nixpkgs-unstable", "x86_64-linux"),
+//RS             ("nixos-unstable", "aarch64-linux"),
+//RS         ] {
+//RS             let serial = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+//RS             let root = std::env::temp_dir().join(format!(
+//RS                 "jet-local-index-identity-{}-{serial}", std::process::id()
+//RS             ));
+//RS             let (_, bytes) = canonical_test_index(
+//RS                 channel, REVISION, system, 1, vec![ripgrep_record()], Vec::new(),
+//RS             ).unwrap();
+//RS             let directory = root.join(LOCAL_INDEX_ROOT).join(REVISION).join("x86_64-linux");
+//RS             fs::create_dir_all(&directory).unwrap();
+//RS             fs::write(directory.join(format!("{}.json.zst", sha256_hex(&bytes))), bytes).unwrap();
+//RS             let client = NixIndexClient::from_local_catalog(&root, true).unwrap();
+//RS             assert!(matches!(
+//RS                 client.local_channel_revision("nixos-unstable", "x86_64-linux"),
+//RS                 Err(NixIndexError::Invalid(_))
+//RS             ));
+//RS             fs::remove_dir_all(root).unwrap();
+//RS         }
+//RS     }
+//RS 
+//RS     fn auxiliary_record() -> IndexRecord {
+//RS         IndexRecord {
+//RS             attrpath: vec!["a".to_string(), "nested".to_string()],
+//RS             version: "1.0.0".to_string(),
+//RS             drv_path: AUX_DRV.to_string(),
+//RS             outputs: [("out".to_string(), AUX_OUT.to_string())]
+//RS                 .into_iter()
+//RS                 .collect(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn document_for(record: RecordWire) -> IndexDocument {
+//RS         IndexDocument {
+//RS             schema: INDEX_SCHEMA,
+//RS             channel: "nixpkgs-unstable".to_string(),
+//RS             revision: REVISION.to_string(),
+//RS             system: "x86_64-linux".to_string(),
+//RS             released_unix: 1,
+//RS             coverage: Coverage {
+//RS                 indexed: vec![record.attrpath.clone()],
+//RS                 not_indexed: Vec::new(),
+//RS             },
+//RS             records: vec![record],
+//RS         }
+//RS     }
+//RS 
+//RS     fn signed_fixture() -> (PathBuf, MapTransport, FixedClock, SigningKey, IndexKey) {
+//RS         signed_fixture_at("http://127.0.0.1:9999")
+//RS     }
+//RS 
+//RS     fn signed_fixture_at(
+//RS         endpoint: &str,
+//RS     ) -> (PathBuf, MapTransport, FixedClock, SigningKey, IndexKey) {
+//RS         let serial = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+//RS         let root =
+//RS             std::env::temp_dir().join(format!("jet-nix-index-{}-{serial}", std::process::id()));
+//RS         let _ = fs::remove_dir_all(&root);
+//RS         let key = SigningKey::from_bytes(&[7; 32]);
+//RS         let (decoded, compressed) = canonical_test_index(
+//RS             "nixpkgs-unstable",
+//RS             REVISION,
+//RS             "x86_64-linux",
+//RS             1_724_000_000,
+//RS             vec![ripgrep_record()],
+//RS             Vec::new(),
+//RS         )
+//RS         .unwrap();
+//RS         let index_signature = key.sign(&producer_signature_request(&decoded));
+//RS         let sidecar = signature_sidecar_for_test("test-key", &index_signature.to_bytes());
+//RS         let target = index_target_for_test(
+//RS             REVISION,
+//RS             "x86_64-linux",
+//RS             endpoint,
+//RS             &compressed,
+//RS             &decoded,
+//RS             &sidecar,
+//RS             1,
+//RS         )
+//RS         .unwrap();
+//RS         let manifest = canonical_manifest_for_test(
+//RS             "nixpkgs-unstable",
+//RS             1,
+//RS             1_724_000_000,
+//RS             1_724_000_000 + 604_800,
+//RS             vec![target.clone()],
+//RS         )
+//RS         .unwrap();
+//RS         let manifest_signature = key.sign(&manifest_signature_request(&manifest));
+//RS         let manifest_sidecar =
+//RS             signature_sidecar_for_test("test-key", &manifest_signature.to_bytes());
+//RS         let target_url = target.url.clone();
+//RS         let signature_url = target.signature_url.clone();
+//RS         let manifest_url = format!("{endpoint}/v1/nixpkgs-unstable/manifest.json");
+//RS         let transport = MapTransport {
+//RS             values: Mutex::new(
+//RS                 [
+//RS                     (manifest_url, manifest),
+//RS                     (
+//RS                         format!("{endpoint}/v1/nixpkgs-unstable/manifest.json.sig.json"),
+//RS                         manifest_sidecar,
+//RS                     ),
+//RS                     (target_url, compressed),
+//RS                     (signature_url, sidecar),
+//RS                 ]
+//RS                 .into_iter()
+//RS                 .collect(),
+//RS             ),
+//RS         };
+//RS         (
+//RS             root,
+//RS             transport,
+//RS             FixedClock(1_724_000_100),
+//RS             key,
+//RS             IndexKey {
+//RS                 channel: "nixpkgs-unstable".to_string(),
+//RS                 revision: REVISION.to_string(),
+//RS                 system: "x86_64-linux".to_string(),
+//RS                 attrpath: vec!["ripgrep".to_string()],
+//RS             },
+//RS         )
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nix_index_requires_explicit_endpoint_and_key() {
+//RS         let serial = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-nix-index-explicit-config-{}-{serial}",
+//RS             std::process::id()
+//RS         ));
+//RS         let _ = fs::remove_dir_all(&root);
+//RS         fs::create_dir_all(&root).unwrap();
+//RS         let roots = Roots {
+//RS             root: root.clone(),
+//RS             dev_mode: true,
+//RS         };
+//RS         let error = match NixIndexClient::from_roots_with_mode(&roots, false) {
+//RS             Ok(_) => panic!("missing signed-index configuration must fail closed"),
+//RS             Err(error) => error,
+//RS         };
+//RS         assert!(matches!(
+//RS             error,
+//RS             NixIndexError::Invalid(detail)
+//RS                 if detail == "signed nixpkgs index endpoint and public key must be configured explicitly"
+//RS         ));
+//RS 
+//RS         fs::create_dir_all(root.join("trust")).unwrap();
+//RS         fs::write(
+//RS             root.join("trust/nix-index-v1.ed25519.pub"),
+//RS             format!(
+//RS                 "fixture-index-signer-v1:{}\n",
+//RS                 base64_encode(&[7; 32])
+//RS             ),
+//RS         )
+//RS         .unwrap();
+//RS         let error = match NixIndexClient::from_roots_with_mode(&roots, false) {
+//RS             Ok(_) => panic!("the official endpoint must not be implicit"),
+//RS             Err(error) => error,
+//RS         };
+//RS         assert!(matches!(
+//RS             error,
+//RS             NixIndexError::Invalid(detail)
+//RS                 if detail == "nix index endpoint and public-key overrides must be installed together"
+//RS         ));
+//RS         let _ = fs::remove_dir_all(root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nix_index_never_accepts_the_test_key_as_an_official_root() {
+//RS         let serial = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-nix-index-test-root-{}-{serial}",
+//RS             std::process::id()
+//RS         ));
+//RS         let _ = fs::remove_dir_all(&root);
+//RS         fs::create_dir_all(root.join("config")).unwrap();
+//RS         fs::create_dir_all(root.join("trust")).unwrap();
+//RS         fs::write(
+//RS             root.join("config/nix-index-v1.endpoint"),
+//RS             "http://127.0.0.1:9999\n",
+//RS         )
+//RS         .unwrap();
+//RS         fs::write(
+//RS             root.join("trust/nix-index-v1.ed25519.pub"),
+//RS             format!("{TEST_INDEX_KEY_ID}:{}\n", base64_encode(&[7; 32])),
+//RS         )
+//RS         .unwrap();
+//RS 
+//RS         let roots = Roots {
+//RS             root: root.clone(),
+//RS             dev_mode: false,
+//RS         };
+//RS         let error = match NixIndexClient::from_roots_with_mode(&roots, false) {
+//RS             Ok(_) => panic!("the test key must not configure an official index"),
+//RS             Err(error) => error,
+//RS         };
+//RS         assert_eq!(error.code(), 1348);
+//RS         assert!(matches!(
+//RS             error,
+//RS             NixIndexError::Invalid(detail)
+//RS                 if detail == "nix index trust root `jet-test-index-v1` is test-only and cannot be used for official signed indexes"
+//RS         ));
+//RS         let _ = fs::remove_dir_all(root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nix_index_holds_endpoint_after_config_rewrite() {
+//RS         use std::io::{Read as _, Write as _};
+//RS         use std::net::TcpListener;
+//RS 
+//RS         let serial = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-nix-index-config-rewrite-{}-{serial}",
+//RS             std::process::id()
+//RS         ));
+//RS         let _ = fs::remove_dir_all(&root);
+//RS         fs::create_dir_all(root.join("config")).unwrap();
+//RS         fs::create_dir_all(root.join("trust")).unwrap();
+//RS 
+//RS         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+//RS         let port = listener.local_addr().unwrap().port();
+//RS         let endpoint = format!("http://127.0.0.1:{port}");
+//RS         let endpoint_path = root.join("config/nix-index-v1.endpoint");
+//RS         fs::write(&endpoint_path, format!("{endpoint}\n")).unwrap();
+//RS         let key = SigningKey::from_bytes(&[7; 32]);
+//RS         fs::write(
+//RS             root.join("trust/nix-index-v1.ed25519.pub"),
+//RS             format!("fixture-index-signer-v1:{}\n", base64_encode(&key.verifying_key().to_bytes())),
+//RS         )
+//RS         .unwrap();
+//RS 
+//RS         let roots = Roots {
+//RS             root: root.clone(),
+//RS             dev_mode: false,
+//RS         };
+//RS         let client = NixIndexClient::from_roots_with_mode(&roots, false).unwrap();
+//RS 
+//RS         // A later rewrite must not change the held endpoint or its resolved
+//RS         // address authority for this already-created client.
+//RS         fs::write(&endpoint_path, "http://127.0.0.1:9\n").unwrap();
+//RS         let server = std::thread::spawn(move || {
+//RS             let (mut stream, _) = listener.accept().unwrap();
+//RS             let mut request = [0u8; 1024];
+//RS             let _ = stream.read(&mut request);
+//RS             stream
+//RS                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nheld")
+//RS                 .unwrap();
+//RS         });
+//RS         let body = client
+//RS             .transport
+//RS             .get_bounded(&format!("{endpoint}/held"), 32)
+//RS             .unwrap();
+//RS         assert_eq!(body, b"held");
+//RS         server.join().unwrap();
+//RS         let _ = fs::remove_dir_all(root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nix_index_resolves_exact_ripgrep_record() {
+//RS         let (root, transport, clock, key, index_key) = signed_fixture();
+//RS         let client = NixIndexClient::for_test(
+//RS             root.clone(),
+//RS             "http://127.0.0.1:9999".to_string(),
+//RS             "test-key".to_string(),
+//RS             key.verifying_key().to_bytes(),
+//RS             &transport,
+//RS             &clock,
+//RS             false,
+//RS         )
+//RS         .unwrap();
+//RS         let resolved = client.resolve(&index_key).unwrap();
+//RS         assert_eq!(resolved.record, ripgrep_record());
+//RS         assert_eq!(resolved.proof.revision, REVISION);
+//RS         assert_eq!(resolved.proof.system, "x86_64-linux");
+//RS         assert_eq!(resolved.proof.manifest_generation, 1);
+//RS         assert_eq!(resolved.proof.jet_key_id, "test-key");
+//RS         assert!(root.join(INDEX_ROOT).exists());
+//RS         let _ = fs::remove_dir_all(root);
+//RS     }
+//RS 
+//RS     // Card #2200 criterion 1: the resolver follows the documented owned
+//RS     // endpoint and verifies the manifest and content-addressed target there.
+//RS     #[test]
+//RS     fn nix_index_resolves_documented_official_endpoint_layout() {
+//RS         const ENDPOINT: &str = "https://index.jet-lang.dev";
+//RS         let (root, transport, clock, key, index_key) = signed_fixture_at(ENDPOINT);
+//RS         let client = NixIndexClient::for_test(
+//RS             root.clone(),
+//RS             ENDPOINT.to_string(),
+//RS             "test-key".to_string(),
+//RS             key.verifying_key().to_bytes(),
+//RS             &transport,
+//RS             &clock,
+//RS             false,
+//RS         )
+//RS         .unwrap();
+//RS         let resolved = client.resolve(&index_key).unwrap();
+//RS         assert_eq!(resolved.record, ripgrep_record());
+//RS         let values = transport.values.lock().unwrap();
+//RS         assert!(values.contains_key(&format!(
+//RS             "{ENDPOINT}/v1/nixpkgs-unstable/manifest.json"
+//RS         )));
+//RS         assert!(values.keys().any(|url| {
+//RS             url.starts_with(&format!("{ENDPOINT}/index-v1/{REVISION}/x86_64-linux/"))
+//RS         }));
+//RS         drop(values);
+//RS         drop(client);
+//RS         let _ = fs::remove_dir_all(root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nix_index_reordered_input_is_byte_identical() {
+//RS         let first_records = vec![ripgrep_record(), auxiliary_record()];
+//RS         let mut second_records = first_records.clone();
+//RS         second_records.reverse();
+//RS         let first = canonical_test_index(
+//RS             "nixpkgs-unstable",
+//RS             REVISION,
+//RS             "x86_64-linux",
+//RS             1,
+//RS             first_records,
+//RS             Vec::new(),
+//RS         )
+//RS         .unwrap();
+//RS         let second = canonical_test_index(
+//RS             "nixpkgs-unstable",
+//RS             REVISION,
+//RS             "x86_64-linux",
+//RS             1,
+//RS             second_records,
+//RS             Vec::new(),
+//RS         )
+//RS         .unwrap();
+//RS         assert_eq!(first.0, second.0);
+//RS         assert_eq!(first.1, second.1);
+//RS         assert_eq!(sha256_hex(&first.1), sha256_hex(&second.1));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nix_index_coverage_report_partitions_indexed_and_not_indexed_attrs() {
+//RS         let excluded = auxiliary_record();
+//RS         let oracle = vec![
+//RS             OracleRecord {
+//RS                 record: ripgrep_record(),
+//RS                 cache_admitted: true,
+//RS             },
+//RS             OracleRecord {
+//RS                 record: excluded.clone(),
+//RS                 cache_admitted: false,
+//RS             },
+//RS         ];
+//RS         let store_paths = [RIPGREP_OUT.to_string(), AUX_OUT.to_string()]
+//RS             .into_iter()
+//RS             .collect();
+//RS         let (decoded, _, _) = producer_generate(
+//RS             "nixpkgs-unstable",
+//RS             "x86_64-linux",
+//RS             REVISION,
+//RS             1,
+//RS             &oracle,
+//RS             &store_paths,
+//RS         )
+//RS         .unwrap();
+//RS         let report = producer_coverage_report(&decoded).unwrap();
+//RS         let parsed = parse_json_exact_numbers(&report, true).unwrap();
+//RS         assert!(report.contains("\"system\":\"x86_64-linux\""));
+//RS         assert!(report.contains("\"indexed\":[[\"ripgrep\"]]"));
+//RS         assert!(report.contains("\"notIndexed\":[{"));
+//RS         assert!(report.contains("missing-narinfo"));
+//RS         assert!(matches!(parsed, DataTree::Object(_)));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nix_index_differential_oracle_accepts_nix_output_map() {
+//RS         let oracle = format!(
+//RS             "{{\"revision\":\"{REVISION}\",\"system\":\"x86_64-linux\",\"records\":[{{\"attrpath\":[\"ripgrep\"],\"version\":\"15.2.0\",\"drvPath\":\"{RIPGREP_DRV}\",\"outputs\":{{\"out\":{{\"path\":\"{RIPGREP_OUT}\"}}}},\"cache\":true}}]}}"
+//RS         );
+//RS         let records = parse_oracle(oracle.as_bytes(), "x86_64-linux", REVISION).unwrap();
+//RS         assert_eq!(records.len(), 1);
+//RS         assert_eq!(records[0].record, ripgrep_record());
+//RS         let store_paths = [RIPGREP_OUT.to_string()].into_iter().collect();
+//RS         let (decoded, _, _) = producer_generate(
+//RS             "nixpkgs-unstable",
+//RS             "x86_64-linux",
+//RS             REVISION,
+//RS             1,
+//RS             &records,
+//RS             &store_paths,
+//RS         )
+//RS         .unwrap();
+//RS         assert_eq!(
+//RS             decode_index_records_for_producer(&decoded).unwrap(),
+//RS             vec![ripgrep_record()]
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nix_index_differential_oracle_rejects_a_different_pinned_revision() {
+//RS         let oracle = format!(
+//RS             "{{\"revision\":\"0000000000000000000000000000000000000000\",\"system\":\"x86_64-linux\",\"records\":[]}}"
+//RS         );
+//RS         let error = parse_oracle(oracle.as_bytes(), "x86_64-linux", REVISION).unwrap_err();
+//RS         assert!(error.to_string().contains("wrong pinned revision"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nix_index_signature_verifies_real_bytes_and_rejects_mutation() {
+//RS         let key = SigningKey::from_bytes(&[7; 32]);
+//RS         let (decoded, _) = canonical_test_index(
+//RS             "nixpkgs-unstable",
+//RS             REVISION,
+//RS             "x86_64-linux",
+//RS             1,
+//RS             vec![ripgrep_record()],
+//RS             Vec::new(),
+//RS         )
+//RS         .unwrap();
+//RS         let sidecar = signature_sidecar_for_test(
+//RS             "test-key",
+//RS             &key.sign(&producer_signature_request(&decoded)).to_bytes(),
+//RS         );
+//RS         let signature = parse_signature_strict(&sidecar).unwrap();
+//RS         assert!(
+//RS             verify_index_signature(&key.verifying_key(), "test-key", &signature, &decoded).is_ok()
+//RS         );
+//RS         let forged = {
+//RS             let mut changed = decoded.clone();
+//RS             let position = changed.len() - 2;
+//RS             changed[position] ^= 1;
+//RS             changed
+//RS         };
+//RS         assert!(
+//RS             verify_index_signature(&key.verifying_key(), "test-key", &signature, &forged).is_err()
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nix_index_refuses_a_server_signature_from_a_substituted_key() {
+//RS         let (root, transport, clock, trusted_key, index_key) = signed_fixture();
+//RS         let endpoint = "http://127.0.0.1:9999";
+//RS         let manifest_url = format!("{endpoint}/v1/nixpkgs-unstable/manifest.json");
+//RS         let manifest_signature_url = format!("{manifest_url}.sig.json");
+//RS         let manifest = transport
+//RS             .values
+//RS             .lock()
+//RS             .unwrap()
+//RS             .get(&manifest_url)
+//RS             .cloned()
+//RS             .unwrap();
+//RS         let substituted_key = SigningKey::from_bytes(&[8; 32]);
+//RS         let substituted_signature = substituted_key.sign(&manifest_signature_request(&manifest));
+//RS         transport.values.lock().unwrap().insert(
+//RS             manifest_signature_url,
+//RS             signature_sidecar_for_test("test-key", &substituted_signature.to_bytes()),
+//RS         );
+//RS 
+//RS         let client = NixIndexClient::for_test(
+//RS             root.clone(),
+//RS             endpoint.to_string(),
+//RS             "test-key".to_string(),
+//RS             trusted_key.verifying_key().to_bytes(),
+//RS             &transport,
+//RS             &clock,
+//RS             false,
+//RS         )
+//RS         .unwrap();
+//RS         let error = client.resolve(&index_key).unwrap_err();
+//RS         assert_eq!(error.code(), 1348);
+//RS         assert!(matches!(
+//RS             error,
+//RS             NixIndexError::Invalid(detail)
+//RS                 if detail == "nix index manifest signature verification failed"
+//RS         ));
+//RS         drop(client);
+//RS         let _ = fs::remove_dir_all(root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nix_index_rejects_forged_stale_cross_system_duplicate_and_ambiguous_input() {
+//RS         let duplicate = br#"{"schema":1,"schema":1}"#;
+//RS         assert!(parse_index_strict(duplicate).is_err());
+//RS 
+//RS         let mut duplicate_records = document_for(wire_from_record(&ripgrep_record()));
+//RS         duplicate_records
+//RS             .records
+//RS             .push(wire_from_record(&ripgrep_record()));
+//RS         assert!(validate_document(&duplicate_records).is_err());
+//RS 
+//RS         let mut duplicate_names = wire_from_record(&ripgrep_record());
+//RS         duplicate_names.outputs.push(OutputWire {
+//RS             name: "out".to_string(),
+//RS             store_path: AUX_OUT.to_string(),
+//RS         });
+//RS         assert!(validate_document(&document_for(duplicate_names)).is_err());
+//RS 
+//RS         let duplicate_paths = RecordWire {
+//RS             attrpath: vec!["ripgrep".to_string()],
+//RS             version: "15.2.0".to_string(),
+//RS             drv_path: RIPGREP_DRV.to_string(),
+//RS             outputs: vec![
+//RS                 OutputWire {
+//RS                     name: "out".to_string(),
+//RS                     store_path: RIPGREP_OUT.to_string(),
+//RS                 },
+//RS                 OutputWire {
+//RS                     name: "bin".to_string(),
+//RS                     store_path: RIPGREP_OUT.to_string(),
+//RS                 },
+//RS             ],
+//RS         };
+//RS         assert!(validate_document(&document_for(duplicate_paths)).is_err());
+//RS 
+//RS         let mut empty_version = wire_from_record(&ripgrep_record());
+//RS         empty_version.version.clear();
+//RS         assert!(validate_document(&document_for(empty_version)).is_err());
+//RS 
+//RS         let mut no_outputs = wire_from_record(&ripgrep_record());
+//RS         no_outputs.outputs.clear();
+//RS         assert!(validate_document(&document_for(no_outputs)).is_err());
+//RS 
+//RS         let no_primary = RecordWire {
+//RS             attrpath: vec!["ripgrep".to_string()],
+//RS             version: "15.2.0".to_string(),
+//RS             drv_path: RIPGREP_DRV.to_string(),
+//RS             outputs: vec![OutputWire {
+//RS                 name: "dev".to_string(),
+//RS                 store_path: RIPGREP_OUT.to_string(),
+//RS             }],
+//RS         };
+//RS         assert!(validate_document(&document_for(no_primary)).is_err());
+//RS         assert!(validate_store_path("/nix/store/not-a-store-path", false).is_err());
+//RS 
+//RS         let (root, transport, clock, key, mut cross_system_key) = signed_fixture();
+//RS         let client = NixIndexClient::for_test(
+//RS             root.clone(),
+//RS             "http://127.0.0.1:9999".to_string(),
+//RS             "test-key".to_string(),
+//RS             key.verifying_key().to_bytes(),
+//RS             &transport,
+//RS             &clock,
+//RS             false,
+//RS         )
+//RS         .unwrap();
+//RS         client.resolve(&cross_system_key).unwrap();
+//RS         assert!(client
+//RS             .check_generation(
+//RS                 "nixpkgs-unstable",
+//RS                 &ChannelManifest {
+//RS                     schema: INDEX_SCHEMA,
+//RS                     channel: "nixpkgs-unstable".to_string(),
+//RS                     generation: 0,
+//RS                     issued_unix: 1_723_000_000,
+//RS                     expires_unix: 1_723_604_800,
+//RS                     targets: Vec::new(),
+//RS                 },
+//RS                 b"stale",
+//RS             )
+//RS             .is_err());
+//RS         assert!(client
+//RS             .check_generation(
+//RS                 "nixpkgs-unstable",
+//RS                 &ChannelManifest {
+//RS                     schema: INDEX_SCHEMA,
+//RS                     channel: "nixpkgs-unstable".to_string(),
+//RS                     generation: 1,
+//RS                     issued_unix: 1_724_000_000,
+//RS                     expires_unix: 1_724_604_800,
+//RS                     targets: Vec::new(),
+//RS                 },
+//RS                 b"same-generation-fork",
+//RS             )
+//RS             .is_err());
+//RS         cross_system_key.attrpath = vec!["not-the-requested-attr".to_string()];
+//RS         assert!(matches!(
+//RS             client.resolve(&cross_system_key),
+//RS             Err(NixIndexError::NotIndexed { .. })
+//RS         ));
+//RS         cross_system_key.system = "aarch64-linux".to_string();
+//RS         assert!(matches!(
+//RS             client.resolve(&cross_system_key),
+//RS             Err(NixIndexError::Invalid(_))
+//RS         ));
+//RS         let _ = fs::remove_dir_all(root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nix_index_rejects_manifest_signature_schema_drift() {
+//RS         let key = SigningKey::from_bytes(&[7; 32]);
+//RS         let bytes = b"{}";
+//RS         let signature = key.sign(&manifest_signature_request(bytes));
+//RS         let sidecar = canonical_signature_bytes(&IndexSignature {
+//RS             schema: 0,
+//RS             key_id: "test-key".to_string(),
+//RS             algorithm: "ed25519".to_string(),
+//RS             signature: base64_encode(&signature.to_bytes()),
+//RS         });
+//RS         assert!(
+//RS             verify_manifest_signature(&key.verifying_key(), "test-key", &sidecar, bytes).is_err()
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nix_index_whole_refresh_retains_targets_and_rejects_rollback() {
+//RS         let (root, transport, clock, key, index_key) = signed_fixture();
+//RS         let client = NixIndexClient::for_test(
+//RS             root.clone(),
+//RS             "http://127.0.0.1:9999".to_string(),
+//RS             "test-key".to_string(),
+//RS             key.verifying_key().to_bytes(),
+//RS             &transport,
+//RS             &clock,
+//RS             false,
+//RS         )
+//RS         .unwrap();
+//RS         client.resolve(&index_key).unwrap();
+//RS         let state = client.load_highest_generation("nixpkgs-unstable").unwrap();
+//RS         assert_eq!(state.map(|(generation, _)| generation), Some(1));
+//RS         let target_files = fs::read_dir(
+//RS             root.join(INDEX_ROOT)
+//RS                 .join("targets")
+//RS                 .join(REVISION)
+//RS                 .join("x86_64-linux"),
+//RS         )
+//RS         .unwrap()
+//RS         .count();
+//RS         assert_eq!(target_files, 2);
+//RS 
+//RS         assert!(client
+//RS             .check_generation(
+//RS                 "nixpkgs-unstable",
+//RS                 &ChannelManifest {
+//RS                     schema: INDEX_SCHEMA,
+//RS                     channel: "nixpkgs-unstable".to_string(),
+//RS                     generation: 0,
+//RS                     issued_unix: 1_723_000_000,
+//RS                     expires_unix: 1_723_604_800,
+//RS                     targets: Vec::new(),
+//RS                 },
+//RS                 b"stale",
+//RS             )
+//RS             .is_err());
+//RS         let _ = fs::remove_dir_all(root);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nix_index_offline_rejects_expired_cached_manifest() {
+//RS         let (root, transport, _, key, index_key) = signed_fixture();
+//RS         let clock = MutableClock(AtomicU64::new(1_724_000_100));
+//RS         let client = NixIndexClient::for_test(
+//RS             root.clone(),
+//RS             "http://127.0.0.1:9999".to_string(),
+//RS             "test-key".to_string(),
+//RS             key.verifying_key().to_bytes(),
+//RS             &transport,
+//RS             &clock,
+//RS             false,
+//RS         )
+//RS         .unwrap();
+//RS         client.resolve(&index_key).unwrap();
+//RS         drop(client);
+//RS         clock.0.store(1_724_604_800, Ordering::Relaxed);
+//RS         let offline = NixIndexClient::for_test(
+//RS             root.clone(),
+//RS             "http://127.0.0.1:9999".to_string(),
+//RS             "test-key".to_string(),
+//RS             key.verifying_key().to_bytes(),
+//RS             &transport,
+//RS             &clock,
+//RS             true,
+//RS         )
+//RS         .unwrap();
+//RS         let error = offline.resolve(&index_key).unwrap_err();
+//RS         assert_eq!(error.code(), 1276);
+//RS         assert!(matches!(error, NixIndexError::Offline(_)));
+//RS         let _ = fs::remove_dir_all(root);
+//RS     }
+//RS 
+//RS     fn collect_text_files(path: &Path, files: &mut Vec<PathBuf>) {
+//RS         for entry in fs::read_dir(path).unwrap() {
+//RS             let entry = entry.unwrap();
+//RS             let file_type = entry.file_type().unwrap();
+//RS             if file_type.is_dir() {
+//RS                 collect_text_files(&entry.path(), files);
+//RS             } else if file_type.is_file() {
+//RS                 files.push(entry.path());
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn branded_host(token: &str) -> Option<&str> {
+//RS         let token = token.trim_matches(|character: char| {
+//RS             matches!(
+//RS                 character,
+//RS                 '`' | '!'
+//RS                     | '#'
+//RS                     | '$'
+//RS                     | '%'
+//RS                     | '&'
+//RS                     | '*'
+//RS                     | '+'
+//RS                     | ','
+//RS                     | ';'
+//RS                     | '<'
+//RS                     | '>'
+//RS                     | '?'
+//RS                     | '\\'
+//RS                     | ']'
+//RS                     | '['
+//RS                     | '}'
+//RS                     | '{'
+//RS                     | ')'
+//RS                     | '('
+//RS             )
+//RS         });
+//RS         let authority = token
+//RS             .strip_prefix("https://")
+//RS             .or_else(|| token.strip_prefix("http://"))
+//RS             .unwrap_or(token)
+//RS             .split(|character: char| matches!(character, '/' | '?' | '#'))
+//RS             .next()?;
+//RS         let host = authority
+//RS             .rsplit('@')
+//RS             .next()?
+//RS             .split(':')
+//RS             .next()?
+//RS             .trim_end_matches('.');
+//RS         let is_jet_domain = host
+//RS             .split('.')
+//RS             .any(|label| matches!(label, "jet" | "jet-lang"));
+//RS         let is_owned = host == "jet-lang.dev" || host.ends_with(".jet-lang.dev");
+//RS         if is_jet_domain && !is_owned {
+//RS             Some(host)
+//RS         } else {
+//RS             None
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn shipped_jet_domains_use_owned_domain() {
+//RS         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+//RS         let mut files = Vec::new();
+//RS         for relative in ["crates", "Source", "Docs"] {
+//RS             collect_text_files(&repo.join(relative), &mut files);
+//RS         }
+//RS         let mut violations = Vec::new();
+//RS         for path in files {
+//RS             let Ok(text) = fs::read_to_string(&path) else {
+//RS                 continue;
+//RS             };
+//RS             for (line_number, line) in text.lines().enumerate() {
+//RS                 for token in line.split(|character: char| {
+//RS                     character.is_whitespace() || matches!(character, '"' | '\'' | '`' | '<' | '>')
+//RS                 }) {
+//RS                     if let Some(host) = branded_host(token) {
+//RS                         violations.push(format!("{}:{} ({host})", path.display(), line_number + 1));
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         assert!(
+//RS             violations.is_empty(),
+//RS             "unowned Jet-branded host(s) in shipped surfaces:\n{}",
+//RS             violations.join("\n")
+//RS         );
+//RS     }
+//RS }
+// END-PORT-PENDING 0889 crates/jetpack/src/NixIndex.rs:1791-4160
+

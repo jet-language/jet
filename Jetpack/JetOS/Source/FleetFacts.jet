@@ -1,0 +1,65 @@
+// Rust theme_fleet_lifecycle.rs:89-203 write_fleet_deploy_facts and :205-214
+// compact_object. Canonical EnvPlan/FleetPlan/HostPlan capture is EnvModel-owned;
+// host overrides are retained by that model, not applied by this Rust writer.
+// #4485: every implicit SSH target is exactly one quoted shell operand. Explicit
+// command overrides, including empty source, remain verbatim. Main's approved
+// rollback correction leaves $(readlink ...) literal for the REMOTE shell.
+// Native execution requires Studio's real jetos_make_executable (#4479/#3593)
+// and Core process #3594; no chmod/process/model substitute is provided here.
+
+pub fn jetos_write_fleet_deploy_facts(dir: String, system: SystemPlan, plan: EnvPlan) IOError! -[FS, Env]> {
+    fleet_dir :: files.join(dir, "fleet")
+    bin_dir :: files.join(dir, "sw/bin")
+    files.create_dir_all(fleet_dir)
+    files.create_dir_all(bin_dir)
+    graph_identity :: if plan.graph_identity == {
+        .Val(value) -> foundation_json_quote(value)
+        .None -> "null"
+    }
+    hosts := [String]{}
+    default_host := ""
+    included := false
+    loop fleet in plan.fleets {
+        loop host in fleet.hosts {
+            if host.system != system.name -> next
+            target :: jetos_option_value(system, [String]{"deploy.host.{host.name}.target"}) ?? "{host.name}@{host.name}"
+            health :: jetos_option_value(system, [String]{"deploy.host.{host.name}.health"}) ?? "system-health"
+            target_word :: jetos_shell_single_quote(target)
+            generation_name :: "${{generation}}"
+            push :: jetos_option_value(system, [String]{"deploy.host.{host.name}.pushCommand"}) ?? "tar -C \"$root\" -cf - . | ssh {target_word} \"mkdir -p ~/.jetos/generations/{generation_name} && tar -C ~/.jetos/generations/{generation_name} -xf -\""
+            proof :: jetos_option_value(system, [String]{"deploy.host.{host.name}.proofCommand"}) ?? "ssh {target_word} \"test -f ~/.jetos/generations/{generation_name}/proof.txt && test -f ~/.jetos/generations/{generation_name}/activation-diff.txt\""
+            switch_cmd :: jetos_option_value(system, [String]{"deploy.host.{host.name}.switchCommand"}) ?? "ssh {target_word} \"ln -sfn ~/.jetos/generations/{generation_name} ~/.jetos/current\""
+            health_cmd :: jetos_option_value(system, [String]{"deploy.host.{host.name}.healthCommand"}) ?? "ssh {target_word} \"test -f ~/.jetos/current/health-checks.txt\""
+            rollback :: jetos_option_value(system, [String]{"deploy.host.{host.name}.rollbackCommand"}) ?? "ssh {target_word} \"test -L ~/.jetos/previous && ln -sfn \\$(readlink ~/.jetos/previous) ~/.jetos/current || true\""
+            if !included {
+                default_host = ~host.name
+                included = true
+            }
+            script_relative :: "fleet/deploy-{host.name}.sh"
+            script_path :: files.join(dir, script_relative)
+            files.write(script_path, jetos_render_fleet_host_script(fleet.name, host.name, host.system, target, push, proof, switch_cmd, health_cmd, rollback, graph_identity))
+            jetos_make_executable(script_path)
+            &hosts.push(jetos_fleet_compact_object([(key: String, value: String)]{
+                (key: "fleet", value: fleet.name),
+                (key: "host", value: host.name),
+                (key: "system", value: host.system),
+                (key: "target", value: target),
+                (key: "policy", value: "staged-proof-gated-rollback-stop"),
+                (key: "health", value: health),
+                (key: "script", value: script_relative)
+            }))
+        }
+    }
+    files.write(files.join(fleet_dir, "deploy-plan.json"), "{{\"kind\":\"jetos.fleet-deploy\",\"host\":{foundation_json_quote(system.name)},\"graph_identity\":{graph_identity},\"hosts\":[{hosts.join(",")}],\"proofs\":[\"build-closure\",\"ssh-push\",\"remote-proof-before-switch\",\"health-window\",\"rollback-on-fail\"]}}")
+    launcher :: "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\nhost=${{1:-{jetos_shell_single_quote(default_host)}}}\nif [ -z \"$host\" ]; then\n  echo 'usage: jetos-fleet-deploy <host>' >&2\n  exit 2\nfi\nscript=\"$root/fleet/deploy-$host.sh\"\nif [ ! -x \"$script\" ]; then\n  echo \"jetos fleet deploy: unknown host $host\" >&2\n  exit 2\nfi\nexec /bin/sh \"$script\"\n"
+    launcher_path :: files.join(bin_dir, "jetos-fleet-deploy")
+    files.write(launcher_path, launcher)
+    jetos_make_executable(launcher_path)
+}
+
+// Ordered STRING object schema, not a JSON codec. Duplicate keys are retained.
+fn jetos_fleet_compact_object(fields: [(key: String, value: String)]) -> String Never! {
+    parts := [String]{}
+    loop field in fields -> &parts.push("{foundation_json_quote(field.key)}:{foundation_json_quote(field.value)}")
+    "{{{parts.join(",")}}}"
+}

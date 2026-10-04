@@ -1,0 +1,30 @@
+// Rust: Source/BudgetProviders.rs:32
+FILE_READER_DELAY_MS :: AtomicU64.new(0) // GATE #4494
+// Rust: Source/BudgetProviders.rs:34
+ACTIVE_FILE_READERS :: AtomicU64.new(0) // GATE #4494
+// Rust: Source/BudgetProviders.rs:36
+ACTIVE_ISOLATED_WORKERS :: AtomicU64.new(0) // GATE #4494
+// Rust: Source/BudgetProviders.rs:38
+LAST_ISOLATED_GROUP :: AtomicU64.new(0) // GATE #4494
+// Rust: Source/BudgetProviders.rs:41
+struct ActiveFileReader {}
+// Rust: Source/BudgetProviders.rs:44
+fn ActiveFileReader.new() -> ActiveFileReader {
+    _ :: ACTIVE_FILE_READERS.fetch_add(1, AtomicOrdering.SeqCst)
+    ActiveFileReader{}
+}
+// Rust: Source/BudgetProviders.rs:51
+fn ActiveFileReader.drop(self: &ActiveFileReader) {
+    _ :: ACTIVE_FILE_READERS.fetch_sub(1, AtomicOrdering.SeqCst)
+}
+// Rust: Source/BudgetProviders.rs:56
+struct ActiveIsolatedWorker {}
+// Rust: Source/BudgetProviders.rs:59
+fn ActiveIsolatedWorker.new() -> ActiveIsolatedWorker {
+    _ :: ACTIVE_ISOLATED_WORKERS.fetch_add(1, AtomicOrdering.SeqCst)
+    ActiveIsolatedWorker{}
+}
+// Rust: Source/BudgetProviders.rs:66
+fn ActiveIsolatedWorker.drop(self: &ActiveIsolatedWorker) {
+    _ :: ACTIVE_ISOLATED_WORKERS.fetch_sub(1, AtomicOrdering.SeqCst)
+}

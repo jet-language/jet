@@ -1,0 +1,394 @@
+// New source-contract regressions; Rust has no embedded receipt/replacement tests.
+// Rust ForeignBridge::{ForeignSourceReceipt,accept_reasoned_replacement,
+// record_comparison}: checked receipt/replacement and raw observation contract.
+// Canonical TestingComparison supplies every verdict and artifact identity.
+// Full acceptance retains compiler gates #4416 (from_root closure lowering),
+// #4303 (borrowed trim), #4313 (SHA), #4325 (prep collections), plus #4323
+// integration until canonical Evidence/TestingComparison land in main Compiler/.
+// No alternate comparison, evidence or hash provider.
+
+fn pkg_boundary_test_identity() -> ForeignBoundaryIdentity Never! {
+    ForeignBoundaryIdentity.new("source", "overlay", "generator", "implementation", "toolchain", "target")
+}
+fn pkg_boundary_test_contract(language: ForeignLanguage) -> ForeignBoundaryContract Never! {
+    descriptor :: pkg_binder_descriptor(language) ?? panic("registered descriptor")
+    identity :: pkg_boundary_test_identity()
+    coverage :: ForeignArtifactCoverage.new("artifact", identity.target, identity.generator).with_transitive_dependencies([String]{}).with_reachable_callbacks([String]{}).with_compiler_flags([String]{"-O2"})
+    ForeignBoundaryContract.new(descriptor, "probe", identity).with_artifact_coverage(coverage)
+}
+fn pkg_boundary_test_derivation(contract: ForeignBoundaryContract) -> DerivationRecord Never! {
+    derivation_record("probe", "replacement", "jet-test", MIRDerivationMethod.SampledAgreement, "comparison", [String]{}, contract.identity.derivation_identity())
+}
+fn pkg_boundary_test_evidence(derivation: DerivationRecord) -> EvidenceRecord Never! {
+    identity :: EvidenceIdentity{report_id: "report", claim_id: "replacement", evidence_id: "observation"}
+    record := evidence_record_new(identity, EvidenceKind.Unit, EvidenceProducerKind.Test, EvidenceOutcome.Passed, U64{1}, EvidenceSource{path: "probe.jet", line: U32{1}, column: U32{1}}, EvidenceBuild{toolchain: "toolchain", target: "target", profile: "test"}, EvidenceRevision{source: "source", build: "build", revision: "run"})
+    record.derivation = Val(derivation_record_reference(derivation))
+    record
+}
+fn pkg_boundary_test_sample(candidate: String) -> ComparisonSample Never! {
+    comparison_sample_new(comparison_identity_new("case", "input", "source", "toolchain", "target"), comparison_observation_value("42"), comparison_observation_value(candidate))
+}
+fn pkg_boundary_test_comparison(candidate: String) -> ComparisonRecord Never! {
+    testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{pkg_boundary_test_sample(candidate)})
+}
+fn pkg_boundary_test_accept(contract: &ForeignBoundaryContract, comparison: ComparisonRecord) -> ForeignSourceReceipt ForeignBridgeError! {
+    derivation :: pkg_boundary_test_derivation(~contract)
+    current_identity :: ~contract.identity
+    current_coverage :: ~contract.artifact_coverage
+    &contract.accept_reasoned_replacement(current_identity, current_coverage, derivation, pkg_boundary_test_evidence(derivation), comparison, "replacement")
+}
+fn pkg_boundary_test_accept_error(contract: &ForeignBoundaryContract, comparison: ComparisonRecord) -> String Never! {
+    if pkg_boundary_test_accept(&contract, comparison) == {
+        .Ok(_) -> panic("replacement must be refused")
+        .Err(error) -> error.message
+    }
+}
+fn pkg_boundary_test_receipt_error(receipt: ForeignSourceReceipt) -> String Never! {
+    if receipt.validate() == {
+        .Ok(_) -> panic("receipt must be refused")
+        .Err(error) -> error.message
+    }
+}
+
+#Test("boundary comparison canonical verdict vocabulary and assertion rendering") {
+    cases :: [(status: ComparisonStatus, text: String)]{(status: ComparisonStatus.Matched, text: "matched"), (status: ComparisonStatus.Mismatch, text: "mismatch"), (status: ComparisonStatus.Empty, text: "empty"), (status: ComparisonStatus.Unsupported, text: "unsupported"), (status: ComparisonStatus.Unavailable, text: "unavailable"), (status: ComparisonStatus.Timeout, text: "timeout"), (status: ComparisonStatus.Cancelled, text: "cancelled"), (status: ComparisonStatus.InvalidOracle, text: "invalid_oracle"), (status: ComparisonStatus.Contaminated, text: "contaminated")}
+    loop row in cases {
+        text :: row.text
+        assert_eq(comparison_status_as_str(row.status), text)
+        terminal :: comparison_record_terminal(ObservationRelation.TypedEquality, row.status, "reason")
+        message :: if comparison_record_assert_equal(terminal) == {
+            .Ok(_) -> panic("terminal has no observations")
+            .Err(error) -> comparison_assertion_error_text(error)
+        }
+        assert_eq(message, "comparison {text}: reason")
+    }
+    assert_eq(observation_relation_as_str(ObservationRelation.TypedEquality), "typed_equality")
+    assert_eq(observation_relation_as_str(ObservationRelation.OrderedEffects), "ordered_effects")
+    assert_eq(observation_relation_as_str(ObservationRelation.TypedFailure), "typed_failure")
+    assert_eq(observation_relation_as_str(ObservationRelation.Custom("oracle")), "oracle")
+}
+
+#Test("boundary matched comparison preserves both raw sides evidence and replay assumptions") {
+    contract := pkg_boundary_test_contract(ForeignLanguage.Py)
+    sample :: comparison_sample_with_replays(pkg_boundary_test_sample("42"), comparison_observation_value("42"), comparison_observation_value("42"))
+    record :: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{sample})
+    evidence :: EvidenceIdentity{report_id: "report", claim_id: "claim", evidence_id: "evidence"}
+    &contract.record_comparison(record, Val(evidence)) ?? panic("record comparison")
+    assert_eq(contract.observations.len(), 1)
+    row :: contract.observations[0]
+    assert_eq(row.case_id, "case")
+    assert_eq(row.input, "input")
+    assert_eq(row.foreign, "42")
+    assert_eq(row.replacement, "42")
+    assert_eq(row.outcome, "matched")
+    assert_eq(row.evidence, Val(evidence))
+    assert_eq(row.assumptions, [String]{"reference-replay=42", "relation=typed_equality", "replacement-replay=42", "source=source", "target=target", "tool=toolchain"})
+    assert(!contract.replacement_accepted())
+}
+
+#Test("boundary terminals retain exact status relation reason and deduplicate assumptions") {
+    statuses :: [ComparisonStatus]{ComparisonStatus.Empty, ComparisonStatus.Unsupported, ComparisonStatus.Unavailable, ComparisonStatus.Timeout, ComparisonStatus.Cancelled, ComparisonStatus.InvalidOracle, ComparisonStatus.Contaminated}
+    loop status in statuses {
+        contract := pkg_boundary_test_contract(ForeignLanguage.Py)
+        record :: comparison_record_terminal(ObservationRelation.Custom("oracle"), status, "terminal reason")
+        &contract.record_comparison(record, None) ?? panic("terminal")
+        &contract.record_comparison(record, None) ?? panic("terminal twice")
+        assert_eq(contract.observations.len(), 0)
+        assert_eq(contract.assumptions, [String]{"comparison-relation:oracle", "comparison-terminal:{comparison_status_as_str(status)}:terminal reason"})
+        assert(!contract.replacement_accepted())
+    }
+    contract := pkg_boundary_test_contract(ForeignLanguage.Py)
+    record := comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Empty, "unused")
+    record.reason = None
+    &contract.record_comparison(record, None) ?? panic("terminal without reason")
+    assert(contract.assumptions.contains("comparison-terminal:empty:comparison produced no samples"))
+}
+
+#Test("boundary refuses unsupported schema and universal comparison proof without mutation") {
+    contract := pkg_boundary_test_contract(ForeignLanguage.Py)
+    record := pkg_boundary_test_comparison("42")
+    record.schema_version = U16{2}
+    error :: if &contract.record_comparison(record, None) == {
+        .Ok(_) -> panic("schema")
+        .Err(error) -> error.message
+    }
+    assert_eq(error, "unsupported comparison schema version 2")
+    record.schema_version = TEST_COMPARISON_SCHEMA_VERSION
+    record.universal_proof = true
+    proof_error :: if &contract.record_comparison(record, None) == {
+        .Ok(_) -> panic("proof")
+        .Err(fault) -> fault.message
+    }
+    assert_eq(proof_error, "foreign boundary comparison cannot claim universal proof")
+    assert_eq(contract.observations.len(), 0)
+    assert_eq(contract.assumptions.len(), 0)
+}
+
+#Test("reasoned replacement creates canonical artifact receipt and selectable boundary") {
+    contract := pkg_boundary_test_contract(ForeignLanguage.Py)
+    record :: pkg_boundary_test_comparison("42")
+    receipt :: pkg_boundary_test_accept(&contract, record) ?? panic("accept")
+    contract.validate() ?? panic("accepted boundary")
+    receipt.validate() ?? panic("receipt")
+    assert(contract.replacement_accepted())
+    assert_eq(contract.source_receipt, Val(receipt))
+    assert_eq(receipt.boundary_digest, contract.digest())
+    assert_eq(receipt.boundary_identity, contract.identity)
+    assert_eq(receipt.artifact_coverage_digest, contract.artifact_coverage.digest())
+    assert_eq(receipt.source_identity, "source")
+    assert_eq(receipt.replacement_identity, "replacement")
+    assert_eq(receipt.source_authority, ForeignSourceAuthority.ReplacementAccepted)
+    assert_eq(receipt.derivation, derivation_record_reference(pkg_boundary_test_derivation(contract)))
+    assert_eq(receipt.evidence, contract.evidence)
+    assert_eq(receipt.comparison_artifact_id, comparison_record_artifact_id(record) ?? panic("canonical artifact"))
+    assert_eq(receipt.comparison_schema_version, TEST_COMPARISON_SCHEMA_VERSION)
+    assert_eq(receipt.comparison_status, "matched")
+    assert_eq(receipt.comparison_relation, "typed_equality")
+    assert_eq(receipt.compared_samples, 1)
+    assert_eq(receipt.discarded_cases, 0)
+    assert_eq(receipt.first_difference, None)
+    assert_eq(receipt.comparison_reason, record.reason)
+    fields :: receipt.provenance_fields()
+    assert(fields.contains((name: "source-receipt-evidence", value: "report/replacement/observation")))
+    rendered :: receipt.render() ?? panic("render receipt")
+    assert(rendered.contains("source-receipt-comparison-artifact={receipt.comparison_artifact_id}\n"))
+    assert(rendered.contains("source-receipt-boundary-source=source\nsource-receipt-boundary-overlay=overlay\nsource-receipt-boundary-generator=generator\nsource-receipt-boundary-implementation=implementation\nsource-receipt-boundary-toolchain=toolchain\nsource-receipt-boundary-target=target\n"))
+    assert_eq(rendered, receipt.render() ?? panic("stable render"))
+    assert_eq(pkg_boundary_test_accept_error(&contract, record), "foreign replacement is already accepted for this boundary")
+}
+
+#Test("reasoned replacement refuses empty mismatched discarded and all terminal verdicts atomically") {
+    records :: [ComparisonRecord]{pkg_boundary_test_comparison("43"), testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{}), testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{pkg_boundary_test_sample("42")}, 1), testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{}, 2), comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Unsupported, "unsupported"), comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Unavailable, "unavailable"), comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Timeout, "timeout"), comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Cancelled, "cancelled"), comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.InvalidOracle, "invalid"), comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Contaminated, "contaminated")}
+    loop record in records {
+        contract := pkg_boundary_test_contract(ForeignLanguage.Py)
+        before :: ~contract
+        expected :: if comparison_record_assert_equal(record) == {
+            .Ok(_) -> panic("refused comparison")
+            .Err(error) -> comparison_assertion_error_text(error)
+        }
+        assert_eq(pkg_boundary_test_accept_error(&contract, record), "foreign replacement comparison was not accepted: {expected}")
+        assert_eq(contract, before)
+    }
+}
+
+#Test("reasoned replacement refuses each stale identity component and artifact coverage") {
+    contract := pkg_boundary_test_contract(ForeignLanguage.Py)
+    derivation :: pkg_boundary_test_derivation(contract)
+    evidence :: pkg_boundary_test_evidence(derivation)
+    record :: pkg_boundary_test_comparison("42")
+    before :: ~contract
+    loop component in 0..<6 {
+        identity := contract.identity
+        if component == {
+            0 -> identity.source = "changed"
+            1 -> identity.overlay = "changed"
+            2 -> identity.generator = "changed"
+            3 -> identity.implementation = "changed"
+            4 -> identity.toolchain = "changed"
+            else -> identity.target = "changed"
+        }
+        error :: if &contract.accept_reasoned_replacement(identity, before.artifact_coverage, derivation, evidence, record, "replacement") == {
+            .Ok(_) -> panic("stale identity")
+            .Err(error) -> error.message
+        }
+        assert_eq(error, "foreign replacement reasoning is stale against the current boundary identity")
+        assert_eq(contract, before)
+    }
+    loop component in 0..<6 {
+        coverage := contract.artifact_coverage
+        if component == {
+            0 -> coverage.loaded_artifact = "changed"
+            1 -> coverage.transitive_dependencies = Val([String]{"changed"})
+            2 -> coverage.reachable_callbacks = Val([String]{"changed"})
+            3 -> coverage.compiler_flags = Val([String]{"changed"})
+            4 -> coverage.target = "changed"
+            else -> coverage.generator = "changed"
+        }
+        error :: if &contract.accept_reasoned_replacement(before.identity, coverage, derivation, evidence, record, "replacement") == {
+            .Ok(_) -> panic("stale coverage")
+            .Err(error) -> error.message
+        }
+        assert_eq(error, "foreign replacement reasoning is stale against current artifact coverage")
+        assert_eq(contract, before)
+    }
+}
+
+#Test("reasoned replacement refuses blank replacement and failed incomplete unchecked evidence") {
+    contract := pkg_boundary_test_contract(ForeignLanguage.Py)
+    derivation :: pkg_boundary_test_derivation(contract)
+    evidence := pkg_boundary_test_evidence(derivation)
+    record :: pkg_boundary_test_comparison("42")
+    before :: ~contract
+    error :: if &contract.accept_reasoned_replacement(before.identity, before.artifact_coverage, derivation, evidence, record, " \t") == {
+        .Ok(_) -> panic("blank replacement")
+        .Err(error) -> error.message
+    }
+    assert_eq(error, "foreign replacement reasoning requires a replacement identity")
+    outcomes :: [EvidenceOutcome]{EvidenceOutcome.Failed, EvidenceOutcome.Error, EvidenceOutcome.Unavailable, EvidenceOutcome.Incomplete, EvidenceOutcome.NotObserved, EvidenceOutcome.Skipped, EvidenceOutcome.Unchecked}
+    loop outcome in outcomes {
+        evidence.outcome = outcome
+        failure :: if &contract.accept_reasoned_replacement(before.identity, before.artifact_coverage, derivation, evidence, record, "replacement") == {
+            .Ok(_) -> panic("evidence")
+            .Err(fault) -> fault.message
+        }
+        assert_eq(failure, "foreign replacement evidence is not a complete successful observation: {evidence_outcome_name(outcome)}")
+        assert_eq(contract, before)
+    }
+}
+
+#Test("reasoned replacement requires canonical derivation and agreeing valid evidence") {
+    contract := pkg_boundary_test_contract(ForeignLanguage.Py)
+    before :: ~contract
+    derivation := pkg_boundary_test_derivation(contract)
+    evidence := pkg_boundary_test_evidence(derivation)
+    record :: pkg_boundary_test_comparison("42")
+    derivation.id = "forged"
+    error :: if &contract.accept_reasoned_replacement(before.identity, before.artifact_coverage, derivation, evidence, record, "replacement") == {
+        .Ok(_) -> panic("forged derivation")
+        .Err(error) -> error.message
+    }
+    assert_eq(error, "derivation forged has a non-canonical identity")
+    wrong :: derivation_record("probe", "replacement", "jet-test", MIRDerivationMethod.SampledAgreement, "comparison", [String]{}, derivation_identity("wrong", "build", "run", "target"))
+    wrong_error :: if &contract.accept_reasoned_replacement(before.identity, before.artifact_coverage, wrong, evidence, record, "replacement") == {
+        .Ok(_) -> panic("wrong derivation identity")
+        .Err(fault) -> fault.message
+    }
+    assert_eq(wrong_error, "foreign boundary derivation identity does not match its source/build/run/target inputs")
+    derivation = pkg_boundary_test_derivation(contract)
+    evidence.derivation = None
+    missing :: if &contract.accept_reasoned_replacement(before.identity, before.artifact_coverage, derivation, evidence, record, "replacement") == {
+        .Ok(_) -> panic("missing reference")
+        .Err(fault) -> fault.message
+    }
+    assert_eq(missing, "foreign boundary evidence must reference a checked derivation")
+    evidence.derivation = Val(MIRDerivationRef{id: "wrong"})
+    disagreement :: if &contract.accept_reasoned_replacement(before.identity, before.artifact_coverage, derivation, evidence, record, "replacement") == {
+        .Ok(_) -> panic("disagreeing reference")
+        .Err(fault) -> fault.message
+    }
+    assert_eq(disagreement, "foreign boundary evidence and derivation references disagree")
+    evidence = pkg_boundary_test_evidence(derivation)
+    evidence.outcome = EvidenceOutcome.Checked
+    evidence.expectation = EvidenceExpectation.ExpectedFailure
+    invalid :: if &contract.accept_reasoned_replacement(before.identity, before.artifact_coverage, derivation, evidence, record, "replacement") == {
+        .Ok(_) -> panic("invalid evidence")
+        .Err(fault) -> fault.message
+    }
+    assert_eq(invalid, "foreign boundary evidence is invalid: evidence expectation expected_failure cannot describe outcome checked")
+    assert_eq(contract, before)
+}
+
+#Test("unsupported family and bare matched observations never accept replacement") {
+    languages :: [ForeignLanguage]{ForeignLanguage.C, ForeignLanguage.Cpp, ForeignLanguage.Com, ForeignLanguage.Ada, ForeignLanguage.Pascal}
+    loop language in languages {
+        contract := pkg_boundary_test_contract(language)
+        before :: ~contract
+        assert_eq(pkg_boundary_test_accept_error(&contract, pkg_boundary_test_comparison("42")), "foreign source replacement is unavailable for {language.root()}")
+        assert_eq(contract, before)
+    }
+    contract := pkg_boundary_test_contract(ForeignLanguage.Py)
+    &contract.record_comparison(pkg_boundary_test_comparison("42"), None) ?? panic("sampled only")
+    error :: if &contract.accept_replacement() == {
+        .Ok(_) -> panic("bare replacement")
+        .Err(error) -> error.message
+    }
+    assert_eq(error, "use accept_reasoned_replacement to attach the checked source receipt")
+    assert(!contract.replacement_accepted())
+    assert_eq(pkg_boundary_test_accept_error(&contract, pkg_boundary_test_comparison("42")), "cannot accept a foreign replacement without all matched cases carrying evidence")
+}
+
+#Test("receipt validation refuses every missing identity authority derivation and comparison field") {
+    contract := pkg_boundary_test_contract(ForeignLanguage.Py)
+    receipt :: pkg_boundary_test_accept(&contract, pkg_boundary_test_comparison("42")) ?? panic("receipt")
+    invalid := receipt
+    invalid.schema = "other"
+    assert_eq(pkg_boundary_test_receipt_error(invalid), "unsupported foreign source receipt schema `other`")
+    loop component in 0..<9 {
+        row := receipt
+        if component == {
+            0 -> row.boundary_digest = ""
+            1 -> row.boundary_identity.source = ""
+            2 -> row.artifact_coverage_digest = ""
+            3 -> row.source_identity = ""
+            4 -> row.replacement_identity = ""
+            5 -> row.comparison_artifact_id = ""
+            6 -> row.comparison_artifact_id = "abc"
+            7 -> row.comparison_artifact_id = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            else -> row.comparison_artifact_id = "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"
+        }
+        assert_eq(pkg_boundary_test_receipt_error(row), "foreign source receipt has incomplete identity or coverage")
+    }
+    invalid = receipt
+    invalid.source_authority = ForeignSourceAuthority.ForeignUntilAccepted
+    assert_eq(pkg_boundary_test_receipt_error(invalid), "foreign source receipt requires replacement-accepted source authority")
+    invalid = receipt
+    invalid.derivation.id = ""
+    assert_eq(pkg_boundary_test_receipt_error(invalid), "foreign source receipt requires checked derivation and evidence references")
+    invalid = receipt
+    invalid.evidence = [EvidenceIdentity]{}
+    assert_eq(pkg_boundary_test_receipt_error(invalid), "foreign source receipt requires checked derivation and evidence references")
+    loop component in 0..<6 {
+        row := receipt
+        if component == {
+            0 -> row.comparison_schema_version = U16{2}
+            1 -> row.comparison_status = "mismatch"
+            2 -> row.comparison_relation = " "
+            3 -> row.compared_samples = 0
+            4 -> row.discarded_cases = 1
+            else -> row.first_difference = Val(0)
+        }
+        assert_eq(pkg_boundary_test_receipt_error(row), "foreign source receipt requires a non-empty matched comparison without discarded cases")
+    }
+}
+
+#Test("accepted boundary rejects absent premature and stale receipts") {
+    contract := pkg_boundary_test_contract(ForeignLanguage.Py)
+    receipt :: pkg_boundary_test_accept(&contract, pkg_boundary_test_comparison("42")) ?? panic("receipt")
+    missing := contract
+    missing.source_receipt = None
+    missing_error :: if missing.validate() == {
+        .Ok(_) -> panic("missing receipt")
+        .Err(error) -> error.message
+    }
+    assert_eq(missing_error, "accepted foreign replacement is missing its source receipt")
+    premature := contract
+    premature.source_authority = ForeignSourceAuthority.ForeignUntilAccepted
+    premature_error :: if premature.validate() == {
+        .Ok(_) -> panic("premature receipt")
+        .Err(error) -> error.message
+    }
+    assert_eq(premature_error, "foreign source receipt requires replacement acceptance")
+    loop component in 0..<4 {
+        stale := contract
+        row := receipt
+        if component == {
+            0 -> row.boundary_digest = "changed"
+            1 -> row.boundary_identity.overlay = "changed"
+            2 -> row.artifact_coverage_digest = "changed"
+            else -> stale.identity.implementation = "changed"
+        }
+        stale.source_receipt = Val(row)
+        error :: if stale.validate() == {
+            .Ok(_) -> panic("stale receipt")
+            .Err(error) -> error.message
+        }
+        assert_eq(error, "foreign source receipt does not match its accepted boundary")
+    }
+}
+
+#Test("boundary mismatched observations retain raw counterexample without accepting replacement") {
+    contract := pkg_boundary_test_contract(ForeignLanguage.Py)
+    record :: pkg_boundary_test_comparison("43")
+    &contract.record_comparison(record, None) ?? panic("record counterexample")
+    assert_eq(contract.observations.len(), 1)
+    row :: contract.observations[0]
+    assert_eq(row.foreign, "42")
+    assert_eq(row.replacement, "43")
+    assert_eq(row.outcome, "mismatch")
+    assert_eq(row.evidence, None)
+    assert_eq(row.assumptions, [String]{"relation=typed_equality", "source=source", "target=target", "tool=toolchain"})
+    assert(!contract.replacement_accepted())
+    before :: ~contract
+    assert_eq(pkg_boundary_test_accept_error(&contract, pkg_boundary_test_comparison("42")), "cannot accept a foreign replacement without all matched cases carrying evidence")
+    assert_eq(contract, before)
+}

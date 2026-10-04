@@ -1,0 +1,438 @@
+// Typed deterministic progress (crates/jet-cli/src/MultiProgress.rs).
+// No terminal probes, environment reads, workers, or stream writes. Jet's
+// callable types have read parameters only; one shared storage owner permits
+// callback reporters to write the same state without copying task collections.
+pub JET_CLI_MAX_PROGRESS_TASKS :: 128
+pub JET_CLI_MAX_PROGRESS_LABEL_BYTES :: 256
+pub JET_CLI_MAX_PROGRESS_COLUMNS :: 16
+pub JET_CLI_MAX_PROGRESS_COLUMN_NAME_BYTES :: 64
+pub JET_CLI_MAX_PROGRESS_COLUMN_VALUE_BYTES :: 256
+pub JET_CLI_MAX_PROGRESS_MESSAGE_BYTES :: 256
+pub JET_CLI_MAX_PROGRESS_FRAME_BYTES :: 65536
+pub JET_CLI_MAX_PROGRESS_WIDTH :: 256
+
+// Rust `TaskId::{new,index,from}` (MultiProgress.rs:29-49).
+pub struct JetCLITaskID { pub index: Int }
+pub fn jet_cli_task_id_new(index: Int) -> JetCLITaskID Never! { JetCLITaskID{index: index} }
+// Rust `ProgressTotal::{as_option,is_known,from}` (MultiProgress.rs:51-82).
+pub enum JetCLIProgressTotal {
+    Known(U64)
+    Unknown
+}
+pub fn jet_cli_progress_total_from(total: U64?) -> JetCLIProgressTotal Never! {
+    if total == {
+        .Val(value) -> JetCLIProgressTotal.Known(value)
+        .None -> JetCLIProgressTotal.Unknown
+    }
+}
+pub fn jet_cli_progress_total_as_option(total: JetCLIProgressTotal) -> U64? Never! {
+    if total == {
+        .Known(value) -> Val(value)
+        .Unknown -> None
+    }
+}
+pub fn jet_cli_progress_total_is_known(total: JetCLIProgressTotal) -> Bool Never! {
+    if total == {
+        .Known(_) -> true
+        .Unknown -> false
+    }
+}
+// Rust `ProgressState::{is_terminal,as_str}` (MultiProgress.rs:84-112).
+pub enum JetCLIProgressState {
+    Running
+    Finished
+    Failed
+    Cancelled
+}
+pub fn jet_cli_progress_state_is_terminal(state: JetCLIProgressState) -> Bool Never! { state != JetCLIProgressState.Running }
+pub fn jet_cli_progress_state_name(state: JetCLIProgressState) -> String Never! {
+    if state == {
+        .Running -> "running"
+        .Finished -> "finished"
+        .Failed -> "failed"
+        .Cancelled -> "cancelled"
+    }
+}
+// Rust `ProgressColumn::{new,try_new,name,value}` (MultiProgress.rs:114-152).
+pub struct JetCLIProgressColumn {
+    pub name: String
+    pub value: String
+}
+pub fn jet_cli_progress_column_new(name: String, value: String) -> JetCLIProgressColumn Never! { JetCLIProgressColumn{name: name, value: value} }
+pub fn jet_cli_progress_column_try_new(name: String, value: String) -> JetCLIProgressColumn JetCLIProgressError! {
+    column :: jet_cli_progress_column_new(name, value)
+    jet_cli_progress_validate_column(column) ?? return Err(err)
+    Ok(column)
+}
+// Rust `TaskOptions::{default,known,unknown,transient,column}` (MultiProgress.rs:154-190).
+pub struct JetCLITaskOptions {
+    pub total: U64?
+    pub transient: Bool
+    pub columns: [JetCLIProgressColumn]
+}
+pub fn jet_cli_task_options_unknown() -> JetCLITaskOptions Never! { JetCLITaskOptions{total: None, transient: false, columns: [JetCLIProgressColumn]{}} }
+pub fn jet_cli_task_options_known(total: U64) -> JetCLITaskOptions Never! { JetCLITaskOptions{total: Val(total), transient: false, columns: [JetCLIProgressColumn]{}} }
+pub fn jet_cli_task_options_transient(options: ^JetCLITaskOptions, transient: Bool) -> JetCLITaskOptions Never! {
+    value := ^options
+    value.transient = transient
+    value
+}
+pub fn jet_cli_task_options_column(options: ^JetCLITaskOptions, name: String, value: String) -> JetCLITaskOptions Never! {
+    result := ^options
+    &result.columns.push(jet_cli_progress_column_new(name, value))
+    result
+}
+// Rust `ProgressFact` and `TaskState::fact` (MultiProgress.rs:192-248,298-323).
+// One record backs the model and snapshots; only snapshot operations copy it.
+pub struct JetCLIProgressFact {
+    pub id: JetCLITaskID
+    pub label: String
+    pub completed: U64
+    pub total: JetCLIProgressTotal
+    pub state: JetCLIProgressState
+    pub transient: Bool
+    pub columns: [JetCLIProgressColumn]
+    pub message: String?
+}
+pub fn jet_cli_progress_fact_position(fact: JetCLIProgressFact) -> U64 Never! { fact.completed }
+pub fn jet_cli_progress_fact_total_value(fact: JetCLIProgressFact) -> U64? Never! { jet_cli_progress_total_as_option(fact.total) }
+pub fn jet_cli_progress_fact_is_terminal(fact: JetCLIProgressFact) -> Bool Never! { jet_cli_progress_state_is_terminal(fact.state) }
+// Rust `ProgressFact::percentage` (MultiProgress.rs:230-242).
+// Fixed 100-step modular accumulation computes floor(completed*100/total)
+// exactly over u64, without an overflowing multiply or an i64 conversion.
+pub fn jet_cli_progress_fact_percentage(fact: JetCLIProgressFact) -> Int? Never! {
+    total :: jet_cli_progress_total_as_option(fact.total) ?? return None
+    if total == (U64{0}) -> return None
+    if fact.completed >= total -> return Val(100)
+    remaining :: total - fact.completed
+    remainder := U64{0}
+    percent := 0
+    loop _ in 0..<100 {
+        if remainder >= remaining {
+            remainder -= remaining
+            percent += 1
+        } else {
+            remainder += fact.completed
+        }
+    }
+    Val(percent)
+}
+// Rust `ProgressUpdate` (MultiProgress.rs:250-267).
+pub enum JetCLIProgressUpdate {
+    Increment(U64)
+    SetPosition(U64)
+    SetTotal(U64?)
+    SetColumn(JetCLIProgressColumn)
+    Finish
+    Fail(String?)
+    Cancel(String?)
+}
+// Rust `ProgressError` and Display (MultiProgress.rs:269-296).
+#Error
+pub enum JetCLIProgressError {
+    Limit(what: String, limit: Int)
+    InvalidText(String)
+    UnknownTask(JetCLITaskID)
+    TaskClosed(JetCLITaskID)
+    CountOverflow(JetCLITaskID)
+}
+pub fn jet_cli_progress_error_message(error: JetCLIProgressError) -> String Never! {
+    if error == {
+        .Limit(what, limit) -> "{what} exceeds the {limit}-byte/item limit"
+        .InvalidText(what) -> "{what} is empty or contains a control character"
+        .UnknownTask(id) -> "unknown progress task {id.index}"
+        .TaskClosed(id) -> "progress task {id.index} is already closed"
+        .CountOverflow(id) -> "progress task {id.index} observed count overflowed"
+    }
+}
+// Rust `ProgressFrame::{from_lines,text,lines,is_empty,diff}` (MultiProgress.rs:326-373).
+pub struct JetCLIProgressFrame {
+    pub text: String
+    pub lines: [String]
+    pub bytes: Int
+}
+pub fn jet_cli_progress_frame_from_lines(lines: ^[String]) -> JetCLIProgressFrame JetCLIProgressError! {
+    text :: lines.join("\n")
+    bytes :: text.bytes().len()
+    if bytes > JET_CLI_MAX_PROGRESS_FRAME_BYTES -> return Err(JetCLIProgressError.Limit{what: "progress frame bytes", limit: JET_CLI_MAX_PROGRESS_FRAME_BYTES})
+    Ok(JetCLIProgressFrame{text: text, lines: ^lines, bytes: bytes})
+}
+pub fn jet_cli_progress_frame_is_empty(frame: JetCLIProgressFrame) -> Bool Never! { frame.lines.len() == 0 }
+// Rust `FrameLineChange`, `ProgressFrameDiff::{empty,is_empty}` (MultiProgress.rs:375-418).
+pub struct JetCLIFrameLineChange { pub index: Int, pub text: String }
+pub struct JetCLIProgressFrameDiff {
+    pub changed: Bool
+    pub previous_lines: Int
+    pub current_lines: Int
+    pub changed_lines: [JetCLIFrameLineChange]
+    pub removed_lines: Int
+    pub text: String
+}
+pub fn jet_cli_progress_frame_diff_empty() -> JetCLIProgressFrameDiff Never! {
+    JetCLIProgressFrameDiff{changed: false, previous_lines: 0, current_lines: 0, changed_lines: [JetCLIFrameLineChange]{}, removed_lines: 0, text: ""}
+}
+pub fn jet_cli_progress_frame_diff_is_empty(diff: JetCLIProgressFrameDiff) -> Bool Never! { !diff.changed }
+// Rust `diff_frames` and `ProgressFrame::diff` (MultiProgress.rs:425-451,370-372).
+pub fn jet_cli_progress_diff_frames(previous: JetCLIProgressFrame?, current: JetCLIProgressFrame?) -> JetCLIProgressFrameDiff Never! {
+    old_count := 0
+    new_count := 0
+    text := ""
+    if previous == .Val(frame) -> old_count = frame.lines.len()
+    if current == .Val(frame) {
+        new_count = frame.lines.len()
+        text = ~frame.text
+    }
+    changes := [JetCLIFrameLineChange]{}
+    if current == .Val(next_frame) {
+        loop index in 0..<new_count {
+            changed := true
+            if previous == .Val(old) {
+                if index < old_count -> changed = old.lines[index] != next_frame.lines[index]
+            }
+            if changed -> &changes.push(JetCLIFrameLineChange{index: index, text: ~next_frame.lines[index]})
+        }
+    }
+    removed :: if old_count > new_count -> old_count - new_count else -> 0
+    JetCLIProgressFrameDiff{changed: old_count != new_count || changes.len() != 0, previous_lines: old_count, current_lines: new_count, changed_lines: ^changes, removed_lines: removed, text: ^text}
+}
+// Rust `ProgressObservation` (MultiProgress.rs:453-462).
+pub struct JetCLIProgressObservation {
+    pub facts: [JetCLIProgressFact]
+    pub frame: JetCLIProgressFrame?
+    pub diff: JetCLIProgressFrameDiff
+}
+// Rust `MultiProgress::{new,profile,progress_enabled,len,is_empty}` (MultiProgress.rs:464-501).
+struct JetCLIProgressStorage {
+    tasks: [JetCLIProgressFact]
+    previous_frame: JetCLIProgressFrame?
+}
+pub struct JetCLIMultiProgress {
+    pub profile: JetCLIOutputProfile
+    storage: Shared<JetCLIProgressStorage>
+}
+pub fn jet_cli_progress_new(profile: JetCLIOutputProfile) -> JetCLIMultiProgress Never! {
+    JetCLIMultiProgress{profile: profile, storage: shared JetCLIProgressStorage{tasks: [JetCLIProgressFact]{}, previous_frame: None}}
+}
+pub fn jet_cli_progress_enabled(progress: JetCLIMultiProgress) -> Bool Never! { progress.profile.progress_enabled }
+pub fn jet_cli_progress_len(progress: JetCLIMultiProgress) -> Int Never! {
+    guard :: progress.storage.guard_read()
+    guard.value.tasks.len()
+}
+pub fn jet_cli_progress_is_empty(progress: JetCLIMultiProgress) -> Bool Never! { jet_cli_progress_len(progress) == 0 }
+// Rust `MultiProgress::{add_task,add_known,add_unknown,add,add_task_with_options}` (MultiProgress.rs:503-570).
+pub fn jet_cli_progress_add_task(progress: &JetCLIMultiProgress, label: String, total: U64?) -> JetCLITaskID JetCLIProgressError! {
+    options := jet_cli_task_options_unknown()
+    options.total = total
+    jet_cli_progress_add_task_with_options(&progress, label, ^options)
+}
+pub fn jet_cli_progress_add_known(progress: &JetCLIMultiProgress, label: String, total: U64) -> JetCLITaskID JetCLIProgressError! { jet_cli_progress_add_task(&progress, label, Val(total)) }
+pub fn jet_cli_progress_add_unknown(progress: &JetCLIMultiProgress, label: String) -> JetCLITaskID JetCLIProgressError! { jet_cli_progress_add_task(&progress, label, None) }
+pub fn jet_cli_progress_add_task_with_options(progress: &JetCLIMultiProgress, label: String, options: ^JetCLITaskOptions) -> JetCLITaskID JetCLIProgressError! {
+    guard :: progress.storage.guard_edit()
+    if guard.value.tasks.len() >= JET_CLI_MAX_PROGRESS_TASKS -> return Err(JetCLIProgressError.Limit{what: "progress tasks", limit: JET_CLI_MAX_PROGRESS_TASKS})
+    jet_cli_progress_validate_label(label) ?? return Err(err)
+    jet_cli_progress_validate_columns(options.columns) ?? return Err(err)
+    id :: jet_cli_task_id_new(guard.value.tasks.len())
+    &guard.value.tasks.push(JetCLIProgressFact{id: id, label: label, completed: U64{0}, total: jet_cli_progress_total_from(options.total), state: JetCLIProgressState.Running, transient: options.transient, columns: ^options.columns, message: None})
+    Ok(id)
+}
+// Rust `MultiProgress::{task,facts,snapshot}` (MultiProgress.rs:572-588).
+pub fn jet_cli_progress_task(progress: JetCLIMultiProgress, id: JetCLITaskID) -> JetCLIProgressFact? Never! { jet_cli_progress_storage_task(progress.storage, id) }
+fn jet_cli_progress_storage_task(storage: Shared<JetCLIProgressStorage>, id: JetCLITaskID) -> JetCLIProgressFact? Never! {
+    guard :: storage.guard_read()
+    if id.index < 0 || id.index >= guard.value.tasks.len() -> return None
+    Val(~guard.value.tasks[id.index])
+}
+pub fn jet_cli_progress_facts(progress: JetCLIMultiProgress) -> [JetCLIProgressFact] Never! {
+    guard :: progress.storage.guard_read()
+    jet_cli_progress_storage_facts(guard.value)
+}
+fn jet_cli_progress_storage_facts(storage: JetCLIProgressStorage) -> [JetCLIProgressFact] Never! { ~storage.tasks }
+pub fn jet_cli_progress_snapshot(progress: JetCLIMultiProgress) -> JetCLIProgressSnapshot Never! { JetCLIProgressSnapshot{facts: jet_cli_progress_facts(progress)} }
+// Rust `MultiProgress::{task_mut,open_task_mut,ensure_open}` (MultiProgress.rs:925-950).
+fn jet_cli_progress_task_index(storage: JetCLIProgressStorage, id: JetCLITaskID) -> Int JetCLIProgressError! {
+    if id.index < 0 || id.index >= storage.tasks.len() -> return Err(JetCLIProgressError.UnknownTask(id))
+    Ok(id.index)
+}
+fn jet_cli_progress_ensure_open(fact: JetCLIProgressFact) JetCLIProgressError! {
+    if jet_cli_progress_fact_is_terminal(fact) -> return Err(JetCLIProgressError.TaskClosed(fact.id))
+}
+// Rust `MultiProgress::apply` and update methods (MultiProgress.rs:589-645,773-847).
+// Validate text before lookup, matching Rust's error precedence. One transition
+// path serves model, reporter, and iterator; counts never clamp to estimates.
+fn jet_cli_progress_validate_update(update: JetCLIProgressUpdate) JetCLIProgressError! {
+    if update == {
+        .SetColumn(column) -> jet_cli_progress_validate_column(column)
+        .Fail(message) -> jet_cli_progress_validate_message(message)
+        .Cancel(message) -> jet_cli_progress_validate_message(message)
+        else -> {}
+    }
+}
+fn jet_cli_progress_apply_task(fact: &JetCLIProgressFact, update: JetCLIProgressUpdate) JetCLIProgressError! {
+    jet_cli_progress_ensure_open(fact) ?? return Err(err)
+    if update == {
+        .Increment(amount) -> {
+            if amount > (U64{18446744073709551615}) - fact.completed -> return Err(JetCLIProgressError.CountOverflow(fact.id))
+            fact.completed += amount
+        }
+        .SetPosition(position) -> fact.completed = position
+        .SetTotal(total) -> fact.total = jet_cli_progress_total_from(total)
+        .SetColumn(column) -> {
+            loop index in 0..<fact.columns.len() {
+                if fact.columns[index].name == column.name {
+                    fact.columns[index].value = ~column.value
+                    return
+                }
+            }
+            if fact.columns.len() >= JET_CLI_MAX_PROGRESS_COLUMNS -> return Err(JetCLIProgressError.Limit{what: "progress columns", limit: JET_CLI_MAX_PROGRESS_COLUMNS})
+            &fact.columns.push(column)
+        }
+        .Finish -> {
+            fact.state = JetCLIProgressState.Finished
+            fact.message = None
+        }
+        .Fail(message) -> {
+            fact.state = JetCLIProgressState.Failed
+            fact.message = message
+        }
+        .Cancel(message) -> {
+            fact.state = JetCLIProgressState.Cancelled
+            fact.message = message
+        }
+    }
+}
+fn jet_cli_progress_storage_apply(storage: Shared<JetCLIProgressStorage>, id: JetCLITaskID, update: JetCLIProgressUpdate) JetCLIProgressError! {
+    jet_cli_progress_validate_update(update) ?? return Err(err)
+    guard := storage.guard_edit()
+    index :: jet_cli_progress_task_index(guard.value, id) ?? return Err(err)
+    jet_cli_progress_apply_task(&guard.value.tasks[index], update)
+}
+pub fn jet_cli_progress_apply(progress: &JetCLIMultiProgress, id: JetCLITaskID, update: JetCLIProgressUpdate) JetCLIProgressError! { jet_cli_progress_storage_apply(progress.storage, id, update) }
+pub fn jet_cli_progress_increment(progress: &JetCLIMultiProgress, id: JetCLITaskID, amount: U64) JetCLIProgressError! { jet_cli_progress_apply(&progress, id, JetCLIProgressUpdate.Increment(amount)) }
+pub fn jet_cli_progress_set_position(progress: &JetCLIMultiProgress, id: JetCLITaskID, position: U64) JetCLIProgressError! { jet_cli_progress_apply(&progress, id, JetCLIProgressUpdate.SetPosition(position)) }
+pub fn jet_cli_progress_set_total(progress: &JetCLIMultiProgress, id: JetCLITaskID, total: U64?) JetCLIProgressError! { jet_cli_progress_apply(&progress, id, JetCLIProgressUpdate.SetTotal(total)) }
+pub fn jet_cli_progress_set_unknown_total(progress: &JetCLIMultiProgress, id: JetCLITaskID) JetCLIProgressError! { jet_cli_progress_set_total(&progress, id, None) }
+pub fn jet_cli_progress_set_column(progress: &JetCLIMultiProgress, id: JetCLITaskID, column: JetCLIProgressColumn) JetCLIProgressError! { jet_cli_progress_apply(&progress, id, JetCLIProgressUpdate.SetColumn(column)) }
+pub fn jet_cli_progress_set_custom_column(progress: &JetCLIMultiProgress, id: JetCLITaskID, name: String, value: String) JetCLIProgressError! { jet_cli_progress_set_column(&progress, id, jet_cli_progress_column_new(name, value)) }
+pub fn jet_cli_progress_finish(progress: &JetCLIMultiProgress, id: JetCLITaskID) JetCLIProgressError! { jet_cli_progress_apply(&progress, id, JetCLIProgressUpdate.Finish) }
+pub fn jet_cli_progress_fail(progress: &JetCLIMultiProgress, id: JetCLITaskID) JetCLIProgressError! { jet_cli_progress_fail_with_message(&progress, id, None) }
+pub fn jet_cli_progress_fail_with_message(progress: &JetCLIMultiProgress, id: JetCLITaskID, message: String?) JetCLIProgressError! { jet_cli_progress_apply(&progress, id, JetCLIProgressUpdate.Fail(message)) }
+pub fn jet_cli_progress_cancel(progress: &JetCLIMultiProgress, id: JetCLITaskID) JetCLIProgressError! { jet_cli_progress_cancel_with_message(&progress, id, None) }
+pub fn jet_cli_progress_cancel_with_message(progress: &JetCLIMultiProgress, id: JetCLITaskID, message: String?) JetCLIProgressError! { jet_cli_progress_apply(&progress, id, JetCLIProgressUpdate.Cancel(message)) }
+// Rust `MultiProgress::set_label` (MultiProgress.rs:635-645).
+fn jet_cli_progress_storage_set_label(storage: Shared<JetCLIProgressStorage>, id: JetCLITaskID, label: String) JetCLIProgressError! {
+    jet_cli_progress_validate_label(label) ?? return Err(err)
+    guard :: storage.guard_edit()
+    index :: jet_cli_progress_task_index(guard.value, id) ?? return Err(err)
+    jet_cli_progress_ensure_open(guard.value.tasks[index]) ?? return Err(err)
+    guard.value.tasks[index].label = label
+}
+pub fn jet_cli_progress_set_label(progress: &JetCLIMultiProgress, id: JetCLITaskID, label: String) JetCLIProgressError! { jet_cli_progress_storage_set_label(progress.storage, id, label) }
+// Rust `MultiProgress::set_transient` (MultiProgress.rs:766-771); allowed after closure.
+fn jet_cli_progress_storage_set_transient(storage: Shared<JetCLIProgressStorage>, id: JetCLITaskID, transient: Bool) JetCLIProgressError! {
+    guard :: storage.guard_edit()
+    index :: jet_cli_progress_task_index(guard.value, id) ?? return Err(err)
+    guard.value.tasks[index].transient = transient
+}
+pub fn jet_cli_progress_set_transient(progress: &JetCLIMultiProgress, id: JetCLITaskID, transient: Bool) JetCLIProgressError! { jet_cli_progress_storage_set_transient(progress.storage, id, transient) }
+// Rust `MultiProgress::{frame,render,frame_text}` (MultiProgress.rs:885-902).
+pub fn jet_cli_progress_frame(progress: JetCLIMultiProgress) -> JetCLIProgressFrame? JetCLIProgressError! {
+    if !jet_cli_progress_enabled(progress) -> return Ok(None)
+    frame :: jet_cli_progress_render_visible_frame(progress) ?? return Err(err)
+    Ok(Val(frame))
+}
+pub fn jet_cli_progress_frame_text(progress: JetCLIMultiProgress) -> String? JetCLIProgressError! {
+    if jet_cli_progress_frame(progress) == {
+        .Ok(frame) -> if frame == {
+            .Val(value) -> Ok(Val(value.text))
+            .None -> Ok(None)
+        }
+        .Err(error) -> Err(error)
+    }
+}
+// Rust `MultiProgress::render_visible_frame` (MultiProgress.rs:952-967).
+fn jet_cli_progress_render_visible_frame(progress: JetCLIMultiProgress) -> JetCLIProgressFrame JetCLIProgressError! {
+    width :: if {
+        progress.profile.width < 1 -> 1
+        progress.profile.width > JET_CLI_MAX_PROGRESS_WIDTH -> JET_CLI_MAX_PROGRESS_WIDTH
+        else -> progress.profile.width
+    }
+    guard :: progress.storage.guard_read()
+    jet_cli_progress_storage_render(guard.value, progress.profile, width)
+}
+fn jet_cli_progress_storage_render(storage: JetCLIProgressStorage, profile: JetCLIOutputProfile, width: Int) -> JetCLIProgressFrame JetCLIProgressError! {
+    lines := [String]{}
+    loop fact in storage.tasks {
+        if fact.transient && jet_cli_progress_fact_is_terminal(fact) -> next
+        marker :: jet_cli_progress_marker(fact.state, profile.unicode_enabled)
+        plain :: jet_cli_progress_render_task_line(fact, marker)
+        clipped :: jet_cli_clip_to_width_with_unicode(plain, width, profile.unicode_enabled)
+        &lines.push(jet_cli_progress_style_marker(clipped, marker, profile.ansi_enabled, fact.state))
+    }
+    jet_cli_progress_frame_from_lines(^lines)
+}
+// Rust `validate_label/message/column/columns/text` (MultiProgress.rs:1255-1307).
+fn jet_cli_progress_validate_text(what: String, value: String, limit: Int, empty_is_invalid: Bool) JetCLIProgressError! {
+    if value.bytes().len() > limit -> return Err(JetCLIProgressError.Limit{what: what, limit: limit})
+    if (empty_is_invalid && value == "") || jet_cli_has_control(value) -> return Err(JetCLIProgressError.InvalidText(what))
+}
+fn jet_cli_progress_validate_label(label: String) JetCLIProgressError! { jet_cli_progress_validate_text("progress task label", label, JET_CLI_MAX_PROGRESS_LABEL_BYTES, true) }
+fn jet_cli_progress_validate_message(message: String?) JetCLIProgressError! {
+    if message == .Val(value) -> jet_cli_progress_validate_text("progress task message", value, JET_CLI_MAX_PROGRESS_MESSAGE_BYTES, false)
+}
+fn jet_cli_progress_validate_column(column: JetCLIProgressColumn) JetCLIProgressError! {
+    jet_cli_progress_validate_text("progress column name", column.name, JET_CLI_MAX_PROGRESS_COLUMN_NAME_BYTES, true) ?? return Err(err)
+    jet_cli_progress_validate_text("progress column value", column.value, JET_CLI_MAX_PROGRESS_COLUMN_VALUE_BYTES, false)
+}
+fn jet_cli_progress_validate_columns(columns: [JetCLIProgressColumn]) JetCLIProgressError! {
+    if columns.len() > JET_CLI_MAX_PROGRESS_COLUMNS -> return Err(JetCLIProgressError.Limit{what: "progress columns", limit: JET_CLI_MAX_PROGRESS_COLUMNS})
+    loop column in columns -> jet_cli_progress_validate_column(column) ?? return Err(err)
+}
+// Rust `marker` (MultiProgress.rs:1309-1320).
+fn jet_cli_progress_marker(state: JetCLIProgressState, unicode: Bool) -> String Never! {
+    if state == {
+        .Running -> if unicode -> "…" else -> ">"
+        .Finished -> if unicode -> "✓" else -> "done"
+        .Failed -> if unicode -> "✗" else -> "fail"
+        .Cancelled -> if unicode -> "×" else -> "cancel"
+    }
+}
+fn jet_cli_progress_append(out: &[U8], value: String) Never! { loop byte in value.bytes() -> &out.push(byte) }
+// Rust `render_task_line` (MultiProgress.rs:1322-1339).
+fn jet_cli_progress_render_task_line(fact: JetCLIProgressFact, marker: String) -> String Never! {
+    total :: if fact.total == {
+        .Known(value) -> "{value}"
+        .Unknown -> "?"
+    }
+    out := [U8]{}
+    jet_cli_progress_append(&out, "{marker} {fact.label} {fact.completed}/{total} {jet_cli_progress_state_name(fact.state)}")
+    loop column in fact.columns {
+        jet_cli_progress_append(&out, "  ")
+        jet_cli_progress_append(&out, column.name)
+        jet_cli_progress_append(&out, "=")
+        jet_cli_progress_append(&out, column.value)
+    }
+    if fact.message == .Val(message) {
+        jet_cli_progress_append(&out, "  ")
+        jet_cli_progress_append(&out, message)
+    }
+    String.from_bytes(out) ?? panic("progress line is valid UTF-8")
+}
+// Rust `style_marker` (MultiProgress.rs:1345-1356).
+fn jet_cli_progress_style_marker(value: String, marker: String, ansi: Bool, state: JetCLIProgressState) -> String Never! {
+    if !ansi || !value.starts_with(marker) -> return ~value
+    color :: if state == {
+        .Running -> "36"
+        .Finished -> "32"
+        .Failed -> "31"
+        .Cancelled -> "33"
+    }
+    out := [U8]{}
+    &out.push(U8{27})
+    jet_cli_progress_append(&out, "[{color}m{marker}")
+    &out.push(U8{27})
+    jet_cli_progress_append(&out, "[0m")
+    raw :: value.bytes()
+    loop index in marker.bytes().len()..<raw.len() -> &out.push(raw[index])
+    String.from_bytes(out) ?? panic("styled progress line is valid UTF-8")
+}

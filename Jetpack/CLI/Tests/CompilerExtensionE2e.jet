@@ -1,0 +1,685 @@
+// PORT-PENDING 0836 crates-jetpack-bin-tests-compiler-extension-e2e-module-group: crates/jetpack-bin/tests/compiler_extension_e2e.rs:1-347
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Tower #549 C4/C5 — real compiler-extension WASM guest harness.
+//RS //!
+//RS //! Drives fixture components under `fixtures/compiler_extension/` through the
+//RS //! compiled `CompilerExtensionHost` (same wasmtime substrate the driver uses)
+//RS //! and proves:
+//RS //! - one custom-lint finding analyze → validate → stage → accept round-trip
+//RS //! - crash / malformed / incompatible / fuel-exhaust guests fail closed
+//RS //!   (Jet `E:` wires, no process abort, no rustc leak, no auto-commit)
+//RS //! - wall-clock epoch `timeout_ms` interrupts a looping guest fail-closed
+//RS //! - WASI-random import guests fail closed at load (deterministic sandbox)
+//RS //! - pure guest re-analyze is byte-identical for the same snapshot
+//RS //!
+//RS //! Driver post-sema wire + AOT/dev fact-parity proofs live in
+//RS //! `jet-driver::CompilerExtensionHook`.
+//RS 
+//RS #![allow(non_snake_case)]
+//RS 
+//RS use jet_pkg_model::CompilerExtension::{
+//RS     decode_and_validate_response, message_exposes_rustc, parse_analyze_result, parse_load_result,
+//RS     Ability, AnalyzeResponse, ExtensionSession, Finding, ProtocolError, SessionPhase, SpanFact,
+//RS     SymbolFact, TypeFact, TypeFactShape, TypedSnapshot,
+//RS };
+//RS #[path = "../../jet-pkg-model/src/Prelude/CompilerExtension.rs"]
+//RS mod CompilerExtensionHost;
+//RS 
+//RS use std::path::PathBuf;
+//RS use std::time::{Duration, Instant};
+//RS use CompilerExtensionHost::{
+//RS     jet_compiler_extension_analyze, jet_compiler_extension_analyze_with_limits,
+//RS     jet_compiler_extension_close, jet_compiler_extension_load,
+//RS };
+//RS 
+//RS fn fixture(name: &str) -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("../jet-pkg-model/fixtures/compiler_extension")
+//RS         .join(name)
+//RS }
+//RS 
+//RS fn snapshot_with_symbol(name: &str) -> TypedSnapshot {
+//RS     TypedSnapshot::new(
+//RS         Ability::v1_defaults().to_vec(),
+//RS         vec![TypeFact {
+//RS             id: "t1".into(),
+//RS             repr: "Int".into(),
+//RS             shape: TypeFactShape::Scalar,
+//RS         }],
+//RS         vec![SymbolFact {
+//RS             id: "s1".into(),
+//RS             name: name.into(),
+//RS             kind: "let".into(),
+//RS             type_id: "t1".into(),
+//RS             span_id: "sp1".into(),
+//RS             effects: vec!["pure".into()],
+//RS             provenance: "sema".into(),
+//RS         }],
+//RS         vec![SpanFact {
+//RS             id: "sp1".into(),
+//RS             file: "main.jet".into(),
+//RS             start: 10,
+//RS             end: 11,
+//RS         }],
+//RS     )
+//RS     .unwrap()
+//RS }
+//RS 
+//RS fn sample_snapshot() -> TypedSnapshot {
+//RS     snapshot_with_symbol("x")
+//RS }
+//RS 
+//RS fn analyze_lint_guest(snapshot: &TypedSnapshot) -> AnalyzeResponse {
+//RS     let handle = load_guest("lint_no_x.wasm").expect("load lint guest");
+//RS     let wire = jet_compiler_extension_analyze(handle, &snapshot.encode().unwrap());
+//RS     let raw = parse_analyze_result(&wire).expect("analyze must succeed");
+//RS     let response = decode_and_validate_response(snapshot, &raw).expect("valid response");
+//RS     assert!(jet_compiler_extension_close(handle));
+//RS     response
+//RS }
+//RS 
+//RS fn assert_jet_owned(err: &ProtocolError) {
+//RS     assert!(
+//RS         !message_exposes_rustc(&err.message),
+//RS         "I2 leak in host message: {}",
+//RS         err.message
+//RS     );
+//RS }
+//RS 
+//RS fn load_guest(wasm: &str) -> Result<u64, ProtocolError> {
+//RS     let path = fixture(wasm);
+//RS     let wire = jet_compiler_extension_load(path.to_str().unwrap());
+//RS     let result = parse_load_result(&wire);
+//RS     if let Err(ref e) = result {
+//RS         assert_jet_owned(e);
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS #[test]
+//RS fn custom_lint_analyze_roundtrip_stages_finding() {
+//RS     let snap = sample_snapshot();
+//RS     let handle = load_guest("lint_no_x.wasm").expect("load lint guest");
+//RS     let mut session = ExtensionSession::new();
+//RS     session.on_loaded(handle).unwrap();
+//RS 
+//RS     let snap_bytes = snap.encode().unwrap();
+//RS     let wire = jet_compiler_extension_analyze(handle, &snap_bytes);
+//RS     let raw = parse_analyze_result(&wire).expect("analyze must succeed");
+//RS     let staged = session.stage_response(&snap, &raw).expect("validate+stage");
+//RS     assert_eq!(staged.findings.len(), 1);
+//RS     assert_eq!(staged.findings[0].rule, "no-x");
+//RS     assert_eq!(staged.findings[0].span_id, "sp1");
+//RS     assert_eq!(staged.findings[0].severity, "warning");
+//RS     assert!(!session.is_committed());
+//RS 
+//RS     let accepted = session.accept_staged().unwrap();
+//RS     assert_eq!(
+//RS         accepted,
+//RS         AnalyzeResponse {
+//RS             protocol: 1,
+//RS             findings: vec![Finding {
+//RS                 rule: "no-x".into(),
+//RS                 span_id: "sp1".into(),
+//RS                 message: "prefer y".into(),
+//RS                 severity: "warning".into(),
+//RS             }],
+//RS             proposed_edits: vec![],
+//RS             artifacts: vec![],
+//RS         }
+//RS     );
+//RS     assert!(session.is_committed());
+//RS 
+//RS     assert!(session.close(jet_compiler_extension_close));
+//RS     assert_eq!(session.phase(), SessionPhase::Closed);
+//RS }
+//RS 
+//RS #[test]
+//RS fn custom_lint_ignores_snapshot_without_x_fact() {
+//RS     let response = analyze_lint_guest(&snapshot_with_symbol("y"));
+//RS     assert!(
+//RS         response.findings.is_empty(),
+//RS         "non-x snapshot must not produce no-x finding: {response:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn custom_lint_ignores_empty_snapshot() {
+//RS     let snapshot = TypedSnapshot::new(
+//RS         Ability::v1_defaults().to_vec(),
+//RS         Vec::new(),
+//RS         Vec::new(),
+//RS         vec![SpanFact {
+//RS             id: "sp1".into(),
+//RS             file: "main.jet".into(),
+//RS             start: 0,
+//RS             end: 0,
+//RS         }],
+//RS     )
+//RS     .unwrap();
+//RS     let response = analyze_lint_guest(&snapshot);
+//RS     assert!(
+//RS         response.findings.is_empty(),
+//RS         "empty snapshot must not produce no-x finding: {response:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn crash_guest_traps_fail_closed_without_commit() {
+//RS     let snap = sample_snapshot();
+//RS     let handle = load_guest("crash.wasm").expect("load crash guest");
+//RS     let mut session = ExtensionSession::new();
+//RS     session.on_loaded(handle).unwrap();
+//RS 
+//RS     let wire = jet_compiler_extension_analyze(handle, &snap.encode().unwrap());
+//RS     let err = parse_analyze_result(&wire).expect_err("crash must fail closed");
+//RS     assert!(
+//RS         err.message.contains("trapped") || err.message.contains("unreachable"),
+//RS         "expected trap wire, got: {}",
+//RS         err.message
+//RS     );
+//RS     assert_jet_owned(&err);
+//RS     assert!(session.staged().is_none());
+//RS     assert!(!session.is_committed());
+//RS     assert!(session.close(jet_compiler_extension_close));
+//RS }
+//RS 
+//RS #[test]
+//RS fn malformed_response_rejected_before_stage() {
+//RS     let snap = sample_snapshot();
+//RS     let handle = load_guest("malformed.wasm").expect("load malformed guest");
+//RS     let mut session = ExtensionSession::new();
+//RS     session.on_loaded(handle).unwrap();
+//RS 
+//RS     let wire = jet_compiler_extension_analyze(handle, &snap.encode().unwrap());
+//RS     let raw = parse_analyze_result(&wire).expect("guest returned bytes");
+//RS     let err = session
+//RS         .stage_response(&snap, &raw)
+//RS         .expect_err("malformed JSON must not stage");
+//RS     assert_jet_owned(&err);
+//RS     assert!(session.staged().is_none());
+//RS     assert!(!session.is_committed());
+//RS     assert!(session.close(jet_compiler_extension_close));
+//RS }
+//RS 
+//RS #[test]
+//RS fn incompatible_guest_fails_at_load() {
+//RS     let err = load_guest("incompatible.wasm").expect_err("missing analyze export");
+//RS     assert!(
+//RS         err.message.contains("analyze") || err.message.contains("no exported"),
+//RS         "expected missing-analyze message, got: {}",
+//RS         err.message
+//RS     );
+//RS     assert_jet_owned(&err);
+//RS     // No live handle — session stays Idle / never commits.
+//RS     let mut session = ExtensionSession::new();
+//RS     assert_eq!(session.phase(), SessionPhase::Idle);
+//RS     assert!(!session.is_committed());
+//RS     assert!(!session.close(jet_compiler_extension_close));
+//RS }
+//RS 
+//RS #[test]
+//RS fn fuel_exhaustion_times_out_fail_closed() {
+//RS     let snap = sample_snapshot();
+//RS     let handle = load_guest("fuel_loop.wasm").expect("load fuel-loop guest");
+//RS     let mut session = ExtensionSession::new();
+//RS     session.on_loaded(handle).unwrap();
+//RS 
+//RS     let wire = jet_compiler_extension_analyze(handle, &snap.encode().unwrap());
+//RS     let err = parse_analyze_result(&wire).expect_err("infinite loop must exhaust fuel");
+//RS     assert!(
+//RS         err.message.contains("trapped") || err.message.to_ascii_lowercase().contains("fuel"),
+//RS         "expected fuel/trap failure, got: {}",
+//RS         err.message
+//RS     );
+//RS     assert_jet_owned(&err);
+//RS     assert!(session.staged().is_none());
+//RS     assert!(!session.is_committed());
+//RS     assert!(session.close(jet_compiler_extension_close));
+//RS }
+//RS 
+//RS #[test]
+//RS fn wall_clock_timeout_ms_epoch_interrupt_fail_closed() {
+//RS     // Huge fuel so the wall-clock epoch path wins over fuel exhaustion.
+//RS     // Short timeout keeps the live proof fast while still observing sleep.
+//RS     const HUGE_FUEL: u64 = u64::MAX / 4;
+//RS     const TIMEOUT_MS: u64 = 50;
+//RS 
+//RS     let snap = sample_snapshot();
+//RS     let handle = load_guest("fuel_loop.wasm").expect("load loop guest");
+//RS     let mut session = ExtensionSession::new();
+//RS     session.on_loaded(handle).unwrap();
+//RS 
+//RS     let start = Instant::now();
+//RS     let wire = jet_compiler_extension_analyze_with_limits(
+//RS         handle,
+//RS         &snap.encode().unwrap(),
+//RS         HUGE_FUEL,
+//RS         TIMEOUT_MS,
+//RS     );
+//RS     let elapsed = start.elapsed();
+//RS     let err = parse_analyze_result(&wire).expect_err("loop must hit wall-clock timeout");
+//RS     let lower = err.message.to_ascii_lowercase();
+//RS     assert!(
+//RS         lower.contains("interrupt") || lower.contains("epoch") || lower.contains("trapped"),
+//RS         "expected epoch interrupt trap, got: {}",
+//RS         err.message
+//RS     );
+//RS     assert!(
+//RS         !lower.contains("fuel"),
+//RS         "timeout proof must not be a fuel miss: {}",
+//RS         err.message
+//RS     );
+//RS     assert!(
+//RS         elapsed >= Duration::from_millis(TIMEOUT_MS.saturating_sub(10)),
+//RS         "epoch interrupt fired too early ({elapsed:?}); expected ~{TIMEOUT_MS}ms wall budget"
+//RS     );
+//RS     assert!(
+//RS         elapsed < Duration::from_millis(2_000),
+//RS         "epoch interrupt took too long ({elapsed:?}); wall path should not wait full v1 default"
+//RS     );
+//RS     assert_jet_owned(&err);
+//RS     assert!(session.staged().is_none());
+//RS     assert!(!session.is_committed());
+//RS     assert!(session.close(jet_compiler_extension_close));
+//RS }
+//RS 
+//RS #[test]
+//RS fn wasi_random_import_guest_fails_closed_at_load() {
+//RS     // Deterministic sandbox law: ambient entropy imports are denied.
+//RS     let err = load_guest("imports_random.wasm").expect_err("WASI random must fail load");
+//RS     let lower = err.message.to_ascii_lowercase();
+//RS     assert!(
+//RS         lower.contains("import")
+//RS             || lower.contains("instantiate")
+//RS             || lower.contains("random")
+//RS             || lower.contains("wasi"),
+//RS         "expected import/instantiate denial, got: {}",
+//RS         err.message
+//RS     );
+//RS     assert!(
+//RS         lower.contains("no clock")
+//RS             || lower.contains("no host import")
+//RS             || lower.contains("admits no host"),
+//RS         "message must name the deterministic sandbox denial, got: {}",
+//RS         err.message
+//RS     );
+//RS     assert_jet_owned(&err);
+//RS     let mut session = ExtensionSession::new();
+//RS     assert_eq!(session.phase(), SessionPhase::Idle);
+//RS     assert!(!session.is_committed());
+//RS     assert!(!session.close(jet_compiler_extension_close));
+//RS }
+//RS 
+//RS #[test]
+//RS fn pure_guest_reanalyze_is_byte_identical() {
+//RS     let snap = sample_snapshot();
+//RS     let snap_bytes = snap.encode().unwrap();
+//RS     let handle = load_guest("lint_no_x.wasm").expect("load pure lint guest");
+//RS     let mut session = ExtensionSession::new();
+//RS     session.on_loaded(handle).unwrap();
+//RS 
+//RS     let wire_a = jet_compiler_extension_analyze(handle, &snap_bytes);
+//RS     let wire_b = jet_compiler_extension_analyze(handle, &snap_bytes);
+//RS     let raw_a = parse_analyze_result(&wire_a).expect("first analyze");
+//RS     let raw_b = parse_analyze_result(&wire_b).expect("second analyze");
+//RS     assert_eq!(
+//RS         raw_a, raw_b,
+//RS         "deterministic sandbox: same snapshot must yield identical analyze bytes"
+//RS     );
+//RS     assert!(session.staged().is_none());
+//RS     assert!(!session.is_committed());
+//RS     assert!(session.close(jet_compiler_extension_close));
+//RS }
+//RS 
+//RS #[test]
+//RS fn analyze_with_host_helper_accepts_lint() {
+//RS     let snap = sample_snapshot();
+//RS     let path = fixture("lint_no_x.wasm");
+//RS     let accepted = jet_pkg_model::CompilerExtension::analyze_with_host(
+//RS         path.to_str().unwrap(),
+//RS         &snap,
+//RS         jet_compiler_extension_load,
+//RS         jet_compiler_extension_analyze,
+//RS         jet_compiler_extension_close,
+//RS     )
+//RS     .expect("helper round-trip");
+//RS     assert_eq!(accepted.findings.len(), 1);
+//RS     assert_eq!(accepted.findings[0].rule, "no-x");
+//RS }
+// END-PORT-PENDING 0836 crates/jetpack-bin/tests/compiler_extension_e2e.rs:1-347
+
+// PORT-PENDING 0836 crates-jetpack-bin-tests-compiler-extension-e2e-module-group: crates/jetpack-bin/tests/criterion1.rs:1-77
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #2189 criterion 1: `env` selects the default or positional module.
+//RS 
+//RS use std::fs;
+//RS use std::io::Write;
+//RS use std::path::PathBuf;
+//RS use std::process::{Command, Stdio};
+//RS 
+//RS fn jetpack() -> Command {
+//RS     Command::new(env!("CARGO_BIN_EXE_jetpack"))
+//RS }
+//RS 
+//RS fn scratch(tag: &str) -> PathBuf {
+//RS     let path = std::env::temp_dir().join(format!(
+//RS         "jet-{tag}-{}-{}",
+//RS         std::process::id(),
+//RS         std::time::SystemTime::now()
+//RS             .duration_since(std::time::UNIX_EPOCH)
+//RS             .unwrap()
+//RS             .as_nanos()
+//RS     ));
+//RS     fs::create_dir_all(&path).unwrap();
+//RS     path
+//RS }
+//RS 
+//RS fn criterion_root() -> PathBuf {
+//RS     let root = PathBuf::from(std::env::var_os("HOME").unwrap())
+//RS         .join(".cache/jet-test-scratch/jetpack-criterion1-root");
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     root
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_enters_default_and_positional_modules() {
+//RS     let project = scratch("criterion1-project");
+//RS     let root = criterion_root();
+//RS     fs::write(
+//RS         project.join("env.jet"),
+//RS         "module env.dev { prompt: \"default-module\" }\nmodule env.full { prompt: \"full-module\" }\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     for (args, prompt) in [
+//RS         (vec!["env", "--no-color"], "default-module"),
+//RS         (vec!["env", "full", "--no-color"], "full-module"),
+//RS     ] {
+//RS         let mut child = jetpack()
+//RS             .args(&args)
+//RS             .current_dir(&project)
+//RS             .env("JETPACK_ROOT", &root)
+//RS             .env("SHELL", "/bin/bash")
+//RS             .stdin(Stdio::piped())
+//RS             .stdout(Stdio::piped())
+//RS             .stderr(Stdio::piped())
+//RS             .spawn()
+//RS             .unwrap();
+//RS         child
+//RS             .stdin
+//RS             .as_mut()
+//RS             .unwrap()
+//RS             .write_all(b"printf '%s\\n' \"$PS1\"\nexit\n")
+//RS             .unwrap();
+//RS         let output = child.wait_with_output().unwrap();
+//RS         assert!(
+//RS             output.status.success(),
+//RS             "args={args:?}\nstdout={}\nstderr={}",
+//RS             String::from_utf8_lossy(&output.stdout),
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS         assert!(
+//RS             String::from_utf8_lossy(&output.stdout).contains(prompt),
+//RS             "args={args:?}\nprompt={prompt}\nstdout={}\nstderr={}",
+//RS             String::from_utf8_lossy(&output.stdout),
+//RS             String::from_utf8_lossy(&output.stderr)
+//RS         );
+//RS     }
+//RS     fs::remove_dir_all(project).unwrap();
+//RS }
+// END-PORT-PENDING 0836 crates/jetpack-bin/tests/criterion1.rs:1-77
+
+// PORT-PENDING 0836 crates-jetpack-bin-tests-compiler-extension-e2e-module-group: crates/jetpack-bin/tests/environment_formatter.rs:1-210
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-ECO12 / D-FMTPROJECT1: the environment formatter must use the real
+//RS //! jetpack plan, package realization, composed process, and zero-write batch.
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::{Command, Output};
+//RS 
+//RS struct TempTree(PathBuf);
+//RS 
+//RS impl TempTree {
+//RS     fn new(tag: &str) -> Self {
+//RS         let path = std::env::temp_dir().join(format!(
+//RS             "jet-environment-formatter-{tag}-{}",
+//RS             std::process::id()
+//RS         ));
+//RS         let _ = fs::remove_dir_all(&path);
+//RS         fs::create_dir_all(&path).unwrap();
+//RS         Self(path)
+//RS     }
+//RS 
+//RS     fn join(&self, name: &str) -> PathBuf {
+//RS         self.0.join(name)
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for TempTree {
+//RS     fn drop(&mut self) {
+//RS         let _ = fs::remove_dir_all(&self.0);
+//RS     }
+//RS }
+//RS 
+//RS fn write_executable(path: &Path, source: &str) {
+//RS     fs::write(path, source).unwrap();
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::PermissionsExt;
+//RS         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+//RS     }
+//RS }
+//RS 
+//RS fn fixture(project: &Path, root: &Path, fixtures: &Path, scratch: &Path, fail: bool) -> Output {
+//RS     fixture_with_args(project, root, fixtures, scratch, fail, &[])
+//RS }
+//RS 
+//RS fn fixture_with_args(
+//RS     project: &Path,
+//RS     root: &Path,
+//RS     fixtures: &Path,
+//RS     scratch: &Path,
+//RS     fail: bool,
+//RS     extra_args: &[&str],
+//RS ) -> Output {
+//RS     fs::create_dir_all(fixtures).unwrap();
+//RS     let out = root.join("hangar/provider-fixture-nixfmt");
+//RS     let bin = out.join("bin");
+//RS     fs::create_dir_all(&bin).unwrap();
+//RS     write_executable(
+//RS         &bin.join("nixfmt"),
+//RS         "#!/bin/sh\nset -e\nif test \"x$JET_FMT_FAIL\" = x1; then exit 7; fi\nfor path do\n    printf 'formatted\\n' > \"$path\"\ndone\n",
+//RS     );
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::PermissionsExt;
+//RS         fs::set_permissions(bin.join("nixfmt"), fs::Permissions::from_mode(0o555)).unwrap();
+//RS         fs::set_permissions(&bin, fs::Permissions::from_mode(0o555)).unwrap();
+//RS         fs::set_permissions(&out, fs::Permissions::from_mode(0o555)).unwrap();
+//RS     }
+//RS     fs::write(
+//RS         fixtures.join("nixpkgs-nixfmt.json"),
+//RS         format!(
+//RS             "[{{\"drvPath\":\"/nix/store/fixture-nixfmt.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
+//RS             out.to_string_lossy()
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         project.join("env.jet"),
+//RS         "module env.dev { formatter: pkgs.nixfmt }\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(project.join("flake.nix"), "unformatted\n").unwrap();
+//RS 
+//RS     let mut command = Command::new(env!("CARGO_BIN_EXE_jetpack"));
+//RS     command
+//RS         .args(["fmt", "--lang", "nix", "--trust", "--offline", "--no-color"])
+//RS         .args(extra_args)
+//RS         .arg("--fixtures")
+//RS         .arg(fixtures)
+//RS         .current_dir(project)
+//RS         .env("JETPACK_ROOT", root)
+//RS         .env("HOME", root.join("home"))
+//RS         .env("TMPDIR", scratch);
+//RS     if fail {
+//RS         command.env("JET_FMT_FAIL", "1");
+//RS     }
+//RS     command.output().unwrap()
+//RS }
+//RS 
+//RS #[test]
+//RS fn formatter_realizes_typed_environment_and_writes_only_after_success() {
+//RS     let tree = TempTree::new("success");
+//RS     let project = tree.join("project");
+//RS     let root = tree.join("root");
+//RS     let fixtures = tree.join("fixtures");
+//RS     let scratch = tree.join("scratch");
+//RS     fs::create_dir_all(&project).unwrap();
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     fs::create_dir_all(&scratch).unwrap();
+//RS 
+//RS     let output = fixture(&project, &root, &fixtures, &scratch, false);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "formatter failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(project.join("flake.nix")).unwrap(),
+//RS         "formatted\n"
+//RS     );
+//RS     assert!(
+//RS         fs::read_dir(&scratch).unwrap().next().is_none(),
+//RS         "formatter staging directory leaked"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn environment_info_discloses_the_typed_formatter_fact() {
+//RS     let tree = TempTree::new("info");
+//RS     let project = tree.join("project");
+//RS     let root = tree.join("root");
+//RS     fs::create_dir_all(&project).unwrap();
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     fs::write(
+//RS         project.join("env.jet"),
+//RS         "module env.dev { formatter: pkgs.nixfmt }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jetpack"))
+//RS         .args(["enter", "info", "--json", "--no-color"])
+//RS         .current_dir(&project)
+//RS         .env("JETPACK_ROOT", &root)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "info failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&output.stdout).contains("\"formatter\":\"nixfmt@nixpkgs\""),
+//RS         "formatter fact missing from info: {}",
+//RS         String::from_utf8_lossy(&output.stdout)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn formatter_failure_keeps_sources_and_cleans_staging() {
+//RS     let tree = TempTree::new("failure");
+//RS     let project = tree.join("project");
+//RS     let root = tree.join("root");
+//RS     let fixtures = tree.join("fixtures");
+//RS     let scratch = tree.join("scratch");
+//RS     fs::create_dir_all(&project).unwrap();
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     fs::create_dir_all(&scratch).unwrap();
+//RS 
+//RS     let output = fixture(&project, &root, &fixtures, &scratch, true);
+//RS     assert_eq!(output.status.code(), Some(7));
+//RS     assert!(
+//RS         String::from_utf8_lossy(&output.stderr).contains("E1340"),
+//RS         "missing formatter failure diagnostic: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(project.join("flake.nix")).unwrap(),
+//RS         "unformatted\n"
+//RS     );
+//RS     assert!(
+//RS         fs::read_dir(&scratch).unwrap().next().is_none(),
+//RS         "formatter staging directory leaked after failure"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn formatter_dry_run_reports_a_diff_without_writing_sources() {
+//RS     let tree = TempTree::new("dry-run");
+//RS     let project = tree.join("project");
+//RS     let root = tree.join("root");
+//RS     let fixtures = tree.join("fixtures");
+//RS     let scratch = tree.join("scratch");
+//RS     fs::create_dir_all(&project).unwrap();
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     fs::create_dir_all(&scratch).unwrap();
+//RS 
+//RS     let output = fixture_with_args(&project, &root, &fixtures, &scratch, false, &["--dry-run"]);
+//RS     assert_eq!(output.status.code(), Some(1));
+//RS     assert!(
+//RS         String::from_utf8_lossy(&output.stdout).contains("--- flake.nix"),
+//RS         "dry-run must report a unified diff: {}",
+//RS         String::from_utf8_lossy(&output.stdout)
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(project.join("flake.nix")).unwrap(),
+//RS         "unformatted\n"
+//RS     );
+//RS     assert!(
+//RS         fs::read_dir(&scratch).unwrap().next().is_none(),
+//RS         "formatter staging directory leaked after dry-run"
+//RS     );
+//RS }
+// END-PORT-PENDING 0836 crates/jetpack-bin/tests/environment_formatter.rs:1-210
+
+// PORT-PENDING 0836 crates-jetpack-bin-tests-compiler-extension-e2e-module-group: crates/jetpack-bin/tests/theme.rs:1-35
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use std::process::Command;
+//RS 
+//RS fn jetpack() -> &'static str {
+//RS     env!("CARGO_BIN_EXE_jetpack")
+//RS }
+//RS 
+//RS #[test]
+//RS fn redirected_help_auto_is_ansi_free() {
+//RS     let output = Command::new(jetpack())
+//RS         .arg("help")
+//RS         .env_remove("NO_COLOR")
+//RS         .env_remove("FORCE_COLOR")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(output.status.success());
+//RS     assert!(String::from_utf8_lossy(&output.stdout).contains("jetpack —"));
+//RS     assert!(
+//RS         !output.stdout.contains(&0x1b),
+//RS         "redirected help contained ANSI"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn json_mode_disables_presentation_even_for_forced_error_output() {
+//RS     let output = Command::new(jetpack())
+//RS         .args(["not-a-command", "--json", "--color=always"])
+//RS         .env("FORCE_COLOR", "1")
+//RS         .env_remove("NO_COLOR")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(output.status.code(), Some(2));
+//RS     assert!(!output.stderr.is_empty(), "expected an error diagnostic");
+//RS     assert!(!output.stdout.contains(&0x1b), "JSON stdout contained ANSI");
+//RS     assert!(!output.stderr.contains(&0x1b), "JSON error contained ANSI");
+//RS }
+// END-PORT-PENDING 0836 crates/jetpack-bin/tests/theme.rs:1-35
+

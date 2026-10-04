@@ -1,0 +1,1058 @@
+use core.files.runtime.kernel_path_components as generation_path
+use core.files.runtime.kernel_path_traits as generation_path_traits
+use core.files.runtime.descriptor_metadata as generation_metadata
+use core.files.host.retained_descriptor as generation_native
+use core.sys.host.os_path_ingress as generation_ingress
+use core.process.host.native_process as generation_process
+use core.encoding.DataTree
+
+// Whole generation_files.rs:1-1536. This is the JetOS ENGINE owner, never CLI.
+// Imports/carriers are shared with Foundation, EnvModel, PackageModel, Store.
+// Main publication: include this file in JetOS source assembly, its tests in
+// JetOS test assembly. Root/Studio call the public jetos_ helpers in this owner.
+// Native ABI is RETAINED-DESCRIPTOR-ABI-1: raw paths, retained entry owners,
+// individual next() results, unfollowed lazy file_type, actual copy permissions.
+// REQUIRED providers have ZERO native bodies (#4494/#4392/#4483). Do not activate
+// native rows from source existence. InvalidData remains #4409, not InvalidInput.
+// #4483/#4500: BOTH cfg bodies retained below; canonical selected functions
+// jetos_copy_runtime_symlink, jetos_rewrite_store_link, jetos_path_bytes,
+// jetos_generation_mode, jetos_jet_toolchain_candidates require actual target
+// selection, NOT path.platform. Native process/current_exe ABI A6E6 is also
+// REQUIRED/0-body; full consumer bodies below never bridge String commands.
+// #4499: package_source_closure uses REAL OSPath map keys with canonical traits;
+// never text-key encoding or linear-array map emulation.
+// Types/Roots/sync must migrate their original PathBuf transport to OSPath at
+// their own owners. Existing String implementations are NOT raw providers.
+
+// Rust44: structural equality of witness and ordered output digests.
+#Equatable
+pub struct JetOSGenerationRootProof {
+    pub witness: String
+    pub output_digests: [String]
+}
+
+// Rust1232-1253. Two borrowed cursors avoid materializing component vectors.
+// Equality and push are the sole Runtime component laws, including prefixes.
+pub fn jetos_relative_path(from: generation_path.OSPath, to: generation_path.OSPath) -> generation_path.OSPath IOError! {
+    left := generation_path.components(from)
+    right := generation_path.components(to)
+    common := 0
+    loop {
+        saved_left :: left
+        saved_right :: right
+        a :: generation_path.next(from, &left)
+        b :: generation_path.next(to, &right)
+        if a == .Val(first) && b == .Val(second) {
+            if generation_path.component_equal(from, first, to, second) {
+                common += 1
+                next
+            }
+        }
+        left = saved_left
+        right = saved_right
+        break
+    }
+    if common == 0 -> return Err(jetos_generation_other("cannot relativize generation store path"))
+    out := generation_path.from_text("", from.platform)
+    up :: generation_path.from_text("..", from.platform)
+    loop {
+        _ :: generation_path.next(from, &left) ?? break
+        generation_path.push(&out, up)
+    }
+    loop {
+        component :: generation_path.next(to, &right) ?? break
+        generation_path.push_component(&out, to, component)
+    }
+    Ok(out)
+}
+
+// Rust1182-1184. Despite its name the original performs NO payload filtering.
+pub fn jetos_copy_runtime_file_filtered(src: generation_path.OSPath, dst: generation_path.OSPath) IOError! -[FS]> {
+    jetos_copy_file_replace(src, dst)
+}
+
+// Rust1263-1270. Selected Unix ONLY; no read_link before ignored remove.
+// Canonical public jetos_copy_runtime_symlink is #4483/#4500 gated, not an alias.
+fn jetos_copy_runtime_symlink_unix_body(src: generation_path.OSPath, dst: generation_path.OSPath) IOError! -[FS]> {
+    if generation_path.parent_span(dst) == .Val(parent) -> generation_native.create_dir_all(generation_path.owned_span(dst, parent))
+    generation_native.remove(dst).drop("Rust ignores remove_file failure")
+    target :: generation_native.read_link(src)
+    generation_native.symlink(target, dst)
+}
+// Rust1273-1275. NonUnix does not create parents or read the link.
+fn jetos_copy_runtime_symlink_nonunix_body(src: generation_path.OSPath, dst: generation_path.OSPath) IOError! -[FS]> {
+    jetos_copy_file_replace(src, dst)
+}
+
+fn jetos_generation_other(message: String) -> IOError Never! {
+    IOError.Other(IOContext{operation: .Write, resource: None, os_code: None, cause: Val(message)})
+}
+// Rust609-611, exact InvalidData. Runtime must publish its actual error kind.
+fn jetos_invalid_generation(message: String) -> IOError Never! {
+    IOError.InvalidData(IOContext{operation: .Read, resource: None, os_code: None, cause: Val(message)})
+}
+fn jetos_generation_child(parent: generation_path.OSPath, name: String) -> generation_path.OSPath Never! {
+    out := parent
+    generation_path.push(&out, generation_path.from_text(name, parent.platform))
+    out
+}
+fn jetos_generation_join(parent: generation_path.OSPath, name: generation_path.OSPath) -> generation_path.OSPath Never! {
+    out := parent
+    generation_path.push(&out, name)
+    out
+}
+
+// Rust628-631: exact U64 BE byte length, then original bytes; no text framing.
+fn jetos_generation_frame(out: &[U8], bytes: [U8]) Never! {
+    size :: U64{bytes.len()}
+    loop i in 0..<8 -> &out.push(U8{Int.from_u64((size >> (56 - i * 8)) & U64{255})})
+    loop byte in bytes -> &out.push(byte)
+}
+fn jetos_generation_u32_be(value: U32) -> [U8] Never! {
+    [U8]{U8{Int.from_u32(value >> 24)}, U8{Int.from_u32((value >> 16) & U32{255})}, U8{Int.from_u32((value >> 8) & U32{255})}, U8{Int.from_u32(value & U32{255})}}
+}
+
+// Rust696/702. Native cfg selected by compiler, NOT lexical path platform.
+fn jetos_path_bytes_unix_body(path: generation_path.OSPath) -> [U8] Never! { path.encoded }
+fn jetos_path_bytes_windows_body(path: generation_path.OSPath) -> [U8] Never! {
+    out := [U8]{}
+    loop unit in generation_path.to_windows_wide(path) {
+        &out.push(U8{Int.from_u16(unit & U16{255})})
+        &out.push(U8{Int.from_u16(unit >> 8)})
+    }
+    out
+}
+// Rust711/717. Windows readonly is the captured real native attribute0x1.
+fn jetos_generation_mode_unix_body(info: generation_metadata.DescriptorStat) -> U32 Never! {
+    if info.native == {
+        .Unix(mode, _) -> mode
+        .Windows(_, _) -> panic("selected Unix metadata must carry Unix mode")
+    }
+}
+fn jetos_generation_mode_windows_body(info: generation_metadata.DescriptorStat) -> U32 Never! {
+    if info.native == {
+        .Windows(attributes, _) -> if (attributes & U32{1}) != U32{0} -> U32{1} else -> U32{0}
+        .Unix(_, _) -> panic("selected Windows metadata must carry Windows attributes")
+    }
+}
+
+struct JetOSGenerationEntry {
+    entry: generation_native.DirectoryEntry
+    name: generation_path.OSPath
+    path: generation_path.OSPath
+    proof_bytes: [U8]
+}
+// Name ordering is OsString encoded bytes; manifest ordering is selected
+// path_bytes (Unix bytes / Windows UTF16 LE), not Path ordering. Cache keys once.
+fn jetos_generation_byte_order(a: [U8], b: [U8]) -> Ordering Never! {
+    loop i in 0..<min(a.len(), b.len()) {
+        if a[i] < b[i] -> return Ordering.Less
+        if a[i] > b[i] -> return Ordering.Greater
+    }
+    if a.len() < b.len() -> return Ordering.Less
+    if a.len() > b.len() -> return Ordering.Greater
+    Ordering.Equal
+}
+// Propagate read_dir opening errors; consumer chooses filter_map(ok) versus
+// collect(Result). Keep the stream/entries alive for their raw names/type loans.
+fn jetos_generation_entries(path: generation_path.OSPath, filter_errors: Bool, proof_order: Bool) -> [JetOSGenerationEntry] IOError! -[FS]> {
+    stream :: generation_native.read_dir(path)
+    entries := [JetOSGenerationEntry]{}
+    loop {
+        if stream.next() == {
+            .Ok(optional) -> {
+                entry :: optional ?? break
+                child :: entry.path()
+                key :: if proof_order -> jetos_path_bytes(child) else -> [U8]{}
+                &entries.push(JetOSGenerationEntry{entry: entry, name: entry.file_name(), path: child, proof_bytes: key})
+            }
+            .Err(error) -> {
+                if filter_errors -> next
+                return Err(error)
+            }
+        }
+    }
+    if proof_order {
+        &entries.sort_by((a: JetOSGenerationEntry, b: JetOSGenerationEntry) -> jetos_generation_byte_order(a.proof_bytes, b.proof_bytes))
+    } else {
+        &entries.sort_by((a: JetOSGenerationEntry, b: JetOSGenerationEntry) -> jetos_generation_byte_order(a.name.encoded, b.name.encoded))
+    }
+    Ok(entries)
+}
+
+// Rust50/58/62. Roots resolution and current seconds stay at their real owners.
+pub fn jetos_generation_dir(system: SystemPlan, explicit: String?) -> generation_path.OSPath Never! -[Env, Time]> {
+    name :: if explicit == {
+        .Val(value) -> if value != "" -> value else -> "{system.name}-{jetos_now_secs()}"
+        .None -> "{system.name}-{jetos_now_secs()}"
+    }
+    jetos_generation_child(jetos_generation_child(jetos_systems_dir(), "generations"), name)
+}
+pub fn jetos_systems_dir() -> generation_path.OSPath Never! -[Env]> {
+    jetos_generation_child(pkg_resolve_roots().root, "systems")
+}
+pub fn jetos_generations_log() -> generation_path.OSPath Never! -[Env]> {
+    jetos_generation_child(jetos_systems_dir(), "generations.log")
+}
+
+// Rust181-188. Do not evaluate later stages after the first original error.
+fn jetos_generation_stage(stage: String, result: Unit IOError!) IOError! {
+    if result == {
+        .Ok(_) -> {}
+        .Err(error) -> return Err(foundation_io_error_with_cause(error, "writing generation {stage} failed: {error}"))
+    }
+}
+// Rust66-179: complete ordered engine orchestration; there is no rollback in
+// this function. Staging/publication rollback belongs generations_activation.
+pub fn jetos_write_generation_files(dir: generation_path.OSPath, published_dir: generation_path.OSPath, system: SystemPlan, realized: [JetOSRealizedPackage], plan: EnvPlan) IOError! -[FS, Env, Exec, IO, Time, Rand]> {
+    generation_native.create_dir_all(dir)
+    packages :: jetos_realized_packages_json(realized)
+    services :: jetos_generation_services_json(system.services)
+    options :: jetos_generation_options_json(system.options)
+    plan_text :: jetos_render_plan_json(system, realized, Val((packages: packages, services: services, options: options)), plan.graph_identity)
+    generation_native.write(jetos_generation_child(dir, "plan.json"), plan_text.bytes())
+    jetos_write_root_closure(dir, realized) ?? return Err(foundation_io_error_with_cause(err, "writing the owned runtime closure failed: {err}"))
+    jetos_generation_stage("etc tree", jetos_write_etc_tree(dir, system))
+    jetos_generation_stage("network facts", jetos_write_network_facts(dir, system))
+    jetos_generation_stage("boot facts", jetos_write_boot_facts(dir, system, realized))
+    jetos_generation_stage("init facts", jetos_write_init_facts(dir, system, realized))
+    generation_native.write(jetos_generation_child(dir, "proof.txt"), jetos_render_proof(system, realized, plan).bytes())
+    jetos_generation_stage("systemd units", jetos_write_systemd_units(dir, system))
+    jetos_generation_stage("systemd timer/socket units", jetos_write_systemd_timer_socket_units(dir, system))
+    jetos_generation_stage("terminal environment", jetos_write_terminal_environment(dir, system))
+    jetos_generation_stage("activation diff", jetos_write_activation_diff(dir, published_dir, system, realized))
+    jetos_generation_stage("health checks", jetos_write_health_checks(dir, system))
+    jetos_generation_stage("hardware facts", jetos_write_hardware_facts(dir, system))
+    jetos_generation_stage("user environment facts", jetos_write_user_environment_facts(dir, system))
+    jetos_generation_stage("flatpak facts", jetos_write_flatpak_facts(dir, system))
+    jetos_generation_stage("performance facts", jetos_write_performance_facts(dir, system))
+    jetos_generation_stage("module priority facts", jetos_write_module_priority_facts(dir, system))
+    jetos_generation_stage("storage facts", jetos_write_storage_facts(dir, system))
+    jetos_generation_stage("workload facts", jetos_write_workload_facts(dir, system))
+    jetos_generation_stage("theme facts", jetos_write_theme_facts(dir, system))
+    jetos_generation_stage("fleet deploy facts", jetos_write_fleet_deploy_facts(dir, system, plan))
+    jetos_generation_stage("options reference", jetos_write_options_reference(dir, system))
+    jetos_generation_stage("image variant facts", jetos_write_image_variant_facts(dir, system, plan))
+    jetos_generation_stage("lifecycle facts", jetos_write_lifecycle_facts(dir, system))
+    jetos_generation_stage("service manager facts", jetos_write_service_manager_depth(dir, system))
+    jetos_generation_stage("app module facts", jetos_write_app_module_facts(dir, system))
+    jetos_generation_stage("acceptance fixture", jetos_write_acceptance_fixture(dir, system))
+    jetos_generation_stage("desktop facts", jetos_write_desktop_facts(dir, system))
+    jetos_generation_stage("store cache facts", jetos_write_store_cache_facts(dir, realized))
+    jetos_generation_stage("compatibility facts", jetos_write_compat_escape_hatches(dir, system))
+    jetos_generation_stage("provenance", jetos_write_provenance(dir, system, realized))
+    jetos_generation_stage("VM proof", jetos_write_vm_proof(dir, system, plan_text))
+    jetos_generation_stage("Studio projection", jetos_write_studio_app_projection(dir, published_dir, system))
+    jetos_generation_stage("secret manifest", jetos_write_secret_manifest(dir, system))
+    jetos_generation_stage("bootable root projection", jetos_write_bootable_root_projection(dir, published_dir))
+}
+
+JETOS_EVALUATOR_SEMANTICS :: prep { "jet-env-model.module-eval.v1" }
+// Rust192-211. Environment String access is the original UTF8 var/default law.
+pub fn jetos_write_generation_source_proof(dir: generation_path.OSPath, config: generation_path.OSPath, flags: JetOSFlags) IOError! -[FS, Env]> {
+    source :: generation_native.read_bytes(config)
+    closure :: jetos_generation_source_closure(config)
+    plan :: generation_native.read_bytes(jetos_generation_child(dir, "plan.json"))
+    input :: sys.get("JETOS_STUDIO_INPUT_PLAN_SHA256") ?? ""
+    proof :: "{{\"kind\":\"jetos.generation-source-proof\",\"source_sha256\":{foundation_json_quote(record_blob_key(source))},\"source_closure_sha256\":{foundation_json_quote(record_blob_key(closure))},\"input_plan_sha256\":{foundation_json_quote(input)},\"plan_sha256\":{foundation_json_quote(record_blob_key(plan))},\"real_tier\":{if flags.real_tier -> "true" else -> "false"},\"evaluator_semantics\":{foundation_json_quote(JETOS_EVALUATOR_SEMANTICS)}}}"
+    generation_native.write(jetos_generation_child(dir, "source-proof.json"), proof.bytes())
+}
+// Rust339-358. SHA256 has ONE Foundation owner. Canonical framing never JSON.
+fn jetos_generation_root_witness(host: String, name: String, source: [U8], plan: [U8], manifest: [U8], digests: [String]) -> String Never! {
+    canonical := [U8]{}
+    jetos_generation_frame(&canonical, "jetos-generation-root-v1".bytes())
+    jetos_generation_frame(&canonical, host.bytes())
+    jetos_generation_frame(&canonical, name.bytes())
+    jetos_generation_frame(&canonical, source)
+    jetos_generation_frame(&canonical, plan)
+    jetos_generation_frame(&canonical, manifest)
+    loop digest in digests -> jetos_generation_frame(&canonical, digest.bytes())
+    "sha256-{record_blob_key(canonical)}"
+}
+// Rust360-386. Stable field order and explicit quoted digest list.
+fn jetos_write_generation_root_metadata(dir: generation_path.OSPath, host: String, name: String, witness: String, source: [U8], plan: [U8], manifest: [U8], digests: [String]) IOError! -[FS]> {
+    quoted := [String]{}
+    loop digest in digests -> &quoted.push(foundation_json_quote(digest))
+    root :: "{{\"kind\":\"jetos.generation-root.v1\",\"host\":{foundation_json_quote(host)},\"generation\":{foundation_json_quote(name)},\"witness\":{foundation_json_quote(witness)},\"source_proof_sha256\":{foundation_json_quote(record_blob_key(source))},\"plan_sha256\":{foundation_json_quote(record_blob_key(plan))},\"files_proof_sha256\":{foundation_json_quote(record_blob_key(manifest))},\"output_digests\":[{quoted.join(",")}]}}"
+    generation_native.write(jetos_generation_child(dir, "generation-root.json"), root.bytes())
+}
+fn jetos_generation_sorted_unique(values: &[String]) Never! {
+    &values.sort()
+    write := 0
+    loop read in 0..<values.len() {
+        if write == 0 || values[read] != values[write - 1] {
+            if write != read -> values[write] = values[read]
+            write += 1
+        }
+    }
+    loop values.len() > write -> _ :: &values.pop()
+}
+// Rust216-249: write manifest BEFORE reading proof/plan or computing witness.
+pub fn jetos_write_generation_root_proof(dir: generation_path.OSPath, host: String, name: String, realized: [JetOSRealizedPackage], roots: HangarRoots) -> JetOSGenerationRootProof IOError! -[FS, Env]> {
+    manifest :: jetos_generation_files_manifest(dir)
+    generation_native.write(jetos_generation_child(dir, "generation-files.proof"), manifest)
+    source :: generation_native.read_bytes(jetos_generation_child(dir, "source-proof.json"))
+    plan :: generation_native.read_bytes(jetos_generation_child(dir, "plan.json"))
+    digests := [String]{}
+    loop package in realized {
+        loop digest in package.output_digests(roots) -> &digests.push(digest)
+    }
+    jetos_generation_sorted_unique(&digests)
+    witness :: jetos_generation_root_witness(host, name, source, plan, manifest, digests)
+    jetos_write_generation_root_metadata(dir, host, name, witness, source, plan, manifest, digests)
+    Ok(JetOSGenerationRootProof{witness: witness, output_digests: digests})
+}
+// Rust571-578. Preserve actual tree lookup/type error diagnostics.
+fn jetos_generation_json_string(value: DataTree, key: String) -> String IOError! {
+    field :: value.get(key) ?? return Err(jetos_invalid_generation("{err}"))
+    text :: field.as_str() ?? return Err(jetos_invalid_generation("{err}"))
+    Ok(text)
+}
+// Rust251-337: exact error priority and canonical ordering check without clone.
+pub fn jetos_validate_generation_root_proof(dir: generation_path.OSPath, host: String, name: String, source_config: generation_path.OSPath, roots: HangarRoots, flags: JetOSFlags) -> JetOSGenerationRootProof IOError! -[FS, Env]> {
+    info :: generation_native.symlink_metadata(dir)
+    if !info.is_dir || info.is_symlink -> return Err(jetos_invalid_generation("published generation root is not an owned directory"))
+    stored :: generation_native.read_bytes(jetos_generation_child(dir, "generation-files.proof"))
+    manifest :: jetos_generation_files_manifest(dir)
+    if manifest != stored -> return Err(jetos_invalid_generation("generation files proof does not match the sealed tree"))
+    source :: generation_native.read_bytes(jetos_generation_child(dir, "source-proof.json"))
+    plan :: generation_native.read_bytes(jetos_generation_child(dir, "plan.json"))
+    jetos_validate_source_proof(source, plan, source_config, flags)
+    text :: generation_native.read_text(jetos_generation_child(dir, "generation-root.json"))
+    root :: foundation_json_parse(text) ?? return Err(jetos_invalid_generation("{err.message}"))
+    identities :: [(key: String, expected: String)]{(key: "kind", expected: "jetos.generation-root.v1"), (key: "host", expected: host), (key: "generation", expected: name)}
+    loop item in identities {
+        if jetos_generation_json_string(root, item.key) != item.expected -> return Err(jetos_invalid_generation("generation root identity does not match its path"))
+    }
+    hashes :: [(key: String, expected: String)]{(key: "source_proof_sha256", expected: record_blob_key(source)), (key: "plan_sha256", expected: record_blob_key(plan)), (key: "files_proof_sha256", expected: record_blob_key(manifest))}
+    loop item in hashes {
+        if jetos_generation_json_string(root, item.key) != item.expected -> return Err(jetos_invalid_generation("generation root hash does not match its durable proof"))
+    }
+    field :: root.get("output_digests") ?? return Err(jetos_invalid_generation("{err}"))
+    array :: field.as_array() ?? return Err(jetos_invalid_generation("{err}"))
+    digests := [String]{}
+    // Parse EVERY element before validating order, as the original collect does.
+    loop value in array {
+        text :: value.as_str() ?? return Err(jetos_invalid_generation("{err}"))
+        &digests.push(text)
+    }
+    loop i in 1..<digests.len() {
+        if digests[i - 1] >= digests[i] -> return Err(jetos_invalid_generation("generation Hangar targets are not canonical and sorted"))
+    }
+    loop digest in digests -> jetos_validate_hangar_digest(roots, digest)
+    witness :: jetos_generation_root_witness(host, name, source, plan, manifest, digests)
+    if jetos_generation_json_string(root, "witness") != witness -> return Err(jetos_invalid_generation("generation root witness does not match its proofs"))
+    Ok(JetOSGenerationRootProof{witness: witness, output_digests: digests})
+}
+// Rust388-426. No tier/name shortcut; every source hash precedes tier checking.
+fn jetos_validate_source_proof(proof_bytes: [U8], plan: [U8], config: generation_path.OSPath, flags: JetOSFlags) IOError! -[FS, Env]> {
+    // The ONE strict UTF8 kernel returns the original std error text.
+    proof_text :: String.from_bytes(proof_bytes) ?? return Err(jetos_invalid_generation(err.message))
+    proof :: foundation_json_parse(proof_text) ?? return Err(jetos_invalid_generation(err.message))
+    source :: generation_native.read_bytes(config)
+    closure :: jetos_generation_source_closure(config)
+    input :: sys.get("JETOS_STUDIO_INPUT_PLAN_SHA256") ?? ""
+    checks :: [(key: String, expected: String)]{(key: "kind", expected: "jetos.generation-source-proof"), (key: "source_sha256", expected: record_blob_key(source)), (key: "source_closure_sha256", expected: record_blob_key(closure)), (key: "input_plan_sha256", expected: input), (key: "plan_sha256", expected: record_blob_key(plan)), (key: "evaluator_semantics", expected: JETOS_EVALUATOR_SEMANTICS)}
+    loop check in checks {
+        if jetos_generation_json_string(proof, check.key) != check.expected -> return Err(jetos_invalid_generation("generation source proof does not match current input"))
+    }
+    field :: proof.get("real_tier") ?? return Err(jetos_invalid_generation("{err}"))
+    tier :: if field == {
+        .Bool(value) -> value
+        else -> return Err(jetos_invalid_generation("generation source tier is not boolean"))
+    }
+    if tier != flags.real_tier -> return Err(jetos_invalid_generation("generation source proof uses a different realization tier"))
+}
+// Rust580-607.
+fn jetos_validate_hangar_digest(roots: HangarRoots, digest: String) IOError! -[FS, Env]> {
+    raw :: digest.bytes()
+    valid := raw.len() == 71 && digest.starts_with("sha256-")
+    if valid {
+        loop i in 7..<raw.len() {
+            byte :: raw[i]
+            if !((byte >= U8{48} && byte <= U8{57}) || (byte >= U8{97} && byte <= U8{102})) -> valid = false
+        }
+    }
+    if !valid -> return Err(jetos_invalid_generation("generation contains a non-canonical Hangar digest"))
+    object_root :: jetos_generation_child(roots.hangar_dir(), "objects")
+    object :: jetos_generation_child(object_root, digest)
+    info :: generation_native.symlink_metadata(object)
+    if !info.is_dir || info.is_symlink -> return Err(jetos_invalid_generation("generation Hangar target is not an owned object"))
+    canonical_root :: generation_native.canonicalize(object_root)
+    canonical_object :: generation_native.canonicalize(object)
+    if !generation_path.starts_with(canonical_object, canonical_root) || !generation_native.is_directory(canonical_object) -> return Err(jetos_invalid_generation("generation Hangar target is not an owned object"))
+}
+
+struct JetOSGenerationSourceFile {
+    path: generation_path.OSPath
+    path_bytes: [U8]
+    bytes: [U8]
+}
+// Rust428-477: ALL lexer diagnostics reject, including non-error diagnostics.
+fn jetos_generation_source_closure(config: generation_path.OSPath) -> [U8] IOError! -[FS, Env]> {
+    if generation_path.file_name_span(config) == .Val(name) {
+        if generation_path.to_str(generation_path.owned_span(config, name)) == Val(PACKAGE_FILE) -> return jetos_package_source_closure(config)
+    }
+    source :: generation_native.read_text(config)
+    lexed :: lex_config(source.bytes())
+    if lexed.diagnostics.len() != 0 -> return Err(jetos_invalid_generation("generation source closure does not lex"))
+    parsed :: parse_config_with_source(lexed, source.bytes())
+    // Canonical parser outcome (same Error-severity parse rejection as Rust).
+    if envmodel_last_error(parsed.diagnostics) != None -> return Err(jetos_invalid_generation("generation source closure does not parse"))
+    parent :: if generation_path.parent_span(config) == {
+        .Val(extent) -> generation_path.owned_span(config, extent)
+        .None -> generation_path.from_text(".", config.platform)
+    }
+    base :: generation_ingress.var_os("JETOS_STUDIO_SOURCE_BASE") ?? parent
+    root_name :: generation_path.from_text("<root>", config.platform)
+    files := [JetOSGenerationSourceFile]{JetOSGenerationSourceFile{path: root_name, path_bytes: jetos_path_bytes(root_name), bytes: source.bytes()}}
+    loop item in parsed.program.items {
+        if item == {
+            .Module(module) -> {
+                if !module.auto_discovered -> next
+                loop import in module.imports {
+                    rel :: jetos_import_find_directory(import)
+                    directory :: jetos_generation_child(base, rel)
+                    entries :: jetos_generation_entries(directory, false, true)
+                    loop entry in entries {
+                        extension :: generation_path.extension_span(entry.path) ?? next
+                        if generation_path.to_str(generation_path.owned_span(entry.path, extension)) != Val(FILE_EXT) -> next
+                        span :: generation_path.strip_prefix_span(entry.path, base) ?? return Err(jetos_invalid_generation("imported source escaped its evaluation root"))
+                        relative :: generation_path.owned_span(entry.path, span)
+                        bytes :: generation_native.read_bytes(entry.path)
+                        &files.push(JetOSGenerationSourceFile{path: relative, path_bytes: jetos_path_bytes(relative), bytes: bytes})
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
+    &files.sort_by((a: JetOSGenerationSourceFile, b: JetOSGenerationSourceFile) -> jetos_generation_byte_order(a.path_bytes, b.path_bytes))
+    canonical := [U8]{}
+    jetos_generation_frame(&canonical, "jetos-source-closure-v1".bytes())
+    loop file in files {
+        jetos_generation_frame(&canonical, file.path_bytes)
+        jetos_generation_frame(&canonical, file.bytes)
+    }
+    Ok(canonical)
+}
+// Rust483-524: checked authority owns manifests/config composition. A REAL
+// OSPath-keyed map preserves BTreeMap last-insertion and component-order laws.
+// #4499 gates generic key admission; no textual identity substitute.
+fn jetos_package_source_closure(config: generation_path.OSPath) -> [U8] IOError! -[FS, Env]> {
+    root :: if generation_path.parent_span(config) == {
+        .Val(extent) -> generation_path.owned_span(config, extent)
+        .None -> generation_path.from_text(".", config.platform)
+    }
+    resolver :: AuthorityResolver.open(root) ?? return Err(jetos_invalid_generation("package source authority failed: {err.message()}"))
+    dot :: generation_path.from_text(".", config.platform)
+    package :: resolver.checked_package(dot) ?? return Err(jetos_invalid_generation("package source authority failed: {err.message()}"))
+    files := [generation_path.OSPath: [U8]]{}
+    jetos_append_package_source_files(resolver, package, &files, true)
+    loop member in package.facts.members {
+        if member == {
+            .Path(relative) -> {
+                checked :: resolver.checked_package(generation_path.from_text(relative, root.platform)) ?? return Err(jetos_invalid_generation("package member authority failed: {err.message()}"))
+                jetos_append_package_source_files(resolver, checked, &files, false)
+            }
+            .Find(relative) -> {
+                discovered :: resolver.discover_members(generation_path.from_text(relative, root.platform)) ?? return Err(jetos_invalid_generation("package member authority failed: {err.message()}"))
+                // Complete ALL members before appending, preserving collect's
+                // error priority over any checked config-file read.
+                completed := [CheckedPackage]{}
+                loop found in discovered {
+                    checked :: resolver.complete_checked_package(^found) ?? return Err(jetos_invalid_generation("package member authority failed: {err.message()}"))
+                    &completed.push(checked)
+                }
+                loop checked in completed -> jetos_append_package_source_files(resolver, checked, &files, false)
+            }
+        }
+    }
+    keys := files.keys().to_list()
+    &keys.sort_by((a: generation_path.OSPath, b: generation_path.OSPath) -> generation_path_traits.compare(a, b))
+    canonical := [U8]{}
+    jetos_generation_frame(&canonical, "jetos-source-closure-v1".bytes())
+    loop path in keys {
+        jetos_generation_frame(&canonical, jetos_path_bytes(path))
+        jetos_generation_frame(&canonical, files.get(path) ?? panic("existing checked file key"))
+    }
+    Ok(canonical)
+}
+// Rust526-547; manifest bytes are checked snapshots, never a path reopen.
+fn jetos_append_package_source_files(resolver: AuthorityResolver, package: CheckedPackage, files: &[generation_path.OSPath: [U8]], root_package: Bool) IOError! -[FS, Env]> {
+    path :: if root_package -> generation_path.from_text("<root>", resolver.root.platform) else -> package.member.manifest.file.relative
+    files[path] = package.member.manifest.file.bytes
+    loop relative in package.facts.resolved_config_paths {
+        file :: resolver.checked_file(generation_path.from_text(relative, resolver.root.platform)) ?? return Err(jetos_invalid_generation("package config authority failed: {err.message()}"))
+        files[file.relative] = file.bytes
+    }
+}
+// Rust549-569, no evaluation/interpolation of authority import literals.
+fn jetos_import_find_directory(import: Expr) -> String IOError! {
+    call :: if import == {
+        .Call(value) -> value
+        else -> return Err(jetos_invalid_generation("generation import is not find(...)"))
+    }
+    if call.name != BUILTIN_FIND || call.args.len() != 1 -> return Err(jetos_invalid_generation("generation import is not find(...)"))
+    parts :: if call.args[0].expr == {
+        .Str(value, _) -> value
+        else -> return Err(jetos_invalid_generation("generation import path is not literal"))
+    }
+    bytes := [U8]{}
+    loop part in parts {
+        if part == {
+            .Lit(text) -> { loop byte in text.bytes() -> &bytes.push(byte) }
+            .Interp(_, _) -> return Err(jetos_invalid_generation("generation import path is interpolated"))
+            // Canonical AST Byte carries the same literal UTF8 byte, not an
+            // interpolation. Rust's older Lit grouping did not split it out.
+            .Byte(byte) -> &bytes.push(byte)
+        }
+    }
+    Ok(String.from_bytes(bytes) ?? panic("literal import parts preserve UTF8"))
+}
+
+// Rust613-626: child files then parent directory; ignore symlink/special sync.
+pub fn jetos_sync_generation_tree(root: generation_path.OSPath) IOError! -[FS]> {
+    entries :: jetos_generation_entries(root, false, true)
+    loop entry in entries {
+        info :: generation_native.symlink_metadata(entry.path)
+        if info.is_dir {
+            jetos_sync_generation_tree(entry.path)
+        } else if info.is_file {
+            store_sync_store_node(entry.path, false)
+        }
+    }
+    store_sync_store_node(root, true)
+}
+// Rust674-693: no descent through symlink; strip-prefix error is Other.
+fn jetos_collect_generation_paths(root: generation_path.OSPath, dir: generation_path.OSPath, paths: &[JetOSGenerationSourceFile]) IOError! -[FS]> {
+    entries :: jetos_generation_entries(dir, false, true)
+    loop entry in entries {
+        extent :: generation_path.strip_prefix_span(entry.path, root) ?? return Err(jetos_generation_other("generation member escaped its root"))
+        relative :: generation_path.owned_span(entry.path, extent)
+        &paths.push(JetOSGenerationSourceFile{path: relative, path_bytes: jetos_path_bytes(relative), bytes: [U8]{}})
+        if generation_native.symlink_metadata(entry.path).is_dir -> jetos_collect_generation_paths(root, entry.path, &paths)
+    }
+}
+// Rust633-672. Only the TWO top-level proof files are omitted; nested names
+// are still bound. l/d/f, U32 BE mode, raw link target and hex content digest.
+fn jetos_generation_files_manifest(root: generation_path.OSPath) -> [U8] IOError! -[FS]> {
+    paths := [JetOSGenerationSourceFile]{}
+    jetos_collect_generation_paths(root, root, &paths)
+    &paths.sort_by((a: JetOSGenerationSourceFile, b: JetOSGenerationSourceFile) -> jetos_generation_byte_order(a.path_bytes, b.path_bytes))
+    out := [U8]{}
+    files_proof :: generation_path.from_text("generation-files.proof", root.platform)
+    root_proof :: generation_path.from_text("generation-root.json", root.platform)
+    loop relative in paths {
+        if generation_path.equals(relative.path, files_proof) || generation_path.equals(relative.path, root_proof) -> next
+        path :: jetos_generation_join(root, relative.path)
+        info :: generation_native.symlink_metadata(path)
+        kind :: if info.is_symlink -> U8{108} else if info.is_dir -> U8{100} else if info.is_file -> U8{102} else -> return Err(jetos_generation_other("generation contains an unsupported filesystem object"))
+        &out.push(kind)
+        jetos_generation_frame(&out, relative.path_bytes)
+        jetos_generation_frame(&out, jetos_generation_u32_be(jetos_generation_mode(info)))
+        if kind == U8{102} {
+            jetos_generation_frame(&out, record_blob_key(generation_native.read_bytes(path)).bytes())
+        } else if kind == U8{108} {
+            jetos_generation_frame(&out, jetos_path_bytes(generation_native.read_link(path)))
+        } else {
+            jetos_generation_frame(&out, [U8]{})
+        }
+    }
+    Ok(out)
+}
+
+// Rust761-826. Object fields are strings, even service/option display facts.
+fn jetos_realized_packages_json(realized: [JetOSRealizedPackage]) -> String Never! {
+    rows := [String]{}
+    loop package in realized {
+        p :: package.entry
+        &rows.push("{{\"name\":{foundation_json_quote(p.name)},\"version\":{foundation_json_quote(p.version)},\"reference\":{foundation_json_quote(p.reference)},\"out\":{foundation_json_quote(p.out)},\"bin\":{foundation_json_quote(p.bin)}}}")
+    }
+    rows.join(",")
+}
+fn jetos_generation_services_json(services: [ServicePlan]) -> String Never! {
+    rows := [String]{}
+    loop service in services -> &rows.push(jetos_service_plan_json(service))
+    rows.join(",")
+}
+fn jetos_generation_options_json(options: [OptionPlan]) -> String Never! {
+    rows := [String]{}
+    loop option in options -> &rows.push("{{\"key\":{foundation_json_quote(option.key)},\"value\":{foundation_json_quote(option.value)}}}")
+    rows.join(",")
+}
+pub fn jetos_render_plan_json(system: SystemPlan, realized: [JetOSRealizedPackage], prebuilt: (packages: String, services: String, options: String)?, graph_identity: String?) -> String Never! {
+    parts :: if prebuilt == {
+        .Val(value) -> value
+        .None -> {
+            rows := [String]{}
+            loop package in system.packages {
+                raw :: if package.source == "" -> package.name else -> "{package.name}@{package.source}"
+                &rows.push("{{\"name\":{foundation_json_quote(package.name)},\"source\":{foundation_json_quote(package.source)},\"ref\":{foundation_json_quote(raw)}}}")
+            }
+            (packages: rows.join(","), services: jetos_generation_services_json(system.services), options: jetos_generation_options_json(system.options))
+        }
+    }
+    closure :: jetos_realized_packages_json(realized)
+    boot :: jetos_boot_profile(system)
+    graph :: if graph_identity == { .Val(value) -> foundation_json_quote(value) .None -> "null" }
+    "{{\"host\":{foundation_json_quote(system.name)},\"target\":{foundation_json_quote(system.target)},\"graph_identity\":{graph},\"boot\":{boot.to_json()},\"packages\":[{parts.packages}],\"closure\":[{closure}],\"services\":[{parts.services}],\"options\":[{parts.options}]}}"
+}
+// Rust828-847.
+fn jetos_service_plan_json(service: ServicePlan) -> String Never! {
+    fields := [String]{}
+    loop extra in service.extra -> &fields.push("{{\"key\":{foundation_json_quote(extra.key)},\"value\":{foundation_json_quote(extra.value)}}}")
+    "{{\"name\":{foundation_json_quote(service.name)},\"enable\":{if service.enable -> "true" else -> "false"},\"fields\":[{fields.join(",")}]}}"
+}
+// Rust854-858 / 900-908. Display diff does not depend on the CLI.
+pub struct JetOSPackageSnapshot { pub name: String pub version: String pub out: String }
+pub struct JetOSPackageDiff {
+    pub name: String
+    pub mark: PlanMark
+    pub from: String
+    pub to: String
+    pub out: String?
+}
+// Rust864-896: malformed outer tree => empty, malformed row name => skip;
+// version/out individually default empty. No production validation is added.
+pub fn jetos_read_generation_packages(dir: generation_path.OSPath) -> [JetOSPackageSnapshot] Never! -[FS]> {
+    text :: generation_native.read_text(jetos_generation_child(dir, "plan.json")) ?? return [JetOSPackageSnapshot]{}
+    root :: foundation_json_parse(text) ?? return [JetOSPackageSnapshot]{}
+    field :: root.get("packages") ?? return [JetOSPackageSnapshot]{}
+    packages :: field.as_array() ?? return [JetOSPackageSnapshot]{}
+    out := [JetOSPackageSnapshot]{}
+    loop package in packages {
+        name :: jetos_generation_json_string(package, "name") ?? next
+        version :: jetos_generation_json_string(package, "version") ?? ""
+        path :: jetos_generation_json_string(package, "out") ?? ""
+        &out.push(JetOSPackageSnapshot{name: name, version: version, out: path})
+    }
+    out
+}
+// Rust912-946. First old name wins, new duplicates retain rows. Hash indexes
+// remove Rust's quadratic scans without changing duplicate/first-match laws.
+pub fn jetos_diff_packages(old: [JetOSPackageSnapshot], new: [JetOSPackageSnapshot]) -> [JetOSPackageDiff] Never! {
+    old_index := [String: Int]{}
+    new_names := [String: Bool]{}
+    loop i in 0..<old.len() {
+        if old_index.get(old[i].name) == None -> old_index[old[i].name] = i
+    }
+    rows := [JetOSPackageDiff]{}
+    loop package in new {
+        new_names[package.name] = true
+        if old_index.get(package.name) == {
+            .None -> &rows.push(JetOSPackageDiff{name: package.name, mark: .Add, from: "—", to: package.version, out: Val(package.out)})
+            .Val(index) -> {
+                previous :: old[index]
+                if previous.version != package.version -> &rows.push(JetOSPackageDiff{name: package.name, mark: .Change, from: previous.version, to: package.version, out: Val(package.out)})
+            }
+        }
+    }
+    loop package in old {
+        if new_names.get(package.name) == None -> &rows.push(JetOSPackageDiff{name: package.name, mark: .Remove, from: package.version, to: "—", out: None})
+    }
+    &rows.sort_by((a: JetOSPackageDiff, b: JetOSPackageDiff) -> a.name <=> b.name)
+    rows
+}
+// Rust953-958.
+pub fn jetos_generation_ordinal(host: String) -> Int Never! -[FS, Env]> {
+    count := 0
+    loop generation in jetos_read_generations() {
+        if generation.host == host -> count += 1
+    }
+    count
+}
+// Rust963-982: all metadata/open/item errors ignored; ordinary file size U64.
+// Unsorted traversal preserves Rust iteration/overflow observation order.
+pub fn jetos_dir_size_bytes(path: generation_path.OSPath) -> U64 Never! -[FS]> {
+    info :: generation_native.symlink_metadata(path) ?? return U64{0}
+    if info.is_symlink {
+        real :: generation_native.canonicalize(path) ?? return U64{0}
+        return jetos_dir_size_bytes(real)
+    }
+    if info.is_file -> return info.size
+    stream :: generation_native.read_dir(path) ?? return U64{0}
+    total := U64{0}
+    loop {
+        if stream.next() == {
+            .Ok(optional) -> {
+                entry :: optional ?? break
+                total += jetos_dir_size_bytes(entry.path())
+            }
+            .Err(_) -> next
+        }
+    }
+    total
+}
+
+// Rust984-1015: projected-runtime set is generation-wide, profile first then
+// package bin overrides; toolchain last then whole-tree link rewrite.
+fn jetos_write_root_closure(dir: generation_path.OSPath, realized: [JetOSRealizedPackage]) IOError! -[FS, Env, Exec, IO, Rand]> {
+    bin :: jetos_generation_child(dir, "sw/bin")
+    generation_native.create_dir_all(bin)
+    manifest := [String]{"jetos system package closure\n"}
+    projected := [String: Bool]{}
+    loop package in realized {
+        &manifest.push("{package.entry.name} {package.entry.reference} {package.entry.out}\n")
+        jetos_project_runtime_closure(dir, package, &manifest, &projected)
+        jetos_project_profile_dirs(dir, package)
+        if package.entry.bin == "" -> next
+        source :: package.consumption_path(package.entry.bin)
+        // Rust ignores BOTH read_dir opening and individual entry errors here.
+        entries :: jetos_generation_entries(source, true, false) ?? next
+        loop entry in entries {
+            if !generation_native.is_file(entry.path) -> next
+            jetos_copy_file_replace(entry.path, jetos_generation_join(bin, entry.name))
+        }
+    }
+    jetos_write_jetos_toolchain(dir, bin, &manifest)
+    jetos_rewrite_generation_store_symlinks(dir, dir)
+    generation_native.write(jetos_generation_child(dir, "sw/closure.txt"), manifest.join("").bytes())
+}
+// Rust1017-1030: preserve exact top order and consumption lease authority.
+fn jetos_project_profile_dirs(dir: generation_path.OSPath, package: JetOSRealizedPackage) IOError! -[FS, Env, Rand]> {
+    out :: package.consumption_path(package.entry.out)
+    if !generation_native.is_directory(out) -> return
+    sw :: jetos_generation_child(dir, "sw")
+    loop top in [String]{"bin", "sbin", "lib", "libexec", "share", "etc"} {
+        src :: jetos_generation_child(out, top)
+        if generation_native.is_directory(src) -> jetos_copy_profile_tree(src, jetos_generation_child(sw, top))
+    }
+}
+// Rust1032-1064. Directory symlink MUST materialize before merging; leaf
+// destination exists follows links, so dangling destinations are replaceable.
+pub fn jetos_copy_profile_tree(src: generation_path.OSPath, dst: generation_path.OSPath) IOError! -[FS]> {
+    if jetos_skip_runtime_payload(src) -> return
+    info :: generation_native.symlink_metadata(src)
+    directory := info.is_dir
+    if !directory && info.is_symlink {
+        if generation_native.metadata(src) == .Ok(followed) -> directory = followed.is_dir
+    }
+    if directory {
+        jetos_ensure_profile_dir(dst)
+        entries :: jetos_generation_entries(src, true, false)
+        loop entry in entries -> jetos_copy_profile_tree(entry.path, jetos_generation_join(dst, entry.name))
+    } else if !generation_native.exists(dst) {
+        if generation_path.parent_span(dst) == .Val(parent) -> generation_native.create_dir_all(generation_path.owned_span(dst, parent))
+        if info.is_symlink {
+            jetos_copy_runtime_symlink(src, dst)
+        } else if info.is_file {
+            jetos_copy_file_replace(src, dst)
+        }
+    }
+}
+// Rust1069-1086. Canonicalize BEFORE removing the destination link; errors
+// never fall through to mkdir. Existing non-link metadata errors are ignored.
+fn jetos_ensure_profile_dir(dst: generation_path.OSPath) IOError! -[FS]> {
+    if generation_native.symlink_metadata(dst) == .Ok(info) {
+        if info.is_symlink {
+            target :: generation_native.canonicalize(dst)
+            generation_native.remove(dst)
+            generation_native.create_dir_all(dst)
+            entries :: jetos_generation_entries(target, true, false)
+            loop entry in entries -> jetos_copy_profile_tree(entry.path, jetos_generation_join(dst, entry.name))
+            return
+        }
+    }
+    generation_native.create_dir_all(dst)
+}
+// Rust1088-1114. The ORIGINAL output/reference decides adapter closure,
+// never lease path. The set key is ORIGINAL to_string_lossy as Rust specifies,
+// not path identity; keep this intentional loss separate from raw IO paths.
+fn jetos_project_runtime_closure(dir: generation_path.OSPath, package: JetOSRealizedPackage, manifest: &[String], projected: &[String: Bool]) IOError! -[FS, Env, Exec, IO]> {
+    out :: package.original_output()
+    store :: generation_path.from_text("/nix/store", out.platform)
+    if !generation_path.starts_with(out, store) && !package.original_reference().starts_with("nix") -> return
+    loop path in jetos_nix_store_closure_paths(out) {
+        if !generation_path.starts_with(path, store) -> return Err(jetos_generation_other("nix-store -qR returned non-store path `{generation_path.display(path)}` for `{generation_path.display(out)}`"))
+        key :: generation_path.display(path)
+        if projected.get(key) != None -> next
+        projected[key] = true
+        jetos_copy_nix_store_path(dir, path)
+        &manifest.push("jetos-adapter-closure {package.entry.name} {key}\n")
+    }
+}
+// Rust1116-1118: fresh ASCII command spelling, existing raw out is borrowed.
+fn jetos_nix_store_closure_paths(out: generation_path.OSPath) -> [generation_path.OSPath] IOError! -[Exec, IO]> {
+    jetos_nix_store_closure_paths_with(generation_path.from_text("nix-store", out.platform), out)
+}
+// Rust1120-1148. Native launch through the ONE published A6E6 contract;
+// NotFound ALONE returns the original out. No retry/shell/String proxy.
+fn jetos_nix_store_closure_paths_with(program: generation_path.OSPath, out: generation_path.OSPath) -> [generation_path.OSPath] IOError! -[Exec, IO]> {
+    command := generation_process.command(program)
+    &command.args([generation_path.OSPath]{generation_path.from_text("-qR", out.platform), out})
+    output :: if &command.output() == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            if error == .NotFound(_) -> return Ok([generation_path.OSPath]{out})
+            return Err(error)
+        }
+    }
+    jetos_nix_store_closure_output(out, output.status.success, output.stdout, output.stderr)
+}
+fn jetos_nix_store_closure_output(out: generation_path.OSPath, success: Bool, stdout: [U8], stderr: [U8]) -> [generation_path.OSPath] IOError! {
+    if !success {
+        detail := String.from_bytes_lossy(stderr).trim() // #4303
+        return Err(jetos_generation_other("nix-store -qR failed for `{generation_path.display(out)}`: {detail}"))
+    }
+    text :: String.from_bytes_lossy(stdout)
+    paths := [generation_path.OSPath]{}
+    loop line in text.lines() {
+        trimmed := line.trim() // #4303
+        path :: generation_path.from_text(trimmed, out.platform)
+        if path.encoded.len() != 0 -> &paths.push(path)
+    }
+    present := false
+    loop path in paths {
+        if generation_path.equals(path, out) -> present = true
+    }
+    if !present -> &paths.push(out)
+    &paths.sort_by((a: generation_path.OSPath, b: generation_path.OSPath) -> generation_path_traits.compare(a, b))
+    write := 0
+    loop read in 0..<paths.len() {
+        if write == 0 || !generation_path.equals(paths[write - 1], paths[read]) {
+            if write != read -> paths[write] = paths[read]
+            write += 1
+        }
+    }
+    loop paths.len() > write -> _ :: &paths.pop()
+    Ok(paths)
+}
+// Rust1150-1158, source Path.strip_prefix("/") NOT generic is_absolute check.
+fn jetos_copy_nix_store_path(dir: generation_path.OSPath, src: generation_path.OSPath) IOError! -[FS]> {
+    extent :: generation_path.strip_prefix_span(src, generation_path.from_text("/", src.platform)) ?? return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("nix closure path is not absolute: `{generation_path.display(src)}`")}))
+    target := dir
+    generation_path.push_span(&target, src, extent)
+    jetos_copy_nix_closure_tree(src, target)
+}
+// Rust1160-1180: unlike profile copies this does NOT skip .nix/.drv payloads.
+fn jetos_copy_nix_closure_tree(src: generation_path.OSPath, dst: generation_path.OSPath) IOError! -[FS]> {
+    info :: generation_native.symlink_metadata(src)
+    if info.is_dir {
+        generation_native.create_dir_all(dst)
+        entries :: jetos_generation_entries(src, true, false)
+        loop entry in entries -> jetos_copy_nix_closure_tree(entry.path, jetos_generation_join(dst, entry.name))
+    } else if info.is_symlink {
+        jetos_copy_runtime_symlink(src, dst)
+    } else if info.is_file {
+        if generation_path.parent_span(dst) == .Val(parent) -> generation_native.create_dir_all(generation_path.owned_span(dst, parent))
+        jetos_copy_file_replace(src, dst)
+    }
+}
+// Rust1186-1188.
+fn jetos_rewrite_generation_store_symlinks(root: generation_path.OSPath, path: generation_path.OSPath) IOError! -[FS]> {
+    jetos_rewrite_store_symlinks(root, path, generation_path.from_text("/nix/store", path.platform))
+}
+// Rust1190-1230. Relative targets reject BEFORE the store-prefix predicate,
+// even targets outside store. Remove precedes selected rewrite failure.
+fn jetos_rewrite_store_symlinks(root: generation_path.OSPath, path: generation_path.OSPath, store: generation_path.OSPath) IOError! -[FS]> {
+    info :: generation_native.symlink_metadata(path)
+    if info.is_symlink {
+        target :: generation_native.read_link(path)
+        extent :: generation_path.strip_prefix_span(target, generation_path.from_text("/", target.platform)) ?? return Err(jetos_invalid_generation("store symlink target must be absolute: `{generation_path.display(target)}`"))
+        if generation_path.starts_with(target, store) {
+            owned := root
+            generation_path.push_span(&owned, target, extent)
+            parent_span :: generation_path.parent_span(path) ?? return Err(jetos_generation_other("generation symlink has no parent"))
+            rewritten :: jetos_relative_path(generation_path.owned_span(path, parent_span), owned)
+            generation_native.remove(path)
+            jetos_rewrite_store_link(rewritten, path)
+        }
+        return
+    }
+    if info.is_dir {
+        entries :: jetos_generation_entries(path, false, false)
+        loop entry in entries -> jetos_rewrite_store_symlinks(root, entry.path, store)
+    }
+}
+// Rust1210-1218: these are BOTH original selected bodies, not fallbacks.
+fn jetos_rewrite_store_link_unix_body(target: generation_path.OSPath, link: generation_path.OSPath) IOError! -[FS]> {
+    generation_native.symlink(target, link)
+}
+fn jetos_rewrite_store_link_nonunix_body(_target: generation_path.OSPath, _link: generation_path.OSPath) IOError! {
+    return Err(jetos_generation_other("store symlink rewriting needs Unix symlinks"))
+}
+// Rust1255-1260. to_str refusal is false, no lossy suffix test.
+fn jetos_skip_runtime_payload(path: generation_path.OSPath) -> Bool Never! {
+    extent :: generation_path.file_name_span(path) ?? return false
+    name :: generation_path.to_str(generation_path.owned_span(path, extent)) ?? return false
+    name.ends_with(".nix") || name.ends_with(".drv")
+}
+// Rust1277-1320: candidate FIRST match wins and errors keep original kind.
+fn jetos_write_jetos_toolchain(dir: generation_path.OSPath, bin: generation_path.OSPath, manifest: &[String]) IOError! -[FS, Env, Exec, IO]> {
+    candidates :: jetos_jet_toolchain_candidates()
+    loop name in [String]{"jet", "jetpack", "jetos"} {
+        found := generation_path.OSPath?{None}
+        loop path in candidates {
+            extent :: generation_path.file_name_span(path) ?? next
+            if generation_path.to_str(generation_path.owned_span(path, extent)) == Val(name) {
+                found = Val(path)
+                break
+            }
+        }
+        src :: found ?? next
+        dst :: jetos_generation_child(bin, name)
+        jetos_copy_file_replace(src, dst) ?? return Err(foundation_io_error_with_cause(err, "copying jetos tool `{generation_path.display(src)}` to `{generation_path.display(dst)}` failed: {err}"))
+        jetos_make_executable(dst) ?? return Err(foundation_io_error_with_cause(err, "marking jetos tool `{generation_path.display(dst)}` executable failed: {err}"))
+        &manifest.push("jetos-toolchain {name} {generation_path.display(src)}\n")
+        jetos_copy_toolchain_runtime_deps(dir, src) ?? return Err(foundation_io_error_with_cause(err, "copying runtime dependencies for jetos tool `{generation_path.display(src)}` failed: {err}"))
+    }
+}
+// Rust1322-1348: current_exe failure ignored, then original selected-target
+// path grammar for target/debug and target/release. Canonical selected name
+// remains #4483/#4500 gated; BOTH complete bodies use actual raw ingress.
+fn jetos_jet_toolchain_candidates_unix_body() -> [generation_path.OSPath] Never! -[FS, Env]> {
+    exe :: if generation_ingress.current_exe() == { .Ok(path) -> Val(path) .Err(_) -> None }
+    jetos_jet_toolchain_candidates_from_exe(exe, generation_path.PathPlatform.Unix)
+}
+fn jetos_jet_toolchain_candidates_windows_body() -> [generation_path.OSPath] Never! -[FS, Env]> {
+    exe :: if generation_ingress.current_exe() == { .Ok(path) -> Val(path) .Err(_) -> None }
+    jetos_jet_toolchain_candidates_from_exe(exe, generation_path.PathPlatform.Windows)
+}
+fn jetos_jet_toolchain_candidates_from_exe(exe: generation_path.OSPath?, platform: generation_path.PathPlatform) -> [generation_path.OSPath] Never! -[FS]> {
+    dirs := [generation_path.OSPath]{}
+    if exe == .Val(path) {
+        if generation_path.parent_span(path) == .Val(extent) {
+            dir :: generation_path.owned_span(path, extent)
+            &dirs.push(dir)
+            if generation_path.file_name_span(dir) == .Val(name) {
+                if generation_path.to_str(generation_path.owned_span(dir, name)) == Val("deps") {
+                    if generation_path.parent_span(dir) == .Val(parent) -> &dirs.push(generation_path.owned_span(dir, parent))
+                }
+            }
+        }
+    }
+    &dirs.push(generation_path.from_text("target/debug", platform))
+    &dirs.push(generation_path.from_text("target/release", platform))
+    out := [generation_path.OSPath]{}
+    seen := [generation_path.OSPath: Bool]{} // #4499 canonical Path Eq/Hash.
+    loop dir in dirs {
+        loop name in [String]{"jet", "jetpack", "jetos"} {
+            path :: jetos_generation_child(dir, name)
+            if generation_native.is_file(path) && seen.get(path) == None {
+                seen[path] = true
+                &out.push(path)
+            }
+        }
+    }
+    out
+}
+// Rust1350-1358. ldd_dependency_paths belongs initrd_overlay, not a duplicate
+// subprocess parser here; its raw producer/caller migration remains explicit.
+fn jetos_copy_toolchain_runtime_deps(dir: generation_path.OSPath, binary: generation_path.OSPath) IOError! -[FS, Exec, IO, Env]> {
+    loop dependency in jetos_ldd_dependency_paths(binary) {
+        jetos_copy_absolute_runtime_file(dir, dependency)
+        if generation_native.canonicalize(dependency) == .Ok(real) -> jetos_copy_absolute_runtime_file(dir, real)
+    }
+}
+// Rust1360-1381: skip relative/not-file/strip-prefix failure, parents before copy.
+fn jetos_copy_absolute_runtime_file(dir: generation_path.OSPath, src: generation_path.OSPath) IOError! -[FS]> {
+    if !generation_path.is_absolute(src) || !generation_native.is_file(src) -> return
+    extent :: generation_path.strip_prefix_span(src, generation_path.from_text("/", src.platform)) ?? return
+    dst := dir
+    generation_path.push_span(&dst, src, extent)
+    if generation_path.parent_span(dst) == .Val(parent) -> generation_native.create_dir_all(generation_path.owned_span(dst, parent))
+    jetos_copy_file_replace(src, dst) ?? return Err(foundation_io_error_with_cause(err, "copying runtime file `{generation_path.display(src)}` to `{generation_path.display(dst)}` failed: {err}"))
+}
+
+// Integration denominator (Rust line -> this canonical JetOS owner spelling).
+// Public/assembly names here are not native/cfg/provider delivery claims.
+// 50 generation_dir -> jetos_generation_dir
+// 58 systems_dir -> jetos_systems_dir
+// 62 generations_log -> jetos_generations_log
+// 66 write_generation_files -> jetos_write_generation_files
+// 181 generation_stage -> jetos_generation_stage
+// 192 write_generation_source_proof -> jetos_write_generation_source_proof
+// 216 write_generation_root_proof -> jetos_write_generation_root_proof
+// 251 validate_generation_root_proof -> jetos_validate_generation_root_proof
+// 339 generation_root_witness -> jetos_generation_root_witness
+// 360 write_generation_root_metadata -> jetos_write_generation_root_metadata
+// 388 validate_source_proof -> jetos_validate_source_proof
+// 428 generation_source_closure -> jetos_generation_source_closure
+// 483 package_source_closure -> jetos_package_source_closure
+// 526 append_package_source_files -> jetos_append_package_source_files
+// 549 import_find_directory -> jetos_import_find_directory
+// 571 json_string -> jetos_generation_json_string
+// 580 validate_hangar_digest -> jetos_validate_hangar_digest
+// 609 invalid_generation -> jetos_invalid_generation
+// 613 sync_generation_tree -> jetos_sync_generation_tree
+// 628 frame -> jetos_generation_frame
+// 633 generation_files_manifest -> jetos_generation_files_manifest
+// 674 collect_generation_paths -> jetos_collect_generation_paths
+// 696 path_bytes Unix -> jetos_path_bytes_unix_body (selection #4483/#4500)
+// 702 path_bytes Windows -> jetos_path_bytes_windows_body (selection same gate)
+// 711 generation_mode Unix -> jetos_generation_mode_unix_body (same gate)
+// 717 generation_mode Windows -> jetos_generation_mode_windows_body (same gate)
+// 725 flags -> Tests/GenerationFiles.jet::jetos_generation_test_flags
+// 741 source_proof_rejects_same_name_across_realization_tiers -> exact #Test name
+// 761 render_plan_json -> jetos_render_plan_json
+// 828 service_plan_json -> jetos_service_plan_json
+// 864 read_generation_packages -> jetos_read_generation_packages
+// 912 diff_packages -> jetos_diff_packages
+// 953 generation_ordinal -> jetos_generation_ordinal
+// 963 dir_size_bytes -> jetos_dir_size_bytes
+// 984 write_root_closure -> jetos_write_root_closure
+// 1017 project_profile_dirs -> jetos_project_profile_dirs
+// 1032 copy_profile_tree -> jetos_copy_profile_tree
+// 1069 ensure_profile_dir -> jetos_ensure_profile_dir
+// 1088 project_runtime_closure -> jetos_project_runtime_closure
+// 1116 nix_store_closure_paths -> jetos_nix_store_closure_paths
+// 1120 nix_store_closure_paths_with -> jetos_nix_store_closure_paths_with +
+//      jetos_nix_store_closure_output; native provider is required A6E6/0-body.
+// 1150 copy_nix_store_path -> jetos_copy_nix_store_path
+// 1160 copy_nix_closure_tree -> jetos_copy_nix_closure_tree
+// 1182 copy_runtime_file_filtered -> public jetos_copy_runtime_file_filtered
+// 1186 rewrite_generation_store_symlinks -> jetos_rewrite_generation_store_symlinks
+// 1190 rewrite_store_symlinks -> jetos_rewrite_store_symlinks +
+//      BOTH jetos_rewrite_store_link_{unix,nonunix}_body (same selection gate)
+// 1232 relative_path -> public jetos_relative_path
+// 1255 skip_runtime_payload -> jetos_skip_runtime_payload
+// 1263 copy_runtime_symlink Unix -> jetos_copy_runtime_symlink_unix_body
+// 1273 copy_runtime_symlink nonUnix -> jetos_copy_runtime_symlink_nonunix_body
+//      public canonical jetos_copy_runtime_symlink selection stays explicit.
+// 1277 write_jetos_toolchain -> jetos_write_jetos_toolchain
+// 1322 jet_toolchain_candidates -> BOTH selected-target
+//      jetos_jet_toolchain_candidates_{unix,windows}_body +
+//      jetos_jet_toolchain_candidates_from_exe (selection #4483/#4500)
+// 1350 copy_toolchain_runtime_deps -> jetos_copy_toolchain_runtime_deps
+// 1360 copy_absolute_runtime_file -> jetos_copy_absolute_runtime_file
+// 1392 Scratch.new -> Tests/GenerationFiles.jet::jetos_generation_scratch_new
+// 1407 Scratch.drop -> Tests/GenerationFiles.jet::JetOSGenerationScratch.Close
+// 1413 relative_store_symlink_target_returns_invalid_data -> exact #Test name
+// 1433 absolute_non_store_symlink_target_is_unchanged -> exact #Test name
+// 1447 generation_owns_full_closure_after_original_and_lease_are_removed
+//      -> Tests/GenerationFiles.jet original real-lease/native-process journey
+// Types44 GenerationRootProof -> JetOSGenerationRootProof
+// Types854 PackageSnapshot -> JetOSPackageSnapshot
+// Types900 PackageDiff -> JetOSPackageDiff; PlanMark stays Foundation/Terminal
+// Const190 EVALUATOR_SEMANTICS -> JETOS_EVALUATOR_SEMANTICS
+//
+// Caller/publication hunks for Main (writer owns ONLY this source/test pair):
+// JetOS source list += Jetpack/JetOS/Source/GenerationFiles.jet
+// JetOS test list += Jetpack/JetOS/Tests/GenerationFiles.jet
+// RootProjection/StudioProjection share this assembly; NEVER import CLI.
+// Types JetOSRealizedPackage: original_out/consumption_override OSPath,
+// consumption_path(String)->OSPath IOError!, original_output()->OSPath,
+// output_digests(HangarRoots)->[String] from store_realize.rs65-83.
+// PackageModel HangarRoots.root/hangar_dir/pkg_resolve_roots: raw OSPath.
+// Store DurableSync.store_sync_store_node(OSPath,Bool) IOError! (Rust459),
+// not invented StoreError.to_io; original file/directory/platform sync law.
+// All native stage-writer dir/published_dir arguments migrate to OSPath at
+// their OWN owners; their current String counterparts are not raw providers.
+// Canonical Foundation quote/hash/UTF8, AST/parser, checked authority and
+// Store verification/lease stay owned there. No second codec/resolver/hash.
+//
+// Complexity/ownership: diff name lookup O(n+m), sorting O(k log k);
+// proof keys/cache are computed ONCE, never allocated per comparison;
+// closure manifests are append buffers, not repeated whole-string copies.
+// Original filesystem recursion (including source symlink-follow size loops)
+// remains source behavior; no additional cycle detector or policy is added.
+// Borrowed native spans/Close owners and OSPath map traits remain actual
+// #4392/#4494/#4499 gates; source shapes do not prove allocation/native parity.
+// Exact manifest hunk (Main ONLY; never activate unresolved natives blindly):
+// Jetpack/Bootstrap/sources.list, "# == JetOS ==" after Types.jet:
+// +Jetpack/JetOS/Source/GenerationFiles.jet
+// Jetpack/Bootstrap/tests.list, "# == JetOS ==":
+// +Jetpack/JetOS/Tests/GenerationFiles.jet
+// Jetpack/Bootstrap/areas.list JetOS stays PackageModel, EnvModel, Store;
+// NO CLI dependency or alias/reexport is added.

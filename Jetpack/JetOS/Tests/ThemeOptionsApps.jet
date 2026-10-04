@@ -1,0 +1,300 @@
+// Original leaf assertions: tests/jetpack_jetos.rs::os_switch_activates_and_sets_current
+// theme1484-1511/options1669-1713/image1714-1718/service1869-1907/apps1908-1949.
+// Input facts come from tests/fixtures/jetpack-config/config.jet, not a replacement
+// CLI journey. GATED native originals are mandatory: Studio #4479/#3593,
+// process #3594, module-system explain writer and generation assembly #4262.
+
+fn jetos_toa_test_system(options: [OptionPlan]) -> SystemPlan Never! {
+    SystemPlan{name: "halcyon", target: "linux.x64", packages: [Pkg]{}, services: [ServicePlan]{}, options: options}
+}
+
+fn jetos_toa_test_halcyon() -> SystemPlan Never! {
+    system := jetos_toa_test_system([OptionPlan]{
+        OptionPlan{key: "user.nate.packages", value: "[packages.hello, packages.btop]"},
+        OptionPlan{key: "user.nate.services", value: "[\"syncthing\"]"},
+        OptionPlan{key: "user.nate.files.ghosttyConfig", value: "\"home/ghostty/config\""},
+        OptionPlan{key: "performance.sysctl.vm.swappiness", value: "10"},
+        OptionPlan{key: "services.displayManager", value: "\"sddm\""},
+        OptionPlan{key: "services.displayManager", value: "\"gdm\""},
+        OptionPlan{key: "services.displayManager.tier", value: ".Force"},
+        OptionPlan{key: "theme.name", value: "\"halcyon\""},
+        OptionPlan{key: "theme.polarity", value: ".Dark"},
+        OptionPlan{key: "theme.wallpaper", value: "\"wallpapers/forest.png\""},
+        OptionPlan{key: "theme.fonts.ui", value: "\"Inter\""},
+        OptionPlan{key: "theme.palette.accent", value: "\"#7aa2f7\""},
+        OptionPlan{key: "apps.flatpak.app.discord.ref", value: "\"com.discordapp.Discord\""},
+        OptionPlan{key: "apps.program.git.userName", value: "\"Nate\""},
+        OptionPlan{key: "apps.program.git.userEmail", value: "\"nate@example.test\""},
+        OptionPlan{key: "apps.program.git.signingKey", value: "\"ABC123\""},
+        OptionPlan{key: "apps.program.ghostty.theme", value: "\"halcyon\""},
+        OptionPlan{key: "apps.program.helix.theme", value: "\"halcyon\""},
+        OptionPlan{key: "apps.program.vscode.extensions", value: "[\"rust-lang.rust-analyzer\", \"jet.jet\"]"},
+        OptionPlan{key: "apps.program.vscode.settings.editorFontFamily", value: "\"Inter\""},
+        OptionPlan{key: "apps.program.cursor.extensions", value: "[\"jet.jet\"]"},
+        OptionPlan{key: "apps.program.discord.source", value: "apps.flatpak.app.discord"},
+        OptionPlan{key: "apps.program.spicetify.theme", value: "\"halcyon\""},
+        OptionPlan{key: "apps.program.browser.zen.policy.DisableTelemetry", value: "true"}
+    })
+    system.services = [ServicePlan]{
+        ServicePlan{name: "openssh", enable: true, extra: [ServicePlanExtra]{ServicePlanExtra{key: "ports", value: "[22]"}, ServicePlanExtra{key: "hardening", value: "\"network-service\""}, ServicePlanExtra{key: "journal", value: "\"persistent\""}}},
+        ServicePlan{name: "backup", enable: true, extra: [ServicePlanExtra]{ServicePlanExtra{key: "exec", value: "\"/run/current-system/sw/bin/hello\""}, ServicePlanExtra{key: "timer", value: "\"daily\""}, ServicePlanExtra{key: "tmpfiles", value: "\"d /var/lib/backup 0750 root root -\""}}},
+        ServicePlan{name: "metrics", enable: true, extra: [ServicePlanExtra]{ServicePlanExtra{key: "exec", value: "\"/run/current-system/sw/bin/btop\""}, ServicePlanExtra{key: "socket", value: "\"127.0.0.1:9999\""}}}
+    }
+    system
+}
+
+fn jetos_toa_test_image(name: String, kind: ImageKind, from: String, format: String, target: String?) -> ImagePlan Never! {
+    ImagePlan{name: name, kind: kind, from: from, format: format, target: target,
+        from_environment: false, expose: [Int]{}, env_vars: [ImageEnvVar]{}, files: [String]{},
+        base: None, services: [String]{}, health: None, entrypoint: None, user: None}
+}
+
+fn jetos_toa_test_plan(images: [ImagePlan]) -> EnvPlan Never! {
+    EnvPlan{table: SourceTable.empty(), source_files: [String]{}, graph_identity: None,
+        environment_reads: [EnvironmentRead]{}, package_refs: [String]{}, adapters: [AdapterPlan]{},
+        prompt: None, prompt_path: PromptPathMode.Short, prompt_strip: PromptStripMode.Off,
+        images: images, dev_services: [DevServicePlan]{}, secrets: [SecretSpec]{},
+        lifecycle: EnvironmentLifecycle{}, presets: [PresetSpec]{}, languages: [LanguageSpec]{},
+        selected_preset: None, language_expansion: LanguageExpansion{}, language_packs: [LanguagePack]{},
+        language_projections: [LanguageProjection]{}, files: [ManagedFile]{},
+        integrations: [EnvironmentIntegration]{}, integration_facts: IntegrationFactProjection{},
+        package_profiles: [PackageProfileSpec]{}, environment_names: [String]{}, active_environment: None,
+        active_environment_provenance: [String]{}}
+}
+
+fn jetos_toa_test_read(root: String, relative: String) -[FS]> String Never! {
+    files.read(files.join(root, relative)) ?? panic("read {relative}")
+}
+
+#Test("JetOS theme original seven targets and Studio accent") {
+    generation :: files.tmpdir("jetos-theme-original-") ?? panic("theme scratch")
+    jetos_write_theme_facts(generation, jetos_toa_test_halcyon()) ?? panic("theme writer")
+    theme :: jetos_toa_test_read(generation, "theme/facts.json")
+    assert(theme.contains("\"name\":\"halcyon\"") && theme.contains("theme-projected"), "theme: {theme}")
+    assert(files.is_file(files.join(generation, "share/themes/jetos/gtk-4.0/gtk.css")), "expected theme projection")
+    loop themed in ([String]{"share/qt6ct/colors/jetos.conf", "share/terminal/theme.toml", "share/editor/theme.json", "share/display-manager/theme.conf", "studio/theme-preview.json"}) {
+        assert(files.is_file(files.join(generation, themed)), "expected theme projection {themed}")
+    }
+    studio_theme :: jetos_toa_test_read(generation, "studio/theme-preview.json")
+    assert(studio_theme.contains("jetos.theme-preview") && studio_theme.contains("#7aa2f7"), "studio_theme: {studio_theme}")
+    assert_eq(jetos_toa_test_read(generation, "share/themes/jetos/gtk-4.0/gtk.css"), "* {{ font-family: \"Inter\"; }}\n:root {{ --jetos-accent: #7aa2f7; }}\n")
+    assert_eq(jetos_toa_test_read(generation, "share/qt6ct/colors/jetos.conf"), "[ColorScheme]\nname=halcyon\naccent=#7aa2f7\npolarity=Dark\nfont=Inter\n")
+    assert_eq(jetos_toa_test_read(generation, "share/terminal/theme.toml"), "name = \"halcyon\"\npolarity = \"Dark\"\nfont = \"Inter\"\naccent = \"#7aa2f7\"\n")
+    assert_eq(jetos_toa_test_read(generation, "share/editor/theme.json"), "{{\"name\":\"halcyon\",\"type\":\"Dark\",\"ui_font\":\"Inter\",\"accent\":\"#7aa2f7\"}}")
+    assert_eq(jetos_toa_test_read(generation, "share/display-manager/theme.conf"), "Theme=halcyon\nAccent=#7aa2f7\nWallpaper=wallpapers/forest.png\n")
+    assert_eq(studio_theme, "{{\"kind\":\"jetos.theme-preview\",\"name\":\"halcyon\",\"polarity\":\"Dark\",\"accent\":\"#7aa2f7\",\"font\":\"Inter\",\"wallpaper\":\"wallpapers/forest.png\"}}")
+    assert_eq(theme, "{{\"kind\":\"jetos.theme\",\"name\":\"halcyon\",\"polarity\":\"Dark\",\"wallpaper\":\"wallpapers/forest.png\",\"font\":\"Inter\",\"accent\":\"#7aa2f7\",\"targets\":[\"gtk\",\"qt\",\"terminal\",\"editor\",\"display-manager\",\"studio\"],\"proof\":\"theme-projected\"}}")
+    files.remove_all(generation) ?? panic("theme cleanup")
+}
+
+#Test("JetOS theme defaults aliases first key and escaped JSON") {
+    root :: files.tmpdir("jetos-theme-default-") ?? panic("theme scratch")
+    jetos_write_theme_facts(root, jetos_toa_test_system([OptionPlan]{})) ?? panic("default theme")
+    assert_eq(jetos_toa_test_read(root, "theme/facts.json"), "{{\"kind\":\"jetos.theme\",\"name\":\"default\",\"polarity\":\"Dark\",\"wallpaper\":\"\",\"font\":\"Inter\",\"accent\":\"#4f8cff\",\"targets\":[\"gtk\",\"qt\",\"terminal\",\"editor\",\"display-manager\",\"studio\"],\"proof\":\"theme-projected\"}}")
+    assert_eq(jetos_toa_test_read(root, "share/themes/jetos/gtk-4.0/gtk.css"), "* {{ font-family: \"Inter\"; }}\n:root {{ --jetos-accent: #4f8cff; }}\n")
+    assert_eq(jetos_toa_test_read(root, "share/qt6ct/colors/jetos.conf"), "[ColorScheme]\nname=default\naccent=#4f8cff\npolarity=Dark\nfont=Inter\n")
+    assert_eq(jetos_toa_test_read(root, "share/terminal/theme.toml"), "name = \"default\"\npolarity = \"Dark\"\nfont = \"Inter\"\naccent = \"#4f8cff\"\n")
+    assert_eq(jetos_toa_test_read(root, "share/editor/theme.json"), "{{\"name\":\"default\",\"type\":\"Dark\",\"ui_font\":\"Inter\",\"accent\":\"#4f8cff\"}}")
+    assert_eq(jetos_toa_test_read(root, "share/display-manager/theme.conf"), "Theme=default\nAccent=#4f8cff\nWallpaper=\n")
+    assert_eq(jetos_toa_test_read(root, "studio/theme-preview.json"), "{{\"kind\":\"jetos.theme-preview\",\"name\":\"default\",\"polarity\":\"Dark\",\"accent\":\"#4f8cff\",\"font\":\"Inter\",\"wallpaper\":\"\"}}")
+    aliases :: jetos_toa_test_system([OptionPlan]{OptionPlan{key: "theme.profile", value: ".Light"}, OptionPlan{key: "theme.font", value: "Mono"}})
+    jetos_write_theme_facts(root, aliases) ?? panic("theme aliases")
+    assert_eq(jetos_toa_test_read(root, "share/qt6ct/colors/jetos.conf"), "[ColorScheme]\nname=Light\naccent=#4f8cff\npolarity=Dark\nfont=Mono\n")
+    first :: jetos_toa_test_system([OptionPlan]{OptionPlan{key: "theme.profile", value: "ignored"}, OptionPlan{key: "theme.name", value: ""}, OptionPlan{key: "theme.font", value: "ignored"}, OptionPlan{key: "theme.fonts.ui", value: "UI"}})
+    jetos_write_theme_facts(root, first) ?? panic("first theme key")
+    assert_eq(jetos_toa_test_read(root, "share/qt6ct/colors/jetos.conf"), "[ColorScheme]\nname=\naccent=#4f8cff\npolarity=Dark\nfont=UI\n")
+    escaped :: jetos_toa_test_system([OptionPlan]{OptionPlan{key: "theme.name", value: "A\"雪"}, OptionPlan{key: "theme.polarity", value: ".Light"}, OptionPlan{key: "theme.fonts.ui", value: "F\tQ"}, OptionPlan{key: "theme.palette.accent", value: "\\blue"}, OptionPlan{key: "theme.wallpaper", value: "path\nnext"}})
+    jetos_write_theme_facts(root, escaped) ?? panic("escaped theme")
+    assert_eq(jetos_toa_test_read(root, "share/editor/theme.json"), "{{\"name\":\"A\\\"雪\",\"type\":\"Light\",\"ui_font\":\"F\\tQ\",\"accent\":\"\\\\blue\"}}")
+    assert_eq(jetos_toa_test_read(root, "studio/theme-preview.json"), "{{\"kind\":\"jetos.theme-preview\",\"name\":\"A\\\"雪\",\"polarity\":\"Light\",\"accent\":\"\\\\blue\",\"font\":\"F\\tQ\",\"wallpaper\":\"path\\nnext\"}}")
+    files.remove_all(root) ?? panic("theme cleanup")
+}
+
+#Test("JetOS image original installer and variant proof") {
+    generation :: files.tmpdir("jetos-image-original-") ?? panic("image scratch")
+    plan :: jetos_toa_test_plan([ImagePlan]{jetos_toa_test_image("installer", ImageKind.Iso, "halcyon", "iso", None)})
+    jetos_write_image_variant_facts(generation, jetos_toa_test_halcyon(), plan) ?? panic("image writer")
+    images :: jetos_toa_test_read(generation, "image-variants/matrix.json")
+    assert(images.contains("\"name\": \"installer\"") && images.contains("image-variant-plan-ready"), "image variants: {images}")
+    files.remove_all(generation) ?? panic("image cleanup")
+}
+
+#Test("JetOS image exact defaults selected ISO targets and configured source order") {
+    root :: files.tmpdir("jetos-image-edges-") ?? panic("image scratch")
+    system :: jetos_toa_test_system([OptionPlan]{OptionPlan{key: "packages.imageVariant.z", value: ".Raw"}, OptionPlan{key: "packages.imageVariant.a", value: "\".users.Sd\""}, OptionPlan{key: "packages.imageVariant.z", value: ".Qcow2"}})
+    plan :: jetos_toa_test_plan([ImagePlan]{
+        jetos_toa_test_image("other", ImageKind.Iso, "other-host", "iso", None),
+        jetos_toa_test_image("container", ImageKind.OCI, "halcyon", "oci", None),
+        jetos_toa_test_image("installer", ImageKind.Iso, "halcyon", "iso", None),
+        jetos_toa_test_image("arm\"雪", ImageKind.Iso, "halcyon", "custom", Val("linux.arm64")),
+        jetos_toa_test_image("empty", ImageKind.Iso, "halcyon", "", Val(""))
+    })
+    jetos_write_image_variant_facts(root, system, plan) ?? panic("image edge writer")
+    expected :: "{{\"kind\":\"jetos.image-variant-matrix\",\"host\":\"halcyon\",\"variants\":[{{\n  \"name\": \"default-qcow2\",\n  \"kind\": \"qcow2\",\n  \"format\": \"qcow2\",\n  \"target\": \"linux.x64\"\n}},{{\n  \"name\": \"default-raw\",\n  \"kind\": \"raw\",\n  \"format\": \"raw\",\n  \"target\": \"linux.x64\"\n}},{{\n  \"name\": \"default-sd\",\n  \"kind\": \"sd\",\n  \"format\": \"sd\",\n  \"target\": \"linux.x64\"\n}},{{\n  \"name\": \"default-netboot\",\n  \"kind\": \"netboot\",\n  \"format\": \"pxe\",\n  \"target\": \"linux.x64\"\n}},{{\n  \"name\": \"installer\",\n  \"kind\": \"iso\",\n  \"format\": \"iso\",\n  \"target\": \"linux.x64\"\n}},{{\n  \"name\": \"arm\\\"雪\",\n  \"kind\": \"iso\",\n  \"format\": \"custom\",\n  \"target\": \"linux.arm64\"\n}},{{\n  \"name\": \"empty\",\n  \"kind\": \"iso\",\n  \"format\": \"\",\n  \"target\": \"\"\n}},{{\n  \"name\": \"z\",\n  \"kind\": \"Raw\",\n  \"format\": \"Raw\",\n  \"target\": \"linux.x64\"\n}},{{\n  \"name\": \"a\",\n  \"kind\": \"Sd\",\n  \"format\": \"Sd\",\n  \"target\": \"linux.x64\"\n}},{{\n  \"name\": \"z\",\n  \"kind\": \"Qcow2\",\n  \"format\": \"Qcow2\",\n  \"target\": \"linux.x64\"\n}}],\"proof\":\"image-variant-plan-ready\"}}"
+    assert_eq(jetos_toa_test_read(root, "image-variants/matrix.json"), expected)
+    // Empty plans/options leave precisely the first four defaults.
+    jetos_write_image_variant_facts(root, jetos_toa_test_system([OptionPlan]{}), jetos_toa_test_plan([ImagePlan]{})) ?? panic("default matrix")
+    default_parts :: expected.split_once(",{{\n  \"name\": \"installer\"") ?? panic("expected default prefix")
+    expected_defaults := default_parts.before // #4303 owned view.
+    assert_eq(jetos_toa_test_read(root, "image-variants/matrix.json"), "{expected_defaults}],\"proof\":\"image-variant-plan-ready\"}}")
+    files.remove_all(root) ?? panic("image cleanup")
+}
+
+// GATED #4479/#3593 executable provider and #3594 process; real explain projection.
+#Test("JetOS options native original reference exact and explain process output") {
+    root :: files.tmpdir("jetos-options-original-") ?? panic("options scratch")
+    system :: jetos_toa_test_halcyon()
+    jetos_write_options_reference(root, system) ?? panic("options writer")
+    jetos_write_module_priority_facts(root, system) ?? panic("real module explain projection")
+    options_ref :: jetos_toa_test_read(root, "options/reference.json")
+    assert(options_ref.contains("apps.flatpak.app.discord.ref") && options_ref.contains("performance.sysctl.vm.swappiness") && options_ref.contains("\"type\":") && options_ref.contains("\"doc\":") && options_ref.contains("\"tier\":"), "options reference: {options_ref}")
+    search :: files.join(root, "sw/bin/jetos-options-search")
+    assert(files.is_file(search), "expected options search helper")
+    exact :: process.cmd([String]{search, "--exact", "services.displayManager"}).env("JETOS_SYSTEM_ROOT", root).stdout(.Capture).stderr(.Capture).run() ?? panic("exact search")
+    assert(exact.success, "stdout: {exact.output}\nstderr: {exact.errors}")
+    assert(exact.output.contains("services.displayManager") && exact.output.contains("gdm"), "option_exact: {exact.output}")
+    explain :: process.cmd([String]{search, "--explain", "services.displayManager"}).env("JETOS_SYSTEM_ROOT", root).stdout(.Capture).stderr(.Capture).run() ?? panic("explain search")
+    assert(explain.success, "stdout: {explain.output}\nstderr: {explain.errors}")
+    assert(explain.output.contains("services.displayManager") && explain.output.contains("winner"), "option_explain: {explain.output}")
+    files.remove_all(root) ?? panic("options cleanup")
+}
+
+#Test("JetOS options native sorted deduped keys metadata filter string priority winner") {
+    root :: files.tmpdir("jetos-options-edges-") ?? panic("options scratch")
+    system :: jetos_toa_test_system([OptionPlan]{
+        OptionPlan{key: "z", value: "first"}, OptionPlan{key: "theme.name", value: "\"snow\""},
+        OptionPlan{key: "z.tier", value: ".Force"}, OptionPlan{key: "z.priority", value: "-17"},
+        OptionPlan{key: "z.override", value: "true"}, OptionPlan{key: "z.disabled", value: "false"},
+        OptionPlan{key: "z", value: "last\"雪"}, OptionPlan{key: "orphan.tier", value: ".Default"}
+    })
+    jetos_write_options_reference(root, system) ?? panic("edge options writer")
+    assert_eq(jetos_toa_test_read(root, "options/reference.json"), "{{\"kind\":\"jetos.option-reference\",\"host\":\"halcyon\",\"options\":[{{\"key\":\"theme.name\",\"namespace\":\"theme\",\"type\":\"String\",\"value\":\"snow\",\"default\":\"default\",\"example\":\"snow\",\"doc\":\"Reusable theme projection for GTK, terminals, editors, DM, and Studio.\",\"source\":\"config.jet options\",\"tier\":\"Normal\",\"priority\":\"1000\",\"provenance\":\"system option resolver\"}},{{\"key\":\"z\",\"namespace\":\"z\",\"type\":\"String\",\"value\":\"last\\\"雪\",\"default\":\"unset\",\"example\":\"last\\\"雪\",\"doc\":\"JetOS system option.\",\"source\":\"config.jet options\",\"tier\":\"Force\",\"priority\":\"-17\",\"provenance\":\"system option resolver\"}}]}}")
+    jetos_write_options_reference(root, jetos_toa_test_system([OptionPlan]{})) ?? panic("empty reference")
+    assert_eq(jetos_toa_test_read(root, "options/reference.json"), "{{\"kind\":\"jetos.option-reference\",\"host\":\"halcyon\",\"options\":[]}}")
+    files.remove_all(root) ?? panic("options cleanup")
+}
+
+#Test("JetOS service native original tmpfiles hardening journal and logs arguments") {
+    root :: files.tmpdir("jetos-service-original-") ?? panic("service scratch")
+    jetos_write_service_manager_depth(root, jetos_toa_test_halcyon()) ?? panic("service writer")
+    services :: jetos_toa_test_read(root, "service-manager/facts.json")
+    assert(services.contains("tmpfiles") && services.contains("hardening") && services.contains("journal"), "service depth: {services}")
+    assert(files.is_file(files.join(root, "etc/tmpfiles.d/backup.conf")), "expected tmpfiles projection")
+    logs :: files.join(root, "sw/bin/jetos-service-logs")
+    assert(files.is_file(logs), "expected service log helper")
+    journal_bin :: files.join(root, "fake-journalctl")
+    journal_log :: files.join(root, "journalctl.log")
+    files.write(journal_bin, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$JETOS_JOURNAL_LOG\"\n") ?? panic("journal fixture")
+    jetos_make_executable(journal_bin) ?? panic("journal fixture permissions")
+    service_logs :: process.cmd([String]{logs, "openssh", "--since", "1 hour ago"}).env("JETOS_SYSTEM_ROOT", root).env("JETOS_JOURNALCTL_BIN", journal_bin).env("JETOS_JOURNAL_LOG", journal_log).stdout(.Capture).stderr(.Capture).run() ?? panic("service log process")
+    assert(service_logs.success, "stdout: {service_logs.output}\nstderr: {service_logs.errors}")
+    journal_args :: jetos_toa_test_read(root, "journalctl.log")
+    assert(journal_args.contains("-u openssh --since 1 hour ago"), "journal_args: {journal_args}")
+    assert_eq(journal_args, "-u openssh --since 1 hour ago\n")
+    assert_eq(jetos_toa_test_read(root, "etc/tmpfiles.d/backup.conf"), "d /var/lib/backup 0750 root root -\n")
+    files.remove_all(root) ?? panic("service cleanup")
+}
+
+#Test("JetOS service native disabled exclusion defaults aliases and STRING booleans") {
+    root :: files.tmpdir("jetos-service-edges-") ?? panic("service scratch")
+    system := jetos_toa_test_system([OptionPlan]{})
+    system.services = [ServicePlan]{
+        ServicePlan{name: "disabled", enable: false, extra: [ServicePlanExtra]{ServicePlanExtra{key: "tmpfiles", value: "ignored"}}},
+        ServicePlan{name: "plain", enable: true, extra: [ServicePlanExtra]{}},
+        ServicePlan{name: "aliases", enable: true, extra: [ServicePlanExtra]{ServicePlanExtra{key: "schedule", value: ""}, ServicePlanExtra{key: "listen", value: ""}, ServicePlanExtra{key: "hardening", value: "\"first\""}, ServicePlanExtra{key: "hardening", value: "second"}, ServicePlanExtra{key: "journal", value: ""}, ServicePlanExtra{key: "tmpfiles", value: "\"line\n\""}}}
+    }
+    jetos_write_service_manager_depth(root, system) ?? panic("service edge writer")
+    assert(!files.exists(files.join(root, "etc/tmpfiles.d/disabled.conf")))
+    assert_eq(jetos_toa_test_read(root, "etc/tmpfiles.d/aliases.conf"), "line\n\n")
+    assert_eq(jetos_toa_test_read(root, "service-manager/facts.json"), "{{\"kind\":\"jetos.service-manager-depth\",\"services\":[{{\n  \"name\": \"plain\",\n  \"hardening\": \"default-sandbox\",\n  \"journal\": \"structured\",\n  \"timers\": \"false\",\n  \"sockets\": \"false\"\n}},{{\n  \"name\": \"aliases\",\n  \"hardening\": \"first\",\n  \"journal\": \"\",\n  \"timers\": \"true\",\n  \"sockets\": \"true\"\n}}],\"features\":[\"services\",\"timers\",\"sockets\",\"tmpfiles\",\"hardening\",\"journal\"]}}")
+    assert_eq(jetos_toa_test_read(root, "service-manager/log-policy.json"), "{{\"kind\":\"jetos.service-logs\",\"backend\":\"journalctl\",\"fallback\":\"service-manager/logs/<unit>.log\",\"proof\":\"logs-query-ready\"}}")
+    jetos_write_service_manager_depth(root, jetos_toa_test_system([OptionPlan]{})) ?? panic("empty services")
+    assert_eq(jetos_toa_test_read(root, "service-manager/facts.json"), "{{\"kind\":\"jetos.service-manager-depth\",\"services\":[],\"features\":[\"services\",\"timers\",\"sockets\",\"tmpfiles\",\"hardening\",\"journal\"]}}")
+    files.remove_all(root) ?? panic("service cleanup")
+}
+
+#Test("JetOS apps native original library Git files and apply outputs") {
+    root :: files.tmpdir("jetos-apps-original-") ?? panic("apps scratch")
+    jetos_write_app_module_facts(root, jetos_toa_test_halcyon()) ?? panic("apps writer")
+    app_modules :: jetos_toa_test_read(root, "apps/modules.json")
+    assert(app_modules.contains("app-module-library") && app_modules.contains("ghosttyConfig") && app_modules.contains("\"name\":\"git\"") && app_modules.contains("\"name\":\"vscode\"") && app_modules.contains("jetos-app-module-apply"), "app modules: {app_modules}")
+    assert(files.is_file(files.join(root, "apps/programs/git/module.json")) && files.is_file(files.join(root, "apps/programs/vscode/config")) && files.is_file(files.join(root, "apps/programs/discord/module.json")) && files.is_file(files.join(root, "apps/coverage.manifest")) && files.is_file(files.join(root, "apps/gap-cards.manifest")) && files.is_file(files.join(root, "sw/bin/jetos-app-module-apply")), "expected app module library artifacts")
+    git_config :: jetos_toa_test_read(root, "apps/programs/git/config")
+    assert(git_config.contains("user.name = Nate") && git_config.contains("user.email"), "git_config: {git_config}")
+    assert_eq(git_config, "# managed by jetos apps.program.git\nuserName = Nate\nuserEmail = nate@example.test\nsigningKey = ABC123\nuser.name = Nate\nuser.email = nate@example.test\n")
+    app_home :: files.join(root, "app-home")
+    app_apply :: process.cmd([String]{files.join(root, "sw/bin/jetos-app-module-apply")}).env("JETOS_SYSTEM_ROOT", root).env("JETOS_USER_HOME", app_home).stdout(.Capture).stderr(.Capture).run() ?? panic("apply app modules")
+    assert(app_apply.success, "stdout: {app_apply.output}\nstderr: {app_apply.errors}")
+    assert(files.is_file(files.join(app_home, ".config/git/config")) && files.is_file(files.join(app_home, ".config/Code/User/settings.json")) && files.is_file(files.join(app_home, ".jetos/proof/app-modules.json")), "expected app module apply output")
+    assert_eq(jetos_toa_test_read(app_home, ".jetos/proof/app-modules.json"), "{{\"kind\":\"jetos.app-modules\",\"state\":\"applied\",\"count\":20,\"proof\":\"app-config-applied\"}}\n")
+    files.remove_all(root) ?? panic("apps cleanup")
+}
+
+#Test("JetOS apps native exact twenty catalog paths enabled package and manifests") {
+    root :: files.tmpdir("jetos-apps-edges-") ?? panic("apps scratch")
+    system :: jetos_toa_test_system([OptionPlan]{OptionPlan{key: "apps.program.git.enable", value: "false"}, OptionPlan{key: "apps.program.git.userName", value: "First"}, OptionPlan{key: "apps.program.git.userName", value: "Last"}, OptionPlan{key: "apps.program.ssh.package", value: "custom-ssh"}, OptionPlan{key: "apps.program.fish.enable", value: ".TrUe"}})
+    jetos_write_app_module_facts(root, system) ?? panic("app edges")
+    expected :: [(name: String, path: String, enabled: String, package: String)]{
+        (name: "git", path: ".config/git/config", enabled: "false", package: "git"),
+        (name: "ssh", path: ".ssh/config", enabled: "true", package: "custom-ssh"),
+        (name: "fish", path: ".config/fish/config.fish", enabled: "true", package: "fish"),
+        (name: "starship", path: ".config/starship.toml", enabled: "false", package: "starship"),
+        (name: "ghostty", path: ".config/ghostty/config", enabled: "false", package: "ghostty"),
+        (name: "helix", path: ".config/helix/config.toml", enabled: "false", package: "helix"),
+        (name: "yazi", path: ".config/yazi/config", enabled: "false", package: "yazi"),
+        (name: "btop", path: ".config/btop/config", enabled: "false", package: "btop"),
+        (name: "bat", path: ".config/bat/config", enabled: "false", package: "bat"),
+        (name: "eza", path: ".config/eza/config", enabled: "false", package: "eza"),
+        (name: "fzf", path: ".config/fzf/config", enabled: "false", package: "fzf"),
+        (name: "zoxide", path: ".config/zoxide/config", enabled: "false", package: "zoxide"),
+        (name: "ripgrep", path: ".config/ripgrep/config", enabled: "false", package: "ripgrep"),
+        (name: "tealdeer", path: ".config/tealdeer/config", enabled: "false", package: "tealdeer"),
+        (name: "fastfetch", path: ".config/fastfetch/config", enabled: "false", package: "fastfetch"),
+        (name: "vscode", path: ".config/Code/User/settings.json", enabled: "false", package: "vscode"),
+        (name: "cursor", path: ".config/Cursor/User/settings.json", enabled: "false", package: "cursor"),
+        (name: "discord", path: ".config/discord/config", enabled: "false", package: "discord"),
+        (name: "spicetify", path: ".config/spicetify/config", enabled: "false", package: "spicetify"),
+        (name: "browser", path: ".config/browser/policies.json", enabled: "false", package: "browser")
+    }
+    entries :: files.list_dir(files.join(root, "apps/programs")) ?? panic("app list")
+    assert_eq(entries.len(), 20)
+    catalog := [String]{}
+    coverage := [String]{}
+    loop row in expected {
+        assert_eq(jetos_app_module_config_path(row.name), row.path)
+        options :: if row.name == {
+            "git" -> "{{\n  \"key\": \"enable\",\n  \"value\": \"false\"\n}},{{\n  \"key\": \"userName\",\n  \"value\": \"First\"\n}},{{\n  \"key\": \"userName\",\n  \"value\": \"Last\"\n}}"
+            "ssh" -> "{{\n  \"key\": \"package\",\n  \"value\": \"custom-ssh\"\n}}"
+            "fish" -> "{{\n  \"key\": \"enable\",\n  \"value\": \".TrUe\"\n}}"
+            else -> ""
+        }
+        assert_eq(jetos_toa_test_read(root, "apps/programs/{row.name}/module.json"), "{{\"kind\":\"jetos.app-module\",\"name\":\"{row.name}\",\"enabled\":{row.enabled},\"package\":\"{row.package}\",\"config_path\":\"{row.path}\",\"options\":[{options}],\"proof\":\"app-module-ready\"}}")
+        if options == "" -> assert_eq(jetos_toa_test_read(root, "apps/programs/{row.name}/config"), "# managed by jetos apps.program.{row.name}\n")
+        &catalog.push("{{\"name\":\"{row.name}\",\"enabled\":{row.enabled},\"config\":\"apps/programs/{row.name}/config\",\"proof\":\"ready\"}}")
+        &coverage.push("{row.name}\tmodule\n")
+    }
+    assert_eq(jetos_toa_test_read(root, "apps/modules.json"), "{{\"kind\":\"jetos.app-module-library\",\"host\":\"halcyon\",\"modules\":[{{\n  \"key\": \"git.enable\",\n  \"value\": \"false\"\n}},{{\n  \"key\": \"git.userName\",\n  \"value\": \"First\"\n}},{{\n  \"key\": \"git.userName\",\n  \"value\": \"Last\"\n}},{{\n  \"key\": \"ssh.package\",\n  \"value\": \"custom-ssh\"\n}},{{\n  \"key\": \"fish.enable\",\n  \"value\": \".TrUe\"\n}}],\"catalog\":[{catalog.join(",")}],\"apply\":\"sw/bin/jetos-app-module-apply\",\"proof\":\"app-config-projected\"}}")
+    assert_eq(jetos_toa_test_read(root, "apps/coverage.manifest"), coverage.join(""))
+    assert_eq(jetos_toa_test_read(root, "apps/gap-cards.manifest"), "vscode-extension-provider\tcovered-by-#330\ncursor-extension-provider\tcovered-by-#330\nspicetify-patching-provider\tcovered-by-#330\n")
+    assert_eq(jetos_toa_test_read(root, "apps/programs/git/config"), "# managed by jetos apps.program.git\nenable = false\nuserName = First\nuserName = Last\nuser.name = Last\n")
+    assert_eq(jetos_app_module_config_path("unlisted"), ".config/unlisted/config")
+    // Rust applies all catalog configs, even explicitly disabled git: retained
+    // frozen behavior, not an invented disabled-module execution policy.
+    home :: files.join(root, "home")
+    applied :: process.cmd([String]{files.join(root, "sw/bin/jetos-app-module-apply")}).env("JETOS_SYSTEM_ROOT", root).env("JETOS_USER_HOME", home).stdout(.Capture).stderr(.Capture).run() ?? panic("apply disabled catalog")
+    assert(applied.success, applied.errors)
+    assert_eq(jetos_toa_test_read(home, ".config/git/config"), "# managed by jetos apps.program.git\nenable = false\nuserName = First\nuserName = Last\nuser.name = Last\n")
+    files.remove_all(root) ?? panic("apps cleanup")
+}
+
+#Test("JetOS native options service and app scripts retain exact Rust bytes") {
+    root :: files.tmpdir("jetos-script-bytes-") ?? panic("script scratch")
+    system :: jetos_toa_test_system([OptionPlan]{})
+    jetos_write_options_reference(root, system) ?? panic("options script")
+    jetos_write_service_manager_depth(root, system) ?? panic("logs script")
+    jetos_write_app_module_facts(root, system) ?? panic("apply script")
+    assert_eq(jetos_toa_test_read(root, "sw/bin/jetos-options-search"), "#!/usr/bin/env sh\nset -eu\nmode=search\ncase \"${{1:-}}\" in\n  --exact) mode=exact; shift ;;\n  --explain) mode=explain; shift ;;\nesac\nterm=${{1:-}}\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\nref=\"$root/options/reference.json\"\nexplain=\"$root/module-system/explain.json\"\nif [ -z \"$term\" ]; then\n  cat \"$ref\"\n  exit 0\nfi\ncase \"$mode\" in\n  exact) grep -F \"\\\"key\\\": \\\"$term\\\"\" \"$ref\" || grep -F \"\\\"key\\\":\\\"$term\\\"\" \"$ref\" || true ;;\n  explain) grep -F \"$term\" \"$explain\" || true ;;\n  *) grep -F \"$term\" \"$ref\" || true ;;\nesac\n")
+    assert_eq(jetos_toa_test_read(root, "sw/bin/jetos-service-logs"), "#!/usr/bin/env sh\nset -eu\nunit=${{1:-}}\nif [ -z \"$unit\" ]; then\n  echo 'usage: jetos-service-logs <unit> [--since <time>]' >&2\n  exit 2\nfi\nshift || true\nsince=''\nif [ \"${{1:-}}\" = '--since' ]; then\n  shift\n  since=${{1:-}}\nfi\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\njournal=${{JETOS_JOURNALCTL_BIN:-journalctl}}\nif command -v \"$journal\" >/dev/null 2>&1; then\n  if [ -n \"$since\" ]; then\n    exec \"$journal\" -u \"$unit\" --since \"$since\"\n  fi\n  exec \"$journal\" -u \"$unit\"\nfi\nfallback=\"$root/service-manager/logs/$unit.log\"\nif [ -f \"$fallback\" ]; then\n  cat \"$fallback\"\n  exit 0\nfi\necho \"jetos logs: no journal backend or fallback log for $unit\" >&2\nexit 2\n")
+    assert_eq(jetos_toa_test_read(root, "sw/bin/jetos-app-module-apply"), "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\nhome=${{JETOS_USER_HOME:-$HOME}}\nproof_dir=${{JETOS_APP_PROOF_DIR:-$home/.jetos/proof}}\nmkdir -p \"$proof_dir\"\ncount=0\nfor module in \"$root\"/apps/programs/*; do\n  [ -d \"$module\" ] || continue\n  name=${{module##*/}}\n  config_path=$(sed -n 's/.*\"config_path\":\"\\([^\"]*\\)\".*/\\1/p' \"$module/module.json\")\n  [ -n \"$config_path\" ] || config_path=\".config/$name/config\"\n  dest=\"$home/$config_path\"\n  mkdir -p \"${{dest%/*}}\"\n  cp \"$module/config\" \"$dest\"\n  count=$((count + 1))\ndone\nprintf '{{\"kind\":\"jetos.app-modules\",\"state\":\"applied\",\"count\":%s,\"proof\":\"app-config-applied\"}}\\n' \"$count\" > \"$proof_dir/app-modules.json\"\ncat \"$proof_dir/app-modules.json\"\n")
+    files.remove_all(root) ?? panic("script cleanup")
+}

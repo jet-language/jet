@@ -1,0 +1,673 @@
+use jet_foundation.PerformanceBudget.[evaluate, Evidence]
+use std.process.[Command, Stdio, Child]
+use std.time.[Duration, Instant]
+use std.sync.[Arc, AtomicBool, AtomicOrdering, mpsc]
+use std.thread as thread
+use std.panic as panic_runtime
+use std.io as io
+use std.fs as fs
+// GATE #4494: native filesystem, process, fork, thread, atomic and unwind seams.
+// Raw process declarations are owned by core.sys.host.process_control;
+// prctl by core.sys.host.linux_seccomp_imports, descriptor calls by unix_fd.
+use c.c as native
+
+// Rust: Source/BudgetProviders.rs:1815
+fn copy_cache_tree(source: OSPath, destination: OSPath) Err! {
+    fs.create_dir_all(destination) ?? return Err("cannot create compile workload cache directory: {err}")
+    entries :: fs.read_dir(source) ?? return Err("cannot read compile workload cache: {err}")
+    collected :: entries.collect() ?? return Err("cannot enumerate compile workload cache: {err}")
+    loop entry in collected {
+        path :: entry.path()
+        metadata :: fs.symlink_metadata(path) ?? return Err("cannot inspect compile workload cache path: {err}")
+        if metadata.file_type().is_symlink() -> return Err("compile workload cache contains a symlink: {path.display()}")
+        target :: destination.join(entry.file_name())
+        if metadata.is_dir() {
+            copy_cache_tree(path, target)
+        } else if metadata.is_file() {
+            _ :: fs.copy(path, target) ?? return Err("cannot copy compile workload cache artifact: {err}")
+        }
+    }
+    Ok(())
+}
+
+// Rust: Source/BudgetProviders.rs:1844
+fn apply_unified_patch(root: OSPath, patch: String) Err! {
+    if !safe_relative_path(patch) -> return Err("compile workload patch path is not project-relative")
+    patch_bytes :: fs.read(root.join(patch)) ?? return Err("cannot read compile workload patch: {err}")
+    patch_text :: String.from_utf8(^patch_bytes) ?? return Err("compile workload patch is not UTF-8")
+    lines :: patch_text.lines().to_list()
+    old_header :: lines.iter().find(fn(line) { line.starts_with("--- ") }) ?? return Err("compile workload patch has no old-file header")
+    new_header :: lines.iter().find(fn(line) { line.starts_with("+++ ") }) ?? return Err("compile workload patch has no new-file header")
+    old_path :: patch_header_path(old_header)
+    new_path :: patch_header_path(new_header)
+    if old_path != new_path -> return Err("compile workload patch changes more than one file")
+    hunk_index :: lines.iter().position(fn(line) { line.starts_with("@@") }) ?? return Err("compile workload patch has no hunk")
+    header := lines[hunk_index].split_whitespace()
+    if header.next() != Val("@@") -> return Err("compile workload patch has an invalid hunk header")
+    parse_range :: fn(value: String) -> (Int, Int) Err! {
+        value :: value.get(1..) ?? return Err("compile workload patch has an invalid hunk range")
+        parts :: value.split_once(",")
+        start_text :: if parts == { .Val(pair) -> pair.before, .None -> value }
+        count_text :: if parts == { .Val(pair) -> pair.after, .None -> "1" }
+        start :: start_text.parse[Int]() ?? return Err("compile workload patch has an invalid hunk start")
+        count :: count_text.parse[Int]() ?? return Err("compile workload patch has an invalid hunk count")
+        if start < 0 -> return Err("compile workload patch has an invalid hunk start")
+        if count < 0 -> return Err("compile workload patch has an invalid hunk count")
+        if start == 0 -> return Err("compile workload patch has a zero hunk start")
+        Ok((start, count))
+    }
+    (old_start_one, old_count) :: parse_range(header.next() ?? return Err("compile workload patch has no old hunk range"))
+    (_, new_count) :: parse_range(header.next() ?? return Err("compile workload patch has no new hunk range"))
+    target :: root.join(new_path)
+    metadata :: fs.symlink_metadata(target) ?? return Err("compile workload patch target is unavailable: {err}")
+    if metadata.file_type().is_symlink() || !metadata.is_file() -> return Err("compile workload patch target is not a regular file")
+    original :: fs.read_to_string(target) ?? return Err("cannot read compile workload patch target: {err}")
+    trailing_newline :: original.ends_with("\n")
+    current :: original.lines().to_list()
+    old_start :: old_start_one - 1
+    if old_start > current.len() -> return Err("compile workload patch hunk starts outside the source tree")
+    output := [String]{}
+    loop index in 0..<old_start -> &output.push(current[index])
+    cursor := old_start
+    seen_old := 0
+    seen_new := 0
+    loop index in (hunk_index + 1)..<lines.len() {
+        line :: lines[index]
+        if line.starts_with("@@") -> return Err("compile workload patch must contain exactly one hunk")
+        if line.starts_with("\\ No newline") -> continue
+        (kind, body) :: line.split_at(1)
+        if kind == {
+            " " -> {
+                if current.get(cursor) != Val(body) -> return Err("compile workload patch context does not match the source tree")
+                &output.push(body)
+                cursor += 1
+                seen_old += 1
+                seen_new += 1
+            }
+            "-" -> {
+                if current.get(cursor) != Val(body) -> return Err("compile workload patch removal does not match the source tree")
+                cursor += 1
+                seen_old += 1
+            }
+            "+" -> { &output.push(body); seen_new += 1 }
+            else -> return Err("compile workload patch contains an invalid hunk line")
+        }
+    }
+    if seen_old != old_count || seen_new != new_count -> return Err("compile workload patch hunk counts do not match its body")
+    loop index in cursor..<current.len() -> &output.push(current[index])
+    rewritten := output.join("\n")
+    if trailing_newline -> &rewritten.push_str("\n")
+    fs.write(target, rewritten) ?? return Err("cannot apply compile workload patch: {err}")
+    Ok(())
+}
+
+// Rust: Source/BudgetProviders.rs:1968
+fn patch_header_path(header: String) -> String Err! {
+    value :: header[4..].split("\t").next() ?? ""
+    value :: value.strip_prefix("a/") ?? value.strip_prefix("b/") ?? value
+    if !safe_relative_path(value) -> return Err("compile workload patch header has an unsafe path")
+    Ok(value)
+}
+
+// Rust: Source/BudgetProviders.rs:1981
+struct ChildMetrics { process_cpu_ns: U128, peak_rss_bytes: U64 }
+// Rust: Source/BudgetProviders.rs:1986
+fn child_peak_rss(pid: U32) -> U64? ProviderFailure! {
+    if core.sys.target.selected_os() == "linux" -> return read_vm_hwm(pid)
+    Ok(None)
+}
+// Rust: Source/BudgetProviders.rs:1998
+fn run_compile_child(entry: OSPath, root: OSPath, target: String, profile: String) -> ChildMetrics ProviderFailure! {
+    if target != "cli" -> return Err(ProviderFailure.operation(.Unsupported, "compile workload target `{target}` is unsupported by the resident fixture compiler"))
+    backend :: CompileBackend.for_profile(profile)
+    executable :: running_executable() ?? return Err(ProviderFailure.operation(.Execution, "cannot identify resident Jet compiler: {err}"))
+    command := Command.new(executable) // GATE #4494
+    &command.arg(if backend == { .JitCranelift -> "run", .AotRustc -> "build" })
+    &command.arg(entry).current_dir(root).env("JET_STORE_DIR", root.join(".jet-store"))
+    &command.stdin(Stdio.null()).stdout(Stdio.null()).stderr(Stdio.null())
+    if profile == {
+        "dev" -> {}
+        "release" -> { &command.arg("--release") }
+        "small" -> { &command.arg("--small") }
+        else -> { &command.arg("--profile={profile}") }
+    }
+    if core.sys.target.selected_family() == "unix" -> &command.process_group(0)
+    child := command.spawn() ?? return Err(ProviderFailure.operation(.Execution, "cannot start compile workload child: {err}"))
+    peak_rss_bytes := U64{0}
+    deadline :: Instant.now() + NATIVE_BUILD_DEADLINE
+    loop {
+        if child_peak_rss(child.id()) == { .Val(value) -> { peak_rss_bytes = peak_rss_bytes.max(value) }, .None -> {} }
+        usage_result :: wait4_process(child.id(), true)
+        if usage_result == {
+            .Ok(Val(usage)) -> {
+                if usage.status != 0 -> return Err(ProviderFailure.operation(.Execution, "compile workload child exited with status {usage.status}"))
+                peak_rss_bytes = peak_rss_bytes.max(usage.peak_rss_bytes)
+                if core.sys.target.selected_os() == "linux" && peak_rss_bytes == 0 -> return Err(ProviderFailure.operation(.Unavailable, "compile child peak RSS was not observable"))
+                return Ok(ChildMetrics{process_cpu_ns: usage.process_cpu_ns, peak_rss_bytes: peak_rss_bytes})
+            }
+            .Ok(None) -> {
+                if Instant.now() < deadline -> thread.sleep(Duration.from_millis(2))
+                else {
+                    terminate_group(&child)
+                    return Err(ProviderFailure.operation(.Timeout, "compile workload child exceeded its deadline"))
+                }
+            }
+            .Err(error) -> { terminate_group(&child); return Err(error) }
+        }
+    }
+}
+// Rust: Source/BudgetProviders.rs:2096
+fn running_executable() -> OSPath io.Error! {
+    if core.sys.target.selected_os() == "linux" {
+        executable :: OSPath.from_text("/proc/self/exe")
+        _ :: fs.File.open(executable) // GATE #4494
+        return Ok(executable)
+    }
+    std.env.current_exe() // GATE #4494
+}
+
+// Rust: Source/BudgetProviders.rs:2109
+fn read_compile_phases(root: OSPath, entry: OSPath) -> [(String, U128)] ProviderFailure! {
+    executable :: running_executable() ?? return Err(ProviderFailure.operation(.Execution, "cannot identify resident Jet compiler: {err}"))
+    command := Command.new(executable)
+    &command.arg("explain-build").arg(entry).arg("--json").current_dir(root)
+    &command.env("JET_STORE_DIR", root.join(".jet-store")).env("NO_COLOR", "1")
+    output :: command.output() ?? return Err(ProviderFailure.operation(.Unavailable, "cannot read explain-build record: {err}"))
+    if !output.status.success() {
+        stderr := String.from_utf8_lossy(output.stderr).trim() // #4303
+        return Err(ProviderFailure.operation(.Unavailable, "explain-build failed with status {output.status}: {stderr}"))
+    }
+    text :: String.from_utf8(output.stdout) ?? return Err(ProviderFailure.malformed("explain-build output is not UTF-8"))
+    trimmed := text.trim() // #4303
+    value :: parse_json(trimmed, true) ?? return Err(ProviderFailure.malformed("explain-build output is invalid: {err.message}"))
+    record :: if value == {
+        .Object(fields) -> fields.iter().find(fn(pair) { pair.0 == "build" }).map(fn(pair) { pair.1 }) ?? value
+        else -> value
+    }
+    fields :: if record == { .Object(fields) -> fields, else -> return Err(ProviderFailure.malformed("explain-build record is not an object")) }
+    schema_value :: fields.iter().find(fn(pair) { pair.0 == "schema" }).map(fn(pair) { pair.1 }) ?? return Err(ProviderFailure.malformed("explain-build record has no schema"))
+    schema :: if schema_value == { .Text(text) | .TypedText(text) -> text, else -> return Err(ProviderFailure.malformed("explain-build record has no schema")) }
+    if schema != "jet.explain-build/v1" -> return Err(ProviderFailure.malformed("explain-build record has an unsupported schema"))
+    program :: fields.iter().find(fn(pair) { pair.0 == "program" }).map(fn(pair) { pair.1 })
+    if !(if program == { .Val(.Text(text)) | .Val(.TypedText(text)) -> !text.is_empty(), else -> false }) -> return Err(ProviderFailure.malformed("explain-build record has no program"))
+    node_value :: fields.iter().find(fn(pair) { pair.0 == "nodes" }).map(fn(pair) { pair.1 })
+    nodes :: if node_value == { .Val(.Array(nodes)) -> nodes, else -> return Err(ProviderFailure.malformed("explain-build record has no nodes")) }
+    phases := [String: U128]{}
+    loop node_value in nodes {
+        node :: if node_value == { .Object(fields) -> fields, else -> return Err(ProviderFailure.malformed("explain-build node is not an object")) }
+        kind_value :: node.iter().find(fn(pair) { pair.0 == "kind" }).map(fn(pair) { pair.1 })
+        kind :: if kind_value == { .Val(.Text(text)) | .Val(.TypedText(text)) -> text, else -> return Err(ProviderFailure.malformed("explain-build node has no kind")) }
+        if kind == "package" -> continue
+        if kind != "check" && kind != "compile" && kind != "link" -> return Err(ProviderFailure.malformed("explain-build node has an unsupported kind"))
+        loop field in ["key", "subject", "why_ran"] {
+            field_value :: node.iter().find(fn(pair) { pair.0 == field }).map(fn(pair) { pair.1 })
+            if !(if field_value == { .Val(.Text(text)) | .Val(.TypedText(text)) -> !text.is_empty(), else -> false }) -> return Err(ProviderFailure.malformed("explain-build node has no {field}"))
+        }
+        input_value :: node.iter().find(fn(pair) { pair.0 == "inputs" }).map(fn(pair) { pair.1 })
+        inputs :: if input_value == { .Val(.Array(values)) -> values, else -> return Err(ProviderFailure.malformed("explain-build node has no inputs")) }
+        loop input in inputs {
+            if !(input == .Text(_) || input == .TypedText(_)) -> return Err(ProviderFailure.malformed("explain-build node inputs are not strings"))
+        }
+        duration :: node.iter().find(fn(pair) { pair.0 == "duration_ms" }).map(fn(pair) { pair.1 }) ?? return Err(ProviderFailure.malformed("explain-build node has no duration"))
+        duration_ms :: if duration == {
+            .Float(number) -> number
+            .Int(number) -> number as F64
+            .Number(text) -> text.parse[F64]() ?? return Err(ProviderFailure.malformed("explain-build node duration is not a number"))
+            else -> return Err(ProviderFailure.malformed("explain-build node duration is not a number"))
+        }
+        if !duration_ms.is_finite() || duration_ms < 0.0 -> return Err(ProviderFailure.malformed("explain-build node duration is invalid"))
+        nanos :: duration_ms * 1_000_000.0
+        if nanos > U64.MAX as F64 -> return Err(ProviderFailure.malformed("explain-build node duration overflowed"))
+        rounded :: nanos.round() as U128
+        total :: phases.get(kind) ?? U128{0}
+        phases[kind] = total.checked_add(rounded) ?? return Err(ProviderFailure.malformed("compile phase total overflowed"))
+    }
+    if phases.is_empty() -> return Err(ProviderFailure.operation(.Unavailable, "explain-build record contained no nodes"))
+    keys := phases.keys().to_list()
+    &keys.sort()
+    result := [(String, U128)]{}
+    loop key in keys -> &result.push((key, phases[key]))
+    Ok(^result)
+}
+// Rust: Source/BudgetProviders.rs:2274
+fn phase_totals_json(phases: [(String, U128)]) -> CanonicalJson ProviderFailure! {
+    result := [CanonicalJson]{}
+    loop (name, ns) in phases {
+        entry :: CanonicalJson.object([("name", CanonicalJson.String(name)), ("ns", CanonicalJson.Integer(ns.to_string()))]) ?? return Err(ProviderFailure.malformed(err))
+        &result.push(entry)
+    }
+    Ok(CanonicalJson.Array(^result))
+}
+// Rust: Source/BudgetProviders.rs:2289
+fn aggregate_compile_phases(records: [CanonicalJson]) -> CanonicalJson ProviderFailure! {
+    totals := [String: U128]{}
+    loop record_value in records {
+        record :: if record_value == { .Object(fields) -> fields, else -> return Err(ProviderFailure.malformed("compile sample record is not an object")) }
+        phases :: if record.get("phase_totals") == { .Val(.Array(values)) -> values, else -> return Err(ProviderFailure.malformed("compile sample record has no phase totals")) }
+        loop phase_value in phases {
+            phase :: if phase_value == { .Object(fields) -> fields, else -> return Err(ProviderFailure.malformed("compile phase total is not an object")) }
+            name :: if phase.get("name") == { .Val(.String(text)) -> text, else -> return Err(ProviderFailure.malformed("compile phase total has no name")) }
+            text :: if phase.get("ns") == { .Val(.Integer(text)) -> text, else -> return Err(ProviderFailure.malformed("compile phase total has no duration")) }
+            ns :: text.parse[U128]() ?? return Err(ProviderFailure.malformed("compile phase total is not an unsigned integer"))
+            total :: totals.get(name) ?? U128{0}
+            totals[name] = total.checked_add(ns) ?? return Err(ProviderFailure.malformed("compile phase total overflowed"))
+        }
+    }
+    keys := totals.keys().to_list()
+    &keys.sort()
+    phases := [(String, U128)]{}
+    loop key in keys -> &phases.push((key, totals[key]))
+    phase_totals_json(phases)
+}
+
+// Rust: Source/BudgetProviders.rs:2330
+fn run_in_process(function: InProcessProvider, request: &ProviderRequest, timeout: Duration, identity: String) -> [ProviderEvent] ProviderFailure! {
+    if core.sys.target.selected_os() != "linux" -> return Err(ProviderFailure.operation(.Execution, "bounded in-process providers are enabled only on Linux"))
+    cancellation :: ProviderCancellation{cancelled: Arc.new(AtomicBool.new(false))}
+    bytes :: run_isolated_bytes(timeout, "provider `{identity}`", fn() -> [U8] ProviderFailure! {
+        result :: panic_runtime.catch_unwind(panic_runtime.AssertUnwindSafe(fn() { function(request, &cancellation) })) ?? return Err(ProviderFailure.operation(.Panic, "in-process provider failed unexpectedly")) // GATE #4494
+        events :: result
+        Ok(encode_stream(events))
+    })
+    decode_stream(bytes, request)
+}
+// Rust: Source/BudgetProviders.rs:2365
+fn read_bounded(path: OSPath, timeout: Duration) -> [U8] ProviderFailure! {
+    if core.sys.target.selected_os() == "linux" -> return read_bounded_isolated(path, timeout)
+    Err(ProviderFailure.operation(.Execution, "isolated provider file reads are enabled only on Linux"))
+}
+
+// Rust: Source/BudgetProviders.rs:2391
+#Layout(c)
+struct StatxTimestamp { sec: I64, nsec: U32, reserved: I32 }
+// Rust: Source/BudgetProviders.rs:2398
+#Layout(c)
+struct Statx {
+    mask: U32, blksize: U32, attributes: U64, nlink: U32, uid: U32, gid: U32,
+    mode: U16, spare0: U16, ino: U64, size: U64, blocks: U64, attributes_mask: U64,
+    atime: StatxTimestamp, btime: StatxTimestamp, ctime: StatxTimestamp, mtime: StatxTimestamp,
+    rdev_major: U32, rdev_minor: U32, dev_major: U32, dev_minor: U32,
+    mnt_id: U64, dio_mem_align: U32, dio_offset_align: U32, spare3: [U64; 12]
+}
+// Rust: Source/BudgetProviders.rs:2432
+// open/read/close/statx/usleep use their native std/C spellings. GATE #4494:
+// exact borrowed C layout, pointers, descriptor ownership and native admission.
+// Rust: Source/BudgetProviders.rs:2381
+fn read_bounded_isolated(path: OSPath, timeout: Duration) -> [U8] ProviderFailure! {
+    name :: std.ffi.CString.new(path.encoded) ?? return Err(ProviderFailure.operation(.Execution, "provider response path contains NUL")) // GATE #4494
+    O_RDONLY :: I32{0}
+    O_NONBLOCK :: I32{2048}
+    O_CLOEXEC :: I32{524288}
+    O_NOFOLLOW :: I32{131072}
+    AT_EMPTY_PATH :: I32{4096}
+    STATX_TYPE :: U32{1}
+    S_IFMT :: U16{61440}
+    S_IFREG :: U16{32768}
+    // GATE #4494: cfg(test) instrumentation must be selected at compile time.
+    active := ActiveFileReader?{None}
+    if core.sys.target.test_build() -> active = Val(ActiveFileReader.new())
+    defer { if active == { .Val(owner) -> owner.close(), .None -> {} } }
+    run_isolated_bytes(timeout, "provider response {path.display()}", fn() -> [U8] ProviderFailure! {
+        #Unsafe("borrow initialized C path/stat/buffer storage for descriptor reads") {
+            if core.sys.target.test_build() {
+                delay :: FILE_READER_DELAY_MS.load(AtomicOrdering.Relaxed)
+                if delay > 0 -> _ :: native.usleep((delay.min(U32.MAX as U64) * 1000) as U32)
+            }
+            fd :: native.open(name.as_ptr(), O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW)
+            if fd < 0 -> return Err(ProviderFailure.operation(.Execution, "cannot open provider response without following links"))
+            empty :: [U8]{0}
+            info := std.mem.zeroed[Statx]() // GATE #4494
+            if native.statx(fd, empty.as_ptr() as *I8, AT_EMPTY_PATH, STATX_TYPE, &info) != 0 || (info.mode & S_IFMT) != S_IFREG {
+                _ :: native.close(fd)
+                return Err(ProviderFailure.operation(.Execution, "provider response is not a regular file"))
+            }
+            bytes := [U8]{}
+            buffer := [U8; 8192]{0}
+            loop {
+                count :: native.read(fd, buffer.as_mut_ptr(), buffer.len())
+                if count < 0 {
+                    _ :: native.close(fd)
+                    return Err(ProviderFailure.operation(.Execution, "cannot read provider response"))
+                }
+                if count == 0 -> break
+                &bytes.extend_from_slice(buffer[0..count as Int])
+                if bytes.len() > MAX_BYTES {
+                    _ :: native.close(fd)
+                    return Err(ProviderFailure.malformed("provider stream exceeds 16 MiB"))
+                }
+            }
+            _ :: native.close(fd)
+            Ok(^bytes)
+        }
+    })
+}
+
+// Rust: Source/BudgetProviders.rs:2534
+fn class_byte(class: FailureClass) -> U8 {
+    if class == { .Unavailable -> 0, .Malformed -> 1, .Panic -> 2, .Timeout -> 3, .Execution -> 4, .Incompatible -> 5, .Unsupported -> 6, .Unresolved -> 7 }
+}
+// Rust: Source/BudgetProviders.rs:2546
+fn byte_class(value: U8) -> FailureClass? {
+    if value == { 0 -> Val(.Unavailable), 1 -> Val(.Malformed), 2 -> Val(.Panic), 3 -> Val(.Timeout), 4 -> Val(.Execution), 5 -> Val(.Incompatible), 6 -> Val(.Unsupported), 7 -> Val(.Unresolved), else -> None }
+}
+// Rust: Source/BudgetProviders.rs:2506
+fn run_isolated_bytes[F](timeout: Duration, label: String, work: F) -> [U8] ProviderFailure! where F: FnOnce[() -> [U8] ProviderFailure!] {
+    O_NONBLOCK :: I32{2048}
+    F_SETFL :: I32{4}
+    WNOHANG :: I32{1}
+    SIGKILL :: I32{9}
+    PR_SET_PDEATHSIG :: I32{1}
+    // Rust: Source/BudgetProviders.rs:2520
+    // pipe/fork/close/read/write/fcntl/waitpid/kill/setpgid/getpid/getppid/
+    // prctl/_exit are raw native imports, never callbacks into Rust.
+    #Unsafe("isolated Linux worker pipe/group/prctl lifecycle; native admission #4494") {
+        supervisor :: native.getpid()
+        pipes := [I32; 2]{-1}
+        if native.pipe(pipes.as_mut_ptr()) != 0 -> return Err(ProviderFailure.operation(.Execution, "cannot create isolated worker pipe: {io.Error.last_os_error()}"))
+        pid :: native.fork()
+        if pid < 0 {
+            _ :: native.close(pipes[0])
+            _ :: native.close(pipes[1])
+            return Err(ProviderFailure.operation(.Execution, "cannot isolate {label}: {io.Error.last_os_error()}"))
+        }
+        if pid == 0 {
+            if native.prctl(PR_SET_PDEATHSIG, SIGKILL as Int, 0, 0, 0) != 0 || native.getppid() != supervisor -> native._exit(1)
+            _ :: native.close(pipes[0])
+            _ :: native.setpgid(0, 0)
+            _ :: native.close(2)
+            // GATE #4494: fork-child allocating/unwind execution needs the
+            // audited native runtime boundary, not ordinary scheduler reentry.
+            caught :: panic_runtime.catch_unwind(panic_runtime.AssertUnwindSafe(^work))
+            result :: if caught == { .Ok(value) -> value, .Err(_) -> Err(ProviderFailure.operation(.Panic, "isolated worker panicked")) }
+            frame := [U8]{}
+            if result == {
+                .Ok(bytes) -> { &frame.push(0); &frame.extend_from_slice(bytes) }
+                .Err(failure) -> { &frame.push(1); &frame.push(class_byte(failure.class)); &frame.extend_from_slice(failure.reason.bytes()) }
+            }
+            at := 0
+            loop at < frame.len() {
+                sent :: native.write(pipes[1], frame[at..].as_ptr(), frame.len() - at)
+                if sent <= 0 -> break
+                at += sent as Int
+            }
+            _ :: native.close(pipes[1])
+            native._exit(0)
+        }
+        // GATE #4494: compile-time test instrumentation, scoped until return.
+        active := ActiveIsolatedWorker?{None}
+        if core.sys.target.test_build() -> active = Val(ActiveIsolatedWorker.new())
+        defer { if active == { .Val(owner) -> owner.close(), .None -> {} } }
+        _ :: native.close(pipes[1])
+        _ :: native.setpgid(pid, pid)
+        _ :: native.fcntl(pipes[0], F_SETFL, O_NONBLOCK)
+        if core.sys.target.test_build() -> LAST_ISOLATED_GROUP.store(pid as U64, AtomicOrdering.SeqCst)
+        deadline :: Instant.now() + timeout
+        frame := [U8]{}
+        worker_reaped := false
+        buffer := [U8; 8192]{0}
+        loop {
+            count :: native.read(pipes[0], buffer.as_mut_ptr(), buffer.len())
+            if count > 0 { &frame.extend_from_slice(buffer[0..count as Int]); continue }
+            if count == 0 { _ :: native.close(pipes[0]); break }
+            if !worker_reaped {
+                status := I32{0}
+                waited :: native.waitpid(pid, &status, WNOHANG)
+                if waited == pid -> worker_reaped = true
+            }
+            if Instant.now() >= deadline {
+                _ :: native.kill(-pid, SIGKILL)
+                if !worker_reaped { status := I32{0}; _ :: native.waitpid(pid, &status, 0) }
+                _ :: native.close(pipes[0])
+                return Err(ProviderFailure.operation(.Timeout, "{label} timed out and its isolated process group was terminated"))
+            }
+            thread.sleep(Duration.from_millis(1))
+        }
+        if !worker_reaped { status := I32{0}; _ :: native.waitpid(pid, &status, 0) }
+        if frame.first() == {
+            .Val(0) -> Ok(frame[1..].to_list())
+            .Val(1) -> {
+                class :: frame.get(1).and_then(byte_class) ?? return Err(ProviderFailure.operation(.Execution, "isolated worker returned an invalid failure class"))
+                reason :: String.from_utf8(frame[2..].to_list()) ?? return Err(ProviderFailure.operation(.Execution, "isolated worker returned non-UTF-8 failure text"))
+                Err(ProviderFailure.operation(class, reason))
+            }
+            else -> Err(ProviderFailure.operation(.Execution, "{label} exited without a result"))
+        }
+    }
+}
+
+// Rust: Source/BudgetProviders.rs:2702
+fn run_subprocess(path: OSPath, request: [U8], timeout: Duration) -> [U8] ProviderFailure! {
+    command := Command.new(path)
+    &command.stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null())
+    if core.sys.target.selected_family() == "unix" -> &command.process_group(0)
+    child := command.spawn() ?? return Err(ProviderFailure.operation(.Execution, "cannot launch provider {path.display()}: {err}"))
+    stdin := child.stdin.take() ?? return Err(ProviderFailure.operation(.Execution, "provider stdin was unavailable"))
+    (writer_tx, writer_rx) :: mpsc.sync_channel(1)
+    thread.spawn(fn() { _ :: writer_tx.send(stdin.write_all(request)) }) // GATE #4494: captured stream/task transfer.
+    stdout :: child.stdout.take() ?? return Err(ProviderFailure.operation(.Execution, "provider stdout was unavailable"))
+    (tx, rx) :: mpsc.channel()
+    thread.spawn(fn() {
+        bytes := [U8]{}
+        limited := stdout.take((MAX_BYTES + 1) as U64)
+        result :: limited.read_to_end(&bytes).map(fn(_) { ^bytes })
+        _ :: tx.send(^result)
+    })
+    deadline :: Instant.now() + timeout
+    loop {
+        if child.try_wait() == {
+            .Ok(Val(status)) -> {
+                if !status.success() { terminate_group(&child); return Err(ProviderFailure.operation(.Execution, "provider exited with {status}")) }
+                remaining :: deadline.saturating_duration_since(Instant.now())
+                read_result :: rx.recv_timeout(remaining) ?? {
+                    terminate_group(&child)
+                    return Err(ProviderFailure.operation(.Timeout, "provider stdout did not close before deadline"))
+                }
+                bytes :: read_result ?? return Err(ProviderFailure.operation(.Execution, "cannot read provider stdout: {err}"))
+                write_result :: writer_rx.recv_timeout(deadline.saturating_duration_since(Instant.now())) ?? {
+                    terminate_group(&child)
+                    return Err(ProviderFailure.operation(.Timeout, "provider stdin did not close before deadline"))
+                }
+                _ :: write_result ?? return Err(ProviderFailure.operation(.Execution, "cannot write provider stdin: {err}"))
+                if bytes.len() > MAX_BYTES -> return Err(ProviderFailure.malformed("provider stream exceeds 16 MiB"))
+                return Ok(bytes)
+            }
+            .Ok(None) -> {
+                if Instant.now() < deadline -> thread.sleep(Duration.from_millis(2))
+                else { terminate_group(&child); return Err(ProviderFailure.operation(.Timeout, "provider timed out and was terminated")) }
+            }
+            .Err(error) -> { terminate_group(&child); return Err(ProviderFailure.operation(.Execution, "cannot supervise provider: {error}")) }
+        }
+    }
+}
+// Rust: Source/BudgetProviders.rs:2810
+pub fn terminate_group(child: &Child) {
+    if core.sys.target.selected_family() == "unix" {
+        // Rust: Source/BudgetProviders.rs:2815
+        #Unsafe("kill the child process group before reaping the child; #4494") { _ :: native.kill(-(child.id() as I32), 9) }
+    }
+    _ :: child.kill()
+    _ :: child.wait()
+}
+
+// Rust: Source/BudgetProviders.rs:2824
+pub fn encode_stream(events: [ProviderEvent]) -> [U8] {
+    out := MAGIC.to_list()
+    loop event in events {
+        if event == {
+            .Sample(spec, metric, value) -> {
+                &out.push(1); put_u32(&out, spec); put_text(&out, metric)
+                put_text(&out, value.num.to_string()); put_text(&out, value.den.to_string())
+            }
+            .Unavailable(spec, reason, details) -> {
+                &out.push(2); put_u32(&out, spec); put_text(&out, reason); put_u32(&out, details.len() as U32)
+                loop (key, value) in details { put_text(&out, key); put_text(&out, value) }
+            }
+            .Metadata(spec, details) -> {
+                &out.push(4); put_u32(&out, spec); put_u32(&out, details.len() as U32)
+                loop (key, value) in details { put_text(&out, key); put_text(&out, value) }
+            }
+            .Complete(request_id, samples) -> {
+                &out.push(3); put_text(&out, request_id); &out.extend_from_slice(samples.to_be_bytes())
+            }
+        }
+    }
+    ^out
+}
+// Rust: Source/BudgetProviders.rs:2874
+fn put_u32(out: &[U8], value: U32) { &out.extend_from_slice(value.to_be_bytes()) }
+// Rust: Source/BudgetProviders.rs:2877
+fn put_text(out: &[U8], value: String) { put_u32(out, value.bytes().len() as U32); &out.extend_from_slice(value.bytes()) }
+// Rust: Source/BudgetProviders.rs:2882
+fn decode_stream(bytes: [U8], request: &ProviderRequest) -> [ProviderEvent] ProviderFailure! {
+    if bytes.len() > MAX_BYTES -> return Err(ProviderFailure.malformed("provider stream exceeds 16 MiB"))
+    reader := Reader{bytes: bytes, at: 0}
+    if reader.take(MAGIC.len()) != MAGIC -> return Err(ProviderFailure.malformed("provider stream has bad magic"))
+    events := [ProviderEvent]{}
+    loop reader.at < bytes.len() {
+        tag :: reader.byte()
+        event :: if tag == {
+            1 -> {
+                spec :: reader.u32(); metric :: reader.text(); num :: reader.text(); den :: reader.text()
+                value :: Rational.parse(num, den) ?? return Err(ProviderFailure.malformed(err))
+                ProviderEvent.Sample{spec: spec, metric: metric, value: value}
+            }
+            2 -> {
+                spec :: reader.u32(); reason :: reader.text(); count :: reader.u32() as Int
+                if count > MAX_DETAIL_SCALARS -> return Err(ProviderFailure.malformed("provider unavailable detail exceeds 512 scalars"))
+                details := [(String, String)]{}
+                loop _ in 0..<count { key :: reader.text(); value :: reader.text(); &details.push((key, value)) }
+                if detail_scalars(reason, details) > MAX_DETAIL_SCALARS -> return Err(ProviderFailure.malformed("provider unavailable detail exceeds 512 scalars"))
+                ProviderEvent.Unavailable{spec: spec, reason: reason, details: ^details}
+            }
+            4 -> {
+                spec :: reader.u32(); count :: reader.u32() as Int
+                if count > MAX_METADATA_SCALARS -> return Err(ProviderFailure.malformed("provider metadata exceeds its scalar limit"))
+                details := [(String, String)]{}
+                loop _ in 0..<count { key :: reader.text(); value :: reader.text(); &details.push((key, value)) }
+                ProviderEvent.Metadata{spec: spec, details: ^details}
+            }
+            3 -> { request_id :: reader.text(); samples :: reader.u64(); ProviderEvent.Complete{request_id: request_id, samples: samples} }
+            else -> return Err(ProviderFailure.malformed("provider stream has unknown event tag"))
+        }
+        &events.push(^event)
+    }
+    evidence :: validate_events(^events, request)
+    Ok(evidence.events)
+}
+// Rust: Source/BudgetProviders.rs:2955
+struct Reader { bytes: View[U8], at: Int }
+// Rust: Source/BudgetProviders.rs:2960
+fn Reader.take(self: &Reader, n: Int) -> View[U8] ProviderFailure! {
+    end :: self.at.checked_add(n) ?? return Err(ProviderFailure.malformed("provider frame length overflow"))
+    value :: self.bytes.get(self.at..end) ?? return Err(ProviderFailure.malformed("provider stream is truncated"))
+    self.at = end
+    Ok(value)
+}
+// Rust: Source/BudgetProviders.rs:2972
+fn Reader.byte(self: &Reader) -> U8 ProviderFailure! { Ok(self.take(1)[0]) }
+// Rust: Source/BudgetProviders.rs:2975
+fn Reader.u32(self: &Reader) -> U32 ProviderFailure! { Ok(U32.from_be_bytes(self.take(4))) }
+// Rust: Source/BudgetProviders.rs:2978
+fn Reader.u64(self: &Reader) -> U64 ProviderFailure! { Ok(U64.from_be_bytes(self.take(8))) }
+// Rust: Source/BudgetProviders.rs:2981
+fn Reader.text(self: &Reader) -> String ProviderFailure! {
+    n :: self.u32() as Int
+    Ok(String.from_utf8(self.take(n).to_list()) ?? return Err(ProviderFailure.malformed("provider text is not UTF-8")))
+}
+
+// Rust: Source/BudgetProviders.rs:2988
+fn validate_events(events: [ProviderEvent], request: &ProviderRequest) -> ProviderEvidence ProviderFailure! {
+    if events.is_empty() -> return Err(ProviderFailure.malformed("provider stream is empty"))
+    sample_count := 0
+    complete := false
+    last_spec := U32{0}
+    seen := false
+    loop index in 0..<events.len() {
+        if complete -> return Err(ProviderFailure.malformed("event follows final Complete"))
+        if events[index] == {
+            .Sample(spec, metric, _) -> {
+                if spec as Int >= request.specs.len() || request.specs[spec as Int].metric != metric -> return Err(ProviderFailure.operation(.Incompatible, "provider sample does not match requested spec/metric"))
+                if seen && spec < last_spec -> return Err(ProviderFailure.malformed("provider events are not contiguous and ordered"))
+                seen = true; last_spec = spec; sample_count += 1
+                if sample_count > MAX_SAMPLES -> return Err(ProviderFailure.malformed("provider emitted more than 1000000 samples"))
+            }
+            .Metadata(spec, details) -> {
+                if spec as Int >= request.specs.len() || details.is_empty() -> return Err(ProviderFailure.malformed("provider metadata has an invalid spec or no fields"))
+                if detail_scalars("", details) > MAX_METADATA_SCALARS -> return Err(ProviderFailure.malformed("provider metadata exceeds its scalar limit"))
+                previous := String?{None}
+                loop (key, value) in details {
+                    if key.is_empty() || previous.is_some_and(fn(prior) { prior >= key }) -> return Err(ProviderFailure.malformed("provider metadata keys are not unique and sorted"))
+                    if value.is_empty() -> return Err(ProviderFailure.malformed("provider metadata contains an empty value"))
+                    previous = Val(key)
+                }
+                if seen && spec < last_spec -> return Err(ProviderFailure.malformed("provider events are not contiguous and ordered"))
+                seen = true; last_spec = spec
+            }
+            .Unavailable(spec, reason, details) -> {
+                if spec as Int >= request.specs.len() || reason.is_empty() -> return Err(ProviderFailure.malformed("provider Unavailable has invalid spec or empty reason"))
+                if detail_scalars(reason, details) > MAX_DETAIL_SCALARS -> return Err(ProviderFailure.malformed("provider unavailable detail exceeds 512 scalars"))
+                if seen && spec < last_spec -> return Err(ProviderFailure.malformed("provider events are not contiguous and ordered"))
+                seen = true; last_spec = spec
+            }
+            .Complete(request_id, samples) -> {
+                if index + 1 != events.len() || request_id != request.request_id || samples != sample_count as U64 -> return Err(ProviderFailure.malformed("provider Complete request id/count/finality mismatch"))
+                complete = true
+            }
+        }
+    }
+    if !complete -> return Err(ProviderFailure.malformed("provider stream has no final Complete"))
+    Ok(ProviderEvidence{events: ^events})
+}
+// Rust: Source/BudgetProviders.rs:3106
+fn detail_scalars(reason: String, details: [(String, String)]) -> Int {
+    sum := 0
+    loop (key, value) in details -> sum += key.chars().count().saturating_add(value.chars().count())
+    reason.chars().count().saturating_add(sum)
+}
+// Rust: Source/BudgetProviders.rs:3114
+fn is_hex64(value: String) -> Bool {
+    if value.bytes().len() != 64 -> return false
+    loop byte in value.bytes() { if !((byte >= 48 && byte <= 57) || (byte >= 97 && byte <= 102)) -> return false }
+    true
+}
+// Rust: Source/BudgetProviders.rs:3121
+pub fn unavailable_if_too_few(budget: String, evidence: &ProviderEvidence, minimum: Int) ProviderDiagnostic! {
+    count := 0
+    first_unavailable := String?{None}
+    loop event in evidence.events {
+        if event == { .Sample(_, _, _) -> { count += 1 }, .Unavailable(_, reason, _) -> { if first_unavailable == None -> first_unavailable = Val(reason) }, else -> {} }
+    }
+    if first_unavailable == { .Val(reason) -> return Err(ProviderFailure.operation(.Unavailable, reason).diagnostic(budget)), .None -> {} }
+    if count < minimum -> return Err(ProviderFailure.operation(.Unavailable, "provider returned {count} samples; policy requires {minimum}").diagnostic(budget))
+    Ok(())
+}
+// Rust: Source/BudgetProviders.rs:3152
+pub fn evaluate_provider_evidence(budget: String, evidence_id: String, context_key: String, baseline_report_ids: [String], evidence: &ProviderEvidence, spec: U32, baseline: [Rational], percentile: Percentile?, comparison: &Comparison, direction: Direction, enforcement: Enforcement, policy: MeasurementPolicy?, minimum_samples: Int) -> Evaluation ProviderDiagnostic! {
+    samples := [Rational]{}
+    loop event in evidence.events {
+        if event == {
+            .Sample(event_spec, _, value) -> { if event_spec == spec -> &samples.push(value) }
+            .Unavailable(event_spec, reason, _) -> { if event_spec == spec -> return Err(ProviderFailure.operation(.Unavailable, reason).diagnostic(budget)) }
+            else -> {}
+        }
+    }
+    if samples.len() < minimum_samples -> return Err(ProviderFailure.operation(.Unavailable, "provider returned {samples.len()} samples; policy requires {minimum_samples}").diagnostic(budget))
+    Ok(evaluate(evidence_id, context_key, baseline_report_ids, samples, baseline, percentile, comparison, direction, enforcement, policy) ?? return Err(ProviderFailure.operation(.Execution, "shared evaluator rejected provider evidence: {err}").diagnostic(budget)))
+}
+// Rust: Source/BudgetProviders.rs:3219
+pub fn evaluation_diagnostic(budget: String, evaluation: &Evaluation, direction: Direction, baseline_report_ids: [String]) -> ProviderDiagnostic? {
+    if evaluation.evidence == {
+        .Pass -> None
+        .Unavailable -> Val(ProviderFailure.operation(.Unavailable, "the shared evaluator found no compatible nonzero baseline evidence").diagnostic(budget))
+        .Regression | .Inconclusive -> {
+            state :: if evaluation.evidence == .Regression -> "regressed" else -> "is inconclusive"
+            rational :: fn(value: Rational) { "{value.num}/{value.den}" }
+            lower :: evaluation.lower95.map(rational) ?? "none"
+            upper :: evaluation.upper95.map(rational) ?? "none"
+            point :: rational(evaluation.point)
+            direction_text :: if direction == { .LowerIsBetter -> "lower-is-better", .HigherIsBetter -> "higher-is-better" }
+            reports :: baseline_report_ids.join(",")
+            Val(ProviderDiagnostic{code: "E2907", what: "Performance budget {budget} {state}", why: "Estimator {point} with confidence [{lower}, {upper}] in {direction_text} direction did not prove the limit; baseline reports [{reports}]", fix: "Improve the measured behavior, inspect the named evidence, or record an explicit exception"})
+        }
+    }
+}

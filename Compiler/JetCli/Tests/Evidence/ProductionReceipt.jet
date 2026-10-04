@@ -1,0 +1,141 @@
+// Source/ProductionReceipt.rs has no inline tests. Expected digests below are
+// an independent Python hashlib oracle over the Rust prepare framing.
+
+fn production_test_context() -> JetCLIProductionContext Never! {
+    root :: receipt_paths.path("/p")
+    source_file :: receipt_paths.path("/p/src/main.jet")
+    entry :: jet_cli_production_relative_entry(source_file, root)
+    source_digest :: jet_cli_production_content_digest("fn run() {{}}\n".bytes())
+    closure := jet_cli_production_closure_start(entry, source_digest)
+    jet_cli_production_add_project_input(&closure, "manifest", receipt_paths.path("/p/package.jet"), "package {{}}\n".bytes(), root)
+    jet_cli_production_add_project_input(&closure, "lock", receipt_paths.path("/elsewhere/.jet/lock"), "version = 1\n".bytes(), root)
+    jet_cli_production_context_finish(root, source_file, entry, source_digest, closure, [String]{"--name", "hunter2"})
+}
+
+#Test("production content digest is prefixed lowercase sha256") {
+    assert_eq(jet_cli_production_content_digest([U8]{}), "sha256-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+    assert_eq(jet_cli_production_content_digest("native".bytes()), "sha256-bef32d2c315a289576f2a6828d27edb16bb316a4d85c271f2d794045f3ea668d")
+}
+
+#Test("production entry is project relative else file name else unknown") {
+    root :: receipt_paths.path("/p")
+    assert_eq(jet_cli_production_relative_entry(receipt_paths.path("/p/src/main.jet"), root), "src/main.jet")
+    assert_eq(jet_cli_production_relative_entry(receipt_paths.path("/p/a\\b.jet"), root), "a/b.jet")
+    assert_eq(jet_cli_production_relative_entry(receipt_paths.path("/q/other.jet"), root), "other.jet")
+    assert_eq(jet_cli_production_relative_entry(receipt_paths.path("/p"), root), "p")
+    assert_eq(jet_cli_production_relative_entry(receipt_paths.path("/"), receipt_paths.path("/")), "<unknown>")
+    assert_eq(jet_cli_production_relative_entry(receipt_paths.path("/q/.."), root), "<unknown>")
+}
+
+#Test("production project input frames kind relative path and digest") {
+    root :: receipt_paths.path("/p")
+    closure := [U8]{}
+    jet_cli_production_add_project_input(&closure, "manifest", receipt_paths.path("/p/sub/package.jet"), "x".bytes(), root)
+    jet_cli_production_add_project_input(&closure, "lock", receipt_paths.path("/elsewhere/.jet/lock"), "y".bytes(), root)
+    expected := [U8]{}
+    jet_cli_receipt_frame(&expected, "manifest".bytes())
+    jet_cli_receipt_frame(&expected, "sub/package.jet".bytes())
+    jet_cli_receipt_frame(&expected, jet_cli_production_content_digest("x".bytes()).bytes())
+    jet_cli_receipt_frame(&expected, "lock".bytes())
+    jet_cli_receipt_frame(&expected, "lock".bytes())
+    jet_cli_receipt_frame(&expected, jet_cli_production_content_digest("y".bytes()).bytes())
+    assert_eq(closure, expected)
+}
+
+#Test("production context matches the Rust framing oracle") {
+    context :: production_test_context()
+    assert_eq(context.entry, "src/main.jet")
+    assert_eq(context.source_digest, jet_cli_production_content_digest("fn run() {{}}\n".bytes()))
+    assert_eq(context.closure_digest, "sha256-9b6576e51c4765ce5e30524cd31e6592c425e0953ad9ceef558aa3d99f1a9998")
+    assert_eq(context.input_digest, "sha256-096e4751599f14dc8f713dedd0e3e782263a6ed591a3f84bbeab957f0fa43096")
+    assert_eq(context.input_count, 2)
+    assert_eq(context.input_count_digest, "sha256-d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35")
+    assert_eq(context.target_digest, "sha256-bef32d2c315a289576f2a6828d27edb16bb316a4d85c271f2d794045f3ea668d")
+    assert_eq(context.directory.raw, "/p/.jet/reports/production-ff50a18e4a844f7c")
+    assert_eq(context.project_root.raw, "/p")
+    assert_eq(context.source_file.raw, "/p/src/main.jet")
+}
+
+#Test("production inputs are framed in order and never stored as values") {
+    root :: receipt_paths.path("/p")
+    file :: receipt_paths.path("/p/main.jet")
+    digest :: jet_cli_production_content_digest([U8]{})
+    split :: jet_cli_production_context_finish(root, file, "main.jet", digest, [U8]{}, [String]{"a", "b"})
+    joined :: jet_cli_production_context_finish(root, file, "main.jet", digest, [U8]{}, [String]{"ab"})
+    swapped :: jet_cli_production_context_finish(root, file, "main.jet", digest, [U8]{}, [String]{"b", "a"})
+    assert(split.input_digest != joined.input_digest)
+    assert(split.input_digest != swapped.input_digest)
+    assert(split.directory.raw != swapped.directory.raw)
+    environment := [String:String?]{}
+    jet_cli_production_receipt_install(production_test_context(), &environment)
+    names :: [String]{JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV, JET_DEVELOPMENT_RECEIPT_ENTRY_ENV, JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST_ENV, JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST_ENV, JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST_ENV, JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_ENV, JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST_ENV, JET_DEVELOPMENT_RECEIPT_TARGET_ENV, JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST_ENV}
+    assert_eq(environment.len(), names.len())
+    loop name in names {
+        value :: environment[name] ?? ""
+        assert(value != "")
+        assert(!value.contains("hunter2"))
+        assert(!value.contains("--name"))
+        assert(!value.contains("fn run"))
+    }
+}
+
+#Test("production install writes the nine redacted receipt overrides") {
+    context :: production_test_context()
+    environment := [String:String?]{}
+    environment["KEEP"] = Val("1")
+    jet_cli_production_receipt_install(context, &environment)
+    assert_eq(environment.len(), 10)
+    assert_eq(environment[JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV], Val("/p/.jet/reports/production-ff50a18e4a844f7c"))
+    assert_eq(environment[JET_DEVELOPMENT_RECEIPT_ENTRY_ENV], Val("src/main.jet"))
+    assert_eq(environment[JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST_ENV], Val(context.source_digest))
+    assert_eq(environment[JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST_ENV], Val(context.closure_digest))
+    assert_eq(environment[JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST_ENV], Val(context.input_digest))
+    assert_eq(environment[JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_ENV], Val("2"))
+    assert_eq(environment[JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST_ENV], Val(context.input_count_digest))
+    assert_eq(environment[JET_DEVELOPMENT_RECEIPT_TARGET_ENV], Val("native"))
+    assert_eq(environment[JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST_ENV], Val(context.target_digest))
+    assert_eq(environment["KEEP"], Val("1"))
+}
+
+#Test("production record identity uses the native engine and validates the digest") {
+    identity :: jet_cli_production_record_identity("a".repeat(64), "0.1.0") ?? panic("valid identity")
+    assert_eq(identity.engine, "native")
+    assert_eq(identity.tool_version, "0.1.0")
+    if jet_cli_production_record_identity("not-a-digest", "0.1.0") == {
+        .Ok(_) -> panic("malformed digest accepted")
+        .Err(error) -> assert_eq(error.message, "target_inputs_sha256 must be a lowercase SHA-256 digest")
+    }
+}
+
+#Test("production project root accessor is not derived from receipt directory") {
+    context :: production_test_context()
+    assert_eq(jet_cli_production_project_root(context).raw, "/p")
+    assert(jet_cli_production_project_root(context).raw != context.directory.raw)
+}
+
+#Test("production empty argument list still hashes the input domain") {
+    root :: receipt_paths.path("/p")
+    file :: receipt_paths.path("/p/main.jet")
+    source_digest :: jet_cli_production_content_digest([U8]{})
+    closure :: jet_cli_production_closure_start("main.jet", source_digest)
+    context :: jet_cli_production_context_finish(root, file, "main.jet", source_digest, closure, [String]{})
+    domain := "jet-production-inputs-v1".bytes()
+    &domain.push(U8{0})
+    assert_eq(context.input_digest, jet_cli_production_content_digest(domain))
+    assert_eq(context.input_count, 0)
+    assert_eq(context.input_count_digest, jet_cli_production_content_digest("0".bytes()))
+    assert(context.input_digest != jet_cli_production_content_digest([U8]{}))
+}
+
+#Test("production installation replaces old child overrides without removing unrelated ones") {
+    context :: production_test_context()
+    environment := [String:String?]{}
+    environment[JET_DEVELOPMENT_RECEIPT_ENTRY_ENV] = None
+    environment[JET_DEVELOPMENT_RECEIPT_TARGET_ENV] = Val("web")
+    environment["KEEP"] = None
+    jet_cli_production_receipt_install(context, &environment)
+    assert_eq(environment.len(), 10)
+    assert_eq(environment[JET_DEVELOPMENT_RECEIPT_ENTRY_ENV], Val(context.entry))
+    assert_eq(environment[JET_DEVELOPMENT_RECEIPT_TARGET_ENV], Val("native"))
+    assert_eq(environment["KEEP"], None)
+}

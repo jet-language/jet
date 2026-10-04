@@ -1,0 +1,1023 @@
+// PORT-PENDING 1046 tests-env-hook: tests/env_hook.rs:1-1019
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-ENVHOOK1=A: direnv-style opt-in env auto-activation.
+//RS //!
+//RS //! Covers the front-door subverbs of `jet env` (which route through `jetpack
+//RS //! enter`, D-JPK-DISPATCH1):
+//RS //!   * `jet env hook <shell>` prints an installable per-prompt hook for each
+//RS //!     supported shell, and rejects an unknown shell with a clean error;
+//RS //!   * `jet env export <shell>` is silent outside any `env.jet`;
+//RS //!   * it activates the nearest `env.jet` (exporting PATH + markers + the
+//RS //!     active-env-dir state), from the root and from a nested subdirectory;
+//RS //!   * `JET_ENV_DISABLE` unloads an active env; and an unchanged directory is a
+//RS //!     silent no-op (never re-realizes).
+//RS //!   * typed `git_hooks_path` projects native Git hooks through entry and the
+//RS //!     clean `jet env test` CI path, while invalid paths fail before launch.
+//RS //!
+//RS //! These drive `jetpack` directly (same as `env_dev_trust.rs`) so the intercept
+//RS //! in `cmd_enter` is exercised without depending on engine-binary discovery.
+//RS 
+//RS use std::fs;
+//RS #[cfg(unix)]
+//RS use std::io::Write;
+//RS use jetpack::SHA256;
+//RS use std::process::{Command, Stdio};
+//RS 
+//RS mod common;
+//RS use common::{jetpack_bin, Scratch};
+//RS 
+//RS #[cfg(unix)]
+//RS fn host_bash() -> std::path::PathBuf {
+//RS     std::env::split_paths(&std::env::var_os("PATH").expect("tests run with PATH"))
+//RS         .map(|directory| directory.join("bash"))
+//RS         .find(|candidate| candidate.is_file())
+//RS         .expect("tests need a bash executable")
+//RS }
+//RS 
+//RS /// A `jetpack` command with the env-hook state variables cleared, stdin nulled
+//RS /// (non-interactive), and a fixed `PATH` baseline so activation output is
+//RS /// deterministic.
+//RS fn export_cmd(dir: &std::path::Path) -> Command {
+//RS     let mut cmd = Command::new(jetpack_bin());
+//RS     cmd.current_dir(dir)
+//RS         .stdin(Stdio::null())
+//RS         .env_remove("JET_ENV_DISABLE")
+//RS         .env_remove("JETPACK_ENV")
+//RS         .env_remove("JETPACK_ENV_DIR")
+//RS         .env_remove("JETPACK_ENV_HASH")
+//RS         .env_remove("JETPACK_ENV_OLD_PATH")
+//RS         .env_remove("JETPACK_REF")
+//RS         .env("PATH", "/usr/bin:/bin");
+//RS     cmd
+//RS }
+//RS 
+//RS fn write_prompt_only_env(dir: &std::path::Path) {
+//RS     fs::write(
+//RS         dir.join("env.jet"),
+//RS         "module env.dev {\n  prompt: \"smoke\"\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS }
+//RS 
+//RS fn activation_hash(stdout: &[u8]) -> String {
+//RS     let text = String::from_utf8_lossy(stdout);
+//RS     text.lines()
+//RS         .find_map(|line| {
+//RS             line.strip_prefix("export JETPACK_ENV_HASH='")
+//RS                 .and_then(|value| value.strip_suffix('\''))
+//RS                 .map(str::to_string)
+//RS         })
+//RS         .expect("activation must export its definition hash")
+//RS }
+//RS 
+//RS #[test]
+//RS fn hook_prints_installable_snippet_per_shell() {
+//RS     for (shell, needle) in [
+//RS         ("bash", "PROMPT_COMMAND"),
+//RS         ("zsh", "add-zsh-hook precmd __jet_env_hook"),
+//RS         ("fish", "--on-event fish_prompt"),
+//RS     ] {
+//RS         let out = Command::new(jetpack_bin())
+//RS             .args(["env", "hook", shell])
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(out.status.success(), "`enter hook {shell}` must exit 0");
+//RS         let stdout = String::from_utf8_lossy(&out.stdout);
+//RS         assert!(
+//RS             stdout.contains(needle),
+//RS             "`hook {shell}` output missing `{needle}`:\n{stdout}"
+//RS         );
+//RS         assert!(
+//RS             stdout.contains(&format!("command jet env export {shell}")),
+//RS             "`hook {shell}` must call back into `jet env export {shell}`:\n{stdout}"
+//RS         );
+//RS         assert!(
+//RS             stdout.contains("__jet_help_prefill"),
+//RS             "`hook {shell}` must install help-app prefill widgets:\n{stdout}"
+//RS         );
+//RS         assert!(
+//RS             !stdout.contains("__jetpack_"),
+//RS             "hook {shell} leaked engine identifiers:\n{stdout}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn hook_unknown_shell_is_a_clean_error() {
+//RS     let out = Command::new(jetpack_bin())
+//RS         .args(["env", "hook", "tcsh"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     let stderr_lower = stderr.to_ascii_lowercase();
+//RS     assert!(stderr_lower.contains("unknown shell"), "{stderr}");
+//RS     assert!(stderr.contains("bash, zsh, fish"), "{stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn export_outside_any_env_is_silent() {
+//RS     let scratch = Scratch::new("noenv");
+//RS     let out = export_cmd(&scratch.path)
+//RS         .args(["env", "export", "bash"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(out.status.success());
+//RS     assert!(
+//RS         out.stdout.is_empty(),
+//RS         "no env.jet in the tree must emit nothing:\n{}",
+//RS         String::from_utf8_lossy(&out.stdout)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn export_does_not_emit_untrusted_typed_environment_shell_code() {
+//RS     let project = Scratch::new("typed-env-hook-trust");
+//RS     let home = Scratch::new("typed-env-hook-trust-home");
+//RS     let marker = project.path.join("envhook-pwned");
+//RS     fs::write(
+//RS         project.path.join("env.jet"),
+//RS         r#"module env.dev {
+//RS     presets: {
+//RS         default: { variables: [String:String]{ "PROMPT_COMMAND": "printf injected > envhook-pwned" } }
+//RS     }
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let out = export_cmd(&project.path)
+//RS         .args(["env", "export", "bash"])
+//RS         .env("HOME", &home.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     #[cfg(unix)]
+//RS     {
+//RS         let mut shell = Command::new(host_bash())
+//RS             .args([
+//RS                 "--noprofile",
+//RS                 "--norc",
+//RS                 "-c",
+//RS                 "source /dev/stdin; if [ -n \"${PROMPT_COMMAND:-}\" ]; then eval \"$PROMPT_COMMAND\"; fi",
+//RS             ])
+//RS             .current_dir(&project.path)
+//RS             .env_clear()
+//RS             .env("HOME", &home.path)
+//RS             .env("PATH", "/usr/bin:/bin")
+//RS             .stdin(Stdio::piped())
+//RS             .stdout(Stdio::null())
+//RS             .stderr(Stdio::piped())
+//RS             .spawn()
+//RS             .unwrap();
+//RS         shell
+//RS             .stdin
+//RS             .take()
+//RS             .unwrap()
+//RS             .write_all(&out.stdout)
+//RS             .unwrap();
+//RS         let shell_out = shell.wait_with_output().unwrap();
+//RS         assert!(
+//RS             shell_out.status.success(),
+//RS             "the shell harness rejected the generated script: {}",
+//RS             String::from_utf8_lossy(&shell_out.stderr)
+//RS         );
+//RS     }
+//RS     assert!(!marker.exists(), "untrusted shell payload executed");
+//RS     assert!(
+//RS         out.stdout.is_empty(),
+//RS         "an untrusted typed environment must not emit shell code:\n{}",
+//RS         String::from_utf8_lossy(&out.stdout)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn export_rejects_shell_syntax_in_environment_names() {
+//RS     for (name, body, marker) in [
+//RS         (
+//RS             "var-name",
+//RS             r#"module env.dev {
+//RS     presets: {
+//RS         default: { variables: [String:String]{ "BAD; touch envhook-var-pwned": "value" } }
+//RS     }
+//RS }
+//RS "#,
+//RS             "envhook-var-pwned",
+//RS         ),
+//RS         (
+//RS             "unset-name",
+//RS             r#"module env.dev {
+//RS     unset: ["BAD; touch envhook-unset-pwned"]
+//RS }
+//RS "#,
+//RS             "envhook-unset-pwned",
+//RS         ),
+//RS     ] {
+//RS         let project = Scratch::new(name);
+//RS         fs::write(project.path.join("env.jet"), body).unwrap();
+//RS         let out = export_cmd(&project.path)
+//RS             .args(["env", "export", "bash"])
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(!out.status.success(), "hostile {name} must be rejected");
+//RS         assert!(
+//RS             String::from_utf8_lossy(&out.stderr).contains("not a valid environment name"),
+//RS             "missing name validation diagnostic for {name}:\n{}",
+//RS             String::from_utf8_lossy(&out.stderr)
+//RS         );
+//RS         assert!(!project.path.join(marker).exists());
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn export_activates_nearest_env_from_root_and_subdir() {
+//RS     let scratch = Scratch::new("activate");
+//RS     write_prompt_only_env(&scratch.path);
+//RS     let inner = scratch.path.join("src").join("inner");
+//RS     fs::create_dir_all(&inner).unwrap();
+//RS     let root = scratch.path.to_string_lossy().into_owned();
+//RS 
+//RS     for dir in [&scratch.path, &inner] {
+//RS         let out = export_cmd(dir)
+//RS             .args(["env", "export", "bash"])
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(out.status.success());
+//RS         let stdout = String::from_utf8_lossy(&out.stdout);
+//RS         // The activation is anchored to the env.jet root even from a subdir.
+//RS         assert!(
+//RS             stdout.contains(&format!("export JETPACK_ENV_DIR='{root}'")),
+//RS             "activation from {dir:?} must anchor to the env root:\n{stdout}"
+//RS         );
+//RS         assert!(stdout.contains("export JETPACK_ENV=1"), "{stdout}");
+//RS         assert!(stdout.contains("export JETPACK_ENV_OLD_PATH="), "{stdout}");
+//RS         assert!(stdout.contains("export PATH="), "{stdout}");
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn export_uses_a_durable_hangar_path_for_realized_package() {
+//RS     let project = Scratch::new("package-export");
+//RS     let root = Scratch::new("package-export-root");
+//RS     let fixtures = Scratch::new("package-export-fixtures");
+//RS     let home = Scratch::new("package-export-home");
+//RS     let artifact = fixtures.join("omp-1.0.0");
+//RS     fs::write(&artifact, "#!/bin/sh\nprintf '%s\\n' cached\n").unwrap();
+//RS     let artifact_digest = jetpack::SHA256::sha256_file_hex(&artifact).unwrap();
+//RS     fs::write(
+//RS         fixtures.join("jetpackage-omp.json"),
+//RS         format!(
+//RS             "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{artifact_digest}\",\"artifact\":\"omp-1.0.0\"}}"
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         project.join("env.jet"),
+//RS         "module env.dev { packages: [\"omp@releases#1.0.0\"] }\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let prep = Command::new(jetpack_bin())
+//RS         .args([
+//RS             "env",
+//RS             "--prep",
+//RS             "--yes",
+//RS             "--trust",
+//RS             "--offline",
+//RS             "--no-color",
+//RS             "--fixtures",
+//RS         ])
+//RS         .arg(&fixtures.path)
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("HOME", &home.path)
+//RS         .env("JETPACK_DENY_NETWORK", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         prep.status.success(),
+//RS         "env --prep failed: {}",
+//RS         String::from_utf8_lossy(&prep.stderr)
+//RS     );
+//RS     fs::remove_file(fixtures.join("jetpackage-omp.json")).unwrap();
+//RS     fs::remove_file(&artifact).unwrap();
+//RS 
+//RS     let out = export_cmd(&project.path)
+//RS         .args(["env", "--trust", "--offline", "export", "bash"])
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("HOME", &home.path)
+//RS         .env("JETPACK_DENY_NETWORK", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "package export failed: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let script = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(
+//RS         !script.contains("/proc/self/fd/"),
+//RS         "parent-shell activation leaked a process-local lease path:\n{script}"
+//RS     );
+//RS     let durable_bin = fs::read_dir(root.path.join("hangar/objects"))
+//RS         .unwrap()
+//RS         .filter_map(Result::ok)
+//RS         .map(|entry| entry.path())
+//RS         .find_map(|object| {
+//RS             let name = object.file_name()?.to_str()?;
+//RS             (name.starts_with("sha256-") && object.join("bin").is_dir()).then(|| object.join("bin"))
+//RS         })
+//RS         .expect("prep must publish a sealed Hangar object with a bin directory");
+//RS     let expected_prefix = format!("export PATH='{}:", durable_bin.display());
+//RS     assert!(
+//RS         script.contains(&expected_prefix),
+//RS         "activation did not publish the sealed Hangar bin directory:\n{script}"
+//RS     );
+//RS 
+//RS     let mut shell = Command::new(host_bash())
+//RS         .args([
+//RS             "--noprofile",
+//RS             "--norc",
+//RS             "-c",
+//RS             "source /dev/stdin; omp",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env_clear()
+//RS         .env("HOME", &home.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .stdin(Stdio::piped())
+//RS         .stdout(Stdio::piped())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .unwrap();
+//RS     shell
+//RS         .stdin
+//RS         .take()
+//RS         .unwrap()
+//RS         .write_all(out.stdout.as_slice())
+//RS         .unwrap();
+//RS     let shell_out = shell.wait_with_output().unwrap();
+//RS     assert!(
+//RS         shell_out.status.success(),
+//RS         "generated activation did not run after exporter exit: {}",
+//RS         String::from_utf8_lossy(&shell_out.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&shell_out.stdout).trim(),
+//RS         "cached"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn enter_from_nested_directory_projects_allowlisted_dotenv_and_unsets() {
+//RS     let scratch = Scratch::new("dotenv-nested");
+//RS     let inner = scratch.path.join("src").join("inner");
+//RS     fs::create_dir_all(&inner).unwrap();
+//RS     fs::write(
+//RS         scratch.path.join(".env"),
+//RS         "VISIBLE=from-dotenv\nSECRET=hidden\nUNLISTED=must-not-load\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         scratch.path.join("env.jet"),
+//RS         "module env.dev {\n  dotenv: Dotenv{ file: \".env\", allow: [\"VISIBLE\", \"SECRET\"], secrets: [\"SECRET\"] }\n  unset: [\"REMOVE_ME\"]\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = export_cmd(&inner)
+//RS         .args([
+//RS             "env",
+//RS             "--trust",
+//RS             "--no-color",
+//RS             "--",
+//RS             "sh",
+//RS             "-c",
+//RS             "printf '%s|%s|%s|%s' \"$VISIBLE\" \"$SECRET\" \"${UNLISTED:-unset}\" \"${REMOVE_ME:-unset}\"",
+//RS         ])
+//RS         .env("VISIBLE", "from-parent")
+//RS         .env("REMOVE_ME", "remove-me")
+//RS         .env("UNLISTED", "from-parent")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&out.stdout).trim(),
+//RS         "from-dotenv|hidden|from-parent|unset"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn export_disable_unloads_active_env() {
+//RS     let scratch = Scratch::new("disable");
+//RS     write_prompt_only_env(&scratch.path);
+//RS     let root = scratch.path.to_string_lossy().into_owned();
+//RS     let out = export_cmd(&scratch.path)
+//RS         .args(["env", "export", "bash"])
+//RS         .env("JET_ENV_DISABLE", "1")
+//RS         .env("JETPACK_ENV_DIR", &root)
+//RS         .env("JETPACK_ENV_OLD_PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(out.status.success());
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(stdout.contains("export PATH='/usr/bin:/bin'"), "{stdout}");
+//RS     assert!(stdout.contains("unset JETPACK_ENV_DIR"), "{stdout}");
+//RS     assert!(stdout.contains("unset JETPACK_ENV\n"), "{stdout}");
+//RS     assert!(stdout.contains("unset GIT_CONFIG_COUNT"), "{stdout}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn export_unchanged_directory_is_silent() {
+//RS     let scratch = Scratch::new("stable");
+//RS     write_prompt_only_env(&scratch.path);
+//RS     let root = scratch.path.to_string_lossy().into_owned();
+//RS     let first = export_cmd(&scratch.path)
+//RS         .args(["env", "export", "bash"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(first.status.success());
+//RS     let hash = activation_hash(&first.stdout);
+//RS     let out = export_cmd(&scratch.path)
+//RS         .args(["env", "export", "bash"])
+//RS         .env("JETPACK_ENV_DIR", &root)
+//RS         .env("JETPACK_ENV_HASH", hash)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(out.status.success());
+//RS     assert!(
+//RS         out.stdout.is_empty(),
+//RS         "already-active env must be a no-op:\n{}",
+//RS         String::from_utf8_lossy(&out.stdout)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn export_changed_definition_reactivates_at_next_prompt() {
+//RS     let scratch = Scratch::new("changed");
+//RS     write_prompt_only_env(&scratch.path);
+//RS     let root = scratch.path.to_string_lossy().into_owned();
+//RS     let first = export_cmd(&scratch.path)
+//RS         .args(["env", "export", "bash"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(first.status.success());
+//RS     let hash = activation_hash(&first.stdout);
+//RS     fs::write(
+//RS         scratch.path.join("env.jet"),
+//RS         "module env.dev {\n  prompt: \"changed\"\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = export_cmd(&scratch.path)
+//RS         .args(["env", "export", "bash"])
+//RS         .env("JETPACK_ENV_DIR", &root)
+//RS         .env("JETPACK_ENV_HASH", hash)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(out.status.success());
+//RS     assert!(
+//RS         !out.stdout.is_empty(),
+//RS         "a changed definition must emit replacement activation"
+//RS     );
+//RS     let replacement = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(
+//RS         replacement.contains("changed"),
+//RS         "replacement facts missing:\n{replacement}"
+//RS     );
+//RS     assert!(
+//RS         !replacement.contains("smoke"),
+//RS         "stale facts survived reload:\n{replacement}"
+//RS     );
+//RS     assert!(replacement.contains("export JETPACK_ENV_HASH='"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn export_failed_reload_keeps_the_previous_activation() {
+//RS     let scratch = Scratch::new("failed-reload");
+//RS     write_prompt_only_env(&scratch.path);
+//RS     let root = scratch.path.to_string_lossy().into_owned();
+//RS     let first = export_cmd(&scratch.path)
+//RS         .args(["env", "export", "bash"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(first.status.success());
+//RS     let hash = activation_hash(&first.stdout);
+//RS     fs::write(scratch.path.join("env.jet"), "module env.dev {\n").unwrap();
+//RS     let out = export_cmd(&scratch.path)
+//RS         .args(["env", "export", "bash"])
+//RS         .env("JETPACK_ENV_DIR", &root)
+//RS         .env("JETPACK_ENV_HASH", hash)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(out.status.success());
+//RS     assert!(
+//RS         out.stdout.is_empty(),
+//RS         "failed reload must not unload the previous activation"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn enter_runs_a_trusted_lifecycle_hook_before_the_child() {
+//RS     let scratch = Scratch::new("trusted-hook");
+//RS     fs::write(
+//RS         scratch.path.join("env.jet"),
+//RS         r#"module env.dev {
+//RS     on_enter: [{
+//RS         name: "marker",
+//RS         command: "printf entered > .hook-marker",
+//RS         trusted: true,
+//RS     }]
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jetpack_bin())
+//RS         .current_dir(&scratch.path)
+//RS         .args([
+//RS             "env",
+//RS             "--trust",
+//RS             "--no-color",
+//RS             "--",
+//RS             "/bin/sh",
+//RS             "-c",
+//RS             "test -f .hook-marker",
+//RS         ])
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "trusted lifecycle hook must run before enter: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(scratch.path.join(".hook-marker")).unwrap(),
+//RS         "entered"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn enter_resolves_a_bare_lifecycle_name_to_a_typed_job() {
+//RS     let scratch = Scratch::new("typed-lifecycle-job");
+//RS     fs::write(
+//RS         scratch.path.join("env.jet"),
+//RS         r#"module env.dev {
+//RS     on_enter: [seed_config]
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         scratch.path.join("run.jet"),
+//RS         r#"#Job
+//RS fn seed_config() {
+//RS         print("typed lifecycle job")
+//RS }
+//RS fn run() {}
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jetpack_bin())
+//RS         .current_dir(&scratch.path)
+//RS         .args(["env", "--trust", "--no-color", "--", "true"])
+//RS         // `enter` keeps the caller's toolchain visible. The nested `jet run`
+//RS         // task therefore needs the same Rust toolchain that runs this test;
+//RS         // the clean-shell proof below still uses the fixed minimal PATH.
+//RS         .env(
+//RS             "PATH",
+//RS             std::env::var_os("PATH").expect("tests run with Rust on PATH"),
+//RS         )
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "typed lifecycle job must run through the job path: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&out.stdout).contains("typed lifecycle job"),
+//RS         "task output missing: {}",
+//RS         String::from_utf8_lossy(&out.stdout)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn enter_rejects_an_undeclared_lifecycle_job_before_launch() {
+//RS     let scratch = Scratch::new("undeclared-lifecycle-job");
+//RS     fs::write(
+//RS         scratch.path.join("env.jet"),
+//RS         "module env.dev {\n  on_enter: [missing_task]\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(scratch.path.join("run.jet"), "fn run() {}\n").unwrap();
+//RS     let out = Command::new(jetpack_bin())
+//RS         .current_dir(&scratch.path)
+//RS         .args(["env", "--trust", "--no-color", "--", "true"])
+//RS         .env(
+//RS             "PATH",
+//RS             std::env::var_os("PATH").expect("tests run with Rust on PATH"),
+//RS         )
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("E1294"),
+//RS         "missing lifecycle job diagnostic:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("missing_task"),
+//RS         "missing task name:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         !stderr.contains("running job missing_task"),
+//RS         "undeclared lifecycle job must be rejected before child launch:\n{stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn export_runs_typed_lifecycle_jobs_without_stdout_pollution() {
+//RS     let scratch = Scratch::new("typed-lifecycle-export");
+//RS     let home = Scratch::new("typed-lifecycle-export-home");
+//RS     fs::write(
+//RS         scratch.path.join("env.jet"),
+//RS         "module env.dev {\n  on_enter: [seed_config]\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         scratch.path.join("run.jet"),
+//RS         "#Job\nfn seed_config() { print(\"typed lifecycle job\") }\nfn run() {}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let selector = format!("env:{}", scratch.path.display());
+//RS     let trusted = Command::new(jetpack_bin())
+//RS         .current_dir(&scratch.path)
+//RS         .args(["trust", "grant", &selector, "--scope", "user"])
+//RS         .env("HOME", &home.path)
+//RS         .env(
+//RS             "PATH",
+//RS             std::env::var_os("PATH").expect("tests run with Rust on PATH"),
+//RS         )
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         trusted.status.success(),
+//RS         "trust setup failed: {}",
+//RS         String::from_utf8_lossy(&trusted.stderr)
+//RS     );
+//RS     let out = export_cmd(&scratch.path)
+//RS         .args(["env", "--no-color", "export", "bash"])
+//RS         .env("HOME", &home.path)
+//RS         .env(
+//RS             "PATH",
+//RS             std::env::var_os("PATH").expect("tests run with Rust on PATH"),
+//RS         )
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(
+//RS         stdout.contains("export JETPACK_ENV=1"),
+//RS         "missing activation; stderr: {}\nstdout:\n{stdout}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert!(
+//RS         !stdout.contains("typed lifecycle job"),
+//RS         "task output must not corrupt shell activation:\n{stdout}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn enter_requires_trust_for_a_trusted_lifecycle_hook() {
+//RS     let project = Scratch::new("trusted-hook-gate");
+//RS     let home = Scratch::new("trusted-hook-gate-home");
+//RS     fs::write(
+//RS         project.path.join("env.jet"),
+//RS         r#"module env.dev {
+//RS     on_enter: [{
+//RS         name: "marker",
+//RS         command: "printf entered > .hook-marker",
+//RS         trusted: true,
+//RS     }]
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jetpack_bin())
+//RS         .current_dir(&project.path)
+//RS         .args(["env", "--no-color", "--", "/bin/true"])
+//RS         .env("HOME", &home.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("E1255"),
+//RS         "missing trust diagnostic:\n{stderr}"
+//RS     );
+//RS     assert!(!project.path.join(".hook-marker").exists());
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_test_rejects_an_untrusted_lifecycle_hook() {
+//RS     let scratch = Scratch::new("untrusted-hook");
+//RS     fs::write(
+//RS         scratch.path.join("env.jet"),
+//RS         r#"module env.dev {
+//RS     on_enter: [{
+//RS         name: "needs-review",
+//RS         command: "false",
+//RS     }]
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jetpack_bin())
+//RS         .current_dir(&scratch.path)
+//RS         .args(["env", "--trust", "--no-color", "test"])
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("E1329"),
+//RS         "missing trust diagnostic:\n{stderr}"
+//RS     );
+//RS     assert!(
+//RS         stderr.contains("needs-review"),
+//RS         "missing hook name:\n{stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_test_runs_hooks_checks_and_command_in_a_clean_child() {
+//RS     let scratch = Scratch::new("clean-hook");
+//RS     fs::write(
+//RS         scratch.path.join("env.jet"),
+//RS         r#"module env.dev {
+//RS     on_enter: [{
+//RS         name: "clean-enter",
+//RS         command: "test -z \"$JET_PARENT_SENTINEL\" && printf entered > .clean-marker",
+//RS         trusted: true,
+//RS     }]
+//RS     checks: [{
+//RS         name: "clean-check",
+//RS         command: "test -z \"$JET_PARENT_SENTINEL\" && test -f .clean-marker",
+//RS         trusted: true,
+//RS     }]
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jetpack_bin())
+//RS         .current_dir(&scratch.path)
+//RS         .args([
+//RS             "env",
+//RS             "--trust",
+//RS             "--no-color",
+//RS             "test",
+//RS             "--",
+//RS             "/bin/sh",
+//RS             "-c",
+//RS             "test -z \"$JET_PARENT_SENTINEL\" && test -f .clean-marker",
+//RS         ])
+//RS         .env("JET_PARENT_SENTINEL", "must-not-leak")
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "clean env test must run every lifecycle phase without host leakage: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(scratch.path.join(".clean-marker")).unwrap(),
+//RS         "entered"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn enter_installs_and_runs_a_native_git_hook_from_the_typed_environment() {
+//RS     use std::os::unix::fs::PermissionsExt;
+//RS 
+//RS     let scratch = Scratch::new("git-hooks-enter");
+//RS     let hooks = scratch.path.join("scripts/githooks");
+//RS     fs::create_dir_all(&hooks).unwrap();
+//RS     let hook = hooks.join("pre-commit");
+//RS     fs::write(&hook, "#!/bin/sh\nprintf ran > .git-hook-ran\n").unwrap();
+//RS     fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+//RS     fs::write(
+//RS         scratch.path.join("env.jet"),
+//RS         "module env.dev {\n  git_hooks_path: \"scripts/githooks\"\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(scratch.path.join("tracked.txt"), "tracked\n").unwrap();
+//RS 
+//RS     for args in [
+//RS         vec!["init", "--quiet"],
+//RS         vec!["config", "user.name", "Jet Test"],
+//RS         vec!["config", "user.email", "jet-test@example.invalid"],
+//RS         vec!["add", "tracked.txt"],
+//RS     ] {
+//RS         let out = Command::new("git")
+//RS             .current_dir(&scratch.path)
+//RS             .args(args)
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(
+//RS             out.status.success(),
+//RS             "git setup failed: {}",
+//RS             String::from_utf8_lossy(&out.stderr)
+//RS         );
+//RS     }
+//RS 
+//RS     let path = fs::canonicalize(&hooks).unwrap();
+//RS     let path_output = Command::new(jetpack_bin())
+//RS         .current_dir(&scratch.path)
+//RS         .args([
+//RS             "env",
+//RS             "--trust",
+//RS             "--no-color",
+//RS             "--",
+//RS             "git",
+//RS             "config",
+//RS             "--get",
+//RS             "core.hooksPath",
+//RS         ])
+//RS         .env(
+//RS             "PATH",
+//RS             std::env::var_os("PATH").expect("tests run with Git on PATH"),
+//RS         )
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         path_output.status.success(),
+//RS         "Git config projection failed: {}",
+//RS         String::from_utf8_lossy(&path_output.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&path_output.stdout).trim(),
+//RS         path.to_string_lossy()
+//RS     );
+//RS 
+//RS     let commit = Command::new(jetpack_bin())
+//RS         .current_dir(&scratch.path)
+//RS         .args([
+//RS             "env",
+//RS             "--trust",
+//RS             "--no-color",
+//RS             "--",
+//RS             "git",
+//RS             "commit",
+//RS             "-m",
+//RS             "hook",
+//RS         ])
+//RS         .env(
+//RS             "PATH",
+//RS             std::env::var_os("PATH").expect("tests run with Git on PATH"),
+//RS         )
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         commit.status.success(),
+//RS         "native Git hook run failed: {}",
+//RS         String::from_utf8_lossy(&commit.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(scratch.path.join(".git-hook-ran")).unwrap(),
+//RS         "ran"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_test_projects_git_hooks_into_the_clean_ci_command() {
+//RS     let scratch = Scratch::new("git-hooks-ci");
+//RS     let hooks = scratch.path.join("scripts/githooks");
+//RS     fs::create_dir_all(&hooks).unwrap();
+//RS     fs::write(
+//RS         scratch.path.join("env.jet"),
+//RS         "module env.ci {\n  git_hooks_path: \"scripts/githooks\"\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let expected = fs::canonicalize(&hooks)
+//RS         .unwrap()
+//RS         .to_string_lossy()
+//RS         .into_owned();
+//RS     let git = std::env::split_paths(&std::env::var_os("PATH").expect("tests run with Git on PATH"))
+//RS         .map(|directory| directory.join("git"))
+//RS         .find(|candidate| candidate.is_file())
+//RS         .expect("Git executable must be discoverable for the CI projection test");
+//RS     let out = Command::new(jetpack_bin())
+//RS         .current_dir(&scratch.path)
+//RS         .args([
+//RS             "env",
+//RS             "--trust",
+//RS             "--env",
+//RS             "ci",
+//RS             "--no-color",
+//RS             "test",
+//RS             "--",
+//RS         ])
+//RS         .arg(&git)
+//RS         .args(["config", "--get", "core.hooksPath"])
+//RS         .env(
+//RS             "PATH",
+//RS             std::env::var_os("PATH").expect("tests run with Git on PATH"),
+//RS         )
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "CI environment test failed: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&out.stdout).contains(expected.as_str()),
+//RS         "CI command did not receive core.hooksPath: stdout={} stderr={}",
+//RS         String::from_utf8_lossy(&out.stdout),
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn enter_rejects_a_missing_git_hooks_directory_before_launch() {
+//RS     let scratch = Scratch::new("git-hooks-missing");
+//RS     fs::write(
+//RS         scratch.path.join("env.jet"),
+//RS         "module env.dev {\n  git_hooks_path: \"scripts/githooks\"\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jetpack_bin())
+//RS         .current_dir(&scratch.path)
+//RS         .args([
+//RS             "env",
+//RS             "--trust",
+//RS             "--no-color",
+//RS             "--",
+//RS             "sh",
+//RS             "-c",
+//RS             "touch child-ran",
+//RS         ])
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("E1333"),
+//RS         "missing git hook path diagnostic: {stderr}"
+//RS     );
+//RS     assert!(!scratch.path.join("child-ran").exists());
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn enter_rejects_a_trusted_hook_cwd_that_escapes_through_a_symlink() {
+//RS     use std::os::unix::fs::symlink;
+//RS 
+//RS     let project = Scratch::new("trusted-hook-symlink");
+//RS     let outside = Scratch::new("trusted-hook-outside");
+//RS     symlink(&outside.path, project.path.join("link")).unwrap();
+//RS     fs::write(
+//RS         project.path.join("env.jet"),
+//RS         r#"module env.dev {
+//RS     on_enter: [{
+//RS         name: "escape",
+//RS         cwd: "link",
+//RS         command: "printf escaped > escaped",
+//RS         trusted: true,
+//RS     }]
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let out = Command::new(jetpack_bin())
+//RS         .current_dir(&project.path)
+//RS         .args(["env", "--trust", "--no-color", "--", "/bin/true"])
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(
+//RS         stderr.contains("unsafe cwd"),
+//RS         "missing boundary diagnostic:\n{stderr}"
+//RS     );
+//RS     assert!(!outside.path.join("escaped").exists());
+//RS }
+// END-PORT-PENDING 1046 tests/env_hook.rs:1-1019
+

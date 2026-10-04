@@ -1,0 +1,658 @@
+// Source/CmdMigration.rs: migration CLI policy. The Driver owns the catalog,
+// target, source renderer and migration errors; the database owns the ledger.
+// Native IO consumes the canonical retained-descriptor ABI, never a Rust bridge.
+use jet_foundation.[StatusEnvelope, StatusFields, StatusValue]
+use jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+// Driver names below are Rust-faithful bindings, pending MIGRATIONS-ABI
+// reconciliation/publication by Wave-0612 and Main; no alternate owner.
+use jet_driver.[MigrationCatalog, MigrationDirection, MigrationError, MigrationLock, MigrationLockInfo, MigrationPlan, MigrationTarget, MIGRATION_DIRECTORY, read_lock_info, render_migration]
+use core.files.runtime.kernel_path_components as migration_paths
+use core.files.host.retained_descriptor as migration_io
+use core.sys.host.os_path_ingress as migration_os
+// Typed database producer is canonical Core DB, not jet_jit/Rust. Its migration
+// carriers/entry points remain a publication gate until the DB kernel lands.
+use core.db as migration_db
+use jet_foundation.[mir_sha256_bytes, mir_sha256_hex_bytes]
+
+// Rust str::parse::<u64>: optional '+', ASCII decimal, checked full-width U64.
+// Keep this lexical adapter private to the two migration option diagnostics.
+fn jet_cli_migration_decimal(value: String) -> U64? Never! {
+    bytes :: value.bytes()
+    start :: if bytes.len() > 0 && bytes[0] == (U8{43}) -> 1 else -> 0
+    if start == bytes.len() -> return None
+    number := U64{0}
+    loop at in start..<bytes.len() {
+        digit :: Int.from_u8(bytes[at]) - 48
+        if digit < 0 || digit > 9 -> return None
+        if number > (U64{1844674407370955161}) || (number == (U64{1844674407370955161}) && digit > 5) -> return None
+        number = number * U64{10} + U64{digit}
+    }
+    Val(number)
+}
+
+// Rust slugify (:971–993) is exactly the already-owned BackendScaffold.jet
+// jet_cli_backend_slugify scalar/byte fold. Reuse it; no second slug mechanism.
+
+// Source/CmdMigration.rs:1091: exact help bytes; status text stays on stderr.
+fn jet_cli_migration_help_text() -> String Never! {
+    "jet db migrate — versioned, reviewable database changes\n\nUsage:\n  jet db migrate new <Name> --up <SQL> [--down <SQL>] [--lock shared|exclusive] [--risk <note>]\n  jet db migrate preview --target <name> [--to <version>|--step <count>]\n  jet db migrate plan --target <name> [--to <version>|--step <count>]\n  jet db migrate status --target <name>\n  jet db migrate drift --target <name>\n  jet db migrate checksum --target <name> [--to <version>|--step <count>]\n  jet db migrate locks [--target <name>]\n  jet db migrate target --target <name> [--database <relative-path>] [--lock shared|exclusive]\n  jet db migrate apply --target <name> [--to <version>|--step <count>] [--lock exclusive]\n  jet db migrate step --target <name> <count> [--lock exclusive]\n  jet db migrate rollback --target <name> [<version>|--step <count>] [--lock exclusive]\n  jet db migrate resume --target <name> [--database <relative-path>] [--lock exclusive]\n\npreview and plan never write. status, drift, checksum, and locks inspect one canonical target state. apply stages a receipt, acquires the selected target lock, and commits the checked SQL transaction before publishing the receipt. rollback requires checked inverse SQL; unsupported dual-write metadata is rejected. Target names and lock policy are explicit for writes; receipt identities do not contain database contents or secrets.\n"
+}
+fn jet_cli_migration_print_help(mode: JetCLIOutputMode) -> JetDriverVerbOutput Never! {
+    text :: jet_cli_migration_help_text()
+    if mode.json {
+        envelope := StatusEnvelope.new("db.migrate.help", true)
+        envelope = (^envelope).with_field("help", StatusValue.String{value: text})
+        return JetDriverVerbOutput{stdout: "{envelope.json()}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    JetDriverVerbOutput{stdout: "", stderr: if mode.quiet -> "" else -> text, exit_code: JET_DRIVER_EXIT_OK}
+}
+
+fn jet_cli_migration_push(out: &[U8], text: String) Never! {
+    loop byte in text.bytes() -> &out.push(byte)
+}
+fn jet_cli_migration_text(out: ^[U8]) -> String Never! {
+    String.from_bytes(out) ?? panic("migration output preserves UTF-8")
+}
+fn jet_cli_migration_output(mode: JetCLIOutputMode, text: String) -> JetDriverVerbOutput Never! {
+    if mode.json -> return JetDriverVerbOutput{stdout: "{text}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: "", stderr: if mode.quiet -> "" else -> text, exit_code: JET_DRIVER_EXIT_OK}
+}
+// Rust status integer conversions must retain U64's high half. The canonical
+// Report writer's lexical number variant emits these exact integer digits; no
+// signed Int cast, f64 conversion, second serializer or number reparsing.
+fn jet_cli_migration_number(value: U64) -> StatusValue Never! {
+    StatusValue.Float{value: "{value}"}
+}
+
+// Rust {:03}: three is a minimum width, never truncation.
+fn jet_cli_migration_version_text(version: U64) -> String Never! {
+    if version < (U64{10}) -> return "00{version}"
+    if version < (U64{100}) -> return "0{version}"
+    "{version}"
+}
+// Source/CmdMigration.rs:1002/1024: project canonical owner fields directly;
+// these helpers do not re-own or duplicate Driver's migration carriers.
+fn jet_cli_migration_value(version: U64, name: String, rollback: Bool) -> StatusValue Never! {
+    fields := StatusFields.new()
+    fields = (^fields).with("version", jet_cli_migration_number(version))
+    fields = (^fields).with("name", StatusValue.String{value: name})
+    fields = (^fields).with("rollback", StatusValue.Bool{value: rollback})
+    StatusValue.object(^fields)
+}
+fn jet_cli_migration_step_value(ordinal: U64, sql: String, risk: String, lock: String) -> StatusValue Never! {
+    fields := StatusFields.new()
+    fields = (^fields).with("ordinal", jet_cli_migration_number(ordinal))
+    fields = (^fields).with("sql", StatusValue.String{value: sql})
+    fields = (^fields).with("risk", StatusValue.String{value: risk})
+    fields = (^fields).with("lock", StatusValue.String{value: lock})
+    StatusValue.object(^fields)
+}
+
+// Rust MigrationOptions. Database text is argv's original UTF-8 spelling;
+// encode it once against the actual native root platform at target selection.
+struct JetCLIMigrationOptions {
+    positionals: [String]
+    target: String?
+    database: String?
+    lock: MigrationLock?
+    to: U64?
+    step: U64?
+    rollback: Bool
+    up: String?
+    down: String?
+    risk: String?
+}
+enum JetCLIMigrationParsed {
+    Options(options: JetCLIMigrationOptions)
+    Help
+}
+fn jet_cli_migration_options() -> JetCLIMigrationOptions Never! {
+    JetCLIMigrationOptions{positionals: [String]{}, target: None, database: None, lock: None, to: None, step: None, rollback: false, up: None, down: None, risk: None}
+}
+fn jet_cli_migration_set_once<T>(slot: &T?, value: ^T, flag: String) MigrationError! {
+    if slot != None -> return Err(MigrationError.usage("E2104", "`{flag}` was supplied twice", "provide one value per migration option"))
+    slot = Val(^value)
+}
+fn jet_cli_migration_parse_version(value: String) -> U64 MigrationError! {
+    version :: jet_cli_migration_decimal(value) ?? return Err(MigrationError.usage("E2104", "`{value}` is not a migration version", "use a positive decimal version"))
+    if version == (U64{0}) -> return Err(MigrationError.usage("E2104", "migration versions start at 1", "use a positive version"))
+    Ok(version)
+}
+fn jet_cli_migration_parse_count(value: String) -> U64 MigrationError! {
+    count :: jet_cli_migration_decimal(value) ?? return Err(MigrationError.usage("E2104", "`{value}` is not a migration step count", "use a positive decimal count"))
+    if count == (U64{0}) -> return Err(MigrationError.usage("E2104", "migration step count must be positive", "use `--step 1` or a larger count"))
+    Ok(count)
+}
+fn jet_cli_migration_parse_options(args: [String], verb: String, start: Int) -> JetCLIMigrationParsed MigrationError! {
+    options := jet_cli_migration_options()
+    index := start
+    loop index < args.len() {
+        arg :: args[index]
+        flag := arg
+        inline := String?{None}
+        equal_at :: arg.find("=")
+        if equal_at >= 0 {
+            flag = arg.slice(0..<equal_at) // #4303: mutable slice binding
+            value := arg.slice((equal_at + 1)..<arg.len()) // #4303
+            inline = Val(value)
+        }
+        takes_value :: flag == "--target" || flag == "--database" || flag == "--lock" || flag == "--to" || flag == "--step" || flag == "--up" || flag == "--sql" || flag == "--down" || flag == "--risk"
+        // Rust exits immediately, using plain/uncolored/nonquiet help even if
+        // the outer command requested JSON. Preserve this precedence.
+        if flag == "--help" || flag == "-h" -> return Ok(JetCLIMigrationParsed.Help)
+        if flag == "--rollback" {
+            options.rollback = true
+            index = index + 1
+            next
+        }
+        if flag == "--json" || flag == "--quiet" || flag == "--no-color" || flag.starts_with("--color") {
+            index = index + 1
+            next
+        }
+        if !arg.starts_with("-") {
+            &options.positionals.push(arg)
+            index = index + 1
+            next
+        }
+        if !takes_value -> return Err(MigrationError.usage("E2102", "unknown `jet db migrate` flag `{arg}`", "use `jet db migrate --help` to see migration flags"))
+        value := ""
+        if inline == .Val(text) {
+            value = text
+        } else {
+            index = index + 1
+            if index >= args.len() -> return Err(MigrationError.usage("E2104", "`{flag}` needs a value", "write `{flag} <value>` for `jet db migrate {verb}`"))
+            value = args[index]
+        }
+        if flag == {
+            "--target" -> jet_cli_migration_set_once(&options.target, ^value, "--target")
+            "--database" -> jet_cli_migration_set_once(&options.database, ^value, "--database")
+            "--lock" -> {
+                if options.lock != None -> return Err(MigrationError.usage("E2104", "`--lock` was supplied twice", "choose one migration lock policy"))
+                options.lock = Val(MigrationLock.parse(value))
+            }
+            "--to" -> {
+                if options.to != None -> return Err(MigrationError.usage("E2104", "migration target version was supplied twice", "choose one `--to` value"))
+                options.to = Val(jet_cli_migration_parse_version(value))
+            }
+            "--step" -> {
+                if options.step != None -> return Err(MigrationError.usage("E2104", "migration step count was supplied twice", "choose one `--step` value"))
+                options.step = Val(jet_cli_migration_parse_count(value))
+            }
+            "--up" | "--sql" -> jet_cli_migration_set_once(&options.up, ^value, "--up")
+            "--down" -> jet_cli_migration_set_once(&options.down, ^value, "--down")
+            "--risk" -> jet_cli_migration_set_once(&options.risk, ^value, "--risk")
+            else -> panic("value flag was checked above")
+        }
+        index = index + 1
+    }
+    if verb == "step" && options.step == None && options.positionals.len() == 1 {
+        options.step = Val(jet_cli_migration_parse_count(options.positionals[0]))
+        &options.positionals.clear()
+    }
+    if verb == "rollback" && options.step == None && options.to == None && options.positionals.len() == 1 {
+        options.to = Val(jet_cli_migration_parse_version(options.positionals[0]))
+        &options.positionals.clear()
+    }
+    Ok(JetCLIMigrationParsed.Options{options: ^options})
+}
+fn jet_cli_migration_known_verb(verb: String) -> Bool Never! {
+    verb == "new" || verb == "preview" || verb == "plan" || verb == "status" || verb == "drift" || verb == "checksum" || verb == "locks" || verb == "target" || verb == "apply" || verb == "step" || verb == "rollback" || verb == "resume"
+}
+fn jet_cli_migration_validate_options(options: JetCLIMigrationOptions, verb: String) MigrationError! {
+    if !jet_cli_migration_known_verb(verb) -> return
+    if options.to != None && options.step != None -> return Err(MigrationError.usage("E2104", "`--to` and `--step` cannot be combined", "choose an absolute target version or a relative step count"))
+    if verb != "new" && verb != "locks" && options.target == None -> return Err(MigrationError.usage("E2104", "`jet db migrate {verb}` needs `--target <name>`", "name the exact deployment target before inspecting or changing state"))
+    if options.rollback && verb != "preview" && verb != "plan" && verb != "checksum" -> return Err(MigrationError.usage("E2104", "`--rollback` is not valid for `jet db migrate {verb}`", "use `rollback` to execute a reverse plan, or use `preview --rollback` to inspect one"))
+    expected :: if verb == "new" -> 1 else -> 0
+    if options.positionals.len() != expected -> return Err(MigrationError.usage("E2104", "`jet db migrate {verb}` received unexpected positional arguments", "use flags for target, version, and step selection"))
+    if (options.up != None || options.down != None || options.risk != None) && verb != "new" -> return Err(MigrationError.usage("E2104", "SQL generation flags are only valid for `jet db migrate new`, not `{verb}`", "move `--up`, `--down`, and `--risk` to the `new` command"))
+    no_version :: verb == "new" || verb == "status" || verb == "drift" || verb == "checksum" || verb == "locks" || verb == "target" || verb == "resume"
+    if no_version && (options.to != None || options.step != None) -> return Err(MigrationError.usage("E2104", "version selection is not valid for `jet db migrate {verb}`", "use `preview`, `plan`, `apply`, `step`, or `rollback` to select a version"))
+    if verb == "new" && (options.target != None || options.database != None) -> return Err(MigrationError.usage("E2104", "`new` does not accept a deployment target or database path", "use `--target` and `--database` only when inspecting or applying a migration"))
+    writer :: verb == "apply" || verb == "step" || verb == "rollback" || verb == "resume"
+    if writer && options.lock == .Val(.Shared) -> return Err(MigrationError.usage("E2104", "`--lock shared` is not valid for migration writer command `{verb}`", "use the default exclusive lock or pass `--lock exclusive` before changing database state"))
+    readonly :: verb == "status" || verb == "drift" || verb == "checksum" || verb == "locks"
+    if readonly && options.lock != None -> return Err(MigrationError.usage("E2104", "`--lock` is not valid for read-only `{verb}`", "remove `--lock`; inspection does not acquire a migration writer lock"))
+    if verb == "locks" && options.database != None -> return Err(MigrationError.usage("E2104", "`locks` does not select a database path", "use `--target <name>` to filter lock records"))
+}
+fn jet_cli_migration_fail(error: MigrationError, mode: JetCLIOutputMode) -> JetDriverVerbOutput Never! {
+    why :: "migration commands keep versioned SQL, target identity, and receipts together"
+    refusal :: jet_cli_args_refuse(error.code, error.message, why, error.fix, mode.json)
+    // The host passes the active profile's resolved ANSI choice in mode.
+    stderr :: if mode.json -> refusal.stderr else -> jet_cli_report(error.code, error.message, why, error.fix, mode.color)
+    JetDriverVerbOutput{stdout: refusal.stdout, stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+}
+
+// usize_max is the ACTUAL selected native width, supplied at the host boundary
+// (#4483). Rust's `as usize` truncates, including counts larger than 2^32 on a
+// 32-bit target; never infer this fact from the executing host.
+fn jet_cli_migration_version_after(catalog: MigrationCatalog, current: U64, count: U64, usize_max: U64) -> U64? Never! {
+    if count == (U64{0}) -> return None
+    wanted :: (count - U64{1}) & usize_max
+    at := U64{0}
+    loop migration in catalog.migrations {
+        if migration.version <= current -> next
+        if at == wanted -> return Val(migration.version)
+        at = at + U64{1}
+    }
+    None
+}
+fn jet_cli_migration_version_before(catalog: MigrationCatalog, current: U64, count: U64, usize_max: U64) -> U64? Never! {
+    if count == (U64{0}) -> return None
+    wanted :: (count - U64{1}) & usize_max
+    previous := U64{0}
+    // Reverse traversal replaces Rust's temporary previous-version vector;
+    // each catalog row is borrowed once, with no whole-value copies.
+    index := catalog.migrations.len()
+    loop index > 0 {
+        index = index - 1
+        version :: catalog.migrations[index].version
+        if version >= current -> next
+        if previous == wanted -> return Val(version)
+        previous = previous + U64{1}
+    }
+    if count == previous + U64{1} -> return Val(U64{0})
+    None
+}
+fn jet_cli_migration_database(root: migration_paths.OSPath, options: JetCLIMigrationOptions) -> migration_paths.OSPath? Never! {
+    if options.database == .Val(value) -> return Val(migration_paths.from_text(value, root.platform))
+    None
+}
+pub fn jet_cli_plan_new_migration(root: migration_paths.OSPath, name: String, up: String, down: String?, lock: MigrationLock?, risk: String?, version: U64?) -[FS.Read]> (version: U64, relative: String, text: String) MigrationError! {
+    catalog :: MigrationCatalog.load(root)
+    selected :: version ?? catalog.next_version()
+    text :: render_migration(selected, name, up, down, lock ?? MigrationLock.Exclusive, risk ?? "schema change")
+    slug :: jet_cli_backend_slugify(name)
+    Ok((version: selected, relative: "{MIGRATION_DIRECTORY}/{jet_cli_migration_version_text(selected)}_{slug}.jet", text: text))
+}
+fn jet_cli_migration_write_new_file(path: migration_paths.OSPath, text: String) -[FS]> MigrationError! {
+    temp :: migration_paths.with_extension(path, "jet.tmp")
+    if migration_io.exists(temp) -> return Err(MigrationError.conflict("temporary migration path `{migration_paths.display(temp)}` already exists", "remove the stale temporary file after checking its contents"))
+    migration_io.write(temp, text.bytes()) ?? return Err(MigrationError.io("couldn't stage migration file", err))
+    if migration_io.rename(temp, path) == .Err(error) {
+        migration_io.remove(temp).drop("publish failure removes the staged file best-effort")
+        return Err(MigrationError.io("couldn't publish migration file", error))
+    }
+}
+fn jet_cli_migration_run_new(root: migration_paths.OSPath, options: JetCLIMigrationOptions, mode: JetCLIOutputMode) -[FS]> JetDriverVerbOutput MigrationError! {
+    if options.positionals.len() == 0 -> return Err(MigrationError.usage("E2104", "`jet db migrate new` needs a migration name", "run `jet db migrate new AddIndex --up \"CREATE INDEX ...\"`"))
+    if options.positionals.len() != 1 -> return Err(MigrationError.usage("E2104", "`jet db migrate new` takes one migration name", "put SQL in `--up`, not another positional argument"))
+    name :: options.positionals[0]
+    up :: options.up ?? return Err(MigrationError.usage("E2104", "`jet db migrate new` needs forward SQL", "pass `--up <SQL>` (or `--sql <SQL>`) so the generated change is reviewable, not a placeholder"))
+    planned :: jet_cli_plan_new_migration(root, name, up, options.down, options.lock, options.risk, None)
+    path := ~root
+    migration_paths.push(&path, migration_paths.from_text(planned.relative, root.platform))
+    if migration_io.exists(path) -> return Err(MigrationError.conflict("migration `{migration_paths.display(path)}` already exists", "rename the migration or remove only the uncommitted duplicate after review"))
+    parent :: migration_paths.parent_span(path) ?? panic("migration path has a parent")
+    migration_io.create_dir_all(migration_paths.owned_span(path, parent)) ?? return Err(MigrationError.io("couldn't create migrations directory", err))
+    jet_cli_migration_write_new_file(path, planned.text)
+    extent :: migration_paths.strip_prefix_span(path, root)
+    relative :: if extent == .Val(span) -> migration_paths.display_span(path, span) else -> migration_paths.display(path)
+    if mode.json {
+        fields := StatusFields.new()
+        fields = (^fields).with("version", jet_cli_migration_number(planned.version))
+        fields = (^fields).with("name", StatusValue.String{value: name})
+        fields = (^fields).with("path", StatusValue.String{value: relative})
+        fields = (^fields).with("checksum", StatusValue.String{value: "sha256:{mir_sha256_hex_bytes(mir_sha256_bytes(planned.text.bytes()))}"})
+        return Ok(jet_cli_migration_status("db.migrate.new", true, ^fields, mode))
+    }
+    Ok(jet_cli_migration_output(mode, "created {relative}\n"))
+}
+fn jet_cli_migration_status(operation: String, ok: Bool, fields: ^StatusFields, mode: JetCLIOutputMode) -> JetDriverVerbOutput Never! {
+    envelope := StatusEnvelope.new(operation, ok)
+    envelope = (^envelope).with_fields(^fields)
+    jet_cli_migration_output(mode, envelope.json())
+}
+fn jet_cli_migration_inspect_database_state(catalog: MigrationCatalog, target: MigrationTarget) -[FS]> migration_db.MigrationState MigrationError! {
+    query :: migration_db.MigrationStateRequest{
+        target: target.name, target_identity: target.identity,
+        database_identity: target.database_identity, source_identity: catalog.source_identity,
+        schema_identity: migration_db.MIGRATION_SCHEMA_IDENTITY,
+    }
+    // Rust Result<_, String> is the canonical Err! rail, with exact text.
+    Ok(migration_db.inspect_migrations(target.database, query) ?? return Err(MigrationError.authority("couldn't inspect the database migration ledger for `{target.name}`", err.message)))
+}
+fn jet_cli_migration_load_state(root: migration_paths.OSPath, options: JetCLIMigrationOptions) -[FS]> (catalog: MigrationCatalog, target: MigrationTarget, state: migration_db.MigrationState) MigrationError! {
+    catalog :: MigrationCatalog.load(root)
+    target :: MigrationTarget.new(root, options.target ?? "default", jet_cli_migration_database(root, options), options.lock ?? MigrationLock.Shared)
+    state :: jet_cli_migration_inspect_database_state(catalog, target)
+    Ok((catalog: catalog, target: target, state: state))
+}
+fn jet_cli_migration_load_plan(root: migration_paths.OSPath, options: JetCLIMigrationOptions, direction: MigrationDirection, step_command: Bool, usize_max: U64) -[FS]> (catalog: MigrationCatalog, target: MigrationTarget, plan: MigrationPlan) MigrationError! {
+    name :: options.target ?? return Err(MigrationError.usage("E2104", "migration target is required", "pass `--target <name>`; writes never choose an ambient database"))
+    target :: MigrationTarget.new(root, name, jet_cli_migration_database(root, options), options.lock ?? MigrationLock.Exclusive)
+    catalog :: MigrationCatalog.load(root)
+    state :: jet_cli_migration_inspect_database_state(catalog, target)
+    if state.is_drifted() -> return Err(MigrationError.authority("migration target `{name}` has unreconciled state", state.drift.join("; ")))
+    requested := options.to
+    if step_command || options.step != None {
+        count :: options.step ?? U64{1}
+        if count == (U64{0}) -> return Err(MigrationError.usage("E2104", "migration step count must be positive", "use `--step 1` or a larger count"))
+        selected :: if direction == {
+            .Apply -> jet_cli_migration_version_after(catalog, state.current_version, count, usize_max) ?? return Err(MigrationError.usage("E2456", "step count exceeds pending migrations", "choose a smaller step count or inspect status"))
+            .Rollback -> jet_cli_migration_version_before(catalog, state.current_version, count, usize_max) ?? return Err(MigrationError.usage("E2456", "step count exceeds applied migrations", "choose a smaller step count or inspect status"))
+        }
+        requested = Val(selected)
+    }
+    // Rust plan owns a target clone independently of the returned target.
+    plan :: if direction == {
+        .Apply -> catalog.plan_apply(~target, state.current_version, requested)
+        .Rollback -> catalog.plan_rollback(~target, state.current_version, requested)
+    }
+    Ok((catalog: catalog, target: target, plan: plan))
+}
+fn jet_cli_migration_request(catalog: MigrationCatalog, target: MigrationTarget, plan: MigrationPlan) -> migration_db.MigrationRequest Never! {
+    steps := [migration_db.MigrationSql]{}
+    loop step in plan.steps {
+        &steps.push(migration_db.MigrationSql{
+            ordinal: step.ordinal, sql: step.sql, inverse_sql: step.inverse_sql,
+            risk: step.risk, lock: if step.lock == .Shared -> migration_db.MigrationLock.Shared else -> migration_db.MigrationLock.Exclusive,
+        })
+    }
+    lower :: if plan.from_version < plan.to_version -> plan.from_version else -> plan.to_version
+    upper :: if plan.from_version > plan.to_version -> plan.from_version else -> plan.to_version
+    migration_db.MigrationRequest{
+        operation: if plan.direction == .Apply -> migration_db.MigrationOperation.Apply else -> migration_db.MigrationOperation.Rollback,
+        migration_key: "migration:{lower}:{upper}", target: target.name,
+        target_identity: target.identity, database_identity: target.database_identity,
+        source_identity: catalog.source_identity, schema_identity: migration_db.MIGRATION_SCHEMA_IDENTITY,
+        tool_identity: plan.tool_identity, from_version: plan.from_version, to_version: plan.to_version,
+        lock: if target.lock == .Shared -> migration_db.MigrationLock.Shared else -> migration_db.MigrationLock.Exclusive,
+        risk: plan.risk, steps: ^steps,
+    }
+}
+fn jet_cli_migration_request_checksum(catalog: MigrationCatalog, target: MigrationTarget, plan: MigrationPlan) -> String Never! {
+    migration_db.migration_request_checksum(jet_cli_migration_request(catalog, target, plan))
+}
+fn jet_cli_migration_lock_name(lock: migration_db.MigrationLock) -> String Never! {
+    if lock == .Shared -> "shared" else -> "exclusive"
+}
+fn jet_cli_migration_lock_value(lock: MigrationLockInfo) -> StatusValue Never! {
+    fields := StatusFields.new()
+    fields = (^fields).with("target", StatusValue.String{value: lock.target})
+    fields = (^fields).with("target_identity", StatusValue.String{value: lock.target_identity})
+    fields = (^fields).with("database", StatusValue.String{value: lock.database})
+    fields = (^fields).with("database_identity", StatusValue.String{value: lock.database_identity})
+    fields = (^fields).with("lock", StatusValue.String{value: lock.lock.as_str()})
+    fields = (^fields).with("pid", jet_cli_migration_number(lock.pid))
+    fields = (^fields).with("path", StatusValue.String{value: migration_paths.display(lock.path)})
+    StatusValue.object(^fields)
+}
+// Rust `u128 as i128` is a bit reinterpret, not a checked conversion. Each
+// from_u128 below is bounded; the high-half offset preserves two's complement
+// without overflowing U128/I128 or narrowing through Int.
+fn jet_cli_migration_timestamp(value: U128) -> I128 Never! {
+    boundary :: U128{170141183460469231731687303715884105728}
+    if value < boundary -> return I128.from_u128(value) ?? panic("low-half timestamp fits i128")
+    offset :: I128.from_u128(value - boundary) ?? panic("high-half timestamp offset fits i128")
+    (I128{-170141183460469231731687303715884105727} - I128{1}) + offset
+}
+fn jet_cli_migration_strings(values: [String]) -> StatusValue Never! {
+    items := [StatusValue]{}
+    loop value in values -> &items.push(StatusValue.String{value: value})
+    StatusValue.array(^items)
+}
+fn jet_cli_migration_outcome_value(outcome: migration_db.MigrationOutcome) -> StatusValue Never! {
+    fields := StatusFields.new()
+    fields = (^fields).with("receipt_id", StatusValue.String{value: outcome.receipt_id})
+    fields = (^fields).with("operation", StatusValue.String{value: outcome.operation})
+    fields = (^fields).with("status", StatusValue.String{value: outcome.status})
+    fields = (^fields).with("target", StatusValue.String{value: outcome.target})
+    fields = (^fields).with("target_identity", StatusValue.String{value: outcome.target_identity})
+    fields = (^fields).with("source_identity", StatusValue.String{value: outcome.source_identity})
+    fields = (^fields).with("schema_identity", StatusValue.String{value: outcome.schema_identity})
+    fields = (^fields).with("database_identity", StatusValue.String{value: outcome.database_identity})
+    fields = (^fields).with("tool_identity", StatusValue.String{value: outcome.tool_identity})
+    fields = (^fields).with("from_version", jet_cli_migration_number(outcome.from_version))
+    fields = (^fields).with("to_version", jet_cli_migration_number(outcome.to_version))
+    fields = (^fields).with("step_count", jet_cli_migration_number(outcome.step_count))
+    fields = (^fields).with("step_ids", jet_cli_migration_strings(outcome.step_ids))
+    fields = (^fields).with("checksum", StatusValue.String{value: outcome.checksum})
+    fields = (^fields).with("lock", StatusValue.String{value: jet_cli_migration_lock_name(outcome.lock)})
+    fields = (^fields).with("risk", StatusValue.String{value: outcome.risk})
+    fields = (^fields).with("started_unix_ms", StatusValue.Float{value: "{jet_cli_migration_timestamp(outcome.started_unix_ms)}"})
+    fields = (^fields).with("finished_unix_ms", StatusValue.Float{value: "{jet_cli_migration_timestamp(outcome.finished_unix_ms)}"})
+    error :: if outcome.error == .Val(value) -> StatusValue.String{value: value} else -> StatusValue.Null
+    fields = (^fields).with("error", error)
+    StatusValue.object(^fields)
+}
+
+fn jet_cli_migration_run_status(root: migration_paths.OSPath, options: JetCLIMigrationOptions, mode: JetCLIOutputMode) -[FS]> JetDriverVerbOutput MigrationError! {
+    loaded :: jet_cli_migration_load_state(root, options)
+    locks :: read_lock_info(root, Val(loaded.target.name))
+    if mode.json {
+        migrations := [StatusValue]{}
+        loop migration in loaded.catalog.migrations -> &migrations.push(jet_cli_migration_value(migration.version, migration.name, migration.has_rollback()))
+        receipts := [StatusValue]{}
+        loop receipt in loaded.state.receipts -> &receipts.push(jet_cli_migration_outcome_value(receipt))
+        lock_values := [StatusValue]{}
+        loop lock in locks -> &lock_values.push(jet_cli_migration_lock_value(lock))
+        fields := StatusFields.new()
+        fields = (^fields).with("target", StatusValue.String{value: loaded.target.name})
+        fields = (^fields).with("target_identity", StatusValue.String{value: loaded.target.identity})
+        fields = (^fields).with("database_identity", StatusValue.String{value: loaded.target.database_identity})
+        fields = (^fields).with("source_identity", StatusValue.String{value: loaded.state.source_identity})
+        fields = (^fields).with("state_checksum", StatusValue.String{value: loaded.state.checksum})
+        fields = (^fields).with("current_version", jet_cli_migration_number(loaded.state.current_version))
+        fields = (^fields).with("drift", jet_cli_migration_strings(loaded.state.drift))
+        fields = (^fields).with("migrations", StatusValue.array(^migrations))
+        fields = (^fields).with("receipts", StatusValue.array(^receipts))
+        fields = (^fields).with("staged", StatusValue.array([StatusValue]{}))
+        fields = (^fields).with("locks", StatusValue.array(^lock_values))
+        return Ok(jet_cli_migration_status("db.migrate.status", !loaded.state.is_drifted(), ^fields, mode))
+    }
+    out := [U8]{}
+    jet_cli_migration_push(&out, "target: {loaded.target.name}\ncurrent: {loaded.state.current_version}\nstate checksum: {loaded.state.checksum}\ntarget identity: {loaded.target.identity}\ndatabase identity: {loaded.target.database_identity}\nsource identity: {loaded.state.source_identity}\nschema identity: {loaded.state.schema_identity}\n")
+    loop migration in loaded.catalog.migrations {
+        status :: if migration.version <= loaded.state.current_version -> "applied" else -> "pending"
+        jet_cli_migration_push(&out, "{status} {jet_cli_migration_version_text(migration.version)} {migration.name}\n")
+    }
+    loop receipt in loaded.state.receipts -> jet_cli_migration_push(&out, "receipt: database ledger:{receipt.receipt_id} ({receipt.status})\n")
+    loop lock in locks -> jet_cli_migration_push(&out, "lock: {lock.lock.as_str()} {lock.target} {lock.database} pid={lock.pid} {migration_paths.display(lock.path)}\n")
+    loop message in loaded.state.drift -> jet_cli_migration_push(&out, "drift: {message}\n")
+    Ok(jet_cli_migration_output(mode, jet_cli_migration_text(^out)))
+}
+fn jet_cli_migration_run_drift(root: migration_paths.OSPath, options: JetCLIMigrationOptions, mode: JetCLIOutputMode) -[FS]> JetDriverVerbOutput MigrationError! {
+    loaded :: jet_cli_migration_load_state(root, options)
+    if mode.json {
+        fields := StatusFields.new()
+        fields = (^fields).with("target", StatusValue.String{value: loaded.target.name})
+        fields = (^fields).with("target_identity", StatusValue.String{value: loaded.target.identity})
+        fields = (^fields).with("database_identity", StatusValue.String{value: loaded.target.database_identity})
+        fields = (^fields).with("state_checksum", StatusValue.String{value: loaded.state.checksum})
+        fields = (^fields).with("drift", jet_cli_migration_strings(loaded.state.drift))
+        return Ok(jet_cli_migration_status("db.migrate.drift", !loaded.state.is_drifted(), ^fields, mode))
+    }
+    if loaded.state.is_drifted() {
+        out := [U8]{}
+        jet_cli_migration_push(&out, "target: {loaded.target.name}\ndrift detected:\n")
+        loop (index, message) in loaded.state.drift {
+            if index > 0 -> &out.push(U8{10})
+            jet_cli_migration_push(&out, "- {message}")
+        }
+        &out.push(U8{10})
+        return Ok(jet_cli_migration_output(mode, jet_cli_migration_text(^out)))
+    }
+    Ok(jet_cli_migration_output(mode, "target: {loaded.target.name}\nclean; state checksum: {loaded.state.checksum}\n"))
+}
+fn jet_cli_migration_run_checksum(root: migration_paths.OSPath, options: JetCLIMigrationOptions, mode: JetCLIOutputMode, usize_max: U64) -[FS]> JetDriverVerbOutput MigrationError! {
+    loaded :: jet_cli_migration_load_state(root, options)
+    // Preserve this source branch although validate_options currently rejects
+    // checksum version selection; direct internal callers still get it.
+    plan_checksum := String?{None}
+    if options.to != None || options.step != None {
+        direction :: if options.rollback -> MigrationDirection.Rollback else -> MigrationDirection.Apply
+        planned :: jet_cli_migration_load_plan(root, options, direction, false, usize_max)
+        plan_checksum = Val(jet_cli_migration_request_checksum(planned.catalog, planned.target, planned.plan))
+    }
+    if mode.json {
+        fields := StatusFields.new()
+        fields = (^fields).with("target", StatusValue.String{value: loaded.target.name})
+        fields = (^fields).with("target_identity", StatusValue.String{value: loaded.target.identity})
+        fields = (^fields).with("database_identity", StatusValue.String{value: loaded.target.database_identity})
+        fields = (^fields).with("catalog_checksum", StatusValue.String{value: loaded.catalog.source_identity})
+        fields = (^fields).with("schema_identity", StatusValue.String{value: loaded.state.schema_identity})
+        fields = (^fields).with("state_checksum", StatusValue.String{value: loaded.state.checksum})
+        if plan_checksum == .Val(value) -> fields = (^fields).with("plan_checksum", StatusValue.String{value: value})
+        return Ok(jet_cli_migration_status("db.migrate.checksum", !loaded.state.is_drifted(), ^fields, mode))
+    }
+    suffix :: if plan_checksum == .Val(value) -> "plan checksum: {value}\n" else -> ""
+    Ok(jet_cli_migration_output(mode, "target: {loaded.target.name}\ncatalog checksum: {loaded.catalog.source_identity}\nstate checksum: {loaded.state.checksum}\ntarget identity: {loaded.target.identity}\ndatabase identity: {loaded.target.database_identity}\n{suffix}"))
+}
+fn jet_cli_migration_run_locks(root: migration_paths.OSPath, options: JetCLIMigrationOptions, mode: JetCLIOutputMode) -[FS]> JetDriverVerbOutput MigrationError! {
+    locks :: read_lock_info(root, options.target)
+    if mode.json {
+        values := [StatusValue]{}
+        loop lock in locks -> &values.push(jet_cli_migration_lock_value(lock))
+        fields := StatusFields.new()
+        fields = (^fields).with("locks", StatusValue.array(^values))
+        return Ok(jet_cli_migration_status("db.migrate.locks", true, ^fields, mode))
+    }
+    if locks.len() == 0 -> return Ok(jet_cli_migration_output(mode, "no active migration locks\n"))
+    out := [U8]{}
+    loop lock in locks -> jet_cli_migration_push(&out, "{lock.lock.as_str()} {lock.target} target_identity={lock.target_identity} pid={lock.pid} database={lock.database} database_identity={lock.database_identity} ({migration_paths.display(lock.path)})\n")
+    Ok(jet_cli_migration_output(mode, jet_cli_migration_text(^out)))
+}
+fn jet_cli_migration_run_target(root: migration_paths.OSPath, options: JetCLIMigrationOptions, mode: JetCLIOutputMode) -[FS]> JetDriverVerbOutput MigrationError! {
+    name :: options.target ?? return Err(MigrationError.usage("E2104", "`jet db migrate target` needs `--target <name>`", "name the deployment target explicitly, for example `--target prod`"))
+    target :: MigrationTarget.new(root, name, jet_cli_migration_database(root, options), options.lock ?? MigrationLock.Exclusive)
+    extent :: migration_paths.strip_prefix_span(target.database, root)
+    relative :: if extent == .Val(span) -> migration_paths.display_span(target.database, span) else -> migration_paths.display(target.database)
+    if mode.json {
+        fields := StatusFields.new()
+        fields = (^fields).with("target", StatusValue.String{value: target.name})
+        fields = (^fields).with("database", StatusValue.String{value: relative})
+        fields = (^fields).with("identity", StatusValue.String{value: target.identity})
+        fields = (^fields).with("database_identity", StatusValue.String{value: target.database_identity})
+        fields = (^fields).with("lock", StatusValue.String{value: target.lock.as_str()})
+        return Ok(jet_cli_migration_status("db.migrate.target", true, ^fields, mode))
+    }
+    Ok(jet_cli_migration_output(mode, "target: {target.name}\ndatabase: {relative}\nlock: {target.lock.as_str()}\nidentity: {target.identity}\ndatabase identity: {target.database_identity}\n"))
+}
+fn jet_cli_migration_render_plan(catalog: MigrationCatalog, target: MigrationTarget, plan: MigrationPlan, mode: JetCLIOutputMode, operation: String) -> JetDriverVerbOutput Never! {
+    checksum :: jet_cli_migration_request_checksum(catalog, target, plan)
+    if mode.json {
+        steps := [StatusValue]{}
+        loop step in plan.steps -> &steps.push(jet_cli_migration_step_value(step.ordinal, step.sql, step.risk, step.lock.as_str()))
+        fields := StatusFields.new()
+        fields = (^fields).with("target", StatusValue.String{value: target.name})
+        fields = (^fields).with("target_identity", StatusValue.String{value: target.identity})
+        fields = (^fields).with("database_identity", StatusValue.String{value: target.database_identity})
+        fields = (^fields).with("source_identity", StatusValue.String{value: plan.source_identity})
+        fields = (^fields).with("schema_identity", StatusValue.String{value: migration_db.MIGRATION_SCHEMA_IDENTITY})
+        fields = (^fields).with("direction", StatusValue.String{value: plan.direction.as_str()})
+        fields = (^fields).with("from", jet_cli_migration_number(plan.from_version))
+        fields = (^fields).with("to", jet_cli_migration_number(plan.to_version))
+        fields = (^fields).with("checksum", StatusValue.String{value: checksum})
+        fields = (^fields).with("risk", StatusValue.String{value: plan.risk})
+        fields = (^fields).with("lock", StatusValue.String{value: plan.target.lock.as_str()})
+        fields = (^fields).with("steps", StatusValue.array(^steps))
+        return jet_cli_migration_status(operation, true, ^fields, mode)
+    }
+    out := [U8]{}
+    jet_cli_migration_push(&out, "target: {target.name}\nfrom: {plan.from_version}\nto: {plan.to_version}\ndirection: {plan.direction.as_str()}\nchecksum: {checksum}\ntarget identity: {target.identity}\ndatabase identity: {target.database_identity}\nlock: {plan.target.lock.as_str()}\nrisk: {plan.risk}\n")
+    loop step in plan.steps -> jet_cli_migration_push(&out, "SQL: {step.sql}\nrisk: {step.risk}\nlock: {step.lock.as_str()}\n")
+    jet_cli_migration_output(mode, jet_cli_migration_text(^out))
+}
+fn jet_cli_migration_run_plan_command_with_operation(root: migration_paths.OSPath, options: JetCLIMigrationOptions, mode: JetCLIOutputMode, operation: String, usize_max: U64) -[FS]> JetDriverVerbOutput MigrationError! {
+    direction :: if options.rollback -> MigrationDirection.Rollback else -> MigrationDirection.Apply
+    loaded :: jet_cli_migration_load_plan(root, options, direction, false, usize_max)
+    Ok(jet_cli_migration_render_plan(loaded.catalog, loaded.target, loaded.plan, mode, operation))
+}
+fn jet_cli_migration_run_preview(root: migration_paths.OSPath, options: JetCLIMigrationOptions, mode: JetCLIOutputMode, usize_max: U64) -[FS]> JetDriverVerbOutput MigrationError! {
+    jet_cli_migration_run_plan_command_with_operation(root, options, mode, "db.migrate.preview", usize_max)
+}
+fn jet_cli_migration_run_plan_command(root: migration_paths.OSPath, options: JetCLIMigrationOptions, mode: JetCLIOutputMode, usize_max: U64) -[FS]> JetDriverVerbOutput MigrationError! {
+    jet_cli_migration_run_plan_command_with_operation(root, options, mode, "db.migrate.plan", usize_max)
+}
+fn jet_cli_migration_run_plan(catalog: MigrationCatalog, target: MigrationTarget, plan: MigrationPlan, mode: JetCLIOutputMode) -[FS]> JetDriverVerbOutput MigrationError! {
+    direction :: plan.direction.as_str()
+    if plan.steps.len() == 0 {
+        if mode.json {
+            fields := StatusFields.new()
+            fields = (^fields).with("status", StatusValue.String{value: "up_to_date"})
+            fields = (^fields).with("target", StatusValue.String{value: target.name})
+            fields = (^fields).with("direction", StatusValue.String{value: direction})
+            fields = (^fields).with("version", jet_cli_migration_number(plan.to_version))
+            return Ok(jet_cli_migration_status("db.migrate.{direction}", true, ^fields, mode))
+        }
+        return Ok(jet_cli_migration_output(mode, "target {target.name} is already at migration {plan.to_version}\n"))
+    }
+    // Owned Close guard stays in scope through database execution AND report
+    // rendering. On either return rail its canonical cleanup releases the lock.
+    lock_guard :: target.acquire_lock()
+    request :: jet_cli_migration_request(catalog, target, plan)
+    outcome :: migration_db.run_migration(target.database, request) ?? return Err(MigrationError.authority("database migration `{direction}` failed", err.message))
+    if mode.json {
+        fields := StatusFields.new()
+        fields = (^fields).with("receipt", jet_cli_migration_outcome_value(outcome))
+        fields = (^fields).with("receipt_store", StatusValue.String{value: "database"})
+        fields = (^fields).with("ledger", StatusValue.String{value: "__jet_migrations"})
+        return Ok(jet_cli_migration_status("db.migrate.{direction}", outcome.error == None, ^fields, mode))
+    }
+    Ok(jet_cli_migration_output(mode, "receipt: database ledger:{outcome.receipt_id}\nstatus: {outcome.status}\ntarget: {target.name}\nversion: {outcome.to_version}\nlock: {jet_cli_migration_lock_name(outcome.lock)}\nrisk: {outcome.risk}\n"))
+}
+fn jet_cli_migration_run_apply(root: migration_paths.OSPath, options: JetCLIMigrationOptions, mode: JetCLIOutputMode, step_command: Bool, usize_max: U64) -[FS]> JetDriverVerbOutput MigrationError! {
+    loaded :: jet_cli_migration_load_plan(root, options, MigrationDirection.Apply, step_command, usize_max)
+    jet_cli_migration_run_plan(loaded.catalog, loaded.target, loaded.plan, mode)
+}
+fn jet_cli_migration_run_rollback(root: migration_paths.OSPath, options: JetCLIMigrationOptions, mode: JetCLIOutputMode, usize_max: U64) -[FS]> JetDriverVerbOutput MigrationError! {
+    loaded :: jet_cli_migration_load_plan(root, options, MigrationDirection.Rollback, false, usize_max)
+    jet_cli_migration_run_plan(loaded.catalog, loaded.target, loaded.plan, mode)
+}
+fn jet_cli_migration_run_resume(root: migration_paths.OSPath, options: JetCLIMigrationOptions, mode: JetCLIOutputMode) -[FS]> JetDriverVerbOutput MigrationError! {
+    name :: options.target ?? return Err(MigrationError.usage("E2104", "`jet db migrate resume` needs `--target <name>`", "resume only after naming the exact target"))
+    catalog :: MigrationCatalog.load(root)
+    target :: MigrationTarget.new(root, name, jet_cli_migration_database(root, options), options.lock ?? MigrationLock.Shared)
+    state :: jet_cli_migration_inspect_database_state(catalog, target)
+    if state.is_drifted() -> return Err(MigrationError.authority("target `{name}` still has migration drift", state.drift.join("; ")))
+    if mode.json {
+        receipts := [StatusValue]{}
+        loop receipt in state.receipts -> &receipts.push(jet_cli_migration_outcome_value(receipt))
+        fields := StatusFields.new()
+        fields = (^fields).with("target", StatusValue.String{value: name})
+        fields = (^fields).with("receipts", StatusValue.array(^receipts))
+        fields = (^fields).with("state_checksum", StatusValue.String{value: state.checksum})
+        fields = (^fields).with("status", StatusValue.String{value: "no_reconciliation_needed"})
+        return Ok(jet_cli_migration_status("db.migrate.resume", true, ^fields, mode))
+    }
+    Ok(jet_cli_migration_output(mode, "target: {name}\nno database migration reconciliation is pending; state checksum: {state.checksum}\n"))
+}
+// The host supplies checked selected-target usize_max (#4483), writes the
+// returned streams, and exits with this result. It must not supply host guesses.
+pub fn jet_cli_run_migration(args: [String], mode: JetCLIOutputMode, usize_max: U64) -[Env, FS]> JetDriverVerbOutput Never! {
+    if args.len() == 0 -> return jet_cli_migration_print_help(mode)
+    first :: args[0]
+    if first == "help" || first == "--help" || first == "-h" -> return jet_cli_migration_print_help(mode)
+    if first != "migrate" -> return jet_cli_migration_fail(MigrationError.usage("E2101", "`jet db {first}` is not a database migration command", "run `jet db migrate --help` to list the migration verbs"), mode)
+    if args.len() == 1 -> return jet_cli_migration_print_help(mode)
+    verb :: args[1]
+    if verb == "help" || verb == "--help" || verb == "-h" -> return jet_cli_migration_print_help(mode)
+    // Scan the original argv owner from offset two, without a list slice/copy.
+    parsed :: jet_cli_migration_parse_options(args, verb, 2) ?? return jet_cli_migration_fail(err, mode)
+    options :: if parsed == {
+        .Help -> return jet_cli_migration_print_help(JetCLIOutputMode{json: false, color: false, quiet: false})
+        .Options(value) -> value
+    }
+    jet_cli_migration_validate_options(options, verb) ?? return jet_cli_migration_fail(err, mode)
+    // Preserve Rust's current_dir error before unknown-verb dispatch.
+    root :: migration_os.current_dir() ?? return jet_cli_migration_fail(MigrationError.io("couldn't read the current project directory", err), mode)
+    jet_cli_migration_dispatch(root, verb, options, mode, usize_max) ?? return jet_cli_migration_fail(err, mode)
+}
+fn jet_cli_migration_dispatch(root: migration_paths.OSPath, verb: String, options: JetCLIMigrationOptions, mode: JetCLIOutputMode, usize_max: U64) -[FS]> JetDriverVerbOutput MigrationError! {
+    if verb == {
+        "new" -> jet_cli_migration_run_new(root, options, mode)
+        "preview" -> jet_cli_migration_run_preview(root, options, mode, usize_max)
+        "plan" -> jet_cli_migration_run_plan_command(root, options, mode, usize_max)
+        "status" -> jet_cli_migration_run_status(root, options, mode)
+        "drift" -> jet_cli_migration_run_drift(root, options, mode)
+        "checksum" -> jet_cli_migration_run_checksum(root, options, mode, usize_max)
+        "locks" -> jet_cli_migration_run_locks(root, options, mode)
+        "target" -> jet_cli_migration_run_target(root, options, mode)
+        "apply" -> jet_cli_migration_run_apply(root, options, mode, false, usize_max)
+        "step" -> jet_cli_migration_run_apply(root, options, mode, true, usize_max)
+        "rollback" -> jet_cli_migration_run_rollback(root, options, mode, usize_max)
+        "resume" -> jet_cli_migration_run_resume(root, options, mode)
+        else -> Err(MigrationError.usage("E2101", "unknown `jet db migrate` verb `{verb}`", "use new, preview, plan, status, drift, checksum, locks, target, apply, step, rollback, or resume"))
+    }
+}

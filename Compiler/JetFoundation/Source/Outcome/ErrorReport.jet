@@ -1,0 +1,223 @@
+// Outcome.rs:64-97,118-145,409-450,555-945. Typed error facts, not a
+// rendered-text reconstruction. Private execution journey/TLS remains a host seam.
+use core.encoding.[DataTree, EncodingLimits]
+
+pub struct JetErrorContextFrame { pub text: String, pub file: String, pub line: Int }
+pub struct JetErrorConversion { pub source: String, pub target: String }
+// `value` is raw canonical JSON, never a quoted rendering of the typed field.
+pub struct JetErrorField { pub name: String, pub value: String }
+pub struct JetErrorSpan { pub start: Int, pub end: Int }
+pub struct JetErrorDetails {
+    pub variant: String
+    pub fields: [JetErrorField]
+    pub source_span: JetErrorSpan?{None}
+
+    fn to_json(self) -> String Never! {
+        fields := [String]{}
+        loop field in self.fields -> &fields.push("{foundation_json_quote(field.name)}:{field.value}")
+        span :: if self.source_span == {
+            .Val(value) -> "{{\"start\":{value.start},\"end\":{value.end}}}"
+            .None -> "null"
+        }
+        "{{\"variant\":{foundation_json_quote(self.variant)},\"fields\":{{{fields.join(",")}}},\"source_span\":{span}}}"
+    }
+}
+pub struct JetErrorJourneyFrame {
+    pub fn_name: String
+    pub file: String
+    pub line: Int
+    pub column: Int
+    pub note: String
+    pub hops: Int
+}
+pub struct JetErrorReport {
+    pub code: String?{None}
+    pub message: String
+    pub typed_identity: String?{None}
+    pub causes: [JetErrorReport]{[JetErrorReport]{}}
+    pub context_frames: [JetErrorContextFrame]{[JetErrorContextFrame]{}}
+    pub origin: JetErrorJourneyFrame?{None}
+    pub source_journey: [JetErrorJourneyFrame]{[JetErrorJourneyFrame]{}}
+    pub conversion_history: [JetErrorConversion]{[JetErrorConversion]{}}
+    pub details: JetErrorDetails?{None}
+
+    fn to_json(self) -> String Never! {
+        code :: if self.code == {
+            .Val(value) -> foundation_json_quote(value)
+            .None -> "null"
+        }
+        causes := [String]{}
+        loop cause in self.causes -> &causes.push(cause.to_json())
+        cause :: if {
+            causes.len() == 0 -> "null"
+            causes.len() == 1 -> causes[0]
+            else -> "[{causes.join(",")}]"
+        }
+        fields := [String]{"\"schema\":\"jet.err/v1\"", "\"message\":{foundation_json_quote(self.message)}", "\"code\":{code}", "\"cause\":{cause}"}
+        if self.typed_identity == .Val(identity) -> &fields.push("\"typed_identity\":{foundation_json_quote(identity)}")
+        if self.context_frames.len() > 0 {
+            frames := [String]{}
+            loop frame in self.context_frames -> &frames.push("{{\"text\":{foundation_json_quote(frame.text)},\"file\":{foundation_json_quote(frame.file)},\"line\":{frame.line}}}")
+            &fields.push("\"context_frames\":[{frames.join(",")}]")
+        }
+        if self.origin == .Val(origin) -> &fields.push("\"origin\":{jet_error_journey_json(origin)}")
+        if self.source_journey.len() > 0 {
+            frames := [String]{}
+            loop frame in self.source_journey -> &frames.push(jet_error_journey_json(frame))
+            &fields.push("\"source_journey\":[{frames.join(",")}]")
+        }
+        if self.conversion_history.len() > 0 {
+            conversions := [String]{}
+            loop conversion in self.conversion_history -> &conversions.push("{{\"source\":{foundation_json_quote(conversion.source)},\"target\":{foundation_json_quote(conversion.target)}}}")
+            &fields.push("\"conversion_history\":[{conversions.join(",")}]")
+        }
+        if self.details == .Val(details) -> &fields.push("\"details\":{details.to_json()}")
+        "{{{fields.join(",")}}}"
+    }
+
+    fn from_json(text: String) -> JetErrorReport ReportError! {
+        // #3598: the frozen bootstrap lacks Core's parse_with_limits export.
+        // Outcome's Rust parser has no byte ceiling; only container depth 64.
+        size :: text.bytes().len()
+        byte_limit :: if size > 0 -> size else -> 1
+        limits :: EncodingLimits{buffer_bytes: 65536, max_depth: 64, max_item_bytes: byte_limit, max_total_bytes: None, max_expansion_depth: 32, max_expansion_bytes: 8388608}
+        value :: if foundation_json_parse_with_limits(text, limits) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                return Err(ReportError.new("invalid error report: {error.message}"))
+            }
+        }
+        report :: jet_error_report_from_json(value)
+        if report.to_json() != text -> return Err(ReportError.new("error report is not canonical"))
+        Ok(report)
+    }
+}
+
+fn jet_error_journey_json(frame: JetErrorJourneyFrame) -> String Never! {
+    "{{\"fn_name\":{foundation_json_quote(frame.fn_name)},\"file\":{foundation_json_quote(frame.file)},\"line\":{frame.line},\"column\":{frame.column},\"note\":{foundation_json_quote(frame.note)},\"hops\":{frame.hops}}}"
+}
+
+fn jet_error_json_object(value: DataTree, name: String) -> [String:DataTree] ReportError! {
+    if value == {
+        .Object(fields) -> Ok(fields)
+        else -> Err(ReportError.new("error report {name} is not an object"))
+    }
+}
+fn jet_error_json_field(fields: [String:DataTree], name: String) -> DataTree ReportError! {
+    Ok(fields.get(name) ?? return Err(ReportError.new("error report lacks {name}")))
+}
+fn jet_error_json_text(value: DataTree, name: String) -> String ReportError! {
+    if value == {
+        .Text(text) -> Ok(text)
+        else -> Err(ReportError.new("error report {name} is not text"))
+    }
+}
+fn jet_error_json_optional_text(fields: [String:DataTree], name: String) -> String? ReportError! {
+    if fields.get(name) == {
+        .Val(value) -> Ok(Val(jet_error_json_text(value, name)))
+        .None -> Ok(None)
+    }
+}
+fn jet_error_json_optional_array(fields: [String:DataTree], name: String) -> [DataTree] ReportError! {
+    value :: fields.get(name) ?? return Ok([DataTree]{})
+    if value == {
+        .Array(values) -> Ok(values)
+        else -> Err(ReportError.new("error report {name} is not an array"))
+    }
+}
+fn jet_error_json_u32(value: DataTree, name: String) -> Int ReportError! {
+    if value == {
+        .Int(number) -> {
+            // EncodingJson represents whole tokens outside i64 as Number, not Int.
+            if number < -9223372036854775808 || number > 9223372036854775807 -> return Err(ReportError.new("error report {name} is not an integer"))
+            if number < 0 || number > 4294967295 -> return Err(ReportError.new("error report {name} is not a u32"))
+            Ok(number)
+        }
+        else -> Err(ReportError.new("error report {name} is not an integer"))
+    }
+}
+fn jet_error_context_from_json(value: DataTree) -> JetErrorContextFrame ReportError! {
+    fields :: jet_error_json_object(value, "context frame")
+    Ok(JetErrorContextFrame{text: jet_error_json_text(jet_error_json_field(fields, "text"), "context text"), file: jet_error_json_text(jet_error_json_field(fields, "file"), "context file"), line: jet_error_json_u32(jet_error_json_field(fields, "line"), "context line")})
+}
+fn jet_error_journey_from_json(value: DataTree) -> JetErrorJourneyFrame ReportError! {
+    fields :: jet_error_json_object(value, "journey frame")
+    Ok(JetErrorJourneyFrame{fn_name: jet_error_json_text(jet_error_json_field(fields, "fn_name"), "journey function"), file: jet_error_json_text(jet_error_json_field(fields, "file"), "journey file"), line: jet_error_json_u32(jet_error_json_field(fields, "line"), "journey line"), column: jet_error_json_u32(jet_error_json_field(fields, "column"), "journey column"), note: jet_error_json_text(jet_error_json_field(fields, "note"), "journey note"), hops: jet_error_json_u32(jet_error_json_field(fields, "hops"), "journey hops")})
+}
+fn jet_error_conversion_from_json(value: DataTree) -> JetErrorConversion ReportError! {
+    fields :: jet_error_json_object(value, "conversion")
+    Ok(JetErrorConversion{source: jet_error_json_text(jet_error_json_field(fields, "source"), "conversion source"), target: jet_error_json_text(jet_error_json_field(fields, "target"), "conversion target")})
+}
+fn jet_error_details_from_json(value: DataTree) -> JetErrorDetails ReportError! {
+    fields :: jet_error_json_object(value, "details")
+    field_values := [JetErrorField]{}
+    loop entry in jet_error_json_object(jet_error_json_field(fields, "fields"), "detail fields") -> &field_values.push(JetErrorField{name: entry.key, value: jet_error_json_encode_value(entry.value)})
+    span_value :: jet_error_json_field(fields, "source_span")
+    source_span :: if span_value == {
+        .Null -> None
+        else -> {
+            span :: jet_error_json_object(span_value, "source span")
+            // Faithful frozen read contract: the usize carrier writes all usize
+            // values, but this decoder accepts only u32 (Outcome.rs:870-873).
+            Val(JetErrorSpan{start: jet_error_json_u32(jet_error_json_field(span, "start"), "span start"), end: jet_error_json_u32(jet_error_json_field(span, "end"), "span end")})
+        }
+    }
+    Ok(JetErrorDetails{variant: jet_error_json_text(jet_error_json_field(fields, "variant"), "detail variant"), fields: field_values, source_span: source_span})
+}
+fn jet_error_report_from_json(value: DataTree) -> JetErrorReport ReportError! {
+    fields :: jet_error_json_object(value, "report")
+    if jet_error_json_text(jet_error_json_field(fields, "schema"), "schema") != "jet.err/v1" -> return Err(ReportError.new("unsupported error report schema"))
+    message :: jet_error_json_text(jet_error_json_field(fields, "message"), "message")
+    code_value :: jet_error_json_field(fields, "code")
+    code :: if code_value == {
+        .Null -> None
+        else -> Val(jet_error_json_text(code_value, "code"))
+    }
+    causes := [JetErrorReport]{}
+    if jet_error_json_field(fields, "cause") == {
+        .Null -> {}
+        .Object(_) -> &causes.push(jet_error_report_from_json(jet_error_json_field(fields, "cause")))
+        .Array(values) -> { loop cause_value in values -> &causes.push(jet_error_report_from_json(cause_value)) }
+        else -> return Err(ReportError.new("error report cause is not null, an object, or an array"))
+    }
+    typed_identity :: jet_error_json_optional_text(fields, "typed_identity")
+    context := [JetErrorContextFrame]{}
+    loop context_value in jet_error_json_optional_array(fields, "context_frames") -> &context.push(jet_error_context_from_json(context_value))
+    origin :: if fields.get("origin") == {
+        .Val(origin_value) -> Val(jet_error_journey_from_json(origin_value))
+        .None -> None
+    }
+    journey := [JetErrorJourneyFrame]{}
+    loop journey_value in jet_error_json_optional_array(fields, "source_journey") -> &journey.push(jet_error_journey_from_json(journey_value))
+    conversions := [JetErrorConversion]{}
+    loop conversion_value in jet_error_json_optional_array(fields, "conversion_history") -> &conversions.push(jet_error_conversion_from_json(conversion_value))
+    details :: if fields.get("details") == {
+        .Val(details_value) -> Val(jet_error_details_from_json(details_value))
+        .None -> None
+    }
+    Ok(JetErrorReport{code: code, message: message, typed_identity: typed_identity, causes: causes, context_frames: context, origin: origin, source_journey: journey, conversion_history: conversions, details: details})
+}
+// Outcome value encoding uses protocol quoting (all Unicode controls), not
+// Report's UI quote or RFC8785/JCS sorting/number policy. Reuse Report's exact
+// Rust f64 Display layout rather than building a second float normalizer.
+fn jet_error_json_encode_value(value: DataTree) -> String Never! {
+    if value == {
+        .Null -> "null"
+        .Bool(flag) -> if flag -> "true" else -> "false"
+        .Int(number) -> "{number}"
+        .Float(number) -> report_float_display(number)
+        .Text(text) -> foundation_json_quote(text)
+        .Array(values) -> {
+            encoded := [String]{}
+            loop child in values -> &encoded.push(jet_error_json_encode_value(child))
+            "[{encoded.join(",")}]"
+        }
+        .Object(fields) -> {
+            // #4306/#4456: Core's object carrier currently loses wire order.
+            // Iterate its actual entries; no private ordered-map/parser substitute.
+            encoded := [String]{}
+            loop entry in fields -> &encoded.push("{foundation_json_quote(entry.key)}:{jet_error_json_encode_value(entry.value)}")
+            "{{{encoded.join(",")}}}"
+        }
+    }
+}

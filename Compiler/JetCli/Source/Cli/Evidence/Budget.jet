@@ -1,0 +1,549 @@
+// Budget command policy, Source/CmdBudget.rs BC01 and its parse/output closure.
+// The checked snapshot and provider/store transport are explicit capabilities.
+// No default host fabricates measurements or emulates descriptor-safe CAS.
+use core.text as budget_command_text
+
+pub enum JetCLIBudgetAnnotations {
+    Auto
+    Disabled
+    Github
+}
+pub struct JetCLIBudgetOptions {
+    pub command: String, pub baseline: String?, pub bootstrap: Bool,
+    pub accept_regression: Bool, pub reason: String?, pub yes: Bool,
+    pub json: Bool, pub verbose: Bool, pub quiet: Bool,
+    pub annotations: JetCLIBudgetAnnotations,
+}
+#Error
+pub enum JetCLIBudgetError {
+    Tool(String)
+    Compiler(human: String, reports: [DataTree])
+}
+JET_CLI_BUDGET_USAGE :: "jet budget check [--json] [--verbose] [--quiet] [--annotations auto|none|github] | jet budget update --baseline <name> [--bootstrap|--accept-regression] [--reason <text>] [-y|--yes] [--json] [--verbose] [--quiet] [--annotations auto|none|github]"
+// Rust Options initialization (parse / run_build_gates).
+pub fn jet_cli_budget_options(command: String) -> JetCLIBudgetOptions Never! {
+    JetCLIBudgetOptions{command: command, baseline: None, bootstrap: false, accept_regression: false, reason: None, yes: false, json: false, verbose: false, quiet: false, annotations: JetCLIBudgetAnnotations.Auto}
+}
+// Rust parse (883-972). raw starts with `budget`, not the executable.
+pub fn jet_cli_budget_parse(raw: [String]) -> JetCLIBudgetOptions JetCLIBudgetError! {
+    if raw.len() < 2 -> return Err(JetCLIBudgetError.Tool("`jet budget` needs `check` or `update`"))
+    command :: raw[1]
+    if command != "check" && command != "update" -> return Err(JetCLIBudgetError.Tool("unknown `jet budget` subcommand `{command}`"))
+    out := jet_cli_budget_options(~command)
+    seen := [String:Bool]{}
+    index := 2
+    loop index < raw.len() {
+        flag :: raw[index]
+        key :: if flag == "-y" -> "--yes" else -> ~flag
+        if seen.has_key(key) -> return Err(JetCLIBudgetError.Tool("flag `{flag}` is repeated"))
+        seen[key] = true
+        if flag == {
+            "--json" -> out.json = true
+            "--verbose" -> out.verbose = true
+            "--quiet" -> out.quiet = true
+            "-y" -> out.yes = true
+            "--yes" -> out.yes = true
+            "--bootstrap" -> out.bootstrap = true
+            "--accept-regression" -> out.accept_regression = true
+            "--baseline" | "--reason" | "--annotations" -> {
+                index += 1
+                if index >= raw.len() -> return Err(JetCLIBudgetError.Tool("flag `{flag}` needs a value"))
+                value :: raw[index]
+                if value.starts_with("-") -> return Err(JetCLIBudgetError.Tool("flag `{flag}` needs a value"))
+                if flag == {
+                    "--baseline" -> out.baseline = Val(~value)
+                    "--reason" -> out.reason = Val(~value)
+                    else -> {
+                        if value == {
+                            "auto" -> out.annotations = JetCLIBudgetAnnotations.Auto
+                            "none" -> out.annotations = JetCLIBudgetAnnotations.Disabled
+                            "github" -> out.annotations = JetCLIBudgetAnnotations.Github
+                            else -> return Err(JetCLIBudgetError.Tool("`--annotations` accepts auto, none, or github"))
+                        }
+                    }
+                }
+            }
+            else -> return Err(JetCLIBudgetError.Tool("unknown flag or argument `{flag}`"))
+        }
+        index += 1
+    }
+    if command == "check" && (out.baseline != None || out.bootstrap || out.accept_regression || out.reason != None || out.yes) -> return Err(JetCLIBudgetError.Tool("update-only flags cannot be used with `budget check`"))
+    if command == "update" && out.baseline == None -> return Err(JetCLIBudgetError.Tool("`budget update` requires `--baseline <name>`"))
+    if out.baseline == .Val(name) { jet_cli_budget_manifest_validate_baseline_name(name) ?? return Err(JetCLIBudgetError.Tool("invalid `--baseline` value: {err.message}")) }
+    if out.bootstrap && out.accept_regression -> return Err(JetCLIBudgetError.Tool("`--bootstrap` and `--accept-regression` are mutually exclusive"))
+    if (out.bootstrap || out.accept_regression) != (out.reason != None) -> return Err(JetCLIBudgetError.Tool("`--reason` is required with, and only accepted with, bootstrap or accept-regression"))
+    if out.json -> out.annotations = JetCLIBudgetAnnotations.Disabled
+    Ok(out)
+}
+// Consumer-only projection of canonical Sema budget facts, not a BudgetSpec.
+// prepare requires the inward BudgetSpecs.rs collector (9-100,125-156) and
+// immutable Driver bundle/effect facts; neither is elaborated in this module.
+// Axis lists carry only canonical values needed by Rust's selection filter.
+pub enum JetCLIBudgetAxis {
+    Current
+    All
+    Only([String])
+}
+pub struct JetCLIBudgetSelection {
+    pub id: String, pub name: String, pub source: String, pub line: Int, pub column: Int,
+    pub targets: JetCLIBudgetAxis, pub profiles: JetCLIBudgetAxis,
+    pub enforcement: String, pub comparison_kind: String, pub provider: String,
+}
+pub struct JetCLIBudgetChecked {
+    pub snapshot: Int, pub root: String, pub entry: String, pub started_at: String,
+    pub specs: [JetCLIBudgetSelection],
+}
+pub struct JetCLIBudgetArtifact { pub path: String, pub size: Int, pub sha256: String }
+// Rust ProviderRegistry / BudgetStore seam. prepare owns root/entry resolution,
+// check_file_with_effect_facts and collect_located_budget_specs_bundle before
+// any write. compatible_report authenticates closure/spec/tool/provider/artifact
+// identities; measure owns BC03-07 using Foundation perf_evaluate/statistics.
+// Store implementations MUST hold directory authority and preserve prior-head
+// CAS through confirmation; apply_update may not silently re-plan a stale plan.
+pub trait JetCLIBudgetHost {
+    fn prepare(&self, entry: String?) -> JetCLIBudgetChecked JetCLIBudgetError!
+    fn timestamp(&self) -> String Never!
+    fn cache_has_live_baseline(&self, checked: &JetCLIBudgetChecked, active: [Int]) -> Bool Never!
+    fn artifact_identity(&self, path: String) -> JetCLIBudgetArtifact JetCLIBudgetError!
+    fn compatible_report(&self, checked: &JetCLIBudgetChecked, active: [Int], target: String, profile: String, artifact: JetCLIBudgetArtifact?) -> [U8]? JetCLIBudgetError!
+    fn measure(&self, checked: &JetCLIBudgetChecked, active: [Int], target: String, profile: String, artifact: JetCLIBudgetArtifact?, bootstrap: Bool) -> [U8] JetCLIBudgetError!
+    fn write_report(&self, root: String, bytes: [U8]) -> Bool JetCLIBudgetError!
+    fn inspect_report(&self, root: String, bytes: [U8]) -> Bool JetCLIBudgetError!
+    fn plan_update(&self, root: String, baseline: String, bytes: [U8], kind: JetCLIBudgetUpdateKind, at: String) -> JetCLIBudgetUpdatePlan JetCLIBudgetError!
+    fn apply_update(&self, root: String, plan: &JetCLIBudgetUpdatePlan) JetCLIBudgetError!
+    fn stdin_is_terminal(&self) -> Bool Never!
+    // Writes prefix, then `Apply? [y/N] `, flushes stderr, reads one line;
+    // read failure declines. Return jet_cli_budget_confirm_answer(answer).
+    fn confirm_update(&self, prefix: String) -> Bool Never!
+    fn github_actions(&self) -> Bool Never!
+}
+// Rust str::eq_ignore_ascii_case: non-ASCII UTF-8 bytes remain unchanged.
+fn jet_cli_budget_ascii_lower_byte(byte: U8) -> Int Never! {
+    code :: Int.from_u8(byte)
+    if code >= 65 && code <= 90 -> code + 32 else -> code
+}
+fn jet_cli_budget_ascii_equal(left: [U8], right: [U8]) -> Bool Never! {
+    if left.len() != right.len() -> return false
+    loop index in 0..<left.len() {
+        if jet_cli_budget_ascii_lower_byte(left[index]) != jet_cli_budget_ascii_lower_byte(right[index]) -> return false
+    }
+    true
+}
+// Rust title (2641-2646): uppercase only the first ASCII scalar.
+fn jet_cli_budget_title(value: String) -> String Never! {
+    if value.len() == 0 -> "" else -> "{value.slice(0, 1).to_ascii_upper()}{value.slice(1, value.len())}"
+}
+// Rust applicable (2623-2633), including enum-rendered axis spellings.
+fn jet_cli_budget_axis_applies(axis: JetCLIBudgetAxis, current: String) -> Bool Never! {
+    if axis == {
+        .Current | .All -> true
+        .Only(values) -> {
+            title :: jet_cli_budget_title(current)
+            bytes :: current.bytes()
+            loop value in values { if jet_cli_budget_ascii_equal(value.bytes(), bytes) || value.contains(title) -> return true }
+            false
+        }
+    }
+}
+pub fn jet_cli_budget_applicable(spec: JetCLIBudgetSelection, target: String, profile: String) -> Bool Never! {
+    jet_cli_budget_axis_applies(spec.targets, target) && jet_cli_budget_axis_applies(spec.profiles, profile)
+}
+// Rust is_build_gate / has_build_gates (261-286). Err sema means gates must run.
+pub fn jet_cli_budget_is_build_gate(spec: JetCLIBudgetSelection, target: String, profile: String) -> Bool Never! {
+    jet_cli_budget_applicable(spec, target, profile) && spec.enforcement == "Fail" && spec.comparison_kind == "Absolute" && (spec.provider == "CompilerFacts" || spec.provider == "BuildArtifact" || spec.provider.starts_with("CompilerFacts(") || spec.provider.starts_with("BuildArtifact("))
+}
+pub fn jet_cli_budget_has_build_gates(specs: [JetCLIBudgetSelection]?, target: String, profile: String) -> Bool Never! {
+    if specs == .Val(values) {
+        loop spec in values { if jet_cli_budget_is_build_gate(spec, target, profile) -> return true }
+        return false
+    }
+    true
+}
+// Rust confirm_update (871-879).
+pub fn jet_cli_budget_confirm_answer(answer: String) -> Bool Never! {
+    value :: budget_command_text.lower(answer.trim())
+    value == "y" || value == "yes"
+}
+fn jet_cli_budget_active(checked: JetCLIBudgetChecked, target: String, profile: String, gates: Bool) -> [Int] Never! {
+    indices := [Int]{}
+    loop (i, spec) in checked.specs {
+        yes :: if gates -> jet_cli_budget_is_build_gate(spec, target, profile) else -> jet_cli_budget_applicable(spec, target, profile)
+        if yes -> &indices.push(i)
+    }
+    indices
+}
+fn jet_cli_budget_object(fields: [CanonicalJSONField]) -> CanonicalJSON Never! { canonical_json_object(fields) ?? panic(err.message) }
+fn jet_cli_budget_index(fields: [CanonicalJSONField], key: String) -> Int Never! {
+    loop (i, field) in fields { if field.key == key -> return i }
+    panic("verified budget field is absent")
+}
+fn jet_cli_budget_field(value: CanonicalJSON, key: String) -> CanonicalJSON Never! {
+    if value == .Object(fields) -> return ~fields[jet_cli_budget_index(fields, key)].value
+    panic("verified budget object expected")
+}
+fn jet_cli_budget_text(value: CanonicalJSON) -> String Never! {
+    if value == .String(v) -> return ~v
+    panic("verified budget text expected")
+}
+fn jet_cli_budget_wire_rational(value: CanonicalJSON) -> PerfRational? Never! {
+    if value == .Null -> return None
+    Val(perf_validate_rational(value, false, "result") ?? panic(err.message))
+}
+pub struct JetCLIBudgetResult {
+    pub measurement: Int, pub spec: Int, pub outcome: String, pub evidence: String,
+    pub reason: String, pub stale: Bool,
+}
+pub struct JetCLIBudgetBuilt { pub value: CanonicalJSON, pub bytes: [U8], pub results: [JetCLIBudgetResult], pub fail: Int, pub id: String }
+// Rust cached_built_report and shared BuiltReport projection. Independent
+// Foundation verification is mandatory for both reuse and producer bytes.
+fn jet_cli_budget_built(bytes: [U8], checked: JetCLIBudgetChecked, active: [Int]) -> JetCLIBudgetBuilt JetCLIBudgetError! {
+    value :: perf_verify_budget_report(bytes) ?? return Err(JetCLIBudgetError.Tool(err.message))
+    id :: jet_cli_budget_manifest_report_id(value) ?? return Err(JetCLIBudgetError.Tool(err.message))
+    results := [JetCLIBudgetResult]{}
+    by_id := [String:Int]{}
+    loop index in active -> by_id[checked.specs[index].id] = index
+    fail := 0
+    if value == .Object(wrapper) {
+        if wrapper[jet_cli_budget_index(wrapper, "content")].value == .Object(content) {
+            if content[jet_cli_budget_index(content, "measurements")].value == .Array(measurements) {
+                if measurements.len() != active.len() -> return Err(JetCLIBudgetError.Tool("budget report does not cover the active budgets"))
+                loop (i, measurement) in measurements {
+                    budget_id :: jet_cli_budget_text(jet_cli_budget_field(measurement, "budget_id"))
+                    located :: by_id.get(budget_id) ?? return Err(JetCLIBudgetError.Tool("cached budget report contains unexpected budget `{budget_id}`"))
+                    decision :: jet_cli_budget_field(measurement, "decision")
+                    if decision == .Null -> return Err(JetCLIBudgetError.Tool("cached budget measurement has no decision"))
+                    reason_value :: jet_cli_budget_field(decision, "reason")
+                    reason :: if reason_value == .Null -> "" else -> jet_cli_budget_text(reason_value)
+                    outcome :: jet_cli_budget_text(jet_cli_budget_field(decision, "policy_outcome"))
+                    evidence :: jet_cli_budget_text(jet_cli_budget_field(decision, "evidence"))
+                    if outcome == "fail" -> fail += 1
+                    &results.push(JetCLIBudgetResult{measurement: i, spec: located, outcome: outcome, evidence: evidence, reason: reason, stale: reason.starts_with("named baseline compatible history is stale")})
+                }
+            }
+        }
+    }
+    &results.sort_by((a: JetCLIBudgetResult, b: JetCLIBudgetResult) -> if {
+        jet_cli_budget_result_rank(a) != jet_cli_budget_result_rank(b) -> jet_cli_budget_result_rank(a) <=> jet_cli_budget_result_rank(b)
+        else -> checked.specs[a.spec].id <=> checked.specs[b.spec].id
+    })
+    Ok(JetCLIBudgetBuilt{value: value, bytes: bytes, results: results, fail: fail, id: id})
+}
+// Rust result_rank / output_counts (2998-3019).
+pub fn jet_cli_budget_result_rank(row: JetCLIBudgetResult) -> Int Never! {
+    if row.outcome == "fail" {
+        if row.evidence == "regression" || row.evidence == "inconclusive" -> return 1
+        if row.evidence == "unavailable" && !row.stale -> return 2
+        if row.stale -> return 3
+    }
+    if row.outcome == "warn" -> return 4
+    5
+}
+fn jet_cli_budget_counts(built: JetCLIBudgetBuilt) -> [Int] Never! {
+    counts := [Int]{0, 0, 0, 0, 0}
+    loop row in built.results {
+        index :: jet_cli_budget_result_rank(row) - 1
+        counts[index] = counts[index] + 1
+    }
+    counts
+}
+fn jet_cli_budget_append(out: &[U8], value: String) Never! { loop byte in value.bytes() -> &out.push(byte) }
+fn jet_cli_budget_string(bytes: [U8]) -> String Never! { String.from_bytes(bytes) ?? panic("budget output UTF-8") }
+fn jet_cli_budget_count(n: Int, one: String, many: String) -> String Never! { "{n} {if n == 1 -> one else -> many}" }
+fn jet_cli_budget_measurement(built: JetCLIBudgetBuilt, row: JetCLIBudgetResult) -> CanonicalJSON Never! {
+    // Output needs no sample, statistics, compile metadata or spec tree copy.
+    if built.value == .Object(w) {
+        if w[jet_cli_budget_index(w, "content")].value == .Object(c) {
+            if c[jet_cli_budget_index(c, "measurements")].value == .Array(m) {
+                if m[row.measurement] == .Object(fields) {
+                    projection := [CanonicalJSONField]{}
+                    loop field in fields {
+                        if field.key == "decision" || field.key == "metric" || field.key == "history" || field.key == "comparison" || field.key == "direction" || field.key == "enforcement" || field.key == "unit" -> &projection.push(~field)
+                    }
+                    return jet_cli_budget_object(projection)
+                }
+            }
+        }
+    }
+    panic("verified measurements")
+}
+// Rust diagnostic_parts (3020-3026).
+fn jet_cli_budget_diagnostic(row: JetCLIBudgetResult, name: String) -> (code: String, message: String, fix: String) Never! {
+    if row.evidence == "unavailable" -> return (code: "E2906", message: "performance budget {name} has no usable evidence", fix: "correct the provider evidence or bootstrap only when absent or stale evidence is eligible")
+    state :: if row.evidence == "inconclusive" -> "is inconclusive" else -> "regressed"
+    (code: "E2907", message: "performance budget {name} {state}", fix: "improve the measured behavior, inspect `jet budget check --verbose`, or record an explicit exception")
+}
+// Rust emit_annotation (3161-3198): property escaping differs from message.
+fn jet_cli_budget_annotation_escape(value: String, property: Bool) -> String Never! {
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR is UTF-8")
+    escaped :: value.replace("%", "%25").replace(cr, "%0D").replace("\n", "%0A")
+    if property -> return escaped.replace(":", "%3A").replace(",", "%2C")
+    escaped
+}
+fn jet_cli_budget_bound(value: CanonicalJSON) -> String Never! {
+    if jet_cli_budget_wire_rational(value) == .Val(q) -> return "{q.num}/{q.den}"
+    "none"
+}
+// Rust cached_metric_label (754-762); even an empty percentile keeps char::default.
+fn jet_cli_budget_metric_label(metric: CanonicalJSON) -> String Never! {
+    name :: jet_cli_budget_text(jet_cli_budget_field(metric, "name"))
+    p :: jet_cli_budget_field(metric, "percentile")
+    if p == .String(percentile) {
+        title :: if percentile.len() == 0 -> String.from_bytes([U8]{0}) ?? panic("NUL is UTF-8") else -> jet_cli_budget_title(percentile)
+        return "{name}({title})"
+    }
+    name
+}
+// Rust emit_verbose_row (3130-3160).
+fn jet_cli_budget_verbose(built: JetCLIBudgetBuilt, row: JetCLIBudgetResult, spec: JetCLIBudgetSelection) -> String Never! {
+    measurement :: jet_cli_budget_measurement(built, row)
+    decision :: jet_cli_budget_field(measurement, "decision")
+    ids := [String]{}
+    history :: jet_cli_budget_field(measurement, "history")
+    if history != .Null { if jet_cli_budget_field(history, "report_ids") == .Array(values) { loop value in values -> &ids.push(jet_cli_budget_text(value)) } }
+    baseline :: if ids.len() == 0 -> "none" else -> ids.join(",")
+    metric :: jet_cli_budget_field(measurement, "metric")
+    label :: jet_cli_budget_metric_label(metric)
+    "{row.outcome} {spec.id}: point {jet_cli_budget_bound(jet_cli_budget_field(decision, "point"))} · bounds [{jet_cli_budget_bound(jet_cli_budget_field(decision, "lower95"))}, {jet_cli_budget_bound(jet_cli_budget_field(decision, "upper95"))}] · baseline [{baseline}] · {label} · {row.reason}\n"
+}
+// Rust emit_check (3027-3129). Quiet suppresses only the recap.
+fn jet_cli_budget_emit_check(options: JetCLIBudgetOptions, built: JetCLIBudgetBuilt, checked: JetCLIBudgetChecked, created: Bool, github: Bool) -> JetDriverVerbOutput Never! {
+    exit :: if built.fail > 0 -> 1 else -> 0
+    if options.json -> return jet_cli_budget_emit_json(options, built, checked, None, false, exit)
+    out := [U8]{}
+    loop row in built.results {
+        spec :: checked.specs[row.spec]
+        if row.outcome != "pass" {
+            parts :: jet_cli_budget_diagnostic(row, spec.name)
+            severity :: if row.outcome == "warn" -> "Warning" else -> "Error"
+            jet_cli_budget_append(&out, "{severity} [{parts.code}]: {parts.message}\n --> {spec.source}:{spec.line}:{spec.column}\n Why: {row.reason}\n Fix: {parts.fix}\nMore: jet-lang.dev/e/{parts.code}\n")
+            if options.annotations == JetCLIBudgetAnnotations.Github || (options.annotations == JetCLIBudgetAnnotations.Auto && github) {
+                level :: if row.outcome == "warn" -> "warning" else -> "error"
+                jet_cli_budget_append(&out, "::{level} file={jet_cli_budget_annotation_escape(spec.source, true)},line={spec.line},col={spec.column},title=Jet {parts.code}::{jet_cli_budget_annotation_escape("{parts.message}\nWhy: {row.reason}\nFix: {parts.fix}", false)}\n")
+            }
+        }
+        if options.verbose -> jet_cli_budget_append(&out, jet_cli_budget_verbose(built, row, spec))
+    }
+    if options.verbose {
+        marker :: if created -> "+" else -> "~"
+        suffix :: if created -> "" else -> " (verified reuse)"
+        jet_cli_budget_append(&out, "{marker} report {built.id} .jet/perf/reports/{built.id}.json{suffix}\n")
+    }
+    if !options.quiet {
+        c :: jet_cli_budget_counts(built)
+        short :: built.id.slice(0, 12)
+        warnings :: if c[3] > 0 -> " · {jet_cli_budget_count(c[3], "warning", "warnings")}" else -> ""
+        recap :: if {
+            c[0] > 0 -> "budgets failed: {jet_cli_budget_count(c[0], "budget failed", "budgets failed")}{warnings}"
+            c[1] > 0 -> "budgets unavailable: {jet_cli_budget_count(c[1], "result unavailable", "results unavailable")}{warnings}"
+            c[2] > 0 -> "budgets stale: {jet_cli_budget_count(c[2], "baseline stale", "baselines stale")}{warnings}"
+            c[3] > 0 -> "budgets: {if c[4] > 0 -> "{jet_cli_budget_count(c[4], "budget", "budgets")} passed · " else -> ""}{jet_cli_budget_count(c[3], "warning", "warnings")}"
+            else -> "budgets: {jet_cli_budget_count(c[4], "budget", "budgets")} passed"
+        }
+        jet_cli_budget_append(&out, "{recap} · report {short}\n")
+    }
+    JetDriverVerbOutput{stdout: "", stderr: jet_cli_budget_string(out), exit_code: exit}
+}
+// Rust result_json (3276-3367). Reuse measurement values; no estimator here.
+fn jet_cli_budget_result_json(built: JetCLIBudgetBuilt, row: JetCLIBudgetResult, spec: JetCLIBudgetSelection) -> CanonicalJSON Never! {
+    m :: jet_cli_budget_measurement(built, row)
+    d :: jet_cli_budget_field(m, "decision")
+    h :: jet_cli_budget_field(m, "history")
+    ids :: if h == .Null -> CanonicalJSON.Array([CanonicalJSON]{}) else -> jet_cli_budget_field(h, "report_ids")
+    status :: if {
+        row.stale && row.outcome == "fail" -> "stale"
+        row.evidence == "unavailable" && row.outcome == "fail" -> "unavailable"
+        else -> ~row.outcome
+    }
+    code :: if row.outcome == "pass" -> CanonicalJSON.Null else -> CanonicalJSON.String(if row.evidence == "unavailable" -> "E2906" else -> "E2907")
+    jet_cli_budget_object([CanonicalJSONField]{
+        CanonicalJSONField{key: "baseline_report_ids", value: ids}, CanonicalJSONField{key: "budget_id", value: CanonicalJSON.String(~spec.id)},
+        CanonicalJSONField{key: "comparison", value: jet_cli_budget_field(m, "comparison")}, CanonicalJSONField{key: "diagnostic_code", value: code},
+        CanonicalJSONField{key: "direction", value: jet_cli_budget_field(m, "direction")}, CanonicalJSONField{key: "enforcement", value: jet_cli_budget_field(m, "enforcement")},
+        CanonicalJSONField{key: "evidence", value: CanonicalJSON.String(~row.evidence)}, CanonicalJSONField{key: "lower95", value: jet_cli_budget_field(d, "lower95")},
+        CanonicalJSONField{key: "metric", value: jet_cli_budget_field(m, "metric")}, CanonicalJSONField{key: "point", value: jet_cli_budget_field(d, "point")},
+        CanonicalJSONField{key: "reason", value: CanonicalJSON.String(~row.reason)},
+        CanonicalJSONField{key: "source", value: jet_cli_budget_object([CanonicalJSONField]{CanonicalJSONField{key: "column", value: CanonicalJSON.Integer("{spec.column}")}, CanonicalJSONField{key: "line", value: CanonicalJSON.Integer("{spec.line}")}, CanonicalJSONField{key: "path", value: CanonicalJSON.String(~spec.source)}})},
+        CanonicalJSONField{key: "stale", value: CanonicalJSON.Bool(row.stale)}, CanonicalJSONField{key: "status", value: CanonicalJSON.String(status)},
+        CanonicalJSONField{key: "trend", value: jet_cli_budget_field(d, "trend")}, CanonicalJSONField{key: "unit", value: jet_cli_budget_field(m, "unit")}, CanonicalJSONField{key: "upper95", value: jet_cli_budget_field(d, "upper95")},
+    })
+}
+// Rust plan_row (3368-3388).
+fn jet_cli_budget_plan_row(operation: String, artifact: String, path: String, from: String?, id: String) -> CanonicalJSON Never! {
+    prior :: if from == .Val(v) -> CanonicalJSON.String(~v) else -> CanonicalJSON.Null
+    jet_cli_budget_object([CanonicalJSONField]{CanonicalJSONField{key: "artifact", value: CanonicalJSON.String(artifact)}, CanonicalJSONField{key: "from_id", value: prior}, CanonicalJSONField{key: "id", value: CanonicalJSON.String(~id)}, CanonicalJSONField{key: "operation", value: CanonicalJSON.String(operation)}, CanonicalJSONField{key: "path", value: CanonicalJSON.String(path)}, CanonicalJSONField{key: "to_id", value: CanonicalJSON.String(id)}})
+}
+pub struct JetCLIBudgetOutputPlan { pub baseline: String, pub old: String?, pub created: Bool }
+// Rust emit_json (3199-3275), using the shared StatusEnvelope encoder.
+fn jet_cli_budget_emit_json(options: JetCLIBudgetOptions, built: JetCLIBudgetBuilt, checked: JetCLIBudgetChecked, plan: JetCLIBudgetOutputPlan?, applied: Bool, exit: Int) -> JetDriverVerbOutput Never! {
+    counts :: jet_cli_budget_counts(built)
+    failure :: if {
+        counts[0] > 0 -> CanonicalJSON.String("budget")
+        counts[1] > 0 || counts[2] > 0 -> CanonicalJSON.String("evidence")
+        else -> CanonicalJSON.Null
+    }
+    path :: ".jet/perf/reports/{built.id}.json"
+    results := [CanonicalJSON]{}
+    loop row in built.results -> &results.push(jet_cli_budget_result_json(built, row, checked.specs[row.spec]))
+    plan_value := CanonicalJSON.Null
+    if plan == .Val(p) {
+        rows :: [CanonicalJSON]{jet_cli_budget_plan_row(if p.created -> "create" else -> "reuse", "report", ~path, None, ~built.id), jet_cli_budget_plan_row("advance", "baseline", ".jet/perf/baselines/names/{p.baseline}.json", ~p.old, ~built.id)}
+        plan_value = jet_cli_budget_object([CanonicalJSONField]{CanonicalJSONField{key: "baseline", value: CanonicalJSON.String(~p.baseline)}, CanonicalJSONField{key: "requires_confirmation", value: CanonicalJSON.Bool(false)}, CanonicalJSONField{key: "rows", value: CanonicalJSON.Array(rows)}})
+    }
+    value :: jet_cli_budget_object([CanonicalJSONField]{CanonicalJSONField{key: "applied", value: CanonicalJSON.Bool(applied)}, CanonicalJSONField{key: "diagnostics", value: CanonicalJSON.Array([CanonicalJSON]{})}, CanonicalJSONField{key: "exit_code", value: CanonicalJSON.Integer("{exit}")}, CanonicalJSONField{key: "failure_kind", value: failure}, CanonicalJSONField{key: "plan", value: plan_value}, CanonicalJSONField{key: "report", value: ~built.value}, CanonicalJSONField{key: "report_path", value: CanonicalJSON.String(path)}, CanonicalJSONField{key: "results", value: CanonicalJSON.Array(results)}})
+    tree :: jet_cli_flash_status_value(value)
+    JetDriverVerbOutput{stdout: StatusEnvelope.new(~options.command, exit == 0).with_field("budget", tree).json(), stderr: "", exit_code: exit}
+}
+// Rust compiler_failure / tool_failure / tool_failure_with_report.
+fn jet_cli_budget_failure(options: JetCLIBudgetOptions, error: JetCLIBudgetError, id: String?) -> JetDriverVerbOutput Never! {
+    human := ""
+    reports := [DataTree]{}
+    kind := "tool"
+    if error == {
+        .Tool(why) -> {
+            report :: ReportEnvelope.new("tool", "error", "E2908", "performance budget operation failed", ~why, "correct the named failure and retry")
+            &reports.push(report.to_tree())
+            suffix :: if id == .Val(v) -> "budget command failed · report {v} was not accepted" else -> "budget command failed before a valid report was produced"
+            human = "Error [E2908]: Performance budget operation failed\n Why: {why}\n Fix: Correct the named failure and retry\nMore: jet-lang.dev/e/E2908\n{suffix}\n"
+        }
+        .Compiler(text, values) -> {
+            human = ~text
+            reports = ~values
+            kind = "compiler"
+        }
+    }
+    if !options.json -> return JetDriverVerbOutput{stdout: "", stderr: human, exit_code: 1}
+    budget :: report_status_object(StatusFields.new().with("applied", DataTree.Bool(false)).with("diagnostics", DataTree.Array(reports)).with("exit_code", DataTree.Int(1)).with("failure_kind", DataTree.Text(kind)).with("plan", DataTree.Null).with("report", DataTree.Null).with("report_path", DataTree.Null).with("results", DataTree.Array([DataTree]{})))
+    JetDriverVerbOutput{stdout: StatusEnvelope.new(~options.command, false).with_field("budget", budget).json(), stderr: "", exit_code: 1}
+}
+// Rust run (50-257). Parse/preflight precede measurement and every mutation.
+pub fn jet_cli_budget_run<H: JetCLIBudgetHost>(host: &H, raw: [String]) -> JetDriverVerbOutput Never! {
+    options :: jet_cli_budget_parse(raw) ?? {
+        message :: if err == .Tool(v) -> ~v else -> "budget argument parsing failed"
+        return JetDriverVerbOutput{stdout: "", stderr: "Error [E2102]: {message}\n Fix: {JET_CLI_BUDGET_USAGE}\nMore: jet-lang.dev/e/E2102\n", exit_code: 2}
+    }
+    checked := &host.prepare(None) ?? return jet_cli_budget_failure(options, err, None)
+    active :: jet_cli_budget_active(checked, "native", "dev", false)
+    cached := [U8]?{None}
+    if options.command == "check" && !(&host.cache_has_live_baseline(&checked, active)) {
+        if &host.compatible_report(&checked, active, "native", "dev", None) == {
+            .Ok(v) -> cached = ^v
+            .Err(e) -> return jet_cli_budget_failure(options, e, None)
+        }
+    }
+    bytes :: if cached == .Val(v) -> ^v else -> &host.measure(&checked, active, "native", "dev", None, options.bootstrap) ?? return jet_cli_budget_failure(options, err, None)
+    built :: jet_cli_budget_built(bytes, checked, active) ?? return jet_cli_budget_failure(options, err, None)
+    if options.command == "check" || (built.fail > 0 && !options.accept_regression && !options.bootstrap) {
+        created :: &host.write_report(~checked.root, built.bytes) ?? return jet_cli_budget_failure(options, jet_cli_budget_prefix_error("report write refused", err), None)
+        github :: &host.github_actions()
+        return jet_cli_budget_emit_check(options, built, checked, created, github)
+    }
+    baseline :: options.baseline ?? panic("validated update baseline")
+    kind :: if {
+        options.bootstrap -> JetCLIBudgetUpdateKind.Bootstrap(options.reason ?? panic("validated reason"))
+        options.accept_regression -> JetCLIBudgetUpdateKind.AcceptRegression(options.reason ?? panic("validated reason"))
+        else -> JetCLIBudgetUpdateKind.Pass
+    }
+    at :: &host.timestamp()
+    plan := &host.plan_update(~checked.root, ~baseline, built.bytes, kind, at) ?? return jet_cli_budget_failure(options, jet_cli_budget_prefix_error("baseline plan refused", err), Val(~built.id))
+    exists :: &host.inspect_report(~checked.root, built.bytes) ?? return jet_cli_budget_failure(options, jet_cli_budget_prefix_error("report inspection refused", err), Val(~built.id))
+    prefix :: "{if exists -> "~" else -> "+"} report {built.id}\n~ baseline {baseline} {plan.prior_head_report_id ?? "none"} -> {built.id}\n"
+    interactive :: !options.json && (&host.stdin_is_terminal())
+    apply :: options.yes || (interactive && (&host.confirm_update(~prefix)))
+    if apply {
+        &host.write_report(~checked.root, built.bytes) ?? {
+            failed := jet_cli_budget_failure(options, jet_cli_budget_prefix_error("report write refused", err), Val(~built.id))
+            if !options.json && (!interactive || options.yes) -> failed.stderr = "{prefix}{failed.stderr}"
+            return failed
+        }
+        &host.apply_update(~checked.root, &plan) ?? {
+            failed := jet_cli_budget_failure(options, jet_cli_budget_prefix_error("baseline apply refused", err), Val(~built.id))
+            if !options.json && (!interactive || options.yes) -> failed.stderr = "{prefix}{failed.stderr}"
+            return failed
+        }
+    }
+    if options.json -> return jet_cli_budget_emit_json(options, built, checked, Val(JetCLIBudgetOutputPlan{baseline: baseline, old: ~plan.prior_head_report_id, created: !exists}), apply, 0)
+    // confirm_update already wrote the prefix when a prompt was required.
+    stderr := if interactive && !options.yes -> "" else -> prefix
+    if !apply -> stderr = "{stderr}{if interactive -> "plan cancelled; no baseline changed" else -> "plan only; pass -y or --yes to apply in a non-interactive shell"}\n"
+    JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: 0}
+}
+fn jet_cli_budget_prefix_error(prefix: String, error: JetCLIBudgetError) -> JetCLIBudgetError Never! {
+    if error == .Tool(v) -> return JetCLIBudgetError.Tool("{prefix}: {v}")
+    ~error
+}
+// Rust run_build_gates (293-420). The existing artifact is supplied directly;
+// measure must never shell back into `jet build` from this gate path.
+pub fn jet_cli_budget_run_build_gates<H: JetCLIBudgetHost>(host: &H, entry: String, artifact_path: String, target: String, profile: String) -> JetDriverVerbOutput Never! {
+    options := jet_cli_budget_options("check")
+    options.annotations = JetCLIBudgetAnnotations.Disabled
+    checked := &host.prepare(Val(entry)) ?? return jet_cli_budget_gate_failure(err)
+    active :: jet_cli_budget_active(checked, target, profile, true)
+    if active.len() == 0 -> return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}
+    needs_artifact := false
+    loop index in active { if checked.specs[index].provider == "BuildArtifact" || checked.specs[index].provider.starts_with("BuildArtifact(") -> needs_artifact = true }
+    artifact :: if needs_artifact -> Val(&host.artifact_identity(artifact_path) ?? return jet_cli_budget_gate_failure(err)) else -> None
+    cached := [U8]?{None}
+    if &host.compatible_report(&checked, active, ~target, ~profile, artifact) == {
+        .Ok(v) -> cached = ^v
+        .Err(e) -> return jet_cli_budget_gate_failure(e)
+    }
+    reused :: cached != None
+    bytes :: if cached == .Val(v) -> ^v else -> &host.measure(&checked, active, target, profile, artifact, false) ?? return jet_cli_budget_gate_failure(err)
+    built :: jet_cli_budget_built(bytes, checked, active) ?? return jet_cli_budget_gate_failure(err)
+    if reused -> return jet_cli_budget_emit_stored_gates(built)
+    created :: &host.write_report(~checked.root, built.bytes) ?? return jet_cli_budget_gate_failure(jet_cli_budget_prefix_error("report write refused", err))
+    jet_cli_budget_emit_check(options, built, checked, created, false)
+}
+// Rust StoredBuildFact (compatible_report 593-623): the stored measurement's
+// own `path:line` source, and budget_spec.name else the budget id suffix.
+fn jet_cli_budget_stored_fact(built: JetCLIBudgetBuilt, row: JetCLIBudgetResult) -> (name: String, source: String) Never! {
+    if built.value == .Object(w) {
+        if w[jet_cli_budget_index(w, "content")].value == .Object(c) {
+            if c[jet_cli_budget_index(c, "measurements")].value == .Array(m) {
+                if m[row.measurement] == .Object(fields) {
+                    id :: jet_cli_budget_text(fields[jet_cli_budget_index(fields, "budget_id")].value)
+                    name := if id.cut_last(":") == .Val(parts) -> parts.after else -> id
+                    loop field in fields {
+                        if field.key != "budget_spec" -> next
+                        if field.value == .Object(spec) {
+                            loop entry in spec {
+                                if entry.key != "name" -> next
+                                if entry.value == .String(text) -> name = text
+                            }
+                        }
+                    }
+                    return (name: name, source: jet_cli_budget_text(fields[jet_cli_budget_index(fields, "source")].value))
+                }
+            }
+        }
+    }
+    panic("verified measurements")
+}
+// Rust emit_stored_build_gates (821-865): stored report measurement order,
+// not the ranked BuiltReport order emit_check uses.
+fn jet_cli_budget_emit_stored_gates(built: JetCLIBudgetBuilt) -> JetDriverVerbOutput Never! {
+    rows := built.results
+    &rows.sort_by((a: JetCLIBudgetResult, b: JetCLIBudgetResult) -> a.measurement <=> b.measurement)
+    out := [U8]{}
+    loop row in rows {
+        if row.outcome != "fail" -> next
+        fact :: jet_cli_budget_stored_fact(built, row)
+        code :: if row.evidence == "unavailable" -> "E2906" else -> "E2907"
+        state :: if {
+            row.evidence == "unavailable" -> "has no usable evidence"
+            row.evidence == "inconclusive" -> "is inconclusive"
+            else -> "regressed"
+        }
+        fix :: if code == "E2906" -> "Correct the provider evidence or bootstrap only when absent or stale evidence is eligible" else -> "Improve the measured behavior, inspect `jet budget check --verbose`, or record an explicit exception"
+        jet_cli_budget_append(&out, "Error [{code}]: Performance budget {fact.name} {state}\n --> {fact.source}\n Why: {row.reason}\n Fix: {fix}\nMore: jet-lang.dev/e/{code}\n")
+    }
+    recap :: if built.fail > 0 -> "budgets failed: {jet_cli_budget_count(built.fail, "budget failed", "budgets failed")}" else -> "budgets: {jet_cli_budget_count(built.results.len(), "budget", "budgets")} passed"
+    jet_cli_budget_append(&out, "{recap} · report {built.id.slice(0, 12)}\n")
+    JetDriverVerbOutput{stdout: "", stderr: jet_cli_budget_string(out), exit_code: if built.fail > 0 -> 1 else -> 0}
+}
+// Rust build_gate_tool_failure (866-869).
+fn jet_cli_budget_gate_failure(error: JetCLIBudgetError) -> JetDriverVerbOutput Never! {
+    if error == .Compiler(human, _) -> return JetDriverVerbOutput{stdout: "", stderr: ~human, exit_code: 1}
+    why :: if error == .Tool(v) -> ~v else -> "budget operation failed"
+    JetDriverVerbOutput{stdout: "", stderr: "Error [E2908]: Performance budget operation failed\n Why: {why}\n Fix: Correct the named failure and retry\nMore: jet-lang.dev/e/E2908\n", exit_code: 1}
+}

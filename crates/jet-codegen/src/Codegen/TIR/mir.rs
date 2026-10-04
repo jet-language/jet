@@ -1529,6 +1529,7 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
             }
         }
     }
+    inline_known_constant_reads(&mut functions, &program.declarations.constants, &constants);
 
     Ok(MirProgram {
         schema_version: MIR_SCHEMA_VERSION,
@@ -2620,6 +2621,83 @@ fn lower_constant_rows(rows: &[super::tir_to_mir_types::TirConstantDef]) -> Vec<
         .collect::<Vec<_>>();
     result.sort_unstable_by_key(|row| row.id);
     result
+}
+
+/// The most scalar leaves a constant may hold and still be copied into each
+/// use site; larger values stay one shared item.
+const INLINE_CONSTANT_LEAVES: usize = 8;
+/// The longest text a copied constant may carry per leaf.
+const INLINE_CONSTANT_TEXT_BYTES: usize = 256;
+
+/// Card #4258 (D-CONSTMARK1): a read of an immutable module constant whose
+/// folded value is a scalar, text, or a small record or enum case of those
+/// becomes a MIR `Constant` at the use site, so the optimizer can fold it and
+/// no backend calls an accessor. `#Static` keeps the `Global` read of the
+/// one addressable item; `#Inline` copies any value.
+/// Tables stay one shared item; the emitter caches a large one.
+fn inline_known_constant_reads(
+    functions: &mut [MirFunction],
+    rows: &[super::tir_to_mir_types::TirConstantDef],
+    constants: &[MirConstantDef],
+) {
+    let rows = rows
+        .iter()
+        .map(|row| (row.key.as_str(), row))
+        .collect::<HashMap<_, _>>();
+    let values = constants
+        .iter()
+        .filter(|constant| !constant.is_storage)
+        .filter_map(|constant| {
+            let row = rows.get(constant.key.as_str())?;
+            let copied = !row.addressable
+                && (row.force_inline || inline_constant_fits(&constant.value, &mut 0));
+            copied.then_some((constant.key.as_str(), &constant.value))
+        })
+        .collect::<HashMap<_, _>>();
+    if values.is_empty() {
+        return;
+    }
+    for function in functions {
+        for block in &mut function.blocks {
+            for instruction in &mut block.instructions {
+                let MirOperation::Global { name } = &instruction.operation else {
+                    continue;
+                };
+                if let Some(value) = values.get(name.as_str()) {
+                    // A sized-integer read keeps its width, as a literal does.
+                    let mut constant = (*value).clone();
+                    if let MirConstant::Int { width: width @ None, .. } = &mut constant {
+                        *width = instruction.ty.as_ref().and_then(MirType::fixed_int);
+                    }
+                    instruction.operation = MirOperation::Constant(constant);
+                }
+            }
+        }
+    }
+}
+
+fn inline_constant_fits(value: &MirConstant, leaves: &mut usize) -> bool {
+    match value {
+        MirConstant::Int { .. }
+        | MirConstant::Float { .. }
+        | MirConstant::Bool(_)
+        | MirConstant::Char(_)
+        | MirConstant::Unit
+        | MirConstant::BigInt(_) => {}
+        MirConstant::String(text) if text.len() <= INLINE_CONSTANT_TEXT_BYTES => {}
+        MirConstant::Struct { fields, .. } => {
+            return fields
+                .iter()
+                .all(|(_, field)| inline_constant_fits(field, leaves));
+        }
+        MirConstant::Enum { args, .. } => {
+            return args.iter().all(|(_, arg)| inline_constant_fits(arg, leaves));
+        }
+        MirConstant::Present(inner) => return inline_constant_fits(inner, leaves),
+        _ => return false,
+    }
+    *leaves += 1;
+    *leaves <= INLINE_CONSTANT_LEAVES
 }
 
 fn lower_constant_value(value: &CtValue) -> Option<MirConstant> {
@@ -8089,6 +8167,17 @@ impl<'a> LowerCtx<'a> {
         kind: MirIndexKind,
         access: MirAccess,
     ) -> Result<MirPlaceId, LowerError> {
+        // D-MEM-COPYSEM1: reading one element of a compiler-copied container
+        // place reads that element in place. The copy of the whole container
+        // (a whole `local.list` on every `local.list[i]` read) is never
+        // observable through a read, and the element read copies the element
+        // as before. A user `~` copy is a distinct node and is never elided.
+        let base = match &base.kind {
+            TExprKind::Clone(inner) if access == MirAccess::Read && tir_place_path(inner) => {
+                &**inner
+            }
+            _ => base,
+        };
         let result_ty = self.index_element_type(&base.ty, kind)?;
         let base_place = if let Some(place) =
             super::tir_to_mir_expr::lower_receiver_place(self, base, access)?
@@ -8548,15 +8637,6 @@ impl<'a> LowerCtx<'a> {
         &mut self,
         expr: &TExpr,
     ) -> Result<Option<MirPlaceId>, LowerError> {
-        fn place_path(expr: &TExpr) -> bool {
-            match &expr.kind {
-                TExprKind::Local(local) => !local.is_persistent(),
-                TExprKind::Field {
-                    recv, boxed: false, ..
-                } => place_path(recv),
-                _ => false,
-            }
-        }
         let expr = match &expr.kind {
             TExprKind::Clone(inner)
             | TExprKind::Borrow {
@@ -8565,7 +8645,7 @@ impl<'a> LowerCtx<'a> {
             } => &**inner,
             _ => expr,
         };
-        if !place_path(expr) {
+        if !tir_place_path(expr) {
             return Ok(None);
         }
         let Some(place) =
@@ -11506,5 +11586,17 @@ impl<'a> LowerCtx<'a> {
             }
             _ => Err(self.error(self.span(), "checked scan is not a text or binary pattern")),
         }
+    }
+}
+
+/// D-MEM-COPYSEM1: `expr` names a plain place: a non-persistent local or an
+/// unboxed field path below one.
+fn tir_place_path(expr: &TExpr) -> bool {
+    match &expr.kind {
+        TExprKind::Local(local) => !local.is_persistent(),
+        TExprKind::Field {
+            recv, boxed: false, ..
+        } => tir_place_path(recv),
+        _ => false,
     }
 }

@@ -1,0 +1,850 @@
+// PORT-PENDING 2127 crates-jet-env-model-src-moduleeval-system: crates/jet-env-model/src/ModuleEval/System.rs:1-846
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! U11–U14/U18: the jetos-tier field checks. Validate and capture
+//RS //! `system.<name>: { … }` and `image.<name>: { … }` contributions as
+//RS //! `SystemPlan`/`ServicePlan`/`OptionPlan`/`ImagePlan`. OCI realization consumes
+//RS //! the typed image plan in jetpack; disk-image realization remains jetos-owned.
+//RS 
+//RS use std::collections::{HashMap, HashSet};
+//RS use std::path::Path;
+//RS 
+//RS use crate::Comptime::CtValue;
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::Syntax;
+//RS use crate::AST::{
+//RS     ContribValue, Expr, FleetFieldValue, FleetLit, Func, ImageFieldValue, ImageFromRef, ImageLit,
+//RS     Item, ServiceEntry, SystemFieldValue, SystemLit, VmTestFieldValue, VmTestLit,
+//RS };
+//RS 
+//RS use super::Computed::{dependencies_for_expression, evaluate_expression, evaluate_named_fields};
+//RS use super::Diagnostics::{
+//RS     fleet_missing_hosts, fleet_unknown_field, image_bad_format, image_field_shape,
+//RS     image_kind_from_mismatch, image_missing_from, image_restated_field, image_unknown_kind,
+//RS     missing_system_target, service_enable_not_bool, service_missing_enable, unknown_platform,
+//RS     unknown_record_field,
+//RS };
+//RS use super::Eval::extract_packages;
+//RS use super::Types::{
+//RS     FleetPlan, HostOverride, HostOverrideProvenance, HostOverrideValue, HostPlan, ImageKind,
+//RS     ImagePlan, OptionPlan, ServicePlan, SystemPlan, VmTestPlan,
+//RS };
+//RS 
+//RS /// U11/U12/U13/U18: field-check a `system.<name>: { … }` record and capture it as
+//RS /// a `SystemPlan`. Validates that every field is one of the four known `System`
+//RS /// fields, that `target` names a known platform, that `services` records carry a
+//RS /// `Bool` `enable`, and that `options` is a list of `key: value` entries.
+//RS pub(super) fn evaluate_system(
+//RS     path: &str,
+//RS     lit: &SystemLit,
+//RS     src: &str,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS ) -> Result<SystemPlan, Diagnostic> {
+//RS     let mut target = None;
+//RS     let mut packages = Vec::new();
+//RS     let mut services = Vec::new();
+//RS     let mut options = Vec::new();
+//RS     for field in &lit.fields {
+//RS         match &field.value {
+//RS             SystemFieldValue::Platform { os, arch, span } => {
+//RS                 target = Some(check_platform(os, arch, *span)?);
+//RS             }
+//RS             SystemFieldValue::Packages(value) => {
+//RS                 packages.extend(extract_packages(value, src)?.packages);
+//RS             }
+//RS             SystemFieldValue::Services(entries) => {
+//RS                 for e in entries {
+//RS                     services.push(evaluate_service(e, base_dir, funcs, globals)?);
+//RS                 }
+//RS             }
+//RS             SystemFieldValue::Options(entries) => {
+//RS                 // U13: option values are typed values / identifiers (`halcyon`,
+//RS                 // `default.fish`) or free-form quoted strings — not computed
+//RS                 // expressions. Capture the written value by slicing its source
+//RS                 // span, the same technique `sources:`/`packages:` use.
+//RS                 for e in entries {
+//RS                     let span = e.value_span;
+//RS                     options.push(OptionPlan {
+//RS                         key: e.key.clone(),
+//RS                         value: src[span.start..span.end].trim().to_string(),
+//RS                     });
+//RS                 }
+//RS             }
+//RS             SystemFieldValue::Other(_) => {
+//RS                 return Err(unknown_record_field(
+//RS                     Syntax::TYPE_SYSTEM,
+//RS                     &field.name,
+//RS                     "`target`, `packages`, `services`, `options`",
+//RS                     field.name_span,
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     let target = target.ok_or_else(|| missing_system_target(lit.span))?;
+//RS     Ok(SystemPlan {
+//RS         name: path.to_string(),
+//RS         target,
+//RS         packages,
+//RS         services,
+//RS         options,
+//RS     })
+//RS }
+//RS 
+//RS /// U13: a `target`/cross-compile platform must name a known OS+arch pair.
+//RS fn check_platform(os: &str, arch: &str, span: Span) -> Result<String, Diagnostic> {
+//RS     let known_arch = matches!(arch, _ if arch == Syntax::PLATFORM_ARCH_X64 || arch == Syntax::PLATFORM_ARCH_ARM64);
+//RS     if os == Syntax::PLATFORM_OS_LINUX && known_arch {
+//RS         Ok(format!("{os}.{arch}"))
+//RS     } else {
+//RS         Err(unknown_platform(os, arch, span))
+//RS     }
+//RS }
+//RS 
+//RS /// U12: field-check one `Service` record (open record; requires a `Bool`
+//RS /// `enable`) and capture it as a `ServicePlan`.
+//RS fn evaluate_service(
+//RS     entry: &ServiceEntry,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS ) -> Result<ServicePlan, Diagnostic> {
+//RS     let mut enable = None;
+//RS     let mut extra = Vec::new();
+//RS     for (name, span, value) in &entry.fields {
+//RS         let v = evaluate_expression(value, globals, funcs, &HashSet::new(), base_dir)?;
+//RS         if name == Syntax::SERVICE_FIELD_ENABLE {
+//RS             match v {
+//RS                 CtValue::Bool(b) => enable = Some(b),
+//RS                 _ => return Err(service_enable_not_bool(*span)),
+//RS             }
+//RS         } else {
+//RS             extra.push((name.clone(), v.jet_show()));
+//RS         }
+//RS     }
+//RS     let enable = enable.ok_or_else(|| service_missing_enable(&entry.name, entry.span))?;
+//RS     Ok(ServicePlan {
+//RS         name: entry.name.clone(),
+//RS         enable,
+//RS         extra,
+//RS     })
+//RS }
+//RS 
+//RS /// U14/U18/D-JPK-IMAGE1: field-check an `image.<name>: { … }` record and capture
+//RS /// it as an `ImagePlan`. `from:` is required and names either a `System`
+//RS /// (`.Iso` disk-image tier), a `Package`, or an `Environment` (`.Oci` tiers); `kind:` is
+//RS /// optional and, when written, must agree with which one `from:` names.
+//RS /// `format`/`target` are `.Iso`-only (`format` defaults to `iso`); `expose`/
+//RS /// `env_vars`/`files`/`base` are `.Oci`-only. Every other field is rejected —
+//RS /// `Image` stays a closed record (unlike the open `Service`).
+//RS pub(super) fn evaluate_image(
+//RS     path: &str,
+//RS     lit: &ImageLit,
+//RS     _src: &str,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS ) -> Result<ImagePlan, Diagnostic> {
+//RS     let mut from: Option<ImageFromRef> = None;
+//RS     let mut from_span = lit.span;
+//RS     let mut format = None;
+//RS     let mut target = None;
+//RS     let mut kind_word: Option<(String, Span)> = None;
+//RS     let mut expose = Vec::new();
+//RS     let mut env_vars = Vec::new();
+//RS     let mut files = Vec::new();
+//RS     let mut base = None;
+//RS     let mut services = Vec::new();
+//RS     let mut health = None;
+//RS     let mut entrypoint = None;
+//RS     let mut user = None;
+//RS     for field in &lit.fields {
+//RS         match &field.value {
+//RS             ImageFieldValue::From { source, span } => {
+//RS                 from = Some(clone_from_ref(source));
+//RS                 from_span = *span;
+//RS             }
+//RS             ImageFieldValue::Format { word, span } => format = Some(check_format(word, *span)?),
+//RS             ImageFieldValue::Platform { os, arch, span } => {
+//RS                 target = Some(check_platform(os, arch, *span)?);
+//RS             }
+//RS             ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_KIND => {
+//RS                 kind_word = Some((bare_enum_word(expr, field.name_span)?, field.name_span));
+//RS             }
+//RS             ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_EXPOSE => {
+//RS                 expose = eval_expose(expr, base_dir, funcs, globals, field.name_span)?;
+//RS             }
+//RS             ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_ENV_VARS => {
+//RS                 env_vars = eval_env_vars(expr, base_dir, funcs, globals, field.name_span)?;
+//RS             }
+//RS             ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_FILES => {
+//RS                 files = eval_files(expr, base_dir, funcs, globals, field.name_span)?;
+//RS             }
+//RS             ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_BASE => {
+//RS                 base = Some(eval_base(expr, base_dir, funcs, globals, field.name_span)?);
+//RS             }
+//RS             ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_SERVICES => {
+//RS                 services = eval_names(
+//RS                     expr,
+//RS                     Syntax::IMAGE_FIELD_SERVICES,
+//RS                     base_dir,
+//RS                     funcs,
+//RS                     globals,
+//RS                     field.name_span,
+//RS                 )?;
+//RS             }
+//RS             ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_HEALTH => {
+//RS                 health = Some(eval_string(
+//RS                     expr,
+//RS                     Syntax::IMAGE_FIELD_HEALTH,
+//RS                     base_dir,
+//RS                     funcs,
+//RS                     globals,
+//RS                     field.name_span,
+//RS                 )?);
+//RS             }
+//RS             ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_ENTRYPOINT => {
+//RS                 entrypoint = Some(eval_string(
+//RS                     expr,
+//RS                     Syntax::IMAGE_FIELD_ENTRYPOINT,
+//RS                     base_dir,
+//RS                     funcs,
+//RS                     globals,
+//RS                     field.name_span,
+//RS                 )?);
+//RS             }
+//RS             ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_USER => {
+//RS                 user = Some(eval_user(expr, field.name_span, base_dir, funcs, globals)?);
+//RS             }
+//RS             ImageFieldValue::Other(_) => {
+//RS                 return Err(image_restated_field(&field.name, field.name_span));
+//RS             }
+//RS         }
+//RS     }
+//RS     let from = from.ok_or_else(|| image_missing_from(lit.span))?;
+//RS     let inferred_kind = match &from {
+//RS         ImageFromRef::System(_) => ImageKind::Iso,
+//RS         ImageFromRef::Package(_) | ImageFromRef::Environment(_) => ImageKind::Oci,
+//RS     };
+//RS     let kind = match &kind_word {
+//RS         None => inferred_kind,
+//RS         Some((word, span)) if word == Syntax::IMAGE_KIND_ISO => {
+//RS             if inferred_kind != ImageKind::Iso {
+//RS                 return Err(image_kind_from_mismatch(Syntax::IMAGE_KIND_ISO, *span));
+//RS             }
+//RS             ImageKind::Iso
+//RS         }
+//RS         Some((word, span)) if word == Syntax::IMAGE_KIND_OCI => {
+//RS             if inferred_kind != ImageKind::Oci {
+//RS                 return Err(image_kind_from_mismatch(Syntax::IMAGE_KIND_OCI, *span));
+//RS             }
+//RS             ImageKind::Oci
+//RS         }
+//RS         Some((word, span)) => return Err(image_unknown_kind(word, *span)),
+//RS     };
+//RS     let name = match &from {
+//RS         ImageFromRef::System(s) => s.clone(),
+//RS         ImageFromRef::Package(p) => p.clone(),
+//RS         ImageFromRef::Environment(e) => e.clone(),
+//RS     };
+//RS     let from_environment = matches!(from, ImageFromRef::Environment(_));
+//RS     if kind == ImageKind::Oci {
+//RS         // `.Oci` never reads `format:`/`target:` — those are the `.Iso` disk-image
+//RS         // fields, and an `.Oci` image has no system to cross-compile for.
+//RS         if format.is_some() {
+//RS             return Err(image_restated_field(Syntax::IMAGE_FIELD_FORMAT, from_span));
+//RS         }
+//RS         if target.is_some() && !from_environment {
+//RS             return Err(image_restated_field(Syntax::SYSTEM_FIELD_TARGET, from_span));
+//RS         }
+//RS     } else if !expose.is_empty() || !env_vars.is_empty() || !files.is_empty() || base.is_some() {
+//RS         // `.Iso` never reads the `.Oci`-only fields.
+//RS         return Err(image_restated_field(Syntax::IMAGE_FIELD_EXPOSE, from_span));
+//RS     }
+//RS     Ok(ImagePlan {
+//RS         name: path.to_string(),
+//RS         kind,
+//RS         from: name,
+//RS         from_environment,
+//RS         format: format.unwrap_or_else(|| Syntax::IMAGE_FORMAT_ISO.to_string()),
+//RS         target,
+//RS         expose,
+//RS         env_vars,
+//RS         files,
+//RS         base,
+//RS         services,
+//RS         health,
+//RS         entrypoint,
+//RS         user,
+//RS     })
+//RS }
+//RS 
+//RS fn clone_from_ref(r: &ImageFromRef) -> ImageFromRef {
+//RS     match r {
+//RS         ImageFromRef::System(s) => ImageFromRef::System(s.clone()),
+//RS         ImageFromRef::Package(p) => ImageFromRef::Package(p.clone()),
+//RS         ImageFromRef::Environment(e) => ImageFromRef::Environment(e.clone()),
+//RS     }
+//RS }
+//RS 
+//RS fn eval_string(
+//RS     expr: &Expr,
+//RS     field: &str,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     span: Span,
+//RS ) -> Result<String, Diagnostic> {
+//RS     match evaluate_expression(expr, globals, funcs, &HashSet::new(), base_dir)? {
+//RS         CtValue::Str(value) => Ok(value),
+//RS         _ => Err(image_field_shape(field, "a string", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn eval_names(
+//RS     expr: &Expr,
+//RS     field: &str,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     span: Span,
+//RS ) -> Result<Vec<String>, Diagnostic> {
+//RS     match evaluate_expression(expr, globals, funcs, &HashSet::new(), base_dir)? {
+//RS         CtValue::List(values) => values
+//RS             .into_iter()
+//RS             .map(|value| match value {
+//RS                 CtValue::Str(value) => Ok(value),
+//RS                 _ => Err(image_field_shape(field, "a list of strings", span)),
+//RS             })
+//RS             .collect(),
+//RS         _ => Err(image_field_shape(field, "a list of strings", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn eval_user(
+//RS     expr: &Expr,
+//RS     span: Span,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS ) -> Result<u32, Diagnostic> {
+//RS     let value = evaluate_expression(expr, globals, funcs, &HashSet::new(), base_dir)?;
+//RS     let CtValue::Int(value) = value else {
+//RS         return Err(image_field_shape(
+//RS             Syntax::IMAGE_FIELD_USER,
+//RS             "a non-negative integer",
+//RS             span,
+//RS         ));
+//RS     };
+//RS     u32::try_from(value)
+//RS         .map_err(|_| image_field_shape(Syntax::IMAGE_FIELD_USER, "a non-negative integer", span))
+//RS }
+//RS 
+//RS /// D-JPK-IMAGE1: `kind: .Oci` / `kind: .Iso` — a bare leading-dot enum literal
+//RS /// (D-ENUMDOT2) with no arguments. Anything else (a call, a string, `.Foo(x)`)
+//RS /// is a shape error, not a semantic one — `image_unknown_kind` covers a bare
+//RS /// word that just isn't `Oci`/`Iso`.
+//RS fn bare_enum_word(expr: &Expr, span: Span) -> Result<String, Diagnostic> {
+//RS     match expr {
+//RS         Expr::EnumLit { variant, args, .. } if args.is_empty() => Ok(variant.clone()),
+//RS         _ => Err(image_field_shape(
+//RS             Syntax::IMAGE_FIELD_KIND,
+//RS             "a bare leading-dot value, e.g. `kind: .Oci`",
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS /// D-JPK-IMAGE1: `expose: [Int]` — TCP ports, sorted + deduped so the OCI
+//RS /// config's `ExposedPorts` (and so the built image's digest) don't depend on
+//RS /// declaration order.
+//RS fn eval_expose(
+//RS     expr: &Expr,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     span: Span,
+//RS ) -> Result<Vec<i64>, Diagnostic> {
+//RS     let v = evaluate_expression(expr, globals, funcs, &HashSet::new(), base_dir)?;
+//RS     let CtValue::List(items) = v else {
+//RS         return Err(image_field_shape(
+//RS             Syntax::IMAGE_FIELD_EXPOSE,
+//RS             "a list of ports, e.g. `expose: [8080, 443]`",
+//RS             span,
+//RS         ));
+//RS     };
+//RS     let mut ports = Vec::new();
+//RS     for item in items {
+//RS         let CtValue::Int(n) = item else {
+//RS             return Err(image_field_shape(
+//RS                 Syntax::IMAGE_FIELD_EXPOSE,
+//RS                 "a list of ports, e.g. `expose: [8080, 443]`",
+//RS                 span,
+//RS             ));
+//RS         };
+//RS         if !(1..=65_535).contains(&n) {
+//RS             return Err(image_field_shape(
+//RS                 Syntax::IMAGE_FIELD_EXPOSE,
+//RS                 "a list of TCP ports from 1 through 65535",
+//RS                 span,
+//RS             ));
+//RS         }
+//RS         ports.push(n);
+//RS     }
+//RS     ports.sort_unstable();
+//RS     ports.dedup();
+//RS     Ok(ports)
+//RS }
+//RS 
+//RS /// D-JPK-IMAGE1: `env_vars: [KEY: "value"]` — a map literal; `CtValue::Map` is
+//RS /// a `BTreeMap`, so this is already sorted by key.
+//RS fn eval_env_vars(
+//RS     expr: &Expr,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     span: Span,
+//RS ) -> Result<Vec<(String, String)>, Diagnostic> {
+//RS     let v = evaluate_expression(expr, globals, funcs, &HashSet::new(), base_dir)?;
+//RS     let CtValue::Map(m) = v else {
+//RS         return Err(image_field_shape(
+//RS             Syntax::IMAGE_FIELD_ENV_VARS,
+//RS             "a map, e.g. `env_vars: [RUST_LOG: \"info\"]`",
+//RS             span,
+//RS         ));
+//RS     };
+//RS     let mut out = Vec::new();
+//RS     for (k, val) in m {
+//RS         let crate::AST::CtKey::Str(key) = k else {
+//RS             return Err(image_field_shape(
+//RS                 Syntax::IMAGE_FIELD_ENV_VARS,
+//RS                 "a map with string keys, e.g. `env_vars: [RUST_LOG: \"info\"]`",
+//RS                 span,
+//RS             ));
+//RS         };
+//RS         let CtValue::Str(s) = val else {
+//RS             return Err(image_field_shape(
+//RS                 Syntax::IMAGE_FIELD_ENV_VARS,
+//RS                 "a map of string values, e.g. `env_vars: [RUST_LOG: \"info\"]`",
+//RS                 span,
+//RS             ));
+//RS         };
+//RS         out.push((key, s));
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS /// D-JPK-IMAGE1: `files: [String]` — extra project-relative paths, sorted so
+//RS /// the tar layer is byte-identical regardless of declaration order.
+//RS fn eval_files(
+//RS     expr: &Expr,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     span: Span,
+//RS ) -> Result<Vec<String>, Diagnostic> {
+//RS     let v = evaluate_expression(expr, globals, funcs, &HashSet::new(), base_dir)?;
+//RS     let CtValue::List(items) = v else {
+//RS         return Err(image_field_shape(
+//RS             Syntax::IMAGE_FIELD_FILES,
+//RS             "a list of paths, e.g. `files: [\"config/app.toml\"]`",
+//RS             span,
+//RS         ));
+//RS     };
+//RS     let mut out = Vec::new();
+//RS     for item in items {
+//RS         let CtValue::Str(s) = item else {
+//RS             return Err(image_field_shape(
+//RS                 Syntax::IMAGE_FIELD_FILES,
+//RS                 "a list of paths, e.g. `files: [\"config/app.toml\"]`",
+//RS                 span,
+//RS             ));
+//RS         };
+//RS         out.push(s);
+//RS     }
+//RS     out.sort();
+//RS     Ok(out)
+//RS }
+//RS 
+//RS /// D-JPK-IMAGE1: `base: oci("<ref>")` — captured as one image fact. The
+//RS /// realization tier accepts verified local `file://` OCI layouts and reports a
+//RS /// transport diagnostic for remote refs rather than changing the requested
+//RS /// base or silently building from scratch.
+//RS fn eval_base(
+//RS     expr: &Expr,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS     span: Span,
+//RS ) -> Result<String, Diagnostic> {
+//RS     let shape_err = || {
+//RS         Err(image_field_shape(
+//RS             Syntax::IMAGE_FIELD_BASE,
+//RS             "`oci(\"<ref>\")`, e.g. `base: oci(\"debian:12\")`",
+//RS             span,
+//RS         ))
+//RS     };
+//RS     let Expr::Call(call) = expr else {
+//RS         return shape_err();
+//RS     };
+//RS     if call.name != Syntax::IMAGE_BASE_FN || call.args.len() != 1 {
+//RS         return shape_err();
+//RS     }
+//RS     let v = evaluate_expression(
+//RS         &call.args[0].expr,
+//RS         globals,
+//RS         funcs,
+//RS         &HashSet::new(),
+//RS         base_dir,
+//RS     )?;
+//RS     let CtValue::Str(s) = v else {
+//RS         return shape_err();
+//RS     };
+//RS     Ok(s)
+//RS }
+//RS 
+//RS /// U15: field-check a `fleet.<name>: { hosts: { … } }` record and capture it as
+//RS /// a `FleetPlan`. The one known field is `hosts:`; each host references a
+//RS /// `System` (cross-checked against the known systems at plan assembly, E1242).
+//RS /// Override records are evaluated into typed field values. The exact source
+//RS /// slice remains alongside those values for explain/round-trip provenance.
+//RS pub(super) fn evaluate_fleet(
+//RS     path: &str,
+//RS     lit: &FleetLit,
+//RS     src: &str,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS ) -> Result<FleetPlan, Diagnostic> {
+//RS     let mut hosts: Option<Vec<HostPlan>> = None;
+//RS     for field in &lit.fields {
+//RS         match &field.value {
+//RS             FleetFieldValue::Hosts(entries) => {
+//RS                 let mut captured = Vec::new();
+//RS                 for e in entries {
+//RS                     let (overrides, override_source) = match e.overrides {
+//RS                         Some(span) => {
+//RS                             let source = src[span.start..span.end].trim().to_string();
+//RS                             (
+//RS                                 Some(evaluate_host_override(
+//RS                                     &source, span, base_dir, funcs, globals,
+//RS                                 )?),
+//RS                                 Some(source),
+//RS                             )
+//RS                         }
+//RS                         None => (None, None),
+//RS                     };
+//RS                     captured.push(HostPlan {
+//RS                         name: e.name.clone(),
+//RS                         system: e.system.clone(),
+//RS                         overrides,
+//RS                         override_source,
+//RS                     });
+//RS                 }
+//RS                 hosts = Some(captured);
+//RS             }
+//RS             FleetFieldValue::Other(_) => {
+//RS                 return Err(fleet_unknown_field(&field.name, field.name_span));
+//RS             }
+//RS         }
+//RS     }
+//RS     let hosts = hosts.ok_or_else(|| fleet_missing_hosts(lit.span))?;
+//RS     Ok(FleetPlan {
+//RS         name: path.to_string(),
+//RS         hosts,
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn evaluate_vmtest(
+//RS     path: &str,
+//RS     lit: &VmTestLit,
+//RS     src: &str,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS ) -> Result<VmTestPlan, Diagnostic> {
+//RS     let mut hosts: Option<Vec<HostPlan>> = None;
+//RS     let mut run = None;
+//RS     for field in &lit.fields {
+//RS         match &field.value {
+//RS             VmTestFieldValue::Hosts(entries) => {
+//RS                 let mut captured = Vec::new();
+//RS                 for e in entries {
+//RS                     let (overrides, override_source) = match e.overrides {
+//RS                         Some(span) => {
+//RS                             let source = src[span.start..span.end].trim().to_string();
+//RS                             (
+//RS                                 Some(evaluate_host_override(
+//RS                                     &source, span, base_dir, funcs, globals,
+//RS                                 )?),
+//RS                                 Some(source),
+//RS                             )
+//RS                         }
+//RS                         None => (None, None),
+//RS                     };
+//RS                     captured.push(HostPlan {
+//RS                         name: e.name.clone(),
+//RS                         system: e.system.clone(),
+//RS                         overrides,
+//RS                         override_source,
+//RS                     });
+//RS                 }
+//RS                 hosts = Some(captured);
+//RS             }
+//RS             VmTestFieldValue::Run { span } => {
+//RS                 run = Some(src[span.start..span.end].trim().to_string());
+//RS             }
+//RS             VmTestFieldValue::Other(_) => {
+//RS                 return Err(fleet_unknown_field(&field.name, field.name_span));
+//RS             }
+//RS         }
+//RS     }
+//RS     let hosts = hosts.ok_or_else(|| fleet_missing_hosts(lit.span))?;
+//RS     let run = run.unwrap_or_else(|| "test {}".to_string());
+//RS     let assertions = vmtest_assertions(&run);
+//RS     Ok(VmTestPlan {
+//RS         name: path.to_string(),
+//RS         hosts,
+//RS         run,
+//RS         assertions,
+//RS     })
+//RS }
+//RS 
+//RS /// Evaluate a fleet/vmtest copy-with-update tail as a typed record. The
+//RS /// parser already knows the field grammar; this small synthetic module gives
+//RS /// the tail the same AST and comptime evaluator used by ordinary System
+//RS /// fields, without introducing a second override parser.
+//RS fn evaluate_host_override(
+//RS     source: &str,
+//RS     original_span: Span,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS ) -> Result<HostOverride, Diagnostic> {
+//RS     let wrapped = format!("module system.fleet_override {source}");
+//RS     let program = super::Eval::parse_program(&wrapped).map_err(|mut diagnostic| {
+//RS         diagnostic.span = Some(original_span);
+//RS         diagnostic
+//RS     })?;
+//RS     let module = program
+//RS         .items
+//RS         .iter()
+//RS         .find_map(|item| match item {
+//RS             Item::Module(module) => Some(module),
+//RS             _ => None,
+//RS         })
+//RS         .ok_or_else(|| {
+//RS             Diagnostic::error(
+//RS                 "E0003",
+//RS                 "host override is not a record".to_string(),
+//RS                 "fleet overrides use the same record evaluator as system fields".to_string(),
+//RS                 "write `.{ field: value }` after the system reference".to_string(),
+//RS                 Some(original_span),
+//RS             )
+//RS         })?;
+//RS     let contribution = module.contributions.first().ok_or_else(|| {
+//RS         Diagnostic::error(
+//RS             "E0003",
+//RS             "host override is empty".to_string(),
+//RS             "a host override must contain at least one typed field".to_string(),
+//RS             "add a field inside the override record".to_string(),
+//RS             Some(original_span),
+//RS         )
+//RS     })?;
+//RS     let ContribValue::System(lit) = &contribution.value else {
+//RS         return Err(Diagnostic::error(
+//RS             "E0003",
+//RS             "host override is not a system record".to_string(),
+//RS             "fleet overrides use System field semantics".to_string(),
+//RS             "write named fields inside `.{ … }`".to_string(),
+//RS             Some(original_span),
+//RS         ));
+//RS     };
+//RS 
+//RS     // Host fields form the same small pure dependency graph as ordinary
+//RS     // computed module fields. Resolve the generic fields before materializing
+//RS     // services/options so declaration order cannot change a fleet's meaning.
+//RS     let field_exprs = lit
+//RS         .fields
+//RS         .iter()
+//RS         .filter_map(|field| match &field.value {
+//RS             SystemFieldValue::Other(expr) => Some((field.name.clone(), (field.span, expr))),
+//RS             _ => None,
+//RS         })
+//RS         .collect::<HashMap<_, _>>();
+//RS     let computed = evaluate_named_fields(
+//RS         &field_exprs,
+//RS         globals,
+//RS         funcs,
+//RS         &HashSet::new(),
+//RS         base_dir,
+//RS         Some(&wrapped),
+//RS         "host override values must have a deterministic dependency order",
+//RS         "break the cycle by making one field independent or by moving the shared computation into a pure function",
+//RS     )?;
+//RS     let resolved = computed.values;
+//RS     let field_names = field_exprs.keys().cloned().collect::<HashSet<_>>();
+//RS     let mut fields = Vec::new();
+//RS     let mut provenance = Vec::new();
+//RS     for field in &lit.fields {
+//RS         let value = match &field.value {
+//RS             SystemFieldValue::Platform { os, arch, span } => {
+//RS                 HostOverrideValue::Platform(check_platform(os, arch, *span)?)
+//RS             }
+//RS             SystemFieldValue::Packages(expr) => {
+//RS                 HostOverrideValue::Packages(extract_packages(expr, &wrapped)?.packages)
+//RS             }
+//RS             SystemFieldValue::Services(entries) => HostOverrideValue::Services(
+//RS                 entries
+//RS                     .iter()
+//RS                     .map(|entry| evaluate_service(entry, base_dir, funcs, &resolved))
+//RS                     .collect::<Result<Vec<_>, _>>()?,
+//RS             ),
+//RS             SystemFieldValue::Options(entries) => {
+//RS                 let mut options = Vec::new();
+//RS                 for entry in entries {
+//RS                     let value = evaluate_host_option(
+//RS                         &entry.value,
+//RS                         entry.value_span,
+//RS                         source,
+//RS                         wrapped.len() - source.len(),
+//RS                         funcs,
+//RS                         base_dir,
+//RS                         &resolved,
+//RS                     )?;
+//RS                     options.push(OptionPlan {
+//RS                         key: entry.key.clone(),
+//RS                         value,
+//RS                     });
+//RS                 }
+//RS                 HostOverrideValue::Options(options)
+//RS             }
+//RS             SystemFieldValue::Other(expr) => HostOverrideValue::Value(evaluate_expression(
+//RS                 expr,
+//RS                 &resolved,
+//RS                 funcs,
+//RS                 &HashSet::new(),
+//RS                 base_dir,
+//RS             )?),
+//RS         };
+//RS         fields.push((field.name.clone(), value));
+//RS         let common = computed
+//RS             .provenance
+//RS             .iter()
+//RS             .find(|candidate| candidate.field == field.name);
+//RS         let dependencies = common
+//RS             .map(|candidate| candidate.dependencies.clone())
+//RS             .unwrap_or_else(|| typed_field_dependencies(&field.value, &field_names));
+//RS         provenance.push(HostOverrideProvenance {
+//RS             field: field.name.clone(),
+//RS             dependencies,
+//RS             pure: common.map(|candidate| candidate.pure).unwrap_or(true),
+//RS             source: common
+//RS                 .map(|candidate| candidate.source.clone())
+//RS                 .filter(|candidate| !candidate.is_empty())
+//RS                 .unwrap_or_else(|| {
+//RS                     host_field_source(source, field.span, wrapped.len() - source.len())
+//RS                 }),
+//RS         });
+//RS     }
+//RS     Ok(HostOverride {
+//RS         fields,
+//RS         source: source.to_string(),
+//RS         provenance,
+//RS     })
+//RS }
+//RS 
+//RS /// Evaluate a fleet option through the shared pure evaluator when it is an
+//RS /// actual value, while preserving the existing option grammar for symbolic
+//RS /// atoms such as `default.fish` and `laptop`. Those atoms are typed strings in
+//RS /// the option plan, not ambient lookups. A bare name that resolves in the
+//RS /// computed-field environment still takes the evaluator path.
+//RS fn evaluate_host_option(
+//RS     expr: &Expr,
+//RS     value_span: Span,
+//RS     source: &str,
+//RS     prefix_len: usize,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     base_dir: &Path,
+//RS     resolved: &HashMap<String, CtValue>,
+//RS ) -> Result<String, Diagnostic> {
+//RS     let value = match expr {
+//RS         Expr::Ident(name, _) if !resolved.contains_key(name) => {
+//RS             CtValue::Str(host_field_source(source, value_span, prefix_len))
+//RS         }
+//RS         Expr::Field(..) => CtValue::Str(host_field_source(source, value_span, prefix_len)),
+//RS         Expr::Str(_, _) => CtValue::Str(host_field_source(source, value_span, prefix_len)),
+//RS         _ => evaluate_expression(expr, resolved, funcs, &HashSet::new(), base_dir)?,
+//RS     };
+//RS     Ok(value.jet_show())
+//RS }
+//RS 
+//RS fn host_field_source(source: &str, span: Span, prefix_len: usize) -> String {
+//RS     let start = span.start.saturating_sub(prefix_len);
+//RS     let end = span.end.saturating_sub(prefix_len);
+//RS     source.get(start..end).unwrap_or(source).trim().to_string()
+//RS }
+//RS 
+//RS fn typed_field_dependencies(
+//RS     value: &SystemFieldValue,
+//RS     field_names: &HashSet<String>,
+//RS ) -> Vec<String> {
+//RS     let mut dependencies = Vec::new();
+//RS     let mut add = |expr: &Expr| {
+//RS         for dependency in dependencies_for_expression(expr, field_names) {
+//RS             if !dependencies.iter().any(|seen| seen == &dependency) {
+//RS                 dependencies.push(dependency);
+//RS             }
+//RS         }
+//RS     };
+//RS     match value {
+//RS         SystemFieldValue::Packages(expr) => add(expr),
+//RS         SystemFieldValue::Services(entries) => {
+//RS             for entry in entries {
+//RS                 for (_, _, expr) in &entry.fields {
+//RS                     add(expr);
+//RS                 }
+//RS             }
+//RS         }
+//RS         SystemFieldValue::Options(entries) => {
+//RS             for entry in entries {
+//RS                 add(&entry.value);
+//RS             }
+//RS         }
+//RS         SystemFieldValue::Other(expr) => add(expr),
+//RS         SystemFieldValue::Platform { .. } => {}
+//RS     }
+//RS     dependencies.sort();
+//RS     dependencies
+//RS }
+//RS 
+//RS fn vmtest_assertions(run: &str) -> Vec<String> {
+//RS     let mut out = Vec::new();
+//RS     for assertion in [
+//RS         "wait_for_boot",
+//RS         "assert_unit_active",
+//RS         "assert_port_open",
+//RS         "assert_file_contains",
+//RS         "assert_command_output",
+//RS     ] {
+//RS         if run.contains(assertion) {
+//RS             out.push(assertion.to_string());
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS /// U14: an image `format:` must be one of `iso` / `qcow` / `raw`.
+//RS fn check_format(word: &str, span: Span) -> Result<String, Diagnostic> {
+//RS     if word == Syntax::IMAGE_FORMAT_ISO
+//RS         || word == Syntax::IMAGE_FORMAT_QCOW
+//RS         || word == Syntax::IMAGE_FORMAT_RAW
+//RS     {
+//RS         Ok(word.to_string())
+//RS     } else {
+//RS         Err(image_bad_format(word, span))
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2127 crates/jet-env-model/src/ModuleEval/System.rs:1-846
+

@@ -1,0 +1,238 @@
+// Original ModuleEval/mod.rs System dependency and all five Fleet claims.
+// ISO-dependent originals remain intact: ImageEval is the canonical provider.
+#Test("fleet captures hosts and cross checks") {
+    src :: "\nmodule system.web {{ target: linux.x64 }}\nmodule fleet.prod {{\n    hosts: {{\n        web1: system.web.{{ region: \"us-east\" }},\n        web2: system.web.{{ region: \"eu-west\" }},\n    }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic(err.diagnostic.what)
+    assert_eq(plan.systems.len(), 1)
+    assert_eq(plan.fleets.len(), 1)
+    fleet :: plan.fleets[0]
+    assert_eq(fleet.name, "prod")
+    assert_eq(fleet.hosts.len(), 2)
+    assert_eq(fleet.hosts[0].name, "web1")
+    assert_eq(fleet.hosts[0].system, "web")
+    assert_eq(fleet.hosts[0].override_source, Val("{{ region: \"us-east\" }}"))
+    override :: fleet.hosts[0].overrides ?? panic("typed override")
+    assert_eq(override.fields[0].name, "region")
+    assert_eq(override.fields[0].value, HostOverrideValue.Value{value: CtValue.Str{value: "us-east"}})
+    assert_eq(fleet.hosts[1].name, "web2")
+    assert_eq(fleet.hosts[1].system, "web")
+}
+
+#Test("fleet bare host ref has no overrides") {
+    src :: "\nmodule system.web {{ target: linux.x64 }}\nmodule fleet.prod {{ hosts: {{ only: system.web }} }}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic(err.diagnostic.what)
+    assert_eq(plan.fleets[0].hosts[0].overrides, None)
+    assert_eq(plan.fleets[0].hosts[0].override_source, None)
+}
+
+#Test("fleet host unknown system is e1242") {
+    src :: "module fleet.prod {{ hosts: {{ web1: system.nope }} }}"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E1242")
+    assert(envmodel_test_render("config.jet", src, error).contains("host `web1` names an unknown system `nope`"))
+}
+
+#Test("fleet unknown field is e1244") {
+    src :: "module fleet.prod {{ region: \"us\" }}"
+    assert_eq(envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir())).code, "E1244")
+}
+
+#Test("fleet missing hosts is e1245") {
+    src :: "module fleet.prod {{ }}"
+    assert_eq(envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir())).code, "E1245")
+}
+
+#Test("worked example captures system and image") {
+    src :: "\nmodule halcyon {{\n    sources: {{ default: NixOS/nixpkgs/nixos-24.05@github }}\n    system.halcyon: {{\n        target: linux.x64,\n        packages: [default.firefox, default.btop, default.ripgrep],\n        services: {{\n            pipewire: {{ enable: true }},\n            openssh: {{ enable: true, ports: [22] }},\n        }},\n        options: [\n            network.hostName: halcyon,\n            filesystem.timeZone: \"Europe/London\",\n            packages.shell: default.fish,\n        ],\n    }}\n}}\nmodule installer {{\n    image.halcyon-iso: {{ from: system.halcyon, format: iso }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic(err.diagnostic.what)
+    assert_eq(plan.systems.len(), 1)
+    system :: plan.systems[0]
+    assert_eq(system.name, "halcyon")
+    assert_eq(system.target, "linux.x64")
+    assert_eq(system.packages, [Pkg]{Pkg.new("default", "firefox"), Pkg.new("default", "btop"), Pkg.new("default", "ripgrep")})
+    assert_eq(system.services.len(), 2)
+    assert_eq(system.services[0].name, "pipewire")
+    assert(system.services[0].enable)
+    assert_eq(system.services[1].name, "openssh")
+    assert_eq(system.services[1].extra, [ServicePlanExtra]{ServicePlanExtra{key: "ports", value: "[22]"}})
+    assert_eq(system.options, [OptionPlan]{OptionPlan{key: "network.hostName", value: "halcyon"}, OptionPlan{key: "filesystem.timeZone", value: "\"Europe/London\""}, OptionPlan{key: "packages.shell", value: "default.fish"}})
+    assert_eq(plan.images.len(), 1)
+    assert_eq(plan.images[0].name, "halcyon-iso")
+    assert_eq(plan.images[0].from, "halcyon")
+    assert_eq(plan.images[0].format, "iso")
+    assert_eq(plan.images[0].target, None)
+}
+
+#Test("computed system service fields consume top level known values") {
+    src :: "\nENABLED :: prep {{ true }}\nmodule system.host {{\n    target: linux.x64,\n    services: {{ ssh: {{ enable: ENABLED }} }},\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic(err.diagnostic.what)
+    assert_eq(plan.systems.len(), 1)
+    assert_eq(plan.systems[0].services[0].name, "ssh")
+    assert(plan.systems[0].services[0].enable)
+}
+
+#Test("s61 hyphenated system and image names") {
+    src :: "\nmodule net {{\n    system.my-host: {{\n        target: linux.x64,\n    }}\n    image.halcyon-iso: {{ from: system.my-host, format: iso }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic(err.diagnostic.what)
+    assert_eq(plan.systems.len(), 1)
+    assert_eq(plan.systems[0].name, "my-host")
+    assert_eq(plan.images.len(), 1)
+    assert_eq(plan.images[0].name, "halcyon-iso")
+    assert_eq(plan.images[0].from, "my-host")
+    assert_eq(plan.images[0].format, "iso")
+}
+
+#Test("committed system example field checks clean") {
+    path :: files.join(envmodel_test_repo_root(), "tests/fixtures/jetpack-typed/system.jet")
+    src :: files.read(path) ?? panic("read committed system fixture")
+    plan :: envmodel_evaluate_env(src, files.dirname(path)) ?? panic(err.diagnostic.what)
+    assert_eq(plan.systems.len(), 1)
+    assert_eq(plan.systems[0].name, "my-host")
+    assert_eq(plan.images.len(), 1)
+    assert_eq(plan.images[0].name, "halcyon-iso")
+    assert_eq(plan.images[0].from, "my-host")
+}
+
+#Test("explicit system service image type names still parse") {
+    src :: "\nmodule m {{\n    system.box: System{{\n        target: linux.arm64,\n        services: {{ sshd: Service{{ enable: false }} }},\n    }}\n    image.box_iso: Image{{ from: system.box }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic(err.diagnostic.what)
+    assert_eq(plan.systems[0].target, "linux.arm64")
+    assert(!plan.systems[0].services[0].enable)
+    assert_eq(plan.images[0].format, "iso")
+}
+
+#Test("unknown system field is e0972") {
+    src :: "module m {{ system.s: {{ target: linux.x64, gpu: true }} }}"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E0972")
+    envmodel_test_check_snapshot("E0972", envmodel_test_render("config.jet", src, error))
+}
+
+#Test("unknown platform target is e0973") {
+    src :: "module m {{ system.s: {{ target: windows.x64 }} }}"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E0973")
+    rendered :: envmodel_test_render("config.jet", src, error)
+    assert(rendered.contains("`windows.x64` isn't a platform"))
+    envmodel_test_check_snapshot("E0973", rendered)
+}
+
+#Test("system without target is e0974") {
+    src :: "module m {{ system.s: {{ packages: [default.fd] }} }}"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E0974")
+    envmodel_test_check_snapshot("E0974", envmodel_test_render("config.jet", src, error))
+}
+
+#Test("system service without enable is e0975") {
+    src :: "module m {{ system.s: {{ target: linux.x64, services: {{ ssh: {{ ports: [22] }} }} }} }}"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E0975")
+    rendered :: envmodel_test_render("config.jet", src, error)
+    assert(rendered.contains("`ssh` has no `enable`"))
+    envmodel_test_check_snapshot("E0975", rendered)
+}
+
+#Test("system service enable not bool is e0975") {
+    src :: "module m {{ system.s: {{ target: linux.x64, services: {{ ssh: {{ enable: 1 }} }} }} }}"
+    assert_eq(envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir())).code, "E0975")
+}
+
+#Test("fleet override computes dependencies before typed fields") {
+    src :: "module system.web {{ target: linux.x64 }}\nmodule fleet.prod {{ hosts: {{ edge: system.web.{{ services: {{ ssh: {{ enable: enabled, ports: [port] }} }}, options: [network.port: port, packages.shell: default.fish, network.hostName: laptop, timezone: \"UTC\"], target: linux.arm64, packages: [default.fd], port: base + 2, enabled: true, base: 20 }} }} }}"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic(err.diagnostic.what)
+    override :: plan.fleets[0].hosts[0].overrides ?? panic("typed override")
+    assert_eq(override.fields[0].value, HostOverrideValue.Services{values: [ServicePlan]{ServicePlan{name: "ssh", enable: true, extra: [ServicePlanExtra]{ServicePlanExtra{key: "ports", value: "[22]"}}}}})
+    assert_eq(override.fields[1].value, HostOverrideValue.Options{values: [OptionPlan]{OptionPlan{key: "network.port", value: "22"}, OptionPlan{key: "packages.shell", value: "default.fish"}, OptionPlan{key: "network.hostName", value: "laptop"}, OptionPlan{key: "timezone", value: "\"UTC\""}}})
+    assert_eq(override.fields[2].value, HostOverrideValue.Platform{value: "linux.arm64"})
+    assert_eq(override.fields[3].value, HostOverrideValue.Packages{values: [Pkg]{Pkg.new("default", "fd")}})
+    assert_eq(override.provenance[0].dependencies, [String]{"enabled", "port"})
+    assert_eq(override.provenance[1].dependencies, [String]{"port"})
+    assert_eq(override.provenance[4].dependencies, [String]{"base"})
+    assert(override.provenance[4].source.contains("port: base + 2"))
+    loop fact in override.provenance -> assert(fact.pure)
+}
+
+#Test("fleet override cycles and ambient effects use canonical controls") {
+    cycle :: "module system.web {{ target: linux.x64 }} module fleet.prod {{ hosts: {{ edge: system.web.{{ first: second, second: first }} }} }}"
+    assert_eq(envmodel_test_env_error(envmodel_evaluate_env(cycle, envmodel_test_base_dir())).code, "E0338")
+    impure :: "module system.web {{ target: linux.x64 }} module fleet.prod {{ hosts: {{ edge: system.web.{{ region: read_file(\"region\") }} }} }}"
+    assert_eq(envmodel_test_env_error(envmodel_evaluate_env(impure, envmodel_test_base_dir())).code, "E3402")
+}
+
+#Test("fleet assembly retains multiple modules and import order") {
+    dir :: envmodel_test_fresh_dir("fleet-import-order")
+    modules :: files.join(dir, "modules")
+    files.create_dir_all(modules) ?? panic("create module directory")
+    files.write(files.join(modules, "a.jet"), "module system.imported {{ target: linux.arm64 }} module fleet.imported {{ hosts: {{ second: system.root }} }}") ?? panic("write first import")
+    files.write(files.join(modules, "b.jet"), "module system.last {{ target: linux.x64 }}") ?? panic("write second import")
+    src :: "module root {{ imports: find(\"./modules\") system.root: {{ target: linux.x64 }} fleet.root: {{ hosts: {{ first: system.imported }} }} }}"
+    plan :: envmodel_evaluate_env(src, dir) ?? panic(err.diagnostic.what)
+    assert_eq(plan.systems.len(), 3)
+    assert_eq(plan.systems[0].name, "root")
+    assert_eq(plan.systems[1].name, "imported")
+    assert_eq(plan.systems[2].name, "last")
+    assert_eq(plan.fleets[0].name, "root")
+    assert_eq(plan.fleets[1].name, "imported")
+    assert_eq(plan.source_files, [String]{"env.jet", "modules/a.jet", "modules/b.jet"})
+    assert_eq(plan.graph_identity, None)
+    files.remove_all(dir) ?? panic("remove fixture")
+}
+
+#Test("fleet source producer captures before environment selection") {
+    src :: "module env.dev {{ packages: [] }} module env.other {{ packages: [] }} module system.web {{ target: linux.x64 }} module fleet.prod {{ hosts: {{ only: system.web }} }}"
+    modules :: envmodel_evaluate_source(src, envmodel_test_base_dir()) ?? panic(err.diagnostic.what)
+    assert_eq(modules[2].systems[0].name, "web")
+    assert_eq(modules[3].fleets[0].name, "prod")
+    plan :: envmodel_evaluate_env_with_environment(src, envmodel_test_base_dir(), Val("other")) ?? panic(err.diagnostic.what)
+    assert_eq(plan.active_environment, Val("other"))
+    assert_eq(plan.systems[0], modules[2].systems[0])
+    assert_eq(plan.fleets[0], modules[3].fleets[0])
+}
+
+#Test("bad image format is e0976") {
+    src :: "module m {{ system.s: {{ target: linux.x64 }} image.i: {{ from: system.s, format: dmg }} }}"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E0976")
+    rendered :: envmodel_test_render("config.jet", src, error)
+    assert(rendered.contains("`dmg` isn't a disk-image format"))
+    envmodel_test_check_snapshot("E0976", rendered)
+}
+
+#Test("image cross compile target is allowed") {
+    src :: "module m {{ system.s: {{ target: linux.x64 }} image.i: {{ from: system.s, target: linux.arm64 }} }}"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic(err.diagnostic.what)
+    assert_eq(plan.images[0].target, Val("linux.arm64"))
+}
+
+#Test("image from unknown system is e0978") {
+    src :: "module m {{ image.i: {{ from: system.nope }} }}"
+    error :: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E0978")
+    rendered :: envmodel_test_render("config.jet", src, error)
+    assert(rendered.contains("unknown system `nope`"))
+    envmodel_test_check_snapshot("E0978", rendered)
+}
+
+#Test("iso image keeps format and validates known systems before fleets") {
+    src :: "module system.web {{ target: linux.x64 }} module image.disk {{ from: system.web, kind: .Iso, format: qcow, target: linux.arm64 }} module image.rawdisk {{ from: system.web, format: raw }}"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic(err.diagnostic.what)
+    assert_eq(plan.images[0].kind, ImageKind.Iso)
+    assert_eq(plan.images[0].format, "qcow")
+    assert_eq(plan.images[0].target, Val("linux.arm64"))
+    assert_eq(plan.images[1].format, "raw")
+    mismatch :: "module system.web {{ target: linux.x64 }} module image.disk {{ from: system.web, kind: .Oci }}"
+    assert_eq(envmodel_test_env_error(envmodel_evaluate_env(mismatch, envmodel_test_base_dir())).code, "E1266")
+    oci_fields :: "module system.web {{ target: linux.x64 }} module image.disk {{ from: system.web, expose: [22] }}"
+    assert_eq(envmodel_test_env_error(envmodel_evaluate_env(oci_fields, envmodel_test_base_dir())).code, "E0977")
+    unknown :: "module image.disk {{ from: system.missing }} module fleet.prod {{ hosts: {{ edge: system.missing }} }}"
+    assert_eq(envmodel_test_env_error(envmodel_evaluate_env(unknown, envmodel_test_base_dir())).code, "E0978")
+}
+
+#Test("host source uses saturating byte offsets and invalid slice fallback") {
+    source :: "  {{ region: \"é\" }}  "
+    assert_eq(envmodel_host_field_source(source, Span{start: 1, end: 200}, 32), "{{ region: \"é\" }}")
+    assert_eq(envmodel_host_field_source("é", Span{start: 0, end: 1}, 0), "é")
+    assert_eq(envmodel_host_field_source(" abc ", Span{start: 33, end: 36}, 32), "abc")
+    assert_eq(envmodel_host_field_source(" abc ", Span{start: 1, end: 1}, 32), "")
+}

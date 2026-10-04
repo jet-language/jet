@@ -1,0 +1,379 @@
+use jet.BudgetStore.[BudgetStore, next_manifest, verify_manifest, validate_update_evidence, open_dir_chain, install_immutable, read_regular, NONCE, FORCE_UNSUPPORTED_MUTATION, PUBLICATION_GATE, PublicationGate]
+use std.fs as fs
+use std.env as env
+use std.process as process
+use std.sync.[Arc, Barrier]
+use std.thread as thread
+use std.sync.atomic.Ordering
+use std.ffi.CString
+use core.sys.target as target
+use core.sys.host.unix_fd as unix_fd
+use jet_foundation.SHA256.sha256_hex
+use jet_foundation.Foundation.TEXT_NUL
+
+// Object construction uses the canonical Foundation representation.
+fn bm_object(pairs: [(String, CanonicalJSON)]) -> CanonicalJSON Never! {
+    fields := [CanonicalJSONField]{}
+    loop (key, value) in pairs -> &fields.push(CanonicalJSONField{key: ^key, value: ^value})
+    canonical_json_object(^fields) ?? panic(err.message)
+}
+fn bm_index(fields: [CanonicalJSONField], key: String) -> Int Never! {
+    loop (i, field) in fields { if field.key == key -> return i }
+    panic("missing fixture key {key}")
+}
+fn bm_fields(value: CanonicalJSON) -> [CanonicalJSONField] Never! {
+    if value == .Object(fields) -> return ~fields
+    panic("fixture is not an object")
+}
+fn bm_put(fields: &[CanonicalJSONField], key: String, value: CanonicalJSON) {
+    loop i in 0..<fields.len() {
+        if fields[i].key == key { fields[i].value = ^value; return }
+    }
+    &fields.push(CanonicalJSONField{key: ^key, value: ^value})
+}
+fn bm_remove(fields: &[CanonicalJSONField], key: String) {
+    at :: bm_index(fields, key)
+    &fields.remove(at)
+}
+fn bm_text(fields: [CanonicalJSONField], key: String) -> String Never! {
+    jet_cli_budget_manifest_text(fields[bm_index(fields, key)].value, key) ?? panic(err.message)
+}
+
+// Rust: Source/BudgetStore.rs:1863
+fn valid_report(marker: String) -> ([U8], String, String, String) Never! {
+    subject :: bm_object([
+        ("artifact", .Null),
+        ("measured_end", .String("2026-01-01T00:00:01.000000000Z")),
+        ("measured_start", .String("2026-01-01T00:00:00.000000000Z")),
+        ("member_sources", .Array([])), ("profile", .String("dev")),
+        ("target_class", .String("native")), ("target_id", .String("target-{marker}")),
+        ("target_triple", .String("x86_64-unknown-linux-gnu"))
+    ])
+    tool_body :: bm_object([
+        ("compiler_build_id", .String("compiler")), ("jet_version", .String("1")),
+        ("runner_id", .String("runner")), ("stdlib_id", .String("stdlib"))
+    ])
+    tool_fields := bm_fields(tool_body)
+    bm_put(&tool_fields, "digest", .String(perf_stable_id(tool_body)))
+    tool :: CanonicalJSON.Object(^tool_fields)
+    provider_body :: bm_object([
+        ("cpu_arch", .String("x86_64")), ("cpu_model", .String("test")),
+        ("identity", .String("")), ("isolation", .String("process")),
+        ("kernel", .String("test")), ("kind", .String("CompilerFacts")),
+        ("logical_cpus", .Integer("1")), ("memory_bytes", .Integer("1")),
+        ("os", .String("linux")), ("power_governor", .String("fixed")),
+        ("version", .String("1"))
+    ])
+    provider_fields := bm_fields(provider_body)
+    bm_put(&provider_fields, "hardware_fingerprint", .String(perf_stable_id(provider_body)))
+    provider :: CanonicalJSON.Object(^provider_fields)
+    metric :: bm_object([("name", .String("BinarySize")), ("percentile", .Null)])
+    comparison :: bm_object([
+        ("direction", .String("at_most")), ("kind", .String("absolute")),
+        ("limit", perf_rational_to_json(perf_rational_integer(10)))
+    ])
+    budget_spec :: bm_object([
+        ("applies", bm_object([
+            ("profiles", .Array([.String("dev")])),
+            ("targets", .Array([.String("target-{marker}")]))
+        ])),
+        ("comparison", ~comparison), ("enforcement", .String("fail")),
+        ("metric", ~metric), ("name", .String("size-{marker}")),
+        ("package_id", .String("pkg")), ("perf_role", .String("package")),
+        ("provider", bm_object([("identity", .String("")), ("kind", .String("CompilerFacts"))])),
+        ("scope", .String("Package"))
+    ])
+    spec :: perf_stable_id(budget_spec)
+    context_input := ("jet-budget-context-v1" + TEXT_NUL).bytes()
+    // Rust: Source/BudgetStore.rs:1979 — length-prefixed context frames.
+    frame :: fn(out: &[U8], value: String) {
+        &out.extend(U64.from_int(value.bytes().len()).to_be_bytes())
+        &out.extend(value.bytes())
+    }
+    loop value in [String]{
+        "target-{marker}", "BinarySize", "", "native", "x86_64-unknown-linux-gnu",
+        "dev", "1", "compiler", "stdlib", "runner", bm_text(bm_fields(tool), "digest"),
+        "CompilerFacts", "", "1", "process", "x86_64", "test", "1", "1", "linux",
+        "test", "fixed", bm_text(bm_fields(provider), "hardware_fingerprint")
+    } -> frame(&context_input, value)
+    context :: sha256_hex(context_input)
+    base :: bm_object([
+        ("baseline", .Null), ("budget_id", .String("pkg:size-{marker}")),
+        ("budget_spec", ^budget_spec), ("budget_spec_sha256", .String(~spec)),
+        ("comparison", ~comparison), ("context_key", .String(~context)),
+        ("decision", .Null), ("direction", .String("lower_is_better")),
+        ("enforcement", .String("fail")), ("history", .Null), ("metric", ^metric),
+        ("policy", .Null), ("provider", ^provider),
+        ("samples", .Array([perf_rational_to_json(perf_rational_integer(1))])),
+        ("source", .String("main.jet:1")), ("statistics", .Null),
+        ("target_class", .String("native")), ("unit", .String("Bytes"))
+    ])
+    evidence :: perf_stable_id(bm_object([
+        ("measurements", .Array([~base])), ("subject", ~subject), ("toolchain", ~tool)
+    ]))
+    evaluation :: perf_evaluate(evidence, context, [], [perf_rational_integer(1)], [], None,
+        .Absolute{limit: perf_rational_integer(10), direction: .AtMost},
+        .LowerIsBetter, .Fail, None) ?? panic(err.message)
+    trend :: bm_object([
+        ("estimators", .Array([])), ("label", .String("insufficient")),
+        ("report_ids", .Array([])), ("score", .Null)
+    ])
+    decision :: bm_object([
+        ("evidence", .String("pass")), ("lower95", .Null),
+        ("point", perf_rational_to_json(evaluation.point)), ("policy_outcome", .String("pass")),
+        ("reason", .Null), ("trend", ^trend), ("upper95", .Null)
+    ])
+    measurement := bm_fields(base)
+    bm_put(&measurement, "decision", ^decision)
+    privacy :: bm_object([
+        ("excluded", .Array([])), ("retained", .Array([])),
+        ("schema", .Integer("1")), ("workspace_paths_only", .Bool(true))
+    ])
+    content :: bm_object([
+        ("evidence_id", .String(^evidence)), ("measurements", .Array([.Object(^measurement)])),
+        ("privacy", ^privacy), ("subject", ^subject),
+        ("summary", bm_object([
+            ("fail", .Integer("0")), ("outcome", .String("pass")),
+            ("pass", .Integer("1")), ("warn", .Integer("0"))
+        ])), ("toolchain", ^tool)
+    ])
+    id :: perf_stable_id(content)
+    report :: bm_object([
+        ("content", ^content), ("report_id", .String(~id)),
+        ("schema", .String("jet.budget-report")), ("version", .Integer("1"))
+    ])
+    bytes :: canonical_json_bytes(report)
+    _ :: perf_verify_budget_report(bytes) ?? panic(err.message)
+    (^bytes, ^id, ^spec, ^context)
+}
+
+// Rust: Source/BudgetStore.rs:2149
+#Test("baseline_names_and_reasons_are_closed") {
+    assert(jet_cli_budget_manifest_validate_baseline_name("release/x86-linux").is_ok())
+    loop bad in [String]{"", "/x", "x/", "x//y", "X", "x_", "x/../y", "x--y"} {
+        assert(jet_cli_budget_manifest_validate_baseline_name(bad).is_err(), bad)
+    }
+    assert(jet_cli_budget_manifest_normalize_reason(" reviewed regression ").is_err())
+    assert(jet_cli_budget_manifest_normalize_reason("reviewed regression").is_ok())
+    assert(jet_cli_budget_manifest_normalize_reason("é").is_err())
+    assert(jet_cli_budget_manifest_normalize_reason("é").is_ok())
+    assert(jet_cli_budget_manifest_validate_timestamp("2026-02-31T12:00:00.000000000Z").is_err())
+    assert(jet_cli_budget_manifest_validate_timestamp("2024-02-29T12:00:00.000000000Z").is_ok())
+}
+
+// Rust: Source/BudgetStore.rs:2166
+struct UnsupportedMutationReset {}
+impl UnsupportedMutationReset.Close {
+    fn close(^self) {
+        // GATE #4494: original thread-local test switch, never process-global replacement.
+        FORCE_UNSUPPORTED_MUTATION.with(fn(value) { value.set(false) })
+    }
+}
+// Rust: Source/BudgetStore.rs:2163
+#Test("unsupported_mutation_fails_before_any_filesystem_change") {
+    // GATE #4494: native temp directory/process ID and thread-local fixture.
+    FORCE_UNSUPPORTED_MUTATION.with(fn(value) { value.set(true) })
+    reset :: UnsupportedMutationReset{}
+    root :: env.temp_dir().join("jet-budget-store-unsupported-{process.id()}")
+    _ :: fs.remove_dir_all(root)
+    store :: BudgetStore.new(root)
+    plan :: JetCLIBudgetUpdatePlan{
+        baseline: "release/linux", report_id: "0".repeat(64), report_bytes: [],
+        prior_manifest_id: None, prior_head_report_id: None,
+        accepted_at: "2026-01-01T00:00:00.000000000Z", kind: .Bootstrap("initial baseline")
+    }
+    assert(store.write_report("invalid".bytes()).is_err())
+    assert(store.plan_update("release/linux", "invalid".bytes(), .Bootstrap("initial baseline"), "invalid").is_err())
+    assert(store.apply_update(plan).is_err())
+    assert(store.gc("invalid").is_err())
+    assert(!root.exists())
+}
+
+// Rust: Source/BudgetStore.rs:2206
+#Test("cache_identity_covers_every_ratified_digest") {
+    keys :: [String]{"budget_spec", "source_inputs", "target", "profile", "toolchain", "provider", "workload", "policy", "privacy"}
+    values := [String:String]{}
+    loop (index, key) in keys -> values[key] = "{index:064x}"
+    base :: BudgetStore.cache_identity(values).unwrap()
+    loop key in keys {
+        changed := ~values
+        changed[key] = "f".repeat(64)
+        assert(BudgetStore.cache_identity(changed).unwrap() != base, key)
+    }
+    &values.remove("privacy")
+    assert(BudgetStore.cache_identity(values).is_err())
+}
+
+// Rust: Source/BudgetStore.rs:2237
+#Test("manifests_hash_audits_and_enforce_cas_chain") {
+    first :: JetCLIBudgetUpdatePlan{
+        baseline: "release/linux", report_id: "1".repeat(64), report_bytes: [],
+        prior_manifest_id: None, prior_head_report_id: None,
+        accepted_at: "2026-07-13T12:00:00.000000000Z", kind: .Bootstrap("initial baseline")
+    }
+    m1 :: next_manifest(None, first).unwrap()
+    _ :: verify_manifest(canonical_json_bytes(m1), "release/linux").unwrap()
+    invalid_first := ~first
+    invalid_first.kind = .Pass
+    assert(verify_manifest(canonical_json_bytes(next_manifest(None, invalid_first).unwrap()), "release/linux").unwrap_err().contains("bootstrap"))
+    second :: JetCLIBudgetUpdatePlan{
+        baseline: ~first.baseline, report_id: "2".repeat(64), report_bytes: [],
+        prior_manifest_id: Val(jet_cli_budget_manifest_id(m1).unwrap()),
+        prior_head_report_id: Val(~first.report_id),
+        accepted_at: "2026-07-13T13:00:00.000000000Z", kind: .Pass
+    }
+    m2 :: next_manifest(Val(m1), second).unwrap()
+    _ :: verify_manifest(canonical_json_bytes(m2), "release/linux").unwrap()
+    wrapper := bm_fields(m2)
+    content := bm_fields(wrapper[bm_index(wrapper, "content")].value)
+    generations := if content[bm_index(content, "generations")].value == .Array(v) -> ~v else -> panic("generations")
+    generation := bm_fields(generations[1])
+    audit := bm_fields(generation[bm_index(generation, "audit")].value)
+    bm_put(&audit, "prior_state_id", .String("f".repeat(64)))
+    body := ~audit
+    bm_remove(&body, "audit_id")
+    bm_put(&audit, "audit_id", .String(perf_stable_id(.Object(^body))))
+    bm_put(&generation, "audit", .Object(^audit))
+    generations[1] = .Object(^generation)
+    bm_put(&content, "generations", .Array(^generations))
+    new_content :: CanonicalJSON.Object(^content)
+    bm_put(&wrapper, "manifest_id", .String(perf_stable_id(new_content)))
+    bm_put(&wrapper, "content", ^new_content)
+    corrupt :: CanonicalJSON.Object(^wrapper)
+    assert(verify_manifest(canonical_json_bytes(corrupt), "release/linux").unwrap_err().contains("CAS chain"))
+}
+
+// Rust: Source/BudgetStore.rs:2314
+#Test("update_kinds_reject_wrong_evidence_before_mutation") {
+    report :: fn(evidence: String) -> CanonicalJSON Never! {
+        bm_object([("content", bm_object([("measurements", .Array([
+            bm_object([("decision", bm_object([("evidence", .String(evidence))]))])
+        ]))]))])
+    }
+    assert(validate_update_evidence(report("pass"), .Pass).is_ok())
+    assert(validate_update_evidence(report("regression"), .Pass).is_err())
+    assert(validate_update_evidence(report("regression"), .AcceptRegression("reviewed")).is_ok())
+    assert(validate_update_evidence(report("pass"), .AcceptRegression("reviewed")).is_err())
+    assert(validate_update_evidence(report("unavailable"), .Bootstrap("initial")).is_ok())
+    assert(validate_update_evidence(report("unavailable"), .AcceptRegression("reviewed")).is_err())
+}
+
+// Rust: Source/BudgetStore.rs:2368
+#Test("immutable_install_is_nofollow_noreplace_and_byte_exact") {
+    if target.selected_family() == "unix" {
+        // GATE #4494: native filesystem metadata, permissions and symlink.
+        root :: env.temp_dir().join("jet-budget-store-{process.id()}-{NONCE.fetch_add(1, Ordering.Relaxed)}")
+        fs.create_dir(root).unwrap()
+        dir :: open_dir_chain(root, ["objects"], true, 0o755).unwrap()
+        assert(install_immutable(dir, "a.json", "one\n".bytes(), fn(_) { Ok(()) }).unwrap())
+        status :: fs.read_to_string(OSPath.from_string("/proc/self/status")).unwrap()
+        mask_text := status.lines().find_map(fn(line) { line.strip_prefix("Umask:\t") }).unwrap().trim() // #4303
+        mask :: U32.from_str_radix(mask_text, 8).unwrap()
+        assert(fs.metadata(root.join("objects/a.json")).unwrap().permissions().mode() & U32{0o777} == U32{0o644} & !mask)
+        assert(!install_immutable(dir, "a.json", "one\n".bytes(), fn(_) { Ok(()) }).unwrap())
+        assert(install_immutable(dir, "a.json", "two\n".bytes(), fn(_) { Ok(()) }).is_err())
+        fs.symlink(OSPath.from_string("/etc/passwd"), root.join("objects/evil.json")).unwrap()
+        assert(read_regular(dir, "evil.json").is_err())
+        fs.remove_dir_all(root).unwrap()
+    }
+}
+
+// Rust: Source/BudgetStore.rs:2428
+struct PublicationReset {}
+impl PublicationReset.Close {
+    fn close(^self) {
+        // GATE #4494: mutex-protected original publication gate reset.
+        guard := PUBLICATION_GATE.lock().unwrap()
+        guard.value = None
+    }
+}
+// Rust: Source/BudgetStore.rs:2406
+#Test("concurrent_report_publication_is_atomic_and_exact") {
+    if target.selected_os() == "linux" {
+        // GATE #4494: real threads, shared owners, mutex and barriers.
+        root :: env.temp_dir().join("jet-budget-store-concurrent-{process.id()}-{NONCE.fetch_add(1, Ordering.Relaxed)}")
+        fs.create_dir(root).unwrap()
+        (report_bytes, id, _, _) :: valid_report("concurrent")
+        store :: Arc.new(BudgetStore.new(root))
+        bytes :: Arc.new(^report_bytes)
+        _ :: store.dir([".jet", "perf", "reports"], true, 0o755).unwrap()
+        reached :: Arc.new(Barrier.new(3))
+        release :: Arc.new(Barrier.new(3))
+        {
+            guard := PUBLICATION_GATE.lock().unwrap()
+            guard.value = Val(PublicationGate{name: "{id}.json", reached: reached.clone(), release: release.clone()})
+        }
+        reset :: PublicationReset{}
+        writers := []
+        loop _ in 0..<2 {
+            writer_store :: store.clone()
+            writer_bytes :: bytes.clone()
+            &writers.push(thread.spawn(fn() { writer_store.write_report(writer_bytes) }))
+        }
+        reached.wait()
+        reader_root :: ~root
+        reader_id :: ~id
+        reader :: thread.spawn(fn() {
+            dir :: open_dir_chain(reader_root, [".jet", "perf", "reports"], false, 0o755).unwrap()
+            read_regular(dir, "{reader_id}.json")
+        })
+        assert(reader.join().unwrap().unwrap_err().contains("No such file"))
+        release.wait()
+        created := [Bool]{}
+        loop writer in writers -> &created.push(writer.join().unwrap().unwrap().1)
+        &created.sort()
+        assert(created == [Bool]{false, true})
+        published :: fs.read(root.join(".jet/perf/reports/{id}.json")).unwrap()
+        _ :: perf_verify_budget_report(published).unwrap()
+        assert(published == bytes.value)
+        fs.remove_dir_all(root).unwrap()
+    }
+}
+
+// Rust: Source/BudgetStore.rs:2535
+#Repr("C")
+struct Timespec { tv_sec: I64, tv_nsec: I64 }
+// Rust: Source/BudgetStore.rs:2468
+#Test("store_rejects_fresh_bootstrap_corrupt_links_and_collects_only_old_unreferenced") {
+    if target.selected_family() == "unix" {
+        // GATE #4494: actual native filesystem and utimensat timestamp update.
+        root :: env.temp_dir().join("jet-budget-store-full-{process.id()}-{NONCE.fetch_add(1, Ordering.Relaxed)}")
+        fs.create_dir(root).unwrap()
+        store :: BudgetStore.new(root)
+        (bytes, id, spec, context) :: valid_report("one")
+        plan :: store.plan_update("release/linux", bytes, .Bootstrap("initial baseline"), "2026-01-01T00:00:00.000000000Z").unwrap()
+        assert(store.apply_update(plan).unwrap().report_id == id)
+        assert(store.plan_update("release/linux", bytes, .Bootstrap("replace fresh"), "2026-01-02T00:00:00.000000000Z").unwrap_err().contains("stale"))
+        fresh :: JetCLIBudgetHistoryQuery{
+            budget_id: "pkg:size-one", budget_spec_sha256: ~spec, context_key: ~context,
+            at: "2026-01-02T00:00:00.000000000Z"
+        }
+        fresh_selection :: store.select_compatible_history("release/linux", bytes, fresh).unwrap()
+        assert(fresh_selection.report_ids == [String]{~id})
+        assert(!fresh_selection.stale)
+        assert(fresh_selection.newest_age_seconds == Val(86400))
+        stale := ~fresh
+        stale.at = "2026-03-02T00:00:00.000000000Z"
+        stale_selection :: store.select_compatible_history("release/linux", bytes, stale).unwrap()
+        assert(stale_selection.report_ids == [String]{~id})
+        assert(stale_selection.stale)
+        assert(stale_selection.stale_after_seconds == 2592000)
+        (other, other_id, _, _) :: valid_report("other")
+        objects :: store.dir([".jet", "perf", "baselines", "objects"], false, 0o755).unwrap()
+        assert(install_immutable(objects, "{other_id}.json", other, fn(candidate) {
+            _ :: perf_verify_budget_report(candidate) ?? return Err(err.to_string())
+            Ok(())
+        }).unwrap())
+        path :: CString.new(root.join(".jet/perf/baselines/objects/{other_id}.json").to_str().unwrap()).unwrap()
+        times :: [Timespec]{Timespec{tv_sec: I64{0}, tv_nsec: I64{0}}, Timespec{tv_sec: I64{0}, tv_nsec: I64{0}}}
+        assert(unix_fd.utimensat(I32{-100}, path.as_ptr(), times.as_ptr(), I32{0}) == 0)
+        fs.write(root.join(".jet/perf/baselines/objects/unknown"), "retain".bytes()).unwrap()
+        result :: store.gc("2026-03-02T00:00:00.000000000Z").unwrap()
+        assert(result.removed == [String]{~other_id})
+        assert(result.retained.any(fn(item) { item.contains("unknown") }))
+        fs.remove_file(root.join(".jet/perf/baselines/objects/{id}.json")).unwrap()
+        fs.write(root.join(".jet/perf/baselines/objects/{id}.json"), other).unwrap()
+        assert(store.select_compatible_history("release/linux", bytes, fresh).unwrap_err().contains("different report_id"))
+        fs.remove_dir_all(root).unwrap()
+    }
+}

@@ -1,0 +1,143 @@
+// Rust Syntax/core_surface.rs and Syntax/package_files.rs: shared path spellings.
+pub FILE_EXT :: prep { "jet" }
+pub UNIFIED_LOCK_FILE :: prep { ".jet/lock" }
+
+// Rust Syntax/predicates.rs classify_identifier: only the underscore prefix
+// affects source visibility. Bare `_` remains an ordinary binding spelling.
+pub enum IdentifierClass {
+    Ordinary
+    SoftPublic
+    Reserved
+}
+
+pub fn classify_identifier(name: String) -> IdentifierClass Never! {
+    if name.starts_with("__") -> return IdentifierClass.Reserved
+    // After the ASCII `_` prefix, a second scalar also means >1 UTF-8 bytes.
+    if name.starts_with("_") && name.len() > 1 -> return IdentifierClass.SoftPublic
+    IdentifierClass.Ordinary
+}
+
+// Rust Syntax/package_files.rs JET_KEYWORD_LIST/JET_TYPE_LIST: ordered current
+// completion/rename catalogs, not lexer teaching words or internal type names.
+JET_KEYWORD_NAMES :: prep { [String]{
+    "fn", "pub", "priv", "use", "as", "extern", "module",
+    "if", "else", "loop", "in", "break", "return", "defer",
+    "struct", "enum", "alias", "impl", "policy", "wrap", "trait", "tag", "effect", "derive", "distinct",
+    "migration", "rename", "add", "remove", "change", "via", "self",
+    "Unsafe", "Impure", "Context", "task", "freeze", "shared", "Transact", "Job", "Test", "Todo",
+    "State", "Transition", "state", "protocol", "client", "server", "marker", "validate", "check",
+    "true", "false", "None", "it"
+} }
+
+JET_TYPE_NAMES :: prep { [String]{
+    "Int", "Float", "Bool", "String", "()", "Char", "Err",
+    "Shared", "SharedSnapshot", "SharedRevisionError", "SharedGuard", "Shared.Weak", "Condition",
+    "Task", "Receiver", "Sender", "TaskFailure", "HashMap", "BTreeMap", "Map", "Queue", "Set", "Rank",
+    "PriorityQueue", "Cache", "Tally", "Bits", "Bytes", "ViewIter",
+    "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "F32", "F64"
+} }
+
+pub fn jet_keyword_names() -> [String] Never! { ~JET_KEYWORD_NAMES }
+pub fn jet_type_names() -> [String] Never! { ~JET_TYPE_NAMES }
+
+// Rust Syntax/core_surface.rs: retirement diagnostics, never keyword aliases.
+pub KW_COPY :: prep { "copy" }
+pub KW_MUTATE :: prep { "mut" }
+pub KW_MOVE :: prep { "take" }
+pub KW_CONST :: prep { "const" }
+pub FOREIGN_UNSAFE :: prep { "unsafe" }
+
+// Rust Syntax/core_surface.rs: source marks keep their independent meanings.
+pub SIGIL_BIND_IMMUT :: prep { "::" }
+pub SIGIL_BIND_MUT :: prep { ":=" }
+pub SIGIL_WRITE :: prep { "&" }
+pub SIGIL_MOVE :: prep { "^" }
+pub SIGIL_COPY :: prep { "~" }
+pub COMPTIME_MARK :: prep { "$" }
+pub SIGIL_FENCE_OPEN :: prep { "<:" }
+pub SIGIL_FENCE_CLOSE :: prep { ":>" }
+pub SIGIL_SPREAD :: prep { "..." }
+
+// Rust Syntax/{package_files,jetpack_config}.rs: canonical file/engine names.
+pub DEFAULT_ENTRY_FILE :: prep { "run.jet" }
+pub LEGACY_ENTRY_FILE :: prep { "main.jet" }
+pub JETPACK_TOML :: prep { "jetpack.toml" }
+pub PACKAGE_FILE :: prep { "package.jet" }
+pub PAYLOAD_FILE :: prep { "pkg.jet" }
+pub TARGET_SANDBOX :: prep { "sandbox" }
+pub RETIRED_TARGET_PLUGIN :: prep { "plugin" }
+pub ENGINE_PROTOCOL_FLAG :: prep { "--engine-protocol" }
+pub ROOT_ENGINE_DISPATCH_PID_ENV :: prep { "JET_INTERNAL_ROOT_DISPATCH_PID" }
+pub BINARY_NAME :: prep { "jet" }
+pub JETPACK_BINARY_NAME :: prep { "jetpack" }
+pub RETIRED_COMPTIME_MARK :: prep { "@" }
+pub ENV_FILE :: prep { "env.jet" }
+pub CONFIG_FILE :: prep { "config.jet" }
+pub WORKSPACE_FILE :: prep { "workspace.jet" }
+pub COMMAND_FILE_RUN :: prep { "@run.jet" }
+pub COMMAND_FILE_BUILD :: prep { "@build.jet" }
+pub COMMAND_FILE_DEV :: prep { "@dev.jet" }
+pub COMMAND_FILE_TEST :: prep { "@test.jet" }
+
+// Rust Syntax/math_layout.rs: canonical names and diagnostic retirements.
+pub TYPE_QUEUE :: prep { "Queue" }
+pub TYPE_RANK :: prep { "Rank" }
+pub TYPE_TALLY :: prep { "Tally" }
+pub TYPE_BITS :: prep { "Bits" }
+pub TYPE_BYTES :: prep { "Bytes" }
+pub RETIRED_TYPE_QUEUE :: prep { "Deque" }
+pub RETIRED_TYPE_RANK :: prep { "SortedSet" }
+pub RETIRED_TYPE_TALLY :: prep { "Bag" }
+pub RETIRED_TYPE_BITS :: prep { "BitSet" }
+pub RETIRED_TYPE_BYTES :: prep { "ByteBuffer" }
+pub RETIRED_OP_PLUS_PLUS :: prep { "++" }
+pub RETIRED_OP_MINUS_MINUS :: prep { "--" }
+pub DIGIT_SEPARATOR :: prep { "_" }
+
+// Rust Syntax/effects_surface.rs: leaf/provenance/provider scalar spellings.
+pub EFFECT_LEAF_EXEC_ARGS :: prep { "Exec.Args" }
+pub RETIRED_INTERPOLATION_SELECTOR_EXAMPLE :: prep { "{{value#Selector}}" }
+pub INTERPOLATION_SELECTOR_EXAMPLE :: prep { "{{value:Selector}}" }
+pub REF_SOURCE_JETPACK :: prep { "jetpack" }
+pub REF_SOURCE_NIXPKGS :: prep { "nixpkgs" }
+pub REF_SOURCE_GITHUB :: prep { "github" }
+pub REF_SOURCE_PATH :: prep { "path" }
+pub REF_SOURCE_CRAN :: prep { "cran" }
+pub REF_SOURCE_LUAROCKS :: prep { "luarocks" }
+pub REF_SOURCE_RUBY :: prep { "ruby" }
+pub REF_SOURCE_PERL :: prep { "perl" }
+pub REF_SOURCE_PHP :: prep { "php" }
+pub REF_SOURCE_JET_REGISTRY :: prep { "jet-registry" }
+pub REF_SOURCE_NPM :: prep { "npm" }
+pub REF_SOURCE_CARGO :: prep { "cargo" }
+pub REF_SOURCE_PYPI :: prep { "pypi" }
+pub REF_SOURCE_SWIFTPM :: prep { "swiftpm" }
+pub REF_SOURCE_RELEASES :: prep { "releases" }
+
+// Rust Syntax/effects_surface.rs:32–67, ordered canonical built-in leaves.
+pub BUILTIN_EFFECT_LEAVES :: prep { [String]{
+    "DB.Read", "DB.Write", "FS.Read", "FS.Write", "Rand.Draw", "Exec.Exit",
+    EFFECT_LEAF_EXEC_ARGS, "Time.Wait", "FFI.Go", "FFI.Java", "FFI.DotNet",
+    "FFI.Fortran", "FFI.Cobol", "FFI.Tcl", "FFI.Lua", "FFI.Ada", "FFI.Pascal",
+    "FFI.Dart", "FFI.PowerShell", "FFI.Perl", "FFI.Ruby", "FFI.Php", "FFI.R",
+    "FFI.Com", "FFI.C", "FFI.Cpp", "FFI.Asm", "FFI.Py", "FFI.Octave",
+} }
+pub REF_SOURCE_PROVIDERS :: prep { [String]{
+    REF_SOURCE_JETPACK, REF_SOURCE_NIXPKGS, REF_SOURCE_GITHUB, REF_SOURCE_PATH,
+    REF_SOURCE_CRAN, REF_SOURCE_LUAROCKS, REF_SOURCE_RUBY, REF_SOURCE_PERL,
+    REF_SOURCE_PHP, REF_SOURCE_JET_REGISTRY, REF_SOURCE_NPM, REF_SOURCE_CARGO,
+    REF_SOURCE_PYPI, REF_SOURCE_SWIFTPM, REF_SOURCE_RELEASES,
+} }
+// Rust Syntax/package_files.rs:47–56, ordered closed command-role vocabulary.
+pub COMMAND_ROLE_FILES :: prep { [String]{
+    COMMAND_FILE_RUN, COMMAND_FILE_BUILD, COMMAND_FILE_DEV, COMMAND_FILE_TEST,
+} }
+
+pub GENERATED_NAME_PREFIX :: prep { "__jet_" }
+
+// Rust Syntax/predicates.rs and Syntax.rs::is_memo_storage_name.
+pub fn is_memo_storage_name(name: String) -> Bool Never! {
+    if !name.starts_with(GENERATED_NAME_PREFIX) -> return false
+    suffix := name.slice(GENERATED_NAME_PREFIX.len(), name.len()) // #4303
+    suffix.starts_with("__memo_")
+}

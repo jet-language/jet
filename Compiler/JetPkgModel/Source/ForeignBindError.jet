@@ -1,0 +1,38 @@
+// Canonical failure carrier shared by the foreign binders and CFFI validation.
+// Why a foreign binding could not be produced. `ToolFailed.action` carries
+// the binder's own verb phrase ("rejected the Ada binding source") so every
+// language keeps its diagnostic text on the one carrier.
+#Error
+pub enum ForeignBindError {
+    Source(String)
+    IO(String)
+    ToolMissing(String)
+    SelectedToolMissing(String)
+    ToolFailed(tool: String, action: String, detail: String)
+    ToolchainRejected(String)
+    ABIMismatch(String)
+    UnsupportedHost(String)
+    // Python/JavaScript binders spell the tool without backticks.
+    PlainToolMissing(String)
+    PlainToolFailed(tool: String, action: String, detail: String)
+
+    pub fn message(self) -> String Never! {
+        if self == {
+            .Source(text) | .IO(text) | .UnsupportedHost(text) -> text
+            .ToolMissing(tool) -> "the provisioned `{tool}` tool was not found"
+            .SelectedToolMissing(tool) -> "the selected `{tool}` tool was not found"
+            .ToolFailed(tool, action, detail) -> "`{tool}` {action}: {detail}"
+            .ToolchainRejected(detail) -> "the C++ toolchain rejected the binding: {detail}"
+            .ABIMismatch(detail) -> "the generated COBOL C-ABI bridge failed its link proof: {detail}"
+            .PlainToolMissing(tool) -> "the provisioned {tool} tool was not found"
+            .PlainToolFailed(tool, action, detail) -> "{tool} {action}: {detail}"
+        }
+    }
+}
+
+// A bridge-record failure surfaces as an I/O failure of the binding.
+impl ForeignBridgeError -> ForeignBindError { pkg_binder_bridge_error(self) }
+
+pub fn pkg_binder_bridge_error(error: ForeignBridgeError) -> ForeignBindError Never! {
+    ForeignBindError.IO(error.message)
+}

@@ -1,0 +1,38 @@
+// Rust CLI.rs:3329-3356 `job_argv_forwards_every_word_after_the_job_name`.
+fn job_argv_test_split(words: [String]) -> [String] Never! {
+    args := ~words
+    jet_cli_separate_job_argv(&args)
+    args
+}
+
+#Test("job_argv_forwards_every_word_after_the_job_name") {
+    assert(job_argv_test_split([String]{"jobs", "--interpret", "-p", "api", "web", "--port", "3000"}) == [String]{"jobs", "--interpret", "-p", "api", "web", "--", "--port", "3000"})
+    assert(job_argv_test_split([String]{"jobs", "web", "--", "--port", "--", "x"}) == [String]{"jobs", "web", "--", "--port", "--", "x"})
+    unchanged :: [[String]]{
+        [String]{"jobs", "--graph"}, [String]{"jobs", "-p", "api"},
+        [String]{"jobs", "web"}, [String]{"run", "main.jet", "--port", "3000"},
+    }
+    loop words in unchanged -> assert(job_argv_test_split(words) == words)
+}
+
+#Test("job separator handles global prefix flags and preserves later separator") {
+    assert(job_argv_test_split([String]{"--json", "-p", "jobs", "jobs", "web", "x", "--", "--json"}) == [String]{"--json", "-p", "jobs", "jobs", "web", "--", "x", "--", "--json"})
+    assert(job_argv_test_split([String]{"jobs", "-", "--json"}) == [String]{"jobs", "-", "--", "--json"})
+    assert(job_argv_test_split([String]{"jobs", "web", "--json"}) == [String]{"jobs", "web", "--", "--json"})
+    assert(job_argv_test_split([String]{"jobs", "--", "web", "--json"}) == [String]{"jobs", "--", "web", "--json"})
+}
+
+#Test("job split is idempotent and swallows separate flag values verbatim") {
+    loop flag in JET_CLI_SEPARATE_VALUE_FLAGS {
+        assert(jet_cli_flag_takes_separate_value(flag))
+        args :: [String]{"jobs", flag, "--", "web", "--json"}
+        expected :: [String]{"jobs", flag, "--", "web", "--", "--json"}
+        split :: job_argv_test_split(args)
+        assert(split == expected)
+        assert(job_argv_test_split(split) == expected)
+        assert(job_argv_test_split([String]{"jobs", flag}) == [String]{"jobs", flag})
+    }
+    assert(!jet_cli_flag_takes_separate_value("--target=x"))
+    assert(!jet_cli_flag_takes_separate_value("--color"))
+    assert(job_argv_test_split([String]{}) == [String]{})
+}

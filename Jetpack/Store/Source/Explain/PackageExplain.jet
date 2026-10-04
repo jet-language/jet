@@ -63,7 +63,7 @@ pub struct ExplainReport {
     }
 
     // A `jet.report/v3` finding (code E1340) plus its `kind`.
-    fn to_tree(self) -> DataTree Never! {
+    fn to_status_value(self) -> StatusValue Never! {
         conflict :: self.kind == ExplainReportKind.Conflict
         report :: ReportEnvelope.new(
             "tool",
@@ -73,14 +73,10 @@ pub struct ExplainReport {
             if conflict -> "two persisted Hangar facts disagree, so the explanation cannot claim one identity" else -> "a persisted Hangar fact needed by this explanation is unavailable or lossy",
             if conflict -> "repair the conflicting Hangar or provider record, then run `jet explain` again" else -> "run `jetpack hangar verify` and repair or rebuild the affected package before relying on this fact"
         )
-        tree :: report.to_tree()
-        if tree == {
-            .Object(fields) -> {
-                extended := fields
-                extended["kind"] = DataTree.Text(self.kind.label())
-                DataTree.Object(extended)
-            }
-            else -> tree
+        value :: StatusValue.parse(report.json()) ?? panic("a validated report is a status value")
+        if value == {
+            .Object(fields) -> StatusValue.object(^fields.with("kind", StatusValue.String{value: self.kind.label()}))
+            else -> panic("a report envelope is an object")
         }
     }
 }
@@ -379,10 +375,10 @@ pub struct PackageExplain {
     // The `jet.status/v1` `explain` object; any conflict makes `ok` false.
     fn to_json(self) -> String Never! {
         conflicted := false
-        reports := [DataTree]{}
+        reports := [StatusValue]{}
         loop report in self.reports {
             if report.kind == ExplainReportKind.Conflict -> conflicted = true
-            &reports.push(report.to_tree())
+            &reports.push(report.to_status_value())
         }
         payload := [String: DataTree]{}
         payload["query"] = DataTree.Text(self.query)
@@ -398,8 +394,8 @@ pub struct PackageExplain {
         payload["graph"] = self.graph.to_tree()
         payload["liveness"] = self.liveness.to_tree()
         payload["rebuild"] = self.rebuild.to_tree()
-        payload["reports"] = DataTree.Array(reports)
-        StatusEnvelope.new("explain", !conflicted).with_field("explain", DataTree.Object(payload)).json()
+        fields :: StatusFields.from_data_tree_object(payload) ?? panic("explanation facts are finite status fields")
+        StatusEnvelope.new("explain", !conflicted).with_field("explain", StatusValue.object(^fields.with("reports", StatusValue.array(reports)))).json()
     }
 
     fn text(self) -> String Never! {
@@ -537,7 +533,7 @@ pub fn store_explain_package(roots: HangarRoots, query: String, lens: ExplainLen
     graph_view :: store_explain_graph_projection(entries, entry, graph, &reports)
     liveness :: store_explain_liveness_projection(roots, entry, graph, &reports)
     rebuild :: store_explain_rebuild_projection(roots, entry, graph, provider, receipt_ok, &reports)
-    Ok(Val(PackageExplain{schema: @REPORT_SCHEMA, query: query, lens: lens.label(), entry: Val(store_explain_entry_projection(entry)), provider: provider, graph: graph_view, liveness: liveness, rebuild: rebuild, reports: reports}))
+    Ok(Val(PackageExplain{schema: REPORT_SCHEMA, query: query, lens: lens.label(), entry: Val(store_explain_entry_projection(entry)), provider: provider, graph: graph_view, liveness: liveness, rebuild: rebuild, reports: reports}))
 }
 
 // The explanation of a package with only a recorded build attempt.
@@ -552,7 +548,7 @@ fn store_explain_without_entry(roots: HangarRoots, query: String, lens: ExplainL
     }
     liveness := ExplainLiveness.empty()
     liveness.reason = "no realized StoreEntry can be matched to a root"
-    Ok(Val(PackageExplain{schema: @REPORT_SCHEMA, query: query, lens: lens.label(), entry: None, provider: None, graph: ExplainGraph.empty(), liveness: liveness, rebuild: rebuild, reports: reports}))
+    Ok(Val(PackageExplain{schema: REPORT_SCHEMA, query: query, lens: lens.label(), entry: None, provider: None, graph: ExplainGraph.empty(), liveness: liveness, rebuild: rebuild, reports: reports}))
 }
 
 // An exact id or reference match; otherwise the one entry whose package name
@@ -631,7 +627,7 @@ fn store_explain_receipt_projection(roots: HangarRoots, entry: StoreEntry, graph
         &reports.push(ExplainReport.conflict("StoreEntry `{entry.id}` has an invalid Hangar receipt digest `{entry.receipt}`"))
         return false
     }
-    path :: files.join(files.join(roots.hangar_dir(), @STORE_RECEIPTS_DIR), entry.receipt)
+    path :: files.join(files.join(roots.hangar_dir(), STORE_RECEIPTS_DIR), entry.receipt)
     if files.stat(path) == {
         .Ok(info) -> {
             if info.is_symlink || !info.is_file {
@@ -683,14 +679,14 @@ fn store_explain_receipt_projection(roots: HangarRoots, entry: StoreEntry, graph
 // between the facts, the producer, and the entry reported.
 fn store_explain_provider_projection(entry: StoreEntry, reports: &[ExplainReport]) -> ExplainProvider? Never! {
     producer :: if ProducerRecord.decode(entry.producer_record) == {
-        .Ok(decoded) -> decoded
+fn store_explain_liveness_projection(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, reports: &[ExplainReport]) -> ExplainLiveness Never! {
         .Err(error) -> {
             &reports.push(ExplainReport.loss("producer provenance is unavailable: {error.message()}"))
             return None
         }
     }
     facts := ProviderFacts?{None}
-    if producer.facts.get("provider-facts") == {
+    if store_lifecycle_snapshot(&verification, roots) == {
         .Val(raw) -> {
             if ProviderFacts.from_json(raw) == {
                 .Ok(decoded) -> {
@@ -807,7 +803,7 @@ fn store_explain_locked_provider_facts(entry: StoreEntry, reports: &[ExplainRepo
             store_explain_report_provider_validation(facts, "locked", &reports)
         }
         identity_ok := true
-        if record.future_fields.get("provider-facts-digest") == {
+fn store_explain_rebuild_projection(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, provider: ExplainProvider?, receipt_ok: Bool, reports: &[ExplainReport]) -> ExplainRebuild Never! {
             .Val(expected) -> {
                 actual :: facts.digest()
                 if matches_entry && expected != actual {
@@ -830,7 +826,7 @@ fn store_explain_locked_provider_facts(entry: StoreEntry, reports: &[ExplainRepo
                 identity_ok = false
                 &reports.push(ExplainReport.conflict("locked provider identity hash disagrees for {record.identity.exact}: {record.identity.hash} vs {facts.digest()}"))
             }
-        }
+        if store_try_entry_output_hash(&verification, roots, entry) == {
         valid :: if facts.validate() == {
             .Ok(_) -> true
             else -> false

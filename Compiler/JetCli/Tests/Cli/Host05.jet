@@ -1,0 +1,23 @@
+use jet_cli.[jet_cli_test_parse_options, jet_cli_test_shuffle_seed, jet_cli_test_watch_failure_names]
+
+// Behavioral controls for Rust Source/CmdCompile.rs:7171-7348 (no inline Rust tests in packet).
+#Test("test_options_positional_filter_release_and_watch") {
+    opts :: jet_cli_test_parse_options(["test", "case.jet", "selected", "--filter=selected", "--profile=debug", "--release", "--watch=off"], [String:String]{"mode": "safe"}, 0)
+    assert(opts.filter == .Val("selected"))
+    assert(opts.profile == .Val("release"))
+    assert(!opts.watch)
+    assert(opts.setting_overrides["mode"] == "safe")
+    refused :: jet_cli_test_parse_options(["test", "case.jet", "first", "--filter=second"], [String:String]{}, 0)
+    assert(refused.is_err())
+}
+// Behavioral control for Rust Source/CmdCompile.rs:7378-7383.
+#Test("test_shuffle_seed_preserves_u64_cast") {
+    assert(jet_cli_test_shuffle_seed(-1) == 0)
+    assert(jet_cli_test_shuffle_seed(18446744073709551616 + 7) == 7)
+}
+// Behavioral control for Rust Source/CmdCompile.rs:8280-8415.
+#Test("test_watch_failure_names_structured_precedence_and_deduplication") {
+    stdout :: "{\"schema\":\"jet.test.v1\",\"tests\":[{\"name\":\"first\",\"ok\":false},{\"name\":\"pass\",\"ok\":true,\"status\":\"failed\"},{\"name\":\"second\",\"status\":\"PANIC\"}]}\nFAIL first\nthird: FAIL\n"
+    stderr :: "{\"schema\":\"jet.status/v1\",\"evidence\":{\"evidence\":[{\"claim\":\"fourth\",\"outcome\":\"unavailable\"}]}}\nFAIL third\n"
+    assert(jet_cli_test_watch_failure_names(stdout, stderr) == ["first", "second", "fourth", "third"])
+}

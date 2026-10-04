@@ -6,7 +6,7 @@
 // partial migration as a live Hangar. Links are copied only when their
 // targets stay inside the migrated tree or the Nix store compatibility root.
 
-@STORE_NIX_STORE_ROOT :: "/nix/store"
+STORE_NIX_STORE_ROOT :: prep { "/nix/store" }
 
 // Rust `node_metadata` / `symlink_metadata` with NotFound as None: the
 // node's own metadata (never through a final link), or None when absent.
@@ -16,7 +16,7 @@ fn store_node_stat(path: String) -[FS]> Stat? StoreError! {
         .Ok(info) -> Ok(Val(info))
         .Err(error) -> {
             if store_io_is_not_found(error) -> return Ok(None)
-            Err(StoreError.Io(error))
+            Err(StoreError.IO(error))
         }
     }
 }
@@ -34,7 +34,7 @@ fn store_migration_existing_destination(path: String) -[FS]> Bool StoreError! {
 // Rust `find_legacy_source`: the user legacy Hangar, else the machine one.
 fn store_migration_find_legacy_source(legacy_source: String) -[FS]> String? StoreError! {
     candidates := [String]{legacy_source}
-    if @HANGAR_DIR != legacy_source -> &candidates.push(@HANGAR_DIR)
+    if HANGAR_DIR != legacy_source -> &candidates.push(HANGAR_DIR)
     loop candidate in candidates {
         node :: store_node_stat(candidate)
         if node != None -> return Ok(Val(candidate))
@@ -99,7 +99,7 @@ fn store_migration_copy_tree(source: String, destination: String, root: String) 
             return Err(StoreError.Other("legacy Hangar symlink `{source}` escapes its migration root"))
         }
         files.symlink(target, destination)
-        return Ok()
+        return
     }
     if info.is_dir {
         files.create_dir(destination)
@@ -109,12 +109,12 @@ fn store_migration_copy_tree(source: String, destination: String, root: String) 
             store_migration_copy_tree(entry.path, files.join(destination, entry.name), root)
         }
         files.set_mode(destination, info.mode & 0o7777)
-        return Ok()
+        return
     }
     if info.is_file {
         files.copy2(source, destination)
         files.set_mode(destination, info.mode & 0o7777)
-        return Ok()
+        return
     }
     Err(StoreError.Other("legacy Hangar contains unsupported node `{source}`"))
 }
@@ -173,14 +173,14 @@ fn store_migration_relative_target_stays_in_root(link: String, target: String, r
 
 // Rust `absolute_target_stays_in_nix_store`.
 fn store_migration_absolute_target_stays_in_nix_store(target: String) -[FS, Env]> Bool Never! {
-    store_parts :: store_migration_components(@STORE_NIX_STORE_ROOT)
+    store_parts :: store_migration_components(STORE_NIX_STORE_ROOT)
     target_parts :: store_migration_components(target)
     if !store_migration_has_prefix(target_parts, store_parts) -> return false
     relative := [String]{}
     loop index in store_parts.len()..<target_parts.len() -> &relative.push(target_parts[index])
     normalized :: store_migration_walk_target(store_parts, store_parts.len(), relative.join("/")) ?? return false
     if !store_migration_has_prefix(normalized, store_parts) -> return false
-    canonical_root :: files.canonicalize(@STORE_NIX_STORE_ROOT) ?? return true
+    canonical_root :: files.canonicalize(STORE_NIX_STORE_ROOT) ?? return true
     store_migration_existing_path_stays_in_root(target, canonical_root)
 }
 

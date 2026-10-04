@@ -67,6 +67,14 @@ pub fn derivation_record_reference(record: DerivationRecord) -> MIRDerivationRef
     MIRDerivationRef{id: record.id}
 }
 
+// Rust FactsDerivation.rs::DerivationRecord::invalidate_if_identity_changed.
+pub fn derivation_record_invalidate_if_identity_changed(record: &DerivationRecord, current: DerivationIdentity) -> Bool Never! {
+    if record.disposition != MIRDerivationDisposition.Current -> return false
+    if record.identity.source == current.source && record.identity.build == current.build && record.identity.run == current.run && record.identity.target == current.target -> return false
+    record.disposition = MIRDerivationDisposition.Stale
+    true
+}
+
 pub fn derivation_record_validate(record: DerivationRecord) -> Bool Never! {
     record.id == derivation_record_id(record)
 }
@@ -143,24 +151,24 @@ fn derivation_strings_sorted_unique(values: [String]) -> [String] Never! {
 
 fn derivation_method_name(method: MIRDerivationMethod) -> String Never! {
     if method == {
-        .StaticDerivation -> derivation_json_quote("static_derivation")
-        .FormalProof -> derivation_json_quote("formal_proof")
-        .RecordedExecution -> derivation_json_quote("recorded_execution")
-        .SampledAgreement -> derivation_json_quote("sampled_agreement")
-        .ExternalAssumption -> derivation_json_quote("external_assumption")
+        .StaticDerivation -> foundation_json_quote("static_derivation")
+        .FormalProof -> foundation_json_quote("formal_proof")
+        .RecordedExecution -> foundation_json_quote("recorded_execution")
+        .SampledAgreement -> foundation_json_quote("sampled_agreement")
+        .ExternalAssumption -> foundation_json_quote("external_assumption")
     }
 }
 
 fn derivation_disposition_name(disposition: MIRDerivationDisposition) -> String Never! {
     if disposition == {
-        .Current -> derivation_json_quote("current")
-        .Stale -> derivation_json_quote("stale")
-        .Expired -> derivation_json_quote("expired")
-        .Redacted -> derivation_json_quote("redacted")
-        .Unavailable -> derivation_json_quote("unavailable")
-        .Unsupported -> derivation_json_quote("unsupported")
-        .BudgetExhausted -> derivation_json_quote("budget_exhausted")
-        .Unknown -> derivation_json_quote("unknown")
+        .Current -> foundation_json_quote("current")
+        .Stale -> foundation_json_quote("stale")
+        .Expired -> foundation_json_quote("expired")
+        .Redacted -> foundation_json_quote("redacted")
+        .Unavailable -> foundation_json_quote("unavailable")
+        .Unsupported -> foundation_json_quote("unsupported")
+        .BudgetExhausted -> foundation_json_quote("budget_exhausted")
+        .Unknown -> foundation_json_quote("unknown")
     }
 }
 
@@ -180,7 +188,7 @@ fn derivation_record_id(record: DerivationRecord) -> String Never! {
     payload := derivation_optional_payload_json(record.payload, "")
     separator :: String.from_bytes([U8]{0}) ?? ""
     premises := record.premises.join(separator)
-    state := DerivationHashState{first: 0xcbf29ce484222325, second: 0x9e3779b185ebca87}
+    state := DerivationHashState{first: U64{0xcbf29ce484222325}, second: U64{0x9e3779b185ebca87}}
     derivation_hash_frame(&state, record.subject)
     derivation_hash_frame(&state, record.claim)
     derivation_hash_frame(&state, record.producer)
@@ -195,7 +203,7 @@ fn derivation_record_id(record: DerivationRecord) -> String Never! {
     derivation_hash_hex(state)
 }
 
-pub struct DerivationHashState { pub first: Int, pub second: Int }
+pub struct DerivationHashState { pub first: U64, pub second: U64 }
 
 fn derivation_method_raw(method: MIRDerivationMethod) -> String Never! {
     if method == {
@@ -215,86 +223,21 @@ fn derivation_hash_frame(state: &DerivationHashState, value: String) Never! {
 }
 
 fn derivation_hash_byte(state: &DerivationHashState, byte: U8) Never! {
-    mask := 0xffffffffffffffff
-    value := Int.from_u8(byte)
-    state.first = ((state.first ^ value) * 0x100000001b3) & mask
-    rotated := ((state.first << 17) | (state.first >> 47)) & mask
-    state.second = ((state.second ^ rotated ^ value) * 0x9e3779b185ebca87) & mask
+    value :: U64.from_u8(byte)
+    state.first = (state.first ~| value).wrapping_mul(U64{0x100000001b3})
+    state.second = (state.second ~| state.first.rotate_left(17) ~| value).wrapping_mul(U64{0x9e3779b185ebca87})
 }
 
 fn derivation_hash_hex(state: DerivationHashState) -> String Never! {
     digits := "0123456789abcdef".bytes()
+    first :: Int.from_u64(state.first)
+    second :: Int.from_u64(state.second)
     output := [U8]{}
-    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[(state.first >> shift) & 15])
-    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[(state.second >> shift) & 15])
+    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[(first >> shift) & 15])
+    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[(second >> shift) & 15])
     String.from_bytes(output) ?? ""
 }
 
-fn derivation_json_quote(value: String) -> String Never! {
-    bytes := value.bytes()
-    output := "\""
-    index := 0
-    loop index < bytes.len() {
-        byte := Int.from_u8(bytes[index])
-        if byte == 34 {
-            output += "\\\""
-            index += 1
-            next
-        }
-        if byte == 92 {
-            output += "\\\\"
-            index += 1
-            next
-        }
-        if byte == 10 {
-            output += "\\n"
-            index += 1
-            next
-        }
-        if byte == 13 {
-            output += "\\r"
-            index += 1
-            next
-        }
-        if byte == 9 {
-            output += "\\t"
-            index += 1
-            next
-        }
-        if byte < 32 {
-            output += "\\u00{derivation_hex_byte(byte)}"
-            index += 1
-            next
-        }
-        if byte == 194 && index + 1 < bytes.len() {
-            following :: Int.from_u8(bytes[index + 1])
-            if following >= 128 && following <= 159 {
-                output += "\\u00{derivation_hex_byte(following)}"
-                index += 2
-                next
-            }
-        }
-        if byte == 127 {
-            output += "\\u007f"
-            index += 1
-            next
-        }
-        width := if {
-            byte < 128 -> 1
-            byte < 224 -> 2
-            byte < 240 -> 3
-            else -> 4
-        }
-        output += String.from_bytes(bytes.slice(index, index + width)) ?? ""
-        index += width
-    }
-    "{output}\""
-}
-
-fn derivation_hex_byte(value: Int) -> String Never! {
-    digits := "0123456789abcdef".bytes()
-    String.from_bytes([U8]{digits[(value >> 4) & 15], digits[value & 15]}) ?? "00"
-}
 
 fn mir_frame_schedule_json(schedule: MIRFrameSchedule) -> String Never! {
     operations := [String]{}
@@ -308,7 +251,7 @@ fn mir_frame_schedule_json(schedule: MIRFrameSchedule) -> String Never! {
     loop transfer in schedule.transfers -> &transfers.push(mir_frame_transfer_json(transfer))
     loop row in schedule.reuse -> &reuse.push(mir_frame_reuse_json(row))
     loop row in schedule.retentions -> &retentions.push(mir_frame_retention_json(row))
-    loop reason in schedule.conservative -> &conservative.push(derivation_json_quote(reason))
+    loop reason in schedule.conservative -> &conservative.push(foundation_json_quote(reason))
     operations_json :: operations.join(",")
     dependencies_json :: dependencies.join(",")
     transfers_json :: transfers.join(",")
@@ -321,18 +264,18 @@ fn mir_frame_schedule_json(schedule: MIRFrameSchedule) -> String Never! {
 fn mir_frame_operation_json(operation: MIRFrameOperation) -> String Never! {
     accesses := [String]{}
     loop access in operation.accesses -> &accesses.push(mir_resource_access_json(access))
-    provider := if operation.completion_provider == None -> "" else -> ",\"completion_provider\":{derivation_json_quote(operation.completion_provider ?? "")}"
+    provider := if operation.completion_provider == None -> "" else -> ",\"completion_provider\":{foundation_json_quote(operation.completion_provider ?? "")}"
     accesses_json :: accesses.join(",")
-    "{{\"name\":{derivation_json_quote(operation.name)},\"source_index\":{derivation_json_quote(operation.source_index.to_string())},\"accesses\":[{accesses_json}],\"completion\":{mir_frame_completion_json(operation.completion)},\"external_effect\":{derivation_json_bool(operation.external_effect)}{provider}}}"
+    "{{\"name\":{foundation_json_quote(operation.name)},\"source_index\":{foundation_json_quote(operation.source_index.to_string())},\"accesses\":[{accesses_json}],\"completion\":{mir_frame_completion_json(operation.completion)},\"external_effect\":{derivation_json_bool(operation.external_effect)}{provider}}}"
 }
 
 fn mir_resource_access_json(access: MIRResourceAccess) -> String Never! {
-    "{{\"resource\":{mir_resource_identity_json(access.resource)},\"mode\":{derivation_json_quote(mir_resource_mode_name(access.mode))},\"region\":{mir_resource_region_json(access.region)},\"layout\":{mir_resource_layout_json(access.layout)},\"temporary\":{derivation_json_bool(access.temporary)}}}"
+    "{{\"resource\":{mir_resource_identity_json(access.resource)},\"mode\":{foundation_json_quote(mir_resource_mode_name(access.mode))},\"region\":{mir_resource_region_json(access.region)},\"layout\":{mir_resource_layout_json(access.layout)},\"temporary\":{derivation_json_bool(access.temporary)}}}"
 }
 
 fn mir_resource_identity_json(identity: MIRResourceIdentity) -> String Never! {
     if identity == {
-        .Named(name) -> "{{\"kind\":\"named\",\"value\":{derivation_json_quote(name)}}}"
+        .Named(name) -> "{{\"kind\":\"named\",\"value\":{foundation_json_quote(name)}}}"
         .Unknown -> "{{\"kind\":\"unknown\"}}"
     }
 }
@@ -349,38 +292,38 @@ fn mir_resource_region_json(region: MIRResourceRegion) -> String Never! {
     if region == {
         .Whole -> "{{\"kind\":\"whole\"}}"
         .Unknown -> "{{\"kind\":\"unknown\"}}"
-        .Bytes(start, length) -> "{{\"kind\":\"bytes\",\"start\":{derivation_json_quote(start.to_string())},\"length\":{derivation_json_quote(length.to_string())}}}"
+        .Bytes(start, length) -> "{{\"kind\":\"bytes\",\"start\":{foundation_json_quote(start.to_string())},\"length\":{foundation_json_quote(length.to_string())}}}"
     }
 }
 
 fn mir_resource_layout_json(layout: MIRResourceLayout?) -> String Never! {
     value :: layout ?? return "null"
-    "{{\"size\":{derivation_json_quote(value.size.to_string())},\"align\":{derivation_json_quote(value.align.to_string())},\"layout\":{derivation_json_quote(value.layout)},\"device\":{derivation_json_quote(value.device)}}}"
+    "{{\"size\":{foundation_json_quote(value.size.to_string())},\"align\":{foundation_json_quote(value.align.to_string())},\"layout\":{foundation_json_quote(value.layout)},\"device\":{foundation_json_quote(value.device)}}}"
 }
 
 fn mir_frame_completion_json(completion: MIRFrameCompletion) -> String Never! {
     if completion == {
         .Synchronous -> "{{\"kind\":\"synchronous\"}}"
-        .Pending(token) -> "{{\"kind\":\"pending\",\"token\":{derivation_json_quote(token)}}}"
-        .Event(token) -> "{{\"kind\":\"event\",\"token\":{derivation_json_quote(token)}}}"
+        .Pending(token) -> "{{\"kind\":\"pending\",\"token\":{foundation_json_quote(token)}}}"
+        .Event(token) -> "{{\"kind\":\"event\",\"token\":{foundation_json_quote(token)}}}"
     }
 }
 
 fn mir_frame_dependency_json(row: MIRFrameDependency) -> String Never! {
-    "{{\"before\":{derivation_json_quote(row.before.to_string())},\"after\":{derivation_json_quote(row.after.to_string())},\"resource\":{derivation_json_quote(row.resource)},\"reason\":{derivation_json_quote(row.reason)}}}"
+    "{{\"before\":{foundation_json_quote(row.before.to_string())},\"after\":{foundation_json_quote(row.after.to_string())},\"resource\":{foundation_json_quote(row.resource)},\"reason\":{foundation_json_quote(row.reason)}}}"
 }
 
 fn mir_frame_transfer_json(row: MIRFrameTransfer) -> String Never! {
-    "{{\"before\":{derivation_json_quote(row.before.to_string())},\"after\":{derivation_json_quote(row.after.to_string())},\"resource\":{derivation_json_quote(row.resource)},\"from_device\":{derivation_json_quote(row.from_device)},\"to_device\":{derivation_json_quote(row.to_device)}}}"
+    "{{\"before\":{foundation_json_quote(row.before.to_string())},\"after\":{foundation_json_quote(row.after.to_string())},\"resource\":{foundation_json_quote(row.resource)},\"from_device\":{foundation_json_quote(row.from_device)},\"to_device\":{foundation_json_quote(row.to_device)}}}"
 }
 
 fn mir_frame_reuse_json(row: MIRFrameReuse) -> String Never! {
-    "{{\"previous_resource\":{derivation_json_quote(row.previous_resource)},\"next_resource\":{derivation_json_quote(row.next_resource)},\"previous_last_use\":{derivation_json_quote(row.previous_last_use.to_string())},\"next_first_use\":{derivation_json_quote(row.next_first_use.to_string())},\"legal\":{derivation_json_bool(row.legal)},\"reason\":{derivation_json_quote(row.reason)}}}"
+    "{{\"previous_resource\":{foundation_json_quote(row.previous_resource)},\"next_resource\":{foundation_json_quote(row.next_resource)},\"previous_last_use\":{foundation_json_quote(row.previous_last_use.to_string())},\"next_first_use\":{foundation_json_quote(row.next_first_use.to_string())},\"legal\":{derivation_json_bool(row.legal)},\"reason\":{foundation_json_quote(row.reason)}}}"
 }
 
 fn mir_frame_retention_json(row: MIRFrameRetention) -> String Never! {
-    token := if row.completion_token == None -> "null" else -> derivation_json_quote(row.completion_token ?? "")
-    "{{\"resource\":{derivation_json_quote(row.resource)},\"operation\":{derivation_json_quote(row.operation.to_string())},\"owner\":{derivation_json_quote(row.owner)},\"completion_token\":{token},\"completed\":{derivation_json_bool(row.completed)}}}"
+    token := if row.completion_token == None -> "null" else -> foundation_json_quote(row.completion_token ?? "")
+    "{{\"resource\":{foundation_json_quote(row.resource)},\"operation\":{foundation_json_quote(row.operation.to_string())},\"owner\":{foundation_json_quote(row.owner)},\"completion_token\":{token},\"completed\":{derivation_json_bool(row.completed)}}}"
 }
 
 fn derivation_json_bool(value: Bool) -> String Never! {

@@ -103,8 +103,8 @@ pub struct RegistryDependency {
 
 // How a fetched archive is verified.
 pub enum RegistryIntegrity {
-    Sha256(String)
-    Sha1(String)
+    SHA256(String)
+    SHA1(String)
     // A GitHub zipball of a full commit reference whose source authority the
     // metadata proves; only non-emptiness is checkable.
     ImmutableGit(repository: String, reference: String)
@@ -133,13 +133,13 @@ pub struct ScriptRegistryProvider {
 
     // A locked realization must still match `authority.providers`.
     fn validate_cache_authority(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env]> {
-        project :: ctx.project_dir ?? return Ok()
-        locked :: pkg_lock_registry_realization(project, self.kind.label(), spec.raw) ?? return Ok()
+        project :: ctx.project_dir ?? return
+        locked :: pkg_lock_registry_realization(project, self.kind.label(), spec.raw) ?? return
         current :: provider_script_registry_cache_authority(self.kind, ctx)
         provider_ensure_locked_authority(self.kind.title(), locked.repository, locked.authority, current)
     }
 
-    fn cache_expectation(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
+    fn cache_expectation(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
         project :: ctx.project_dir ?? return None
         locked :: pkg_lock_registry_realization(project, self.kind.label(), spec.raw) ?? return None
         authority :: provider_script_registry_cache_authority(self.kind, ctx) ?? return None
@@ -148,13 +148,13 @@ pub struct ScriptRegistryProvider {
         Val(CacheExpectation{identity, owned_output: Val(locked.output), allow_unsigned_local: true})
     }
 
-    fn plan_downloads(self, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
+    fn plan_downloads(self, verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
         plan := DownloadPlan.empty()
         loop spec in specs -> &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
         Ok(plan)
     }
 
-    fn realize(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+    fn realize(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
         if ctx.offline -> return Err(ProviderError.Offline("`{spec.raw}` is not in verified Hangar and --offline forbids {self.kind.title()} metadata or source fetches"))
         realized :: provider_script_realize(self.kind, spec, ctx) ?? return Err(err.into_provider(self.kind.error_kind()))
         Ok(realized)
@@ -170,7 +170,7 @@ pub fn provider_script_registry_cache_authority(kind: ScriptRegistryKind, ctx: P
     Ok(authority)
 }
 
-fn provider_script_realize(kind: ScriptRegistryKind, spec: RefSpec, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized RegistryError! {
+fn provider_script_realize(kind: ScriptRegistryKind, spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized RegistryError! {
     root_ref :: provider_script_parse_ref(kind, spec.package)
     authority :: provider_script_authority(kind, ctx)
     repository :: authority.registry()
@@ -353,7 +353,7 @@ struct ScriptRegistryOrderWalk {
     out: [RegistryPackage]
 
     fn visit(&self, name: String) RegistryError! {
-        if self.done.contains(name) -> return Ok()
+        if self.done.contains(name) -> return
         if self.active.contains(name) -> return Err(RegistryError.Reason("dependency cycle includes `{name}`"))
         &self.active.push(name)
         package :: self.selected.get(name) ?? return Err(RegistryError.Reason("resolved package `{name}` disappeared"))
@@ -433,8 +433,8 @@ fn provider_script_copy_tree(source: String, destination: String) RegistryError!
 
 fn provider_script_verify_integrity(package: RegistryPackage, bytes: [U8]) RegistryError! {
     if package.integrity == {
-        .Sha256(expected) -> provider_script_check_digest("SHA-256", package, expected, pkg_sha256_hex(bytes))
-        .Sha1(expected) -> provider_script_check_digest("SHA-1", package, expected, crypto.sha1(bytes))
+        .SHA256(expected) -> provider_script_check_digest("SHA-256", package, expected, pkg_sha256_hex(bytes))
+        .SHA1(expected) -> provider_script_check_digest("SHA-1", package, expected, crypto.sha1(bytes))
         .ImmutableGit(repository, reference) -> {
             if bytes.len() == 0 -> return Err(RegistryError.Reason("empty source fetched for immutable `{repository}` reference `{reference}`"))
         }
@@ -548,7 +548,7 @@ fn provider_script_json_get(value: DataTree, key: String) -> DataTree RegistryEr
 }
 
 fn provider_script_json_str(value: DataTree) -> String RegistryError! {
-    text :: pkg_json_text(value) ?? return Err(RegistryError.Reason(@PKG_JSON_NOT_STRING))
+    text :: pkg_json_text(value) ?? return Err(RegistryError.Reason(PKG_JSON_NOT_STRING))
     Ok(text)
 }
 
@@ -568,8 +568,8 @@ fn provider_script_version_satisfies(kind: ScriptRegistryKind, actual: String, r
     }
 }
 
-@SCRIPT_REGISTRY_OPERATORS :: [String]{">=", "<=", "!=", "==", "~>", "=", ">", "<", "~", "^"}
-@SCRIPT_REGISTRY_COMPOSER_OPERATORS :: [String]{">=", "<=", "!=", "==", "=", ">", "<", "~", "^"}
+SCRIPT_REGISTRY_OPERATORS :: prep { [String]{">=", "<=", "!=", "==", "~>", "=", ">", "<", "~", "^"} }
+SCRIPT_REGISTRY_COMPOSER_OPERATORS :: prep { [String]{">=", "<=", "!=", "==", "=", ">", "<", "~", "^"} }
 
 // One constraint token: an operator token with its version in the next
 // token, or an operator-prefixed version, or a bare version (`=`).
@@ -596,7 +596,7 @@ fn provider_script_basic_satisfies(actual: String, raw_requirement: String) -> B
         index := 0
         matched := true
         loop index < tokens.len() {
-            constraint :: provider_script_constraint_at(tokens, index, @SCRIPT_REGISTRY_OPERATORS) ?? {
+            constraint :: provider_script_constraint_at(tokens, index, SCRIPT_REGISTRY_OPERATORS) ?? {
                 matched = false
                 break
             }
@@ -626,7 +626,7 @@ fn provider_script_composer_satisfies(actual: String, raw_requirement: String) -
         index := 0
         matched := true
         loop index < tokens.len() {
-            constraint :: provider_script_constraint_at(tokens, index, @SCRIPT_REGISTRY_COMPOSER_OPERATORS) ?? {
+            constraint :: provider_script_constraint_at(tokens, index, SCRIPT_REGISTRY_COMPOSER_OPERATORS) ?? {
                 matched = false
                 break
             }
@@ -711,7 +711,7 @@ fn provider_script_cpan_requirement(raw: String) -> String Never! {
     requirement :: raw.trim()
     if requirement == "" || requirement == "0" -> return ">= 0"
     if provider_script_is_operator(requirement) -> return requirement
-    loop operator in @SCRIPT_REGISTRY_OPERATORS {
+    loop operator in SCRIPT_REGISTRY_OPERATORS {
         if requirement.starts_with(operator) -> return requirement
     }
     ">= {requirement}"

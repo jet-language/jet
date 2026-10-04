@@ -1,0 +1,271 @@
+// Pure visibility export of generated Rust crate text.
+use jet_foundation.[rust_code_mask, pkg_bytes_text, pkg_bytes_code, pkg_bytes_starts_with]
+// The Rust item context one line sits in.
+enum NativeRuntimeScope {
+    Module
+    Struct
+    Enum
+    Trait
+    InherentImpl
+    TraitImpl
+    Function
+    // A `macro_rules!` body: the items it generates when the runtime invokes
+    // it are part of the runtime boundary (`store_runtime_export_macro_line`).
+    Macro
+    // A module-level `thread_local! { … }` block: its statics are items.
+    ThreadLocal
+    Other
+}
+
+// One open brace and the item it belongs to.
+struct NativeRuntimeScopeLevel {
+    scope: NativeRuntimeScope
+    level: Int
+}
+
+// Fixed keyword registries are prepared once, not allocated per source line.
+STORE_RUNTIME_EXPORTABLE_ITEMS :: prep { [String]{"fn ", "struct ", "enum ", "union ", "trait ", "type ", "const ", "static ", "mod "} }
+STORE_RUNTIME_EXPORTABLE_QUALIFIED_ITEMS :: prep { [String]{"unsafe fn ", "async fn ", "const fn ", "async unsafe fn "} }
+STORE_RUNTIME_IMPL_MEMBERS :: prep { [String]{"fn ", "const ", "type ", "unsafe fn ", "async fn ", "const fn "} }
+
+// Make the generated runtime boundary callable from its dependent user crate.
+pub fn export_crate_source(source: String) -> String Never! {
+    mask :: rust_code_mask(source)
+    source_lines :: store_runtime_split_inclusive(source)
+    mask_lines :: store_runtime_split_inclusive(mask)
+    out := [String]{}
+    scopes := [NativeRuntimeScopeLevel]{NativeRuntimeScopeLevel{scope: .Module, level: 0}}
+    depth := 0
+    pending := [String]{}
+    macro_exported := false
+    macro_level := -1
+    count :: if source_lines.len() < mask_lines.len() -> source_lines.len() else -> mask_lines.len()
+    loop index in 0..<count {
+        line :: source_lines[index]
+        masked :: mask_lines[index]
+        loop scopes.len() > 0 && scopes[scopes.len() - 1].level > depth -> _ := &scopes.pop()
+        if macro_level > depth -> macro_level = -1
+        scope :: if scopes.len() > 0 -> scopes[scopes.len() - 1].scope else -> NativeRuntimeScope.Other
+        direct :: scopes.len() > 0 && scopes[scopes.len() - 1].level == depth
+        // `pending` is non-empty only while an item header is still open: a
+        // multi-line generic parameter list or `where` clause. Those rows are
+        // continuations, not items: `pub fn jet_fixed_list_concat<` followed
+        // by `const LEFT: usize,` would otherwise become `pub const LEFT` inside
+        // the angle brackets and the runtime crate would not even parse.
+        code := masked.trim() // #4303
+        // A root `macro_rules!` is textually scoped to the crate that defines
+        // it; the program crate invokes some of them (`jet_history_callable!`),
+        // so the split runtime exports every root macro by path.
+        if scopes.len() == 1 && direct && pending.len() == 0 && code.starts_with("macro_rules!") && !macro_exported {
+            raw :: line.bytes()
+            &out.push("{pkg_bytes_text(raw, 0, raw.len() - line.trim_start().bytes().len())}#[macro_export]\n")
+        }
+        &out.push(if {
+            macro_level >= 0 -> store_runtime_export_macro_line(line, masked, depth == macro_level + 1)
+            direct && pending.len() == 0 -> store_runtime_export_line(line, masked, scope)
+            else -> line
+        })
+        if code != "" -> macro_exported = code == "#[macro_export]" || (macro_exported && code.starts_with("#"))
+        if direct && ((pending.len() == 0 && store_runtime_starts_item_header(code, scope)) || pending.len() > 0) {
+            &pending.push(code)
+            &pending.push(" ")
+        }
+        loop byte in masked.bytes() {
+            if Int.from_u8(byte) == {
+                123 -> {
+                    kind :: if direct && pending.len() > 0 -> store_runtime_scope_for_header(pending.join("")) else -> NativeRuntimeScope.Other
+                    depth += 1
+                    if kind == NativeRuntimeScope.Macro && macro_level < 0 -> macro_level = depth
+                    &scopes.push(NativeRuntimeScopeLevel{scope: kind, level: depth})
+                    pending = [String]{}
+                }
+                125 -> {
+                    if depth > 0 -> depth -= 1
+                    loop scopes.len() > 0 && scopes[scopes.len() - 1].level > depth -> _ := &scopes.pop()
+                    pending = [String]{}
+                }
+                59 -> {
+                    if direct -> pending = [String]{}
+                }
+                else -> {}
+            }
+        }
+    }
+    out.join("")
+}
+
+// `str::split_inclusive('\n')`: every line keeps its newline; a final line
+// without one is kept; an empty text has no lines.
+fn store_runtime_split_inclusive(text: String) -> [String] Never! {
+    raw :: text.bytes()
+    lines := [String]{}
+    start := 0
+    loop index in 0..<raw.len() {
+        if Int.from_u8(raw[index]) == 10 {
+            &lines.push(pkg_bytes_text(raw, start, index + 1))
+            start = index + 1
+        }
+    }
+    if start < raw.len() -> &lines.push(pkg_bytes_text(raw, start, raw.len()))
+    lines
+}
+
+// `line` with its item made `pub` when it is exportable in `scope`.
+fn store_runtime_export_line(line: String, masked: String, scope: NativeRuntimeScope) -> String Never! {
+    code := masked.trim_start() // #4303
+    if code == "" || code.starts_with("#") -> return line
+    should_export :: if scope == {
+        .Module -> store_runtime_starts_exportable_item(code) || store_runtime_starts_restricted_reexport(code)
+        .Struct -> store_runtime_looks_like_struct_field(code)
+        .InherentImpl -> store_runtime_starts_impl_member(code)
+        .ThreadLocal -> store_runtime_strip_visibility(code).starts_with("static ")
+        else -> false
+    }
+    if !should_export -> return line
+    raw :: line.bytes()
+    indent :: raw.len() - line.trim_start().bytes().len()
+    lead :: pkg_bytes_text(raw, 0, indent)
+    body :: pkg_bytes_text(raw, indent, raw.len())
+    exported :: if store_runtime_restricted_visibility_rest(body) == {
+        .Val(rest) -> "{lead}pub {rest}"
+        else -> if body.starts_with("pub ") -> line else -> "{lead}pub {body}"
+    }
+    if scope == NativeRuntimeScope.Module && store_runtime_is_tuple_struct(code) -> return store_runtime_export_tuple_field(exported)
+    exported
+}
+
+// Inside a `macro_rules!` body an explicit restricted visibility widens at any
+// depth, and an item written directly in a transcriber (`trait $name`,
+// `fn $name`) becomes `pub`: the runtime invokes these macros to generate items
+// the program crate names. Deeper lines (impl members, statements) and the arm
+// structure itself are not item syntax and stay as written.
+fn store_runtime_export_macro_line(line: String, masked: String, transcriber_item: Bool) -> String Never! {
+    raw :: line.bytes()
+    indent :: raw.len() - line.trim_start().bytes().len()
+    lead :: pkg_bytes_text(raw, 0, indent)
+    body :: pkg_bytes_text(raw, indent, raw.len())
+    code := masked.trim_start() // #4303
+    if store_runtime_restricted_visibility_rest(code) != None {
+        if store_runtime_restricted_visibility_rest(body) == {
+            .Val(rest) -> return "{lead}pub {rest}"
+            else -> {}
+        }
+    }
+    if transcriber_item && !code.starts_with("pub") && store_runtime_starts_exportable_item(code) -> return "{lead}pub {body}"
+    line
+}
+
+fn store_runtime_is_tuple_struct(code: String) -> Bool Never! {
+    item :: store_runtime_strip_visibility(code)
+    item.starts_with("struct ") && item.contains("(") && !item.contains("{{")
+}
+
+// Make the first field of a one-line tuple struct `pub`.
+fn store_runtime_export_tuple_field(line: String) -> String Never! {
+    raw :: line.bytes()
+    keyword :: "struct ".bytes()
+    struct_at :: store_runtime_find(raw, keyword, 0)
+    if struct_at < 0 -> return line
+    open :: store_runtime_find(raw, "(".bytes(), struct_at + keyword.len())
+    if open < 0 -> return line
+    if pkg_bytes_starts_with(raw, open + 1, "pub ".bytes()) -> return line
+    "{pkg_bytes_text(raw, 0, open + 1)}pub {pkg_bytes_text(raw, open + 1, raw.len())}"
+}
+
+// The text after `pub(<scope>) `, or None.
+fn store_runtime_restricted_visibility_rest(value: String) -> String? Never! {
+    if !value.starts_with("pub(") -> return None
+    raw :: value.bytes()
+    close_at :: store_runtime_find(raw, ")".bytes(), 4)
+    if close_at < 0 -> return None
+    if !pkg_bytes_starts_with(raw, close_at + 1, " ".bytes()) -> return None
+    Val(pkg_bytes_text(raw, close_at + 2, raw.len()))
+}
+
+// A `pub(crate) use …;` at module scope IS part of the runtime boundary: it is
+// how the Core prelude publishes a fragment it keeps inside a private module
+// (`mod jet_sync { … } pub(crate) use jet_sync::*;`). Left alone, the split
+// runtime rlib kept those names crate-private and the user crate could not
+// see them. A bare `use` is a private import, not a boundary, and stays
+// private so no `std` path leaks into the program's glob namespace.
+fn store_runtime_starts_restricted_reexport(code: String) -> Bool Never! {
+    if store_runtime_restricted_visibility_rest(code) == {
+        .Val(rest) -> rest.starts_with("use ")
+        else -> false
+    }
+}
+
+fn store_runtime_strip_visibility(code: String) -> String Never! {
+    raw :: code.bytes()
+    if code.starts_with("pub ") -> return pkg_bytes_text(raw, 4, raw.len())
+    if code.starts_with("pub(") {
+        close_at :: store_runtime_find(raw, ")".bytes(), 4)
+        if close_at >= 0 {
+            rest := pkg_bytes_text(raw, close_at + 1, raw.len()).trim_start() // #4303
+            return rest
+        }
+    }
+    code
+}
+
+fn store_runtime_starts_with_any(code: String, prefixes: [String]) -> Bool Never! {
+    loop prefix in prefixes {
+        if code.starts_with(prefix) -> return true
+    }
+    false
+}
+
+fn store_runtime_starts_exportable_item(code: String) -> Bool Never! {
+    item :: store_runtime_strip_visibility(code)
+    store_runtime_starts_with_any(item, STORE_RUNTIME_EXPORTABLE_ITEMS)
+        || store_runtime_starts_with_any(item, STORE_RUNTIME_EXPORTABLE_QUALIFIED_ITEMS)
+        || ((item.starts_with("unsafe extern ") || item.starts_with("extern ")) && item.contains(" fn "))
+}
+
+fn store_runtime_starts_impl_member(code: String) -> Bool Never! {
+    item :: store_runtime_strip_visibility(code)
+    store_runtime_starts_with_any(item, STORE_RUNTIME_IMPL_MEMBERS)
+}
+
+// `name: Type` with a plain identifier name (not a `::` path).
+fn store_runtime_looks_like_struct_field(code: String) -> Bool Never! {
+    item :: store_runtime_strip_visibility(code)
+    raw :: item.bytes()
+    colon :: store_runtime_find(raw, ":".bytes(), 0)
+    if colon < 0 -> return false
+    if pkg_bytes_text(raw, 0, colon).ends_with(":") || pkg_bytes_code(raw, colon + 1) == 58 -> return false
+    name := pkg_bytes_text(raw, 0, colon).trim() // #4303
+    if name == "" -> return false
+    loop byte in name.bytes() {
+        code :: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95) -> return false
+    }
+    true
+}
+
+fn store_runtime_starts_item_header(code: String, scope: NativeRuntimeScope) -> Bool Never! {
+    if scope == {
+        .Module -> {
+            item :: store_runtime_strip_visibility(code)
+            store_runtime_starts_exportable_item(item) || item.starts_with("impl") || item.starts_with("unsafe impl") || item.starts_with("extern ") || item.starts_with("macro_rules!") || item.starts_with("thread_local!")
+        }
+        .InherentImpl | .TraitImpl | .Trait -> store_runtime_starts_impl_member(code)
+        else -> false
+    }
+}
+
+fn store_runtime_scope_for_header(header: String) -> NativeRuntimeScope Never! {
+    trimmed := header.trim_start() // #4303
+    item :: store_runtime_strip_visibility(trimmed)
+    if {
+        item.starts_with("struct ") || item.starts_with("union ") -> NativeRuntimeScope.Struct
+        item.starts_with("enum ") -> NativeRuntimeScope.Enum
+        item.starts_with("trait ") -> NativeRuntimeScope.Trait
+        item.starts_with("impl") || item.starts_with("unsafe impl") -> if item.contains(" for ") -> NativeRuntimeScope.TraitImpl else -> NativeRuntimeScope.InherentImpl
+        item.starts_with("mod ") -> NativeRuntimeScope.Module
+        item.starts_with("macro_rules!") -> NativeRuntimeScope.Macro
+        item.starts_with("thread_local!") -> NativeRuntimeScope.ThreadLocal
+        item.contains("fn ") -> NativeRuntimeScope.Function
+        else -> NativeRuntimeScope.Other
+    }
+}

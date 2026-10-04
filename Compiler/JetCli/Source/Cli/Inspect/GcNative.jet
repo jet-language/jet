@@ -1,0 +1,96 @@
+// Outward GC report policy (Source/CmdGc.rs:77-226,641-682).
+// Only published, implemented providers are consumed here. Native command
+// activation is gated on retained_descriptor, native OS environment ingress,
+// Driver selected_project_root, selected-target facts, and epoch clock bodies.
+// No path-only reader, prototype, alternate authority search, or clock fallback.
+use core.files.runtime.kernel_path_components as gc_native_paths
+use jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+use jet_foundation.[
+    Diagnostic, ReportPath, StatusEnvelope,
+    diagnostic_from_registry, diagnostic_render_all, diagnostic_to_report,
+]
+
+// Rust trace_path (CmdGc.rs:115-117). Filesystem/environment inputs remain
+// original encoded OsPath values; only the three authored components are text.
+pub fn jet_cli_gc_trace_path(root: gc_native_paths.OsPath) -> gc_native_paths.OsPath Never! {
+    path := ~root
+    gc_native_paths.push(&path, gc_native_paths.from_text(".jet", root.platform))
+    gc_native_paths.push(&path, gc_native_paths.from_text("gc", root.platform))
+    gc_native_paths.push(&path, gc_native_paths.from_text("trace-v1.json", root.platform))
+    path
+}
+
+// Rust run (CmdGc.rs:84-92), argument phase only. This boundary deliberately
+// ignores EVERY dash-leading argument, including '--', unknown flags and help.
+// Native run remains gated; this function does not claim command completion.
+pub fn jet_cli_gc_arguments(args: [String]) JetCLIGCTraceError! {
+    loop argument in args {
+        if !argument.starts_with("-") -> return Err(jet_cli_gc_error(JetCLIGCErrorKind.Malformed, "unexpected gc report argument `{argument}`"))
+    }
+}
+
+// Rust fail (CmdGc.rs:649-655), canonical construction phase. Remove all ASCII
+// trailing dots only; whitespace and Unicode punctuation are NOT trimmed.
+fn jet_cli_gc_failure_diagnostic(error: JetCLIGCTraceError) -> Diagnostic Never! {
+    fix :: if error.kind == {
+        .Missing -> "run `jet run --gc-trace <file.jet>`, then rerun `jet gc report`"
+        .Incomplete -> "trace a smaller complete workload; reports never estimate dropped promotions"
+        else -> "rerun the program with `--gc-trace` to replace the rejected trace"
+    }
+    bytes :: error.detail.bytes()
+    end := bytes.len()
+    loop end > 0 && bytes[end - 1] == (U8{46}) -> end -= 1
+    detail := String.from_bytes(bytes[0..<end]) ?? panic("ASCII dot trimming preserves UTF-8") // #4303
+    diagnostic_from_registry("E2110", None, "GC trace cannot be reported", "{detail}.", "{fix}.")
+}
+
+// Rust fail (CmdGc.rs:641-674), complete outward behavior. Process output and
+// exit belong to Main's host, not this library. Machine errors have NO LF.
+pub fn jet_cli_gc_fail(error: JetCLIGCTraceError, mode: JetCLIOutputMode) -[FS, Env]> JetDriverVerbOutput Never! {
+    diagnostic :: jet_cli_gc_failure_diagnostic(error)
+    if mode.json {
+        report :: diagnostic_to_report(diagnostic, ReportPath.from_process(""), "")
+        return JetDriverVerbOutput{
+            stdout: StatusEnvelope.new("gc.report", false).with_report(report).json(),
+            stderr: "",
+            exit_code: JET_DRIVER_EXIT_USER_ERROR,
+        }
+    }
+    JetDriverVerbOutput{
+        stdout: "",
+        stderr: diagnostic_render_all("", "", [Diagnostic]{diagnostic}, mode.color),
+        exit_code: JET_DRIVER_EXIT_USER_ERROR,
+    }
+}
+
+// Rust run (CmdGc.rs:101-106), success projection of an ALREADY validated
+// actual trace. This does not synthesize a successful trace or execute a read.
+pub fn jet_cli_gc_trace_output(trace: JetCLIGCTrace, mode: JetCLIOutputMode) -> JetDriverVerbOutput Never! {
+    stdout :: if mode.json -> "{jet_cli_gc_render_json(trace)}\n" else -> jet_cli_gc_render_text(trace, mode.color)
+    JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// Rust run (CmdGc.rs:99-106), parse/output phase after the real retained read
+// and clock. Native run must call it only after those operations succeed.
+pub fn jet_cli_gc_parse_output(raw: String, root: gc_native_paths.OsPath, now: U64, mode: JetCLIOutputMode) -[FS, Env]> JetDriverVerbOutput Never! {
+    trace :: jet_cli_gc_parse_trace(raw, gc_native_paths.display(root), Int.from_u64(now)) ?? return jet_cli_gc_fail(err, mode)
+    jet_cli_gc_trace_output(trace, mode)
+}
+
+// Rust main.rs:3147 raw-argument trigger, including child args after '--'.
+// Main's host performs configure_trace before execution; this is not an env
+// mutation callback or a successful configuration placeholder.
+pub fn jet_cli_gc_trace_requested(raw: [String]) -> Bool Never! {
+    raw.contains("--gc-trace")
+}
+
+// Rust unix_ms (CmdGc.rs:680-681), arithmetic only on genuine Duration parts.
+// The real SystemTime now/duration_since/default producer is NOT supplied by
+// this helper. In particular monotonic_ns and bounded Core unix_ns cannot
+// substitute for that producer. No wide intermediate or overflow is needed.
+pub fn jet_cli_gc_duration_ms(seconds: U64, nanoseconds: U32) -> U64 Never! {
+    maximum :: U64{18446744073709551615}
+    whole :: seconds.checked_mul(U64{1000}) ?? return maximum
+    fraction :: U64.from_u32(nanoseconds /% U32{1000000})
+    whole.checked_add(fraction) ?? maximum
+}

@@ -1,0 +1,55 @@
+#Test("watch child flags keep invocation facts but not watch or named capture") {
+    options := jet_cli_test_options_default()
+    options.show_default = true
+    options.watch = true
+    options.record = Val("lifetime")
+    options.update_snapshots = true
+    options.coverage = true
+    options.release = true
+    options.profile = Val("release")
+    options.setting_overrides = [String:String]{"z": "2", "a": "1"}
+    options.trace_tiers = true
+    options.browser_engines = Val("firefox")
+    options.browser_retries = Val(2)
+    options.browser_reporter = Val("html")
+    options.browser_ui = true
+    options.browser_visual = true
+    options.browser_trace = true
+    options.filter = Val("original")
+    options.shuffle_seed = Val(7)
+    options.serial = true
+    options.measure = true
+    options.where_expr = Val("tag=Test")
+    options.docs = true
+    options.fresh = true
+    assert_eq(jet_cli_test_watch_flags(options, Val("failed")), [String]{"--quiet", "--capture=all", "--show-default", "--update-snapshots", "--coverage", "--release", "--profile=release", "--set=a=1", "--set=z=2", "--trace-tiers", "--browser=firefox", "--browser-retries=2", "--browser-reporter=html", "--browser-ui", "--browser-visual", "--browser-trace", "--filter=failed", "--shuffle=7", "--serial", "--measure", "--where=tag=Test", "--docs", "--fresh"})
+    assert(jet_cli_test_watch_flags(options, None).contains("--filter=original"))
+}
+#Test("watch controls drain to last byte and cycle all capture policies") {
+    state := jet_cli_test_watch_state_new(JetCLITestCapturePolicy.Failed)
+    assert(jet_cli_test_watch_control(&state, "RA?".bytes()) == JetCLITestWatchAction.NonePending)
+    assert(jet_cli_test_watch_control(&state, "qR".bytes()) == JetCLITestWatchAction.RerunFailed)
+    assert(jet_cli_test_watch_control(&state, "A".bytes()) == JetCLITestWatchAction.RunAll)
+    assert(jet_cli_test_watch_control(&state, "O".bytes()) == JetCLITestWatchAction.OutputChanged)
+    assert(state.output == JetCLITestCapturePolicy.All)
+    assert(jet_cli_test_watch_control(&state, "o".bytes()) == JetCLITestWatchAction.OutputChanged)
+    assert(state.output == JetCLITestCapturePolicy.Off)
+    assert(jet_cli_test_watch_control(&state, "o".bytes()) == JetCLITestWatchAction.OutputChanged)
+    assert(state.output == JetCLITestCapturePolicy.Failed)
+    assert(jet_cli_test_watch_control(&state, [U8]{U8{3}}) == JetCLITestWatchAction.Quit)
+    assert(jet_cli_test_watch_control(&state, [U8]{}) == JetCLITestWatchAction.NonePending)
+}
+#Test("watch keeps last good after failure and retains failed rerun cursor") {
+    state := jet_cli_test_watch_state_new(JetCLITestCapturePolicy.Failed)
+    assert(jet_cli_test_watch_changed_selection(state) == None)
+    assert(jet_cli_test_watch_observe(&state, 1, [String]{"broken"}, true))
+    assert(!state.last_good)
+    assert_eq(jet_cli_test_watch_changed_selection(state), Val([String]{"broken"}))
+    assert(!jet_cli_test_watch_observe(&state, 1, [String]{"still broken"}, false))
+    assert(!jet_cli_test_watch_observe(&state, 0, [String]{}, false))
+    assert(state.last_good)
+    assert(jet_cli_test_watch_changed_selection(state) == None)
+    assert(jet_cli_test_watch_observe(&state, 101, [String]{"compile"}, false))
+    assert(state.last_good)
+    assert_eq(state.last_status, 101)
+}

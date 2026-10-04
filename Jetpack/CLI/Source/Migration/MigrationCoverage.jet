@@ -4,7 +4,7 @@
 // coverage without a denominator, so nativeization progress cannot become a
 // false green from counting only realized objects.
 
-@CLI_COVERAGE_SCHEMA :: "jetpack-migration-coverage-v1"
+CLI_COVERAGE_SCHEMA :: prep { "jetpack-migration-coverage-v1" }
 
 // One package identity in the migration inventory.
 pub struct CoveragePackage {
@@ -124,7 +124,7 @@ pub struct CoverageReport {
         progress["remaining"] = DataTree.Int(self.nativeization.remaining)
         progress["percent"] = DataTree.Int(self.nativeization.percent)
         object := [String: DataTree]{}
-        object["schema"] = DataTree.Text(@CLI_COVERAGE_SCHEMA)
+        object["schema"] = DataTree.Text(CLI_COVERAGE_SCHEMA)
         object["native_recipes"] = cli_coverage_packages_json(self.native_recipes)
         object["centrally_imported_recipes"] = cli_coverage_packages_json(self.centrally_imported_recipes)
         object["local_imports"] = cli_coverage_packages_json(self.local_imports)

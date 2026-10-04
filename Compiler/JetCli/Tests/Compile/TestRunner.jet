@@ -1,0 +1,447 @@
+// Main-authorized typed inward-seam journey tests. The canonical empty MIR
+// fixture is borrowed from Tests/Host/Execution.jet; no native proof is claimed.
+// #4316: all journey tests remain live. The exact canonical closure currently
+// fails MIR lowering when nested generic execution loses its checked callee;
+// rerun these tests after the compiler fix, without erasing MIR/request types.
+struct JetCLITestJourneyProvider {
+    scenario: String
+    calls: [String]
+    watch_runs: Int
+    watch_steps: Int
+    impl JetCLITestProvider {
+        fn invocation_context(&self, requested_target: String?, show_default: Bool, sample_shuffle_seed: Bool) -> JetCLITestCommandContext JetCLITestError! {
+            &self.calls.push("context:{sample_shuffle_seed}")
+            Ok(JetCLITestCommandContext{target: requested_target ?? "main.jet", unix_ns: 3, receipt_bypass: false})
+        }
+        fn prepare_command(&self, invocation: JetCLITestInvocation) JetCLITestError! {
+            &self.calls.push("environment:{invocation.target}")
+        }
+        fn discover(&self, invocation: JetCLITestInvocation) -> JetCLITestDiscovery JetCLITestError! {
+            // Rust re-enters run_test_opts with the package entry file, which
+            // is classified as a file; only the first discovery is the package.
+            package :: self.scenario.starts_with("package") && !self.calls.contains("discover-package")
+            &self.calls.push(if package -> "discover-package" else -> "discover:{invocation.target}")
+            directory :: self.scenario.starts_with("directory")
+            Ok(JetCLITestDiscovery{kind: if package -> JetCLITestDiscoveryKind.Package else -> if directory -> JetCLITestDiscoveryKind.Directory else -> JetCLITestDiscoveryKind.File, root: "/project", entry: "main.jet", entry_exists: true, override_file: None, targets: if package -> [String]{"main.jet", "@run.jet", "member.jet"} else -> if directory -> [String]{"first.jet", "second.jet"} else -> [String]{}})
+        }
+        fn prepare_target(&self, file: String, invocation: JetCLITestInvocation, package: Bool) -> JetCLITestPreparation JetCLITestError! {
+            &self.calls.push("prepare:{file}")
+            if self.scenario.contains("prepare-error") && (file == "main.jet" || file == "first.jet") -> return Ok(JetCLITestPreparation.Failed{output: JetCLITestOutput{stdout: "", stderr: "couldn't read `{file}`: fixture read refusal\n"}})
+            if self.scenario.contains("profile-fatal") -> return Err(JetCLITestError{code: "E1219", message: "`--profile=missing` is not a defined build profile.", fix: "declare the profile in `package.jet`", exit_code: 1})
+            fixture :: jet_cli_execution_test_request()
+            docs :: self.scenario.starts_with("docs")
+            member_tests :: file == "member.jet" && self.scenario != "package-empty"
+            Ok(JetCLITestPreparation.Ready{target: JetCLITestPreparedTarget{file: file, source: "#Test(\"fixture\") {{}}", sources: fixture.sources, project_root: Val("/project"), has_blocks: (!package || member_tests || self.scenario.contains("finalize-error")) && !docs, has_contracts: false, has_doctests: docs, override_entry: self.scenario == "package-override" && file == "main.jet", facts: JetCLITestTargetFacts{package: "fixture", deps: [String]{}, path: file, tags: [String]{"Test"}, status: None}, cache_identity: JetCLITestCacheIdentity{canonical_path: "/project/{file}", package: package, comptime_inputs: [JetCLITestComptimeInput]{}, inputs: [JetCLITestCacheInput]{JetCLITestCacheInput{path: file, contents: Val("fixture".bytes())}}, native_identity: Val("checked-fixture")}, cache_root: "/project", preserve_report: self.scenario.contains("preserved"), report_path: "/private/fixture", coverage_path: if invocation.options.coverage -> Val("/private/coverage") else -> None}})
+        }
+        fn compile_harness(&self, target: JetCLITestPreparedTarget, invocation: JetCLITestInvocation, generated: Bool, environment: [String:String?], stdio: JetCLIExecutionStdio) -> JetCLITestCompilation JetCLITestError! {
+            &self.calls.push("compile:{target.file}:{generated}")
+            if self.scenario == "compile-failure" -> return Ok(JetCLITestCompilation.Refused(JetDriverVerbOutput{stdout: "", stderr: "checked compile failure\n", exit_code: 1}))
+            request := jet_cli_execution_test_request()
+            loop pair in environment -> request.environment[pair.key] = ~pair.value
+            request.stdio = stdio
+            Ok(JetCLITestCompilation.Ready{request: request, diagnostics: JetCLITestOutput{stdout: "", stderr: ""}})
+        }
+        fn doctests(&self, target: JetCLITestPreparedTarget, invocation: JetCLITestInvocation) -> JetCLITestPhaseResult JetCLITestError! {
+            &self.calls.push("doctest:{target.file}")
+            Ok(JetCLITestPhaseResult{ok: true, output: JetCLITestOutput{stdout: "", stderr: ""}})
+        }
+        fn finalize_evidence(&self, target: JetCLITestPreparedTarget, invocation: JetCLITestInvocation, harness_stdout: String?, child_ok: Bool) -> JetCLITestFinalization JetCLITestError! {
+            &self.calls.push("finalize:{target.file}:{child_ok}")
+            if self.scenario.contains("finalize-error") && target.file != "member.jet" && target.file != "second.jet" -> return Err(JetCLITestError{code: "E2105", message: "fixture finalization refusal", fix: "", exit_code: 1})
+            Ok(JetCLITestFinalization{ok: Val(child_ok && self.scenario != "evidence-failure"), output: JetCLITestOutput{stdout: "", stderr: ""}})
+        }
+        fn read_cache(&self, path: String) -> [U8]? Never! {
+            &self.calls.push("cache-read")
+            if self.scenario.starts_with("cache") -> return Val(jet_cli_test_cache_encode(JetCLITestResultCache{ok: true, stdout: "cached pass\n", stderr: ""}))
+            None
+        }
+        fn write_cache(&self, path: String, bytes: [U8]) Never! {
+            result :: jet_cli_test_cache_decode(bytes) ?? panic("writer must produce canonical cache bytes")
+            &self.calls.push("cache-write:{result.ok}")
+        }
+        fn remove_evidence(&self, target: JetCLITestPreparedTarget) Never! { &self.calls.push("evidence-remove:{target.file}") }
+        fn remove_coverage(&self, target: JetCLITestPreparedTarget) Never! { &self.calls.push("coverage-remove") }
+        fn coverage(&self, target: JetCLITestPreparedTarget, invocation: JetCLITestInvocation) -> JetCLITestCoverageResult JetCLITestError! {
+            &self.calls.push("coverage")
+            Ok(JetCLITestCoverageResult{records: "f\t4\n", functions: [JetCLITestCoverableFunction]{JetCLITestCoverableFunction{name: "fixture", line: 4}}})
+        }
+        fn begin_record(&self, target: JetCLITestPreparedTarget, invocation: JetCLITestInvocation) JetCLITestError! { &self.calls.push("record-begin") }
+        fn finish_record(&self, target: JetCLITestPreparedTarget, invocation: JetCLITestInvocation, exit_code: Int) JetCLITestError! { &self.calls.push("record-finish:{exit_code}") }
+        fn emit(&self, output: JetCLITestOutput) Never! {
+            if output.stdout != "" -> &self.calls.push("stdout:{output.stdout}")
+            if output.stderr != "" -> &self.calls.push("stderr:{output.stderr}")
+        }
+        fn watch_open(&self, invocation: JetCLITestInvocation) -> JetCLITestWatchSession JetCLITestError! {
+            &self.calls.push("watch-open")
+            Ok(JetCLITestWatchSession{identity: 9})
+        }
+        fn watch_next(&self, session: JetCLITestWatchSession) -> JetCLITestWatchEvent JetCLITestError! {
+            assert_eq(session.identity, 9)
+            self.watch_steps += 1
+            Ok(JetCLITestWatchEvent{controls: if self.watch_steps == 1 -> [U8]{U8{114}} else -> [U8]{U8{113}}, changed: false})
+        }
+        fn watch_child(&self, target: String, argv: [String], mode: JetCLIOutputMode) -> JetCLITestWatchChild JetCLITestError! {
+            self.watch_runs += 1
+            &self.calls.push("watch-child:{self.watch_runs}")
+            &self.calls.push("argv:{argv.join(" ")}")
+            if self.scenario == "watch-spawn-error" -> return Err(JetCLITestError{code: "E2105", message: "fixture spawn refusal", fix: "", exit_code: 1})
+            if self.watch_runs == 2 -> assert(argv.contains("--filter=fixture"))
+            ok :: self.watch_runs > 1
+            Ok(JetCLITestWatchChild{exit_code: if ok -> 0 else -> 1, result: JetCLITestResultCache{ok: ok, stdout: if ok -> "fixture: pass\n" else -> "fixture: FAIL\n", stderr: ""}})
+        }
+        fn watch_close(&self, session: JetCLITestWatchSession, exit_code: Int) JetCLITestError! {
+            assert_eq(session.identity, 9)
+            &self.calls.push("watch-close:{exit_code}")
+        }
+    }
+}
+struct JetCLITestJourneyHost {
+    calls: [String]
+    status: Int
+    fail_launch: Bool
+    generated: Bool
+    impl JetCLIExecutionHost {
+        fn launch(&self, request: JetCLIExecutionRequest) -> JetCLIExecutionSession JetCLIExecutionError! {
+            &self.calls.push("launch")
+            assert_eq(request.artifact_identity, "fixture-artifact")
+            // #4410: synthesized optional require_eq has mismatched MIR
+            // operands. Require presence, then compare the same exact text;
+            // the original optional assertions remain in the frozen repro.
+            if self.generated {
+                assert(request.stdio == JetCLIExecutionStdio.Inherit)
+                // #4410 original: assert_eq(request.environment["JET_FUZZ_ITERATIONS"], Val("1000"))
+                // #4410 original: assert_eq(request.environment["JET_FUZZ_TIME_MS"], Val("0"))
+                // #4410 original: assert_eq(request.environment["JET_FUZZ_SEED"], Val("6840143426475589633"))
+                // #4410 original: assert_eq(request.environment["JET_FUZZ_CORPUS"], Val(".jet/fuzz/main"))
+                assert_eq(request.environment["JET_FUZZ_ITERATIONS"] ?? panic("missing iterations"), "1000")
+                assert_eq(request.environment["JET_FUZZ_TIME_MS"] ?? panic("missing time budget"), "0")
+                assert_eq(request.environment["JET_FUZZ_SEED"] ?? panic("missing seed"), "6840143426475589633")
+                assert_eq(request.environment["JET_FUZZ_CORPUS"] ?? panic("missing corpus"), ".jet/fuzz/main")
+            } else {
+                assert(request.stdio == JetCLIExecutionStdio.Capture)
+                // #4410 original: assert_eq(request.environment["JET_PROJECT_ROOT"], Val("/project"))
+                // #4410 original: assert_eq(request.environment["JET_TEST_CAPTURE"], Val("all"))
+                assert_eq(request.environment["JET_PROJECT_ROOT"] ?? panic("missing project root"), "/project")
+                assert_eq(request.environment["JET_TEST_CAPTURE"] ?? panic("missing capture policy"), "all")
+            }
+            if self.fail_launch -> return Err(JetCLIExecutionError{operation: "launch", message: "fixture refusal"})
+            Ok(JetCLIExecutionSession{identity: 8})
+        }
+        fn wait(&self, session: JetCLIExecutionSession) -> JetCLIExecutionResult JetCLIExecutionError! {
+            assert_eq(session.identity, 8)
+            &self.calls.push("wait")
+            Ok(JetCLIExecutionResult{exit_code: self.status, stdout: if self.status == 0 -> "fixture: pass\n" else -> "fixture: FAIL\n", stderr: ""})
+        }
+        fn close(&self, session: JetCLIExecutionSession) JetCLIExecutionError! {
+            assert_eq(session.identity, 8)
+            &self.calls.push("close")
+        }
+        fn reload(&self, session: JetCLIExecutionSession, request: JetCLIExecutionRequest, policy: WatchPolicy) JetCLIExecutionError! { panic("test commands never reload execution sessions") }
+        fn next_change(&self, session: JetCLIExecutionSession) -> JetCLIExecutionChange JetCLIExecutionError! { panic("test watch belongs to the canonical closure watcher") }
+    }
+}
+fn jet_cli_test_journey_provider(scenario: String) -> JetCLITestJourneyProvider Never! {
+    JetCLITestJourneyProvider{scenario: scenario, calls: [String]{}, watch_runs: 0, watch_steps: 0}
+}
+fn jet_cli_test_journey_host(status: Int) -> JetCLITestJourneyHost Never! {
+    JetCLITestJourneyHost{calls: [String]{}, status: status, fail_launch: false, generated: false}
+}
+fn jet_cli_test_journey_invocation() -> JetCLITestInvocation Never! {
+    options := jet_cli_test_options_default()
+    options.capture = JetCLITestCapturePolicy.All
+    JetCLITestInvocation{target: "main.jet", options: options, mode: JetCLIOutputMode{json: false, color: false, quiet: false}, advisory_lints_visible: false, receipt_bypass: false}
+}
+#Test("actual test command dispatch fails then fixes through canonical execution seam") {
+    provider := jet_cli_test_journey_provider("")
+    host := jet_cli_test_journey_host(1)
+    invocation :: jet_cli_test_journey_invocation()
+    assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 1)
+    assert(provider.calls.contains("finalize:main.jet:false"))
+    assert(provider.calls.contains("cache-write:false"))
+    host.status = 0
+    assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 0)
+    assert_eq(host.calls, [String]{"launch", "wait", "close", "launch", "wait", "close"})
+    assert(provider.calls.contains("finalize:main.jet:true"))
+}
+#Test("successful child cannot bypass required evidence grading") {
+    provider := jet_cli_test_journey_provider("evidence-failure")
+    host := jet_cli_test_journey_host(0)
+    invocation :: jet_cli_test_journey_invocation()
+    assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 1)
+    assert(provider.calls.contains("cache-write:false"))
+}
+#Test("package no-test root traverses members but skips reserved fact files") {
+    provider := jet_cli_test_journey_provider("package")
+    host := jet_cli_test_journey_host(0)
+    invocation :: jet_cli_test_journey_invocation()
+    assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 0)
+    assert(!provider.calls.contains("compile:main.jet:false"))
+    assert(!provider.calls.contains("prepare:@run.jet"))
+    assert(provider.calls.contains("compile:member.jet:false"))
+    assert_eq(host.calls.len(), 3)
+}
+#Test("package root test override stops member traversal") {
+    provider := jet_cli_test_journey_provider("package-override")
+    host := jet_cli_test_journey_host(0)
+    invocation :: jet_cli_test_journey_invocation()
+    assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 0)
+    assert(provider.calls.contains("compile:main.jet:false"))
+    assert(!provider.calls.contains("prepare:member.jet"))
+    assert(!provider.calls.contains("cache-write:true"))
+}
+#Test("directory continues all selected files after failure") {
+    provider := jet_cli_test_journey_provider("directory")
+    host := jet_cli_test_journey_host(1)
+    invocation :: jet_cli_test_journey_invocation()
+    assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 1)
+    assert(provider.calls.contains("finalize:first.jet:false") && provider.calls.contains("finalize:second.jet:false"))
+    assert_eq(host.calls.len(), 6)
+}
+#Test("cached result still finalizes canonical evidence and never launches producer") {
+    provider := jet_cli_test_journey_provider("cache")
+    host := jet_cli_test_journey_host(0)
+    invocation :: jet_cli_test_journey_invocation()
+    assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 0)
+    assert_eq(host.calls.len(), 0)
+    assert(provider.calls.contains("finalize:main.jet:true") && provider.calls.contains("stdout:cached pass\n"))
+}
+#Test("fresh bypasses result cache without suppressing compile or evidence") {
+    provider := jet_cli_test_journey_provider("cache")
+    host := jet_cli_test_journey_host(0)
+    invocation := jet_cli_test_journey_invocation()
+    invocation.options.fresh = true
+    assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 0)
+    assert(!provider.calls.contains("cache-read"))
+    assert_eq(host.calls.len(), 3)
+}
+#Test("doctest-only target finalizes without a stock harness or result-cache write") {
+    provider := jet_cli_test_journey_provider("docs")
+    host := jet_cli_test_journey_host(0)
+    invocation := jet_cli_test_journey_invocation()
+    invocation.options.docs = true
+    assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 0)
+    assert(provider.calls.contains("doctest:main.jet") && provider.calls.contains("finalize:main.jet:true"))
+    assert_eq(host.calls.len(), 0)
+}
+#Test("compile refusal still finalizes failed evidence without launching") {
+    provider := jet_cli_test_journey_provider("compile-failure")
+    host := jet_cli_test_journey_host(0)
+    invocation :: jet_cli_test_journey_invocation()
+    assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 1)
+    assert(provider.calls.contains("finalize:main.jet:false"))
+    assert_eq(host.calls.len(), 0)
+}
+#Test("generated command uses Rust-default corpus iterations time seed environment") {
+    provider := jet_cli_test_journey_provider("")
+    host := jet_cli_test_journey_host(0)
+    host.generated = true
+    invocation := jet_cli_test_journey_invocation()
+    invocation.options.grade_generated = true
+    assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 0)
+    assert(provider.calls.contains("compile:main.jet:true"))
+    assert_eq(jet_cli_test_generated_corpus("path/a.b.jet", None), ".jet/fuzz/a_b")
+    assert_eq(jet_cli_test_generated_corpus("unused.jet", Val("a🦀/b-c")), ".jet/fuzz/a__b-c")
+}
+#Test("watch failed-test selection reuses command dispatch and closes session") {
+    provider := jet_cli_test_journey_provider("")
+    host := jet_cli_test_journey_host(0)
+    invocation := jet_cli_test_journey_invocation()
+    invocation.options.watch = true
+    assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 0)
+    assert_eq(provider.watch_runs, 2)
+    assert(provider.calls.contains("watch-close:0"))
+    assert_eq(host.calls.len(), 0)
+}
+#Test("named capture closes after joined execution with actual failing status") {
+    provider := jet_cli_test_journey_provider("")
+    host := jet_cli_test_journey_host(3)
+    invocation := jet_cli_test_journey_invocation()
+    invocation.options.record = Val("named")
+    assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 1)
+    assert(provider.calls.contains("record-begin") && provider.calls.contains("record-finish:3"))
+    assert(!provider.calls.contains("cache-write:false"))
+}
+#Test("Front wrapper uses shared settings refusal and samples bare shuffle only") {
+    provider := jet_cli_test_journey_provider("")
+    host := jet_cli_test_journey_host(0)
+    mode :: JetCLIOutputMode{json: false, color: false, quiet: false}
+    if jet_cli_test_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>([String]{"test", "--capture=all", "--shuffle"}, mode, false, &provider, &host) == {
+        .Completed(status) -> assert_eq(status, 0)
+        else -> panic("bare default command refused")
+    }
+    assert(provider.calls.contains("context:true"))
+    if jet_cli_test_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>([String]{"test", "--set=x=1", "--set=x=2"}, mode, false, &provider, &host) == {
+        .OptionsRefused(error) -> assert_eq(error.code, "E2104")
+        else -> panic("canonical duplicate setting diagnostic lost")
+    }
+    // Rust main.rs:2984 parses settings before any target resolution or
+    // clock sample, so the refused invocation never reaches the provider.
+    assert(!provider.calls.contains("context:false"))
+}
+
+#Test("target preparation refusal records failure and continues package and directory") {
+    scenarios :: [String]{"package-prepare-error", "directory-prepare-error"}
+    loop scenario in scenarios {
+        provider := jet_cli_test_journey_provider(scenario)
+        host := jet_cli_test_journey_host(0)
+        invocation :: jet_cli_test_journey_invocation()
+        assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 1)
+        later :: if scenario.starts_with("package") -> "member.jet" else -> "second.jet"
+        assert(provider.calls.contains("compile:{later}:false"))
+        assert(provider.calls.contains("finalize:{later}:true"))
+        assert_eq(host.calls.len(), 3)
+        failed :: if scenario.starts_with("package") -> "main.jet" else -> "first.jet"
+        assert(provider.calls.contains("stderr:couldn't read `{failed}`: fixture read refusal\n"))
+    }
+}
+// Rust resolve_named_profile exits at the first target; no later member runs.
+#Test("fatal target preparation refusal stops directory traversal") {
+    provider := jet_cli_test_journey_provider("directory-profile-fatal")
+    host := jet_cli_test_journey_host(0)
+    invocation :: jet_cli_test_journey_invocation()
+    if jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) == {
+        .Ok(_) -> panic("unknown profile was treated as a failed target")
+        .Err(error) -> assert_eq(error.code, "E1219")
+    }
+    assert(provider.calls.contains("prepare:first.jet"))
+    assert(!provider.calls.contains("prepare:second.jet"))
+    assert_eq(host.calls.len(), 0)
+}
+// Rust run_test_opts order: environment/existence, generated, where, watch,
+// fresh status (write_mode_status: never in machine mode), then discovery.
+#Test("command preamble order keeps discovery after where watch and fresh") {
+    provider := jet_cli_test_journey_provider("package")
+    host := jet_cli_test_journey_host(0)
+    invocation := jet_cli_test_journey_invocation()
+    invocation.options.where_expr = Val("")
+    if jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) == {
+        .Ok(_) -> panic("invalid where accepted")
+        .Err(error) -> assert_eq(error.code, "E2104")
+    }
+    assert_eq(provider.calls, [String]{"environment:main.jet"})
+    machine := jet_cli_test_journey_provider("")
+    fresh := jet_cli_test_journey_invocation()
+    fresh.options.fresh = true
+    fresh.mode = JetCLIOutputMode{json: true, color: false, quiet: false}
+    assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(fresh, &machine, &host) ?? panic(err.message), 0)
+    loop call in machine.calls -> assert(!call.contains("fresh result run"))
+    human := jet_cli_test_journey_provider("")
+    fresh.mode = JetCLIOutputMode{json: false, color: false, quiet: false}
+    assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(fresh, &human, &host) ?? panic(err.message), 0)
+    assert_eq(human.calls[0], "environment:main.jet")
+    assert_eq(human.calls[1], "stderr:jet test: fresh result run (test-result cache bypassed; build cache reusable)\n")
+    assert_eq(human.calls[2], "discover:main.jet")
+}
+// Rust run_test_package: nothing testable re-enters run_test_opts for the
+// entry file, repeating environment/existence and the fresh status line.
+#Test("package without testable members re-enters the command for its entry") {
+    provider := jet_cli_test_journey_provider("package-empty")
+    host := jet_cli_test_journey_host(0)
+    invocation := jet_cli_test_journey_invocation()
+    invocation.target = "/project"
+    invocation.options.fresh = true
+    assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 0)
+    assert(provider.calls.contains("environment:/project") && provider.calls.contains("environment:main.jet"))
+    assert(provider.calls.contains("discover:main.jet"))
+    notices := 0
+    loop call in provider.calls { if call.contains("fresh result run") -> notices += 1 }
+    assert_eq(notices, 2)
+    assert(provider.calls.contains("compile:main.jet:false"))
+    assert_eq(host.calls.len(), 3)
+}
+// Rust run_test_watch never runs directory/package discovery; children get
+// test <path> [--json] [--verbose] flags, and a spawn failure keeps watching.
+#Test("watch skips discovery forwards machine and verbose and survives spawn failure") {
+    provider := jet_cli_test_journey_provider("watch-spawn-error")
+    host := jet_cli_test_journey_host(0)
+    invocation := jet_cli_test_journey_invocation()
+    invocation.options.watch = true
+    invocation.mode = JetCLIOutputMode{json: true, color: false, quiet: false}
+    invocation.advisory_lints_visible = true
+    assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 1)
+    assert(provider.calls.contains("argv:test main.jet --json --verbose --quiet --capture=all"))
+    assert(provider.calls.contains("stderr:jet test watcher: couldn't run child: fixture spawn refusal\n"))
+    assert(provider.calls.contains("watch-close:1"))
+    loop call in provider.calls -> assert(!call.starts_with("discover"))
+}
+#Test("finalization error continues package with failed cache and captured output") {
+    provider := jet_cli_test_journey_provider("package-finalize-error")
+    host := jet_cli_test_journey_host(0)
+    invocation :: jet_cli_test_journey_invocation()
+    assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 1)
+    assert(provider.calls.contains("finalize:main.jet:true"))
+    assert(provider.calls.contains("finalize:member.jet:true"))
+    assert(provider.calls.contains("cache-write:false"))
+    assert(provider.calls.contains("cache-write:true"))
+    assert(provider.calls.contains("stdout:fixture: pass\n"))
+    assert_eq(host.calls.len(), 6)
+    found := false
+    loop call in provider.calls { if call.contains("finalize test evidence for `main.jet`: fixture finalization refusal") -> found = true }
+    assert(found)
+}
+#Test("finalization error retains coverage and named capture completion") {
+    provider := jet_cli_test_journey_provider("finalize-error")
+    host := jet_cli_test_journey_host(0)
+    invocation := jet_cli_test_journey_invocation()
+    invocation.options.coverage = true
+    invocation.options.record = Val("named")
+    assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 1)
+    assert(provider.calls.contains("coverage"))
+    assert(provider.calls.contains("coverage-remove"))
+    assert(provider.calls.contains("stdout:fixture: pass\n"))
+    assert(provider.calls.contains("record-begin"))
+    assert(provider.calls.contains("record-finish:1"))
+    assert_eq(host.calls, [String]{"launch", "wait", "close"})
+}
+#Test("cached and doctest finalization errors are failed targets without launching") {
+    scenarios :: [String]{"cache-finalize-error", "docs-finalize-error"}
+    loop scenario in scenarios {
+        provider := jet_cli_test_journey_provider(scenario)
+        host := jet_cli_test_journey_host(0)
+        invocation := jet_cli_test_journey_invocation()
+        invocation.options.docs = scenario.starts_with("docs")
+        assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 1)
+        assert(provider.calls.contains("finalize:main.jet:true"))
+        assert_eq(host.calls.len(), 0)
+        if scenario.starts_with("cache") -> assert(provider.calls.contains("stdout:cached pass\n"))
+    }
+}
+#Test("failed finalization cleans only private evidence") {
+    scenarios :: [String]{"finalize-error", "finalize-error-preserved"}
+    loop scenario in scenarios {
+        provider := jet_cli_test_journey_provider(scenario)
+        host := jet_cli_test_journey_host(0)
+        invocation :: jet_cli_test_journey_invocation()
+        assert_eq(jet_cli_test_run_command<JetCLITestJourneyProvider,JetCLITestJourneyHost>(invocation, &provider, &host) ?? panic(err.message), 1)
+        removals := 0
+        loop call in provider.calls { if call == "evidence-remove:main.jet" -> removals += 1 }
+        assert_eq(removals, if scenario.contains("preserved") -> 1 else -> 2)
+    }
+}
+
+// Actual Front route, not a local dispatcher. Focused Runner proofs cannot
+// replace Front's process-wide machine-mode publication with a fake sys API.
+#Test("Front test dispatch preserves owned argv output mode and verbose advisory") {
+    facts :: output_adapter_test_facts()
+    plan :: jet_cli_front([String]{"test", "main.jet", "--json", "--quiet", "--verbose", "--", "--filter=child", "evil; arg"}, facts)
+    if plan == {
+        .Test(arguments, mode, advisory_lints_visible) -> {
+            assert_eq(arguments, [String]{"test", "main.jet", "--json", "--quiet", "--verbose"})
+            assert(mode.json)
+            assert(mode.quiet)
+            assert(!mode.color)
+            assert(advisory_lints_visible)
+        }
+        else -> panic("Front did not dispatch test")
+    }
+    normal :: jet_cli_front([String]{"test", "main.jet", "--", "--json", "--verbose"}, facts)
+    if normal == {
+        .Test(arguments, mode, advisory_lints_visible) -> {
+            assert_eq(arguments, [String]{"test", "main.jet"})
+            assert(!mode.json)
+            assert(!mode.quiet)
+            assert(!advisory_lints_visible)
+        }
+        else -> panic("Front did not dispatch test")
+    }
+}

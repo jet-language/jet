@@ -8,17 +8,20 @@
 
 Compiler hash:
 Compiler front end: Compiler hash
+Compiler store: Compiler front end
 Foundation: Compiler front end
 TrustRoot: Foundation
 NixEval:
 PackageModel: Foundation
 EnvModel: PackageModel, Compiler front end
 Nix: NixEval, PackageModel
-Store: PackageModel, TrustRoot
+Store: PackageModel, TrustRoot, Compiler store
 Trust: Store, EnvModel
 Recipe: Trust
 Provider: Trust, Recipe, Nix, EnvModel
+Publication: PackageModel, Provider
 Environment: Provider
 Services: Environment
 Image: Environment
+JetOS: PackageModel, EnvModel, Store
 CLI: Services, Image

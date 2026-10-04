@@ -5,16 +5,16 @@
 
 // D-ECO-HANGARPATH1: the native data-directory leaf (macOS/Windows spell it
 // `Hangar`); explicit roots keep the historical lower-case child.
-@HANGAR_NATIVE_SUBDIR_TITLE :: "Hangar"
-@HANGAR_LEGACY_SUBDIR :: "hangar"
-@HANGAR_SHARED_CAS_ENV :: "JETPACK_SHARED_CAS"
-@HANGAR_MAX_STORE_OBJECTS :: 1000000
-@HANGAR_MAX_STORE_META_BYTES :: 1048576
+HANGAR_NATIVE_SUBDIR_TITLE :: prep { "Hangar" }
+HANGAR_LEGACY_SUBDIR :: prep { "hangar" }
+HANGAR_SHARED_CAS_ENV :: prep { "JETPACK_SHARED_CAS" }
+HANGAR_MAX_STORE_OBJECTS :: prep { 1000000 }
+HANGAR_MAX_STORE_META_BYTES :: prep { 1048576 }
 
 // The native leaf of the resolved root's content-addressed store.
 fn pkg_hangar_subdir() -[Env]> String Never! {
-    if sys.is_macos() || sys.is_windows() -> return @HANGAR_NATIVE_SUBDIR_TITLE
-    @HANGAR_LEGACY_SUBDIR
+    if sys.is_macos() || sys.is_windows() -> return HANGAR_NATIVE_SUBDIR_TITLE
+    HANGAR_LEGACY_SUBDIR
 }
 
 // The resolved root, and whether it is the default user-owned root.
@@ -30,14 +30,14 @@ pub struct HangarRoots {
 
     // The global content-addressed store (hangar) under this root.
     fn hangar_dir(self) -[Env]> String Never! {
-        leaf :: if self.dev_mode -> pkg_hangar_subdir() else -> @HANGAR_LEGACY_SUBDIR
+        leaf :: if self.dev_mode -> pkg_hangar_subdir() else -> HANGAR_LEGACY_SUBDIR
         files.join(self.root, leaf)
     }
 
     // The immutable payload pool this root shares: the machine-wide pool for
     // the default user root or an explicit JETPACK_SHARED_CAS, else its own.
     fn shared_cas_dir(self) -[Env]> String Never! {
-        if self.root == pkg_user_data_root() || pkg_environment_path(@HANGAR_SHARED_CAS_ENV) != None {
+        if self.root == pkg_user_data_root() || pkg_environment_path(HANGAR_SHARED_CAS_ENV) != None {
             return pkg_shared_cas_dir()
         }
         files.join(self.hangar_dir(), "cas")
@@ -70,7 +70,7 @@ pub struct HangarRoots {
                 if info.is_symlink || !info.is_dir -> next
                 if pkg_hangar_real_directory(files.join(entry.path, pkg_hangar_subdir())) {
                     pkg_hangar_add_machine_root(&roots, HangarRoots{root: entry.path, dev_mode: true})
-                } else if pkg_hangar_real_directory(files.join(entry.path, @HANGAR_LEGACY_SUBDIR)) {
+                } else if pkg_hangar_real_directory(files.join(entry.path, HANGAR_LEGACY_SUBDIR)) {
                     pkg_hangar_add_machine_root(&roots, HangarRoots.at(entry.path))
                 }
             }
@@ -81,7 +81,7 @@ pub struct HangarRoots {
 
 // The machine/user shared immutable payload pool.
 pub fn pkg_shared_cas_dir() -[Env]> String Never! {
-    explicit :: pkg_environment_path(@HANGAR_SHARED_CAS_ENV) ?? return files.join(files.join(pkg_user_data_root(), pkg_hangar_subdir()), "cas")
+    explicit :: pkg_environment_path(HANGAR_SHARED_CAS_ENV) ?? return files.join(files.join(pkg_user_data_root(), pkg_hangar_subdir()), "cas")
     explicit
 }
 
@@ -100,7 +100,7 @@ fn pkg_hangar_real_directory(path: String) -[FS]> Bool Never! {
 // The project-local `.jet/` managed folder (lockfile, caches, GC roots).
 // Never holds realized packages; those live in the shared hangar.
 pub fn pkg_managed_dir(project: String) -> String Never! {
-    files.join(project, @SOURCE_ROOT_DIR)
+    files.join(project, SOURCE_ROOT_DIR)
 }
 
 // The single unified lockfile path for `project` (`.jet/lock`, U2).
@@ -116,7 +116,9 @@ pub fn pkg_resolve_roots() -[Env]> HangarRoots Never! {
 }
 
 fn pkg_home_dir() -[Env]> String Never! {
-    if sys.is_windows() -> return pkg_environment_path("USERPROFILE") ?? pkg_environment_path("HOME") ?? "."
+    if sys.is_windows() {
+        if pkg_environment_path("USERPROFILE") == .Val(home) -> return home
+    }
     pkg_environment_path("HOME") ?? "."
 }
 
@@ -152,7 +154,7 @@ pub fn pkg_legacy_user_root() -[Env]> String Never! {
 
 // The old Hangar path of the pre-D-ECO-HANGARPATH1 resolver.
 pub fn pkg_legacy_user_hangar_dir() -[Env]> String Never! {
-    files.join(pkg_legacy_user_root(), @HANGAR_LEGACY_SUBDIR)
+    files.join(pkg_legacy_user_root(), HANGAR_LEGACY_SUBDIR)
 }
 
 // JP0 cache identity. Legacy records have empty fields and can never hit.
@@ -237,7 +239,7 @@ pub struct StoreEntry {
 
 // A JSON string literal for `text`.
 fn pkg_json_quote(text: String) -> String Never! {
-    pkg_json_render(DataTree.Text(text))
+    pkg_json_render(DataTree.Text(~text))
 }
 
 fn pkg_hangar_json_string_array(items: [String]) -> String Never! {
@@ -346,18 +348,19 @@ fn pkg_meta_unsigned(object: [String: DataTree], key: String) -> Int? Never! {
         code :: Int.from_u8(byte)
         if code < 48 || code > 57 -> return None
     }
-    Int.parse(digits) ?? None
+    value :: Int.parse(digits) ?? return None
+    Val(value)
 }
 
 // A malformed or over-budget read of the recorded store projection.
 #Error
 pub enum HangarReadError {
-    Io(IOError)
+    IO(IOError)
     InvalidData(String)
 
     fn message(self) -> String Never! {
         if self == {
-            .Io(error) -> "{error}"
+            .IO(error) -> "{error}"
             .InvalidData(detail) -> detail
         }
     }
@@ -380,7 +383,7 @@ fn pkg_store_list_impl(roots: HangarRoots, strict: Bool) -[FS, Env]> [StoreEntry
     store :: roots.hangar_dir()
     entries :: files.list_dir(store) ? listed -> listed ! error -> {
         if pkg_io_is_not_found(error) || !strict -> return Ok(out)
-        return Err(HangarReadError.Io(error))
+        return Err(HangarReadError.IO(error))
     }
     object_count := 0
     loop entry in entries {
@@ -388,24 +391,24 @@ fn pkg_store_list_impl(roots: HangarRoots, strict: Bool) -[FS, Env]> [StoreEntry
             .Ok(info) -> info
             .Err(error) -> {
                 if !strict -> next
-                return Err(HangarReadError.Io(error))
+                return Err(HangarReadError.IO(error))
             }
         }
         if !kind.is_dir -> next
         meta :: files.join(entry.path, "meta.json")
         info :: files.stat(meta) ? found -> found ! error -> {
             if pkg_io_is_not_found(error) || !strict -> next
-            return Err(HangarReadError.Io(error))
+            return Err(HangarReadError.IO(error))
         }
         if !info.is_file || info.is_symlink {
             if strict -> return Err(HangarReadError.InvalidData("Hangar metadata `{meta}` is not a regular file"))
             next
         }
         object_count += 1
-        if object_count > @HANGAR_MAX_STORE_OBJECTS {
-            return Err(HangarReadError.InvalidData("Hangar contains more than {@HANGAR_MAX_STORE_OBJECTS} store objects"))
+        if object_count > HANGAR_MAX_STORE_OBJECTS {
+            return Err(HangarReadError.InvalidData("Hangar contains more than {HANGAR_MAX_STORE_OBJECTS} store objects"))
         }
-        text :: if pkg_hangar_read_bounded_text(meta, @HANGAR_MAX_STORE_META_BYTES) == {
+        text :: if pkg_hangar_read_bounded_text(meta, HANGAR_MAX_STORE_META_BYTES) == {
             .Ok(read) -> read
             .Err(error) -> {
                 if !strict -> next
@@ -444,9 +447,9 @@ fn pkg_store_list_impl(roots: HangarRoots, strict: Bool) -[FS, Env]> [StoreEntry
 
 // A metadata file of at most `limit` bytes, as UTF-8.
 fn pkg_hangar_read_bounded_text(path: String, limit: Int) -[FS]> String HangarReadError! {
-    info :: files.stat(path) ?? return Err(HangarReadError.Io(err))
+    info :: files.stat(path) ?? return Err(HangarReadError.IO(err))
     if info.size > limit -> return Err(HangarReadError.InvalidData("Hangar metadata `{path}` exceeds {limit} bytes"))
-    bytes :: files.read_at(path, 0, limit + 1) ?? return Err(HangarReadError.Io(err))
+    bytes :: files.read_at(path, 0, limit + 1) ?? return Err(HangarReadError.IO(err))
     if bytes.len() > limit -> return Err(HangarReadError.InvalidData("Hangar metadata `{path}` exceeds {limit} bytes"))
     text :: String.from_bytes(bytes) ?? return Err(HangarReadError.InvalidData("Hangar metadata `{path}` is not UTF-8"))
     Ok(text)

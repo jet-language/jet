@@ -1,0 +1,516 @@
+use jet_foundation.[pkg_bytes_code]
+use jet_lexer.[lex, Token, TOKEN_DOT, TOKEN_LBRACE, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_EOF]
+use jet_foundation.[Span, jet_ring_parse_manifest_layer, BUILD_ENTRY_FN, MANIFEST_BLOCK_AUTHORITY, MANIFEST_BLOCK_BOUNDARIES, MANIFEST_BLOCK_BUILD, MANIFEST_BLOCK_DEPS, MANIFEST_BLOCK_MEMBERS, MANIFEST_BLOCK_OUTPUTS, MANIFEST_BLOCK_SETTINGS, MANIFEST_FIELD_NAME, MANIFEST_FIELD_VERSION, OUTPUT_FIELD_BINDINGS, OUTPUT_FIELD_LOADABLE, OUTPUT_FIELD_NATIVE, SYSTEM_FIELD_TARGET]
+
+// The one structural reader of `package.jet` Package and Config carriers
+// (Package/mod.rs `parse_common` and its field readers). There is no second,
+// legacy-vocabulary parser (D-CONF-PLANE1).
+
+impl PackageFacts {
+    // Parse the canonical `package.jet` root shape, validating guarantees and
+    // `defaults:`.
+    pub fn parse(text: String, origin: String) -> PackageFacts PackageParseError! {
+        facts :: PackageFacts.parse_uncomposed(text, origin)
+        facts.validate_guarantees()
+        if facts.validate_defaults() == .Err(error) -> return Err(PackageParseError.Composition(error.message()))
+        Ok(facts)
+    }
+
+    // Parse the root's own declarations without validating references a
+    // later file-backed Config may supply.
+    pub fn parse_uncomposed(text: String, origin: String) -> PackageFacts PackageParseError! {
+        facts :: pkg_parse_common(text, origin, false)
+        if facts.name == "" -> return Err(PackageParseError.MissingName)
+        Ok(facts)
+    }
+
+    // Parse one contextual leading `package { … }` carrier with the same
+    // canonical field parser.
+    pub fn parse_inline(text: String, origin: String) -> InlinePackage? InlinePackageParseError! {
+        block :: if pkg_extract_inline_package(text) == {
+            .Ok(found) -> found ?? return Ok(None)
+            .Err(error) -> {
+                return Err(InlinePackageParseError.Structure(error))
+            }
+        }
+        if PackageFacts.parse(block.body(text), origin) == {
+            .Ok(facts) -> Ok(Val(InlinePackage{facts: facts, block: block}))
+            .Err(error) -> Err(InlinePackageParseError.Fields(error))
+        }
+    }
+}
+
+// One parsed inline Package and its preserved source carrier.
+pub struct InlinePackage {
+    pub facts: PackageFacts
+    pub block: InlinePackageBlock
+}
+
+impl ConfigFacts {
+    pub fn parse(text: String, origin: String) -> ConfigFacts PackageParseError! {
+        stripped :: pkg_strip_comments(text)
+        declared_name := String?{None}
+        body := stripped
+        if pkg_config_wrapper(stripped) == {
+            .Val(wrapper) -> {
+                declared_name = Val(wrapper.key)
+                body = wrapper.value
+            }
+            .None -> {
+                if stripped.trim_start().starts_with("Config") -> body = pkg_record_body(stripped.trim(), "Config")
+            }
+        }
+        facts :: pkg_parse_common(body, origin, true)
+        name :: if declared_name == {
+            .Val(declared) -> Val(declared)
+            .None -> if facts.name == "" -> None else -> Val(facts.name)
+        }
+        Ok(ConfigFacts{name: name, version: facts.version, source: facts.source, deps: facts.deps, services: facts.services, outputs: facts.outputs, environments: facts.environments, defaults: facts.defaults, origin: facts.origin})
+    }
+}
+
+// The retired `.{` record heads: each `.` token directly before `{`, outside
+// strings and comments. A text that does not lex has none.
+pub fn pkg_retired_record_head_spans(text: String) -> [Span] Never! {
+    tokens :: pkg_manifest_tokens(text) ?? return [Span]{}
+    spans := [Span]{}
+    loop index in 1..<tokens.len() {
+        if tokens[index - 1].kind == TOKEN_DOT && tokens[index].kind == TOKEN_LBRACE -> &spans.push(tokens[index - 1].span)
+    }
+    spans
+}
+
+// The compiler lexer's tokens without comments and EOF, or None when the
+// text has lexer diagnostics.
+pub fn pkg_manifest_tokens(text: String) -> [Token]? Never! {
+    lexed :: lex(text.bytes())
+    if lexed.diagnostics.len() > 0 -> return None
+    tokens := [Token]{}
+    loop token in lexed.tokens {
+        if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT || token.kind == TOKEN_EOF -> next
+        &tokens.push(token)
+    }
+    Val(tokens)
+}
+
+// Parse the shared Package/Config field vocabulary. `config` rejects the
+// package-only fields.
+fn pkg_parse_common(text: String, origin: String, config: Bool) -> PackageFacts PackageParseError! {
+    if pkg_retired_record_head_spans(text).len() > 0 -> return Err(PackageParseError.RetiredRecordHead)
+    facts := PackageFacts.default()
+    facts.origin = origin
+    inline := [InlineConfigDecl]{}
+    inline_names := [String]{}
+    seen := [String]{}
+    loop entry in pkg_top_level_entries(pkg_strip_comments(text)) {
+        if !config {
+            if pkg_config_wrapper(entry) == .Val(wrapper) {
+                if inline_names.contains(wrapper.key) -> return Err(PackageParseError.Composition("inline Config `{wrapper.key}` is declared more than once"))
+                &inline_names.push(wrapper.key)
+                contribution :: ConfigFacts.parse(entry, "{facts.origin}::{wrapper.key}")
+                &inline.push(InlineConfigDecl{name: wrapper.key, facts: contribution})
+                next
+            }
+        }
+        binding := ManifestEntry?{None}
+        if pkg_split_package_binding(entry) == .Val(split) {
+            if split.operator == "::" -> binding = Val(ManifestEntry{key: split.left.trim(), value: split.right.trim()})
+        }
+        if binding == None -> binding = pkg_split_field(entry)
+        found :: binding ?? {
+            // D-BUILDSCOPE1: the package's single `fn build` may live here.
+            if pkg_is_build_entry_decl(entry) -> next
+            return Err(PackageParseError.MalformedField(entry))
+        }
+        field :: found.key
+        value :: found.value
+        if seen.contains(field) {
+            if field == MANIFEST_BLOCK_AUTHORITY -> return Err(PackageParseError.BadEffectsBlock("malformed `authority:` block: declared more than once"))
+            return Err(PackageParseError.Composition("`{field}` is declared more than once"))
+        }
+        &seen.push(field)
+        if value.starts_with("Output.") {
+            output :: pkg_parse_output_value(field, value.removeprefix("Output.").trim())
+            if facts.outputs.has_key(field) -> return Err(PackageParseError.Composition("output `{field}` is declared more than once"))
+            facts.outputs[field] = output
+            pkg_record_output_provenance(&facts.provenance, "outputs.{field}", facts.origin, output)
+            next
+        }
+        &facts.apply_field(field, value, config)
+        declared_origin :: ~facts.origin
+        pkg_record_declared_provenance(&facts, field, declared_origin)
+    }
+    loop declared in inline {
+        if pkg_merge_config(&facts, declared.facts) == .Err(error) -> return Err(PackageParseError.Composition(error.message()))
+        facts.inline_configs[declared.name] = declared.facts
+    }
+    Ok(facts)
+}
+
+// One inline `name :: Config{ … }` contribution, in declaration order.
+struct InlineConfigDecl {
+    name: String
+    facts: ConfigFacts
+}
+
+impl PackageFacts {
+    // Apply one top-level `field: value` of a Package (or Config) carrier.
+    fn apply_field(&self, field: String, value: String, config: Bool) PackageParseError! {
+        if config && pkg_package_only_field(field) -> return Err(PackageParseError.UnknownField(field))
+        if field == {
+            MANIFEST_FIELD_NAME -> self.name = pkg_scalar(value)
+            MANIFEST_FIELD_VERSION -> self.version = Val(pkg_scalar(value))
+            "jet" -> self.jet = Val(pkg_scalar(value))
+            "source" -> self.source = Val(pkg_scalar(value))
+            "edition" -> self.edition = Val(pkg_scalar(value))
+            "description" -> self.description = Val(pkg_scalar(value))
+            "license" -> self.license = Val(pkg_scalar(value))
+            "repository" -> self.repository = Val(pkg_scalar(value))
+            "target" -> return Err(PackageParseError.UnknownField(field))
+            "targets" -> self.targets = pkg_parse_target_profiles(pkg_record_body(value, "targets"))
+            "allocator" -> self.allocator = pkg_parse_program_allocator(value)
+            "runtime" -> {
+                raw :: pkg_scalar(value)
+                self.layer = Val(jet_ring_parse_manifest_layer(raw) ?? return Err(PackageParseError.InvalidValue{field: "runtime", value: raw}))
+            }
+            MANIFEST_BLOCK_DEPS -> self.deps = pkg_parse_deps(pkg_record_body(value, MANIFEST_BLOCK_DEPS))
+            MANIFEST_BLOCK_BOUNDARIES -> self.boundaries = pkg_parse_boundaries(pkg_record_body(value, MANIFEST_BLOCK_BOUNDARIES))
+            "packages" -> self.packages = pkg_parse_packages(pkg_record_body(value, "packages"))
+            "dev" -> self.dev = pkg_parse_dev(value)
+            MANIFEST_BLOCK_BUILD -> {
+                body :: pkg_record_body(value, MANIFEST_BLOCK_BUILD)
+                self.build_profiles = pkg_parse_build(body)
+                self.build_allow = pkg_parse_build_allow(body)
+            }
+            MANIFEST_BLOCK_SETTINGS -> self.settings = pkg_parse_settings(value)
+            "services" -> self.services = pkg_parse_services(value)
+            MANIFEST_BLOCK_OUTPUTS -> {
+                parsed :: pkg_parse_outputs(value)
+                loop name in pkg_manifest_sorted(parsed.keys().to_list()) {
+                    output :: parsed[name]
+                    if self.outputs.get(name) == {
+                        .Val(existing) -> {
+                            if existing != output -> return Err(PackageParseError.Composition("output `{name}` is declared with conflicting values: {pkg_debug_output(existing)} and {pkg_debug_output(output)}"))
+                        }
+                        .None -> self.outputs[name] = output
+                    }
+                }
+            }
+            "environments" -> self.environments = pkg_parse_environments(value)
+            "defaults" -> self.defaults = pkg_parse_string_map("defaults", value)
+            "grants" -> return Err(PackageParseError.RetiredAuthorityField{field: field, replacement: "authority.grants"})
+            "authority" -> &self.apply_authority(pkg_parse_authority_value(value))
+            "policy" -> self.policy = pkg_parse_package_policy(pkg_record_body(value, "policy"))
+            MANIFEST_BLOCK_MEMBERS -> self.members = pkg_parse_members(value)
+            "configs" -> self.configs = pkg_parse_list(value)
+            // U1/S52/E1209: reserved for a future feature; legal only empty.
+            "dev_deps" | "patch" | "workspace" -> {
+                if pkg_record_entries(value, field).len() > 0 -> return Err(PackageParseError.ReservedSection(field))
+            }
+            else -> return Err(PackageParseError.UnknownField(field))
+        }
+    }
+
+    fn apply_authority(&self, authority: AuthorityBlock) Never! {
+        if authority.holds.allow != None || authority.holds.deny != None {
+            self.effects_enabled = true
+            self.effects_allow = authority.holds.allow
+            self.effects_deny = authority.holds.deny
+        }
+        if authority.grants.len() > 0 -> self.grants = authority.grants
+        self.authority = PackageAuthority{holds: authority.holds, needs: authority.needs, grants: authority.grants, trust: authority.trust, providers: authority.providers}
+    }
+}
+
+// Fields only a Package root may declare; a Config naming one is an unknown
+// field (`members` has its own refusal).
+fn pkg_package_only_field(field: String) -> Bool PackageParseError! {
+    if field == MANIFEST_BLOCK_MEMBERS -> return Err(PackageParseError.ConfigMembers)
+    Ok(if field == {
+        "jet" | "edition" | "description" | "license" | "repository" | "targets" | "allocator" | "runtime" | "packages" | "dev" | "grants" | "authority" | "policy" | "configs" -> true
+        MANIFEST_BLOCK_BOUNDARIES | MANIFEST_BLOCK_BUILD | MANIFEST_BLOCK_SETTINGS -> true
+        else -> false
+    })
+}
+
+// The full `policy: { … }` fact from one body.
+fn pkg_parse_package_policy(body: String) -> PackagePolicy PackageParseError! {
+    guarantees :: pkg_parse_guarantee_policy(body)
+    surface :: pkg_parse_package_policy_surface(body)
+    Ok(PackagePolicy{
+        declarations: pkg_parse_policy(body, true),
+        lints_deny: pkg_parse_lints_policy(body),
+        effects: surface.effects,
+        unsafe_paths: surface.unsafe_paths,
+        expert: surface.expert,
+        deps: surface.deps,
+        claims_min: surface.claims_min,
+        contain: guarantees.contain,
+        harden: guarantees.harden,
+        licenses: surface.licenses,
+        source_maps: surface.source_maps,
+        exceptions: surface.exceptions,
+    })
+}
+
+fn pkg_parse_outputs(value: String) -> [String: OutputFact] PackageParseError! {
+    outputs := [String: OutputFact]{}
+    loop entry in pkg_record_entries(value, "outputs") {
+        output :: pkg_parse_output_value(entry.key, entry.value)
+        if outputs.has_key(entry.key) -> return Err(PackageParseError.Composition("output `{entry.key}` is declared more than once"))
+        outputs[entry.key] = output
+    }
+    Ok(outputs)
+}
+
+fn pkg_parse_output_value(key: String, raw: String) -> OutputFact PackageParseError! {
+    head :: raw.split_once("{{")?.before ?? raw
+    kind_text :: pkg_binder_trim_end_matches(pkg_trim_start_matches(head.trim(), "."), ".")
+    kind :: PackageOutputKind.parse(kind_text)
+    raw_fields :: pkg_named_entries_checked(pkg_record_body(raw, "output"), "outputs.{key}")
+    payload_fields := [String: OutputPayload]{}
+    loop field in raw_fields -> payload_fields[field.key] = pkg_parse_output_payload(field.value)
+    fields := [String: String]{}
+    loop field in raw_fields {
+        name :: field.key
+        value :: field.value
+        if !pkg_output_field_allowed(kind, name) -> return Err(PackageParseError.UnknownField("outputs.{key}.{name}"))
+        if name == "entry" && (value.trim().starts_with("\"") || !pkg_is_identifier(pkg_scalar(value))) -> return Err(PackageParseError.InvalidValue{field: "outputs.{key}.entry", value: value})
+        if name == OUTPUT_FIELD_LOADABLE || name == OUTPUT_FIELD_NATIVE {
+            is_bool :: if payload_fields[name] == {
+                .Bool(_) -> true
+                else -> false
+            }
+            if !is_bool -> return Err(PackageParseError.InvalidValue{field: "outputs.{key}.{name}", value: value})
+        }
+        if name == OUTPUT_FIELD_BINDINGS && !pkg_payload_is_string_array(payload_fields[name]) -> return Err(PackageParseError.InvalidValue{field: "outputs.{key}.{name}", value: value})
+        fields[name] = pkg_scalar(value)
+    }
+    Ok(OutputFact{kind: kind, name: fields.get("name") ?? key, entry: fields.get("entry"), fields: fields, payload: OutputPayload.Object(payload_fields)})
+}
+
+fn pkg_payload_is_string_array(payload: OutputPayload) -> Bool Never! {
+    values :: if payload == {
+        .Array(values) -> values
+        else -> {
+            return false
+        }
+    }
+    loop value in values {
+        if value == {
+            .String(_) -> {}
+            else -> return false
+        }
+    }
+    true
+}
+
+fn pkg_parse_output_payload(input: String) -> OutputPayload PackageParseError! {
+    value :: pkg_binder_trim_end_matches(input.trim(), ",").trim()
+    if value == "" || value == "null" -> return Ok(OutputPayload.Null)
+    if value == "true" -> return Ok(OutputPayload.Bool(true))
+    if value == "false" -> return Ok(OutputPayload.Bool(false))
+    if value.starts_with("\"") && value.ends_with("\"") -> return Ok(OutputPayload.String(pkg_scalar(value)))
+    if value.starts_with("[") && value.ends_with("]") {
+        items := [OutputPayload]{}
+        loop item in pkg_top_level_entries(pkg_binder_slice(value, 1, value.bytes().len() - 1)) -> &items.push(pkg_parse_output_payload(item))
+        return Ok(OutputPayload.Array(items))
+    }
+    if value.starts_with("{{") {
+        object := [String: OutputPayload]{}
+        loop entry in pkg_named_entries_checked(pkg_record_body(value, "output payload"), "output payload") -> object[pkg_binder_trim_matches(entry.key, "\"")] = pkg_parse_output_payload(entry.value)
+        return Ok(OutputPayload.Object(object))
+    }
+    if pkg_parse_i64(value) != None || pkg_is_float_literal(value) -> return Ok(OutputPayload.Number(value))
+    Ok(OutputPayload.String(pkg_scalar(value)))
+}
+
+// `str::parse::<f64>().is_ok()` over manifest numbers: optional sign, digits
+// with an optional fraction and exponent, or `inf`/`infinity`/`nan`.
+fn pkg_is_float_literal(value: String) -> Bool Never! {
+    text :: if value.starts_with("+") || value.starts_with("-") -> pkg_binder_tail(value, 1) else -> value
+    lower :: pkg_ascii_lower(text)
+    if lower == "inf" || lower == "infinity" || lower == "nan" -> return true
+    raw :: text.bytes()
+    index := 0
+    digits := 0
+    loop index < raw.len() && Int.from_u8(raw[index]) >= 48 && Int.from_u8(raw[index]) <= 57 {
+        index += 1
+        digits += 1
+    }
+    if index < raw.len() && Int.from_u8(raw[index]) == 46 {
+        index += 1
+        loop index < raw.len() && Int.from_u8(raw[index]) >= 48 && Int.from_u8(raw[index]) <= 57 {
+            index += 1
+            digits += 1
+        }
+    }
+    if digits == 0 -> return false
+    if index < raw.len() && (Int.from_u8(raw[index]) == 101 || Int.from_u8(raw[index]) == 69) {
+        index += 1
+        if index < raw.len() && (Int.from_u8(raw[index]) == 43 || Int.from_u8(raw[index]) == 45) -> index += 1
+        exponent_digits := 0
+        loop index < raw.len() && Int.from_u8(raw[index]) >= 48 && Int.from_u8(raw[index]) <= 57 {
+            index += 1
+            exponent_digits += 1
+        }
+        if exponent_digits == 0 -> return false
+    }
+    index == raw.len()
+}
+
+fn pkg_parse_environments(value: String) -> [String: EnvironmentFact] PackageParseError! {
+    environments := [String: EnvironmentFact]{}
+    loop entry in pkg_record_entries(value, "environments") {
+        key :: entry.key
+        fields := [String: String]{}
+        loop field in pkg_named_entries_checked(pkg_record_body(entry.value, "environment"), "environments.{key}") {
+            if field.key == {
+                "name" | "tools" | "services" | "secrets" -> fields[field.key] = field.value
+                else -> return Err(PackageParseError.UnknownField("environments.{key}.{field.key}"))
+            }
+        }
+        name :: if fields.get("name") == {
+            .Val(raw) -> pkg_scalar(raw)
+            .None -> key
+        }
+        tools :: if fields.get("tools") == {
+            .Val(raw) -> pkg_parse_list(raw)
+            .None -> [String]{}
+        }
+        services :: if fields.get("services") == {
+            .Val(raw) -> pkg_parse_services(raw)
+            .None -> [String: ServiceFact]{}
+        }
+        secrets :: if fields.get("secrets") == {
+            .Val(raw) -> pkg_parse_string_map("secrets", raw)
+            .None -> [String: String]{}
+        }
+        if environments.has_key(key) -> return Err(PackageParseError.Composition("environment `{key}` is declared more than once"))
+        environments[key] = EnvironmentFact{name: name, tools: tools, services: services, secrets: secrets, fields: fields}
+    }
+    Ok(environments)
+}
+
+fn pkg_parse_services(value: String) -> [String: ServiceFact] PackageParseError! {
+    services := [String: ServiceFact]{}
+    loop entry in pkg_record_entries(value, "services") {
+        key :: entry.key
+        fields := [String: String]{}
+        loop field in pkg_named_entries_checked(pkg_record_body(entry.value, "service"), "services.{key}") {
+            if !pkg_service_field_allowed(field.key) -> return Err(PackageParseError.UnknownField("services.{key}.{field.key}"))
+            fields[field.key] = field.value
+        }
+        enable := false
+        if fields.get("enable") == .Val(raw) {
+            if pkg_scalar(raw) == {
+                "true" -> enable = true
+                "false" -> enable = false
+                else -> return Err(PackageParseError.InvalidValue{field: "services.{key}.enable", value: raw})
+            }
+        }
+        ports := [Int]{}
+        if fields.get("ports") == .Val(raw) {
+            loop port in pkg_parse_list(raw) {
+                &ports.push(pkg_parse_i64(port) ?? return Err(PackageParseError.InvalidValue{field: "services.{key}.ports", value: port}))
+            }
+        }
+        ready :: if fields.get("ready") == {
+            .Val(raw) -> Val(pkg_scalar(raw))
+            .None -> None
+        }
+        if services.has_key(key) -> return Err(PackageParseError.Composition("service `{key}` is declared more than once"))
+        services[key] = ServiceFact{enable: enable, ports: ports, ready: ready, fields: fields}
+    }
+    Ok(services)
+}
+
+fn pkg_parse_members(input: String) -> [MemberRef] PackageParseError! {
+    value :: input.trim()
+    if value.starts_with("find(") {
+        inner :: pkg_binder_trim_end_matches(pkg_trim_start_matches(value, "find("), ")")
+        return Ok([MemberRef]{MemberRef.Find(pkg_scalar(inner))})
+    }
+    if !value.starts_with("[") -> return Err(PackageParseError.InvalidValue{field: "members", value: value})
+    members := [MemberRef]{}
+    loop path in pkg_parse_list(value) -> &members.push(MemberRef.Path(path))
+    Ok(members)
+}
+
+fn pkg_output_field_allowed(kind: PackageOutputKind, field: String) -> Bool Never! {
+    allowed :: if kind == {
+        .Library -> [String]{"name", "modules", "entry", OUTPUT_FIELD_LOADABLE, OUTPUT_FIELD_NATIVE, OUTPUT_FIELD_BINDINGS}
+        .Executable | .Service | .Check -> [String]{"name", "entry"}
+        .Environment -> [String]{"name", "tools", "services", "secrets"}
+        .Image -> [String]{"name", "from", "kind", "environment"}
+        .Bundle -> [String]{"name", "members"}
+        .System -> [String]{"name", SYSTEM_FIELD_TARGET, "packages", "services", "options"}
+        .Fleet -> [String]{"name", "hosts"}
+    }
+    allowed.contains(field)
+}
+
+PKG_SERVICE_FIELDS :: prep { [String]{"enable", "from", "ports", "ready", "run", "restart", "watch", "after", "before_start", "sockets", "shutdown", "depends_on", "health", "limits", "logs"} }
+
+fn pkg_service_field_allowed(field: String) -> Bool Never! {
+    PKG_SERVICE_FIELDS.contains(field)
+}
+
+// `settings: { tls: Bool = true }` — a name, a Tier-0 type, and a default.
+fn pkg_parse_settings(value: String) -> [String: SettingDecl] PackageParseError! {
+    out := [String: SettingDecl]{}
+    loop entry in pkg_record_entries(value, "settings") {
+        key :: pkg_binder_trim_matches(entry.key, "\"")
+        parts :: entry.value.split_once("=") ?? return Err(PackageParseError.InvalidValue{field: "settings.{key}", value: entry.value})
+        ty :: parts.before.trim()
+        default :: pkg_scalar(parts.after)
+        if ty == "" -> return Err(PackageParseError.InvalidValue{field: "settings.{key}", value: ty})
+        if !pkg_is_ascii_identifier(key) -> return Err(PackageParseError.InvalidValue{field: "settings.{key}", value: entry.value})
+        if out.has_key(key) -> return Err(PackageParseError.Composition("`settings.{key}` is declared more than once"))
+        out[key] = SettingDecl{ty: ty, default: default}
+    }
+    Ok(out)
+}
+
+fn pkg_parse_string_map(field: String, value: String) -> [String: String] PackageParseError! {
+    map := [String: String]{}
+    loop entry in pkg_record_entries(value, field) {
+        key :: pkg_binder_trim_matches(entry.key, "\"")
+        text :: pkg_scalar(entry.value)
+        if map.get(key) == .Val(existing) {
+            if existing != text -> return Err(PackageParseError.Composition("`{field}.{key}` is declared with conflicting values"))
+        }
+        map[key] = text
+    }
+    Ok(map)
+}
+
+// The file form `pub name :: Config{ ... }` (also an inline Config in
+// `package.jet`): its declared name and record body.
+pub fn pkg_config_wrapper(text: String) -> ManifestEntry? PackageParseError! {
+    at :: pkg_binder_find(text, "::", 0)
+    if at < 0 -> return Ok(None)
+    head :: pkg_binder_slice(text, 0, at).trim()
+    name :: (if head.starts_with("pub ") -> head.removeprefix("pub ") else -> head).trim()
+    if name == "" -> return Err(PackageParseError.MalformedField(text.trim()))
+    value := pkg_binder_tail(text, at + 2).trim()
+    if !value.starts_with("Config") -> return Ok(None)
+    value = value.removeprefix("Config").trim_start()
+    if value.starts_with(".") -> value = value.removeprefix(".").trim_start()
+    if !value.starts_with("{{") -> return Err(PackageParseError.MissingRecord("Config"))
+    Ok(Val(ManifestEntry{key: name, value: pkg_record_body(value, "Config")}))
+}
+
+// Whether a top-level manifest entry is the package's `fn build` (D-BUILDSCOPE1).
+fn pkg_is_build_entry_decl(entry: String) -> Bool Never! {
+    rest :: entry.trim_start()
+    if !rest.starts_with("fn") -> return false
+    after_fn :: rest.removeprefix("fn")
+    if pkg_bytes_space_width(after_fn.bytes(), 0) == 0 -> return false
+    name :: after_fn.trim_start()
+    if !name.starts_with(BUILD_ENTRY_FN) -> return false
+    tail :: name.removeprefix(BUILD_ENTRY_FN)
+    if tail == "" -> return true
+    first :: pkg_bytes_code(tail.bytes(), 0)
+    !(pkg_bytes_is_word(first) || first >= 128)
+}

@@ -726,8 +726,24 @@ impl<'a> Checker<'a> {
     }
 
     fn operator_operand_needs_borrow(&self, expr: &Expr, op: BinOp) -> bool {
+        let expr = expr.without_parens();
         if !matches!(expr, Expr::Field(..) | Expr::Index { .. }) {
             return false;
+        }
+        // A comparison only inspects its operands: every tier compares a
+        // non-scalar operand through a reference, so a field operand is read
+        // in place instead of being copied whole first.
+        if matches!(
+            op,
+            BinOp::Eq
+                | BinOp::Ne
+                | BinOp::Compare
+                | BinOp::Lt
+                | BinOp::Le
+                | BinOp::Gt
+                | BinOp::Ge
+        ) {
+            return true;
         }
         let ty = self.operator_expr_type(expr);
         let trait_name = match op {
@@ -735,30 +751,6 @@ impl<'a> Checker<'a> {
             BinOp::Sub => crate::Syntax::TRAIT_SUB,
             BinOp::Mul => crate::Syntax::TRAIT_MUL,
             BinOp::Div => crate::Syntax::TRAIT_DIV,
-            BinOp::Eq | BinOp::Ne => {
-                let has_comparable = ty.as_ref().is_some_and(|ty| match ty {
-                    Type::Named(name) => {
-                        Self::comparable_equality_hook(name)
-                            && (self.type_implements_trait_for_name(
-                                name,
-                                crate::Syntax::TRAIT_COMPARABLE,
-                            ) || self.type_param_has_bound(ty, crate::Syntax::TRAIT_COMPARABLE))
-                            && (self.type_implements_trait_for_name(
-                                name,
-                                crate::Syntax::TRAIT_EQUATABLE,
-                            ) || self.type_param_has_bound(ty, crate::Syntax::TRAIT_EQUATABLE))
-                    }
-                    _ => false,
-                });
-                if has_comparable {
-                    crate::Syntax::TRAIT_COMPARABLE
-                } else {
-                    crate::Syntax::TRAIT_EQUATABLE
-                }
-            }
-            BinOp::Compare | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
-                crate::Syntax::TRAIT_COMPARABLE
-            }
             _ => return false,
         };
         ty.is_some_and(|ty| match &ty {
@@ -1214,8 +1206,8 @@ impl<'a> Checker<'a> {
             return Some(Type::Bool);
         }
 
-        // Only a synthetic read/read hook borrows a non-Copy field operand.
-        // Ordinary expressions retain the canonical owning-read clone rule.
+        // Comparisons and synthetic read/read hooks borrow a non-Copy field
+        // operand; other operators retain the canonical owning-read clone rule.
         self.borrow_ctx = self.operator_operand_needs_borrow(lhs, op);
         let saved_expected = self.expected_type.clone();
         if Self::is_exact_numeric_literal(lhs)

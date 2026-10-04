@@ -1,0 +1,29 @@
+// Pure dependency selector vocabulary shared with outward manifest conversion.
+pub enum GitSelector {
+    Tag(String)
+    Branch(String)
+    Rev(String)
+
+    pub fn is_moving(self) -> Bool Never! {
+        if self == {
+            .Tag(label) -> label == "@latest"
+            .Branch(_) -> true
+            .Rev(_) -> false
+        }
+    }
+
+    // The `package.jet` field spelling of this selector.
+    pub fn field(self) -> String Never! {
+        if self == {
+            .Tag(_) -> "tag"
+            .Branch(_) -> "branch"
+            .Rev(_) -> "rev"
+        }
+    }
+
+    pub fn value(self) -> String Never! {
+        if self == {
+            .Tag(value) | .Branch(value) | .Rev(value) -> value
+        }
+    }
+}

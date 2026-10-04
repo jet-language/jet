@@ -85,7 +85,7 @@ fn pkg_inline_deps_test_unresolved(dep: InlineDep, script_dir: String) -[FS, Env
     root :: files.temp_dir("jet-script-deps-depth") ?? panic("scratch")
     current := files.join(root.path, ".jet/inline-deps/hostile/1.0.0")
     files.create_dir_all(current) ?? panic("package root")
-    loop index in 0..<(@MAX_TREE_DEPTH + 2) {
+    loop index in 0..<(MAX_TREE_DEPTH + 2) {
         current = files.join(current, "d{index}")
         files.create_dir(current) ?? panic("nested directory")
     }
@@ -93,7 +93,7 @@ fn pkg_inline_deps_test_unresolved(dep: InlineDep, script_dir: String) -[FS, Env
     error :: pkg_inline_deps_test_unresolved(pkg_inline_deps_test_dep("hostile"), root.path)
     if error == {
         .InvalidTree(tree_error) -> if tree_error == {
-            .TooLarge(_, limit) -> assert_eq(limit, @MAX_TREE_DEPTH)
+            .TooLarge(_, limit) -> assert_eq(limit, MAX_TREE_DEPTH)
             else -> panic("expected a tree bound failure")
         }
         else -> panic("expected an invalid tree failure")

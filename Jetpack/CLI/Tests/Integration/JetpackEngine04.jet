@@ -1,0 +1,1778 @@
+// PORT-PENDING 1089 tests-jetpack-engine-slice-5421: tests/jetpack_engine.rs:5421-7194
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn channel_build_without_lock_is_e1271() {
+//RS     let proj = Scratch::new("proj");
+//RS     let root = Scratch::new("root");
+//RS     fs::write(
+//RS         proj.join("env.jet"),
+//RS         r#"
+//RS module dev {
+//RS     sources: { default: acme/tools@github#latest }
+//RS     env.dev: Env{ packages: [default.greet] }
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let out = jetpack()
+//RS         .args(["build", "--no-color", "--offline"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(stderr.contains("E1271"), "stderr: {stderr}");
+//RS     assert!(
+//RS         stderr.contains("jetpack update default"),
+//RS         "stderr: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn channel_update_accepts_main_and_semver_mask() {
+//RS     let proj = Scratch::new("proj");
+//RS     let root = Scratch::new("root");
+//RS     let fixtures = Scratch::new("fx");
+//RS     fs::write(
+//RS         proj.join("env.jet"),
+//RS         r#"
+//RS module dev {
+//RS     sources: {
+//RS         trunk: acme/tools@github#main,
+//RS         stable: acme/tools@github#v0.x,
+//RS     }
+//RS     env.dev: Env{ packages: [trunk.greet, stable.greet] }
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::create_dir_all(&fixtures.path).unwrap();
+//RS     fs::write(
+//RS         fixtures.join("channels.txt"),
+//RS         "github:acme/tools main github:acme/tools#abc123\n\
+//RS          github:acme/tools v0.x github:acme/tools#v0.9.4\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let out = jetpack()
+//RS         .args(["update", "--no-color", "--yes", "--fixtures"])
+//RS         .arg(&fixtures.path)
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let lock = fs::read_to_string(proj.join(".jet/lock")).unwrap();
+//RS     assert!(lock.contains("name = \"trunk\""), "lock: {lock}");
+//RS     assert!(lock.contains("channel = \"main\""), "lock: {lock}");
+//RS     assert!(
+//RS         lock.contains("exact = \"github:acme/tools#abc123\""),
+//RS         "lock: {lock}"
+//RS     );
+//RS     assert!(lock.contains("name = \"stable\""), "lock: {lock}");
+//RS     assert!(lock.contains("channel = \"v0.x\""), "lock: {lock}");
+//RS     assert!(
+//RS         lock.contains("exact = \"github:acme/tools#v0.9.4\""),
+//RS         "lock: {lock}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn outdated_reports_newer_channel_without_mutating_lock() {
+//RS     let proj = Scratch::new("proj");
+//RS     let root = Scratch::new("root");
+//RS     let fixtures = Scratch::new("fx");
+//RS     fs::write(
+//RS         proj.join("env.jet"),
+//RS         r#"
+//RS module dev {
+//RS     sources: { default: acme/tools@github#latest }
+//RS     env.dev: Env{ packages: [default.greet] }
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::create_dir_all(proj.join(".jet")).unwrap();
+//RS     fs::write(
+//RS         proj.join(".jet/lock"),
+//RS         "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"latest\"\nexact = \"github:acme/tools#v1.2.0\"\n\n[root]\ndependencies = []\n",
+//RS     )
+//RS     .unwrap();
+//RS     write_channel_fixture(
+//RS         &fixtures.path,
+//RS         "github:acme/tools",
+//RS         "latest",
+//RS         "github:acme/tools#v1.3.0",
+//RS     );
+//RS 
+//RS     let out = jetpack()
+//RS         .args(["outdated", "--no-color", "--fixtures"])
+//RS         .arg(&fixtures.path)
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(stderr.contains("v1.2.0"), "stderr: {stderr}");
+//RS     assert!(stderr.contains("v1.3.0"), "stderr: {stderr}");
+//RS     let lock = fs::read_to_string(proj.join(".jet/lock")).unwrap();
+//RS     assert!(
+//RS         lock.contains("exact = \"github:acme/tools#v1.2.0\""),
+//RS         "lock mutated: {lock}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn automatic_channel_refresh_writes_lock_and_manifest_without_update() {
+//RS     let proj = Scratch::new("proj");
+//RS     let root = Scratch::new("root");
+//RS     let fixtures = Scratch::new("fx");
+//RS     fs::write(
+//RS         proj.join("env.jet"),
+//RS         r#"
+//RS module dev {
+//RS     sources: { automatic: omp@nixpkgs#auto }
+//RS     env.dev: Env{ packages: [] }
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     write_channel_fixture(&fixtures.path, "nixpkgs:omp", "latest", "nixpkgs:omp#1.2.3");
+//RS 
+//RS     let build = jetpack()
+//RS         .args(["build", "--no-color", "--yes", "--fixtures"])
+//RS         .arg(&fixtures.path)
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         build.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&build.stderr)
+//RS     );
+//RS     let lock = fs::read_to_string(proj.join(".jet/lock")).unwrap();
+//RS     assert!(lock.contains("name = \"automatic\""), "lock: {lock}");
+//RS     assert!(
+//RS         lock.contains("exact = \"nixpkgs:omp#1.2.3\""),
+//RS         "lock: {lock}"
+//RS     );
+//RS     let manifest = fs::read_to_string(proj.join("env.jet")).unwrap();
+//RS     assert!(
+//RS         manifest.contains("omp@nixpkgs#auto"),
+//RS         "manifest: {manifest}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn automatic_channel_refresh_moves_again_after_manifest_writeback() {
+//RS     let proj = Scratch::new("proj");
+//RS     let root = Scratch::new("root");
+//RS     let fixtures = Scratch::new("fx");
+//RS     fs::write(
+//RS         proj.join("env.jet"),
+//RS         r#"
+//RS module dev {
+//RS     sources: { automatic: omp@nixpkgs#auto }
+//RS     env.dev: Env{ packages: [] }
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     for exact in ["nixpkgs:omp#1.2.3", "nixpkgs:omp#1.2.4"] {
+//RS         write_channel_fixture(&fixtures.path, "nixpkgs:omp", "latest", exact);
+//RS         let build = jetpack()
+//RS             .args(["build", "--no-color", "--yes", "--fixtures"])
+//RS             .arg(&fixtures.path)
+//RS             .current_dir(&proj.path)
+//RS             .env("JETPACK_ROOT", &root.path)
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(
+//RS             build.status.success(),
+//RS             "stderr: {}",
+//RS             String::from_utf8_lossy(&build.stderr)
+//RS         );
+//RS     }
+//RS 
+//RS     let lock = fs::read_to_string(proj.join(".jet/lock")).unwrap();
+//RS     assert!(
+//RS         lock.contains("exact = \"nixpkgs:omp#1.2.4\""),
+//RS         "lock: {lock}"
+//RS     );
+//RS     let manifest = fs::read_to_string(proj.join("env.jet")).unwrap();
+//RS     assert!(
+//RS         manifest.contains("omp@nixpkgs#auto"),
+//RS         "manifest: {manifest}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn update_of_pinned_source_is_e1352() {
+//RS     let proj = Scratch::new("proj");
+//RS     let root = Scratch::new("root");
+//RS     fs::write(
+//RS         proj.join("env.jet"),
+//RS         r#"
+//RS module dev {
+//RS     sources: { stable: rustc@jetpack }
+//RS     env.dev: Env{ packages: [] }
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let out = jetpack()
+//RS         .args(["update", "stable", "--no-color"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(stderr.contains("E1352"), "stderr: {stderr}");
+//RS     assert!(stderr.contains("#auto"), "stderr: {stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn outdated_labels_pinned_manual_and_automatic_sources() {
+//RS     let proj = Scratch::new("proj");
+//RS     let root = Scratch::new("root");
+//RS     let fixtures = Scratch::new("fx");
+//RS     fs::write(
+//RS         proj.join("env.jet"),
+//RS         r#"
+//RS module dev {
+//RS     sources: {
+//RS         pinned: rustc@jetpack,
+//RS         manual: jq@jetpack#latest,
+//RS         automatic: omp@jetpack#auto,
+//RS     }
+//RS     env.dev: Env{ packages: [] }
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::create_dir_all(proj.join(".jet")).unwrap();
+//RS     fs::write(
+//RS         proj.join(".jet/lock"),
+//RS         "version = 1\n\n[[source_channel]]\nname = \"manual\"\nchannel = \"latest\"\nexact = \"nixpkgs:jq#1.0\"\n\n[[source_channel]]\nname = \"automatic\"\nchannel = \"latest\"\nexact = \"nixpkgs:omp#1.0\"\n\n[root]\ndependencies = []\n",
+//RS     )
+//RS     .unwrap();
+//RS     write_channel_fixture(&fixtures.path, "nixpkgs:jq", "latest", "nixpkgs:jq#1.0");
+//RS     write_channel_fixture(&fixtures.path, "nixpkgs:omp", "latest", "nixpkgs:omp#1.0");
+//RS 
+//RS     let out = jetpack()
+//RS         .args(["outdated", "--no-color", "--fixtures"])
+//RS         .arg(&fixtures.path)
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&out.stderr);
+//RS     assert!(stderr.contains("pinned"), "stderr: {stderr}");
+//RS     assert!(stderr.contains("manual"), "stderr: {stderr}");
+//RS     assert!(stderr.contains("automatic"), "stderr: {stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn add_adapt_prints_snippet_without_editing_env() {
+//RS     let proj = Scratch::new("proj");
+//RS     let output = jetpack()
+//RS         .args(["add", "./vendor/weirdctl", "--adapt", "--no-color"])
+//RS         .current_dir(&proj.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(output.status.success());
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(stdout.contains("Pkg.adapt("), "stdout: {stdout}");
+//RS     assert!(
+//RS         stdout.contains("source: \"./vendor/weirdctl\""),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(!proj.join("env.jet").exists());
+//RS }
+//RS 
+//RS #[test]
+//RS fn named_source_env_resolves_with_pin() {
+//RS     // An env that declares a named source `stable` and references it inline as
+//RS     // `ripgrep@stable` resolves via the nix provider against the pin. The
+//RS     // fixture is keyed by the source name (`stable-ripgrep.json`).
+//RS     let proj = Scratch::new("proj");
+//RS     let root = Scratch::new("root");
+//RS     fs::write(
+//RS         proj.join("env.jet"),
+//RS         "use jetpack as pkg\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"stable\", \"NixOS/nixpkgs/nixos-24.05@github\"),\n        pkg.packages([\"ripgrep@stable\"])\n    ]\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let output = jetpack()
+//RS         .args(["build", "--no-color", "--offline"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_FIXTURES", example_fixtures(&root.path))
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("ripgrep"), "stderr: {stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn unknown_named_source_in_env_is_friendly() {
+//RS     let proj = Scratch::new("proj");
+//RS     let root = Scratch::new("root");
+//RS     // References `neovim@beta` but only declares `stable`.
+//RS     fs::write(
+//RS         proj.join("env.jet"),
+//RS         "use jetpack as pkg\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"stable\", \"NixOS/nixpkgs/nixos-24.05@github\"),\n        pkg.packages([\"neovim@beta\"])\n    ]\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let output = jetpack()
+//RS         .args(["build", "--no-color", "--offline"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_FIXTURES", example_fixtures(&root.path))
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(output.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("not a known source"), "stderr: {stderr}");
+//RS     assert!(
+//RS         stderr.contains("stable"),
+//RS         "should list declared names: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn jetpack_env_runs_command_in_project_env() {
+//RS     // Gap #6 / U §8 (Scale-2): `jetpack env` is the project-env command — it
+//RS     // never takes an explicit ref, it always composes the env declared by the
+//RS     // project `env.jet`. The `-- cmd` form runs a one-off command in the
+//RS     // realized env, which is how we prove `env` put the package on PATH.
+//RS     let (base, proj, root) = core_hello_project("env");
+//RS     let output = jetpack()
+//RS         // U19: `env` trust-gates a project that declares packages; `--trust`
+//RS         // is the one-shot bypass so this test can assert on PATH composition
+//RS         // without exercising the interactive prompt.
+//RS         .args(["env", "--no-color", "--trust", "--", "hello"])
+//RS         .current_dir(&proj)
+//RS         .env("JETPACK_ROOT", &root)
+//RS         .env("HOME", base.join("home"))
+//RS         .env("PATH", "/usr/bin:/bin") // no nix on PATH
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&output.stdout).trim(),
+//RS         "hello from jet-pkgs"
+//RS     );
+//RS     let roots = jetpack::Store::Roots::at(root);
+//RS     let entry = jetpack::Store::find_by_reference(&roots, "hello@mine")
+//RS         .expect("core realization should register a Store entry");
+//RS     let shared = jetpack::ProviderFacts::from_json(
+//RS         jetpack::Store::ProducerRecord::decode(&entry.producer_record)
+//RS             .expect("Store producer record")
+//RS             .facts
+//RS             .get("provider-facts")
+//RS             .expect("Store entry should carry shared provider facts"),
+//RS     )
+//RS     .expect("shared provider facts JSON");
+//RS     shared
+//RS         .validate()
+//RS         .expect("Store provider facts are lossless");
+//RS     assert_eq!(shared.reference, entry.reference);
+//RS     assert!(!shared.native_document.is_empty());
+//RS }
+//RS 
+//RS #[test]
+//RS fn jetpack_env_propagates_child_exit_status() {
+//RS     let (base, proj, root) = core_hello_project("env-status");
+//RS     let output = jetpack()
+//RS         .args(["env", "--no-color", "--trust", "--", "sh", "-c", "exit 17"])
+//RS         .current_dir(&proj)
+//RS         .env("JETPACK_ROOT", &root)
+//RS         .env("HOME", base.join("home"))
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         output.status.code(),
+//RS         Some(17),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn jetpack_env_prep_materializes_without_entering() {
+//RS     let (base, proj, root) = core_hello_project("env-prep");
+//RS     let prep = jetpack()
+//RS         .args(["env", "--prep", "--no-color", "--trust"])
+//RS         .current_dir(&proj)
+//RS         .env("JETPACK_ROOT", &root)
+//RS         .env("HOME", base.join("home"))
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         prep.status.success(),
+//RS         "env --prep failed: {}",
+//RS         String::from_utf8_lossy(&prep.stderr)
+//RS     );
+//RS     let enter = jetpack()
+//RS         .args(["env", "--no-color", "--trust", "--", "hello"])
+//RS         .current_dir(&proj)
+//RS         .env("JETPACK_ROOT", &root)
+//RS         .env("HOME", base.join("home"))
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         enter.status.success(),
+//RS         "entry after prep failed: {}",
+//RS         String::from_utf8_lossy(&enter.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&enter.stdout).trim(),
+//RS         "hello from jet-pkgs"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn provider_conformance_pypi_swiftpm_maven_round_trips_the_production_carrier() {
+//RS     use jetpack::ProviderFacts;
+//RS     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+//RS 
+//RS     let revision = "0123456789abcdef0123456789abcdef01234567";
+//RS     let pypi = r#"{"info":{"name":"sample-pkg","version":"2.4.1","license":"MIT","requires_python":">=3.10","requires_dist":["httpx>=0.27"],"classifiers":["Programming Language :: Python :: 3"]},"urls":[{"filename":"sample_pkg-2.4.1.tar.gz","digests":{"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},"yanked":false}],"vulnerabilities":[{"id":"PYSEC-0000"}]}"#;
+//RS     let swiftpm = format!(
+//RS         r#"{{"version":1,"pins":[{{"package":"swift-log","repositoryURL":"https://github.com/apple/swift-log.git","state":{{"revision":"{revision}","version":"1.5.4"}}}}]}}"#
+//RS     );
+//RS     let maven = r#"<project>
+//RS   <modelVersion>4.0.0</modelVersion>
+//RS   <groupId>com.example</groupId>
+//RS   <artifactId>sample</artifactId>
+//RS   <version>1.2.3</version>
+//RS   <packaging>jar</packaging>
+//RS   <licenses><license><name>Apache-2.0</name><url>https://www.apache.org/licenses/LICENSE-2.0</url></license></licenses>
+//RS   <dependencies><dependency><groupId>org.example</groupId><artifactId>dep</artifactId><version>3.0.0</version><scope>test</scope></dependency></dependencies>
+//RS   <build><plugins><plugin><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version><goals><goal>compile</goal></goals></plugin></plugins></build>
+//RS   <profiles><profile><id>linux</id><activation><os><name>Linux</name></os></activation></profile></profiles>
+//RS   <scm><url>https://example.invalid/sample</url></scm>
+//RS </project>"#;
+//RS 
+//RS     for (family, native) in [
+//RS         (ProviderFamily::PyPI, pypi),
+//RS         (ProviderFamily::SwiftPM, swiftpm.as_str()),
+//RS         (ProviderFamily::Maven, maven),
+//RS     ] {
+//RS         let report = normalize_provider_document(family, native);
+//RS         report
+//RS             .validate()
+//RS             .unwrap_or_else(|error| panic!("lossless provider report: {error}"));
+//RS         let shared = report.shared_facts();
+//RS         assert_eq!(shared.native_document, native);
+//RS         assert!(shared
+//RS             .explain_lines()
+//RS             .iter()
+//RS             .any(|line| line.contains("native") && line.contains("retained")));
+//RS 
+//RS         let exported = ProviderFacts::from_json(&report.export_json())
+//RS             .expect("provider export uses the shared carrier");
+//RS         assert_eq!(exported, shared);
+//RS 
+//RS         let lock = report
+//RS             .lock_record("app", &shared.reference, "x86_64-linux")
+//RS             .expect("provider lock uses the shared carrier");
+//RS         let locked = ProviderFacts::from_json(
+//RS             lock.future_fields
+//RS                 .get("provider-facts")
+//RS                 .expect("provider facts in lock"),
+//RS         )
+//RS         .expect("locked provider facts JSON");
+//RS         assert_eq!(locked, shared);
+//RS         let digest = shared.digest();
+//RS         assert_eq!(
+//RS             lock.future_fields.get("provider-facts-digest"),
+//RS             Some(&digest)
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn provider_conformance_reports_loss_and_conflict_without_defaults() {
+//RS     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+//RS 
+//RS     let missing_version = normalize_provider_document(
+//RS         ProviderFamily::PyPI,
+//RS         r#"{"info":{"name":"sample-pkg"},"urls":[]}"#,
+//RS     );
+//RS     assert!(missing_version
+//RS         .losses
+//RS         .iter()
+//RS         .any(|loss| loss.contains("exact version")));
+//RS     assert!(missing_version.validate().is_err());
+//RS     assert!(missing_version
+//RS         .shared_facts()
+//RS         .losses
+//RS         .iter()
+//RS         .any(|loss| loss.reason.contains("exact version")));
+//RS 
+//RS     let branch_only = normalize_provider_document(
+//RS         ProviderFamily::SwiftPM,
+//RS         r#"{"version":1,"pins":[{"package":"swift-log","state":{"branch":"main"}}]}"#,
+//RS     );
+//RS     assert!(branch_only
+//RS         .losses
+//RS         .iter()
+//RS         .any(|loss| loss.contains("exact revision")));
+//RS     assert!(branch_only.validate().is_err());
+//RS 
+//RS     let conflicting_pom = r#"<project><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.0.0</version><version>2.0.0</version></project>"#;
+//RS     let conflict = normalize_provider_document(ProviderFamily::Maven, conflicting_pom);
+//RS     assert!(conflict
+//RS         .conflicts
+//RS         .iter()
+//RS         .any(|finding| finding.contains("conflicting version")));
+//RS     assert!(conflict.validate().is_err());
+//RS 
+//RS     let unsupported_xml = normalize_provider_document(
+//RS         ProviderFamily::Maven,
+//RS         r#"<m:project xmlns:m="urn:example"><m:artifactId>sample</m:artifactId></m:project>"#,
+//RS     );
+//RS     assert!(unsupported_xml
+//RS         .losses
+//RS         .iter()
+//RS         .any(|loss| loss.contains("namespaced XML")));
+//RS     assert!(unsupported_xml.validate().is_err());
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_dash_p_adds_adhoc_package_with_no_manifest_at_all() {
+//RS     // U16: `jet env -p <pkg>... -- cmd` needs no env.jet/package.jet at all — the
+//RS     // ad-hoc package becomes an ordinary nixpkgs RefSpec, folded into an
+//RS     // otherwise-empty plan, trust-gated and realized exactly like a
+//RS     // manifest-declared ref.
+//RS     let root = Scratch::new("dashp-root");
+//RS     let proj = Scratch::new("dashp-proj");
+//RS     let fixtures = Scratch::new("dashp-fx");
+//RS     let out = Scratch::new("dashp-out");
+//RS     write_runnable_fixture(&fixtures.path, &root.path, &out.path);
+//RS     let output = jetpack()
+//RS         .args(["env", "--no-color", "--trust", "--offline", "--fixtures"])
+//RS         .arg(&fixtures.path)
+//RS         .args(["-p", "greet", "--", "greet"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&output.stdout).trim(),
+//RS         "hello from jetpack"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_dash_p_merges_with_project_declared_packages() {
+//RS     // The project's own declared package (`hello`, a `core` ref) and the
+//RS     // ad-hoc `-p greet` (nixpkgs) both land on PATH in the same shell.
+//RS     let (base, proj, root) = core_hello_project("dashp-merge");
+//RS     let fixtures = base.join("fixtures");
+//RS     let out = base.join("greet-out");
+//RS     write_runnable_fixture(&fixtures, &root, &out);
+//RS     let output = jetpack()
+//RS         .args(["env", "--no-color", "--trust", "--offline", "--fixtures"])
+//RS         .arg(&fixtures)
+//RS         .args(["-p", "greet", "--", "sh", "-c", "hello && greet"])
+//RS         .current_dir(&proj)
+//RS         .env("JETPACK_ROOT", &root)
+//RS         .env("HOME", base.join("home"))
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(stdout.contains("hello from jet-pkgs"), "stdout: {stdout}");
+//RS     assert!(stdout.contains("hello from jetpack"), "stdout: {stdout}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_without_env_jet_or_packages_is_still_nothing_to_do() {
+//RS     // The pre-U16 refusal is unchanged when there is truly nothing: no
+//RS     // env.jet and no `-p`.
+//RS     let root = Scratch::new("nothing-root");
+//RS     let proj = Scratch::new("nothing-proj");
+//RS     let output = jetpack()
+//RS         .args(["env", "--no-color"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!output.status.success());
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("nothing to do"), "stderr: {stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_flake_detection_ordering_project_env_wins_without_flag() {
+//RS     // U16's ordering rule: a project that declares `env.*` (here the
+//RS     // Phase-1 directive surface) is never silently swapped for a foreign
+//RS     // flake.nix, even when one is present — only `--flake` forces it. Proven
+//RS     // here by an offline realize of the *declared* `hello` package
+//RS     // succeeding with no `nix` on PATH and no flake.nix ever being touched
+//RS     // (a bad flake.nix would fail loudly if `nix develop` ran against it).
+//RS     let (base, proj, root) = core_hello_project("flake-ordering");
+//RS     fs::write(proj.join("flake.nix"), "this is not valid nix").unwrap();
+//RS     let output = jetpack()
+//RS         .args(["env", "--no-color", "--trust", "--", "hello"])
+//RS         .current_dir(&proj)
+//RS         .env("JETPACK_ROOT", &root)
+//RS         .env("HOME", base.join("home"))
+//RS         .env("PATH", "/usr/bin:/bin") // no nix on PATH
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&output.stdout).trim(),
+//RS         "hello from jet-pkgs"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_flake_flag_requires_trust_before_native_projection() {
+//RS     // `--flake` forces the foreign-flake projection even though the project
+//RS     // declares `env.*`; the trust boundary runs before native evaluation.
+//RS     let (base, proj, root) = core_hello_project("flake-forced");
+//RS     fs::write(proj.join("flake.nix"), "{ }").unwrap();
+//RS     let output = jetpack()
+//RS         .args(["env", "--no-color", "--flake"])
+//RS         .current_dir(&proj)
+//RS         .env("JETPACK_ROOT", &root)
+//RS         .env("HOME", base.join("home"))
+//RS         .env("PATH", "/usr/bin:/bin") // no nix on PATH
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!output.status.success());
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("E1255"), "stderr: {stderr}");
+//RS     assert!(stderr.contains("--trust"), "stderr: {stderr}");
+//RS     assert!(!stderr.contains("E1256"), "stderr: {stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_flake_native_projection_runs_without_nix_on_path() {
+//RS     // U16 product proof: `env --flake --trust` uses the bounded native
+//RS     // evaluator with an empty PATH, so no installed Nix executable can be
+//RS     // discovered by the production path.
+//RS     let project = Scratch::new("flake-native-env");
+//RS     fs::write(
+//RS         project.join("flake.nix"),
+//RS         "{ devShells.x86_64-linux.default = { }; }",
+//RS     )
+//RS     .unwrap();
+//RS     let output = jetpack()
+//RS         .args([
+//RS             "env",
+//RS             "--flake",
+//RS             "--trust",
+//RS             "--no-color",
+//RS             "--",
+//RS             "/bin/sh",
+//RS             "-c",
+//RS             "printf native-flake",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("PATH", "")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&output.stdout).trim(),
+//RS         "native-flake"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn bridge_flake_projects_imported_flake_parts_module_and_preserves_last_lock_on_failure() {
+//RS     let project = Scratch::new("flake-parts-bridge");
+//RS     fs::create_dir_all(project.join("parts")).unwrap();
+//RS     fs::write(
+//RS         project.join("flake.nix"),
+//RS         r#"
+//RS let marker = "flake-parts mkFlake"; in {
+//RS   imports = [ ./parts/dev.nix ];
+//RS   systems = [ "x86_64-linux" ];
+//RS   perSystem = true;
+//RS   outputs = import ./parts/dev.nix;
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         project.join("parts/dev.nix"),
+//RS         "{ devShells.x86_64-linux.default = { packages = [ pkgs.fd ]; }; }\n",
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let first = jetpack()
+//RS         .args(["bridge", "flake", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("PATH", "")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         first.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&first.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&first.stdout).contains("packages: [fd]"),
+//RS         "stdout: {}",
+//RS         String::from_utf8_lossy(&first.stdout)
+//RS     );
+//RS     let lock_path = project.join(".jet/lock");
+//RS     let before = fs::read(&lock_path).expect("successful bridge must commit a semantic lock");
+//RS     let lock_text = String::from_utf8(before.clone()).unwrap();
+//RS     assert!(
+//RS         lock_text.contains("flake-composition:flake-parts"),
+//RS         "{lock_text}"
+//RS     );
+//RS     assert!(lock_text.contains("./parts/dev.nix"), "{lock_text}");
+//RS     let previous = jetpack::SemanticLock::parse(&lock_text);
+//RS     let previous_graph =
+//RS         jetpack::SemanticLock::FlakeGraph::from_semantic_lock("flake.nix", &previous)
+//RS             .expect("the committed imported-module projection must remain usable");
+//RS     assert!(previous_graph
+//RS         .named_dev_shells()
+//RS         .iter()
+//RS         .any(|output| output.provenance.contains("./parts/dev.nix")));
+//RS 
+//RS     fs::write(
+//RS         project.join("parts/dev.nix"),
+//RS         "{ devShells.x86_64-linux.default = { packages = pkgs.lib.optionals true [ pkgs.fd ]; }; }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let failed = jetpack()
+//RS         .args(["bridge", "flake", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("PATH", "")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(failed.status.code(), Some(1));
+//RS     let stderr = String::from_utf8_lossy(&failed.stderr);
+//RS     assert!(stderr.contains("E1256"), "stderr: {stderr}");
+//RS     assert_eq!(fs::read(&lock_path).unwrap(), before);
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_flake_dynamic_projection_reports_e1256_without_nix() {
+//RS     let project = Scratch::new("flake-dynamic-env");
+//RS     fs::write(
+//RS         project.join("flake.nix"),
+//RS         "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = pkgs.lib.optionals true [ pkgs.fd ]; }; }",
+//RS     )
+//RS     .unwrap();
+//RS     let output = jetpack()
+//RS         .args(["env", "--flake", "--trust", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("PATH", "")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(output.status.code(), Some(1));
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("E1256"), "stderr: {stderr}");
+//RS     assert!(!stderr.contains("couldn't run `nix`"), "stderr: {stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_flake_with_no_foreign_flake_present_is_friendly() {
+//RS     let root = Scratch::new("flake-none-root");
+//RS     let proj = Scratch::new("flake-none-proj");
+//RS     let output = jetpack()
+//RS         .args(["env", "--no-color", "--flake"])
+//RS         .current_dir(&proj.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!output.status.success());
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("no foreign flake"), "stderr: {stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn retired_profile_flag_teaches_preset() {
+//RS     let project = Scratch::new("retired-profile-flag");
+//RS     fs::write(
+//RS         project.join("env.jet"),
+//RS         "module env.dev {\n    packages: [nixpkgs.ripgrep]\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let output = jetpack()
+//RS         .args(["env", "info", "--profile", "work", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("E1300"), "stderr: {stderr}");
+//RS     assert!(stderr.contains("--preset"), "stderr: {stderr}");
+//RS     assert!(
+//RS         !output.status.success(),
+//RS         "the retired spelling must not select anything"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn retired_environment_flag_teaches_env() {
+//RS     let project = Scratch::new("retired-environment-flag");
+//RS     fs::write(
+//RS         project.join("env.jet"),
+//RS         "module env.dev {\n    packages: [nixpkgs.ripgrep]\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let output = jetpack()
+//RS         .args(["env", "info", "--env-profile", "full", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("E1342"), "stderr: {stderr}");
+//RS     assert!(stderr.contains("`--env <name>`"), "stderr: {stderr}");
+//RS     assert!(
+//RS         !output.status.success(),
+//RS         "the retired spelling must not select an environment module"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_info_json_discloses_selected_preset_and_language_projection() {
+//RS     let project = Scratch::new("env-info-composition");
+//RS     fs::write(
+//RS         project.join("env.jet"),
+//RS         r#"module env.dev {
+//RS     presets: {
+//RS         host: { hostname: "epoch5-host", variables: [String:String]{ "MODE": "dev" } }
+//RS         user: { user: "epoch5-user" }
+//RS     }
+//RS     services: {
+//RS         redis: { enable: true, ports: [6379], after: ["database"] }
+//RS     }
+//RS     languages: [
+//RS         "rust": Lang{ enable: true, channel: .Stable },
+//RS         "zig": Lang{ enable: true }
+//RS     ]
+//RS     packages: [nixpkgs.ripgrep]
+//RS }
+//RS module env.full {
+//RS     packages: [nixpkgs.fd]
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(project.join("run.jet"), "#Job\nfn lint() {}\n").unwrap();
+//RS     let output = jetpack()
+//RS         .args(["env", "info", "--json", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("HOSTNAME", "epoch5-host")
+//RS         .env("USER", "epoch5-user")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         stdout.contains("\"preset\":\"host+user\""),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"selected_presets\":[\"host\",\"user\"]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"active_environment\":\"dev\""),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"active_environment_provenance\":[\"env.dev\"]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(stdout.contains("\"language_catalog\""), "stdout: {stdout}");
+//RS     assert!(stdout.contains("\"fingerprint\":\""), "stdout: {stdout}");
+//RS     assert!(
+//RS         stdout.contains("\"language_projections\""),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(stdout.contains("\"host\":\"native\""), "stdout: {stdout}");
+//RS     assert!(
+//RS         stdout.contains("\"platform\":\"x86_64-linux\""),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"license\":\"Apache-2.0 OR MIT\""),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(stdout.contains("\"missing_tools\":[]"), "stdout: {stdout}");
+//RS     assert!(stdout.contains("\"included\""), "stdout: {stdout}");
+//RS     assert!(stdout.contains("\"omitted\""), "stdout: {stdout}");
+//RS     assert!(stdout.contains("\"name\":\"Zig\""), "stdout: {stdout}");
+//RS     assert!(stdout.contains("\"zig@nixpkgs\""), "stdout: {stdout}");
+//RS     assert!(
+//RS         stdout.contains("\"services\":[{\"name\":\"redis\""),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     // D-JOB-NAME2=B (card #1448): the merged `tasks` key is gone. `lint` is the
+//RS     // project's own `#Job fn`, so it reports under `jobs`; this env declares no
+//RS     // `checks:` hook records, so the environment's key is present but empty.
+//RS     // Both keys always appear, so a consumer reads the one it means.
+//RS     assert!(
+//RS         stdout.contains("\"checks\":[],\"jobs\":[\"lint\"]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(!stdout.contains("\"tasks\":[\"lint\"]"), "stdout: {stdout}");
+//RS     assert!(
+//RS         stdout.contains("\"variables\":[{\"name\":\"MODE\""),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS 
+//RS     let full = jetpack()
+//RS         .args(["env", "info", "--json", "--no-color", "--env", "full"])
+//RS         .current_dir(&project.path)
+//RS         .env("HOSTNAME", "epoch5-host")
+//RS         .env("USER", "epoch5-user")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         full.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&full.stderr)
+//RS     );
+//RS     let full_stdout = String::from_utf8_lossy(&full.stdout);
+//RS     assert!(
+//RS         full_stdout.contains("\"active_environment\":\"full\""),
+//RS         "stdout: {full_stdout}"
+//RS     );
+//RS     assert!(
+//RS         full_stdout.contains("\"active_environment_provenance\":[\"env.full\"]"),
+//RS         "stdout: {full_stdout}"
+//RS     );
+//RS     assert!(
+//RS         full_stdout.contains("\"fd@nixpkgs\""),
+//RS         "stdout: {full_stdout}"
+//RS     );
+//RS     assert!(
+//RS         !full_stdout.contains("\"ripgrep@nixpkgs\""),
+//RS         "stdout: {full_stdout}"
+//RS     );
+//RS 
+//RS     let missing = jetpack()
+//RS         .args(["env", "info", "--no-color", "--env", "missing"])
+//RS         .current_dir(&project.path)
+//RS         .env("HOSTNAME", "epoch5-host")
+//RS         .env("USER", "epoch5-user")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!missing.status.success());
+//RS     let missing_stderr = String::from_utf8_lossy(&missing.stderr);
+//RS     assert!(missing_stderr.contains("E1337"), "stderr: {missing_stderr}");
+//RS     assert!(
+//RS         missing_stderr.contains("environment module `missing` is not declared"),
+//RS         "stderr: {missing_stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_info_json_discloses_reads_and_typed_service_facts_without_starting_processes() {
+//RS     let project = Scratch::new("env-info-facts");
+//RS     fs::write(
+//RS         project.join("env.jet"),
+//RS         r#"module env.dev {
+//RS     prompt: $HOME
+//RS     services: {
+//RS         fixture: {
+//RS             enable: false,
+//RS             ports: [8080],
+//RS             run: ["fixture", "--port", "8080"],
+//RS             ready: "fixture --ready",
+//RS             data_dir: "state/fixture",
+//RS             watch: ["src"],
+//RS             after: ["database"],
+//RS             before_start: ["lint"],
+//RS             sockets: ["run/fixture.sock"]
+//RS         }
+//RS     }
+//RS     files: ["config/generated.txt": File{ content: "generated\n", mode: .Copy }]
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(project.join("run.jet"), "#Job\nfn lint() {}\n").unwrap();
+//RS 
+//RS     let output = jetpack()
+//RS         .args(["env", "info", "--json", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("HOME", "/test/home")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         jetpack::JSON::parse(&stdout).is_ok(),
+//RS         "info JSON must parse: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"variables\":[{\"name\":\"HOME\",\"sources\":[\"environment\"]}"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"name\":\"fixture\",\"enabled\":false"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"run\":[\"fixture\",\"--port\",\"8080\"]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"ready\":\"fixture --ready\""),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"data_dir\":\"state/fixture\""),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(stdout.contains("\"watch\":[\"src\"]"), "stdout: {stdout}");
+//RS     assert!(
+//RS         stdout.contains("\"after\":[\"database\"]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"before_start\":[\"lint\"]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"sockets\":[\"run/fixture.sock\"]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"files\":[\"config/generated.txt\"]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(stdout.contains("\"jobs\":[\"lint\"]"), "stdout: {stdout}");
+//RS     assert!(
+//RS         !project.join(".jet/services").exists(),
+//RS         "info must not start services"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_sync_applies_typed_files_and_refuses_unmanaged_destinations() {
+//RS     let project = Scratch::new("env-sync-files");
+//RS     let root = Scratch::new("env-sync-files-root");
+//RS     let home = Scratch::new("env-sync-files-home");
+//RS     fs::write(
+//RS         project.join("env.jet"),
+//RS         r#"module env.dev {
+//RS     files: [
+//RS         "generated/config.txt": File{ content: "generated\n", mode: .Copy },
+//RS         "seed/config.txt": File{ content: "seeded\n", mode: .Seed }
+//RS     ]
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     fs::create_dir_all(project.join("seed")).unwrap();
+//RS     fs::write(project.join("seed/config.txt"), "keep me\n").unwrap();
+//RS 
+//RS     let output = jetpack()
+//RS         .args([
+//RS             "env",
+//RS             "sync",
+//RS             "--trust",
+//RS             "--yes",
+//RS             "--offline",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("HOME", &home.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(project.join("generated/config.txt")).unwrap(),
+//RS         "generated\n"
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(project.join("seed/config.txt")).unwrap(),
+//RS         "keep me\n"
+//RS     );
+//RS     assert!(project.join(".jet/files/state").is_file());
+//RS 
+//RS     let blocked = Scratch::new("env-sync-files-blocked");
+//RS     let blocked_root = Scratch::new("env-sync-files-blocked-root");
+//RS     let blocked_home = Scratch::new("env-sync-files-blocked-home");
+//RS     fs::write(
+//RS         blocked.join("env.jet"),
+//RS         fs::read(project.join("env.jet")).unwrap(),
+//RS     )
+//RS     .unwrap();
+//RS     fs::create_dir_all(blocked.join("generated")).unwrap();
+//RS     fs::write(blocked.join("generated/config.txt"), "user-owned\n").unwrap();
+//RS     let refused = jetpack()
+//RS         .args([
+//RS             "env",
+//RS             "sync",
+//RS             "--trust",
+//RS             "--yes",
+//RS             "--offline",
+//RS             "--no-color",
+//RS         ])
+//RS         .current_dir(&blocked.path)
+//RS         .env("JETPACK_ROOT", &blocked_root.path)
+//RS         .env("HOME", &blocked_home.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(refused.status.code(), Some(2));
+//RS     assert!(
+//RS         String::from_utf8_lossy(&refused.stderr).contains("unmanaged destination"),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&refused.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_to_string(blocked.join("generated/config.txt")).unwrap(),
+//RS         "user-owned\n"
+//RS     );
+//RS     assert!(!blocked.join(".jet/files/state").exists());
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_info_json_discloses_typed_integration_projection() {
+//RS     let project = Scratch::new("env-info-integrations");
+//RS     fs::write(
+//RS         project.join("env.jet"),
+//RS         r#"module env.dev {
+//RS     imports: [
+//RS         env.platform.android(api: 35, build_tools: "35.0.0", ndk: "27.1"),
+//RS         env.platform.apple(targets: [.IOS]),
+//RS         env.security.certificates([dev_certificate]),
+//RS         env.cloud.credentials([aws_production]),
+//RS         env.security.vault([database_password]),
+//RS         env.network.hosts(["api.local": "127.0.0.1"]),
+//RS         env.agent.codex(mcp: [repo_server]),
+//RS         env.editor.vscode()
+//RS     ]
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let output = jetpack()
+//RS         .args(["env", "info", "--json", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .env("JET_TARGET", "x86_64-linux-darwin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(stdout.contains("\"integrations\":["), "stdout: {stdout}");
+//RS     assert!(stdout.contains("\"kind\":\"android\""), "stdout: {stdout}");
+//RS     assert!(stdout.contains("\"kind\":\"apple\""), "stdout: {stdout}");
+//RS     assert!(
+//RS         stdout.contains("\"kind\":\"certificates\""),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"kind\":\"cloud-credentials\""),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(stdout.contains("\"kind\":\"vault\""), "stdout: {stdout}");
+//RS     assert!(stdout.contains("\"kind\":\"hosts\""), "stdout: {stdout}");
+//RS     assert!(
+//RS         stdout.contains("\"kind\":\"codex-agent\""),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(stdout.contains("\"kind\":\"editor\""), "stdout: {stdout}");
+//RS     assert!(
+//RS         stdout.contains("\"option_keys\":[\"api\",\"build_tools\",\"license\",\"ndk\"]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"option_keys\":[\"license\",\"targets\"]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(stdout.contains("\"host_checks\":["), "stdout: {stdout}");
+//RS     assert!(stdout.contains("\"grants\":["), "stdout: {stdout}");
+//RS     assert!(
+//RS         stdout.contains("\"secrets\":[\"dev_certificate\"]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"grants\":[\"certificate.read\"]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"secrets\":[\"aws_production\"]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"grants\":[\"credential.read\"]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"secrets\":[\"database_password\"]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"grants\":[\"vault.read\"]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"grants\":[\"mcp.read\"]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"packages\":[\"vscode@nixpkgs\"]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     assert!(
+//RS         stdout.contains("\"option_keys\":[\"host.api.local\"]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_requires_a_persisted_cloud_integration_grant() {
+//RS     let project = Scratch::new("cloud-integration-grant");
+//RS     let root = Scratch::new("cloud-integration-grant-root");
+//RS     let home = Scratch::new("cloud-integration-grant-home");
+//RS     fs::write(
+//RS         project.join("env.jet"),
+//RS         r#"module env.dev {
+//RS     imports: [env.cloud.credentials([aws_production])]
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let output = jetpack()
+//RS         .args(["env", "--trust", "--offline", "--no-color", "--", "true"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("HOME", &home.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(output.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("E1335"), "stderr: {stderr}");
+//RS     assert!(
+//RS         stderr.contains("cloud-credentials:credential.read"),
+//RS         "stderr: {stderr}"
+//RS     );
+//RS     assert!(
+//RS         !stderr.contains("aws_production"),
+//RS         "secret name leaked: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_requires_a_persisted_vault_integration_grant() {
+//RS     let project = Scratch::new("vault-integration-grant");
+//RS     let root = Scratch::new("vault-integration-grant-root");
+//RS     let home = Scratch::new("vault-integration-grant-home");
+//RS     fs::write(
+//RS         project.join("env.jet"),
+//RS         r#"module env.dev {
+//RS     imports: [env.security.vault([database_password])]
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let output = jetpack()
+//RS         .args(["env", "--trust", "--offline", "--no-color", "--", "true"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("HOME", &home.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(output.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("E1335"), "stderr: {stderr}");
+//RS     assert!(stderr.contains("vault:vault.read"), "stderr: {stderr}");
+//RS     assert!(
+//RS         !stderr.contains("database_password"),
+//RS         "secret name leaked: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_info_rejects_unredactable_integration_secret() {
+//RS     let project = Scratch::new("env-info-integration-secret");
+//RS     fs::write(
+//RS         project.join("env.jet"),
+//RS         r#"module env.dev {
+//RS     imports: [env.cloud.credentials("super_secret_value")]
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let output = jetpack()
+//RS         .args(["env", "info", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!output.status.success());
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("E1335"), "stderr: {stderr}");
+//RS     assert!(!stderr.contains("super_secret_value"), "stderr: {stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn env_info_rejects_unsupported_apple_integration_target() {
+//RS     let project = Scratch::new("env-info-apple-target");
+//RS     fs::write(
+//RS         project.join("env.jet"),
+//RS         r#"module env.dev {
+//RS     imports: [env.platform.apple(targets: [.IOS])]
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let output = jetpack()
+//RS         .args(["env", "info", "--no-color"])
+//RS         .current_dir(&project.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!output.status.success());
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("E1335"), "stderr: {stderr}");
+//RS     assert!(stderr.contains("apple integration"), "stderr: {stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn bridge_flake_uses_native_evaluator_without_nix() {
+//RS     let dir = Scratch::new("bridge-nonix");
+//RS     fs::write(
+//RS         dir.join("flake.nix"),
+//RS         "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.fd ]; }; }",
+//RS     )
+//RS     .unwrap();
+//RS     let output = jetpack()
+//RS         .args(["bridge", "flake", "--no-color"])
+//RS         .current_dir(&dir.path)
+//RS         .env("PATH", "") // no Nix or other evaluator executable on PATH
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&output.stdout).contains("packages: [fd]"),
+//RS         "stdout: {}",
+//RS         String::from_utf8_lossy(&output.stdout)
+//RS     );
+//RS 
+//RS     let lock_text = fs::read_to_string(dir.join(".jet/lock"))
+//RS         .expect("native bridge must commit the pinned evaluator ledger");
+//RS     let lock = jetpack::SemanticLock::parse(&lock_text);
+//RS     let inventory = lock
+//RS         .records
+//RS         .iter()
+//RS         .filter(|record| {
+//RS             record
+//RS                 .identity
+//RS                 .key
+//RS                 .starts_with("flake-evaluator-inventory:")
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(inventory.len(), 17, "{lock_text}");
+//RS     assert_eq!(
+//RS         inventory
+//RS             .iter()
+//RS             .filter(|record| record.identity.exact.contains("class=evaluable"))
+//RS             .count(),
+//RS         10
+//RS     );
+//RS     assert_eq!(
+//RS         inventory
+//RS             .iter()
+//RS             .filter(|record| record.identity.exact.contains("class=buildable"))
+//RS             .count(),
+//RS         5
+//RS     );
+//RS     let skipped = inventory
+//RS         .iter()
+//RS         .filter(|record| record.identity.exact.starts_with("status=skipped;"))
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(skipped.len(), 2, "{lock_text}");
+//RS     assert!(skipped.iter().any(|record| {
+//RS         record.identity.key.ends_with(":dynamic-derivations")
+//RS             && record.identity.exact
+//RS                 == "status=skipped;class=skipped;reason=dynamic staging has a separate compatibility boundary"
+//RS     }));
+//RS     assert!(skipped.iter().any(|record| {
+//RS         record.identity.key.ends_with(":ifd")
+//RS             && record.identity.exact
+//RS                 == "status=skipped;class=skipped;reason=import-from-derivation requires a separate authority grant"
+//RS     }));
+//RS     for (surface, class, reason) in [
+//RS         (
+//RS             "fixed-output-fetchers",
+//RS             "buildable",
+//RS             "explicit fetch authority returns verified canonical store paths",
+//RS         ),
+//RS         (
+//RS             "cross-system-packages",
+//RS             "buildable",
+//RS             "explicit target authority projects pinned systems",
+//RS         ),
+//RS         (
+//RS             "external-flakes",
+//RS             "evaluable",
+//RS             "explicit provider authority evaluates bounded external sources",
+//RS         ),
+//RS     ] {
+//RS         let key = format!("flake-evaluator-inventory:{surface}");
+//RS         let exact = format!("status=covered;class={class};reason={reason}");
+//RS         assert!(
+//RS             inventory
+//RS                 .iter()
+//RS                 .any(|record| record.identity.key == key && record.identity.exact == exact),
+//RS             "missing inventory record {key}: {lock_text}"
+//RS         );
+//RS     }
+//RS     assert!(lock.records.iter().any(|record| {
+//RS         record.identity.key == "flake-evaluator"
+//RS             && record.identity.exact
+//RS                 == "native-nix:2.34.8:b5aa0fbd538984f6e3d201be0005b4463d8b09f8:x86_64-linux"
+//RS     }));
+//RS 
+//RS     let before_failure = lock_text;
+//RS     fs::write(dir.join("flake.nix"), " ".repeat((1 << 20) + 1)).unwrap();
+//RS     let failed = jetpack()
+//RS         .args(["bridge", "flake", "--no-color"])
+//RS         .current_dir(&dir.path)
+//RS         .env("PATH", "")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(failed.status.code(), Some(1));
+//RS     let stderr = String::from_utf8_lossy(&failed.stderr);
+//RS     assert!(stderr.contains("E1256"), "stderr: {stderr}");
+//RS     assert!(!stderr.contains("nix eval"), "stderr: {stderr}");
+//RS     assert_eq!(
+//RS         fs::read_to_string(dir.join(".jet/lock")).unwrap(),
+//RS         before_failure
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn bridge_flake_breadth_and_json_budget_use_native_evaluator_without_nix() {
+//RS     let dir = Scratch::new("bridge-native-breadth");
+//RS     fs::write(
+//RS         dir.join("flake.nix"),
+//RS         r#"{ devShells.x86_64-linux.default = pkgs.mkShell {
+//RS   packages = builtins.attrValues (builtins.fromJSON "{\"b\":\"ripgrep\",\"a\":\"fd\"}");
+//RS }; }"#,
+//RS     )
+//RS     .unwrap();
+//RS     let output = jetpack()
+//RS         .args(["bridge", "flake", "--no-color"])
+//RS         .current_dir(&dir.path)
+//RS         .env("PATH", "")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&output.stdout).contains("packages: [fd, ripgrep]"),
+//RS         "stdout: {}",
+//RS         String::from_utf8_lossy(&output.stdout)
+//RS     );
+//RS     let lock_before_budget_failure = fs::read_to_string(dir.join(".jet/lock"))
+//RS         .expect("native breadth bridge must commit a lock before the failure case");
+//RS 
+//RS     let nested_json = format!("{}true{}", "[".repeat(257), "]".repeat(257));
+//RS     let over_budget = format!(
+//RS         "{{ devShells.x86_64-linux.default = pkgs.mkShell {{ packages = builtins.fromJSON \"{nested_json}\"; }}; }}"
+//RS     );
+//RS     fs::write(dir.join("flake.nix"), over_budget).unwrap();
+//RS     let failed = jetpack()
+//RS         .args(["bridge", "flake", "--no-color"])
+//RS         .current_dir(&dir.path)
+//RS         .env("PATH", "")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!failed.status.success());
+//RS     let stderr = String::from_utf8_lossy(&failed.stderr);
+//RS     assert!(stderr.contains("E1256"), "stderr: {stderr}");
+//RS     assert!(
+//RS         stderr.contains("JSON value is too deeply nested"),
+//RS         "stderr: {stderr}"
+//RS     );
+//RS     assert!(!stderr.contains("nix eval"), "stderr: {stderr}");
+//RS     assert_eq!(
+//RS         fs::read_to_string(dir.join(".jet/lock")).unwrap(),
+//RS         lock_before_budget_failure
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn bridge_flake_projects_fetchers_cross_packages_and_external_flakes_without_nix() {
+//RS     let dir = Scratch::new("bridge-native-nix-breadth");
+//RS     fs::create_dir_all(dir.join("dep")).unwrap();
+//RS     fs::write(
+//RS         dir.join("dep/flake.nix"),
+//RS         "{ packages.x86_64-linux.default = pkgs.fd; }",
+//RS     )
+//RS     .unwrap();
+//RS     let source_bytes = b"fixed-output\n";
+//RS     fs::write(dir.join("source.txt"), source_bytes).unwrap();
+//RS     let source_hash = jetpack::SHA256::sha256_hex(source_bytes);
+//RS     let source = format!(
+//RS         r#"{{
+//RS   devShells.x86_64-linux.default = pkgs.mkShell {{
+//RS     packages = [
+//RS       (builtins.getFlake "path:./dep").packages.x86_64-linux.default
+//RS       pkgs.pkgsCross.aarch64-multiplatform.foo
+//RS     ];
+//RS   }};
+//RS   packages.x86_64-linux.fetched = builtins.derivationStrict {{
+//RS     name = "fetched";
+//RS     system = "x86_64-linux";
+//RS     builder = "/bin/sh";
+//RS     args = [ "-c" "echo $src > $out" ];
+//RS     src = builtins.fetchurl {{
+//RS       url = "file:./source.txt";
+//RS       sha256 = "{source_hash}";
+//RS       name = "source.txt";
+//RS     }};
+//RS   }};
+//RS }}
+//RS "#
+//RS     );
+//RS     fs::write(dir.join("flake.nix"), source).unwrap();
+//RS 
+//RS     let output = jetpack()
+//RS         .args(["bridge", "flake", "--no-color"])
+//RS         .current_dir(&dir.path)
+//RS         .env("PATH", "")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         stdout.contains("packages: [fd, fetched]"),
+//RS         "stdout: {stdout}"
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(
+//RS         stderr.contains("cross-package:aarch64-linux/foo"),
+//RS         "stderr: {stderr}"
+//RS     );
+//RS     assert!(!stderr.contains("nix eval"), "stderr: {stderr}");
+//RS 
+//RS     let lock_path = dir.join(".jet/lock");
+//RS     let lock_before_failure = fs::read_to_string(&lock_path).expect("breadth bridge lock");
+//RS     assert!(
+//RS         lock_before_failure.contains("flake-devshell:devShells:x86_64-linux:default")
+//RS             && lock_before_failure
+//RS                 .contains("packages=fd;unsupported=cross-package:aarch64-linux/foo"),
+//RS         "lock: {lock_before_failure}"
+//RS     );
+//RS     assert!(
+//RS         lock_before_failure.contains("flake-derivation:packages:x86_64-linux:fetched"),
+//RS         "lock: {lock_before_failure}"
+//RS     );
+//RS 
+//RS     fs::write(dir.join("source.txt"), b"tampered\n").unwrap();
+//RS     let fetch_failed = jetpack()
+//RS         .args(["bridge", "flake", "--no-color"])
+//RS         .current_dir(&dir.path)
+//RS         .env("PATH", "")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(fetch_failed.status.code(), Some(1));
+//RS     let fetch_failure_stderr = String::from_utf8_lossy(&fetch_failed.stderr);
+//RS     assert!(
+//RS         fetch_failure_stderr.contains("E1256"),
+//RS         "stderr: {fetch_failure_stderr}"
+//RS     );
+//RS     assert!(
+//RS         fetch_failure_stderr.contains("verified fetch hash mismatch"),
+//RS         "stderr: {fetch_failure_stderr}"
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&lock_path).unwrap(), lock_before_failure);
+//RS 
+//RS     fs::write(
+//RS         dir.join("flake.nix"),
+//RS         r#"{ devShells.x86_64-linux.default = pkgs.mkShell {
+//RS   packages = [ (builtins.getFlake "github:NixOS/nixpkgs").packages.x86_64-linux.default ];
+//RS }; }"#,
+//RS     )
+//RS     .unwrap();
+//RS     let failed = jetpack()
+//RS         .args(["bridge", "flake", "--no-color"])
+//RS         .current_dir(&dir.path)
+//RS         .env("PATH", "")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(failed.status.code(), Some(1));
+//RS     let failure_stderr = String::from_utf8_lossy(&failed.stderr);
+//RS     assert!(failure_stderr.contains("E1256"), "stderr: {failure_stderr}");
+//RS     assert!(
+//RS         failure_stderr.contains("provider authority"),
+//RS         "stderr: {failure_stderr}"
+//RS     );
+//RS     assert!(
+//RS         !failure_stderr.contains("nix eval"),
+//RS         "stderr: {failure_stderr}"
+//RS     );
+//RS     assert_eq!(fs::read_to_string(lock_path).unwrap(), lock_before_failure);
+//RS }
+//RS 
+//RS #[test]
+//RS fn bridge_flake_projects_overlays_named_devshells_and_all_outputs_without_nix() {
+//RS     let dir = Scratch::new("bridge-native-evaluator-breadth");
+//RS     fs::write(
+//RS         dir.join("flake.nix"),
+//RS         r#"{
+//RS   packages.x86_64-linux.default = builtins.derivation {
+//RS     name = "many";
+//RS     system = "x86_64-linux";
+//RS     builder = "/bin/sh";
+//RS     outputs = [ "out" "dev" "doc" ];
+//RS   };
+//RS   devShells.x86_64-linux.default =
+//RS     (import pkgs { overlays = [ (final: prev: { custom = prev.fd; }) ]; }).mkShell {
+//RS       packages = [ (import pkgs { overlays = [ (final: prev: { custom = prev.fd; }) ]; }).custom ];
+//RS     };
+//RS   devShells.x86_64-linux.debug = {
+//RS     packages = [ pkgs.ripgrep ];
+//RS     inputsFrom = [];
+//RS     shellHook = "export DEBUG=1";
+//RS   };
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let output = jetpack()
+//RS         .args(["bridge", "flake", "--no-color"])
+//RS         .current_dir(&dir.path)
+//RS         .env("PATH", "")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&output.stdout).contains("packages: [fd]"),
+//RS         "stdout: {}",
+//RS         String::from_utf8_lossy(&output.stdout)
+//RS     );
+//RS     let stderr = String::from_utf8_lossy(&output.stderr);
+//RS     assert!(stderr.contains("L0204"), "stderr: {stderr}");
+//RS     assert!(stderr.contains("inputsFrom"), "stderr: {stderr}");
+//RS     let lock = fs::read_to_string(dir.join(".jet/lock")).unwrap();
+//RS     assert!(
+//RS         lock.contains("flake-devshell:devShells:x86_64-linux:debug"),
+//RS         "lock: {lock}"
+//RS     );
+//RS     assert!(
+//RS         lock.contains("packages=ripgrep;unsupported=inputsFrom,shellHook"),
+//RS         "lock: {lock}"
+//RS     );
+//RS     assert!(
+//RS         lock.contains("flake-derivation:packages:x86_64-linux:default"),
+//RS         "lock: {lock}"
+//RS     );
+//RS     assert!(
+//RS         lock.contains("drvPath=/nix/store/iqjpmbf780gw1gqzhcvarkhw6h9y4c98-many.drv;dev=/nix/store/0cmdcz6gdcx6k0wf2ir78dh5isib04w3-many-dev;doc=/nix/store/v5m6bfihjhlp2ggsr9zcgw1j4wz1z1az-many-doc;out=/nix/store/3d8xbsqfn74lgzz2x82y3hh8i9mmx7xy-many"),
+//RS         "lock: {lock}"
+//RS     );
+//RS 
+//RS     let overlay_list = std::iter::repeat("overlay")
+//RS         .take(65)
+//RS         .collect::<Vec<_>>()
+//RS         .join(" ");
+//RS     let over_budget = format!(
+//RS         "let overlay = final: prev: {{}}; in {{ devShells.x86_64-linux.default = (import pkgs {{ overlays = [ {overlay_list} ]; }}).mkShell {{ packages = []; }}; }}"
+//RS     );
+//RS     fs::write(dir.join("flake.nix"), over_budget).unwrap();
+//RS     let failed = jetpack()
+//RS         .args(["bridge", "flake", "--no-color"])
+//RS         .current_dir(&dir.path)
+//RS         .env("PATH", "")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(failed.status.code(), Some(1));
+//RS     let failure_stderr = String::from_utf8_lossy(&failed.stderr);
+//RS     assert!(failure_stderr.contains("E1256"), "stderr: {failure_stderr}");
+//RS     assert!(
+//RS         failure_stderr.contains("overlay list exceeds 64"),
+//RS         "stderr: {failure_stderr}"
+//RS     );
+//RS     assert_eq!(fs::read_to_string(dir.join(".jet/lock")).unwrap(), lock);
+//RS }
+//RS 
+//RS #[test]
+// END-PORT-PENDING 1089 tests/jetpack_engine.rs:5421-7194
+

@@ -5,8 +5,8 @@
 // reuse the checked leases directly when the stamp, the plan, and the
 // definition fingerprint still match.
 
-@ENV_ENTRY_RECEIPT_HEADER :: "jetpack-env-entry-v4"
-@ENV_ENTRY_RECEIPT_NAME :: "env-entry"
+ENV_ENTRY_RECEIPT_HEADER :: prep { "jetpack-env-entry-v4" }
+ENV_ENTRY_RECEIPT_NAME :: prep { "env-entry" }
 
 pub struct EnvEntryReceipt {
     pub stamp: String
@@ -16,7 +16,7 @@ pub struct EnvEntryReceipt {
 
 // The canonical receipt path under the project's managed folder.
 fn cli_env_entry_receipt_path(project_dir: String) -> String Never! {
-    files.join(files.join(files.join(project_dir, ".jet"), "receipts"), @ENV_ENTRY_RECEIPT_NAME)
+    files.join(files.join(files.join(project_dir, ".jet"), "receipts"), ENV_ENTRY_RECEIPT_NAME)
 }
 
 // Rust tuple order: reference, name, version, output, metadata.
@@ -38,7 +38,7 @@ fn cli_canonical_env_entry(packages: [EnvironmentSelection]) -> [EnvironmentSele
 fn cli_read_env_entry_receipt(project_dir: String) -[FS]> EnvEntryReceipt? Never! {
     contents :: files.read(cli_env_entry_receipt_path(project_dir)) ?? return None
     lines :: contents.lines().to_list()
-    if lines.len() < 2 || lines[0] != @ENV_ENTRY_RECEIPT_HEADER -> return None
+    if lines.len() < 2 || lines[0] != ENV_ENTRY_RECEIPT_HEADER -> return None
     stamp_line :: lines[1].split_once("\t") ?? return None
     if stamp_line.before != "stamp" || stamp_line.after == "" -> return None
     next_line := 2
@@ -71,22 +71,22 @@ fn cli_has_line_separator(text: String) -> Bool Never! {
 
 // Write the receipt through an exclusive temporary, fsync it, then rename it
 // over the receipt. A failed write removes its temporary.
-fn cli_write_env_entry_receipt(project_dir: String, stamp: String, secret_identity: String, packages: [EnvironmentSelection]) CliError! -[FS, Env, Time]> {
+fn cli_write_env_entry_receipt(project_dir: String, stamp: String, secret_identity: String, packages: [EnvironmentSelection]) CLIError! -[FS, Env, Time]> {
     if stamp == "" || cli_has_line_separator(stamp) || secret_identity == "" || cli_has_line_separator(secret_identity) {
-        return Err(CliError.InvalidData("environment entry identity cannot contain line separators"))
+        return Err(CLIError.InvalidData("environment entry identity cannot contain line separators"))
     }
     loop package in packages {
         fields :: [String]{package.reference, package.name, package.version, package.output_hash, package.metadata}
         loop field in fields {
-            if cli_has_line_separator(field) -> return Err(CliError.InvalidData("environment entry package fields cannot contain line separators"))
+            if cli_has_line_separator(field) -> return Err(CLIError.InvalidData("environment entry package fields cannot contain line separators"))
         }
     }
     path :: cli_env_entry_receipt_path(project_dir)
     parent :: files.dirname(path)
     files.create_dir_all(parent)
     nonce :: time.instant().unix_ns
-    temporary :: files.join(parent, ".{@ENV_ENTRY_RECEIPT_NAME}.{sys.pid()}.{nonce}.tmp")
-    text := "{@ENV_ENTRY_RECEIPT_HEADER}\nstamp\t{stamp}\nsecrets\t{secret_identity}\n"
+    temporary :: files.join(parent, ".{ENV_ENTRY_RECEIPT_NAME}.{sys.pid()}.{nonce}.tmp")
+    text := "{ENV_ENTRY_RECEIPT_HEADER}\nstamp\t{stamp}\nsecrets\t{secret_identity}\n"
     loop package in cli_canonical_env_entry(packages) {
         text = "{text}{package.reference}\t{package.name}\t{package.version}\t{package.output_hash}\t{package.metadata}\n"
     }
@@ -94,17 +94,15 @@ fn cli_write_env_entry_receipt(project_dir: String, stamp: String, secret_identi
         files.remove(temporary).drop("a failed receipt write leaves no temporary")
         return Err(error)
     }
-    Ok()
 }
 
 // D-CORE-FILEOPEN1: `if_exists: .Refuse` is the O_EXCL create the staging
 // file needs.
-fn cli_publish_receipt(temporary: String, path: String, text: String) CliError! -[FS]> {
+fn cli_publish_receipt(temporary: String, path: String, text: String) CLIError! -[FS]> {
     writer :: files.create(temporary, if_exists: CreateIfExists.Refuse)
     writer.write_all(text.bytes())
     writer.fsync()
     files.rename(temporary, path)
-    Ok()
 }
 
 // Rust `u64::to_le_bytes`.
@@ -150,11 +148,11 @@ fn cli_environment_entry_definition_fingerprint_with_hook(requested_preset: Stri
 
 // Fresh cache expectations for every plan member, so a stale composite stamp
 // can still reuse each member that verifies on its own.
-fn cli_environment_member_expectations(roots: HangarRoots, project_dir: String, flags: CliFlags, plan: RunPlan) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> [String: CacheExpectation] Never! {
+fn cli_environment_member_expectations(verification: &StoreVerification, roots: HangarRoots, project_dir: String, flags: CLIFlags, plan: RunPlan) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> [String: CacheExpectation] Never! {
     context :: cli_provider_ctx(roots, flags, cli_effective_fixtures(flags), Val(project_dir), None, Val(roots))
     expectations := [String: CacheExpectation]{}
     loop spec in plan.refs {
-        if provider_cache_expectation(spec, plan.table, context) == .Val(expectation) -> expectations[spec.raw] = expectation
+        if provider_cache_expectation(&verification, spec, plan.table, context) == .Val(expectation) -> expectations[spec.raw] = expectation
     }
     loop adapter in plan.adapters {
         if provider_adapter_cache_expectation(adapter, plan.table, context) == .Ok(expectation) -> expectations[RunPlan.adapter_reference(adapter)] = expectation
@@ -254,15 +252,15 @@ pub fn cli_format_env_changes(previous: [(name: String, version: String)], curre
 
 // Print the ready banner, then record the receipt unless this entry reused
 // an exact one.
-fn cli_announce_env_ready(theme: Theme, project_dir: String, roots: HangarRoots, warm_reused: Bool, elapsed: time.Duration, definition_fingerprint: String, inherited_loader_path: String?, secret_identity: String, stats: EnvReadyStats) CliError! -[IO, FS, Env, Time]> {
+fn cli_announce_env_ready(theme: Theme, project_dir: String, roots: HangarRoots, warm_reused: Bool, elapsed: time.Duration, definition_fingerprint: String, inherited_loader_path: String?, secret_identity: String, stats: EnvReadyStats) CLIError! -[IO, FS, Env, Time, Time.Wait]> {
     theme.status(cli_format_env_ready(elapsed, stats.cache_hit_percent()))
-    if warm_reused -> return Ok()
+    if warm_reused -> return
     cli_record_env_entry_receipt(theme, project_dir, roots, definition_fingerprint, inherited_loader_path, secret_identity, stats)
 }
 
 // Stamp the realized selections, report what changed since the previous
 // receipt, and rewrite the receipt when anything differs.
-fn cli_record_env_entry_receipt(theme: Theme, project_dir: String, roots: HangarRoots, definition_fingerprint: String, inherited_loader_path: String?, secret_identity: String, stats: EnvReadyStats) CliError! -[IO, FS, Env, Time]> {
+fn cli_record_env_entry_receipt(theme: Theme, project_dir: String, roots: HangarRoots, definition_fingerprint: String, inherited_loader_path: String?, secret_identity: String, stats: EnvReadyStats) CLIError! -[IO, FS, Env, Time, Time.Wait]> {
     current :: stats.realized_set()
     selections :: stats.realized_entries()
     stamp :: store_environment_entry_stamp(roots, project_dir, definition_fingerprint, inherited_loader_path, selections)
@@ -273,7 +271,7 @@ fn cli_record_env_entry_receipt(theme: Theme, project_dir: String, roots: Hangar
             &previous_display.push((name: package.name, version: version))
         }
         if cli_format_env_changes(previous_display, current) == .Val(changes) -> theme.status("what changed: {changes}")
-        if previous.stamp == stamp && previous.secret_identity == secret_identity && previous.packages == selections -> return Ok()
+        if previous.stamp == stamp && previous.secret_identity == secret_identity && previous.packages == selections -> return
     }
     cli_write_env_entry_receipt(project_dir, stamp, secret_identity, selections)
 }

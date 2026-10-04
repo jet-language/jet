@@ -1,0 +1,305 @@
+// Generate.rs contains no inline tests. Faithful controls for every pure
+// policy here; original native integration suites remain separately owned.
+use jet_foundation.[TEXT_NUL]
+
+fn generate_test_path(text: String) -> generate_paths.OSPath Never! {
+    generate_paths.from_text(text, generate_paths.PathPlatform.Unix)
+}
+fn generate_test_options_error(args: [String], message: String) Never! {
+    if jet_cli_generate_parse_options(args) == {
+        .Ok(_) -> panic("invalid generator arguments accepted")
+        .Err(error) -> assert_eq(error.message, message)
+    }
+}
+fn generate_test_fact() -> JetCLIGenerateFact Never! {
+    JetCLIGenerateFact{
+        name: "make_sources", source: "run.jet", line: 3, input_digest: "inputs",
+        authority: JetCLIGenerateAuthorityFact{path: "ambient", absolute: None, digest: "authority"},
+        metadata: ast_job_metadata(),
+    }
+}
+fn generate_test_plan(before: [U8]?, after: [U8]) -> JetCLIGenerateOutputPlan Never! {
+    JetCLIGenerateOutputPlan{path: "out.jet", absolute: generate_test_path("/p/out.jet"), before: before, after: after}
+}
+#Test("generate argument errors preserve first failure and accepted flags") {
+    generate_test_options_error([String]{}, "`jet generate` needs a generator name")
+    generate_test_options_error([String]{"one", "two"}, "`jet generate` accepts one generator name")
+    generate_test_options_error([String]{"--entry"}, "`--entry` needs a `.jet` file")
+    generate_test_options_error([String]{"--unknown"}, "unknown `jet generate` flag `--unknown`")
+    generate_test_options_error([String]{"3bad"}, "`3bad` is not a valid generator name")
+    generate_test_options_error([String]{"é"}, "`é` is not a valid generator name")
+    options :: jet_cli_generate_parse_options([String]{"--entry", "--looks-like-flag", "_make2", "--apply", "--dry-run", "--json", "--quiet", "--color=never", "--verbose", "-v", "--color"}) ?? panic("options")
+    assert_eq(options.job, "_make2")
+    assert_eq(options.entry, Val("--looks-like-flag"))
+    assert(!options.apply)
+    assert(options.dry_run && options.json && options.quiet)
+    applied :: jet_cli_generate_parse_options([String]{"--entry", "one.jet", "job", "--entry", "two.jet", "--apply"}) ?? panic("options")
+    assert_eq(applied.entry, Val("two.jet"))
+    assert(applied.apply)
+}
+#Test("generate declared paths obey Rust component normalization and literal state filter") {
+    root :: generate_test_path("/p")
+    _ :: jet_cli_generate_declared_relative(root, "a//./b.jet", "output") ?? panic("interior CurDir normalized by Rust components")
+    _ :: jet_cli_generate_declared_relative(root, ".git", "input") ?? panic("filter is literal .git slash")
+    _ :: jet_cli_generate_declared_relative(root, ".jet/config", "input") ?? panic(".jet not part of declared filter")
+    loop raw in [String]{"", ".", "./a.jet", "a/../b.jet", "/a.jet"} {
+        if jet_cli_generate_declared_relative(root, raw, "input") == {
+            .Ok(_) -> panic("unsafe declaration accepted")
+            .Err(error) -> assert_eq(error.message, "generator input `{raw}` must be a project-relative path without `.` or `..`")
+        }
+    }
+    loop raw in [String]{".git/a", "target/a"} {
+        if jet_cli_generate_declared_relative(root, raw, "output") == {
+            .Ok(_) -> panic("state declaration accepted")
+            .Err(error) -> assert_eq(error.message, "generator output `{raw}` points into compiler state")
+        }
+    }
+    windows :: generate_paths.from_text("C:\\p", generate_paths.PathPlatform.Windows)
+    if jet_cli_generate_declared_relative(windows, "C:relative.jet", "output") == {
+        .Ok(_) -> panic("drive prefix accepted")
+        .Err(_) -> {}
+    }
+}
+#Test("generate relative paths preserve raw native bytes and slash display") {
+    assert_eq(jet_cli_generate_relative_path(generate_test_path("/p"), generate_test_path("/p/a//./b.jet")) ?? panic("relative"), "a/b.jet")
+    assert_eq(jet_cli_generate_relative_path(generate_test_path("/p"), generate_test_path("/p")) ?? panic("root"), "")
+    if jet_cli_generate_relative_path(generate_test_path("/p"), generate_test_path("/prefix/a.jet")) == {
+        .Ok(_) -> panic("sibling prefix accepted")
+        .Err(error) -> assert_eq(error.message, "path `/prefix/a.jet` escapes project")
+    }
+    bytes := "/p/".bytes()
+    &bytes.push(U8{255})
+    path :: generate_paths.from_encoded(^bytes, generate_paths.PathPlatform.Unix)
+    assert_eq(jet_cli_generate_relative_path(generate_test_path("/p"), path) ?? panic("raw path"), "�")
+}
+#Test("generate provenance parser validates complete UTF8 and duplicate overwrite") {
+    bytes :: "{GENERATE_HEADER}\n// generator=first\n// generator=second\n// value=a=b\n\nbody".bytes()
+    header :: jet_cli_generate_generation_header(bytes) ?? panic("header")
+    assert_eq(header.get("generator"), Val("second"))
+    assert_eq(header.get("value"), Val("a=b"))
+    assert_eq(jet_cli_generate_header_body_start(bytes), bytes.len() - 4)
+    assert_eq(jet_cli_generate_header_body_start("plain\n\nbody".bytes()), 0)
+    assert_eq(jet_cli_generate_header_body_start("{GENERATE_HEADER}\n// generator=g\n".bytes()), 0)
+    assert_eq(jet_cli_generate_generation_header("{GENERATE_HEADER}\n// generator=g\n".bytes()), None)
+    assert_eq(jet_cli_generate_generation_header("{GENERATE_HEADER}\nbad\n\n".bytes()), None)
+    assert_eq(jet_cli_generate_generation_header("{GENERATE_HEADER}\n// missing_equal\n\n".bytes()), None)
+    invalid := bytes
+    &invalid.push(U8{255})
+    assert_eq(jet_cli_generate_generation_header(invalid), None)
+}
+#Test("generate source headers are idempotent and refuse edited or foreign bodies") {
+    fact :: generate_test_fact()
+    generated :: jet_cli_generate_generated_source(fact, "out.jet", "fn run() {}\n".bytes(), "jet/1-linux-x86_64")
+    restored :: jet_cli_generate_generated_source(fact, "out.jet", generated, "jet/1-linux-x86_64")
+    assert_eq(generated, restored)
+    _ :: jet_cli_generate_ensure_output_collision(generated, fact.name, "out.jet") ?? panic("owned output")
+    loop pair in [String]{"wrong-generator", "wrong-output"} {
+        name :: if pair == "wrong-generator" -> "other" else -> fact.name
+        path :: if pair == "wrong-output" -> "other.jet" else -> "out.jet"
+        if jet_cli_generate_ensure_output_collision(generated, name, path) == {
+            .Ok(_) -> panic("foreign output accepted")
+            .Err(error) -> assert_eq(error.message, "refusing collision with existing source output `{path}`; another generator owns it")
+        }
+    }
+    if jet_cli_generate_ensure_output_collision("user source".bytes(), fact.name, "out.jet") == {
+        .Ok(_) -> panic("unattributed output accepted")
+        .Err(error) -> assert_eq(error.message, "refusing collision with existing source output `out.jet`; the file is not attributed to this generator")
+    }
+    edited := generated
+    &edited.push(U8{32})
+    if jet_cli_generate_ensure_output_collision(edited, fact.name, "out.jet") == {
+        .Ok(_) -> panic("edited body accepted")
+        .Err(error) -> assert_eq(error.message, "refusing stale source output `out.jet`; its attributed body was edited outside the generator")
+    }
+}
+#Test("generate sorted change union and absent versus empty output") {
+    before :: [String: [U8]]{"z": [U8]{1}, "same": [U8]{}, "removed": [U8]{3}}
+    after :: [String: [U8]]{"z": [U8]{2}, "same": [U8]{}, "added": [U8]{}}
+    assert_eq(jet_cli_generate_changed_paths(before, after), [String]{"added", "removed", "z"})
+    assert(jet_cli_generate_output_is_changed(generate_test_plan(None, [U8]{})))
+    assert(!jet_cli_generate_output_is_changed(generate_test_plan(Val([U8]{}), [U8]{})))
+    assert_eq(jet_cli_generate_action(generate_test_plan(None, [U8]{})), "create")
+    assert_eq(jet_cli_generate_action(generate_test_plan(Val([U8]{1}), [U8]{2})), "update")
+    assert_eq(jet_cli_generate_action(generate_test_plan(Val([U8]{1}), [U8]{1})), "unchanged")
+}
+#Test("generate source locations are bytes and component sanitization is scalar") {
+    assert_eq(jet_cli_generate_source_line("é\nline\n", 1), 1)
+    assert_eq(jet_cli_generate_source_line("é\nline\n", 3), 2)
+    assert_eq(jet_cli_generate_source_line("é\nline\n", 100), 3)
+    assert_eq(jet_cli_generate_safe_component("Aé🙂/z-_9"), "A___z-_9")
+    assert_eq(jet_cli_generate_format_run_failure(I32{7}, " stdout ", " error "), "generator job exited with status 7: error")
+    assert_eq(jet_cli_generate_format_run_failure(I32{7}, " stdout ", "\n\t"), "generator job exited with status 7: stdout")
+    assert_eq(jet_cli_generate_format_run_failure(I32{-1}, "\n", "\t"), "generator job exited with status -1")
+    assert_eq(jet_cli_generate_fail_with_source(generate_test_path("/p/run.jet"), "\nfn gen() {}", "gen", "detail").message, "generator `gen` failed at /p/run.jet:2: detail")
+}
+#Test("generate input dedup preserves first occurrence and refuses conflicting bytes") {
+    inputs := [JetCLIGenerateInputFact]{}
+    seen := [String: String]{}
+    _ :: jet_cli_generate_add_input(&inputs, &seen, JetCLIGenerateInputFact{path: "x", absolute: generate_test_path("/p/x"), digest: "one"}) ?? panic("input")
+    _ :: jet_cli_generate_add_input(&inputs, &seen, JetCLIGenerateInputFact{path: "x", absolute: generate_test_path("/p/x"), digest: "one"}) ?? panic("duplicate")
+    assert_eq(inputs.len(), 1)
+    assert_eq(jet_cli_generate_digest_input_facts(inputs), jet_cli_generate_hash("x{TEXT_NUL}one\n".bytes()))
+    if jet_cli_generate_add_input(&inputs, &seen, JetCLIGenerateInputFact{path: "x", absolute: generate_test_path("/p/x"), digest: "two"}) == {
+        .Ok(_) -> panic("conflicting input accepted")
+        .Err(error) -> assert_eq(error.message, "generator input `x` resolves to conflicting bytes")
+    }
+}
+#Test("generate machine projection uses canonical status and preview is read only") {
+    fact :: generate_test_fact()
+    outputs :: [JetCLIGenerateOutputPlan]{generate_test_plan(None, [U8]{})}
+    project :: generate_test_path("/p")
+    receipt :: generate_test_path("/p/.jet/codemods/generate-make_sources.receipt.json")
+    text :: jet_cli_generate_print_machine_result(fact, [JetCLIGenerateInputFact]{}, outputs, project, receipt, "preview", "jet/1-linux-x86_64") ?? panic("machine")
+    assert(text.contains("jet.status"))
+    assert(text.contains("\"action\":\"generate\""))
+    assert(text.contains("\"status\":\"preview\""))
+    assert(text.contains("\"action\":\"create\""))
+    assert_eq(jet_cli_generate_render_preview(fact, [JetCLIGenerateInputFact]{}, outputs, project, receipt, false, true, "toolchain") ?? panic("quiet"), "")
+    human :: jet_cli_generate_render_preview(fact, [JetCLIGenerateInputFact]{}, outputs, project, receipt, false, false, "toolchain") ?? panic("human")
+    assert_eq(human, "generator: make_sources\nsource: run.jet:3\npreview: planned source writes (nothing applied)\n  create out.jet\napply: jet generate make_sources --apply (receipt /p/.jet/codemods/generate-make_sources.receipt.json)\n")
+}
+
+#Test("generate persisted receipt layout and failure suffix preserve exact bytes") {
+    fact :: generate_test_fact()
+    receipt :: jet_cli_generate_render_receipt(fact, [JetCLIGenerateInputFact]{}, [JetCLIGenerateOutputPlan]{}, "ok", None, "jet/1-linux-x86_64")
+    assert_eq(receipt, "{{\n  \"schema\":\"jet-generate-v1\",\n  \"status\":\"ok\",\n  \"command\":\"jet generate make_sources --apply\",\n  \"generator\":{{\"name\":\"make_sources\",\"source\":\"run.jet\",\"line\":3}},\n  \"authority\":{{\"path\":\"ambient\",\"digest\":\"authority\"}},\n  \"toolchain\":\"jet/1-linux-x86_64\",\n  \"inputs\":[],\n  \"outputs\":[]\n}\n")
+    failure :: jet_cli_generate_render_receipt(fact, [JetCLIGenerateInputFact]{}, [JetCLIGenerateOutputPlan]{}, "failed", Val("bad \"quote\"\n"), "toolchain")
+    assert(!failure.contains(" --apply"))
+    assert(failure.contains(",\n  \"error\":\"bad \\\"quote\\\"\\n\"\n}\n"))
+    log :: jet_cli_generate_render_transaction_log(fact, [JetCLIGenerateOutputPlan]{}, generate_test_path("/p"), generate_test_path("/p/r.json")) ?? panic("log")
+    assert_eq(log, "{{\n  \"schema\":\"jet-generate-transaction-v1\",\n  \"generator\":\"make_sources\",\n  \"receipt\":\"r.json\",\n  \"files\":[]\n}\n")
+}
+
+// Native witnesses require the real retained resources (#4494/#4392), not a
+// mock host or text-backed filesystem. Text paths are only fixture setup.
+use core.files as generate_fixture_files
+use core.sys.host.os_path_ingress as generate_fixture_ingress
+fn generate_test_native_path(text: String) -[Env, FS.Read]> generate_paths.OSPath Never! {
+    cwd :: generate_fixture_ingress.current_dir() ?? panic("native platform fixture")
+    generate_paths.from_text(text, cwd.platform)
+}
+#Test("generate staged copy excludes state at every depth but collection excludes only root") {
+    source :: generate_fixture_files.temp_dir("jet-generate-source") ?? panic("source fixture")
+    destination :: generate_fixture_files.temp_dir("jet-generate-stage") ?? panic("stage fixture")
+    generate_fixture_files.create_dir_all("{source.path}/nested/.jet") ?? panic("nested state")
+    generate_fixture_files.create_dir_all("{source.path}/.jet") ?? panic("root state")
+    generate_fixture_files.write("{source.path}/nested/a.jet", "source") ?? panic("source")
+    generate_fixture_files.write("{source.path}/nested/.jet/hidden", "state") ?? panic("nested state")
+    generate_fixture_files.write("{source.path}/.jet/hidden", "state") ?? panic("root state")
+    _ :: jet_cli_generate_copy_project(generate_test_native_path(source.path), generate_test_native_path(destination.path)) ?? panic("copy")
+    copied :: jet_cli_generate_collect_files(generate_test_native_path(destination.path)) ?? panic("collect")
+    assert_eq(copied.len(), 1)
+    assert_eq(copied.get("nested/a.jet"), Val("source".bytes()))
+    generate_fixture_files.create_dir_all("{destination.path}/nested/.jet") ?? panic("generator state")
+    generate_fixture_files.write("{destination.path}/nested/.jet/created", "generated") ?? panic("generated")
+    after :: jet_cli_generate_collect_files(generate_test_native_path(destination.path)) ?? panic("after")
+    assert_eq(jet_cli_generate_changed_paths(copied, after), [String]{"nested/.jet/created"})
+}
+#Test("generate declared native parents and symlink collision precedence") {
+    directory :: generate_fixture_files.temp_dir("jet-generate-paths") ?? panic("fixture")
+    generate_fixture_files.create_dir_all("{directory.path}/out") ?? panic("out")
+    root :: generate_test_native_path(directory.path)
+    absent :: jet_cli_generate_declared_path(root, "out/new.jet", "output", false) ?? panic("absent output")
+    assert(generate_paths.equals(absent, generate_test_native_path("{directory.path}/out/new.jet")))
+    if jet_cli_generate_declared_path(root, "out/new.jet", "input", true) == {
+        .Ok(_) -> panic("missing input accepted")
+        .Err(error) -> assert_eq(error.message, "generator input `out/new.jet` does not exist")
+    }
+    if jet_cli_generate_declared_path(root, "out", "output", false) == {
+        .Ok(_) -> panic("directory output accepted")
+        .Err(error) -> assert_eq(error.message, "generator output `out` must be a regular file")
+    }
+    generate_fixture_files.write("{directory.path}/real.jet", "source") ?? panic("real")
+    generate_fixture_files.symlink("{directory.path}/real.jet", "{directory.path}/link.jet") ?? panic("link")
+    if jet_cli_generate_declared_path(root, "link.jet", "input", true) == {
+        .Ok(_) -> panic("symlink input accepted")
+        .Err(error) -> assert_eq(error.message, "generator input `link.jet` is a symlink")
+    }
+    if jet_cli_generate_validate_tree(root) == {
+        .Ok(_) -> panic("linked tree accepted")
+        .Err(error) -> assert_eq(error.message, "generator input tree contains symlink `{directory.path}/link.jet`")
+    }
+}
+
+#Test("generate overlap and undeclared mutations retain sorted exact diagnostics") {
+    inputs :: [JetCLIGenerateInputFact]{JetCLIGenerateInputFact{path: "out.jet", absolute: generate_test_path("/p/out.jet"), digest: "digest"}}
+    outputs :: [JetCLIGenerateOutputPath]{JetCLIGenerateOutputPath{path: "out.jet", absolute: generate_test_path("/p/out.jet")}}
+    if jet_cli_generate_ensure_disjoint(inputs, outputs) == {
+        .Ok(_) -> panic("input output overlap accepted")
+        .Err(error) -> assert_eq(error.message, "generator input/output overlap at `out.jet`")
+    }
+    before :: [String: [U8]]{"z": [U8]{1}, "out.jet": [U8]{1}}
+    after :: [String: [U8]]{"z": [U8]{2}, "a": [U8]{}, "out.jet": [U8]{2}}
+    if jet_cli_generate_ensure_declared_changes(before, after, outputs) == {
+        .Ok(_) -> panic("undeclared mutations accepted")
+        .Err(error) -> assert_eq(error.message, "generator changed undeclared project files: a, z")
+    }
+    _ :: jet_cli_generate_ensure_declared_changes([String: [U8]]{}, [String: [U8]]{"out.jet": [U8]{}}, outputs) ?? panic("declared mutation")
+}
+#Test("generate publication distinguishes absent files and unchanged receipt") {
+    plans :: [JetCLIGenerateOutputPlan]{
+        generate_test_plan(None, [U8]{}),
+        JetCLIGenerateOutputPlan{path: "same.jet", absolute: generate_test_path("/p/same.jet"), before: Val([U8]{1}), after: [U8]{1}},
+        JetCLIGenerateOutputPlan{path: "updated.jet", absolute: generate_test_path("/p/updated.jet"), before: Val([U8]{1}), after: [U8]{2}},
+    }
+    publication :: jet_cli_generate_publication(plans, generate_test_path("/p/r.json"), Val([U8]{4}), [U8]{4})
+    assert_eq(publication.changes.len(), 2)
+    assert_eq(publication.absent.len(), 1)
+    assert_eq(generate_paths.display(publication.absent[0]), "/p/out.jet")
+    assert_eq(publication.changes[0].before, [U8]{})
+    assert_eq(publication.changes[0].after, [U8]{})
+    assert_eq(publication.changes[1].before, [U8]{1})
+    assert_eq(publication.changes[1].after, [U8]{2})
+    receipt :: jet_cli_generate_publication([JetCLIGenerateOutputPlan]{}, generate_test_path("/p/r.json"), None, [U8]{})
+    assert_eq(receipt.changes.len(), 1)
+    assert_eq(receipt.absent.len(), 1)
+}
+#Test("generate output planner fails missing outputs before native inspection") {
+    fact :: generate_test_fact()
+    paths :: [JetCLIGenerateOutputPath]{JetCLIGenerateOutputPath{path: "missing.jet", absolute: generate_test_path("/nonexistent/missing.jet")}}
+    if jet_cli_generate_plan_outputs(fact, paths, [String: [U8]]{}, "toolchain") == {
+        .Ok(_) -> panic("missing output accepted")
+        .Err(error) -> assert_eq(error.message, "generator did not produce declared output `missing.jet`")
+    }
+}
+#Test("generate native output planning preserves ownership and detects external edits") {
+    directory :: generate_fixture_files.temp_dir("jet-generate-output") ?? panic("fixture")
+    fact :: generate_test_fact()
+    path :: generate_test_native_path("{directory.path}/out.jet")
+    tree :: [String: [U8]]{"out.jet": "fn run() {}\n".bytes()}
+    first :: jet_cli_generate_plan_outputs(fact, [JetCLIGenerateOutputPath]{JetCLIGenerateOutputPath{path: "out.jet", absolute: path}}, tree, "toolchain") ?? panic("plan absent")
+    assert_eq(first[0].before, None)
+    generate_fixture_files.write_bytes("{directory.path}/out.jet", first[0].after) ?? panic("publish fixture")
+    second :: jet_cli_generate_plan_outputs(fact, [JetCLIGenerateOutputPath]{JetCLIGenerateOutputPath{path: "out.jet", absolute: path}}, tree, "toolchain") ?? panic("plan owned")
+    assert(!jet_cli_generate_output_is_changed(second[0]))
+    generate_fixture_files.write("{directory.path}/out.jet", "user source") ?? panic("external edit")
+    if jet_cli_generate_plan_outputs(fact, [JetCLIGenerateOutputPath]{JetCLIGenerateOutputPath{path: "out.jet", absolute: path}}, tree, "toolchain") == {
+        .Ok(_) -> panic("unattributed collision accepted")
+        .Err(error) -> assert_eq(error.message, "refusing collision with existing source output `out.jet`; the file is not attributed to this generator")
+    }
+}
+#Test("generate generated input current validates header output and body") {
+    directory :: generate_fixture_files.temp_dir("jet-generate-input") ?? panic("fixture")
+    path :: generate_test_native_path("{directory.path}/out.jet")
+    bytes :: jet_cli_generate_generated_source(generate_test_fact(), "out.jet", "body".bytes(), "toolchain")
+    generate_fixture_files.write_bytes("{directory.path}/out.jet", bytes) ?? panic("generated input")
+    _ :: jet_cli_generate_ensure_generated_input_current(path, "out.jet") ?? panic("current")
+    if jet_cli_generate_ensure_generated_input_current(path, "other.jet") == {
+        .Ok(_) -> panic("mismatched input accepted")
+        .Err(error) -> assert_eq(error.message, "generated input `other.jet` has a mismatched provenance output")
+    }
+    edited := bytes
+    &edited.push(U8{32})
+    generate_fixture_files.write_bytes("{directory.path}/out.jet", edited) ?? panic("edited")
+    if jet_cli_generate_ensure_generated_input_current(path, "out.jet") == {
+        .Ok(_) -> panic("edited input accepted")
+        .Err(error) -> assert_eq(error.message, "stale generated input `out.jet` was edited outside its generator; regenerate it first")
+    }
+    generate_fixture_files.write("{directory.path}/out.jet", "{GENERATE_HEADER}\n// generator=make_sources\n") ?? panic("incomplete")
+    if jet_cli_generate_ensure_generated_input_current(path, "out.jet") == {
+        .Ok(_) -> panic("incomplete input accepted")
+        .Err(error) -> assert_eq(error.message, "generated input `out.jet` has an incomplete provenance header")
+    }
+    generate_fixture_files.write("{directory.path}/out.jet", "authored input") ?? panic("authored")
+    _ :: jet_cli_generate_ensure_generated_input_current(path, "out.jet") ?? panic("authored input allowed")
+}

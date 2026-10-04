@@ -1,0 +1,247 @@
+// Projection-only oracles for Source/CheckReceipt.rs `package_nodes` and
+// `PackageRow::{inputs,node}`. No graph/check/persistence facts are fabricated.
+// Re-ranged Rust fixtures: tests/receipt_store.rs:59-95 content-key isolation,
+// :101-130 fresh/replayed count + reused; package-specific reason assertions
+// actually live in tests/build_entry.rs:1094-1158 (not receipt_store.rs).
+
+fn package_nodes_test_row() -> JetCLIPackageRow Never! {
+    JetCLIPackageRow{
+        identity: "pkg:app",
+        key: "key-new",
+        source: "src-new",
+        interface: "api-new",
+        target: "host-new",
+        compiler: "compiler-new",
+        dependencies: [PackageKeyDependency]{
+            PackageKeyDependency{identity: "pkg:z", interface_digest: "z-new"},
+            PackageKeyDependency{identity: "pkg:a", interface_digest: "a-new"},
+        },
+    }
+}
+
+// Independent literal input oracle, intentionally not PackageRow::inputs.
+fn package_nodes_test_old() -> BuildNodeRecord Never! {
+    BuildNodeRecord{
+        kind: "package",
+        key: "key-old",
+        subject: "pkg:app",
+        duration_ms: 17.25,
+        why_ran: "old-reason",
+        inputs: [String]{"compiler:compiler-new", "target:host-new", "source:src-new", "interface:api-new", "dep:pkg:z=z-new", "dep:pkg:a=a-new"},
+    }
+}
+
+fn package_nodes_test_record(nodes: [BuildNodeRecord]) -> BuildRecord Never! {
+    BuildRecord{schema: "jet.build-record/v1", program: "main.jet", nodes}
+}
+
+fn package_nodes_test_reason(old: BuildNodeRecord) -> String Never! {
+    jet_cli_package_row_node(package_nodes_test_row(), true, [BuildNodeRecord]{old}).why_ran
+}
+
+#Test("package inputs preserve exact field bytes and caller dependency order") {
+    row := package_nodes_test_row()
+    row.compiler = "c+core:β"
+    row.target = "t=日本"
+    row.source = "s\nraw"
+    row.interface = "i\t"
+    row.dependencies = [PackageKeyDependency]{
+        PackageKeyDependency{identity: "pkg:é=x", interface_digest: "a=b"},
+        PackageKeyDependency{identity: "pkg:a", interface_digest: ""},
+        PackageKeyDependency{identity: "pkg:é=x", interface_digest: "second"},
+    }
+    assert_eq(jet_cli_package_row_inputs(row), [String]{"compiler:c+core:β", "target:t=日本", "source:s\nraw", "interface:i\t", "dep:pkg:é=x=a=b", "dep:pkg:a=", "dep:pkg:é=x=second"})
+    row.dependencies = [PackageKeyDependency]{}
+    assert_eq(jet_cli_package_row_inputs(row), [String]{"compiler:c+core:β", "target:t=日本", "source:s\nraw", "interface:i\t"})
+}
+
+#Test("first run and new package distinguish absent from empty prior record") {
+    rows :: [JetCLIPackageRow]{package_nodes_test_row()}
+    fresh :: jet_cli_package_nodes(rows, None, false)
+    assert_eq(fresh.len(), 1)
+    assert_eq(fresh[0].why_ran, "first-run")
+    added :: jet_cli_package_nodes(rows, Val(package_nodes_test_record([BuildNodeRecord]{})), false)
+    assert_eq(added.len(), 1)
+    assert_eq(added[0].why_ran, "red:new")
+    other := package_nodes_test_old()
+    other.subject = "pkg:other"
+    assert_eq(package_nodes_test_reason(other), "red:new")
+}
+
+#Test("node projection writes every canonical BuildNodeRecord field") {
+    node :: jet_cli_package_row_node(package_nodes_test_row(), false, [BuildNodeRecord]{})
+    assert_eq(node.kind, "package")
+    assert_eq(node.key, "key-new")
+    assert_eq(node.subject, "pkg:app")
+    assert_eq(node.duration_ms, 0.0)
+    assert_eq(node.why_ran, "first-run")
+    assert_eq(node.inputs, [String]{"compiler:compiler-new", "target:host-new", "source:src-new", "interface:api-new", "dep:pkg:z=z-new", "dep:pkg:a=a-new"})
+}
+
+#Test("same key wins over all changed input fields without cutoff") {
+    old := package_nodes_test_old()
+    old.key = "key-new"
+    old.inputs = [String]{}
+    assert_eq(package_nodes_test_reason(old), "green:key")
+}
+
+#Test("source change wins over dependency and toolchain changes") {
+    old := package_nodes_test_old()
+    old.inputs = [String]{"interface:api-new"}
+    assert_eq(package_nodes_test_reason(old), "red:source+cutoff")
+    old.inputs = [String]{}
+    assert_eq(package_nodes_test_reason(old), "red:source")
+}
+
+#Test("dependency reason chooses first missing current dependency not sorted identity") {
+    old := package_nodes_test_old()
+    old.inputs = [String]{"source:src-new", "interface:api-new"}
+    assert_eq(package_nodes_test_reason(old), "red:dependency:pkg:z+cutoff")
+    old.inputs = [String]{"source:src-new", "dep:pkg:z=z-new"}
+    assert_eq(package_nodes_test_reason(old), "red:dependency:pkg:a")
+    old.inputs = [String]{"source:src-new", "dep:pkg:a=a-new"}
+    assert_eq(package_nodes_test_reason(old), "red:dependency:pkg:z")
+}
+
+#Test("toolchain is the fallback for every key change with unchanged source and dependencies") {
+    old := package_nodes_test_old()
+    assert_eq(package_nodes_test_reason(old), "red:toolchain+cutoff")
+    old.inputs = [String]{"source:src-new", "dep:pkg:z=z-new", "dep:pkg:a=a-new"}
+    assert_eq(package_nodes_test_reason(old), "red:toolchain")
+    row := package_nodes_test_row()
+    row.dependencies = [PackageKeyDependency]{}
+    assert_eq(jet_cli_package_row_node(row, true, [BuildNodeRecord]{old}).why_ran, "red:toolchain")
+}
+
+#Test("red reason and cutoff exhaust independent membership combinations") {
+    choices :: [Bool]{false, true}
+    loop source_present in choices {
+        loop first_dep_present in choices {
+            loop second_dep_present in choices {
+                loop interface_present in choices {
+                    old := package_nodes_test_old()
+                    old.inputs = [String]{}
+                    if source_present -> &old.inputs.push("source:src-new")
+                    if first_dep_present -> &old.inputs.push("dep:pkg:z=z-new")
+                    if second_dep_present -> &old.inputs.push("dep:pkg:a=a-new")
+                    if interface_present -> &old.inputs.push("interface:api-new")
+                    expected := if {
+                        !source_present -> "red:source"
+                        !first_dep_present -> "red:dependency:pkg:z"
+                        !second_dep_present -> "red:dependency:pkg:a"
+                        else -> "red:toolchain"
+                    }
+                    if interface_present -> expected = "{expected}+cutoff"
+                    assert_eq(package_nodes_test_reason(old), expected)
+                }
+            }
+        }
+    }
+}
+
+#Test("old input membership is exact and ignores order extra fields and duplicate inputs") {
+    old := package_nodes_test_old()
+    old.inputs = [String]{"dep:pkg:a=a-new", "extra", "interface:api-new", "source:src-new", "source:src-new", "dep:pkg:z=z-new"}
+    assert_eq(package_nodes_test_reason(old), "red:toolchain+cutoff")
+    old.inputs = [String]{"source:src-new-extra", "interface:api-new-extra", "dep:pkg:z=z-new-extra", "dep:pkg:a=a-new"}
+    assert_eq(package_nodes_test_reason(old), "red:source")
+}
+
+#Test("first duplicate subject decides the reason") {
+    first := package_nodes_test_old()
+    first.inputs = [String]{}
+    second := package_nodes_test_old()
+    second.key = "key-new"
+    previous :: [BuildNodeRecord]{first, second}
+    assert_eq(jet_cli_package_row_node(package_nodes_test_row(), false, previous).why_ran, "red:source")
+}
+
+#Test("fresh projection filters non-package prior rows and preserves current row order") {
+    non_package := package_nodes_test_old()
+    non_package.kind = "check"
+    non_package.key = "key-new"
+    previous :: Val(package_nodes_test_record([BuildNodeRecord]{non_package}))
+    z := package_nodes_test_row()
+    z.identity = "pkg:z"
+    a := package_nodes_test_row()
+    a.identity = "pkg:a"
+    rows :: [JetCLIPackageRow]{z, package_nodes_test_row(), a}
+    nodes :: jet_cli_package_nodes(rows, previous, false)
+    assert_eq(nodes.len(), 3)
+    assert_eq(nodes[0].subject, "pkg:z")
+    assert_eq(nodes[1].subject, "pkg:app")
+    assert_eq(nodes[2].subject, "pkg:a")
+    loop node in nodes -> assert_eq(node.why_ran, "red:new")
+}
+
+// tests/receipt_store.rs check_reuses_receipt_at_the_cli_boundary count/reused
+// assertions adapted to this leaf's package rows, not an invocation replay claim.
+#Test("receipt replay carries only prior package nodes in prior order and zeroes durations") {
+    first := package_nodes_test_old()
+    first.subject = "pkg:z"
+    first.inputs = [String]{"opaque", "opaque", "interface:old"}
+    ignored := package_nodes_test_old()
+    ignored.kind = "check"
+    last := package_nodes_test_old()
+    last.subject = "pkg:a"
+    last.key = "last-key"
+    last.duration_ms = -8.0
+    original :: package_nodes_test_record([BuildNodeRecord]{first, ignored, last})
+    nodes :: jet_cli_package_nodes([JetCLIPackageRow]{package_nodes_test_row()}, Val(original), true)
+    assert_eq(nodes.len(), 2)
+    assert_eq(nodes[0].kind, "package")
+    assert_eq(nodes[0].key, "key-old")
+    assert_eq(nodes[0].subject, "pkg:z")
+    assert_eq(nodes[0].inputs, [String]{"opaque", "opaque", "interface:old"})
+    assert_eq(nodes[1].kind, "package")
+    assert_eq(nodes[1].key, "last-key")
+    assert_eq(nodes[1].subject, "pkg:a")
+    assert_eq(nodes[1].inputs, [String]{"compiler:compiler-new", "target:host-new", "source:src-new", "interface:api-new", "dep:pkg:z=z-new", "dep:pkg:a=a-new"})
+    loop node in nodes {
+        assert_eq(node.duration_ms, 0.0)
+        assert_eq(node.why_ran, "reused")
+    }
+    assert_eq(original.nodes[0].duration_ms, 17.25)
+    assert_eq(original.nodes[0].why_ran, "old-reason")
+    assert_eq(original.nodes[2].duration_ms, -8.0)
+    assert_eq(original.nodes[2].why_ran, "old-reason")
+}
+
+#Test("empty replay never manufactures nodes from current packages") {
+    rows :: [JetCLIPackageRow]{package_nodes_test_row()}
+    assert_eq(jet_cli_package_nodes(rows, None, true).len(), 0)
+    assert_eq(jet_cli_package_nodes(rows, Val(package_nodes_test_record([BuildNodeRecord]{})), true).len(), 0)
+    assert_eq(jet_cli_package_nodes([JetCLIPackageRow]{}, None, false).len(), 0)
+}
+
+// tests/build_entry.rs explain_build_reports_package_reuse_reasons:1134-1158;
+// tests/receipt_store.rs content_keys_reuse_without_timestamps_and_invalidate_only_dependents.
+// Keys/digests are supplied facts; only the projection is under test here.
+#Test("private body cutoff leaves importer green while public interface edit reddens dependency") {
+    dep := package_nodes_test_row()
+    dep.identity = "pkg:dep_b"
+    dep.key = "dep-key-1"
+    dep.source = "dep-source-1"
+    dep.interface = "dep-api-1"
+    dep.dependencies = [PackageKeyDependency]{}
+    app := package_nodes_test_row()
+    app.identity = "pkg:."
+    app.key = "app-key-1"
+    app.dependencies = [PackageKeyDependency]{PackageKeyDependency{identity: "pkg:dep_b", interface_digest: "dep-api-1"}}
+    first :: jet_cli_package_nodes([JetCLIPackageRow]{dep, app}, None, false)
+    assert_eq(first.len(), 2)
+    loop node in first -> assert_eq(node.why_ran, "first-run")
+    dep.key = "dep-key-2"
+    dep.source = "dep-source-2"
+    body :: jet_cli_package_nodes([JetCLIPackageRow]{dep, app}, Val(package_nodes_test_record(first)), false)
+    assert_eq(body[0].why_ran, "red:source+cutoff")
+    assert_eq(body[1].why_ran, "green:key")
+    dep.key = "dep-key-3"
+    dep.source = "dep-source-3"
+    dep.interface = "dep-api-2"
+    app.key = "app-key-2"
+    app.dependencies[0].interface_digest = "dep-api-2"
+    changed :: jet_cli_package_nodes([JetCLIPackageRow]{dep, app}, Val(package_nodes_test_record(body)), false)
+    assert_eq(changed[0].why_ran, "red:source")
+    assert_eq(changed[1].why_ran, "red:dependency:pkg:dep_b+cutoff")
+}

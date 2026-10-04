@@ -1,0 +1,316 @@
+// In-memory RI03 versions of RecordIndex.rs retention scenarios. RI04 owns
+// actual restart/locking/atomic publication and failed-publication filesystem proof.
+fn record_retention_test_entry(kind: JetCLIRecordKind, id: String, path: String, size: Int, sequence: Int, saved: Bool) -> JetCLIRecordIndexEntry {
+    identity :: jet_cli_record_identity_new("a".repeat(64), "test-toolchain", "test-engine") ?? panic(err.message)
+    entry := jet_cli_record_entry_new(identity, kind, id, path) ?? panic(err.message)
+    entry.size = size
+    entry.recorded_sequence = sequence
+    entry.saved = saved
+    ^entry
+}
+fn record_retention_test_receipt(id: String, size: Int, sequence: Int) -> JetCLIRecordIndexEntry {
+    record_retention_test_entry(.Receipt, id, ".jet/receipts/{id}", size, sequence, false)
+}
+fn record_retention_test_link(kind: JetCLIRecordKind, id: String) -> JetCLIRecordLink {
+    jet_cli_record_link_new(kind, id) ?? panic(err.message)
+}
+fn record_retention_test_budget(bytes: Int) -> JetCLIRecordBudget { jet_cli_record_budget_new(bytes) ?? panic(err.message) }
+fn record_retention_test_error(result: () JetCLIRecordError!, message: String) {
+    if result == {
+        .Ok(_) -> panic("expected record retention error")
+        .Err(error) -> assert_eq(error.message, message)
+    }
+}
+fn record_retention_test_restart(entries: [JetCLIRecordIndexEntry]) -> [JetCLIRecordIndexEntry] {
+    loaded := [JetCLIRecordIndexEntry]{}
+    loop entry in entries {
+        row :: jet_cli_record_entry_to_jsonl(entry) ?? panic(err.message)
+        &loaded.push(jet_cli_record_entry_parse_line(row) ?? panic(err.message))
+    }
+    loaded
+}
+// Scripted native boundary: tests exercise policy, not actual filesystem safety.
+struct RecordRetentionTestHost {
+    files: [String:JetCLIRecordArtifactMetadata]
+    calls: [String]
+    inspect_error: String
+    remove_error: String
+    impl JetCLIRecordRetentionHost {
+        fn symlink_metadata(&self, path: String) -[FS.Read]> JetCLIRecordArtifactMetadata JetCLIRecordRetentionIOError! {
+            &self.calls.push("inspect {path}")
+            if self.inspect_error == "missing" -> return Err(.NotFound)
+            if self.inspect_error.len() > 0 -> return Err(.Other(~self.inspect_error))
+            Ok(self.files.get(path) ?? JetCLIRecordArtifactMetadata.Missing)
+        }
+        fn remove_file(&self, path: String) JetCLIRecordRetentionIOError! -[FS.Write]> {
+            &self.calls.push("remove {path}")
+            if self.remove_error == "missing" -> return Err(.NotFound)
+            if self.remove_error.len() > 0 -> return Err(.Other(~self.remove_error))
+            _ :: &self.files.remove(path)
+        }
+    }
+}
+fn record_retention_test_host() -> RecordRetentionTestHost {
+    RecordRetentionTestHost{files: [String:JetCLIRecordArtifactMetadata]{}, calls: [String]{}, inspect_error: "", remove_error: ""}
+}
+
+// Rust restart_eviction_removes_the_old_disposable_artifact (1598-1637), memory seam.
+#Test("record retention restart evicts the old artifact and retains the new row") {
+    old :: record_retention_test_receipt("old", 5, 1)
+    entries := record_retention_test_restart([JetCLIRecordIndexEntry]{old})
+    budget :: record_retention_test_budget(5)
+    jet_cli_record_validate_all(entries, budget) ?? panic(err.message)
+    &entries.push(record_retention_test_receipt("new", 5, 2))
+    jet_cli_record_apply_eviction(&entries, budget) ?? panic(err.message)
+    jet_cli_record_validate_all(entries, budget) ?? panic(err.message)
+    assert_eq(entries.len(), 1)
+    assert_eq(entries[0].artifact_id, "new")
+    host := record_retention_test_host()
+    host.files["/project/.jet/receipts/old"] = .Regular
+    host.files["/project/.jet/receipts/new"] = .Regular
+    jet_cli_record_remove_disposable_artifact(entries, old, Val("/project"), &host) ?? panic(err.message)
+    assert(!host.files.has_key("/project/.jet/receipts/old"))
+    assert(host.files.has_key("/project/.jet/receipts/new"))
+    assert_eq(host.calls, [String]{"inspect /project/.jet/receipts/old", "remove /project/.jet/receipts/old"})
+    reloaded :: record_retention_test_restart(entries)
+    assert_eq(reloaded.len(), 1)
+    assert_eq(reloaded[0].artifact_id, "new")
+}
+// Rust saved_history_survives_disposable_eviction_after_restart (1640-1689), memory seam.
+#Test("record retention saved history survives eviction after row reload") {
+    saved :: record_retention_test_entry(.Replay, "saved", ".jet/replays/saved", 100, 1, true)
+    old :: record_retention_test_receipt("old", 4, 2)
+    budget :: record_retention_test_budget(4)
+    entries := record_retention_test_restart([JetCLIRecordIndexEntry]{saved, old})
+    &entries.push(record_retention_test_receipt("new", 4, 3))
+    jet_cli_record_apply_eviction(&entries, budget) ?? panic(err.message)
+    jet_cli_record_validate_all(entries, budget) ?? panic(err.message)
+    assert_eq(entries.len(), 2)
+    assert_eq(entries[0].artifact_id, "saved")
+    assert_eq(entries[1].artifact_id, "new")
+    host := record_retention_test_host()
+    host.files["/project/.jet/replays/saved"] = .Regular
+    host.files["/project/.jet/receipts/old"] = .Regular
+    host.files["/project/.jet/receipts/new"] = .Regular
+    jet_cli_record_remove_disposable_artifact(entries, old, Val("/project"), &host) ?? panic(err.message)
+    assert(host.files.has_key("/project/.jet/replays/saved"))
+    assert(!host.files.has_key("/project/.jet/receipts/old"))
+    assert(host.files.has_key("/project/.jet/receipts/new"))
+    assert_eq(record_retention_test_restart(entries).len(), 2)
+}
+// Rust default_budget_retains_many_run_build_test_and_replay_rows_without_count_cap (1770-1810).
+#Test("record retention default budget keeps 320 run build test and replay rows") {
+    budget :: jet_cli_record_budget_default()
+    assert_eq(budget.max_bytes, 256 * 1024 * 1024)
+    entries := [JetCLIRecordIndexEntry]{}
+    labels :: [String]{"run", "build", "test", "replay"}
+    sequence := 1
+    loop label in labels {
+        kind :: if label == "replay" -> JetCLIRecordKind.Replay else -> JetCLIRecordKind.Receipt
+        prefix :: if label == "replay" -> ".jet/replays" else -> ".jet/receipts"
+        loop offset in 0..<80 {
+            &entries.push(record_retention_test_entry(kind, "{label}-{offset}", "{prefix}/{label}-{offset}", 1, sequence, false))
+            jet_cli_record_apply_eviction(&entries, budget) ?? panic(err.message)
+            sequence += 1
+        }
+    }
+    jet_cli_record_validate_all(entries, budget) ?? panic(err.message)
+    assert_eq(entries.len(), 320)
+    loaded :: record_retention_test_restart(entries)
+    jet_cli_record_validate_all(loaded, budget) ?? panic(err.message)
+    assert_eq(loaded.len(), 320)
+}
+// Rust protected_sensitive_saved_and_linked_rows_survive_selective_eviction_and_failed_publish
+// (1813-1937): eviction/privacy half only; publish failure is RI02/RI04.
+#Test("record retention protects sensitive saved audit and externally linked rows") {
+    linked :: record_retention_test_receipt("linked", 1, 1)
+    old :: record_retention_test_receipt("old", 1, 2)
+    sensitive := record_retention_test_receipt("sensitive", 8, 3)
+    sensitive.capture = .Sensitive
+    saved :: record_retention_test_entry(.Replay, "saved", ".jet/replays/saved", 32, 4, true)
+    proof := record_retention_test_entry(.Proof, "audit-proof", ".jet/proofs/audit", 32, 5, false)
+    &proof.consumed.push(record_retention_test_link(.Receipt, "linked"))
+    trust := record_retention_test_entry(.Trust, "audit-trust", ".jet/trust/audit", 32, 6, false)
+    &trust.produced.push(record_retention_test_link(.Receipt, "sensitive"))
+    evidence := record_retention_test_entry(.Evidence, "mandatory", ".jet/evidence/mandatory", 32, 7, false)
+    evidence.capture = .Sensitive
+    budget :: record_retention_test_budget(2)
+    entries := record_retention_test_restart([JetCLIRecordIndexEntry]{linked, old, sensitive, saved, proof, trust, evidence})
+    &entries.push(record_retention_test_receipt("new", 1, 8))
+    jet_cli_record_apply_eviction(&entries, budget) ?? panic(err.message)
+    jet_cli_record_validate_all(entries, budget) ?? panic(err.message)
+    assert_eq(entries.len(), 7)
+    ids := [String]{}
+    loop entry in entries -> &ids.push(~entry.artifact_id)
+    assert_eq(ids, [String]{"linked", "sensitive", "saved", "audit-proof", "audit-trust", "mandatory", "new"})
+    visible :: jet_cli_record_visible_entry(entries, entries[4], false)
+    assert_eq(visible.produced.len(), 0)
+    assert_eq(visible.artifact_id, "audit-trust")
+    authenticated :: jet_cli_record_visible_entry(entries, entries[4], true)
+    assert_eq(authenticated.produced.len(), 1)
+    assert(!jet_cli_record_link_visible(entries, record_retention_test_link(.Receipt, "sensitive")))
+    assert(jet_cli_record_link_visible(entries, record_retention_test_link(.Receipt, "linked")))
+}
+#Test("record retention linked components evict together without dangling links") {
+    first := record_retention_test_receipt("first", 2, 1)
+    last := record_retention_test_receipt("last", 2, 3)
+    middle := record_retention_test_receipt("middle", 2, 2)
+    &first.consumed.push(record_retention_test_link(.Receipt, "middle"))
+    &last.produced.push(record_retention_test_link(.Receipt, "middle"))
+    // An outgoing link to a protected target does not protect the disposable group.
+    &last.consumed.push(record_retention_test_link(.Proof, "audit"))
+    audit :: record_retention_test_entry(.Proof, "audit", ".jet/proofs/audit", 100, 4, false)
+    entries := [JetCLIRecordIndexEntry]{first, middle, last, audit, record_retention_test_receipt("new", 2, 5)}
+    groups :: jet_cli_record_eviction_groups(entries)
+    assert_eq(groups, [[Int]]{[Int]{0, 1, 2}, [Int]{4}})
+    jet_cli_record_apply_eviction(&entries, record_retention_test_budget(2)) ?? panic(err.message)
+    assert_eq(entries.len(), 2)
+    assert_eq(entries[0].artifact_id, "audit")
+    assert_eq(entries[1].artifact_id, "new")
+    jet_cli_record_validate_all(entries, record_retention_test_budget(2)) ?? panic(err.message)
+}
+#Test("record retention FIFO compares minimum group sequence then artifact id") {
+    entries := [JetCLIRecordIndexEntry]{record_retention_test_receipt("z", 1, 5), record_retention_test_receipt("b", 1, 1), record_retention_test_receipt("a", 1, 1)}
+    jet_cli_record_apply_eviction(&entries, record_retention_test_budget(2)) ?? panic(err.message)
+    assert_eq(entries.len(), 2)
+    assert_eq(entries[0].artifact_id, "z")
+    assert_eq(entries[1].artifact_id, "b")
+    jet_cli_record_apply_eviction(&entries, record_retention_test_budget(1)) ?? panic(err.message)
+    assert_eq(entries.len(), 1)
+    assert_eq(entries[0].artifact_id, "z")
+}
+#Test("record retention fails when every disposable group has an external reference") {
+    target :: record_retention_test_receipt("target", 2, 1)
+    audit := record_retention_test_entry(.Proof, "audit", ".jet/proofs/audit", 100, 2, false)
+    &audit.produced.push(record_retention_test_link(.Receipt, "target"))
+    entries := [JetCLIRecordIndexEntry]{target, audit}
+    assert_eq(jet_cli_record_eviction_groups(entries).len(), 0)
+    record_retention_test_error(jet_cli_record_apply_eviction(&entries, record_retention_test_budget(1)), "disposable history budget exceeded; no unreferenced FIFO record group can be evicted")
+    assert_eq(entries.len(), 2)
+}
+#Test("record retention validation errors and their precedence are byte exact") {
+    budget :: record_retention_test_budget(1)
+    entries := [JetCLIRecordIndexEntry]{record_retention_test_receipt("one", 1, 2), record_retention_test_receipt("two", 1, 1)}
+    record_retention_test_error(jet_cli_record_validate_all(entries, budget), "recorded_sequence values must be unique and strictly increasing")
+    entries[1].recorded_sequence = 2
+    record_retention_test_error(jet_cli_record_validate_all(entries, budget), "recorded_sequence values must be unique and strictly increasing")
+    entries[1].recorded_sequence = 3
+    entries[1].artifact_id = "one"
+    record_retention_test_error(jet_cli_record_validate_all(entries, budget), "duplicate record identity `receipt/one`")
+    entries[1].artifact_id = "two"
+    record_retention_test_error(jet_cli_record_validate_all(entries, budget), "disposable record size 2 exceeds budget 1")
+    &entries[0].consumed.push(record_retention_test_link(.Replay, "missing"))
+    record_retention_test_error(jet_cli_record_validate_all(entries, budget), "disposable record size 2 exceeds budget 1")
+    record_retention_test_error(jet_cli_record_validate_all(entries, record_retention_test_budget(2)), "record `receipt/one` links to missing `replay/missing`")
+    entries[0].consumed = [JetCLIRecordLink]{}
+    &entries[1].produced.push(record_retention_test_link(.Evidence, "missing"))
+    record_retention_test_error(jet_cli_record_validate_all(entries, record_retention_test_budget(2)), "record `receipt/two` links to missing `evidence/missing`")
+    entries[1].produced = [JetCLIRecordLink]{record_retention_test_link(.Receipt, "one")}
+    entries[0].consumed = [JetCLIRecordLink]{record_retention_test_link(.Receipt, "two")}
+    record_retention_test_error(jet_cli_record_validate_all(entries, record_retention_test_budget(2)), "record links contain a cycle at `receipt/one`")
+    entries[0].identity.engine = ""
+    record_retention_test_error(jet_cli_record_validate_all(entries, budget), "engine is empty, too large, or contains control characters")
+    // Same id in distinct kinds is not a duplicate. Sequence zero is allowed first.
+    distinct :: [JetCLIRecordIndexEntry]{record_retention_test_receipt("same", 0, 0), record_retention_test_entry(.Replay, "same", ".jet/replays/same", 0, 1, false)}
+    jet_cli_record_validate_all(distinct, budget) ?? panic(err.message)
+}
+#Test("record retention disposable byte sums preserve unsigned 64-bit overflow") {
+    maximum :: 18446744073709551615
+    entries := [JetCLIRecordIndexEntry]{record_retention_test_receipt("one", maximum, 1)}
+    budget :: record_retention_test_budget(maximum)
+    jet_cli_record_validate_all(entries, budget) ?? panic(err.message)
+    jet_cli_record_apply_eviction(&entries, budget) ?? panic(err.message)
+    &entries.push(record_retention_test_receipt("two", 1, 2))
+    record_retention_test_error(jet_cli_record_validate_all(entries, budget), "record budget byte count overflows")
+    record_retention_test_error(jet_cli_record_apply_eviction(&entries, budget), "record budget byte count overflows")
+    entries[0].saved = true
+    jet_cli_record_validate_all(entries, record_retention_test_budget(1)) ?? panic(err.message)
+    jet_cli_record_apply_eviction(&entries, record_retention_test_budget(1)) ?? panic(err.message)
+    assert_eq(entries.len(), 2)
+}
+#Test("record retention total link bound precedes missing targets and cycles") {
+    entries := [JetCLIRecordIndexEntry]{}
+    loop index in 0..<50 {
+        entry := record_retention_test_receipt("row-{index}", 0, index)
+        loop _ in 0..<1000 {
+            &entry.consumed.push(record_retention_test_link(.Proof, "target"))
+            &entry.produced.push(record_retention_test_link(.Proof, "target"))
+        }
+        &entries.push(^entry)
+    }
+    &entries.push(record_retention_test_entry(.Proof, "target", ".jet/proofs/target", 1, 50, false))
+    budget :: record_retention_test_budget(1)
+    jet_cli_record_validate_all(entries, budget) ?? panic(err.message)
+    &entries[49].consumed.push(record_retention_test_link(.Proof, "missing"))
+    record_retention_test_error(jet_cli_record_validate_all(entries, budget), "record index has too many links")
+}
+#Test("record retention link filtering keeps safe order and hides unknown sensitive references") {
+    safe :: record_retention_test_receipt("safe", 1, 1)
+    sensitive := record_retention_test_receipt("sensitive", 1, 2)
+    sensitive.capture = .Sensitive
+    owner := record_retention_test_entry(.Trust, "owner", ".jet/trust/owner", 1, 3, false)
+    owner.consumed = [JetCLIRecordLink]{record_retention_test_link(.Receipt, "sensitive"), record_retention_test_link(.Receipt, "safe"), record_retention_test_link(.Replay, "safe")}
+    owner.produced = [JetCLIRecordLink]{record_retention_test_link(.Receipt, "safe"), record_retention_test_link(.Receipt, "missing"), record_retention_test_link(.Receipt, "sensitive")}
+    entries :: [JetCLIRecordIndexEntry]{safe, sensitive, owner}
+    visible :: jet_cli_record_visible_entry(entries, owner, false)
+    assert_eq(visible.consumed.len(), 1)
+    assert_eq(visible.produced.len(), 1)
+    assert_eq(visible.consumed[0].artifact_id, "safe")
+    assert_eq(visible.produced[0].artifact_id, "safe")
+    assert(visible.identity == owner.identity)
+    assert_eq(visible.path, owner.path)
+    assert_eq(visible.size, owner.size)
+    assert_eq(owner.consumed.len(), 3)
+    assert(jet_cli_record_visible_entry(entries, owner, true) == owner)
+    assert(!jet_cli_record_link_visible(entries, record_retention_test_link(.Replay, "safe")))
+    assert(!jet_cli_record_link_visible(entries, record_retention_test_link(.Receipt, "missing")))
+}
+#Test("record retention artifact removal preserves shared paths and absent root") {
+    old :: record_retention_test_receipt("old", 1, 1)
+    alias := record_retention_test_receipt("alias", 1, 2)
+    alias.path = ".jet//receipts/./old/"
+    host := record_retention_test_host()
+    jet_cli_record_remove_disposable_artifact([JetCLIRecordIndexEntry]{alias}, old, Val("/project"), &host) ?? panic(err.message)
+    assert_eq(host.calls.len(), 0)
+    root := Val("/project")
+    root = None
+    jet_cli_record_remove_disposable_artifact([JetCLIRecordIndexEntry]{}, old, root, &host) ?? panic(err.message)
+    assert_eq(host.calls.len(), 0)
+}
+#Test("record retention artifact removal errors and not-found races are byte exact") {
+    old :: record_retention_test_receipt("old", 1, 1)
+    entries :: [JetCLIRecordIndexEntry]{}
+    host := record_retention_test_host()
+    // Missing metadata (and OS NotFound) never attempts removal.
+    jet_cli_record_remove_disposable_artifact(entries, old, Val("/project"), &host) ?? panic(err.message)
+    assert_eq(host.calls.len(), 1)
+    host.inspect_error = "missing"
+    jet_cli_record_remove_disposable_artifact(entries, old, Val("/project"), &host) ?? panic(err.message)
+    assert_eq(host.calls.len(), 2)
+    host.inspect_error = "denied"
+    record_retention_test_error(jet_cli_record_remove_disposable_artifact(entries, old, Val("/project"), &host), "could not inspect disposable artifact `/project/.jet/receipts/old`: denied")
+    host.inspect_error = ""
+    host.files["/project/.jet/receipts/old"] = .Other
+    record_retention_test_error(jet_cli_record_remove_disposable_artifact(entries, old, Val("/project"), &host), "disposable artifact is not a regular file: /project/.jet/receipts/old")
+    assert_eq(host.calls.len(), 4)
+    host.files["/project/.jet/receipts/old"] = .Regular
+    host.remove_error = "denied"
+    record_retention_test_error(jet_cli_record_remove_disposable_artifact(entries, old, Val("/project"), &host), "could not evict disposable artifact `/project/.jet/receipts/old`: denied")
+    assert_eq(host.calls.len(), 6)
+    host.remove_error = "missing"
+    jet_cli_record_remove_disposable_artifact(entries, old, Val("/project"), &host) ?? panic(err.message)
+    assert_eq(host.calls.len(), 8)
+    host.remove_error = ""
+    jet_cli_record_remove_disposable_artifact(entries, old, Val("/project"), &host) ?? panic(err.message)
+    assert_eq(host.calls.len(), 10)
+    assert(!host.files.has_key("/project/.jet/receipts/old"))
+}
+#Test("record retention positional eviction preserves survivor order with duplicate rows") {
+    duplicate :: record_retention_test_receipt("duplicate", 1, 1)
+    entries := [JetCLIRecordIndexEntry]{duplicate, record_retention_test_receipt("middle", 1, 2), duplicate, record_retention_test_receipt("last", 1, 3)}
+    jet_cli_record_apply_eviction(&entries, record_retention_test_budget(3)) ?? panic(err.message)
+    assert_eq(entries.len(), 3)
+    assert_eq(entries[0].artifact_id, "middle")
+    assert_eq(entries[1].artifact_id, "duplicate")
+    assert_eq(entries[2].artifact_id, "last")
+}

@@ -1,0 +1,623 @@
+// Capability-aware typed tables (crates/jet-cli/src/AdaptiveTable.rs).
+// Layout borrows the source through the render call, rather than retaining an
+// owned copy of its rows. Output capabilities are explicit; no host IO occurs.
+use core.math as table_math
+pub JET_CLI_TABLE_MAX_COLUMNS :: 64
+pub JET_CLI_TABLE_MAX_ROWS :: 4096
+pub JET_CLI_TABLE_MAX_CELL_BYTES :: 4096
+pub JET_CLI_TABLE_MAX_RENDER_WIDTH :: 256
+
+// Rust `String::push_str`: append to one buffer rather than concatenate copies.
+fn jet_cli_table_append(out: &[U8], value: String) Never! {
+    loop byte in value.bytes() -> &out.push(byte)
+}
+fn jet_cli_table_append_bytes(out: &[U8], raw: [U8], start: Int, end: Int) Never! {
+    loop index in start..<end -> &out.push(raw[index])
+}
+fn jet_cli_table_finish(out: [U8]) -> String Never! {
+    String.from_bytes(out) ?? panic("table output is valid UTF-8")
+}
+
+pub enum JetCLITableCell {
+    Text(String)
+    Integer(Int)
+    Unsigned(Int)
+    Boolean(Bool)
+    Empty
+}
+pub enum JetCLITableCellKind {
+    Text
+    Integer
+    Unsigned
+    Boolean
+    Empty
+}
+pub enum JetCLITableAlignment {
+    Left
+    Right
+    Center
+}
+pub struct JetCLITableColumn {
+    pub name: String
+    pub kind: JetCLITableCellKind
+    pub alignment: JetCLITableAlignment
+}
+pub struct JetCLITableRow { pub cells: [JetCLITableCell] }
+pub struct JetCLIStructuredTable {
+    pub columns: [JetCLITableColumn]
+    pub rows: [JetCLITableRow]
+    pub truncated: Bool
+}
+pub struct JetCLIAdaptiveTable {
+    // Rust `AdaptiveTable::{columns,rows,truncated}` (AdaptiveTable.rs:233-245).
+    pub columns: [JetCLITableColumn]
+    pub rows: [JetCLITableRow]
+    pub truncated: Bool
+}
+pub struct JetCLITableLayout {
+    // Rust `TableLayout::{widths,width}` (AdaptiveTable.rs:316-323).
+    pub widths: [Int]
+    pub width: Int
+    unicode: Bool
+    human: Bool
+    narrow: Bool
+    plain: Bool
+}
+
+// Rust `TableCell::text` (AdaptiveTable.rs:35-38).
+pub fn jet_cli_table_cell_text(value: String) -> JetCLITableCell Never! {
+    JetCLITableCell.Text(jet_cli_table_bounded_text(value))
+}
+// Rust `TableCell::integer` (AdaptiveTable.rs:41-43).
+pub fn jet_cli_table_cell_integer(value: Int) -> JetCLITableCell Never! { JetCLITableCell.Integer(value) }
+// Rust `TableCell::unsigned` (AdaptiveTable.rs:46-48).
+pub fn jet_cli_table_cell_unsigned(value: Int) -> JetCLITableCell Never! { JetCLITableCell.Unsigned(value) }
+// Rust `TableCell::boolean` (AdaptiveTable.rs:51-53).
+pub fn jet_cli_table_cell_boolean(value: Bool) -> JetCLITableCell Never! { JetCLITableCell.Boolean(value) }
+// Rust `TableCell::empty` (AdaptiveTable.rs:56-58).
+pub fn jet_cli_table_cell_empty() -> JetCLITableCell Never! { JetCLITableCell.Empty }
+// Rust `TableCell::kind` (AdaptiveTable.rs:61-69).
+pub fn jet_cli_table_cell_kind(cell: JetCLITableCell) -> JetCLITableCellKind Never! {
+    if cell == {
+        .Text(_) -> JetCLITableCellKind.Text
+        .Integer(_) -> JetCLITableCellKind.Integer
+        .Unsigned(_) -> JetCLITableCellKind.Unsigned
+        .Boolean(_) -> JetCLITableCellKind.Boolean
+        .Empty -> JetCLITableCellKind.Empty
+    }
+}
+// Rust `TableCell::display_text` (AdaptiveTable.rs:71-79).
+fn jet_cli_table_cell_display_text(cell: JetCLITableCell) -> String Never! {
+    if cell == {
+        .Text(value) -> jet_cli_table_bounded_text(value)
+        .Integer(value) -> "{value}"
+        .Unsigned(value) -> "{value}"
+        .Boolean(value) -> "{value}"
+        .Empty -> ""
+    }
+}
+// Rust `TableCellKind::default_alignment` (AdaptiveTable.rs:98-103).
+fn jet_cli_table_default_alignment(kind: JetCLITableCellKind) -> JetCLITableAlignment Never! {
+    if kind == JetCLITableCellKind.Integer || kind == JetCLITableCellKind.Unsigned -> return JetCLITableAlignment.Right
+    JetCLITableAlignment.Left
+}
+// Rust `TableColumn::new` (AdaptiveTable.rs:130-137).
+pub fn jet_cli_table_column_new(name: String, kind: JetCLITableCellKind) -> JetCLITableColumn Never! {
+    JetCLITableColumn{name: jet_cli_table_bounded_text(name), kind: kind, alignment: jet_cli_table_default_alignment(kind)}
+}
+// Rust `TableRow::new` (AdaptiveTable.rs:150-153).
+pub fn jet_cli_table_row_new(cells: ^[JetCLITableCell]) -> JetCLITableRow Never! {
+    kept := ^cells
+    loop kept.len() > JET_CLI_TABLE_MAX_COLUMNS -> (&kept.pop()).drop("table row cell bound")
+    JetCLITableRow{cells: ^kept}
+}
+// Rust `StructuredTable::new` (AdaptiveTable.rs:168-188).
+fn jet_cli_table_structured_new(columns: ^[JetCLITableColumn], rows: ^[JetCLITableRow], truncated: Bool) -> JetCLIStructuredTable Never! {
+    kept_columns := ^columns
+    kept_rows := ^rows
+    dropped := truncated || kept_columns.len() > JET_CLI_TABLE_MAX_COLUMNS || kept_rows.len() > JET_CLI_TABLE_MAX_ROWS
+    loop kept_columns.len() > JET_CLI_TABLE_MAX_COLUMNS -> (&kept_columns.pop()).drop("table column bound")
+    loop kept_rows.len() > JET_CLI_TABLE_MAX_ROWS -> (&kept_rows.pop()).drop("table row bound")
+    loop index in 0..<kept_rows.len() {
+        if kept_rows[index].cells.len() > kept_columns.len() {
+            loop kept_rows[index].cells.len() > kept_columns.len() -> (&kept_rows[index].cells.pop()).drop("table schema cell bound")
+            dropped = true
+        }
+    }
+    JetCLIStructuredTable{columns: ^kept_columns, rows: ^kept_rows, truncated: dropped}
+}
+// Rust `AdaptiveTable::new` (AdaptiveTable.rs:201-230).
+pub fn jet_cli_table_new(columns: ^[JetCLITableColumn], rows: ^[JetCLITableRow]) -> JetCLIAdaptiveTable Never! {
+    bounded := jet_cli_table_structured_new(^columns, ^rows, false)
+    loop index in 0..<bounded.columns.len() -> bounded.columns[index].name = jet_cli_table_bounded_text(bounded.columns[index].name)
+    loop row_index in 0..<bounded.rows.len() -> jet_cli_table_sanitize_row(&bounded.rows[row_index])
+    JetCLIAdaptiveTable{columns: ^bounded.columns, rows: ^bounded.rows, truncated: bounded.truncated}
+}
+// Rust `AdaptiveTable::new` cell sanitation loop (AdaptiveTable.rs:219-223).
+fn jet_cli_table_sanitize_cell(cell: &JetCLITableCell) Never! {
+    if cell == .Text(value) -> cell = jet_cli_table_cell_text(value)
+}
+// Rust `AdaptiveTable::new` row sanitation loop (AdaptiveTable.rs:214-224).
+// Lend the row rather than materialize its enclosing table for each cell.
+fn jet_cli_table_sanitize_row(row: &JetCLITableRow) Never! {
+    loop index in 0..<row.cells.len() -> jet_cli_table_sanitize_cell(&row.cells[index])
+}
+// Rust `AdaptiveTable::structured` (AdaptiveTable.rs:275-281).
+pub fn jet_cli_table_structured(table: JetCLIAdaptiveTable) -> JetCLIStructuredTable Never! {
+    jet_cli_table_structured_new(~table.columns, ~table.rows, table.truncated)
+}
+// Rust `AdaptiveTable::natural_widths` (AdaptiveTable.rs:283-299).
+fn jet_cli_table_natural_widths(table: JetCLIAdaptiveTable) -> [Int] Never! {
+    widths := [Int]{}
+    loop (index, column) in table.columns {
+        widest := jet_cli_table_display_width(column.name)
+        loop row in table.rows {
+            if index < row.cells.len() -> widest = table_math.max(widest, jet_cli_table_display_width(jet_cli_table_cell_display_text(row.cells[index])))
+        }
+        &widths.push(table_math.min(table_math.max(widest, 1), JET_CLI_TABLE_MAX_RENDER_WIDTH))
+    }
+    widths
+}
+// Rust `AdaptiveTable::layout` (AdaptiveTable.rs:249-272).
+pub fn jet_cli_table_layout(table: JetCLIAdaptiveTable, profile: JetCLIOutputProfile) -> JetCLITableLayout Never! {
+    width :: table_math.min(table_math.max(profile.width, 1), JET_CLI_TABLE_MAX_RENDER_WIDTH)
+    count :: table.columns.len()
+    natural :: jet_cli_table_natural_widths(table)
+    plain :: count == 0 || (count == 1 && width < 5)
+    narrow :: !plain && count > 1 && width < count * 4 + 1
+    JetCLITableLayout{
+        widths: if plain || narrow -> [Int]{} else -> jet_cli_table_fit_widths(natural, width),
+        width: width, unicode: profile.unicode_enabled, human: profile.human_enabled,
+        narrow: narrow, plain: plain,
+    }
+}
+// Rust `TableLayout::render` (AdaptiveTable.rs:329-340).
+pub fn jet_cli_table_layout_render(table: JetCLIAdaptiveTable, layout: JetCLITableLayout) -> String? Never! {
+    if !layout.human -> return None
+    Val(if {
+        layout.plain -> jet_cli_table_render_plain(table, layout.width)
+        layout.narrow -> jet_cli_table_render_narrow(table, layout.width)
+        else -> jet_cli_table_render_grid(table, layout.widths, layout.unicode)
+    })
+}
+// Rust `fit_widths` (AdaptiveTable.rs:343-371).
+fn jet_cli_table_fit_widths(natural: [Int], width: Int) -> [Int] Never! {
+    widths := [Int]{}
+    loop _ in natural -> &widths.push(1)
+    if natural.len() == 0 -> return widths
+    budget :: table_math.max(width - (natural.len() * 3 + 1), 0)
+    remaining := table_math.max(budget - natural.len(), 0)
+    loop remaining != 0 {
+        grew := false
+        loop index in 0..<widths.len() {
+            if widths[index] < natural[index] {
+                widths[index] = widths[index] + 1
+                remaining -= 1
+                grew = true
+                if remaining == 0 -> break
+            }
+        }
+        if !grew -> break
+    }
+    widths
+}
+// Rust `render_grid` (AdaptiveTable.rs:373-420).
+fn jet_cli_table_render_grid(table: JetCLIAdaptiveTable, widths: [Int], unicode: Bool) -> String Never! {
+    lines := [String]{jet_cli_table_border(widths, if unicode -> "┌" else -> "+", if unicode -> "┬" else -> "+", if unicode -> "┐" else -> "+", if unicode -> "─" else -> "-")}
+    separator :: if unicode -> "│" else -> "|"
+    if table.columns.len() != 0 {
+        headers := [JetCLITableCell]{}
+        loop column in table.columns -> &headers.push(jet_cli_table_cell_text(column.name))
+        loop line in jet_cli_table_render_grid_row(headers, table.columns, widths, separator) -> &lines.push(line)
+        &lines.push(jet_cli_table_border(widths, if unicode -> "├" else -> "+", if unicode -> "┼" else -> "+", if unicode -> "┤" else -> "+", if unicode -> "─" else -> "-"))
+    }
+    loop row in table.rows {
+        loop line in jet_cli_table_render_grid_row(row.cells, table.columns, widths, separator) -> &lines.push(line)
+    }
+    &lines.push(jet_cli_table_border(widths, if unicode -> "└" else -> "+", if unicode -> "┴" else -> "+", if unicode -> "┘" else -> "+", if unicode -> "─" else -> "-"))
+    lines.join("\n")
+}
+// Rust `border` (AdaptiveTable.rs:422-433).
+fn jet_cli_table_border(widths: [Int], left: String, joint: String, right: String, fill: String) -> String Never! {
+    line := [U8]{}
+    jet_cli_table_append(&line, left)
+    loop (index, width) in widths {
+        if index != 0 -> jet_cli_table_append(&line, joint)
+        jet_cli_table_append(&line, fill.repeat(width + 2))
+    }
+    jet_cli_table_append(&line, right)
+    jet_cli_table_finish(line)
+}
+// Rust `render_grid_row` (AdaptiveTable.rs:435-480).
+fn jet_cli_table_render_grid_row(cells: [JetCLITableCell], columns: [JetCLITableColumn], widths: [Int], separator: String) -> [String] Never! {
+    wrapped := [[String]]{}
+    height := 1
+    loop (index, width) in widths {
+        value :: if index < cells.len() -> jet_cli_table_cell_display_text(cells[index]) else -> ""
+        pieces :: jet_cli_table_wrap_cell(value, width)
+        height = table_math.max(height, pieces.len())
+        &wrapped.push(pieces)
+    }
+    lines := [String]{}
+    loop line_index in 0..<height {
+        line := [U8]{}
+        jet_cli_table_append(&line, separator)
+        loop (index, width) in widths {
+            if index != 0 -> jet_cli_table_append(&line, separator)
+            value :: if line_index < wrapped[index].len() -> wrapped[index][line_index] else -> ""
+            alignment :: if index < columns.len() -> columns[index].alignment else -> JetCLITableAlignment.Left
+            jet_cli_table_append(&line, " ")
+            jet_cli_table_append(&line, jet_cli_table_pad_cell(value, width, alignment))
+            jet_cli_table_append(&line, " ")
+        }
+        jet_cli_table_append(&line, separator)
+        &lines.push(jet_cli_table_finish(line))
+    }
+    lines
+}
+// Rust `render_narrow` (AdaptiveTable.rs:482-528).
+fn jet_cli_table_render_narrow(table: JetCLIAdaptiveTable, width: Int) -> String Never! {
+    label_width := 0
+    loop column in table.columns -> label_width = table_math.max(label_width, jet_cli_table_display_width(column.name))
+    label_width = table_math.min(label_width, table_math.max(width - 3, 0))
+    value_width :: table_math.max(width - (label_width + 2), 1)
+    lines := [String]{}
+    loop row in table.rows {
+        loop (index, column) in table.columns {
+            label :: jet_cli_table_clip_to_width(column.name, label_width)
+            value :: if index < row.cells.len() -> jet_cli_table_cell_display_text(row.cells[index]) else -> ""
+            loop (line_index, piece) in jet_cli_table_wrap_cell(value, value_width) {
+                line := [U8]{}
+                if line_index == 0 {
+                    jet_cli_table_append(&line, jet_cli_table_pad_cell(label, label_width, JetCLITableAlignment.Left))
+                    if label_width != 0 -> jet_cli_table_append(&line, ": ")
+                } else {
+                    if label_width != 0 -> jet_cli_table_append(&line, " ".repeat(label_width + 2))
+                }
+                jet_cli_table_append(&line, piece)
+                &lines.push(jet_cli_table_clip_to_width(jet_cli_table_finish(line), width))
+            }
+        }
+    }
+    if lines.len() == 0 && table.columns.len() != 0 {
+        headings := [String]{}
+        loop column in table.columns -> &headings.push(column.name)
+        &lines.push(jet_cli_table_clip_to_width(headings.join(" | "), width))
+    }
+    lines.join("\n")
+}
+// Rust `render_plain` (AdaptiveTable.rs:530-551).
+fn jet_cli_table_render_plain(table: JetCLIAdaptiveTable, width: Int) -> String Never! {
+    lines := [String]{}
+    if table.columns.len() != 0 {
+        headings := [String]{}
+        loop column in table.columns -> &headings.push(column.name)
+        loop line in jet_cli_table_wrap_cell(headings.join(" | "), width) -> &lines.push(line)
+    }
+    loop row in table.rows {
+        values := [String]{}
+        loop cell in row.cells -> &values.push(jet_cli_table_cell_display_text(cell))
+        loop line in jet_cli_table_wrap_cell(values.join(" | "), width) -> &lines.push(line)
+    }
+    lines.join("\n")
+}
+// Rust `pad_cell` (AdaptiveTable.rs:553-564).
+fn jet_cli_table_pad_cell(value: String, width: Int, alignment: JetCLITableAlignment) -> String Never! {
+    clipped :: jet_cli_table_clip_to_width(value, width)
+    gap :: table_math.max(width - jet_cli_table_display_width(clipped), 0)
+    if alignment == {
+        .Left -> "{clipped}{" ".repeat(gap)}"
+        .Right -> "{" ".repeat(gap)}{clipped}"
+        .Center -> {
+            left :: gap /% 2
+            "{" ".repeat(left)}{clipped}{" ".repeat(gap - left)}"
+        }
+    }
+}
+// Rust `wrap_cell` (AdaptiveTable.rs:566-610).
+fn jet_cli_table_wrap_cell(value: String, requested_width: Int) -> [String] Never! {
+    width :: table_math.max(requested_width, 1)
+    text :: jet_cli_table_bounded_text(value)
+    lines := [String]{}
+    loop logical_line in text.split("\n") {
+        logical_raw :: logical_line.bytes()
+        // Byte offsets: String.slice counts characters.
+        logical :: if logical_raw.len() > 0 && logical_raw[logical_raw.len() - 1] == (U8{13}) -> String.from_bytes(logical_raw[0..<logical_raw.len() - 1]) ?? logical_line else -> logical_line
+        if logical.len() == 0 {
+            &lines.push("")
+            next
+        }
+        raw :: logical.bytes()
+        line := [U8]{}
+        line_width := 0
+        emitted := false
+        at := 0
+        loop at < raw.len() {
+            cluster :: jet_cli_table_next_cluster(raw, at)
+            if cluster.width == 0 {
+                if line_width < width -> jet_cli_table_append_bytes(&line, raw, at, cluster.end)
+                at = cluster.end
+                next
+            }
+            if cluster.width > width {
+                if line.len() != 0 {
+                    &lines.push(jet_cli_table_finish(line))
+                    line = [U8]{}
+                    line_width = 0
+                }
+                &lines.push("?")
+                emitted = true
+                at = cluster.end
+                next
+            }
+            if line_width != 0 && line_width + cluster.width > width {
+                &lines.push(jet_cli_table_finish(line))
+                line = [U8]{}
+                line_width = 0
+            }
+            jet_cli_table_append_bytes(&line, raw, at, cluster.end)
+            line_width += cluster.width
+            at = cluster.end
+        }
+        if line.len() != 0 || !emitted -> &lines.push(jet_cli_table_finish(line))
+    }
+    if lines.len() == 0 -> &lines.push("")
+    lines
+}
+// Rust `clip_to_width_with_unicode` (AdaptiveTable.rs:611-649).
+pub fn jet_cli_clip_to_width_with_unicode(value: String, width: Int, unicode: Bool) -> String Never! {
+    if width == 0 -> return ""
+    text :: jet_cli_table_bounded_text(value)
+    if jet_cli_table_display_width(text) <= width -> return text
+    suffix :: if unicode -> "…" else -> "..."
+    suffix_width :: jet_cli_table_display_width(suffix)
+    if width <= suffix_width -> return if unicode -> "…" else -> ".".repeat(width)
+    keep :: width - suffix_width
+    used := 0
+    raw :: text.bytes()
+    at := 0
+    loop at < raw.len() {
+        if used >= keep -> break
+        cluster :: jet_cli_table_next_cluster(raw, at)
+        if cluster.width > table_math.max(keep - used, 0) -> break
+        used += cluster.width
+        at = cluster.end
+    }
+    out := [U8]{}
+    jet_cli_table_append_bytes(&out, raw, 0, at)
+    jet_cli_table_append(&out, suffix)
+    jet_cli_table_finish(out)
+}
+// Rust `clip_to_width` (AdaptiveTable.rs:651-653).
+fn jet_cli_table_clip_to_width(value: String, width: Int) -> String Never! { jet_cli_clip_to_width_with_unicode(value, width, true) }
+// Rust `display_width` (AdaptiveTable.rs:656-668).
+pub fn jet_cli_table_display_width(value: String) -> Int Never! {
+    text :: jet_cli_table_strip_ansi(value)
+    widest := 0
+    loop line in text.split("\n") {
+        raw :: line.bytes()
+        width := 0
+        at := 0
+        loop at < raw.len() {
+            cluster :: jet_cli_table_next_cluster(raw, at)
+            width += cluster.width
+            at = cluster.end
+        }
+        widest = table_math.max(widest, width)
+    }
+    widest
+}
+// Rust `bounded_text` (AdaptiveTable.rs:670-684).
+fn jet_cli_table_bounded_text(value: String) -> String Never! {
+    text :: jet_cli_table_strip_ansi(value)
+    raw :: text.bytes()
+    if raw.len() <= JET_CLI_TABLE_MAX_CELL_BYTES -> return text
+    out := [U8]{}
+    bytes := 0
+    at := 0
+    run_start := 0
+    loop at < raw.len() {
+        cluster :: jet_cli_table_next_cluster(raw, at)
+        length :: cluster.end - at
+        if bytes + length <= JET_CLI_TABLE_MAX_CELL_BYTES {
+            bytes += length
+        } else {
+            if at > run_start -> jet_cli_table_append_bytes(&out, raw, run_start, at)
+            run_start = cluster.end
+        }
+        at = cluster.end
+    }
+    if at > run_start -> jet_cli_table_append_bytes(&out, raw, run_start, at)
+    jet_cli_table_finish(out)
+}
+// Rust `strip_ansi` (AdaptiveTable.rs:685-707). Controls outside escape
+// sequences remain intact, exactly as in the reference (their width is zero).
+fn jet_cli_table_strip_ansi(value: String) -> String Never! {
+    raw :: value.bytes()
+    out := [U8]{}
+    state := 0
+    at := 0
+    run_start := 0
+    loop at < raw.len() {
+        scalar :: jet_cli_table_decode_scalar(raw, at)
+        cp :: scalar.code
+        was_escape :: state != 0
+        if {
+            state == 0 && cp == 27 -> {
+                if at > run_start -> jet_cli_table_append_bytes(&out, raw, run_start, at)
+                run_start = scalar.end
+                state = 1
+            }
+            state == 0 -> {}
+            state == 1 && cp == 91 -> state = 2
+            state == 1 && cp == 93 -> state = 3
+            state == 1 -> state = 0
+            state == 2 && cp >= 64 && cp <= 126 -> state = 0
+            state == 2 -> {}
+            state == 3 && cp == 7 -> state = 0
+            state == 3 && cp == 27 -> state = 4
+            state == 3 -> {}
+            state == 4 && cp == 92 -> state = 0
+            state == 4 -> state = 3
+            else -> state = 0
+        }
+        if was_escape && state == 0 -> run_start = scalar.end
+        at = scalar.end
+    }
+    if state == 0 && at > run_start -> jet_cli_table_append_bytes(&out, raw, run_start, at)
+    jet_cli_table_finish(out)
+}
+struct JetCLITableScalar { code: Int, end: Int }
+struct JetCLITableCluster { end: Int, width: Int }
+// UTF-8 scalar cursor for Rust `char_indices`; valid UTF-8 is a String invariant.
+fn jet_cli_table_decode_scalar(raw: [U8], at: Int) -> JetCLITableScalar Never! {
+    first :: Int.from_u8(raw[at])
+    count :: if {
+        first < 128 -> 1
+        first < 224 -> 2
+        first < 240 -> 3
+        else -> 4
+    }
+    code := if {
+        count == 1 -> first
+        count == 2 -> first & 31
+        count == 3 -> first & 15
+        else -> first & 7
+    }
+    loop offset in 1..<count -> code = (code << 6) | (Int.from_u8(raw[at + offset]) & 63)
+    JetCLITableScalar{code: code, end: at + count}
+}
+// Rust `for_each_cluster` (AdaptiveTable.rs:709-747), one cursor step.
+fn jet_cli_table_next_cluster(raw: [U8], at: Int) -> JetCLITableCluster Never! {
+    first :: jet_cli_table_decode_scalar(raw, at)
+    end := first.end
+    width := jet_cli_table_scalar_width(first.code)
+    if jet_cli_table_is_regional_indicator(first.code) {
+        if end < raw.len() {
+            next_scalar :: jet_cli_table_decode_scalar(raw, end)
+            if jet_cli_table_is_regional_indicator(next_scalar.code) {
+                end = next_scalar.end
+                width = 2
+            }
+        }
+    } else {
+        loop {
+            loop end < raw.len() {
+                next_scalar :: jet_cli_table_decode_scalar(raw, end)
+                if !jet_cli_table_is_extend(next_scalar.code) -> break
+                end = next_scalar.end
+            }
+            if end >= raw.len() -> break
+            joiner :: jet_cli_table_decode_scalar(raw, end)
+            if joiner.code != 0x200d -> break
+            end = joiner.end
+            if end >= raw.len() -> break
+            next_scalar :: jet_cli_table_decode_scalar(raw, end)
+            end = next_scalar.end
+            width = table_math.max(width, jet_cli_table_scalar_width(next_scalar.code))
+        }
+    }
+    JetCLITableCluster{end: end, width: width}
+}
+// Rust `scalar_width` (AdaptiveTable.rs:749-757).
+fn jet_cli_table_scalar_width(code: Int) -> Int Never! {
+    if code < 32 || (code >= 127 && code <= 159) || jet_cli_table_is_extend(code) || code == 0x200d -> return 0
+    if jet_cli_table_is_wide(code) -> return 2
+    1
+}
+// Rust `is_regional_indicator` (AdaptiveTable.rs:759-761).
+fn jet_cli_table_is_regional_indicator(code: Int) -> Bool Never! { code >= 0x1f1e6 && code <= 0x1f1ff }
+// Rust `is_extend` (AdaptiveTable.rs:763-933). Explicit reference ranges,
+// not Core's wider grapheme algorithm: display columns must match this table.
+fn jet_cli_table_is_extend(code: Int) -> Bool Never! {
+    (code >= 0x0300 && code <= 0x036f) || (code >= 0x0483 && code <= 0x0489) ||
+    (code >= 0x0591 && code <= 0x05bd) || code == 0x05bf ||
+    (code >= 0x05c1 && code <= 0x05c2) || (code >= 0x05c4 && code <= 0x05c5) ||
+    (code >= 0x0610 && code <= 0x061a) || (code >= 0x064b && code <= 0x065f) || code == 0x0670 ||
+    (code >= 0x06d6 && code <= 0x06ed) || code == 0x0711 || (code >= 0x0730 && code <= 0x074a) ||
+    (code >= 0x07a6 && code <= 0x07b0) || (code >= 0x07eb && code <= 0x07f3) ||
+    (code >= 0x0816 && code <= 0x0819) || (code >= 0x081b && code <= 0x0823) ||
+    (code >= 0x0825 && code <= 0x0827) || (code >= 0x0829 && code <= 0x082d) ||
+    (code >= 0x0859 && code <= 0x085b) || (code >= 0x08d3 && code <= 0x0903) ||
+    (code >= 0x093a && code <= 0x093c) || (code >= 0x093e && code <= 0x094f) ||
+    (code >= 0x0951 && code <= 0x0957) || (code >= 0x0962 && code <= 0x0963) ||
+    (code >= 0x0981 && code <= 0x0984) || (code >= 0x09be && code <= 0x09c4) ||
+    (code >= 0x09c7 && code <= 0x09c8) || (code >= 0x09cb && code <= 0x09cd) || code == 0x09d7 ||
+    (code >= 0x09e2 && code <= 0x09e3) || (code >= 0x0a01 && code <= 0x0a03) || code == 0x0a3c ||
+    (code >= 0x0a3e && code <= 0x0a42) || (code >= 0x0a47 && code <= 0x0a48) ||
+    (code >= 0x0a4b && code <= 0x0a4d) || code == 0x0a51 || (code >= 0x0a70 && code <= 0x0a71) ||
+    code == 0x0a75 || code == 0x0abc || (code >= 0x0abe && code <= 0x0ac5) ||
+    (code >= 0x0ac7 && code <= 0x0ac9) || (code >= 0x0acb && code <= 0x0acd) ||
+    (code >= 0x0ae2 && code <= 0x0ae3) || (code >= 0x0b01 && code <= 0x0b03) || code == 0x0b3c ||
+    (code >= 0x0b3e && code <= 0x0b44) || (code >= 0x0b47 && code <= 0x0b48) ||
+    (code >= 0x0b4b && code <= 0x0b4d) || (code >= 0x0b56 && code <= 0x0b57) ||
+    (code >= 0x0b62 && code <= 0x0b63) || (code >= 0x0c00 && code <= 0x0c04) ||
+    (code >= 0x0c3e && code <= 0x0c44) || (code >= 0x0c46 && code <= 0x0c48) ||
+    (code >= 0x0c4a && code <= 0x0c4d) || (code >= 0x0c55 && code <= 0x0c56) ||
+    (code >= 0x0c62 && code <= 0x0c63) || (code >= 0x0d00 && code <= 0x0d03) ||
+    (code >= 0x0d3b && code <= 0x0d44) || (code >= 0x0d46 && code <= 0x0d48) ||
+    (code >= 0x0d4a && code <= 0x0d4d) || code == 0x0d57 || (code >= 0x0d62 && code <= 0x0d63) ||
+    code == 0x0e31 || (code >= 0x0e34 && code <= 0x0e3a) || (code >= 0x0e47 && code <= 0x0e4e) ||
+    code == 0x0eb1 || (code >= 0x0eb4 && code <= 0x0ebc) || (code >= 0x0ec8 && code <= 0x0ecd) ||
+    code == 0x0f18 || code == 0x0f35 || code == 0x0f37 || code == 0x0f39 ||
+    (code >= 0x0f71 && code <= 0x0f84) || (code >= 0x0f86 && code <= 0x0f87) ||
+    (code >= 0x0f8d && code <= 0x0fbc) || code == 0x0fc6 || (code >= 0x102b && code <= 0x103e) ||
+    (code >= 0x1056 && code <= 0x1059) || (code >= 0x105e && code <= 0x1060) ||
+    (code >= 0x1062 && code <= 0x1064) || (code >= 0x1067 && code <= 0x106d) ||
+    (code >= 0x1071 && code <= 0x1074) || code == 0x1082 || code == 0x1084 ||
+    (code >= 0x1087 && code <= 0x108d) || code == 0x108f || (code >= 0x109a && code <= 0x109d) ||
+    (code >= 0x135d && code <= 0x135f) || (code >= 0x1712 && code <= 0x1714) ||
+    (code >= 0x1732 && code <= 0x1734) || (code >= 0x1752 && code <= 0x1753) ||
+    (code >= 0x1772 && code <= 0x1773) || (code >= 0x17b4 && code <= 0x17d3) || code == 0x17dd ||
+    (code >= 0x180b && code <= 0x180f) || (code >= 0x1885 && code <= 0x1886) || code == 0x18a9 ||
+    (code >= 0x1920 && code <= 0x193b) || (code >= 0x1a17 && code <= 0x1a1b) ||
+    (code >= 0x1a55 && code <= 0x1a5e) || code == 0x1a60 || (code >= 0x1a62 && code <= 0x1a6f) ||
+    (code >= 0x1a70 && code <= 0x1a7c) || code == 0x1a7f || (code >= 0x1ab0 && code <= 0x1aff) ||
+    (code >= 0x1b00 && code <= 0x1b04) || code == 0x1b34 || (code >= 0x1b36 && code <= 0x1b44) ||
+    (code >= 0x1b6b && code <= 0x1b73) || (code >= 0x1b80 && code <= 0x1b82) ||
+    (code >= 0x1ba1 && code <= 0x1bad) || (code >= 0x1be6 && code <= 0x1bf3) ||
+    (code >= 0x1c24 && code <= 0x1c37) || (code >= 0x1cd0 && code <= 0x1ce8) || code == 0x1ced ||
+    code == 0x1cf4 || (code >= 0x1cf7 && code <= 0x1cfc) || (code >= 0x1d167 && code <= 0x1d1ff) ||
+    (code >= 0x1dc00 && code <= 0x1dfff) || (code >= 0x20d0 && code <= 0x20f0) ||
+    (code >= 0x2cef && code <= 0x2cf1) || (code >= 0x2de0 && code <= 0x2dff) ||
+    (code >= 0x302a && code <= 0x302f) || (code >= 0xa66f && code <= 0xa672) ||
+    (code >= 0xa674 && code <= 0xa67d) || (code >= 0xa69e && code <= 0xa69f) ||
+    (code >= 0xa6f0 && code <= 0xa6f1) || code == 0xa802 || code == 0xa806 || code == 0xa80b ||
+    (code >= 0xa823 && code <= 0xa827) || code == 0xa82c || (code >= 0xa880 && code <= 0xa881) ||
+    (code >= 0xa8b4 && code <= 0xa8c5) || (code >= 0xa8e0 && code <= 0xa8f1) || code == 0xa8ff ||
+    (code >= 0xa926 && code <= 0xa92f) || (code >= 0xa947 && code <= 0xa953) ||
+    (code >= 0xa980 && code <= 0xa983) || (code >= 0xa9b3 && code <= 0xa9c0) || code == 0xa9c6 ||
+    code == 0xa9e5 || (code >= 0xaa29 && code <= 0xaa3f) || code == 0xaa43 ||
+    (code >= 0xaa4c && code <= 0xaa4d) || (code >= 0xaa7b && code <= 0xaa7d) || code == 0xaab0 ||
+    (code >= 0xaab2 && code <= 0xaab4) || (code >= 0xaab7 && code <= 0xaab8) ||
+    (code >= 0xaabe && code <= 0xaabf) || code == 0xaac1 || (code >= 0xaaeb && code <= 0xaaef) ||
+    (code >= 0xaaf5 && code <= 0xaaf6) || (code >= 0xabe3 && code <= 0xabe4) ||
+    (code >= 0xabe6 && code <= 0xabe7) || code == 0xabe9 || code == 0xabec ||
+    (code >= 0xabf0 && code <= 0xabf1) || (code >= 0xfe00 && code <= 0xfe0f) ||
+    (code >= 0xfe20 && code <= 0xfe2f) || (code >= 0x1f3fb && code <= 0x1f3ff) ||
+    code == 0x200b || code == 0x200c || (code >= 0x200e && code <= 0x200f) ||
+    (code >= 0x2060 && code <= 0x2064) || (code >= 0x2066 && code <= 0x206f)
+}
+// Rust `is_wide` (AdaptiveTable.rs:935-990).
+fn jet_cli_table_is_wide(code: Int) -> Bool Never! {
+    (code >= 0x1100 && code <= 0x115f) || (code >= 0x231a && code <= 0x231b) ||
+    (code >= 0x2329 && code <= 0x232a) || (code >= 0x23e9 && code <= 0x23ec) ||
+    code == 0x23f0 || code == 0x23f3 || (code >= 0x25fd && code <= 0x25fe) ||
+    (code >= 0x2614 && code <= 0x2615) || (code >= 0x2648 && code <= 0x2653) ||
+    code == 0x267f || code == 0x2693 || code == 0x26a1 || (code >= 0x26aa && code <= 0x26ab) ||
+    (code >= 0x26bd && code <= 0x26be) || (code >= 0x26c4 && code <= 0x26c5) ||
+    code == 0x26ce || code == 0x26d4 || code == 0x26ea || (code >= 0x26f2 && code <= 0x26f3) ||
+    code == 0x26f5 || code == 0x26fa || code == 0x26fd || code == 0x2705 ||
+    (code >= 0x270a && code <= 0x270b) || code == 0x2728 || code == 0x274c || code == 0x274e ||
+    (code >= 0x2753 && code <= 0x2755) || code == 0x2757 || (code >= 0x2795 && code <= 0x2797) ||
+    code == 0x27b0 || code == 0x27bf || (code >= 0x2b1b && code <= 0x2b1c) ||
+    code == 0x2b50 || code == 0x2b55 || (code >= 0x2e80 && code <= 0x2ffb) ||
+    (code >= 0x3000 && code <= 0x303e) || (code >= 0x3041 && code <= 0x3247) ||
+    (code >= 0x3250 && code <= 0x4dbf) || (code >= 0x4e00 && code <= 0xa4c6) ||
+    (code >= 0xa960 && code <= 0xa97c) || (code >= 0xac00 && code <= 0xd7a3) ||
+    (code >= 0xf900 && code <= 0xfaff) || (code >= 0xfe10 && code <= 0xfe19) ||
+    (code >= 0xfe30 && code <= 0xfe6b) || (code >= 0xff01 && code <= 0xff60) ||
+    (code >= 0xffe0 && code <= 0xffe6) || (code >= 0x1f300 && code <= 0x1f64f) ||
+    (code >= 0x1f680 && code <= 0x1f6ff) || (code >= 0x1f900 && code <= 0x1f9ff) ||
+    (code >= 0x20000 && code <= 0x3fffd)
+}

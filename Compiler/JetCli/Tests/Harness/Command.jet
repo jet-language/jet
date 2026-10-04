@@ -1,0 +1,204 @@
+COMMAND_TEST_CR :: prep { String.from_bytes([U8]{U8{13}}) ?? panic("CR") }
+COMMAND_TEST_ESC :: prep { String.from_bytes([U8]{U8{27}}) ?? panic("ESC") }
+COMMAND_TEST_BEL :: prep { String.from_bytes([U8]{U8{7}}) ?? panic("BEL") }
+COMMAND_TEST_NUL :: prep { String.from_bytes([U8]{U8{0}}) ?? panic("NUL") }
+// CommandHarness.rs has no #[cfg(test)] module. CH01 behavioral claims.
+// Dispatch seams are tested as capture plumbing, not as pretend CLI commands.
+// End-to-end help/check/error journeys require the host's canonical dispatcher.
+fn command_test_result(stdout: String, stderr: String, diagnostics: [JetCLICommandDiagnostic], exit_code: Int) -> JetCLICommandResult {
+    JetCLICommandResult{stdout: stdout, stderr: stderr, diagnostics: diagnostics, exit_code: exit_code}
+}
+fn command_test_finish(^capture: JetCLICommandCapture, exit_code: Int) -> JetCLICommandResult {
+    jet_cli_command_capture_finish(^capture, exit_code) ?? panic(jet_cli_command_error_message(err))
+}
+fn command_test_finish_error(^capture: JetCLICommandCapture) -> String {
+    if jet_cli_command_capture_finish(^capture, 0) == {
+        .Ok(_) -> panic("expected capture limit refusal")
+        .Err(error) -> jet_cli_command_error_message(error)
+    }
+}
+#Test("command severity wire spellings and diagnostic constructors") {
+    assert_eq(jet_cli_command_severity_name(JetCLIDiagnosticSeverity.Info), "info")
+    assert_eq(jet_cli_command_severity_name(JetCLIDiagnosticSeverity.Warning), "warning")
+    assert_eq(jet_cli_command_severity_name(JetCLIDiagnosticSeverity.Error), "error")
+    error :: jet_cli_command_diagnostic_error("E2102", "what", "why", "fix")
+    assert(error == jet_cli_command_diagnostic_new("E2102", JetCLIDiagnosticSeverity.Error, "what", "why", "fix"))
+    assert_eq(canonical_json_bytes(jet_cli_command_diagnostic_to_json(error)), "{{\"code\":\"E2102\",\"fix\":\"fix\",\"severity\":\"error\",\"what\":\"what\",\"why\":\"why\"}}\n".bytes())
+}
+#Test("command success requires zero exit and no error diagnostic") {
+    clean :: command_test_result("", "", [JetCLICommandDiagnostic]{}, 0)
+    assert(jet_cli_command_result_succeeded(clean))
+    assert(!jet_cli_command_result_succeeded(command_test_result("", "", [JetCLICommandDiagnostic]{}, 1)))
+    reports := [JetCLICommandDiagnostic]{jet_cli_command_diagnostic_new("I0001", JetCLIDiagnosticSeverity.Info, "", "", ""), jet_cli_command_diagnostic_new("L0001", JetCLIDiagnosticSeverity.Warning, "", "", "")}
+    assert(jet_cli_command_result_succeeded(command_test_result("", "", reports, 0)))
+    &reports.push(jet_cli_command_diagnostic_error("E2104", "", "", ""))
+    assert(!jet_cli_command_result_succeeded(command_test_result("", "", reports, 0)))
+}
+#Test("command capture preserves exact channel bytes and report order") {
+    capture := jet_cli_command_capture_new()
+    jet_cli_command_capture_stdout(&capture, "é{COMMAND_TEST_CR}\n")
+    jet_cli_command_capture_stderr(&capture, "first")
+    jet_cli_command_capture_stdout(&capture, "{COMMAND_TEST_ESC}[32mout{COMMAND_TEST_ESC}[0m")
+    jet_cli_command_capture_stderr(&capture, "\nsecond\n")
+    first :: jet_cli_command_diagnostic_new("L1", JetCLIDiagnosticSeverity.Warning, "one", "", "")
+    second :: jet_cli_command_diagnostic_error("E2", "two", "", "")
+    jet_cli_command_capture_diagnostic(&capture, first)
+    jet_cli_command_capture_diagnostic(&capture, second)
+    assert_eq(jet_cli_command_capture_stderr_text(capture), "first\nsecond\n")
+    assert_eq(capture.diagnostics.len(), 2)
+    result :: command_test_finish(^capture, -1)
+    assert_eq(result.stdout, "é{COMMAND_TEST_CR}\n{COMMAND_TEST_ESC}[32mout{COMMAND_TEST_ESC}[0m")
+    assert_eq(result.stderr, "first\nsecond\n")
+    assert_eq(result.diagnostics, [JetCLICommandDiagnostic]{first, second})
+    assert_eq(result.exit_code, -1)
+}
+#Test("command normalization preserves semantic fields and source capture") {
+    diagnostic :: jet_cli_command_diagnostic_error("E{COMMAND_TEST_ESC}[0m", "{COMMAND_TEST_ESC}[31mwhat{COMMAND_TEST_ESC}[0m{COMMAND_TEST_CR}\n", "why{COMMAND_TEST_BEL}", "{COMMAND_TEST_ESC}]title{COMMAND_TEST_ESC}\\fix{COMMAND_TEST_CR}")
+    original :: command_test_result("é{COMMAND_TEST_ESC}[32mout{COMMAND_TEST_ESC}[0m{COMMAND_TEST_CR}\n", "err{COMMAND_TEST_CR}", [JetCLICommandDiagnostic]{diagnostic}, 7)
+    normalized :: jet_cli_command_result_normalized(original)
+    assert_eq(normalized.stdout, "éout\n")
+    assert_eq(normalized.stderr, "err\n")
+    assert_eq(normalized.diagnostics[0].code, "E{COMMAND_TEST_ESC}[0m")
+    assert_eq(normalized.diagnostics[0].what, "what\n")
+    assert_eq(normalized.diagnostics[0].why, "why")
+    assert_eq(normalized.diagnostics[0].fix, "fix\n")
+    assert(normalized.diagnostics[0].severity == JetCLIDiagnosticSeverity.Error)
+    assert_eq(normalized.exit_code, 7)
+    assert_eq(original.stderr, "err{COMMAND_TEST_CR}")
+    assert(jet_cli_command_result_normalized(normalized) == normalized)
+}
+#Test("command terminal controls handle truncation Unicode and CR state") {
+    assert_eq(jet_cli_command_normalize_terminal_text("a{COMMAND_TEST_ESC}["), "a")
+    assert_eq(jet_cli_command_normalize_terminal_text("a{COMMAND_TEST_ESC}]unterminated"), "a")
+    assert_eq(jet_cli_command_normalize_terminal_text("a{COMMAND_TEST_ESC}éb"), "ab")
+    assert_eq(jet_cli_command_normalize_terminal_text("é{COMMAND_TEST_ESC}]title{COMMAND_TEST_BEL}文"), "é文")
+    assert_eq(jet_cli_command_normalize_terminal_text("{COMMAND_TEST_CR}{COMMAND_TEST_ESC}[0m\n{COMMAND_TEST_CR}{COMMAND_TEST_CR}\n"), "\n\n\n\n")
+    assert_eq(jet_cli_command_normalize_terminal_text("a{COMMAND_TEST_ESC}]x{COMMAND_TEST_ESC}qz{COMMAND_TEST_BEL}b"), "ab")
+    assert_eq(jet_cli_command_normalize_terminal_text("a{COMMAND_TEST_BEL}b\t{COMMAND_TEST_NUL}"), "ab\t{COMMAND_TEST_NUL}")
+}
+#Test("command canonical result bytes keep raw streams exit and trailing LF") {
+    result :: command_test_result("out{COMMAND_TEST_CR}\n", "é\t", [JetCLICommandDiagnostic]{}, -7)
+    expected :: "{{\"diagnostics\":[],\"exit_code\":-7,\"stderr\":\"é\\t\",\"stdout\":\"out\\r\\n\"}}\n"
+    assert_eq(jet_cli_command_result_canonical_bytes(result), expected.bytes())
+    normalized :: jet_cli_command_result_normalized(result)
+    assert_eq(jet_cli_command_result_digest(result), mir_sha256_hex_bytes(mir_sha256_bytes(jet_cli_command_result_canonical_bytes(normalized))))
+    assert_eq(jet_cli_command_result_digest(result), jet_cli_command_result_digest(normalized))
+    changed :: command_test_result("out{COMMAND_TEST_CR}\n", "é\t", [JetCLICommandDiagnostic]{}, 0)
+    assert(jet_cli_command_result_digest(result) != jet_cli_command_result_digest(changed))
+}
+#Test("command canonical result preserves diagnostic order and exact escaping") {
+    first :: jet_cli_command_diagnostic_new("I1", JetCLIDiagnosticSeverity.Info, "文😀/\\\"", "why\n", "{COMMAND_TEST_NUL}{COMMAND_TEST_ESC}")
+    second :: jet_cli_command_diagnostic_new("L2", JetCLIDiagnosticSeverity.Warning, "", "", "")
+    result :: command_test_result("out\\\"", "{COMMAND_TEST_BEL}\t", [JetCLICommandDiagnostic]{first, second}, -2147483648)
+    expected :: "{{\"diagnostics\":[{{\"code\":\"I1\",\"fix\":\"\\u0000\\u001b\",\"severity\":\"info\",\"what\":\"文😀/\\\\\\\"\",\"why\":\"why\\n\"}},{{\"code\":\"L2\",\"fix\":\"\",\"severity\":\"warning\",\"what\":\"\",\"why\":\"\"}}],\"exit_code\":-2147483648,\"stderr\":\"\\u0007\\t\",\"stdout\":\"out\\\\\\\"\"}}\n"
+    bytes :: jet_cli_command_result_canonical_bytes(result)
+    assert_eq(bytes, expected.bytes())
+    assert((canonical_json_parse(bytes) ?? panic("canonical command JSON")) == jet_cli_command_result_to_json(result))
+    normalized :: jet_cli_command_result_normalized(result)
+    assert_eq(jet_cli_command_result_digest(result), canonical_json_sha256(jet_cli_command_result_to_json(normalized)))
+}
+#Test("command environment names are portable ASCII with no value restriction") {
+    valid :: [String]{"A", "_", "_9", "a_Z09"}
+    loop name in valid -> assert(jet_cli_command_valid_env_name(name))
+    invalid :: [String]{"", "9A", "A=B", "A B", "é", "A\n", "A{COMMAND_TEST_NUL}", "A-é"}
+    loop name in invalid {
+        assert(!jet_cli_command_valid_env_name(name))
+        command := jet_cli_command_default()
+        if jet_cli_command_env(^command, name, "value") == {
+            .Ok(_) -> panic("invalid environment name accepted")
+            .Err(error) -> assert_eq(jet_cli_command_error_message(error), "invalid command environment name `{name}`")
+        }
+    }
+    command := jet_cli_command_default()
+    command = jet_cli_command_arg(^command, "check")
+    command = jet_cli_command_arg(^command, "a b.jet")
+    command = jet_cli_command_env(^command, "Z", "old") ?? panic("env")
+    command = jet_cli_command_env(^command, "A", "{COMMAND_TEST_NUL}{COMMAND_TEST_CR}\né") ?? panic("env")
+    command = jet_cli_command_env(^command, "Z", "new") ?? panic("env")
+    assert_eq(command.args.len(), 2)
+    assert_eq(command.args[1], "a b.jet")
+    environment :: jet_cli_command_environment(command)
+    assert_eq(environment.len(), 2)
+    assert_eq(environment["Z"], "new")
+    assert_eq(environment["A"], "{COMMAND_TEST_NUL}{COMMAND_TEST_CR}\né")
+    keys := [String]{}
+    loop (key, _) in environment -> &keys.push(key)
+    assert_eq(keys, [String]{"A", "Z"})
+}
+#Test("command streams accept exact byte bound and reject UTF8 excess in order") {
+    full :: "a".repeat(JET_CLI_MAX_COMMAND_STREAM_BYTES)
+    accepted := jet_cli_command_capture_new()
+    jet_cli_command_capture_stdout(&accepted, full)
+    jet_cli_command_capture_stderr(&accepted, full)
+    result :: command_test_finish(^accepted, 0)
+    assert_eq(result.stdout.len(), JET_CLI_MAX_COMMAND_STREAM_BYTES)
+    assert_eq(result.stderr.len(), JET_CLI_MAX_COMMAND_STREAM_BYTES)
+    stdout := jet_cli_command_capture_new()
+    jet_cli_command_capture_stdout(&stdout, full)
+    jet_cli_command_capture_stdout(&stdout, "é")
+    jet_cli_command_capture_stderr(&stdout, full)
+    jet_cli_command_capture_stderr(&stdout, "x")
+    assert_eq(command_test_finish_error(^stdout), "stdout bytes exceeds the 16777216 item limit")
+    stderr := jet_cli_command_capture_new()
+    jet_cli_command_capture_stderr(&stderr, full)
+    jet_cli_command_capture_stderr(&stderr, "x")
+    assert_eq(command_test_finish_error(^stderr), "stderr bytes exceeds the 16777216 item limit")
+}
+#Test("command diagnostic bound accepts maximum then refuses one extra") {
+    capture := jet_cli_command_capture_new()
+    diagnostic :: jet_cli_command_diagnostic_error("E1", "", "", "")
+    loop index in 0..<JET_CLI_MAX_COMMAND_DIAGNOSTICS -> jet_cli_command_capture_diagnostic(&capture, diagnostic)
+    // A separate capture keeps the owning finish and over-limit case independent.
+    accepted := ~capture
+    result :: command_test_finish(^accepted, 0)
+    assert_eq(result.diagnostics.len(), JET_CLI_MAX_COMMAND_DIAGNOSTICS)
+    jet_cli_command_capture_diagnostic(&capture, diagnostic)
+    assert_eq(command_test_finish_error(^capture), "structured diagnostic count exceeds the 100000 item limit")
+}
+fn command_test_capture_plumbing(args: [String], environment: [String:String], capture: &JetCLICommandCapture) -> Int Never! {
+    assert_eq(args, [String]{"capture-plumbing"})
+    assert_eq(environment["EXPLICIT"], "value")
+    jet_cli_command_capture_stdout(&capture, "stdout")
+    jet_cli_command_capture_stderr(&capture, "stderr")
+    jet_cli_command_capture_diagnostic(&capture, jet_cli_command_diagnostic_error("E1", "what", "why", "fix"))
+    23
+}
+struct CommandTestDispatch {
+    calls: Int
+    impl JetCLICommandDispatch {
+        fn dispatch(&self, args: [String], environment: [String:String], capture: &JetCLICommandCapture) -> Int Never! {
+            self.calls += 1
+            command_test_capture_plumbing(args, environment, &capture)
+        }
+    }
+}
+struct CommandTestExecutor {
+    calls: Int
+    impl JetCLICommandExecutor {
+        fn execute(&self, command: JetCLICommand, capture: &JetCLICommandCapture) -> Int Never! {
+            self.calls += 1
+            command_test_capture_plumbing(command.args, command.environment, &capture)
+        }
+    }
+}
+#Test("command callback trait and raw argv adapter use the same capture sink") {
+    command := jet_cli_command_new([String]{"capture-plumbing"})
+    command = jet_cli_command_env(^command, "EXPLICIT", "value") ?? panic("env")
+    dispatch := CommandTestDispatch{calls: 0}
+    direct :: jet_cli_command_run(command, &dispatch) ?? panic("run")
+    assert_eq(dispatch.calls, 1)
+    adapter := jet_cli_command_executor_adapter_new(^dispatch)
+    adapted :: jet_cli_command_run_with(command, &adapter) ?? panic("run_with")
+    repeated :: jet_cli_command_run_with(command, &adapter) ?? panic("run_with")
+    assert(direct == adapted)
+    assert(direct == repeated)
+    assert_eq(direct.stdout, "stdout")
+    assert_eq(direct.stderr, "stderr")
+    assert_eq(direct.exit_code, 23)
+    assert_eq(direct.diagnostics.len(), 1)
+    inner := jet_cli_command_executor_adapter_into_inner(^adapter)
+    assert((jet_cli_command_run(command, &inner) ?? panic("inner")) == direct)
+    executor := CommandTestExecutor{calls: 0}
+    assert((jet_cli_command_run_with(command, &executor) ?? panic("executor")) == direct)
+    assert_eq(executor.calls, 1)
+}

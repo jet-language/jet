@@ -1,0 +1,158 @@
+// Whole artifact leaves from Rust JetOS/theme_fleet_lifecycle.rs:13-87,
+// 243-349,430-599. Fleet/lifecycle are separate owners, not placeholders here.
+// Studio owns jetos_make_executable: #4479/#3593; native scripts also need #3594.
+// Fixed object schemas preserve Rust JSON::object_of pretty STRING values.
+pub fn jetos_write_theme_facts(dir: String, system: SystemPlan) IOError! -[FS]> {
+    theme_dir :: files.join(dir, "theme")
+    gtk_dir :: files.join(dir, "share/themes/jetos/gtk-4.0")
+    qt_dir :: files.join(dir, "share/qt6ct/colors")
+    terminal_dir :: files.join(dir, "share/terminal")
+    editor_dir :: files.join(dir, "share/editor")
+    dm_dir :: files.join(dir, "share/display-manager")
+    studio_dir :: files.join(dir, "studio")
+    loop path in ([String]{theme_dir, gtk_dir, qt_dir, terminal_dir, editor_dir, dm_dir, studio_dir}) -> files.create_dir_all(path)
+    name :: jetos_clean_symbol(jetos_option_value(system, [String]{"theme.name", "theme.profile"}) ?? "default")
+    polarity :: jetos_clean_symbol(jetos_option_value(system, [String]{"theme.polarity"}) ?? "Dark")
+    wallpaper :: jetos_option_value(system, [String]{"theme.wallpaper"}) ?? ""
+    font :: jetos_option_value(system, [String]{"theme.fonts.ui", "theme.font"}) ?? "Inter"
+    accent :: jetos_option_value(system, [String]{"theme.palette.accent"}) ?? "#4f8cff"
+    files.write(files.join(gtk_dir, "gtk.css"), "* {{ font-family: \"{font}\"; }}\n:root {{ --jetos-accent: {accent}; }}\n")
+    files.write(files.join(qt_dir, "jetos.conf"), "[ColorScheme]\nname={name}\naccent={accent}\npolarity={polarity}\nfont={font}\n")
+    files.write(files.join(terminal_dir, "theme.toml"), "name = \"{name}\"\npolarity = \"{polarity}\"\nfont = \"{font}\"\naccent = \"{accent}\"\n")
+    files.write(files.join(editor_dir, "theme.json"), "{{\"name\":{foundation_json_quote(name)},\"type\":{foundation_json_quote(polarity)},\"ui_font\":{foundation_json_quote(font)},\"accent\":{foundation_json_quote(accent)}}}")
+    files.write(files.join(dm_dir, "theme.conf"), "Theme={name}\nAccent={accent}\nWallpaper={wallpaper}\n")
+    files.write(files.join(studio_dir, "theme-preview.json"), "{{\"kind\":\"jetos.theme-preview\",\"name\":{foundation_json_quote(name)},\"polarity\":{foundation_json_quote(polarity)},\"accent\":{foundation_json_quote(accent)},\"font\":{foundation_json_quote(font)},\"wallpaper\":{foundation_json_quote(wallpaper)}}}")
+    files.write(files.join(theme_dir, "facts.json"), "{{\"kind\":\"jetos.theme\",\"name\":{foundation_json_quote(name)},\"polarity\":{foundation_json_quote(polarity)},\"wallpaper\":{foundation_json_quote(wallpaper)},\"font\":{foundation_json_quote(font)},\"accent\":{foundation_json_quote(accent)},\"targets\":[\"gtk\",\"qt\",\"terminal\",\"editor\",\"display-manager\",\"studio\"],\"proof\":\"theme-projected\"}}")
+}
+
+pub fn jetos_write_options_reference(dir: String, system: SystemPlan) IOError! -[FS]> {
+    options_dir :: files.join(dir, "options")
+    files.create_dir_all(options_dir)
+    keys := [String]{}
+    loop option in system.options {
+        if !jetos_is_option_priority_metadata(option.key) -> &keys.push(option.key)
+    }
+    &keys.sort()
+    rows := [String]{}
+    loop index in 0..<keys.len() {
+        key :: keys[index]
+        if index > 0 && key == keys[index - 1] -> next
+        resolved :: jetos_resolved_option(system, key) ?? next
+        namespace := if key.split_once(".") == { // #4303: owned view passed to String calls.
+            .Val(parts) -> parts.before
+            .None -> key
+        }
+        &rows.push("{{\"key\":{foundation_json_quote(key)},\"namespace\":{foundation_json_quote(namespace)},\"type\":{foundation_json_quote(jetos_option_type(resolved.value))},\"value\":{foundation_json_quote(resolved.value)},\"default\":{foundation_json_quote(jetos_option_default(namespace))},\"example\":{foundation_json_quote(resolved.value)},\"doc\":{foundation_json_quote(jetos_option_doc(key))},\"source\":\"config.jet options\",\"tier\":{foundation_json_quote(resolved.tier)},\"priority\":\"{resolved.priority}\",\"provenance\":\"system option resolver\"}}")
+    }
+    files.write(files.join(options_dir, "reference.json"), "{{\"kind\":\"jetos.option-reference\",\"host\":{foundation_json_quote(system.name)},\"options\":[{rows.join(",")}]}}")
+    bin_dir :: files.join(dir, "sw/bin")
+    files.create_dir_all(bin_dir)
+    search :: "#!/usr/bin/env sh\nset -eu\nmode=search\ncase \"${{1:-}}\" in\n  --exact) mode=exact; shift ;;\n  --explain) mode=explain; shift ;;\nesac\nterm=${{1:-}}\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\nref=\"$root/options/reference.json\"\nexplain=\"$root/module-system/explain.json\"\nif [ -z \"$term\" ]; then\n  cat \"$ref\"\n  exit 0\nfi\ncase \"$mode\" in\n  exact) grep -F \"\\\"key\\\": \\\"$term\\\"\" \"$ref\" || grep -F \"\\\"key\\\":\\\"$term\\\"\" \"$ref\" || true ;;\n  explain) grep -F \"$term\" \"$explain\" || true ;;\n  *) grep -F \"$term\" \"$ref\" || true ;;\nesac\n"
+    search_path :: files.join(bin_dir, "jetos-options-search")
+    files.write(search_path, search)
+    jetos_make_executable(search_path)
+}
+
+pub fn jetos_write_image_variant_facts(dir: String, system: SystemPlan, plan: EnvPlan) IOError! -[FS]> {
+    image_dir :: files.join(dir, "image-variants")
+    files.create_dir_all(image_dir)
+    variants := [String]{}
+    defaults :: [(name: String, kind: String, format: String)]{
+        (name: "default-qcow2", kind: "qcow2", format: "qcow2"),
+        (name: "default-raw", kind: "raw", format: "raw"),
+        (name: "default-sd", kind: "sd", format: "sd"),
+        (name: "default-netboot", kind: "netboot", format: "pxe")
+    }
+    loop row in defaults -> &variants.push("{{\n  \"name\": {foundation_json_quote(row.name)},\n  \"kind\": {foundation_json_quote(row.kind)},\n  \"format\": {foundation_json_quote(row.format)},\n  \"target\": {foundation_json_quote(system.target)}\n}}")
+    loop image in plan.images {
+        if image.kind == ImageKind.Iso && image.from == system.name {
+            target :: image.target ?? system.target
+            &variants.push("{{\n  \"name\": {foundation_json_quote(image.name)},\n  \"kind\": \"iso\",\n  \"format\": {foundation_json_quote(image.format)},\n  \"target\": {foundation_json_quote(target)}\n}}")
+        }
+    }
+    loop row in jetos_prefixed_options(system, "packages.imageVariant.") {
+        value :: jetos_clean_symbol(row.value)
+        &variants.push("{{\n  \"name\": {foundation_json_quote(row.key)},\n  \"kind\": {foundation_json_quote(value)},\n  \"format\": {foundation_json_quote(value)},\n  \"target\": {foundation_json_quote(system.target)}\n}}")
+    }
+    files.write(files.join(image_dir, "matrix.json"), "{{\"kind\":\"jetos.image-variant-matrix\",\"host\":{foundation_json_quote(system.name)},\"variants\":[{variants.join(",")}],\"proof\":\"image-variant-plan-ready\"}}")
+}
+
+pub fn jetos_write_service_manager_depth(dir: String, system: SystemPlan) IOError! -[FS]> {
+    service_dir :: files.join(dir, "service-manager")
+    bin_dir :: files.join(dir, "sw/bin")
+    tmpfiles_dir :: files.join(dir, "etc/tmpfiles.d")
+    files.create_dir_all(service_dir)
+    files.create_dir_all(bin_dir)
+    files.create_dir_all(tmpfiles_dir)
+    facts := [String]{}
+    loop svc in system.services {
+        if !svc.enable -> next
+        if jetos_service_extra(svc, [String]{"tmpfiles"}) == .Val(tmpfiles) -> files.write(files.join(tmpfiles_dir, "{svc.name}.conf"), "{tmpfiles}\n")
+        hardening :: jetos_service_extra(svc, [String]{"hardening"}) ?? "default-sandbox"
+        journal :: jetos_service_extra(svc, [String]{"journal"}) ?? "structured"
+        timers :: if jetos_service_extra(svc, [String]{"timer", "schedule"}) != None -> "true" else -> "false"
+        sockets :: if jetos_service_extra(svc, [String]{"socket", "listen"}) != None -> "true" else -> "false"
+        &facts.push("{{\n  \"name\": {foundation_json_quote(svc.name)},\n  \"hardening\": {foundation_json_quote(hardening)},\n  \"journal\": {foundation_json_quote(journal)},\n  \"timers\": {foundation_json_quote(timers)},\n  \"sockets\": {foundation_json_quote(sockets)}\n}}")
+    }
+    files.write(files.join(service_dir, "facts.json"), "{{\"kind\":\"jetos.service-manager-depth\",\"services\":[{facts.join(",")}],\"features\":[\"services\",\"timers\",\"sockets\",\"tmpfiles\",\"hardening\",\"journal\"]}}")
+    files.write(files.join(service_dir, "log-policy.json"), "{{\"kind\":\"jetos.service-logs\",\"backend\":\"journalctl\",\"fallback\":\"service-manager/logs/<unit>.log\",\"proof\":\"logs-query-ready\"}}")
+    logs :: "#!/usr/bin/env sh\nset -eu\nunit=${{1:-}}\nif [ -z \"$unit\" ]; then\n  echo 'usage: jetos-service-logs <unit> [--since <time>]' >&2\n  exit 2\nfi\nshift || true\nsince=''\nif [ \"${{1:-}}\" = '--since' ]; then\n  shift\n  since=${{1:-}}\nfi\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\njournal=${{JETOS_JOURNALCTL_BIN:-journalctl}}\nif command -v \"$journal\" >/dev/null 2>&1; then\n  if [ -n \"$since\" ]; then\n    exec \"$journal\" -u \"$unit\" --since \"$since\"\n  fi\n  exec \"$journal\" -u \"$unit\"\nfi\nfallback=\"$root/service-manager/logs/$unit.log\"\nif [ -f \"$fallback\" ]; then\n  cat \"$fallback\"\n  exit 0\nfi\necho \"jetos logs: no journal backend or fallback log for $unit\" >&2\nexit 2\n"
+    logs_path :: files.join(bin_dir, "jetos-service-logs")
+    files.write(logs_path, logs)
+    jetos_make_executable(logs_path)
+}
+
+pub fn jetos_write_app_module_facts(dir: String, system: SystemPlan) IOError! -[FS]> {
+    apps_dir :: files.join(dir, "apps")
+    programs_dir :: files.join(apps_dir, "programs")
+    bin_dir :: files.join(dir, "sw/bin")
+    files.create_dir_all(apps_dir)
+    files.create_dir_all(programs_dir)
+    files.create_dir_all(bin_dir)
+    rows := jetos_prefixed_options(system, "apps.program.")
+    loop row in jetos_prefixed_options(system, "user.") -> &rows.push(row)
+    loop row in jetos_prefixed_options(system, "theme.") -> &rows.push(row)
+    modules :: [String]{"git", "ssh", "fish", "starship", "ghostty", "helix", "yazi", "btop", "bat", "eza", "fzf", "zoxide", "ripgrep", "tealdeer", "fastfetch", "vscode", "cursor", "discord", "spicetify", "browser"}
+    module_json := [String]{}
+    coverage := [String]{}
+    loop module in modules {
+        module_dir :: files.join(programs_dir, module)
+        files.create_dir_all(module_dir)
+        options :: jetos_prefixed_options(system, "apps.program.{module}.")
+        enabled :: jetos_option_value(system, [String]{"apps.program.{module}.enable"}) ?? if options.len() > 0 -> "true" else -> "false"
+        config_path :: jetos_app_module_config_path(module)
+        package :: jetos_option_value(system, [String]{"apps.program.{module}.package"}) ?? module
+        files.write(files.join(module_dir, "module.json"), "{{\"kind\":\"jetos.app-module\",\"name\":{foundation_json_quote(module)},\"enabled\":{jetos_clean_bool_json(enabled)},\"package\":{foundation_json_quote(package)},\"config_path\":{foundation_json_quote(config_path)},\"options\":[{jetos_option_rows_json(options)}],\"proof\":\"app-module-ready\"}}")
+        config := [String]{"# managed by jetos apps.program.{module}\n"}
+        loop row in options -> &config.push("{row.key} = {row.value}\n")
+        if module == "git" {
+            if jetos_option_value(system, [String]{"apps.program.git.userName"}) == .Val(name) -> &config.push("user.name = {name}\n")
+            if jetos_option_value(system, [String]{"apps.program.git.userEmail"}) == .Val(email) -> &config.push("user.email = {email}\n")
+        }
+        files.write(files.join(module_dir, "config"), config.join(""))
+        &module_json.push("{{\"name\":{foundation_json_quote(module)},\"enabled\":{jetos_clean_bool_json(enabled)},\"config\":{foundation_json_quote("apps/programs/{module}/config")},\"proof\":\"ready\"}}")
+        &coverage.push("{module}\tmodule\n")
+    }
+    files.write(files.join(apps_dir, "coverage.manifest"), coverage.join(""))
+    files.write(files.join(apps_dir, "gap-cards.manifest"), "vscode-extension-provider\tcovered-by-#330\ncursor-extension-provider\tcovered-by-#330\nspicetify-patching-provider\tcovered-by-#330\n")
+    apply :: "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\nhome=${{JETOS_USER_HOME:-$HOME}}\nproof_dir=${{JETOS_APP_PROOF_DIR:-$home/.jetos/proof}}\nmkdir -p \"$proof_dir\"\ncount=0\nfor module in \"$root\"/apps/programs/*; do\n  [ -d \"$module\" ] || continue\n  name=${{module##*/}}\n  config_path=$(sed -n 's/.*\"config_path\":\"\\([^\"]*\\)\".*/\\1/p' \"$module/module.json\")\n  [ -n \"$config_path\" ] || config_path=\".config/$name/config\"\n  dest=\"$home/$config_path\"\n  mkdir -p \"${{dest%/*}}\"\n  cp \"$module/config\" \"$dest\"\n  count=$((count + 1))\ndone\nprintf '{{\"kind\":\"jetos.app-modules\",\"state\":\"applied\",\"count\":%s,\"proof\":\"app-config-applied\"}}\\n' \"$count\" > \"$proof_dir/app-modules.json\"\ncat \"$proof_dir/app-modules.json\"\n"
+    apply_path :: files.join(bin_dir, "jetos-app-module-apply")
+    files.write(apply_path, apply)
+    jetos_make_executable(apply_path)
+    files.write(files.join(apps_dir, "modules.json"), "{{\"kind\":\"jetos.app-module-library\",\"host\":{foundation_json_quote(system.name)},\"modules\":[{jetos_option_rows_json(rows)}],\"catalog\":[{module_json.join(",")}],\"apply\":\"sw/bin/jetos-app-module-apply\",\"proof\":\"app-config-projected\"}}")
+}
+
+pub fn jetos_app_module_config_path(module: String) -> String Never! {
+    if module == {
+        "git" -> ".config/git/config"
+        "ssh" -> ".ssh/config"
+        "fish" -> ".config/fish/config.fish"
+        "starship" -> ".config/starship.toml"
+        "ghostty" -> ".config/ghostty/config"
+        "helix" -> ".config/helix/config.toml"
+        "vscode" -> ".config/Code/User/settings.json"
+        "cursor" -> ".config/Cursor/User/settings.json"
+        "browser" -> ".config/browser/policies.json"
+        else -> ".config/{module}/config"
+    }
+}

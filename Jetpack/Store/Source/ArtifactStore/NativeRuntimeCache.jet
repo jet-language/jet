@@ -2,21 +2,35 @@
 //
 // Codegen keeps emitting one complete Rust program for inspection and I1/I2
 // audits. Native builders extract its marked Prelude/runtime and Core blocks,
-// compile that mutually dependent closure once under a flag-keyed identity,
-// then link the user program against the cached rlibs.
+// compile that mutually dependent closure once as ONE `jet_runtime` rlib
+// under a flag-keyed identity, then link the user program against it. The two
+// blocks reference each other, so they cannot be two crates (Rust crates
+// cannot depend on each other cyclically).
+//
+// Packaging prebuilds the default build-fact set: the `jet-runtime/`
+// directory beside the `jet` executable holds `<key>/libjet_runtime.rlib`
+// under exactly this key, so a fresh machine with an empty store links the
+// shipped rlib instead of compiling the runtime. Other keys (another rustc,
+// profile, CPU, or feature set) miss it and build on demand into the store.
 
-@STORE_RUNTIME_CACHE_SCHEMA :: "jet-runtime-core-rlib-v8"
-@STORE_RUNTIME_CRATE_NAME :: "jet_runtime"
-@STORE_RUNTIME_CORE_CRATE_NAME :: "jet_runtime_core"
-@STORE_RUNTIME_CRATE_PREFIX :: "#![allow(warnings)]\n"
-@STORE_RUNTIME_CORE_CRATE_PREFIX :: "#![allow(warnings)]\nextern crate jet_runtime;\nuse jet_runtime::*;\n"
-@STORE_RUNTIME_BEGIN :: "// jet:cached-runtime-begin\n"
-@STORE_RUNTIME_END :: "// jet:cached-runtime-end\n"
-@STORE_RUNTIME_CORE_BEGIN :: "// jet:cached-core-begin\n"
-@STORE_RUNTIME_CORE_END :: "// jet:cached-core-end\n"
+use jet_store.[split_generated, export_crate_source, STORE_RUNTIME_CRATE_PREFIX]
+STORE_RUNTIME_CACHE_SCHEMA :: prep { "jet-runtime-rlib-v9" }
+STORE_RUNTIME_CRATE_NAME :: prep { "jet_runtime" }
+STORE_RUNTIME_RLIB_FILE :: prep { "libjet_runtime.rlib" }
+// Directory beside the `jet` executable holding prebuilt runtime rlibs as
+// `<key>/libjet_runtime.rlib`.
+STORE_RUNTIME_PREBUILT_DIR :: prep { "jet-runtime" }
+// When set, every runtime rlib a process links is also written to this
+// directory in the prebuilt layout. The packaging step sets it while building
+// a seed program to populate the shipped prebuilt directory.
+STORE_RUNTIME_PREBUILD_EXPORT_ENV :: prep { "JET_RUNTIME_PREBUILD_DIR" }
+// Separates the `rustc -vV` identity from the host CPU description when the
+// flags select `target-cpu=native`: the key must name the CPU the rlib was
+// tuned for, or a prebuilt rlib could reach a machine lacking its features.
+STORE_RUNTIME_NATIVE_CPU_IDENTITY :: prep { "jet:target-cpu=native\n" }
 
-// Why the runtime cache could not prepare a program: the tool (rustc) failed
-// to run, or the artifact store failed.
+// Why the runtime cache could not prepare a program: malformed runtime markers,
+// the tool (rustc) failed to run, or the artifact store failed.
 #Error
 pub enum NativeRuntimeError {
     Tool(String)
@@ -32,7 +46,7 @@ pub enum NativeRuntimeError {
 
 impl ArtifactStoreError -> NativeRuntimeError { NativeRuntimeError.Cache(self) }
 
-impl IOError -> NativeRuntimeError { NativeRuntimeError.Cache(ArtifactStoreError.Io(self)) }
+impl IOError -> NativeRuntimeError { NativeRuntimeError.Cache(ArtifactStoreError.IO(self)) }
 
 // One environment variable passed to every rustc invocation.
 pub struct NativeRuntimeEnvVar {
@@ -40,8 +54,9 @@ pub struct NativeRuntimeEnvVar {
     pub value: String
 }
 
-// The `rustc -vV` identity of each rustc and environment already queried
-// (the Rust process-wide identity memo, carried explicitly by the caller).
+// The rustc identity of each rustc, environment and CPU tuning already
+// queried (the Rust process-wide identity memo, carried explicitly by the
+// caller).
 pub struct NativeRuntimeIdentityCache {
     identities: [String: String]
 
@@ -49,9 +64,11 @@ pub struct NativeRuntimeIdentityCache {
         NativeRuntimeIdentityCache{identities: [String: String]{}}
     }
 
-    // The verbose version of `rustc` under `rustc_env`, queried once per
-    // distinct rustc and environment.
-    fn rustc_identity(&self, rustc: String, rustc_env: [NativeRuntimeEnvVar]) -[Exec, Time]> String NativeRuntimeError! {
+    // The `rustc -vV` output of `rustc` under `rustc_env`, followed, when the
+    // flags tune for the host CPU, by the native-CPU marker and the
+    // `rustc --print cfg -C target-cpu=native` description of this CPU.
+    // Queried once per distinct rustc, environment and tuning.
+    fn rustc_identity(&self, rustc: String, rustc_env: [NativeRuntimeEnvVar], native_cpu: Bool) -[Exec, Time]> String NativeRuntimeError! {
         framed := [U8]{}
         store_runtime_push_bytes(&framed, rustc.bytes())
         store_runtime_push_bytes(&framed, store_runtime_be64(rustc_env.len()))
@@ -59,23 +76,38 @@ pub struct NativeRuntimeIdentityCache {
             store_runtime_push_bytes(&framed, variable.name.bytes())
             store_runtime_push_bytes(&framed, variable.value.bytes())
         }
+        if native_cpu -> store_runtime_push_bytes(&framed, STORE_RUNTIME_NATIVE_CPU_IDENTITY.bytes())
         identity_key :: pkg_sha256_hex(framed)
         if self.identities.get(identity_key) == {
             .Val(identity) -> return Ok(identity)
             else -> {}
         }
-        spec := process.cmd([String]{rustc, "-vV"}).stdout(.Capture).stderr(.Capture)
-        loop variable in rustc_env -> spec = spec.env(variable.name, variable.value)
-        receipt :: if process.run_spec(spec) == {
-            .Ok(done) -> done
-            .Err(error) -> {
-                return Err(NativeRuntimeError.Tool("could not run rustc -vV: {error}"))
-            }
+        version :: store_runtime_rustc_query(rustc, rustc_env, [String]{"-vV"})
+        identity := version
+        if native_cpu {
+            cpu :: store_runtime_rustc_query(rustc, rustc_env, [String]{"--print", "cfg", "-C", "target-cpu=native"})
+            identity = "{version}{STORE_RUNTIME_NATIVE_CPU_IDENTITY}{cpu}"
         }
-        if !receipt.success -> return Err(NativeRuntimeError.Tool("rustc -vV failed: {receipt.errors}"))
-        self.identities[identity_key] = receipt.output
-        Ok(receipt.output)
+        self.identities[identity_key] = identity
+        Ok(identity)
     }
+}
+
+// The standard output of `rustc <args>` under `rustc_env`.
+fn store_runtime_rustc_query(rustc: String, rustc_env: [NativeRuntimeEnvVar], args: [String]) -[Exec, Time]> String NativeRuntimeError! {
+    argv := [String]{rustc}
+    loop arg in args -> &argv.push(arg)
+    rendered :: args.join(" ")
+    spec := process.cmd(argv).stdout(.Capture).stderr(.Capture)
+    loop variable in rustc_env -> spec = spec.env(variable.name, variable.value)
+    receipt :: if process.run_spec(spec) == {
+        .Ok(done) -> done
+        .Err(error) -> {
+            return Err(NativeRuntimeError.Tool("could not run rustc {rendered}: {error}"))
+        }
+    }
+    if !receipt.success -> return Err(NativeRuntimeError.Tool("rustc {rendered} failed: {receipt.errors}"))
+    Ok(receipt.output)
 }
 
 // A per-prepare staging directory holding the restored rlibs a rustc command
@@ -99,26 +131,26 @@ impl NativeRuntimeMaterializedRoot.Close {
 }
 
 // The program to hand to the native rustc invocation and the cached runtime
-// and Core rlibs it links. Keep it open until the consuming rustc command
-// exits: it holds the leases that pin the rlibs and their staging copies.
+// rlib it links. Keep it open until the consuming rustc command exits: it
+// holds the lease that pins the rlib and its staging copy.
 pub struct PreparedRuntime {
     rust: String
-    runtime: StoredArtifact?
-    core: StoredArtifact?
+    runtime_rlib: String?
     cache_hit: Bool
     repaired: Bool
-    leases: [ArtifactLease]
+    prebuilt: Bool
+    lease: ArtifactLease?
     materialized_root: NativeRuntimeMaterializedRoot?
 
     // The whole generated program, compiled without a cached runtime.
     fn inline(rust: String) -> PreparedRuntime Never! {
         PreparedRuntime{
             rust,
-            runtime: None,
-            core: None,
+            runtime_rlib: None,
             cache_hit: false,
             repaired: false,
-            leases: [ArtifactLease]{},
+            prebuilt: false,
+            lease: None,
             materialized_root: None,
         }
     }
@@ -129,29 +161,29 @@ pub struct PreparedRuntime {
 
     fn repaired(self) -> Bool Never! { self.repaired }
 
+    // True when the runtime rlib came from the prebuilt directory shipped
+    // beside the `jet` executable rather than from the store or rustc.
+    fn prebuilt(self) -> Bool Never! { self.prebuilt }
+
     // True when the program crate links the cached runtime rlib instead of
     // carrying the runtime source itself.
-    fn is_split(self) -> Bool Never! { self.runtime != None }
+    fn is_split(self) -> Bool Never! { self.runtime_rlib != None }
 
-    // `spec` with an `--extern` for each cached rlib.
+    // `spec` with an `--extern` for the cached runtime rlib.
     fn add_rustc_args(self, spec: ProcessSpec) -> ProcessSpec Never! {
-        out := spec
-        if self.runtime == {
-            .Val(runtime) -> out = out.arg("--extern").arg("{@STORE_RUNTIME_CRATE_NAME}={runtime.path}")
-            else -> {}
+        if self.runtime_rlib == {
+            .Val(rlib) -> spec.arg("--extern").arg("{STORE_RUNTIME_CRATE_NAME}={rlib}")
+            else -> spec
         }
-        if self.core == {
-            .Val(core) -> out = out.arg("--extern").arg("{@STORE_RUNTIME_CORE_CRATE_NAME}={core.path}")
-            else -> {}
-        }
-        out
     }
 }
 
 impl PreparedRuntime.Close {
     fn close(^self) -[FS]> {
-        leases :: self.leases
-        loop lease in leases -> close(^lease)
+        if self.lease == {
+            .Val(lease) -> close(^lease)
+            else -> {}
+        }
         if self.materialized_root == {
             .Val(root) -> close(^root)
             else -> {}
@@ -160,67 +192,90 @@ impl PreparedRuntime.Close {
 }
 
 // Prepare the generated program for one native rustc invocation. A program
-// without runtime markers, with malformed markers, or whose runtime does not
-// compile is returned whole.
+// without runtime markers, or whose runtime does not compile, is returned whole.
+// Malformed markers retain their exact split message in the tool error rail.
 pub fn store_runtime_prepare(store: ArtifactStore, identities: &NativeRuntimeIdentityCache, rustc: String, generated: String, rustc_flags: [String], rustc_env: [NativeRuntimeEnvVar]) -[FS, Env, Exec, Time, Rand]> PreparedRuntime NativeRuntimeError! {
-    found :: store_runtime_split_generated(generated) ?? None
+    found :: split_generated(generated) ?? return Err(NativeRuntimeError.Tool(err.message()))
     split :: found ?? return Ok(PreparedRuntime.inline(generated))
-    materialized_root :: NativeRuntimeMaterializedRoot.new(store)
-    rustc_version :: identities.rustc_identity(rustc, rustc_env)
     compile_flags :: store_runtime_compile_flags(rustc_flags)
-    exported_runtime :: store_runtime_export_source(split.runtime)
-    runtime_key :: store_runtime_cache_key(@STORE_RUNTIME_CRATE_NAME, split.runtime, exported_runtime, @STORE_RUNTIME_CRATE_PREFIX, None, rustc, rustc_version, compile_flags, rustc_env)
-    runtime_unit :: NativeRuntimeCompileUnit{
-        key: runtime_key,
-        crate_name: @STORE_RUNTIME_CRATE_NAME,
-        exported: exported_runtime,
-        crate_prefix: @STORE_RUNTIME_CRATE_PREFIX,
-        dependency: None,
-    }
-    runtime :: store_runtime_compile_artifact(store, runtime_unit, rustc, compile_flags, rustc_env, materialized_root.path())
-    compiled_runtime :: runtime ?? return Ok(PreparedRuntime.inline(generated))
-    runtime_path :: compiled_runtime.artifact.path
-    compiled_core :: if split.core == {
-        .Val(core_source) -> {
-            exported_core :: store_runtime_export_source(core_source)
-            core_key :: store_runtime_cache_key(@STORE_RUNTIME_CORE_CRATE_NAME, core_source, exported_core, @STORE_RUNTIME_CORE_CRATE_PREFIX, Val(runtime_key), rustc, rustc_version, compile_flags, rustc_env)
-            core_unit :: NativeRuntimeCompileUnit{
-                key: core_key,
-                crate_name: @STORE_RUNTIME_CORE_CRATE_NAME,
-                exported: exported_core,
-                crate_prefix: @STORE_RUNTIME_CORE_CRATE_PREFIX,
-                dependency: Val(NativeRuntimeDependency{name: @STORE_RUNTIME_CRATE_NAME, path: runtime_path}),
-            }
-            compiled :: store_runtime_compile_artifact(store, core_unit, rustc, compile_flags, rustc_env, materialized_root.path())
-            Val(compiled ?? return Ok(PreparedRuntime.inline(generated)))
-        }
-        else -> None
-    }
-    leases := [ArtifactLease]{}
-    &leases.push(compiled_runtime.lease)
-    repaired := compiled_runtime.repaired
-    core_hit := true
-    if compiled_core == {
-        .Val(compiled) -> {
-            repaired = repaired || compiled.repaired
-            core_hit = compiled.cache_hit
-            &leases.push(compiled.lease)
+    rustc_version :: identities.rustc_identity(rustc, rustc_env, store_runtime_targets_native_cpu(compile_flags))
+    exported_runtime :: export_crate_source(split.runtime)
+    runtime_key :: store_runtime_cache_key(split.runtime, exported_runtime, rustc, rustc_version, compile_flags, rustc_env)
+    if store_runtime_prebuilt_rlib(runtime_key) == {
+        .Val(rlib) -> {
+            store_runtime_export_prebuilt(runtime_key, rlib)
+            return Ok(PreparedRuntime{
+                rust: split.program,
+                runtime_rlib: Val(rlib),
+                cache_hit: true,
+                repaired: false,
+                prebuilt: true,
+                lease: None,
+                materialized_root: None,
+            })
         }
         else -> {}
     }
-    core :: if compiled_core == {
-        .Val(compiled) -> Val(compiled.artifact)
-        else -> None
-    }
+    materialized_root :: NativeRuntimeMaterializedRoot.new(store)
+    runtime :: store_runtime_compile_artifact(store, runtime_key, exported_runtime, rustc, compile_flags, rustc_env, materialized_root.path())
+    compiled :: runtime ?? return Ok(PreparedRuntime.inline(generated))
+    rlib :: compiled.artifact.path
+    store_runtime_export_prebuilt(runtime_key, rlib)
     Ok(PreparedRuntime{
         rust: split.program,
-        runtime: Val(compiled_runtime.artifact),
-        core,
-        cache_hit: compiled_runtime.cache_hit && core_hit,
-        repaired,
-        leases,
+        runtime_rlib: Val(rlib),
+        cache_hit: compiled.cache_hit,
+        repaired: compiled.repaired,
+        prebuilt: false,
+        lease: Val(compiled.lease),
         materialized_root: Val(materialized_root),
     })
+}
+
+// The shipped rlib for `key`: `<exe dir>/jet-runtime/<key>/libjet_runtime.rlib`.
+// The key covers the runtime source, rustc identity (host CPU included for
+// `target-cpu=native`), flags and environment, so a present file is exactly
+// the artifact rustc would produce here.
+fn store_runtime_prebuilt_rlib(key: String) -[FS, Env]> String? Never! {
+    directory :: files.dirname(sys.executable())
+    if directory == "" -> return None
+    path :: files.join(files.join(files.join(directory, STORE_RUNTIME_PREBUILT_DIR), key), STORE_RUNTIME_RLIB_FILE)
+    if files.is_file(path) -> return Val(path)
+    None
+}
+
+// Packaging hook (`JET_RUNTIME_PREBUILD_DIR`): copy the linked rlib into the
+// prebuilt layout under `key`, atomically, unless that entry already exists.
+fn store_runtime_export_prebuilt(key: String, rlib: String) NativeRuntimeError! -[FS, Env, Rand]> {
+    directory :: sys.get(STORE_RUNTIME_PREBUILD_EXPORT_ENV) ?? ""
+    if directory == "" -> return
+    entry :: files.join(directory, key)
+    target :: files.join(entry, STORE_RUNTIME_RLIB_FILE)
+    if files.is_file(target) -> return
+    files.create_dir_all(entry)
+    staged :: files.join(entry, ".{STORE_RUNTIME_RLIB_FILE}.{sys.pid()}-{store_artifact_unique_token()}")
+    if files.copyfile(rlib, staged) == {
+        .Err(error) -> {
+            files.remove(staged).drop("the partial copy is scratch")
+            return Err(NativeRuntimeError.Cache(ArtifactStoreError.IO(error)))
+        }
+        else -> {}
+    }
+    if files.rename(staged, target) == {
+        .Err(error) -> {
+            files.remove(staged).drop("the unpublished copy is scratch")
+            return Err(NativeRuntimeError.Cache(ArtifactStoreError.IO(error)))
+        }
+        else -> {}
+    }
+}
+
+// Whether the runtime compile flags tune code for the host CPU.
+fn store_runtime_targets_native_cpu(flags: [String]) -> Bool Never! {
+    loop flag in flags {
+        if flag == "target-cpu=native" || flag == "-Ctarget-cpu=native" -> return true
+    }
+    false
 }
 
 // Linker selection and link arguments affect the final user crate, not the
@@ -246,22 +301,6 @@ fn store_runtime_is_link_only_flag(flag: String) -> Bool Never! {
     store_runtime_starts_with_any(flag, [String]{"linker=", "link-arg=", "-Clinker=", "-Clink-arg="})
 }
 
-// The crate an rlib is compiled against.
-struct NativeRuntimeDependency {
-    name: String
-    path: String
-}
-
-// One crate of the runtime closure: its cache key, name, exported source,
-// crate prologue, and the crate it depends on.
-struct NativeRuntimeCompileUnit {
-    key: String
-    crate_name: String
-    exported: String
-    crate_prefix: String
-    dependency: NativeRuntimeDependency?
-}
-
 // One cached rlib restored for linking, with the lease that pins it.
 struct NativeRuntimeCompiledArtifact {
     artifact: StoredArtifact
@@ -270,11 +309,11 @@ struct NativeRuntimeCompiledArtifact {
     lease: ArtifactLease
 }
 
-// The cached rlib of `unit`, compiled with rustc and published on a miss.
-// None when rustc rejects the crate or the published artifact cannot be
+// The cached runtime rlib under `key`, compiled with rustc and published on a
+// miss. None when rustc rejects the crate or the published artifact cannot be
 // verified, so the caller falls back to the inline program.
-fn store_runtime_compile_artifact(store: ArtifactStore, unit: NativeRuntimeCompileUnit, rustc: String, rustc_flags: [String], rustc_env: [NativeRuntimeEnvVar], materialized_root: String) -[FS, Env, Exec, Time, Rand]> NativeRuntimeCompiledArtifact? NativeRuntimeError! {
-    lookup :: store.lookup_artifact(unit.key)
+fn store_runtime_compile_artifact(store: ArtifactStore, key: String, exported: String, rustc: String, rustc_flags: [String], rustc_env: [NativeRuntimeEnvVar], materialized_root: String) -[FS, Env, Exec, Time, Rand]> NativeRuntimeCompiledArtifact? NativeRuntimeError! {
+    lookup :: store.lookup_artifact(key)
     repaired :: if lookup == {
         .Corrupt -> true
         else -> false
@@ -282,40 +321,33 @@ fn store_runtime_compile_artifact(store: ArtifactStore, unit: NativeRuntimeCompi
     if lookup == {
         .Hit(artifact) -> {
             hit := artifact
-            hit.path = store_runtime_materialize_artifact(store, unit.key, unit.crate_name, materialized_root)
+            hit.path = store_runtime_materialize_artifact(store, key, materialized_root)
             lease :: store.acquire_artifact_lease([LeaseTarget]{LeaseTarget.Action(hit.action), LeaseTarget.Blob(hit.object)})
             return Ok(Val(NativeRuntimeCompiledArtifact{artifact: hit, cache_hit: true, repaired, lease}))
         }
         else -> {}
     }
 
-    staging :: files.join(files.join(store.root(), "staging"), "{unit.crate_name}-{sys.pid()}-{store_artifact_unique_token()}")
+    staging :: files.join(files.join(store.root(), "staging"), "{STORE_RUNTIME_CRATE_NAME}-{sys.pid()}-{store_artifact_unique_token()}")
     files.create_dir_all(staging)
     source :: files.join(staging, "runtime.rs")
-    staged_rlib :: files.join(staging, "lib{unit.crate_name}.rlib")
-    if files.write(source, "{unit.crate_prefix}{unit.exported}") == {
+    staged_rlib :: files.join(staging, "lib{STORE_RUNTIME_CRATE_NAME}.rlib")
+    if files.write(source, "{STORE_RUNTIME_CRATE_PREFIX}{exported}") == {
         .Err(error) -> {
             files.remove_all(staging).drop("the failed write is reported; staging is scratch")
-            return Err(NativeRuntimeError.Cache(ArtifactStoreError.Io(error)))
+            return Err(NativeRuntimeError.Cache(ArtifactStoreError.IO(error)))
         }
         else -> {}
     }
 
-    argv := [String]{rustc, "--edition", "2021", "--crate-name", unit.crate_name, "--crate-type", "rlib"}
+    argv := [String]{rustc, "--edition", "2021", "--crate-name", STORE_RUNTIME_CRATE_NAME, "--crate-type", "rlib"}
     loop flag in rustc_flags -> &argv.push(flag)
     &argv.push("-C")
-    &argv.push("metadata={unit.key}")
+    &argv.push("metadata={key}")
     if files.canonicalize(staging) == {
         .Ok(prefix) -> {
             &argv.push("--remap-path-prefix")
             &argv.push("{prefix}=/jet/build")
-        }
-        else -> {}
-    }
-    if unit.dependency == {
-        .Val(dependency) -> {
-            &argv.push("--extern")
-            &argv.push("{dependency.name}={dependency.path}")
         }
         else -> {}
     }
@@ -336,7 +368,7 @@ fn store_runtime_compile_artifact(store: ArtifactStore, unit: NativeRuntimeCompi
         files.remove_all(staging).drop("a rejected runtime falls back to the inline program")
         return Ok(None)
     }
-    if store.publish_file(unit.key, staged_rlib) == {
+    if store.publish_file(key, staged_rlib) == {
         .Err(error) -> {
             if error == {
                 .Conflict(_) -> {}
@@ -349,107 +381,38 @@ fn store_runtime_compile_artifact(store: ArtifactStore, unit: NativeRuntimeCompi
         else -> {}
     }
     files.remove_all(staging).drop("the rlib now lives in the store; staging is scratch")
-    published :: store.lookup_artifact(unit.key)
+    published :: store.lookup_artifact(key)
     artifact := if published == {
         .Hit(found) -> found
         else -> {
             return Ok(None)
         }
     }
-    artifact.path = store_runtime_materialize_artifact(store, unit.key, unit.crate_name, materialized_root)
+    artifact.path = store_runtime_materialize_artifact(store, key, materialized_root)
     lease :: store.acquire_artifact_lease([LeaseTarget]{LeaseTarget.Action(artifact.action), LeaseTarget.Blob(artifact.object)})
     Ok(Val(NativeRuntimeCompiledArtifact{artifact, cache_hit: false, repaired, lease}))
 }
 
-// Restore the cached rlib `key` as `<root>/lib<crate>.rlib`.
-fn store_runtime_materialize_artifact(store: ArtifactStore, key: String, crate_name: String, root: String) -[FS, Env, Exec, Time, Rand]> String NativeRuntimeError! {
-    path :: files.join(root, "lib{crate_name}.rlib")
+// Restore the cached rlib `key` as `<root>/libjet_runtime.rlib`.
+fn store_runtime_materialize_artifact(store: ArtifactStore, key: String, root: String) -[FS, Env, Exec, Time, Rand]> String NativeRuntimeError! {
+    path :: files.join(root, "lib{STORE_RUNTIME_CRATE_NAME}.rlib")
     if store.restore_file(key, path) == {
         .Hit(_, _) -> Ok(path)
         else -> Err(NativeRuntimeError.Cache(ArtifactStoreError.Corrupt{path: path, reason: "published runtime artifact disappeared before linking"}))
     }
 }
 
-// The runtime block, the optional Core block, and the user program with both
-// blocks replaced by imports of their cached crates.
-struct NativeRuntimeSplit {
-    runtime: String
-    core: String?
-    program: String
-}
-
-// Why the runtime markers of a generated program are malformed.
-#Error
-struct NativeRuntimeSplitError {
-    reason: String
-}
-
-// Split the marked runtime and Core blocks out of `generated`. None when the
-// program carries no runtime block.
-fn store_runtime_split_generated(generated: String) -> NativeRuntimeSplit? NativeRuntimeSplitError! {
-    raw :: generated.bytes()
-    begin_marker :: @STORE_RUNTIME_BEGIN.bytes()
-    end_marker :: @STORE_RUNTIME_END.bytes()
-    core_begin_marker :: @STORE_RUNTIME_CORE_BEGIN.bytes()
-    core_end_marker :: @STORE_RUNTIME_CORE_END.bytes()
-    begin :: store_artifact_find(raw, begin_marker, 0)
-    if begin < 0 -> return Ok(None)
-    if store_runtime_count(raw, begin_marker) != 1 || store_runtime_count(raw, end_marker) != 1 {
-        return Err(NativeRuntimeSplitError{reason: "generated Rust has an invalid runtime marker pair"})
-    }
-    runtime_start :: begin + begin_marker.len()
-    runtime_end :: store_artifact_find(raw, end_marker, runtime_start)
-    if runtime_end < 0 -> return Err(NativeRuntimeSplitError{reason: "generated Rust has an unterminated runtime block"})
-    after_runtime :: runtime_end + end_marker.len()
-    runtime :: pkg_bytes_text(raw, runtime_start, runtime_end)
-    core_begin :: store_artifact_find(raw, core_begin_marker, 0)
-    if core_begin < 0 && store_runtime_count(raw, core_end_marker) != 0 {
-        return Err(NativeRuntimeSplitError{reason: "generated Rust has an invalid core marker pair"})
-    }
-    if store_runtime_count(raw, core_begin_marker) > 1 || store_runtime_count(raw, core_end_marker) > 1 {
-        return Err(NativeRuntimeSplitError{reason: "generated Rust has an invalid core marker pair"})
-    }
-    prologue :: "{pkg_bytes_text(raw, 0, begin)}extern crate jet_runtime;\nuse jet_runtime::*;\n"
-    if core_begin < 0 {
-        program :: "{prologue}{pkg_bytes_text(raw, after_runtime, raw.len())}"
-        return Ok(Val(NativeRuntimeSplit{runtime, core: None, program}))
-    }
-    if core_begin < after_runtime -> return Err(NativeRuntimeSplitError{reason: "generated Rust has nested runtime/core markers"})
-    core_start :: core_begin + core_begin_marker.len()
-    core_end :: store_artifact_find(raw, core_end_marker, core_start)
-    if core_end < 0 -> return Err(NativeRuntimeSplitError{reason: "generated Rust has an unterminated core block"})
-    core_after :: core_end + core_end_marker.len()
-    program :: "{prologue}extern crate jet_runtime_core;\nuse jet_runtime_core::*;\n{pkg_bytes_text(raw, after_runtime, core_begin)}{pkg_bytes_text(raw, core_after, raw.len())}"
-    Ok(Val(NativeRuntimeSplit{runtime, core: Val(pkg_bytes_text(raw, core_start, core_end)), program}))
-}
-
-// Non-overlapping occurrences of `needle` in `haystack` (`str::matches`).
-fn store_runtime_count(haystack: [U8], needle: [U8]) -> Int Never! {
-    count := 0
-    at := store_artifact_find(haystack, needle, 0)
-    loop at >= 0 {
-        count += 1
-        at = store_artifact_find(haystack, needle, at + needle.len())
-    }
-    count
-}
-
-// The cache key of one runtime crate under the current schema.
-fn store_runtime_cache_key(crate_name: String, source: String, exported_source: String, crate_prefix: String, dependency_key: String?, rustc: String, rustc_version: String, rustc_flags: [String], rustc_env: [NativeRuntimeEnvVar]) -> String Never! {
-    store_runtime_cache_key_with_schema(@STORE_RUNTIME_CACHE_SCHEMA.bytes(), crate_name, source, exported_source, crate_prefix, dependency_key, rustc, rustc_version, rustc_flags, rustc_env)
-}
 
 // SHA-256 over every length-framed input that can change the compiled rlib:
-// schema, crate, source and its exported form, prologue, dependency key,
-// rustc path and version, flags, and environment.
-fn store_runtime_cache_key_with_schema(schema: [U8], crate_name: String, source: String, exported_source: String, crate_prefix: String, dependency_key: String?, rustc: String, rustc_version: String, rustc_flags: [String], rustc_env: [NativeRuntimeEnvVar]) -> String Never! {
+// schema, crate, source and its exported form, prologue, rustc path and
+// version, flags, and environment.
+fn store_runtime_cache_key(source: String, exported_source: String, rustc: String, rustc_version: String, rustc_flags: [String], rustc_env: [NativeRuntimeEnvVar]) -> String Never! {
     data := [U8]{}
-    store_runtime_push_bytes(&data, schema)
-    store_runtime_push_bytes(&data, crate_name.bytes())
+    store_runtime_push_bytes(&data, STORE_RUNTIME_CACHE_SCHEMA.bytes())
+    store_runtime_push_bytes(&data, STORE_RUNTIME_CRATE_NAME.bytes())
     store_runtime_push_bytes(&data, source.bytes())
-    store_runtime_push_bytes(&data, crate_prefix.bytes())
+    store_runtime_push_bytes(&data, STORE_RUNTIME_CRATE_PREFIX.bytes())
     store_runtime_push_bytes(&data, exported_source.bytes())
-    store_runtime_push_bytes(&data, (dependency_key ?? "").bytes())
     store_runtime_push_bytes(&data, rustc.bytes())
     store_runtime_push_bytes(&data, rustc_version.bytes())
     store_runtime_push_bytes(&data, "flags".bytes())

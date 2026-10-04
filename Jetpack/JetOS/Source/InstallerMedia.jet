@@ -1,0 +1,624 @@
+// PORT-PENDING 0872 crates-jetpack-src-jetos-installer-media-module-group: crates/jetpack/src/JetOS/installer_media.rs:1-620
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::desktop_store_vm::find_path_tool;
+//RS use super::generation_files::{copy_runtime_file_filtered, systems_dir};
+//RS use super::identity::jetos_release_label;
+//RS use super::initrd_overlay::{
+//RS     append_installer_initrd_overlay, first_zstd_frame_offset, unique_initrd_temp_path,
+//RS     zstd_decode_file, zstd_encode_file,
+//RS };
+//RS use super::iso_vm_commands::build_hybrid_iso;
+//RS use super::root_projection::copy_dir_recursive_deref;
+//RS use super::types::Generation;
+//RS use super::vm_proof::vm_tools_json;
+//RS use crate::JSON;
+//RS use jet_env_model::ModuleEval::SystemPlan;
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS 
+//RS pub(super) fn write_installer_media(
+//RS     gen: &Generation,
+//RS     system: &SystemPlan,
+//RS     disk: &str,
+//RS ) -> std::io::Result<PathBuf> {
+//RS     let image_dir = systems_dir().join("images");
+//RS     fs::create_dir_all(&image_dir)?;
+//RS     let media_name = format!("jetos-installer-{}.iso", system.name);
+//RS     let staging = image_dir.join(format!("{media_name}.d"));
+//RS     if staging.exists() {
+//RS         fs::remove_dir_all(&staging)?;
+//RS     }
+//RS     fs::create_dir_all(staging.join("boot"))?;
+//RS     fs::create_dir_all(staging.join("install"))?;
+//RS     fs::create_dir_all(staging.join("jetos"))?;
+//RS     copy_generation_payload_deref(&gen.path, &staging.join("jetos/current-system")).map_err(
+//RS         |e| {
+//RS             std::io::Error::new(
+//RS                 e.kind(),
+//RS                 format!(
+//RS                     "copying generation `{}` into installer staging `{}` failed: {e}",
+//RS                     gen.path.display(),
+//RS                     staging.join("jetos/current-system").display()
+//RS                 ),
+//RS             )
+//RS         },
+//RS     )?;
+//RS     let installer_limine = render_installer_limine_conf(system, gen, disk);
+//RS     fs::write(staging.join("limine.conf"), &installer_limine)?;
+//RS     fs::write(staging.join("boot/limine.conf"), installer_limine)?;
+//RS     fs::write(
+//RS         staging.join("boot/installed-limine.conf"),
+//RS         render_installed_limine_conf(system, gen),
+//RS     )?;
+//RS     copy_runtime_file_filtered(&gen.path.join("boot/kernel"), &staging.join("boot/kernel"))
+//RS         .map_err(|e| {
+//RS             std::io::Error::new(e.kind(), format!("copying installer kernel failed: {e}"))
+//RS         })?;
+//RS     copy_initrd_runtime_filtered(&gen.path.join("boot/initrd"), &staging.join("boot/initrd"))
+//RS         .map_err(|e| {
+//RS             std::io::Error::new(e.kind(), format!("copying installer initrd failed: {e}"))
+//RS         })?;
+//RS     append_installer_initrd_overlay(&staging.join("boot/initrd"), system, gen).map_err(|e| {
+//RS         std::io::Error::new(
+//RS             e.kind(),
+//RS             format!("appending JetOS installer initrd overlay failed: {e}"),
+//RS         )
+//RS     })?;
+//RS     fs::write(
+//RS         staging.join("jetos/plan.json"),
+//RS         fs::read_to_string(gen.path.join("plan.json"))?,
+//RS     )?;
+//RS     fs::write(
+//RS         staging.join("jetos/proof.txt"),
+//RS         fs::read_to_string(gen.path.join("proof.txt"))?,
+//RS     )?;
+//RS     fs::write(
+//RS         staging.join("jetos/provenance.json"),
+//RS         fs::read_to_string(gen.path.join("provenance.json"))?,
+//RS     )?;
+//RS     fs::write(
+//RS         staging.join("jetos/generation-path.txt"),
+//RS         format!("{}\n", gen.path.display()),
+//RS     )?;
+//RS     let transaction = format!(
+//RS         "{{\"brand\":\"jetos\",\"host\":{},\"generation\":{},\"mode\":\"guided-or-scripted\",\"disk\":{},\"root_label\":\"jetos-root\",\"esp_label\":\"JETOS-ESP\",\"source_generation\":{},\"steps\":[\"partition-gpt\",\"mkfs.vfat-esp\",\"mkfs.ext4-root\",\"copy-generation-closure\",\"install-limine-esp\",\"write-generation-ledger\",\"reboot-installed-disk\",\"verify-guest-proof\"]}}",
+//RS         JSON::quote(&system.name),
+//RS         JSON::quote(&gen.name),
+//RS         JSON::quote(disk),
+//RS         JSON::quote(&gen.path.display().to_string())
+//RS     );
+//RS     fs::write(staging.join("install/transaction.json"), &transaction)?;
+//RS     fs::write(
+//RS         staging.join("install/install.sh"),
+//RS         render_installer_script(system, gen),
+//RS     )?;
+//RS     fs::write(
+//RS         staging.join("install/guest-verify.sh"),
+//RS         render_guest_verify_script(system, gen),
+//RS     )?;
+//RS     fs::write(
+//RS         staging.join("README.txt"),
+//RS         format!(
+//RS             "jetos installer media\nhost={}\ngeneration={}\ntransaction=install/transaction.json\n",
+//RS             system.name, gen.name
+//RS         ),
+//RS     )?;
+//RS     let iso = image_dir.join(&media_name);
+//RS     let iso_state = match build_hybrid_iso(&staging, &iso) {
+//RS         Ok(true) => "built",
+//RS         Ok(false) => "staged",
+//RS         Err(e) => {
+//RS             fs::write(staging.join("iso-error.txt"), e)?;
+//RS             "staged"
+//RS         }
+//RS     };
+//RS     let proof = image_dir.join(format!("{media_name}.proof.json"));
+//RS     let tools = vm_tools_json();
+//RS     let text = format!(
+//RS         "{{\"brand\":\"jetos\",\"kind\":\"hybrid-iso\",\"state\":{},\"host\":{},\"generation\":{},\"media\":{},\"path\":{},\"staging\":{},\"transaction\":{},\"tools\":[{}]}}",
+//RS         JSON::quote(iso_state),
+//RS         JSON::quote(&system.name),
+//RS         JSON::quote(&gen.name),
+//RS         JSON::quote(&media_name),
+//RS         JSON::quote(&iso.display().to_string()),
+//RS         JSON::quote(&staging.display().to_string()),
+//RS         JSON::quote(&staging.join("install/transaction.json").display().to_string()),
+//RS         tools
+//RS     );
+//RS     fs::write(&proof, text)?;
+//RS     Ok(proof)
+//RS }
+//RS 
+//RS pub(super) fn copy_generation_payload_deref(src: &Path, dst: &Path) -> std::io::Result<()> {
+//RS     fs::create_dir_all(dst)?;
+//RS     let mut entries = fs::read_dir(src)?
+//RS         .filter_map(Result::ok)
+//RS         .collect::<Vec<_>>();
+//RS     entries.sort_by_key(|entry| entry.file_name());
+//RS     for entry in entries {
+//RS         if entry.file_name() == "root" {
+//RS             continue;
+//RS         }
+//RS         let path = entry.path();
+//RS         let target = dst.join(entry.file_name());
+//RS         if entry.file_type()?.is_dir() {
+//RS             copy_dir_recursive_deref(&path, &target)?;
+//RS         } else {
+//RS             copy_runtime_file_filtered(&path, &target)?;
+//RS         }
+//RS     }
+//RS     deref_profile_bin_symlinks(dst)?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn deref_profile_bin_symlinks(system: &Path) -> std::io::Result<()> {
+//RS     let bin = system.join("sw/bin");
+//RS     let Ok(entries) = fs::read_dir(&bin) else {
+//RS         return Ok(());
+//RS     };
+//RS     for entry in entries.filter_map(Result::ok) {
+//RS         let path = entry.path();
+//RS         let meta = fs::symlink_metadata(&path)?;
+//RS         if !meta.file_type().is_symlink() {
+//RS             continue;
+//RS         }
+//RS         let target = fs::read_link(&path)?;
+//RS         if !target.starts_with("/nix/store") {
+//RS             continue;
+//RS         }
+//RS         let _ = fs::remove_file(&path);
+//RS         copy_runtime_file_filtered(&target, &path)?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn copy_initrd_runtime_filtered(src: &Path, dst: &Path) -> std::io::Result<()> {
+//RS     let bytes = fs::read(src)?;
+//RS     if let (Some(offset), Some(zstd)) = (first_zstd_frame_offset(&bytes), find_path_tool("zstd")) {
+//RS         if let Some(parent) = dst.parent() {
+//RS             fs::create_dir_all(parent)?;
+//RS         }
+//RS         let compressed_path = unique_initrd_temp_path(dst, "copy-main.zst");
+//RS         fs::write(&compressed_path, &bytes[offset..])?;
+//RS         let plain = zstd_decode_file(&zstd, &compressed_path)?;
+//RS         let _ = fs::remove_file(&compressed_path);
+//RS         let plain_path = unique_initrd_temp_path(dst, "copy-main.cpio");
+//RS         fs::write(&plain_path, &plain)?;
+//RS         let compressed = zstd_encode_file(&zstd, &plain_path)?;
+//RS         let _ = fs::remove_file(&plain_path);
+//RS         let mut out = Vec::with_capacity(offset + compressed.len());
+//RS         out.extend_from_slice(&bytes[..offset]);
+//RS         out.extend_from_slice(&compressed);
+//RS         fs::write(dst, out)?;
+//RS         return Ok(());
+//RS     }
+//RS     copy_runtime_file_filtered(src, dst)
+//RS }
+//RS 
+//RS pub(super) fn write_image_variant_artifacts(
+//RS     gen: &Generation,
+//RS     system: &SystemPlan,
+//RS ) -> std::io::Result<PathBuf> {
+//RS     let image_dir = systems_dir().join("images");
+//RS     fs::create_dir_all(&image_dir)?;
+//RS     let host = &system.name;
+//RS     let qcow2 = image_dir.join(format!("jetos-{host}.qcow2"));
+//RS     let raw = image_dir.join(format!("jetos-{host}.raw"));
+//RS     let sd = image_dir.join(format!("jetos-{host}-sd.img"));
+//RS     let netboot = image_dir.join(format!("jetos-{host}-netboot"));
+//RS     fs::create_dir_all(&netboot)?;
+//RS 
+//RS     // D-JOS-IMAGEPROOF1=C: sparse markers / deferred artifacts report `staged`.
+//RS     // `built` requires a real format artifact plus format-specific smoke proof.
+//RS     let qcow2_state = match smoke_prove_qcow2(&qcow2) {
+//RS         Ok(()) => "built",
+//RS         Err(_) => {
+//RS             write_sparse_marker(&qcow2, 64 * 1024 * 1024, "JETOS-QCOW2-STAGED\n")?;
+//RS             "staged"
+//RS         }
+//RS     };
+//RS     write_sparse_marker(
+//RS         &raw,
+//RS         128 * 1024 * 1024,
+//RS         &format!("JETOS-RAW-STAGED\nhost={host}\ngeneration={}\n", gen.name),
+//RS     )?;
+//RS     write_sparse_marker(
+//RS         &sd,
+//RS         128 * 1024 * 1024,
+//RS         &format!("JETOS-SD-STAGED\nhost={host}\ngeneration={}\n", gen.name),
+//RS     )?;
+//RS     copy_runtime_file_filtered(&gen.path.join("boot/kernel"), &netboot.join("vmlinuz"))?;
+//RS     copy_initrd_runtime_filtered(&gen.path.join("boot/initrd"), &netboot.join("initrd"))?;
+//RS     fs::write(
+//RS         netboot.join("ipxe.conf"),
+//RS         format!(
+//RS             "#!ipxe\nkernel vmlinuz console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=run jetos.host={host} jetos.generation={} root=LABEL=jetos-root rw\ninitrd initrd\nboot\n",
+//RS             gen.name
+//RS         ),
+//RS     )?;
+//RS     fs::write(
+//RS         netboot.join("manifest.json"),
+//RS         format!(
+//RS             "{{\"kind\":\"jetos.netboot\",\"host\":{},\"generation\":{},\"kernel\":\"vmlinuz\",\"initrd\":\"initrd\",\"ipxe\":\"ipxe.conf\"}}",
+//RS             JSON::quote(host),
+//RS             JSON::quote(&gen.name)
+//RS         ),
+//RS     )?;
+//RS 
+//RS     let kernel_state = if smoke_prove_kernel_image(&netboot.join("vmlinuz")) {
+//RS         "built"
+//RS     } else {
+//RS         "staged"
+//RS     };
+//RS     let initrd_state = if smoke_prove_initrd_image(&netboot.join("initrd")) {
+//RS         "built"
+//RS     } else {
+//RS         "staged"
+//RS     };
+//RS     let ipxe_state = if netboot.join("ipxe.conf").is_file() {
+//RS         "built"
+//RS     } else {
+//RS         "staged"
+//RS     };
+//RS 
+//RS     let artifacts = [
+//RS         ("qcow2", qcow2_state, qcow2.clone()),
+//RS         ("raw", "staged", raw.clone()),
+//RS         ("sd", "staged", sd.clone()),
+//RS         ("netboot-kernel", kernel_state, netboot.join("vmlinuz")),
+//RS         ("netboot-initrd", initrd_state, netboot.join("initrd")),
+//RS         ("netboot-ipxe", ipxe_state, netboot.join("ipxe.conf")),
+//RS     ];
+//RS     let any_built = artifacts.iter().any(|(_, state, _)| *state == "built");
+//RS     let proof_label = if any_built {
+//RS         "image-variants-smoke-proved"
+//RS     } else {
+//RS         "image-variants-staged"
+//RS     };
+//RS     let rows = artifacts
+//RS         .iter()
+//RS         .map(|(kind, state, path)| {
+//RS             JSON::object_of(&[
+//RS                 ("kind", *kind),
+//RS                 ("state", *state),
+//RS                 ("path", &path.display().to_string()),
+//RS                 ("sha256", &sha256_file_or_marker(path)),
+//RS             ])
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let proof = image_dir.join(format!("jetos-image-variants-{host}.proof.json"));
+//RS     fs::write(
+//RS         &proof,
+//RS         format!(
+//RS             "{{\"kind\":\"jetos.image-variants\",\"host\":{},\"generation\":{},\"source_generation\":{},\"artifacts\":[{}],\"proof\":{}}}",
+//RS             JSON::quote(host),
+//RS             JSON::quote(&gen.name),
+//RS             JSON::quote(&gen.path.display().to_string()),
+//RS             rows,
+//RS             JSON::quote(proof_label)
+//RS         ),
+//RS     )?;
+//RS     Ok(proof)
+//RS }
+//RS 
+//RS /// Create a qcow2 (when qemu-img exists) and smoke-prove it via `qemu-img info`.
+//RS fn smoke_prove_qcow2(path: &Path) -> Result<(), String> {
+//RS     let qemu_img = find_path_tool("qemu-img").ok_or_else(|| "qemu-img missing".to_string())?;
+//RS     let status = Command::new(&qemu_img)
+//RS         .args(["create", "-f", "qcow2"])
+//RS         .arg(path)
+//RS         .arg("4G")
+//RS         .status()
+//RS         .map_err(|e| e.to_string())?;
+//RS     if !status.success() {
+//RS         return Err("qemu-img create failed".to_string());
+//RS     }
+//RS     let output = Command::new(&qemu_img)
+//RS         .args(["info", "--output=json"])
+//RS         .arg(path)
+//RS         .output()
+//RS         .map_err(|e| e.to_string())?;
+//RS     if !output.status.success() {
+//RS         return Err("qemu-img info failed".to_string());
+//RS     }
+//RS     let info = String::from_utf8_lossy(&output.stdout);
+//RS     if !info.contains("\"format\": \"qcow2\"") && !info.contains("\"format\":\"qcow2\"") {
+//RS         return Err(format!("qcow2 smoke failed: {info}"));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn smoke_prove_kernel_image(path: &Path) -> bool {
+//RS     let Ok(bytes) = fs::read(path) else {
+//RS         return false;
+//RS     };
+//RS     bytes.starts_with(b"\x7fELF")
+//RS         || (bytes.starts_with(b"MZ") && bytes.windows(4).any(|w| w == b"HdrS"))
+//RS }
+//RS 
+//RS fn smoke_prove_initrd_image(path: &Path) -> bool {
+//RS     let Ok(bytes) = fs::read(path) else {
+//RS         return false;
+//RS     };
+//RS     bytes.starts_with(&[0x1f, 0x8b])
+//RS         || bytes.starts_with(b"070701")
+//RS         || bytes.starts_with(b"070702")
+//RS         || bytes.windows(4).any(|w| w == [0x28, 0xb5, 0x2f, 0xfd])
+//RS }
+//RS 
+//RS fn write_sparse_marker(path: &Path, size: u64, marker: &str) -> std::io::Result<()> {
+//RS     use std::io::Write;
+//RS     let mut file = fs::File::create(path)?;
+//RS     file.write_all(marker.as_bytes())?;
+//RS     file.set_len(size)
+//RS }
+//RS 
+//RS fn sha256_file_or_marker(path: &Path) -> String {
+//RS     fs::read(path)
+//RS         .map(|bytes| crate::SHA256::sha256_hex(&bytes))
+//RS         .unwrap_or_else(|_| "<unreadable>".to_string())
+//RS }
+//RS 
+//RS pub(super) fn render_installer_script(system: &SystemPlan, gen: &Generation) -> String {
+//RS     format!(
+//RS         r#"#!/bin/sh
+//RS set -eu
+//RS PATH=/jetos/tools/bin:/bin:/sbin:/usr/bin:/usr/sbin
+//RS export PATH
+//RS disk="${{1:-}}"
+//RS mkdir -p /proc
+//RS mount -t proc proc /proc 2>/dev/null || true
+//RS mkdir -p /dev
+//RS mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+//RS mkdir -p /sys
+//RS mount -t sysfs sysfs /sys 2>/dev/null || true
+//RS cmdline="$(cat /proc/cmdline 2>/dev/null || true)"
+//RS if [ -z "$disk" ]; then
+//RS     case "$cmdline" in
+//RS         *jetos.disk=*) disk="${{cmdline#*jetos.disk=}}"; disk="${{disk%% *}}" ;;
+//RS     esac
+//RS fi
+//RS if [ -z "$disk" ]; then
+//RS     disk="/dev/vda"
+//RS fi
+//RS echo "jetos installer: starting host={host} generation={generation} disk=$disk"
+//RS root="${{JETOS_TARGET_ROOT:-/mnt/jetos}}"
+//RS mkdir -p /media "$root"
+//RS modprobe virtio_pci 2>/dev/null || true
+//RS modprobe virtio_blk 2>/dev/null || true
+//RS modprobe ata_piix 2>/dev/null || true
+//RS modprobe sd_mod 2>/dev/null || true
+//RS modprobe sr_mod 2>/dev/null || true
+//RS modprobe cdrom 2>/dev/null || true
+//RS insmod /jetos/modules/isofs.ko.xz 2>/dev/null || true
+//RS modprobe isofs 2>/dev/null || true
+//RS for dev in /sys/block/* /dev/vd* /dev/sd*; do
+//RS     echo "jetos installer: sees $dev"
+//RS done
+//RS media=""
+//RS tries=0
+//RS while [ -z "$media" ] && [ "$tries" -lt 20 ]; do
+//RS     for candidate in /dev/sr0 /dev/cdrom /dev/hdc /dev/hdb; do
+//RS         if [ -e "$candidate" ]; then media="$candidate"; break; fi
+//RS     done
+//RS     tries=$((tries + 1))
+//RS     if [ -z "$media" ]; then sleep 1; fi
+//RS done
+//RS if [ -n "$media" ]; then
+//RS     echo "jetos installer: mounting media=$media"
+//RS     mount -t iso9660 -o ro "$media" /media || mount -o ro "$media" /media || true
+//RS fi
+//RS if [ ! -e /media/jetos/current-system ]; then
+//RS     echo "jetos installer: media payload missing"
+//RS     for entry in /media/* /media/jetos/*; do
+//RS         echo "jetos installer: media sees $entry"
+//RS     done
+//RS fi
+//RS tries=0
+//RS while [ ! -e "$disk" ] && [ "$tries" -lt 50 ]; do
+//RS     if [ -e /dev/vda ]; then disk=/dev/vda; break; fi
+//RS     if [ -e /dev/sda ]; then disk=/dev/sda; break; fi
+//RS     tries=$((tries + 1))
+//RS     if [ "$tries" = 10 ] || [ "$tries" = 30 ]; then
+//RS         for dev in /sys/block/* /dev/vd* /dev/sd*; do
+//RS             echo "jetos installer: wait sees $dev"
+//RS         done
+//RS     fi
+//RS     sleep 1
+//RS done
+//RS echo "jetos installer: using disk=$disk"
+//RS case "$disk" in
+//RS     *[0-9]) esp="${{disk}}p1"; root_part="${{disk}}p2" ;;
+//RS     *) esp="${{disk}}1"; root_part="${{disk}}2" ;;
+//RS esac
+//RS printf 'label: gpt\nsize=512M, type=U\n type=L\n' | sfdisk --wipe always "$disk"
+//RS blockdev --rereadpt "$disk" 2>/dev/null || true
+//RS sync
+//RS tries=0
+//RS while {{ [ ! -e "$esp" ] || [ ! -e "$root_part" ]; }} && [ "$tries" -lt 30 ]; do
+//RS     tries=$((tries + 1))
+//RS     sleep 1
+//RS done
+//RS if [ ! -e "$esp" ] || [ ! -e "$root_part" ]; then
+//RS     echo "jetos installer: missing partition nodes esp=$esp root=$root_part"
+//RS     exit 1
+//RS fi
+//RS mkfs.vfat -F 32 -n JETOS-ESP "$esp"
+//RS mkfs.ext4 -F -L jetos-root "$root_part"
+//RS mount "$root_part" "$root"
+//RS mkdir -p "$root/run" "$root/boot" "$root/boot/efi" "$root/var/lib/jetos/generations/{generation}"
+//RS insmod /jetos/modules/nls_ascii.ko.xz 2>/dev/null || true
+//RS insmod /jetos/modules/nls_cp437.ko.xz 2>/dev/null || true
+//RS insmod /jetos/modules/fat.ko.xz 2>/dev/null || true
+//RS insmod /jetos/modules/vfat.ko.xz 2>/dev/null || true
+//RS modprobe vfat 2>/dev/null || true
+//RS mount "$esp" "$root/boot/efi"
+//RS mkdir -p "$root/boot/efi/EFI/BOOT" "$root/boot/efi/boot"
+//RS cp -a /media/jetos/current-system/. "$root/var/lib/jetos/generations/{generation}/"
+//RS rm -rf "$root/run/current-system"
+//RS ln -s "/var/lib/jetos/generations/{generation}" "$root/run/current-system"
+//RS rm -f "$root/var/lib/jetos/current-system"
+//RS ln -s "/var/lib/jetos/generations/{generation}" "$root/var/lib/jetos/current-system"
+//RS cp /media/boot/kernel "$root/boot/kernel"
+//RS cp /media/boot/initrd "$root/boot/initrd"
+//RS cp /media/boot/installed-limine.conf "$root/boot/limine.conf"
+//RS cp /media/boot/kernel "$root/boot/efi/boot/kernel"
+//RS cp /media/boot/initrd "$root/boot/efi/boot/initrd"
+//RS cp /media/boot/installed-limine.conf "$root/boot/efi/boot/limine.conf"
+//RS cp /media/EFI/BOOT/BOOTX64.EFI "$root/boot/efi/EFI/BOOT/BOOTX64.EFI"
+//RS printf '%s\t%s\t%s\n' "{created}" "{host}" "{generation}" > "$root/var/lib/jetos/generations/log"
+//RS printf '{{"host":"{host}","generation":"{generation}","disk":"%s","esp":"%s","root":"%s","layout":"gpt-esp-ext4","result":"installed"}}\n' "$disk" "$esp" "$root_part" > "$root/var/lib/jetos/install-proof.json"
+//RS sync
+//RS echo "jetos installer: installed host={host} generation={generation}"
+//RS poweroff -f 2>/dev/null || halt -f 2>/dev/null || exit 0
+//RS "#,
+//RS         created = gen.created_at,
+//RS         host = system.name,
+//RS         generation = gen.name
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn render_installed_limine_conf(system: &SystemPlan, gen: &Generation) -> String {
+//RS     format!(
+//RS         "timeout: 1\nserial: yes\ngraphics: no\nverbose: yes\n/{release} — {host} verify\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=verify jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw\n",
+//RS         release = jetos_release_label(false),
+//RS         host = system.name,
+//RS         generation = gen.name
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn render_installer_limine_conf(
+//RS     system: &SystemPlan,
+//RS     gen: &Generation,
+//RS     disk: &str,
+//RS ) -> String {
+//RS     let disk = if disk.starts_with("/dev/") {
+//RS         disk.to_string()
+//RS     } else {
+//RS         "/dev/sda".to_string()
+//RS     };
+//RS     format!(
+//RS         "timeout: 5\nserial: yes\ngraphics: no\nverbose: yes\n/Install {release} — {host}\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=install jetos.host={host} jetos.generation={generation} jetos.disk={disk}\n",
+//RS         release = jetos_release_label(false),
+//RS         host = system.name,
+//RS         generation = gen.name
+//RS     )
+//RS }
+//RS 
+//RS pub(super) fn render_guest_verify_script(system: &SystemPlan, gen: &Generation) -> String {
+//RS     let services = system
+//RS         .services
+//RS         .iter()
+//RS         .filter(|svc| svc.enable)
+//RS         .map(|svc| svc.name.clone())
+//RS         .collect::<Vec<_>>()
+//RS         .join(" ");
+//RS     format!(
+//RS         r#"#!/bin/sh
+//RS set -eu
+//RS PATH=/jetos/tools/bin:/bin:/sbin:/usr/bin:/usr/sbin
+//RS export PATH
+//RS root="${{JETOS_TARGET_ROOT:-/sysroot}}"
+//RS mkdir -p /proc
+//RS mount -t proc proc /proc 2>/dev/null || true
+//RS mkdir -p /dev
+//RS mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+//RS mkdir -p /sys
+//RS mount -t sysfs sysfs /sys 2>/dev/null || true
+//RS if [ "$root" != "/" ]; then
+//RS     mkdir -p "$root"
+//RS     modprobe virtio_pci 2>/dev/null || true
+//RS     modprobe virtio_blk 2>/dev/null || true
+//RS     modprobe ata_piix 2>/dev/null || true
+//RS     modprobe sd_mod 2>/dev/null || true
+//RS     tries=0
+//RS     while [ ! -e /dev/vda ] && [ ! -e /dev/vda2 ] && [ ! -e /dev/sda ] && [ ! -e /dev/sda2 ] && [ "$tries" -lt 30 ]; do
+//RS         tries=$((tries + 1))
+//RS         sleep 1
+//RS     done
+//RS     for dev in /sys/block/* /dev/vd* /dev/sd*; do
+//RS         echo "jetos verifier: sees $dev"
+//RS     done
+//RS     echo "jetos verifier: mounting installed root"
+//RS     for candidate in LABEL=jetos-root /dev/vda2 /dev/sda2 /dev/vda /dev/sda; do
+//RS         if mount "$candidate" "$root" 2>/dev/null; then
+//RS             echo "jetos verifier: mounted installed root=$candidate"
+//RS             break
+//RS         fi
+//RS     done
+//RS fi
+//RS cmdline="$(cat /proc/cmdline 2>/dev/null || true)"
+//RS need() {{
+//RS     path="$1"
+//RS     if [ ! -e "$path" ]; then
+//RS         echo "jetos verifier: missing $path"
+//RS         exit 1
+//RS     fi
+//RS }}
+//RS system="$root/var/lib/jetos/generations/{generation}"
+//RS need "$system/plan.json"
+//RS need "$system/proof.txt"
+//RS need "$system/provenance.json"
+//RS need "$system/boot/kernel"
+//RS need "$system/boot/initrd"
+//RS need "$system/sbin/init"
+//RS need "$system/terminal/facts.json"
+//RS need "$system/etc/profile"
+//RS need "$system/etc/shells"
+//RS need "$system/etc/systemd/system/serial-getty@ttyS0.service"
+//RS need "$system/etc/systemd/system/getty.target.wants/serial-getty@ttyS0.service"
+//RS need "$system/desktop/facts.json"
+//RS need "$system/sw/bin/gdm"
+//RS need "$system/sw/bin/gnome-session"
+//RS need "$system/sw/bin/gnome-shell"
+//RS need "$system/sw/bin/jetos-desktop-session"
+//RS need "$system/sw/bin/jetos-terminal-fallback"
+//RS need "$system/sw/bin/jetos-studio"
+//RS need "$system/share/applications/jetos-studio.desktop"
+//RS need "$system/etc/systemd/system/display-manager.service"
+//RS need "$system/etc/systemd/system/graphical.target.wants/display-manager.service"
+//RS need "$root/var/lib/jetos/generations/log"
+//RS if [ ! -L "$root/run/current-system" ]; then
+//RS     echo "jetos verifier: missing current-system symlink"
+//RS     exit 1
+//RS fi
+//RS for svc in {services}; do
+//RS     need "$system/etc/systemd/system/$svc.service"
+//RS done
+//RS case "$cmdline" in
+//RS   *jetos.mode=desktop-verify*)
+//RS     insmod /jetos/modules/bochs.ko.xz 2>/dev/null || true
+//RS     modprobe virtio_gpu 2>/dev/null || true
+//RS     modprobe bochs 2>/dev/null || true
+//RS     modprobe drm 2>/dev/null || true
+//RS     cat /proc/fb 2>/dev/null || true
+//RS     for gfx in /sys/class/graphics/*; do
+//RS         echo "jetos verifier: graphics sees $gfx"
+//RS     done
+//RS     if [ ! -e /sys/class/graphics/fb0 ] && [ ! -s /proc/fb ]; then
+//RS         echo "jetos verifier: missing graphical framebuffer"
+//RS         exit 1
+//RS     fi
+//RS     desktop_path="$system/sw/bin:$PATH"
+//RS     JETOS_SYSTEM_ROOT="$system" PATH="$desktop_path" /jetos/tools/bin/sh "$system/sw/bin/jetos-display-manager" --jetos-proof
+//RS     JETOS_SYSTEM_ROOT="$system" PATH="$desktop_path" /jetos/tools/bin/sh "$system/sw/bin/jetos-desktop-session" --jetos-proof
+//RS     JETOS_SYSTEM_ROOT="$system" PATH="$desktop_path" /jetos/tools/bin/sh "$system/sw/bin/jetos-terminal-fallback" --jetos-proof
+//RS     printf '{{"host":"{host}","generation":"{generation}","packages":"present","services":"present","network":"declared","rollback":"ledger-present","proof":"present","desktop":"gnome-wayland","display":"graphical","launcher":"proved"}}\n'
+//RS     printf 'JETOS_GUEST_PROOF: {{"state":"guest-passed","host":"{host}","generation":"{generation}","assertions":["current-generation-matches","packages-present","services-active","network-up","rollback-generation-bootable","terminal-login-ready","desktop-session-ready","graphical-console-ready","desktop-launchers-run"]}}\n'
+//RS     ;;
+//RS   *)
+//RS     printf '{{"host":"{host}","generation":"{generation}","packages":"present","services":"present","network":"declared","rollback":"ledger-present","proof":"present"}}\n'
+//RS     printf 'JETOS_GUEST_PROOF: {{"state":"guest-passed","host":"{host}","generation":"{generation}","assertions":["current-generation-matches","packages-present","services-active","network-up","rollback-generation-bootable","terminal-login-ready","desktop-session-ready"]}}\n'
+//RS     ;;
+//RS esac
+//RS poweroff -f 2>/dev/null || halt -f 2>/dev/null || exit 0
+//RS "#,
+//RS         host = system.name,
+//RS         generation = gen.name,
+//RS         services = services
+//RS     )
+//RS }
+// END-PORT-PENDING 0872 crates/jetpack/src/JetOS/installer_media.rs:1-620
+

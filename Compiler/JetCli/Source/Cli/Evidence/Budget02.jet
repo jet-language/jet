@@ -1,0 +1,719 @@
+// Private fragment of Cli.Evidence.Budget; Main publishes it in the same module.
+use jet_foundation.PerformanceBudget.[CanonicalJson, Rational, BigInt, Comparison, LimitDirection, RelativeGoal, MeasurementPolicy, Percentile, Direction, TrendLabel, Evidence, PolicyOutcome, Enforcement, stable_id, statistics, estimator, evaluate_trend]
+use jet_foundation.Report.[ReportEnvelope, ReportExtension, StatusValue, StatusFields, StatusEnvelope]
+use jet.SHA256.[sha256_hex, sha256_file_hex]
+use jet.BudgetSpecs.[BudgetSpec, LocatedBudgetSpec]
+use jet.Sema.[BudgetQuantity, BudgetAxis, SemIndexEffectFacts, CompileWorkloadFact]
+use jet.AST.[ProgramBundle, Item]
+use jet.BudgetProviders.[ProviderRequest, ProviderCancellation, ProviderEvent, ProviderFailure, compiler_probe_version]
+use core.files as fs
+use core.sys.target
+use std.process.[Command, Stdio]
+use std.time.[Instant, Duration, SystemTime, UNIX_EPOCH]
+use jet_foundation.Text.[TEXT_NUL]
+
+// Rust: Source/CmdBudget.rs:1808
+fn dev_owned(spec: &BudgetSpec) -> Bool {
+    ((provider_kind(spec.provider) == "ServiceProbe" || provider_kind(spec.provider) == "SceneProbe") && (spec.scope.starts_with("Service(") || spec.scope.starts_with("Scene("))) || provider_kind(spec.provider) == "CompilerProbe"
+}
+// Rust: Source/CmdBudget.rs:1814
+fn bench_measurement_provider(request: &ProviderRequest, _: &ProviderCancellation) -> [ProviderEvent] ProviderFailure! {
+    workload :: if request.workload == .Object(value) -> value else -> return Err(ProviderFailure.malformed("BenchMeasurement workload is not an object"))
+    path :: if workload.get("path") == .Val(.String(value)) -> value else -> return Err(ProviderFailure.malformed("BenchMeasurement workload has no source path"))
+    name :: if workload.get("name") == .Val(.String(value)) -> value else -> return Err(ProviderFailure.malformed("BenchMeasurement workload has no benchmark name"))
+    source :: fs.read_to_string(OSPath.from(path)) ?? return Err(ProviderFailure.malformed("cannot read benchmark source: {err}"))
+    mode :: OutputMode{json: false, color: ColorChoice.Never, quiet: false}
+    evidence :: collect_measure_evidence(path, source, mode, Val(name))
+    bench :: evidence.find((bench) -> bench.name == name) ?? return Err(ProviderFailure.malformed("measured claim `{name}` was not emitted by `jet test --measure"))
+    events := [ProviderEvent]{}
+    loop (index, spec) in request.specs {
+        if !spec.metric.starts_with("BenchTime(") -> return Err(ProviderFailure.malformed("BenchMeasurement does not support metric `{spec.metric}`"))
+        loop (elapsed, iters) in bench.samples {
+            value :: Rational.parse(elapsed.to_string(), iters.to_string()) ?? return Err(ProviderFailure.malformed(err))
+            &events.push(ProviderEvent.Sample{spec: index as U32, metric: spec.metric, value: value})
+        }
+    }
+    samples :: events.len() as U64
+    &events.push(ProviderEvent.Complete{request_id: request.request_id, samples: samples})
+    Ok(^events)
+}
+// Rust: Source/CmdBudget.rs:1876
+fn allocation_probe_provider(request: &ProviderRequest, _: &ProviderCancellation) -> [ProviderEvent] ProviderFailure! {
+    workload :: if request.workload == .Object(value) -> value else -> return Err(ProviderFailure.malformed("AllocationProbe workload is not an object"))
+    path :: if workload.get("path") == .Val(.String(value)) -> value else -> return Err(ProviderFailure.malformed("AllocationProbe workload has no source path"))
+    name :: if workload.get("name") == .Val(.String(value)) -> value else -> return Err(ProviderFailure.malformed("AllocationProbe workload has no benchmark name"))
+    source :: fs.read_to_string(OSPath.from(path)) ?? return Err(ProviderFailure.malformed("cannot read allocation workload source: {err}"))
+    mode :: OutputMode{json: false, color: ColorChoice.Never, quiet: false}
+    evidence :: collect_measure_evidence(path, source, mode, Val(name))
+    bench :: evidence.find((bench) -> bench.name == name) ?? return Err(ProviderFailure.malformed("measured claim `{name}` was not emitted by its selected allocation workload"))
+    if bench.allocation_samples.len() != 20 -> return Err(ProviderFailure.malformed("AllocationProbe `{name}` emitted {bench.allocation_samples.len()} trials; policy requires 20"))
+    events := [ProviderEvent]{}
+    loop (index, spec) in request.specs {
+        if spec.metric != "AllocationCount" && spec.metric != "AllocationBytes" -> return Err(ProviderFailure.malformed("AllocationProbe does not support metric `{spec.metric}`"))
+        loop (count, bytes, iters) in bench.allocation_samples {
+            numerator :: if spec.metric == "AllocationCount" -> count else -> bytes
+            value :: Rational.parse(numerator.to_string(), iters.to_string()) ?? return Err(ProviderFailure.malformed(err))
+            &events.push(ProviderEvent.Sample{spec: index as U32, metric: spec.metric, value: value})
+        }
+    }
+    samples :: events.len() as U64
+    &events.push(ProviderEvent.Complete{request_id: request.request_id, samples: samples})
+    Ok(^events)
+}
+// Rust: Source/CmdBudget.rs:1949
+fn service_probe_provider(request: &ProviderRequest, _: &ProviderCancellation) -> [ProviderEvent] ProviderFailure! {
+    // Evidence is supplied by run_dev_refresh/build_report. Bare budget check has no readiness evidence.
+    events := [ProviderEvent]{}
+    loop (index, spec) in request.specs {
+        if spec.metric != "ServiceReadiness" -> return Err(ProviderFailure.malformed("ServiceProbe does not support metric `{spec.metric}`"))
+        &events.push(ProviderEvent.Unavailable{spec: index as U32, reason: "ServiceProbe requires `jet dev` to collect readiness evidence; run `jet dev <file>` to refresh", details: []})
+    }
+    &events.push(ProviderEvent.Complete{request_id: request.request_id, samples: 0 as U64})
+    Ok(^events)
+}
+// Rust: Source/CmdBudget.rs:1975
+fn scene_probe_provider(request: &ProviderRequest, _: &ProviderCancellation) -> [ProviderEvent] ProviderFailure! {
+    // Evidence is supplied by run_dev_refresh/build_report, not the bare check invocation.
+    events := [ProviderEvent]{}
+    loop (index, spec) in request.specs {
+        metric :: spec.metric.split("(").first().unwrap_or(spec.metric)
+        if metric != "FrameTime" && metric != "DrawCalls" && metric != "SceneAssetBytes" && metric != "MemoryHighWater" -> return Err(ProviderFailure.malformed("SceneProbe does not support metric `{spec.metric}`"))
+        &events.push(ProviderEvent.Unavailable{spec: index as U32, reason: "SceneProbe requires `jet dev` to collect scene evidence; run `jet dev <file>` to refresh", details: []})
+    }
+    &events.push(ProviderEvent.Complete{request_id: request.request_id, samples: 0 as U64})
+    Ok(^events)
+}
+// Rust: Source/CmdBudget.rs:2003
+fn measurement_base(root: &OSPath, bundle: &ProgramBundle, spec: &BudgetSpec, _subject: &CanonicalJson, tool: &CanonicalJson, provider: &CanonicalJson, target: String, profile: String) -> (CanonicalJson, String, String) Err! {
+    metric_name :: spec.metric.split("(").first().unwrap_or(spec.metric)
+    percentile :: metric_percentile(spec.metric).map((value) -> CanonicalJson.String(value)).unwrap_or(CanonicalJson.Null)
+    metric :: CanonicalJson.object([("name", CanonicalJson.String(metric_name)), ("percentile", percentile)])?
+    comparison :: comparison_json(spec)?
+    direction :: if metric_name == "Throughput" -> "higher_is_better" else -> "lower_is_better"
+    applies :: CanonicalJson.object([("profiles", CanonicalJson.Array(axis(spec.applicability.profiles, profile))), ("targets", CanonicalJson.Array(axis(spec.applicability.targets, target)))])?
+    kind :: provider_kind(spec.provider)
+    identity :: provider_identity(spec.provider)
+    budget_spec :: CanonicalJson.object([
+        ("applies", applies), ("comparison", comparison),
+        ("enforcement", CanonicalJson.String(spec.enforcement.to_ascii_lowercase())),
+        ("metric", metric), ("name", CanonicalJson.String(spec.name)),
+        ("package_id", CanonicalJson.String(package_name(root))), ("perf_role", CanonicalJson.String(spec.role)),
+        ("provider", CanonicalJson.object([("identity", CanonicalJson.String(identity)), ("kind", CanonicalJson.String(kind))])?),
+        ("scope", CanonicalJson.String(spec.scope))
+    ])?
+    hash :: stable_id(budget_spec)
+    fingerprint :: text_field(provider, "hardware_fingerprint")?
+    framed := ("jet-budget-context-v1" + TEXT_NUL).bytes().to_vec()
+    // GATE #4483: architecture comes from selected-target facts.
+    loop value in ["package", metric_name, metric_percentile(spec.metric).unwrap_or(""), target, core.sys.target.selected_arch(), profile, JET_VERSION,
+        text_field(tool, "compiler_build_id")?, text_field(tool, "stdlib_id")?, text_field(tool, "runner_id")?, text_field(tool, "digest")?, kind, identity,
+        text_field(provider, "version")?, text_field(provider, "isolation")?, text_field(provider, "cpu_arch")?, text_field(provider, "cpu_model")?,
+        wire_map(as_object(provider)?, "logical_cpus")?, wire_map(as_object(provider)?, "memory_bytes")?, text_field(provider, "os")?,
+        text_field(provider, "kernel")?, text_field(provider, "power_governor")?, fingerprint] { frame(&framed, value) }
+    context :: sha256_hex(framed)
+    (source, line, _) :: source_location(root, bundle, spec)
+    base :: CanonicalJson.object([
+        ("baseline", CanonicalJson.Null), ("budget_id", CanonicalJson.String("{spec.role}:{spec.name}")),
+        ("budget_spec", budget_spec), ("budget_spec_sha256", CanonicalJson.String(hash)), ("comparison", comparison),
+        ("context_key", CanonicalJson.String(context)), ("decision", CanonicalJson.Null), ("direction", CanonicalJson.String(direction)),
+        ("enforcement", CanonicalJson.String(spec.enforcement.to_ascii_lowercase())), ("history", CanonicalJson.Null), ("metric", metric),
+        ("policy", if spec.comparison_fact.kind == "Absolute" -> CanonicalJson.Null else -> policy_json()),
+        ("provider", provider), ("samples", CanonicalJson.Array([CanonicalJson.Integer("0")])),
+        ("source", CanonicalJson.String("{source}:{line}")), ("statistics", CanonicalJson.Null),
+        ("target_class", CanonicalJson.String(target)), ("unit", CanonicalJson.String(metric_unit(spec.metric)))
+    ])?
+    Ok((^base, ^hash, ^context))
+}
+// Rust: Source/CmdBudget.rs:2145
+fn measurement_base_truthful(root: &OSPath, bundle: &ProgramBundle, located: &LocatedBudgetSpec, subject: &CanonicalJson, tool: &CanonicalJson, provider: &CanonicalJson, target: String, profile: String) -> (CanonicalJson, String, String) Err! {
+    spec :: located.spec
+    (base, hash, _) :: measurement_base(root, bundle, spec, subject, tool, provider, target, profile)?
+    metric_name :: spec.metric.split("(").first().unwrap_or(spec.metric)
+    context :: context_key(subject, tool, provider, metric_name, metric_percentile(spec.metric))?
+    object := as_object(base)?.clone()
+    object["context_key"] = CanonicalJson.String(context)
+    (source, line, _) :: source_location(root, bundle, located)
+    object["source"] = CanonicalJson.String("{source}:{line}")
+    Ok((CanonicalJson.Object(^object), ^hash, ^context))
+}
+// Rust: Source/CmdBudget.rs:2176
+fn context_key(subject: &CanonicalJson, tool: &CanonicalJson, provider: &CanonicalJson, metric: String, percentile: String?) -> String Err! {
+    subject :: as_object(subject)?
+    tool :: as_object(tool)?
+    provider :: as_object(provider)?
+    input := ("jet-budget-context-v1" + TEXT_NUL).bytes().to_vec()
+    loop value in [text_map(subject, "target_id")?, metric, percentile.unwrap_or(""), text_map(subject, "target_class")?, text_map(subject, "target_triple")?, text_map(subject, "profile")?] { frame(&input, value) }
+    loop key in ["jet_version", "compiler_build_id", "stdlib_id", "runner_id", "digest"] { frame(&input, text_map(tool, key)?) }
+    loop key in ["kind", "identity", "version", "isolation", "cpu_arch", "cpu_model", "logical_cpus", "memory_bytes", "os", "kernel", "power_governor", "hardware_fingerprint"] { frame(&input, wire_map(provider, key)?) }
+    Ok(sha256_hex(input))
+}
+// Rust: Source/CmdBudget.rs:2225
+fn compiler_fact(bundle: &ProgramBundle, effect_facts: &SemIndexEffectFacts, spec: &BudgetSpec) -> U128 Err! {
+    if spec.metric == {
+        "PublicApiItems" -> {
+            count := 0 as U128
+            loop (module_idx, module) in bundle.modules {
+                loop item in module.items {
+                    public :: if item == {
+                        .Func(v) | .Struct(v) | .Enum(v) | .Trait(v) | .CodeModule(v) -> effect_facts.name_ledger.public(module_idx, v.name)
+                        else -> false
+                    }
+                    if public -> count += 1
+                }
+            }
+            Ok(count)
+        }
+        "DependencyCount" -> Ok(bundle.dep_roots.len() as U128)
+        "EffectCount" -> {
+            // GATE #4499: native effect identity is the map key; no string encoding.
+            effects := [Effect:Bool]{}
+            loop (_, set) in effect_facts.solved { loop effect in set { effects[effect] = true } }
+            Ok(effects.len() as U128)
+        }
+        "GeneratedUnsafe" -> Err("CompilerFacts metric `GeneratedUnsafe` has no exact checked front-end fact; refusing proxy measurement")
+        else -> {
+            if spec.metric.starts_with("CompileTime") -> return Err("CompilerFacts metric `CompileTime` is unsupported; use the typed CompilerProbe provider")
+            Err("CompilerFacts metric `{spec.metric}` is not implemented")
+        }
+    }
+}
+// Rust: Source/CmdBudget.rs:2232
+fn provider_kind(provider: String) -> String { provider.split_once("(").map((pair) -> pair.0).unwrap_or(provider) }
+// Rust: Source/CmdBudget.rs:2238
+fn provider_identity(provider: String) -> String { provider.split_once("(").and_then((pair) -> pair.1.strip_suffix(")")).unwrap_or("") }
+// Rust: Source/CmdBudget.rs:2244
+fn metric_unit(metric: String) -> String {
+    if metric.split("(").first().unwrap_or(metric) == {
+        "BinarySize" | "ArtifactSize" -> "Bytes"
+        "StartupTime" | "FrameTime" | "Latency" | "BenchTime" | "ServiceReadiness" | "CompileTime" -> "Duration"
+        "MemoryHighWater" | "AllocationBytes" | "SceneAssetBytes" -> "Bytes"
+        "Throughput" -> "Rate"
+        else -> "Count"
+    }
+}
+// Rust: Source/CmdBudget.rs:2254
+fn build_selected_artifact(root: &OSPath, entry: &OSPath) -> (OSPath, U64, String) Err! {
+    executable :: running_executable() ?? return Err("cannot identify compiler for BuildArtifact: {err}")
+    // GATE #4494: real native child process, group ownership, supervision and clock.
+    command := Command.new(executable)
+    &command.arg("build").arg(entry).current_dir(root).stdin(Stdio.null()).stdout(Stdio.null()).stderr(Stdio.null())
+    if core.sys.target.selected_family() == "unix" { &command.process_group(0) }
+    child := command.spawn() ?? return Err("cannot start selected artifact build: {err}")
+    deadline :: Instant.now() + SELECTED_BUILD_DEADLINE
+    loop {
+        status :: child.try_wait() ?? {
+            terminate_group(&child)
+            return Err("cannot supervise selected artifact build: {err}")
+        }
+        if status == {
+            .Val(status) -> {
+                if status.success() -> break
+                terminate_group(&child)
+                return Err("selected artifact build exited with {status}")
+            }
+            .None -> {
+                if Instant.now() < deadline { std.thread.sleep(Duration.from_millis(5)) }
+                else {
+                    terminate_group(&child)
+                    return Err("selected artifact build exceeded 120 second build deadline")
+                }
+            }
+        }
+    }
+    stem :: entry.file_stem().and_then((value) -> value.to_str()) ?? return Err("selected artifact entry has no UTF-8 stem")
+    artifact :: root.join(".jet").join("build").join(if core.sys.target.selected_os() == "windows" -> "{stem}.exe" else -> stem)
+    metadata :: fs.symlink_metadata(artifact) ?? return Err("selected artifact was not produced: {err}")
+    if metadata.file_type().is_symlink() || !metadata.is_file() -> return Err("selected artifact is not a regular file")
+    digest :: sha256_file_hex(artifact) ?? return Err("cannot hash selected artifact: {err}")
+    Ok((artifact, metadata.len(), digest))
+}
+// Rust: Source/CmdBudget.rs:2313
+fn quantity(value: &BudgetQuantity) -> Rational Err! {
+    if value == {
+        .Count(v) | .Bytes(v) | .DurationNs(v) -> Rational.parse(v.to_string(), "1")
+        .Rate(numerator, denominator_ns) -> Rational.parse(numerator.to_string(), denominator_ns.to_string())
+        .PercentBasisPoints(_) -> Err("absolute budget cannot use a relative percent limit")
+    }
+}
+// Rust: Source/CmdBudget.rs:2327
+fn metric_percentile(metric: String) -> String? {
+    raw :: metric.split_once("(")?.1.strip_suffix(")")?
+    if raw == { "P50" -> Val("p50"), "P90" -> Val("p90"), "P95" -> Val("p95"), "P99" -> Val("p99"), "P999" -> Val("p999"), else -> None }
+}
+// Rust: Source/CmdBudget.rs:2338
+fn percentile(metric: String) -> Percentile? {
+    if metric_percentile(metric) == { .Val("p50") -> Val(Percentile.P50), .Val("p90") -> Val(Percentile.P90), .Val("p95") -> Val(Percentile.P95), .Val("p99") -> Val(Percentile.P99), .Val("p999") -> Val(Percentile.P999), else -> None }
+}
+// Rust: Source/CmdBudget.rs:2348
+fn comparison_json(spec: &BudgetSpec) -> CanonicalJson Err! {
+    direction :: if spec.limit_fact.kind == "AtLeast" -> "at_least" else -> "at_most"
+    if spec.comparison_fact.kind == {
+        "Absolute" -> CanonicalJson.object([("direction", CanonicalJson.String(direction)), ("kind", CanonicalJson.String("absolute")), ("limit", quantity(spec.limit_fact.quantity)?.to_json())])
+        "AbsoluteFrom" -> CanonicalJson.object([
+            ("baseline", CanonicalJson.String(spec.comparison_fact.baseline ?? return Err("AbsoluteFrom baseline is absent"))),
+            ("direction", CanonicalJson.String(direction)), ("kind", CanonicalJson.String("absolute_from")), ("limit", quantity(spec.limit_fact.quantity)?.to_json())
+        ])
+        "RelativeTo" -> {
+            value :: if spec.limit_fact.quantity == .PercentBasisPoints(value) -> value else -> return Err("RelativeTo requires a basis-point limit")
+            improvement :: spec.limit_fact.kind == "ImprovementAtLeast"
+            CanonicalJson.object([
+                ("baseline", CanonicalJson.String(spec.comparison_fact.baseline ?? return Err("RelativeTo baseline is absent"))),
+                ("direction", CanonicalJson.String(if spec.metric.starts_with("Throughput") -> "higher_is_better" else -> "lower_is_better")),
+                ("goal", CanonicalJson.String(if improvement -> "improvement_at_least" else -> "regression_at_most")),
+                ("kind", CanonicalJson.String("relative_to")), ("limit_basis_points", CanonicalJson.Integer(value.to_string()))
+            ])
+        }
+        else -> Err("unknown budget comparison `{spec.comparison_fact.kind}`")
+    }
+}
+// Rust: Source/CmdBudget.rs:2421
+fn comparison_model(spec: &BudgetSpec) -> Comparison Err! {
+    direction :: if spec.limit_fact.kind == "AtLeast" -> LimitDirection.AtLeast else -> LimitDirection.AtMost
+    if spec.comparison_fact.kind == {
+        "Absolute" -> Ok(Comparison.Absolute{limit: quantity(spec.limit_fact.quantity)?, direction: direction})
+        "AbsoluteFrom" -> Ok(Comparison.AbsoluteFrom{limit: quantity(spec.limit_fact.quantity)?, direction: direction})
+        "RelativeTo" -> {
+            raw :: if spec.limit_fact.quantity == .PercentBasisPoints(value) -> value else -> return Err("RelativeTo requires a basis-point limit")
+            value :: I128.try_from(raw) ?? return Err("relative basis-point limit exceeds evaluator range")
+            Ok(Comparison.RelativeTo{limit_basis_points: BigInt.from_i128(value), goal: if spec.limit_fact.kind == "ImprovementAtLeast" -> RelativeGoal.ImprovementAtLeast else -> RelativeGoal.RegressionAtMost})
+        }
+        else -> Err("unknown budget comparison `{spec.comparison_fact.kind}`")
+    }
+}
+// Rust: Source/CmdBudget.rs:2454
+fn policy_json() -> CanonicalJson {
+    CanonicalJson.object([("baseline_generations", CanonicalJson.Integer("5")), ("bootstrap_resamples", CanonicalJson.Integer("10000")),
+        ("lower_rank", CanonicalJson.Integer("250")), ("min_baseline_samples", CanonicalJson.Integer("20")), ("min_candidate_samples", CanonicalJson.Integer("20")),
+        ("stale_after_seconds", CanonicalJson.Integer("2592000")), ("trend_generations", CanonicalJson.Integer("5")), ("upper_rank", CanonicalJson.Integer("9750"))]).unwrap()
+}
+// Rust: Source/CmdBudget.rs:2485
+fn evaluation_policy() -> MeasurementPolicy { MeasurementPolicy{bootstrap_resamples: 10000, lower_rank: 250, upper_rank: 9750} }
+// Rust: Source/CmdBudget.rs:2492
+fn statistics_json(samples: &[Rational]) -> CanonicalJson Err! {
+    sorted := samples.to_vec()
+    &sorted.sort()
+    value :: statistics(samples)?
+    CanonicalJson.object([("count", CanonicalJson.Integer(samples.len().to_string())), ("mad", value.mad.to_json()), ("mean", value.mean.to_json()),
+        ("p50", value.p50.to_json()), ("p90", value.p90.to_json()), ("p95", value.p95.to_json()), ("p99", value.p99.to_json()), ("p999", value.p999.to_json()),
+        ("sorted_samples", CanonicalJson.Array(sorted.map((sample) -> sample.to_json())))])
+}
+// Rust: Source/CmdBudget.rs:2514
+fn privacy_json() -> CanonicalJson Err! {
+    CanonicalJson.object([("excluded", CanonicalJson.Array([])), ("retained", CanonicalJson.Array([CanonicalJson.String("typed measurements"), CanonicalJson.String("workspace source hashes")])), ("schema", CanonicalJson.Integer("1")), ("workspace_paths_only", CanonicalJson.Bool(true))])
+}
+// Rust: Source/CmdBudget.rs:2528
+fn report_wrapper(evidence_id: String, measurements: [CanonicalJson], subject: CanonicalJson, tool: CanonicalJson, privacy: CanonicalJson, pass: Int, warn: Int, fail: Int) -> CanonicalJson Err! {
+    overall :: if fail > 0 -> "fail" else if warn > 0 -> "warn" else -> "pass"
+    content :: CanonicalJson.object([("evidence_id", CanonicalJson.String(evidence_id)), ("measurements", CanonicalJson.Array(^measurements)), ("privacy", ^privacy), ("subject", ^subject),
+        ("summary", CanonicalJson.object([("fail", CanonicalJson.Integer(fail.to_string())), ("outcome", CanonicalJson.String(overall)), ("pass", CanonicalJson.Integer(pass.to_string())), ("warn", CanonicalJson.Integer(warn.to_string()))])?), ("toolchain", ^tool)])?
+    id :: stable_id(content)
+    CanonicalJson.object([("content", ^content), ("report_id", CanonicalJson.String(id)), ("schema", CanonicalJson.String("jet.budget-report")), ("version", CanonicalJson.Integer("1"))])
+}
+// Rust: Source/CmdBudget.rs:2575
+fn trend_json(ids: &[String], samples: &[[Rational]], percentile: Percentile?, direction: Direction) -> CanonicalJson Err! {
+    pairs := [(String, Rational)]{}
+    loop index in 0..<ids.len().min(samples.len()) { &pairs.push((ids[index], estimator(samples[index], percentile)?)) }
+    &pairs.reverse()
+    ids :: pairs.map((pair) -> pair.0)
+    estimators :: pairs.map((pair) -> pair.1)
+    value :: evaluate_trend(ids, estimators, direction)?
+    label :: if value.label == { .Improving -> "improving", .Stable -> "stable", .Regressing -> "regressing", .Insufficient -> "insufficient" }
+    CanonicalJson.object([("estimators", CanonicalJson.Array(value.estimators.map((value) -> value.to_json()))), ("label", CanonicalJson.String(label)),
+        ("report_ids", CanonicalJson.Array(value.report_ids.map((id) -> CanonicalJson.String(id)))), ("score", value.score.map((score) -> score.to_json()).unwrap_or(CanonicalJson.Null))])
+}
+// Rust: Source/CmdBudget.rs:2623
+fn applicable(spec: &BudgetSpec, target: String, profile: String) -> Bool {
+    // Rust: Source/CmdBudget.rs:2624
+    fn one(axis: &BudgetAxis, current: String) -> Bool {
+        if axis == { .Current | .All -> true, .Only(values) -> values.any((v) -> v.eq_ignore_ascii_case(current) || v.contains(title(current))) }
+    }
+    one(spec.applicability.targets, target) && one(spec.applicability.profiles, profile)
+}
+// Rust: Source/CmdBudget.rs:2634
+fn axis(axis: &BudgetAxis, current: String) -> [CanonicalJson] {
+    if axis == { .Current -> [CanonicalJson.String(current)], .All -> [CanonicalJson.String("all")], .Only(values) -> values.map((value) -> CanonicalJson.String(value)) }
+}
+// Rust: Source/CmdBudget.rs:2641
+fn title(s: String) -> String {
+    chars := s.chars()
+    chars.next().map((first) -> first.to_ascii_uppercase().to_string() + chars.as_str()).unwrap_or("")
+}
+// Rust: Source/CmdBudget.rs:2647
+fn project_entry(root: &OSPath) -> OSPath { find_project_entry(root) }
+// Rust: Source/CmdBudget.rs:2650
+fn package_name(root: &OSPath) -> String {
+    entry :: project_entry(root)
+    if jet.Loader.package_facts_for_entry(entry) == { .Ok(.Val(facts)) -> return facts.name, .Ok(.None) -> {}, .Err(_) -> return "package" }
+    jet.Package.PackageFacts.load(root).and_then((result) -> result.ok()).map((facts) -> facts.name).unwrap_or("package")
+}
+// Rust: Source/CmdBudget.rs:2662
+trait BudgetSource {
+    // Rust: Source/CmdBudget.rs:2663
+    fn spec(&self) -> &BudgetSpec
+    // Rust: Source/CmdBudget.rs:2664
+    fn module_index(&self, bundle: &ProgramBundle) -> Int
+}
+// Rust: Source/CmdBudget.rs:2666
+impl BudgetSource for BudgetSpec {
+    // Rust: Source/CmdBudget.rs:2667
+    fn spec(&self) -> &BudgetSpec { self }
+    // Rust: Source/CmdBudget.rs:2670
+    fn module_index(&self, bundle: &ProgramBundle) -> Int { bundle.entry }
+}
+// Rust: Source/CmdBudget.rs:2674
+impl BudgetSource for LocatedBudgetSpec {
+    // Rust: Source/CmdBudget.rs:2675
+    fn spec(&self) -> &BudgetSpec { self.spec }
+    // Rust: Source/CmdBudget.rs:2678
+    fn module_index(&self, _bundle: &ProgramBundle) -> Int { self.module_index }
+}
+// Rust: Source/CmdBudget.rs:2682
+impl<T: BudgetSource> BudgetSource for &T {
+    // Rust: Source/CmdBudget.rs:2683
+    fn spec(&self) -> &BudgetSpec { (*self).spec() }
+    // Rust: Source/CmdBudget.rs:2686
+    fn module_index(&self, bundle: &ProgramBundle) -> Int { (*self).module_index(bundle) }
+}
+// Rust: Source/CmdBudget.rs:2690
+fn source_location<T: BudgetSource>(root: &OSPath, bundle: &ProgramBundle, located: &T) -> (String, Int, Int) {
+    spec :: located.spec()
+    module :: bundle.modules[located.module_index(bundle)]
+    (line, column) :: jet.Diagnostics.span_line_col(module.source, spec.span.start.min(module.source.len()))
+    path :: module.path.strip_prefix(root).unwrap_or(module.path).to_string_lossy().replace("\\", "/")
+    (path, line, column)
+}
+// Rust: Source/CmdBudget.rs:2707
+fn subject(root: &OSPath, bundle: &ProgramBundle, start: String, end: String, target: String, profile: String, artifact: &(OSPath, U64, String)?) -> CanonicalJson Err! {
+    sources := [(String, String)]{}
+    loop module in bundle.modules {
+        path :: module.path.strip_prefix(root).unwrap_or(module.path).to_string_lossy().replace("\\", "/")
+        &sources.push((path, sha256_hex(module.source.bytes())))
+    }
+    &sources.sort()
+    artifact :: artifact.map((value) -> CanonicalJson.object([("bytes", CanonicalJson.Integer(value.1.to_string())), ("sha256", CanonicalJson.String(value.2))]).unwrap()).unwrap_or(CanonicalJson.Null)
+    CanonicalJson.object([("artifact", artifact), ("measured_end", CanonicalJson.String(end)), ("measured_start", CanonicalJson.String(start)),
+        ("member_sources", CanonicalJson.Array(sources.map((pair) -> CanonicalJson.object([("path", CanonicalJson.String(pair.0)), ("sha256", CanonicalJson.String(pair.1))]).unwrap()))),
+        ("profile", CanonicalJson.String(profile)), ("target_class", CanonicalJson.String(target)), ("target_id", CanonicalJson.String(package_name(root))), ("target_triple", CanonicalJson.String(host_triple()?))])
+}
+// Rust: Source/CmdBudget.rs:2767
+fn toolchain() -> CanonicalJson Err! {
+    compiler_digest :: proof_compiler_digest()
+    body :: CanonicalJson.object([("compiler_build_id", CanonicalJson.String(compiler_digest)), ("jet_version", CanonicalJson.String(JET_VERSION)), ("runner_id", CanonicalJson.String(JET_RUNNER_BUILD_ID)), ("stdlib_id", CanonicalJson.String(JET_STDLIB_BUILD_ID))])?
+    map := as_object(body)?.clone()
+    map["digest"] = CanonicalJson.String(stable_id(body))
+    Ok(CanonicalJson.Object(^map))
+}
+// Rust: Source/CmdBudget.rs:2791
+fn provider(kind: String, identity: String, root: &OSPath, _entry: &OSPath, profile: String, compile: &CompileWorkloadFact?) -> CanonicalJson Err! {
+    triple :: host_triple()?
+    cpu_arch :: triple.split("-").first().filter((v) -> !v.is_empty()) ?? return Err("host triple has no architecture")
+    cpuinfo :: fs.read_to_string(OSPath.from("/proc/cpuinfo")) ?? return Err("cannot read CPU identity: {err}")
+    cpu_model :: proc_value(cpuinfo, "model name").or_else(() -> proc_value(cpuinfo, "Hardware")) ?? return Err("CPU model is unavailable")
+    meminfo :: fs.read_to_string(OSPath.from("/proc/meminfo")) ?? return Err("cannot read memory identity: {err}")
+    memory_text :: proc_value(meminfo, "MemTotal").and_then((v) -> v.split_whitespace().first()) ?? return Err("memory total is unavailable")
+    memory_kib :: U128.parse(memory_text) ?? return Err("memory total is malformed")
+    memory_bytes :: memory_kib.checked_mul(1024) ?? return Err("memory total overflow")
+    kernel :: read_trimmed("/proc/sys/kernel/osrelease", "kernel identity")?
+    power_governor :: read_trimmed("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", "CPU power governor")?
+    // GATE #4494: native available parallelism must return the observed OS value.
+    logical_cpus :: std.thread.available_parallelism() ?? return Err("logical CPU count unavailable: {err}")
+    compile_version :: if kind == "CompilerProbe" {
+        workload :: compile ?? return Err("CompilerProbe provider has no resolved workload")
+        Val(compiler_probe_version(root, workload.mode, workload.target, profile, workload.patch)?)
+    } else -> None
+    (version, isolation) :: if kind == {
+        "AllocationProbe" -> ("jet-arena-events-v1-warmup-auto-trials-20", "benchmark-process-counter-reset-per-trial")
+        "ServiceProbe" -> ("jet-service-readiness-v1-trials-20", "service-process-group-down-up-per-trial")
+        "SceneProbe" -> ("jet-scene-headless-v1-warmup-5-measure-20", "scene-in-process-frame-loop")
+        "CompilerProbe" -> (compile_version.expect("compile provider version"), "child-process-per-sample")
+        "BuildArtifact" -> ("jet-artifact-footprint-v1-first-line-vmhwm-trials-20", "fresh-child-process-per-trial")
+        else -> ("1", "process")
+    }
+    // GATE #4483: preserve selected OS, not a hard-coded host.
+    body :: CanonicalJson.object([("cpu_arch", CanonicalJson.String(cpu_arch)), ("cpu_model", CanonicalJson.String(cpu_model)), ("identity", CanonicalJson.String(identity)),
+        ("isolation", CanonicalJson.String(isolation)), ("kernel", CanonicalJson.String(kernel)), ("kind", CanonicalJson.String(kind)),
+        ("logical_cpus", CanonicalJson.Integer(logical_cpus.get().to_string())), ("memory_bytes", CanonicalJson.Integer(memory_bytes.to_string())),
+        ("os", CanonicalJson.String(core.sys.target.selected_os())), ("power_governor", CanonicalJson.String(power_governor)), ("version", CanonicalJson.String(version))])?
+    map := as_object(body)?.clone()
+    map["hardware_fingerprint"] = CanonicalJson.String(stable_id(body))
+    Ok(CanonicalJson.Object(^map))
+}
+// Rust: Source/CmdBudget.rs:2902
+// Stable executing inode survives concurrent executable pathname replacement.
+// Rust: Source/CmdBudget.rs:2906
+fn running_executable() -> OSPath IOError! {
+    // GATE #4494: actual process executable identity.
+    current :: std.env.current_exe()?
+    if core.sys.target.selected_os() == "linux" -> select_running_executable(current, OSPath.from("/proc/self/exe")) else -> Ok(current)
+}
+// Rust: Source/CmdBudget.rs:2919
+fn select_running_executable(current: &OSPath, stable: &OSPath) -> OSPath IOError! {
+    // GATE #4409: distinguish NotFound from unreadable canonical paths.
+    if fs.File.open(current) == {
+        .Ok(file) -> {
+            file.close()
+            if fs.File.open(stable) == .Ok(stable_file) { stable_file.close(); Ok(stable.clone()) } else -> Ok(current.clone())
+        }
+        .Err(error) -> {
+            if error.kind() == IOErrorKind.NotFound {
+                file :: fs.File.open(stable)?
+                file.close()
+                Ok(stable.clone())
+            } else -> Ok(current.clone())
+        }
+    }
+}
+// Rust: Source/CmdBudget.rs:2937
+fn host_triple() -> String Err! {
+    target :: JET_BUILD_TARGET
+    if target.split("-").count() < 3 -> return Err("compiler build omitted canonical target triple")
+    Ok(target)
+}
+// Rust: Source/CmdBudget.rs:2944
+fn proc_value(text: String, key: String) -> String? {
+    loop line in text.lines() {
+        if line.split_once(":") == .Val((left, right)) {
+            left := left.trim() // #4303
+            if left == key { right := right.trim(); return Val(right) } // #4303
+        }
+    }
+    None
+}
+// Rust: Source/CmdBudget.rs:2950
+fn read_trimmed(path: String, label: String) -> String Err! {
+    value :: fs.read_to_string(OSPath.from(path)) ?? return Err("cannot read {label}: {err}")
+    value := value.trim() // #4303
+    if value.is_empty() -> Err("{label} is empty") else -> Ok(value)
+}
+// Rust: Source/CmdBudget.rs:2959
+fn text_map(map: &[String:CanonicalJson], key: String) -> String Err! {
+    if map.get(key) == .Val(.String(value)) -> Ok(value) else -> Err("{key} is not text")
+}
+// Rust: Source/CmdBudget.rs:2968
+fn wire_map(map: &[String:CanonicalJson], key: String) -> String Err! {
+    if map.get(key) == { .Val(.String(value)) | .Val(.Integer(value)) -> Ok(value), else -> Err("{key} is not wire text") }
+}
+// Rust: Source/CmdBudget.rs:2978
+fn as_object(value: &CanonicalJson) -> &[String:CanonicalJson] Err! {
+    if value == .Object(object) -> Ok(object) else -> Err("expected canonical object")
+}
+// Rust: Source/CmdBudget.rs:2987
+fn text_field(value: &CanonicalJson, key: String) -> String Err! {
+    if as_object(value)?.get(key) == .Val(.String(value)) -> Ok(value) else -> Err("missing {key}")
+}
+// Rust: Source/CmdBudget.rs:2993
+fn frame(out: &[U8], value: String) {
+    bytes :: value.bytes()
+    &out.extend_from_slice((bytes.len() as U64).to_be_bytes())
+    &out.extend_from_slice(bytes)
+}
+// Rust: Source/CmdBudget.rs:2998
+fn result_rank(row: &ResultRow) -> U8 {
+    if (row.outcome, row.evidence, row.stale) == {
+        (.Fail, .Regression | .Inconclusive, _) -> 1
+        (.Fail, .Unavailable, false) -> 2
+        (.Fail, _, true) -> 3
+        (.Warn, _, _) -> 4
+        else -> 5
+    }
+}
+// Rust: Source/CmdBudget.rs:3007
+fn output_counts(built: &BuiltReport) -> (Int, Int, Int, Int, Int) {
+    counts := (0, 0, 0, 0, 0)
+    loop row in built.results {
+        if result_rank(row) == { 1 -> counts.0 += 1, 2 -> counts.1 += 1, 3 -> counts.2 += 1, 4 -> counts.3 += 1, else -> counts.4 += 1 }
+    }
+    counts
+}
+// Rust: Source/CmdBudget.rs:3020
+fn diagnostic_parts(row: &ResultRow) -> (String, String, String) {
+    if row.evidence == Evidence.Unavailable -> ("E2906", "performance budget {row.name} has no usable evidence", "correct the provider evidence or bootstrap only when absent or stale evidence is eligible")
+    else -> ("E2907", "performance budget {row.name} {if row.evidence == Evidence.Inconclusive -> \"is inconclusive\" else -> \"regressed\"}", "improve the measured behavior, inspect `jet budget check --verbose`, or record an explicit exception")
+}
+// Rust: Source/CmdBudget.rs:3027
+fn emit_check(options: &Options, built: &BuiltReport, id: String, path: String, created: Bool) {
+    if options.json { emit_json(options, built, path, None, false, if built.fail > 0 -> 1 else -> 0, None); return }
+    loop row in built.results {
+        if row.outcome == PolicyOutcome.Pass {
+            if options.verbose { emit_verbose_row(row) }
+            next
+        }
+        (code, message, fix) :: diagnostic_parts(row)
+        severity :: if row.outcome == PolicyOutcome.Warn -> "Warning" else -> "Error"
+        eprintln("{severity} [{code}]: {message}\n --> {row.source}:{row.line}:{row.column}\n Why: {row.reason}\n Fix: {fix}\nMore: jet-lang.dev/e/{code}")
+        emit_annotation(options, severity, code, row, message, fix)
+        if options.verbose { emit_verbose_row(row) }
+    }
+    if options.verbose {
+        marker :: if created -> "+" else -> "~"
+        suffix :: if created -> "" else -> " (verified reuse)"
+        eprintln("{marker} report {id} {path}{suffix}")
+    }
+    // Quiet suppresses only the recap, never per-row diagnostics.
+    if options.quiet -> return
+    short :: id.slice(0, 12)
+    (failed, unavailable, stale, warn, passed) :: output_counts(built)
+    warning :: if warn > 0 -> " · {count(warn, \"warning\", \"warnings\")}" else -> ""
+    if failed > 0 { eprintln("budgets failed: {count(failed, \"budget failed\", \"budgets failed\")}{warning} · report {short}") }
+    else if unavailable > 0 { eprintln("budgets unavailable: {count(unavailable, \"result unavailable\", \"results unavailable\")}{warning} · report {short}") }
+    else if stale > 0 { eprintln("budgets stale: {count(stale, \"baseline stale\", \"baselines stale\")}{warning} · report {short}") }
+    else if warn > 0 {
+        prefix :: if passed > 0 -> "{count(passed, \"budget\", \"budgets\")} passed · " else -> ""
+        eprintln("budgets: {prefix}{count(warn, \"warning\", \"warnings\")} · report {short}")
+    } else { eprintln("budgets: {count(passed, \"budget\", \"budgets\")} passed · report {short}") }
+}
+// Rust: Source/CmdBudget.rs:3130
+fn emit_verbose_row(row: &ResultRow) {
+    ids :: if row.baseline_report_ids.is_empty() -> "none" else -> row.baseline_report_ids.join(",")
+    bound :: (value: Rational?) -> value.map((value) -> "{value.num}/{value.den}").unwrap_or("none")
+    outcome :: if row.outcome == PolicyOutcome.Pass -> "pass" else if row.outcome == PolicyOutcome.Warn -> "warn" else -> "fail"
+    eprintln("{outcome} {row.id}: point {row.sample.num}/{row.sample.den} · bounds [{bound(row.lower95)}, {bound(row.upper95)}] · baseline [{ids}] · {row.metric_label} · {row.reason}")
+}
+// Rust: Source/CmdBudget.rs:3161
+fn emit_annotation(options: &Options, severity: String, code: String, row: &ResultRow, message: String, fix: String) {
+    enabled :: options.annotations == Annotations.Github || (options.annotations == Annotations.Auto && std.env.var("GITHUB_ACTIONS").ok() == Val("true"))
+    if !enabled -> return
+    level :: if severity == "Warning" -> "warning" else -> "error"
+    property :: (v: String) -> v.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A").replace(":", "%3A").replace(",", "%2C")
+    message :: "{message}\nWhy: {row.reason}\nFix: {fix}".replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    eprintln("::{level} file={property(row.source)},line={row.line},col={row.column},title={property(\"Jet {code}\")}::{message}")
+}
+// Rust: Source/CmdBudget.rs:3199
+fn emit_json(options: &Options, built: &BuiltReport, path: String, plan: (String, String?, Bool)?, applied: Bool, exit: I32, diagnostic: CanonicalJson?) {
+    (failed, unavailable, stale, warn, _) :: output_counts(built)
+    failure_kind :: if failed > 0 -> Val("budget") else if unavailable > 0 || stale > 0 -> Val("evidence") else -> None
+    results :: built.results.map((row) -> result_json(row))
+    plan :: plan.map((plan) -> {
+        (baseline, old, created) :: plan
+        id :: text_field(built.value, "report_id").unwrap()
+        CanonicalJson.object([("baseline", CanonicalJson.String(baseline)), ("requires_confirmation", CanonicalJson.Bool(false)),
+            ("rows", CanonicalJson.Array([plan_row(if created -> "create" else -> "reuse", "report", path, None, id), plan_row("advance", "baseline", ".jet/perf/baselines/names/{baseline}.json", old, id)]))]).unwrap()
+    }).unwrap_or(CanonicalJson.Null)
+    diagnostics :: diagnostic.map((value) -> [value]).unwrap_or([])
+    value :: CanonicalJson.object([("applied", CanonicalJson.Bool(applied)), ("diagnostics", CanonicalJson.Array(diagnostics)), ("exit_code", CanonicalJson.Integer(exit.to_string())),
+        ("failure_kind", failure_kind.map((value) -> CanonicalJson.String(value)).unwrap_or(CanonicalJson.Null)), ("plan", plan), ("report", built.value),
+        ("report_path", CanonicalJson.String(path)), ("results", CanonicalJson.Array(results))]).unwrap()
+    budget :: status_value(value)
+    print(StatusEnvelope.new(options.command, exit == 0).with_field("budget", budget).json())
+}
+// Rust: Source/CmdBudget.rs:3276
+fn result_json(row: &ResultRow) -> CanonicalJson {
+    evidence :: if row.evidence == { .Pass -> "pass", .Regression -> "regression", .Inconclusive -> "inconclusive", .Unavailable -> "unavailable" }
+    status :: if row.stale && row.outcome == PolicyOutcome.Fail -> "stale"
+        else if row.evidence == Evidence.Unavailable && row.outcome == PolicyOutcome.Fail -> "unavailable"
+        else -> if row.outcome == { .Pass -> "pass", .Warn -> "warn", .Fail -> "fail" }
+    diagnostic :: if row.outcome == PolicyOutcome.Pass -> CanonicalJson.Null else -> CanonicalJson.String(if row.evidence == Evidence.Unavailable -> "E2906" else -> "E2907")
+    CanonicalJson.object([
+        ("baseline_report_ids", CanonicalJson.Array(row.baseline_report_ids.map((value) -> CanonicalJson.String(value)))), ("budget_id", CanonicalJson.String(row.id)),
+        ("comparison", row.comparison), ("diagnostic_code", diagnostic), ("direction", CanonicalJson.String(row.direction)),
+        ("enforcement", CanonicalJson.String(if row.enforcement == Enforcement.Warn -> "warn" else -> "fail")), ("evidence", CanonicalJson.String(evidence)),
+        ("lower95", row.lower95.map((value) -> value.to_json()).unwrap_or(CanonicalJson.Null)), ("metric", row.metric), ("point", row.sample.to_json()), ("reason", CanonicalJson.String(row.reason)),
+        ("source", CanonicalJson.object([("column", CanonicalJson.Integer(row.column.to_string())), ("line", CanonicalJson.Integer(row.line.to_string())), ("path", CanonicalJson.String(row.source))]).unwrap()),
+        ("stale", CanonicalJson.Bool(row.stale)), ("status", CanonicalJson.String(status)), ("trend", row.trend), ("unit", CanonicalJson.String(row.unit)),
+        ("upper95", row.upper95.map((value) -> value.to_json()).unwrap_or(CanonicalJson.Null))
+    ]).unwrap()
+}
+// Rust: Source/CmdBudget.rs:3368
+fn plan_row(operation: String, artifact: String, path: String, from: String?, id: String) -> CanonicalJson {
+    CanonicalJson.object([("artifact", CanonicalJson.String(artifact)), ("from_id", from.map((value) -> CanonicalJson.String(value)).unwrap_or(CanonicalJson.Null)),
+        ("id", CanonicalJson.String(id)), ("operation", CanonicalJson.String(operation)), ("path", CanonicalJson.String(path)), ("to_id", CanonicalJson.String(id))]).unwrap()
+}
+// Rust: Source/CmdBudget.rs:3389
+fn count(n: Int, one: String, many: String) -> String { "{n} {if n == 1 -> one else -> many}" }
+// Rust: Source/CmdBudget.rs:3392
+fn compiler_failure(options: &Options, entry: &OSPath, diags: &[Diagnostic]) -> I32 {
+    src :: fs.read_to_string(entry).unwrap_or("")
+    if options.json {
+        report_path :: jet.Diagnostics.ReportPath.from_path(entry)
+        diagnostics :: StatusValue.array(diags.map((diagnostic) -> report_status_value(diagnostic.to_report(report_path, src))))
+        budget :: StatusValue.object(StatusFields.new().with("applied", false).with("diagnostics", diagnostics).with("exit_code", 1).with("failure_kind", "compiler")
+            .with("plan", StatusValue.Null).with("report", StatusValue.Null).with("report_path", StatusValue.Null).with("results", StatusValue.array([])))
+        print(StatusEnvelope.new(options.command, false).with_field("budget", budget).json())
+    } else { eprint(jet.Diagnostics.render_all(entry.to_string_lossy(), src, diags)) }
+    1
+}
+// Rust: Source/CmdBudget.rs:3428
+fn tool_failure(options: &Options, why: String) -> I32 {
+    if options.json {
+        diagnostic :: ReportEnvelope.new("tool", "error", "E2908", "performance budget operation failed", why, "correct the named failure and retry")
+        budget :: StatusValue.object(StatusFields.new().with("applied", false).with("diagnostics", StatusValue.array([report_status_value(diagnostic)]))
+            .with("exit_code", 1).with("failure_kind", "tool").with("plan", StatusValue.Null).with("report", StatusValue.Null).with("report_path", StatusValue.Null).with("results", StatusValue.array([])))
+        print(StatusEnvelope.new(options.command, false).with_field("budget", budget).json())
+    } else { eprintln("Error [E2908]: Performance budget operation failed\n Why: {why}\n Fix: Correct the named failure and retry\nMore: jet-lang.dev/e/E2908\nbudget command failed before a valid report was produced") }
+    1
+}
+// Rust: Source/CmdBudget.rs:3467
+fn status_value(value: &CanonicalJson) -> StatusValue {
+    if value == {
+        .Null -> StatusValue.Null
+        .Bool(value) -> StatusValue.Bool(value)
+        .Integer(value) -> StatusValue.Integer(Int.parse(value).expect("canonical budget integer must fit status integer"))
+        .String(value) -> StatusValue.String(value)
+        .Array(values) -> StatusValue.array(values.map((value) -> status_value(value)))
+        .Object(values) -> {
+            fields := StatusFields.new()
+            keys := values.keys().to_vec()
+            &keys.sort()
+            loop name in keys { fields = fields.with(name, status_value(values[name])) }
+            StatusValue.object(^fields)
+        }
+    }
+}
+// Rust: Source/CmdBudget.rs:3488
+fn report_status_value(report: &ReportEnvelope) -> StatusValue {
+    fields := StatusFields.new().with("schema", "{report.schema_name}/v{report.schema_version}").with("moment", report.moment.as_str())
+        .with("severity", report.severity.as_str()).with("code", report.code.as_str()).with("what", report.what.as_str()).with("why", report.why.as_str()).with("fix", report.fix.as_str())
+        .with("applicability", report.applicability.map((value) -> StatusValue.from(value.as_str())).unwrap_or(StatusValue.Null))
+        .with("detail", report.detail.map((value) -> StatusValue.from(value)).unwrap_or(StatusValue.Null))
+        .with("denial_kind", report.denial_kind.map((value) -> StatusValue.from(value)).unwrap_or(StatusValue.Null))
+        .with("call_chain", StatusValue.array(report.call_chain.map((value) -> StatusValue.from(value))))
+        .with("scope_chain", StatusValue.array(report.scope_chain.map((value) -> StatusValue.from(value))))
+        .with("nearest_granting_scope", report.nearest_granting_scope.map((value) -> StatusValue.from(value)).unwrap_or(StatusValue.Null))
+        .with("file", report.file.filter((value) -> !value.is_empty()).map((value) -> StatusValue.from(value.as_str())).unwrap_or(StatusValue.Null))
+        .with("line", report.line.map((value) -> StatusValue.from(value)).unwrap_or(StatusValue.Null))
+        .with("col", report.col.map((value) -> StatusValue.from(value)).unwrap_or(StatusValue.Null))
+        .with("span", report.span.map((span) -> StatusValue.object(StatusFields.new().with("start", span.start).with("end", span.end))).unwrap_or(StatusValue.Null))
+    fix_edits :: StatusValue.array(report.fix_edits().map((edit) -> StatusValue.object(StatusFields.new().with("file", edit.file.as_str())
+        .with("span", StatusValue.object(StatusFields.new().with("start", edit.span.start).with("end", edit.span.end)))
+        .with("new_text", edit.new_text.as_str()).with("safety", edit.safety.as_str()))))
+    if !report.fix_edits().is_empty() { fields = fields.with("fix_edits", fix_edits) }
+    else if report.no_fix_reason() == .Val(reason) { fields = fields.with("no_fix_reason", StatusValue.object(StatusFields.new().with("kind", reason.kind.as_str()).with("next", reason.next.as_str()))) }
+    else { fields = fields.with("fix_edits", fix_edits) }
+    fields = fields.with("cause", StatusValue.array(report.cause.map((value) -> StatusValue.from(value.as_str())))).with("clears", report.clears)
+    if report.extension == .Val(extension) {
+        if extension == {
+            .Crypto(reason, operation, expected, actual) -> {
+                fields = fields.with("reason", reason.as_str()).with("operation", operation.as_str())
+                    .with("expected", expected.map((value) -> StatusValue.from(value)).unwrap_or(StatusValue.Null))
+                    .with("actual", actual.map((value) -> StatusValue.from(value)).unwrap_or(StatusValue.Null))
+            }
+            .BuildError(report) -> fields = fields.with("build_error", report.as_str())
+        }
+    }
+    StatusValue.object(^fields)
+}
+// Rust: Source/CmdBudget.rs:3658
+fn tool_failure_with_report(options: &Options, id: String, why: String) -> I32 {
+    if options.json -> return tool_failure(options, why)
+    eprintln("Error [E2908]: Performance budget operation failed\n Why: {why}\n Fix: Correct the named failure and retry\nMore: jet-lang.dev/e/E2908\nbudget command failed · report {id} was not accepted")
+    1
+}
+// Rust: Source/CmdBudget.rs:3666
+fn timestamp_now() -> String {
+    // GATE #4494: real wall clock; preserve duration-before-epoch default handling.
+    elapsed :: SystemTime.now().duration_since(UNIX_EPOCH).unwrap_or(Duration.ZERO)
+    seconds :: elapsed.as_secs() as I64
+    days :: seconds.div_euclid(86400)
+    second :: seconds.rem_euclid(86400)
+    z :: days + 719468
+    era :: (if z >= 0 -> z else -> z - 146096) / 146097
+    doe :: z - era * 146097
+    yoe :: (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+    year := yoe + era * 400
+    doy :: doe - (365 * yoe + yoe / 4 - yoe / 100)
+    mp :: (5 * doy + 2) / 153
+    day :: doy - (153 * mp + 2) / 5 + 1
+    month :: mp + (if mp < 10 -> 3 else -> -9)
+    year += if month <= 2 -> 1 else -> 0
+    "{year:04}-{month:02}-{day:02}T{second / 3600:02}:{(second % 3600) / 60:02}:{second % 60:02}.{elapsed.subsec_nanos():09}Z"
+}

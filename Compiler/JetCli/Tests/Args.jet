@@ -1,0 +1,317 @@
+// Behavioral claims for Source/main.rs:1249-1586,7518-7538. These ranges
+// contain no #[cfg(test)] tests; cover parser boundaries and refusal precedence.
+use core.encoding.json as args_test_json
+
+fn args_test_json_text(value: DataTree) -> String {
+    if value == {
+        .Text(text) -> text
+        else -> panic("expected JSON text")
+    }
+}
+
+fn args_test_authority_refusal(argv: [String], json: Bool) -> JetCLIArgsRefusal {
+    if jet_cli_args_parse_authority_flags(argv, json) == {
+        .Ok(_) -> panic("authority unexpectedly accepted")
+        .Err(error) -> error
+    }
+}
+
+fn args_test_settings_refusal(argv: [String], json: Bool) -> JetCLIArgsRefusal {
+    if jet_cli_args_parse_setting_overrides(argv, json) == {
+        .Ok(_) -> panic("settings unexpectedly accepted")
+        .Err(error) -> error
+    }
+}
+
+fn args_test_record_refusal(argv: [String], command: String, json: Bool) -> JetCLIArgsRefusal {
+    if jet_cli_args_named_record_for_command(argv, command, json) == {
+        .Ok(_) -> panic("record unexpectedly accepted")
+        .Err(error) -> error
+    }
+}
+
+fn args_test_replay_refusal(argv: [String], json: Bool) -> JetCLIArgsRefusal {
+    if jet_cli_args_named_debug_replay(argv, "debug", json) == {
+        .Ok(_) -> panic("replay unexpectedly accepted")
+        .Err(error) -> error
+    }
+}
+
+fn args_test_gate_refusal(argv: [String], json: Bool) -> JetCLIArgsRefusal {
+    if jet_cli_args_parse_gate_flags(argv, json) == {
+        .Ok(_) -> panic("gate unexpectedly accepted")
+        .Err(error) -> error
+    }
+}
+
+#Test("args separate flag value preserves the following word") {
+    assert(jet_cli_args_flag_value([String]{"--filter=inline", "--filter", "--json", "--filter", "later"}, "--filter") == (Val("--json")))
+    assert(jet_cli_args_flag_value([String]{"--filter=inline"}, "--filter") == None)
+    assert(jet_cli_args_flag_value([String]{"--filter"}, "--filter") == None)
+    assert(jet_cli_args_flag_value([String]{}, "--filter") == None)
+}
+
+#Test("args option value uses the first inline or separate occurrence") {
+    assert(jet_cli_args_option_value([String]{"--filter=", "--filter", "later"}, "--filter") == (Val("")))
+    assert(jet_cli_args_option_value([String]{"--filter", "--json", "--filter=later"}, "--filter") == (Val("--json")))
+    assert(jet_cli_args_option_value([String]{"--filtering=no", "--filter=a=b"}, "--filter") == (Val("a=b")))
+    assert(jet_cli_args_option_value([String]{"--filter"}, "--filter") == None)
+    assert(jet_cli_args_option_value([String]{}, "--filter") == None)
+}
+
+#Test("args authority canonicalizes roots preserves leaves and deduplicates") {
+    authority :: jet_cli_args_parse_authority_flags([String]{"run", "--allow=fs.Read,Time,FS.Read", "--allow", " env.Read , Mem.Alloc ", "--deny=net.Connect", "--deny=Net.Connect"}, false) ?? panic("valid authority refused")
+    assert_eq(authority.allow, [String]{"FS.Read", "Time", "Env.Read", "Mem.Alloc"})
+    assert_eq(authority.deny, [String]{"Net.Connect"})
+    empty :: jet_cli_args_parse_authority_flags([String]{"run", "--allow-other=FS"}, false) ?? panic("unrelated argv refused")
+    assert_eq(empty.allow.len(), 0)
+    assert_eq(empty.deny.len(), 0)
+}
+
+#Test("args authority missing empty and unknown values differ") {
+    assert_eq(args_test_authority_refusal([String]{"--allow"}, false).what, "`--allow` needs a comma-separated rights value")
+    assert_eq(args_test_authority_refusal([String]{"--deny", "-Time"}, false).what, "`--deny` needs a comma-separated rights value")
+    assert_eq(args_test_authority_refusal([String]{"--allow="}, false).what, "`--allow` needs a non-empty rights value")
+    assert_eq(args_test_authority_refusal([String]{"--allow", "  "}, false).what, "`--allow` needs a non-empty rights value")
+    assert_eq(args_test_authority_refusal([String]{"--deny=FS,"}, false).what, "unknown authority right ``")
+    assert_eq(args_test_authority_refusal([String]{"--allow=unknown"}, false).what, "unknown authority right `unknown`")
+    assert_eq(args_test_authority_refusal([String]{"--deny=panic"}, false).what, "unknown authority right `panic`")
+}
+
+#Test("args authority conflict checks exact rights not ancestor coverage") {
+    roots :: jet_cli_args_parse_authority_flags([String]{"--allow=FS", "--deny=FS.Read"}, false) ?? panic("ancestor overlap is not an exact conflict")
+    assert_eq(roots.allow, [String]{"FS"})
+    assert_eq(roots.deny, [String]{"FS.Read"})
+    leaves :: jet_cli_args_parse_authority_flags([String]{"--allow=FS.Read", "--deny=FS.read"}, false) ?? panic("leaf spelling must remain case-sensitive")
+    assert_eq(leaves.deny, [String]{"FS.read"})
+    refusal :: args_test_authority_refusal([String]{"--allow=Time,Net", "--deny=Net,Time"}, false)
+    assert_eq(refusal.code, "E2102")
+    assert_eq(refusal.what, "authority right `Time` is both allowed and denied")
+    assert_eq(refusal.fix, "remove one of `--allow=Time` or `--deny=Time`")
+    assert_eq(refusal.exit_code, 2)
+}
+
+#Test("args malformed authority precedes deferred conflict") {
+    refusal :: args_test_authority_refusal([String]{"--allow=Net", "--deny=Net", "--allow=NoSuchRoot"}, false)
+    assert_eq(refusal.code, "E2104")
+    assert_eq(refusal.what, "unknown authority right `NoSuchRoot`")
+}
+
+#Test("args build authority projects sorted unique flags only") {
+    grants :: jet_cli_args_build_grants_from_authority([String]{"Time.Wait", "FS.Read", "Net.Connect", "FS.Write", "Mem.Alloc", "Panic", "FFI", "Browser", "Secret", "GPU", "Env.Read", "Exec.Args"})
+    assert_eq(grants, [String]{"env", "exec", "fs", "gpu", "net", "time"})
+    assert_eq(jet_cli_args_build_grants_from_authority([String]{}).len(), 0)
+}
+
+#Test("args retired authority flags reject exact build spellings in argv order") {
+    if jet_cli_args_reject_retired_authority_flags([String]{"--allow-FS", "--allow-browser", "--deny-net=anything", "--allow-fs"}, false) == {
+        .Ok(_) -> panic("retired flag accepted")
+        .Err(refusal) -> {
+            assert_eq(refusal.code, "E2102")
+            assert_eq(refusal.what, "`--deny-net` is retired")
+            assert_eq(refusal.fix, "use `--deny=Net`")
+        }
+    }
+    jet_cli_args_reject_retired_authority_flags([String]{"--allow-FS", "--deny-ffi", "--allow-not-an-effect"}, false) ?? panic("non-retired flag rejected")
+}
+
+#Test("args retired impure gate matches only the registry spelling") {
+    jet_cli_args_reject_retired_gate_flags([String]{"--allow-impure=true"}, false) ?? panic("suffix should not match")
+    if jet_cli_args_reject_retired_gate_flags([String]{"--allow-impure"}, false) == {
+        .Ok(_) -> panic("retired gate accepted")
+        .Err(refusal) -> {
+            assert_eq(refusal.code, "E1343")
+            assert_eq(refusal.what, "`--allow-impure` is retired")
+            assert_eq(refusal.fix, "use `--gate impure=allow`")
+        }
+    }
+}
+
+#Test("args gate inline separate repeated assignments use one GateSet") {
+    gates :: jet_cli_args_parse_gate_flags([String]{"--gate=unsafe=allow", "--gate", " impure = allow ", "--gate=unsafe=allow", "--gate=nondeterministic=allow"}, false) ?? panic("valid gates refused")
+    assert(gate_set_allows(gates, PolicyKey.Unsafe))
+    assert(gate_set_allows(gates, PolicyKey.Impure))
+    assert(gate_set_allows(gates, PolicyKey.Nondeterministic))
+    assert(!gate_set_is_empty(gates))
+    empty :: jet_cli_args_parse_gate_flags([String]{"--gate-other=unsafe=allow"}, false) ?? panic("unrelated flag refused")
+    assert(gate_set_is_empty(empty))
+}
+
+#Test("args missing and malformed gates preserve policy detail") {
+    assert_eq(args_test_gate_refusal([String]{"--gate", "--json"}, false).what, "`--gate` needs a gate assignment")
+    assert_eq(args_test_gate_refusal([String]{"--gate"}, false).fix, "use `--gate name=allow`")
+    empty :: args_test_gate_refusal([String]{"--gate="}, false)
+    assert_eq(empty.what, "invalid audited gate")
+    assert_eq(empty.why, "use `--gate name=allow`")
+    assert_eq(args_test_gate_refusal([String]{"--gate=nope=allow"}, false).why, "`nope` is not an audited gate")
+    assert_eq(args_test_gate_refusal([String]{"--gate=unsafe=deny"}, false).why, "`--gate unsafe=deny` must name an audited gate with `=allow`")
+    assert_eq(args_test_gate_refusal([String]{"--gate=gc=allow"}, false).why, "`--gate gc=allow` must name an audited gate with `=allow`")
+}
+
+#Test("args settings split first equals trim and keep empty values") {
+    settings :: jet_cli_args_parse_setting_overrides([String]{"build", "--set= a = x=y ", "--set", "b=", "--set", "-c= -1 ", "--setting=unrelated"}, false) ?? panic("valid settings refused")
+    assert_eq(settings.len(), 3)
+    assert_eq(settings["a"], "x=y")
+    assert_eq(settings["b"], "")
+    assert_eq(settings["-c"], "-1")
+    assert_eq(jet_cli_args_parse_setting_overrides([String]{}, false) ?? panic("empty argv refused"), [String: String]{})
+}
+
+#Test("args setting refusals distinguish missing malformed empty duplicate") {
+    assert_eq(args_test_settings_refusal([String]{"--set"}, false).what, "`--set` needs a key=value assignment")
+    assert_eq(args_test_settings_refusal([String]{"--set", "--json"}, false).what, "`--set` needs a key=value assignment")
+    assert_eq(args_test_settings_refusal([String]{"--set=word"}, false).what, "`--set` needs a key=value assignment")
+    assert_eq(args_test_settings_refusal([String]{"--set= =x"}, false).what, "`--set` needs a non-empty key")
+    assert_eq(args_test_settings_refusal([String]{"--set=k=1", "--set", " k = 2"}, false).what, "setting `k` is assigned more than once")
+    assert_eq(args_test_settings_refusal([String]{"--set=k=1", "--set=k=1"}, false).fix, "remove the duplicate `--set` assignment")
+}
+
+#Test("args records use last valid name on each supported command") {
+    commands :: [String]{"run", "dev", "test", "debug"}
+    loop command in commands {
+        if jet_cli_args_named_record_for_command([String]{command, "--record=first", "file.jet", "--record=Second_2-"}, command, false) == {
+            .Ok(value) -> {
+                if value == {
+                    .Val(name) -> assert_eq(name, "Second_2-")
+                    .None -> panic("record name is absent")
+                }
+            }
+            .Err(_) -> panic("valid record refused")
+        }
+    }
+    if jet_cli_args_named_record_for_command([String]{"--record=ignored"}, "run", false) == {
+        .Ok(value) -> assert(value == None)
+        .Err(_) -> panic("first argv word is skipped")
+    }
+    if jet_cli_args_named_record_for_command([String]{}, "run", false) == {
+        .Ok(value) -> assert(value == None)
+        .Err(_) -> panic("empty argv refused")
+    }
+}
+
+#Test("args record command validity precedes invalid name") {
+    invalid_command :: args_test_record_refusal([String]{"build", "--record="}, "build", false)
+    assert_eq(invalid_command.code, "E2102")
+    assert_eq(invalid_command.what, "`--record` is not valid with `jet build`")
+    bare :: args_test_record_refusal([String]{"build", "--record"}, "build", false)
+    assert_eq(bare.code, "E2104")
+    assert_eq(bare.what, "`--record` needs a closed `=NAME` value")
+}
+
+#Test("args record names refuse paths unicode and empty without overwriting errors") {
+    values :: [String]{"", "dir/name", "name.jetproof-replay", "é", "has space", "\\name"}
+    loop value in values {
+        refusal :: args_test_record_refusal([String]{"run", "--record={value}"}, "run", false)
+        assert_eq(refusal.what, "invalid replay name")
+        assert_eq(refusal.why, "replay NAME must be non-empty and contain only ASCII letters, digits, `-`, or `_`")
+    }
+    assert_eq(args_test_record_refusal([String]{"run", "--record=bad/name", "--record=good"}, "run", false).what, "invalid replay name")
+}
+
+#Test("args debug replay names resolve but explicit paths remain untouched") {
+    cases :: [(argv: [String], command: String, expected: String?)]{
+        (argv: [String]{"debug", "--replay=Named_2-"}, command: "debug", expected: Val(".jet/replays/Named_2-.jetproof-replay")),
+        (argv: [String]{"debug", "--replay=first", "--replay=../path with space"}, command: "debug", expected: Val("../path with space")),
+        (argv: [String]{"debug", "--replay=.jetproof-replay"}, command: "debug", expected: Val(".jetproof-replay")),
+        (argv: [String]{"run", "--replay"}, command: "run", expected: None),
+        (argv: [String]{}, command: "debug", expected: None),
+    }
+    loop test_case in cases {
+        if jet_cli_args_named_debug_replay(test_case.argv, test_case.command, false) == {
+            .Ok(value) -> assert_eq(value, test_case.expected)
+            .Err(_) -> panic("valid replay refused")
+        }
+    }
+}
+
+#Test("args debug replay missing and invalid names refuse early") {
+    assert_eq(args_test_replay_refusal([String]{"debug", "--replay"}, false).what, "`--replay` needs a closed `=NAME` value")
+    assert_eq(args_test_replay_refusal([String]{"debug", "--replay="}, false).fix, "write `--replay=NAME` with letters, digits, `-`, or `_`")
+    assert_eq(args_test_replay_refusal([String]{"debug", "--replay=bad.name", "--replay=good"}, false).what, "invalid replay name")
+}
+
+#Test("args human refusal carries exact frame usage status and Front plan") {
+    refusal :: args_test_settings_refusal([String]{"--set"}, false)
+    assert_eq(refusal.stdout, "")
+    assert_eq(refusal.stderr, "Error [E2104]: `--set` needs a key=value assignment\n Why: A typed package setting override names one declared key and its value\n Fix: Use `--set key=value`\nMore: jet-lang.dev/e/E2104\n")
+    assert_eq(refusal.exit_code, 2)
+    if jet_cli_args_refusal_plan(refusal, false) == {
+        .Done(output) -> {
+            assert_eq(output.stdout, "")
+            assert_eq(output.stderr, refusal.stderr)
+            assert_eq(output.exit_code, 2)
+        }
+        else -> panic("refusal must complete the command")
+    }
+}
+
+#Test("args machine refusal is one status object on stdout with registry metadata") {
+    refusal :: args_test_settings_refusal([String]{"--set"}, true)
+    assert_eq(refusal.stderr, "")
+    assert_eq(refusal.exit_code, 2)
+    assert(refusal.stdout.ends_with("\n"))
+    tree :: args_test_json.parse(refusal.stdout) ?? panic("invalid status JSON")
+    object :: if tree == {
+        .Object(value) -> value
+        else -> panic("status must be an object")
+    }
+    assert_eq(args_test_json_text(object["schema"]), "jet.status/v1")
+    assert_eq(args_test_json_text(object["action"]), "cli")
+    if object["ok"] == {
+        .Bool(value) -> assert(!value)
+        else -> panic("status ok must be a boolean")
+    }
+    reports :: if object["reports"] == {
+        .Array(value) -> value
+        else -> panic("reports must be an array")
+    }
+    assert_eq(reports.len(), 1)
+    report :: if reports[0] == {
+        .Object(value) -> value
+        else -> panic("report must be an object")
+    }
+    assert_eq(args_test_json_text(report["schema"]), "jet.report/v3")
+    assert_eq(args_test_json_text(report["moment"]), "compile")
+    assert_eq(args_test_json_text(report["code"]), "E2104")
+    assert_eq(args_test_json_text(report["what"]), "`--set` needs a key=value assignment")
+    assert_eq(args_test_json_text(report["why"]), "A typed package setting override names one declared key and its value")
+    if report["file"] == {
+        .Null -> {}
+        else -> panic("spanless CLI report must have a null file")
+    }
+    assert(!report.has_key("fix_edits"))
+    if jet_cli_args_refusal_plan(refusal, true) == {
+        .Done(output) -> {
+            assert_eq(output.stdout, refusal.stdout)
+            assert_eq(output.stderr, "")
+            assert_eq(output.exit_code, 2)
+        }
+        else -> panic("machine refusal must complete the command")
+    }
+    assert_eq(args_test_record_refusal([String]{"run", "--record"}, "run", true).stderr, "")
+}
+
+#Test("args first equals splits UTF-8 bytes without truncating keys or values") {
+    parts :: jet_cli_args_assignment_parts("clé=値=é") ?? panic("assignment split is absent")
+    assert_eq(parts, [String]{"clé", "値=é"})
+    assert(jet_cli_args_assignment_parts("clé値") == None)
+    assert_eq(jet_cli_args_assignment_parts("=値") ?? panic("empty key split is absent"), [String]{"", "値"})
+    assert_eq(jet_cli_args_option_value([String]{"--é=値=é", "--é", "later"}, "--é"), Val("値=é"))
+    assert_eq(jet_cli_args_option_value([String]{"--é", "値", "--é=later"}, "--é"), Val("値"))
+    assert_eq(jet_cli_args_flag_value([String]{"--é=ignored", "--é", "値", "--é", "later"}, "--é"), Val("値"))
+}
+
+#Test("args machine refusal preserves exact serialized bytes") {
+    refusal :: args_test_settings_refusal([String]{"--set"}, true)
+    expected :: "{{\"schema\":\"jet.status/v1\",\"action\":\"cli\",\"ok\":false,\"reports\":[{{\"schema\":\"jet.report/v3\",\"moment\":\"compile\",\"severity\":\"error\",\"code\":\"E2104\",\"what\":\"`--set` needs a key=value assignment\",\"why\":\"A typed package setting override names one declared key and its value\",\"fix\":\"Use `--set key=value`\",\"detail\":null,\"denial_kind\":null,\"call_chain\":[],\"scope_chain\":[],\"nearest_granting_scope\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"no_fix_reason\":{{\"kind\":\"ambiguous\",\"next\":\"Correct the named argument or input, then run the command again.\"}},\"cause\":[],\"clears\":0}}]}}\n"
+    assert_eq(refusal.stdout, expected)
+    assert_eq(refusal.stderr, "")
+    assert_eq(refusal.exit_code, 2)
+}
+
+#Test("args human refusal preserves exact bytes without the Front adapter") {
+    refusal :: args_test_settings_refusal([String]{"--set"}, false)
+    assert_eq(refusal.stdout, "")
+    assert_eq(refusal.stderr, "Error [E2104]: `--set` needs a key=value assignment\n Why: A typed package setting override names one declared key and its value\n Fix: Use `--set key=value`\nMore: jet-lang.dev/e/E2104\n")
+    assert_eq(refusal.exit_code, 2)
+}

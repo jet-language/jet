@@ -1,0 +1,1412 @@
+// PORT-PENDING 2109 crates-jet-env-model-src-moduleeval-source: crates/jet-env-model/src/ModuleEval/Source.rs:1-1408
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! The `env.jet` → `EnvPlan` driver: route the typed `module { … }` surface,
+//RS //! discover `imports: find(…)` files (U4), lower typed integration imports, and build the merged `(name → upstream)`
+//RS //! source table (U5/U6/U9), and fold every module's contributions into the
+//RS //! runnable plan.
+//RS 
+//RS use std::collections::BTreeMap;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS use crate::Diagnostics::Diagnostic;
+//RS use crate::Syntax;
+//RS use crate::AST::{Expr, Item, Namespace, StrPart};
+//RS 
+//RS use super::super::Merge;
+//RS use super::super::RefSpec::{self, ProviderKind, RefError, Source, SourceTable};
+//RS use super::Diagnostics::{
+//RS     bad_import_directive, bad_source_ref, discovered_module_imports, find_missing_directory,
+//RS     fleet_unknown_system, image_from_unknown_system, merge_error_to_diagnostic,
+//RS     oci_from_non_executable, retired_nixpkgs_source_ref,
+//RS };
+//RS use super::Environment::{
+//RS     qualified_call_name, EnvironmentIntegration, EnvironmentLifecycle, IntegrationFactProjection,
+//RS     IntegrationKind, LanguagePackCatalog, LanguageSpec, ManagedFile, PackageProfileFact,
+//RS     PackageProfilePlan, PackageProfileSet, PresetSet,
+//RS };
+//RS use super::Eval::{evaluate_modules, merge_all, parse_program, pkg_ref};
+//RS use super::Types::{
+//RS     AdapterPlan, EnvPlan, FleetPlan, ImageKind, ImagePlan, PromptPathMode, PromptStripMode,
+//RS     SecretSpec, SystemPlan,
+//RS };
+//RS use jet_pkg_model::ProviderFacts::{ProviderFactValue, ProviderFacts};
+//RS use jet_pkg_model::Package::PackageFacts;
+//RS 
+//RS /// Read-only source access for an environment graph. Paths passed to the
+//RS /// loader are relative to the pinned environment root; returned file paths
+//RS /// use that same relative coordinate system. The compiler-facing package
+//RS /// reader supplies an authority-backed implementation so profile evaluation
+//RS /// cannot fall back to ambient filesystem reads.
+//RS pub trait SourceLoader {
+//RS     fn read_file(&mut self, relative: &Path) -> Result<String, Diagnostic>;
+//RS 
+//RS     fn list_jet_files(&mut self, relative: &Path) -> Result<Vec<PathBuf>, Diagnostic>;
+//RS 
+//RS     /// Package cross-checks are needed only for image declarations. A loader
+//RS     /// may decline them when the graph has no image that names a package.
+//RS     fn package_facts(&mut self) -> Result<Option<PackageFacts>, Diagnostic> {
+//RS         Ok(None)
+//RS     }
+//RS }
+//RS 
+//RS struct FileSystemSourceLoader {
+//RS     root: PathBuf,
+//RS }
+//RS 
+//RS impl SourceLoader for FileSystemSourceLoader {
+//RS     fn read_file(&mut self, relative: &Path) -> Result<String, Diagnostic> {
+//RS         let path = self.checked_path(relative)?;
+//RS         std::fs::read_to_string(&path).map_err(|error| source_loader_error(&path, error.to_string()))
+//RS     }
+//RS 
+//RS     fn list_jet_files(&mut self, relative: &Path) -> Result<Vec<PathBuf>, Diagnostic> {
+//RS         let directory = self.checked_path(relative)?;
+//RS         let entries = std::fs::read_dir(&directory)
+//RS             .map_err(|error| source_loader_error(&directory, error.to_string()))?;
+//RS         let mut files = Vec::new();
+//RS         for entry in entries {
+//RS             let entry = entry
+//RS                 .map_err(|error| source_loader_error(&directory, error.to_string()))?;
+//RS             let path = entry.path();
+//RS             if path.extension().and_then(|extension| extension.to_str())
+//RS                 != Some(Syntax::FILE_EXT)
+//RS             {
+//RS                 continue;
+//RS             }
+//RS             let canonical = std::fs::canonicalize(&path)
+//RS                 .map_err(|error| source_loader_error(&path, error.to_string()))?;
+//RS             if !canonical.starts_with(&self.root) || !canonical.is_file() {
+//RS                 return Err(source_loader_error(
+//RS                     &path,
+//RS                     "source import resolves outside the environment root".to_string(),
+//RS                 ));
+//RS             }
+//RS             let relative = canonical
+//RS                 .strip_prefix(&self.root)
+//RS                 .map_err(|_| source_loader_error(&canonical, "source import escapes root"))?
+//RS                 .to_path_buf();
+//RS             files.push(relative);
+//RS         }
+//RS         files.sort();
+//RS         Ok(files)
+//RS     }
+//RS 
+//RS     fn package_facts(&mut self) -> Result<Option<PackageFacts>, Diagnostic> {
+//RS         for relative in [
+//RS             PathBuf::from(Syntax::DEFAULT_ENTRY_FILE),
+//RS             Path::new("src").join(Syntax::DEFAULT_ENTRY_FILE),
+//RS         ] {
+//RS             let path = self.root.join(&relative);
+//RS             let source = match std::fs::read_to_string(&path) {
+//RS                 Ok(source) => source,
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+//RS                 Err(error) => {
+//RS                     return Err(source_loader_error(&path, error.to_string()));
+//RS                 }
+//RS             };
+//RS             match jet_pkg_model::Package::extract_inline_package(&source) {
+//RS                 Ok(Some(block)) => {
+//RS                     if PackageFacts::load(&self.root).is_some() {
+//RS                         return Err(Diagnostic::error(
+//RS                             "E1363",
+//RS                             "an inline Package conflicts with package.jet".to_string(),
+//RS                             "one project cannot carry both an inline Package block and a package.jet manifest"
+//RS                                 .to_string(),
+//RS                             "remove package.jet or remove the inline Package block".to_string(),
+//RS                             Some(block.span),
+//RS                         ));
+//RS                     }
+//RS                     return PackageFacts::parse(block.body(&source), path.display().to_string())
+//RS                         .map(Some)
+//RS                         .map_err(|error| {
+//RS                             Diagnostic::error(
+//RS                                 "E1362",
+//RS                                 "the inline Package body is malformed".to_string(),
+//RS                                 error.to_string(),
+//RS                                 "fix the inline Package fields, then retry".to_string(),
+//RS                                 Some(block.body_span),
+//RS                             )
+//RS                         });
+//RS                 }
+//RS                 Err(error) => return Err(error.diagnostic()),
+//RS                 Ok(None) => {}
+//RS             }
+//RS         }
+//RS         Ok(PackageFacts::load(&self.root).and_then(|result| result.ok()))
+//RS     }
+//RS 
+//RS }
+//RS impl FileSystemSourceLoader {
+//RS     fn checked_path(&self, relative: &Path) -> Result<PathBuf, Diagnostic> {
+//RS         if relative.is_absolute()
+//RS             || relative
+//RS                 .components()
+//RS                 .any(|component| component == std::path::Component::ParentDir)
+//RS         {
+//RS             return Err(source_loader_error(
+//RS                 relative,
+//RS                 "source import path must stay below the environment root",
+//RS             ));
+//RS         }
+//RS         let path = self.root.join(relative);
+//RS         let canonical = std::fs::canonicalize(&path)
+//RS             .map_err(|error| source_loader_error(&path, error.to_string()))?;
+//RS         if !canonical.starts_with(&self.root) {
+//RS             return Err(source_loader_error(
+//RS                 &path,
+//RS                 "source import resolves outside the environment root",
+//RS             ));
+//RS         }
+//RS         Ok(canonical)
+//RS     }
+//RS }
+//RS 
+//RS fn source_loader_error(path: &Path, cause: impl Into<String>) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1331",
+//RS         format!("environment source `{}` cannot be read", path.display()),
+//RS         cause.into(),
+//RS         "restore a regular source file below the environment root".to_string(),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS /// True when `src` uses the typed `module { … }` surface (U3/U8) rather than
+//RS /// the Phase-1 `pkg.*` directive surface. The CLI routes loading on this: a
+//RS /// file that declares the `module` keyword stays on this path even when its
+//RS /// later syntax is malformed; only the legacy directive surface uses the
+//RS /// tolerant fallback scanner.
+//RS pub fn is_module_surface(src: &str) -> bool {
+//RS     let (toks, diags) = crate::Lexer::lex_config(src);
+//RS     let has_module = toks
+//RS         .iter()
+//RS         .any(|token| matches!(&token.kind, crate::Lexer::TokKind::KwModule));
+//RS     if !diags.is_empty() {
+//RS         return has_module;
+//RS     }
+//RS     match crate::Parser::parse_config(&toks) {
+//RS         Ok(program) => program
+//RS             .items
+//RS             .iter()
+//RS             .any(|item| matches!(item, Item::Module(_))),
+//RS         Err(_) => has_module,
+//RS     }
+//RS }
+//RS 
+//RS /// Evaluate a typed `env.jet` (the `module name { sources:/imports:/env.X: }`
+//RS /// surface, U3/U6/U8) into an `EnvPlan`. Sources merge across modules by key
+//RS /// (U5); package sugar resolves to `package@source` refs; the `prompt`
+//RS /// fact becomes the label. `imports: find(…)` is walked before evaluation;
+//RS /// typed integration calls lower into the same source and environment graph.
+//RS pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
+//RS     evaluate_env_with_preset(src, base_dir, None)
+//RS }
+//RS 
+//RS /// Evaluate one source-backed package generation without realizing or mutating
+//RS /// the store. This is the production path for `jet profile plan`; callers get
+//RS /// provider identity, source provenance, and collision selections from the
+//RS /// same graph used by environment evaluation.
+//RS pub fn evaluate_package_profile(
+//RS     src: &str,
+//RS     base_dir: &Path,
+//RS     name: &str,
+//RS ) -> Result<PackageProfilePlan, Diagnostic> {
+//RS     let env = evaluate_env(src, base_dir)?;
+//RS     let mut profiles = PackageProfileSet::default();
+//RS     for profile in env.package_profiles {
+//RS         profiles.insert_checked(profile).map_err(|error| {
+//RS             Diagnostic::error(
+//RS                 "E1332",
+//RS                 format!("package generation composition failed: {error}"),
+//RS                 "one source-backed package generation cannot silently choose different inheritance, package, or collision facts".to_string(),
+//RS                 "merge the declarations so they agree, or give the generations different names".to_string(),
+//RS                 None,
+//RS             )
+//RS         })?;
+//RS     }
+//RS     let resolved = profiles.resolve(name).map_err(|error| {
+//RS         Diagnostic::error(
+//RS             "E1332",
+//RS             format!("package generation `{name}` could not be resolved: {error}"),
+//RS             "generation inheritance is resolved parent-first and must remain acyclic".to_string(),
+//RS             "fix the generation name, parent reference, or inheritance cycle".to_string(),
+//RS             None,
+//RS         )
+//RS     })?;
+//RS     let package_names = resolved
+//RS         .packages
+//RS         .iter()
+//RS         .map(|package| package.raw.clone())
+//RS         .collect::<std::collections::BTreeSet<_>>();
+//RS     for (path, provider) in &resolved.collisions {
+//RS         if !package_names.contains(provider) {
+//RS             return Err(Diagnostic::error(
+//RS                 "E1335",
+//RS                 format!(
+//RS                     "package generation `{name}` selects `{provider}` for `{path}`, but that provider is not in the generation"
+//RS                 ),
+//RS                 "a collision selection must name one exact package contender retained by the source-backed generation".to_string(),
+//RS                 "add the selected package ref to `packages`, or select one of the existing contenders".to_string(),
+//RS                 None,
+//RS             ));
+//RS         }
+//RS     }
+//RS     let mut packages = Vec::new();
+//RS     for package in &resolved.packages {
+//RS         let spec = classify_profile_ref(&package.raw, &env.table).map_err(|error| {
+//RS             Diagnostic::error(
+//RS                 "E1335",
+//RS                 format!(
+//RS                     "package generation `{name}` contains unsupported ref `{}`: {error}",
+//RS                     package.raw
+//RS                 ),
+//RS                 "generation package facts must retain one lossless package and provider identity"
+//RS                     .to_string(),
+//RS                 "use `package@source` with a built-in or declared source".to_string(),
+//RS                 None,
+//RS             )
+//RS         })?;
+//RS         let (target, channel) = RefSpec::split_channel_ref(&spec.package);
+//RS         // Keep the source token from the declaration. `default` is the
+//RS         // package-sugar spelling for nixpkgs, but changing it to `nixpkgs`
+//RS         // here would erase source identity from the plan and later lock views.
+//RS         let source = package
+//RS             .raw
+//RS             .rsplit_once(Syntax::REF_PROVIDER_AT)
+//RS             .map(|(_, source)| source)
+//RS             .unwrap_or_else(|| spec.source.label())
+//RS             .to_string();
+//RS         let provider = profile_provider_label(&spec.source, &source, &env.table);
+//RS         let upstream = env.table.upstream(&source).map(str::to_string);
+//RS         let mut facts = ProviderFacts::for_reference(&provider, &package.raw);
+//RS         facts.set_profile(&resolved.name, &package.declared_by.join(","));
+//RS         facts.add_fact(
+//RS             "package.target",
+//RS             ProviderFactValue::Text(target.to_string()),
+//RS             "profile.declaration",
+//RS         );
+//RS         facts.add_fact(
+//RS             "package.source",
+//RS             ProviderFactValue::Text(source.clone()),
+//RS             "profile.declaration",
+//RS         );
+//RS         if let Some(channel) = channel.as_ref() {
+//RS             facts.add_fact(
+//RS                 "package.channel",
+//RS                 ProviderFactValue::Text(channel.as_str().to_string()),
+//RS                 "profile.declaration",
+//RS             );
+//RS         }
+//RS         if is_external_provider(&provider) && channel.is_some() {
+//RS             facts.add_loss(
+//RS                 "provider.selector",
+//RS                 "external provider references must retain an exact version, revision, or digest",
+//RS                 "profile.declaration",
+//RS             );
+//RS         }
+//RS         match &upstream {
+//RS             Some(upstream) => {
+//RS                 facts.set_resolved_source(upstream);
+//RS                 facts.add_fact(
+//RS                     "provider.upstream",
+//RS                     ProviderFactValue::Text(upstream.clone()),
+//RS                     "env.source",
+//RS                 );
+//RS                 let resolved_reference = provider_reference_from_upstream(upstream, &provider);
+//RS                 let resolved = ProviderFacts::for_reference(&provider, &resolved_reference);
+//RS                 if resolved.selector.is_exact() {
+//RS                     facts.set_resolved_selector(&resolved.selector.raw, "env.source");
+//RS                 } else if is_external_provider(&provider) {
+//RS                     facts.add_loss(
+//RS                         "provider.upstream",
+//RS                         &format!(
+//RS                             "ambiguous provider fact: unresolved inference for source `{source}` from `{upstream}`"
+//RS                         ),
+//RS                         "env.source",
+//RS                     );
+//RS                 }
+//RS             }
+//RS             None => facts.set_resolved_source(&source),
+//RS         }
+//RS         if !facts.is_lossless() {
+//RS             let ambiguous = facts
+//RS                 .losses
+//RS                 .iter()
+//RS                 .any(|loss| loss.reason.contains("ambiguous provider fact"));
+//RS             let details = facts
+//RS                 .losses
+//RS                 .iter()
+//RS                 .map(|loss| loss.reason.as_str())
+//RS                 .chain(
+//RS                     facts
+//RS                         .conflicts
+//RS                         .iter()
+//RS                         .map(|conflict| conflict.right.as_str()),
+//RS                 )
+//RS                 .collect::<Vec<_>>()
+//RS                 .join("; ");
+//RS             let message = if ambiguous {
+//RS                 format!("package generation `{name}` has ambiguous provider fact: {details}")
+//RS             } else {
+//RS                 format!(
+//RS                     "package generation `{name}` has lossy or conflicting provider fact: {details}"
+//RS                 )
+//RS             };
+//RS             return Err(Diagnostic::error(
+//RS                 "E1335",
+//RS                 message,
+//RS                 "provider identity, selector, and native meaning must remain explicit across planning and locking".to_string(),
+//RS                 "pin the provider with an exact version, revision, or digest, or declare a lossless built-in source".to_string(),
+//RS                 None,
+//RS             ));
+//RS         }
+//RS         let fact = PackageProfileFact {
+//RS             raw: package.raw.clone(),
+//RS             target: target.to_string(),
+//RS             source: source.clone(),
+//RS             upstream,
+//RS             provider,
+//RS             channel: channel.map(|value| value.as_str().to_string()),
+//RS             declared_by: package.declared_by.clone(),
+//RS             provider_facts: facts.clone(),
+//RS         };
+//RS         packages.push(fact);
+//RS     }
+//RS     Ok(PackageProfilePlan {
+//RS         name: resolved.name,
+//RS         selected_profiles: resolved.selected_profiles,
+//RS         applied: resolved.applied,
+//RS         packages,
+//RS         collisions: resolved.collisions,
+//RS         sources: resolved.sources,
+//RS         fingerprint: String::new(),
+//RS         provider_facts: BTreeMap::new(),
+//RS     }
+//RS     .finalize())
+//RS }
+//RS 
+//RS fn profile_provider_label(source: &Source, source_name: &str, table: &SourceTable) -> String {
+//RS     match source {
+//RS         Source::Jetpack => "nix".to_string(),
+//RS         Source::Nixpkgs => "nix".to_string(),
+//RS         Source::Github => "github".to_string(),
+//RS         Source::Path => "core".to_string(),
+//RS         Source::Cran => "cran".to_string(),
+//RS         Source::LuaRocks => "luarocks".to_string(),
+//RS         Source::RubyGems => "ruby".to_string(),
+//RS         Source::Cpan => "perl".to_string(),
+//RS         Source::Packagist => "php".to_string(),
+//RS         Source::JetRegistry => "jet-registry".to_string(),
+//RS         Source::Npm => "npm".to_string(),
+//RS         Source::Cargo => "cargo".to_string(),
+//RS         Source::PyPI => "pypi".to_string(),
+//RS         Source::SwiftPM => "swiftpm".to_string(),
+//RS         Source::Releases => "jetpackage".to_string(),
+//RS         Source::Named(_) => table
+//RS             .upstream(source_name)
+//RS             .and_then(|upstream| upstream.rsplit_once('@').map(|(_, provider)| provider))
+//RS             .filter(|provider| !provider.is_empty())
+//RS             .map(str::to_string)
+//RS             .unwrap_or_else(|| table.provider(source_name).label().to_string()),
+//RS     }
+//RS }
+//RS 
+//RS /// Convert the source table's provider-first upstream back to the shared
+//RS /// package-reference shape before extracting selector facts. The table keeps
+//RS /// `provider:target` so the resolver can pass it to its native backend; the
+//RS /// shared carrier uses `target@provider#selector` so identity and selectors
+//RS /// remain parseable and comparable.
+//RS fn provider_reference_from_upstream(upstream: &str, provider: &str) -> String {
+//RS     upstream
+//RS         .split_once(Syntax::REF_SEPARATOR)
+//RS         .map(|(_, target)| {
+//RS             RefSpec::migrate_persisted_ref(&format!(
+//RS                 "{target}{}{provider}",
+//RS                 Syntax::REF_PROVIDER_AT
+//RS             ))
+//RS             .canonical
+//RS         })
+//RS         .unwrap_or_else(|| upstream.to_string())
+//RS }
+//RS 
+//RS fn is_external_provider(provider: &str) -> bool {
+//RS     matches!(
+//RS         provider,
+//RS         "jet-registry"
+//RS             | "npm"
+//RS             | "pypi"
+//RS             | "cargo"
+//RS             | "swiftpm"
+//RS             | "maven"
+//RS             | "nuget"
+//RS             | "conan"
+//RS             | "vcpkg"
+//RS             | "github"
+//RS             | "homebrew"
+//RS             | "binary"
+//RS             | "cran"
+//RS             | "luarocks"
+//RS             | "ruby"
+//RS             | "perl"
+//RS             | "php"
+//RS     )
+//RS }
+//RS 
+//RS fn classify_profile_ref(raw: &str, table: &SourceTable) -> Result<RefSpec::RefSpec, String> {
+//RS     if let Some((package, source_with_selector)) = raw.rsplit_once(Syntax::REF_PROVIDER_AT) {
+//RS         let (source, selector) = source_with_selector
+//RS             .split_once(Syntax::REF_CHANNEL_MARKER)
+//RS             .map_or((source_with_selector, None), |(source, selector)| {
+//RS                 (source, Some(selector))
+//RS             });
+//RS         if source == Syntax::DEFAULT_SOURCE && !package.contains(Syntax::REF_CHANNEL_MARKER) {
+//RS             let package = selector.map_or_else(
+//RS                 || package.to_string(),
+//RS                 |selector| format!("{package}{}{selector}", Syntax::REF_CHANNEL_MARKER),
+//RS             );
+//RS             let raw = RefSpec::with_default_source(&package);
+//RS             return Ok(RefSpec::RefSpec {
+//RS                 source: RefSpec::Source::Jetpack,
+//RS                 package,
+//RS                 raw,
+//RS             });
+//RS         }
+//RS     }
+//RS     RefSpec::classify_in(raw, table).map_err(|error| format!("{error:?}"))
+//RS }
+//RS 
+//RS /// Evaluate a typed environment with one authoritative preset selection.
+//RS /// An explicit CLI choice is resolved before ambient hostname/user matching,
+//RS /// so an unrelated ambient preset cannot reject or augment the requested
+//RS /// plan.
+//RS pub fn evaluate_env_with_preset(
+//RS     src: &str,
+//RS     base_dir: &Path,
+//RS     requested_preset: Option<&str>,
+//RS ) -> Result<EnvPlan, Diagnostic> {
+//RS     evaluate_env_with_selections(src, base_dir, requested_preset, None)
+//RS }
+//RS 
+//RS /// Evaluate an environment while explicitly selecting one `env.<name>`
+//RS /// environment module. The ordinary CLI uses the deterministic default
+//RS /// (`dev`, then `default`, then lexical order) when it has no selector.
+//RS pub fn evaluate_env_with_environment(
+//RS     src: &str,
+//RS     base_dir: &Path,
+//RS     requested_environment: Option<&str>,
+//RS ) -> Result<EnvPlan, Diagnostic> {
+//RS     evaluate_env_with_selections(src, base_dir, None, requested_environment)
+//RS }
+//RS 
+//RS pub fn evaluate_env_with_selections(
+//RS     src: &str,
+//RS     base_dir: &Path,
+//RS     requested_preset: Option<&str>,
+//RS     requested_environment: Option<&str>,
+//RS ) -> Result<EnvPlan, Diagnostic> {
+//RS     let environment_root = std::fs::canonicalize(base_dir).map_err(|error| {
+//RS         Diagnostic::error(
+//RS             "E1331",
+//RS             format!("environment root `{}` cannot be resolved: {error}", base_dir.display()),
+//RS             "one environment graph must resolve from a real project directory before it follows imports or path-backed facts".to_string(),
+//RS             "run the command from an existing project directory".to_string(),
+//RS             None,
+//RS         )
+//RS     })?;
+//RS     let mut loader = FileSystemSourceLoader {
+//RS         root: environment_root.clone(),
+//RS     };
+//RS     evaluate_env_with_source_loader(
+//RS         src,
+//RS         &environment_root,
+//RS         &mut loader,
+//RS         requested_preset,
+//RS         requested_environment,
+//RS     )
+//RS }
+//RS 
+//RS /// Evaluate an environment with caller-owned, authority-checked source access.
+//RS /// This is the same graph evaluator as [`evaluate_env_with_selections`]; only
+//RS /// the file and directory boundary changes. Package tooling uses it to keep
+//RS /// every imported profile source inside the already-pinned package root.
+//RS pub fn evaluate_env_with_source_loader(
+//RS     src: &str,
+//RS     base_dir: &Path,
+//RS     loader: &mut dyn SourceLoader,
+//RS     requested_preset: Option<&str>,
+//RS     requested_environment: Option<&str>,
+//RS ) -> Result<EnvPlan, Diagnostic> {
+//RS     let program = parse_program(src)?;
+//RS     let environment_root = std::fs::canonicalize(base_dir).map_err(|error| {
+//RS         Diagnostic::error(
+//RS             "E1331",
+//RS             format!("environment root `{}` cannot be resolved: {error}", base_dir.display()),
+//RS             "one environment graph must resolve from a real project directory before it follows imports or path-backed facts".to_string(),
+//RS             "run the command from an existing project directory".to_string(),
+//RS             None,
+//RS         )
+//RS     })?;
+//RS 
+//RS     // The root `env.jet` plus every file reachable through `imports: find(…)`
+//RS     // (U4). Each unit owns its source text (spans index into it) and the dir its
+//RS     // relative refs / `embed_file` resolve against.
+//RS     let mut units = vec![EvalUnit {
+//RS         items: program.items,
+//RS         src: src.to_string(),
+//RS         base_dir: environment_root.clone(),
+//RS         source_path: environment_root.join(Syntax::ENV_FILE),
+//RS     }];
+//RS     let discovered = discover_imports(&units[0], &environment_root, loader)?;
+//RS     units.extend(discovered);
+//RS     let source_files = units
+//RS         .iter()
+//RS         .filter_map(|unit| {
+//RS             unit.source_path
+//RS                 .strip_prefix(&environment_root)
+//RS                 .ok()
+//RS                 .map(|path| {
+//RS                     path.to_string_lossy()
+//RS                         .replace(std::path::MAIN_SEPARATOR, "/")
+//RS                 })
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     // `evaluate_modules` reads every unit for comptime evaluation. The plan's
+//RS     // disclosure projection is filled below from the selected environment's
+//RS     // scoped contributions, so sibling variables do not leak into `info`.
+//RS     let mut env_reads = Vec::<super::Types::EnvironmentRead>::new();
+//RS 
+//RS     let table = build_source_table(&units)?;
+//RS 
+//RS     // Evaluate every unit's modules (each against its own source + base dir),
+//RS     // then merge all contributions through the §6 engine as one pass — so a
+//RS     // discovered module's `env.dev` packages combine with the root's, and a
+//RS     // cross-file source conflict still surfaces as E0967; fact conflicts use
+//RS     // the canonical contribution diagnostic.
+//RS     let mut modules = Vec::new();
+//RS     for unit in &units {
+//RS         modules.extend(evaluate_modules(&unit.items, &unit.src, &unit.base_dir)?);
+//RS     }
+//RS 
+//RS     // U11/U14: collect every captured System/Image across all modules (source
+//RS     // order), then cross-check each image's `from:` against the known systems.
+//RS     let mut systems: Vec<SystemPlan> = Vec::new();
+//RS     let mut images: Vec<ImagePlan> = Vec::new();
+//RS     let mut fleets: Vec<FleetPlan> = Vec::new();
+//RS     let mut vmtests = Vec::new();
+//RS     let mut dev_services: Vec<super::Types::DevServicePlan> = Vec::new();
+//RS     let mut secrets: Vec<SecretSpec> = Vec::new();
+//RS     let mut adapters: Vec<AdapterPlan> = Vec::new();
+//RS     let mut lifecycle = EnvironmentLifecycle::default();
+//RS     let mut presets = PresetSet::default();
+//RS     let mut package_profiles = PackageProfileSet::default();
+//RS     let mut languages = Vec::new();
+//RS     let mut files: Vec<ManagedFile> = Vec::new();
+//RS     let mut integrations: Vec<EnvironmentIntegration> = Vec::new();
+//RS     let mut integration_facts = IntegrationFactProjection::default();
+//RS     let mut integration_packages = Vec::new();
+//RS     let environment_names: std::collections::BTreeSet<String> = modules
+//RS         .iter()
+//RS         .flat_map(|module| module.entries.iter())
+//RS         .filter_map(|((namespace, name), _)| (*namespace == Namespace::Env).then_some(name.clone()))
+//RS         .collect();
+//RS     // Select exactly one environment before projecting any non-entry facts.
+//RS     // Package/settings selection below already used this rule; the same
+//RS     // boundary must govern services, lifecycle, files, integrations, and
+//RS     // variable disclosure.
+//RS     let active_environment = select_active_environment(&environment_names, requested_environment)?;
+//RS     for module in &modules {
+//RS         systems.extend(module.systems.iter().cloned());
+//RS         images.extend(module.images.iter().cloned());
+//RS         fleets.extend(module.fleets.iter().cloned());
+//RS         vmtests.extend(module.vmtests.iter().cloned());
+//RS         for profile in &module.package_profiles {
+//RS             package_profiles.insert_checked(profile.clone()).map_err(|error| {
+//RS                 Diagnostic::error(
+//RS                     "E1332",
+//RS                     format!("package generation composition failed: {error}"),
+//RS                     "one source-backed package generation cannot silently choose different inheritance, package, or collision facts".to_string(),
+//RS                     "merge the declarations so they agree, or give the generations different names".to_string(),
+//RS                     None,
+//RS                 )
+//RS             })?;
+//RS         }
+//RS         let Some(active_name) = active_environment.as_deref() else {
+//RS             continue;
+//RS         };
+//RS         if !module
+//RS             .environment_contributions
+//RS             .iter()
+//RS             .any(|contribution| contribution.name == active_name)
+//RS         {
+//RS             continue;
+//RS         }
+//RS         for contribution in module
+//RS             .environment_contributions
+//RS             .iter()
+//RS             .filter(|contribution| contribution.name == active_name)
+//RS         {
+//RS             for read in &contribution.environment_reads {
+//RS                 if !env_reads.iter().any(|seen| seen.name == read.name) {
+//RS                     env_reads.push(read.clone());
+//RS                 }
+//RS             }
+//RS             for service in &contribution.dev_services {
+//RS                 if dev_services
+//RS                     .iter()
+//RS                     .any(|existing| existing.name == service.name)
+//RS                 {
+//RS                     return Err(Diagnostic::error(
+//RS                         "E1262",
+//RS                         format!("service `{}` is declared more than once", service.name),
+//RS                         "one environment supervisor owns each service name and cannot choose between different process facts".to_string(),
+//RS                         "merge the service records or give them distinct names".to_string(),
+//RS                         None,
+//RS                     ));
+//RS                 }
+//RS                 dev_services.push(service.clone());
+//RS             }
+//RS             for secret in &contribution.secrets {
+//RS                 merge_secret_spec(&mut secrets, secret.clone())?;
+//RS             }
+//RS             adapters.extend(contribution.adapters.iter().cloned());
+//RS             super::Eval::lifecycle_merge(
+//RS                 &mut lifecycle,
+//RS                 contribution.lifecycle.clone(),
+//RS                 &module.name,
+//RS             )?;
+//RS             for preset in &contribution.presets {
+//RS                 presets.insert_checked(preset.clone()).map_err(|error| {
+//RS                     Diagnostic::error(
+//RS                         "E1332",
+//RS                         format!("environment preset composition failed: {error}"),
+//RS                         "one environment graph cannot silently choose between different facts for the same preset".to_string(),
+//RS                         "merge the preset declarations so they are identical, or give them different names".to_string(),
+//RS                         None,
+//RS                     )
+//RS                 })?;
+//RS             }
+//RS             for language in &contribution.languages {
+//RS                 if let Some(existing) = languages
+//RS                     .iter()
+//RS                     .find(|existing: &&LanguageSpec| existing.key() == language.key())
+//RS                 {
+//RS                     if !existing.same_selection(language) {
+//RS                         return Err(Diagnostic::error(
+//RS                             "E1333",
+//RS                             format!("language pack `{}` has conflicting selection facts", language.name),
+//RS                             "one environment graph cannot silently choose a version, channel, venv, or extra-package selection".to_string(),
+//RS                             "merge the language records so their typed facts agree".to_string(),
+//RS                             None,
+//RS                         ));
+//RS                     }
+//RS                 } else {
+//RS                     languages.push(language.clone());
+//RS                 }
+//RS             }
+//RS             for file in &contribution.files {
+//RS                 if let Some(existing) = files
+//RS                     .iter()
+//RS                     .find(|item| item.destination == file.destination)
+//RS                 {
+//RS                     if existing != file {
+//RS                         return Err(Diagnostic::error(
+//RS                             "E1326",
+//RS                             format!("managed file `{}` has conflicting declarations", file.destination),
+//RS                             "one environment graph cannot apply two different owners to the same destination".to_string(),
+//RS                             "merge the file declarations or choose distinct destinations".to_string(),
+//RS                             None,
+//RS                         ));
+//RS                     }
+//RS                 } else {
+//RS                     files.push(file.clone());
+//RS                 }
+//RS             }
+//RS         }
+//RS         for integration in &module.integrations {
+//RS             if let Some(existing) = integrations
+//RS                 .iter()
+//RS                 .find(|existing| existing.name == integration.name)
+//RS             {
+//RS                 if existing != integration {
+//RS                     return Err(Diagnostic::error(
+//RS                         "E1335",
+//RS                         format!("integration `{}` has conflicting declarations", integration.name),
+//RS                         "one environment graph cannot silently choose different SDK, host, credential, or grant facts".to_string(),
+//RS                         "merge the integration options so they agree, or keep one declaration".to_string(),
+//RS                         None,
+//RS                     ));
+//RS                 }
+//RS             } else {
+//RS                 integrations.push(integration.clone());
+//RS             }
+//RS             for secret in &integration.secrets {
+//RS                 if !secrets.iter().any(|existing| existing.name == *secret) {
+//RS                     secrets.push(SecretSpec::implicit(secret.clone()));
+//RS                 }
+//RS             }
+//RS             for package in &integration.packages {
+//RS                 push_unique(&mut integration_packages, package.clone());
+//RS             }
+//RS             for file in &integration.files {
+//RS                 if let Some(existing) = files
+//RS                     .iter()
+//RS                     .find(|item| item.destination == file.destination)
+//RS                 {
+//RS                     if existing != file {
+//RS                         return Err(Diagnostic::error(
+//RS                             "E1326",
+//RS                             format!("managed file `{}` has conflicting declarations", file.destination),
+//RS                             "one environment graph cannot apply two different owners to the same destination".to_string(),
+//RS                             "merge the file declarations or choose distinct destinations".to_string(),
+//RS                             None,
+//RS                         ));
+//RS                     }
+//RS                 } else {
+//RS                     files.push(file.clone());
+//RS                 }
+//RS             }
+//RS             for task in &integration.tasks {
+//RS                 push_unique(&mut integration_facts.tasks, task.clone());
+//RS                 let fact = super::Environment::IntegrationTaskFact {
+//RS                     name: task.clone(),
+//RS                     integration: integration.kind,
+//RS                     packages: integration.packages.clone(),
+//RS                     secrets: integration.secrets.clone(),
+//RS                     providers: integration.providers.clone(),
+//RS                     host_checks: integration.host_checks.clone(),
+//RS                     grants: integration.grants.clone(),
+//RS                 };
+//RS                 if !integration_facts.task_facts.contains(&fact) {
+//RS                     integration_facts.task_facts.push(fact);
+//RS                 }
+//RS             }
+//RS             for provider in &integration.providers {
+//RS                 push_unique(&mut integration_facts.providers, provider.clone());
+//RS             }
+//RS             for host_check in &integration.host_checks {
+//RS                 push_unique(&mut integration_facts.host_checks, host_check.clone());
+//RS             }
+//RS             for grant in &integration.grants {
+//RS                 push_unique(&mut integration_facts.grants, grant.clone());
+//RS             }
+//RS             for loss in &integration.losses {
+//RS                 push_unique(&mut integration_facts.losses, loss.clone());
+//RS             }
+//RS         }
+//RS     }
+//RS     if let Err(error) = integration_facts.validate() {
+//RS         return Err(Diagnostic::error(
+//RS             "E1335",
+//RS             "environment integration lowering was lossy".to_string(),
+//RS             error,
+//RS             "use named secret references and supported typed integration arguments".to_string(),
+//RS             None,
+//RS         ));
+//RS     }
+//RS     let system_names: Vec<String> = systems.iter().map(|s| s.name.clone()).collect();
+//RS     // D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` cross-checks against
+//RS     // this project's own `pkg.jet` `packages:` block (E1267) — a different
+//RS     // manifest than the `env.jet`/`config.jet` this pass is evaluating, so it's
+//RS     // loaded fresh here rather than threaded through as a plan field.
+//RS     let needs_package_facts = images.iter().any(|image| {
+//RS         matches!(image.kind, ImageKind::Oci) && !image.from_environment
+//RS     });
+//RS     let manifest = if needs_package_facts {
+//RS         loader.package_facts()?
+//RS     } else {
+//RS         None
+//RS     };
+//RS     for image in &images {
+//RS         match image.kind {
+//RS             ImageKind::Iso => {
+//RS                 if !system_names.contains(&image.from) {
+//RS                     return Err(image_from_unknown_system(
+//RS                         &image.name,
+//RS                         &image.from,
+//RS                         &system_names,
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             ImageKind::Oci => {
+//RS                 if image.from_environment {
+//RS                     if !environment_names.contains(&image.from) {
+//RS                         return Err(Diagnostic::error(
+//RS                             "E1327",
+//RS                             format!("the image `{}` names unknown environment `{}`", image.name, image.from),
+//RS                             "D-ENV-IMAGE1: an environment image projects one declared `env.<name>` fact graph into a runnable OCI image".to_string(),
+//RS                             format!("declare `module env.{} {{ … }}`, or point `from:` at an existing environment", image.from),
+//RS                             None,
+//RS                         ));
+//RS                     }
+//RS                     continue;
+//RS                 }
+//RS                 let kind = manifest.as_ref().and_then(|m| m.package_kind(&image.from));
+//RS                 let is_executable =
+//RS                     matches!(kind, Some(super::super::Package::PackageKind::Executable));
+//RS                 if !is_executable {
+//RS                     let is_library =
+//RS                         matches!(kind, Some(super::super::Package::PackageKind::Library));
+//RS                     return Err(oci_from_non_executable(
+//RS                         &image.name,
+//RS                         &image.from,
+//RS                         is_library,
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     // U15: every fleet host must reference a known system (E1242).
+//RS     for fleet in &fleets {
+//RS         for host in &fleet.hosts {
+//RS             if !system_names.contains(&host.system) {
+//RS                 return Err(fleet_unknown_system(
+//RS                     &fleet.name,
+//RS                     &host.name,
+//RS                     &host.system,
+//RS                     &system_names,
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     for vmtest in &vmtests {
+//RS         for host in &vmtest.hosts {
+//RS             if !system_names.contains(&host.system) {
+//RS                 return Err(fleet_unknown_system(
+//RS                     &vmtest.name,
+//RS                     &host.name,
+//RS                     &host.system,
+//RS                     &system_names,
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     super::Eval::validate_secret_graph(&secrets, crate::Diagnostics::Span::new(0, 0))?;
+//RS     if requested_environment.is_some() {
+//RS         for secret in &secrets {
+//RS             for environment in &secret.allowed_environments {
+//RS                 if !environment_names.contains(environment) {
+//RS                     return Err(Diagnostic::error(
+//RS                         "E1333",
+//RS                         format!(
+//RS                             "secret `{}` names undeclared environment `{environment}`",
+//RS                             secret.name
+//RS                         ),
+//RS                         "a known active profile can validate every allowed-environment label before activation".to_string(),
+//RS                         "declare that `env.<name>` profile or defer selection with a dynamic profile".to_string(),
+//RS                         None,
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     let merged = merge_all(&modules).map_err(|e| merge_error_to_diagnostic(&e))?;
+//RS 
+//RS     // Select exactly one environment module. The selected name is explicit when a host
+//RS     // asks for it; otherwise `dev`, then `default`, then lexical order gives
+//RS     // one stable beginner path instead of silently merging sibling modules.
+//RS     let active_key = active_environment
+//RS         .as_ref()
+//RS         .map(|name| (Namespace::Env, name.clone()));
+//RS     let active_environment_provenance = active_key
+//RS         .as_ref()
+//RS         .map(|key| {
+//RS             modules
+//RS                 .iter()
+//RS                 .filter(|module| module.entries.iter().any(|(entry_key, _)| entry_key == key))
+//RS                 .map(|module| module.name.clone())
+//RS                 .collect::<Vec<_>>()
+//RS         })
+//RS         .unwrap_or_default();
+//RS 
+//RS     let mut package_refs = Vec::new();
+//RS     package_refs.extend(integration_packages);
+//RS     let mut prompt = None;
+//RS     let mut prompt_path = PromptPathMode::default();
+//RS     let mut prompt_strip = PromptStripMode::default();
+//RS     if let Some(key) = &active_key {
+//RS         let entry = &merged[key];
+//RS         for pkg in &entry.packages {
+//RS             push_unique(&mut package_refs, pkg_ref(pkg));
+//RS         }
+//RS         if prompt.is_none() {
+//RS             if let Some(label) = entry.settings.get(Syntax::ENV_FIELD_PROMPT) {
+//RS                 prompt = Some(label.clone());
+//RS             }
+//RS         }
+//RS         if let Some(path) = entry.settings.get(Syntax::PROMPT_SETTING_PATH) {
+//RS             prompt_path = prompt_path_mode(path);
+//RS         }
+//RS         if let Some(strip) = entry.settings.get(Syntax::PROMPT_SETTING_STRIP) {
+//RS             prompt_strip = prompt_strip_mode(strip);
+//RS         }
+//RS     }
+//RS     let selected_names = requested_preset
+//RS         .map(|name| vec![name.to_string()])
+//RS         .unwrap_or_else(|| {
+//RS             presets.auto_select_many(
+//RS                 &std::env::var("HOSTNAME").unwrap_or_default(),
+//RS                 &std::env::var("USER")
+//RS                     .or_else(|_| std::env::var("USERNAME"))
+//RS                     .unwrap_or_default(),
+//RS             )
+//RS         });
+//RS     let selected_preset = (!selected_names.is_empty())
+//RS         .then(|| presets.resolve_many(&selected_names))
+//RS         .transpose()
+//RS         .map_err(|error| {
+//RS             Diagnostic::error(
+//RS                 "E1332",
+//RS                 format!("environment preset could not be resolved: {error}"),
+//RS                 "preset inheritance is resolved parent-first and must remain acyclic".to_string(),
+//RS                 "fix the preset name, parent reference, or inheritance cycle".to_string(),
+//RS                 None,
+//RS             )
+//RS         })?;
+//RS     if let Some(preset) = &selected_preset {
+//RS         for package in &preset.packages {
+//RS             push_unique(&mut package_refs, package.clone());
+//RS         }
+//RS     }
+//RS     let catalog = LanguagePackCatalog::builtin();
+//RS     let language_expansion = catalog.expand(&languages).map_err(|error| {
+//RS         Diagnostic::error(
+//RS             "E1333",
+//RS             format!("environment language pack could not be expanded: {error}"),
+//RS             "language packs expand through one closed catalog into ordinary package refs"
+//RS                 .to_string(),
+//RS             "choose a language name from the catalog exposed by `jet env info`".to_string(),
+//RS             None,
+//RS         )
+//RS     })?;
+//RS     for package in &language_expansion.packages {
+//RS         push_unique(&mut package_refs, package.clone());
+//RS     }
+//RS     let language_packs = language_expansion.packs.clone();
+//RS     let language_projections = language_expansion.projections.clone();
+//RS     Ok(EnvPlan {
+//RS         table,
+//RS         source_files,
+//RS         graph_identity: None,
+//RS         environment_reads: env_reads,
+//RS         package_refs,
+//RS         adapters,
+//RS         prompt,
+//RS         prompt_path,
+//RS         prompt_strip,
+//RS         systems,
+//RS         images,
+//RS         fleets,
+//RS         vmtests,
+//RS         dev_services,
+//RS         secrets,
+//RS         lifecycle,
+//RS         presets: presets.presets.values().cloned().collect(),
+//RS         languages,
+//RS         selected_preset,
+//RS         language_expansion,
+//RS         language_packs,
+//RS         language_projections,
+//RS         files,
+//RS         integrations,
+//RS         integration_facts,
+//RS         package_profiles: package_profiles.profiles.values().cloned().collect(),
+//RS         environment_names: environment_names.into_iter().collect(),
+//RS         active_environment,
+//RS         active_environment_provenance,
+//RS     })
+//RS }
+//RS 
+//RS fn select_active_environment(
+//RS     names: &std::collections::BTreeSet<String>,
+//RS     requested_environment: Option<&str>,
+//RS ) -> Result<Option<String>, Diagnostic> {
+//RS     if let Some(name) = requested_environment {
+//RS         if names.contains(name) {
+//RS             return Ok(Some(name.to_string()));
+//RS         }
+//RS         return Err(Diagnostic::error(
+//RS             "E1337",
+//RS             format!("environment module `{name}` is not declared"),
+//RS             "one environment plan activates one declared `env.<name>` module; siblings stay available for explicit selection".to_string(),
+//RS             "choose one of the declared `env.<name>` module names".to_string(),
+//RS             None,
+//RS         ));
+//RS     }
+//RS     if names.contains("dev") {
+//RS         return Ok(Some("dev".to_string()));
+//RS     }
+//RS     if names.contains("default") {
+//RS         return Ok(Some("default".to_string()));
+//RS     }
+//RS     Ok(names.iter().next().cloned())
+//RS }
+//RS 
+//RS fn push_unique(values: &mut Vec<String>, value: String) {
+//RS     if !values.iter().any(|existing| existing == &value) {
+//RS         values.push(value);
+//RS     }
+//RS }
+//RS 
+//RS fn merge_secret_spec(specs: &mut Vec<SecretSpec>, incoming: SecretSpec) -> Result<(), Diagnostic> {
+//RS     let Some(index) = specs
+//RS         .iter()
+//RS         .position(|existing| existing.name == incoming.name)
+//RS     else {
+//RS         specs.push(incoming);
+//RS         return Ok(());
+//RS     };
+//RS     let existing = &specs[index];
+//RS     if existing.implicit && !incoming.implicit {
+//RS         specs[index] = incoming;
+//RS         return Ok(());
+//RS     }
+//RS     if incoming.implicit {
+//RS         return Ok(());
+//RS     }
+//RS     Err(Diagnostic::error(
+//RS         "E1333",
+//RS         format!("secret `{}` is declared more than once", incoming.name),
+//RS         "one selected environment has one declaration for each secret name".to_string(),
+//RS         "merge the metadata into one map entry or give the declarations different names"
+//RS             .to_string(),
+//RS         None,
+//RS     ))
+//RS }
+//RS 
+//RS fn prompt_path_mode(value: &str) -> PromptPathMode {
+//RS     match value {
+//RS         Syntax::PROMPT_PATH_FULL => PromptPathMode::Full,
+//RS         _ => PromptPathMode::Short,
+//RS     }
+//RS }
+//RS 
+//RS fn prompt_strip_mode(value: &str) -> PromptStripMode {
+//RS     match value {
+//RS         Syntax::PROMPT_STRIP_ON => PromptStripMode::On,
+//RS         _ => PromptStripMode::Off,
+//RS     }
+//RS }
+//RS 
+//RS /// One parsed `.jet` file contributing modules: the root `env.jet` and every
+//RS /// file discovered through `imports: find(…)` (U4). Spans in `items` index into
+//RS /// this unit's own `src`; `base_dir` is the dir the file's relative refs and
+//RS /// `embed_file` calls resolve against.
+//RS struct EvalUnit {
+//RS     items: Vec<Item>,
+//RS     src: String,
+//RS     base_dir: PathBuf,
+//RS     source_path: PathBuf,
+//RS }
+//RS 
+//RS /// Walk every `imports: find("<dir>")` directive in the root unit's modules,
+//RS /// skipping recognized typed integrations, and return one `EvalUnit` per
+//RS /// discovered `*.jet` file (U4 import-tree
+//RS /// discovery). Discovery is one level deep: a discovered file may not itself
+//RS /// import (the liftability law — modules contribute to the merged whole, they
+//RS /// don't import each other; violations are E0971).
+//RS fn discover_imports(
+//RS     root: &EvalUnit,
+//RS     base_dir: &Path,
+//RS     loader: &mut dyn SourceLoader,
+//RS ) -> Result<Vec<EvalUnit>, Diagnostic> {
+//RS     let mut out = Vec::new();
+//RS     let environment_root = std::fs::canonicalize(base_dir).map_err(|error| {
+//RS         Diagnostic::error(
+//RS             "E1331",
+//RS             format!(
+//RS                 "environment root `{}` cannot be resolved: {error}",
+//RS                 base_dir.display()
+//RS             ),
+//RS             "imports follow physical paths and cannot be evaluated from an unresolved root"
+//RS                 .to_string(),
+//RS             "run the command from an existing project directory".to_string(),
+//RS             None,
+//RS         )
+//RS     })?;
+//RS     let mut seen_files = std::collections::BTreeSet::new();
+//RS     for item in &root.items {
+//RS         let Item::Module(m) = item else { continue };
+//RS         if !m.is_auto_discovered() {
+//RS             continue;
+//RS         }
+//RS         let mut directives = Vec::new();
+//RS         for import in &m.imports {
+//RS             collect_import_directives(import, &mut directives);
+//RS         }
+//RS         for imp in directives {
+//RS             if let Some(name) = qualified_call_name(imp) {
+//RS                 if IntegrationKind::from_call(&name).is_some() {
+//RS                     continue;
+//RS                 }
+//RS             }
+//RS             let rel = find_dir_arg(imp)?;
+//RS             let relative = Path::new(&rel);
+//RS             let relative_norm = normalize_relative_path(relative);
+//RS             let find_span = match imp {
+//RS                 Expr::Call(call) => Some(call.name_span),
+//RS                 _ => Some(imp.span()),
+//RS             };
+//RS             if relative_norm.as_os_str().is_empty()
+//RS                 || relative_norm.is_absolute()
+//RS                 || relative_norm
+//RS                     .components()
+//RS                     .any(|component| component == std::path::Component::ParentDir)
+//RS             {
+//RS                 return Err(Diagnostic::error(
+//RS                     "E1331",
+//RS                     format!("module import `{rel}` escapes the environment root"),
+//RS                     "one environment graph may compose files below its root, but an import cannot escape it".to_string(),
+//RS                     "use a project-relative directory without `..`".to_string(),
+//RS                     find_span,
+//RS                 ));
+//RS             }
+//RS             let listed = environment_root.join(&relative_norm);
+//RS             if !listed.exists() {
+//RS                 return Err(find_missing_directory(
+//RS                     &environment_root.join(relative),
+//RS                     find_span,
+//RS                 ));
+//RS             }
+//RS             let files = loader.list_jet_files(&relative_norm)?;
+//RS             for file_relative in files {
+//RS                 let file_norm = normalize_relative_path(&file_relative);
+//RS                 if file_relative.is_absolute()
+//RS                     || !file_norm.starts_with(&relative_norm)
+//RS                     || file_relative
+//RS                         .components()
+//RS                         .any(|component| component == std::path::Component::ParentDir)
+//RS                 {
+//RS                     return Err(Diagnostic::error(
+//RS                         "E1331",
+//RS                         format!(
+//RS                             "discovered module `{}` escapes the environment root",
+//RS                             file_relative.display()
+//RS                         ),
+//RS                         "imports follow physical paths and cannot cross the project boundary"
+//RS                             .to_string(),
+//RS                         "remove the escaping import or move the module below the environment root"
+//RS                             .to_string(),
+//RS                         find_span,
+//RS                     ));
+//RS                 }
+//RS                 let canonical_file = environment_root.join(&file_relative);
+//RS                 if !seen_files.insert(canonical_file.clone()) {
+//RS                     continue;
+//RS                 }
+//RS                 let file_src = loader.read_file(&file_relative)?;
+//RS                 let prog = parse_program(&file_src)?;
+//RS                 // Liftability law (U4): a discovered module may not import.
+//RS                 for nested in &prog.items {
+//RS                     if let Item::Module(nm) = nested {
+//RS                         if !nm.imports.is_empty() {
+//RS                             return Err(discovered_module_imports(&canonical_file));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 let file_base = canonical_file
+//RS                     .parent()
+//RS                     .map(Path::to_path_buf)
+//RS                     .unwrap_or_else(|| base_dir.to_path_buf());
+//RS                 out.push(EvalUnit {
+//RS                     items: prog.items,
+//RS                     src: file_src,
+//RS                     base_dir: file_base,
+//RS                     source_path: canonical_file,
+//RS                 });
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS fn collect_import_directives<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
+//RS     match expr {
+//RS         Expr::ListLit(items, _) => {
+//RS             for item in items {
+//RS                 collect_import_directives(item, out);
+//RS             }
+//RS         }
+//RS         _ => out.push(expr),
+//RS     }
+//RS }
+//RS 
+//RS fn normalize_relative_path(path: &Path) -> PathBuf {
+//RS     path.components()
+//RS         .filter(|component| *component != std::path::Component::CurDir)
+//RS         .collect()
+//RS }
+//RS 
+//RS /// Extract the literal directory path from an `imports: find("dir")` directive.
+//RS /// Anything else — a non-`find` expression, the wrong arity, or a non-literal
+//RS /// (interpolated) argument — is E0969.
+//RS fn find_dir_arg(imp: &Expr) -> Result<String, Diagnostic> {
+//RS     let Expr::Call(call) = imp else {
+//RS         return Err(bad_import_directive(imp.span()));
+//RS     };
+//RS     if call.name != Syntax::BUILTIN_FIND || call.args.len() != 1 {
+//RS         return Err(bad_import_directive(imp.span()));
+//RS     }
+//RS     let Expr::Str(parts, _) = &call.args[0].expr else {
+//RS         return Err(bad_import_directive(imp.span()));
+//RS     };
+//RS     let mut path = String::new();
+//RS     for part in parts {
+//RS         match part {
+//RS             StrPart::Lit(s) => path.push_str(s),
+//RS             StrPart::Interp(..) => return Err(bad_import_directive(imp.span())),
+//RS         }
+//RS     }
+//RS     Ok(path)
+//RS }
+//RS 
+//RS /// Merge every enabled module's `sources:` block — across the root and every
+//RS /// discovered unit — into one `(name → upstream)` table (U5: same name +
+//RS /// different ref conflicts, E0967). Each `target@provider` ref (D-JPK-REF1) is translated
+//RS /// to the colon/flake upstream the providers realize (`github:owner/repo/rev`,
+//RS /// `path:./local`, `nixpkgs:channel`).
+//RS fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
+//RS     let mut maps: Vec<BTreeMap<String, String>> = Vec::new();
+//RS     let mut policies: BTreeMap<String, RefSpec::ChannelPolicy> = BTreeMap::new();
+//RS     let mut raw_refs: BTreeMap<String, String> = BTreeMap::new();
+//RS     // U9: the provider kind is *inferred*, never declared. We record each
+//RS     // source's kind here, keyed by name, as we resolve its target. The §6 merge
+//RS     // guarantees a given name resolves to one upstream (else E0967), so the
+//RS     // probe result is consistent across units.
+//RS     let mut kinds: BTreeMap<String, ProviderKind> = BTreeMap::new();
+//RS     for (idx, unit) in units.iter().enumerate() {
+//RS         // Spans index into each unit's own source, but the CLI renders against
+//RS         // the root `env.jet`. Only the root unit (index 0) can safely carry a
+//RS         // span; a discovered file's diagnostic is span-less so it never slices
+//RS         // the wrong source.
+//RS         let is_root = idx == 0;
+//RS         for item in &unit.items {
+//RS             let Item::Module(m) = item else { continue };
+//RS             if !m.is_auto_discovered() {
+//RS                 continue;
+//RS             }
+//RS             let mut map: BTreeMap<String, String> = BTreeMap::new();
+//RS             for s in &m.sources {
+//RS                 let ref_text = unit.src[s.ref_span.start..s.ref_span.end].trim();
+//RS                 let span = if is_root { Some(s.ref_span) } else { None };
+//RS                 let pref = RefSpec::classify_provider_ref(ref_text)
+//RS                     .map_err(|error| match error {
+//RS                         RefError::RetiredNixpkgs { raw, replacement } => {
+//RS                             retired_nixpkgs_source_ref(&raw, &replacement, span)
+//RS                         }
+//RS                         _ => bad_source_ref(ref_text, span),
+//RS                     })?;
+//RS                 let upstream = pref.upstream();
+//RS                 if let Some(existing) = map.get(&s.name) {
+//RS                     if existing != &upstream {
+//RS                         return Err(merge_error_to_diagnostic(
+//RS                             &Merge::MergeError::SourceConflict {
+//RS                                 name: s.name.clone(),
+//RS                                 a: existing.clone(),
+//RS                                 b: upstream,
+//RS                             },
+//RS                         ));
+//RS                     }
+//RS                     if policies.get(&s.name).copied() != Some(pref.policy) {
+//RS                         return Err(merge_error_to_diagnostic(
+//RS                             &Merge::MergeError::SourceConflict {
+//RS                                 name: s.name.clone(),
+//RS                                 a: existing.clone(),
+//RS                                 b: upstream,
+//RS                             },
+//RS                         ));
+//RS                     }
+//RS                     continue;
+//RS                 }
+//RS                 // Probe the resolved target against the *declaring file's* dir,
+//RS                 // so a bare `./local` path resolves where it was written.
+//RS                 let kind = infer_provider_kind(&pref, &unit.base_dir);
+//RS                 if let Some(existing) = kinds.get(&s.name) {
+//RS                     if existing != &kind {
+//RS                         return Err(Diagnostic::error(
+//RS                             "E0967",
+//RS                             format!("Source `{}` resolves to conflicting provider kinds", s.name),
+//RS                             "One named source must have one deterministic realization path across the environment graph".to_string(),
+//RS                             "Make every declaration use the same source location and provider kind".to_string(),
+//RS                             span,
+//RS                         ));
+//RS                     }
+//RS                 } else {
+//RS                     kinds.insert(s.name.clone(), kind);
+//RS                 }
+//RS                 policies.insert(s.name.clone(), pref.policy);
+//RS                 raw_refs.insert(s.name.clone(), pref.raw.clone());
+//RS                 map.insert(s.name.clone(), upstream);
+//RS             }
+//RS             maps.push(map);
+//RS         }
+//RS     }
+//RS     let merged = Merge::merge_sources(&maps).map_err(|e| merge_error_to_diagnostic(&e))?;
+//RS     let mut table = SourceTable::from_decls(merged.into_iter().map(|(name, upstream)| {
+//RS         let via = kinds.get(&name).copied().unwrap_or_default();
+//RS         (name, upstream, via)
+//RS     }));
+//RS     for name in table.declared_names() {
+//RS         let policy = policies.get(&name).copied().unwrap_or_default();
+//RS         let raw = raw_refs
+//RS             .get(&name)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| table.upstream(&name).unwrap_or_default().to_string());
+//RS         table.set_channel_metadata(&name, policy, raw);
+//RS     }
+//RS     Ok(table)
+//RS }
+//RS 
+//RS /// U9: infer whether a source is realized by the first-party `core` provider or
+//RS /// the `nix` compatibility provider from its *resolved target* — no marker is
+//RS /// declared. The rule (see syntax-decisions.md U9, unified-ecosystem.md §6): a
+//RS /// target carrying a `pkg.jet` is a Jet package repo (→ `core`); otherwise it
+//RS /// is a nix flake (→ `nix`).
+//RS ///
+//RS /// The probe must never clone a nixpkgs-sized repo just to classify it:
+//RS /// - a bare path stats the directory locally (offline, free) — resolved here to a
+//RS ///   concrete `Core`/`Nix`;
+//RS /// - `…@nixpkgs` is unconditionally `nix` — never probed;
+//RS /// - `…@github` is left **`Infer`**: its kind depends on whether the remote
+//RS ///   repo carries a `pkg.jet`, which only a realize-time probe can answer
+//RS ///   (this pure pass has no offline flag or source cache). `Provider::
+//RS ///   resolve_kind` does the lightweight git peek when realization runs.
+//RS fn infer_provider_kind(pref: &RefSpec::ProviderRef, base_dir: &Path) -> ProviderKind {
+//RS     use super::super::RefSpec::Source;
+//RS     match pref.provider {
+//RS         Source::Path => {
+//RS             let (target, _) = RefSpec::split_channel_ref(&pref.target);
+//RS             let target = Path::new(target);
+//RS             let dir = if target.is_absolute() {
+//RS                 target.to_path_buf()
+//RS             } else {
+//RS                 base_dir.join(target)
+//RS             };
+//RS             if dir.join(Syntax::PACKAGE_FILE).is_file() || dir.join(Syntax::PAYLOAD_FILE).is_file()
+//RS             {
+//RS                 ProviderKind::Core
+//RS             } else {
+//RS                 ProviderKind::Nix
+//RS             }
+//RS         }
+//RS         // `…@github` can't be classified offline-and-free; defer to a realize-time
+//RS         // `pkg.jet` peek (U9).
+//RS         Source::Github => ProviderKind::Infer,
+//RS         Source::Cran => ProviderKind::Cran,
+//RS         Source::LuaRocks => ProviderKind::LuaRocks,
+//RS         Source::RubyGems => ProviderKind::RubyGems,
+//RS         Source::Cpan => ProviderKind::Cpan,
+//RS         Source::Packagist => ProviderKind::Packagist,
+//RS         Source::Releases => ProviderKind::JetPackage,
+//RS         Source::JetRegistry => ProviderKind::JetRegistry,
+//RS         Source::Npm => ProviderKind::Npm,
+//RS         Source::Cargo => ProviderKind::Cargo,
+//RS         // `…@nixpkgs` is always the nix collection; never probed. (`Named` can't
+//RS         // appear in a `target@provider` ref.)
+//RS         _ => ProviderKind::Nix,
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2109 crates/jet-env-model/src/ModuleEval/Source.rs:1-1408
+

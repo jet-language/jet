@@ -1,0 +1,809 @@
+// Project fmt/fix command policy (Source/CmdCompile.rs). The canonical source
+// formatter, checked copy-site query, LSP fix engine, Jetpack environment provider
+// and held-directory transaction are inward services, never CLI replacements.
+use jet_driver.[JetDriverVerbOutput]
+use jet_foundation.[Diagnostic, PACKAGE_FILE, PAYLOAD_FILE]
+
+pub struct JetCLIFormatOptions {
+    pub paths: [String]
+    pub stdin: Bool
+    pub stdin_path: String?
+    pub check: Bool
+    pub diff: Bool
+    pub changed: Bool
+    pub explicit_copies: Bool
+    pub simplify: Bool
+}
+pub struct JetCLIFixOptions { pub path: String, pub dry_run: Bool, pub edition: String?, pub all: Bool }
+pub struct JetCLIExternalFormatOptions {
+    pub language: String
+    pub paths: [String]
+    pub child_flags: [String]
+    pub preset: String?
+    pub environment: String?
+    pub check: Bool
+    pub diff: Bool
+    pub changed: Bool
+}
+#Error
+pub struct JetCLIFormatParseError { pub code: String, pub what: String, pub why: String, pub fix: String }
+fn jet_cli_format_parse_error(code: String, what: String, why: String, fix: String) -> JetCLIFormatParseError Never! {
+    JetCLIFormatParseError{code: code, what: what, why: why, fix: fix}
+}
+pub fn jet_cli_format_parse_refusal(error: JetCLIFormatParseError, mode: JetCLIOutputMode) -> JetDriverVerbOutput Never! {
+    jet_cli_format_refusal(error.code, error.what, error.why, error.fix, mode, 2)
+}
+// Rust `FileResult` and `ExternalFmtStagedFile`: handle is issued by the held
+// source service, not synthesized from a path/mtime. Publication revalidates it.
+pub struct JetCLIFormatSnapshot { pub path: String, pub bytes: [U8], pub handle: Int }
+pub struct JetCLIFormatChange { pub before: JetCLIFormatSnapshot, pub after: [U8] }
+pub struct JetCLIFormatRewrites { pub targets: Int, pub selectors: Int, pub prints: Int, pub types: Int }
+pub struct JetCLIFormattedSource { pub text: String, pub rewrites: JetCLIFormatRewrites }
+pub struct JetCLIFixRound { pub text: String, pub applied: Int, pub deferred: Int, pub skipped: Int }
+pub enum JetCLIFormatPathKind { Directory File Other }
+pub struct JetCLIFormatEntry { pub path: String, pub name: String, pub kind: JetCLIFormatPathKind }
+pub struct JetCLIExternalFormatter { pub root: String, pub package: String }
+pub struct JetCLIExternalFormatted {
+    pub output: JetDriverVerbOutput
+    // Same order/count as inputs. Bytes stay bytes until a display diff is needed.
+    pub files: [[U8]]
+}
+#Error
+pub enum JetCLIFormatError {
+    IO(String)
+    Diagnostics([Diagnostic])
+    Refusal(JetDriverVerbOutput)
+}
+// Services have no default implementations. C-FS publication must recover the
+// shared journal, reject stale/aliased inputs and atomically publish the batch.
+// `format` is lib.rs:2975-2985 + format_source_for_fmt:9516-9580, including
+// PackageFacts validation/comment-preserving decline and E0122 copy-site errors.
+// `fix_round` is the ONE LSP collect/safe/apply_non_overlapping engine.
+// `external_format` owns a scoped create-new staging directory and exact
+// EngineDispatch/Jetpack env invocation; original files must never reach it.
+pub trait JetCLIFormatHost {
+    fn cwd(&self) -[FS, Env]> String Never!
+    fn project_root(&self, cwd: String) -[FS]> String Never!
+    // Core Path component order/equality, not String order or canonicalization.
+    fn path_order(&self, left: String, right: String) -[]> Ordering Never!
+    fn kind(&self, path: String, nofollow: Bool) -[FS]> JetCLIFormatPathKind JetCLIFormatError!
+    fn entries(&self, path: String, nofollow: Bool) -[FS]> [JetCLIFormatEntry] JetCLIFormatError!
+    fn read(&self, path: String) -[FS]> JetCLIFormatSnapshot JetCLIFormatError!
+    fn stdin(&self) -[IO]> String JetCLIFormatError!
+    // Native: git rev-parse then diff HEAD + cached, .jet regular files only.
+    // External: diff HEAD + cached + untracked at root, normalize/trim names.
+    fn changed_files(&self, root: String, external: Bool) -[FS, Exec]> [String] JetCLIFormatError!
+    fn format(&self, source: String, origin: String, explicit_copies: Bool, simplify: Bool) -[FS, Env]> JetCLIFormattedSource JetCLIFormatError!
+    fn rewrites(&self, source: String, origin: String) -[]> JetCLIFormatRewrites Never!
+    fn rewrite_targets(&self, source: String, origin: String) -[]> String Never!
+    fn fix_round(&self, path: String, source: String, all: Bool) -[FS, Env]> JetCLIFixRound Never!
+    fn diff(&self, path: String, before: String, after: String) -[]> String Never!
+    fn diagnostics(&self, action: String, path: String, source: String, diagnostics: [Diagnostic], mode: JetCLIOutputMode) -[FS, Env]> String Never!
+    fn commit(&self, changes: [JetCLIFormatChange], fix: Bool) -[FS]> String JetCLIFormatError!
+    // EnvHook::find_env_root + ModuleEval::evaluate_env_with_selections;
+    // errors include the exact E1340/read/evaluation/no-formatter diagnostics.
+    fn external_formatter(&self, cwd: String, language: String, preset: String?, environment: String?, mode: JetCLIOutputMode) -[FS, Env]> JetCLIExternalFormatter JetCLIFormatError!
+    fn external_format(&self, program: String, flags: [String], inputs: [JetCLIFormatSnapshot], mode: JetCLIOutputMode) -[FS, Env, Exec, IO]> JetCLIExternalFormatted JetCLIFormatError!
+}
+
+struct JetCLIFormatBuffer { stdout: [U8], stderr: [U8], exit_code: Int }
+fn jet_cli_format_output() -> JetCLIFormatBuffer Never! { JetCLIFormatBuffer{stdout: [U8]{}, stderr: [U8]{}, exit_code: 0} }
+fn jet_cli_format_finish(out: JetCLIFormatBuffer) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: String.from_bytes(out.stdout) ?? panic("fmt stdout UTF-8"), stderr: String.from_bytes(out.stderr) ?? panic("fmt stderr UTF-8"), exit_code: out.exit_code}
+}
+fn jet_cli_format_append(out: &[U8], text: String) Never! { loop byte in text.bytes() -> &out.push(byte) }
+fn jet_cli_format_append_range(out: &[U8], raw: [U8], start: Int, end: Int) Never! {
+    loop at in start..<end -> &out.push(raw[at])
+}
+fn jet_cli_format_render(out: &JetCLIFormatBuffer, text: String) Never! { jet_cli_format_append(&out.stdout, text) }
+fn jet_cli_format_status(out: &JetCLIFormatBuffer, text: String, mode: JetCLIOutputMode) Never! {
+    if !mode.json && !mode.quiet -> jet_cli_format_append(&out.stderr, text)
+}
+fn jet_cli_format_diagnostic(out: &JetCLIFormatBuffer, text: String, mode: JetCLIOutputMode) Never! {
+    jet_cli_format_append(&out.stderr, text)
+}
+fn jet_cli_format_refusal(code: String, what: String, why: String, fix: String, mode: JetCLIOutputMode, exit_code: Int) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report(code, what, why, fix, mode.color), exit_code: exit_code}
+}
+fn jet_cli_format_io_error(path: String, message: String, mode: JetCLIOutputMode) -> String Never! {
+    if mode.json {
+        errors :: [DataTree]{report_status_object(StatusFields.new().with("path", DataTree.Text(~path)).with("message", DataTree.Text(~message)))}
+        fields :: StatusFields.new().with("fmt", report_status_object(StatusFields.new().with("status", DataTree.Text("error")).with("errors", DataTree.Array(errors))))
+        return "{report_render_status("fmt", false, fields)}\n"
+    }
+    jet_cli_report("E2105", message, "Jet could not complete the named file, tool, or operating-system operation", "", mode.color)
+}
+// Rust fmt_json_ok/dirty_paths/dirty_diffs (9376-9429): shared status encoder.
+pub fn jet_cli_fmt_json_ok() -> String Never! {
+    report_render_status("fmt", true, StatusFields.new().with("fmt", report_status_object(StatusFields.new().with("status", DataTree.Text("ok")))))
+}
+pub fn jet_cli_fmt_json_dirty(paths: [String], diffs: [String]?) -> String Never! {
+    entries := [DataTree]{}
+    loop index in 0..<paths.len() {
+        if diffs == {
+            .Val(values) -> &entries.push(report_status_object(StatusFields.new().with("path", DataTree.Text(~paths[index])).with("diff", DataTree.Text(~values[index]))))
+            .None -> &entries.push(DataTree.Text(~paths[index]))
+        }
+    }
+    report_render_status("fmt", false, StatusFields.new().with("fmt", report_status_object(StatusFields.new().with("status", DataTree.Text("dirty")).with("files", DataTree.Array(entries)))))
+}
+// Rust main.rs:3616-3635; positionals exclude verb and flags, raw excludes verb.
+pub fn jet_cli_format_options(raw: [String], positionals: [String]) -> JetCLIFormatOptions Never! {
+    paths := [String]{}
+    loop path in positionals { if path != "-" -> &paths.push(path) }
+    stdin_path := String?{None}
+    loop arg in raw {
+        if arg.starts_with("--stdin-path=") {
+            stdin_path = Val(arg.slice(13..<arg.len()))
+            break
+        }
+    }
+    dry :: raw.contains("--dry-run")
+    JetCLIFormatOptions{paths: paths, stdin: positionals.contains("-"), stdin_path: stdin_path, check: raw.contains("--check") || dry, diff: raw.contains("--diff") || dry, changed: raw.contains("--changed"), explicit_copies: raw.contains("--explicit-copies"), simplify: raw.contains("--simplify")}
+}
+// Rust main.rs:4696-4701.
+pub fn jet_cli_fix_options(raw: [String], path: String) -> JetCLIFixOptions Never! {
+    edition := String?{None}
+    loop arg in raw {
+        if arg.starts_with("--edition=") {
+            edition = Val(arg.slice(10..<arg.len()))
+            break
+        }
+    }
+    JetCLIFixOptions{path: path, dry_run: raw.contains("--dry-run"), edition: edition, all: raw.contains("--all")}
+}
+// Rust run_external_fmt argument phase (9814-9931); raw excludes `fmt`.
+pub fn jet_cli_external_format_options(raw: [String]) -> JetCLIExternalFormatOptions JetCLIFormatParseError! {
+    language := String?{None}
+    paths := [String]{}
+    flags := [String]{}
+    preset := String?{None}
+    environment := String?{None}
+    check := false
+    diff := false
+    changed := false
+    index := 0
+    loop index < raw.len() {
+        arg :: raw[index]
+        if {
+            arg == "--lang" -> {
+                index += 1
+                language = if index < raw.len() -> Val(raw[index]) else -> None
+            }
+            arg.starts_with("--lang=") -> language = Val(jet_cli_format_trim_prefixes(arg, "--lang="))
+            arg == "--check" -> check = true
+            arg == "--diff" || arg == "--dry-run" -> {
+                check = true
+                diff = true
+            }
+            arg == "--changed" -> changed = true
+            arg == "--fixtures" || arg == "--preset" || arg == "--env" -> {
+                index += 1
+                if index >= raw.len() -> return Err(jet_cli_format_parse_error("E2104", "{arg} needs a value", "these options select the realized environment", "pass a value after the option"))
+                value :: raw[index]
+                if arg == "--preset" -> preset = Val(value)
+                if arg == "--env" -> environment = Val(value)
+                &flags.push(arg)
+                &flags.push(value)
+            }
+            arg.starts_with("--fixtures=") || arg.starts_with("--preset=") || arg.starts_with("--env=") -> {
+                prefix := "--fixtures"
+                if arg.starts_with("--preset=") -> prefix = "--preset"
+                if arg.starts_with("--env=") -> prefix = "--env"
+                value :: jet_cli_format_trim_prefixes(arg, "{prefix}=")
+                if prefix == "--preset" -> preset = Val(value)
+                if prefix == "--env" -> environment = Val(value)
+                &flags.push(prefix)
+                &flags.push(value)
+            }
+            arg == "--trust" || arg == "--offline" || arg == "--online" || arg == "--no-color" || arg == "--json" || arg == "--flake" || arg == "--pure" || arg == "--yes" || arg == "-y" || arg.starts_with("--color=") -> &flags.push(arg)
+            arg == "--" -> return Err(jet_cli_format_parse_error("E2104", "jet fmt --lang does not accept a command separator", "Jet supplies the staged files to the environment formatter", "pass formatter input paths before `--`"))
+            arg.starts_with("-") -> return Err(jet_cli_format_parse_error("E2102", "unknown external formatter option `{arg}`", "Jet forwards only environment selection and formatter mode flags", "run `jet fmt --help` or remove the unknown option"))
+            else -> &paths.push(arg)
+        }
+        index += 1
+    }
+    value := (language ?? "").trim()
+    loop value.starts_with(".") -> value = value.slice(1..<value.len())
+    if value == "" || jet_cli_format_has_space(value) || value.contains("/") || value.contains("\\") -> return Err(jet_cli_format_parse_error("E2104", "jet fmt needs --lang <language>", "non-Jet formatting is selected by a file-language name", "run `jet fmt --lang nix` or omit `--lang` for Jet files"))
+    Ok(JetCLIExternalFormatOptions{language: value, paths: paths, child_flags: flags, preset: preset, environment: environment, check: check, diff: diff, changed: changed})
+}
+// Rust run_external_fmt command assembly (10047-10079). Paths name held
+// staging inputs, never the original source files.
+pub fn jet_cli_external_format_command(program: String, flags: [String], staged_paths: [String]) -> [String] Never! {
+    command := [String]{"env"}
+    loop flag in flags -> &command.push(flag)
+    &command.push("--")
+    &command.push(program)
+    loop path in staged_paths -> &command.push(path)
+    command
+}
+// Rust `str::trim_start_matches(prefix)`: strips EVERY leading repetition.
+fn jet_cli_format_trim_prefixes(value: String, prefix: String) -> String Never! {
+    raw :: value.bytes()
+    needle :: prefix.bytes()
+    at := 0
+    loop jet_cli_format_match(raw, at, needle) -> at += needle.len()
+    jet_cli_format_slice(raw, at, raw.len())
+}
+// Rust `Path::join` with a relative operand: one separator, none after an
+// empty or already separator-terminated base; an absolute operand replaces.
+fn jet_cli_format_join(base: String, relative: String) -> String Never! {
+    if relative.starts_with("/") || base == "" -> return ~relative
+    if base.ends_with("/") -> return "{base}{relative}"
+    "{base}/{relative}"
+}
+fn jet_cli_format_space_at(raw: [U8], at: Int) -> Bool Never! {
+    lead :: Int.from_u8(raw[at])
+    width :: if lead < 128 -> 1 else -> if lead < 224 -> 2 else -> if lead < 240 -> 3 else -> 4
+    point := if width == 1 -> lead else -> lead % (2 ^ (7 - width))
+    loop offset in 1..<width -> point = point * 64 + Int.from_u8(raw[at + offset]) % 64
+    point == 32 || (point >= 9 && point <= 13) || point == 133 || point == 160 || point == 5760 || (point >= 8192 && point <= 8202) || point == 8232 || point == 8233 || point == 8239 || point == 8287 || point == 12288
+}
+fn jet_cli_format_has_space(value: String) -> Bool Never! {
+    raw :: value.bytes()
+    at := 0
+    loop at < raw.len() {
+        lead :: Int.from_u8(raw[at])
+        width :: if lead < 128 -> 1 else -> if lead < 224 -> 2 else -> if lead < 240 -> 3 else -> 4
+        if jet_cli_format_space_at(raw, at) -> return true
+        at += width
+    }
+    false
+}
+// Rust external_formatter_program (10173-10178).
+pub fn jet_cli_external_formatter_program(package: String) -> String? Never! {
+    version :: package.split("@").to_list()
+    fragment :: version[0].split("#").to_list()
+    components :: fragment[0].replace(":", "/").split("/").to_list()
+    program :: components[components.len() - 1].trim()
+    if program == "" || jet_cli_format_has_space(program) -> return None
+    Val(program)
+}
+// Rust `Path::file_name` bounds over the shared component scanner: the last
+// component, after repeated/trailing separators and interior `.` are dropped,
+// when it is Normal; otherwise an empty range (root, `.`, `..`, empty path).
+fn jet_cli_format_file_name(raw: [U8]) -> (start: Int, end: Int) Never! {
+    start := 0
+    end := 0
+    at := 0
+    loop {
+        part :: jet_cli_record_next_path_component(raw, at)
+        if part.start == part.end -> break
+        start = part.start
+        end = part.end
+        at = part.next
+    }
+    if start == end || jet_cli_record_path_component_rank(raw, start, end) != 3 -> return (start: 0, end: 0)
+    (start: start, end: end)
+}
+// Rust is_typed_package_source/is_package_manifest_file (9712-9737).
+pub fn jet_cli_format_is_package(origin: String) -> Bool Never! {
+    raw :: origin.bytes()
+    name :: jet_cli_format_file_name(raw)
+    needle :: PACKAGE_FILE.bytes()
+    name.end - name.start == needle.len() && jet_cli_format_match(raw, name.start, needle)
+}
+// The `pub ` strip only feeds `split_once("::")`, where it cannot change the
+// value; the leading-`Config` fallback reads the unstripped text.
+pub fn jet_cli_format_is_typed_package(source: String, origin: String) -> Bool Never! {
+    if jet_cli_format_is_package(origin) -> return true
+    trimmed :: source.trim_start()
+    parts :: trimmed.split("::").to_list()
+    value := ""
+    if parts.len() > 1 -> value = parts[1].trim_start()
+    else {
+        if trimmed.starts_with("Config") -> value = trimmed.slice(6..<trimmed.len()).trim_start()
+        else -> return false
+    }
+    if !value.starts_with("Config") -> return false
+    tail :: value.slice(6..<value.len()).trim_start()
+    tail.starts_with(".{{") || tail.starts_with("{{")
+}
+// Rust skip_fmt_walk_path (9234-9273). Explicit paths bypass this predicate.
+pub fn jet_cli_format_skip_walk_path(path: String) -> Bool Never! {
+    value :: path.replace("\\", "/")
+    tests :: value.split("/tests/").to_list()
+    docs :: value.split("/docs/").to_list()
+    relative := ~value
+    if tests.len() > 1 -> relative = "tests/{tests[tests.len() - 1]}"
+    else { if docs.len() > 1 -> relative = "docs/{docs[docs.len() - 1]}" }
+    if relative == "Docs/spec/reference/syntax-surface.jet" || relative.ends_with("/Docs/spec/reference/syntax-surface.jet") || relative == "syntax-surface.jet" -> return true
+    if relative == "tests/ui_lint" || relative.starts_with("tests/ui_lint/") || relative == "tests/fuzz/sema/invalid" || relative.starts_with("tests/fuzz/sema/invalid/") -> return true
+    if relative == "tests/ui" || relative.starts_with("tests/ui/") -> return relative.ends_with(".jet") && !relative.ends_with(".fixed.jet")
+    relative.starts_with("tests/fixtures/jetpack-config/") || relative.starts_with("tests/fixtures/jetpack-config-real/") || relative == "tests/fixtures/jetpack-project/functional-env.jet" || relative.starts_with("tests/fixtures/policy_package_unsafe_allow/") || relative == "tests/agent_workloads/inputs/build-test-recovery/invalid.jet" || relative.ends_with("/ex_concurrency_detached_task.jet")
+}
+// Rust Path::extension: text after the file name's last `.`, absent for a
+// name without one or whose only `.` leads (a lone dotfile).
+pub fn jet_cli_format_matches_language(path: String, language: String) -> Bool Never! {
+    raw :: path.bytes()
+    name :: jet_cli_format_file_name(raw)
+    dot := name.end - 1
+    loop dot > name.start && raw[dot] != (U8{46}) -> dot -= 1
+    if dot <= name.start -> return false
+    needle :: language.bytes()
+    name.end - (dot + 1) == needle.len() && jet_cli_format_match(raw, dot + 1, needle)
+}
+fn jet_cli_format_ignored(name: String) -> Bool Never! { name == "vendor" || name == "target" || name == "build" || name == ".git" || name == "node_modules" || name == ".jet" }
+fn jet_cli_format_sort_unique<H: JetCLIFormatHost>(host: &H, paths: &[String]) Never! -[]> {
+    &paths.sort_by((a, b) -> &host.path_order(a, b))
+    unique := [String]{}
+    &paths.reverse()
+    loop !paths.is_empty() {
+        path :: &paths.pop() ?? panic("fmt sorted path disappeared")
+        if unique.is_empty() || &host.path_order(unique[unique.len() - 1], path) != Ordering.Equal -> &unique.push(^path)
+    }
+    paths = ^unique
+}
+// Rust walk_jet_files/walk_external_fmt_files (9279-9299,10209-10233).
+fn jet_cli_format_walk<H: JetCLIFormatHost>(host: &H, directory: String, language: String?, discovered: &[String]) Never! -[FS]> {
+    entries := &host.entries(directory, language != None) ?? return
+    &entries.sort_by((a, b) -> &host.path_order(a.path, b.path))
+    loop entry in entries {
+        external :: language != None
+        if entry.kind == JetCLIFormatPathKind.Directory {
+            if !jet_cli_format_ignored(entry.name) && (external || !jet_cli_format_skip_walk_path(entry.path)) -> jet_cli_format_walk<H>(&host, entry.path, language, &discovered)
+        } else {
+            if language == {
+                .Val(extension) -> { if entry.kind == JetCLIFormatPathKind.File && jet_cli_format_matches_language(entry.path, extension) -> &discovered.push(~entry.path) }
+                .None -> { if jet_cli_format_matches_language(entry.path, "jet") && entry.name != PAYLOAD_FILE && !jet_cli_format_skip_walk_path(entry.path) -> &discovered.push(~entry.path) }
+            }
+        }
+    }
+}
+// Rust collect_explicit_files/discover_project_files (9303-9329).
+pub fn jet_cli_format_collect<H: JetCLIFormatHost>(host: &H, paths: [String], root: String) -[FS]> [String] Never! {
+    discovered := [String]{}
+    if paths.is_empty() -> jet_cli_format_walk<H>(&host, root, String?{None}, &discovered)
+    else {
+        loop path in paths {
+            kind :: &host.kind(path, false) ?? JetCLIFormatPathKind.Other
+            if kind == JetCLIFormatPathKind.Directory -> jet_cli_format_walk<H>(&host, path, String?{None}, &discovered)
+            else -> &discovered.push(~path)
+        }
+        jet_cli_format_sort_unique<H>(&host, &discovered)
+    }
+    discovered
+}
+// Rust make_rel/external_fmt_display_path: component prefix, not text prefix.
+pub fn jet_cli_format_display_path(root: String, path: String, external: Bool) -> String Never! {
+    if root == "" -> return if external -> path.replace("\\", "/") else -> ~path
+    root_bytes :: root.bytes()
+    path_bytes :: path.bytes()
+    compatible :: root.starts_with("/") == path.starts_with("/")
+    left := 0
+    right := 0
+    matched := compatible
+    loop matched {
+        root_part :: jet_cli_record_next_path_component(root_bytes, left)
+        if root_part.start == root_part.end -> break
+        path_part :: jet_cli_record_next_path_component(path_bytes, right)
+        if root_bytes[root_part.start..<root_part.end] != path_bytes[path_part.start..<path_part.end] {
+            matched = false
+            break
+        }
+        left = root_part.next
+        right = path_part.next
+    }
+    value := ~path
+    if matched {
+        rest :: jet_cli_record_next_path_component(path_bytes, right)
+        value = String.from_bytes(path_bytes[rest.start..<path_bytes.len()]) ?? panic("fmt display UTF-8")
+        // Rust external_fmt_display_path: only a stripped relative is respelled.
+        if external -> value = value.replace("\\", "/")
+    }
+    value
+}
+fn jet_cli_format_rewrite_status(path: String, counts: JetCLIFormatRewrites, fmt_file: Bool) -> String Never! {
+    out := [U8]{}
+    if counts.selectors > 0 {
+        plural :: if counts.selectors == 1 -> "" else -> "s"
+        jet_cli_format_append(&out, "{path}: rewrote {counts.selectors} retired interpolation selector{plural} from `#` to `:` (D-ONCE-HASH1)\n")
+    }
+    if counts.prints > 0 {
+        plural :: if counts.prints == 1 -> "" else -> "s"
+        clause :: if fmt_file -> " from `#` to `:`" else -> ""
+        jet_cli_format_append(&out, "{path}: rewrote {counts.prints} retired print-family spelling{plural}{clause} (D-ONCE-PRINT1=A)\n")
+    }
+    if counts.targets > 0 {
+        plural :: if counts.targets == 1 -> "" else -> "s"
+        jet_cli_format_append(&out, "{path}: rewrote {counts.targets} retired target spelling{plural} from `plugin` to `sandbox` (D-ONCE-SANDBOX1=A)\n")
+    }
+    if counts.types > 0 {
+        plural :: if counts.types == 1 -> "" else -> "s"
+        jet_cli_format_append(&out, "{path}: rewrote {counts.types} retired Core container name{plural} (D-COLLNAME1=A)\n")
+    }
+    String.from_bytes(out) ?? panic("fmt status UTF-8")
+}
+// Rust run_fmt/run_fmt_stdin (10270-10552,9433-9514). Preflight ALL before
+// shared atomic publication; neither --check nor stdin ever enters commit.
+pub fn jet_cli_run_fmt<H: JetCLIFormatHost>(host: &H, options: JetCLIFormatOptions, mode: JetCLIOutputMode) -[FS, Env, Exec, IO]> JetDriverVerbOutput Never! {
+    out := jet_cli_format_output()
+    if options.stdin {
+        source :: &host.stdin() ?? return jet_cli_format_refusal("E2105", "failed to read from stdin", "Jet could not complete the named file, tool, or operating-system operation", "", mode, 2)
+        label :: options.stdin_path ?? "<stdin>"
+        formatted :: &host.format(source, label, options.explicit_copies, options.simplify) ?? {
+            if err == {
+                .Diagnostics(diags) -> jet_cli_format_diagnostic(&out, &host.diagnostics("fmt", label, source, diags, mode), mode)
+                .IO(message) -> jet_cli_format_diagnostic(&out, jet_cli_format_io_error(label, message, mode), mode)
+                .Refusal(output) -> return output
+            }
+            out.exit_code = 2
+            return jet_cli_format_finish(out)
+        }
+        if !mode.json -> jet_cli_format_render(&out, formatted.text)
+        // stdin prints target before selector/print/type notes.
+        counts :: formatted.rewrites
+        target :: JetCLIFormatRewrites{targets: counts.targets, selectors: 0, prints: 0, types: 0}
+        rest :: JetCLIFormatRewrites{targets: 0, selectors: counts.selectors, prints: counts.prints, types: counts.types}
+        jet_cli_format_status(&out, jet_cli_format_rewrite_status(label, target, false), mode)
+        jet_cli_format_status(&out, jet_cli_format_rewrite_status(label, rest, false), mode)
+        return jet_cli_format_finish(out)
+    }
+    cwd :: &host.cwd()
+    root :: &host.project_root(cwd)
+    discovered :: if options.changed -> &host.changed_files(cwd, false) ?? {
+        if err == .Refusal(output) -> return output
+        return jet_cli_format_refusal("E2104", "`--changed` requires a git repository", "`jet fmt --changed` uses git to find modified .jet files", "run from inside a git repository, or format specific files with `jet fmt <path>`", mode, 2)
+    } else -> jet_cli_format_collect<H>(&host, options.paths, root)
+    changes := [JetCLIFormatChange]{}
+    rewrites := [JetCLIFormatRewrites]{}
+    failed := false
+    loop path in discovered {
+        snapshot :: &host.read(path) ?? {
+            if err == {
+                .IO(message) -> jet_cli_format_diagnostic(&out, jet_cli_format_io_error(path, "can't read `{path}`: {message}", mode), mode)
+                .Refusal(output) -> {
+                    jet_cli_format_append(&out.stdout, output.stdout)
+                    jet_cli_format_append(&out.stderr, output.stderr)
+                }
+                .Diagnostics(diags) -> jet_cli_format_diagnostic(&out, &host.diagnostics("fmt", path, "", diags, mode), mode)
+            }
+            failed = true
+            next
+        }
+        source :: String.from_bytes(snapshot.bytes) ?? {
+            jet_cli_format_diagnostic(&out, jet_cli_format_io_error(path, "can't read `{path}`: stream did not contain valid UTF-8", mode), mode)
+            failed = true
+            next
+        }
+        formatted :: &host.format(source, path, options.explicit_copies, options.simplify) ?? {
+            if err == {
+                .Diagnostics(diags) -> jet_cli_format_diagnostic(&out, &host.diagnostics("fmt", path, source, diags, mode), mode)
+                .IO(message) -> jet_cli_format_diagnostic(&out, jet_cli_format_io_error(path, message, mode), mode)
+                .Refusal(output) -> {
+                    jet_cli_format_append(&out.stdout, output.stdout)
+                    jet_cli_format_append(&out.stderr, output.stderr)
+                }
+            }
+            failed = true
+            next
+        }
+        if formatted.text != source {
+            &changes.push(JetCLIFormatChange{before: ^snapshot, after: formatted.text.bytes()})
+            &rewrites.push(formatted.rewrites)
+        }
+    }
+    if failed {
+        out.exit_code = if options.check -> 1 else -> 2
+        return jet_cli_format_finish(out)
+    }
+    if options.check {
+        sort_root :: ~root
+        &changes.sort_by((a, b) -> jet_cli_format_display_path(sort_root, a.before.path, false) <=> jet_cli_format_display_path(sort_root, b.before.path, false))
+        jet_cli_format_dirty_output<H>(&host, &out, changes, root, false, options.diff, mode)
+        return jet_cli_format_finish(out)
+    }
+    if !changes.is_empty() {
+        _ :: &host.commit(changes, false) ?? {
+            if err == .Refusal(output) -> return output
+            message :: if err == .IO(text) -> text else -> "formatter publication failed"
+            return jet_cli_format_refusal("E2105", message, "Jet could not complete the named file, tool, or operating-system operation", "", mode, 2)
+        }
+        loop index in 0..<changes.len() -> jet_cli_format_status(&out, jet_cli_format_rewrite_status(changes[index].before.path, rewrites[index], true), mode)
+    } else { if discovered.is_empty() && mode.json -> jet_cli_format_render(&out, "{jet_cli_fmt_json_ok()}\n") }
+    jet_cli_format_finish(out)
+}
+fn jet_cli_format_dirty_output<H: JetCLIFormatHost>(host: &H, out: &JetCLIFormatBuffer, changes: [JetCLIFormatChange], root: String, external: Bool, show_diff: Bool, mode: JetCLIOutputMode) Never! {
+    if changes.is_empty() {
+        if mode.json -> jet_cli_format_render(&out, "{jet_cli_fmt_json_ok()}\n")
+        return
+    }
+    paths := [String]{}
+    diffs := [String]{}
+    loop change in changes {
+        relative :: jet_cli_format_display_path(root, change.before.path, external)
+        // Native dirty JSON without diff uses original paths, NOT relative ones.
+        &paths.push(if mode.json && !show_diff && !external -> change.before.path else -> relative)
+        if show_diff -> &diffs.push(&host.diff(relative, String.from_bytes_lossy(change.before.bytes), String.from_bytes_lossy(change.after)))
+        if !mode.json {
+            jet_cli_format_render(&out, "{relative}\n")
+            if show_diff -> jet_cli_format_render(&out, diffs[diffs.len() - 1])
+        }
+    }
+    if mode.json -> jet_cli_format_render(&out, "{jet_cli_fmt_json_dirty(paths, if show_diff -> Val(diffs) else -> None)}\n")
+    out.exit_code = 1
+}
+// Rust run_external_fmt (9933-10171). Scoped stage/realization stays with the
+// canonical environment host; discovery, changed filtering and output stay here.
+pub fn jet_cli_run_external_fmt<H: JetCLIFormatHost>(host: &H, options: JetCLIExternalFormatOptions, mode: JetCLIOutputMode) -[FS, Env, Exec, IO]> JetDriverVerbOutput Never! {
+    cwd :: &host.cwd()
+    formatter :: &host.external_formatter(cwd, options.language, options.preset, options.environment, mode) ?? {
+        if err == .Refusal(output) -> return output
+        return jet_cli_format_refusal("E1340", "jet fmt --lang needs an env.jet", "the external formatter is an environment package fact", "run from a realized environment project containing env.jet", mode, 1)
+    }
+    program :: jet_cli_external_formatter_program(formatter.package) ?? return jet_cli_format_refusal("E1340", "the environment formatter package has no executable name", "Jetpack realizes formatter packages, and Jet invokes their package name", "use a formatter package such as `pkgs.nixfmt`", mode, 1)
+    discovered := [String]{}
+    if options.paths.is_empty() -> jet_cli_format_walk<H>(&host, formatter.root, Val(options.language), &discovered)
+    else {
+        loop raw in options.paths {
+            path :: jet_cli_format_join(cwd, raw)
+            kind :: &host.kind(path, true) ?? {
+                if err == .Refusal(output) -> return output
+                message :: if err == .IO(text) -> "{path}: {text}" else -> ~path
+                return jet_cli_format_refusal("E1340", "could not discover formatter input files", message, "fix the named path or run the formatter from the environment root", mode, 2)
+            }
+            if kind == JetCLIFormatPathKind.Directory -> jet_cli_format_walk<H>(&host, path, Val(options.language), &discovered)
+            else { if kind == JetCLIFormatPathKind.File && jet_cli_format_matches_language(path, options.language) -> &discovered.push(^path) }
+        }
+    }
+    jet_cli_format_sort_unique<H>(&host, &discovered)
+    if options.changed {
+        changed :: &host.changed_files(formatter.root, true) ?? {
+            if err == .Refusal(output) -> return output
+            message :: if err == .IO(text) -> text else -> ""
+            return jet_cli_format_refusal("E1340", "--changed needs a readable Git worktree", message, "run inside a Git worktree or remove --changed", mode, 2)
+        }
+        membership := [String:Bool]{}
+        loop path in changed -> membership[path] = true
+        filtered := [String]{}
+        loop path in discovered {
+            relative :: jet_cli_format_display_path(formatter.root, path, true)
+            if membership.has_key(relative) -> &filtered.push(~path)
+        }
+        discovered = ^filtered
+    }
+    out := jet_cli_format_output()
+    if discovered.is_empty() {
+        if mode.json -> jet_cli_format_render(&out, "{jet_cli_fmt_json_ok()}\n")
+        return jet_cli_format_finish(out)
+    }
+    inputs := [JetCLIFormatSnapshot]{}
+    loop path in discovered {
+        snapshot :: &host.read(path) ?? {
+            if err == .Refusal(output) -> return output
+            message :: if err == .IO(text) -> text else -> ""
+            return jet_cli_format_refusal("E1340", "could not read `{path}`", message, "fix the file permissions and retry", mode, 2)
+        }
+        &inputs.push(^snapshot)
+    }
+    formatted := &host.external_format(program, options.child_flags, inputs, mode) ?? {
+        if err == .Refusal(output) -> return output
+        message :: if err == .IO(text) -> text else -> ""
+        return jet_cli_format_refusal("E1340", "could not stage formatter inputs", message, "fix the temporary directory and retry", mode, 2)
+    }
+    out = JetCLIFormatBuffer{stdout: formatted.output.stdout.bytes(), stderr: formatted.output.stderr.bytes(), exit_code: formatted.output.exit_code}
+    if out.exit_code != 0 -> return jet_cli_format_finish(out)
+    // A provider must report unreadable/missing stage files as Refusal with
+    // E1340 and exit1. A mismatched successful response is never publishable.
+    if formatted.files.len() != inputs.len() -> return jet_cli_format_refusal("E1340", "environment formatter did not produce readable output", "formatter output count does not match staged inputs", "check the formatter package and retry", mode, 1)
+    changes := [JetCLIFormatChange]{}
+    // Drain owned stage bytes and held snapshots in input order, without
+    // cloning either payload merely to put it in the publication batch.
+    &inputs.reverse()
+    &formatted.files.reverse()
+    loop !inputs.is_empty() {
+        before :: &inputs.pop() ?? panic("fmt held input disappeared")
+        after :: &formatted.files.pop() ?? panic("fmt staged output disappeared")
+        if before.bytes != after -> &changes.push(JetCLIFormatChange{before: ^before, after: ^after})
+    }
+    if options.check {
+        jet_cli_format_dirty_output<H>(&host, &out, changes, formatter.root, true, options.diff, mode)
+        return jet_cli_format_finish(out)
+    }
+    if !changes.is_empty() {
+        _ :: &host.commit(changes, false) ?? {
+            if err == .Refusal(output) -> return output
+            message :: if err == .IO(text) -> text else -> ""
+            return jet_cli_format_refusal("E1340", "could not publish formatter outputs", message, "fix the file permissions and rerun the formatter", mode, 2)
+        }
+    }
+    if mode.json -> jet_cli_format_render(&out, "{jet_cli_fmt_json_ok()}\n")
+    jet_cli_format_finish(out)
+}
+
+// Edition-2027 migration uses Rust's intentionally lexical scanner, NOT a
+// substitute formatter. All coordinates below are UTF-8 bytes.
+fn jet_cli_format_slice(raw: [U8], start: Int, end: Int) -> String Never! { String.from_bytes(raw[start..<end]) ?? panic("format migration UTF-8 boundary") }
+fn jet_cli_format_match(raw: [U8], at: Int, needle: [U8]) -> Bool Never! {
+    if at + needle.len() > raw.len() -> return false
+    loop offset in 0..<needle.len() { if raw[at + offset] != needle[offset] -> return false }
+    true
+}
+// Rust find_matching_paren (5615-5643).
+pub fn jet_cli_format_matching_paren(raw: [U8], start: Int) -> Int? Never! {
+    depth := 1
+    quoted := false
+    escaped := false
+    loop at in start..<raw.len() {
+        code :: Int.from_u8(raw[at])
+        if quoted {
+            if escaped -> escaped = false
+            else { if code == 92 -> escaped = true else { if code == 34 -> quoted = false } }
+            next
+        }
+        if code == 34 -> quoted = true
+        if code == 40 -> depth += 1
+        if code == 41 {
+            depth -= 1
+            if depth == 0 -> return Val(at)
+        }
+    }
+    None
+}
+// Rust innermost_open_brace/fn_header_before/enclosing_fn_is_fallible.
+fn jet_cli_format_open_brace(raw: [U8], before: Int) -> Int? Never! {
+    depth := 0
+    at := before
+    loop at > 0 {
+        at -= 1
+        if raw[at] == (U8{125}) -> depth += 1
+        if raw[at] == (U8{123}) {
+            if depth == 0 -> return Val(at)
+            depth -= 1
+        }
+    }
+    None
+}
+fn jet_cli_format_fn_header(raw: [U8], open: Int) -> Int? Never! {
+    at := open
+    loop at > 0 {
+        at -= 1
+        if !jet_cli_format_match(raw, at, "fn ".bytes()) -> next
+        if at > 0 {
+            previous :: Int.from_u8(raw[at - 1])
+            if (previous >= 65 && previous <= 90) || (previous >= 97 && previous <= 122) || (previous >= 48 && previous <= 57) || previous == 95 -> next
+        }
+        paren := at + 3
+        loop paren < open && raw[paren] != (U8{40}) -> paren += 1
+        if paren >= open -> next
+        close :: jet_cli_format_matching_paren(raw, paren + 1) ?? next
+        if close >= open -> next
+        tail :: jet_cli_format_slice(raw, close + 1, open)
+        if !tail.contains("{{") && !tail.contains("}}") && !tail.contains(";") -> return Val(at)
+    }
+    None
+}
+fn jet_cli_format_enclosing_fallible(raw: [U8], at: Int) -> Bool Never! {
+    before := at
+    loop {
+        open :: jet_cli_format_open_brace(raw, before) ?? return false
+        if jet_cli_format_fn_header(raw, open) == .Val(start) -> return !jet_cli_format_slice(raw, start, open).contains("Never!")
+        before = open
+    }
+}
+// Rust replace_untyped_call (5645-5660).
+fn jet_cli_format_replace_call(source: String, from: String, to: String) -> String Never! {
+    raw :: source.bytes()
+    needle :: from.bytes()
+    out := [U8]{}
+    base := 0
+    at := 0
+    loop at < raw.len() {
+        if jet_cli_format_match(raw, at, needle) {
+            jet_cli_format_append_range(&out, raw, base, at)
+            end :: at + needle.len()
+            jet_cli_format_append(&out, if end < raw.len() && raw[end] == (U8{60}) -> from else -> to)
+            at = end
+            base = end
+        } else { at += 1 }
+    }
+    jet_cli_format_append_range(&out, raw, base, raw.len())
+    String.from_bytes(out) ?? panic("fmt migration UTF-8")
+}
+// Rust apply_edition_2027_encoding_fixes/rewrite_json_canonical_calls.
+pub fn jet_cli_format_edition_2027(source: String) -> String Never! {
+    materialized :: jet_cli_format_replace_call(jet_cli_format_replace_call(source, "cbor.encode(", "cbor.to_bytes("), "cbor.decode(", "cbor.parse(")
+    raw :: materialized.bytes()
+    needle :: "json.canonical(".bytes()
+    out := [U8]{}
+    base := 0
+    at := 0
+    loop at < raw.len() {
+        if !jet_cli_format_match(raw, at, needle) {
+            at += 1
+            next
+        }
+        jet_cli_format_append_range(&out, raw, base, at)
+        start :: at + needle.len()
+        close :: jet_cli_format_matching_paren(raw, start) ?? {
+            jet_cli_format_append(&out, "json.canonical(")
+            at = start
+            base = start
+            next
+        }
+        jet_cli_format_append_range(&out, raw, at, close + 1)
+        trailing := close + 1
+        loop trailing < raw.len() && jet_cli_format_space_at(raw, trailing) {
+            lead :: Int.from_u8(raw[trailing])
+            trailing += if lead < 128 -> 1 else -> if lead < 224 -> 2 else -> if lead < 240 -> 3 else -> 4
+        }
+        already :: trailing < raw.len() && raw[trailing] == (U8{63})
+        if !already && !jet_cli_format_enclosing_fallible(raw, at) -> jet_cli_format_append(&out, " ?? panic(\"value is not canonical JSON\")")
+        at = close + 1
+        base = at
+    }
+    jet_cli_format_append_range(&out, raw, base, raw.len())
+    String.from_bytes(out) ?? panic("fmt migration UTF-8")
+}
+// Rust edition_2027_encoding_audit (5662-5685).
+pub fn jet_cli_format_edition_audit(before: String, after: String) -> [String] Never! {
+    notes := [String]{}
+    if before.contains("json.canonical(") {
+        if after.contains("?? panic(\"value is not canonical JSON\")") || (after.contains("json.canonical(") && after != before) -> &notes.push("rewrote `json.canonical(...)` to fallible form; review hashing/signing fixtures")
+        else -> &notes.push("review every `json.canonical(...)` call — edition 2027 requires fallible `json.canonical(data, limits)?` (or an explicit panic fallback)")
+    }
+    if before != after && (before.contains("cbor.encode(") || before.contains("cbor.decode(")) -> &notes.push("rewrote deprecated CBOR forwarding calls (`encode`/`decode`)")
+    if notes.is_empty() -> &notes.push("no encoding forwarding calls found")
+    notes
+}
+// Rust run_fix (5273-5494): recompute checked edits only while overlap deferred,
+// stop on unchanged round, cap at16; all/safe selection belongs to shared LSP.
+pub fn jet_cli_run_fix<H: JetCLIFormatHost>(host: &H, options: JetCLIFixOptions, mode: JetCLIOutputMode) -[FS, Env, Exec, IO]> JetDriverVerbOutput Never! {
+    path :: options.path
+    snapshot :: &host.read(path) ?? return jet_cli_format_refusal("E2105", "can't find the file `{path}`", "Jet could not complete the named file, tool, or operating-system operation", "", mode, 1)
+    source :: String.from_bytes(snapshot.bytes) ?? return jet_cli_format_refusal("E2105", "can't find the file `{path}`", "Jet could not complete the named file, tool, or operating-system operation", "", mode, 1)
+    edition :: if options.edition == .Val(value) -> value == "2027" else -> false
+    materialized :: if edition -> jet_cli_format_edition_2027(source) else -> ~source
+    migrated :: &host.rewrite_targets(materialized, path)
+    counts :: &host.rewrites(migrated, path)
+    target_counts :: &host.rewrites(materialized, path)
+    rewrites :: JetCLIFormatRewrites{targets: target_counts.targets, selectors: counts.selectors, prints: counts.prints, types: counts.types}
+    out := jet_cli_format_output()
+    if edition { loop note in jet_cli_format_edition_audit(source, materialized) -> jet_cli_format_status(&out, "{path}: edition 2027 migration: {note}\n", mode) }
+    first :: &host.fix_round(path, migrated, options.all)
+    skipped :: first.skipped
+    fixed := first.text
+    applied := first.applied
+    deferred := first.deferred
+    round := 1
+    loop deferred > 0 && round < 16 {
+        next_round :: &host.fix_round(path, fixed, options.all)
+        if next_round.text == fixed -> break
+        fixed = next_round.text
+        applied += next_round.applied
+        deferred = next_round.deferred
+        round += 1
+    }
+    suggestions :: if skipped == 1 -> "" else -> "s"
+    if fixed == source {
+        if skipped == 0 -> jet_cli_format_status(&out, "{path}: no changes made\n", mode)
+        else -> jet_cli_format_status(&out, "{path}: no changes made ({skipped} suggestion{suggestions} need review)\n", mode)
+        return jet_cli_format_finish(out)
+    }
+    plural :: if applied == 1 -> "" else -> "es"
+    migration_only :: applied == 0 && rewrites.targets == 0 && rewrites.selectors == 0 && rewrites.prints == 0 && rewrites.types == 0
+    if options.dry_run {
+        if !mode.json -> jet_cli_format_render(&out, &host.diff(path, source, fixed))
+        if migration_only -> jet_cli_format_status(&out, "{path}: would apply edition migration (dry run; nothing written)\n", mode)
+        else { if applied > 0 -> jet_cli_format_status(&out, "{path}: would apply {applied} fix{plural} (dry run; nothing written)\n", mode) }
+        // Fix order is target, selector, print, type (different from file fmt).
+        jet_cli_format_status(&out, jet_cli_format_rewrite_status(path, JetCLIFormatRewrites{targets: rewrites.targets, selectors: 0, prints: 0, types: 0}, false), mode)
+        jet_cli_format_status(&out, jet_cli_format_rewrite_status(path, JetCLIFormatRewrites{targets: 0, selectors: rewrites.selectors, prints: rewrites.prints, types: rewrites.types}, false), mode)
+        if skipped > 0 -> jet_cli_format_status(&out, "{path}: skipped {skipped} suggestion{suggestions} for review (dry run)\n", mode)
+        return jet_cli_format_finish(out)
+    }
+    changes :: [JetCLIFormatChange]{JetCLIFormatChange{before: ^snapshot, after: fixed.bytes()}}
+    log :: &host.commit(changes, true) ?? {
+        if err == .Refusal(output) -> return output
+        message :: if err == .IO(text) -> text else -> "fix publication failed"
+        return jet_cli_format_refusal("E2105", message, "Jet could not complete the named file, tool, or operating-system operation", "", mode, 2)
+    }
+    if migration_only -> jet_cli_format_status(&out, "{path}: applied edition migration\n", mode)
+    else { if applied > 0 -> jet_cli_format_status(&out, "{path}: applied {applied} fix{plural}\n", mode) }
+    if skipped > 0 -> jet_cli_format_status(&out, "{path}: skipped {skipped} suggestion{suggestions} for review\n", mode)
+    jet_cli_format_status(&out, "  log: {log}\n", mode)
+    jet_cli_format_status(&out, jet_cli_format_rewrite_status(path, JetCLIFormatRewrites{targets: rewrites.targets, selectors: 0, prints: 0, types: 0}, false), mode)
+    jet_cli_format_status(&out, jet_cli_format_rewrite_status(path, JetCLIFormatRewrites{targets: 0, selectors: rewrites.selectors, prints: rewrites.prints, types: rewrites.types}, false), mode)
+    jet_cli_format_finish(out)
+}

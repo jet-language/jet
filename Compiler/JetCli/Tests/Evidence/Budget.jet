@@ -1,0 +1,500 @@
+// BC01 behavior: exact argv precedence, output, authenticated report dispatch,
+// store ordering and CAS refusal. The host below is test-only transport, not a
+// production measurement provider; canonical math/verification remain real.
+fn budget_test_parse_error(raw: [String], wanted: String) Never! {
+    if jet_cli_budget_parse(raw) == {
+        .Err(.Tool(message)) -> assert_eq(message, wanted)
+        else -> panic("expected parse refusal")
+    }
+}
+#Test("budget parser exact subcommands values duplicates and precedence") {
+    budget_test_parse_error([String]{"budget"}, "`jet budget` needs `check` or `update`")
+    budget_test_parse_error([String]{"budget", "history"}, "unknown `jet budget` subcommand `history`")
+    budget_test_parse_error([String]{"budget", "check", "--baseline", "--quiet"}, "flag `--baseline` needs a value")
+    budget_test_parse_error([String]{"budget", "update", "-y", "--yes"}, "flag `--yes` is repeated")
+    budget_test_parse_error([String]{"budget", "check", "--yes"}, "update-only flags cannot be used with `budget check`")
+    budget_test_parse_error([String]{"budget", "update", "--bootstrap", "--accept-regression"}, "`budget update` requires `--baseline <name>`")
+    budget_test_parse_error([String]{"budget", "update", "--baseline", "../main"}, "invalid `--baseline` value: invalid BaselineName")
+    budget_test_parse_error([String]{"budget", "update", "--baseline", "main", "--bootstrap", "--accept-regression"}, "`--bootstrap` and `--accept-regression` are mutually exclusive")
+    budget_test_parse_error([String]{"budget", "update", "--baseline", "main", "--reason", "why"}, "`--reason` is required with, and only accepted with, bootstrap or accept-regression")
+    budget_test_parse_error([String]{"budget", "check", "--annotations", "bad"}, "`--annotations` accepts auto, none, or github")
+    budget_test_parse_error([String]{"budget", "check", "--json=true"}, "unknown flag or argument `--json=true`")
+    o :: jet_cli_budget_parse([String]{"budget", "update", "--baseline", "perf/main", "--bootstrap", "--reason", "new baseline", "-y", "--json", "--verbose", "--quiet", "--annotations", "github"}) ?? panic("valid options")
+    assert(o.bootstrap && o.yes && o.json && o.verbose && o.quiet)
+    assert(o.annotations == JetCLIBudgetAnnotations.Disabled)
+    assert_eq(o.baseline, Val("perf/main"))
+}
+fn budget_test_spec() -> JetCLIBudgetSelection Never! {
+    JetCLIBudgetSelection{id: "b", name: "latency", source: "src/日本.jet", line: 3, column: 5, targets: JetCLIBudgetAxis.Current, profiles: JetCLIBudgetAxis.All, enforcement: "Fail", comparison_kind: "Absolute", provider: "CompilerFacts"}
+}
+fn budget_test_checked() -> JetCLIBudgetChecked Never! { JetCLIBudgetChecked{snapshot: 1, root: "/workspace", entry: "/workspace/run.jet", started_at: "2026-01-01T00:00:00Z", specs: [JetCLIBudgetSelection]{budget_test_spec()}} }
+#Test("budget gates select only applicable deterministic absolute Fail providers") {
+    s := budget_test_spec()
+    assert(jet_cli_budget_is_build_gate(s, "native", "dev"))
+    s.enforcement = "Warn"
+    assert(!jet_cli_budget_is_build_gate(s, "native", "dev"))
+    s.enforcement = "Fail"
+    s.comparison_kind = "AbsoluteFrom"
+    assert(!jet_cli_budget_is_build_gate(s, "native", "dev"))
+    s.comparison_kind = "Absolute"
+    s.provider = "BenchMeasurement(x)"
+    assert(!jet_cli_budget_is_build_gate(s, "native", "dev"))
+    s.provider = "BuildArtifact"
+    s.targets = JetCLIBudgetAxis.Only([String]{"Target.Native"})
+    s.profiles = JetCLIBudgetAxis.Only([String]{"DEV"})
+    assert(jet_cli_budget_is_build_gate(s, "native", "dev"))
+    assert(!jet_cli_budget_is_build_gate(s, "web", "dev"))
+    assert(jet_cli_budget_has_build_gates(None, "native", "dev"))
+    assert(!jet_cli_budget_has_build_gates(Val([JetCLIBudgetSelection]{}), "native", "dev"))
+}
+#Test("budget confirmation and annotation escaping preserve refusal default") {
+    assert(jet_cli_budget_confirm_answer(" YES\n"))
+    assert(jet_cli_budget_confirm_answer("y"))
+    assert(!jet_cli_budget_confirm_answer(""))
+    assert(!jet_cli_budget_confirm_answer("yes please"))
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR is UTF-8")
+    assert_eq(jet_cli_budget_annotation_escape("a%:{cr}\n,b", true), "a%25%3A%0D%0A%2Cb")
+    assert_eq(jet_cli_budget_annotation_escape("a%:{cr}\n,b", false), "a%25:%0D%0A,b")
+}
+fn budget_test_f(key: String, value: CanonicalJSON) -> CanonicalJSONField Never! { CanonicalJSONField{key: key, value: value} }
+fn budget_test_s(value: String) -> CanonicalJSON Never! { CanonicalJSON.String(value) }
+fn budget_test_i(value: Int) -> CanonicalJSON Never! { CanonicalJSON.Integer("{value}") }
+fn budget_test_set(value: CanonicalJSON, key: String, replacement: CanonicalJSON) -> CanonicalJSON Never! {
+    if value == .Object(fields) {
+        out := [CanonicalJSONField]{}
+        loop field in fields { if field.key != key -> &out.push(~field) }
+        &out.push(budget_test_f(key, replacement))
+        return jet_cli_budget_object(out)
+    }
+    panic("test object")
+}
+// A test fixture observation, independently graded with canonical perf_evaluate.
+// No Foundation Tests file dependency and no production host implementation.
+fn budget_test_report(unavailable: Bool) -> [U8] Never! {
+    o :: (fields: [CanonicalJSONField]) -> jet_cli_budget_object(fields)
+    empty :: CanonicalJSON.Array([CanonicalJSON]{})
+    q :: perf_rational_to_json(perf_rational_integer(9))
+    subject :: o([CanonicalJSONField]{budget_test_f("target_id", budget_test_s("fixture")), budget_test_f("member_sources", ~empty), budget_test_f("target_triple", budget_test_s("x64-linux")), budget_test_f("target_class", budget_test_s("native")), budget_test_f("profile", budget_test_s("dev")), budget_test_f("artifact", CanonicalJSON.Null), budget_test_f("measured_start", budget_test_s("start")), budget_test_f("measured_end", budget_test_s("end"))})
+    tool_base :: o([CanonicalJSONField]{budget_test_f("jet_version", budget_test_s("1")), budget_test_f("compiler_build_id", budget_test_s("compiler")), budget_test_f("stdlib_id", budget_test_s("core")), budget_test_f("runner_id", budget_test_s("runner"))})
+    tool :: budget_test_set(tool_base, "digest", budget_test_s(perf_stable_id(tool_base)))
+    provider_base :: o([CanonicalJSONField]{budget_test_f("kind", budget_test_s("CompilerFacts")), budget_test_f("identity", budget_test_s("fixture")), budget_test_f("version", budget_test_s("1")), budget_test_f("isolation", budget_test_s("process")), budget_test_f("cpu_arch", budget_test_s("x64")), budget_test_f("cpu_model", budget_test_s("fixture")), budget_test_f("logical_cpus", budget_test_i(8)), budget_test_f("memory_bytes", budget_test_i(1000)), budget_test_f("os", budget_test_s("linux")), budget_test_f("kernel", budget_test_s("fixture")), budget_test_f("power_governor", budget_test_s("fixture"))})
+    provider :: budget_test_set(provider_base, "hardware_fingerprint", budget_test_s(perf_stable_id(provider_base)))
+    spec :: o([CanonicalJSONField]{})
+    measurement := o([CanonicalJSONField]{budget_test_f("budget_id", budget_test_s("b")), budget_test_f("budget_spec", ~spec), budget_test_f("budget_spec_sha256", budget_test_s(perf_stable_id(spec))), budget_test_f("source", budget_test_s("src/日本.jet")), budget_test_f("metric", o([CanonicalJSONField]{budget_test_f("name", budget_test_s("BenchTime")), budget_test_f("percentile", CanonicalJSON.Null)})), budget_test_f("target_class", budget_test_s("native")), budget_test_f("unit", budget_test_s("Duration")), budget_test_f("direction", budget_test_s("lower_is_better")), budget_test_f("provider", provider), budget_test_f("comparison", o([CanonicalJSONField]{budget_test_f("kind", budget_test_s("absolute")), budget_test_f("limit", perf_rational_to_json(perf_rational_integer(10))), budget_test_f("direction", budget_test_s("at_most"))})), budget_test_f("enforcement", budget_test_s("fail")), budget_test_f("context_key", budget_test_s("0".repeat(64))), budget_test_f("policy", CanonicalJSON.Null), budget_test_f("samples", if unavailable -> ~empty else -> CanonicalJSON.Array([CanonicalJSON]{~q})), budget_test_f("statistics", CanonicalJSON.Null), budget_test_f("history", CanonicalJSON.Null), budget_test_f("baseline", CanonicalJSON.Null), budget_test_f("decision", CanonicalJSON.Null)})
+    if unavailable {
+        measurement = budget_test_set(measurement, "comparison", o([CanonicalJSONField]{budget_test_f("kind", budget_test_s("absolute_from")), budget_test_f("baseline", budget_test_s("main")), budget_test_f("limit", perf_rational_to_json(perf_rational_integer(10))), budget_test_f("direction", budget_test_s("at_most"))}))
+    }
+    if subject == .Object(s) { if tool == .Object(t) { if measurement == .Object(m) -> measurement = budget_test_set(measurement, "context_key", budget_test_s(perf_budget_context_key(s, t, m) ?? panic(err.message))) } }
+    sanitized :: o([CanonicalJSONField]{budget_test_f("subject", ~subject), budget_test_f("toolchain", ~tool), budget_test_f("measurements", CanonicalJSON.Array([CanonicalJSON]{perf_sanitize_measurement(measurement) ?? panic(err.message)}))})
+    evidence_id :: perf_stable_id(sanitized)
+    samples :: if unavailable -> [PerfRational]{} else -> [PerfRational]{perf_rational_integer(9)}
+    actual :: if unavailable -> perf_finish(perf_rational_zero(), None, None, PerfEvidence.Unavailable, PerfEnforcement.Fail, [PerfRational]{}) else -> perf_evaluate(~evidence_id, jet_cli_budget_text(jet_cli_budget_field(measurement, "context_key")), [String]{}, samples, [PerfRational]{}, None, PerfComparison.Absolute{limit: perf_rational_integer(10), direction: PerfLimitDirection.AtMost}, PerfDirection.LowerIsBetter, PerfEnforcement.Fail, None) ?? panic(err.message)
+    trend :: o([CanonicalJSONField]{budget_test_f("label", budget_test_s("insufficient")), budget_test_f("report_ids", ~empty), budget_test_f("estimators", ~empty), budget_test_f("score", CanonicalJSON.Null)})
+    decision :: o([CanonicalJSONField]{budget_test_f("evidence", budget_test_s(if unavailable -> "unavailable" else -> "pass")), budget_test_f("reason", budget_test_s(if unavailable -> "provider unavailable" else -> "within limit")), budget_test_f("point", perf_rational_to_json(actual.point)), budget_test_f("lower95", CanonicalJSON.Null), budget_test_f("upper95", CanonicalJSON.Null), budget_test_f("trend", trend), budget_test_f("policy_outcome", budget_test_s(if unavailable -> "fail" else -> "pass"))})
+    measurement = budget_test_set(measurement, "decision", decision)
+    summary :: o([CanonicalJSONField]{budget_test_f("outcome", budget_test_s(if unavailable -> "fail" else -> "pass")), budget_test_f("pass", budget_test_i(if unavailable -> 0 else -> 1)), budget_test_f("warn", budget_test_i(0)), budget_test_f("fail", budget_test_i(if unavailable -> 1 else -> 0))})
+    privacy :: o([CanonicalJSONField]{budget_test_f("schema", budget_test_i(1)), budget_test_f("workspace_paths_only", CanonicalJSON.Bool(true)), budget_test_f("retained", ~empty), budget_test_f("excluded", ~empty)})
+    content :: o([CanonicalJSONField]{budget_test_f("subject", subject), budget_test_f("toolchain", tool), budget_test_f("evidence_id", budget_test_s(evidence_id)), budget_test_f("measurements", CanonicalJSON.Array([CanonicalJSON]{measurement})), budget_test_f("summary", summary), budget_test_f("privacy", privacy)})
+    canonical_json_bytes(perf_budget_report(content))
+}
+struct BudgetTestHost {
+    calls: [String], report: [U8], cached: Bool, live: Bool, interactive: Bool, answer: Bool, fail_at: String, unavailable: Bool, artifact_budget: Bool, no_gates: Bool,
+    fn record(&self, call: String) JetCLIBudgetError! {
+        &self.calls.push(~call)
+        if call == self.fail_at -> return Err(JetCLIBudgetError.Tool("refused"))
+    }
+    impl JetCLIBudgetHost {
+    fn prepare(&self, entry: String?) -> JetCLIBudgetChecked JetCLIBudgetError! {
+        &self.record("prepare")
+        checked := budget_test_checked()
+        if self.unavailable -> checked.specs[0].comparison_kind = "AbsoluteFrom"
+        if self.artifact_budget -> checked.specs[0].provider = "BuildArtifact"
+        if self.no_gates -> checked.specs[0].enforcement = "Warn"
+        Ok(checked)
+    }
+    fn timestamp(&self) -> String Never! { "2026-01-02T00:00:00Z" }
+    fn cache_has_live_baseline(&self, checked: &JetCLIBudgetChecked, active: [Int]) -> Bool Never! {
+        &self.calls.push("baseline")
+        self.live
+    }
+    fn artifact_identity(&self, path: String) -> JetCLIBudgetArtifact JetCLIBudgetError! {
+        &self.record("artifact")
+        Ok(JetCLIBudgetArtifact{path: path, size: 1, sha256: "0".repeat(64)})
+    }
+    fn compatible_report(&self, checked: &JetCLIBudgetChecked, active: [Int], target: String, profile: String, artifact: JetCLIBudgetArtifact?) -> [U8]? JetCLIBudgetError! {
+        &self.record("reuse")
+        Ok(if self.cached -> Val(~self.report) else -> None)
+    }
+    fn measure(&self, checked: &JetCLIBudgetChecked, active: [Int], target: String, profile: String, artifact: JetCLIBudgetArtifact?, bootstrap: Bool) -> [U8] JetCLIBudgetError! {
+        &self.record("measure")
+        Ok(~self.report)
+    }
+    fn write_report(&self, root: String, bytes: [U8]) -> Bool JetCLIBudgetError! {
+        &self.record("write")
+        Ok(true)
+    }
+    fn inspect_report(&self, root: String, bytes: [U8]) -> Bool JetCLIBudgetError! {
+        &self.record("inspect")
+        Ok(false)
+    }
+    fn plan_update(&self, root: String, baseline: String, bytes: [U8], kind: JetCLIBudgetUpdateKind, at: String) -> JetCLIBudgetUpdatePlan JetCLIBudgetError! {
+        &self.record("plan")
+        value :: perf_verify_budget_report(bytes) ?? return Err(JetCLIBudgetError.Tool(err.message))
+        Ok(JetCLIBudgetUpdatePlan{baseline: baseline, report_id: jet_cli_budget_manifest_report_id(value) ?? panic(err.message), report_bytes: ~bytes, prior_manifest_id: Val("1".repeat(64)), prior_head_report_id: Val("2".repeat(64)), accepted_at: at, kind: kind})
+    }
+    fn apply_update(&self, root: String, plan: &JetCLIBudgetUpdatePlan) JetCLIBudgetError! { &self.record("apply") }
+    fn stdin_is_terminal(&self) -> Bool Never! { self.interactive }
+    fn confirm_update(&self, prefix: String) -> Bool Never! {
+        &self.calls.push("prompt")
+        self.answer
+    }
+    fn github_actions(&self) -> Bool Never! { false }
+    }
+}
+fn budget_test_host(unavailable: Bool) -> BudgetTestHost Never! { BudgetTestHost{calls: [String]{}, report: budget_test_report(unavailable), cached: false, live: false, interactive: false, answer: false, fail_at: "", unavailable: unavailable, artifact_budget: false, no_gates: false} }
+#Test("budget check canonical measurement versus verified reuse and live baseline") {
+    host := budget_test_host(false)
+    out :: jet_cli_budget_run(&host, [String]{"budget", "check"})
+    assert_eq(out.exit_code, 0)
+    assert(out.stderr.starts_with("budgets: 1 budget passed · report "))
+    assert_eq(host.calls, [String]{"prepare", "baseline", "reuse", "measure", "write"})
+    host = budget_test_host(false)
+    host.cached = true
+    reuse :: jet_cli_budget_run(&host, [String]{"budget", "check", "--verbose"})
+    assert_eq(reuse.exit_code, 0)
+    assert_eq(host.calls, [String]{"prepare", "baseline", "reuse", "write"})
+    host = budget_test_host(false)
+    host.live = true
+    jet_cli_budget_run(&host, [String]{"budget", "check"})
+    assert_eq(host.calls, [String]{"prepare", "baseline", "measure", "write"})
+}
+#Test("budget unavailable remains failure and quiet keeps diagnostics") {
+    host := budget_test_host(true)
+    out :: jet_cli_budget_run(&host, [String]{"budget", "check", "--quiet"})
+    assert_eq(out.exit_code, 1)
+    assert(out.stderr.contains("Error [E2906]: performance budget latency has no usable evidence"))
+    assert(!out.stderr.contains("budgets unavailable:"))
+    host = budget_test_host(true)
+    json :: jet_cli_budget_run(&host, [String]{"budget", "check", "--json"})
+    assert_eq(json.exit_code, 1)
+    assert_eq(json.stderr, "")
+    assert(json.stdout.contains("\"failure_kind\":\"evidence\""))
+    assert(json.stdout.contains("\"status\":\"unavailable\""))
+}
+#Test("budget update plans are read only until explicit confirmation") {
+    host := budget_test_host(false)
+    out :: jet_cli_budget_run(&host, [String]{"budget", "update", "--baseline", "main", "--json"})
+    assert_eq(out.exit_code, 0)
+    assert_eq(host.calls, [String]{"prepare", "measure", "plan", "inspect"})
+    assert(out.stdout.contains("\"applied\":false"))
+    assert(out.stdout.contains("\"requires_confirmation\":false"))
+    assert(out.stdout.contains("\"to_id\":"))
+    host = budget_test_host(false)
+    planned :: jet_cli_budget_run(&host, [String]{"budget", "update", "--baseline", "main"})
+    assert(planned.stderr.ends_with("plan only; pass -y or --yes to apply in a non-interactive shell\n"))
+    assert_eq(host.calls, [String]{"prepare", "measure", "plan", "inspect"})
+    host = budget_test_host(false)
+    host.interactive = true
+    cancelled :: jet_cli_budget_run(&host, [String]{"budget", "update", "--baseline", "main"})
+    assert_eq(cancelled.stderr, "plan cancelled; no baseline changed\n")
+    assert_eq(host.calls, [String]{"prepare", "measure", "plan", "inspect", "prompt"})
+    host = budget_test_host(false)
+    applied :: jet_cli_budget_run(&host, [String]{"budget", "update", "--baseline", "main", "-y", "--json"})
+    assert_eq(applied.exit_code, 0)
+    assert_eq(host.calls, [String]{"prepare", "measure", "plan", "inspect", "write", "apply"})
+    assert(applied.stdout.contains("\"applied\":true"))
+}
+#Test("budget failures preserve preflight publication order and stale CAS refusal") {
+    host := budget_test_host(false)
+    host.fail_at = "prepare"
+    out :: jet_cli_budget_run(&host, [String]{"budget", "check", "--json"})
+    assert_eq(out.exit_code, 1)
+    assert_eq(host.calls, [String]{"prepare"})
+    assert(out.stdout.contains("\"failure_kind\":\"tool\""))
+    host = budget_test_host(false)
+    host.report = "{{}}\n".bytes()
+    corrupt :: jet_cli_budget_run(&host, [String]{"budget", "check"})
+    assert_eq(corrupt.exit_code, 1)
+    assert_eq(host.calls, [String]{"prepare", "baseline", "reuse", "measure"})
+    host = budget_test_host(false)
+    host.fail_at = "apply"
+    stale :: jet_cli_budget_run(&host, [String]{"budget", "update", "--baseline", "main", "--yes"})
+    assert_eq(stale.exit_code, 1)
+    assert(stale.stderr.contains("baseline apply refused: refused"))
+    assert(stale.stderr.contains("was not accepted"))
+    assert_eq(host.calls, [String]{"prepare", "measure", "plan", "inspect", "write", "apply"})
+}
+#Test("budget update rejects failing report unless explicitly eligible exception requested") {
+    host := budget_test_host(true)
+    out :: jet_cli_budget_run(&host, [String]{"budget", "update", "--baseline", "main", "--yes"})
+    assert_eq(out.exit_code, 1)
+    assert_eq(host.calls, [String]{"prepare", "measure", "write"})
+    host = budget_test_host(true)
+    accepted :: jet_cli_budget_run(&host, [String]{"budget", "update", "--baseline", "main", "--accept-regression", "--reason", "approved", "--yes", "--json"})
+    assert_eq(accepted.exit_code, 0)
+    assert_eq(host.calls, [String]{"prepare", "measure", "plan", "inspect", "write", "apply"})
+}
+#Test("budget build gates reuse without write and never request another selected build") {
+    host := budget_test_host(false)
+    host.cached = true
+    out :: jet_cli_budget_run_build_gates(&host, "run.jet", "artifact", "native", "dev")
+    assert_eq(out.exit_code, 0)
+    assert_eq(host.calls, [String]{"prepare", "reuse"})
+    host = budget_test_host(false)
+    fresh :: jet_cli_budget_run_build_gates(&host, "run.jet", "artifact", "native", "dev")
+    assert_eq(fresh.exit_code, 0)
+    assert_eq(host.calls, [String]{"prepare", "reuse", "measure", "write"})
+}
+
+#Test("budget parse failure never prepares or writes and retains E2102 bytes") {
+    host := budget_test_host(false)
+    output :: jet_cli_budget_run(&host, [String]{"budget", "check", "--yes"})
+    assert_eq(output.exit_code, 2)
+    assert_eq(output.stdout, "")
+    assert_eq(output.stderr, "Error [E2102]: update-only flags cannot be used with `budget check`\n Fix: {JET_CLI_BUDGET_USAGE}\nMore: jet-lang.dev/e/E2102\n")
+    assert_eq(host.calls, [String]{})
+}
+#Test("budget result severity ordering distinguishes stale unavailable and warnings") {
+    row := JetCLIBudgetResult{measurement: 0, spec: 0, outcome: "fail", evidence: "regression", reason: "", stale: true}
+    assert_eq(jet_cli_budget_result_rank(row), 1)
+    row.evidence = "inconclusive"
+    assert_eq(jet_cli_budget_result_rank(row), 1)
+    row.evidence = "unavailable"
+    assert_eq(jet_cli_budget_result_rank(row), 3)
+    row.stale = false
+    assert_eq(jet_cli_budget_result_rank(row), 2)
+    row.outcome = "warn"
+    assert_eq(jet_cli_budget_result_rank(row), 4)
+    row.outcome = "pass"
+    assert_eq(jet_cli_budget_result_rank(row), 5)
+}
+#Test("budget compiler diagnostics remain compiler failures in both channels") {
+    options := jet_cli_budget_options("check")
+    human :: jet_cli_budget_failure(options, JetCLIBudgetError.Compiler{human: "compiler finding\n", reports: [DataTree]{DataTree.Text("finding")}}, None)
+    assert_eq(human.exit_code, 1)
+    assert_eq(human.stderr, "compiler finding\n")
+    assert_eq(human.stdout, "")
+    options.json = true
+    machine :: jet_cli_budget_failure(options, JetCLIBudgetError.Compiler{human: "compiler finding\n", reports: [DataTree]{DataTree.Text("finding")}}, None)
+    assert_eq(machine.stderr, "")
+    assert(machine.stdout.contains("\"failure_kind\":\"compiler\""))
+    assert(machine.stdout.contains("\"report\":null"))
+    assert(machine.stdout.contains("\"diagnostics\":[\"finding\"]"))
+}
+#Test("budget interactive approval and write failure preserve the original plan") {
+    host := budget_test_host(false)
+    host.interactive = true
+    host.answer = true
+    approved :: jet_cli_budget_run(&host, [String]{"budget", "update", "--baseline", "main"})
+    assert_eq(approved.exit_code, 0)
+    assert_eq(host.calls, [String]{"prepare", "measure", "plan", "inspect", "prompt", "write", "apply"})
+    assert_eq(approved.stderr, "")
+    host = budget_test_host(false)
+    host.fail_at = "write"
+    refused :: jet_cli_budget_run(&host, [String]{"budget", "update", "--baseline", "main", "-y"})
+    assert_eq(refused.exit_code, 1)
+    assert(refused.stderr.starts_with("+ report "))
+    assert(refused.stderr.contains("report write refused: refused"))
+    assert_eq(host.calls, [String]{"prepare", "measure", "plan", "inspect", "write"})
+}
+
+#Test("budget gate artifact identity failure is closed and no gates need no measurement") {
+    host := budget_test_host(false)
+    host.artifact_budget = true
+    host.fail_at = "artifact"
+    failed :: jet_cli_budget_run_build_gates(&host, "run.jet", "artifact", "native", "dev")
+    assert_eq(failed.exit_code, 1)
+    assert_eq(host.calls, [String]{"prepare", "artifact"})
+    host = budget_test_host(false)
+    host.no_gates = true
+    empty :: jet_cli_budget_run_build_gates(&host, "run.jet", "artifact", "native", "dev")
+    assert_eq(empty.exit_code, 0)
+    assert_eq(empty.stderr, "")
+    assert_eq(host.calls, [String]{"prepare"})
+}
+
+// Rust output goldens, transcribed from CmdBudget.rs emit_check/emit_verbose_row/
+// emit_annotation/emit_json/result_json/plan_row and run's update-plan output.
+// Expected bytes never call a Jet encoder or renderer. Emitter-only fixtures
+// below are deliberately small projections; the 14 journey tests above retain
+// independent Foundation authentication of full reports.
+fn budget_test_output(out: JetDriverVerbOutput, stdout: String, stderr: String, exit: Int) -> Bool Never! {
+    if out.stdout != stdout {
+        actual :: out.stdout.slice(0, if out.stdout.len() < 160 -> out.stdout.len() else -> 160)
+        wanted :: stdout.slice(0, if stdout.len() < 160 -> stdout.len() else -> 160)
+        panic("stdout bytes differ: actual prefix {actual}; Rust prefix {wanted}")
+    }
+    assert_eq(out.stdout.bytes(), stdout.bytes())
+    assert_eq(out.stderr.bytes(), stderr.bytes())
+    assert_eq(out.exit_code, exit)
+    true
+}
+fn budget_test_output_built(outcome: String, evidence: String, reason: String, stale: Bool, percentile: CanonicalJSON) -> JetCLIBudgetBuilt Never! {
+    decision :: jet_cli_budget_object([CanonicalJSONField]{budget_test_f("lower95", CanonicalJSON.Null), budget_test_f("point", perf_rational_to_json(perf_rational_integer(9))), budget_test_f("trend", CanonicalJSON.Null), budget_test_f("upper95", CanonicalJSON.Null)})
+    metric :: jet_cli_budget_object([CanonicalJSONField]{budget_test_f("name", budget_test_s("BenchTime")), budget_test_f("percentile", percentile)})
+    measurement :: jet_cli_budget_object([CanonicalJSONField]{budget_test_f("comparison", CanonicalJSON.Null), budget_test_f("decision", decision), budget_test_f("direction", budget_test_s("lower_is_better")), budget_test_f("enforcement", budget_test_s("fail")), budget_test_f("history", CanonicalJSON.Null), budget_test_f("metric", metric), budget_test_f("unit", budget_test_s("Duration"))})
+    content :: jet_cli_budget_object([CanonicalJSONField]{budget_test_f("measurements", CanonicalJSON.Array([CanonicalJSON]{measurement}))})
+    value :: jet_cli_budget_object([CanonicalJSONField]{budget_test_f("content", content)})
+    JetCLIBudgetBuilt{value: value, bytes: [U8]{}, results: [JetCLIBudgetResult]{JetCLIBudgetResult{measurement: 0, spec: 0, outcome: outcome, evidence: evidence, reason: reason, stale: stale}}, fail: if outcome == "fail" -> 1 else -> 0, id: "0123456789abcdef"}
+}
+#Test("budget applicability uses ASCII equality and ASCII first scalar title like Rust") {
+    spec := budget_test_spec()
+    spec.targets = JetCLIBudgetAxis.Only([String]{"NATIVE"})
+    assert(jet_cli_budget_applicable(spec, "native", "dev"))
+    spec.targets = JetCLIBudgetAxis.Only([String]{"Target.Native"})
+    assert(jet_cli_budget_applicable(spec, "native", "dev"))
+    spec.targets = JetCLIBudgetAxis.Only([String]{"ÉLAN"})
+    assert(!jet_cli_budget_applicable(spec, "élan", "dev"))
+    assert(jet_cli_budget_applicable(spec, "Élan", "dev"))
+    spec.targets = JetCLIBudgetAxis.Only([String]{"Target.Élan"})
+    assert(!jet_cli_budget_applicable(spec, "élan", "dev"))
+    spec.targets = JetCLIBudgetAxis.Only([String]{"K"})
+    assert(!jet_cli_budget_applicable(spec, "k", "dev"))
+    spec.targets = JetCLIBudgetAxis.Only([String]{"Σ"})
+    assert(!jet_cli_budget_applicable(spec, "σ", "dev"))
+    spec.targets = JetCLIBudgetAxis.Current
+    spec.profiles = JetCLIBudgetAxis.Only([String]{"DÉV"})
+    assert(!jet_cli_budget_applicable(spec, "native", "dév"))
+    assert(jet_cli_budget_applicable(spec, "native", "dÉv"))
+    spec.profiles = JetCLIBudgetAxis.Only([String]{})
+    assert(!jet_cli_budget_applicable(spec, "native", ""))
+    spec.profiles = JetCLIBudgetAxis.Only([String]{"anything"})
+    assert(jet_cli_budget_applicable(spec, "native", ""))
+}
+#Test("budget Rust byte exact verbose pass created and verified reused report") {
+    built :: budget_test_output_built("pass", "pass", "within limit", false, CanonicalJSON.Null)
+    options := jet_cli_budget_options("check")
+    options.verbose = true
+    assert(budget_test_output(jet_cli_budget_emit_check(options, built, budget_test_checked(), true, false), "", "pass b: point 9/1 · bounds [none, none] · baseline [none] · BenchTime · within limit\n+ report 0123456789abcdef .jet/perf/reports/0123456789abcdef.json\nbudgets: 1 budget passed · report 0123456789ab\n", 0))
+    assert(budget_test_output(jet_cli_budget_emit_check(options, built, budget_test_checked(), false, false), "", "pass b: point 9/1 · bounds [none, none] · baseline [none] · BenchTime · within limit\n~ report 0123456789abcdef .jet/perf/reports/0123456789abcdef.json (verified reuse)\nbudgets: 1 budget passed · report 0123456789ab\n", 0))
+    options.quiet = true
+    assert(budget_test_output(jet_cli_budget_emit_check(options, built, budget_test_checked(), true, false), "", "pass b: point 9/1 · bounds [none, none] · baseline [none] · BenchTime · within limit\n+ report 0123456789abcdef .jet/perf/reports/0123456789abcdef.json\n", 0))
+}
+#Test("budget Rust byte exact percentile labels preserve suffix case and Unicode") {
+    checked :: budget_test_checked()
+    built :: budget_test_output_built("pass", "pass", "within limit", false, budget_test_s("meanX"))
+    assert_eq(jet_cli_budget_verbose(built, built.results[0], checked.specs[0]).bytes(), "pass b: point 9/1 · bounds [none, none] · baseline [none] · BenchTime(MeanX) · within limit\n".bytes())
+    metric := jet_cli_budget_object([CanonicalJSONField]{budget_test_f("name", budget_test_s("BenchTime")), budget_test_f("percentile", budget_test_s("p95"))})
+    assert_eq(jet_cli_budget_metric_label(metric), "BenchTime(P95)")
+    metric = budget_test_set(metric, "percentile", budget_test_s("élanX"))
+    assert_eq(jet_cli_budget_metric_label(metric), "BenchTime(élanX)")
+    metric = budget_test_set(metric, "percentile", budget_test_s(""))
+    nul :: String.from_bytes([U8]{0}) ?? panic("NUL")
+    assert_eq(jet_cli_budget_metric_label(metric).bytes(), "BenchTime({nul})".bytes())
+}
+#Test("budget Rust byte exact diagnostic GitHub properties messages and quiet") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR")
+    built :: budget_test_output_built("fail", "unavailable", "missing 50%:{cr}\nnext", false, CanonicalJSON.Null)
+    checked := budget_test_checked()
+    checked.specs[0].source = "src/日本%:,x{cr}\n.jet"
+    options := jet_cli_budget_options("check")
+    options.quiet = true
+    options.annotations = JetCLIBudgetAnnotations.Github
+    diagnostic :: "Error [E2906]: performance budget latency has no usable evidence\n --> src/日本%:,x{cr}\n.jet:3:5\n Why: missing 50%:{cr}\nnext\n Fix: correct the provider evidence or bootstrap only when absent or stale evidence is eligible\nMore: jet-lang.dev/e/E2906\n"
+    annotation :: "::error file=src/日本%25%3A%2Cx%0D%0A.jet,line=3,col=5,title=Jet E2906::performance budget latency has no usable evidence%0AWhy: missing 50%25:%0D%0Anext%0AFix: correct the provider evidence or bootstrap only when absent or stale evidence is eligible\n"
+    assert(budget_test_output(jet_cli_budget_emit_check(options, built, checked, true, false), "", "{diagnostic}{annotation}", 1))
+    options.annotations = JetCLIBudgetAnnotations.Auto
+    assert(budget_test_output(jet_cli_budget_emit_check(options, built, checked, true, true), "", "{diagnostic}{annotation}", 1))
+    assert(budget_test_output(jet_cli_budget_emit_check(options, built, checked, true, false), "", diagnostic, 1))
+    options.quiet = false
+    assert(budget_test_output(jet_cli_budget_emit_check(options, built, checked, true, false), "", "{diagnostic}budgets unavailable: 1 result unavailable · report 0123456789ab\n", 1))
+}
+#Test("budget Rust byte exact regression inconclusive stale warnings and recap precedence") {
+    built := budget_test_output_built("fail", "regression", "over limit", false, CanonicalJSON.Null)
+    options := jet_cli_budget_options("check")
+    options.annotations = JetCLIBudgetAnnotations.Disabled
+    regression :: "Error [E2907]: performance budget latency regressed\n --> src/日本.jet:3:5\n Why: over limit\n Fix: improve the measured behavior, inspect `jet budget check --verbose`, or record an explicit exception\nMore: jet-lang.dev/e/E2907\n"
+    assert(budget_test_output(jet_cli_budget_emit_check(options, built, budget_test_checked(), true, false), "", "{regression}budgets failed: 1 budget failed · report 0123456789ab\n", 1))
+    built.results[0].evidence = "inconclusive"
+    inconclusive :: "Error [E2907]: performance budget latency is inconclusive\n --> src/日本.jet:3:5\n Why: over limit\n Fix: improve the measured behavior, inspect `jet budget check --verbose`, or record an explicit exception\nMore: jet-lang.dev/e/E2907\n"
+    assert(budget_test_output(jet_cli_budget_emit_check(options, built, budget_test_checked(), true, false), "", "{inconclusive}budgets failed: 1 budget failed · report 0123456789ab\n", 1))
+    built = budget_test_output_built("fail", "unavailable", "named baseline compatible history is stale", true, CanonicalJSON.Null)
+    stale :: "Error [E2906]: performance budget latency has no usable evidence\n --> src/日本.jet:3:5\n Why: named baseline compatible history is stale\n Fix: correct the provider evidence or bootstrap only when absent or stale evidence is eligible\nMore: jet-lang.dev/e/E2906\n"
+    assert(budget_test_output(jet_cli_budget_emit_check(options, built, budget_test_checked(), true, false), "", "{stale}budgets stale: 1 baseline stale · report 0123456789ab\n", 1))
+    built = budget_test_output_built("warn", "regression", "over limit", false, CanonicalJSON.Null)
+    warning :: "Warning [E2907]: performance budget latency regressed\n --> src/日本.jet:3:5\n Why: over limit\n Fix: improve the measured behavior, inspect `jet budget check --verbose`, or record an explicit exception\nMore: jet-lang.dev/e/E2907\n"
+    assert(budget_test_output(jet_cli_budget_emit_check(options, built, budget_test_checked(), true, false), "", "{warning}budgets: 1 warning · report 0123456789ab\n", 0))
+    &built.results.push(JetCLIBudgetResult{measurement: 0, spec: 0, outcome: "pass", evidence: "pass", reason: "", stale: false})
+    assert(budget_test_output(jet_cli_budget_emit_check(options, built, budget_test_checked(), true, false), "", "{warning}budgets: 1 budget passed · 1 warning · report 0123456789ab\n", 0))
+    &built.results.push(JetCLIBudgetResult{measurement: 0, spec: 0, outcome: "fail", evidence: "regression", reason: "over limit", stale: false})
+    built.fail = 1
+    assert(budget_test_output(jet_cli_budget_emit_check(options, built, budget_test_checked(), true, false), "", "{warning}{regression}budgets failed: 1 budget failed · 1 warning · report 0123456789ab\n", 1))
+    &built.results.push(~built.results[2])
+    built.fail = 2
+    assert(budget_test_output(jet_cli_budget_emit_check(options, built, budget_test_checked(), true, false), "", "{warning}{regression}{regression}budgets failed: 2 budgets failed · 1 warning · report 0123456789ab\n", 1))
+}
+// #4306 BEGIN: exercised Core/Dyn object emission sorts keys, not Rust order.
+// Keep source-transcribed byte goldens unchanged; no CLI codec or sorted repin.
+#Test("budget Rust byte exact machine result envelope with ordered keys and Unicode") {
+    built :: budget_test_output_built("fail", "unavailable", "missing \"evidence\"\n", false, CanonicalJSON.Null)
+    options := jet_cli_budget_options("check")
+    options.json = true
+    expected :: "{{\"schema\":\"jet.status/v1\",\"action\":\"check\",\"ok\":false,\"reports\":[],\"budget\":{{\"applied\":false,\"diagnostics\":[],\"exit_code\":1,\"failure_kind\":\"evidence\",\"plan\":null,\"report\":{{\"content\":{{\"measurements\":[{{\"comparison\":null,\"decision\":{{\"lower95\":null,\"point\":{{\"den\":1,\"num\":9}},\"trend\":null,\"upper95\":null}},\"direction\":\"lower_is_better\",\"enforcement\":\"fail\",\"history\":null,\"metric\":{{\"name\":\"BenchTime\",\"percentile\":null}},\"unit\":\"Duration\"}}]}}}},\"report_path\":\".jet/perf/reports/0123456789abcdef.json\",\"results\":[{{\"baseline_report_ids\":[],\"budget_id\":\"b\",\"comparison\":null,\"diagnostic_code\":\"E2906\",\"direction\":\"lower_is_better\",\"enforcement\":\"fail\",\"evidence\":\"unavailable\",\"lower95\":null,\"metric\":{{\"name\":\"BenchTime\",\"percentile\":null}},\"point\":{{\"den\":1,\"num\":9}},\"reason\":\"missing \\\"evidence\\\"\\n\",\"source\":{{\"column\":5,\"line\":3,\"path\":\"src/日本.jet\"}},\"stale\":false,\"status\":\"unavailable\",\"trend\":null,\"unit\":\"Duration\",\"upper95\":null}}]}}}}"
+    assert(budget_test_output(jet_cli_budget_emit_check(options, built, budget_test_checked(), true, true), expected, "", 1))
+}
+#Test("budget Rust byte exact JSON update plan create reuse old head and applied") {
+    options := jet_cli_budget_options("update")
+    options.json = true
+    built :: JetCLIBudgetBuilt{value: CanonicalJSON.Null, bytes: [U8]{}, results: [JetCLIBudgetResult]{}, fail: 0, id: "0123456789abcdef"}
+    created :: "{{\"schema\":\"jet.status/v1\",\"action\":\"update\",\"ok\":true,\"reports\":[],\"budget\":{{\"applied\":false,\"diagnostics\":[],\"exit_code\":0,\"failure_kind\":null,\"plan\":{{\"baseline\":\"main\",\"requires_confirmation\":false,\"rows\":[{{\"artifact\":\"report\",\"from_id\":null,\"id\":\"0123456789abcdef\",\"operation\":\"create\",\"path\":\".jet/perf/reports/0123456789abcdef.json\",\"to_id\":\"0123456789abcdef\"}},{{\"artifact\":\"baseline\",\"from_id\":null,\"id\":\"0123456789abcdef\",\"operation\":\"advance\",\"path\":\".jet/perf/baselines/names/main.json\",\"to_id\":\"0123456789abcdef\"}}]}},\"report\":null,\"report_path\":\".jet/perf/reports/0123456789abcdef.json\",\"results\":[]}}}}"
+    assert(budget_test_output(jet_cli_budget_emit_json(options, built, budget_test_checked(), Val(JetCLIBudgetOutputPlan{baseline: "main", old: None, created: true}), false, 0), created, "", 0))
+    reused :: "{{\"schema\":\"jet.status/v1\",\"action\":\"update\",\"ok\":true,\"reports\":[],\"budget\":{{\"applied\":true,\"diagnostics\":[],\"exit_code\":0,\"failure_kind\":null,\"plan\":{{\"baseline\":\"main\",\"requires_confirmation\":false,\"rows\":[{{\"artifact\":\"report\",\"from_id\":null,\"id\":\"0123456789abcdef\",\"operation\":\"reuse\",\"path\":\".jet/perf/reports/0123456789abcdef.json\",\"to_id\":\"0123456789abcdef\"}},{{\"artifact\":\"baseline\",\"from_id\":\"prior\",\"id\":\"0123456789abcdef\",\"operation\":\"advance\",\"path\":\".jet/perf/baselines/names/main.json\",\"to_id\":\"0123456789abcdef\"}}]}},\"report\":null,\"report_path\":\".jet/perf/reports/0123456789abcdef.json\",\"results\":[]}}}}"
+    assert(budget_test_output(jet_cli_budget_emit_json(options, built, budget_test_checked(), Val(JetCLIBudgetOutputPlan{baseline: "main", old: Val("prior"), created: false}), true, 0), reused, "", 0))
+}
+// #4306 END
+#Test("budget Rust byte exact human plan tool refusal and stored build gate") {
+    host := budget_test_host(false)
+    id :: jet_cli_budget_manifest_report_id(perf_verify_budget_report(host.report) ?? panic("verified fixture")) ?? panic("fixture id")
+    old :: "2".repeat(64)
+    assert(budget_test_output(jet_cli_budget_run(&host, [String]{"budget", "update", "--baseline", "main"}), "", "+ report {id}\n~ baseline main {old} -> {id}\nplan only; pass -y or --yes to apply in a non-interactive shell\n", 0))
+    options :: jet_cli_budget_options("check")
+    assert(budget_test_output(jet_cli_budget_failure(options, JetCLIBudgetError.Tool("refused"), None), "", "Error [E2908]: Performance budget operation failed\n Why: refused\n Fix: Correct the named failure and retry\nMore: jet-lang.dev/e/E2908\nbudget command failed before a valid report was produced\n", 1))
+    assert(budget_test_output(jet_cli_budget_failure(options, JetCLIBudgetError.Tool("refused"), Val("0123456789abcdef")), "", "Error [E2908]: Performance budget operation failed\n Why: refused\n Fix: Correct the named failure and retry\nMore: jet-lang.dev/e/E2908\nbudget command failed · report 0123456789abcdef was not accepted\n", 1))
+    // Rust StoredBuildFact: report measurement order (not result rank), the
+    // measurement's `path:line` source, budget_spec.name else the id suffix.
+    stored :: (id: String, spec: CanonicalJSON, source: String) -> jet_cli_budget_object([CanonicalJSONField]{budget_test_f("budget_id", budget_test_s(id)), budget_test_f("budget_spec", spec), budget_test_f("source", budget_test_s(source))})
+    named :: jet_cli_budget_object([CanonicalJSONField]{budget_test_f("name", budget_test_s("latency"))})
+    measurements :: CanonicalJSON.Array([CanonicalJSON]{stored("budget:b", named, "src/日本.jet:3"), stored("budget:speed", CanonicalJSON.Null, "src/b.jet:7")})
+    value :: jet_cli_budget_object([CanonicalJSONField]{budget_test_f("content", jet_cli_budget_object([CanonicalJSONField]{budget_test_f("measurements", measurements)}))})
+    built :: JetCLIBudgetBuilt{value: value, bytes: [U8]{}, results: [JetCLIBudgetResult]{
+        JetCLIBudgetResult{measurement: 1, spec: 0, outcome: "fail", evidence: "regression", reason: "over limit", stale: false},
+        JetCLIBudgetResult{measurement: 0, spec: 0, outcome: "fail", evidence: "unavailable", reason: "provider unavailable", stale: false}}, fail: 2, id: "0123456789abcdef"}
+    unavailable :: "Error [E2906]: Performance budget latency has no usable evidence\n --> src/日本.jet:3\n Why: provider unavailable\n Fix: Correct the provider evidence or bootstrap only when absent or stale evidence is eligible\nMore: jet-lang.dev/e/E2906\n"
+    regressed :: "Error [E2907]: Performance budget speed regressed\n --> src/b.jet:7\n Why: over limit\n Fix: Improve the measured behavior, inspect `jet budget check --verbose`, or record an explicit exception\nMore: jet-lang.dev/e/E2907\n"
+    assert(budget_test_output(jet_cli_budget_emit_stored_gates(built), "", "{unavailable}{regressed}budgets failed: 2 budgets failed · report 0123456789ab\n", 1))
+}
+
+// #4306 BEGIN: same exercised shared StatusEnvelope/ReportEnvelope order defect.
+#Test("budget Rust byte exact tool and compiler machine failures") {
+    options := jet_cli_budget_options("check")
+    options.json = true
+    tool :: "{{\"schema\":\"jet.status/v1\",\"action\":\"check\",\"ok\":false,\"reports\":[],\"budget\":{{\"applied\":false,\"diagnostics\":[{{\"schema\":\"jet.report/v3\",\"moment\":\"tool\",\"severity\":\"error\",\"code\":\"E2908\",\"what\":\"performance budget operation failed\",\"why\":\"refused\",\"fix\":\"correct the named failure and retry\",\"detail\":null,\"denial_kind\":null,\"call_chain\":[],\"scope_chain\":[],\"nearest_granting_scope\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"fix_edits\":[],\"cause\":[],\"clears\":0}}],\"exit_code\":1,\"failure_kind\":\"tool\",\"plan\":null,\"report\":null,\"report_path\":null,\"results\":[]}}}}"
+    assert(budget_test_output(jet_cli_budget_failure(options, JetCLIBudgetError.Tool("refused"), None), tool, "", 1))
+    assert(budget_test_output(jet_cli_budget_failure(options, JetCLIBudgetError.Tool("refused"), Val("0123456789abcdef")), tool, "", 1))
+    compiler :: "{{\"schema\":\"jet.status/v1\",\"action\":\"check\",\"ok\":false,\"reports\":[],\"budget\":{{\"applied\":false,\"diagnostics\":[\"finding\"],\"exit_code\":1,\"failure_kind\":\"compiler\",\"plan\":null,\"report\":null,\"report_path\":null,\"results\":[]}}}}"
+    assert(budget_test_output(jet_cli_budget_failure(options, JetCLIBudgetError.Compiler{human: "compiler finding\n", reports: [DataTree]{DataTree.Text("finding")}}, None), compiler, "", 1))
+}
+
+// #4306 END
+// FRONT PROOF BEGIN: real Front/Host closure required, not a scratch dispatcher.
+// Full-closure integration proof pending; excluded only from the focused unit.
+#Test("budget Front preserves raw flags and shared Host dispatch with generic help first") {
+    facts :: JetCLIProcessFacts{stdout_terminal: false, stderr_terminal: false, shell_prefill: false, term: None, no_color: true, force_color: false, columns: None, locale: Val("C.UTF-8")}
+    raw :: [String]{"budget", "check", "--json", "--quiet"}
+    plan :: jet_cli_front(raw, facts)
+    if plan == {
+        .Budget(arguments) -> assert_eq(arguments, raw)
+        else -> panic("budget flags must route unmodified")
+    }
+    direct_host := budget_test_host(false)
+    direct :: jet_cli_budget_run<BudgetTestHost>(&direct_host, raw)
+    routed_host := budget_test_host(false)
+    routed :: jet_cli_dispatch_with_budget<BudgetTestHost>(raw, facts, &routed_host)
+    assert(budget_test_output(routed, direct.stdout, direct.stderr, direct.exit_code))
+    assert_eq(routed_host.calls, direct_host.calls)
+    help_host := budget_test_host(false)
+    help :: jet_cli_dispatch_with_budget<BudgetTestHost>([String]{"budget", "check", "--help"}, facts, &help_host)
+    assert(budget_test_output(help, jet_cli_command_help("budget"), "", 0))
+    assert_eq(help_host.calls, [String]{})
+}
+// FRONT PROOF END

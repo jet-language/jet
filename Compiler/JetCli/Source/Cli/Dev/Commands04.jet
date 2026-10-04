@@ -1,0 +1,1758 @@
+// PORT-PENDING 0682 source-cmddevtools-slice-5466: Source/CmdDevTools.rs:5466-7219
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn update_binding_package_config(
+//RS     package_path: &Path,
+//RS     name: Option<&str>,
+//RS     shape: Option<jet::Bindgen::BindingShape>,
+//RS     policy: Option<jet::Bindgen::BindingPolicy>,
+//RS ) -> Result<(), String> {
+//RS     let mut source = fs::read_to_string(package_path).unwrap_or_default();
+//RS     if let (Some(name), Some(shape)) = (name, shape) {
+//RS         if !source.contains("bindings:") {
+//RS             source.push_str("\n\nbindings: .{\n");
+//RS             source.push_str(&format!(
+//RS                 "    {name}: .{{ shape: .{}, frozen: {} }}\n",
+//RS                 match shape {
+//RS                     jet::Bindgen::BindingShape::Automatic => "Automatic",
+//RS                     jet::Bindgen::BindingShape::Native => "Native",
+//RS                 },
+//RS                 policy == Some(jet::Bindgen::BindingPolicy::Frozen)
+//RS             ));
+//RS             source.push_str("}\n");
+//RS         } else if !source.contains(&format!("{name}:")) {
+//RS             source.push_str(&format!(
+//RS                 "\n// binding plan: {name} shape={}\n",
+//RS                 shape.as_str()
+//RS             ));
+//RS         }
+//RS     }
+//RS     if let Some(policy) = policy {
+//RS         if !source.contains("bindings: .{") || !source.contains("policy:") {
+//RS             source.push_str(&format!(
+//RS                 "\n\npolicy: .{{ bindings: .{} }}\n",
+//RS                 match policy {
+//RS                     jet::Bindgen::BindingPolicy::Automatic => "Automatic",
+//RS                     jet::Bindgen::BindingPolicy::Frozen => "Frozen",
+//RS                 }
+//RS             ));
+//RS         }
+//RS     }
+//RS     if source.trim().is_empty() {
+//RS         return Err(format!(
+//RS             "`{}` is not a package manifest",
+//RS             package_path.display()
+//RS         ));
+//RS     }
+//RS     fs::write(package_path, source)
+//RS         .map_err(|error| format!("could not write `{}`: {error}", package_path.display()))
+//RS }
+//RS 
+//RS fn read_c_bind_overlay(path: &str, lib: &str) -> Result<jet::CBind::HandleOverlay, String> {
+//RS     let source = std::fs::read_to_string(path)
+//RS         .map_err(|error| format!("the overlay file could not be read ({error})"))?;
+//RS     let (tokens, lex_diagnostics) = jet::Lexer::lex(&source);
+//RS     if !lex_diagnostics.is_empty() {
+//RS         return Err(format!(
+//RS             "the overlay has lexer diagnostics: {lex_diagnostics:#?}"
+//RS         ));
+//RS     }
+//RS     let program = jet::Parser::parse_with_source(&tokens, &source)
+//RS         .map_err(|diagnostics| format!("the overlay has parser diagnostics: {diagnostics:#?}"))?;
+//RS     let mut overlay = jet::CBind::HandleOverlay::default();
+//RS     let mut found = false;
+//RS     for item in &program.items {
+//RS         let jet::AST::Item::CModule(c_module) = item else {
+//RS             continue;
+//RS         };
+//RS         if c_module.kind != jet::AST::CModuleKind::Extern {
+//RS             continue;
+//RS         }
+//RS         if c_module.lib != lib {
+//RS             return Err(format!(
+//RS                 "the overlay declares `c.{}` but this bind targets `c.{lib}`",
+//RS                 c_module.lib
+//RS             ));
+//RS         }
+//RS         found = true;
+//RS         for function in &c_module.functions {
+//RS             let Some((close, _)) = &function.close else {
+//RS                 continue;
+//RS             };
+//RS             let Some(jet::AST::Type::Named(handle)) = &function.return_type else {
+//RS                 continue;
+//RS             };
+//RS             overlay
+//RS                 .close_functions
+//RS                 .insert(handle.clone(), close.clone());
+//RS         }
+//RS     }
+//RS     if !found {
+//RS         return Err(format!(
+//RS             "the overlay has no `#Import module c.{lib} {{ … }}` block"
+//RS         ));
+//RS     }
+//RS     Ok(overlay)
+//RS }
+//RS 
+//RS fn bind_e3208(what: String, why: String, fix: String) -> ! {
+//RS     crate::emit_cli_report("E3208", what, why, fix, false);
+//RS     exit(ExitCodes::USER_ERROR);
+//RS }
+//RS 
+//RS fn selected_project_root_for_path(path: &str) -> PathBuf {
+//RS     match jet::build_project_root(path) {
+//RS         Ok(root) => root,
+//RS         Err(diagnostics) => {
+//RS             let source = fs::read_to_string(path).unwrap_or_default();
+//RS             eprint!("{}", jet::render_diagnostics(path, &source, &diagnostics));
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn default_binding_output(path: &str, module_root: &str, lib: &str) -> String {
+//RS     selected_project_root_for_path(path)
+//RS         .join(".jet")
+//RS         .join("bindings")
+//RS         .join(module_root)
+//RS         .join(format!("{lib}.{}", jet::Syntax::FILE_EXT))
+//RS         .display()
+//RS         .to_string()
+//RS }
+//RS 
+//RS fn run_data_bind(format: &str, args: &[&String]) {
+//RS     let usage = || {
+//RS         eprintln!(
+//RS             "usage: {} inspect bind {} <input> [--type <Type>] [-o <output>]",
+//RS             jet::Syntax::BINARY_NAME,
+//RS             format
+//RS         );
+//RS     };
+//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+//RS         usage();
+//RS         exit(if args.is_empty() {
+//RS             ExitCodes::USAGE
+//RS         } else {
+//RS             ExitCodes::OK
+//RS         });
+//RS     }
+//RS     let input_path = args[0].as_str();
+//RS     let mut root_type = None;
+//RS     let mut output = None;
+//RS     let mut index = 1usize;
+//RS     while index < args.len() {
+//RS         match args[index].as_str() {
+//RS             "--type" => {
+//RS                 let Some(value) = args.get(index + 1) else {
+//RS                     crate::cli_error!(
+//RS                         "E2102",
+//RS                         "inspect bind {format} requires a value after --type"
+//RS                     );
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE);
+//RS                 };
+//RS                 if value.is_empty() {
+//RS                     crate::cli_error!("E2102", "inspect bind {format} type name cannot be empty");
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE);
+//RS                 }
+//RS                 root_type = Some(value.to_string());
+//RS                 index += 2;
+//RS             }
+//RS             "-o" | "--out" => {
+//RS                 let Some(value) = args.get(index + 1) else {
+//RS                     crate::cli_error!("E2102", "inspect bind {format} requires a value after -o");
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE);
+//RS                 };
+//RS                 if value.is_empty() {
+//RS                     crate::cli_error!("E2102", "inspect bind {format} output path cannot be empty");
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE);
+//RS                 }
+//RS                 output = Some(value.to_string());
+//RS                 index += 2;
+//RS             }
+//RS             other => {
+//RS                 crate::cli_error!("E2102", "unknown inspect bind {format} argument {other}");
+//RS                 usage();
+//RS                 exit(ExitCodes::USAGE);
+//RS             }
+//RS         }
+//RS     }
+//RS     let input = match fs::read_to_string(input_path) {
+//RS         Ok(input) => input,
+//RS         Err(error) => data_bind_io_error(
+//RS             format,
+//RS             input_path,
+//RS             "read",
+//RS             &format!("the input could not be read ({error})"),
+//RS         ),
+//RS     };
+//RS     let default_output = output.is_none();
+//RS     let output_path = output.clone().unwrap_or_else(|| {
+//RS         let base = input_path
+//RS             .rsplit(|ch| ch == '/' || ch == '\\')
+//RS             .next()
+//RS             .unwrap_or(input_path);
+//RS         let stem = base.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(base);
+//RS         let safe =
+//RS             jet::Syntax::sanitize_generated_name(stem, jet::Syntax::NameCase::Snake, "schema");
+//RS         selected_project_root_for_path(input_path)
+//RS             .join(".jet")
+//RS             .join("bindings")
+//RS             .join(format!("{safe}.{}", jet::Syntax::FILE_EXT))
+//RS             .display()
+//RS             .to_string()
+//RS     });
+//RS     let mut command = vec![
+//RS         jet::Syntax::BINARY_NAME.to_string(),
+//RS         "inspect".to_string(),
+//RS         "bind".to_string(),
+//RS         format.to_string(),
+//RS         input_path.to_string(),
+//RS     ];
+//RS     if let Some(root_type) = &root_type {
+//RS         command.push("--type".to_string());
+//RS         command.push(root_type.clone());
+//RS     }
+//RS     if let Some(output) = &output {
+//RS         command.push("-o".to_string());
+//RS         command.push(output.clone());
+//RS     }
+//RS     let command = command.join(" ");
+//RS     let result =
+//RS         match jet::CBind::generate_data(format, input_path, &input, root_type.as_deref(), &command)
+//RS         {
+//RS             Ok(result) => result,
+//RS             Err(error) => data_bind_error(format, input_path, &error),
+//RS         };
+//RS     if default_output {
+//RS         match fs::read_to_string(&output_path) {
+//RS             Ok(existing) => {
+//RS                 let generated_command = result
+//RS                     .source
+//RS                     .lines()
+//RS                     .find(|line| line.starts_with("// generated by: "));
+//RS                 let existing_command = existing
+//RS                     .lines()
+//RS                     .find(|line| line.starts_with("// generated by: "));
+//RS                 if generated_command != existing_command {
+//RS                     data_bind_output_collision(format, input_path, &output_path);
+//RS                 }
+//RS             }
+//RS             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+//RS             Err(error) => data_bind_io_error(
+//RS                 format,
+//RS                 &output_path,
+//RS                 "inspect",
+//RS                 &format!("the existing output could not be checked ({error})"),
+//RS             ),
+//RS         }
+//RS     }
+//RS     if let Some(parent) = Path::new(&output_path).parent() {
+//RS         if !parent.as_os_str().is_empty() {
+//RS             if let Err(error) = fs::create_dir_all(parent) {
+//RS                 data_bind_io_error(
+//RS                     format,
+//RS                     &output_path,
+//RS                     "create",
+//RS                     &format!(
+//RS                         "could not create output directory {} ({error})",
+//RS                         parent.display()
+//RS                     ),
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS     if let Err(error) = fs::write(&output_path, result.source) {
+//RS         data_bind_io_error(
+//RS             format,
+//RS             &output_path,
+//RS             "write",
+//RS             &format!("could not write {output_path} ({error})"),
+//RS         );
+//RS     }
+//RS     println!(
+//RS         "bound {} {} record{} from {input_path} → {output_path}",
+//RS         result.record_count,
+//RS         format,
+//RS         if result.record_count == 1 { "" } else { "s" }
+//RS     );
+//RS }
+//RS 
+//RS fn data_bind_error(format: &str, path: &str, why: &str) -> ! {
+//RS     bind_e3208(
+//RS         format!("Could not generate {format} bindings from {path}."),
+//RS         format!("{why}."),
+//RS         format!("provide a well-formed {format} schema and rerun `jet inspect bind {format}`."),
+//RS     )
+//RS }
+//RS 
+//RS fn data_bind_io_error(format: &str, path: &str, operation: &str, why: &str) -> ! {
+//RS     crate::emit_cli_report(
+//RS         "E2105",
+//RS         format!("Could not {operation} {format} bindings at {path}."),
+//RS         format!("{why}."),
+//RS         format!("check the input and output paths, permissions, and available disk space, then rerun `jet inspect bind {format}`."),
+//RS         false,
+//RS     );
+//RS     exit(ExitCodes::USER_ERROR);
+//RS }
+//RS 
+//RS fn data_bind_output_collision(format: &str, input_path: &str, output_path: &str) -> ! {
+//RS     crate::emit_cli_report(
+//RS         "E2104",
+//RS         format!("the default {format} binding output `{output_path}` is already in use"),
+//RS         format!("sanitizing `{input_path}` produces the same output name as an existing binding"),
+//RS         format!("rerun with `-o <different-output>` to choose an explicit path"),
+//RS         false,
+//RS     );
+//RS     exit(ExitCodes::USER_ERROR);
+//RS }
+//RS 
+//RS fn run_cpp_bind(args: &[&String]) {
+//RS     let usage = || {
+//RS         eprintln!("usage: {} inspect bind cpp <header.hpp> --target <triple> --clang <absolute-path> --ar <absolute-path> [--pkg <lib>] [--namespace <name>] [--instantiate <qualified=type:jet-name>] [-I <dir>] [-L <dir>] [-l <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME)
+//RS     };
+//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+//RS         usage();
+//RS         exit(if args.is_empty() {
+//RS             ExitCodes::USAGE
+//RS         } else {
+//RS             ExitCodes::OK
+//RS         });
+//RS     }
+//RS     let header = args[0].as_str();
+//RS     let mut pkg = None;
+//RS     let mut out = None;
+//RS     let mut target = None;
+//RS     let mut clang = None;
+//RS     let mut archiver = None;
+//RS     let mut include_dirs = Vec::new();
+//RS     let mut library_dirs = Vec::new();
+//RS     let mut libraries = Vec::new();
+//RS     let mut namespaces = Vec::new();
+//RS     let mut templates = Vec::new();
+//RS     let mut index = 1;
+//RS     while index < args.len() {
+//RS         match args[index].as_str() {
+//RS             "--pkg" => {
+//RS                 pkg = args.get(index + 1).map(|v| v.to_string());
+//RS                 if pkg.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE);
+//RS                 }
+//RS                 index += 2;
+//RS             }
+//RS             "-o" | "--out" => {
+//RS                 out = args.get(index + 1).map(|v| v.to_string());
+//RS                 if out.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE);
+//RS                 }
+//RS                 index += 2;
+//RS             }
+//RS             "--target" => {
+//RS                 target = args.get(index + 1).map(|v| v.to_string());
+//RS                 if target.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE);
+//RS                 }
+//RS                 index += 2;
+//RS             }
+//RS             "--clang" => {
+//RS                 clang = args.get(index + 1).map(|v| v.to_string());
+//RS                 if clang.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE);
+//RS                 }
+//RS                 index += 2;
+//RS             }
+//RS             "--ar" => {
+//RS                 archiver = args.get(index + 1).map(|v| v.to_string());
+//RS                 if archiver.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE);
+//RS                 }
+//RS                 index += 2;
+//RS             }
+//RS             "-I" => {
+//RS                 let Some(value) = args.get(index + 1) else {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE);
+//RS                 };
+//RS                 include_dirs.push(std::path::PathBuf::from(value.as_str()));
+//RS                 index += 2;
+//RS             }
+//RS             "-L" => {
+//RS                 let Some(value) = args.get(index + 1) else {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE);
+//RS                 };
+//RS                 library_dirs.push(std::path::PathBuf::from(value.as_str()));
+//RS                 index += 2;
+//RS             }
+//RS             "-l" => {
+//RS                 let Some(value) = args.get(index + 1) else {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE);
+//RS                 };
+//RS                 libraries.push(value.to_string());
+//RS                 index += 2;
+//RS             }
+//RS             "--namespace" => {
+//RS                 let Some(value) = args.get(index + 1) else {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE);
+//RS                 };
+//RS                 namespaces.push(value.to_string());
+//RS                 index += 2;
+//RS             }
+//RS             "--instantiate" => {
+//RS                 let Some(value) = args.get(index + 1) else {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE);
+//RS                 };
+//RS                 let Some((qualified_name, rest)) = value.split_once('=') else {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE);
+//RS                 };
+//RS                 let Some((cpp_types, jet_name)) = rest.rsplit_once(':') else {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE);
+//RS                 };
+//RS                 templates.push(jet::CppBind::TemplateInstantiation {
+//RS                     qualified_name: qualified_name.to_string(),
+//RS                     cpp_args: cpp_types.split(',').map(str::to_string).collect(),
+//RS                     jet_name: jet_name.to_string(),
+//RS                 });
+//RS                 index += 2;
+//RS             }
+//RS             flag => {
+//RS                 crate::cli_error!("E2102", "unknown `inspect bind cpp` flag `{flag}`");
+//RS                 usage();
+//RS                 exit(ExitCodes::USAGE);
+//RS             }
+//RS         }
+//RS     }
+//RS     let (Some(target), Some(clang), Some(archiver)) = (target, clang, archiver) else {
+//RS         usage();
+//RS         exit(ExitCodes::USAGE);
+//RS     };
+//RS     let lib = pkg.unwrap_or_else(|| {
+//RS         let base = header.rsplit('/').next().unwrap_or(header);
+//RS         base.rsplit_once('.')
+//RS             .map(|v| v.0)
+//RS             .unwrap_or(base)
+//RS             .to_ascii_lowercase()
+//RS     });
+//RS     let out_path = out.unwrap_or_else(|| {
+//RS         default_binding_output(header, jet::Syntax::CPP_MODULE_ROOT, &lib)
+//RS     });
+//RS     let cache = std::path::Path::new(&out_path)
+//RS         .parent()
+//RS         .filter(|path| !path.as_os_str().is_empty())
+//RS         .unwrap_or_else(|| std::path::Path::new("."));
+//RS     let canonicalize = |path: std::path::PathBuf| {
+//RS         std::fs::canonicalize(&path).unwrap_or_else(|error| {
+//RS             cpp_bind_error(
+//RS                 header,
+//RS                 &format!(
+//RS                     "could not resolve selected native path `{}` ({error})",
+//RS                     path.display()
+//RS                 ),
+//RS             )
+//RS         })
+//RS     };
+//RS     let options = jet::CppBind::BindOptions {
+//RS         lib: lib.clone(),
+//RS         target,
+//RS         clang: canonicalize(std::path::PathBuf::from(clang)),
+//RS         archiver: canonicalize(std::path::PathBuf::from(archiver)),
+//RS         include_dirs: include_dirs.into_iter().map(canonicalize).collect(),
+//RS         library_dirs: library_dirs.into_iter().map(canonicalize).collect(),
+//RS         libraries,
+//RS         namespaces,
+//RS         templates,
+//RS     };
+//RS     let result = jet::CppBind::bind(std::path::Path::new(header), cache, &options)
+//RS         .unwrap_or_else(|error| cpp_bind_error(header, &error.to_string()));
+//RS     if let Err(error) = std::fs::write(&out_path, &result.source) {
+//RS         cpp_bind_error(
+//RS             header,
+//RS             &format!("the generated cache could not be written ({error})"),
+//RS         );
+//RS     }
+//RS     if let Err(error) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance)
+//RS     {
+//RS         cpp_bind_error(
+//RS             header,
+//RS             &format!("the provenance could not be written ({error})"),
+//RS         );
+//RS     }
+//RS     println!(
+//RS         "bound {} C++ member{} from `{header}` → {out_path}",
+//RS         result.bound.len(),
+//RS         if result.bound.len() == 1 { "" } else { "s" }
+//RS     );
+//RS }
+//RS 
+//RS fn cpp_bind_error(path: &str, why: &str) -> ! {
+//RS     bind_e3208(
+//RS         format!("Could not generate C++ bindings from `{path}`."),
+//RS         format!("{why}."),
+//RS         "select an explicit target/toolchain, expose public scalar declarations, and request templates with `--instantiate`, then rerun `jet inspect bind cpp`.".to_string(),
+//RS     )
+//RS }
+//RS 
+//RS fn run_tcl_bind(args: &[&String]) {
+//RS     let usage = || {
+//RS         eprintln!(
+//RS             "usage: {} inspect bind tcl <script.tcl> [--pkg <lib>] [-o <out.jet>]",
+//RS             jet::Syntax::BINARY_NAME
+//RS         )
+//RS     };
+//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+//RS         usage();
+//RS         exit(if args.is_empty() {
+//RS             ExitCodes::USAGE
+//RS         } else {
+//RS             ExitCodes::OK
+//RS         })
+//RS     }
+//RS     let path = args[0].as_str();
+//RS     let mut pkg = None;
+//RS     let mut out = None;
+//RS     let mut i = 1;
+//RS     while i < args.len() {
+//RS         match args[i].as_str() {
+//RS             "--pkg" => {
+//RS                 pkg = args.get(i + 1).map(|v| v.to_string());
+//RS                 if pkg.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             "-o" | "--out" => {
+//RS                 out = args.get(i + 1).map(|v| v.to_string());
+//RS                 if out.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             flag => {
+//RS                 crate::cli_error!("E2102", "unknown `inspect bind tcl` flag `{flag}`");
+//RS                 usage();
+//RS                 exit(ExitCodes::USAGE)
+//RS             }
+//RS         }
+//RS     }
+//RS     let lib = pkg.unwrap_or_else(|| {
+//RS         let b = path.rsplit('/').next().unwrap_or(path);
+//RS         b.rsplit_once('.').map(|v| v.0).unwrap_or(b).to_string()
+//RS     });
+//RS     let source = std::fs::read_to_string(path)
+//RS         .unwrap_or_else(|e| tcl_bind_error(path, &format!("the script could not be read ({e})")));
+//RS     let out_path = out.unwrap_or_else(|| {
+//RS         default_binding_output(path, jet::Syntax::TCL_MODULE_ROOT, &lib)
+//RS     });
+//RS     let cache = std::path::Path::new(&out_path)
+//RS         .parent()
+//RS         .unwrap_or_else(|| std::path::Path::new("."));
+//RS     let result = jet::TclBind::bind(&source, &lib, cache)
+//RS         .unwrap_or_else(|e| tcl_bind_error(path, &e.to_string()));
+//RS     if let Err(e) = std::fs::write(&out_path, &result.source) {
+//RS         tcl_bind_error(
+//RS             path,
+//RS             &format!("the generated cache could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     if let Err(e) = std::fs::write(
+//RS         cache.join(format!("{lib}.tcl-path")),
+//RS         format!("{}\n", result.lib_dir.display()),
+//RS     ) {
+//RS         tcl_bind_error(
+//RS             path,
+//RS             &format!("the Tcl runtime identity could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), result.provenance) {
+//RS         tcl_bind_error(
+//RS             path,
+//RS             &format!("the binding provenance could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     println!("bound in-process Tcl session from `{path}` → {out_path}")
+//RS }
+//RS fn tcl_bind_error(path: &str, why: &str) -> ! {
+//RS     bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"use a valid Tcl initialization script and rerun `jet inspect bind tcl` inside the provisioned Jet environment.".to_string())
+//RS }
+//RS 
+//RS fn run_lua_bind(args: &[&String]) {
+//RS     let usage = || {
+//RS         eprintln!(
+//RS             "usage: {} inspect bind lua <script.lua> [--pkg <lib>] [-o <out.jet>]",
+//RS             jet::Syntax::BINARY_NAME
+//RS         )
+//RS     };
+//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+//RS         usage();
+//RS         exit(if args.is_empty() {
+//RS             ExitCodes::USAGE
+//RS         } else {
+//RS             ExitCodes::OK
+//RS         })
+//RS     }
+//RS     let path = args[0].as_str();
+//RS     let mut pkg = None;
+//RS     let mut out = None;
+//RS     let mut i = 1;
+//RS     while i < args.len() {
+//RS         match args[i].as_str() {
+//RS             "--pkg" => {
+//RS                 pkg = args.get(i + 1).map(|v| v.to_string());
+//RS                 if pkg.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             "-o" | "--out" => {
+//RS                 out = args.get(i + 1).map(|v| v.to_string());
+//RS                 if out.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             flag => {
+//RS                 crate::cli_error!("E2102", "unknown `inspect bind lua` flag `{flag}`");
+//RS                 usage();
+//RS                 exit(ExitCodes::USAGE)
+//RS             }
+//RS         }
+//RS     }
+//RS     let lib = pkg.unwrap_or_else(|| {
+//RS         let b = path.rsplit('/').next().unwrap_or(path);
+//RS         b.rsplit_once('.').map(|v| v.0).unwrap_or(b).to_string()
+//RS     });
+//RS     let source = std::fs::read_to_string(path)
+//RS         .unwrap_or_else(|e| lua_bind_error(path, &format!("the script could not be read ({e})")));
+//RS     let out_path = out.unwrap_or_else(|| {
+//RS         default_binding_output(path, jet::Syntax::LUA_MODULE_ROOT, &lib)
+//RS     });
+//RS     let cache = std::path::Path::new(&out_path)
+//RS         .parent()
+//RS         .unwrap_or_else(|| std::path::Path::new("."));
+//RS     let result = jet::LuaBind::bind(std::path::Path::new(path), &source, &lib, cache)
+//RS         .unwrap_or_else(|e| lua_bind_error(path, &e.to_string()));
+//RS     if let Err(e) = std::fs::write(&out_path, &result.source) {
+//RS         lua_bind_error(
+//RS             path,
+//RS             &format!("the generated cache could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     if let Err(e) = std::fs::write(
+//RS         cache.join(format!("{lib}.lua-path")),
+//RS         format!("{}\n", result.lib_dir.display()),
+//RS     ) {
+//RS         lua_bind_error(
+//RS             path,
+//RS             &format!("the Lua runtime identity could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), result.provenance) {
+//RS         lua_bind_error(
+//RS             path,
+//RS             &format!("the binding provenance could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     println!(
+//RS         "bound {} in-process Lua function{} from `{path}` → {out_path}",
+//RS         result.bound.len(),
+//RS         if result.bound.len() == 1 { "" } else { "s" }
+//RS     );
+//RS }
+//RS fn lua_bind_error(path: &str, why: &str) -> ! {
+//RS     bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level `function name(input)` routines and rerun `jet inspect bind lua` inside the provisioned Jet environment.".to_string())
+//RS }
+//RS 
+//RS /// D-FFI-ADA1=A: compile exported GNAT functions and preserve scalar subtype
+//RS /// ranges as checked Jet wrapper boundaries.
+//RS fn run_ada_bind(args: &[&String]) {
+//RS     let usage = || {
+//RS         eprintln!(
+//RS             "usage: {} inspect bind ada <package.ads> [--pkg <lib>] [-o <out.jet>]",
+//RS             jet::Syntax::BINARY_NAME
+//RS         )
+//RS     };
+//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+//RS         usage();
+//RS         exit(if args.is_empty() {
+//RS             ExitCodes::USAGE
+//RS         } else {
+//RS             ExitCodes::OK
+//RS         })
+//RS     }
+//RS     let path = args[0].as_str();
+//RS     let mut pkg = None;
+//RS     let mut out = None;
+//RS     let mut i = 1;
+//RS     while i < args.len() {
+//RS         match args[i].as_str() {
+//RS             "--pkg" => {
+//RS                 pkg = args.get(i + 1).map(|v| v.to_string());
+//RS                 if pkg.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             "-o" | "--out" => {
+//RS                 out = args.get(i + 1).map(|v| v.to_string());
+//RS                 if out.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             flag => {
+//RS                 crate::cli_error!("E2102", "unknown `inspect bind ada` flag `{flag}`");
+//RS                 usage();
+//RS                 exit(ExitCodes::USAGE)
+//RS             }
+//RS         }
+//RS     }
+//RS     let lib = pkg.unwrap_or_else(|| {
+//RS         let base = path.rsplit('/').next().unwrap_or(path);
+//RS         base.rsplit_once('.')
+//RS             .map(|v| v.0)
+//RS             .unwrap_or(base)
+//RS             .to_ascii_lowercase()
+//RS     });
+//RS     let spec = std::fs::read_to_string(path).unwrap_or_else(|e| {
+//RS         ada_bind_error(path, &format!("the package spec could not be read ({e})"))
+//RS     });
+//RS     let out_path = out.unwrap_or_else(|| {
+//RS         default_binding_output(path, jet::Syntax::ADA_MODULE_ROOT, &lib)
+//RS     });
+//RS     let cache = std::path::Path::new(&out_path)
+//RS         .parent()
+//RS         .unwrap_or_else(|| std::path::Path::new("."));
+//RS     let result = jet::AdaBind::bind(std::path::Path::new(path), &spec, &lib, cache)
+//RS         .unwrap_or_else(|e| ada_bind_error(path, &e.to_string()));
+//RS     if let Err(e) = std::fs::write(&out_path, &result.source) {
+//RS         ada_bind_error(
+//RS             path,
+//RS             &format!("the generated cache could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     if let Err(e) = std::fs::write(
+//RS         cache.join(format!("{lib}.ada-path")),
+//RS         format!("{}\n", result.runtime_dir.display()),
+//RS     ) {
+//RS         ada_bind_error(
+//RS             path,
+//RS             &format!("the GNAT runtime identity could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), result.provenance) {
+//RS         ada_bind_error(
+//RS             path,
+//RS             &format!("the binding provenance could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     println!(
+//RS         "bound {} GNAT export{} from `{path}` → {out_path}",
+//RS         result.bound.len(),
+//RS         if result.bound.len() == 1 { "" } else { "s" }
+//RS     );
+//RS }
+//RS fn ada_bind_error(path: &str, why: &str) -> ! {
+//RS     bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"export `Interfaces.C.long_long` or `Interfaces.C.double` functions with `Convention => C` and `External_Name`, then rerun `jet inspect bind ada`.".to_string())
+//RS }
+//RS 
+//RS /// D-FFI-PASCAL1=A: compile FreePascal cdecl exports and generate bounded,
+//RS /// consuming opaque-handle wrappers for one Object Pascal class estate.
+//RS fn run_pascal_bind(args: &[&String]) {
+//RS     let usage = || {
+//RS         eprintln!(
+//RS             "usage: {} inspect bind pascal <library.pas> [--pkg <lib>] [-o <out.jet>]",
+//RS             jet::Syntax::BINARY_NAME
+//RS         )
+//RS     };
+//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+//RS         usage();
+//RS         exit(if args.is_empty() {
+//RS             ExitCodes::USAGE
+//RS         } else {
+//RS             ExitCodes::OK
+//RS         })
+//RS     }
+//RS     let path = args[0].as_str();
+//RS     let mut pkg = None;
+//RS     let mut out = None;
+//RS     let mut i = 1;
+//RS     while i < args.len() {
+//RS         match args[i].as_str() {
+//RS             "--pkg" => {
+//RS                 pkg = args.get(i + 1).map(|v| v.to_string());
+//RS                 if pkg.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             "-o" | "--out" => {
+//RS                 out = args.get(i + 1).map(|v| v.to_string());
+//RS                 if out.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             flag => {
+//RS                 crate::cli_error!("E2102", "unknown `inspect bind pascal` flag `{flag}`");
+//RS                 usage();
+//RS                 exit(ExitCodes::USAGE)
+//RS             }
+//RS         }
+//RS     }
+//RS     let lib = pkg.unwrap_or_else(|| {
+//RS         let base = path.rsplit('/').next().unwrap_or(path);
+//RS         base.rsplit_once('.')
+//RS             .map(|v| v.0)
+//RS             .unwrap_or(base)
+//RS             .to_ascii_lowercase()
+//RS     });
+//RS     let source = std::fs::read_to_string(path).unwrap_or_else(|e| {
+//RS         pascal_bind_error(path, &format!("the Pascal source could not be read ({e})"))
+//RS     });
+//RS     let out_path = out.unwrap_or_else(|| {
+//RS         default_binding_output(path, jet::Syntax::PASCAL_MODULE_ROOT, &lib)
+//RS     });
+//RS     let cache = std::path::Path::new(&out_path)
+//RS         .parent()
+//RS         .unwrap_or_else(|| std::path::Path::new("."));
+//RS     let result = jet::PascalBind::bind(std::path::Path::new(path), &source, &lib, cache)
+//RS         .unwrap_or_else(|e| pascal_bind_error(path, &e.to_string()));
+//RS     if let Err(e) = std::fs::write(&out_path, &result.source) {
+//RS         pascal_bind_error(
+//RS             path,
+//RS             &format!("the generated cache could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), result.provenance) {
+//RS         pascal_bind_error(
+//RS             path,
+//RS             &format!("the binding provenance could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     println!(
+//RS         "bound {} FreePascal export{} from `{path}` → {out_path}",
+//RS         result.bound.len(),
+//RS         if result.bound.len() == 1 { "" } else { "s" }
+//RS     );
+//RS }
+//RS fn pascal_bind_error(path: &str, why: &str) -> ! {
+//RS     bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"export `Int64`/`Double` cdecl routines plus `<class>_new`, `<class>_free`, and pointer-first scalar method wrappers, then rerun `jet inspect bind pascal`.".to_string())
+//RS }
+//RS 
+//RS /// D-FFI-DART1=A: Dart/Flutter owns the isolate. Generate and compile the
+//RS /// dart_api_dl callback bridge plus a native Jet plugin loaded by `dart:ffi`.
+//RS fn run_dart_bind(args: &[&String]) {
+//RS     let usage = || {
+//RS         eprintln!("usage: {} inspect bind dart <contract.dart> --jet <compute.jet> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME)
+//RS     };
+//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+//RS         usage();
+//RS         exit(if args.is_empty() {
+//RS             ExitCodes::USAGE
+//RS         } else {
+//RS             ExitCodes::OK
+//RS         })
+//RS     }
+//RS     let path = args[0].as_str();
+//RS     let mut pkg = None;
+//RS     let mut out = None;
+//RS     let mut compute = None;
+//RS     let mut i = 1;
+//RS     while i < args.len() {
+//RS         match args[i].as_str() {
+//RS             "--pkg" => {
+//RS                 pkg = args.get(i + 1).map(|v| v.to_string());
+//RS                 if pkg.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             "--jet" => {
+//RS                 compute = args.get(i + 1).map(|v| v.to_string());
+//RS                 if compute.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             "-o" | "--out" => {
+//RS                 out = args.get(i + 1).map(|v| v.to_string());
+//RS                 if out.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             flag => {
+//RS                 crate::cli_error!("E2102", "unknown `inspect bind dart` flag `{flag}`");
+//RS                 usage();
+//RS                 exit(ExitCodes::USAGE)
+//RS             }
+//RS         }
+//RS     }
+//RS     let Some(compute) = compute else {
+//RS         crate::cli_error!("E2104", "`inspect bind dart` requires `--jet <compute.jet>` so the Dart host has real native Jet code to load");
+//RS         usage();
+//RS         exit(ExitCodes::USAGE)
+//RS     };
+//RS     let lib = pkg.unwrap_or_else(|| {
+//RS         let base = path.rsplit('/').next().unwrap_or(path);
+//RS         base.rsplit_once('.')
+//RS             .map(|v| v.0)
+//RS             .unwrap_or(base)
+//RS             .to_ascii_lowercase()
+//RS     });
+//RS     let source = std::fs::read_to_string(path).unwrap_or_else(|e| {
+//RS         dart_bind_error(path, &format!("the Dart contract could not be read ({e})"))
+//RS     });
+//RS     let out_path = out.unwrap_or_else(|| {
+//RS         default_binding_output(path, jet::Syntax::DART_MODULE_ROOT, &lib)
+//RS     });
+//RS     let cache = std::path::Path::new(&out_path)
+//RS         .parent()
+//RS         .unwrap_or_else(|| std::path::Path::new("."));
+//RS     let host = cache.join(format!("{lib}_host.dart"));
+//RS     let archive = cache.join(format!("libjet_dart_{lib}.a"));
+//RS     let provenance = cache.join(format!("{lib}.provenance"));
+//RS     let compute_artifact = cache.join(format!("{lib}_compute.rs"));
+//RS     let clear_outputs = || {
+//RS         let _ = std::fs::remove_file(&out_path);
+//RS         let _ = std::fs::remove_file(&host);
+//RS         let _ = std::fs::remove_file(&provenance);
+//RS         let _ = std::fs::remove_file(&compute_artifact);
+//RS         for ext in ["so", "dylib", "dll"] {
+//RS             let _ = std::fs::remove_file(cache.join(format!("libjet_dart_{lib}_compute.{ext}")));
+//RS         }
+//RS     };
+//RS     clear_outputs();
+//RS     let _ = std::fs::remove_file(&archive);
+//RS     let cleanup = || {
+//RS         clear_outputs();
+//RS         let _ = std::fs::remove_file(&archive);
+//RS     };
+//RS     let mut result = jet::DartBind::bind(std::path::Path::new(path), &source, &lib, cache)
+//RS         .unwrap_or_else(|e| {
+//RS             cleanup();
+//RS             dart_bind_error(path, &e.to_string())
+//RS         });
+//RS     if let Err(e) = std::fs::write(&out_path, &result.source) {
+//RS         cleanup();
+//RS         dart_bind_error(
+//RS             path,
+//RS             &format!("the generated cache could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     if let Err(e) = std::fs::write(&host, &result.host_source) {
+//RS         cleanup();
+//RS         dart_bind_error(
+//RS             path,
+//RS             &format!("the Dart host wrapper could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     let compute_source = std::fs::read_to_string(&compute).unwrap_or_else(|e| {
+//RS         cleanup();
+//RS         dart_bind_error(
+//RS             path,
+//RS             &format!("the Jet compute source could not be read ({e})"),
+//RS         )
+//RS     });
+//RS     result.provenance = jet::DartBind::bind_compute_provenance(
+//RS         &result.provenance,
+//RS         std::path::Path::new(&compute),
+//RS         &compute_source,
+//RS     )
+//RS     .unwrap_or_else(|e| {
+//RS         cleanup();
+//RS         dart_bind_error(path, &e.to_string())
+//RS     });
+//RS     let compiled =
+//RS         jet::Driver::compile_bundle_path_opts_plugin(&compute, jet::Sema::CompileMode::Check, None)
+//RS             .unwrap_or_else(|_| {
+//RS                 cleanup();
+//RS                 dart_bind_error(
+//RS                     path,
+//RS                     "the Jet compute source did not pass Jet front-end checks",
+//RS                 )
+//RS             });
+//RS     let plugin = compiled.plugin.as_ref().unwrap_or_else(|| {
+//RS         cleanup();
+//RS         dart_bind_error(
+//RS             path,
+//RS             "the Jet compute source produced no native plugin export artifact",
+//RS         )
+//RS     });
+//RS     let native = jet::DartBind::build_compute(
+//RS         &plugin.guest_rust,
+//RS         &result.host_rust,
+//RS         compiled.ffi.as_ref(),
+//RS         &compiled.clinks,
+//RS         &lib,
+//RS         cache,
+//RS     )
+//RS     .unwrap_or_else(|e| {
+//RS         cleanup();
+//RS         dart_bind_error(path, &e.to_string())
+//RS     });
+//RS     if let Err(e) = std::fs::write(&provenance, &result.provenance) {
+//RS         cleanup();
+//RS         dart_bind_error(
+//RS             path,
+//RS             &format!("the binding provenance could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     println!(
+//RS         "bound {} Dart callback{} and native Jet compute `{}` from `{}` → {}",
+//RS         result.bound.len(),
+//RS         if result.bound.len() == 1 { "" } else { "s" },
+//RS         native.display(),
+//RS         path,
+//RS         out_path
+//RS     );
+//RS }
+//RS fn dart_bind_error(path: &str, why: &str) -> ! {
+//RS     bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"mark top-level scalar Dart callbacks with `@pragma('vm:entry-point')`, pass a valid Jet plugin source with `--jet`, and rerun inside the provisioned Jet environment.".to_string())
+//RS }
+//RS 
+//RS /// D-FFI-PWSH1=A: validate named script functions, then generate a persistent
+//RS /// PowerShell worker whose object pipeline crosses as canonical DataTree.
+//RS fn run_powershell_bind(args: &[&String]) {
+//RS     let usage = || {
+//RS         eprintln!(
+//RS             "usage: {} inspect bind pwsh <script.ps1> [--pkg <lib>] [-o <out.jet>]",
+//RS             jet::Syntax::BINARY_NAME
+//RS         )
+//RS     };
+//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+//RS         usage();
+//RS         exit(if args.is_empty() {
+//RS             ExitCodes::USAGE
+//RS         } else {
+//RS             ExitCodes::OK
+//RS         })
+//RS     }
+//RS     let path = args[0].as_str();
+//RS     let mut pkg = None;
+//RS     let mut out = None;
+//RS     let mut i = 1;
+//RS     while i < args.len() {
+//RS         match args[i].as_str() {
+//RS             "--pkg" => {
+//RS                 pkg = args.get(i + 1).map(|v| v.to_string());
+//RS                 if pkg.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             "-o" | "--out" => {
+//RS                 out = args.get(i + 1).map(|v| v.to_string());
+//RS                 if out.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             flag => {
+//RS                 crate::cli_error!("E2102", "unknown `inspect bind pwsh` flag `{flag}`");
+//RS                 usage();
+//RS                 exit(ExitCodes::USAGE)
+//RS             }
+//RS         }
+//RS     }
+//RS     let lib = pkg.unwrap_or_else(|| {
+//RS         let base = path.rsplit('/').next().unwrap_or(path);
+//RS         base.rsplit_once('.')
+//RS             .map(|v| v.0)
+//RS             .unwrap_or(base)
+//RS             .to_ascii_lowercase()
+//RS     });
+//RS     let source = std::fs::read_to_string(path).unwrap_or_else(|e| {
+//RS         powershell_bind_error(
+//RS             path,
+//RS             &format!("the PowerShell script could not be read ({e})"),
+//RS         )
+//RS     });
+//RS     let out_path = out.unwrap_or_else(|| {
+//RS         default_binding_output(path, jet::Syntax::PWSH_MODULE_ROOT, &lib)
+//RS     });
+//RS     let cache = std::path::Path::new(&out_path)
+//RS         .parent()
+//RS         .unwrap_or_else(|| std::path::Path::new("."));
+//RS     let result = jet::PowerShellBind::bind(std::path::Path::new(path), &source, &lib, cache)
+//RS         .unwrap_or_else(|e| powershell_bind_error(path, &e.to_string()));
+//RS     if let Err(e) = std::fs::write(&out_path, &result.source) {
+//RS         powershell_bind_error(
+//RS             path,
+//RS             &format!("the generated cache could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
+//RS         powershell_bind_error(
+//RS             path,
+//RS             &format!("the binding provenance could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     println!(
+//RS         "bound {} persistent PowerShell function{} from `{path}` → {out_path}",
+//RS         result.bound.len(),
+//RS         if result.bound.len() == 1 { "" } else { "s" }
+//RS     );
+//RS }
+//RS fn powershell_bind_error(path: &str, why: &str) -> ! {
+//RS     bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define named PowerShell functions with Jet-compatible identifiers and rerun `jet inspect bind pwsh` inside the provisioned Jet environment.".to_string())
+//RS }
+//RS 
+//RS /// D-FFI-PERL1=A: compile named Perl subs into a supervised persistent worker.
+//RS fn run_perl_bind(args: &[&String]) {
+//RS     let usage = || {
+//RS         eprintln!(
+//RS             "usage: {} inspect bind perl <script.pl> [--pkg <lib>] [-o <out.jet>]",
+//RS             jet::Syntax::BINARY_NAME
+//RS         )
+//RS     };
+//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+//RS         usage();
+//RS         exit(if args.is_empty() {
+//RS             ExitCodes::USAGE
+//RS         } else {
+//RS             ExitCodes::OK
+//RS         })
+//RS     }
+//RS     let path = args[0].as_str();
+//RS     let mut pkg = None;
+//RS     let mut out = None;
+//RS     let mut i = 1;
+//RS     while i < args.len() {
+//RS         match args[i].as_str() {
+//RS             "--pkg" => {
+//RS                 pkg = args.get(i + 1).map(|v| v.to_string());
+//RS                 if pkg.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             "-o" | "--out" => {
+//RS                 out = args.get(i + 1).map(|v| v.to_string());
+//RS                 if out.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             flag => {
+//RS                 crate::cli_error!("E2102", "unknown `inspect bind perl` flag `{flag}`");
+//RS                 usage();
+//RS                 exit(ExitCodes::USAGE)
+//RS             }
+//RS         }
+//RS     }
+//RS     let lib = pkg.unwrap_or_else(|| {
+//RS         let base = path.rsplit('/').next().unwrap_or(path);
+//RS         base.rsplit_once('.')
+//RS             .map(|v| v.0)
+//RS             .unwrap_or(base)
+//RS             .to_ascii_lowercase()
+//RS     });
+//RS     let source = std::fs::read_to_string(path).unwrap_or_else(|e| {
+//RS         perl_bind_error(path, &format!("the Perl script could not be read ({e})"))
+//RS     });
+//RS     let out_path = out.unwrap_or_else(|| {
+//RS         default_binding_output(path, jet::Syntax::PERL_MODULE_ROOT, &lib)
+//RS     });
+//RS     let cache = std::path::Path::new(&out_path)
+//RS         .parent()
+//RS         .unwrap_or_else(|| std::path::Path::new("."));
+//RS     let result = jet::PerlBind::bind(std::path::Path::new(path), &source, &lib, cache)
+//RS         .unwrap_or_else(|e| perl_bind_error(path, &e.to_string()));
+//RS     if let Err(e) = std::fs::write(&out_path, &result.source) {
+//RS         perl_bind_error(
+//RS             path,
+//RS             &format!("the generated cache could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
+//RS         perl_bind_error(
+//RS             path,
+//RS             &format!("the binding provenance could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     println!(
+//RS         "bound {} persistent Perl function{} from `{path}` → {out_path}",
+//RS         result.bound.len(),
+//RS         if result.bound.len() == 1 { "" } else { "s" }
+//RS     );
+//RS }
+//RS fn perl_bind_error(path: &str, why: &str) -> ! {
+//RS     bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define named main-package Perl functions with Jet-compatible identifiers and rerun `jet inspect bind perl` inside the provisioned Jet environment.".to_string())
+//RS }
+//RS 
+//RS /// D-FFI-RUBY1=A: statically discover top-level methods and generate a
+//RS /// persistent supervised Ruby worker. Ruby source never runs during discovery.
+//RS fn run_ruby_bind(args: &[&String]) {
+//RS     let usage = || {
+//RS         eprintln!(
+//RS             "usage: {} inspect bind ruby <script.rb> [--pkg <lib>] [-o <out.jet>]",
+//RS             jet::Syntax::BINARY_NAME
+//RS         )
+//RS     };
+//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+//RS         usage();
+//RS         exit(if args.is_empty() {
+//RS             ExitCodes::USAGE
+//RS         } else {
+//RS             ExitCodes::OK
+//RS         })
+//RS     }
+//RS     let path = args[0].as_str();
+//RS     let mut pkg = None;
+//RS     let mut out = None;
+//RS     let mut i = 1;
+//RS     while i < args.len() {
+//RS         match args[i].as_str() {
+//RS             "--pkg" => {
+//RS                 pkg = args.get(i + 1).map(|v| v.to_string());
+//RS                 if pkg.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             "-o" | "--out" => {
+//RS                 out = args.get(i + 1).map(|v| v.to_string());
+//RS                 if out.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             flag => {
+//RS                 crate::cli_error!("E2102", "unknown `inspect bind ruby` flag `{flag}`");
+//RS                 usage();
+//RS                 exit(ExitCodes::USAGE)
+//RS             }
+//RS         }
+//RS     }
+//RS     let lib = pkg.unwrap_or_else(|| {
+//RS         let base = path.rsplit('/').next().unwrap_or(path);
+//RS         base.rsplit_once('.')
+//RS             .map(|v| v.0)
+//RS             .unwrap_or(base)
+//RS             .to_ascii_lowercase()
+//RS     });
+//RS     let source = std::fs::read_to_string(path).unwrap_or_else(|e| {
+//RS         ruby_bind_error(path, &format!("the Ruby script could not be read ({e})"))
+//RS     });
+//RS     let out_path = out.unwrap_or_else(|| {
+//RS         default_binding_output(path, jet::Syntax::RUBY_MODULE_ROOT, &lib)
+//RS     });
+//RS     let cache = std::path::Path::new(&out_path)
+//RS         .parent()
+//RS         .unwrap_or_else(|| std::path::Path::new("."));
+//RS     let result = jet::RubyBind::bind(std::path::Path::new(path), &source, &lib, cache)
+//RS         .unwrap_or_else(|e| ruby_bind_error(path, &e.to_string()));
+//RS     if let Err(e) = std::fs::write(&out_path, &result.source) {
+//RS         ruby_bind_error(
+//RS             path,
+//RS             &format!("the generated cache could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
+//RS         ruby_bind_error(
+//RS             path,
+//RS             &format!("the binding provenance could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     println!(
+//RS         "bound {} persistent Ruby method{} from `{path}` → {out_path}",
+//RS         result.bound.len(),
+//RS         if result.bound.len() == 1 { "" } else { "s" }
+//RS     );
+//RS }
+//RS fn ruby_bind_error(path: &str, why: &str) -> ! {
+//RS     bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level Ruby methods with one required positional argument and Jet-compatible names, then rerun `jet inspect bind ruby`.".to_string())
+//RS }
+//RS 
+//RS /// D-FFI-PHP1=A: statically discover top-level functions and generate a
+//RS /// persistent supervised PHP worker pool. PHP source never runs during discovery.
+//RS fn run_php_bind(args: &[&String]) {
+//RS     let usage = || {
+//RS         eprintln!(
+//RS             "usage: {} inspect bind php <script.php> [--pkg <lib>] [-o <out.jet>]",
+//RS             jet::Syntax::BINARY_NAME
+//RS         )
+//RS     };
+//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+//RS         usage();
+//RS         exit(if args.is_empty() {
+//RS             ExitCodes::USAGE
+//RS         } else {
+//RS             ExitCodes::OK
+//RS         })
+//RS     }
+//RS     let path = args[0].as_str();
+//RS     let mut pkg = None;
+//RS     let mut out = None;
+//RS     let mut i = 1;
+//RS     while i < args.len() {
+//RS         match args[i].as_str() {
+//RS             "--pkg" => {
+//RS                 pkg = args.get(i + 1).map(|v| v.to_string());
+//RS                 if pkg.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             "-o" | "--out" => {
+//RS                 out = args.get(i + 1).map(|v| v.to_string());
+//RS                 if out.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             flag => {
+//RS                 crate::cli_error!("E2102", "unknown `inspect bind php` flag `{flag}`");
+//RS                 usage();
+//RS                 exit(ExitCodes::USAGE)
+//RS             }
+//RS         }
+//RS     }
+//RS     let lib = pkg.unwrap_or_else(|| {
+//RS         let base = path.rsplit('/').next().unwrap_or(path);
+//RS         base.rsplit_once('.')
+//RS             .map(|v| v.0)
+//RS             .unwrap_or(base)
+//RS             .to_ascii_lowercase()
+//RS     });
+//RS     let source = std::fs::read_to_string(path).unwrap_or_else(|e| {
+//RS         php_bind_error(path, &format!("the PHP script could not be read ({e})"))
+//RS     });
+//RS     let out_path = out.unwrap_or_else(|| {
+//RS         default_binding_output(path, jet::Syntax::PHP_MODULE_ROOT, &lib)
+//RS     });
+//RS     let cache = std::path::Path::new(&out_path)
+//RS         .parent()
+//RS         .unwrap_or_else(|| std::path::Path::new("."));
+//RS     let result = jet::PhpBind::bind(std::path::Path::new(path), &source, &lib, cache)
+//RS         .unwrap_or_else(|e| php_bind_error(path, &e.to_string()));
+//RS     if let Err(e) = std::fs::write(&out_path, &result.source) {
+//RS         php_bind_error(
+//RS             path,
+//RS             &format!("the generated cache could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
+//RS         php_bind_error(
+//RS             path,
+//RS             &format!("the binding provenance could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     println!(
+//RS         "bound {} PHP function{} into a four-worker pool from `{path}` → {out_path}",
+//RS         result.bound.len(),
+//RS         if result.bound.len() == 1 { "" } else { "s" }
+//RS     );
+//RS }
+//RS fn php_bind_error(path: &str, why: &str) -> ! {
+//RS     bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level PHP functions with one required positional argument and Jet-compatible names, then rerun `jet inspect bind php` inside the provisioned Jet environment.".to_string())
+//RS }
+//RS 
+//RS /// D-FFI-R1=A: parse top-level function metadata without evaluating source,
+//RS /// then generate a persistent supervised R worker.
+//RS fn run_r_bind(args: &[&String]) {
+//RS     let usage = || {
+//RS         eprintln!(
+//RS             "usage: {} inspect bind r <script.R> [--pkg <lib>] [-o <out.jet>]",
+//RS             jet::Syntax::BINARY_NAME
+//RS         )
+//RS     };
+//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+//RS         usage();
+//RS         exit(if args.is_empty() {
+//RS             ExitCodes::USAGE
+//RS         } else {
+//RS             ExitCodes::OK
+//RS         })
+//RS     }
+//RS     let path = args[0].as_str();
+//RS     let mut pkg = None;
+//RS     let mut out = None;
+//RS     let mut i = 1;
+//RS     while i < args.len() {
+//RS         match args[i].as_str() {
+//RS             "--pkg" => {
+//RS                 pkg = args.get(i + 1).map(|v| v.to_string());
+//RS                 if pkg.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             "-o" | "--out" => {
+//RS                 out = args.get(i + 1).map(|v| v.to_string());
+//RS                 if out.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             flag => {
+//RS                 crate::cli_error!("E2102", "unknown `inspect bind r` flag `{flag}`");
+//RS                 usage();
+//RS                 exit(ExitCodes::USAGE)
+//RS             }
+//RS         }
+//RS     }
+//RS     let lib = pkg.unwrap_or_else(|| {
+//RS         let base = path.rsplit('/').next().unwrap_or(path);
+//RS         base.rsplit_once('.')
+//RS             .map(|v| v.0)
+//RS             .unwrap_or(base)
+//RS             .to_ascii_lowercase()
+//RS     });
+//RS     let source = std::fs::read_to_string(path)
+//RS         .unwrap_or_else(|e| r_bind_error(path, &format!("the R script could not be read ({e})")));
+//RS     let out_path = out.unwrap_or_else(|| {
+//RS         default_binding_output(path, jet::Syntax::R_MODULE_ROOT, &lib)
+//RS     });
+//RS     let cache = std::path::Path::new(&out_path)
+//RS         .parent()
+//RS         .unwrap_or_else(|| std::path::Path::new("."));
+//RS     let result = jet::RBind::bind(std::path::Path::new(path), &source, &lib, cache)
+//RS         .unwrap_or_else(|e| r_bind_error(path, &e.to_string()));
+//RS     if let Err(e) = std::fs::write(&out_path, &result.source) {
+//RS         r_bind_error(
+//RS             path,
+//RS             &format!("the generated cache could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
+//RS         r_bind_error(
+//RS             path,
+//RS             &format!("the binding provenance could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     println!(
+//RS         "bound {} R function{} from `{path}` → {out_path}",
+//RS         result.bound.len(),
+//RS         if result.bound.len() == 1 { "" } else { "s" }
+//RS     );
+//RS }
+//RS fn r_bind_error(path: &str, why: &str) -> ! {
+//RS     bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level R functions with one required positional argument and Jet-compatible names, then rerun `jet inspect bind r`.".to_string())
+//RS }
+//RS 
+//RS /// D-FFI-PY1=A: statically discover top-level Python functions and generate a
+//RS /// persistent supervised CPython sidecar with the common checked boundary.
+//RS fn run_python_bind(args: &[&String]) {
+//RS     let usage = || {
+//RS         eprintln!(
+//RS             "usage: {} inspect bind py <script.py> [--pkg <lib>] [-o <out.jet>]",
+//RS             jet::Syntax::BINARY_NAME
+//RS         )
+//RS     };
+//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+//RS         usage();
+//RS         exit(if args.is_empty() {
+//RS             ExitCodes::USAGE
+//RS         } else {
+//RS             ExitCodes::OK
+//RS         })
+//RS     }
+//RS     let path = args[0].as_str();
+//RS     let mut pkg = None;
+//RS     let mut out = None;
+//RS     let mut i = 1;
+//RS     while i < args.len() {
+//RS         match args[i].as_str() {
+//RS             "--pkg" => {
+//RS                 pkg = args.get(i + 1).map(|v| v.to_string());
+//RS                 if pkg.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             "-o" | "--out" => {
+//RS                 out = args.get(i + 1).map(|v| v.to_string());
+//RS                 if out.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             flag => {
+//RS                 crate::cli_error!("E2102", "unknown `inspect bind py` flag `{flag}`");
+//RS                 usage();
+//RS                 exit(ExitCodes::USAGE)
+//RS             }
+//RS         }
+//RS     }
+//RS     let lib = pkg.unwrap_or_else(|| {
+//RS         let base = path.rsplit('/').next().unwrap_or(path);
+//RS         base.rsplit_once('.')
+//RS             .map(|v| v.0)
+//RS             .unwrap_or(base)
+//RS             .to_ascii_lowercase()
+//RS     });
+//RS     let source = std::fs::read_to_string(path).unwrap_or_else(|e| {
+//RS         python_bind_error(path, &format!("the Python script could not be read ({e})"))
+//RS     });
+//RS     let out_path = out.unwrap_or_else(|| {
+//RS         default_binding_output(path, jet::Syntax::PY_MODULE_ROOT, &lib)
+//RS     });
+//RS     let cache = std::path::Path::new(&out_path)
+//RS         .parent()
+//RS         .unwrap_or_else(|| std::path::Path::new("."));
+//RS     let result = jet::PythonBind::bind(std::path::Path::new(path), &source, &lib, cache)
+//RS         .unwrap_or_else(|e| python_bind_error(path, &e.to_string()));
+//RS     if let Err(e) = std::fs::write(&out_path, &result.source) {
+//RS         python_bind_error(
+//RS             path,
+//RS             &format!("the generated cache could not be written ({e})"),
+//RS         );
+//RS     }
+//RS     if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
+//RS         python_bind_error(
+//RS             path,
+//RS             &format!("the binding provenance could not be written ({e})"),
+//RS         );
+//RS     }
+//RS     println!(
+//RS         "bound {} persistent Python function{} from `{path}` → {out_path}",
+//RS         result.bound.len(),
+//RS         if result.bound.len() == 1 { "" } else { "s" }
+//RS     );
+//RS }
+//RS fn python_bind_error(path: &str, why: &str) -> ! {
+//RS     bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level Python functions with Jet-compatible names and required scalar annotations (`int`, `float`, or `bool`), then rerun `jet inspect bind py` inside the provisioned Jet environment.".to_string())
+//RS }
+//RS 
+//RS /// D-FFI-JS1=A: bind a typed TypeScript declaration file to a target-selected
+//RS /// native JavaScript module through the common checked scalar sidecar.
+//RS fn run_javascript_bind(args: &[&String]) {
+//RS     let usage = || {
+//RS         eprintln!("usage: {} inspect bind js <module.d.ts> --runtime <module.js> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME)
+//RS     };
+//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+//RS         usage();
+//RS         exit(if args.is_empty() {
+//RS             ExitCodes::USAGE
+//RS         } else {
+//RS             ExitCodes::OK
+//RS         })
+//RS     }
+//RS     let declaration = args[0].as_str();
+//RS     let mut runtime = None;
+//RS     let mut pkg = None;
+//RS     let mut out = None;
+//RS     let mut i = 1;
+//RS     while i < args.len() {
+//RS         match args[i].as_str() {
+//RS             "--runtime" => {
+//RS                 runtime = args.get(i + 1).map(|v| v.to_string());
+//RS                 if runtime.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             "--pkg" => {
+//RS                 pkg = args.get(i + 1).map(|v| v.to_string());
+//RS                 if pkg.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             "-o" | "--out" => {
+//RS                 out = args.get(i + 1).map(|v| v.to_string());
+//RS                 if out.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             flag => {
+//RS                 crate::cli_error!("E2102", "unknown `inspect bind js` flag `{flag}`");
+//RS                 usage();
+//RS                 exit(ExitCodes::USAGE)
+//RS             }
+//RS         }
+//RS     }
+//RS     let lib = pkg.unwrap_or_else(|| {
+//RS         let base = declaration.rsplit('/').next().unwrap_or(declaration);
+//RS         base.strip_suffix(".d.ts")
+//RS             .or_else(|| base.rsplit_once('.').map(|v| v.0))
+//RS             .unwrap_or(base)
+//RS             .to_ascii_lowercase()
+//RS     });
+//RS     let source = std::fs::read_to_string(declaration).unwrap_or_else(|e| {
+//RS         javascript_bind_error(
+//RS             declaration,
+//RS             &format!("the TypeScript declaration file could not be read ({e})"),
+//RS         )
+//RS     });
+//RS     let Some(runtime) = runtime else {
+//RS         javascript_bind_error(
+//RS             declaration,
+//RS             "the Node broker is opt-in; provide the matching runtime with `--runtime <module.js>`",
+//RS         )
+//RS     };
+//RS     let out_path = out.unwrap_or_else(|| {
+//RS         default_binding_output(declaration, jet::Syntax::JS_MODULE_ROOT, &lib)
+//RS     });
+//RS     let cache = std::path::Path::new(&out_path)
+//RS         .parent()
+//RS         .unwrap_or_else(|| std::path::Path::new("."));
+//RS     let result = jet::JavaScriptBind::bind(
+//RS         std::path::Path::new(declaration),
+//RS         &source,
+//RS         std::path::Path::new(&runtime),
+//RS         &lib,
+//RS         cache,
+//RS     )
+//RS     .unwrap_or_else(|e| javascript_bind_error(declaration, &e.to_string()));
+//RS     if let Err(e) = std::fs::write(&out_path, &result.source) {
+//RS         javascript_bind_error(
+//RS             declaration,
+//RS             &format!("the generated cache could not be written ({e})"),
+//RS         );
+//RS     }
+//RS     if let Err(e) = std::fs::write(cache.join(format!("{lib}.d.ts")), &source) {
+//RS         javascript_bind_error(
+//RS             declaration,
+//RS             &format!("the typed declaration cache could not be written ({e})"),
+//RS         );
+//RS     }
+//RS     if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
+//RS         javascript_bind_error(
+//RS             declaration,
+//RS             &format!("the binding provenance could not be written ({e})"),
+//RS         );
+//RS     }
+//RS     println!(
+//RS         "bound {} JavaScript export{} from `{declaration}` → {out_path}",
+//RS         result.bound.len(),
+//RS         if result.bound.len() == 1 { "" } else { "s" }
+//RS     );
+//RS }
+//RS fn javascript_bind_error(path: &str, why: &str) -> ! {
+//RS     bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"export typed scalar functions in a `.d.ts` file, provide the matching JavaScript module with `--runtime`, and rerun `jet inspect bind js` inside the provisioned Jet environment.".to_string())
+//RS }
+//RS 
+//RS /// D-FFI-OCTAVE1=A: parse one-input/one-output matrix functions without
+//RS /// evaluating source, then generate a persistent checked Octave sidecar.
+//RS fn run_octave_bind(args: &[&String]) {
+//RS     let usage = || {
+//RS         eprintln!(
+//RS             "usage: {} inspect bind octave <script.m> [--pkg <lib>] [-o <out.jet>]",
+//RS             jet::Syntax::BINARY_NAME
+//RS         )
+//RS     };
+//RS     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+//RS         usage();
+//RS         exit(if args.is_empty() {
+//RS             ExitCodes::USAGE
+//RS         } else {
+//RS             ExitCodes::OK
+//RS         })
+//RS     }
+//RS     let path = args[0].as_str();
+//RS     let mut pkg = None;
+//RS     let mut out = None;
+//RS     let mut i = 1;
+//RS     while i < args.len() {
+//RS         match args[i].as_str() {
+//RS             "--pkg" => {
+//RS                 pkg = args.get(i + 1).map(|v| v.to_string());
+//RS                 if pkg.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             "-o" | "--out" => {
+//RS                 out = args.get(i + 1).map(|v| v.to_string());
+//RS                 if out.is_none() {
+//RS                     usage();
+//RS                     exit(ExitCodes::USAGE)
+//RS                 }
+//RS                 i += 2
+//RS             }
+//RS             flag => {
+//RS                 crate::cli_error!("E2102", "unknown `inspect bind octave` flag `{flag}`");
+//RS                 usage();
+//RS                 exit(ExitCodes::USAGE)
+//RS             }
+//RS         }
+//RS     }
+//RS     let lib = pkg.unwrap_or_else(|| {
+//RS         let base = path.rsplit('/').next().unwrap_or(path);
+//RS         base.rsplit_once('.')
+//RS             .map(|v| v.0)
+//RS             .unwrap_or(base)
+//RS             .to_ascii_lowercase()
+//RS     });
+//RS     let source = std::fs::read_to_string(path).unwrap_or_else(|e| {
+//RS         octave_bind_error(path, &format!("the Octave script could not be read ({e})"))
+//RS     });
+//RS     let out_path = out.unwrap_or_else(|| {
+//RS         default_binding_output(path, jet::Syntax::OCTAVE_MODULE_ROOT, &lib)
+//RS     });
+//RS     let cache = std::path::Path::new(&out_path)
+//RS         .parent()
+//RS         .unwrap_or_else(|| std::path::Path::new("."));
+//RS     let result = jet::OctaveBind::bind(std::path::Path::new(path), &source, &lib, cache)
+//RS         .unwrap_or_else(|e| octave_bind_error(path, &e.to_string()));
+//RS     if let Err(e) = std::fs::write(&out_path, &result.source) {
+//RS         octave_bind_error(
+//RS             path,
+//RS             &format!("the generated cache could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
+//RS         octave_bind_error(
+//RS             path,
+//RS             &format!("the binding provenance could not be written ({e})"),
+//RS         )
+//RS     }
+//RS     println!(
+//RS         "bound {} Octave matrix function{} from `{path}` → {out_path}",
+//RS         result.bound.len(),
+//RS         if result.bound.len() == 1 { "" } else { "s" }
+//RS     );
+//RS }
+//RS fn octave_bind_error(path: &str, why: &str) -> ! {
+//RS     bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level Octave functions with one matrix input and one matrix output, then rerun `jet inspect bind octave` in the provisioned Jet environment.".to_string())
+//RS }
+//RS 
+//RS /// D-FFI-COM1=A: inspect a Windows type library and generate typed IDispatch
+//RS /// automation stubs. Non-Windows hosts reject before touching the input.
+// END-PORT-PENDING 0682 Source/CmdDevTools.rs:5466-7219
+

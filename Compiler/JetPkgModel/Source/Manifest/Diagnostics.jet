@@ -1,0 +1,159 @@
+use jet_foundation.[Diagnostic, Span, diagnostic_from_registry, diagnostic_registry_row, FILE_EXT, MANIFEST_BLOCK_AUTHORITY, PACKAGE_FIELD_KIND_REMOVED, PACKAGE_FIELD_TARGETS, PACKAGE_FILE, TARGET_EXAMPLE, TARGET_EXECUTABLE, TARGET_FIELD_ENTRY, TARGET_FIELD_NAME, TARGET_LIBRARY, TARGET_SANDBOX, TARGET_TEST]
+
+// Registered package parse and manifest diagnostics shared by all consumers.
+// Rust `Diagnostic::from_row(code, holes, span)`: fill the registered row's
+// `{hole}` templates and project its protocol metadata.
+pub fn pkg_manifest_diagnostic_from_row(code: String, holes: [ManifestEntry], span: Span?) -> Diagnostic Never! {
+    row :: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no typed row")
+    what := row.what
+    why := row.why
+    fix := row.fix
+    loop hole in holes {
+        marker :: "{{{hole.key}}}"
+        what = what.replace(marker, hole.value)
+        why = why.replace(marker, hole.value)
+        fix = fix.replace(marker, hole.value)
+    }
+    diagnostic_from_registry(code, span, what, why, fix)
+}
+
+// The registered diagnostic for one Package parse failure.
+pub fn pkg_manifest_parse_diagnostic(path: String, error: PackageParseError) -> Diagnostic Never! {
+    if error == {
+        .UnknownField(field) -> pkg_e1206_unknown_field(field)
+        .MissingName -> pkg_e1206("`{PACKAGE_FILE}` needs a `name` field")
+        .MissingRecord(field) -> pkg_e1206("`{field}:` needs a record value")
+        .MalformedField(value) -> pkg_e1206("malformed field `{value}`")
+        .UnknownOutputKind(kind) -> pkg_e1206("unknown Output kind `{kind}`")
+        .RetiredRecordHead -> pkg_e1206("record literals use `{{ … }}`; remove the retired dot before `{{` (D-LIT-DOT1)")
+        .InvalidValue(field, value) -> {
+            if field == "runtime" -> return pkg_e1206("`runtime` must be `core`, `alloc`, or `hosted`, not `{value}`")
+            pkg_e1206("invalid value for `{field}`: `{value}`")
+        }
+        .ConfigMembers -> pkg_e1206("a Config file cannot declare `members`")
+        .NestedMembers(root, member) -> diagnostic_from_registry("E1323", None,
+            "member Package `{member}` declares `members`",
+            "Package membership has depth cap one: `{root}` owns the member list, but `{member}` declares another one",
+            "remove `members:` from `{member}` and lift its references into `{root}`")
+        .LintPolicyCode(code, name) -> pkg_manifest_diagnostic_from_row("E1206", [ManifestEntry]{ManifestEntry{key: "code", value: code}, ManifestEntry{key: "name", value: name}}, None)
+        .Composition(detail) -> pkg_e1206(detail)
+        .BadTarget(name, value, reserved) -> {
+            if reserved -> return pkg_e1210("package `{name}` lists target `{value}`, which has no backend yet (reserved for a future increment)")
+            pkg_e1210("package `{name}` lists target `{value}`, which is not a known target")
+        }
+        .KindFieldRemoved(name) -> pkg_e1211("package `{name}` uses `{PACKAGE_FIELD_KIND_REMOVED}:`, which was removed")
+        .BadTargetField(name, detail) -> pkg_e1216("package `{name}`: {detail}")
+        .ReservedSection(section) -> pkg_e1209(path, section)
+        .BadEffectsBlock(detail) -> pkg_e1221(detail)
+        .RetiredAuthorityField(field, replacement) -> diagnostic_from_registry("E1206", None,
+            "`{field}` is retired",
+            "`{field}` moved into `{replacement}` in the one `authority:` block.",
+            "write `{replacement}` inside `authority: {{ … }}`")
+        .BadMemoryPolicy(detail) -> {
+            if detail.contains("retired memory floor") || detail.contains("memory floors belong in `authority.holds.deny`") {
+                return diagnostic_from_registry("E1206", None,
+                    "`{PACKAGE_FILE}` uses a retired memory floor",
+                    "{detail}; memory floors belong in `authority.holds.deny`.",
+                    "write the denial in `authority.holds.deny` inside `authority: {{ holds: {{ deny: […] }} }}`")
+            }
+            pkg_e1206("memory policy is malformed: {detail}")
+        }
+        .RetiredPolicyField(field, replacement) -> diagnostic_from_registry("E1206", None,
+            "`{field}` is retired",
+            "Package refusals use the named `policy.lints.deny` surface; `{field}` was a separate boolean and no longer has meaning.",
+            "remove `{field}` for the default, or put `auto_derive` in `policy.lints.deny` as `{replacement}` to refuse auto-derive")
+        .BadGuaranteePolicy(detail) -> pkg_e1206("package guarantee policy is malformed: {detail}")
+        .BadPackagePolicy(detail) -> pkg_e1206("package metadata policy is malformed: {detail}")
+        .BadAllocatorPolicy(detail) -> diagnostic_from_registry("E1206", None,
+            "invalid hosted program allocator",
+            detail,
+            "use `allocator: mem.Heap` or wrap it with `allocator: mem.Counting.over(mem.Heap, cap: 2.gb)`")
+    }
+}
+
+// D-CONF-PLANE1/D-CONF-NAME1: an unknown top-level manifest field.
+pub fn pkg_e1206_unknown_field(field: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1206", None,
+        "unknown field `{field}:` in `{PACKAGE_FILE}`",
+        "`{field}:` is not part of the Package vocabulary. Identity is bare `name:` and `version:` at the top level (D-CONF-NAME1) — there is no `identity:` or `payload:` wrapper.",
+        "use `name:`, `version:`, `deps:`, `boundaries:`, `outputs:`, `settings:`, `build:`, `policy:`, or `members:`; see Docs/spec/syntax-decisions.md D-CONF-NAME1")
+}
+
+// D-AUTHORITY-MANIFEST1 (E1221): a malformed `authority:` block.
+pub fn pkg_e1221(detail: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1221", None,
+        "`{PACKAGE_FILE}` has a malformed `{MANIFEST_BLOCK_AUTHORITY}` block",
+        detail,
+        "`{MANIFEST_BLOCK_AUTHORITY}: {{ holds: {{ allow: […], deny: […] }}, grants: {{ \"dep\": […] }}, trust: {{ … }}, providers: {{ … }} }}` is the one package authority block; rights use the thirteen grantable roots, `FFI` and its language leaves (`FFI.Go`, `FFI.Py`, `FFI.Octave`), plus deny-only `Panic`/`Mem`")
+}
+
+pub fn pkg_e1206(detail: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1206", None,
+        "`{PACKAGE_FILE}` has a shape error",
+        detail,
+        "check `{PACKAGE_FILE}` against Docs/spec/syntax-decisions.md (U1)")
+}
+
+pub fn pkg_e1209(file: String, section: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1209", None,
+        "`{section}` is reserved and not yet implemented",
+        "this section name is reserved for a future Jet feature — using it now is an error",
+        "remove the `{section}` block from `{PACKAGE_FILE}`, or leave it empty")
+}
+
+pub fn pkg_e1210(detail: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1210", None,
+        "`{PACKAGE_FILE}` lists an unknown target",
+        detail,
+        "use a shipped target: `{TARGET_LIBRARY}`, `{TARGET_EXECUTABLE}`, `{TARGET_TEST}`, `{TARGET_EXAMPLE}`, or `{TARGET_SANDBOX}`")
+}
+
+pub fn pkg_e1211(detail: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1211", None,
+        "`{PACKAGE_FILE}` uses the removed `kind:` field",
+        detail,
+        "write `{PACKAGE_FIELD_TARGETS}: [{TARGET_EXECUTABLE}]` (or `[{TARGET_LIBRARY}]`) instead")
+}
+
+pub fn pkg_e1216(detail: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1216", None,
+        "`{PACKAGE_FILE}` has an invalid target field",
+        detail,
+        "a target block accepts `{TARGET_FIELD_ENTRY}: \"…\"` and `{TARGET_FIELD_NAME}: \"…\"`")
+}
+
+pub fn pkg_e1212(file: String, name: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1212", None,
+        "`{PACKAGE_FILE}` declares package `{name}` but no `module {name}` was found",
+        "each `packages:` name must correspond to a `module <name> {{ … }}` declaration in a `.{FILE_EXT}` file in the source tree",
+        "add a `.{FILE_EXT}` file containing `module {name} {{ … }}`, or remove `{name}` from `packages:` in `{PACKAGE_FILE}`")
+}
+
+pub fn pkg_e1213(file: String, name: String, paths: [String]) -> Diagnostic Never! {
+    diagnostic_from_registry("E1213", None,
+        "`{PACKAGE_FILE}` declares package `{name}` but `module {name}` is ambiguous",
+        "`module {name}` was found in multiple files: {paths.join(", ")}; each package name must map to exactly one module",
+        "rename one of the conflicting `module {name}` declarations so each package has a unique name")
+}
+
+// E1258 (D-PLUGIN-AUTHORITY1): a sandbox uses an effect its `authority.needs`
+// does not cover.
+pub fn pkg_e1258(effects: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1258", None,
+        "a sandbox effect is not declared",
+        "this package builds as `target: sandbox` and uses: {effects}. Every non-memory effect must be covered by the package's canonical `authority.needs` declaration before a host import can be registered.",
+        "declare each required canonical right in `authority.needs`, or remove the effectful call from the sandbox guest")
+}
+
+// E1259 (D-DEP-WASM1=A): the sandbox's wasm32 Component build failed.
+pub fn pkg_e1259(detail: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1259", None,
+        "couldn't build the sandbox's WASM Component",
+        detail,
+        "make sure `rustc` supports `--target wasm32-unknown-unknown` and `wasm-tools` is on PATH (both ship in the project's `nix develop` shell)")
+}
+
+// D-BUILDPROFILE1: `--profile=<name>` names no blessed or declared profile.
+pub fn pkg_e1219(name: String) -> Diagnostic Never! {
+    pkg_manifest_diagnostic_from_row("E1219", [ManifestEntry]{ManifestEntry{key: "name", value: name}}, None)
+}

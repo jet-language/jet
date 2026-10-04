@@ -1,0 +1,74 @@
+// Behavioral controls for Source/CmdConsoleHost.rs; no inline Rust tests.
+// Statement controls require the sole JetRepl validation exports and #4437.
+// These are not substitutes for the separately owned actual-provider journeys.
+fn console_host_test_statement_error(operation: String, sql: String) -> ConsoleError Never! {
+    if ConsoleDbStatement.new(~operation, ~sql) == {
+        .Err(error) -> error
+        .Ok(_) -> panic("invalid checked statement accepted")
+    }
+}
+fn console_host_test_invalid_input(error: ConsoleError) -> String Never! {
+    if error == { .InvalidInput(reason) -> reason; else -> panic("wrong console error kind") }
+}
+
+#Test("console builtin SQL preserves exact schema queries and clamps zero") {
+    assert(jet_cli_console_builtin_sql("tables", 0) == Val("SELECT name, type FROM sqlite_master WHERE type IN ('table','view') ORDER BY name LIMIT 1"))
+    assert(jet_cli_console_builtin_sql("TaBlEs", 17) == Val("SELECT name, type FROM sqlite_master WHERE type IN ('table','view') ORDER BY name LIMIT 17"))
+    schema :: "SELECT name, type, sql FROM sqlite_master WHERE type IN ('table','view') ORDER BY name LIMIT 256"
+    assert(jet_cli_console_builtin_sql("SCHEMA", 256) == Val(schema))
+    assert(jet_cli_console_builtin_sql("Describe", 256) == Val(schema))
+    count :: "SELECT COUNT(*) AS count FROM sqlite_master WHERE type IN ('table','view')"
+    assert(jet_cli_console_builtin_sql("COUNT", 0) == Val(count))
+    assert(jet_cli_console_builtin_sql("count", 256) == Val(count))
+    assert_eq(JET_CLI_CONSOLE_BUILTIN_READ_OPERATIONS, [String]{"tables", "schema", "count", "describe"})
+}
+
+#Test("console builtin SQL neither parses console SQL nor trims operations") {
+    loop operation in [String]{"", " tables", "tables ", "read", "query", "select", "write", "SELECT * FROM users", "tábles"} {
+        assert(jet_cli_console_builtin_sql(operation, 1) == None)
+    }
+}
+
+#Test("console checked statement preserves host text and validates operation first") {
+    statement :: ConsoleDbStatement.new("select", "  SELECT ? AS value  ") ?? panic("valid host SQL")
+    assert_eq(statement.operation, "select")
+    assert_eq(statement.sql, "  SELECT ? AS value  ")
+    assert_eq(console_host_test_invalid_input(console_host_test_statement_error("", "")), "database operation must be a bounded non-empty token")
+    assert_eq(console_host_test_invalid_input(console_host_test_statement_error("bad operation", "")), "database operation must be a bounded non-empty token")
+    loop sql in [String]{"", " ", "　"} {
+        assert_eq(console_host_test_invalid_input(console_host_test_statement_error("read", sql)), "database statement SQL must be non-empty text")
+    }
+}
+
+#Test("console statement rejects all control classes but not noncontrol Unicode") {
+    nul :: String.from_bytes([U8]{U8{0}}) ?? panic("NUL")
+    tab :: String.from_bytes([U8]{U8{9}}) ?? panic("tab")
+    del :: String.from_bytes([U8]{U8{127}}) ?? panic("DEL")
+    c1 :: String.from_bytes([U8]{U8{194}, U8{133}}) ?? panic("C1")
+    loop control in [String]{nul, tab, del, c1, "\n"} {
+        assert_eq(console_host_test_invalid_input(console_host_test_statement_error("read", "SELECT '{control}'")), "database statement SQL must be non-empty text")
+    }
+    _ :: ConsoleDbStatement.new("read", "SELECT 'é　中'") ?? panic("Unicode SQL must be retained")
+}
+
+#Test("console token bounds count UTF8 bytes not scalars") {
+    valid := [U8]{}
+    loop _ in 0..<128 {
+        &valid.push(U8{195})
+        &valid.push(U8{169})
+    }
+    boundary :: String.from_bytes(valid) ?? panic("256-byte token")
+    _ :: ConsoleDbStatement.new(~boundary, "SELECT 1") ?? panic("exact boundary")
+    assert_eq(console_host_test_invalid_input(console_host_test_statement_error("{boundary}a", "SELECT 1")), "database operation must be a bounded non-empty token")
+    assert_eq(console_host_test_invalid_input(console_host_test_statement_error("read　all", "SELECT 1")), "database operation must be a bounded non-empty token")
+}
+
+#Test("console HTTP cancellation classification is exact") {
+    assert(jet_cli_console_http_error("HTTP operation cancelled") == ConsoleError.Cancelled)
+    loop message in [String]{"", "http operation cancelled", "HTTP operation cancelled ", "HTTP operation cancelled: timeout", "unavailable"} {
+        if jet_cli_console_http_error(~message) == {
+            .Backend(reason) -> assert_eq(reason, message)
+            else -> panic("noncancellation error misclassified")
+        }
+    }
+}

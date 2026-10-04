@@ -1,0 +1,250 @@
+// Optional-history policy (Source/ReceiptStore.rs and Source/CmdCompile.rs).
+// C-HISTORY-RUNTIME #4451 (CONC-BACKGROUND-1): ONE process runtime must own the
+// capacity-8 queue, named `jet-optional-history` worker and protected notice set.
+// Bounded channel exists, but Sender has no try_send (Collections.rs:2162-2167).
+// Fallible named start, per-job catch_unwind and Shared.with_mut exclusive access
+// are missing pending owner ballot; copied core.tasks.TaskState is not a queue.
+// No synchronous fallback, private queue, process-global telemetry or fake host.
+// C-RECEIPT-STORE: record_with_sections_and_links (ReceiptStore.rs:841-871)
+// awaits the canonical claim/currentness/write/relookup/index owner. Receipt
+// types and codecs alone cannot publish or authenticate current filesystem inputs.
+// C-RECORD-INDEX: persist_evidence_report awaits canonical load/find/next sequence/
+// update_and_store; production receipt rows require supersede_and_store. The
+// entry builder below is NOT another index and does not claim persistence.
+use core.files as history_files
+
+pub JET_CLI_OPTIONAL_HISTORY_QUEUE_CAPACITY :: 8
+pub JET_CLI_OPTIONAL_HISTORY_WORKER_NAME :: "jet-optional-history"
+pub JET_CLI_OPTIONAL_HISTORY_WORKER_UNAVAILABLE :: "optional history worker is unavailable"
+pub JET_CLI_OPTIONAL_HISTORY_QUEUE_UNAVAILABLE :: "optional history queue is full or unavailable"
+pub JET_CLI_OPTIONAL_HISTORY_WORKER_PANIC :: "optional history worker failed while persisting this result"
+
+// Rust optional_history_notice (ReceiptStore.rs:1258-1273), ASCII folding only.
+pub fn jet_cli_history_notice_fix(error: String) -> String Never! {
+    bytes := error.bytes()
+    loop index in 0..<bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if code >= 65 && code <= 90 -> bytes[index] = U8{code + 32}
+    }
+    lower :: String.from_bytes(bytes) ?? panic("ASCII folding preserves UTF-8")
+    if lower.contains("permission") || lower.contains("access denied") -> return "check `.jet` history permissions"
+    if lower.contains("no space") || lower.contains("disk full") || lower.contains("quota") -> return "free `.jet` history storage or raise its quota"
+    if lower.contains("queue") || lower.contains("worker") -> return "retry after optional history drains or repair `.jet` history storage"
+    if lower.contains("budget") || lower.contains("exceeds") -> return "raise the history byte budget or remove disposable history"
+    "check `.jet` history storage and retry"
+}
+// Rust optional_history_notice (ReceiptStore.rs:1274-1279). Called only while
+// holding the canonical runtime's notice mutex; lock poison instead formats
+// unconditionally, as Rust map_or(true, ...) does. This is not a runtime owner.
+pub fn jet_cli_history_notice_first(seen: &[String:Bool], operation: String, error: String) -> String? Never! {
+    fix :: jet_cli_history_notice_fix(error)
+    if seen.has_key(fix) -> return None
+    seen[~fix] = true
+    Val(jet_cli_history_notice_line(operation, error, fix))
+}
+// Rust eprintln! in optional_history_notice (ReceiptStore.rs:1278).
+pub fn jet_cli_history_notice_line(operation: String, error: String, fix: String) -> String Never! {
+    "history: optional persistence failed while {operation}: {error}; fix: {fix}\n"
+}
+
+#Error
+pub struct JetCLIHistoryError { pub message: String }
+fn jet_cli_history_error(message: String) -> JetCLIHistoryError Never! { JetCLIHistoryError{message: message} }
+#Error
+pub enum JetCLIHistoryIOError { NotFound(String) Other(String) }
+fn jet_cli_history_io_message(error: JetCLIHistoryIOError) -> String Never! {
+    if error == {
+        .NotFound(message) -> message
+        .Other(message) -> message
+    }
+}
+
+// C-FS (#3593/#3598): there is deliberately no implementation until native
+// create-new and no-follow metadata are published. Core create truncates;
+// path-based fsync cannot substitute for sync_all on the held staging file.
+// stage_synced_new must open write/create_new, then (Unix only) fchmod(0600),
+// write_all and sync_all on that SAME handle, closing it on every result.
+// link_new must be an atomic hard link and propagate AlreadyExists (not rename).
+// Each Other message is the native error Display text, never normalized wording.
+pub trait JetCLIHistoryFileHost {
+    fn unix(&self) -[]> Bool Never!
+    fn pid(&self) -[]> Int Never!
+    fn symlink_metadata(&self, path: String) -[FS.Read]> history_files.Stat JetCLIHistoryIOError!
+    fn create_directory(&self, path: String) JetCLIHistoryIOError! -[FS.Write]>
+    fn set_directory_mode(&self, path: String, mode: Int) JetCLIHistoryIOError! -[FS.Write]>
+    fn read(&self, path: String) -[FS.Read]> [U8] JetCLIHistoryIOError!
+    fn stage_synced_new(&self, path: String, bytes: [U8], mode: Int?) JetCLIHistoryIOError! -[FS.Write]>
+    fn link_new(&self, source: String, destination: String) JetCLIHistoryIOError! -[FS.Write]>
+    fn remove_file(&self, path: String) JetCLIHistoryIOError! -[FS.Write]>
+    fn sync_directory(&self, path: String) JetCLIHistoryIOError! -[FS.Write]>
+}
+
+// Rust Path::parent (CmdCompile.rs:6687); canonical Unix component scanner is
+// shared with RecordTypes, not copied. Raw non-UTF-8 native paths remain C-RAW.
+pub fn jet_cli_history_evidence_parent(path: String) -> String? Never! {
+    bytes :: path.bytes()
+    offset := 0
+    last_end := -1
+    parent_end := 0
+    last_rank := -1
+    loop {
+        part :: jet_cli_record_next_path_component(bytes, offset)
+        if part.start == part.end -> break
+        if last_end >= 0 -> parent_end = last_end
+        last_end = part.end
+        last_rank = jet_cli_record_path_component_rank(bytes, part.start, part.end)
+        offset = part.next
+    }
+    if last_end < 0 || last_rank == 0 -> return None
+    Val(String.from_bytes(bytes[0..<parent_end]) ?? panic("component boundary is UTF-8"))
+}
+// Rust path.with_extension (CmdCompile.rs:6743-6749).
+pub fn jet_cli_history_evidence_temporary(path: String, pid: Int, bytes: [U8]) -> String Never! {
+    raw :: path.bytes()
+    offset := 0
+    start := 0
+    end := raw.len()
+    rank := -1
+    loop {
+        part :: jet_cli_record_next_path_component(raw, offset)
+        if part.start == part.end -> break
+        start = part.start
+        end = part.end
+        rank = jet_cli_record_path_component_rank(raw, part.start, part.end)
+        offset = part.next
+    }
+    if rank != 3 -> return ~path
+    stem_end := end
+    cursor := end - 1
+    loop cursor > start {
+        if Int.from_u8(raw[cursor]) == 46 {
+            stem_end = cursor
+            break
+        }
+        cursor -= 1
+    }
+    stem :: String.from_bytes(raw[0..<stem_end]) ?? panic("extension boundary is UTF-8")
+    digest :: mir_sha256_hex_bytes(mir_sha256_bytes(bytes))
+    "{stem}.json.tmp.{pid}.{digest.slice(0, 8)}"
+}
+// Rust write_test_evidence_bytes parent walk (CmdCompile.rs:6690-6725): only
+// Normal components are appended; ParentDir/CurDir/RootDir are skipped.
+fn jet_cli_history_secure_evidence_parent<H: JetCLIHistoryFileHost>(parent: String, host: &H) JetCLIHistoryError! -[FS.Read, FS.Write]> {
+    bytes :: parent.bytes()
+    current := if parent.starts_with("/") -> "/" else -> "."
+    offset := 0
+    loop {
+        part :: jet_cli_record_next_path_component(bytes, offset)
+        if part.start == part.end -> break
+        offset = part.next
+        if jet_cli_record_path_component_rank(bytes, part.start, part.end) != 3 -> next
+        name :: String.from_bytes(bytes[part.start..<part.end]) ?? panic("component boundary is UTF-8")
+        if current != "/" -> current += "/"
+        current += name
+        if &host.symlink_metadata(current) == {
+            .Ok(metadata) -> {
+                jet_cli_history_validate_evidence_parent(current, metadata)
+            }
+            .Err(error) -> {
+                if error == .NotFound(_) {
+                    &host.create_directory(current) ?? return Err(jet_cli_history_error(jet_cli_history_io_message(err)))
+                    if &host.unix() -> &host.set_directory_mode(current, 0o700) ?? return Err(jet_cli_history_error(jet_cli_history_io_message(err)))
+                } else {
+                    return Err(jet_cli_history_error(jet_cli_history_io_message(error)))
+                }
+            }
+        }
+    }
+}
+// Rust parent symlink/type error precedence (CmdCompile.rs:6701-6711).
+pub fn jet_cli_history_validate_evidence_parent(path: String, metadata: history_files.Stat) JetCLIHistoryError! {
+    if metadata.is_symlink -> return Err(jet_cli_history_error("test evidence parent is a symlink: {path}"))
+    if !metadata.is_dir -> return Err(jet_cli_history_error("test evidence parent is not a directory: {path}"))
+}
+// Rust immutable evidence destination check (CmdCompile.rs:6726-6742).
+pub fn jet_cli_history_validate_evidence_destination(path: String, metadata: history_files.Stat) JetCLIHistoryError! {
+    if metadata.is_symlink || !metadata.is_file -> return Err(jet_cli_history_error("final test evidence path is not a regular file: {path}"))
+}
+pub fn jet_cli_history_existing_evidence_size(path: String, existing: [U8], bytes: [U8]) -> Int JetCLIHistoryError! {
+    if existing != bytes -> return Err(jet_cli_history_error("refusing to overwrite differing test evidence report at {path}"))
+    jet_cli_history_evidence_size(existing.len())
+}
+fn jet_cli_history_evidence_size(size: Int) -> Int JetCLIHistoryError! {
+    if size < 0 || size > 18446744073709551615 -> return Err(jet_cli_history_error("test evidence report is too large"))
+    Ok(size)
+}
+// Rust write_test_evidence_bytes (CmdCompile.rs:6686-6778), full publication
+// policy. No mocked filesystem proof can discharge the C-FS native gate.
+pub fn jet_cli_history_write_test_evidence_bytes<H: JetCLIHistoryFileHost>(path: String, bytes: [U8], host: &H) -[FS.Read, FS.Write]> Int JetCLIHistoryError! {
+    parent :: jet_cli_history_evidence_parent(path) ?? return Err(jet_cli_history_error("test evidence report has no parent directory"))
+    jet_cli_history_secure_evidence_parent(parent, &host)
+    // Rust intentionally ignores every final symlink_metadata error here.
+    if &host.symlink_metadata(path) == {
+        .Ok(metadata) -> {
+            jet_cli_history_validate_evidence_destination(path, metadata)
+            existing :: &host.read(path) ?? return Err(jet_cli_history_error(jet_cli_history_io_message(err)))
+            return jet_cli_history_existing_evidence_size(path, existing, bytes)
+        }
+        .Err(_) -> {}
+    }
+    temporary :: jet_cli_history_evidence_temporary(path, &host.pid(), bytes)
+    if jet_cli_history_publish_evidence(temporary, path, parent, bytes, &host) == {
+        .Ok(_) -> jet_cli_history_evidence_size(bytes.len())
+        .Err(error) -> {
+            &host.remove_file(temporary).drop("preserve evidence publication failure")
+            Err(error)
+        }
+    }
+}
+// Rust write_result closure (CmdCompile.rs:6750-6772), including Unix-only
+// directory fsync AFTER removing the staging file. Failures propagate unchanged.
+fn jet_cli_history_publish_evidence<H: JetCLIHistoryFileHost>(temporary: String, path: String, parent: String, bytes: [U8], host: &H) JetCLIHistoryError! -[FS.Read, FS.Write]> {
+    mode :: if &host.unix() -> Val(0o600) else -> None
+    &host.stage_synced_new(temporary, bytes, mode) ?? return Err(jet_cli_history_error(jet_cli_history_io_message(err)))
+    &host.link_new(temporary, path) ?? return Err(jet_cli_history_error(jet_cli_history_io_message(err)))
+    &host.remove_file(temporary) ?? return Err(jet_cli_history_error(jet_cli_history_io_message(err)))
+    if &host.unix() -> &host.sync_directory(parent) ?? return Err(jet_cli_history_error(jet_cli_history_io_message(err)))
+}
+
+// Rust persist_evidence_report_for_inputs_with_retention id check (6805-6813).
+// This deliberately does NOT add RecordIndex's stricter control/size validation:
+// Rust checks that later, after encoding and publishing the evidence bytes.
+pub fn jet_cli_history_evidence_relative_path(report_id: String) -> String JetCLIHistoryError! {
+    if report_id == "" || report_id.contains("/") || report_id.contains("\\") || report_id == "." || report_id == ".." -> return Err(jet_cli_history_error("evidence report has an unsafe id `{report_id}`"))
+    Ok(".jet/evidence/{report_id}.json")
+}
+// Rust persist_evidence_report_for_inputs_with_retention (CmdCompile.rs:6821-6822).
+// Consumes the REAL canonical EvidenceReport/codec, never a private JSON encoder.
+pub fn jet_cli_history_write_evidence_report<H: JetCLIHistoryFileHost>(report: EvidenceReport, project_root: String, host: &H) -[FS.Read, FS.Write]> Int JetCLIHistoryError! {
+    relative :: jet_cli_history_evidence_relative_path(report.identity.report_id)
+    path :: history_files.join(project_root, relative)
+    bytes :: evidence_report_encode(report) ?? return Err(jet_cli_history_error(~err.message))
+    jet_cli_history_write_test_evidence_bytes(path, bytes, &host)
+}
+// Rust index_compile_artifact_at (CmdCompile.rs:199-218). The canonical index
+// owner supplies its authenticated find result and allocates next_sequence ONLY
+// when absent, in the SAME loaded index. Preserve sequence and saved on repeat.
+// Canonical update/supersede + retention + lock/fsync stay with that owner.
+pub fn jet_cli_history_compile_artifact_entry(identity: JetCLIRecordIdentity, kind: JetCLIRecordKind, artifact_id: String, relative_path: String, size: Int, capture: JetCLIRecordCapture, consumed: ^[JetCLIRecordLink], produced: ^[JetCLIRecordLink], protected: Bool, existing: JetCLIRecordIndexEntry?, next_sequence: Int) -> JetCLIRecordIndexEntry JetCLIHistoryError! {
+    sequence := next_sequence
+    saved := false
+    if existing == .Val(previous) {
+        sequence = previous.recorded_sequence
+        saved = previous.saved
+    }
+    kind_name :: jet_cli_record_kind_name(kind)
+    entry := jet_cli_record_entry_new(identity, kind, artifact_id, relative_path) ?? return Err(jet_cli_history_error("could not construct {kind_name} record: {err.message}"))
+    jet_cli_record_entry_with_links(&entry, ^consumed, ^produced) ?? return Err(jet_cli_history_error("could not link {kind_name} record `{artifact_id}`: {err.message}"))
+    jet_cli_record_entry_with_capture(&entry, capture)
+    jet_cli_record_entry_with_size(&entry, size) ?? return Err(jet_cli_history_error(~err.message))
+    jet_cli_record_entry_with_recorded_sequence(&entry, sequence) ?? return Err(jet_cli_history_error(~err.message))
+    jet_cli_record_entry_with_saved(&entry, saved || protected)
+    Ok(entry)
+}
+// Rust persist_evidence_report (CmdCompile.rs:6780-6784) and identity/new call
+// (6823-6838). Explicit input identity override is not derived from report bytes.
+pub fn jet_cli_history_evidence_entry(report: EvidenceReport, target_inputs_sha256: String, size: Int, protected: Bool, existing: JetCLIRecordIndexEntry?, next_sequence: Int) -> JetCLIRecordIndexEntry JetCLIHistoryError! {
+    relative :: jet_cli_history_evidence_relative_path(report.identity.report_id)
+    identity :: jet_cli_record_identity_new(target_inputs_sha256, report.build.toolchain, evidence_producer_name(report.producer)) ?? return Err(jet_cli_history_error(~err.message))
+    jet_cli_history_compile_artifact_entry(identity, .Evidence, report.identity.report_id, relative, size, .Safe, ^[JetCLIRecordLink]{}, ^[JetCLIRecordLink]{}, protected, existing, next_sequence)
+}

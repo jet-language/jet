@@ -1,0 +1,81 @@
+#Test("test cache codec keeps UTF8 byte lengths and both LF terminated headers") {
+    result :: JetCLITestResultCache{ok: true, stdout: "é\n", stderr: "bad"}
+    bytes :: jet_cli_test_cache_encode(result)
+    assert_eq(String.from_bytes(bytes) ?? panic("UTF8"), "JET_TEST_RESULT_V2\n1\n3\n3\né\nbad")
+    decoded :: jet_cli_test_cache_decode(bytes) ?? panic("cache must round trip")
+    assert(decoded.ok)
+    assert_eq(decoded.stdout, result.stdout)
+    assert_eq(decoded.stderr, result.stderr)
+    // Rust6320-6322 defect before Main's tandem-fix ruling: merged length
+    // digits leave the reader without its second length line. Never bless it.
+    assert(jet_cli_test_cache_decode("JET_TEST_RESULT_V2\n1\n33\né\nbad".bytes()) == None)
+}
+#Test("test cache rejects truncation overflow bad UTF8 and malformed lengths") {
+    assert(jet_cli_test_cache_decode("JET_TEST_RESULT_V1\n1\n0\n0\n".bytes()) == None)
+    assert(jet_cli_test_cache_decode("JET_TEST_RESULT_V2\n1\n1\n0\n".bytes()) == None)
+    assert(jet_cli_test_cache_decode("JET_TEST_RESULT_V2\n1\n-1\n0\n".bytes()) == None)
+    assert(jet_cli_test_cache_decode("JET_TEST_RESULT_V2\n1\n18446744073709551616\n0\n".bytes()) == None)
+    invalid := "JET_TEST_RESULT_V2\n1\n1\n0\n".bytes()
+    &invalid.push(U8{255})
+    assert(jet_cli_test_cache_decode(invalid) == None)
+    decoded :: jet_cli_test_cache_decode("JET_TEST_RESULT_V2\nanything\n+0\n0\ntrailing".bytes()) ?? panic("Rust accepts false and trailing bytes")
+    assert(!decoded.ok)
+    assert_eq(decoded.stdout, "")
+    assert_eq(decoded.stderr, "")
+}
+#Test("test result caching excludes evidence mutations but fresh is writeable") {
+    options := jet_cli_test_options_default()
+    assert(jet_cli_test_cache_write_allowed(options, false))
+    options.fresh = true
+    assert(jet_cli_test_cache_write_allowed(options, false))
+    assert(!jet_cli_test_cache_write_allowed(options, true))
+    options.docs = true
+    assert(!jet_cli_test_cache_write_allowed(options, false))
+    options.docs = false
+    options.coverage = true
+    assert(!jet_cli_test_cache_write_allowed(options, false))
+    options.coverage = false
+    options.measure = true
+    assert(!jet_cli_test_cache_write_allowed(options, false))
+    options.measure = false
+    options.update_snapshots = true
+    assert(!jet_cli_test_cache_write_allowed(options, false))
+    options.update_snapshots = false
+    options.record = Val("capture")
+    assert(!jet_cli_test_cache_write_allowed(options, false))
+}
+#Test("cache identity keeps native identity closure kind and execution options") {
+    options := jet_cli_test_options_default()
+    identity := JetCLITestCacheIdentity{canonical_path: "/root/x.jet", package: false,
+        comptime_inputs: [JetCLITestComptimeInput]{JetCLITestComptimeInput{path: "data", hash: "digest"}},
+        inputs: [JetCLITestCacheInput]{JetCLITestCacheInput{path: "x.jet", contents: Val("#Test {{}}".bytes())}}, native_identity: Val("native")}
+    key :: jet_cli_test_cache_key(identity, options) ?? panic("cacheable")
+    assert_eq(key.len(), 64)
+    assert_eq(jet_cli_test_cache_key(identity, options), Val(key))
+    options.capture = JetCLITestCapturePolicy.All
+    options.fresh = true
+    // Capture/fresh/where do not change execution identity in the Rust key.
+    options.where_expr = Val("status=pass")
+    assert_eq(jet_cli_test_cache_key(identity, options), Val(key))
+    options.serial = true
+    assert(jet_cli_test_cache_key(identity, options) != Val(key))
+    options.serial = false
+    identity.package = true
+    assert(jet_cli_test_cache_key(identity, options) != Val(key))
+    identity.package = false
+    identity.native_identity = Val("different")
+    assert(jet_cli_test_cache_key(identity, options) != Val(key))
+    identity.native_identity = None
+    assert(jet_cli_test_cache_key(identity, options) == None)
+    assert_eq(jet_cli_test_cache_path("/workspace", key), "/workspace/.jet/test-results/{key}.cache")
+}
+#Test("cache option text uses Rust Debug option framing") {
+    options := jet_cli_test_options_default()
+    options.filter = Val("quote\"\n")
+    options.shuffle_seed = Val(18446744073709551615)
+    options.profile = Val("custom")
+    text :: jet_cli_test_cache_options_text(options)
+    assert(text.contains("profile=Some(\"custom\");"))
+    assert(text.contains("filter=Some(\"quote\\\"\\n\");shuffle=Some(18446744073709551615);"))
+    assert(text.starts_with("show_default=false;coverage=false;release=false;"))
+}

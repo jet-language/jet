@@ -1,0 +1,1804 @@
+// PORT-PENDING 2092 crates-jet-pkg-model-src-envelope-slice-1: crates/jet-pkg-model/src/Envelope.rs:1-1800
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-JPK-CACHE1=A (U24) — the A4 hangar-object envelope.
+//RS //!
+//RS //! Every realized hangar object carries a small identity block that makes it a
+//RS //! cache-substitutable artifact: the content hash of its output tree, the
+//RS //! platform it was built for, a detached-signature slot (filled by package
+//RS //! signing, card #13), and provenance (how it was produced). These fields are
+//RS //! frozen into the hangar/lock schema now — the binary-cache protocol that
+//RS //! consumes them is a later card (D-JPK-CACHE1 protocol slice). A
+//RS //! build-from-source output is an envelope-carrying object exactly like a
+//RS //! substituted one, so the resolver never has to care which path produced it.
+//RS //!
+//RS //! E4-JP1 Hangar Store v2: the canonical archive digests uncompressed logical
+//RS //! bytes (sparse holes hash as zero-filled logical content; physical allocation
+//RS //! is not identity). Path law rejects case-fold collisions, reserved names,
+//RS //! trailing-dot/space Windows aliases, and unrepresentable cross-platform
+//RS //! names — Unicode normalization is never implicit. Security/quarantine xattrs
+//RS //! are excluded from identity; other semantic xattrs require an explicit
+//RS //! platform artifact kind or the ingest fails closed.
+//RS 
+//RS use crate::SHA256;
+//RS use std::collections::BTreeMap;
+//RS use std::fs;
+//RS use std::io::Read as _;
+//RS use std::path::{Component, Path, PathBuf};
+//RS 
+//RS /// Path-law failure (E1299). Stable codes so CLI + tests can match without
+//RS /// scraping free-form text alone.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct PathLawError {
+//RS     pub code: &'static str,
+//RS     pub path: String,
+//RS     pub detail: String,
+//RS }
+//RS 
+//RS impl PathLawError {
+//RS     pub fn what(&self) -> String {
+//RS         format!("store path rejected: `{}`", self.path)
+//RS     }
+//RS 
+//RS     pub fn why(&self) -> String {
+//RS         format!(
+//RS             "Hangar Store v2 path law ({}) forbids this name: {}.",
+//RS             self.code, self.detail
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn fix(&self) -> &'static str {
+//RS         "Rename the entry to a portable store path: no reserved Windows names, no trailing `.`/` `, no case-fold collisions with a sibling, and no `.`/`..` components."
+//RS     }
+//RS }
+//RS 
+//RS /// Reject a single path component under Hangar path law (POSIX bytes; Windows
+//RS /// reserved/trailing rules applied so the same tree is representable both ways).
+//RS pub fn validate_path_component(name: &[u8]) -> Result<(), PathLawError> {
+//RS     validate_path_component_with_mode(name, false)
+//RS }
+//RS 
+//RS /// Validate a path component with the POSIX-only allowances used by Nix
+//RS /// admission. Native ingest keeps the strict wrapper above.
+//RS pub fn validate_path_component_with_mode(
+//RS     name: &[u8],
+//RS     allow_nix_store_symlinks: bool,
+//RS ) -> Result<(), PathLawError> {
+//RS     if name.is_empty() {
+//RS         return Err(PathLawError {
+//RS             code: "empty",
+//RS             path: String::new(),
+//RS             detail: "empty path component".into(),
+//RS         });
+//RS     }
+//RS     if name.contains(&0) {
+//RS         return Err(PathLawError {
+//RS             code: "nul",
+//RS             path: lossy(name),
+//RS             detail: "NUL byte in path component".into(),
+//RS         });
+//RS     }
+//RS     if name == b"." || name == b".." {
+//RS         return Err(PathLawError {
+//RS             code: "dot",
+//RS             path: lossy(name),
+//RS             detail: "`.` and `..` are not store path components".into(),
+//RS         });
+//RS     }
+//RS     // Nix admission accepts exactly Nix's own component law (any byte except
+//RS     // `/` and NUL; not `.`/`..`) — real nixpkgs closures ship backslashes,
+//RS     // trailing dots, and Windows-reserved spellings. The Windows
+//RS     // representability rules below are native-ingest law only.
+//RS     if allow_nix_store_symlinks {
+//RS         return Ok(());
+//RS     }
+//RS     if name.contains(&b'\\') {
+//RS         return Err(PathLawError {
+//RS             code: "backslash",
+//RS             path: lossy(name),
+//RS             detail: "backslash is not a portable path component outside Nix admission".into(),
+//RS         });
+//RS     }
+//RS     if name.ends_with(b".") || name.ends_with(b" ") {
+//RS         return Err(PathLawError {
+//RS             code: "trailing-alias",
+//RS             path: lossy(name),
+//RS             detail: "trailing `.` or space is a Windows alias and is rejected".into(),
+//RS         });
+//RS     }
+//RS     if is_windows_reserved(name) {
+//RS         return Err(PathLawError {
+//RS             code: "reserved",
+//RS             path: lossy(name),
+//RS             detail: "Windows reserved device name".into(),
+//RS         });
+//RS     }
+//RS     // No implicit Unicode normalization: NFC and NFD that differ in bytes are
+//RS     // distinct names. Cross-platform unrepresentable: reject unpaired surrogates
+//RS     // when the name claims to be UTF-8 text with escapes — raw non-UTF8 bytes
+//RS     // are allowed on POSIX and recorded as opaque bytes.
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Validate every component of a relative store path (no absolute, no empty).
+//RS pub fn validate_rel_path(rel: &Path) -> Result<(), PathLawError> {
+//RS     validate_rel_path_with_mode(rel, false)
+//RS }
+//RS 
+//RS /// Validate a relative store path with the POSIX-only allowances used by Nix
+//RS /// admission. Native ingest keeps the strict wrapper above.
+//RS pub fn validate_rel_path_with_mode(
+//RS     rel: &Path,
+//RS     allow_nix_store_symlinks: bool,
+//RS ) -> Result<(), PathLawError> {
+//RS     if rel.is_absolute() {
+//RS         return Err(PathLawError {
+//RS             code: "absolute",
+//RS             path: rel.display().to_string(),
+//RS             detail: "store paths must be relative".into(),
+//RS         });
+//RS     }
+//RS     let mut saw = false;
+//RS     for comp in rel.components() {
+//RS         use std::path::Component;
+//RS         match comp {
+//RS             Component::Normal(os) => {
+//RS                 saw = true;
+//RS                 validate_path_component_with_mode(
+//RS                     &path_component_bytes(os),
+//RS                     allow_nix_store_symlinks,
+//RS                 )?;
+//RS             }
+//RS             Component::CurDir | Component::ParentDir => {
+//RS                 return Err(PathLawError {
+//RS                     code: "dot",
+//RS                     path: rel.display().to_string(),
+//RS                     detail: "`.` and `..` are not store path components".into(),
+//RS                 });
+//RS             }
+//RS             Component::RootDir | Component::Prefix(_) => {
+//RS                 return Err(PathLawError {
+//RS                     code: "absolute",
+//RS                     path: rel.display().to_string(),
+//RS                     detail: "store paths must be relative".into(),
+//RS                 });
+//RS             }
+//RS         }
+//RS     }
+//RS     if !saw && rel.as_os_str().is_empty() {
+//RS         return Ok(()); // output root itself
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Reject case-fold collisions among sibling directory entry names.
+//RS pub fn reject_casefold_collisions(names: &[Vec<u8>]) -> Result<(), PathLawError> {
+//RS     let mut folded: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
+//RS     for name in names {
+//RS         let key: Vec<u8> = name.iter().map(ascii_fold).collect();
+//RS         if let Some(prior) = folded.get(&key) {
+//RS             if prior != name {
+//RS                 return Err(PathLawError {
+//RS                     code: "case-fold",
+//RS                     path: lossy(name),
+//RS                     detail: format!("collides with `{}` under ASCII case-folding", lossy(prior)),
+//RS                 });
+//RS             }
+//RS         } else {
+//RS             folded.insert(key, name.clone());
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn ascii_fold(b: &u8) -> u8 {
+//RS     b.to_ascii_lowercase()
+//RS }
+//RS 
+//RS fn lossy(bytes: &[u8]) -> String {
+//RS     String::from_utf8_lossy(bytes).into_owned()
+//RS }
+//RS 
+//RS fn is_windows_reserved(name: &[u8]) -> bool {
+//RS     let stem = match name.iter().position(|&b| b == b'.') {
+//RS         Some(i) if i > 0 => &name[..i],
+//RS         _ => name,
+//RS     };
+//RS     let upper: Vec<u8> = stem.iter().map(|b| b.to_ascii_uppercase()).collect();
+//RS     matches!(
+//RS         upper.as_slice(),
+//RS         b"CON"
+//RS             | b"PRN"
+//RS             | b"AUX"
+//RS             | b"NUL"
+//RS             | b"COM1"
+//RS             | b"COM2"
+//RS             | b"COM3"
+//RS             | b"COM4"
+//RS             | b"COM5"
+//RS             | b"COM6"
+//RS             | b"COM7"
+//RS             | b"COM8"
+//RS             | b"COM9"
+//RS             | b"LPT1"
+//RS             | b"LPT2"
+//RS             | b"LPT3"
+//RS             | b"LPT4"
+//RS             | b"LPT5"
+//RS             | b"LPT6"
+//RS             | b"LPT7"
+//RS             | b"LPT8"
+//RS             | b"LPT9"
+//RS     )
+//RS }
+//RS 
+//RS fn path_component_bytes(os: &std::ffi::OsStr) -> Vec<u8> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::ffi::OsStrExt as _;
+//RS         os.as_bytes().to_vec()
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         // Windows: keep WTF-16 → lossy UTF-8 only for validation messaging;
+//RS         // encode_node still records OsStr via path_bytes.
+//RS         os.to_string_lossy().as_bytes().to_vec()
+//RS     }
+//RS }
+//RS 
+//RS /// Security / quarantine xattr prefixes excluded from hangar identity.
+//RS const EXCLUDED_XATTR_PREFIXES: &[&str] = &[
+//RS     "security.",
+//RS     "trusted.",
+//RS     "system.nfs4_acl",
+//RS     "com.apple.quarantine",
+//RS     "com.apple.macl",
+//RS     "com.apple.provenance",
+//RS ];
+//RS 
+//RS /// True when `name` is a security/quarantine xattr Hangar strips from identity.
+//RS pub fn is_excluded_xattr(name: &str) -> bool {
+//RS     EXCLUDED_XATTR_PREFIXES
+//RS         .iter()
+//RS         .any(|prefix| name == *prefix || name.starts_with(prefix))
+//RS }
+//RS 
+//RS /// Audited target `O_NOFOLLOW` value shared by hashing and ingest.
+//RS #[cfg(unix)]
+//RS pub fn nofollow_open_flag() -> Result<i32, String> {
+//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS     return Ok(0o400000);
+//RS     #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS     return Ok(0x0100);
+//RS     #[allow(unreachable_code)]
+//RS     Err(format!(
+//RS         "nofollow file access is unsupported on target `{}`",
+//RS         super::Platform::host_key()
+//RS     ))
+//RS }
+//RS 
+//RS /// List xattr names on `path` without following symlinks.
+//RS pub fn list_xattr_names(path: &Path) -> Result<Vec<String>, String> {
+//RS     #[cfg(target_os = "linux")]
+//RS     {
+//RS         list_xattr_names_linux(path)
+//RS     }
+//RS     #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS     {
+//RS         list_xattr_names_apple(path)
+//RS     }
+//RS     #[cfg(windows)]
+//RS     {
+//RS         let _ = path;
+//RS         Ok(Vec::new())
+//RS     }
+//RS     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "ios", windows)))]
+//RS     {
+//RS         Err(format!(
+//RS             "semantic xattr inspection is unsupported on target `{}`",
+//RS             super::Platform::host_key()
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS /// Reject unsupported semantic xattrs unless `allow_semantic_xattrs` (explicit
+//RS /// platform artifact kind). Excluded security/quarantine names are ignored.
+//RS pub fn check_xattrs(path: &Path, allow_semantic_xattrs: bool) -> Result<(), String> {
+//RS     let names = list_xattr_names(path)?;
+//RS     let semantic: Vec<_> = names
+//RS         .into_iter()
+//RS         .filter(|n| !is_excluded_xattr(n))
+//RS         .collect();
+//RS     if semantic.is_empty() || allow_semantic_xattrs {
+//RS         return Ok(());
+//RS     }
+//RS     Err(format!(
+//RS         "unsupported semantic xattr(s) on `{}`: {} — set an explicit platform artifact kind to keep them",
+//RS         path.display(),
+//RS         semantic.join(", ")
+//RS     ))
+//RS }
+//RS 
+//RS fn encode_semantic_xattrs(
+//RS     path: &Path,
+//RS     archive: &mut SHA256::StreamingSha256,
+//RS     allow_semantic_xattrs: bool,
+//RS ) -> Result<(), String> {
+//RS     let mut names = list_xattr_names(path)?
+//RS         .into_iter()
+//RS         .filter(|name| !is_excluded_xattr(name))
+//RS         .collect::<Vec<_>>();
+//RS     names.sort();
+//RS     if names.is_empty() {
+//RS         return Ok(());
+//RS     }
+//RS     if !allow_semantic_xattrs {
+//RS         return Err(format!(
+//RS             "unsupported semantic xattr(s) on `{}`: {} — set an explicit platform artifact kind to keep them",
+//RS             path.display(),
+//RS             names.join(", ")
+//RS         ));
+//RS     }
+//RS     for name in names {
+//RS         archive.update(&[b'X']);
+//RS         push_bytes(archive, name.as_bytes());
+//RS         push_bytes(archive, &xattr_value(path, &name)?);
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS fn xattr_value(path: &Path, name: &str) -> Result<Vec<u8>, String> {
+//RS     use std::os::unix::ffi::OsStrExt as _;
+//RS     unsafe extern "C" {
+//RS         fn lgetxattr(path: *const i8, name: *const i8, value: *mut u8, size: usize) -> isize;
+//RS     }
+//RS     let path = std::ffi::CString::new(path.as_os_str().as_bytes())
+//RS         .map_err(|_| "xattr path contains NUL".to_string())?;
+//RS     let name_c = std::ffi::CString::new(name).map_err(|_| "xattr name contains NUL".to_string())?;
+//RS     let size = unsafe { lgetxattr(path.as_ptr(), name_c.as_ptr(), std::ptr::null_mut(), 0) };
+//RS     if size < 0 {
+//RS         return Err(format!(
+//RS             "lgetxattr `{name}` failed: {}",
+//RS             std::io::Error::last_os_error()
+//RS         ));
+//RS     }
+//RS     let mut value = vec![0; size as usize];
+//RS     let wrote = unsafe {
+//RS         lgetxattr(
+//RS             path.as_ptr(),
+//RS             name_c.as_ptr(),
+//RS             value.as_mut_ptr(),
+//RS             value.len(),
+//RS         )
+//RS     };
+//RS     if wrote < 0 {
+//RS         return Err(format!(
+//RS             "lgetxattr `{name}` failed: {}",
+//RS             std::io::Error::last_os_error()
+//RS         ));
+//RS     }
+//RS     value.truncate(wrote as usize);
+//RS     Ok(value)
+//RS }
+//RS 
+//RS #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS fn xattr_value(path: &Path, name: &str) -> Result<Vec<u8>, String> {
+//RS     use std::os::unix::ffi::OsStrExt as _;
+//RS     unsafe extern "C" {
+//RS         fn getxattr(
+//RS             path: *const i8,
+//RS             name: *const i8,
+//RS             value: *mut u8,
+//RS             size: usize,
+//RS             position: u32,
+//RS             options: i32,
+//RS         ) -> isize;
+//RS     }
+//RS     const XATTR_NOFOLLOW: i32 = 0x0001;
+//RS     let path = std::ffi::CString::new(path.as_os_str().as_bytes())
+//RS         .map_err(|_| "xattr path contains NUL".to_string())?;
+//RS     let name_c = std::ffi::CString::new(name).map_err(|_| "xattr name contains NUL".to_string())?;
+//RS     let size = unsafe {
+//RS         getxattr(
+//RS             path.as_ptr(),
+//RS             name_c.as_ptr(),
+//RS             std::ptr::null_mut(),
+//RS             0,
+//RS             0,
+//RS             XATTR_NOFOLLOW,
+//RS         )
+//RS     };
+//RS     if size < 0 {
+//RS         return Err(format!(
+//RS             "getxattr `{name}` failed: {}",
+//RS             std::io::Error::last_os_error()
+//RS         ));
+//RS     }
+//RS     let mut value = vec![0; size as usize];
+//RS     let wrote = unsafe {
+//RS         getxattr(
+//RS             path.as_ptr(),
+//RS             name_c.as_ptr(),
+//RS             value.as_mut_ptr(),
+//RS             value.len(),
+//RS             0,
+//RS             XATTR_NOFOLLOW,
+//RS         )
+//RS     };
+//RS     if wrote < 0 {
+//RS         return Err(format!(
+//RS             "getxattr `{name}` failed: {}",
+//RS             std::io::Error::last_os_error()
+//RS         ));
+//RS     }
+//RS     value.truncate(wrote as usize);
+//RS     Ok(value)
+//RS }
+//RS 
+//RS #[cfg(windows)]
+//RS fn xattr_value(_path: &Path, _name: &str) -> Result<Vec<u8>, String> {
+//RS     Err("semantic xattrs are unsupported on Windows".into())
+//RS }
+//RS 
+//RS #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "ios", windows)))]
+//RS fn xattr_value(_path: &Path, _name: &str) -> Result<Vec<u8>, String> {
+//RS     Err(format!(
+//RS         "semantic xattr values are unsupported on target `{}`",
+//RS         super::Platform::host_key()
+//RS     ))
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS fn list_xattr_names_linux(path: &Path) -> Result<Vec<String>, String> {
+//RS     use std::os::unix::ffi::OsStrExt as _;
+//RS     type LibcChar = i8;
+//RS     #[link(name = "c")]
+//RS     extern "C" {
+//RS         fn llistxattr(path: *const LibcChar, list: *mut LibcChar, size: usize) -> isize;
+//RS     }
+//RS     let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+//RS         .map_err(|_| format!("path `{}` contains NUL", path.display()))?;
+//RS     let size = unsafe { llistxattr(c_path.as_ptr(), std::ptr::null_mut(), 0) };
+//RS     if size < 0 {
+//RS         return Err(format!(
+//RS             "cannot inspect xattrs on `{}`: {}",
+//RS             path.display(),
+//RS             std::io::Error::last_os_error()
+//RS         ));
+//RS     }
+//RS     if size == 0 {
+//RS         return Ok(Vec::new());
+//RS     }
+//RS     let mut buf = vec![0i8; size as usize];
+//RS     let wrote = unsafe { llistxattr(c_path.as_ptr(), buf.as_mut_ptr(), buf.len()) };
+//RS     if wrote < 0 {
+//RS         return Err(format!(
+//RS             "cannot read xattr names on `{}`: {}",
+//RS             path.display(),
+//RS             std::io::Error::last_os_error()
+//RS         ));
+//RS     }
+//RS     let bytes = unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, wrote as usize) };
+//RS     Ok(bytes
+//RS         .split(|b| *b == 0)
+//RS         .filter(|s| !s.is_empty())
+//RS         .map(|s| String::from_utf8_lossy(s).into_owned())
+//RS         .collect())
+//RS }
+//RS 
+//RS #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS fn list_xattr_names_apple(path: &Path) -> Result<Vec<String>, String> {
+//RS     use std::os::unix::ffi::OsStrExt as _;
+//RS     unsafe extern "C" {
+//RS         fn listxattr(path: *const i8, list: *mut i8, size: usize, options: i32) -> isize;
+//RS     }
+//RS     const XATTR_NOFOLLOW: i32 = 0x0001;
+//RS     let path = std::ffi::CString::new(path.as_os_str().as_bytes())
+//RS         .map_err(|_| format!("path `{}` contains NUL", path.display()))?;
+//RS     let size = unsafe { listxattr(path.as_ptr(), std::ptr::null_mut(), 0, XATTR_NOFOLLOW) };
+//RS     if size < 0 {
+//RS         return Err(format!(
+//RS             "listxattr failed: {}",
+//RS             std::io::Error::last_os_error()
+//RS         ));
+//RS     }
+//RS     let mut names = vec![0i8; size as usize];
+//RS     let wrote = unsafe {
+//RS         listxattr(
+//RS             path.as_ptr(),
+//RS             names.as_mut_ptr(),
+//RS             names.len(),
+//RS             XATTR_NOFOLLOW,
+//RS         )
+//RS     };
+//RS     if wrote < 0 {
+//RS         return Err(format!(
+//RS             "listxattr failed: {}",
+//RS             std::io::Error::last_os_error()
+//RS         ));
+//RS     }
+//RS     let bytes = unsafe { std::slice::from_raw_parts(names.as_ptr().cast::<u8>(), wrote as usize) };
+//RS     Ok(bytes
+//RS         .split(|byte| *byte == 0)
+//RS         .filter(|name| !name.is_empty())
+//RS         .map(|name| String::from_utf8_lossy(name).into_owned())
+//RS         .collect())
+//RS }
+//RS 
+//RS /// Sparse-file policy (JP1): holes are hashed as zero-filled logical bytes.
+//RS /// Physical sparseness is never part of identity — a sparse file and a dense
+//RS /// file with the same logical zeros share a digest.
+//RS pub fn file_has_sparse_holes(path: &Path) -> Result<bool, String> {
+//RS     #[cfg(target_os = "linux")]
+//RS     {
+//RS         file_has_sparse_holes_linux(path)
+//RS     }
+//RS     #[cfg(not(target_os = "linux"))]
+//RS     {
+//RS         let _ = path;
+//RS         Ok(false)
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS fn file_has_sparse_holes_linux(path: &Path) -> Result<bool, String> {
+//RS     let mut options = fs::OpenOptions::new();
+//RS     options.read(true);
+//RS     {
+//RS         use std::os::unix::fs::OpenOptionsExt as _;
+//RS         options.custom_flags(nofollow_open_flag()?);
+//RS     }
+//RS     let file = options
+//RS         .open(path)
+//RS         .map_err(|e| format!("cannot open `{}` for sparse probe: {e}", path.display()))?;
+//RS     let len = file
+//RS         .metadata()
+//RS         .map_err(|e| format!("cannot stat `{}`: {e}", path.display()))?
+//RS         .len();
+//RS     if len == 0 {
+//RS         return Ok(false);
+//RS     }
+//RS     // SEEK_HOLE = 4 on Linux.
+//RS     const SEEK_HOLE: i32 = 4;
+//RS     use std::os::unix::io::AsRawFd as _;
+//RS     #[link(name = "c")]
+//RS     extern "C" {
+//RS         fn lseek(fd: i32, offset: i64, whence: i32) -> i64;
+//RS     }
+//RS     let hole = unsafe { lseek(file.as_raw_fd(), 0, SEEK_HOLE) };
+//RS     if hole < 0 {
+//RS         return Ok(false);
+//RS     }
+//RS     Ok((hole as u64) < len)
+//RS }
+//RS 
+//RS /// The A4 envelope. `Default` is the empty envelope (older records / providers
+//RS /// that predate the field), so reading a legacy `meta.json` never fails.
+//RS #[derive(Debug, Clone, PartialEq, Eq, Default)]
+//RS pub struct Envelope {
+//RS     /// Content hash of the realized output tree (`sha256-…`) — the cache key.
+//RS     pub output_hash: String,
+//RS     /// Target platform key (`<arch>-<os>`, e.g. `x86_64-linux`).
+//RS     pub platform: String,
+//RS     /// Detached-signature slot; empty until package signing (card #13) fills it.
+//RS     pub signature: String,
+//RS     /// How this output was produced: the resolved source ref + build recipe id.
+//RS     pub provenance: String,
+//RS }
+//RS 
+//RS impl Envelope {
+//RS     /// True when no envelope field is populated (a legacy or unrealized record).
+//RS     pub fn is_empty(&self) -> bool {
+//RS         self.output_hash.is_empty()
+//RS             && self.platform.is_empty()
+//RS             && self.signature.is_empty()
+//RS             && self.provenance.is_empty()
+//RS     }
+//RS 
+//RS     /// Build the envelope for a freshly realized output rooted at `out`.
+//RS     /// `reference` is the resolved source ref; `recipe_id` names the build path
+//RS     /// that produced it (`core-source`, `core-cargo-rlib`, `nix`, …).
+//RS     pub fn for_output(out: &str, reference: &str, recipe_id: &str) -> Envelope {
+//RS         Envelope {
+//RS             output_hash: output_hash_of(out),
+//RS             platform: host_platform(),
+//RS             signature: String::new(),
+//RS             provenance: format!("{reference} via {recipe_id}"),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// The platform key for the host build target (`<arch>-<os>`). std-only (I6):
+//RS /// derived from the compile target, which is what the realized artifact runs on.
+//RS pub fn host_platform() -> String {
+//RS     super::Platform::host_key()
+//RS }
+//RS 
+//RS /// Content hash of a realized output root.
+//RS ///
+//RS /// For a real local directory or regular-file root this is the full content
+//RS /// hash (every node's relative path, length, and bytes) — not the compiler's
+//RS /// `.jet`-only `tree_hash`, since a realized output is `bin/`, `.rlib`, and
+//RS /// arbitrary files.
+//RS /// Existing files and symlinks are hashed from their bytes/target. Callers
+//RS /// that can report failure should use [`try_output_hash_of`]; missing or
+//RS /// unreadable outputs produce an empty compatibility digest here and Store
+//RS /// registration rejects that digest.
+//RS pub fn output_hash_of(out: &str) -> String {
+//RS     try_output_hash_of(out).unwrap_or_default()
+//RS }
+//RS 
+//RS /// Canonical archive digest. The byte stream records every node's relative
+//RS /// path, type, mode, and type-specific payload. Symlinks are never followed
+//RS /// while encoding; native relative targets stay lexically inside the root,
+//RS /// while Nix admission may name one sibling store object. Absolute Nix-store
+//RS /// targets are allowed only in Hangar mode. Hardlink identity is explicit;
+//RS /// unsupported special files fail closed.
+//RS pub fn try_output_hash_of(out: &str) -> Result<String, String> {
+//RS     try_output_hash_of_with_policy(out, false, &mut |_, _| {})
+//RS }
+//RS 
+//RS /// Like [`try_output_hash_of`], but Hangar/internal shared-CAS hardlink peers
+//RS /// do not fail the external-hardlink law. Peers outside those roots still
+//RS /// reject. Digest bytes stay path-local: CAS peers are never encoded as
+//RS /// in-tree `H` records.
+//RS pub fn try_output_hash_of_in_hangar(
+//RS     out: &str,
+//RS     hangar_root: &Path,
+//RS     allow_semantic_xattrs: bool,
+//RS ) -> Result<String, String> {
+//RS     try_output_hash_of_in_hangar_with_policy(
+//RS         out,
+//RS         hangar_root,
+//RS         allow_semantic_xattrs,
+//RS         &mut |_, _| {},
+//RS     )
+//RS }
+//RS 
+//RS /// Like [`try_output_hash_of_in_hangar`], with the same canonical traversal
+//RS /// event hook as [`try_output_hash_of_with_policy`]. The hook is an observation
+//RS /// seam only; the canonical archive remains the sole output identity.
+//RS pub fn try_output_hash_of_in_hangar_with_policy(
+//RS     out: &str,
+//RS     hangar_root: &Path,
+//RS     allow_semantic_xattrs: bool,
+//RS     hook: &mut dyn FnMut(&Path, &'static str),
+//RS ) -> Result<String, String> {
+//RS     try_output_hash_of_with_hook(out, allow_semantic_xattrs, Some(hangar_root), hook)
+//RS }
+//RS 
+//RS /// Like [`try_output_hash_of`], with an explicit semantic-xattr policy.
+//RS pub fn try_output_hash_of_with_policy(
+//RS     out: &str,
+//RS     allow_semantic_xattrs: bool,
+//RS     hook: &mut dyn FnMut(&Path, &'static str),
+//RS ) -> Result<String, String> {
+//RS     try_output_hash_of_with_hook(out, allow_semantic_xattrs, None, hook)
+//RS }
+//RS 
+//RS fn try_output_hash_of_with_hook(
+//RS     out: &str,
+//RS     allow_semantic_xattrs: bool,
+//RS     hangar_root: Option<&Path>,
+//RS     hook: &mut dyn FnMut(&Path, &'static str),
+//RS ) -> Result<String, String> {
+//RS     let p = Path::new(out);
+//RS     if !p.exists() && !p.is_symlink() {
+//RS         return Err(format!("output `{out}` does not exist"));
+//RS     }
+//RS     let output_meta = fs::symlink_metadata(p)
+//RS         .map_err(|e| format!("cannot inspect `{out}`: {e}"))?;
+//RS     if output_meta.file_type().is_symlink() {
+//RS         if hangar_root.is_none() {
+//RS             return Err(format!("output root `{out}` must not be a symlink"));
+//RS         }
+//RS         let target = fs::read_link(p)
+//RS             .map_err(|e| format!("cannot read symlink `{out}`: {e}"))?;
+//RS         if !target.is_absolute() {
+//RS             return Err("Nix symlink target must be absolute".into());
+//RS         }
+//RS         validate_nix_store_symlink_target(&target)?;
+//RS         let mut archive = new_archive_hasher();
+//RS         hook(p, "node");
+//RS         record_header(&mut archive, b'L', &[], mode_of(&output_meta));
+//RS         push_bytes(&mut archive, &path_bytes(&target));
+//RS         encode_semantic_xattrs(p, &mut archive, allow_semantic_xattrs)?;
+//RS         return Ok(format!("sha256-{}", digest_hex(archive.finalize())));
+//RS     }
+//RS     let root = fs::canonicalize(p).map_err(|e| format!("cannot resolve `{out}`: {e}"))?;
+//RS     let mut archive = new_archive_hasher();
+//RS     let mut hardlinks = BTreeMap::new();
+//RS     encode_node(
+//RS         &root,
+//RS         &root,
+//RS         Path::new(""),
+//RS         &mut archive,
+//RS         &mut hardlinks,
+//RS         allow_semantic_xattrs,
+//RS         hangar_root.is_some(),
+//RS         hook,
+//RS     )?;
+//RS     // Admission and validation changes below do not alter archive bytes for
+//RS     // any tree that already hashes successfully.
+//RS     for (key, link) in &hardlinks {
+//RS         if link.seen == link.total {
+//RS             continue;
+//RS         }
+//RS         if let Some(hangar) = hangar_root {
+//RS             let hangar = fs::canonicalize(hangar).unwrap_or_else(|_| hangar.to_path_buf());
+//RS             let shared_cas = canonical_real_directory(&crate::Store::shared_cas_dir());
+//RS             let mut hangars = vec![hangar.clone()];
+//RS             for machine_root in crate::Store::Roots::machine_roots() {
+//RS                 if let Some(machine_hangar) = canonical_real_directory(&machine_root.hangar_dir()) {
+//RS                     add_allowed_hangar_root(&mut hangars, machine_hangar);
+//RS                 }
+//RS             }
+//RS             let local_cas_paths: Vec<_> = hangars
+//RS                 .iter()
+//RS                 .filter_map(|hangar| canonical_real_directory(&hangar.join("cas")))
+//RS                 .collect();
+//RS             if link.cas_key.as_deref().is_some_and(|cas_key| {
+//RS                 local_cas_paths
+//RS                     .iter()
+//RS                     .any(|pool| count_cas_peer(pool, cas_key, *key) == 1)
+//RS                     || shared_cas
+//RS                         .as_ref()
+//RS                         .is_some_and(|pool| count_cas_peer(pool, cas_key, *key) == 1)
+//RS             }) {
+//RS                 continue;
+//RS             }
+//RS             let mut allowed_peers = 0;
+//RS             for hangar in &hangars {
+//RS                 let local_cas = canonical_real_directory(&hangar.join("cas"));
+//RS                 let mut excluded = vec![root.as_path()];
+//RS                 for pool in [local_cas.as_ref(), shared_cas.as_ref()]
+//RS                     .into_iter()
+//RS                     .flatten()
+//RS                     .filter(|pool| pool.starts_with(hangar) && pool.as_path() != hangar.as_path())
+//RS                 {
+//RS                     excluded.push(pool.as_path());
+//RS                 }
+//RS                 allowed_peers += count_inode_peers_under_except(hangar, *key, &excluded);
+//RS                 if let Some(local_cas) = &local_cas {
+//RS                     if let Some(cas_key) = link.cas_key.as_deref() {
+//RS                         allowed_peers += count_cas_peer(local_cas, cas_key, *key);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             if let (Some(shared_cas), Some(cas_key)) =
+//RS                 (shared_cas.as_ref(), link.cas_key.as_deref())
+//RS             {
+//RS                 if !local_cas_paths
+//RS                     .iter()
+//RS                     .any(|path| path.as_path() == shared_cas.as_path())
+//RS                 {
+//RS                     allowed_peers += count_cas_peer(shared_cas, cas_key, *key);
+//RS                 }
+//RS             }
+//RS             let required_peers = link.total.saturating_sub(link.seen);
+//RS             if allowed_peers == required_peers {
+//RS                 // In-Hangar dedupe and local/shared CAS entries are legitimate;
+//RS                 // every other inode peer remains untrusted.
+//RS                 continue;
+//RS             }
+//RS         }
+//RS         return Err(format!(
+//RS             "hardlink `{}` has {} link(s), but only {} are inside the output",
+//RS             link.first.display(),
+//RS             link.total,
+//RS             link.seen
+//RS         ));
+//RS     }
+//RS     Ok(format!("sha256-{}", digest_hex(archive.finalize())))
+//RS }
+//RS 
+//RS /// The streaming updates below are the former canonical archive `Vec<u8>` in
+//RS /// the same byte order. Only storage changes; every successful tree keeps its
+//RS /// prior digest.
+//RS fn new_archive_hasher() -> SHA256::StreamingSha256 {
+//RS     let mut archive = SHA256::StreamingSha256::new();
+//RS     archive.update(b"jet-hangar-archive-v1\0");
+//RS     archive
+//RS }
+//RS 
+//RS fn canonical_real_directory(path: &Path) -> Option<PathBuf> {
+//RS     let metadata = fs::symlink_metadata(path).ok()?;
+//RS     if metadata.file_type().is_symlink() || !metadata.is_dir() {
+//RS         return None;
+//RS     }
+//RS     fs::canonicalize(path).ok()
+//RS }
+//RS 
+//RS fn add_allowed_hangar_root(roots: &mut Vec<PathBuf>, candidate: PathBuf) {
+//RS     if roots.iter().any(|root| candidate.starts_with(root)) {
+//RS         return;
+//RS     }
+//RS     roots.retain(|root| !root.starts_with(&candidate));
+//RS     roots.push(candidate);
+//RS }
+//RS 
+//RS fn count_cas_peer(root: &Path, cas_key: &str, key: (u64, u64)) -> u64 {
+//RS     let path = root.join(cas_key);
+//RS     let Ok(meta) = fs::symlink_metadata(path) else {
+//RS         return 0;
+//RS     };
+//RS     if meta.file_type().is_symlink() || !meta.is_file() {
+//RS         return 0;
+//RS     }
+//RS     u64::from(file_identity(&meta) == Some(key))
+//RS }
+//RS 
+//RS /// Count regular files under `root` that share `(dev, ino)`, excluding pool
+//RS /// directories whose peers are admitted only through their exact CAS key.
+//RS fn count_inode_peers_under_except(root: &Path, key: (u64, u64), excluded: &[&Path]) -> u64 {
+//RS     fn walk(path: &Path, key: (u64, u64), excluded: &[&Path], count: &mut u64) {
+//RS         if excluded.iter().any(|excluded| path == *excluded) {
+//RS             return;
+//RS         }
+//RS         let Ok(meta) = fs::symlink_metadata(path) else {
+//RS             return;
+//RS         };
+//RS         if meta.file_type().is_symlink() {
+//RS             return;
+//RS         }
+//RS         if meta.is_file() {
+//RS             if file_identity(&meta) == Some(key) {
+//RS                 *count += 1;
+//RS             }
+//RS             return;
+//RS         }
+//RS         if meta.is_dir() {
+//RS             let Ok(rd) = fs::read_dir(path) else {
+//RS                 return;
+//RS             };
+//RS             for ent in rd.flatten() {
+//RS                 walk(&ent.path(), key, excluded, count);
+//RS             }
+//RS         }
+//RS     }
+//RS     let mut count = 0u64;
+//RS     walk(root, key, excluded, &mut count);
+//RS     count
+//RS }
+//RS 
+//RS struct HardlinkState {
+//RS     first: PathBuf,
+//RS     seen: u64,
+//RS     total: u64,
+//RS     cas_key: Option<String>,
+//RS }
+//RS 
+//RS fn encode_node(
+//RS     root: &Path,
+//RS     path: &Path,
+//RS     rel: &Path,
+//RS     archive: &mut SHA256::StreamingSha256,
+//RS     hardlinks: &mut BTreeMap<(u64, u64), HardlinkState>,
+//RS     allow_semantic_xattrs: bool,
+//RS     allow_nix_store_symlinks: bool,
+//RS     hook: &mut dyn FnMut(&Path, &'static str),
+//RS ) -> Result<(), String> {
+//RS     if let Err(err) = validate_rel_path_with_mode(rel, allow_nix_store_symlinks) {
+//RS         return Err(format!("{} — {}", err.what(), err.detail));
+//RS     }
+//RS     let meta = fs::symlink_metadata(path)
+//RS         .map_err(|e| format!("cannot inspect `{}`: {e}", path.display()))?;
+//RS     let kind = meta.file_type();
+//RS     let rel_bytes = path_bytes(rel);
+//RS     // Reproducibility certification observes every already-validated node
+//RS     // through this canonical walker. This keeps first-difference reporting
+//RS     // from growing a second path traversal with different security rules.
+//RS     hook(path, "node");
+//RS     // Sparse holes hash as logical zeros via ordinary reads; probe only so
+//RS     // ingest can log policy without changing the digest stream.
+//RS     if kind.is_file() {
+//RS         let _ = file_has_sparse_holes(path)?;
+//RS     }
+//RS     if kind.is_dir() {
+//RS         let before = stable_file_identity(&meta);
+//RS         let before_entries = directory_snapshot(path)?;
+//RS         let sibling_names: Vec<Vec<u8>> = before_entries.iter().map(|e| e.name.clone()).collect();
+//RS         // Nix archives are POSIX-only content. Native ingest owns Windows
+//RS         // representability laws; Nix admission skips only this case-fold and
+//RS         // backslash check while the exact name bytes remain in the digest.
+//RS         if !allow_nix_store_symlinks {
+//RS             if let Err(err) = reject_casefold_collisions(&sibling_names) {
+//RS                 return Err(format!("{} — {}", err.what(), err.detail));
+//RS             }
+//RS         }
+//RS         let resolved = fs::canonicalize(path)
+//RS             .map_err(|e| format!("cannot resolve directory `{}`: {e}", path.display()))?;
+//RS         if !resolved.starts_with(root) {
+//RS             return Err(format!(
+//RS                 "directory `{}` escapes output root",
+//RS                 path.display()
+//RS             ));
+//RS         }
+//RS         record_header(archive, b'D', &rel_bytes, mode_of(&meta));
+//RS         encode_semantic_xattrs(path, archive, allow_semantic_xattrs)?;
+//RS         hook(path, "directory-snapshotted");
+//RS         let mut entries = fs::read_dir(path)
+//RS             .map_err(|e| format!("cannot read `{}`: {e}", path.display()))?
+//RS             .collect::<Result<Vec<_>, _>>()
+//RS             .map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
+//RS         entries.sort_by_key(|entry| path_bytes(Path::new(&entry.file_name())));
+//RS         for entry in entries {
+//RS             let child_rel = rel.join(entry.file_name());
+//RS             encode_node(
+//RS                 root,
+//RS                 &entry.path(),
+//RS                 &child_rel,
+//RS                 archive,
+//RS                 hardlinks,
+//RS                 allow_semantic_xattrs,
+//RS                 allow_nix_store_symlinks,
+//RS                 hook,
+//RS             )?;
+//RS         }
+//RS         let after = fs::symlink_metadata(path)
+//RS             .map_err(|e| format!("directory `{}` changed while hashing: {e}", path.display()))?;
+//RS         let after_entries = directory_snapshot(path)?;
+//RS         if !stable_identity_unchanged(
+//RS             &before,
+//RS             &stable_file_identity(&after),
+//RS             allow_nix_store_symlinks,
+//RS         ) || !directory_snapshot_unchanged(
+//RS             &before_entries,
+//RS             &after_entries,
+//RS             allow_nix_store_symlinks,
+//RS         ) {
+//RS             return Err(format!(
+//RS                 "directory `{}` changed while hashing",
+//RS                 path.display()
+//RS             ));
+//RS         }
+//RS     } else if kind.is_symlink() {
+//RS         let target = fs::read_link(path)
+//RS             .map_err(|e| format!("cannot read symlink `{}`: {e}", path.display()))?;
+//RS         if target.is_absolute() {
+//RS             if !allow_nix_store_symlinks {
+//RS                 return Err(format!("symlink `{}` escapes output root", path.display()));
+//RS             }
+//RS             // Nix admission accepts any absolute target as inert link data
+//RS             // (nixpkgs legally links to host paths such as `/bin/sh` and
+//RS             // `/run/current-system`); only NUL is impossible in link bytes.
+//RS             if path_bytes(&target).contains(&0) {
+//RS                 return Err("Nix symlink target contains a NUL byte".into());
+//RS             }
+//RS         } else {
+//RS             let parent_depth = rel
+//RS                 .parent()
+//RS                 .into_iter()
+//RS                 .flat_map(Path::components)
+//RS                 .filter(|component| matches!(component, Component::Normal(_)))
+//RS                 .count();
+//RS             validate_relative_nix_store_symlink_target(
+//RS                 &target,
+//RS                 parent_depth,
+//RS                 allow_nix_store_symlinks,
+//RS             )
+//RS             .map_err(|error| {
+//RS                 if error.contains("escapes output root") {
+//RS                     format!("symlink `{}` escapes output root", path.display())
+//RS                 } else {
+//RS                     error
+//RS                 }
+//RS             })?;
+//RS         }
+//RS         record_header(archive, b'L', &rel_bytes, mode_of(&meta));
+//RS         push_bytes(archive, &path_bytes(&target));
+//RS         encode_semantic_xattrs(path, archive, allow_semantic_xattrs)?;
+//RS     } else if kind.is_file() {
+//RS         let key = file_identity(&meta);
+//RS         if let Some(state) = key.and_then(|key| hardlinks.get_mut(&key)) {
+//RS             state.seen += 1;
+//RS             record_header(archive, b'H', &rel_bytes, mode_of(&meta));
+//RS             push_bytes(archive, &path_bytes(&state.first));
+//RS             return Ok(());
+//RS         }
+//RS         record_header(archive, b'F', &rel_bytes, mode_of(&meta));
+//RS         encode_semantic_xattrs(path, archive, allow_semantic_xattrs)?;
+//RS         let content_digest =
+//RS             read_file_stable(path, &meta, allow_nix_store_symlinks, archive, hook)?;
+//RS         if let Some(key) = key {
+//RS             hardlinks.insert(
+//RS                 key,
+//RS                 HardlinkState {
+//RS                     first: rel.to_path_buf(),
+//RS                     seen: 1,
+//RS                     total: link_count(&meta),
+//RS                     cas_key: Some(cas_key_for_digest(&meta, content_digest)),
+//RS                 },
+//RS             );
+//RS         }
+//RS     } else {
+//RS         return Err(format!(
+//RS             "unsupported special file in output: `{}`",
+//RS             path.display()
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_nix_store_symlink_target(target: &Path) -> Result<(), String> {
+//RS     let bytes = path_bytes(target);
+//RS     if bytes.is_empty()
+//RS         || bytes.windows(2).any(|window| window == b"//")
+//RS         || bytes.contains(&b'\\')
+//RS         || bytes.iter().any(|byte| byte.is_ascii_control())
+//RS     {
+//RS         return Err("Nix symlink target is not a canonical absolute store path".into());
+//RS     }
+//RS     let mut components = target.components();
+//RS     if !matches!(components.next(), Some(Component::RootDir))
+//RS         || !matches!(components.next(), Some(Component::Normal(value)) if path_component_bytes(value) == b"nix")
+//RS         || !matches!(components.next(), Some(Component::Normal(value)) if path_component_bytes(value) == b"store")
+//RS     {
+//RS         return Err("Nix symlink target is not under /nix/store".into());
+//RS     }
+//RS     let Some(Component::Normal(store_name)) = components.next() else {
+//RS         return Err("Nix symlink target has no store object".into());
+//RS     };
+//RS     validate_nix_store_component(&path_component_bytes(store_name), "store object")?;
+//RS     for component in components {
+//RS         let Component::Normal(value) = component else {
+//RS             return Err("Nix symlink target contains a traversal component".into());
+//RS         };
+//RS         validate_nix_store_component(&path_component_bytes(value), "component")?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_nix_store_component(value: &[u8], label: &str) -> Result<(), String> {
+//RS     validate_path_component(value)
+//RS         .map_err(|error| format!("Nix symlink target has an unsafe {label}: {}", error.detail))
+//RS }
+//RS 
+//RS fn validate_relative_nix_store_symlink_target(
+//RS     target: &Path,
+//RS     mut depth: usize,
+//RS     allow_nix_store_symlinks: bool,
+//RS ) -> Result<(), String> {
+//RS     // Native relative links stay inside the output. Nix admission accepts a
+//RS     // relative target that escapes the output root as inert link data (Nix
+//RS     // NARs legally reference sibling store objects and host config such as
+//RS     // systemd's `../../../../../etc/environment`); hashing never follows the
+//RS     // link, and every named component still passes the Nix path law.
+//RS     let mut crossed_root = false;
+//RS     for component in target.components() {
+//RS         if crossed_root {
+//RS             match component {
+//RS                 Component::CurDir | Component::ParentDir => {}
+//RS                 Component::Normal(value) => {
+//RS                     validate_path_component_with_mode(&path_component_bytes(value), true)
+//RS                         .map_err(|error| {
+//RS                             format!(
+//RS                                 "Nix symlink target has an unsafe component: {}",
+//RS                                 error.detail
+//RS                             )
+//RS                         })?;
+//RS                 }
+//RS                 Component::RootDir | Component::Prefix(_) => {
+//RS                     return Err("Nix relative symlink is not relative".into());
+//RS                 }
+//RS             }
+//RS             continue;
+//RS         }
+//RS         match component {
+//RS             Component::CurDir => {}
+//RS             Component::Normal(_) => depth = depth.saturating_add(1),
+//RS             Component::ParentDir if depth > 0 => depth -= 1,
+//RS             Component::ParentDir if allow_nix_store_symlinks => crossed_root = true,
+//RS             Component::ParentDir => {
+//RS                 return Err("Nix relative symlink escapes output root".into());
+//RS             }
+//RS             Component::RootDir | Component::Prefix(_) => {
+//RS                 return Err("Nix relative symlink is not relative".into());
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn read_file_stable(
+//RS     path: &Path,
+//RS     expected: &fs::Metadata,
+//RS     allow_hardlink_metadata_changes: bool,
+//RS     archive: &mut SHA256::StreamingSha256,
+//RS     hook: &mut dyn FnMut(&Path, &'static str),
+//RS ) -> Result<[u8; 32], String> {
+//RS     let mut options = fs::OpenOptions::new();
+//RS     options.read(true);
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::OpenOptionsExt as _;
+//RS         options.custom_flags(nofollow_open_flag()?);
+//RS     }
+//RS     let mut file = options.open(path).map_err(|e| {
+//RS         format!(
+//RS             "cannot open `{}` without following links: {e}",
+//RS             path.display()
+//RS         )
+//RS     })?;
+//RS     let before = file
+//RS         .metadata()
+//RS         .map_err(|e| format!("cannot inspect open file `{}`: {e}", path.display()))?;
+//RS     if !stable_identity_unchanged(
+//RS         &stable_file_identity(&before),
+//RS         &stable_file_identity(expected),
+//RS         allow_hardlink_metadata_changes,
+//RS     ) {
+//RS         return Err(format!("file `{}` changed before hashing", path.display()));
+//RS     }
+//RS     hook(path, "file-opened");
+//RS     archive.update(&expected.len().to_be_bytes());
+//RS     let mut content_hasher = SHA256::StreamingSha256::new();
+//RS     // Fixed-size reads keep hashing O(64 KiB + metadata), independent of file
+//RS     // or tree size.
+//RS     let mut buffer = [0u8; 64 * 1024];
+//RS     loop {
+//RS         let count = file
+//RS             .read(&mut buffer)
+//RS             .map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
+//RS         if count == 0 {
+//RS             break;
+//RS         }
+//RS         let chunk = &buffer[..count];
+//RS         archive.update(chunk);
+//RS         content_hasher.update(chunk);
+//RS     }
+//RS     let after = file
+//RS         .metadata()
+//RS         .map_err(|e| format!("cannot re-inspect `{}`: {e}", path.display()))?;
+//RS     if !stable_identity_unchanged(
+//RS         &stable_file_identity(&before),
+//RS         &stable_file_identity(&after),
+//RS         allow_hardlink_metadata_changes,
+//RS     ) {
+//RS         return Err(format!("file `{}` changed while hashing", path.display()));
+//RS     }
+//RS     Ok(content_hasher.finalize())
+//RS }
+//RS 
+//RS #[derive(Debug, PartialEq, Eq)]
+//RS struct DirectoryEntrySnapshot {
+//RS     name: Vec<u8>,
+//RS     kind: u8,
+//RS     identity: StableIdentity,
+//RS }
+//RS 
+//RS fn directory_snapshot(path: &Path) -> Result<Vec<DirectoryEntrySnapshot>, String> {
+//RS     let mut entries = fs::read_dir(path)
+//RS         .map_err(|e| format!("cannot snapshot directory `{}`: {e}", path.display()))?
+//RS         .collect::<Result<Vec<_>, _>>()
+//RS         .map_err(|e| format!("cannot snapshot directory `{}`: {e}", path.display()))?
+//RS         .into_iter()
+//RS         .map(|entry| {
+//RS             let meta = fs::symlink_metadata(entry.path())
+//RS                 .map_err(|e| format!("cannot inspect `{}`: {e}", entry.path().display()))?;
+//RS             let ty = meta.file_type();
+//RS             Ok(DirectoryEntrySnapshot {
+//RS                 name: path_bytes(Path::new(&entry.file_name())),
+//RS                 kind: if ty.is_dir() {
+//RS                     b'D'
+//RS                 } else if ty.is_file() {
+//RS                     b'F'
+//RS                 } else if ty.is_symlink() {
+//RS                     b'L'
+//RS                 } else {
+//RS                     b'S'
+//RS                 },
+//RS                 identity: stable_file_identity(&meta),
+//RS             })
+//RS         })
+//RS         .collect::<Result<Vec<_>, String>>()?;
+//RS     entries.sort_by(|a, b| a.name.cmp(&b.name));
+//RS     Ok(entries)
+//RS }
+//RS 
+//RS fn directory_snapshot_unchanged(
+//RS     before: &[DirectoryEntrySnapshot],
+//RS     after: &[DirectoryEntrySnapshot],
+//RS     allow_hardlink_metadata_changes: bool,
+//RS ) -> bool {
+//RS     before.len() == after.len()
+//RS         && before.iter().zip(after).all(|(before, after)| {
+//RS             before.name == after.name
+//RS                 && before.kind == after.kind
+//RS                 && stable_identity_unchanged(
+//RS                     &before.identity,
+//RS                     &after.identity,
+//RS                     allow_hardlink_metadata_changes,
+//RS                 )
+//RS         })
+//RS }
+//RS 
+//RS fn record_header(out: &mut SHA256::StreamingSha256, kind: u8, path: &[u8], mode: u32) {
+//RS     out.update(&[kind]);
+//RS     push_bytes(out, path);
+//RS     out.update(&mode.to_be_bytes());
+//RS }
+//RS 
+//RS fn push_bytes(out: &mut SHA256::StreamingSha256, bytes: &[u8]) {
+//RS     out.update(&(bytes.len() as u64).to_be_bytes());
+//RS     out.update(bytes);
+//RS }
+//RS 
+//RS fn digest_hex(bytes: [u8; 32]) -> String {
+//RS     use std::fmt::Write as _;
+//RS 
+//RS     bytes
+//RS         .iter()
+//RS         .fold(String::with_capacity(64), |mut text, byte| {
+//RS             let _ = write!(text, "{byte:02x}");
+//RS             text
+//RS         })
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn path_bytes(path: &Path) -> Vec<u8> {
+//RS     use std::os::unix::ffi::OsStrExt as _;
+//RS     path.as_os_str().as_bytes().to_vec()
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn path_bytes(path: &Path) -> Vec<u8> {
+//RS     path.to_string_lossy().as_bytes().to_vec()
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn mode_of(meta: &fs::Metadata) -> u32 {
+//RS     use std::os::unix::fs::MetadataExt as _;
+//RS     meta.mode()
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn mode_of(meta: &fs::Metadata) -> u32 {
+//RS     u32::from(meta.permissions().readonly())
+//RS }
+//RS 
+//RS #[cfg(all(test, unix))]
+//RS fn cas_key_for(meta: &fs::Metadata, bytes: &[u8]) -> String {
+//RS     cas_key_for_digest(meta, SHA256::sha256(bytes))
+//RS }
+//RS 
+//RS fn cas_key_for_digest(meta: &fs::Metadata, digest: [u8; 32]) -> String {
+//RS     format!("{}-{:08x}", digest_hex(digest), mode_of(meta) & 0o7777)
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn file_identity(meta: &fs::Metadata) -> Option<(u64, u64)> {
+//RS     use std::os::unix::fs::MetadataExt as _;
+//RS     (meta.nlink() > 1).then(|| (meta.dev(), meta.ino()))
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn link_count(meta: &fs::Metadata) -> u64 {
+//RS     use std::os::unix::fs::MetadataExt as _;
+//RS     meta.nlink()
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn link_count(_meta: &fs::Metadata) -> u64 {
+//RS     1
+//RS }
+//RS 
+//RS type StableIdentity = (u64, u64, u64, i64, i64, i64, i64, u32, u64);
+//RS 
+//RS #[cfg(unix)]
+//RS fn stable_file_identity(meta: &fs::Metadata) -> StableIdentity {
+//RS     use std::os::unix::fs::MetadataExt as _;
+//RS     (
+//RS         meta.dev(),
+//RS         meta.ino(),
+//RS         meta.len(),
+//RS         meta.mtime(),
+//RS         meta.mtime_nsec(),
+//RS         meta.ctime(),
+//RS         meta.ctime_nsec(),
+//RS         meta.mode(),
+//RS         meta.nlink(),
+//RS     )
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn stable_file_identity(meta: &fs::Metadata) -> StableIdentity {
+//RS     (
+//RS         0,
+//RS         0,
+//RS         meta.len(),
+//RS         meta.modified()
+//RS             .ok()
+//RS             .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+//RS             .map_or(0, |duration| duration.as_secs() as i64),
+//RS         0,
+//RS         0,
+//RS         0,
+//RS         u32::from(meta.permissions().readonly()),
+//RS         1,
+//RS     )
+//RS }
+//RS 
+//RS fn stable_identity_unchanged(
+//RS     before: &StableIdentity,
+//RS     after: &StableIdentity,
+//RS     allow_hardlink_metadata_changes: bool,
+//RS ) -> bool {
+//RS     if before == after {
+//RS         return true;
+//RS     }
+//RS     allow_hardlink_metadata_changes
+//RS         && before.0 == after.0
+//RS         && before.1 == after.1
+//RS         && before.2 == after.2
+//RS         && before.3 == after.3
+//RS         && before.4 == after.4
+//RS         && before.7 == after.7
+//RS         && before.8 != after.8
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn file_identity(_meta: &fs::Metadata) -> Option<(u64, u64)> {
+//RS     None
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn platform_key_is_arch_os() {
+//RS         let p = host_platform();
+//RS         assert!(p.contains('-'), "platform key should be <arch>-<os>: {p}");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn output_hash_of_dir_reflects_contents() {
+//RS         let base = std::env::temp_dir().join(format!(
+//RS             "env-hash-{}",
+//RS             std::time::SystemTime::now()
+//RS                 .duration_since(std::time::UNIX_EPOCH)
+//RS                 .unwrap()
+//RS                 .as_nanos()
+//RS         ));
+//RS         let a = base.join("a");
+//RS         let b = base.join("b");
+//RS         std::fs::create_dir_all(&a).unwrap();
+//RS         std::fs::create_dir_all(&b).unwrap();
+//RS         std::fs::write(a.join("f"), "one").unwrap();
+//RS         std::fs::write(b.join("f"), "two").unwrap();
+//RS         let ha = output_hash_of(&a.to_string_lossy());
+//RS         let hb = output_hash_of(&b.to_string_lossy());
+//RS         assert!(ha.starts_with("sha256-"));
+//RS         assert_ne!(ha, hb, "different contents must hash differently");
+//RS         std::fs::remove_dir_all(&base).ok();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn output_hash_of_file_reflects_bytes_not_path_text() {
+//RS         let base = std::env::temp_dir().join(format!(
+//RS             "env-file-hash-{}",
+//RS             std::time::SystemTime::now()
+//RS                 .duration_since(std::time::UNIX_EPOCH)
+//RS                 .unwrap()
+//RS                 .as_nanos()
+//RS         ));
+//RS         std::fs::write(&base, "one").unwrap();
+//RS         let before = output_hash_of(&base.to_string_lossy());
+//RS         std::fs::write(&base, "two").unwrap();
+//RS         let after = output_hash_of(&base.to_string_lossy());
+//RS         assert_ne!(before, after, "file bytes, not path text, are identity");
+//RS         std::fs::remove_file(&base).ok();
+//RS     }
+//RS 
+//RS     #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))]
+//RS     #[test]
+//RS     fn canonical_archive_stream_matches_materialized_reference() {
+//RS         use std::io::Write as _;
+//RS         use std::os::unix::fs::symlink;
+//RS 
+//RS         let dir = scratch("stream-reference");
+//RS         let nested = dir.join("nested/deeper");
+//RS         fs::create_dir_all(&nested).unwrap();
+//RS         fs::write(dir.join("small.txt"), b"small file").unwrap();
+//RS         let large = dir.join("large.bin");
+//RS         let chunk: Vec<u8> = (0..4096).map(|index| (index % 251) as u8).collect();
+//RS         let mut file = fs::File::create(&large).unwrap();
+//RS         for _ in 0..768 {
+//RS             file.write_all(&chunk).unwrap();
+//RS         }
+//RS         fs::write(nested.join("payload"), b"nested payload").unwrap();
+//RS         symlink("nested/deeper/payload", dir.join("payload-link")).unwrap();
+//RS         fs::hard_link(dir.join("small.txt"), dir.join("small-alias")).unwrap();
+//RS 
+//RS         let has_xattr = set_test_xattr(&nested.join("payload"), b"stream-reference");
+//RS         let root = fs::canonicalize(&dir).unwrap();
+//RS         let got = try_output_hash_of_with_policy(&dir.to_string_lossy(), has_xattr, &mut |_, _| {})
+//RS             .unwrap();
+//RS         let reference = reference_archive(&root, has_xattr);
+//RS         assert_eq!(
+//RS             got,
+//RS             format!("sha256-{}", SHA256::sha256_hex(&reference)),
+//RS             "streamed archive bytes must match materialized reference"
+//RS         );
+//RS 
+//RS         let metadata = fs::metadata(dir.join("small.txt")).unwrap();
+//RS         let expected_cas_key = format!(
+//RS             "{}-{:08x}",
+//RS             SHA256::sha256_hex(b"small file"),
+//RS             mode_of(&metadata) & 0o7777
+//RS         );
+//RS         assert_eq!(
+//RS             cas_key_for_digest(&metadata, SHA256::sha256(b"small file")),
+//RS             expected_cas_key
+//RS         );
+//RS         fs::remove_dir_all(dir).ok();
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn canonical_archive_hashes_large_sparse_file_incrementally() {
+//RS         use std::io::{Seek as _, SeekFrom, Write as _};
+//RS 
+//RS         let dir = scratch("large-sparse");
+//RS         let path = dir.join("payload");
+//RS         let size = 64 * 1024 * 1024;
+//RS         let mut file = fs::File::create(&path).unwrap();
+//RS         file.set_len(size).unwrap();
+//RS         file.write_all(b"start").unwrap();
+//RS         file.seek(SeekFrom::Start(size - 4)).unwrap();
+//RS         file.write_all(b"tail").unwrap();
+//RS         drop(file);
+//RS 
+//RS         let digest = try_output_hash_of(&dir.to_string_lossy()).unwrap();
+//RS         assert!(digest.starts_with("sha256-"));
+//RS         fs::remove_dir_all(dir).ok();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn for_output_fills_all_fields_for_a_real_tree() {
+//RS         let dir = std::env::temp_dir().join(format!(
+//RS             "env-for-{}",
+//RS             std::time::SystemTime::now()
+//RS                 .duration_since(std::time::UNIX_EPOCH)
+//RS                 .unwrap()
+//RS                 .as_nanos()
+//RS         ));
+//RS         std::fs::create_dir_all(&dir).unwrap();
+//RS         std::fs::write(dir.join("x"), "hi").unwrap();
+//RS         let e = Envelope::for_output(&dir.to_string_lossy(), "hello@mine", "core-source");
+//RS         assert!(!e.is_empty());
+//RS         assert!(e.output_hash.starts_with("sha256-"));
+//RS         assert!(!e.platform.is_empty());
+//RS         assert!(e.provenance.contains("hello@mine"));
+//RS         assert!(e.provenance.contains("core-source"));
+//RS         assert!(
+//RS             e.signature.is_empty(),
+//RS             "signature slot stays empty until #13"
+//RS         );
+//RS         std::fs::remove_dir_all(&dir).ok();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn canonical_archive_covers_empty_directories() {
+//RS         let dir = scratch("empty-dir");
+//RS         fs::create_dir_all(dir.join("empty")).unwrap();
+//RS         let with_empty = try_output_hash_of(&dir.to_string_lossy()).unwrap();
+//RS         fs::remove_dir(dir.join("empty")).unwrap();
+//RS         let without_empty = try_output_hash_of(&dir.to_string_lossy()).unwrap();
+//RS         assert_ne!(with_empty, without_empty);
+//RS         fs::remove_dir_all(dir).ok();
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn canonical_archive_covers_modes_and_hardlinks() {
+//RS         use std::os::unix::fs::PermissionsExt as _;
+//RS 
+//RS         let dir = scratch("mode-hardlink");
+//RS         let file = dir.join("file");
+//RS         fs::write(&file, "same bytes").unwrap();
+//RS         fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+//RS         let plain = try_output_hash_of(&dir.to_string_lossy()).unwrap();
+//RS         fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).unwrap();
+//RS         let executable = try_output_hash_of(&dir.to_string_lossy()).unwrap();
+//RS         assert_ne!(plain, executable);
+//RS 
+//RS         fs::hard_link(&file, dir.join("alias")).unwrap();
+//RS         let hardlinked = try_output_hash_of(&dir.to_string_lossy()).unwrap();
+//RS         fs::remove_file(dir.join("alias")).unwrap();
+//RS         fs::copy(&file, dir.join("alias")).unwrap();
+//RS         let copied = try_output_hash_of(&dir.to_string_lossy()).unwrap();
+//RS         assert_ne!(hardlinked, copied);
+//RS         fs::remove_dir_all(dir).ok();
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn canonical_archive_rejects_hardlinks_outside_output() {
+//RS         let dir = scratch("outside-hardlink");
+//RS         let file = dir.join("payload");
+//RS         let outside = dir
+//RS             .parent()
+//RS             .unwrap()
+//RS             .join(format!("outside-hardlink-{}", std::process::id()));
+//RS         fs::write(&file, "trusted").unwrap();
+//RS         fs::hard_link(&file, &outside).unwrap();
+//RS         let error = try_output_hash_of(&dir.to_string_lossy()).unwrap_err();
+//RS         assert!(error.contains("only 1 are inside"), "{error}");
+//RS         fs::remove_file(outside).ok();
+//RS         fs::remove_dir_all(dir).ok();
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn canonical_archive_rejects_wrong_shared_cas_key() {
+//RS         let hangar = scratch("wrong-cas-key-hangar");
+//RS         let output = hangar.join("objects/output");
+//RS         let pool = hangar.join("cas");
+//RS         fs::create_dir_all(&output).unwrap();
+//RS         fs::create_dir_all(&pool).unwrap();
+//RS         let file = output.join("payload");
+//RS         fs::write(&file, "trusted").unwrap();
+//RS         fs::hard_link(&file, pool.join("not-the-content-key")).unwrap();
+//RS 
+//RS         let error =
+//RS             try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).unwrap_err();
+//RS         assert!(error.contains("only 1 are inside"), "{error}");
+//RS         fs::remove_dir_all(hangar).ok();
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn canonical_archive_accepts_pool_backed_inode_with_foreign_peer() {
+//RS         let hangar = scratch("pool-backed-hardlink");
+//RS         let output = hangar.join("objects/output");
+//RS         let pool = hangar.join("cas");
+//RS         fs::create_dir_all(&output).unwrap();
+//RS         fs::create_dir_all(&pool).unwrap();
+//RS         let file = output.join("payload");
+//RS         let bytes = b"trusted";
+//RS         fs::write(&file, bytes).unwrap();
+//RS         let cas_key = cas_key_for(&fs::metadata(&file).unwrap(), bytes);
+//RS         fs::hard_link(&file, pool.join(&cas_key)).unwrap();
+//RS         let foreign = hangar.parent().unwrap().join(format!(
+//RS             "{}-foreign-peer",
+//RS             hangar.file_name().unwrap().to_string_lossy()
+//RS         ));
+//RS         fs::hard_link(&file, &foreign).unwrap();
+//RS 
+//RS         let digest = try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false)
+//RS             .unwrap();
+//RS         assert!(digest.starts_with("sha256-"), "{digest}");
+//RS 
+//RS         fs::remove_file(foreign).ok();
+//RS         fs::remove_dir_all(hangar).ok();
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn canonical_archive_rejects_foreign_peer_without_cas_entry() {
+//RS         let hangar = scratch("foreign-hardlink-no-cas");
+//RS         let output = hangar.join("objects/output");
+//RS         fs::create_dir_all(&output).unwrap();
+//RS         let file = output.join("payload");
+//RS         fs::write(&file, b"trusted").unwrap();
+//RS         let foreign = hangar.parent().unwrap().join(format!(
+//RS             "{}-foreign-peer",
+//RS             hangar.file_name().unwrap().to_string_lossy()
+//RS         ));
+//RS         fs::hard_link(&file, &foreign).unwrap();
+//RS 
+//RS         let error =
+//RS             try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).unwrap_err();
+//RS         assert!(error.contains("only 1 are inside"), "{error}");
+//RS 
+//RS         fs::remove_file(foreign).ok();
+//RS         fs::remove_dir_all(hangar).ok();
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn canonical_archive_hashes_symlink_root_only_in_hangar_mode() {
+//RS         use std::os::unix::fs::symlink;
+//RS 
+//RS         let hangar = scratch("symlink-root");
+//RS         let output = hangar.join("objects/output");
+//RS         fs::create_dir_all(output.parent().unwrap()).unwrap();
+//RS         symlink(
+//RS             "/nix/store/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-foo",
+//RS             &output,
+//RS         )
+//RS         .unwrap();
+//RS 
+//RS         let first = try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).unwrap();
+//RS         let second =
+//RS             try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).unwrap();
+//RS         assert_eq!(first, second);
+//RS         let error = try_output_hash_of(&output.to_string_lossy()).unwrap_err();
+//RS         assert!(error.contains("must not be a symlink"), "{error}");
+//RS 
+//RS         fs::remove_file(&output).unwrap();
+//RS         symlink("relative", &output).unwrap();
+//RS         assert!(try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).is_err());
+//RS 
+//RS         fs::remove_file(&output).unwrap();
+//RS         symlink("/tmp/not-a-store-path", &output).unwrap();
+//RS         assert!(try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).is_err());
+//RS 
+//RS         fs::remove_dir_all(hangar).ok();
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn canonical_archive_validates_relative_symlinks_lexically() {
+//RS         use std::os::unix::fs::symlink;
+//RS 
+//RS         let hangar = scratch("lexical-symlinks");
+//RS         let output = hangar.join("objects/output");
+//RS         fs::create_dir_all(output.join("bin")).unwrap();
+//RS         fs::create_dir_all(output.join("lib")).unwrap();
+//RS         symlink("../lib/real", output.join("bin/x")).unwrap();
+//RS         symlink(
+//RS             "/nix/store/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-foo/f",
+//RS             output.join("lib/real"),
+//RS         )
+//RS         .unwrap();
+//RS         assert!(try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).is_ok());
+//RS 
+//RS         // Nix admission accepts escaped relative targets as inert link data
+//RS         // (systemd ships `../../../../../etc/environment`).
+//RS         symlink("../../../../../etc/environment", output.join("up")).unwrap();
+//RS         let first =
+//RS             try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).unwrap();
+//RS         let second =
+//RS             try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).unwrap();
+//RS         assert_eq!(first, second);
+//RS         fs::remove_file(output.join("up")).unwrap();
+//RS 
+//RS         symlink("missing/target", output.join("dangling")).unwrap();
+//RS         assert!(try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).is_ok());
+//RS 
+//RS         fs::remove_dir_all(hangar).ok();
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn canonical_archive_rejects_concurrent_add_remove_and_replace() {
+//RS         let dir = scratch("concurrent-directory");
+//RS         let keep = dir.join("keep");
+//RS         fs::write(&keep, "before").unwrap();
+//RS         let mut changed = false;
+//RS         let error = try_output_hash_of_with_hook(
+//RS             &dir.to_string_lossy(),
+//RS             false,
+//RS             None,
+//RS             &mut |path, stage| {
+//RS                 if !changed && path == dir && stage == "directory-snapshotted" {
+//RS                     changed = true;
+//RS                     let transient = dir.join("transient");
+//RS                     fs::write(&transient, "added").unwrap();
+//RS                     fs::remove_file(&transient).unwrap();
+//RS                     let replacement = dir.join("replacement");
+//RS                     fs::write(&replacement, "after!").unwrap();
+//RS                     fs::rename(&replacement, &keep).unwrap();
+//RS                 }
+//RS             },
+//RS         )
+//RS         .unwrap_err();
+//RS         assert!(error.contains("changed while hashing"), "{error}");
+//RS         fs::remove_dir_all(dir).ok();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn canonical_archive_rejects_missing_output() {
+//RS         let missing = scratch("missing-output");
+//RS         fs::remove_dir_all(&missing).unwrap();
+//RS         let error = try_output_hash_of(&missing.to_string_lossy()).unwrap_err();
+//RS         assert!(error.contains("does not exist"), "{error}");
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn canonical_archive_rejects_unreadable_output() {
+//RS         use std::os::unix::fs::PermissionsExt as _;
+//RS 
+//RS         let dir = scratch("unreadable-output");
+//RS         fs::write(dir.join("payload"), "bytes").unwrap();
+//RS         fs::set_permissions(&dir, fs::Permissions::from_mode(0o000)).unwrap();
+//RS         if fs::read_dir(&dir).is_ok() {
+//RS             fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+//RS             fs::remove_dir_all(dir).ok();
+//RS             return;
+//RS         }
+//RS         let result = try_output_hash_of(&dir.to_string_lossy());
+//RS         fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+//RS         let error = result.unwrap_err();
+//RS         assert!(error.contains("Permission denied"), "{error}");
+//RS         fs::remove_dir_all(dir).ok();
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn canonical_archive_rejects_output_disappearing_during_hash() {
+//RS         let dir = scratch("disappearing-output");
+//RS         let payload = dir.join("payload");
+//RS         fs::write(&payload, "bytes").unwrap();
+//RS         let mut removed = false;
+//RS         let error = try_output_hash_of_with_hook(
+//RS             &dir.to_string_lossy(),
+//RS             false,
+//RS             None,
+//RS             &mut |path, stage| {
+//RS                 if !removed && path == payload && stage == "file-opened" {
+//RS                     removed = true;
+//RS                     fs::remove_file(&payload).unwrap();
+//RS                 }
+//RS             },
+//RS         )
+//RS         .unwrap_err();
+//RS         assert!(error.contains("changed while hashing"), "{error}");
+//RS         fs::remove_dir_all(dir).ok();
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn canonical_archive_rejects_same_size_write_with_restored_mtime() {
+//RS         use std::os::unix::fs::MetadataExt as _;
+//RS         use std::process::Command;
+//RS 
+//RS         let dir = scratch("restored-mtime");
+//RS         let file = dir.join("payload");
+//RS         let stamp = dir.join("stamp");
+//RS         fs::write(&file, "AAAA").unwrap();
+//RS         fs::write(&stamp, "stamp").unwrap();
+//RS         Command::new("touch")
+//RS             .args(["-r", stamp.to_str().unwrap(), file.to_str().unwrap()])
+//RS             .status()
+//RS             .unwrap();
+//RS         let expected_mtime = fs::metadata(&file).unwrap().mtime_nsec();
+//RS         let mut changed = false;
+//RS         let error = try_output_hash_of_with_hook(
+//RS             &dir.to_string_lossy(),
+//RS             false,
+//RS             None,
+//RS             &mut |path, stage| {
+//RS                 if !changed && path == file && stage == "file-opened" {
+//RS                     changed = true;
+//RS                     fs::write(&file, "BBBB").unwrap();
+//RS                     Command::new("touch")
+//RS                         .args(["-r", stamp.to_str().unwrap(), file.to_str().unwrap()])
+//RS                         .status()
+//RS                         .unwrap();
+//RS                     assert_eq!(fs::metadata(&file).unwrap().mtime_nsec(), expected_mtime);
+//RS                 }
+//RS             },
+//RS         )
+//RS         .unwrap_err();
+//RS         assert!(error.contains("changed while hashing"), "{error}");
+//RS         fs::remove_dir_all(dir).ok();
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn canonical_archive_rejects_symlink_escape_and_special_file() {
+//RS         use std::os::unix::fs::symlink;
+//RS         use std::os::unix::net::UnixListener;
+//RS 
+//RS         let dir = scratch("hostile-nodes");
+//RS         let outside = dir.parent().unwrap().join("outside-cache-proof");
+//RS         fs::write(&outside, "outside").unwrap();
+//RS         symlink(&outside, dir.join("escape")).unwrap();
+//RS         assert!(try_output_hash_of(&dir.to_string_lossy()).is_err());
+//RS         fs::remove_file(dir.join("escape")).unwrap();
+//RS 
+//RS         symlink("b", dir.join("a")).unwrap();
+//RS         symlink("a", dir.join("b")).unwrap();
+//RS         assert!(try_output_hash_of(&dir.to_string_lossy()).is_ok());
+//RS         fs::remove_file(dir.join("a")).unwrap();
+//RS         fs::remove_file(dir.join("b")).unwrap();
+//RS 
+//RS         let socket = UnixListener::bind(dir.join("socket")).unwrap();
+//RS         assert!(try_output_hash_of(&dir.to_string_lossy()).is_err());
+// END-PORT-PENDING 2092 crates/jet-pkg-model/src/Envelope.rs:1-1800
+

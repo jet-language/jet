@@ -1,0 +1,120 @@
+use core.files.runtime.kernel_path_components as path_components
+use core.files.runtime.kernel_path_components.[OSPath, ComponentKind, PathComponent]
+use core.files.runtime.descriptor_metadata.[DescriptorStat, NativeFileFacts]
+use core.files.host.retained_descriptor as authority_io
+use core.files.host.retained_descriptor.[Directory, OpenOptions]
+use jet_foundation.[FILE_EXT, STALE_MANIFEST_NAMES]
+
+// Bounded no-follow authority walking (jet-pkg-model Authority.rs).
+// The retained producer imports are staged-unavailable, not providerComplete.
+pub PKG_MAX_TREE_FILE_BYTES :: prep { 536870912 }
+pub PKG_MAX_TREE_TOTAL_BYTES :: prep { 4294967296 }
+pub PKG_MAX_TREE_FILES :: prep { 1000000 }
+pub PKG_MAX_TREE_NODES :: prep { 2000000 }
+pub PKG_MAX_TREE_DEPTH :: prep { 256 }
+AUTHORITY_SOURCE_WALK_SKIPPED :: prep { [String]{"target", "build", "node_modules", "bin"} }
+
+pub struct AuthorityEntry {
+    pub name: OSPath
+    pub path: OSPath
+    pub info: DescriptorStat
+}
+
+pub struct AuthorityWalkBudget {
+    entries: Int
+    files: Int
+    bytes: Int
+
+    pub fn new() -> AuthorityWalkBudget Never! {
+        AuthorityWalkBudget{entries: 0, files: 0, bytes: 0}
+    }
+
+    pub fn note_entry(&self, path: OSPath) AuthorityError! {
+        if self.entries >= PKG_MAX_TREE_FILES {
+            return Err(pkg_authority_limit_error(path, "authority directory walk exceeds the {PKG_MAX_TREE_FILES}-entry bound"))
+        }
+        self.entries += 1
+    }
+
+    pub fn ensure_file(self, path: OSPath, length: U64) AuthorityError! {
+        if length > U64{PKG_MAX_TREE_FILE_BYTES} {
+            return Err(pkg_authority_limit_error(path, "authority file exceeds the {PKG_MAX_TREE_FILE_BYTES}-byte read bound"))
+        }
+        if self.files >= PKG_MAX_TREE_FILES {
+            return Err(pkg_authority_limit_error(path, "authority source walk exceeds the {PKG_MAX_TREE_FILES}-file bound"))
+        }
+        if U64{self.bytes} + length > U64{PKG_MAX_TREE_TOTAL_BYTES} {
+            return Err(pkg_authority_limit_error(path, "authority source walk exceeds the {PKG_MAX_TREE_TOTAL_BYTES}-byte total bound"))
+        }
+    }
+
+    pub fn record_file(&self, path: OSPath, length: Int) AuthorityError! {
+        self.ensure_file(path, U64{length})
+        self.files += 1
+        self.bytes += length
+    }
+}
+
+pub fn pkg_authority_open_options() -> OpenOptions Never! {
+    OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false}
+}
+
+// Name spans borrow the original encoded directory-entry owner.
+pub fn pkg_authority_normal_name(name: OSPath) -> PathComponent AuthorityError! {
+    cursor := path_components.components(name)
+    value :: path_components.next(name, &cursor) ?? return Err(AuthorityError.Escapes(path_components.display(name)))
+    if value.kind != ComponentKind.Normal || path_components.next(name, &cursor) != None {
+        return Err(AuthorityError.Escapes(path_components.display(name)))
+    }
+    Ok(value)
+}
+
+// Enumerate the held directory; every metadata query is relative to that SAME
+// descriptor. Neither the display label nor a concatenated path is reopened.
+pub fn pkg_authority_read_sorted_entries(directory: Directory, path: OSPath, budget: &AuthorityWalkBudget) -[FS]> [AuthorityEntry] AuthorityError! {
+    listed := directory.entries() ?? return Err(AuthorityError.IO{path: path_components.display(path), operation: "read", detail: "{err}"})
+    entries := [AuthorityEntry]{}
+    loop {
+        name :: listed.next() ?? return Err(AuthorityError.IO{path: path_components.display(path), operation: "read", detail: "{err}"})
+        entry :: name ?? break
+        component :: pkg_authority_normal_name(entry)
+        info :: directory.entry_stat(entry, component) ?? return Err(AuthorityError.IO{path: path_components.display(path), operation: "inspect", detail: "{err}"})
+        &budget.note_entry(path)
+        &entries.push(AuthorityEntry{name: entry, path: pkg_authority_join(path, entry), info: info})
+    }
+    &entries.sort_by(entry -> entry.name.encoded)
+    Ok(entries)
+}
+
+pub fn pkg_authority_has_candidate(root: OSPath) -[FS, Env]> Bool AuthorityError! {
+    directory :: authority_io.open_directory(root, pkg_authority_open_options()) ?? return Err(pkg_authority_map_io(root, err, true))
+    listed := directory.entries() ?? return Err(pkg_authority_map_io(root, err, true))
+    candidate := false
+    loop {
+        name :: listed.next() ?? return Err(pkg_authority_map_io(root, err, true))
+        entry :: name ?? break
+        if pkg_authority_extension(entry) == Val(FILE_EXT) -> candidate = true
+        spelling :: path_components.to_str(entry)
+        if spelling == .Val(text) && STALE_MANIFEST_NAMES.contains(text) -> candidate = true
+    }
+    Ok(candidate)
+}
+
+// World-writable Unix directories are discovery space, never pinned authority.
+pub fn pkg_authority_is_shared_directory(info: DescriptorStat) -> Bool Never! {
+    if info.native == {
+        .Unix(mode, _) -> (mode & U32{0o002}) != U32{0}
+        .Windows(_, _) -> false
+    }
+}
+
+pub fn pkg_authority_is_shared_directory_path(path: OSPath) -[FS, Env]> Bool Never! {
+    info :: authority_io.symlink_metadata(path) ?? return false
+    pkg_authority_is_shared_directory(info)
+}
+
+pub fn pkg_authority_source_walk_skips(name: OSPath) -> Bool Never! {
+    if name.encoded.len() > 0 && name.encoded[0] == U8{46} -> return true
+    text :: path_components.to_str(name) ?? return false
+    AUTHORITY_SOURCE_WALK_SKIPPED.contains(text)
+}

@@ -1,0 +1,83 @@
+use jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, diagnostic_from_registry, diagnostic_registry_row]
+
+// D-LINTPOLICY1=A, the override law (jet-pkg-model LintPolicy.rs plus the
+// `apply`/`is_denied` wall of jet_foundation::LintPolicy it delegates to).
+//
+// Warnings and lints never fail a build by default. A team opts into a wall
+// through `policy: { lints: { deny: […] } }` in `package.jet`; a denied lint
+// then fails the build as E1293 naming the exact lint and site instead of
+// only printing a warning. Lint names resolve through the one generated
+// diagnostic registry; no second code/name table exists here.
+
+// The stable lint name of a rendered diagnostic code, if it is a lint.
+fn pkg_lint_name_for_code(code: String) -> String? Never! {
+    row :: diagnostic_registry_row(code) ?? return None
+    row.lint_name
+}
+
+// Whether `code` names a lint listed in `deny`.
+pub fn pkg_lint_policy_is_denied(deny: [String], code: String) -> Bool Never! {
+    name :: pkg_lint_name_for_code(code) ?? return false
+    deny.contains(name)
+}
+
+// Apply the package wall to every lint one sema run emitted: a denied lint
+// becomes E1293; everything else passes through unchanged.
+pub fn pkg_lint_policy_apply(deny: [String], diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
+    out := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_LINT && pkg_lint_policy_is_denied(deny, diagnostic.code) {
+            &out.push(pkg_lint_e1293(diagnostic))
+        } else {
+            &out.push(diagnostic)
+        }
+    }
+    out
+}
+
+// E1293 from its registry row, filled with the original lint's wording.
+fn pkg_lint_e1293(original: Diagnostic) -> Diagnostic Never! {
+    row :: diagnostic_registry_row("E1293") ?? panic("diagnostic `E1293` has no generated Source registry row")
+    name :: pkg_lint_name_for_code(original.code) ?? original.code
+    why := original.why
+    loop why.ends_with(".") -> why = why.removesuffix(".")
+    holes :: [(key: String, value: String)]{
+        (key: "name", value: name),
+        (key: "code", value: original.code),
+        (key: "what", value: original.what),
+        (key: "why", value: why),
+        (key: "fix", value: original.fix)
+    }
+    diagnostic_from_registry("E1293", original.span, pkg_lint_fill_row(row.what, holes), pkg_lint_fill_row(row.why, holes), pkg_lint_fill_row(row.fix, holes))
+}
+
+// Replace each `{hole}` of a registry template with its value.
+fn pkg_lint_fill_row(template: String, holes: [(key: String, value: String)]) -> String Never! {
+    out := template
+    loop hole in holes -> out = out.replace("{{{hole.key}}}", hole.value)
+    out
+}
+
+// Whole-program enforcement: every emitted lint named in `package.jet`'s
+// `policy.lints.deny` fails the build as E1293. No `policy.lints` block is the
+// default: the result is empty and every lint stays a warning.
+pub fn pkg_lint_enforce(lints: [Diagnostic], manifest: PackageFacts) -> [Diagnostic] Never! {
+    deny :: manifest.policy.lints_deny ?? [String]{}
+    out := [Diagnostic]{}
+    loop diagnostic in pkg_lint_policy_apply(deny, lints) {
+        if diagnostic.code == "E1293" -> &out.push(diagnostic)
+    }
+    out
+}
+
+// Only the findings that remain warnings under this package's policy; denied
+// findings are reported by `pkg_lint_enforce` instead, so the wall is one
+// truthful report.
+pub fn pkg_lint_non_denied(lints: [Diagnostic], manifest: PackageFacts) -> [Diagnostic] Never! {
+    deny :: manifest.policy.lints_deny ?? [String]{}
+    out := [Diagnostic]{}
+    loop lint in lints {
+        if !pkg_lint_policy_is_denied(deny, lint.code) -> &out.push(lint)
+    }
+    out
+}

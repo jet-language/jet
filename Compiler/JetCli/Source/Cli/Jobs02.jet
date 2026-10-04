@@ -1,0 +1,2171 @@
+// PORT-PENDING 0725 crates-jet-cli-src-cli-slice-1799: crates/jet-cli/src/CLI.rs:1799-3965
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn retired_report_fix(_: &[String]) -> String {
+//RS     "jet inspect build".to_string()
+//RS }
+//RS 
+//RS fn retired_dossier_fix(_: &[String]) -> String {
+//RS     "jet inspect build".to_string()
+//RS }
+//RS 
+//RS 
+//RS pub const RETIRED_COMMANDS: &[RetiredCommandSpec] = &[
+//RS     RetiredCommandSpec {
+//RS         spelling: "facts",
+//RS         category: RetirementCategory::Semantic,
+//RS         error_code: "E2101",
+//RS         why: "the typed facts ledger is now the `inspect types` plane (D-CLI-ONE1=A)",
+//RS         fix: retired_facts_fix,
+//RS         rewrite: None,
+//RS     },
+//RS     RetiredCommandSpec {
+//RS         spelling: "authority",
+//RS         category: RetirementCategory::Semantic,
+//RS         error_code: "E2101",
+//RS         why: "authority inspection is the `inspect rights` plane (D-CLI-ONE1=A)",
+//RS         fix: retired_authority_fix,
+//RS         rewrite: None,
+//RS     },
+//RS     RetiredCommandSpec {
+//RS         spelling: "unsafe",
+//RS         category: RetirementCategory::Semantic,
+//RS         error_code: "E2101",
+//RS         why: "unsafe inspection is the `inspect gates` plane (D-CLI-ONE1=A)",
+//RS         fix: retired_unsafe_fix,
+//RS         rewrite: None,
+//RS     },
+//RS     RetiredCommandSpec {
+//RS         spelling: "guarantees",
+//RS         category: RetirementCategory::Semantic,
+//RS         error_code: "E2101",
+//RS         why: "guarantees inspection is the `inspect rights` plane (D-CLI-ONE1=A)",
+//RS         fix: retired_guarantees_fix,
+//RS         rewrite: None,
+//RS     },
+//RS     RetiredCommandSpec {
+//RS         spelling: "report",
+//RS         category: RetirementCategory::Semantic,
+//RS         error_code: "E2101",
+//RS         why: "build inspection is the `inspect build` plane (D-CLI-ONE1=A)",
+//RS         fix: retired_report_fix,
+//RS         rewrite: None,
+//RS     },
+//RS     RetiredCommandSpec {
+//RS         spelling: "dossier",
+//RS         category: RetirementCategory::Semantic,
+//RS         error_code: "E2101",
+//RS         why: "build inspection is the `inspect build` plane (D-CLI-ONE1=A)",
+//RS         fix: retired_dossier_fix,
+//RS         rewrite: None,
+//RS     },
+//RS     RetiredCommandSpec {
+//RS         spelling: "bench",
+//RS         category: RetirementCategory::Semantic,
+//RS         error_code: "E2101",
+//RS         why: "measurement is a mode of the test harness now (D-CLAIM-BENCH1=A)",
+//RS         fix: retired_bench_fix,
+//RS         rewrite: None,
+//RS     },
+//RS     RetiredCommandSpec {
+//RS         spelling: "serve",
+//RS         category: RetirementCategory::Semantic,
+//RS         error_code: "E2101",
+//RS         why: "`jet dev` is the only dev loop now; `--swap` forces its hot-swap path (D-CLI-DEVSERVE1=A)",
+//RS         fix: retired_serve_fix,
+//RS         rewrite: None,
+//RS     },
+//RS     RetiredCommandSpec {
+//RS         spelling: "store",
+//RS         category: RetirementCategory::Semantic,
+//RS         error_code: "E2101",
+//RS         why: "the store group is owned by Jetpack; project commands stay with Jet (D-VERDICT-2188-1)",
+//RS         fix: retired_store_fix,
+//RS         rewrite: None,
+//RS     },
+//RS     RetiredCommandSpec {
+//RS         spelling: "store fetch",
+//RS         category: RetirementCategory::Semantic,
+//RS         error_code: "E2101",
+//RS         why: "dependency fetching is the flat `jet fetch` command (D-CLI-STORE2=A)",
+//RS         fix: retired_store_fetch_fix,
+//RS         rewrite: None,
+//RS     },
+//RS     RetiredCommandSpec {
+//RS         spelling: "store verify",
+//RS         category: RetirementCategory::Semantic,
+//RS         error_code: "E2101",
+//RS         why: "package-store integrity checks belong to Jetpack's Hangar (D-VERDICT-2188-1)",
+//RS         fix: retired_store_verify_fix,
+//RS         rewrite: None,
+//RS     },
+//RS     RetiredCommandSpec {
+//RS         spelling: "store generations",
+//RS         category: RetirementCategory::Semantic,
+//RS         error_code: "E2101",
+//RS         why: "package-store generations belong to Jetpack's Hangar (D-VERDICT-2188-1)",
+//RS         fix: retired_store_generations_fix,
+//RS         rewrite: None,
+//RS     },
+//RS     RetiredCommandSpec {
+//RS         spelling: "store rollback",
+//RS         category: RetirementCategory::Semantic,
+//RS         error_code: "E2101",
+//RS         why: "package-store rollback belongs to Jetpack's Hangar (D-VERDICT-2188-1)",
+//RS         fix: retired_store_rollback_fix,
+//RS         rewrite: None,
+//RS     },
+//RS     RetiredCommandSpec {
+//RS         spelling: "store gc",
+//RS         category: RetirementCategory::Semantic,
+//RS         error_code: "E2101",
+//RS         why: "package-store cleanup is the sole `jet clean` intent (D-CLI-STORE2=A)",
+//RS         fix: retired_store_gc_fix,
+//RS         rewrite: None,
+//RS     },
+//RS     RetiredCommandSpec {
+//RS         spelling: "store lock",
+//RS         category: RetirementCategory::Semantic,
+//RS         error_code: "E2101",
+//RS         why: "script locking is a `jet fetch` flag, not a separate command (D-CLI-STORE2=A)",
+//RS         fix: retired_store_lock_fix,
+//RS         rewrite: None,
+//RS     },
+//RS     RetiredCommandSpec {
+//RS         spelling: "lock",
+//RS         category: RetirementCategory::Semantic,
+//RS         error_code: "E2101",
+//RS         why: "script locking is a `jet fetch` flag, not a separate command (D-CLI-STORE2=A)",
+//RS         fix: retired_lock_fix,
+//RS         rewrite: None,
+//RS     },
+//RS ];
+//RS 
+//RS 
+//RS pub fn retired_command(argv: &[String]) -> Option<&'static RetiredCommandSpec> {
+//RS     RETIRED_COMMANDS
+//RS         .iter()
+//RS         .filter(|spec| {
+//RS             spec.spelling
+//RS                 .split_whitespace()
+//RS                 .enumerate()
+//RS                 .all(|(index, word)| argv.get(index).is_some_and(|arg| arg.as_str() == word))
+//RS         })
+//RS         .max_by_key(|spec| spec.spelling.split_whitespace().count())
+//RS }
+//RS 
+//RS pub fn is_retired_root(name: &str) -> bool {
+//RS     RETIRED_COMMANDS
+//RS         .iter()
+//RS         .filter(|spec| spec.spelling.split_whitespace().count() == 1)
+//RS         .any(|spec| spec.spelling.split_whitespace().next() == Some(name))
+//RS }
+//RS 
+//RS /// D-CLI-SURFACE1=B / D-CLI-SURFACE2=A / D-CLI-SURFACE3=B: canonical top-level
+//RS /// frequency ring. Moved handler names remain in the internal registry only so
+//RS /// normalized grouped argv reaches the real dispatcher; generators never
+//RS /// advertise moved, retired, or the E0043 teaching-only `install` spelling.
+//RS pub fn is_canonical_top_level(name: &str) -> bool {
+//RS     moved_command_group(name).is_none() && !is_retired_root(name) && name != "install"
+//RS }
+//RS 
+//RS 
+//RS 
+//RS /// Every global flag the driver understands. Used to flag-check and to suggest
+//RS /// on a typo (E2102), and to complete after `--`.
+//RS const BASE_FLAGS: &[FlagSpec] = &[
+//RS     FlagSpec { long: "--live", help: "With inspect: Process id for a live plane scope" },
+//RS     FlagSpec { long: "--observe", help: "With run: Expose bounded live runtime facts for attachment" },
+//RS     FlagSpec { long: "--raw-frames", help: "With debug: Show generated Rust frames and scopes (expert)" },
+//RS     FlagSpec { long: "--dap", help: "With debug: Speak the Debug Adapter Protocol over stdio" },
+//RS     FlagSpec { long: "--gc-trace", help: "With run/dev: Record bounded automatic GC-promotion evidence" },
+//RS     FlagSpec { long: "--structural", help: "With diff/merge: Compare checked definitions by semantic identity" },
+//RS     FlagSpec { long: "--base-receipt", help: "With review: Proof receipt for the base change-set side" },
+//RS     FlagSpec { long: "--receipt", help: "With review: Proof receipt for the reviewed change-set side" },
+//RS     FlagSpec { long: "--out", help: "With structural merge: Write the checked result to this path" },
+//RS     FlagSpec { long: "--repo", help: "With merge install-driver: Git worktree to configure" },
+//RS     FlagSpec { long: MACHINE_OUTPUT_FLAG, help: "Emit machine-readable facts or diagnostics" },
+//RS     FlagSpec { long: "--topic", help: "With inspect digest: Emit one digest topic" },
+//RS     FlagSpec { long: "--to", help: "With publish/cache/db migrate: Foreign registry, prune target size, or migration target version" },
+//RS     FlagSpec { long: "--list-topics", help: "With inspect digest: List digest topics" },
+//RS     FlagSpec { long: "--kind", help: "With inspect gates/package: Filter one gate or bundle kind" },
+//RS     // #1659 criterion 3: one spelling, every command. Suppresses non-error
+//RS     // status/progress output (watch banners, hot-swap notices,
+//RS     // confirmations); never suppresses errors or requested data.
+//RS     FlagSpec { long: "--quiet", help: "Suppress non-error status output" },
+//RS     FlagSpec { long: "--color", help: "Color: auto | always | never" },
+//RS     FlagSpec { long: "--version", help: "With package/new: Set bundle or migration version; global flag prints compiler version" },
+//RS     FlagSpec { long: "--endpoint", help: "With self-update: Signed toolchain channel endpoint" },
+//RS     FlagSpec { long: "--channel", help: "With self-update: Toolchain channel name" },
+//RS     FlagSpec { long: "--platform", help: "With self-update: Toolchain target triple" },
+//RS     FlagSpec { long: "--trust-key", help: "With self-update: Public trust-key file" },
+//RS     FlagSpec { long: "--apply", help: "With self-update/generate/new: Apply the verified artifact or planned source writes" },
+//RS     FlagSpec { long: "--preview", help: "With new: Preview deterministic backend source writes without applying them" },
+//RS     FlagSpec { long: "--remove", help: "With new: Remove only unchanged outputs recorded by the scaffold receipt" },
+//RS     FlagSpec { long: "--path", help: "With new: Route or output path, defaulting to `/<name>`" },
+//RS     FlagSpec { long: "--route", help: "With new: Alias for `--path`" },
+//RS     FlagSpec { long: "--model", help: "With new: Model name recorded beside the route source" },
+//RS     FlagSpec { long: "--allow-unofficial", help: "With self-update: Explicitly allow a local keyless channel" },
+//RS     FlagSpec { long: "--check", help: "With fmt/learn: Check without changing files (CI gate)" },
+//RS     FlagSpec { long: "--lang", help: "With fmt: Delegate non-Jet files to the environment formatter for this language" },
+//RS     FlagSpec { long: "--restore-role-files", help: "With init: Restore the exact pre-package.jet role files" },
+//RS     FlagSpec { long: "--diff", help: "With fmt --check: Also print unified diffs for each changed file" },
+//RS     FlagSpec { long: "--simplify", help: "With fmt: Rewrite to the simplest ratified spelling" },
+//RS     FlagSpec { long: "--changed", help: "With fmt: Format only VCS-changed .jet files (requires git)" },
+//RS     FlagSpec { long: "--explicit-copies", help: "With fmt: Materialize implicit read-view copies as `~`" },
+//RS     FlagSpec { long: "--skipped", help: "With project parts: Show modules omitted from automatic discovery" },
+//RS     FlagSpec { long: "--stdin-path", help: "With fmt -: Path label used in diagnostics when reading from stdin" },
+//RS     FlagSpec { long: "--small", help: "With build/run/jobs: Favor a smaller binary" },
+//RS     FlagSpec { long: "--lib", help: "With build: Emit the native Library and C header" },
+//RS     FlagSpec { long: "--output", help: "With build/run/dev/jobs/package: Select a named output (build --lib selects a Library; Canvas uses it as the initial selection)" },
+//RS     FlagSpec { long: "--locked", help: "With build/fetch/jobs/run: Require locked dependency and provenance facts" },
+//RS     FlagSpec { long: "--effect", help: "With find: Require an effect such as FS.Read" },
+//RS     FlagSpec { long: "--example", help: "With find: Search by input/output example" },
+//RS     // D-CLI-STORE2=A: script locking folds into `fetch`, not a separate verb.
+//RS     FlagSpec { long: "--lock", help: "With fetch/db migrate/new: Lock dependency fetching or choose a migration/scaffold lock policy" },
+//RS     FlagSpec { long: "--read-only", help: "With shared-store enroll: Grant read-only broker access" },
+//RS     FlagSpec { long: "--host", help: "With cache limit: Host-wide store cap" },
+//RS     FlagSpec { long: "--fd", help: "With shared-store broker: Inherited broker socket descriptor" },
+//RS     // D-CLI-BARE1=A / D-TASKS-LIST1=A: select one workspace member.
+//RS     FlagSpec { long: "-p", help: "With run/dev/debug/check/build/jobs: Pick a workspace member by name" },
+//RS     FlagSpec { long: "--annotated", help: "With new: Include commented example deps" },
+//RS     FlagSpec { long: "--force", help: "With publish: Bypass pre-publish gate (with warning)" },
+//RS     // #1659 criterion 1 (round 2): these 8 flags previously lived only in
+//RS     // usage-string prose (`NestedCommandSpec::usage`), invisible to
+//RS     // `is_known_flag`/`closest_flag` (E2102 "did you mean"), the man page,
+//RS     // and shell completions. Real rows here fix all three renderers at once.
+//RS     FlagSpec { long: "--no-sign", help: "With publish: Skip the optional author signature (registry metadata is still signed)" },
+//RS     FlagSpec { long: "--registry", help: "With keygen/key: Registry name to generate or manage a signing key for" },
+//RS     FlagSpec { long: "--pkg", help: "With bind: Library name for the generated binding module" },
+//RS     FlagSpec { long: "--shape", help: "With bind: Binding facade shape: automatic or native" },
+//RS     FlagSpec { long: "--freeze", help: "With bind: Record the resolved binding plan in the project lock" },
+//RS     FlagSpec { long: "--policy", help: "With bind: Binding policy: automatic or frozen" },
+//RS     FlagSpec { long: "--accept", help: "With bind --update: Accept exactly this candidate plan digest" },
+//RS     FlagSpec { long: "--import", help: "With build: Import and inspect an existing foreign build graph" },
+//RS     FlagSpec { long: "--clang", help: "With bind cpp: Path to the clang binary used to parse the header" },
+//RS     FlagSpec { long: "--ar", help: "With bind cpp: Path to the ar archiver used to build the static library" },
+//RS     FlagSpec { long: "--before", help: "With schema squash: Re-baseline migrations before this version" },
+//RS     FlagSpec { long: "--spdx", help: "With sbom: Emit SPDX tag-value format (default)" },
+//RS     FlagSpec { long: "--cyclonedx", help: "With sbom: Emit CycloneDX JSON format" },
+//RS     FlagSpec { long: "--advisory-db", help: "With audit: Path to advisory database file" },
+//RS     FlagSpec { long: "--vendor-dir", help: "With vendor: Directory to copy dependencies into (default vendor/)" },
+//RS     FlagSpec { long: "--sbom", help: "With build: Also write an SPDX SBOM next to the binary" },
+//RS     FlagSpec { long: "--verbose", help: "With build/jobs: Print the bridge steps; with check: print the status line, proof rows, and receipt notices; with run/dev/test: show advisory lints; with explain: show a syntax token's registry name and decision" },
+//RS     FlagSpec { long: "--template", help: "With new: Start from a named template: cli, ui, web, or overrides" },
+//RS     FlagSpec { long: "--sort", help: "With help: Order commands by use (frequency, the default), A to Z (az), or Z to A (za)" },
+//RS     FlagSpec { long: "--online", help: "With doctor: Allow network checks" },
+//RS     FlagSpec { long: "--fix", help: "With doctor: Apply auto-fixable problems" },
+//RS     FlagSpec { long: DRY_RUN_FLAG, help: "With package/rewrite commands/generate: Preview changes without writing" },
+//RS     FlagSpec { long: "--entry", help: "With generate: Source file containing the generator job" },
+//RS     FlagSpec { long: "--keep", help: "With try: Keep a clean speculative edit" },
+//RS     FlagSpec { long: "--edition", help: "With fix: Apply edition migration rewrites --edition=<year>" },
+//RS     FlagSpec { long: "--all", help: "With fix: Apply safety classes beyond formatting and behavior-preserving" },
+//RS     FlagSpec { long: "--try-anyway", help: "With dev: Interpret past unsupported features (no guarantees)" },
+//RS     FlagSpec { long: "--interpret", help: "With dev/jobs: Force the tier-0 TIR interpreter" },
+//RS     FlagSpec { long: "--trace-tiers", help: "With run/dev: Print per-function Cranelift vs interpreter tier selection; with test: print AOT marker" },
+//RS     FlagSpec { long: "--restart", help: "With dev: Always rerun from scratch after a save" },
+//RS     FlagSpec { long: "--swap", help: "With dev: Hot-swap compatible edits and restart after type changes" },
+//RS     FlagSpec { long: "--reload", help: "With explain: Explain the checked reload decision for a source or project path" },
+//RS     FlagSpec { long: "--watch", help: "With run/dev/learn/test/jobs: Re-run on dependency changes; test default off with r=failed, a=all, o=output; jobs accepts --watch[=<on|off>]; --watch=off runs once" },
+//RS     FlagSpec { long: "--graph", help: "With jobs: Show the checked job dependency graph" },
+//RS     FlagSpec { long: "--status", help: "With jobs: Show fresh or stale status for declared jobs" },
+//RS     FlagSpec { long: "--explain", help: "With jobs/package: Explain dependencies, phases, cache identity, and admission facts" },
+//RS     FlagSpec { long: CANVAS_FLAG, help: "With dev: Open the full Canvas IDE over this dev session" },
+//RS     FlagSpec { long: "--app", help: "With dev: Select a checked local-app function" },
+//RS     FlagSpec { long: "--share", help: "With dev: Select local-app sharing authority: loopback or lan" },
+//RS     FlagSpec { long: "--canvas-host", help: "With dev: With --canvas, bind host (loopback by default)" },
+//RS     FlagSpec { long: "--canvas-port", help: "With dev: With --canvas, bind an explicit port" },
+//RS     FlagSpec { long: "--canvas-transport", help: "With dev: With --canvas, select the named transport" },
+//RS     FlagSpec { long: "--canvas-authority", help: "With dev: With --canvas, select loopback or remote authority" },
+//RS     FlagSpec { long: "--canvas-audit", help: "With dev: With --canvas, enable request/rebuild audit output" },
+//RS     // E2-M18 REPL flags.
+//RS     FlagSpec { long: "--project", help: "With repl: Load package settings and imports from this directory" },
+//RS     FlagSpec { long: "--console", help: "With repl: Open the project-loaded capability-gated console" },
+//RS     FlagSpec { long: "--sandbox", help: "With repl: Use the reversible data sandbox (`--sandbox data`)" },
+//RS     FlagSpec { long: "--console-ttl", help: "With repl: Expire console authority after this many milliseconds" },
+//RS     // E3 interactive scripting flags.
+//RS     FlagSpec { long: "--protocol", help: "With notebook: Use the bounded headless JSONL/script session" },
+//RS     FlagSpec { long: "--headless", help: "With notebook: Use the bounded headless session" },
+//RS     FlagSpec { long: "--bind", help: "With notebook: Bind the local HTTP client to this address" },
+//RS     FlagSpec { long: "--token", help: "With notebook/dev: Require a bearer token for the session" },
+//RS     // E2-M16 flags.
+//RS     // D-RUN-PREPARE1=A: `jet run` delegates project environment realization
+//RS     // to Jetpack unless the caller explicitly opts out.
+//RS     FlagSpec { long: "--no-prepare", help: "With run: Refuse Jetpack project environment preparation" },
+//RS     FlagSpec { long: "--pure", help: "With eval: Reject code with side effects" },
+//RS     FlagSpec { long: "--allow", help: "With run/build/jobs/repl/db: Allow comma-separated effect roots or leaves as --allow=RIGHTS" },
+//RS     FlagSpec { long: "--deny", help: "With run/build/jobs/repl/db: Deny comma-separated effect roots or leaves as --deny=RIGHTS" },
+//RS     FlagSpec { long: "--offline", help: "With env/run/dev/test/cc/c++: Reuse only cached signed toolchain and package data" },
+//RS     FlagSpec { long: "--fixtures", help: "With env/run/dev/test/cc/c++: Use an explicit fixture bundle" },
+//RS     FlagSpec { long: "--project-root", help: "With cc/c++: Scope source paths to a project directory" },
+//RS     FlagSpec { long: "--build-root", help: "With cc/c++: Scope output paths to a build directory" },
+//RS     FlagSpec { long: "-c", help: "With cc/c++: Compile sources without linking" },
+//RS     FlagSpec { long: "-o", help: "With cc/c++: Choose the output path" },
+//RS     FlagSpec { long: "-MMD", help: "With cc/c++: Emit user-header dependency data" },
+//RS     FlagSpec { long: "-MD", help: "With cc/c++: Emit dependency data" },
+//RS     FlagSpec { long: "-MF", help: "With cc/c++: Choose the dependency-file path" },
+//RS     FlagSpec { long: "-MT", help: "With cc/c++: Choose the dependency target" },
+//RS     FlagSpec { long: "--sysroot", help: "With cc/c++: Reserved; target selects the pinned sysroot" },
+//RS     FlagSpec { long: "-I", help: "With cc/c++: Add a project-relative include path" },
+//RS     FlagSpec { long: "-D", help: "With cc/c++: Define a preprocessor symbol" },
+//RS     FlagSpec { long: "-L", help: "With cc/c++: Add a project-relative library path" },
+//RS     FlagSpec { long: "-l", help: "With cc/c++: Link a declared library" },
+//RS     FlagSpec { long: "-std", help: "With cc/c++: Select the language standard" },
+//RS     FlagSpec { long: "-dumpmachine", help: "With cc/c++: Print the pinned target triple" },
+//RS     FlagSpec { long: "-print-sysroot", help: "With cc/c++: Print the pinned virtual sysroot" },
+//RS     FlagSpec { long: "-dumpversion", help: "With cc/c++: Print the pinned compiler version" },
+//RS     FlagSpec { long: "-v", help: "With cc/c++: Print pinned toolchain details or compile verbosely" },
+//RS     // D-ONCE-GATE1=A: one invocation gate surface covers every audited escape.
+//RS     FlagSpec { long: "--gate", help: "With build/run/dev/jobs: Allow one audited gate as --gate name=allow" },
+//RS     FlagSpec { long: "--target", help: "With build/run/dev/jobs/package/cc/c++/flash: Select a target (triple, board.<name>, or named database target)" },
+//RS     FlagSpec { long: "--up", help: "With db migrate/new: Checked forward SQL" },
+//RS     FlagSpec { long: "--sql", help: "With db migrate/new: Alias for checked forward SQL" },
+//RS     FlagSpec { long: "--down", help: "With db migrate/new: Checked inverse SQL for rollback" },
+//RS     FlagSpec { long: "--database", help: "With db migrate: Project-relative database path (receipt identity is redacted)" },
+//RS     FlagSpec { long: "--risk", help: "With db migrate/new: Data-risk note shown before writes" },
+//RS     FlagSpec { long: "--step", help: "With db migrate: Number of ordered migrations to apply or roll back" },
+//RS     // D-DB-CONSOLE1=A: bounded SQL console options share the canonical flag
+//RS     // registry with migration options and generated help/completions.
+//RS     FlagSpec { long: "--format", help: "With db: Output format: human, text, json, jsonl, or csv" },
+//RS     FlagSpec { long: "--csv", help: "With db: Select deterministic CSV output" },
+//RS     FlagSpec { long: "--jsonl", help: "With db: Emit one JSON value per row" },
+//RS     FlagSpec { long: "--machine", help: "With db: Select machine-readable output" },
+//RS     FlagSpec { long: "--human", help: "With db: Select human-readable output" },
+//RS     FlagSpec { long: "--no-color", help: "With db: Disable color in console output" },
+//RS     FlagSpec { long: "--force-color", help: "With db: Force color in console output" },
+//RS     FlagSpec { long: "--query", help: "With db: Execute one SQL query" },
+//RS     FlagSpec { long: "--script", help: "With db: Execute SQL from a script path" },
+//RS     FlagSpec { long: "--table", help: "With db: Set an explicit table identity as NAME=PATH" },
+//RS     FlagSpec { long: "--max-rows", help: "With db: Bound decoded input rows" },
+//RS     FlagSpec { long: "--max-bytes", help: "With db: Bound source or script bytes" },
+//RS     FlagSpec { long: "--max-output-bytes", help: "With db: Bound one rendered result" },
+//RS     FlagSpec { long: "--image", help: "With flash: Firmware image to program" },
+//RS     FlagSpec { long: "--audit", help: "With flash: Target audit JSON for the image" },
+//RS     FlagSpec { long: "--adapter", help: "With flash: Flash adapter: probe-rs, openocd, or emulator" },
+//RS     FlagSpec { long: "--package", help: "With package: Set the bundle package identifier" },
+//RS     FlagSpec { long: "--name", help: "With package: Set the bundle executable name" },
+//RS     FlagSpec { long: "--executable", help: "With package: Path to the executable to bundle" },
+//RS     FlagSpec { long: "--icon", help: "With package: Path to the bundle icon" },
+//RS     FlagSpec { long: "--icon-format", help: "With package: Icon format: png, icns, ico, or svg" },
+//RS     FlagSpec { long: "--icon-size", help: "With package: Icon size in pixels" },
+//RS     FlagSpec { long: "--publisher", help: "With package: Publisher metadata" },
+//RS     FlagSpec { long: "--description", help: "With package: Application description metadata" },
+//RS     FlagSpec { long: "--update-channel", help: "With package: Updater channel" },
+//RS     FlagSpec { long: "--update-url", help: "With package: Updater URL" },
+//RS     FlagSpec { long: "--game", help: "With package: Build a game bundle" },
+//RS     FlagSpec { long: "--source", help: "With package: Project source or package root for a game bundle" },
+//RS     FlagSpec { long: "--phase", help: "With package: Comma-separated game phases: build, cook, stage, package, export, deploy, run" },
+//RS     FlagSpec { long: "--backend", help: "With package: Game build backend: aot" },
+//RS     FlagSpec { long: "--renderer", help: "With package: Game renderer authority: headless or raylib" },
+//RS     FlagSpec { long: "--cook", help: "With package: Alias for --cook-mode" },
+//RS     FlagSpec { long: "--cook-mode", help: "With package: Asset cooking mode: fast, reproducible, or scripts-only" },
+//RS     FlagSpec { long: "--export", help: "With package: Export phase or named export preset" },
+//RS     FlagSpec { long: "--export-preset", help: "With package: Named export preset: default, store, or headless" },
+//RS     FlagSpec { long: "--deploy", help: "With package: Include the deploy phase" },
+//RS     FlagSpec { long: "--deploy-to", help: "With package: Explicit deployment destination" },
+//RS     FlagSpec { long: "--crash-reporter", help: "With package: Crash reporter policy: off, on, or opt-in" },
+//RS     FlagSpec { long: "--crash-consent", help: "With package: Crash reporter consent: not-requested, granted, or denied" },
+//RS     FlagSpec { long: "--cancel", help: "With package: Cancel owned game staging" },
+//RS     FlagSpec { long: "--resume", help: "With package: Resume an owned game stage" },
+//RS     FlagSpec { long: "--clean", help: "With package: Force-clean owned game cache/staging" },
+//RS     FlagSpec { long: "--force-clean", help: "With package: Alias for --clean" },
+//RS     FlagSpec { long: "--scripts-only", help: "With package: Cook only script assets" },
+//RS     FlagSpec { long: "--run-now", help: "With package: Explicitly opt into the run phase" },
+//RS     FlagSpec { long: "--run", help: "With package: Include the run phase" },
+//RS     // D-ENVFLAG1=A: `--env` selects one environment module; it never names a
+//RS     // preset and has no retired-spelling alias.
+//RS     FlagSpec { long: "--env", help: "With env/run/dev/test: Select one declared env.<name> module" },
+//RS     // D-CONF-WORD1=A: `--preset` selects a named environment composition.
+//RS     FlagSpec { long: "--preset", help: "With env/run/dev/test: Select one declared environment preset" },
+//RS     FlagSpec {
+//RS         long: "--explain-partition",
+//RS         help: "With build --target=web: Show which code becomes JavaScript or WebAssembly",
+//RS     },
+//RS     FlagSpec { long: "--fresh", help: "With test: Bypass only cached test results (default off); the build cache remains reusable" },
+//RS     FlagSpec { long: "--docs", help: "With test: Run checked documentation examples only (default off)" },
+//RS     FlagSpec { long: "--where", help: "With test: Filter recorded package, dependency, path, tag, or status facts (default all) as --where=<expr>" },
+//RS     FlagSpec { long: "--capture", help: "With test: Capture output as failed, all, or none (default failed); watch key o cycles it" },
+//RS     FlagSpec { long: "--no-capture", help: "With dev: Disable automatic replay capture for this session" },
+//RS     FlagSpec { long: "--update-snapshots", help: "With test: Replace expected snapshot output" },
+//RS     FlagSpec { long: "--update", help: "With import: Merge generated Jet into an existing target" },
+//RS     FlagSpec { long: "--coverage", help: "With test/inspect build: Show function or diagnostic coverage" },
+//RS     FlagSpec { long: "--verify", help: "With build: Rebuild and compare one indexed receipt artifact" },
+//RS     FlagSpec { long: "--rust", help: "With emit: Print generated Rust source" },
+//RS     FlagSpec { long: "--emit-generated", help: "With build: Copy generated Jet sources into `.jet/generated/`" },
+//RS     FlagSpec { long: "-u", help: "Short form of --update-snapshots" },
+//RS     // D-BUILDPROFILE1 (ratified 2026-06-25): named optimization bundles.
+//RS     FlagSpec { long: "--release", help: "With build/run/dev/jobs/test: Optimize for release" },
+//RS     FlagSpec { long: "--profile", help: "With build/run/dev/jobs/package/test: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle" },
+//RS     // D-CONF-KEY1=A: command-line contribution to one typed package setting.
+//RS     FlagSpec { long: "--set", help: "With build/run/dev/jobs/test: Set one declared package setting as key=value" },
+//RS     FlagSpec { long: "--builder", help: "With build/jobs: Select a previously bound remote builder" },
+//RS     // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.
+//RS     FlagSpec { long: "--a11y", help: "With lint: Check roles, labels, and other accessibility basics" },
+//RS     FlagSpec { long: "--complexity", help: "With lint: Report per-function cognitive complexity" },
+//RS     FlagSpec { long: "--cost", help: "With lint/explain: Show typed hidden-copy and fallback costs" },
+//RS     FlagSpec { long: "--max", help: "With lint --complexity: Fail when a function exceeds this score" },
+//RS     FlagSpec { long: "--scope", help: "With inspect: Choose a ledger or trust scope" },
+//RS     FlagSpec { long: "--core", help: "With inspect structure: Show the canonical core module export facts" },
+//RS     // D-TESTKIT1=A: the shared test name-selection flag.
+//RS     FlagSpec { long: "--filter", help: "With test: Only run claims whose name contains --filter=<substr>" },
+//RS     FlagSpec { long: "--grade", help: "With test: Select the generated property-test grade as --grade=generated" },
+//RS     FlagSpec { long: "--shuffle", help: "With test: Run tests in random (or --shuffle=<seed>) order" },
+//RS     FlagSpec { long: "--serial", help: "With test: Run tests one at a time instead of the parallel default" },
+//RS     FlagSpec { long: "--show-default", help: "With run/build/dev/test: Use and report the stock default" },
+//RS     FlagSpec { long: "--measure", help: "With test: Measure `.measure` claims" },
+//RS     // D-DX-BROWSERTEST1=A: native cross-browser test controls.
+//RS     FlagSpec { long: "--browser", help: "With test/db: Select browser engines for tests or serve a loopback database inspector" },
+//RS     FlagSpec { long: "--browser-retries", help: "With test: Retry each browser attempt up to five times" },
+//RS     FlagSpec { long: "--browser-reporter", help: "With test: Browser report format: text, json, or html" },
+//RS     FlagSpec { long: "--browser-ui", help: "With test: Write/open the local browser report viewer" },
+//RS     FlagSpec { long: "--browser-visual", help: "With test: Capture screenshots for passing browser attempts" },
+//RS     FlagSpec { long: "--browser-trace", help: "With test: Keep redacted BiDi trace entries for every browser attempt" },
+//RS     FlagSpec { long: "--browser-scaffold", help: "With test: Create an isolated browser-test project as --browser-scaffold=<name>" },
+//RS     FlagSpec { long: "--record", help: "With run/dev/test/debug: Record a named replay as --record=<name>" },
+//RS     FlagSpec { long: "--replay", help: "With inspect/debug: Consume a named replay artifact" },
+//RS     // D-TESTKIT1=A: `jet fuzz` (its own bespoke flags below are validated by
+//RS     // `owns_flag_vocabulary`; these two are listed for completions/the man page).
+//RS     FlagSpec { long: "--iterations", help: "With fuzz: Case budget --iterations=<n> (default 1000)" },
+//RS     FlagSpec { long: "--time", help: "With fuzz: Wall-clock budget in seconds --time=<n>" },
+//RS     FlagSpec { long: "--seed", help: "With fuzz: Base PRNG seed --seed=<n> (default: fixed, reproducible)" },
+//RS     FlagSpec { long: "--corpus", help: "With fuzz: Corpus directory --corpus=<dir> (default: .jet/fuzz/<test>)" },
+//RS     FlagSpec { long: "--lens", help: "With prove: Project the human report by an exact evidence facet" },
+//RS     // #1659 criterion 1 (round 2): see the block above --message for the
+//RS     // other 7 formerly usage-string-only flags.
+//RS     FlagSpec { long: "--facts", help: "With expand: Project inline, memory, web, effects, layout, derive, templates, or callable-signature facts --facts=<lens>" },
+//RS     FlagSpec { long: "--annotations", help: "With budget: CI annotations auto, none, or github" },
+//RS     FlagSpec { long: "--baseline", help: "With budget update: Selected baseline name" },
+//RS     FlagSpec { long: "--bootstrap", help: "With budget update: Create absent or stale baseline history" },
+//RS     FlagSpec { long: "--accept-regression", help: "With budget update: Explicitly accept a regression" },
+//RS     FlagSpec { long: "--reason", help: "With exceptional budget update: Checked-in reason" },
+//RS     FlagSpec { long: "--yes", help: "With budget update: Apply a valid non-interactive plan" },
+//RS     FlagSpec { long: "-y", help: "Short form of --yes" },
+//RS ];
+//RS 
+//RS pub static FLAGS: LazyLock<Vec<FlagSpec>> = LazyLock::new(|| BASE_FLAGS.to_vec());
+//RS 
+//RS /// Render the usage shape for a live command from the one registry: a group
+//RS /// renders its declared `CommandSpec::usage` when present, otherwise
+//RS /// `<group> <command>`; a nested action renders its
+//RS /// `NestedCommandSpec::usage`, and a flat command its own usage (falling back
+//RS /// to `[args]` when it takes no positional). Help, completions, and the man
+//RS /// page all read this one function.
+//RS pub fn command_usage(name: &str) -> String {
+//RS     if let Some(group) = command_group(name) {
+//RS         if let Some(usage) = group.usage {
+//RS             return format!("{} {}", BINARY_NAME, usage);
+//RS         }
+//RS         return format!("{} {} <command>", BINARY_NAME, group.name);
+//RS     }
+//RS     if let Some((group, action)) = moved_command(name) {
+//RS         return action
+//RS             .usage
+//RS             .lines()
+//RS             .map(|usage| format!("{} {} {}", BINARY_NAME, group.name, usage))
+//RS             .collect::<Vec<_>>()
+//RS             .join("\n");
+//RS     }
+//RS     // A flat command's own declared shape, when the registry carries one
+//RS     // (#2072). Falling back to `[args]` keeps rows that have no positional.
+//RS     if let Some(usage) = COMMANDS
+//RS         .iter()
+//RS         .find(|command| command.name == name)
+//RS         .and_then(|command| command.usage)
+//RS     {
+//RS         return format!("{} {}", BINARY_NAME, usage);
+//RS     }
+//RS     format!("{} {} [args]", BINARY_NAME, name)
+//RS }
+//RS 
+//RS /// Flags attached to one command, projected from the same rows used by flag
+//RS /// validation, completions, and the man page.
+//RS pub fn flags_for_command(name: &str) -> Vec<(&'static str, &'static str)> {
+//RS     FLAGS
+//RS         .iter()
+//RS         .filter(|flag| {
+//RS             let scoped = flag
+//RS                 .help
+//RS                 .strip_prefix("with ")
+//RS                 .or_else(|| flag.help.strip_prefix("With "))
+//RS                 .and_then(|rest| rest.split_once(':'))
+//RS                 .map(|(names, _)| {
+//RS                     names
+//RS                         .split(['/', ','])
+//RS                         .map(str::trim)
+//RS                         .any(|candidate| candidate == name)
+//RS                 })
+//RS                 .unwrap_or(false);
+//RS             let global = matches!(
+//RS                 flag.long,
+//RS                 MACHINE_OUTPUT_FLAG | "--quiet" | "--color"
+//RS             );
+//RS             scoped || global
+//RS         })
+//RS         .map(|flag| {
+//RS             let help = flag
+//RS                 .help
+//RS                 .strip_prefix("with ")
+//RS                 .or_else(|| flag.help.strip_prefix("With "))
+//RS                 .and_then(|rest| rest.split_once(':'))
+//RS                 .map(|(_, help)| help.trim())
+//RS                 .unwrap_or(flag.help);
+//RS             (flag.long, help)
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS 
+//RS /// D-HELP-SORT1=A with the owner's spelling: the order `jet help` lists
+//RS /// commands in. `Frequency` (the default) reads each row's measured
+//RS /// `frequency_rank`; `jet help --sort az` and `--sort za` list by name for
+//RS /// lookup. Man and completions keep the registry's declaration order.
+//RS #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+//RS pub enum HelpOrder {
+//RS     #[default]
+//RS     Frequency,
+//RS     Az,
+//RS     Za,
+//RS }
+//RS 
+//RS impl HelpOrder {
+//RS     /// The accepted `--sort` values, as a diagnostic lists them.
+//RS     pub const NAMES: &'static str = "frequency, az, za";
+//RS 
+//RS     pub fn parse(value: &str) -> Option<Self> {
+//RS         match value {
+//RS             "frequency" => Some(Self::Frequency),
+//RS             "az" => Some(Self::Az),
+//RS             "za" => Some(Self::Za),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Every `COMMANDS` row in `order`. Names compare case-insensitively, so the
+//RS /// capitalized `Fold` sits between `flash` and `fuzz`.
+//RS pub fn commands_in(order: HelpOrder) -> Vec<&'static CommandSpec> {
+//RS     let by_name = |left: &CommandSpec, right: &CommandSpec| {
+//RS         left.name
+//RS             .bytes()
+//RS             .map(|byte| byte.to_ascii_lowercase())
+//RS             .cmp(right.name.bytes().map(|byte| byte.to_ascii_lowercase()))
+//RS     };
+//RS     let mut commands: Vec<&'static CommandSpec> = COMMANDS.iter().collect();
+//RS     match order {
+//RS         HelpOrder::Frequency => commands.sort_by_key(|command| command.frequency_rank),
+//RS         HelpOrder::Az => commands.sort_by(|left, right| by_name(*left, *right)),
+//RS         HelpOrder::Za => commands.sort_by(|left, right| by_name(*right, *left)),
+//RS     }
+//RS     commands
+//RS }
+//RS 
+//RS /// Full top-level help generated from the live command and flag registries,
+//RS /// commands and group sections both in `order`. Completion and man
+//RS /// generators expose the same canonical rows.
+//RS pub fn usage_page(version: &str, order: HelpOrder) -> String {
+//RS     let mut output = format!(
+//RS         "Welcome to {lang}! (v{version})\n\nUsage:\n",
+//RS         lang = crate::Syntax::LANG_NAME,
+//RS     );
+//RS     let commands = commands_in(order);
+//RS     for command in commands
+//RS         .iter()
+//RS         .filter(|command| is_canonical_top_level(command.name))
+//RS     {
+//RS         output.push_str(&format!(
+//RS             "  {:<36} {}\n",
+//RS             command_usage(command.name),
+//RS             command.summary
+//RS         ));
+//RS     }
+//RS     for group in commands.iter().filter(|command| command.is_group()) {
+//RS         output.push_str(&format!(
+//RS             "\n{} Commands:\n",
+//RS             command_group_label(group.name)
+//RS         ));
+//RS         output.push_str(&command_group_usage(group.name));
+//RS     }
+//RS     output.push_str("\nFlags:\n");
+//RS     for flag in FLAGS.iter() {
+//RS         output.push_str(&format!("  {:<28} {}\n", flag.long, flag.help));
+//RS     }
+//RS     output
+//RS }
+//RS 
+//RS /// Is `name` a built-in command?
+//RS pub fn is_builtin(name: &str) -> bool {
+//RS     COMMANDS.iter().any(|c| c.name == name)
+//RS         // Group normalization rewrites canonical `jet <group> <action>` into
+//RS         // its internal handler word after rejecting the retired bare form.
+//RS         || COMMANDS
+//RS             .iter()
+//RS             .flat_map(|c| c.actions)
+//RS             .any(|action| action.handler.dispatch_word() == name)
+//RS         // E0043 teaching path: `jet install` is intentionally not advertised in
+//RS         // help/completions, but dispatch must reach its bespoke "use fetch"
+//RS         // diagnostic instead of generic unknown-command E2101.
+//RS         || name == "install"
+//RS         || is_retired_root(name)
+//RS }
+//RS /// Validate the parser-facing registry before the host dispatches an argv.
+//RS ///
+//RS /// `COMMANDS`, `InspectPlane`, and `FLAGS` are the parser's one source of
+//RS /// truth. This guard checks the normalization invariants and exercises the
+//RS /// real inspect parser for every registered inspect plane. The optional host
+//RS /// projection is generated by the dispatch macro in `Source/main.rs`; it is
+//RS /// not a second hand-maintained route table.
+//RS pub fn parser_inventory_violations() -> Vec<String> {
+//RS     parser_inventory_violations_against(None)
+//RS }
+//RS 
+//RS pub fn parser_inventory_violations_against(
+//RS     host_dispatch_words: Option<&[&str]>,
+//RS ) -> Vec<String> {
+//RS     match host_dispatch_words {
+//RS         Some(words) => {
+//RS             let groups = [words];
+//RS             parser_inventory_violations_with_host(Some(&groups))
+//RS         }
+//RS         None => parser_inventory_violations_with_host(None),
+//RS     }
+//RS }
+//RS 
+//RS pub fn parser_inventory_violations_against_slices(
+//RS     host_dispatch_words: Option<&[&[&str]]>,
+//RS ) -> Vec<String> {
+//RS     parser_inventory_violations_with_host(host_dispatch_words)
+//RS }
+//RS 
+//RS fn parser_inventory_violations_with_host(
+//RS     host_dispatch_words: Option<&[&[&str]]>,
+//RS ) -> Vec<String> {
+//RS     let host_has = |word: &str| {
+//RS         host_dispatch_words.is_none_or(|groups| {
+//RS             groups
+//RS                 .iter()
+//RS                 .any(|words| words.iter().any(|candidate| *candidate == word))
+//RS         })
+//RS     };
+//RS     let registry_has_dispatch = |word: &str| {
+//RS         word == "install"
+//RS             || COMMANDS
+//RS                 .iter()
+//RS                 .any(|command| command.actions.is_empty() && command.name == word)
+//RS             || command_groups().flat_map(|group| group.actions).any(|action| {
+//RS                 action.handler.dispatch_word() == word
+//RS             })
+//RS             // A non-exhaustive group owns verbs the registry deliberately does
+//RS             // not model (`jet os check`, `jet env export`), so the host routes
+//RS             // the group word itself and the group's own dispatcher decides.
+//RS             || COMMANDS.iter().any(|command| {
+//RS                 command.name == word && !command.actions.is_empty() && !command.exhaustive
+//RS             })
+//RS     };
+//RS     let mut violations = Vec::new();
+//RS     let mut inspect_group = None;
+//RS     for (index, command) in COMMANDS.iter().enumerate() {
+//RS         if command.name.trim().is_empty() {
+//RS             violations.push(format!("command row {index} has an empty name"));
+//RS         }
+//RS         if command.summary.trim().is_empty() {
+//RS             violations.push(format!("command `{}` has an empty summary", command.name));
+//RS         }
+//RS         if COMMANDS[..index]
+//RS             .iter()
+//RS             .any(|previous| previous.name == command.name)
+//RS         {
+//RS             violations.push(format!("duplicate command row `{}`", command.name));
+//RS         }
+//RS         if command.name == "inspect" {
+//RS             inspect_group = Some(command);
+//RS         }
+//RS         if host_dispatch_words.is_some()
+//RS             && command.actions.is_empty()
+//RS             && is_canonical_top_level(command.name)
+//RS             && !host_has(command.name)
+//RS         {
+//RS             violations.push(format!(
+//RS                 "canonical command `{}` has no host dispatch route",
+//RS                 command.name
+//RS             ));
+//RS         }
+//RS         let mut actions = Vec::new();
+//RS         for action in command.actions {
+//RS             if action.name.trim().is_empty() {
+//RS                 violations.push(format!(
+//RS                     "command `{}` has a nested action with an empty name",
+//RS                     command.name
+//RS                 ));
+//RS             }
+//RS             if action.usage.trim().is_empty() {
+//RS                 violations.push(format!(
+//RS                     "nested action `{} {}` has empty usage",
+//RS                     command.name, action.name
+//RS                 ));
+//RS             }
+//RS             if action.summary.trim().is_empty() {
+//RS                 violations.push(format!(
+//RS                     "nested action `{} {}` has empty summary",
+//RS                     command.name, action.name
+//RS                 ));
+//RS             }
+//RS             if !actions.iter().any(|name| *name == action.name) {
+//RS                 actions.push(action.name);
+//RS             } else {
+//RS                 violations.push(format!(
+//RS                     "duplicate nested action `{} {}`",
+//RS                     command.name, action.name
+//RS                 ));
+//RS             }
+//RS             let dispatch_word = action.handler.dispatch_word();
+//RS             if dispatch_word.trim().is_empty() {
+//RS                 violations.push(format!(
+//RS                     "nested action `{} {}` has an empty dispatch word",
+//RS                     command.name, action.name
+//RS                 ));
+//RS             }
+//RS             if host_dispatch_words.is_some() && !host_has(dispatch_word) {
+//RS                 violations.push(format!(
+//RS                     "nested action `{} {}` routes to missing host dispatch `{}`",
+//RS                     command.name, action.name, dispatch_word
+//RS                 ));
+//RS             }
+//RS             // Most grouped handlers consume the group word after
+//RS             // normalization. `inspect env` is the one deliberate pair whose
+//RS             // handler consumes both words without rewriting the argv.
+//RS             let consumes_pair = command.name == "inspect" && action.name == "env";
+//RS             if action.handler.keeps_group()
+//RS                 && dispatch_word != command.name
+//RS                 && !consumes_pair
+//RS             {
+//RS                 violations.push(format!(
+//RS                     "nested action `{} {}` keeps a mismatched group for `{}`",
+//RS                     command.name, action.name, dispatch_word
+//RS                 ));
+//RS             }
+//RS             if !action.handler.keeps_group() && dispatch_word == command.name {
+//RS                 violations.push(format!(
+//RS                     "nested action `{} {}` strips to its owning group `{}`",
+//RS                     command.name, action.name, dispatch_word
+//RS                 ));
+//RS             }
+//RS             if action.handler == HandlerKey::InspectPlane {
+//RS                 if command.name != "inspect" {
+//RS                     violations.push(format!(
+//RS                         "inspect plane `{}` is registered under `{}`",
+//RS                         action.name, command.name
+//RS                     ));
+//RS                 } else {
+//RS                     let args = vec!["inspect".to_string(), action.name.to_string()];
+//RS                     match parse_inspect_args(&args) {
+//RS                         Ok(request)
+//RS                             if request.plane.name() == action.name
+//RS                                 && request.scope == InspectScope::Package
+//RS                                 && request.options.is_empty() => {}
+//RS                         Ok(_) => violations.push(format!(
+//RS                             "inspect parser normalized plane `{}` inconsistently",
+//RS                             action.name
+//RS                         )),
+//RS                         Err(error) => violations.push(format!(
+//RS                             "inspect parser rejected registered plane `{}`: {error}",
+//RS                             action.name
+//RS                         )),
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     if let Some(groups) = host_dispatch_words {
+//RS         for word in groups
+//RS             .iter()
+//RS             .flat_map(|words| words.iter().copied())
+//RS             .filter(|word| !registry_has_dispatch(word))
+//RS         {
+//RS             violations.push(format!(
+//RS                 "host dispatch `{word}` has no registered parser route"
+//RS             ));
+//RS         }
+//RS     }
+//RS     let Some(inspect) = inspect_group else {
+//RS         violations.push("missing `inspect` command registry row".to_string());
+//RS         return violations;
+//RS     };
+//RS     for plane in InspectPlane::ALL {
+//RS         let count = inspect
+//RS             .actions
+//RS             .iter()
+//RS             .filter(|action| {
+//RS                 action.handler == HandlerKey::InspectPlane && action.name == plane.name()
+//RS             })
+//RS             .count();
+//RS         if count != 1 {
+//RS             violations.push(format!(
+//RS                 "inspect plane `{}` has {count} registry rows",
+//RS                 plane.name()
+//RS             ));
+//RS         }
+//RS     }
+//RS     for (index, flag) in FLAGS.iter().enumerate() {
+//RS         if flag.long.trim().is_empty() {
+//RS             violations.push(format!("flag row {index} has an empty name"));
+//RS         }
+//RS         if FLAGS[..index]
+//RS             .iter()
+//RS             .any(|previous| previous.long == flag.long)
+//RS         {
+//RS             violations.push(format!("duplicate flag row `{}`", flag.long));
+//RS         }
+//RS     }
+//RS     for retired in RETIRED_COMMANDS {
+//RS         if COMMANDS.iter().any(|command| command.name == retired.spelling)
+//RS             || command_groups().any(|group| {
+//RS                 group.actions.iter().any(|action| {
+//RS                     format!("{} {}", group.name, action.name) == retired.spelling
+//RS                 })
+//RS             })
+//RS         {
+//RS             violations.push(format!("retired route `{}` remains live", retired.spelling));
+//RS         }
+//RS     }
+//RS     violations
+//RS }
+//RS 
+//RS 
+//RS /// Commands that own a bespoke flag vocabulary or forward flags downstream.
+//RS /// Main dispatch still reads the command set from `COMMANDS`; this only decides
+//RS /// whether the generic E2102 checker should run.
+//RS pub fn owns_flag_vocabulary(name: &str) -> bool {
+//RS     matches!(
+//RS         name,
+//RS         "env"
+//RS             | "cc"
+//RS             | "c++"
+//RS             | "remote"
+//RS             | "shared-store"
+//RS             | "dev"
+//RS             | "devtools"
+//RS             | "push"
+//RS             | "trust"
+//RS             | "bridge"
+//RS             | "services"
+//RS             | "image"
+//RS             | "new"
+//RS             | "flash"
+//RS             | "os"
+//RS             | "add"
+//RS             | "remove"
+//RS             | "bind"
+//RS             | "lsp"
+//RS             | "config"
+//RS             | "update"
+//RS             | "outdated"
+//RS             | "search"
+//RS             | "info"
+//RS             | "import"
+//RS             | "explain"
+//RS             | "logs"
+//RS             | "clean"
+//RS             | "fetch"
+//RS             | "publish"
+//RS             | "yank"
+//RS             | "keygen"
+//RS             | "key"
+//RS             | "vendor"
+//RS             | "audit"
+//RS             | "sbom"
+//RS             | "repl"
+//RS             | "notebook"
+//RS             | "schema"
+//RS             | "db"
+//RS             | "semindex"
+//RS             | "impact"
+//RS             | "codemod"
+//RS             | "generate"
+//RS             | "expand"
+//RS             | "diff"
+//RS             | "merge"
+//RS             | "review"
+//RS             | "prove"
+//RS             | "budget"
+//RS             | "perf"
+//RS             | "completions"
+//RS             | "self-update"
+//RS     )
+//RS }
+//RS 
+//RS /// Is `flag` (e.g. `--json` or `--color=always`) a known flag?
+//RS pub fn is_known_flag(flag: &str) -> bool {
+//RS     let head = flag.split('=').next().unwrap_or(flag);
+//RS     FLAGS.iter().any(|f| f.long == head)
+//RS }
+//RS 
+//RS /// #1659 criterion 2: the one spelling-check for "the user asked for help",
+//RS /// shared by every command instead of each hand-copying
+//RS /// `arg == "--help" || arg == "-h"`.
+//RS pub fn is_help_flag(arg: &str) -> bool {
+//RS     arg == "--help" || arg == "-h"
+//RS }
+//RS 
+//RS /// Levenshtein edit distance — the same shape used by sema's S14 suggestions.
+//RS /// Closest built-in command to `name` within edit distance 3, or `None`.
+//RS pub fn closest_command(name: &str) -> Option<&'static str> {
+//RS     closest(
+//RS         name,
+//RS         COMMANDS
+//RS             .iter()
+//RS             .filter(|command| is_canonical_top_level(command.name))
+//RS             .map(|command| command.name),
+//RS     )
+//RS }
+//RS 
+//RS /// Closest known flag to `flag` within edit distance 3, or `None`.
+//RS pub fn closest_flag(flag: &str) -> Option<&'static str> {
+//RS     let head = flag.split('=').next().unwrap_or(flag);
+//RS     closest(head, FLAGS.iter().map(|f| f.long))
+//RS }
+//RS 
+//RS fn closest<'a, I: Iterator<Item = &'a str>>(needle: &str, hay: I) -> Option<&'a str> {
+//RS     let mut best: Option<(&str, usize)> = None;
+//RS     for cand in hay {
+//RS         let d = edit_distance(needle, cand);
+//RS         if best.map(|(_, bd)| d < bd).unwrap_or(true) {
+//RS             best = Some((cand, d));
+//RS         }
+//RS     }
+//RS     // Cap: only suggest when reasonably close (allow ~half the word length).
+//RS     best.filter(|(c, d)| *d <= 3 && *d <= c.len())
+//RS         .map(|(c, _)| c)
+//RS }
+//RS 
+//RS // ──────────────────────────────────────────────
+//RS // Generators (hand-rolled — invariant I6, no clap_complete)
+//RS // ──────────────────────────────────────────────
+//RS 
+//RS /// bash completion script for `jet`.
+//RS pub fn completions_bash() -> String {
+//RS     let cmds = COMMANDS
+//RS         .iter()
+//RS         .filter(|c| is_canonical_top_level(c.name))
+//RS         .map(|c| c.name)
+//RS         .collect::<Vec<_>>()
+//RS         .join(" ");
+//RS     let flags = FLAGS.iter().map(|f| f.long).collect::<Vec<_>>().join(" ");
+//RS     let job_completion = format!(
+//RS         "    if [[ $COMP_CWORD -eq 2 && \"${{COMP_WORDS[1]}}\" == \"jobs\" ]]; then\n\
+//RS         local job_names\n\
+//RS         job_names=\"$({bin} --json jobs 2>/dev/null | sed -n 's/.*\"name\":\"\\([^\"]*\\)\".*/\\1/p')\"\n\
+//RS         COMPREPLY=( $(compgen -W \"$job_names\" -- \"$cur\") )\n\
+//RS         return 0\n\
+//RS     fi\n",
+//RS         bin = BINARY_NAME,
+//RS     );
+//RS     let nested = command_groups()
+//RS         .map(|g| {
+//RS             format!(
+//RS                 "        {}) COMPREPLY=( $(compgen -W \"{}\" -- \"$cur\") ); return 0 ;;",
+//RS                 g.name,
+//RS                 g.actions
+//RS                     .iter()
+//RS                     .map(|a| a.name)
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(" ")
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n");
+//RS     format!(
+//RS         "# bash completion for {bin} (generated by `{bin} self completions bash`)\n\
+//RS _{bin}() {{\n\
+//RS     local cur prev cmds flags\n\
+//RS     COMPREPLY=()\n\
+//RS     cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n\
+//RS     cmds=\"{cmds}\"\n\
+//RS     flags=\"{flags}\"\n\
+//RS     if [[ \"$cur\" == -* ]]; then\n\
+//RS         COMPREPLY=( $(compgen -W \"$flags\" -- \"$cur\") )\n\
+//RS         return 0\n\
+//RS     fi\n\
+//RS     if [[ $COMP_CWORD -eq 1 ]]; then\n\
+//RS         COMPREPLY=( $(compgen -W \"$cmds\" -- \"$cur\") )\n\
+//RS         return 0\n\
+//RS     fi\n\
+//RS {job_completion}    if [[ $COMP_CWORD -eq 2 ]]; then\n\
+//RS         case \"${{COMP_WORDS[1]}}\" in\n{nested}\n        esac\n\
+//RS     fi\n\
+//RS     COMPREPLY=( $(compgen -f -- \"$cur\") )\n\
+//RS }}\n\
+//RS complete -F _{bin} {bin}\n",
+//RS         bin = BINARY_NAME,
+//RS         cmds = cmds,
+//RS         flags = flags,
+//RS         nested = nested,
+//RS     )
+//RS }
+//RS 
+//RS /// zsh completion script for `jet`.
+//RS pub fn completions_zsh() -> String {
+//RS     let mut cmd_lines = String::new();
+//RS     for c in COMMANDS {
+//RS         if !is_canonical_top_level(c.name) {
+//RS             continue;
+//RS         }
+//RS         cmd_lines.push_str(&format!("        '{}:{}'\n", c.name, escape_zsh(c.summary)));
+//RS     }
+//RS     let nested = command_groups()
+//RS         .map(|g| {
+//RS             format!(
+//RS                 "            {}) _values 'action' {} ;;",
+//RS                 g.name,
+//RS                 g.actions
+//RS                     .iter()
+//RS                     .map(|a| format!("'{}:{}'", a.name, escape_zsh(a.summary)))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(" ")
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n");
+//RS     let mut flag_lines = String::new();
+//RS     for f in FLAGS.iter() {
+//RS         flag_lines.push_str(&format!("        '{}[{}]'\n", f.long, escape_zsh(f.help)));
+//RS     }
+//RS     let job_completion = format!(
+//RS         "        local -a job_names\n\
+//RS         job_names=(\"${{(@f)$({bin} --json jobs 2>/dev/null | sed -n 's/.*\"name\":\"\\([^\"]*\\)\".*/\\1/p')}}\")\n\
+//RS         _describe -t job_names 'job' job_names\n",
+//RS         bin = BINARY_NAME,
+//RS     );
+//RS     format!(
+//RS         "#compdef {bin}\n\
+//RS # zsh completion for {bin} (generated by `{bin} self completions zsh`)\n\
+//RS _{bin}() {{\n\
+//RS     local -a commands flags\n\
+//RS     commands=(\n{cmds}    )\n\
+//RS     flags=(\n{flags}    )\n\
+//RS     if (( CURRENT == 2 )); then\n\
+//RS         _describe -t commands 'command' commands\n\
+//RS     elif (( CURRENT == 3 && $words[2] == jobs )); then\n\
+//RS {job_completion}    else\n\
+//RS         if (( CURRENT == 3 )); then\n\
+//RS             case $words[2] in\n{nested}\n            esac\n\
+//RS         else\n\
+//RS             _values 'flag' $flags\n\
+//RS             _files\n\
+//RS         fi\n\
+//RS     fi\n\
+//RS }}\n\
+//RS _{bin} \"$@\"\n",
+//RS         bin = BINARY_NAME,
+//RS         cmds = cmd_lines,
+//RS         flags = flag_lines,
+//RS         nested = nested,
+//RS     )
+//RS }
+//RS 
+//RS /// fish completion script for `jet`.
+//RS pub fn completions_fish() -> String {
+//RS     let mut out = format!(
+//RS         "# fish completion for {bin} (generated by `{bin} self completions fish`)\n",
+//RS         bin = BINARY_NAME
+//RS     );
+//RS     // Only complete subcommands when none has been seen yet.
+//RS     let seen = "__fish_use_subcommand";
+//RS     for c in COMMANDS {
+//RS         if !is_canonical_top_level(c.name) {
+//RS             continue;
+//RS         }
+//RS         out.push_str(&format!(
+//RS             "complete -c {bin} -n '{seen}' -a {name} -d '{desc}'\n",
+//RS             bin = BINARY_NAME,
+//RS             seen = seen,
+//RS             name = c.name,
+//RS             desc = escape_fish(c.summary),
+//RS         ));
+//RS     }
+//RS     for group in command_groups() {
+//RS         for action in group.actions {
+//RS             out.push_str(&format!("complete -c {bin} -n '__fish_seen_subcommand_from {group}' -a {action} -d '{desc}'\n", bin=BINARY_NAME, group=group.name, action=action.name, desc=escape_fish(action.summary)));
+//RS         }
+//RS     }
+//RS     for f in FLAGS.iter() {
+//RS         out.push_str(&format!(
+//RS             "complete -c {bin} -l {long} -d '{desc}'\n",
+//RS             bin = BINARY_NAME,
+//RS             long = f.long.trim_start_matches("--"),
+//RS             desc = escape_fish(f.help),
+//RS         ));
+//RS     }
+//RS     out.push_str(&format!(
+//RS         "complete -c {bin} -n '__fish_seen_subcommand_from jobs' -a \"({bin} --json jobs 2>/dev/null | string match -r '\\\"name\\\":\\\"[^\\\"]+\\\"' | string replace -r '.*\\\"name\\\":\\\"([^\\\"]+)\\\".*' '$1')\" -d 'job name'\n",
+//RS         bin = BINARY_NAME,
+//RS     ));
+//RS     out
+//RS }
+//RS 
+//RS /// PowerShell completion script, derived from the same nested registry.
+//RS pub fn completions_powershell() -> String {
+//RS     let top = COMMANDS
+//RS         .iter()
+//RS         .filter(|c| is_canonical_top_level(c.name))
+//RS         .map(|c| format!("'{}'", c.name))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let groups = command_groups()
+//RS         .map(|g| {
+//RS             format!(
+//RS                 "'{}' = @({})",
+//RS                 g.name,
+//RS                 g.actions
+//RS                     .iter()
+//RS                     .map(|a| format!("'{}'", a.name))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",")
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join("; ");
+//RS     let flags = FLAGS
+//RS         .iter()
+//RS         .map(|f| format!("'{}'", f.long))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let job_completion = format!(
+//RS         "$JetJobs = @((& {bin} --json jobs 2>$null | ConvertFrom-Json).jobs.name)\n",
+//RS         bin = BINARY_NAME,
+//RS     );
+//RS     format!(
+//RS         "# PowerShell completion for {bin} (generated by `{bin} self completions powershell`)\n\
+//RS $JetCommands = @({top})\n\
+//RS $JetFlags = @({flags})\n\
+//RS $JetGroups = @{{ {groups} }}\n\
+//RS {job_completion}\
+//RS Register-ArgumentCompleter -Native -CommandName {bin} -ScriptBlock {{\n\
+//RS     param($wordToComplete,$commandAst,$cursorPosition)\n\
+//RS     $words = @($commandAst.CommandElements | ForEach-Object {{ $_.Extent.Text }})\n\
+//RS     $choices = if ($wordToComplete.StartsWith('-')) {{\n\
+//RS         $JetFlags\n\
+//RS     }} elseif ($words.Count -ge 2 -and $words[1] -eq 'jobs') {{\n\
+//RS         $JetJobs\n\
+//RS     }} elseif ($words.Count -ge 2 -and $JetGroups.ContainsKey($words[1])) {{\n\
+//RS         $JetGroups[$words[1]]\n\
+//RS     }} else {{\n\
+//RS         $JetCommands\n\
+//RS     }}\n\
+//RS     $choices | Where-Object {{ $_ -like \"$wordToComplete*\" }} |\n\
+//RS         ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,\"ParameterValue\",$_) }}\n\
+//RS }}\n",
+//RS         bin = BINARY_NAME,
+//RS         top = top,
+//RS         flags = flags,
+//RS         groups = groups,
+//RS         job_completion = job_completion,
+//RS     )
+//RS }
+//RS 
+//RS /// D-SHAPE-CLI-COMPLETE1=A: render a completion script for a compiled Jet
+//RS /// program from its verified embedded schema. Only schema-known flags are
+//RS /// candidates; application code is never executed and live values are never
+//RS /// queried.
+//RS pub fn completions_for_program(
+//RS     shell: &str,
+//RS     command_name: &str,
+//RS     schema: &jet_foundation::CLISchema::CLICommandSchema,
+//RS ) -> Option<String> {
+//RS     debug_assert!(!command_name.chars().any(char::is_control));
+//RS     let root_words = schema.completion_words();
+//RS     let root_input_words = schema.root_completion_words();
+//RS     match shell {
+//RS         "bash" => {
+//RS             if schema.commands.is_empty() {
+//RS                 return Some(format!(
+//RS                     "# bash completion from JetCommandSchema v{}\n__jet_program_completion() {{\n    local cur\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    COMPREPLY=( $(compgen -W {} -- \"$cur\") )\n}}\ncomplete -F __jet_program_completion -- {}\n",
+//RS                     jet_foundation::CLISchema::RECORD_VERSION,
+//RS                     shell_single_quote(&root_words.join(" ")),
+//RS                     shell_single_quote(command_name),
+//RS                 ));
+//RS             }
+//RS             let cases = schema
+//RS                 .commands
+//RS                 .iter()
+//RS                 .map(|command| {
+//RS                     format!(
+//RS                         "        {}) flags={} ;;",
+//RS                         shell_single_quote(&command.name),
+//RS                         shell_single_quote(&schema.command_completion_words(command).join(" ")),
+//RS                     )
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS                 .join("\n");
+//RS             Some(format!(
+//RS                 "# bash completion from JetCommandSchema v{}\n__jet_program_completion() {{\n    local cur flags\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    if [[ $COMP_CWORD -eq 1 ]]; then\n        COMPREPLY=( $(compgen -W {} -- \"$cur\") )\n        return 0\n    fi\n    flags={}\n    case \"${{COMP_WORDS[1]}}\" in\n{}\n    esac\n    if [[ \"$cur\" == -* ]]; then\n        COMPREPLY=( $(compgen -W \"$flags\" -- \"$cur\") )\n    fi\n}}\ncomplete -F __jet_program_completion -- {}\n",
+//RS                 jet_foundation::CLISchema::RECORD_VERSION,
+//RS                 shell_single_quote(&root_words.join(" ")),
+//RS                 shell_single_quote(&root_input_words.join(" ")),
+//RS                 cases,
+//RS                 shell_single_quote(command_name),
+//RS             ))
+//RS         }
+//RS         "zsh" => {
+//RS             if schema.commands.is_empty() {
+//RS                 let mut specs = zsh_standard_specs(schema.standard, schema.version.is_some());
+//RS                 specs.extend(zsh_input_specs(&schema.inputs));
+//RS                 let args = specs.join(" \\\n");
+//RS                 return Some(format!(
+//RS                     "#compdef {}\n# zsh completion from JetCommandSchema v{}\n_arguments \\\n{}\n",
+//RS                     shell_single_quote(command_name),
+//RS                     jet_foundation::CLISchema::RECORD_VERSION,
+//RS                     args,
+//RS                 ));
+//RS             }
+//RS             // The whole `_arguments` spec is already single-quoted below.
+//RS             // Jet command words are checked identifiers; quoting each word
+//RS             // again produces literal quote characters in zsh's candidate list.
+//RS             let commands = schema
+//RS                 .commands
+//RS                 .iter()
+//RS                 .map(|command| command.name.as_str())
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(" ");
+//RS             let mut root_specs = zsh_standard_specs(schema.standard, schema.version.is_some());
+//RS             root_specs.extend(zsh_input_specs(&schema.inputs));
+//RS             root_specs.push(format!("    '1:command:({commands})'"));
+//RS             let root_args = root_specs.join(" \\\n");
+//RS             let cases = schema
+//RS                 .commands
+//RS                 .iter()
+//RS                 .map(|command| {
+//RS                     format!(
+//RS                         "        {}) _arguments \\\n{} ;;",
+//RS                         shell_single_quote(&command.name),
+//RS                         {
+//RS                             let specs = zsh_input_specs(&schema.command_inputs(command));
+//RS                             specs.join(" \\\n")
+//RS                         },
+//RS                     )
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS                 .join("\n");
+//RS             Some(format!(
+//RS                 "#compdef {}\n# zsh completion from JetCommandSchema v{}\nif (( CURRENT == 2 )); then\n_arguments \\\n{}\nelse\n    case $words[2] in\n{}\n    esac\nfi\n",
+//RS                 shell_single_quote(command_name), jet_foundation::CLISchema::RECORD_VERSION, root_args, cases,
+//RS             ))
+//RS         }
+//RS         "fish" => {
+//RS             let mut out = format!(
+//RS                 "# fish completion from JetCommandSchema v{}\n",
+//RS                 jet_foundation::CLISchema::RECORD_VERSION
+//RS             );
+//RS             let root_condition = if schema.commands.is_empty() {
+//RS                 ""
+//RS             } else {
+//RS                 " -n '__fish_use_subcommand'"
+//RS             };
+//RS             out.push_str(&format!(
+//RS                 "complete -c {}{} -l help -d 'show help'\n",
+//RS                 fish_single(command_name),
+//RS                 root_condition
+//RS             ));
+//RS             if schema.standard {
+//RS                 out.push_str(&format!(
+//RS                     "complete -c {}{} -l verbose -s v -d 'print extra detail'\n",
+//RS                     fish_single(command_name),
+//RS                     root_condition
+//RS                 ));
+//RS                 out.push_str(&format!(
+//RS                     "complete -c {}{} -l quiet -s q -d 'suppress normal output'\n",
+//RS                     fish_single(command_name),
+//RS                     root_condition
+//RS                 ));
+//RS                 out.push_str(&format!(
+//RS                     "complete -c {}{} -l color -r -d 'control terminal color'\n",
+//RS                     fish_single(command_name),
+//RS                     root_condition
+//RS                 ));
+//RS                 if schema.version.is_some() {
+//RS                     out.push_str(&format!(
+//RS                         "complete -c {}{} -l version -d 'show version'\n",
+//RS                         fish_single(command_name),
+//RS                         root_condition
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             for input in &schema.inputs {
+//RS                 let short = input
+//RS                     .short
+//RS                     .as_ref()
+//RS                     .map_or_else(String::new, |short| format!(" -s {short}"));
+//RS                 out.push_str(&format!(
+//RS                     "complete -c {}{} -l {}{} -d {}{}\n",
+//RS                     fish_single(command_name),
+//RS                     root_condition,
+//RS                     input.flag,
+//RS                     short,
+//RS                     fish_single(&input.help),
+//RS                     if input.metavar.is_some() { " -r" } else { "" }
+//RS                 ));
+//RS             }
+//RS             for command in &schema.commands {
+//RS                 out.push_str(&format!(
+//RS                     "complete -c {} -n '__fish_use_subcommand' -a {}\n",
+//RS                     fish_single(command_name),
+//RS                     fish_single(&command.name)
+//RS                 ));
+//RS                 out.push_str(&format!(
+//RS                     "complete -c {} -n '__fish_seen_subcommand_from {}' -l help -d 'show help'\n",
+//RS                     fish_single(command_name),
+//RS                     command.name
+//RS                 ));
+//RS                 let command_inputs = schema.command_inputs(command);
+//RS                 for input in &command_inputs {
+//RS                     let short = input
+//RS                         .short
+//RS                         .as_ref()
+//RS                         .map_or_else(String::new, |short| format!(" -s {short}"));
+//RS                     out.push_str(&format!(
+//RS                         "complete -c {} -n '__fish_seen_subcommand_from {}' -l {}{} -d {}{}\n",
+//RS                         fish_single(command_name),
+//RS                         command.name,
+//RS                         input.flag,
+//RS                         short,
+//RS                         fish_single(&input.help),
+//RS                         if input.metavar.is_some() { " -r" } else { "" }
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             Some(out)
+//RS         }
+//RS         "powershell" => {
+//RS             let root = root_words
+//RS                 .iter()
+//RS                 .map(|word| ps_single(word))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",");
+//RS             if schema.commands.is_empty() {
+//RS                 return Some(format!("# PowerShell completion from JetCommandSchema v{}\nRegister-ArgumentCompleter -Native -CommandName {} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) @({root}) | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n", jet_foundation::CLISchema::RECORD_VERSION, ps_single(command_name)));
+//RS             }
+//RS             let flags = root_input_words
+//RS                 .iter()
+//RS                 .map(|word| ps_single(word))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",");
+//RS             let command_flags = schema
+//RS                 .commands
+//RS                 .iter()
+//RS                 .map(|command| {
+//RS                     format!(
+//RS                         "{} = @({})",
+//RS                         ps_single(&command.name),
+//RS                         schema
+//RS                             .command_completion_words(command)
+//RS                             .iter()
+//RS                             .map(|word| ps_single(word))
+//RS                             .collect::<Vec<_>>()
+//RS                             .join(","),
+//RS                     )
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS                 .join("; ");
+//RS             Some(format!("# PowerShell completion from JetCommandSchema v{}\nRegister-ArgumentCompleter -Native -CommandName {} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) $root = @({root}); $flags = @({flags}); $commandFlags = @{{ {command_flags} }}; $words = @($commandAst.CommandElements | ForEach-Object {{ $_.Extent.Text }}); $selected = if ($words.Count -ge 2) {{ $words[1] }} else {{ '' }}; $choices = if ($commandFlags.ContainsKey($selected)) {{ $commandFlags[$selected] }} elseif ($wordToComplete.StartsWith('-')) {{ $flags }} else {{ $root }}; $choices | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n", jet_foundation::CLISchema::RECORD_VERSION, ps_single(command_name)))
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// Registration uses executable basename, never a path/comment payload.
+//RS pub fn completion_command_name(program: &str) -> Result<String, &'static str> {
+//RS     let name = std::path::Path::new(program)
+//RS         .file_name()
+//RS         .and_then(|name| name.to_str())
+//RS         .filter(|name| !name.is_empty())
+//RS         .ok_or("the program path has no usable command name")?;
+//RS     if name.chars().any(char::is_control) {
+//RS         return Err("the program command name contains a control character");
+//RS     }
+//RS     Ok(name.to_string())
+//RS }
+//RS 
+//RS fn zsh_standard_specs(standard: bool, version: bool) -> Vec<String> {
+//RS     if !standard {
+//RS         return Vec::new();
+//RS     }
+//RS     let mut specs = vec![
+//RS         "    '(-v --verbose){-v,--verbose}[print extra detail]'".to_string(),
+//RS         "    '(-q --quiet){-q,--quiet}[suppress normal output]'".to_string(),
+//RS         "    '--color[control terminal color]:MODE:(auto always never)'".to_string(),
+//RS     ];
+//RS     if version {
+//RS         specs.push("    '--version[show version]'".to_string());
+//RS     }
+//RS     specs
+//RS }
+//RS 
+//RS fn zsh_input_specs(inputs: &[jet_foundation::CLISchema::CLIInputSchema]) -> Vec<String> {
+//RS     let mut specs = Vec::new();
+//RS     let mut positionals: Vec<&jet_foundation::CLISchema::CLIInputSchema> = inputs
+//RS         .iter()
+//RS         .filter(|input| input.positional.is_some())
+//RS         .collect();
+//RS     positionals.sort_by_key(|input| input.positional.unwrap());
+//RS     for input in positionals {
+//RS         let meta = input
+//RS             .metavar
+//RS             .as_deref()
+//RS             .unwrap_or(input.flag.as_str())
+//RS             .to_lowercase();
+//RS         specs.push(format!(
+//RS             "    ':{}:{}'",
+//RS             zsh_single(&meta),
+//RS             zsh_bracket(&input.help)
+//RS         ));
+//RS     }
+//RS     specs.extend(inputs.iter().map(|input| {
+//RS         let value = input
+//RS             .metavar
+//RS             .as_deref()
+//RS             .map(|name| format!(":{}:", name.to_lowercase()))
+//RS             .unwrap_or_default();
+//RS         let names = input.short.as_ref().map_or_else(
+//RS             || format!("--{}", input.flag),
+//RS             |short| format!("(-{short} --{}){{-{short},--{}}}", input.flag, input.flag),
+//RS         );
+//RS         format!(
+//RS             "    '{}[{}]{}'",
+//RS             zsh_single(&names),
+//RS             zsh_bracket(&input.help),
+//RS             value
+//RS         )
+//RS     }));
+//RS     specs.push("    '--help[show help]'".to_string());
+//RS     specs
+//RS }
+//RS 
+//RS fn shell_single_quote(value: &str) -> String {
+//RS     format!("'{}'", value.replace('\'', "'\\''"))
+//RS }
+//RS fn zsh_single(value: &str) -> String {
+//RS     value.replace('\'', "'\\''")
+//RS }
+//RS fn zsh_bracket(value: &str) -> String {
+//RS     zsh_single(value).replace('[', "\\[").replace(']', "\\]")
+//RS }
+//RS fn fish_single(value: &str) -> String {
+//RS     shell_single_quote(value)
+//RS }
+//RS fn ps_single(value: &str) -> String {
+//RS     format!("'{}'", value.replace('\'', "''"))
+//RS }
+//RS 
+//RS /// roff man page for `jet`, section 1.
+//RS pub fn man_page(version: &str) -> String {
+//RS     let mut out = String::new();
+//RS     out.push_str(&format!(
+//RS         ".TH {bin_up} 1 \"\" \"{bin} {ver}\" \"Jet Manual\"\n",
+//RS         bin_up = BINARY_NAME.to_uppercase(),
+//RS         bin = BINARY_NAME,
+//RS         ver = version,
+//RS     ));
+//RS     out.push_str(".SH Name\n");
+//RS     out.push_str(&format!(
+//RS         "{bin} \\- the Jet compiler and project tool\n",
+//RS         bin = BINARY_NAME
+//RS     ));
+//RS     out.push_str(".SH Synopsis\n");
+//RS     out.push_str(&format!(
+//RS         ".B {bin}\n.RI [ command ] \" \" [ args ...]\n",
+//RS         bin = BINARY_NAME
+//RS     ));
+//RS     out.push_str(".SH Description\n");
+//RS     out.push_str(&format!(
+//RS         "{bin} builds, checks, runs, and tests Jet programs, and manages Jet projects \
+//RS and their dependencies. Output is plain when piped and colored on a terminal.\n",
+//RS         bin = BINARY_NAME
+//RS     ));
+//RS     out.push_str(".SH Commands\n");
+//RS     for c in COMMANDS {
+//RS         if !is_canonical_top_level(c.name) {
+//RS             continue;
+//RS         }
+//RS         out.push_str(&format!(".TP\n.B {}\n{}\n", c.name, roff_escape(c.summary)));
+//RS         if let Some(group) = command_group(c.name) {
+//RS             for action in group.actions {
+//RS                 out.push_str(&format!(
+//RS                     ".TP\n.B {} {}\n{}\n",
+//RS                     group.name,
+//RS                     action.name,
+//RS                     roff_escape(action.summary)
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     out.push_str(".SH Flags\n");
+//RS     for f in FLAGS.iter() {
+//RS         out.push_str(&format!(".TP\n.B {}\n{}\n", f.long, roff_escape(f.help)));
+//RS     }
+//RS     out.push_str(".SH Files\n");
+//RS     out.push_str(&format!(
+//RS         ".TP\n.B {manifest}\nThe project manifest.\n",
+//RS         manifest = crate::Syntax::PAYLOAD_FILE
+//RS     ));
+//RS     out.push_str(".SH See Also\n");
+//RS     out.push_str(&format!("{bin}-explain(1)\n", bin = BINARY_NAME));
+//RS     out
+//RS }
+//RS 
+//RS fn escape_zsh(s: &str) -> String {
+//RS     s.replace('\'', "'\\''")
+//RS         .replace(':', "\\:")
+//RS         .replace('[', "\\[")
+//RS         .replace(']', "\\]")
+//RS }
+//RS fn escape_fish(s: &str) -> String {
+//RS     s.replace('\'', "\\'")
+//RS }
+//RS fn roff_escape(s: &str) -> String {
+//RS     // Lines beginning with `'` or `.` are roff control lines; escape and also
+//RS     // neutralize backslashes.
+//RS     s.replace('\\', "\\\\")
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn job_argv_forwards_every_word_after_the_job_name() {
+//RS         let split = |words: &[&str]| {
+//RS             let mut args = words.iter().map(|word| word.to_string()).collect::<Vec<_>>();
+//RS             separate_job_argv(&mut args);
+//RS             args
+//RS         };
+//RS         // Job flags after the name are forwarded; Jet flags and `-p <member>`
+//RS         // before the name stay Jet's.
+//RS         assert_eq!(
+//RS             split(&["jobs", "--interpret", "-p", "api", "web", "--port", "3000"]),
+//RS             ["jobs", "--interpret", "-p", "api", "web", "--", "--port", "3000"]
+//RS         );
+//RS         // A `--` right after the name is the separator itself; a later one is
+//RS         // job input.
+//RS         assert_eq!(
+//RS             split(&["jobs", "web", "--", "--port", "--", "x"]),
+//RS             ["jobs", "web", "--", "--port", "--", "x"]
+//RS         );
+//RS         // Listing, a bare name, and other commands are untouched.
+//RS         for words in [
+//RS             &["jobs", "--graph"][..],
+//RS             &["jobs", "-p", "api"][..],
+//RS             &["jobs", "web"][..],
+//RS             &["run", "main.jet", "--port", "3000"][..],
+//RS         ] {
+//RS             assert_eq!(split(words), words);
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn external_completion_rejects_hostile_program_names() {
+//RS         let schema = jet_foundation::CLISchema::CLICommandSchema {
+//RS             entry_type: String::new(),
+//RS             description: None,
+//RS             inputs: Vec::new(),
+//RS             commands: Vec::new(),
+//RS             jobs: Vec::new(),
+//RS             standard: false,
+//RS             version: None,
+//RS         };
+//RS         assert_eq!(
+//RS             completion_command_name("build/greeter"),
+//RS             Ok("greeter".to_string())
+//RS         );
+//RS         assert_eq!(
+//RS             completion_command_name("safe\nINJECT_COMMAND\rnext"),
+//RS             Err("the program command name contains a control character")
+//RS         );
+//RS         for shell in ["bash", "zsh", "fish", "powershell"] {
+//RS             let script = completions_for_program(shell, "greeter", &schema).unwrap();
+//RS             assert!(!script.contains("build/greeter"));
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn typo_finds_closest_command() {
+//RS         assert_eq!(closest_command("buld"), Some("build"));
+//RS         assert_eq!(closest_command("chekc"), Some("check"));
+//RS         assert_eq!(closest_command("rnu"), Some("run"));
+//RS         // Nonsense gets no suggestion.
+//RS         assert_eq!(closest_command("zxqwvbn"), None);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn typo_finds_closest_flag() {
+//RS         assert_eq!(closest_flag("--jsn"), Some("--json"));
+//RS         assert_eq!(closest_flag("--colr"), Some("--color"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn known_flag_ignores_value() {
+//RS         assert!(is_known_flag("--color=always"));
+//RS         assert!(is_known_flag("--json"));
+//RS         assert!(is_known_flag("--raw-frames"));
+//RS         assert!(is_known_flag("--dap"));
+//RS         assert!(!is_known_flag("--nonsense"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dry_run_is_one_shared_flag_row() {
+//RS         assert_eq!(
+//RS             FLAGS
+//RS                 .iter()
+//RS                 .filter(|flag| flag.long == DRY_RUN_FLAG)
+//RS                 .count(),
+//RS             1
+//RS         );
+//RS         assert!(is_known_flag(DRY_RUN_FLAG));
+//RS         assert!(man_page("0.0.0").contains(DRY_RUN_FLAG));
+//RS         assert!(completions_bash().contains(DRY_RUN_FLAG));
+//RS         assert!(completions_zsh().contains(DRY_RUN_FLAG));
+//RS         assert!(completions_fish().contains("dry-run"));
+//RS         assert!(completions_powershell().contains(DRY_RUN_FLAG));
+//RS         let inspect_usage = command_group_usage("inspect");
+//RS         assert!(inspect_usage.contains("codemod <plan.json> --dry-run"));
+//RS         assert!(!inspect_usage.contains("codemod dry-run"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dev_canvas_is_one_registered_surface() {
+//RS         assert_eq!(
+//RS             FLAGS.iter().filter(|flag| flag.long == CANVAS_FLAG).count(),
+//RS             1
+//RS         );
+//RS         assert!(is_known_flag(CANVAS_FLAG));
+//RS         let usage = command_usage("dev");
+//RS         assert_eq!(
+//RS             usage,
+//RS             "jet dev [<file.jet|dir>] [--canvas|--app <function>] [--share <loopback|lan>] [--token <token>] [-- <args>]"
+//RS         );
+//RS         assert!(flags_for_command("dev")
+//RS             .iter()
+//RS             .any(|flag| flag.0 == CANVAS_FLAG));
+//RS         for expert_flag in [
+//RS             "--output",
+//RS             "--target",
+//RS             "--canvas-host",
+//RS             "--canvas-port",
+//RS             "--canvas-transport",
+//RS             "--canvas-authority",
+//RS             "--canvas-audit",
+//RS         ] {
+//RS             assert!(
+//RS                 flags_for_command("dev")
+//RS                     .iter()
+//RS                     .any(|flag| flag.0 == expert_flag),
+//RS                 "{expert_flag} must be visible in dev help"
+//RS             );
+//RS         }
+//RS         assert!(man_page("0.0.0").contains("--canvas"));
+//RS         assert!(completions_bash().contains("--canvas"));
+//RS         assert!(completions_zsh().contains("--canvas"));
+//RS         assert!(completions_fish().contains("canvas"));
+//RS         assert!(completions_powershell().contains("--canvas"));
+//RS         assert!(!is_builtin("canvas"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn run_prepare_refusal_is_one_registered_surface() {
+//RS         let flag = crate::Syntax::RUN_FLAG_NO_PREPARE;
+//RS         assert_eq!(FLAGS.iter().filter(|entry| entry.long == flag).count(), 1);
+//RS         assert_eq!(
+//RS             command_usage("run"),
+//RS             "jet run [<file.jet|dir>] [--no-prepare] [-- <args>]"
+//RS         );
+//RS         assert!(flags_for_command("run")
+//RS             .iter()
+//RS             .any(|entry| entry.0 == flag));
+//RS         assert!(man_page("0.0.0").contains(flag));
+//RS         assert!(completions_bash().contains(flag));
+//RS         assert!(completions_zsh().contains(flag));
+//RS         assert!(completions_fish().contains("no-prepare"));
+//RS         assert!(completions_powershell().contains(flag));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn flash_registry_matches_parser_surface() {
+//RS         assert_eq!(
+//RS             COMMANDS.iter().filter(|command| command.name == "flash").count(),
+//RS             1
+//RS         );
+//RS         assert_eq!(
+//RS             command_usage("flash"),
+//RS             "jet flash --target <board.name> [--image <firmware.elf>] [--audit <target.json>] [--adapter <probe-rs|openocd|emulator>]"
+//RS         );
+//RS         let flags = flags_for_command("flash");
+//RS         for expected in ["--target", "--image", "--audit", "--adapter"] {
+//RS             assert!(
+//RS                 flags.iter().any(|(long, _)| *long == expected),
+//RS                 "flash help missing {expected}"
+//RS             );
+//RS         }
+//RS         assert_eq!(
+//RS             FLAGS
+//RS                 .iter()
+//RS                 .filter(|flag| matches!(flag.long, "--image" | "--audit" | "--adapter"))
+//RS                 .count(),
+//RS             3
+//RS         );
+//RS         assert!(owns_flag_vocabulary("flash"));
+//RS         assert!(completions_bash().contains("flash"));
+//RS         assert!(completions_zsh().contains("flash"));
+//RS         assert!(completions_fish().contains("flash"));
+//RS         assert!(completions_powershell().contains("flash"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn hangar_is_not_a_jet_command_or_help_route() {
+//RS         assert!(!is_builtin("hangar"));
+//RS         assert!(command_group("hangar").is_none());
+//RS         assert!(!usage_page("0.0.0", HelpOrder::Frequency).to_ascii_lowercase().contains("hangar"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn completions_mention_every_command() {
+//RS         for shell_out in [
+//RS             completions_bash(),
+//RS             completions_zsh(),
+//RS             completions_fish(),
+//RS             completions_powershell(),
+//RS         ] {
+//RS             for c in COMMANDS.iter().filter(|c| is_canonical_top_level(c.name)) {
+//RS                 assert!(
+//RS                     shell_out.contains(c.name),
+//RS                     "completion missing command {}",
+//RS                     c.name
+//RS                 );
+//RS             }
+//RS             for group in command_groups() {
+//RS                 assert!(
+//RS                     shell_out.contains(group.name),
+//RS                     "completion missing group {}",
+//RS                     group.name
+//RS                 );
+//RS                 for action in group.actions {
+//RS                     assert!(
+//RS                         shell_out.contains(action.name),
+//RS                         "completion missing {} {}",
+//RS                         group.name,
+//RS                         action.name
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn moved_command_registry_agrees_with_dispatch() {
+//RS         for group in command_groups() {
+//RS             for action in group.actions {
+//RS                 if action.name == "install" {
+//RS                     assert_eq!(action.handler, HandlerKey::SharedStore);
+//RS                     assert!(moved_command(action.name).is_none());
+//RS                     continue;
+//RS                 }
+//RS                 if action.also_canonical_top_level {
+//RS                     assert!(is_canonical_top_level(action.name));
+//RS                     assert!(moved_command(action.name).is_none());
+//RS                     continue;
+//RS                 }
+//RS                 assert!(
+//RS                     !is_canonical_top_level(action.name),
+//RS                     "moved bare command leaked: {}",
+//RS                     action.name
+//RS                 );
+//RS                 let owner = moved_command_group(action.name);
+//RS                 assert!(owner.is_some(), "missing moved owner for {}", action.name);
+//RS                 // An action name can appear in more than one group (`export` under
+//RS                 // multiple groups). Bare teaching routes to the first registered owner.
+//RS                 assert!(
+//RS                     command_groups().any(|candidate| {
+//RS                         candidate.name == owner.unwrap()
+//RS                             && candidate
+//RS                                 .actions
+//RS                                 .iter()
+//RS                                 .any(|entry| entry.name == action.name)
+//RS                     }),
+//RS                     "{} moved to unknown owner {:?}",
+//RS                     action.name,
+//RS                     owner
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn typo_suggestions_never_advertise_moved_bare_actions() {
+//RS         for group in command_groups() {
+//RS             for action in group.actions {
+//RS                 let canonical_bare = COMMANDS.iter().any(|command| {
+//RS                     command.name == action.name
+//RS                         && command.actions.is_empty()
+//RS                         && is_canonical_top_level(command.name)
+//RS                 });
+//RS                 if !action.also_canonical_top_level && !canonical_bare {
+//RS                     assert_ne!(closest_command(action.name), Some(action.name));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn every_nested_action_has_canonical_usage() {
+//RS         for group in command_groups() {
+//RS             for action in group.actions {
+//RS                 assert!(
+//RS                     !action.usage.trim().is_empty(),
+//RS                     "missing usage for {} {}",
+//RS                     group.name,
+//RS                     action.name
+//RS                 );
+//RS                 for usage in action.usage.lines() {
+//RS                     assert!(
+//RS                         usage == action.name || usage.starts_with(&format!("{} ", action.name)),
+//RS                         "usage `{usage}` does not begin with action name `{}`",
+//RS                         action.name
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn every_nested_action_routes_to_a_real_dispatch_seam() {
+//RS         for group in command_groups() {
+//RS             for action in group.actions {
+//RS                 assert!(
+//RS                     !action.summary.trim().is_empty(),
+//RS                     "missing summary for {} {}",
+//RS                     group.name,
+//RS                     action.name
+//RS                 );
+//RS                 assert!(
+//RS                     is_builtin(action.handler.dispatch_word()),
+//RS                     "{} {} routes to missing handler {}",
+//RS                     group.name,
+//RS                     action.name,
+//RS                     action.handler.dispatch_word()
+//RS                 );
+//RS                 assert_eq!(
+//RS                     nested_command(group.name, action.name).map(|(_, value)| value.handler),
+//RS                     Some(action.handler)
+//RS                 );
+//RS                 if action.handler.keeps_group() {
+//RS                     assert_eq!(
+//RS                         action.handler.dispatch_word(),
+//RS                         group.name,
+//RS                         "kept group must own its dispatcher"
+//RS                     );
+//RS                 }
+//RS                 let mut normalized = vec![
+//RS                     group.name.to_string(),
+//RS                     action.name.to_string(),
+//RS                     "tail".to_string(),
+//RS                 ];
+//RS                 if !action.handler.keeps_group() {
+//RS                     normalized[0] = action.handler.dispatch_word().to_string();
+//RS                     normalized.remove(1);
+//RS                 }
+//RS                 let expected = if action.handler.keeps_group() {
+//RS                     vec![
+//RS                         group.name.to_string(),
+//RS                         action.name.to_string(),
+//RS                         "tail".to_string(),
+//RS                     ]
+//RS                 } else {
+//RS                     vec![action.handler.dispatch_word().to_string(), "tail".to_string()]
+//RS                 };
+//RS                 assert_eq!(normalized, expected);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn man_mentions_every_command_and_flag() {
+//RS         let m = man_page("0.0.0");
+//RS         for c in COMMANDS.iter().filter(|c| is_canonical_top_level(c.name)) {
+//RS             assert!(m.contains(c.name), "man missing command {}", c.name);
+//RS         }
+//RS         for f in FLAGS.iter() {
+//RS             assert!(m.contains(f.long), "man missing flag {}", f.long);
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS fn authority_flags_render_in_registry_completions_and_man() {
+//RS     use jet_foundation::BuildEffect;
+//RS 
+//RS     let man = man_page("0.0.0");
+//RS     let completions = [
+//RS         completions_bash(),
+//RS         completions_zsh(),
+//RS         completions_fish(),
+//RS         completions_powershell(),
+//RS     ];
+//RS     for canonical in ["--allow", "--deny"] {
+//RS         assert_eq!(
+//RS             FLAGS.iter().filter(|flag| flag.long == canonical).count(),
+//RS             1,
+//RS             "registry must contain one canonical {canonical} row"
+//RS         );
+//RS         assert!(flags_for_command("db")
+//RS             .iter()
+//RS             .any(|flag| flag.0 == canonical));
+//RS         assert!(man.contains(canonical), "man missing {canonical}");
+//RS         for completion in &completions {
+//RS             assert!(
+//RS                 completion.contains(canonical)
+//RS                     || completion.contains(canonical.trim_start_matches("--")),
+//RS                 "completion missing {canonical}"
+//RS             );
+//RS         }
+//RS     }
+//RS     for effect in BuildEffect::ALL {
+//RS         for kind in ["allow", "deny"] {
+//RS             let retired = format!("--{kind}-{}", effect.flag());
+//RS             assert!(
+//RS                 !FLAGS.iter().any(|flag| flag.long == retired),
+//RS                 "registry must reject retired {retired}"
+//RS             );
+//RS             assert!(!man.contains(&retired), "man contains retired {retired}");
+//RS             for completion in &completions {
+//RS                 assert!(
+//RS                     !completion.contains(&retired),
+//RS                     "completion contains retired {retired}"
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS     #[test]
+//RS     fn cost_surface_is_registered_for_help_man_and_completions() {
+//RS         assert_eq!(
+//RS             FLAGS.iter().filter(|flag| flag.long == "--cost").count(),
+//RS             1
+//RS         );
+//RS         assert!(is_known_flag("--cost"));
+//RS         assert!(command_usage("lint").contains("--cost"));
+//RS         assert!(command_usage("explain").contains("<CODE|FACT>"));
+//RS         assert!(command_usage("explain").contains("--cost"));
+//RS         assert!(man_page("0.0.0").contains("--cost"));
+//RS         for completion in [
+//RS             completions_bash(),
+//RS             completions_zsh(),
+//RS             completions_fish(),
+//RS             completions_powershell(),
+//RS         ] {
+//RS             assert!(completion.contains("--cost") || completion.contains("cost"));
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn self_update_keyless_override_is_registered_for_help_and_completions() {
+//RS         assert_eq!(
+//RS             FLAGS
+//RS                 .iter()
+//RS                 .filter(|flag| flag.long == "--allow-unofficial")
+//RS                 .count(),
+//RS             1
+//RS         );
+//RS         assert!(is_known_flag("--allow-unofficial"));
+//RS         assert!(command_group_usage("self").contains("--allow-unofficial"));
+//RS         assert!(man_page("0.0.0").contains("--allow-unofficial"));
+//RS         for completion in [
+//RS             completions_bash(),
+//RS             completions_zsh(),
+//RS             completions_fish(),
+//RS             completions_powershell(),
+//RS         ] {
+//RS             assert!(completion.contains("--allow-unofficial"));
+//RS         }
+//RS     }
+//RS 
+//RS     /// #1659 criterion 1: a command is declared exactly once in the one
+//RS     /// `COMMANDS` table. A non-keeps_group nested action's dispatch word must
+//RS     /// never also appear as its own separate top-level `COMMANDS` row — that
+//RS     /// would be the same command declared twice within the one table.
+//RS     /// (`keeps_group` actions legitimately share their owning group's own row.)
+//RS     #[test]
+//RS     fn no_command_declared_in_both_tables() {
+//RS         for group in command_groups() {
+//RS             for action in group.actions {
+//RS                 if action.handler.keeps_group() {
+//RS                     continue;
+//RS                 }
+//RS                 assert!(
+//RS                     !COMMANDS.iter().any(|c| c.name == action.handler.dispatch_word()),
+//RS                     "`{}` is declared both as a `{}` nested action and again as a top-level COMMANDS row",
+//RS                     action.handler.dispatch_word(),
+//RS                     group.name,
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn is_help_flag_recognizes_both_spellings() {
+//RS         assert!(is_help_flag("--help"));
+//RS         assert!(is_help_flag("-h"));
+//RS         assert!(!is_help_flag("--json"));
+//RS         assert!(!is_help_flag("help"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn machine_output_has_one_registered_flag_and_reader_spelling() {
+//RS         let args = vec!["inspect".to_string(), MACHINE_OUTPUT_FLAG.to_string()];
+//RS         assert!(machine_output_requested(&args));
+//RS         assert!(!machine_output_requested(&["inspect".to_string()]));
+//RS         assert_eq!(
+//RS             FLAGS.iter().filter(|flag| flag.long == MACHINE_OUTPUT_FLAG).count(),
+//RS             1
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn output_flags_ignore_program_arguments_after_separator() {
+//RS         let args = [
+//RS             "run".to_string(),
+//RS             "--quiet".to_string(),
+//RS             "--".to_string(),
+//RS             "--verbose".to_string(),
+//RS             "--json".to_string(),
+//RS         ];
+//RS         let flags = OutputFlags::parse(&args).unwrap();
+//RS         assert!(flags.quiet);
+//RS         assert!(!flags.verbose);
+//RS         assert!(!flags.json);
+//RS         assert!(!machine_output_requested(&args));
+//RS 
+//RS         let verbose_args = [
+//RS             "run".to_string(),
+//RS             "--verbose".to_string(),
+//RS             "--".to_string(),
+//RS             "--quiet".to_string(),
+//RS             "--json".to_string(),
+//RS         ];
+//RS         let verbose = OutputFlags::parse(&verbose_args).unwrap();
+//RS         assert!(verbose.verbose);
+//RS         assert!(!verbose.quiet);
+//RS         assert!(!verbose.json);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn always_machine_commands_use_the_shared_reader() {
+//RS         assert!(machine_output_requested(&[
+//RS             "inspect".to_string(),
+//RS             "compiler".to_string(),
+//RS         ]));
+//RS         assert!(machine_output_requested(&["compiler".to_string()]));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn command_group_usage_lists_every_action() {
+//RS         for group in command_groups() {
+//RS             let text = command_group_usage(group.name);
+//RS             for action in group.actions {
+//RS                 assert!(
+//RS                     text.contains(action.name),
+//RS                     "{} usage missing action {}",
+//RS                     group.name,
+//RS                     action.name
+//RS                 );
+//RS             }
+//RS         }
+//RS         assert_eq!(command_group_usage("no-such-group"), "");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn help_copy_uses_sentence_case_descriptions_and_title_case_chrome() {
+//RS         let starts_uppercase = |text: &str| {
+//RS             text.chars()
+//RS                 .next()
+//RS                 .is_some_and(|character| character.is_uppercase())
+//RS         };
+//RS         assert!(COMMANDS.iter().all(|command| starts_uppercase(command.summary)));
+//RS         assert!(command_groups()
+//RS             .flat_map(|group| group.actions.iter())
+//RS             .all(|action| starts_uppercase(action.summary)));
+//RS         assert!(FLAGS.iter().all(|flag| starts_uppercase(flag.help)));
+//RS 
+//RS         let help = usage_page("test", HelpOrder::Frequency);
+//RS         assert!(help.contains("\nUsage:\n"));
+//RS         assert!(help.contains("\nFlags:\n"));
+//RS         for group in command_groups() {
+//RS             assert!(help.contains(&format!(
+//RS                 "\n{} Commands:\n",
+//RS                 command_group_label(group.name)
+//RS             )));
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn frequency_ranks_order_every_command_exactly_once() {
+//RS         let mut ranks: Vec<u16> = COMMANDS.iter().map(|command| command.frequency_rank).collect();
+//RS         ranks.sort_unstable();
+//RS         let expected: Vec<u16> = (1..=COMMANDS.len() as u16).collect();
+//RS         assert_eq!(
+//RS             ranks, expected,
+//RS             "run `node Tools/cli-census/census.mjs` to rank every COMMANDS row"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn retired_routes_have_zero_live_registry_rows() {
+//RS         let surfaces = [
+//RS             usage_page("0.0.0", HelpOrder::Frequency),
+//RS             man_page("0.0.0"),
+//RS             completions_bash(),
+//RS             completions_zsh(),
+//RS             completions_fish(),
+//RS             completions_powershell(),
+//RS         ];
+//RS         for retired in RETIRED_COMMANDS {
+//RS             assert_eq!(
+//RS                 COMMANDS
+//RS                     .iter()
+//RS                     .filter(|command| command.name == retired.spelling)
+//RS                     .count(),
+//RS                 0,
+//RS                 "retired route {} remains a top-level row",
+//RS                 retired.spelling
+//RS             );
+//RS             assert_eq!(
+//RS                 command_groups()
+//RS                     .flat_map(|group| group
+//RS                         .actions
+//RS                         .iter()
+//RS                         .map(move |action| (group.name, action.name)))
+//RS                     .filter(|(group, action)| format!("{group} {action}") == retired.spelling)
+//RS                     .count(),
+//RS                 0,
+//RS                 "retired route {} remains a nested row",
+//RS                 retired.spelling
+//RS             );
+//RS             let needle = format!("{} {}", BINARY_NAME, retired.spelling);
+//RS             for surface in &surfaces {
+//RS                 assert!(
+//RS                     !surface.contains(&needle),
+//RS                     "retired route leaked into generated surface: {needle}\n{surface}"
+//RS                 );
+//RS             }
+//RS             assert_eq!(retired.category, RetirementCategory::Semantic);
+//RS             assert_eq!(retired.error_code, "E2101");
+//RS         }
+//RS     }
+//RS     #[test]
+//RS     fn parser_inventory_guard_is_clean() {
+//RS         let violations = parser_inventory_violations();
+//RS         assert!(
+//RS             violations.is_empty(),
+//RS             "CLI parser registry drift: {:?}",
+//RS             violations
+//RS         );
+//RS     }
+//RS 
+//RS }
+// END-PORT-PENDING 0725 crates/jet-cli/src/CLI.rs:1799-3965
+

@@ -1,0 +1,1804 @@
+// PORT-PENDING 2044 crates-jet-pkg-model-src-lock-slice-1801: crates/jet-pkg-model/src/Lock.rs:1801-3600
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     ));
+//RS     out.push_str(&format!(
+//RS         "nix-revision = \"{}\"\n",
+//RS         escape_str(&closure.revision)
+//RS     ));
+//RS     out.push_str(&format!(
+//RS         "nix-system = \"{}\"\n",
+//RS         escape_str(&closure.system)
+//RS     ));
+//RS     out.push_str(&format!(
+//RS         "nix-index-authority = \"{}\"\n",
+//RS         escape_str(&closure.index_authority)
+//RS     ));
+//RS     out.push_str(&format!(
+//RS         "nix-derivation = \"{}\"\n",
+//RS         escape_str(&closure.derivation)
+//RS     ));
+//RS     out.push_str(&format!(
+//RS         "nix-output = \"{}\"\n",
+//RS         escape_str(&closure.output)
+//RS     ));
+//RS     out.push_str(&format!(
+//RS         "nix-nar-hash = \"{}\"\n",
+//RS         escape_str(&closure.nar_hash)
+//RS     ));
+//RS     out.push_str(&format!("nix-size = {}\n", closure.size));
+//RS     out.push_str(&format!(
+//RS         "nix-compression = \"{}\"\n",
+//RS         escape_str(&closure.compression)
+//RS     ));
+//RS     out.push_str(&format!(
+//RS         "nix-references = {}\n",
+//RS         write_string_array(&closure.references)
+//RS     ));
+//RS     out.push_str(&format!(
+//RS         "nix-upstream-proof = \"{}\"\n",
+//RS         escape_str(&closure.upstream_proof)
+//RS     ));
+//RS     out.push_str(&format!(
+//RS         "nix-cache-key = \"{}\"\n",
+//RS         escape_str(&closure.cache_key)
+//RS     ));
+//RS     out.push_str(&format!(
+//RS         "nix-project-cas-bundle = \"{}\"\n",
+//RS         escape_str(&closure.project_cas_bundle)
+//RS     ));
+//RS }
+//RS 
+//RS /// D-JPK-CACHE1=A (A4): serialize the envelope field set (shared by
+//RS /// `[[package]]` and `[[toolchain]]` blocks). `output-hash`/`platform`/
+//RS /// `provenance` are always emitted for a realized object (the frozen schema);
+//RS /// `signature` only when the slot is filled.
+//RS fn write_envelope(out: &mut String, env: &LockEnvelope) {
+//RS     out.push_str(&format!(
+//RS         "output-hash = \"{}\"\n",
+//RS         escape_str(&env.output_hash)
+//RS     ));
+//RS     out.push_str(&format!("platform = \"{}\"\n", escape_str(&env.platform)));
+//RS     if !env.signature.is_empty() {
+//RS         out.push_str(&format!("signature = \"{}\"\n", escape_str(&env.signature)));
+//RS     }
+//RS     if !env.catalog_tier.is_empty() {
+//RS         out.push_str(&format!(
+//RS             "catalog-tier = \"{}\"\n",
+//RS             escape_str(&env.catalog_tier)
+//RS         ));
+//RS     }
+//RS     if !env.catalog_trust.is_empty() {
+//RS         out.push_str(&format!(
+//RS             "catalog-trust = \"{}\"\n",
+//RS             escape_str(&env.catalog_trust)
+//RS         ));
+//RS     }
+//RS     out.push_str(&format!(
+//RS         "provenance = \"{}\"\n",
+//RS         escape_str(&env.provenance)
+//RS     ));
+//RS }
+//RS 
+//RS // ──────────────────────────────────────────────
+//RS // Parsing
+//RS // ──────────────────────────────────────────────
+//RS 
+//RS pub fn parse(raw: &str) -> Result<LockFile, String> {
+//RS     if raw.len() > MAX_LOCK_BYTES {
+//RS         return Err(oversized_lock_file_message());
+//RS     }
+//RS     let mut version: Option<u32> = None;
+//RS     let mut packages: Vec<LockedPackage> = Vec::new();
+//RS     let mut root_deps: Vec<String> = Vec::new();
+//RS     let mut authority: Option<crate::Package::PackageAuthority> = None;
+//RS     let mut workspace_members: Vec<LockedWorkspaceMember> = Vec::new();
+//RS     let mut workspace_source_digest: Option<String> = None;
+//RS     let mut workspace_overlay_sets: Vec<PartialWorkspaceOverlay> = Vec::new();
+//RS     let mut workspace_overlay_packages: Vec<PartialWorkspaceOverlayPackage> = Vec::new();
+//RS     let mut workspace_build_grants: Vec<PartialWorkspaceBuildGrant> = Vec::new();
+//RS     let mut workspace_policy_allow_unfree = Vec::new();
+//RS     let mut workspace_policy_build_deny = Vec::new();
+//RS     let mut comptime_inputs: Vec<ComptimeInput> = Vec::new();
+//RS     let mut toolchains: Vec<LockedToolchain> = Vec::new();
+//RS     let mut browsers: Vec<LockedBrowser> = Vec::new();
+//RS     let mut source_channels: Vec<LockedSourceChannel> = Vec::new();
+//RS     let mut build_contributions: Vec<LockedBuildContribution> = Vec::new();
+//RS     let mut build_stamp: Option<BuildStamp> = None;
+//RS     let mut current_pkg: Option<PartialPkg> = None;
+//RS     let mut current_ci: Option<PartialCi> = None;
+//RS     let mut current_workspace_member: Option<PartialWorkspaceMember> = None;
+//RS     let mut current_toolchain: Option<PartialToolchain> = None;
+//RS     let mut current_browser: Option<PartialBrowser> = None;
+//RS     let mut current_source_channel: Option<PartialSourceChannel> = None;
+//RS     let mut current_build_contribution: Option<PartialBuildContribution> = None;
+//RS     let mut current_workspace_overlay: Option<PartialWorkspaceOverlay> = None;
+//RS     let mut current_workspace_overlay_package: Option<PartialWorkspaceOverlayPackage> = None;
+//RS     let mut current_workspace_build_grant: Option<PartialWorkspaceBuildGrant> = None;
+//RS     let mut in_root = false;
+//RS     let mut in_build_stamp = false;
+//RS 
+//RS     for (line_number, raw_line) in raw.lines().enumerate() {
+//RS         // Corruption handling, not the escaping fix: stop before one malformed
+//RS         // lock value can allocate without a bound.
+//RS         if raw_line.len() > MAX_LOCK_VALUE_BYTES {
+//RS             return Err(oversized_lock_value_message(line_number + 1));
+//RS         }
+//RS         let line = raw_line.trim();
+//RS         if line.is_empty() || line.starts_with('#') {
+//RS             continue;
+//RS         }
+//RS         if line.starts_with('[') {
+//RS             // Any section header closes the section currently being built.
+//RS             if let Some(ci) = current_ci.take() {
+//RS                 if let Some(c) = ci.finish() {
+//RS                     comptime_inputs.push(c);
+//RS                 }
+//RS             }
+//RS             if let Some(wm) = current_workspace_member.take() {
+//RS                 workspace_members.push(wm.finish()?);
+//RS             }
+//RS             if let Some(p) = current_pkg.take() {
+//RS                 packages.push(p.finish()?);
+//RS             }
+//RS             if let Some(t) = current_toolchain.take() {
+//RS                 toolchains.push(t.finish());
+//RS             }
+//RS             if let Some(b) = current_browser.take() {
+//RS                 browsers.push(b.finish()?);
+//RS             }
+//RS             if let Some(sc) = current_source_channel.take() {
+//RS                 source_channels.push(sc.finish());
+//RS             }
+//RS             if let Some(contribution) = current_build_contribution.take() {
+//RS                 build_contributions.push(contribution.finish()?);
+//RS             }
+//RS             if let Some(package) = current_workspace_overlay_package.take() {
+//RS                 workspace_overlay_packages.push(package.finish()?);
+//RS             }
+//RS             if let Some(overlay) = current_workspace_overlay.take() {
+//RS                 workspace_overlay_sets.push(overlay.finish()?);
+//RS             }
+//RS             if let Some(grant) = current_workspace_build_grant.take() {
+//RS                 workspace_build_grants.push(grant.finish()?);
+//RS             }
+//RS             in_root = false;
+//RS             in_build_stamp = false;
+//RS             match line {
+//RS                 "[[comptime_inputs]]" => current_ci = Some(PartialCi::default()),
+//RS                 "[[package]]" => current_pkg = Some(PartialPkg::default()),
+//RS                 "[[workspace_member]]" => {
+//RS                     current_workspace_member = Some(PartialWorkspaceMember::default())
+//RS                 }
+//RS                 "[[toolchain]]" => current_toolchain = Some(PartialToolchain::default()),
+//RS                 "[[browser]]" => current_browser = Some(PartialBrowser::default()),
+//RS                 "[[source_channel]]" => {
+//RS                     current_source_channel = Some(PartialSourceChannel::default())
+//RS                 }
+//RS                 "[[build.contribution]]" => {
+//RS                     current_build_contribution = Some(PartialBuildContribution::default())
+//RS                 }
+//RS                 "[[workspace_overlay]]" => {
+//RS                     current_workspace_overlay = Some(PartialWorkspaceOverlay::default())
+//RS                 }
+//RS                 "[[workspace_overlay_package]]" => {
+//RS                     current_workspace_overlay_package =
+//RS                         Some(PartialWorkspaceOverlayPackage::default())
+//RS                 }
+//RS                 "[[workspace_build_grant]]" => {
+//RS                     current_workspace_build_grant = Some(PartialWorkspaceBuildGrant::default())
+//RS                 }
+//RS                 "[root]" => in_root = true,
+//RS                 "[build.stamp]" => in_build_stamp = true,
+//RS                 _ => return Err(format!("unknown lock section `{line}`")),
+//RS             }
+//RS             continue;
+//RS         }
+//RS 
+//RS         let (key, val) = match line.split_once('=') {
+//RS             Some((k, v)) => (k.trim(), v.trim()),
+//RS             None => {
+//RS                 return Err(format!(
+//RS                     "malformed lock line {}: expected `key = value`",
+//RS                     line_number + 1
+//RS                 ))
+//RS             }
+//RS         };
+//RS 
+//RS         if key == "version"
+//RS             && current_pkg.is_none()
+//RS             && current_toolchain.is_none()
+//RS             && current_browser.is_none()
+//RS             && current_workspace_overlay_package.is_none()
+//RS             && !in_root
+//RS         {
+//RS             version = Some(
+//RS                 val.trim_matches('"')
+//RS                     .parse()
+//RS                     .map_err(|_| format!("invalid lock version: {val}"))?,
+//RS             );
+//RS             continue;
+//RS         }
+//RS 
+//RS         if in_build_stamp {
+//RS             let stamp = build_stamp.get_or_insert_with(BuildStamp::default);
+//RS             match key {
+//RS                 "git" => stamp.git = Some(unescape_str(val)),
+//RS                 "dirty" => {
+//RS                     stamp.dirty = match val {
+//RS                         "true" => true,
+//RS                         "false" => false,
+//RS                         _ => return Err(format!("invalid build stamp dirty value: {val}")),
+//RS                     }
+//RS                 }
+//RS                 "toolchain" => stamp.toolchain = unescape_str(val),
+//RS                 "at" => stamp.at = unescape_str(val),
+//RS                 _ => return Err(format!("unknown build stamp field `{key}`")),
+//RS             }
+//RS             continue;
+//RS         }
+//RS 
+//RS         if key == "workspace_source_digest" && current_pkg.is_none() && !in_root {
+//RS             workspace_source_digest = Some(unescape_str(val));
+//RS             continue;
+//RS         }
+//RS 
+//RS         if key == "workspace_policy_allow_unfree" && current_pkg.is_none() && !in_root {
+//RS             workspace_policy_allow_unfree = parse_string_array(val)?;
+//RS             continue;
+//RS         }
+//RS         if key == "workspace_policy_build_deny" && current_pkg.is_none() && !in_root {
+//RS             workspace_policy_build_deny = parse_string_array(val)?;
+//RS             continue;
+//RS         }
+//RS 
+//RS         if in_root {
+//RS             match key {
+//RS                 "dependencies" => root_deps = parse_string_array(val)?,
+//RS                 "authority" => {
+//RS                     let parsed = crate::Package::Blocks::parse_authority_value(val)
+//RS                         .map_err(|error| error.to_string())?;
+//RS                     authority = Some(crate::Package::PackageAuthority {
+//RS                         holds: parsed.holds,
+//RS                         needs: parsed.needs,
+//RS                         grants: parsed.grants,
+//RS                         trust: parsed.trust,
+//RS                         providers: parsed.providers,
+//RS                     });
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS             continue;
+//RS         }
+//RS 
+//RS         if let Some(ref mut ci) = current_ci {
+//RS             match key {
+//RS                 "path" => ci.path = Some(unescape_str(val)),
+//RS                 "hash" => ci.hash = Some(val.trim_matches('"').to_string()),
+//RS                 _ => {}
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if let Some(ref mut contribution) = current_build_contribution {
+//RS             match key {
+//RS                 "package" => contribution.package = Some(unescape_str(val)),
+//RS                 "key" => contribution.key = Some(unescape_str(val)),
+//RS                 "value" => contribution.value = Some(unescape_str(val)),
+//RS                 "scope" => contribution.scope = Some(unescape_str(val)),
+//RS                 "layer" => contribution.layer = Some(unescape_str(val)),
+//RS                 "source" => contribution.source = Some(unescape_str(val)),
+//RS                 "reason" => contribution.reason = Some(unescape_str(val)),
+//RS                 _ => return Err(format!("unknown build contribution field `{key}`")),
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if let Some(ref mut wm) = current_workspace_member {
+//RS             match key {
+//RS                 "name" => wm.name = Some(unescape_str(val)),
+//RS                 "path" => wm.path = Some(unescape_str(val)),
+//RS                 "source_digest" => wm.source_digest = Some(unescape_str(val)),
+//RS                 "canonical_path" => wm.canonical_path = Some(unescape_str(val)),
+//RS                 "package_digest" => wm.package_digest = Some(unescape_str(val)),
+//RS                 _ => {}
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if let Some(ref mut overlay) = current_workspace_overlay {
+//RS             match key {
+//RS                 "name" => overlay.name = Some(unescape_str(val)),
+//RS                 "provider" => overlay.provider = Some(unescape_str(val)),
+//RS                 "channel" => overlay.channel = Some(unescape_str(val)),
+//RS                 _ => return Err(format!("unknown workspace overlay field `{key}`")),
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if let Some(ref mut package) = current_workspace_overlay_package {
+//RS             match key {
+//RS                 "overlay" => package.overlay = Some(unescape_str(val)),
+//RS                 "package" => package.package = Some(unescape_str(val)),
+//RS                 "source" => package.source = Some(unescape_str(val)),
+//RS                 "version" => package.version = Some(unescape_str(val)),
+//RS                 "flags" => package.flags = parse_string_array(val)?,
+//RS                 "priority" => {
+//RS                     package.priority = Some(
+//RS                         val.parse()
+//RS                             .map_err(|_| format!("invalid workspace overlay priority `{val}`"))?,
+//RS                     )
+//RS                 }
+//RS                 "field_priorities" => package.field_priorities = parse_string_array(val)?,
+//RS                 "env" => package.env = parse_string_array(val)?,
+//RS                 "patches" => package.patches = parse_string_array(val)?,
+//RS                 "allow_unfree" => {
+//RS                     package.allow_unfree = match val {
+//RS                         "true" => true,
+//RS                         "false" => false,
+//RS                         _ => {
+//RS                             return Err(format!(
+//RS                                 "invalid workspace overlay allow_unfree value `{val}`"
+//RS                             ))
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 _ => return Err(format!("unknown workspace overlay package field `{key}`")),
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if let Some(ref mut grant) = current_workspace_build_grant {
+//RS             match key {
+//RS                 "package" => grant.package = Some(unescape_str(val)),
+//RS                 "effects" => grant.effects = parse_string_array(val)?,
+//RS                 _ => return Err(format!("unknown workspace build grant field `{key}`")),
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if let Some(ref mut tc) = current_toolchain {
+//RS             match key {
+//RS                 "id" => tc.id = Some(unescape_str(val)),
+//RS                 "channel" => tc.channel = Some(unescape_str(val)),
+//RS                 "version" => tc.version = Some(unescape_str(val)),
+//RS                 "output-hash" => tc.envelope.output_hash = unescape_str(val),
+//RS                 "platform" => tc.envelope.platform = unescape_str(val),
+//RS                 "signature" => tc.envelope.signature = unescape_str(val),
+//RS                 "catalog-tier" => tc.envelope.catalog_tier = unescape_str(val),
+//RS                 "catalog-trust" => tc.envelope.catalog_trust = unescape_str(val),
+//RS                 "provenance" => tc.envelope.provenance = unescape_str(val),
+//RS                 _ => {}
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if let Some(ref mut browser) = current_browser {
+//RS             match key {
+//RS                 "engine" => browser.engine = Some(unescape_str(val)),
+//RS                 "version" => browser.version = Some(unescape_str(val)),
+//RS                 "binary" => browser.binary = Some(unescape_str(val)),
+//RS                 "protocol" => browser.protocol = Some(unescape_str(val)),
+//RS                 "size" => {
+//RS                     browser.size = Some(
+//RS                         val.trim_matches('"')
+//RS                             .parse()
+//RS                             .map_err(|_| format!("invalid browser size: {val}"))?,
+//RS                     );
+//RS                 }
+//RS                 "output-hash" => browser.envelope.output_hash = unescape_str(val),
+//RS                 "platform" => browser.envelope.platform = unescape_str(val),
+//RS                 "signature" => browser.envelope.signature = unescape_str(val),
+//RS                 "catalog-tier" => browser.envelope.catalog_tier = unescape_str(val),
+//RS                 "catalog-trust" => browser.envelope.catalog_trust = unescape_str(val),
+//RS                 "provenance" => browser.envelope.provenance = unescape_str(val),
+//RS                 _ => {}
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if let Some(ref mut sc) = current_source_channel {
+//RS             match key {
+//RS                 "name" => sc.name = Some(unescape_str(val)),
+//RS                 "channel" => sc.channel = Some(unescape_str(val)),
+//RS                 "exact" => sc.exact = Some(unescape_str(val)),
+//RS                 _ => {}
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if let Some(ref mut pkg) = current_pkg {
+//RS             match key {
+//RS                 "name" => pkg.name = Some(unescape_str(val)),
+//RS                 "version" => pkg.version = Some(unescape_str(val)),
+//RS                 "fingerprint" => pkg.fingerprint = Some(unescape_str(val)),
+//RS                 // D-CASTORE1=A: content hash is optional (old lockfiles omit it).
+//RS                 "content-hash" => pkg.content_hash = Some(unescape_str(val)),
+//RS                 "source" => pkg.source_raw = Some(val.to_string()),
+//RS                 "locked" => pkg.locked_raw = Some(val.to_string()),
+//RS                 "dependencies" => pkg.deps = parse_string_array(val)?,
+//RS                 "layer" => {
+//RS                     pkg.layer = crate::Syntax::RuntimeLayer::parse_manifest(val.trim_matches('"'));
+//RS                 }
+//RS                 "inferred-layer" => {
+//RS                     pkg.inferred_layer =
+//RS                         crate::Syntax::RuntimeLayer::parse_manifest(val.trim_matches('"'));
+//RS                 }
+//RS                 "effects" => pkg.effects = parse_string_array(val)?,
+//RS                 "effect-grants" => pkg.effect_grants = parse_string_array(val)?,
+//RS                 "required-effects" => pkg.required_effects = parse_string_array(val)?,
+//RS                 "granted-effects" => pkg.granted_effects = parse_string_array(val)?,
+//RS                 "denied-effects" => pkg.denied_effects = parse_string_array(val)?,
+//RS                 "effect-authority" => {
+//RS                     pkg.effect_authority = Some(unescape_str(val));
+//RS                 }
+//RS                 "nix-channel" => pkg.nix_closure_mut().channel = Some(unescape_str(val)),
+//RS                 "nix-revision" => pkg.nix_closure_mut().revision = Some(unescape_str(val)),
+//RS                 "nix-system" => pkg.nix_closure_mut().system = Some(unescape_str(val)),
+//RS                 "nix-index-authority" => {
+//RS                     pkg.nix_closure_mut().index_authority = Some(unescape_str(val))
+//RS                 }
+//RS                 "nix-derivation" => pkg.nix_closure_mut().derivation = Some(unescape_str(val)),
+//RS                 "nix-output" => pkg.nix_closure_mut().output = Some(unescape_str(val)),
+//RS                 "nix-nar-hash" => pkg.nix_closure_mut().nar_hash = Some(unescape_str(val)),
+//RS                 "nix-size" => {
+//RS                     pkg.nix_closure_mut().size = Some(
+//RS                         val.trim_matches('"')
+//RS                             .parse()
+//RS                             .map_err(|_| format!("invalid Nix closure size: {val}"))?,
+//RS                     )
+//RS                 }
+//RS                 "nix-compression" => pkg.nix_closure_mut().compression = Some(unescape_str(val)),
+//RS                 "nix-references" => {
+//RS                     pkg.nix_closure_mut().references = Some(parse_string_array(val)?)
+//RS                 }
+//RS                 "nix-upstream-proof" => {
+//RS                     pkg.nix_closure_mut().upstream_proof = Some(unescape_str(val))
+//RS                 }
+//RS                 "nix-cache-key" => pkg.nix_closure_mut().cache_key = Some(unescape_str(val)),
+//RS                 "nix-project-cas-bundle" => {
+//RS                     pkg.nix_closure_mut().project_cas_bundle = Some(unescape_str(val))
+//RS                 }
+//RS 
+//RS                 // D-JPK-CACHE1=A (A4): realized-output envelope. Seeing any of
+//RS                 // these marks the package as realized (envelope becomes Some).
+//RS                 "output-hash" => pkg.envelope_mut().output_hash = unescape_str(val),
+//RS                 "platform" => pkg.envelope_mut().platform = unescape_str(val),
+//RS                 "signature" => pkg.envelope_mut().signature = unescape_str(val),
+//RS                 "catalog-tier" => pkg.envelope_mut().catalog_tier = unescape_str(val),
+//RS                 "catalog-trust" => pkg.envelope_mut().catalog_trust = unescape_str(val),
+//RS                 "provenance" => pkg.envelope_mut().provenance = unescape_str(val),
+//RS                 "receipt" => {
+//RS                     let receipt = unescape_str(val);
+//RS                     pkg.receipt = (!receipt.is_empty()).then_some(receipt);
+//RS                 }
+//RS                 "provenance-transparency" => {
+//RS                     pkg.provenance_mut().transparency = Some(unescape_str(val))
+//RS                 }
+//RS                 "provenance-publisher" => pkg.provenance_mut().publisher = Some(unescape_str(val)),
+//RS                 "provenance-build" => pkg.provenance_mut().build = Some(unescape_str(val)),
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS     }
+//RS     if let Some(ci) = current_ci {
+//RS         if let Some(c) = ci.finish() {
+//RS             comptime_inputs.push(c);
+//RS         }
+//RS     }
+//RS     if let Some(wm) = current_workspace_member {
+//RS         workspace_members.push(wm.finish()?);
+//RS     }
+//RS     if let Some(p) = current_pkg {
+//RS         packages.push(p.finish()?);
+//RS     }
+//RS     if let Some(t) = current_toolchain {
+//RS         toolchains.push(t.finish());
+//RS     }
+//RS     if let Some(b) = current_browser {
+//RS         browsers.push(b.finish()?);
+//RS     }
+//RS     if let Some(sc) = current_source_channel {
+//RS         source_channels.push(sc.finish());
+//RS     }
+//RS     if let Some(contribution) = current_build_contribution {
+//RS         build_contributions.push(contribution.finish()?);
+//RS     }
+//RS 
+//RS     if let Some(package) = current_workspace_overlay_package {
+//RS         workspace_overlay_packages.push(package.finish()?);
+//RS     }
+//RS     if let Some(overlay) = current_workspace_overlay {
+//RS         workspace_overlay_sets.push(overlay.finish()?);
+//RS     }
+//RS     if let Some(grant) = current_workspace_build_grant {
+//RS         workspace_build_grants.push(grant.finish()?);
+//RS     }
+//RS 
+//RS     let workspace_overlay_policy = build_workspace_overlay_policy(
+//RS         workspace_overlay_sets,
+//RS         workspace_overlay_packages,
+//RS         workspace_build_grants,
+//RS         workspace_policy_allow_unfree,
+//RS         workspace_policy_build_deny,
+//RS     )?;
+//RS 
+//RS     let version = version.ok_or("lock is missing top-level `version`")?;
+//RS     if version != LOCK_VERSION {
+//RS         return Err(format!(
+//RS             "unsupported lock version {version}; expected {LOCK_VERSION}"
+//RS         ));
+//RS     }
+//RS     let mut lock = LockFile {
+//RS         version,
+//RS         packages,
+//RS         root_dependencies: root_deps,
+//RS         authority,
+//RS         workspace_members,
+//RS         workspace_source_digest,
+//RS         workspace_overlay_policy,
+//RS         comptime_inputs,
+//RS         toolchains,
+//RS         browsers,
+//RS         source_channels,
+//RS         build_stamp,
+//RS         build_contributions,
+//RS     };
+//RS     canonicalize_lock(&mut lock);
+//RS     Ok(lock)
+//RS }
+//RS 
+//RS /// Parse a lock for a user-facing path. Unsupported format versions are
+//RS /// distinct from corruption: the reader must not rewrite an input whose
+//RS /// required meanings it cannot establish.
+//RS pub fn parse_with_path(raw: &str, lock_path: &Path) -> Result<LockFile, Diagnostic> {
+//RS     parse(raw).map_err(|error| {
+//RS         if let Some(version) = unsupported_lock_version(&error) {
+//RS             e1214_lock_unsupported(
+//RS                 &lock_path.display().to_string(),
+//RS                 version,
+//RS                 &LOCK_VERSION.to_string(),
+//RS             )
+//RS         } else {
+//RS             e1205_lock_corrupt(&lock_path.display().to_string())
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn unsupported_lock_version(error: &str) -> Option<&str> {
+//RS     let version = error.strip_prefix("unsupported lock version ")?;
+//RS     let (version, expected) = version.split_once(';')?;
+//RS     (expected.trim() == format!("expected {LOCK_VERSION}")).then_some(version.trim())
+//RS }
+//RS 
+//RS /// Load a project lock with the registered diagnostic for each reader outcome.
+//RS /// Missing locks remain optional; a present unsupported or corrupt lock stops
+//RS /// the strict caller before it can resolve or write anything.
+//RS pub fn load_strict_with_path(project_root: &Path) -> Result<Option<LockFile>, Diagnostic> {
+//RS     let path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+//RS     match read_lock_text(&path) {
+//RS         Ok(raw) => parse_with_path(&raw, &path).map(Some),
+//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+//RS         Err(_) => Err(e1205_lock_corrupt(&path.display().to_string())),
+//RS     }
+//RS }
+//RS 
+//RS /// Identify a lock that claims workspace authority even when its typed parse
+//RS /// fails. Callers use this only to report the malformed/stale lock instead of
+//RS /// treating it as an ordinary package lock or an empty workspace.
+//RS pub fn looks_like_workspace_lock(raw: &str) -> bool {
+//RS     raw.lines().map(str::trim).any(|line| {
+//RS         matches!(
+//RS             line,
+//RS             "[[workspace_member]]"
+//RS                 | "[[workspace_overlay]]"
+//RS                 | "[[workspace_overlay_package]]"
+//RS                 | "[[workspace_build_grant]]"
+//RS         ) || line.starts_with("workspace_source_digest")
+//RS             || line.starts_with("workspace_policy_allow_unfree")
+//RS             || line.starts_with("workspace_policy_build_deny")
+//RS     })
+//RS }
+//RS 
+//RS fn parse_string_array(val: &str) -> Result<Vec<String>, String> {
+//RS     let val = val.trim();
+//RS     if !(val.starts_with('[') && val.ends_with(']')) {
+//RS         return Err(format!("invalid string array: {val}"));
+//RS     }
+//RS     let val = &val[1..val.len() - 1];
+//RS     if val.trim().is_empty() {
+//RS         return Ok(Vec::new());
+//RS     }
+//RS     let mut values = Vec::new();
+//RS     let mut current = String::new();
+//RS     let mut quoted = false;
+//RS     let mut escaped = false;
+//RS     let mut item_started = false;
+//RS     let mut item_quoted = false;
+//RS     for character in val.chars() {
+//RS         if escaped {
+//RS             current.push(match character {
+//RS                 'n' => '\n',
+//RS                 'r' => '\r',
+//RS                 't' => '\t',
+//RS                 other => other,
+//RS             });
+//RS             escaped = false;
+//RS             item_started = true;
+//RS         } else if quoted && character == '\\' {
+//RS             escaped = true;
+//RS         } else if character == '"' {
+//RS             quoted = !quoted;
+//RS             item_started = true;
+//RS             item_quoted = true;
+//RS         } else if character == ',' && !quoted {
+//RS             if !item_started {
+//RS                 return Err(format!("invalid string array: {val}"));
+//RS             }
+//RS             values.push(if item_quoted {
+//RS                 current.clone()
+//RS             } else {
+//RS                 current.trim().to_string()
+//RS             });
+//RS             current.clear();
+//RS             item_started = false;
+//RS             item_quoted = false;
+//RS         } else if quoted || !character.is_whitespace() {
+//RS             current.push(character);
+//RS             item_started = true;
+//RS         }
+//RS     }
+//RS     if quoted || escaped || !item_started {
+//RS         return Err(format!("invalid string array: {val}"));
+//RS     }
+//RS     values.push(if item_quoted {
+//RS         current
+//RS     } else {
+//RS         current.trim().to_string()
+//RS     });
+//RS     Ok(values)
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct PartialCi {
+//RS     path: Option<String>,
+//RS     hash: Option<String>,
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct PartialBuildContribution {
+//RS     package: Option<String>,
+//RS     key: Option<String>,
+//RS     value: Option<String>,
+//RS     scope: Option<String>,
+//RS     layer: Option<String>,
+//RS     source: Option<String>,
+//RS     reason: Option<String>,
+//RS }
+//RS 
+//RS impl PartialBuildContribution {
+//RS     fn finish(self) -> Result<LockedBuildContribution, String> {
+//RS         let required = |name: &str, value: Option<String>| {
+//RS             value
+//RS                 .filter(|value| !value.is_empty())
+//RS                 .ok_or_else(|| format!("build contribution is missing `{name}`"))
+//RS         };
+//RS         Ok(LockedBuildContribution {
+//RS             package: required("package", self.package)?,
+//RS             key: required("key", self.key)?,
+//RS             value: required("value", self.value)?,
+//RS             scope: required("scope", self.scope)?,
+//RS             layer: required("layer", self.layer)?,
+//RS             source: required("source", self.source)?,
+//RS             reason: self.reason.unwrap_or_default(),
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS impl PartialCi {
+//RS     fn finish(self) -> Option<ComptimeInput> {
+//RS         Some(ComptimeInput {
+//RS             path: self.path?,
+//RS             hash: self.hash?,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct PartialWorkspaceMember {
+//RS     name: Option<String>,
+//RS     path: Option<String>,
+//RS     source_digest: Option<String>,
+//RS     canonical_path: Option<String>,
+//RS     package_digest: Option<String>,
+//RS }
+//RS 
+//RS impl PartialWorkspaceMember {
+//RS     fn finish(self) -> Result<LockedWorkspaceMember, String> {
+//RS         let nonempty = |field: &str, value: Option<String>| {
+//RS             value
+//RS                 .filter(|value| !value.is_empty())
+//RS                 .ok_or_else(|| format!("workspace member is missing `{field}`"))
+//RS         };
+//RS         Ok(LockedWorkspaceMember {
+//RS             name: nonempty("name", self.name)?,
+//RS             path: nonempty("path", self.path)?,
+//RS             source_digest: nonempty("source_digest", self.source_digest)?,
+//RS             canonical_path: nonempty("canonical_path", self.canonical_path)?,
+//RS             package_digest: nonempty("package_digest", self.package_digest)?,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct PartialWorkspaceOverlay {
+//RS     name: Option<String>,
+//RS     provider: Option<String>,
+//RS     channel: Option<String>,
+//RS }
+//RS 
+//RS impl PartialWorkspaceOverlay {
+//RS     fn finish(self) -> Result<Self, String> {
+//RS         let name = self
+//RS             .name
+//RS             .filter(|name| !name.is_empty())
+//RS             .ok_or_else(|| "workspace overlay is missing `name`".to_string())?;
+//RS         if self.channel.is_some() && self.provider.is_none() {
+//RS             return Err(format!(
+//RS                 "workspace overlay `{name}` has `channel` without `provider`"
+//RS             ));
+//RS         }
+//RS         Ok(Self {
+//RS             name: Some(name),
+//RS             provider: self.provider,
+//RS             channel: self.channel,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct PartialWorkspaceOverlayPackage {
+//RS     overlay: Option<String>,
+//RS     package: Option<String>,
+//RS     source: Option<String>,
+//RS     version: Option<String>,
+//RS     flags: Vec<String>,
+//RS     priority: Option<i32>,
+//RS     field_priorities: Vec<String>,
+//RS     env: Vec<String>,
+//RS     patches: Vec<String>,
+//RS     allow_unfree: bool,
+//RS }
+//RS 
+//RS impl PartialWorkspaceOverlayPackage {
+//RS     fn finish(self) -> Result<Self, String> {
+//RS         let Self {
+//RS             overlay,
+//RS             package,
+//RS             source,
+//RS             version,
+//RS             flags,
+//RS             priority,
+//RS             field_priorities,
+//RS             env,
+//RS             patches,
+//RS             allow_unfree,
+//RS         } = self;
+//RS         let overlay = overlay
+//RS             .filter(|overlay| !overlay.is_empty())
+//RS             .ok_or_else(|| "workspace overlay package is missing `overlay`".to_string())?;
+//RS         let package = package
+//RS             .filter(|package| !package.is_empty())
+//RS             .ok_or_else(|| "workspace overlay package is missing `package`".to_string())?;
+//RS         Ok(Self {
+//RS             overlay: Some(overlay),
+//RS             package: Some(package),
+//RS             source,
+//RS             version,
+//RS             flags,
+//RS             priority,
+//RS             field_priorities,
+//RS             env,
+//RS             patches,
+//RS             allow_unfree,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct PartialWorkspaceBuildGrant {
+//RS     package: Option<String>,
+//RS     effects: Vec<String>,
+//RS }
+//RS 
+//RS impl PartialWorkspaceBuildGrant {
+//RS     fn finish(self) -> Result<Self, String> {
+//RS         let package = self
+//RS             .package
+//RS             .filter(|package| !package.is_empty())
+//RS             .ok_or_else(|| "workspace build grant is missing `package`".to_string())?;
+//RS         Ok(Self {
+//RS             package: Some(package),
+//RS             effects: self.effects,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS fn split_fact(value: &str) -> Option<(String, String)> {
+//RS     let (key, value) = value.split_once('=')?;
+//RS     Some((key.to_string(), value.to_string()))
+//RS }
+//RS 
+//RS fn build_workspace_overlay_policy(
+//RS     overlays: Vec<PartialWorkspaceOverlay>,
+//RS     packages: Vec<PartialWorkspaceOverlayPackage>,
+//RS     grants: Vec<PartialWorkspaceBuildGrant>,
+//RS     allow_unfree: Vec<String>,
+//RS     build_deny: Vec<String>,
+//RS ) -> Result<OverlayPolicy, String> {
+//RS     let mut overlay_names = BTreeSet::new();
+//RS     let mut build_grants = Vec::new();
+//RS     let mut policy = OverlayPolicy {
+//RS         overlays: overlays
+//RS             .into_iter()
+//RS             .map(|overlay| {
+//RS                 let name = overlay
+//RS                     .name
+//RS                     .ok_or_else(|| "workspace overlay is missing `name`".to_string())?;
+//RS                 if !overlay_names.insert(name.clone()) {
+//RS                     return Err(format!("duplicate workspace overlay `{name}`"));
+//RS                 }
+//RS                 Ok(OverlaySet {
+//RS                     name,
+//RS                     provider: overlay.provider.map(|provider| ProviderOverride {
+//RS                         provider,
+//RS 
+//RS                         channel: overlay.channel.clone(),
+//RS                     }),
+//RS                     packages: Vec::new(),
+//RS                 })
+//RS             })
+//RS             .collect::<Result<Vec<_>, String>>()?,
+//RS         allow_unfree,
+//RS         build_deny,
+//RS         build_grants: Vec::new(),
+//RS     };
+//RS     for grant in grants {
+//RS         let package = grant
+//RS             .package
+//RS             .ok_or_else(|| "workspace build grant is missing `package`".to_string())?;
+//RS         if build_grants
+//RS             .iter()
+//RS             .any(|(existing, _)| existing == &package)
+//RS         {
+//RS             return Err(format!("duplicate workspace build grant `{package}`"));
+//RS         }
+//RS         build_grants.push((package, grant.effects));
+//RS     }
+//RS     policy.build_grants = build_grants;
+//RS     let mut package_keys = BTreeSet::new();
+//RS     for package in packages {
+//RS         let overlay_name = package
+//RS             .overlay
+//RS             .ok_or_else(|| "workspace overlay package is missing `overlay`".to_string())?;
+//RS         let package_name = package
+//RS             .package
+//RS             .ok_or_else(|| "workspace overlay package is missing `package`".to_string())?;
+//RS         if !package_keys.insert((overlay_name.clone(), package_name.clone())) {
+//RS             return Err(format!(
+//RS                 "duplicate workspace overlay package `{overlay_name}/{package_name}`"
+//RS             ));
+//RS         }
+//RS         let target = policy
+//RS             .overlays
+//RS             .iter_mut()
+//RS             .find(|overlay| overlay.name == overlay_name)
+//RS             .ok_or_else(|| {
+//RS                 format!("workspace overlay package names unknown overlay `{overlay_name}`")
+//RS             })?;
+//RS         let mut field_priorities = std::collections::BTreeMap::new();
+//RS         for fact in package.field_priorities {
+//RS             let (key, value) = split_fact(&fact)
+//RS                 .ok_or_else(|| format!("invalid workspace overlay field priority `{fact}`"))?;
+//RS             if field_priorities.contains_key(&key) {
+//RS                 return Err(format!(
+//RS                     "duplicate workspace overlay field priority `{key}`"
+//RS                 ));
+//RS             }
+//RS             let priority = value
+//RS                 .parse()
+//RS                 .map_err(|_| format!("invalid workspace overlay field priority `{fact}`"))?;
+//RS             field_priorities.insert(key, priority);
+//RS         }
+//RS         let env = package
+//RS             .env
+//RS             .into_iter()
+//RS             .map(|fact| {
+//RS                 split_fact(&fact)
+//RS                     .ok_or_else(|| format!("invalid workspace overlay environment fact `{fact}`"))
+//RS             })
+//RS             .collect::<Result<Vec<_>, _>>()?;
+//RS         let mut env_keys = BTreeSet::new();
+//RS         for (key, _) in &env {
+//RS             if !env_keys.insert(key) {
+//RS                 return Err(format!(
+//RS                     "duplicate workspace overlay environment fact `{key}`"
+//RS                 ));
+//RS             }
+//RS         }
+//RS         target.packages.push(PackageOverride {
+//RS             package: package_name,
+//RS             source: package.source,
+//RS             version: package.version,
+//RS             flags: package.flags,
+//RS             priority: package.priority.unwrap_or_default(),
+//RS             field_priorities,
+//RS             env,
+//RS             patches: package.patches,
+//RS             allow_unfree: package.allow_unfree,
+//RS         });
+//RS     }
+//RS     Ok(policy)
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct PartialPkg {
+//RS     name: Option<String>,
+//RS     version: Option<String>,
+//RS     source_raw: Option<String>,
+//RS     locked_raw: Option<String>,
+//RS     fingerprint: Option<String>,
+//RS     content_hash: Option<String>,
+//RS     deps: Vec<String>,
+//RS     layer: Option<crate::Syntax::RuntimeLayer>,
+//RS     inferred_layer: Option<crate::Syntax::RuntimeLayer>,
+//RS     effects: Vec<String>,
+//RS     effect_grants: Vec<String>,
+//RS     required_effects: Vec<String>,
+//RS     granted_effects: Vec<String>,
+//RS     denied_effects: Vec<String>,
+//RS     effect_authority: Option<String>,
+//RS     envelope: Option<LockEnvelope>,
+//RS     nix_closure: Option<PartialNixClosure>,
+//RS     receipt: Option<String>,
+//RS     provenance: Option<DependencyProvenance>,
+//RS }
+//RS 
+//RS impl PartialPkg {
+//RS     /// Lazily create the envelope on first envelope key seen.
+//RS     fn envelope_mut(&mut self) -> &mut LockEnvelope {
+//RS         self.envelope.get_or_insert_with(LockEnvelope::default)
+//RS     }
+//RS 
+//RS     fn nix_closure_mut(&mut self) -> &mut PartialNixClosure {
+//RS         self.nix_closure
+//RS             .get_or_insert_with(PartialNixClosure::default)
+//RS     }
+//RS 
+//RS     fn provenance_mut(&mut self) -> &mut DependencyProvenance {
+//RS         self.provenance
+//RS             .get_or_insert_with(DependencyProvenance::default)
+//RS     }
+//RS 
+//RS     fn finish(self) -> Result<LockedPackage, String> {
+//RS         let name = self.name.ok_or("missing name")?;
+//RS         let version = self.version.ok_or("missing version")?;
+//RS         let source = parse_source(self.source_raw.as_deref().unwrap_or(""))?;
+//RS         let nix_closure = self
+//RS             .nix_closure
+//RS             .map(PartialNixClosure::finish)
+//RS             .transpose()?;
+//RS         match (&source, &nix_closure) {
+//RS             (LockSource::Nix { output, .. }, Some(closure)) if closure.output != *output => {
+//RS                 return Err("Nix source output disagrees with its closure record".into());
+//RS             }
+//RS             (LockSource::Nix { .. }, None) => {
+//RS                 return Err("Nix package is missing its portable closure record".into());
+//RS             }
+//RS             (LockSource::Nix { .. }, Some(_)) => {}
+//RS             (_, Some(_)) => {
+//RS                 return Err("portable Nix closure record attached to a non-Nix package".into());
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS         if let (Some(envelope), Some(closure)) = (self.envelope.as_ref(), nix_closure.as_ref()) {
+//RS             if envelope.output_hash != closure.output || envelope.platform != closure.system {
+//RS                 return Err("Nix envelope identity disagrees with its closure record".into());
+//RS             }
+//RS         }
+//RS         let locked = self.locked_raw.as_deref().map(parse_locked).transpose()?;
+//RS         let fingerprint = self.fingerprint.unwrap_or_default();
+//RS         Ok(LockedPackage {
+//RS             name,
+//RS             version,
+//RS             source,
+//RS             nix_closure,
+//RS             locked,
+//RS             fingerprint,
+//RS             content_hash: self.content_hash,
+//RS             dependencies: self.deps,
+//RS             layer: self.layer,
+//RS             inferred_layer: self.inferred_layer,
+//RS             effects: self.effects,
+//RS             effect_grants: self.effect_grants,
+//RS             required_effects: self.required_effects,
+//RS             granted_effects: self.granted_effects,
+//RS             denied_effects: self.denied_effects,
+//RS             effect_authority: self.effect_authority,
+//RS             envelope: self.envelope,
+//RS             receipt: self.receipt,
+//RS             provenance: self.provenance,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct PartialNixClosure {
+//RS     channel: Option<String>,
+//RS     revision: Option<String>,
+//RS     system: Option<String>,
+//RS     index_authority: Option<String>,
+//RS     derivation: Option<String>,
+//RS     output: Option<String>,
+//RS     nar_hash: Option<String>,
+//RS     size: Option<u64>,
+//RS     compression: Option<String>,
+//RS     references: Option<Vec<String>>,
+//RS     upstream_proof: Option<String>,
+//RS     cache_key: Option<String>,
+//RS     project_cas_bundle: Option<String>,
+//RS }
+//RS 
+//RS impl PartialNixClosure {
+//RS     fn finish(self) -> Result<NixClosureRecord, String> {
+//RS         let record = NixClosureRecord {
+//RS             channel: self.channel.ok_or("Nix closure is missing `channel`")?,
+//RS             revision: self.revision.ok_or("Nix closure is missing `revision`")?,
+//RS             system: self.system.ok_or("Nix closure is missing `system`")?,
+//RS             index_authority: self
+//RS                 .index_authority
+//RS                 .ok_or("Nix closure is missing `index-authority`")?,
+//RS             derivation: self
+//RS                 .derivation
+//RS                 .ok_or("Nix closure is missing `derivation`")?,
+//RS             output: self.output.ok_or("Nix closure is missing `output`")?,
+//RS             nar_hash: self.nar_hash.ok_or("Nix closure is missing `nar-hash`")?,
+//RS             size: self.size.ok_or("Nix closure is missing `size`")?,
+//RS             compression: self
+//RS                 .compression
+//RS                 .ok_or("Nix closure is missing `compression`")?,
+//RS             references: self
+//RS                 .references
+//RS                 .ok_or("Nix closure is missing `references`")?,
+//RS             upstream_proof: self
+//RS                 .upstream_proof
+//RS                 .ok_or("Nix closure is missing `upstream-proof`")?,
+//RS             cache_key: self.cache_key.ok_or("Nix closure is missing `cache-key`")?,
+//RS             project_cas_bundle: self
+//RS                 .project_cas_bundle
+//RS                 .ok_or("Nix closure is missing `project-cas-bundle`")?,
+//RS         };
+//RS         record.validate()?;
+//RS         Ok(record)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct PartialToolchain {
+//RS     id: Option<String>,
+//RS     channel: Option<String>,
+//RS     version: Option<String>,
+//RS     envelope: LockEnvelope,
+//RS }
+//RS 
+//RS impl PartialToolchain {
+//RS     fn finish(self) -> LockedToolchain {
+//RS         LockedToolchain {
+//RS             id: self.id.unwrap_or_default(),
+//RS             channel: self.channel.unwrap_or_default(),
+//RS             version: self.version.unwrap_or_default(),
+//RS             envelope: self.envelope,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct PartialBrowser {
+//RS     engine: Option<String>,
+//RS     version: Option<String>,
+//RS     binary: Option<String>,
+//RS     protocol: Option<String>,
+//RS     size: Option<u64>,
+//RS     envelope: LockEnvelope,
+//RS }
+//RS 
+//RS impl PartialBrowser {
+//RS     fn finish(self) -> Result<LockedBrowser, String> {
+//RS         Ok(LockedBrowser {
+//RS             engine: self.engine.ok_or("missing browser engine")?,
+//RS             version: self.version.ok_or("missing browser version")?,
+//RS             binary: self.binary.ok_or("missing browser binary")?,
+//RS             protocol: self.protocol.ok_or("missing browser protocol")?,
+//RS             size: self.size.ok_or("missing browser size")?,
+//RS             envelope: self.envelope,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct PartialSourceChannel {
+//RS     name: Option<String>,
+//RS     channel: Option<String>,
+//RS     exact: Option<String>,
+//RS }
+//RS 
+//RS impl PartialSourceChannel {
+//RS     fn finish(self) -> LockedSourceChannel {
+//RS         LockedSourceChannel {
+//RS             name: self.name.unwrap_or_default(),
+//RS             channel: self.channel.unwrap_or_default(),
+//RS             exact: canonical_ref(&self.exact.unwrap_or_default()),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn parse_source(s: &str) -> Result<LockSource, String> {
+//RS     let s = s
+//RS         .trim()
+//RS         .trim_start_matches('{')
+//RS         .trim_end_matches('}')
+//RS         .trim();
+//RS     if let Some(v) = kv_field(s, "root") {
+//RS         let _ = v;
+//RS         return Ok(LockSource::Root);
+//RS     }
+//RS     if let Some(v) = kv_field(s, "path") {
+//RS         return Ok(LockSource::Path(v));
+//RS     }
+//RS     if let Some(reference) = kv_field(s, "nix") {
+//RS         let output = kv_field(s, "output").unwrap_or_default();
+//RS         return Ok(LockSource::Nix {
+//RS             reference: canonical_ref(&reference),
+//RS             output,
+//RS         });
+//RS     }
+//RS     if let Some(reference) = kv_field(s, "cran") {
+//RS         return Ok(LockSource::Cran {
+//RS             reference: canonical_ref(&reference),
+//RS             output: kv_field(s, "output").unwrap_or_default(),
+//RS             source_hash: kv_field(s, "source-hash").unwrap_or_default(),
+//RS             repository: kv_field(s, "repository").unwrap_or_default(),
+//RS             authority: kv_field(s, "authority").unwrap_or_default(),
+//RS         });
+//RS     }
+//RS     if let Some(reference) = kv_field(s, "luarocks") {
+//RS         return Ok(LockSource::LuaRocks {
+//RS             reference: canonical_ref(&reference),
+//RS             output: kv_field(s, "output").unwrap_or_default(),
+//RS             source_hash: kv_field(s, "source-hash").unwrap_or_default(),
+//RS             repository: kv_field(s, "repository").unwrap_or_default(),
+//RS             authority: kv_field(s, "authority").unwrap_or_default(),
+//RS         });
+//RS     }
+//RS     if let Some(registry) = kv_field(s, "registry") {
+//RS         return Ok(LockSource::Registry {
+//RS             registry,
+//RS             reference: canonical_ref(&kv_field(s, "reference").unwrap_or_default()),
+//RS             output: kv_field(s, "output").unwrap_or_default(),
+//RS             source_hash: kv_field(s, "source-hash").unwrap_or_default(),
+//RS             repository: kv_field(s, "repository").unwrap_or_default(),
+//RS             authority: kv_field(s, "authority").unwrap_or_default(),
+//RS             tier: kv_field(s, "tier").unwrap_or_else(|| "unknown".to_string()),
+//RS             gate_status: kv_field(s, "gate-status").unwrap_or_else(|| "unknown".to_string()),
+//RS         });
+//RS     }
+//RS     if let Some(language) = kv_field(s, "foreign") {
+//RS         let language = crate::AST::ForeignLanguage::from_root(&language)
+//RS             .ok_or_else(|| format!("unknown foreign language `{language}`"))?;
+//RS         let reference = kv_field(s, "reference")
+//RS             .ok_or_else(|| "foreign source is missing `reference`".to_string())?;
+//RS         let output = kv_field(s, "output")
+//RS             .ok_or_else(|| "foreign source is missing `output`".to_string())?;
+//RS         return Ok(LockSource::Foreign {
+//RS             language,
+//RS             reference: canonical_ref(&reference),
+//RS             output,
+//RS         });
+//RS     }
+//RS     if let Some(url) = kv_field(s, "git") {
+//RS         let selector = if let Some(t) = kv_field(s, "tag") {
+//RS             format!("tag = \"{}\"", t)
+//RS         } else if let Some(b) = kv_field(s, "branch") {
+//RS             format!("branch = \"{}\"", b)
+//RS         } else if let Some(r) = kv_field(s, "rev") {
+//RS             format!("rev = \"{}\"", r)
+//RS         } else {
+//RS             String::new()
+//RS         };
+//RS         return Ok(LockSource::Git { url, selector });
+//RS     }
+//RS     Err(format!("unrecognised source: {}", s))
+//RS }
+//RS 
+//RS fn parse_locked(s: &str) -> Result<LockedRevision, String> {
+//RS     let s = s
+//RS         .trim()
+//RS         .trim_start_matches('{')
+//RS         .trim_end_matches('}')
+//RS         .trim();
+//RS     let rev = kv_field(s, "rev").unwrap_or_default();
+//RS     let tree_hash = kv_field(s, "tree-hash").unwrap_or_default();
+//RS     let last_modified = kv_field(s, "last-modified")
+//RS         .and_then(|v| v.parse().ok())
+//RS         .unwrap_or(0);
+//RS     Ok(LockedRevision {
+//RS         rev,
+//RS         tree_hash,
+//RS         last_modified,
+//RS     })
+//RS }
+//RS 
+//RS /// Extract the value for `key = "..."` or `key = digits` from an inline table string.
+//RS fn kv_field(inline: &str, key: &str) -> Option<String> {
+//RS     let mut parts = Vec::new();
+//RS     let mut start = 0;
+//RS     let mut quoted = false;
+//RS     let mut escaped = false;
+//RS     for (index, character) in inline.char_indices() {
+//RS         if escaped {
+//RS             escaped = false;
+//RS         } else if quoted && character == '\\' {
+//RS             escaped = true;
+//RS         } else if character == '"' {
+//RS             quoted = !quoted;
+//RS         } else if character == ',' && !quoted {
+//RS             parts.push(&inline[start..index]);
+//RS             start = index + 1;
+//RS         }
+//RS     }
+//RS     parts.push(&inline[start..]);
+//RS     for part in parts {
+//RS         let part = part.trim();
+//RS         if let Some(rest) = part.strip_prefix(key) {
+//RS             let rest = rest.trim().strip_prefix('=')?.trim();
+//RS             let val = if rest.starts_with('"') {
+//RS                 unescape_str(rest)
+//RS             } else {
+//RS                 rest.to_string()
+//RS             };
+//RS             return Some(val);
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS /// Read one lock without letting a corrupt line grow the input buffer forever.
+//RS fn read_lock_text(path: &Path) -> std::io::Result<String> {
+//RS     let file = std::fs::File::open(path)?;
+//RS     let mut reader = std::io::BufReader::new(file);
+//RS     let mut raw = Vec::new();
+//RS     let mut line_length = 0;
+//RS     let mut line_number = 1;
+//RS 
+//RS     loop {
+//RS         let (take, content_length, has_newline) = {
+//RS             let chunk = reader.fill_buf()?;
+//RS             if chunk.is_empty() {
+//RS                 break;
+//RS             }
+//RS             let newline = chunk.iter().position(|byte| *byte == b'\n');
+//RS             let take = newline.map_or(chunk.len(), |index| index + 1);
+//RS             let content_length = newline.unwrap_or(take);
+//RS             if line_length + content_length > MAX_LOCK_VALUE_BYTES {
+//RS                 return Err(std::io::Error::new(
+//RS                     std::io::ErrorKind::InvalidData,
+//RS                     oversized_lock_value_message(line_number),
+//RS                 ));
+//RS             }
+//RS             let new_length = raw.len().checked_add(take).ok_or_else(|| {
+//RS                 std::io::Error::new(
+//RS                     std::io::ErrorKind::InvalidData,
+//RS                     oversized_lock_file_message(),
+//RS                 )
+//RS             })?;
+//RS             if new_length > MAX_LOCK_BYTES {
+//RS                 return Err(std::io::Error::new(
+//RS                     std::io::ErrorKind::InvalidData,
+//RS                     oversized_lock_file_message(),
+//RS                 ));
+//RS             }
+//RS             raw.extend_from_slice(&chunk[..take]);
+//RS             (take, content_length, newline.is_some())
+//RS         };
+//RS         reader.consume(take);
+//RS         if has_newline {
+//RS             line_length = 0;
+//RS             line_number += 1;
+//RS         } else {
+//RS             line_length += content_length;
+//RS         }
+//RS     }
+//RS 
+//RS     String::from_utf8(raw)
+//RS         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+//RS }
+//RS 
+//RS // ──────────────────────────────────────────────
+//RS // Load and verify
+//RS // ──────────────────────────────────────────────
+//RS 
+//RS pub fn load(project_root: &Path) -> Option<LockFile> {
+//RS     let path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+//RS     let raw = read_lock_text(&path).ok()?;
+//RS     parse(&raw).ok()
+//RS }
+//RS 
+//RS /// Load the project lock without turning malformed lock state into a cache
+//RS /// miss. Fully locked providers use this boundary before any catalog lookup.
+//RS pub fn load_strict(project_root: &Path) -> Result<Option<LockFile>, String> {
+//RS     let path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+//RS     match read_lock_text(&path) {
+//RS         Ok(raw) => parse(&raw).map(Some),
+//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+//RS         Err(error) => Err(format!("could not read `{}`: {error}", path.display())),
+//RS     }
+//RS }
+//RS 
+//RS fn empty_lock() -> LockFile {
+//RS     LockFile {
+//RS         version: LOCK_VERSION,
+//RS         packages: Vec::new(),
+//RS         root_dependencies: Vec::new(),
+//RS         authority: None,
+//RS         workspace_members: Vec::new(),
+//RS         workspace_source_digest: None,
+//RS         workspace_overlay_policy: Default::default(),
+//RS         comptime_inputs: Vec::new(),
+//RS         toolchains: Vec::new(),
+//RS         browsers: Vec::new(),
+//RS         source_channels: Vec::new(),
+//RS         build_stamp: None,
+//RS         build_contributions: Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS /// D-CONF-STAMP1=B: return the lock-pinned provenance or capture one stamp
+//RS /// for the lock-writing operation. A locked build may not fall back to the
+//RS /// wall clock; a missing stamp is a stale lock input.
+//RS pub fn build_stamp(project_root: &Path, locked: bool) -> Result<BuildStamp, String> {
+//RS     if let Some(stamp) = load(project_root).and_then(|lock| lock.build_stamp) {
+//RS         return Ok(stamp);
+//RS     }
+//RS     if locked {
+//RS         return Err(format!(
+//RS             "locked build has no `[build.stamp]` in `{}`",
+//RS             project_root.join(Syntax::UNIFIED_LOCK_FILE).display()
+//RS         ));
+//RS     }
+//RS     Ok(capture_build_stamp(project_root))
+//RS }
+//RS 
+//RS /// Pin provenance on every writer of the unified lock. Existing stamps are
+//RS /// immutable; a new lock gets one capture at the write boundary.
+//RS pub fn ensure_build_stamp(project_root: &Path, lock: &mut LockFile) {
+//RS     if lock.build_stamp.is_none() {
+//RS         lock.build_stamp = Some(capture_build_stamp(project_root));
+//RS     }
+//RS }
+//RS 
+//RS fn capture_build_stamp(project_root: &Path) -> BuildStamp {
+//RS     let Some(revision) = git_output(project_root, &["rev-parse", "HEAD"]) else {
+//RS         return BuildStamp {
+//RS             at: timestamp_now(),
+//RS             ..BuildStamp::default()
+//RS         };
+//RS     };
+//RS     let dirty = git_output(
+//RS         project_root,
+//RS         &["status", "--porcelain", "--untracked-files=all"],
+//RS     )
+//RS     .is_some_and(|status| !status.is_empty());
+//RS     let git = Some(if dirty {
+//RS         format!("{revision}-dirty")
+//RS     } else {
+//RS         revision
+//RS     });
+//RS     BuildStamp {
+//RS         git,
+//RS         dirty,
+//RS         at: timestamp_now(),
+//RS         ..BuildStamp::default()
+//RS     }
+//RS }
+//RS 
+//RS fn git_output(project_root: &Path, args: &[&str]) -> Option<String> {
+//RS     let output = std::process::Command::new("git")
+//RS         .arg("-C")
+//RS         .arg(project_root)
+//RS         .args(args)
+//RS         .output()
+//RS         .ok()?;
+//RS     if !output.status.success() {
+//RS         return None;
+//RS     }
+//RS     Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+//RS }
+//RS 
+//RS /// Minimal RFC3339 UTC rendering keeps the lock model std-only (I6).
+//RS fn timestamp_now() -> String {
+//RS     let elapsed = std::time::SystemTime::now()
+//RS         .duration_since(std::time::UNIX_EPOCH)
+//RS         .unwrap_or_default();
+//RS     let seconds = elapsed.as_secs() as i64;
+//RS     let days = seconds.div_euclid(86_400);
+//RS     let second = seconds.rem_euclid(86_400);
+//RS     let z = days + 719_468;
+//RS     let era = (if z >= 0 { z } else { z - 146_096 }).div_euclid(146_097);
+//RS     let doe = z - era * 146_097;
+//RS     let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096).div_euclid(365);
+//RS     let mut year = yoe + era * 400;
+//RS     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+//RS     let month_part = (5 * doy + 2).div_euclid(153);
+//RS     let day = doy - (153 * month_part + 2).div_euclid(5) + 1;
+//RS     let month = month_part + if month_part < 10 { 3 } else { -9 };
+//RS     year += if month <= 2 { 1 } else { 0 };
+//RS     format!(
+//RS         "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:09}Z",
+//RS         second / 3_600,
+//RS         (second % 3_600) / 60,
+//RS         second % 60,
+//RS         elapsed.subsec_nanos()
+//RS     )
+//RS }
+//RS 
+//RS /// D-RINGLAYER1=A M2: persist inferred runtime profile for the root package after build.
+//RS pub fn record_inferred_layer(
+//RS     project_root: &Path,
+//RS     package_name: &str,
+//RS     layer: crate::Syntax::RuntimeLayer,
+//RS ) {
+//RS     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+//RS     let Ok(raw) = read_lock_text(&lock_path) else {
+//RS         return;
+//RS     };
+//RS     let Ok(mut lock) = parse(&raw) else {
+//RS         return;
+//RS     };
+//RS     let Some(pkg) = lock.packages.iter_mut().find(|p| p.name == package_name) else {
+//RS         return;
+//RS     };
+//RS     pkg.inferred_layer = Some(layer);
+//RS     ensure_build_stamp(project_root, &mut lock);
+//RS     publish_lock_or_report(project_root, &write(&lock));
+//RS }
+//RS 
+//RS /// D-JPK-CACHE1=A (A4): stamp a realized package's output envelope into the
+//RS /// lock after it is built, so cache substitution can be driven off the lock
+//RS /// (the same field set the hangar object's `meta.json` already carries). A
+//RS /// no-op if the lock or the named package is absent, mirroring
+//RS /// [`record_inferred_layer`].
+//RS pub fn record_envelope(project_root: &Path, package_name: &str, envelope: LockEnvelope) {
+//RS     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+//RS     let Ok(raw) = read_lock_text(&lock_path) else {
+//RS         return;
+//RS     };
+//RS     let Ok(mut lock) = parse(&raw) else {
+//RS         return;
+//RS     };
+//RS     let Some(pkg) = lock.packages.iter_mut().find(|p| p.name == package_name) else {
+//RS         return;
+//RS     };
+//RS     pkg.envelope = Some(envelope);
+//RS     ensure_build_stamp(project_root, &mut lock);
+//RS     publish_lock_or_report(project_root, &write(&lock));
+//RS }
+//RS 
+//RS /// D-JPK-OFFLINE2=B: after a successful Nix-provider realize, record the locked
+//RS /// source identity (the resolved ref + portable output digest) and the complete
+//RS /// closure record into `.jet/lock`, creating the lock if the project has none.
+//RS /// This lock entry is the trust root a later offline replay matches before it
+//RS /// may reuse the Hangar copy. Upserts by package name so re-realizing the same
+//RS /// package replaces its entry in place.
+//RS pub fn record_nix_realization(
+//RS     project_root: &Path,
+//RS     name: &str,
+//RS     version: &str,
+//RS     reference: &str,
+//RS     output: &str,
+//RS     nix_closure: NixClosureRecord,
+//RS     envelope: LockEnvelope,
+//RS ) -> Result<(), String> {
+//RS     nix_closure.validate()?;
+//RS     envelope.validate_nix_catalog()?;
+//RS     if nix_closure.output != output || envelope.output_hash != output {
+//RS         return Err(
+//RS             "Nix closure and envelope outputs must match the realized output digest".into(),
+//RS         );
+//RS     }
+//RS     if envelope.platform != nix_closure.system {
+//RS         return Err("Nix closure system does not match the lock envelope platform".into());
+//RS     }
+//RS     let reference = crate::RefSpec::canonical_locked_ref(reference);
+//RS     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+//RS     let mut lock = match read_lock_text(&lock_path) {
+//RS         Ok(raw) => parse(&raw).map_err(|error| {
+//RS             format!(
+//RS                 "could not parse project lock `{}`: {error}",
+//RS                 lock_path.display()
+//RS             )
+//RS         })?,
+//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => LockFile {
+//RS             version: LOCK_VERSION,
+//RS             packages: Vec::new(),
+//RS             root_dependencies: Vec::new(),
+//RS             authority: None,
+//RS             workspace_members: Vec::new(),
+//RS             workspace_source_digest: None,
+//RS             workspace_overlay_policy: Default::default(),
+//RS             comptime_inputs: Vec::new(),
+//RS             toolchains: Vec::new(),
+//RS             browsers: Vec::new(),
+//RS             source_channels: Vec::new(),
+//RS             build_stamp: None,
+//RS             build_contributions: Vec::new(),
+//RS         },
+//RS         Err(error) => {
+//RS             return Err(format!(
+//RS                 "could not read project lock `{}`: {error}",
+//RS                 lock_path.display()
+//RS             ));
+//RS         }
+//RS     };
+//RS     let source_name = reference
+//RS         .rsplit_once(crate::Syntax::REF_PROVIDER_AT)
+//RS         .map(|(_, source)| {
+//RS             source
+//RS                 .split_once(crate::Syntax::REF_CHANNEL_MARKER)
+//RS                 .map_or(source, |(name, _)| name)
+//RS         })
+//RS         .filter(|name| !name.is_empty())
+//RS         .unwrap_or(Syntax::REF_SOURCE_JETPACK);
+//RS     if !lock
+//RS         .source_channels
+//RS         .iter()
+//RS         .any(|channel| channel.name == source_name)
+//RS     {
+//RS         lock.source_channels.push(LockedSourceChannel {
+//RS             name: source_name.to_string(),
+//RS             channel: nix_closure.channel.clone(),
+//RS             // The channel label is presentation metadata. The exact input
+//RS             // must use the one canonical Nix index identity accepted by the
+//RS             // provider selector.
+//RS             exact: format!("github:NixOS/nixpkgs#{}", nix_closure.revision),
+//RS         });
+//RS     }
+//RS     let existing_provenance = lock
+//RS         .packages
+//RS         .iter()
+//RS         .find(|package| {
+//RS             package.name == name
+//RS                 && package.version == version
+//RS                 && matches!(&package.source, LockSource::Nix { .. })
+//RS         })
+//RS         .and_then(|package| package.provenance.clone());
+//RS     let existing_receipt = lock
+//RS         .packages
+//RS         .iter()
+//RS         .find(|package| {
+//RS             package.name == name
+//RS                 && package.version == version
+//RS                 && matches!(
+//RS                     &package.source,
+//RS                     LockSource::Nix {
+//RS                         reference: locked_reference,
+//RS                         output: locked_output,
+//RS                     } if locked_reference == &reference && locked_output == output
+//RS                 )
+//RS                 && package.nix_closure.as_ref() == Some(&nix_closure)
+//RS                 && package
+//RS                     .envelope
+//RS                     .as_ref()
+//RS                     .is_some_and(|current| current.output_hash == envelope.output_hash)
+//RS         })
+//RS         .and_then(|package| package.receipt.clone());
+//RS     let entry = LockedPackage {
+//RS         name: name.to_string(),
+//RS         version: version.to_string(),
+//RS         source: LockSource::Nix {
+//RS             reference: reference.to_string(),
+//RS             output: output.to_string(),
+//RS         },
+//RS         nix_closure: Some(nix_closure),
+//RS 
+//RS         locked: None,
+//RS         fingerprint: String::new(),
+//RS         content_hash: None,
+//RS         dependencies: Vec::new(),
+//RS         layer: None,
+//RS         inferred_layer: None,
+//RS         effects: Vec::new(),
+//RS         effect_grants: Vec::new(),
+//RS         required_effects: Vec::new(),
+//RS         granted_effects: Vec::new(),
+//RS         denied_effects: Vec::new(),
+//RS         effect_authority: None,
+//RS         envelope: Some(envelope),
+//RS         receipt: existing_receipt,
+//RS         provenance: existing_provenance,
+//RS     };
+//RS     if let Some(existing) = lock
+//RS         .packages
+//RS         .iter_mut()
+//RS         .find(|p| p.name == name && matches!(&p.source, LockSource::Nix { .. }))
+//RS     {
+//RS         *existing = entry;
+//RS     } else {
+//RS         lock.packages.push(entry);
+//RS     }
+//RS     ensure_build_stamp(project_root, &mut lock);
+//RS     let contents = write(&lock);
+//RS     write_lock_atomically(project_root, contents.as_bytes())
+//RS }
+//RS 
+//RS /// Record one verified package-backed foreign namespace projection. The
+//RS /// language and provider ref stay in the lock source, while `output` names
+//RS /// the Hangar projection that supplied the generated binding. Upserting by
+//RS /// foreign dependency name keeps a provider change visible and preserves the
+//RS /// receipt only when the complete identity and envelope are unchanged.
+//RS pub fn record_foreign_realization(
+//RS     project_root: &Path,
+//RS     name: &str,
+//RS     version: &str,
+//RS     language: crate::AST::ForeignLanguage,
+//RS     reference: &str,
+//RS     output: &str,
+//RS     envelope: LockEnvelope,
+//RS ) -> Result<(), String> {
+//RS     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+//RS     let mut lock = match read_lock_text(&lock_path) {
+//RS         Ok(raw) => parse(&raw).map_err(|error| {
+//RS             format!(
+//RS                 "could not parse project lock `{}`: {error}",
+//RS                 lock_path.display()
+//RS             )
+//RS         })?,
+//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => LockFile {
+//RS             version: LOCK_VERSION,
+//RS             packages: Vec::new(),
+//RS             root_dependencies: Vec::new(),
+//RS             authority: None,
+//RS             workspace_members: Vec::new(),
+//RS             workspace_source_digest: None,
+//RS             workspace_overlay_policy: Default::default(),
+//RS             comptime_inputs: Vec::new(),
+//RS             toolchains: Vec::new(),
+//RS             browsers: Vec::new(),
+//RS             source_channels: Vec::new(),
+//RS             build_stamp: None,
+//RS             build_contributions: Vec::new(),
+//RS         },
+//RS         Err(error) => {
+//RS             return Err(format!(
+//RS                 "could not read project lock `{}`: {error}",
+//RS                 lock_path.display()
+//RS             ));
+//RS         }
+//RS     };
+//RS     lock.version = LOCK_VERSION;
+//RS     let existing_receipt = lock
+//RS         .packages
+//RS         .iter()
+//RS         .find(|package| {
+//RS             package.name == name
+//RS                 && package.version == version
+//RS                 && matches!(
+//RS                     &package.source,
+//RS                     LockSource::Foreign {
+//RS                         language: locked_language,
+//RS                         reference: locked_reference,
+//RS                         output: locked_output,
+//RS                     } if locked_language == &language
+//RS                         && locked_reference == reference
+//RS                         && locked_output == output
+//RS                 )
+//RS                 && package
+//RS                     .envelope
+//RS                     .as_ref()
+//RS                     .is_some_and(|current| current.output_hash == envelope.output_hash)
+//RS         })
+//RS         .and_then(|package| package.receipt.clone());
+//RS     let entry = LockedPackage {
+//RS         name: name.to_string(),
+//RS         version: version.to_string(),
+//RS         source: LockSource::Foreign {
+//RS             language,
+//RS             reference: reference.to_string(),
+//RS             output: output.to_string(),
+//RS         },
+//RS         nix_closure: None,
+//RS 
+//RS         locked: None,
+//RS         fingerprint: envelope.output_hash.clone(),
+//RS         content_hash: None,
+//RS         dependencies: Vec::new(),
+//RS         layer: None,
+//RS         inferred_layer: None,
+//RS         effects: Vec::new(),
+//RS         effect_grants: Vec::new(),
+//RS         required_effects: Vec::new(),
+//RS         granted_effects: Vec::new(),
+//RS         denied_effects: Vec::new(),
+//RS         effect_authority: None,
+//RS         envelope: Some(envelope),
+//RS         receipt: existing_receipt,
+//RS         provenance: None,
+//RS     };
+//RS     if let Some(existing) = lock.packages.iter_mut().find(|package| {
+//RS         package.name == name && matches!(&package.source, LockSource::Foreign { .. })
+//RS     }) {
+//RS         *existing = entry;
+//RS     } else {
+//RS         lock.packages.push(entry);
+//RS     }
+//RS     ensure_build_stamp(project_root, &mut lock);
+//RS     write_lock_atomically(project_root, write(&lock).as_bytes())
+//RS }
+//RS /// Record the resolved packages of a Rust FFI bridge in the unified package
+//RS /// graph. The bridge uses the existing `Foreign` source kind; Cargo's generated
+//RS /// lock is only read to fill the ordinary package records, never copied into a
+//RS /// second lock schema. A later bridge build replaces the records emitted by an
+//RS /// earlier bridge build while leaving user/provider records untouched.
+//RS pub fn record_rust_bridge(
+//RS     project_root: &Path,
+//RS     bridge_identity: &str,
+//RS     packages: Vec<LockedPackage>,
+//RS ) -> Result<(), String> {
+//RS     if bridge_identity.trim().is_empty() {
+//RS         return Err("Rust bridge lock identity is empty".to_string());
+//RS     }
+//RS     if packages.is_empty() {
+//RS         return Ok(());
+//RS     }
+//RS     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+//RS     let mut lock = match read_lock_text(&lock_path) {
+//RS         Ok(raw) => parse(&raw).map_err(|error| {
+//RS             format!(
+//RS                 "could not parse project lock `{}`: {error}",
+//RS                 lock_path.display()
+//RS             )
+//RS         })?,
+//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => LockFile {
+//RS             version: LOCK_VERSION,
+//RS             packages: Vec::new(),
+//RS             root_dependencies: Vec::new(),
+//RS             authority: None,
+//RS             workspace_members: Vec::new(),
+//RS             workspace_source_digest: None,
+//RS             workspace_overlay_policy: Default::default(),
+//RS             comptime_inputs: Vec::new(),
+//RS             toolchains: Vec::new(),
+//RS             browsers: Vec::new(),
+//RS             source_channels: Vec::new(),
+//RS             build_stamp: None,
+//RS             build_contributions: Vec::new(),
+//RS         },
+//RS         Err(error) => {
+//RS             return Err(format!(
+//RS                 "could not read project lock `{}`: {error}",
+//RS                 lock_path.display()
+//RS             ));
+//RS         }
+//RS     };
+//RS     lock.version = LOCK_VERSION;
+//RS     lock.packages.retain(|package| {
+//RS         !package
+//RS             .provenance
+//RS             .as_ref()
+//RS             .and_then(|provenance| provenance.build.as_deref())
+//RS             .is_some_and(|build| build.starts_with(RUST_BRIDGE_PROVENANCE_PREFIX))
+//RS     });
+//RS     lock.packages.extend(packages);
+//RS     ensure_build_stamp(project_root, &mut lock);
+//RS     write_lock_atomically(project_root, write(&lock).as_bytes())
+//RS }
+//RS 
+//RS /// Publish one complete canonical lock serialization without exposing a
+//RS /// partially written file. The size check runs before creating a temporary so
+//RS /// a rejected lock cannot replace the last good lock or leave scratch bytes.
+//RS pub fn write_lock_atomically(project_root: &Path, contents: &[u8]) -> Result<(), String> {
+//RS     let path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+//RS     if contents.len() > MAX_LOCK_BYTES {
+//RS         return Err(format!(
+//RS             "internal error: refusing to write project lock `{}`: serialized lock is {} bytes, over the 1 MiB limit",
+// END-PORT-PENDING 2044 crates/jet-pkg-model/src/Lock.rs:1801-3600
+

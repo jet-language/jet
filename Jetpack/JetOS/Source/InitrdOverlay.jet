@@ -1,0 +1,713 @@
+// PORT-PENDING 0871 crates-jetpack-src-jetos-generations-activation-module-group: crates/jetpack/src/JetOS/initrd_overlay.rs:1-709
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::desktop_store_vm::find_path_tool;
+//RS use super::installer_media::{render_guest_verify_script, render_installer_script};
+//RS use super::types::Generation;
+//RS use jet_env_model::ModuleEval::SystemPlan;
+//RS use std::collections::BTreeSet;
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS use std::time::{SystemTime, UNIX_EPOCH};
+//RS 
+//RS pub(super) fn append_installer_initrd_overlay(
+//RS     initrd: &Path,
+//RS     system: &SystemPlan,
+//RS     gen: &Generation,
+//RS ) -> std::io::Result<()> {
+//RS     let init = r#"#!/bin/sh
+//RS set -eu
+//RS PATH=/jetos/tools/bin:/bin:/sbin:/usr/bin:/usr/sbin
+//RS export PATH
+//RS mkdir -p /proc
+//RS mount -t proc proc /proc 2>/dev/null || true
+//RS mkdir -p /dev
+//RS mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+//RS mkdir -p /sys
+//RS mount -t sysfs sysfs /sys 2>/dev/null || true
+//RS use_system_nix() {
+//RS     system_nix="$1"
+//RS     [ -d "$system_nix" ] || return 0
+//RS     if [ -L /nix ]; then
+//RS         rm -f /nix 2>/dev/null || true
+//RS     elif [ -d /nix ]; then
+//RS         rmdir /nix 2>/dev/null || true
+//RS     fi
+//RS     [ -e /nix ] || ln -s "$system_nix" /nix 2>/dev/null || true
+//RS }
+//RS modprobe virtio_pci 2>/dev/null || true
+//RS modprobe virtio_blk 2>/dev/null || true
+//RS modprobe ata_piix 2>/dev/null || true
+//RS modprobe sd_mod 2>/dev/null || true
+//RS modprobe sr_mod 2>/dev/null || true
+//RS modprobe cdrom 2>/dev/null || true
+//RS insmod /jetos/modules/serio.ko.xz 2>/dev/null || true
+//RS insmod /jetos/modules/i8042.ko.xz 2>/dev/null || true
+//RS insmod /jetos/modules/libps2.ko.xz 2>/dev/null || true
+//RS insmod /jetos/modules/atkbd.ko.xz 2>/dev/null || true
+//RS insmod /jetos/modules/hid-generic.ko.xz 2>/dev/null || true
+//RS insmod /jetos/modules/usbhid.ko.xz 2>/dev/null || true
+//RS insmod /jetos/modules/uhci-hcd.ko.xz 2>/dev/null || true
+//RS insmod /jetos/modules/ehci-hcd.ko.xz 2>/dev/null || true
+//RS insmod /jetos/modules/xhci-hcd.ko.xz 2>/dev/null || true
+//RS modprobe atkbd 2>/dev/null || true
+//RS modprobe usbhid 2>/dev/null || true
+//RS cmdline="$(cat /proc/cmdline 2>/dev/null || true)"
+//RS case "$cmdline" in
+//RS   *jetos.mode=install*)
+//RS     mkdir -p /media /mnt/jetos
+//RS     mount -o ro /dev/sr0 /media 2>/dev/null || mount -o ro /dev/cdrom /media 2>/dev/null || true
+//RS     exec /jetos/tools/bin/sh /jetos/install.sh
+//RS     ;;
+//RS   *jetos.mode=verify*|*jetos.mode=desktop-verify*)
+//RS     mkdir -p /sysroot
+//RS     tries=0
+//RS     while [ ! -e /dev/vda ] && [ ! -e /dev/vda2 ] && [ ! -e /dev/sda ] && [ ! -e /dev/sda2 ] && [ "$tries" -lt 30 ]; do
+//RS         tries=$((tries + 1))
+//RS         sleep 1
+//RS     done
+//RS     for candidate in LABEL=jetos-root /dev/vda2 /dev/sda2 /dev/vda /dev/sda; do
+//RS         mount "$candidate" /sysroot 2>/dev/null && break
+//RS     done
+//RS     system="/sysroot/var/lib/jetos/generations/@JETOS_GENERATION@"
+//RS     use_system_nix "$system/nix"
+//RS     JETOS_TARGET_ROOT=/sysroot /jetos/tools/bin/sh /jetos/guest-verify.sh
+//RS     poweroff -f 2>/dev/null || halt -f 2>/dev/null || exit 0
+//RS     ;;
+//RS   *jetos.mode=run*)
+//RS     set +e
+//RS     mkdir -p /sysroot
+//RS     tries=0
+//RS     while [ ! -e /dev/vda ] && [ ! -e /dev/vda2 ] && [ ! -e /dev/sda ] && [ ! -e /dev/sda2 ] && [ "$tries" -lt 30 ]; do
+//RS         tries=$((tries + 1))
+//RS         sleep 1
+//RS     done
+//RS     for candidate in LABEL=jetos-root /dev/vda2 /dev/sda2 /dev/vda /dev/sda; do
+//RS         mount "$candidate" /sysroot 2>/dev/null && break
+//RS     done
+//RS     system="/sysroot/var/lib/jetos/generations/@JETOS_GENERATION@"
+//RS     if [ ! -e "$system" ]; then
+//RS         system="/sysroot/run/current-system"
+//RS     fi
+//RS     if [ ! -e "$system/sw/bin/jetos-terminal-fallback" ]; then
+//RS         echo "jetos run: missing installed terminal fallback"
+//RS         exec /jetos/tools/bin/sh
+//RS     fi
+//RS     mkdir -p /run
+//RS     if [ -L /run/current-system ]; then
+//RS         rm -f /run/current-system 2>/dev/null || true
+//RS     elif [ -d /run/current-system ]; then
+//RS         rmdir /run/current-system 2>/dev/null || true
+//RS     else
+//RS         rm -f /run/current-system 2>/dev/null || true
+//RS     fi
+//RS     ln -s "$system" /run/current-system
+//RS     export JETOS_SYSTEM_ROOT="$system"
+//RS     export PATH="$system/sw/bin:$PATH"
+//RS     if [ -r "$system/etc/profile" ]; then
+//RS         . "$system/etc/profile"
+//RS     fi
+//RS     use_system_nix "$system/nix"
+//RS     if { [ -e "$system/sbin/init" ] || [ -L "$system/sbin/init" ]; } && command -v chroot >/dev/null 2>&1; then
+//RS         generation_target="/var/lib/jetos/generations/@JETOS_GENERATION@"
+//RS         mkdir -p /sysroot/run /sysroot/proc /sysroot/dev /sysroot/sys
+//RS         mkdir -p /sysroot/var/lib/jetos
+//RS         rm -f /sysroot/var/lib/jetos/current-system 2>/dev/null || true
+//RS         ln -s "$generation_target" /sysroot/var/lib/jetos/current-system 2>/dev/null || true
+//RS         if [ -L /sysroot/run/current-system ]; then
+//RS             rm -f /sysroot/run/current-system 2>/dev/null || true
+//RS         elif [ -d /sysroot/run/current-system ]; then
+//RS             rmdir /sysroot/run/current-system 2>/dev/null || true
+//RS         else
+//RS             rm -f /sysroot/run/current-system 2>/dev/null || true
+//RS         fi
+//RS         ln -s "$generation_target" /sysroot/run/current-system
+//RS         if [ -d "$system/nix" ]; then
+//RS             if [ -L /sysroot/nix ]; then
+//RS                 rm -f /sysroot/nix 2>/dev/null || true
+//RS             elif [ -d /sysroot/nix ]; then
+//RS                 rmdir /sysroot/nix 2>/dev/null || true
+//RS             fi
+//RS             [ -e /sysroot/nix ] || ln -s "$generation_target/nix" /sysroot/nix 2>/dev/null || true
+//RS         fi
+//RS         for top in etc sbin sw share studio init systemd lib usr network hardware users flatpak performance module-system storage workloads theme fleet options image-variants lifecycle service-manager apps acceptance desktop store compat terminal home; do
+//RS             if [ -d "/sysroot/$top" ]; then
+//RS                 rmdir "/sysroot/$top" 2>/dev/null || true
+//RS             fi
+//RS             if [ -e "$system/$top" ] && [ ! -e "/sysroot/$top" ]; then
+//RS                 ln -s "$generation_target/$top" "/sysroot/$top" 2>/dev/null || true
+//RS             fi
+//RS         done
+//RS         mount --move /proc /sysroot/proc 2>/dev/null || mount -t proc proc /sysroot/proc 2>/dev/null || true
+//RS         mount --move /dev /sysroot/dev 2>/dev/null || mount -t devtmpfs devtmpfs /sysroot/dev 2>/dev/null || true
+//RS         mount --move /sys /sysroot/sys 2>/dev/null || mount -t sysfs sysfs /sysroot/sys 2>/dev/null || true
+//RS         echo "jetos run: handing off to installed systemd"
+//RS         export JETOS_SYSTEM_ROOT=/var/lib/jetos/current-system
+//RS         export SYSTEMD_UNIT_PATH=/etc/systemd/system:/var/lib/jetos/current-system/systemd/lib/systemd/system:/var/lib/jetos/current-system/usr/lib/systemd/system:/var/lib/jetos/current-system/lib/systemd/system
+//RS         exec chroot /sysroot /run/current-system/sbin/init systemd.unit=graphical.target
+//RS         echo "jetos run: systemd handoff failed; falling back to emergency console"
+//RS         mkdir -p /proc /dev /sys
+//RS         mount -t proc proc /proc 2>/dev/null || true
+//RS         mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+//RS         mount -t sysfs sysfs /sys 2>/dev/null || true
+//RS     fi
+//RS     run_external() {
+//RS         "$@" &
+//RS         child=$!
+//RS         wait "$child"
+//RS         printf '\017'
+//RS     }
+//RS     tty=/dev/tty1
+//RS     case "$cmdline" in
+//RS       *console=ttyS0*) tty=/dev/ttyS0 ;;
+//RS     esac
+//RS     if [ ! -e "$tty" ]; then
+//RS         tty=/dev/console
+//RS     fi
+//RS     {
+//RS         printf '\017\033[2J\033[H'
+//RS         echo "JetOS {host}"
+//RS         echo "installed generation: $JETOS_SYSTEM_ROOT"
+//RS         echo "try: ls /run/current-system ; cat /run/current-system/studio/app.json"
+//RS         while true; do
+//RS             printf '\017JetOS {host} / # '
+//RS             IFS= read -r line || break
+//RS             case "$line" in
+//RS               exit|logout) break ;;
+//RS               reset|clear) printf '\017\033[2J\033[H' ;;
+//RS               jet) echo "jetos: bare jet starts the REPL; run 'jet repl' explicitly, or 'jet --help'" ;;
+//RS               cd' '*) cd "${line#cd }" 2>/dev/null || echo "cd: ${line#cd }: no such directory" ;;
+//RS               pwd) pwd ;;
+//RS               ls|ls' '*)
+//RS                 set -- $line
+//RS                 shift
+//RS                 if [ "$#" -eq 0 ]; then
+//RS                     set -- .
+//RS                 fi
+//RS                 for target in "$@"; do
+//RS                     if [ -d "$target" ]; then
+//RS                         for item in "$target"/*; do
+//RS                             [ -e "$item" ] && printf '%s\n' "${item##*/}"
+//RS                         done
+//RS                     elif [ -e "$target" ]; then
+//RS                         printf '%s\n' "$target"
+//RS                     else
+//RS                         echo "ls: $target: no such file or directory"
+//RS                     fi
+//RS                 done
+//RS                 ;;
+//RS               cat' '*)
+//RS                 set -- $line
+//RS                 shift
+//RS                 for file in "$@"; do
+//RS                     if [ ! -r "$file" ]; then
+//RS                         echo "cat: $file: no such file"
+//RS                         continue
+//RS                     fi
+//RS                     while IFS= read -r text || [ -n "$text" ]; do
+//RS                         printf '%s\n' "$text"
+//RS                     done < "$file"
+//RS                 done
+//RS                 ;;
+//RS               echo|echo' '*) printf '%s\n' "${line#echo }" ;;
+//RS               '') ;;
+//RS               *)
+//RS                 set -- $line
+//RS                 cmd=${1:-}
+//RS                 if [ -z "$cmd" ]; then
+//RS                     continue
+//RS                 fi
+//RS                 shift
+//RS                 if command -v "$cmd" >/dev/null 2>&1; then
+//RS                     run_external "$cmd" "$@"
+//RS                 elif [ -x "$system/sw/bin/$cmd" ]; then
+//RS                     run_external "$system/sw/bin/$cmd" "$@"
+//RS                 elif [ -x "/jetos/tools/bin/$cmd" ]; then
+//RS                     run_external "/jetos/tools/bin/$cmd" "$@"
+//RS                 elif [ -x "/bin/$cmd" ]; then
+//RS                     run_external "/bin/$cmd" "$@"
+//RS                 elif [ -x "$cmd" ]; then
+//RS                     run_external "$cmd" "$@"
+//RS                 else
+//RS                     echo "$cmd: command not found"
+//RS                 fi
+//RS                 ;;
+//RS             esac
+//RS         done
+//RS         echo "JetOS console closed"
+//RS     } < "$tty" > "$tty" 2>&1
+//RS     poweroff -f 2>/dev/null || halt -f 2>/dev/null || exec /jetos/tools/bin/sh
+//RS     ;;
+//RS esac
+//RS mkdir -p /sysroot
+//RS tries=0
+//RS while [ ! -e /dev/vda ] && [ ! -e /dev/vda2 ] && [ ! -e /dev/sda ] && [ ! -e /dev/sda2 ] && [ "$tries" -lt 30 ]; do
+//RS     tries=$((tries + 1))
+//RS     sleep 1
+//RS done
+//RS for candidate in LABEL=jetos-root /dev/vda2 /dev/sda2 /dev/vda /dev/sda; do
+//RS     mount "$candidate" /sysroot 2>/dev/null && break
+//RS done
+//RS if [ -e /sysroot/var/lib/jetos/generations/log ] || [ -L /sysroot/run/current-system ]; then
+//RS     system="/sysroot/var/lib/jetos/generations/@JETOS_GENERATION@"
+//RS     use_system_nix "$system/nix"
+//RS     JETOS_TARGET_ROOT=/sysroot /jetos/tools/bin/sh /jetos/guest-verify.sh
+//RS     poweroff -f 2>/dev/null || halt -f 2>/dev/null || exit 0
+//RS fi
+//RS exec /jetos/tools/bin/sh /jetos/install.sh
+//RS "#
+//RS     .replace("@JETOS_GENERATION@", &gen.name);
+//RS     let install = render_installer_script(system, gen);
+//RS     let verify = render_guest_verify_script(system, gen);
+//RS     let isofs = fs::read(gen.path.join("boot/modules/isofs.ko.xz")).ok();
+//RS     let bochs = fs::read(gen.path.join("boot/modules/bochs.ko.xz")).ok();
+//RS     let fat_modules = [
+//RS         (
+//RS             "fat.ko.xz",
+//RS             fs::read(gen.path.join("boot/modules/fat.ko.xz")).ok(),
+//RS         ),
+//RS         (
+//RS             "vfat.ko.xz",
+//RS             fs::read(gen.path.join("boot/modules/vfat.ko.xz")).ok(),
+//RS         ),
+//RS         (
+//RS             "nls_ascii.ko.xz",
+//RS             fs::read(gen.path.join("boot/modules/nls_ascii.ko.xz")).ok(),
+//RS         ),
+//RS         (
+//RS             "nls_cp437.ko.xz",
+//RS             fs::read(gen.path.join("boot/modules/nls_cp437.ko.xz")).ok(),
+//RS         ),
+//RS     ];
+//RS     let input_modules = [
+//RS         "serio.ko.xz",
+//RS         "i8042.ko.xz",
+//RS         "libps2.ko.xz",
+//RS         "atkbd.ko.xz",
+//RS         "hid-generic.ko.xz",
+//RS         "usbhid.ko.xz",
+//RS         "uhci-hcd.ko.xz",
+//RS         "ehci-hcd.ko.xz",
+//RS         "xhci-hcd.ko.xz",
+//RS     ];
+//RS     let mut entries = vec![
+//RS         OwnedCpioEntry::dir("jetos"),
+//RS         OwnedCpioEntry::dir("jetos/modules"),
+//RS         OwnedCpioEntry::dir("jetos/tools"),
+//RS         OwnedCpioEntry::dir("jetos/tools/bin"),
+//RS         OwnedCpioEntry::file("jetos/init", 0o100755, init.as_bytes().to_vec()),
+//RS         OwnedCpioEntry::file("jetos/install.sh", 0o100755, install.as_bytes().to_vec()),
+//RS         OwnedCpioEntry::file(
+//RS             "jetos/guest-verify.sh",
+//RS             0o100755,
+//RS             verify.as_bytes().to_vec(),
+//RS         ),
+//RS     ];
+//RS     if let Some(isofs) = isofs {
+//RS         entries.push(OwnedCpioEntry::file(
+//RS             "jetos/modules/isofs.ko.xz",
+//RS             0o100644,
+//RS             isofs,
+//RS         ));
+//RS     }
+//RS     if let Some(bochs) = bochs {
+//RS         entries.push(OwnedCpioEntry::file(
+//RS             "jetos/modules/bochs.ko.xz",
+//RS             0o100644,
+//RS             bochs,
+//RS         ));
+//RS     }
+//RS     for (name, bytes) in fat_modules {
+//RS         if let Some(bytes) = bytes {
+//RS             entries.push(OwnedCpioEntry::file(
+//RS                 &format!("jetos/modules/{name}"),
+//RS                 0o100644,
+//RS                 bytes,
+//RS             ));
+//RS         }
+//RS     }
+//RS     for name in input_modules {
+//RS         if let Ok(bytes) = fs::read(gen.path.join("boot/modules").join(name)) {
+//RS             entries.push(OwnedCpioEntry::file(
+//RS                 &format!("jetos/modules/{name}"),
+//RS                 0o100644,
+//RS                 bytes,
+//RS             ));
+//RS         }
+//RS     }
+//RS     entries.extend(installer_tool_overlay_entries()?);
+//RS     let overlay = cpio_newc_owned(&entries);
+//RS     let initrd_bytes = fs::read(initrd)?;
+//RS     if let Some(offset) = first_zstd_frame_offset(&initrd_bytes) {
+//RS         let zstd = find_path_tool("zstd").ok_or_else(|| {
+//RS             std::io::Error::new(
+//RS                 std::io::ErrorKind::NotFound,
+//RS                 "missing zstd for installer initrd overlay",
+//RS             )
+//RS         })?;
+//RS         let compressed_path = unique_initrd_temp_path(initrd, "main.zst");
+//RS         fs::write(&compressed_path, &initrd_bytes[offset..])?;
+//RS         let plain = zstd_decode_file(&zstd, &compressed_path)?;
+//RS         let _ = fs::remove_file(&compressed_path);
+//RS         let merged = append_overlay_to_cpio_plain(plain, &overlay);
+//RS         let plain_path = unique_initrd_temp_path(initrd, "main.cpio");
+//RS         fs::write(&plain_path, &merged)?;
+//RS         let compressed = zstd_encode_file(&zstd, &plain_path)?;
+//RS         let _ = fs::remove_file(&plain_path);
+//RS         let mut out = Vec::with_capacity(offset + compressed.len());
+//RS         out.extend_from_slice(&initrd_bytes[..offset]);
+//RS         out.extend_from_slice(&compressed);
+//RS         fs::write(initrd, out)?;
+//RS         return Ok(());
+//RS     }
+//RS 
+//RS     let merged = append_overlay_to_cpio_plain(initrd_bytes, &overlay);
+//RS     fs::write(initrd, merged)
+//RS }
+//RS 
+//RS fn installer_tool_overlay_entries() -> std::io::Result<Vec<OwnedCpioEntry>> {
+//RS     let mut dirs = BTreeSet::new();
+//RS     let mut seen_files = BTreeSet::new();
+//RS     let mut files = Vec::new();
+//RS     for tool in [
+//RS         "cat",
+//RS         "sh",
+//RS         "cp",
+//RS         "ln",
+//RS         "mkdir",
+//RS         "mount",
+//RS         "rm",
+//RS         "sleep",
+//RS         "sync",
+//RS         "sfdisk",
+//RS         "blockdev",
+//RS         "mkfs.vfat",
+//RS         "mkfs.ext4",
+//RS         "poweroff",
+//RS         "halt",
+//RS         "setsid",
+//RS         "chroot",
+//RS         "switch_root",
+//RS     ] {
+//RS         let tool_path = find_path_tool(tool).ok_or_else(|| {
+//RS             std::io::Error::new(
+//RS                 std::io::ErrorKind::NotFound,
+//RS                 format!("missing installer tool `{tool}`"),
+//RS             )
+//RS         })?;
+//RS         let actual = fs::canonicalize(&tool_path).unwrap_or_else(|_| tool_path.clone());
+//RS         if tool == "sh" {
+//RS             add_host_file_to_cpio_as(
+//RS                 &mut dirs,
+//RS                 &mut seen_files,
+//RS                 &mut files,
+//RS                 &actual,
+//RS                 "jetos/tools/bin/sh",
+//RS                 host_cpio_file_mode(&actual, 0o100755),
+//RS             )?;
+//RS             for dep in ldd_dependency_paths(&actual)? {
+//RS                 add_host_file_to_cpio(
+//RS                     &mut dirs,
+//RS                     &mut seen_files,
+//RS                     &mut files,
+//RS                     &dep,
+//RS                     host_cpio_file_mode(&dep, 0o100644),
+//RS                 )?;
+//RS             }
+//RS             continue;
+//RS         }
+//RS         let wrapper = format!("#!/bin/sh\nexec {} \"$@\"\n", tool_path.display());
+//RS         add_cpio_file(
+//RS             &mut dirs,
+//RS             &mut seen_files,
+//RS             &mut files,
+//RS             &format!("jetos/tools/bin/{tool}"),
+//RS             0o100755,
+//RS             wrapper.into_bytes(),
+//RS         );
+//RS         add_host_file_to_cpio(&mut dirs, &mut seen_files, &mut files, &tool_path, 0o100755)?;
+//RS         for dep in ldd_dependency_paths(&actual)? {
+//RS             add_host_file_to_cpio(
+//RS                 &mut dirs,
+//RS                 &mut seen_files,
+//RS                 &mut files,
+//RS                 &dep,
+//RS                 host_cpio_file_mode(&dep, 0o100644),
+//RS             )?;
+//RS         }
+//RS     }
+//RS     let mut entries = dirs
+//RS         .into_iter()
+//RS         .map(|dir| OwnedCpioEntry::dir(&dir))
+//RS         .collect::<Vec<_>>();
+//RS     entries.extend(files);
+//RS     Ok(entries)
+//RS }
+//RS 
+//RS fn add_host_file_to_cpio(
+//RS     dirs: &mut BTreeSet<String>,
+//RS     seen_files: &mut BTreeSet<String>,
+//RS     files: &mut Vec<OwnedCpioEntry>,
+//RS     path: &Path,
+//RS     mode: u32,
+//RS ) -> std::io::Result<()> {
+//RS     let Some(name) = path
+//RS         .to_str()
+//RS         .and_then(|s| s.strip_prefix('/'))
+//RS         .map(str::to_string)
+//RS     else {
+//RS         return Ok(());
+//RS     };
+//RS     let data = fs::read(path)?;
+//RS     add_cpio_file(dirs, seen_files, files, &name, mode, data);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn add_host_file_to_cpio_as(
+//RS     dirs: &mut BTreeSet<String>,
+//RS     seen_files: &mut BTreeSet<String>,
+//RS     files: &mut Vec<OwnedCpioEntry>,
+//RS     path: &Path,
+//RS     name: &str,
+//RS     mode: u32,
+//RS ) -> std::io::Result<()> {
+//RS     let data = fs::read(path)?;
+//RS     add_cpio_file(dirs, seen_files, files, name, mode, data);
+//RS     Ok(())
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn host_cpio_file_mode(path: &Path, fallback: u32) -> u32 {
+//RS     use std::os::unix::fs::PermissionsExt;
+//RS     fs::metadata(path)
+//RS         .map(|meta| 0o100000 | (meta.permissions().mode() & 0o777))
+//RS         .unwrap_or(fallback)
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn host_cpio_file_mode(_path: &Path, fallback: u32) -> u32 {
+//RS     fallback
+//RS }
+//RS 
+//RS fn add_cpio_file(
+//RS     dirs: &mut BTreeSet<String>,
+//RS     seen_files: &mut BTreeSet<String>,
+//RS     files: &mut Vec<OwnedCpioEntry>,
+//RS     name: &str,
+//RS     mode: u32,
+//RS     data: Vec<u8>,
+//RS ) {
+//RS     add_cpio_parent_dirs(dirs, name);
+//RS     if seen_files.insert(name.to_string()) {
+//RS         files.push(OwnedCpioEntry::file(name, mode, data));
+//RS     }
+//RS }
+//RS 
+//RS fn add_cpio_parent_dirs(dirs: &mut BTreeSet<String>, name: &str) {
+//RS     let mut prefix = String::new();
+//RS     for part in name
+//RS         .split('/')
+//RS         .collect::<Vec<_>>()
+//RS         .into_iter()
+//RS         .rev()
+//RS         .skip(1)
+//RS         .rev()
+//RS     {
+//RS         if part.is_empty() {
+//RS             continue;
+//RS         }
+//RS         if !prefix.is_empty() {
+//RS             prefix.push('/');
+//RS         }
+//RS         prefix.push_str(part);
+//RS         dirs.insert(prefix.clone());
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn ldd_dependency_paths(path: &Path) -> std::io::Result<Vec<PathBuf>> {
+//RS     if fs::read(path)
+//RS         .map(|bytes| bytes.starts_with(b"#!"))
+//RS         .unwrap_or(false)
+//RS     {
+//RS         return Ok(Vec::new());
+//RS     }
+//RS     let ldd = find_path_tool("ldd").unwrap_or_else(|| PathBuf::from("ldd"));
+//RS     let output = Command::new(ldd).arg(path).output()?;
+//RS     if !output.status.success() {
+//RS         return Err(std::io::Error::new(
+//RS             std::io::ErrorKind::Other,
+//RS             format!("ldd failed for `{}`", path.display()),
+//RS         ));
+//RS     }
+//RS     let text = String::from_utf8_lossy(&output.stdout);
+//RS     let mut deps = Vec::new();
+//RS     let mut seen = BTreeSet::new();
+//RS     for token in text.split_whitespace() {
+//RS         let candidate = token.trim_end_matches(':');
+//RS         if !candidate.starts_with('/') {
+//RS             continue;
+//RS         }
+//RS         let path = PathBuf::from(candidate);
+//RS         if path.exists() && seen.insert(candidate.to_string()) {
+//RS             deps.push(path);
+//RS         }
+//RS     }
+//RS     Ok(deps)
+//RS }
+//RS 
+//RS pub(super) fn first_zstd_frame_offset(bytes: &[u8]) -> Option<usize> {
+//RS     bytes.windows(4).enumerate().find_map(|(offset, window)| {
+//RS         if window != [0x28, 0xb5, 0x2f, 0xfd] || offset % 4 != 0 {
+//RS             return None;
+//RS         }
+//RS         if offset == 0 || cpio_trailer_header_offset(&bytes[..offset]).is_some() {
+//RS             Some(offset)
+//RS         } else {
+//RS             None
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS pub(super) fn zstd_decode_file(zstd: &Path, input: &Path) -> std::io::Result<Vec<u8>> {
+//RS     let output = Command::new(zstd)
+//RS         .args(["-d", "-q", "-c"])
+//RS         .arg(input)
+//RS         .output()?;
+//RS     if output.status.success() {
+//RS         Ok(output.stdout)
+//RS     } else {
+//RS         Err(std::io::Error::new(
+//RS             std::io::ErrorKind::InvalidData,
+//RS             "zstd could not decode installer initrd payload",
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn zstd_encode_file(zstd: &Path, input: &Path) -> std::io::Result<Vec<u8>> {
+//RS     let output = Command::new(zstd).args(["-q", "-c"]).arg(input).output()?;
+//RS     if output.status.success() {
+//RS         Ok(output.stdout)
+//RS     } else {
+//RS         Err(std::io::Error::new(
+//RS             std::io::ErrorKind::InvalidData,
+//RS             "zstd could not encode installer initrd payload",
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn unique_initrd_temp_path(initrd: &Path, label: &str) -> PathBuf {
+//RS     let stamp = SystemTime::now()
+//RS         .duration_since(UNIX_EPOCH)
+//RS         .map(|duration| duration.as_nanos())
+//RS         .unwrap_or(0);
+//RS     let file_name = initrd
+//RS         .file_name()
+//RS         .and_then(|name| name.to_str())
+//RS         .unwrap_or("initrd");
+//RS     initrd.with_file_name(format!("{file_name}.{stamp}.{label}"))
+//RS }
+//RS 
+//RS fn append_overlay_to_cpio_plain(mut plain: Vec<u8>, overlay: &[u8]) -> Vec<u8> {
+//RS     if let Some(offset) = cpio_trailer_header_offset(&plain) {
+//RS         plain.truncate(offset);
+//RS     } else {
+//RS         while plain.len() % 4 != 0 {
+//RS             plain.push(0);
+//RS         }
+//RS     }
+//RS     plain.extend_from_slice(overlay);
+//RS     plain
+//RS }
+//RS 
+//RS fn cpio_trailer_header_offset(bytes: &[u8]) -> Option<usize> {
+//RS     let mut pos = 0;
+//RS     let mut found = None;
+//RS     while let Some(rel) = bytes[pos..]
+//RS         .windows("TRAILER!!!".len())
+//RS         .position(|window| window == b"TRAILER!!!")
+//RS     {
+//RS         let name_offset = pos + rel;
+//RS         if name_offset >= 110 {
+//RS             let header_offset = name_offset - 110;
+//RS             if bytes
+//RS                 .get(header_offset..header_offset + 6)
+//RS                 .map(|magic| magic == b"070701" || magic == b"070702")
+//RS                 .unwrap_or(false)
+//RS             {
+//RS                 found = Some(header_offset);
+//RS             }
+//RS         }
+//RS         pos = name_offset + 1;
+//RS     }
+//RS     found
+//RS }
+//RS 
+//RS struct OwnedCpioEntry {
+//RS     name: String,
+//RS     mode: u32,
+//RS     data: Vec<u8>,
+//RS }
+//RS 
+//RS impl OwnedCpioEntry {
+//RS     fn dir(name: &str) -> OwnedCpioEntry {
+//RS         OwnedCpioEntry {
+//RS             name: name.to_string(),
+//RS             mode: 0o040755,
+//RS             data: Vec::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn file(name: &str, mode: u32, data: Vec<u8>) -> OwnedCpioEntry {
+//RS         OwnedCpioEntry {
+//RS             name: name.to_string(),
+//RS             mode,
+//RS             data,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn cpio_newc_owned(entries: &[OwnedCpioEntry]) -> Vec<u8> {
+//RS     let mut out = Vec::new();
+//RS     for (ino, entry) in entries.iter().enumerate() {
+//RS         cpio_newc_entry(
+//RS             &mut out,
+//RS             (ino + 1) as u32,
+//RS             &entry.name,
+//RS             entry.mode,
+//RS             &entry.data,
+//RS         );
+//RS     }
+//RS     cpio_newc_entry(&mut out, entries.len() as u32 + 1, "TRAILER!!!", 0, &[]);
+//RS     out
+//RS }
+//RS 
+//RS fn cpio_newc_entry(out: &mut Vec<u8>, ino: u32, name: &str, mode: u32, data: &[u8]) {
+//RS     let namesize = name.len() + 1;
+//RS     out.extend_from_slice(
+//RS         format!(
+//RS             "070701{ino:08x}{mode:08x}{uid:08x}{gid:08x}{nlink:08x}{mtime:08x}{filesize:08x}{devmajor:08x}{devminor:08x}{rdevmajor:08x}{rdevminor:08x}{namesize:08x}{check:08x}",
+//RS             uid = 0,
+//RS             gid = 0,
+//RS             nlink = 1,
+//RS             mtime = 0,
+//RS             filesize = data.len(),
+//RS             devmajor = 0,
+//RS             devminor = 0,
+//RS             rdevmajor = 0,
+//RS             rdevminor = 0,
+//RS             check = 0
+//RS         )
+//RS         .as_bytes(),
+//RS     );
+//RS     out.extend_from_slice(name.as_bytes());
+//RS     out.push(0);
+//RS     while out.len() % 4 != 0 {
+//RS         out.push(0);
+//RS     }
+//RS     out.extend_from_slice(data);
+//RS     while out.len() % 4 != 0 {
+//RS         out.push(0);
+//RS     }
+//RS }
+// END-PORT-PENDING 0871 crates/jetpack/src/JetOS/initrd_overlay.rs:1-709
+

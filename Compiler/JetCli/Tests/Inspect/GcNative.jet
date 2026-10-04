@@ -1,0 +1,442 @@
+// Source/CmdGc.rs outward policies and original budget.rs:1195-1241 journey.
+// Native command tests require JET_CLI_GC_TEST_JET = the composed Jet CLI.
+// They execute that real binary; pure path/output/arithmetic tests are not
+// native descriptor/clock/ownership evidence. No provider facts are mocked.
+use core.files as gc_native_test_files
+use core.files.[TempDir]
+use core.process as gc_native_test_process
+use core.process.[ProcessReceipt]
+use core.sys as gc_native_test_sys
+
+// Immutable original snapshot provenance. Main authorized ONLY sentence case
+// of No/Run in the tandem Rust fixture, matching its current shared constructor.
+GC_NATIVE_ORIGINAL_MISSING_SNAPSHOT :: "Error [E2110]: GC trace cannot be reported\n Why: no GC trace exists at `WORKSPACE/.jet/gc/trace-v1.json`.\n Fix: run `jet run --gc-trace <file.jet>`, then rerun `jet gc report`.\nMore: jet-lang.dev/e/E2110\n"
+GC_NATIVE_MISSING_SNAPSHOT :: "Error [E2110]: GC trace cannot be reported\n Why: No GC trace exists at `WORKSPACE/.jet/gc/trace-v1.json`.\n Fix: Run `jet run --gc-trace <file.jet>`, then rerun `jet gc report`.\nMore: jet-lang.dev/e/E2110\n"
+
+fn gc_native_test_mode(machine: Bool, color: Bool) -> JetCLIOutputMode Never! {
+    JetCLIOutputMode{json: machine, color: color, quiet: false}
+}
+fn gc_native_test_kinds() -> [JetCLIGCErrorKind] Never! {
+    [JetCLIGCErrorKind]{.Missing, .Unsafe, .Oversized, .Malformed, .Incompatible, .Stale, .Incomplete}
+}
+fn gc_native_test_fix(kind: JetCLIGCErrorKind) -> String Never! {
+    if kind == {
+        .Missing -> "Run `jet run --gc-trace <file.jet>`, then rerun `jet gc report`."
+        .Incomplete -> "Trace a smaller complete workload; reports never estimate dropped promotions."
+        else -> "Rerun the program with `--gc-trace` to replace the rejected trace."
+    }
+}
+fn gc_native_test_trace() -> JetCLIGCTrace Never! {
+    JetCLIGCTrace{project: "/project", pid: 7, started_unix_ms: 10, updated_unix_ms: 20, collections: 1, sites: [JetCLIGCSite]{}}
+}
+fn gc_native_test_root(label: String) -[FS]> TempDir {
+    gc_native_test_files.temp_dir("jet-gc-native-{label}") ?? panic("GC fixture: {err}")
+}
+fn gc_native_test_command(root: String, args: [String], trace: String?) -[Exec, Env, Time.Wait]> ProcessReceipt {
+    binary :: gc_native_test_sys.get("JET_CLI_GC_TEST_JET") ?? panic("set JET_CLI_GC_TEST_JET to the actual composed Jet CLI")
+    command := gc_native_test_process.cmd([String]{binary}).args_extend(args).cwd(root).env("NO_COLOR", "1")
+    if trace == .Val(path) -> command = command.env("JET_GC_TRACE", path)
+    command.run() ?? panic("GC command: {err}")
+}
+fn gc_native_test_report(root: String, path: String) -[Exec, Env, Time.Wait]> ProcessReceipt {
+    gc_native_test_command(root, [String]{"gc", "report", "--json"}, Val(path))
+}
+fn gc_native_test_rejected(output: ProcessReceipt, message: String) Never! {
+    assert_eq(output.code, 1)
+    assert(output.errors.is_empty())
+    assert(output.output.contains("\"code\":\"E2110\""))
+    assert(output.output.contains("\"severity\":\"error\""))
+    assert(output.output.contains(message))
+    assert(!output.output.contains("\u{1b}"))
+    assert(!output.output.ends_with("\n"))
+}
+fn gc_native_test_write(path: String, bytes: [U8]) -[FS, Env]> {
+    gc_native_test_files.write_bytes(path, bytes) ?? panic("GC fixture bytes: {err}")
+    if gc_native_test_sys.is_unix() -> gc_native_test_files.set_mode(path, 0o600) ?? panic("private GC fixture: {err}")
+}
+
+#Test("GC argument boundary ignores every dash-leading flag including separator") {
+    jet_cli_gc_arguments([String]{"--", "--unknown", "--json", "-", "--help", "-x"}) ?? panic("dash argument rejected")
+    jet_cli_gc_arguments([String]{}) ?? panic("empty argv rejected")
+}
+#Test("GC argument boundary rejects first positional including empty string") {
+    rows :: [String]{"", "first", "report", "界"}
+    loop word in rows {
+        if jet_cli_gc_arguments([String]{"--ignored", word, "later"}) == {
+            .Err(error) -> {
+                assert(error.kind == JetCLIGCErrorKind.Malformed)
+                assert_eq(error.detail, "unexpected gc report argument `{word}`")
+            }
+            else -> panic("positional accepted")
+        }
+    }
+}
+#Test("GC separator does not shield a later positional") {
+    if jet_cli_gc_arguments([String]{"--", "offender", "second"}) == {
+        .Err(error) -> assert_eq(error.detail, "unexpected gc report argument `offender`")
+        else -> panic("separator shielded argument")
+    }
+}
+#Test("GC all seven errors use canonical E2110 severity and per-kind fix") {
+    loop kind in gc_native_test_kinds() {
+        diagnostic :: jet_cli_gc_failure_diagnostic(jet_cli_gc_error(kind, "GC detail..."))
+        assert_eq(diagnostic.code, "E2110")
+        assert_eq(diagnostic.severity, 1)
+        assert_eq(diagnostic.what, "GC trace cannot be reported")
+        assert_eq(diagnostic.why, "GC detail.")
+        assert_eq(diagnostic.fix, gc_native_test_fix(kind))
+        assert(diagnostic.span == None)
+        assert(diagnostic.origin == None)
+        assert(diagnostic.edit == None)
+        assert(diagnostic.no_fix_reason != None)
+    }
+}
+#Test("GC trims all trailing dots only including empty all-dot and UTF8 details") {
+    rows :: [String]{"", ".", ".....", "界...", "GC detail. ", "GC detail…", "GC detail...\t"}
+    expected :: [String]{".", ".", ".", "界.", "GC detail. .", "GC detail….", "GC detail...\t."}
+    loop index in 0..<rows.len() {
+        diagnostic :: jet_cli_gc_failure_diagnostic(jet_cli_gc_error(.Malformed, rows[index]))
+        assert_eq(diagnostic.why, expected[index])
+    }
+}
+#Test("GC every human failure has stderr only exact shared renderer and exit one") {
+    loop kind in gc_native_test_kinds() {
+        error :: jet_cli_gc_error(kind, "GC detail...")
+        diagnostic :: jet_cli_gc_failure_diagnostic(error)
+        plain :: jet_cli_gc_fail(error, gc_native_test_mode(false, false))
+        assert_eq(plain.exit_code, 1)
+        assert(plain.stdout.is_empty())
+        assert_eq(plain.stderr, diagnostic_render_all("", "", [Diagnostic]{diagnostic}, false))
+        assert(!plain.stderr.contains("\u{1b}"))
+        colored :: jet_cli_gc_fail(error, gc_native_test_mode(false, true))
+        assert_eq(colored.exit_code, 1)
+        assert(colored.stdout.is_empty())
+        assert_eq(colored.stderr, diagnostic_render_all("", "", [Diagnostic]{diagnostic}, true))
+        assert(colored.stderr.contains("\u{1b}"))
+    }
+}
+#Test("GC every machine failure is ordered canonical report no LF no ANSI exit one") {
+    loop kind in gc_native_test_kinds() {
+        error :: jet_cli_gc_error(kind, "GC detail...")
+        diagnostic :: jet_cli_gc_failure_diagnostic(error)
+        report :: diagnostic_to_report(diagnostic, ReportPath.from_process(""), "")
+        assert_eq(report.severity, "error")
+        assert_eq(report.fix, gc_native_test_fix(kind))
+        assert(report.file == None && report.span == None)
+        output :: jet_cli_gc_fail(error, gc_native_test_mode(true, true))
+        assert_eq(output.exit_code, 1)
+        assert(output.stderr.is_empty())
+        assert_eq(output.stdout, StatusEnvelope.new("gc.report", false).with_report(report).json())
+        assert(output.stdout.starts_with("{{\"schema\":\"jet.status/v1\",\"action\":\"gc.report\",\"ok\":false,\"reports\":[{{\"schema\":\"jet.report/v3\",\"moment\":\"compile\",\"severity\":\"error\",\"code\":\"E2110\""))
+        assert(!output.stdout.ends_with("\n"))
+        assert(!output.stdout.contains("\u{1b}"))
+    }
+}
+#Test("GC missing failure matches current Rust canonical snapshot") {
+    output :: jet_cli_gc_fail(jet_cli_gc_error(.Missing, "no GC trace exists at `WORKSPACE/.jet/gc/trace-v1.json`"), gc_native_test_mode(false, false))
+    assert_eq(output.stderr, GC_NATIVE_MISSING_SNAPSHOT)
+    assert(GC_NATIVE_ORIGINAL_MISSING_SNAPSHOT != GC_NATIVE_MISSING_SNAPSHOT)
+}
+#Test("GC quiet does not suppress explicit human or machine failure") {
+    error :: jet_cli_gc_error(.Incomplete, "GC incomplete")
+    modes :: [Bool]{false, true}
+    loop machine in modes {
+        normal :: jet_cli_gc_fail(error, gc_native_test_mode(machine, false))
+        quiet :: jet_cli_gc_fail(error, JetCLIOutputMode{json: machine, color: false, quiet: true})
+        assert_eq(quiet.stdout, normal.stdout)
+        assert_eq(quiet.stderr, normal.stderr)
+        assert_eq(quiet.exit_code, normal.exit_code)
+    }
+}
+#Test("GC success human exact renderer machine exactly one newline stdout exit zero") {
+    trace :: gc_native_test_trace()
+    colors :: [Bool]{false, true}
+    loop color in colors {
+        human :: jet_cli_gc_trace_output(trace, gc_native_test_mode(false, color))
+        assert_eq(human.stdout, jet_cli_gc_render_text(trace, color))
+        assert(human.stderr.is_empty())
+        assert_eq(human.exit_code, 0)
+        machine :: jet_cli_gc_trace_output(trace, gc_native_test_mode(true, color))
+        assert_eq(machine.stdout, "{jet_cli_gc_render_json(trace)}\n")
+        assert(!machine.stdout.ends_with("\n\n"))
+        assert(!machine.stdout.contains("\u{1b}"))
+        assert(machine.stderr.is_empty())
+        assert_eq(machine.exit_code, 0)
+    }
+}
+#Test("GC source-only duration floor and saturating unsigned boundaries") {
+    assert_eq(jet_cli_gc_duration_ms(U64{0}, U32{0}), U64{0})
+    assert_eq(jet_cli_gc_duration_ms(U64{0}, U32{999999}), U64{0})
+    assert_eq(jet_cli_gc_duration_ms(U64{0}, U32{1000000}), U64{1})
+    assert_eq(jet_cli_gc_duration_ms(U64{1}, U32{999999999}), U64{1999})
+    assert_eq(jet_cli_gc_duration_ms(U64{18446744073709551}, U32{614999999}), U64{18446744073709551614})
+    assert_eq(jet_cli_gc_duration_ms(U64{18446744073709551}, U32{615000000}), U64{18446744073709551615})
+    assert_eq(jet_cli_gc_duration_ms(U64{18446744073709551}, U32{616000000}), U64{18446744073709551615})
+    assert_eq(jet_cli_gc_duration_ms(U64{18446744073709552}, U32{0}), U64{18446744073709551615})
+    assert_eq(jet_cli_gc_duration_ms(U64{18446744073709551615}, U32{999999999}), U64{18446744073709551615})
+}
+#Test("GC trace path canonical Unix joins preserve empty dot root and original root") {
+    roots :: [String]{"", ".", "/", "/project/", "a/.."}
+    expected :: [String]{".jet/gc/trace-v1.json", "./.jet/gc/trace-v1.json", "/.jet/gc/trace-v1.json", "/project/.jet/gc/trace-v1.json", "a/../.jet/gc/trace-v1.json"}
+    loop index in 0..<roots.len() {
+        root :: gc_native_paths.from_text(roots[index], .Unix)
+        path :: jet_cli_gc_trace_path(root)
+        assert_eq(gc_native_paths.display(path), expected[index])
+        assert_eq(root.encoded, roots[index].bytes())
+    }
+}
+#Test("GC trace path retains original nonUTF8 native Unix bytes") {
+    root :: gc_native_paths.from_encoded([U8]{U8{47}, U8{255}}, .Unix)
+    path :: jet_cli_gc_trace_path(root)
+    assert_eq(path.encoded[0..<2], root.encoded)
+    assert_eq(path.encoded[2..<path.encoded.len()], "/.jet/gc/trace-v1.json".bytes())
+    assert(gc_native_paths.to_str(path) == None)
+}
+#Test("GC trace path canonical Windows disk UNC and verbatim joins") {
+    roots :: [String]{"C:\\project", "C:", "\\\\server\\share\\project", "\\\\?\\C:\\project"}
+    expected :: [String]{"C:\\project\\.jet\\gc\\trace-v1.json", "C:.jet\\gc\\trace-v1.json", "\\\\server\\share\\project\\.jet\\gc\\trace-v1.json", "\\\\?\\C:\\project\\.jet\\gc\\trace-v1.json"}
+    loop index in 0..<roots.len() {
+        root :: gc_native_paths.from_text(roots[index], .Windows)
+        assert_eq(gc_native_paths.display(jet_cli_gc_trace_path(root)), expected[index])
+    }
+}
+
+// Complete original Rust missing-trace human AND JSON assertions, with the
+// Main-approved tandem casing correction. TempDir remains alive until BOTH
+// native child processes finish; no manual deletion while resources are held.
+#Test("integration original gc report missing trace registered human and JSON diagnostics") {
+    assert(gc_native_test_sys.get("JET_GC_TRACE") == None, "original absent override journey requires JET_GC_TRACE absent")
+    scratch :: gc_native_test_root("missing-original")
+    human :: gc_native_test_command(scratch.path, [String]{"gc", "report"}, None)
+    assert_eq(human.code, 1)
+    assert(human.output.is_empty())
+    assert(human.errors.contains("Error [E2110]: GC trace cannot be reported"))
+    // Original assertion: assert(human.errors.contains("run `jet run --gc-trace <file.jet>`")).
+    // Main-authorized tandem correction matches the current Rust constructor.
+    assert(human.errors.contains("Run `jet run --gc-trace <file.jet>`"))
+    assert(!human.errors.contains("\u{1b}"))
+    assert_eq(human.errors.replace(scratch.path, "WORKSPACE"), GC_NATIVE_MISSING_SNAPSHOT)
+    machine :: gc_native_test_command(scratch.path, [String]{"gc", "report", "--json"}, None)
+    assert_eq(machine.code, 1)
+    assert(machine.errors.is_empty())
+    assert(machine.output.contains("\"code\":\"E2110\""))
+    assert(machine.output.contains("\"severity\":\"error\""))
+    assert(!machine.output.contains("\u{1b}"))
+    assert(!machine.output.ends_with("\n"))
+}
+#Test("integration GC parent metadata failure precedes trace inspection") {
+    scratch :: gc_native_test_root("parent-missing")
+    path :: gc_native_test_files.join(scratch.path, "absent/trace-v1.json")
+    output :: gc_native_test_report(scratch.path, path)
+    gc_native_test_rejected(output, "No GC trace exists at")
+    assert(output.output.contains("Run `jet run --gc-trace <file.jet>`"))
+}
+#Test("integration GC regular parent refusal precedes trace missing") {
+    scratch :: gc_native_test_root("parent-file")
+    parent :: gc_native_test_files.join(scratch.path, "parent")
+    gc_native_test_write(parent, [U8]{})
+    gc_native_test_rejected(gc_native_test_report(scratch.path, "{parent}/trace-v1.json"), "GC trace directory path is not a directory")
+}
+#Test("integration GC trace directory is rejected as not regular") {
+    scratch :: gc_native_test_root("trace-directory")
+    gc_native_test_rejected(gc_native_test_report(scratch.path, scratch.path), "GC trace is not a regular file")
+}
+#Test("integration GC parent symlink is rejected before following it") {
+    if !gc_native_test_sys.is_unix() -> return
+    scratch :: gc_native_test_root("parent-link")
+    target :: gc_native_test_files.join(scratch.path, "target")
+    link :: gc_native_test_files.join(scratch.path, "link")
+    gc_native_test_files.create_dir_all(target) ?? panic("target directory")
+    gc_native_test_write("{target}/trace-v1.json", [U8]{})
+    gc_native_test_files.symlink(target, link) ?? panic("parent symlink")
+    gc_native_test_rejected(gc_native_test_report(scratch.path, "{link}/trace-v1.json"), "GC trace directory path is not a directory")
+}
+#Test("integration GC trace symlink is rejected before opening it") {
+    if !gc_native_test_sys.is_unix() -> return
+    scratch :: gc_native_test_root("trace-link")
+    target :: gc_native_test_files.join(scratch.path, "target.json")
+    link :: gc_native_test_files.join(scratch.path, "trace-v1.json")
+    gc_native_test_write(target, [U8]{})
+    gc_native_test_files.symlink(target, link) ?? panic("trace symlink")
+    gc_native_test_rejected(gc_native_test_report(scratch.path, link), "GC trace is not a regular file")
+}
+#Test("integration GC every group or world permission bit refuses before parse") {
+    if !gc_native_test_sys.is_unix() -> return
+    scratch :: gc_native_test_root("permission-mask")
+    path :: gc_native_test_files.join(scratch.path, "trace-v1.json")
+    gc_native_test_write(path, [U8]{})
+    bits :: [Int]{0o040, 0o020, 0o010, 0o004, 0o002, 0o001}
+    loop bit in bits {
+        gc_native_test_files.set_mode(path, 0o600 | bit) ?? panic("permission fixture")
+        output :: gc_native_test_report(scratch.path, path)
+        gc_native_test_files.set_mode(path, 0o600) ?? panic("restore private mode")
+        gc_native_test_rejected(output, "GC trace permissions expose runtime state")
+    }
+}
+#Test("integration GC native hardlink count does not add a rejection predicate") {
+    if !gc_native_test_sys.is_unix() -> return
+    scratch :: gc_native_test_root("hardlink")
+    path :: gc_native_test_files.join(scratch.path, "trace-v1.json")
+    gc_native_test_write(path, [U8]{})
+    gc_native_test_files.hard_link(path, gc_native_test_files.join(scratch.path, "other.json")) ?? panic("hardlink fixture")
+    output :: gc_native_test_report(scratch.path, path)
+    gc_native_test_rejected(output, "Rerun the program with `--gc-trace`")
+    assert(!output.output.contains("GC trace permissions") && !output.output.contains("not a regular file") && !output.output.contains("multiple hard links"))
+}
+#Test("integration GC native metadata exactly four MiB admitted plus one refused") {
+    scratch :: gc_native_test_root("metadata-ceiling")
+    path :: gc_native_test_files.join(scratch.path, "trace-v1.json")
+    bytes := [U8]{}
+    loop _ in 0..<4194304 -> &bytes.push(U8{32})
+    gc_native_test_write(path, bytes)
+    exact :: gc_native_test_report(scratch.path, path)
+    gc_native_test_rejected(exact, "Rerun the program with `--gc-trace`")
+    assert(!exact.output.contains("4 MiB safety limit"))
+    &bytes.push(U8{32})
+    gc_native_test_write(path, bytes)
+    gc_native_test_rejected(gc_native_test_report(scratch.path, path), "GC trace exceeds the 4 MiB safety limit")
+}
+#Test("integration GC private invalid UTF8 yields read error before parse") {
+    scratch :: gc_native_test_root("invalid-utf8")
+    path :: gc_native_test_files.join(scratch.path, "trace-v1.json")
+    gc_native_test_write(path, [U8]{U8{255}})
+    gc_native_test_rejected(gc_native_test_report(scratch.path, path), "Cannot read GC trace:")
+}
+#Test("integration GC private empty file never fabricates a successful report") {
+    scratch :: gc_native_test_root("empty")
+    path :: gc_native_test_files.join(scratch.path, "trace-v1.json")
+    gc_native_test_write(path, [U8]{})
+    output :: gc_native_test_report(scratch.path, path)
+    gc_native_test_rejected(output, "Rerun the program with `--gc-trace`")
+    assert(output.output.contains("\"ok\":false"))
+    assert(!output.output.contains("\"schema\":\"jet.gc.report\""))
+}
+#Test("integration GC present empty env override is not default trace path") {
+    scratch :: gc_native_test_root("empty-override")
+    output :: gc_native_test_report(scratch.path, "")
+    gc_native_test_rejected(output, "No GC trace exists at ``")
+    assert(!output.output.contains("trace-v1.json"))
+}
+#Test("integration GC explicit env override preserves native file selection") {
+    scratch :: gc_native_test_root("override")
+    path :: gc_native_test_files.join(scratch.path, "explicit-界.json")
+    gc_native_test_write(path, [U8]{U8{255}})
+    gc_native_test_rejected(gc_native_test_report(scratch.path, path), "Cannot read GC trace:")
+}
+#Test("integration GC first positional wins over missing file evidence") {
+    scratch :: gc_native_test_root("argument-first")
+    output :: gc_native_test_command(scratch.path, [String]{"gc", "report", "--json", "--", "", "later"}, Val("absent.json"))
+    gc_native_test_rejected(output, "Unexpected gc report argument ``")
+    assert(!output.output.contains("No GC trace exists"))
+}
+#Test("integration GC dash flags ignored at command boundary before native missing") {
+    scratch :: gc_native_test_root("dash-flags")
+    output :: gc_native_test_command(scratch.path, [String]{"gc", "report", "--unknown", "--json", "--"}, Val("absent.json"))
+    gc_native_test_rejected(output, "No GC trace exists at `absent.json`")
+}
+#Test("integration GC bare route teaches clean and unknown route teaches report exit two") {
+    scratch :: gc_native_test_root("grouped-routes")
+    bare :: gc_native_test_command(scratch.path, [String]{"gc"}, None)
+    assert_eq(bare.code, 2)
+    assert(bare.output.is_empty())
+    assert(bare.errors.contains("E2101") && bare.errors.contains("`gc` isn't a jet command"))
+    assert(bare.errors.contains("`jet clean` is the sole package-store cleanup entry (D-CLI-STORE2=A)"))
+    assert(bare.errors.contains("Run `jet clean`"))
+    unknown :: gc_native_test_command(scratch.path, [String]{"gc", "other"}, None)
+    assert_eq(unknown.code, 2)
+    assert(unknown.output.is_empty())
+    assert(unknown.errors.contains("E2101") && unknown.errors.contains("`other` isn't a jet gc command"))
+    assert(unknown.errors.contains("Jet gc currently exposes only the automatic-promotion report"))
+    assert(unknown.errors.contains("Run `jet gc report`"))
+}
+
+#Test("GC raw trace trigger matches exact flag anywhere including child separator") {
+    assert(jet_cli_gc_trace_requested([String]{"run", "app.jet", "--gc-trace"}))
+    assert(jet_cli_gc_trace_requested([String]{"run", "app.jet", "--", "--gc-trace"}))
+    assert(!jet_cli_gc_trace_requested([String]{"run", "--gc-trace=true"}))
+    assert(!jet_cli_gc_trace_requested([String]{"--gc-trace-more"}))
+    assert(!jet_cli_gc_trace_requested([String]{}))
+}
+#Test("GC actual parser output phase retains valid evidence and both stream laws") {
+    root :: gc_native_paths.from_text("/project", .Unix)
+    raw :: "{{\"schema\":\"jet.gc.trace\",\"version\":1,\"project\":\"/project\",\"pid\":7,\"started_unix_ms\":10,\"updated_unix_ms\":20,\"complete\":true,\"dropped_promotions\":0,\"collections\":1,\"sites\":[]}}"
+    human :: jet_cli_gc_parse_output(raw, root, U64{20}, gc_native_test_mode(false, false))
+    assert_eq(human.exit_code, 0)
+    assert_eq(human.stdout, jet_cli_gc_render_text(gc_native_test_trace(), false))
+    assert(human.stderr.is_empty())
+    machine :: jet_cli_gc_parse_output(raw, root, U64{20}, gc_native_test_mode(true, true))
+    assert_eq(machine.exit_code, 0)
+    assert_eq(machine.stdout, "{jet_cli_gc_render_json(gc_native_test_trace())}\n")
+    assert(machine.stderr.is_empty())
+}
+#Test("GC parser output phase rejects malformed project and incomplete evidence") {
+    root :: gc_native_paths.from_text("/project", .Unix)
+    raw :: "{{\"schema\":\"jet.gc.trace\",\"version\":1,\"project\":\"/project\",\"pid\":7,\"started_unix_ms\":10,\"updated_unix_ms\":20,\"complete\":true,\"dropped_promotions\":0,\"collections\":1,\"sites\":[]}}"
+    rows :: [String]{"", raw.replace("\"project\":\"/project\"", "\"project\":\"/other\""), raw.replace("\"complete\":true", "\"complete\":false")}
+    loop rejected in rows {
+        output :: jet_cli_gc_parse_output(rejected, root, U64{20}, gc_native_test_mode(true, true))
+        assert_eq(output.exit_code, 1)
+        assert(output.stderr.is_empty())
+        assert(output.stdout.contains("\"code\":\"E2110\""))
+        assert(output.stdout.contains("\"ok\":false"))
+        assert(!output.stdout.ends_with("\n"))
+        assert(!output.stdout.contains("\u{1b}"))
+    }
+}
+#Test("integration configure trace is inherited before real child even after separator") {
+    scratch :: gc_native_test_root("configure-child")
+    entry :: gc_native_test_files.join(scratch.path, "run.jet")
+    source :: "use core.sys as gc_config_sys\nuse core.term as gc_config_term\nfn run() {{\n    output := gc_config_term.stdout()\n    &output.write(gc_config_sys.get(\"JET_GC_PROJECT\") ?? \"unset\").drop(\"config project output\")\n    &output.write(\"\\n\").drop(\"config separator output\")\n    &output.write(gc_config_sys.get(\"JET_GC_TRACE\") ?? \"unset\").drop(\"config trace output\")\n}}\n"
+    gc_native_test_files.write(entry, source) ?? panic("native config child source")
+    before :: gc_native_test_command(scratch.path, [String]{"run", entry, "--gc-trace"}, None)
+    assert_eq(before.code, 0)
+    assert_eq(before.output, "{scratch.path}\n{gc_native_test_files.join(scratch.path, ".jet/gc/trace-v1.json")}")
+    after :: gc_native_test_command(scratch.path, [String]{"run", entry, "--", "--gc-trace"}, None)
+    assert_eq(after.code, 0)
+    assert_eq(after.output, before.output)
+}
+
+#Test("integration GC grouped usage machine uses cli action E2101 and one LF") {
+    scratch :: gc_native_test_root("grouped-machine")
+    rows :: [String]{"", "other"}
+    loop word in rows {
+        args := [String]{"gc"}
+        if !word.is_empty() -> &args.push(word)
+        &args.push("--json")
+        output :: gc_native_test_command(scratch.path, args, None)
+        assert_eq(output.code, 2)
+        assert(output.errors.is_empty())
+        assert(output.output.contains("\"action\":\"cli\""))
+        assert(output.output.contains("\"code\":\"E2101\""))
+        assert(output.output.contains("\"severity\":\"error\""))
+        assert(output.output.ends_with("\n"))
+        assert(!output.output.ends_with("\n\n"))
+        assert(!output.output.contains("\u{1b}"))
+        if word.is_empty() {
+            assert(output.output.contains("`jet clean`"))
+        } else {
+            assert(output.output.contains("`jet gc report`"))
+        }
+    }
+}
+
+#Test("integration GC native open refusal keeps secure-open error precedence") {
+    if !gc_native_test_sys.is_unix() || gc_native_test_sys.geteuid() == 0 -> return
+    scratch :: gc_native_test_root("open-refusal")
+    path :: gc_native_test_files.join(scratch.path, "trace-v1.json")
+    gc_native_test_write(path, [U8]{})
+    gc_native_test_files.set_mode(path, 0) ?? panic("deny reader")
+    output :: gc_native_test_report(scratch.path, path)
+    gc_native_test_files.set_mode(path, 0o600) ?? panic("restore reader")
+    gc_native_test_rejected(output, "Cannot securely open GC trace:")
+}
+#Test("integration GC Linux actual proc self mem read refusal precedes parse") {
+    if !gc_native_test_sys.is_linux() -> return
+    scratch :: gc_native_test_root("read-refusal")
+    // A real regular proc file with size zero and private owner permissions,
+    // reached through `/proc/self/task/..` so its immediate parent is a real
+    // directory (original CmdGc 134-137 rejects a symlinked immediate parent such
+    // as `/proc/self`); the same child `mem` read at address zero fails with EIO.
+    // No descriptor/error is fabricated.
+    gc_native_test_rejected(gc_native_test_report(scratch.path, "/proc/self/task/../mem"), "Cannot read GC trace:")
+}

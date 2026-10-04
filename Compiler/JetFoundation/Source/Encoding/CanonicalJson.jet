@@ -1,0 +1,267 @@
+// A-canonical receipt/proof JSON (jet-foundation PerformanceBudget.rs:11-271).
+// Integers stay as canonical decimal strings; this is NOT RFC8785 JCS.
+pub enum CanonicalJSON {
+    Null
+    Bool(Bool)
+    Integer(String)
+    String(String)
+    Array([CanonicalJSON])
+    Object([CanonicalJSONField])
+}
+pub struct CanonicalJSONField { pub key: String, pub value: CanonicalJSON }
+#Error
+pub struct CanonicalJSONError { pub message: String }
+fn canonical_json_error(message: String) -> CanonicalJSONError Never! { CanonicalJSONError{message: message} }
+// Rust valid_integer (PerformanceBudget.rs:214-222).
+fn canonical_json_valid_integer(value: String) -> Bool Never! {
+    if value == "0" -> return true
+    bytes :: value.bytes()
+    start :: if {
+        bytes.len() > 0 && Int.from_u8(bytes[0]) == 45 -> 1
+        else -> 0
+    }
+    if start == bytes.len() || Int.from_u8(bytes[start]) == 48 -> return false
+    loop index in start..<bytes.len() {
+        if Int.from_u8(bytes[index]) < 48 || Int.from_u8(bytes[index]) > 57 -> return false
+    }
+    true
+}
+// Rust CanonicalJson::integer (PerformanceBudget.rs:22-28).
+pub fn canonical_json_integer(value: String) -> CanonicalJSON CanonicalJSONError! {
+    if !canonical_json_valid_integer(value) -> return Err(canonical_json_error("non-canonical integer `{value}`"))
+    Ok(CanonicalJSON.Integer(value))
+}
+// Rust CanonicalJson::object (PerformanceBudget.rs:30-40).
+pub fn canonical_json_object(fields: [CanonicalJSONField]) -> CanonicalJSON CanonicalJSONError! {
+    seen := [String:Bool]{}
+    loop field in fields {
+        if seen.has_key(field.key) -> return Err(canonical_json_error("duplicate JSON key `{field.key}`"))
+        seen[field.key] = true
+    }
+    sorted := ~fields
+    &sorted.sort_by((left: CanonicalJSONField, right: CanonicalJSONField) -> left.key <=> right.key)
+    Ok(CanonicalJSON.Object(sorted))
+}
+// Rust CanonicalJson::bytes (PerformanceBudget.rs:42-47).
+pub fn canonical_json_bytes(value: CanonicalJSON) -> [U8] Never! {
+    out := [U8]{}
+    canonical_json_encode(value, &out)
+    &out.push(U8{10})
+    out
+}
+// Rust CanonicalJson::sha256 (PerformanceBudget.rs:49-51).
+pub fn canonical_json_sha256(value: CanonicalJSON) -> String Never! {
+    mir_sha256_hex_bytes(mir_sha256_bytes(canonical_json_bytes(value)))
+}
+struct CanonicalJSONParser { bytes: [U8], at: Int }
+fn canonical_json_peek(parser: CanonicalJSONParser) -> Int Never! {
+    if parser.at >= parser.bytes.len() -> return -1
+    Int.from_u8(parser.bytes[parser.at])
+}
+fn canonical_json_take(parser: &CanonicalJSONParser) -> Int Never! {
+    byte :: canonical_json_peek(parser)
+    if byte >= 0 -> parser.at += 1
+    byte
+}
+// Rust CanonicalJson::parse_canonical (PerformanceBudget.rs:53-73).
+pub fn canonical_json_parse(bytes: [U8]) -> CanonicalJSON CanonicalJSONError! {
+    _ :: String.from_bytes(bytes) ?? return Err(canonical_json_error("canonical JSON is not UTF-8"))
+    if bytes.len() >= 3 && Int.from_u8(bytes[0]) == 239 && Int.from_u8(bytes[1]) == 187 && Int.from_u8(bytes[2]) == 191 -> return Err(canonical_json_error("canonical JSON has a BOM"))
+    if bytes.len() == 0 -> return Err(canonical_json_error("canonical JSON must end in exactly one LF"))
+    if Int.from_u8(bytes[bytes.len() - 1]) != 10 || (bytes.len() > 1 && Int.from_u8(bytes[bytes.len() - 2]) == 10) -> return Err(canonical_json_error("canonical JSON must end in exactly one LF"))
+    parser := CanonicalJSONParser{bytes: ~bytes[0..<bytes.len() - 1], at: 0}
+    value :: canonical_json_value(&parser)
+    if parser.at != parser.bytes.len() -> return Err(canonical_json_error("trailing bytes after canonical JSON value"))
+    if canonical_json_bytes(value) != bytes -> return Err(canonical_json_error("JSON is valid but not A-canonical"))
+    Ok(value)
+}
+// Rust JSONParser::value/literal/integer (PerformanceBudget.rs:89-129).
+fn canonical_json_value(parser: &CanonicalJSONParser) -> CanonicalJSON CanonicalJSONError! {
+    byte :: canonical_json_peek(parser)
+    if byte == -1 -> return Err(canonical_json_error("unexpected end of JSON"))
+    if byte == 34 -> return Ok(CanonicalJSON.String(canonical_json_string(&parser)))
+    if byte == 91 -> return canonical_json_array(&parser)
+    if byte == 123 -> return canonical_json_parse_object(&parser)
+    if byte == 110 || byte == 116 || byte == 102 {
+        word :: if {
+            byte == 110 -> "null"
+            byte == 116 -> "true"
+            else -> "false"
+        }
+        raw :: word.bytes()
+        if parser.at + raw.len() > parser.bytes.len() -> return Err(canonical_json_error("invalid JSON literal"))
+        loop index in 0..<raw.len() {
+            if parser.bytes[parser.at + index] != raw[index] -> return Err(canonical_json_error("invalid JSON literal"))
+        }
+        parser.at += raw.len()
+        return Ok(if {
+            byte == 110 -> CanonicalJSON.Null
+            byte == 116 -> CanonicalJSON.Bool(true)
+            else -> CanonicalJSON.Bool(false)
+        })
+    }
+    if byte == 45 || (byte >= 48 && byte <= 57) {
+        start :: parser.at
+        if byte == 45 -> parser.at += 1
+        loop true {
+            next_byte :: canonical_json_peek(parser)
+            if next_byte < 48 || next_byte > 57 -> break
+            parser.at += 1
+        }
+        text :: String.from_bytes(~parser.bytes[start..<parser.at]) ?? return Err(canonical_json_error("invalid integer"))
+        return canonical_json_integer(text)
+    }
+    Err(canonical_json_error("invalid canonical JSON token"))
+}
+// Rust JSONParser::string (PerformanceBudget.rs:130-172).
+fn canonical_json_string(parser: &CanonicalJSONParser) -> String CanonicalJSONError! {
+    if canonical_json_take(&parser) != 34 -> return Err(canonical_json_error("expected JSON string"))
+    out := [U8]{}
+    loop true {
+        byte :: canonical_json_take(&parser)
+        if byte == 34 -> return Ok(String.from_bytes(out) ?? return Err(canonical_json_error("JSON string is not UTF-8")))
+        if byte == -1 -> return Err(canonical_json_error("unterminated JSON string"))
+        if byte == 92 {
+            escape :: canonical_json_take(&parser)
+            if escape == 117 {
+                if parser.at + 4 > parser.bytes.len() -> return Err(canonical_json_error("short Unicode escape"))
+                scalar := 0
+                index := parser.at
+                if Int.from_u8(parser.bytes[index]) == 43 -> index += 1
+                loop index < parser.at + 4 {
+                    hex :: Int.from_u8(parser.bytes[index])
+                    digit :: if {
+                        hex >= 48 && hex <= 57 -> hex - 48
+                        hex >= 65 && hex <= 70 -> hex - 55
+                        hex >= 97 && hex <= 102 -> hex - 87
+                        else -> -1
+                    }
+                    if digit < 0 -> return Err(canonical_json_error("invalid Unicode escape"))
+                    scalar = scalar * 16 + digit
+                    index += 1
+                }
+                parser.at += 4
+                if scalar >= 55296 && scalar <= 57343 -> return Err(canonical_json_error("unpaired surrogate in JSON string"))
+                if {
+                    scalar < 128 -> &out.push(U8{scalar})
+                    scalar < 2048 -> {
+                        &out.push(U8{192 + scalar /% 64})
+                        &out.push(U8{128 + scalar % 64})
+                    }
+                    else -> {
+                        &out.push(U8{224 + scalar /% 4096})
+                        &out.push(U8{128 + (scalar /% 64) % 64})
+                        &out.push(U8{128 + scalar % 64})
+                    }
+                }
+                next
+            }
+            decoded :: if {
+                escape == 34 -> 34
+                escape == 92 -> 92
+                escape == 98 -> 8
+                escape == 102 -> 12
+                escape == 110 -> 10
+                escape == 114 -> 13
+                escape == 116 -> 9
+                else -> -1
+            }
+            if decoded < 0 -> return Err(canonical_json_error("invalid JSON string escape"))
+            &out.push(U8{decoded})
+            next
+        }
+        if byte < 32 -> return Err(canonical_json_error("unescaped control in JSON string"))
+        &out.push(U8{byte})
+    }
+}
+// Rust JSONParser::array (PerformanceBudget.rs:173-188).
+fn canonical_json_array(parser: &CanonicalJSONParser) -> CanonicalJSON CanonicalJSONError! {
+    parser.at += 1
+    values := [CanonicalJSON]{}
+    if canonical_json_peek(parser) == 93 {
+        parser.at += 1
+        return Ok(CanonicalJSON.Array(values))
+    }
+    loop true {
+        &values.push(canonical_json_value(&parser))
+        separator :: canonical_json_take(&parser)
+        if separator == 93 -> return Ok(CanonicalJSON.Array(values))
+        if separator != 44 -> return Err(canonical_json_error("invalid JSON array"))
+    }
+}
+// Rust JSONParser::object (PerformanceBudget.rs:189-211).
+fn canonical_json_parse_object(parser: &CanonicalJSONParser) -> CanonicalJSON CanonicalJSONError! {
+    parser.at += 1
+    values := [CanonicalJSONField]{}
+    seen := [String:Bool]{}
+    if canonical_json_peek(parser) == 125 {
+        parser.at += 1
+        return Ok(CanonicalJSON.Object(values))
+    }
+    loop true {
+        key :: canonical_json_string(&parser)
+        if canonical_json_take(&parser) != 58 -> return Err(canonical_json_error("missing JSON object colon"))
+        value :: canonical_json_value(&parser)
+        if seen.has_key(key) -> return Err(canonical_json_error("duplicate JSON key `{key}`"))
+        seen[key] = true
+        &values.push(CanonicalJSONField{key: key, value: value})
+        separator :: canonical_json_take(&parser)
+        if separator == 125 -> return canonical_json_object(values)
+        if separator != 44 -> return Err(canonical_json_error("invalid JSON object"))
+    }
+}
+fn canonical_json_append(out: &[U8], value: String) Never! { loop byte in value.bytes() -> &out.push(byte) }
+// Rust encode_json (PerformanceBudget.rs:224-253). Object fields are already sorted.
+fn canonical_json_encode(value: CanonicalJSON, out: &[U8]) Never! {
+    if value == {
+        .Null -> canonical_json_append(&out, "null")
+        .Bool(flag) -> {
+            if flag { canonical_json_append(&out, "true") } else { canonical_json_append(&out, "false") }
+        }
+        .Integer(number) -> canonical_json_append(&out, number)
+        .String(text) -> canonical_json_encode_string(text, &out)
+        .Array(values) -> {
+            &out.push(U8{91})
+            loop (index, child) in values {
+                if index != 0 -> &out.push(U8{44})
+                canonical_json_encode(child, &out)
+            }
+            &out.push(U8{93})
+        }
+        .Object(fields) -> {
+            &out.push(U8{123})
+            loop (index, field) in fields {
+                if index != 0 -> &out.push(U8{44})
+                canonical_json_encode_string(field.key, &out)
+                &out.push(U8{58})
+                canonical_json_encode(field.value, &out)
+            }
+            &out.push(U8{125})
+        }
+    }
+}
+// Rust encode_string (PerformanceBudget.rs:255-271).
+fn canonical_json_encode_string(value: String, out: &[U8]) Never! {
+    &out.push(U8{34})
+    hex :: "0123456789abcdef".bytes()
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if code == {
+            34 -> canonical_json_append(&out, "\\\"")
+            92 -> canonical_json_append(&out, "\\\\")
+            8 -> canonical_json_append(&out, "\\b")
+            12 -> canonical_json_append(&out, "\\f")
+            10 -> canonical_json_append(&out, "\\n")
+            13 -> canonical_json_append(&out, "\\r")
+            9 -> canonical_json_append(&out, "\\t")
+            else -> {
+                if code < 32 {
+                    canonical_json_append(&out, "\\u00")
+                    &out.push(hex[code /% 16])
+                    &out.push(hex[code % 16])
+                } else { &out.push(byte) }
+            }
+        }
+    }
+    &out.push(U8{34})
+}

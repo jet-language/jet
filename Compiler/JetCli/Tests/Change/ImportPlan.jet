@@ -1,0 +1,403 @@
+// CLI-56: controlled transport ONLY. Planning, translation, identities,
+// boundary validation, evidence and output are the real canonical Jet code.
+struct ImportPlanTestFile { path: Path, kind: JetCLIImportFileType, text: String, reread: String? }
+struct ImportPlanTestHost {
+    files: [ImportPlanTestFile]
+    events: [String]
+    fail: String
+    unsafe_entry: Bool
+}
+fn import_plan_test_host() -> ImportPlanTestHost Never! { ImportPlanTestHost{files: [ImportPlanTestFile]{}, events: [String]{}, fail: "", unsafe_entry: false} }
+fn import_plan_test_add(host: &ImportPlanTestHost, path: String, kind: JetCLIImportFileType, text: String) Never! {
+    &host.files.push(ImportPlanTestFile{path: import_paths.of(path), kind: kind, text: text, reread: None})
+}
+fn import_plan_test_python(raw: String) -> ImportPlanTestHost Never! {
+    host := import_plan_test_host()
+    import_plan_test_add(&host, "/p/python/app", JetCLIImportFileType.Directory, "")
+    import_plan_test_add(&host, "/p/python/app/math.py", JetCLIImportFileType.File, raw)
+    host
+}
+impl ImportPlanTestHost.JetCLIImportPlanHost {
+    fn cwd(&self) -> Path JetCLIImportPlanError! {
+        &self.events.push("cwd")
+        if self.fail == "cwd" -> return Err(jet_cli_import_plan_error("cwd denied"))
+        Ok(import_paths.of("/p"))
+    }
+    fn canonicalize(&self, path: Path) -> Path JetCLIImportPlanError! {
+        &self.events.push("canonicalize:{path.raw}")
+        if self.fail == "canonicalize" -> return Err(jet_cli_import_plan_error("canonicalize denied"))
+        loop file in self.files { if file.path == path -> return Ok(path) }
+        Err(jet_cli_import_plan_error("No such file or directory (os error 2)"))
+    }
+    fn is_dir(&self, path: Path) -> Bool Never! {
+        &self.events.push("is_dir:{path.raw}")
+        loop file in self.files { if file.path == path -> return file.kind == JetCLIImportFileType.Directory }
+        false
+    }
+    fn read_dir(&self, path: Path) -> [Path] JetCLIImportPlanError! {
+        &self.events.push("read_dir:{path.raw}")
+        if self.fail == "read_dir" -> return Err(jet_cli_import_plan_error("directory denied"))
+        entries := [Path]{}
+        loop file in self.files { if import_paths.parent(file.path) == path -> &entries.push(file.path) }
+        if self.unsafe_entry -> &entries.push(import_paths.of("{path.raw}/../escape.py"))
+        Ok(entries)
+    }
+    fn file_type(&self, path: Path) -> JetCLIImportFileType JetCLIImportPlanError! {
+        &self.events.push("file_type:{path.raw}")
+        if self.fail == "file_type" -> return Err(jet_cli_import_plan_error("type denied"))
+        if self.unsafe_entry && path.raw.ends_with("/../escape.py") -> return Ok(JetCLIImportFileType.File)
+        loop file in self.files { if file.path == path -> return Ok(file.kind) }
+        Err(jet_cli_import_plan_error("missing entry"))
+    }
+    fn read_text(&self, path: Path) -> String JetCLIImportPlanError! {
+        &self.events.push("read_text:{path.raw}")
+        if self.fail == "read_text" -> return Err(jet_cli_import_plan_error("text denied"))
+        loop file in self.files { if file.path == path -> return Ok(file.text) }
+        Err(jet_cli_import_plan_error("missing text"))
+    }
+    fn read_bytes(&self, path: Path) -> [U8] JetCLIImportPlanError! {
+        &self.events.push("read_bytes:{path.raw}")
+        if self.fail == "read_bytes" -> return Err(jet_cli_import_plan_error("bytes denied"))
+        loop file in self.files { if file.path == path -> return Ok((file.reread ?? file.text).bytes()) }
+        Err(jet_cli_import_plan_error("missing bytes"))
+    }
+    fn target_identity(&self) -> String Never! {
+        &self.events.push("target_identity")
+        "x86_64-linux"
+    }
+    fn version(&self) -> String Never! {
+        &self.events.push("version")
+        "0.0.1"
+    }
+}
+fn import_plan_test_build(host: &ImportPlanTestHost, language: String, root: String) -> JetCLIImportPlan Never! {
+    jet_cli_import_build_plan<ImportPlanTestHost>(import_paths.of(root), import_paths.of("/p/jet/app"), language, &host) ?? panic("plan failed: {err.message}")
+}
+fn import_plan_test_run(host: &ImportPlanTestHost, language: String, path: String, json: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_run_import_preview<ImportPlanTestHost>([String]{"import", language, path, "--dry-run"}, json, &host)
+}
+#Test("IM01 parser aliases duplicate flags and malformed args") {
+    args :: jet_cli_import_parse_args([String]{"import", "PYTHON", "app", "--dry-run"}) ?? panic("parse")
+    assert(args.mode == JetCLIImportMode.DryRun)
+    assert_eq(jet_cli_import_canonical_language(args.language), "py")
+    aliases :: [String]{"cs", "c#", "typescript", "javascript", "golang", "c++"}
+    wanted :: [String]{"csharp", "csharp", "ts", "js", "go", "cpp"}
+    loop index in 0..<aliases.len() -> assert_eq(jet_cli_import_canonical_language(aliases[index]), wanted[index])
+    bad :: [[String]]{[String]{"import", "py"}, [String]{"import", "py", "app", "--bad"}, [String]{"import", "py", "app", "--dry-run", "--update"}, [String]{"import", "py", "app", "--dry-run", "--dry-run"}, [String]{"import", "py", "app", "--update", "--update"}}
+    loop raw in bad {
+        rejected :: if jet_cli_import_parse_args(raw) == {
+            .Err(_) -> true
+            .Ok(_) -> false
+        }
+        assert(rejected)
+    }
+}
+#Test("IM01 argument and language errors precede all host access") {
+    host := import_plan_test_host()
+    host.fail = "cwd"
+    output :: import_plan_test_run(&host, "C++", "missing", false)
+    assert_eq(output.exit_code, 2)
+    assert(output.stderr.contains("source conversion for 'cpp' is unavailable"))
+    assert(output.stderr.contains(pkg_foreign_boundary_capability(ForeignLanguage.Cpp).reason))
+    assert(host.events.is_empty())
+    unknown :: import_plan_test_run(&host, "unknown", "missing", true)
+    assert_eq(unknown.exit_code, 2)
+    assert(unknown.stdout.contains("source importer 'unknown' is not installed"))
+    assert(host.events.is_empty())
+    malformed :: jet_cli_run_import_preview<ImportPlanTestHost>([String]{"import", "py", "--dry-run"}, false, &host)
+    assert_eq(malformed.exit_code, 2)
+    assert(host.events.is_empty())
+}
+#Test("IM01 preparation and operation error precedence") {
+    host := import_plan_test_python("def answer() -> int:\n    return 42\n")
+    host.fail = "cwd"
+    cwd :: import_plan_test_run(&host, "py", "python/app", false)
+    assert_eq(cwd.stderr, "error[JT0198]: Source import could not read current directory\n  why: Cwd denied\n  fix: Check the source path and write permissions, then rerun\n")
+    assert_eq(host.events, [String]{"cwd"})
+    host.fail = "canonicalize"
+    host.events = [String]{}
+    canonical :: import_plan_test_run(&host, "py", "python/app", false)
+    assert_eq(canonical.exit_code, 1)
+    assert_eq(host.events, [String]{"cwd", "canonicalize:/p/python/app"})
+    host.fail = ""
+    host.events = [String]{}
+    file :: import_plan_test_run(&host, "py", "/p/python/app/math.py", false)
+    assert(file.stderr.contains("Source is not a directory"))
+    assert_eq(host.events, [String]{"cwd", "canonicalize:/p/python/app/math.py", "is_dir:/p/python/app/math.py"})
+}
+#Test("IM01 no files symlink skipping unsafe components and prefix boundary") {
+    host := import_plan_test_host()
+    import_plan_test_add(&host, "/p/app", JetCLIImportFileType.Directory, "")
+    import_plan_test_add(&host, "/p/app/link.py", JetCLIImportFileType.Symlink, "bad")
+    import_plan_test_add(&host, "/p/app/link", JetCLIImportFileType.Symlink, "")
+    import_plan_test_add(&host, "/p/app/upper.PY", JetCLIImportFileType.File, "bad")
+    empty :: import_plan_test_run(&host, "py", "app", false)
+    assert(empty.stderr.contains("No .py files found under /p/app"))
+    assert(!host.events.contains("read_text:/p/app/link.py"))
+    host.unsafe_entry = true
+    unsafe :: import_plan_test_run(&host, "py", "app", false)
+    assert(unsafe.stderr.contains("Unsafe source path ../escape.py"))
+    rejected :: if jet_cli_import_relative(import_paths.of("/p/app-other/x.py"), import_paths.of("/p/app")) == {
+        .Err(_) -> true
+        .Ok(_) -> false
+    }
+    assert(rejected)
+}
+#Test("IM01 source and type read errors retain exact ordering") {
+    host := import_plan_test_python("def answer() -> int:\n    return 42\n")
+    host.fail = "file_type"
+    typed :: import_plan_test_run(&host, "py", "python/app", false)
+    assert(typed.stderr.contains("Type denied"))
+    assert(!host.events.contains("read_text:/p/python/app/math.py"))
+    host.fail = "read_text"
+    host.events = [String]{}
+    text :: import_plan_test_run(&host, "py", "python/app", false)
+    assert(text.stderr.contains("Read /p/python/app/math.py: text denied"))
+    assert(!host.events.contains("read_bytes:/p/python/app/math.py"))
+    host.fail = "read_bytes"
+    host.events = [String]{}
+    bytes :: import_plan_test_run(&host, "py", "python/app", false)
+    assert(bytes.stderr.contains("Read /p/python/app/math.py: bytes denied"))
+    assert_eq(host.events[host.events.len() - 2], "read_text:/p/python/app/math.py")
+    assert_eq(host.events[host.events.len() - 1], "read_bytes:/p/python/app/math.py")
+    assert(!host.events.contains("target_identity"))
+}
+#Test("IM01 mandatory boundary evidence counts identities and source reread") {
+    host := import_plan_test_python("def answer() -> int:\n    return 42\n")
+    host.files[1].reread = Val("reread bytes")
+    plan :: import_plan_test_build(&host, "py", "/p/python/app")
+    assert_eq(plan.generated.len(), 1)
+    assert_eq(plan.functions, 1)
+    assert_eq(plan.tests, 0)
+    assert_eq(plan.todos.len(), 0)
+    identity := ForeignIdentityBuilder.new("jet-source-import-input-v1")
+    &identity.field("path", "math.py".bytes())
+    &identity.field("bytes", "reread bytes".bytes())
+    assert_eq(plan.source_digest, identity.finish())
+    assert_eq(plan.boundary_digest, plan.boundary.digest())
+    assert_eq(plan.replacement_digest, jet_cli_import_generated_tree_identity(plan.generated, "jet-source-import-replacement-v1"))
+    assert(plan.boundary.source_authority == ForeignSourceAuthority.ForeignUntilAccepted)
+    assert(plan.boundary.source_receipt == None)
+    assert(plan.boundary.evidence.is_empty())
+    assert_eq(plan.evidence.identity.report_id, "source-import-{plan.boundary_digest}")
+    assert_eq(plan.evidence.records.len(), 1)
+    assert_eq(plan.evidence.derivations.len(), 1)
+    record :: plan.evidence.records[0]
+    assert(record.outcome == EvidenceOutcome.Generated)
+    assert_eq(record.count, U64{1})
+    assert_eq(record.identity, evidence_identity_for_record(plan.evidence.identity.report_id, "source-import", EvidenceProducerKind.Compile, EvidenceKind.Contract, plan.evidence.source, U64{1}, "source import generated 1 files, 1 functions, and 0 tests"))
+    assert_eq(record.build.target, "x86_64-linux")
+    assert_eq(record.build.profile, "source-import")
+    assert(plan.evidence.derivations[0].disposition == MIRDerivationDisposition.Current)
+    assert(derivation_record_validate(plan.evidence.derivations[0]))
+    assert(record.attachments.contains(EvidenceAttachment{name: "boundary", value: plan.boundary_digest}))
+    assert(record.attachments.contains(EvidenceAttachment{name: "import-report", value: "/p/jet/app/import-report.json"}))
+}
+#Test("IM01 preview reads target baseline reports ignores failures never attaches") {
+    host := import_plan_test_python("def answer() -> int:\n    return 42\n")
+    plan :: import_plan_test_build(&host, "py", "/p/python/app")
+    host.events = [String]{}
+    host.fail = "read_text"
+    output :: jet_cli_import_preview_plan<ImportPlanTestHost>(plan, false, &host)
+    assert_eq(output.exit_code, 0)
+    assert_eq(output.stderr, "")
+    assert_eq(output.stdout, "would import /p/python/app -> /p/jet/app\n  1 functions, 0 carried tests, 0 TODO diagnostics\n  migration: supported (mode: conversion; source conversion: narrow-checked-subset; source authority: foreign-until-accepted)\n")
+    assert_eq(host.events, [String]{"read_text:/p/jet/app/math.jet", "read_text:/p/jet/app/.jet-import/baseline/math.jet", "read_text:/p/jet/app/import-report.json", "read_text:/p/jet/app/.jet-import/baseline/import-report.json"})
+    assert(plan.boundary.evidence.is_empty())
+    assert(plan.boundary.derivation == None)
+    assert(plan.boundary.source_receipt == None)
+}
+// Original tests/source_import.rs vertical source, with genuine DryRun migration row.
+#Test("IM01 Python vertical preview human golden and incomplete evidence") {
+    raw :: "import decimal\n\ndef add(x: int, y: int) -> int:\n    total = x + y\n    return total\n\ndef test_add() -> None:\n    assert add(2, 3) == 5\n\ndef risky(x: int) -> int:\n    if x > 0:\n        return x\n    raise RuntimeError(\"negative\")\n"
+    host := import_plan_test_python(raw)
+    plan :: import_plan_test_build(&host, "py", "/p/python/app")
+    assert_eq(plan.functions, 2)
+    assert_eq(plan.tests, 1)
+    assert_eq(plan.todos.len(), 2)
+    assert(plan.evidence.records[0].outcome == EvidenceOutcome.Incomplete)
+    assert(plan.evidence.derivations[0].disposition == MIRDerivationDisposition.Unavailable)
+    actual :: jet_cli_import_preview_plan<ImportPlanTestHost>(plan, false, &host)
+    expected :: "would import /p/python/app -> /p/jet/app\n  2 functions, 1 carried tests, 2 TODO diagnostics\n  migration: supported (mode: conversion; source conversion: narrow-checked-subset; source authority: foreign-until-accepted)\n  JT0101 Source import omitted unsupported Python top-level construct 'import decimal' at /p/python/app/math.py:1\n    why: The importer cannot prove an equivalent Jet construct: first Python importer translates annotated functions only\n    fix: Port construct into ordinary Jet; no source was silently emitted; then review the generated target `/p/jet/app/math.jet` before rerunning the import.\n    target: /p/jet/app/math.jet  status: omitted-reported\n  JT0101 Source import omitted Python body 'risky' was not translated at /p/python/app/math.py:11\n    why: The importer cannot prove an equivalent Jet construct: nested control flow has no proven equivalent in this importer\n    fix: Port body into ordinary Jet; source remains in omissions report; then review the generated target `/p/jet/app/math.jet` before rerunning the import.\n    target: /p/jet/app/math.jet  status: omitted-reported\n"
+    assert_eq(actual.stdout, expected)
+    report :: jet_cli_import_report(plan)
+    assert(report.contains("\"source_span\":\"/p/python/app/math.py:11\""))
+    assert(report.contains("\"summary\":{{\"files\":1,\"translated_functions\":2,\"carried_tests\":1,\"omissions\":2}}"))
+    machine :: jet_cli_import_preview_plan<ImportPlanTestHost>(plan, true, &host)
+    assert_eq(machine.stdout, "{{\"schema\":\"jet.status/v1\",\"action\":\"import\",\"ok\":true,\"reports\":[],\"import\":{report.trim_end()}}}\n")
+}
+#Test("IM01 directory recursion path component order and symlink skipping") {
+    host := import_plan_test_host()
+    import_plan_test_add(&host, "/p/app", JetCLIImportFileType.Directory, "")
+    import_plan_test_add(&host, "/p/app/a.py", JetCLIImportFileType.File, "def last() -> int:\n    return 2\n")
+    import_plan_test_add(&host, "/p/app/a", JetCLIImportFileType.Directory, "")
+    import_plan_test_add(&host, "/p/app/a/b.py", JetCLIImportFileType.File, "def first() -> int:\n    return 1\n")
+    import_plan_test_add(&host, "/p/app/skipped.py", JetCLIImportFileType.Symlink, "bad")
+    plan :: import_plan_test_build(&host, "py", "/p/app")
+    assert_eq(plan.generated[0].relative, import_paths.of("a/b.jet"))
+    assert_eq(plan.generated[1].relative, import_paths.of("a.jet"))
+    assert_eq(plan.functions, 2)
+    assert_eq(plan.evidence.records[0].count, U64{2})
+    assert(!host.events.contains("read_text:/p/app/skipped.py"))
+}
+#Test("IM01 Pascal Ada binder fixtures remain manual and incomplete") {
+    languages :: [String]{"pascal", "ada"}
+    paths :: [String]{"inventory.pas", "geodesy.ads"}
+    raws :: [String]{"library inventory;\nfunction add_scalar(A, B: Int64): Int64; cdecl;\nbegin Result := A + B; end;\nexports add_scalar;\nbegin end.\n", "with Interfaces.C;\npackage Geodesy is\n   subtype Latitude is Interfaces.C.double range -90.0 .. 90.0;\n   function Double_Lat (Lat : Latitude) return Interfaces.C.double\n     with Export, Convention => C, External_Name => \"geo_double\";\nend Geodesy;\n"}
+    loop index in 0..<languages.len() {
+        host := import_plan_test_host()
+        import_plan_test_add(&host, "/p/app", JetCLIImportFileType.Directory, "")
+        import_plan_test_add(&host, "/p/app/{paths[index]}", JetCLIImportFileType.File, raws[index])
+        import_plan_test_add(&host, "/p/app/geodesy.adb", JetCLIImportFileType.File, "package body Geodesy is begin null; end Geodesy;\n")
+        plan :: import_plan_test_build(&host, languages[index], "/p/app")
+        assert_eq(plan.generated.len(), 1)
+        assert_eq(plan.functions, 0)
+        assert_eq(plan.todos.len(), 1)
+        assert(plan.boundary.disposition == ForeignBoundaryDisposition.BinderOnly)
+        assert_eq(jet_cli_import_migration_projection_json(plan), "{{\"disposition\":\"binder-only\",\"source_conversion\":\"unavailable\",\"mode\":\"manual\",\"source_authority\":\"foreign-until-accepted\"}}")
+        assert(plan.evidence.records[0].outcome == EvidenceOutcome.Incomplete)
+        preview :: import_plan_test_run(&host, languages[index], "app", false)
+        assert_eq(preview.exit_code, 0)
+        assert(preview.stdout.contains("migration: binder-only (mode: manual; source conversion: unavailable; source authority: foreign-until-accepted)"))
+        assert_eq(host.files[1].text, raws[index])
+    }
+}
+// Exact original enterprise fixture bytes; translator goldens stay in CLI-54.
+#Test("IM01 enterprise fixtures traverse complete plan and real preview") {
+    languages :: [String]{"java", "csharp", "ts", "js", "go"}
+    extensions :: [String]{"java", "cs", "ts", "js", "go"}
+    raws :: [String]{
+        "package demo;\n\npublic final class Math {{\n    public static long add(long left, long right) {{\n        long total = left + right;\n        return total;\n    }}\n\n    public static void run() {{\n        System.out.println(add(2, 3));\n    }}\n\n    public static long unsupported(long[] values) {{\n        return values.length;\n    }}\n}}\n",
+        "using System;\n\nnamespace Demo {{\n    public static class Math {{\n        public static long Add(long left, long right) {{\n            long total = left + right;\n            return total;\n        }}\n\n        public static void run() {{\n            Console.WriteLine(Add(2, 3));\n        }}\n\n        public static long Unsupported(long[] values) {{\n            return values.Length;\n        }}\n    }}\n}}\n",
+        "export function add(left: number, right: number): number {{\n    const total = left + right;\n    return total;\n}}\n\nexport function run(): void {{\n    console.log(add(2, 3));\n}}\n\nexport function unsupported(values: number[]): number {{\n    return values.length;\n}}\n",
+        "/**\n * @param {{number}} left\n * @param {{number}} right\n * @returns {{number}}\n */\nfunction add(left, right) {{\n    return left + right;\n}}\n\n/** @returns {{void}} */\nfunction run() {{\n    console.log(add(2, 3));\n}}\n\n/**\n * @param {{object}} values\n * @returns {{number}}\n */\nfunction unsupported(values) {{\n    return values.length;\n}}\n",
+        "package demo\n\nimport \"fmt\"\n\nfunc Add(left int, right int) int {{\n    total := left + right\n    return total\n}}\n\nfunc run() {{\n    fmt.Println(Add(2, 3))\n}}\n\nfunc Unsupported(values []int) int {{\n    return len(values)\n}}\n",
+    }
+    loop index in 0..<languages.len() {
+        host := import_plan_test_host()
+        import_plan_test_add(&host, "/p/app", JetCLIImportFileType.Directory, "")
+        import_plan_test_add(&host, "/p/app/program.{extensions[index]}", JetCLIImportFileType.File, raws[index])
+        plan :: import_plan_test_build(&host, languages[index], "/p/app")
+        assert_eq(plan.functions, 2)
+        assert_eq(plan.todos.len(), 1)
+        assert(plan.evidence.records[0].outcome == EvidenceOutcome.Incomplete)
+        assert(plan.boundary.source_authority == ForeignSourceAuthority.ForeignUntilAccepted)
+        output :: import_plan_test_run(&host, languages[index], "app", true)
+        assert_eq(output.exit_code, 0)
+        assert_eq(output.stderr, "")
+        assert_eq(output.stdout, StatusEnvelope.new("import", true).with_field("import", jet_cli_import_report_value(plan)).json_line())
+        assert_eq(host.files[1].text, raws[index])
+        assert_eq(host.files.len(), 2)
+    }
+}
+#Test("IM01 malformed enterprise source is honest incomplete preview") {
+    host := import_plan_test_host()
+    import_plan_test_add(&host, "/p/app", JetCLIImportFileType.Directory, "")
+    import_plan_test_add(&host, "/p/app/broken.java", JetCLIImportFileType.File, "public static long broken(long value) {{\n    return value;\n")
+    plan :: import_plan_test_build(&host, "java", "/p/app")
+    assert_eq(plan.functions, 0)
+    assert(!plan.todos.is_empty())
+    assert(plan.evidence.records[0].outcome == EvidenceOutcome.Incomplete)
+    assert(plan.generated[0].contents.contains("No construct was safe to translate"))
+    output :: import_plan_test_run(&host, "java", "app", false)
+    assert_eq(output.exit_code, 0)
+    assert(output.stdout.contains("malformed java function"))
+    assert_eq(host.files.len(), 2)
+}
+// #4306: shared Core JSON sorts these ordered objects at runtime. Preserve the
+// original byte golden; retained failure: leaves-8G.unit.txt / leaves-8G.log.
+#Test("IM01 usage and operation JSON byte goldens") {
+    usage :: jet_cli_import_usage_error("bad input", "use explicit args", true)
+    assert_eq(usage.stdout, "{{\"schema\":\"jet.status/v1\",\"action\":\"import\",\"ok\":false,\"reports\":[{{\"schema\":\"jet.report/v3\",\"moment\":\"tool\",\"severity\":\"error\",\"code\":\"E2102\",\"what\":\"bad input\",\"why\":\"D-MIGRATE-SRC1 keeps source import arguments explicit\",\"fix\":\"use explicit args\",\"detail\":null,\"denial_kind\":null,\"call_chain\":[],\"scope_chain\":[],\"nearest_granting_scope\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"fix_edits\":[],\"cause\":[],\"clears\":0}}]}}\n")
+    operation :: jet_cli_import_operation_error("read current directory", "cwd denied", true)
+    assert_eq(operation.stdout, "{{\"schema\":\"jet.status/v1\",\"action\":\"import\",\"ok\":false,\"reports\":[{{\"schema\":\"jet.report/v3\",\"moment\":\"tool\",\"severity\":\"error\",\"code\":\"JT0198\",\"what\":\"Source import could not read current directory\",\"why\":\"Cwd denied\",\"fix\":\"Check the source path and write permissions, then rerun\",\"detail\":null,\"denial_kind\":null,\"call_chain\":[],\"scope_chain\":[],\"nearest_granting_scope\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"fix_edits\":[],\"cause\":[],\"clears\":0}}]}}\n")
+}
+#Test("IM01 root and normalized components retain containment") {
+    relative :: jet_cli_import_relative(import_paths.of("/nested/x.py"), import_paths.of("/")) ?? panic("root prefix")
+    assert_eq(relative, import_paths.of("nested/x.py"))
+    dotted :: jet_cli_import_relative(import_paths.of("/p/app/./nested//x.py"), import_paths.of("/p/app")) ?? panic("components")
+    assert_eq(dotted, import_paths.of("nested/x.py"))
+}
+// Constructor/renderer proof independent of #4430 collection: actual canonical
+// boundary+evidence and translated fixture bytes, NOT a build_plan/Front proof.
+#Test("IM01 pure mandatory evidence constructor generated and incomplete") {
+    source :: import_paths.of("/p/app")
+    target :: import_paths.of("/p/jet/app")
+    host := import_plan_test_host()
+    raw :: "def answer() -> int:\n    return 42\n"
+    translated :: jet_cli_import_translate_file(raw, "/p/app/math.py", "/p/jet/app/math.jet")
+    generated :: [JetCLIImportGenerated]{JetCLIImportGenerated{relative: import_paths.of("math.jet"), contents: translated.source}}
+    input := ForeignIdentityBuilder.new("jet-source-import-input-v1")
+    &input.field("path", "math.py".bytes())
+    &input.field("bytes", raw.bytes())
+    source_digest :: input.finish()
+    replacement_digest :: jet_cli_import_generated_tree_identity(generated, "jet-source-import-replacement-v1")
+    boundary :: jet_cli_import_boundary<ImportPlanTestHost>("py", source, target, source_digest, replacement_digest, &host) ?? panic("boundary")
+    report :: jet_cli_import_evidence(boundary, source, target, source_digest, replacement_digest, 1, translated.functions, translated.tests, translated.todos.len()) ?? panic("evidence")
+    assert_eq(report.records.len(), 1)
+    assert(report.records[0].outcome == EvidenceOutcome.Generated)
+    assert_eq(report.records[0].count, U64{1})
+    assert_eq(report.records[0].identity, evidence_identity_for_record(report.identity.report_id, "source-import", EvidenceProducerKind.Compile, EvidenceKind.Contract, report.source, U64{1}, "source import generated 1 files, 1 functions, and 0 tests"))
+    assert_eq(report.records[0].revision.source, boundary.identity.derivation_identity().source)
+    assert(report.derivations[0].disposition == MIRDerivationDisposition.Current)
+    assert(derivation_record_validate(report.derivations[0]))
+    incomplete :: jet_cli_import_evidence(boundary, source, target, source_digest, replacement_digest, 1, 1, 0, 2) ?? panic("incomplete")
+    assert(incomplete.records[0].outcome == EvidenceOutcome.Incomplete)
+    assert(incomplete.derivations[0].disposition == MIRDerivationDisposition.Unavailable)
+    assert(derivation_record_validate(incomplete.derivations[0]))
+    assert(boundary.source_receipt == None)
+    assert(boundary.evidence.is_empty())
+}
+#Test("IM01 pure genuine preview reads and exact output without publication") {
+    source :: import_paths.of("/p/app")
+    target :: import_paths.of("/p/jet/app")
+    host := import_plan_test_host()
+    raw :: "def answer() -> int:\n    return 42\n"
+    translated :: jet_cli_import_translate_file(raw, "/p/app/math.py", "/p/jet/app/math.jet")
+    generated :: [JetCLIImportGenerated]{JetCLIImportGenerated{relative: import_paths.of("math.jet"), contents: translated.source}}
+    input := ForeignIdentityBuilder.new("jet-source-import-input-v1")
+    &input.field("path", "math.py".bytes())
+    &input.field("bytes", raw.bytes())
+    source_digest :: input.finish()
+    replacement_digest :: jet_cli_import_generated_tree_identity(generated, "jet-source-import-replacement-v1")
+    boundary :: jet_cli_import_boundary<ImportPlanTestHost>("py", source, target, source_digest, replacement_digest, &host) ?? panic("boundary")
+    evidence :: jet_cli_import_evidence(boundary, source, target, source_digest, replacement_digest, 1, translated.functions, translated.tests, translated.todos.len()) ?? panic("evidence")
+    plan :: JetCLIImportPlan{language: "py", source: source, target: target, generated: generated, todos: translated.todos, functions: translated.functions, tests: translated.tests, boundary: boundary, evidence: evidence, boundary_digest: boundary.digest(), source_digest: source_digest, replacement_digest: replacement_digest}
+    host.events = [String]{}
+    human :: jet_cli_import_preview_plan<ImportPlanTestHost>(plan, false, &host)
+    assert_eq(human.stdout, "would import /p/app -> /p/jet/app\n  1 functions, 0 carried tests, 0 TODO diagnostics\n  migration: supported (mode: conversion; source conversion: narrow-checked-subset; source authority: foreign-until-accepted)\n")
+    assert_eq(host.events, [String]{"read_text:/p/jet/app/math.jet", "read_text:/p/jet/app/.jet-import/baseline/math.jet", "read_text:/p/jet/app/import-report.json", "read_text:/p/jet/app/.jet-import/baseline/import-report.json"})
+    assert(plan.boundary.source_receipt == None)
+    assert(plan.boundary.evidence.is_empty())
+    machine :: jet_cli_import_preview_plan<ImportPlanTestHost>(plan, true, &host)
+    report :: jet_cli_import_report(plan)
+    assert_eq(machine.stdout, "{{\"schema\":\"jet.status/v1\",\"action\":\"import\",\"ok\":true,\"reports\":[],\"import\":{report.trim_end()}}}\n")
+    assert_eq(host.files.len(), 0)
+}
+#Test("IM01 generated tree identity exact framing and bytes") {
+    generated :: [JetCLIImportGenerated]{JetCLIImportGenerated{relative: import_paths.of("math.jet"), contents: "fn answer() -> Int {{\n    return 42\n}}\n"}}
+    // Independent Node SHA-256 of Rust IdentityBuilder's little-endian u64
+    // schema/path/bytes field framing, independently hashed with Node SHA-256.
+    assert_eq(jet_cli_import_generated_tree_identity(generated, "jet-source-import-replacement-v1"), "b46189c870ca99f6c250944a9a2b75ef867d0513e769921bd47357b0a0641a71")
+}
+#Test("IM01 registry diagnostic projection preserves real omission fields") {
+    translated :: jet_cli_import_translate_file("import decimal\n", "math.py", "math.jet")
+    diagnostic :: jet_cli_import_todo_diagnostic(translated.todos[0])
+    assert_eq(diagnostic.code, "JT0101")
+    assert_eq(diagnostic.what, "Source import omitted unsupported Python top-level construct 'import decimal' at math.py:1")
+    assert_eq(diagnostic.why, "The importer cannot prove an equivalent Jet construct: first Python importer translates annotated functions only")
+    assert_eq(diagnostic.fix, "Port construct into ordinary Jet; no source was silently emitted; then review the generated target `math.jet` before rerunning the import.")
+    assert(diagnostic.moment == DiagnosticMoment.Tool)
+    assert_eq(diagnostic.severity, 2)
+    assert_eq(translated.todos[0].source, "math.py:1")
+    assert_eq(translated.todos[0].target, "math.jet")
+    assert_eq(translated.todos[0].status, "omitted-reported")
+}
+#Test("IM01 canonical language is ASCII only and preserves unknown spellings") {
+    aliases :: [String]{"PYTHON", "CS", "C#", "TYPESCRIPT", "JAVASCRIPT", "GOLANG", "C++"}
+    wanted :: [String]{"py", "csharp", "csharp", "ts", "js", "go", "cpp"}
+    loop index in 0..<aliases.len() -> assert_eq(jet_cli_import_canonical_language(aliases[index]), wanted[index])
+    assert_eq(jet_cli_import_canonical_language("UNKNOWN"), "unknown")
+    assert_eq(jet_cli_import_canonical_language("PŸTHON"), "pŸthon")
+    assert_eq(jet_cli_import_canonical_language(" PYTHON "), " python ")
+}

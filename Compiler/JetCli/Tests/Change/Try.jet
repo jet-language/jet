@@ -1,0 +1,541 @@
+// Fake HOST TRANSPORT only, authorized for CLI-49. These exercise Try's real
+// parser, overlay ordering, byte-current gate, receipt and report policy. They
+// do not certify the native transaction or the resident compiler producer.
+use core.encoding.json as try_json
+
+struct TryTestHost {
+    disk: [String:[U8]]
+    documents: [String:String]
+    events: [String]
+    query_stats: JetDriverCompilerQueryStats
+    verdict_diagnostics: [Diagnostic]
+    baseline_diagnostics: [Diagnostic]
+    drift_path: String?
+    commit_failure: Bool
+    committed: [JetCLIChange]
+    operations: [SemanticOp]
+    index_kind: Int
+    regress_stats: Bool
+}
+fn try_test_host() -> TryTestHost {
+    stats :: JetDriverCompilerQueryStats{hits: 0, recomputes: 0, live_inputs: 0, live_input_bytes: 0, live_memos: 0, live_query_counters: 0, item_hits: 0, item_recomputes: 0, live_items: 0, live_item_bytes: 0, recomputed_items: [String]{}}
+    TryTestHost{disk: [String:[U8]]{}, documents: [String:String]{}, events: [String]{}, query_stats: stats, verdict_diagnostics: [Diagnostic]{}, drift_path: None, commit_failure: false, committed: [JetCLIChange]{}, operations: [SemanticOp]{}, index_kind: 0, regress_stats: false, baseline_diagnostics: [Diagnostic]{}}
+}
+impl TryTestHost.JetCLITryHost {
+    fn cwd(&self) -> String JetCLITryError! { Ok("/p") }
+    fn canonicalize(&self, path: String) -> String JetCLITryError! {
+        if path == "/p/alias.jet" -> return Ok("/p/main.jet")
+        if self.disk.has_key(path) -> return Ok(path)
+        Err(jet_cli_try_error("not found"))
+    }
+    fn read_bytes(&self, path: String) -> [U8] JetCLITryError! {
+        &self.events.push("read:{path}")
+        Ok(self.disk.get(path) ?? return Err(jet_cli_try_error("not found")))
+    }
+    // The fake transport supports fixture identifiers, not a Unicode oracle.
+    fn identifier_valid(&self, name: String) -> Bool Never! {
+        bytes :: name.bytes()
+        if bytes.len() == 0 -> return false
+        loop (index, byte) in bytes {
+            code :: Int.from_u8(byte)
+            alpha :: (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
+            digit :: code >= 48 && code <= 57
+            if !alpha && (index == 0 || !digit) -> return false
+        }
+        true
+    }
+    fn open_index(&self, entry: String) -> SemIndex JetCLITryError! {
+        &self.events.push("index:{entry}")
+        if self.index_kind == 0 -> return Err(jet_cli_try_error("index unavailable"))
+        if self.index_kind == 3 {
+            source :: String.from_bytes(self.disk.get(entry) ?? [U8]{}) ?? ""
+            return Err(JetCLITryError.Load{entry: entry, source: source, diagnostics: self.verdict_diagnostics})
+        }
+        if self.index_kind == 1 {
+            facts :: [DefinitionFact]{DefinitionFact{stable_id: "canonical-id", signature_id: "sig", content_id: "content", human_identity: "module::target", name: "target", kind: "function", module_path: "/p/main.jet", span: SourceSpan{start: 3, end: 9}}}
+            return Ok(SemIndex.new(^[SymbolDef]{}, ^[SymbolRef]{}, ^[CallEdge]{}, ^[EffectFact]{}, ^[MemberFact]{}, ^[StructuralNode]{}, ^facts))
+        }
+        unavailable :: CallableFactUnavailable{required_stage: CompilerStage.Resolved, reason: "fixture has no callable"}
+        defs :: [SymbolDef]{SymbolDef{identity: "resolved-target", declaration_identity_unavailable: unavailable, name: "target", qualified_name: "module::target", module_path: "/p/main.jet", def_span: SourceSpan{start: 0, end: 6}, kind: SemIndexSymbolKind.Const, view_provenance: [], callable_signature: None, derives: [String]{}, nominal_base: None, trait_contracts: []}}
+        refs :: [SymbolRef]{SymbolRef{name: "target", module_path: "/p/main.jet", scope_identity: None, target: None, fact: None, span: SourceSpan{start: 12, end: 18}}}
+        facts :: [DefinitionFact]{DefinitionFact{stable_id: "stable-target", signature_id: "sig", content_id: "body", human_identity: "module::target", name: "target", kind: "const", module_path: "/p/main.jet", span: SourceSpan{start: 0, end: 6}}}
+        Ok(SemIndex.new(^defs, ^refs, ^[CallEdge]{}, ^[EffectFact]{}, ^[MemberFact]{}, ^[StructuralNode]{}, ^facts))
+    }
+    // Transport's reference FixEngine: stable start/end order, reject overlap,
+    // clamp offsets, reverse splice on BYTES. Not a second production engine.
+    fn apply_edits(&self, source: String, edits: [TextEdit]) -> String JetCLITryError! {
+        ordered := ~edits
+        &ordered.sort_by((a: TextEdit, b: TextEdit) -> {
+            if a.span.start != b.span.start -> a.span.start <=> b.span.start else -> a.span.end <=> b.span.end
+        })
+        loop index in 1..<ordered.len() {
+            if ordered[index].span.start < ordered[index - 1].span.end -> return Err(jet_cli_try_error("overlap"))
+        }
+        result := source.bytes()
+        length :: result.len()
+        index := ordered.len()
+        loop index > 0 {
+            index -= 1
+            item :: ordered[index]
+            start :: if item.span.start < length -> item.span.start else -> length
+            clamped_end :: if item.span.end < length -> item.span.end else -> length
+            end :: if clamped_end > start -> clamped_end else -> start
+            next_bytes := [U8]{}
+            loop byte in result[0..<start] -> &next_bytes.push(byte)
+            loop byte in item.new_text.bytes() -> &next_bytes.push(byte)
+            loop byte in result[end..<result.len()] -> &next_bytes.push(byte)
+            result = ^next_bytes
+        }
+        Ok(String.from_bytes(result) ?? return Err(jet_cli_try_error("not a character boundary")))
+    }
+    fn check_disk(&self, entry: String) -> [Diagnostic] JetCLITryError! {
+        &self.events.push("baseline:{entry}")
+        self.query_stats.item_recomputes = 100
+        self.query_stats.item_hits = 200
+        Ok(self.baseline_diagnostics)
+    }
+    fn stats(&self) -> JetDriverCompilerQueryStats Never! { self.query_stats }
+    fn set_document(&self, path: String, source: String) JetCLITryError! {
+        &self.events.push("overlay:{path}")
+        self.documents[path] = source
+    }
+    fn check_text(&self, entry: String, source: String) -> [Diagnostic] JetCLITryError! {
+        &self.events.push("check:{entry}")
+        assert_eq(self.documents.get(entry) ?? source, source)
+        self.query_stats.item_recomputes = if self.regress_stats -> 99 else -> 102
+        self.query_stats.item_hits = if self.regress_stats -> 199 else -> 207
+        if self.drift_path == .Val(path) -> self.disk[path] = "editor".bytes()
+        Ok(self.verdict_diagnostics)
+    }
+    fn render_diagnostics(&self, entry: String, source: String, diagnostics: [Diagnostic]) -> String Never! { "checked diagnostic\n" }
+    fn diagnostic_reports(&self, entry: String, source: String, diagnostics: [Diagnostic]) -> [ReportEnvelope] Never! {
+        loop diagnostic in diagnostics -> ReportEnvelope.new("compile", "error", diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
+    }
+    fn commit_fix_with_semantic_ops(&self, change: JetCLIChange, operations: [SemanticOp]) -> String JetCLITryError! {
+        &self.events.push("commit:{change.path}")
+        if self.commit_failure -> return Err(jet_cli_try_error("transaction unavailable"))
+        assert_eq(self.disk.get(change.path) ?? [U8]{}, change.before)
+        self.disk[change.path] = change.after
+        &self.committed.push(~change)
+        self.operations = ~operations
+        Ok("/p/.jet/codemods/Fix-main.log.json")
+    }
+}
+fn try_test_fixture() -> TryTestHost {
+    host := try_test_host()
+    host.disk["/p/main.jet"] = "fn run() {{ print(\"one\") }}\n".bytes()
+    host.disk["/p/try.json"] = `{"name":"journey","entry":"main.jet","edits":[{"path":"main.jet","start":18,"end":21,"new_text":"two"}]}`.bytes()
+    host
+}
+fn try_test_run(host: &TryTestHost, keep: Bool, json: Bool) -> JetDriverVerbOutput {
+    jet_cli_try_run("try.json", keep, json, &host) ?? panic("try failed: {jet_cli_try_error_message(err)}")
+}
+fn try_test_parse(text: String) -> JetCLITryPlan {
+    host := try_test_host()
+    jet_cli_try_parse_plan(text, "/p/try.json", &host) ?? panic("parse failed: {jet_cli_try_error_message(err)}")
+}
+fn try_test_bad_plan(text: String, expected: String) {
+    host := try_test_host()
+    if jet_cli_try_parse_plan(text, "/p/try.json", &host) == {
+        .Ok(_) -> panic("invalid plan accepted")
+        .Err(error) -> assert_eq(jet_cli_try_error_message(error), expected)
+    }
+}
+
+#Test("default_try_rechecks_overlay_then_rolls_back_byte_for_byte") {
+    host := try_test_fixture()
+    before :: host.disk.get("/p/main.jet") ?? panic("fixture missing")
+    output :: try_test_run(&host, false, false)
+    assert_eq(output.exit_code, 0)
+    assert_eq(output.stderr, "")
+    assert(output.stdout.contains("claims re-checked: 2 · claims reused: 7"))
+    assert(output.stdout.contains("rolled back (default): working tree is byte-identical"))
+    assert_eq(host.disk.get("/p/main.jet") ?? [U8]{}, before)
+    assert_eq(host.committed.len(), 0)
+    assert_eq(host.documents.get("/p/main.jet") ?? "", "fn run() {{ print(\"two\") }}\n")
+    assert_eq(host.events, [String]{"read:/p/try.json", "read:/p/main.jet", "baseline:/p/main.jet", "overlay:/p/main.jet", "check:/p/main.jet"})
+}
+#Test("keep_lands_the_same_bytes_as_the_staged_edit") {
+    host := try_test_fixture()
+    output :: try_test_run(&host, true, false)
+    assert_eq(output.exit_code, 0)
+    assert(output.stdout.contains("kept: working tree now contains the staged bytes"))
+    assert_eq(host.committed.len(), 1)
+    assert_eq(host.disk.get("/p/main.jet") ?? [U8]{}, "fn run() {{ print(\"two\") }}\n".bytes())
+    assert_eq(host.committed[0].after, host.disk.get("/p/main.jet") ?? [U8]{})
+    assert_eq(host.operations.len(), 0)
+    assert_eq(host.events[5], "read:/p/main.jet")
+    assert_eq(host.events[6], "commit:/p/main.jet")
+}
+#Test("failed_verdict_rolls_back_without_keep even when keep is explicit") {
+    host := try_test_fixture()
+    host.verdict_diagnostics = [Diagnostic]{diagnostic_from_registry("E2105", None, "bad edit", "why", "fix")}
+    before :: host.disk.get("/p/main.jet") ?? [U8]{}
+    output :: try_test_run(&host, true, false)
+    assert_eq(output.exit_code, 1)
+    assert_eq(output.stdout, "")
+    assert_eq(output.stderr, "try `journey`: verdict failed; rolled back\nchecked diagnostic\n")
+    assert_eq(host.disk.get("/p/main.jet") ?? [U8]{}, before)
+    assert_eq(host.committed.len(), 0)
+    assert_eq(host.events.len(), 5)
+}
+#Test("try JSON uses the shared status envelope on success and failure") {
+    host := try_test_fixture()
+    output :: try_test_run(&host, false, true)
+    value :: try_json.parse(output.stdout) ?? panic("invalid success JSON")
+    fields :: if value == { .Object(object) -> object else -> panic("status not object") }
+    assert_eq(try_json.to_string(fields.get("action") ?? DataTree.Null), "\"try\"")
+    assert_eq(try_json.to_string(fields.get("ok") ?? DataTree.Null), "true")
+    assert_eq(try_json.to_string(fields.get("kept") ?? DataTree.Null), "false")
+    assert_eq(try_json.to_string(fields.get("claims_rechecked") ?? DataTree.Null), "2")
+    assert_eq(try_json.to_string(fields.get("claims_reused") ?? DataTree.Null), "7")
+    host.verdict_diagnostics = [Diagnostic]{diagnostic_from_registry("E2105", None, "bad edit", "why", "fix")}
+    failed :: try_test_run(&host, true, true)
+    failure_tree :: try_json.parse(failed.stdout) ?? panic("invalid failure JSON")
+    failure :: if failure_tree == { .Object(object) -> object else -> panic("status not object") }
+    assert_eq(try_json.to_string(failure.get("ok") ?? DataTree.Null), "false")
+    assert_eq(try_json.to_string(failure.get("kept") ?? DataTree.Null), "false")
+    assert_eq(try_json.to_string(failure.get("verdict") ?? DataTree.Null), "\"failed\"")
+    assert_eq(failed.stderr, "")
+    assert_eq(host.committed.len(), 0)
+}
+#Test("try validates all current bytes before publishing any file") {
+    host := try_test_fixture()
+    host.disk["/p/z.jet"] = "one".bytes()
+    host.disk["/p/try.json"] = `{"entry":"main.jet","edits":[{"path":"main.jet","start":18,"end":21,"new_text":"two"},{"path":"z.jet","start":0,"end":3,"new_text":"two"}]}`.bytes()
+    host.drift_path = Val("/p/z.jet")
+    before :: host.disk.get("/p/main.jet") ?? [U8]{}
+    if jet_cli_try_run("try.json", true, false, &host) == {
+        .Ok(_) -> panic("drifting keep accepted")
+        .Err(error) -> assert_eq(jet_cli_try_error_message(error), "try target `/p/z.jet` changed while it was being checked; no files written")
+    }
+    assert_eq(host.committed.len(), 0)
+    assert_eq(host.disk.get("/p/main.jet") ?? [U8]{}, before)
+}
+#Test("try cannot report kept when its canonical transaction is unavailable") {
+    host := try_test_fixture()
+    host.commit_failure = true
+    before :: host.disk.get("/p/main.jet") ?? [U8]{}
+    if jet_cli_try_run("try.json", true, false, &host) == {
+        .Ok(_) -> panic("failed transaction reported success")
+        .Err(error) -> assert_eq(jet_cli_try_error_message(error), "transaction unavailable")
+    }
+    assert_eq(host.disk.get("/p/main.jet") ?? [U8]{}, before)
+}
+#Test("try plan versions defaults operation precedence and relative paths") {
+    plan :: try_test_parse(`{"entry":"main.jet","operation":"rename","from":"target","to":"renamed"}`)
+    assert_eq(plan.name, "Try")
+    assert_eq(plan.entry, "/p/main.jet")
+    assert(plan.action == JetCLITryAction.Rename{from: "target", to: "renamed"})
+    edits :: try_test_parse(`{"version":1,"name":"","entry":"/a/main.jet","operation":"text_edit","edits":[{"path":"other.jet","start":0,"end":0,"new_text":"x"}]}`)
+    assert_eq(edits.name, "")
+    assert_eq(edits.entry, "/a/main.jet")
+    if edits.action == {
+        .Edits(items) -> assert_eq(items[0].path, "/p/other.jet")
+        else -> panic("wrong action")
+    }
+    try_test_bad_plan("[]", "try plan must be a JSON object")
+    try_test_bad_plan(`{"version":2}`, "unsupported try plan version; expected version 1")
+    try_test_bad_plan(`{"entry":"m.jet","operation":"other","edits":[]}`, "try plan operation `other` is not supported")
+    try_test_bad_plan(`{"entry":"m.jet"}`, "try plan needs `operation: \"rename\"` or `edits`")
+    try_test_bad_plan(`{"entry":4}`, "`entry` must be text")
+    try_test_bad_plan(`{"entry":"m.jet","operation":"rename","from":"1x","to":"x"}`, "`1x` is not a Jet identifier")
+    try_test_bad_plan(`{"entry":"m.jet","operation":"rename","from":"x","to":"y","z":0,"a":0}`, "unknown field(s) in try plan: a, z")
+}
+#Test("try rejects malformed edit objects and byte coordinates") {
+    try_test_bad_plan(`{"entry":"m.jet","operation":"text_edit"}`, "try plan is missing `edits`")
+    try_test_bad_plan(`{"entry":"m.jet","edits":false}`, "`edits` must be an array")
+    try_test_bad_plan(`{"entry":"m.jet","edits":[]}`, "try plan needs at least one edit")
+    try_test_bad_plan(`{"entry":"m.jet","edits":[false]}`, "each try edit must be an object")
+    try_test_bad_plan(`{"entry":"m.jet","edits":[{"path":"m.jet","start":-1,"end":0,"new_text":"x"}]}`, "`start` must be a non-negative integer")
+    try_test_bad_plan(`{"entry":"m.jet","edits":[{"path":"m.jet","end":0,"new_text":"x"}]}`, "try edit is missing `start`")
+    try_test_bad_plan(`{"entry":"m.jet","edits":[{"path":"m.jet","start":2,"end":1,"new_text":"x"}]}`, "try edit `end` must not be before `start`")
+    try_test_bad_plan(`{"entry":"m.jet","edits":[{"path":"m.jet","start":0,"end":0,"new_text":"x","z":0,"a":0}]}`, "unknown field(s) in try edit: a, z")
+    host := try_test_host()
+    if jet_cli_try_parse_plan(`{"entry":"a","entry":"b"}`, "/p/try.json", &host) == {
+        .Ok(_) -> panic("duplicate field accepted")
+        .Err(error) -> assert(jet_cli_try_error_message(error).starts_with("invalid try plan JSON: "))
+    }
+}
+#Test("try staging groups aliases and sorts receipt paths while preserving byte offsets") {
+    host := try_test_host()
+    host.disk["/p/main.jet"] = "é one z".bytes()
+    host.disk["/p/a.jet"] = "one".bytes()
+    plan :: try_test_parse(`{"entry":"main.jet","edits":[{"path":"main.jet","start":7,"end":8,"new_text":"ZZ"},{"path":"alias.jet","start":3,"end":6,"new_text":"two"},{"path":"a.jet","start":0,"end":3,"new_text":"two"}]}`)
+    changes :: jet_cli_try_stage(plan, &host) ?? panic("stage failed")
+    assert_eq(changes.len(), 2)
+    assert_eq(changes[0].path, "/p/a.jet")
+    assert_eq(changes[1].path, "/p/main.jet")
+    assert_eq(changes[1].after, "é two ZZ".bytes())
+    assert_eq(host.disk.get("/p/main.jet") ?? [U8]{}, "é one z".bytes())
+}
+// Rust stage_file_edits iterates BTreeMap<PathBuf, _>: component order and
+// component equality, never raw String order or spelling equality.
+#Test("try staging follows PathBuf component order and equality") {
+    host := try_test_host()
+    host.disk["/p/a-b.jet"] = "one".bytes()
+    host.disk["/p/a/b.jet"] = "one".bytes()
+    plan :: try_test_parse(`{"entry":"a-b.jet","edits":[{"path":"a-b.jet","start":0,"end":3,"new_text":"two"},{"path":"a/b.jet","start":0,"end":3,"new_text":"two"}]}`)
+    changes :: jet_cli_try_stage(plan, &host) ?? panic("stage failed")
+    assert_eq(changes.len(), 2)
+    assert_eq(changes[0].path, "/p/a/b.jet")
+    assert_eq(changes[1].path, "/p/a-b.jet")
+    missing :: try_test_parse(`{"entry":"x/m.jet","edits":[{"path":"x/m.jet","start":0,"end":0,"new_text":"a"},{"path":"x/./m.jet","start":0,"end":0,"new_text":"b"}]}`)
+    if jet_cli_try_stage(missing, &host) == {
+        .Ok(_) -> panic("missing target accepted")
+        .Err(error) -> assert_eq(jet_cli_try_error_message(error), "could not read `/p/x/m.jet`: not found")
+    }
+}
+// Shared CLI-internal law; Core publication requires ballot #4378.
+// #4357: original Ordering assert_eq checks retained; builtin JetDebug emit gate.
+#Test("try shared borrowed PathBuf law preserves roots dots parent ranks and UTF8") {
+    assert_eq(jet_cli_record_compare_paths("/", "///./"), Ordering.Equal)
+    assert_eq(jet_cli_record_compare_paths("", "/"), Ordering.Less)
+    assert_eq(jet_cli_record_compare_paths("/", "."), Ordering.Less)
+    assert_eq(jet_cli_record_compare_paths(".", ".."), Ordering.Less)
+    assert_eq(jet_cli_record_compare_paths("..", "a"), Ordering.Less)
+    assert_eq(jet_cli_record_compare_paths("./a", "a"), Ordering.Less)
+    assert_eq(jet_cli_record_compare_paths("/./a//b/", "/a/b"), Ordering.Equal)
+    assert_eq(jet_cli_record_compare_paths("a/./b", "a/b"), Ordering.Equal)
+    assert_eq(jet_cli_record_compare_paths("a/b", "a-b"), Ordering.Less)
+    assert_eq(jet_cli_record_compare_paths("a", "a/b"), Ordering.Less)
+    assert_eq(jet_cli_record_compare_paths("a/..", "a/."), Ordering.Greater)
+    assert_eq(jet_cli_record_compare_paths("é/a", "é//./a/"), Ordering.Equal)
+    assert_eq(jet_cli_record_path_key("///./é//a/"), jet_cli_record_path_key("/é/a"))
+    assert(jet_cli_record_path_key("./a") != jet_cli_record_path_key("a"))
+    assert(jet_cli_record_path_key("/a") != jet_cli_record_path_key("a"))
+}
+// #4357: the original debug-bearing test above remains intact with its failing
+// unit. Boolean checks exercise the same law, with no formatting provider.
+#Test("try shared borrowed PathBuf comparisons use Boolean law assertions") {
+    assert(jet_cli_record_compare_paths("/", "///./") == Ordering.Equal)
+    assert(jet_cli_record_compare_paths("", "/") == Ordering.Less)
+    assert(jet_cli_record_compare_paths("/", ".") == Ordering.Less)
+    assert(jet_cli_record_compare_paths(".", "..") == Ordering.Less)
+    assert(jet_cli_record_compare_paths("..", "a") == Ordering.Less)
+    assert(jet_cli_record_compare_paths("./a", "a") == Ordering.Less)
+    assert(jet_cli_record_compare_paths("/./a//b/", "/a/b") == Ordering.Equal)
+    assert(jet_cli_record_compare_paths("a/./b", "a/b") == Ordering.Equal)
+    assert(jet_cli_record_compare_paths("a/b", "a-b") == Ordering.Less)
+    assert(jet_cli_record_compare_paths("a", "a/b") == Ordering.Less)
+    assert(jet_cli_record_compare_paths("a/..", "a/.") == Ordering.Greater)
+    assert(jet_cli_record_compare_paths("é/a", "é//./a/") == Ordering.Equal)
+    assert_eq(jet_cli_record_path_key("///./é//a/"), jet_cli_record_path_key("/é/a"))
+    assert(jet_cli_record_path_key("./a") != jet_cli_record_path_key("a"))
+    assert(jet_cli_record_path_key("/a") != jet_cli_record_path_key("a"))
+}
+#Test("try shared path scanner retains record validation refusal precedence") {
+    jet_cli_record_validate_index_path(".jet/receipts/é//./") ?? panic("valid record path refused")
+    if jet_cli_record_validate_index_path(".jet/..") == {
+        .Ok(_) -> panic("short record path accepted")
+        .Err(error) -> assert_eq(error.message, "record index path must stay under `.jet/<artifact-kind>`")
+    }
+    if jet_cli_record_validate_index_path(".jet/receipts/..") == {
+        .Ok(_) -> panic("parent record path accepted")
+        .Err(error) -> assert_eq(error.message, "record index path contains an unsafe component")
+    }
+    if jet_cli_record_validate_index_path("./.jet/receipts/é") == {
+        .Ok(_) -> panic("leading dot record path accepted")
+        .Err(error) -> assert_eq(error.message, "record index path must stay under `.jet/<artifact-kind>`")
+    }
+    if jet_cli_record_validate_index_path("/.jet/receipts/é") == {
+        .Ok(_) -> panic("absolute record path accepted")
+        .Err(error) -> assert_eq(error.message, "record index path must be project-relative")
+    }
+}
+#Test("try no-op overlap missing target and invalid UTF8 fail before any check") {
+    host := try_test_fixture()
+    host.disk["/p/try.json"] = `{"entry":"main.jet","edits":[{"path":"main.jet","start":18,"end":21,"new_text":"one"}]}`.bytes()
+    if jet_cli_try_run("try.json", false, false, &host) == {
+        .Ok(_) -> panic("no-op accepted")
+        .Err(error) -> assert_eq(jet_cli_try_error_message(error), "try edit leaves `/p/main.jet` unchanged")
+    }
+    host.disk["/p/main.jet"] = [U8]{255}
+    if jet_cli_try_run("try.json", false, false, &host) == {
+        .Ok(_) -> panic("non UTF8 accepted")
+        .Err(error) -> assert_eq(jet_cli_try_error_message(error), "try target `/p/main.jet` is not UTF-8")
+    }
+    host.disk["/p/main.jet"] = "abc".bytes()
+    host.disk["/p/try.json"] = `{"entry":"main.jet","edits":[{"path":"main.jet","start":0,"end":2,"new_text":"x"},{"path":"main.jet","start":1,"end":3,"new_text":"y"}]}`.bytes()
+    if jet_cli_try_run("try.json", false, false, &host) == {
+        .Ok(_) -> panic("overlap accepted")
+        .Err(error) -> assert_eq(jet_cli_try_error_message(error), "try edits overlap or fall outside `/p/main.jet`")
+    }
+    assert_eq(host.documents.len(), 0)
+    assert_eq(host.committed.len(), 0)
+}
+#Test("try rename receipts retain canonical stable identities and no inferred targets") {
+    host := try_test_host()
+    host.index_kind = 1
+    plan :: try_test_parse(`{"name":"rename","entry":"main.jet","operation":"rename","from":"target","to":"renamed"}`)
+    ops :: jet_cli_try_semantic_ops(plan, &host) ?? panic("operations failed")
+    assert_eq(ops.len(), 1)
+    assert_eq(ops[0].rule_id, Val("rename"))
+    assert_eq(ops[0].targets[0].stable_id, "canonical-id")
+    assert_eq(ops[0].targets[0].before, "module::target")
+    assert_eq(ops[0].targets[0].after, "/p/main.jet::renamed")
+    assert_eq(ops[0].files.len(), 0)
+    if jet_cli_try_stage(plan, &host) == {
+        .Ok(_) -> panic("empty index produced a rename")
+        .Err(error) -> assert_eq(jet_cli_try_error_message(error), "try plan found no `target` symbols")
+    }
+}
+#Test("try receipt hashes exact little endian counters and staged bytes") {
+    changes :: [JetCLIChange]{JetCLIChange{path: "/p/m.jet", before: "one".bytes(), after: "two".bytes()}}
+    verdict :: JetCLITryVerdict{diagnostics: [Diagnostic]{}, claims_rechecked: U64{2}, claims_reused: U64{7}}
+    id :: jet_cli_try_receipt_id("journey", changes, verdict)
+    bytes := "journey".bytes()
+    counter_bytes :: [U8]{2,0,0,0,0,0,0,0,7,0,0,0,0,0,0,0}
+    loop byte in counter_bytes -> &bytes.push(byte)
+    loop byte in "/p/m.jetonetwo".bytes() -> &bytes.push(byte)
+    digest :: mir_sha256_hex_bytes(mir_sha256_bytes(bytes))
+    assert_eq(id, "try-{digest.slice(0..<12)}")
+    // Independent sha256sum oracle of the exact bytes above.
+    assert_eq(id, "try-c5bdc923ed2f")
+    assert_eq(id.len(), 16)
+    wide :: JetCLITryVerdict{diagnostics: [Diagnostic]{}, claims_rechecked: U64{0x0102030405060708}, claims_reused: U64{0xffffffffffffffff}}
+    assert_eq(jet_cli_try_receipt_id("wide", changes, wide), "try-ab5f02ef3626")
+}
+
+#Test("try rename stages only canonical definitions and references and publishes canonical operations") {
+    host := try_test_host()
+    host.disk["/p/main.jet"] = "target :: 1\ntarget // target\n".bytes()
+    host.disk["/p/try.json"] = `{"entry":"main.jet","operation":"rename","from":"target","to":"renamed"}`.bytes()
+    host.index_kind = 2
+    output :: try_test_run(&host, true, false)
+    assert_eq(output.exit_code, 0)
+    assert_eq(host.disk.get("/p/main.jet") ?? [U8]{}, "renamed :: 1\nrenamed // target\n".bytes())
+    assert_eq(host.operations.len(), 1)
+    assert_eq(host.operations[0].from, Val("target"))
+    assert_eq(host.operations[0].to, Val("renamed"))
+    assert_eq(host.operations[0].targets[0].stable_id, "stable-target")
+    assert_eq(host.operations[0].targets[0].kind, "const")
+    assert_eq(host.committed.len(), 1)
+}
+
+#Test("try overlay for another file reads the unchanged entry and never writes it") {
+    host := try_test_fixture()
+    host.disk["/p/other.jet"] = "one".bytes()
+    host.disk["/p/try.json"] = `{"entry":"main.jet","edits":[{"path":"other.jet","start":0,"end":3,"new_text":"two"}]}`.bytes()
+    before :: host.disk.get("/p/main.jet") ?? [U8]{}
+    output :: try_test_run(&host, false, false)
+    assert_eq(output.exit_code, 0)
+    assert_eq(host.documents.get("/p/main.jet"), None)
+    assert_eq(host.documents.get("/p/other.jet"), Val("two"))
+    assert_eq(host.disk.get("/p/main.jet") ?? [U8]{}, before)
+    assert_eq(host.disk.get("/p/other.jet") ?? [U8]{}, "one".bytes())
+    assert_eq(host.events[2], "read:/p/main.jet")
+}
+
+#Test("try query counter differences saturate rather than wrapping") {
+    host := try_test_fixture()
+    host.regress_stats = true
+    output :: try_test_run(&host, false, false)
+    assert_eq(output.exit_code, 0)
+    assert(output.stdout.contains("claims re-checked: 0 · claims reused: 0"))
+}
+
+#Test("try missing plan and missing edit target have distinct failures before checking") {
+    host := try_test_host()
+    if jet_cli_try_run("missing.json", false, false, &host) == {
+        .Ok(_) -> panic("missing plan accepted")
+        .Err(error) -> assert_eq(jet_cli_try_error_message(error), "could not read try plan `/p/missing.json`: not found")
+    }
+    host.disk["/p/try.json"] = `{"entry":"main.jet","edits":[{"path":"main.jet","start":0,"end":0,"new_text":"x"}]}`.bytes()
+    if jet_cli_try_run("try.json", false, false, &host) == {
+        .Ok(_) -> panic("missing target accepted")
+        .Err(error) -> assert_eq(jet_cli_try_error_message(error), "could not read `/p/main.jet`: not found")
+    }
+    assert_eq(host.documents.len(), 0)
+    assert_eq(host.committed.len(), 0)
+}
+
+#Test("try accepts a repaired broken baseline instead of treating it as an overlay failure") {
+    host := try_test_fixture()
+    host.baseline_diagnostics = [Diagnostic]{diagnostic_from_registry("E2105", None, "broken baseline", "why", "repair it")}
+    output :: try_test_run(&host, true, false)
+    assert_eq(output.exit_code, 0)
+    assert_eq(host.committed.len(), 1)
+    assert_eq(host.disk.get("/p/main.jet") ?? [U8]{}, "fn run() {{ print(\"two\") }}\n".bytes())
+    assert(output.stdout.contains("verdict clean"))
+}
+
+// Main tandem ruling: frozen Rust JSON::parse delegates to EncodingJson; the
+// Jet Foundation provider preserves Core's established errors and limits.
+fn try_test_bad_core_json(text: String) {
+    if try_json.parse(text) == {
+        .Ok(_) -> panic("Core JSON accepted the deliberately invalid input")
+        .Err(error) -> try_test_bad_plan(text, "invalid try plan JSON: {error.reason}")
+    }
+}
+#Test("try Foundation JSON provider preserves established Core errors and limits") {
+    try_test_bad_plan(`{"version":9223372036854775808}`, "unsupported try plan version; expected version 1")
+    try_test_bad_core_json(`{"entry":"a","entry":"b"}`)
+    try_test_bad_core_json(`{"entry":"a"} trailing`)
+    try_test_bad_core_json(" ".repeat(16777217))
+    opening :: "[".repeat(257)
+    closing :: "]".repeat(257)
+    try_test_bad_core_json("{opening}0{closing}")
+    // Old Foundation's 64-level and 1 MiB limits no longer shadow Core.
+    opening65 :: "[".repeat(65)
+    closing65 :: "]".repeat(65)
+    try_test_bad_plan("{opening65}0{closing65}", "try plan must be a JSON object")
+    long_name :: "a".repeat(1048577)
+    plan :: try_test_parse("{{\"entry\":\"main.jet\",\"name\":\"{long_name}\",\"edits\":[{{\"path\":\"main.jet\",\"start\":0,\"end\":0,\"new_text\":\"x\"}}]}}")
+    assert_eq(plan.name.len(), 1048577)
+    wide :: try_test_parse(`{"entry":"main.jet","edits":[{"path":"main.jet","start":18446744073709551616,"end":18446744073709551616,"new_text":"tail"}]}`)
+    if wide.action == {
+        .Edits(edits) -> {
+            assert_eq(edits[0].edit.span.start, 18446744073709551616)
+            assert_eq(edits[0].edit.span.end, 18446744073709551616)
+        }
+        else -> panic("wide edit coordinates were not preserved")
+    }
+}
+
+fn try_test_front_facts() -> JetCLIProcessFacts {
+    JetCLIProcessFacts{stdout_terminal: false, stderr_terminal: false, shell_prefill: false, term: None, no_color: true, force_color: false, columns: None, locale: None}
+}
+
+#Test("try actual Front routes keep JSON to the typed command journey") {
+    args :: [String]{"try", "try.json", "--keep", "--json"}
+    if jet_cli_front(args, try_test_front_facts()) == {
+        .Try(file, keep, mode) -> {
+            assert_eq(file, "try.json")
+            assert(keep)
+            assert(mode.json)
+        }
+        else -> panic("Front did not produce the typed try route")
+    }
+    host := try_test_fixture()
+    output :: jet_cli_dispatch_with_try(args, try_test_front_facts(), &host)
+    assert_eq(output.exit_code, 0)
+    assert_eq(output.stderr, "")
+    report :: try_json.parse(output.stdout) ?? panic("Front try report was not JSON")
+    assert_eq(try_json.to_string(report.get("kept") ?? DataTree.Null), "true")
+    assert_eq(host.committed.len(), 1)
+    assert((String.from_bytes(host.disk.get("/p/main.jet") ?? [U8]{}) ?? "").contains("two"))
+}
+
+#Test("try actual Front bare usage exits two without touching its host") {
+    host := try_test_fixture()
+    output :: jet_cli_dispatch_with_try([String]{"try"}, try_test_front_facts(), &host)
+    assert_eq(output.exit_code, 2)
+    assert_eq(output.stdout, "")
+    assert(output.stderr.contains("try <plan.json>"))
+    assert_eq(host.events.len(), 0)
+    assert_eq(host.committed.len(), 0)
+}
+
+#Test("try actual dispatch preserves semantic-index Load source diagnostics") {
+    host := try_test_fixture()
+    host.index_kind = 3
+    host.verdict_diagnostics = [Diagnostic]{diagnostic_from_registry("E2105", None, "bad baseline", "why", "fix")}
+    host.disk["/p/try.json"] = `{"entry":"main.jet","operation":"rename","from":"target","to":"renamed"}`.bytes()
+    output :: jet_cli_dispatch_with_try([String]{"try", "try.json", "--json"}, try_test_front_facts(), &host)
+    assert_eq(output.exit_code, 1)
+    assert_eq(output.stdout, "")
+    assert_eq(output.stderr, "checked diagnostic\n")
+    assert_eq(host.events, [String]{"read:/p/try.json", "index:/p/main.jet"})
+    assert_eq(host.committed.len(), 0)
+}

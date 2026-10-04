@@ -4,11 +4,11 @@
 // that bless a build, their verification, and the project lock projection
 // of the crates Cargo resolved.
 
-@FFI_INLINE_BRIDGE_SCHEMA :: "jet-inline-ffi-v10-asm-early-clobber"
+FFI_INLINE_BRIDGE_SCHEMA :: prep { "jet-inline-ffi-v10-asm-early-clobber" }
 // v2: artifact digests are recorded relative to the SHARED Cargo target dir
 // (#2075); a v1 sidecar fails verification and the bridge rebuilds.
-@FFI_BRIDGE_ARTIFACTS_SCHEMA :: "jet-ffi-artifacts-v2"
-@FFI_SHARED_DEPS_SCHEMA :: "jet-ffi-shared-deps-v1"
+FFI_BRIDGE_ARTIFACTS_SCHEMA :: prep { "jet-ffi-artifacts-v2" }
+FFI_SHARED_DEPS_SCHEMA :: prep { "jet-ffi-shared-deps-v1" }
 
 // How the sandboxed Cargo build ran, recorded in provenance.
 pub struct CargoBridgeReceipt {
@@ -23,9 +23,9 @@ pub struct RustBridgeKeyInputs {
     pub deps: [String: String]
     pub needs: RustBridgeNeeds
     pub authority_needs: [String]
-    pub handle_facts: [FfiHandleFact]
+    pub handle_facts: [FFIHandleFact]
     pub record_source: String
-    pub link_closure: FfiLinkClosure
+    pub link_closure: FFILinkClosure
     pub selected_target: String
     // `pkg_ffi_native_toolchain_identity()`, resolved once per build.
     pub rust_toolchain: String
@@ -37,8 +37,8 @@ pub struct RustBridgeKeyInputs {
     // crate, its dependency graph, or the toolchain that builds it.
     fn cache_key(self) -[FS]> String Never! {
         needs :: self.needs
-        identity := ForeignIdentityBuilder.new(@FOREIGN_BRIDGE_IDENTITY_SCHEMA)
-        &identity.field("descriptor_schema", @FFI_INLINE_BRIDGE_SCHEMA.bytes())
+        identity := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+        &identity.field("descriptor_schema", FFI_INLINE_BRIDGE_SCHEMA.bytes())
         &identity.field("c-record-source", self.record_source.bytes())
         &identity.field("selected_target", self.selected_target.bytes())
         if self.foundation_source_digest == .Val(digest) -> &identity.field("jet-foundation-source", digest.bytes())
@@ -53,33 +53,33 @@ pub struct RustBridgeKeyInputs {
         if needs.regex -> &identity.field("regex_runtime", "ring".bytes())
         &identity.field("needs_archive", pkg_bridge_flag(needs.archive))
         &identity.field("needs_db", pkg_bridge_flag(needs.db))
-        if needs.db -> &identity.field("db_runtime", @FFI_DB_RUNTIME.bytes())
+        if needs.db -> &identity.field("db_runtime", FFI_DB_RUNTIME.bytes())
         &identity.field("needs_parquet", pkg_bridge_flag(needs.parquet))
         if needs.parquet {
-            &identity.field("parquet_runtime", @FFI_PARQUET_RUNTIME.bytes())
+            &identity.field("parquet_runtime", FFI_PARQUET_RUNTIME.bytes())
             loop spec in pkg_ffi_parquet_crate_specs() -> &identity.field("parquet_dependency", "{spec.name}={spec.version}".bytes())
         }
         &identity.field("needs_http_client", pkg_bridge_flag(needs.http_client))
         if needs.http_client {
-            &identity.field("http_client_runtime", @FFI_HTTP_CLIENT_RUNTIME.bytes())
-            &identity.field("http_public_suffix_list", @FFI_HTTP_PUBLIC_SUFFIX_LIST.bytes())
+            &identity.field("http_client_runtime", FFI_HTTP_CLIENT_RUNTIME.bytes())
+            &identity.field("http_public_suffix_list", FFI_HTTP_PUBLIC_SUFFIX_LIST.bytes())
         }
         &identity.field("needs_http_server_tls", pkg_bridge_flag(needs.http_server_tls))
-        if needs.http_server_tls -> &identity.field("http_server_tls_runtime", @FFI_HTTP_SERVER_TLS_RUNTIME.bytes())
+        if needs.http_server_tls -> &identity.field("http_server_tls_runtime", FFI_HTTP_SERVER_TLS_RUNTIME.bytes())
         &identity.field("needs_net_tls", pkg_bridge_flag(needs.net_tls))
-        if needs.net_tls -> &identity.field("net_tls_runtime", @FFI_NET_TLS_RUNTIME.bytes())
+        if needs.net_tls -> &identity.field("net_tls_runtime", FFI_NET_TLS_RUNTIME.bytes())
         &identity.field("needs_crypto", pkg_bridge_flag(needs.crypto))
         if needs.crypto -> pkg_ffi_identity_crypto_runtimes(&identity)
         &identity.field("needs_compress", pkg_bridge_flag(needs.compress))
         &identity.field("needs_plugin", pkg_bridge_flag(needs.plugin))
         loop need in pkg_ffi_sorted_unique(self.authority_needs) -> &identity.field("authority_need", need.bytes())
-        if needs.plugin -> &identity.field("plugin_runtime", @FFI_PLUGIN_RUNTIME.bytes())
+        if needs.plugin -> &identity.field("plugin_runtime", FFI_PLUGIN_RUNTIME.bytes())
         &identity.field("needs_secrets", pkg_bridge_flag(needs.secrets))
         if needs.secrets {
-            &identity.field("unicode_tables_runtime", @FFI_UNICODE_TABLES_RUNTIME.bytes())
-            &identity.field("vault_nfc_runtime", @FFI_VAULT_NFC_RUNTIME.bytes())
-            &identity.field("secrets_runtime", @FFI_SECRETS_RUNTIME.bytes())
-            &identity.field("vault_key_wrap_runtime", @FFI_VAULT_KEY_WRAP_RUNTIME.bytes())
+            &identity.field("unicode_tables_runtime", FFI_UNICODE_TABLES_RUNTIME.bytes())
+            &identity.field("vault_nfc_runtime", FFI_VAULT_NFC_RUNTIME.bytes())
+            &identity.field("secrets_runtime", FFI_SECRETS_RUNTIME.bytes())
+            &identity.field("vault_key_wrap_runtime", FFI_VAULT_KEY_WRAP_RUNTIME.bytes())
         }
         loop name in pkg_ffi_sorted_keys(self.deps) {
             &identity.field("dependency", name.bytes())
@@ -94,19 +94,19 @@ pub struct RustBridgeKeyInputs {
     }
 }
 
-fn pkg_ffi_parquet_crate_specs() -> [FfiCrateSpec] Never! {
-    [FfiCrateSpec]{@FFI_PARQUET_CRATE_SPEC, @FFI_ARROW_ARRAY_CRATE_SPEC, @FFI_ARROW_DATA_CRATE_SPEC, @FFI_ARROW_SCHEMA_CRATE_SPEC, @FFI_ARROW_SELECT_CRATE_SPEC, @FFI_BYTES_CRATE_SPEC}
+fn pkg_ffi_parquet_crate_specs() -> [FFICrateSpec] Never! {
+    [FFICrateSpec]{FFI_PARQUET_CRATE_SPEC, FFI_ARROW_ARRAY_CRATE_SPEC, FFI_ARROW_DATA_CRATE_SPEC, FFI_ARROW_SCHEMA_CRATE_SPEC, FFI_ARROW_SELECT_CRATE_SPEC, FFI_BYTES_CRATE_SPEC}
 }
 
 fn pkg_ffi_identity_crypto_runtimes(identity: &ForeignIdentityBuilder) Never! {
     &identity.field("standalone_outcome_runtime", pkg_ffi_standalone_outcome_runtime().bytes())
-    &identity.field("encoding_errors_runtime", @FFI_ENCODING_ERRORS_RUNTIME.bytes())
-    &identity.field("datatree_runtime", @FFI_DATATREE_RUNTIME.bytes())
-    &identity.field("encoding_json_runtime", @FFI_ENCODING_JSON_RUNTIME.bytes())
-    &identity.field("json_number_runtime", @FFI_JSON_NUMBER_RUNTIME.bytes())
-    &identity.field("runtime_diagnostic_core", @FFI_RUNTIME_DIAGNOSTIC_CORE.bytes())
-    &identity.field("crypto_runtime", @FFI_CRYPTO_RUNTIME.bytes())
-    &identity.field("crypto_entropy_runtime", @FFI_CRYPTO_ENTROPY_RUNTIME.bytes())
+    &identity.field("encoding_errors_runtime", FFI_ENCODING_ERRORS_RUNTIME.bytes())
+    &identity.field("datatree_runtime", FFI_DATATREE_RUNTIME.bytes())
+    &identity.field("encoding_json_runtime", FFI_ENCODING_JSON_RUNTIME.bytes())
+    &identity.field("json_number_runtime", FFI_JSON_NUMBER_RUNTIME.bytes())
+    &identity.field("runtime_diagnostic_core", FFI_RUNTIME_DIAGNOSTIC_CORE.bytes())
+    &identity.field("crypto_runtime", FFI_CRYPTO_RUNTIME.bytes())
+    &identity.field("crypto_entropy_runtime", FFI_CRYPTO_ENTROPY_RUNTIME.bytes())
     // The helper is a separately cached binary: its closed status protocol
     // and cleanup behavior invalidate old cache entries too.
     &identity.field("crypto_helper_runtime", pkg_ffi_emit_crypto_helper_bin("jet_ffi_cache_key").bytes())
@@ -121,7 +121,7 @@ fn pkg_ffi_identity_entry(identity: &ForeignIdentityBuilder, entry: ExternEntry)
     &identity.field("c_abi", pkg_bridge_flag(entry.c_abi))
     &identity.field("generated", pkg_bridge_flag(entry.generated))
     &identity.field("c_module", pkg_bridge_flag(entry.c_module))
-    if entry.inline == .Val(inline) -> pkg_ffi_identity_inline(identity, inline)
+    if entry.inline == .Val(inline) -> pkg_ffi_identity_inline(&identity, inline)
     loop param in entry.params {
         &identity.field("parameter_convention", pkg_ffi_convention_debug(param.convention).bytes())
         &identity.field("parameter_type", pkg_ffi_type_key(param.ty).bytes())
@@ -135,7 +135,7 @@ fn pkg_ffi_identity_entry(identity: &ForeignIdentityBuilder, entry: ExternEntry)
 
 fn pkg_ffi_identity_inline(identity: &ForeignIdentityBuilder, inline: InlineEntry) Never! {
     if inline.lang == "asm" -> &identity.field("asm_lowering", "out-early-clobber-v2-exported-symbol".bytes())
-    &identity.field("inline_schema", @FFI_INLINE_BRIDGE_SCHEMA.bytes())
+    &identity.field("inline_schema", FFI_INLINE_BRIDGE_SCHEMA.bytes())
     &identity.field("inline_language", inline.lang.bytes())
     &identity.field("inline_source", inline.source.bytes())
     loop name in inline.param_names -> &identity.field("inline_parameter", name.bytes())
@@ -176,7 +176,7 @@ fn pkg_ffi_identity_static_link_inputs(identity: &ForeignIdentityBuilder, args: 
         if flag == "-l" && value.starts_with("static=") -> &static_libs.push(value.removeprefix("static="))
     }
     loop name in static_libs {
-        found := None
+        found := String?{None}
         loop dir in dirs {
             candidate :: files.join(dir, "lib{name}.a")
             if files.is_file(candidate) {
@@ -247,8 +247,8 @@ fn pkg_ffi_bridge_paths(key: String, selected_target: String, native_link_args: 
 // rustc/cargo toolchain, the selected target, and the rustflags handed to
 // Cargo. The profile is the `release` segment Cargo appends itself.
 fn pkg_ffi_shared_target_dir(selected_target: String, native_link_args: [String], rust_toolchain: String) -[Env]> String Never! {
-    identity := ForeignIdentityBuilder.new(@FOREIGN_BRIDGE_IDENTITY_SCHEMA)
-    &identity.field("descriptor_schema", @FFI_SHARED_DEPS_SCHEMA.bytes())
+    identity := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+    &identity.field("descriptor_schema", FFI_SHARED_DEPS_SCHEMA.bytes())
     &identity.field("selected_target", selected_target.bytes())
     &identity.field("rust_toolchain", rust_toolchain.bytes())
     loop argument in native_link_args -> &identity.field("rustflag", argument.bytes())
@@ -340,7 +340,7 @@ fn pkg_ffi_bridge_provenance_path(target: String, crate_name: String) -> String 
 fn pkg_ffi_parse_bridge_manifest(target: String, crate_name: String) -[FS]> [String: String]? Never! {
     manifest :: files.read(pkg_ffi_bridge_manifest_path(target, crate_name)) ?? return None
     lines :: pkg_bridge_text_lines(manifest)
-    if lines.len() == 0 || lines[0] != @FFI_BRIDGE_ARTIFACTS_SCHEMA -> return None
+    if lines.len() == 0 || lines[0] != FFI_BRIDGE_ARTIFACTS_SCHEMA -> return None
     expected := [String: String]{}
     loop index in 1..<lines.len() {
         row :: lines[index].split_once(" ") ?? return None
@@ -370,7 +370,7 @@ fn pkg_ffi_bridge_cache_verified(target: String, crate_name: String, cache_ident
         if !pkg_ffi_sha_file_matches(path, digest) -> return false
     }
     provenance :: pkg_bridge_read_provenance(pkg_ffi_bridge_provenance_path(target, crate_name)) ?? return false
-    if provenance.schema != @FOREIGN_BRIDGE_PROVENANCE_SCHEMA || provenance.identity != cache_identity -> return false
+    if provenance.schema != FOREIGN_BRIDGE_PROVENANCE_SCHEMA || provenance.identity != cache_identity -> return false
     if provenance.value("target") != Val(selected_target) || provenance.value("crate") != Val(crate_name) || provenance.value("source") == None -> return false
     if provenance.value("source-digest") != Val(cache_identity) || provenance.value("capabilities") != Val("exec:cargo") -> return false
     if provenance.value("sandbox") == None || provenance.value("sandbox-policy") == None || provenance.value("compile-time-code") == None -> return false
@@ -413,7 +413,7 @@ fn pkg_ffi_bridge_cache_verified(target: String, crate_name: String, cache_ident
 
 // Publish the artifact digest manifest: stage beside the target, rename.
 fn pkg_ffi_publish_bridge_manifest(target: String, crate_name: String, artifacts: [String]) ForeignBridgeError! -[FS, Env]> {
-    manifest := "{@FFI_BRIDGE_ARTIFACTS_SCHEMA}\n"
+    manifest := "{FFI_BRIDGE_ARTIFACTS_SCHEMA}\n"
     loop path in artifacts {
         relative :: pkg_ffi_artifact_relative_path(target, path) ?? return Err(pkg_bridge_error("FFI artifact escapes the shared target dir: {path}"))
         bytes :: files.read_bytes(path) ?? return Err(pkg_bridge_error("could not read FFI artifact {path}: {err}"))
@@ -426,7 +426,6 @@ fn pkg_ffi_publish_bridge_manifest(target: String, crate_name: String, artifacts
         files.remove(temporary).drop("the staged manifest may already be gone")
         return Err(pkg_bridge_error("could not publish {manifest_path}: {err}"))
     }
-    Ok()
 }
 
 // One canonical boundary row for each foreign language the shared inline
@@ -435,7 +434,7 @@ fn pkg_ffi_publish_bridge_manifest(target: String, crate_name: String, artifacts
 // obligation rows in the same provenance sidecar.
 fn pkg_ffi_inline_boundary_rows(entries: [ExternEntry], cache_identity: String, selected_target: String, crate_name: String, source: String, toolchain_digest: String, artifact_digests: [(name: String, digest: String)]) -[FS]> [(name: String, value: String)] ForeignBridgeError! {
     source_digest :: pkg_bridge_sha_file(source)
-    artifact_identity := ForeignIdentityBuilder.new(@FOREIGN_BOUNDARY_SCHEMA)
+    artifact_identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
     loop artifact in artifact_digests {
         &artifact_identity.field("artifact-path", artifact.name.bytes())
         &artifact_identity.field("artifact-digest", artifact.digest.bytes())
@@ -466,7 +465,7 @@ fn pkg_ffi_inline_boundary_rows(entries: [ExternEntry], cache_identity: String, 
 
 // The digest of every entry one language contributes to the bridge.
 fn pkg_ffi_boundary_entry_identity(entries: [ExternEntry], language: ForeignLanguage, cache_identity: String, descriptor_stamp: String) -> String Never! {
-    identity := ForeignIdentityBuilder.new(@FOREIGN_BOUNDARY_SCHEMA)
+    identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
     &identity.field("cache-identity", cache_identity.bytes())
     &identity.field("language", language.root().bytes())
     &identity.field("descriptor", descriptor_stamp.bytes())
@@ -497,7 +496,7 @@ fn pkg_ffi_boundary_entry_identity(entries: [ExternEntry], language: ForeignLang
 
 // Publish the bridge provenance sidecar: build receipt, descriptors, one
 // boundary row per language, handle facts, link closure, artifact digests.
-fn pkg_ffi_publish_bridge_provenance(path: String, cache_identity: String, selected_target: String, crate_name: String, target: String, source: String, receipt: CargoBridgeReceipt, entries: [ExternEntry], handle_facts: [FfiHandleFact], link_closure: FfiLinkClosure, artifacts: [String], rust_toolchain: String) ForeignBridgeError! -[FS, Env]> {
+fn pkg_ffi_publish_bridge_provenance(path: String, cache_identity: String, selected_target: String, crate_name: String, target: String, source: String, receipt: CargoBridgeReceipt, entries: [ExternEntry], handle_facts: [FFIHandleFact], link_closure: FFILinkClosure, artifacts: [String], rust_toolchain: String) ForeignBridgeError! -[FS, Env]> {
     artifact_digests := [(name: String, digest: String)]{}
     loop artifact in artifacts {
         relative :: pkg_ffi_artifact_relative_path(target, artifact) ?? return Err(pkg_bridge_error("FFI artifact escapes the shared target dir: {artifact}"))
@@ -516,7 +515,7 @@ fn pkg_ffi_publish_bridge_provenance(path: String, cache_identity: String, selec
         (name: "sandbox", value: receipt.sandbox_class),
         (name: "sandbox-policy", value: receipt.sandbox_policy),
         (name: "compile-time-code", value: compile_time),
-        (name: "bridge-descriptor", value: @FFI_INLINE_BRIDGE_SCHEMA),
+        (name: "bridge-descriptor", value: FFI_INLINE_BRIDGE_SCHEMA),
         (name: "toolchain", value: toolchain_digest)
     }
     loop stamp in pkg_ffi_foreign_descriptor_stamps(entries) -> &fields.push((name: "descriptor", value: stamp))
@@ -578,13 +577,12 @@ struct CargoLockPackage {
 // Record the registry crates the bridge resolved into the project lock.
 fn pkg_ffi_sync_bridge_lock(project_root: String?, cache_root: String, bridge_identity: String, rlib: String) ForeignBridgeError! -[FS, Env, Exec, Time, Time.Wait]> {
     root :: project_root ?? return
-    if !files.is_file(files.join(root, @PACKAGE_FILE)) -> return
+    if !files.is_file(files.join(root, PACKAGE_FILE)) -> return
     cargo_lock :: files.join(cache_root, "Cargo.lock")
     raw :: files.read(cargo_lock) ?? return Err(pkg_bridge_error("could not read generated Cargo lock `{cargo_lock}`: {err}"))
     rlib_bytes :: files.read_bytes(rlib) ?? return Err(pkg_bridge_error("could not read FFI artifact `{rlib}`: {err}"))
     packages :: pkg_ffi_cargo_lock_bridge_packages(raw, bridge_identity, "sha256-{pkg_sha256_hex(rlib_bytes)}")
     pkg_lock_record_rust_bridge(root, bridge_identity, packages) ?? return Err(pkg_bridge_error(err.message()))
-    Ok()
 }
 
 // Registry, sparse, and git packages of a Cargo.lock as locked foreign Rust
@@ -596,7 +594,7 @@ fn pkg_ffi_cargo_lock_bridge_packages(raw: String, bridge_identity: String, outp
         if !(source.starts_with("registry+") || source.starts_with("sparse+") || source.starts_with("git+")) -> next
         name :: package.name ?? next
         version :: package.version ?? next
-        content_hash := None
+        content_hash := String?{None}
         if package.checksum == .Val(checksum) -> content_hash = Val("sha256-{checksum}")
         &packages.push(LockedPackage{
             name: name,
@@ -605,7 +603,7 @@ fn pkg_ffi_cargo_lock_bridge_packages(raw: String, bridge_identity: String, outp
             fingerprint: content_hash ?? "",
             content_hash: content_hash,
             dependencies: package.dependencies,
-            provenance: Val(DependencyProvenance{build: Val("{@PKG_RUST_BRIDGE_PROVENANCE_PREFIX}{bridge_identity};cargo-source:{source}")})
+            provenance: Val(DependencyProvenance{build: Val("{PKG_RUST_BRIDGE_PROVENANCE_PREFIX}{bridge_identity};cargo-source:{source}")})
         })
     }
     Ok(packages)
@@ -613,7 +611,7 @@ fn pkg_ffi_cargo_lock_bridge_packages(raw: String, bridge_identity: String, outp
 
 fn pkg_ffi_parse_cargo_lock(raw: String) -> [CargoLockPackage] ForeignBridgeError! {
     packages := [CargoLockPackage]{}
-    current := None
+    current := CargoLockPackage?{None}
     in_dependencies := false
     loop raw_line in pkg_bridge_text_lines(raw) {
         line :: raw_line.trim()
@@ -675,7 +673,6 @@ fn pkg_ffi_finish_cargo_lock_package(current: CargoLockPackage?, packages: &[Car
         if !pkg_bridge_is_lower_hex64(checksum) -> return Err(pkg_bridge_error("Cargo lock package `{name}` {version} has an invalid checksum"))
     }
     &packages.push(package)
-    Ok()
 }
 
 // `key = "value"` with a JSON string value.

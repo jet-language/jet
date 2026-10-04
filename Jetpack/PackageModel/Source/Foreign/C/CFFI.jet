@@ -1,0 +1,1804 @@
+// PORT-PENDING 2056 crates-jet-pkg-model-src-cffi-slice-1: crates/jet-pkg-model/src/CFFI.rs:1-1800
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! S59 (E2-M14) — C FFI assembly, merge, and link resolution.
+//RS //!
+//RS //! The front end owns all C-FFI semantics; rustc only verifies the generated
+//RS //! `extern "C"` shims (I2/I3). This module runs after the loader has read every
+//RS //! `.jet` file and before sema:
+//RS //!
+//RS //! 1. Gather every `#Import module c.<lib>` (overlay) and
+//RS //!    `#Bindgen module c.<lib>.__bindgen__` (generated cache) item.
+//RS //! 2. Enforce the location rule: `#Bindgen` only in a generated
+//RS //!    `.jet/bindings/c/<lib>.jet` file (E3207).
+//RS //! 3. Merge per library — **bindgen ∪ overlay, overlay wins** on a clash;
+//RS //!    incompatible signatures are E3205 (D-CFFI2-SYN-4).
+//RS //! 4. Materialize one synthetic module per library (alias `__c_<lib>`) holding
+//RS //!    the merged surface, so the rest of the pipeline treats C calls exactly
+//RS //!    like any other namespaced module call.
+//RS //! 5. Classify each file's C `use` forms — `use c.<lib>` / `use "<header>.h"` —
+//RS //!    one form per lib per file (E3204), and record the synthetic target for
+//RS //!    sema's import map.
+//RS //!
+//RS //! Link discovery lives in helpers here: a declared `<lib>: c@…` dep in the
+//RS //! `deps:` block of `package.jet` (S59/D-CFFI2) takes precedence, else `pkg-config
+//RS //! <lib>`, else E3201.
+//RS 
+//RS use crate::Diagnostics::{Diagnostic, Span};
+//RS use crate::Syntax;
+//RS use crate::AST::{
+//RS     CModule, CModuleKind, ExternFn, FfiBoundaryFacts, FfiBoundaryObligation, FfiCloseAdapter,
+//RS     FfiCloseSource, FfiHandleFact, FfiLinkClosure, FfiThreadSafety, ForeignImportError,
+//RS     ForeignLanguage, ImportDecl, ImportKind, Item, LoadedModule, ProgramBundle,
+//RS };
+//RS use std::collections::hash_map::Entry;
+//RS use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS 
+//RS use crate::CBind::{CloseSource, HandleFact, HandleOverlay, LinkClosure, ThreadSafety};
+//RS 
+//RS // Struct defs live in AST for cross-seam sharing; re-export for callers.
+//RS pub use crate::AST::{CFfi, CImportLink, COverlayOverride, CLib};
+//RS 
+//RS fn all_imports(module: &LoadedModule) -> impl Iterator<Item = (Option<&str>, &ImportDecl)> {
+//RS     let mut seen = HashSet::new();
+//RS     crate::AST::walk_imports(module)
+//RS         .into_iter()
+//RS         .filter_map(move |(scope, import)| {
+//RS             seen.insert((scope, import.span)).then_some((scope, import))
+//RS         })
+//RS }
+//RS 
+//RS fn invalid_foreign_import_diagnostics(bundle: &ProgramBundle) -> Vec<Diagnostic> {
+//RS     let mut diagnostics = Vec::new();
+//RS     let mut seen = HashSet::new();
+//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
+//RS         for (_, import) in all_imports(module) {
+//RS             if !seen.insert((module_idx, import.span)) {
+//RS                 continue;
+//RS             }
+//RS             if let Err(error) = import.foreign_imports() {
+//RS                 diagnostics.push(error.diagnostic());
+//RS             }
+//RS         }
+//RS     }
+//RS     diagnostics
+//RS }
+//RS 
+//RS /// Resolve every C library in a logical-module import, including
+//RS /// `use c.[raylib as rl, sqlite3]`.
+//RS pub fn c_module_imports(imp: &ImportDecl) -> Result<Vec<(String, String)>, ForeignImportError> {
+//RS     imp.foreign_imports().map(|imports| {
+//RS         imports
+//RS             .into_iter()
+//RS             .filter(|(namespace, _)| namespace.language == ForeignLanguage::C)
+//RS             .map(|(namespace, alias)| (namespace.lib, alias))
+//RS             .collect()
+//RS     })
+//RS }
+//RS 
+//RS fn c_module_imports_after_preflight(imp: &ImportDecl) -> Vec<(String, String)> {
+//RS     c_module_imports(imp).unwrap_or_else(|error| {
+//RS         unreachable!(
+//RS             "invalid foreign import reached CFFI after preflight: {}",
+//RS             error.path
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS /// `File("<…>.h")` → `Some((header, lib))` (the header-path C `use` form). The
+//RS /// link key is the header basename without directory or extension (D-CFFI2-SYN
+//RS /// header→lib rule; alias maps are out of M14 v1).
+//RS pub fn c_header_lib(imp: &ImportDecl) -> Option<(String, String)> {
+//RS     if let ImportKind::File(path, _) = &imp.kind {
+//RS         if path.ends_with(".h") {
+//RS             let base = path.rsplit('/').next().unwrap_or(path);
+//RS             let lib = base.strip_suffix(".h").unwrap_or(base).to_string();
+//RS             return Some((path.clone(), lib));
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS /// Is this import any C `use` form?
+//RS pub fn is_c_import(imp: &ImportDecl) -> Result<bool, ForeignImportError> {
+//RS     Ok(!c_module_imports(imp)?.is_empty() || c_header_lib(imp).is_some())
+//RS }
+//RS 
+//RS fn import_alias(imp: &ImportDecl) -> String {
+//RS     imp.import_alias()
+//RS }
+//RS 
+//RS fn binding_cache_file(
+//RS     project_root: &Path,
+//RS     language: ForeignLanguage,
+//RS     lib: &str,
+//RS ) -> std::path::PathBuf {
+//RS     let extension = crate::AST::binder_descriptor(language)
+//RS         .map(|descriptor| descriptor.cache_extension)
+//RS         .unwrap_or(Syntax::FILE_EXT);
+//RS     project_root
+//RS         .join(Syntax::SOURCE_ROOT_DIR)
+//RS         .join(language.bindings_subdir())
+//RS         .join(format!("{lib}.{extension}"))
+//RS }
+//RS const C_BINDING_METADATA_SCHEMA: &str = "jet-c-binding-metadata-v1";
+//RS 
+//RS #[derive(Debug, Clone, Default)]
+//RS struct BindingMetadata {
+//RS     handle_facts: Vec<FfiHandleFact>,
+//RS     link_closure: FfiLinkClosure,
+//RS }
+//RS 
+//RS impl BindingMetadata {
+//RS     fn add_handle(&mut self, fact: FfiHandleFact) {
+//RS         self.handle_facts.push(fact);
+//RS         self.handle_facts
+//RS             .sort_by(|a, b| a.stable_key().cmp(&b.stable_key()));
+//RS         self.handle_facts.dedup_by(|a, b| a == b);
+//RS     }
+//RS 
+//RS     fn add_closure(&mut self, closure: &FfiLinkClosure) {
+//RS         let mut direct = std::mem::take(&mut self.link_closure.direct);
+//RS         direct.extend(closure.direct.iter().cloned());
+//RS         let mut transitive = std::mem::take(&mut self.link_closure.transitive);
+//RS         transitive.extend(closure.transitive.iter().cloned());
+//RS         self.link_closure = FfiLinkClosure::new(direct, transitive);
+//RS     }
+//RS }
+//RS 
+//RS fn canonical_handle_fact(fact: &HandleFact) -> FfiHandleFact {
+//RS     FfiHandleFact {
+//RS         lib: fact.link_closure.primary.clone(),
+//RS         typedef_name: fact.typedef_name.clone(),
+//RS         jet_name: fact.jet_name.clone(),
+//RS         close: fact.close.clone(),
+//RS         close_source: match fact.close_source {
+//RS             CloseSource::Conventional => FfiCloseSource::Conventional,
+//RS             CloseSource::Overlay => FfiCloseSource::Overlay,
+//RS         },
+//RS         thread_safety: match fact.thread_safety {
+//RS             ThreadSafety::Unspecified => FfiThreadSafety::Unspecified,
+//RS             ThreadSafety::Safe => FfiThreadSafety::Safe,
+//RS             ThreadSafety::Unsafe => FfiThreadSafety::Unsafe,
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn canonical_link_closure(closure: &LinkClosure) -> FfiLinkClosure {
+//RS     FfiLinkClosure::new(
+//RS         vec![closure.primary.clone()],
+//RS         closure.transitive.clone(),
+//RS     )
+//RS }
+//RS 
+//RS fn binding_metadata_path(cache: &Path) -> PathBuf {
+//RS     cache.with_extension("metadata")
+//RS }
+//RS 
+//RS fn parse_boundary_list(
+//RS     provenance: &crate::ForeignBridge::Provenance,
+//RS     name: &str,
+//RS ) -> Result<Option<Vec<String>>, String> {
+//RS     let value = provenance
+//RS         .value(name)
+//RS         .ok_or_else(|| format!("foreign boundary provenance omits `{name}`"))?;
+//RS     match value {
+//RS         "unknown" => Ok(None),
+//RS         "none" => Ok(Some(Vec::new())),
+//RS         value => Ok(Some(
+//RS             value
+//RS                 .split('|')
+//RS                 .filter(|item| !item.trim().is_empty())
+//RS                 .map(str::to_string)
+//RS                 .collect(),
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn resolve_provenance_artifact(provenance_path: &Path, encoded: &str) -> PathBuf {
+//RS     let artifact = Path::new(encoded);
+//RS     if artifact.is_absolute() {
+//RS         artifact.to_path_buf()
+//RS     } else {
+//RS         provenance_path
+//RS             .parent()
+//RS             .unwrap_or_else(|| Path::new("."))
+//RS             .join(artifact)
+//RS     }
+//RS }
+//RS 
+//RS fn read_boundary_facts(
+//RS     cache: &Path,
+//RS     expected_language: ForeignLanguage,
+//RS     expected_lib: &str,
+//RS     loaded_lib: &str,
+//RS ) -> Result<FfiBoundaryFacts, String> {
+//RS     let path = cache.with_extension("provenance");
+//RS     let provenance = crate::ForeignBridge::read_boundary_provenance(&path)?;
+//RS     let value = |name: &str| {
+//RS         provenance
+//RS             .value(name)
+//RS             .ok_or_else(|| format!("foreign boundary provenance omits `{name}`"))
+//RS             .map(str::to_string)
+//RS     };
+//RS     let schema = value("boundary-schema")?;
+//RS     if schema != crate::ForeignBridge::FOREIGN_BOUNDARY_SCHEMA {
+//RS         return Err(format!("unsupported foreign boundary schema `{schema}`"));
+//RS     }
+//RS     let library = value("boundary-library")?;
+//RS     if library != expected_lib {
+//RS         return Err(format!(
+//RS             "foreign boundary library `{library}` does not match `{expected_lib}`"
+//RS         ));
+//RS     }
+//RS     let mut artifact_digests = Vec::new();
+//RS     for (name, values) in provenance
+//RS         .fields
+//RS         .iter()
+//RS         .filter_map(|(name, values)| name.strip_prefix("artifact.").map(|relative| (relative, values)))
+//RS     {
+//RS         let digest = values
+//RS             .last()
+//RS             .ok_or_else(|| format!("artifact `{name}` has no digest"))?;
+//RS         let artifact = resolve_provenance_artifact(&path, name);
+//RS         let actual = crate::ForeignBridge::sha_file(&artifact)?;
+//RS         if actual != *digest {
+//RS             return Err(format!(
+//RS                 "loaded artifact `{}` changed (expected {}, found {})",
+//RS                 artifact.display(),
+//RS                 digest,
+//RS                 actual
+//RS             ));
+//RS         }
+//RS         artifact_digests.push(digest.to_string());
+//RS     }
+//RS     let obligations = provenance
+//RS         .fields
+//RS         .get("boundary-obligation")
+//RS         .ok_or_else(|| "foreign boundary provenance has no obligation rows".to_string())?
+//RS         .iter()
+//RS         .map(|row| {
+//RS             let parts = row.split('\t').collect::<Vec<_>>();
+//RS             if parts.len() != 5 {
+//RS                 return Err("foreign boundary obligation row has invalid arity".into());
+//RS             }
+//RS             let basis = crate::AST::FfiEvidenceBasis::parse(parts[1])
+//RS                 .ok_or_else(|| format!("unknown foreign evidence basis `{}`", parts[1]))?;
+//RS             Ok(FfiBoundaryObligation {
+//RS                 name: parts[0].to_string(),
+//RS                 basis,
+//RS                 checker: parts[2].to_string(),
+//RS                 coverage_digest: parts[3].to_string(),
+//RS                 assumptions: parts[4]
+//RS                     .split('|')
+//RS                     .filter(|item| !item.trim().is_empty())
+//RS                     .map(str::to_string)
+//RS                     .collect(),
+//RS             })
+//RS         })
+//RS         .collect::<Result<Vec<_>, String>>()?;
+//RS     let digest = value("boundary-digest")?;
+//RS     let language = value("boundary-language")?;
+//RS     let language_kind = ForeignLanguage::from_root(&language)
+//RS         .ok_or_else(|| format!("unknown foreign boundary language `{language}`"))?;
+//RS     if language_kind != expected_language {
+//RS         return Err(format!(
+//RS             "foreign boundary language `{language}` does not match `{}`",
+//RS             expected_language.root()
+//RS         ));
+//RS     }
+//RS     let descriptor = crate::AST::binder_descriptor(language_kind)
+//RS         .ok_or_else(|| format!("missing binder descriptor for `{language}`"))?;
+//RS     let recorded_descriptor = value("boundary-descriptor")?;
+//RS     if recorded_descriptor != descriptor.stamp() {
+//RS         return Err(format!(
+//RS             "foreign boundary descriptor does not match `{}`",
+//RS             language_kind.root()
+//RS         ));
+//RS     }
+//RS     let effect_root = value("boundary-effect-root")?;
+//RS     if effect_root != descriptor.effect_root {
+//RS         return Err(format!(
+//RS             "foreign boundary effect root `{effect_root}` does not match `{}`",
+//RS             descriptor.effect_root
+//RS         ));
+//RS     }
+//RS     let effects = value("boundary-effects")?;
+//RS     let source_authority = value("boundary-source-authority")?;
+//RS     let artifact_coverage_digest = value("boundary-artifact-coverage")?;
+//RS     let loaded_artifact = value("boundary-loaded-artifact")?;
+//RS     if loaded_artifact != "not-recorded" {
+//RS         for item in loaded_artifact.split('|') {
+//RS             let (encoded_path, digest) = item
+//RS                 .rsplit_once(":sha256-")
+//RS                 .ok_or_else(|| "foreign loaded artifact identity is malformed".to_string())?;
+//RS             let artifact = resolve_provenance_artifact(&path, encoded_path);
+//RS             let actual = crate::ForeignBridge::sha_file(&artifact)?;
+//RS             if actual != digest {
+//RS                 return Err(format!(
+//RS                     "loaded artifact `{}` changed (expected {}, found {})",
+//RS                     artifact.display(),
+//RS                     digest,
+//RS                     actual
+//RS                 ));
+//RS             }
+//RS             if !artifact_digests.is_empty()
+//RS                 && !artifact_digests.iter().any(|known| known == digest)
+//RS             {
+//RS                 return Err(format!(
+//RS                     "foreign loaded artifact `{item}` has no matching artifact digest"
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     let transitive_dependencies =
+//RS         parse_boundary_list(&provenance, "boundary-transitive-dependencies")?;
+//RS     let reachable_callbacks = parse_boundary_list(
+//RS         &provenance,
+//RS         "boundary-reachable-callbacks",
+//RS     )?;
+//RS     let compiler_flags = parse_boundary_list(&provenance, "boundary-compiler-flags")?;
+//RS     let target = value("boundary-coverage-target")?;
+//RS     let generator = value("boundary-coverage-generator")?;
+//RS     let mut coverage = crate::ForeignBridge::ForeignArtifactCoverage::new(
+//RS         loaded_artifact.clone(),
+//RS         target.clone(),
+//RS         generator.clone(),
+//RS     );
+//RS     if let Some(values) = &transitive_dependencies {
+//RS         coverage = coverage.with_transitive_dependencies(values.clone());
+//RS     }
+//RS     if let Some(values) = &reachable_callbacks {
+//RS         coverage = coverage.with_reachable_callbacks(values.clone());
+//RS     }
+//RS     if let Some(values) = &compiler_flags {
+//RS         coverage = coverage.with_compiler_flags(values.clone());
+//RS     }
+//RS     if coverage.digest() != artifact_coverage_digest {
+//RS         return Err("foreign boundary coverage digest does not match its fields".into());
+//RS     }
+//RS     let facts = FfiBoundaryFacts {
+//RS         schema,
+//RS         digest,
+//RS         language,
+//RS         library: loaded_lib.to_string(),
+//RS         effect_root,
+//RS         effects,
+//RS         source_authority,
+//RS         artifact_coverage_digest,
+//RS         loaded_artifact,
+//RS         transitive_dependencies,
+//RS         reachable_callbacks,
+//RS         compiler_flags,
+//RS         target,
+//RS         generator,
+//RS         obligations,
+//RS     };
+//RS     facts.validate()?;
+//RS     Ok(facts)
+//RS }
+//RS 
+//RS fn metadata_escape(value: &str) -> String {
+//RS     let mut out = String::with_capacity(value.len());
+//RS     for byte in value.bytes() {
+//RS         if byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'/') {
+//RS             out.push(byte as char);
+//RS         } else {
+//RS             out.push('%');
+//RS             out.push_str(&format!("{byte:02X}"));
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn metadata_unescape(value: &str) -> Result<String, String> {
+//RS     let bytes = value.as_bytes();
+//RS     let mut out = Vec::with_capacity(bytes.len());
+//RS     let mut index = 0;
+//RS     while index < bytes.len() {
+//RS         if bytes[index] != b'%' {
+//RS             out.push(bytes[index]);
+//RS             index += 1;
+//RS             continue;
+//RS         }
+//RS         if index + 2 >= bytes.len() {
+//RS             return Err("truncated percent escape".to_string());
+//RS         }
+//RS         let hi = (bytes[index + 1] as char)
+//RS             .to_digit(16)
+//RS             .ok_or_else(|| "invalid percent escape".to_string())?;
+//RS         let lo = (bytes[index + 2] as char)
+//RS             .to_digit(16)
+//RS             .ok_or_else(|| "invalid percent escape".to_string())?;
+//RS         out.push(((hi << 4) | lo) as u8);
+//RS         index += 3;
+//RS     }
+//RS     String::from_utf8(out).map_err(|_| "metadata contains invalid UTF-8".to_string())
+//RS }
+//RS 
+//RS fn render_binding_metadata(
+//RS     lib: &str,
+//RS     handle_facts: &[FfiHandleFact],
+//RS     link_closure: &FfiLinkClosure,
+//RS ) -> String {
+//RS     let mut facts = handle_facts.to_vec();
+//RS     facts.sort_by(|a, b| a.stable_key().cmp(&b.stable_key()));
+//RS     facts.dedup();
+//RS     let mut out = format!(
+//RS         "schema={C_BINDING_METADATA_SCHEMA}\nlibrary={}\n",
+//RS         metadata_escape(lib)
+//RS     );
+//RS     for direct in &link_closure.direct {
+//RS         out.push_str("closure.direct=");
+//RS         out.push_str(&metadata_escape(direct));
+//RS         out.push('\n');
+//RS     }
+//RS     for transitive in &link_closure.transitive {
+//RS         out.push_str("closure.transitive=");
+//RS         out.push_str(&metadata_escape(transitive));
+//RS         out.push('\n');
+//RS     }
+//RS     for fact in facts {
+//RS         out.push_str("handle=");
+//RS         out.push_str(&metadata_escape(&fact.lib));
+//RS         out.push('|');
+//RS         out.push_str(&metadata_escape(&fact.typedef_name));
+//RS         out.push('|');
+//RS         out.push_str(&metadata_escape(&fact.jet_name));
+//RS         out.push('|');
+//RS         out.push_str(&metadata_escape(&fact.close));
+//RS         out.push('|');
+//RS         out.push_str(fact.close_source.as_str());
+//RS         out.push('|');
+//RS         out.push_str(fact.thread_safety.as_str());
+//RS         out.push('\n');
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn read_binding_metadata(
+//RS     cache: &Path,
+//RS     expected_lib: &str,
+//RS ) -> Result<Option<BindingMetadata>, String> {
+//RS     let path = binding_metadata_path(cache);
+//RS     if !path.is_file() {
+//RS         return Ok(None);
+//RS     }
+//RS     let text = std::fs::read_to_string(&path)
+//RS         .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+//RS     let mut schema = None;
+//RS     let mut library = None;
+//RS     let mut direct = Vec::new();
+//RS     let mut transitive = Vec::new();
+//RS     let mut facts = Vec::new();
+//RS     for line in text.lines() {
+//RS         let (name, value) = line
+//RS             .split_once('=')
+//RS             .ok_or_else(|| format!("malformed binding metadata line in {}", path.display()))?;
+//RS         if value.is_empty() {
+//RS             return Err(format!("empty binding metadata value in {}", path.display()));
+//RS         }
+//RS         match name {
+//RS             "schema" => {
+//RS                 if schema.replace(value.to_string()).is_some() {
+//RS                     return Err(format!("duplicate binding metadata schema in {}", path.display()));
+//RS                 }
+//RS             }
+//RS             "library" => {
+//RS                 if library.replace(metadata_unescape(value)?).is_some() {
+//RS                     return Err(format!("duplicate binding metadata library in {}", path.display()));
+//RS                 }
+//RS             }
+//RS             "closure.direct" => direct.push(metadata_unescape(value)?),
+//RS             "closure.transitive" => transitive.push(metadata_unescape(value)?),
+//RS             "handle" => {
+//RS                 let parts = value.split('|').collect::<Vec<_>>();
+//RS                 if parts.len() != 6 {
+//RS                     return Err(format!(
+//RS                         "binding metadata handle row has {} fields in {}",
+//RS                         parts.len(),
+//RS                         path.display()
+//RS                     ));
+//RS                 }
+//RS                 let close_source = FfiCloseSource::parse(parts[4]).ok_or_else(|| {
+//RS                     format!("unknown handle close source `{}` in {}", parts[4], path.display())
+//RS                 })?;
+//RS                 let thread_safety = FfiThreadSafety::parse(parts[5]).ok_or_else(|| {
+//RS                     format!("unknown handle thread safety `{}` in {}", parts[5], path.display())
+//RS                 })?;
+//RS                 facts.push(FfiHandleFact {
+//RS                     lib: metadata_unescape(parts[0])?,
+//RS                     typedef_name: metadata_unescape(parts[1])?,
+//RS                     jet_name: metadata_unescape(parts[2])?,
+//RS                     close: metadata_unescape(parts[3])?,
+//RS                     close_source,
+//RS                     thread_safety,
+//RS                 });
+//RS             }
+//RS             _ => {
+//RS                 return Err(format!(
+//RS                     "unknown binding metadata field `{name}` in {}",
+//RS                     path.display()
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     if schema.as_deref() != Some(C_BINDING_METADATA_SCHEMA) {
+//RS         return Err(format!("unsupported binding metadata schema in {}", path.display()));
+//RS     }
+//RS     if library.as_deref() != Some(expected_lib) {
+//RS         return Err(format!(
+//RS             "binding metadata library does not match `{expected_lib}` in {}",
+//RS             path.display()
+//RS         ));
+//RS     }
+//RS     facts.sort_by(|a, b| a.stable_key().cmp(&b.stable_key()));
+//RS     facts.dedup();
+//RS     Ok(Some(BindingMetadata {
+//RS         handle_facts: facts,
+//RS         link_closure: FfiLinkClosure::new(direct, transitive),
+//RS     }))
+//RS }
+//RS 
+//RS /// Write the typed C binding metadata produced by `CBind`.
+//RS pub fn write_c_binding_metadata(
+//RS     cache: &Path,
+//RS     handles: &[HandleFact],
+//RS     closure: &LinkClosure,
+//RS ) -> Result<PathBuf, String> {
+//RS     let facts = handles.iter().map(canonical_handle_fact).collect::<Vec<_>>();
+//RS     let canonical_closure = canonical_link_closure(closure);
+//RS     let path = binding_metadata_path(cache);
+//RS     let text = render_binding_metadata(
+//RS         &closure.primary,
+//RS         &facts,
+//RS         &canonical_closure,
+//RS     );
+//RS     let temporary = path.with_extension(format!("metadata.tmp.{}", std::process::id()));
+//RS     std::fs::write(&temporary, text.as_bytes())
+//RS         .map_err(|error| format!("could not stage {}: {error}", path.display()))?;
+//RS     if let Err(error) = std::fs::rename(&temporary, &path) {
+//RS         let _ = std::fs::remove_file(&temporary);
+//RS         return Err(format!("could not publish {}: {error}", path.display()));
+//RS     }
+//RS     Ok(path)
+//RS }
+//RS 
+//RS /// The synthetic module alias for a C library (`__c_raylib`). Never typeable by
+//RS /// users (a `c.` prefix is reserved and `__` mirrors the reserved segment).
+//RS fn synthetic_alias(lib: &str) -> String {
+//RS     format!("__c_{lib}")
+//RS }
+//RS 
+//RS /// Identify compiler-owned binding cache locations. `#Bindgen` is legal only
+//RS /// in one of these generated directories (E3207).
+//RS fn generated_cache_language(display: &str) -> Option<ForeignLanguage> {
+//RS     let display = display.replace('\\', "/");
+//RS     ForeignLanguage::ALL.into_iter().find(|language| {
+//RS         let needle = format!(
+//RS             "{}/{}/",
+//RS             Syntax::SOURCE_ROOT_DIR,
+//RS             language.bindings_subdir()
+//RS         );
+//RS         display.contains(&needle)
+//RS     })
+//RS }
+//RS 
+//RS fn generated_boundary_cache(
+//RS     project_root: &Path,
+//RS     language: ForeignLanguage,
+//RS     loaded_lib: &str,
+//RS ) -> Result<(PathBuf, String), String> {
+//RS     let source_lib = language
+//RS         .bridge_prefix()
+//RS         .is_empty()
+//RS         .then_some(loaded_lib)
+//RS         .or_else(|| loaded_lib.strip_prefix(language.bridge_prefix()))
+//RS         .filter(|lib| !lib.is_empty())
+//RS         .ok_or_else(|| {
+//RS             format!(
+//RS                 "generated `{}` binding library `{loaded_lib}` does not match its bridge prefix `{}`",
+//RS                 language.root(),
+//RS                 language.bridge_prefix()
+//RS             )
+//RS         })?;
+//RS     Ok((
+//RS         binding_cache_file(project_root, language, source_lib),
+//RS         source_lib.to_string(),
+//RS     ))
+//RS }
+//RS 
+//RS /// Two `ExternFn`s have the same boundary signature (params by type + return).
+//RS fn same_signature(a: &ExternFn, b: &ExternFn) -> bool {
+//RS     if a.abi.as_ref().map(|(name, _)| name) != b.abi.as_ref().map(|(name, _)| name) {
+//RS         return false;
+//RS     }
+//RS     if a.params.len() != b.params.len() {
+//RS         return false;
+//RS     }
+//RS     if a.return_type != b.return_type {
+//RS         return false;
+//RS     }
+//RS     a.params
+//RS         .iter()
+//RS         .zip(&b.params)
+//RS         .all(|(x, y)| x.convention == y.convention && x.ty == y.ty)
+//RS }
+//RS 
+//RS /// E3207 — `#Bindgen` used outside a generated cache file.
+//RS fn e3207(lib: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E3207",
+//RS         format!(
+//RS             "`#{}` is only allowed in generated cache files",
+//RS             Syntax::MARKER_BINDGEN
+//RS         ),
+//RS         format!(
+//RS             "`{}/{}/{}.{}` is written by `{} inspect bind`; hand-written sources use `#{} module`",
+//RS             Syntax::SOURCE_ROOT_DIR,
+//RS             ForeignLanguage::C.bindings_subdir(),
+//RS             lib,
+//RS             Syntax::FILE_EXT,
+//RS             Syntax::BINARY_NAME,
+//RS             Syntax::MARKER_IMPORT,
+//RS         ),
+//RS         format!(
+//RS             "edit your overlay file with `#{} module`, or regenerate the cache with `{} inspect bind`",
+//RS             Syntax::MARKER_IMPORT,
+//RS             Syntax::BINARY_NAME,
+//RS         ),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// E3205 — overlay symbol clashes with bindgen with an incompatible signature.
+//RS fn e3205(lib: &str, name: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E3205",
+//RS         format!("overlay `{}` disagrees with the generated binding", name),
+//RS         format!(
+//RS             "user `#{} module {}.{}` may override bindgen symbols, but the signature must stay compatible when replacing",
+//RS             Syntax::MARKER_IMPORT, Syntax::C_MODULE_ROOT, lib,
+//RS         ),
+//RS         "match the generated signature, or rename your overlay function".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// E3204 — two different C `use` forms for the same lib in one file.
+//RS fn e3204(lib: &str, header: &str, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E3204",
+//RS         format!("two different `{}` forms refer to the same C library `{}`", Syntax::KW_USE, lib),
+//RS         format!(
+//RS             "{} allows one bring-in per C lib per file — either `{} \"{}\" as alias`, `{} {}.{} as alias`, or `{} {}.[{} as alias]`, not both",
+//RS             Syntax::LANG_NAME,
+//RS             Syntax::KW_USE,
+//RS             header,
+//RS             Syntax::KW_USE,
+//RS             Syntax::C_MODULE_ROOT,
+//RS             lib,
+//RS             Syntax::KW_USE,
+//RS             Syntax::C_MODULE_ROOT,
+//RS             lib,
+//RS         ),
+//RS         "remove one line; keep the form that matches your workflow".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS /// Resolve native-library linker arguments for every C library this program
+//RS /// uses (D-CFFI2). On any unresolved lib, returns the E3201 diagnostics.
+//RS /// The returned strings are ready to append to a `rustc`/`cc` command.
+//RS pub fn rustc_link_args(cffi: &CFfi, project_root: &Path) -> Result<Vec<String>, Vec<Diagnostic>> {
+//RS     rustc_link_args_for_target_with_entry(
+//RS         cffi,
+//RS         project_root,
+//RS         &crate::FFI::host_target(),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS pub fn rustc_link_args_for_target(
+//RS     cffi: &CFfi,
+//RS     project_root: &Path,
+//RS     target: &str,
+//RS ) -> Result<Vec<String>, Vec<Diagnostic>> {
+//RS     rustc_link_args_for_target_with_entry(cffi, project_root, target, None)
+//RS }
+//RS 
+//RS /// Resolve C link arguments using an optional entry source for an inline
+//RS /// Package carrier. The path-only API remains for standalone callers.
+//RS pub fn rustc_link_args_for_target_with_entry(
+//RS     cffi: &CFfi,
+//RS     project_root: &Path,
+//RS     target: &str,
+//RS     entry: Option<&Path>,
+//RS ) -> Result<Vec<String>, Vec<Diagnostic>> {
+//RS     let mut args = Vec::new();
+//RS     let mut diags = Vec::new();
+//RS     let direct = if cffi.link_closure.direct.is_empty() {
+//RS         cffi.libs.iter().map(|lib| lib.lib.clone()).collect()
+//RS     } else {
+//RS         cffi.link_closure.direct.clone()
+//RS     };
+//RS     for lib in direct {
+//RS         match resolve_link_for_target_with_entry(&lib, project_root, target, entry) {
+//RS             Ok(flags) => {
+//RS                 if let Err(diagnostic) = validate_link_inputs(
+//RS                     &lib,
+//RS                     project_root,
+//RS                     target,
+//RS                     &flags,
+//RS                     &cffi.overlay_overrides,
+//RS                     entry,
+//RS                 ) {
+//RS                     diags.push(diagnostic);
+//RS                     continue;
+//RS                 }
+//RS                 append_link_flags(&mut args, &flags);
+//RS             }
+//RS             Err(d) => diags.push(d),
+//RS         }
+//RS     }
+//RS     // Overlay-declared transitive libraries are explicit link inputs, but
+//RS     // they do not own a generated C binding and therefore skip C artifact
+//RS     // validation.
+//RS     for lib in &cffi.link_closure.transitive {
+//RS         match resolve_link_for_target_with_entry(lib, project_root, target, entry) {
+//RS             Ok(flags) => append_link_flags(&mut args, &flags),
+//RS             Err(d) => diags.push(d),
+//RS         }
+//RS     }
+//RS     if !diags.is_empty() {
+//RS         return Err(diags);
+//RS     }
+//RS     Ok(args)
+//RS }
+//RS 
+//RS fn append_link_flags(args: &mut Vec<String>, flags: &LinkFlags) {
+//RS     for dir in &flags.lib_dirs {
+//RS         args.push("-L".to_string());
+//RS         args.push(format!("native={dir}"));
+//RS     }
+//RS     for name in &flags.link_names {
+//RS         args.push("-l".to_string());
+//RS         args.push(name.clone());
+//RS     }
+//RS     for dir in &flags.rpath_dirs {
+//RS         args.push("-C".to_string());
+//RS         args.push(format!("link-arg=-Wl,-rpath,{dir}"));
+//RS     }
+//RS }
+//RS 
+//RS fn validate_link_inputs(
+//RS     lib: &str,
+//RS     project_root: &Path,
+//RS     target: &str,
+//RS     flags: &LinkFlags,
+//RS     overlay_overrides: &[COverlayOverride],
+//RS     entry: Option<&Path>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     if let Some(actual) = lib.strip_prefix("jet_cpp_") {
+//RS         let directory = project_root
+//RS             .join(Syntax::SOURCE_ROOT_DIR)
+//RS             .join(ForeignLanguage::Cpp.bindings_subdir());
+//RS         let archive = directory.join(format!("libjet_cpp_{actual}.a"));
+//RS         validate_generated_artifact(
+//RS             &directory.join(format!("{actual}.provenance")),
+//RS             &archive,
+//RS             lib,
+//RS         )?;
+//RS         return validate_cpp_symbols(actual, lib, &archive, target, flags);
+//RS     }
+//RS     for (language, prefix) in [
+//RS         (ForeignLanguage::Java, "jet_java_"),
+//RS         (ForeignLanguage::JS, "jet_js_"),
+//RS         (ForeignLanguage::Py, "jet_py_"),
+//RS     ] {
+//RS         if let Some(actual) = lib.strip_prefix(prefix) {
+//RS             let directory = project_root
+//RS                 .join(Syntax::SOURCE_ROOT_DIR)
+//RS                 .join(language.bindings_subdir());
+//RS             let archive = directory.join(format!("lib{prefix}{actual}.a"));
+//RS             return validate_generated_artifact(
+//RS                 &directory.join(format!("{actual}.provenance")),
+//RS                 &archive,
+//RS                 lib,
+//RS             );
+//RS         }
+//RS     }
+//RS     if let Some(actual) = lib.strip_prefix("jet_com_") {
+//RS         let directory = project_root
+//RS             .join(Syntax::SOURCE_ROOT_DIR)
+//RS             .join(ForeignLanguage::Com.bindings_subdir());
+//RS         let archive = directory.join(format!("libjet_com_{actual}.a"));
+//RS         return validate_com_binding(actual, &directory, &archive);
+//RS     }
+//RS     validate_c_binding(lib, project_root, overlay_overrides, entry)
+//RS }
+//RS 
+//RS fn validate_com_binding(
+//RS     lib: &str,
+//RS     directory: &Path,
+//RS     archive: &Path,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let generated_source = directory.join(format!("{lib}.jet"));
+//RS     let provenance = directory.join(format!("{lib}.provenance"));
+//RS     crate::ComBind::validate_provenance(&provenance, &generated_source, archive, lib).map_err(
+//RS         |reason| {
+//RS             e3208(
+//RS                 &provenance.display().to_string(),
+//RS                 &format!("jet_com_{lib}"),
+//RS                 &format!("the COM binding is invalid ({reason})"),
+//RS             )
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn validate_generated_artifact(
+//RS     provenance_path: &Path,
+//RS     archive: &Path,
+//RS     lib: &str,
+//RS ) -> Result<(), Diagnostic> {
+//RS     if !provenance_path.is_file() {
+//RS         return Ok(());
+//RS     }
+//RS     let provenance = crate::ForeignBridge::read_provenance(provenance_path).map_err(|reason| {
+//RS         e3208(
+//RS             &provenance_path.display().to_string(),
+//RS             lib,
+//RS             &format!("the binding provenance is invalid ({reason})"),
+//RS         )
+//RS     })?;
+//RS     let artifact_name = archive
+//RS         .file_name()
+//RS         .and_then(|name| name.to_str())
+//RS         .unwrap_or_default();
+//RS     let artifact_key = format!("artifact.{artifact_name}");
+//RS     let expected = provenance.value(&artifact_key).ok_or_else(|| {
+//RS         e3208(
+//RS             &provenance_path.display().to_string(),
+//RS             lib,
+//RS             &format!("the binding provenance has no digest for `{artifact_name}`"),
+//RS         )
+//RS     })?;
+//RS     let actual = crate::ForeignBridge::sha_file(archive).map_err(|reason| {
+//RS         e3208(
+//RS             &provenance_path.display().to_string(),
+//RS             lib,
+//RS             &format!("the generated archive could not be read ({reason})"),
+//RS         )
+//RS     })?;
+//RS     if expected != actual {
+//RS         return Err(e3208(
+//RS             &provenance_path.display().to_string(),
+//RS             lib,
+//RS             "the generated archive digest differs from its binding provenance; regenerate the binding",
+//RS         ));
+//RS     }
+//RS     validate_provenance_source_inputs(&provenance, provenance_path, lib)?;
+//RS     validate_provenance_archive_inputs(&provenance, provenance_path, lib)
+//RS }
+//RS 
+//RS fn validate_provenance_source_inputs(
+//RS     provenance: &crate::ForeignBridge::Provenance,
+//RS     provenance_path: &Path,
+//RS     lib: &str,
+//RS ) -> Result<(), Diagnostic> {
+//RS     for role in ["source", "runtime", "declaration", "worker", "link"] {
+//RS         let digest_key = format!("{role}-sha256");
+//RS         let Some(paths) = provenance.fields.get(role) else {
+//RS             if provenance.fields.contains_key(digest_key.as_str()) {
+//RS                 return Err(e3208(
+//RS                     &provenance_path.display().to_string(),
+//RS                     lib,
+//RS                     &format!("the binding provenance has no path for `{role}`"),
+//RS                 ));
+//RS             }
+//RS             continue;
+//RS         };
+//RS         let Some(digests) = provenance.fields.get(digest_key.as_str()) else {
+//RS             return Err(e3208(
+//RS                 &provenance_path.display().to_string(),
+//RS                 lib,
+//RS                 &format!("the binding provenance has no digest for `{role}`"),
+//RS             ));
+//RS         };
+//RS         if paths.len() != digests.len() {
+//RS             return Err(e3208(
+//RS                 &provenance_path.display().to_string(),
+//RS                 lib,
+//RS                 &format!("the binding provenance has an incomplete `{role}` inventory"),
+//RS             ));
+//RS         }
+//RS         for (path, expected) in paths.iter().zip(digests) {
+//RS             let path = Path::new(path);
+//RS             let actual = crate::ForeignBridge::sha_file(path).map_err(|reason| {
+//RS                 e3208(
+//RS                     &provenance_path.display().to_string(),
+//RS                     lib,
+//RS                     &format!(
+//RS                         "foreign `{role}` `{}` could not be read ({reason}); regenerate the binding",
+//RS                         path.display()
+//RS                     ),
+//RS                 )
+//RS             })?;
+//RS             if actual != expected.as_str() {
+//RS                 return Err(e3208(
+//RS                     &provenance_path.display().to_string(),
+//RS                     lib,
+//RS                     &format!(
+//RS                         "foreign `{role}` `{}` differs from binding provenance; regenerate the binding",
+//RS                         path.display()
+//RS                     ),
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_provenance_archive_inputs(
+//RS     provenance: &crate::ForeignBridge::Provenance,
+//RS     provenance_path: &Path,
+//RS     lib: &str,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let paths = provenance
+//RS         .fields
+//RS         .get("linked-archive")
+//RS         .cloned()
+//RS         .unwrap_or_default();
+//RS     let digests = provenance
+//RS         .fields
+//RS         .get("linked-archive-sha256")
+//RS         .cloned()
+//RS         .unwrap_or_default();
+//RS     if paths.len() != digests.len() {
+//RS         return Err(e3208(
+//RS             &provenance_path.display().to_string(),
+//RS             lib,
+//RS             "the binding provenance has an incomplete local archive inventory",
+//RS         ));
+//RS     }
+//RS     for (path, expected) in paths.iter().zip(digests) {
+//RS         let actual = std::fs::read(path)
+//RS             .ok()
+//RS             .map(|bytes| crate::SHA256::sha256_hex(&bytes))
+//RS             .unwrap_or_else(|| "missing".into());
+//RS         if actual != expected {
+//RS             return Err(e3208(
+//RS                 &provenance_path.display().to_string(),
+//RS                 lib,
+//RS                 &format!(
+//RS                     "local archive `{path}` differs from binding provenance; regenerate the binding"
+//RS                 ),
+//RS             ));
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_c_binding(
+//RS     lib: &str,
+//RS     project_root: &Path,
+//RS     overlay_overrides: &[COverlayOverride],
+//RS     entry: Option<&Path>,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let cache = binding_cache_file(project_root, ForeignLanguage::C, lib);
+//RS     if !cache.is_file() {
+//RS         return Ok(());
+//RS     }
+//RS     let provenance_path = cache.with_extension("provenance");
+//RS     if provenance_path.is_file() {
+//RS         let provenance = crate::ForeignBridge::read_provenance(&provenance_path).map_err(|reason| {
+//RS             e3208(
+//RS                 &provenance_path.display().to_string(),
+//RS                 lib,
+//RS                 &format!("the C binding provenance is invalid ({reason})"),
+//RS             )
+//RS         })?;
+//RS         let header = provenance.value("source").ok_or_else(|| {
+//RS             e3208(
+//RS                 &provenance_path.display().to_string(),
+//RS                 lib,
+//RS                 "the C binding provenance has no source header",
+//RS             )
+//RS         })?;
+//RS         let expected =
+//RS             c_binding_identity_with_entry(project_root, lib, Path::new(header), &cache, entry)
+//RS             .map_err(|reason| {
+//RS                 e3208(
+//RS                     &provenance_path.display().to_string(),
+//RS                     lib,
+//RS                     &format!("the C binding inputs could not be read ({reason})"),
+//RS                 )
+//RS             })?;
+//RS         if provenance.identity != expected {
+//RS             return Err(e3208(
+//RS                 &provenance_path.display().to_string(),
+//RS                 lib,
+//RS                 "the C header, generated cache, or local archive changed after binding; regenerate the binding",
+//RS             ));
+//RS         }
+//RS         let cache_name = cache
+//RS             .file_name()
+//RS             .and_then(|name| name.to_str())
+//RS             .unwrap_or_default();
+//RS         let expected_cache = provenance.value(&format!("artifact.{cache_name}"));
+//RS         let actual_cache = crate::ForeignBridge::sha_file(&cache).map_err(|reason| {
+//RS             e3208(
+//RS                 &provenance_path.display().to_string(),
+//RS                 lib,
+//RS                 &format!("the generated C cache could not be read ({reason})"),
+//RS             )
+//RS         })?;
+//RS         if expected_cache != Some(actual_cache.as_str()) {
+//RS             return Err(e3208(
+//RS                 &provenance_path.display().to_string(),
+//RS                 lib,
+//RS                 "the generated C cache digest differs from its binding provenance; regenerate the binding",
+//RS             ));
+//RS         }
+//RS     }
+//RS 
+//RS     let Some(input) = local_c_archive_inputs(project_root, lib, entry).into_iter().next() else {
+//RS         return Ok(());
+//RS     };
+//RS     if !input.path.is_file() {
+//RS         return Ok(());
+//RS     }
+//RS     if input.bytes.is_none() {
+//RS         return Err(e3208(
+//RS             &cache.display().to_string(),
+//RS             lib,
+//RS             &format!("the local archive `{}` could not be read", input.path.display()),
+//RS         ));
+//RS     }
+//RS     let source = std::fs::read_to_string(&cache).map_err(|reason| {
+//RS         e3208(
+//RS             &cache.display().to_string(),
+//RS             lib,
+//RS             &format!("the generated C cache could not be read ({reason})"),
+//RS         )
+//RS     })?;
+//RS     let mut expected = binding_symbols(&source);
+//RS     for overlay in overlay_overrides.iter().filter(|overlay| overlay.lib == lib) {
+//RS         expected.remove(&overlay.generated_symbol);
+//RS         expected.insert(overlay.overlay_symbol.clone());
+//RS     }
+//RS     if expected.is_empty() {
+//RS         return Ok(());
+//RS     }
+//RS     let defined = nm_symbols(&input.path, false).map_err(|reason| {
+//RS         e3208(
+//RS             &cache.display().to_string(),
+//RS             lib,
+//RS             &format!("could not inventory exported symbols in `{}` ({reason})", input.path.display()),
+//RS         )
+//RS     })?;
+//RS     let missing: Vec<String> = expected
+//RS         .into_iter()
+//RS         .filter(|symbol| !defined.contains(&normalize_nm_symbol(symbol)))
+//RS         .collect();
+//RS     if missing.is_empty() {
+//RS         Ok(())
+//RS     } else {
+//RS         Err(e3208(
+//RS             &cache.display().to_string(),
+//RS             lib,
+//RS             &format!(
+//RS                 "the local archive `{}` is missing bound export symbol(s): {}; the binding is stale",
+//RS                 input.path.display(),
+//RS                 missing.join(", ")
+//RS             ),
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS fn binding_symbols(source: &str) -> BTreeSet<String> {
+//RS     let mut symbols = BTreeSet::new();
+//RS     for line in source.lines() {
+//RS         let Some((_, value)) = line.rsplit_once("= \"") else {
+//RS             continue;
+//RS         };
+//RS         let Some(symbol) = value.split('"').next() else {
+//RS             continue;
+//RS         };
+//RS         if !symbol.is_empty() {
+//RS             symbols.insert(symbol.to_string());
+//RS         }
+//RS     }
+//RS     symbols
+//RS }
+//RS 
+//RS fn validate_cpp_symbols(
+//RS     actual: &str,
+//RS     lib: &str,
+//RS     generated_archive: &Path,
+//RS     target: &str,
+//RS     flags: &LinkFlags,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let generated_name = format!("jet_cpp_{actual}");
+//RS     let directories: Vec<PathBuf> = flags.lib_dirs.iter().map(PathBuf::from).collect();
+//RS     let libraries: Vec<String> = flags
+//RS         .link_names
+//RS         .iter()
+//RS         .filter_map(|name| {
+//RS             let name = name
+//RS                 .strip_prefix("static=")
+//RS                 .or_else(|| name.strip_prefix("dylib="))
+//RS                 .or_else(|| name.strip_prefix("framework="))
+//RS                 .unwrap_or(name);
+//RS             (name != generated_name && !cpp_runtime_library(name, target))
+//RS                 .then(|| name.to_string())
+//RS         })
+//RS         .collect();
+//RS     let inputs = crate::ForeignBridge::local_archive_inputs(&directories, &libraries);
+//RS     let inputs: Vec<_> = inputs
+//RS         .into_iter()
+//RS         .filter(|input| input.path.is_file())
+//RS         .collect();
+//RS     if inputs.is_empty() {
+//RS         return Ok(());
+//RS     }
+//RS     let mut defined = BTreeSet::new();
+//RS     for input in &inputs {
+//RS         if input.bytes.is_none() {
+//RS             return Err(e3208(
+//RS                 &generated_archive.display().to_string(),
+//RS                 lib,
+//RS                 &format!("the local archive `{}` could not be read", input.path.display()),
+//RS             ));
+//RS         }
+//RS         defined.extend(nm_symbols(&input.path, false).map_err(|reason| {
+//RS             e3208(
+//RS                 &generated_archive.display().to_string(),
+//RS                 lib,
+//RS                 &format!("could not inventory exported symbols in `{}` ({reason})", input.path.display()),
+//RS             )
+//RS         })?);
+//RS     }
+//RS     let undefined = nm_symbols(generated_archive, true).map_err(|reason| {
+//RS         e3208(
+//RS             &generated_archive.display().to_string(),
+//RS             lib,
+//RS             &format!("could not inventory bound symbols in `{}` ({reason})", generated_archive.display()),
+//RS         )
+//RS     })?;
+//RS     let missing: Vec<String> = undefined
+//RS         .into_iter()
+//RS         .filter(|symbol| !ignorable_cpp_symbol(symbol))
+//RS         .filter(|symbol| !defined.contains(symbol))
+//RS         .collect();
+//RS     if missing.is_empty() {
+//RS         Ok(())
+//RS     } else {
+//RS         Err(e3208(
+//RS             &generated_archive.display().to_string(),
+//RS             lib,
+//RS             &format!(
+//RS                 "local C++ archive inventory is missing bound symbol(s): {}; regenerate the binding or restore the archive",
+//RS                 missing.join(", ")
+//RS             ),
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS fn cpp_runtime_library(name: &str, target: &str) -> bool {
+//RS     name == crate::FFI::cxx_runtime_for_target(target)
+//RS         || matches!(name, "c" | "m" | "dl" | "pthread" | "rt" | "gcc_s")
+//RS }
+//RS 
+//RS fn nm_symbols(path: &Path, undefined: bool) -> Result<BTreeSet<String>, String> {
+//RS     let mut command = Command::new("nm");
+//RS     command.arg("-g");
+//RS     if undefined {
+//RS         command.arg("-u");
+//RS     }
+//RS     let output = command.arg(path).output().map_err(|error| {
+//RS         if error.kind() == std::io::ErrorKind::NotFound {
+//RS             "the provisioned nm tool was not found".to_string()
+//RS         } else {
+//RS             format!("could not start nm: {error}")
+//RS         }
+//RS     })?;
+//RS     if !output.status.success() {
+//RS         let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+//RS         return Err(if detail.is_empty() {
+//RS             "nm rejected the native archive".into()
+//RS         } else {
+//RS             detail
+//RS         });
+//RS     }
+//RS     Ok(parse_nm_symbols(&output.stdout, undefined))
+//RS }
+//RS 
+//RS fn parse_nm_symbols(output: &[u8], undefined: bool) -> BTreeSet<String> {
+//RS     let mut symbols = BTreeSet::new();
+//RS     for line in String::from_utf8_lossy(output).lines() {
+//RS         let tokens: Vec<&str> = line.split_whitespace().collect();
+//RS         if tokens.len() < 2 {
+//RS             continue;
+//RS         }
+//RS         let is_undefined = tokens.iter().any(|token| *token == "U" || *token == "u");
+//RS         if undefined != is_undefined {
+//RS             continue;
+//RS         }
+//RS         let symbol = tokens.last().copied().unwrap_or_default();
+//RS         if symbol.is_empty() || symbol == "?" {
+//RS             continue;
+//RS         }
+//RS         symbols.insert(normalize_nm_symbol(symbol));
+//RS     }
+//RS     symbols
+//RS }
+//RS 
+//RS fn normalize_nm_symbol(symbol: &str) -> String {
+//RS     symbol.strip_prefix('_').unwrap_or(symbol).to_string()
+//RS }
+//RS 
+//RS fn ignorable_cpp_symbol(symbol: &str) -> bool {
+//RS     let symbol = symbol.trim_start_matches('_');
+//RS     symbol.starts_with("ZSt")
+//RS         || symbol.starts_with("ZNSt")
+//RS         || symbol.starts_with("ZNKSt")
+//RS         || symbol.starts_with("ZNS")
+//RS         || symbol.starts_with("ZNKS")
+//RS         || symbol.starts_with("ZTI")
+//RS         || symbol.starts_with("ZTV")
+//RS         || symbol.starts_with("ZTS")
+//RS         || symbol.starts_with("ZTT")
+//RS         || symbol.starts_with("Zda")
+//RS         || symbol.starts_with("Zdl")
+//RS         || symbol.starts_with("Zna")
+//RS         || symbol.starts_with("Znw")
+//RS         || symbol.contains("cxa")
+//RS         || symbol.contains("gxx_personality")
+//RS         || symbol.contains("Unwind")
+//RS         || symbol.starts_with("atomic_")
+//RS         || symbol.starts_with("dynamic_cast")
+//RS         || symbol.starts_with("errno_location")
+//RS         || symbol.starts_with("gthread")
+//RS         || symbol.starts_with("pthread")
+//RS         || symbol.starts_with("dl")
+//RS         || symbol.starts_with("sched_")
+//RS         || symbol.starts_with("stack_chk")
+//RS         || symbol.starts_with("__")
+//RS         || matches!(
+//RS             symbol,
+//RS             "abort" | "free" | "malloc" | "memcpy" | "memmove" | "memset" | "strlen"
+//RS         )
+//RS }
+//RS 
+//RS /// Admit close contracts written in a source `#Import` overlay to the typed
+//RS /// binder seam before a header is generated. Explicit caller-supplied facts
+//RS /// remain authoritative; source markers only fill missing close mappings.
+//RS fn admit_source_handle_overlays(
+//RS     bundle: &ProgramBundle,
+//RS     supplied: &BTreeMap<String, HandleOverlay>,
+//RS ) -> BTreeMap<String, HandleOverlay> {
+//RS     let mut admitted = supplied.clone();
+//RS     for module in &bundle.modules {
+//RS         for item in &module.items {
+//RS             let Item::CModule(c_module) = item else {
+//RS                 continue;
+//RS             };
+//RS             if c_module.kind != CModuleKind::Extern {
+//RS                 continue;
+//RS             }
+//RS             let overlay = admitted.entry(c_module.lib.clone()).or_default();
+//RS             for function in &c_module.functions {
+//RS                 let Some((close, _)) = &function.close else {
+//RS                     continue;
+//RS                 };
+//RS                 let Some(crate::AST::Type::Named(handle)) = &function.return_type else {
+//RS                     continue;
+//RS                 };
+//RS                 overlay
+//RS                     .close_functions
+//RS                     .entry(handle.clone())
+//RS                     .or_insert_with(|| close.clone());
+//RS             }
+//RS         }
+//RS     }
+//RS     admitted
+//RS }
+//RS 
+//RS /// Run the whole C-FFI assembly pass over a freshly loaded bundle. Removes
+//RS /// `Item::CModule`s from user files, merges them, appends synthetic modules,
+//RS /// and resolves C `use` forms. Returns the artifacts, or diagnostics.
+//RS pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
+//RS     assemble_with_overlays(bundle, &BTreeMap::new())
+//RS }
+//RS 
+//RS /// Assemble C bindings while applying typed per-library handle overlays.
+//RS pub fn assemble_with_overlays(
+//RS     bundle: &mut ProgramBundle,
+//RS     overlays: &BTreeMap<String, HandleOverlay>,
+//RS ) -> Result<CFfi, Vec<Diagnostic>> {
+//RS     let admitted_overlays = admit_source_handle_overlays(bundle, overlays);
+//RS     let mut diags = invalid_foreign_import_diagnostics(bundle);
+//RS     diags.extend(duplicate_use_form_diagnostics(bundle));
+//RS     if !diags.is_empty() {
+//RS         return Err(diags);
+//RS     }
+//RS 
+//RS     // 0. Load any generated bindgen cache files for libraries this program
+//RS     //    brings in. Cache files (`.jet/bindings/c/<lib>.jet`) are not `use`d
+//RS     //    explicitly; they are discovered here so the bindgen surface is present
+//RS     //    before merge.
+//RS     let metadata = load_binding_caches(bundle, &mut diags, &admitted_overlays);
+//RS     if !diags.is_empty() {
+//RS         return Err(diags);
+//RS     }
+//RS     assemble_loaded(bundle, diags, metadata, &admitted_overlays)
+//RS }
+//RS 
+//RS fn status_close_adapter(
+//RS     lib: &str,
+//RS     functions: &mut [ExternFn],
+//RS     facts: &[FfiHandleFact],
+//RS ) -> Option<(FfiCloseAdapter, Item)> {
+//RS     for fact in facts.iter().filter(|fact| fact.lib == lib) {
+//RS         let Some(constructor_idx) = functions.iter().position(|function| {
+//RS             function.close.as_ref().is_some_and(|(name, _)| name == &fact.close)
+//RS                 && matches!(
+//RS                     function.return_type.as_ref(),
+//RS                     Some(crate::AST::Type::Named(name)) if name == &fact.jet_name
+//RS                 )
+//RS         }) else {
+//RS             continue;
+//RS         };
+//RS         let Some(raw_name) = functions.iter().find_map(|function| {
+//RS             (function.name == fact.close
+//RS                 && function.return_type.is_some()
+//RS                 && matches!(
+//RS                     function.params.as_slice(),
+//RS                     [param]
+//RS                         if param.convention == crate::AST::AccessConvention::Move
+//RS                             && param.ty == crate::AST::Type::Named(fact.jet_name.clone())
+//RS                 ))
+//RS             .then(|| function.name.clone())
+//RS         }) else {
+//RS             continue;
+//RS         };
+//RS         let adapter_name = format!("__jet_ffi_close_{}", fact.jet_name);
+//RS         let source = format!(
+//RS             "fn {adapter_name}(handle: ^{}) {{\n    {}(^handle)\n}}\n",
+//RS             fact.jet_name, raw_name
+//RS         );
+//RS         let (tokens, lex_diagnostics) = crate::Lexer::lex_generated(&source);
+//RS         if !lex_diagnostics.is_empty() {
+//RS             continue;
+//RS         }
+//RS         let Ok(program) = crate::Parser::parse(&tokens) else {
+//RS             continue;
+//RS         };
+//RS         let Some(Item::Func(mut adapter)) = program.items.into_iter().next() else {
+//RS             continue;
+//RS         };
+//RS         adapter.is_pub = false;
+//RS         adapter.is_unsafe = true;
+//RS         adapter.unsafe_reason = Some("compiler-generated foreign close adapter".to_string());
+//RS         adapter.unsafe_span = Some(Span::new(0, 0));
+//RS         adapter.compiler_generated = true;
+//RS         functions[constructor_idx]
+//RS             .close
+//RS             .as_mut()
+//RS             .expect("selected constructor has a close contract")
+//RS             .0
+//RS             .clone_from(&adapter_name);
+//RS         return Some((
+//RS             FfiCloseAdapter {
+//RS                 lib: lib.to_string(),
+//RS                 handle_type: fact.jet_name.clone(),
+//RS                 raw_function: raw_name,
+//RS                 adapter_function: adapter_name,
+//RS             },
+//RS             Item::Func(adapter),
+//RS         ));
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn assemble_loaded(
+//RS     bundle: &mut ProgramBundle,
+//RS     mut diags: Vec<Diagnostic>,
+//RS     metadata: BindingMetadata,
+//RS     overlays: &BTreeMap<String, HandleOverlay>,
+//RS ) -> Result<CFfi, Vec<Diagnostic>> {
+//RS 
+//RS     // 1. Drain every CModule from every loaded file, validating location.
+//RS     //    Grouped per lib into (bindgen funcs, overlay funcs).
+//RS     struct LibSurface {
+//RS         bindgen: Vec<ExternFn>,
+//RS         overlay: Vec<ExternFn>,
+//RS         generated_language: Option<ForeignLanguage>,
+//RS     }
+//RS     let mut surfaces: HashMap<String, LibSurface> = HashMap::new();
+//RS     // Preserve first-seen order for stable synthetic module ordering / output.
+//RS     let mut order: Vec<String> = Vec::new();
+//RS 
+//RS     for module in &mut bundle.modules {
+//RS         let generated_language = generated_cache_language(&module.path.to_string_lossy());
+//RS         let generated = generated_language.is_some();
+//RS         let mut kept = Vec::new();
+//RS         for item in module.items.drain(..) {
+//RS             let Item::CModule(cm) = item else {
+//RS                 kept.push(item);
+//RS                 continue;
+//RS             };
+//RS             let CModule {
+//RS                 kind,
+//RS                 lib,
+//RS                 path_span,
+//RS                 mut functions,
+//RS                 ..
+//RS             } = cm;
+//RS             if kind == CModuleKind::Bindgen && !generated {
+//RS                 diags.push(e3207(&lib, path_span));
+//RS                 continue;
+//RS             }
+//RS             if kind == CModuleKind::Bindgen {
+//RS                 for function in &mut functions {
+//RS                     function.generated = true;
+//RS                 }
+//RS             }
+//RS             let surf = match surfaces.entry(lib.clone()) {
+//RS                 Entry::Occupied(entry) => entry.into_mut(),
+//RS                 Entry::Vacant(entry) => {
+//RS                     order.push(lib.clone());
+//RS                     entry.insert(LibSurface {
+//RS                         bindgen: Vec::new(),
+//RS                         overlay: Vec::new(),
+//RS                         generated_language: None,
+//RS                     })
+//RS                 }
+//RS             };
+//RS             if let Some(language) = generated_language {
+//RS                 if let Some(existing) = surf.generated_language {
+//RS                     if existing != language {
+//RS                         diags.push(e3208(
+//RS                             &module.path.display().to_string(),
+//RS                             &lib,
+//RS                             "one C library was loaded from multiple generated foreign families",
+//RS                         ));
+//RS                         continue;
+//RS                     }
+//RS                 } else {
+//RS                     surf.generated_language = Some(language);
+//RS                 }
+//RS             }
+//RS             match kind {
+//RS                 CModuleKind::Bindgen => surf.bindgen.extend(functions),
+//RS                 CModuleKind::Extern => surf.overlay.extend(functions),
+//RS             }
+//RS         }
+//RS         module.items = kept;
+//RS     }
+//RS 
+//RS     if !diags.is_empty() {
+//RS         return Err(diags);
+//RS     }
+//RS 
+//RS     // 2. Merge per lib (bindgen ∪ overlay; overlay wins; clash → E3205) and
+//RS     //    materialize one synthetic module each.
+//RS     let mut cffi = CFfi {
+//RS         handle_facts: metadata.handle_facts.clone(),
+//RS         link_closure: metadata.link_closure.clone(),
+//RS         ..CFfi::default()
+//RS     };
+//RS     for lib in &order {
+//RS         let generated_language = surfaces
+//RS             .get(lib)
+//RS             .and_then(|surface| surface.generated_language);
+//RS         let (boundary_cache, boundary_lib) = if let Some(language) = generated_language {
+//RS             match generated_boundary_cache(&bundle.project_root, language, lib) {
+//RS                 Ok(cache) => cache,
+//RS                 Err(error) => {
+//RS                     diags.push(e3208(&format!("c.{lib}"), lib, &error));
+//RS                     continue;
+//RS                 }
+//RS             }
+//RS         } else {
+//RS             (
+//RS                 binding_cache_file(&bundle.project_root, ForeignLanguage::C, lib),
+//RS                 lib.clone(),
+//RS             )
+//RS         };
+//RS         let boundary_provenance = boundary_cache.with_extension("provenance");
+//RS         let boundary = if boundary_provenance.is_file() {
+//RS             match read_boundary_facts(
+//RS                 &boundary_cache,
+//RS                 generated_language.unwrap_or(ForeignLanguage::C),
+//RS                 &boundary_lib,
+//RS                 lib,
+//RS             ) {
+//RS                 Ok(facts) => facts,
+//RS                 Err(error) => {
+//RS                     diags.push(e3208(
+//RS                         &boundary_provenance.display().to_string(),
+//RS                         lib,
+//RS                         &format!("foreign boundary provenance is invalid: {error}"),
+//RS                     ));
+//RS                     continue;
+//RS                 }
+//RS             }
+//RS         } else if generated_language.is_some_and(|language| language != ForeignLanguage::C) {
+//RS             diags.push(e3208(
+//RS                 &boundary_provenance.display().to_string(),
+//RS                 lib,
+//RS                 "generated foreign binding has no canonical boundary provenance",
+//RS             ));
+//RS             continue;
+//RS         } else {
+//RS             let descriptor = crate::AST::binder_descriptor(ForeignLanguage::C)
+//RS                 .expect("C binder descriptor is registered");
+//RS             crate::ForeignBridge::ForeignBoundaryContract::new(
+//RS                 *descriptor,
+//RS                 lib,
+//RS                 crate::ForeignBridge::ForeignBoundaryIdentity::new(
+//RS                     "not-recorded",
+//RS                     "none",
+//RS                     "not-recorded",
+//RS                     "not-recorded",
+//RS                     "not-recorded",
+//RS                     crate::ForeignBridge::foreign_host_target(),
+//RS                 ),
+//RS             )
+//RS             .carrier_facts()
+//RS         };
+//RS         cffi.boundaries.push(boundary);
+//RS     }
+//RS     let mut lib_to_idx: HashMap<String, usize> = HashMap::new();
+//RS 
+//RS     for lib in &order {
+//RS         // Every key enters `order` only beside its vacant `surfaces` insertion
+//RS         // above, and no surface is removed before this ordered merge pass.
+//RS         let Some(surf) = surfaces.get(lib) else {
+//RS             continue;
+//RS         };
+//RS         // Start from bindgen, then let overlay add/override.
+//RS         let mut merged: Vec<ExternFn> = Vec::new();
+//RS         let mut index: HashMap<String, usize> = HashMap::new();
+//RS         let bindgen_symbols: HashMap<String, String> = surf
+//RS             .bindgen
+//RS             .iter()
+//RS             .map(|function| (function.name.clone(), function.rust_path.clone()))
+//RS             .collect();
+//RS         for ef in &surf.bindgen {
+//RS             // Last bindgen wins on intra-bindgen dup (regen artifact); rare.
+//RS             if let Some(&i) = index.get(&ef.name) {
+//RS                 merged[i] = ef.clone();
+//RS             } else {
+//RS                 index.insert(ef.name.clone(), merged.len());
+//RS                 merged.push(ef.clone());
+//RS             }
+//RS         }
+//RS         for ef in &surf.overlay {
+//RS             if let Some(&i) = index.get(&ef.name) {
+//RS                 // Override: signatures must stay compatible (D-CFFI2-SYN-4).
+//RS                 if !same_signature(&merged[i], ef) {
+//RS                     diags.push(e3205(lib, &ef.name, ef.name_span));
+//RS                     continue;
+//RS                 }
+//RS                 if let Some(generated_symbol) = bindgen_symbols.get(&ef.name) {
+//RS                     cffi.overlay_overrides.push(COverlayOverride {
+//RS                         lib: lib.clone(),
+//RS                         generated_symbol: generated_symbol.clone(),
+//RS                         overlay_symbol: ef.rust_path.clone(),
+//RS                     });
+//RS                 }
+//RS                 let effect_root = merged[i].effect_root.clone();
+//RS                 merged[i] = ef.clone();
+//RS                 merged[i].effect_root = effect_root;
+//RS             } else {
+//RS                 index.insert(ef.name.clone(), merged.len());
+//RS                 merged.push(ef.clone());
+//RS             }
+//RS         }
+//RS 
+//RS         if let Some(effect_root) = cffi
+//RS             .boundary_for(lib)
+//RS             .map(|boundary| boundary.effect_root.clone())
+//RS         {
+//RS             for function in &mut merged {
+//RS                 function.effect_root = Some(effect_root.clone());
+//RS             }
+//RS         }
+//RS 
+//RS         // Keep every explicit library in the direct closure. Overlay-only
+//RS         // transitive libraries remain metadata, never guessed from symbols.
+//RS         let mut direct = cffi.link_closure.direct.clone();
+//RS         direct.push(lib.clone());
+//RS         let mut transitive = cffi.link_closure.transitive.clone();
+//RS         if let Some(overlay) = overlays.get(lib) {
+//RS             transitive.extend(overlay.links.iter().cloned());
+//RS         }
+//RS         cffi.link_closure = FfiLinkClosure::new(direct, transitive);
+//RS 
+//RS         let mut adapter_items = Vec::new();
+//RS         while let Some((adapter, item)) =
+//RS             status_close_adapter(lib, &mut merged, &cffi.handle_facts)
+//RS         {
+//RS             cffi.close_adapters.push(adapter);
+//RS             adapter_items.push(item);
+//RS         }
+//RS 
+//RS         let alias = synthetic_alias(lib);
+//RS         let synth_idx = bundle.modules.len();
+//RS         let merged_module = CModule {
+//RS             kind: CModuleKind::Extern,
+//RS             lib: lib.clone(),
+//RS             path_span: Span::new(0, 0),
+//RS             functions: merged,
+//RS             span: Span::new(0, 0),
+//RS         };
+//RS         let mut items = vec![Item::CModule(merged_module)];
+//RS         items.extend(adapter_items);
+//RS         bundle.modules.push(LoadedModule {
+//RS             path: std::path::PathBuf::from(format!("<c.{lib}>")),
+//RS             display: format!("c.{lib}"),
+//RS             source: String::new(),
+//RS             alias,
+//RS             imports: Vec::new(),
+//RS             items,
+//RS             script_body: Vec::new(),
+//RS             block_spans: Vec::new(),
+//RS             web_target_ceiling: None,
+//RS             pub_file: false,
+//RS             no_prelude: false,
+//RS             default_target: None,
+//RS             html_path: None,
+//RS             policy_declarations: Vec::new(),
+//RS             user_policy_declarations: Vec::new(),
+//RS             rule_facts: Vec::new(),
+//RS         });
+//RS         lib_to_idx.insert(lib.clone(), synth_idx);
+//RS         cffi.libs.push(CLib {
+//RS             lib: lib.clone(),
+//RS             module_idx: synth_idx,
+//RS         });
+//RS     }
+//RS 
+//RS     if !diags.is_empty() {
+//RS         return Err(diags);
+//RS     }
+//RS 
+//RS     // 3. Resolve each file's C `use` forms. Duplicate forms were rejected
+//RS     //    before cache discovery so a missing header cannot mask E3204.
+//RS     //    A `use` of a lib with no declared surface is allowed — the bind backend
+//RS     //    (Phase 3) would generate it; for now an empty synthetic module is made
+//RS     //    on demand so the alias still resolves and link discovery still runs.
+//RS     let n_user_modules = bundle.modules.len();
+//RS     for idx in 0..n_user_modules {
+//RS         let imports: Vec<_> = crate::AST::walk_imports(&bundle.modules[idx])
+//RS             .into_iter()
+//RS             .map(|(scope, import)| (scope.map(str::to_owned), import.clone()))
+//RS             .collect();
+//RS         for (scope, imp) in &imports {
+//RS             let mut requested = match c_module_imports(imp) {
+//RS                 Ok(requested) => requested,
+//RS                 Err(error) => {
+//RS                     diags.push(error.diagnostic());
+//RS                     continue;
+//RS                 }
+//RS             };
+//RS             if let Some((_, lib)) = c_header_lib(imp) {
+//RS                 requested.push((lib, import_alias(imp)));
+//RS             }
+//RS             for (lib, alias) in requested {
+//RS                 let target_idx = match lib_to_idx.get(&lib) {
+//RS                     Some(&i) => i,
+//RS                     None => {
+//RS                         // No surface yet: make an empty synthetic module so the
+//RS                         // alias resolves and link discovery still names the lib.
+//RS                         let synth_idx = bundle.modules.len();
+//RS                         bundle.modules.push(LoadedModule {
+//RS                             path: std::path::PathBuf::from(format!("<c.{lib}>")),
+//RS                             display: format!("c.{lib}"),
+//RS                             source: String::new(),
+//RS                             alias: synthetic_alias(&lib),
+//RS                             imports: Vec::new(),
+//RS                             items: vec![Item::CModule(CModule {
+//RS                                 kind: CModuleKind::Extern,
+//RS                                 lib: lib.clone(),
+//RS                                 path_span: Span::new(0, 0),
+//RS                                 functions: Vec::new(),
+//RS                                 span: Span::new(0, 0),
+//RS                             })],
+//RS                             script_body: Vec::new(),
+//RS                             block_spans: Vec::new(),
+//RS                             web_target_ceiling: None,
+//RS                             pub_file: false,
+//RS                             no_prelude: false,
+//RS                             default_target: None,
+//RS                             html_path: None,
+//RS                             policy_declarations: Vec::new(),
+//RS                             user_policy_declarations: Vec::new(),
+//RS                             rule_facts: Vec::new(),
+//RS                         });
+//RS                         lib_to_idx.insert(lib.clone(), synth_idx);
+//RS                         cffi.libs.push(CLib {
+//RS                             lib: lib.clone(),
+//RS                             module_idx: synth_idx,
+//RS                         });
+//RS                         let mut direct = cffi.link_closure.direct.clone();
+//RS                         direct.push(lib.clone());
+//RS                         cffi.link_closure =
+//RS                             FfiLinkClosure::new(direct, cffi.link_closure.transitive.clone());
+//RS                         synth_idx
+//RS                     }
+//RS                 };
+//RS                 cffi.import_links.push(CImportLink {
+//RS                     importing_idx: idx,
+//RS                     scope: scope.clone(),
+//RS                     alias,
+//RS                     target_idx,
+//RS                 });
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     if !diags.is_empty() {
+//RS         return Err(diags);
+//RS     }
+//RS     cffi.handle_facts
+//RS         .sort_by(|a, b| a.stable_key().cmp(&b.stable_key()));
+//RS     cffi.handle_facts.dedup();
+//RS     cffi.close_adapters
+//RS         .sort_by(|a, b| a.adapter_function.cmp(&b.adapter_function));
+//RS     cffi.close_adapters.dedup();
+//RS     cffi.link_closure = FfiLinkClosure::new(
+//RS         cffi.link_closure.direct,
+//RS         cffi.link_closure.transitive,
+//RS     );
+//RS     Ok(cffi)
+//RS }
+//RS 
+//RS /// C-FFI assembly with source provenance for front-end inspection commands.
+//RS /// The ordinary API above remains a bare-diagnostic compatibility seam for
+//RS /// compiler callers; this form snapshots user spans before assembly drains
+//RS /// `CModule` items and carries generated-cache parser errors by cache path.
+//RS #[derive(Debug, Clone)]
+//RS pub struct CffiDiagnostic {
+//RS     pub file: String,
+//RS     pub source: String,
+//RS     pub diagnostic: Diagnostic,
+//RS }
+//RS 
+//RS struct AssemblyOrigins {
+//RS     spans: HashMap<Span, Vec<(String, String)>>,
+//RS     headers: Vec<(String, String)>,
+//RS     duplicate_uses: Vec<(String, String)>,
+//RS     invalid_bindgen: Vec<(String, String)>,
+//RS     incompatible_overrides: Vec<(String, String)>,
+//RS }
+//RS 
+//RS struct OriginSurface {
+//RS     bindgen: Vec<(ExternFn, (String, String))>,
+//RS     overlay: Vec<(ExternFn, (String, String))>,
+//RS }
+//RS 
+//RS pub fn assemble_with_provenance(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<CffiDiagnostic>> {
+//RS     assemble_with_provenance_and_overlays(bundle, &BTreeMap::new())
+//RS }
+//RS 
+//RS pub fn assemble_with_provenance_and_overlays(
+//RS     bundle: &mut ProgramBundle,
+//RS     overlays: &BTreeMap<String, HandleOverlay>,
+//RS ) -> Result<CFfi, Vec<CffiDiagnostic>> {
+//RS     let admitted_overlays = admit_source_handle_overlays(bundle, overlays);
+//RS     let invalid_diagnostics = invalid_foreign_import_diagnostics(bundle);
+//RS     if !invalid_diagnostics.is_empty() {
+//RS         return Err(map_diagnostics(
+//RS             bundle,
+//RS             assembly_origins(bundle),
+//RS             invalid_diagnostics,
+//RS         ));
+//RS     }
+//RS     // `assemble` rejects duplicate C imports before it discovers generated
+// END-PORT-PENDING 2056 crates/jet-pkg-model/src/CFFI.rs:1-1800
+

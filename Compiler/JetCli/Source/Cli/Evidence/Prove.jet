@@ -1,0 +1,1824 @@
+// PORT-PENDING 0703 source-cmdprove-slice-1: Source/CmdProve.rs:1-1820
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-PROVE-SEM1: first real `jet prove` producer tranche.
+//RS //!
+//RS //! This owns target discovery, front-end evidence, runtime producers, and the
+//RS //! canonical ProofReport/artifact boundary.
+//RS 
+//RS use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+//RS use std::fs;
+//RS use std::io::Write;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::exit;
+//RS use std::process::Command;
+//RS use std::process::Stdio;
+//RS use std::time::{Duration, Instant};
+//RS 
+//RS use jet::Diagnostics::{span_line_col, Diagnostic, Severity};
+//RS use jet::ExitCodes;
+//RS use jet::RecordIndex::{
+//RS     RecordCapture, RecordIdentity, RecordIndex, RecordIndexEntry, RecordKind, RecordLink,
+//RS };
+//RS use jet::AST::{Expr, Func, Item, Stmt};
+//RS use jet_foundation::DataTree::DataTree;
+//RS use jet_foundation::Evidence::{
+//RS     decode_report_bytes, EvidenceKind, EvidenceOutcome, EvidenceReport,
+//RS };
+//RS use jet_foundation::Facts::{
+//RS     DerivationDisposition, DerivationIdentity, DerivationMethod, DerivationRecord,
+//RS };
+//RS use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
+//RS use jet_foundation::JSON::parse_json;
+//RS 
+//RS use crate::ProveReplay::json_str as json;
+//RS 
+//RS #[derive(Clone)]
+//RS struct Member {
+//RS     path: String,
+//RS     bytes: Vec<u8>,
+//RS     sha256: String,
+//RS }
+//RS 
+//RS struct Target {
+//RS     kind: &'static str,
+//RS     root: String,
+//RS     authority_root: PathBuf,
+//RS     mir: jet_foundation::MIR::MirProgramIdentity,
+//RS     members: Vec<Member>,
+//RS     identity_members: Vec<(String, String)>,
+//RS     input_sha256: String,
+//RS     source_digest: String,
+//RS     build_digest: String,
+//RS     core_abi: String,
+//RS     lock_digest: String,
+//RS }
+//RS 
+//RS struct ProofArtifact {
+//RS     artifact_id: String,
+//RS     path: PathBuf,
+//RS     size: u64,
+//RS }
+//RS 
+//RS fn index_artifact(
+//RS     identity: RecordIdentity,
+//RS     kind: RecordKind,
+//RS     artifact_id: String,
+//RS     path: PathBuf,
+//RS     size: u64,
+//RS     capture: RecordCapture,
+//RS     consumed: Vec<RecordLink>,
+//RS     produced: Vec<RecordLink>,
+//RS     save_requested: bool,
+//RS ) -> Result<RecordLink, String> {
+//RS     let absolute = if path.is_absolute() {
+//RS         path
+//RS     } else {
+//RS         std::env::current_dir()
+//RS             .map_err(|error| error.to_string())?
+//RS             .join(path)
+//RS     };
+//RS     let project_root = jet::build_project_root(&absolute.to_string_lossy())
+//RS         .map_err(|diagnostics| format!("could not resolve record project root: {diagnostics:?}"))?;
+//RS     let path = absolute
+//RS         .strip_prefix(&project_root)
+//RS         .map_err(|_| format!("record artifact is outside the project: {}", absolute.display()))?
+//RS         .to_path_buf();
+//RS     let mut index = RecordIndex::load_for_project(&project_root)
+//RS         .map_err(|error| format!("could not load record index: {error}"))?;
+//RS     let (recorded_sequence, existing_saved) =
+//RS         if let Some(entry) = index.find(kind, &artifact_id, true) {
+//RS             (entry.recorded_sequence, entry.saved)
+//RS         } else {
+//RS             (
+//RS                 index
+//RS                     .next_recorded_sequence()
+//RS                     .map_err(|error| format!("could not allocate record sequence: {error}"))?,
+//RS                 false,
+//RS             )
+//RS         };
+//RS     let entry = RecordIndexEntry::new(identity, kind, artifact_id.clone(), path)
+//RS         .map_err(|error| format!("could not construct {kind} record: {error}"))?
+//RS         .with_links(consumed, produced)
+//RS         .map_err(|error| format!("could not link {kind} record `{artifact_id}`: {error}"))?
+//RS         .with_capture(capture)
+//RS         .with_size(size)
+//RS         .with_recorded_sequence(recorded_sequence)
+//RS         .with_saved(existing_saved || save_requested);
+//RS     index
+//RS         .update_and_store(entry)
+//RS         .map_err(|error| format!("could not store {kind} record `{artifact_id}`: {error}"))?;
+//RS     RecordLink::new(kind, artifact_id)
+//RS         .map_err(|error| format!("could not link {kind} record: {error}"))
+//RS }
+//RS 
+//RS fn produced_receipt_links(target: &Target) -> Vec<RecordLink> {
+//RS     let Ok(claim_key) = std::env::var(jet::ReceiptStore::JET_RECEIPT_RECORD_CLAIM_ENV) else {
+//RS         return Vec::new();
+//RS     };
+//RS     if claim_key.len() != 64
+//RS         || !claim_key
+//RS             .bytes()
+//RS             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+//RS     {
+//RS         return Vec::new();
+//RS     }
+//RS     let Ok(expected_identity) = RecordIdentity::new(
+//RS         target.input_sha256.clone(),
+//RS         env!("CARGO_PKG_VERSION"),
+//RS         "jet-receipt-v2",
+//RS     ) else {
+//RS         return Vec::new();
+//RS     };
+//RS     let Ok(index) = RecordIndex::load_for_project(&target.authority_root) else {
+//RS         return Vec::new();
+//RS     };
+//RS     let Some(indexed) = index.find(RecordKind::Receipt, &claim_key, true) else {
+//RS         return Vec::new();
+//RS     };
+//RS     if indexed.identity != expected_identity {
+//RS         return Vec::new();
+//RS     }
+//RS     RecordLink::new(RecordKind::Receipt, claim_key)
+//RS         .ok()
+//RS         .into_iter()
+//RS         .collect()
+//RS }
+//RS 
+//RS fn write_authoritative_bytes(path: &Path, bytes: &[u8], label: &str) -> Result<u64, String> {
+//RS     ensure_artifact_parent(path)?;
+//RS     if let Ok(metadata) = fs::symlink_metadata(path) {
+//RS         if metadata.file_type().is_symlink() || !metadata.is_file() {
+//RS             return Err(format!(
+//RS                 "final {label} path is not a regular file: {}",
+//RS                 path.display()
+//RS             ));
+//RS         }
+//RS         let existing = fs::read(path).map_err(|error| error.to_string())?;
+//RS         if existing == bytes {
+//RS             return u64::try_from(existing.len()).map_err(|_| format!("{label} is too large"));
+//RS         }
+//RS         return Err(format!(
+//RS             "refusing to overwrite differing {label} at {}",
+//RS             path.display()
+//RS         ));
+//RS     }
+//RS     let tmp = path.with_extension(format!(
+//RS         "{}.tmp.{}.{}",
+//RS         path.extension()
+//RS             .and_then(|extension| extension.to_str())
+//RS             .unwrap_or("artifact"),
+//RS         std::process::id(),
+//RS         jet::SHA256::sha256_hex(bytes)
+//RS             .get(..8)
+//RS             .unwrap_or("00000000")
+//RS     ));
+//RS     let write_result = (|| -> Result<(), String> {
+//RS         let mut file = fs::OpenOptions::new()
+//RS             .write(true)
+//RS             .create_new(true)
+//RS             .open(&tmp)
+//RS             .map_err(|error| error.to_string())?;
+//RS         #[cfg(unix)]
+//RS         {
+//RS             use std::os::unix::fs::PermissionsExt;
+//RS             file.set_permissions(fs::Permissions::from_mode(0o600))
+//RS                 .map_err(|error| error.to_string())?;
+//RS         }
+//RS         file.write_all(bytes).map_err(|error| error.to_string())?;
+//RS         file.sync_all().map_err(|error| error.to_string())?;
+//RS         match fs::hard_link(&tmp, path) {
+//RS             Ok(()) => {}
+//RS             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+//RS                 let metadata = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+//RS                 if metadata.file_type().is_symlink() || !metadata.is_file() {
+//RS                     return Err(format!(
+//RS                         "final {label} path is not a regular file: {}",
+//RS                         path.display()
+//RS                     ));
+//RS                 }
+//RS                 let existing = fs::read(path).map_err(|e| e.to_string())?;
+//RS                 if existing != bytes {
+//RS                     return Err(format!(
+//RS                         "refusing to overwrite differing {label} at {}",
+//RS                         path.display()
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             Err(error) => return Err(error.to_string()),
+//RS         }
+//RS         fs::remove_file(&tmp).map_err(|error| error.to_string())?;
+//RS         #[cfg(unix)]
+//RS         if let Some(parent) = path.parent() {
+//RS             fs::File::open(parent)
+//RS                 .map_err(|error| error.to_string())?
+//RS                 .sync_all()
+//RS                 .map_err(|error| error.to_string())?;
+//RS         }
+//RS         Ok(())
+//RS     })();
+//RS     if let Err(error) = write_result {
+//RS         let _ = fs::remove_file(&tmp);
+//RS         return Err(error);
+//RS     }
+//RS     u64::try_from(bytes.len()).map_err(|_| format!("{label} is too large"))
+//RS }
+//RS 
+//RS fn persist_evidence_report(target: &Target, report: &EvidenceReport) -> Result<RecordLink, String> {
+//RS     let report_id = report.identity.report_id.as_str();
+//RS     if report_id.is_empty()
+//RS         || report_id.contains('/')
+//RS         || report_id.contains('\\')
+//RS         || report_id == "."
+//RS         || report_id == ".."
+//RS     {
+//RS         return Err(format!(
+//RS             "evidence report has an unsafe report id `{report_id}`"
+//RS         ));
+//RS     }
+//RS     let identity = RecordIdentity::new(
+//RS         target.input_sha256.clone(),
+//RS         report.build.toolchain.clone(),
+//RS         report.producer.as_str(),
+//RS     )?;
+//RS     let path = target
+//RS         .authority_root
+//RS         .join(".jet/evidence")
+//RS         .join(format!("{report_id}.json"));
+//RS     let bytes = report.encode()?;
+//RS     let size = write_authoritative_bytes(&path, &bytes, "evidence report")?;
+//RS     index_artifact(
+//RS         identity,
+//RS         RecordKind::Evidence,
+//RS         report_id.to_string(),
+//RS         path,
+//RS         size,
+//RS         RecordCapture::Safe,
+//RS         Vec::new(),
+//RS         Vec::new(),
+//RS         true,
+//RS     )
+//RS }
+//RS fn replay_artifact_id(bytes: &[u8]) -> Result<String, String> {
+//RS     if bytes.len() < 16 {
+//RS         return Err("replay artifact is truncated before its header".into());
+//RS     }
+//RS     let header_len = u32::from_le_bytes(
+//RS         bytes[12..16]
+//RS             .try_into()
+//RS             .map_err(|_| "replay header length is invalid".to_string())?,
+//RS     ) as usize;
+//RS     let header_end = 16usize
+//RS         .checked_add(header_len)
+//RS         .ok_or_else(|| "replay header length overflows".to_string())?;
+//RS     if header_end > bytes.len() {
+//RS         return Err("replay artifact header is truncated".into());
+//RS     }
+//RS     let header = std::str::from_utf8(&bytes[16..header_end])
+//RS         .map_err(|_| "replay artifact header is not UTF-8".to_string())?;
+//RS     let DataTree::Object(fields) =
+//RS         parse_json(header).map_err(|_| "replay artifact header is not valid JSON".to_string())?
+//RS     else {
+//RS         return Err("replay artifact header is not a JSON object".into());
+//RS     };
+//RS     let Some(artifact_id) = fields.iter().find_map(|(key, value)| {
+//RS         (key == "artifact_id")
+//RS             .then(|| value.as_str().ok())
+//RS             .flatten()
+//RS     }) else {
+//RS         return Err("replay artifact header has no artifact_id".into());
+//RS     };
+//RS     Ok(artifact_id.to_string())
+//RS }
+//RS 
+//RS pub(crate) fn index_replay_artifact(
+//RS     path: &Path,
+//RS     identity: &crate::ProveReplay::ReplayIdentity,
+//RS     capture: RecordCapture,
+//RS     save_requested: bool,
+//RS ) -> Result<RecordLink, String> {
+//RS     let bytes = fs::read(path).map_err(|error| {
+//RS         format!(
+//RS             "could not read replay artifact `{}` for indexing: {error}",
+//RS             path.display()
+//RS         )
+//RS     })?;
+//RS     let artifact_id = replay_artifact_id(&bytes)?;
+//RS     let record_identity = identity.record_identity()?;
+//RS     let size =
+//RS         u64::try_from(bytes.len()).map_err(|_| "replay artifact is too large".to_string())?;
+//RS     index_artifact(
+//RS         record_identity,
+//RS         RecordKind::Replay,
+//RS         artifact_id,
+//RS         path.to_path_buf(),
+//RS         size,
+//RS         capture,
+//RS         Vec::new(),
+//RS         Vec::new(),
+//RS         save_requested,
+//RS     )
+//RS }
+//RS 
+//RS fn validate_artifact_id(id: &str) -> Result<(), String> {
+//RS     if id.len() != 24 || !id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+//RS         return Err("replay artifact id must be 24 lowercase hexadecimal bytes".into());
+//RS     }
+//RS     if id.bytes().any(|byte| byte.is_ascii_uppercase()) {
+//RS         return Err("replay artifact id must use lowercase hexadecimal bytes".into());
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn saved_replay_relative_path(id: &str) -> PathBuf {
+//RS     PathBuf::from(format!(".jet/records/saved/{id}"))
+//RS }
+//RS 
+//RS 
+//RS fn validate_replay_input_path(raw: &str) -> Result<PathBuf, String> {
+//RS     if raw.is_empty() {
+//RS         return Err("replay artifact path is empty".into());
+//RS     }
+//RS     if raw.contains('\0') || raw.contains('\\') || raw.starts_with('/') {
+//RS         return Err("replay artifact path must stay project-relative".into());
+//RS     }
+//RS     if raw.split('/').any(|component| component.is_empty()) {
+//RS         return Err("replay artifact path must use non-empty components".into());
+//RS     }
+//RS     let path = PathBuf::from(raw);
+//RS     if path.components().any(|component| {
+//RS         matches!(
+//RS             component,
+//RS             std::path::Component::CurDir
+//RS                 | std::path::Component::ParentDir
+//RS                 | std::path::Component::RootDir
+//RS                 | std::path::Component::Prefix(_)
+//RS         )
+//RS     }) {
+//RS         return Err("replay artifact path contains an unsafe component".into());
+//RS     }
+//RS     let is_saved = path.parent() == Some(Path::new(".jet/records/saved"))
+//RS         && path
+//RS             .file_name()
+//RS             .and_then(|name| name.to_str())
+//RS             .is_some_and(|name| validate_artifact_id(name).is_ok());
+//RS     if path.extension().and_then(|extension| extension.to_str()) != Some("jetproof-replay")
+//RS         && !is_saved
+//RS     {
+//RS         return Err(
+//RS             "replay input must be a canonical index id or `.jetproof-replay` artifact path".into(),
+//RS         );
+//RS     }
+//RS     Ok(path)
+//RS }
+//RS 
+//RS fn resolve_indexed_replay(
+//RS     index: &RecordIndex,
+//RS     raw: &str,
+//RS ) -> Result<Option<RecordIndexEntry>, String> {
+//RS     if let Some(entry) = index.find(RecordKind::Replay, raw, true) {
+//RS         return Ok(Some(entry));
+//RS     }
+//RS     let path = validate_replay_input_path(raw)?;
+//RS     Ok(index
+//RS         .entries_authenticated()
+//RS         .into_iter()
+//RS         .find(|entry| entry.kind == RecordKind::Replay && entry.path == path))
+//RS }
+//RS 
+//RS fn load_record_index(project_root: &Path) -> Result<RecordIndex, String> {
+//RS     RecordIndex::load_for_project(project_root)
+//RS         .map_err(|error| format!("could not load record index: {error}"))
+//RS }
+//RS 
+//RS fn mutation_diag(error: (&'static str, String), action: &str, json: bool) -> ! {
+//RS     let (code, why) = error;
+//RS     crate::ProveReplay::emit_prove_diag(
+//RS         code,
+//RS         &format!("replay {action} could not be completed"),
+//RS         &why,
+//RS         &format!("use `--unsave <id>` or capture a fresh replay before retrying {action}"),
+//RS         json,
+//RS     );
+//RS     exit(ExitCodes::USER_ERROR);
+//RS }
+//RS fn prove_status_result(field: &str, value: &str) -> String {
+//RS     let value = StatusValue::parse(value).expect("prove mutation result must be valid JSON");
+//RS     StatusEnvelope::new("prove", true)
+//RS         .with_field(field, value)
+//RS         .json_line()
+//RS }
+//RS fn emit_prove_cli_error(code: &str, what: impl Into<String>, json: bool) {
+//RS     crate::emit_cli_report_for_action(
+//RS         "prove",
+//RS         code,
+//RS         what.into(),
+//RS         "the requested `jet prove` operation could not be completed".to_string(),
+//RS         "check `jet prove --help` and retry".to_string(),
+//RS         json,
+//RS     );
+//RS }
+//RS 
+//RS fn emit_prove_cli_error_with_fix(
+//RS     code: &str,
+//RS     what: impl Into<String>,
+//RS     fix: impl Into<String>,
+//RS     json: bool,
+//RS ) {
+//RS     crate::emit_cli_report_for_action(
+//RS         "prove",
+//RS         code,
+//RS         what.into(),
+//RS         "the requested `jet prove` operation could not be completed".to_string(),
+//RS         fix.into(),
+//RS         json,
+//RS     );
+//RS }
+//RS 
+//RS fn save_replay_command(
+//RS     identity: &crate::ProveReplay::ReplayIdentity,
+//RS     raw: &str,
+//RS ) -> Result<(String, PathBuf, u64), (&'static str, String)> {
+//RS     let project_root = jet::build_project_root(&identity.entry)
+//RS         .map_err(|diagnostics| ("E3622", format!("could not resolve replay project root: {diagnostics:?}")))?;
+//RS     let mut index = load_record_index(&project_root).map_err(|error| ("E3622", error))?;
+//RS     let Some(entry) = resolve_indexed_replay(&index, raw).map_err(|error| ("E3621", error))? else {
+//RS         return Err((
+//RS             "E3621",
+//RS             format!("replay `{raw}` is not an indexed replay artifact"),
+//RS         ));
+//RS     };
+//RS     let record_identity = identity
+//RS         .record_identity()
+//RS         .map_err(|error| ("E3621", error))?;
+//RS     if entry.identity != record_identity {
+//RS         return Err((
+//RS             "E3621",
+//RS             format!(
+//RS                 "replay `{}` belongs to a different target identity",
+//RS                 entry.artifact_id
+//RS             ),
+//RS         ));
+//RS     }
+//RS     validate_artifact_id(&entry.artifact_id).map_err(|error| ("E3621", error))?;
+//RS     let source_path = project_root.join(&entry.path);
+//RS     let source_text = source_path.to_string_lossy().into_owned();
+//RS     let prepared = if entry.saved {
+//RS         crate::ProveReplay::prepare_saved_replay(identity, &source_path)
+//RS     } else {
+//RS         crate::ProveReplay::prepare_replay(identity, &source_text)
+//RS     };
+//RS     prepared.map_err(|(code, why)| (code, why))?;
+//RS     let source_bytes = fs::read(&source_path).map_err(|error| {
+//RS         (
+//RS             "E3622",
+//RS             format!(
+//RS                 "could not read indexed replay `{}` for saving: {error}",
+//RS                 source_path.display()
+//RS             ),
+//RS         )
+//RS     })?;
+//RS     let actual_id = replay_artifact_id(&source_bytes).map_err(|error| ("E3622", error))?;
+//RS     if actual_id != entry.artifact_id {
+//RS         return Err((
+//RS             "E3621",
+//RS             format!(
+//RS                 "indexed replay id `{}` does not match its authoritative bytes",
+//RS                 entry.artifact_id
+//RS             ),
+//RS         ));
+//RS     }
+//RS     let source_size = u64::try_from(source_bytes.len())
+//RS         .map_err(|_| ("E3622", "replay artifact is too large".into()))?;
+//RS     if source_size != entry.size {
+//RS         return Err((
+//RS             "E3621",
+//RS             format!(
+//RS                 "indexed replay `{}` records {} bytes but contains {}",
+//RS                 entry.artifact_id, entry.size, source_size
+//RS             ),
+//RS         ));
+//RS     }
+//RS     let destination_relative = saved_replay_relative_path(&entry.artifact_id);
+//RS     let destination = project_root.join(&destination_relative);
+//RS     let source_hash = jet::SHA256::sha256_hex(&source_bytes);
+//RS     write_authoritative_bytes(&destination, &source_bytes, "saved replay").map_err(|error| {
+//RS         (
+//RS             "E3623",
+//RS             format!(
+//RS                 "could not publish saved replay `{}`: {error}",
+//RS                 entry.artifact_id
+//RS             ),
+//RS         )
+//RS     })?;
+//RS     let saved_bytes = fs::read(&destination).map_err(|error| {
+//RS         (
+//RS             "E3623",
+//RS             format!(
+//RS                 "could not verify saved replay `{}`: {error}",
+//RS                 entry.artifact_id
+//RS             ),
+//RS         )
+//RS     })?;
+//RS     let saved_size = u64::try_from(saved_bytes.len())
+//RS         .map_err(|_| ("E3623", "saved replay is too large".into()))?;
+//RS     if saved_size != source_size || jet::SHA256::sha256_hex(&saved_bytes) != source_hash {
+//RS         return Err((
+//RS             "E3623",
+//RS             format!(
+//RS                 "saved replay `{}` failed byte and size verification",
+//RS                 entry.artifact_id
+//RS             ),
+//RS         ));
+//RS     }
+//RS     let saved = index
+//RS         .save_replay_and_store(
+//RS             &entry.artifact_id,
+//RS             &record_identity,
+//RS             destination_relative,
+//RS             saved_size,
+//RS         )
+//RS         .map_err(|error| ("E3621", error))?;
+//RS     Ok((saved.artifact_id, saved.path, saved.size))
+//RS }
+//RS 
+//RS fn ordinary_replay_for_id(
+//RS     project_root: &Path,
+//RS     id: &str,
+//RS ) -> Result<Option<(PathBuf, u64)>, String> {
+//RS     let directory = project_root.join(".jet/replays");
+//RS     let entries = match fs::read_dir(&directory) {
+//RS         Ok(entries) => entries,
+//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+//RS         Err(error) => return Err(format!("could not inspect replay directory: {error}")),
+//RS     };
+//RS     let mut candidates = Vec::new();
+//RS     for item in entries {
+//RS         let item = item.map_err(|error| error.to_string())?;
+//RS         let path = item.path();
+//RS         let metadata = item
+//RS             .metadata()
+//RS             .map_err(|error| format!("could not inspect replay candidate: {error}"))?;
+//RS         if item
+//RS             .file_type()
+//RS             .map_err(|error| error.to_string())?
+//RS             .is_symlink()
+//RS             || !metadata.is_file()
+//RS             || path.extension().and_then(|extension| extension.to_str()) != Some("jetproof-replay")
+//RS         {
+//RS             continue;
+//RS         }
+//RS         let bytes = fs::read(&path).map_err(|error| error.to_string())?;
+//RS         if replay_artifact_id(&bytes).ok().as_deref() == Some(id) {
+//RS             let relative = path
+//RS                 .strip_prefix(project_root)
+//RS                 .map_err(|_| "replay artifact escaped its project root".to_string())?
+//RS                 .to_path_buf();
+//RS             candidates.push((
+//RS                 relative,
+//RS                 u64::try_from(bytes.len())
+//RS                     .map_err(|_| "replay artifact is too large".to_string())?,
+//RS             ));
+//RS         }
+//RS     }
+//RS     candidates.sort_by(|left, right| left.0.cmp(&right.0));
+//RS     Ok(candidates.into_iter().next())
+//RS }
+//RS 
+//RS fn unsave_replay_command(
+//RS     id: &str,
+//RS     identity: &crate::ProveReplay::ReplayIdentity,
+//RS ) -> Result<(), (&'static str, String)> {
+//RS     validate_artifact_id(id).map_err(|error| ("E3621", error))?;
+//RS     let project_root = jet::build_project_root(&identity.entry)
+//RS         .map_err(|diagnostics| ("E3622", format!("could not resolve replay project root: {diagnostics:?}")))?;
+//RS     let record_identity = identity
+//RS         .record_identity()
+//RS         .map_err(|error| ("E3621", error))?;
+//RS     let mut index = load_record_index(&project_root).map_err(|error| ("E3622", error))?;
+//RS     let Some(entry) = index.find(RecordKind::Replay, id, true) else {
+//RS         return Err(("E3623", format!("saved replay `{id}` is not indexed")));
+//RS     };
+//RS     if entry.identity != record_identity {
+//RS         return Err((
+//RS             "E3621",
+//RS             format!("replay `{id}` belongs to a different target identity"),
+//RS         ));
+//RS     }
+//RS     let expected_relative = saved_replay_relative_path(id);
+//RS     if !entry.saved || entry.path != expected_relative {
+//RS         return Err((
+//RS             "E3623",
+//RS             format!("replay `{id}` is not an exact saved replay claim"),
+//RS         ));
+//RS     }
+//RS     let expected_path = project_root.join(&expected_relative);
+//RS     let mut tombstone = None;
+//RS     match fs::symlink_metadata(&expected_path) {
+//RS         Ok(metadata) => {
+//RS             if metadata.file_type().is_symlink() || !metadata.is_file() {
+//RS                 return Err((
+//RS                     "E3623",
+//RS                     format!("saved replay `{id}` is not a regular file"),
+//RS                 ));
+//RS             }
+//RS             let temporary =
+//RS                 expected_path.with_extension(format!("unsave.tmp.{}", std::process::id()));
+//RS             fs::rename(&expected_path, &temporary).map_err(|error| {
+//RS                 (
+//RS                     "E3623",
+//RS                     format!("could not stage saved replay `{id}` for removal: {error}"),
+//RS                 )
+//RS             })?;
+//RS             tombstone = Some(temporary);
+//RS         }
+//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+//RS         Err(error) => {
+//RS             return Err((
+//RS                 "E3623",
+//RS                 format!("could not inspect saved replay `{id}`: {error}"),
+//RS             ))
+//RS         }
+//RS     }
+//RS     let restored =
+//RS         ordinary_replay_for_id(&project_root, id).map_err(|error| ("E3622", error))?;
+//RS     let mutation = if let Some((path, size)) = restored {
+//RS         let mut ordinary = entry.clone();
+//RS         ordinary.path = path;
+//RS         ordinary.size = size;
+//RS         ordinary.saved = false;
+//RS         index.replace_and_store(ordinary)
+//RS     } else {
+//RS         index.remove_replay_and_store(id).map(|_| ())
+//RS     };
+//RS     if let Err(error) = mutation {
+//RS         if let Some(tombstone) = tombstone {
+//RS             let _ = fs::rename(tombstone, &expected_path);
+//RS         }
+//RS         return Err(("E3623", error));
+//RS     }
+//RS     if let Some(tombstone) = tombstone {
+//RS         fs::remove_file(tombstone).map_err(|error| {
+//RS             (
+//RS                 "E3623",
+//RS                 format!("saved replay `{id}` was unpublished but cleanup failed: {error}"),
+//RS             )
+//RS         })?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS struct FrontEndItem {
+//RS     id: String,
+//RS     path: String,
+//RS     diagnostic: Option<Diagnostic>,
+//RS     source: String,
+//RS     facet: &'static str,
+//RS     line: usize,
+//RS     column: usize,
+//RS }
+//RS 
+//RS struct FrontEndWarning {
+//RS     path: String,
+//RS     source: String,
+//RS     diagnostic: Diagnostic,
+//RS }
+//RS 
+//RS struct ContractDeclaration {
+//RS     id: String,
+//RS     path: String,
+//RS     line: usize,
+//RS     column: usize,
+//RS     marker: &'static str,
+//RS     message: Option<String>,
+//RS }
+//RS 
+//RS struct TestItem {
+//RS     id: String,
+//RS     path: String,
+//RS     state: u8,
+//RS     kind: u8,
+//RS     message: String,
+//RS     line: u32,
+//RS     name: String,
+//RS     seed: String,
+//RS     case_index: u64,
+//RS     generated: bool,
+//RS     generated_count: u64,
+//RS     reason: String,
+//RS }
+//RS 
+//RS struct GeneratedFailure {
+//RS     seed: u64,
+//RS     case_index: u64,
+//RS     input: String,
+//RS }
+//RS 
+//RS enum ChildOutcome {
+//RS     Exited(Option<i32>),
+//RS     TimedOut,
+//RS     LaunchFailed,
+//RS }
+//RS const DEFAULT_PROPERTY_SEED: u64 = 0x5EED_1234_ABCD_0001;
+//RS 
+//RS fn generated_failure_root(target: &Target) -> &Path {
+//RS     &target.authority_root
+//RS }
+//RS 
+//RS fn generated_failure_path(target: &Target, member: &Member) -> PathBuf {
+//RS     generated_failure_root(target)
+//RS         .join(".jet/records/generated")
+//RS         .join(format!("{}-{}.json", target.input_sha256, member.sha256))
+//RS }
+//RS const HISTORY_ARTIFACT_PREFIX: &str = "history-artifact ";
+//RS 
+//RS fn history_artifact_path(target: &Target, member: &Member) -> PathBuf {
+//RS     generated_failure_root(target)
+//RS         .join(".jet/records/generated")
+//RS         .join(format!(
+//RS             "{}-{}.history.json",
+//RS             target.input_sha256, member.sha256
+//RS         ))
+//RS }
+//RS 
+//RS fn parse_history_artifact_detail(detail: &str) -> Option<String> {
+//RS     detail.lines().find_map(|line| {
+//RS         let artifact = line.trim().strip_prefix(HISTORY_ARTIFACT_PREFIX)?;
+//RS         let DataTree::Object(fields) = parse_json(artifact).ok()? else {
+//RS             return None;
+//RS         };
+//RS         let schema = fields
+//RS             .iter()
+//RS             .find_map(|(key, value)| (key == "schema").then(|| value.as_str().ok()).flatten());
+//RS         let version = fields
+//RS             .iter()
+//RS             .find_map(|(key, value)| (key == "version").then_some(value));
+//RS         if schema != Some("jet.testing.history") || !matches!(version, Some(DataTree::Int(1))) {
+//RS             return None;
+//RS         }
+//RS         Some(artifact.to_string())
+//RS     })
+//RS }
+//RS 
+//RS fn clear_history_artifact(target: &Target, member: &Member) -> Result<(), String> {
+//RS     let path = history_artifact_path(target, member);
+//RS     match fs::symlink_metadata(&path) {
+//RS         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+//RS             return Err(format!(
+//RS                 "history artifact path is not a regular file: {}",
+//RS                 path.display()
+//RS             ));
+//RS         }
+//RS         Ok(_) => {}
+//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+//RS         Err(error) => return Err(format!("could not inspect history artifact: {error}")),
+//RS     }
+//RS     fs::remove_file(path).map_err(|error| format!("could not clear history artifact: {error}"))
+//RS }
+//RS 
+//RS fn persist_history_artifact(
+//RS     target: &Target,
+//RS     member: &Member,
+//RS     report: &EvidenceReport,
+//RS ) -> Result<(), String> {
+//RS     let mut has_property = false;
+//RS     let mut artifact = None;
+//RS     for record in &report.records {
+//RS         if !matches!(record.kind, EvidenceKind::Property) {
+//RS             continue;
+//RS         }
+//RS         has_property = true;
+//RS         if matches!(
+//RS             record.outcome,
+//RS             EvidenceOutcome::Failed | EvidenceOutcome::Error
+//RS         ) {
+//RS             if let Some(value) = parse_history_artifact_detail(&record.detail) {
+//RS                 artifact = Some(value);
+//RS                 break;
+//RS             }
+//RS         }
+//RS     }
+//RS     match artifact {
+//RS         Some(value) => {
+//RS             let path = history_artifact_path(target, member);
+//RS             let bytes = format!("{value}\n").into_bytes();
+//RS             write_authoritative_bytes(&path, &bytes, "history artifact")?;
+//RS             Ok(())
+//RS         }
+//RS         None if has_property => clear_history_artifact(target, member),
+//RS         None => Ok(()),
+//RS     }
+//RS }
+//RS 
+//RS fn parse_generated_failure_detail(detail: &str) -> Option<GeneratedFailure> {
+//RS     detail.lines().find_map(|line| {
+//RS         let rest = line.trim().strip_prefix("seed ")?;
+//RS         let (seed, rest) = rest.split_once(" case ")?;
+//RS         let (case_index, rest) = rest.split_once(':')?;
+//RS         let input_marker = " (input ";
+//RS         let input_start = rest.rfind(input_marker)?;
+//RS         let input = rest[input_start + input_marker.len()..]
+//RS             .strip_suffix(')')?
+//RS             .to_owned();
+//RS         Some(GeneratedFailure {
+//RS             seed: seed.parse().ok()?,
+//RS             case_index: case_index.parse().ok()?,
+//RS             input,
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn read_generated_failure(target: &Target, member: &Member) -> Option<GeneratedFailure> {
+//RS     let path = generated_failure_path(target, member);
+//RS     let metadata = fs::symlink_metadata(&path).ok()?;
+//RS     if metadata.file_type().is_symlink() || !metadata.is_file() {
+//RS         return None;
+//RS     }
+//RS     let text = fs::read_to_string(path).ok()?;
+//RS     let DataTree::Object(fields) = parse_json(&text).ok()? else {
+//RS         return None;
+//RS     };
+//RS     let field = |name: &str| {
+//RS         fields
+//RS             .iter()
+//RS             .find_map(|(key, value)| (key == name).then_some(value))
+//RS     };
+//RS     if !matches!(field("version"), Some(DataTree::Int(1)))
+//RS         || !matches!(
+//RS             field("target").and_then(|value| value.as_str().ok()),
+//RS             Some(value) if value == target.input_sha256
+//RS         )
+//RS         || !matches!(
+//RS             field("member").and_then(|value| value.as_str().ok()),
+//RS             Some(value) if value == member.sha256
+//RS         )
+//RS     {
+//RS         return None;
+//RS     }
+//RS     let parse_u64 = |value: Option<&DataTree>| match value {
+//RS         Some(DataTree::Int(value)) if *value >= 0 => u64::try_from(*value).ok(),
+//RS         Some(DataTree::Text(value)) | Some(DataTree::TypedText(value)) => value.parse().ok(),
+//RS         _ => None,
+//RS     };
+//RS     let seed = parse_u64(field("seed"))?;
+//RS     let case_index = parse_u64(field("caseIndex"))?;
+//RS     let input = field("input")
+//RS         .and_then(|value| value.as_str().ok())?
+//RS         .to_string();
+//RS     Some(GeneratedFailure {
+//RS         seed,
+//RS         case_index,
+//RS         input,
+//RS     })
+//RS }
+//RS 
+//RS fn write_generated_failure(
+//RS     target: &Target,
+//RS     member: &Member,
+//RS     failure: &GeneratedFailure,
+//RS ) -> Result<(), String> {
+//RS     let path = generated_failure_path(target, member);
+//RS     ensure_artifact_parent(&path)?;
+//RS     if let Ok(metadata) = fs::symlink_metadata(&path) {
+//RS         if metadata.file_type().is_symlink() || !metadata.is_file() {
+//RS             return Err(format!(
+//RS                 "generated failure path is not a regular file: {}",
+//RS                 path.display()
+//RS             ));
+//RS         }
+//RS     }
+//RS     let seed = if failure.seed <= i64::MAX as u64 {
+//RS         failure.seed.to_string()
+//RS     } else {
+//RS         json(&failure.seed.to_string())
+//RS     };
+//RS     let case_index = if failure.case_index <= i64::MAX as u64 {
+//RS         failure.case_index.to_string()
+//RS     } else {
+//RS         json(&failure.case_index.to_string())
+//RS     };
+//RS     let contents = format!(
+//RS         "{{\"caseIndex\":{},\"input\":{},\"member\":{},\"seed\":{},\"target\":{},\"version\":1}}\n",
+//RS         case_index,
+//RS         json(&failure.input),
+//RS         json(&member.sha256),
+//RS         seed,
+//RS         json(&target.input_sha256),
+//RS     );
+//RS     let temporary = path.with_extension(format!(
+//RS         "json.tmp.{}.{}",
+//RS         std::process::id(),
+//RS         &jet::SHA256::sha256_hex(contents.as_bytes())[..8]
+//RS     ));
+//RS     use std::io::Write;
+//RS     let write_result = (|| -> Result<(), String> {
+//RS         let mut file = fs::OpenOptions::new()
+//RS             .write(true)
+//RS             .create_new(true)
+//RS             .open(&temporary)
+//RS             .map_err(|error| error.to_string())?;
+//RS         file.write_all(contents.as_bytes())
+//RS             .map_err(|error| error.to_string())?;
+//RS         file.sync_all().map_err(|error| error.to_string())?;
+//RS         Ok(())
+//RS     })();
+//RS     if let Err(error) = write_result {
+//RS         let _ = fs::remove_file(&temporary);
+//RS         return Err(format!(
+//RS             "could not write generated failure `{}`: {error}",
+//RS             temporary.display()
+//RS         ));
+//RS     }
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::PermissionsExt;
+//RS         fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600)).map_err(|error| {
+//RS             format!(
+//RS                 "could not protect generated failure `{}`: {error}",
+//RS                 temporary.display()
+//RS             )
+//RS         })?;
+//RS     }
+//RS     fs::rename(&temporary, &path).map_err(|error| {
+//RS         let _ = fs::remove_file(&temporary);
+//RS         format!(
+//RS             "could not publish generated failure `{}`: {error}",
+//RS             path.display()
+//RS         )
+//RS     })?;
+//RS     if let Some(parent) = path.parent() {
+//RS         fs::File::open(parent)
+//RS             .map_err(|error| error.to_string())?
+//RS             .sync_all()
+//RS             .map_err(|error| error.to_string())?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn clear_generated_failure(target: &Target, member: &Member) -> Result<(), String> {
+//RS     let path = generated_failure_path(target, member);
+//RS     match fs::symlink_metadata(&path) {
+//RS         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+//RS             return Err(format!(
+//RS                 "generated failure path is not a regular file: {}",
+//RS                 path.display()
+//RS             ));
+//RS         }
+//RS         Ok(_) => {}
+//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+//RS         Err(error) => return Err(format!("could not inspect generated failure: {error}")),
+//RS     }
+//RS     fs::remove_file(path).map_err(|error| format!("could not clear generated failure: {error}"))
+//RS }
+//RS 
+//RS fn persist_generated_failure(
+//RS     target: &Target,
+//RS     member: &Member,
+//RS     report: &EvidenceReport,
+//RS ) -> Result<(), String> {
+//RS     persist_history_artifact(target, member, report)?;
+//RS     let mut has_property = false;
+//RS     let mut failure = None;
+//RS     for record in &report.records {
+//RS         if !matches!(record.kind, EvidenceKind::Property) {
+//RS             continue;
+//RS         }
+//RS         has_property = true;
+//RS         if matches!(
+//RS             record.outcome,
+//RS             EvidenceOutcome::Failed | EvidenceOutcome::Error
+//RS         ) {
+//RS             if let Some(parsed) = parse_generated_failure_detail(&record.detail) {
+//RS                 failure = Some(parsed);
+//RS                 break;
+//RS             }
+//RS         }
+//RS     }
+//RS     match failure {
+//RS         Some(failure) => write_generated_failure(target, member, &failure),
+//RS         None if has_property => clear_generated_failure(target, member),
+//RS         None => Ok(()),
+//RS     }
+//RS }
+//RS 
+//RS fn property_generation_unavailable(message: &str) -> bool {
+//RS     message.starts_with("E0613:")
+//RS         || message.contains("generated inputs are unavailable")
+//RS         || message.contains("has no built-in generator")
+//RS }
+//RS 
+//RS pub(crate) fn run_prove(args: &[String], json: bool) {
+//RS     // A caller cannot smuggle a stale authority into this production path.
+//RS     // Capture/replay are the only owners allowed to install this adapter.
+//RS     std::env::remove_var("JET_PROVE_REPLAY_TIME_MS");
+//RS     let mut positional = Vec::new();
+//RS     let mut lenses = Vec::new();
+//RS     let mut capture: Option<crate::ProveReplay::CaptureOpts> = None;
+//RS     let mut replay: Option<String> = None;
+//RS     let mut save: Option<String> = None;
+//RS     let mut unsave: Option<String> = None;
+//RS     let mut i = 0usize;
+//RS     while i < args.len() {
+//RS         let arg = args[i].as_str();
+//RS         if arg == jet::CLI::MACHINE_OUTPUT_FLAG {
+//RS             i += 1;
+//RS             continue;
+//RS         }
+//RS         if let Some(opts) = crate::ProveReplay::parse_capture_flag(arg) {
+//RS             if capture.is_some() || replay.is_some() {
+//RS                 emit_prove_cli_error(
+//RS                     "E2104",
+//RS                     "`jet prove` accepts at most one of `--capture` / `--replay`",
+//RS                     json,
+//RS                 );
+//RS                 exit(ExitCodes::USAGE);
+//RS             }
+//RS             capture = Some(opts);
+//RS             i += 1;
+//RS             continue;
+//RS         }
+//RS         if let Some(parsed) =
+//RS             crate::ProveReplay::parse_replay_flag(arg, args.get(i + 1).map(String::as_str))
+//RS         {
+//RS             if capture.is_some() || replay.is_some() {
+//RS                 emit_prove_cli_error(
+//RS                     "E2104",
+//RS                     "`jet prove` accepts at most one of `--capture` / `--replay`",
+//RS                     json,
+//RS                 );
+//RS                 exit(ExitCodes::USAGE);
+//RS             }
+//RS             match parsed {
+//RS                 Ok(path) => {
+//RS                     replay = Some(path);
+//RS                     i += if arg == "--replay" { 2 } else { 1 };
+//RS                 }
+//RS                 Err(message) => {
+//RS                     emit_prove_cli_error("E2104", message, json);
+//RS                     exit(ExitCodes::USAGE);
+//RS                 }
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if let Some(value) = arg.strip_prefix("--save=") {
+//RS             if value.is_empty() {
+//RS                 emit_prove_cli_error("E2104", "`--save` needs a replay artifact id or path", json);
+//RS                 exit(ExitCodes::USAGE);
+//RS             }
+//RS             if save.is_some() || unsave.is_some() {
+//RS                 emit_prove_cli_error(
+//RS                     "E2104",
+//RS                     "`jet prove` accepts at most one of `--save` / `--unsave`",
+//RS                     json,
+//RS                 );
+//RS                 exit(ExitCodes::USAGE);
+//RS             }
+//RS             save = Some(value.to_string());
+//RS             i += 1;
+//RS             continue;
+//RS         }
+//RS         if arg == "--save" {
+//RS             let Some(value) = args
+//RS                 .get(i + 1)
+//RS                 .map(String::as_str)
+//RS                 .filter(|value| !value.starts_with('-'))
+//RS             else {
+//RS                 emit_prove_cli_error("E2104", "`--save` needs a replay artifact id or path", json);
+//RS                 exit(ExitCodes::USAGE);
+//RS             };
+//RS             if save.is_some() || unsave.is_some() {
+//RS                 emit_prove_cli_error(
+//RS                     "E2104",
+//RS                     "`jet prove` accepts at most one of `--save` / `--unsave`",
+//RS                     json,
+//RS                 );
+//RS                 exit(ExitCodes::USAGE);
+//RS             }
+//RS             save = Some(value.to_string());
+//RS             i += 2;
+//RS             continue;
+//RS         }
+//RS         if let Some(value) = arg.strip_prefix("--unsave=") {
+//RS             if value.is_empty() {
+//RS                 emit_prove_cli_error("E2104", "`--unsave` needs a replay artifact id", json);
+//RS                 exit(ExitCodes::USAGE);
+//RS             }
+//RS             if save.is_some() || unsave.is_some() {
+//RS                 emit_prove_cli_error(
+//RS                     "E2104",
+//RS                     "`jet prove` accepts at most one of `--save` / `--unsave`",
+//RS                     json,
+//RS                 );
+//RS                 exit(ExitCodes::USAGE);
+//RS             }
+//RS             unsave = Some(value.to_string());
+//RS             i += 1;
+//RS             continue;
+//RS         }
+//RS         if arg == "--unsave" {
+//RS             let Some(value) = args
+//RS                 .get(i + 1)
+//RS                 .map(String::as_str)
+//RS                 .filter(|value| !value.starts_with('-'))
+//RS             else {
+//RS                 emit_prove_cli_error("E2104", "`--unsave` needs a replay artifact id", json);
+//RS                 exit(ExitCodes::USAGE);
+//RS             };
+//RS             if save.is_some() || unsave.is_some() {
+//RS                 emit_prove_cli_error(
+//RS                     "E2104",
+//RS                     "`jet prove` accepts at most one of `--save` / `--unsave`",
+//RS                     json,
+//RS                 );
+//RS                 exit(ExitCodes::USAGE);
+//RS             }
+//RS             unsave = Some(value.to_string());
+//RS             i += 2;
+//RS             continue;
+//RS         }
+//RS         if let Some(value) = arg.strip_prefix("--lens=") {
+//RS             validate_lens(value, positional.first().copied().unwrap_or("TARGET"), json);
+//RS             lenses.push(value.to_string());
+//RS             i += 1;
+//RS             continue;
+//RS         }
+//RS         if arg == "--lens" {
+//RS             let value = args.get(i + 1).map(String::as_str).unwrap_or("");
+//RS             validate_lens(value, positional.first().copied().unwrap_or("TARGET"), json);
+//RS             lenses.push(value.to_string());
+//RS             i += 2;
+//RS             continue;
+//RS         }
+//RS         if arg.starts_with('-') {
+//RS             emit_prove_cli_error("E2102", format!("unknown `jet prove` flag `{arg}`"), json);
+//RS             exit(ExitCodes::USAGE);
+//RS         }
+//RS         positional.push(arg);
+//RS         i += 1;
+//RS     }
+//RS     if positional.len() != 1 {
+//RS         emit_prove_cli_error_with_fix(
+//RS             "E2104",
+//RS             "`jet prove` needs exactly one file, package, or workspace target",
+//RS             "jet prove path/to/program.jet",
+//RS             json,
+//RS         );
+//RS         exit(ExitCodes::USAGE);
+//RS     }
+//RS     let target = match resolve_target(positional[0]) {
+//RS         Ok(target) => target,
+//RS         Err(message) => {
+//RS             emit_prove_cli_error("E2105", message, json);
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS     };
+//RS 
+//RS     let identity = crate::ProveReplay::ReplayIdentity {
+//RS         entry: if target.members.len() == 1 {
+//RS             target.members[0].path.clone()
+//RS         } else {
+//RS             target.root.clone()
+//RS         },
+//RS         source_digest: target.source_digest.clone(),
+//RS         execution_adapter: "mir-v1".to_string(),
+//RS         target_triple: host_target_triple(),
+//RS         abi: "gnu".to_string(),
+//RS         build_digest: target.build_digest.clone(),
+//RS         core_abi: target.core_abi.clone(),
+//RS         lock_digest: target.lock_digest.clone(),
+//RS         profile: "dev".to_string(),
+//RS         semantic_mir_hash: target.mir.semantic_hash.clone(),
+//RS         optimized_mir_hash: target.mir.optimized_hash.clone(),
+//RS         mir_schema: jet_foundation::MIR::MIR_IDENTITY_SCHEMA.to_string(),
+//RS         mir_identity: target.mir.canonical_json(),
+//RS         time_site_id: time_site_id_for_target(&target),
+//RS     };
+//RS     if (save.is_some() || unsave.is_some()) && (capture.is_some() || replay.is_some()) {
+//RS         emit_prove_cli_error(
+//RS             "E2104",
+//RS             "`jet prove` cannot combine `--save` or `--unsave` with capture or replay",
+//RS             json,
+//RS         );
+//RS         exit(ExitCodes::USAGE);
+//RS     }
+//RS     if let Some(id) = unsave.as_deref() {
+//RS         if let Err(error) = unsave_replay_command(id, &identity) {
+//RS             mutation_diag(error, "unsave", json);
+//RS         }
+//RS         if json {
+//RS             let result = format!(
+//RS                 "{{\"artifactId\":{},\"status\":\"removed\"}}",
+//RS                 crate::ProveReplay::json_str(id)
+//RS             );
+//RS             print!("{}", prove_status_result("unsave", &result));
+//RS         } else {
+//RS             println!("UNSAVED  replay {id}");
+//RS         }
+//RS         exit(ExitCodes::OK);
+//RS     }
+//RS     if let Some(raw) = save.as_deref() {
+//RS         let (artifact_id, path, size) = match save_replay_command(&identity, raw) {
+//RS             Ok(saved) => saved,
+//RS             Err(error) => mutation_diag(error, "save", json),
+//RS         };
+//RS         if json {
+//RS             let result = format!(
+//RS                 "{{\"artifactId\":{},\"path\":{},\"size\":{size},\"status\":\"saved\"}}",
+//RS                 crate::ProveReplay::json_str(&artifact_id),
+//RS                 crate::ProveReplay::json_str(&path.to_string_lossy())
+//RS             );
+//RS             print!("{}", prove_status_result("save", &result));
+//RS         } else {
+//RS             println!(
+//RS                 "SAVED    replay {artifact_id} -> {} ({size} bytes)",
+//RS                 path.display()
+//RS             );
+//RS         }
+//RS         exit(ExitCodes::OK);
+//RS     }
+//RS     if (capture.is_some() || replay.is_some()) && target.members.len() != 1 {
+//RS         let paths = target
+//RS             .members
+//RS             .iter()
+//RS             .map(|member| member.path.as_str())
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         crate::ProveReplay::emit_prove_diag(
+//RS             "E3624",
+//RS             "replay target cardinality is not one",
+//RS             &format!(
+//RS                 "the selected {} resolved {} runnable targets: {}",
+//RS                 target.kind,
+//RS                 target.members.len(),
+//RS                 if paths.is_empty() {
+//RS                     "none"
+//RS                 } else {
+//RS                     paths.as_str()
+//RS                 }
+//RS             ),
+//RS             "select one runnable file or package target before capture or replay",
+//RS             json,
+//RS         );
+//RS         exit(ExitCodes::USER_ERROR);
+//RS     }
+//RS     let capture_opts = capture.clone();
+//RS     let capture_authority = if let Some(opts) = capture.as_ref() {
+//RS         match crate::ProveReplay::prepare_safe_capture_at(opts, json, &target.authority_root) {
+//RS             Ok(authority) => Some(authority),
+//RS             Err(status) => exit(status),
+//RS         }
+//RS     } else {
+//RS         None
+//RS     };
+//RS     if let Some(authority) = capture_authority.as_ref() {
+//RS         // The capture authority is the value the real producer observes. The
+//RS         // finalized artifact records this same value, so capture and replay
+//RS         // cannot drift merely because wall time advanced between setup and
+//RS         // serialization.
+//RS         std::env::set_var("JET_PROVE_REPLAY_TIME_MS", authority.time_ms().to_string());
+//RS     }
+//RS     if let Some(opts) = capture_opts.as_ref() {
+//RS         if let Err(status) = preflight_capture_target(&target, opts, json) {
+//RS             exit(status);
+//RS         }
+//RS     }
+//RS     if let Some(raw) = replay.take() {
+//RS         let index = match load_record_index(&target.authority_root) {
+//RS             Ok(index) => index,
+//RS             Err(error) => {
+//RS                 emit_prove_cli_error(
+//RS                     "E2105",
+//RS                     format!("failed to load replay index: {error}"),
+//RS                     json,
+//RS                 );
+//RS                 exit(ExitCodes::ICE);
+//RS             }
+//RS         };
+//RS         replay = match resolve_indexed_replay(&index, &raw) {
+//RS             Ok(Some(entry)) => Some(
+//RS                 target
+//RS                     .authority_root
+//RS                     .join(entry.path)
+//RS                     .to_string_lossy()
+//RS                     .into_owned(),
+//RS             ),
+//RS             Ok(None) => {
+//RS                 let path = Path::new(&raw);
+//RS                 if path.starts_with(Path::new(".jet")) {
+//RS                     Some(
+//RS                         target
+//RS                             .authority_root
+//RS                             .join(path)
+//RS                             .to_string_lossy()
+//RS                             .into_owned(),
+//RS                     )
+//RS                 } else {
+//RS                     Some(raw)
+//RS                 }
+//RS             }
+//RS             Err(error) => {
+//RS                 crate::ProveReplay::emit_prove_diag(
+//RS                     "E3621",
+//RS                     "replay semantic identity could not be resolved",
+//RS                     &error,
+//RS                     "use an indexed replay id or a canonical `.jetproof-replay` path",
+//RS                     json,
+//RS                 );
+//RS                 exit(ExitCodes::USER_ERROR);
+//RS             }
+//RS         };
+//RS     }
+//RS     if replay.is_none() && capture.is_none() {
+//RS         let record_identity = match identity.record_identity() {
+//RS             Ok(identity) => identity,
+//RS             Err(error) => {
+//RS                 emit_prove_cli_error(
+//RS                     "E2105",
+//RS                     format!("failed to identify saved replay claims: {error}"),
+//RS                     json,
+//RS                 );
+//RS                 exit(ExitCodes::ICE);
+//RS             }
+//RS         };
+//RS         let index = match load_record_index(&target.authority_root) {
+//RS             Ok(index) => index,
+//RS             Err(error) => {
+//RS                 emit_prove_cli_error(
+//RS                     "E2105",
+//RS                     format!("failed to load replay index: {error}"),
+//RS                     json,
+//RS                 );
+//RS                 exit(ExitCodes::ICE);
+//RS             }
+//RS         };
+//RS         if let Some(entry) = index.saved_replays(&record_identity).into_iter().next() {
+//RS             replay = Some(
+//RS                 target
+//RS                     .authority_root
+//RS                     .join(entry.path)
+//RS                     .to_string_lossy()
+//RS                     .into_owned(),
+//RS             );
+//RS         }
+//RS     }
+//RS     let replay_path = replay.clone();
+//RS     let mut replay_authority = if let Some(path) = replay {
+//RS         // Existing artifacts get schema/identity validation first. Missing
+//RS         // artifacts keep authority preflight first, so unrecorded IO/time
+//RS         // remains E3623 without opening a path that cannot be replayed.
+//RS         let artifact_present = crate::ProveReplay::replay_artifact_is_present(&path);
+//RS         let authority = if artifact_present {
+//RS             let authority = prepare_replay_or_exit(&identity, &path, json);
+//RS             if let Err(status) = preflight_replay_target(&target, json) {
+//RS                 exit(status);
+//RS             }
+//RS             authority
+//RS         } else {
+//RS             if let Err(status) = preflight_replay_target(&target, json) {
+//RS                 exit(status);
+//RS             }
+//RS             prepare_replay_or_exit(&identity, &path, json)
+//RS         };
+//RS         // Both artifact validation and target authority checks must pass before
+//RS         // the executable target is inspected by the normal producer.
+//RS         let time_sites = capture_sites_for_target(&target)
+//RS             .into_iter()
+//RS             .filter(|site| supported_time_capture_site(site))
+//RS             .count();
+//RS         if time_sites == 0 {
+//RS             crate::ProveReplay::emit_prove_diag(
+//RS                 "E3623",
+//RS                 "replay diverged from captured authority",
+//RS                 "the target has no statically identified `core.time.now` call site for the captured Time record",
+//RS                 "replay the matching target, or recapture a target with one supported Time call",
+//RS                 json,
+//RS             );
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS         std::env::set_var("JET_PROVE_REPLAY_TIME_MS", authority.time_ms.to_string());
+//RS         if !json {
+//RS             eprintln!(
+//RS                 "ambient authority opened: Time; {} exact",
+//RS                 identity.execution_adapter
+//RS             );
+//RS         }
+//RS         Some(authority)
+//RS     } else {
+//RS         None
+//RS     };
+//RS     // Only a validated replay artifact may add replay evidence to the report.
+//RS     // The environment variable is an execution-tier adapter, not proof that a
+//RS     // replay was requested; accepting it here would let ambient process state
+//RS     // forge a replay claim.
+//RS     let replay_time_ms = replay_authority.as_ref().map(|authority| authority.time_ms);
+//RS 
+//RS     let mut items = Vec::new();
+//RS     let mut warnings = Vec::new();
+//RS     let mut declarations = Vec::new();
+//RS     for member in &target.members {
+//RS         let source = String::from_utf8_lossy(&member.bytes).into_owned();
+//RS         let (semantic_items, member_declarations) =
+//RS             semantic_front_end_items(&target, &member.path, &source);
+//RS         declarations.extend(member_declarations);
+//RS         let (errors, member_warnings): (Vec<_>, Vec<_>) = jet::check_with_path(&member.path)
+//RS             .into_iter()
+//RS             .partition(|diagnostic| matches!(diagnostic.severity, Severity::Error));
+//RS         warnings.extend(
+//RS             member_warnings
+//RS                 .into_iter()
+//RS                 .map(|diagnostic| FrontEndWarning {
+//RS                     path: member.path.clone(),
+//RS                     source: source.clone(),
+//RS                     diagnostic,
+//RS                 }),
+//RS         );
+//RS         if errors.is_empty() {
+//RS             items.extend(semantic_items.into_iter().map(|mut item| {
+//RS                 item.source = source.clone();
+//RS                 item
+//RS             }));
+//RS         } else {
+//RS             for diagnostic in errors {
+//RS                 let span = diagnostic_span(&source, &diagnostic);
+//RS                 let (line, column) = diagnostic
+//RS                     .span
+//RS                     .map(|span| span_line_col(&source, span.start))
+//RS                     .unwrap_or((1, 1));
+//RS                 let claim = format!("{}:{}", diagnostic.code, diagnostic.what);
+//RS                 items.push(FrontEndItem {
+//RS                     id: evidence_id(&target, "front_end", &member.path, &span, &claim),
+//RS                     path: member.path.clone(),
+//RS                     diagnostic: Some(diagnostic),
+//RS                     facet: "all",
+//RS                     source: source.clone(),
+//RS                     line,
+//RS                     column,
+//RS                 });
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     let failed = items
+//RS         .iter()
+//RS         .filter(|item| item.diagnostic.is_some())
+//RS         .count();
+//RS     let proved = items.len() - failed;
+//RS     let (tests, producer_exit, evidence_links) = if failed == 0 {
+//RS         match run_test_producers(&target) {
+//RS             Ok(result) => result,
+//RS             Err(message) => {
+//RS                 emit_prove_cli_error(
+//RS                     "E2105",
+//RS                     format!("evidence producer failed: {message}"),
+//RS                     json,
+//RS                 );
+//RS                 exit(ExitCodes::ICE);
+//RS             }
+//RS         }
+//RS     } else {
+//RS         (Vec::new(), ExitCodes::OK, Vec::new())
+//RS     };
+//RS     let test_failed = tests.iter().filter(|item| item.state == 1).count();
+//RS     let budgets = budget_projection(&target);
+//RS     let budget_failed = budgets.facts.iter().any(|fact| fact.outcome == "fail");
+//RS     let enable_solver = lenses.iter().any(|lens| lens == "solver");
+//RS     let solver_members: Vec<(String, String)> = target
+//RS         .members
+//RS         .iter()
+//RS         .map(|member| {
+//RS             (
+//RS                 member.path.clone(),
+//RS                 String::from_utf8_lossy(&member.bytes).into_owned(),
+//RS             )
+//RS         })
+//RS         .collect();
+//RS     // The solver is a projection of the checked front end. Do not let it parse
+//RS     // and discharge a member after sema has rejected another member in the
+//RS     // target; that would turn a failed source check into partial proof output.
+//RS     let solver = if failed == 0 {
+//RS         match crate::ProveSolver::run_solver_producer(
+//RS             &solver_members,
+//RS             &target.input_sha256,
+//RS             enable_solver,
+//RS         ) {
+//RS             Ok(items) => items,
+//RS             Err(message) => {
+//RS                 emit_prove_cli_error("E2105", format!("solver producer failed: {message}"), json);
+//RS                 exit(ExitCodes::ICE);
+//RS             }
+//RS         }
+//RS     } else {
+//RS         Vec::new()
+//RS     };
+//RS     let solver_disproved = solver.iter().any(|item| {
+//RS         matches!(
+//RS             item.outcome,
+//RS             crate::ProveSolver::SolverOutcome::Disproved { .. }
+//RS         )
+//RS     });
+//RS     let mut exit_code = if producer_exit == ExitCodes::ICE {
+//RS         ExitCodes::ICE
+//RS     } else if producer_exit == ExitCodes::RUNTIME_PANIC {
+//RS         ExitCodes::RUNTIME_PANIC
+//RS     } else if producer_exit == ExitCodes::USER_ERROR {
+//RS         ExitCodes::USER_ERROR
+//RS     } else if failed > 0 || test_failed > 0 || budget_failed || solver_disproved {
+//RS         ExitCodes::USER_ERROR
+//RS     } else {
+//RS         ExitCodes::OK
+//RS     };
+//RS     if let Some(authority) = replay_authority.as_mut() {
+//RS         // Consume the one statically authorized record only after the normal
+//RS         // producer has reached the matching call-site proof boundary. A
+//RS         // target with no such site is rejected during preflight; an artifact
+//RS         // with an extra/reordered record is rejected by the cursor checks.
+//RS         if let Err(why) = authority.consume_time() {
+//RS             crate::ProveReplay::emit_prove_diag(
+//RS                 "E3623",
+//RS                 "replay diverged from captured authority",
+//RS                 &why,
+//RS                 "recapture with `--capture` so the normal producer result is authoritative",
+//RS                 json,
+//RS             );
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS         if let Err(why) = authority.finish() {
+//RS             crate::ProveReplay::emit_prove_diag(
+//RS                 "E3623",
+//RS                 "replay diverged from captured authority",
+//RS                 &why,
+//RS                 "recapture with `--capture` so the normal producer result is authoritative",
+//RS                 json,
+//RS             );
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS         let outcome = if exit_code == ExitCodes::RUNTIME_PANIC {
+//RS             "panic"
+//RS         } else {
+//RS             "exit"
+//RS         };
+//RS         if authority.expected_status != exit_code || authority.expected_outcome != outcome {
+//RS             crate::ProveReplay::emit_prove_diag(
+//RS                 "E3623",
+//RS                 "replay diverged from captured authority",
+//RS                 &format!(
+//RS                     "captured outcome={} status={}, current outcome={} status={}",
+//RS                     authority.expected_outcome, authority.expected_status, outcome, exit_code
+//RS                 ),
+//RS                 "recapture with `--capture` so the normal producer result is authoritative",
+//RS                 json,
+//RS             );
+//RS             exit(ExitCodes::USER_ERROR);
+//RS         }
+//RS     }
+//RS     let claims_grade = claim_grade(proved, failed, &tests, &solver);
+//RS     let claims_floor = claims_floor_for_target(&target);
+//RS     let claims_floor_violation =
+//RS         claims_floor.filter(|floor| !grade_meets_floor(&claims_grade, *floor));
+//RS     if claims_floor_violation.is_some() && exit_code == ExitCodes::OK {
+//RS         exit_code = ExitCodes::USER_ERROR;
+//RS     }
+//RS     let report = render_report(
+//RS         &target,
+//RS         &items,
+//RS         &warnings,
+//RS         &tests,
+//RS         &budgets,
+//RS         &solver,
+//RS         &lenses,
+//RS         &declarations,
+//RS         replay_time_ms,
+//RS         proved,
+//RS         failed,
+//RS         &claims_grade,
+//RS         claims_floor_violation,
+//RS         exit_code,
+//RS     );
+//RS     // D-JPROOF1=A (#1127): persist the exact ProofReport under the canonical
+//RS     // `.jetproof` envelope. Usage errors and internal compiler errors do not
+//RS     // produce evidence artifacts; `--json` wraps each valid ProofReport in
+//RS     // the command-owned `jet.status/v1` envelope.
+//RS     if exit_code != ExitCodes::ICE {
+//RS         let mut consumed = evidence_links;
+//RS         if let Some(path) = replay_path.as_ref() {
+//RS             let replay_link =
+//RS                 match index_replay_artifact(
+//RS                     Path::new(path),
+//RS                     &identity,
+//RS                     RecordCapture::Safe,
+//RS                     false,
+//RS                 ) {
+//RS                     Ok(link) => link,
+//RS                     Err(message) => {
+//RS                         emit_prove_cli_error(
+//RS                             "E2105",
+//RS                             format!("failed to index replay artifact: {message}"),
+//RS                             json,
+//RS                         );
+//RS                         exit(ExitCodes::ICE);
+//RS                     }
+//RS                 };
+//RS             consumed.push(replay_link);
+//RS         }
+//RS         let produced = produced_receipt_links(&target);
+//RS         let proof_artifact = match write_jetproof(&target, &report, &consumed, &produced) {
+//RS             Ok(artifact) => artifact,
+//RS             Err(message) => {
+//RS                 emit_prove_cli_error(
+//RS                     "E2105",
+//RS                     format!("failed to write .jetproof: {message}"),
+//RS                     json,
+//RS                 );
+//RS                 exit(ExitCodes::ICE);
+//RS             }
+//RS         };
+//RS         let proof_identity = match RecordIdentity::new(
+//RS             target.input_sha256.clone(),
+//RS             env!("CARGO_PKG_VERSION"),
+//RS             "jet-prove-v1",
+//RS         ) {
+//RS             Ok(identity) => identity,
+//RS             Err(message) => {
+//RS                 emit_prove_cli_error(
+//RS                     "E2105",
+//RS                     format!("failed to identify proof artifact: {message}"),
+//RS                     json,
+//RS                 );
+//RS                 exit(ExitCodes::ICE);
+//RS             }
+//RS         };
+//RS         if let Err(message) = index_artifact(
+//RS             proof_identity,
+//RS             RecordKind::Proof,
+//RS             proof_artifact.artifact_id.clone(),
+//RS             proof_artifact.path.clone(),
+//RS             proof_artifact.size,
+//RS             RecordCapture::Safe,
+//RS             consumed,
+//RS             produced,
+//RS             true,
+//RS         ) {
+//RS             emit_prove_cli_error(
+//RS                 "E2105",
+//RS                 format!("failed to index .jetproof: {message}"),
+//RS                 json,
+//RS             );
+//RS             exit(ExitCodes::ICE);
+//RS         }
+//RS         if failed == 0 && producer_exit != ExitCodes::ICE {
+//RS             if let Some(authority) = capture_authority.as_ref() {
+//RS                 let path = match crate::ProveReplay::finalize_safe_capture_path(
+//RS                     &identity, authority, exit_code, json, None,
+//RS                 ) {
+//RS                     Ok(path) => path,
+//RS                     Err(status) => exit(status),
+//RS                 };
+//RS                 let capture = if capture_opts.as_ref().is_some_and(|opts| opts.sensitive) {
+//RS                     RecordCapture::Sensitive
+//RS                 } else {
+//RS                     RecordCapture::Safe
+//RS                 };
+//RS                 if let Err(message) = index_replay_artifact(&path, &identity, capture, true) {
+//RS                     emit_prove_cli_error(
+//RS                         "E2105",
+//RS                         format!("failed to index replay artifact: {message}"),
+//RS                         json,
+//RS                     );
+//RS                     exit(ExitCodes::ICE);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     if json {
+//RS         let proof = StatusValue::parse(&report).expect("render_report emits valid JSON");
+//RS         let status =
+//RS             StatusEnvelope::new("prove", exit_code == ExitCodes::OK).with_field("proof", proof);
+//RS         println!("{}", status.json_line());
+//RS     } else {
+//RS         let show = |facet: &str| lens_shows(&lenses, facet);
+//RS         if !lenses.is_empty() {
+//RS             println!("LENSES   {}", canonical_lens_names(&lenses).join(", "));
+//RS         }
+//RS         println!("CLAIMS   grade: {claims_grade}");
+//RS         if let Some(floor) = claims_floor_violation {
+//RS             eprintln!(
+//RS                 "Error [E2942]: claim grade `{claims_grade}` is below package floor `{}`",
+//RS                 floor.render()
+//RS             );
+//RS         }
+//RS         if show("refinements")
+//RS             || show("all")
+//RS             || show("effects")
+//RS             || show("taint")
+//RS             || lenses.is_empty()
+//RS         {
+//RS             println!("CHECKED  front end: {proved} proved, {failed} failed");
+//RS         }
+//RS         for item in &items {
+//RS             if let Some(diagnostic) = &item.diagnostic {
+//RS                 eprintln!("{}", diagnostic.render(&item.path, &item.source));
+//RS             }
+//RS         }
+//RS         for warning in &warnings {
+//RS             eprintln!(
+//RS                 "{}",
+//RS                 warning.diagnostic.render(&warning.path, &warning.source)
+//RS             );
+//RS         }
+//RS         for row in outside_selected_lenses(&lenses, &items, &tests, &budgets, &declarations) {
+//RS             println!("{row}");
+//RS         }
+//RS         if show("tests") || lenses.is_empty() {
+//RS             if !tests.is_empty() {
+//RS                 let report = unit_test_report(&tests);
+//RS                 println!("TESTS    unit: {}", report.summary());
+//RS                 for item in tests
+//RS                     .iter()
+//RS                     .filter(|item| (item.kind == 0 || item.kind == 2) && item.state == 1)
+//RS                 {
+//RS                     println!("{}: FAIL", item.name);
+//RS                     eprint!("{}", test_failure_detail(item));
+//RS                 }
+//RS             }
+//RS         }
+//RS         if show("budgets") || lenses.is_empty() {
+//RS             if !budgets.facts.is_empty() || !budgets.rejected.is_empty() {
+//RS                 let met = budgets
+//RS                     .facts
+//RS                     .iter()
+//RS                     .filter(|fact| fact.outcome == "pass")
+//RS                     .count();
+//RS                 let failed = budgets
+//RS                     .facts
+//RS                     .iter()
+//RS                     .filter(|fact| fact.outcome == "fail")
+//RS                     .count();
+//RS                 let warned = budgets.facts.len() - met - failed;
+//RS                 println!("BUDGETS  {met} met, {failed} failed, {warned} warned, {} unavailable · verified canonical reports", budgets.rejected.len());
+//RS                 for reason in &budgets.rejected {
+//RS                     println!("  unavailable: {reason}");
+//RS                 }
+//RS             }
+//RS         }
+//RS         if replay_time_ms.is_some() && (show("replay") || lenses.is_empty()) {
+//RS             println!(
+//RS                 "REPLAY   exact Time authority; execution adapter matched; parity not available"
+//RS             );
+//RS         }
+//RS         if enable_solver {
+//RS             let (selected, proved_s, disproved_s, unknown_s, _) =
+//RS                 crate::ProveSolver::summarize(&solver);
+//RS             println!(
+//RS                 "SOLVER   {selected} selected, {proved_s} proved, {disproved_s} disproved, {unknown_s} unknown"
+//RS             );
+//RS             for item in &solver {
+//RS                 if let crate::ProveSolver::SolverOutcome::Disproved { assignment, .. } =
+//RS                     &item.outcome
+//RS                 {
+//RS                     let values = assignment
+//RS                         .iter()
+//RS                         .map(|(k, v)| format!("{k} = {v}"))
+//RS                         .collect::<Vec<_>>()
+//RS                         .join(" and ");
+//RS                     eprintln!(
+//RS                         "Error [E2950]: Solver found a counterexample to {}",
+//RS                         item.obligation.kind
+//RS                     );
+//RS                     eprintln!(" Why: The assignment {values} satisfies the assumptions but makes the claim false");
+//RS                     eprintln!(
+//RS                         " Fix: Change {} so every return satisfies the claim, or correct the contract",
+//RS                         item.obligation.origin
+//RS                     );
+//RS                     eprintln!("More: jet-lang.dev/e/E2950");
+//RS                 }
+//RS             }
+//RS         }
+//RS         let unavailable = tests.iter().filter(|item| item.state == 3).count();
+//RS         let budget_incomplete = !budgets.rejected.is_empty()
+//RS             || budgets
+//RS                 .facts
+//RS                 .iter()
+//RS                 .any(|fact| fact.evidence == "unavailable");
+//RS         println!(
+//RS             "RESULT   {}",
+//RS             if failed > 0 || test_failed > 0 || budget_failed || solver_disproved {
+//RS                 "fail"
+//RS             } else if unavailable > 0
+//RS                 || budget_incomplete
+//RS                 || solver.iter().any(|item| {
+//RS                     matches!(
+//RS                         item.outcome,
+//RS                         crate::ProveSolver::SolverOutcome::Unknown { .. }
+//RS                     )
+//RS                 })
+//RS             {
+//RS                 "pass_incomplete"
+//RS             } else {
+//RS                 "pass"
+//RS             }
+//RS         );
+//RS     }
+//RS     exit(exit_code);
+//RS }
+//RS 
+// END-PORT-PENDING 0703 Source/CmdProve.rs:1-1820
+

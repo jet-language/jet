@@ -1,6 +1,18 @@
 // Closure journal integrity claims ported from
 // crates/jetpack/src/Store/Journal.rs (integrity_tests).
 
+// Shared by journal validation and tree ingest (Rust valid_output_name).
+#Test("store output name accepts exactly one normal component") {
+    valid :: [String]{"out", "dev", "a.b", "é", " space "}
+    loop name in valid {
+        assert(store_valid_output_name(name))
+    }
+    invalid :: [String]{"", ".", "..", "/", "\\", "a/b", "a\\b", "./out", "out/"}
+    loop name in invalid {
+        assert(!store_valid_output_name(name))
+    }
+}
+
 fn store_test_checked(body: String) -> String Never! {
     "{body}checksum\t{store_sha256_hex(body.bytes())}\n"
 }
@@ -78,24 +90,25 @@ fn store_test_nix_projection_record(id: String, output_name: String, digest: Str
 }
 
 #Test("store graph validation rejects external and relation inconsistency") {
+    verification := StoreVerification.new()
     roots :: HangarRoots{root: files.join(sys.temp_dir(), "jet-closure-integrity-{process.current_pid()}"), dev_mode: true}
     digest :: "sha256-primary"
-    object :: ClosureObject{digest: digest, path: files.join(files.join(roots.hangar_dir(), @STORE_OBJECTS_DIR), digest), external: true}
+    object :: ClosureObject{digest: digest, path: files.join(files.join(roots.hangar_dir(), STORE_OBJECTS_DIR), digest), external: true}
     record :: ClosureRecord{id: "record", primary: digest, action_key: "sha256-action", outputs: [String: String]{"out": digest}, references: [String]{}, producer_record: "", package_meta: ""}
     graph := ClosureGraph{objects: [String: ClosureObject]{digest: object}, records: [String: ClosureRecord]{"record": record}, deleted_records: [String]{}}
-    if store_validate_graph(roots, graph) == {
+    if store_validate_graph(&verification, roots, graph) == {
         .Ok(_) -> panic("wrong external marker must be refused")
         .Err(error) -> assert(error.message().contains("invalid external marker"))
     }
     graph.objects[digest].external = false
     graph.records["record"].primary = "sha256-other"
-    if store_validate_graph(roots, graph) == {
+    if store_validate_graph(&verification, roots, graph) == {
         .Ok(_) -> panic("primary outside outputs must be refused")
         .Err(error) -> assert(error.message().contains("primary is not its `out` output"))
     }
     graph.records["record"].primary = digest
     graph.records["record"].references = [String]{"sha256-missing"}
-    if store_validate_graph(roots, graph) == {
+    if store_validate_graph(&verification, roots, graph) == {
         .Ok(_) -> panic("missing reference must be refused")
         .Err(error) -> assert(error.message().contains("references missing object"))
     }

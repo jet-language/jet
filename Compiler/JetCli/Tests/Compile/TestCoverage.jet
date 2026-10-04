@@ -1,0 +1,44 @@
+// CmdCompile.rs report_coverage record, sort, machine and human contracts.
+#Test("coverage tolerates bad rows and keeps duplicate branch observations") {
+    observations :: jet_cli_test_coverage_parse("f\t+8\nf\t8\nf\tbad\nf\t-1\nb\tz\tf\t1\t0\nb\ta\tg\t2\t3\nb\ta\th\t4\t5\nb\tx\tf\tbad\t0\n")
+    assert_eq(observations.function_hits.len(), 1)
+    assert(observations.function_hits.has_key(8))
+    assert_eq(observations.branches.len(), 3)
+    assert_eq(observations.branches[0].id, "a")
+    assert_eq(observations.branches[0].function, "g")
+    assert_eq(observations.branches[1].function, "h")
+    assert_eq(observations.branches[2].id, "z")
+}
+#Test("coverage machine projection sorts function lines and expands both branch outcomes") {
+    functions :: [JetCLITestCoverableFunction]{JetCLITestCoverableFunction{name: "late", line: 9}, JetCLITestCoverableFunction{name: "early", line: 4}}
+    observations :: jet_cli_test_coverage_parse("f\t4\nb\tb1\tearly\t7\t0\n")
+    if jet_cli_test_coverage_tree("source.jet", functions, observations) == .Object(object) {
+        if object["functions"] == .Array(rows) {
+            assert_eq(rows.len(), 2)
+            if rows[0] == .Object(row) {
+                if row["name"] == .Text(name) -> assert_eq(name, "early") else -> panic("name type")
+                if row["covered"] == .Bool(hit) -> assert(hit) else -> panic("covered type")
+            } else { panic("function row type") }
+        } else { panic("functions type") }
+        if object["branches"] == .Array(rows) {
+            assert_eq(rows.len(), 2)
+            if rows[1] == .Object(row) {
+                if row["outcome"] == .Text(outcome) -> assert_eq(outcome, "not-taken") else -> panic("outcome type")
+                if row["hits"] == .Int(hits) -> assert_eq(hits, 0) else -> panic("hits type")
+            } else { panic("branch row type") }
+        } else { panic("branches type") }
+    } else { panic("coverage payload type") }
+}
+#Test("coverage human output preserves established hit miss and branch frame") {
+    functions :: [JetCLITestCoverableFunction]{JetCLITestCoverableFunction{name: "late", line: 9}, JetCLITestCoverableFunction{name: "early", line: 4}}
+    observations :: jet_cli_test_coverage_parse("f\t4\nb\tb1\tearly\t7\t0\n")
+    assert_eq(jet_cli_test_coverage_human("source.jet", functions, observations), "\ncoverage for source.jet\n  HIT   early  source.jet:4\n  MISS  late  source.jet:9\n  1/2 functions covered (50%)\n  BRANCH b1 taken     HIT  hits=7  early\n  BRANCH b1 not-taken MISS hits=0  early\n  1/2 branches covered (50%)\n")
+    assert_eq(jet_cli_test_coverage_human("empty.jet", [JetCLITestCoverableFunction]{}, jet_cli_test_coverage_parse("")), "\ncoverage: no functions to measure\n")
+}
+// #4407: retain Rust 62.5 -> 62 acceptance without CLI-local rounding.
+#Test("coverage percentage uses canonical Rust ties-to-even rounding") {
+    functions := [JetCLITestCoverableFunction]{}
+    loop line in 1..<9 -> &functions.push(JetCLITestCoverableFunction{name: "f{line}", line: line})
+    observations :: jet_cli_test_coverage_parse("f\t1\nf\t2\nf\t3\nf\t4\nf\t5\n")
+    assert(jet_cli_test_coverage_human("source.jet", functions, observations).contains("5/8 functions covered (62%)"))
+}

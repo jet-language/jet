@@ -25,15 +25,15 @@ pub struct LockRegeneration {
     pub argv: [String]
 
     fn dependency() -> LockRegeneration Never! {
-        LockRegeneration{argv: [String]{@BINARY_NAME, "fetch"}}
+        LockRegeneration{argv: [String]{BINARY_NAME, "fetch"}}
     }
 
     fn toolchain() -> LockRegeneration Never! {
-        LockRegeneration{argv: [String]{@BINARY_NAME, "update", "jet"}}
+        LockRegeneration{argv: [String]{BINARY_NAME, "update", "jet"}}
     }
 
     fn source_channel(name: String) -> LockRegeneration Never! {
-        LockRegeneration{argv: [String]{@JETPACK_BINARY_NAME, "update", name}}
+        LockRegeneration{argv: [String]{JETPACK_BINARY_NAME, "update", name}}
     }
 
     // Each argument in backticks, space separated.
@@ -70,11 +70,11 @@ pub struct LockCompletenessError {
     // fields and run `regeneration.argv` directly.
     fn diagnostic(self) -> Diagnostic Never! {
         command :: self.regeneration.display()
-        fix :: "run {command} and commit `{@UNIFIED_LOCK_FILE}`"
+        fix :: "run {command} and commit `{UNIFIED_LOCK_FILE}`"
         if self.kind == {
-            .Dependency -> diagnostic_from_registry("E1217", None, "dependency `{self.name}` has an incomplete lock record", "`{self.name}` is missing `{self.missing_field}` in `{@UNIFIED_LOCK_FILE}`; a locked or offline realization cannot reconstruct this dependency", fix)
-            .Toolchain -> diagnostic_from_registry("E1250", None, "toolchain channel `{self.name}` has an incomplete lock record", "`{self.name}` is missing `{self.missing_field}` in `{@UNIFIED_LOCK_FILE}`; locked or offline builds need the exact toolchain identity", fix)
-            .SourceChannel -> diagnostic_from_registry("E1271", None, "source channel `{self.name}` has an incomplete lock record", "`{self.name}` is missing `{self.missing_field}` in `{@UNIFIED_LOCK_FILE}`; realization must use the previously locked exact source", fix)
+            .Dependency -> diagnostic_from_registry("E1217", None, "dependency `{self.name}` has an incomplete lock record", "`{self.name}` is missing `{self.missing_field}` in `{UNIFIED_LOCK_FILE}`; a locked or offline realization cannot reconstruct this dependency", fix)
+            .Toolchain -> diagnostic_from_registry("E1250", None, "toolchain channel `{self.name}` has an incomplete lock record", "`{self.name}` is missing `{self.missing_field}` in `{UNIFIED_LOCK_FILE}`; locked or offline builds need the exact toolchain identity", fix)
+            .SourceChannel -> diagnostic_from_registry("E1271", None, "source channel `{self.name}` has an incomplete lock record", "`{self.name}` is missing `{self.missing_field}` in `{UNIFIED_LOCK_FILE}`; realization must use the previously locked exact source", fix)
         }
     }
 }
@@ -155,7 +155,7 @@ pub fn pkg_lock_verify_all_manifest_deps_locked(manifest: Manifest, lock: LockFi
 
 // D-RINGLAYER1=A M2: the manifest `runtime:` ceiling set on locked packages
 // at fetch time.
-pub fn pkg_lock_layer_from_manifest(manifest: Manifest) -> MirRuntimeLayer? Never! {
+pub fn pkg_lock_layer_from_manifest(manifest: Manifest) -> MIRRuntimeLayer? Never! {
     manifest.package.layer
 }
 
@@ -171,7 +171,7 @@ pub fn pkg_lock_verify_locked_generated_inputs(project_root: String, generated: 
         if generated.len() == 0 -> return
         return Err(LockError.Reported(pkg_lock_e3512("locked generated input `{generated[0].path}` has no unified lock entry", "`--locked` requires every generated source hash to be recorded before materialization", "rerun without `--locked` to review and record the generated provenance")))
     }
-    lock :: loaded ?? return
+    lock :: loaded
     loop input in generated {
         if !lock.comptime_inputs.contains(input) -> return Err(LockError.Reported(pkg_lock_e3512("locked generated input `{input.path}` drifted", "`--locked` requires generated input and output hashes to match the unified lock exactly", "rerun without `--locked` to review and record the new generated provenance")))
     }
@@ -240,8 +240,8 @@ pub fn pkg_lock_record_generated_inputs_with_lock_state(project_root: String, ge
     }
     lock.comptime_inputs = pkg_lock_sorted_comptime_inputs(lock.comptime_inputs)
     if pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes()) == {
-        .Ok(_) -> Ok()
-        .Err(error) -> Err(LockError.Reported(pkg_lock_write_error(pkg_lock_file_path(project_root), error.message())))
+        .Ok(_) -> {}
+        .Err(error) -> return Err(LockError.Reported(pkg_lock_write_error(pkg_lock_file_path(project_root), error.message())))
     }
 }
 
@@ -251,9 +251,9 @@ fn pkg_lock_locked_build_contribution(package: String, contribution: FactContrib
     LockedBuildContribution{
         package: package,
         key: contribution.key,
-        value: contribution.value.debug_text(),
-        scope: contribution.scope.name(),
-        layer: contribution.layer.name(),
+        value: fact_value_debug_text(contribution.value),
+        scope: source_scope_name(contribution.scope),
+        layer: contribution_layer_name(contribution.layer),
         source: contribution.source,
         reason: contribution.reason ?? ""
     }
@@ -273,13 +273,13 @@ pub fn pkg_lock_verify_locked_build_contributions(project_root: String, package:
         if actual.len() == 0 -> return
         return Err(LockError.Reported(pkg_lock_e3512("locked build contributions for `{package}` are not recorded", "a locked build must replay every computed fact writer from `.jet/lock`", "rerun without `--locked` to record the computed contribution chain")))
     }
-    lock :: loaded ?? return
+    lock :: loaded
     recorded := [LockedBuildContribution]{}
     loop contribution in lock.build_contributions {
         if contribution.package == package -> &recorded.push(contribution)
     }
     if pkg_lock_sorted_contributions(recorded) == actual -> return
-    Err(LockError.Reported(pkg_lock_e3512("locked build contribution for `{package}` drifted", "the computed fact writer chain differs from the chain recorded in `.jet/lock`", "rerun without `--locked` to review and record the new contribution chain")))
+    return Err(LockError.Reported(pkg_lock_e3512("locked build contribution for `{package}` drifted", "the computed fact writer chain differs from the chain recorded in `.jet/lock`", "rerun without `--locked` to review and record the new contribution chain")))
 }
 
 // D-CONF-SPLIT1=A: replace one package's computed writer records in the
@@ -298,8 +298,8 @@ pub fn pkg_lock_record_build_contributions(project_root: String, package: String
     lock.build_contributions = pkg_lock_sorted_contributions(kept)
     if lock.build_stamp == None -> lock.build_stamp = Val(stamp)
     if pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes()) == {
-        .Ok(_) -> Ok()
-        .Err(error) -> Err(LockError.Reported(pkg_lock_write_error(pkg_lock_file_path(project_root), error.message())))
+        .Ok(_) -> {}
+        .Err(error) -> return Err(LockError.Reported(pkg_lock_write_error(pkg_lock_file_path(project_root), error.message())))
     }
 }
 
@@ -342,7 +342,7 @@ pub fn pkg_lock_e1201(package_name: String, version_a: String, chain_a: [String]
 
 // E1202: the lock is out of date.
 pub fn pkg_lock_e1202(lock_path: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E1202", None, "the lock file is out of date", "`{@PACKAGE_FILE}` changed since `{@UNIFIED_LOCK_FILE}` was last written", "run `jet fetch` to update `{@UNIFIED_LOCK_FILE}`")
+    diagnostic_from_registry("E1202", None, "the lock file is out of date", "`{PACKAGE_FILE}` changed since `{UNIFIED_LOCK_FILE}` was last written", "run `jet fetch` to update `{UNIFIED_LOCK_FILE}`")
 }
 
 // E1205: lock data is corrupt or exceeds the reader safety bound.
@@ -400,6 +400,6 @@ fn pkg_diagnostic_from_row(code: String, args: [(name: String, value: String)], 
 
 fn pkg_diagnostic_fill_row(template: String, args: [(name: String, value: String)]) -> String Never! {
     text := template
-    loop arg in args -> text = &text.replace("{{{arg.name}}}", arg.value)
+    loop arg in args -> text = text.replace("{{{arg.name}}}", arg.value)
     text
 }

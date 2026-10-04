@@ -1,0 +1,1804 @@
+// PORT-PENDING 2057 crates-jet-pkg-model-src-cffi-slice-1801: crates/jet-pkg-model/src/CFFI.rs:1801-3600
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     // caches. Preserve that order in the provenance path as well.
+//RS     let duplicate_diagnostics = duplicate_use_form_diagnostics(bundle);
+//RS     if !duplicate_diagnostics.is_empty() {
+//RS         return Err(map_diagnostics(
+//RS             bundle,
+//RS             assembly_origins(bundle),
+//RS             duplicate_diagnostics,
+//RS         ));
+//RS     }
+//RS 
+//RS     // Cache modules are appended before taking the symbol snapshot so
+//RS     // cache-vs-overlay conflicts retain the generated cache item's identity.
+//RS     let mut cache_diagnostics = Vec::new();
+//RS     let metadata = load_binding_caches(bundle, &mut cache_diagnostics, &admitted_overlays);
+//RS     let origins = assembly_origins(bundle);
+//RS     if !cache_diagnostics.is_empty() {
+//RS         return Err(map_diagnostics(bundle, origins, cache_diagnostics));
+//RS     }
+//RS 
+//RS     match assemble_loaded(bundle, Vec::new(), metadata, &admitted_overlays) {
+//RS         Ok(cffi) => Ok(cffi),
+//RS         Err(diagnostics) => Err(map_diagnostics(bundle, origins, diagnostics)),
+//RS     }
+//RS }
+//RS 
+//RS fn map_diagnostics(
+//RS     bundle: &ProgramBundle,
+//RS     mut origins: AssemblyOrigins,
+//RS     diagnostics: Vec<Diagnostic>,
+//RS ) -> Vec<CffiDiagnostic> {
+//RS     let cache_origins = cache_diagnostic_origins(bundle);
+//RS     let mut used_cache_origins = vec![false; cache_origins.len()];
+//RS     let mut next_duplicate_use = 0;
+//RS     let mut next_invalid_bindgen = 0;
+//RS     let mut next_incompatible_override = 0;
+//RS     let mut next_header_origin = 0;
+//RS     let fallback_file = bundle.project_root.display().to_string();
+//RS     diagnostics
+//RS         .into_iter()
+//RS         .map(|diagnostic| {
+//RS             let origin = cache_origins
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .find(|(index, candidate)| {
+//RS                     !used_cache_origins[*index]
+//RS                         && same_diagnostic(&diagnostic, &candidate.diagnostic)
+//RS                 })
+//RS                 .map(|(index, candidate)| {
+//RS                     used_cache_origins[index] = true;
+//RS                     (candidate.file.clone(), candidate.source.clone())
+//RS                 })
+//RS                 .or_else(|| match diagnostic.code.as_str() {
+//RS                     "E3204" => take_origin(&origins.duplicate_uses, &mut next_duplicate_use),
+//RS                     "E3205" => take_origin(
+//RS                         &origins.incompatible_overrides,
+//RS                         &mut next_incompatible_override,
+//RS                     ),
+//RS                     "E3207" => take_origin(&origins.invalid_bindgen, &mut next_invalid_bindgen),
+//RS                     _ => None,
+//RS                 })
+//RS                 .or_else(|| {
+//RS                     diagnostic.span.and_then(|span| {
+//RS                         let candidates = origins.spans.get_mut(&span)?;
+//RS                         (!candidates.is_empty()).then(|| candidates.remove(0))
+//RS                     })
+//RS                 })
+//RS                 .or_else(|| {
+//RS                     if diagnostic.code == "E3208" {
+//RS                         take_origin(&origins.headers, &mut next_header_origin)
+//RS                     } else {
+//RS                         None
+//RS                     }
+//RS                 })
+//RS                 .unwrap_or_else(|| (fallback_file.clone(), String::new()));
+//RS             CffiDiagnostic {
+//RS                 file: origin.0,
+//RS                 source: origin.1,
+//RS                 diagnostic,
+//RS             }
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn take_origin(origins: &[(String, String)], next: &mut usize) -> Option<(String, String)> {
+//RS     let origin = origins.get(*next).cloned();
+//RS     if origin.is_some() {
+//RS         *next += 1;
+//RS     }
+//RS     origin
+//RS }
+//RS 
+//RS fn assembly_origins(bundle: &ProgramBundle) -> AssemblyOrigins {
+//RS     let mut origins = AssemblyOrigins {
+//RS         spans: HashMap::new(),
+//RS         headers: Vec::new(),
+//RS         duplicate_uses: Vec::new(),
+//RS         invalid_bindgen: Vec::new(),
+//RS         incompatible_overrides: Vec::new(),
+//RS     };
+//RS     let mut surfaces: HashMap<String, OriginSurface> = HashMap::new();
+//RS     let mut order = Vec::new();
+//RS     let mut library_order = Vec::new();
+//RS     let mut header_origins_by_lib: HashMap<String, (String, String)> = HashMap::new();
+//RS     for module in &bundle.modules {
+//RS         let origin = (module.display.clone(), module.source.clone());
+//RS         let generated_language = generated_cache_language(&module.path.to_string_lossy());
+//RS         let generated = generated_language.is_some();
+//RS         let mut seen: HashMap<(Option<String>, String), (bool, String)> = HashMap::new();
+//RS         for (scope, import) in all_imports(module) {
+//RS             origins
+//RS                 .spans
+//RS                 .entry(import.span)
+//RS                 .or_insert_with(Vec::new)
+//RS                 .push(origin.clone());
+//RS             origins
+//RS                 .spans
+//RS                 .entry(import.alias_span)
+//RS                 .or_insert_with(Vec::new)
+//RS                 .push(origin.clone());
+//RS             let c_imports = match c_module_imports(import) {
+//RS                 Ok(imports) => imports,
+//RS                 Err(error) => {
+//RS                     // The frontend preflight reports this before provenance
+//RS                     // is consumed; there is no library key to attribute here.
+//RS                     let _ = error;
+//RS                     continue;
+//RS                 }
+//RS             };
+//RS             let mut uses: Vec<(String, bool, String)> = c_imports
+//RS                 .into_iter()
+//RS                 .map(|(lib, _)| (lib, false, String::new()))
+//RS                 .collect();
+//RS             if let Some((header, lib)) = c_header_lib(import) {
+//RS                 uses.push((lib, true, header));
+//RS             }
+//RS             for (lib, is_header, header) in uses {
+//RS                 let key = (scope.map(str::to_owned), lib.clone());
+//RS                 if !library_order.contains(&lib) {
+//RS                     library_order.push(lib.clone());
+//RS                 }
+//RS                 if let Some((previous_is_header, previous_header)) = seen.get(&key) {
+//RS                     if *previous_is_header != is_header {
+//RS                         let _header = if is_header { &header } else { previous_header };
+//RS                         origins.duplicate_uses.push(origin.clone());
+//RS                     }
+//RS                 } else {
+//RS                     seen.insert(key, (is_header, header));
+//RS                 }
+//RS                 if is_header {
+//RS                     header_origins_by_lib
+//RS                         .entry(lib)
+//RS                         .or_insert_with(|| origin.clone());
+//RS                 }
+//RS             }
+//RS         }
+//RS         for item in &module.items {
+//RS             let Item::CModule(c_module) = item else {
+//RS                 continue;
+//RS             };
+//RS             if c_module.kind == CModuleKind::Bindgen && !generated {
+//RS                 origins.invalid_bindgen.push(origin.clone());
+//RS                 continue;
+//RS             }
+//RS             let surface = match surfaces.entry(c_module.lib.clone()) {
+//RS                 Entry::Occupied(entry) => entry.into_mut(),
+//RS                 Entry::Vacant(entry) => {
+//RS                     order.push(c_module.lib.clone());
+//RS                     entry.insert(OriginSurface {
+//RS                         bindgen: Vec::new(),
+//RS                         overlay: Vec::new(),
+//RS                     })
+//RS                 }
+//RS             };
+//RS             let functions = match c_module.kind {
+//RS                 CModuleKind::Bindgen => &mut surface.bindgen,
+//RS                 CModuleKind::Extern => &mut surface.overlay,
+//RS             };
+//RS             functions.extend(
+//RS                 c_module
+//RS                     .functions
+//RS                     .iter()
+//RS                     .cloned()
+//RS                     .map(|function| (function, origin.clone())),
+//RS             );
+//RS             for span in std::iter::once(c_module.span)
+//RS                 .chain(std::iter::once(c_module.path_span))
+//RS                 .chain(c_module.functions.iter().flat_map(|function| {
+//RS                     std::iter::once(function.span)
+//RS                         .chain(std::iter::once(function.name_span))
+//RS                         .chain(std::iter::once(function.rust_path_span))
+//RS                         .chain(function.abi.iter().map(|(_, span)| *span))
+//RS                 }))
+//RS             {
+//RS                 origins
+//RS                     .spans
+//RS                     .entry(span)
+//RS                     .or_insert_with(Vec::new)
+//RS                     .push(origin.clone());
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     // `load_binding_caches` first orders all C libraries, then selects the
+//RS     // first header import for each library. A later header can therefore be
+//RS     // the provenance for a library whose `use c.<lib>` appeared earlier.
+//RS     for lib in library_order {
+//RS         if let Some(origin) = header_origins_by_lib.remove(&lib) {
+//RS             origins.headers.push(origin);
+//RS         }
+//RS     }
+//RS 
+//RS     // `assemble` groups surfaces by library before it emits E3205. A plain
+//RS     // span queue loses that identity when imported files reuse offsets, so
+//RS     // derive the same per-library conflict order from the pre-drain snapshot.
+//RS     for lib in order {
+//RS         let Some(surface) = surfaces.get(&lib) else {
+//RS             continue;
+//RS         };
+//RS         let mut merged = HashMap::new();
+//RS         for (function, _) in &surface.bindgen {
+//RS             merged.insert(function.name.clone(), function.clone());
+//RS         }
+//RS         for (function, origin) in &surface.overlay {
+//RS             if let Some(previous) = merged.get_mut(&function.name) {
+//RS                 if !same_signature(previous, function) {
+//RS                     origins.incompatible_overrides.push(origin.clone());
+//RS                     continue;
+//RS                 }
+//RS                 *previous = function.clone();
+//RS             } else {
+//RS                 merged.insert(function.name.clone(), function.clone());
+//RS             }
+//RS         }
+//RS     }
+//RS     origins
+//RS }
+//RS 
+//RS fn cache_diagnostic_origins(bundle: &ProgramBundle) -> Vec<CffiDiagnostic> {
+//RS     let mut libs = Vec::new();
+//RS     for module in &bundle.modules {
+//RS         for (_, import) in all_imports(module) {
+//RS             let c_imports = match c_module_imports(import) {
+//RS                 Ok(imports) => imports,
+//RS                 Err(_) => continue,
+//RS             };
+//RS             for (lib, _) in c_imports {
+//RS                 if !libs.contains(&lib) {
+//RS                     libs.push(lib);
+//RS                 }
+//RS             }
+//RS             if let Some((_, lib)) = c_header_lib(import) {
+//RS                 if !libs.contains(&lib) {
+//RS                     libs.push(lib);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     libs.into_iter()
+//RS         .flat_map(|lib| {
+//RS             let path = binding_cache_file(&bundle.project_root, ForeignLanguage::C, &lib);
+//RS             let source = std::fs::read_to_string(&path).ok()?;
+//RS             let (tokens, lex_diags) = crate::Lexer::lex_generated(&source);
+//RS             let diagnostics = if !lex_diags.is_empty() {
+//RS                 lex_diags
+//RS             } else {
+//RS                 match crate::Parser::parse(&tokens) {
+//RS                     Ok(_) => Vec::new(),
+//RS                     Err(parse_diags) => parse_diags,
+//RS                 }
+//RS             };
+//RS             Some(
+//RS                 diagnostics
+//RS                     .into_iter()
+//RS                     .map(move |diagnostic| CffiDiagnostic {
+//RS                         file: path.display().to_string(),
+//RS                         source: source.clone(),
+//RS                         diagnostic,
+//RS                     }),
+//RS             )
+//RS         })
+//RS         .flatten()
+//RS         .collect()
+//RS }
+//RS 
+//RS fn same_diagnostic(left: &Diagnostic, right: &Diagnostic) -> bool {
+//RS     left.code == right.code
+//RS         && left.what == right.what
+//RS         && left.why == right.why
+//RS         && left.fix == right.fix
+//RS         && left.span == right.span
+//RS }
+//RS 
+//RS fn duplicate_use_form_diagnostics(bundle: &ProgramBundle) -> Vec<Diagnostic> {
+//RS     let mut diagnostics = Vec::new();
+//RS     let mut reported = HashSet::new();
+//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
+//RS         let mut seen: HashMap<(Option<String>, String), (bool, String)> = HashMap::new();
+//RS         for (scope, import) in all_imports(module) {
+//RS             let mut uses: Vec<(String, bool, String)> = c_module_imports_after_preflight(import)
+//RS                 .into_iter()
+//RS                 .map(|(lib, _)| (lib, false, String::new()))
+//RS                 .collect();
+//RS             if let Some((header, lib)) = c_header_lib(import) {
+//RS                 uses.push((lib, true, header));
+//RS             }
+//RS             for (lib, is_header, header) in uses {
+//RS                 let key = (scope.map(str::to_owned), lib.clone());
+//RS                 if let Some((previous_is_header, previous_header)) = seen.get(&key) {
+//RS                     if *previous_is_header != is_header
+//RS                         && reported.insert((module_idx, import.span, lib.clone()))
+//RS                     {
+//RS                         let header = if is_header { &header } else { previous_header };
+//RS                         diagnostics.push(e3204(&lib, header, import.span));
+//RS                     }
+//RS                 } else {
+//RS                     seen.insert(key, (is_header, header));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     diagnostics
+//RS }
+//RS 
+//RS fn c_marker_value(source: &str, marker: &str) -> Option<String> {
+//RS     source.lines().find_map(|line| {
+//RS         let value = line.split_once(marker)?.1.trim();
+//RS         let value = value.strip_prefix(':').unwrap_or(value).trim();
+//RS         (!value.is_empty()).then(|| value.trim_matches('"').to_string())
+//RS     })
+//RS }
+//RS 
+//RS fn c_automatic_operation(name: &str, source: &str) -> crate::Bindgen::BindingOperation {
+//RS     let declaration = source
+//RS         .lines()
+//RS         .map(str::trim)
+//RS         .find(|line| line.contains(&format!("{name}(")))
+//RS         .unwrap_or("");
+//RS     let native_signature = declaration.trim_end_matches(';').to_string();
+//RS     let result_type = declaration
+//RS         .split_once(&format!("{name}("))
+//RS         .and_then(|(prefix, _)| {
+//RS             if prefix.contains("char") && prefix.contains('*') {
+//RS                 return Some("String".to_string());
+//RS             }
+//RS             prefix
+//RS                 .split_whitespace()
+//RS                 .last()
+//RS                 .filter(|value| !value.is_empty())
+//RS                 .map(|value| value.replace("const ", ""))
+//RS         })
+//RS         .map(|value| match value.as_str() {
+//RS             "void" => "Unit".to_string(),
+//RS             "uint64_t" | "size_t" => "U64".to_string(),
+//RS             "int" | "int32_t" => "Int".to_string(),
+//RS             "float" | "double" => "Float".to_string(),
+//RS             _ => value,
+//RS         })
+//RS         .unwrap_or_else(|| "Unit".to_string());
+//RS     let mut operation =
+//RS         crate::Bindgen::BindingOperation::new(name, native_signature, result_type);
+//RS     if let Some((_, params)) = declaration.split_once(&format!("{name}(")) {
+//RS         if let Some(params) = params.split_once(')').map(|(params, _)| params) {
+//RS             let parameters = params.split(',').map(str::trim).collect::<Vec<_>>();
+//RS             let pointer = parameters
+//RS                 .iter()
+//RS                 .find(|parameter| parameter.contains('*'))
+//RS                 .and_then(|parameter| parameter.split_whitespace().last())
+//RS                 .map(|value| value.trim_start_matches('*').to_string());
+//RS             let count = parameters
+//RS                 .iter()
+//RS                 .find(|parameter| {
+//RS                     if parameter.contains('*') {
+//RS                         return false;
+//RS                     }
+//RS                     let lower = parameter.to_ascii_lowercase();
+//RS                     lower.contains("count")
+//RS                         || lower.contains("length")
+//RS                         || lower.contains("len")
+//RS                         || lower == "n"
+//RS                         || lower.ends_with(" n")
+//RS                 })
+//RS                 .and_then(|parameter| parameter.split_whitespace().last())
+//RS                 .map(str::to_string);
+//RS             if let (Some(pointer), Some(count)) = (pointer, count) {
+//RS                 let unit = match c_marker_value(source, "jet-ffi-count-unit").as_deref() {
+//RS                     Some("bytes") => crate::Bindgen::CountUnit::Bytes,
+//RS                     Some(value) if value.starts_with("elements:") => {
+//RS                         crate::Bindgen::CountUnit::Elements(value[9..].to_string())
+//RS                     }
+//RS                     _ => crate::Bindgen::CountUnit::Unknown,
+//RS                 };
+//RS                 let meaning = match c_marker_value(source, "jet-ffi-count-meaning").as_deref() {
+//RS                     Some("full-extent") => crate::Bindgen::CountMeaning::FullExtent,
+//RS                     Some("prefix") => crate::Bindgen::CountMeaning::Prefix,
+//RS                     _ => crate::Bindgen::CountMeaning::Unknown,
+//RS                 };
+//RS                 let width = c_marker_value(source, "jet-ffi-count-width")
+//RS                     .and_then(|value| value.parse::<u16>().ok())
+//RS                     .unwrap_or(0);
+//RS                 let retention = match c_marker_value(source, "jet-ffi-retention").as_deref() {
+//RS                     Some("borrowed-for-call") => crate::Bindgen::PointerRetention::BorrowedForCall,
+//RS                     Some("may-retain") => crate::Bindgen::PointerRetention::MayRetain,
+//RS                     _ => crate::Bindgen::PointerRetention::Unknown,
+//RS                 };
+//RS                 operation = operation.with_pointer_count(crate::Bindgen::PointerCountFact::new(
+//RS                     pointer,
+//RS                     count,
+//RS                     unit,
+//RS                     meaning,
+//RS                     width,
+//RS                     retention,
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     operation.nullable_return = source.contains("jet-ffi-nullable");
+//RS     operation.borrowed_view = source.contains("jet-ffi-borrowed-view");
+//RS     operation.status_out = source.contains("jet-ffi-status-out");
+//RS     operation.partial_success = source.contains("jet-ffi-partial-success");
+//RS     operation.fallible_close = source.contains("jet-ffi-fallible-close");
+//RS     operation.callback_transport =
+//RS         c_marker_value(source, "jet-ffi-callback").unwrap_or_else(|| "none".to_string());
+//RS     operation.effects =
+//RS         c_marker_value(source, "jet-ffi-effects").unwrap_or_else(|| "foreign".to_string());
+//RS     operation.ownership = c_marker_value(source, "jet-ffi-ownership")
+//RS         .unwrap_or_else(|| "signature-declared".to_string());
+//RS     operation.failure_mapping = c_marker_value(source, "jet-ffi-failure")
+//RS         .unwrap_or_else(|| "preserve".to_string());
+//RS     operation.copies =
+//RS         c_marker_value(source, "jet-ffi-copies").unwrap_or_else(|| "none".to_string());
+//RS     operation.placement =
+//RS         c_marker_value(source, "jet-ffi-placement").unwrap_or_else(|| "caller".to_string());
+//RS     operation.cleanup =
+//RS         c_marker_value(source, "jet-ffi-cleanup").unwrap_or_else(|| "none".to_string());
+//RS     operation
+//RS }
+//RS 
+//RS fn c_annotated_contract(
+//RS     mut contract: crate::ForeignBridge::ForeignBoundaryContract,
+//RS     source: &str,
+//RS     header: &str,
+//RS ) -> Result<crate::ForeignBridge::ForeignBoundaryContract, String> {
+//RS     let coverage = crate::ForeignBridge::ForeignArtifactCoverage::new(
+//RS         format!("{}:sha256-{}", header, crate::SHA256::sha256_hex(source.as_bytes())),
+//RS         crate::ForeignBridge::foreign_host_target(),
+//RS         "jet-bindgen-v1",
+//RS     )
+//RS     .with_transitive_dependencies(Vec::<String>::new())
+//RS     .with_reachable_callbacks(Vec::<String>::new())
+//RS     .with_compiler_flags(Vec::<String>::new());
+//RS     contract = contract.with_artifact_coverage(coverage);
+//RS     for line in source
+//RS         .lines()
+//RS         .filter_map(|line| line.split_once("jet-ffi-obligation:").map(|(_, value)| value.trim()))
+//RS     {
+//RS         let mut obligation = None;
+//RS         let mut basis = crate::ForeignBridge::ForeignEvidenceBasis::Unknown;
+//RS         let mut checker = String::new();
+//RS         let mut assumptions = Vec::new();
+//RS         for field in line.split(';') {
+//RS             let Some((key, value)) = field.split_once('=') else {
+//RS                 continue;
+//RS             };
+//RS             match key.trim() {
+//RS                 "name" | "obligation" => obligation = Some(value.trim().to_string()),
+//RS                 "basis" => {
+//RS                     basis = crate::ForeignBridge::ForeignEvidenceBasis::parse(value.trim())
+//RS                         .ok_or_else(|| format!("unknown evidence basis `{}`", value.trim()))?;
+//RS                 }
+//RS                 "checker" => checker = value.trim().to_string(),
+//RS                 "assumptions" => {
+//RS                     assumptions = value
+//RS                         .split('|')
+//RS                         .map(str::trim)
+//RS                         .filter(|value| !value.is_empty())
+//RS                         .map(str::to_string)
+//RS                         .collect()
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS         let Some(obligation) = obligation else {
+//RS             return Err("an obligation marker needs `name=`".to_string());
+//RS         };
+//RS         contract.set_obligation(obligation, basis, checker, assumptions)?;
+//RS     }
+//RS     contract.validate()?;
+//RS     Ok(contract)
+//RS }
+//RS 
+//RS fn automatic_header_facade_from_result(
+//RS     header_source: &str,
+//RS     header_path: &str,
+//RS     generated: &crate::CBind::BindResult,
+//RS ) -> Result<Option<String>, String> {
+//RS     let contract = c_annotated_contract(generated.boundary.clone(), header_source, header_path)?;
+//RS     let inputs = crate::Bindgen::BindingInputs::new(
+//RS         crate::ForeignBridge::foreign_host_target(),
+//RS         "jet-bindgen-v1",
+//RS         format!(
+//RS             "{}:sha256-{}",
+//RS             header_path,
+//RS             crate::SHA256::sha256_hex(header_source.as_bytes())
+//RS         ),
+//RS     )
+//RS     .with_dependencies(Vec::<String>::new())
+//RS     .with_compiler_flags(Vec::<String>::new());
+//RS     let mut plans = BTreeMap::new();
+//RS     for name in &generated.bound {
+//RS         let operation = c_automatic_operation(name, header_source);
+//RS         if let Ok(plan) = crate::Bindgen::BindingPlan::resolve(
+//RS             &contract,
+//RS             operation,
+//RS             inputs.clone(),
+//RS             crate::Bindgen::BindingShape::Automatic,
+//RS         ) {
+//RS             plans.insert(name.clone(), plan);
+//RS         }
+//RS     }
+//RS     if plans.is_empty() {
+//RS         return Ok(None);
+//RS     }
+//RS     let mut facade = String::new();
+//RS     for plan in plans.values() {
+//RS         facade.push_str(&plan.render_facade());
+//RS         facade.push('\n');
+//RS     }
+//RS     Ok(Some(facade))
+//RS }
+//RS 
+//RS fn automatic_header_facade(
+//RS     header_source: &str,
+//RS     header_path: &str,
+//RS     lib: &str,
+//RS     overlay: &HandleOverlay,
+//RS ) -> Result<Option<String>, String> {
+//RS     let generated = crate::CBind::generate_with_overlay(header_source, lib, overlay)?;
+//RS     automatic_header_facade_from_result(header_source, header_path, &generated)
+//RS }
+//RS 
+//RS fn canonical_header_boundary(
+//RS     header_source: &str,
+//RS     header_path: &str,
+//RS     lib: &str,
+//RS     overlay: &HandleOverlay,
+//RS ) -> Result<String, String> {
+//RS     let generated = crate::CBind::generate_with_overlay(header_source, lib, overlay)?;
+//RS     let contract = c_annotated_contract(generated.boundary, header_source, header_path)?;
+//RS     Ok(contract.digest())
+//RS }
+//RS 
+//RS /// Read the canonical adaptation facade selected by `jet bind`.
+//RS ///
+//RS /// Ordinary `use "header.h"` compilation consumes the same lock/facade pair as
+//RS /// the explicit command. An unfrozen project may omit it; the loader derives a
+//RS /// canonical automatic facade from current header evidence and retains native
+//RS /// shape only when that evidence cannot justify an adaptation.
+//RS fn binding_plan_facade(
+//RS     project_root: &Path,
+//RS     lib: &str,
+//RS     header_source: Option<&str>,
+//RS     expected_boundary: Option<&str>,
+//RS     frozen: bool,
+//RS ) -> Result<Option<String>, String> {
+//RS     let lock_path = project_root
+//RS         .join(".jet")
+//RS         .join("lock")
+//RS         .join("bindings")
+//RS         .join(format!("{lib}.plan"));
+//RS     let lock = std::fs::read_to_string(&lock_path).ok();
+//RS     let Some(lock) = lock else {
+//RS         if frozen {
+//RS             return Err(format!(
+//RS                 "frozen binding policy requires `{}`; run `jet bind {lib} --freeze`",
+//RS                 lock_path.display()
+//RS             ));
+//RS         }
+//RS         return Ok(None);
+//RS     };
+//RS     let digest = lock
+//RS         .lines()
+//RS         .find_map(|line| line.strip_prefix("digest="))
+//RS         .filter(|value| !value.trim().is_empty())
+//RS         .ok_or_else(|| format!("binding lock `{}` has no candidate digest", lock_path.display()))?;
+//RS     if let Some(source) = header_source {
+//RS         let current_hash = crate::SHA256::sha256_hex(source.as_bytes());
+//RS         let artifact = lock
+//RS             .lines()
+//RS             .find_map(|line| line.strip_prefix("artifact="))
+//RS             .unwrap_or("");
+//RS         if !artifact.contains(&format!("sha256-{current_hash}")) {
+//RS             return Err(format!(
+//RS                 "binding `{lib}` input artifact changed under its recorded plan; run `jet bind {lib} --update --preview`"
+//RS             ));
+//RS         }
+//RS     }
+//RS     let boundary = lock
+//RS         .lines()
+//RS         .find_map(|line| line.strip_prefix("boundary="))
+//RS         .filter(|value| !value.trim().is_empty());
+//RS     if let (Some(expected), Some(recorded)) = (expected_boundary, boundary) {
+//RS         if expected != recorded {
+//RS             return Err(format!(
+//RS                 "binding `{lib}` changed under its recorded plan; run `jet bind {lib} --update --preview`"
+//RS             ));
+//RS         }
+//RS     }
+//RS     let facade = lock
+//RS         .split_once("\nfacade:\n")
+//RS         .map(|(_, facade)| facade.to_string())
+//RS         .ok_or_else(|| {
+//RS             format!(
+//RS                 "binding lock `{}` has no generated facade",
+//RS                 lock_path.display()
+//RS             )
+//RS         })?;
+//RS     let facade_boundary = binding_cache_boundary(&facade);
+//RS     if let Some(expected) = expected_boundary {
+//RS         if facade_boundary.as_deref() != Some(expected) {
+//RS             return Err(format!(
+//RS                 "binding `{lib}` facade boundary does not match the generated header"
+//RS             ));
+//RS         }
+//RS     }
+//RS     let marker = facade
+//RS         .lines()
+//RS         .find_map(|line| line.strip_prefix("// jet-ffi-plan="))
+//RS         .map(str::trim)
+//RS         .filter(|value| !value.is_empty())
+//RS         .ok_or_else(|| format!("binding lock `{}` has no facade plan marker", lock_path.display()))?;
+//RS     if marker != digest.trim() {
+//RS         return Err(format!(
+//RS             "binding `{lib}` facade digest does not match `{}`",
+//RS             lock_path.display()
+//RS         ));
+//RS     }
+//RS     if !facade.contains(&format!("#Import module c.{lib}")) {
+//RS         return Err(format!(
+//RS             "binding `{lib}` facade does not import its canonical C library"
+//RS         ));
+//RS     }
+//RS     Ok(Some(facade))
+//RS }
+//RS 
+//RS fn binding_policy_is_frozen(project_root: &Path) -> bool {
+//RS     let package = project_root.join("package.jet");
+//RS     let Ok(source) = std::fs::read_to_string(package) else {
+//RS         return false;
+//RS     };
+//RS     let compact = source
+//RS         .chars()
+//RS         .filter(|character| !character.is_whitespace())
+//RS         .collect::<String>();
+//RS     compact.contains("bindings:.Frozen")
+//RS }
+//RS 
+//RS fn binding_cache_boundary(source: &str) -> Option<String> {
+//RS     source.lines().rev().find_map(|line| {
+//RS         line.strip_prefix("// jet-ffi-boundary=")
+//RS             .and_then(|value| value.split_whitespace().next())
+//RS             .filter(|value| !value.is_empty())
+//RS             .map(str::to_string)
+//RS     })
+//RS }
+//RS 
+//RS fn append_binding_plan_facade(source: &mut String, facade: &str) -> Result<(), String> {
+//RS     let selected = facade
+//RS         .lines()
+//RS         .find_map(|line| line.strip_prefix("// jet-ffi-plan="))
+//RS         .map(str::trim)
+//RS         .filter(|value| !value.is_empty());
+//RS     let Some(selected) = selected else {
+//RS         return Err("binding facade has no plan digest".to_string());
+//RS     };
+//RS     if let Some(existing) = source.lines().find_map(|line| {
+//RS         line.strip_prefix("// jet-ffi-plan=")
+//RS             .map(str::trim)
+//RS             .filter(|value| !value.is_empty())
+//RS     }) {
+//RS         if existing == selected {
+//RS             let marker = format!("// jet-ffi-plan={selected}");
+//RS             let suffix = source
+//RS                 .find(&marker)
+//RS                 .map(|offset| source[offset..].trim_end())
+//RS                 .unwrap_or_default();
+//RS             if suffix == facade.trim_end() {
+//RS                 return Ok(());
+//RS             }
+//RS             return Err(format!(
+//RS                 "generated binding plan `{selected}` does not match its canonical facade"
+//RS             ));
+//RS         }
+//RS         return Err(format!(
+//RS             "generated binding already carries adaptation plan `{existing}`, selected `{selected}`"
+//RS         ));
+//RS     }
+//RS     if !source.ends_with('\n') {
+//RS         source.push('\n');
+//RS     }
+//RS     source.push('\n');
+//RS     source.push_str(facade);
+//RS     if !source.ends_with('\n') {
+//RS         source.push('\n');
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Discover and parse generated bindgen cache files for every C library this
+//RS /// program brings in. Each cache lives at `<root>/.jet/bindings/c/<lib>.jet`
+//RS /// (`use "lib.h" as l`), the bind backend is invoked automatically (D-CBIND2
+//RS /// auto half, E3 deferred piece). Existing or newly generated caches then
+//RS /// consume the frozen facade or derive the same automatic plan from the header
+//RS /// evidence before loading.
+//RS /// Parsed `#Bindgen` modules are appended as ordinary loaded modules so the
+//RS /// main drain/merge pass (step 1) folds them like any other.
+//RS fn collect_binding_metadata(
+//RS     metadata: &mut BindingMetadata,
+//RS     cache: &Path,
+//RS     lib: &str,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS ) {
+//RS     match read_binding_metadata(cache, lib) {
+//RS         Ok(Some(cache_metadata)) => {
+//RS             for fact in cache_metadata.handle_facts {
+//RS                 metadata.add_handle(fact);
+//RS             }
+//RS             metadata.add_closure(&cache_metadata.link_closure);
+//RS         }
+//RS         Ok(None) => {
+//RS             // Older caches have no typed sidecar. Preserve the explicit
+//RS             // program link while treating absent handle facts as empty.
+//RS             metadata.add_closure(&FfiLinkClosure::new(
+//RS                 vec![lib.to_string()],
+//RS                 Vec::new(),
+//RS             ));
+//RS         }
+//RS         Err(reason) => {
+//RS             diags.push(e3208(
+//RS                 &binding_metadata_path(cache).display().to_string(),
+//RS                 lib,
+//RS                 &reason,
+//RS             ));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn load_binding_caches(
+//RS     bundle: &mut ProgramBundle,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS     overlays: &BTreeMap<String, HandleOverlay>,
+//RS ) -> BindingMetadata {
+//RS     let mut metadata = BindingMetadata::default();
+//RS     // Collect libs and, for the header-path `use "x.h"` form, the header path.
+//RS     // A single lib can be brought in from multiple modules; first-seen header wins.
+//RS     let mut libs: Vec<String> = Vec::new();
+//RS     let mut lib_header: std::collections::HashMap<String, String> =
+//RS         std::collections::HashMap::new();
+//RS 
+//RS     for module in &bundle.modules {
+//RS         for (_, imp) in all_imports(module) {
+//RS             let c_imports = match c_module_imports(imp) {
+//RS                 Ok(imports) => imports,
+//RS                 Err(error) => {
+//RS                     diags.push(error.diagnostic());
+//RS                     continue;
+//RS                 }
+//RS             };
+//RS             for (lib, _) in c_imports {
+//RS                 if !libs.contains(&lib) {
+//RS                     libs.push(lib);
+//RS                 }
+//RS             }
+//RS             if let Some((header_path, lib)) = c_header_lib(imp) {
+//RS                 if !libs.contains(&lib) {
+//RS                     libs.push(lib.clone());
+//RS                 }
+//RS                 lib_header.entry(lib).or_insert(header_path);
+//RS             }
+//RS     }
+//RS     }
+//RS     if libs.is_empty() {
+//RS         return metadata;
+//RS     }
+//RS 
+//RS     // Avoid re-loading a cache file already present in the bundle.
+//RS     let already: std::collections::HashSet<std::path::PathBuf> =
+//RS         bundle.modules.iter().map(|m| m.path.clone()).collect();
+//RS 
+//RS     let entry_path = bundle
+//RS         .modules
+//RS         .get(bundle.entry)
+//RS         .map(|module| module.path.clone());
+//RS     for lib in libs {
+//RS         let cache_path = binding_cache_file(&bundle.project_root, ForeignLanguage::C, &lib);
+//RS 
+//RS         if already.contains(&cache_path) {
+//RS             let source = std::fs::read_to_string(&cache_path).unwrap_or_default();
+//RS             let header_source = lib_header
+//RS                 .get(&lib)
+//RS                 .and_then(|path| {
+//RS                     std::fs::read_to_string(resolve_header_path(path, &bundle.project_root)).ok()
+//RS                 });
+//RS             let expected_boundary = if source.contains("// jet-ffi-plan=") {
+//RS                 binding_cache_boundary(&source)
+//RS             } else if let Some(header) = header_source.as_deref() {
+//RS                 let plan_path = bundle
+//RS                     .project_root
+//RS                     .join(".jet")
+//RS                     .join("lock")
+//RS                     .join("bindings")
+//RS                     .join(format!("{lib}.plan"));
+//RS                 if plan_path.is_file() {
+//RS                     let empty_overlay = HandleOverlay::default();
+//RS                     let overlay = overlays.get(&lib).unwrap_or(&empty_overlay);
+//RS                     let header_path = lib_header
+//RS                         .get(&lib)
+//RS                         .map(String::as_str)
+//RS                         .unwrap_or(&lib);
+//RS                     match canonical_header_boundary(header, header_path, &lib, overlay) {
+//RS                         Ok(boundary) => Some(boundary),
+//RS                         Err(reason) => {
+//RS                             diags.push(e3208(
+//RS                                 &cache_path.display().to_string(),
+//RS                                 &lib,
+//RS                                 &reason,
+//RS                             ));
+//RS                             continue;
+//RS                         }
+//RS                     }
+//RS                 } else {
+//RS                     None
+//RS                 }
+//RS             } else {
+//RS                 None
+//RS             };
+//RS             match binding_plan_facade(
+//RS                 &bundle.project_root,
+//RS                 &lib,
+//RS                 header_source.as_deref(),
+//RS                 expected_boundary.as_deref(),
+//RS                 binding_policy_is_frozen(&bundle.project_root),
+//RS             ) {
+//RS                 Ok(Some(facade)) => {
+//RS                     let mut checked = source.clone();
+//RS                     if let Err(reason) = append_binding_plan_facade(&mut checked, &facade) {
+//RS                         diags.push(e3208(
+//RS                             &cache_path.display().to_string(),
+//RS                             &lib,
+//RS                             &reason,
+//RS                         ));
+//RS                         continue;
+//RS                     }
+//RS                     if !source.contains("// jet-ffi-plan=") {
+//RS                         let facade_path = cache_path.with_extension("adapted.jet");
+//RS                         load_cache_source(
+//RS                             &facade,
+//RS                             &facade_path,
+//RS                             &lib,
+//RS                             diags,
+//RS                             &mut bundle.modules,
+//RS                         );
+//RS                     }
+//RS                 }
+//RS                 Ok(None) => {
+//RS                     if !source.contains("// jet-ffi-plan=") {
+//RS                         if let Some(header) = header_source.as_deref() {
+//RS                             let empty_overlay = HandleOverlay::default();
+//RS                             let overlay = overlays.get(&lib).unwrap_or(&empty_overlay);
+//RS                             let header_path = lib_header
+//RS                                 .get(&lib)
+//RS                                 .map(String::as_str)
+//RS                                 .unwrap_or(&lib);
+//RS                             match automatic_header_facade(header, header_path, &lib, overlay) {
+//RS                                 Ok(Some(facade)) => {
+//RS                                     let facade_path = cache_path.with_extension("adapted.jet");
+//RS                                     load_cache_source(
+//RS                                         &facade,
+//RS                                         &facade_path,
+//RS                                         &lib,
+//RS                                         diags,
+//RS                                         &mut bundle.modules,
+//RS                                     );
+//RS                                 }
+//RS                                 Ok(None) => {}
+//RS                                 Err(reason) => {
+//RS                                     diags.push(e3208(
+//RS                                         &cache_path.display().to_string(),
+//RS                                         &lib,
+//RS                                         &reason,
+//RS                                     ));
+//RS                                     continue;
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Err(reason) => {
+//RS                     diags.push(e3208(
+//RS                         &cache_path.display().to_string(),
+//RS                         &lib,
+//RS                         &reason,
+//RS                     ));
+//RS                     continue;
+//RS                 }
+//RS             }
+//RS             collect_binding_metadata(&mut metadata, &cache_path, &lib, diags);
+//RS             continue;
+//RS         }
+//RS 
+//RS         // A source-level header import authorizes only bindings derived from
+//RS         // that readable header. `use c.<lib>` remains the explicit headerless
+//RS         // cache mode.
+//RS         let header_src = match lib_header.get(&lib) {
+//RS             Some(header_path) => {
+//RS                 let header_abs = resolve_header_path(header_path, &bundle.project_root);
+//RS                 match std::fs::read_to_string(&header_abs) {
+//RS                     Ok(source) => Some(source),
+//RS                     Err(error) => {
+//RS                         let reason = format!("the header file could not be read ({error}).");
+//RS                         diags.push(e3208(header_path, &lib, &reason));
+//RS                         continue;
+//RS                     }
+//RS                 }
+//RS             }
+//RS             None => None,
+//RS         };
+//RS 
+//RS         // --- Phase 3: hash invalidation ---
+//RS         // If the cache exists and we know the header path, check whether the
+//RS         // header content has changed since the cache was generated. On a
+//RS         // mismatch, re-run the bind backend before loading.
+//RS         let need_rebind = if overlays.contains_key(&lib) {
+//RS             // The legacy `.hash` sidecar covers header bytes only. A typed
+//RS             // overlay is an additional bind input, so regenerate it rather
+//RS             // than silently reusing metadata from another overlay revision.
+//RS             cache_path.is_file()
+//RS         } else if cache_path.is_file() {
+//RS             if let Some(header_src) = &header_src {
+//RS                 let current_hash = crate::CBind::compute_bind_hash(header_src, "");
+//RS                 let stored = crate::CBind::read_stored_hash(&cache_path);
+//RS                 stored.as_deref() != Some(current_hash.as_str())
+//RS             } else {
+//RS                 false
+//RS             }
+//RS         } else {
+//RS             false
+//RS         };
+//RS 
+//RS         // --- D-CBIND2 auto-invoke on cache miss / hash mismatch ---
+//RS         if !cache_path.is_file() || need_rebind {
+//RS             let Some(header_path) = lib_header.get(&lib) else {
+//RS                 // No header path known (use c.<lib> form, no file to parse) —
+//RS                 // skip silently; an empty synthetic module is made in step 3.
+//RS                 if cache_path.is_file() && !need_rebind {
+//RS                     // Present and fresh — handled below.
+//RS                 }
+//RS                 if !cache_path.is_file() {
+//RS                     continue; // no cache, no header → nothing to auto-bind
+//RS                 }
+//RS                 let mut source = match std::fs::read_to_string(&cache_path) {
+//RS                     Ok(source) => source,
+//RS                     Err(_) => continue,
+//RS                 };
+//RS                 let expected_boundary = source
+//RS                     .contains("// jet-ffi-plan=")
+//RS                     .then(|| binding_cache_boundary(&source))
+//RS                     .flatten();
+//RS                 match binding_plan_facade(
+//RS                     &bundle.project_root,
+//RS                     &lib,
+//RS                     None,
+//RS                     expected_boundary.as_deref(),
+//RS                     binding_policy_is_frozen(&bundle.project_root),
+//RS                 ) {
+//RS                     Ok(Some(facade)) => {
+//RS                         if let Err(reason) = append_binding_plan_facade(&mut source, &facade) {
+//RS                             diags.push(e3208(
+//RS                                 &cache_path.display().to_string(),
+//RS                                 &lib,
+//RS                                 &reason,
+//RS                             ));
+//RS                             continue;
+//RS                         }
+//RS                     }
+//RS                     Ok(None) => {}
+//RS                     Err(reason) => {
+//RS                         diags.push(e3208(
+//RS                             &cache_path.display().to_string(),
+//RS                             &lib,
+//RS                             &reason,
+//RS                         ));
+//RS                         continue;
+//RS                     }
+//RS                 }
+//RS                 load_cache_source(&source, &cache_path, &lib, diags, &mut bundle.modules);
+//RS                 collect_binding_metadata(&mut metadata, &cache_path, &lib, diags);
+//RS                 continue;
+//RS             };
+//RS             let header_src = header_src.as_deref().expect("header path was collected");
+//RS             let empty_overlay = HandleOverlay::default();
+//RS             let overlay = overlays.get(&lib).unwrap_or(&empty_overlay);
+//RS             let result = match crate::CBind::generate_with_overlay(header_src, &lib, overlay) {
+//RS                 Ok(r) => r,
+//RS                 Err(reason) => {
+//RS                     // A changed header that no longer parses must never revive
+//RS                     // bindings from the old hash generation.
+//RS                     let reason = format!("{reason}.");
+//RS                     diags.push(e3208(header_path, &lib, &reason));
+//RS                     continue;
+//RS                 }
+//RS             };
+//RS             if !result.handle_skipped.is_empty() {
+//RS                 let details = result
+//RS                     .handle_skipped
+//RS                     .iter()
+//RS                     .map(|(handle, reason)| format!("`{handle}`: {reason}"))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join("; ");
+//RS                 let reason = format!("opaque handle bindings were unresolved: {details}");
+//RS                 diags.push(e3208(header_path, &lib, &reason));
+//RS                 continue;
+//RS             }
+//RS             let expected_boundary =
+//RS                 match c_annotated_contract(result.boundary.clone(), header_src, header_path) {
+//RS                     Ok(contract) => Some(contract.digest()),
+//RS                     Err(reason) => {
+//RS                         diags.push(e3208(header_path, &lib, &reason));
+//RS                         continue;
+//RS                     }
+//RS                 };
+//RS             let mut generated_source = result.source.clone();
+//RS             let mut automatic_facade = None;
+//RS             match binding_plan_facade(
+//RS                 &bundle.project_root,
+//RS                 &lib,
+//RS                 Some(header_src),
+//RS                 expected_boundary.as_deref(),
+//RS                 binding_policy_is_frozen(&bundle.project_root),
+//RS             ) {
+//RS                 Ok(Some(facade)) => {
+//RS                     if let Err(reason) = append_binding_plan_facade(&mut generated_source, &facade) {
+//RS                         diags.push(e3208(header_path, &lib, &reason));
+//RS                         continue;
+//RS                     }
+//RS                 }
+//RS                 Ok(None) => {
+//RS                     match automatic_header_facade_from_result(header_src, header_path, &result) {
+//RS                         Ok(Some(facade)) => automatic_facade = Some(facade),
+//RS                         Ok(None) => {}
+//RS                         Err(reason) => {
+//RS                             diags.push(e3208(header_path, &lib, &reason));
+//RS                             continue;
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 Err(reason) => {
+//RS                     diags.push(e3208(header_path, &lib, &reason));
+//RS                     continue;
+//RS                 }
+//RS             }
+//RS             // Write cache, hash, and typed metadata sidecars.
+//RS             if let Some(parent) = cache_path.parent() {
+//RS                 let _ = std::fs::create_dir_all(parent);
+//RS             }
+//RS             if std::fs::write(&cache_path, &generated_source).is_ok() {
+//RS                 let _ = crate::CBind::write_bind_hash(&cache_path, header_src, "");
+//RS                 if let Err(reason) =
+//RS                     write_c_binding_metadata(&cache_path, &result.handles, &result.link_closure)
+//RS                 {
+//RS                     diags.push(e3208(
+//RS                         &cache_path.display().to_string(),
+//RS                         &lib,
+//RS                         &reason,
+//RS                     ));
+//RS                     continue;
+//RS                 }
+//RS                 collect_binding_metadata(&mut metadata, &cache_path, &lib, diags);
+//RS                 let header = resolve_header_path(header_path, &bundle.project_root);
+//RS                 if let Err(reason) = write_c_binding_provenance_with_boundary(
+//RS                     &bundle.project_root,
+//RS                     &lib,
+//RS                     &header,
+//RS                     &cache_path,
+//RS                     entry_path.as_deref(),
+//RS                     Some(&result.boundary),
+//RS                 ) {
+//RS                     diags.push(e3208(header_path, &lib, &reason));
+//RS                     continue;
+//RS                 }
+//RS             } else {
+//RS                 let reason = format!("could not write generated cache `{}`", cache_path.display());
+//RS                 diags.push(e3208(header_path, &lib, &reason));
+//RS                 continue;
+//RS             }
+//RS             load_cache_source(
+//RS                 &generated_source,
+//RS                 &cache_path,
+//RS                 &lib,
+//RS                 diags,
+//RS                 &mut bundle.modules,
+//RS             );
+//RS             if let Some(facade) = automatic_facade.as_deref() {
+//RS                 let facade_path = cache_path.with_extension("adapted.jet");
+//RS                 load_cache_source(
+//RS                     facade,
+//RS                     &facade_path,
+//RS                     &lib,
+//RS                     diags,
+//RS                     &mut bundle.modules,
+//RS                 );
+//RS             }
+//RS         }
+//RS 
+//RS         // Cache present and fresh — load it.
+//RS         let mut source = match std::fs::read_to_string(&cache_path) {
+//RS             Ok(s) => s,
+//RS             Err(_) => continue,
+//RS         };
+//RS         if let Some(header_path) = lib_header.get(&lib) {
+//RS             // A provenance sidecar is an immutable record of the bind that
+//RS             // produced this cache. Do not refresh it on every check: doing so
+//RS             // would replace an old local-archive digest before link-time
+//RS             // validation could report the archive as stale.
+//RS             let provenance_path = cache_path.with_extension("provenance");
+//RS             if !provenance_path.is_file() {
+//RS                 let header = resolve_header_path(header_path, &bundle.project_root);
+//RS                 if let Err(reason) = write_c_binding_provenance_with_entry(
+//RS                     &bundle.project_root,
+//RS                     &lib,
+//RS                     &header,
+//RS                     &cache_path,
+//RS                     entry_path.as_deref(),
+//RS                 ) {
+//RS                     diags.push(e3208(header_path, &lib, &reason));
+//RS                     continue;
+//RS                 }
+//RS             }
+//RS         }
+//RS         let expected_boundary = if source.contains("// jet-ffi-plan=") {
+//RS             binding_cache_boundary(&source)
+//RS         } else if let Some(header) = header_src.as_deref() {
+//RS             let plan_path = bundle
+//RS                 .project_root
+//RS                 .join(".jet")
+//RS                 .join("lock")
+//RS                 .join("bindings")
+//RS                 .join(format!("{lib}.plan"));
+//RS             if plan_path.is_file() {
+//RS                 let empty_overlay = HandleOverlay::default();
+//RS                 let overlay = overlays.get(&lib).unwrap_or(&empty_overlay);
+//RS                 let header_path = lib_header
+//RS                     .get(&lib)
+//RS                     .map(String::as_str)
+//RS                     .unwrap_or(&lib);
+//RS                 match canonical_header_boundary(header, header_path, &lib, overlay) {
+//RS                     Ok(boundary) => Some(boundary),
+//RS                     Err(reason) => {
+//RS                         diags.push(e3208(
+//RS                             &cache_path.display().to_string(),
+//RS                             &lib,
+//RS                             &reason,
+//RS                         ));
+//RS                         continue;
+//RS                     }
+//RS                 }
+//RS             } else {
+//RS                 None
+//RS             }
+//RS         } else {
+//RS             None
+//RS         };
+//RS         let mut automatic_facade = None;
+//RS         match binding_plan_facade(
+//RS             &bundle.project_root,
+//RS             &lib,
+//RS             header_src.as_deref(),
+//RS             expected_boundary.as_deref(),
+//RS             binding_policy_is_frozen(&bundle.project_root),
+//RS         ) {
+//RS             Ok(Some(facade)) => {
+//RS                 if let Err(reason) = append_binding_plan_facade(&mut source, &facade) {
+//RS                     diags.push(e3208(
+//RS                         &cache_path.display().to_string(),
+//RS                         &lib,
+//RS                         &reason,
+//RS                     ));
+//RS                     continue;
+//RS                 }
+//RS             }
+//RS             Ok(None) => {
+//RS                 if !source.contains("// jet-ffi-plan=") {
+//RS                     if let Some(header) = header_src.as_deref() {
+//RS                         let empty_overlay = HandleOverlay::default();
+//RS                         let overlay = overlays.get(&lib).unwrap_or(&empty_overlay);
+//RS                         let header_path = lib_header
+//RS                             .get(&lib)
+//RS                             .map(String::as_str)
+//RS                             .unwrap_or(&lib);
+//RS                         match automatic_header_facade(header, header_path, &lib, overlay) {
+//RS                             Ok(Some(facade)) => automatic_facade = Some(facade),
+//RS                             Ok(None) => {}
+//RS                             Err(reason) => {
+//RS                                 diags.push(e3208(
+//RS                                     &cache_path.display().to_string(),
+//RS                                     &lib,
+//RS                                     &reason,
+//RS                                 ));
+//RS                                 continue;
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Err(reason) => {
+//RS                 diags.push(e3208(
+//RS                     &cache_path.display().to_string(),
+//RS                     &lib,
+//RS                     &reason,
+//RS                 ));
+//RS                 continue;
+//RS             }
+//RS         }
+//RS         collect_binding_metadata(&mut metadata, &cache_path, &lib, diags);
+//RS         load_cache_source(&source, &cache_path, &lib, diags, &mut bundle.modules);
+//RS         if let Some(facade) = automatic_facade.as_deref() {
+//RS             let facade_path = cache_path.with_extension("adapted.jet");
+//RS             load_cache_source(
+//RS                 facade,
+//RS                 &facade_path,
+//RS                 &lib,
+//RS                 diags,
+//RS                 &mut bundle.modules,
+//RS             );
+//RS         }
+//RS     }
+//RS     metadata
+//RS }
+//RS 
+//RS /// Resolve a header path: if absolute use as-is, else try relative to
+//RS /// the project root (common for `use "raylib.h"` in single-file mode).
+//RS fn resolve_header_path(header_path: &str, project_root: &std::path::Path) -> std::path::PathBuf {
+//RS     let p = std::path::Path::new(header_path);
+//RS     if p.is_absolute() {
+//RS         p.to_path_buf()
+//RS     } else {
+//RS         project_root.join(header_path)
+//RS     }
+//RS }
+//RS 
+//RS const C_BINDER_SCHEMA: &str = "jet-c-bind-v1";
+//RS 
+//RS fn local_c_archive_inputs(
+//RS     project_root: &Path,
+//RS     lib: &str,
+//RS     entry: Option<&Path>,
+//RS ) -> Vec<crate::ForeignBridge::ArchiveInput> {
+//RS     let Some(target) = declared_c_dep_for_entry(lib, project_root, entry) else {
+//RS         return Vec::new();
+//RS     };
+//RS     if target == Syntax::SYSTEM_LIB_TARGET || target.starts_with(NIXPKGS_TARGET_PREFIX) {
+//RS         return Vec::new();
+//RS     }
+//RS     let directory = PathBuf::from(&target);
+//RS     let directory = if directory.is_absolute() {
+//RS         directory
+//RS     } else {
+//RS         project_root.join(directory)
+//RS     };
+//RS     crate::ForeignBridge::local_archive_inputs(
+//RS         &[directory],
+//RS         &[lib.to_string()],
+//RS     )
+//RS }
+//RS 
+//RS /// Build the unified C binding identity from the exact header/cache bytes and
+//RS /// any declared local archive input. The old header-only hash remains the
+//RS /// quick rebind check; this record is the link-time truth.
+//RS pub fn c_binding_identity(
+//RS     project_root: &Path,
+//RS     lib: &str,
+//RS     header: &Path,
+//RS     cache: &Path,
+//RS ) -> Result<String, String> {
+//RS     c_binding_identity_with_entry(project_root, lib, header, cache, None)
+//RS }
+//RS 
+//RS pub fn c_binding_identity_with_entry(
+//RS     project_root: &Path,
+//RS     lib: &str,
+//RS     header: &Path,
+//RS     cache: &Path,
+//RS     entry: Option<&Path>,
+//RS ) -> Result<String, String> {
+//RS     let header = header.canonicalize().unwrap_or_else(|_| header.to_path_buf());
+//RS     let cache = cache.canonicalize().unwrap_or_else(|_| cache.to_path_buf());
+//RS     let header_bytes = std::fs::read(&header).map_err(|error| {
+//RS         format!(
+//RS             "could not read {} for C binding identity: {error}",
+//RS             header.display()
+//RS         )
+//RS     })?;
+//RS     let cache_bytes = std::fs::read(&cache).map_err(|error| {
+//RS         format!(
+//RS             "could not read {} for C binding identity: {error}",
+//RS             cache.display()
+//RS         )
+//RS     })?;
+//RS     let descriptor = crate::AST::binder_descriptor(ForeignLanguage::C)
+//RS         .ok_or_else(|| "C binder descriptor is not registered".to_string())?;
+//RS     let mut identity = crate::ForeignBridge::IdentityBuilder::new(
+//RS         crate::ForeignBridge::IDENTITY_SCHEMA,
+//RS     );
+//RS     identity.field("language", ForeignLanguage::C.root().as_bytes());
+//RS     identity.field("binder_schema", C_BINDER_SCHEMA.as_bytes());
+//RS     identity.field("library", lib.as_bytes());
+//RS     identity.field("abi", format!("c_{lib}").as_bytes());
+//RS     identity.field("descriptor", descriptor.stamp().as_bytes());
+//RS     identity.field("header_path", header.as_os_str().as_encoded_bytes());
+//RS     identity.field("header_bytes", &header_bytes);
+//RS     identity.field("cache_path", cache.as_os_str().as_encoded_bytes());
+//RS     identity.field("cache_bytes", &cache_bytes);
+//RS     let metadata = read_binding_metadata(&cache, lib)?.unwrap_or_else(|| BindingMetadata {
+//RS         handle_facts: Vec::new(),
+//RS         link_closure: FfiLinkClosure::new(vec![lib.to_string()], Vec::new()),
+//RS     });
+//RS     let handle_keys = metadata
+//RS         .handle_facts
+//RS         .iter()
+//RS         .map(FfiHandleFact::stable_key)
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n");
+//RS     identity.field("handle_facts", handle_keys.as_bytes());
+//RS     identity.field("link_closure", metadata.link_closure.stable_key().as_bytes());
+//RS     identity.field("cc", crate::ForeignBridge::tool_identity("cc").as_bytes());
+//RS     identity.field("ar", crate::ForeignBridge::tool_identity("ar").as_bytes());
+//RS     if let Some(target) = declared_c_dep_for_entry(lib, project_root, entry) {
+//RS         identity.field("dependency", target.as_bytes());
+//RS     } else {
+//RS         identity.field("dependency_missing", b"true");
+//RS     }
+//RS     let local_archives = local_c_archive_inputs(project_root, lib, entry);
+//RS     crate::ForeignBridge::add_archive_inputs(&mut identity, &local_archives);
+//RS     Ok(identity.finish())
+//RS }
+//RS 
+//RS /// Publish the C binding's common provenance record beside its generated
+//RS /// cache. This records the local archive bytes when a package names a local C
+//RS /// dependency, so a changed implementation cannot reuse a header-only cache.
+//RS pub fn write_c_binding_provenance(
+//RS     project_root: &Path,
+//RS     lib: &str,
+//RS     header: &Path,
+//RS     cache: &Path,
+//RS ) -> Result<PathBuf, String> {
+//RS     write_c_binding_provenance_with_boundary(project_root, lib, header, cache, None, None)
+//RS }
+//RS 
+//RS pub fn write_c_binding_provenance_with_entry(
+//RS     project_root: &Path,
+//RS     lib: &str,
+//RS     header: &Path,
+//RS     cache: &Path,
+//RS     entry: Option<&Path>,
+//RS ) -> Result<PathBuf, String> {
+//RS     write_c_binding_provenance_with_boundary(project_root, lib, header, cache, entry, None)
+//RS }
+//RS 
+//RS fn write_c_binding_provenance_with_boundary(
+//RS     project_root: &Path,
+//RS     lib: &str,
+//RS     header: &Path,
+//RS     cache: &Path,
+//RS     entry: Option<&Path>,
+//RS     supplied_boundary: Option<&crate::ForeignBridge::ForeignBoundaryContract>,
+//RS ) -> Result<PathBuf, String> {
+//RS     let header = header.canonicalize().unwrap_or_else(|_| header.to_path_buf());
+//RS     let cache = cache.canonicalize().unwrap_or_else(|_| cache.to_path_buf());
+//RS     let identity = c_binding_identity_with_entry(project_root, lib, &header, &cache, entry)?;
+//RS     let header_sha = crate::ForeignBridge::sha_file(&header)?;
+//RS     let descriptor = crate::AST::binder_descriptor(ForeignLanguage::C)
+//RS         .ok_or_else(|| "C binder descriptor is not registered".to_string())?;
+//RS     let metadata = read_binding_metadata(&cache, lib)?.unwrap_or_else(|| BindingMetadata {
+//RS         handle_facts: Vec::new(),
+//RS         link_closure: FfiLinkClosure::new(vec![lib.to_string()], Vec::new()),
+//RS     });
+//RS     let boundary = supplied_boundary.cloned().unwrap_or_else(|| {
+//RS         let mut boundary = crate::ForeignBridge::ForeignBoundaryContract::new(
+//RS             *descriptor,
+//RS             lib,
+//RS             crate::ForeignBridge::ForeignBoundaryIdentity::new(
+//RS                 format!("header:{}:{header_sha}", header.display()),
+//RS                 "cache-recorded-or-none",
+//RS                 format!("c-bind:{C_BINDER_SCHEMA}"),
+//RS                 format!("cache:{identity}"),
+//RS                 format!(
+//RS                     "cc={};ar={}",
+//RS                     crate::ForeignBridge::tool_identity("cc"),
+//RS                     crate::ForeignBridge::tool_identity("ar")
+//RS                 ),
+//RS                 crate::ForeignBridge::foreign_host_target(),
+//RS             ),
+//RS         );
+//RS         boundary.ownership = if metadata.handle_facts.is_empty() {
+//RS             "signature-declared; no opaque handles".into()
+//RS         } else {
+//RS             "owned opaque handles recorded in binding metadata".into()
+//RS         };
+//RS         boundary.assumptions.push(
+//RS             "cache was published without an in-memory overlay identity; foreign source remains authoritative"
+//RS                 .into(),
+//RS         );
+//RS         boundary
+//RS     });
+//RS     let mut fields: Vec<(String, String)> = vec![
+//RS         ("language".into(), ForeignLanguage::C.root().to_string()),
+//RS         ("abi".into(), format!("c_{lib}")),
+//RS         ("transport".into(), "direct-c-abi".to_string()),
+//RS         ("binder-schema".into(), C_BINDER_SCHEMA.to_string()),
+//RS         ("descriptor".into(), descriptor.stamp()),
+//RS         ("source".into(), header.to_string_lossy().into_owned()),
+//RS         ("source-sha256".into(), header_sha.clone()),
+//RS         ("cache".into(), cache.to_string_lossy().into_owned()),
+//RS         (
+//RS             "cache-sha256".into(),
+//RS             crate::ForeignBridge::sha_file(&cache)?,
+//RS         ),
+//RS         ("cc".into(), crate::ForeignBridge::tool_identity("cc")),
+//RS         ("ar".into(), crate::ForeignBridge::tool_identity("ar")),
+//RS     ];
+//RS     fields.extend(boundary.provenance_fields());
+//RS     let handle_keys = metadata
+//RS         .handle_facts
+//RS         .iter()
+//RS         .map(FfiHandleFact::stable_key)
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n");
+//RS     fields.push(("handle-facts".into(), handle_keys));
+//RS     fields.push(("link-closure".into(), metadata.link_closure.stable_key()));
+//RS     if let Some(target) = declared_c_dep_for_entry(lib, project_root, entry) {
+//RS         fields.push(("dependency".into(), target));
+//RS     }
+//RS     for input in local_c_archive_inputs(project_root, lib, entry) {
+//RS         fields.push(("linked-library".into(), input.library));
+//RS         fields.push((
+//RS             "linked-archive".into(),
+//RS             input.path.to_string_lossy().into_owned(),
+//RS         ));
+//RS         fields.push((
+//RS             "linked-archive-sha256".into(),
+//RS             input
+//RS                 .bytes
+//RS                 .as_deref()
+//RS                 .map(crate::SHA256::sha256_hex)
+//RS                 .unwrap_or_else(|| "missing".into()),
+//RS         ));
+//RS     }
+//RS     let field_refs: Vec<(&str, &str)> = fields
+//RS         .iter()
+//RS         .map(|(name, value)| (name.as_str(), value.as_str()))
+//RS         .collect();
+//RS     let mut artifacts = vec![
+//RS         (
+//RS             cache
+//RS                 .file_name()
+//RS                 .unwrap_or_default()
+//RS                 .to_string_lossy()
+//RS                 .into_owned(),
+//RS             crate::ForeignBridge::sha_file(&cache)?,
+//RS         ),
+//RS     ];
+//RS     let metadata_path = binding_metadata_path(&cache);
+//RS     if metadata_path.is_file() {
+//RS         artifacts.push((
+//RS             metadata_path
+//RS                 .file_name()
+//RS                 .unwrap_or_default()
+//RS                 .to_string_lossy()
+//RS                 .into_owned(),
+//RS             crate::ForeignBridge::sha_file(&metadata_path)?,
+//RS         ));
+//RS     }
+//RS     let provenance = cache.with_extension("provenance");
+//RS     crate::ForeignBridge::write_provenance(&provenance, &identity, &field_refs, &artifacts)?;
+//RS     Ok(provenance)
+//RS }
+//RS 
+//RS fn e3208(header: &str, lib: &str, reason: &str) -> Diagnostic {
+//RS     Diagnostic::from_row(
+//RS         "E3208",
+//RS         &[("header", header), ("lib", lib), ("reason", reason)],
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS /// Parse a cache source string and push a `LoadedModule` into `modules`.
+//RS fn load_cache_source(
+//RS     source: &str,
+//RS     path: &std::path::Path,
+//RS     lib: &str,
+//RS     diags: &mut Vec<Diagnostic>,
+//RS     modules: &mut Vec<LoadedModule>,
+//RS ) {
+//RS     if source.contains("#Bindgen") {
+//RS         let expected =
+//RS             crate::AST::binder_descriptor(ForeignLanguage::C).map(|descriptor| descriptor.stamp());
+//RS         let actual = source
+//RS             .lines()
+//RS             .find_map(|line| line.strip_prefix("// jet-ffi-descriptor="));
+//RS         if let (Some(expected), Some(actual)) = (expected, actual) {
+//RS             if actual != expected {
+//RS                 let reason = format!(
+//RS                     "the generated cache descriptor is stale (expected `{expected}`, found `{actual}`)"
+//RS                 );
+//RS                 diags.push(e3208(&path.display().to_string(), lib, &reason));
+//RS                 return;
+//RS             }
+//RS         }
+//RS     }
+//RS     let (toks, lex_diags) = crate::Lexer::lex_generated(source);
+//RS     if !lex_diags.is_empty() {
+//RS         diags.extend(lex_diags);
+//RS         return;
+//RS     }
+//RS     let mut prog = match crate::Parser::parse(&toks) {
+//RS         Ok(p) => p,
+//RS         Err(ds) => {
+//RS             diags.extend(ds);
+//RS             return;
+//RS         }
+//RS     };
+//RS     let display = path.display().to_string();
+//RS     modules.push(LoadedModule {
+//RS         path: path.to_path_buf(),
+//RS         display,
+//RS         source: source.to_string(),
+//RS         alias: format!("__c_cache_{lib}"),
+//RS         imports: std::mem::take(&mut prog.imports),
+//RS         items: std::mem::take(&mut prog.items),
+//RS         script_body: std::mem::take(&mut prog.script_body),
+//RS         block_spans: std::mem::take(&mut prog.block_spans),
+//RS         web_target_ceiling: prog.web_target_ceiling,
+//RS         pub_file: prog.pub_file,
+//RS         no_prelude: prog.no_prelude,
+//RS         default_target: prog.default_target,
+//RS         html_path: prog.html_path.clone(),
+//RS         policy_declarations: prog.policy_declarations.clone(),
+//RS         user_policy_declarations: prog.user_policy_declarations.clone(),
+//RS         rule_facts: std::mem::take(&mut prog.rule_facts),
+//RS     });
+//RS }
+//RS 
+//RS /// Resolve link flags for one C library (S59/D-CFFI2). Order:
+//RS ///   1. A declared `<lib>: c@…` dep in the `deps: { … }` block of `package.jet`:
+//RS ///      `c@system` → pkg-config (with a bare `-l <lib>` fallback when there is
+//RS ///      no `.pc`, e.g. libc); `c@"<path>"` → local dir (`-L`/`-I`/`-l`).
+//RS ///   2. Else `pkg-config <lib>` (an undeclared `use c.<lib>` keeps this path).
+//RS ///   3. Else E3201.
+//RS pub fn resolve_link(lib: &str, project_root: &Path) -> Result<LinkFlags, Diagnostic> {
+//RS     resolve_link_for_target_with_entry(lib, project_root, &crate::FFI::host_target(), None)
+//RS }
+//RS 
+//RS pub fn resolve_link_for_target(
+//RS     lib: &str,
+//RS     project_root: &Path,
+//RS     target: &str,
+//RS ) -> Result<LinkFlags, Diagnostic> {
+//RS     resolve_link_for_target_with_entry(lib, project_root, target, None)
+//RS }
+//RS 
+//RS pub fn resolve_link_for_target_with_entry(
+//RS     lib: &str,
+//RS     project_root: &Path,
+//RS     target: &str,
+//RS     entry: Option<&Path>,
+//RS ) -> Result<LinkFlags, Diagnostic> {
+//RS     if let Some(actual) = lib.strip_prefix("jet_cpp_") {
+//RS         let dir = project_root
+//RS             .join(Syntax::SOURCE_ROOT_DIR)
+//RS             .join(ForeignLanguage::Cpp.bindings_subdir());
+//RS         let archive = dir.join(format!("libjet_cpp_{actual}.a"));
+//RS         if archive.is_file() {
+//RS             let metadata = dir.join(format!("{actual}.link"));
+//RS             let source = std::fs::read_to_string(metadata).map_err(|_| e3201(lib))?;
+//RS             let mut bound_target = None;
+//RS             for line in source.lines() {
+//RS                 if let Some(value) = line.strip_prefix("target\t") {
+//RS                     let duplicate = bound_target.replace(value).is_some();
+//RS                     if value.is_empty() || value.contains('\t') || duplicate {
+//RS                         return Err(e3201(lib));
+//RS                     }
+//RS                 } else if line.starts_with("target") {
+//RS                     return Err(e3201(lib));
+//RS                 }
+//RS             }
+//RS             if bound_target != Some(target) {
+//RS                 return Err(e3201(lib));
+//RS             }
+//RS             let mut flags = LinkFlags {
+//RS                 lib_dirs: vec![dir.display().to_string()],
+//RS                 link_names: vec![format!("static=jet_cpp_{actual}")],
+//RS                 ..Default::default()
+//RS             };
+//RS             let mut has_runtime = false;
+//RS             for line in source.lines() {
+//RS                 if let Some(value) = line.strip_prefix("L\t") {
+//RS                     if std::path::Path::new(value).is_absolute() {
+//RS                         flags.lib_dirs.push(value.to_string());
+//RS                         flags.rpath_dirs.push(value.to_string());
+//RS                     }
+//RS                 } else if let Some(value) = line.strip_prefix("l\t") {
+//RS                     if value
+//RS                         .chars()
+//RS                         .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+//RS                     {
+//RS                         has_runtime |= value == crate::FFI::cxx_runtime_for_target(target);
+//RS                         flags.link_names.push(value.to_string());
+//RS                     }
+//RS                 }
+//RS             }
+//RS             if !has_runtime {
+//RS                 flags
+//RS                     .link_names
+//RS                     .push(crate::FFI::cxx_runtime_for_target(target).into());
+//RS             }
+//RS             return Ok(flags);
+//RS         }
+//RS         return Err(e3201(lib));
+//RS     }
+//RS     if let Some(actual) = lib.strip_prefix("jet_go_") {
+//RS         let archive = project_root
+//RS             .join(Syntax::SOURCE_ROOT_DIR)
+//RS             .join(ForeignLanguage::Go.bindings_subdir())
+//RS             .join(format!("libjet_go_{actual}.a"));
+//RS         if archive.is_file() {
+//RS             return Ok(LinkFlags {
+//RS                 lib_dirs: vec![archive
+//RS                     .parent()
+//RS                     .unwrap_or(project_root)
+//RS                     .display()
+//RS                     .to_string()],
+//RS                 link_names: vec![
+//RS                     format!("static=jet_go_{actual}"),
+//RS                     "pthread".into(),
+//RS                     "dl".into(),
+//RS                     "m".into(),
+//RS                 ],
+//RS                 ..Default::default()
+//RS             });
+//RS         }
+//RS         return Err(e3201(lib));
+//RS     }
+//RS     if let Some(actual) = lib.strip_prefix("jet_js_") {
+//RS         let dir = project_root
+//RS             .join(Syntax::SOURCE_ROOT_DIR)
+//RS             .join(ForeignLanguage::JS.bindings_subdir());
+//RS         let archive = dir.join(format!("libjet_js_{actual}.a"));
+//RS         if archive.is_file() {
+//RS             return Ok(LinkFlags {
+//RS                 lib_dirs: vec![dir.display().to_string()],
+//RS                 link_names: vec![format!("static=jet_js_{actual}")],
+//RS                 ..Default::default()
+//RS             });
+//RS         }
+//RS         return Err(e3201(lib));
+//RS     }
+//RS     if let Some(actual) = lib.strip_prefix("jet_java_") {
+//RS         let dir = project_root
+//RS             .join(Syntax::SOURCE_ROOT_DIR)
+//RS             .join(ForeignLanguage::Java.bindings_subdir());
+//RS         let archive = dir.join(format!("libjet_java_{actual}.a"));
+//RS         let path_file = dir.join(format!("{actual}.jvm-path"));
+//RS         let Ok(jvm_dir) = std::fs::read_to_string(path_file) else {
+//RS             return Err(e3201(lib));
+//RS         };
+//RS         let jvm_dir = jvm_dir.trim();
+//RS         if archive.is_file()
+//RS             && std::path::Path::new(jvm_dir).is_absolute()
+//RS             && std::path::Path::new(jvm_dir)
+//RS                 .join(if cfg!(target_os = "macos") {
+//RS                     "libjvm.dylib"
+//RS                 } else {
+//RS                     "libjvm.so"
+//RS                 })
+//RS                 .is_file()
+//RS         {
+//RS             return Ok(LinkFlags {
+//RS                 lib_dirs: vec![dir.display().to_string(), jvm_dir.to_string()],
+//RS                 link_names: vec![
+//RS                     format!("static=jet_java_{actual}"),
+//RS                     "jvm".into(),
+//RS                     "pthread".into(),
+//RS                     "dl".into(),
+//RS                 ],
+//RS                 rpath_dirs: vec![jvm_dir.to_string()],
+//RS                 ..Default::default()
+//RS             });
+//RS         }
+//RS         return Err(e3201(lib));
+//RS     }
+//RS     if let Some(actual) = lib.strip_prefix("jet_cs_") {
+//RS         let dir = project_root
+//RS             .join(Syntax::SOURCE_ROOT_DIR)
+//RS             .join(ForeignLanguage::DotNet.bindings_subdir());
+//RS         let archive = dir.join(format!("libjet_cs_{actual}.a"));
+//RS         if archive.is_file() {
+//RS             return Ok(LinkFlags {
+//RS                 lib_dirs: vec![dir.display().to_string()],
+//RS                 link_names: vec![
+//RS                     format!("static=jet_cs_{actual}"),
+//RS                     "pthread".into(),
+//RS                     "dl".into(),
+//RS                 ],
+//RS                 ..Default::default()
+//RS             });
+//RS         }
+//RS         return Err(e3201(lib));
+//RS     }
+//RS     if let Some(actual) = lib.strip_prefix("jet_tcl_") {
+//RS         let dir = project_root
+//RS             .join(Syntax::SOURCE_ROOT_DIR)
+//RS             .join(ForeignLanguage::Tcl.bindings_subdir());
+//RS         let archive = dir.join(format!("libjet_tcl_{actual}.a"));
+//RS         let path_file = dir.join(format!("{actual}.tcl-path"));
+//RS         let Ok(tcl_dir) = std::fs::read_to_string(path_file) else {
+//RS             return Err(e3201(lib));
+//RS         };
+//RS         let tcl_dir = tcl_dir.trim();
+//RS         if archive.is_file()
+//RS             && std::path::Path::new(tcl_dir).is_absolute()
+//RS             && std::path::Path::new(tcl_dir)
+//RS                 .join(if cfg!(target_os = "macos") {
+//RS                     "libtcl.dylib"
+//RS                 } else {
+//RS                     "libtcl.so"
+//RS                 })
+//RS                 .is_file()
+//RS         {
+//RS             return Ok(LinkFlags {
+//RS                 lib_dirs: vec![dir.display().to_string(), tcl_dir.into()],
+//RS                 link_names: vec![
+//RS                     format!("static=jet_tcl_{actual}"),
+//RS                     "tcl".into(),
+//RS                     "pthread".into(),
+//RS                     "dl".into(),
+//RS                 ],
+//RS                 rpath_dirs: vec![tcl_dir.into()],
+//RS                 ..Default::default()
+//RS             });
+//RS         }
+//RS         return Err(e3201(lib));
+//RS     }
+//RS     if let Some(actual) = lib.strip_prefix("jet_lua_") {
+//RS         let dir = project_root
+//RS             .join(Syntax::SOURCE_ROOT_DIR)
+//RS             .join(ForeignLanguage::Lua.bindings_subdir());
+//RS         let archive = dir.join(format!("libjet_lua_{actual}.a"));
+//RS         let path_file = dir.join(format!("{actual}.lua-path"));
+//RS         let Ok(lua_dir) = std::fs::read_to_string(path_file) else {
+//RS             return Err(e3201(lib));
+//RS         };
+//RS         let lua_dir = lua_dir.trim();
+//RS         if archive.is_file()
+//RS             && std::path::Path::new(lua_dir).is_absolute()
+//RS             && std::path::Path::new(lua_dir)
+//RS                 .join(if cfg!(target_os = "macos") {
+//RS                     "liblua.dylib"
+//RS                 } else {
+//RS                     "liblua.so"
+//RS                 })
+//RS                 .is_file()
+//RS         {
+//RS             return Ok(LinkFlags {
+//RS                 lib_dirs: vec![dir.display().to_string(), lua_dir.into()],
+//RS                 link_names: vec![
+//RS                     format!("static=jet_lua_{actual}"),
+//RS                     "lua".into(),
+//RS                     "pthread".into(),
+//RS                     "dl".into(),
+//RS                     "m".into(),
+//RS                 ],
+//RS                 rpath_dirs: vec![lua_dir.into()],
+//RS                 ..Default::default()
+//RS             });
+//RS         }
+//RS         return Err(e3201(lib));
+//RS     }
+//RS     if let Some(actual) = lib.strip_prefix("jet_ada_") {
+//RS         let dir = project_root
+//RS             .join(Syntax::SOURCE_ROOT_DIR)
+//RS             .join(ForeignLanguage::Ada.bindings_subdir());
+//RS         let archive = dir.join(format!("libjet_ada_{actual}.a"));
+//RS         let path_file = dir.join(format!("{actual}.ada-path"));
+//RS         let Ok(runtime_dir) = std::fs::read_to_string(path_file) else {
+//RS             return Err(e3201(lib));
+//RS         };
+//RS         let runtime_dir = runtime_dir.trim();
+//RS         if archive.is_file()
+//RS             && std::path::Path::new(runtime_dir).is_absolute()
+//RS             && std::path::Path::new(runtime_dir)
+// END-PORT-PENDING 2057 crates/jet-pkg-model/src/CFFI.rs:1801-3600
+

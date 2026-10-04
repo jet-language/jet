@@ -2,14 +2,14 @@
 // jetpack::CLI::dashboard. Every line is sanitized and fitted to the
 // terminal width; colored lines are cut with their SGR state intact.
 
-@DASHBOARD_SCREEN_ENTER_CODES :: "[?1049h"
-@DASHBOARD_SCREEN_HIDE_CURSOR :: "[?25l"
-@DASHBOARD_SCREEN_SHOW_CURSOR :: "[?25h"
-@DASHBOARD_SCREEN_LEAVE_CODES :: "[?1049l"
-@DASHBOARD_CLEAR_HOME :: "[2J"
-@DASHBOARD_CURSOR_HOME :: "[H"
-@DASHBOARD_BUSY_NOTE :: "refreshing; store busy (another jetpack is running)"
-@DASHBOARD_KEYS_HINT :: "r refresh · q quit"
+DASHBOARD_SCREEN_ENTER_CODES :: prep { "[?1049h" }
+DASHBOARD_SCREEN_HIDE_CURSOR :: prep { "[?25l" }
+DASHBOARD_SCREEN_SHOW_CURSOR :: prep { "[?25h" }
+DASHBOARD_SCREEN_LEAVE_CODES :: prep { "[?1049l" }
+DASHBOARD_CLEAR_HOME :: prep { "[2J" }
+DASHBOARD_CURSOR_HOME :: prep { "[H" }
+DASHBOARD_BUSY_NOTE :: prep { "refreshing; store busy (another jetpack is running)" }
+DASHBOARD_KEYS_HINT :: prep { "r refresh · q quit" }
 
 // The alternate screen with a hidden cursor while the dashboard runs; the
 // normal screen and cursor come back at scope exit.
@@ -30,12 +30,12 @@ impl DashboardAlternateScreen.Close {
 
 pub fn cli_dashboard_screen_enter_sequence() -> String Never! {
     esc :: terminal_esc()
-    "{esc}{@DASHBOARD_SCREEN_ENTER_CODES}{esc}{@DASHBOARD_SCREEN_HIDE_CURSOR}{esc}{@DASHBOARD_CLEAR_HOME}{esc}{@DASHBOARD_CURSOR_HOME}"
+    "{esc}{DASHBOARD_SCREEN_ENTER_CODES}{esc}{DASHBOARD_SCREEN_HIDE_CURSOR}{esc}{DASHBOARD_CLEAR_HOME}{esc}{DASHBOARD_CURSOR_HOME}"
 }
 
 pub fn cli_dashboard_screen_leave_sequence() -> String Never! {
     esc :: terminal_esc()
-    "{esc}{@DASHBOARD_SCREEN_SHOW_CURSOR}{esc}{@DASHBOARD_SCREEN_LEAVE_CODES}"
+    "{esc}{DASHBOARD_SCREEN_SHOW_CURSOR}{esc}{DASHBOARD_SCREEN_LEAVE_CODES}"
 }
 
 fn cli_dashboard_write_stdout(text: String) Never! -[IO]> {
@@ -47,7 +47,7 @@ fn cli_dashboard_write_stdout(text: String) Never! -[IO]> {
 // Clear the screen and draw one frame from the top-left corner.
 pub fn cli_dashboard_redraw(frame: String) Never! -[IO]> {
     esc :: terminal_esc()
-    cli_dashboard_write_stdout("{esc}{@DASHBOARD_CLEAR_HOME}{esc}{@DASHBOARD_CURSOR_HOME}{frame}")
+    cli_dashboard_write_stdout("{esc}{DASHBOARD_CLEAR_HOME}{esc}{DASHBOARD_CURSOR_HOME}{frame}")
 }
 
 // `COLUMNS` when positive, the terminal's width when interactive, else 80.
@@ -64,8 +64,8 @@ pub fn cli_dashboard_render_frame_width(frame: DashboardFrame, width: Int, theme
     if frame == {
         .Loading -> cli_dashboard_render_loading_width(width, theme.gray("reading store…"), theme)
         .Busy(stale) -> if stale == {
-            .Val(snapshot) -> cli_dashboard_render_width_with_note(snapshot, width, theme, Val(@DASHBOARD_BUSY_NOTE))
-            .None -> cli_dashboard_render_loading_width(width, theme.yellow(@DASHBOARD_BUSY_NOTE), theme)
+            .Val(snapshot) -> cli_dashboard_render_width_with_note(snapshot, width, theme, Val(DASHBOARD_BUSY_NOTE))
+            .None -> cli_dashboard_render_loading_width(width, theme.yellow(DASHBOARD_BUSY_NOTE), theme)
         }
         .Refreshing(snapshot) -> cli_dashboard_render_width_with_note(snapshot, width, theme, Val("refreshing store…"))
         .Ready(snapshot) -> cli_dashboard_render_width(snapshot, width, theme)
@@ -80,7 +80,7 @@ fn cli_dashboard_render_loading_width(width: Int, store_message: String, theme: 
     cli_dashboard_push_line(&out, width, 0, theme.cyan("Store"))
     cli_dashboard_push_line(&out, width, 2, store_message)
     &out.push("\n")
-    cli_dashboard_push_line(&out, width, 0, theme.gray(@DASHBOARD_KEYS_HINT))
+    cli_dashboard_push_line(&out, width, 0, theme.gray(DASHBOARD_KEYS_HINT))
     out.join("")
 }
 
@@ -145,7 +145,7 @@ fn cli_dashboard_render_width_with_note(snapshot: DashboardSnapshot, width: Int,
         loop activity in snapshot.activity -> cli_dashboard_push_line(&out, width, 2, theme.gray(cli_dashboard_activity_text(activity)))
     }
     &out.push("\n")
-    cli_dashboard_push_line(&out, width, 0, theme.gray(@DASHBOARD_KEYS_HINT))
+    cli_dashboard_push_line(&out, width, 0, theme.gray(DASHBOARD_KEYS_HINT))
     out.join("")
 }
 

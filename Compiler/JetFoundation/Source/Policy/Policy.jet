@@ -1,0 +1,592 @@
+// Compiler-owned policy and build-fact contribution law (D-MARK-SCOPE1).
+// PolicyKey, PolicyValue, PolicyScope and PolicyDeclaration live in AST/Statements.jet.
+// Rust's generic resolve/explain seams specialize here as policy_resolve/fact_resolve
+// and policy_explain/fact_explain; contributors never choose a merge algorithm.
+// Limit reuses the AST Int carrier; the u64 range boundary belongs to C-INT.
+
+// Rust `PolicyKey::name` (Policy.rs:21-31).
+pub fn policy_key_name(key: PolicyKey) -> String Never! {
+    if key == {
+        .Unsafe -> "unsafe"
+        .Impure -> "impure"
+        .Nondeterministic -> "nondeterministic"
+        .ScopedGC -> "gc"
+        .ExplicitUnits -> "explicit_units"
+        .Copies -> "copies"
+        .Sentries -> "sentries"
+    }
+}
+// Rust `PolicyKey::parse` (Policy.rs:32-43).
+pub fn policy_key_parse(name: String) -> PolicyKey? Never! {
+    if name == {
+        "unsafe" -> Val(PolicyKey.Unsafe)
+        "impure" -> Val(PolicyKey.Impure)
+        "nondeterministic" -> Val(PolicyKey.Nondeterministic)
+        "gc" -> Val(PolicyKey.ScopedGC)
+        "explicit_units" -> Val(PolicyKey.ExplicitUnits)
+        "copies" -> Val(PolicyKey.Copies)
+        "sentries" -> Val(PolicyKey.Sentries)
+        else -> None
+    }
+}
+// Rust `PolicyKey::is_audited_gate` (Policy.rs:44-46).
+pub fn policy_key_is_audited_gate(key: PolicyKey) -> Bool Never! {
+    key == PolicyKey.Unsafe || key == PolicyKey.Impure || key == PolicyKey.Nondeterministic
+}
+// Rust `PolicyValue::display` (Policy.rs:68-85).
+pub fn policy_value_display(value: PolicyValue) -> String Never! {
+    if value == {
+        .Enabled -> "true"
+        .Limit(n) -> "{n}"
+        .Forbid -> ".Forbid"
+        .Default -> ".Default"
+        .GateOnly -> ".GateOnly"
+        .Obligations -> ".Obligations"
+        .Relaxed -> ".Relaxed"
+        .PerSite -> ".PerSite"
+        .Track -> ".Track"
+        .Skip -> ".Skip"
+        .Allow -> ".Allow"
+        .On -> ".On"
+        .Off -> ".Off"
+        .Explicit -> ".Explicit"
+    }
+}
+
+pub enum SourceScope { Package File Module Function Block Item }
+// Rust `SourceScope::name` (Policy.rs:101-110).
+pub fn source_scope_name(scope: SourceScope) -> String Never! {
+    if scope == {
+        .Package -> "package"
+        .File -> "file"
+        .Module -> "module"
+        .Function -> "function"
+        .Block -> "block"
+        .Item -> "item"
+    }
+}
+// Rust `SourceScope::rank` (Policy.rs:112-121).
+pub fn source_scope_rank(scope: SourceScope) -> Int Never! {
+    if scope == {
+        .Package -> 0
+        .File -> 1
+        .Module -> 2
+        .Function -> 3
+        .Block -> 4
+        .Item -> 5
+    }
+}
+pub enum ContributionLayer { Declaration OptimizationBundle Workspace Environment System Fleet CommandLine }
+// Rust `ContributionLayer::name` (Policy.rs:139-149).
+pub fn contribution_layer_name(layer: ContributionLayer) -> String Never! {
+    if layer == {
+        .Declaration -> "declaration"
+        .OptimizationBundle -> "optimization bundle"
+        .Workspace -> "workspace"
+        .Environment -> "environment"
+        .System -> "system"
+        .Fleet -> "fleet"
+        .CommandLine -> "command line"
+    }
+}
+// Rust `ContributionLayer::rank` (Policy.rs:151-161).
+pub fn contribution_layer_rank(layer: ContributionLayer) -> Int Never! {
+    if layer == {
+        .Declaration -> 0
+        .OptimizationBundle -> 1
+        .Workspace -> 2
+        .Environment -> 3
+        .System -> 4
+        .Fleet -> 5
+        .CommandLine -> 6
+    }
+}
+// Rust `ContributionLayer::can_force` (Policy.rs:163-165).
+pub fn contribution_layer_can_force(layer: ContributionLayer) -> Bool Never! {
+    layer == ContributionLayer.System || layer == ContributionLayer.Fleet
+}
+
+pub enum FactMerge { Override TightenOnly }
+pub struct FactDefault { pub value: FactValue pub source: String }
+pub struct FactKey { pub name: String pub merge: FactMerge pub default: FactDefault? }
+// Rust `FactKey::new` (Policy.rs:185-192).
+pub fn fact_key_new(name: String) -> FactKey Never! {
+    FactKey{name: name, merge: FactMerge.Override, default: None}
+}
+// Rust `FactKey::tighten_only` (Policy.rs:194-198).
+pub fn fact_key_tighten_only(name: String) -> FactKey Never! {
+    FactKey{name: name, merge: FactMerge.TightenOnly, default: None}
+}
+// Rust `FactKey::with_default` (Policy.rs:201-203).
+pub fn fact_key_with_default(name: String, value: FactValue) -> FactKey Never! {
+    fact_key_with_default_source(name, value, "<default>")
+}
+// Rust `FactKey::with_default_source` (Policy.rs:207-215).
+pub fn fact_key_with_default_source(name: String, value: FactValue, source: String) -> FactKey Never! {
+    FactKey{name: name, merge: FactMerge.Override, default: Val(FactDefault{value: value, source: source})}
+}
+pub enum FactValue {
+    Bool(Bool)
+    Int(Int)
+    Char(Char)
+    Text(String)
+    Enum(String)
+    OptionalText(String?)
+    Policy(PolicyValue)
+}
+// Rust `FactValue::display` (Policy.rs:232-243); strings are deliberately not escaped.
+pub fn fact_value_display(value: FactValue) -> String Never! {
+    if value == {
+        .Bool(v) -> "{v}"
+        .Int(v) -> "{v}"
+        .Char(v) -> "'{v}'"
+        .Text(v) -> "\"{v}\""
+        .Enum(v) -> ".{v}"
+        .OptionalText(v) -> if v == {
+            .Val(s) -> "Some(\"{s}\")"
+            .None -> "None"
+        }
+        .Policy(v) -> policy_value_display(v)
+    }
+}
+pub enum FactSafetyRelation { Same Tighten Widen Incomparable }
+// Rust `FactValue::safety_relation` (Policy.rs:245-273).
+pub fn fact_value_safety_relation(outer: FactValue, inner: FactValue) -> FactSafetyRelation Never! {
+    if outer == inner -> return FactSafetyRelation.Same
+    if outer == {
+        .Bool(a) -> if inner == .Bool(b) {
+            if a && !b -> return FactSafetyRelation.Tighten
+            return FactSafetyRelation.Widen
+        }
+        .Int(a) -> if inner == .Int(b) {
+            if b < a -> return FactSafetyRelation.Tighten
+            return FactSafetyRelation.Widen
+        }
+        .Policy(a) -> if inner == .Policy(b) {
+            if policy_gate_widens(a, b) -> return FactSafetyRelation.Widen
+            return FactSafetyRelation.Tighten
+        }
+        else -> {}
+    }
+    FactSafetyRelation.Incomparable
+}
+
+pub struct FactContribution {
+    pub key: String
+    pub value: FactValue
+    pub scope: SourceScope
+    pub layer: ContributionLayer
+    pub span: Span
+    pub target: Span?
+    pub source: String
+    pub reason: String?
+    pub force: Bool
+    pub force_reason: String?
+    pub default: Bool
+}
+// Rust `FactContribution::new` (Policy.rs:305-325).
+pub fn fact_contribution_new(key: String, value: FactValue, scope: SourceScope, layer: ContributionLayer, source: String) -> FactContribution Never! {
+    FactContribution{key: key, value: value, scope: scope, layer: layer, span: Span{start: 0, end: 0}, target: None, source: source, reason: None, force: false, force_reason: None, default: false}
+}
+// Rust `FactContribution::at` (Policy.rs:327-330).
+pub fn fact_contribution_at(contribution: FactContribution, span: Span) -> FactContribution Never! {
+    out := contribution
+    out.span = span
+    out
+}
+// Rust `FactContribution::for_target` (Policy.rs:332-335).
+pub fn fact_contribution_for_target(contribution: FactContribution, target: Span) -> FactContribution Never! {
+    out := contribution
+    out.target = Val(target)
+    out
+}
+// Rust `FactContribution::force_with_reason` (Policy.rs:337-341).
+pub fn fact_contribution_force_with_reason(contribution: FactContribution, reason: String) -> FactContribution Never! {
+    out := contribution
+    out.force = true
+    out.force_reason = Val(reason)
+    out
+}
+// Rust `FactContribution::force` (Policy.rs:343-345).
+pub fn fact_contribution_force(contribution: FactContribution) -> FactContribution Never! {
+    fact_contribution_force_with_reason(contribution, ".Force")
+}
+// Rust `FactContribution::with_reason` (Policy.rs:347-350).
+pub fn fact_contribution_with_reason(contribution: FactContribution, reason: String) -> FactContribution Never! {
+    out := contribution
+    out.reason = Val(reason)
+    out
+}
+// Rust `FactContribution::default_for` (Policy.rs:352-362).
+pub fn fact_contribution_default_for(key: FactKey, value: FactValue, source: String) -> FactContribution Never! {
+    out := fact_contribution_new(key.name, value, SourceScope.Package, ContributionLayer.Declaration, source)
+    out.default = true
+    out
+}
+pub struct EffectiveFact { pub key: FactKey pub value: FactValue pub provenance: [FactContribution] pub effective: Int pub forced: Bool }
+#Error
+pub enum FactError {
+    InvalidForce(key: String, layer: ContributionLayer, source: String)
+    Conflict(key: String, layer: ContributionLayer, first: FactContribution, second: FactContribution)
+    SafetyWidening(key: String, previous: FactContribution, next: FactContribution)
+    SafetyIncomparable(key: String, previous: FactContribution, next: FactContribution)
+}
+// Rust `FactError::message` (Policy.rs:402-441).
+pub fn fact_error_message(error: FactError) -> String Never! {
+    if error == {
+        .InvalidForce(key, layer, source) -> "fact `{key}` uses `.Force` at the unsupported {contribution_layer_name(layer)} layer ({source})"
+        .Conflict(key, layer, first, second) -> "fact `{key}` has conflicting values at the {contribution_layer_name(layer)} layer: {first.source}:{first.span.start} and {second.source}:{second.span.start}"
+        .SafetyWidening(key, previous, next) -> "fact `{key}` widens from {fact_value_display(previous.value)} at {previous.source} to {fact_value_display(next.value)} at {next.source}"
+        .SafetyIncomparable(key, previous, next) -> "fact `{key}` has unrelated safety values at {previous.source} and {next.source}"
+    }
+}
+// Rust `FactError::diagnostic` (Policy.rs:445-462).
+pub fn fact_error_diagnostic(error: FactError) -> Diagnostic? Never! {
+    if error == .Conflict(key, layer, first, second) {
+        return Val(diagnostic_from_registry("E3521", Val(second.span),
+            "fact `{key}` has conflicting values at the {contribution_layer_name(layer)} layer",
+            "`{first.source}` writes {fact_value_display(first.value)} at {first.span.start}:{first.span.end}; `{second.source}` writes {fact_value_display(second.value)} at {second.span.start}:{second.span.end}.",
+            "make same-layer writers agree, or move one value to a more explicit contribution layer"))
+    }
+    None
+}
+
+pub enum PolicyCombine { Tighten Override Merge }
+pub struct PolicyRule { pub key: PolicyKey pub scopes: [PolicyScope] pub combine: PolicyCombine }
+POLICY_PACKAGE_SCOPES :: [PolicyScope]{PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block}
+POLICY_ALL_SCOPES :: [PolicyScope]{PolicyScope.Organization, PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block}
+pub POLICY_RULES :: prep { [PolicyRule]{
+    PolicyRule{key: PolicyKey.Unsafe, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.Impure, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.Nondeterministic, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.ScopedGC, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Override},
+    PolicyRule{key: PolicyKey.ExplicitUnits, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.Copies, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.Sentries, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
+} }
+pub AUDITED_GATE_KEYS :: [PolicyKey]{PolicyKey.Unsafe, PolicyKey.Impure, PolicyKey.Nondeterministic}
+// Rust `rule` (Policy.rs:536-541).
+pub fn policy_rule(key: PolicyKey) -> PolicyRule Never! {
+    loop row in POLICY_RULES { if row.key == key -> return row }
+    panic("registered policy key")
+}
+// Rust `Authority::Scope::{rank,name}`, reusing the AST's PolicyScope.
+pub fn policy_scope_rank(scope: PolicyScope) -> Int Never! {
+    if scope == {
+        .Organization -> 0
+        .Package -> 1
+        .Module -> 2
+        .Function -> 3
+        .Block -> 4
+    }
+}
+pub fn policy_scope_name(scope: PolicyScope) -> String Never! {
+    if scope == {
+        .Organization -> "organization"
+        .Package -> "package"
+        .Module -> "module"
+        .Function -> "function"
+        .Block -> "block"
+    }
+}
+pub struct EffectivePolicy { pub key: PolicyKey pub value: PolicyValue pub provenance: [PolicyDeclaration] }
+#Error
+pub enum PolicyError {
+    ProhibitedScope(key: PolicyKey, scope: PolicyScope, span: Span)
+    Conflict(key: PolicyKey, scope: PolicyScope, first: Span, second: Span)
+    Widening(key: PolicyKey, outer: PolicyValue, inner: PolicyValue, span: Span)
+}
+// Rust `resolve_policy`, `ResolutionKey for PolicyKey`, `resolve` (Policy.rs:586-713).
+pub fn policy_resolve(key: PolicyKey, declarations: [PolicyDeclaration]) -> EffectivePolicy? PolicyError! {
+    ordered := [PolicyDeclaration]{}
+    loop declaration in declarations { if declaration.key == key -> &ordered.push(declaration) }
+    &ordered.sort_by((left: PolicyDeclaration, right: PolicyDeclaration) -> policy_scope_rank(left.scope) <=> policy_scope_rank(right.scope))
+    chain := [PolicyDeclaration]{}
+    effective := PolicyValue?{None}
+    registry :: policy_rule(key)
+    loop declaration in ordered {
+        if !registry.scopes.contains(declaration.scope) -> return Err(PolicyError.ProhibitedScope{key: key, scope: declaration.scope, span: declaration.span})
+        loop previous in chain {
+            if previous.scope == declaration.scope && previous.target == declaration.target -> return Err(PolicyError.Conflict{key: key, scope: declaration.scope, first: previous.span, second: declaration.span})
+        }
+        next := declaration.value
+        if effective == .Val(outer) {
+            widens := true
+            if {
+                (key == PolicyKey.ScopedGC || key == PolicyKey.ExplicitUnits) && outer == PolicyValue.Enabled && next == PolicyValue.Enabled -> widens = false
+                key == PolicyKey.Copies && outer == PolicyValue.Explicit && next == PolicyValue.Explicit -> widens = false
+                key == PolicyKey.Sentries -> {
+                    if (outer == PolicyValue.On && (next == PolicyValue.On || next == PolicyValue.Off)) || (outer == PolicyValue.Off && next == PolicyValue.Off) -> widens = false
+                }
+                policy_key_is_audited_gate(key) -> widens = policy_gate_widens(outer, next)
+                else -> {}
+            }
+            if registry.combine == PolicyCombine.Tighten && widens -> return Err(PolicyError.Widening{key: key, outer: outer, inner: next, span: declaration.span})
+            if registry.combine == PolicyCombine.Merge {
+                merged := PolicyValue?{None}
+                if outer == .Limit(a) && next == .Limit(b) {
+                    minimum :: if {
+                        a < b -> a
+                        else -> b
+                    }
+                    merged = Val(PolicyValue.Limit{value: minimum})
+                }
+                if outer == PolicyValue.Enabled && next == PolicyValue.Enabled -> merged = Val(PolicyValue.Enabled)
+                if outer == PolicyValue.Forbid && next == PolicyValue.Forbid -> merged = Val(PolicyValue.Forbid)
+                next = merged ?? return Err(PolicyError.Conflict{key: key, scope: declaration.scope, first: chain[chain.len() - 1].span, second: declaration.span})
+            }
+        }
+        effective = Val(next)
+        &chain.push(declaration)
+    }
+    if effective == .Val(value) -> return Ok(Val(EffectivePolicy{key: key, value: value, provenance: chain}))
+    Ok(None)
+}
+// Rust `resolve_fact`, `ResolutionKey for FactKey`, `resolve` (Policy.rs:694-854).
+pub fn fact_resolve(key: FactKey, declarations: [FactContribution]) -> EffectiveFact? FactError! {
+    chain := [FactContribution]{}
+    has_default := false
+    loop declaration in declarations {
+        if declaration.key == key.name {
+            if declaration.default -> has_default = true
+            &chain.push(declaration)
+        }
+    }
+    if key.default == .Val(default) && !has_default -> &chain.push(fact_contribution_default_for(key, default.value, default.source))
+    if chain.is_empty() -> return Ok(None)
+    &chain.sort_by((left: FactContribution, right: FactContribution) -> if {
+        left.layer != right.layer -> contribution_layer_rank(left.layer) <=> contribution_layer_rank(right.layer)
+        left.scope != right.scope -> source_scope_rank(left.scope) <=> source_scope_rank(right.scope)
+        left.source != right.source -> left.source <=> right.source
+        left.span.start != right.span.start -> left.span.start <=> right.span.start
+        else -> left.span.end <=> right.span.end
+    })
+    loop declaration in chain {
+        if declaration.force && !contribution_layer_can_force(declaration.layer) -> return Err(FactError.InvalidForce{key: key.name, layer: declaration.layer, source: declaration.source})
+    }
+    first_in_group := 0
+    force_layer := -1
+    loop (index, declaration) in chain {
+        first :: chain[first_in_group]
+        if {
+            declaration.layer != first.layer || declaration.scope != first.scope -> first_in_group = index
+            declaration.value != first.value -> return Err(FactError.Conflict{key: key.name, layer: declaration.layer, first: first, second: declaration})
+            else -> {}
+        }
+        if declaration.force && contribution_layer_rank(declaration.layer) > force_layer -> force_layer = contribution_layer_rank(declaration.layer)
+    }
+    effective_layer := -1
+    effective_scope := -1
+    effective := 0
+    previous := -1
+    loop (index, declaration) in chain {
+        layer :: contribution_layer_rank(declaration.layer)
+        if force_layer >= 0 && layer > force_layer -> next
+        scope :: source_scope_rank(declaration.scope)
+        if layer > effective_layer || (layer == effective_layer && scope > effective_scope) {
+            effective_layer = layer
+            effective_scope = scope
+            effective = index
+        }
+        if key.merge == FactMerge.TightenOnly && previous >= 0 {
+            prior :: chain[previous]
+            if fact_value_safety_relation(prior.value, declaration.value) == {
+                .Same -> {}
+                .Tighten -> {}
+                .Widen -> return Err(FactError.SafetyWidening{key: key.name, previous: prior, next: declaration})
+                .Incomparable -> return Err(FactError.SafetyIncomparable{key: key.name, previous: prior, next: declaration})
+            }
+        }
+        previous = index
+    }
+    value :: chain[effective].value
+    forced :: chain[effective].force || force_layer >= 0
+    Ok(Val(EffectiveFact{key: key, value: value, provenance: chain, effective: effective, forced: forced}))
+}
+// Rust `gate_widens` (Policy.rs:856-874), including its intentionally non-reflexive cases.
+pub fn policy_gate_widens(outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
+    if inner == PolicyValue.Allow -> return outer == PolicyValue.Forbid
+    if outer == PolicyValue.Forbid -> return inner != PolicyValue.Forbid
+    if outer == PolicyValue.Obligations -> return inner != PolicyValue.Obligations && inner != PolicyValue.Track
+    if outer == PolicyValue.PerSite -> return inner != PolicyValue.Track && inner != PolicyValue.Skip && inner != PolicyValue.PerSite
+    if outer == PolicyValue.Default || outer == PolicyValue.GateOnly || outer == PolicyValue.Relaxed {
+        return inner != PolicyValue.Track && inner != PolicyValue.Obligations && inner != PolicyValue.Default && inner != PolicyValue.GateOnly && inner != PolicyValue.Relaxed && inner != PolicyValue.Skip
+    }
+    if outer == PolicyValue.Track && inner == PolicyValue.Track -> return false
+    if outer == PolicyValue.Skip && inner == PolicyValue.Skip -> return false
+    if outer == PolicyValue.On && (inner == PolicyValue.On || inner == PolicyValue.Off) -> return false
+    if outer == PolicyValue.Off && inner == PolicyValue.Off -> return false
+    true
+}
+// Rust `default_gate_value` (Policy.rs:876-883).
+pub fn default_gate_value(key: PolicyKey) -> PolicyValue Never! {
+    if key == {
+        .Unsafe -> PolicyValue.Default
+        .Impure -> PolicyValue.GateOnly
+        .Nondeterministic -> PolicyValue.GateOnly
+        .Sentries -> PolicyValue.On
+        else -> PolicyValue.Enabled
+    }
+}
+#Error
+pub struct PolicyValueParseError { pub message: String }
+// Rust `parse_value` (Policy.rs:885-911).
+pub fn policy_parse_value(key: PolicyKey, raw: String) -> PolicyValue PolicyValueParseError! {
+    value :: raw.trim()
+    if (key == PolicyKey.ScopedGC || key == PolicyKey.ExplicitUnits) && value == "true" -> return Ok(PolicyValue.Enabled)
+    if key == PolicyKey.Copies {
+        if value == ".Explicit" -> return Ok(PolicyValue.Explicit)
+        return Err(PolicyValueParseError{message: "`copies` must be `.Explicit`"})
+    }
+    if key == PolicyKey.Sentries {
+        if value == ".On" -> return Ok(PolicyValue.On)
+        if value == ".Off" -> return Ok(PolicyValue.Off)
+        return Err(PolicyValueParseError{message: "`sentries` must be `.On` or `.Off`"})
+    }
+    if policy_key_is_audited_gate(key) {
+        if value == {
+            ".Forbid" -> return Ok(PolicyValue.Forbid)
+            ".Default" -> return Ok(PolicyValue.Default)
+            ".GateOnly" -> return Ok(PolicyValue.GateOnly)
+            ".Obligations" -> return Ok(PolicyValue.Obligations)
+            ".Relaxed" -> return Ok(PolicyValue.Relaxed)
+            ".PerSite" -> return Ok(PolicyValue.PerSite)
+            ".Track" -> return Ok(PolicyValue.Track)
+            ".Skip" -> return Ok(PolicyValue.Skip)
+            else -> {}
+        }
+        return Err(PolicyValueParseError{message: "`{policy_key_name(key)}` must be one of `.Forbid`, `.Default`, `.GateOnly`, `.Obligations`, `.Relaxed`, `.PerSite`, `.Track`, or `.Skip`"})
+    }
+    Err(PolicyValueParseError{message: "package policy `{policy_key_name(key)}` has an unsupported value"})
+}
+
+pub struct GateSet { pub bits: Int }
+#Error
+pub struct PolicyGateParseError { pub message: String }
+// Rust `GateSet::default` (Policy.rs:913-916).
+pub fn gate_set_new() -> GateSet Never! { GateSet{bits: 0} }
+// Rust `GateSet::bit` (Policy.rs:925-932).
+fn gate_set_bit(key: PolicyKey) -> Int Never! {
+    if key == {
+        .Unsafe -> 1
+        .Impure -> 2
+        .Nondeterministic -> 4
+        else -> 0
+    }
+}
+// Rust `GateSet::allow` (Policy.rs:919-923).
+pub fn gate_set_allow(key: PolicyKey) -> GateSet Never! { GateSet{bits: gate_set_bit(key)} }
+// Rust `GateSet::insert` (Policy.rs:934-936).
+pub fn gate_set_insert(gates: &GateSet, key: PolicyKey) Never! { gates.bits = gates.bits | gate_set_bit(key) }
+// Rust `GateSet::contains` (Policy.rs:945-947).
+fn gate_set_contains(gates: GateSet, key: PolicyKey) -> Bool Never! { gates.bits & gate_set_bit(key) != 0 }
+// Rust `GateSet::allows` (Policy.rs:941-943).
+pub fn gate_set_allows(gates: GateSet, key: PolicyKey) -> Bool Never! { policy_resolve_invocation(key, gates) ?? false }
+// Rust `GateSet::is_empty` (Policy.rs:948-950).
+pub fn gate_set_is_empty(gates: GateSet) -> Bool Never! { gates.bits == 0 }
+// Rust `GateSet::parse` (Policy.rs:954-968).
+pub fn gate_set_parse(spec: String) -> PolicyKey PolicyGateParseError! {
+    raw :: spec.bytes()
+    split := -1
+    loop (index, byte) in raw {
+        if Int.from_u8(byte) == 61 {
+            split = index
+            break
+        }
+    }
+    if split < 0 -> return Err(PolicyGateParseError{message: "use `--gate name=allow`"})
+    // `split` is a byte offset (Rust `split_once`); String.slice counts characters.
+    name := (String.from_bytes(raw[0..<split]) ?? "").trim() // #4303
+    value := (String.from_bytes(raw[(split + 1)..<raw.len()]) ?? "").trim() // #4303
+    key :: policy_key_parse(name) ?? return Err(PolicyGateParseError{message: "`{name}` is not an audited gate"})
+    if !policy_key_is_audited_gate(key) || value != "allow" -> return Err(PolicyGateParseError{message: "`--gate {spec}` must name an audited gate with `=allow`"})
+    // An audited key's single Block Allow declaration cannot fail this registry.
+    policy_resolve_invocation(key, gate_set_allow(key)) ?? panic("registered invocation gate failed")
+    Ok(key)
+}
+// Rust `resolve_invocation` (Policy.rs:973-986).
+pub fn policy_resolve_invocation(key: PolicyKey, gates: GateSet) -> Bool PolicyError! {
+    if !gate_set_contains(gates, key) -> return Ok(false)
+    declarations :: [PolicyDeclaration]{policy_invocation_declaration(key)}
+    if policy_resolve(key, declarations) == {
+        .Err(error) -> return Err(error)
+        .Ok(_) -> {}
+    }
+    Ok(true)
+}
+// Rust invocation declaration shared by `resolve_invocation`/`resolve_with_gates` (Policy.rs:977-984,997-1004).
+fn policy_invocation_declaration(key: PolicyKey) -> PolicyDeclaration Never! {
+    PolicyDeclaration{key: key, value: PolicyValue.Allow, scope: PolicyScope.Block, span: Span{start: 0, end: 0}, target: None, source: "<invocation>"}
+}
+// Rust `resolve_with_gates` (Policy.rs:988-1010).
+pub fn policy_resolve_with_gates(key: PolicyKey, declarations: [PolicyDeclaration], gates: GateSet) -> EffectivePolicy? PolicyError! {
+    effective := EffectivePolicy?{None}
+    if policy_resolve(key, declarations) == {
+        .Err(error) -> return Err(error)
+        .Ok(value) -> effective = value
+    }
+    if gate_set_contains(gates, key) {
+        invocation_chain := ~declarations
+        &invocation_chain.push(policy_invocation_declaration(key))
+        if policy_resolve(key, invocation_chain) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+    }
+    Ok(effective)
+}
+fn policy_explanation_append(out: &[U8], value: String) Never! {
+    loop byte in value.bytes() -> &out.push(byte)
+}
+// Rust `EffectivePolicy::explain_resolution`, `explain` (Policy.rs:1016-1036,1073-1075).
+pub fn policy_explain(resolution: EffectivePolicy) -> String Never! {
+    out := [U8]{}
+    policy_explanation_append(&out, "{policy_key_name(resolution.key)} = {policy_value_display(resolution.value)}")
+    loop (index, declaration) in resolution.provenance {
+        status :: if {
+            index + 1 == resolution.provenance.len() -> "effective"
+            else -> "shadowed"
+        }
+        policy_explanation_append(&out, "\n  [{status}] {policy_scope_name(declaration.scope)} {policy_value_display(declaration.value)} at {declaration.source}:{declaration.span.start}..{declaration.span.end}")
+    }
+    String.from_bytes(out) ?? panic("policy explanation is valid UTF-8")
+}
+// Rust `EffectiveFact::explain_resolution`, `explain` (Policy.rs:1038-1075).
+pub fn fact_explain(resolution: EffectiveFact) -> String Never! {
+    out := [U8]{}
+    policy_explanation_append(&out, "{resolution.key.name} = {fact_value_display(resolution.value)}")
+    loop (index, contribution) in resolution.provenance {
+        status :: if {
+            index == resolution.effective -> "effective"
+            contribution.force -> "pinned"
+            else -> "shadowed"
+        }
+        policy_explanation_append(&out, "\n  [{status}] {contribution_layer_name(contribution.layer)} / {source_scope_name(contribution.scope)} {fact_value_display(contribution.value)} at {contribution.source}:{contribution.span.start}..{contribution.span.end}")
+        if contribution.force_reason == .Val(reason) -> policy_explanation_append(&out, " pin={reason}")
+        if contribution.reason == .Val(reason) -> policy_explanation_append(&out, " reason={reason}")
+    }
+    String.from_bytes(out) ?? panic("fact explanation is valid UTF-8")
+}
+    // Rust's tuple-variant Debug spelling is part of the lock projection,
+    // distinct from the human-facing value display above.
+    pub fn fact_value_debug_text(value: FactValue) -> String Never! {
+        if value == {
+            .Bool(value) -> "Bool({value:Debug})"
+            .Int(value) -> "Int({value:Debug})"
+            .Char(value) -> "Char({value:Debug})"
+            .Text(value) -> "Text({value:Debug})"
+            .Enum(variant) -> "Enum({variant:Debug})"
+            .OptionalText(value) -> {
+                if value == {
+                    .Val(text) -> "OptionalText(Some({text:Debug}))"
+                    .None -> "OptionalText(None)"
+                }
+            }
+            .Policy(value) -> {
+                if value == {
+                    .Limit(limit) -> "Policy(Limit({limit:Debug}))"
+                    else -> "Policy({value:Debug})"
+                }
+            }
+        }
+    }

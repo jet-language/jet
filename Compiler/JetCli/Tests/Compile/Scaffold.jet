@@ -1,0 +1,391 @@
+// Claims for `jet new` starters and `jet test --browser-scaffold`
+// (Source/CmdCompile.rs:5687-5919, Source/main.rs:4719-4771) on the real Core
+// filesystem, the canonical Jetpack manifest template/authority edit and the
+// one Lock recorder/reader. Original tests/jet_test.rs:1284-1388 journeys are
+// ported below; their compile/run/test/Web-build steps need the installed
+// O0 execution, test and Web build providers (Host dispatch gates).
+use core.files as scaffold_test_files
+use core.files.[TempDir]
+use core.process as scaffold_test_process
+use core.sys as scaffold_test_sys
+
+fn scaffold_test_mode() -> JetCLIOutputMode Never! { JetCLIOutputMode{json: false, color: false, quiet: false} }
+
+// Keep the real temporary-directory owner alive in each test; returning only
+// its path would drop the native directory before a no-touch refusal can read it.
+fn scaffold_test_root(prefix: String) -[FS]> TempDir {
+    scaffold_test_files.temp_dir(prefix) ?? panic("scaffold scratch: {err}")
+}
+
+fn scaffold_test_read(path: String) -[FS]> String {
+    scaffold_test_files.read(path) ?? panic("read {path}: {err}")
+}
+
+fn scaffold_test_names(path: String) -[FS]> [String] {
+    names := [String]{}
+    loop entry in scaffold_test_files.list_dir(path) ?? panic("list {path}: {err}") -> &names.push(entry.name)
+    &names.sort()
+    names
+}
+
+// The canonical manifest this starter must carry (Manifest Convert + Edit).
+fn scaffold_test_manifest(name: String, holds: [String]) -> String Never! {
+    manifest := pkg_new_template(name, false)
+    loop hold in holds -> manifest = pkg_add_authority_hold(manifest, hold)
+    manifest
+}
+
+// tests/jet_test.rs `jet_ok_outside_core`: success and no diagnostic located in Core source.
+fn scaffold_test_ok_outside_core(args: [String]) -> String {
+    output :: jet_cli_dispatch(args, output_adapter_test_facts())
+    assert_eq(output.exit_code, 0)
+    assert(!output.stderr.contains("Core/") && !output.stdout.contains("Core/"))
+    output.stdout
+}
+
+// Asset-consumer proof only: the explicitly supplied installed compiler is the
+// real transport for generated files, not a fallback in the Jet CLI dispatcher.
+fn scaffold_test_installed_command(directory: String, args: [String]) -[Exec, Env, Time.Wait]> String {
+    binary :: scaffold_test_sys.get("JET_CLI_SCAFFOLD_TEST_JET") ?? panic("set JET_CLI_SCAFFOLD_TEST_JET to the installed compiler for scaffold asset journeys")
+    output :: scaffold_test_process.cmd([String]{binary}).args_extend(args).cwd(directory).run() ?? panic("scaffold child: {err}")
+    assert(output.success, "scaffold child failed: {output.errors}")
+    assert(!output.errors.contains("Core/") && !output.output.contains("Core/"))
+    assert(!output.errors.contains("ICE") && !output.errors.contains("E-WEB-TIR-UNSUPPORTED") && !output.errors.contains("E2937"))
+    output.output
+}
+
+#Test("new template names parse exactly the four starters") {
+    assert(jet_cli_new_template_parse("cli") == .Val(.CLI))
+    assert(jet_cli_new_template_parse("ui") == .Val(.UI))
+    assert(jet_cli_new_template_parse("web") == .Val(.Web))
+    assert(jet_cli_new_template_parse("overrides") == .Val(.Overrides))
+    assert(jet_cli_new_template_parse("gui") == None)
+    assert(jet_cli_new_template_parse("CLI") == None)
+    assert(jet_cli_new_template_parse("") == None)
+    assert_eq(JET_CLI_NEW_TEMPLATE_NAMES, "cli, ui, web, overrides")
+}
+
+#Test("new starter selection carries the exact authority leaves and ordered override homes") {
+    assert_eq(jet_cli_new_run_source(None), JET_CLI_NEW_PRINT_RUN)
+    assert_eq(jet_cli_new_run_source(Val(JetCLINewTemplate.CLI)), JET_CLI_NEW_CLI_RUN)
+    assert_eq(jet_cli_new_run_source(Val(JetCLINewTemplate.UI)), JET_CLI_NEW_UI_RUN)
+    assert_eq(jet_cli_new_run_source(Val(JetCLINewTemplate.Web)), JET_CLI_NEW_WEB_RUN)
+    assert_eq(jet_cli_new_run_source(Val(JetCLINewTemplate.Overrides)), JET_CLI_NEW_PRINT_RUN)
+    assert_eq(jet_cli_new_holds(None), [String]{})
+    assert_eq(jet_cli_new_holds(Val(JetCLINewTemplate.CLI)), [String]{"Exec.Args"})
+    assert_eq(jet_cli_new_holds(Val(JetCLINewTemplate.UI)), [String]{"Exec.Args", "Browser"})
+    assert_eq(jet_cli_new_holds(Val(JetCLINewTemplate.Web)), [String]{"Browser"})
+    assert_eq(jet_cli_new_holds(Val(JetCLINewTemplate.Overrides)), [String]{})
+    assert_eq(jet_cli_new_command_homes(None).len(), 0)
+    assert_eq(jet_cli_new_command_homes(Val(JetCLINewTemplate.CLI)).len(), 0)
+    assert_eq(jet_cli_new_command_homes(Val(JetCLINewTemplate.UI)).len(), 0)
+    assert_eq(jet_cli_new_command_homes(Val(JetCLINewTemplate.Web)).len(), 0)
+    homes :: jet_cli_new_command_homes(Val(JetCLINewTemplate.Overrides))
+    assert_eq(homes.len(), 4)
+    expected_files :: [String]{"@run.jet", "@build.jet", "@dev.jet", "@test.jet"}
+    expected_sources :: [String]{JET_CLI_NEW_RUN_HOME, JET_CLI_NEW_BUILD_HOME, JET_CLI_NEW_DEV_HOME, JET_CLI_NEW_TEST_HOME}
+    loop index in 0..<4 {
+        assert_eq(homes[index].file, expected_files[index])
+        assert_eq(homes[index].source, expected_sources[index])
+        assert(homes[index].source.starts_with("// Optional `jet "))
+    }
+}
+
+// tests/jet_test.rs:1284-1350 `jet_new_creates_project`, materialization and
+// refusal half; its run/test/build steps are the gated journey below.
+#Test("plain new writes only the print-only project and refuses duplicates and unknown templates") {
+    scratch :: scaffold_test_root("jet-new-plain")
+    parent :: scratch.path
+    dir :: scaffold_test_files.join(parent, "hello")
+    output :: jet_cli_run_new(parent, "hello", false, None, scaffold_test_mode())
+    assert_eq(output.exit_code, 0)
+    assert_eq(output.stdout, "")
+    assert_eq(output.stderr, "created hello/\n  package.jet\n  run.jet\n  .gitignore\nnext: cd hello && jet run\n")
+    assert_eq(scaffold_test_names(dir), [String]{".gitignore", ".jet", "package.jet", "run.jet"})
+    source :: scaffold_test_read(scaffold_test_files.join(dir, "run.jet"))
+    assert(!source.contains("#CLI") && !source.contains("core.ui") && source.contains("fn run()"))
+    assert_eq(source, JET_CLI_NEW_PRINT_RUN)
+    assert_eq(scaffold_test_read(scaffold_test_files.join(dir, "package.jet")), pkg_new_template("hello", false))
+    assert_eq(scaffold_test_read(scaffold_test_files.join(dir, ".gitignore")), ".jet/build/\n.jet/lock\n.jet/cache/\n")
+    duplicate :: jet_cli_run_new(parent, "hello", false, None, scaffold_test_mode())
+    assert_eq(duplicate.exit_code, 1)
+    assert_eq(duplicate.stderr, jet_cli_report("E2104", "`hello` already exists", jet_cli_why("E2104"), "correct the named argument or input, then run the command again", false))
+    if jet_cli_new_request([String]{"new", "other"}, [String]{"new", "other", "--template", "gui"}, false) == {
+        .Ok(_) -> panic("an unknown template was accepted")
+        .Err(refusal) -> {
+            assert_eq(refusal.exit_code, 2)
+            assert(refusal.stderr.contains("E2104") && refusal.stderr.contains("cli, ui, web, overrides"))
+            assert_eq(refusal.what, "`gui` is not a `jet new` template")
+            assert_eq(refusal.fix, "choose one of cli, ui, web, overrides: `jet new other --template ui`")
+        }
+    }
+    assert(!scaffold_test_files.exists(scaffold_test_files.join(parent, "other")))
+    scaffold_test_files.remove_all(parent).drop("new scratch cleanup")
+}
+
+#Test("new pins the running toolchain in the canonical project lock") {
+    scratch :: scaffold_test_root("jet-new-lock")
+    parent :: scratch.path
+    dir :: scaffold_test_files.join(parent, "pinned")
+    assert_eq(jet_cli_run_new(parent, "pinned", false, None, scaffold_test_mode()).exit_code, 0)
+    lock :: pkg_lock_load(dir) ?? panic("the new project has no readable lock")
+    assert_eq(lock.toolchains.len(), 1)
+    toolchain :: lock.toolchains[0]
+    assert_eq(toolchain.channel, trust_pin_channel_of(JET_CLI_VERSION))
+    assert_eq(toolchain.version, JET_CLI_VERSION)
+    assert(toolchain.id.starts_with("jet-{JET_CLI_VERSION}-"))
+    assert_eq(lock.packages.len(), 0)
+    scaffold_test_files.remove_all(parent).drop("new scratch cleanup")
+}
+
+#Test("every template writes its starter and holds and only overrides writes command homes") {
+    scratch :: scaffold_test_root("jet-new-templates")
+    parent :: scratch.path
+    homes :: [String]{"@run.jet", "@build.jet", "@dev.jet", "@test.jet"}
+    names :: [String]{"cli", "ui", "web", "overrides"}
+    loop template_name in names {
+        template :: jet_cli_new_template_parse(template_name) ?? panic("template {template_name}")
+        name :: "starter_{template_name}"
+        dir :: scaffold_test_files.join(parent, name)
+        output :: jet_cli_run_new(parent, name, false, Val(template), scaffold_test_mode())
+        assert_eq(output.exit_code, 0)
+        loop home in homes -> assert_eq(scaffold_test_files.exists(scaffold_test_files.join(dir, home)), template_name == "overrides")
+        source :: scaffold_test_read(scaffold_test_files.join(dir, "run.jet"))
+        manifest :: scaffold_test_read(scaffold_test_files.join(dir, "package.jet"))
+        if template == {
+            .CLI -> {
+                assert_eq(source, JET_CLI_NEW_CLI_RUN)
+                assert_eq(manifest, scaffold_test_manifest(name, [String]{"Exec.Args"}))
+                assert_eq(output.stderr, "created {name}/\n  package.jet\n  run.jet\n  .gitignore\nnext: cd {name} && jet run\n")
+            }
+            .UI -> {
+                assert_eq(source, JET_CLI_NEW_UI_RUN)
+                assert_eq(manifest, scaffold_test_manifest(name, [String]{"Exec.Args", "Browser"}))
+                assert(manifest.contains("Exec.Args") && manifest.contains("Browser"))
+            }
+            .Web -> {
+                assert_eq(source, JET_CLI_NEW_WEB_RUN)
+                assert_eq(manifest, scaffold_test_manifest(name, [String]{"Browser"}))
+                assert_eq(output.stderr, "created {name}/\n  package.jet\n  run.jet\n  .gitignore\nnext: cd {name} && jet dev\n")
+            }
+            .Overrides -> {
+                assert_eq(source, JET_CLI_NEW_PRINT_RUN)
+                assert_eq(manifest, pkg_new_template(name, false))
+                assert_eq(output.stderr, "created {name}/\n  package.jet\n  run.jet\n  @run.jet\n  @build.jet\n  @dev.jet\n  @test.jet\n  .gitignore\nnext: cd {name} && jet run\n")
+                assert_eq(scaffold_test_read(scaffold_test_files.join(dir, "@build.jet")), JET_CLI_NEW_BUILD_HOME)
+                assert(scaffold_test_read(scaffold_test_files.join(dir, "@test.jet")).starts_with("// Optional `jet test` override."))
+            }
+        }
+    }
+    scaffold_test_files.remove_all(parent).drop("new scratch cleanup")
+}
+
+// tests/jet_test.rs:1354-1388 `jet_new_every_template_runs_and_tests`.
+// The composed Jet dispatcher journey stays distinct from installed-host asset
+// consumption; it requires the canonical compile/run/test/Web Host providers.
+// #4262 C15 integration gap: Front lacks New/BrowserScaffold requests and the
+// composed Host test/run/Web providers are not yet qualified. Retain this
+// original dispatcher acceptance test; installed-host assets are not parity.
+#Test("every new template starter runs and passes its own test outside Core") {
+    scratch :: scaffold_test_root("jet-new-templates-parent")
+    parent :: scratch.path
+    homes :: [String]{"@run.jet", "@build.jet", "@dev.jet", "@test.jet"}
+    template_names :: [String]{"cli", "ui", "web", "overrides"}
+    loop template_name in template_names {
+        template :: jet_cli_new_template_parse(template_name) ?? panic("template {template_name}")
+        name :: "starter_{template_name}"
+        dir :: scaffold_test_files.join(parent, name)
+        assert_eq(jet_cli_run_new(parent, name, false, Val(template), scaffold_test_mode()).exit_code, 0)
+        loop home in homes -> assert_eq(scaffold_test_files.exists(scaffold_test_files.join(dir, home)), template_name == "overrides")
+        tested :: scaffold_test_ok_outside_core([String]{"test", dir, "--capture=all"})
+        assert(tested.contains("1 passed"))
+        if template_name == "web" {
+            scaffold_test_ok_outside_core([String]{"build", "--target", "web", dir})
+            assert(scaffold_test_files.is_file(scaffold_test_files.join(dir, ".jet/build/app.wasm")))
+        } else {
+            stdout :: scaffold_test_ok_outside_core([String]{"run", dir})
+            assert(stdout.starts_with("hello, world\n"))
+        }
+    }
+    scaffold_test_files.remove_all(parent).drop("new scratch cleanup")
+}
+
+// tests/jet_test.rs:1354-1388 asset consumption against a real installed host.
+#Test("installed compiler consumes every materialized template test run and Web build") {
+    scratch :: scaffold_test_root("jet-new-assets-parent")
+    parent :: scratch.path
+    template_names :: [String]{"cli", "ui", "web", "overrides"}
+    loop template_name in template_names {
+        template :: jet_cli_new_template_parse(template_name) ?? panic("template {template_name}")
+        name :: "asset_{template_name}"
+        dir :: scaffold_test_files.join(parent, name)
+        assert_eq(jet_cli_run_new(parent, name, false, Val(template), scaffold_test_mode()).exit_code, 0)
+        tested :: scaffold_test_installed_command(dir, [String]{"test", "--capture=all"})
+        assert(tested.contains("1 passed"))
+        if template_name == "web" {
+            scaffold_test_installed_command(dir, [String]{"build", "--target", "web"})
+            assert(scaffold_test_files.is_file(scaffold_test_files.join(dir, ".jet/build/app.wasm")))
+            assert(scaffold_test_files.is_file(scaffold_test_files.join(dir, ".jet/build/index.html")))
+        } else {
+            stdout :: scaffold_test_installed_command(dir, [String]{"run"})
+            assert(stdout.starts_with("hello, world\n"))
+        }
+    }
+    scaffold_test_files.remove_all(parent).drop("new scratch cleanup")
+}
+
+#Test("new annotated writes the commented dependency template") {
+    scratch :: scaffold_test_root("jet-new-annotated")
+    parent :: scratch.path
+    assert_eq(jet_cli_run_new(parent, "noted", true, None, scaffold_test_mode()).exit_code, 0)
+    manifest :: scaffold_test_read(scaffold_test_files.join(parent, "noted/package.jet"))
+    assert_eq(manifest, pkg_new_template("noted", true))
+    assert(manifest.contains("// Jet package dependencies:"))
+    scaffold_test_files.remove_all(parent).drop("new scratch cleanup")
+}
+
+#Test("new rejects non-folder names before touching the filesystem") {
+    scratch :: scaffold_test_root("jet-new-names")
+    parent :: scratch.path
+    invalid_names :: [String]{"", "a/b", "a\\b", "/abs"}
+    loop name in invalid_names {
+        output :: jet_cli_run_new(parent, name, false, None, scaffold_test_mode())
+        assert_eq(output.exit_code, 1)
+        assert_eq(output.stdout, "")
+        assert_eq(output.stderr, jet_cli_report("E2104", "project name must be a simple folder name", jet_cli_why("E2104"), "try: jet new my_app", false))
+    }
+    assert_eq(scaffold_test_names(parent).len(), 0)
+    scaffold_test_files.remove_all(parent).drop("new scratch cleanup")
+}
+
+#Test("new quiet and machine modes create the project without status narration") {
+    scratch :: scaffold_test_root("jet-new-quiet")
+    parent :: scratch.path
+    quiet :: jet_cli_run_new(parent, "muted", false, Val(JetCLINewTemplate.Overrides), JetCLIOutputMode{json: false, color: false, quiet: true})
+    assert_eq(quiet.exit_code, 0)
+    assert_eq(quiet.stdout, "")
+    assert_eq(quiet.stderr, "")
+    assert(scaffold_test_files.is_file(scaffold_test_files.join(parent, "muted/@dev.jet")))
+    machine :: jet_cli_run_new(parent, "machine", false, None, JetCLIOutputMode{json: true, color: false, quiet: false})
+    assert_eq(machine.exit_code, 0)
+    assert_eq(machine.stdout, "")
+    assert_eq(machine.stderr, "")
+    assert(scaffold_test_files.is_file(scaffold_test_files.join(parent, "machine/run.jet")))
+    refused :: jet_cli_run_new(parent, "machine", false, None, JetCLIOutputMode{json: true, color: false, quiet: true})
+    assert_eq(refused.exit_code, 1)
+    assert_eq(refused.stderr, "")
+    assert(refused.stdout.contains("\"action\":\"cli\"") && refused.stdout.contains("\"code\":\"E2104\"") && refused.stdout.contains("`machine` already exists"))
+    scaffold_test_files.remove_all(parent).drop("new scratch cleanup")
+}
+
+#Test("new stops at the first filesystem failure with E2105") {
+    scratch :: scaffold_test_root("jet-new-blocked")
+    parent :: scratch.path
+    blocker :: scaffold_test_files.join(parent, "blocker")
+    scaffold_test_files.write(blocker, "a regular file") ?? panic("write blocker: {err}")
+    output :: jet_cli_run_new(blocker, "app", false, None, scaffold_test_mode())
+    assert_eq(output.exit_code, 1)
+    assert(output.stderr.contains("E2105") && output.stderr.contains("couldn't create `app`/.jet: "))
+    assert_eq(scaffold_test_read(blocker), "a regular file")
+    scaffold_test_files.remove_all(parent).drop("new scratch cleanup")
+}
+
+#Test("new request reads the name, annotation and either template spelling") {
+    inline :: jet_cli_new_request([String]{"new", "site"}, [String]{"new", "site", "--template=web", "--annotated"}, false) ?? panic("inline template refused")
+    assert_eq(inline.name, "site")
+    assert(inline.annotated)
+    assert(inline.template == .Val(.Web))
+    separate :: jet_cli_new_request([String]{"new", "app"}, [String]{"new", "--template", "ui", "app"}, false) ?? panic("separate template refused")
+    assert_eq(separate.name, "app")
+    assert(!separate.annotated)
+    assert(separate.template == .Val(.UI))
+    plain :: jet_cli_new_request([String]{"new", "app"}, [String]{"new", "app"}, false) ?? panic("plain new refused")
+    assert(plain.template == None)
+    if jet_cli_new_request([String]{"new"}, [String]{"new", "--template=cli"}, false) == {
+        .Ok(_) -> panic("a missing name was accepted")
+        .Err(refusal) -> {
+            assert_eq(refusal.exit_code, 2)
+            assert_eq(refusal.stderr, jet_cli_report("E2104", "`jet new` needs a project name", jet_cli_why("E2104"), "run `jet new my_app`", false))
+        }
+    }
+    if jet_cli_new_request([String]{"new", "app"}, [String]{"new", "app", "--template"}, true) == {
+        .Ok(_) -> panic("an empty template was accepted")
+        .Err(refusal) -> {
+            assert_eq(refusal.what, "`` is not a `jet new` template")
+            assert_eq(refusal.stderr, "")
+            assert(refusal.stdout.contains("\"code\":\"E2104\""))
+        }
+    }
+}
+
+#Test("browser scaffold writes the isolated native test project") {
+    scratch :: scaffold_test_root("jet-browser-scaffold")
+    root :: scratch.path
+    project :: jet_cli_scaffold_browser_tests(root, "checkout-flow_2") ?? panic("scaffold refused: {err.message}")
+    assert_eq(project, scaffold_test_files.join(root, "checkout-flow_2"))
+    assert_eq(scaffold_test_names(project), [String]{"browser-tests.conf", "package.jet", "run.jet", "tests"})
+    assert_eq(scaffold_test_read(scaffold_test_files.join(project, "package.jet")), "name: \"checkout-flow_2_browser_tests\"\nversion: \"0.1.0\"\nedition: \"2026\"\ndescription: \"Native cross-browser tests\"\n")
+    assert_eq(scaffold_test_read(scaffold_test_files.join(project, "run.jet")), "#Target(Web)\n\nfn run() {{}}\n")
+    assert_eq(scaffold_test_read(scaffold_test_files.join(project, "browser-tests.conf")), "browsers=chromium,firefox,webkit\nserver=reuse\nwebServer=jet dev\nserver-url=http://127.0.0.1:8080\nreporter=json\n")
+    assert_eq(scaffold_test_names(scaffold_test_files.join(project, "tests")), [String]{"browser_suite.jet"})
+    assert_eq(scaffold_test_read(scaffold_test_files.join(project, "tests/browser_suite.jet")), "use core.web.browser\n\n#Test fn first_page(page: BrowserPage) {{\n  page.goto(\"/\")\n}}\n")
+    scaffold_test_files.remove_all(root).drop("browser scratch cleanup")
+}
+
+#Test("browser scaffold names must be simple ASCII folder names") {
+    scratch :: scaffold_test_root("jet-browser-names")
+    root :: scratch.path
+    invalid_names :: [String]{"", ".", "..", "a/b", "a\\b", "has space", "dotted.name", "café"}
+    loop name in invalid_names {
+        _ :: jet_cli_scaffold_browser_tests(root, name) ?? {
+            assert_eq(err.message, "browser test project name must be a simple folder name")
+            next
+        }
+        panic("browser scaffold accepted `{name}`")
+    }
+    assert_eq(scaffold_test_names(root).len(), 0)
+    accepted :: jet_cli_scaffold_browser_tests(root, "-") ?? panic("a dash is a simple folder name: {err.message}")
+    assert(scaffold_test_files.is_file(scaffold_test_files.join(accepted, "browser-tests.conf")))
+    scaffold_test_files.remove_all(root).drop("browser scratch cleanup")
+}
+
+#Test("browser scaffold refuses an existing project and a blocked directory") {
+    scratch :: scaffold_test_root("jet-browser-existing")
+    root :: scratch.path
+    existing :: scaffold_test_files.join(root, "suite")
+    scaffold_test_files.create_dir_all(existing) ?? panic("create existing: {err}")
+    if jet_cli_scaffold_browser_tests(root, "suite") == {
+        .Err(error) -> assert_eq(error.message, "browser test project `{existing}` already exists")
+        .Ok(_) -> panic("browser scaffold overwrote an existing directory")
+    }
+    assert_eq(scaffold_test_names(existing).len(), 0)
+    blocker :: scaffold_test_files.join(root, "blocker")
+    scaffold_test_files.write(blocker, "file") ?? panic("write blocker: {err}")
+    if jet_cli_scaffold_browser_tests(blocker, "suite") == {
+        .Err(error) -> assert(error.message.starts_with("couldn't create `{blocker}/suite/tests`: "))
+        .Ok(_) -> panic("browser scaffold created a project below a regular file")
+    }
+    scaffold_test_files.remove_all(root).drop("browser scratch cleanup")
+}
+
+#Test("test browser-scaffold route reports status, quiet and E2104 refusals") {
+    scratch :: scaffold_test_root("jet-browser-route")
+    root :: scratch.path
+    created :: jet_cli_test_browser_scaffold(root, "web_suite", scaffold_test_mode())
+    assert_eq(created.exit_code, 0)
+    assert_eq(created.stdout, "")
+    assert_eq(created.stderr, "created browser test project `{root}/web_suite`\n")
+    quiet :: jet_cli_test_browser_scaffold(root, "quiet_suite", JetCLIOutputMode{json: false, color: false, quiet: true})
+    assert_eq(quiet.exit_code, 0)
+    assert_eq(quiet.stderr, "")
+    assert(scaffold_test_files.is_file(scaffold_test_files.join(root, "quiet_suite/tests/browser_suite.jet")))
+    refused :: jet_cli_test_browser_scaffold(root, "bad/name", scaffold_test_mode())
+    assert_eq(refused.exit_code, 1)
+    assert_eq(refused.stdout, "")
+    assert_eq(refused.stderr, jet_cli_report("E2104", "browser test project name must be a simple folder name", jet_cli_why("E2104"), "use `jet test --browser-scaffold=<new-project-name>`", false))
+    machine :: jet_cli_test_browser_scaffold(root, "web_suite", JetCLIOutputMode{json: true, color: false, quiet: false})
+    assert_eq(machine.exit_code, 1)
+    assert_eq(machine.stderr, "")
+    assert(machine.stdout.contains("\"code\":\"E2104\"") && machine.stdout.contains("already exists") && machine.stdout.ends_with("\n"))
+    scaffold_test_files.remove_all(root).drop("browser scratch cleanup")
+}

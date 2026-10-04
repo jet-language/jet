@@ -7,15 +7,18 @@
 // Ownership identity recorded in lock and lease files. PID alone is not
 // sufficient because a later process may reuse it.
 pub struct ArtifactProcessIdentity {
-    pid: Int
-    start: String
+    pid_value: Int
+    start_value: String
 
     fn new(pid: Int, start: String) -> ArtifactProcessIdentity Never! {
-        ArtifactProcessIdentity{pid, start}
+        ArtifactProcessIdentity{pid_value: pid, start_value: start}
     }
 
-    // This process: its PID and kernel start token, or a per-store fallback
-    // token where the platform exposes none.
+    // This process: its PID and kernel start token, or a fallback token where
+    // the platform exposes none. #3594: Rust's fallback is ONE process-wide
+    // OnceLock token; this per-open token makes two stores in one process on a
+    // non-Linux host see each other's lock/leases as a dead same-PID owner.
+    // A process-wide identity provider is required; no substitute is invented.
     fn current() -[FS, Env, Rand]> ArtifactProcessIdentity ArtifactStoreError! {
         pid :: sys.pid()
         if store_artifact_lookup_process_start(pid) == {
@@ -24,14 +27,14 @@ pub struct ArtifactProcessIdentity {
         }
     }
 
-    fn pid(self) -> Int Never! { self.pid }
+    fn pid(self) -> Int Never! { self.pid_value }
 
-    fn start(self) -> String Never! { self.start }
+    fn start(self) -> String Never! { self.start_value }
 
     // `jet.store.v1|<role>|<pid>|<start>\n`, the first line of a lock or
     // lease file.
     fn owner_line(self, role: String) -> String Never! {
-        "{@STORE_ARTIFACT_VERSION}|{role}|{self.pid}|{self.start}\n"
+        "{STORE_ARTIFACT_VERSION}|{role}|{self.pid_value}|{self.start_value}\n"
     }
 }
 
@@ -44,6 +47,7 @@ enum ArtifactIdentityLookup {
 
 // The kernel start time of `pid` (Linux `/proc/<pid>/stat` field 22); other
 // platforms cannot tell.
+// #3594: platform/process identity providers remain required.
 fn store_artifact_lookup_process_start(pid: Int) -[FS, Env]> ArtifactIdentityLookup Never! {
     if !sys.is_linux() -> return ArtifactIdentityLookup.Unknown
     content :: if files.read("/proc/{pid}/stat") == {
@@ -87,25 +91,25 @@ fn store_artifact_rfind(haystack: [U8], needle: [U8]) -> Int Never! {
 // unchanged; a later process can therefore never remove a live lease by PID
 // coincidence.
 pub struct ArtifactLease {
-    path: String
-    owner: ArtifactProcessIdentity
+    path_value: String
+    owner_value: ArtifactProcessIdentity
 
-    fn path(self) -> String Never! { self.path }
+    fn path(self) -> String Never! { self.path_value }
 
-    fn owner(self) -> ArtifactProcessIdentity Never! { self.owner }
+    fn owner(self) -> ArtifactProcessIdentity Never! { self.owner_value }
 
     fn is_live(self) -[FS, Env]> Bool Never! {
-        store_artifact_owner_liveness(self.owner, self.owner) ?? true
+        store_artifact_owner_liveness(self.owner_value, self.owner_value) ?? true
     }
 }
 
 impl ArtifactLease.Close {
     fn close(^self) -[FS]> {
-        expected :: self.owner.owner_line("lease").bytes()
-        bytes :: files.read_bytes(self.path) ?? return
+        expected :: self.owner_value.owner_line("lease").bytes()
+        bytes :: files.read_bytes(self.path_value) ?? return
         if !pkg_bytes_starts_with(bytes, 0, expected) -> return
-        files.remove(self.path) ?? return
-        store_artifact_sync_dir(files.dirname(self.path)).drop("lease release is best-effort once the file is gone")
+        files.remove(self.path_value) ?? return
+        store_artifact_sync_dir(files.dirname(self.path_value)).drop("lease release is best-effort once the file is gone")
     }
 }
 
@@ -138,7 +142,7 @@ fn store_artifact_parse_lease(bytes: [U8]) -> ArtifactLeaseRecord? Never! {
     lines :: store_artifact_lines(text)
     if lines.len() == 0 -> return None
     header :: lines[0].split("|").to_list()
-    if header.len() != 4 || header[0] != @STORE_ARTIFACT_VERSION || header[1] != "lease" -> return None
+    if header.len() != 4 || header[0] != STORE_ARTIFACT_VERSION || header[1] != "lease" -> return None
     pid :: store_artifact_parse_pid(header[2]) ?? return None
     if header[3] == "" -> return None
     owner :: ArtifactProcessIdentity.new(pid, header[3])
@@ -159,7 +163,7 @@ fn store_artifact_parse_owner_line(bytes: [U8]) -> ArtifactProcessIdentity? Neve
         text = pkg_bytes_text(raw, 0, raw.len() - 1)
     }
     fields :: text.split("|").to_list()
-    if fields.len() != 4 || fields[0] != @STORE_ARTIFACT_VERSION || fields[1] != "lock" || fields[3] == "" -> return None
+    if fields.len() != 4 || fields[0] != STORE_ARTIFACT_VERSION || fields[1] != "lock" || fields[3] == "" -> return None
     pid :: store_artifact_parse_pid(fields[2]) ?? return None
     Val(ArtifactProcessIdentity.new(pid, fields[3]))
 }
@@ -207,7 +211,7 @@ struct ArtifactJournalState {
 // One checksummed journal line:
 // `jet.store.v1|<op>|<kind>|<value>|<length>|<sequence>|<sha256 of prefix>`.
 fn store_artifact_journal_line(operation: String, key: ArtifactEntryKey, length: Int, sequence: Int) -> String Never! {
-    prefix :: "{@STORE_ARTIFACT_VERSION}|{operation}|{key.kind_name()}|{key.wire_value()}|{length}|{sequence}|"
+    prefix :: "{STORE_ARTIFACT_VERSION}|{operation}|{key.kind_name()}|{key.wire_value()}|{length}|{sequence}|"
     "{prefix}{pkg_sha256_hex(prefix.bytes())}\n"
 }
 
@@ -216,7 +220,7 @@ fn store_artifact_read_journal(path: String) -[FS]> ArtifactJournalState Artifac
         .Ok(read) -> read
         .Err(error) -> {
             if store_artifact_io_missing(error) -> return Ok(ArtifactJournalState{last_use: [String: Int]{}, last_sequence: 0, bytes: 0, valid: true})
-            return Err(ArtifactStoreError.Io(error))
+            return Err(ArtifactStoreError.IO(error))
         }
     }
     state := ArtifactJournalState{last_use: [String: Int]{}, last_sequence: 0, bytes: bytes.len(), valid: true}
@@ -226,34 +230,84 @@ fn store_artifact_read_journal(path: String) -[FS]> ArtifactJournalState Artifac
         line_start :: start
         start = index + 1
         if index == line_start -> next
-        end :: if Int.from_u8(bytes[index - 1]) == 13 -> index - 1 else -> index
-        if !store_artifact_replay_journal_line(&state, store_artifact_slice(bytes, line_start, end)) {
-            state.valid = false
-            break
+        if store_artifact_parse_journal_line(store_artifact_slice(bytes, line_start, index)) == {
+            .Val(record) -> {
+                if record.sequence > state.last_sequence -> state.last_sequence = record.sequence
+                if record.operation == "remove" {
+                    &state.last_use.remove(record.key.identity()).drop("a remove of an unknown key is a no-op")
+                } else {
+                    state.last_use[record.key.identity()] = record.sequence
+                }
+            }
+            .None -> {
+                state.valid = false
+                break
+            }
         }
     }
     Ok(state)
 }
 
-// Apply one journal record; false when it is invalid.
-fn store_artifact_replay_journal_line(state: &ArtifactJournalState, line: [U8]) -> Bool Never! {
-    text :: String.from_bytes(line) ?? return false
+// One verified journal record (Rust `(operation, key, sequence)`).
+struct ArtifactJournalRecord {
+    operation: String
+    key: ArtifactEntryKey
+    sequence: Int
+}
+
+// One checksummed journal line (Rust parse_journal_line); None for a torn,
+// foreign or corrupt line, including an unknown operation. One trailing CR is
+// dropped here, as in Rust; nothing is recorded from a refused line.
+fn store_artifact_parse_journal_line(line: [U8]) -> ArtifactJournalRecord? Never! {
+    end :: if line.len() > 0 && Int.from_u8(line[line.len() - 1]) == 13 -> line.len() - 1 else -> line.len()
+    text :: String.from_bytes(store_artifact_slice(line, 0, end)) ?? return None
     fields :: text.split("|").to_list()
-    if fields.len() != 7 || fields[0] != @STORE_ARTIFACT_VERSION -> return false
-    prefix :: "{fields[0]}|{fields[1]}|{fields[2]}|{fields[3]}|{fields[4]}|{fields[5]}|"
-    if pkg_sha256_hex(prefix.bytes()) != fields[6] -> return false
-    store_artifact_parse_count(fields[4]) ?? return false
-    sequence :: store_artifact_parse_count(fields[5]) ?? return false
-    key :: ArtifactEntryKey.parse_wire(fields[2], fields[3]) ?? return false
-    if sequence > state.last_sequence -> state.last_sequence = sequence
-    if fields[1] == {
-        "put" | "touch" -> {
-            state.last_use[key.identity()] = sequence
+    if fields.len() != 7 || fields[0] != STORE_ARTIFACT_VERSION -> return None
+    // The checksum covers everything before it, trailing separator included.
+    if pkg_sha256_hex(store_artifact_slice(line, 0, end - fields[6].bytes().len())) != fields[6] -> return None
+    store_artifact_parse_count(fields[4]) ?? return None
+    sequence :: store_artifact_parse_count(fields[5]) ?? return None
+    key :: ArtifactEntryKey.parse_wire(fields[2], fields[3]) ?? return None
+    if fields[1] != "put" && fields[1] != "touch" && fields[1] != "remove" -> return None
+    Val(ArtifactJournalRecord{operation: fields[1], key, sequence})
+}
+
+// Bytes read from the journal's end to find its final line. A line is one
+// wire key plus a few short fields, far below this.
+STORE_ARTIFACT_JOURNAL_TAIL_WINDOW :: prep { 65536 }
+
+// The journal's last sequence number, read from its final line alone (Rust
+// journal_tail_sequence). Every append numbers after the previous maximum and
+// compaction renumbers in file order, so the final line carries the maximum.
+// None marks a torn or corrupt tail: the caller compacts.
+fn store_artifact_journal_tail_sequence(path: String) -[FS]> Int? ArtifactStoreError! {
+    length :: if files.stat(path) == {
+        .Ok(info) -> info.size
+        .Err(error) -> {
+            if store_artifact_io_missing(error) -> return Ok(Val(0))
+            return Err(ArtifactStoreError.IO(error))
         }
-        "remove" -> {
-            state.last_use.remove(key.identity()).drop("a remove of an unknown key is a no-op")
-        }
-        else -> return false
     }
-    true
+    if length == 0 -> return Ok(Val(0))
+    window :: if length < STORE_ARTIFACT_JOURNAL_TAIL_WINDOW -> length else -> STORE_ARTIFACT_JOURNAL_TAIL_WINDOW
+    tail :: files.read_at(path, length - window, window)
+    if tail.len() == 0 || Int.from_u8(tail[tail.len() - 1]) != 10 -> return Ok(None)
+    body_end :: tail.len() - 1
+    start := -1
+    at := body_end - 1
+    loop at >= 0 {
+        if Int.from_u8(tail[at]) == 10 {
+            start = at + 1
+            break
+        }
+        at -= 1
+    }
+    if start < 0 {
+        if window < length -> return Ok(None)
+        start = 0
+    }
+    if store_artifact_parse_journal_line(store_artifact_slice(tail, start, body_end)) == {
+        .Val(record) -> Ok(Val(record.sequence))
+        .None -> Ok(None)
+    }
 }

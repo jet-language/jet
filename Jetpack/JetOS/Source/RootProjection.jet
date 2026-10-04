@@ -1,0 +1,205 @@
+use core.files.runtime.kernel_path_components as root_path
+use core.files.host.retained_descriptor as root_native
+
+// Whole Rust crates/jetpack/src/JetOS/root_projection.rs:1-213 (10 bodies,
+// counting BOTH cfg variants of link_or_copy_file and enable_unit_link).
+// Required native ABI: RETAINED-DESCRIPTOR-ABI.md:161-181,198-221 (#DF89).
+// ALL native providers/carriers remain undelivered #4494/#4392/#4483/#4500.
+// Canonical jetos_link_or_copy_file and jetos_enable_unit_link publication
+// requires the actual selected native cfg: both complete bodies are below,
+// not aliases/fallbacks selected by lexical PathPlatform or sys.family().
+// GenerationFiles owns jetos_relative_path, jetos_copy_runtime_file_filtered,
+// jetos_copy_runtime_symlink. No duplicate path/copy/filter algorithm here.
+// SOURCE bodies are not native parity; Main owns source-row activation/proof.
+
+// Generated names enter the sole PathBuf push owner. Native paths stay encoded.
+fn jetos_root_child(dir: root_path.OSPath, name: String) -> root_path.OSPath Never! {
+    out := dir
+    root_path.push(&out, root_path.from_text(name, dir.platform))
+    out
+}
+
+// Fixed Rust arrays are immutable prep values, not new runtime lists per call.
+JETOS_ROOT_TOPS :: prep { [String]{"boot", "etc", "sbin", "sw", "share", "studio", "init", "systemd", "nix", "lib", "usr", "network", "hardware", "users", "flatpak", "performance", "module-system", "storage", "workloads", "theme", "fleet", "options", "image-variants", "lifecycle", "service-manager", "apps", "acceptance", "desktop", "store", "compat", "terminal", "home"} }
+JETOS_ROOT_ROOTED :: prep { [String]{"boot", "etc", "sbin", "lib", "usr", "systemd", "home"} }
+JETOS_ROOT_PROOF_FILES :: prep { [String]{"plan.json", "proof.txt", "provenance.json", "health-checks.txt", "activation-diff.txt", "secrets.tmpfs.manifest", "vm-proof.txt"} }
+
+// Rust :5-79: inventory order, rooted subset, followed exists/is_file, and
+// original symlink pathname passed to projection (never canonicalized).
+pub fn jetos_write_bootable_root_projection(dir: root_path.OSPath, published_dir: root_path.OSPath) IOError! -[FS]> {
+    root :: jetos_root_child(dir, "root")
+    if root_native.exists(root) -> root_native.remove_dir_all(root)
+    current :: jetos_root_child(root, "run/current-system")
+    root_native.create_dir_all(current)
+    root_native.create_dir_all(jetos_root_child(root, "var/lib/jetos/generations"))
+    loop top in JETOS_ROOT_TOPS {
+        src :: jetos_root_child(dir, top)
+        if !root_native.exists(src) -> next
+        jetos_copy_dir_recursive(src, jetos_root_child(current, top))
+        if JETOS_ROOT_ROOTED.contains(top) -> jetos_copy_dir_recursive(src, jetos_root_child(root, top))
+    }
+    loop file in JETOS_ROOT_PROOF_FILES {
+        src :: jetos_root_child(dir, file)
+        if root_native.is_file(src) -> jetos_link_or_copy_file(src, jetos_root_child(current, file))
+    }
+    root_native.write(jetos_root_child(root, "var/lib/jetos/generations/current"), "{root_path.display(published_dir)}\n".bytes())
+}
+
+// Rust :82-92. Selected Unix body ONLY; any symlink error invokes exact copy.
+fn jetos_link_or_copy_file_unix_body(src: root_path.OSPath, dst: root_path.OSPath) IOError! -[FS]> {
+    root_native.remove(dst).drop("Rust ignores remove_file failure")
+    parent_span :: root_path.parent_span(dst) ?? return Err(IOError.Other(IOContext{operation: .Write, resource: None, os_code: None, cause: Val("root projection link has no parent")}))
+    parent :: root_path.owned_span(dst, parent_span)
+    relative :: jetos_relative_path(parent, src)
+    if root_native.symlink(relative, dst) == {
+        .Ok(_) -> {}
+        .Err(_) -> { _ :: root_native.copy(src, dst) }
+    }
+}
+
+// Rust :95-98. Selected nonUnix body ONLY, no symlink attempt/mkdir.
+fn jetos_link_or_copy_file_nonunix_body(src: root_path.OSPath, dst: root_path.OSPath) IOError! -[FS]> {
+    root_native.remove(dst).drop("Rust ignores remove_file failure")
+    _ :: root_native.copy(src, dst)
+}
+
+// Rust :100-106, BOTH targets: capture followed destination permissions after
+// exact bytes+permissions copy, then mutate THAT value and set permissions.
+// Unix ORs 0o222; Windows clears readonly using its real permission value.
+// Removing the old symlink FIRST prevents mutating its former target.
+pub fn jetos_copy_file_replace(src: root_path.OSPath, dst: root_path.OSPath) IOError! -[FS]> {
+    root_native.remove(dst).drop("Rust ignores remove_file failure")
+    _ :: root_native.copy(src, dst)
+    permissions :: root_native.permissions(dst)
+    root_native.set_readonly(dst, permissions, false)
+}
+
+// Cache each original file_name ONCE; sorting must not allocate/clone a native
+// name for every comparison. Entry owners and their source stream stay live.
+struct JetOSRootEntry {
+    name: root_path.OSPath
+    entry: root_native.DirectoryEntry
+}
+
+// Original OsString ordering is raw encoded-byte order, NOT Path component
+// order, lossy String order, case folding, or normalization. Borrow both names.
+fn jetos_root_name_order(left: root_path.OSPath, right: root_path.OSPath) -> Ordering Never! {
+    count :: min(left.encoded.len(), right.encoded.len())
+    loop i in 0..<count {
+        if left.encoded[i] < right.encoded[i] -> return Ordering.Less
+        if left.encoded[i] > right.encoded[i] -> return Ordering.Greater
+    }
+    if left.encoded.len() < right.encoded.len() -> return Ordering.Less
+    if left.encoded.len() > right.encoded.len() -> return Ordering.Greater
+    Ordering.Equal
+}
+
+// Rust :108-124. read_dir opening errors propagate; EACH item error is filtered
+// independently. Unfollowed entry.file_type errors are propagated, not skipped.
+fn jetos_copy_dir_recursive(src: root_path.OSPath, dst: root_path.OSPath) IOError! -[FS]> {
+    root_native.create_dir_all(dst)
+    stream :: root_native.read_dir(src)
+    entries := [JetOSRootEntry]{}
+    loop {
+        if stream.next() == {
+            .Ok(optional) -> {
+                entry :: optional ?? break
+                &entries.push(JetOSRootEntry{name: entry.file_name(), entry: entry})
+            }
+            .Err(_) -> next
+        }
+    }
+    &entries.sort_by((left: JetOSRootEntry, right: JetOSRootEntry) -> jetos_root_name_order(left.name, right.name))
+    loop entry in entries {
+        path :: entry.entry.path()
+        target := dst
+        root_path.push(&target, entry.name)
+        own :: entry.entry.file_type()
+        if own.is_dir {
+            jetos_copy_dir_recursive(path, target)
+        } else {
+            jetos_link_or_copy_file(path, target)
+        }
+    }
+}
+
+// Rust :126-187: exact preserved targets, followed metadata, broken-link rail,
+// SECOND entry.file_type/read_link errors, and kind-preserving path contexts.
+// Canonical Foundation cause attachment's ResourceLimit context rail remains
+// #3593; this consumer must not invent a second error-kind/formatting owner.
+pub fn jetos_copy_dir_recursive_deref(src: root_path.OSPath, dst: root_path.OSPath) IOError! -[FS]> {
+    root_native.create_dir_all(dst)
+    stream :: root_native.read_dir(src)
+    entries := [JetOSRootEntry]{}
+    loop {
+        if stream.next() == {
+            .Ok(optional) -> {
+                entry :: optional ?? break
+                &entries.push(JetOSRootEntry{name: entry.file_name(), entry: entry})
+            }
+            .Err(_) -> next
+        }
+    }
+    &entries.sort_by((left: JetOSRootEntry, right: JetOSRootEntry) -> jetos_root_name_order(left.name, right.name))
+    loop entry in entries {
+        path :: entry.entry.path()
+        target := dst
+        root_path.push(&target, entry.name)
+        own :: entry.entry.file_type()
+        if own.is_symlink {
+            link_target :: root_native.read_link(path)
+            if jetos_should_preserve_staged_symlink(link_target) {
+                jetos_copy_runtime_symlink(path, target)
+                next
+            }
+        }
+        if root_native.metadata(path) == {
+            .Ok(meta) -> {
+                if meta.is_dir {
+                    jetos_copy_dir_recursive_deref(path, target) ?? return Err(foundation_io_error_with_cause(err, "copying directory `{root_path.display(path)}` to `{root_path.display(target)}` failed: {err}"))
+                } else if meta.is_file {
+                    jetos_copy_runtime_file_filtered(path, target) ?? return Err(foundation_io_error_with_cause(err, "copying file `{root_path.display(path)}` to `{root_path.display(target)}` failed: {err}"))
+                }
+            }
+            .Err(error) -> {
+                // Rust re-queries entry.file_type here; do not reuse own.
+                retry_type :: entry.entry.file_type()
+                if retry_type.is_symlink {
+                    link_target :: root_native.read_link(path)
+                    if jetos_should_preserve_staged_symlink(link_target) -> jetos_copy_runtime_symlink(path, target)
+                    next
+                }
+                return Err(foundation_io_error_with_cause(error, "reading `{root_path.display(path)}` while copying to `{root_path.display(target)}` failed: {error}"))
+            }
+        }
+    }
+}
+
+JETOS_ROOT_STORE_UNIX :: prep { root_path.from_text("/nix/store", root_path.PathPlatform.Unix) }
+JETOS_ROOT_STORE_WINDOWS :: prep { root_path.from_text("/nix/store", root_path.PathPlatform.Windows) }
+
+// Rust :189-191. Lexical platform is correct for PATH semantics, never cfg.
+pub fn jetos_should_preserve_staged_symlink(target: root_path.OSPath) -> Bool Never! {
+    if target.platform == root_path.PathPlatform.Unix -> return root_path.starts_with(target, JETOS_ROOT_STORE_UNIX) || !root_path.is_absolute(target)
+    root_path.starts_with(target, JETOS_ROOT_STORE_WINDOWS) || !root_path.is_absolute(target)
+}
+
+// Rust :193-203. Ignore only remove_file failure; mkdir/link/copy errors remain.
+pub fn jetos_enable_unit(unit_dir: root_path.OSPath, target: String, unit_name: String) IOError! -[FS]> {
+    wants :: jetos_root_child(unit_dir, "{target}.wants")
+    root_native.create_dir_all(wants)
+    dst :: jetos_root_child(wants, unit_name)
+    root_native.remove(dst).drop("Rust ignores remove_file failure")
+    relative :: jetos_root_child(root_path.from_text("..", unit_dir.platform), unit_name)
+    jetos_enable_unit_link(relative, jetos_root_child(unit_dir, unit_name), dst)
+}
+
+// Rust :206-208. Selected Unix body ONLY; no ignored failure/copy fallback.
+fn jetos_enable_unit_link_unix_body(rel_src: root_path.OSPath, _abs_src: root_path.OSPath, dst: root_path.OSPath) IOError! -[FS]> {
+    root_native.symlink(rel_src, dst)
+}
+
+// Rust :211-213. Selected nonUnix body ONLY; exact copy, no remove/mkdir.
+fn jetos_enable_unit_link_nonunix_body(_rel_src: root_path.OSPath, abs_src: root_path.OSPath, dst: root_path.OSPath) IOError! -[FS]> {
+    _ :: root_native.copy(abs_src, dst)
+}

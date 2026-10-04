@@ -1,0 +1,657 @@
+// Source/CmdLocalApp.rs: checked local-app projection; Kernel is the only evaluator.
+// Native listener/session publication is gated by #4494/#4483/#4409. This module
+// does not invent a native provider or a replacement notebook evaluator.
+use core.encoding.[DataTree]
+use core.files.runtime.kernel_path_components as local_app_paths
+use core.files.host.retained_descriptor as local_app_files
+use jet_foundation.[StatusEnvelope, StatusValue, ReportEnvelope, foundation_parse_protocol_json, foundation_json_quote, foundation_json_write_quote, mir_sha256_bytes, mir_sha256_hex_bytes]
+
+pub JET_CLI_LOCAL_APP_MAX_REQUEST_HEADERS :: 65536
+pub JET_CLI_LOCAL_APP_MAX_REQUEST_BODY :: 8388608
+pub JET_CLI_LOCAL_APP_MAX_CONNECTIONS :: 64
+pub JET_CLI_LOCAL_APP_REQUEST_TIMEOUT_NS :: 10000000000
+pub JET_CLI_LOCAL_APP_BOOTSTRAP_ROUTE :: "/__jet_local_app_bootstrap"
+pub JET_CLI_LOCAL_APP_BOOTSTRAP_TTL_NS :: 30000000000
+pub JET_CLI_LOCAL_APP_RECEIPT_SCHEMA :: "jet.local-app/v1"
+LOCAL_APP_CR :: prep { String.from_bytes([U8]{U8{13}}) ?? panic("CR") }
+
+// Result<_, String> preserves its exact Rust text on Err!.
+pub fn jet_cli_local_app_requested(raw: [String]) -> Bool Never! {
+    loop arg in raw -> if arg == "--app" || arg.starts_with("--app=") -> return true
+    false
+}
+pub fn jet_cli_local_app_function(raw: [String]) -> String? Never! { jet_cli_local_app_flag_value(raw, "--app") }
+pub fn jet_cli_local_app_share(raw: [String]) -> String? Never! { jet_cli_local_app_flag_value(raw, "--share") }
+// CmdLocalApp1088 differs from Notebook: separated values starting '-' are refused.
+pub fn jet_cli_local_app_flag_value(raw: [String], name: String) -> String? Never! {
+    prefix :: "{name}="
+    loop arg in raw {
+        if arg.starts_with(prefix) {
+            value := arg.slice(prefix.bytes().len()..<arg.bytes().len()) // #4303
+            return Val(~value)
+        }
+    }
+    loop (index, arg) in raw {
+        if arg == name {
+            if index + 1 >= raw.len() || raw[index + 1].starts_with("-") -> return None
+            return Val(~raw[index + 1])
+        }
+    }
+    None
+}
+
+// CmdLocalApp147–184.
+pub enum JetCLILocalAppShareMode {
+    Loopback
+    Lan
+    fn parse(value: String) -> JetCLILocalAppShareMode Err! {
+        if value == {
+            "loopback" | "local" -> Ok(JetCLILocalAppShareMode.Loopback)
+            "lan" -> Ok(JetCLILocalAppShareMode.Lan)
+            else -> Err("unknown local-app sharing mode `{value}`; expected `loopback` or `lan`")
+        }
+    }
+    fn bind_address(self) -> String Never! {
+        if self == { .Loopback -> "127.0.0.1:0", .Lan -> "0.0.0.0:0" }
+    }
+    fn as_str(self) -> String Never! {
+        if self == { .Loopback -> "loopback", .Lan -> "lan" }
+    }
+    fn authority(self) -> String Never! {
+        if self == { .Loopback -> "Network.Listen(loopback)", .Lan -> "Network.Listen(approved by --share lan)" }
+    }
+}
+
+// CmdLocalApp243–287; checked Input conversion belongs at the canonical Kernel seam.
+pub struct JetCLILocalAppControlSchema {
+    pub function: String
+    pub name: String
+    pub label: String
+    pub type_name: String
+    pub required: Bool
+    pub variadic: Bool
+    fn json(self) -> String Never! { self.json_with_optional_value(None) }
+    fn json_with_value(self, value: String) -> String Never! { self.json_with_optional_value(Val(value)) }
+    fn json_with_optional_value(self, value: String?) -> String Never! {
+        suffix :: if value == { .Val(text) -> ",\"value\":{foundation_json_quote(text)}", .None -> "" }
+        "{{\"function\":{foundation_json_quote(self.function)},\"name\":{foundation_json_quote(self.name)},\"label\":{foundation_json_quote(self.label)},\"type\":{foundation_json_quote(self.type_name)},\"required\":{self.required},\"variadic\":{self.variadic}{suffix}}}"
+    }
+}
+pub struct JetCLILocalAppSchema {
+    pub function: String
+    pub controls: [JetCLILocalAppControlSchema]
+    pub return_projection: String
+    pub effects: [String]
+    pub authority: String
+    pub source_identity: String
+    pub compatibility_digest: String
+}
+pub struct JetCLILocalAppControlValue { pub schema: JetCLILocalAppControlSchema, pub value: String }
+// CmdLocalApp361–374. Values are keyed by canonical control name, not label.
+pub fn jet_cli_local_app_values_as_controls(schema: JetCLILocalAppSchema, values: [String:String]) -> [JetCLILocalAppControlValue] Never! {
+    out := [JetCLILocalAppControlValue]{}
+    loop control in schema.controls {
+        value :: values.get(control.name) ?? ""
+        &out.push(JetCLILocalAppControlValue{schema: ~control, value: ~value})
+    }
+    out
+}
+// CmdLocalApp376–384.
+pub fn jet_cli_local_app_required_string(fields: [String:DataTree], key: String) -> String Err! {
+    value :: fields.get(key) ?? return Err("local-app identity field `{key}` is not text")
+    if value == { .Text(text) -> Ok(~text), else -> Err("local-app identity field `{key}` is not text") }
+}
+
+// CmdLocalApp628–672. Wire counters remain U64, not host Int.
+pub struct JetCLILocalAppReloadFact {
+    pub status: String
+    pub reason: String
+    pub source_hash: String
+    pub generation: U64
+    pub reset_count: U64
+    pub stale: Bool
+    fn initial(source_hash: String) -> JetCLILocalAppReloadFact Never! {
+        JetCLILocalAppReloadFact{status: "initial", reason: "source checked before launch", source_hash: source_hash, generation: U64{0}, reset_count: U64{0}, stale: false}
+    }
+    fn error(source_hash: String, reason: String) -> JetCLILocalAppReloadFact Never! {
+        JetCLILocalAppReloadFact{status: "error", reason: reason, source_hash: source_hash, generation: U64{0}, reset_count: U64{0}, stale: true}
+    }
+    fn json(self) -> String Never! {
+        "{{\"status\":{foundation_json_quote(self.status)},\"reason\":{foundation_json_quote(self.reason)},\"source_hash\":{foundation_json_quote(self.source_hash)},\"generation\":{self.generation},\"reset_count\":{self.reset_count},\"stale\":{self.stale}}}"
+    }
+}
+pub struct JetCLILocalAppServerReceipt {
+    pub bind: String
+    pub url: String
+    pub share: String
+    pub authority: String
+    fn empty() -> JetCLILocalAppServerReceipt Never! { JetCLILocalAppServerReceipt{bind: "", url: "", share: "", authority: ""} }
+}
+
+// CmdLocalApp1030–1060. Canonical bounded protocol JSON owns syntax/number parsing.
+pub fn jet_cli_local_app_parse_values(body: String) -> [String:String] Err! {
+    root :: foundation_parse_protocol_json(body) ?? return Err("local-app call body is not valid JSON")
+    fields :: if root == { .Object(fields) -> fields, else -> return Err("local-app call body must be a JSON object") }
+    member :: fields.get("values") ?? return Ok([String:String]{})
+    values :: if member == { .Object(values) -> values, else -> return Err("local-app call `values` must be a JSON object") }
+    out := [String:String]{}
+    loop entry in values {
+        text :: if entry.value == {
+            .Text(text) -> ~text
+            .Bool(flag) -> "{flag}"
+            .Int(number) -> "{number}"
+            .Float(number) -> jet_cli_db_float_display(number, false)
+            .Null -> "null"
+            else -> return Err("local-app control `{entry.key}` must be a scalar Jet literal")
+        }
+        out[entry.key] = text
+    }
+    Ok(out)
+}
+
+// CmdLocalApp106–145: structured preflight data is projected through Report.
+// Emission + USER_ERROR process termination remain native caller responsibilities.
+pub fn jet_cli_local_app_preflight_report(message: String) -> ReportEnvelope Never! {
+    code := "E2104"
+    what := ~message
+    why := "a local app must select one checked function and one explicit sharing authority"
+    fix := "choose an available function, use `--share loopback` by default, and retry"
+    if foundation_parse_protocol_json(message) == .Val(root) {
+        if root == .Object(fields) {
+            if fields.get("code") == .Val(value) -> if value == .Text(text) -> code = ~text
+            if fields.get("what") == .Val(value) -> if value == .Text(text) -> what = ~text
+            if fields.get("why") == .Val(value) -> if value == .Text(text) -> why = ~text
+            if fields.get("fix") == .Val(value) -> if value == .Text(text) -> fix = ~text
+        }
+    }
+    ReportEnvelope.new("", "error", code, what, why, fix)
+}
+// CmdLocalApp1321–1329: HTTP error is protocol data, not a CLI status envelope.
+pub fn jet_cli_local_app_error_json(code: String, message: String) -> String Never! {
+    report :: ReportEnvelope.new("", "error", code, message, "the local app accepts only checked schema data and an existing tab session", "refresh the app state, correct the typed input, and retry")
+    "{{\"ok\":false,\"error\":{{\"code\":{foundation_json_quote(report.code)},\"what\":{foundation_json_quote(report.what)},\"why\":{foundation_json_quote(report.why)},\"fix\":{foundation_json_quote(report.fix)}}}}}"
+}
+pub fn jet_cli_local_app_checked_error_json(code: String, message: String) -> String Never! {
+    if foundation_parse_protocol_json(message) == .Val(value) {
+        if value == .Object(_) -> return "{{\"ok\":false,\"error\":{message}}}"
+    }
+    jet_cli_local_app_error_json(code, message)
+}
+
+// CmdLocalApp1285–1308; Notebook owns matching redirect frame. Local-app response
+// additionally requires Cache-Control: no-store and cannot reuse notebook response.
+pub fn jet_cli_local_app_response_bytes(status: String, content_type: String, body: String) -> [U8] Never! {
+    "HTTP/1.1 {status}{LOCAL_APP_CR}\nContent-Type: {content_type}{LOCAL_APP_CR}\nCache-Control: no-store{LOCAL_APP_CR}\nContent-Length: {body.bytes().len()}{LOCAL_APP_CR}\nConnection: close{LOCAL_APP_CR}\n{LOCAL_APP_CR}\n{body}".bytes()
+}
+// CmdLocalApp1081–1086; Request remains NotebookHttp's canonical shared carrier.
+pub fn jet_cli_local_app_session_header(request: JetCLINotebookRequest) -> String? Never! { request.headers.get("x-jet-app-session") }
+// Native-gated orchestration (no successful placeholder): run_local_app54,
+// serve688, handle_connection780 and open_local_app_browser1109. load204 and
+// reload457 below consume required-but-unpublished retained_descriptor.read_bytes.
+// Kernel/identity bind to0803, document loading to0801, trust/eval to0802.
+// Source1143 read_request -> NotebookHttp jet_cli_notebook_read_request: same
+// 64KiB/8MiB/deadline/error branches; linear newly-available terminator search.
+// Source1214 split_target -> jet_cli_notebook_split_target.
+// Source1218 authorized -> jet_cli_notebook_authorized.
+// Source1226 constant_time_eq -> jet_cli_notebook_constant_time_eq.
+// Source1237 consume_bootstrap -> jet_cli_notebook_consume_bootstrap_at under
+// SAME held Mutex grant/poison refusal; native lock+clock remain gated.
+// Source1257 form_value -> jet_cli_notebook_form_value.
+// Source1266 decode_component -> jet_cli_notebook_decode_component.
+// Source1300 write_redirect -> jet_cli_notebook_write_redirect.
+// Source1310 fragment_component -> jet_cli_notebook_fragment_component.
+// Source1100 mint_token -> jet_cli_notebook_mint_token under SAME real
+// /dev/urandom random_16 producer. Generic policy is not native completion.
+
+// CmdLocalApp556–608. Values use a keyed map instead of Rust's quadratic
+// schema-by-ControlValue search; schema order and empty-value behavior are identical.
+pub fn jet_cli_local_app_app_json(schema: JetCLILocalAppSchema, path: String, source_hash: String, values: [String:String]?) -> String Never! {
+    out := [U8]{}
+    jet_cli_local_app_append(&out, "{{\"path\":{foundation_json_quote(path)},\"function\":{foundation_json_quote(schema.function)},\"source_hash\":{foundation_json_quote(source_hash)},\"source_identity\":{foundation_json_quote(schema.source_identity)},\"compatibility_digest\":{foundation_json_quote(schema.compatibility_digest)},\"return_projection\":{foundation_json_quote(schema.return_projection)},\"effects\":[")
+    loop (index, effect) in schema.effects {
+        if index > 0 -> &out.push(U8{44})
+        foundation_json_write_quote(&out, effect)
+    }
+    jet_cli_local_app_append(&out, "],\"authority\":{foundation_json_quote(schema.authority)},\"controls\":[")
+    loop (index, control) in schema.controls {
+        if index > 0 -> &out.push(U8{44})
+        if values == {
+            .Val(current) -> jet_cli_local_app_append(&out, control.json_with_value(current.get(control.name) ?? ""))
+            .None -> jet_cli_local_app_append(&out, control.json())
+        }
+    }
+    jet_cli_local_app_append(&out, "]}}")
+    String.from_bytes(out) ?? panic("local-app JSON preserves UTF-8")
+}
+fn jet_cli_local_app_append(out: &[U8], text: String) Never! { loop byte in text.bytes() -> &out.push(byte) }
+// CmdLocalApp610–625: exact HTTP receipt. POLICY_VERSION comes from the one
+// Notebook trust owner, passed by caller, never duplicated here.
+pub fn jet_cli_local_app_receipt_json(receipt: JetCLILocalAppServerReceipt, schema: JetCLILocalAppSchema, path: String, source_hash: String, policy_version: String, sessions: Int, generation: U64, reload: JetCLILocalAppReloadFact) -> String Never! {
+    app :: jet_cli_local_app_app_json(schema, path, source_hash, None)
+    "{{\"schema\":{foundation_json_quote(JET_CLI_LOCAL_APP_RECEIPT_SCHEMA)},\"bind\":{foundation_json_quote(receipt.bind)},\"url\":{foundation_json_quote(receipt.url)},\"share\":{foundation_json_quote(receipt.share)},\"authority\":{foundation_json_quote(receipt.authority)},\"app\":{app},\"data\":{{\"input\":\"checked typed controls\",\"output\":\"Kernel MIME/state projection\",\"session_isolation\":\"one Kernel per browser tab\",\"source_hash\":{foundation_json_quote(source_hash)}}},\"trust\":{{\"policy\":{foundation_json_quote(policy_version)},\"renderer\":\"jet-notebook\",\"grants\":\"kernel-owned\"}},\"sessions\":{sessions},\"generation\":{generation},\"reload\":{reload.json()}}}"
+}
+// CLI machine launch receipt uses Foundation's sole status envelope; nested
+// local-app HTTP receipt remains protocol data with its original schema.
+pub fn jet_cli_local_app_launch_status(receipt: StatusValue) -> StatusEnvelope Never! {
+    status := StatusEnvelope.new("cli", true)
+    status = ^status.with_field("receipt", receipt)
+    status
+}
+
+// CmdLocalApp1338–1429: the original browser shell. All braces are literal
+// Jet escapes; DOM text, sandbox, quarantine and authentication behavior preserved.
+pub JET_CLI_LOCAL_APP_HTML :: """
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jet local app</title>
+<style>
+:root{{color-scheme:dark;font:15px system-ui,sans-serif;background:#111827;color:#e5e7eb}}
+body{{max-width:960px;margin:2rem auto;padding:0 1rem}}button,input{{font:inherit}}button{{border:1px solid #4b5563;background:#1f2937;color:inherit;border-radius:.35rem;padding:.45rem .75rem;cursor:pointer}}button:hover{{border-color:#93c5fd}}input{{background:#030712;color:inherit;border:1px solid #4b5563;border-radius:.3rem;padding:.4rem;width:min(26rem,100%)}}header{{display:flex;justify-content:space-between;gap:1rem;align-items:start;border-bottom:1px solid #374151;padding-bottom:1rem}}header h1{{margin:0;font-size:1.35rem}}header p{{margin:.3rem 0;color:#9ca3af}}.actions{{display:flex;gap:.5rem;flex-wrap:wrap}}.control{{display:grid;gap:.35rem;margin:1rem 0}}.control label{{color:#d1d5db}}.type{{color:#9ca3af;font-size:.8rem}}section{{margin:1.25rem 0;padding:1rem;border:1px solid #374151;border-radius:.5rem;background:#172033}}.cell{{border-top:1px solid #374151;padding:.75rem 0}}.cell:first-child{{border-top:0}}.cell small{{color:#9ca3af}}.cell pre{{white-space:pre-wrap;overflow:auto;margin:.4rem 0 0}}.status{{color:#93c5fd;min-height:1.4rem}}.error{{color:#fca5a5}}
+</style>
+</head>
+<body>
+<header><div><h1 id="title">Jet local app</h1><p id="meta">connecting…</p></div><div class="actions"><button id="reset">Reset</button><button id="reconnect">Reconnect</button></div></header>
+<section><div id="controls"></div><button id="call">Run checked function</button><p id="status" class="status"></p></section>
+<section><h2>Notebook outputs</h2><div id="cells"></div></section>
+<script>
+(() => {{
+  const token = new URLSearchParams((location.hash || '').slice(1)).get('token') || '';
+  if (location.hash) history.replaceState(null, '', location.pathname);
+  let session = sessionStorage.getItem('jet-local-app-session');
+  let state = null;
+  const auth = {{'Authorization': `Bearer ${{token}}`, 'Content-Type':'application/json'}};
+  const api = async (path, body = {{}}) => {{
+    const headers = {{...auth}};
+    if (session) headers['X-Jet-App-Session'] = session;
+    const response = await fetch(path, {{method:'POST', headers, body:JSON.stringify(body)}});
+    const value = await response.json();
+    if (!response.ok || value.ok === false) throw new Error(value.error?.what || value.error || 'request failed');
+    return value;
+  }};
+  const outputNode = (output) => {{
+    const box = document.createElement('div'); box.className = 'output';
+    if (!output) {{ box.textContent = 'No output yet.'; return box; }}
+    if (!output.live && !output.quarantined) {{ box.textContent = 'Stale output hidden. Run the function again.'; return box; }}
+    if (output.quarantined) {{
+      const notice = document.createElement('div'); notice.className = 'notice';
+      notice.textContent = 'Rich output is quarantined; the safe text projection remains visible.';
+      box.append(notice);
+    }}
+    const text = document.createElement('pre'); text.textContent = output.text || '(no text/plain)'; box.append(text);
+    for (const part of (output.mime || [])) {{
+      if (part.type === 'image/svg+xml') {{
+        const image = document.createElement('img'); image.alt = 'Jet app plot';
+        image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(part.data); box.append(image);
+      }} else if (part.type === 'text/html') {{
+        const frame = document.createElement('iframe'); frame.title = 'Sandboxed rich output';
+        frame.sandbox = ''; frame.srcdoc = part.data; box.append(frame);
+      }}
+    }}
+    return box;
+  }};
+  const render = (value) => {{
+    state = value.state || value;
+    const app = state.app || {{}};
+    document.getElementById('title').textContent = `Jet · ${{app.function || 'local app'}}`;
+    document.getElementById('meta').textContent = `${{app.path || ''}} · generation ${{state.generation ?? 0}}`;
+    const controls = document.getElementById('controls'); controls.replaceChildren();
+    for (const item of (app.controls || [])) {{
+      const wrap = document.createElement('div'); wrap.className = 'control';
+      const label = document.createElement('label'); label.textContent = item.label || item.name;
+      const type = document.createElement('span'); type.className = 'type'; type.textContent = item.type || 'checked value';
+      const input = document.createElement('input'); input.dataset.name = item.name; input.value = item.value || '';
+      input.placeholder = item.required ? 'required Jet literal' : 'optional Jet literal';
+      wrap.append(label, type, input); controls.append(wrap);
+    }}
+    const cells = document.getElementById('cells'); cells.replaceChildren();
+    for (const cell of (state.state?.cells || state.cells || [])) {{
+      const box = document.createElement('article'); box.className = 'cell';
+      const name = document.createElement('small'); name.textContent = `${{cell.kind || 'jet'}} · ${{cell.status || 'idle'}}`;
+      box.append(name, outputNode(cell.output)); cells.append(box);
+    }}
+    const reload = state.reload;
+    document.getElementById('status').textContent = reload?.stale ? `${{reload.status}}: ${{reload.reason}}` : '';
+  }};
+  const refresh = async () => {{ try {{ render(await api('/api/state')); }} catch (error) {{ document.getElementById('status').textContent = error.message; }} }};
+  const start = async () => {{
+    try {{
+      if (!session) {{ const value = await api('/api/session'); session = value.session; sessionStorage.setItem('jet-local-app-session', session); }}
+      await refresh();
+    }} catch (error) {{ document.getElementById('status').textContent = error.message; }}
+  }};
+  document.getElementById('call').onclick = async () => {{
+    const values = {{}}; for (const input of document.querySelectorAll('#controls input')) values[input.dataset.name] = input.value;
+    try {{ render(await api('/api/call', {{values}})); }} catch (error) {{ document.getElementById('status').textContent = error.message; }}
+  }};
+  document.getElementById('reset').onclick = async () => {{ try {{ render(await api('/api/reset')); }} catch (error) {{ document.getElementById('status').textContent = error.message; }} }};
+  document.getElementById('reconnect').onclick = async () => {{ try {{ render(await api('/api/reconnect', {{identity: state.state?.identity || state.identity}})); }} catch (error) {{ document.getElementById('status').textContent = error.message; }} }};
+  start(); setInterval(refresh, 1500);
+}})();
+</script>
+</body>
+</html>
+"""
+
+// Capability/accounting boundary for Source/CmdLocalApp.rs:
+// #4494: load204 requires retained_descriptor.read_bytes(original OSPath), strict
+// UTF-8 and one SHA256 owner; no textual path reconstruction. serve688 requires
+// actual TcpListener.bind/local_addr/incoming, owned TcpStream read/write timeouts,
+// Arc/Mutex poison errors, native threads, and AcqRel/Acquire bounded admission
+// with decrement on both thread completion and spawn failure. mint_token1100
+// requires FileReader open("/dev/urandom"), read_exact16 and close on every rail,
+// not a generic RNG with different Unix error/availability behavior.
+// open_local_app_browser1109 retains original native JET_CANVAS_BROWSER/BROWSER,
+// their empty-value filtering and precedence, one URL argument, null stdout/stderr
+// and ignored spawn error. No shell splitting or fabricated success.
+// #4483: original macOS open / Windows explorer.exe / other xdg-open branches;
+// native usize header/body/counter widths and target SocketAddr formatting.
+// #4409: source UTF-8 refusal is distinct from native read/open errors; request
+// header/body UTF-8 exact messages come from the canonical Notebook transport.
+// #4499 not applicable: all maps here have String keys (Rust386/395/1030/1136).
+// #4500: retained Kernel/session/map-field loans and native handle ownership must
+// not be replaced by cloning AppDefinition/source/schema before each callback.
+// Native providers and absent0801/0802/0803 publication are gates, not parity.
+
+// Main's explicit binding ruling: these are Rust-faithful Notebook names pending
+// NOTEBOOK ABI reconciliation (0801 document / 0803 Kernel); no implementations
+// of their types or evaluator methods are duplicated here.
+pub enum JetCLILocalAppDocument {
+    Notebook(path: local_app_paths.OSPath)
+    Source(source: String)
+}
+pub struct JetCLILocalAppDefinition {
+    pub document: JetCLILocalAppDocument
+    pub path: local_app_paths.OSPath
+    pub function: String
+    pub source_hash: String
+    pub environment_hash: String
+    // Rust's unused flattened source and duplicate controls are omitted. Source
+    // is owned once by document; checked controls once by the host schema.
+    fn load(path: local_app_paths.OSPath, function: String) -[FS.Read]> JetCLILocalAppDefinition Err! {
+        bytes :: local_app_files.read_bytes(path) ?? return Err("local app source `{local_app_paths.display(path)}` could not be read: {err.message}")
+        source_hash :: mir_sha256_hex_bytes(mir_sha256_bytes(bytes))
+        notebook := false
+        if local_app_paths.extension_span(path) == .Val(extent) {
+            notebook = String.from_bytes(path.encoded[extent.start..<extent.end]) == Val("jetnb")
+        }
+        document :: if notebook {
+            // Preserve the second notebook read/validation before environment hash.
+            _ :: load_jetnb(path)
+            // Rust's joined .source field is never read; loading still validates
+            // every original notebook cell via the canonical document owner.
+            JetCLILocalAppDocument.Notebook{path: ~path}
+        } else {
+            source :: String.from_bytes(bytes) ?? return Err("local app source `{local_app_paths.display(path)}` is not UTF-8")
+            JetCLILocalAppDocument.Source{source: source}
+        }
+        parent :: if local_app_paths.parent_span(path) == {
+            .Val(extent) -> local_app_paths.from_encoded(~path.encoded[extent.start..<extent.end], path.platform)
+            .None -> local_app_paths.from_text(".", path.platform)
+        }
+        Ok(JetCLILocalAppDefinition{document: document, path: ~path, function: ~function, source_hash: source_hash, environment_hash: Kernel.environment_hash(parent)})
+    }
+}
+pub fn jet_cli_local_app_control_from_input(function: String, input: ^NotebookAppInput) -> JetCLILocalAppControlSchema Never! {
+    JetCLILocalAppControlSchema{function: ~function, name: ^input.name, label: ^input.label, type_name: ^input.type_name, required: input.required, variadic: input.variadic}
+}
+pub fn jet_cli_local_app_schema_from_checked(schema: ^NotebookAppSchema) -> JetCLILocalAppSchema Never! {
+    controls := [JetCLILocalAppControlSchema]{}
+    loop input in ^schema.inputs -> &controls.push(jet_cli_local_app_control_from_input(schema.function, ^input))
+    JetCLILocalAppSchema{function: ^schema.function, controls: ^controls, return_projection: ^schema.return_projection, effects: ^schema.effects, authority: ^schema.authority, source_identity: ^schema.source_identity, compatibility_digest: ^schema.compatibility_digest}
+}
+pub struct JetCLILocalAppSession {
+    pub kernel: Kernel
+    pub call_cell: String
+    pub schema: JetCLILocalAppSchema
+    pub values: [String:String]
+    pub callback: U64
+}
+pub fn jet_cli_local_app_build_kernel(definition: JetCLILocalAppDefinition, token: String) -> JetCLILocalAppSession Err! {
+    kernel := if definition.document == {
+        .Notebook(path) -> Kernel.open(Val(path), ~definition.environment_hash)
+        .Source(source) -> {
+            opened := Kernel.open(None, ~definition.environment_hash)
+            _ :: &opened.add_cell(CellKind.Jet, ~source)
+            ^opened
+        }
+    }
+    &kernel.set_authority(token)
+    checked := &kernel.app_schema(definition.function)
+    schema :: jet_cli_local_app_schema_from_checked(^checked)
+    call_cell :: &kernel.add_cell(CellKind.Jet, "{definition.function}()")
+    Ok(JetCLILocalAppSession{kernel: ^kernel, call_cell: call_cell, schema: schema, values: [String:String]{}, callback: U64{0}})
+}
+fn jet_cli_local_app_next_callback(value: U64) -> U64 Never! {
+    if value == (U64{18446744073709551615}) -> value else -> value + U64{1}
+}
+pub struct JetCLILocalAppHost {
+    pub definition: JetCLILocalAppDefinition
+    pub schema: JetCLILocalAppSchema
+    pub control_index: [String:Int]
+    pub token: String
+    pub prototype: JetCLILocalAppSession?
+    pub sessions: [String:JetCLILocalAppSession]
+    pub generation: U64
+    pub reload: JetCLILocalAppReloadFact
+    pub receipt: JetCLILocalAppServerReceipt
+    fn new(definition: ^JetCLILocalAppDefinition, token: ^String) -> JetCLILocalAppHost Err! {
+        prototype := jet_cli_local_app_build_kernel(definition, token)
+        schema :: ~prototype.schema
+        reload :: JetCLILocalAppReloadFact.initial(definition.source_hash)
+        Ok(JetCLILocalAppHost{definition: ^definition, control_index: jet_cli_local_app_control_index(schema), schema: schema, token: ^token, prototype: Val(^prototype), sessions: [String:JetCLILocalAppSession]{}, generation: U64{0}, reload: reload, receipt: JetCLILocalAppServerReceipt.empty()})
+    }
+    fn create_session(&self) -> String Err! {
+        id :: JetNotebook.mint_cell_id()
+        available := ^self.prototype
+        self.prototype = None
+        session :: if available == {
+            .Val(session) -> ^session
+            .None -> jet_cli_local_app_build_kernel(self.definition, self.token)
+        }
+        self.sessions[id] = session
+        Ok(id)
+    }
+    fn reset_session(&self, id: String) Err! {
+        if !self.sessions.has_key(id) -> return Err("local app session does not exist")
+        replacement := jet_cli_local_app_build_kernel(self.definition, self.token)
+        self.sessions[id].kernel = ^replacement.kernel
+        self.sessions[id].call_cell = ^replacement.call_cell
+        self.sessions[id].schema = ^replacement.schema
+        &self.sessions[id].values.clear()
+        self.sessions[id].callback = jet_cli_local_app_next_callback(self.sessions[id].callback)
+    }
+    fn callback(self, id: String) -> U64 Err! {
+        if !self.sessions.has_key(id) -> return Err("local app session does not exist")
+        Ok(self.sessions[id].callback)
+    }
+    fn state(self, id: String) -> String Err! {
+        session :: self.sessions.get(id) ?? return Err("local app session does not exist")
+        app :: jet_cli_local_app_app_json(self.schema, local_app_paths.display(self.definition.path), self.definition.source_hash, Val(session.values))
+        Ok("{{\"ok\":true,\"schema\":{foundation_json_quote(JET_CLI_LOCAL_APP_RECEIPT_SCHEMA)},\"session\":{foundation_json_quote(id)},\"generation\":{self.generation},\"app\":{app},\"reload\":{self.reload.json()},\"state\":{session.kernel.state_json_for(JetCLINotebookClientKind.FirstParty)}}}")
+    }
+    fn app_json(self) -> String Never! {
+        jet_cli_local_app_app_json(self.schema, local_app_paths.display(self.definition.path), self.definition.source_hash, None)
+    }
+    fn app_json_with_values(self, values: [String:String]) -> String Never! {
+        jet_cli_local_app_app_json(self.schema, local_app_paths.display(self.definition.path), self.definition.source_hash, Val(values))
+    }
+    fn receipt_json(self) -> String Never! {
+        jet_cli_local_app_receipt_json(self.receipt, self.schema, local_app_paths.display(self.definition.path), self.definition.source_hash, POLICY_VERSION, self.sessions.len(), self.generation, self.reload)
+    }
+    fn reload_if_changed(&self, max_usize: U64) -[FS.Read]> Never! {
+        bytes :: local_app_files.read_bytes(self.definition.path) ?? {
+            self.reload = JetCLILocalAppReloadFact.error(self.definition.source_hash, "source refresh failed: {err.message}")
+            return
+        }
+        source_hash :: mir_sha256_hex_bytes(mir_sha256_bytes(bytes))
+        if source_hash == self.definition.source_hash -> return
+        candidate := JetCLILocalAppDefinition.load(self.definition.path, self.definition.function) ?? {
+            self.reload = JetCLILocalAppReloadFact.error(source_hash, err.message)
+            return
+        }
+        candidate_prototype := jet_cli_local_app_build_kernel(candidate, self.token) ?? {
+            self.reload = JetCLILocalAppReloadFact.error(source_hash, err.message)
+            return
+        }
+        compatible :: self.schema.compatibility_digest == candidate_prototype.schema.compatibility_digest
+        replacements := [String:JetCLILocalAppSession]{}
+        reset_count := U64{0}
+        ids := self.sessions.keys().to_list()
+        &ids.sort()
+        loop id in ids {
+            replacement := jet_cli_local_app_build_kernel(candidate, self.token) ?? {
+                self.reload = JetCLILocalAppReloadFact.error(source_hash, err.message)
+                return
+            }
+            replacement.callback = self.sessions[id].callback
+            if compatible {
+                loop control in candidate_prototype.schema.controls {
+                    if self.sessions[id].values.get(control.name) == .Val(value) {
+                        if value != "" {
+                            if &replacement.kernel.set_control(control.function, control.name, ~value) == .Ok(_) -> replacement.values[control.name] = ~value
+                        }
+                    }
+                }
+            } else {
+                if reset_count < max_usize -> reset_count += U64{1}
+            }
+            replacements[id] = ^replacement
+        }
+        // Publish only after every candidate Kernel succeeds; earlier failures
+        // leave source, schema, prototype and every original tab untouched.
+        self.definition = ^candidate
+        self.schema = ~candidate_prototype.schema
+        self.control_index = jet_cli_local_app_control_index(self.schema)
+        self.prototype = Val(^candidate_prototype)
+        self.sessions = ^replacements
+        self.generation = jet_cli_local_app_next_callback(self.generation)
+        self.reload = JetCLILocalAppReloadFact{status: "reloaded", reason: if compatible -> "source changed; checked controls and compatible input state restored" else -> "source changed; checked app schema changed and sessions were reset", source_hash: source_hash, generation: self.generation, reset_count: reset_count, stale: true}
+    }
+}
+
+// Preserve Rust's first schema match of either name OR label, including collisions.
+fn jet_cli_local_app_control_index(schema: JetCLILocalAppSchema) -> [String:Int] Never! {
+    index := [String:Int]{}
+    loop (ordinal, control) in schema.controls {
+        if !index.has_key(control.name) -> index[control.name] = ordinal
+        if !index.has_key(control.label) -> index[control.label] = ordinal
+    }
+    index
+}
+// CmdLocalApp1062–1079: identity source/build/session/authority error precedence.
+pub fn jet_cli_local_app_parse_identity(body: String) -> KernelIdentity Err! {
+    root :: foundation_parse_protocol_json(body) ?? return Err("reconnect body is not valid JSON")
+    fields :: if root == { .Object(fields) -> fields, else -> return Err("reconnect body must be a JSON object") }
+    value :: fields.get("identity") ?? return Err("reconnect body is missing identity")
+    identity :: if value == { .Object(fields) -> fields, else -> return Err("reconnect identity must be a JSON object") }
+    source :: jet_cli_local_app_required_string(identity, "source")
+    build :: jet_cli_local_app_required_string(identity, "build")
+    session :: jet_cli_local_app_required_string(identity, "session")
+    authority :: jet_cli_local_app_required_string(identity, "authority")
+    Ok(KernelIdentity{source: source, build: build, session: session, authority: authority})
+}
+// Rust ApiResponse reuses NotebookHttp's identical Ok/Error transport carrier.
+// CmdLocalApp869–926; /api/session intentionally precedes tab header validation.
+pub fn jet_cli_local_app_api_message(host: &JetCLILocalAppHost, route: String, body: String, session: String?) -> JetCLINotebookApiResponse Never! {
+    if route == "/api/session" {
+        id :: &host.create_session() ?? return JetCLINotebookApiResponse.Error(jet_cli_local_app_error_json("E2105", err.message))
+        state :: host.state(id) ?? "null"
+        return JetCLINotebookApiResponse.Ok("{{\"ok\":true,\"schema\":{foundation_json_quote(JET_CLI_LOCAL_APP_RECEIPT_SCHEMA)},\"session\":{foundation_json_quote(id)},\"receipt\":{host.receipt_json()},\"state\":{state}}}")
+    }
+    id :: session ?? return JetCLINotebookApiResponse.Error(jet_cli_local_app_error_json("E2104", "local-app API request needs X-Jet-App-Session"))
+    if id == "" -> return JetCLINotebookApiResponse.Error(jet_cli_local_app_error_json("E2104", "local-app API request needs X-Jet-App-Session"))
+    if !host.sessions.has_key(id) -> return JetCLINotebookApiResponse.Error(jet_cli_local_app_error_json("E2104", "local app session does not exist"))
+    if route == {
+        "/api/state" -> {
+            value :: host.state(id) ?? return JetCLINotebookApiResponse.Error(jet_cli_local_app_error_json("E2104", err.message))
+            JetCLINotebookApiResponse.Ok(value)
+        }
+        "/api/call" -> {
+            value :: jet_cli_local_app_call_message(&host, id, body) ?? return JetCLINotebookApiResponse.Error(err.message)
+            JetCLINotebookApiResponse.Ok(value)
+        }
+        "/api/reset" -> {
+            &host.reset_session(id) ?? return JetCLINotebookApiResponse.Error(jet_cli_local_app_error_json("E2105", err.message))
+            callback :: host.callback(id) ?? U64{0}
+            state :: host.state(id) ?? "null"
+            JetCLINotebookApiResponse.Ok("{{\"ok\":true,\"callback\":{callback},\"reason\":\"explicit reset\",\"state\":{state}}}")
+        }
+        "/api/reconnect" -> {
+            value :: jet_cli_local_app_reconnect_message(&host, id, body) ?? return JetCLINotebookApiResponse.Error(err.message)
+            JetCLINotebookApiResponse.Ok(value)
+        }
+        "/api/receipt" -> JetCLINotebookApiResponse.Ok(host.receipt_json())
+        else -> JetCLINotebookApiResponse.Error(jet_cli_local_app_error_json("E2104", "unknown local-app route `{route}`"))
+    }
+}
+// CmdLocalApp928–998. Borrow disjoint host schema/session fields instead of
+// cloning the entire source definition + schema on every call (#4500).
+pub fn jet_cli_local_app_call_message(host: &JetCLILocalAppHost, id: String, body: String) -> String Err! {
+    values :: jet_cli_local_app_parse_values(body) ?? return Err(jet_cli_local_app_error_json("E2104", err.message))
+    if !host.sessions.has_key(id) -> return Err(jet_cli_local_app_error_json("E2104", "local app session does not exist"))
+    // BTreeMap's lexical iteration determines alias updates and first control
+    // failure. Validate all scalar JSON values first, then sort these keys once.
+    names := values.keys().to_list()
+    &names.sort()
+    loop name in names {
+        ordinal :: host.control_index.get(name) ?? return Err(jet_cli_local_app_error_json("E2104", "checked app function has no control `{name}`"))
+        control :: host.schema.controls[ordinal]
+        &host.sessions[id].kernel.set_control(control.function, control.name, ~values[name]) ?? return Err(jet_cli_local_app_checked_error_json("E2104", err.message))
+        host.sessions[id].values[control.name] = ~values[name]
+    }
+    args := [U8]{}
+    first := true
+    loop control in host.schema.controls {
+        value :: host.sessions[id].values.get(control.name) ?? ""
+        if control.required && value == "" -> return Err(jet_cli_local_app_error_json("E2104", "required checked control `{control.label}` has no value"))
+        if value != "" {
+            if !first -> jet_cli_local_app_append(&args, ", ")
+            first = false
+            jet_cli_local_app_append(&args, control.name)
+            jet_cli_local_app_append(&args, ": ")
+            jet_cli_local_app_append(&args, value)
+        }
+    }
+    text :: String.from_bytes(args) ?? panic("checked argument source UTF-8")
+    &host.sessions[id].kernel.edit_cell(host.sessions[id].call_cell, "{host.definition.function}({text})") ?? return Err(jet_cli_local_app_error_json("E2104", err.message))
+    result :: &host.sessions[id].kernel.execute_cell(JetCLINotebookClientKind.FirstParty, host.sessions[id].call_cell) ?? return Err(jet_cli_local_app_error_json("E2105", err.message))
+    host.sessions[id].callback = jet_cli_local_app_next_callback(host.sessions[id].callback)
+    state :: host.state(id) ?? return Err(jet_cli_local_app_error_json("E2105", err.message))
+    Ok("{{\"ok\":true,\"callback\":{host.sessions[id].callback},\"result\":{{\"ok\":{result.ok()},\"elapsed_ms\":{result.elapsed_ms},\"text\":{foundation_json_quote(result.bundle.text_plain)}}},\"state\":{state}}}")
+}
+// CmdLocalApp1000–1027; checked mismatch object passes through verbatim.
+pub fn jet_cli_local_app_reconnect_message(host: &JetCLILocalAppHost, id: String, body: String) -> String Err! {
+    identity :: jet_cli_local_app_parse_identity(body) ?? return Err(jet_cli_local_app_error_json("E2104", err.message))
+    if !host.sessions.has_key(id) -> return Err(jet_cli_local_app_error_json("E2104", "local app session does not exist"))
+    host.sessions[id].kernel.reconnect(identity) ?? return Err(jet_cli_local_app_checked_error_json("E2104", err.message))
+    host.sessions[id].callback = jet_cli_local_app_next_callback(host.sessions[id].callback)
+    state :: host.state(id) ?? return Err(jet_cli_local_app_error_json("E2105", err.message))
+    Ok("{{\"ok\":true,\"callback\":{host.sessions[id].callback},\"state\":{state}}}")
+}
+
+// CmdLocalApp823–861, invoked only after public/bootstrap routes and bearer
+// authentication, under the SAME acquired host lock. Lock/read/redirect remain
+// canonical native gates, not this policy function's authority to acquire them.
+pub fn jet_cli_local_app_authenticated_response(host: &JetCLILocalAppHost, request: JetCLINotebookRequest, max_usize: U64) -[FS.Read]> [U8] Never! {
+    target :: jet_cli_notebook_split_target(request.target)
+    &host.reload_if_changed(max_usize)
+    if request.method == "GET" && target.route == "/health" {
+        return jet_cli_local_app_response_bytes("200 OK", "application/json; charset=utf-8", "{{\"ok\":true,\"schema\":{foundation_json_quote(JET_CLI_LOCAL_APP_RECEIPT_SCHEMA)},\"sessions\":{host.sessions.len()},\"generation\":{host.generation}}}")
+    }
+    if request.method == "GET" && target.route == "/api/receipt" -> return jet_cli_local_app_response_bytes("200 OK", "application/json; charset=utf-8", host.receipt_json())
+    if request.method != "POST" || !target.route.starts_with("/api/") -> return jet_cli_local_app_response_bytes("404 Not Found", "text/plain; charset=utf-8", "not found")
+    response :: jet_cli_local_app_api_message(&host, target.route, request.body, jet_cli_local_app_session_header(request))
+    if response == {
+        .Ok(body) -> jet_cli_local_app_response_bytes("200 OK", "application/json; charset=utf-8", body)
+        .Error(body) -> jet_cli_local_app_response_bytes("400 Bad Request", "application/json; charset=utf-8", body)
+    }
+}
+
+// CmdLocalApp1285–1298: reuse the canonical synchronous stream seam; its actual
+// TCP write-all implementation remains native-gated, never a Rust bridge.
+pub fn jet_cli_local_app_write_response<H: JetCLINotebookHTTPHost>(stream: &H, status: String, content_type: String, body: String) Err! -[Net]> {
+    &stream.write_all(jet_cli_local_app_response_bytes(status, content_type, body))
+}

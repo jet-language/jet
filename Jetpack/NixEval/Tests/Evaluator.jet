@@ -2,7 +2,7 @@
 // committed nix-compat differential fixtures (embedded verbatim below).
 
 // tests/fixtures/nix-compat/stage-a.json
-@NIXEVAL_TEST_STAGE_A_JSON :: ``{
+NIXEVAL_TEST_STAGE_A_JSON :: prep { ``{
   "schema": 1,
   "oracle": {
     "nix_version": "2.34.8",
@@ -148,10 +148,10 @@
     }
   }
 }
-``
+`` }
 
 // tests/fixtures/nix-compat/stage-a-authority.json
-@NIXEVAL_TEST_STAGE_A_AUTHORITY_JSON :: ``{
+NIXEVAL_TEST_STAGE_A_AUTHORITY_JSON :: prep { ``{
   "schema": 1,
   "oracle": {
     "nix_version": "2.34.8",
@@ -179,10 +179,10 @@
     }
   ]
 }
-``
+`` }
 
 // tests/fixtures/nix-compat/stage-a-derivation.json
-@NIXEVAL_TEST_STAGE_A_DERIVATION_JSON :: ``{
+NIXEVAL_TEST_STAGE_A_DERIVATION_JSON :: prep { ``{
   "schema": 1,
   "oracle": {
     "nix_version": "2.34.8",
@@ -269,10 +269,10 @@
     }
   ]
 }
-``
+`` }
 
 // tests/fixtures/nix-compat/breadth.json
-@NIXEVAL_TEST_BREADTH_JSON :: ``{
+NIXEVAL_TEST_BREADTH_JSON :: prep { ``{
   "schema": 1,
   "oracle": {
     "nix_version": "2.34.8",
@@ -470,7 +470,7 @@
     "latency_micros": 1000000
   }
 }
-``
+`` }
 
 fn nixeval_test_shell(source: String, system: String) -> NixEvalDevShell {
     nixeval_evaluate_devshell(source, system) ?? panic("devShell source must evaluate")
@@ -535,7 +535,7 @@ fn nixeval_test_map_authority(files: [String: String], label: String) -> NixEval
     }}
 }
 
-fn nixeval_test_string_map(document: NixEvalJson, index: Int) -> [String: String] {
+fn nixeval_test_string_map(document: NixEvalJSON, index: Int) -> [String: String] {
     values := [String: String]{}
     loop entry in nixeval_test_object(document, index) -> values[entry.key] = nixeval_test_string(document, entry.value)
     values
@@ -558,7 +558,7 @@ fn nixeval_test_breadth_variant(source: String, seed: Int) -> String {
     }
 }
 
-fn nixeval_test_seeds(document: NixEvalJson, root: [String: Int]) -> [Int] {
+fn nixeval_test_seeds(document: NixEvalJSON, root: [String: Int]) -> [Int] {
     seeds := [Int]{}
     loop seed in nixeval_test_array(document, nixeval_test_get(root, "fuzz_seeds")) -> &seeds.push(nixeval_test_integer(document, seed))
     seeds
@@ -611,7 +611,7 @@ fn nixeval_test_output_named(outputs: [NixEvalDerivationOutput], name: String) -
 }
 
 #Test("nixeval native evaluator rejects deeply nested syntax before stack overflow") {
-    depth :: @NIXEVAL_EXPRESSION_LIMIT * 2
+    depth :: NIXEVAL_EXPRESSION_LIMIT * 2
     opening :: nixeval_test_repeat("(", depth)
     closing :: nixeval_test_repeat(")", depth)
     source :: "{opening}true{closing}"
@@ -621,14 +621,14 @@ fn nixeval_test_output_named(outputs: [NixEvalDerivationOutput], name: String) -
 
 #Test("nixeval native evaluator applies memory budget before parser growth") {
     padding :: nixeval_test_repeat(" ", 800000)
-    identifiers :: nixeval_test_repeat("a ", @NIXEVAL_TOKEN_LIMIT)
+    identifiers :: nixeval_test_repeat("a ", NIXEVAL_TOKEN_LIMIT)
     source :: "{padding}{identifiers}"
     error :: nixeval_test_shell_error(source, "x86_64-linux")
     assert(nixeval_test_resource_limit(error).contains("memory budget"))
 }
 
 #Test("nixeval native evaluator applies json depth budget before recursive conversion") {
-    nesting :: @NIXEVAL_EXPRESSION_LIMIT + 1
+    nesting :: NIXEVAL_EXPRESSION_LIMIT + 1
     json :: nixeval_test_nested_arrays(nesting)
     source :: "{{ devShells.x86_64-linux.default = pkgs.mkShell {{ packages = builtins.fromJSON \"{json}\"; }}; }}"
     error :: nixeval_test_shell_error(source, "x86_64-linux")
@@ -713,7 +713,7 @@ fn nixeval_test_output_named(outputs: [NixEvalDerivationOutput], name: String) -
 }
 
 #Test("nixeval stage a authority fixture matches native projection") {
-    document :: nixeval_test_json(@NIXEVAL_TEST_STAGE_A_AUTHORITY_JSON)
+    document :: nixeval_test_json(NIXEVAL_TEST_STAGE_A_AUTHORITY_JSON)
     root :: nixeval_test_object(document, document.root)
     loop value_index in nixeval_test_array(document, nixeval_test_get(root, "values")) {
         value :: nixeval_test_object(document, value_index)
@@ -727,7 +727,7 @@ fn nixeval_test_output_named(outputs: [NixEvalDerivationOutput], name: String) -
 }
 
 #Test("nixeval stage a differential fixture matches native projection") {
-    document :: nixeval_test_json(@NIXEVAL_TEST_STAGE_A_JSON)
+    document :: nixeval_test_json(NIXEVAL_TEST_STAGE_A_JSON)
     root :: nixeval_test_object(document, document.root)
     values :: nixeval_test_array(document, nixeval_test_get(root, "values"))
     loop value_index in values {
@@ -763,8 +763,8 @@ fn nixeval_test_output_named(outputs: [NixEvalDerivationOutput], name: String) -
     nodes :: nixeval_test_object(document, nixeval_test_get(lock, "nodes"))
     nixpkgs :: nixeval_test_object(document, nixeval_test_get(nodes, "nixpkgs"))
     locked :: nixeval_test_object(document, nixeval_test_get(nixpkgs, "locked"))
-    assert_eq(nixeval_test_text(document, locked, "rev"), @NIXEVAL_NIXPKGS_REVISION)
-    assert_eq(nixeval_test_text(document, locked, "narHash"), @NIXEVAL_NIXPKGS_NAR_HASH)
+    assert_eq(nixeval_test_text(document, locked, "rev"), NIXEVAL_NIXPKGS_REVISION)
+    assert_eq(nixeval_test_text(document, locked, "narHash"), NIXEVAL_NIXPKGS_NAR_HASH)
 
     identities :: nixeval_test_object(document, nixeval_test_get(root, "output_identities"))
     manifest :: NixEvalOracleManifest.embedded() ?? panic("embedded manifest")
@@ -777,7 +777,7 @@ fn nixeval_test_output_named(outputs: [NixEvalDerivationOutput], name: String) -
 }
 
 #Test("nixeval breadth fixture matches native projection for every seed") {
-    document :: nixeval_test_json(@NIXEVAL_TEST_BREADTH_JSON)
+    document :: nixeval_test_json(NIXEVAL_TEST_BREADTH_JSON)
     root :: nixeval_test_object(document, document.root)
     seeds :: nixeval_test_seeds(document, root)
     loop value_index in nixeval_test_array(document, nixeval_test_get(root, "values")) {
@@ -816,17 +816,17 @@ fn nixeval_test_output_named(outputs: [NixEvalDerivationOutput], name: String) -
     assert_eq(nixeval_test_integer(document, nixeval_test_get(budgets, "expression_steps")), budget.expression_steps)
     assert_eq(nixeval_test_integer(document, nixeval_test_get(budgets, "imports")), budget.imports)
     assert_eq(nixeval_test_integer(document, nixeval_test_get(budgets, "string_bytes")), budget.string_bytes)
-    assert_eq(nixeval_test_integer(document, nixeval_test_get(budgets, "memory_bytes")), @NIXEVAL_MEMORY_BYTES)
+    assert_eq(nixeval_test_integer(document, nixeval_test_get(budgets, "memory_bytes")), NIXEVAL_MEMORY_BYTES)
     // The latency budget is a declared number, not a measurement: the
     // evaluator has no clock authority, and cost is pinned by the
     // deterministic budgets asserted above.
-    assert_eq(nixeval_test_integer(document, nixeval_test_get(budgets, "latency_micros")), @NIXEVAL_LATENCY_MICROS)
+    assert_eq(nixeval_test_integer(document, nixeval_test_get(budgets, "latency_micros")), NIXEVAL_LATENCY_MICROS)
 }
 
 #Test("nixeval breadth fixture pins lock and output identity corpus") {
-    breadth_document :: nixeval_test_json(@NIXEVAL_TEST_BREADTH_JSON)
+    breadth_document :: nixeval_test_json(NIXEVAL_TEST_BREADTH_JSON)
     breadth :: nixeval_test_object(breadth_document, breadth_document.root)
-    stage_a_document :: nixeval_test_json(@NIXEVAL_TEST_STAGE_A_JSON)
+    stage_a_document :: nixeval_test_json(NIXEVAL_TEST_STAGE_A_JSON)
     stage_a :: nixeval_test_object(stage_a_document, stage_a_document.root)
     assert(breadth_document.same(nixeval_test_get(breadth, "locks"), stage_a_document, nixeval_test_get(stage_a, "locks")))
     assert(breadth_document.same(nixeval_test_get(breadth, "output_identities"), stage_a_document, nixeval_test_get(stage_a, "output_identities")))
@@ -920,7 +920,7 @@ fn nixeval_test_output_named(outputs: [NixEvalDerivationOutput], name: String) -
 }
 
 #Test("nixeval native derivation fixture matches pure request") {
-    document :: nixeval_test_json(@NIXEVAL_TEST_STAGE_A_DERIVATION_JSON)
+    document :: nixeval_test_json(NIXEVAL_TEST_STAGE_A_DERIVATION_JSON)
     root :: nixeval_test_object(document, document.root)
     loop value_index in nixeval_test_array(document, nixeval_test_get(root, "values")) {
         value :: nixeval_test_object(document, value_index)
@@ -1024,7 +1024,7 @@ fn nixeval_test_output_named(outputs: [NixEvalDerivationOutput], name: String) -
 }
 
 #Test("nixeval breadth authority fixture matches pinned values and derivation inputs") {
-    document :: nixeval_test_json(@NIXEVAL_TEST_BREADTH_JSON)
+    document :: nixeval_test_json(NIXEVAL_TEST_BREADTH_JSON)
     root :: nixeval_test_object(document, document.root)
     seeds :: nixeval_test_seeds(document, root)
     loop case_index in nixeval_test_array(document, nixeval_test_get(root, "authority_values")) {
@@ -1068,7 +1068,7 @@ fn nixeval_test_output_named(outputs: [NixEvalDerivationOutput], name: String) -
 }
 
 #Test("nixeval breadth derivation fixture matches native multi output request") {
-    document :: nixeval_test_json(@NIXEVAL_TEST_BREADTH_JSON)
+    document :: nixeval_test_json(NIXEVAL_TEST_BREADTH_JSON)
     root :: nixeval_test_object(document, document.root)
     loop case_index in nixeval_test_array(document, nixeval_test_get(root, "derivations")) {
         value :: nixeval_test_object(document, case_index)

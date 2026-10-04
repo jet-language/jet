@@ -1,0 +1,310 @@
+// PORT-PENDING 0815 source-publish-api: Source/Publish/API.rs:1-306
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // ──────────────────────────────────────────────
+//RS // Public API surface extraction
+//RS // ──────────────────────────────────────────────
+//RS 
+//RS /// An item in a package's public API. Two `ApiItem`s are "compatible" when they
+//RS /// have the same `kind`, `name`, and `signature` (a textual canonical form).
+//RS /// We store the signature as a string because full AST comparison is brittle;
+//RS /// the canonical form gives false-negative safety (we might miss a breaking
+//RS /// change in a complex generic; that is acceptable for v1).
+//RS #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+//RS pub struct ApiItem {
+//RS     /// "fn", "struct", "enum", "trait", "const"
+//RS     pub kind: String,
+//RS     pub name: String,
+//RS     /// Textual canonical form of the signature (param/field types, return type).
+//RS     /// Does not include the body. Whitespace-normalised.
+//RS     pub signature: String,
+//RS }
+//RS 
+//RS /// Extract the public API surface from a parsed Jet source file.
+//RS /// Includes `pub` items at file scope and inside inline code modules.
+//RS pub fn extract_public_api(src: &str, file: &str) -> Vec<ApiItem> {
+//RS     let package = crate::Loader::package_facts_for_entry(std::path::Path::new(file))
+//RS         .ok()
+//RS         .flatten()
+//RS         .map(|manifest| manifest.name)
+//RS         .unwrap_or_else(|| "package".to_string());
+//RS     extract_public_api_for_package(src, file, &package)
+//RS }
+//RS 
+//RS /// Extract with the canonical package provenance already resolved by the
+//RS /// publish caller. API freeze and SemVer must receive this same identity.
+//RS pub fn extract_public_api_for_package(src: &str, file: &str, package: &str) -> Vec<ApiItem> {
+//RS     use crate::Loader;
+//RS 
+//RS     let mut bundle = match Loader::load_entry_with_overlay(file, None, true) {
+//RS         Ok(b) => b,
+//RS         Err(_) => return vec![],
+//RS     };
+//RS     let (_, facts) =
+//RS         crate::Sema::check_bundle_with_effect_facts(&mut bundle, crate::Sema::CompileMode::Check);
+//RS     let _ = src; // bundle already loaded
+//RS 
+//RS     let mut out = Vec::new();
+//RS     // Entry file items (the main module).
+//RS     let entry = &bundle.modules[bundle.entry];
+//RS     let mut dimensions = crate::Sema::ApiFreeze::ApiUnitDimensions::new();
+//RS     crate::Sema::ApiFreeze::collect_api_unit_dimensions(&entry.items, package, &mut dimensions);
+//RS     collect_public_api(
+//RS         &entry.items,
+//RS         bundle.entry,
+//RS         facts
+//RS             .name_ledger
+//RS             .module_alias(bundle.entry)
+//RS             .unwrap_or(&entry.alias),
+//RS         None,
+//RS         None,
+//RS         &facts.solved,
+//RS         &facts.name_ledger,
+//RS         &dimensions,
+//RS         &mut out,
+//RS     );
+//RS     out.sort();
+//RS     out
+//RS }
+//RS 
+//RS fn collect_public_api(
+//RS     items: &[crate::AST::Item],
+//RS     module_idx: usize,
+//RS     module_alias: &str,
+//RS     semantic_module: Option<&str>,
+//RS     display_module: Option<&str>,
+//RS     solved: &std::collections::HashMap<String, crate::Sema::EffectSet>,
+//RS     ledger: &crate::AST::NameLedger,
+//RS     dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions,
+//RS     out: &mut Vec<ApiItem>,
+//RS ) {
+//RS     for item in items {
+//RS         if let Some(api) = public_api_of_item(
+//RS             item,
+//RS             module_idx,
+//RS             module_alias,
+//RS             semantic_module,
+//RS             display_module,
+//RS             solved,
+//RS             ledger,
+//RS             dimensions,
+//RS         ) {
+//RS             out.push(api);
+//RS         }
+//RS         if let crate::AST::Item::Trait(trait_def) = item {
+//RS             let trait_name = semantic_module
+//RS                 .map(|module| crate::AST::member_name(module, &trait_def.name))
+//RS                 .unwrap_or_else(|| trait_def.name.clone());
+//RS             if ledger.public(module_idx, &trait_name) {
+//RS                 out.extend(
+//RS                     trait_def
+//RS                         .methods
+//RS                         .iter()
+//RS                         .filter(|method| supported_public_name(&method.name))
+//RS                         .map(|method| ApiItem {
+//RS                             kind: "fn".to_string(),
+//RS                             name: public_item_name(
+//RS                                 display_module,
+//RS                                 &format!("{}.{}", trait_def.name, method.name),
+//RS                             ),
+//RS                             signature: crate::Sema::ApiFreeze::qualify_api_signature(
+//RS                                 display_module,
+//RS                                 &crate::Sema::ApiFreeze::trait_method_signature(
+//RS                                     &trait_def.name,
+//RS                                     method,
+//RS                                     dimensions,
+//RS                                 ),
+//RS                             ),
+//RS                         }),
+//RS                 );
+//RS             }
+//RS         }
+//RS         if let crate::AST::Item::CodeModule(module) = item {
+//RS             if let Some(body) = &module.body {
+//RS                 let nested_semantic_module = semantic_module
+//RS                     .map(|parent| crate::AST::member_name(parent, &module.name))
+//RS                     .unwrap_or_else(|| module.name.clone());
+//RS                 let nested_display_module = display_module
+//RS                     .map(|parent| format!("{parent}.{}", module.name))
+//RS                     .unwrap_or_else(|| module.name.clone());
+//RS                 collect_public_api(
+//RS                     body,
+//RS                     module_idx,
+//RS                     module_alias,
+//RS                     Some(&nested_semantic_module),
+//RS                     Some(&nested_display_module),
+//RS                     solved,
+//RS                     ledger,
+//RS                     dimensions,
+//RS                     out,
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn public_item_name(code_module: Option<&str>, name: &str) -> String {
+//RS     code_module
+//RS         .map(|module| format!("{module}.{name}"))
+//RS         .unwrap_or_else(|| name.to_string())
+//RS }
+//RS 
+//RS /// Build an `ApiItem` for a single AST item, or `None` if it is private.
+//RS fn public_api_of_item(
+//RS     item: &crate::AST::Item,
+//RS     module_idx: usize,
+//RS     module_alias: &str,
+//RS     semantic_module: Option<&str>,
+//RS     display_module: Option<&str>,
+//RS     solved: &std::collections::HashMap<String, crate::Sema::EffectSet>,
+//RS     ledger: &crate::AST::NameLedger,
+//RS     dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions,
+//RS ) -> Option<ApiItem> {
+//RS     use crate::AST::Item;
+//RS     match item {
+//RS         Item::Func(f) if supported_public_name(&f.name) => {
+//RS             let ledger_name = semantic_module
+//RS                 .map(|module| crate::AST::member_name(module, &f.name))
+//RS                 .unwrap_or_else(|| f.name.clone());
+//RS             if !ledger.public(module_idx, &ledger_name) {
+//RS                 return None;
+//RS             }
+//RS             let signature = format_fn_sig(
+//RS                 f,
+//RS                 solved
+//RS                     .get(&format!(
+//RS                         "{module_alias}::{}",
+//RS                         semantic_module
+//RS                             .map(|module| crate::AST::member_name(module, &f.name))
+//RS                             .unwrap_or_else(|| f.name.clone())
+//RS                     ))
+//RS                     .or_else(|| solved.get(&f.name)),
+//RS                 dimensions,
+//RS             );
+//RS             Some(ApiItem {
+//RS                 kind: "fn".into(),
+//RS                 name: public_item_name(display_module, &f.name),
+//RS                 signature: crate::Sema::ApiFreeze::qualify_api_signature(
+//RS                     display_module,
+//RS                     &signature,
+//RS                 ),
+//RS             })
+//RS         }
+//RS         Item::Struct(s) if supported_public_name(&s.name) => {
+//RS             let ledger_name = semantic_module
+//RS                 .map(|module| crate::AST::member_name(module, &s.name))
+//RS                 .unwrap_or_else(|| s.name.clone());
+//RS             ledger.public(module_idx, &ledger_name).then(|| ApiItem {
+//RS                 kind: "struct".into(),
+//RS                 name: public_item_name(display_module, &s.name),
+//RS                 signature: format_struct_sig(s, dimensions),
+//RS             })
+//RS         }
+//RS         Item::Enum(e) if supported_public_name(&e.name) => {
+//RS             let ledger_name = semantic_module
+//RS                 .map(|module| crate::AST::member_name(module, &e.name))
+//RS                 .unwrap_or_else(|| e.name.clone());
+//RS             ledger.public(module_idx, &ledger_name).then(|| ApiItem {
+//RS                 kind: "enum".into(),
+//RS                 name: public_item_name(display_module, &e.name),
+//RS                 signature: format_enum_sig(e),
+//RS             })
+//RS         }
+//RS         Item::Trait(t) if supported_public_name(&t.name) => {
+//RS             let ledger_name = semantic_module
+//RS                 .map(|module| crate::AST::member_name(module, &t.name))
+//RS                 .unwrap_or_else(|| t.name.clone());
+//RS             ledger.public(module_idx, &ledger_name).then(|| ApiItem {
+//RS                 kind: "trait".into(),
+//RS                 name: public_item_name(display_module, &t.name),
+//RS                 signature: format_trait_sig(t, dimensions),
+//RS             })
+//RS         }
+//RS         // ConstDef does not carry is_pub in v1 — consts are accessible by name
+//RS         // and the pub distinction is enforced at use sites by sema. Skip from
+//RS         // public API for now; revisit when const visibility is added to the AST.
+//RS         Item::Const(_c) => None,
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn supported_public_name(name: &str) -> bool {
+//RS     crate::Syntax::classify_identifier(name) == crate::Syntax::IdentifierClass::Ordinary
+//RS }
+//RS 
+//RS fn format_fn_sig(
+//RS     f: &crate::AST::Func,
+//RS     inferred: Option<&crate::Sema::EffectSet>,
+//RS     dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions,
+//RS ) -> String {
+//RS     crate::Sema::ApiFreeze::canonical_fn_signature_with_effects(f, inferred, dimensions)
+//RS }
+//RS 
+//RS fn format_struct_sig(
+//RS     s: &crate::AST::StructDef,
+//RS     dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions,
+//RS ) -> String {
+//RS     let is_cli = s
+//RS         .derives
+//RS         .iter()
+//RS         .any(|(name, _)| name == crate::Syntax::MARKER_CLI);
+//RS     let mut positional_order = 0u16;
+//RS     let fields: Vec<String> = s
+//RS         .fields
+//RS         .iter()
+//RS         .filter(|f| supported_public_name(&f.name))
+//RS         .map(|f| {
+//RS             let ty = crate::Sema::ApiFreeze::canonical_api_type_name(&f.ty, dimensions);
+//RS             if !is_cli {
+//RS                 return format!("{}: {}", f.name, ty);
+//RS             }
+//RS             // D-CLI-POS1: publish API diff sees positional order and #[Flag]
+//RS             // opt-outs as part of the public command shape.
+//RS             let flag_only = f
+//RS                 .serde_markers
+//RS                 .iter()
+//RS                 .any(|m| m.name == crate::Syntax::MARKER_FLAG);
+//RS             // D-DEFAULT-SHAPE1=B: declaration defaults live on the field's
+//RS             // typed-value slot. The retired `#Default` marker is removed by
+//RS             // sema before API extraction, so freezing marker presence here
+//RS             // misses `port: Int{3000}` and incorrectly makes it positional.
+//RS             let has_default = f.default.is_some();
+//RS             let is_bool = matches!(f.ty, crate::AST::Type::Bool);
+//RS             let is_optional = matches!(f.ty, crate::AST::Type::Option(_));
+//RS             if !is_bool && !is_optional && !has_default && !flag_only {
+//RS                 let order = positional_order;
+//RS                 positional_order = positional_order.saturating_add(1);
+//RS                 format!("{}: {} [positional {order}]", f.name, ty)
+//RS             } else if flag_only {
+//RS                 format!("{}: {} [flag]", f.name, ty)
+//RS             } else {
+//RS                 format!("{}: {}", f.name, ty)
+//RS             }
+//RS         })
+//RS         .collect();
+//RS     format!("struct {} {{ {} }}", s.name, fields.join("; "))
+//RS }
+//RS 
+//RS fn format_enum_sig(e: &crate::AST::EnumDef) -> String {
+//RS     let variants: Vec<String> = e
+//RS         .variants
+//RS         .iter()
+//RS         .filter(|v| supported_public_name(&v.name))
+//RS         .map(|v| v.name.clone())
+//RS         .collect();
+//RS     format!("enum {} {{ {} }}", e.name, variants.join(", "))
+//RS }
+//RS 
+//RS fn format_trait_sig(
+//RS     t: &crate::AST::TraitDef,
+//RS     dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions,
+//RS ) -> String {
+//RS     let methods: Vec<String> = t
+//RS         .methods
+//RS         .iter()
+//RS         .filter(|method| supported_public_name(&method.name))
+//RS         .map(|method| crate::Sema::ApiFreeze::trait_method_signature(&t.name, method, dimensions))
+//RS         .collect();
+//RS     format!("trait {} {{ {} }}", t.name, methods.join(", "))
+//RS }
+// END-PORT-PENDING 0815 Source/Publish/API.rs:1-306
+

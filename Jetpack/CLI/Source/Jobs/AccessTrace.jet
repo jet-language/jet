@@ -15,8 +15,8 @@ fn cli_task_access_trace_path(cache_key: String) -[Env]> String Never! {
 }
 
 // Run `argv` in `env` under the file-access tracer, writing `trace_path`.
-fn cli_run_job_with_access_trace(env: &ShellEnv, argv: [String], project_dir: String, clean: Bool, silent: Bool, trace_path: String) -[FS, Env, Exec, Time, Time.Wait]> Int CliError! {
-    if !sys.is_linux() -> return Err(CliError.Other("strict cached job access tracing is currently supported only on Linux"))
+fn cli_run_job_with_access_trace(env: &ShellEnv, argv: [String], project_dir: String, clean: Bool, silent: Bool, trace_path: String) -[IO, FS, Env, Exec, Time, Time.Wait]> Int CLIError! {
+    if !sys.is_linux() -> return Err(CLIError.Other("strict cached job access tracing is currently supported only on Linux"))
     base_path :: if clean -> env_shell_clean_path() else -> sys.get("PATH") ?? ""
     composed_path :: env.composed_path(base_path)
     tracer :: cli_resolve_executable_path_in("strace", composed_path)
@@ -29,7 +29,7 @@ fn cli_run_job_with_access_trace(env: &ShellEnv, argv: [String], project_dir: St
         silent -> &env.run_command_in_silent(traced, Val(project_dir))
         else -> &env.run_command_in(traced, Val(project_dir))
     }
-    if !files.is_file(trace_path) -> return Err(CliError.Other("file-access tracer completed without producing an access log"))
+    if !files.is_file(trace_path) -> return Err(CLIError.Other("file-access tracer completed without producing an access log"))
     Ok(code)
 }
 
@@ -41,10 +41,10 @@ fn cli_path_starts_with(path: String, prefix: String) -> Bool Never! {
 }
 
 // Every undeclared project path in a finished trace, sorted and unique.
-fn cli_task_undeclared_accesses(project_dir: String, job_cwd: String, entry: String, metadata: JobMetadata, trace_path: String) -[FS, Env]> [String] CliError! {
-    trace :: files.read(trace_path) ?? return Err(CliError.Other("couldn't read file-access trace: {err}"))
-    project_root :: files.canonicalize(project_dir) ?? return Err(CliError.Other("couldn't resolve project root for access proof: {err}"))
-    entry_path :: files.canonicalize(entry) ?? return Err(CliError.Other("couldn't resolve job entry for access proof: {err}"))
+fn cli_task_undeclared_accesses(project_dir: String, job_cwd: String, entry: String, metadata: JobMetadata, trace_path: String) -[FS, Env]> [String] CLIError! {
+    trace :: files.read(trace_path) ?? return Err(CLIError.Other("couldn't read file-access trace: {err}"))
+    project_root :: files.canonicalize(project_dir) ?? return Err(CLIError.Other("couldn't resolve project root for access proof: {err}"))
+    entry_path :: files.canonicalize(entry) ?? return Err(CLIError.Other("couldn't resolve job entry for access proof: {err}"))
     declared := [String]{}
     loop input in metadata.inputs -> &declared.push(cli_job_path(project_dir, Val(input), "input", true))
     outputs := [String]{}

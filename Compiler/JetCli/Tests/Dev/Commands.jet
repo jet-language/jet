@@ -1,0 +1,492 @@
+use core.encoding.json as dev_commands_test_json
+
+// Command behavior from tests/cli_parts/{commands,budget,surface,bindings}.rs.
+// Goldens remain owned by tests/cli and Help, not copied into a second catalog.
+fn dev_commands_test_done(plan: JetCLIDevCompletionPlan) -> JetDriverVerbOutput Never! {
+    if plan == {
+        .Done(output) -> output
+        else -> panic("completion unexpectedly requires filesystem transport")
+    }
+}
+fn dev_commands_test_program(shell: String, path: String) -> JetCLICompletionProgram Never! {
+    if jet_cli_dev_completions([String]{shell, "--for", path}) == {
+        .OpenProgram(program) -> program
+        else -> panic("external completion did not request a static program open")
+    }
+}
+fn dev_commands_test_mode(json: Bool) -> JetCLIOutputMode Never! {
+    JetCLIOutputMode{json: json, color: false, quiet: false}
+}
+fn dev_commands_test_request(code: String?, json: Bool) -> JetCLIDevExplainRequest Never! {
+    JetCLIDevExplainRequest{code: code, fact_file: None, mode: dev_commands_test_mode(json), verbose: false, profile: "dev", setting_overrides: [String:String]{}}
+}
+fn dev_commands_test_explain(request: JetCLIDevExplainRequest) -> JetDriverVerbOutput Never! {
+    if jet_cli_dev_explain(request) == {
+        .Done(output) -> output
+        else -> panic("diagnostic explanation unexpectedly requires shared fact/syntax services")
+    }
+}
+
+// Rust completions_generate_for_every_shell and formerly_prose_only_flags_are_real_flag_rows.
+#Test("developer completions generate every supported shell through the canonical tables") {
+    shells :: [String]{"bash", "zsh", "fish", "powershell"}
+    expected :: [String]{jet_cli_completions_bash(), jet_cli_completions_zsh(), jet_cli_completions_fish(), jet_cli_completions_powershell()}
+    loop (index, shell) in shells {
+        output :: dev_commands_test_done(jet_cli_dev_completions([String]{shell}))
+        assert_eq(output.exit_code, 0)
+        assert_eq(output.stderr, "")
+        assert_eq(output.stdout, expected[index])
+        flags :: [String]{"structural", "out", "repo", "explicit-copies", "a11y", "fixtures"}
+        loop flag in flags {
+            spelling :: if shell == "fish" -> "-l {flag}" else -> "--{flag}"
+            assert(output.stdout.contains(spelling))
+        }
+        assert(output.stdout.contains("budget"))
+        assert(output.stdout.contains("env"))
+    }
+}
+
+#Test("developer completions validates its own raw vocabulary before any open") {
+    invalid :: [[String]]{
+        [String]{}, [String]{"sh"}, [String]{"BASH"},
+        [String]{"bash", "--for"}, [String]{"bash", "--for=app"},
+        [String]{"bash", "--wrong", "app"}, [String]{"bash", "--for", "app", "extra"},
+        [String]{"bash", "--json"}, [String]{"bash", "--", "app"}
+    }
+    loop args in invalid {
+        output :: dev_commands_test_done(jet_cli_dev_completions(args))
+        assert_eq(output.exit_code, 2)
+        assert_eq(output.stdout, "")
+        assert_eq(output.stderr, "Error [E2102]: Completions arguments don't match `jet self completions <bash|zsh|fish|powershell> [--for PROGRAM]`.\n Why: A completion script needs one supported shell and, optionally, one compiled Jet program.\n Fix: Run `jet self completions <bash|zsh|fish|powershell> [--for PROGRAM]`.\nMore: jet-lang.dev/e/E2102\n")
+    }
+}
+
+fn dev_commands_test_schema() -> CLICommandSchema Never! {
+    CLICommandSchema{
+        entry_type: "Options", description: None,
+        inputs: [TCLIInput]{TCLIInput{field: "count", flag: "count", short: Val("n"), env: None, help: "number", metavar: Val("COUNT"), shape: TCLIInputShape.Value{kind: TCLIValueKind.Int, optional: false, default: None}, positional: None, variadic: false}},
+        commands: [TCLICommand]{}, jobs: [CLIRecordJob]{}, standard: true, version: Val("1.2.3")
+    }
+}
+fn dev_commands_test_wasm() -> [U8] Never! {
+    wasm := [U8]{0, 97, 115, 109, 1, 0, 0, 0}
+    cli_schema_embed_wasm_record(&wasm, cli_schema_encode_record(dev_commands_test_schema())) ?? panic("valid Wasm fixture rejected")
+    wasm
+}
+
+// Rust static_artifact_contains_command_schema_and_external_completions_use_it;
+// no application code is executed even though the fixture is a real executable format.
+#Test("developer external completions consume verified executable metadata for all shells") {
+    shells :: [String]{"bash", "zsh", "fish", "powershell"}
+    loop shell in shells {
+        program :: dev_commands_test_program(shell, "build/typed")
+        wasm :: dev_commands_test_wasm()
+        if jet_cli_dev_completion_opened(program, JetCLICompletionProgramMetadata{regular_file: true, size: wasm.len()}) == {
+            .ReadOpened(checked, capacity, limit) -> {
+                assert_eq(capacity, wasm.len())
+                assert_eq(limit, 536870913)
+                output :: jet_cli_dev_completion_read(checked, wasm)
+                assert_eq(output.exit_code, 0)
+                assert_eq(output.stderr, "")
+                assert_eq(output.stdout, jet_cli_completions_for_program(shell, "typed", dev_commands_test_schema()) ?? panic("supported shell rejected"))
+                spelling :: if shell == "fish" -> "-l count" else -> "--count"
+                assert(output.stdout.contains(spelling))
+                assert(!output.stdout.contains("build/typed"))
+            }
+            else -> panic("regular bounded executable refused")
+        }
+    }
+}
+
+// Rust external_completion_metadata_errors_fail_closed (budget.rs:1633-1648).
+#Test("developer invalid executable metadata emits the exact E2103 refusal") {
+    output :: jet_cli_dev_completion_read(dev_commands_test_program("bash", "not-a-program"), "not an executable".bytes())
+    assert_eq(output.exit_code, 1)
+    assert_eq(output.stdout, "")
+    assert_eq(output.stderr, "Error [E2103]: Couldn't read command metadata from `not-a-program`.\n Why: the file is not an ELF, PE, Mach-O, or Wasm executable.\n Fix: Rebuild the program with this Jet toolchain, then try again.\nMore: jet-lang.dev/e/E2103\n")
+    plain :: jet_cli_dev_completion_read(dev_commands_test_program("bash", "plain"), [U8]{0, 97, 115, 109, 1, 0, 0, 0})
+    assert_eq(plain.exit_code, 1)
+    assert(plain.stderr.contains("the executable has no JetCommandSchema metadata"))
+    duplicate := dev_commands_test_wasm()
+    cli_schema_embed_wasm_record(&duplicate, cli_schema_encode_record(dev_commands_test_schema())) ?? panic("duplicate fixture rejected while embedding")
+    duplicate_output :: jet_cli_dev_completion_read(dev_commands_test_program("bash", "duplicate"), duplicate)
+    assert_eq(duplicate_output.exit_code, 1)
+    assert(duplicate_output.stderr.contains("more than one JetCommandSchema record"))
+}
+
+// Rust external_completion_rejects_hostile_files_and_names (budget.rs:1650-1708).
+#Test("developer external completion rejects hostile names before opening") {
+    shells :: [String]{"bash", "zsh", "fish", "powershell"}
+    loop shell in shells {
+        output :: dev_commands_test_done(jet_cli_dev_completions([String]{shell, "--for", "safe\nINJECT_COMMAND\nnext"}))
+        assert_eq(output.exit_code, 1)
+        assert_eq(output.stdout, "")
+        assert(output.stderr.contains("contains a control character"))
+        assert(output.stderr.contains("safe\\nINJECT_COMMAND\\nnext"))
+        assert(!output.stderr.contains("\nINJECT_COMMAND\n"))
+    }
+    empty :: dev_commands_test_done(jet_cli_dev_completions([String]{"bash", "--for", "/"}))
+    assert_eq(empty.exit_code, 1)
+    assert(empty.stderr.contains("no usable command name"))
+}
+
+#Test("developer external completion checks opened file kind before size and before reading") {
+    program :: dev_commands_test_program("bash", "artifact")
+    special :: dev_commands_test_done(jet_cli_dev_completion_opened(program, JetCLICompletionProgramMetadata{regular_file: false, size: 536870913}))
+    assert_eq(special.exit_code, 1)
+    assert(special.stderr.contains("the program is not a regular file"))
+    assert(!special.stderr.contains("larger than"))
+    large :: dev_commands_test_done(jet_cli_dev_completion_opened(program, JetCLICompletionProgramMetadata{regular_file: true, size: 536870913}))
+    assert_eq(large.exit_code, 1)
+    assert(large.stderr.contains("larger than the 512 MiB"))
+    if jet_cli_dev_completion_opened(program, JetCLICompletionProgramMetadata{regular_file: true, size: 536870912}) == {
+        .ReadOpened(_, capacity, limit) -> {
+            assert_eq(capacity, 536870912)
+            assert_eq(limit, 536870913)
+        }
+        else -> panic("exact size limit refused")
+    }
+    assert(jet_cli_dev_completion_read_bound("artifact", 536870912) == None)
+    growth :: jet_cli_dev_completion_read_bound("artifact", 536870913) ?? panic("grown artifact accepted")
+    assert_eq(growth.exit_code, 1)
+    assert_eq(growth.stdout, "")
+    assert(growth.stderr.contains("grew beyond the 512 MiB"))
+}
+
+#Test("developer completion IO failures retain the failing handle stage") {
+    stages :: [JetCLICompletionIOStage]{JetCLICompletionIOStage.Open, JetCLICompletionIOStage.Inspect, JetCLICompletionIOStage.Read}
+    reasons :: [String]{"the program could not be opened (denied)", "the opened program could not be inspected (denied)", "the opened program could not be read (denied)"}
+    loop (index, stage) in stages {
+        output :: jet_cli_dev_completion_io_failure("build/app", stage, "denied")
+        assert_eq(output.exit_code, 1)
+        assert_eq(output.stdout, "")
+        assert(output.stderr.contains(reasons[index]))
+    }
+}
+
+#Test("developer completion metadata diagnostics use Rust escape_default not JSON or Debug") {
+    nul :: String.from_bytes([U8]{0}) ?? panic("NUL is not UTF-8")
+    del :: String.from_bytes([U8]{127}) ?? panic("DEL is not UTF-8")
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR is not UTF-8")
+    output :: jet_cli_dev_completion_metadata_error("é中😀{nul}{del}\t{cr}\n\"'\\", "bad")
+    assert(output.stderr.starts_with("Error [E2103]: Couldn't read command metadata from `\\u{{e9}}\\u{{4e2d}}\\u{{1f600}}\\u{{0}}\\u{{7f}}\\t\\r\\n\\\"\\'\\\\`.\n"))
+}
+
+// Rust man_page_golden and budget_surface_is_generated_into_help_completions_and_man.
+#Test("developer manual uses the canonical generator and output profile") {
+    facts := jet_cli_output_facts_default()
+    profile :: jet_cli_output_profile_select(facts) ?? panic("default profile rejected")
+    output :: jet_cli_dev_man("VERSION", profile)
+    assert_eq(output.exit_code, 0)
+    assert_eq(output.stderr, "")
+    assert_eq(output.stdout, jet_cli_man_page("VERSION"))
+    assert(output.stdout.starts_with(".TH JET 1 \"\" \"jet VERSION\" \"Jet Manual\"\n"))
+    flags :: [String]{"--structural", "--out", "--repo", "--explicit-copies"}
+    loop flag in flags -> assert(output.stdout.contains(flag))
+    assert(output.stdout.contains("budget"))
+    facts.json = true
+    machine :: jet_cli_dev_man("VERSION", jet_cli_output_profile_select(facts) ?? panic("machine profile rejected"))
+    assert_eq(machine.exit_code, 0)
+    assert_eq(machine.stdout, "")
+    assert_eq(machine.stderr, "")
+}
+
+#Test("developer explanation missing arguments is usage not an unknown diagnostic") {
+    output :: dev_commands_test_explain(dev_commands_test_request(None, false))
+    assert_eq(output.exit_code, 2)
+    assert_eq(output.stdout, "")
+    assert_eq(output.stderr, "usage: jet explain <CODE|FACT> [file]\n       jet explain marker <file>:<line> <policy-key>\n")
+}
+
+// Rust every_registered_code_has_an_explain_entry and question_mark_code_query_matches_explain_verbatim.
+#Test("developer explanation uses the canonical essay for every registered diagnostic") {
+    loop row in DIAGNOSTIC_ROWS {
+        output :: dev_commands_test_explain(dev_commands_test_request(Val(row.code), false))
+        explanation :: jet_cli_explain_lookup_code(row.code) ?? panic("registered diagnostic has no explanation")
+        assert_eq(output.exit_code, 0)
+        assert_eq(output.stderr, "")
+        assert_eq(output.stdout, jet_cli_explain_render(explanation, false))
+    }
+    lower :: dev_commands_test_explain(dev_commands_test_request(Val(" e0102 "), false))
+    upper :: dev_commands_test_explain(dev_commands_test_request(Val("E0102"), false))
+    assert_eq(lower.stdout, upper.stdout)
+    verbose := dev_commands_test_request(Val("E0102"), false)
+    verbose.verbose = true
+    assert_eq(dev_commands_test_explain(verbose).stdout, upper.stdout)
+}
+
+// Rust exit_code_explain_unknown (surface.rs:970-978).
+#Test("developer unknown diagnostic retains E2104 and the user-error exit") {
+    output :: dev_commands_test_explain(dev_commands_test_request(Val("E9999"), false))
+    assert_eq(output.exit_code, 1)
+    assert_eq(output.stdout, "")
+    assert_eq(output.stderr, jet_cli_report("E2104", "no diagnostic code `E9999` exists", jet_cli_why("E2104"), "run a command that reports an error to see its code, e.g. `jet check file.jet`", false))
+}
+
+#Test("developer explanation JSON is the shared status envelope with null optional fields") {
+    explanation :: DiagnosticExplanation{code: "E0000", stage: "parse", meaning: "a meaning", what: None, why: None, fix: None, example: None, retired: false}
+    output :: jet_cli_dev_print_explanation(explanation, dev_commands_test_mode(true))
+    assert_eq(output.exit_code, 0)
+    assert_eq(output.stderr, "")
+    // #4306 (G1): Core/Dyn JSON sorts keys instead of preserving Rust field order.
+    // Keep the exact byte oracle; no CLI-local encoder or sorted-key repin.
+    assert_eq(output.stdout, "{{\"schema\":\"jet.status/v1\",\"action\":\"explain\",\"ok\":true,\"reports\":[],\"code\":\"E0000\",\"stage\":\"parse\",\"what\":\"a meaning\",\"why\":null,\"fix\":null,\"example\":null}}\n")
+    quiet := dev_commands_test_request(Val("E0102"), true)
+    quiet.mode.quiet = true
+    assert_eq(dev_commands_test_explain(quiet).stdout, dev_commands_test_explain(dev_commands_test_request(Val("E0102"), true)).stdout)
+}
+
+// Existing syntax/fact/marker goldens stay blocked on missing shared Help services;
+// preserve their request rather than silently rendering a diagnostic-only fallback.
+#Test("developer explanation service request preserves source profile settings and verbose") {
+    request := dev_commands_test_request(Val("$build.settings.channel"), true)
+    request.fact_file = Val("app/run.jet")
+    request.profile = "release"
+    request.setting_overrides["channel"] = "preview"
+    request.verbose = true
+    if jet_cli_dev_explain(request) == {
+        .Resolve(required) -> {
+            assert_eq(required.code, Val("$build.settings.channel"))
+            assert_eq(required.fact_file, Val("app/run.jet"))
+            assert_eq(required.profile, "release")
+            assert_eq(required.setting_overrides["channel"], "preview")
+            assert(required.mode.json)
+            assert(required.verbose)
+        }
+        else -> panic("build fact falsely completed without its shared resolver")
+    }
+    syntax :: [String]{"@", "::", "#Live", "->", "loop", "^", "??", "@@"}
+    loop code in syntax {
+        if jet_cli_dev_explain(dev_commands_test_request(Val(code), false)) == {
+            .Resolve(_) -> {}
+            else -> panic("syntax query falsely completed without dictionary services")
+        }
+    }
+}
+
+// Deterministic native transport fixture: a single handle, never path-based
+// metadata or reopening. These tests exercise the real runner and codecs.
+struct DevCommandsTestHost {
+    pub calls: [String]
+    pub active: Bool
+    pub regular: Bool
+    pub size: Int
+    pub bytes: [U8]
+    pub failure: String
+}
+fn dev_commands_test_host(bytes: [U8]) -> DevCommandsTestHost Never! {
+    DevCommandsTestHost{calls: [String]{}, active: false, regular: true, size: bytes.len(), bytes: bytes, failure: ""}
+}
+impl DevCommandsTestHost.JetCLICompletionProgramHost {
+    fn open_nonblocking(&self, path: String) -[FS.Read]> JetCLICompletionProgramHandle JetCLICompletionProgramIOError! {
+        &self.calls.push("open_nonblocking:{path}")
+        if self.failure == "open" -> return Err(JetCLICompletionProgramIOError{message: "denied"})
+        assert(!self.active)
+        self.active = true
+        Ok(JetCLICompletionProgramHandle{identity: 37})
+    }
+    fn fstat(&self, handle: JetCLICompletionProgramHandle) -[FS.Read]> JetCLICompletionProgramMetadata JetCLICompletionProgramIOError! {
+        assert_eq(handle.identity, 37)
+        assert(self.active)
+        &self.calls.push("fstat:37")
+        if self.failure == "inspect" -> return Err(JetCLICompletionProgramIOError{message: "denied"})
+        Ok(JetCLICompletionProgramMetadata{regular_file: self.regular, size: self.size})
+    }
+    fn read_bounded(&self, handle: JetCLICompletionProgramHandle, capacity: Int, limit: Int) -[FS.Read]> [U8] JetCLICompletionProgramIOError! {
+        assert_eq(handle.identity, 37)
+        assert(self.active)
+        &self.calls.push("read_bounded:37:{capacity}:{limit}")
+        if self.failure == "read" -> return Err(JetCLICompletionProgramIOError{message: "denied"})
+        assert(self.bytes.len() <= limit)
+        Ok(~self.bytes)
+    }
+    fn close(&self, handle: JetCLICompletionProgramHandle) Never! -[FS.Read]> {
+        assert_eq(handle.identity, 37)
+        assert(self.active)
+        &self.calls.push("close:37")
+        self.active = false
+    }
+}
+fn dev_commands_test_run(host: &DevCommandsTestHost, args: [String]) -[FS.Read]> JetDriverVerbOutput Never! {
+    jet_cli_run_completions(&host, args)
+}
+
+#Test("developer completion runner performs no transport on builtin or rejected argv") {
+    host := dev_commands_test_host([U8]{})
+    output :: dev_commands_test_run(&host, [String]{"bash"})
+    assert_eq(output.exit_code, 0)
+    assert_eq(output.stdout, jet_cli_completions_bash())
+    invalid :: dev_commands_test_run(&host, [String]{"sh"})
+    assert_eq(invalid.exit_code, 2)
+    hostile :: dev_commands_test_run(&host, [String]{"bash", "--for", "unsafe\nname"})
+    assert_eq(hostile.exit_code, 1)
+    assert_eq(host.calls.len(), 0)
+    assert(!host.active)
+}
+
+#Test("developer completion runner keeps one handle through stat bounded read and close") {
+    host := dev_commands_test_host(dev_commands_test_wasm())
+    output :: dev_commands_test_run(&host, [String]{"zsh", "--for", "build/app"})
+    assert_eq(output.exit_code, 0)
+    assert_eq(output.stderr, "")
+    assert_eq(output.stdout, jet_cli_completions_for_program("zsh", "app", dev_commands_test_schema()) ?? panic("zsh rejected"))
+    assert_eq(host.calls, [String]{"open_nonblocking:build/app", "fstat:37", "read_bounded:37:{host.size}:536870913", "close:37"})
+    assert(!host.active)
+}
+
+#Test("developer completion runner closes once on every native operation failure") {
+    stages :: [String]{"open", "inspect", "read"}
+    expected :: [[String]]{
+        [String]{"open_nonblocking:app"},
+        [String]{"open_nonblocking:app", "fstat:37", "close:37"},
+        [String]{"open_nonblocking:app", "fstat:37", "read_bounded:37:0:536870913", "close:37"}
+    }
+    loop (index, stage) in stages {
+        host := dev_commands_test_host([U8]{})
+        host.failure = stage
+        output :: dev_commands_test_run(&host, [String]{"bash", "--for", "app"})
+        assert_eq(output.exit_code, 1)
+        assert_eq(output.stdout, "")
+        assert(output.stderr.contains("(denied)"))
+        assert_eq(host.calls, expected[index])
+        assert(!host.active)
+    }
+}
+
+#Test("developer completion runner closes before rejecting kind size or decoded metadata") {
+    special := dev_commands_test_host([U8]{})
+    special.regular = false
+    special_output :: dev_commands_test_run(&special, [String]{"bash", "--for", "fifo"})
+    assert(special_output.stderr.contains("not a regular file"))
+    assert_eq(special.calls, [String]{"open_nonblocking:fifo", "fstat:37", "close:37"})
+    assert(!special.active)
+    large := dev_commands_test_host([U8]{})
+    large.size = 536870913
+    large_output :: dev_commands_test_run(&large, [String]{"bash", "--for", "large"})
+    assert(large_output.stderr.contains("larger than"))
+    assert_eq(large.calls, [String]{"open_nonblocking:large", "fstat:37", "close:37"})
+    assert(!large.active)
+    malformed := dev_commands_test_host("bad".bytes())
+    malformed_output :: dev_commands_test_run(&malformed, [String]{"bash", "--for", "bad"})
+    assert_eq(malformed_output.exit_code, 1)
+    assert(malformed_output.stderr.contains("not an ELF"))
+    assert_eq(malformed.calls, [String]{"open_nonblocking:bad", "fstat:37", "read_bounded:37:3:536870913", "close:37"})
+    assert(!malformed.active)
+}
+
+// Owner-approved CLI07/11B reference drift: these names have no row in either
+// current Rust FLAGS or JET_CLI_FLAGS. Preserve the old behavioral expectation
+// separately; do not invent flags in order to make an obsolete oracle green.
+#Test("developer original formerly prose flag assertions retain the reference drift") {
+    obsolete :: [String]{"optional-history", "overrides", "max-frames"}
+    scripts :: [String]{jet_cli_completions_bash(), jet_cli_completions_zsh(), jet_cli_completions_fish(), jet_cli_completions_powershell()}
+    loop flag in obsolete {
+        assert(jet_cli_man_page("VERSION").contains("--{flag}"))
+        loop (index, script) in scripts {
+            spelling :: if index == 2 -> "-l {flag}" else -> "--{flag}"
+            assert(script.contains(spelling))
+        }
+    }
+}
+
+fn dev_commands_test_json_text(value: DataTree) -> String Never! {
+    if value == {
+        .Text(text) -> text
+        else -> panic("expected a JSON text field")
+    }
+}
+
+#Test("developer explanation JSON preserves typed fields independently of object ordering") {
+    explanation :: DiagnosticExplanation{code: "E0000", stage: "parse", meaning: "a meaning", what: None, why: Val("quotes \" and newline\n"), fix: None, example: None, retired: false}
+    output :: jet_cli_dev_print_explanation(explanation, dev_commands_test_mode(true))
+    tree :: dev_commands_test_json.parse(output.stdout) ?? panic("explanation status is not valid JSON")
+    if tree == {
+        .Object(fields) -> {
+            assert_eq(dev_commands_test_json_text(fields["schema"]), "jet.status/v1")
+            assert_eq(dev_commands_test_json_text(fields["action"]), "explain")
+            if fields["ok"] == {
+                .Bool(ok) -> assert(ok)
+                else -> panic("status ok is not a boolean")
+            }
+            if fields["reports"] == {
+                .Array(reports) -> assert_eq(reports.len(), 0)
+                else -> panic("reports is not an array")
+            }
+            assert_eq(dev_commands_test_json_text(fields["code"]), "E0000")
+            assert_eq(dev_commands_test_json_text(fields["stage"]), "parse")
+            assert_eq(dev_commands_test_json_text(fields["what"]), "a meaning")
+            assert_eq(dev_commands_test_json_text(fields["why"]), "quotes \" and newline\n")
+            assert(fields["fix"] == .Null)
+            assert(fields["example"] == .Null)
+        }
+        else -> panic("explanation status is not an object")
+    }
+}
+
+struct DevCommandsTestExplainHost {
+    pub calls: Int
+    pub received: JetCLIDevExplainRequest?
+    pub output: JetDriverVerbOutput
+}
+impl DevCommandsTestExplainHost.JetCLIDevExplainHost {
+    fn resolve(&self, request: JetCLIDevExplainRequest) -[FS, Env]> JetDriverVerbOutput Never! {
+        self.calls += 1
+        self.received = Val(~request)
+        ~self.output
+    }
+}
+#Test("developer explanation runner dispatches exactly once with the complete request") {
+    host := DevCommandsTestExplainHost{calls: 0, received: None, output: JetDriverVerbOutput{stdout: "owned service result\n", stderr: "", exit_code: 0}}
+    diagnostic :: jet_cli_run_explain(&host, dev_commands_test_request(Val("E0102"), false))
+    assert_eq(diagnostic.exit_code, 0)
+    assert_eq(host.calls, 0)
+    missing :: jet_cli_run_explain(&host, dev_commands_test_request(None, false))
+    assert_eq(missing.exit_code, 2)
+    assert_eq(host.calls, 0)
+    request := dev_commands_test_request(Val("$build.settings.channel"), true)
+    request.fact_file = Val("app/run.jet")
+    request.profile = "release"
+    request.verbose = true
+    request.setting_overrides["channel"] = "preview"
+    result :: jet_cli_run_explain(&host, request)
+    assert_eq(result.stdout, "owned service result\n")
+    assert_eq(host.calls, 1)
+    received :: host.received ?? panic("service request lost")
+    assert_eq(received.code, request.code)
+    assert_eq(received.fact_file, request.fact_file)
+    assert_eq(received.profile, "release")
+    assert_eq(received.setting_overrides["channel"], "preview")
+    assert(received.verbose)
+    assert(received.mode.json)
+}
+
+#Test("developer policy essay projects the canonical effective chain and rejects conflicts") {
+    key :: PolicyKey.Copies
+    package_decl :: PolicyDeclaration{key: key, value: PolicyValue.Explicit, scope: PolicyScope.Package, span: Span{start: 1, end: 2}, target: None, source: "package.jet"}
+    module_decl :: PolicyDeclaration{key: key, value: PolicyValue.Explicit, scope: PolicyScope.Module, span: Span{start: 3, end: 4}, target: None, source: "app.jet"}
+    explanation :: jet_cli_explain_lookup_policy(key, [PolicyDeclaration]{module_decl, package_decl}) ?? panic("valid policy chain rejected")
+    assert_eq(explanation.code, "copies")
+    assert_eq(explanation.stage, "policy")
+    assert_eq(explanation.meaning, "effective scoped policy `copies`")
+    what :: explanation.what ?? panic("policy chain omitted")
+    assert(what.contains("package.jet:1..2"))
+    assert(what.contains("app.jet:3..4"))
+    assert(!explanation.retired)
+    assert(jet_cli_explain_lookup_policy(key, [PolicyDeclaration]{}) == None)
+    assert(jet_cli_explain_lookup_policy(key, [PolicyDeclaration]{package_decl, package_decl}) == None)
+}
+
+#Test("developer fact essay projects the canonical writer law rather than resolving it twice") {
+    key :: fact_key_new("Build.Settings.channel")
+    outer :: fact_contribution_new(key.name, FactValue.Text("stable"), SourceScope.Package, ContributionLayer.Declaration, "package.jet")
+    inner :: fact_contribution_new(key.name, FactValue.Text("preview"), SourceScope.Module, ContributionLayer.CommandLine, "<command line>")
+    explanation :: jet_cli_explain_lookup_fact(key, [FactContribution]{inner, outer}) ?? panic("valid fact chain rejected")
+    assert_eq(explanation.code, key.name)
+    assert_eq(explanation.stage, "build fact")
+    what :: explanation.what ?? panic("fact writer chain omitted")
+    assert(what.contains("[effective] command line / module"))
+    assert(what.contains("[shadowed] declaration / package"))
+    assert(jet_cli_explain_lookup_fact(key, [FactContribution]{}) == None)
+    disagreeing :: fact_contribution_new(key.name, FactValue.Text("different"), SourceScope.Module, ContributionLayer.CommandLine, "<other command line>")
+    assert(jet_cli_explain_lookup_fact(key, [FactContribution]{inner, disagreeing}) == None)
+}

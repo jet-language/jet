@@ -1,0 +1,1191 @@
+// PORT-PENDING 1099 tests-jetpack-studio-module-group: tests/jetpack_studio.rs:1-733
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! JetOS Studio tests (Tower card #367 slice 6 split).
+//RS //!
+//RS //! Covers the Studio headless/serve/transaction surface over a realized
+//RS //! JetOS generation. Split out of the former `tests/jetpack.rs`.
+//RS 
+//RS use std::fs;
+//RS use jet_foundation::DataTree::DataTree;
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "support/jetpack_fixtures.rs"]
+//RS mod jetpack_fixtures;
+//RS use jetpack_fixtures::*;
+//RS 
+//RS #[test]
+//RS fn jetos_studio_headless_opens_installed_app_projection() {
+//RS     let root = Scratch::new("studio-root");
+//RS     let switch = jet()
+//RS         .args([
+//RS             "os",
+//RS             "switch",
+//RS             "halcyon",
+//RS             "--name",
+//RS             "studio-app",
+//RS             "--no-color",
+//RS             "--offline",
+//RS         ])
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         switch.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&switch.stderr)
+//RS     );
+//RS     let generation = root.path.join("systems/generations/studio-app");
+//RS     let out = jetos()
+//RS         .args(["studio", "--headless", "--no-color"])
+//RS         .env("JETOS_STUDIO_ROOT", &generation)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(
+//RS         stdout.contains("studio/index.html"),
+//RS         "stdout should print app path: {stdout}"
+//RS     );
+//RS 
+//RS     let open_bin = root.path.join("open-bin");
+//RS     fs::create_dir_all(&open_bin).unwrap();
+//RS     write_executable(&open_bin.join("xdg-open"), "#!/bin/sh\nexit 0\n");
+//RS     let mut child = jetos()
+//RS         .args(["studio", "--no-color"])
+//RS         .env("JETOS_STUDIO_ROOT", &generation)
+//RS         .env("PATH", &open_bin)
+//RS         .stdout(std::process::Stdio::piped())
+//RS         .spawn()
+//RS         .unwrap();
+//RS     let stdout = child.stdout.take().unwrap();
+//RS     let mut reader = std::io::BufReader::new(stdout);
+//RS     let mut line = String::new();
+//RS     {
+//RS         use std::io::BufRead;
+//RS         reader.read_line(&mut line).unwrap();
+//RS     }
+//RS     let addr = studio_addr(&line);
+//RS     let page = studio_http(&addr, "GET", "/studio/", "");
+//RS     assert!(
+//RS         page.contains("data-page-kind=\"dashboard\""),
+//RS         "page: {page}"
+//RS     );
+//RS     let _ = child.kill();
+//RS     let _ = child.wait();
+//RS }
+//RS 
+//RS #[test]
+//RS fn jetos_studio_serve_exposes_projection_json() {
+//RS     let root = Scratch::new("studio-serve-root");
+//RS     let switch = jet()
+//RS         .args([
+//RS             "os",
+//RS             "switch",
+//RS             "halcyon",
+//RS             "--name",
+//RS             "studio-serve",
+//RS             "--no-color",
+//RS             "--offline",
+//RS         ])
+//RS         .current_dir(config_example_dir())
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         switch.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&switch.stderr)
+//RS     );
+//RS     let generation = root.path.join("systems/generations/studio-serve");
+//RS     let mut child = jetos()
+//RS         .args(["studio", "--serve", "127.0.0.1:0", "--no-color"])
+//RS         .env("JETOS_STUDIO_ROOT", &generation)
+//RS         .stdout(std::process::Stdio::piped())
+//RS         .spawn()
+//RS         .unwrap();
+//RS     let stdout = child.stdout.take().unwrap();
+//RS     let mut reader = std::io::BufReader::new(stdout);
+//RS     let mut line = String::new();
+//RS     {
+//RS         use std::io::BufRead;
+//RS         reader.read_line(&mut line).unwrap();
+//RS     }
+//RS     let addr = studio_addr(&line);
+//RS     let connect_addr = addr.split_once('?').map(|(host, _)| host).unwrap_or(&addr);
+//RS     let response = studio_raw(
+//RS         &addr,
+//RS         &format!(
+//RS             "GET /studio/data.json HTTP/1.1\r\nHost: {connect_addr}\r\nConnection: close\r\n\r\n"
+//RS         ),
+//RS     );
+//RS     assert!(
+//RS         response.contains("401 Unauthorized"),
+//RS         "response: {response}"
+//RS     );
+//RS     let source = studio_raw(
+//RS         &addr,
+//RS         &format!(
+//RS             "GET /studio/source HTTP/1.1\r\nHost: {connect_addr}\r\nConnection: close\r\n\r\n"
+//RS         ),
+//RS     );
+//RS     assert!(
+//RS         source.contains("401 Unauthorized"),
+//RS         "source disclosure response: {source}"
+//RS     );
+//RS     let write = studio_raw(
+//RS         &addr,
+//RS         &format!(
+//RS             "POST /studio/transaction HTTP/1.1\r\nHost: {connect_addr}\r\nOrigin: http://{connect_addr}\r\nContent-Type: application/json\r\nContent-Length: 16\r\nConnection: close\r\n\r\n{{\"op\":\"session\"}}"
+//RS         ),
+//RS     );
+//RS     assert!(
+//RS         write.contains("401 Unauthorized"),
+//RS         "write response: {write}"
+//RS     );
+//RS     let token = addr
+//RS         .split_once("?session=")
+//RS         .map(|(_, token)| token)
+//RS         .expect("Studio service URL must carry its session token");
+//RS     let csrf = studio_raw(
+//RS         &addr,
+//RS         &format!(
+//RS             "POST /studio/run HTTP/1.1\r\nHost: {connect_addr}\r\nOrigin: http://evil.test\r\nCookie: jetos_studio={token}\r\nContent-Type: application/json\r\nContent-Length: 16\r\nConnection: close\r\n\r\n{{\"action\":\"run\"}}"
+//RS         ),
+//RS     );
+//RS     assert!(csrf.contains("401 Unauthorized"), "CSRF response: {csrf}");
+//RS     let response = studio_http(&addr, "GET", "/studio/data.json", "");
+//RS     assert!(response.contains("200 OK"), "response: {response}");
+//RS     assert!(
+//RS         response.contains("jetos-studio-projection"),
+//RS         "response: {response}"
+//RS     );
+//RS     assert!(response.contains("openssh"), "response: {response}");
+//RS     let page = studio_http(&addr, "GET", "/studio/", "");
+//RS     assert!(page.contains("200 OK"), "page: {page}");
+//RS     assert!(
+//RS         page.contains("Set-Cookie: jetos_studio="),
+//RS         "Studio bootstrap must establish an HttpOnly session cookie: {page}"
+//RS     );
+//RS     let cookie_data = studio_raw(
+//RS         &addr,
+//RS         &format!(
+//RS             "GET /studio/data.json HTTP/1.1\r\nHost: {connect_addr}\r\nCookie: jetos_studio={token}\r\nSec-Fetch-Site: same-origin\r\nConnection: close\r\n\r\n"
+//RS         ),
+//RS     );
+//RS     assert!(
+//RS         cookie_data.contains("200 OK"),
+//RS         "same-origin Studio cookie request failed: {cookie_data}"
+//RS     );
+//RS     assert!(
+//RS         page.contains("data-page-kind=\"dashboard\"")
+//RS             && page.contains("data-page-registry=\"studio-pages\"")
+//RS             && page.contains("data-page-kind=\"changeset\""),
+//RS         "served Studio must be dashboard/sidebar/Changeset app: {page}"
+//RS     );
+//RS     assert!(
+//RS         page.contains("data-changeset-action=\"apply\"")
+//RS             && page.contains("data-changeset-action=\"discard\""),
+//RS         "served Studio must expose one Changeset apply path: {page}"
+//RS     );
+//RS     let _ = child.kill();
+//RS     let _ = child.wait();
+//RS }
+//RS 
+//RS #[test]
+//RS fn jetos_studio_control_plane_rejects_unauthenticated_and_cross_origin_actions() {
+//RS     let root = Scratch::new("studio-auth-root");
+//RS     fs::create_dir_all(root.path.join("studio")).unwrap();
+//RS     fs::write(
+//RS         root.path.join("studio/index.html"),
+//RS         "<!doctype html><title>Studio</title>",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(root.path.join("studio/app.json"), "{}").unwrap();
+//RS     fs::write(root.path.join("studio/data.json"), "{}").unwrap();
+//RS 
+//RS     let project = Scratch::new("studio-auth-project");
+//RS     copy_dir_recursive(&config_example_dir(), &project.path);
+//RS     let mut child = jetos()
+//RS         .args([
+//RS             "studio",
+//RS             project.path.to_str().unwrap(),
+//RS             "--host",
+//RS             "halcyon",
+//RS             "--serve",
+//RS             "127.0.0.1:0",
+//RS             "--no-color",
+//RS         ])
+//RS         .env("JETOS_STUDIO_ROOT", &root.path)
+//RS         .stdout(std::process::Stdio::piped())
+//RS         .spawn()
+//RS         .unwrap();
+//RS 
+//RS     struct KillOnDrop(std::process::Child);
+//RS     impl Drop for KillOnDrop {
+//RS         fn drop(&mut self) {
+//RS             let _ = self.0.kill();
+//RS             let _ = self.0.wait();
+//RS         }
+//RS     }
+//RS 
+//RS     let stdout = child.stdout.take().unwrap();
+//RS     let mut reader = std::io::BufReader::new(stdout);
+//RS     let mut line = String::new();
+//RS     {
+//RS         use std::io::BufRead;
+//RS         reader.read_line(&mut line).unwrap();
+//RS     }
+//RS     let guard = KillOnDrop(child);
+//RS     let addr = studio_addr(&line);
+//RS     let connect_addr = addr.split_once('?').map(|(host, _)| host).unwrap_or(&addr);
+//RS     let host = format!("Host: {connect_addr}\r\n");
+//RS 
+//RS     for path in ["/studio/data.json", "/studio/source"] {
+//RS         let response = studio_raw(
+//RS             &addr,
+//RS             &format!("GET {path} HTTP/1.1\r\n{host}Connection: close\r\n\r\n"),
+//RS         );
+//RS         assert!(
+//RS             response.contains("401 Unauthorized"),
+//RS             "unauthenticated Studio read reached {path}: {response}"
+//RS         );
+//RS     }
+//RS 
+//RS     for (path, body) in [
+//RS         ("/studio/transaction", "{\"op\":\"session\"}"),
+//RS         ("/studio/run", "{\"action\":\"check\"}"),
+//RS     ] {
+//RS         let response = studio_raw(
+//RS             &addr,
+//RS             &format!(
+//RS                 "POST {path} HTTP/1.1\r\n{host}Origin: http://{connect_addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+//RS                 body.len()
+//RS             ),
+//RS         );
+//RS         assert!(
+//RS             response.contains("401 Unauthorized"),
+//RS             "unauthenticated Studio action reached {path}: {response}"
+//RS         );
+//RS     }
+//RS 
+//RS     let token = addr
+//RS         .split_once("?session=")
+//RS         .map(|(_, token)| token)
+//RS         .expect("Studio service URL must carry its session token");
+//RS     let body = "{\"action\":\"check\"}";
+//RS     let csrf = studio_raw(
+//RS         &addr,
+//RS         &format!(
+//RS             "POST /studio/run HTTP/1.1\r\n{host}Origin: http://evil.test\r\nCookie: jetos_studio={token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+//RS             body.len()
+//RS         ),
+//RS     );
+//RS     assert!(
+//RS         csrf.contains("401 Unauthorized"),
+//RS         "cross-origin Studio action reached JetOS: {csrf}"
+//RS     );
+//RS 
+//RS     let source = studio_http(&addr, "GET", "/studio/source", "");
+//RS     assert!(source.contains("module halcyon"), "authorized read failed: {source}");
+//RS     let session = studio_http(&addr, "POST", "/studio/transaction", "{\"op\":\"session\"}");
+//RS     assert!(session.contains("200 OK"), "authorized transaction failed: {session}");
+//RS     assert!(session.contains("session_id"), "authorized transaction lacked session: {session}");
+//RS 
+//RS     drop(guard);
+//RS }
+//RS 
+//RS #[test]
+//RS fn jetos_studio_transaction_previews_and_writes_source() {
+//RS     let project = Scratch::new("studio-edit-project");
+//RS     copy_dir_recursive(&config_example_dir(), &project.path);
+//RS     let root = Scratch::new("studio-edit-root");
+//RS     let switch = jet()
+//RS         .args([
+//RS             "os",
+//RS             "switch",
+//RS             "halcyon",
+//RS             "--name",
+//RS             "studio-edit",
+//RS             "--no-color",
+//RS             "--yes",
+//RS             "--offline",
+//RS         ])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         switch.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&switch.stderr)
+//RS     );
+//RS     let generation = root.path.join("systems/generations/studio-edit");
+//RS     let mut child = jetos()
+//RS         .args([
+//RS             "studio",
+//RS             project.path.to_str().unwrap(),
+//RS             "--host",
+//RS             "halcyon",
+//RS             "--serve",
+//RS             "127.0.0.1:0",
+//RS             "--no-color",
+//RS         ])
+//RS         .env("JETOS_STUDIO_ROOT", &generation)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .stdout(std::process::Stdio::piped())
+//RS         .spawn()
+//RS         .unwrap();
+//RS     let server_pid = child.id();
+//RS     let stdout = child.stdout.take().unwrap();
+//RS     let mut reader = std::io::BufReader::new(stdout);
+//RS     let mut line = String::new();
+//RS     {
+//RS         use std::io::BufRead;
+//RS         reader.read_line(&mut line).unwrap();
+//RS     }
+//RS     let addr = studio_addr(&line);
+//RS     let session = studio_session(&addr);
+//RS     let other_session = studio_session(&addr);
+//RS     let initial_data = studio_http(&addr, "GET", "/studio/data.json", "");
+//RS     assert!(
+//RS         initial_data.contains("live-checked-plan"),
+//RS         "data: {initial_data}"
+//RS     );
+//RS     assert!(
+//RS         initial_data.contains("network.hostName"),
+//RS         "data: {initial_data}"
+//RS     );
+//RS     for field in [
+//RS         "page_registry",
+//RS         "renderer",
+//RS         "system_plan",
+//RS         "services",
+//RS         "packages",
+//RS         "options",
+//RS         "proof_state",
+//RS         "generations",
+//RS     ] {
+//RS         assert!(
+//RS             initial_data.contains(field),
+//RS             "missing live model `{field}`: {initial_data}"
+//RS         );
+//RS     }
+//RS     let bypass = studio_stage_option(&addr, &session, "network.hostName", "bypass", true);
+//RS     assert!(bypass.contains("400 Bad Request"), "bypass: {bypass}");
+//RS     assert!(
+//RS         bypass.contains("direct Studio writes are disabled"),
+//RS         "bypass: {bypass}"
+//RS     );
+//RS     let inserted = studio_stage_option(&addr, &session, "network.mtu", "1500", false);
+//RS     assert!(inserted.contains("@@ -1,"), "inserted: {inserted}");
+//RS     assert!(
+//RS         inserted.contains("+            network.mtu: 1500,"),
+//RS         "inserted: {inserted}"
+//RS     );
+//RS     let inserted_owner = studio_changeset_owner(&inserted, &session);
+//RS     let _ = studio_owned_transaction(&addr, "discard", &inserted_owner);
+//RS     let preview = studio_stage_option(&addr, &session, "network.hostName", "aurora", false);
+//RS     assert!(preview.contains("200 OK"), "preview: {preview}");
+//RS     assert!(preview.contains("\"write\":false"), "preview: {preview}");
+//RS     assert!(
+//RS         preview.contains("\"state\":\"staged\""),
+//RS         "preview: {preview}"
+//RS     );
+//RS     assert!(preview.contains("\"staged_count\":1"), "preview: {preview}");
+//RS     let preview_owner = studio_changeset_owner(&preview, &session);
+//RS     assert!(
+//RS         preview.contains("-            network.hostName: halcyon,"),
+//RS         "preview: {preview}"
+//RS     );
+//RS     assert!(
+//RS         preview.contains("+            network.hostName: aurora,"),
+//RS         "preview: {preview}"
+//RS     );
+//RS     let config = fs::read_to_string(project.join("config.jet")).unwrap();
+//RS     assert!(
+//RS         config.contains("network.hostName: halcyon"),
+//RS         "config: {config}"
+//RS     );
+//RS     let source = studio_http(&addr, "GET", "/studio/source", "");
+//RS     assert!(
+//RS         source.contains("network.hostName: halcyon"),
+//RS         "source: {source}"
+//RS     );
+//RS     let stolen_discard = studio_http(&addr, "POST", "/studio/transaction", &format!("{{\"op\":\"discard\",\"session_id\":\"{other_session}\",\"token\":\"{}\",\"base_revision\":\"{}\"}}", preview_owner.token, preview_owner.base_revision));
+//RS     assert!(
+//RS         stolen_discard.contains("409 Conflict"),
+//RS         "stolen discard: {stolen_discard}"
+//RS     );
+//RS     let stolen_apply = studio_http(&addr, "POST", "/studio/transaction", &format!("{{\"op\":\"apply\",\"session_id\":\"{other_session}\",\"token\":\"{}\",\"base_revision\":\"{}\"}}", preview_owner.token, preview_owner.base_revision));
+//RS     assert!(
+//RS         stolen_apply.contains("409 Conflict"),
+//RS         "stolen apply: {stolen_apply}"
+//RS     );
+//RS     let staged = studio_owned_transaction(&addr, "status", &preview_owner);
+//RS     assert!(staged.contains("200 OK"), "staged: {staged}");
+//RS     assert!(staged.contains("\"state\":\"staged\""), "staged: {staged}");
+//RS     assert!(staged.contains("\"staged_count\":1"), "staged: {staged}");
+//RS     assert!(staged.contains("network.hostName"), "staged: {staged}");
+//RS     let discarded = studio_owned_transaction(&addr, "discard", &preview_owner);
+//RS     assert!(
+//RS         discarded.contains("\"state\":\"discarded\""),
+//RS         "discarded: {discarded}"
+//RS     );
+//RS     let empty = studio_session_transaction(&addr, "status", &session);
+//RS     assert!(empty.contains("\"state\":\"empty\""), "empty: {empty}");
+//RS     let preview = studio_stage_option(&addr, &session, "network.hostName", "aurora", false);
+//RS     assert!(
+//RS         preview.contains("\"state\":\"staged\""),
+//RS         "preview: {preview}"
+//RS     );
+//RS     let preview_owner = studio_changeset_owner(&preview, &session);
+//RS     let original = fs::read_to_string(project.join("config.jet")).unwrap();
+//RS     fs::write(
+//RS         project.join("config.jet"),
+//RS         format!("{original}// external edit\n"),
+//RS     )
+//RS     .unwrap();
+//RS     let stale = studio_owned_transaction(&addr, "apply", &preview_owner);
+//RS     assert!(stale.contains("409 Conflict"), "stale: {stale}");
+//RS     assert!(
+//RS         stale.contains("changed after this Changeset"),
+//RS         "stale: {stale}"
+//RS     );
+//RS     fs::write(project.join("config.jet"), &original).unwrap();
+//RS     let config_q = test_shell_quote(&project.join("config.jet"));
+//RS     let lock_path = project.join(".config.jet.studio.lock");
+//RS     let mut compliant_writer = std::process::Command::new("flock")
+//RS         .arg("-x")
+//RS         .arg(&lock_path)
+//RS         .arg("sh")
+//RS         .arg("-c")
+//RS         .arg(format!(
+//RS             "sleep 0.05; printf '%s\\n' '// compliant external process' >> {config_q}"
+//RS         ))
+//RS         .spawn()
+//RS         .unwrap();
+//RS     std::thread::sleep(std::time::Duration::from_millis(10));
+//RS     let raced_apply = studio_owned_transaction(&addr, "apply", &preview_owner);
+//RS     assert!(compliant_writer.wait().unwrap().success());
+//RS     assert!(
+//RS         raced_apply.contains("409 Conflict"),
+//RS         "cross-process CAS: {raced_apply}"
+//RS     );
+//RS     let externally_written = fs::read_to_string(project.join("config.jet")).unwrap();
+//RS     assert!(
+//RS         externally_written.contains("compliant external process"),
+//RS         "external write was clobbered: {externally_written}"
+//RS     );
+//RS     fs::write(project.join("config.jet"), &original).unwrap();
+//RS     let mut noncompliant_writer = std::process::Command::new("sh")
+//RS         .arg("-c")
+//RS         .arg(format!("i=0; while [ $i -lt 30 ]; do printf '%s\\n' '// noncompliant external process' >> {config_q}; i=$((i + 1)); sleep 0.01; done"))
+//RS         .spawn()
+//RS         .unwrap();
+//RS     let noncompliant_apply = studio_owned_transaction(&addr, "apply", &preview_owner);
+//RS     assert!(noncompliant_writer.wait().unwrap().success());
+//RS     assert!(
+//RS         noncompliant_apply.contains("409 Conflict"),
+//RS         "noncompliant CAS: {noncompliant_apply}"
+//RS     );
+//RS     let externally_written = fs::read_to_string(project.join("config.jet")).unwrap();
+//RS     assert!(
+//RS         externally_written.contains("noncompliant external process"),
+//RS         "noncompliant write was clobbered: {externally_written}"
+//RS     );
+//RS     fs::write(project.join("config.jet"), &original).unwrap();
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::PermissionsExt;
+//RS         let original_mode = fs::metadata(&project.path).unwrap().permissions().mode();
+//RS         fs::set_permissions(&project.path, fs::Permissions::from_mode(0o555)).unwrap();
+//RS         let failed = studio_owned_transaction(&addr, "apply", &preview_owner);
+//RS         fs::set_permissions(&project.path, fs::Permissions::from_mode(original_mode)).unwrap();
+//RS         assert!(
+//RS             failed.contains("500 Internal Server Error"),
+//RS             "failed: {failed}"
+//RS         );
+//RS         assert!(failed.contains("\"reprojected\":false"), "failed: {failed}");
+//RS     }
+//RS     let write = studio_owned_transaction(&addr, "apply", &preview_owner);
+//RS     assert!(write.contains("200 OK"), "write: {write}");
+//RS     assert!(write.contains("\"state\":\"applied\""), "write: {write}");
+//RS     assert!(write.contains("\"reprojected\":true"), "write: {write}");
+//RS     assert!(write.contains("\"staged_count\":0"), "write: {write}");
+//RS     let config = fs::read_to_string(project.join("config.jet")).unwrap();
+//RS     assert!(
+//RS         config.contains("network.hostName: aurora"),
+//RS         "config: {config}"
+//RS     );
+//RS     let source = studio_http(&addr, "GET", "/studio/source", "");
+//RS     assert!(
+//RS         source.contains("network.hostName: aurora"),
+//RS         "source: {source}"
+//RS     );
+//RS     let live_data = studio_http(&addr, "GET", "/studio/data.json", "");
+//RS     assert!(live_data.contains("live-checked-plan"), "data: {live_data}");
+//RS     assert!(live_data.contains("aurora"), "data: {live_data}");
+//RS     assert!(
+//RS         live_data.contains("\"renderer\":\"dashboard\""),
+//RS         "data: {live_data}"
+//RS     );
+//RS     let plan = jet()
+//RS         .args(["os", "plan", "halcyon", "--json", "--no-color", "--offline"])
+//RS         .current_dir(&project.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("PATH", "/usr/bin:/bin")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         plan.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&plan.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&plan.stdout);
+//RS     assert!(stdout.contains("aurora"), "plan: {stdout}");
+//RS     let check = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"check\"}");
+//RS     assert!(check.contains("\"success\":true"), "check: {check}");
+//RS     let plan = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"plan\"}");
+//RS     assert!(plan.contains("\"success\":true"), "plan: {plan}");
+//RS     assert!(plan.contains("aurora"), "plan: {plan}");
+//RS     let build = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"build\"}");
+//RS     assert!(build.contains("\"success\":true"), "build: {build}");
+//RS     let unproved_switch = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"switch\"}");
+//RS     assert!(
+//RS         unproved_switch.contains("409 Conflict"),
+//RS         "switch: {unproved_switch}"
+//RS     );
+//RS     let config_path = project.join("config.jet");
+//RS     let proved_source = fs::read_to_string(&config_path).unwrap();
+//RS     let raced_source =
+//RS         proved_source.replace("network.hostName: aurora", "network.hostName: intruder");
+//RS     let race_path = config_path.clone();
+//RS     let race = std::thread::spawn(move || {
+//RS         std::thread::sleep(std::time::Duration::from_millis(25));
+//RS         fs::write(race_path, raced_source).unwrap();
+//RS     });
+//RS     let raced_proof = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"proof\"}");
+//RS     race.join().unwrap();
+//RS     assert!(
+//RS         raced_proof.contains("\"source_revision\":"),
+//RS         "proof race: {raced_proof}"
+//RS     );
+//RS     let raced_switch = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"switch\"}");
+//RS     assert!(
+//RS         raced_switch.contains("409 Conflict"),
+//RS         "proof race switch: {raced_switch}"
+//RS     );
+//RS     let failed_proof_state = studio_http(&addr, "GET", "/studio/data.json", "");
+//RS     assert!(
+//RS         failed_proof_state.contains("\"state\":\"unproved\""),
+//RS         "failed proof badge: {failed_proof_state}"
+//RS     );
+//RS     fs::write(&config_path, &proved_source).unwrap();
+//RS     let snapshot_mutation = studio_attack_snapshot(server_pid, false);
+//RS     let mutated_proof = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"proof\"}");
+//RS     snapshot_mutation.join().unwrap();
+//RS     assert!(
+//RS         mutated_proof.contains("\"success\":true"),
+//RS         "sealed snapshot: {mutated_proof}"
+//RS     );
+//RS     let snapshot_replacement = studio_attack_snapshot(server_pid, true);
+//RS     let replaced_proof = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"proof\"}");
+//RS     snapshot_replacement.join().unwrap();
+//RS     assert!(
+//RS         replaced_proof.contains("\"success\":true"),
+//RS         "sealed snapshot: {replaced_proof}"
+//RS     );
+//RS     let proved_source = format!("{proved_source}// unbuilt proof-only revision\n");
+//RS     fs::write(&config_path, &proved_source).unwrap();
+//RS     let proof = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"proof\"}");
+//RS     assert!(proof.contains("\"success\":true"), "proof: {proof}");
+//RS     assert!(proof.contains("aurora"), "proof: {proof}");
+//RS     assert!(proof.contains("\"source_revision\":"), "proof: {proof}");
+//RS     assert!(proof.contains("source_proof"), "proof: {proof}");
+//RS     assert!(proof.contains("input_plan_sha256"), "proof: {proof}");
+//RS     let proof_response = studio_json(&proof);
+//RS     assert_eq!(
+//RS         proof_response.get("success").unwrap(),
+//RS         &DataTree::Bool(true),
+//RS         "proof: {proof}"
+//RS     );
+//RS     let proof_revision = json_string(&proof_response, "source_revision");
+//RS     let proof_stdout = json_string(&proof_response, "stdout");
+//RS     let proof_artifact = jetpack::JSON::parse(proof_stdout.trim())
+//RS         .unwrap_or_else(|error| panic!("invalid Studio proof artifact: {error}: {proof_stdout}"));
+//RS     let proof_generation = json_string(&proof_artifact, "generation");
+//RS     let proof_source = proof_artifact.get("source_proof").unwrap_or_else(|error| {
+//RS         panic!("missing proof source binding: {error}: {proof_artifact:?}")
+//RS     });
+//RS     let proof_source_sha256 = json_string(proof_source, "source_sha256");
+//RS     let proof_input_plan_sha256 = json_string(proof_source, "input_plan_sha256");
+//RS     let proof_plan_sha256 = json_string(proof_source, "plan_sha256");
+//RS     assert_eq!(proof_source_sha256, proof_revision);
+//RS     let proved_projection = studio_http(&addr, "GET", "/studio/data.json", "");
+//RS     assert!(
+//RS         proved_projection.contains("\"state\":\"proved\""),
+//RS         "proved badge: {proved_projection}"
+//RS     );
+//RS     assert!(
+//RS         proved_projection.contains(&proof_revision),
+//RS         "proved revision: {proved_projection}"
+//RS     );
+//RS     let switch_race_path = config_path.clone();
+//RS     let switch_raced_source =
+//RS         proved_source.replace("network.hostName: aurora", "network.hostName: unproved");
+//RS     let switch_race = std::thread::spawn(move || {
+//RS         std::thread::sleep(std::time::Duration::from_millis(1));
+//RS         fs::write(switch_race_path, switch_raced_source).unwrap();
+//RS     });
+//RS     let switched = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"switch\"}");
+//RS     switch_race.join().unwrap();
+//RS     assert!(
+//RS         switched.contains("\"success\":false"),
+//RS         "switch race: {switched}"
+//RS     );
+//RS     assert!(
+//RS         switched.contains("\"source_changed_after\":true"),
+//RS         "switch: {switched}"
+//RS     );
+//RS     assert!(switched.contains("rolled back"), "switch race: {switched}");
+//RS     let current_after_race = fs::read_link(root.join("systems/current")).unwrap();
+//RS     assert_eq!(current_after_race.file_name().unwrap(), "studio-edit");
+//RS     fs::write(&config_path, &proved_source).unwrap();
+//RS     let candidate_plan_before =
+//RS         fs::read(root.join("systems/generations/zz-studio-candidate/plan.json")).unwrap();
+//RS     let switched = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"switch\"}");
+//RS     assert!(switched.contains("\"success\":true"), "switch: {switched}");
+//RS     let current = fs::read_link(root.join("systems/current")).unwrap();
+//RS     assert_eq!(current.file_name().unwrap(), proof_generation.as_str());
+//RS     let current_source_proof =
+//RS         fs::read_to_string(root.join("systems/current/source-proof.json")).unwrap();
+//RS     let current_source_proof = jetpack::JSON::parse(&current_source_proof)
+//RS         .unwrap_or_else(|error| panic!("invalid current generation source proof: {error}"));
+//RS     assert_eq!(
+//RS         json_string(&current_source_proof, "source_sha256"),
+//RS         proof_source_sha256
+//RS     );
+//RS     assert_eq!(
+//RS         json_string(&current_source_proof, "input_plan_sha256"),
+//RS         proof_input_plan_sha256
+//RS     );
+//RS     assert_eq!(
+//RS         json_string(&current_source_proof, "plan_sha256"),
+//RS         proof_plan_sha256
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read(root.join("systems/generations/zz-studio-candidate/plan.json")).unwrap(),
+//RS         candidate_plan_before,
+//RS         "switch must not rebuild a candidate"
+//RS     );
+//RS     let generations = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"generations\"}");
+//RS     assert!(
+//RS         generations.contains("zz-studio-candidate"),
+//RS         "generations: {generations}"
+//RS     );
+//RS     let applied_source = proved_source.replace("// unbuilt proof-only revision\n", "");
+//RS     fs::write(&config_path, applied_source).unwrap();
+//RS     let rollback = studio_session_transaction(&addr, "stage-rollback", &session);
+//RS     assert!(
+//RS         rollback.contains("\"state\":\"staged\""),
+//RS         "rollback: {rollback}"
+//RS     );
+//RS     let rollback_owner = studio_changeset_owner(&rollback, &session);
+//RS     assert!(
+//RS         rollback.contains("-            network.hostName: aurora,"),
+//RS         "rollback: {rollback}"
+//RS     );
+//RS     assert!(
+//RS         rollback.contains("+            network.hostName: halcyon,"),
+//RS         "rollback: {rollback}"
+//RS     );
+//RS     let rollback_apply = studio_owned_transaction(&addr, "apply", &rollback_owner);
+//RS     assert!(
+//RS         rollback_apply.contains("\"reprojected\":true"),
+//RS         "rollback: {rollback_apply}"
+//RS     );
+//RS     let restored = studio_http(&addr, "GET", "/studio/data.json", "");
+//RS     assert!(restored.contains("halcyon"), "restored: {restored}");
+//RS     let literal = "\"café \\\"lab\\\" \\\\share\"";
+//RS     let escaped = studio_stage_option(&addr, &session, "network.interface", literal, false);
+//RS     assert!(escaped.contains("café"), "escaped: {escaped}");
+//RS     let escaped_owner = studio_changeset_owner(&escaped, &session);
+//RS     let escaped_apply = studio_owned_transaction(&addr, "apply", &escaped_owner);
+//RS     assert!(
+//RS         escaped_apply.contains("\"reprojected\":true"),
+//RS         "escaped: {escaped_apply}"
+//RS     );
+//RS     let escaped_source = fs::read_to_string(&config_path).unwrap();
+//RS     assert!(
+//RS         escaped_source.contains(&format!("network.interface: {literal},")),
+//RS         "escaped source: {escaped_source}"
+//RS     );
+//RS     let _ = child.kill();
+//RS     let _ = child.wait();
+//RS }
+// END-PORT-PENDING 1099 tests/jetpack_studio.rs:1-733
+
+// PORT-PENDING 1099 tests-jetpack-studio-module-group: tests/jetpack_tasks.rs:1-450
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-JPK-TASKRUN1 (card #476) / D-DX-JOBS-UX1=E: `#Job fn`s run by name.
+//RS 
+//RS use std::fs;
+//RS use std::process::Command;
+//RS 
+//RS mod common;
+//RS use common::Scratch;
+//RS 
+//RS fn jet() -> Command {
+//RS     Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS fn write_main(dir: &std::path::Path, src: &str) {
+//RS     fs::write(dir.join("main.jet"), src).unwrap();
+//RS     // The jobs print, so the fixture package decides IO authority up front.
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"test-fixture\"\nversion: \"0.1.0\"\nauthority: {\n    holds: {\n        allow: [IO, Mem.Alloc]\n    }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_run_job_invokes_marked_fn() {
+//RS     let scratch = Scratch::new("jet-job");
+//RS     write_main(
+//RS         &scratch.path,
+//RS         r#"
+//RS #Job
+//RS fn greet() {
+//RS         print("hello-job")
+//RS }
+//RS fn run() { print("run-entry") }
+//RS "#,
+//RS     );
+//RS     let entry = scratch.path.join("main.jet");
+//RS     let out = jet()
+//RS         .args(["run", entry.to_str().unwrap(), "--", "greet"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     assert!(stdout.contains("hello-job"), "stdout: {stdout}");
+//RS     assert!(
+//RS         !stdout.contains("run-entry"),
+//RS         "must not run fn run when a job subcommand is set: {stdout}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_jobs_runs_by_name_and_unknown_lists_declared() {
+//RS     // D-DX-JOBS-UX1=E: `jet jobs <name>` runs a job from the resolved entry;
+//RS     // an unknown name reports E1294 with the declared jobs. (`jetpack run`
+//RS     // is retired: E1353.)
+//RS     let scratch = Scratch::new("jet-jobs");
+//RS     write_main(
+//RS         &scratch.path,
+//RS         r#"
+//RS #Job
+//RS fn greet() {
+//RS     print("from-jobs")
+//RS }
+//RS #Job
+//RS fn seed_data() {
+//RS     print("seeded")
+//RS }
+//RS fn run() {}
+//RS "#,
+//RS     );
+//RS     fs::rename(scratch.path.join("main.jet"), scratch.path.join("run.jet")).unwrap();
+//RS 
+//RS     let ok = jet()
+//RS         .args(["jobs", "--no-color", "greet"])
+//RS         .current_dir(&scratch.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         ok.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&ok.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&ok.stdout).contains("from-jobs"),
+//RS         "stdout: {}",
+//RS         String::from_utf8_lossy(&ok.stdout)
+//RS     );
+//RS 
+//RS     let bad = jet()
+//RS         .args(["jobs", "--no-color", "deploy"])
+//RS         .current_dir(&scratch.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!bad.status.success());
+//RS     let stderr = String::from_utf8_lossy(&bad.stderr);
+//RS     assert!(stderr.contains("E1294"), "stderr: {stderr}");
+//RS     assert!(stderr.contains("No job named `deploy`"), "stderr: {stderr}");
+//RS     assert!(
+//RS         stderr.contains("declared jobs:")
+//RS             && stderr.contains("greet")
+//RS             && stderr.contains("seed_data"),
+//RS         "stderr: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_run_job_leaf_stays_callable_from_sibling() {
+//RS     // D-JPK-TASKRUN1: dependency = plain call. Selecting leaf `greet` as
+//RS     // entry must not rename it away — sibling `seed`'s `greet()` must not
+//RS     // die with E0102, and both jobs must run.
+//RS     let scratch = Scratch::new("job-dep");
+//RS     write_main(
+//RS         &scratch.path,
+//RS         r#"
+//RS #Job
+//RS fn greet() {
+//RS     print("leaf-ok")
+//RS }
+//RS #Job
+//RS fn seed_data() {
+//RS     greet()
+//RS     print("dep-ok")
+//RS }
+//RS fn run() { print("run-entry") }
+//RS "#,
+//RS     );
+//RS     let entry = scratch.path.join("main.jet");
+//RS     let path = entry.to_str().unwrap();
+//RS 
+//RS     let greet = jet().args(["run", path, "--", "greet"]).output().unwrap();
+//RS     assert!(
+//RS         greet.status.success(),
+//RS         "leaf job subcommand must not E0102; stderr: {}",
+//RS         String::from_utf8_lossy(&greet.stderr)
+//RS     );
+//RS     let greet_out = String::from_utf8_lossy(&greet.stdout);
+//RS     assert!(greet_out.contains("leaf-ok"), "stdout: {greet_out}");
+//RS     assert!(
+//RS         !String::from_utf8_lossy(&greet.stderr).contains("E0102"),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&greet.stderr)
+//RS     );
+//RS 
+//RS     let seed = jet()
+//RS         .args(["run", path, "--", "seed_data"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         seed.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&seed.stderr)
+//RS     );
+//RS     let seed_out = String::from_utf8_lossy(&seed.stdout);
+//RS     assert!(
+//RS         seed_out.contains("leaf-ok") && seed_out.contains("dep-ok"),
+//RS         "stdout: {seed_out}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_run_job_typed_cli_args() {
+//RS     let scratch = Scratch::new("job-cli");
+//RS     write_main(
+//RS         &scratch.path,
+//RS         r#"
+//RS #CLI
+//RS struct MigrateArgs {
+//RS     #Doc("target") to: String{"latest"}
+//RS }
+//RS #Job
+//RS fn migrate(args: MigrateArgs) {
+//RS     print(args.to)
+//RS }
+//RS fn run() {}
+//RS "#,
+//RS     );
+//RS     let entry = scratch.path.join("main.jet");
+//RS     let out = jet()
+//RS         .args([
+//RS             "run",
+//RS             entry.to_str().unwrap(),
+//RS             "--",
+//RS             "migrate",
+//RS             "--to",
+//RS             "004",
+//RS         ])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "004");
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_jobs_after_runs_predecessors_and_scalar_args() {
+//RS     // D-DX-JOBGRAPH1=A / I9: the default tier runs `after:` predecessors
+//RS     // through the Prelude job graph, and scalar job parameters are flags.
+//RS     let scratch = Scratch::new("job-graph");
+//RS     write_main(
+//RS         &scratch.path,
+//RS         r#"
+//RS #Job
+//RS fn migrate(to: String{"latest"}) {
+//RS     print("migrate {to}")
+//RS }
+//RS #Job(after: ["migrate"])
+//RS fn populate(label: String{"dev"}) {
+//RS     print("populate {label}")
+//RS }
+//RS fn run() {}
+//RS "#,
+//RS     );
+//RS     let entry = scratch.path.join("main.jet");
+//RS     let path = entry.to_str().unwrap();
+//RS 
+//RS     let populate = jet()
+//RS         .args(["run", path, "--", "populate", "--label", "ci"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         populate.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&populate.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&populate.stdout).trim(),
+//RS         "migrate latest\npopulate ci"
+//RS     );
+//RS 
+//RS     let migrate = jet()
+//RS         .args(["run", path, "--", "migrate", "--to", "004"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         migrate.status.success(),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&migrate.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&migrate.stdout).trim(), "migrate 004");
+//RS 
+//RS     // Root arguments are checked before any predecessor runs.
+//RS     let bad = jet()
+//RS         .args(["run", path, "--", "populate", "--bogus"])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(bad.status.code(), Some(2));
+//RS     assert!(
+//RS         !String::from_utf8_lossy(&bad.stdout).contains("migrate"),
+//RS         "stdout: {}",
+//RS         String::from_utf8_lossy(&bad.stdout)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&bad.stderr).contains("E1331"),
+//RS         "stderr: {}",
+//RS         String::from_utf8_lossy(&bad.stderr)
+//RS     );
+//RS }
+//RS 
+//RS /// The `after:` + scalar-parameter fixture shared by the job-argv and AOT
+//RS /// parity tests, written as the package's `run.jet` role file.
+//RS fn write_job_graph_package(dir: &std::path::Path) {
+//RS     write_main(
+//RS         dir,
+//RS         r#"
+//RS #Job
+//RS fn migrate(to: String{"latest"}) {
+//RS     print("migrate {to}")
+//RS }
+//RS #Job(after: ["migrate"])
+//RS fn populate(label: String{"dev"}) {
+//RS     print("populate {label}")
+//RS }
+//RS #Job
+//RS fn web(port: Int{8080}, host: String{"127.0.0.1"}) {
+//RS     print("web host={host} port={port}")
+//RS }
+//RS #Job
+//RS fn broken() {
+//RS     panic("broken job")
+//RS }
+//RS #Job(after: ["broken"])
+//RS fn needs_broken() {
+//RS     print("needs_broken ran")
+//RS }
+//RS fn run() {}
+//RS "#,
+//RS     );
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"test-fixture\"\nversion: \"0.1.0\"\nauthority: {\n    holds: {\n        allow: [IO, Mem.Alloc, Panic]\n    }\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::rename(dir.join("main.jet"), dir.join("run.jet")).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_jobs_forward_flags_after_name() {
+//RS     // D-JOB-ARGV1=A: `jet jobs <name> …` gives the job every word after its
+//RS     // name; Jet's own flags go before the name; `--` after the name is the
+//RS     // same separator and still works.
+//RS     let scratch = Scratch::new("job-argv");
+//RS     write_job_graph_package(&scratch.path);
+//RS     let jobs = |args: &[&str]| {
+//RS         jet()
+//RS             .arg("jobs")
+//RS             .args(args)
+//RS             .current_dir(&scratch.path)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap()
+//RS     };
+//RS 
+//RS     for (args, expected) in [
+//RS         (&["web", "--port", "3000"][..], "web host=127.0.0.1 port=3000"),
+//RS         (&["web", "--", "--port", "3000"][..], "web host=127.0.0.1 port=3000"),
+//RS         (
+//RS             &["--interpret", "web", "--port", "3000", "--host", "0.0.0.0"][..],
+//RS             "web host=0.0.0.0 port=3000",
+//RS         ),
+//RS         (&["populate", "--label", "ci"][..], "migrate latest\npopulate ci"),
+//RS     ] {
+//RS         let out = jobs(args);
+//RS         assert!(
+//RS             out.status.success(),
+//RS             "jet jobs {args:?}: {}",
+//RS             String::from_utf8_lossy(&out.stderr)
+//RS         );
+//RS         assert_eq!(
+//RS             String::from_utf8_lossy(&out.stdout).trim(),
+//RS             expected,
+//RS             "jet jobs {args:?}"
+//RS         );
+//RS     }
+//RS 
+//RS     // A Jet flag after the name belongs to the job, whose argument check
+//RS     // rejects it before any predecessor runs.
+//RS     let forwarded = jobs(&["populate", "--json"]);
+//RS     assert_eq!(forwarded.status.code(), Some(2));
+//RS     let forwarded_stderr = String::from_utf8_lossy(&forwarded.stderr);
+//RS     assert!(forwarded_stderr.contains("E1331"), "{forwarded_stderr}");
+//RS     assert!(
+//RS         !String::from_utf8_lossy(&forwarded.stdout).contains("migrate"),
+//RS         "{forwarded_stderr}"
+//RS     );
+//RS 
+//RS     // A job flag before the name is still Jet's, and the fix says where the
+//RS     // job's flags go.
+//RS     let misplaced = jobs(&["--port", "3000", "web"]);
+//RS     assert_eq!(misplaced.status.code(), Some(2));
+//RS     let misplaced_stderr = String::from_utf8_lossy(&misplaced.stderr);
+//RS     assert!(
+//RS         misplaced_stderr.contains("E2102") && misplaced_stderr.contains("after the job name"),
+//RS         "{misplaced_stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_build_job_dispatch_matches_default_and_interpreter() {
+//RS     // I9: the built binary dispatches `<binary> <job> <args…>` through the
+//RS     // same Prelude job graph as `jet jobs` and `jet run --interpret --`.
+//RS     if !common::have_rustc() {
+//RS         return;
+//RS     }
+//RS     let scratch = Scratch::new("job-aot");
+//RS     write_job_graph_package(&scratch.path);
+//RS     let build = jet()
+//RS         .args(["build", "run.jet"])
+//RS         .current_dir(&scratch.path)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         build.status.success(),
+//RS         "jet build: {}",
+//RS         String::from_utf8_lossy(&build.stderr)
+//RS     );
+//RS     let binary = scratch.path.join(".jet/build/run");
+//RS 
+//RS     for args in [
+//RS         &["populate", "--label", "ci"][..],
+//RS         &["migrate", "--to", "004"][..],
+//RS         &["web", "--port", "3000"][..],
+//RS         &["needs_broken"][..],
+//RS         &["populate", "--bogus"][..],
+//RS     ] {
+//RS         let aot = Command::new(&binary)
+//RS             .args(args)
+//RS             .current_dir(&scratch.path)
+//RS             .output()
+//RS             .unwrap();
+//RS         let jobs = jet()
+//RS             .arg("jobs")
+//RS             .args(args)
+//RS             .current_dir(&scratch.path)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap();
+//RS         let interpreted = jet()
+//RS             .args(["run", "--interpret", "run.jet", "--"])
+//RS             .args(args)
+//RS             .current_dir(&scratch.path)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap();
+//RS         let aot_stdout = String::from_utf8_lossy(&aot.stdout);
+//RS         for (tier, out) in [("jet jobs", &jobs), ("jet run --interpret", &interpreted)] {
+//RS             assert_eq!(
+//RS                 String::from_utf8_lossy(&out.stdout),
+//RS                 aot_stdout,
+//RS                 "{tier} {args:?} stdout differs from the built binary; stderr: {}",
+//RS                 String::from_utf8_lossy(&out.stderr)
+//RS             );
+//RS             assert_eq!(
+//RS                 out.status.success(),
+//RS                 aot.status.success(),
+//RS                 "{tier} {args:?}: aot stderr: {}\n{tier} stderr: {}",
+//RS                 String::from_utf8_lossy(&aot.stderr),
+//RS                 String::from_utf8_lossy(&out.stderr)
+//RS             );
+//RS         }
+//RS         match args {
+//RS             ["populate", "--label", "ci"] => assert_eq!(aot_stdout.trim(), "migrate latest\npopulate ci"),
+//RS             ["migrate", "--to", "004"] => assert_eq!(aot_stdout.trim(), "migrate 004"),
+//RS             ["web", "--port", "3000"] => assert_eq!(aot_stdout.trim(), "web host=127.0.0.1 port=3000"),
+//RS             // A failing predecessor stops its dependent.
+//RS             ["needs_broken"] => {
+//RS                 assert!(!aot.status.success());
+//RS                 assert!(!aot_stdout.contains("needs_broken ran"), "{aot_stdout}");
+//RS             }
+//RS             // A bad root argument fails before any predecessor runs.
+//RS             _ => {
+//RS                 for out in [&aot, &jobs, &interpreted] {
+//RS                     assert_eq!(out.status.code(), Some(2));
+//RS                     assert!(
+//RS                         String::from_utf8_lossy(&out.stderr).contains("E1331"),
+//RS                         "{}",
+//RS                         String::from_utf8_lossy(&out.stderr)
+//RS                     );
+//RS                 }
+//RS                 assert!(!aot_stdout.contains("migrate"), "{aot_stdout}");
+//RS             }
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 1099 tests/jetpack_tasks.rs:1-450
+

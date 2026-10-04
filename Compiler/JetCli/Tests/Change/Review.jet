@@ -1,0 +1,341 @@
+// CmdReview.rs has no inline/macro/included tests. These are behavioral
+// controls over the actual pure policies/codecs, not a native provider mock.
+// tests/review.rs belongs to packet 1142; do not duplicate that suite here.
+use core.encoding.[DataTree]
+use core.files.runtime.kernel_path_components.[OSPath, PathPlatform]
+use jet_foundation.[Diagnostic, Span, DiagnosticOrigin, DiagnosticMoment,
+    DIAGNOSTIC_ERROR, DerivationIdentity, DerivationObservation,
+    StatusFields, StatusValue, foundation_json_parse]
+use jet_semindex.[ReviewSemanticOp, ReviewOpKind, ReviewAlignment]
+
+fn review_test_decode(raw: String) -> JetCLIReviewReceipt JetCLIReviewError! {
+    jet_cli_review_decode_receipt(raw, "proof.jetproof", JetCLIReviewProofReceipt{path: "proof.jetproof", digest: "real-decoding-fixture-not-a-native-digest"})
+}
+fn review_test_object(raw: String) -> [String:DataTree] Never! {
+    value :: foundation_json_parse(raw) ?? panic("invalid test JSON")
+    if value == .Object(fields) -> return fields
+    panic("test object required")
+}
+fn review_test_derivation(method: String, disposition: String, id: String) -> JetCLIReviewDerivationClaim Never! {
+    JetCLIReviewDerivationClaim{id, subject: "target", claim: "contract", producer: "fixture", method, rule: "rule", premises: [String]{"numerical"}, identity: DerivationIdentity{source: "source", build: "build", run: "run", target: "target"}, assumptions: [String]{}, disposition, observation: Val(DerivationObservation{event_id: Val("event"), counterexample_id: None})}
+}
+fn review_test_claim(method: String, disposition: String, result: String, order: Int) -> JetCLIReviewClaim Never! {
+    record :: review_test_derivation(method, disposition, "derivation")
+    observation :: JetCLIReviewObservation{contract: "contract", inputs: "inputs", environment: "environment", premises: "numerical", event: Val("event"), result, source: "source", identity: Val(~record.identity), order}
+    JetCLIReviewClaim{label: "claim", outcome: "pass", state: "complete", proven: jet_cli_review_is_proven_derivation(record), derivation: Val(record), observation: Val(observation), order}
+}
+fn review_test_receipt(claims: [String:JetCLIReviewClaim]) -> JetCLIReviewReceipt Never! {
+    JetCLIReviewReceipt{recorded: true, claims, derivations: [String:JetCLIReviewDerivationClaim]{}, claim_key: None, proof_receipt: None}
+}
+fn review_test_diagnostic(code: String, start: Int, end: Int) -> Diagnostic Never! {
+    Diagnostic{severity: DIAGNOSTIC_ERROR, code, span: Val(Span{start, end}), what: "what", why: "why", fix: "fix"}
+}
+fn review_test_side(diagnostics: [Diagnostic], complete: Bool) -> JetCLIReviewDiagnosticSide Never! {
+    scopes := [String:String]{}
+    scopes["entry.jet"] = "entry.jet"
+    scopes["dep.jet"] = "dep.jet"
+    revisions := [String:String]{}
+    revisions["entry.jet"] = "revision"
+    revisions["dep.jet"] = "dependency-revision"
+    JetCLIReviewDiagnosticSide{path: OSPath{encoded: "entry.jet".bytes(), platform: PathPlatform.Unix}, display: "entry.jet", source_hash: "revision", scope_root: None, entry_scope: "entry.jet", input_revisions: ^revisions, diagnostics, source_scopes: ^scopes, valid: true, complete}
+}
+
+#Test("review positional parsing skips argv zero and exact receipt flags") {
+    assert_eq(jet_cli_review_positional([String]{"review", "base.jet", "--base-receipt", "base.jetproof", "head.jet", "--receipt=head.jetproof", "--json"}), [String]{"base.jet", "head.jet"})
+    assert_eq(jet_cli_review_positional([String]{"review", "--receipt", "--diagnostics", "", "head.jet"}), [String]{"", "head.jet"})
+    assert_eq(jet_cli_review_positional([String]{"review", "--", "base.jet", "-head.jet"}), [String]{"base.jet"})
+}
+#Test("review first receipt option wins and equals accepts empty text") {
+    if jet_cli_review_option_value([String]{"review", "--receipt=", "--head-receipt=later"}, [String]{"--receipt", "--head-receipt"}) == {
+        .Ok(value) -> assert_eq(value, Val(""))
+        .Err(_) -> panic("empty equals receipt is accepted")
+    }
+    if jet_cli_review_option_value([String]{"--head-receipt=-option"}, [String]{"--receipt", "--head-receipt"}) == {
+        .Ok(value) -> assert_eq(value, Val("-option"))
+        .Err(_) -> panic("equals receipt is not a separated option")
+    }
+    if jet_cli_review_option_value([String]{"--receipt", "--json"}, [String]{"--receipt"}) == {
+        .Err(error) -> assert_eq(error.message, "`--receipt` needs a receipt path")
+        .Ok(_) -> panic("separated option-looking receipt accepted")
+    }
+    if jet_cli_review_option_value([String]{"--receipt"}, [String]{"--receipt"}) == {
+        .Err(error) -> assert_eq(error.message, "`--receipt` needs a receipt path")
+        .Ok(_) -> panic("missing receipt accepted")
+    }
+}
+#Test("review diagnostic mode precedes malformed receipt validation") {
+    plan :: jet_cli_review_arguments([String]{"review", "base.jet", "head.jet", "--receipt", "--diagnostics"}, false)
+    if plan == {
+        .Request(.Diagnostics(base, head)) -> { assert_eq(base, "base.jet"); assert_eq(head, "head.jet") }
+        else -> panic("diagnostic mode incorrectly validated a receipt")
+    }
+    bad :: jet_cli_review_arguments([String]{"review", "base.jet", "head.jet", "--receipt"}, true)
+    if bad == {
+        .Refused(output) -> { assert_eq(output.exit_code, 2); assert(output.stdout.contains("`--receipt` needs a receipt path")) }
+        else -> panic("meaning mode accepted a missing receipt")
+    }
+}
+#Test("review usage and input errors retain code fix and exit class") {
+    usage :: jet_cli_review_arguments([String]{"review", "base.jet"}, true)
+    if usage == {
+        .Refused(output) -> { assert_eq(output.exit_code, 2); assert(output.stdout.contains("E2104")); assert(output.stdout.contains("base.jetproof")) }
+        else -> panic("review accepted one path")
+    }
+    input :: jet_cli_review_input_error("é.jet", "checker failed", true)
+    assert_eq(input.exit_code, 1)
+    assert(input.stdout.contains("could not review `é.jet`: checker failed"))
+    assert(input.stdout.contains("E2105"))
+    receipt :: jet_cli_review_receipt_error("receipt is invalid", true)
+    assert_eq(receipt.exit_code, 1)
+    assert(receipt.stdout.contains("provide a readable `.jetproof` receipt"))
+}
+#Test("review authority ignores checkout display but retains term differences") {
+    old := jet_cli_review_authority_empty()
+    new := jet_cli_review_authority_empty()
+    old.display["/old/checkout"] = true
+    new.display["/new/checkout"] = true
+    jet_cli_review_add_detail_facts(&old, "granted effects: FS.Read, Net,none, FS.Read; authority: /old/checkout host; audited", "/old/checkout")
+    jet_cli_review_add_detail_facts(&new, "granted effects: Net,FS.Read; authority: /new/checkout host; audited", "/new/checkout")
+    assert(jet_cli_review_same_authority(old, new))
+    assert_eq(jet_cli_review_classify_authority_change(Val(old), Val(new)), None)
+    new.terms["status=changed"] = true
+    assert_eq(jet_cli_review_classify_authority_change(Val(old), Val(new)), Val("changed"))
+}
+#Test("review authority grants and denials compare by subset in both directions") {
+    old := jet_cli_review_authority_empty()
+    new := jet_cli_review_authority_empty()
+    old.granted["FS.Read"] = true
+    new.granted["FS.Read"] = true
+    new.granted["Net"] = true
+    assert_eq(jet_cli_review_classify_authority_change(Val(old), Val(new)), Val("widened"))
+    assert_eq(jet_cli_review_classify_authority_change(Val(new), Val(old)), Val("narrowed"))
+    old.denied["Exec"] = true
+    new.denied["Rand"] = true
+    assert_eq(jet_cli_review_classify_authority_change(Val(old), Val(new)), Val("changed"))
+    assert_eq(jet_cli_review_classify_authority_change(None, Val(jet_cli_review_authority_empty())), Val("widened"))
+    assert_eq(jet_cli_review_classify_authority_change(Val(jet_cli_review_authority_empty()), None), Val("narrowed"))
+    assert_eq(jet_cli_review_classify_authority_change(None, None), None)
+}
+#Test("review authority display and effect lists are deterministic and exact") {
+    fact := jet_cli_review_authority_empty()
+    fact.display["z"] = true
+    fact.display["a"] = true
+    assert_eq(jet_cli_review_authority_display(fact), "a | z")
+    assert_eq(jet_cli_review_effect_list(" FS.Read,none, ,Net,FS.Read "), [String]{"FS.Read", "Net", "FS.Read"})
+    assert_eq(jet_cli_review_sorted_join([String]{"z", "a", "z"}), "a,z")
+}
+#Test("review canonical claim identities preserve object insertion order and no braces") {
+    value :: foundation_json_parse("{{\"z\":[1,true,null],\"a\":\"é\"}}") ?? panic("fixture")
+    assert_eq(jet_cli_review_canonical_json(value), "\"z\":[1,true,null],\"a\":\"é\"")
+    assert_eq(jet_cli_review_contract_identity(foundation_json_parse("{{\"marker\":\"m\",\"observation\":\"o\",\"text\":\"ignored\"}}") ?? panic("fixture")), "marker=m|observation=o")
+    assert_eq(jet_cli_review_claim_key(review_test_object("{{\"claimId\":\"first\",\"claim\":\"second\"}}")), "claimId:first")
+    assert_eq(jet_cli_review_claim_key(review_test_object("{{\"contract\":{{\"marker\":\"m\"}},\"source\":{{\"path\":\"p\",\"line\":3}}}}")), "contract=marker=m|observation=|source.path=\"p\"")
+    assert_eq(jet_cli_review_claim_key(review_test_object("{{\"id\":\"x\"}}")), "id:x")
+    assert_eq(jet_cli_review_claim_key(review_test_object("{{}}")), "anonymous")
+}
+#Test("review unrecorded receipt differs from recorded empty receipt") {
+    assert(!jet_cli_review_missing_receipt().recorded)
+    empty :: review_test_decode("{{}}") ?? panic("recorded empty receipt")
+    assert(empty.recorded)
+    assert_eq(empty.claims.len(), 0)
+    assert(empty.proof_receipt != None)
+    assert_eq(empty.claim_key, None)
+}
+#Test("review decoding preserves wrapper precedence empty claim key and complete state fallback") {
+    receipt :: review_test_decode("{{\"claim_key\":\"\",\"claimKey\":\"not-selected\",\"proofReport\":{{\"evidence\":[{{\"claim\":\"x\",\"result\":\"pass\",\"completeness\":{{\"state\":\"complete\"}}}}]}},\"proof_report\":{{\"evidence\":42}}}}") ?? panic("wrapper precedence")
+    assert_eq(receipt.claim_key, None)
+    claim :: receipt.claims.get("claim:x") ?? panic("claim")
+    assert_eq(claim.outcome, "pass")
+    assert_eq(claim.state, "complete")
+    assert(!claim.proven)
+    assert_eq(claim.observation, None)
+}
+#Test("review malformed and duplicate receipt rows retain exact refusals") {
+    if review_test_decode("{{\"derivations\":42}}") == {
+        .Err(error) -> assert_eq(error.message, "receipt `proof.jetproof` has invalid derivations: expected a DataTree array")
+        .Ok(_) -> panic("invalid derivation array accepted")
+    }
+    if review_test_decode("{{\"derivations\":[{{\"id\":\"x\"}},{{\"id\":\"x\"}}]}}") == {
+        .Err(error) -> assert_eq(error.message, "receipt `proof.jetproof` has duplicate derivation ids")
+        .Ok(_) -> panic("duplicate derivation accepted")
+    }
+    if review_test_decode("{{\"evidence\":[{{\"claim\":\"x\"}},{{\"claim\":\"x\"}}]}}") == {
+        .Err(error) -> assert_eq(error.message, "receipt `proof.jetproof` has duplicate evidence claim `claim:x`")
+        .Ok(_) -> panic("duplicate claim accepted")
+    }
+    if review_test_decode("{{\"evidence\":[null]}}") == {
+        .Err(error) -> assert_eq(error.message, "receipt `proof.jetproof` has invalid evidence item: expected a DataTree object")
+        .Ok(_) -> panic("null evidence item accepted")
+    }
+    if review_test_decode("{{\"evidence\":false}}") == {
+        .Err(error) -> assert_eq(error.message, "receipt `proof.jetproof` has invalid evidence: expected a DataTree array")
+        .Ok(_) -> panic("nonarray evidence accepted")
+    }
+    if review_test_decode("{{\"derivations\":[{{}}]}}") == {
+        .Err(error) -> assert_eq(error.message, "receipt `proof.jetproof` has invalid derivation: derivation has no id")
+        .Ok(_) -> panic("missing derivation id accepted")
+    }
+}
+#Test("review derivation references prefer table to inline fields") {
+    receipt :: review_test_decode("{{\"derivations\":[{{\"id\":\"d\",\"method\":\"formal_proof\",\"disposition\":\"current\"}}],\"evidence\":[{{\"claim\":\"x\",\"derivation\":{{\"id\":\"d\",\"method\":\"sampled_agreement\"}}}}]}}") ?? panic("table derivation")
+    assert((receipt.claims.get("claim:x") ?? panic("claim")).proven)
+    if jet_cli_review_string_array_field(review_test_object("{{\"premises\":[1]}}"), "premises") == {
+        .Err(error) -> assert_eq(error.message, "premises has a non-text item")
+        .Ok(_) -> panic("nontext premise accepted")
+    }
+    if jet_cli_review_parse_derivation_identity(Val(DataTree.Int{value: 1})) == {
+        .Err(error) -> assert_eq(error.message, "derivation identity is invalid: expected a DataTree object")
+        .Ok(_) -> panic("invalid identity accepted")
+    }
+}
+#Test("review event wins over counterexample and proof requires current universal derivation") {
+    parsed :: jet_cli_review_parse_derivation_observation(Val(foundation_json_parse("{{\"event\":\"e\",\"counterexample\":\"c\"}}") ?? panic("fixture"))) ?? panic("event")
+    observation :: parsed ?? panic("missing event")
+    assert_eq(observation.event_id, Val("e"))
+    assert_eq(observation.counterexample_id, None)
+    assert(jet_cli_review_is_proven_derivation(review_test_derivation("static_derivation", "current", "x")))
+    assert(jet_cli_review_is_proven_derivation(review_test_derivation("formal_proof", "current", "x")))
+    assert(!jet_cli_review_is_proven_derivation(review_test_derivation("sampled_agreement", "current", "x")))
+    assert(!jet_cli_review_is_proven_derivation(review_test_derivation("recorded_execution", "current", "x")))
+    assert(!jet_cli_review_is_proven_derivation(review_test_derivation("formal_proof", "stale", "x")))
+}
+#Test("review observation checks missing before different and keeps identity mismatch order") {
+    a := review_test_claim("formal_proof", "current", "pass:complete", 0).observation ?? panic("observation")
+    b := ~a
+    a.contract = ""
+    b.contract = "different"
+    a.inputs = ""
+    b.environment = "different"
+    b.premises = ""
+    b.identity = None
+    assert_eq(jet_cli_review_observation_mismatches(a, b), [String]{"observation contract is missing", "declared inputs are missing", "relevant environment identity differs", "numerical or scheduling premises are missing", "build identity is missing", "run identity is missing", "target identity is missing"})
+}
+#Test("review comparison distinguishes universal sampled unproved and differing events") {
+    checked :: review_test_claim("formal_proof", "current", "pass:complete", 0)
+    assert_eq(jet_cli_review_compare_observations("x", checked, checked), None)
+    sampled :: review_test_claim("sampled_agreement", "current", "pass:complete", 0)
+    assert_eq((jet_cli_review_compare_observations("x", sampled, checked) ?? panic("sampled")).status, "sampled_agreement")
+    stale :: review_test_claim("formal_proof", "stale", "pass:complete", 0)
+    assert_eq((jet_cli_review_compare_observations("x", stale, checked) ?? panic("stale")).status, "unproved")
+    different :: review_test_claim("formal_proof", "current", "fail:complete", 0)
+    assert_eq((jet_cli_review_compare_observations("x", checked, different) ?? panic("difference")).status, "first_difference")
+    missing :: review_test_claim("formal_proof", "current", "pass:unknown", 0)
+    assert_eq((jet_cli_review_compare_observations("x", checked, missing) ?? panic("missing result")).reason, "comparable event result is missing")
+}
+#Test("review receipt loss outranks change and first difference follows evidence order not key") {
+    old := [String:JetCLIReviewClaim]{}
+    new := [String:JetCLIReviewClaim]{}
+    old["a"] = review_test_claim("formal_proof", "current", "pass:complete", 9)
+    new["a"] = review_test_claim("formal_proof", "current", "fail:complete", 9)
+    old["z"] = review_test_claim("formal_proof", "current", "pass:complete", 1)
+    new["z"] = review_test_claim("formal_proof", "current", "fail:complete", 1)
+    old["lost"] = review_test_claim("formal_proof", "current", "pass:complete", 3)
+    new["lost"] = review_test_claim("formal_proof", "stale", "pass:complete", 3)
+    diff :: jet_cli_review_receipt_diff(review_test_receipt(old), review_test_receipt(new))
+    assert_eq(diff.lost, 1)
+    assert_eq((diff.first_difference ?? panic("first difference")).key, "z")
+    assert_eq(diff.unproved.len(), 1)
+    assert_eq(jet_cli_review_verdict([JetCLIReviewAuthorityChange]{}, diff), "proof lost")
+    widened :: [JetCLIReviewAuthorityChange]{JetCLIReviewAuthorityChange{status: "changed", key: "authority", before: None, after: None}}
+    assert_eq(jet_cli_review_verdict(widened, diff), "authority widened and proof lost")
+}
+#Test("review retained claims include unmatched unproved rows without promoting them") {
+    old := [String:JetCLIReviewClaim]{}
+    new := [String:JetCLIReviewClaim]{}
+    old["unproved-only"] = review_test_claim("recorded_execution", "current", "pass:complete", 2)
+    checked :: review_test_claim("formal_proof", "current", "pass:complete", 0)
+    old["checked"] = checked
+    new["checked"] = checked
+    new["gained"] = checked
+    diff :: jet_cli_review_receipt_diff(review_test_receipt(old), review_test_receipt(new))
+    assert_eq(diff.retained, 2)
+    assert_eq(diff.gained, 1)
+    assert_eq(diff.preserved.len(), 1)
+    assert_eq(diff.changed_contracts.len(), 1)
+    assert_eq(jet_cli_review_verdict([JetCLIReviewAuthorityChange]{}, diff), "reviewable")
+}
+fn review_test_operation(identity: String, source: String?) -> ReviewSemanticOp Never! {
+    ReviewSemanticOp{kind: ReviewOpKind.BodyChanged, stable_id: "stable", identity, before: None, after: None, before_identity: None, after_identity: None, alignment: ReviewAlignment.Matched, source_operation: source}
+}
+#Test("review source linking keeps first matching operation across exact and suffix identities") {
+    old := [String:JetCLIReviewClaim]{}
+    new := [String:JetCLIReviewClaim]{}
+    old["claim"] = review_test_claim("formal_proof", "current", "pass:complete", 0)
+    new["claim"] = review_test_claim("formal_proof", "current", "fail:complete", 0)
+    diff := jet_cli_review_receipt_diff(review_test_receipt(old), review_test_receipt(new))
+    meaning :: [ReviewSemanticOp]{review_test_operation("module::target", Val("recorded-first")), review_test_operation("target", Val("later-exact"))}
+    jet_cli_review_link_source_operations(&diff, meaning)
+    assert_eq((diff.first_difference ?? panic("difference")).source_operation, Val("recorded-first"))
+    jet_cli_review_link_source_operations(&diff, [ReviewSemanticOp]{review_test_operation("not-a-boundary-target", Val("must-not-match"))})
+    assert_eq((diff.first_difference ?? panic("difference")).source_operation, Val("recorded-first"))
+}
+#Test("review diagnostic exact identity survives incomplete coverage and changed entry source") {
+    row :: review_test_diagnostic("E1001", 2, 5)
+    base :: review_test_side([Diagnostic]{row}, false)
+    head := review_test_side([Diagnostic]{row}, false)
+    head.input_revisions["entry.jet"] = "changed"
+    diff :: jet_cli_review_compare_diagnostics(base, head)
+    assert_eq(diff.existing.len(), 1)
+    assert_eq(diff.unknown.len(), 0)
+    assert_eq((diff.existing[0].base ?? panic("occurrence")).identity, Val("E1001|entry.jet|2:5"))
+}
+#Test("review diagnostic new resolved ambiguous and spanless rows stay distinct") {
+    base :: review_test_side([Diagnostic]{review_test_diagnostic("E1001", 1, 2)}, true)
+    head :: review_test_side([Diagnostic]{review_test_diagnostic("E2002", 1, 2)}, true)
+    diff :: jet_cli_review_compare_diagnostics(base, head)
+    assert_eq(diff.new.len(), 1)
+    assert_eq(diff.resolved.len(), 1)
+    repeated :: review_test_side([Diagnostic]{review_test_diagnostic("E1001", 1, 2), review_test_diagnostic("E1001", 1, 2)}, true)
+    ambiguous :: jet_cli_review_compare_diagnostics(base, repeated)
+    assert_eq(ambiguous.unknown.len(), 3)
+    assert_eq(ambiguous.existing.len(), 0)
+    missing := review_test_diagnostic("E3003", 0, 0)
+    missing.span = None
+    spanless :: jet_cli_review_compare_diagnostics(review_test_side([Diagnostic]{missing}, true), review_test_side([Diagnostic]{}, true))
+    assert_eq(spanless.unknown[0].reason, "diagnostic occurrence identity is unavailable")
+}
+#Test("review unmatched diagnostic refusals preserve incomplete location and dependency precedence") {
+    base :: review_test_side([Diagnostic]{review_test_diagnostic("E1001", 1, 2)}, true)
+    moved :: review_test_side([Diagnostic]{review_test_diagnostic("E1001", 3, 4)}, true)
+    diff :: jet_cli_review_compare_diagnostics(base, moved)
+    assert_eq(diff.unknown.len(), 2)
+    assert_eq(diff.unknown[0].reason, "same-code occurrence has a different location in the compatible scope")
+    incomplete :: jet_cli_review_compare_diagnostics(base, review_test_side([Diagnostic]{}, false))
+    assert_eq(incomplete.unknown[0].reason, "one side has incomplete checker coverage")
+    dependency := review_test_diagnostic("E1001", 1, 2)
+    dependency.origin = Val(DiagnosticOrigin{display: "dep", path: "dep.jet", source: "source", revision: "revision"})
+    old :: review_test_side([Diagnostic]{dependency}, true)
+    new := review_test_side([Diagnostic]{dependency}, true)
+    new.input_revisions["dep.jet"] = "changed"
+    changed :: jet_cli_review_compare_diagnostics(old, new)
+    assert_eq(changed.unknown[0].reason, "diagnostic source snapshot changed in a dependency scope")
+}
+#Test("review diagnostic projection retains inferred origin byte spans and nullable fields") {
+    side :: review_test_side([Diagnostic]{}, true)
+    row :: review_test_diagnostic("E1001", 2, 5)
+    json :: jet_cli_review_diagnostic_value(row, side).json()
+    assert_eq(json, "{{\"code\":\"E1001\",\"severity\":\"error\",\"moment\":\"compile\",\"what\":\"what\",\"why\":\"why\",\"fix\":\"fix\",\"span\":{{\"start\":2,\"end\":5}},\"origin\":{{\"display\":\"entry.jet\",\"path\":\"entry.jet\",\"revision\":\"revision\",\"inferred\":true}},\"cause\":[],\"detail\":null}}")
+    assert_eq(jet_cli_review_diagnostic_origin_value(None, side, false).json(), "null")
+    explicit :: DiagnosticOrigin{display: "display", path: "actual", source: "source", revision: "revision"}
+    assert_eq(jet_cli_review_diagnostic_origin_value(Val(explicit), side, false).json(), "{{\"display\":\"display\",\"path\":\"actual\",\"revision\":\"revision\",\"inferred\":false}}")
+}
+#Test("review diagnostic report uses canonical status and preserves empty coverage payload") {
+    base :: review_test_side([Diagnostic]{}, true)
+    head :: review_test_side([Diagnostic]{}, false)
+    diff :: jet_cli_review_compare_diagnostics(base, head)
+    json :: jet_cli_review_render_diagnostic_json(base, head, diff)
+    assert(json.starts_with("{{\"schema\":\"jet.status/v1\",\"action\":\"review\",\"ok\":true,\"reports\":[],\"review\":"))
+    assert(json.contains("\"schema\":\"jet.diagnostic-review/v1\""))
+    assert(json.contains("\"counts\":{{\"new\":0,\"existing\":0,\"resolved\":0,\"unknown\":0}}"))
+    assert(json.contains("\"coverage\":{{\"status\":\"incomplete\",\"basis\":\"checker-bundle\"}}"))
+    assert_eq(jet_cli_review_render_diagnostic_text(base, head, diff), "diagnostics base valid=true complete=true count=0\ndiagnostics head valid=true complete=false count=0\n")
+}
+#Test("review proof report values retain all identity observation and null fields") {
+    record :: review_test_derivation("formal_proof", "current", "derivation")
+    json :: jet_cli_review_derivation_value(record).json()
+    assert(json.contains("\"identity\":{{\"source\":\"source\",\"build\":\"build\",\"run\":\"run\",\"target\":\"target\"}}"))
+    assert(json.contains("\"observation\":{{\"event\":\"event\",\"counterexample\":null}}"))
+    assert_eq(jet_cli_review_derivation_observation_value(None).json(), "null")
+    empty :: jet_cli_review_receipt_diff(jet_cli_review_missing_receipt(), jet_cli_review_missing_receipt())
+    assert_eq(jet_cli_review_render_text([ReviewSemanticOp]{}, [JetCLIReviewAuthorityChange]{}, empty, "reviewable"), "meaning    no semantic changes\nauthority  no authority changes\nclaims     +0 gained · 0 lost · 0 changed · 0 retained (base=missing head=missing)\nproof      preserved=0 changed_contracts=0 first_difference=false sampled_agreements=0 unknown=0 unproved=0\nverdict    reviewable\n")
+}

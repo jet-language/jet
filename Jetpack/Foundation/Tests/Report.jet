@@ -1,0 +1,69 @@
+// Shared Report.rs contract through the one Compiler/JetFoundation owner.
+// Jetpack status producers use StatusValue, never a parallel DataTree renderer.
+
+#Test("status values preserve insertion order nested arrays and JSON escaping") {
+    nested :: StatusValue.object(StatusFields.new().with("z", StatusValue.Integer{value: 2}).with("a", StatusValue.Null))
+    fields :: StatusFields.new().with("text", StatusValue.String{value: "é\n\""}).with("items", StatusValue.array([StatusValue]{StatusValue.Bool{value: false}, nested}))
+    assert_eq(StatusEnvelope.new("test", true).with_fields(fields).json_line(), "{{\"schema\":\"jet.status/v1\",\"action\":\"test\",\"ok\":true,\"reports\":[],\"text\":\"é\\n\\\"\",\"items\":[false,{{\"z\":2,\"a\":null}}]}}\n")
+}
+
+#Test("status field validation rejects duplicates reserved names and controls") {
+    fields :: StatusFields.new().with("x", StatusValue.Null)
+    if ^fields.try_with("x", StatusValue.Null) == {
+        .Ok(_) -> panic("duplicate accepted")
+        .Err(error) -> assert_eq(error.message, "duplicate status field `x`")
+    }
+    invalid_names :: [String]{"", "line\n"}
+    loop name in invalid_names {
+        if StatusFields.new().try_with(name, StatusValue.Null) == {
+            .Ok(_) -> panic("invalid name accepted")
+            .Err(error) -> assert_eq(error.message, "status field names must be non-empty and printable")
+        }
+    }
+    reserved_names :: [String]{"schema", "action", "ok", "reports"}
+    loop name in reserved_names {
+        if StatusEnvelope.new("test", true).with_field(name, StatusValue.Null).validate() == {
+            .Ok(_) -> panic("reserved name accepted")
+            .Err(error) -> assert_eq(error.message, "status field `{name}` is reserved")
+        }
+    }
+    assert(StatusEnvelope.new("", true).validate() == .Err(_))
+    assert(StatusEnvelope.new("line\n", true).validate() == .Err(_))
+}
+
+#Test("status conversion rejects non finite values even inside nested fields") {
+    infinity :: Float.INFINITY
+    nan :: Float.NAN
+    nonfinite :: [Float]{infinity, 0.0 - infinity, nan}
+    loop number in nonfinite {
+        value :: DataTree.Object([String: DataTree]{"nested": DataTree.Array([DataTree]{DataTree.Float(number)})})
+        if StatusValue.from_data_tree(value) == {
+            .Ok(_) -> panic("non finite status value accepted")
+            .Err(error) -> assert_eq(error.message, "status fields cannot contain non-finite numbers")
+        }
+    }
+    value :: StatusValue.parse("{{\"z\":1.0,\"a\":[null,true,\"é\"]}}") ?? panic("finite status JSON refused")
+    assert_eq(StatusEnvelope.new("parse", true).with_field("value", value).json(), "{{\"schema\":\"jet.status/v1\",\"action\":\"parse\",\"ok\":true,\"reports\":[],\"value\":{{\"z\":1,\"a\":[null,true,\"é\"]}}}}")
+}
+
+#Test("no fix reasons validate next actions and exclude edits in both directions") {
+    invalid_actions :: [String]{"", "  ", "next\nstep"}
+    loop next_action in invalid_actions -> assert(NoFixReason.try_new(NoFixReasonKind.Design, next_action) == .Err(_))
+    reason :: NoFixReason.try_new(NoFixReasonKind.Ambiguous, "choose one owner") ?? panic("reviewed action refused")
+    assert_eq(reason.kind.as_str(), "ambiguous")
+    assert(NoFixReasonKind.parse("unknown") == .Err(_))
+    report := ReportEnvelope.new("tool", "error", "E1340", "what", "why", "fix")
+    &report.set_no_fix_reason(reason) ?? panic("no fix refused")
+    edit :: ReportEdit.new(ReportPath.from_process("<test>"), ReportSpan.new(0, 1), "x", FixSafety.NeedsReview)
+    if &report.push_fix_edit(edit) == {
+        .Ok(_) -> panic("edit accepted alongside no fix reason")
+        .Err(error) -> assert_eq(error.message, "a report cannot carry fix_edits and no_fix_reason")
+    }
+    edited := ReportEnvelope.new("tool", "error", "E1340", "what", "why", "fix")
+    &edited.push_fix_edit(edit) ?? panic("edit refused")
+    if &edited.set_no_fix_reason(reason) == {
+        .Ok(_) -> panic("no fix reason accepted alongside edit")
+        .Err(error) -> assert_eq(error.message, "a report cannot carry fix_edits and no_fix_reason")
+    }
+    assert_eq(report.json(), "{{\"schema\":\"jet.report/v3\",\"moment\":\"tool\",\"severity\":\"error\",\"code\":\"E1340\",\"what\":\"what\",\"why\":\"why\",\"fix\":\"fix\",\"detail\":null,\"denial_kind\":null,\"call_chain\":[],\"scope_chain\":[],\"nearest_granting_scope\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"no_fix_reason\":{{\"kind\":\"ambiguous\",\"next\":\"choose one owner\"}},\"cause\":[],\"clears\":0}}")
+}

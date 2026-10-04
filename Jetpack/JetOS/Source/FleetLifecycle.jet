@@ -1,0 +1,111 @@
+// Complete Rust theme_fleet_lifecycle.rs render_fleet_host_script :216-241 and
+// write_lifecycle_facts :351-428. #4485 corrects implicit argv and embedded JSON
+// shell quoting; explicit command source remains verbatim. JSON operands are
+// printf %s DATA, so neither percent directives nor backslash escapes run.
+// FleetFacts owns artifact writing/launcher/model integration. Main's approved
+// default-command correction exports derived root/generation to child sh -c.
+// Rendering alone is not writer, launcher or native Fleet parity.
+// Lifecycle uses canonical SystemPlan. Native writer retains real Studio
+// jetos_make_executable (#4479/#3593), RootProjection unit links (#3593), and
+// process (#3594) prerequisites, without local replacements.
+
+pub fn jetos_render_fleet_host_script(fleet: String, host: String, system: String, target: String, push: String, proof: String, switch_cmd: String, health: String, rollback: String, graph_identity_json: String) -> String Never! {
+    operands :: "{jetos_shell_single_quote(foundation_json_quote(fleet))} {jetos_shell_single_quote(foundation_json_quote(host))} {jetos_shell_single_quote(foundation_json_quote(system))} {jetos_shell_single_quote(foundation_json_quote(target))} {jetos_shell_single_quote(graph_identity_json)}"
+    dry :: jetos_shell_single_quote("{{\"state\":\"dry-run\",\"fleet\":%s,\"host\":%s,\"system\":%s,\"target\":%s,\"graph_identity\":%s,\"generation\":\"%s\"}}\\n")
+    staged :: jetos_shell_single_quote("{{\"state\":\"staged\",\"fleet\":%s,\"host\":%s,\"system\":%s,\"target\":%s,\"graph_identity\":%s,\"generation\":\"%s\"}}\\n")
+    failed :: jetos_shell_single_quote("{{\"state\":\"rolled-back\",\"fleet\":%s,\"host\":%s,\"system\":%s,\"target\":%s,\"graph_identity\":%s,\"generation\":\"%s\"}}\\n")
+    deployed :: jetos_shell_single_quote("{{\"state\":\"deployed\",\"fleet\":%s,\"host\":%s,\"system\":%s,\"target\":%s,\"graph_identity\":%s,\"generation\":\"%s\",\"proofs\":[\"push\",\"remote-proof-before-switch\",\"health-window\"]}}\\n")
+    "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\ngeneration=$(cat \"$root/generation.txt\" 2>/dev/null || basename \"$root\")\nexport root generation\nproof_dir=${{JETOS_DEPLOY_PROOF_DIR:-$root/fleet/proofs}}\nmkdir -p \"$proof_dir\"\nproof_name={jetos_shell_single_quote("{fleet}-{host}.json")}\nproof_file=\"$proof_dir/$proof_name\"\nhost_label={jetos_shell_single_quote(host)}\npush_cmd={jetos_shell_single_quote(push)}\nproof_cmd={jetos_shell_single_quote(proof)}\nswitch_cmd={jetos_shell_single_quote(switch_cmd)}\nhealth_cmd={jetos_shell_single_quote(health)}\nrollback_cmd={jetos_shell_single_quote(rollback)}\nrun_step() {{\n  name=$1\n  cmd=$2\n  printf '%s\\n' \"jetos deploy $host_label: $name\"\n  sh -c \"$cmd\"\n}}\nif [ \"${{JETOS_FLEET_DRY_RUN:-}}\" = \"1\" ]; then\n  printf {dry} {operands} \"$generation\" > \"$proof_file\"\n  cat \"$proof_file\"\n  exit 0\nfi\nrun_step push \"$push_cmd\"\nrun_step proof \"$proof_cmd\"\nif [ \"${{JETOS_FLEET_STAGE_ONLY:-}}\" = \"1\" ]; then\n  printf {staged} {operands} \"$generation\" > \"$proof_file\"\n  cat \"$proof_file\"\n  exit 0\nfi\nrun_step switch \"$switch_cmd\"\nif ! sh -c \"$health_cmd\"; then\n  sh -c \"$rollback_cmd\" || true\n  printf {failed} {operands} \"$generation\" > \"$proof_file\"\n  cat \"$proof_file\"\n  exit 2\nfi\nprintf {deployed} {operands} \"$generation\" > \"$proof_file\"\ncat \"$proof_file\"\n"
+}
+
+// Pure complete output of the lifecycle writer, shared by native and byte tests.
+struct JetOSLifecycleRendering {
+    policy: String
+    channel: String
+    auto_upgrade: String
+    gc_script: String
+    channel_script: String
+    upgrade_script: String
+    enabled: Bool
+    service: String
+    timer: String
+}
+
+fn jetos_lifecycle_rendering(system: SystemPlan) -> JetOSLifecycleRendering Never! {
+    keep :: jetos_option_value(system, [String]{"packages.generations.keep", "deploy.generations.keep"}) ?? "10"
+    auto_upgrade :: jetos_option_value(system, [String]{"deploy.autoUpgrade.enable"}) ?? "false"
+    channel :: jetos_option_value(system, [String]{"packages.channel"}) ?? "locked"
+    schedule :: jetos_option_value(system, [String]{"deploy.autoUpgrade.schedule"}) ?? "daily"
+    enabled :: jetos_clean_bool_json(auto_upgrade) == "true"
+    JetOSLifecycleRendering{
+        policy: "{{\"kind\":\"jetos.lifecycle-policy\",\"keep_generations\":{foundation_json_quote(keep)},\"channel\":{foundation_json_quote(channel)},\"auto_upgrade\":{jetos_clean_bool_json(auto_upgrade)},\"schedule\":{foundation_json_quote(schedule)},\"gc\":\"explain-before-delete\",\"rollback_window\":\"kept-generations\",\"proof\":\"lifecycle-policy-ready\"}}",
+        channel: "{{\"kind\":\"jetos.channel-policy\",\"channel\":{foundation_json_quote(channel)},\"update_command\":\"sw/bin/jetos-channel-update\",\"proof\":\"channel-policy-ready\"}}",
+        auto_upgrade: "{{\"kind\":\"jetos.auto-upgrade\",\"enabled\":{jetos_clean_bool_json(auto_upgrade)},\"schedule\":{foundation_json_quote(schedule)},\"steps\":[\"fetch-channel\",\"build\",\"proof\",\"switch\",\"health\",\"rollback-on-fail\"],\"proof\":\"auto-upgrade-proof-gated\"}}",
+        gc_script: jetos_lifecycle_gc_script(system.name, keep),
+        channel_script: jetos_lifecycle_channel_script(channel),
+        upgrade_script: jetos_lifecycle_upgrade_script(system.name),
+        enabled: enabled,
+        service: "[Unit]\nDescription=jetos proof-gated auto-upgrade\n\n[Service]\nType=oneshot\nExecStart=/run/current-system/sw/bin/jetos-auto-upgrade\n",
+        timer: "[Unit]\nDescription=jetos auto-upgrade schedule\n\n[Timer]\nOnCalendar={schedule}\nUnit=jetos-auto-upgrade.service\n\n[Install]\nWantedBy=timers.target\n"
+    }
+}
+
+// Rust usize on the reference x64 host: optional '+', ASCII digits, u64 bound.
+// Keep policy JSON retains the original string even when the script falls back.
+fn jetos_lifecycle_keep(keep: String) -> Int Never! {
+    bytes :: keep.bytes()
+    if bytes.len() == 0 -> return 10
+    start :: if bytes[0] == 43 -> 1 else -> 0
+    if start == bytes.len() -> return 10
+    loop index in start..<bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if code < 48 || code > 57 -> return 10
+    }
+    value :: Int.parse(keep) ?? return 10
+    if value > 18446744073709551615 -> return 10
+    value
+}
+
+fn jetos_lifecycle_gc_script(host: String, keep: String) -> String Never! {
+    "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\nsystems=${{JETOS_SYSTEMS_DIR:-${{JETPACK_ROOT:-$HOME/.jetpack}}/systems}}\nlog=\"$systems/generations.log\"\nkeep={jetos_lifecycle_keep(keep)}\nhost={jetos_shell_single_quote(host)}\napply=false\nif [ \"${{1:-}}\" = \"--apply\" ]; then apply=true; fi\nmkdir -p \"$root/lifecycle\"\nout=\"$root/lifecycle/gc-plan.txt\"\n: > \"$out\"\nif [ ! -f \"$log\" ]; then\n  echo 'no generations log' | tee -a \"$out\"\n  exit 0\nfi\ncount=0\nsort -r \"$log\" | while IFS='\t' read -r created entry_host name path; do\n  [ \"$entry_host\" = \"$host\" ] || continue\n  count=$((count + 1))\n  if [ \"$count\" -le \"$keep\" ]; then\n    printf 'keep\\t%s\\t%s\\t%s\\treason=within-retention\\n' \"$created\" \"$name\" \"$path\" | tee -a \"$out\"\n  else\n    printf 'delete\\t%s\\t%s\\t%s\\treason=older-than-retention\\n' \"$created\" \"$name\" \"$path\" | tee -a \"$out\"\n    if [ \"$apply\" = true ]; then\n      rm -rf -- \"$path\"\n    fi\n  fi\ndone\n"
+}
+
+fn jetos_lifecycle_channel_script(channel: String) -> String Never! {
+    command :: "jetpack channel update {jetos_shell_single_quote(channel)}"
+    "#!/usr/bin/env sh\nset -eu\nchannel={jetos_shell_single_quote(channel)}\ndefault_cmd={jetos_shell_single_quote(command)}\ncmd=${{JETOS_CHANNEL_UPDATE_CMD:-$default_cmd}}\nsh -c \"$cmd\"\n"
+}
+
+fn jetos_lifecycle_upgrade_script(host: String) -> String Never! {
+    build :: jetos_shell_single_quote("jet os build {jetos_shell_single_quote(host)}")
+    proof :: jetos_shell_single_quote("jet os proof {jetos_shell_single_quote(host)}")
+    switch_cmd :: jetos_shell_single_quote("jet os switch {jetos_shell_single_quote(host)}")
+    rollback :: jetos_shell_single_quote("jet os rollback {jetos_shell_single_quote(host)}")
+    "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\nproof_dir=${{JETOS_LIFECYCLE_PROOF_DIR:-$root/lifecycle}}\nmkdir -p \"$proof_dir\"\nfetch=${{JETOS_UPGRADE_FETCH_CMD:-/run/current-system/sw/bin/jetos-channel-update}}\ndefault_build={build}\ndefault_proof={proof}\ndefault_switch={switch_cmd}\ndefault_rollback={rollback}\nbuild=${{JETOS_UPGRADE_BUILD_CMD:-$default_build}}\nproof=${{JETOS_UPGRADE_PROOF_CMD:-$default_proof}}\nswitch_cmd=${{JETOS_UPGRADE_SWITCH_CMD:-$default_switch}}\nhealth=${{JETOS_UPGRADE_HEALTH_CMD:-true}}\nrollback=${{JETOS_UPGRADE_ROLLBACK_CMD:-$default_rollback}}\nrun_step() {{ name=$1; shift; printf '%s\\n' \"jetos lifecycle: $name\"; sh -c \"$*\"; }}\nrun_step fetch \"$fetch\"\nrun_step build \"$build\"\nrun_step proof \"$proof\"\nrun_step switch \"$switch_cmd\"\nif run_step health \"$health\"; then\n  printf '{{\"kind\":\"jetos.auto-upgrade-proof\",\"state\":\"switched\",\"rollback\":\"available\",\"proof\":\"health-passed\"}}\\n' > \"$proof_dir/auto-upgrade-proof.json\"\nelse\n  sh -c \"$rollback\" || true\n  printf '{{\"kind\":\"jetos.auto-upgrade-proof\",\"state\":\"rolled-back\",\"rollback\":\"executed\",\"proof\":\"health-failed\"}}\\n' > \"$proof_dir/auto-upgrade-proof.json\"\n  exit 1\nfi\ncat \"$proof_dir/auto-upgrade-proof.json\"\n"
+}
+
+pub fn jetos_write_lifecycle_facts(dir: String, system: SystemPlan) IOError! -[FS, Env]> {
+    lifecycle_dir :: files.join(dir, "lifecycle")
+    bin_dir :: files.join(dir, "sw/bin")
+    unit_dir :: files.join(dir, "etc/systemd/system")
+    files.create_dir_all(lifecycle_dir)
+    files.create_dir_all(bin_dir)
+    files.create_dir_all(unit_dir)
+    rendered :: jetos_lifecycle_rendering(system)
+    files.write(files.join(lifecycle_dir, "policy.json"), rendered.policy)
+    files.write(files.join(lifecycle_dir, "channel.json"), rendered.channel)
+    files.write(files.join(lifecycle_dir, "auto-upgrade.json"), rendered.auto_upgrade)
+    gc_path :: files.join(bin_dir, "jetos-lifecycle-gc")
+    files.write(gc_path, rendered.gc_script)
+    jetos_make_executable(gc_path)
+    channel_path :: files.join(bin_dir, "jetos-channel-update")
+    files.write(channel_path, rendered.channel_script)
+    jetos_make_executable(channel_path)
+    upgrade_path :: files.join(bin_dir, "jetos-auto-upgrade")
+    files.write(upgrade_path, rendered.upgrade_script)
+    jetos_make_executable(upgrade_path)
+    if rendered.enabled {
+        files.write(files.join(unit_dir, "jetos-auto-upgrade.service"), rendered.service)
+        files.write(files.join(unit_dir, "jetos-auto-upgrade.timer"), rendered.timer)
+        jetos_enable_unit(unit_dir, "timers.target", "jetos-auto-upgrade.timer")
+    }
+}

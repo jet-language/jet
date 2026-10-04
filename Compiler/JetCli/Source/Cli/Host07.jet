@@ -1,0 +1,669 @@
+// Canonical Cli.Host private fragment.
+use jet as jet
+use jet_driver as Driver
+use jet_foundation.[Diagnostic, Severity, ExitCodes, Syntax, ApplicationAuthority, TEXT_NUL, StatusValue, StatusFields, ComptimeInput]
+use jet_cli.[NativeLinker, CmdDevTools]
+use jet_devserver.[WebHost, WebOutputAuthority, WatchSession, CanvasHostOptions, WATCH_POLL_INTERVAL_MS, stage_and_swap]
+use jet_semindex.SCHEMA_VERSION
+// GATE #4494: real native filesystem/process/env/monotonic time and once cells.
+use std.fs as fs
+use std.env as env
+use std.process.[Command, exit, id]
+use std.time.[Instant, Duration]
+use std.sync.LazyLock
+
+// Rust: Source/CmdCompile.rs:10270 run_fmt -> Compile/Format.jet:420 jet_cli_run_fmt.
+// Canonical JetCLIFormatOptions carries every flag: paths, stdin, stdin_path,
+// check, diff, changed, explicit_copies, simplify. FileResult maps to existing
+// JetCLIFormatSnapshot/Change/Rewrites, batch read/format preflight collects all
+// errors before commit, check sorts root-relative display (machine paths stay
+// original unless diff), shared policy preserves both error exits and notices.
+
+// Rust: Source/CmdCompile.rs:10554
+pub fn stem(file: String) -> String {
+    OSPath.new(file).file_stem().map(fn(value) { value.to_string_lossy() }).unwrap_or("out").replace(".", "_")
+}
+// Rust: Source/CmdCompile.rs:10562
+fn build_output_root(project_root: &OSPath) -> OSPath { project_root.join(".jet").join("build") }
+// Rust: Source/CmdCompile.rs:10566
+fn bin_path(project_root: &OSPath, file: String) -> OSPath { build_output_root(project_root).join(stem(file)) }
+// Rust: Source/CmdCompile.rs:10570
+fn programmable_build_target_name(output: &Driver.BuildCompileOutput) -> String? {
+    build :: output.build ?? return .None
+    default_target :: build.plan.default_target() ?? return .None
+    target_id :: default_target.id().0
+    target :: build.plan.targets().get(target_id) ?? return .None
+    if target.kind == .Executable { .Val(target.name.clone()) } else { .None }
+}
+// Rust: Source/CmdCompile.rs:10577
+fn build_artifact_path(project_root: &OSPath, file: String, target_name: String?) -> OSPath {
+    name :: target_name ?? return bin_path(project_root, file)
+    components := OSPath.new(name).components()
+    first :: &components.next()
+    second :: &components.next()
+    if first == .Val(.Normal(_)) && second.is_none() -> return build_output_root(project_root).join(name)
+    bin_path(project_root, file)
+}
+// Rust: Source/CmdCompile.rs:10596
+fn test_bin_path(project_root: &OSPath, path: &OSPath) -> OSPath {
+    build_output_root(project_root).join(".test_{stem(path.to_string_lossy())}.{id()}")
+}
+// Rust: Source/CmdCompile.rs:10604
+fn fuzz_bin_path(project_root: &OSPath, path: &OSPath) -> OSPath {
+    build_output_root(project_root).join(".fuzz_{stem(path.to_string_lossy())}.{id()}")
+}
+// Rust: Source/CmdCompile.rs:10616
+pub struct FuzzRunOpts {
+    pub iterations: U64?
+    pub time_budget_ms: U64?
+    pub seed: U64?
+    pub corpus: String?
+}
+// Rust: Source/CmdCompile.rs:10629
+pub fn run_fuzz(file: String, test_name: String?, opts: FuzzRunOpts, mode: OutputMode) {
+    replacement := "{Syntax.BINARY_NAME} test --grade=generated"
+    if opts.iterations == .Val(iterations) -> replacement = "{replacement} --iterations={iterations}"
+    replacement = "{replacement} {file}"
+    if test_name == .Val(name) -> replacement = "{replacement} {name}"
+    _ :: (opts.time_budget_ms, opts.seed, opts.corpus, mode)
+    cli_error("E2104", "`jet fuzz` is retired; use `{replacement}`")
+    exit(ExitCodes.USAGE)
+}
+
+// Rust: Source/CmdCompile.rs:10649
+fn package_build_fingerprint(file: String) -> String? Unit! {
+    (root, facts) :: load_pkg_manifest(file) ?? return Ok(.None)
+    resolver :: jet.Authority.AuthorityResolver.open(root) ?? return Err(())
+    maybe_entry :: facts.resolve_build_entry_checked(resolver) ?? return Err(())
+    entry :: maybe_entry ?? return Ok(.None)
+    raw :: entry.text() ?? return Err(())
+    source :: if entry.path.file_name().and_then(fn(name) { name.to_str() }) == .Val(Syntax.PACKAGE_FILE) { jet.Package.build_entry_source(raw).unwrap_or(raw) } else { raw }
+    entry_path :: entry.path.to_string_lossy()
+    bundle :: jet.Loader.load_entry_with_overlay(entry_path, .Val((entry.path, source)), false) ?? return Err(())
+    Ok(.Val(jet.SHA256.sha256_hex(jet.CanonicalAST.canonical_bytes(bundle))))
+}
+// Rust: Source/CmdCompile.rs:10677
+fn manifest_fingerprint(file: String) -> String? {
+    search_from :: OSPath.new(file).parent().unwrap_or(OSPath.new("."))
+    package_root :: jet.Loader.find_package_root_checked(search_from) ?? return .None
+    (unused_root, facts) :: load_pkg_manifest(file) ?? return if package_root.is_none() { .Val("") } else { .None }
+    build :: package_build_fingerprint(file).ok() ?? return .None
+    bytes := "jet.package-semantic.v2{TEXT_NUL}".bytes()
+    append_cache_field(&bytes, facts.semantic_digest())
+    append_cache_field(&bytes, build.unwrap_or(""))
+    .Val(jet.SHA256.sha256_hex(bytes))
+}
+// Rust: Source/CmdCompile.rs:10692
+fn debug_native_cache_event(event: String) {
+    path :: env.var("JET_DEBUG_NATIVE_CACHE_LOG") ?? return
+    if fs.OpenOptions.new().create(true).append(true).open(OSPath.new(path)) == .Ok(log) {
+        _ :: &log.write_all("{event}\n".bytes())
+    }
+}
+// Rust: Source/CmdCompile.rs:10705
+fn append_cache_field(bytes: &[U8], value: String) {
+    raw :: value.bytes()
+    &bytes.extend(raw.len().to_u64().to_be_bytes())
+    &bytes.extend(raw)
+}
+// Rust: Source/CmdCompile.rs:10710
+fn append_link_identity(bytes: &[U8], links: [String], root: OSPath?) {
+    loop link in links -> append_cache_field(&bytes, normalize_link_argument(link, root))
+    artifacts := [OSPath]{}
+    index := 0
+    loop index < links.len() {
+        argument :: links[index]
+        raw_path :: if argument == "-L" { links.get(index + 1).and_then(fn(value) { value.strip_prefix("native=") }) } else { argument.strip_prefix("native=") }
+        if raw_path == .Val(raw) -> collect_link_artifacts(resolve_link_path(raw, root), root, &artifacts)
+        index += if argument == "-L" { 2 } else { 1 }
+    }
+    loop link in links {
+        raw_path :: link.strip_prefix("link-arg=").filter(fn(path) { !path.starts_with("-Wl,") }) ?? next
+        collect_link_artifacts(resolve_link_path(raw_path, root), root, &artifacts)
+    }
+    identities := artifacts.map(fn(original) {
+        path :: fs.canonicalize(original).unwrap_or(original)
+        logical :: stable_link_path(path, root)
+        digest :: fs.read(path).map(fn(contents) { jet.SHA256.sha256_hex(contents) }).unwrap_or("unreadable")
+        (logical, digest)
+    })
+    &identities.sort()
+    &identities.dedup()
+    append_cache_field(&bytes, "jet-linked-artifacts.v1")
+    loop (path, digest) in identities {
+        append_cache_field(&bytes, path)
+        append_cache_field(&bytes, digest)
+    }
+}
+// Rust: Source/CmdCompile.rs:10766
+fn collect_link_artifacts(path: &OSPath, root: OSPath?, artifacts: &[OSPath]) {
+    project :: root ?? return
+    canonical :: fs.canonicalize(path).unwrap_or(path.clone())
+    if !canonical.starts_with(project) -> return
+    if canonical.is_file() {
+        if is_link_artifact(canonical) -> &artifacts.push(canonical)
+        return
+    }
+    entries :: fs.read_dir(canonical) ?? return
+    loop result in entries {
+        entry :: result ?? next
+        candidate :: entry.path()
+        if candidate.is_file() && is_link_artifact(candidate) -> &artifacts.push(candidate)
+    }
+}
+// Rust: Source/CmdCompile.rs:10791
+fn is_link_artifact(path: &OSPath) -> Bool {
+    path.extension().is_some_and(fn(extension) {
+        value :: extension.to_str()
+        value == .Val("a") || value == .Val("so") || value == .Val("dylib") || value == .Val("dll") || value == .Val("lib")
+    })
+}
+// Rust: Source/CmdCompile.rs:10800
+fn resolve_link_path(raw: String, root: OSPath?) -> OSPath {
+    path := OSPath.new(raw)
+    if !path.is_absolute() && root == .Val(project) -> path = project.join(path)
+    fs.canonicalize(path).unwrap_or(path)
+}
+// Rust: Source/CmdCompile.rs:10812
+fn stable_link_path(path: &OSPath, root: OSPath?) -> String {
+    rendered :: root.and_then(fn(project) { path.strip_prefix(project).ok() }).map(fn(relative) { "project/{relative.to_string_lossy()}" }).unwrap_or_else(fn() { path.to_string_lossy() })
+    rendered.replace("\\", "/")
+}
+// Rust: Source/CmdCompile.rs:10820
+fn normalize_link_argument(argument: String, root: OSPath?) -> String {
+    loop marker in ["native=", "dependency=", "link-arg=-Wl,-rpath,"] {
+        if argument.strip_prefix(marker) == .Val(raw_path) {
+            path :: resolve_link_path(raw_path, root)
+            return "{marker}{stable_link_path(path, root)}"
+        }
+    }
+    if argument.strip_prefix("link-arg=").filter(fn(path) { !path.starts_with("-Wl,") }) == .Val(raw_path) {
+        path :: resolve_link_path(raw_path, root)
+        return "link-arg={stable_link_path(path, root)}"
+    }
+    argument
+}
+// Rust: Source/CmdCompile.rs:10837
+fn native_cache_salt(toolchain: String, dependency_fingerprint: String, runtime_fingerprint: String, corelib_fingerprint: String, mode: String, target: String, instance_fingerprints: [String], bridge_identity: String?, comptime_inputs: [ComptimeInput], authority_identity: String?) -> String {
+    native_cache_salt_with_schema(NATIVE_CACHE_SALT_SCHEMA, toolchain, dependency_fingerprint, runtime_fingerprint, corelib_fingerprint, mode, target, instance_fingerprints, bridge_identity, comptime_inputs, authority_identity)
+}
+// Rust: Source/CmdCompile.rs:10863
+fn native_cache_salt_with_schema(schema: [U8], toolchain: String, dependency_fingerprint: String, runtime_fingerprint: String, corelib_fingerprint: String, mode: String, target: String, instance_fingerprints: [String], bridge_identity: String?, comptime_inputs: [ComptimeInput], authority_identity: String?) -> String {
+    instances := instance_fingerprints.clone()
+    &instances.sort()
+    inputs := comptime_inputs.map(fn(input) { (input.path, input.hash) })
+    &inputs.sort_unstable()
+    bytes := [U8]{}
+    &bytes.extend(schema)
+    loop value in [toolchain, dependency_fingerprint, runtime_fingerprint, corelib_fingerprint, mode, target, bridge_identity.unwrap_or("none")] -> append_cache_field(&bytes, value)
+    &bytes.extend(instances.len().to_u64().to_be_bytes())
+    loop instance in instances -> append_cache_field(&bytes, instance)
+    &bytes.extend(inputs.len().to_u64().to_be_bytes())
+    loop (path, hash) in inputs {
+        append_cache_field(&bytes, path)
+        append_cache_field(&bytes, hash)
+    }
+    if authority_identity == .Val(identity) {
+        append_cache_field(&bytes, "application-authority")
+        append_cache_field(&bytes, identity)
+    }
+    jet.SHA256.sha256_hex(bytes)
+}
+// Rust: Source/CmdCompile.rs:10914
+APPLICATION_AUTHORITY_CACHE_SCHEMA :: "jet-application-authority-cache-v1".bytes()
+// Rust: Source/CmdCompile.rs:10915
+NATIVE_CACHE_SALT_SCHEMA :: "jet-native-cache-salt-v7".bytes()
+// Rust: Source/CmdCompile.rs:10916
+NATIVE_CACHE_COMPILER_ABI :: "jet.native-cache-abi.v5"
+// Rust: Source/CmdCompile.rs:10918
+fn application_authority_cache_identity(authority: ApplicationAuthority?) -> String? {
+    selected :: authority ?? return .None
+    bytes := [U8]{}
+    &bytes.extend(APPLICATION_AUTHORITY_CACHE_SCHEMA)
+    append_cache_field(&bytes, selected.authority)
+    loop (name, holds) in [("required", selected.required_effects), ("granted", selected.granted_effects), ("denied", selected.denied_effects)] {
+        append_cache_field(&bytes, name)
+        &bytes.extend(holds.len().to_u64().to_be_bytes())
+        loop hold in holds -> append_cache_field(&bytes, hold)
+    }
+    .Val(jet.SHA256.sha256_hex(bytes))
+}
+// Rust: Source/CmdCompile.rs:10939
+fn command_identity(program: String, args: [String]) -> String {
+    command := Command.new(OSPath.new(program))
+    &command.args(args)
+    output :: &command.output() ?? return "unavailable:{err.kind():?}"
+    bytes := [U8]{}
+    &bytes.extend(output.status.code().unwrap_or(-1).to_i64().to_be_bytes())
+    &bytes.extend(output.stdout)
+    &bytes.extend(output.stderr)
+    jet.SHA256.sha256_hex(bytes)
+}
+// Rust: Source/CmdCompile.rs:10952
+fn rustc_identity() -> (String, String) {
+    command := Command.new(OSPath.new("rustc"))
+    &command.arg("-vV")
+    output :: &command.output() ?? {
+        unavailable :: "unavailable:{err.kind():?}"
+        return (unavailable.clone(), unavailable)
+    }
+    bytes := [U8]{}
+    &bytes.extend(output.status.code().unwrap_or(-1).to_i64().to_be_bytes())
+    &bytes.extend(output.stdout)
+    &bytes.extend(output.stderr)
+    verbose :: String.from_utf8_lossy(output.stdout)
+    backend :: verbose.lines().find(fn(line) { line.starts_with("LLVM version:") }).unwrap_or("LLVM version: unavailable")
+    (jet.SHA256.sha256_hex(bytes), backend)
+}
+// Rust: Source/CmdCompile.rs:10995
+// Compile-time semantic IDs are REQUIRED inputs, not optional environment values.
+NATIVE_TOOLCHAIN_IDENTITY :: LazyLock.new(fn() {
+    compiler_build :: jet.JET_COMPILER_BUILD_ID
+    (rustc, backend) :: rustc_identity()
+    linker_selection :: NativeLinker.for_target(.None)
+    (linker_driver, backend_name, backend_program) :: linker_selection.identity()
+    linker_name :: linker_driver.unwrap_or("system")
+    linker :: linker_driver.map(fn(name) { command_identity(name, ["--version"]) }).unwrap_or("system")
+    linker_backend_name :: backend_name.unwrap_or("system")
+    linker_backend_program_name :: backend_program.unwrap_or("system")
+    linker_backend :: backend_program.map(fn(name) { command_identity(name, ["--version"]) }).unwrap_or("system")
+    "abi={NATIVE_CACHE_COMPILER_ABI}\u{1}build={compiler_build}\u{1}version={jet.Manifest.COMPILER_VERSION}\u{1}semindex={SCHEMA_VERSION}\u{1}rustc-pin={jet.Doctor.RUSTC_VERSION_PIN}\u{1}rustc={rustc}\u{1}backend={backend}\u{1}linker-selection={linker_selection.label()}\u{1}linker-name={linker_name}\u{1}linker={linker}\u{1}linker-backend={linker_backend_name}\u{1}linker-backend-name={linker_backend_program_name}\u{1}linker-backend-identity={linker_backend}"
+})
+// Rust: Source/CmdCompile.rs:11019
+fn native_toolchain_identity() -> String { NATIVE_TOOLCHAIN_IDENTITY.get() }
+// Rust: Source/CmdCompile.rs:11026
+DEV_AOT_TOOLCHAIN_IDENTITY :: LazyLock.new(fn() {
+    "abi={NATIVE_CACHE_COMPILER_ABI}\u{1}build={jet.JET_COMPILER_BUILD_ID}\u{1}version={jet.Manifest.COMPILER_VERSION}\u{1}semindex={SCHEMA_VERSION}\u{1}backend=cranelift\u{1}runner={jet.JET_RUNNER_BUILD_ID}"
+})
+// Rust: Source/CmdCompile.rs:11038
+enum NativeKeyBackend { Rustc(String) Cranelift }
+// Rust: Source/CmdCompile.rs:11047
+impl NativeKeyBackend {
+    fn for_build(cranelift: Bool) -> NativeKeyBackend {
+        if cranelift { .Cranelift } else { .Rustc(native_toolchain_identity()) }
+    }
+}
+// Rust: Source/CmdCompile.rs:11060
+fn rustc_fallback_cache_key(cranelift_key: String) -> String {
+    bytes := "jet-native-rustc-fallback-v1{TEXT_NUL}".bytes()
+    append_cache_field(&bytes, cranelift_key)
+    append_cache_field(&bytes, native_toolchain_identity())
+    jet.SHA256.sha256_hex(bytes)
+}
+// Rust: Source/CmdCompile.rs:11067
+fn dependency_interface_fingerprint(bundle: &jet.AST.ProgramBundle) -> String {
+    interfaces := [(String, String, [U8])]{}
+    loop (dependency, root) in bundle.dep_roots {
+        loop (module_idx, module) in bundle.modules.enumerate() {
+            if !module.path.starts_with(root) -> next
+            loop item in module.items {
+                name :: if item == {
+                    .Func(def), .Struct(def), .Enum(def), .Trait(def), .Tag(def), .CodeModule(def) -> .Val(def.name)
+                    _ -> .None
+                }
+                public :: name.is_some_and(fn(value) { bundle.name_ledger.exported(module_idx, value) })
+                if public -> &interfaces.push((dependency.clone(), module.display.clone(), jet.CanonicalAST.canonical_fragment(item)))
+            }
+        }
+    }
+    &interfaces.sort_by(fn(a, b) { (a.0, a.1, a.2).cmp((b.0, b.1, b.2)) })
+    bytes := [U8]{}
+    loop (dependency, module, interface) in interfaces {
+        loop value in [dependency.bytes(), module.bytes(), interface] {
+            &bytes.extend(value.len().to_u64().to_be_bytes())
+            &bytes.extend(value)
+        }
+    }
+    jet.SHA256.sha256_hex(bytes)
+}
+// Rust: Source/CmdCompile.rs:11127
+fn setting_overrides_tag(settings: [String:String]) -> String {
+    if settings.is_empty() -> return "settings=default"
+    keys := settings.keys().collect()
+    &keys.sort()
+    fields := [String]{}
+    loop key in keys {
+        value :: settings[key]
+        &fields.push("{key.len()}:{key}{value.len()}:{value}")
+    }
+    "settings={fields.join("")}"
+}
+// Rust: Source/CmdCompile.rs:11141
+fn native_cache_key(file: String, profile: String, profile_tag: String, mode_tag: String, invocation_authority: ApplicationAuthority?) -> String? {
+    native_cache_key_with_toolchain(file, profile, profile_tag, mode_tag, native_toolchain_identity(), invocation_authority)
+}
+// Rust: Source/CmdCompile.rs:11157
+fn native_cache_key_with_source_closure(file: String, source_closure: [(OSPath, String)], profile: String, profile_tag: String, mode_tag: String, backend: NativeKeyBackend, invocation_authority: ApplicationAuthority?) -> String? {
+    native_cache_key_with_toolchain_and_overlays(file, profile, profile_tag, mode_tag, backend, source_closure, invocation_authority)
+}
+// Rust: Source/CmdCompile.rs:11180
+fn native_cache_key_with_toolchain(file: String, profile: String, profile_tag: String, mode_tag: String, toolchain_identity: String, invocation_authority: ApplicationAuthority?) -> String? {
+    native_cache_key_with_toolchain_and_overlays(file, profile, profile_tag, mode_tag, .Rustc(toolchain_identity), [], invocation_authority)
+}
+// Rust: Source/CmdCompile.rs:11199
+fn native_cache_key_with_toolchain_and_overlays(file: String, profile: String, profile_tag: String, mode_tag: String, backend: NativeKeyBackend, overlays: [(OSPath, String)], invocation_authority: ApplicationAuthority?) -> String? {
+    debug_native_cache_event("key-entry pid={id()} file={file} profile={profile_tag} mode={mode_tag}")
+    if env.var_os("JET_PROVE_FRESH_TEST").is_some() {
+        debug_native_cache_event("key-none prove-fresh")
+        return .None
+    }
+    bundle := jet.Loader.load_entry_with_overlays(file, overlays, false) ?? {
+        debug_native_cache_event("key-none load")
+        return .None
+    }
+    if program_uses_embed(bundle) {
+        debug_native_cache_event("key-none embed")
+        return .None
+    }
+    if Driver.seed_build_facts(&bundle, profile, false, [String:String]{}).is_err() {
+        debug_native_cache_event("key-none seed-facts")
+        return .None
+    }
+    if jet.Sema.check_bundle(&bundle, .Check).any(fn(diagnostic) { diagnostic.severity == .Error }) {
+        debug_native_cache_event("key-none sema")
+        return .None
+    }
+    native_cache_key_for_program(file, bundle, profile_tag, mode_tag, backend, invocation_authority)
+}
+// Rust: Source/CmdCompile.rs:11256
+fn native_cache_key_for_prepared_build(file: String, prepared: Driver.PreparedBuildFrontEnd?, profile_tag: String, mode_tag: String, backend: NativeKeyBackend, invocation_authority: ApplicationAuthority?) -> String? {
+    program :: prepared.and_then(fn(value) { value.emitted_program() }) ?? {
+        debug_native_cache_event("program-key-none no-emitted-program")
+        return .None
+    }
+    native_cache_key_for_program(file, program, profile_tag, mode_tag, backend, invocation_authority)
+}
+// Rust: Source/CmdCompile.rs:11290
+fn native_cache_key_for_program(file: String, bundle: &jet.AST.ProgramBundle, profile_tag: String, mode_tag: String, backend: NativeKeyBackend, invocation_authority: ApplicationAuthority?) -> String? {
+    debug_native_cache_event("program-key-entry pid={id()} file={file} profile={profile_tag} mode={mode_tag} modules={bundle.modules.len()}")
+    if env.var_os("JET_PROVE_FRESH_TEST").is_some() {
+        debug_native_cache_event("program-key-none prove-fresh")
+        return .None
+    }
+    (toolchain_identity, runtime_fingerprint, corelib_fingerprint) :: if backend == {
+        .Rustc(identity) -> {
+            devtools_policy :: Driver.release_devtools_policy_for_bundle(bundle, profile_tag)
+            (identity, jet.Codegen.cached_runtime_fingerprint_with_policy(devtools_policy), jet.Codegen.corelib_emission_fingerprint_with_policy(bundle, mode_tag.starts_with("test"), devtools_policy))
+        }
+        .Cranelift -> (DEV_AOT_TOOLCHAIN_IDENTITY.get(), "", "")
+    }
+    if !native_cacheable_program(bundle) -> return .None
+    bridge_identity :: jet.FFI.prepare(bundle).map(fn(link) { link.map(fn(value) { value.cache_identity }) }) ?? return .None
+    instances := [String]{}
+    loop module in bundle.modules {
+        loop item in module.items {
+            if item == .CodeModule(cm) && cm.instance_identity == .Val(identity) -> &instances.push(identity.fingerprint.clone())
+        }
+    }
+    dependency_interfaces :: dependency_interface_fingerprint(bundle)
+    manifest :: manifest_fingerprint(file) ?? {
+        debug_native_cache_event("program-key-none manifest")
+        return .None
+    }
+    // Selected target dossier, never host OS or CPU facts. GATE #4483.
+    target_identity :: jet.SHA256.sha256_hex(bundle.build_facts.target_dossier.cache_bytes(bundle.build_facts.target_triple))
+    authority_identity :: application_authority_cache_identity(invocation_authority)
+    salt :: native_cache_salt(toolchain_identity, "{manifest}:{dependency_interfaces}", runtime_fingerprint, corelib_fingerprint, mode_tag, target_identity, instances, bridge_identity, bundle.comptime_inputs, authority_identity)
+    canonical :: jet.CanonicalAST.canonical_bytes(bundle)
+    canonical_fingerprint :: jet.SHA256.sha256_hex(canonical)
+    key :: jet.CanonicalAST.ast_cache_key(bundle, profile_tag, salt, bundle.build_facts)
+    if env.var("JET_DEBUG_NATIVE_CACHE_LOG") == .Ok(path) {
+        line :: "pid={id()} file={file} profile={profile_tag} mode={mode_tag} canonical={canonical_fingerprint} toolchain={jet.SHA256.sha256_hex(toolchain_identity.bytes())} dependency={dependency_interfaces} runtime={runtime_fingerprint} corelib={corelib_fingerprint} manifest={manifest} salt={salt} key={key} instances={instances:?} comptime_inputs={bundle.comptime_inputs:?}\n"
+        if fs.OpenOptions.new().create(true).append(true).open(OSPath.new(path)) == .Ok(log) -> _ :: &log.write_all(line.bytes())
+    }
+    debug_native_cache_event("program-key-ok pid={id()} file={file} key={key}")
+    .Val(key)
+}
+// Rust: Source/CmdCompile.rs:11425
+fn program_uses_embed(bundle: &jet.AST.ProgramBundle) -> Bool {
+    bundle.modules.any(fn(module) { module.source.contains(Syntax.BUILTIN_EMBED_FILE) || module.source.contains(Syntax.BUILTIN_EMBED_BYTES) })
+}
+// Rust: Source/CmdCompile.rs:11434
+fn program_uses_game_runtime(bundle: &jet.AST.ProgramBundle) -> Bool { bundle.modules.any(fn(module) { module.source.contains("core.game") }) }
+// Rust: Source/CmdCompile.rs:11443
+fn native_cacheable_program(bundle: &jet.AST.ProgramBundle) -> Bool {
+    !bundle.cffi.links_c() && !jet.FFI.collect_externs(bundle).any(fn(entry) { entry.c_abi })
+}
+// Rust: Source/CmdCompile.rs:11452
+fn inject_game_crash_reporter_bootstrap(rust_code: &String, game_runtime: Bool) {
+    if !game_runtime -> return
+    // Rust: Source/CmdCompile.rs:11456
+    MAIN :: "fn main() {\n"
+    main_start := rust_code.find(MAIN) ?? return
+    // Rust: Source/CmdCompile.rs:11460
+    MARKER_DECL :: "\n#[used]\nstatic JET_GAME_CRASH_REPORTER_BOOTSTRAP_MARKER: &[u8] = b\"jet-game-crash-reporter-v1\";\n"
+    if !rust_code.contains("JET_GAME_CRASH_REPORTER_BOOTSTRAP_MARKER") -> &rust_code.insert_str(main_start, MARKER_DECL)
+    main_start = rust_code.find(MAIN).unwrap_or(main_start)
+    insertion :: "    jet_game_crash_reporter_install_from_manifest();\n"
+    body_start :: main_start + MAIN.len()
+    if rust_code.slice(body_start..<rust_code.len()).starts_with(insertion) -> return
+    &rust_code.insert_str(body_start, insertion)
+}
+// Rust: Source/CmdCompile.rs:11480
+pub fn validate_target(triple: String, mode: OutputMode) {
+    if jet.Doctor.probe_target_component(triple) == .Err(error) {
+        needs_install_hint :: if error == { .SysrootUnavailable, .LibraryUnavailable(_) -> true; _ -> false }
+        fix :: error.fix(triple)
+        diag :: jet.Sema.e3302(triple)
+        src :: "// cross-build for {triple}"
+        report_problems(mode, "<target>", src, [diag])
+        if needs_install_hint -> write_mode_diagnostic(mode, " why: {fix}\n")
+        exit(ExitCodes.USER_ERROR)
+    }
+}
+
+// Rust: Source/CmdCompile.rs:11507
+struct WebRustcIncrementalSession {
+    root: OSPath
+    pid: U32
+    // GATE #4499: native-path equality/order keys; never display strings.
+    process_roots: [OSPath:OSPath]
+    reused_dirs: U64
+    // Rust: Source/CmdCompile.rs:11515
+    fn new(build_root: &OSPath) -> WebRustcIncrementalSession {
+        WebRustcIncrementalSession{root: build_root.join(".jet-web-incremental"), pid: id(), process_roots: [OSPath:OSPath]{}, reused_dirs: 0}
+    }
+    // Rust: Source/CmdCompile.rs:11524
+    fn prepare_dir(&self, identity: String, emit_maps: Bool, has_ffi: Bool) -> OSPath Err! {
+        identity_root :: self.root.join(identity)
+        fs.create_dir_all(identity_root) ?? return Err("error: couldn't prepare Web rustc incremental cache {identity_root.display()}: {err}")
+        self.prune_stale_siblings(identity_root)
+        process_root :: identity_root.join(self.pid.to_string())
+        fs.create_dir_all(process_root) ?? return Err("error: couldn't prepare Web rustc process cache {process_root.display()}: {err}")
+        self.process_roots[process_root.clone()] = identity_root
+        dir :: process_root.join(if emit_maps { "debug" } else { "release" }).join(if has_ffi { "ffi" } else { "plain" })
+        fs.create_dir_all(dir) ?? return Err("error: couldn't prepare Web rustc incremental cache {dir.display()}: {err}")
+        if fs.read_dir(dir).ok().and_then(fn(&entries) { &entries.next() }).is_some() -> self.reused_dirs = self.reused_dirs.saturating_add(1)
+        Ok(dir)
+    }
+    // Rust: Source/CmdCompile.rs:11567 (cfg(test) observation).
+    fn reused_dirs(&self) -> U64 { self.reused_dirs }
+    // Rust: Source/CmdCompile.rs:11571
+    fn prune_stale_siblings(&self, identity_root: &OSPath) {
+        proc_root :: OSPath.new("/proc")
+        if !proc_root.is_dir() -> return
+        entries :: fs.read_dir(identity_root) ?? return
+        loop result in entries {
+            entry :: result ?? next
+            path :: entry.path()
+            file_type :: entry.file_type() ?? next
+            if !file_type.is_dir() -> next
+            pid :: U32.parse(entry.file_name().to_string_lossy()) ?? next
+            if pid != self.pid && !proc_root.join(pid.to_string()).is_dir() -> _ :: fs.remove_dir_all(path)
+        }
+    }
+    // Rust: Source/CmdCompile.rs:11596
+    fn cleanup(&self) {
+        roots :: &self.process_roots.take()
+        keys := roots.keys().collect()
+        &keys.sort()
+        loop process_root in keys {
+            _ :: fs.remove_dir_all(process_root)
+            _ :: fs.remove_dir(roots[process_root])
+        }
+    }
+}
+// Rust: Source/CmdCompile.rs:11605
+impl Close for WebRustcIncrementalSession { fn close(&self) { self.cleanup() } }
+
+// Rust: Source/CmdCompile.rs:11613
+pub fn run_dev_web(file: String, profile: &BuildProfile, mode: OutputMode, verbose: Bool, port: U16?, canvas: Bool, canvas_options: CanvasHostOptions?, setting_overrides: [String:String]) {
+    release_policy :: release_devtools_policy_for_profile(profile)
+    path :: OSPath.new(file)
+    if !path.exists() {
+        cli_error_fix("E2105", "can't find the file `{file}`", "check the spelling, or run {Syntax.BINARY_NAME} from the folder that contains it")
+        exit(ExitCodes.USER_ERROR)
+    }
+    project_root :: jet.build_project_root(file) ?? {
+        source :: fs.read_to_string(path).unwrap_or("")
+        report_problems(mode, file, source, err)
+        exit(ExitCodes.USER_ERROR)
+    }
+    static_root :: build_output_root(project_root)
+    rustc_incremental_session := WebRustcIncrementalSession.new(static_root)
+    host :: if canvas {
+        options :: canvas_options.unwrap_or(CanvasHostOptions.default())
+        WebHost.bind_web_with_canvas_options_and_policy(file, static_root, verbose, port, options, release_policy.clone())
+    } else { WebHost.bind_with_policy(file, static_root, verbose, port, release_policy) } ?? {
+        if canvas { emit_cli_diagnostic_with_fix("E2105", err, "close the existing Canvas session or choose another `--canvas-port`") } else { write_mode_diagnostic(mode, "{err}\n") }
+        exit(ExitCodes.USER_ERROR)
+    }
+    resident_session :: host.resident_session()
+    _project_rebuild_executor :: resident_session.register_project_rebuild_executor() ?? {
+        write_mode_diagnostic(mode, "{err}\n")
+        &rustc_incremental_session.cleanup()
+        exit(ExitCodes.USER_ERROR)
+    }
+    watch := WatchSession.open(path) ?? {
+        write_mode_diagnostic(mode, jet.render_all_colored(file, "", [err], mode.color_stderr()))
+        &rustc_incremental_session.cleanup()
+        exit(ExitCodes.USER_ERROR)
+    }
+    if rebuild_dev_web(file, profile, mode, verbose, false, host, setting_overrides, &rustc_incremental_session).is_err() {
+        &rustc_incremental_session.cleanup()
+        exit(ExitCodes.USER_ERROR)
+    }
+    if canvas {
+        host.start_canvas()
+        CmdDevTools.open_canvas_browser(host.canvas_url())
+    } else { host.start() }
+    loop {
+        &watch.wait_for_change_for(.Val(Duration.from_millis(WATCH_POLL_INTERVAL_MS)))
+        if host.exit_code() == .Val(code) {
+            &rustc_incremental_session.cleanup()
+            exit(code)
+        }
+        if &watch.poll() == .Val(receipt) {
+            if receipt.change_kinds.all(fn(kind) { kind == "stale" }) -> next
+            _ :: rebuild_dev_web(file, profile, mode, verbose, true, host, setting_overrides, &rustc_incremental_session)
+            &watch.acknowledge(receipt) ?? {
+                write_mode_diagnostic(mode, jet.render_all_colored(file, "", [err], mode.color_stderr()))
+                &rustc_incremental_session.cleanup()
+                exit(ExitCodes.USER_ERROR)
+            }
+        }
+        if resident_session.take_project_rebuild() == {
+            .Ok(.Val(request)) -> {
+                result :: rebuild_dev_web(file, profile, mode, verbose, true, host, setting_overrides, &rustc_incremental_session)
+                resident_session.finish_project_rebuild(request, result) ?? write_mode_diagnostic(mode, "{err}\n")
+            }
+            .Ok(.None) -> {}
+            .Err(error) -> write_mode_diagnostic(mode, "{error}\n")
+        }
+    }
+}
+// Rust: Source/CmdCompile.rs:11777
+#Error
+struct DevWebBuildFailure {
+    message: String
+    source: String
+    diagnostics: [Diagnostic]
+    // Rust: Source/CmdCompile.rs:11784
+    fn host(message: String) -> DevWebBuildFailure {
+        DevWebBuildFailure{message: message, source: "", diagnostics: []}
+    }
+}
+// Rust: Source/CmdCompile.rs:11793
+fn rebuild_dev_web(file: String, profile: &BuildProfile, mode: OutputMode, verbose: Bool, is_rebuild: Bool, host: &WebHost, setting_overrides: [String:String], rustc_incremental_session: &WebRustcIncrementalSession) Err! {
+    _source_transaction :: host.lock_source_transaction()
+    result :: build_dev_web(file, profile, mode, verbose, is_rebuild, host, setting_overrides, &rustc_incremental_session)
+    if is_rebuild && mode.json -> emit_dev_rebuild_status(mode, file, host, result.as_ref().err())
+    result.map_err(fn(failure) { failure.message })
+}
+// Rust: Source/CmdCompile.rs:11824
+fn emit_dev_rebuild_status(mode: OutputMode, file: String, host: &WebHost, failure: DevWebBuildFailure?) {
+    revisions :: host.revision_facts()
+    revision :: fn(value: U64?) { value.map(StatusValue.from).unwrap_or(.Null) }
+    fields := StatusFields.new().with("file", file).with("candidate", revision(revisions.candidate)).with("diagnostic_revision", revision(revisions.diagnostic)).with("accepted_revision", revision(revisions.accepted)).with("last_good_revision", revision(revisions.accepted))
+    reports := []
+    if failure == .Val(value) {
+        if value.diagnostics.is_empty() {
+            fields = fields.with("error", value.message)
+        } else {
+            machine_file :: machine_report_path_for_process(file)
+            clears :: jet.Diagnostics.report_clear_counts(value.diagnostics)
+            reports = value.diagnostics.zip(clears).map(fn((diagnostic, count)) { diagnostic.to_report_with_clears(machine_file, value.source, count) })
+        }
+    }
+    rendered :: render_status_with_reports("dev.rebuild", failure.is_none(), reports, fields)
+    write_mode_machine(mode, "{rendered}\n")
+}
+// Rust: Source/CmdCompile.rs:11859
+fn build_dev_web(file: String, profile: &BuildProfile, mode: OutputMode, verbose: Bool, is_rebuild: Bool, host: &WebHost, setting_overrides: [String:String], rustc_incremental_session: &WebRustcIncrementalSession) DevWebBuildFailure! {
+    started :: Instant.now()
+    host.mark_building()
+    src :: fs.read_to_string(OSPath.new(file)).unwrap_or("")
+    project_root :: jet.build_project_root(file) ?? {
+        message :: jet.render_diagnostics(file, src, err)
+        if !is_rebuild -> report_problems(mode, file, src, err)
+        host.mark_error("E2105", message.clone(), is_rebuild)
+        return Err(DevWebBuildFailure{message: message, source: src, diagnostics: err})
+    }
+    out :: jet.compile_web_with_gates_and_profile_and_settings(file, jet.Policy.GateSet.default(), profile.budget_name(), setting_overrides) ?? {
+        if !is_rebuild -> report_problems(mode, file, src, err)
+        code :: err.first().map(fn(diagnostic) { diagnostic.code.to_string() }).unwrap_or("")
+        message :: jet.render_diagnostics(file, src, err)
+        host.mark_error(code, message.clone(), is_rebuild)
+        return Err(DevWebBuildFailure{message: message, source: src, diagnostics: err})
+    }
+    web :: out.web ?? {
+        message :: jet.Diagnostics.render_ice_report("missing web codegen output", "", false)
+        write_mode_diagnostic(mode, "{message}\n")
+        host.mark_error("ICE", message.clone(), is_rebuild)
+        return Err(DevWebBuildFailure.host(message))
+    }
+    build_root :: build_output_root(project_root)
+    staging :: build_root.join(".jet-dev-staging")
+    staging_authority :: WebOutputAuthority.open_or_create(staging, project_root) ?? {
+        message :: "error: couldn't open web staging output: {err}"
+        write_mode_diagnostic(mode, "{message}\n")
+        host.mark_error("ICE", message.clone(), is_rebuild)
+        return Err(DevWebBuildFailure.host(message))
+    }
+    write_web_artifacts(file, web, out.ffi, verbose, staging_authority, .Val(&rustc_incremental_session), true, mode) ?? {
+        write_mode_diagnostic(mode, "{err}\n")
+        host.mark_error("ICE", err.clone(), is_rebuild)
+        return Err(DevWebBuildFailure.host(err))
+    }
+    stage_and_swap(staging, build_root, project_root) ?? {
+        message :: "couldn't finalize web build: {err}"
+        write_mode_diagnostic(mode, "{message}\n")
+        host.mark_error("ICE", message.clone(), is_rebuild)
+        return Err(DevWebBuildFailure.host(message))
+    }
+    host.mark_ready(started.elapsed().as_millis(), is_rebuild)
+    Ok(())
+}
+// Rust: Source/CmdCompile.rs:11961
+pub struct WebBuildPaths {
+    pub manifest: OSPath
+    pub dom: OSPath
+    pub js: OSPath
+    pub js_map: OSPath?
+    pub wasm: OSPath
+    pub wasm_map: OSPath?
+    pub html: OSPath
+}
+// Rust: Source/CmdCompile.rs:11971-11988
+// write_web_artifacts (next fragment) owns disk paths, companion HTML selection,
+// authority writes and compiler failure; both build and dev call that one owner.

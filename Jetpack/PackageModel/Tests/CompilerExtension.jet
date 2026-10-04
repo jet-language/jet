@@ -12,7 +12,7 @@ fn pkg_test_extension_snapshot() -> TypedSnapshot {
 
 fn pkg_test_extension_response(severity: String) -> AnalyzeResponse {
     AnalyzeResponse{
-        protocol: @EXTENSION_PROTOCOL_VERSION,
+        protocol: EXTENSION_PROTOCOL_VERSION,
         findings: [ExtensionFinding]{ExtensionFinding{rule: "r", span_id: "sp1", message: "m", severity: severity}},
         proposed_edits: [ExtensionProposedEdit]{},
         artifacts: [String]{}
@@ -27,7 +27,7 @@ fn pkg_test_extension_error(result: ExtensionProtocolError) -> String {
 fn pkg_test_extension_too_deep() -> String {
     opens := [String]{}
     closes := [String]{}
-    loop _ in 0..<(@PKG_JSON_MAX_DEPTH + 1) {
+    loop _ in 0..<(PKG_JSON_MAX_DEPTH + 1) {
         &opens.push("[")
         &closes.push("]")
     }
@@ -39,31 +39,31 @@ fn pkg_test_extension_too_deep() -> String {
         TypeFact{id: "t-list", repr: "[Int]", shape: TypeFactShape.List{element_type_id: "t-int"}},
         TypeFact{id: "t-int", repr: "Int", shape: TypeFactShape.Scalar}
     }
-    imports :: [MirHostImportFact]{MirHostImportFact{id: "host-read", operation: "read_file", required_right: "FS.Read", parameter_type_ids: [String]{"t-list"}, result_type_id: Val("t-int")}}
+    imports :: [MIRHostImportFact]{MIRHostImportFact{id: "host-read", operation: "read_file", required_right: "FS.Read", parameter_type_ids: [String]{"t-list"}, result_type_id: Val("t-int")}}
     snapshot :: TypedSnapshot.new_with_imports(ExtensionAbility.v1_defaults(), types, [SymbolFact]{}, [SpanFact]{}, imports) ?? panic("valid structured snapshot")
-    decoded :: TypedSnapshot.decode(snapshot.encode() ?? panic("encode")) ?? panic("decode")
+    decoded :: TypedSnapshot.decode_bytes(snapshot.encode_bytes() ?? panic("encode")) ?? panic("decode")
     assert_eq(decoded.types, snapshot.types)
     assert_eq(decoded.host_imports, snapshot.host_imports)
 }
 
 #Test("dx5 hook1 world is distinct from application plugins and path helpers") {
     assert_eq(pkg_extension_mechanism(), PluginMechanism.CompilerExtension)
-    assert(@EXTENSION_WORLD_NAME != @EXTENSION_APPLICATION_PLUGIN_WORLD)
-    assert(pkg_extension_is_compiler_extension_world(@EXTENSION_WORLD_NAME))
-    assert(pkg_extension_is_application_plugin_world(@EXTENSION_APPLICATION_PLUGIN_WORLD))
-    assert(!pkg_extension_is_compiler_extension_world(@EXTENSION_APPLICATION_PLUGIN_WORLD))
-    assert(!pkg_extension_is_application_plugin_world(@EXTENSION_WORLD_NAME))
+    assert(EXTENSION_WORLD_NAME != EXTENSION_APPLICATION_PLUGIN_WORLD)
+    assert(pkg_extension_is_compiler_extension_world(EXTENSION_WORLD_NAME))
+    assert(pkg_extension_is_application_plugin_world(EXTENSION_APPLICATION_PLUGIN_WORLD))
+    assert(!pkg_extension_is_compiler_extension_world(EXTENSION_APPLICATION_PLUGIN_WORLD))
+    assert(!pkg_extension_is_application_plugin_world(EXTENSION_WORLD_NAME))
     assert(pkg_extension_mechanism() != PluginMechanism.PathHelper)
     assert(pkg_extension_mechanism() != PluginMechanism.ApplicationPlugin)
 }
 
 #Test("v1 wit world and protocol match dx5 hook1") {
-    assert_eq(@EXTENSION_PROTOCOL_VERSION, 1)
-    assert_eq(@EXTENSION_STAGE, "typed")
+    assert_eq(EXTENSION_PROTOCOL_VERSION, 1)
+    assert_eq(EXTENSION_STAGE, "typed")
     wit :: pkg_extension_wit_world()
-    assert(wit.contains("package {@EXTENSION_PACKAGE_NAME};"))
-    assert(wit.contains("world {@EXTENSION_WORLD_NAME}"))
-    assert(wit.contains("export {@EXTENSION_ANALYZE_EXPORT}:"))
+    assert(wit.contains("package {EXTENSION_PACKAGE_NAME};"))
+    assert(wit.contains("world {EXTENSION_WORLD_NAME}"))
+    assert(wit.contains("export {EXTENSION_ANALYZE_EXPORT}:"))
     assert(wit.contains("list<u8>"))
     assert(!wit.contains("world jetplugin"))
     assert(ExtensionAbility.v1_defaults().contains(ExtensionAbility.ReadTypes))
@@ -82,31 +82,31 @@ fn pkg_test_extension_too_deep() -> String {
 
 #Test("snapshot round trip is byte deterministic") {
     snapshot :: pkg_test_extension_snapshot()
-    first :: snapshot.encode() ?? panic("encode")
-    second :: snapshot.encode() ?? panic("encode again")
+    first :: snapshot.encode_bytes() ?? panic("encode")
+    second :: snapshot.encode_bytes() ?? panic("encode again")
     assert_eq(first, second)
     text :: String.from_bytes(first) ?? panic("snapshot bytes are UTF-8")
     assert(!text.contains(" "))
     assert(text.contains("\"effects\":[\"pure\"]"))
     assert(text.contains("\"provenance\":\"sema\""))
     assert(text.starts_with("{{\"abilities\":["))
-    decoded :: TypedSnapshot.decode(first) ?? panic("decode")
+    decoded :: TypedSnapshot.decode_bytes(first) ?? panic("decode")
     assert_eq(decoded, snapshot)
-    assert_eq(decoded.encode() ?? panic("re-encode"), first)
+    assert_eq(decoded.encode_bytes() ?? panic("re-encode"), first)
 }
 
 #Test("typed snapshot decode rejects nested and oversized json before conversion") {
     nested :: "{{\"abilities\":[],\"limits\":{{\"max_edits\":64,\"max_findings\":256,\"max_fuel\":10000000,\"max_memory_bytes\":16777216,\"max_response_bytes\":262144,\"max_table_elements\":10000,\"timeout_ms\":2000}},\"protocol\":1,\"spans\":[],\"stage\":\"typed\",\"symbols\":[],\"trust\":\"untrusted\",\"types\":{pkg_test_extension_too_deep()}}}"
-    if TypedSnapshot.decode(nested.bytes()) == {
+    if TypedSnapshot.decode_bytes(nested.bytes()) == {
         .Ok(_) -> panic("nested snapshot JSON must hit the depth cap")
         .Err(error) -> assert_eq(pkg_test_extension_error(error), "JSON exceeds maximum nesting depth")
     }
     snapshot :: pkg_test_extension_snapshot()
-    valid :: snapshot.encode() ?? panic("sample snapshot encodes")
-    assert_eq(TypedSnapshot.decode(valid) ?? panic("valid snapshot decodes"), snapshot)
+    valid :: snapshot.encode_bytes() ?? panic("sample snapshot encodes")
+    assert_eq(TypedSnapshot.decode_bytes(valid) ?? panic("valid snapshot decodes"), snapshot)
     oversized := valid
-    loop oversized.len() < @PKG_JSON_MAX_PROTOCOL_BYTES + 1 -> &oversized.push(U8{32})
-    if TypedSnapshot.decode(oversized) == {
+    loop oversized.len() < PKG_JSON_MAX_PROTOCOL_BYTES + 1 -> &oversized.push(U8{32})
+    if TypedSnapshot.decode_bytes(oversized) == {
         .Ok(_) -> panic("oversized snapshot JSON must hit the size cap")
         .Err(error) -> assert_eq(pkg_test_extension_error(error), "JSON input exceeds the 1 MiB limit")
     }
@@ -114,21 +114,21 @@ fn pkg_test_extension_too_deep() -> String {
 
 #Test("analyze response decode rejects nested and oversized json before conversion") {
     nested :: "{{\"artifacts\":[],\"findings\":{pkg_test_extension_too_deep()},\"protocol\":1,\"proposed_edits\":[]}}"
-    if AnalyzeResponse.decode(nested.bytes()) == {
+    if AnalyzeResponse.decode_bytes(nested.bytes()) == {
         .Ok(_) -> panic("nested response JSON must hit the depth cap")
         .Err(error) -> assert_eq(pkg_test_extension_error(error), "JSON exceeds maximum nesting depth")
     }
     response :: AnalyzeResponse{
-        protocol: @EXTENSION_PROTOCOL_VERSION,
+        protocol: EXTENSION_PROTOCOL_VERSION,
         findings: [ExtensionFinding]{ExtensionFinding{rule: "no-x", span_id: "sp1", message: "prefer y", severity: "warning"}},
         proposed_edits: [ExtensionProposedEdit]{ExtensionProposedEdit{span_id: "sp1", replacement: "y", rationale: "rename"}},
         artifacts: [String]{}
     }
-    valid :: response.encode() ?? panic("sample response encodes")
-    assert_eq(AnalyzeResponse.decode(valid) ?? panic("valid response decodes"), response)
+    valid :: response.encode_bytes() ?? panic("sample response encodes")
+    assert_eq(AnalyzeResponse.decode_bytes(valid) ?? panic("valid response decodes"), response)
     oversized := valid
-    loop oversized.len() < @PKG_JSON_MAX_PROTOCOL_BYTES + 1 -> &oversized.push(U8{32})
-    if AnalyzeResponse.decode(oversized) == {
+    loop oversized.len() < PKG_JSON_MAX_PROTOCOL_BYTES + 1 -> &oversized.push(U8{32})
+    if AnalyzeResponse.decode_bytes(oversized) == {
         .Ok(_) -> panic("oversized response JSON must hit the size cap")
         .Err(error) -> assert_eq(pkg_test_extension_error(error), "JSON input exceeds the 1 MiB limit")
     }
@@ -142,7 +142,7 @@ fn pkg_test_extension_too_deep() -> String {
         proposed_edits: [ExtensionProposedEdit]{ExtensionProposedEdit{span_id: "sp1", replacement: "y", rationale: "rename"}},
         artifacts: [String]{}
     }
-    raw :: response.encode() ?? panic("encode")
+    raw :: response.encode_bytes() ?? panic("encode")
     response.validate(snapshot, raw.len()) ?? panic("in-span response validates")
     again :: AnalyzeResponse.decode_and_validate(snapshot, raw) ?? panic("decode and validate")
     assert_eq(again.findings.len(), 1)
@@ -182,7 +182,7 @@ fn pkg_test_extension_too_deep() -> String {
 
 #Test("session lifecycle stages rolls back and closes") {
     snapshot :: pkg_test_extension_snapshot()
-    raw :: pkg_test_extension_response("warning").encode() ?? panic("encode")
+    raw :: pkg_test_extension_response("warning").encode_bytes() ?? panic("encode")
     session := ExtensionSession.new()
     assert_eq(session.phase(), ExtensionSessionPhase.Idle)
     &session.on_loaded(7) ?? panic("load")
@@ -208,7 +208,7 @@ fn pkg_test_extension_too_deep() -> String {
 
 #Test("accept then rollback refuses restage") {
     snapshot :: pkg_test_extension_snapshot()
-    raw :: pkg_test_extension_response("warning").encode() ?? panic("encode")
+    raw :: pkg_test_extension_response("warning").encode_bytes() ?? panic("encode")
     session := ExtensionSession.new()
     &session.on_loaded(3) ?? panic("load")
     _ :: &session.stage_response(snapshot, raw) ?? panic("stage")

@@ -1,0 +1,105 @@
+// Pure generated-runtime/Core crate splitting. Native cache owners consume
+// split_generated; bootstrap consumes split_runtime_crate (head in runtime).
+use jet_foundation.[pkg_bytes_text, pkg_bytes_code, pkg_bytes_starts_with]
+
+pub STORE_RUNTIME_CRATE_PREFIX :: prep { "#![allow(warnings)]\n" }
+pub STORE_RUNTIME_BEGIN :: prep { "// jet:cached-runtime-begin\n" }
+pub STORE_RUNTIME_END :: prep { "// jet:cached-runtime-end\n" }
+pub STORE_RUNTIME_CORE_BEGIN :: prep { "// jet:cached-core-begin\n" }
+pub STORE_RUNTIME_CORE_END :: prep { "// jet:cached-core-end\n" }
+// The runtime crate source (the runtime block followed by the Core block) and
+// the user program with both blocks replaced by one import of that crate.
+pub struct SplitGenerated {
+    pub runtime: String
+    pub program: String
+}
+
+// Split the marked runtime and Core blocks out of `generated`. None when the
+// program carries no runtime block.
+// Rust Result<_, String> failures use Err! with the original message unchanged.
+pub fn split_generated(generated: String) -> SplitGenerated? Err! {
+    raw :: generated.bytes()
+    begin_marker :: STORE_RUNTIME_BEGIN.bytes()
+    end_marker :: STORE_RUNTIME_END.bytes()
+    core_begin_marker :: STORE_RUNTIME_CORE_BEGIN.bytes()
+    core_end_marker :: STORE_RUNTIME_CORE_END.bytes()
+    begin :: store_runtime_find(raw, begin_marker, 0)
+    if begin < 0 -> return Ok(None)
+    if store_runtime_count(raw, begin_marker) != 1 || store_runtime_count(raw, end_marker) != 1 {
+        return Err("generated Rust has an invalid runtime marker pair")
+    }
+    runtime_start :: begin + begin_marker.len()
+    runtime_end :: store_runtime_find(raw, end_marker, runtime_start)
+    if runtime_end < 0 -> return Err("generated Rust has an unterminated runtime block")
+    after_runtime :: runtime_end + end_marker.len()
+    runtime :: pkg_bytes_text(raw, runtime_start, runtime_end)
+    core_begin :: store_runtime_find(raw, core_begin_marker, 0)
+    if core_begin < 0 && store_runtime_count(raw, core_end_marker) != 0 {
+        return Err("generated Rust has an invalid core marker pair")
+    }
+    if store_runtime_count(raw, core_begin_marker) > 1 || store_runtime_count(raw, core_end_marker) > 1 {
+        return Err("generated Rust has an invalid core marker pair")
+    }
+    prologue :: "{pkg_bytes_text(raw, 0, begin)}extern crate jet_runtime;\nuse jet_runtime::*;\n"
+    if core_begin < 0 {
+        program :: "{prologue}{pkg_bytes_text(raw, after_runtime, raw.len())}"
+        return Ok(Val(SplitGenerated{runtime, program}))
+    }
+    if core_begin < after_runtime -> return Err("generated Rust has nested runtime/core markers")
+    core_start :: core_begin + core_begin_marker.len()
+    core_end :: store_runtime_find(raw, core_end_marker, core_start)
+    if core_end < 0 -> return Err("generated Rust has an unterminated core block")
+    core_after :: core_end + core_end_marker.len()
+    program :: "{prologue}{pkg_bytes_text(raw, after_runtime, core_begin)}{pkg_bytes_text(raw, core_after, raw.len())}"
+    Ok(Val(SplitGenerated{runtime: "{runtime}{pkg_bytes_text(raw, core_start, core_end)}", program}))
+}
+
+// Non-overlapping occurrences of `needle` in `haystack` (`str::matches`).
+fn store_runtime_count(haystack: [U8], needle: [U8]) -> Int Never! {
+    count := 0
+    at := store_runtime_find(haystack, needle, 0)
+    loop at >= 0 {
+        count += 1
+        at = store_runtime_find(haystack, needle, at + needle.len())
+    }
+    count
+}
+
+pub struct RuntimeCrateSplit {
+    pub runtime_lib: String
+    pub program: String
+}
+
+// The text before the runtime block is its FFI hook, not program text. Export
+// that head together with the mutually dependent runtime/Core closure.
+// The Err! rail propagates split failures without replacing their messages.
+pub fn split_runtime_crate(generated: String) -> RuntimeCrateSplit? Err! {
+    found :: split_generated(generated) ?? return Err(err)
+    split :: found ?? return Ok(None)
+    raw :: generated.bytes()
+    begin :: store_runtime_find(raw, STORE_RUNTIME_BEGIN.bytes(), 0)
+    head :: pkg_bytes_text(raw, 0, if begin < 0 -> 0 else -> begin)
+    program_bytes :: split.program.bytes()
+    if !pkg_bytes_starts_with(program_bytes, 0, head.bytes()) {
+        return Err("split program does not start with the pre-runtime text")
+    }
+    program :: pkg_bytes_text(program_bytes, head.bytes().len(), program_bytes.len())
+    combined :: "{head}{split.runtime}"
+    Ok(Val(RuntimeCrateSplit{
+        runtime_lib: "{STORE_RUNTIME_CRATE_PREFIX}{export_crate_source(combined)}",
+        program,
+    }))
+}
+
+// Every needle here is a fixed Rust marker or punctuation/keyword. Each search
+// is O(input bytes), and occurrence counting advances past each match.
+fn store_runtime_find(haystack: [U8], needle: [U8], from: Int) -> Int Never! {
+    if needle.len() == 0 -> return from
+    last :: haystack.len() - needle.len()
+    at := if from < 0 -> 0 else -> from
+    loop at <= last {
+        if pkg_bytes_starts_with(haystack, at, needle) -> return at
+        at += 1
+    }
+    -1
+}

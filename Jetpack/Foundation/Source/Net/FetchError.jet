@@ -1,0 +1,126 @@
+// Portable policy from crates/jet-net/src/lib.rs (FetchError and :892-950).
+// This module does not open connections or grant destination authority.
+pub enum FoundationFetchErrorKind {
+    General
+    TLSHandshake
+    TLSCertificate
+    TLSTrustRoots
+}
+
+#Error
+pub enum FoundationFetchError {
+    IO(String)
+    HTTP(kind: FoundationFetchErrorKind, detail: String)
+    Scheme(String)
+
+    pub fn diagnostic_code(self) -> String Never! {
+        if self == {
+            .HTTP(.TLSHandshake, _) -> "E4201"
+            .HTTP(.TLSCertificate, _) -> "E4202"
+            .HTTP(.TLSTrustRoots, _) -> "E4203"
+            else -> "E3414"
+        }
+    }
+
+    pub fn diagnostic_what(self, url: String) -> String Never! {
+        host :: foundation_fetch_host_from_url(url)
+        if self == {
+            .HTTP(.TLSHandshake, _) -> "TLS handshake with `{host}` failed"
+            .HTTP(.TLSCertificate, _) -> "TLS certificate for `{host}` could not be trusted"
+            .HTTP(.TLSTrustRoots, _) -> "HTTPS could not find system certificate roots"
+            else -> "fetch failed: {self.to_string()}"
+        }
+    }
+
+    pub fn diagnostic_why(self, url: String) -> String Never! {
+        if self == {
+            .HTTP(.TLSHandshake, _) -> "`{url}` reached the server, but the connection did not complete a secure HTTPS handshake"
+            .HTTP(.TLSCertificate, _) -> "`{url}` presented a certificate Jet could not verify for that host"
+            .HTTP(.TLSTrustRoots, _) -> "Jet uses rustls with the system trust store for default HTTPS, but no usable roots were available"
+            else -> "could not retrieve `{url}`"
+        }
+    }
+
+    pub fn diagnostic_fix(self) -> String Never! {
+        if self == {
+            .HTTP(.TLSHandshake, _) -> "verify the URL points at an HTTPS server, not plain HTTP; for local tests, start the TLS fixture server"
+            .HTTP(.TLSCertificate, _) -> "use a certificate whose subject matches the host and chains to a trusted root; for tests, trust the local fixture CA explicitly"
+            .HTTP(.TLSTrustRoots, _) -> "install the system certificate bundle (for example `ca-certificates`) or run in an image that includes it"
+            else -> "check the URL is reachable and the network is available; use `file://` for a local path inside the compile-time source directory"
+        }
+    }
+
+    // Rust Display intentionally hides transport detail for the three TLS kinds.
+    pub fn to_string(self) -> String Never! {
+        if self == {
+            .IO(detail) -> detail
+            .Scheme(detail) -> detail
+            .HTTP(.General, detail) -> detail
+            .HTTP(.TLSHandshake, _) -> "TLS handshake failed"
+            .HTTP(.TLSCertificate, _) -> "TLS certificate could not be trusted"
+            .HTTP(.TLSTrustRoots, _) -> "HTTPS could not find system certificate roots"
+        }
+    }
+}
+
+// Rust FetchError::http; the detail is retained even when Display hides it.
+pub fn foundation_fetch_http_error(url: String, detail: String) -> FoundationFetchError Never! {
+    return FoundationFetchError.HTTP{kind: foundation_fetch_classify_http_error(url, detail), detail: detail}
+}
+
+// Rust fetch_with_root_timeout_and_http's unsupported-scheme error construction.
+// The transport owner uses this on its unsupported-scheme branch; no fetch here.
+pub fn foundation_fetch_scheme_error(url: String) -> FoundationFetchError Never! {
+    scheme :: url.split_once("://")?.before ?? url
+    return FoundationFetchError.Scheme("unsupported URL scheme `{scheme}`; expected `file://`, `http://`, or `https://`")
+}
+
+// Rust classify_http_error: ASCII folding only, root > certificate > handshake.
+pub fn foundation_fetch_classify_http_error(url: String, detail: String) -> FoundationFetchErrorKind Never! {
+    if !url.starts_with("https://") -> return FoundationFetchErrorKind.General
+    lower :: detail.to_ascii_lower()
+    if lower.contains("no valid certificates loaded")
+        || lower.contains("no root cert")
+        || lower.contains("no roots")
+        || lower.contains("empty root")
+        || lower.contains("trust store") {
+        return FoundationFetchErrorKind.TLSTrustRoots
+    }
+    if lower.contains("certificate")
+        || lower.contains("unknownissuer")
+        || lower.contains("notvalid")
+        || lower.contains("expired")
+        || lower.contains("hostname")
+        || lower.contains("cert") {
+        return FoundationFetchErrorKind.TLSCertificate
+    }
+    if lower.contains("tls")
+        || lower.contains("rustls")
+        || lower.contains("handshake")
+        || lower.contains("alert") {
+        return FoundationFetchErrorKind.TLSHandshake
+    }
+    FoundationFetchErrorKind.General
+}
+
+// Rust host_from_url is lexical: port/userinfo/query are NOT stripped, and
+// missing/empty hosts are NOT rejected. Core's validated URL parser differs.
+pub fn foundation_fetch_host_from_url(url: String) -> String Never! {
+    rest := url
+    if url.starts_with("https://") -> rest = url.removeprefix("https://")
+    else if url.starts_with("http://") -> rest = url.removeprefix("http://")
+    loop part in rest.split("/") -> return part
+    rest
+}
+
+// Rust resolve_redirect does not normalize a URL. In particular //other/path
+// is root-relative to the *current* authority, not an RFC scheme-relative URL.
+// Empty authority is preserved; transport must validate each resulting hop.
+pub fn foundation_fetch_resolve_redirect(current: String, location: String) -> String FoundationFetchError! {
+    if location.starts_with("https://") || location.starts_with("http://") -> return Ok(location)
+    if location.starts_with("/") {
+        parts :: current.split_once("://") ?? return Err(foundation_fetch_http_error(current, "redirect URL has no authority"))
+        loop authority in parts.after.split("/") -> return Ok("{parts.before}://{authority}{location}")
+    }
+    return Err(foundation_fetch_http_error(current, "redirect Location must be an absolute or root-relative URL"))
+}

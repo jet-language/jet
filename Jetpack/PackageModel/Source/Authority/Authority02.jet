@@ -1,0 +1,297 @@
+// PORT-PENDING 2095 crates-jet-pkg-model-src-authority-slice-1801: crates/jet-pkg-model/src/Authority.rs:1801-2093
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     const O_RDONLY: i32 = 0;
+//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS     const O_CLOEXEC: i32 = 0o2000000;
+//RS     #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS     const O_CLOEXEC: i32 = 0x01000000;
+//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS     const O_DIRECTORY: i32 = 0o200000;
+//RS     #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS     const O_DIRECTORY: i32 = 0x00100000;
+//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS     const O_NOFOLLOW: i32 = 0o400000;
+//RS     #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS     const O_NOFOLLOW: i32 = 0x0100;
+//RS 
+//RS     unsafe extern "C" {
+//RS         fn openat(directory: i32, path: *const c_char, flags: i32, ...) -> i32;
+//RS     }
+//RS 
+//RS     pub(super) fn open_root(path: &Path) -> io::Result<File> {
+//RS         OpenOptions::new()
+//RS             .read(true)
+//RS             .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+//RS             .open(path)
+//RS     }
+//RS 
+//RS     pub(super) fn open_relative(root: &File, relative: &Path, directory: bool) -> io::Result<File> {
+//RS         let components = relative.components().collect::<Vec<_>>();
+//RS         if components.is_empty() {
+//RS             return root.try_clone();
+//RS         }
+//RS         let mut current = root.try_clone()?;
+//RS         for (index, component) in components.iter().enumerate() {
+//RS             let Component::Normal(name) = component else {
+//RS                 return Err(io::Error::new(
+//RS                     io::ErrorKind::InvalidInput,
+//RS                     "authority path has unsupported components",
+//RS                 ));
+//RS             };
+//RS             let name = CString::new(name.as_bytes()).map_err(|_| {
+//RS                 io::Error::new(io::ErrorKind::InvalidInput, "authority path contains NUL")
+//RS             })?;
+//RS             let last = index + 1 == components.len();
+//RS             let flags = if last && !directory {
+//RS                 O_RDONLY | O_NOFOLLOW | O_CLOEXEC
+//RS             } else {
+//RS                 O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+//RS             };
+//RS             let fd = unsafe { openat(current.as_raw_fd(), name.as_ptr(), flags, 0) };
+//RS             if fd < 0 {
+//RS                 return Err(io::Error::last_os_error());
+//RS             }
+//RS             let opened = unsafe { File::from_raw_fd(fd) };
+//RS             if last {
+//RS                 return Ok(opened);
+//RS             }
+//RS             current = opened;
+//RS         }
+//RS         Err(io::Error::new(
+//RS             io::ErrorKind::InvalidInput,
+//RS             "authority path is empty",
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(not(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios"
+//RS )))]
+//RS mod platform {
+//RS     use super::*;
+//RS 
+//RS     pub(super) fn open_root(_path: &Path) -> io::Result<File> {
+//RS         Err(io::Error::new(
+//RS             io::ErrorKind::Unsupported,
+//RS             "descriptor-relative no-follow authority is unavailable on this platform",
+//RS         ))
+//RS     }
+//RS 
+//RS     pub(super) fn open_relative(_root: &File, _path: &Path, _directory: bool) -> io::Result<File> {
+//RS         Err(io::Error::new(
+//RS             io::ErrorKind::Unsupported,
+//RS             "descriptor-relative no-follow authority is unavailable on this platform",
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS fn is_symlink_error(error: &io::Error) -> bool {
+//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS     {
+//RS         return error.raw_os_error() == Some(40);
+//RS     }
+//RS     #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS     {
+//RS         return error.raw_os_error() == Some(62);
+//RS     }
+//RS     #[cfg(not(any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios"
+//RS     )))]
+//RS     {
+//RS         let _ = error;
+//RS         false
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod authority_walk_tests {
+//RS     use super::AuthorityResolver;
+//RS     use std::fs;
+//RS     use std::path::Path;
+//RS     fn temp_root(tag: &str) -> std::path::PathBuf {
+//RS         std::env::temp_dir().join(format!("jet-authority-walk-{tag}-{}", std::process::id()))
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn project_candidate_stays_pinned_but_shared_temp_does_not() {
+//RS         let parent = temp_root("candidate-parent");
+//RS         let root = parent.join("project");
+//RS         let _ = fs::remove_dir_all(&parent);
+//RS         fs::create_dir_all(&root).unwrap();
+//RS         fs::write(root.join("run.jet"), "fn run() {}\n").unwrap();
+//RS 
+//RS         let resolver = AuthorityResolver::open_for_authority_walk(&root)
+//RS             .unwrap()
+//RS             .expect("source directory is an authority candidate");
+//RS         assert_eq!(resolver.root(), fs::canonicalize(&root).unwrap());
+//RS 
+//RS         #[cfg(unix)]
+//RS         {
+//RS             use std::os::unix::fs::PermissionsExt;
+//RS             // Do not assume `std::env::temp_dir()` is world-writable: agent
+//RS             // scratch lives on disk under `$HOME` (jet-env rejects tmpfs /tmp).
+//RS             let shared = temp_root("shared-space");
+//RS             let _ = fs::remove_dir_all(&shared);
+//RS             fs::create_dir_all(&shared).unwrap();
+//RS             fs::write(shared.join("noise.jet"), "fn run() {}\n").unwrap();
+//RS             fs::set_permissions(&shared, fs::Permissions::from_mode(0o777)).unwrap();
+//RS             assert!(
+//RS                 AuthorityResolver::open_for_authority_walk(&shared)
+//RS                     .unwrap()
+//RS                     .is_none(),
+//RS                 "shared temp must stay discovery space"
+//RS             );
+//RS             fs::set_permissions(&shared, fs::Permissions::from_mode(0o700)).unwrap();
+//RS             fs::remove_dir_all(&shared).unwrap();
+//RS         }
+//RS         #[cfg(unix)]
+//RS         {
+//RS             use std::os::unix::fs::PermissionsExt;
+//RS             fs::set_permissions(&parent, fs::Permissions::from_mode(0o777)).unwrap();
+//RS         }
+//RS         #[cfg(unix)]
+//RS         assert!(
+//RS             AuthorityResolver::authority_walk_parent(&root).is_none(),
+//RS             "walk must stop before shared temp"
+//RS         );
+//RS 
+//RS         fs::remove_dir_all(parent).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn memoized_listing_sees_entries_created_after_it() {
+//RS         let root = temp_root("listing-memo");
+//RS         let _ = fs::remove_dir_all(&root);
+//RS         fs::create_dir_all(&root).unwrap();
+//RS         fs::write(root.join("notes.txt"), "not a source\n").unwrap();
+//RS         // Past the fine-grained settle window, so this listing is memoized.
+//RS         std::thread::sleep(std::time::Duration::from_millis(120));
+//RS         assert!(AuthorityResolver::open_for_authority_walk(&root)
+//RS             .unwrap()
+//RS             .is_none());
+//RS         assert!(AuthorityResolver::open_for_authority_walk(&root)
+//RS             .unwrap()
+//RS             .is_none());
+//RS 
+//RS         fs::write(root.join("run.jet"), "fn run() {}\n").unwrap();
+//RS         assert!(
+//RS             AuthorityResolver::open_for_authority_walk(&root)
+//RS                 .unwrap()
+//RS                 .is_some(),
+//RS             "a source created after the memoized listing must be seen"
+//RS         );
+//RS         fs::remove_file(root.join("run.jet")).unwrap();
+//RS         assert!(AuthorityResolver::open_for_authority_walk(&root)
+//RS             .unwrap()
+//RS             .is_none());
+//RS         fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn world_writable_candidate_is_not_an_authority_root() {
+//RS         use std::os::unix::fs::PermissionsExt;
+//RS 
+//RS         let root = temp_root("world-writable");
+//RS         let _ = fs::remove_dir_all(&root);
+//RS         fs::create_dir_all(&root).unwrap();
+//RS         fs::write(root.join("workspace.jet"), "module workspace {}\n").unwrap();
+//RS         fs::set_permissions(&root, fs::Permissions::from_mode(0o777)).unwrap();
+//RS 
+//RS         assert!(AuthorityResolver::open_for_authority_walk(&root)
+//RS             .unwrap()
+//RS             .is_none());
+//RS         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+//RS         fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     #[test]
+//RS     fn source_walk_prunes_nested_projects_before_hostile_entries() {
+//RS         use std::os::unix::fs::symlink;
+//RS 
+//RS         let root = temp_root("nested-project");
+//RS         let _ = fs::remove_dir_all(&root);
+//RS         fs::create_dir_all(&root).unwrap();
+//RS         fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+//RS 
+//RS         let sibling = root.join("sibling-scratch");
+//RS         fs::create_dir_all(sibling.join(".jet")).unwrap();
+//RS         fs::write(
+//RS             sibling.join("package.jet"),
+//RS             "name: \"nested\"\nversion: \"0.1.0\"\n",
+//RS         )
+//RS         .unwrap();
+//RS         fs::write(sibling.join(".jet/lock"), "hostile lock fixture\n").unwrap();
+//RS         let outside = root
+//RS             .parent()
+//RS             .unwrap()
+//RS             .join("jet-authority-walk-nested-project-outside.jet");
+//RS         let _ = fs::remove_file(&outside);
+//RS         fs::write(&outside, "not part of the parent project\n").unwrap();
+//RS         symlink(&outside, sibling.join("config.jet")).unwrap();
+//RS 
+//RS         let linked = root.join("linked-scratch");
+//RS         symlink(&sibling, &linked).unwrap();
+//RS 
+//RS         let resolver = AuthorityResolver::open(&root).unwrap();
+//RS         let files = resolver
+//RS             .discover_source_files()
+//RS             .expect("nested projects and linked directories are pruned");
+//RS         assert_eq!(
+//RS             files
+//RS                 .iter()
+//RS                 .map(|file| file.relative.clone())
+//RS                 .collect::<Vec<_>>(),
+//RS             vec![Path::new("main.jet").to_path_buf()]
+//RS         );
+//RS         fs::remove_dir_all(&root).unwrap();
+//RS         fs::remove_file(outside).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_walk_rejects_hostile_depth() {
+//RS         let root = temp_root("deep");
+//RS         let _ = fs::remove_dir_all(&root);
+//RS         fs::create_dir_all(&root).unwrap();
+//RS         let mut current = root.clone();
+//RS         for index in 0..=(crate::SHA256::MAX_TREE_DEPTH + 1) {
+//RS             current.push(format!("d{index}"));
+//RS             fs::create_dir(&current).unwrap();
+//RS         }
+//RS         fs::write(current.join("input.jet"), "// input\n").unwrap();
+//RS         let resolver = AuthorityResolver::open(&root).unwrap();
+//RS         let result = resolver.discover_source_files();
+//RS         assert!(matches!(
+//RS             result,
+//RS             Err(error) if error.to_string().contains("depth bound")
+//RS         ));
+//RS         fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn checked_file_rejects_oversized_eof_read() {
+//RS         let root = temp_root("oversized");
+//RS         let _ = fs::remove_dir_all(&root);
+//RS         fs::create_dir_all(&root).unwrap();
+//RS         let path = root.join("oversized.jet");
+//RS         let file = fs::File::create(&path).unwrap();
+//RS         file.set_len(crate::SHA256::MAX_TREE_FILE_BYTES + 1).unwrap();
+//RS         let resolver = AuthorityResolver::open(&root).unwrap();
+//RS         let result = resolver.checked_file(Path::new("oversized.jet"));
+//RS         assert!(matches!(
+//RS             result,
+//RS             Err(error) if error.to_string().contains("read bound")
+//RS         ));
+//RS         fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2095 crates/jet-pkg-model/src/Authority.rs:1801-2093
+

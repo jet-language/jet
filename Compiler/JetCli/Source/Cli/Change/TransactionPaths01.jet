@@ -1,0 +1,787 @@
+use core.files.host.retained_descriptor as transaction_io
+use core.files.runtime.kernel_path_components as transaction_paths
+use core.files.runtime.descriptor_metadata as transaction_metadata
+use core.files.runtime.kernel_path_components.[OSPath]
+use core.sys as sys
+use jet_cli.JSON
+use core.sys.target
+use jet_foundation.Hex.[encode]
+use jet_cli.CmdCodemod.[Lock, Journal, fail, hash_bytes, json_escape, unhex, now_nanos, parse_journal, write_new_at, unlink_at_checked, replace_journal_generation, secure_replace, validate_destinations, validate_fix_destinations, write_new_sync, path_identity]
+
+// All native descriptor operations below consume the sole retained Core ABI.
+// GATE #4494: escaping Close owners, descriptor loans and native calls.
+// GATE #4483: selected family/OS, usize bounds; #4409: exact IO error kinds.
+// GATE #4499: OSPath/FileID map keys preserve equality, not display strings.
+
+// Rust: Source/CmdCodemod/Transaction.rs:599
+pub fn lock(project: OSPath) -[FS, Env]> Lock {
+    project :: jet_cli_transaction_canonical_project(project) ?? fail(err.message)
+    dir :: jet_cli_transaction_validate_codemods_dir(project, true) ?? fail("could not securely open codemod directory: {err}")
+    path :: dir.join("codemod.lock")
+    if target.selected_family() == .Unix {
+        file :: transaction_io.open_directory(dir, transaction_io.OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false}) ?? fail("could not open codemod directory lock: {err}")
+        // Rust: Source/CmdCodemod/Transaction.rs:610 (flock LOCK_EX|LOCK_NB)
+        advisory :: file.acquire_lock(true) ?? fail("another codemod holds `{dir.display()}`")
+        project_file :: transaction_io.open_directory(project, transaction_io.OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false}) ?? fail("could not retain codemod project directory: {err}")
+        return Lock{project: ^project, dir: ^dir, project_file: Val(^project_file), _path: ^path, _file: .Directory(^file), advisory: Val(^advisory)}
+    }
+    options :: if target.selected_os() == .Windows -> transaction_io.CreateOptions{read: true, write: true, access_mode: Val(U32{0xc0010000}), share_mode: None, mode: None, delete_on_close: true, open_reparse_point: true}
+        else -> transaction_io.CreateOptions{read: false, write: true, access_mode: None, share_mode: None, mode: None, delete_on_close: false, open_reparse_point: false}
+    file :: transaction_io.create_new(path, options, Val(transaction_io.RemoveOnClose{path: path})) ?? fail("another codemod holds `{path.display()}`")
+    file.write_all("pid={sys.pid()}\n".bytes()) ?? fail("could not write codemod lock: {err}")
+    file.sync_all() ?? fail("could not sync codemod lock: {err}")
+    regular :: if file.stat() == { .Ok(metadata) -> metadata.is_file else -> false }
+    if !regular -> fail("codemod lock is not a regular file")
+    Lock{project: ^project, dir: ^dir, project_file: None, _path: ^path, _file: .Writer(^file), advisory: None}
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:686
+fn read_at_checked(dir: transaction_io.Directory, file_name: OSPath) -[FS.Read]> (transaction_io.FileReader, transaction_metadata.FileID, [U8]) IOError! {
+    // Rust: Source/CmdCodemod/Transaction.rs:698 openat(O_RDONLY|O_NOFOLLOW|O_CLOEXEC).
+    name :: transaction_paths.file_name_component(file_name) ?? return Err(jet_cli_transaction_invalid_input("NUL in codemod file name"))
+    tx_name(file_name, name, "NUL in codemod file name")
+    file :: dir.open_reader(file_name, name, tx_nofollow())
+    metadata :: file.stat()
+    if !metadata.is_file || metadata.nlink != U64{1} -> return Err(jet_cli_transaction_permission("opened codemod file is linked or not regular"))
+    size :: tx_read_size(metadata.size)
+    bytes := [U8].filled(size, U8{0})
+    offset := 0
+    loop offset < bytes.len() {
+        // GATE #4494: Rust FileExt.read_at, borrowed output slice; no seek/shared-offset substitute.
+        read :: file.read_at(&bytes[offset..], U64{offset})
+        if read == 0 -> return Err(tx_io_error(.UnexpectedEof, "codemod file changed while reading"))
+        offset += read
+    }
+    (^file, metadata.file_id, ^bytes)
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:744
+fn read_held(file: transaction_io.FileReader) -[FS.Read]> [U8] IOError! {
+    metadata :: file.stat()
+    bytes := [U8].filled(tx_read_size(metadata.size), U8{0})
+    offset := 0
+    loop offset < bytes.len() {
+        read :: file.read_at(&bytes[offset..], U64{offset}) // GATE #4494
+        if read == 0 -> return Err(tx_io_error(.UnexpectedEof, "held file changed while reading"))
+        offset += read
+    }
+    ^bytes
+}
+
+// Source-local projections only; IOError remains the canonical carrier.
+fn tx_read_size(size: U64) -> Int IOError! {
+    if size > target.usize_max() -> return Err(tx_io_error(.InvalidData, "file too large"))
+    Int{size}
+}
+fn tx_io_error(kind: IOErrorKind, message: String) -> IOError Never! {
+    IOError.from_kind(kind, IOContext{operation: .Read, resource: None, os_code: None, cause: Val(message)}) // GATE #4409
+}
+fn tx_nofollow() -> transaction_io.OpenOptions Never! {
+    transaction_io.OpenOptions{nofollow: true, cloexec: true, open_reparse_point: false}
+}
+fn tx_create(mode: U32?) -> transaction_io.CreateOptions Never! {
+    transaction_io.CreateOptions{read: false, write: true, access_mode: None, share_mode: None, mode, delete_on_close: false, open_reparse_point: false}
+}
+fn tx_name(path: OSPath, name: transaction_paths.PathComponent, message: String) IOError! {
+    loop index in name.span.start..<name.span.end {
+        if path.encoded[index] == U8{0} -> return Err(jet_cli_transaction_invalid_input(message))
+    }
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:768
+pub fn recover(lock: Lock) -[FS]> Unit {
+    if target.selected_family() == .Unix -> recover_unix(lock)
+    else -> fail("codemod recovery is unavailable on this platform until native handle-relative transactions are implemented")
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:776
+fn recover_unix(lock: Lock) -[FS]> Unit {
+    journal_name :: OSPath.from_text("transaction.journal")
+    (_, journal_id, journal_bytes) :: if read_at_checked(lock.directory(), journal_name) == {
+        .Ok(value) -> value
+        .Err(.NotFound(_)) -> return
+        .Err(error) -> fail("could not read recovery journal: {error}")
+    }
+    raw :: String.from_utf8(journal_bytes) ?? fail("recovery journal is not UTF-8")
+    if is_generate_journal(raw) { recover_generate_unix(lock, journal_id, raw); return }
+    parsed :: parse_journal(raw)
+    handles :: prepare_recovery_handles(lock, parsed)
+    records :: parsed.records
+    all_after := true
+    loop index in 0..<records.len() {
+        matches :: if read_held(handles[index].destination) == { .Ok(current) -> current == records[index].after else -> false }
+        if !matches { all_after = false; break }
+    }
+    if all_after {
+        log_name :: parsed.log_path.file_name() ?? panic("journal log name")
+        if read_at_checked(lock.directory(), log_name) == {
+            .Ok((_, _, current)) -> { if current != parsed.log -> fail("recovered replay log conflicts with transaction journal; journal preserved") }
+            .Err(.NotFound(_)) -> { _ :: write_new_at(lock.directory(), log_name, parsed.log) ?? fail("could not publish recovered replay log: {err}") }
+            .Err(error) -> fail("could not inspect recovered replay log: {error}")
+        }
+        loop index in 0..<records.len() { cleanup_recovery_temp(records[index], handles[index]) ?? fail("could not remove recovered temp: {err}") }
+        unlink_at_checked(lock.directory(), journal_name, journal_id) ?? fail("could not remove completed journal: {err}")
+        return
+    }
+    conflict := [String]{}
+    loop index in 0..<records.len() {
+        record :: records[index]
+        held :: handles[index]
+        current :: read_held(held.destination).unwrap_or_default()
+        if current == record.before -> continue
+        if current == record.after {
+            atomic_restore_held(record, held, record.before) ?? fail("could not recover `{record.path.display()}`: {err}")
+        } else {
+            &conflict.push("{record.path.display()} (current {hash_bytes(current)}, before {hash_bytes(record.before)}, after {hash_bytes(record.after)})")
+        }
+    }
+    if !conflict.is_empty() -> fail("codemod recovery found concurrent drift; journal preserved:\n  {conflict.join("\n  ")}")
+    loop index in 0..<records.len() { cleanup_recovery_temp(records[index], handles[index]) ?? fail("could not remove recovered temp: {err}") }
+    unlink_at_checked(lock.directory(), journal_name, journal_id) ?? fail("could not remove recovered journal: {err}")
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:855
+fn is_generate_journal(raw: String) -> Bool Never! {
+    root :: if JSON.parse(raw) == { .Ok(.Object(root)) -> root else -> return false }
+    if root.get("schema") == { .Val(.String(schema)) -> schema == "jet-generate-transaction-v1" else -> false }
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:866
+fn parse_generate_journal(raw: String) -> [GenerateRecord] {
+    root :: JSON.parse(raw).and_then(fn(value) { value.object() }) ?? fail("invalid generation recovery journal: {err}")
+    files :: if root.get("files") == {
+        .Val(.Array(files)) -> { if files.is_empty() -> fail("generation recovery journal has no files"); files }
+        else -> fail("generation recovery journal has no files")
+    }
+    string :: fn(object: [String: JSON.Value], key: String) -> String {
+        if object.get(key) == { .Val(.String(value)) -> value else -> fail("generation recovery journal missing `{key}`") }
+    }
+    boolean :: fn(object: [String: JSON.Value], key: String) -> Bool {
+        if object.get(key) == { .Val(.Bool(value)) -> value else -> fail("generation recovery journal missing `{key}`") }
+    }
+    result := [GenerateRecord]{}
+    loop value in files {
+        object :: if value == { .Object(object) -> object else -> fail("invalid generation recovery journal record") }
+        &result.push(GenerateRecord{path: OSPath.from_text(string(object, "path")), temp: OSPath.from_text(string(object, "temp")), before: unhex(string(object, "before")), after: unhex(string(object, "after")), before_exists: boolean(object, "before_exists")})
+    }
+    ^result
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:901
+fn recover_generate_unix(lock: Lock, journal_id: transaction_metadata.FileID, raw: String) -[FS]> Unit {
+    records :: parse_generate_journal(raw)
+    paths := [OSPath]{}
+    loop record in records { &paths.push(record.path) }
+    validate_generate_destinations(lock.project, paths)
+    loop record in records {
+        if record.temp == record.path || record.temp.parent() != record.path.parent() -> fail("generation recovery temp is not beside its destination; journal preserved")
+        (temp_exists, temp) :: read_generate_path(record.temp) ?? fail("could not inspect generation recovery temp `{record.temp.display()}`: {err}; journal preserved")
+        if temp_exists && temp != record.after -> fail("generation recovery temp `{record.temp.display()}` differs from its journal; journal preserved")
+    }
+    all_after := true
+    loop record in records {
+        (exists, current) :: read_generate_path(record.path) ?? fail("could not inspect generation destination `{record.path.display()}`: {err}; journal preserved")
+        at_after :: exists && current == record.after
+        at_before :: exists == record.before_exists && (!exists || current == record.before)
+        if !at_after && !at_before -> fail("generation recovery found concurrent drift at `{record.path.display()}`; journal preserved")
+        if !at_after {
+            all_after = false
+            (temp_exists, _) :: read_generate_path(record.temp) ?? fail("could not inspect pending generation temp `{record.temp.display()}`: {err}; journal preserved")
+            if !temp_exists -> fail("generation recovery temp `{record.temp.display()}` is missing; journal preserved")
+        }
+    }
+    if !all_after {
+        generate_rollback(records)
+        if !generate_all_before(records) -> fail("generation recovery could not restore every destination; journal preserved")
+    }
+    cleanup_generate_temps(records)
+    unlink_at_checked(lock.directory(), OSPath.from_text("transaction.journal"), journal_id) ?? fail("could not remove generation recovery journal: {err}")
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:973
+fn prepare_recovery_handles(lock: Lock, parsed: Journal) -[FS]> [UnixRecoveryHandles] {
+    // Rust: Source/CmdCodemod/Transaction.rs:983 openat and :985 name.
+    if parsed.log_path.parent() != Val(lock.dir) || !(parsed.log_path.file_name().and_then(fn(name) { name.to_str() }).is_some_and(fn(name) { name.ends_with(".log.json") })) -> fail("recovery journal log path escapes retained codemod directory; journal preserved")
+    identities := [transaction_metadata.FileID: Bool]{}
+    result := [UnixRecoveryHandles]{}
+    loop record in parsed.records {
+        if record.temp.parent() != record.path.parent() -> fail("recovery temp is not beside destination; journal preserved")
+        relative :: record.path.strip_prefix(lock.project) ?? fail("recovery destination escapes retained project; journal preserved")
+        components :: relative.components()
+        allowed :: relative.starts_with(OSPath.from_text("Examples")) || relative.starts_with(OSPath.from_text("tests/ui"))
+        extension :: record.path.extension().and_then(fn(value) { value.to_str() })
+        allowed_extension :: extension == Val("jet") || (relative.starts_with(OSPath.from_text("tests/ui")) && extension == Val("stderr"))
+        if !allowed || !allowed_extension || components.len() < 2 -> fail("recovery destination leaves allowed roots; journal preserved")
+        held := [transaction_io.Directory]{}
+        parent :: tx_retain_parent(lock.project_directory(), relative, &held, "recovery path is not normal; journal preserved", "NUL in recovery path") ?? fail("could not retain recovery parent: {err}")
+        dest_name :: transaction_paths.file_name_component(record.path) ?? panic("destination name")
+        tx_name(record.path, dest_name, "NUL in recovery path") ?? fail("invalid recovery path: {err}")
+        destination :: parent.open_reader(record.path, dest_name, tx_nofollow()) ?? fail("could not retain recovery destination: {err}")
+        meta :: destination.stat() ?? fail("could not identify recovery destination: {err}")
+        destination_id :: meta.file_id
+        if !meta.is_file || meta.nlink != U64{1} || (destination_id != record.destination_id && destination_id != record.temp_id) || identities.contains_key(destination_id) -> fail("recovery destination identity changed or aliases another row; journal preserved")
+        &identities.insert(destination_id, true)
+        temp_name :: transaction_paths.file_name_component(record.temp) ?? panic("temp name")
+        tx_name(record.temp, temp_name, "NUL in recovery path") ?? fail("invalid recovery path: {err}")
+        temp :: if parent.open_reader(record.temp, temp_name, tx_nofollow()) == {
+            .Err(.NotFound(_)) -> None
+            .Err(error) -> fail("could not retain recovery temp: {error}")
+            .Ok(file) -> {
+                metadata :: file.stat() ?? fail("could not identify recovery temp: {err}")
+                identity :: metadata.file_id
+                content_matches :: if read_held(file) == { .Ok(content) -> content == record.after else -> false }
+                if !metadata.is_file || metadata.nlink != U64{1} || identity != record.temp_id || !content_matches || identities.contains_key(identity) -> fail("recovery temp identity changed, contents differ, or aliases another row; journal preserved")
+                &identities.insert(identity, true)
+                Val(^file)
+            }
+        }
+        &result.push(UnixRecoveryHandles{parent: ^parent, destination: ^destination, destination_id, temp: ^temp, temp_id: record.temp_id})
+    }
+    ^result
+}
+
+// Shared mechanical openat walk; all ancestors remain live through the leaf.
+fn tx_retain_parent(root: transaction_io.Directory, relative: OSPath, held: &[transaction_io.Directory], nonnormal: String, nul: String) -[FS.Read]> transaction_io.Directory IOError! {
+    cursor := transaction_paths.components(relative)
+    pending := transaction_paths.next(relative, &cursor) ?? return Err(jet_cli_transaction_invalid_input(nonnormal))
+    loop {
+        next :: transaction_paths.next(relative, &cursor) ?? break
+        if pending.kind != transaction_paths.ComponentKind.Normal -> return Err(jet_cli_transaction_invalid_input(nonnormal))
+        tx_name(relative, pending, nul)
+        child :: if held.is_empty() -> root.open_directory(relative, pending, tx_nofollow()) else -> held[held.len() - 1].open_directory(relative, pending, tx_nofollow())
+        &held.push(^child)
+        pending = next
+    }
+    if !held.is_empty() -> return &held.pop() ?? panic("held parent")
+    dot :: OSPath.from_text(".")
+    dot_cursor := transaction_paths.components(dot)
+    dot_component :: transaction_paths.next(dot, &dot_cursor) ?? panic("dot component")
+    root.open_directory(dot, dot_component, tx_nofollow())
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:1133
+pub fn commit(lock: Lock, changes: [JetCLITransactionChange], log_path: OSPath, log: [U8]) -[FS, Env]> Unit {
+    if target.selected_family() == .Unix -> commit_unix(lock, changes, log_path, log, false)
+    else -> fail("codemod commit is unavailable on this platform until native handle-relative transactions are implemented")
+}
+// Rust: Source/CmdCodemod/Transaction.rs:1140
+pub fn commit_fix(lock: Lock, changes: [JetCLITransactionChange], log_path: OSPath, log: [U8]) -[FS, Env]> Unit {
+    if target.selected_family() == .Unix -> commit_unix(lock, changes, log_path, log, true)
+    else -> fail("fix commit is unavailable on this platform until native handle-relative transactions are implemented")
+}
+// Rust: Source/CmdCodemod/Transaction.rs:1152
+// Generation records absence instead of requiring every destination to exist.
+pub fn commit_generate(lock: Lock, changes: [JetCLITransactionChange], absent: [OSPath], log_path: OSPath, log: [U8]) -[FS, Env]> Unit {
+    if target.selected_family() == .Unix -> commit_generate_unix(lock, changes, absent, log_path, log)
+    else -> fail("source generation transactions are unavailable on this platform until native atomic transactions are implemented")
+}
+// Rust: Source/CmdCodemod/Transaction.rs:1175
+// Each removed path first moves to a private sibling; later failures restore it.
+pub fn commit_delete(lock: Lock, changes: [JetCLITransactionChange]) -[FS, Env]> Unit {
+    if target.selected_family() == .Unix -> commit_delete_unix(lock, changes)
+    else -> fail("source deletion transactions are unavailable on this platform until native atomic transactions are implemented")
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:1187
+fn commit_delete_unix(lock: Lock, changes: [JetCLITransactionChange]) -[FS, Env]> Unit {
+    if changes.is_empty() -> fail("source deletion has no file changes")
+    project :: lock.project
+    tx :: "{sys.pid()}-{now_nanos()}"
+    names := [OSPath: Bool]{}
+    identities := [transaction_metadata.FileID: Bool]{}
+    records := [DeleteRecord]{}
+    loop index in 0..<changes.len() {
+        change :: changes[index]
+        validate_delete_destination(project, change.path)
+        metadata :: transaction_io.symlink_metadata(change.path) ?? fail("could not inspect deletion destination `{change.path.display()}`: {err}")
+        if metadata.is_symlink || !metadata.is_file -> fail("deletion destination `{change.path.display()}` is not a regular non-link file")
+        canonical :: transaction_io.canonicalize(change.path) ?? fail("could not canonicalize deletion destination `{change.path.display()}`: {err}")
+        if canonical != change.path || names.contains_key(canonical) -> fail("duplicate or aliased deletion destination `{change.path.display()}`")
+        &names.insert(canonical, true)
+        identity :: jet_cli_transaction_path_identity_unix(change.path) ?? fail("could not identify deletion destination: {err}")
+        if identities.contains_key(identity) -> fail("deletion destinations alias the same file at `{change.path.display()}`")
+        &identities.insert(identity, true)
+        current :: transaction_io.read_bytes(change.path) ?? fail("could not read deletion destination `{change.path.display()}`: {err}")
+        if current != change.before -> fail("deletion destination `{change.path.display()}` drifted before commit")
+        parent :: change.path.parent() ?? project
+        after_temp :: if change.after.is_empty() -> None else -> Val(parent.join(".jet-delete-after-{tx}-{index}.tmp"))
+        &records.push(DeleteRecord{path: change.path, temp: parent.join(".jet-delete-{tx}-{index}.tmp"), after_temp, before: change.before, after: change.after, identity, staged: false, published: false})
+    }
+    loop record in records {
+        exists_after :: if record.after_temp == { .Val(path) -> transaction_io.symlink_metadata(path).is_ok() else -> false }
+        if transaction_io.symlink_metadata(record.temp).is_ok() || exists_after -> fail("deletion staging path for `{record.path.display()}` already exists")
+    }
+    loop record in records {
+        after_temp :: record.after_temp ?? continue
+        staged :: if transaction_io.create_new(after_temp, tx_create(None), None) == {
+            .Ok(file) -> file
+            .Err(error) -> { restore_delete_records(records); fail("could not stage restoration of `{record.path.display()}`: {error}") }
+        }
+        if staged.write_all(record.after).and_then(fn(_) { staged.sync_all() }) == {
+            .Err(error) -> {
+                _ :: transaction_io.remove(after_temp)
+                restore_delete_records(records)
+                fail("could not write staged restoration of `{record.path.display()}`: {error}")
+            }
+            else -> {}
+        }
+    }
+    loop index in 0..<records.len() {
+        record :: records[index]
+        current :: transaction_io.read_bytes(record.path) ?? {
+            restore_delete_records(records)
+            fail("could not recheck deletion destination `{record.path.display()}`: {err}")
+        }
+        if current != record.before || jet_cli_transaction_path_identity_unix(record.path).ok() != Val(record.identity) {
+            restore_delete_records(records)
+            fail("deletion destination `{record.path.display()}` drifted before staging")
+        }
+        transaction_io.rename(record.path, record.temp) ?? {
+            restore_delete_records(records)
+            fail("could not stage deletion of `{record.path.display()}`: {err}")
+        }
+        records[index].staged = true
+    }
+    loop index in 0..<records.len() {
+        after_temp :: records[index].after_temp ?? continue
+        path :: records[index].path
+        transaction_io.rename(after_temp, path) ?? {
+            restore_delete_records(records)
+            fail("could not publish restoration of `{path.display()}`: {err}")
+        }
+        records[index].published = true
+    }
+    loop record in records {
+        transaction_io.remove(record.temp) ?? {
+            restore_delete_records(records)
+            fail("could not publish deletion of `{record.path.display()}`: {err}")
+        }
+    }
+    parents := [OSPath: Bool]{}
+    loop record in records { if record.path.parent() == .Val(parent) -> &parents.insert(parent, true) }
+    // BTreeSet order is native path order, never lossy display order.
+    ordered := parents.keys().to_list()
+    &ordered.sort()
+    loop parent in ordered { sync_generate_parent(parent) }
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:1366
+struct DeleteRecord {
+    path: OSPath
+    temp: OSPath
+    after_temp: OSPath?
+    before: [U8]
+    after: [U8]
+    identity: transaction_metadata.FileID
+    staged: Bool
+    published: Bool
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:1379
+fn validate_delete_destination(project: OSPath, path: OSPath) -[FS.Read]> Unit {
+    relative :: path.strip_prefix(project) ?? fail("deletion destination `{path.display()}` escapes the project")
+    components :: relative.components()
+    if components.is_empty() || components.any(fn(component) { component.kind != .Normal }) || relative.starts_with(OSPath.from_text(".git")) || relative.starts_with(OSPath.from_text("target")) -> fail("deletion destination `{path.display()}` is not a normal project file")
+    parent := project
+    loop component in relative.parent().map(fn(parent) { parent.components() }).unwrap_or_default() {
+        if component.kind != .Normal -> panic("normal parent")
+        transaction_paths.push_component(&parent, relative, component)
+        metadata :: transaction_io.symlink_metadata(parent) ?? fail("deletion parent `{parent.display()}` is unavailable: {err}")
+        if metadata.is_symlink || !metadata.is_dir -> fail("deletion parent `{parent.display()}` is not a real directory")
+    }
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:1421
+fn restore_delete_records(records: [DeleteRecord]) -[FS, Env]> Unit {
+    loop index in (0..<records.len()).rev() {
+        record :: records[index]
+        if record.after_temp == .Val(after_temp) -> _ :: transaction_io.remove(after_temp)
+        if !record.staged -> continue
+        path_exists :: if transaction_io.symlink_metadata(record.path) == {
+            .Ok(metadata) -> {
+                if metadata.is_symlink || !metadata.is_file -> continue
+                true
+            }
+            .Err(.NotFound(_)) -> false
+            else -> continue
+        }
+        if path_exists {
+            if !record.published || record.after.is_empty() -> continue
+            current :: transaction_io.read_bytes(record.path).ok()
+            if current != Val(record.after) -> continue
+            if transaction_io.remove(record.path).is_err() -> continue
+        }
+        if transaction_io.rename(record.temp, record.path).is_ok() -> continue
+        parent :: record.path.parent() ?? continue
+        restore :: parent.join(".jet-delete-restore-{sys.pid()}-{now_nanos()}.tmp")
+        if transaction_io.create_new(restore, tx_create(None), None) == .Ok(file) {
+            if file.write_all(record.before).and_then(fn(_) { file.sync_all() }).is_ok() {
+                _ :: transaction_io.rename(restore, record.path)
+            } else { _ :: transaction_io.remove(restore) }
+        }
+    }
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:1478
+fn render_generate_journal(tx: String, completed: Int, records: [GenerateRecord]) -> String Never! {
+    files := [String]{}
+    loop record in records {
+        &files.push("{{\"path\":\"{json_escape(record.path.display())}\",\"temp\":\"{json_escape(record.temp.display())}\",\"before_exists\":{record.before_exists},\"before\":\"{encode(record.before)}\",\"after\":\"{encode(record.after)}\"}}")
+    }
+    "{{\"schema\":\"jet-generate-transaction-v1\",\"tx\":\"{json_escape(tx)}\",\"completed\":{completed},\"files\":[{files.join(",")}]}}\n"
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:1502
+fn generate_all_before(records: [GenerateRecord]) -[FS.Read]> Bool {
+    loop record in records {
+        matches :: if read_generate_path(record.path) == { .Ok((exists, current)) -> exists == record.before_exists && (!exists || current == record.before) else -> false }
+        if !matches -> return false
+    }
+    true
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:1511
+fn abort_generate(lock: Lock, journal_id: transaction_metadata.FileID, records: [GenerateRecord]) -[FS, Env]> Unit {
+    generate_rollback(records)
+    if !generate_all_before(records) -> fail("source generation rollback was incomplete; transaction journal preserved")
+    unlink_at_checked(lock.directory(), OSPath.from_text("transaction.journal"), journal_id) ?? fail("could not remove aborted generation journal: {err}")
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:1525
+fn commit_generate_unix(lock: Lock, changes: [JetCLITransactionChange], absent: [OSPath], log_path: OSPath, log: [U8]) -[FS, Env]> Unit {
+    if changes.is_empty() -> fail("source generation has no file changes")
+    project :: lock.project
+    if log_path.parent() != Val(lock.dir) || !log_path.file_name().and_then(fn(name) { name.to_str() }).is_some_and(fn(name) { name.ends_with(".log.json") }) -> fail("source generation replay log must be directly beneath .jet/codemods and end in .log.json")
+    loop change in changes {
+        if change.path == log_path -> fail("source generation replay log is duplicated in its file changes")
+    }
+    (log_exists, log_before) :: read_generate_path(log_path) ?? fail("could not inspect generation replay log: {err}")
+    // Borrow original changes; the one synthetic receipt row owns only its data.
+    log_change :: JetCLITransactionChange{path: log_path, before: log_before, after: log}
+    paths := [OSPath]{}
+    loop change in changes { &paths.push(change.path) }
+    &paths.push(log_path)
+    validate_generate_destinations(project, paths)
+    absent_index := [OSPath: Bool]{}
+    loop path in absent { &absent_index.insert(path, true) }
+    records := [GenerateRecord]{}
+    loop index in 0..<(changes.len() + 1) {
+        change :: if index == changes.len() -> log_change else -> changes[index]
+        (before_exists, before) :: read_generate_path(change.path) ?? {
+            cleanup_generate_temps(records)
+            fail("could not inspect generation destination `{change.path.display()}`: {err}")
+        }
+        expected_exists :: if change.path == log_path -> log_exists else -> !absent_index.contains_key(change.path)
+        if before_exists != expected_exists || before != change.before {
+            cleanup_generate_temps(records)
+            fail("generation destination `{change.path.display()}` drifted before commit; no files written")
+        }
+        parent :: change.path.parent() ?? project
+        temp :: parent.join(".jet-generate-{sys.pid()}-{now_nanos()}-{index}.tmp")
+        staged :: if transaction_io.create_new(temp, tx_create(None), None) == {
+            .Ok(file) -> file
+            .Err(error) -> {
+                cleanup_generate_temps(records)
+                fail("could not stage generated destination `{change.path.display()}`: {error}")
+            }
+        }
+        if staged.write_all(change.after).and_then(fn(_) { staged.sync_all() }) == .Err(error) {
+            cleanup_generate_temps(records)
+            _ :: transaction_io.remove(temp)
+            fail("could not write staged generated destination `{change.path.display()}`: {error}")
+        }
+        &records.push(GenerateRecord{path: change.path, temp, before: change.before, after: change.after, before_exists})
+    }
+    tx :: "{sys.pid()}-{now_nanos()}"
+    journal_id := replace_journal_generation(lock, tx, 0, render_generate_journal(tx, 0, records).bytes(), None)
+    if sys.var("JET_CODEMOD_CRASH_AFTER_JOURNAL").ok() == Val("1") -> sys.exit(87)
+    loop index in 0..<records.len() {
+        record :: records[index]
+        (exists, before) :: read_generate_path(record.path) ?? {
+            abort_generate(lock, journal_id, records)
+            fail("could not recheck generation destination `{record.path.display()}`: {err}")
+        }
+        if exists != record.before_exists || before != record.before {
+            abort_generate(lock, journal_id, records)
+            fail("generation destination `{record.path.display()}` drifted before rename; no files written")
+        }
+        transaction_io.rename(record.temp, record.path) ?? {
+            abort_generate(lock, journal_id, records)
+            fail("could not atomically publish generated destination `{record.path.display()}`: {err}")
+        }
+        journal_id = replace_journal_generation(lock, tx, index + 1, render_generate_journal(tx, index + 1, records).bytes(), Val(journal_id))
+        if sys.var("JET_CODEMOD_CRASH_AFTER_RENAME").ok() == Val("{index + 1}") -> sys.exit(86)
+    }
+    unlink_at_checked(lock.directory(), OSPath.from_text("transaction.journal"), journal_id) ?? fail("could not remove generation journal: {err}")
+    loop record in records { if record.path.parent() == .Val(parent) -> sync_generate_parent(parent) }
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:1687
+struct GenerateRecord {
+    path: OSPath
+    temp: OSPath
+    before: [U8]
+    after: [U8]
+    before_exists: Bool
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:1696
+fn read_generate_path(path: OSPath) -[FS.Read]> (Bool, [U8]) IOError! {
+    metadata :: if transaction_io.symlink_metadata(path) == {
+        .Ok(metadata) -> metadata
+        .Err(.NotFound(_)) -> return (false, [U8]{})
+        .Err(error) -> return Err(error)
+    }
+    if metadata.is_symlink || !metadata.is_file -> return Err(jet_cli_transaction_permission("generation destination is not a regular non-link file"))
+    (true, transaction_io.read_bytes(path))
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:1712
+fn validate_generate_destinations(project: OSPath, paths: [OSPath]) -[FS.Read]> Unit {
+    names := [OSPath: Bool]{}
+    loop path in paths {
+        relative :: path.strip_prefix(project) ?? fail("generation destination `{path.display()}` escapes the project")
+        components :: relative.components()
+        if components.is_empty() || components.any(fn(component) { component.kind != .Normal }) -> fail("generation destination `{path.display()}` is not a normal project path")
+        if relative.starts_with(OSPath.from_text(".git")) || relative.starts_with(OSPath.from_text("target")) -> fail("generation destination `{path.display()}` points into compiler state")
+        if names.contains_key(relative) -> fail("duplicate generation destination `{path.display()}`")
+        &names.insert(relative, true)
+        parent := project
+        loop component in relative.parent().map(fn(parent) { parent.components() }).unwrap_or_default() {
+            if component.kind != .Normal -> panic("normal parent")
+            transaction_paths.push_component(&parent, relative, component)
+            metadata :: transaction_io.symlink_metadata(parent) ?? fail("generation destination parent `{parent.display()}` is unavailable: {err}")
+            if metadata.is_symlink || !metadata.is_dir -> fail("generation destination parent `{parent.display()}` is not a real directory")
+        }
+        if transaction_io.symlink_metadata(path) == .Ok(metadata) {
+            if metadata.is_symlink || !metadata.is_file -> fail("generation destination `{path.display()}` is not a regular non-link file")
+            canonical :: transaction_io.canonicalize(path) ?? fail("could not canonicalize generation destination `{path.display()}`: {err}")
+            if canonical != path -> fail("generation destination `{path.display()}` aliases another path")
+        }
+    }
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:1787
+fn cleanup_generate_temps(records: [GenerateRecord]) -[FS.Write]> Unit {
+    loop record in records { _ :: transaction_io.remove(record.temp) }
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:1794
+fn generate_rollback(records: [GenerateRecord]) -[FS, Env]> Unit {
+    loop index in (0..<records.len()).rev() {
+        record :: records[index]
+        (exists, current) :: if read_generate_path(record.path) == { .Ok(value) -> value else -> continue }
+        if !exists || current != record.after -> continue
+        if record.before_exists {
+            parent :: record.path.parent() ?? continue
+            temp :: parent.join(".jet-generate-rollback-{sys.pid()}-{now_nanos()}.tmp")
+            file :: if transaction_io.create_new(temp, tx_create(None), None) == { .Ok(file) -> file else -> continue }
+            if file.write_all(record.before).and_then(fn(_) { file.sync_all() }).is_ok() {
+                _ :: transaction_io.rename(temp, record.path)
+            } else { _ :: transaction_io.remove(temp) }
+        } else { _ :: transaction_io.remove(record.path) }
+    }
+    cleanup_generate_temps(records)
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:1835
+fn sync_generate_parent(parent: OSPath) -[FS]> Unit {
+    if transaction_io.open_reader(parent, transaction_io.OpenOptions{nofollow: false, cloexec: false, open_reparse_point: false}) == .Ok(file) {
+        _ :: file.sync_all()
+    }
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:1842
+fn commit_unix(lock: Lock, changes: [JetCLITransactionChange], log_path: OSPath, log: [U8], allow_any_path: Bool) -[FS, Env]> Unit {
+    if changes.is_empty() -> fail("codemod has no file edits")
+    project :: lock.project
+    paths := [OSPath]{}
+    loop change in changes { &paths.push(change.path) }
+    if allow_any_path -> validate_fix_destinations(project, paths) else -> validate_destinations(project, paths)
+    if log_path.parent() != Val(lock.dir) -> fail("codemod replay log must be directly beneath .jet/codemods")
+    if !log_path.file_name().and_then(fn(name) { name.to_str() }).is_some_and(fn(name) { name.ends_with(".log.json") }) -> fail("codemod replay log name must end in .log.json")
+    tx :: "{sys.pid()}-{now_nanos()}"
+    records := [Record]{}
+    loop index in 0..<changes.len() {
+        change :: changes[index]
+        parent :: change.path.parent() ?? project
+        record := Record{path: change.path, temp: parent.join(".jet-codemod-{tx}-{index}.tmp"), before: change.before, after: change.after, destination_id: transaction_metadata.FileID{device: U64{0}, inode: U64{0}}, temp_id: transaction_metadata.FileID{device: U64{0}, inode: U64{0}}, handles: None}
+        if target.selected_family() == .Unix {
+            handles :: prepare_unix_record(lock.project_directory(), project, record.path, record.temp, record.after) ?? fail("could not securely stage `{record.path.display()}`: {err}")
+            record.destination_id = handles.destination_id
+            record.temp_id = handles.temp_id
+            current :: read_held(handles.destination) ?? fail("could not read held destination: {err}")
+            if current != record.before -> fail("observed drift for `{record.path.display()}` before commit; no files written")
+            record.handles = Val(^handles)
+        } else {
+            write_new_sync(record.temp, record.after)
+            record.temp_id = path_identity(record.temp) ?? fail("could not identify temp: {err}")
+        }
+        &records.push(^record)
+    }
+    journal_id := replace_journal_generation(lock, tx, 0, render_journal(tx, 0, records, log_path, log).bytes(), None)
+    if sys.var("JET_CODEMOD_CRASH_AFTER_JOURNAL").ok() == Val("1") -> sys.exit(87)
+    loop index in 0..<records.len() {
+        record :: records[index]
+        secure_replace_record(project, record, record.before) ?? {
+            rollback(project, records, lock, journal_id)
+            fail("codemod rename failed for `{record.path.display()}`: {err}")
+        }
+        journal_id = replace_journal_generation(lock, tx, index + 1, render_journal(tx, index + 1, records, log_path, log).bytes(), Val(journal_id))
+        if sys.var("JET_CODEMOD_CRASH_AFTER_RENAME").ok() == Val("{index + 1}") -> sys.exit(86)
+    }
+    _ :: write_new_at(lock.directory(), log_path.file_name() ?? panic("log name"), log) ?? fail("could not publish replay log: {err}")
+    unlink_at_checked(lock.directory(), OSPath.from_text("transaction.journal"), journal_id) ?? fail("could not remove transaction journal: {err}")
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:1963
+fn prepare_unix_record(project_file: transaction_io.Directory, project: OSPath, path: OSPath, temp: OSPath, bytes: [U8]) -[FS]> UnixRecordHandles IOError! {
+    // Rust: Source/CmdCodemod/Transaction.rs:1983 openat; :1985 name.
+    if temp.parent() != path.parent() -> return Err(jet_cli_transaction_invalid_input("temp is not beside destination"))
+    relative :: path.strip_prefix(project) ?? return Err(jet_cli_transaction_permission("destination escapes project"))
+    project_file :: project_file.dup()
+    held := [transaction_io.Directory]{}
+    parent :: tx_retain_parent(project_file, relative, &held, "non-normal codemod path", "NUL in codemod path")
+    destination_name :: transaction_paths.file_name_component(path) ?? return Err(jet_cli_transaction_invalid_input("destination has no name"))
+    tx_name(path, destination_name, "NUL in codemod path")
+    destination :: parent.open_reader(path, destination_name, tx_nofollow())
+    destination_meta :: destination.stat()
+    if !destination_meta.is_file || destination_meta.nlink != U64{1} -> return Err(jet_cli_transaction_permission("destination is linked or not regular"))
+    temp_name :: transaction_paths.file_name_component(temp) ?? return Err(jet_cli_transaction_invalid_input("temp has no name"))
+    tx_name(temp, temp_name, "NUL in codemod path")
+    // Original O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC, mode0600.
+    // GATE #4494: Core must preserve original nofollow/cloexec creation flags.
+    temp_file :: parent.create_new(temp, temp_name, transaction_io.CreateOptions{read: false, write: true, access_mode: None, share_mode: None, mode: Val(U32{0o600}), delete_on_close: false, open_reparse_point: false, nofollow: true, cloexec: true}, None)
+    temp_file.write_all(bytes)
+    temp_file.sync_all()
+    temp_meta :: temp_file.stat()
+    if !temp_meta.is_file || temp_meta.nlink != U64{1} -> return Err(jet_cli_transaction_permission("temp is linked or not regular"))
+    UnixRecordHandles{_project: ^project_file, parent: ^parent, destination: ^destination, temp: ^temp_file, destination_id: destination_meta.file_id, temp_id: temp_meta.file_id}
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:2102
+fn secure_replace_record(project: OSPath, record: Record, expected: [U8]) -[FS]> Unit IOError! {
+    if target.selected_family() == .Unix {
+        if record.handles == .Val(handles) -> return secure_replace_held(handles, record.temp, record.path, expected)
+    }
+    secure_replace(project, record.temp, record.path, expected)
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:2111
+fn secure_replace_held(handles: UnixRecordHandles, temp: OSPath, path: OSPath, expected: [U8]) -[FS]> Unit IOError! {
+    // Rust: Source/CmdCodemod/Transaction.rs:2126 openat, :2127 renameat, :2129 name.
+    dest_name :: transaction_paths.file_name_component(path) ?? return Err(jet_cli_transaction_invalid_input("destination has no name"))
+    temp_name :: transaction_paths.file_name_component(temp) ?? return Err(jet_cli_transaction_invalid_input("temp has no name"))
+    tx_name(path, dest_name, "NUL in codemod path")
+    tx_name(temp, temp_name, "NUL in codemod path")
+    current :: handles.parent.open_reader(path, dest_name, tx_nofollow())
+    current_meta :: current.stat()
+    if current_meta.file_id != handles.destination_id || current_meta.nlink != U64{1} -> return Err(jet_cli_transaction_permission("destination name identity changed before rename"))
+    temp_current :: handles.parent.open_reader(temp, temp_name, tx_nofollow())
+    temp_meta :: temp_current.stat()
+    if temp_meta.file_id != handles.temp_id || temp_meta.nlink != U64{1} -> return Err(jet_cli_transaction_permission("temp name identity changed before rename"))
+    held_dest :: handles.destination.stat()
+    held_temp :: handles.temp.stat()
+    if held_dest.file_id != handles.destination_id || held_temp.file_id != handles.temp_id -> return Err(jet_cli_transaction_permission("held codemod file identity changed"))
+    bytes :: current.read_to_end()
+    if bytes != expected -> return Err(tx_io_error(.Other, "destination drifted before handle-relative rename"))
+    handles.parent.rename(temp, temp_name, &handles.parent, path, dest_name)
+    published :: handles.parent.open_reader(path, dest_name, tx_nofollow())
+    published_meta :: published.stat()
+    if published_meta.file_id != handles.temp_id || published_meta.nlink != U64{1} -> return Err(jet_cli_transaction_permission("published destination identity differs from retained temp"))
+    handles.parent.sync_all()
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:2216
+fn cleanup_recovery_temp(record: Record, handles: UnixRecoveryHandles) -[FS]> Unit IOError! {
+    temp :: handles.temp ?? return
+    metadata :: temp.stat()
+    if metadata.file_id != handles.temp_id || metadata.nlink != U64{1} -> return Err(jet_cli_transaction_permission("held recovery temp identity changed"))
+    unlink_at_checked(handles.parent, record.temp.file_name() ?? panic("temp name"), handles.temp_id)
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:2236
+fn atomic_restore_held(record: Record, handles: UnixRecoveryHandles, bytes: [U8]) -[FS, Env]> Unit IOError! {
+    name :: record.path.file_name() ?? return Err(jet_cli_transaction_invalid_input("destination has no name"))
+    replace_bytes_at(handles.parent, name, handles.destination_id, record.after, bytes)
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:2253
+fn replace_bytes_at(parent: transaction_io.Directory, destination_name: OSPath, expected_id: transaction_metadata.FileID, expected: [U8], bytes: [U8]) -[FS, Env]> Unit IOError! {
+    // Rust: Source/CmdCodemod/Transaction.rs:2264 renameat.
+    staged_path :: OSPath.from_text(".jet-codemod-recover-{sys.pid()}-{now_nanos()}.tmp")
+    staged_id :: write_new_at(parent, staged_path, bytes)
+    (_, current_id, current) :: read_at_checked(parent, destination_name)
+    if current_id != expected_id || current != expected -> return Err(jet_cli_transaction_permission("destination changed before recovery rename"))
+    staged_name :: transaction_paths.file_name_component(staged_path) ?? return Err(jet_cli_transaction_invalid_input("NUL in recovery temp"))
+    dest_name :: transaction_paths.file_name_component(destination_name) ?? return Err(jet_cli_transaction_invalid_input("NUL in recovery destination"))
+    tx_name(staged_path, staged_name, "NUL in recovery temp")
+    tx_name(destination_name, dest_name, "NUL in recovery destination")
+    parent.rename(staged_path, staged_name, &parent, destination_name, dest_name)
+    (_, published_id, _) :: read_at_checked(parent, destination_name)
+    if published_id != staged_id -> return Err(jet_cli_transaction_permission("recovered destination identity differs from staged file"))
+    parent.sync_all()
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:2312
+// Rust: Source/CmdCodemod/Transaction.rs:2349 (nonUnix's intentional empty arm)
+fn rollback(_project: OSPath, records: [Record], lock: Lock, journal_id: transaction_metadata.FileID) -[FS, Env]> Unit {
+    if target.selected_family() != .Unix -> return
+    conflict := false
+    loop record in records {
+        handles :: record.handles ?? { conflict = true; continue }
+        destination_name :: record.path.file_name() ?? panic("destination name")
+        if read_at_checked(handles.parent, destination_name) == {
+            .Ok((_, id, current)) -> {
+                if id == handles.temp_id && current == record.after {
+                    if replace_bytes_at(handles.parent, destination_name, id, record.after, record.before).is_err() -> conflict = true
+                } else if id != handles.destination_id || current != record.before -> conflict = true
+            }
+            else -> { conflict = true }
+        }
+        temp_name :: record.temp.file_name() ?? panic("temp name")
+        if read_at_checked(handles.parent, temp_name) == .Ok((_, id, _)) {
+            if id != handles.temp_id || unlink_at_checked(handles.parent, temp_name, id).is_err() -> conflict = true
+        }
+    }
+    if !conflict -> _ :: unlink_at_checked(lock.directory(), OSPath.from_text("transaction.journal"), journal_id)
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:2351
+struct Record {
+    path: OSPath
+    temp: OSPath
+    before: [U8]
+    after: [U8]
+    destination_id: transaction_metadata.FileID
+    temp_id: transaction_metadata.FileID
+    handles: UnixRecordHandles?
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:2363
+struct UnixRecordHandles {
+    _project: transaction_io.Directory
+    parent: transaction_io.Directory
+    destination: transaction_io.FileReader
+    temp: transaction_io.FileWriter
+    destination_id: transaction_metadata.FileID
+    temp_id: transaction_metadata.FileID
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:2373
+struct UnixRecoveryHandles {
+    parent: transaction_io.Directory
+    destination: transaction_io.FileReader
+    destination_id: transaction_metadata.FileID
+    temp: transaction_io.FileReader?
+    temp_id: transaction_metadata.FileID
+}
+
+// Rust: Source/CmdCodemod/Transaction.rs:2380
+fn render_journal(tx: String, completed: Int, records: [Record], log_path: OSPath, log: [U8]) -> String Never! {
+    rows := [String]{}
+    loop record in records {
+        &rows.push("{{\"path\":\"{json_escape(record.path.display())}\",\"temp\":\"{json_escape(record.temp.display())}\",\"before\":\"{encode(record.before)}\",\"after\":\"{encode(record.after)}\",\"destination_id\":[{record.destination_id.device},{record.destination_id.inode}],\"temp_id\":[{record.temp_id.device},{record.temp_id.inode}]}}")
+    }
+    "{{\"schema\":2,\"tx\":\"{json_escape(tx)}\",\"completed\":{completed},\"log_path\":\"{json_escape(log_path.display())}\",\"log\":\"{encode(log)}\",\"files\":[{rows.join(",")}]}}\n"
+}

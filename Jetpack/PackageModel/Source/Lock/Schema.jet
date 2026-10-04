@@ -1,19 +1,19 @@
 // `.jet/lock` schema v1 (M12.1, D-PM1/3): the typed lock graph. The lock
-// lives at `@UNIFIED_LOCK_FILE` inside the project's `.jet/` managed folder
+// lives at `UNIFIED_LOCK_FILE` inside the project's `.jet/` managed folder
 // (U2) and is the single lockfile. Canonical text lives in Write.jet, the
 // strict reader in Parse.jet, and the on-disk recorders in Record.jet.
 
-@PKG_LOCK_VERSION :: 1
+PKG_LOCK_VERSION :: prep { 1 }
 // `provenance.build` prefix that marks a package record as projected from a
 // Rust FFI bridge build; `pkg_lock_record_rust_bridge` replaces every such
 // record.
-@PKG_RUST_BRIDGE_PROVENANCE_PREFIX :: "jet-ffi-bridge:"
+PKG_RUST_BRIDGE_PROVENANCE_PREFIX :: prep { "jet-ffi-bridge:" }
 // Hard upper bound for one committed lockfile. A lock is a human-reviewed
 // artifact; exceeding this limit indicates a serializer invariant failure.
-@PKG_MAX_LOCK_BYTES :: 1048576
-@PKG_MAX_LOCK_VALUE_BYTES :: 1048576
+PKG_MAX_LOCK_BYTES :: prep { 1048576 }
+PKG_MAX_LOCK_VALUE_BYTES :: prep { 1048576 }
 // The largest accepted `nix-size`: 16 GiB.
-@PKG_MAX_NIX_NAR_SIZE :: 17179869184
+PKG_MAX_NIX_NAR_SIZE :: prep { 17179869184 }
 
 // The Lock model's one error carrier. Parse and validation failures keep the
 // exact Rust message text; an unsupported format version stays typed so
@@ -25,7 +25,7 @@ pub enum LockError {
     // The top-level `version` names a schema this reader does not support.
     UnsupportedVersion(String)
     // Reading or opening lock bytes failed at the file system.
-    Io(IOError)
+    IO(IOError)
     // A generated record is missing one concrete fact.
     Incomplete(LockCompletenessError)
     // A registered host diagnostic (E1202, E1205, E1214, E3502, E3512).
@@ -34,8 +34,8 @@ pub enum LockError {
     fn message(self) -> String Never! {
         if self == {
             .Invalid(text) -> text
-            .UnsupportedVersion(version) -> "unsupported lock version {version}; expected {@PKG_LOCK_VERSION}"
-            .Io(error) -> "{error}"
+            .UnsupportedVersion(version) -> "unsupported lock version {version}; expected {PKG_LOCK_VERSION}"
+            .IO(error) -> "{error}"
             .Incomplete(error) -> error.message()
             .Reported(diagnostic) -> diagnostic.what
         }
@@ -44,7 +44,7 @@ pub enum LockError {
     // Rust `error.kind() == ErrorKind::NotFound`.
     fn is_not_found(self) -> Bool Never! {
         if self == {
-            .Io(error) -> if error == {
+            .IO(error) -> if error == {
                 .NotFound(_) -> true
                 else -> false
             }
@@ -53,16 +53,10 @@ pub enum LockError {
     }
 }
 
-impl IOError -> LockError { LockError.Io(self) }
+impl IOError -> LockError { LockError.IO(self) }
 
 impl LockCompletenessError -> LockError { LockError.Incomplete(self) }
 
-// D-CTEFFECT1 Tier-1: one `embed_file`/`embed_bytes` (or generated-module)
-// input hashed at compile time: the relative path and the digest of its bytes.
-pub struct ComptimeInput {
-    pub path: String
-    pub hash: String
-}
 
 // One node in the resolved package graph.
 pub struct LockedPackage {
@@ -81,9 +75,9 @@ pub struct LockedPackage {
     // Direct dependency names.
     pub dependencies: [String]{[String]{}}
     // D-RINGLAYER1=A: optional `runtime:` ceiling from the package payload.
-    pub layer: MirRuntimeLayer?{None}
+    pub layer: MIRRuntimeLayer?{None}
     // D-RINGLAYER1=A M2: minimum runtime profile inferred at last build.
-    pub inferred_layer: MirRuntimeLayer?{None}
+    pub inferred_layer: MIRRuntimeLayer?{None}
     // D-EFFBUDGET1: the effect names this dependency's code used at the last
     // build, and the effects granted to it through `grants: { … }`.
     pub effects: [String]{[String]{}}
@@ -389,7 +383,7 @@ pub struct NixClosureRecord {
             if seen.contains(reference) -> return Err(LockError.Invalid("Nix closure record repeats an ordered reference"))
             &seen.push(reference)
         }
-        if self.size == 0 || self.size > @PKG_MAX_NIX_NAR_SIZE -> return Err(LockError.Invalid("Nix closure record has an invalid NAR size"))
+        if self.size == 0 || self.size > PKG_MAX_NIX_NAR_SIZE -> return Err(LockError.Invalid("Nix closure record has an invalid NAR size"))
     }
 }
 
@@ -415,7 +409,7 @@ pub struct LockEnvelope {
     fn validate_nix_catalog(self) LockError! {
         if self.catalog_tier == "official-signed" && self.catalog_trust == "verified" -> return
         if self.catalog_tier == "local-unofficial" && self.catalog_trust == "unverified" -> return
-        Err(LockError.Invalid("Nix lock requires a recognized, consistent catalog tier and trust"))
+        return Err(LockError.Invalid("Nix lock requires a recognized, consistent catalog tier and trust"))
     }
 }
 
@@ -521,7 +515,7 @@ pub struct LockFile {
     // A version-1 lock with no records.
     fn empty() -> LockFile Never! {
         LockFile{
-            version: @PKG_LOCK_VERSION,
+            version: PKG_LOCK_VERSION,
             packages: [LockedPackage]{},
             root_dependencies: [String]{},
             authority: None,

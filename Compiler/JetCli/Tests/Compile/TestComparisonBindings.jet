@@ -1,0 +1,31 @@
+fn jet_cli_test_comparison_binding_test_fields() -> [String:DataTree] {
+    [String:DataTree]{"boundary_digest": DataTree.Text("boundary"), "source_identity": DataTree.Text("source"), "replacement_identity": DataTree.Text("replacement"), "tool_identity": DataTree.Text("tool"), "target_identity": DataTree.Text("target"), "coverage_digest": DataTree.Text("coverage")}
+}
+fn jet_cli_test_comparison_binding_test_error(root: DataTree, message: String) {
+    if jet_cli_test_comparison_binding_from_root(root) == {
+        .Ok(_) -> panic("invalid foreign binding accepted")
+        .Err(error) -> assert_eq(error.message, message)
+    }
+}
+#Test("foreign comparison binding needs every identity and preserves authored values") {
+    fields := jet_cli_test_comparison_binding_test_fields()
+    fields["source_identity"] = DataTree.Text(" source ")
+    fields["assumptions"] = DataTree.Array([DataTree]{DataTree.Text("z"), DataTree.Text("a"), DataTree.Text("z"), DataTree.Text(" a ")})
+    binding :: jet_cli_test_comparison_binding_from_root(DataTree.Object([String:DataTree]{"foreign_binding": DataTree.Object(fields)})) ?? panic(err.message)
+    assert_eq(binding.source_identity, Val(" source "))
+    assert_eq(binding.assumptions, [String]{" a ", "a", "z"})
+    jet_cli_test_comparison_binding_test_error(DataTree.Object([String:DataTree]{}), "`foreign_binding` requires boundary_digest, source_identity, replacement_identity, tool_identity, target_identity, and coverage_digest")
+    jet_cli_test_comparison_binding_test_error(DataTree.Int(0), "`foreign_binding` requires boundary_digest, source_identity, replacement_identity, tool_identity, target_identity, and coverage_digest")
+}
+#Test("foreign binding aliases are refused in fixed source order before other checks") {
+    jet_cli_test_comparison_binding_test_error(DataTree.Object([String:DataTree]{"boundary-digest": DataTree.Null, "foreign": DataTree.Null, "foreign_binding": DataTree.Null}), "foreign binding field `foreign` must be nested under `foreign_binding`")
+    jet_cli_test_comparison_binding_test_error(DataTree.Object([String:DataTree]{"foreign_binding": DataTree.Int(0)}), "`foreign_binding` must be an object")
+    jet_cli_test_comparison_binding_test_error(DataTree.Object([String:DataTree]{"foreign_binding": DataTree.Object([String:DataTree]{"source": DataTree.Text("x"), "boundary-digest": DataTree.Text("x")})}), "foreign binding field `boundary-digest` is not a canonical snake_case field")
+}
+#Test("foreign binding field type errors precede required field absence") {
+    jet_cli_test_comparison_binding_test_error(DataTree.Object([String:DataTree]{"foreign_binding": DataTree.Object([String:DataTree]{"source_identity": DataTree.Int(1)})}), "foreign binding `source_identity` must be a string")
+    jet_cli_test_comparison_binding_test_error(DataTree.Object([String:DataTree]{"foreign_binding": DataTree.Object([String:DataTree]{"source_identity": DataTree.Text(" \n ")})}), "foreign binding `source_identity` must not be empty")
+    jet_cli_test_comparison_binding_test_error(DataTree.Object([String:DataTree]{"foreign_binding": DataTree.Object([String:DataTree]{"assumptions": DataTree.Int(1)})}), "foreign binding `assumptions` must be an array")
+    jet_cli_test_comparison_binding_test_error(DataTree.Object([String:DataTree]{"foreign_binding": DataTree.Object([String:DataTree]{"assumptions": DataTree.Array([DataTree]{DataTree.Int(1)})})}), "foreign binding `assumptions` entries must be strings")
+    jet_cli_test_comparison_binding_test_error(DataTree.Object([String:DataTree]{"foreign_binding": DataTree.Object([String:DataTree]{"assumptions": DataTree.Array([DataTree]{DataTree.Text("\t")})})}), "foreign binding `assumptions` entries must not be empty")
+}

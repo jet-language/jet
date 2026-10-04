@@ -1,0 +1,208 @@
+// Source/CmdStatus.rs:1-68,413-607: authenticated read-only project truth.
+// Cache mutations are a separate command slice; status never runs a producer.
+use core.files.path as status_paths
+use jet_driver.[JetDriverVerbOutput]
+use jet_foundation.[StatusValue, StatusFields, StatusEnvelope, ReportEnvelope]
+
+pub enum JetCLIStatusState { Proven Unproven Stale }
+pub struct JetCLIStatusClaim {
+    pub name: String
+    pub action: String
+    pub state: JetCLIStatusState
+    pub receipt: String?
+    pub sections: StatusValue
+    pub reason: String
+}
+#Error
+pub struct JetCLIStatusError { pub message: String }
+
+// The receipt store owner authenticates listed records and checks their input
+// closures. There is deliberately no producer/run operation in this interface.
+// All path operations use the canonical Core Path, never a lossy CLI wrapper.
+pub trait JetCLIStatusHost {
+    fn cwd(&self) -> status_paths.Path Never!
+    fn default_target(&self, cwd: status_paths.Path) -> String Never!
+    fn receipt_root(&self, verb: String, arguments: [String], cwd: status_paths.Path) -> status_paths.Path Never!
+    fn list(&self, root: status_paths.Path) -> [JetCLIReceipt] JetCLIStatusError!
+    fn is_current(&self, root: status_paths.Path, receipt: &JetCLIReceipt) -> Bool JetCLIStatusError!
+    fn sections(&self, root: status_paths.Path, receipt: &JetCLIReceipt) -> StatusValue JetCLIStatusError!
+    fn canonicalize(&self, path: status_paths.Path) -> status_paths.Path? Never!
+    fn is_directory(&self, path: status_paths.Path) -> Bool Never!
+}
+
+// Rust State::as_str (CmdStatus.rs:17-25).
+pub fn jet_cli_status_state_name(state: JetCLIStatusState) -> String Never! {
+    if state == {
+        .Proven -> "proven"
+        .Unproven -> "unproven"
+        .Stale -> "stale"
+    }
+}
+// Rust target_arg: the host resolves the actual project/workspace default only
+// after validating that no explicit target was provided.
+pub fn jet_cli_status_target_argument(arguments: [String]) -> String? JetCLIStatusError! {
+    target := String?{None}
+    skip := false
+    loop argument in arguments {
+        if skip {
+            skip = false
+            next
+        }
+        if argument == "--json" || argument == "--quiet" || argument == "--no-color" || argument.starts_with("--color=") -> next
+        if argument == "--color" {
+            skip = true
+            next
+        }
+        if argument.starts_with("-") -> return Err(JetCLIStatusError{message: "unknown `jet status` flag `{argument}`"})
+        if target != None -> return Err(JetCLIStatusError{message: "`jet status` accepts at most one target"})
+        target = Val(argument)
+    }
+    Ok(target)
+}
+
+// Rust Path::starts_with: component prefix, not a text prefix. Reuse the
+// borrowed component scanner used by record identity and retention policy.
+fn jet_cli_status_path_prefix(path: String, prefix: String) -> Bool Never! {
+    if path.starts_with("/") != prefix.starts_with("/") -> return false
+    bytes :: path.bytes()
+    wanted :: prefix.bytes()
+    offset := 0
+    prefix_offset := 0
+    loop {
+        parent :: jet_cli_record_next_path_component(wanted, prefix_offset)
+        if parent.start == parent.end -> return true
+        child :: jet_cli_record_next_path_component(bytes, offset)
+        if bytes[child.start..<child.end] != wanted[parent.start..<parent.end] -> return false
+        offset = child.next
+        prefix_offset = parent.next
+    }
+}
+
+// Rust receipt_matches (CmdStatus.rs:537-542): fallback Path equality is
+// component equality too, even when canonicalization cannot resolve a file.
+fn jet_cli_status_path_matches(path: String, target: String, directory: Bool) -> Bool Never! {
+    jet_cli_record_compare_paths(path, target) == Ordering.Equal || (directory && jet_cli_status_path_prefix(path, target))
+}
+
+// Rust rows_from_receipts: one grouping pass, BTreeMap verb order and receipt
+// list order within each group. Store reads and large payloads are not copied
+// into the grouping map; rows keep only receipt indices.
+fn jet_cli_status_rows<H: JetCLIStatusHost>(host: &H, root: status_paths.Path, receipts: &[JetCLIReceipt], target_path: status_paths.Path, display_target: String) -> [JetCLIStatusClaim] {
+    // #4381: preserve Core Path identity; no success-path nominal rewrap.
+    target :: &host.canonicalize(target_path) ?? target_path
+    directory :: &host.is_directory(target)
+    groups := [String:[Int]]{}
+    loop (index, receipt) in receipts {
+        matches := false
+        loop input in receipt.claim.inputs {
+            path :: &host.canonicalize(input.path) ?? input.path
+            if jet_cli_status_path_matches(path.raw, target.raw, directory) {
+                matches = true
+                break
+            }
+        }
+        if !matches -> next
+        if !groups.has_key(receipt.claim.verb) -> groups[receipt.claim.verb] = [Int]{}
+        &groups[receipt.claim.verb].push(index)
+    }
+    verbs := groups.keys().to_list()
+    &verbs.sort()
+    rows := [JetCLIStatusClaim]{}
+    loop verb in verbs {
+        indices :: groups.get(verb) ?? panic("status grouping lost its verb")
+        success := Int?{None}
+        failed := Int?{None}
+        stale := Int?{None}
+        loop index in indices {
+            if &host.is_current(root, &receipts[index]) == {
+                .Ok(current) -> {
+                    if !current -> stale = Val(index)
+                    else {
+                        if receipts[index].status == (I32{0}) -> success = Val(index)
+                        else -> failed = Val(index)
+                    }
+                }
+                .Err(_) -> failed = Val(index)
+            }
+        }
+        state := JetCLIStatusState.Unproven
+        selected := Int?{None}
+        reason := "no receipt proves this claim"
+        if failed == .Val(index) {
+            selected = Val(index)
+            reason = "current receipt records failure"
+        } else {
+            if success == .Val(index) {
+                selected = Val(index)
+                state = JetCLIStatusState.Proven
+                reason = "current receipt records success"
+            } else {
+                if stale == .Val(index) {
+                    selected = Val(index)
+                    state = JetCLIStatusState.Stale
+                    reason = "receipt input closure changed"
+                }
+            }
+        }
+        receipt_id := String?{None}
+        sections := StatusValue.object(StatusFields.new())
+        if selected == .Val(index) {
+            key :: receipts[index].claim.key
+            length :: if key.len() > 12 -> 12 else -> key.len()
+            receipt_id = Val(key.slice(0..<length))
+            sections = &host.sections(root, &receipts[index]) ?? StatusValue.object(StatusFields.new())
+        }
+        &rows.push(JetCLIStatusClaim{name: verb, action: "jet {verb} {display_target}", state: state, receipt: receipt_id, sections: sections, reason: reason})
+    }
+    rows
+}
+
+// Rust render: unreadable stores remain a truthful empty report carrying the
+// error in machine output. Human output, including padding, is byte-faithful.
+// Ordered StatusValue/StatusFields are the canonical Report ABI. Do not route
+// receipt sections through an unordered DataTree object or a private JSON codec.
+pub fn jet_cli_status_render(target: String, rows: [JetCLIStatusClaim], error: String, json: Bool) -> JetDriverVerbOutput Never! {
+    if json {
+        claims := [StatusValue]{}
+        loop row in rows {
+            receipt :: if row.receipt == .Val(value) -> StatusValue.String{value: value} else -> StatusValue.Null
+            fields :: StatusFields.new().with("action", StatusValue.String{value: row.action}).with("claim", StatusValue.String{value: row.name}).with("reason", StatusValue.String{value: row.reason}).with("receipt", receipt).with("sections", row.sections).with("state", StatusValue.String{value: jet_cli_status_state_name(row.state)})
+            &claims.push(StatusValue.object(fields))
+        }
+        fields :: StatusFields.new().with("claims", StatusValue.array(claims)).with("error", if error == "" -> StatusValue.Null else -> StatusValue.String{value: ~error}).with("target", StatusValue.String{value: ~target})
+        return JetDriverVerbOutput{stdout: StatusEnvelope.new("status", true).with_fields(fields).json_line(), stderr: "", exit_code: 0}
+    }
+    lines := [String]{"target  {target}"}
+    loop row in rows {
+        state :: jet_cli_status_state_name(row.state)
+        receipt :: row.receipt ?? "none"
+        line :: "{jet_cli_pad(row.name, 8)} {jet_cli_pad(state, 9)} receipt {receipt}"
+        if row.state == JetCLIStatusState.Proven -> &lines.push(line)
+        else -> &lines.push("{line} · act: {row.action} · {row.reason}")
+    }
+    JetDriverVerbOutput{stdout: "{lines.join("\n")}\n", stderr: "", exit_code: 0}
+}
+
+pub fn jet_cli_run_status<H: JetCLIStatusHost>(host: &H, arguments: [String], json: Bool) -> JetDriverVerbOutput {
+    cwd :: &host.cwd()
+    // #4376: bind the optional payload through its Result, not fallible ??.
+    asked :: if jet_cli_status_target_argument(arguments) == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            what :: error.message
+            why :: "jet status accepts one project target and registered output flags"
+            fix :: "run `jet status [<file.jet|dir>]` with one target"
+            if json {
+                report :: ReportEnvelope.new("compile", "error", "E2102", what, why, fix)
+                return JetDriverVerbOutput{stdout: StatusEnvelope.new("status", false).with_report(report).json(), stderr: "", exit_code: 2}
+            }
+            return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", what, why, fix, false), exit_code: 2}
+        }
+    }
+    target :: asked ?? &host.default_target(cwd)
+    target_path :: status_paths.join(cwd, target)
+    root :: &host.receipt_root("prove", [String]{"prove", target}, cwd)
+    receipts := &host.list(root) ?? return jet_cli_status_render(target, [JetCLIStatusClaim]{}, "receipt store is unreadable: {err.message}", json)
+    rows :: jet_cli_status_rows<H>(&host, root, &receipts, target_path, target)
+    jet_cli_status_render(target, rows, "", json)
+}

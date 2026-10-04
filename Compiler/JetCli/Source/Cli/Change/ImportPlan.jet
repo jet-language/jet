@@ -1,0 +1,288 @@
+// IM01: read-only source import planning (Source/CmdImport.rs).
+// A completed plan always carries the canonical boundary and evidence report.
+// Publication and accepted comparison receipts are deliberately not this API.
+use core.files.path as import_paths
+use core.files.path.[Path]
+
+// Rust Mode / Generated / Plan. No optional boundary/evidence after construction.
+pub enum JetCLIImportMode { Create Update DryRun }
+pub struct JetCLIImportGenerated { pub relative: Path, pub contents: String }
+pub struct JetCLIImportPlan {
+    pub language: String
+    pub source: Path
+    pub target: Path
+    pub generated: [JetCLIImportGenerated]
+    pub todos: [JetCLIImportTodo]
+    pub functions: Int
+    pub tests: Int
+    pub boundary: ForeignBoundaryContract
+    pub evidence: EvidenceReport
+    pub boundary_digest: String
+    pub source_digest: String
+    pub replacement_digest: String
+}
+pub struct JetCLIImportArguments { pub language: String, pub source: Path, pub mode: JetCLIImportMode }
+#Error
+pub struct JetCLIImportUsageError { pub what: String, pub fix: String }
+#Error
+pub struct JetCLIImportPlanError { pub message: String }
+pub enum JetCLIImportFileType { File Directory Symlink Other }
+
+// ONE transport seam. read_dir returns paths, with iteration errors propagated;
+// file_type is no-follow (DirEntry::file_type), separate from directory reading.
+// read_text must preserve Rust read_to_string UTF-8 failure wording. Target and
+// compiler version are native facts, not CLI-owned constants. No mutation API.
+pub trait JetCLIImportPlanHost {
+    fn cwd(&self) -> Path JetCLIImportPlanError!
+    fn canonicalize(&self, path: Path) -> Path JetCLIImportPlanError!
+    fn is_dir(&self, path: Path) -> Bool Never!
+    fn read_dir(&self, path: Path) -> [Path] JetCLIImportPlanError!
+    fn file_type(&self, path: Path) -> JetCLIImportFileType JetCLIImportPlanError!
+    fn read_text(&self, path: Path) -> String JetCLIImportPlanError!
+    fn read_bytes(&self, path: Path) -> [U8] JetCLIImportPlanError!
+    fn target_identity(&self) -> String Never!
+    fn version(&self) -> String Never!
+}
+fn jet_cli_import_plan_error(message: String) -> JetCLIImportPlanError Never! { JetCLIImportPlanError{message: message} }
+
+// Rust parse_args. Raw includes the command name, as in CmdImport::run.
+pub fn jet_cli_import_parse_args(raw: [String]) -> JetCLIImportArguments JetCLIImportUsageError! {
+    positionals := [String]{}
+    mode := JetCLIImportMode.Create
+    loop index in 1..<raw.len() {
+        arg :: raw[index]
+        if arg == "--dry-run" || arg == "--update" {
+            if mode != JetCLIImportMode.Create -> return Err(JetCLIImportUsageError{what: "--dry-run and --update cannot be combined", fix: "choose preview (--dry-run) or merge (--update)"})
+            mode = if arg == "--dry-run" -> JetCLIImportMode.DryRun else -> JetCLIImportMode.Update
+        } else {
+            if arg.starts_with("-") -> return Err(JetCLIImportUsageError{what: "'{arg}' is not an import flag", fix: "use jet import <lang> <dir> [--dry-run|--update]"})
+            &positionals.push(arg)
+        }
+    }
+    if positionals.len() != 2 -> return Err(JetCLIImportUsageError{what: "source import needs a language and directory", fix: "use jet import <lang> <dir> [--dry-run|--update]"})
+    // #4381: retain real Core Path construction (JetPath/Path emitted mismatch).
+    Ok(JetCLIImportArguments{language: positionals[0], source: import_paths.of(positionals[1]), mode: mode})
+}
+// Rust canonical_language (ASCII only).
+pub fn jet_cli_import_canonical_language(language: String) -> String Never! {
+    bytes := language.bytes()
+    loop index in 0..<bytes.len() { if bytes[index] >= 65 && bytes[index] <= 90 -> bytes[index] = U8{Int.from_u8(bytes[index]) + 32} }
+    lower :: String.from_bytes(bytes) ?? panic("ASCII lowering preserves UTF-8")
+    if lower == {
+        "python" -> "py"
+        "cs" | "c#" -> "csharp"
+        "typescript" -> "ts"
+        "javascript" -> "js"
+        "golang" -> "go"
+        "c++" -> "cpp"
+        else -> lower
+    }
+}
+// Rust foreign_language; reuse the package model's sole foreign vocabulary.
+pub fn jet_cli_import_foreign_language(language: String) -> ForeignLanguage? Never! {
+    if language == {
+        "py" -> Val(ForeignLanguage.Py)
+        "c" -> Val(ForeignLanguage.C)
+        "cpp" -> Val(ForeignLanguage.Cpp)
+        "pascal" -> Val(ForeignLanguage.Pascal)
+        "ada" -> Val(ForeignLanguage.Ada)
+        "java" -> Val(ForeignLanguage.Java)
+        "csharp" -> Val(ForeignLanguage.DotNet)
+        "ts" | "js" -> Val(ForeignLanguage.JS)
+        "go" -> Val(ForeignLanguage.Go)
+        else -> None
+    }
+}
+
+// Rust Components ignores redundant separators and '.' but retains '..'.
+fn jet_cli_import_components(path: Path) -> [String] Never! {
+    components := [String]{}
+    loop part in import_paths.parts(path) { if part != "" && part != "." -> &components.push(part) }
+    components
+}
+// Rust Path::cmp for collected paths: compare components without allocating
+// a component list in every sort comparison. Collected paths have the same
+// canonical root and directory-entry names (no redundant separators).
+fn jet_cli_import_path_order(left: Path, right: Path) -> Ordering Never! {
+    a :: left.raw.bytes()
+    b :: right.raw.bytes()
+    i := 0
+    j := 0
+    loop i < a.len() && j < b.len() {
+        if a[i] == b[j] { i += 1
+            j += 1
+            next
+        }
+        if a[i] == (U8{47}) -> return Ordering.Less
+        if b[j] == (U8{47}) -> return Ordering.Greater
+        return a[i] <=> b[j]
+    }
+    a.len() <=> b.len()
+}
+// Rust DirEntry::file_name ordering, without allocating a basename per compare.
+fn jet_cli_import_entry_order(left: Path, right: Path) -> Ordering Never! {
+    a :: left.raw.bytes()
+    b :: right.raw.bytes()
+    i := a.len()
+    j := b.len()
+    loop i > 0 && a[i - 1] != (U8{47}) -> i -= 1
+    loop j > 0 && b[j - 1] != (U8{47}) -> j -= 1
+    loop i < a.len() && j < b.len() {
+        if a[i] != b[j] -> return a[i] <=> b[j]
+        i += 1
+        j += 1
+    }
+    (a.len() - i) <=> (b.len() - j)
+}
+// Rust Path::strip_prefix and Component containment. Do not collapse '..':
+// traversal must be rejected, not normalized into an apparently safe identity.
+pub fn jet_cli_import_relative(path: Path, root: Path) -> Path JetCLIImportPlanError! {
+    parts :: jet_cli_import_components(path)
+    base :: jet_cli_import_components(root)
+    if import_paths.is_absolute(path) != import_paths.is_absolute(root) || parts.len() < base.len() -> return Err(jet_cli_import_plan_error("prefix not found"))
+    loop index in 0..<base.len() { if parts[index] != base[index] -> return Err(jet_cli_import_plan_error("prefix not found")) }
+    tail :: parts[base.len()..<parts.len()]
+    relative :: import_paths.of(tail.join("/"))
+    if import_paths.is_absolute(relative) || import_paths.drive(relative) != "" -> return Err(jet_cli_import_plan_error("unsafe source path {relative.raw}"))
+    loop part in tail { if part == ".." -> return Err(jet_cli_import_plan_error("unsafe source path {relative.raw}")) }
+    Ok(relative)
+}
+fn jet_cli_import_extension_matches(path: Path, language: String) -> Bool Never! {
+    extension :: import_paths.suffix(path)
+    if language == {
+        "pascal" -> extension == ".pas" || extension == ".pp"
+        "ada" -> extension == ".ads"
+        "java" -> extension == ".java"
+        "csharp" -> extension == ".cs"
+        "ts" -> extension == ".ts"
+        "js" -> extension == ".js"
+        "go" -> extension == ".go"
+        else -> extension == ".py"
+    }
+}
+// Rust collect_sources: sorted entry names, no-follow type, recursive walk.
+pub fn jet_cli_import_collect_sources<H: JetCLIImportPlanHost>(root: Path, dir: Path, language: String, out: &[Path], host: &H) JetCLIImportPlanError! {
+    // #4430 E0340 root gate: typed custom read_dir(Path) is incorrectly retired.
+    // Original caller retained; genuine witness is read-dir-gate/unit.jet.
+    entries := &host.read_dir(dir) ?? return Err(jet_cli_import_plan_error("read {dir.raw}: {err.message}"))
+    &entries.sort_by((left: Path, right: Path) -> jet_cli_import_entry_order(left, right))
+    loop path in entries {
+        ty :: &host.file_type(path) ?? return Err(err)
+        if ty == JetCLIImportFileType.Symlink -> next
+        if ty == JetCLIImportFileType.Directory -> jet_cli_import_collect_sources<H>(root, path, language, &out, &host)
+        else { if ty == JetCLIImportFileType.File && jet_cli_import_extension_matches(path, language) {
+            _ :: jet_cli_import_relative(path, root) ?? return Err(err)
+            // #4381: canonical Core Path push rejected as a distinct nominal Path.
+            &out.push(path)
+        } }
+    }
+}
+// Rust import_tree_identity. Deliberately reread bytes AFTER all translations.
+pub fn jet_cli_import_tree_identity<H: JetCLIImportPlanHost>(source: Path, files: [Path], schema: String, host: &H) -> String JetCLIImportPlanError! {
+    identity := ForeignIdentityBuilder.new(schema)
+    loop path in files {
+        relative :: jet_cli_import_relative(path, source) ?? return Err(err)
+        bytes :: &host.read_bytes(path) ?? return Err(jet_cli_import_plan_error("read {path.raw}: {err.message}"))
+        &identity.field("path", relative.raw.bytes())
+        &identity.field("bytes", bytes)
+    }
+    Ok(identity.finish())
+}
+// Rust generated_tree_identity.
+pub fn jet_cli_import_generated_tree_identity(generated: [JetCLIImportGenerated], schema: String) -> String Never! {
+    identity := ForeignIdentityBuilder.new(schema)
+    loop file in generated {
+        // #4436: actual ForeignIdentityBuilder.field / Core Path MIR owner gate.
+        &identity.field("path", file.relative.raw.bytes())
+        &identity.field("bytes", file.contents.bytes())
+    }
+    identity.finish()
+}
+// Rust boundary_for_import: canonical descriptor/coverage and identity builder.
+pub fn jet_cli_import_boundary<H: JetCLIImportPlanHost>(language: String, source: Path, target: Path, source_digest: String, replacement_digest: String, host: &H) -> ForeignBoundaryContract JetCLIImportPlanError! {
+    foreign :: jet_cli_import_foreign_language(language) ?? return Err(jet_cli_import_plan_error("source importer has no foreign boundary for `{language}`"))
+    target_identity :: &host.target_identity()
+    source_identity :: "source:{source.raw}:sha256-{source_digest}"
+    identity :: ForeignBoundaryIdentity.new(source_identity, "generated:{target.raw}:sha256-{replacement_digest}", "jet-source-import-v1", source_identity, "jet-source-import:{&host.version()}", target_identity)
+    coverage :: ForeignArtifactCoverage.new(source_identity, target_identity, "jet-source-import-v1").with_transitive_dependencies([String]{}).with_reachable_callbacks([String]{}).with_compiler_flags([String]{})
+    boundary :: pkg_source_import_boundary(foreign, "{language}:{source.raw}", identity, coverage) ?? return Err(jet_cli_import_plan_error(err.message))
+    Ok(boundary.with_assumptions([String]{"D-MIGRATE-SRC1 proves only the declared source subset", "foreign source remains authoritative until an accepted comparison receipt"}))
+}
+// Rust import_evidence (2358-2471). Generation is not accepted replacement.
+pub fn jet_cli_import_evidence(boundary: ForeignBoundaryContract, source: Path, target: Path, source_digest: String, replacement_digest: String, file_count: Int, function_count: Int, test_count: Int, omission_count: Int) -> EvidenceReport JetCLIImportPlanError! {
+    boundary_digest :: boundary.digest()
+    report_id :: "source-import-{boundary_digest}"
+    source_ref :: EvidenceSource{path: source.raw, line: U32{0}, column: U32{0}}
+    derivation_identity :: boundary.identity.derivation_identity()
+    revision :: EvidenceRevision{source: derivation_identity.source, build: derivation_identity.build, revision: derivation_identity.run}
+    build :: EvidenceBuild{toolchain: derivation_identity.build, target: derivation_identity.target, profile: "source-import"}
+    outcome :: if omission_count == 0 -> EvidenceOutcome.Generated else -> EvidenceOutcome.Incomplete
+    detail :: if omission_count == 0 -> "source import generated {file_count} files, {function_count} functions, and {test_count} tests" else -> "source import translated {file_count} files, {function_count} functions, and {test_count} tests with {omission_count} reported omissions"
+    count :: U64.from_int(file_count) ?? return Err(jet_cli_import_plan_error("source import file count is too large"))
+    identity :: evidence_identity_for_record(report_id, "source-import", EvidenceProducerKind.Compile, EvidenceKind.Contract, source_ref, count, detail)
+    record := evidence_record_new(identity, EvidenceKind.Contract, EvidenceProducerKind.Compile, outcome, count, source_ref, build, revision)
+    record.detail = detail
+    record.attachments = [EvidenceAttachment]{
+        EvidenceAttachment{name: "boundary", value: boundary_digest},
+        EvidenceAttachment{name: "source-digest", value: source_digest},
+        EvidenceAttachment{name: "replacement-digest", value: replacement_digest},
+        EvidenceAttachment{name: "source-identity", value: boundary.identity.source},
+        EvidenceAttachment{name: "replacement-identity", value: boundary.identity.overlay},
+        EvidenceAttachment{name: "tool-identity", value: boundary.identity.toolchain},
+        EvidenceAttachment{name: "target-identity", value: boundary.identity.target},
+        EvidenceAttachment{name: "coverage", value: boundary.artifact_coverage.digest()},
+        EvidenceAttachment{name: "import-report", value: import_paths.join(target, "import-report.json").raw},
+    }
+    loop assumption in boundary.assumptions -> &record.attachments.push(EvidenceAttachment{name: "assumption", value: assumption})
+    derivation := derivation_record(record.identity.evidence_id, record.identity.claim_id, evidence_producer_name(record.producer), MIRDerivationMethod.StaticDerivation, "foreign-source-import", [String]{boundary_digest, boundary.artifact_coverage.digest(), source_digest, replacement_digest}, derivation_identity)
+    if omission_count != 0 -> derivation.disposition = MIRDerivationDisposition.Unavailable
+    report := evidence_report_new(report_id, EvidenceProducerKind.Compile, source_ref, build, revision)
+    evidence_report_add_record_with_derivation(&report, ^record, ^derivation) ?? return Err(jet_cli_import_plan_error(evidence_merge_error_text(err)))
+    Ok(report)
+}
+// Rust build_plan. Boundary and evidence are mandatory construction results.
+pub fn jet_cli_import_build_plan<H: JetCLIImportPlanHost>(source: Path, target: Path, language: String, host: &H) -> JetCLIImportPlan JetCLIImportPlanError! {
+    source_paths := [Path]{}
+    jet_cli_import_collect_sources<H>(source, source, language, &source_paths, &host) ?? return Err(err)
+    if source_paths.is_empty() {
+        extensions :: if language == {
+            "pascal" -> ".pas or .pp"
+            "ada" -> ".ads"
+            "java" -> ".java"
+            "csharp" -> ".cs"
+            "ts" -> ".ts"
+            "js" -> ".js"
+            "go" -> ".go"
+            else -> ".py"
+        }
+        return Err(jet_cli_import_plan_error("no {extensions} files found under {source.raw}"))
+    }
+    // #4381: original canonical Path comparator retained (named-Path-proof.unit.txt).
+    &source_paths.sort_by((left: Path, right: Path) -> jet_cli_import_path_order(left, right))
+    generated := [JetCLIImportGenerated]{}
+    todos := [JetCLIImportTodo]{}
+    functions := 0
+    tests := 0
+    loop path in source_paths {
+        relative :: jet_cli_import_relative(path, source) ?? return Err(err)
+        output :: import_paths.with_suffix(relative, ".jet")
+        raw :: &host.read_text(path) ?? return Err(jet_cli_import_plan_error("read {path.raw}: {err.message}"))
+        generated_target :: import_paths.join_path(target, output)
+        translation :: if language == {
+            "pascal" -> jet_cli_import_translate_pascal_file(raw, path.raw, generated_target.raw)
+            "ada" -> jet_cli_import_translate_ada_file(raw, path.raw, generated_target.raw)
+            "java" | "csharp" | "ts" | "js" | "go" -> jet_cli_import_translate_enterprise_file(language, raw, path.raw, generated_target.raw)
+            else -> jet_cli_import_translate_file(raw, path.raw, generated_target.raw)
+        }
+        functions += translation.functions
+        tests += translation.tests
+        loop todo in translation.todos -> &todos.push(todo)
+        &generated.push(JetCLIImportGenerated{relative: output, contents: translation.source})
+    }
+    source_digest :: jet_cli_import_tree_identity<H>(source, source_paths, "jet-source-import-input-v1", &host) ?? return Err(err)
+    replacement_digest :: jet_cli_import_generated_tree_identity(generated, "jet-source-import-replacement-v1")
+    boundary :: jet_cli_import_boundary<H>(language, source, target, source_digest, replacement_digest, &host) ?? return Err(err)
+    boundary_digest :: boundary.digest()
+    evidence :: jet_cli_import_evidence(boundary, source, target, source_digest, replacement_digest, source_paths.len(), functions, tests, todos.len()) ?? return Err(err)
+    Ok(JetCLIImportPlan{language: language, source: source, target: target, generated: generated, todos: todos, functions: functions, tests: tests, boundary: boundary, evidence: evidence, boundary_digest: boundary_digest, source_digest: source_digest, replacement_digest: replacement_digest})
+}

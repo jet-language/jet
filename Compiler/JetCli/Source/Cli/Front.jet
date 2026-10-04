@@ -10,13 +10,13 @@ use jet_driver.[
     JET_DRIVER_EXIT_OK,
     JET_DRIVER_EXIT_USER_ERROR,
     JET_DRIVER_EXIT_USAGE,
-    jet_driver_explain_code,
 ]
 use jet_foundation.[
     Diagnostic,
-    diagnostic_explanation,
     diagnostic_from_registry,
     diagnostic_render_all,
+    WatchPolicy,
+    watch_policy_from,
 ]
 
 pub enum JetCLIPlan {
@@ -28,16 +28,19 @@ pub enum JetCLIPlan {
     // `jet build <file>`: the entry and its bytes; `release` selects the
     // rustc/LLVM backend, otherwise the Jet-native backend builds it.
     Build(file: String, source: String, color: Bool, release: Bool)
-}
-
-// Commands that validate their own flags (CLI.rs `owns_flag_vocabulary`).
-JET_CLI_OWNS_FLAGS :: [String]{
-    "env", "cc", "c++", "remote", "shared-store", "dev", "devtools", "push", "trust", "bridge",
-    "services", "image", "new", "flash", "os", "add", "remove", "bind", "lsp", "config", "update",
-    "outdated", "search", "info", "import", "explain", "logs", "clean", "fetch", "publish", "yank",
-    "keygen", "key", "vendor", "audit", "sbom", "repl", "notebook", "schema", "db", "semindex",
-    "impact", "codemod", "generate", "expand", "diff", "merge", "review", "prove", "budget", "perf",
-    "completions", "self-update",
+    Inspect(file: String, color: Bool, semindex: Bool)
+    Run(invocation: JetCLIExecutionInvocation)
+    Dev(invocation: JetCLIExecutionInvocation)
+    Completions(arguments: [String])
+    Explain(request: JetCLIDevExplainRequest)
+    Format(options: JetCLIFormatOptions, mode: JetCLIOutputMode)
+    ExternalFormat(options: JetCLIExternalFormatOptions, mode: JetCLIOutputMode)
+    Fix(options: JetCLIFixOptions, mode: JetCLIOutputMode)
+    Status(arguments: [String], json: Bool)
+    Test(arguments: [String], mode: JetCLIOutputMode, advisory_lints_visible: Bool)
+    Try(file: String, keep: Bool, mode: JetCLIOutputMode)
+    Budget(arguments: [String])
+    PackageDesktop(arguments: [String], options: JetCLIBundleOptions, machine: Bool)
 }
 
 // Flags whose value is the next argv word (CLI.rs `flag_takes_separate_value`).
@@ -114,13 +117,6 @@ fn jet_cli_tail(items: [String], start: Int) -> [String] Never! {
     tail
 }
 
-fn jet_cli_has(items: [String], value: String) -> Bool Never! {
-    items.contains(value)
-}
-
-fn jet_cli_is_help_flag(argument: String) -> Bool Never! {
-    argument == "--help" || argument == "-h"
-}
 
 fn jet_cli_any_help_flag(items: [String]) -> Bool Never! {
     loop item in items {
@@ -129,37 +125,49 @@ fn jet_cli_any_help_flag(items: [String]) -> Bool Never! {
     false
 }
 
-// Source/main.rs `is_diagnostic_code`: `E1234`, `L1234`, or `JT1234`.
-fn jet_cli_is_diagnostic_code(value: String) -> Bool Never! {
-    bytes :: value.bytes()
-    digits_from := 0
-    if {
-        bytes.len() == 5 && (bytes[0] == (U8{69}) || bytes[0] == (U8{76})) -> digits_from = 1
-        bytes.len() == 6 && bytes[0] == (U8{74}) && bytes[1] == (U8{84}) -> digits_from = 2
-        else -> return false
-    }
-    loop index in digits_from..<bytes.len() {
-        digit :: Int.from_u8(bytes[index])
-        if digit < 48 || digit > 57 -> return false
-    }
-    true
-}
 
-// Rust `{:?}` of a plain request value.
+// Rust `{:?}` of a `str` (`char::escape_debug`): `\t`, `\r`, `\n`, `\\`, `\"`,
+// `\0`, and every other control character as `\u{hex}`; printable text,
+// including non-ASCII, stays as written.
 fn jet_cli_debug_quote(value: String) -> String Never! {
-    "\"{value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
-}
-
-// The value of `--flag=value` or `--flag value` (Source/main.rs `test_option_value`).
-fn jet_cli_option_value(items: [String], flag: String) -> String? Never! {
-    loop (index, item) in items {
-        if item.starts_with("{flag}=") -> return Val(item.slice(flag.len() + 1..<item.len()))
-        if item == flag {
-            if index + 1 < items.len() -> return Val(items[index + 1])
-            return None
+    digits :: "0123456789abcdef".bytes()
+    raw :: value.bytes()
+    out := [U8]{U8{34}}
+    index := 0
+    loop index < raw.len() {
+        code :: Int.from_u8(raw[index])
+        escape := ""
+        control := -1
+        if {
+            code == 9 -> escape = "\\t"
+            code == 10 -> escape = "\\n"
+            code == 13 -> escape = "\\r"
+            code == 34 -> escape = "\\\""
+            code == 92 -> escape = "\\\\"
+            code == 0 -> escape = "\\0"
+            code < 32 || code == 127 -> control = code
+            code == 0xC2 && index + 1 < raw.len() && Int.from_u8(raw[index + 1]) >= 0x80 && Int.from_u8(raw[index + 1]) <= 0x9F -> {
+                control = Int.from_u8(raw[index + 1])
+                index = index + 1
+            }
+            else -> {}
         }
+        if {
+            control >= 0 -> {
+                loop byte in "\\u{{".bytes() -> &out.push(byte)
+                if control >= 16 -> &out.push(digits[control >> 4])
+                &out.push(digits[control & 15])
+                &out.push(U8{125})
+            }
+            escape != "" -> {
+                loop byte in escape.bytes() -> &out.push(byte)
+            }
+            else -> &out.push(raw[index])
+        }
+        index = index + 1
     }
-    None
+    &out.push(U8{34})
+    String.from_bytes(out) ?? value
 }
 
 // The `jet help --sort` value; "frequency" when no order is asked for.
@@ -169,7 +177,7 @@ fn jet_cli_help_order(jet_argv: [String]) -> String Never! {
         if item == "--sort" || item.starts_with("--sort=") -> asked = true
     }
     if !asked -> return "frequency"
-    jet_cli_option_value(jet_argv, "--sort") ?? ""
+    jet_cli_args_option_value(jet_argv, "--sort") ?? ""
 }
 
 // E2104 for a `--sort` value other than frequency, az, or za.
@@ -188,7 +196,7 @@ fn jet_cli_positionals(jet_argv: [String]) -> [String] Never! {
             skip_next = false
             next
         }
-        if JET_CLI_SEPARATE_VALUE_FLAGS.contains(argument) {
+        if jet_cli_flag_takes_separate_value(argument) {
             skip_next = true
             next
         }
@@ -330,50 +338,40 @@ fn jet_cli_build(jet_argv: [String], args: [String], color: Bool, quiet: Bool) -
     entry
 }
 
-// `jet explain [<CODE>]` for registered diagnostic codes; the other explain
-// subjects and views are not ported yet.
-fn jet_cli_explain(jet_argv: [String], args: [String], color: Bool) -> JetCLIPlan Never! {
-    if jet_cli_has(jet_argv, "--reload") || jet_cli_has(jet_argv, "--web-graph") || jet_cli_has(jet_argv, "--cost") -> return jet_cli_not_ported("explain", color)
-    if args.len() > 2 || (args.len() == 2 && args[1] == "marker") -> return jet_cli_not_ported("explain", color)
-    if args.len() == 2 {
-        code :: args[1]
-        if !jet_cli_is_diagnostic_code(code) && diagnostic_explanation(code) == None -> return jet_cli_not_ported("explain", color)
-        return JetCLIPlan.Done{output: jet_driver_explain_code(Val(code), color)}
+// Source/main.rs explain dispatch consumes the one Help/Explain mechanism.
+fn jet_cli_explain(jet_argv: [String], args: [String], adapter: JetCLIOutputAdapter) -> JetCLIPlan Never! {
+    color :: adapter.profile.ansi_enabled
+    if jet_argv.contains("--reload") || jet_argv.contains("--web-graph") || jet_argv.contains("--cost") -> return jet_cli_not_ported("explain", color)
+    if args.len() > 1 && args[1] == "marker" -> return jet_cli_not_ported("explain marker", color)
+    code :: if args.len() > 1 -> Val(args[1]) else -> None
+    fact_file :: if args.len() > 2 -> Val(args[2]) else -> None
+    settings :: jet_cli_args_parse_setting_overrides(jet_argv, adapter.profile.machine_enabled) ?? return jet_cli_args_refusal_plan(err, color)
+    profile :: jet_cli_args_option_value(jet_argv, "--profile") ?? "dev"
+    request :: JetCLIDevExplainRequest{code: code, fact_file: fact_file, mode: jet_cli_output_mode(adapter), verbose: adapter.flags.verbose, profile: profile, setting_overrides: settings}
+    if jet_cli_dev_explain(request) == {
+        .Done(output) -> return JetCLIPlan.Done{output: ~output}
+        .Resolve(pending) -> return JetCLIPlan.Explain{request: ~pending}
     }
-    JetCLIPlan.Done{output: jet_driver_explain_code(None, color)}
 }
 
-// Plan one `jet` invocation; `raw` is argv without the program name.
-pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
-    // Output flags, parsed once from the jet-owned prefix before `--`.
-    output_end := raw.len()
-    loop (index, argument) in raw {
-        if argument == "--" {
-            output_end = index
-            break
-        }
-    }
-    owned :: jet_cli_prefix(raw, output_end)
-    color := false
-    loop argument in owned {
-        if argument == "--color" -> color = true
-        if argument.starts_with("--color=") {
-            value :: argument.slice(8..<argument.len())
-            if value == {
-                "always" -> color = true
-                "auto" | "never" -> color = false
-                else -> return jet_cli_done("", "Error [E2104]: invalid color request {jet_cli_debug_quote(value)}; expected auto, always, or never\n", JET_DRIVER_EXIT_USAGE)
-            }
-        }
-    }
-    quiet :: owned.contains("--quiet")
-    json := owned.contains("--json") || (owned.len() > 0 && owned[0] == "compiler")
-    loop index in 1..<owned.len() {
-        if owned[index - 1] == "inspect" && owned[index] == "compiler" -> json = true
-    }
+// Plan one `jet` invocation; `input` is argv without the program name and
+// `facts` the process output facts the host read once.
+pub fn jet_cli_front(input: [String], facts: JetCLIProcessFacts) -[FS, Env]> JetCLIPlan Never! {
+    // Source/main.rs `main`: the project-job boundary is inserted before any
+    // parsing, so the later passes only see Jet's own words.
+    raw := ~input
+    jet_cli_separate_job_argv(&raw)
+    // Every output capability is resolved once from the jet-owned prefix;
+    // the standalone separator belongs to the child program (Source/main.rs
+    // `main`: `OutputAdapterHost::select(&raw[..output_arg_end])`).
+    owned :: jet_cli_before_argument_separator(raw)
+    adapter :: jet_cli_output_adapter_select(owned, facts) ?? return jet_cli_done("", "Error [E2104]: {jet_cli_output_profile_error_message(err)}\n", JET_DRIVER_EXIT_USAGE)
+    jet_cli_apply_machine_mode(adapter)
+    color :: adapter.profile.ansi_enabled
+    quiet :: adapter.flags.quiet
+    json :: adapter.profile.machine_enabled
     if raw.len() == 0 -> return jet_cli_not_ported("repl", color)
     if raw[0] == "?" -> return jet_cli_not_ported("?", color)
-    if json -> return jet_cli_not_ported("{raw[0]} --json", color)
 
     // Retired, moved, and grouped spellings (Source/main.rs `normalize_frequency_ring_argv`).
     if jet_cli_retired_report(raw, color) == .Val(report) -> return jet_cli_done("", report, JET_DRIVER_EXIT_USAGE)
@@ -416,6 +414,11 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
         }
     }
     if argv[0] == "cc" || argv[0] == "c++" || argv[0] == "perf" -> return jet_cli_not_ported(argv[0], color)
+    if !jet_cli_is_builtin(argv[0]) && jet_cli_looks_like_source(argv[0]) {
+        rewritten := [String]{"run"}
+        loop word in argv -> &rewritten.push(word)
+        argv = rewritten
+    }
 
     // Everything after the first standalone `--` belongs to the program.
     separator := argv.len()
@@ -446,6 +449,7 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
         return jet_cli_done(jet_cli_greeting(), "", JET_DRIVER_EXIT_OK)
     }
     command :: args[0]
+    if json && command != "run" && command != "dev" && command != "compiler" && command != "semindex" && command != "completions" && command != "man" && command != "explain" && command != "fmt" && command != "fix" && command != "status" && command != "test" && command != "try" && command != "budget" && command != "package" -> return jet_cli_not_ported("{command} --json", color)
 
     // `--lib` and `--output` belong to the commands that produce those artifacts.
     library :: jet_argv.contains("--lib")
@@ -473,12 +477,11 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
     }
 
     if !jet_cli_is_builtin(command) {
-        if jet_cli_looks_like_source(command) -> return jet_cli_not_ported("run", color)
         fix :: if jet_cli_closest_command(command) == .Val(close) -> "did you mean `jet {close}`? Run `jet help` to see them all." else -> "run `jet help` to see every command."
         return jet_cli_fail("E2101", "`{command}` isn't a jet command.", "every jet run starts with a command like `run`, `check`, or `new`.", fix, color, JET_DRIVER_EXIT_USAGE)
     }
 
-    owns_flags :: JET_CLI_OWNS_FLAGS.contains(command)
+    owns_flags :: jet_cli_owns_flag_vocabulary(command)
     bespoke_help :: command == "bind" || command == "diff" || command == "merge" || command == "perf"
     if jet_cli_any_help_flag(jet_argv) && !(owns_flags && bespoke_help) -> return jet_cli_done(jet_cli_command_help(command), "", JET_DRIVER_EXIT_OK)
     if !owns_flags {
@@ -498,9 +501,75 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
             }
             return jet_cli_done(jet_cli_usage_page(order), "", JET_DRIVER_EXIT_OK)
         }
-        "explain" -> return jet_cli_explain(jet_argv, args, color)
+        "explain" -> return jet_cli_explain(jet_argv, args, adapter)
+        "completions" -> return JetCLIPlan.Completions{arguments: jet_cli_tail(jet_argv, 1)}
+        "man" -> return JetCLIPlan.Done{output: jet_cli_dev_man(JET_CLI_VERSION, adapter.profile)}
+        // Source/main.rs `"reserved"`: the human report (machine output is not ported yet).
+        "reserved" -> return jet_cli_done(jet_cli_reserved_report_text(), "", JET_DRIVER_EXIT_OK)
+        // Source/main.rs `"inspect"`: the request is parsed and refused exactly as
+        // Rust does; running a plane needs the checked inspection projections.
+        "inspect" -> {
+            if jet_cli_parse_inspect_args(argv) == .Err(error) {
+                return jet_cli_fail("E2104", error.message, jet_cli_why("E2104"), "run `jet inspect <types|rights|claims|shapes|accel|decisions|structure|build|gates> [TARGET] [--live PID | --replay ARTIFACT]`", color, JET_DRIVER_EXIT_USAGE)
+            }
+            return jet_cli_not_ported("inspect", color)
+        }
         "check" -> return jet_cli_check(args, "check", color, quiet)
         "build" -> return jet_cli_build(jet_argv, args, color, quiet)
+        "run" -> return JetCLIPlan.Run{invocation: JetCLIExecutionInvocation{command: "run", arguments: jet_argv, program_arguments: jet_cli_tail(argv, separator + 1), output: adapter, reload: watch_policy_from(jet_argv, WatchPolicy.Auto)}}
+        "dev" -> return JetCLIPlan.Dev{invocation: JetCLIExecutionInvocation{command: "dev", arguments: jet_argv, program_arguments: jet_cli_tail(argv, separator + 1), output: adapter, reload: watch_policy_from(jet_argv, WatchPolicy.Auto)}}
+        "fmt" -> {
+            external := false
+            loop argument in jet_argv {
+                if argument == "--lang" || argument.starts_with("--lang=") -> external = true
+            }
+            mode :: jet_cli_output_mode(adapter)
+            if external {
+                if jet_cli_external_format_options(jet_cli_tail(argv, 1)) == {
+                    .Ok(options) -> return JetCLIPlan.ExternalFormat{options: ~options, mode: mode}
+                    .Err(error) -> return JetCLIPlan.Done{output: jet_cli_format_parse_refusal(~error, mode)}
+                }
+            }
+            return JetCLIPlan.Format{options: jet_cli_format_options(jet_cli_tail(jet_argv, 1), jet_cli_tail(args, 1)), mode: mode}
+        }
+        "fix" -> {
+            if args.len() < 2 {
+                output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_USAGE}
+                jet_cli_write_status(&output, adapter.profile, jet_cli_command_help("fix"))
+                return JetCLIPlan.Done{output: output}
+            }
+            return JetCLIPlan.Fix{options: jet_cli_fix_options(jet_cli_tail(jet_argv, 1), args[1]), mode: jet_cli_output_mode(adapter)}
+        }
+        "status" -> return JetCLIPlan.Status{arguments: jet_cli_tail(jet_argv, 1), json: json}
+        "test" -> return JetCLIPlan.Test{arguments: jet_argv, mode: jet_cli_output_mode(adapter), advisory_lints_visible: jet_cli_advisory_lints_visible(command, adapter.flags.verbose)}
+        "budget" -> return JetCLIPlan.Budget{arguments: argv}
+        "package" -> {
+            // Source/main.rs passes the whole jet_argv; the parser skips `package`.
+            if jet_cli_bundle_parse_args(jet_argv) == {
+                .Err(error) -> return JetCLIPlan.Done{output: jet_cli_bundle_error_output(error.message, json)}
+                .Ok(options) -> {
+                    if options.kind == BundleKind.Game -> return jet_cli_not_ported("package game", color)
+                    return JetCLIPlan.PackageDesktop{arguments: jet_argv, options: options, machine: json}
+                }
+            }
+        }
+        "try" -> {
+            if args.len() < 2 {
+                output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_USAGE}
+                jet_cli_write_status(&output, adapter.profile, jet_cli_command_help("try"))
+                return JetCLIPlan.Done{output: output}
+            }
+            return JetCLIPlan.Try{file: args[1], keep: jet_argv.contains("--keep"), mode: jet_cli_output_mode(adapter)}
+        }
+        "compiler" -> {
+            if args.len() == 3 && args[1] == "check" -> return JetCLIPlan.Inspect{file: args[2], color: color, semindex: false}
+            return jet_cli_not_ported("inspect compiler", color)
+        }
+        "semindex" -> {
+            if args.len() < 2 -> return jet_cli_fail("E2104", "`jet inspect semindex` needs an entry file", jet_cli_why("E2104"), "jet inspect semindex Examples/features/basics/hello.jet", color, JET_DRIVER_EXIT_USER_ERROR)
+            if json -> return JetCLIPlan.Inspect{file: args[1], color: color, semindex: true}
+            return jet_cli_not_ported("inspect semindex", color)
+        }
         else -> {}
     }
     jet_cli_not_ported(command, color)

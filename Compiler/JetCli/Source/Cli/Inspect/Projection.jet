@@ -1,0 +1,286 @@
+// One checked source projection for command consumers (CmdInspect.rs IP01).
+// The source host constructs one authorized, prepared Driver input. Consumers
+// retain that snapshot and the exact compiler-services packet: no reopening an
+// entry, second checker, index reconstruction, or independent version pin.
+use core.files.runtime.kernel_path_components as inspect_projection_os_path
+use jet_driver.[
+    JetDriverCompilerCheckInput,
+    JetDriverCompilerCheckResult,
+    JetDriverVerbOutput,
+    jet_driver_compiler_check,
+    jet_driver_compiler_check_demand_index,
+    jet_driver_present_checked_diagnostics,
+    JET_DRIVER_EXIT_USER_ERROR,
+]
+use jet_foundation.[
+    Diagnostic,
+    DIAGNOSTIC_ERROR,
+    Span,
+    diagnostic_registry_row,
+    diagnostic_from_registry,
+    TComptimeValue,
+    TComptimeKey,
+    StatusValue,
+    StatusFields,
+    StatusEnvelope,
+    ReportPath,
+    diagnostic_render_all_json,
+    comptime_character,
+    comptime_float_json,
+    tir_comptime_key_value,
+    tir_comptime_value_text,
+    is_memo_storage_name,
+]
+use jet_eval.[JetCompilerServicesCheckedFacts, JetCompilerServicesParseFacts, API_VERSION, SCHEMA_VERSION]
+use jet_lexer.[TOKEN_KW_USE, TOKEN_IDENT, TOKEN_DOT]
+use jet_semindex.[SemIndex]
+
+// Rust CheckScope (CmdInspect.rs:85-89). Scope is command intent, never inferred
+// from whether a replayed packet happens to contain an index.
+pub enum JetCLICheckScope { Project ExplicitFile }
+
+// Rust CheckProjection (CmdInspect.rs:30-68). Retain the original Driver query,
+// including loaded-source/proof metadata and its lazy full-index memo. Command
+// consumers demand that memo; they never copy/reconstruct a checked graph.
+pub struct JetCLICheckProjection {
+    pub result: JetDriverCompilerCheckResult
+}
+
+// Rust DiagnosticProjection (CmdInspect.rs:69-80,153-173). Retain the original
+// query's loaded sources and proof rows outside CompilerChecked. Complete and
+// valid stay distinct; source revisions can use only this retained metadata.
+pub struct JetCLIDiagnosticProjection {
+    pub result: JetDriverCompilerCheckResult
+    pub valid: Bool
+    pub complete: Bool
+}
+
+#Error
+pub enum JetCLIProjectionError {
+    Diagnostics(diagnostics: [Diagnostic])
+    Internal(message: String)
+    Incomplete(diagnostics: [Diagnostic])
+}
+
+// Rust check_projection_with_options_and_preflight error precedence
+// (CmdInspect.rs:398-431). Never lower or publish an index for semantic errors.
+pub fn jet_cli_projection_has_errors(diagnostics: [Diagnostic]) -> Bool Never! {
+    loop diagnostic in diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> return true
+    }
+    false
+}
+
+// Rust check_projection (CmdInspect.rs:118-125,398-431). Scope/output/preflight
+// intent belongs to the canonical Driver request. Index construction stays lazy.
+pub fn jet_cli_check_projection(input: JetDriverCompilerCheckInput) -> JetCLICheckProjection JetCLIProjectionError! {
+    result := jet_driver_compiler_check(input)
+    if jet_cli_projection_has_errors(result.diagnostics) -> return Err(.Diagnostics{diagnostics: result.diagnostics})
+    if result.internal_problem == .Val(problem) -> return Err(.Internal{message: problem})
+    if !result.complete || result.checked == None -> return Err(.Incomplete{diagnostics: result.diagnostics})
+    Ok(JetCLICheckProjection{result: ^result})
+}
+
+// Rust check_diagnostics (CmdInspect.rs:129-174): retain checker diagnostics on
+// failure, while a missing usable bundle remains incomplete, never clean.
+pub fn jet_cli_check_diagnostics(input: JetDriverCompilerCheckInput) -> JetCLIDiagnosticProjection {
+    result := jet_driver_compiler_check(input)
+    complete :: result.graph != None && result.registration != None && result.internal_problem == None
+    valid :: complete && !jet_cli_projection_has_errors(result.diagnostics) && result.complete
+    JetCLIDiagnosticProjection{
+        result: ^result,
+        valid: valid,
+        complete: complete,
+    }
+}
+
+// Rust scope_name (CmdInspect.rs:453-458).
+pub fn jet_cli_check_scope_name(scope: JetCLICheckScope) -> String Never! {
+    if scope == {
+        .Project -> "project"
+        .ExplicitFile -> "explicit-file"
+    }
+}
+
+// Rust missing_project_context_diagnostic (CmdInspect.rs:484-555). The host's
+// checked package/workspace/inline-package lookup supplies owning_context; the
+// lexer and parser here are those already used to prepare the exact entry.
+// In particular strings/comments are never scanned as source imports.
+pub fn jet_cli_missing_project_context_diagnostic(parsed: JetCompilerServicesParseFacts, owning_context: Bool) -> Diagnostic? Never! {
+    if owning_context || parsed.lexed.diagnostics.len() != 0 -> return None
+    span := Span?{None}
+    if parsed.parsed.diagnostics.len() == 0 {
+        loop declaration in parsed.parsed.program.imports {
+            if declaration.kind == {
+                .Module(name, site) -> {
+                    if name.starts_with("project.") {
+                        span = Val(site)
+                        break
+                    }
+                }
+                .Unqualified(name, _, _, _, site) -> {
+                    if name.starts_with("project.") {
+                        span = Val(site)
+                        break
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+    if span == None && parsed.lexed.tokens.len() >= 4 {
+        tokens :: parsed.lexed.tokens
+        loop at in 0..<(tokens.len() - 3) {
+            if tokens[at].kind == TOKEN_KW_USE && tokens[at + 1].kind == TOKEN_IDENT && tokens[at + 1].payload.decoded == "project" && tokens[at + 2].kind == TOKEN_DOT && tokens[at + 3].kind == TOKEN_IDENT {
+                span = Val(Span{start: tokens[at + 1].span.start, end: tokens[at + 3].span.end})
+                break
+            }
+        }
+    }
+    site :: span ?? return None
+    row :: diagnostic_registry_row("E2393") ?? panic("E2393 is not registered")
+    Val(diagnostic_from_registry("E2393", Val(site), row.what.replace("{{import}}", "use project.<module>"), row.why, row.fix))
+}
+
+// Rust status_map_key (Compiler.rs:2552-2562). Compound keys use the same JSON
+// projection as their corresponding value, rather than internal type/debug text.
+fn jet_cli_projection_map_key(key: TComptimeKey) -> String Never! {
+    if key == {
+        .Int(value) -> return "{value}"
+        .String(value) -> return ~value
+        .Bool(value) -> return "{value}"
+        .Char(value) -> return comptime_character(value)
+        .Enum(_, _) | .Tuple(_) | .Struct(_, _) -> return tir_comptime_value_text(tir_comptime_key_value(key))
+    }
+}
+
+// Rust status_ct_value (Compiler.rs:2564-2616). Mechanical serialization of the
+// shared compiler packet, including carrier absence. Never serialize a second
+// Rust-shaped compatibility model or use a separate semantic-index version.
+pub fn jet_cli_projection_value_status_value(value: TComptimeValue) -> StatusValue Never! {
+    if value == {
+        .Int(number) -> return StatusValue.Integer{value: number}
+        .Float(number, bits) -> return StatusValue.Float{value: comptime_float_json(number, bits)}
+        .Bool(flag) -> return StatusValue.Bool{value: flag}
+        .Char(code) -> return StatusValue.String{value: comptime_character(code)}
+        .String(text) -> return StatusValue.String{value: text}
+        .BigInt(decimal) -> return StatusValue.String{value: decimal}
+        .Bytes(bytes) -> {
+            values := [StatusValue]{}
+            loop byte in bytes -> &values.push(StatusValue.Integer{value: Int.from_u8(byte)})
+            return StatusValue.Array{values: values}
+        }
+        .List(items) -> {
+            values := [StatusValue]{}
+            loop item in items -> &values.push(jet_cli_projection_value_status_value(item))
+            return StatusValue.Array{values: values}
+        }
+        .Map(entries) -> {
+            fields := StatusFields.new()
+            loop entry in entries -> fields = ^fields.with(jet_cli_projection_map_key(entry.key), jet_cli_projection_value_status_value(entry.value))
+            return StatusValue.Object{fields: fields}
+        }
+        .Struct(_, entries) -> {
+            fields := StatusFields.new()
+            loop entry in entries {
+                if is_memo_storage_name(entry.name) -> next
+                fields = ^fields.with(entry.name, jet_cli_projection_value_status_value(entry.value))
+            }
+            return StatusValue.Object{fields: fields}
+        }
+        .Enum(_, variant, args) -> {
+            if args.len() == 0 -> return StatusValue.String{value: variant}
+            labeled := true
+            loop arg in args { if arg.name == None -> labeled = false }
+            payload := StatusValue.Null
+            if labeled {
+                fields := StatusFields.new()
+                loop arg in args {
+                    name :: arg.name ?? panic("labeled checked enum lost its label")
+                    fields = ^fields.with(name, jet_cli_projection_value_status_value(arg.value))
+                }
+                payload = StatusValue.Object{fields: fields}
+            } else {
+                values := [StatusValue]{}
+                loop arg in args -> &values.push(jet_cli_projection_value_status_value(arg.value))
+                payload = StatusValue.Array{values: values}
+            }
+            return StatusValue.Object{fields: StatusFields.new().with(variant, payload)}
+        }
+        .Present(payload) -> return jet_cli_projection_value_status_value(payload)
+        .Failed(report) -> {
+            if report == {
+                .Clean(_) -> return StatusValue.Null
+                .Told(payload) -> return StatusValue.Object{fields: StatusFields.new().with("err", jet_cli_projection_value_status_value(payload))}
+            }
+        }
+        .Unit | .Closure(_) -> return StatusValue.Null
+    }
+}
+
+// Rust Compiler.rs:2030: read only the distinct twelve-field compiler view.
+// This reflected field is never the source of the full SemIndex envelope.
+pub fn jet_cli_projection_index_status_value(checked: JetCompilerServicesCheckedFacts) -> StatusValue Never! {
+    if checked.value == .Struct(_, fields) {
+        loop field in fields {
+            if field.name == "semantic_index" -> return jet_cli_projection_value_status_value(field.value)
+        }
+    }
+    panic("canonical CompilerChecked packet has no semantic_index field")
+}
+
+// Missing early-stage Driver packets are a typed incomplete result with all
+// diagnostics intact. The host owns presentation; the CLI never invents a
+// successful checked packet or a different compiler diagnostic schema.
+pub fn jet_cli_projection_query_packet(result: ^JetDriverCompilerCheckResult) -> JetCompilerServicesCheckedFacts JetCLIProjectionError! {
+    if result.internal_problem == .Val(problem) -> return Err(.Internal{message: problem})
+    if result.checked == None -> return Err(.Incomplete{diagnostics: result.diagnostics})
+    Ok(^result.checked ?? panic("checked packet disappeared while transferring its owner"))
+}
+
+// Rust run_compiler_api check branch (CmdCompile.rs:880-923) using the shared
+// Driver query. User errors remain diagnostics in the packet (exit 0), with
+// semantic_index:null; they are not converted into command/transport rejection.
+pub fn jet_cli_inspect_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverVerbOutput JetCLIProjectionError! {
+    result := jet_driver_compiler_check(input)
+    if result.complete && !jet_cli_projection_has_errors(result.diagnostics) {
+        if !jet_driver_compiler_check_demand_index(&result) -> return Err(.Incomplete{diagnostics: result.diagnostics})
+    }
+    checked :: jet_cli_projection_query_packet(^result)
+    Ok(jet_cli_projection_compiler_output(checked))
+}
+
+// Rust compiler_json/compiler_payload (Compiler.rs:2301-2315).
+pub fn jet_cli_projection_compiler_output(checked: JetCompilerServicesCheckedFacts) -> JetDriverVerbOutput Never! {
+    compiler :: StatusValue.Object{fields: StatusFields.new()
+        .with("schema_version", StatusValue.Integer{value: SCHEMA_VERSION})
+        .with("api_version", StatusValue.Integer{value: API_VERSION})
+        .with("operation", StatusValue.String{value: "check"})
+        .with("value", jet_cli_projection_value_status_value(checked.value))}
+    envelope :: StatusEnvelope.new("inspect.compiler.check", true).with_field("compiler", compiler)
+    JetDriverVerbOutput{stdout: "{envelope.json()}\n", stderr: "", exit_code: 0}
+}
+
+// Rust CmdSemIndex.rs:30-114. Semantic/load rejection is canonical diagnostic
+// JSON Lines + USER_ERROR, even when a diagnostic-side typed index is retained.
+// Incomplete/transport failure stays typed; neither is a successful null index.
+pub fn jet_cli_inspect_semindex(input: JetDriverCompilerCheckInput) -> JetDriverVerbOutput JetCLIProjectionError! {
+    result := jet_driver_compiler_check(input)
+    if result.internal_problem == .Val(problem) -> return Err(.Internal{message: problem})
+    if jet_cli_projection_has_errors(result.diagnostics) {
+        file :: ReportPath.from_path(inspect_projection_os_path.display(input.request.authorized_sources.entry_path))
+        diagnostics :: jet_driver_present_checked_diagnostics(result)
+        return Ok(JetDriverVerbOutput{stdout: diagnostic_render_all_json(file, "", diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR})
+    }
+    if !result.complete || result.checked == None -> return Err(.Incomplete{diagnostics: result.diagnostics})
+    if !jet_driver_compiler_check_demand_index(&result) -> return Err(.Incomplete{diagnostics: result.diagnostics})
+    index :: result.semantic_index ?? return Err(.Incomplete{diagnostics: result.diagnostics})
+    Ok(jet_cli_projection_semindex_output(index))
+}
+
+// Rust run_semindex success (CmdSemIndex.rs:31-34), JSON.rs:1053-1118.
+// The sole provider serializes the full fifteen-field retained model directly.
+pub fn jet_cli_projection_semindex_output(index: SemIndex) -> JetDriverVerbOutput Never! {
+    envelope :: index.to_status_envelope()
+    JetDriverVerbOutput{stdout: "{envelope.json()}\n", stderr: "", exit_code: 0}
+}

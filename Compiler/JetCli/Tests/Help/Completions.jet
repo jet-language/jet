@@ -1,0 +1,380 @@
+use jet_foundation.[BuildEffect]
+
+// Behavioral claims for CLI.rs closest helpers, shell completions, and man_page.
+fn completions_test_shells() -> [String] Never! {
+    [String]{jet_cli_completions_bash(), jet_cli_completions_zsh(), jet_cli_completions_fish(), jet_cli_completions_powershell()}
+}
+fn completions_test_flag_count(long: String) -> Int Never! {
+    count := 0
+    loop flag in JET_CLI_FLAGS { if flag.long == long -> count += 1 }
+    count
+}
+fn completions_test_command_has_flag(command: String, long: String) -> Bool Never! {
+    loop flag in jet_cli_flags_for_command(command) { if flag.long == long -> return true }
+    false
+}
+
+// Rust `typo_finds_closest_command` (CLI.rs:3383-3390); implementation reused from Registry.jet.
+#Test("typo_finds_closest_command") {
+    assert_eq(jet_cli_closest_command("buld"), Val("build"))
+    assert_eq(jet_cli_closest_command("chekc"), Val("check"))
+    assert_eq(jet_cli_closest_command("rnu"), Val("run"))
+    assert(jet_cli_closest_command("zxqwvbn") == None)
+}
+// Rust `typo_finds_closest_flag` (CLI.rs:3392-3396).
+#Test("typo_finds_closest_flag") {
+    assert_eq(jet_cli_closest_flag("--jsn"), Val("--json"))
+    assert_eq(jet_cli_closest_flag("--colr"), Val("--color"))
+    assert_eq(jet_cli_closest_flag("--colr=always"), Val("--color"))
+}
+// Rust `external_completion_rejects_hostile_program_names` (CLI.rs:3358-3381).
+#Test("external_completion_rejects_hostile_program_names") {
+    assert_eq(jet_cli_completion_command_name("build/greeter") ?? panic("usable basename refused"), "greeter")
+    cr :: String.from_bytes([U8]{U8{13}}) ?? panic("carriage return not UTF-8")
+    if jet_cli_completion_command_name("safe\nINJECT_COMMAND{cr}next") == {
+        .Ok(_) -> panic("control-character name accepted")
+        .Err(error) -> assert_eq(jet_cli_completion_name_error_message(error), "the program command name contains a control character")
+    }
+    schema :: completions_test_program_empty()
+    shells :: [String]{"bash", "zsh", "fish", "powershell"}
+    loop shell in shells {
+        script :: jet_cli_completions_for_program(shell, "greeter", schema) ?? panic("supported shell refused")
+        assert(!script.contains("build/greeter"))
+    }
+}
+#Test("completion command name follows POSIX path components") {
+    good :: [String]{"greeter", "build//greeter/", "./build/greeter/.", "../greeter//./"}
+    loop path in good -> assert_eq(jet_cli_completion_command_name(path) ?? panic("usable name refused"), "greeter")
+    unusable :: [String]{"", "/", ".", "./", "..", "build/..", "/./", "build/../."}
+    loop path in unusable {
+        if jet_cli_completion_command_name(path) == {
+            .Ok(_) -> panic("path without a file name accepted")
+            .Err(error) -> assert_eq(jet_cli_completion_name_error_message(error), "the program path has no usable command name")
+        }
+    }
+    nul :: String.from_bytes([U8]{U8{0}}) ?? panic("NUL not UTF-8")
+    del :: String.from_bytes([U8]{U8{127}}) ?? panic("DEL not UTF-8")
+    c1_first :: String.from_bytes([U8]{U8{194}, U8{128}}) ?? panic("C1 not UTF-8")
+    c1_last :: String.from_bytes([U8]{U8{194}, U8{159}}) ?? panic("C1 not UTF-8")
+    controls :: [String]{"a\t", "a{nul}", "a{del}", "a{c1_first}", "a{c1_last}"}
+    loop path in controls {
+        if jet_cli_completion_command_name(path) == {
+            .Ok(_) -> panic("control-character name accepted")
+            .Err(error) -> assert(error == JetCLICompletionNameError.ControlCharacter)
+        }
+    }
+    assert_eq(jet_cli_completion_command_name("bad\nparent/greeter") ?? panic("parent control rejected"), "greeter")
+    assert_eq(jet_cli_completion_command_name("build/gréétér") ?? panic("Unicode name refused"), "gréétér")
+}
+
+// Rust `dry_run_is_one_shared_flag_row` (CLI.rs:3407-3425).
+#Test("dry_run_is_one_shared_flag_row") {
+    assert_eq(completions_test_flag_count("--dry-run"), 1)
+    assert(jet_cli_is_known_flag("--dry-run"))
+    assert(jet_cli_man_page("0.0.0").contains("--dry-run"))
+    loop script in completions_test_shells() -> assert(script.contains("dry-run"))
+    usage :: jet_cli_group_usage("inspect")
+    assert(usage.contains("codemod <plan.json> --dry-run"))
+    assert(!usage.contains("codemod dry-run"))
+}
+// Rust `dev_canvas_is_one_registered_surface` (CLI.rs:3427-3464).
+#Test("dev_canvas_is_one_registered_surface") {
+    assert_eq(completions_test_flag_count("--canvas"), 1)
+    assert(jet_cli_is_known_flag("--canvas"))
+    assert_eq(jet_cli_command_usage("dev"), "jet dev [<file.jet|dir>] [--canvas|--app <function>] [--share <loopback|lan>] [--token <token>] [-- <args>]")
+    assert(completions_test_command_has_flag("dev", "--canvas"))
+    expert :: [String]{"--output", "--target", "--canvas-host", "--canvas-port", "--canvas-transport", "--canvas-authority", "--canvas-audit"}
+    loop flag in expert -> assert(completions_test_command_has_flag("dev", flag))
+    assert(jet_cli_man_page("0.0.0").contains("--canvas"))
+    loop script in completions_test_shells() -> assert(script.contains("canvas"))
+    assert(!jet_cli_is_builtin("canvas"))
+}
+// Rust `run_prepare_refusal_is_one_registered_surface` (CLI.rs:3466-3482).
+#Test("run_prepare_refusal_is_one_registered_surface") {
+    assert_eq(completions_test_flag_count("--no-prepare"), 1)
+    assert_eq(jet_cli_command_usage("run"), "jet run [<file.jet|dir>] [--no-prepare] [-- <args>]")
+    assert(completions_test_command_has_flag("run", "--no-prepare"))
+    assert(jet_cli_man_page("0.0.0").contains("--no-prepare"))
+    loop script in completions_test_shells() -> assert(script.contains("no-prepare"))
+}
+// Rust `flash_registry_matches_parser_surface` (CLI.rs:3484-3513).
+#Test("flash_registry_matches_parser_surface") {
+    count := 0
+    loop command in JET_CLI_COMMANDS { if command.name == "flash" -> count += 1 }
+    assert_eq(count, 1)
+    assert_eq(jet_cli_command_usage("flash"), "jet flash --target <board.name> [--image <firmware.elf>] [--audit <target.json>] [--adapter <probe-rs|openocd|emulator>]")
+    expected :: [String]{"--target", "--image", "--audit", "--adapter"}
+    loop flag in expected -> assert(completions_test_command_has_flag("flash", flag))
+    assert_eq(completions_test_flag_count("--image") + completions_test_flag_count("--audit") + completions_test_flag_count("--adapter"), 3)
+    loop script in completions_test_shells() -> assert(script.contains("flash"))
+    // owns_flag_vocabulary is a dispatcher parser contract, not a shell renderer.
+}
+// Rust `completions_mention_every_command` (CLI.rs:3522-3553).
+#Test("completions_mention_every_command") {
+    loop script in completions_test_shells() {
+        loop command in JET_CLI_COMMANDS {
+            if jet_cli_is_canonical_top_level(command.name) -> assert(script.contains(command.name))
+            if command.actions.len() > 0 -> assert(script.contains(command.name))
+            loop action in command.actions -> assert(script.contains(action.name))
+        }
+    }
+}
+// Rust `typo_suggestions_never_advertise_moved_bare_actions` (CLI.rs:3594-3608).
+#Test("typo_suggestions_never_advertise_moved_bare_actions") {
+    loop group in JET_CLI_COMMANDS {
+        loop action in group.actions {
+            canonical_bare := false
+            // Canonical group roots win too (Rust `moved_command`, CLI.rs:1098-1106).
+            loop command in JET_CLI_COMMANDS {
+                if command.name == action.name && jet_cli_is_canonical_top_level(command.name) -> canonical_bare = true
+            }
+            if !action.also_canonical_top_level && !canonical_bare -> assert(jet_cli_closest_command(action.name) != Val(action.name))
+        }
+    }
+}
+// Rust `man_mentions_every_command_and_flag` (CLI.rs:3682-3691).
+#Test("man_mentions_every_command_and_flag") {
+    man :: jet_cli_man_page("0.0.0")
+    loop command in JET_CLI_COMMANDS {
+        if jet_cli_is_canonical_top_level(command.name) -> assert(man.contains(command.name))
+    }
+    loop flag in JET_CLI_FLAGS -> assert(man.contains(flag.long))
+}
+// Rust `authority_flags_render_in_registry_completions_and_man` (CLI.rs:3693-3738).
+#Test("authority_flags_render_in_registry_completions_and_man") {
+    man :: jet_cli_man_page("0.0.0")
+    scripts :: completions_test_shells()
+    canonical :: [String]{"--allow", "--deny"}
+    loop flag in canonical {
+        assert_eq(completions_test_flag_count(flag), 1)
+        assert(completions_test_command_has_flag("db", flag))
+        assert(man.contains(flag))
+        loop script in scripts -> assert(script.contains(flag) || script.contains(flag.slice(2..<flag.len())))
+    }
+    effects :: [BuildEffect]{BuildEffect.Net, BuildEffect.FS, BuildEffect.IO, BuildEffect.DB, BuildEffect.Time, BuildEffect.Rand, BuildEffect.Env, BuildEffect.Exec, BuildEffect.Log, BuildEffect.GPU}
+    kinds :: [String]{"allow", "deny"}
+    loop build_effect in effects {
+        loop kind in kinds {
+            retired :: "--{kind}-{build_effect.flag()}"
+            assert_eq(completions_test_flag_count(retired), 0)
+            assert(!man.contains(retired))
+            loop script in scripts -> assert(!script.contains(retired))
+        }
+    }
+}
+// Rust `cost_surface_is_registered_for_help_man_and_completions` (CLI.rs:3740-3759).
+#Test("cost_surface_is_registered_for_help_man_and_completions") {
+    assert_eq(completions_test_flag_count("--cost"), 1)
+    assert(jet_cli_is_known_flag("--cost"))
+    assert(jet_cli_command_usage("lint").contains("--cost"))
+    assert(jet_cli_command_usage("explain").contains("<CODE|FACT>"))
+    assert(jet_cli_command_usage("explain").contains("--cost"))
+    assert(jet_cli_man_page("0.0.0").contains("--cost"))
+    loop script in completions_test_shells() -> assert(script.contains("cost"))
+}
+// Rust `self_update_keyless_override_is_registered_for_help_and_completions` (CLI.rs:3761-3781).
+#Test("self_update_keyless_override_is_registered_for_help_and_completions") {
+    assert_eq(completions_test_flag_count("--allow-unofficial"), 1)
+    assert(jet_cli_is_known_flag("--allow-unofficial"))
+    assert(jet_cli_group_usage("self").contains("--allow-unofficial"))
+    assert(jet_cli_man_page("0.0.0").contains("--allow-unofficial"))
+    assert(jet_cli_completions_bash().contains("--allow-unofficial"))
+    assert(jet_cli_completions_zsh().contains("--allow-unofficial"))
+    // Fish registers long flags without the leading dashes (Rust `completions_fish`).
+    assert(jet_cli_completions_fish().contains("-l allow-unofficial"))
+    assert(jet_cli_completions_powershell().contains("--allow-unofficial"))
+}
+// Rust `retired_routes_have_zero_live_registry_rows` generated-surface assertions (CLI.rs:3912-3954).
+#Test("retired_routes_have_zero_live_registry_rows") {
+    surfaces := completions_test_shells()
+    &surfaces.push(jet_cli_man_page("0.0.0"))
+    &surfaces.push(jet_cli_usage_page("frequency"))
+    loop retired in JET_CLI_RETIRED {
+        loop command in JET_CLI_COMMANDS {
+            assert(command.name != retired.spelling)
+            loop action in command.actions {
+                route :: "{command.name} {action.name}"
+                assert(route != retired.spelling)
+            }
+        }
+        loop surface in surfaces -> assert(!surface.contains("{JET_CLI_BINARY} {retired.spelling}"))
+    }
+    // RetirementCategory/error-code fields are owned by the retirement registry port.
+}
+
+#Test("shell escaping preserves the reference quoting contracts") {
+    assert_eq(jet_cli_completions_escape_zsh("a'b:[c]\\d"), "a'\\''b\\:\\[c\\]\\d")
+    assert_eq(jet_cli_completions_escape_fish("a'b\\c"), "a\\'b\\c")
+    assert_eq(jet_cli_completions_roff_escape(".a\n'b\\c"), ".a\n'b\\\\c")
+}
+#Test("bash and zsh preserve template whitespace and JSON job queries") {
+    bash :: jet_cli_completions_bash()
+    assert(bash.starts_with("# bash completion for jet (generated by `jet self completions bash`)\n_jet() {{\nlocal cur prev cmds flags\n"))
+    assert(bash.contains("    if [[ $COMP_CWORD -eq 2 && \"${{COMP_WORDS[1]}}\" == \"jobs\" ]]; then\nlocal job_names\njob_names=\"$(jet --json jobs 2>/dev/null | sed -n 's/.*\"name\":\"\\([^\"]*\\)\".*/\\1/p')\"\n"))
+    assert(bash.ends_with("        esac\nfi\nCOMPREPLY=( $(compgen -f -- \"$cur\") )\n}}\ncomplete -F _jet jet\n"))
+    zsh :: jet_cli_completions_zsh()
+    assert(zsh.starts_with("#compdef jet\n# zsh completion for jet (generated by `jet self completions zsh`)\n_jet() {{\nlocal -a commands flags\ncommands=(\n"))
+    assert(zsh.contains("        local -a job_names\njob_names=(\"${{(@f)$(jet --json jobs 2>/dev/null | sed -n 's/.*\"name\":\"\\([^\"]*\\)\".*/\\1/p')}}\")\n_describe -t job_names 'job' job_names\n    else\n"))
+    assert(zsh.ends_with("            esac\nelse\n_values 'flag' $flags\n_files\nfi\nfi\n}}\n_jet \"$@\"\n"))
+}
+#Test("fish and PowerShell preserve job query registration templates") {
+    fish :: jet_cli_completions_fish()
+    assert(fish.ends_with("complete -c jet -n '__fish_seen_subcommand_from jobs' -a \"(jet --json jobs 2>/dev/null | string match -r '\\\"name\\\":\\\"[^\\\"]+\\\"' | string replace -r '.*\\\"name\\\":\\\"([^\\\"]+)\\\".*' '$1')\" -d 'job name'\n"))
+    ps :: jet_cli_completions_powershell()
+    assert(ps.contains("$JetJobs = @((& jet --json jobs 2>$null | ConvertFrom-Json).jobs.name)\nRegister-ArgumentCompleter -Native -CommandName jet -ScriptBlock {{\nparam($wordToComplete,$commandAst,$cursorPosition)\n"))
+    assert(ps.ends_with("ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,\"ParameterValue\",$_) }}\n}}\n"))
+}
+#Test("man preserves the exact section framing and version") {
+    man :: jet_cli_man_page("VERSION")
+    assert(man.starts_with(".TH JET 1 \"\" \"jet VERSION\" \"Jet Manual\"\n.SH Name\njet \\- the Jet compiler and project tool\n.SH Synopsis\n.B jet\n.RI [ command ] \" \" [ args ...]\n"))
+    assert(man.ends_with(".SH Files\n.TP\n.B pkg.jet\nThe project manifest.\n.SH See Also\njet-explain(1)\n"))
+    loop command in JET_CLI_COMMANDS {
+        if !jet_cli_is_canonical_top_level(command.name) -> next
+        assert(man.contains(".TP\n.B {command.name}\n{jet_cli_completions_roff_escape(command.summary)}\n"))
+        loop action in command.actions -> assert(man.contains(".TP\n.B {command.name} {action.name}\n{jet_cli_completions_roff_escape(action.summary)}\n"))
+    }
+}
+
+fn completions_test_program_empty() -> CLICommandSchema Never! {
+    CLICommandSchema{entry_type: "", description: None, inputs: [TCLIInput]{}, commands: [TCLICommand]{}, jobs: [CLIRecordJob]{}, standard: false, version: None}
+}
+fn completions_test_program_input(flag: String, short: String?, metavar: String?, help: String, positional: Int?) -> TCLIInput Never! {
+    TCLIInput{field: ~flag, flag: ~flag, short: ~short, env: None, help: ~help, metavar: ~metavar, shape: TCLIInputShape.Value{kind: TCLIValueKind.String, optional: false, default: None}, positional: positional, variadic: false}
+}
+// Checked metadata from tests/cli_parts/surface.rs:292-298.
+fn completions_test_program_commands() -> CLICommandSchema Never! {
+    schema := completions_test_program_empty()
+    schema.standard = true
+    schema.version = Val("0.0.1")
+    &schema.inputs.push(completions_test_program_input("config", Val("c"), Val("CONFIG"), "shared config", None))
+    &schema.commands.push(TCLICommand{name: "serve", description: Val("start the service"), function: None, receiver: None, inputs: [TCLIInput]{completions_test_program_input("port", None, Val("PORT"), "value for --port", None)}})
+    &schema.commands.push(TCLICommand{name: "import", description: Val("import one file"), function: None, receiver: None, inputs: [TCLIInput]{completions_test_program_input("file", None, Val("FILE"), "value for --file", Val(0))}})
+    schema
+}
+
+// Byte oracles tests/cli/shape_cli_program_{bash,zsh,fish,powershell}.txt.
+// Their v6 header predates the current record version; all other bytes are retained.
+#Test("compiled program completion byte oracles") {
+    schema :: completions_test_program_commands()
+    version :: CLI_RECORD_VERSION
+    bash :: "# bash completion from JetCommandSchema v{version}\n__jet_program_completion() {{\n    local cur flags\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    if [[ $COMP_CWORD -eq 1 ]]; then\n        COMPREPLY=( $(compgen -W '--help --verbose -v --quiet -q --color --version --config -c serve import' -- \"$cur\") )\n        return 0\n    fi\n    flags='--help --verbose -v --quiet -q --color --version --config -c'\n    case \"${{COMP_WORDS[1]}}\" in\n        'serve') flags='--help --port' ;;\n        'import') flags='--help file --file' ;;\n    esac\n    if [[ \"$cur\" == -* ]]; then\n        COMPREPLY=( $(compgen -W \"$flags\" -- \"$cur\") )\n    fi\n}}\ncomplete -F __jet_program_completion -- 'commands'\n"
+    zsh :: "#compdef 'commands'\n# zsh completion from JetCommandSchema v{version}\nif (( CURRENT == 2 )); then\n_arguments \\\n    '(-v --verbose){{-v,--verbose}}[print extra detail]' \\\n    '(-q --quiet){{-q,--quiet}}[suppress normal output]' \\\n    '--color[control terminal color]:MODE:(auto always never)' \\\n    '--version[show version]' \\\n    '(-c --config){{-c,--config}}[shared config]:config:' \\\n    '--help[show help]' \\\n    '1:command:(serve import)'\nelse\n    case $words[2] in\n        'serve') _arguments \\\n    '--port[value for --port]:port:' \\\n    '--help[show help]' ;;\n        'import') _arguments \\\n    ':file:value for --file' \\\n    '--file[value for --file]:file:' \\\n    '--help[show help]' ;;\n    esac\nfi\n"
+    fish :: "# fish completion from JetCommandSchema v{version}\ncomplete -c 'commands' -n '__fish_use_subcommand' -l help -d 'show help'\ncomplete -c 'commands' -n '__fish_use_subcommand' -l verbose -s v -d 'print extra detail'\ncomplete -c 'commands' -n '__fish_use_subcommand' -l quiet -s q -d 'suppress normal output'\ncomplete -c 'commands' -n '__fish_use_subcommand' -l color -r -d 'control terminal color'\ncomplete -c 'commands' -n '__fish_use_subcommand' -l version -d 'show version'\ncomplete -c 'commands' -n '__fish_use_subcommand' -l config -s c -d 'shared config' -r\ncomplete -c 'commands' -n '__fish_use_subcommand' -a 'serve'\ncomplete -c 'commands' -n '__fish_seen_subcommand_from serve' -l help -d 'show help'\ncomplete -c 'commands' -n '__fish_seen_subcommand_from serve' -l port -d 'value for --port' -r\ncomplete -c 'commands' -n '__fish_use_subcommand' -a 'import'\ncomplete -c 'commands' -n '__fish_seen_subcommand_from import' -l help -d 'show help'\ncomplete -c 'commands' -n '__fish_seen_subcommand_from import' -l file -d 'value for --file' -r\n"
+    ps :: "# PowerShell completion from JetCommandSchema v{version}\nRegister-ArgumentCompleter -Native -CommandName 'commands' -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) $root = @('--help','--verbose','-v','--quiet','-q','--color','--version','--config','-c','serve','import'); $flags = @('--help','--verbose','-v','--quiet','-q','--color','--version','--config','-c'); $commandFlags = @{{ 'serve' = @('--help','--port'); 'import' = @('--help','file','--file') }}; $words = @($commandAst.CommandElements | ForEach-Object {{ $_.Extent.Text }}); $selected = if ($words.Count -ge 2) {{ $words[1] }} else {{ '' }}; $choices = if ($commandFlags.ContainsKey($selected)) {{ $commandFlags[$selected] }} elseif ($wordToComplete.StartsWith('-')) {{ $flags }} else {{ $root }}; $choices | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n"
+    assert_eq(jet_cli_completions_for_program("bash", "commands", schema), Val(bash))
+    assert_eq(jet_cli_completions_for_program("zsh", "commands", schema), Val(zsh))
+    assert_eq(jet_cli_completions_for_program("fish", "commands", schema), Val(fish))
+    assert_eq(jet_cli_completions_for_program("powershell", "commands", schema), Val(ps))
+}
+
+#Test("compiled program empty schema byte oracles and unsupported shell") {
+    schema :: completions_test_program_empty()
+    version :: CLI_RECORD_VERSION
+    assert_eq(jet_cli_completions_for_program("bash", "greeter", schema), Val("# bash completion from JetCommandSchema v{version}\n__jet_program_completion() {{\n    local cur\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    COMPREPLY=( $(compgen -W '--help' -- \"$cur\") )\n}}\ncomplete -F __jet_program_completion -- 'greeter'\n"))
+    assert_eq(jet_cli_completions_for_program("zsh", "greeter", schema), Val("#compdef 'greeter'\n# zsh completion from JetCommandSchema v{version}\n_arguments \\\n    '--help[show help]'\n"))
+    assert_eq(jet_cli_completions_for_program("fish", "greeter", schema), Val("# fish completion from JetCommandSchema v{version}\ncomplete -c 'greeter' -l help -d 'show help'\n"))
+    assert_eq(jet_cli_completions_for_program("powershell", "greeter", schema), Val("# PowerShell completion from JetCommandSchema v{version}\nRegister-ArgumentCompleter -Native -CommandName 'greeter' -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) @('--help') | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n"))
+    assert(jet_cli_completions_for_program("Bash", "greeter", schema) == None)
+    assert(jet_cli_completions_for_program("", "greeter", schema) == None)
+}
+
+#Test("compiled program quoting distinguishes shell words from zsh descriptions") {
+    assert_eq(jet_cli_completions_shell_single_quote("a'b:$x\\[c]"), "'a'\\''b:$x\\[c]'")
+    assert_eq(jet_cli_completions_zsh_single("a'b:[c]"), "a'\\''b:[c]")
+    assert_eq(jet_cli_completions_zsh_bracket("a'b:[c]"), "a'\\''b:\\[c\\]")
+    assert_eq(jet_cli_completions_ps_single("a'b"), "'a''b'")
+    schema :: completions_test_program_empty()
+    bash :: jet_cli_completions_for_program("bash", "odd' name;$x", schema) ?? panic("bash")
+    fish :: jet_cli_completions_for_program("fish", "odd' name;$x", schema) ?? panic("fish")
+    ps :: jet_cli_completions_for_program("powershell", "odd' name;$x", schema) ?? panic("powershell")
+    assert(bash.ends_with(" -- 'odd'\\'' name;$x'\n"))
+    assert(fish.contains("-c 'odd'\\'' name;$x'"))
+    assert(ps.contains("-CommandName 'odd'' name;$x'"))
+}
+
+#Test("compiled program zsh positional ordering is stable and descriptions are bracket escaped") {
+    inputs :: [TCLIInput]{
+        completions_test_program_input("later", None, Val("LATER"), "late: [one]'s", Val(3)),
+        completions_test_program_input("first", Val("f"), None, "first", Val(1)),
+        completions_test_program_input("tie", None, Val("TIE"), "tie", Val(1)),
+    }
+    specs :: jet_cli_completions_zsh_input_specs(inputs)
+    assert_eq(specs[0], "    ':first:first'")
+    assert_eq(specs[1], "    ':tie:tie'")
+    assert_eq(specs[2], "    ':later:late: \\[one\\]'\\''s'")
+    assert_eq(specs[3], "    '--later[late: \\[one\\]'\\''s]:later:'")
+    assert_eq(specs[4], "    '(-f --first){{-f,--first}}[first]'")
+    assert_eq(specs[6], "    '--help[show help]'")
+}
+
+#Test("compiled program Standard version gating and no invented flag values") {
+    schema := completions_test_program_empty()
+    schema.version = Val("1.2.3")
+    assert_eq(jet_cli_completions_zsh_standard_specs(false, true).len(), 0)
+    assert_eq(jet_cli_completions_zsh_standard_specs(true, false).len(), 3)
+    assert_eq(jet_cli_completions_zsh_standard_specs(true, true).len(), 4)
+    &schema.inputs.push(completions_test_program_input("label", None, Val("LABEL"), "don't [guess]: label", None))
+    shells :: [String]{"bash", "zsh", "fish", "powershell"}
+    loop shell in shells {
+        script :: jet_cli_completions_for_program(shell, "greeter", schema) ?? panic("supported shell")
+        assert(!script.contains("version"))
+        assert(!script.contains("verbose"))
+        assert(!script.contains("1.2.3"))
+        assert(!script.contains("compgen -f"))
+        assert(!script.contains("2>/dev/null"))
+    }
+    fish :: jet_cli_completions_for_program("fish", "greeter", schema) ?? panic("fish")
+    assert(fish.contains("-l label -d 'don'\\''t [guess]: label' -r\n"))
+    schema.standard = true
+    loop shell in shells {
+        script :: jet_cli_completions_for_program(shell, "greeter", schema) ?? panic("supported shell")
+        assert(script.contains("version"))
+        assert(script.contains("verbose"))
+    }
+}
+
+fn completions_test_program_job(name: String, scope: JobScope) -> CLIRecordJob Never! {
+    CLIRecordJob{name: ~name, scope: scope, doc: None, arguments: [TJobArgumentFact]{}, after: [String]{}, packages: [String]{}, cwd: None, inputs: [String]{}, outputs: [String]{}, skip: None, cache: JobCachePolicy.Uncached, parallel: 1, limits: [String:String]{}, schedule: None}
+}
+#Test("compiled program schema words retain visible jobs without querying job values") {
+    schema := completions_test_program_empty()
+    &schema.jobs.push(completions_test_program_job("local", JobScope.Dev))
+    &schema.jobs.push(completions_test_program_job("publish", JobScope.Ship))
+    &schema.jobs.push(completions_test_program_job("hidden", JobScope.Internal))
+    &schema.inputs.push(TCLIInput{field: "enabled", flag: "enabled", short: Val("e"), env: Val("APP_ENABLED"), help: "enable it", metavar: None, shape: TCLIInputShape.Flag, positional: None, variadic: false})
+    bash :: jet_cli_completions_for_program("bash", "app", schema) ?? panic("bash")
+    ps :: jet_cli_completions_for_program("powershell", "app", schema) ?? panic("powershell")
+    assert(bash.contains("'--help --enabled -e local publish'"))
+    assert(ps.contains("@('--help','--enabled','-e','local','publish')"))
+    assert(!bash.contains("hidden"))
+    assert(!ps.contains("hidden"))
+    fish :: jet_cli_completions_for_program("fish", "app", schema) ?? panic("fish")
+    assert(fish.contains("-l enabled -s e -d 'enable it'\n"))
+    assert(!fish.contains("-r"))
+    assert(!fish.contains("APP_ENABLED"))
+    // Rust only projects job words in bash/PowerShell; no invented fish/zsh rows.
+    assert(!fish.contains("publish"))
+    zsh :: jet_cli_completions_for_program("zsh", "app", schema) ?? panic("zsh")
+    assert(!zsh.contains("publish"))
+    assert(zsh.contains("    '(-e --enabled){{-e,--enabled}}[enable it]'"))
+}
+
+// Byte oracles tests/cli/shape_cli_for_{bash,zsh,fish,powershell,plain}.txt,
+// derived from tests/cli_parts/budget.rs:1291-1398, with only v6 -> RECORD_VERSION.
+#Test("compiled program flat typed and plain schema byte oracles") {
+    schema := completions_test_program_empty()
+    &schema.inputs.push(completions_test_program_input("name", None, Val("NAME"), "person to greet", Val(0)))
+    &schema.inputs.push(completions_test_program_input("retries", None, Val("RETRIES"), "value for --retries", None))
+    &schema.inputs.push(TCLIInput{field: "verbose", flag: "verbose", short: None, env: None, help: "value for --verbose", metavar: None, shape: TCLIInputShape.Flag, positional: None, variadic: false})
+    version :: CLI_RECORD_VERSION
+    bash :: "# bash completion from JetCommandSchema v{version}\n__jet_program_completion() {{\n    local cur\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    COMPREPLY=( $(compgen -W '--help name --name --retries --verbose' -- \"$cur\") )\n}}\ncomplete -F __jet_program_completion -- 'typed'\n"
+    zsh :: "#compdef 'typed'\n# zsh completion from JetCommandSchema v{version}\n_arguments \\\n    ':name:person to greet' \\\n    '--name[person to greet]:name:' \\\n    '--retries[value for --retries]:retries:' \\\n    '--verbose[value for --verbose]' \\\n    '--help[show help]'\n"
+    fish :: "# fish completion from JetCommandSchema v{version}\ncomplete -c 'typed' -l help -d 'show help'\ncomplete -c 'typed' -l name -d 'person to greet' -r\ncomplete -c 'typed' -l retries -d 'value for --retries' -r\ncomplete -c 'typed' -l verbose -d 'value for --verbose'\n"
+    ps :: "# PowerShell completion from JetCommandSchema v{version}\nRegister-ArgumentCompleter -Native -CommandName 'typed' -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) @('--help','name','--name','--retries','--verbose') | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n"
+    assert_eq(jet_cli_completions_for_program("bash", "typed", schema), Val(bash))
+    assert_eq(jet_cli_completions_for_program("zsh", "typed", schema), Val(zsh))
+    assert_eq(jet_cli_completions_for_program("fish", "typed", schema), Val(fish))
+    assert_eq(jet_cli_completions_for_program("powershell", "typed", schema), Val(ps))
+    plain :: "# bash completion from JetCommandSchema v{version}\n__jet_program_completion() {{\n    local cur\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    COMPREPLY=( $(compgen -W '--help' -- \"$cur\") )\n}}\ncomplete -F __jet_program_completion -- 'plain'\n"
+    assert_eq(jet_cli_completions_for_program("bash", "plain", completions_test_program_empty()), Val(plain))
+}

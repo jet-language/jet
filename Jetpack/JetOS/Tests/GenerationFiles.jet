@@ -1,0 +1,203 @@
+use core.sys.host.retained_counter as generation_test_counter
+
+// Original generation_files.rs tests741/1413/1433/1447. Mandatory native
+// journeys, UNEXECUTED; no mock filesystem, shell-mode probe or Rust wrapper.
+// Linux original closure suite requires actual selected test target #4483;
+// do not treat a PathPlatform as native cfg. Runtime providers remain #4494.
+// Main source wiring: this file with GenerationFiles and shared JetOS/Store
+// test assemblies. Preserve Store verification/lease production, not fixtures
+// forging CacheLease fields. Main owns positive/control/restored proof.
+
+// Rust725-738, exact flag defaults and same name across both tiers.
+fn jetos_generation_test_flags(real_tier: Bool) -> JetOSFlags Never! {
+    JetOSFlags{fixtures: None, offline: true, name: Val("same-name"), manual_disk: None, disk: None, json: false, assume_yes: false, trust: false, host: None, real_tier: real_tier}
+}
+
+// Rust1392-1403: actual native temporary parent and exclusive fixture creation.
+// Canonical counter replaces thread/time formatting ONLY for uniqueness;
+// native payloads/permissions/links/lease journey remain the original tests.
+struct JetOSGenerationScratch { path: generation_path.OSPath }
+fn jetos_generation_scratch_new(prefix: String) -> JetOSGenerationScratch Never! -[FS, Env]> {
+    parent :: generation_ingress.temp_dir()
+    loop {
+        count :: generation_test_counter.temp_counter_next()
+        path :: jetos_generation_child(parent, "{prefix}{sys.pid()}-{count}")
+        if generation_native.create_dir(path) == {
+            .Ok(_) -> return JetOSGenerationScratch{path: path}
+            .Err(error) -> {
+                if error == .AlreadyExists(_) -> next
+                panic("scratch directory: {error}")
+            }
+        }
+    }
+}
+// Rust1407-1409. Ignored cleanup error, including unwinding/failed assertions.
+impl JetOSGenerationScratch.Close {
+    fn close(^self) -[FS]> {
+        generation_native.remove_dir_all(self.path).drop("Rust Scratch.drop ignores cleanup failure")
+    }
+}
+
+// Original Rust741-758: write false proof; false validates, TRUE rejects.
+#Test("source_proof_rejects_same_name_across_realization_tiers") {
+    scratch :: jetos_generation_scratch_new("jetos-request-proof-")
+    root :: scratch.path
+    config :: jetos_generation_child(root, "config.jet")
+    generation_native.write(config, "module empty {{}}\n".bytes()) ?? panic("config")
+    generation_native.write(jetos_generation_child(root, "plan.json"), "{{}}\n".bytes()) ?? panic("plan")
+    jetos_write_generation_source_proof(root, config, jetos_generation_test_flags(false)) ?? panic("write source proof")
+    proof :: generation_native.read_bytes(jetos_generation_child(root, "source-proof.json")) ?? panic("read source proof")
+    plan :: generation_native.read_bytes(jetos_generation_child(root, "plan.json")) ?? panic("read plan")
+    jetos_validate_source_proof(proof, plan, config, jetos_generation_test_flags(false)) ?? panic("same tier validates")
+    if jetos_validate_source_proof(proof, plan, config, jetos_generation_test_flags(true)) == {
+        .Ok(_) -> panic("proof must reject different realization tier with same name")
+        .Err(_) -> {}
+    }
+    // Original request-proof test requires cleanup success, unlike Scratch.drop.
+    generation_native.remove_dir_all(root) ?? panic("request proof cleanup")
+}
+
+// Original Rust1413-1430, selected Linux: kind, EXACT text and unchanged link.
+#Test("relative_store_symlink_target_returns_invalid_data") {
+    scratch :: jetos_generation_scratch_new("jetos-owned-closure-")
+    generation :: jetos_generation_child(scratch.path, "generation")
+    generation_native.create_dir_all(generation) ?? panic("generation")
+    link :: jetos_generation_child(generation, "tool")
+    target :: generation_path.from_text("nix/store/aaaa-package/bin/tool", generation.platform)
+    generation_native.symlink(target, link) ?? panic("relative fixture link")
+    error :: if jetos_rewrite_store_symlinks(generation, link, generation_path.from_text("/nix/store", generation.platform)) == {
+        .Ok(_) -> panic("relative target must reject before prefix classification")
+        .Err(value) -> value
+    }
+    if error == {
+        .InvalidData(context) -> assert_eq(context.cause, Val("store symlink target must be absolute: `nix/store/aaaa-package/bin/tool`"))
+        else -> panic("original exact InvalidData kind: {error}")
+    }
+    assert_eq("{error}", "store symlink target must be absolute: `nix/store/aaaa-package/bin/tool`")
+    actual :: generation_native.read_link(link) ?? panic("unchanged link")
+    assert(generation_path.equals(actual, target))
+}
+
+// Original Rust1433-1444: absolute target outside store must NOT be rewritten.
+#Test("absolute_non_store_symlink_target_is_unchanged") {
+    scratch :: jetos_generation_scratch_new("jetos-owned-closure-")
+    generation :: jetos_generation_child(scratch.path, "generation")
+    generation_native.create_dir_all(generation) ?? panic("generation")
+    link :: jetos_generation_child(generation, "tool")
+    target :: generation_path.from_text("/opt/jet/bin/tool", generation.platform)
+    generation_native.symlink(target, link) ?? panic("absolute fixture link")
+    jetos_rewrite_store_symlinks(generation, link, generation_path.from_text("/nix/store", generation.platform)) ?? panic("outside-store rewrite")
+    assert(generation_path.equals(generation_native.read_link(link) ?? panic("unchanged outside target"), target))
+}
+
+// Pure policies exercise the same bodies, never stand in for native originals.
+#Test("JetOS relative path uses canonical components and preserves raw names") {
+    unix :: generation_path.PathPlatform.Unix
+    assert(generation_path.equals(jetos_relative_path(generation_path.from_text("/generation/sw/bin", unix), generation_path.from_text("/generation/nix/store/item/bin/tool", unix)) ?? panic("relative"), generation_path.from_text("../../nix/store/item/bin/tool", unix)))
+    assert(generation_path.equals(jetos_relative_path(generation_path.from_text("/a//./b", unix), generation_path.from_text("/a/b", unix)) ?? panic("same components"), generation_path.from_text("", unix)))
+    if jetos_relative_path(generation_path.from_text("left", unix), generation_path.from_text("right", unix)) == {
+        .Ok(_) -> panic("no common component must reject")
+        .Err(error) -> assert_eq("{error}", "cannot relativize generation store path")
+    }
+    from :: generation_path.from_encoded([U8]{47, 255, 47, 97}, unix)
+    to :: generation_path.from_encoded([U8]{47, 255, 47, 98}, unix)
+    relative :: jetos_relative_path(from, to) ?? panic("raw relative")
+    assert_eq(relative.encoded, [U8]{46, 46, 47, 98})
+    windows :: generation_path.PathPlatform.Windows
+    assert(generation_path.equals(jetos_relative_path(generation_path.from_text("C:\\a\\bin", windows), generation_path.from_text("c:/a/lib/tool", windows)) ?? panic("drive component equality"), generation_path.from_text("..\\lib\\tool", windows)))
+    if jetos_relative_path(generation_path.from_text("C:\\a", windows), generation_path.from_text("D:\\a", windows)) == {
+        .Ok(_) -> panic("distinct prefixes must reject")
+        .Err(_) -> {}
+    }
+}
+#Test("JetOS proof frame retains BE U64 length and payload") {
+    out := [U8]{}
+    jetos_generation_frame(&out, [U8]{255, 0, 1})
+    assert_eq(out, [U8]{0, 0, 0, 0, 0, 0, 0, 3, 255, 0, 1})
+    assert_eq(jetos_generation_u32_be(U32{0x12345678}), [U8]{18, 52, 86, 120})
+}
+#Test("JetOS package diff retains first-match and duplicate rows") {
+    old :: [JetOSPackageSnapshot]{JetOSPackageSnapshot{name: "same", version: "1", out: "first"}, JetOSPackageSnapshot{name: "same", version: "9", out: "second"}, JetOSPackageSnapshot{name: "gone", version: "2", out: "old"}}
+    new :: [JetOSPackageSnapshot]{JetOSPackageSnapshot{name: "same", version: "1", out: "equal"}, JetOSPackageSnapshot{name: "same", version: "3", out: "changed"}, JetOSPackageSnapshot{name: "added", version: "4", out: "new"}}
+    rows :: jetos_diff_packages(old, new)
+    assert_eq(rows.len(), 3)
+    assert_eq(rows[0].name, "added")
+    assert_eq(rows[0].mark, PlanMark.Add)
+    assert_eq(rows[0].from, "—")
+    assert_eq(rows[0].to, "4")
+    assert_eq(rows[0].out, Val("new"))
+    assert_eq(rows[1].name, "gone")
+    assert_eq(rows[1].mark, PlanMark.Remove)
+    assert_eq(rows[1].from, "2")
+    assert_eq(rows[1].to, "—")
+    assert_eq(rows[1].out, None)
+    assert_eq(rows[2].name, "same")
+    assert_eq(rows[2].mark, PlanMark.Change)
+    assert_eq(rows[2].from, "1")
+    assert_eq(rows[2].to, "3")
+    assert_eq(rows[2].out, Val("changed"))
+}
+
+// Original Rust1447-1535, selected Linux. The helper is a REAL executable,
+// Store produces and verifies a REAL cache lease, and that lease is consumed
+// before removing the original store. The final raw command invokes the
+// generation's rewritten symlink, not original output or a simulated stdout.
+#Test("generation_owns_full_closure_after_original_and_lease_are_removed") {
+    scratch :: jetos_generation_scratch_new("jetos-owned-closure-")
+    root :: scratch.path
+    store :: jetos_generation_child(root, "fake-nix/store")
+    package :: jetos_generation_child(store, "aaaa-package")
+    dependency :: jetos_generation_child(store, "bbbb-dependency")
+    generation_native.create_dir_all(jetos_generation_child(package, "bin")) ?? panic("package bin")
+    generation_native.create_dir_all(jetos_generation_child(dependency, "bin")) ?? panic("dependency bin")
+    package_tool :: jetos_generation_child(package, "bin/tool-real")
+    generation_native.write(package_tool, "#!/bin/sh\nprintf closure-owned".bytes()) ?? panic("package tool")
+    generation_native.set_permissions(package_tool, U32{0o555}) ?? panic("package mode555")
+    generation_native.write(jetos_generation_child(dependency, "bin/dependency-data"), "required closure member".bytes()) ?? panic("dependency data")
+    helper :: jetos_generation_child(root, "nix-store")
+    helper_text :: "#!/bin/sh\nprintf '%s\\n' '{generation_path.display(package)}' '{generation_path.display(dependency)}'\n"
+    generation_native.write(helper, helper_text.bytes()) ?? panic("closure helper")
+    generation_native.set_permissions(helper, U32{0o555}) ?? panic("helper mode555")
+    closure :: jetos_nix_store_closure_paths_with(helper, package) ?? panic("actual closure command")
+    assert_eq(closure.len(), 2)
+    assert(generation_path.equals(closure[0], package))
+    assert(generation_path.equals(closure[1], dependency))
+
+    roots :: HangarRoots{root: jetos_generation_child(root, "jetpack-root"), dev_mode: true}
+    verification :: StoreVerification.new()
+    // Original envelope/record metadata explicitly uses to_string_lossy.
+    // This is metadata TEXT, never reconstructed as an OSPath for native IO.
+    package_text :: generation_path.display(package)
+    envelope :: Envelope.for_output(package_text, "package@nixpkgs", "nix")
+    identity :: CacheIdentity{source_fingerprint: "source", recipe_fingerprint: "recipe", policy_fingerprint: "policy", platform: pkg_host_platform()}
+    entry :: store_record_verified(&verification, roots, "package", "1", "package@nixpkgs", package_text, "", "", envelope, identity) ?? panic("record real package")
+    expectation :: CacheExpectation{identity: identity, owned_output: Val(package), allow_unsigned_local: true}
+    proof :: store_verify_cache_entry(&verification, roots, entry, "package@nixpkgs", expectation)
+    assert(proof.trusted(), proof.debug())
+    hit :: store_find_verified_by_reference(&verification, roots, "package@nixpkgs", expectation) ?? panic("real verified lookup") ?? panic("real verified lease must exist")
+    generation_native.symlink(package_tool, jetos_generation_child(package, "bin/tool")) ?? panic("package symlink after lease")
+
+    generation :: jetos_generation_child(root, "generation")
+    loop member in closure {
+        extent :: generation_path.strip_prefix_span(member, generation_path.from_text("/", member.platform)) ?? panic("absolute closure member")
+        destination := generation
+        generation_path.push_span(&destination, member, extent)
+        jetos_copy_nix_closure_tree(member, destination) ?? panic("copy actual closure member")
+    }
+    jetos_rewrite_store_symlinks(generation, generation, store) ?? panic("rewrite actual owned store links")
+    ^hit.lease.release()
+    generation_native.remove_dir_all(store) ?? panic("remove original after lease release")
+
+    package_extent :: generation_path.strip_prefix_span(package, generation_path.from_text("/", package.platform)) ?? panic("absolute package")
+    owned_package := generation
+    generation_path.push_span(&owned_package, package, package_extent)
+    owned_tool :: jetos_generation_child(owned_package, "bin/tool")
+    dependency_extent :: generation_path.strip_prefix_span(dependency, generation_path.from_text("/", dependency.platform)) ?? panic("absolute dependency")
+    owned_dependency := generation
+    generation_path.push_span(&owned_dependency, dependency, dependency_extent)
+    assert(generation_native.is_file(jetos_generation_child(owned_dependency, "bin/dependency-data")))
+    command := generation_process.command(owned_tool)
+    output :: &command.output() ?? panic("execute generation-owned tool")
+    assert(output.status.success)
+    assert_eq(String.from_bytes(output.stdout) ?? panic(err.message), "closure-owned")
+}

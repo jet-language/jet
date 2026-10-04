@@ -768,7 +768,22 @@ pub fn mir_rust_aot_metadata(
 /// The runtime and Core block for one artifact (gated by
 /// `config.execution.emit_runtime`): decided by build facts only, never by user
 /// source, so `jet_store::runtime::prepare` links it as the `jet_runtime` rlib.
+/// Its Prelude sources' test-only items are left out: generated programs are
+/// never built with `--test`, so they would only be written, hashed and parsed.
+/// The cache identities (`cached_runtime_fingerprint`, the Core closure
+/// fingerprint) hash the Prelude text before this deterministic removal.
 fn emit_runtime_block(
+    emitter: &RustEmitter<'_>,
+    program: &MirProgram,
+    config: &MirRustConfig<'_>,
+    out: &mut String,
+) {
+    let mut block = String::new();
+    push_runtime_block(emitter, program, config, &mut block);
+    out.push_str(&jet_foundation::RustSource::strip_test_items(&block));
+}
+
+fn push_runtime_block(
     emitter: &RustEmitter<'_>,
     program: &MirProgram,
     config: &MirRustConfig<'_>,
@@ -969,8 +984,24 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
                 );
             }
         }
+        // Card #4258: a constant whose every read was copied into its use
+        // sites (TIR→MIR `inline_known_constant_reads`) needs no accessor;
+        // storage cells and every constant still read through `Global` keep
+        // their item.
+        let global_reads = program
+            .functions
+            .iter()
+            .flat_map(|function| &function.blocks)
+            .flat_map(|block| &block.instructions)
+            .filter_map(|instruction| match &instruction.operation {
+                MirOperation::Global { name } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
         for constant in &program.constants {
-            if emitter.module_selected(constant.module) {
+            if emitter.module_selected(constant.module)
+                && (constant.is_storage || global_reads.contains(constant.key.as_str()))
+            {
                 let unit = units
                     .as_ref()
                     .map(|units| units.module_unit(constant.module, constant.span.start));
@@ -26421,6 +26452,15 @@ impl<'a> RustEmitter<'a> {
             } else {
                 format!("(*({reference})).clone()")
             }
+        } else if let Some(place) = self.elided_shared_guard_base(function, base) {
+            // The guard deref (or guard field) feeding this read is a borrow
+            // projection that is never stored in its value slot; read the
+            // field through the guard's own place instead of that empty slot.
+            if self.boxed_field(field) {
+                format!("({place}).{field_name}.as_ref().clone()")
+            } else {
+                format!("({place}).{field_name}.clone()")
+            }
         } else if self.boxed_field(field) {
             if self.history_runtime_metadata_enabled() {
                 format!(
@@ -26482,6 +26522,16 @@ impl<'a> RustEmitter<'a> {
             Some(owner) => self.history_source_field_value(owner, &field_name, value),
             None => value,
         }
+    }
+
+    /// A shared-guard deref or guard field whose instruction is elided as a
+    /// direct borrow projection (see the `direct_borrow_projection` skip):
+    /// its value slot is never assigned, so readers use the guard place.
+    fn elided_shared_guard_base(&self, function: &MirFunction, base: MirValueId) -> Option<String> {
+        if !self.shared_guard_borrow_origin(function, base) || !self.direct_borrow_only(function, base) {
+            return None;
+        }
+        self.shared_guard_borrow_place(function, base, MirAccess::Read)
     }
 
     fn history_struct_field_value(

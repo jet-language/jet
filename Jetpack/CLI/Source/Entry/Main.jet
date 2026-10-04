@@ -9,12 +9,12 @@
 pub fn cli_jetpack_main(argv: [String]) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     // The root `jet` process probes this hidden flag before every engine
     // dispatch; the answer is only the lockstep release version.
-    if argv.get(1) == Val(@ENGINE_PROTOCOL_FLAG) {
-        print(@COMPILER_VERSION)
-        return @EXIT_OK
+    if argv.get(1) == Val(ENGINE_PROTOCOL_FLAG) {
+        print(COMPILER_VERSION)
+        return EXIT_OK
     }
     args :: cli_tail(argv, 1)
-    if args.get(0) == Val(@EXTENSION_HOST_SUBCOMMAND) -> return cli_run_compiler_extension_host(cli_tail(args, 1))
-    if args.get(0) == Val(@BUILD_PLUGIN_HOST_SUBCOMMAND) -> return cli_run_build_plugin_host(cli_tail(args, 1))
+    if args.get(0) == Val(EXTENSION_HOST_SUBCOMMAND) -> return cli_run_compiler_extension_host(cli_tail(args, 1))
+    if args.get(0) == Val(BUILD_PLUGIN_HOST_SUBCOMMAND) -> return cli_run_build_plugin_host(cli_tail(args, 1))
     cli_run(args)
 }

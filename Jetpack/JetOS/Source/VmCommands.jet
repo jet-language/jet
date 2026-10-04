@@ -1,0 +1,306 @@
+// PORT-PENDING 0868 crates-jetpack-src-jetos-entry-module-group: crates/jetpack/src/JetOS/vm_commands.rs:1-302
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::desktop_store_vm::missing_vm_tools;
+//RS use super::generation::build_generation;
+//RS use super::generation_files::systems_dir;
+//RS use super::generations_activation::latest_generation_for;
+//RS use super::installer_media::write_installer_media;
+//RS use super::load_validate::{load_plan, load_target, parse_target_or_report};
+//RS use super::types::{OSFlags, Target};
+//RS use super::vm_proof::{
+//RS     prove_vm_guest, qemu_has_local_display, qemu_interactive_run_command, qemu_vnc_endpoint,
+//RS     require_vm_run_proof, run_interactive_vm_command, run_vmtest, write_vm_install_plan,
+//RS };
+//RS use crate::Output::Theme;
+//RS use crate::Syntax;
+//RS use jet_env_model::ModuleEval::SystemPlan;
+//RS 
+//RS pub(super) fn cmd_vm(theme: &Theme, args: &[String], flags: &OSFlags) -> i32 {
+//RS     let Some((action, rest)) = args.split_first().map(|(a, r)| (a.as_str(), r)) else {
+//RS         theme.error(
+//RS             "vm needs an action",
+//RS             "D-JOS-VMCOMMAND1=A, D-JOS-VMRUN1=A, and D-JOS-VMTEST1=A: the active VM actions are `prove`, `run`, and `test`.",
+//RS             "run `jet os vm prove <host> --disk <path>`, `jet os vm run <host> --disk <path>`, or `jet os vm test <scenario> --disk <path>`.",
+//RS         );
+//RS         return 2;
+//RS     };
+//RS     if action != Syntax::OS_VM_ACTION_PROVE
+//RS         && action != Syntax::OS_VM_ACTION_RUN
+//RS         && action != Syntax::OS_VM_ACTION_TEST
+//RS     {
+//RS         theme.error(
+//RS             &format!("`{action}` is not a jetos VM action"),
+//RS             "D-JOS-VMCOMMAND1=A, D-JOS-VMRUN1=A, and D-JOS-VMTEST1=A: the active VM actions are `prove`, `run`, and `test`.",
+//RS             "run `jet os vm prove <host> --disk <path>`, `jet os vm run <host> --disk <path>`, or `jet os vm test <scenario> --disk <path>`.",
+//RS         );
+//RS         return 2;
+//RS     }
+//RS     if rest.iter().any(|arg| arg == Syntax::OS_VM_FLAG_REAL) {
+//RS         theme.error(
+//RS             "`--real` is not a jetos VM option",
+//RS             "D-JOS-NATIVE1=A forbids the NixOS backend on product VM commands.",
+//RS             "run `jet os migrate compare-nixos <host> --out <dir>` for a labeled NixOS comparison.",
+//RS         );
+//RS         return 2;
+//RS     }
+//RS     if action == Syntax::OS_VM_ACTION_TEST {
+//RS         let Some(target) = parse_target_or_report(theme, rest.first().map(String::as_str)) else {
+//RS             return 2;
+//RS         };
+//RS         let disk = flags
+//RS             .disk
+//RS             .as_deref()
+//RS             .or(flags.manual_disk.as_deref())
+//RS             .unwrap_or("");
+//RS         if disk.is_empty() {
+//RS             theme.error(
+//RS                 "vm test needs a target disk",
+//RS                 "`jet os vm test` installs each declared host into a proved virtual disk and records scenario proof facts.",
+//RS                 "pass `--disk ./scenario.qcow2`.",
+//RS             );
+//RS             return 2;
+//RS         }
+//RS         return cmd_vm_test(theme, &target, disk, flags);
+//RS     }
+//RS     let Some(target) = parse_target_or_report(theme, rest.first().map(String::as_str)) else {
+//RS         return 2;
+//RS     };
+//RS     let disk = flags
+//RS         .disk
+//RS         .as_deref()
+//RS         .or(flags.manual_disk.as_deref())
+//RS         .unwrap_or("");
+//RS     if disk.is_empty() {
+//RS         theme.error(
+//RS             "vm needs a target disk",
+//RS             "`jet os vm prove` installs into a virtual disk; `jet os vm run` opens that proved disk for human use.",
+//RS             "pass `--disk ./host.qcow2`.",
+//RS         );
+//RS         return 2;
+//RS     }
+//RS     let Some((plan, system)) = load_target(theme, &target) else {
+//RS         return 2;
+//RS     };
+//RS     if action == Syntax::OS_VM_ACTION_RUN {
+//RS         return cmd_vm_run(theme, &system, disk, flags);
+//RS     }
+//RS     let missing = missing_vm_tools();
+//RS     if !missing.is_empty() {
+//RS         theme.error_coded(
+//RS             "E1279",
+//RS             "jetos VM proof tools are missing",
+//RS             &format!(
+//RS                 "D-JOS-VMDEPS1=A requires pinned VM/media tools before installer proof can run; missing: {}.",
+//RS                 missing.join(", ")
+//RS             ),
+//RS             "realize or expose qemu-system-x86_64, qemu-img, xorriso, limine, sfdisk, blockdev, mkfs.ext4, mkfs.vfat, mmd, mcopy, and zstd, then rerun `jet os vm prove`.",
+//RS         );
+//RS         return 2;
+//RS     }
+//RS     let Some(gen) = build_generation(theme, &plan, &system, flags, &target.config) else {
+//RS         return 2;
+//RS     };
+//RS     let media = match write_installer_media(&gen, &system, "guided-ext4") {
+//RS         Ok(path) => path,
+//RS         Err(e) => {
+//RS             theme.error(
+//RS                 "could not write the jetos installer media",
+//RS                 &format!("writing installer media artifacts failed: {e}"),
+//RS                 "check permissions on the Jetpack root, or set JETPACK_ROOT.",
+//RS             );
+//RS             return 2;
+//RS         }
+//RS     };
+//RS     let installer_iso = systems_dir()
+//RS         .join("images")
+//RS         .join(format!("jetos-installer-{}.iso", system.name));
+//RS     if !installer_iso.is_file() {
+//RS         theme.error(
+//RS             "jetos installer ISO was not built",
+//RS             &format!(
+//RS                 "VM proof needs `{}`; media staging did not produce a bootable ISO.",
+//RS                 installer_iso.display()
+//RS             ),
+//RS             "inspect the media staging `iso-error.txt`, fix the ISO build failure, then rerun `jet os vm prove`.",
+//RS         );
+//RS         return 2;
+//RS     }
+//RS     match write_vm_install_plan(&gen, &system, disk, &media, false) {
+//RS         Ok(path) => match prove_vm_guest(&gen, &system, disk, &media, &path, false) {
+//RS             Ok(Some(final_path)) => {
+//RS                 theme.ok(&format!(
+//RS                     "proved jetos VM install/reboot {}",
+//RS                     final_path.display()
+//RS                 ));
+//RS                 0
+//RS             }
+//RS             Ok(None) => {
+//RS                 theme.error_coded(
+//RS                     "E1285",
+//RS                     "jetos VM guest proof has not run",
+//RS                     &format!(
+//RS                         "the QEMU install/reboot harness was written to `{}`, but no guest boot proof was recorded.",
+//RS                         path.display()
+//RS                     ),
+//RS                     "inspect the VM run logs, fix the boot/install path, then rerun `jet os vm prove` to capture a guest proof marker.",
+//RS                 );
+//RS                 2
+//RS             }
+//RS             Err(e) => {
+//RS                 theme.error_coded(
+//RS                     "E1285",
+//RS                     "jetos VM guest proof has not run",
+//RS                     &format!(
+//RS                         "the guest proof for `{}` is stale or incomplete: {e}.",
+//RS                         path.display()
+//RS                     ),
+//RS                     "rerun the recorded QEMU install/reboot phases and write a matching guest proof artifact.",
+//RS                 );
+//RS                 2
+//RS             }
+//RS         },
+//RS         Err(e) => {
+//RS             theme.error(
+//RS                 "could not write the jetos VM proof plan",
+//RS                 &format!("writing VM proof artifacts failed: {e}"),
+//RS                 "check permissions on the Jetpack root, or set JETPACK_ROOT.",
+//RS             );
+//RS             2
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn cmd_vm_test(theme: &Theme, target: &Target, disk: &str, flags: &OSFlags) -> i32 {
+//RS     let Some(plan) = load_plan(theme, target) else {
+//RS         return 2;
+//RS     };
+//RS     let Some(vmtest) = plan.vmtests.iter().find(|t| t.name == target.host).cloned() else {
+//RS         let mut names: Vec<String> = plan.vmtests.iter().map(|t| t.name.clone()).collect();
+//RS         names.sort();
+//RS         let known = if names.is_empty() {
+//RS             "this config defines no vmtests".to_string()
+//RS         } else {
+//RS             format!("available vmtests: {}", names.join(", "))
+//RS         };
+//RS         theme.error_coded(
+//RS             "E0980",
+//RS             &format!("`{}` is not a vmtest in this config", target.host),
+//RS             &known,
+//RS             "define `module vmtest.<name> { hosts: { node: system.<host> }, run: test { ... } }`, or select one of the vmtests above.",
+//RS         );
+//RS         return 2;
+//RS     };
+//RS     let missing = missing_vm_tools();
+//RS     if !missing.is_empty() {
+//RS         theme.error_coded(
+//RS             "E1279",
+//RS             "jetos VM proof tools are missing",
+//RS             &format!(
+//RS                 "D-JOS-VMTEST1=A runs the same pinned VM/media harness as `jet os vm prove`; missing: {}.",
+//RS                 missing.join(", ")
+//RS             ),
+//RS             "realize or expose qemu-system-x86_64, qemu-img, xorriso, limine, sfdisk, blockdev, mkfs.ext4, mkfs.vfat, mmd, mcopy, and zstd, then rerun `jet os vm test`.",
+//RS         );
+//RS         return 2;
+//RS     }
+//RS     match run_vmtest(theme, &plan, &vmtest, disk, flags, &target.config) {
+//RS         Ok(path) => {
+//RS             theme.ok(&format!("proved jetos VM test {}", path.display()));
+//RS             0
+//RS         }
+//RS         Err(e) => {
+//RS             theme.error_coded(
+//RS                 "E1285",
+//RS                 "jetos VM test proof has not run",
+//RS                 &format!("the VM test `{}` did not produce a passing proof: {e}.", vmtest.name),
+//RS                 "inspect the VM test artifacts, fix the failing host/assertion, then rerun `jet os vm test`.",
+//RS             );
+//RS             2
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn cmd_vm_run(theme: &Theme, system: &SystemPlan, disk: &str, _flags: &OSFlags) -> i32 {
+//RS     let missing = missing_vm_tools();
+//RS     let missing = missing
+//RS         .into_iter()
+//RS         .filter(|tool| tool == "qemu-system-x86_64")
+//RS         .collect::<Vec<_>>();
+//RS     if !missing.is_empty() {
+//RS         theme.error_coded(
+//RS             "E1279",
+//RS             "jetos VM proof tools are missing",
+//RS             &format!(
+//RS                 "D-JOS-VMDEPS1=A requires pinned VM/media tools before a VM can run; missing: {}.",
+//RS                 missing.join(", ")
+//RS             ),
+//RS             "realize or expose qemu-system-x86_64, then rerun `jet os vm run`.",
+//RS         );
+//RS         return 2;
+//RS     }
+//RS     let Some(gen) = latest_generation_for(&system.name) else {
+//RS         theme.error_coded(
+//RS             "E1287",
+//RS             "jetos VM run needs a proved installed disk",
+//RS             &format!(
+//RS                 "no built generation exists for `{}`; VM launch follows the latest proven generation.",
+//RS                 system.name
+//RS             ),
+//RS             "run `jet os vm prove <host> --disk <path>` first.",
+//RS         );
+//RS         return 2;
+//RS     };
+//RS     let proof = systems_dir()
+//RS         .join("vm-proofs")
+//RS         .join(format!("{}-{}-vm-proof.json", system.name, gen.name));
+//RS     let media_proof = systems_dir()
+//RS         .join("images")
+//RS         .join(format!("jetos-installer-{}.iso.proof.json", system.name));
+//RS     match require_vm_run_proof(&gen, system, disk, &media_proof, &proof) {
+//RS         Ok(()) => {}
+//RS         Err(e) => {
+//RS             theme.error_coded(
+//RS                 "E1287",
+//RS                 "jetos VM run needs a proved installed disk",
+//RS                 &format!("the installed disk `{disk}` is not tied to a passing VM proof: {e}."),
+//RS                 "run `jet os vm prove <host> --disk <path>` first, then rerun `jet os vm run`.",
+//RS             );
+//RS             return 2;
+//RS         }
+//RS     }
+//RS     let boot_dir = systems_dir()
+//RS         .join("images")
+//RS         .join(format!("jetos-installer-{}.iso.d/boot", system.name));
+//RS     let boot_dir = if boot_dir.join("initrd").is_file() {
+//RS         boot_dir
+//RS     } else {
+//RS         gen.path.join("boot")
+//RS     };
+//RS     let command = qemu_interactive_run_command(&boot_dir, disk, &system.name, &gen.name);
+//RS     theme.ok(&format!(
+//RS         "booting jetos VM {} generation {}",
+//RS         theme.bold(&system.name),
+//RS         theme.bold(&gen.name)
+//RS     ));
+//RS     if qemu_has_local_display() {
+//RS         theme.detail("graphical console is open in a local QEMU window");
+//RS     } else {
+//RS         theme.detail(&format!(
+//RS             "graphical console is exposed over VNC at {}; serial output is attached here",
+//RS             qemu_vnc_endpoint()
+//RS         ));
+//RS     }
+//RS     match run_interactive_vm_command(&command) {
+//RS         Ok(code) => code,
+//RS         Err(e) => {
+//RS             theme.error(
+//RS                 "could not run the jetos VM",
+//RS                 &format!("starting interactive QEMU failed: {e}"),
+//RS                 "check the VM proof artifacts and rerun `jet os vm prove` if the disk changed.",
+//RS             );
+//RS             2
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0868 crates/jetpack/src/JetOS/vm_commands.rs:1-302
+

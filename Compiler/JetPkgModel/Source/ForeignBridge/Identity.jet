@@ -1,0 +1,219 @@
+use jet_foundation.[DerivationIdentity, derivation_identity, FfiEvidenceBasis]
+
+// Shared identity for generated foreign bridge artifacts, ported from
+// jet_pkg_model::ForeignBridge.
+//
+// A bridge key is a digest of a length-delimited input record. The caller
+// builds the record: the binder or bridge builder owns the descriptor inputs,
+// while this module owns the stable encoding.
+
+pub FOREIGN_BRIDGE_IDENTITY_SCHEMA :: prep { "jet-ffi-bridge-identity-v1" }
+pub FOREIGN_BRIDGE_PROVENANCE_SCHEMA :: prep { "jet-ffi-bridge-provenance-v1" }
+pub FOREIGN_BOUNDARY_SCHEMA :: prep { "jet-ffi-boundary-v1" }
+
+// The obligation names every foreign descriptor must expose.
+pub FOREIGN_BOUNDARY_OBLIGATIONS :: prep { [String]{"abi", "layout", "width", "alignment", "ownership", "lifetime", "cleanup", "encoding", "nullability", "errors", "exceptions", "callbacks", "task-thread", "target", "copy-cost", "effects"} }
+
+// Why a bridge identity, boundary row, provenance record, or sidecar build
+// was refused. The message is the reference diagnostic text.
+#Error
+pub struct ForeignBridgeError {
+    pub message: String
+}
+
+pub fn pkg_bridge_error(message: String) -> ForeignBridgeError Never! {
+    ForeignBridgeError{message: message}
+}
+
+// A deterministic content-addressed identity record.
+pub struct ForeignIdentityBuilder {
+    bytes: [U8]
+
+    // Start an identity record with its schema as the first field.
+    pub fn new(schema: String) -> ForeignIdentityBuilder Never! {
+        identity := ForeignIdentityBuilder{bytes: [U8]{}}
+        &identity.field("schema", schema.bytes())
+        identity
+    }
+
+    // Add one ordered, length-delimited input field: little-endian u64
+    // length, name bytes, little-endian u64 length, value bytes.
+    pub fn field(&self, name: String, value: [U8]) Never! {
+        name_bytes :: name.bytes()
+        pkg_bridge_push_u64_le(&self.bytes, name_bytes.len())
+        loop byte in name_bytes -> &self.bytes.push(byte)
+        pkg_bridge_push_u64_le(&self.bytes, value.len())
+        loop byte in value -> &self.bytes.push(byte)
+    }
+
+    // Finish the record as a lowercase SHA-256 digest.
+    pub fn finish(self) -> String Never! {
+        pkg_sha256_hex(self.bytes)
+    }
+}
+
+pub fn pkg_bridge_push_u64_le(bytes: &[U8], value: Int) Never! {
+    loop index in 0..<8 -> &bytes.push(U8{(value >> (index * 8)) & 255})
+}
+
+// `[1]` / `[0]`: the one-byte boolean identity field.
+pub fn pkg_bridge_flag(value: Bool) -> [U8] Never! {
+    if value -> [U8]{U8{1}} else -> [U8]{U8{0}}
+}
+
+// One source/build/run/target identity for a foreign boundary. The source,
+// checked overlay, generator, implementation, toolchain, and target are named
+// separately: a path or version alone cannot keep a cached replacement honest
+// when the bytes behind it change.
+pub struct ForeignBoundaryIdentity {
+    pub source: String
+    pub overlay: String
+    pub generator: String
+    pub implementation: String
+    pub toolchain: String
+    pub target: String
+
+    pub fn new(source: String, overlay: String, generator: String, implementation: String, toolchain: String, target: String) -> ForeignBoundaryIdentity Never! {
+        ForeignBoundaryIdentity{source: source, overlay: overlay, generator: generator, implementation: implementation, toolchain: toolchain, target: target}
+    }
+
+    pub fn empty() -> ForeignBoundaryIdentity Never! {
+        ForeignBoundaryIdentity.new("", "", "", "", "", "")
+    }
+
+    // Map the boundary identity onto the one canonical derivation identity.
+    // Overlay and generator changes are source/build changes; the foreign
+    // implementation remains the recorded run input.
+    pub fn derivation_identity(self) -> DerivationIdentity Never! {
+        derivation_identity("source={self.source};overlay={self.overlay}", "generator={self.generator};toolchain={self.toolchain}", self.implementation, self.target)
+    }
+
+    pub fn differs_from(self, other: ForeignBoundaryIdentity) -> Bool Never! {
+        self != other
+    }
+
+    // Stable digest used by receipts and generated source comments.
+    pub fn digest(self) -> String Never! {
+        identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
+        &identity.field("source", self.source.bytes())
+        &identity.field("overlay", self.overlay.bytes())
+        &identity.field("generator", self.generator.bytes())
+        &identity.field("implementation", self.implementation.bytes())
+        &identity.field("toolchain", self.toolchain.bytes())
+        &identity.field("target", self.target.bytes())
+        identity.finish()
+    }
+
+    pub fn is_complete(self) -> Bool Never! {
+        values :: [String]{self.source, self.overlay, self.generator, self.implementation, self.toolchain, self.target}
+        loop value in values {
+            if value.trim() == "" -> return false
+        }
+        true
+    }
+}
+
+// Exact loaded-artifact coverage shared by every obligation in a boundary.
+// `None` means the producer did not establish the list; `Val([])` is an
+// established empty list, so missing callback/dependency analysis cannot be
+// mistaken for "there were none".
+pub struct ForeignArtifactCoverage {
+    pub loaded_artifact: String
+    pub transitive_dependencies: [String]?
+    pub reachable_callbacks: [String]?
+    pub compiler_flags: [String]?
+    pub target: String
+    pub generator: String
+
+    pub fn new(loaded_artifact: String, target: String, generator: String) -> ForeignArtifactCoverage Never! {
+        ForeignArtifactCoverage{loaded_artifact: loaded_artifact, transitive_dependencies: None, reachable_callbacks: None, compiler_flags: None, target: target, generator: generator}
+    }
+
+    pub fn with_transitive_dependencies(self, dependencies: [String]) -> ForeignArtifactCoverage Never! {
+        out := self
+        out.transitive_dependencies = Val(pkg_bridge_sorted_strings(dependencies))
+        out
+    }
+
+    pub fn with_reachable_callbacks(self, callbacks: [String]) -> ForeignArtifactCoverage Never! {
+        out := self
+        out.reachable_callbacks = Val(pkg_bridge_sorted_strings(callbacks))
+        out
+    }
+
+    pub fn with_compiler_flags(self, flags: [String]) -> ForeignArtifactCoverage Never! {
+        out := self
+        out.compiler_flags = Val(pkg_bridge_sorted_strings(flags))
+        out
+    }
+
+    pub fn digest(self) -> String Never! {
+        identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
+        &identity.field("loaded-artifact", self.loaded_artifact.bytes())
+        &identity.field("transitive-dependencies", pkg_bridge_stable_optional_strings(self.transitive_dependencies).bytes())
+        &identity.field("reachable-callbacks", pkg_bridge_stable_optional_strings(self.reachable_callbacks).bytes())
+        &identity.field("compiler-flags", pkg_bridge_stable_optional_strings(self.compiler_flags).bytes())
+        &identity.field("target", self.target.bytes())
+        &identity.field("generator", self.generator.bytes())
+        identity.finish()
+    }
+
+    pub fn is_complete(self) -> Bool Never! {
+        self.loaded_artifact.trim() != "" && self.transitive_dependencies != None && self.reachable_callbacks != None && self.compiler_flags != None && self.target.trim() != "" && self.generator.trim() != ""
+    }
+}
+
+// One obligation row in the canonical foreign boundary contract.
+pub struct ForeignObligationEvidence {
+    pub obligation: String
+    pub basis: FfiEvidenceBasis
+    pub checker: String
+    pub assumptions: [String]
+    pub coverage_digest: String
+
+    pub fn new(obligation: String, basis: FfiEvidenceBasis, checker: String, assumptions: [String], coverage: ForeignArtifactCoverage) -> ForeignObligationEvidence Never! {
+        ForeignObligationEvidence{obligation: obligation, basis: basis, checker: checker, assumptions: pkg_bridge_sorted_strings(assumptions), coverage_digest: coverage.digest()}
+    }
+
+    pub fn validate(self, coverage: ForeignArtifactCoverage) ForeignBridgeError! {
+        if self.obligation.trim() == "" -> return Err(pkg_bridge_error("foreign obligation evidence needs an obligation name"))
+        if self.checker.trim() == "" -> return Err(pkg_bridge_error("foreign obligation `{self.obligation}` needs an evidence checker"))
+        if self.assumptions.len() == 0 -> return Err(pkg_bridge_error("foreign obligation `{self.obligation}` needs explicit assumptions"))
+        if self.coverage_digest != coverage.digest() -> return Err(pkg_bridge_error("foreign obligation `{self.obligation}` is attached to stale artifact coverage"))
+        if self.basis != FfiEvidenceBasis.Unknown && !coverage.is_complete() -> return Err(pkg_bridge_error("foreign obligation `{self.obligation}` cannot claim {self.basis.as_str()} without complete artifact coverage"))
+    }
+}
+
+// Non-blank values, sorted and deduplicated.
+pub fn pkg_bridge_sorted_strings(values: [String]) -> [String] Never! {
+    out := [String]{}
+    loop value in values {
+        if value.trim() == "" || out.contains(value) -> next
+        &out.push(value)
+    }
+    &out.sort()
+    out
+}
+
+pub fn pkg_bridge_stable_optional_strings(values: [String]?) -> String Never! {
+    rows :: values ?? return "unknown"
+    if rows.len() == 0 -> return "none"
+    rows.join("\n")
+}
+
+pub fn pkg_bridge_provenance_optional_strings(values: [String]?) -> String Never! {
+    rows :: values ?? return "unknown"
+    if rows.len() == 0 -> return "none"
+    rows.join("|")
+}
+
+// Whether `value` is 64 lowercase hexadecimal digits.
+pub fn pkg_bridge_is_lower_hex64(value: String) -> Bool Never! {
+    bytes :: value.bytes()
+    if bytes.len() != 64 -> return false
+    loop byte in bytes {
+        code :: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
+    }
+    true
+}

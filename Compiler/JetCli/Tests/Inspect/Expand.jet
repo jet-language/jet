@@ -1,0 +1,181 @@
+// Source/CmdExpand.rs:1329 is test_is_measurement, a production predicate;
+// the Rust file has no #[test] module or assertion fixtures. These real AST
+// fixtures pin its direct-statement behavior and the reachable presentation
+// leaves. Full command/checked-bundle journeys belong to Main's composed gate.
+use jet_foundation.[
+    Span, Stmt, Expr, TestDef, CompilerStage,
+    AccessConvention, ParamZone, Type, StatusValue, CtValue, CtReport, NamedCtValue,
+]
+use jet_semindex.[
+    CallableParameterFact, CallableDefaultFact, CallableFactUnavailable,
+    CallableEffectsFact, CallableEffectFact, SourceSpan, EffectFact,
+    ViewProvenanceFact, ViewSourcePathFact, ViewSourceFact, ViewProjectionFact,
+    semindex_status_expand_value,
+]
+use jet_sema.[MemoryProjection]
+
+fn expand_test_definition(body: ^[Stmt]) -> TestDef Never! {
+    site :: Span{start: 0, end: 0}
+    TestDef{span: site, name: Val("fixture"), name_expr: None, faults_expr: None,
+        faults: [String]{}, expected_fail_expr: None, expected_fail: false,
+        marker_name_span: site, name_prefix: None, name_span: site,
+        params: [], fn_keyword_span: None, body: ^body}
+}
+fn expand_test_member(name: String) -> Stmt Never! {
+    site :: Span{start: 0, end: 0}
+    Stmt.ScopeMember{name: name, name_span: site, args: [Expr]{}, args_span: None,
+        body: [Stmt]{}, dsl: false, dot_span: site, span: site}
+}
+fn expand_test_span(start: Int, end: Int) -> SourceSpan Never! { SourceSpan{start: start, end: end} }
+fn expand_test_unavailable() -> CallableFactUnavailable Never! {
+    CallableFactUnavailable{required_stage: CompilerStage.Prepared, reason: "default expression is not prepared"}
+}
+fn expand_test_parameter() -> CallableParameterFact Never! {
+    CallableParameterFact{name: "value", label: "input", source: expand_test_span(4, 9),
+        default: Val(CallableDefaultFact{source_text: "17", source: expand_test_span(12, 14), value_unavailable: expand_test_unavailable()}),
+        access: AccessConvention.Move, zone: ParamZone.LabelOnly, ty: Type.Int, variadic: true}
+}
+
+#Test("expand measurement uses direct measure ScopeMember only") fn() {
+    assert(!jet_cli_expand_test_is_measurement(expand_test_definition([Stmt]{})))
+    assert(jet_cli_expand_test_is_measurement(expand_test_definition([Stmt]{expand_test_member("measure")})))
+    assert(!jet_cli_expand_test_is_measurement(expand_test_definition([Stmt]{expand_test_member("measurement")})))
+    site :: Span{start: 0, end: 0}
+    assert(!jet_cli_expand_test_is_measurement(expand_test_definition([Stmt]{Stmt.Loop{body: [Stmt]{expand_test_member("measure")}, span: site, arrow_body: false, label: None}})))
+    assert(jet_cli_expand_test_is_measurement(expand_test_definition([Stmt]{expand_test_member("other"), expand_test_member("measure")})))
+}
+
+#Test("expand lens selection preserves argument precedence") fn() {
+    all :: jet_cli_expand_selection([String]{"entry.jet", "second.jet", "--ignored"}) ?? panic("valid arguments")
+    assert_eq(all.path, "entry.jet")
+    assert_eq(all.selection, "all")
+    assert(all.lens == None)
+    chosen :: jet_cli_expand_selection([String]{"--facts=memory", "entry.jet", "--facts", "effects"}) ?? panic("valid lens")
+    assert_eq(chosen.selection, "effects")
+    assert(chosen.lens == Val(3))
+    if jet_cli_expand_selection([String]{"--facts"}) == .Err(error) {
+        assert_eq(error.diagnostic.code, "E2104")
+        assert_eq(error.diagnostic.what, "`--facts` needs a lens name")
+        assert(error.show_lenses)
+    } else -> panic("missing lens must fail before missing entry")
+    if jet_cli_expand_selection([String]{"--facts=bogus"}) == .Err(error) {
+        assert_eq(error.diagnostic.what, "`jet inspect expand` needs an entry file")
+        assert(!error.show_lenses)
+    } else -> panic("missing entry must fail before unknown lens")
+    if jet_cli_expand_selection([String]{"entry.jet", "--facts="}) == .Err(error) {
+        assert_eq(error.diagnostic.code, "E2941")
+        assert_eq(error.diagnostic.what, "unknown expand lens ``")
+        assert(error.show_lenses)
+    } else -> panic("empty lens must not select all")
+}
+
+#Test("expand template marker is the original line prefix predicate") fn() {
+    assert(jet_cli_expand_module_has_template_loop("\n  prep loop items {}\n"))
+    assert(jet_cli_expand_module_has_template_loop("prep looping\n"))
+    assert(!jet_cli_expand_module_has_template_loop("// prep loop\n"))
+    assert(!jet_cli_expand_module_has_template_loop("x prep loop\n"))
+}
+
+#Test("expand callable defaults remain unavailable typed projections") fn() {
+    parameter :: expand_test_parameter()
+    assert_eq(jet_cli_expand_callable_parameter_text(parameter), "move ...input: value{17}: Int [label_only]")
+    actual :: semindex_status_expand_value(jet_cli_expand_callable_parameter_json(parameter)) ?? panic("canonical report projection")
+    expected :: StatusValue.parse("{\"access\":\"move\",\"default\":\"17\",\"default_source\":{\"end\":14,\"start\":12},\"default_value\":{\"reason\":\"default expression is not prepared\",\"required_stage\":\"Prepared\",\"status\":\"unavailable\"},\"label\":\"input\",\"name\":\"value\",\"source\":{\"end\":9,\"start\":4},\"type\":\"Int\",\"variadic\":true,\"zone\":\"label_only\"}") ?? panic("fixture JSON")
+    // Report's canonical object ordering, not a hand-written alternate codec.
+    assert_eq(actual.json(), expected.json())
+}
+
+#Test("expand checked empty effects differ from unavailable effects") fn() {
+    checked := jet_cli_expand_callable_effects_json(CallableEffectsFact.Checked{effects: [CallableEffectFact]{}})
+    assert_eq((semindex_status_expand_value(checked.names) ?? panic("names")).json(), "[]")
+    assert_eq((semindex_status_expand_value(checked.facts) ?? panic("facts")).json(), "[]")
+    unavailable := jet_cli_expand_callable_effects_json(CallableEffectsFact.Unavailable{reason: expand_test_unavailable()})
+    assert_eq((semindex_status_expand_value(unavailable.names) ?? panic("names")).json(), "null")
+    assert_eq((semindex_status_expand_value(unavailable.facts) ?? panic("facts")).json(), "null")
+}
+
+#Test("expand resolved effect text preserves maximal suffix") fn() {
+    effect := EffectFact{function: "entry", direct: [String]{}, callees: [String]{}, inferred: [String]{}, maximal: false, provenance: []}
+    assert_eq(jet_cli_expand_effect_row_text(effect), "entry: resolved=[]")
+    effect.inferred = [String]{"IO", "FS.Read"}
+    effect.maximal = true
+    assert_eq(jet_cli_expand_effect_row_text(effect), "entry: resolved=[IO, FS.Read] (maximal)")
+}
+
+#Test("expand provenance retains source alternatives and projection order") fn() {
+    view :: ViewProvenanceFact{output_path: [String]{"value"}, mutable: true,
+        sources: [ViewSourcePathFact]{
+            ViewSourcePathFact{source: ViewSourceFact.Parameter{index: 2}, projections: [ViewProjectionFact]{ViewProjectionFact.Field{name: "items"}, ViewProjectionFact.Range}},
+            ViewSourcePathFact{source: ViewSourceFact.Static{module_path: "pkg.m", name: "DATA"}, projections: [ViewProjectionFact]{ViewProjectionFact.Index}},
+        }}
+    actual :: semindex_status_expand_value(jet_cli_expand_callable_view_json(view)) ?? panic("view report")
+    expected :: StatusValue.parse("{\"mutable\":true,\"output_path\":[\"value\"],\"sources\":[{\"projections\":[\"field:items\",\"range\"],\"source\":\"parameter:2\"},{\"projections\":[\"index\"],\"source\":\"static:pkg.m::DATA\"}]}") ?? panic("fixture JSON")
+    assert_eq(actual.json(), expected.json())
+}
+
+#Test("expand origin spelling respects UTF8 byte boundaries and Unicode whitespace") fn() {
+    assert_eq(jet_cli_expand_origin_receiver_from_source(" α .@origin ", Span{start: 0, end: 13}), "α")
+    assert_eq(jet_cli_expand_origin_receiver_from_source("receiver... @origin", Span{start: 12, end: 19}), "receiver")
+    assert_eq(jet_cli_expand_origin_receiver_from_source(" receiver.\n@origin", Span{start: 13, end: 20}), "receiver")
+    assert_eq(jet_cli_expand_origin_receiver_from_source("α.@origin", Span{start: 1, end: 10}), "value")
+    assert_eq(jet_cli_expand_origin_receiver_from_source("x", Span{start: 0, end: 2}), "value")
+    assert_eq(jet_cli_expand_origin_receiver_from_source(" @origin", Span{start: 1, end: 8}), "value")
+}
+
+#Test("expand origin option predicate retains present and clean absence types") fn() {
+    origin :: CtValue.Struct{type_name: "OriginInfo", fields: [NamedCtValue]{}}
+    assert(!jet_cli_expand_origin_value_is_option(origin))
+    assert(jet_cli_expand_origin_value_is_option(CtValue.Present{value: origin}))
+    assert(jet_cli_expand_origin_value_is_option(CtValue.Failed{report: CtReport.Clean{ty: Type.Named{name: "OriginInfo"}}}))
+    assert(!jet_cli_expand_origin_value_is_option(CtValue.Failed{report: CtReport.Clean{ty: Type.Int}}))
+}
+
+fn expand_test_layout(fields: ^CtValue) -> CtValue Never! {
+    CtValue.Struct{type_name: "LayoutInfo", fields: [NamedCtValue]{
+        NamedCtValue{name: "size", value: CtValue.Present{value: CtValue.Int{value: 8}}},
+        NamedCtValue{name: "alignment", value: CtValue.Present{value: CtValue.Int{value: 8}}},
+        NamedCtValue{name: "stride", value: CtValue.Present{value: CtValue.Int{value: 8}}},
+        NamedCtValue{name: "fields", value: ^fields},
+    }}
+}
+#Test("expand layout byte availability keeps missing field bytes unavailable") fn() {
+    assert(jet_cli_expand_layout_has_unavailable_bytes(CtValue.Struct{type_name: "LayoutInfo", fields: [NamedCtValue]{}}))
+    available :: expand_test_layout(CtValue.List{values: [CtValue]{}})
+    assert(!jet_cli_expand_layout_has_unavailable_bytes(available))
+    actual :: semindex_status_expand_value(jet_cli_expand_layout_byte_fact_json(available)) ?? panic("layout report")
+    assert_eq(actual.json(), "{\"status\":\"available\"}")
+    missing :: expand_test_layout(CtValue.List{values: [CtValue]{CtValue.Struct{type_name: "LayoutFieldInfo", fields: [NamedCtValue]{NamedCtValue{name: "offset", value: CtValue.Int{value: 0}}}}}})
+    assert(jet_cli_expand_layout_has_unavailable_bytes(missing))
+    absent :: CtValue.Failed{report: CtReport.Clean{ty: Type.Int}}
+    unavailable :: expand_test_layout(CtValue.List{values: [CtValue]{CtValue.Struct{type_name: "LayoutFieldInfo", fields: [NamedCtValue]{NamedCtValue{name: "offset", value: absent}, NamedCtValue{name: "size", value: CtValue.Int{value: 8}}}}}})
+    assert(jet_cli_expand_layout_has_unavailable_bytes(unavailable))
+    // Original non-list fields arm is false, not a new validation rejection.
+    assert(!jet_cli_expand_layout_has_unavailable_bytes(expand_test_layout(CtValue.Int{value: 3})))
+    assert_eq(jet_cli_expand_layout_byte_fact_diagnostic().code, "E0959")
+}
+
+#Test("expand memory projection retains all original status branches") fn() {
+    assert_eq(jet_cli_expand_memory_projection_text(None), "not projected")
+    proven :: MemoryProjection.Proven
+    assert_eq(jet_cli_expand_memory_projection_text(Val(@proven)), "proven")
+    violation :: MemoryProjection.Violated{call_path: [String]{"entry", "callee"}, operation: "allocate"}
+    assert_eq(jet_cli_expand_memory_projection_text(Val(@violation)), "violated by allocate through entry -> callee")
+    open :: MemoryProjection.OpenWorld{call_path: [String]{"entry"}, reason: "dynamic dispatch"}
+    assert_eq(jet_cli_expand_memory_projection_text(Val(@open)), "open through entry: dynamic dispatch")
+    assert_eq((semindex_status_expand_value(jet_cli_expand_memory_projection_json(None)) ?? panic("status")).json(), "{\"kind\":\"not_projected\"}")
+}
+
+#Test("expand origin fact type belongs to the shared fact registry") fn() {
+    assert_eq(jet_cli_expand_origin_fact_type(), "OriginInfo?")
+}
+
+#Test("expand JSON CLI failure preserves canonical reports and user exit") fn() {
+    output :: jet_cli_expand_json_cli_error("E2104", "missing entry", "entry owns checked facts", "pass an entry")
+    assert_eq(output.exit_code, 1)
+    assert_eq(output.stderr, "")
+    assert(output.stdout.ends_with("\n"))
+    assert(output.stdout.contains("\"code\":\"E2104\""))
+    assert(output.stdout.contains("\"what\":\"missing entry\""))
+    assert(output.stdout.contains("\"why\":\"entry owns checked facts\""))
+    assert(output.stdout.contains("\"fix\":\"pass an entry\""))
+}

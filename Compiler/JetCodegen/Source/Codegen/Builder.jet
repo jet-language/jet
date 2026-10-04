@@ -283,6 +283,8 @@ struct JetCodegenBuilder {
     pub function: TFunc
     pub function_index: JetCodegenFunctionIndex
     pub modules: [SemaGraphModuleResult]
+    // Method owner metadata over `modules` (jet_codegen_owner_index).
+    pub owners: JetCodegenOwnerIndex
     // Program-wide field symbol index (jet_codegen_field_symbol_index).
     pub field_symbols: [String:[JetCodegenFieldSymbolRow]]
     pub source_files: [MIRSourceFile]
@@ -435,13 +437,64 @@ fn jet_codegen_identity(builder: &JetCodegenBuilder, kind: String, span: Span, r
     "{builder.function.key}|{kind}|{span.start}:{span.end}|{role}|{detail}|{index}"
 }
 
-// Whether `definition` declares the method `key`, testing its method list in
-// place (returning the list copied every type's methods per lowered function).
-fn jet_codegen_type_definition_has_method(definition: TTypeDef, key: String) -> Bool Never! {
-    if definition.kind == {
-        .Struct(_, methods) | .Enum(_, methods) -> return methods.contains(key)
-        else -> return false
+// Owner metadata of every method, keyed by
+// `jet_codegen_qualified_function_key(module, function key)`, built once per
+// builder: asking per function scanned every type definition and impl.
+// Each map keeps the first row in module, then declaration, order.
+pub struct JetCodegenOwnerIndex {
+    // Generic parameter names of the type definition that lists the method.
+    pub type_method_generics: [String:[String]]
+    // Target type of the first impl that declares the method.
+    pub impl_method_targets: [String:Type]
+    // Generic parameter names of each type definition, by qualified name.
+    pub type_generics_by_name: [String:[String]]
+    // Where each type definition sits in `modules`, by qualified name.
+    pub type_def_rows: [String:JetCodegenTypeDefRow]
+}
+
+pub struct JetCodegenTypeDefRow {
+    pub module_index: Int
+    pub definition_index: Int
+}
+
+fn jet_codegen_type_generic_names(definition: TTypeDef) -> [String] Never! {
+    names := [String]{}
+    loop parameter in definition.generic_params -> &names.push(parameter.name)
+    names
+}
+
+fn jet_codegen_owner_index(modules: [SemaGraphModuleResult]) -> JetCodegenOwnerIndex Never! {
+    type_method_generics := [String:[String]]{}
+    impl_method_targets := [String:Type]{}
+    type_generics_by_name := [String:[String]]{}
+    type_def_rows := [String:JetCodegenTypeDefRow]{}
+    loop module_row in 0..<modules.len() {
+        module_identity :: modules[module_row].module_identity
+        loop definition_row in 0..<modules[module_row].declarations.type_defs.len() {
+            definition :: modules[module_row].declarations.type_defs[definition_row]
+            name_key :: jet_codegen_qualified_function_key(module_identity, definition.name)
+            if type_generics_by_name.get(name_key) == None {
+                type_generics_by_name[name_key] = jet_codegen_type_generic_names(definition)
+                type_def_rows[name_key] = JetCodegenTypeDefRow{module_index: module_row, definition_index: definition_row}
+            }
+            if definition.kind == {
+                .Struct(_, methods) | .Enum(_, methods) -> {
+                    loop method in methods {
+                        method_key :: jet_codegen_qualified_function_key(module_identity, method)
+                        if type_method_generics.get(method_key) == None -> type_method_generics[method_key] = jet_codegen_type_generic_names(definition)
+                    }
+                }
+                else -> {}
+            }
+        }
+        loop implementation in modules[module_row].impls {
+            loop method in implementation.methods {
+                method_key :: jet_codegen_qualified_function_key(module_identity, method.symbol.id.key)
+                if impl_method_targets.get(method_key) == None -> impl_method_targets[method_key] = implementation.target_type
+            }
+        }
     }
+    JetCodegenOwnerIndex{type_method_generics: type_method_generics, impl_method_targets: impl_method_targets, type_generics_by_name: type_generics_by_name, type_def_rows: type_def_rows}
 }
 
 pub struct JetCodegenOwnerTypeBindings {
@@ -450,25 +503,12 @@ pub struct JetCodegenOwnerTypeBindings {
     pub complete: Bool
 }
 
-fn jet_codegen_function_owner_pattern(function: TFunc, modules: [SemaGraphModuleResult]) -> Type? {
-    registered_pattern := Type?{None}
-    loop semantic_module in modules {
-        if semantic_module.module_identity != function.module_identity -> next
-        loop implementation in semantic_module.impls {
-            loop method in implementation.methods {
-                if method.symbol.id.key == function.key {
-                    registered_pattern = Val(implementation.target_type)
-                    break
-                }
-            }
-            if registered_pattern != None -> break
-        }
-    }
+fn jet_codegen_function_owner_pattern(function: TFunc, owners: JetCodegenOwnerIndex) -> Type? {
+    registered_pattern :: owners.impl_method_targets.get(jet_codegen_qualified_function_key(function.module_identity, function.key))
     kind_pattern := if function.kind == {
         .Method(_, owner_type) | .TraitMethod(_, _, owner_type, _, _) -> Val(owner_type)
         else -> None
     }
-    if registered_pattern == None -> return kind_pattern
     registered :: registered_pattern ?? return kind_pattern
     kind_owner :: kind_pattern ?? return Val(registered)
     if registered == {
@@ -487,32 +527,15 @@ fn jet_codegen_function_owner_pattern(function: TFunc, modules: [SemaGraphModule
     Val(registered)
 }
 
-fn jet_codegen_function_type_generic_names(function: TFunc, modules: [SemaGraphModuleResult]) -> [String] Never! {
-    loop semantic_module in modules {
-        if semantic_module.module_identity != function.module_identity -> next
-        loop definition in semantic_module.declarations.type_defs {
-            if jet_codegen_type_definition_has_method(definition, function.key) {
-                names := [String]{}
-                loop parameter in definition.generic_params -> &names.push(parameter.name)
-                return names
-            }
-        }
-    }
-    owner_pattern :: jet_codegen_function_owner_pattern(function, modules) ?? return [String]{}
+fn jet_codegen_function_type_generic_names(function: TFunc, owners: JetCodegenOwnerIndex) -> [String] Never! {
+    listed :: owners.type_method_generics.get(jet_codegen_qualified_function_key(function.module_identity, function.key))
+    if listed == .Val(names) -> return names
+    owner_pattern :: jet_codegen_function_owner_pattern(function, owners) ?? return [String]{}
     owner_name := if owner_pattern == {
         .Named(name) | .Apply(name, _) -> name
         else -> { return [String]{} }
     }
-    loop semantic_module in modules {
-        if semantic_module.module_identity != function.module_identity -> next
-        loop definition in semantic_module.declarations.type_defs {
-            if definition.name != owner_name -> next
-            names := [String]{}
-            loop parameter in definition.generic_params -> &names.push(parameter.name)
-            return names
-        }
-    }
-    [String]{}
+    owners.type_generics_by_name.get(jet_codegen_qualified_function_key(function.module_identity, owner_name)) ?? [String]{}
 }
 
 fn jet_codegen_owner_type_binding_index(names: [String], name: String) -> Int? {
@@ -623,9 +646,9 @@ fn jet_codegen_bind_owner_type_pattern(pattern: Type, actual: Type, owner_names:
     }
 }
 
-pub fn jet_codegen_function_owner_bindings(function: TFunc, receiver_type: Type, modules: [SemaGraphModuleResult]) -> JetCodegenOwnerTypeBindings Never! {
-    owner_pattern :: jet_codegen_function_owner_pattern(function, modules) ?? return JetCodegenOwnerTypeBindings{names: [String]{}, arguments: [Type]{}, complete: true}
-    owner_names := jet_codegen_function_type_generic_names(function, modules)
+pub fn jet_codegen_function_owner_bindings(function: TFunc, receiver_type: Type, owners: JetCodegenOwnerIndex) -> JetCodegenOwnerTypeBindings Never! {
+    owner_pattern :: jet_codegen_function_owner_pattern(function, owners) ?? return JetCodegenOwnerTypeBindings{names: [String]{}, arguments: [Type]{}, complete: true}
+    owner_names := jet_codegen_function_type_generic_names(function, owners)
     bound_names := [String]{}
     bound_arguments := [Type]{}
     if !jet_codegen_bind_owner_type_pattern(owner_pattern, receiver_type, owner_names, &bound_names, &bound_arguments) -> return JetCodegenOwnerTypeBindings{names: [String]{}, arguments: [Type]{}, complete: false}
@@ -641,15 +664,17 @@ pub fn jet_codegen_function_owner_bindings(function: TFunc, receiver_type: Type,
 }
 
 fn jet_codegen_new_builder(function: TFunc, function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], field_symbols: [String:[JetCodegenFieldSymbolRow]], source_files: [MIRSourceFile], source_index: JetCodegenSourceIndex) -> JetCodegenBuilder Never! {
+    owners :: jet_codegen_owner_index(modules)
     generic_type_names := [String]{}
     loop param in function.generic_params -> &generic_type_names.push(param.name)
-    loop name in jet_codegen_function_type_generic_names(function, modules) {
+    loop name in jet_codegen_function_type_generic_names(function, owners) {
         if !generic_type_names.contains(name) -> &generic_type_names.push(name)
     }
     builder := JetCodegenBuilder{
         function: function,
         function_index: function_index,
         modules: modules,
+        owners: owners,
         field_symbols: field_symbols,
         source_files: source_files,
         source_index: source_index,
@@ -709,7 +734,7 @@ fn jet_codegen_new_builder(function: TFunc, function_index: JetCodegenFunctionIn
 }
 
 // The per-function part of a `JetCodegenBuilder`: every field except the
-// program-wide inputs (function_index, modules, field_symbols, source_files,
+// program-wide inputs (function_index, modules, owners, field_symbols, source_files,
 // source_index). A new builder field that belongs to one function must be
 // added here, to `jet_codegen_begin_function`, `jet_codegen_function_state`
 // and `jet_codegen_restore_function_state`, or it leaks between functions.
@@ -764,7 +789,7 @@ struct JetCodegenFunctionState {
 fn jet_codegen_begin_function(builder: &JetCodegenBuilder, function: TFunc) Never! {
     generic_type_names := [String]{}
     loop param in function.generic_params -> &generic_type_names.push(param.name)
-    loop name in jet_codegen_function_type_generic_names(function, builder.modules) {
+    loop name in jet_codegen_function_type_generic_names(function, builder.owners) {
         if !generic_type_names.contains(name) -> &generic_type_names.push(name)
     }
     jet_codegen_restore_function_state(&builder, JetCodegenFunctionState{
@@ -1078,6 +1103,21 @@ fn jet_codegen_set_drop_live(builder: &JetCodegenBuilder, place: MIRPlaceID, liv
     _ := jet_codegen_emit(&builder, record.span, None, MIROperation.WritePlace{place: record.live, value: value})
 }
 
+// Rust `retain_place_access`: a place row referenced by several operations
+// keeps the strongest access any of them required (Move, then Write, then
+// Read), so a later read cannot invalidate an earlier borrow or move.
+fn jet_codegen_retain_place_access(builder: &JetCodegenBuilder, place: MIRPlaceID, requested: MIRAccess) Never! {
+    loop index in 0..<builder.places.len() {
+        if builder.places[index].id != place -> next
+        current :: builder.places[index].access
+        if {
+            current == MIRAccess.Move || requested == MIRAccess.Move -> builder.places[index].access = MIRAccess.Move
+            current == MIRAccess.Write || requested == MIRAccess.Write -> builder.places[index].access = MIRAccess.Write
+            else -> {}
+        }
+    }
+}
+
 fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, place: MIRPlaceID, ty: Type, ownership: MIROwnership, initialized: Bool) Never! {
     if ownership.drop == MIRDropKind.NoDrop || jet_codegen_ownership(ty).mode == MIROwnershipMode.Copy -> return
     identity := "{builder.function.key}|drop-live|{place.value}"
@@ -1144,6 +1184,9 @@ fn jet_codegen_emit_drop_cleanup(builder: &JetCodegenBuilder, record: JetCodegen
     next_block := jet_codegen_new_block(&builder, record.span, "drop-live-next")
     jet_codegen_terminate(&builder, MIRTerminator.Branch{condition: live, then_target: drop_block, else_target: next_block})
     jet_codegen_switch_block(&builder, drop_block)
+    // The cleanup consumes the owned value, so its shared place row carries
+    // Move access (Rust `emit_owned_place_cleanup`).
+    jet_codegen_retain_place_access(&builder, record.place, MIRAccess.Move)
     value := jet_codegen_emit_value(&builder, record.span, record.ty, MIROperation.MovePlace{place: record.place})
     scope_close := jet_codegen_scope_end_close_function(builder, record.ty)
     if scope_close == {
@@ -1737,8 +1780,14 @@ fn jet_codegen_project_field_place(builder: &JetCodegenBuilder, base: MIRPlaceID
 
 
 fn jet_codegen_find_function(function_index: JetCodegenFunctionIndex, key: String) -> TFunc? {
-    row :: function_index.first_by_key.get(key) ?? return None
+    row :: jet_codegen_find_function_row(function_index, key) ?? return None
     Val(function_index.rows[row])
+}
+
+// The row of the first function with `key`, for callers that read a few
+// fields in place instead of copying the whole function (body included).
+fn jet_codegen_find_function_row(function_index: JetCodegenFunctionIndex, key: String) -> Int? {
+    function_index.first_by_key.get(key)
 }
 fn jet_codegen_find_function_by_key(function_index: JetCodegenFunctionIndex, key: String, module_identity: String) -> TFunc? {
     qualified :: jet_codegen_qualified_function_key(module_identity, key)

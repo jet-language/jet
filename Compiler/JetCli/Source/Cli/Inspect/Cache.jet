@@ -1,0 +1,195 @@
+// Source/CmdStatus.rs:69-410. Machine-wide cache commands consume the one
+// canonical Jetpack ArtifactStore and size parser; no CLI store policy lives here.
+use core.math as cache_math
+use jet_driver.[JetDriverVerbOutput]
+
+pub enum JetCLICacheRequest { Status Prune(Int) Limit(Int) }
+enum JetCLICacheOption { To Host }
+#Error
+pub struct JetCLICacheUsageError { pub message: String }
+
+// Rust parse_cache_request (CmdStatus.rs:94-185).
+pub fn jet_cli_cache_parse_request(arguments: [String]) -> JetCLICacheRequest JetCLICacheUsageError! {
+    command := String?{None}
+    option := JetCLICacheOption?{None}
+    value := ""
+    index := 0
+    loop index < arguments.len() {
+        argument :: arguments[index]
+        if argument == "--json" || argument == "--quiet" || argument == "--no-color" || argument.starts_with("--color=") {
+            index += 1
+            next
+        }
+        if argument == "--color" {
+            if index + 1 >= arguments.len() -> return Err(JetCLICacheUsageError{message: "`jet cache --color` needs auto, always, or never"})
+            index += 2
+            next
+        }
+        if argument == "--to" || argument == "--host" {
+            if index + 1 >= arguments.len() -> return Err(JetCLICacheUsageError{message: "`jet cache {argument}` needs a size"})
+            if option != None -> return Err(JetCLICacheUsageError{message: "`jet cache` accepts one size option"})
+            option = Val(if argument == "--to" -> JetCLICacheOption.To else -> JetCLICacheOption.Host)
+            value = arguments[index + 1]
+            index += 2
+            next
+        }
+        if argument.starts_with("--to=") || argument.starts_with("--host=") {
+            if option != None -> return Err(JetCLICacheUsageError{message: "`jet cache` accepts one size option"})
+            to :: argument.starts_with("--to=")
+            option = Val(if to -> JetCLICacheOption.To else -> JetCLICacheOption.Host)
+            // ASCII option prefix; String offsets here are scalar offsets.
+            value = argument.slice(if to -> 5 else -> 7, argument.len())
+            index += 1
+            next
+        }
+        if argument.starts_with("-") -> return Err(JetCLICacheUsageError{message: "unknown `jet cache` flag `{argument}`"})
+        if command != None -> return Err(JetCLICacheUsageError{message: "`jet cache` accepts one command"})
+        command = Val(argument)
+        index += 1
+    }
+    action :: command ?? return Err(JetCLICacheUsageError{message: "missing `jet cache` command"})
+    if action == {
+        "status" -> {
+            if option != None -> return Err(JetCLICacheUsageError{message: "`jet cache status` does not take a size option"})
+            Ok(JetCLICacheRequest.Status)
+        }
+        "prune" -> {
+            if option != Val(JetCLICacheOption.To) -> return Err(JetCLICacheUsageError{message: "`jet cache prune` requires `--to <size>`"})
+            Ok(JetCLICacheRequest.Prune(jet_cli_cache_parse_size(value)))
+        }
+        "limit" -> {
+            if option != Val(JetCLICacheOption.Host) -> return Err(JetCLICacheUsageError{message: "`jet cache limit` requires `--host <size>`"})
+            Ok(JetCLICacheRequest.Limit(jet_cli_cache_parse_size(value)))
+        }
+        else -> Err(JetCLICacheUsageError{message: "`{action}` isn't a jet cache command"})
+    }
+}
+
+// Rust parse_cache_size (CmdStatus.rs:187-189). StoreConfig owns all bounds.
+pub fn jet_cli_cache_parse_size(value: String) -> Int JetCLICacheUsageError! {
+    size :: store_artifact_parse_size(value) ?? return Err(JetCLICacheUsageError{message: "invalid cache size `{value}`: {err.message()}"})
+    Ok(size)
+}
+
+// Rust format_size (CmdStatus.rs:351-367). Canonical Fixed formatting owns
+// rounding (including Rust's ties-to-even contract, tracked by #4407).
+pub fn jet_cli_cache_format_size(bytes: Int) -> String Never! {
+    if bytes < 1024 -> return "{bytes} B"
+    units :: [String]{"B", "KiB", "MiB", "GiB", "TiB"}
+    value := Float.from_int(bytes)
+    unit := 0
+    loop value >= (Float{1024.0}) && unit < units.len() - 1 {
+        value /= Float{1024.0}
+        unit += 1
+    }
+    if cache_math.fract(value) == (Float{0.0}) || value >= (Float{10.0}) -> return "{value:Fixed(0)} {units[unit]}"
+    "{value:Fixed(1)} {units[unit]}"
+}
+
+// Rust entry_count (CmdStatus.rs:346-348).
+fn jet_cli_cache_entry_count(status: ArtifactStoreStatus, kind: ArtifactEntryKind) -> Int Never! {
+    count := 0
+    loop entry in status.entries { if entry.kind == kind -> count += 1 }
+    count
+}
+
+// Rust render_cache_status (CmdStatus.rs:277-344). Borrow the canonical status;
+// do not copy its potentially large listing while counting each entry kind.
+pub fn jet_cli_cache_render_status(status: ArtifactStoreStatus, cap_bytes: Int?, json: Bool) -> JetDriverVerbOutput Never! {
+    blobs :: jet_cli_cache_entry_count(status, ArtifactEntryKind.Blob)
+    records :: jet_cli_cache_entry_count(status, ArtifactEntryKind.Action)
+    lto :: jet_cli_cache_entry_count(status, ArtifactEntryKind.LTO)
+    if json {
+        tiers := [DataTree]{}
+        loop tier in status.tiers -> &tiers.push(DataTree.Text(~tier))
+        fields :: StatusFields.new().with("available_bytes", if status.available_bytes == .Val(bytes) -> DataTree.Int(bytes) else -> DataTree.Null)
+            .with("blobs", DataTree.Int(blobs)).with("entries", DataTree.Int(status.entries.len()))
+            .with("footprint_bytes", DataTree.Int(status.footprint_bytes))
+            .with("host_limit_bytes", if status.host_limit_bytes == .Val(bytes) -> DataTree.Int(bytes) else -> DataTree.Null)
+            .with("limit_bytes", DataTree.Int(status.limit_bytes)).with("live_leases", DataTree.Int(status.live_leases))
+            .with("records", DataTree.Int(records)).with("reserve_bytes", DataTree.Int(status.reserve_bytes))
+            .with("root", DataTree.Text(~status.root)).with("tiers", DataTree.Array(tiers)).with("thinlto_caches", DataTree.Int(lto))
+        return jet_cli_cache_machine("cache.status", fields)
+    }
+    source :: if status.host_limit_bytes != None -> "host policy" else -> if cap_bytes != None -> "JET_STORE_CAP_BYTES" else -> "adaptive rule"
+    text :: "store      {status.root}\nlimit      {jet_cli_cache_format_size(status.limit_bytes)} ({source})\nreserve    keep {jet_cli_cache_format_size(status.reserve_bytes)} free on that filesystem\nused       {jet_cli_cache_format_size(status.footprint_bytes)} · {blobs} blobs · {records} records · {lto} ThinLTO caches\nleases     {status.live_leases} live\ntiers      {status.tiers.join(" · ")}\n"
+    JetDriverVerbOutput{stdout: text, stderr: "", exit_code: 0}
+}
+
+// Rust run_cache_prune output (CmdStatus.rs:213-248).
+pub fn jet_cli_cache_render_prune(report: ArtifactPruneReport, json: Bool) -> JetDriverVerbOutput Never! {
+    freed :: if report.before_bytes > report.after_bytes -> report.before_bytes - report.after_bytes else -> 0
+    if json {
+        fields :: StatusFields.new().with("after_bytes", DataTree.Int(report.after_bytes)).with("before_bytes", DataTree.Int(report.before_bytes))
+            .with("blocked", DataTree.Bool(report.blocked)).with("freed_bytes", DataTree.Int(freed)).with("pinned_bytes", DataTree.Int(report.pinned_bytes))
+            .with("removed_entries", DataTree.Int(report.removed.len())).with("target_bytes", DataTree.Int(report.target_bytes))
+        return jet_cli_cache_machine("cache.prune", fields)
+    }
+    blocked :: if report.blocked -> "result     target blocked by live leases\n" else -> ""
+    JetDriverVerbOutput{stdout: "prune      {jet_cli_cache_format_size(report.before_bytes)} -> {jet_cli_cache_format_size(report.after_bytes)} (target {jet_cli_cache_format_size(report.target_bytes)})\nremoved    {report.removed.len()} entries · freed {jet_cli_cache_format_size(freed)}\npinned     {jet_cli_cache_format_size(report.pinned_bytes)}\n{blocked}", stderr: "", exit_code: 0}
+}
+
+// Rust run_cache_limit output (CmdStatus.rs:260-273).
+pub fn jet_cli_cache_render_limit(root: String, bytes: Int, json: Bool) -> JetDriverVerbOutput Never! {
+    if json -> return jet_cli_cache_machine("cache.limit", StatusFields.new().with("host_limit_bytes", DataTree.Int(bytes)).with("root", DataTree.Text(~root)))
+    JetDriverVerbOutput{stdout: "host limit {jet_cli_cache_format_size(bytes)} (persisted)\nstore      {root}\n", stderr: "", exit_code: 0}
+}
+
+fn jet_cli_cache_machine(action: String, fields: StatusFields) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: StatusEnvelope.new(action, true).with_field("cache", report_status_object(fields)).json_line(), stderr: "", exit_code: 0}
+}
+
+// Rust emit_report (CmdStatus.rs:391-410): errors have no trailing JSON LF.
+fn jet_cli_cache_error(code: String, what: String, why: String, fix: String, json: Bool, exit_code: Int) -> JetDriverVerbOutput Never! {
+    if json {
+        diagnostic :: diagnostic_from_registry(code, None, what, why, fix)
+        report := ReportEnvelope.new("compile", "error", code, diagnostic.what, diagnostic.why, diagnostic.fix)
+        if diagnostic.no_fix_reason == .Val(reason) {
+            kind :: if reason.kind == {
+                .Behavior -> NoFixReasonKind.Behavior
+                .Design -> NoFixReasonKind.Design
+                .Ambiguous -> NoFixReasonKind.Ambiguous
+            }
+            &report.set_no_fix_reason(NoFixReason.new(kind, reason.next)) ?? panic("registry no-fix reason is invalid")
+        }
+        return JetDriverVerbOutput{stdout: StatusEnvelope.new("status", false).with_report(report).json(), stderr: "", exit_code}
+    }
+    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report(code, what, why, fix, false), exit_code}
+}
+
+// Rust cache_usage_error (CmdStatus.rs:369-379).
+pub fn jet_cli_cache_usage_error(message: String, json: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_cache_error("E2102", message, "`jet cache` has one read-only status command and two explicit mutations", "run `jet cache status`, `jet cache prune --to <size>`, or `jet cache limit --host <size>`", json, 2)
+}
+
+// Rust cache_store_error (CmdStatus.rs:381-390).
+pub fn jet_cli_cache_store_error(operation: String, error: ArtifactStoreError, json: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_cache_error("E2105", "could not {operation}: {error.message()}", "cache commands use one machine-wide store with atomic, verified entries", "check the JET_STORE_DIR path and permissions, then retry the cache command", json, 1)
+}
+
+// Rust run_cache_status/run_cache_prune/run_cache_limit (CmdStatus.rs:191-275).
+// An already opened canonical store permits isolated journeys without changing
+// the process environment; the real CLI entry below always opens from_env.
+pub fn jet_cli_cache_execute(store: ArtifactStore, request: JetCLICacheRequest, json: Bool) -[FS, Env, Exec, Time, Rand]> JetDriverVerbOutput {
+    if request == {
+        .Status -> {
+            status :: store.status() ?? return jet_cli_cache_store_error("read the machine-wide store", err, json)
+            jet_cli_cache_render_status(status, store.config().cap_bytes(), json)
+        }
+        .Prune(bytes) -> {
+            report :: store.prune_to(bytes) ?? return jet_cli_cache_store_error("prune the machine-wide store", err, json)
+            jet_cli_cache_render_prune(report, json)
+        }
+        .Limit(bytes) -> {
+            store.set_host_limit(Val(bytes)) ?? return jet_cli_cache_store_error("set the host store limit", err, json)
+            jet_cli_cache_render_limit(store.root(), bytes, json)
+        }
+    }
+}
+
+// Rust run_cache (CmdStatus.rs:82-92). Parse before any store I/O.
+pub fn jet_cli_cache_run(arguments: [String], json: Bool) -[FS, Env, Exec, Time, Rand]> JetDriverVerbOutput {
+    request :: jet_cli_cache_parse_request(arguments) ?? return jet_cli_cache_usage_error(err.message, json)
+    store :: ArtifactStore.from_env() ?? return jet_cli_cache_store_error("open the machine-wide store", err, json)
+    jet_cli_cache_execute(store, request, json)
+}

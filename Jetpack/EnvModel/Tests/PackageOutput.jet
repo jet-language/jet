@@ -1,0 +1,133 @@
+// PackageOutput.rs556–654: all four original claims, using real PackageFacts.
+fn envmodel_test_package_output_error(facts: PackageFacts) -> PackageOutputError {
+    if envmodel_project_package_outputs(facts) == {
+        .Ok(_) -> panic("expected projection refusal")
+        .Err(error) -> error
+    }
+}
+
+#Test("projects system and fleet outputs with stable identity") {
+    facts :: PackageFacts.parse("name: \"demo\"\noutputs: {{\n    workstation: System{{\n        name: \"workstation\"\n        target: linux.x64\n        packages: [ripgrep, \"fd@nixpkgs\", ripgrep]\n        services: {{ ssh: {{ enable: true, ports: [22] }} }}\n        options: {{ network: {{ hostName: \"workstation\" }} }}\n    }}\n    prod: Fleet{{ hosts: {{ edge: \"system.workstation\" }} }}\n}}", "package.jet") ?? panic(err.message())
+    first :: envmodel_project_package_outputs(facts) ?? panic(err.message())
+    second :: envmodel_project_package_outputs(facts) ?? panic(err.message())
+    assert_eq(first, second)
+    assert_eq(first.systems[0].packages[0], Pkg.new("jetpack", "ripgrep"))
+    assert_eq(first.systems[0].options[0].key, "network.hostName")
+    assert_eq(first.fleets[0].hosts[0].system, "workstation")
+    assert_eq(first.graph_identity, facts.semantic_digest())
+    assert_eq(first.systems[0].packages, [Pkg]{Pkg.new("jetpack", "ripgrep"), Pkg.new("nixpkgs", "fd")})
+    assert_eq(first.systems[0].services[0].extra, [ServicePlanExtra]{ServicePlanExtra{key: "ports", value: "[22]"}})
+    plan :: envmodel_env_plan_from_package_outputs("relative/package.jet", first)
+    assert_eq(plan.source_files, [String]{"relative/package.jet"})
+    assert_eq(plan.graph_identity, Val(facts.semantic_digest()))
+    assert_eq(plan.systems, first.systems)
+    assert_eq(plan.fleets, first.fleets)
+    assert_eq(plan.images, [ImagePlan]{})
+    assert_eq(plan.package_refs, [String]{})
+    assert_eq(plan.environment_names, [String]{})
+    assert_eq(plan.active_environment, None)
+}
+
+#Test("rejects a system service without enable") {
+    facts :: PackageFacts.parse("name: \"demo\"\noutputs: {{ host: System{{ target: linux.x64, services: {{ ssh: {{}} }} }} }}", "package.jet") ?? panic(err.message())
+    error :: envmodel_test_package_output_error(facts)
+    assert(error.message().contains("outputs.host.services.ssh.enable"))
+    assert_eq(error.path, "outputs.host.services.ssh.enable")
+    assert_eq(error.message, "is required")
+    assert_eq(error.message(), "outputs.host.services.ssh.enable: is required")
+}
+
+#Test("rejects a fleet host that could escape generation storage") {
+    facts :: PackageFacts.parse("name: \"demo\"\noutputs: {{\n    workstation: System{{ target: linux.x64 }}\n    prod: Fleet{{ hosts: {{ \"../escape\": system.workstation }}\n    }}\n}}", "package.jet") ?? panic(err.message())
+    error :: envmodel_test_package_output_error(facts)
+    rendered :: error.message()
+    assert(rendered.contains("../escape"))
+    assert(rendered.contains("safe path component"))
+    assert_eq(error.path, "outputs.prod.hosts.../escape")
+    assert_eq(error.message, "host `../escape` is not a safe path component")
+}
+
+#Test("rejects duplicate fleet names and host paths") {
+    facts :: PackageFacts.parse("name: \"demo\"\noutputs: {{\n    workstation: System{{ target: linux.x64 }}\n    blue: Fleet{{ name: \"prod\", hosts: {{ edge: system.workstation }} }}\n    green: Fleet{{ name: \"prod\", hosts: {{ other: system.workstation }} }}\n}}", "package.jet") ?? panic(err.message())
+    error :: envmodel_test_package_output_error(facts)
+    assert(error.message().contains("fleet prod is declared more than once"))
+    assert_eq(error.path, "outputs.green")
+    facts2 :: PackageFacts.parse("name: \"demo\"\noutputs: {{\n    workstation: System{{ target: linux.x64 }}\n    laptop: System{{ target: linux.arm64 }}\n    blue: Fleet{{ hosts: {{ edge: system.workstation }} }}\n    green: Fleet{{ hosts: {{ edge: system.laptop }} }}\n}}", "package.jet") ?? panic(err.message())
+    collision :: envmodel_test_package_output_error(facts2)
+    rendered :: collision.message()
+    assert(rendered.contains("outputs.green.hosts.edge"))
+    assert(rendered.contains("collides with Fleet host"))
+    assert_eq(collision.path, "outputs.green.hosts.edge")
+    assert_eq(collision.message, "host `edge` for system `laptop` collides with Fleet host at outputs.blue.hosts.edge")
+}
+
+#Test("package overrides preserve typed values raw display and sorted provenance") {
+    facts :: PackageFacts.parse("name: \"demo\"\noutputs: {{ z: System{{ name: \"web\", target: linux.x64, packages: [\" fd @ source \" , \"./local\", ripgrep, ripgrep] }}, a: Fleet{{ hosts: {{ zhost: {{ system: systems.web, target: linux.arm64, packages: [fd, fd], services: {{ z: {{ enable: false, user: 1000, ports: [22, 22] }}, a: {{ enable: true }} }}, options: {{ z: false, a: {{ b: \"raw\" }} }}, user: 1000, region: \"west\" }}, ahost: web }} }} }}", "package.jet") ?? panic(err.message())
+    projection :: envmodel_project_package_outputs(facts) ?? panic(err.message())
+    assert_eq(projection.systems[0].packages, [Pkg]{Pkg.new("source", "fd"), Pkg.new("", "./local"), Pkg.new("jetpack", "ripgrep")})
+    assert_eq(projection.fleets[0].hosts[0].name, "ahost")
+    assert_eq(projection.fleets[0].hosts[0].overrides, None)
+    host :: projection.fleets[0].hosts[1]
+    assert_eq(host.name, "zhost")
+    assert_eq(host.system, "web")
+    override :: host.overrides ?? panic("typed overrides")
+    assert_eq(override.fields[0].name, "options")
+    assert_eq(override.fields[0].value, HostOverrideValue.Options{values: [OptionPlan]{OptionPlan{key: "a.b", value: "raw"}, OptionPlan{key: "z", value: "false"}}})
+    assert_eq(override.fields[1].value, HostOverrideValue.Packages{values: [Pkg]{Pkg.new("jetpack", "fd")}})
+    assert_eq(override.fields[2].value, HostOverrideValue.Value{value: CtValue.Str{value: "west"}})
+    assert_eq(override.fields[3].value, HostOverrideValue.Services{values: [ServicePlan]{ServicePlan{name: "a", enable: true, extra: [ServicePlanExtra]{}}, ServicePlan{name: "z", enable: false, extra: [ServicePlanExtra]{ServicePlanExtra{key: "ports", value: "[22, 22]"}, ServicePlanExtra{key: "user", value: "1000"}}}}})
+    assert_eq(override.fields[4].value, HostOverrideValue.Platform{value: "linux.arm64"})
+    assert_eq(override.fields[5].value, HostOverrideValue.Value{value: CtValue.Int{value: 1000}})
+    assert_eq(override.provenance[0].source, "{{a: {{b: raw}}, z: false}}")
+    assert_eq(override.provenance[5].field, "user")
+    assert_eq(override.provenance[5].source, "1000")
+    loop provenance in override.provenance {
+        assert(provenance.pure)
+        assert_eq(provenance.dependencies, [String]{})
+    }
+    payload :: if facts.outputs["a"].payload == {
+        .Object(fields) -> fields["hosts"]
+        else -> panic("Fleet payload")
+    }
+    hosts :: if payload == { .Object(fields) -> fields; else -> panic("host payload") }
+    assert_eq(host.override_source, Val(envmodel_payload_display(hosts["zhost"])))
+    assert_eq(override.source, envmodel_payload_display(hosts["zhost"]))
+}
+
+#Test("package payload number null list map conversion and raw display") {
+    payload :: OutputPayload.Object([String: OutputPayload]{
+        "z": OutputPayload.Array([OutputPayload]{OutputPayload.Null, OutputPayload.Bool(true), OutputPayload.Number("7"), OutputPayload.Number("1.25"), OutputPayload.Number("not-a-number"), OutputPayload.String("plain"), OutputPayload.Number("9223372036854775808")}),
+        "a": OutputPayload.String("first"),
+    })
+    value :: envmodel_payload_to_ct_value(payload)
+    expected :: CtValue.Map{entries: [CtMapEntry]{
+        CtMapEntry{key: CtKey.Str{value: "a"}, value: CtValue.Str{value: "first"}},
+        CtMapEntry{key: CtKey.Str{value: "z"}, value: CtValue.List{values: [CtValue]{CtValue.Unit, CtValue.Bool{value: true}, CtValue.Int{value: 7}, CtValue.Float{value: CtFloat.F64{value: 1.25}}, CtValue.Str{value: "not-a-number"}, CtValue.Str{value: "plain"}, CtValue.Float{value: CtFloat.F64{value: 9223372036854775808.0}}}}},
+    }}
+    assert_eq(value, expected)
+    assert_eq(envmodel_payload_display(payload), "{{a: first, z: [null, true, 7, 1.25, not-a-number, plain, 9223372036854775808]}}")
+}
+
+#Test("package projection two pass validation and collision precedence") {
+    duplicate :: PackageFacts.parse("name: \"demo\" outputs: {{ z: System{{ name: \"web\", target: linux.x64 }}, b: System{{ name: \"web\", target: linux.arm64 }}, a: Fleet{{ hosts: {{ edge: system.missing }} }} }}", "package.jet") ?? panic(err.message())
+    error :: envmodel_test_package_output_error(duplicate)
+    assert_eq(error.message(), "outputs.z: system web is declared more than once")
+    invalid :: PackageFacts.parse("name: \"demo\" outputs: {{ z: System{{ target: unknown.target }}, a: Fleet{{ hosts: {{ edge: system.missing }} }} }}", "package.jet") ?? panic(err.message())
+    assert_eq(envmodel_test_package_output_error(invalid).message(), "outputs.z.target: unknown target unknown.target; use linux.x64 or linux.arm64")
+    fleet :: PackageFacts.parse("name: \"demo\" outputs: {{ web: System{{ target: linux.x64 }}, a: Fleet{{ name: prod, hosts: {{ edge: system.web }} }}, b: Fleet{{ name: prod, hosts: {{ edge: system.web }} }} }}", "package.jet") ?? panic(err.message())
+    assert_eq(envmodel_test_package_output_error(fleet).message(), "outputs.b: fleet prod is declared more than once")
+}
+
+#Test("package projection sorted outputs services and options author array order") {
+    facts :: PackageFacts.parse("name: \"demo\" outputs: {{ z: System{{ target: linux.x64 }}, a: System{{ target: linux.arm64, packages: [z, a, z, \"b@provider\"], services: {{ z: {{ enable: false }}, a: {{ enable: true }} }}, options: {{ z: 2, a: 1 }} }}, q: Fleet{{ hosts: {{ z: systems.z, a: system.a }} }} }}", "package.jet") ?? panic(err.message())
+    projection :: envmodel_project_package_outputs(facts) ?? panic(err.message())
+    assert_eq(projection.systems[0].name, "a")
+    assert_eq(projection.systems[1].name, "z")
+    assert_eq(projection.systems[0].packages, [Pkg]{Pkg.new("jetpack", "z"), Pkg.new("jetpack", "a"), Pkg.new("provider", "b")})
+    assert_eq(projection.systems[0].services[0].name, "a")
+    assert_eq(projection.systems[0].services[1].name, "z")
+    assert_eq(projection.systems[0].options[0].key, "a")
+    assert_eq(projection.systems[0].options[1].key, "z")
+    assert_eq(projection.fleets[0].hosts[0].name, "a")
+    assert_eq(projection.fleets[0].hosts[1].name, "z")
+}

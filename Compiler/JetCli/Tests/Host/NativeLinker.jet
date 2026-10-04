@@ -1,0 +1,136 @@
+// Source/NativeLinker.rs:180-228 and EngineDispatch.rs:245-304.
+// Both modules share this ledger-owned Host test target.
+
+fn cli_native_linker_test_no_environment(name: String) -> String? Never! { None }
+
+#Test("preferred_backend_is_ordered_mold_then_lld") {
+    assert_eq(jet_cli_native_linker_preferred_backend((name: String) -> name == "lld"), Val("lld"))
+    assert_eq(jet_cli_native_linker_preferred_backend((name: String) -> name == "mold" || name == "lld"), Val("mold"))
+    assert_eq(jet_cli_native_linker_preferred_backend((name: String) -> false), None)
+}
+
+#Test("fast_linker_selection_emits_driver_and_backend_flags") {
+    selection :: jet_cli_native_linker_auto("cc", "lld", "lld")
+    assert_eq(jet_cli_native_linker_rustc_args(selection), [String]{"-C", "linker=cc", "-C", "link-arg=-fuse-ld=lld"})
+    assert_eq(jet_cli_native_linker_label(selection), "lld via cc")
+}
+
+#Test("explicit_linker_prefers_rustc_linker_then_cc_and_skips_blanks") {
+    first :: jet_cli_native_linker_explicit_from((name: String) -> {
+        if name == {
+            "RUSTC_LINKER" -> Val("  ")
+            "CC" -> Val("clang")
+            else -> None
+        }
+    })
+    assert_eq(first, Val("clang"))
+    second :: jet_cli_native_linker_explicit_from((name: String) -> {
+        if name == {
+            "RUSTC_LINKER" -> Val("custom-linker")
+            "CC" -> Val("cc")
+            else -> None
+        }
+    })
+    assert_eq(second, Val("custom-linker"))
+}
+
+#Test("system_identity_does_not_override_rustc_linker_choice") {
+    selection :: jet_cli_native_linker_system_with_identity(Val("cc"))
+    assert(jet_cli_native_linker_rustc_args(selection).is_empty())
+    identity :: jet_cli_native_linker_identity(selection)
+    assert_eq(identity.driver, Val("cc"))
+    assert_eq(identity.backend, None)
+    assert_eq(identity.backend_program, None)
+    assert_eq(jet_cli_native_linker_label(selection), "system via cc")
+}
+
+#Test("find_engine_binary_in_finds_first_match") {
+    first :: engine_files.temp_dir("jet_engine_dispatch_d1") ?? panic("scratch d1: {err}")
+    second :: engine_files.temp_dir("jet_engine_dispatch_d2") ?? panic("scratch d2: {err}")
+    family :: engine_sys.family()
+    bin :: engine_files.join(second.path, jet_cli_engine_exe_name("jetpack", family == "windows"))
+    engine_files.write(bin, "#!/bin/sh\n") ?? panic("write engine: {err}")
+    if family == "unix" -> engine_files.set_mode(bin, 0o755) ?? panic("chmod engine: {err}")
+    dirs :: [String]{first.path, second.path}
+    assert_eq(jet_cli_find_engine_binary_in(dirs, "jetpack", family), Val(bin))
+    // A sibling takes precedence even if PATH contains another installation.
+    sibling :: engine_files.join(first.path, jet_cli_engine_exe_name("jetpack", family == "windows"))
+    engine_files.write(sibling, "#!/bin/sh\n") ?? panic("write sibling: {err}")
+    if family == "unix" -> engine_files.set_mode(sibling, 0o755) ?? panic("chmod sibling: {err}")
+    assert_eq(jet_cli_find_engine_binary_in(dirs, "jetpack", family), Val(sibling))
+}
+
+#Test("find_engine_binary_in_skips_non_executable") {
+    directory :: engine_files.temp_dir("jet_engine_dispatch_noexec") ?? panic("scratch: {err}")
+    if engine_sys.family() == "unix" {
+        bin :: engine_files.join(directory.path, "jetpack")
+        engine_files.write(bin, "not executable") ?? panic("write: {err}")
+        engine_files.set_mode(bin, 0o644) ?? panic("chmod: {err}")
+        assert_eq(jet_cli_find_engine_binary_in([String]{directory.path}, "jetpack", "unix"), None)
+    }
+}
+
+#Test("find_engine_binary_in_none_when_absent") {
+    directory :: engine_files.temp_dir("jet_engine_dispatch_absent") ?? panic("scratch: {err}")
+    assert_eq(jet_cli_find_engine_binary_in([String]{directory.path}, "jetpack", engine_sys.family()), None)
+}
+
+#Test("engine_command_sets_canonical_root_dispatch_pid") {
+    // Execute the builder rather than inspecting its source or relying on a
+    // mock. In particular env_remove + env would incorrectly erase this value
+    // with the current Core implementation.
+    spec := jet_cli_engine_command("sh").args_extend([String]{"-c", "printf '%s' \"$JET_INTERNAL_ROOT_DISPATCH_PID\""})
+    if engine_sys.family() == "windows" {
+        spec = jet_cli_engine_command("cmd").args_extend([String]{"/C", "echo %JET_INTERNAL_ROOT_DISPATCH_PID%"})
+    }
+    output :: spec.run() ?? panic("PID marker command: {err}")
+    assert(output.success)
+    assert_eq(output.output.trim(), "{engine_sys.pid()}")
+}
+
+#Test("missing_engine_message_names_e1228") {
+    message :: jet_cli_missing_engine_message("jetpack", "env")
+    assert(message.contains("E1228"))
+    assert(message.contains("jetpack"))
+    assert_eq(message, "Error [E1228]: `env` needs the `jetpack` engine, which isn't installed\n Why: `env` is a jetpack engine verb — jet execs `jetpack` for it rather than building package-manager logic into the compiler\n Fix: install the matching Jet toolchain (the `jetpack` binary ships alongside `jet`)\nMore: jet-lang.dev/e/E1228\n")
+}
+
+#Test("version_skew_message_names_e1227") {
+    message :: jet_cli_engine_version_skew_message("jetpack", "1.0.0", Val("2.0.0"))
+    assert(message.contains("E1227"))
+    assert(message.contains("1.0.0"))
+    assert(message.contains("2.0.0"))
+    assert_eq(message, "Error [E1227]: `jet` 1.0.0 and `jetpack` 2.0.0 disagree\n Why: `jet` and `jetpack` ship as one toolchain and must match exactly, or the engine may not understand what `jet` sends it\n Fix: Use matching `jet`/`jetpack` versions — reinstall the toolchain so both binaries come from the same release\n More: jet-lang.dev/e/E1227\n")
+    assert_eq(jet_cli_engine_version_skew_message("jetpack", "1.0.0", None), "Error [E1227]: `jet` 1.0.0 and `jetpack` disagree (no protocol reply)\n Why: `jet` and `jetpack` ship as one toolchain and must match exactly; this `jetpack` didn't answer the version handshake, so it predates this protocol\n Fix: Use matching `jet`/`jetpack` versions — reinstall the toolchain so both binaries come from the same release\n More: jet-lang.dev/e/E1227\n")
+}
+
+#Test("explicit linker retains nonblank spelling and emits no backend") {
+    value :: jet_cli_native_linker_explicit_from((name: String) -> Val("  custom-linker  "))
+    assert_eq(value, Val("  custom-linker  "))
+    selection :: jet_cli_native_linker_explicit(value ?? panic("explicit linker absent"))
+    assert_eq(jet_cli_native_linker_rustc_args(selection), [String]{"-C", "linker=  custom-linker  "})
+    assert_eq(jet_cli_native_linker_label(selection), "explicit:  custom-linker  ")
+    assert_eq(jet_cli_native_linker_explicit_from(cli_native_linker_test_no_environment), None)
+    assert_eq(jet_cli_native_linker_label(jet_cli_native_linker_system()), "system")
+}
+
+#Test("engine executable names and PATH quoting are platform specific") {
+    assert_eq(jet_cli_engine_exe_name("jetpack", false), "jetpack")
+    assert_eq(jet_cli_engine_exe_name("jetpack", true), "jetpack.exe")
+    assert_eq(jet_cli_engine_exe_name("jetpack.exe", true), "jetpack.exe.exe")
+    assert_eq(jet_cli_engine_path_directories(":one::two:", false), [String]{"", "one", "", "two", ""})
+    assert_eq(jet_cli_engine_path_directories("C:\\bin;\"D:\\semi;colon\";;", true), [String]{"C:\\bin", "D:\\semi;colon", "", ""})
+    assert_eq(jet_cli_engine_path_directories("\"one\":two", false), [String]{"\"one\"", "two"})
+}
+
+#Test("protocol reply rejects failed empty and invalid UTF8 stdout only") {
+    output := JetCLIHostProcessOutput{stdout: " \n1.0.0\t ".bytes(), stderr: [U8]{U8{255}}, success: true, code: Val(0)}
+    assert_eq(jet_cli_engine_protocol_reply(output), Val("1.0.0"))
+    output.success = false
+    assert_eq(jet_cli_engine_protocol_reply(output), None)
+    output.success = true
+    output.stdout = " \n\t".bytes()
+    assert_eq(jet_cli_engine_protocol_reply(output), None)
+    output.stdout = [U8]{U8{255}}
+    assert_eq(jet_cli_engine_protocol_reply(output), None)
+}

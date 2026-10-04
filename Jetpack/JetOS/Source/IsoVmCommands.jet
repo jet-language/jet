@@ -1,0 +1,168 @@
+// PORT-PENDING 0872 crates-jetpack-src-jetos-installer-media-module-group: crates/jetpack/src/JetOS/iso_vm_commands.rs:1-164
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::desktop_store_vm::find_path_tool;
+//RS use super::root_projection::copy_file_replace;
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS 
+//RS pub(super) fn build_hybrid_iso(staging: &Path, iso: &Path) -> Result<bool, String> {
+//RS     if find_path_tool("xorriso").is_none() || find_path_tool("limine").is_none() {
+//RS         return Ok(false);
+//RS     }
+//RS     let limine_data = Command::new("limine")
+//RS         .arg("--print-datadir")
+//RS         .output()
+//RS         .map_err(|e| format!("running limine --print-datadir failed: {e}"))?;
+//RS     if !limine_data.status.success() {
+//RS         return Err(format!(
+//RS             "limine --print-datadir exited with {}: {}",
+//RS             limine_data.status,
+//RS             String::from_utf8_lossy(&limine_data.stderr)
+//RS         ));
+//RS     }
+//RS     let data_dir = PathBuf::from(String::from_utf8_lossy(&limine_data.stdout).trim());
+//RS     let boot_dir = staging.join("boot");
+//RS     let efi_boot_dir = staging.join("EFI/BOOT");
+//RS     fs::create_dir_all(&efi_boot_dir)
+//RS         .map_err(|e| format!("creating EFI boot directory failed: {e}"))?;
+//RS     copy_file_replace(
+//RS         &data_dir.join("BOOTX64.EFI"),
+//RS         &efi_boot_dir.join("BOOTX64.EFI"),
+//RS     )
+//RS     .map_err(|e| format!("copying BOOTX64.EFI failed: {e}"))?;
+//RS     copy_file_replace(
+//RS         &data_dir.join("limine-bios.sys"),
+//RS         &boot_dir.join("limine-bios.sys"),
+//RS     )
+//RS     .map_err(|e| format!("copying limine-bios.sys failed: {e}"))?;
+//RS     fs::copy(data_dir.join("BOOTX64.EFI"), boot_dir.join("BOOTX64.EFI"))
+//RS         .map_err(|e| format!("copying BOOTX64.EFI failed: {e}"))?;
+//RS     let efi_boot = staging.join("EFI/BOOT");
+//RS     fs::create_dir_all(&efi_boot).map_err(|e| format!("creating EFI boot dir failed: {e}"))?;
+//RS     fs::copy(data_dir.join("BOOTX64.EFI"), efi_boot.join("BOOTX64.EFI"))
+//RS         .map_err(|e| format!("copying EFI/BOOT/BOOTX64.EFI failed: {e}"))?;
+//RS     let efi_img = boot_dir.join("efiboot.img");
+//RS     let bootx64_len = fs::metadata(data_dir.join("BOOTX64.EFI"))
+//RS         .map_err(|e| format!("reading BOOTX64.EFI metadata failed: {e}"))?
+//RS         .len();
+//RS     let limine_len = fs::metadata(boot_dir.join("limine.conf"))
+//RS         .map_err(|e| format!("reading limine.conf metadata failed: {e}"))?
+//RS         .len();
+//RS     let kernel_len = fs::metadata(boot_dir.join("kernel"))
+//RS         .map_err(|e| format!("reading kernel metadata failed: {e}"))?
+//RS         .len();
+//RS     let initrd_len = fs::metadata(boot_dir.join("initrd"))
+//RS         .map_err(|e| format!("reading initrd metadata failed: {e}"))?
+//RS         .len();
+//RS     let min_efi_len = 96 * 1024 * 1024;
+//RS     let payload_len = bootx64_len + limine_len + (kernel_len * 2) + (initrd_len * 2);
+//RS     let efi_len = round_up_u64(
+//RS         min_efi_len.max(payload_len + 64 * 1024 * 1024),
+//RS         16 * 1024 * 1024,
+//RS     );
+//RS     let efi_file =
+//RS         fs::File::create(&efi_img).map_err(|e| format!("creating efiboot.img failed: {e}"))?;
+//RS     efi_file
+//RS         .set_len(efi_len)
+//RS         .map_err(|e| format!("sizing efiboot.img failed: {e}"))?;
+//RS     drop(efi_file);
+//RS     let mkfs = Command::new("mkfs.vfat")
+//RS         .args(["-n", "JETOS_EFI"])
+//RS         .arg(&efi_img)
+//RS         .output()
+//RS         .map_err(|e| format!("running mkfs.vfat failed: {e}"))?;
+//RS     if !mkfs.status.success() {
+//RS         return Err(format!(
+//RS             "mkfs.vfat exited with {}: {}",
+//RS             mkfs.status,
+//RS             String::from_utf8_lossy(&mkfs.stderr)
+//RS         ));
+//RS     }
+//RS     let mmd = Command::new("mmd")
+//RS         .args(["-i"])
+//RS         .arg(&efi_img)
+//RS         .args(["::/EFI", "::/EFI/BOOT", "::/boot"])
+//RS         .output()
+//RS         .map_err(|e| format!("running mmd failed: {e}"))?;
+//RS     if !mmd.status.success() {
+//RS         return Err(format!(
+//RS             "mmd exited with {}: {}",
+//RS             mmd.status,
+//RS             String::from_utf8_lossy(&mmd.stderr)
+//RS         ));
+//RS     }
+//RS     for (source, target) in [
+//RS         (data_dir.join("BOOTX64.EFI"), "::/EFI/BOOT/BOOTX64.EFI"),
+//RS         (boot_dir.join("limine.conf"), "::/boot/limine.conf"),
+//RS         (boot_dir.join("kernel"), "::/boot/kernel"),
+//RS         (boot_dir.join("initrd"), "::/boot/initrd"),
+//RS         (boot_dir.join("kernel"), "::/kernel"),
+//RS         (boot_dir.join("initrd"), "::/initrd"),
+//RS     ] {
+//RS         let mcopy = Command::new("mcopy")
+//RS             .args(["-i"])
+//RS             .arg(&efi_img)
+//RS             .arg(&source)
+//RS             .arg(target)
+//RS             .output()
+//RS             .map_err(|e| format!("running mcopy failed: {e}"))?;
+//RS         if !mcopy.status.success() {
+//RS             return Err(format!(
+//RS                 "mcopy exited with {}: {}",
+//RS                 mcopy.status,
+//RS                 String::from_utf8_lossy(&mcopy.stderr)
+//RS             ));
+//RS         }
+//RS     }
+//RS     let xorriso = Command::new("xorriso")
+//RS         .args([
+//RS             "-as",
+//RS             "mkisofs",
+//RS             "-b",
+//RS             "boot/limine-bios.sys",
+//RS             "-no-emul-boot",
+//RS             "-boot-load-size",
+//RS             "4",
+//RS             "-boot-info-table",
+//RS             "--efi-boot",
+//RS             "boot/efiboot.img",
+//RS             "-efi-boot-part",
+//RS             "--efi-boot-image",
+//RS             "--protective-msdos-label",
+//RS             "-o",
+//RS         ])
+//RS         .arg(iso)
+//RS         .arg(staging)
+//RS         .output()
+//RS         .map_err(|e| format!("running xorriso failed: {e}"))?;
+//RS     if !xorriso.status.success() {
+//RS         return Err(format!(
+//RS             "xorriso exited with {}: {}",
+//RS             xorriso.status,
+//RS             String::from_utf8_lossy(&xorriso.stderr)
+//RS         ));
+//RS     }
+//RS     let limine = Command::new("limine")
+//RS         .args(["bios-install"])
+//RS         .arg(iso)
+//RS         .output()
+//RS         .map_err(|e| format!("running limine bios-install failed: {e}"))?;
+//RS     if !limine.status.success() {
+//RS         return Err(format!(
+//RS             "limine bios-install exited with {}: {}",
+//RS             limine.status,
+//RS             String::from_utf8_lossy(&limine.stderr)
+//RS         ));
+//RS     }
+//RS     Ok(true)
+//RS }
+//RS 
+//RS fn round_up_u64(value: u64, unit: u64) -> u64 {
+//RS     if unit == 0 {
+//RS         return value;
+//RS     }
+//RS     value.div_ceil(unit) * unit
+//RS }
+// END-PORT-PENDING 0872 crates/jetpack/src/JetOS/iso_vm_commands.rs:1-164
+

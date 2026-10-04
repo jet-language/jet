@@ -1,0 +1,99 @@
+// Rust Source/CmdCompile.rs:9053-9058,9073-9142. Coverage observations are
+// combined with the canonical compiler's coverable function facts, never
+// rediscovered from source text or from incidental output lines.
+use core.encoding.[DataTree]
+
+pub struct JetCLITestCoverageBranch {
+    pub id: String
+    pub function: String
+    pub taken: Int
+    pub not_taken: Int
+}
+pub struct JetCLITestCoverableFunction { pub name: String, pub line: Int }
+pub struct JetCLITestCoverageObservations {
+    pub function_hits: [Int:Bool]
+    pub branches: [JetCLITestCoverageBranch]
+}
+
+// Rust report_coverage record reader (CmdCompile.rs:9073-9097). Malformed
+// records are ignored. Function hits are a set; duplicate branch ids remain
+// distinct source observations and keep their relative order after sorting.
+pub fn jet_cli_test_coverage_parse(text: String) -> JetCLITestCoverageObservations Never! {
+    observations := JetCLITestCoverageObservations{function_hits: [Int:Bool]{}, branches: [JetCLITestCoverageBranch]{}}
+    loop record in jet_cli_test_report_lines(text) {
+        fields :: record.split("\t").to_list()
+        if fields.len() == 2 && fields[0] == "f" {
+            line :: jet_cli_test_unsigned(fields[1]) ?? next
+            observations.function_hits[line] = true
+        }
+        if fields.len() == 5 && fields[0] == "b" {
+            taken :: jet_cli_test_unsigned(fields[3]) ?? next
+            not_taken :: jet_cli_test_unsigned(fields[4]) ?? next
+            &observations.branches.push(JetCLITestCoverageBranch{id: fields[1], function: fields[2], taken: taken, not_taken: not_taken})
+        }
+    }
+    &observations.branches.sort_by((a: JetCLITestCoverageBranch, b: JetCLITestCoverageBranch) -> a.id <=> b.id)
+    observations
+}
+
+// Rust report_coverage by_line sort and machine payload (CmdCompile.rs:9100-
+// 9142). Core DataTree is the canonical machine model. OutputAdapter/Report
+// wraps this payload under action `coverage`, ok=true, field `coverage`.
+pub fn jet_cli_test_coverage_tree(file: String, functions: [JetCLITestCoverableFunction], observations: JetCLITestCoverageObservations) -> DataTree Never! {
+    order := [Int]{}
+    loop index in 0..<functions.len() -> &order.push(index)
+    &order.sort_by((a: Int, b: Int) -> functions[a].line <=> functions[b].line)
+    function_rows := [DataTree]{}
+    loop index in order {
+        function :: functions[index]
+        &function_rows.push(DataTree.Object([String:DataTree]{"name": DataTree.Text(~function.name), "line": DataTree.Int(function.line), "covered": DataTree.Bool(observations.function_hits.has_key(function.line))}))
+    }
+    branch_rows := [DataTree]{}
+    loop branch in observations.branches {
+        &branch_rows.push(DataTree.Object([String:DataTree]{"id": DataTree.Text(~branch.id), "function": DataTree.Text(~branch.function), "outcome": DataTree.Text("taken"), "hits": DataTree.Int(branch.taken)}))
+        &branch_rows.push(DataTree.Object([String:DataTree]{"id": DataTree.Text(~branch.id), "function": DataTree.Text(~branch.function), "outcome": DataTree.Text("not-taken"), "hits": DataTree.Int(branch.not_taken)}))
+    }
+    DataTree.Object([String:DataTree]{"file": DataTree.Text(~file), "functions": DataTree.Array(function_rows), "branches": DataTree.Array(branch_rows)})
+}
+
+fn jet_cli_test_coverage_append(output: &[U8], text: String) Never! {
+    loop byte in text.bytes() -> &output.push(byte)
+}
+
+// Rust report_coverage human projection (CmdCompile.rs:9161-9223).
+pub fn jet_cli_test_coverage_human(file: String, functions: [JetCLITestCoverableFunction], observations: JetCLITestCoverageObservations) -> String Never! {
+    if functions.len() == 0 && observations.branches.len() == 0 -> return "\ncoverage: no functions to measure\n"
+    output := [U8]{}
+    if functions.len() == 0 {
+        jet_cli_test_coverage_append(&output, "\ncoverage: no functions to measure\n")
+    } else {
+        jet_cli_test_coverage_append(&output, "\ncoverage for {file}\n")
+        order := [Int]{}
+        loop index in 0..<functions.len() -> &order.push(index)
+        &order.sort_by((a: Int, b: Int) -> functions[a].line <=> functions[b].line)
+        covered := 0
+        loop index in order {
+            function :: functions[index]
+            hit :: observations.function_hits.has_key(function.line)
+            if hit -> covered += 1
+            jet_cli_test_coverage_append(&output, "  {if hit -> "HIT " else -> "MISS"}  {function.name}  {file}:{function.line}\n")
+        }
+        covered_float :: Float.from_int(covered)
+        total_float :: Float.from_int(functions.len())
+        pct :: (covered_float / total_float) * (Float{100.0})
+        // #4407 tracks Fixed(0)/Core fmt rounding parity. Keep the original
+        // 62.5 -> 62 assertion and the canonical format, not a CLI formatter.
+        jet_cli_test_coverage_append(&output, "  {covered}/{functions.len()} functions covered ({pct:Fixed(0)}%)\n")
+    }
+    covered_branches := 0
+    loop branch in observations.branches {
+        if branch.taken > 0 -> covered_branches += 1
+        if branch.not_taken > 0 -> covered_branches += 1
+        jet_cli_test_coverage_append(&output, "  BRANCH {branch.id} taken     {if branch.taken > 0 -> "HIT " else -> "MISS"} hits={branch.taken}  {branch.function}\n")
+        jet_cli_test_coverage_append(&output, "  BRANCH {branch.id} not-taken {if branch.not_taken > 0 -> "HIT " else -> "MISS"} hits={branch.not_taken}  {branch.function}\n")
+    }
+    total_branches :: observations.branches.len() * 2
+    branch_pct :: if total_branches == 0 -> 100 else -> (covered_branches * 100) /% total_branches
+    jet_cli_test_coverage_append(&output, "  {covered_branches}/{total_branches} branches covered ({branch_pct}%)\n")
+    String.from_bytes(output) ?? panic("coverage output is UTF-8")
+}

@@ -1,0 +1,14 @@
+use jet_foundation.[Type]
+
+// Rust FFI.rs:5781–5791, shared by the scanner and outward wrapper emitter.
+pub fn pkg_ffi_inline_rust_type(ty: Type) -> String Never! {
+    if ty == {
+        .Int -> "i64"
+        .Float -> "f64"
+        .IntN(signed, bits) -> pkg_ffi_int_rust_name(signed, bits)
+        .InlineRange(base, _, _) -> pkg_ffi_inline_rust_type(base)
+        .Float32 -> "f32"
+        .Bool -> "bool"
+        else -> "()"
+    }
+}

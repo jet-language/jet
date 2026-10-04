@@ -1,0 +1,187 @@
+// CmdPkg.rs has no inline tests. Package-command regressions are in
+// tests/pkg.rs:5667-5834; parser precedence and changed-carrier boundaries
+// below exercise the same command policy without a fabricated provider.
+
+#Test("package add requires a name and an explicit source") {
+    if jet_cli_package_parse_add([String]{"add"}) == {
+        .Ok(_) -> panic("missing dependency accepted")
+        .Err(error) -> {
+            assert_eq(error.code, "E2104")
+            assert_eq(error.what, "`jet add` needs a dependency name")
+            assert_eq(error.fix, "try `jet add mylib --path ../mylib`")
+        }
+    }
+    if jet_cli_package_parse_add([String]{"add", "mylib"}) == {
+        .Ok(_) -> panic("missing source accepted")
+        .Err(error) -> {
+            assert_eq(error.what, "`jet add mylib` needs --path or --git")
+            assert_eq(error.fix, "try `jet add mylib --path ../mylib` or `jet add mylib --git <url> --tag <tag>`")
+        }
+    }
+}
+
+#Test("package add path wins over git and selector flags") {
+    parsed :: jet_cli_package_parse_add([String]{"add", "mylib", "--git", "https://example.test/lib", "--branch", "main", "--path", "../mylib"}) ?? panic("path addition refused")
+    assert_eq(parsed.name, "mylib")
+    if parsed.spec == {
+        .Path(path) -> assert_eq(path, "../mylib")
+        else -> panic("path must win")
+    }
+}
+
+#Test("package git selector priority is tag then branch then rev") {
+    tagged :: jet_cli_package_parse_add([String]{"add", "lib", "--git", "repo", "--rev", "sha", "--branch", "main", "--tag", "v1"}) ?? panic("tag addition refused")
+    if tagged.spec == {
+        .Git(url, selector) -> {
+            assert_eq(url, "repo")
+            assert(selector == GitSelector.Tag("v1"))
+        }
+        else -> panic("expected git")
+    }
+    branch :: jet_cli_package_parse_add([String]{"add", "lib", "--git", "repo", "--rev", "sha", "--branch", "main"}) ?? panic("branch addition refused")
+    if branch.spec == {
+        .Git(_, selector) -> assert(selector == GitSelector.Branch("main"))
+        else -> panic("expected git")
+    }
+    revision :: jet_cli_package_parse_add([String]{"add", "lib", "--git", "repo", "--rev", "sha"}) ?? panic("revision addition refused")
+    if revision.spec == {
+        .Git(_, selector) -> assert(selector == GitSelector.Rev("sha"))
+        else -> panic("expected git")
+    }
+    if jet_cli_package_parse_add([String]{"add", "lib", "--git", "repo"}) == {
+        .Ok(_) -> panic("unpinned git accepted")
+        .Err(error) -> {
+            assert_eq(error.what, "git dependency `lib` needs one of: --tag, --branch, --rev")
+            assert_eq(error.fix, "")
+        }
+    }
+}
+
+#Test("package add preserves Rust positional and separate-value semantics") {
+    // A flag's value can be the second non-flag word in the Rust parser.
+    parsed :: jet_cli_package_parse_add([String]{"add", "--path", "../first", "actual-name"}) ?? panic("separate path refused")
+    assert_eq(parsed.name, "../first")
+    if jet_cli_package_parse_add([String]{"add", "lib", "--path=../lib"}) == {
+        .Ok(_) -> panic("equals-form is not flag_value")
+        .Err(error) -> assert_eq(error.what, "`jet add lib` needs --path or --git")
+    }
+    first :: jet_cli_package_parse_add([String]{"add", "lib", "--path", "first", "--path", "second"}) ?? panic("repeated flag refused")
+    if first.spec == {
+        .Path(path) -> assert_eq(path, "first")
+        else -> panic("expected path")
+    }
+    empty :: jet_cli_package_parse_add([String]{"add", "-x", "--path", ""}) ?? panic("empty separate value must be passed to the model")
+    assert_eq(empty.name, "-x")
+}
+
+#Test("fetch offline selects locked while script lock takes precedence") {
+    offline :: [String]{"fetch", "--offline"}
+    intent :: jet_cli_package_intent(offline, [String]{"fetch"}, "", false) ?? panic("fetch intent")
+    assert(intent == JetCLIPackageIntent.Fetch{locked: true})
+    explicit :: jet_cli_package_intent([String]{"fetch"}, [String]{"fetch"}, "", true) ?? panic("locked fetch intent")
+    assert(explicit == JetCLIPackageIntent.Fetch{locked: true})
+    script :: jet_cli_package_intent([String]{"fetch", "--offline", "--lock", "lesson.jet"}, [String]{"fetch"}, "", true) ?? panic("script intent")
+    assert(script == JetCLIPackageIntent.LockScript("lesson.jet"))
+}
+
+#Test("dependency updates do not swallow the toolchain route") {
+    all :: jet_cli_package_intent([String]{"update"}, [String]{"update"}, "", false) ?? panic("all updates")
+    assert(all == JetCLIPackageIntent.Update{dependency: None})
+    named :: jet_cli_package_intent([String]{"update", "lib"}, [String]{"update", "lib"}, "", false) ?? panic("named update")
+    assert(named == JetCLIPackageIntent.Update{dependency: Val("lib")})
+    toolchain :: jet_cli_package_intent([String]{"update", "jet", "nightly"}, [String]{"update", "jet", "nightly"}, "", false) ?? panic("toolchain update")
+    assert(toolchain == JetCLIPackageIntent.UpdateToolchain{channel: Val("nightly")})
+    remove :: jet_cli_package_intent([String]{"remove", "lib"}, [String]{"remove", "lib"}, "lib", false) ?? panic("remove intent")
+    assert(remove == JetCLIPackageIntent.Remove("lib"))
+}
+
+// Source-carrier integration cases require the real canonical PackageModel.
+fn package_command_test_input(raw: String) -> JetCLIPackageInput {
+    inline :: pkg_extract_inline_package(raw) ?? panic("inline package extraction")
+    body :: if inline == {
+        .Val(block) -> block.body(raw)
+        .None -> raw
+    }
+    facts :: PackageFacts.parse(body, "package.jet") ?? panic("package facts")
+    jet_cli_package_input("package.jet", raw, inline, facts) ?? panic("manifest conversion")
+}
+
+// tests/pkg.rs::cli_add_path_into_inline_empty_deps_table, source-edit half.
+#Test("package add fills an empty deps table with the canonical editor") {
+    input :: package_command_test_input("name: \"app\"\nversion: \"0.1.0\"\ndeps: {{}}\n")
+    addition :: jet_cli_package_parse_add([String]{"add", "mylib", "--path", "./mylib"}) ?? panic("add parse")
+    updated :: jet_cli_package_add_source(input, addition)
+    assert(updated.contains("    mylib: ./mylib,"))
+    reparsed :: package_command_test_input(updated)
+    assert(reparsed.manifest.dependencies.has_key("mylib"))
+}
+
+// tests/pkg.rs::cli_remove_absent_dependency_is_an_error.
+#Test("absent dependency removal never creates a success edit") {
+    before :: "name: \"app\"\nversion: \"0.1.0\"\n"
+    input :: package_command_test_input(before)
+    if jet_cli_package_remove_source(input, "json") == {
+        .Ok(_) -> panic("absent dependency accepted")
+        .Err(error) -> {
+            assert_eq(error.code, "E2104")
+            assert_eq(error.what, "dependency `json` is not present in package.jet")
+            assert_eq(error.fix, "remove a dependency listed in package.jet, or add `json` first")
+        }
+    }
+    assert_eq(input.raw, before)
+}
+
+#Test("inline package edits preserve Unicode source and unrelated comments") {
+    prefix :: "// café 日本\npackage {{\nname: \"app\"\nversion: \"0.1.0\"\n// retain metadata\n"
+    suffix :: "\n}}\nfn run() {{ print(\"λ\") }}\n"
+    raw :: "{prefix}deps: {{\n    lib: ../lib,\n}}{suffix}"
+    input :: package_command_test_input(raw)
+    removed :: jet_cli_package_remove_source(input, "lib") ?? panic("remove inline dep")
+    assert(removed.starts_with(prefix))
+    assert(removed.ends_with(suffix))
+    assert(!removed.contains("    lib:"))
+    addition :: jet_cli_package_parse_add([String]{"add", "helper", "--path", "../helper"}) ?? panic("add inline dep")
+    updated :: jet_cli_package_add_source(input, addition)
+    assert(updated.starts_with(prefix))
+    assert(updated.ends_with(suffix))
+    assert(updated.contains("    lib: ../lib,"))
+    assert(updated.contains("    helper: ../helper,"))
+}
+
+#Test("changed carrier is refused without losing the other writer's bytes") {
+    input :: package_command_test_input("name: \"app\"\nversion: \"0.1.0\"\n")
+    jet_cli_package_require_unchanged(input, input.raw) ?? panic("unchanged input refused")
+    concurrent :: "{input.raw}// another writer\n"
+    if jet_cli_package_require_unchanged(input, concurrent) == {
+        .Ok(_) -> panic("concurrent source change accepted")
+        .Err(error) -> {
+            assert_eq(error.code, "E2105")
+            assert_eq(error.what, "package.jet changed while the package edit was prepared")
+        }
+    }
+    assert(concurrent.ends_with("// another writer\n"))
+}
+
+#Test("package success output follows completed edit and provider outcomes") {
+    lock :: LockFile.empty()
+    addition :: JetCLIPackageIntent.Add(JetCLIPackageAdd{name: "lib", spec: DepSpec.Path{path: "../lib"}})
+    assert_eq(jet_cli_package_edit_message(addition, "run.jet"), "added `lib` to run.jet\n")
+    assert_eq(jet_cli_package_edit_message(JetCLIPackageIntent.Remove("lib"), "package.jet"), "removed `lib` from package.jet\n")
+    assert_eq(jet_cli_package_fetch_message(addition, lock), "fetched all dependencies\n")
+    assert_eq(jet_cli_package_fetch_message(JetCLIPackageIntent.Fetch{locked: true}, lock), "lock verified\n")
+    assert_eq(jet_cli_package_fetch_message(JetCLIPackageIntent.Update{dependency: None}, lock), "updated all moving selectors\n")
+    assert_eq(jet_cli_package_fetch_message(JetCLIPackageIntent.Update{dependency: Val("lib")}, lock), "updated `lib`\n")
+}
+
+// Rust `print_registry_tiers`: interspersed non-registry nodes are skipped,
+// and provider order is retained rather than sorted for presentation.
+#Test("package registry tiers preserve lock order and canonical gate status") {
+    lock := LockFile.empty()
+    &lock.packages.push(LockedPackage{name: "local", version: "0.1.0", source: LockSource.Path("../local")})
+    &lock.packages.push(LockedPackage{name: "zlib", version: "2.0.0", source: LockSource.Registry{registry: "core", reference: "zlib#2.0.0", output: "", source_hash: "", repository: "", authority: "", tier: "core", gate_status: "passed"}})
+    &lock.packages.push(LockedPackage{name: "app", version: "1.0.0", source: LockSource.Root})
+    &lock.packages.push(LockedPackage{name: "alpha", version: "3.0.0", source: LockSource.Registry{registry: "community", reference: "alpha#3.0.0", output: "", source_hash: "", repository: "", authority: "", tier: "community", gate_status: "unverified"}})
+    expected :: "resolved `zlib` 2.0.0 from registry `core` (tier: core; gate status: passed)\nresolved `alpha` 3.0.0 from registry `community` (tier: community; gate status: unverified)\n"
+    assert_eq(jet_cli_package_registry_tiers(lock), expected)
+    assert_eq(jet_cli_package_fetch_message(JetCLIPackageIntent.Fetch{locked: true}, lock), "{expected}lock verified\n")
+}

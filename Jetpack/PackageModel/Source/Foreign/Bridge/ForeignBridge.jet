@@ -1,0 +1,1804 @@
+// PORT-PENDING 2070 crates-jet-pkg-model-src-foreignbridge-slice-1: crates/jet-pkg-model/src/ForeignBridge.rs:1-1800
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Shared identity and provenance for generated foreign bridge artifacts.
+//RS //!
+//RS //! A bridge key is a digest of a length-delimited input record.  The record is
+//RS //! deliberately built by the caller: the binder or bridge builder owns the
+//RS //! descriptor inputs, while this module owns the stable encoding and artifact
+//RS //! provenance format.
+//RS 
+//RS use crate::AST::{BinderCapability, BinderDescriptor, ForeignAbiContract, ForeignScalar};
+//RS use std::collections::{BTreeMap, BTreeSet};
+//RS use std::fmt::Write as _;
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS 
+//RS pub const IDENTITY_SCHEMA: &str = "jet-ffi-bridge-identity-v1";
+//RS pub const PROVENANCE_SCHEMA: &str = "jet-ffi-bridge-provenance-v1";
+//RS pub const FOREIGN_BOUNDARY_SCHEMA: &str = "jet-ffi-boundary-v1";
+//RS const SCALAR_BRIDGE_SCHEMA: &str = "jet-ffi-scalar-sidecar-v1";
+//RS 
+//RS /// One scalar function in the common checked sidecar ABI. Language adapters
+//RS /// parse their own declaration format into this shape, then share the C
+//RS /// boundary, Jet wrapper, and provenance rules below.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct ScalarBridgeFunction {
+//RS     pub name: String,
+//RS     pub params: Vec<ForeignScalar>,
+//RS     pub result: ForeignScalar,
+//RS }
+//RS 
+//RS /// One exact file input in a bridge identity. The role is part of the record,
+//RS /// so a declaration, runtime, header, or generated worker cannot be mistaken
+//RS /// for another file merely because both happen to have the same bytes.
+//RS pub type BridgeSource<'a> = (&'a str, &'a Path);
+//RS 
+//RS /// A local native archive candidate used by a binding or link record.
+//RS /// `bytes == None` is deliberate evidence that the candidate was absent or
+//RS /// unreadable when the identity was made; it is not a permission to fall back
+//RS /// to a different host tool or guessed library.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct ArchiveInput {
+//RS     pub library: String,
+//RS     pub path: PathBuf,
+//RS     pub bytes: Option<Vec<u8>>,
+//RS }
+//RS 
+//RS /// A deterministic content-addressed identity record.
+//RS #[derive(Debug, Default)]
+//RS pub struct IdentityBuilder {
+//RS     bytes: Vec<u8>,
+//RS }
+//RS 
+//RS impl IdentityBuilder {
+//RS     /// Start an identity record with its schema as the first field.
+//RS     pub fn new(schema: &str) -> Self {
+//RS         let mut identity = Self::default();
+//RS         identity.field("schema", schema.as_bytes());
+//RS         identity
+//RS     }
+//RS 
+//RS     /// Add one ordered, length-delimited input field.
+//RS     pub fn field(&mut self, name: &str, value: &[u8]) {
+//RS         self.bytes
+//RS             .extend_from_slice(&(name.len() as u64).to_le_bytes());
+//RS         self.bytes.extend_from_slice(name.as_bytes());
+//RS         self.bytes
+//RS             .extend_from_slice(&(value.len() as u64).to_le_bytes());
+//RS         self.bytes.extend_from_slice(value);
+//RS     }
+//RS 
+//RS     /// Finish the record as a lowercase SHA-256 digest.
+//RS     pub fn finish(self) -> String {
+//RS         crate::SHA256::sha256_hex(&self.bytes)
+//RS     }
+//RS }
+//RS /// One source/build/run/target identity for a foreign boundary.
+//RS ///
+//RS /// The identity deliberately names the declaration source, checked overlay,
+//RS /// generator, foreign implementation, toolchain, and target separately. A
+//RS /// path or a version by itself is not enough to keep a cached replacement
+//RS /// honest when the bytes behind it change.
+//RS #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub struct ForeignBoundaryIdentity {
+//RS     pub source: String,
+//RS     pub overlay: String,
+//RS     pub generator: String,
+//RS     pub implementation: String,
+//RS     pub toolchain: String,
+//RS     pub target: String,
+//RS }
+//RS 
+//RS impl ForeignBoundaryIdentity {
+//RS     pub fn new(
+//RS         source: impl Into<String>,
+//RS         overlay: impl Into<String>,
+//RS         generator: impl Into<String>,
+//RS         implementation: impl Into<String>,
+//RS         toolchain: impl Into<String>,
+//RS         target: impl Into<String>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             source: source.into(),
+//RS             overlay: overlay.into(),
+//RS             generator: generator.into(),
+//RS             implementation: implementation.into(),
+//RS             toolchain: toolchain.into(),
+//RS             target: target.into(),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Map the boundary identity onto the one canonical derivation identity.
+//RS     /// Overlay and generator changes are source/build changes respectively;
+//RS     /// the foreign implementation remains the recorded run input.
+//RS     pub fn derivation_identity(&self) -> jet_foundation::Facts::DerivationIdentity {
+//RS         jet_foundation::Facts::DerivationIdentity::new(
+//RS             format!("source={};overlay={}", self.source, self.overlay),
+//RS             format!("generator={};toolchain={}", self.generator, self.toolchain),
+//RS             self.implementation.clone(),
+//RS             self.target.clone(),
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn differs_from(&self, other: &Self) -> bool {
+//RS         self != other
+//RS     }
+//RS 
+//RS     /// Stable digest used by receipts and generated source comments.
+//RS     pub fn digest(&self) -> String {
+//RS         let mut identity = IdentityBuilder::new(FOREIGN_BOUNDARY_SCHEMA);
+//RS         for (name, value) in [
+//RS             ("source", self.source.as_str()),
+//RS             ("overlay", self.overlay.as_str()),
+//RS             ("generator", self.generator.as_str()),
+//RS             ("implementation", self.implementation.as_str()),
+//RS             ("toolchain", self.toolchain.as_str()),
+//RS             ("target", self.target.as_str()),
+//RS         ] {
+//RS             identity.field(name, value.as_bytes());
+//RS         }
+//RS         identity.finish()
+//RS     }
+//RS 
+//RS     fn is_complete(&self) -> bool {
+//RS         [
+//RS             &self.source,
+//RS             &self.overlay,
+//RS             &self.generator,
+//RS             &self.implementation,
+//RS             &self.toolchain,
+//RS             &self.target,
+//RS         ]
+//RS         .iter()
+//RS         .all(|value| !value.trim().is_empty())
+//RS     }
+//RS }
+//RS 
+//RS /// Evidence basis for one foreign-call obligation. The enum is defined in
+//RS /// Foundation so sema, TIR, and execution tiers consume the same vocabulary.
+//RS pub use jet_foundation::AST::FfiEvidenceBasis as ForeignEvidenceBasis;
+//RS 
+//RS /// Exact loaded-artifact coverage shared by every obligation in a boundary.
+//RS ///
+//RS /// `None` means that the producer did not establish the corresponding list.
+//RS /// `Some(empty)` is an established empty list, so missing callback/dependency
+//RS /// analysis cannot be mistaken for "there were no callbacks/dependencies".
+//RS #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub struct ForeignArtifactCoverage {
+//RS     pub loaded_artifact: String,
+//RS     pub transitive_dependencies: Option<Vec<String>>,
+//RS     pub reachable_callbacks: Option<Vec<String>>,
+//RS     pub compiler_flags: Option<Vec<String>>,
+//RS     pub target: String,
+//RS     pub generator: String,
+//RS }
+//RS 
+//RS impl ForeignArtifactCoverage {
+//RS     pub fn new(
+//RS         loaded_artifact: impl Into<String>,
+//RS         target: impl Into<String>,
+//RS         generator: impl Into<String>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             loaded_artifact: loaded_artifact.into(),
+//RS             transitive_dependencies: None,
+//RS             reachable_callbacks: None,
+//RS             compiler_flags: None,
+//RS             target: target.into(),
+//RS             generator: generator.into(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn with_transitive_dependencies<I, S>(mut self, dependencies: I) -> Self
+//RS     where
+//RS         I: IntoIterator<Item = S>,
+//RS         S: Into<String>,
+//RS     {
+//RS         self.transitive_dependencies = Some(sorted_strings(dependencies));
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_reachable_callbacks<I, S>(mut self, callbacks: I) -> Self
+//RS     where
+//RS         I: IntoIterator<Item = S>,
+//RS         S: Into<String>,
+//RS     {
+//RS         self.reachable_callbacks = Some(sorted_strings(callbacks));
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_compiler_flags<I, S>(mut self, flags: I) -> Self
+//RS     where
+//RS         I: IntoIterator<Item = S>,
+//RS         S: Into<String>,
+//RS     {
+//RS         self.compiler_flags = Some(sorted_strings(flags));
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn digest(&self) -> String {
+//RS         let mut identity = IdentityBuilder::new(FOREIGN_BOUNDARY_SCHEMA);
+//RS         identity.field("loaded-artifact", self.loaded_artifact.as_bytes());
+//RS         identity.field(
+//RS             "transitive-dependencies",
+//RS             stable_optional_strings(self.transitive_dependencies.as_deref()).as_bytes(),
+//RS         );
+//RS         identity.field(
+//RS             "reachable-callbacks",
+//RS             stable_optional_strings(self.reachable_callbacks.as_deref()).as_bytes(),
+//RS         );
+//RS         identity.field(
+//RS             "compiler-flags",
+//RS             stable_optional_strings(self.compiler_flags.as_deref()).as_bytes(),
+//RS         );
+//RS         identity.field("target", self.target.as_bytes());
+//RS         identity.field("generator", self.generator.as_bytes());
+//RS         identity.finish()
+//RS     }
+//RS 
+//RS     fn is_complete(&self) -> bool {
+//RS         !self.loaded_artifact.trim().is_empty()
+//RS             && self.transitive_dependencies.is_some()
+//RS             && self.reachable_callbacks.is_some()
+//RS             && self.compiler_flags.is_some()
+//RS             && !self.target.trim().is_empty()
+//RS             && !self.generator.trim().is_empty()
+//RS     }
+//RS }
+//RS 
+//RS /// One obligation row in the canonical foreign boundary contract.
+//RS #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub struct ForeignObligationEvidence {
+//RS     pub obligation: String,
+//RS     pub basis: ForeignEvidenceBasis,
+//RS     pub checker: String,
+//RS     pub assumptions: Vec<String>,
+//RS     pub coverage_digest: String,
+//RS }
+//RS 
+//RS impl ForeignObligationEvidence {
+//RS     pub fn new(
+//RS         obligation: impl Into<String>,
+//RS         basis: ForeignEvidenceBasis,
+//RS         checker: impl Into<String>,
+//RS         assumptions: impl IntoIterator<Item = String>,
+//RS         coverage: &ForeignArtifactCoverage,
+//RS     ) -> Self {
+//RS         Self {
+//RS             obligation: obligation.into(),
+//RS             basis,
+//RS             checker: checker.into(),
+//RS             assumptions: sorted_strings(assumptions),
+//RS             coverage_digest: coverage.digest(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn validate(&self, coverage: &ForeignArtifactCoverage) -> Result<(), String> {
+//RS         if self.obligation.trim().is_empty() {
+//RS             return Err("foreign obligation evidence needs an obligation name".into());
+//RS         }
+//RS         if self.checker.trim().is_empty() {
+//RS             return Err(format!(
+//RS                 "foreign obligation `{}` needs an evidence checker",
+//RS                 self.obligation
+//RS             ));
+//RS         }
+//RS         if self.assumptions.is_empty() {
+//RS             return Err(format!(
+//RS                 "foreign obligation `{}` needs explicit assumptions",
+//RS                 self.obligation
+//RS             ));
+//RS         }
+//RS         if self.coverage_digest != coverage.digest() {
+//RS             return Err(format!(
+//RS                 "foreign obligation `{}` is attached to stale artifact coverage",
+//RS                 self.obligation
+//RS             ));
+//RS         }
+//RS         if self.basis != ForeignEvidenceBasis::Unknown && !coverage.is_complete() {
+//RS             return Err(format!(
+//RS                 "foreign obligation `{}` cannot claim {} without complete artifact coverage",
+//RS                 self.obligation,
+//RS                 self.basis.as_str()
+//RS             ));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS /// The obligation names every foreign descriptor must expose.
+//RS pub const FOREIGN_BOUNDARY_OBLIGATIONS: &[&str] = &[
+//RS     "abi",
+//RS     "layout",
+//RS     "width",
+//RS     "alignment",
+//RS     "ownership",
+//RS     "lifetime",
+//RS     "cleanup",
+//RS     "encoding",
+//RS     "nullability",
+//RS     "errors",
+//RS     "exceptions",
+//RS     "callbacks",
+//RS     "task-thread",
+//RS     "target",
+//RS     "copy-cost",
+//RS     "effects",
+//RS ];
+//RS 
+//RS fn sorted_strings<I, S>(values: I) -> Vec<String>
+//RS where
+//RS     I: IntoIterator<Item = S>,
+//RS     S: Into<String>,
+//RS {
+//RS     let mut values = values
+//RS         .into_iter()
+//RS         .map(Into::into)
+//RS         .filter(|value: &String| !value.trim().is_empty())
+//RS         .collect::<Vec<_>>();
+//RS     values.sort();
+//RS     values.dedup();
+//RS     values
+//RS }
+//RS 
+//RS fn stable_optional_strings(values: Option<&[String]>) -> String {
+//RS     match values {
+//RS         None => "unknown".into(),
+//RS         Some(values) if values.is_empty() => "none".into(),
+//RS         Some(values) => values.join("\n"),
+//RS     }
+//RS }
+//RS 
+//RS fn provenance_optional_strings(values: Option<&[String]>) -> String {
+//RS     match values {
+//RS         None => "unknown".into(),
+//RS         Some(values) if values.is_empty() => "none".into(),
+//RS         Some(values) => values.join("|"),
+//RS     }
+//RS }
+//RS 
+//RS /// Whether a foreign family has a checked replacement path or only a binder.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum ForeignBoundaryDisposition {
+//RS     Supported,
+//RS     BinderOnly,
+//RS     Unsupported,
+//RS }
+//RS 
+//RS impl ForeignBoundaryDisposition {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Supported => "supported",
+//RS             Self::BinderOnly => "binder-only",
+//RS             Self::Unsupported => "unsupported",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// The source remains authoritative until a recorded comparison accepts the
+//RS /// replacement. This is a state marker, not a second evaluator.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub enum ForeignSourceAuthority {
+//RS     ForeignUntilAccepted,
+//RS     ReplacementAccepted,
+//RS }
+//RS 
+//RS impl ForeignSourceAuthority {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::ForeignUntilAccepted => "foreign-until-accepted",
+//RS             Self::ReplacementAccepted => "replacement-accepted",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// One raw case from the existing comparison/evidence machinery.
+//RS ///
+//RS /// The boundary keeps the input and both raw observations, but does not run a
+//RS /// relation or create an evidence graph of its own. `outcome` uses the
+//RS /// comparison API's vocabulary (`matched`, `mismatch`, `empty`, `unsupported`,
+//RS /// or `unknown`).
+//RS #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//RS pub struct ForeignBoundaryObservation {
+//RS     pub case_id: String,
+//RS     pub input: String,
+//RS     pub foreign: String,
+//RS     pub replacement: String,
+//RS     pub outcome: String,
+//RS     pub assumptions: Vec<String>,
+//RS     pub evidence: Option<jet_foundation::Evidence::EvidenceIdentity>,
+//RS }
+//RS 
+//RS impl ForeignBoundaryObservation {
+//RS     pub fn new(
+//RS         case_id: impl Into<String>,
+//RS         input: impl Into<String>,
+//RS         foreign: impl Into<String>,
+//RS         replacement: impl Into<String>,
+//RS         outcome: impl Into<String>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             case_id: case_id.into(),
+//RS             input: input.into(),
+//RS             foreign: foreign.into(),
+//RS             replacement: replacement.into(),
+//RS             outcome: outcome.into(),
+//RS             assumptions: Vec::new(),
+//RS             evidence: None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn with_assumptions(mut self, assumptions: impl IntoIterator<Item = String>) -> Self {
+//RS         self.assumptions = assumptions.into_iter().collect();
+//RS         self.assumptions.sort();
+//RS         self.assumptions.dedup();
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_evidence(
+//RS         mut self,
+//RS         evidence: jet_foundation::Evidence::EvidenceIdentity,
+//RS     ) -> Self {
+//RS         self.evidence = Some(evidence);
+//RS         self
+//RS     }
+//RS 
+//RS     fn validate(&self) -> Result<(), String> {
+//RS         if self.case_id.trim().is_empty() || self.input.trim().is_empty() {
+//RS             return Err("foreign boundary comparison cases need an id and input".into());
+//RS         }
+//RS         if self.foreign.trim().is_empty() || self.replacement.trim().is_empty() {
+//RS             return Err(
+//RS                 "foreign boundary comparison cases retain both raw foreign and replacement observations"
+//RS                     .into(),
+//RS             );
+//RS         }
+//RS         if !matches!(
+//RS             self.outcome.as_str(),
+//RS             "matched"
+//RS                 | "mismatch"
+//RS                 | "empty"
+//RS                 | "unsupported"
+//RS                 | "unavailable"
+//RS                 | "timeout"
+//RS                 | "cancelled"
+//RS                 | "invalid_oracle"
+//RS                 | "contaminated"
+//RS                 | "unknown"
+//RS         ) {
+//RS             return Err(format!(
+//RS                 "unknown foreign boundary comparison outcome `{}`",
+//RS                 self.outcome
+//RS             ));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS /// Family-level capability projection over the canonical binder descriptor.
+//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//RS pub struct ForeignBoundaryCapability {
+//RS     pub language: crate::AST::ForeignLanguage,
+//RS     pub disposition: ForeignBoundaryDisposition,
+//RS     pub source_import: bool,
+//RS     pub mixed_debug: bool,
+//RS     pub native_export: bool,
+//RS     pub build_host: bool,
+//RS     pub reason: &'static str,
+//RS }
+//RS 
+//RS /// Project the consumed family matrix without looking at command presence.
+//RS ///
+//RS /// Active descriptors provide an executable binder. Only the named narrow
+//RS /// conversion families claim source import; C/C++ source import and
+//RS /// COM/Ada/Pascal semantic translation remain explicitly unavailable.
+//RS pub fn foreign_boundary_capability(
+//RS     language: crate::AST::ForeignLanguage,
+//RS ) -> ForeignBoundaryCapability {
+//RS     let descriptor = crate::AST::binder_descriptor(language);
+//RS     let active = descriptor.is_some_and(|descriptor| {
+//RS         descriptor.status == crate::AST::BinderStatus::Active
+//RS     });
+//RS     let source_import = matches!(
+//RS         language,
+//RS         crate::AST::ForeignLanguage::Py
+//RS             | crate::AST::ForeignLanguage::Java
+//RS             | crate::AST::ForeignLanguage::DotNet
+//RS             | crate::AST::ForeignLanguage::JS
+//RS             | crate::AST::ForeignLanguage::Go
+//RS     );
+//RS     let binder_only = matches!(
+//RS         language,
+//RS         crate::AST::ForeignLanguage::Com
+//RS             | crate::AST::ForeignLanguage::Ada
+//RS             | crate::AST::ForeignLanguage::Pascal
+//RS     );
+//RS     let disposition = if !active {
+//RS         ForeignBoundaryDisposition::Unsupported
+//RS     } else if binder_only {
+//RS         ForeignBoundaryDisposition::BinderOnly
+//RS     } else {
+//RS         ForeignBoundaryDisposition::Supported
+//RS     };
+//RS     let reason = match disposition {
+//RS         ForeignBoundaryDisposition::Supported if source_import => {
+//RS             "active adapter with a narrow checked conversion subset"
+//RS         }
+//RS         ForeignBoundaryDisposition::Supported => {
+//RS             "active checked binder; semantic source import is unavailable"
+//RS         }
+//RS         ForeignBoundaryDisposition::BinderOnly => {
+//RS             "binder/adapter path is executable; semantic source translation is unavailable"
+//RS         }
+//RS         ForeignBoundaryDisposition::Unsupported => {
+//RS             "no active binder descriptor is registered for this family"
+//RS         }
+//RS     };
+//RS     ForeignBoundaryCapability {
+//RS         language,
+//RS         disposition,
+//RS         source_import,
+//RS         mixed_debug: matches!(
+//RS             language,
+//RS             crate::AST::ForeignLanguage::C
+//RS                 | crate::AST::ForeignLanguage::Cpp
+//RS                 | crate::AST::ForeignLanguage::Py
+//RS                 | crate::AST::ForeignLanguage::Java
+//RS                 | crate::AST::ForeignLanguage::DotNet
+//RS                 | crate::AST::ForeignLanguage::JS
+//RS                 | crate::AST::ForeignLanguage::Go
+//RS         ),
+//RS         native_export: matches!(
+//RS             language,
+//RS             crate::AST::ForeignLanguage::C | crate::AST::ForeignLanguage::Cpp
+//RS         ),
+//RS         build_host: matches!(
+//RS             language,
+//RS             crate::AST::ForeignLanguage::C | crate::AST::ForeignLanguage::Cpp
+//RS         ),
+//RS         reason,
+//RS     }
+//RS }
+//RS 
+//RS /// Return the complete family matrix used by foreign inspection and
+//RS /// comparison views. Every language gets one explicit executable,
+//RS /// binder-only, or unsupported disposition.
+//RS pub fn foreign_boundary_capabilities() -> Vec<ForeignBoundaryCapability> {
+//RS     crate::AST::ForeignLanguage::ALL
+//RS         .iter()
+//RS         .copied()
+//RS         .map(foreign_boundary_capability)
+//RS         .collect()
+//RS }
+//RS 
+//RS 
+//RS /// Build the canonical boundary row for an import operation.
+//RS ///
+//RS /// Source conversion and binder-only preparation share the descriptor,
+//RS /// identity, coverage, and provenance path. The capability matrix remains the
+//RS /// authority for whether a family has semantic conversion; this constructor
+//RS /// deliberately does not upgrade binder-only families.
+//RS pub fn source_import_boundary(
+//RS     language: crate::AST::ForeignLanguage,
+//RS     library: impl Into<String>,
+//RS     identity: ForeignBoundaryIdentity,
+//RS     coverage: ForeignArtifactCoverage,
+//RS ) -> Result<ForeignBoundaryContract, String> {
+//RS     let descriptor = crate::AST::binder_descriptor(language)
+//RS         .ok_or_else(|| format!("missing binder descriptor for {language:?}"))?;
+//RS     let boundary = ForeignBoundaryContract::new(*descriptor, library, identity)
+//RS         .with_artifact_coverage(coverage);
+//RS     boundary.validate()?;
+//RS     Ok(boundary)
+//RS }
+//RS 
+//RS /// Stable receipt emitted when a checked comparison accepts a replacement
+//RS /// projection for a foreign source. The receipt references the existing
+//RS /// derivation/evidence/comparison records; it does not copy or re-evaluate
+//RS /// their graphs.
+//RS pub const FOREIGN_SOURCE_RECEIPT_SCHEMA: &str = "jet-ffi-source-receipt-v1";
+//RS 
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct ForeignSourceReceipt {
+//RS     pub schema: &'static str,
+//RS     pub boundary_digest: String,
+//RS     pub boundary_identity: ForeignBoundaryIdentity,
+//RS     pub artifact_coverage_digest: String,
+//RS     pub source_identity: String,
+//RS     pub replacement_identity: String,
+//RS     pub source_authority: ForeignSourceAuthority,
+//RS     pub derivation: jet_foundation::Facts::DerivationRef,
+//RS     pub evidence: Vec<jet_foundation::Evidence::EvidenceIdentity>,
+//RS     pub comparison_artifact_id: String,
+//RS     pub comparison_schema_version: u16,
+//RS     pub comparison_status: String,
+//RS     pub comparison_relation: String,
+//RS     pub compared_samples: usize,
+//RS     pub discarded_cases: usize,
+//RS     pub first_difference: Option<usize>,
+//RS     pub comparison_reason: Option<String>,
+//RS }
+//RS 
+//RS impl ForeignSourceReceipt {
+//RS     fn from_contract(
+//RS         contract: &ForeignBoundaryContract,
+//RS         comparison: &jet_foundation::TestingComparison::ComparisonRecord,
+//RS         replacement_identity: String,
+//RS     ) -> Result<Self, String> {
+//RS         let derivation = contract
+//RS             .derivation
+//RS             .clone()
+//RS             .ok_or_else(|| "accepted foreign replacement is missing its derivation reference".to_string())?;
+//RS         let comparison_artifact_id = comparison.artifact_id()?;
+//RS         let receipt = Self {
+//RS             schema: FOREIGN_SOURCE_RECEIPT_SCHEMA,
+//RS             boundary_digest: contract.digest(),
+//RS             boundary_identity: contract.identity.clone(),
+//RS             artifact_coverage_digest: contract.artifact_coverage.digest(),
+//RS             source_identity: contract.identity.source.clone(),
+//RS             replacement_identity,
+//RS             source_authority: contract.source_authority,
+//RS             derivation,
+//RS             evidence: contract.evidence.clone(),
+//RS             comparison_artifact_id,
+//RS             comparison_schema_version: comparison.schema_version,
+//RS             comparison_status: comparison.status.as_str().to_string(),
+//RS             comparison_relation: comparison.relation.as_str().to_string(),
+//RS             compared_samples: comparison.samples.len(),
+//RS             discarded_cases: comparison.discarded_cases,
+//RS             first_difference: comparison.first_difference,
+//RS             comparison_reason: comparison.reason.clone(),
+//RS         };
+//RS         receipt.validate()?;
+//RS         Ok(receipt)
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), String> {
+//RS         if self.schema != FOREIGN_SOURCE_RECEIPT_SCHEMA {
+//RS             return Err(format!("unsupported foreign source receipt schema `{}`", self.schema));
+//RS         }
+//RS         if self.boundary_digest.trim().is_empty()
+//RS             || !self.boundary_identity.is_complete()
+//RS             || self.artifact_coverage_digest.trim().is_empty()
+//RS             || self.source_identity.trim().is_empty()
+//RS             || self.replacement_identity.trim().is_empty()
+//RS             || self.comparison_artifact_id.trim().is_empty()
+//RS             || self.comparison_artifact_id.len() != 64
+//RS             || !self
+//RS                 .comparison_artifact_id
+//RS                 .bytes()
+//RS                 .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+//RS         {
+//RS             return Err("foreign source receipt has incomplete identity or coverage".into());
+//RS         }
+//RS         if self.source_authority != ForeignSourceAuthority::ReplacementAccepted {
+//RS             return Err(
+//RS                 "foreign source receipt requires replacement-accepted source authority".into(),
+//RS             );
+//RS         }
+//RS         if self.derivation.id.trim().is_empty() || self.evidence.is_empty() {
+//RS             return Err(
+//RS                 "foreign source receipt requires checked derivation and evidence references".into(),
+//RS             );
+//RS         }
+//RS         if self.comparison_schema_version
+//RS             != jet_foundation::TestingComparison::TEST_COMPARISON_SCHEMA_VERSION
+//RS             || self.comparison_status != "matched"
+//RS             || self.comparison_relation.trim().is_empty()
+//RS             || self.compared_samples == 0
+//RS             || self.discarded_cases != 0
+//RS             || self.first_difference.is_some()
+//RS         {
+//RS             return Err(
+//RS                 "foreign source receipt requires a non-empty matched comparison without discarded cases"
+//RS                     .into(),
+//RS             );
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Queryable fields for the existing provenance/receipt channels.
+//RS     pub fn provenance_fields(&self) -> Vec<(String, String)> {
+//RS         let mut fields = vec![
+//RS             ("source-receipt-schema".into(), self.schema.into()),
+//RS             ("source-receipt-boundary".into(), self.boundary_digest.clone()),
+//RS             (
+//RS                 "source-receipt-coverage".into(),
+//RS                 self.artifact_coverage_digest.clone(),
+//RS             ),
+//RS             (
+//RS                 "source-receipt-authority".into(),
+//RS                 self.source_authority.as_str().into(),
+//RS             ),
+//RS             (
+//RS                 "source-receipt-source".into(),
+//RS                 self.source_identity.clone(),
+//RS             ),
+//RS             (
+//RS                 "source-receipt-replacement".into(),
+//RS                 self.replacement_identity.clone(),
+//RS             ),
+//RS             (
+//RS                 "source-receipt-derivation".into(),
+//RS                 self.derivation.id.clone(),
+//RS             ),
+//RS             (
+//RS                 "source-receipt-comparison-artifact".into(),
+//RS                 self.comparison_artifact_id.clone(),
+//RS             ),
+//RS             (
+//RS                 "source-receipt-comparison-schema".into(),
+//RS                 self.comparison_schema_version.to_string(),
+//RS             ),
+//RS             (
+//RS                 "source-receipt-comparison-status".into(),
+//RS                 self.comparison_status.clone(),
+//RS             ),
+//RS             (
+//RS                 "source-receipt-comparison-relation".into(),
+//RS                 self.comparison_relation.clone(),
+//RS             ),
+//RS             (
+//RS                 "source-receipt-compared-samples".into(),
+//RS                 self.compared_samples.to_string(),
+//RS             ),
+//RS             (
+//RS                 "source-receipt-discarded-cases".into(),
+//RS                 self.discarded_cases.to_string(),
+//RS             ),
+//RS         ];
+//RS         for evidence in &self.evidence {
+//RS             fields.push((
+//RS                 "source-receipt-evidence".into(),
+//RS                 format!("{}/{}/{}", evidence.report_id, evidence.claim_id, evidence.evidence_id),
+//RS             ));
+//RS         }
+//RS         if let Some(reason) = &self.comparison_reason {
+//RS             fields.push(("source-receipt-comparison-reason".into(), reason.clone()));
+//RS         }
+//RS         fields
+//RS     }
+//RS 
+//RS     /// Deterministic text form suitable for the existing receipt store.
+//RS     pub fn render(&self) -> Result<String, String> {
+//RS         self.validate()?;
+//RS         let mut output = String::new();
+//RS         for (name, value) in self.provenance_fields() {
+//RS             append_line(&mut output, &name, &value)?;
+//RS         }
+//RS         output.push_str(&format!(
+//RS             "source-receipt-boundary-source={}\nsource-receipt-boundary-overlay={}\nsource-receipt-boundary-generator={}\nsource-receipt-boundary-implementation={}\nsource-receipt-boundary-toolchain={}\nsource-receipt-boundary-target={}\n",
+//RS             self.boundary_identity.source,
+//RS             self.boundary_identity.overlay,
+//RS             self.boundary_identity.generator,
+//RS             self.boundary_identity.implementation,
+//RS             self.boundary_identity.toolchain,
+//RS             self.boundary_identity.target,
+//RS         ));
+//RS         Ok(output)
+//RS     }
+//RS }
+//RS 
+//RS /// The one consumed boundary row for a binder invocation.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct ForeignBoundaryContract {
+//RS     pub schema: &'static str,
+//RS     pub language: crate::AST::ForeignLanguage,
+//RS     pub library: String,
+//RS     pub descriptor: String,
+//RS     pub abi: ForeignAbiContract,
+//RS     pub scalar_widths: BTreeMap<String, String>,
+//RS     pub alignment: String,
+//RS     pub ownership: String,
+//RS     pub cleanup: String,
+//RS     pub encoding: String,
+//RS     pub nullability: String,
+//RS     pub errors: String,
+//RS     pub exceptions: String,
+//RS     pub callbacks: String,
+//RS     pub task_thread: String,
+//RS     pub target_availability: String,
+//RS     pub copy_cost: String,
+//RS     /// The descriptor-owned effect root. It is never narrowed from a foreign
+//RS     /// effect to purity by an evidence row.
+//RS     pub effects: String,
+//RS     pub effect_root: String,
+//RS     /// Exact loaded artifact and reachable native coverage shared by all rows.
+//RS     pub artifact_coverage: ForeignArtifactCoverage,
+//RS     pub identity: ForeignBoundaryIdentity,
+//RS     pub disposition: ForeignBoundaryDisposition,
+//RS     pub source_import: bool,
+//RS     pub source_authority: ForeignSourceAuthority,
+//RS     /// Receipt of the checked comparison that made a replacement selectable.
+//RS     /// It is a projection over the canonical reasoning records, not a second
+//RS     /// facts/evidence graph.
+//RS     pub source_receipt: Option<ForeignSourceReceipt>,
+//RS     pub derivation: Option<jet_foundation::Facts::DerivationRef>,
+//RS     pub evidence: Vec<jet_foundation::Evidence::EvidenceIdentity>,
+//RS     pub assumptions: Vec<String>,
+//RS     pub observations: Vec<ForeignBoundaryObservation>,
+//RS     /// One evidence row for every canonical ABI/safety/effect obligation.
+//RS     pub obligations: Vec<ForeignObligationEvidence>,
+//RS }
+//RS 
+//RS impl ForeignBoundaryContract {
+//RS     pub fn new(
+//RS         descriptor: BinderDescriptor,
+//RS         library: impl Into<String>,
+//RS         identity: ForeignBoundaryIdentity,
+//RS     ) -> Self {
+//RS         let capability = foreign_boundary_capability(descriptor.language);
+//RS         let mut scalar_widths = BTreeMap::new();
+//RS         for (name, scalar) in [
+//RS             ("integer", descriptor.contract.integer),
+//RS             ("floating", descriptor.contract.floating),
+//RS             ("boolean", descriptor.contract.boolean),
+//RS             ("character", descriptor.contract.character),
+//RS             ("string", descriptor.contract.string),
+//RS         ] {
+//RS             scalar_widths.insert(name.to_string(), scalar_width(scalar).to_string());
+//RS         }
+//RS         let is_cpp = descriptor.language == crate::AST::ForeignLanguage::Cpp;
+//RS         let is_c = descriptor.language == crate::AST::ForeignLanguage::C;
+//RS         let artifact_coverage = ForeignArtifactCoverage::new(
+//RS             "not-recorded",
+//RS             identity.target.clone(),
+//RS             identity.generator.clone(),
+//RS         );
+//RS         let coverage_digest = artifact_coverage.digest();
+//RS         let obligations = FOREIGN_BOUNDARY_OBLIGATIONS
+//RS             .iter()
+//RS             .map(|obligation| ForeignObligationEvidence {
+//RS                 obligation: (*obligation).into(),
+//RS                 basis: ForeignEvidenceBasis::Unknown,
+//RS                 checker: "not-established".into(),
+//RS                 assumptions: vec![
+//RS                     "descriptor declarations do not prove the foreign implementation".into(),
+//RS                 ],
+//RS                 coverage_digest: coverage_digest.clone(),
+//RS             })
+//RS             .collect();
+//RS         Self {
+//RS             schema: FOREIGN_BOUNDARY_SCHEMA,
+//RS             language: descriptor.language,
+//RS             library: library.into(),
+//RS             descriptor: descriptor.stamp(),
+//RS             abi: descriptor.contract,
+//RS             scalar_widths,
+//RS             alignment: if is_cpp {
+//RS                 "opaque-handle; native class layout intentionally unclaimed".into()
+//RS             } else if is_c {
+//RS                 "target-declared C ABI; aggregate alignment requires #Layout(c)".into()
+//RS             } else {
+//RS                 "adapter-declared; no native aggregate layout is claimed".into()
+//RS             },
+//RS             ownership: if is_cpp {
+//RS                 "opaque-owned-handle".into()
+//RS             } else {
+//RS                 format!("{:?}", descriptor.contract.ownership)
+//RS             },
+//RS             cleanup: if is_cpp {
+//RS                 "consuming close removes the handle slot before delete".into()
+//RS             } else {
+//RS                 "descriptor/overlay close contract".into()
+//RS             },
+//RS             encoding: if is_cpp {
+//RS                 "scalar subset; no implicit text conversion".into()
+//RS             } else {
+//RS                 "descriptor-declared encoding".into()
+//RS             },
+//RS             nullability: if is_cpp {
+//RS                 "null handle is invalid; no nullable scalar claim".into()
+//RS             } else {
+//RS                 "descriptor-declared; unknown remains unsupported".into()
+//RS             },
+//RS             errors: if is_cpp {
+//RS                 "Jet checked result plus take_error status".into()
+//RS             } else {
+//RS                 format!("{:?}", descriptor.contract.errors)
+//RS             },
+//RS             exceptions: if is_cpp {
+//RS                 "caught at the C++ shim; mapped to Exception".into()
+//RS             } else {
+//RS                 "foreign exceptions are not translated implicitly".into()
+//RS             },
+//RS             callbacks: if is_cpp {
+//RS                 "C ABI callback pointer; captured state is rejected".into()
+//RS             } else {
+//RS                 format!("{:?}", descriptor.contract.callbacks)
+//RS             },
+//RS             task_thread: format!(
+//RS                 "async={:?};task-boundary={:?};thread-crossing=descriptor-declared",
+//RS                 descriptor.contract.async_completion, descriptor.contract.task_boundary
+//RS             ),
+//RS             target_availability: format!(
+//RS                 "target={}; source/tool/overlay identities are exact",
+//RS                 identity.target
+//RS             ),
+//RS             copy_cost: if is_cpp {
+//RS                 "scalar by-value; handles are slot lookups, never native object copies".into()
+//RS             } else {
+//RS                 "adapter/binder-declared conversion cost".into()
+//RS             },
+//RS             effects: format!("{};foreign-unverified", descriptor.effect_root),
+//RS             effect_root: descriptor.effect_root.into(),
+//RS             artifact_coverage,
+//RS             identity,
+//RS             disposition: capability.disposition,
+//RS             source_import: capability.source_import,
+//RS             source_authority: ForeignSourceAuthority::ForeignUntilAccepted,
+//RS             source_receipt: None,
+//RS             derivation: None,
+//RS             evidence: Vec::new(),
+//RS             assumptions: Vec::new(),
+//RS             observations: Vec::new(),
+//RS             obligations,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), String> {
+//RS         if self.schema != FOREIGN_BOUNDARY_SCHEMA {
+//RS             return Err(format!("unsupported foreign boundary schema `{}`", self.schema));
+//RS         }
+//RS         if self.library.trim().is_empty() || self.descriptor.trim().is_empty() {
+//RS             return Err("foreign boundary requires a library and descriptor".into());
+//RS         }
+//RS         if !self.identity.is_complete() {
+//RS             return Err("foreign boundary identity is incomplete".into());
+//RS         }
+//RS         if self.effect_root.trim().is_empty()
+//RS             || !self
+//RS                 .effects
+//RS                 .split(';')
+//RS                 .any(|effect| effect == self.effect_root)
+//RS         {
+//RS             return Err("foreign effects cannot be narrowed below the descriptor effect root".into());
+//RS         }
+//RS         if self.obligations.len() < FOREIGN_BOUNDARY_OBLIGATIONS.len() {
+//RS             return Err("foreign boundary is missing canonical obligation rows".into());
+//RS         }
+//RS         let mut obligation_names = BTreeSet::new();
+//RS         for obligation in &self.obligations {
+//RS             obligation.validate(&self.artifact_coverage)?;
+//RS             if !obligation_names.insert(obligation.obligation.as_str()) {
+//RS                 return Err(format!(
+//RS                     "foreign boundary repeats obligation `{}`",
+//RS                     obligation.obligation
+//RS                 ));
+//RS             }
+//RS         }
+//RS         if FOREIGN_BOUNDARY_OBLIGATIONS
+//RS             .iter()
+//RS             .any(|name| !obligation_names.contains(name))
+//RS         {
+//RS             return Err("foreign boundary omitted a canonical obligation row".into());
+//RS         }
+//RS 
+//RS         if !self.evidence.is_empty() && self.derivation.is_none() {
+//RS             return Err("foreign boundary evidence requires a checked derivation reference".into());
+//RS         }
+//RS         if !self.source_import
+//RS             && self.source_authority == ForeignSourceAuthority::ReplacementAccepted
+//RS         {
+//RS             return Err(format!(
+//RS                 "foreign source replacement is unavailable for {}",
+//RS                 self.language.root()
+//RS             ));
+//RS         }
+//RS         match (&self.source_authority, &self.source_receipt) {
+//RS             (ForeignSourceAuthority::ReplacementAccepted, Some(receipt)) => {
+//RS                 receipt.validate()?;
+//RS                 if receipt.boundary_digest != self.digest()
+//RS                     || receipt.boundary_identity != self.identity
+//RS                     || receipt.artifact_coverage_digest != self.artifact_coverage.digest()
+//RS                     || receipt.source_authority != self.source_authority
+//RS                 {
+//RS                     return Err(
+//RS                         "foreign source receipt does not match its accepted boundary".into(),
+//RS                     );
+//RS                 }
+//RS             }
+//RS             (ForeignSourceAuthority::ReplacementAccepted, None) => {
+//RS                 return Err("accepted foreign replacement is missing its source receipt".into());
+//RS             }
+//RS             (ForeignSourceAuthority::ForeignUntilAccepted, Some(_)) => {
+//RS                 return Err("foreign source receipt requires replacement acceptance".into());
+//RS             }
+//RS             (ForeignSourceAuthority::ForeignUntilAccepted, None) => {}
+//RS         }
+//RS         for observation in &self.observations {
+//RS             observation.validate()?;
+//RS         }
+//RS         if self.source_authority == ForeignSourceAuthority::ReplacementAccepted
+//RS             && (self.observations.is_empty()
+//RS                 || self
+//RS                     .observations
+//RS                     .iter()
+//RS                     .any(|observation| observation.outcome != "matched"))
+//RS         {
+//RS             return Err(
+//RS                 "a foreign replacement requires non-empty matched comparison observations".into(),
+//RS             );
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn with_assumptions(mut self, assumptions: impl IntoIterator<Item = String>) -> Self {
+//RS         self.assumptions = assumptions.into_iter().collect();
+//RS         self.assumptions.sort();
+//RS         self.assumptions.dedup();
+//RS         self
+//RS     }
+//RS 
+//RS     /// Attach exact artifact coverage and retarget every existing obligation
+//RS     /// row to the same coverage digest.
+//RS     pub fn with_artifact_coverage(mut self, coverage: ForeignArtifactCoverage) -> Self {
+//RS         let digest = coverage.digest();
+//RS         self.artifact_coverage = coverage;
+//RS         for obligation in &mut self.obligations {
+//RS             obligation.coverage_digest = digest.clone();
+//RS         }
+//RS         self
+//RS     }
+//RS 
+//RS     /// Replace one obligation row without creating a parallel evidence store.
+//RS     pub fn record_obligation(
+//RS         &mut self,
+//RS         obligation: ForeignObligationEvidence,
+//RS     ) -> Result<(), String> {
+//RS         obligation.validate(&self.artifact_coverage)?;
+//RS         if let Some(existing) = self
+//RS             .obligations
+//RS             .iter_mut()
+//RS             .find(|existing| existing.obligation == obligation.obligation)
+//RS         {
+//RS             *existing = obligation;
+//RS         } else {
+//RS             self.obligations.push(obligation);
+//RS         }
+//RS         self.obligations
+//RS             .sort_by(|left, right| left.obligation.cmp(&right.obligation));
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Record one basis/checker/assumption row against this contract's exact
+//RS     /// loaded artifact coverage.
+//RS     pub fn set_obligation(
+//RS         &mut self,
+//RS         name: impl Into<String>,
+//RS         basis: ForeignEvidenceBasis,
+//RS         checker: impl Into<String>,
+//RS         assumptions: impl IntoIterator<Item = String>,
+//RS     ) -> Result<(), String> {
+//RS         self.record_obligation(ForeignObligationEvidence::new(
+//RS             name,
+//RS             basis,
+//RS             checker,
+//RS             assumptions,
+//RS             &self.artifact_coverage,
+//RS         ))
+//RS     }
+//RS 
+//RS     pub fn obligation(&self, name: &str) -> Option<&ForeignObligationEvidence> {
+//RS         self.obligations
+//RS             .iter()
+//RS             .find(|obligation| obligation.obligation == name)
+//RS     }
+//RS 
+//RS     /// Safe/user-visible projections require a non-unknown basis and complete
+//RS     /// loaded-artifact coverage. TRUSTED remains callable only outside that
+//RS     /// guarantee path.
+//RS     pub fn permits_guarantee(&self, name: &str) -> bool {
+//RS         self.artifact_coverage.is_complete()
+//RS             && self
+//RS                 .obligation(name)
+//RS                 .is_some_and(|obligation| obligation.basis.permits_guarantee())
+//RS     }
+//RS 
+//RS     pub fn has_unknown_obligations(&self) -> bool {
+//RS         self.obligations
+//RS             .iter()
+//RS             .any(|obligation| obligation.basis == ForeignEvidenceBasis::Unknown)
+//RS     }
+//RS 
+//RS     pub fn has_complete_artifact_coverage(&self) -> bool {
+//RS         self.artifact_coverage.is_complete()
+//RS     }
+//RS 
+//RS     /// Project the canonical row into the lower-layer carrier used by sema,
+//RS     /// TIR, and execution tiers. The carrier has no independent semantics.
+//RS     pub fn carrier_facts(&self) -> jet_foundation::AST::FfiBoundaryFacts {
+//RS         jet_foundation::AST::FfiBoundaryFacts {
+//RS             schema: self.schema.to_string(),
+//RS             digest: self.digest(),
+//RS             language: self.language.root().to_string(),
+//RS             library: self.library.clone(),
+//RS             effect_root: self.effect_root.clone(),
+//RS             effects: self.effects.clone(),
+//RS             source_authority: self.source_authority.as_str().to_string(),
+//RS             artifact_coverage_digest: self.artifact_coverage.digest(),
+//RS             loaded_artifact: self.artifact_coverage.loaded_artifact.clone(),
+//RS             transitive_dependencies: self.artifact_coverage.transitive_dependencies.clone(),
+//RS             reachable_callbacks: self.artifact_coverage.reachable_callbacks.clone(),
+//RS             compiler_flags: self.artifact_coverage.compiler_flags.clone(),
+//RS             target: self.artifact_coverage.target.clone(),
+//RS             generator: self.artifact_coverage.generator.clone(),
+//RS             obligations: self
+//RS                 .obligations
+//RS                 .iter()
+//RS                 .map(|obligation| jet_foundation::AST::FfiBoundaryObligation {
+//RS                     name: obligation.obligation.clone(),
+//RS                     basis: obligation.basis,
+//RS                     checker: obligation.checker.clone(),
+//RS                     assumptions: obligation.assumptions.clone(),
+//RS                     coverage_digest: obligation.coverage_digest.clone(),
+//RS                 })
+//RS                 .collect(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn attach_derivation(
+//RS         mut self,
+//RS         record: &jet_foundation::Facts::DerivationRecord,
+//RS     ) -> Result<Self, String> {
+//RS         record.validate()?;
+//RS         if record.identity != self.identity.derivation_identity() {
+//RS             return Err("foreign boundary derivation identity does not match its source/build/run/target inputs".into());
+//RS         }
+//RS         self.derivation = Some(record.reference());
+//RS         Ok(self)
+//RS     }
+//RS 
+//RS     pub fn attach_evidence(
+//RS         mut self,
+//RS         record: &jet_foundation::Evidence::EvidenceRecord,
+//RS     ) -> Result<Self, String> {
+//RS         record
+//RS             .validate()
+//RS             .map_err(|error| format!("foreign boundary evidence is invalid: {error}"))?;
+//RS         let Some(derivation) = &record.derivation else {
+//RS             return Err("foreign boundary evidence must reference a checked derivation".into());
+//RS         };
+//RS         if self.derivation.as_ref() != Some(derivation) {
+//RS             return Err("foreign boundary evidence and derivation references disagree".into());
+//RS         }
+//RS         if !self.evidence.contains(&record.identity) {
+//RS             self.evidence.push(record.identity.clone());
+//RS             self.evidence.sort();
+//RS         }
+//RS         Ok(self)
+//RS     }
+//RS 
+//RS     /// Consume the existing checked derivation, evidence, and comparison
+//RS     /// records before allowing a replacement projection to become selectable.
+//RS     /// The returned receipt is the only new record; it references the existing
+//RS     /// canonical records instead of building a second reasoning graph.
+//RS     pub fn accept_reasoned_replacement(
+//RS         &mut self,
+//RS         current_identity: &ForeignBoundaryIdentity,
+//RS         current_coverage: &ForeignArtifactCoverage,
+//RS         derivation: &jet_foundation::Facts::DerivationRecord,
+//RS         evidence: &jet_foundation::Evidence::EvidenceRecord,
+//RS         comparison: &jet_foundation::TestingComparison::ComparisonRecord,
+//RS         replacement_identity: impl Into<String>,
+//RS     ) -> Result<ForeignSourceReceipt, String> {
+//RS         self.validate()?;
+//RS         if self.replacement_accepted() {
+//RS             return Err("foreign replacement is already accepted for this boundary".into());
+//RS         }
+//RS         if self.stale_against(current_identity) {
+//RS             return Err(
+//RS                 "foreign replacement reasoning is stale against the current boundary identity"
+//RS                     .into(),
+//RS             );
+//RS         }
+//RS         if self.coverage_stale_against(current_coverage) {
+//RS             return Err(
+//RS                 "foreign replacement reasoning is stale against current artifact coverage".into(),
+//RS             );
+//RS         }
+//RS         let replacement_identity = replacement_identity.into();
+//RS         if replacement_identity.trim().is_empty() {
+//RS             return Err("foreign replacement reasoning requires a replacement identity".into());
+//RS         }
+//RS         if evidence.outcome.is_failure()
+//RS             || evidence.outcome.is_incomplete()
+//RS             || matches!(
+//RS                 evidence.outcome,
+//RS                 jet_foundation::Evidence::EvidenceOutcome::Unchecked
+//RS             )
+//RS         {
+//RS             return Err(format!(
+//RS                 "foreign replacement evidence is not a complete successful observation: {}",
+//RS                 evidence.outcome.as_str()
+//RS             ));
+//RS         }
+//RS         comparison
+//RS             .assert_equal()
+//RS             .map_err(|error| format!("foreign replacement comparison was not accepted: {error}"))?;
+//RS         let mut candidate = self.clone();
+//RS         candidate = candidate.attach_derivation(derivation)?;
+//RS         candidate = candidate.attach_evidence(evidence)?;
+//RS         candidate.record_comparison(comparison, Some(evidence.identity.clone()))?;
+//RS         candidate.mark_replacement_accepted()?;
+//RS         let receipt =
+//RS             ForeignSourceReceipt::from_contract(&candidate, comparison, replacement_identity)?;
+//RS         candidate.source_receipt = Some(receipt.clone());
+//RS         candidate.validate()?;
+//RS         *self = candidate;
+//RS         Ok(receipt)
+//RS     }
+//RS 
+//RS     pub fn record_observation(
+//RS         &mut self,
+//RS         observation: ForeignBoundaryObservation,
+//RS     ) -> Result<(), String> {
+//RS         observation.validate()?;
+//RS         self.observations.push(observation);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Consume one canonical comparison record without creating another
+//RS     /// evaluator or evidence graph. Every sampled case keeps both raw sides;
+//RS     /// terminal outcomes retain their exact status/reason as assumptions
+//RS     /// because no raw observation exists to copy.
+//RS     pub fn record_comparison(
+//RS         &mut self,
+//RS         record: &jet_foundation::TestingComparison::ComparisonRecord,
+//RS         evidence: Option<jet_foundation::Evidence::EvidenceIdentity>,
+//RS     ) -> Result<(), String> {
+//RS         if record.schema_version
+//RS             != jet_foundation::TestingComparison::TEST_COMPARISON_SCHEMA_VERSION
+//RS         {
+//RS             return Err(format!(
+//RS                 "unsupported comparison schema version {}",
+//RS                 record.schema_version
+//RS             ));
+//RS         }
+//RS         if record.universal_proof {
+//RS             return Err("foreign boundary comparison cannot claim universal proof".into());
+//RS         }
+//RS         let outcome = record.status.as_str().to_string();
+//RS         let relation = record.relation.as_str().to_string();
+//RS         if record.samples.is_empty() {
+//RS             let reason = record
+//RS                 .reason
+//RS                 .as_deref()
+//RS                 .unwrap_or("comparison produced no samples");
+//RS             self.assumptions
+//RS                 .push(format!("comparison-terminal:{outcome}:{reason}"));
+//RS             self.assumptions
+//RS                 .push(format!("comparison-relation:{relation}"));
+//RS             self.assumptions.sort();
+//RS             self.assumptions.dedup();
+//RS             return Ok(());
+//RS         }
+//RS         for sample in &record.samples {
+//RS             let mut assumptions = vec![
+//RS                 format!("relation={relation}"),
+//RS                 format!("source={}", sample.identity.source),
+//RS                 format!("tool={}", sample.identity.tool),
+//RS                 format!("target={}", sample.identity.target),
+//RS             ];
+//RS             if let Some(replay) = &sample.reference_replay {
+//RS                 assumptions.push(format!("reference-replay={}", replay.raw));
+//RS             }
+//RS             if let Some(replay) = &sample.candidate_replay {
+//RS                 assumptions.push(format!("replacement-replay={}", replay.raw));
+//RS             }
+//RS             let observation = ForeignBoundaryObservation::new(
+//RS                 sample.identity.case_id.clone(),
+//RS                 sample.identity.input_id.clone(),
+//RS                 sample.reference.raw.clone(),
+//RS                 sample.candidate.raw.clone(),
+//RS                 outcome.clone(),
+//RS             )
+//RS             .with_assumptions(assumptions);
+//RS             let observation = match evidence.clone() {
+//RS                 Some(evidence) => observation.with_evidence(evidence),
+//RS                 None => observation,
+//RS             };
+//RS             self.record_observation(observation)?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS     /// Accept a replacement only after the checked workflow has persisted its
+//RS     /// explicit source receipt. This prevents a bare matched row from creating
+//RS     /// an accepted-but-unreceipted boundary.
+//RS     pub fn accept_replacement(&mut self) -> Result<(), String> {
+//RS         if self.source_receipt.is_none() {
+//RS             return Err(
+//RS                 "use accept_reasoned_replacement to attach the checked source receipt".into(),
+//RS             );
+//RS         }
+//RS         self.mark_replacement_accepted()
+//RS     }
+//RS 
+//RS     fn mark_replacement_accepted(&mut self) -> Result<(), String> {
+//RS         if !self.source_import {
+//RS             return Err(format!(
+//RS                 "foreign source replacement is unavailable for {}",
+//RS                 self.language.root()
+//RS             ));
+//RS         }
+//RS         if self.derivation.is_none() || self.evidence.is_empty() {
+//RS             return Err(
+//RS                 "cannot accept a foreign replacement without checked derivation and evidence references"
+//RS                     .into(),
+//RS             );
+//RS         }
+//RS         if self.observations.is_empty()
+//RS             || self
+//RS                 .observations
+//RS                 .iter()
+//RS                 .any(|observation| {
+//RS                     observation.outcome != "matched" || observation.evidence.is_none()
+//RS                 })
+//RS         {
+//RS             return Err(
+//RS                 "cannot accept a foreign replacement without all matched cases carrying evidence"
+//RS                     .into(),
+//RS             );
+//RS         }
+//RS         self.source_authority = ForeignSourceAuthority::ReplacementAccepted;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn stale_against(&self, current: &ForeignBoundaryIdentity) -> bool {
+//RS         self.identity.differs_from(current)
+//RS     }
+//RS 
+//RS     /// Stable digest for a complete boundary row. The raw observations remain
+//RS     /// available through `observations`; this digest only keys the row.
+//RS     pub fn digest(&self) -> String {
+//RS         let mut identity = IdentityBuilder::new(FOREIGN_BOUNDARY_SCHEMA);
+//RS         for (name, value) in self.stable_fields() {
+//RS             identity.field(name, value.as_bytes());
+//RS         }
+//RS         identity.finish()
+//RS     }
+//RS 
+//RS     pub fn coverage_stale_against(&self, current: &ForeignArtifactCoverage) -> bool {
+//RS         self.artifact_coverage.digest() != current.digest()
+//RS     }
+//RS 
+//RS     /// Whether a consumer may select the replacement projection. Unsupported,
+//RS     /// mismatched, stale, or merely sampled rows keep foreign source text
+//RS     /// authoritative.
+//RS     pub fn replacement_accepted(&self) -> bool {
+//RS         self.source_import && self.source_authority == ForeignSourceAuthority::ReplacementAccepted
+//RS     }
+//RS 
+//RS     /// Compact source-safe marker carried by generated bindings. The digest
+//RS     /// points back to the complete structured row in provenance.
+//RS     pub fn stamp(&self) -> String {
+//RS         format!(
+//RS             "{};language={};library={};disposition={};source-authority={};digest={}",
+//RS             self.schema,
+//RS             self.language.root(),
+//RS             self.library,
+//RS             self.disposition.as_str(),
+//RS             self.source_authority.as_str(),
+//RS             self.digest()
+//RS         )
+//RS     }
+//RS 
+//RS     /// Queryable fields merged into the existing bridge provenance record.
+//RS     pub fn provenance_fields(&self) -> Vec<(String, String)> {
+//RS         let mut fields = vec![
+//RS             ("boundary-schema".into(), self.schema.into()),
+//RS             ("boundary-digest".into(), self.digest()),
+//RS             ("boundary-language".into(), self.language.root().into()),
+//RS             ("boundary-library".into(), self.library.clone()),
+//RS             ("boundary-descriptor".into(), self.descriptor.clone()),
+//RS             (
+//RS                 "boundary-disposition".into(),
+//RS                 self.disposition.as_str().into(),
+//RS             ),
+//RS             (
+//RS                 "boundary-source-import".into(),
+//RS                 self.source_import.to_string(),
+//RS             ),
+//RS             (
+//RS                 "boundary-source-authority".into(),
+//RS                 self.source_authority.as_str().into(),
+//RS             ),
+//RS             ("boundary-alignment".into(), self.alignment.clone()),
+//RS             ("boundary-ownership".into(), self.ownership.clone()),
+//RS             ("boundary-cleanup".into(), self.cleanup.clone()),
+//RS             ("boundary-encoding".into(), self.encoding.clone()),
+//RS             ("boundary-nullability".into(), self.nullability.clone()),
+//RS             ("boundary-errors".into(), self.errors.clone()),
+//RS             ("boundary-exceptions".into(), self.exceptions.clone()),
+//RS             ("boundary-callbacks".into(), self.callbacks.clone()),
+//RS             ("boundary-task-thread".into(), self.task_thread.clone()),
+//RS             (
+//RS                 "boundary-target-availability".into(),
+//RS                 self.target_availability.clone(),
+//RS             ),
+//RS             ("boundary-copy-cost".into(), self.copy_cost.clone()),
+//RS             ("boundary-effects".into(), self.effects.clone()),
+//RS             ("boundary-effect-root".into(), self.effect_root.clone()),
+//RS             (
+//RS                 "boundary-artifact-coverage".into(),
+//RS                 self.artifact_coverage.digest(),
+//RS             ),
+//RS             (
+//RS                 "boundary-loaded-artifact".into(),
+//RS                 self.artifact_coverage.loaded_artifact.clone(),
+//RS             ),
+//RS             (
+//RS                 "boundary-transitive-dependencies".into(),
+//RS                 provenance_optional_strings(self.artifact_coverage.transitive_dependencies.as_deref()),
+//RS             ),
+//RS             (
+//RS                 "boundary-reachable-callbacks".into(),
+//RS                 provenance_optional_strings(self.artifact_coverage.reachable_callbacks.as_deref()),
+//RS             ),
+//RS             (
+//RS                 "boundary-compiler-flags".into(),
+//RS                 provenance_optional_strings(self.artifact_coverage.compiler_flags.as_deref()),
+//RS             ),
+//RS             (
+//RS                 "boundary-coverage-target".into(),
+//RS                 self.artifact_coverage.target.clone(),
+//RS             ),
+//RS             (
+//RS                 "boundary-coverage-generator".into(),
+//RS                 self.artifact_coverage.generator.clone(),
+//RS             ),
+//RS             ("boundary-overlay-identity".into(), self.identity.overlay.clone()),
+//RS             (
+//RS                 "boundary-generator-identity".into(),
+//RS                 self.identity.generator.clone(),
+//RS             ),
+//RS             (
+//RS                 "boundary-implementation-identity".into(),
+//RS                 self.identity.implementation.clone(),
+//RS             ),
+//RS             (
+//RS                 "boundary-toolchain-identity".into(),
+//RS                 self.identity.toolchain.clone(),
+//RS             ),
+//RS             ("boundary-target-identity".into(), self.identity.target.clone()),
+//RS         ];
+//RS         for (name, width) in &self.scalar_widths {
+//RS             fields.push((format!("boundary-width-{name}"), width.clone()));
+//RS         }
+//RS         if let Some(derivation) = &self.derivation {
+//RS             fields.push(("boundary-derivation".into(), derivation.id.clone()));
+//RS         }
+//RS         for evidence in &self.evidence {
+//RS             fields.push((
+//RS                 "boundary-evidence".into(),
+//RS                 format!(
+//RS                     "{}/{}/{}",
+//RS                     evidence.report_id, evidence.claim_id, evidence.evidence_id
+//RS                 ),
+//RS             ));
+//RS         }
+//RS         for assumption in &self.assumptions {
+//RS             fields.push(("boundary-assumption".into(), assumption.clone()));
+//RS         }
+//RS         for obligation in &self.obligations {
+//RS             fields.push((
+//RS                 "boundary-obligation".into(),
+//RS                 format!(
+//RS                     "{}\t{}\t{}\t{}\t{}",
+//RS                     obligation.obligation,
+//RS                     obligation.basis.as_str(),
+//RS                     obligation.checker,
+//RS                     obligation.coverage_digest,
+//RS                     obligation.assumptions.join("|"),
+//RS                 ),
+//RS             ));
+//RS         }
+//RS         for observation in &self.observations {
+//RS             fields.push((
+//RS                 "boundary-comparison".into(),
+//RS                 format!(
+//RS                     "{}\t{}\t{}\t{}\t{}",
+//RS                     observation.case_id,
+//RS                     observation.input,
+//RS                     observation.outcome,
+//RS                     observation.foreign,
+//RS                     observation.replacement
+//RS                 ),
+//RS             ));
+//RS         }
+//RS         if let Some(receipt) = &self.source_receipt {
+//RS             fields.extend(receipt.provenance_fields());
+//RS         }
+//RS         fields
+//RS     }
+//RS 
+//RS     fn stable_fields(&self) -> Vec<(&str, String)> {
+//RS         let mut fields = vec![
+//RS             ("schema", self.schema.to_string()),
+//RS             ("language", self.language.root().to_string()),
+//RS             ("library", self.library.clone()),
+//RS             ("descriptor", self.descriptor.clone()),
+//RS             ("abi", self.abi.stamp()),
+//RS             ("alignment", self.alignment.clone()),
+//RS             ("ownership", self.ownership.clone()),
+//RS             ("cleanup", self.cleanup.clone()),
+//RS             ("encoding", self.encoding.clone()),
+//RS             ("nullability", self.nullability.clone()),
+//RS             ("errors", self.errors.clone()),
+//RS             ("exceptions", self.exceptions.clone()),
+//RS             ("callbacks", self.callbacks.clone()),
+//RS             ("task_thread", self.task_thread.clone()),
+//RS             ("target_availability", self.target_availability.clone()),
+//RS             ("copy_cost", self.copy_cost.clone()),
+//RS             ("effects", self.effects.clone()),
+//RS             ("effect_root", self.effect_root.clone()),
+//RS             ("artifact_coverage", self.artifact_coverage.digest()),
+//RS             (
+//RS                 "loaded_artifact",
+//RS                 self.artifact_coverage.loaded_artifact.clone(),
+//RS             ),
+//RS             (
+//RS                 "transitive_dependencies",
+//RS                 stable_optional_strings(
+//RS                     self.artifact_coverage.transitive_dependencies.as_deref(),
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "reachable_callbacks",
+//RS                 stable_optional_strings(self.artifact_coverage.reachable_callbacks.as_deref()),
+//RS             ),
+//RS             (
+//RS                 "compiler_flags",
+//RS                 stable_optional_strings(self.artifact_coverage.compiler_flags.as_deref()),
+//RS             ),
+//RS             ("coverage_target", self.artifact_coverage.target.clone()),
+//RS             ("coverage_generator", self.artifact_coverage.generator.clone()),
+//RS             (
+//RS                 "obligations",
+//RS                 self.obligations
+//RS                     .iter()
+//RS                     .map(|obligation| {
+//RS                         format!(
+//RS                             "{}:{}:{}:{}:{}",
+//RS                             obligation.obligation,
+//RS                             obligation.basis.as_str(),
+//RS                             obligation.checker,
+//RS                             obligation.coverage_digest,
+//RS                             obligation.assumptions.join("|"),
+//RS                         )
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS                     .join("\n"),
+//RS             ),
+//RS             ("source_import", self.source_import.to_string()),
+//RS             (
+//RS                 "source_authority",
+//RS                 self.source_authority.as_str().to_string(),
+//RS             ),
+//RS             ("source_identity", self.identity.source.clone()),
+//RS             ("overlay_identity", self.identity.overlay.clone()),
+//RS             ("generator_identity", self.identity.generator.clone()),
+//RS             (
+//RS                 "implementation_identity",
+//RS                 self.identity.implementation.clone(),
+//RS             ),
+//RS             ("toolchain_identity", self.identity.toolchain.clone()),
+//RS             ("target_identity", self.identity.target.clone()),
+//RS         ];
+//RS         for (name, width) in &self.scalar_widths {
+//RS             fields.push((name.as_str(), width.clone()));
+//RS         }
+//RS         fields
+//RS     }
+//RS }
+//RS 
+//RS fn scalar_width(scalar: ForeignScalar) -> &'static str {
+//RS     match scalar {
+//RS         ForeignScalar::Int => "target-declared-integer-width",
+//RS         ForeignScalar::Float => "target-declared-floating-width",
+//RS         ForeignScalar::Bool => "target-declared-boolean-width",
+//RS         ForeignScalar::Char => "target-declared-character-width",
+//RS         ForeignScalar::String => "pointer-plus-encoding",
+//RS         ForeignScalar::Unsupported => "unsupported",
+//RS     }
+//RS }
+//RS 
+//RS /// Return the target identity used by adapters that do not receive a target
+//RS /// argument directly. Environment-provided target wins over host guessing.
+//RS pub fn foreign_host_target() -> String {
+//RS     std::env::var("JET_TARGET")
+//RS         .or_else(|_| std::env::var("TARGET"))
+//RS         .unwrap_or_else(|_| format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS))
+//RS }
+//RS 
+//RS 
+//RS /// Parsed artifact provenance. Repeated fields are retained in insertion order.
+//RS #[derive(Debug, Clone, PartialEq, Eq)]
+//RS pub struct Provenance {
+//RS     pub schema: String,
+//RS     pub identity: String,
+//RS     pub fields: BTreeMap<String, Vec<String>>,
+//RS }
+//RS 
+//RS impl Provenance {
+//RS     /// Return the first value for a field.
+//RS     pub fn value(&self, name: &str) -> Option<&str> {
+//RS         self.fields
+//RS             .get(name)
+//RS             .and_then(|values| values.first())
+//RS             .map(String::as_str)
+//RS     }
+//RS }
+//RS 
+//RS /// Build the identity shared by a scalar binder's bridge build and its
+//RS /// provenance sidecar. Input bytes matter: a source path alone cannot notice a
+//RS /// changed foreign implementation behind the same filename.
+//RS pub fn scalar_bridge_identity(
+//RS     descriptor: BinderDescriptor,
+//RS     lib: &str,
+//RS     abi: &str,
+//RS     runtime: &str,
+//RS     source: &Path,
+//RS     worker: &Path,
+//RS     functions: &[ScalarBridgeFunction],
+//RS ) -> Result<String, String> {
+//RS     scalar_bridge_identity_with_sources(
+//RS         descriptor,
+//RS         lib,
+//RS         abi,
+//RS         runtime,
+//RS         &[("source", source)],
+//RS         worker,
+//RS         functions,
+//RS     )
+//RS }
+//RS 
+//RS /// Build a scalar bridge identity from all exact foreign source files involved
+//RS /// in the bridge. `sources` must include the primary `source` passed to the C
+//RS /// bridge renderer; adapters may add declaration files or other local inputs.
+//RS pub fn scalar_bridge_identity_with_sources(
+//RS     descriptor: BinderDescriptor,
+//RS     lib: &str,
+//RS     abi: &str,
+//RS     runtime: &str,
+//RS     sources: &[BridgeSource<'_>],
+//RS     worker: &Path,
+//RS     functions: &[ScalarBridgeFunction],
+//RS ) -> Result<String, String> {
+//RS     validate_scalar_bridge(abi, descriptor, functions)?;
+//RS     let expected_abi = format!("{}{lib}", descriptor.language.bridge_prefix());
+//RS     if abi != expected_abi {
+//RS         return Err("foreign bridge ABI name does not match its descriptor language".into());
+//RS     }
+//RS     scalar_bridge_identity_with_descriptor(
+//RS         descriptor.language.root(),
+//RS         lib,
+//RS         abi,
+//RS         runtime,
+//RS         &descriptor.stamp(),
+//RS         sources,
+//RS         worker,
+//RS         functions,
+//RS     )
+//RS }
+//RS 
+//RS fn scalar_bridge_identity_with_descriptor(
+//RS     language: &str,
+//RS     lib: &str,
+//RS     abi: &str,
+//RS     runtime: &str,
+//RS     descriptor: &str,
+//RS     sources: &[BridgeSource<'_>],
+//RS     worker: &Path,
+//RS     functions: &[ScalarBridgeFunction],
+//RS ) -> Result<String, String> {
+//RS     let worker_bytes = fs::read(worker).map_err(|error| {
+//RS         format!(
+//RS             "could not read {} for bridge identity: {error}",
+//RS             worker.display()
+//RS         )
+//RS     })?;
+//RS     let mut identity = IdentityBuilder::new(IDENTITY_SCHEMA);
+//RS     identity.field("bridge_schema", SCALAR_BRIDGE_SCHEMA.as_bytes());
+//RS     identity.field("language", language.as_bytes());
+//RS     identity.field("library", lib.as_bytes());
+//RS     identity.field("abi", abi.as_bytes());
+//RS     identity.field("runtime", runtime.as_bytes());
+//RS     identity.field("runtime_toolchain", tool_identity(runtime).as_bytes());
+//RS     identity.field("cc", tool_identity("cc").as_bytes());
+//RS     identity.field("ar", tool_identity("ar").as_bytes());
+//RS     identity.field("descriptor", descriptor.as_bytes());
+//RS     for (role, source) in sources {
+//RS         if role.is_empty() {
+//RS             return Err("foreign bridge source roles cannot be empty".into());
+//RS         }
+//RS         let path_field = format!("{role}_path");
+//RS         identity.field(&path_field, source.as_os_str().as_encoded_bytes());
+//RS         let source_bytes = fs::read(source).map_err(|error| {
+//RS             format!(
+//RS                 "could not read {} for bridge identity: {error}",
+//RS                 source.display()
+//RS             )
+//RS         })?;
+//RS         let bytes_field = format!("{role}_bytes");
+//RS         identity.field(&bytes_field, &source_bytes);
+//RS     }
+//RS     identity.field("worker_path", worker.as_os_str().as_encoded_bytes());
+//RS     identity.field("worker_bytes", &worker_bytes);
+//RS     for function in functions {
+//RS         identity.field("function", function.name.as_bytes());
+//RS         for parameter in &function.params {
+//RS             identity.field("parameter", format!("{parameter:?}").as_bytes());
+//RS         }
+//RS         identity.field("result", format!("{:?}", function.result).as_bytes());
+//RS     }
+//RS     Ok(identity.finish())
+//RS }
+//RS 
+//RS /// Write the queryable provenance sidecar for one published bridge.
+//RS pub fn write_provenance(
+//RS     path: &Path,
+//RS     identity: &str,
+//RS     fields: &[(&str, &str)],
+//RS     artifacts: &[(String, String)],
+//RS ) -> Result<(), String> {
+//RS     let text = render_provenance(identity, fields, artifacts)?;
+//RS     let temporary = path.with_extension(format!("tmp.{}", std::process::id()));
+//RS     fs::write(&temporary, text.as_bytes())
+//RS         .map_err(|error| format!("could not stage {}: {error}", path.display()))?;
+//RS     if let Err(error) = fs::rename(&temporary, path) {
+//RS         let _ = fs::remove_file(&temporary);
+//RS         return Err(format!("could not publish {}: {error}", path.display()));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Render the common queryable provenance format without publishing a file.
+//RS /// Binders use this when their result object carries the record to a CLI
+//RS /// writer; `write_provenance` uses the same formatter for on-disk records.
+//RS pub fn render_provenance(
+//RS     identity: &str,
+//RS     fields: &[(&str, &str)],
+//RS     artifacts: &[(String, String)],
+//RS ) -> Result<String, String> {
+//RS     let mut text = format!("schema={PROVENANCE_SCHEMA}\nidentity={identity}\n");
+//RS     let has_boundary_fields = fields
+//RS         .iter()
+//RS         .any(|(name, _)| name.starts_with("boundary-"));
+//RS     let language = fields
+//RS         .iter()
+//RS         .find_map(|(name, value)| (*name == "language").then_some(*value))
+//RS         .and_then(crate::AST::ForeignLanguage::from_root);
+//RS     for (name, value) in fields {
+//RS         append_line(&mut text, name, value)?;
+//RS     }
+//RS     if let Some(language) = language.filter(|_| !has_boundary_fields) {
+//RS         let value = |name: &str| {
+//RS             fields
+//RS                 .iter()
+//RS                 .find_map(|(field, value)| (*field == name).then_some(*value))
+//RS         };
+//RS         let abi = value("abi");
+//RS         let library = value("library")
+//RS             .or_else(|| value("lib"))
+//RS             .or_else(|| {
+//RS                 abi.and_then(|abi| {
+//RS                     abi.strip_prefix("jet_")
+//RS                         .and_then(|rest| rest.split_once('_'))
+//RS                         .map(|(_, library)| library)
+//RS                 })
+//RS             })
+//RS             .unwrap_or("not-recorded");
+//RS         let loaded_artifact = artifacts
+//RS             .iter()
+//RS             .map(|(path, digest)| format!("{path}:sha256-{digest}"))
+//RS             .collect::<Vec<_>>()
+//RS             .join("|");
+//RS         let source = value("source")
+//RS             .or_else(|| value("source_path"))
+//RS             .or_else(|| value("type-library"))
+//RS             .unwrap_or("not-recorded");
+//RS         let overlay = value("overlay")
+// END-PORT-PENDING 2070 crates/jet-pkg-model/src/ForeignBridge.rs:1-1800
+

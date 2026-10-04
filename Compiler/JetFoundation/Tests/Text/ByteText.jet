@@ -1,0 +1,29 @@
+// The three moved original byte-helper contracts, shared by Store and PkgModel.
+#Test("canonical byte text uses byte offsets across Unicode scalars") {
+    raw :: "aé🦀z".bytes()
+    assert_eq(pkg_bytes_text(raw, 1, 3), "é")
+    assert_eq(pkg_bytes_text(raw, 3, 7), "🦀")
+    assert_eq(pkg_bytes_text(raw, 0, raw.len()), "aé🦀z")
+    assert_eq(pkg_bytes_text(raw, 3, 3), "")
+    assert_eq(pkg_bytes_text(raw, 4, 3), "")
+    assert_eq(pkg_bytes_text(raw, 1, 2), "")
+}
+
+#Test("canonical byte code preserves every byte and bounds sentinel") {
+    raw :: [U8]{0, 127, 128, 255}
+    loop index in 0..<raw.len() -> assert_eq(pkg_bytes_code(raw, index), Int.from_u8(raw[index]))
+    assert_eq(pkg_bytes_code(raw, -1), -1)
+    assert_eq(pkg_bytes_code(raw, raw.len()), -1)
+    assert_eq(pkg_bytes_code([U8]{}, 0), -1)
+}
+
+#Test("canonical byte prefix checks exact bytes offsets and both bounds") {
+    raw :: "aé🦀z".bytes()
+    assert(pkg_bytes_starts_with(raw, 1, "é🦀".bytes()))
+    assert(!pkg_bytes_starts_with(raw, 2, "é".bytes()))
+    assert(!pkg_bytes_starts_with(raw, -1, [U8]{}))
+    assert(!pkg_bytes_starts_with(raw, raw.len() + 1, [U8]{}))
+    assert(pkg_bytes_starts_with(raw, raw.len(), [U8]{}))
+    assert(!pkg_bytes_starts_with(raw, raw.len(), "z".bytes()))
+    assert(pkg_bytes_starts_with([U8]{}, 0, [U8]{}))
+}

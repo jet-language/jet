@@ -3,7 +3,7 @@
 
 // Ripper-based discovery: prints each top-level one-argument `def` name and
 // aborts on a parse error or unsupported parameters. It never loads the script.
-@PKG_RUBY_DISCOVERER :: ```require 'ripper'
+PKG_RUBY_DISCOVERER :: prep { ```require 'ripper'
 source = File.binread(ARGV.fetch(0))
 tree = Ripper.sexp(source)
 abort 'parse error' unless tree && tree[0] == :program
@@ -17,10 +17,10 @@ tree[1].each do |statement|
   abort "unsupported parameters for #{name}" unless valid
   puts name
 end
-```
+``` }
 
 // The persistent worker. Hole: `allowed`, the quoted method names.
-@PKG_RUBY_WORKER :: ```require 'json'
+PKG_RUBY_WORKER :: prep { ```require 'json'
 STDIN.binmode
 STDOUT.binmode
 ALLOWED = [@@allowed@@].to_h { |name| [name, true] }.freeze
@@ -63,9 +63,9 @@ loop do
   STDOUT.write([encoded.bytesize].pack('L<'), [response['id'] || 0].pack('Q<'), encoded)
   STDOUT.flush
 end
-```
+``` }
 
-@PKG_RUBY_RESERVED :: [String]{"open", "cancel", "close", "decode_response", "Session", "RubyError"}
+PKG_RUBY_RESERVED :: prep { [String]{"open", "cancel", "close", "decode_response", "Session", "RubyError"} }
 
 // Bind the top-level one-argument methods of the Ruby script at `path`.
 pub fn pkg_ruby_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
@@ -76,7 +76,7 @@ pub fn pkg_ruby_bind(path: String, source: String, lib: String, cache: String) -
     script :: pkg_binder_canonicalize(path, "could not resolve the Ruby script")
     build :: pkg_worker_prepare_build(cache, "ruby", lib, "Ruby")
     discoverer :: files.join(build, "jet_discover.rb")
-    pkg_binder_write(discoverer, @PKG_RUBY_DISCOVERER, "could not write Ruby binding inspector")
+    pkg_binder_write(discoverer, PKG_RUBY_DISCOVERER, "could not write Ruby binding inspector")
     discovered :: pkg_worker_run_tool([String]{ruby, discoverer, script}, "ruby", language, true)
     functions :: pkg_ruby_parse_function_names(discovered)
     worker_source :: pkg_ruby_render_worker(functions)
@@ -115,7 +115,7 @@ fn pkg_ruby_parse_function_names(bytes: [U8]) -> [String] ForeignBindError! {
 fn pkg_ruby_render_worker(functions: [String]) -> String Never! {
     allowed := [String]{}
     loop name in functions -> &allowed.push("'{name}'")
-    pkg_binder_fill_template(@PKG_RUBY_WORKER, [String: String]{"allowed": allowed.join(", ")})
+    pkg_binder_fill_template(PKG_RUBY_WORKER, [String: String]{"allowed": allowed.join(", ")})
 }
 
 fn pkg_ruby_render_jet(lib: String, functions: [String]) -> String Never! {
@@ -138,5 +138,5 @@ pub fn pkg_ruby_render_probe() -> String Never! {
 }
 
 fn pkg_ruby_reserved(value: String) -> Bool Never! {
-    @PKG_RUBY_RESERVED.contains(value) || @JET_KEYWORD_LIST.contains(value) || @JET_TYPE_LIST.contains(value)
+    PKG_RUBY_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_LIST.contains(value)
 }

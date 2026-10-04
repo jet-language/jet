@@ -1,0 +1,1428 @@
+// PORT-PENDING 0814 source-fetch-slice-1798: Source/Fetch.rs:1798-3221
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn verify_registry_hangar_entry(
+//RS     package: &str,
+//RS     store_entry: &Path,
+//RS     expected_hash: &str,
+//RS ) -> Result<(), Vec<Diagnostic>> {
+//RS     let actual = Publish::registry_artifact_hash(store_entry).map_err(|error| {
+//RS         vec![registry_diagnostic(
+//RS             package,
+//RS             &format!("stored registry artifact cannot be hashed: {error}"),
+//RS             "repair the canonical Jetpack Hangar or retry the verified registry ingest",
+//RS         )]
+//RS     })?;
+//RS     if actual != expected_hash {
+//RS         return Err(vec![registry_diagnostic(
+//RS             package,
+//RS             "stored registry artifact failed its content hash",
+//RS             "repair the canonical Jetpack Hangar or retry the verified registry ingest",
+//RS         )]);
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Move a verified registry source tree into the canonical Jetpack Hangar.
+//RS /// Registry verification happens before this call; Hangar then supplies the
+//RS /// durable, content-addressed project input used by linking and locked fetch.
+//RS fn ingest_registry_artifact(
+//RS     registry: &Publish::RegistryConfig,
+//RS     entry: &Publish::IndexEntry,
+//RS     artifact: &Path,
+//RS     references: &[String],
+//RS     advisory_receipt: Option<&Publish::AdvisoryReceipt>,
+//RS     package_policy: Option<&Publish::PackagePolicyReceipt>,
+//RS     source_exception: Option<&PackagePolicyException>,
+//RS ) -> Result<PathBuf, String> {
+//RS     let roots = jetpack::Store::resolve();
+//RS     let policy = format!(
+//RS         "registry={};tier={};gate-status={}",
+//RS         registry.name,
+//RS         entry.tier.label(),
+//RS         entry.gate_status.summary(),
+//RS     );
+//RS     let provenance = format!(
+//RS         "registry={};repository={};package={}#{};source-hash={};fingerprint={};publisher={};index-signature={}",
+//RS         registry.name,
+//RS         Publish::redact_registry_url(&registry.url),
+//RS         entry.name,
+//RS         entry.version,
+//RS         entry.content_hash,
+//RS         entry.fingerprint,
+//RS         entry.public_key,
+//RS         entry.signature,
+//RS     );
+//RS     let referrer_receipt = format!(
+//RS         "subject={};sbom=verified;signature-binding=verified;provenance=verified;reproducibility=verified",
+//RS         entry.content_hash
+//RS     );
+//RS     let policy = format!("{policy};oci-referrers={referrer_receipt}");
+//RS     let provenance = format!("{provenance};oci-referrers={referrer_receipt}");
+//RS     let advisory = advisory_receipt.map(|receipt| {
+//RS         format!(
+//RS             "sequence={},digest={},key={},maturity={}s",
+//RS             receipt.sequence, receipt.digest, receipt.key_id, receipt.maturity_seconds
+//RS         )
+//RS     });
+//RS     let package_policy_fingerprint = package_policy.map(|receipt| receipt.fingerprint.clone());
+//RS     let package_policy = package_policy.map(Publish::PackagePolicyReceipt::summary);
+//RS     let source_exception = source_exception.map(PackagePolicyException::summary);
+//RS     let policy = package_policy
+//RS         .as_deref()
+//RS         .map(|receipt| format!("{policy};package-policy={receipt}"))
+//RS         .unwrap_or(policy);
+//RS     let provenance = package_policy
+//RS         .as_deref()
+//RS         .map(|receipt| format!("{provenance};package-policy={receipt}"))
+//RS         .unwrap_or(provenance);
+//RS     let policy = source_exception
+//RS         .as_deref()
+//RS         .map(|exception| format!("{policy};source-policy-exception={exception}"))
+//RS         .unwrap_or(policy);
+//RS     let provenance = source_exception
+//RS         .as_deref()
+//RS         .map(|exception| format!("{provenance};source-policy-exception={exception}"))
+//RS         .unwrap_or(provenance);
+//RS     let policy = advisory
+//RS         .as_deref()
+//RS         .map(|receipt| format!("{policy};advisory-feed={receipt}"))
+//RS         .unwrap_or(policy);
+//RS     let provenance = advisory
+//RS         .as_deref()
+//RS         .map(|receipt| format!("{provenance};advisory-feed={receipt}"))
+//RS         .unwrap_or(provenance);
+//RS     let reference = format!(
+//RS         "registry:{}:{}#{}",
+//RS         registry.name, entry.name, entry.version
+//RS     );
+//RS     let existing = jetpack::Store::list(&roots).into_iter().find(|existing| {
+//RS         existing.name.as_str() == entry.name.as_str()
+//RS             && existing.version.as_str() == entry.version.as_str()
+//RS             && existing.reference.as_str() == reference.as_str()
+//RS             && existing.cache_identity.source_fingerprint.as_str() == entry.content_hash.as_str()
+//RS     });
+//RS     let provenance = if advisory_receipt.is_none() {
+//RS         existing
+//RS             .as_ref()
+//RS             .and_then(|existing| {
+//RS                 existing
+//RS                     .envelope
+//RS                     .provenance
+//RS                     .split(';')
+//RS                     .find(|field| field.starts_with("advisory-feed="))
+//RS             })
+//RS             .map(|receipt| format!("{provenance};{receipt}"))
+//RS             .unwrap_or(provenance)
+//RS     } else {
+//RS         provenance
+//RS     };
+//RS     let references = existing
+//RS         .as_ref()
+//RS         .map(|existing| existing.references.clone())
+//RS         .unwrap_or_else(|| references.to_vec());
+//RS     let policy_fingerprint = package_policy_fingerprint
+//RS         .or_else(|| {
+//RS             existing
+//RS                 .as_ref()
+//RS                 .filter(|_| advisory_receipt.is_none())
+//RS                 .map(|existing| existing.cache_identity.policy_fingerprint.clone())
+//RS         })
+//RS         .unwrap_or_else(|| format!("sha256-{}", crate::SHA256::sha256_hex(policy.as_bytes())));
+//RS     let provenance = existing
+//RS         .as_ref()
+//RS         .filter(|_| advisory_receipt.is_none() && package_policy.is_none())
+//RS         .map(|existing| existing.envelope.provenance.clone())
+//RS         .unwrap_or(provenance);
+//RS     let provenance = if provenance.contains("oci-referrers=") {
+//RS         provenance
+//RS     } else {
+//RS         format!("{provenance};oci-referrers={referrer_receipt}")
+//RS     };
+//RS     let request = jetpack::Store::IngestRequest {
+//RS         name: entry.name.clone(),
+//RS         version: entry.version.clone(),
+//RS         reference,
+//RS         cache_identity: jetpack::Store::CacheIdentity {
+//RS             source_fingerprint: entry.content_hash.clone(),
+//RS             recipe_fingerprint: entry.fingerprint.clone(),
+//RS             policy_fingerprint,
+//RS             platform: jetpack::Envelope::host_platform(),
+//RS         },
+//RS         references,
+//RS         outputs: BTreeMap::from([(String::from("out"), artifact.to_path_buf())]),
+//RS         signature: String::new(),
+//RS         provenance,
+//RS         platform_artifact_kind: String::new(),
+//RS     };
+//RS     let ingested = jetpack::Store::ingest_tree(&roots, &request)
+//RS         .map_err(|error| format!("{} ({})", error.what(), error.code()))?;
+//RS     Ok(PathBuf::from(ingested.entry.out))
+//RS }
+//RS 
+//RS // ──────────────────────────────────────────────
+//RS // Build dep_dirs from existing lock (--locked mode)
+//RS // ──────────────────────────────────────────────
+//RS 
+//RS fn locked_store_source_path(
+//RS     dep_name: &str,
+//RS     package: &LockedPackage,
+//RS ) -> Result<PathBuf, Vec<Diagnostic>> {
+//RS     let fingerprint = package
+//RS         .fingerprint
+//RS         .strip_prefix("sha256-")
+//RS         .unwrap_or(&package.fingerprint);
+//RS     if !safe_store_component(dep_name)
+//RS         || !safe_store_component(&package.version)
+//RS         || !safe_store_component(fingerprint)
+//RS     {
+//RS         return Err(vec![locked_source_diagnostic(
+//RS             dep_name,
+//RS             "the lock has no safe immutable store fingerprint",
+//RS         )]);
+//RS     }
+//RS     Ok(Store::store_path(dep_name, &package.version, fingerprint))
+//RS }
+//RS 
+//RS fn safe_store_component(value: &str) -> bool {
+//RS     !value.is_empty()
+//RS         && value != "."
+//RS         && value != ".."
+//RS         && !value.contains(['/', '\\', ':'])
+//RS         && !value.chars().any(char::is_control)
+//RS         && matches!(
+//RS             Path::new(value).components().next(),
+//RS             Some(std::path::Component::Normal(_))
+//RS         )
+//RS         && Path::new(value).components().nth(1).is_none()
+//RS }
+//RS 
+//RS fn build_dep_dirs_from_lock(
+//RS     lock: &LockFile,
+//RS     project_root: &Path,
+//RS     manifest: &Manifest,
+//RS ) -> Result<HashMap<String, PathBuf>, Vec<Diagnostic>> {
+//RS     let mut dep_dirs = HashMap::new();
+//RS     for (dep_name, spec) in &manifest.dependencies {
+//RS         let source_dir = match spec {
+//RS             DepSpec::Path { path } => {
+//RS                 let source_dir = normalize_path(&project_root.join(path));
+//RS                 let Some(package) = lock.packages.iter().find(|package| {
+//RS                     package.name == *dep_name && matches!(&package.source, LockSource::Path(_))
+//RS                 }) else {
+//RS                     return Err(vec![locked_source_diagnostic(
+//RS                         dep_name,
+//RS                         "the lock has no matching path source identity",
+//RS                     )]);
+//RS                 };
+//RS                 let LockSource::Path(locked_path) = &package.source else {
+//RS                     unreachable!("path package predicate guarantees a path source")
+//RS                 };
+//RS                 if normalize_path(&project_root.join(locked_path)) != source_dir {
+//RS                     return Err(vec![locked_source_diagnostic(
+//RS                         dep_name,
+//RS                         "the locked path source disagrees with the manifest",
+//RS                     )]);
+//RS                 }
+//RS                 let source_dir = locked_store_source_path(dep_name, package)?;
+//RS                 Store::verify_entry(
+//RS                     dep_name,
+//RS                     &source_dir,
+//RS                     package.content_hash.as_deref().unwrap_or(""),
+//RS                 )
+//RS                 .map_err(|diagnostic| vec![diagnostic])?;
+//RS                 source_dir
+//RS             }
+//RS             DepSpec::Git { url, selector } => {
+//RS                 let Some(package) = lock.packages.iter().find(|package| {
+//RS                     package.name == *dep_name && matches!(&package.source, LockSource::Git { .. })
+//RS                 }) else {
+//RS                     return Err(vec![locked_source_diagnostic(
+//RS                         dep_name,
+//RS                         "the lock has no matching git source identity",
+//RS                     )]);
+//RS                 };
+//RS                 let LockSource::Git {
+//RS                     url: locked_url,
+//RS                     selector: locked_selector,
+//RS                 } = &package.source
+//RS                 else {
+//RS                     unreachable!("git package predicate guarantees a git source")
+//RS                 };
+//RS                 let expected_selector = Lock::git_selector_str(selector);
+//RS                 if locked_url != url || locked_selector != &expected_selector {
+//RS                     return Err(vec![locked_source_diagnostic(
+//RS                         dep_name,
+//RS                         "the locked git source disagrees with the manifest",
+//RS                     )]);
+//RS                 }
+//RS                 let Some(revision) = package.locked.as_ref() else {
+//RS                     return Err(vec![locked_source_diagnostic(
+//RS                         dep_name,
+//RS                         "the lock has no pinned git revision",
+//RS                     )]);
+//RS                 };
+//RS                 let expected_hash = package
+//RS                     .content_hash
+//RS                     .as_deref()
+//RS                     .unwrap_or(&revision.tree_hash);
+//RS                 let source_dir = locked_store_source_path(dep_name, package)?;
+//RS                 Store::verify_entry(dep_name, &source_dir, expected_hash)
+//RS                     .map_err(|diagnostic| vec![diagnostic])?;
+//RS                 source_dir
+//RS             }
+//RS             DepSpec::Registry(version_req) => {
+//RS                 let requirement = VersionReq::parse(version_req).ok_or_else(|| {
+//RS                     vec![registry_diagnostic(
+//RS                         dep_name,
+//RS                         &format!("invalid locked version requirement `{version_req}`"),
+//RS                         "use a valid SemVer requirement before creating a lock",
+//RS                     )]
+//RS                 })?;
+//RS                 let Some(locked) = lock.packages.iter().find(|package| {
+//RS                     package.name == *dep_name
+//RS                         && SemVer::parse(&package.version)
+//RS                             .is_some_and(|version| requirement.matches(&version))
+//RS                         && matches!(&package.source, LockSource::Registry { .. })
+//RS                 }) else {
+//RS                     return Err(vec![registry_diagnostic(
+//RS                         dep_name,
+//RS                         "locked registry dependency has no exact package record",
+//RS                         "run `jet fetch` online to select and record an immutable registry version",
+//RS                     )]);
+//RS                 };
+//RS                 let LockSource::Registry {
+//RS                     registry,
+//RS                     reference,
+//RS                     repository,
+//RS                     source_hash,
+//RS                     tier,
+//RS                     gate_status,
+//RS                     ..
+//RS                 } = &locked.source
+//RS                 else {
+//RS                     unreachable!("registry package predicate guarantees registry source")
+//RS                 };
+//RS                 if crate::Publish::redact_registry_url(repository) != *repository {
+//RS                     return Err(vec![registry_diagnostic(
+//RS                         dep_name,
+//RS                         "locked registry repository contains embedded credentials",
+//RS                         "regenerate the lock from a credential-free registry endpoint; credentials never belong in `.jet/lock`",
+//RS                     )]);
+//RS                 }
+//RS                 let config = crate::Publish::RegistryConfig {
+//RS                     name: registry.clone(),
+//RS                     url: repository.clone(),
+//RS                     mirror: false,
+//RS                     require_signed: false,
+//RS                     tier: crate::Publish::RegistryTier::parse(tier)
+//RS                         .unwrap_or(crate::Publish::RegistryTier::Core),
+//RS                 };
+//RS                 let repo = crate::Publish::ensure_local_index_clone(&config)
+//RS                     .map_err(|diagnostic| vec![diagnostic])?;
+//RS                 let entry = crate::Publish::Index::find_entry(&repo, dep_name, &locked.version)
+//RS                     .map_err(|error| {
+//RS                         vec![registry_diagnostic(
+//RS                             dep_name,
+//RS                             &format!("locked registry index could not be read: {error}"),
+//RS                             "restore the pinned registry mirror; locked mode never downloads a new index",
+//RS                         )]
+//RS                     })?
+//RS                     .ok_or_else(|| {
+//RS                         vec![registry_diagnostic(
+//RS                             dep_name,
+//RS                             "locked registry index has no pinned version",
+//RS                             "restore the exact offline registry checkpoint or run `jet fetch` online",
+//RS                         )]
+//RS                     })?;
+//RS                 let expected_reference = format!("{}#{}", dep_name, locked.version);
+//RS                 if reference != &expected_reference {
+//RS                     return Err(vec![registry_diagnostic(
+//RS                         dep_name,
+//RS                         "locked registry reference does not name the locked package version",
+//RS                         "regenerate the lock from the trusted registry checkpoint",
+//RS                     )]);
+//RS                 }
+//RS                 if source_hash.is_empty() {
+//RS                     return Err(vec![registry_diagnostic(
+//RS                         dep_name,
+//RS                         "locked registry package has no source hash",
+//RS                         "regenerate the lock from a registry entry with immutable source identity",
+//RS                     )]);
+//RS                 }
+//RS                 if entry.content_hash != *source_hash {
+//RS                     return Err(vec![registry_diagnostic(
+//RS                         dep_name,
+//RS                         "locked registry content hash disagrees with the local index",
+//RS                         "refresh the lock from a trusted registry checkpoint",
+//RS                     )]);
+//RS                 }
+//RS                 if entry.tier.label() != tier || entry.gate_status.summary() != *gate_status {
+//RS                     return Err(vec![registry_diagnostic(
+//RS                         dep_name,
+//RS                         "locked registry tier or gate status disagrees with the live index",
+//RS                         "regenerate the lock from the trusted registry checkpoint",
+//RS                     )]);
+//RS                 }
+//RS                 let all_entries =
+//RS                     crate::Publish::verify_registry_package(&repo, &config.name, dep_name)
+//RS                         .map_err(|diagnostic| vec![diagnostic])?;
+//RS                 crate::Publish::verify_entry_tier(&entry).map_err(|diagnostic| vec![diagnostic])?;
+//RS                 crate::Publish::verify_index_entry(
+//RS                     &all_entries,
+//RS                     &entry,
+//RS                     config.require_signed || entry.tier == crate::Publish::RegistryTier::Community,
+//RS                     &config.name,
+//RS                 )
+//RS                 .map_err(|diagnostic| vec![diagnostic])?;
+//RS                 let artifact_snapshot = crate::Publish::snapshot_verified_artifact(&repo, &entry)
+//RS                     .map_err(|error| {
+//RS                     vec![registry_diagnostic(
+//RS                         dep_name,
+//RS                         &format!("locked registry artifact is unavailable: {error}"),
+//RS                         "restore the artifact in the local registry mirror; locked mode stays offline",
+//RS                     )]
+//RS                     })?;
+//RS                 let artifact = artifact_snapshot.path();
+//RS                 let dep_manifest = load_dep_manifest(artifact, dep_name)?;
+//RS                 if dep_manifest.package.name != *dep_name
+//RS                     || dep_manifest.package.version != locked.version
+//RS                 {
+//RS                     return Err(vec![registry_diagnostic(
+//RS                         dep_name,
+//RS                         "locked source metadata disagrees with its registry identity",
+//RS                         "refresh the lock from a trusted immutable registry artifact",
+//RS                     )]);
+//RS                 }
+//RS                 let registry_metadata = crate::Publish::read_registry_package_metadata(
+//RS                     artifact,
+//RS                     dep_name,
+//RS                     &locked.version,
+//RS                 )
+//RS                 .map_err(|error| {
+//RS                     vec![registry_diagnostic(
+//RS                         dep_name,
+//RS                         &format!("locked registry dependency metadata is invalid: {error}"),
+//RS                         "refresh the lock from a trusted immutable registry artifact",
+//RS                     )]
+//RS                 })?;
+//RS                 let registry_dependencies =
+//RS                     registry_dependency_edges(&dep_manifest, registry_metadata.as_ref(), dep_name)?;
+//RS                 let expected_dependencies = registry_dependencies
+//RS                     .iter()
+//RS                     .map(|dependency| dependency.name.clone())
+//RS                     .chain(dep_manifest.dependencies.iter().filter_map(|(name, spec)| {
+//RS                         (!matches!(spec, DepSpec::Registry(_))).then_some(name.clone())
+//RS                     }))
+//RS                     .collect::<BTreeSet<_>>();
+//RS                 let locked_dependencies =
+//RS                     locked.dependencies.iter().cloned().collect::<BTreeSet<_>>();
+//RS                 if locked_dependencies != expected_dependencies {
+//RS                     return Err(vec![registry_diagnostic(
+//RS                         dep_name,
+//RS                         "locked dependency roles, features, or constraints disagree with the artifact metadata",
+//RS                         "refresh the lock from the trusted immutable registry artifact",
+//RS                     )]);
+//RS                 }
+//RS                 let policy_receipt = crate::Publish::authorize_package_candidate(
+//RS                     &manifest.policy,
+//RS                     dep_name,
+//RS                     &locked.version,
+//RS                     dep_manifest.package.license.as_deref(),
+//RS                     &config.name,
+//RS                 )
+//RS                 .map_err(|error| {
+//RS                     let owner = manifest.package.name.clone();
+//RS                     let edge = format!("{owner} -> {}#{}", dep_name, locked.version);
+//RS                     vec![crate::Publish::package_policy_edge_diagnostic(
+//RS                         &owner,
+//RS                         &edge,
+//RS                         &config.name,
+//RS                         &error,
+//RS                     )]
+//RS                 })?;
+//RS                 let source_exception = crate::Publish::active_source_exception(
+//RS                     &manifest.policy.exceptions,
+//RS                     dep_name,
+//RS                     &locked.version,
+//RS                 );
+//RS                 let store_path = ingest_registry_artifact(
+//RS                     &config,
+//RS                     &entry,
+//RS                     artifact,
+//RS                     &[],
+//RS                     None,
+//RS                     Some(&policy_receipt),
+//RS                     source_exception,
+//RS                 )
+//RS                 .map_err(|error| {
+//RS                     vec![registry_diagnostic(
+//RS                         dep_name,
+//RS                         &error,
+//RS                         "repair the canonical Jetpack Hangar or retry the verified registry ingest",
+//RS                     )]
+//RS                 })?;
+//RS                 verify_registry_hangar_entry(dep_name, &store_path, source_hash)?;
+//RS                 store_path
+//RS             }
+//RS             DepSpec::Foreign {
+//RS                 language,
+//RS                 reference,
+//RS             } => validate_locked_foreign_dependency(
+//RS                 lock,
+//RS                 project_root,
+//RS                 dep_name,
+//RS                 *language,
+//RS                 reference,
+//RS             )?,
+//RS         };
+//RS         dep_dirs.insert(dep_name.clone(), source_dir);
+//RS     }
+//RS     Ok(dep_dirs)
+//RS }
+//RS 
+//RS fn validate_locked_foreign_dependency(
+//RS     lock: &LockFile,
+//RS     project_root: &Path,
+//RS     dep_name: &str,
+//RS     language: crate::AST::ForeignLanguage,
+//RS     reference: &str,
+//RS ) -> Result<PathBuf, Vec<Diagnostic>> {
+//RS     let Some(package) = lock.packages.iter().find(|package| {
+//RS         package.name == dep_name
+//RS             && matches!(
+//RS                 &package.source,
+//RS                 LockSource::Foreign {
+//RS                     language: locked_language,
+//RS                     reference: locked_reference,
+//RS                     ..
+//RS                 } if *locked_language == language && locked_reference == reference
+//RS             )
+//RS     }) else {
+//RS         return Err(vec![foreign_locked_diagnostic(
+//RS             dep_name,
+//RS             "the lock has no matching language-qualified provider identity",
+//RS         )]);
+//RS     };
+//RS     let LockSource::Foreign { output, .. } = &package.source else {
+//RS         unreachable!("foreign package predicate guarantees a foreign lock source")
+//RS     };
+//RS     let output = PathBuf::from(output);
+//RS     let output_metadata = std::fs::symlink_metadata(&output).map_err(|error| {
+//RS         vec![foreign_locked_diagnostic(
+//RS             dep_name,
+//RS             &format!("locked Hangar output is unavailable: {error}"),
+//RS         )]
+//RS     })?;
+//RS     if output_metadata.file_type().is_symlink() || !output_metadata.is_dir() {
+//RS         return Err(vec![foreign_locked_diagnostic(
+//RS             dep_name,
+//RS             "locked Hangar output is not a real directory",
+//RS         )]);
+//RS     }
+//RS     let Some(envelope) = package.envelope.as_ref() else {
+//RS         return Err(vec![foreign_locked_diagnostic(
+//RS             dep_name,
+//RS             "the foreign lock record has no verified output envelope",
+//RS         )]);
+//RS     };
+//RS     if envelope.output_hash.is_empty() {
+//RS         return Err(vec![foreign_locked_diagnostic(
+//RS             dep_name,
+//RS             "the foreign lock record has no output hash",
+//RS         )]);
+//RS     }
+//RS     let roots = jetpack::Store::resolve();
+//RS     let actual = jetpack::Envelope::try_output_hash_of_in_hangar(
+//RS         &output.to_string_lossy(),
+//RS         &roots.hangar_dir(),
+//RS         false,
+//RS     )
+//RS     .map_err(|error| {
+//RS         vec![foreign_locked_diagnostic(
+//RS             dep_name,
+//RS             &format!("locked foreign output failed integrity verification: {error}"),
+//RS         )]
+//RS     })?;
+//RS     if actual != envelope.output_hash {
+//RS         return Err(vec![foreign_locked_diagnostic(
+//RS             dep_name,
+//RS             "locked foreign output hash disagrees with its envelope",
+//RS         )]);
+//RS     }
+//RS 
+//RS     let stored_binding = output
+//RS         .join(Syntax::SOURCE_ROOT_DIR)
+//RS         .join(language.bindings_subdir())
+//RS         .join(format!("{dep_name}.{}", Syntax::FILE_EXT));
+//RS     let project_binding = jetpack::Foreign::project_binding_path(project_root, language, dep_name);
+//RS     let stored_metadata = std::fs::symlink_metadata(&stored_binding).map_err(|error| {
+//RS         vec![foreign_locked_diagnostic(
+//RS             dep_name,
+//RS             &format!("locked generated binding is unavailable: {error}"),
+//RS         )]
+//RS     })?;
+//RS     let project_metadata = std::fs::symlink_metadata(&project_binding).map_err(|error| {
+//RS         vec![foreign_locked_diagnostic(
+//RS             dep_name,
+//RS             &format!("project binding cache is unavailable: {error}"),
+//RS         )]
+//RS     })?;
+//RS     if stored_metadata.file_type().is_symlink()
+//RS         || !stored_metadata.is_file()
+//RS         || project_metadata.file_type().is_symlink()
+//RS         || !project_metadata.is_file()
+//RS     {
+//RS         return Err(vec![foreign_locked_diagnostic(
+//RS             dep_name,
+//RS             "the locked generated binding is not a regular file",
+//RS         )]);
+//RS     }
+//RS     let stored_bytes = std::fs::read(&stored_binding).map_err(|error| {
+//RS         vec![foreign_locked_diagnostic(
+//RS             dep_name,
+//RS             &format!("could not read locked generated binding: {error}"),
+//RS         )]
+//RS     })?;
+//RS     let project_bytes = std::fs::read(&project_binding).map_err(|error| {
+//RS         vec![foreign_locked_diagnostic(
+//RS             dep_name,
+//RS             &format!("could not read project generated binding: {error}"),
+//RS         )]
+//RS     })?;
+//RS     if stored_bytes != project_bytes {
+//RS         return Err(vec![foreign_locked_diagnostic(
+//RS             dep_name,
+//RS             "project binding cache disagrees with the locked Hangar binding",
+//RS         )]);
+//RS     }
+//RS     Ok(output)
+//RS }
+//RS 
+//RS fn foreign_locked_diagnostic(dep_name: &str, detail: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1204",
+//RS         format!("locked foreign dependency `{dep_name}` failed verification"),
+//RS         detail.to_string(),
+//RS         "run `jet fetch` to recreate the verified provider projection, then commit the resulting `.jet/lock`".to_string(),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS fn locked_source_diagnostic(dep_name: &str, detail: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1204",
+//RS         format!("locked dependency `{dep_name}` failed source verification"),
+//RS         detail.to_string(),
+//RS         "run `jet fetch` to recreate the lock from the verified dependency source".to_string(),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS // ──────────────────────────────────────────────
+//RS // Git helpers
+//RS // ──────────────────────────────────────────────
+//RS 
+//RS pub fn git_available() -> bool {
+//RS     jetpack::Provider::hardened_git_command()
+//RS         .arg("--version")
+//RS         .output()
+//RS         .is_ok()
+//RS }
+//RS 
+//RS fn git_cache_dir(url: &str, rev: &str) -> Result<PathBuf, Diagnostic> {
+//RS     if let Err(reason) = validate_cached_revision(rev) {
+//RS         return Err(git_revision_diagnostic(rev, &reason));
+//RS     }
+//RS     let home = std::env::var("HOME")
+//RS         .or_else(|_| std::env::var("USERPROFILE"))
+//RS         .unwrap_or_else(|_| ".".to_string());
+//RS     let url_hash = crate::SHA256::sha256_hex(url.as_bytes());
+//RS     let rev_prefix: String = rev
+//RS         .char_indices()
+//RS         .take_while(|(index, _)| *index < 16)
+//RS         .map(|(_, character)| character)
+//RS         .collect();
+//RS     let path = PathBuf::from(home)
+//RS         .join(".jet")
+//RS         .join("git-cache")
+//RS         .join(&url_hash[..16])
+//RS         .join(rev_prefix);
+//RS     Ok(path)
+//RS }
+//RS 
+//RS fn git_resolve_ref(
+//RS     url: &str,
+//RS     refname: &str,
+//RS     transport: &ValidatedGitTransport,
+//RS ) -> Result<String, Diagnostic> {
+//RS     if let Err(reason) = validate_git_revision(refname) {
+//RS         return Err(git_revision_diagnostic(refname, &reason));
+//RS     }
+//RS     let remote = transport
+//RS         .git_remote(url)
+//RS         .map_err(|reason| git_transport_diagnostic(url, &reason))?;
+//RS     let out = hardened_git_transport_command(transport)
+//RS         .args(["ls-remote", "--exit-code", "--", &remote, refname])
+//RS         .output()
+//RS         .map_err(|_| Lock::e1203())?;
+//RS     if !out.status.success() {
+//RS         return Err(Diagnostic::error(
+//RS             "E1203",
+//RS             format!("couldn't resolve git ref `{}` at `{}`", refname, url),
+//RS             "the git ref may not exist or the URL may be unreachable".to_string(),
+//RS             format!(
+//RS                 "check the URL and ref name in {}",
+//RS                 crate::Syntax::PACKAGE_FILE
+//RS             ),
+//RS             None,
+//RS         ));
+//RS     }
+//RS     let stdout = String::from_utf8_lossy(&out.stdout);
+//RS     let rev = stdout.split_whitespace().next().unwrap_or("").to_string();
+//RS     if rev.is_empty() {
+//RS         return Err(Diagnostic::error(
+//RS             "E1203",
+//RS             format!("git ref `{}` not found at `{}`", refname, url),
+//RS             "the tag or branch name must exist in the remote repository".to_string(),
+//RS             format!("check the ref spelling in {}", crate::Syntax::PACKAGE_FILE),
+//RS             None,
+//RS         ));
+//RS     }
+//RS     if let Err(reason) = validate_cached_revision(&rev) {
+//RS         return Err(git_revision_diagnostic(&rev, &reason));
+//RS     }
+//RS     Ok(rev)
+//RS }
+//RS 
+//RS fn git_clone(
+//RS     url: &str,
+//RS     rev: &str,
+//RS     dest: &Path,
+//RS     transport: &ValidatedGitTransport,
+//RS ) -> Result<Store::SourceSnapshot, Vec<Diagnostic>> {
+//RS     if let Err(reason) = validate_git_revision(rev) {
+//RS         return Err(vec![git_revision_diagnostic(rev, &reason)]);
+//RS     }
+//RS     if let Err(reason) = validate_cached_revision(rev) {
+//RS         return Err(vec![git_revision_diagnostic(rev, &reason)]);
+//RS     }
+//RS     let parent = dest.parent().unwrap_or_else(|| Path::new("."));
+//RS     let destination_name = dest.file_name().ok_or_else(|| {
+//RS         vec![Diagnostic::error(
+//RS             "E1206",
+//RS             format!("git cache destination `{}` has no final component", dest.display()),
+//RS             "the Git cache destination must be one safe path component".to_string(),
+//RS             "use a safe pinned revision and run `jet fetch` again".to_string(),
+//RS             None,
+//RS         )]
+//RS     })?;
+//RS     let parent_authority = Store::ensure_directory_authority(parent).map_err(|error| {
+//RS         vec![Diagnostic::error(
+//RS             "E1206",
+//RS             format!("couldn't create git cache directory `{}`: {}", parent.display(), error),
+//RS             "the git cache must be reached through no-follow directory authorities".to_string(),
+//RS             "remove cache symlinks or check disk space and permissions".to_string(),
+//RS             None,
+//RS         )]
+//RS     })?;
+//RS     let (staging_name, staging) = parent_authority
+//RS         .create_private_child("jet-fetch")
+//RS         .map_err(|error| {
+//RS             vec![Diagnostic::error(
+//RS                 "E1206",
+//RS                 "couldn't create temporary git cache directory".to_string(),
+//RS                 format!("the cache staging directory could not be allocated: {error}"),
+//RS                 "check disk space and permissions".to_string(),
+//RS                 None,
+//RS             )]
+//RS         })?;
+//RS     let cleanup = || {
+//RS         let _ = parent_authority.remove_child_tree(&staging_name);
+//RS     };
+//RS 
+//RS     #[cfg(not(any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios"
+//RS     )))]
+//RS     {
+//RS         cleanup();
+//RS         return Err(vec![Diagnostic::error(
+//RS             "E1206",
+//RS             "cannot run Git without descriptor-relative cache authority".to_string(),
+//RS             "this platform cannot pass an unredirectable private cache directory to Git".to_string(),
+//RS             "run `jet fetch` on Linux, Android, macOS, or iOS".to_string(),
+//RS             None,
+//RS         )]);
+//RS     }
+//RS 
+//RS     #[cfg(any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios"
+//RS     ))]
+//RS     {
+//RS         let inheritable = staging.inheritable_clone().map_err(|error| {
+//RS             cleanup();
+//RS             vec![Diagnostic::error(
+//RS                 "E1206",
+//RS                 "couldn't retain Git cache authority".to_string(),
+//RS                 format!("the cache descriptor could not be inherited by Git: {error}"),
+//RS                 "check platform descriptor support and permissions".to_string(),
+//RS                 None,
+//RS             )]
+//RS         })?;
+//RS         let destination_path = Store::descriptor_path_for(&inheritable);
+//RS         let destination = match destination_path.to_str() {
+//RS             Some(path) => path.to_owned(),
+//RS             None => {
+//RS                 cleanup();
+//RS                 return Err(vec![Diagnostic::error(
+//RS                     "E1206",
+//RS                     "couldn't address the Git cache staging directory".to_string(),
+//RS                     "the platform descriptor path is not valid UTF-8".to_string(),
+//RS                     "run `jet fetch` on a supported platform".to_string(),
+//RS                     None,
+//RS                 )]);
+//RS             }
+//RS         };
+//RS         let remote = match transport.git_remote(url) {
+//RS             Ok(remote) => remote,
+//RS             Err(reason) => {
+//RS                 cleanup();
+//RS                 return Err(vec![git_transport_diagnostic(url, &reason)]);
+//RS             }
+//RS         };
+//RS         let clone_ok = hardened_git_transport_command(transport)
+//RS             .args([
+//RS                 "clone",
+//RS                 "--quiet",
+//RS                 "--",
+//RS                 &remote,
+//RS                 &destination,
+//RS             ])
+//RS             .status()
+//RS             .map(|status| status.success())
+//RS             .unwrap_or(false);
+//RS         if !clone_ok {
+//RS             cleanup();
+//RS             return Err(vec![Diagnostic::error(
+//RS                 "E1203",
+//RS                 format!("failed to clone `{}`", url),
+//RS                 "git clone returned an error".to_string(),
+//RS                 "check the git URL and your network connection".to_string(),
+//RS                 None,
+//RS             )]);
+//RS         }
+//RS 
+//RS         let checkout_ok = jetpack::Provider::hardened_git_command()
+//RS             .args([
+//RS                 "-C",
+//RS                 &destination,
+//RS                 "checkout",
+//RS                 "--quiet",
+//RS                 rev,
+//RS             ])
+//RS             .status()
+//RS             .map(|status| status.success())
+//RS             .unwrap_or(false);
+//RS         if !checkout_ok {
+//RS             cleanup();
+//RS             return Err(vec![Diagnostic::error(
+//RS                 "E1203",
+//RS                 format!("couldn't check out revision `{}` from `{}`", rev, url),
+//RS                 "git checkout returned an error".to_string(),
+//RS                 "check that the revision exists in the repository".to_string(),
+//RS                 None,
+//RS             )]);
+//RS         }
+//RS 
+//RS         let snapshot = match Store::snapshot_directory_authority(&staging) {
+//RS             Ok(snapshot) => snapshot,
+//RS             Err(diagnostic) => {
+//RS                 cleanup();
+//RS                 return Err(vec![diagnostic]);
+//RS             }
+//RS         };
+//RS         return match Store::publish_directory(
+//RS             &parent_authority,
+//RS             &staging_name,
+//RS             &parent_authority,
+//RS             destination_name,
+//RS         ) {
+//RS             Ok(()) => Ok(snapshot),
+//RS             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+//RS                 drop(snapshot);
+//RS                 cleanup();
+//RS                 let winner = parent_authority
+//RS                     .open_child_directory(destination_name)
+//RS                     .map_err(|error| {
+//RS                         vec![Diagnostic::error(
+//RS                             "E1206",
+//RS                             format!(
+//RS                                 "couldn't open concurrent git cache `{}`: {}",
+//RS                                 dest.display(),
+//RS                                 error
+//RS                             ),
+//RS                             "the Git cache entry must be a real directory".to_string(),
+//RS                             "remove the cache entry and run `jet fetch` again".to_string(),
+//RS                             None,
+//RS                         )]
+//RS                     })?;
+//RS                 Store::snapshot_directory_authority(&winner).map_err(|diagnostic| vec![diagnostic])
+//RS             }
+//RS             Err(error) => {
+//RS                 cleanup();
+//RS                 Err(vec![Diagnostic::error(
+//RS                     "E1206",
+//RS                     format!(
+//RS                         "couldn't publish cloned repository into `{}`: {}",
+//RS                         dest.display(),
+//RS                         error
+//RS                     ),
+//RS                     "the Git cache publication must use an atomic no-replace rename".to_string(),
+//RS                     "check cache permissions and disk space".to_string(),
+//RS                     None,
+//RS                 )])
+//RS             }
+//RS         };
+//RS     }
+//RS }
+//RS 
+//RS fn path_dependency_escape_diagnostic(dep_name: &str, path: &str, parent_dir: &Path) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1206",
+//RS         format!("path dependency `{dep_name}` escapes its parent package"),
+//RS         format!(
+//RS             "the path `{path}` resolves outside the declaring package directory `{}`",
+//RS             parent_dir.display()
+//RS         ),
+//RS         "use a relative path below the declaring package directory".to_string(),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS fn git_transport_diagnostic(url: &str, reason: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1203",
+//RS         "git dependency URL is not allowed".to_string(),
+//RS         format!("git transport policy rejected `{url}`: {reason}"),
+//RS         "use a public HTTPS, SSH, or Git URL, or a local file URL".to_string(),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS fn git_revision_diagnostic(revision: &str, reason: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1203",
+//RS         "git revision is not allowed".to_string(),
+//RS         format!("git revision policy rejected `{revision}`: {reason}"),
+//RS         format!(
+//RS             "use a branch, tag, or commit name without leading `-` in {}",
+//RS             crate::Syntax::PACKAGE_FILE
+//RS         ),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS 
+//RS fn validate_git_revision(revision: &str) -> Result<(), String> {
+//RS     if revision.is_empty() || has_terminal_control(revision) || revision.starts_with('-') {
+//RS         return Err("the revision is empty or contains unsafe characters".to_string());
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_cached_revision(revision: &str) -> Result<(), String> {
+//RS     if revision.is_empty()
+//RS         || revision == "."
+//RS         || revision == ".."
+//RS         || revision.starts_with('-')
+//RS         || revision.contains(['/', '\\', ':'])
+//RS         || has_terminal_control(revision)
+//RS         || !matches!(
+//RS             Path::new(revision).components().next(),
+//RS             Some(std::path::Component::Normal(_))
+//RS         )
+//RS         || Path::new(revision).components().nth(1).is_some()
+//RS     {
+//RS         return Err("the revision must be one safe cache path component".to_string());
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS fn has_terminal_control(value: &str) -> bool {
+//RS     value
+//RS         .chars()
+//RS         .any(|character| character.is_control() || matches!(character, '\u{2028}' | '\u{2029}'))
+//RS }
+//RS 
+//RS 
+//RS #[derive(Debug)]
+//RS enum ValidatedGitTransport {
+//RS     Local(LocalGitSource),
+//RS     Network {
+//RS         scheme: String,
+//RS         host: String,
+//RS         port: u16,
+//RS         explicit_port: bool,
+//RS         address: IpAddr,
+//RS     },
+//RS }
+//RS 
+//RS #[derive(Debug)]
+//RS struct LocalGitSource {
+//RS     #[cfg(any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios"
+//RS     ))]
+//RS     handle: File,
+//RS }
+//RS 
+//RS impl ValidatedGitTransport {
+//RS     fn pinned_url(&self, url: &str) -> String {
+//RS         let Self::Network {
+//RS             scheme,
+//RS             port,
+//RS             explicit_port,
+//RS             address,
+//RS             ..
+//RS         } = self
+//RS         else {
+//RS             return url.to_string();
+//RS         };
+//RS         if scheme != "git" {
+//RS             return url.to_string();
+//RS         }
+//RS         let Some((url_scheme, rest)) = url.split_once("://") else {
+//RS             return url.to_string();
+//RS         };
+//RS         let authority_end = rest
+//RS             .find(|character| matches!(character, '/' | '?' | '#'))
+//RS             .unwrap_or(rest.len());
+//RS         let suffix = &rest[authority_end..];
+//RS         let port = if *explicit_port {
+//RS             format!(":{port}")
+//RS         } else {
+//RS             String::new()
+//RS         };
+//RS         format!("{url_scheme}://{}{}{}", git_host(*address), port, suffix)
+//RS     }
+//RS 
+//RS     fn git_config_values(&self) -> Vec<String> {
+//RS         let Self::Network {
+//RS             scheme,
+//RS             host,
+//RS             port,
+//RS             address,
+//RS             ..
+//RS         } = self
+//RS         else {
+//RS             return Vec::new();
+//RS         };
+//RS         if !matches!(scheme.as_str(), "http" | "https") {
+//RS             return Vec::new();
+//RS         }
+//RS         // Keep the URL host unchanged so HTTPS still verifies that host's
+//RS         // certificate. curloptResolve pins the socket address, and redirects
+//RS         // stay disabled because a redirected host has no validated address.
+//RS         vec![
+//RS             "http.followRedirects=false".to_string(),
+//RS             "http.proxy=".to_string(),
+//RS             "http.sslVerify=true".to_string(),
+//RS             format!(
+//RS                 "http.curloptResolve={}:{}:{}",
+//RS                 curl_resolve_host(host),
+//RS                 port,
+//RS                 curl_resolve_address(*address)
+//RS             ),
+//RS         ]
+//RS     }
+//RS 
+//RS     fn ssh_command(&self) -> Option<String> {
+//RS         let Self::Network {
+//RS             scheme, address, ..
+//RS         } = self
+//RS         else {
+//RS             return None;
+//RS         };
+//RS         (scheme == "ssh").then(|| hardened_ssh_command_for(*address))
+//RS     }
+//RS 
+//RS     fn git_remote(&self, url: &str) -> Result<String, String> {
+//RS         match self {
+//RS             Self::Local(source) => source.git_path(),
+//RS             Self::Network { .. } => Ok(self.pinned_url(url)),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl LocalGitSource {
+//RS     fn git_path(&self) -> Result<String, String> {
+//RS         #[cfg(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios"
+//RS         ))]
+//RS         {
+//RS             #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS             let prefix = "/proc/self/fd/";
+//RS             #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS             let prefix = "/dev/fd/";
+//RS             return Ok(format!("{prefix}{}", self.handle.as_raw_fd()));
+//RS         }
+//RS 
+//RS         #[cfg(windows)]
+//RS         {
+//RS             let _ = self;
+//RS             return Err(
+//RS                 "descriptor-relative Git source access is unavailable on Windows".to_string(),
+//RS             );
+//RS         }
+//RS 
+//RS         #[cfg(not(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios",
+//RS             windows
+//RS         )))]
+//RS         {
+//RS             let _ = self;
+//RS             Err("descriptor-relative Git source access is unavailable on this platform".to_string())
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn git_host(address: IpAddr) -> String {
+//RS     match address {
+//RS         IpAddr::V4(address) => address.to_string(),
+//RS         IpAddr::V6(address) => format!("[{address}]"),
+//RS     }
+//RS }
+//RS 
+//RS fn curl_resolve_address(address: IpAddr) -> String {
+//RS     match address {
+//RS         IpAddr::V4(address) => address.to_string(),
+//RS         IpAddr::V6(address) => format!("[{address}]"),
+//RS     }
+//RS }
+//RS 
+//RS fn curl_resolve_host(host: &str) -> String {
+//RS     if host.contains(':') {
+//RS         format!("[{host}]")
+//RS     } else {
+//RS         host.to_string()
+//RS     }
+//RS }
+//RS 
+//RS fn hardened_git_transport_command(transport: &ValidatedGitTransport) -> Command {
+//RS     let mut command = jetpack::Provider::hardened_git_command();
+//RS     for config in transport.git_config_values() {
+//RS         command.args(["-c", &config]);
+//RS     }
+//RS     if let Some(ssh_command) = transport.ssh_command() {
+//RS         command.env("GIT_SSH_COMMAND", ssh_command);
+//RS     }
+//RS     command
+//RS }
+//RS 
+//RS fn hardened_ssh_command_for(address: IpAddr) -> String {
+//RS     format!(
+//RS         "{} -oHostName={address}",
+//RS         jetpack::Provider::hardened_ssh_command()
+//RS     )
+//RS }
+//RS 
+//RS fn validate_git_transport_url(
+//RS     url: &str,
+//RS     project_root: &Path,
+//RS ) -> Result<ValidatedGitTransport, String> {
+//RS     if url.is_empty() || has_terminal_control(url) || url.starts_with('-') {
+//RS         return Err("the URL is empty or contains unsafe characters".to_string());
+//RS     }
+//RS     if let Some(path) = url.strip_prefix("file://") {
+//RS         if path.is_empty() || path.contains(['?', '#', '\\']) || !path.starts_with('/') {
+//RS             return Err("file URLs must name a local absolute path".to_string());
+//RS         }
+//RS         let source = validate_local_git_path(Path::new(path), project_root)?;
+//RS         return Ok(ValidatedGitTransport::Local(source));
+//RS     }
+//RS     if !url.contains("://") && !looks_like_scp_url(url) {
+//RS         return Err("local git paths must use file:// inside the project root".to_string());
+//RS     }
+//RS     let (scheme, authority) = if let Some((scheme, rest)) = url.split_once("://") {
+//RS         let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+//RS         (scheme.to_ascii_lowercase(), authority)
+//RS     } else {
+//RS         (
+//RS             "ssh".to_string(),
+//RS             url.split_once(':').map(|(host, _)| host).unwrap_or(""),
+//RS         )
+//RS     };
+//RS     if !matches!(scheme.as_str(), "git" | "http" | "https" | "ssh") {
+//RS         return Err(format!("the `{scheme}` transport is not allowed"));
+//RS     }
+//RS     if let Some((user, _)) = authority.rsplit_once('@') {
+//RS         if scheme != "ssh"
+//RS             || user.is_empty()
+//RS             || user.starts_with('-')
+//RS             || !user
+//RS                 .bytes()
+//RS                 .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+//RS         {
+//RS             return Err("SSH user-info must be a safe username".to_string());
+//RS         }
+//RS     }
+//RS     let host = host_from_git_authority(authority)?;
+//RS     if host.starts_with('-') {
+//RS         return Err("Git transport host must not begin with `-`".to_string());
+//RS     }
+//RS     let explicit_port = port_from_git_authority(authority)?;
+//RS     let port = if let Some(port) = explicit_port {
+//RS         port
+//RS     } else if scheme == "https" {
+//RS         443
+//RS     } else if scheme == "http" {
+//RS         80
+//RS     } else if scheme == "git" {
+//RS         9418
+//RS     } else {
+//RS         22
+//RS     };
+//RS     let endpoint = if host.contains(':') {
+//RS         format!("[{host}]:{port}")
+//RS     } else {
+//RS         format!("{host}:{port}")
+//RS     };
+//RS     let addresses = endpoint
+//RS         .to_socket_addrs()
+//RS         .map_err(|error| format!("could not resolve the destination: {error}"))?
+//RS         .collect::<Vec<_>>();
+//RS     if addresses.is_empty()
+//RS         || addresses
+//RS             .iter()
+//RS             .any(|address| !jet_net::is_public_ip(address.ip()))
+//RS     {
+//RS         return Err("the destination resolves to a non-public address".to_string());
+//RS     }
+//RS     Ok(ValidatedGitTransport::Network {
+//RS         scheme,
+//RS         host,
+//RS         port,
+//RS         explicit_port: explicit_port.is_some(),
+//RS         address: addresses[0].ip(),
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios"
+//RS ))]
+//RS fn validate_local_git_path(path: &Path, project_root: &Path) -> Result<LocalGitSource, String> {
+//RS     let resolver = crate::Authority::AuthorityResolver::open(project_root)
+//RS         .map_err(|error| format!("could not open the project root authority: {error}"))?;
+//RS     let candidate = std::fs::canonicalize(path)
+//RS         .map_err(|error| format!("could not resolve the local Git path: {error}"))?;
+//RS     if !candidate.starts_with(resolver.root()) {
+//RS         return Err("the local Git path resolves outside the project root".to_string());
+//RS     }
+//RS     let relative = candidate
+//RS         .strip_prefix(resolver.root())
+//RS         .map_err(|_| "the local Git path resolves outside the project root".to_string())?;
+//RS     let directory = resolver
+//RS         .checked_directory(relative)
+//RS         .map_err(|error| format!("could not open the local Git path authority: {error}"))?;
+//RS     let authority = Store::directory_authority_from_file(&candidate, directory.handle.as_ref())
+//RS         .map_err(|error| format!("could not retain the local Git path authority: {error}"))?;
+//RS     Store::hash_directory_authority(&authority, true)
+//RS         .map_err(|error| format!("local Git source contains unsafe files: {error}"))?;
+//RS     let handle = authority
+//RS         .inheritable_clone()
+//RS         .map_err(|error| format!("could not retain the local Git descriptor: {error}"))?;
+//RS     Ok(LocalGitSource { handle })
+//RS }
+//RS 
+//RS #[cfg(windows)]
+//RS fn validate_local_git_path(_path: &Path, _project_root: &Path) -> Result<LocalGitSource, String> {
+//RS     Err("descriptor-relative Git source access is unavailable on Windows".to_string())
+//RS }
+//RS 
+//RS #[cfg(not(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios",
+//RS     windows
+//RS )))]
+//RS fn validate_local_git_path(_path: &Path, _project_root: &Path) -> Result<LocalGitSource, String> {
+//RS     Err("descriptor-relative Git source access is unavailable on this platform".to_string())
+//RS }
+//RS 
+//RS 
+//RS 
+//RS fn looks_like_scp_url(url: &str) -> bool {
+//RS     url.split_once(':')
+//RS         .map(|(host, path)| {
+//RS             !host.is_empty()
+//RS                 && !path.is_empty()
+//RS                 && !host.contains(['/', '?', '#'])
+//RS                 && !host.ends_with('\\')
+//RS         })
+//RS         .unwrap_or(false)
+//RS }
+//RS 
+//RS fn host_from_git_authority(authority: &str) -> Result<String, String> {
+//RS     let authority = authority
+//RS         .rsplit_once('@')
+//RS         .map(|(_, host)| host)
+//RS         .unwrap_or(authority);
+//RS     if authority.is_empty() || authority.contains(['@', '\\']) {
+//RS         return Err("the URL has no valid host".to_string());
+//RS     }
+//RS     if let Some(host) = authority.strip_prefix('[') {
+//RS         let (host, suffix) = host
+//RS             .split_once(']')
+//RS             .ok_or_else(|| "the URL has an invalid IPv6 host".to_string())?;
+//RS         if host.is_empty() || (!suffix.is_empty() && !suffix.starts_with(':')) {
+//RS             return Err("the URL has an invalid host".to_string());
+//RS         }
+//RS         return Ok(host.to_string());
+//RS     }
+//RS     let host = authority
+//RS         .rsplit_once(':')
+//RS         .map(|(host, _)| host)
+//RS         .unwrap_or(authority);
+//RS     if host.is_empty() || host.contains(':') || host.chars().any(char::is_whitespace) {
+//RS         return Err("the URL has an invalid host".to_string());
+//RS     }
+//RS     Ok(host.to_string())
+//RS }
+//RS 
+//RS fn port_from_git_authority(authority: &str) -> Result<Option<u16>, String> {
+//RS     let authority = authority
+//RS         .rsplit_once('@')
+//RS         .map(|(_, host)| host)
+//RS         .unwrap_or(authority);
+//RS     let raw_port = if let Some(host) = authority.strip_prefix('[') {
+//RS         host.split_once(']')
+//RS             .and_then(|(_, suffix)| suffix.strip_prefix(':'))
+//RS     } else {
+//RS         authority.rsplit_once(':').map(|(_, port)| port)
+//RS     };
+//RS     raw_port
+//RS         .map(|port| {
+//RS             let port = port
+//RS                 .parse::<u16>()
+//RS                 .map_err(|_| "the URL has an invalid port".to_string())?;
+//RS             if port == 0 {
+//RS                 return Err("the URL has an invalid port".to_string());
+//RS             }
+//RS             Ok(port)
+//RS         })
+//RS         .transpose()
+//RS }
+//RS 
+//RS fn unix_now() -> u64 {
+//RS     std::time::SystemTime::now()
+//RS         .duration_since(std::time::UNIX_EPOCH)
+//RS         .map(|d| d.as_secs())
+//RS         .unwrap_or(0)
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     #[test]
+//RS     fn git_revision_allowlist_rejects_option_and_control_injection() {
+//RS         assert!(super::validate_git_revision("main").is_ok());
+//RS         assert!(super::validate_git_revision("--upload-pack=touch pwned").is_err());
+//RS         assert!(super::validate_git_revision("main\n--upload-pack=touch").is_err());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn git_diagnostics_keep_source_data_but_escape_terminal_projection() {
+//RS         let diagnostic = super::git_transport_diagnostic(
+//RS             "https://example.invalid/repo.git\nforged",
+//RS             "provider stderr: \x1b[31mfailed",
+//RS         );
+//RS         let rendered = diagnostic.render("", "");
+//RS         assert!(!rendered.contains('\x1b'));
+//RS         assert!(rendered.contains("\\nforged"));
+//RS         assert!(rendered.contains("\\u{001b}"));
+//RS         assert!(diagnostic.why.contains('\n'));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn git_network_transport_pins_validated_address_and_disables_redirects() {
+//RS         let https_url = "https://8.8.8.8/repository.git";
+//RS         let https = super::validate_git_transport_url(https_url, std::path::Path::new("."))
+//RS             .expect("numeric public HTTPS host should validate");
+//RS         assert_eq!(https.pinned_url(https_url), https_url);
+//RS         assert_eq!(
+//RS             https.git_config_values(),
+//RS             vec![
+//RS                 "http.followRedirects=false".to_string(),
+//RS                 "http.proxy=".to_string(),
+//RS                 "http.sslVerify=true".to_string(),
+//RS                 "http.curloptResolve=8.8.8.8:443:8.8.8.8".to_string(),
+//RS             ]
+//RS         );
+//RS         let rebound = super::ValidatedGitTransport::Network {
+//RS             scheme: "https".to_string(),
+//RS             host: "rebind.example".to_string(),
+//RS             port: 443,
+//RS             explicit_port: false,
+//RS             address: "8.8.8.8".parse().unwrap(),
+//RS         };
+//RS         assert_eq!(
+//RS             rebound.pinned_url("https://rebind.example/repository.git"),
+//RS             "https://rebind.example/repository.git"
+//RS         );
+//RS         assert!(rebound
+//RS             .git_config_values()
+//RS             .iter()
+//RS             .any(|value| value == "http.curloptResolve=rebind.example:443:8.8.8.8"));
+//RS         assert_eq!(super::curl_resolve_host("2001:db8::1"), "[2001:db8::1]");
+//RS 
+//RS         let git_url = "git://8.8.8.8/repository.git";
+//RS         let git = super::validate_git_transport_url(git_url, std::path::Path::new("."))
+//RS             .expect("numeric public Git host should validate");
+//RS         assert_eq!(
+//RS             git.pinned_url(git_url),
+//RS             "git://8.8.8.8/repository.git".to_string()
+//RS         );
+//RS 
+//RS         let ssh = super::validate_git_transport_url(
+//RS             "ssh://git@8.8.8.8/repository.git",
+//RS             std::path::Path::new("."),
+//RS         )
+//RS         .expect("numeric public SSH host should validate");
+//RS         assert!(ssh
+//RS             .ssh_command()
+//RS             .expect("SSH transport should pin its address")
+//RS             .contains("-oHostName=8.8.8.8"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn git_transport_rejects_reserved_ipv4_destination() {
+//RS         for address in ["192.0.0.1", "192.0.0.9", "192.0.0.255"] {
+//RS             let url = format!("https://{address}/repository.git");
+//RS             assert!(
+//RS                 super::validate_git_transport_url(&url, std::path::Path::new(".")).is_err(),
+//RS                 "reserved Git destination was accepted: {url}"
+//RS             );
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0814 Source/Fetch.rs:1798-3221
+

@@ -8,26 +8,26 @@
 // bytes. This file owns the records, the encoder, the bounded decoder, the
 // per-field validators, and the CLI status report.
 
-@STORE_ARCHIVE_MAGIC :: "jet-hangar-archive-v1"
-@STORE_ARCHIVE_NIX_MANIFEST_TRAILER :: 2
-@STORE_MAX_ARCHIVE_BYTES :: 1073741824
-@STORE_ARCHIVE_MAX_OBJECTS :: 16384
-@STORE_ARCHIVE_MAX_NODES_PER_OBJECT :: 1000000
-@STORE_ARCHIVE_MAX_FIELD_BYTES :: 16777216
-@STORE_ARCHIVE_MAX_NODE_BYTES :: 536870912
-@STORE_ARCHIVE_STAGE :: ".archive-stage"
-@STORE_ARCHIVE_KEY :: "hangar.key"
+STORE_ARCHIVE_MAGIC :: prep { "jet-hangar-archive-v1" }
+STORE_ARCHIVE_NIX_MANIFEST_TRAILER :: prep { 2 }
+STORE_MAX_ARCHIVE_BYTES :: prep { 1073741824 }
+STORE_ARCHIVE_MAX_OBJECTS :: prep { 16384 }
+STORE_ARCHIVE_MAX_NODES_PER_OBJECT :: prep { 1000000 }
+STORE_ARCHIVE_MAX_FIELD_BYTES :: prep { 16777216 }
+STORE_ARCHIVE_MAX_NODE_BYTES :: prep { 536870912 }
+STORE_ARCHIVE_STAGE :: prep { ".archive-stage" }
+STORE_ARCHIVE_KEY :: prep { "hangar.key" }
 
 // Unix permission masks (octal 7777, 0222, 0200, 0600, 0644).
-@STORE_MODE_PERMISSION_BITS :: 0xFFF
-@STORE_MODE_WRITE_BITS :: 0x92
-@STORE_MODE_OWNER_WRITE :: 0x80
-@STORE_MODE_PRIVATE_FILE :: 0x180
-@STORE_MODE_DEFAULT_FILE :: 0x1A4
+STORE_MODE_PERMISSION_BITS :: prep { 0xFFF }
+STORE_MODE_WRITE_BITS :: prep { 0x92 }
+STORE_MODE_OWNER_WRITE :: prep { 0x80 }
+STORE_MODE_PRIVATE_FILE :: prep { 0x180 }
+STORE_MODE_DEFAULT_FILE :: prep { 0x1A4 }
 
 // The archive magic: the format name and one NUL byte.
 fn store_archive_magic() -> [U8] Never! {
-    magic := @STORE_ARCHIVE_MAGIC.bytes()
+    magic := STORE_ARCHIVE_MAGIC.bytes()
     &magic.push(U8{0})
     magic
 }
@@ -42,10 +42,10 @@ pub struct HangarArchiveReport {
     // Stable `jet.status/v1` output for the Hangar CLI (Rust `report_json`).
     fn json(self, action: String) -> String Never! {
         fields :: StatusFields.new()
-            .with("bytes", DataTree.Int(self.bytes))
-            .with("objects", DataTree.Int(self.objects))
-            .with("root", DataTree.Text(self.root))
-            .with("signed", DataTree.Bool(self.signed))
+            .with("bytes", StatusValue.Integer{value: self.bytes})
+            .with("objects", StatusValue.Integer{value: self.objects})
+            .with("root", StatusValue.String{value: self.root})
+            .with("signed", StatusValue.Bool{value: self.signed})
         StatusEnvelope.new(action, true).with_fields(fields).json()
     }
 }
@@ -135,14 +135,14 @@ pub struct NixClosureManifest {
         revision :: reader.string()
         cache_key :: reader.string()
         count :: &reader.u32()
-        if count > @STORE_ARCHIVE_MAX_OBJECTS -> return Err(StoreError.InvalidData("Nix closure manifest contains too many members"))
+        if count > STORE_ARCHIVE_MAX_OBJECTS -> return Err(StoreError.InvalidData("Nix closure manifest contains too many members"))
         members := [NixClosureMember]{}
         loop _ in 0..<count {
             key :: reader.string()
             hash :: reader.string()
             size :: &reader.u64()
             reference_count :: &reader.u32()
-            if reference_count > @STORE_ARCHIVE_MAX_OBJECTS {
+            if reference_count > STORE_ARCHIVE_MAX_OBJECTS {
                 return Err(StoreError.InvalidData("Nix closure manifest member contains too many references"))
             }
             references := [String]{}
@@ -205,7 +205,7 @@ pub struct HangarArchive {
         }
         if self.nix_manifest == {
             .Val(manifest) -> {
-                &out.push(U8{@STORE_ARCHIVE_NIX_MANIFEST_TRAILER})
+                &out.push(U8{STORE_ARCHIVE_NIX_MANIFEST_TRAILER})
                 manifest.encode_into(&out)
             }
             .None -> {}
@@ -237,14 +237,14 @@ pub struct HangarArchive {
     // Bounded decode: every length, count, identity, path, and node kind is
     // checked before the value is built.
     fn decode(bytes: [U8]) -> HangarArchive StoreError! {
-        if bytes.len() > @STORE_MAX_ARCHIVE_BYTES -> return Err(StoreError.InvalidData("archive exceeds the 1 GiB limit"))
+        if bytes.len() > STORE_MAX_ARCHIVE_BYTES -> return Err(StoreError.InvalidData("archive exceeds the 1 GiB limit"))
         reader := HangarArchiveReader{bytes, at: 0}
         magic :: store_archive_magic()
         if &reader.take_bytes(magic.len()) != magic -> return Err(StoreError.InvalidData("archive has an unknown format"))
         root_id :: reader.string()
         store_archive_validate_id(root_id)
         count :: &reader.u32()
-        if count > @STORE_ARCHIVE_MAX_OBJECTS -> return Err(StoreError.InvalidData("archive contains too many records"))
+        if count > STORE_ARCHIVE_MAX_OBJECTS -> return Err(StoreError.InvalidData("archive contains too many records"))
         objects := [HangarArchiveObject]{}
         output_digests := [String]{}
         package_ids := [String]{}
@@ -266,7 +266,7 @@ pub struct HangarArchive {
             }
             root_mode :: &reader.u32()
             node_count :: &reader.u32()
-            if node_count > @STORE_ARCHIVE_MAX_NODES_PER_OBJECT -> return Err(StoreError.InvalidData("archive output has too many nodes"))
+            if node_count > STORE_ARCHIVE_MAX_NODES_PER_OBJECT -> return Err(StoreError.InvalidData("archive output has too many nodes"))
             nodes := [HangarArchiveNode]{}
             loop _ in 0..<node_count {
                 kind_code :: Int.from_u8(&reader.byte())
@@ -274,7 +274,7 @@ pub struct HangarArchive {
                 store_archive_validate_relative(path)
                 mode :: &reader.u32()
                 size :: &reader.u64()
-                if size < 0 || size > @STORE_ARCHIVE_MAX_NODE_BYTES -> return Err(StoreError.InvalidData("archive node exceeds the 512 MiB limit"))
+                if size < 0 || size > STORE_ARCHIVE_MAX_NODE_BYTES -> return Err(StoreError.InvalidData("archive node exceeds the 512 MiB limit"))
                 kind :: HangarArchiveNodeKind.from_wire_tag(kind_code) ?? return Err(StoreError.InvalidData("archive contains an unknown node kind"))
                 payload :: if kind == {
                     .Directory -> {
@@ -289,14 +289,14 @@ pub struct HangarArchive {
             &objects.push(HangarArchiveObject{id, digest, meta, root_mode, nodes})
         }
         trailer :: Int.from_u8(&reader.byte())
-        nix_manifest := None
+        nix_manifest := NixClosureManifest?{None}
         signature_tag := trailer
-        if trailer == @STORE_ARCHIVE_NIX_MANIFEST_TRAILER {
+        if trailer == STORE_ARCHIVE_NIX_MANIFEST_TRAILER {
             nix_manifest = Val(NixClosureManifest.decode_from(&reader))
             signature_tag = Int.from_u8(&reader.byte())
         }
         if signature_tag != 0 && signature_tag != 1 -> return Err(StoreError.InvalidData("archive has an unknown signature trailer"))
-        signature := None
+        signature := HangarArchiveSignature?{None}
         if signature_tag == 1 {
             key_id :: reader.string()
             algorithm :: reader.string()
@@ -317,7 +317,7 @@ pub struct HangarArchive {
     // the caller allows them.
     fn verify_signature(self, roots: HangarRoots, requested: String?, allow_unsigned: Bool) StoreError! {
         signature :: self.signature ?? {
-            if allow_unsigned -> return Ok()
+            if allow_unsigned -> return
             return Err(StoreError.InvalidData("unsigned Hangar archives are refused by default"))
         }
         key :: store_archive_signing_key(roots, requested, false)
@@ -371,7 +371,7 @@ struct HangarArchiveReader {
 
     fn string(&self) -> String StoreError! {
         len :: &self.u32()
-        if len > @STORE_ARCHIVE_MAX_FIELD_BYTES -> return Err(StoreError.InvalidData("archive field is too large"))
+        if len > STORE_ARCHIVE_MAX_FIELD_BYTES -> return Err(StoreError.InvalidData("archive field is too large"))
         raw :: &self.take_bytes(len)
         text :: String.from_bytes(raw) ?? return Err(StoreError.InvalidData("archive field is not UTF-8"))
         Ok(text)
@@ -398,7 +398,7 @@ fn store_archive_put_u64(out: &[U8], value: Int) Never! {
 
 fn store_archive_put_string(out: &[U8], value: String) StoreError! {
     raw :: value.bytes()
-    if raw.len() > @STORE_ARCHIVE_MAX_FIELD_BYTES -> return Err(StoreError.InvalidData("archive field is too large"))
+    if raw.len() > STORE_ARCHIVE_MAX_FIELD_BYTES -> return Err(StoreError.InvalidData("archive field is too large"))
     store_archive_put_u32(&out, raw.len())
     loop byte in raw -> &out.push(byte)
 }

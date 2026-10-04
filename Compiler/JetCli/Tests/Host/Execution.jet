@@ -1,0 +1,102 @@
+// Main-authorized controlled execution-host tests, not a native O0 proof.
+use jet_foundation.[
+    MIRProgram, MIRFunctionID, MIRCffiFacts, MIRCImportLink, MIRCLib,
+    MIRCOverlayOverride, MIRFFIBoundaryFacts, MIRCloseAdapter, MIRPackageFacts,
+    MIRRuntimePartID, MIRTargetDossier, MIRRuntimeLayer, MIRTargetHardwareUse,
+    MIRTargetRegisterAccessFact, MIRTargetInterruptHandlerFact,
+    MIRTargetDMAOperationFact, MIRTargetHardwareUnresolvedReference,
+    MIRHardwareSetup, MIRNameFacts, MIRNameModule, MIRNameDeclaration,
+    MIRNameAlias, MIRNameReference, MIRStructureFact, MIRModule, MIRImport,
+    MIRTypeDef, MIRTraitDef, MIRCoreOwner, MIRImplDef, MIRConstantDef,
+    MIRFieldRow, MIRSourceFile, MIRFunction, MIRForeign, MIRLinkUnit,
+    MIRCallbackAdapter, MIRHandleLifecycle, MIRJob, MIRTestCase,
+    MIRHarnessPlan, MIRArtifactPlan, MIRCoreCall, MIRPreludeCall, MIRType,
+    MIRSchemaMigrationPlan, MIRUnreachable, MIR_SCHEMA_VERSION,
+    WatchPolicy,
+]
+use jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverAuthorizedSourceRoot]
+
+fn jet_cli_execution_test_request() -> JetCLIExecutionRequest Never! {
+    program :: MIRProgram{
+        cffi: MIRCffiFacts{import_links: [MIRCImportLink]{}, libs: [MIRCLib]{}, overlay_overrides: [MIRCOverlayOverride]{}, boundaries: [MIRFFIBoundaryFacts]{}, direct_links: [String]{}, transitive_links: [String]{}, close_adapters: [MIRCloseAdapter]{}},
+        schema_version: MIR_SCHEMA_VERSION, package_identity: "execution-fixture",
+        facts: MIRPackageFacts{project_root: "/project", edition: "2028", runtime_parts: [MIRRuntimePartID]{}, uses_arrow: false, active_os: "linux", inferred_layer: "std", allocator: "", package_version: "0.0.1", artifact_target: None, target_dossier: MIRTargetDossier{machine: None, layer: MIRRuntimeLayer.Std, provider_identity: "", closure_identity: "", linker_identity: "", tier_identity: "", compiler_identity: "", environment_identity: "", dependency_identity: ""}, web_app: None, authority_needs: [String]{}, hardware_use: MIRTargetHardwareUse{register_accesses: [MIRTargetRegisterAccessFact]{}, interrupt_handlers: [MIRTargetInterruptHandlerFact]{}, dma_operations: [MIRTargetDMAOperationFact]{}, unresolved_references: [MIRTargetHardwareUnresolvedReference]{}}, hardware_profile: None, hardware_profile_id: "", hardware_capabilities: [String]{}, hardware_setups: [MIRHardwareSetup]{}},
+        names: MIRNameFacts{modules: [MIRNameModule]{}, declarations: [MIRNameDeclaration]{}, aliases: [MIRNameAlias]{}, references: [MIRNameReference]{}, structure_facts: [MIRStructureFact]{}},
+        modules: [MIRModule]{}, imports: [MIRImport]{}, types: [MIRTypeDef]{}, traits: [MIRTraitDef]{}, core_owners: [MIRCoreOwner]{}, impls: [MIRImplDef]{}, constants: [MIRConstantDef]{}, fields: [MIRFieldRow]{}, source_files: [MIRSourceFile]{}, functions: [MIRFunction]{}, foreign: [MIRForeign]{}, links: [MIRLinkUnit]{}, callbacks: [MIRCallbackAdapter]{}, handles: [MIRHandleLifecycle]{}, jobs: [MIRJob]{}, tests: [MIRTestCase]{}, harnesses: [MIRHarnessPlan]{}, artifacts: [MIRArtifactPlan]{}, core_calls: [MIRCoreCall]{}, prelude_calls: [MIRPreludeCall]{}, type_instances: [MIRType]{}, codec_migrations: [String:MIRSchemaMigrationPlan]{}, unreachable: [MIRUnreachable]{},
+    }
+    JetCLIExecutionRequest{program: program, entry: MIRFunctionID{value: 1}, artifact_identity: "fixture-artifact", sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{}, entry_root_identity: "fixture-root", entry_path: "/project/main.jet"}, cwd: "/project", argv: [String]{"/project/main.jet", "-child", "evil; arg"}, environment: [String:String?]{"JET_TEST_FILTER": Val("one"), "JET_TEST_CAPTURE": None}, stdio: JetCLIExecutionStdio.Capture}
+}
+
+struct JetCLIExecutionTestHost {
+    calls: [String]
+    fail: String
+    impl JetCLIExecutionHost {
+        fn launch(&self, request: JetCLIExecutionRequest) -> JetCLIExecutionSession JetCLIExecutionError! {
+            &self.calls.push("launch")
+            assert_eq(request.argv, [String]{"/project/main.jet", "-child", "evil; arg"})
+            // #4410: original synthesized require_eq repro, retained verbatim.
+            // assert_eq(request.environment.get("JET_TEST_FILTER"), Val(Val("one")))
+            // assert_eq(request.environment.get("JET_TEST_CAPTURE"), Val(None))
+            assert_eq(request.environment.get("JET_TEST_FILTER") ?? panic("missing filter binding") ?? panic("removed filter"), "one")
+            assert((request.environment.get("JET_TEST_CAPTURE") ?? panic("missing capture binding")) == None)
+            assert_eq(request.artifact_identity, "fixture-artifact")
+            if self.fail == "launch" -> return Err(JetCLIExecutionError{operation: "launch", message: "denied"})
+            Ok(JetCLIExecutionSession{identity: 7})
+        }
+        fn wait(&self, session: JetCLIExecutionSession) -> JetCLIExecutionResult JetCLIExecutionError! {
+            &self.calls.push("wait")
+            assert_eq(session.identity, 7)
+            if self.fail == "wait" || self.fail == "wait-close" -> return Err(JetCLIExecutionError{operation: "wait", message: "stop"})
+            Ok(JetCLIExecutionResult{exit_code: 23, stdout: String.from_bytes([U8]{111, 117, 116, 0, 10}) ?? panic("fixture stdout is UTF-8"), stderr: "err\n"})
+        }
+        fn reload(&self, session: JetCLIExecutionSession, request: JetCLIExecutionRequest, policy: WatchPolicy) JetCLIExecutionError! { &self.calls.push("reload") }
+        fn next_change(&self, session: JetCLIExecutionSession) -> JetCLIExecutionChange JetCLIExecutionError! { Ok(JetCLIExecutionChange.Stop) }
+        fn close(&self, session: JetCLIExecutionSession) JetCLIExecutionError! {
+            &self.calls.push("close")
+            if self.fail == "close" || self.fail == "wait-close" -> return Err(JetCLIExecutionError{operation: "close", message: "join"})
+        }
+    }
+}
+#Test("execution keeps child arguments, explicit environment, streams and nonzero exit") {
+    host := JetCLIExecutionTestHost{calls: [String]{}, fail: ""}
+    request :: jet_cli_execution_test_request()
+    result :: jet_cli_execute_once<JetCLIExecutionTestHost>(request, &host) ?? panic("execute")
+    assert_eq(result.exit_code, 23)
+    assert_eq(result.stdout.bytes(), [U8]{111, 117, 116, 0, 10})
+    assert_eq(result.stderr, "err\n")
+    assert_eq(host.calls, [String]{"launch", "wait", "close"})
+}
+#Test("launch failure owns no session to wait or release") {
+    host := JetCLIExecutionTestHost{calls: [String]{}, fail: "launch"}
+    request :: jet_cli_execution_test_request()
+    _ :: jet_cli_execute_once<JetCLIExecutionTestHost>(request, &host) ?? {
+        assert_eq(err.operation, "launch")
+        assert_eq(host.calls, [String]{"launch"})
+        return
+    }
+    panic("launch failure accepted")
+}
+#Test("wait failure still closes and preserves primary failure if close also fails") {
+    failures :: [String]{"wait", "wait-close"}
+    loop failure in failures {
+        host := JetCLIExecutionTestHost{calls: [String]{}, fail: failure}
+        request :: jet_cli_execution_test_request()
+        operation := ""
+        _ :: jet_cli_execute_once<JetCLIExecutionTestHost>(request, &host) ?? {
+            operation = ~err.operation
+            JetCLIExecutionResult{exit_code: 0, stdout: "", stderr: ""}
+        }
+        assert_eq(operation, "wait")
+        assert_eq(host.calls, [String]{"launch", "wait", "close"})
+    }
+}
+#Test("cleanup failure cannot turn a completed child into successful host execution") {
+    host := JetCLIExecutionTestHost{calls: [String]{}, fail: "close"}
+    request :: jet_cli_execution_test_request()
+    _ :: jet_cli_execute_once<JetCLIExecutionTestHost>(request, &host) ?? {
+        assert_eq(err.operation, "close")
+        assert_eq(host.calls, [String]{"launch", "wait", "close"})
+        return
+    }
+    panic("cleanup failure accepted")
+}

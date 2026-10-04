@@ -30,20 +30,20 @@ pub enum ProviderAdapter {
             .Cran -> CranProvider{}.validate_cache_authority(spec, table, ctx)
             .LuaRocks -> LuaRocksProvider{}.validate_cache_authority(spec, table, ctx)
             .ScriptRegistry(kind) -> ScriptRegistryProvider{kind}.validate_cache_authority(spec, table, ctx)
-            else -> Ok()
+            else -> {}
         }
     }
 
     // The exact current identity required to trust a cached output. A
     // provider that cannot derive it gets no early cache path.
-    fn cache_expectation(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
+    fn cache_expectation(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
         if self == {
-            .Nix -> NixProvider{}.cache_expectation(spec, table, ctx)
-            .Core -> CoreProvider{}.cache_expectation(spec, table, ctx)
-            .Cran -> CranProvider{}.cache_expectation(spec, table, ctx)
-            .LuaRocks -> LuaRocksProvider{}.cache_expectation(spec, table, ctx)
-            .ScriptRegistry(kind) -> ScriptRegistryProvider{kind}.cache_expectation(spec, table, ctx)
-            .Native -> NativeReleaseProvider{}.cache_expectation(spec, table, ctx)
+            .Nix -> NixProvider{}.cache_expectation(&verification, spec, table, ctx)
+            .Core -> CoreProvider{}.cache_expectation(&verification, spec, table, ctx)
+            .Cran -> CranProvider{}.cache_expectation(&verification, spec, table, ctx)
+            .LuaRocks -> LuaRocksProvider{}.cache_expectation(&verification, spec, table, ctx)
+            .ScriptRegistry(kind) -> ScriptRegistryProvider{kind}.cache_expectation(&verification, spec, table, ctx)
+            .Native -> NativeReleaseProvider{}.cache_expectation(&verification, spec, table, ctx)
             .Unsupported(_) -> None
         }
     }
@@ -58,14 +58,14 @@ pub enum ProviderAdapter {
 
     // Plan acquisition for this adapter's refs; the caller groups refs by
     // adapter so Nix can plan one shared closure.
-    fn plan_downloads(self, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
+    fn plan_downloads(self, verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
         if self == {
-            .Nix -> NixProvider{}.plan_downloads(specs, table, ctx)
-            .Core -> CoreProvider{}.plan_downloads(specs, table, ctx)
-            .Cran -> CranProvider{}.plan_downloads(specs, table, ctx)
-            .LuaRocks -> LuaRocksProvider{}.plan_downloads(specs, table, ctx)
-            .ScriptRegistry(kind) -> ScriptRegistryProvider{kind}.plan_downloads(specs, table, ctx)
-            .Native -> NativeReleaseProvider{}.plan_downloads(specs, table, ctx)
+            .Nix -> NixProvider{}.plan_downloads(&verification, specs, table, ctx)
+            .Core -> CoreProvider{}.plan_downloads(&verification, specs, table, ctx)
+            .Cran -> CranProvider{}.plan_downloads(&verification, specs, table, ctx)
+            .LuaRocks -> LuaRocksProvider{}.plan_downloads(&verification, specs, table, ctx)
+            .ScriptRegistry(kind) -> ScriptRegistryProvider{kind}.plan_downloads(&verification, specs, table, ctx)
+            .Native -> NativeReleaseProvider{}.plan_downloads(&verification, specs, table, ctx)
             .Unsupported(_) -> Ok(DownloadPlan.empty())
         }
     }
@@ -87,14 +87,14 @@ pub enum ProviderAdapter {
         }
     }
 
-    fn realize(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+    fn realize(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
         if self == {
-            .Nix -> NixProvider{}.realize(spec, table, ctx)
-            .Core -> CoreProvider{}.realize(spec, table, ctx)
-            .Cran -> CranProvider{}.realize(spec, table, ctx)
-            .LuaRocks -> LuaRocksProvider{}.realize(spec, table, ctx)
-            .ScriptRegistry(kind) -> ScriptRegistryProvider{kind}.realize(spec, table, ctx)
-            .Native -> NativeReleaseProvider{}.realize(spec, table, ctx)
+            .Nix -> NixProvider{}.realize(&verification, spec, table, ctx)
+            .Core -> CoreProvider{}.realize(&verification, spec, table, ctx)
+            .Cran -> CranProvider{}.realize(&verification, spec, table, ctx)
+            .LuaRocks -> LuaRocksProvider{}.realize(&verification, spec, table, ctx)
+            .ScriptRegistry(kind) -> ScriptRegistryProvider{kind}.realize(&verification, spec, table, ctx)
+            .Native -> NativeReleaseProvider{}.realize(&verification, spec, table, ctx)
             .Unsupported(label) -> Err(ProviderError.Unsupported("provider `{label}` has no realization path for `{spec.raw}`; import and lock its native facts first"))
         }
     }
@@ -125,13 +125,13 @@ fn provider_for_ref(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, E
 
 // Check the provider authority recorded for a project cache binding.
 pub fn provider_validate_cache_authority(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env, Exec, Net, Time.Wait, Rand]> {
-    if ctx.project_dir == None -> return Ok()
+    if ctx.project_dir == None -> return
     provider_for_ref(spec, table, ctx).validate_cache_authority(spec, table, ctx)
 }
 
 // Independently derive every fact required to trust an existing cache record.
-pub fn provider_cache_expectation(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
-    provider_for_ref(spec, table, ctx).cache_expectation(spec, table, ctx)
+pub fn provider_cache_expectation(verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
+    provider_for_ref(spec, table, ctx).cache_expectation(&verification, spec, table, ctx)
 }
 
 // The exact external approval subject for a provider action, without
@@ -203,7 +203,7 @@ fn provider_resolve_kind_in_context(spec: RefSpec, table: SourceTable, ctx: Prov
 // in first-seen order. Nix uses the signed index plus narinfo closure; native
 // release fixtures contribute their exact artifact length. Providers without
 // a byte-bearing metadata seam keep the total unknown instead of inventing it.
-pub fn provider_plan_downloads(specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan ProviderError! {
+pub fn provider_plan_downloads(verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan ProviderError! {
     kinds := [ProviderKind]{}
     grouped := [[RefSpec]]{}
     loop spec in specs {
@@ -221,7 +221,7 @@ pub fn provider_plan_downloads(specs: [RefSpec], table: SourceTable, ctx: Provid
     }
     plan := DownloadPlan.empty()
     loop index in 0..<kinds.len() {
-        &plan.extend(provider_for(kinds[index]).plan_downloads(grouped[index], table, ctx))
+        &plan.extend(provider_for(kinds[index]).plan_downloads(&verification, grouped[index], table, ctx))
     }
     Ok(plan)
 }
@@ -248,8 +248,8 @@ pub fn provider_requires_acquisition(spec: RefSpec, table: SourceTable, offline:
 
 // Realize a ref through its provider. The resolver never knows which backend
 // runs; every result carries the refreshed shared provider facts.
-pub fn provider_realize(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
-    realized := provider_for_ref(spec, table, ctx).realize(spec, table, ctx)
+pub fn provider_realize(verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+    realized := provider_for_ref(spec, table, ctx).realize(&verification, spec, table, ctx)
     provider_refresh_provider_facts(&realized.producer, realized.reference)
     Ok(realized)
 }
@@ -269,7 +269,7 @@ fn provider_infer_remote_kind(upstream: String, offline: Bool, cache_dir: String
     remote :: RemoteSource.parse(upstream) ?? return ProviderKind.Nix
     cache :: provider_source_cache_dir(cache_dir, remote)
     if files.is_dir(cache) {
-        return provider_pack_kind(files.is_file(files.join(cache, @PACKAGE_FILE)) || files.is_file(files.join(cache, @PAYLOAD_FILE)))
+        return provider_pack_kind(files.is_file(files.join(cache, PACKAGE_FILE)) || files.is_file(files.join(cache, PAYLOAD_FILE)))
     }
     exact :: if remote.rev == {
         .Val(rev) -> rev.bytes().len() == 40 && provider_is_ascii_hex(rev)
@@ -333,7 +333,7 @@ fn provider_peek_pack_markers(tmp: String, remote: RemoteSource) -[Env, Exec, Ti
     set_up :: provider_git_in(tmp, [String]{"init", "--quiet"}) && provider_git_in(tmp, [String]{"remote", "add", "origin", remote.url})
     fetched :: set_up && provider_git_in(tmp, [String]{"fetch", "--quiet", "--depth", "1", "--filter=tree:0", "origin", rev})
     if !fetched -> return false
-    listing :: provider_git_output_in(tmp, [String]{"ls-tree", "FETCH_HEAD", @PACKAGE_FILE, @PAYLOAD_FILE}) ?? return false
+    listing :: provider_git_output_in(tmp, [String]{"ls-tree", "FETCH_HEAD", PACKAGE_FILE, PAYLOAD_FILE}) ?? return false
     listing != ""
 }
 

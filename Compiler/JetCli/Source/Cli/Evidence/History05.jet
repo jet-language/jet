@@ -1,0 +1,978 @@
+// PORT-PENDING 0720 source-store-slice-1818: Source/Store.rs:1818-2791
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS pub(crate) fn copy_directory_authority(
+//RS     source: &DirectoryAuthority,
+//RS     destination: &DirectoryAuthority,
+//RS     reject_hardlinks: bool,
+//RS ) -> io::Result<()> {
+//RS     let names = source.list_names()?;
+//RS     for name in &names {
+//RS         let mut source_file = source.open_child(name)?;
+//RS         let metadata = source_file.metadata()?;
+//RS         let name_str = name.to_str().ok_or_else(|| {
+//RS             io::Error::new(io::ErrorKind::InvalidData, "package tree contains a non-UTF-8 name")
+//RS         })?;
+//RS         if metadata.is_dir() {
+//RS             if ignored_tree_name(name_str) {
+//RS                 continue;
+//RS             }
+//RS             let child_source = DirectoryAuthority::from_opened(source.path.join(name), source_file);
+//RS             let child = destination.create_child_directory(name)?;
+//RS             copy_directory_authority(&child_source, &child, reject_hardlinks)?;
+//RS         } else if metadata.is_file() {
+//RS             if reject_hardlinks && file_nlink(&metadata) > 1 {
+//RS                 return Err(io::Error::new(
+//RS                     io::ErrorKind::PermissionDenied,
+//RS                     format!("refusing multiply linked source file `{}`", source.path.join(name).display()),
+//RS                 ));
+//RS             }
+//RS             if ignored_tree_name(name_str) {
+//RS                 continue;
+//RS             }
+//RS             let mut destination_file = destination.create_child_file(name)?;
+//RS             copy_open_file(&mut source_file, &mut destination_file)?;
+//RS             let after = source_file.metadata()?;
+//RS             if !same_store_file_identity(&metadata, &after) {
+//RS                 return Err(io::Error::new(
+//RS                     io::ErrorKind::Other,
+//RS                     format!("package source file changed while copying `{}`", source.path.join(name).display()),
+//RS                 ));
+//RS             }
+//RS         } else {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::InvalidInput,
+//RS                 format!("package tree contains a special entry `{}`", source.path.join(name).display()),
+//RS             ));
+//RS         }
+//RS     }
+//RS     if names != source.list_names()? {
+//RS         return Err(io::Error::new(
+//RS             io::ErrorKind::Other,
+//RS             format!("package source changed while copying `{}`", source.path.display()),
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub(crate) fn link_directory_authority(
+//RS     source: &DirectoryAuthority,
+//RS     destination: &DirectoryAuthority,
+//RS ) -> io::Result<()> {
+//RS     let names = source.list_names()?;
+//RS     for name in &names {
+//RS         let mut source_file = source.open_child(name)?;
+//RS         let metadata = source_file.metadata()?;
+//RS         let name_str = name.to_str().ok_or_else(|| {
+//RS             io::Error::new(io::ErrorKind::InvalidData, "store entry contains a non-UTF-8 name")
+//RS         })?;
+//RS         if metadata.is_dir() {
+//RS             if ignored_tree_name(name_str) {
+//RS                 continue;
+//RS             }
+//RS             let child_source = DirectoryAuthority::from_opened(source.path.join(name), source_file);
+//RS             let child = destination.create_child_directory(name)?;
+//RS             link_directory_authority(&child_source, &child)?;
+//RS         } else if metadata.is_file() {
+//RS             if ignored_tree_name(name_str) {
+//RS                 continue;
+//RS             }
+//RS             if !directory_platform::link_file(&source_file, &destination.handle_ref(), name)? {
+//RS                 let mut destination_file = destination.create_child_file(name)?;
+//RS                 copy_open_file(&mut source_file, &mut destination_file)?;
+//RS             }
+//RS             let after = source_file.metadata()?;
+//RS             if !same_store_file_identity(&metadata, &after) {
+//RS                 return Err(io::Error::new(
+//RS                     io::ErrorKind::Other,
+//RS                     format!("store source file changed while linking `{}`", source.path.join(name).display()),
+//RS                 ));
+//RS             }
+//RS         } else {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::InvalidInput,
+//RS                 format!("store entry contains a special entry `{}`", source.path.join(name).display()),
+//RS             ));
+//RS         }
+//RS     }
+//RS     if names != source.list_names()? {
+//RS         return Err(io::Error::new(
+//RS             io::ErrorKind::Other,
+//RS             format!("store entry changed while linking `{}`", source.path.display()),
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS struct SnapshotCleanup {
+//RS     parent: DirectoryAuthority,
+//RS     name: OsString,
+//RS }
+//RS 
+//RS pub(crate) fn snapshot_directory_authority(
+//RS     source: &DirectoryAuthority,
+//RS ) -> Result<SourceSnapshot, Diagnostic> {
+//RS     let store = ensure_directory_authority(&store_dir())
+//RS         .map_err(|error| io_error("creating source snapshot store", &store_dir(), error))?;
+//RS     let snapshots = match store.open_child_directory(OsStr::new(".snapshots")) {
+//RS         Ok(directory) => directory,
+//RS         Err(error) if error.kind() == io::ErrorKind::NotFound => store
+//RS             .create_child_directory(OsStr::new(".snapshots"))
+//RS             .map_err(|error| io_error("creating source snapshot root", &store.path.join(".snapshots"), error))?,
+//RS         Err(error) => {
+//RS             return Err(io_error(
+//RS                 "opening source snapshot root",
+//RS                 &store.path.join(".snapshots"),
+//RS                 error,
+//RS             ))
+//RS         }
+//RS     };
+//RS     let (name, stage) = snapshots
+//RS         .create_private_child("source")
+//RS         .map_err(|error| io_error("creating source snapshot", snapshots.path(), error))?;
+//RS     let cleanup = || {
+//RS         let _ = snapshots.remove_child_tree(&name);
+//RS     };
+//RS     if let Err(error) = copy_directory_authority(source, &stage, true) {
+//RS         cleanup();
+//RS         return Err(io_error("snapshotting package source", source.path(), error));
+//RS     }
+//RS     let content_hash = match hash_directory_authority(&stage, false) {
+//RS         Ok(hash) => hash,
+//RS         Err(error) => {
+//RS             cleanup();
+//RS             return Err(io_error("hashing source snapshot", stage.path(), error));
+//RS         }
+//RS     };
+//RS     let cleanup_parent = snapshots
+//RS         .try_clone()
+//RS         .map_err(|error| io_error("retaining source snapshot authority", snapshots.path(), error))?;
+//RS     Ok(SourceSnapshot {
+//RS         path: stage.path.clone(),
+//RS         cleanup: Some(SnapshotCleanup {
+//RS             parent: cleanup_parent,
+//RS             name,
+//RS         }),
+//RS         content_hash,
+//RS     })
+//RS }
+//RS 
+//RS // ──────────────────────────────────────────────
+//RS // Store location
+//RS // ──────────────────────────────────────────────
+//RS 
+//RS /// Returns `~/.jet/store`.
+//RS /// If `JET_PACKAGE_STORE_DIR` is set, that directory is used instead (for testing).
+//RS pub fn store_dir() -> PathBuf {
+//RS     if let Ok(dir) = std::env::var("JET_PACKAGE_STORE_DIR") {
+//RS         return PathBuf::from(dir);
+//RS     }
+//RS     let home = std::env::var("HOME")
+//RS         .or_else(|_| std::env::var("USERPROFILE"))
+//RS         .unwrap_or_else(|_| ".".to_string());
+//RS     PathBuf::from(home).join(".jet").join("store")
+//RS }
+//RS 
+//RS /// Store path for a package: `~/.jet/store/<name>-<version>-<fingerprint>/`.
+//RS pub fn store_path(name: &str, version: &str, fingerprint: &str) -> PathBuf {
+//RS     let fp = fingerprint.strip_prefix("sha256-").unwrap_or(fingerprint);
+//RS     store_dir().join(format!("{}-{}-{}", name, version, fp))
+//RS }
+//RS 
+//RS /// A private, immutable-by-construction source snapshot. Callers must keep
+//RS /// this value alive while reading the package; the original path is never
+//RS /// consulted after the snapshot has been made.
+//RS pub struct SourceSnapshot {
+//RS     path: PathBuf,
+//RS     cleanup: Option<SnapshotCleanup>,
+//RS     content_hash: String,
+//RS }
+//RS 
+//RS impl SourceSnapshot {
+//RS     pub fn path(&self) -> &Path {
+//RS         &self.path
+//RS     }
+//RS 
+//RS     pub fn content_hash(&self) -> &str {
+//RS         &self.content_hash
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for SourceSnapshot {
+//RS     fn drop(&mut self) {
+//RS         if let Some(cleanup) = self.cleanup.take() {
+//RS             let _ = cleanup.parent.remove_child_tree(&cleanup.name);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Copy a source tree into an exclusive temporary directory and hash the
+//RS /// copied bytes. The returned hash describes the bytes callers must consume,
+//RS /// not a later re-read of the mutable source path.
+//RS pub fn snapshot_tree(source_dir: &Path) -> Result<SourceSnapshot, Diagnostic> {
+//RS     let source = open_directory_authority(source_dir)
+//RS         .map_err(|error| io_error("checking package source", source_dir, error))?;
+//RS     snapshot_directory_authority(&source)
+//RS }
+//RS 
+//RS 
+//RS // ──────────────────────────────────────────────
+//RS // Install / link into project
+//RS // ──────────────────────────────────────────────
+//RS 
+//RS /// Ensure a path dep's source is available in the store.
+//RS /// For path deps the store entry is the canonical source copy.
+//RS /// Returns `(store_path, content_hash)` — hash of the installed tree (D-CASTORE1=A).
+//RS pub fn ensure_path_dep(
+//RS     name: &str,
+//RS     version: &str,
+//RS     fingerprint: &str,
+//RS     source_dir: &Path,
+//RS ) -> Result<(PathBuf, String), Diagnostic> {
+//RS     validate_store_component(name).map_err(|reason| store_path_diagnostic(name, &reason))?;
+//RS     validate_store_component(version).map_err(|reason| store_path_diagnostic(version, &reason))?;
+//RS     let fingerprint = fingerprint.strip_prefix("sha256-").unwrap_or(fingerprint);
+//RS     validate_store_component(fingerprint)
+//RS         .map_err(|reason| store_path_diagnostic(fingerprint, &reason))?;
+//RS 
+//RS     let source = open_directory_authority(source_dir)
+//RS         .map_err(|error| io_error("checking package source", source_dir, error))?;
+//RS     let dest = store_path(name, version, fingerprint);
+//RS     let parent = dest
+//RS         .parent()
+//RS         .ok_or_else(|| io_error("locating store entry parent", &dest, invalid_path_error()))?;
+//RS     let parent_authority = ensure_directory_authority(parent)
+//RS         .map_err(|error| io_error("creating store entry parent", parent, error))?;
+//RS     let dest_name = dest
+//RS         .file_name()
+//RS         .ok_or_else(|| io_error("locating store entry", &dest, invalid_path_error()))?;
+//RS 
+//RS     match parent_authority.open_child_directory(dest_name) {
+//RS         Ok(existing) => {
+//RS             let hash = hash_directory_authority(&existing, false)
+//RS                 .map_err(|error| io_error("hashing store entry", &dest, error))?;
+//RS             return Ok((dest, hash));
+//RS         }
+//RS         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+//RS         Err(error) => return Err(io_error("checking store entry", &dest, error)),
+//RS     }
+//RS 
+//RS     let (staging_name, staging) = parent_authority
+//RS         .create_private_child("entry")
+//RS         .map_err(|error| io_error("creating store staging entry", parent, error))?;
+//RS     let result = (|| {
+//RS         copy_directory_authority(&source, &staging, true)
+//RS             .map_err(|error| io_error("copying to store", &dest, error))?;
+//RS         let hash = hash_directory_authority(&staging, false)
+//RS             .map_err(|error| io_error("hashing store entry", &dest, error))?;
+//RS         match publish_directory(&parent_authority, &staging_name, &parent_authority, dest_name) {
+//RS             Ok(()) => Ok(hash),
+//RS             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+//RS                 let winner = parent_authority
+//RS                     .open_child_directory(dest_name)
+//RS                     .map_err(|error| io_error("opening concurrent store entry", &dest, error))?;
+//RS                 let winner_hash = hash_directory_authority(&winner, false)
+//RS                     .map_err(|error| io_error("hashing concurrent store entry", &dest, error))?;
+//RS                 if winner_hash == hash {
+//RS                     Ok(winner_hash)
+//RS                 } else {
+//RS                     Err(io_error(
+//RS                         "publishing store entry",
+//RS                         &dest,
+//RS                         io::Error::new(
+//RS                             io::ErrorKind::AlreadyExists,
+//RS                             "concurrent store entry has different contents",
+//RS                         ),
+//RS                     ))
+//RS                 }
+//RS             }
+//RS             Err(error) => Err(io_error("publishing store entry", &dest, error)),
+//RS         }
+//RS     })();
+//RS     let _ = parent_authority.remove_child_tree(&staging_name);
+//RS     Ok((dest, result?))
+//RS }
+//RS 
+//RS /// D-CASTORE1=A: verify a store entry's content hash against the recorded lock value.
+//RS /// Returns E1204 on mismatch (tampered store) or if entry is missing.
+//RS pub fn verify_content_hash(
+//RS     pkg_name: &str,
+//RS     store_entry: &Path,
+//RS     expected_content_hash: &str,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let entry = match open_directory_authority(store_entry) {
+//RS         Ok(entry) => entry,
+//RS         Err(error) if error.kind() == io::ErrorKind::NotFound => {
+//RS             return Err(Diagnostic::error(
+//RS                 "E1204",
+//RS                 format!("the store entry for `{}` is missing", pkg_name),
+//RS                 "a package source tree must be present in the store".to_string(),
+//RS                 "run `jet fetch` to re-download the package".to_string(),
+//RS                 None,
+//RS             ))
+//RS         }
+//RS         Err(error) => return Err(io_error("checking store entry", store_entry, error)),
+//RS     };
+//RS     if expected_content_hash.is_empty() {
+//RS         return Err(missing_content_hash(pkg_name));
+//RS     }
+//RS     let actual = hash_directory_authority(&entry, false)
+//RS         .map_err(|error| io_error("hashing store entry", store_entry, error))?;
+//RS     if actual != expected_content_hash {
+//RS         return Err(Diagnostic::error(
+//RS             "E1204",
+//RS             format!("the store entry for `{}` has been modified", pkg_name),
+//RS             format!(
+//RS                 "expected content hash `{}` but got `{}`",
+//RS                 expected_content_hash, actual
+//RS             ),
+//RS             "delete the store entry and run `jet fetch` to re-install".to_string(),
+//RS             None,
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Ensure a git dep is stored.
+//RS /// `git_dir` is the directory where the revision has been checked out.
+//RS pub fn ensure_git_dep(
+//RS     name: &str,
+//RS     version: &str,
+//RS     fingerprint: &str,
+//RS     git_dir: &Path,
+//RS ) -> Result<(PathBuf, String), Diagnostic> {
+//RS     ensure_path_dep(name, version, fingerprint, git_dir)
+//RS }
+//RS 
+//RS /// Link a store entry into a project's local deps dir via hardlinks (or copy).
+//RS /// `link_root` is typically `<project>/.jet/build/deps/<name>/`.
+//RS pub fn link_into_project(store_entry: &Path, link_root: &Path) -> Result<(), Diagnostic> {
+//RS     let source = open_directory_authority(store_entry)
+//RS         .map_err(|error| io_error("checking store entry", store_entry, error))?;
+//RS     let expected = hash_directory_authority(&source, false)
+//RS         .map_err(|error| io_error("hashing store entry", store_entry, error))?;
+//RS     let parent = link_root
+//RS         .parent()
+//RS         .ok_or_else(|| io_error("locating dep link parent", link_root, invalid_path_error()))?;
+//RS     let parent_authority = ensure_directory_authority(parent)
+//RS         .map_err(|error| io_error("creating dep link parent", parent, error))?;
+//RS     let link_name = link_root
+//RS         .file_name()
+//RS         .ok_or_else(|| io_error("locating dep link", link_root, invalid_path_error()))?;
+//RS 
+//RS     match parent_authority.open_child_directory(link_name) {
+//RS         Ok(existing) => {
+//RS             let actual = hash_directory_authority(&existing, false)
+//RS                 .map_err(|error| io_error("hashing dependency link", link_root, error))?;
+//RS             if actual != expected {
+//RS                 return Err(io_error(
+//RS                     "checking dependency link",
+//RS                     link_root,
+//RS                     io::Error::new(
+//RS                         io::ErrorKind::InvalidData,
+//RS                         "existing dependency link does not match its immutable store entry",
+//RS                     ),
+//RS                 ));
+//RS             }
+//RS             return Ok(());
+//RS         }
+//RS         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+//RS         Err(error) => return Err(io_error("checking dependency link", link_root, error)),
+//RS     }
+//RS 
+//RS     let (staging_name, staging) = parent_authority
+//RS         .create_private_child("dep-link")
+//RS         .map_err(|error| io_error("creating dep link staging dir", parent, error))?;
+//RS     let result = (|| {
+//RS         link_directory_authority(&source, &staging)
+//RS             .map_err(|error| io_error("linking dependency tree", link_root, error))?;
+//RS         let actual = hash_directory_authority(&staging, false)
+//RS             .map_err(|error| io_error("hashing staged dependency link", link_root, error))?;
+//RS         if actual != expected {
+//RS             return Err(io_error(
+//RS                 "checking staged dependency link",
+//RS                 link_root,
+//RS                 io::Error::new(
+//RS                     io::ErrorKind::InvalidData,
+//RS                     "staged dependency link does not match its immutable store entry",
+//RS                 ),
+//RS             ));
+//RS         }
+//RS         match publish_directory(&parent_authority, &staging_name, &parent_authority, link_name) {
+//RS             Ok(()) => Ok(()),
+//RS             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+//RS                 let winner = parent_authority
+//RS                     .open_child_directory(link_name)
+//RS                     .map_err(|error| io_error("opening concurrent dependency link", link_root, error))?;
+//RS                 let winner_hash = hash_directory_authority(&winner, false)
+//RS                     .map_err(|error| io_error("hashing concurrent dependency link", link_root, error))?;
+//RS                 if winner_hash == expected {
+//RS                     Ok(())
+//RS                 } else {
+//RS                     Err(io_error(
+//RS                         "publishing dependency link",
+//RS                         link_root,
+//RS                         io::Error::new(
+//RS                             io::ErrorKind::AlreadyExists,
+//RS                             "concurrent dependency link has different contents",
+//RS                         ),
+//RS                     ))
+//RS                 }
+//RS             }
+//RS             Err(error) => Err(io_error("publishing dependency link", link_root, error)),
+//RS         }
+//RS     })();
+//RS     let _ = parent_authority.remove_child_tree(&staging_name);
+//RS     result
+//RS }
+//RS 
+//RS /// Copy an immutable Hangar object into a project without creating hardlinks
+//RS /// outside the Hangar CAS. Hangar verification treats external hardlinks as a
+//RS /// mutation risk; registry dependencies therefore use this boundary while
+//RS /// legacy path/git stores retain `link_into_project`'s inode sharing.
+//RS pub fn copy_into_project(store_entry: &Path, project_root: &Path) -> Result<(), Diagnostic> {
+//RS     let source = open_directory_authority(store_entry)
+//RS         .map_err(|error| io_error("checking store entry", store_entry, error))?;
+//RS     let expected = hash_directory_authority(&source, false)
+//RS         .map_err(|error| io_error("hashing store entry", store_entry, error))?;
+//RS     let parent = project_root.parent().ok_or_else(|| {
+//RS         io_error(
+//RS             "locating dep copy parent",
+//RS             project_root,
+//RS             invalid_path_error(),
+//RS         )
+//RS     })?;
+//RS     let parent_authority = ensure_directory_authority(parent)
+//RS         .map_err(|error| io_error("creating dep copy parent", parent, error))?;
+//RS     let project_name = project_root
+//RS         .file_name()
+//RS         .ok_or_else(|| io_error("locating dep copy", project_root, invalid_path_error()))?;
+//RS 
+//RS     match parent_authority.open_child_directory(project_name) {
+//RS         Ok(existing) => {
+//RS             let actual = hash_directory_authority(&existing, false)
+//RS                 .map_err(|error| io_error("hashing dep copy", project_root, error))?;
+//RS             if actual != expected {
+//RS                 return Err(io_error(
+//RS                     "checking dep copy",
+//RS                     project_root,
+//RS                     io::Error::new(
+//RS                         io::ErrorKind::InvalidData,
+//RS                         "existing dependency copy does not match its immutable store entry",
+//RS                     ),
+//RS                 ));
+//RS             }
+//RS             return Ok(());
+//RS         }
+//RS         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+//RS         Err(error) => return Err(io_error("checking dep copy", project_root, error)),
+//RS     }
+//RS 
+//RS     let (staging_name, staging) = parent_authority
+//RS         .create_private_child("dep-copy")
+//RS         .map_err(|error| io_error("creating dep copy staging dir", parent, error))?;
+//RS     let result = (|| {
+//RS         copy_directory_authority(&source, &staging, false)
+//RS             .map_err(|error| io_error("copying dep tree", project_root, error))?;
+//RS         let actual = hash_directory_authority(&staging, false)
+//RS             .map_err(|error| io_error("hashing staged dep copy", project_root, error))?;
+//RS         if actual != expected {
+//RS             return Err(io_error(
+//RS                 "checking staged dep copy",
+//RS                 project_root,
+//RS                 io::Error::new(
+//RS                     io::ErrorKind::InvalidData,
+//RS                     "staged dependency copy does not match its immutable store entry",
+//RS                 ),
+//RS             ));
+//RS         }
+//RS         match publish_directory(&parent_authority, &staging_name, &parent_authority, project_name) {
+//RS             Ok(()) => Ok(()),
+//RS             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+//RS                 let winner = parent_authority
+//RS                     .open_child_directory(project_name)
+//RS                     .map_err(|error| io_error("opening concurrent dep copy", project_root, error))?;
+//RS                 let winner_hash = hash_directory_authority(&winner, false)
+//RS                     .map_err(|error| io_error("hashing concurrent dep copy", project_root, error))?;
+//RS                 if winner_hash == expected {
+//RS                     Ok(())
+//RS                 } else {
+//RS                     Err(io_error(
+//RS                         "publishing dep copy",
+//RS                         project_root,
+//RS                         io::Error::new(
+//RS                             io::ErrorKind::AlreadyExists,
+//RS                             "concurrent dependency copy has different contents",
+//RS                         ),
+//RS                     ))
+//RS                 }
+//RS             }
+//RS             Err(error) => Err(io_error("publishing dep copy", project_root, error)),
+//RS         }
+//RS     })();
+//RS     let _ = parent_authority.remove_child_tree(&staging_name);
+//RS     result
+//RS }
+//RS 
+//RS /// Verify the content hash of a store entry matches expected. Returns E1204 on mismatch.
+//RS pub fn verify_entry(
+//RS     pkg_name: &str,
+//RS     store_entry: &Path,
+//RS     expected_tree_hash: &str,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let entry = match open_directory_authority(store_entry) {
+//RS         Ok(entry) => entry,
+//RS         Err(error) if error.kind() == io::ErrorKind::NotFound => {
+//RS             return Err(Diagnostic::error(
+//RS                 "E1204",
+//RS                 format!("the store entry for `{}` is missing", pkg_name),
+//RS                 "a package source tree must be present in the store before it can be used".to_string(),
+//RS                 "run `jet fetch` to re-download the package".to_string(),
+//RS                 None,
+//RS             ))
+//RS         }
+//RS         Err(error) => return Err(io_error("checking store entry", store_entry, error)),
+//RS     };
+//RS     if expected_tree_hash.is_empty() {
+//RS         return Err(missing_content_hash(pkg_name));
+//RS     }
+//RS     let actual = hash_directory_authority(&entry, false)
+//RS         .map_err(|error| io_error("hashing store entry", store_entry, error))?;
+//RS     if actual != expected_tree_hash {
+//RS         return Err(Diagnostic::error(
+//RS             "E1204",
+//RS             format!("the store entry for `{}` has been modified", pkg_name),
+//RS             format!(
+//RS                 "the content hash of the stored source tree doesn't match the fingerprint in {}",
+//RS                 Syntax::UNIFIED_LOCK_FILE
+//RS             ),
+//RS             "run `jet fetch` to re-download the package, or run `jetpack hangar verify` to check all entries"
+//RS                 .to_string(),
+//RS             None,
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS 
+//RS // ──────────────────────────────────────────────
+//RS // `jetpack hangar verify`
+//RS // ──────────────────────────────────────────────
+//RS 
+//RS /// Re-verify all store entries against their expected tree hashes.
+//RS /// The `entries` map is `(name, store_path, expected_tree_hash)`.
+//RS pub fn verify_all(entries: &[(&str, &Path, &str)]) -> Vec<Diagnostic> {
+//RS     let mut diags = Vec::new();
+//RS     for (name, path, expected) in entries {
+//RS         if let Err(d) = verify_entry(name, path, expected) {
+//RS             diags.push(d);
+//RS         }
+//RS     }
+//RS     diags
+//RS }
+//RS 
+//RS // ──────────────────────────────────────────────
+//RS // `jet clean` — remove unreferenced store entries (stub)
+//RS // ──────────────────────────────────────────────
+//RS 
+//RS /// List all store entries.
+//RS pub fn list_entries() -> Vec<PathBuf> {
+//RS     let dir = store_dir();
+//RS     let Ok(authority) = open_directory_authority(&dir) else {
+//RS         return Vec::new();
+//RS     };
+//RS     let Ok(names) = authority.list_names() else {
+//RS         return Vec::new();
+//RS     };
+//RS     names
+//RS         .into_iter()
+//RS         .filter(|name| name != OsStr::new(".snapshots"))
+//RS         .filter_map(|name| {
+//RS             authority
+//RS                 .open_child_directory(&name)
+//RS                 .ok()
+//RS                 .map(|_| dir.join(name))
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS /// Remove store entries whose fingerprints are not in the provided set.
+//RS /// The set contains the fingerprint suffix (without `sha256-` prefix) of in-use entries.
+//RS pub fn gc(in_use_fingerprints: &std::collections::HashSet<String>) -> Vec<PathBuf> {
+//RS     let dir = store_dir();
+//RS     let Ok(authority) = open_directory_authority(&dir) else {
+//RS         return Vec::new();
+//RS     };
+//RS     let Ok(names) = authority.list_names() else {
+//RS         return Vec::new();
+//RS     };
+//RS     let mut removed = Vec::new();
+//RS     for name in names {
+//RS         if name == OsStr::new(".snapshots") {
+//RS             continue;
+//RS         }
+//RS         let Ok(entry) = authority.open_child_directory(&name) else {
+//RS             continue;
+//RS         };
+//RS         let dir_name = name.to_string_lossy();
+//RS         let fp = dir_name.rsplitn(2, '-').next().unwrap_or("");
+//RS         if !in_use_fingerprints.contains(fp)
+//RS             && authority.remove_child_tree(&name).is_ok()
+//RS         {
+//RS             let _ = entry;
+//RS             removed.push(dir.join(name));
+//RS         }
+//RS     }
+//RS     removed
+//RS }
+//RS 
+//RS fn validate_store_component(value: &str) -> Result<(), String> {
+//RS     if value.is_empty()
+//RS         || value == "."
+//RS         || value == ".."
+//RS         || value.contains(['/', '\\', ':'])
+//RS         || value.chars().any(char::is_control)
+//RS         || !matches!(
+//RS             Path::new(value).components().next(),
+//RS             Some(std::path::Component::Normal(_))
+//RS         )
+//RS         || Path::new(value).components().nth(1).is_some()
+//RS     {
+//RS         return Err("the value must be one safe path component".to_string());
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn store_path_diagnostic(value: &str, reason: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1206",
+//RS         format!("package store path component `{value}` is not allowed"),
+//RS         reason.to_string(),
+//RS         "use a package name, version, and fingerprint without path separators".to_string(),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS 
+//RS fn io_error(action: &str, path: &Path, err: std::io::Error) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1206",
+//RS         format!("I/O error while {} at `{}`", action, path.display()),
+//RS         "a filesystem operation failed during package installation".to_string(),
+//RS         format!("check permissions and disk space: {}", err),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS 
+//RS fn invalid_path_error() -> std::io::Error {
+//RS     std::io::Error::new(
+//RS         std::io::ErrorKind::InvalidInput,
+//RS         "store entry has no parent",
+//RS     )
+//RS }
+//RS 
+//RS fn missing_content_hash(pkg_name: &str) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1204",
+//RS         format!("the store entry for `{pkg_name}` has no content hash"),
+//RS         "locked package sources must carry a content hash before they are used".to_string(),
+//RS         "run `jet fetch` to recreate the lock with verified content hashes".to_string(),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS // ──────────────────────────────────────────────
+//RS // D-PURE3=B (E2-M16): signed cache + generation tracking
+//RS // ──────────────────────────────────────────────
+//RS 
+//RS /// Generation log path: `~/.jet/store/generations.log`.
+//RS /// Each line: `<generation_number> <timestamp_utc> <store_entry_list_hash>`.
+//RS pub fn generations_log_path() -> PathBuf {
+//RS     store_dir().join("generations.log")
+//RS }
+//RS 
+//RS /// One generation record.
+//RS #[derive(Debug, Clone)]
+//RS pub struct Generation {
+//RS     pub number: u64,
+//RS     pub timestamp: String,
+//RS     pub entry_hash: String,
+//RS }
+//RS 
+//RS /// Record the current store state as a new generation.
+//RS /// Returns the new generation number.
+//RS pub fn record_generation() -> u64 {
+//RS     let entries = list_entries();
+//RS     let mut entry_names: Vec<String> = entries
+//RS         .iter()
+//RS         .map(|p| {
+//RS             p.file_name()
+//RS                 .and_then(|n| n.to_str())
+//RS                 .unwrap_or("")
+//RS                 .to_string()
+//RS         })
+//RS         .collect();
+//RS     entry_names.sort();
+//RS     let entry_list = entry_names.join(",");
+//RS     let entry_hash = {
+//RS         // Simple hash: sha256 of the sorted entry list.
+//RS         use std::collections::hash_map::DefaultHasher;
+//RS         use std::hash::{Hash, Hasher};
+//RS         let mut h = DefaultHasher::new();
+//RS         entry_list.hash(&mut h);
+//RS         format!("{:016x}", h.finish())
+//RS     };
+//RS 
+//RS     let log_path = generations_log_path();
+//RS     // Read existing generations.
+//RS     let existing_raw = fs::read_to_string(&log_path).unwrap_or_default();
+//RS     let next_gen = existing_raw
+//RS         .lines()
+//RS         .filter_map(|l| l.split_whitespace().next())
+//RS         .filter_map(|n| n.parse::<u64>().ok())
+//RS         .max()
+//RS         .unwrap_or(0)
+//RS         + 1;
+//RS 
+//RS     // Append the new generation.
+//RS     let ts = std::time::SystemTime::now()
+//RS         .duration_since(std::time::UNIX_EPOCH)
+//RS         .map(|d| d.as_secs().to_string())
+//RS         .unwrap_or_else(|_| "0".to_string());
+//RS     let line = format!("{} {} {}\n", next_gen, ts, entry_hash);
+//RS     let _ = fs::create_dir_all(store_dir());
+//RS     let _ = fs::OpenOptions::new()
+//RS         .create(true)
+//RS         .append(true)
+//RS         .open(&log_path)
+//RS         .and_then(|mut f| {
+//RS             use std::io::Write;
+//RS             f.write_all(line.as_bytes())
+//RS         });
+//RS 
+//RS     next_gen
+//RS }
+//RS 
+//RS /// Read all recorded generations from the log.
+//RS pub fn list_generations() -> Vec<Generation> {
+//RS     let log_path = generations_log_path();
+//RS     let raw = fs::read_to_string(&log_path).unwrap_or_default();
+//RS     raw.lines()
+//RS         .filter_map(|line| {
+//RS             let mut parts = line.split_whitespace();
+//RS             let number = parts.next()?.parse::<u64>().ok()?;
+//RS             let timestamp = parts.next()?.to_string();
+//RS             let entry_hash = parts.next().unwrap_or("").to_string();
+//RS             Some(Generation {
+//RS                 number,
+//RS                 timestamp,
+//RS                 entry_hash,
+//RS             })
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS /// Roll back to a prior generation number.
+//RS /// In this implementation, rollback writes a new generation entry that
+//RS /// records the intent (store entries cannot be erased — the store is
+//RS /// append-only; a rollback marks which generation is "current").
+//RS /// Returns the rolled-back-to generation number, or an error string.
+//RS pub fn rollback_to(gen_number: u64) -> Result<Generation, String> {
+//RS     let gens = list_generations();
+//RS     let target = gens
+//RS         .iter()
+//RS         .find(|g| g.number == gen_number)
+//RS         .ok_or_else(|| format!("generation {} does not exist", gen_number))?
+//RS         .clone();
+//RS     // Write a "rollback" marker generation pointing at the target hash.
+//RS     let log_path = generations_log_path();
+//RS     let next_gen = gens.iter().map(|g| g.number).max().unwrap_or(0) + 1;
+//RS     let ts = std::time::SystemTime::now()
+//RS         .duration_since(std::time::UNIX_EPOCH)
+//RS         .map(|d| d.as_secs().to_string())
+//RS         .unwrap_or_else(|_| "0".to_string());
+//RS     let line = format!("{} {} rollback-to-{}\n", next_gen, ts, gen_number);
+//RS     let _ = fs::OpenOptions::new()
+//RS         .create(true)
+//RS         .append(true)
+//RS         .open(&log_path)
+//RS         .and_then(|mut f| {
+//RS             use std::io::Write;
+//RS             f.write_all(line.as_bytes())
+//RS         });
+//RS     Ok(target)
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS     fn authority_test_root(name: &str) -> PathBuf {
+//RS         let stamp = SystemTime::now()
+//RS             .duration_since(UNIX_EPOCH)
+//RS             .expect("test clock must be after the Unix epoch")
+//RS             .as_nanos();
+//RS         std::env::temp_dir().join(format!(
+//RS             "jet-store-{name}-{}-{stamp}",
+//RS             std::process::id()
+//RS         ))
+//RS     }
+//RS 
+//RS     #[cfg(any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios"
+//RS     ))]
+//RS     #[test]
+//RS     fn authority_replace_rejects_a_changed_pending_target() {
+//RS         let root = authority_test_root("authority-change");
+//RS         fs::create_dir_all(&root).unwrap();
+//RS         let path = root.join("package.jet");
+//RS         fs::write(&path, b"approved\n").unwrap();
+//RS         let snapshot = read_authority_file(&path).unwrap();
+//RS 
+//RS         fs::write(&path, b"attacker\n").unwrap();
+//RS         let error = replace_authority_file(&snapshot, b"published\n").unwrap_err();
+//RS 
+//RS         assert!(
+//RS             error
+//RS                 .to_string()
+//RS                 .contains("authority target contents changed while approval was pending"),
+//RS             "unexpected authority replacement error: {error}"
+//RS         );
+//RS         assert_eq!(fs::read(&path).unwrap(), b"attacker\n");
+//RS         fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[cfg(any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios"
+//RS     ))]
+//RS     #[test]
+//RS     fn authority_replace_publishes_only_the_snapshotted_target() {
+//RS         let root = authority_test_root("authority-replace");
+//RS         fs::create_dir_all(&root).unwrap();
+//RS         let path = root.join("package.jet");
+//RS         fs::write(&path, b"approved\n").unwrap();
+//RS         let snapshot = read_authority_file(&path).unwrap();
+//RS 
+//RS         replace_authority_file(&snapshot, b"published\n").unwrap();
+//RS 
+//RS         assert_eq!(fs::read(&path).unwrap(), b"published\n");
+//RS         fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[cfg(any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios"
+//RS     ))]
+//RS     #[test]
+//RS     fn authority_file_operations_reject_symlink_targets() {
+//RS         use std::os::unix::fs::symlink;
+//RS 
+//RS         let root = authority_test_root("authority-symlink");
+//RS         fs::create_dir_all(&root).unwrap();
+//RS         let victim = root.join("victim");
+//RS         let path = root.join("authority.jsonl");
+//RS         fs::write(&victim, b"victim\n").unwrap();
+//RS         symlink(&victim, &path).unwrap();
+//RS 
+//RS         assert!(read_authority_file(&path).is_err());
+//RS         assert!(append_authority_file(&path, b"grant\n").is_err());
+//RS         assert_eq!(fs::read(&victim).unwrap(), b"victim\n");
+//RS         fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[cfg(any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios"
+//RS     ))]
+//RS     #[test]
+//RS     fn held_store_authority_survives_active_ancestor_swap() {
+//RS         use std::io::Read as _;
+//RS         use std::os::unix::fs::symlink;
+//RS         use std::sync::atomic::{AtomicBool, Ordering};
+//RS         use std::sync::{Arc, Barrier};
+//RS 
+//RS         let stamp = std::time::SystemTime::now()
+//RS             .duration_since(std::time::UNIX_EPOCH)
+//RS             .expect("test clock must be after the Unix epoch")
+//RS             .as_nanos();
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             "jet-store-held-root-{}-{stamp}",
+//RS             std::process::id()
+//RS         ));
+//RS         let held = root.with_file_name(format!(
+//RS             "jet-store-held-root-renamed-{}-{stamp}",
+//RS             std::process::id()
+//RS         ));
+//RS         let outside = root.with_file_name(format!(
+//RS             "jet-store-held-root-outside-{}-{stamp}",
+//RS             std::process::id()
+//RS         ));
+//RS         fs::create_dir_all(&root).unwrap();
+//RS         fs::create_dir_all(&outside).unwrap();
+//RS         fs::write(root.join("trusted.jet"), b"trusted bytes\n").unwrap();
+//RS         fs::write(outside.join("evil.jet"), b"evil bytes\n").unwrap();
+//RS 
+//RS         let authority = DirectoryAuthority::open(&root).expect("source authority must open");
+//RS         let reached = Arc::new(Barrier::new(2));
+//RS         let release = Arc::new(Barrier::new(2));
+//RS         let fired = Arc::new(AtomicBool::new(false));
+//RS         let hook_root = root.clone();
+//RS         let hook_reached = Arc::clone(&reached);
+//RS         let hook_release = Arc::clone(&release);
+//RS         let hook_fired = Arc::clone(&fired);
+//RS         let _hook = install_store_walk_hook(Arc::new(move |directory, name| {
+//RS             if directory == hook_root.as_path()
+//RS                 && name == OsStr::new("trusted.jet")
+//RS                 && !hook_fired.swap(true, Ordering::AcqRel)
+//RS             {
+//RS                 hook_reached.wait();
+//RS                 hook_release.wait();
+//RS             }
+//RS         }));
+//RS 
+//RS         let attacker_root = root.clone();
+//RS         let attacker_held = held.clone();
+//RS         let attacker_outside = outside.clone();
+//RS         let attacker_reached = Arc::clone(&reached);
+//RS         let attacker_release = Arc::clone(&release);
+//RS         let attacker = std::thread::spawn(move || {
+//RS             attacker_reached.wait();
+//RS             fs::rename(&attacker_root, &attacker_held).expect("source root must be movable");
+//RS             symlink(&attacker_outside, &attacker_root).expect("hostile root link must be made");
+//RS             attacker_release.wait();
+//RS         });
+//RS 
+//RS         let mut files = Vec::new();
+//RS         let walk = collect_authority_tree(&authority, Path::new(""), &mut files, 0, true);
+//RS         attacker.join().expect("ancestor swap thread must finish");
+//RS         drop(_hook);
+//RS 
+//RS         fs::remove_file(&root).expect("hostile root link must be removable");
+//RS         fs::rename(&held, &root).expect("held source root must be restored");
+//RS 
+//RS         walk.expect("held authority must retain the verified root");
+//RS         assert_eq!(files.len(), 1, "walk must not enter the hostile root");
+//RS         assert_eq!(files[0].relative, "trusted.jet");
+//RS         let mut bytes = Vec::new();
+//RS         files[0]
+//RS             .file
+//RS             .read_to_end(&mut bytes)
+//RS             .expect("verified file must remain readable");
+//RS         assert_eq!(bytes, b"trusted bytes\n");
+//RS         assert!(root.is_dir(), "the original root must be restored");
+//RS 
+//RS         fs::remove_dir_all(&root).unwrap();
+//RS         fs::remove_dir_all(&outside).unwrap();
+//RS     }
+//RS }
+// END-PORT-PENDING 0720 Source/Store.rs:1818-2791
+

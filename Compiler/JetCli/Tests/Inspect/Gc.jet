@@ -1,0 +1,356 @@
+// Source/CmdGc.rs:684-714: both original parser tests remain complete.
+JET_CLI_GC_TEST_SAMPLE :: `{"schema":"jet.gc.trace","version":1,"project":"/project","pid":7,"started_unix_ms":10,"updated_unix_ms":20,"complete":true,"dropped_promotions":0,"collections":1,"sites":[{"source":"src/main.jet","span_start":4,"span_end":8,"scope":"fn run","policy_provenance":"package.jet:4","reason":"cycle","type_name":"Node","allocations":2,"retained":1,"identities":[{"identity":1,"retained":true},{"identity":2,"retained":false}]}]}`
+
+fn jet_cli_gc_test_utf8(bytes: [U8]) -> String {
+    String.from_bytes(bytes) ?? panic("GC test scalar encoding")
+}
+fn jet_cli_gc_test_parse(raw: String, project: String, now: Int) -> JetCLIGCTrace {
+    jet_cli_gc_parse_trace(raw, project, now) ?? panic("GC parser rejected fixture: {err.detail}")
+}
+fn jet_cli_gc_test_error(raw: String, project: String, now: Int, kind: JetCLIGCErrorKind, detail: String) {
+    if jet_cli_gc_parse_trace(raw, project, now) == {
+        .Ok(_) -> panic("GC parser accepted invalid evidence")
+        .Err(error) -> {
+            assert(error.kind == kind)
+            assert_eq(error.detail, detail)
+        }
+    }
+}
+fn jet_cli_gc_test_mutation(from: String, to: String, kind: JetCLIGCErrorKind, detail: String) {
+    jet_cli_gc_test_error(JET_CLI_GC_TEST_SAMPLE.replace(from, to), "/project", 20, kind, detail)
+}
+// Rust projections_derive_counts_from_identity_evidence, unabridged.
+#Test("gc parser projections derive counts from identity evidence") {
+    trace :: jet_cli_gc_test_parse(JET_CLI_GC_TEST_SAMPLE, "/project", 20)
+    text :: jet_cli_gc_render_text(trace, false)
+    assert(text.contains("2 promotions · 1 retained"))
+    assert(text.contains("Id<Node>"))
+    json :: jet_cli_gc_render_json(trace)
+    assert(json.contains("\"allocations\":2,\"retained\":1"))
+    assert(!json.contains(jet_cli_gc_test_utf8([U8]{U8{27}})))
+}
+// Rust malformed_or_incomplete_evidence_never_becomes_a_report, unabridged.
+#Test("gc parser malformed or incomplete evidence never becomes a report") {
+    bad_count :: JET_CLI_GC_TEST_SAMPLE.replace("\"allocations\":2", "\"allocations\":3")
+    if jet_cli_gc_parse_trace(bad_count, "/project", 20) == {
+        .Ok(_) -> panic("bad count accepted")
+        .Err(error) -> assert(error.kind == JetCLIGCErrorKind.Malformed)
+    }
+    incomplete :: JET_CLI_GC_TEST_SAMPLE.replace("\"complete\":true", "\"complete\":false")
+    if jet_cli_gc_parse_trace(incomplete, "/project", 20) == {
+        .Ok(_) -> panic("incomplete evidence accepted")
+        .Err(error) -> assert(error.kind == JetCLIGCErrorKind.Incomplete)
+    }
+}
+
+// Renderer fixtures are real engine carriers, never replacements for parser tests.
+fn jet_cli_gc_test_model() -> JetCLIGCTrace {
+    JetCLIGCTrace{project: "/project", pid: 7, started_unix_ms: 10, updated_unix_ms: 20, collections: 1, sites: [JetCLIGCSite]{
+        JetCLIGCSite{source: "src/main.jet", span_start: 4, span_end: 8, scope: "fn run", policy_provenance: "package.jet:4", reason: "cycle", type_name: "Node", identities: [JetCLIGCIdentity]{JetCLIGCIdentity{id: 1, retained: true}, JetCLIGCIdentity{id: 2, retained: false}}}
+    }}
+}
+JET_CLI_GC_TEST_TEXT :: "jet gc report · 2 promotions · 1 retained · 1 collections\n\nsrc/main.jet:4..8  Node\n  scope: fn run\n  policy: package.jet:4\n  reason: cycle\n  allocations: 2  retained: 1\n  identities: 1*, 2\n  rewrite: own Node directly; represent identity-bearing links as Id<Node>, or use Pool<Node> when lifetime is bounded\n"
+JET_CLI_GC_TEST_JSON :: `{"schema":"jet.status/v1","action":"gc.report","ok":true,"reports":[],"gc":{"schema":"jet.gc.report","version":1,"project":"/project","pid":7,"started_unix_ms":10,"updated_unix_ms":20,"collections":1,"summary":{"sites":1,"allocations":2,"retained":1},"sites":[{"source":"src/main.jet","span_start":4,"span_end":8,"scope":"fn run","policy_provenance":"package.jet:4","reason":"cycle","type_name":"Node","allocations":2,"retained":1,"identities":[{"identity":1,"retained":true},{"identity":2,"retained":false}],"recommendation":"own Node directly; represent identity-bearing links as Id<Node>, or use Pool<Node> when lifetime is bounded"}]}}`
+#Test("gc renderer exact text and ordered JSON") {
+    trace :: jet_cli_gc_test_model()
+    assert_eq(jet_cli_gc_render_text(trace, false), JET_CLI_GC_TEST_TEXT)
+    assert_eq(jet_cli_gc_render_json(trace), JET_CLI_GC_TEST_JSON)
+}
+#Test("gc renderer exact ANSI only in human output") {
+    trace :: jet_cli_gc_test_model()
+    escape :: jet_cli_gc_test_utf8([U8]{U8{27}})
+    expected :: JET_CLI_GC_TEST_TEXT.replace("jet gc report", "{escape}[1;36mjet gc report{escape}[0m").replace("src/main.jet:4..8", "{escape}[1msrc/main.jet:4..8{escape}[0m")
+    assert_eq(jet_cli_gc_render_text(trace, true), expected)
+    assert(!jet_cli_gc_render_json(trace).contains(escape))
+    assert_eq(jet_cli_gc_paint("x", "31", false), "x")
+    assert_eq(jet_cli_gc_paint("x", "31", true), "{escape}[31mx{escape}[0m")
+}
+#Test("gc renderer zero sites exact recommendation and JSON") {
+    trace := jet_cli_gc_test_model()
+    trace.sites = [JetCLIGCSite]{}
+    assert_eq(jet_cli_gc_render_text(trace, false), "jet gc report · 0 promotions · 0 retained · 1 collections\n\nNo automatic GC promotions recorded.\nRemove the effective gc opt-in; ownership already proves every allocation.\n")
+    assert_eq(jet_cli_gc_render_json(trace), `{"schema":"jet.status/v1","action":"gc.report","ok":true,"reports":[],"gc":{"schema":"jet.gc.report","version":1,"project":"/project","pid":7,"started_unix_ms":10,"updated_unix_ms":20,"collections":1,"summary":{"sites":0,"allocations":0,"retained":0},"sites":[]}}`)
+}
+#Test("gc renderer identity summary first eight and overflow") {
+    identities := [JetCLIGCIdentity]{}
+    assert_eq(jet_cli_gc_identity_summary(identities), "-")
+    loop id in 1..<9 -> &identities.push(JetCLIGCIdentity{id: id, retained: id == 2})
+    assert_eq(jet_cli_gc_identity_summary(identities), "1, 2*, 3, 4, 5, 6, 7, 8")
+    &identities.push(JetCLIGCIdentity{id: 9, retained: true})
+    assert_eq(jet_cli_gc_identity_summary(identities), "1, 2*, 3, 4, 5, 6, 7, 8 (+1 more)")
+}
+#Test("gc renderer quotes via canonical Report codec and derives totals") {
+    trace := jet_cli_gc_test_model()
+    trace.sites[0].type_name = "N\"\\é"
+    trace.sites[0].identities = [JetCLIGCIdentity]{JetCLIGCIdentity{id: 99, retained: false}}
+    json :: jet_cli_gc_render_json(trace)
+    assert(json.contains("\"type_name\":\"N\\\"\\\\é\""))
+    assert(json.contains(`"summary":{"sites":1,"allocations":1,"retained":0}`))
+    assert(jet_cli_gc_render_text(trace, false).contains("1 promotions · 0 retained"))
+}
+#Test("gc parser projections match independent byte oracles") {
+    trace :: jet_cli_gc_test_parse(JET_CLI_GC_TEST_SAMPLE, "/project", 20)
+    assert_eq(jet_cli_gc_render_text(trace, false), JET_CLI_GC_TEST_TEXT)
+    assert_eq(jet_cli_gc_render_json(trace), JET_CLI_GC_TEST_JSON)
+}
+#Test("gc parser schema version project precedence and safety") {
+    jet_cli_gc_test_mutation("jet.gc.trace", "other", JetCLIGCErrorKind.Incompatible, "GC trace schema is not supported")
+    jet_cli_gc_test_mutation("\"version\":1", "\"version\":2", JetCLIGCErrorKind.Incompatible, "GC trace version is not supported")
+    jet_cli_gc_test_error(JET_CLI_GC_TEST_SAMPLE.replace("jet.gc.trace", "other"), "\n", 20, JetCLIGCErrorKind.Incompatible, "GC trace schema is not supported")
+    jet_cli_gc_test_error(JET_CLI_GC_TEST_SAMPLE.replace("\"version\":1", "\"version\":2"), "\n", 20, JetCLIGCErrorKind.Incompatible, "GC trace version is not supported")
+    jet_cli_gc_test_error(JET_CLI_GC_TEST_SAMPLE, "\n", 20, JetCLIGCErrorKind.Unsafe, "project path is not safe to display")
+    jet_cli_gc_test_error(JET_CLI_GC_TEST_SAMPLE, jet_cli_gc_test_utf8([U8]{U8{194}, U8{133}}), 20, JetCLIGCErrorKind.Unsafe, "project path is not safe to display")
+    jet_cli_gc_test_error(JET_CLI_GC_TEST_SAMPLE, "x".repeat(4097), 20, JetCLIGCErrorKind.Unsafe, "project path is not safe to display")
+    jet_cli_gc_test_error(JET_CLI_GC_TEST_SAMPLE, "/other", 20, JetCLIGCErrorKind.Stale, "GC trace belongs to project `/project`, not `/other`")
+    jet_cli_gc_test_error(JET_CLI_GC_TEST_SAMPLE, "", 20, JetCLIGCErrorKind.Stale, "GC trace belongs to project `/project`, not ``")
+    jet_cli_gc_test_mutation("\"pid\":7", "\"pid\":0", JetCLIGCErrorKind.Malformed, "GC trace process id is zero")
+}
+#Test("gc parser timestamp strict boundaries and saturating u64 clock") {
+    assert_eq(jet_cli_gc_test_parse(JET_CLI_GC_TEST_SAMPLE, "/project", 2592000020).pid, 7)
+    jet_cli_gc_test_error(JET_CLI_GC_TEST_SAMPLE, "/project", 2592000021, JetCLIGCErrorKind.Stale, "GC trace is older than 30 days")
+    assert_eq(jet_cli_gc_test_parse(JET_CLI_GC_TEST_SAMPLE.replace("\"updated_unix_ms\":20", "\"updated_unix_ms\":300020"), "/project", 20).updated_unix_ms, 300020)
+    jet_cli_gc_test_mutation("\"updated_unix_ms\":20", "\"updated_unix_ms\":300021", JetCLIGCErrorKind.Malformed, "GC trace timestamps are inconsistent")
+    jet_cli_gc_test_mutation("\"started_unix_ms\":10", "\"started_unix_ms\":21", JetCLIGCErrorKind.Malformed, "GC trace timestamps are inconsistent")
+    assert_eq(jet_cli_gc_test_parse(JET_CLI_GC_TEST_SAMPLE, "/project", 0).updated_unix_ms, 20)
+    jet_cli_gc_test_error(JET_CLI_GC_TEST_SAMPLE, "/project", 18446744073709551615, JetCLIGCErrorKind.Stale, "GC trace is older than 30 days")
+    jet_cli_gc_test_error(JET_CLI_GC_TEST_SAMPLE, "/project", 18446744073709251616, JetCLIGCErrorKind.Stale, "GC trace is older than 30 days")
+}
+#Test("gc parser incomplete dropped counters precede sites") {
+    jet_cli_gc_test_mutation("\"dropped_promotions\":0", "\"dropped_promotions\":2", JetCLIGCErrorKind.Incomplete, "GC trace dropped 2 promotions at its safety limits")
+    raw :: JET_CLI_GC_TEST_SAMPLE.replace("\"complete\":true", "\"complete\":false").replace("\"collections\":1,", "")
+    jet_cli_gc_test_error(raw, "/project", 20, JetCLIGCErrorKind.Incomplete, "GC trace dropped 0 promotions at its safety limits")
+    jet_cli_gc_test_mutation("\"span_start\":4", "\"span_start\":9", JetCLIGCErrorKind.Malformed, "GC promotion span is reversed")
+    jet_cli_gc_test_mutation("\"retained\":1", "\"retained\":2", JetCLIGCErrorKind.Malformed, "GC trace counters do not match identity evidence")
+}
+#Test("gc parser identity sort zero and duplicate evidence") {
+    reverse :: JET_CLI_GC_TEST_SAMPLE.replace(`{"identity":1,"retained":true},{"identity":2,"retained":false}`, `{"identity":2,"retained":false},{"identity":1,"retained":true}`)
+    trace :: jet_cli_gc_test_parse(reverse, "/project", 20)
+    assert_eq(trace.sites[0].identities[0].id, 1)
+    assert_eq(trace.sites[0].identities[1].id, 2)
+    jet_cli_gc_test_mutation("\"identity\":1", "\"identity\":0", JetCLIGCErrorKind.Malformed, "GC trace has a zero or duplicate identity")
+    jet_cli_gc_test_mutation("\"identity\":2", "\"identity\":1", JetCLIGCErrorKind.Malformed, "GC trace has a zero or duplicate identity")
+    jet_cli_gc_test_mutation(`"identities":[{"identity":1,"retained":true},{"identity":2,"retained":false}]`, "\"identities\":[]", JetCLIGCErrorKind.Malformed, "GC trace counters do not match identity evidence")
+}
+#Test("gc parser safe strings UTF8 byte limits and Unicode controls") {
+    names :: [String]{"project", "source", "scope", "policy_provenance", "reason", "type_name"}
+    originals :: [String]{"/project", "src/main.jet", "fn run", "package.jet:4", "cycle", "Node"}
+    loop index in 0..<names.len() {
+        name :: names[index]
+        original :: "\"{name}\":\"{originals[index]}\""
+        long :: "é".repeat(2048)
+        raw :: JET_CLI_GC_TEST_SAMPLE.replace(original, "\"{name}\":\"{long}\"")
+        expected_project :: if name == "project" -> long else -> "/project"
+        assert_eq(jet_cli_gc_test_parse(raw, expected_project, 20).pid, 7)
+        jet_cli_gc_test_error(raw.replace(long, "{long}x"), expected_project, 20, JetCLIGCErrorKind.Malformed, "GC trace `{name}` is empty, unsafe, or too long")
+        bad_values :: [String]{"", "\\n", "\\u007f", "\\u0080", "\\u009f"}
+        loop bad in bad_values {
+            jet_cli_gc_test_error(JET_CLI_GC_TEST_SAMPLE.replace(original, "\"{name}\":\"{bad}\""), "/project", 20, JetCLIGCErrorKind.Malformed, "GC trace `{name}` is empty, unsafe, or too long")
+        }
+    }
+    assert(!jet_cli_has_control("é 🦀"))
+    assert(jet_cli_has_control(jet_cli_gc_test_utf8([U8]{U8{194}, U8{159}})))
+}
+#Test("gc parser object list and JSON refusal abstraction") {
+    bad_json :: [String]{"", "{{", "null trailing", `{"x":1,"x":2}`, "9223372036854775808", "-9223372036854775809"}
+    loop raw in bad_json -> jet_cli_gc_test_error(raw, "/project", 20, JetCLIGCErrorKind.Malformed, "GC trace is not valid JSON")
+    roots :: [String]{"null", "[]", "3", "true", "\"x\""}
+    loop raw in roots -> jet_cli_gc_test_error(raw, "/project", 20, JetCLIGCErrorKind.Malformed, "GC trace root is not an object")
+    jet_cli_gc_test_mutation("\"sites\":[", "\"sites\":[null,", JetCLIGCErrorKind.Malformed, "GC promotion site is not an object")
+    jet_cli_gc_test_mutation("\"identities\":[", "\"identities\":[null,", JetCLIGCErrorKind.Malformed, "GC identity is not an object")
+    assert_eq(jet_cli_gc_test_parse(JET_CLI_GC_TEST_SAMPLE.replace("\"schema\":", `"ignored":{"a":[1,true,null]},"schema":`), "/project", 20).pid, 7)
+}
+#Test("gc parser every field missing and wrong type exact messages") {
+    // Test the actual extraction helpers against borrowed canonical DataTree.
+    empty :: [String:DataTree]{}
+    text_names :: [String]{"schema", "project", "source", "scope", "policy_provenance", "reason", "type_name"}
+    loop name in text_names {
+        if jet_cli_gc_string_field(empty, name) == {
+            .Ok(_) -> panic("missing text accepted")
+            .Err(error) -> {
+                assert(error.kind == JetCLIGCErrorKind.Malformed)
+                assert_eq(error.detail, "GC trace is missing `{name}`")
+            }
+        }
+        wrong :: [String:DataTree]{name: DataTree.Null}
+        if jet_cli_gc_safe_string(wrong, name) == {
+            .Ok(_) -> panic("null text accepted")
+            .Err(error) -> assert_eq(error.detail, "GC trace `{name}` is not text")
+        }
+    }
+    uint_names :: [String]{"version", "pid", "started_unix_ms", "updated_unix_ms", "dropped_promotions", "collections", "span_start", "span_end", "identity", "allocations", "retained"}
+    loop name in uint_names {
+        if jet_cli_gc_uint_field(empty, name) == {
+            .Ok(_) -> panic("missing uint accepted")
+            .Err(error) -> assert_eq(error.detail, "GC trace is missing `{name}`")
+        }
+        wrong_values :: [DataTree]{DataTree.Null, DataTree.Text("1"), DataTree.Bool(true), DataTree.Int(-1), DataTree.Int(9223372036854775808)}
+        loop value in wrong_values {
+            if jet_cli_gc_uint_field([String:DataTree]{name: value}, name) == {
+                .Ok(_) -> panic("invalid uint accepted")
+                .Err(error) -> assert_eq(error.detail, "GC trace `{name}` is not a non-negative integer")
+            }
+        }
+        assert_eq(jet_cli_gc_uint_field([String:DataTree]{name: DataTree.Int(9223372036854775807)}, name) ?? panic("i64 maximum rejected"), 9223372036854775807)
+    }
+    bool_names :: [String]{"complete", "retained"}
+    loop name in bool_names {
+        if jet_cli_gc_bool_field(empty, name) == {
+            .Ok(_) -> panic("missing bool accepted")
+            .Err(error) -> assert_eq(error.detail, "GC trace is missing `{name}`")
+        }
+        if jet_cli_gc_bool_field([String:DataTree]{name: DataTree.Int(1)}, name) == {
+            .Ok(_) -> panic("integer bool accepted")
+            .Err(error) -> assert_eq(error.detail, "GC trace `{name}` is not Bool")
+        }
+    }
+    array_names :: [String]{"sites", "identities"}
+    loop name in array_names {
+        if jet_cli_gc_array_field(empty, name) == {
+            .Ok(_) -> panic("missing array accepted")
+            .Err(error) -> assert_eq(error.detail, "GC trace is missing `{name}`")
+        }
+        if jet_cli_gc_array_field([String:DataTree]{name: DataTree.Null}, name) == {
+            .Ok(_) -> panic("null array accepted")
+            .Err(error) -> assert_eq(error.detail, "GC trace `{name}` is not a list")
+        }
+    }
+    jet_cli_gc_test_mutation("\"pid\":7", "\"pid\":-1", JetCLIGCErrorKind.Malformed, "GC trace `pid` is not a non-negative integer")
+    jet_cli_gc_test_mutation("\"complete\":true", "\"complete\":1", JetCLIGCErrorKind.Malformed, "GC trace `complete` is not Bool")
+}
+
+fn jet_cli_gc_test_site(source: String, start: Int, end: Int, scope: String, policy: String, reason: String, ty: String) -> DataTree {
+    DataTree.Object([String:DataTree]{"source": DataTree.Text(source), "span_start": DataTree.Int(start), "span_end": DataTree.Int(end), "scope": DataTree.Text(scope), "policy_provenance": DataTree.Text(policy), "reason": DataTree.Text(reason), "type_name": DataTree.Text(ty), "allocations": DataTree.Int(0), "retained": DataTree.Int(0), "identities": DataTree.Array([DataTree]{})})
+}
+fn jet_cli_gc_test_root(sites: [DataTree]) -> [String:DataTree] {
+    [String:DataTree]{"schema": DataTree.Text("jet.gc.trace"), "version": DataTree.Int(1), "project": DataTree.Text("/project"), "pid": DataTree.Int(7), "started_unix_ms": DataTree.Int(10), "updated_unix_ms": DataTree.Int(20), "complete": DataTree.Bool(true), "dropped_promotions": DataTree.Int(0), "collections": DataTree.Int(1), "sites": DataTree.Array(sites)}
+}
+#Test("gc core duplicate site key covers all seven fields and sorts lexicographically") {
+    base :: jet_cli_gc_test_site("a", 1, 2, "a", "a", "a", "a")
+    sites := [DataTree]{base, jet_cli_gc_test_site("b", 1, 2, "a", "a", "a", "a"), jet_cli_gc_test_site("a", 2, 2, "a", "a", "a", "a"), jet_cli_gc_test_site("a", 1, 3, "a", "a", "a", "a"), jet_cli_gc_test_site("a", 1, 2, "b", "a", "a", "a"), jet_cli_gc_test_site("a", 1, 2, "a", "b", "a", "a"), jet_cli_gc_test_site("a", 1, 2, "a", "a", "b", "a"), jet_cli_gc_test_site("a", 1, 2, "a", "a", "a", "b")}
+    &sites.reverse()
+    trace :: jet_cli_gc_parse_root(jet_cli_gc_test_root(sites), "/project", 20) ?? panic("distinct seven-field sites rejected")
+    assert_eq(trace.sites.len(), 8)
+    assert_eq(trace.sites[0].type_name, "a")
+    assert_eq(trace.sites[1].type_name, "b")
+    assert_eq(trace.sites[2].reason, "b")
+    assert_eq(trace.sites[3].policy_provenance, "b")
+    assert_eq(trace.sites[4].scope, "b")
+    assert_eq(trace.sites[5].span_end, 3)
+    assert_eq(trace.sites[6].span_start, 2)
+    assert_eq(trace.sites[7].source, "b")
+    &sites.push(base)
+    if jet_cli_gc_parse_root(jet_cli_gc_test_root(sites), "/project", 20) == {
+        .Ok(_) -> panic("duplicate site accepted")
+        .Err(error) -> {
+            assert(error.kind == JetCLIGCErrorKind.Malformed)
+            assert_eq(error.detail, "GC trace repeats a promotion site")
+        }
+    }
+    framed :: [DataTree]{jet_cli_gc_test_site("a:1", 2, 3, "x:y", "z", "a", "a"), jet_cli_gc_test_site("a", 1, 2, "3:x", "y:z", "a", "a")}
+    assert_eq((jet_cli_gc_parse_root(jet_cli_gc_test_root(framed), "/project", 20) ?? panic("framed keys collided")).sites.len(), 2)
+}
+#Test("gc core sites 4096 accepted and 4097 refused before malformed site") {
+    sites := [DataTree]{}
+    loop index in 0..<4096 -> &sites.push(jet_cli_gc_test_site("s{index}", 0, 0, "s", "p", "r", "t"))
+    assert_eq((jet_cli_gc_parse_root(jet_cli_gc_test_root(sites), "/project", 20) ?? panic("4096 sites rejected")).sites.len(), 4096)
+    &sites.push(DataTree.Null)
+    if jet_cli_gc_parse_root(jet_cli_gc_test_root(sites), "/project", 20) == {
+        .Ok(_) -> panic("4097 sites accepted")
+        .Err(error) -> {
+            assert(error.kind == JetCLIGCErrorKind.Oversized)
+            assert_eq(error.detail, "GC trace has too many promotion sites")
+        }
+    }
+}
+#Test("gc core identities 65536 cumulative limit and global duplicate precedence") {
+    // These identity counts cannot fit Rust's raw 1 MiB JSON boundary. Exercise
+    // the real borrowed validation engine, not a claimed parser acceptance.
+    identities := [DataTree]{}
+    loop id in 1..<65537 -> &identities.push(DataTree.Object([String:DataTree]{"identity": DataTree.Int(id), "retained": DataTree.Bool(false)}))
+    site := [String:DataTree]{"source": DataTree.Text("s"), "span_start": DataTree.Int(0), "span_end": DataTree.Int(0), "scope": DataTree.Text("s"), "policy_provenance": DataTree.Text("p"), "reason": DataTree.Text("r"), "type_name": DataTree.Text("t"), "allocations": DataTree.Int(65536), "retained": DataTree.Int(0), "identities": DataTree.Array(identities)}
+    seen := [Int:Bool]{}
+    sites_seen := [String:Bool]{}
+    parsed :: jet_cli_gc_parse_site(site, &seen, &sites_seen) ?? panic("65536 identities rejected")
+    assert_eq(parsed.identities.len(), 65536)
+    next_site := ~site
+    next_site["source"] = DataTree.Text("other")
+    next_site["allocations"] = DataTree.Int(1)
+    next_site["identities"] = DataTree.Array([DataTree]{DataTree.Null})
+    if jet_cli_gc_parse_site(next_site, &seen, &sites_seen) == {
+        .Ok(_) -> panic("65537 cumulative identities accepted")
+        .Err(error) -> {
+            assert(error.kind == JetCLIGCErrorKind.Oversized)
+            assert_eq(error.detail, "GC trace has too many identities")
+        }
+    }
+    // The single-site +1 limit also wins before inspecting a malformed row.
+    &identities.push(DataTree.Null)
+    site["identities"] = DataTree.Array(identities)
+    seen = [Int:Bool]{}
+    sites_seen = [String:Bool]{}
+    if jet_cli_gc_parse_site(site, &seen, &sites_seen) == {
+        .Ok(_) -> panic("65537 single-site identities accepted")
+        .Err(error) -> {
+            assert(error.kind == JetCLIGCErrorKind.Oversized)
+            assert_eq(error.detail, "GC trace has too many identities")
+        }
+    }
+    small :: [DataTree]{DataTree.Object([String:DataTree]{"identity": DataTree.Int(7), "retained": DataTree.Bool(false)})}
+    site["identities"] = DataTree.Array(small)
+    site["allocations"] = DataTree.Int(1)
+    seen = [Int:Bool]{}
+    sites_seen = [String:Bool]{}
+    first :: jet_cli_gc_parse_site(site, &seen, &sites_seen) ?? panic("first identity rejected")
+    assert_eq(first.identities[0].id, 7)
+    site["source"] = DataTree.Text("second")
+    if jet_cli_gc_parse_site(site, &seen, &sites_seen) == {
+        .Ok(_) -> panic("global duplicate accepted")
+        .Err(error) -> assert_eq(error.detail, "GC trace has a zero or duplicate identity")
+    }
+}
+#Test("gc parser actual protocol one MiB depth and ignored integer rejection") {
+    // JSON whitespace counts toward the parser's byte ceiling independently
+    // of the future native reader's four MiB ceiling.
+    padding :: " ".repeat(1048576 - JET_CLI_GC_TEST_SAMPLE.bytes().len())
+    assert_eq(jet_cli_gc_test_parse("{JET_CLI_GC_TEST_SAMPLE}{padding}", "/project", 20).pid, 7)
+    jet_cli_gc_test_error("{JET_CLI_GC_TEST_SAMPLE}{padding} ", "/project", 20, JetCLIGCErrorKind.Malformed, "GC trace is not valid JSON")
+    jet_cli_gc_test_mutation("\"schema\":", "\"ignored\":9223372036854775808,\"schema\":", JetCLIGCErrorKind.Malformed, "GC trace is not valid JSON")
+    // #4303: bind slice views mutably before String-typed concatenation.
+    tail := JET_CLI_GC_TEST_SAMPLE.slice(1..<JET_CLI_GC_TEST_SAMPLE.len())
+    valid :: "{{\"ignored\":" + "[".repeat(63) + "0" + "]".repeat(63) + "," + tail
+    assert_eq(jet_cli_gc_test_parse(valid, "/project", 20).pid, 7)
+    invalid :: "{{\"ignored\":" + "[".repeat(64) + "0" + "]".repeat(64) + "," + tail
+    jet_cli_gc_test_error(invalid, "/project", 20, JetCLIGCErrorKind.Malformed, "GC trace is not valid JSON")
+}
+
+fn jet_cli_gc_test_sites_json(sites: [String]) -> String {
+    "{{\"schema\":\"jet.gc.trace\",\"version\":1,\"project\":\"/project\",\"pid\":7,\"started_unix_ms\":10,\"updated_unix_ms\":20,\"complete\":true,\"dropped_promotions\":0,\"collections\":1,\"sites\":[{sites.join(",")}]}}"
+}
+#Test("gc parser site limit and duplicate seven field evidence on raw JSON") {
+    sites := [String]{}
+    loop index in 0..<4096 {
+        &sites.push("{{\"source\":\"s{index}\",\"span_start\":0,\"span_end\":0,\"scope\":\"s\",\"policy_provenance\":\"p\",\"reason\":\"r\",\"type_name\":\"t\",\"allocations\":0,\"retained\":0,\"identities\":[]}}")
+    }
+    raw :: jet_cli_gc_test_sites_json(sites)
+    assert(raw.bytes().len() <= 1048576)
+    assert_eq(jet_cli_gc_test_parse(raw, "/project", 20).sites.len(), 4096)
+    &sites.push("null")
+    jet_cli_gc_test_error(jet_cli_gc_test_sites_json(sites), "/project", 20, JetCLIGCErrorKind.Oversized, "GC trace has too many promotion sites")
+    duplicate :: [String]{sites[0], sites[0]}
+    jet_cli_gc_test_error(jet_cli_gc_test_sites_json(duplicate), "/project", 20, JetCLIGCErrorKind.Malformed, "GC trace repeats a promotion site")
+}
+#Test("gc parser identity and site error precedence never invents evidence") {
+    // Duplicate identity wins before retained's missing-field error.
+    identities :: `"identities":[{"identity":1,"retained":true},{"identity":2,"retained":false}]`
+    jet_cli_gc_test_mutation(identities, `"identities":[{"identity":1,"retained":true},{"identity":1}]`, JetCLIGCErrorKind.Malformed, "GC trace has a zero or duplicate identity")
+    jet_cli_gc_test_mutation(identities, `"identities":[{"identity":0}]`, JetCLIGCErrorKind.Malformed, "GC trace has a zero or duplicate identity")
+    jet_cli_gc_test_mutation(identities, `"identities":[{"identity":1}]`, JetCLIGCErrorKind.Malformed, "GC trace is missing `retained`")
+    jet_cli_gc_test_mutation(identities, `"identities":[{"identity":1,"retained":0}]`, JetCLIGCErrorKind.Malformed, "GC trace `retained` is not Bool")
+    site :: `{"source":"s","span_start":0,"span_end":0,"scope":"s","policy_provenance":"p","reason":"r","type_name":"t","allocations":1,"retained":0,"identities":[{"identity":7,"retained":false}]}`
+    global :: [String]{site, site.replace(`"source":"s"`, `"source":"other"`)}
+    jet_cli_gc_test_error(jet_cli_gc_test_sites_json(global), "/project", 20, JetCLIGCErrorKind.Malformed, "GC trace has a zero or duplicate identity")
+    // Site key duplicate is checked before the second site's absent identities.
+    duplicate :: [String]{site, site.replace(`,"identities":[{"identity":7,"retained":false}]`, "")}
+    jet_cli_gc_test_error(jet_cli_gc_test_sites_json(duplicate), "/project", 20, JetCLIGCErrorKind.Malformed, "GC trace repeats a promotion site")
+    jet_cli_gc_test_error(JET_CLI_GC_TEST_SAMPLE.replace(`"span_start":4,"span_end":8`, `"span_start":9,"span_end":8`).replace(`"scope":"fn run",`, ""), "/project", 20, JetCLIGCErrorKind.Malformed, "GC promotion span is reversed")
+}

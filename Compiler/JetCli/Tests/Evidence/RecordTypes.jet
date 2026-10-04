@@ -1,0 +1,337 @@
+// Pure RI01 behavior (Source/RecordIndex.rs). Its inline Rust tests all use
+// RecordIndex/filesystem state, so these isolate the public types and row codec.
+fn record_types_test_text(bytes: [U8]) -> String { String.from_bytes(bytes) ?? panic("invalid UTF-8 fixture") }
+fn record_types_test_identity() -> JetCLIRecordIdentity {
+    jet_cli_record_identity_new("a".repeat(64), "test-toolchain", "test-engine") ?? panic("invalid fixture identity")
+}
+fn record_types_test_entry(kind: JetCLIRecordKind, id: String, path: String) -> JetCLIRecordIndexEntry {
+    jet_cli_record_entry_new(record_types_test_identity(), kind, id, path) ?? panic("invalid fixture entry")
+}
+fn record_types_test_link(kind: JetCLIRecordKind, id: String) -> JetCLIRecordLink {
+    jet_cli_record_link_new(kind, id) ?? panic("invalid fixture link")
+}
+fn record_types_test_row(entry: JetCLIRecordIndexEntry) -> String {
+    jet_cli_record_entry_to_jsonl(entry) ?? panic("invalid fixture row")
+}
+fn record_types_test_parse_error(row: String, message: String) {
+    if jet_cli_record_entry_parse_line(row) == {
+        .Ok(_) -> panic("invalid row accepted")
+        .Err(error) -> assert_eq(error.message, message)
+    }
+}
+fn record_types_test_unit_error(result: () JetCLIRecordError!, message: String) {
+    if result == {
+        .Ok(_) -> panic("invalid value accepted")
+        .Err(error) -> assert_eq(error.message, message)
+    }
+}
+
+#Test("record kinds and capture modes form closed vocabularies") {
+    names :: [String]{"receipt", "replay", "proof", "evidence", "comparison", "trust"}
+    loop (index, kind) in JET_CLI_RECORD_KINDS {
+        assert_eq(jet_cli_record_kind_name(kind), names[index])
+        assert_eq(jet_cli_record_kind_rank(kind), index)
+        assert((jet_cli_record_kind_parse(names[index]) ?? panic("kind failed")) == kind)
+    }
+    if jet_cli_record_kind_parse("Receipt") == {
+        .Ok(_) -> panic("case-insensitive kind")
+        .Err(error) -> assert_eq(error.message, "unknown record kind `Receipt`")
+    }
+    assert(jet_cli_record_capture_default() == .Safe)
+    assert((jet_cli_record_capture_parse("safe") ?? panic("safe failed")) == .Safe)
+    assert((jet_cli_record_capture_parse("sensitive") ?? panic("sensitive failed")) == .Sensitive)
+    assert_eq(jet_cli_record_capture_name(.Sensitive), "sensitive")
+    assert(!jet_cli_record_capture_is_sensitive(.Safe))
+    assert(jet_cli_record_capture_is_sensitive(.Sensitive))
+    if jet_cli_record_capture_parse("unsafe") == {
+        .Ok(_) -> panic("unknown capture")
+        .Err(error) -> assert_eq(error.message, "unknown record capture mode `unsafe`")
+    }
+    assert_eq(jet_cli_record_index_error_message(.RecordedSequenceOverflow), "recorded_sequence exhausted")
+}
+
+#Test("identity digest and UTF-8 byte bounds are exact") {
+    digest :: "a".repeat(64)
+    jet_cli_record_validate_digest(digest, "digest") ?? panic("bare digest failed")
+    jet_cli_record_validate_digest("sha256-{digest}", "digest") ?? panic("prefixed digest failed")
+    invalid :: [String]{"A".repeat(64), "a".repeat(63), "a".repeat(65), "g".repeat(64), "é".repeat(32)}
+    loop value in invalid {
+        record_types_test_unit_error(jet_cli_record_validate_digest(value, "digest"), "digest must be a lowercase SHA-256 digest")
+    }
+    jet_cli_record_validate_text("é".repeat(256), "text", 512) ?? panic("512 bytes failed")
+    record_types_test_unit_error(jet_cli_record_validate_text("é".repeat(257), "text", 512), "text is empty, too large, or contains control characters")
+    controls :: [String]{"", "x\n", record_types_test_text([U8]{U8{120}, U8{127}}), record_types_test_text([U8]{U8{120}, U8{194}, U8{133}}), record_types_test_text([U8]{U8{120}, U8{194}, U8{159}})}
+    loop value in controls {
+        record_types_test_unit_error(jet_cli_record_validate_text(value, "text", 512), "text is empty, too large, or contains control characters")
+    }
+    jet_cli_record_validate_text("x ", "text", 512) ?? panic("noncontrol failed")
+    identity :: record_types_test_identity()
+    nul :: record_types_test_text([U8]{U8{0}})
+    assert_eq(jet_cli_record_identity_key(identity), "{digest}{nul}test-toolchain{nul}test-engine")
+}
+
+#Test("components and project-relative paths follow Rust Path components") {
+    invalid :: [String]{".", "..", "a/b", "a\\b"}
+    loop value in invalid {
+        record_types_test_unit_error(jet_cli_record_validate_component(value, "id", 512), "id contains an unsafe path component")
+    }
+    c1 :: record_types_test_text([U8]{U8{194}, U8{133}})
+    valid :: [String]{".jet/receipts/a", ".jet//receipts/./a/", ".jet/unknown/a", ".jet/receipts/a\n{c1}"}
+    loop path in valid { jet_cli_record_validate_index_path(path) ?? panic("safe path failed") }
+    record_types_test_unit_error(jet_cli_record_validate_index_path(""), "record index path is empty, too large, or uses unsafe separators")
+    nul :: record_types_test_text([U8]{U8{0}})
+    record_types_test_unit_error(jet_cli_record_validate_index_path(".jet/receipts/a{nul}"), "record index path is empty, too large, or uses unsafe separators")
+    record_types_test_unit_error(jet_cli_record_validate_index_path(".jet\\receipts/a"), "record index path is empty, too large, or uses unsafe separators")
+    record_types_test_unit_error(jet_cli_record_validate_index_path("/tmp/a"), "record index path must be project-relative")
+    record_types_test_unit_error(jet_cli_record_validate_index_path("./.jet/receipts/a"), "record index path must stay under `.jet/<artifact-kind>`")
+    record_types_test_unit_error(jet_cli_record_validate_index_path(".jet/receipts"), "record index path must stay under `.jet/<artifact-kind>`")
+    record_types_test_unit_error(jet_cli_record_validate_index_path(".jet/receipts/../a"), "record index path contains an unsafe component")
+    jet_cli_record_validate_index_path(".jet/receipts/{"a".repeat(4082)}") ?? panic("4096 bytes failed")
+    record_types_test_unit_error(jet_cli_record_validate_index_path(".jet/receipts/{"a".repeat(4083)}"), "record index path is empty, too large, or uses unsafe separators")
+}
+
+#Test("record row matches Rust ordered JSON bytes without newline") {
+    controls :: record_types_test_text([U8]{U8{8}, U8{12}, U8{127}, U8{194}, U8{133}})
+    entry := record_types_test_entry(.Replay, "replay-\"é", ".jet/replays/a{controls}")
+    consumed :: [JetCLIRecordLink]{record_types_test_link(.Receipt, "z"), record_types_test_link(.Trust, "a")}
+    produced :: [JetCLIRecordLink]{record_types_test_link(.Evidence, "p")}
+    jet_cli_record_entry_with_links(&entry, ~consumed, ^produced) ?? panic("links failed")
+    jet_cli_record_entry_with_capture(&entry, .Sensitive)
+    jet_cli_record_entry_with_size(&entry, 42) ?? panic("size failed")
+    jet_cli_record_entry_with_recorded_sequence(&entry, 7) ?? panic("sequence failed")
+    jet_cli_record_entry_with_saved(&entry, true)
+    expected :: "{{\"capture\":\"sensitive\",\"consumed\":[{{\"artifact_id\":\"a\",\"kind\":\"trust\"}},{{\"artifact_id\":\"z\",\"kind\":\"receipt\"}}],\"engine\":\"test-engine\",\"id\":\"replay-\\\"é\",\"kind\":\"replay\",\"links_version\":1,\"path\":\".jet/replays/a\\u0008\\u000c\\u007f\\u0085\",\"produced\":[{{\"artifact_id\":\"p\",\"kind\":\"evidence\"}}],\"recorded_sequence\":7,\"saved\":true,\"size\":42,\"target_inputs_sha256\":\"{"a".repeat(64)}\",\"tool_version\":\"test-toolchain\",\"version\":1}}"
+    assert_eq(record_types_test_row(entry), expected)
+    assert((jet_cli_record_entry_parse_line(expected) ?? panic("row roundtrip failed")) == entry)
+    assert_eq(jet_cli_record_links_json(consumed), "[{{\"artifact_id\":\"a\",\"kind\":\"trust\"}},{{\"artifact_id\":\"z\",\"kind\":\"receipt\"}}]")
+}
+
+#Test("row encoding sorts a copy and link order is artifact before kind") {
+    entry := record_types_test_entry(.Receipt, "r", ".jet/receipts/r")
+    entry.consumed = [JetCLIRecordLink]{record_types_test_link(.Trust, "a"), record_types_test_link(.Receipt, "a"), record_types_test_link(.Receipt, "b")}
+    row :: record_types_test_row(entry)
+    assert(entry.consumed[0].kind == .Trust)
+    decoded :: jet_cli_record_entry_parse_line(row) ?? panic("sorted row failed")
+    assert(decoded.consumed[0].kind == .Receipt)
+    assert(decoded.consumed[1].kind == .Trust)
+    assert_eq(decoded.consumed[2].artifact_id, "b")
+    duplicate :: [JetCLIRecordLink]{record_types_test_link(.Receipt, "a"), record_types_test_link(.Receipt, "a")}
+    record_types_test_unit_error(jet_cli_record_entry_with_links(&entry, ^duplicate, [JetCLIRecordLink]{}), "record consumed contains duplicate link")
+}
+
+#Test("row parser refuses malformed objects and versions before later fields") {
+    record_types_test_parse_error("x", "record index line is not valid JSON")
+    record_types_test_parse_error("[]", "record index line must be a JSON object")
+    record_types_test_parse_error("{{\"x\":0}}", "record index line contains an unknown field")
+    record_types_test_parse_error("{{}}", "record index is missing `version`")
+    record_types_test_parse_error("{{\"version\":2}}", "unsupported record index version 2")
+    record_types_test_parse_error("{{\"version\":1,\"links_version\":2}}", "unsupported record links version 2")
+    record_types_test_parse_error("{{\"version\":1,\"links_version\":1}}", "record index is missing `target_inputs_sha256`")
+    record_types_test_parse_error("{{\"version\":1.0}}", "record index field `version` must be an integer")
+    record_types_test_parse_error("{{\"version\":1,\"version\":1}}", "record index line is not valid JSON")
+    record_types_test_parse_error("{{\"version\":9223372036854775808}}", "record index line is not valid JSON")
+    record_types_test_parse_error("{{\"x\":-9223372036854775809}}", "record index line is not valid JSON")
+    open :: "[".repeat(64)
+    close :: "]".repeat(64)
+    record_types_test_parse_error("{open}0{close}", "record index line must be a JSON object")
+    record_types_test_parse_error("[{open}0{close}]", "record index line is not valid JSON")
+    record_types_test_parse_error(" ".repeat(1048577), "record index line exceeds the 1 MiB limit")
+    record_types_test_parse_error(" ".repeat(1048576), "record index line is not valid JSON")
+}
+
+// Rust RecordIndexEntry::parse_line keeps its byte error ahead of JSON/schema.
+// These exercise the sole Foundation protocol parser, including its #3598 gate.
+#Test("record row protocol byte ceiling counts exact Unicode bytes") {
+    row :: record_types_test_row(record_types_test_entry(.Receipt, "r", ".jet/receipts/r"))
+    prefix :: "{{\"unknown\":\""
+    suffix :: "\",\"version\":2}}"
+    remaining :: JET_CLI_MAX_INDEX_LINE_BYTES - prefix.bytes().len() - suffix.bytes().len()
+    padding :: "é".repeat(remaining /% 2)
+    odd :: "x".repeat(remaining % 2)
+    exact :: "{prefix}{padding}{odd}{suffix}"
+    assert_eq(exact.bytes().len(), JET_CLI_MAX_INDEX_LINE_BYTES)
+    record_types_test_parse_error(exact, "record index line contains an unknown field")
+    record_types_test_parse_error("{exact} ", "record index line exceeds the 1 MiB limit")
+    // A valid row padded with JSON whitespace is accepted at the same ceiling.
+    valid :: "{row}{" ".repeat(JET_CLI_MAX_INDEX_LINE_BYTES - row.bytes().len())}"
+    assert_eq(valid.bytes().len(), JET_CLI_MAX_INDEX_LINE_BYTES)
+    assert((jet_cli_record_entry_parse_line(valid) ?? panic(err.message)) == record_types_test_entry(.Receipt, "r", ".jet/receipts/r"))
+    record_types_test_parse_error("{valid} ", "record index line exceeds the 1 MiB limit")
+}
+
+#Test("record protocol depth refusal precedes unknown fields and versions") {
+    // The object is container one, so 63 nested arrays reach exactly depth 64.
+    open :: "[".repeat(63)
+    close :: "]".repeat(63)
+    record_types_test_parse_error("{{\"unknown\":{open}0{close},\"version\":2}}", "record index line contains an unknown field")
+    record_types_test_parse_error("{{\"unknown\":[{open}0{close}],\"version\":2}}", "record index line is not valid JSON")
+    record_types_test_parse_error("{{\"version\":{open}0{close}}}", "record index field `version` must be an integer")
+    record_types_test_parse_error("{{\"version\":[{open}0{close}]}}", "record index line is not valid JSON")
+}
+
+#Test("record protocol i64 endpoints survive parsing before schema precedence") {
+    endpoints :: [String]{"-9223372036854775808", "9223372036854775807"}
+    loop number in endpoints {
+        record_types_test_parse_error("{{\"version\":{number}}}", "unsupported record index version {number}")
+        record_types_test_parse_error("{{\"unknown\":{number},\"version\":2}}", "record index line contains an unknown field")
+    }
+    outside :: [String]{"-9223372036854775809", "9223372036854775808"}
+    loop number in outside {
+        record_types_test_parse_error("{{\"version\":{number}}}", "record index line is not valid JSON")
+        record_types_test_parse_error("{{\"unknown\":{number},\"version\":2}}", "record index line is not valid JSON")
+        record_types_test_parse_error("{{\"version\":2,\"size\":{number}}}", "record index line is not valid JSON")
+    }
+    record_types_test_parse_error("{{\"unknown\":0,\"version\":2", "record index line is not valid JSON")
+}
+
+#Test("row field decoders retain missing versus mistyped diagnostics") {
+    fields := [String:DataTree]{}
+    fields["text"] = DataTree.Text("value")
+    fields["number"] = DataTree.Int(12)
+    fields["negative"] = DataTree.Int(-1)
+    fields["boolean"] = DataTree.Bool(true)
+    assert_eq(jet_cli_record_string_field(fields, "text") ?? panic("text failed"), "value")
+    assert_eq(jet_cli_record_integer_field(fields, "number") ?? panic("integer failed"), 12)
+    assert_eq(jet_cli_record_unsigned_field(fields, "number") ?? panic("unsigned failed"), 12)
+    assert(jet_cli_record_bool_field(fields, "boolean") ?? panic("boolean failed"))
+    if jet_cli_record_string_field(fields, "missing") == {
+        .Ok(_) -> panic("missing text")
+        .Err(error) -> assert_eq(error.message, "record index is missing `missing`")
+    }
+    if jet_cli_record_string_field(fields, "number") == {
+        .Ok(_) -> panic("numeric text")
+        .Err(error) -> assert_eq(error.message, "record index field `number` must be a string")
+    }
+    if jet_cli_record_integer_field(fields, "text") == {
+        .Ok(_) -> panic("text integer")
+        .Err(error) -> assert_eq(error.message, "record index field `text` must be an integer")
+    }
+    if jet_cli_record_unsigned_field(fields, "negative") == {
+        .Ok(_) -> panic("negative unsigned")
+        .Err(error) -> assert_eq(error.message, "record index field `negative` must be non-negative")
+    }
+    if jet_cli_record_bool_field(fields, "text") == {
+        .Ok(_) -> panic("text boolean")
+        .Err(error) -> assert_eq(error.message, "record index field `text` must be a boolean")
+    }
+    if jet_cli_record_links_field(fields, "missing") == {
+        .Ok(_) -> panic("missing links")
+        .Err(error) -> assert_eq(error.message, "record index field `missing` must be an array")
+    }
+}
+
+#Test("link decoder rejects hostile shape unknown fields and duplicates") {
+    objects :: [String]{"{{\"links\":[1]}}", "{{\"links\":[{{\"other\":0}}]}}", "{{\"links\":[{{\"artifact_id\":\"a\",\"kind\":\"receipt\"}},{{\"artifact_id\":\"a\",\"kind\":\"receipt\"}}]}}"}
+    errors :: [String]{"record index links link must be an object", "record index links link contains an unknown field", "record links contains duplicate link"}
+    loop (index, source) in objects {
+        tree :: foundation_parse_protocol_json(source) ?? panic("fixture JSON failed")
+        if tree == .Object(fields) {
+            if jet_cli_record_links_field(fields, "links") == {
+                .Ok(_) -> panic("invalid link accepted")
+                .Err(error) -> assert_eq(error.message, errors[index])
+            }
+        } else { panic("fixture not object") }
+    }
+    links := [JetCLIRecordLink]{}
+    loop index in 0..<1024 -> &links.push(record_types_test_link(.Receipt, "a-{index}"))
+    jet_cli_record_validate_links(links, "consumed") ?? panic("1024 links failed")
+    &links.push(record_types_test_link(.Receipt, "last"))
+    record_types_test_unit_error(jet_cli_record_validate_links(links, "consumed"), "record consumed has too many links")
+    fields := [String:DataTree]{}
+    values := [DataTree]{}
+    loop _ in 0..<1025 -> &values.push(DataTree.Null)
+    fields["consumed"] = DataTree.Array(values)
+    if jet_cli_record_links_field(fields, "consumed") == {
+        .Ok(_) -> panic("oversized links")
+        .Err(error) -> assert_eq(error.message, "record index field `consumed` has too many links")
+    }
+}
+
+#Test("u64 builders and i64 JSON parsing preserve Rust numeric boundaries") {
+    assert_eq(jet_cli_record_budget_default().max_bytes, 268435456)
+    assert_eq((jet_cli_record_budget_new(18446744073709551615) ?? panic("u64 maximum failed")).max_bytes, 18446744073709551615)
+    if jet_cli_record_budget_new(0) == {
+        .Ok(_) -> panic("zero budget")
+        .Err(error) -> assert_eq(error.message, "record budget byte limit must be greater than zero")
+    }
+    entry := record_types_test_entry(.Receipt, "r", ".jet/receipts/r")
+    jet_cli_record_entry_with_size(&entry, 9223372036854775807) ?? panic("i64 maximum failed")
+    jet_cli_record_entry_with_recorded_sequence(&entry, 9223372036854775807) ?? panic("sequence failed")
+    assert((jet_cli_record_entry_parse_line(record_types_test_row(entry)) ?? panic("i64 roundtrip failed")) == entry)
+    jet_cli_record_entry_with_size(&entry, 18446744073709551615) ?? panic("u64 maximum failed")
+    record_types_test_parse_error(record_types_test_row(entry), "record index line is not valid JSON")
+    record_types_test_unit_error(jet_cli_record_entry_with_size(&entry, -1), "record size must fit an unsigned 64-bit integer")
+    record_types_test_unit_error(jet_cli_record_entry_with_recorded_sequence(&entry, 18446744073709551616), "recorded_sequence must fit an unsigned 64-bit integer")
+}
+
+#Test("disposable policy respects capture saved kind and path components") {
+    kinds :: [JetCLIRecordKind]{.Receipt, .Replay, .Comparison, .Evidence}
+    paths :: [String]{".jet/receipts/a", ".jet/replays/a", ".jet/receipts/a", ".jet/evidence/a"}
+    loop (index, kind) in kinds {
+        entry := record_types_test_entry(kind, "a", paths[index])
+        assert(jet_cli_record_entry_is_disposable(entry))
+        jet_cli_record_entry_with_saved(&entry, true)
+        assert(!jet_cli_record_entry_is_disposable(entry))
+        jet_cli_record_entry_with_saved(&entry, false)
+        jet_cli_record_entry_with_capture(&entry, .Sensitive)
+        assert(!jet_cli_record_entry_is_disposable(entry))
+    }
+    assert(!jet_cli_record_entry_is_disposable(record_types_test_entry(.Proof, "a", ".jet/proofs/a")))
+    assert(!jet_cli_record_entry_is_disposable(record_types_test_entry(.Trust, "a", ".jet/trust/a")))
+    assert(!jet_cli_record_entry_is_disposable(record_types_test_entry(.Receipt, "a", ".jet/receipts-extra/a")))
+    assert(!jet_cli_record_entry_is_disposable(record_types_test_entry(.Receipt, "a", ".jet/production/a")))
+    assert(jet_cli_record_entry_is_disposable(record_types_test_entry(.Receipt, "a", ".jet//receipts/./a/")))
+}
+
+#Test("entry comparator orders kind id identity then component-normalized path") {
+    receipt :: record_types_test_entry(.Receipt, "z", ".jet/receipts/z")
+    replay :: record_types_test_entry(.Replay, "a", ".jet/replays/a")
+    assert(jet_cli_record_compare_entries(receipt, replay) == (0 <=> 1))
+    low :: record_types_test_entry(.Receipt, "a", ".jet/receipts/a")
+    assert(jet_cli_record_compare_entries(low, receipt) == (0 <=> 1))
+    high := ~low
+    high.identity.target_inputs_sha256 = "b".repeat(64)
+    assert(jet_cli_record_compare_entries(low, high) == (0 <=> 1))
+    high = ~low
+    high.identity.tool_version = "z"
+    assert(jet_cli_record_compare_entries(low, high) == (0 <=> 1))
+    high = ~low
+    high.identity.engine = "z"
+    assert(jet_cli_record_compare_entries(low, high) == (0 <=> 1))
+    high = ~low
+    high.path = ".jet/receipts/z"
+    assert(jet_cli_record_compare_entries(low, high) == (0 <=> 1))
+    high.path = ".jet//receipts/./a/"
+    assert(jet_cli_record_compare_entries(low, high) == (0 <=> 0))
+    assert(jet_cli_record_entry_key(receipt) == record_types_test_link(.Receipt, "z"))
+}
+
+#Test("links are typed and undirected only in entries_linked") {
+    left := record_types_test_entry(.Proof, "p", ".jet/proofs/p")
+    right :: record_types_test_entry(.Receipt, "r", ".jet/receipts/r")
+    jet_cli_record_entry_with_links(&left, [JetCLIRecordLink]{record_types_test_link(.Receipt, "r")}, [JetCLIRecordLink]{}) ?? panic("link failed")
+    assert(jet_cli_record_entry_links_to(left, right))
+    assert(!jet_cli_record_entry_links_to(right, left))
+    assert(jet_cli_record_entries_linked(right, left))
+    assert(!jet_cli_record_entry_links_to(left, record_types_test_entry(.Replay, "r", ".jet/replays/r")))
+}
+
+#Test("cycles combine duplicate nodes both edge directions and stable root ordering") {
+    a := record_types_test_entry(.Receipt, "a", ".jet/receipts/a")
+    b := record_types_test_entry(.Replay, "b", ".jet/replays/b")
+    c :: record_types_test_entry(.Proof, "c", ".jet/proofs/c")
+    jet_cli_record_entry_with_links(&a, [JetCLIRecordLink]{record_types_test_link(.Replay, "b")}, [JetCLIRecordLink]{record_types_test_link(.Trust, "missing")}) ?? panic("links failed")
+    jet_cli_record_entry_with_links(&b, [JetCLIRecordLink]{}, [JetCLIRecordLink]{record_types_test_link(.Proof, "c")}) ?? panic("links failed")
+    jet_cli_record_reject_cycles([JetCLIRecordIndexEntry]{b, c, a}) ?? panic("acyclic graph rejected")
+    b.produced = [JetCLIRecordLink]{record_types_test_link(.Receipt, "a")}
+    record_types_test_unit_error(jet_cli_record_reject_cycles([JetCLIRecordIndexEntry]{b, a}), "record links contain a cycle at `receipt/a`")
+    self_link := record_types_test_entry(.Trust, "self", ".jet/trust/self")
+    self_link.consumed = [JetCLIRecordLink]{record_types_test_link(.Trust, "self")}
+    record_types_test_unit_error(jet_cli_record_reject_cycles([JetCLIRecordIndexEntry]{self_link}), "record links contain a cycle at `trust/self`")
+    empty_a :: record_types_test_entry(.Receipt, "a", ".jet/receipts/a2")
+    record_types_test_unit_error(jet_cli_record_reject_cycles([JetCLIRecordIndexEntry]{empty_a, b, a}), "record links contain a cycle at `receipt/a`")
+    diamond := record_types_test_entry(.Proof, "d", ".jet/proofs/d")
+    diamond.consumed = [JetCLIRecordLink]{record_types_test_link(.Proof, "c")}
+    b.produced = [JetCLIRecordLink]{record_types_test_link(.Proof, "c"), record_types_test_link(.Proof, "d")}
+    jet_cli_record_reject_cycles([JetCLIRecordIndexEntry]{a, b, c, diamond}) ?? panic("shared descendant misidentified as cycle")
+}

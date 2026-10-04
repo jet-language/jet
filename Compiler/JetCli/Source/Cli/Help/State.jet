@@ -1,0 +1,556 @@
+// Pure help reducer (crates/jet-cli/src/Help/Interactive.rs). The terminal and
+// headless drivers share these transitions and the renderer's semantic hit map.
+// No terminal IO, command execution, elapsed-time policy, or alternate UI state.
+
+// Rust `Mode` (Interactive.rs:20-30).
+pub enum JetCLIHelpMode { Categorized Results Detail Reference }
+// Rust `Action` (Interactive.rs:32-39).
+pub enum JetCLIHelpAction { Continue Quit EnterReference LeaveReference Submit(String?) }
+// Rust `State` (Interactive.rs:44-60).
+pub struct JetCLIHelpState {
+    index: [JetCLIHelpEntry]
+    width: Int
+    height: Int
+    color: Bool
+    mode: JetCLIHelpMode
+    query: String
+    cat_selected: Int
+    cat_entry: Int?
+    hits: [JetCLIHelpHit]
+    res_selected: Int
+    res_scroll: Int
+    ref_category: Int
+    ref_entry: Int?
+    ref_query: String
+    ref_scroll: Int
+}
+// Rust `ElementId` (Interactive.rs:647-653).
+enum JetCLIHelpElement { Category(Int) Command(Int) Result(Int) ReferenceCategory(Int) ReferenceCommand(Int) }
+// Rust `HitRegion` (Interactive.rs:656-661).
+struct JetCLIHelpHitRegion { row: Int, column_start: Int, column_end: Int, element: JetCLIHelpElement }
+// Rust `HitRegion::new` / `all_columns` (Interactive.rs:664-675).
+fn jet_cli_help_hit_region(row: Int, column_start: Int, column_end: Int, element: JetCLIHelpElement) -> JetCLIHelpHitRegion Never! {
+    JetCLIHelpHitRegion{row: row, column_start: column_start, column_end: column_end, element: element}
+}
+// Rust `HitRegion::contains` (Interactive.rs:677-679).
+fn jet_cli_help_hit_contains(region: JetCLIHelpHitRegion, column: Int, row: Int) -> Bool Never! {
+    region.row == row && column >= region.column_start && column < region.column_end
+}
+// Rust `State::new` (Interactive.rs:63-81).
+pub fn jet_cli_help_state_new(width: Int, height: Int, color: Bool) -> JetCLIHelpState Never! {
+    JetCLIHelpState{index: jet_cli_help_build_index(), width: jet_cli_help_max(width, 1), height: jet_cli_help_max(height, 1), color: color,
+        mode: JetCLIHelpMode.Categorized, query: "", cat_selected: 0, cat_entry: None, hits: [JetCLIHelpHit]{},
+        res_selected: 0, res_scroll: 0, ref_category: 0, ref_entry: None, ref_query: "", ref_scroll: 0}
+}
+// Rust `State::width` / `height` (Interactive.rs:83-89).
+pub fn jet_cli_help_state_width(state: JetCLIHelpState) -> Int Never! { state.width }
+pub fn jet_cli_help_state_height(state: JetCLIHelpState) -> Int Never! { state.height }
+// Rust `State::resize` (Interactive.rs:91-94).
+pub fn jet_cli_help_state_resize(state: &JetCLIHelpState, width: Int, height: Int) Never! {
+    state.width = jet_cli_help_max(width, 1)
+    state.height = jet_cli_help_max(height, 1)
+}
+// Rust `step` (Interactive.rs:878-884).
+fn jet_cli_help_state_step(current: Int, length: Int, delta: Int) -> Int Never! {
+    if length == 0 -> return 0
+    ((current + delta) % length + length) % length
+}
+// Rust `entries_in_category` (Interactive.rs:1011-1021).
+fn jet_cli_help_state_entries(index: [JetCLIHelpEntry], category: Int) -> [Int] Never! {
+    entries := [Int]{}
+    if category < 0 || category >= JET_CLI_HELP_CATEGORIES.len() -> return entries
+    loop at in 0..<index.len() {
+        if index[at].category == JET_CLI_HELP_CATEGORIES[category] -> &entries.push(at)
+    }
+    entries
+}
+// Rust `selected_category_index` / `State::selected_category_index` (Interactive.rs:603-605,1023-1029).
+fn jet_cli_help_state_selected_category(state: JetCLIHelpState) -> Int? Never! {
+    if state.cat_entry == .Val(selected) {
+        entries :: jet_cli_help_state_entries(state.index, state.cat_selected)
+        if selected >= 0 && selected < entries.len() -> return Val(entries[selected])
+    }
+    None
+}
+// Rust `selected_category_cmd` (Interactive.rs:1031-1033).
+fn jet_cli_help_state_selected_command(state: JetCLIHelpState) -> String? Never! {
+    if jet_cli_help_state_selected_category(state) == .Val(at) -> return Val(state.index[at].symbol.name)
+    None
+}
+// Rust `State::category_index` (Interactive.rs:607-612).
+fn jet_cli_help_state_category_index(state: JetCLIHelpState, command: Int) -> Int? Never! {
+    if command < 0 || command >= state.index.len() -> return None
+    loop category in 0..<JET_CLI_HELP_CATEGORIES.len() {
+        if JET_CLI_HELP_CATEGORIES[category] == state.index[command].category -> return Val(category)
+    }
+    None
+}
+// Rust `State::select_categorized_command` (Interactive.rs:614-622).
+fn jet_cli_help_state_select_command(state: &JetCLIHelpState, command: Int) Never! {
+    category :: jet_cli_help_state_category_index(state, command) ?? return
+    state.cat_selected = category
+    state.cat_entry = None
+    entries :: jet_cli_help_state_entries(state.index, category)
+    loop at in 0..<entries.len() {
+        if entries[at] == command {
+            state.cat_entry = Val(at)
+            return
+        }
+    }
+}
+// Rust `result_code` (Interactive.rs:952-957).
+fn jet_cli_help_state_result_code(state: JetCLIHelpState) -> DiagnosticExplanation? Never! {
+    if state.res_selected < 0 || state.res_selected >= state.hits.len() -> return None
+    if state.hits[state.res_selected] == .Code(explanation) -> return Val(explanation)
+    None
+}
+// Rust `reference_code` (Interactive.rs:959-964).
+fn jet_cli_help_state_reference_code(state: JetCLIHelpState) -> DiagnosticExplanation? Never! {
+    hits :: jet_cli_help_search(state.index, state.ref_query)
+    if hits.len() > 0 {
+        if hits[0] == .Code(explanation) -> return Val(explanation)
+    }
+    None
+}
+// Rust `apply_reference_search` (Interactive.rs:1035-1052).
+fn jet_cli_help_state_reference_search(state: &JetCLIHelpState) Never! {
+    if state.ref_query.len() == 0 -> return
+    hits :: jet_cli_help_search(state.index, state.ref_query)
+    if hits.len() == 0 -> return
+    if hits[0] == .Command(found, _, _, _) {
+        loop category in 0..<JET_CLI_HELP_CATEGORIES.len() {
+            if JET_CLI_HELP_CATEGORIES[category] == found.category -> state.ref_category = category
+        }
+        state.ref_entry = None
+        loop at in 0..<state.index.len() {
+            if state.index[at].symbol.identity == found.symbol.identity {
+                state.ref_entry = Val(at)
+                return
+            }
+        }
+    }
+}
+// Rust `move_selection` (Interactive.rs:831-876).
+fn jet_cli_help_state_move_selection(state: &JetCLIHelpState, delta: Int) Never! {
+    if state.mode == {
+        .Categorized -> {
+            if state.cat_entry == .Val(at) -> state.cat_entry = Val(jet_cli_help_state_step(at, jet_cli_help_state_entries(state.index, state.cat_selected).len(), delta))
+            else -> state.cat_selected = jet_cli_help_state_step(state.cat_selected, JET_CLI_HELP_CATEGORIES.len(), delta)
+        }
+        .Results -> {
+            if state.hits.len() > 0 -> state.res_selected = jet_cli_help_state_step(state.res_selected, state.hits.len(), delta)
+        }
+        .Reference -> {
+            if state.ref_entry == .Val(command) {
+                entries :: jet_cli_help_state_entries(state.index, state.ref_category)
+                loop at in 0..<entries.len() {
+                    if entries[at] == command {
+                        state.ref_entry = Val(entries[jet_cli_help_state_step(at, entries.len(), delta)])
+                        return
+                    }
+                }
+            } else {
+                state.ref_category = jet_cli_help_state_step(state.ref_category, JET_CLI_HELP_CATEGORIES.len(), delta)
+            }
+        }
+        .Detail -> {}
+    }
+}
+// Rust `current_entry` (Interactive.rs:966-979), represented by index identity.
+fn jet_cli_help_state_current_entry(state: JetCLIHelpState) -> Int? Never! {
+    if state.res_selected >= 0 && state.res_selected < state.hits.len() {
+        if state.hits[state.res_selected] == .Command(entry, _, _, _) {
+            loop at in 0..<state.index.len() {
+                if state.index[at].symbol.identity == entry.symbol.identity -> return Val(at)
+            }
+            return None
+        }
+    }
+    jet_cli_help_state_selected_category(state)
+}
+// Rust `prefill_command` / `prefill_example` / `current_prefill` (Interactive.rs:982-1009,1073-1079).
+fn jet_cli_help_state_prefill(state: JetCLIHelpState, want_example: Bool) -> String? Never! {
+    selected := Val(0)
+    selected = None
+    if state.mode == {
+        .Categorized -> selected = jet_cli_help_state_selected_category(state)
+        .Reference -> selected = state.ref_entry
+        .Results | .Detail -> {
+            if state.res_selected >= 0 && state.res_selected < state.hits.len() {
+                if state.hits[state.res_selected] == .Command(entry, _, _, _) {
+                    loop at in 0..<state.index.len() {
+                        if state.index[at].symbol.identity == entry.symbol.identity {
+                            selected = Val(at)
+                            break
+                        }
+                    }
+                }
+            }
+        }
+    }
+    at :: selected ?? return None
+    entry :: state.index[at]
+    if want_example && entry.symbol.examples.len() > 0 -> return Val(entry.symbol.examples[0])
+    Val("jet {entry.symbol.name}")
+}
+// Rust query.pop(): remove one scalar, not one UTF-8 byte.
+fn jet_cli_help_state_pop(text: String) -> String Never! {
+    if text.len() == 0 -> return ""
+    text.slice(0..<(text.len() - 1))
+}
+// Rust usize::saturating_add/sub for scroll state on the x64 reference host.
+// Int must carry the full u64 bound (the shared C-INT runtime prerequisite).
+fn jet_cli_help_state_scroll(current: Int, delta: Int) -> Int Never! {
+    if delta < 0 -> return jet_cli_help_sub(current, 1)
+    if current >= 18446744073709551615 -> return 18446744073709551615
+    current + 1
+}
+// Rust `State::apply_key` Escape/Tab return mode (Interactive.rs:122-137,169-174).
+fn jet_cli_help_state_palette_mode(state: JetCLIHelpState) -> JetCLIHelpMode Never! {
+    if state.query.len() == 0 -> JetCLIHelpMode.Categorized else -> JetCLIHelpMode.Results
+}
+// Rust `State::apply_key` (Interactive.rs:116-339). Match order is semantic:
+// reference Char('q') searches, code arrows scroll, Enter expands before submit.
+pub fn jet_cli_help_state_apply_key(state: &JetCLIHelpState, key: JetCLITermKey) -> JetCLIHelpAction Never! {
+    if key == {
+        .Idle -> JetCLIHelpAction.Continue
+        .EOF | .CtrlC -> JetCLIHelpAction.Quit
+        .Escape -> {
+            if state.mode == {
+                .Detail -> {
+                    state.mode = jet_cli_help_state_palette_mode(state)
+                    state.res_scroll = 0
+                    JetCLIHelpAction.Continue
+                }
+                .Reference -> {
+                    state.mode = jet_cli_help_state_palette_mode(state)
+                    state.ref_scroll = 0
+                    JetCLIHelpAction.LeaveReference
+                }
+                .Categorized | .Results -> JetCLIHelpAction.Quit
+            }
+        }
+        .F1 -> {
+            if state.mode == JetCLIHelpMode.Reference -> return JetCLIHelpAction.Continue
+            state.mode = JetCLIHelpMode.Reference
+            state.ref_category = 0
+            state.ref_entry = jet_cli_help_state_selected_category(state)
+            if state.ref_entry == None {
+                entries :: jet_cli_help_state_entries(state.index, state.cat_selected)
+                if entries.len() > 0 -> state.ref_entry = Val(entries[0])
+            }
+            state.ref_query = ""
+            state.ref_scroll = 0
+            JetCLIHelpAction.EnterReference
+        }
+        .Tab -> {
+            if state.mode == {
+                .Categorized -> {
+                    if state.cat_entry != None {
+                        state.mode = JetCLIHelpMode.Detail
+                        state.res_scroll = 0
+                    }
+                }
+                .Results -> {
+                    if state.hits.len() > 0 {
+                        state.mode = JetCLIHelpMode.Detail
+                        state.res_scroll = 0
+                    }
+                }
+                .Detail -> state.mode = jet_cli_help_state_palette_mode(state)
+                .Reference -> {}
+            }
+            JetCLIHelpAction.Continue
+        }
+        .Backspace -> {
+            if state.mode == JetCLIHelpMode.Reference {
+                state.ref_query = jet_cli_help_state_pop(state.ref_query)
+                state.ref_scroll = 0
+                jet_cli_help_state_reference_search(&state)
+            } else {
+                state.query = jet_cli_help_state_pop(state.query)
+                if state.query.len() == 0 {
+                    state.mode = JetCLIHelpMode.Categorized
+                    state.hits = [JetCLIHelpHit]{}
+                } else {
+                    state.hits = jet_cli_help_search(state.index, state.query)
+                    state.res_selected = 0
+                    state.res_scroll = 0
+                    state.mode = JetCLIHelpMode.Results
+                }
+            }
+            JetCLIHelpAction.Continue
+        }
+        .Char(character) -> {
+            if state.mode == JetCLIHelpMode.Reference {
+                state.ref_query = "{state.ref_query}{character}"
+                state.ref_scroll = 0
+                jet_cli_help_state_reference_search(&state)
+            } else {
+                if character == 'q' && state.query.len() == 0 && state.mode == JetCLIHelpMode.Categorized -> return JetCLIHelpAction.Quit
+                state.query = "{state.query}{character}"
+                state.hits = jet_cli_help_search(state.index, state.query)
+                state.res_selected = 0
+                state.res_scroll = 0
+                state.mode = JetCLIHelpMode.Results
+            }
+            JetCLIHelpAction.Continue
+        }
+        .Up | .Down -> {
+            delta :: if key == JetCLITermKey.Up -> -1 else -> 1
+            if state.mode == JetCLIHelpMode.Reference && jet_cli_help_state_reference_code(state) != None {
+                state.ref_scroll = jet_cli_help_state_scroll(state.ref_scroll, delta)
+            } else {
+                if ((state.mode == JetCLIHelpMode.Results || state.mode == JetCLIHelpMode.Detail) && jet_cli_help_state_result_code(state) != None) || state.mode == JetCLIHelpMode.Detail {
+                    state.res_scroll = jet_cli_help_state_scroll(state.res_scroll, delta)
+                } else {
+                    jet_cli_help_state_move_selection(&state, delta)
+                }
+            }
+            JetCLIHelpAction.Continue
+        }
+        .Left -> {
+            if state.mode == JetCLIHelpMode.Categorized -> state.cat_entry = None
+            if state.mode == JetCLIHelpMode.Reference -> state.ref_entry = None
+            JetCLIHelpAction.Continue
+        }
+        .Right -> {
+            if state.mode == JetCLIHelpMode.Categorized -> state.cat_entry = Val(0)
+            if state.mode == JetCLIHelpMode.Reference {
+                entries :: jet_cli_help_state_entries(state.index, state.ref_category)
+                if entries.len() > 0 -> state.ref_entry = Val(entries[0])
+            }
+            JetCLIHelpAction.Continue
+        }
+        .Enter | .EscapeEnter -> {
+            want_example :: key == JetCLITermKey.EscapeEnter
+            if !want_example && state.mode == JetCLIHelpMode.Categorized && state.cat_entry == None {
+                state.cat_entry = Val(0)
+                return JetCLIHelpAction.Continue
+            }
+            if state.mode == JetCLIHelpMode.Categorized && jet_cli_help_state_selected_category(state) == None -> return JetCLIHelpAction.Continue
+            JetCLIHelpAction.Submit(jet_cli_help_state_prefill(state, want_example))
+        }
+        else -> JetCLIHelpAction.Continue
+    }
+}
+// Rust `State::render` / `render_current` (Interactive.rs:96-114,887-950).
+pub fn jet_cli_help_state_render(state: JetCLIHelpState) -> String Never! {
+    if state.mode == JetCLIHelpMode.Results || state.mode == JetCLIHelpMode.Detail {
+        if jet_cli_help_state_result_code(state) == .Val(explanation) {
+            return jet_cli_help_render_text_viewport(jet_cli_help_render_code_page(explanation, state.color), state.width, state.height, state.res_scroll)
+        }
+    }
+    if state.mode == {
+        .Categorized -> jet_cli_help_render_categorized(state.index, state.cat_selected, state.cat_entry != None, jet_cli_help_state_selected_command(state), state.width, state.color, Val(state.height))
+        .Results -> jet_cli_help_render_result_list(state.hits, state.query, state.width, state.color, Val(state.res_selected), Val(state.height))
+        .Detail -> {
+            if jet_cli_help_state_current_entry(state) == .Val(at) -> jet_cli_help_render_lines_viewport(jet_cli_help_render_detail(state.index[at], state.width, state.color), state.height, state.res_scroll)
+            else -> jet_cli_help_render_result_list(state.hits, state.query, state.width, state.color, Val(state.res_selected), Val(state.height))
+        }
+        .Reference -> {
+            if jet_cli_help_state_reference_code(state) == .Val(explanation) -> return jet_cli_help_render_text_viewport(jet_cli_help_render_code_page(explanation, state.color), state.width, state.height, state.ref_scroll)
+            selected :: if state.ref_entry == .Val(at) -> Val(state.index[at]) else -> None
+            jet_cli_help_render_reference(state.index, state.ref_category, selected, state.width, state.height, state.color, state.ref_query)
+        }
+    }
+}
+// Rust `State::categorized_elements` non-clickable Error Codes row (Interactive.rs:552-554).
+// #4315: typed None.
+fn jet_cli_help_state_placeholder() -> JetCLIHelpElement? Never! { None }
+// Rust `State::categorized_elements` (Interactive.rs:537-559).
+fn jet_cli_help_state_categorized_elements(state: JetCLIHelpState) -> [JetCLIHelpElement?] Never! {
+    rows := [JetCLIHelpElement?]{}
+    loop category in 0..<JET_CLI_HELP_CATEGORIES.len() {
+        entries :: jet_cli_help_state_entries(state.index, category)
+        name :: JET_CLI_HELP_CATEGORIES[category]
+        if entries.len() == 0 && name != "Error Codes" -> next
+        &rows.push(Val(JetCLIHelpElement.Category(category)))
+        if category == state.cat_selected && state.cat_entry != None {
+            if name == "Error Codes" -> &rows.push(jet_cli_help_state_placeholder())
+            loop at in entries -> &rows.push(Val(JetCLIHelpElement.Command(at)))
+        }
+    }
+    rows
+}
+// Rust `State::reference_elements` (Interactive.rs:561-576).
+fn jet_cli_help_state_reference_elements(state: JetCLIHelpState) -> [JetCLIHelpElement] Never! {
+    rows := [JetCLIHelpElement]{}
+    loop category in 0..<JET_CLI_HELP_CATEGORIES.len() {
+        &rows.push(JetCLIHelpElement.ReferenceCategory(category))
+        if category == state.ref_category {
+            loop at in jet_cli_help_state_entries(state.index, category) -> &rows.push(JetCLIHelpElement.ReferenceCommand(at))
+        }
+    }
+    rows
+}
+// Rust `State::result_viewport` (Interactive.rs:578-601).
+fn jet_cli_help_state_result_viewport(state: JetCLIHelpState) -> (start: Int, visible: Int)? Never! {
+    if state.hits.len() == 0 || jet_cli_help_state_result_code(state) != None -> return None
+    fixed := 4
+    if state.height >= 6 -> fixed += 1
+    if state.height >= 7 -> fixed += 1
+    if state.height >= 8 {
+        if state.hits[0] == .Command(entry, _, _, _) {
+            if entry.symbol.examples.len() > 0 -> fixed += 1
+        }
+    }
+    visible :: jet_cli_help_max(jet_cli_help_sub(state.height, fixed), 1)
+    selected :: jet_cli_help_min(state.res_selected, state.hits.len() - 1)
+    start :: jet_cli_help_min(jet_cli_help_sub(selected, jet_cli_help_sub(visible, 1)), jet_cli_help_sub(state.hits.len(), visible))
+    Val((start: start, visible: visible))
+}
+// Rust `State::categorized_hit_map` (Interactive.rs:460-495).
+fn jet_cli_help_state_categorized_hit_map(state: JetCLIHelpState) -> [JetCLIHelpHitRegion] Never! {
+    rows :: jet_cli_help_state_categorized_elements(state)
+    regions := [JetCLIHelpHitRegion]{}
+    if rows.len() == 0 -> return regions
+    header := 0
+    selected := Val(0)
+    selected = None
+    command :: jet_cli_help_state_selected_category(state)
+    loop row in 0..<rows.len() {
+        if rows[row] == .Val(element) {
+            if element == .Category(category) { if category == state.cat_selected -> header = row }
+            if state.cat_entry != None {
+                if element == .Command(command_at) { if command == (Val(command_at)) -> selected = Val(row) }
+            }
+        }
+    }
+    chosen :: selected ?? header
+    visible :: jet_cli_help_max(jet_cli_help_sub(state.height, 4), 1)
+    start :: jet_cli_help_min(jet_cli_help_sub(chosen, jet_cli_help_sub(visible, 1)), jet_cli_help_sub(rows.len(), visible))
+    loop row in start..<jet_cli_help_min(rows.len(), start + visible) {
+        if rows[row] == .Val(element) -> &regions.push(jet_cli_help_hit_region(3 + row - start, 0, state.width, element))
+    }
+    regions
+}
+// Rust `State::result_hit_map` (Interactive.rs:497-511).
+fn jet_cli_help_state_result_hit_map(state: JetCLIHelpState) -> [JetCLIHelpHitRegion] Never! {
+    regions := [JetCLIHelpHitRegion]{}
+    viewport :: jet_cli_help_state_result_viewport(state) ?? return regions
+    loop hit in viewport.start..<jet_cli_help_min(state.hits.len(), viewport.start + viewport.visible) {
+        &regions.push(jet_cli_help_hit_region(3 + hit - viewport.start, 0, state.width, JetCLIHelpElement.Result(hit)))
+    }
+    regions
+}
+// Rust `State::reference_hit_map` (Interactive.rs:513-535).
+fn jet_cli_help_state_reference_hit_map(state: JetCLIHelpState) -> [JetCLIHelpHitRegion] Never! {
+    rows :: jet_cli_help_state_reference_elements(state)
+    regions := [JetCLIHelpHitRegion]{}
+    body :: jet_cli_help_max(state.height, 3) - 2
+    selected := Val(0)
+    selected = None
+    if state.ref_entry == .Val(command) {
+        loop row in 0..<rows.len() {
+            if rows[row] == .ReferenceCommand(at) { if at == command -> selected = Val(row) }
+        }
+    }
+    start := 0
+    if selected == .Val(selected_row) -> start = jet_cli_help_sub(selected_row, jet_cli_help_sub(body, 1))
+    start = jet_cli_help_min(start, jet_cli_help_sub(rows.len(), body))
+    left_width :: jet_cli_help_max(jet_cli_help_max(state.width, 24) /% 3, 18)
+    loop offset in 0..<body {
+        if start + offset < rows.len() -> &regions.push(jet_cli_help_hit_region(1 + offset, 0, left_width, rows[start + offset]))
+    }
+    regions
+}
+// Rust `State::hit_map` (Interactive.rs:451-458).
+fn jet_cli_help_state_hit_map(state: JetCLIHelpState) -> [JetCLIHelpHitRegion] Never! {
+    if state.mode == {
+        .Categorized -> jet_cli_help_state_categorized_hit_map(state)
+        .Results -> jet_cli_help_state_result_hit_map(state)
+        .Detail -> [JetCLIHelpHitRegion]{}
+        .Reference -> jet_cli_help_state_reference_hit_map(state)
+    }
+}
+// Rust `State::click` (Interactive.rs:346-391). Geometry, never rendered text.
+pub fn jet_cli_help_state_click(state: &JetCLIHelpState, column: Int, row: Int) -> JetCLIHelpAction Never! {
+    if column < 0 || row < 0 || column >= state.width || row >= state.height -> return JetCLIHelpAction.Continue
+    regions :: jet_cli_help_state_hit_map(state)
+    loop region in regions {
+        if !jet_cli_help_hit_contains(region, column, row) -> next
+        if region.element == {
+            .Category(category) -> {
+                if state.mode == JetCLIHelpMode.Categorized {
+                    state.cat_selected = category
+                    state.cat_entry = None
+                }
+            }
+            .Command(command) -> { if state.mode == JetCLIHelpMode.Categorized -> jet_cli_help_state_select_command(&state, command) }
+            .Result(hit) -> { if state.mode == JetCLIHelpMode.Results && hit < state.hits.len() -> state.res_selected = hit }
+            .ReferenceCategory(category) -> {
+                if state.mode == JetCLIHelpMode.Reference {
+                    state.ref_category = category
+                    state.ref_entry = None
+                }
+            }
+            .ReferenceCommand(command) -> {
+                if state.mode == JetCLIHelpMode.Reference && command < state.index.len() {
+                    state.ref_entry = Val(command)
+                    state.ref_category = jet_cli_help_state_category_index(state, command) ?? state.ref_category
+                }
+            }
+        }
+        break
+    }
+    JetCLIHelpAction.Continue
+}
+// Rust `State::wait` (Interactive.rs:393). A semantic idle transition; timing
+// belongs to the driver. This deliberately changes no reducer state.
+pub fn jet_cli_help_state_wait(state: &JetCLIHelpState) Never! {}
+// Rust `State::focus_name` (Interactive.rs:396-421).
+pub fn jet_cli_help_state_focus_name(state: JetCLIHelpState) -> String? Never! {
+    if state.mode == {
+        .Categorized -> {
+            if jet_cli_help_state_selected_category(state) == .Val(at) -> return Val(state.index[at].symbol.name)
+            if state.cat_selected >= 0 && state.cat_selected < JET_CLI_HELP_CATEGORIES.len() -> return Val(JET_CLI_HELP_CATEGORIES[state.cat_selected])
+            None
+        }
+        .Results | .Detail -> {
+            if state.res_selected < 0 || state.res_selected >= state.hits.len() -> return None
+            if state.hits[state.res_selected] == {
+                .Command(entry, _, _, _) -> Val(entry.symbol.name)
+                .Code(explanation) -> Val(explanation.code)
+            }
+        }
+        .Reference -> {
+            if state.ref_entry == .Val(at) {
+                if at >= 0 && at < state.index.len() -> return Val(state.index[at].symbol.name)
+            }
+            if state.ref_category >= 0 && state.ref_category < JET_CLI_HELP_CATEGORIES.len() -> return Val(JET_CLI_HELP_CATEGORIES[state.ref_category])
+            None
+        }
+    }
+}
+// Rust `State::ready` (Interactive.rs:428-446). Exact semantic names only.
+pub fn jet_cli_help_state_ready(state: JetCLIHelpState, marker: String) -> Bool Never! {
+    if marker.len() == 0 -> return false
+    if (marker == "categorized" && state.mode == JetCLIHelpMode.Categorized) || (marker == "results" && state.mode == JetCLIHelpMode.Results) || (marker == "detail" && state.mode == JetCLIHelpMode.Detail) || (marker == "reference" && state.mode == JetCLIHelpMode.Reference) -> return true
+    focus :: jet_cli_help_state_focus_name(state) ?? return false
+    // Bind first: interpolated text directly on == is a Jet text pattern.
+    prefilled :: "jet {focus}"
+    marker == focus || marker == prefilled
+}
+// Rust `State::cursor` (Interactive.rs:624-644).
+pub fn jet_cli_help_state_cursor(state: JetCLIHelpState) -> (column: Int, row: Int)? Never! {
+    target := Val(JetCLIHelpElement.Category(0))
+    target = None
+    if state.mode == {
+        .Categorized -> {
+            if jet_cli_help_state_selected_category(state) == .Val(at) -> target = Val(JetCLIHelpElement.Command(at))
+            else -> target = Val(JetCLIHelpElement.Category(state.cat_selected))
+        }
+        .Results -> { if jet_cli_help_state_result_code(state) == None -> target = Val(JetCLIHelpElement.Result(state.res_selected)) }
+        .Reference -> {
+            if state.ref_entry == .Val(at) -> target = Val(JetCLIHelpElement.ReferenceCommand(at))
+            else -> target = Val(JetCLIHelpElement.ReferenceCategory(state.ref_category))
+        }
+        .Detail -> {}
+    }
+    chosen :: target ?? return None
+    loop region in jet_cli_help_state_hit_map(state) {
+        if region.element == chosen -> return Val((column: region.column_start, row: region.row))
+    }
+    None
+}

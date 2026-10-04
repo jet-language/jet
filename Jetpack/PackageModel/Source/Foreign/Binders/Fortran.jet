@@ -7,9 +7,9 @@
 // reject a wrong flat-list length before entering foreign code. Unsupported
 // declarations fail binding instead of guessing an ABI (I3).
 
-@FORTRAN_BIND_SCHEMA :: "jet-fortran-bind-v1"
-@FORTRAN_TOOL_ACTION :: "rejected the ISO_C_BINDING source"
-@FORTRAN_COLUMN_MAJOR :: "column-major"
+FORTRAN_BIND_SCHEMA :: prep { "jet-fortran-bind-v1" }
+FORTRAN_TOOL_ACTION :: prep { "rejected the ISO_C_BINDING source" }
+FORTRAN_COLUMN_MAJOR :: prep { "column-major" }
 
 pub struct FortranBindResult {
     pub source: String
@@ -129,8 +129,8 @@ pub fn pkg_fortran_bind(source_path: String, source: String, lib: String, cache_
         pkg_fortran_compile(bridge_source, bridge_object, cache_dir)
         &archive_command.push(bridge_object)
     }
-    output :: pkg_binder_capture(archive_command, None, "ar", @FORTRAN_TOOL_ACTION)
-    if !output.success -> return Err(ForeignBindError.ToolFailed{tool: "ar", action: @FORTRAN_TOOL_ACTION, detail: pkg_fortran_launder(output.stderr)})
+    output :: pkg_binder_capture(archive_command, None, "ar", FORTRAN_TOOL_ACTION)
+    if !output.success -> return Err(ForeignBindError.ToolFailed{tool: "ar", action: FORTRAN_TOOL_ACTION, detail: pkg_fortran_launder(output.stderr)})
     pkg_binder_remove_file_quiet(object)
     pkg_binder_remove_file_quiet(bridge_object)
     pkg_binder_remove_file_quiet(bridge_source)
@@ -141,21 +141,21 @@ pub fn pkg_fortran_bind(source_path: String, source: String, lib: String, cache_
         &bound.push(routine.jet_name)
         loop entry in routine.params {
             if entry.param == {
-                .Array(_, extents) -> &layouts.push(FortranArrayLayoutFact{routine: routine.jet_name, parameter: entry.name, extents: extents, order: @FORTRAN_COLUMN_MAJOR})
+                .Array(_, extents) -> &layouts.push(FortranArrayLayoutFact{routine: routine.jet_name, parameter: entry.name, extents: extents, order: FORTRAN_COLUMN_MAJOR})
                 .Scalar(_) -> {}
             }
         }
     }
-    provenance := "schema={@FORTRAN_BIND_SCHEMA}\n"
+    provenance := "schema={FORTRAN_BIND_SCHEMA}\n"
     pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Fortran, "Fortran", lib, source_path, archive, "gfortran=-c;-fPIC;-ffree-line-length-none/ar")
     Ok(FortranBindResult{source: generated, bound: bound, archive: archive, layouts: layouts, provenance: provenance})
 }
 
 fn pkg_fortran_compile(source: String, object: String, module_dir: String) ForeignBindError! -[Exec, Time.Wait]> {
     argv :: [String]{"gfortran", "-c", "-fPIC", "-ffree-line-length-none", "-J", module_dir, "-I", module_dir, source, "-o", object}
-    output :: pkg_binder_capture(argv, None, "gfortran", @FORTRAN_TOOL_ACTION)
-    if output.success -> return Ok()
-    Err(ForeignBindError.ToolFailed{tool: "gfortran", action: @FORTRAN_TOOL_ACTION, detail: pkg_fortran_launder(output.stderr)})
+    output :: pkg_binder_capture(argv, None, "gfortran", FORTRAN_TOOL_ACTION)
+    if output.success -> return
+    return Err(ForeignBindError.ToolFailed{tool: "gfortran", action: FORTRAN_TOOL_ACTION, detail: pkg_fortran_launder(output.stderr)})
 }
 
 // The detail of the first `Error:` line, at most 160 characters.
@@ -163,10 +163,10 @@ fn pkg_fortran_launder(stderr: [U8]) -> String Never! {
     loop line in pkg_binder_lines(String.from_bytes_lossy(stderr)) {
         parts :: line.split_once("Error:") ?? next
         detail :: parts.after.trim()
-        if detail == "" -> return @BINDER_TOOL_FAILURE_DETAIL
+        if detail == "" -> return BINDER_TOOL_FAILURE_DETAIL
         return pkg_binder_take_chars(detail, 160)
     }
-    @BINDER_TOOL_FAILURE_DETAIL
+    BINDER_TOOL_FAILURE_DETAIL
 }
 
 fn pkg_fortran_parse_routines(source: String) -> [FortranRoutine] ForeignBindError! {
@@ -254,7 +254,7 @@ fn pkg_fortran_find_decl(declarations: [String], name: String) -> FortranDeclara
             if part.trim() == "value" -> value = true
             if part.trim() == "intent(in)" -> intent_in = true
         }
-        dims := None
+        dims := String?{None}
         if entity.split_once("(") == {
             .Val(parts) -> {
                 close :: pkg_binder_rfind(parts.after, ")")
@@ -263,7 +263,7 @@ fn pkg_fortran_find_decl(declarations: [String], name: String) -> FortranDeclara
             .None -> {}
         }
         if dims == None -> dims = pkg_fortran_parse_dimension_attr(lower)
-        extents := None
+        extents := [Int]?{None}
         if dims == {
             .Val(raw) -> {
                 parsed := [Int]{}
@@ -462,7 +462,7 @@ fn pkg_fortran_render_bridge(module_name: String, lib: String, routines: [Fortra
                         coordinates := [String]{}
                         loop extent in extents {
                             &coordinates.push("{remaining % extent + 1}")
-                            remaining = remaining / extent
+                            remaining = remaining /% extent
                         }
                         out = "{out}    {entry.name}({coordinates.join(",")}) = {entry.name}_{index}\n"
                     }

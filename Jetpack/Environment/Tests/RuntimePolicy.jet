@@ -18,7 +18,7 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
 
 #Test("every verb is daemonless and needs no root") {
     policies :: env_all_verb_policies()
-    assert_eq(policies.len(), @JETPACK_VERBS.len())
+    assert_eq(policies.len(), JETPACK_VERBS.len())
     loop policy in policies {
         assert(!policy.resident_daemon)
         assert(!policy.requires_root)
@@ -29,7 +29,7 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
 
 #Test("project lock allows nested same session scopes") {
     root :: env_rt_test_scratch("nested-project-lock")
-    managed :: files.join(root, @SOURCE_ROOT_DIR)
+    managed :: files.join(root, SOURCE_ROOT_DIR)
     files.create_dir_all(managed) ?? panic("managed dir")
     session := RuntimeLockSession.new()
     outer :: session.enter(managed, "outer") ?? panic("outer scope")
@@ -43,7 +43,7 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
 
 #Test("stale pid text and file age are not liveness") {
     root :: env_rt_test_scratch("stale-text")
-    dir :: files.join(root, @RUNTIME_LOCK_DIR)
+    dir :: files.join(root, RUNTIME_LOCK_DIR)
     files.create_dir_all(dir) ?? panic("lock dir")
     path :: files.join(dir, "hangar.lock")
     files.write(path, "pid=4294967294\nprocess_start=1\n") ?? panic("stale marker")
@@ -59,11 +59,11 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
 
 #Test("absent lock probe is read only") {
     root :: env_rt_test_scratch("absent-probe")
-    path :: files.join(files.join(root, @RUNTIME_LOCK_DIR), "missing.lock")
+    path :: files.join(files.join(root, RUNTIME_LOCK_DIR), "missing.lock")
     state :: env_lock_state(path) ?? panic("probe absent")
     assert(state == RuntimeLockState.Absent)
     assert(!files.exists(path))
-    assert(!files.exists(files.join(root, @RUNTIME_LOCK_DIR)))
+    assert(!files.exists(files.join(root, RUNTIME_LOCK_DIR)))
     files.remove_all(root).drop("test cleanup")
 }
 
@@ -84,7 +84,7 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
 
 #Test("lock open failures fail closed") {
     root :: env_rt_test_scratch("fail-closed")
-    lock_dir :: files.join(root, @RUNTIME_LOCK_DIR)
+    lock_dir :: files.join(root, RUNTIME_LOCK_DIR)
     files.write(lock_dir, "not a directory") ?? panic("plant file")
     assert(env_acquire_lock(root, "hangar") == .Err(_))
     files.remove(lock_dir) ?? panic("remove planted file")
@@ -99,7 +99,7 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
     // outright, never waited on.
     if sys.is_windows() -> return
     root :: env_rt_test_scratch("symlink-fail-closed")
-    lock_dir :: files.join(root, @RUNTIME_LOCK_DIR)
+    lock_dir :: files.join(root, RUNTIME_LOCK_DIR)
     files.create_dir_all(lock_dir) ?? panic("lock dir")
     target :: files.join(root, "attacker-target")
     files.write(target, "not a lock") ?? panic("target")
@@ -116,7 +116,7 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
     if sys.is_windows() -> return
     root :: env_rt_test_scratch("dual-replace-fail-closed")
     first :: env_acquire_lock(root, "hangar") ?? panic("first claim")
-    lock_dir :: files.join(root, @RUNTIME_LOCK_DIR)
+    lock_dir :: files.join(root, RUNTIME_LOCK_DIR)
     path :: files.join(lock_dir, "hangar.lock")
     anchor :: files.join(lock_dir, "hangar.lock.anchor")
     files.hard_link(path, anchor) ?? panic("anchor")

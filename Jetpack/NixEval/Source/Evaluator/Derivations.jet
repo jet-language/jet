@@ -2,10 +2,10 @@
 // request; they never execute builders or read the host store, and inputs
 // without canonical store identities fail closed.
 
-@NIXEVAL_MAX_DERIVATION_ARGS :: 256
-@NIXEVAL_MAX_DERIVATION_ENV :: 256
-@NIXEVAL_MAX_DERIVATION_INPUTS :: 256
-@NIXEVAL_MAX_DERIVATION_OUTPUTS :: 64
+NIXEVAL_MAX_DERIVATION_ARGS :: prep { 256 }
+NIXEVAL_MAX_DERIVATION_ENV :: prep { 256 }
+NIXEVAL_MAX_DERIVATION_INPUTS :: prep { 256 }
+NIXEVAL_MAX_DERIVATION_OUTPUTS :: prep { 64 }
 
 fn nixeval_derivation_reserved_fields() -> [String] Never! {
     [String]{"name", "system", "builder", "args", "outputs", "outputHash", "outputHashAlgo", "outputHashMode", "__ignoreNulls"}
@@ -151,7 +151,7 @@ impl NixEvaluator {
             .Val(value) -> {
                 if value == {
                     .List(values) -> {
-                        if values.len() > @NIXEVAL_MAX_DERIVATION_ARGS -> return Err(NixEvalError.ResourceLimit("derivation has more than {@NIXEVAL_MAX_DERIVATION_ARGS} arguments"))
+                        if values.len() > NIXEVAL_MAX_DERIVATION_ARGS -> return Err(NixEvalError.ResourceLimit("derivation has more than {NIXEVAL_MAX_DERIVATION_ARGS} arguments"))
                         loop item in values {
                             forced :: &self.force(item)
                             text :: forced.stringify()
@@ -183,8 +183,8 @@ impl NixEvaluator {
             }
             else -> {}
         }
-        if output_names.len() == 0 || output_names.len() > @NIXEVAL_MAX_DERIVATION_OUTPUTS {
-            return Err(NixEvalError.ResourceLimit("derivation must declare between one and {@NIXEVAL_MAX_DERIVATION_OUTPUTS} outputs"))
+        if output_names.len() == 0 || output_names.len() > NIXEVAL_MAX_DERIVATION_OUTPUTS {
+            return Err(NixEvalError.ResourceLimit("derivation must declare between one and {NIXEVAL_MAX_DERIVATION_OUTPUTS} outputs"))
         }
         seen := [String]{}
         loop output_name in output_names {
@@ -233,7 +233,7 @@ impl NixEvaluator {
             text :: value.stringify()
             nixeval_record_derivation_contexts(text.contexts, &input_sources)
             env[field] = text.value
-            if env.len() > @NIXEVAL_MAX_DERIVATION_ENV -> return Err(NixEvalError.ResourceLimit("derivation has more than {@NIXEVAL_MAX_DERIVATION_ENV} environment fields"))
+            if env.len() > NIXEVAL_MAX_DERIVATION_ENV -> return Err(NixEvalError.ResourceLimit("derivation has more than {NIXEVAL_MAX_DERIVATION_ENV} environment fields"))
         }
         env["builder"] = ~builder
         env["name"] = ~name
@@ -246,8 +246,8 @@ impl NixEvaluator {
         }
         loop output_name in output_names -> env[output_name] = ""
 
-        if input_sources.len() > @NIXEVAL_MAX_DERIVATION_INPUTS {
-            return Err(NixEvalError.ResourceLimit("derivation has more than {@NIXEVAL_MAX_DERIVATION_INPUTS} source inputs"))
+        if input_sources.len() > NIXEVAL_MAX_DERIVATION_INPUTS {
+            return Err(NixEvalError.ResourceLimit("derivation has more than {NIXEVAL_MAX_DERIVATION_INPUTS} source inputs"))
         }
         outputs := [NixEvalDerivationOutput]{}
         loop output_name in output_names -> &outputs.push(NixEvalDerivationOutput{name: output_name, method_algo: ~method_algo, hash_hex: ~hash_hex})
@@ -274,13 +274,13 @@ fn nixeval_record_derivation_contexts(contexts: [String], inputs: &[String]) Nix
 }
 
 fn nixeval_validate_derivation_name(name: String) NixEvalError! {
-    if name == "" || name.bytes().len() > @NIXEVAL_MAX_PATH_BYTES || nixeval_contains_byte(name, 47) || nixeval_contains_byte(name, 0) || name == "." || name == ".." {
+    if name == "" || name.bytes().len() > NIXEVAL_MAX_PATH_BYTES || nixeval_contains_byte(name, 47) || nixeval_contains_byte(name, 0) || name == "." || name == ".." {
         return Err(NixEvalError.Invalid("invalid derivation name `{name}`"))
     }
 }
 
 fn nixeval_validate_derivation_output_name(name: String) NixEvalError! {
-    reserved :: name == "" || name.bytes().len() > @NIXEVAL_MAX_PACKAGE_NAME_BYTES || name == "." || name == ".." || nixeval_contains_byte(name, 47) || nixeval_contains_byte(name, 61)
+    reserved :: name == "" || name.bytes().len() > NIXEVAL_MAX_PACKAGE_NAME_BYTES || name == "." || name == ".." || nixeval_contains_byte(name, 47) || nixeval_contains_byte(name, 61)
     if reserved || nixeval_has_ascii_control(name) -> return Err(NixEvalError.Invalid("invalid derivation output name `{name}`"))
 }
 

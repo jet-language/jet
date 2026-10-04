@@ -49,13 +49,13 @@ pub fn jet_eval_source_target(program: MIRProgram, row: MIRPreludeCall) -> JetEv
 // The source-member matcher above remains the single owner of symbol, arity,
 // and borrow-mask classification; callers retain their own value marshalling.
 pub fn jet_eval_source_row(program: MIRProgram, member: String) -> MIRPreludeCall? {
-    loop row in program.prelude_calls {
-        if !jet_eval_source_route_shape_valid(row) {
+    loop index in 0..<program.prelude_calls.len() {
+        if !jet_eval_source_route_shape_valid(program.prelude_calls[index]) {
             next
         }
-        source_member :: jet_eval_source_member(row) ?? next
+        source_member :: jet_eval_source_member(program.prelude_calls[index]) ?? next
         if source_member == member {
-            return Val(row)
+            return Val(program.prelude_calls[index])
         }
     }
     None
@@ -94,15 +94,19 @@ struct JetEvalSourceFunction {
 }
 
 fn jet_eval_source_find_function(program: MIRProgram, member: String) -> JetEvalSourceFunction? {
-    loop function in program.functions {
-        if function.name != member -> next
-        loop candidate_module in program.modules {
-            if candidate_module.id == function.module_id && candidate_module.name == "core_text_fmt" && candidate_module.path == "Core/text/fmt.jet" && function.module_name == candidate_module.key {
+    fmt_modules := [Int]{}
+    loop index in 0..<program.modules.len() {
+        if program.modules[index].name == "core_text_fmt" && program.modules[index].path == "Core/text/fmt.jet" -> &fmt_modules.push(index)
+    }
+    loop index in 0..<program.functions.len() {
+        loop position in 0..<fmt_modules.len() {
+            fmt_module :: fmt_modules[position]
+            if program.modules[fmt_module].id == program.functions[index].module_id && program.functions[index].name == member && program.functions[index].module_name == program.modules[fmt_module].key {
                 return Val(JetEvalSourceFunction{
-                    id: function.id,
-                    module_name: function.module_name,
-                    arity: function.params.len(),
-                    interpreter: function.target_applicability.interpreter,
+                    id: program.functions[index].id,
+                    module_name: program.functions[index].module_name,
+                    arity: program.functions[index].params.len(),
+                    interpreter: program.functions[index].target_applicability.interpreter,
                 })
             }
         }

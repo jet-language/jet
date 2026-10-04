@@ -32,30 +32,30 @@ pub enum VariantRole {
     }
 }
 
-pub enum VariantOs {
+pub enum VariantOS {
     Linux
     MacOS
     Windows
 
     fn as_str(self) -> String Never! {
         if self == {
-            .Linux -> @OS_LINUX
-            .MacOS -> @OS_MACOS
-            .Windows -> @OS_WINDOWS
+            .Linux -> OS_LINUX
+            .MacOS -> OS_MACOS
+            .Windows -> OS_WINDOWS
         }
     }
 
-    fn parse(raw: String) -> VariantOs? Never! {
+    fn parse(raw: String) -> VariantOS? Never! {
         if raw == {
-            @OS_LINUX | "Linux" -> Val(VariantOs.Linux)
-            @OS_MACOS | "MacOS" | "Darwin" | "darwin" -> Val(VariantOs.MacOS)
-            @OS_WINDOWS | "Windows" -> Val(VariantOs.Windows)
+            OS_LINUX | "Linux" -> Val(VariantOS.Linux)
+            OS_MACOS | "MacOS" | "Darwin" | "darwin" -> Val(VariantOS.MacOS)
+            OS_WINDOWS | "Windows" -> Val(VariantOS.Windows)
             else -> None
         }
     }
 
-    fn from_platform_os(os: String) -> VariantOs Never! {
-        VariantOs.parse(os) ?? VariantOs.Linux
+    fn from_platform_os(os: String) -> VariantOS Never! {
+        VariantOS.parse(os) ?? VariantOS.Linux
     }
 }
 
@@ -65,15 +65,15 @@ pub enum VariantArch {
 
     fn as_str(self) -> String Never! {
         if self == {
-            .X64 -> @ARCH_X64
-            .Aarch64 -> @ARCH_ARM64
+            .X64 -> ARCH_X64
+            .Aarch64 -> ARCH_ARM64
         }
     }
 
     fn parse(raw: String) -> VariantArch? Never! {
         if raw == {
-            @ARCH_X64 | "x64" | "amd64" -> Val(VariantArch.X64)
-            @ARCH_ARM64 | "arm64" | "Aarch64" -> Val(VariantArch.Aarch64)
+            ARCH_X64 | "x64" | "amd64" -> Val(VariantArch.X64)
+            ARCH_ARM64 | "arm64" | "Aarch64" -> Val(VariantArch.Aarch64)
             else -> None
         }
     }
@@ -108,7 +108,7 @@ pub enum VariantLibc {
         }
     }
 
-    fn default_for(os: VariantOs) -> VariantLibc Never! {
+    fn default_for(os: VariantOS) -> VariantLibc Never! {
         if os == {
             .Linux -> VariantLibc.Gnu
             .MacOS -> VariantLibc.NoLibc
@@ -137,7 +137,7 @@ pub enum VariantLinkage {
     }
 }
 
-pub enum VariantAbi {
+pub enum VariantABI {
     Sysv
     Ms
     Unknown
@@ -150,19 +150,19 @@ pub enum VariantAbi {
         }
     }
 
-    fn parse(raw: String) -> VariantAbi? Never! {
+    fn parse(raw: String) -> VariantABI? Never! {
         if raw == {
-            "sysv" -> Val(VariantAbi.Sysv)
-            "ms" | "msvc" -> Val(VariantAbi.Ms)
-            "unknown" -> Val(VariantAbi.Unknown)
+            "sysv" -> Val(VariantABI.Sysv)
+            "ms" | "msvc" -> Val(VariantABI.Ms)
+            "unknown" -> Val(VariantABI.Unknown)
             else -> None
         }
     }
 
-    fn default_for(os: VariantOs) -> VariantAbi Never! {
+    fn default_for(os: VariantOS) -> VariantABI Never! {
         if os == {
-            .Windows -> VariantAbi.Ms
-            .Linux | .MacOS -> VariantAbi.Sysv
+            .Windows -> VariantABI.Ms
+            .Linux | .MacOS -> VariantABI.Sysv
         }
     }
 }
@@ -209,11 +209,11 @@ pub enum ArtifactKind {
 // axis separates.
 pub enum VariantAxis {
     Role
-    Os
+    OS
     Arch
     Libc
     Linkage
-    Abi
+    ABI
     Artifact
     Features
     ProviderFacts
@@ -221,11 +221,11 @@ pub enum VariantAxis {
     fn as_str(self) -> String Never! {
         if self == {
             .Role -> "role"
-            .Os -> "os"
+            .OS -> "os"
             .Arch -> "arch"
             .Libc -> "libc"
             .Linkage -> "linkage"
-            .Abi -> "abi"
+            .ABI -> "abi"
             .Artifact -> "artifact"
             .Features -> "features"
             .ProviderFacts -> "provider-facts"
@@ -236,11 +236,11 @@ pub enum VariantAxis {
     fn parse_mapped(raw: String) -> VariantAxis? Never! {
         if raw == {
             "role" -> Val(VariantAxis.Role)
-            "os" -> Val(VariantAxis.Os)
+            "os" -> Val(VariantAxis.OS)
             "arch" -> Val(VariantAxis.Arch)
             "libc" | "runtime" -> Val(VariantAxis.Libc)
             "linkage" -> Val(VariantAxis.Linkage)
-            "abi" -> Val(VariantAxis.Abi)
+            "abi" -> Val(VariantAxis.ABI)
             "artifact" -> Val(VariantAxis.Artifact)
             "features" -> Val(VariantAxis.Features)
             else -> None
@@ -252,39 +252,39 @@ pub enum VariantAxis {
 // and unique so equal sets compare equal.
 pub struct PackageVariant {
     pub role: VariantRole
-    pub os: VariantOs
+    pub os: VariantOS
     pub arch: VariantArch
     pub libc: VariantLibc
     pub linkage: VariantLinkage
-    pub abi: VariantAbi
+    pub abi: VariantABI
     pub artifact: ArtifactKind
     pub features: [String]
 
     // Total defaults from the requesting context: its platform, Host role,
     // shared linkage, library artifact, no features.
     fn defaults_for_context(platform: PlatformKey) -> PackageVariant Never! {
-        os :: VariantOs.from_platform_os(platform.os)
+        os :: VariantOS.from_platform_os(platform.os)
         PackageVariant{
             role: VariantRole.Host,
             os: ~os,
             arch: VariantArch.from_platform_arch(platform.arch),
             libc: VariantLibc.default_for(os),
             linkage: VariantLinkage.Shared,
-            abi: VariantAbi.default_for(os),
+            abi: VariantABI.default_for(os),
             artifact: ArtifactKind.Library,
             features: [String]{}
         }
     }
 
     // Cross-compile need: Target role on a foreign triple.
-    fn cross_target(os: VariantOs, arch: VariantArch, libc: VariantLibc) -> PackageVariant Never! {
+    fn cross_target(os: VariantOS, arch: VariantArch, libc: VariantLibc) -> PackageVariant Never! {
         PackageVariant{
             role: VariantRole.Target,
             os: ~os,
             arch: arch,
             libc: libc,
             linkage: VariantLinkage.Shared,
-            abi: VariantAbi.default_for(os),
+            abi: VariantABI.default_for(os),
             artifact: ArtifactKind.Library,
             features: [String]{}
         }
@@ -297,10 +297,10 @@ pub struct PackageVariant {
     }
 
     // Changing the OS resets libc and ABI to that OS's defaults.
-    fn with_os(self, os: VariantOs) -> PackageVariant Never! {
+    fn with_os(self, os: VariantOS) -> PackageVariant Never! {
         out := self
         out.libc = VariantLibc.default_for(os)
-        out.abi = VariantAbi.default_for(os)
+        out.abi = VariantABI.default_for(os)
         out.os = os
         out
     }
@@ -323,7 +323,7 @@ pub struct PackageVariant {
         out
     }
 
-    fn with_abi(self, abi: VariantAbi) -> PackageVariant Never! {
+    fn with_abi(self, abi: VariantABI) -> PackageVariant Never! {
         out := self
         out.abi = abi
         out
@@ -375,11 +375,11 @@ pub struct PackageVariant {
     fn first_distinguishing_axis(left: PackageVariant, right: PackageVariant) -> VariantAxis Never! {
         if {
             left.role != right.role -> VariantAxis.Role
-            left.os != right.os -> VariantAxis.Os
+            left.os != right.os -> VariantAxis.OS
             left.arch != right.arch -> VariantAxis.Arch
             left.libc != right.libc -> VariantAxis.Libc
             left.linkage != right.linkage -> VariantAxis.Linkage
-            left.abi != right.abi -> VariantAxis.Abi
+            left.abi != right.abi -> VariantAxis.ABI
             left.artifact != right.artifact -> VariantAxis.Artifact
             else -> VariantAxis.Features
         }
@@ -456,8 +456,8 @@ pub struct VariantCandidate {
             axis :: VariantAxis.parse_mapped(entry.axis) ?? next
             if axis == {
                 .Role -> variant.role = VariantRole.parse(value) ?? variant.role
-                .Os -> {
-                    if VariantOs.parse(value) == {
+                .OS -> {
+                    if VariantOS.parse(value) == {
                         .Val(os) -> variant = variant.with_os(os)
                         .None -> {}
                     }
@@ -465,7 +465,7 @@ pub struct VariantCandidate {
                 .Arch -> variant.arch = VariantArch.parse(value) ?? variant.arch
                 .Libc -> variant.libc = VariantLibc.parse(value) ?? variant.libc
                 .Linkage -> variant.linkage = VariantLinkage.parse(value) ?? variant.linkage
-                .Abi -> variant.abi = VariantAbi.parse(value) ?? variant.abi
+                .ABI -> variant.abi = VariantABI.parse(value) ?? variant.abi
                 .Artifact -> variant.artifact = ArtifactKind.parse(value) ?? variant.artifact
                 .Features -> &variant.add_feature(value)
                 .ProviderFacts -> {}

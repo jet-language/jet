@@ -1,0 +1,837 @@
+// PORT-PENDING 1096 tests-jetpack-nix-eval-boundary-module-group: tests/jetpack_nix_eval_boundary.rs:1-81
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::Path;
+//RS 
+//RS #[test]
+//RS fn evaluator_seam_is_no_std_dependency_free_and_unsafe_forbidden() {
+//RS     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+//RS     let manifest = fs::read_to_string(root.join("crates/jet-nix-eval/Cargo.toml"))
+//RS         .expect("native evaluator seam manifest");
+//RS     let dependencies = manifest
+//RS         .split_once("[dependencies]")
+//RS         .expect("evaluator seam must declare an explicit dependency section")
+//RS         .1
+//RS         .trim();
+//RS     assert!(
+//RS         dependencies.is_empty(),
+//RS         "native evaluator seam must remain dependency-free, got:\n{dependencies}"
+//RS     );
+//RS     assert!(manifest.lines().any(|line| line.trim() == "build = false"));
+//RS     assert!(!root.join("crates/jet-nix-eval/build.rs").exists());
+//RS 
+//RS     let seam = fs::read_to_string(root.join("crates/jet-nix-eval/src/lib.rs"))
+//RS         .expect("native evaluator seam root");
+//RS     assert!(seam.contains("#![no_std]"));
+//RS     assert!(seam.contains("#![forbid(unsafe_code)]"));
+//RS     assert!(seam.contains("#![deny(clippy::disallowed_types)]"));
+//RS 
+//RS     let clippy = fs::read_to_string(root.join("clippy.toml")).expect("workspace Clippy policy");
+//RS     assert!(clippy.contains("std::process::Command"));
+//RS     let verify = fs::read_to_string(root.join("Tools/agent/verify-full.sh"))
+//RS         .expect("full verification entry point");
+//RS     assert!(verify.contains("verify-nix-eval-stopline.sh"));
+//RS     let escape = fs::read_to_string(root.join("tests/fixtures/nix-compat/authority-escape/lib.rs"))
+//RS         .expect("native evaluator authority escape fixture");
+//RS     assert!(escape.contains("extern crate std as host;"));
+//RS     assert!(escape.contains("host::process::Command::new"));
+//RS     assert!(escape.contains("host::net::TcpStream as Wire"));
+//RS     assert!(escape.contains("host::net::ToSocketAddrs as Resolve"));
+//RS     assert!(escape.contains("host::os::unix::net::UnixStream as Wire"));
+//RS     let build_escape =
+//RS         fs::read_to_string(root.join("tests/fixtures/nix-compat/build-script-escape/build.rs"))
+//RS             .expect("native evaluator build-script escape fixture");
+//RS     assert!(build_escape.contains("std::process::Command::new"));
+//RS 
+//RS     let jetpack_manifest =
+//RS         fs::read_to_string(root.join("crates/jetpack/Cargo.toml")).expect("jetpack manifest");
+//RS     assert!(jetpack_manifest.contains("jet-nix-eval = { path = \"../jet-nix-eval\" }"));
+//RS     let jetpack =
+//RS         fs::read_to_string(root.join("crates/jetpack/src/lib.rs")).expect("jetpack library root");
+//RS     assert!(jetpack.contains("pub(crate) mod NixEval;"));
+//RS     assert!(!jetpack.contains("pub mod NixEval;"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn oracle_pin_is_independent_from_mutable_root_flake_lock() {
+//RS     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+//RS     let oracle = fs::read_to_string(root.join("tests/fixtures/nix-compat/oracle.json"))
+//RS         .expect("committed oracle manifest");
+//RS     assert!(oracle.contains("\"version\": \"2.34.8\""));
+//RS     assert!(oracle.contains("b6769c588f60b3e762f73d3a8cf60294df078ccd"));
+//RS     assert!(oracle.contains("f3f1c3c5b8ad91850e0f7c590cf177f7ab022024"));
+//RS     assert!(oracle.contains("b5aa0fbd538984f6e3d201be0005b4463d8b09f8"));
+//RS     assert!(oracle.contains("\"last_modified\": 1782723713"));
+//RS     assert!(oracle.contains("sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ="));
+//RS     assert_eq!(oracle.matches("\"build_nar_hash\": \"").count(), 4);
+//RS     assert_eq!(oracle.matches("\"executable_nar_hash\": \"").count(), 4);
+//RS     assert_eq!(oracle.matches("\"status\": \"ready\"").count(), 4);
+//RS     assert!(oracle.contains("\"corpus_status\": \"bit_exact\""));
+//RS 
+//RS     let breadth = fs::read_to_string(root.join("tests/fixtures/nix-compat/breadth.json"))
+//RS         .expect("pinned breadth fixture");
+//RS     assert!(breadth.contains("\"fuzz_seeds\""));
+//RS     assert!(breadth.contains("\"locks\""));
+//RS     assert!(breadth.contains("\"output_identities\""));
+//RS     assert!(breadth.contains("\"memory_bytes\": 16777216"));
+//RS     assert!(breadth.contains("\"latency_micros\": 1000000"));
+//RS     let stopline = fs::read_to_string(root.join("Tools/agent/verify-nix-eval-stopline.sh"))
+//RS         .expect("native evaluator stop-line");
+//RS     assert!(stopline.contains("breadth.json"));
+//RS }
+// END-PORT-PENDING 1096 tests/jetpack_nix_eval_boundary.rs:1-81
+
+// PORT-PENDING 1096 tests-jetpack-nix-eval-boundary-module-group: tests/jetpack_nix_index.rs:1-529
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #2158: signed-index Nix provider realization and closure repair.
+//RS 
+//RS use std::fs;
+//RS use std::path::Path;
+//RS 
+//RS use jetpack::Store::{self, ProducerRecord};
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "support/jetpack_fixtures.rs"]
+//RS mod jetpack_fixtures;
+//RS #[path = "support/nix_index_cache_server.rs"]
+//RS mod nix_index_cache_server;
+//RS 
+//RS use jetpack_fixtures::{
+//RS     assert_jetos_stderr_snapshot_normalized, copy_dir_recursive, jetpack, Scratch,
+//RS };
+//RS use nix_index_cache_server::{NixIndexCacheServer, LIB_PATH, RUNTIME_PATH};
+//RS 
+//RS #[path = "support/static_file_server.rs"]
+//RS mod static_file_server;
+//RS use static_file_server::StaticFileServer;
+//RS 
+//RS const REVISION: &str = nix_index_cache_server::REVISION;
+//RS 
+//RS fn project(scratch: &Scratch) {
+//RS     fs::create_dir_all(scratch.join(".jet")).expect("project managed directory");
+//RS     fs::write(
+//RS         scratch.join(".jet/lock"),
+//RS         format!(
+//RS             "version = 1\n\n[[source_channel]]\nname = \"jetpack\"\nchannel = \"nixpkgs-unstable\"\nexact = \"github:NixOS/nixpkgs#{REVISION}\"\n\n[root]\ndependencies = []\n"
+//RS         ),
+//RS     )
+//RS     .expect("project lock");
+//RS     fs::write(
+//RS         scratch.join("env.jet"),
+//RS         "module env.dev {\n    sources: { jetpack: NixOS/nixpkgs/nixpkgs-unstable@github }\n    packages: [jetpack.ripgrep]\n}\n",
+//RS     ).expect("project environment");
+//RS }
+//RS 
+//RS fn isolated_jetpack(project: &Scratch, root: &Scratch) -> std::process::Command {
+//RS     let temporary = root.join("tmp");
+//RS     fs::create_dir_all(&temporary).expect("private command temporary directory");
+//RS     let mut command = jetpack();
+//RS     command
+//RS         .env_clear()
+//RS         .current_dir(&project.path)
+//RS         .env("PATH", "")
+//RS         .env("HOME", root.join("home"))
+//RS         .env("XDG_DATA_HOME", root.join("home/data"))
+//RS         .env("XDG_STATE_HOME", root.join("home/state"))
+//RS         .env("XDG_CACHE_HOME", root.join("home/cache"))
+//RS         .env("XDG_CONFIG_HOME", root.join("home/config"))
+//RS         .env("XDG_RUNTIME_DIR", root.join("run"))
+//RS         .env("TMPDIR", &temporary)
+//RS         .env("TMP", &temporary)
+//RS         .env("TEMP", &temporary)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_SHARED_CAS", root.join("hangar/cas"))
+//RS         .env("JETPACK_NIX_FALLBACK_POLICY", "deny");
+//RS     command
+//RS }
+//RS 
+//RS fn prepare(project: &Scratch, root: &Scratch, offline: bool) -> std::process::Output {
+//RS     let mut command = isolated_jetpack(project, root);
+//RS     command.args(["env", "--env", "dev", "--prep", "--trust", "--yes", "--no-color"]);
+//RS     if offline {
+//RS         command.arg("--offline");
+//RS     }
+//RS     command.output().expect("prepare index-backed Nix environment")
+//RS }
+//RS 
+//RS fn package_entry(root: &Scratch) -> Store::StoreEntry {
+//RS     Store::list_checked(&Store::Roots::at(root.path.clone()))
+//RS         .expect("list Hangar")
+//RS         .into_iter()
+//RS         .find(|entry| entry.reference == "ripgrep@jetpack" && entry.version == "15.2.0")
+//RS         .expect("realized ripgrep package entry")
+//RS }
+//RS 
+//RS fn make_directories_writable(path: &Path) {
+//RS     let metadata = fs::symlink_metadata(path).expect("inspect Hangar object");
+//RS     if !metadata.is_dir() {
+//RS         return;
+//RS     }
+//RS     let mut permissions = metadata.permissions();
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::PermissionsExt as _;
+//RS         permissions.set_mode(permissions.mode() | 0o200);
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     permissions.set_readonly(false);
+//RS     fs::set_permissions(path, permissions).expect("make Hangar directory writable");
+//RS     for child in fs::read_dir(path).expect("read Hangar object") {
+//RS         make_directories_writable(&child.expect("Hangar object child").path());
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn index_backed_nixpkgs_records_complete_closure_and_both_proofs() {
+//RS     let project_root = Scratch::new("nix-index-project");
+//RS     let hangar_root = Scratch::new("nix-index-hangar");
+//RS     let server = NixIndexCacheServer::start_ripgrep(&project_root.path);
+//RS     server.install(&hangar_root.path);
+//RS     project(&project_root);
+//RS 
+//RS     let output = prepare(&project_root, &hangar_root, false);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS 
+//RS     let entry = package_entry(&hangar_root);
+//RS     assert!(!entry.references.is_empty(), "Realized.references is empty");
+//RS     let roots = Store::Roots::at(hangar_root.path.clone());
+//RS     let graph = Store::closure_graph(&roots).expect("read Hangar closure graph");
+//RS     let closure = graph.closure(&entry.envelope.output_hash);
+//RS     assert_eq!(closure.len(), 3, "closure graph: {graph:?}");
+//RS     assert!(entry
+//RS         .references
+//RS         .iter()
+//RS         .all(|digest| graph.objects.contains_key(digest)));
+//RS     assert!(
+//RS         graph
+//RS             .transitive_references(&entry.envelope.output_hash)
+//RS             .len()
+//RS             >= 2
+//RS     );
+//RS 
+//RS     let producer = ProducerRecord::decode(&entry.producer_record).expect("decode Nix producer");
+//RS     for fact in [
+//RS         "nix.index.proof.v1",
+//RS         "nix.index.record.sha256",
+//RS         "nix.index.target.sha256",
+//RS         "nix.index.manifest.sha256",
+//RS         "nix.cache.output.out.proof.sha256",
+//RS         "nix.cache.closure.receipt.sha256",
+//RS     ] {
+//RS         assert!(
+//RS             producer
+//RS                 .facts
+//RS                 .get(fact)
+//RS                 .is_some_and(|value| !value.is_empty()),
+//RS             "missing provenance fact {fact}: {:?}",
+//RS             producer.facts
+//RS         );
+//RS     }
+//RS     assert_eq!(
+//RS         producer.facts.get("nix.native.format").map(String::as_str),
+//RS         Some("jet-nixpkgs-index-v1")
+//RS     );
+//RS     assert!(producer
+//RS         .facts
+//RS         .get("nix.index.proof.v1")
+//RS         .is_some_and(|proof| proof.contains("fixture-index-signer-v1")));
+//RS }
+//RS 
+//RS // Card #2200: the client must resolve the same signed layout from a
+//RS // disk-backed static publication root.
+//RS #[test]
+//RS fn static_publication_resolves_signed_index_and_nix_objects() {
+//RS     let project_root = Scratch::new("static-nix-index-project");
+//RS     let hangar_root = Scratch::new("static-nix-index-hangar");
+//RS     let publication = Scratch::new("static-nix-index-publication");
+//RS     let server = NixIndexCacheServer::start_static_ripgrep(&project_root.path, &publication.path);
+//RS     server.install(&hangar_root.path);
+//RS     project(&project_root);
+//RS 
+//RS     let output = prepare(&project_root, &hangar_root, false);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert!(publication.join("v1/nixpkgs-unstable/manifest.json").is_file());
+//RS     assert!(publication
+//RS         .join("v1/nixpkgs-unstable/manifest.json.sig.json")
+//RS         .is_file());
+//RS     assert!(publication.join("index-v1").is_dir());
+//RS     assert!(publication.join("nar").is_dir());
+//RS }
+//RS 
+//RS // Card #2200: native cache objects remain content-addressed and untrusted
+//RS // bytes never cross the normal verification boundary.
+//RS #[test]
+//RS fn static_jetpack_cache_admits_content_addressed_objects_only_after_verification() {
+//RS     let root = Scratch::new("static-cache-root");
+//RS     let source = Scratch::new("static-cache-source");
+//RS     let local_cache = Scratch::new("static-cache-local");
+//RS     let publication = Scratch::new("static-cache-publication");
+//RS     let restored = Scratch::new("static-cache-restored");
+//RS     let roots = Store::Roots {
+//RS         root: root.path.clone(),
+//RS         dev_mode: false,
+//RS     };
+//RS     fs::write(source.join("payload"), "static cache bytes\n").expect("cache source");
+//RS     let entry = Store::ingest_tree(
+//RS         &roots,
+//RS         &jetpack::Store::IngestRequest {
+//RS             name: "static-cache-demo".into(),
+//RS             version: "1".into(),
+//RS             reference: "./static-cache-demo".into(),
+//RS             cache_identity: jetpack::Store::CacheIdentity {
+//RS                 source_fingerprint: "sha256:static-cache-source".into(),
+//RS                 recipe_fingerprint: "sha256:static-cache-recipe".into(),
+//RS                 policy_fingerprint: "sha256:static-cache-policy".into(),
+//RS                 platform: jetpack::Envelope::host_platform(),
+//RS             },
+//RS             references: Vec::new(),
+//RS             outputs: std::collections::BTreeMap::from([("out".into(), source.path.clone())]),
+//RS             signature: String::new(),
+//RS             provenance: "static cache test".into(),
+//RS             platform_artifact_kind: String::new(),
+//RS         },
+//RS     )
+//RS     .expect("ingest static cache entry")
+//RS     .entry;
+//RS     Store::bind_cache(
+//RS         &roots,
+//RS         "public",
+//RS         vec![local_cache.path.display().to_string()],
+//RS         None,
+//RS         None,
+//RS         true,
+//RS     )
+//RS     .expect("bind local cache publisher");
+//RS     let published = Store::publish_cache_entry(&roots, &entry.id, "public")
+//RS         .expect("publish signed local cache objects");
+//RS     copy_dir_recursive(&local_cache.path, &publication.path);
+//RS     assert!(publication
+//RS         .join("nar")
+//RS         .join(format!("{}.nar", entry.envelope.output_hash))
+//RS         .is_file());
+//RS     assert!(publication
+//RS         .join(&format!("{}-{}.narinfo", entry.envelope.output_hash, entry.id))
+//RS         .is_file());
+//RS     assert!(publication
+//RS         .join("trust")
+//RS         .join(format!("{}-{}.receipt", entry.envelope.output_hash, entry.id))
+//RS         .is_file());
+//RS     assert!(!publication.join("cache-public.key").exists());
+//RS 
+//RS     let server = StaticFileServer::start(&publication.path);
+//RS     let trust_key = root.join("trust/cache-public.key");
+//RS     Store::bind_cache(
+//RS         &roots,
+//RS         "public",
+//RS         vec![server.endpoint.clone()],
+//RS         Some(&trust_key),
+//RS         None,
+//RS         false,
+//RS     )
+//RS     .expect("bind read-only static cache");
+//RS     let verified = Store::verify_cache_transfer(&roots, &entry.id, "public")
+//RS         .expect("verify static cache objects");
+//RS     assert_eq!(verified.mirror, server.endpoint);
+//RS     assert_eq!(verified.output_hash, published.output_hash);
+//RS     assert_eq!(verified.witness, published.witness);
+//RS     Store::substitute_cache_entry(&roots, &entry.id, "public", &restored.join("out"))
+//RS         .expect("substitute from verified static cache");
+//RS     assert_eq!(fs::read_to_string(restored.join("out/payload")).unwrap(), "static cache bytes\n");
+//RS 
+//RS     let info_path = publication.join(&format!(
+//RS         "{}-{}.narinfo",
+//RS         entry.envelope.output_hash, entry.id
+//RS     ));
+//RS     let signed_info = fs::read(&info_path).expect("signed static narinfo");
+//RS     let unsigned_info = String::from_utf8(signed_info.clone())
+//RS         .expect("narinfo UTF-8")
+//RS         .lines()
+//RS         .filter(|line| !line.starts_with("Sig: "))
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n")
+//RS         + "\n";
+//RS     fs::write(&info_path, unsigned_info).expect("remove static narinfo signature");
+//RS     assert!(Store::verify_cache_transfer(&roots, &entry.id, "public").is_err());
+//RS     fs::write(info_path, signed_info).expect("restore signed static narinfo");
+//RS }
+//RS 
+//RS #[test]
+//RS fn index_backed_nixpkgs_reuses_closure_offline_after_network_removal() {
+//RS     let project_root = Scratch::new("nix-index-offline-project");
+//RS     let hangar_root = Scratch::new("nix-index-offline-hangar");
+//RS     let server = NixIndexCacheServer::start_ripgrep(&project_root.path);
+//RS     server.install(&hangar_root.path);
+//RS     project(&project_root);
+//RS     let initial = prepare(&project_root, &hangar_root, false);
+//RS     assert!(
+//RS         initial.status.success(),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&initial.stdout),
+//RS         String::from_utf8_lossy(&initial.stderr),
+//RS     );
+//RS 
+//RS     server.reset_counts();
+//RS     server.stop_network();
+//RS     let output = prepare(&project_root, &hangar_root, true);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(server.count("/nix-cache-info"), 0);
+//RS     assert_eq!(server.object_request_count(&server.root_store_path), 0);
+//RS     assert_eq!(server.object_request_count(LIB_PATH), 0);
+//RS     assert_eq!(server.object_request_count(RUNTIME_PATH), 0);
+//RS }
+//RS 
+//RS #[test]
+//RS fn index_backed_nixpkgs_repairs_only_missing_transitive_object() {
+//RS     let project_root = Scratch::new("nix-index-repair-project");
+//RS     let hangar_root = Scratch::new("nix-index-repair-hangar");
+//RS     let server = NixIndexCacheServer::start_ripgrep(&project_root.path);
+//RS     server.install(&hangar_root.path);
+//RS     project(&project_root);
+//RS     let initial = prepare(&project_root, &hangar_root, false);
+//RS     assert!(
+//RS         initial.status.success(),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&initial.stdout),
+//RS         String::from_utf8_lossy(&initial.stderr),
+//RS     );
+//RS 
+//RS     let roots = Store::Roots::at(hangar_root.path.clone());
+//RS     let original = package_entry(&hangar_root);
+//RS     let original_lock = fs::read(project_root.join(".jet/lock")).unwrap();
+//RS     let expectation = Store::CacheExpectation {
+//RS         identity: original.cache_identity.clone(),
+//RS         owned_output: None,
+//RS         allow_unsigned_local: true,
+//RS     };
+//RS     let deleted_path = Store::list_checked(&roots)
+//RS         .expect("list before deletion")
+//RS         .into_iter()
+//RS         .find_map(|entry| {
+//RS             let producer = ProducerRecord::decode(&entry.producer_record).ok()?;
+//RS             (producer.facts.get("nix.store-path").map(String::as_str) == Some(RUNTIME_PATH))
+//RS                 .then_some(entry.out)
+//RS         })
+//RS         .expect("runtime Hangar object");
+//RS     make_directories_writable(Path::new(&deleted_path));
+//RS     fs::remove_dir_all(&deleted_path).expect("delete one transitive Hangar object");
+//RS     let mut forged_entry = original.clone();
+//RS     let mut forged_producer = ProducerRecord::decode(&original.producer_record).unwrap();
+//RS     forged_producer.facts.insert(
+//RS         "nix.cache.closure.receipt.sha256".into(), format!("sha256-{}", "d".repeat(64)),
+//RS     );
+//RS     forged_entry.producer_record = forged_producer.encode();
+//RS     assert!(!Store::verify_cache_entry(
+//RS         &roots, &forged_entry, "ripgrep@jetpack", &expectation,
+//RS     ).policy, "a re-checksummed producer must not replace the original WAL-bound repair authority");
+//RS 
+//RS     server.reset_counts();
+//RS     server.stop_network();
+//RS     let offline = prepare(&project_root, &hangar_root, true);
+//RS     assert_eq!(
+//RS         offline.status.code(),
+//RS         Some(1),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&offline.stdout),
+//RS         String::from_utf8_lossy(&offline.stderr)
+//RS     );
+//RS     let offline_stderr = String::from_utf8_lossy(&offline.stderr);
+//RS     assert!(offline_stderr.contains("E1350"), "stderr: {offline_stderr}");
+//RS     assert!(
+//RS         offline_stderr.contains("ripgrep@jetpack"),
+//RS         "offline error must name the affected locked package: {offline_stderr}"
+//RS     );
+//RS     assert_eq!(server.count("/nix-cache-info"), 0);
+//RS     assert_eq!(server.object_request_count(RUNTIME_PATH), 0);
+//RS 
+//RS     server.reset_counts();
+//RS     server.start_network();
+//RS     let mut tampered = jetpack::Lock::parse(std::str::from_utf8(&original_lock).unwrap()).unwrap();
+//RS     tampered.packages.iter_mut().find_map(|package| package.nix_closure.as_mut())
+//RS         .unwrap().index_authority = "d".repeat(64);
+//RS     fs::write(project_root.join(".jet/lock"), jetpack::Lock::write(&tampered)).unwrap();
+//RS     let rejected = prepare(&project_root, &hangar_root, false);
+//RS     assert_eq!(rejected.status.code(), Some(1));
+//RS     assert!(String::from_utf8_lossy(&rejected.stderr).contains("E1350"));
+//RS     assert_eq!(server.count("/nix-cache-info"), 0);
+//RS     assert_eq!(server.object_request_count(&server.root_store_path), 0);
+//RS     assert_eq!(server.object_request_count(LIB_PATH), 0);
+//RS     assert_eq!(server.object_request_count(RUNTIME_PATH), 0);
+//RS     assert!(!Path::new(&deleted_path).exists());
+//RS     assert_eq!(package_entry(&hangar_root).producer_record, original.producer_record);
+//RS     fs::write(project_root.join(".jet/lock"), &original_lock).unwrap();
+//RS     let repaired = prepare(&project_root, &hangar_root, false);
+//RS     assert!(
+//RS         repaired.status.success(),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&repaired.stdout),
+//RS         String::from_utf8_lossy(&repaired.stderr)
+//RS     );
+//RS     assert_eq!(server.object_request_count(&server.root_store_path), 0);
+//RS     assert_eq!(server.object_request_count(LIB_PATH), 0);
+//RS     assert_eq!(server.object_request_count(RUNTIME_PATH), 2);
+//RS     assert_eq!(server.count("/nix-cache-info"), 1);
+//RS     let after = package_entry(&hangar_root);
+//RS     assert_eq!(after.producer_record, original.producer_record);
+//RS     assert_eq!(after.envelope, original.envelope);
+//RS     assert_eq!(after.named_outputs, original.named_outputs);
+//RS     assert_eq!(fs::read(project_root.join(".jet/lock")).unwrap(), original_lock);
+//RS     assert!(Store::verify_cache_entry(&roots, &after, "ripgrep@jetpack", &expectation).trusted());
+//RS }
+//RS 
+//RS #[test]
+//RS fn hangar_doctor_reports_and_repairs_cache_drift_and_staging() {
+//RS     let project_root = Scratch::new("nix-index-doctor-project");
+//RS     let hangar_root = Scratch::new("nix-index-doctor-hangar");
+//RS     let server = NixIndexCacheServer::start_ripgrep(&project_root.path);
+//RS     server.install(&hangar_root.path);
+//RS     project(&project_root);
+//RS     let initial = prepare(&project_root, &hangar_root, false);
+//RS     assert!(
+//RS         initial.status.success(),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&initial.stdout),
+//RS         String::from_utf8_lossy(&initial.stderr),
+//RS     );
+//RS 
+//RS     let roots = Store::Roots::at(hangar_root.path.clone());
+//RS     let (runtime_output, runtime_digest) = Store::list_checked(&roots)
+//RS         .expect("list Hangar before doctor")
+//RS         .into_iter()
+//RS         .find_map(|entry| {
+//RS             let producer = ProducerRecord::decode(&entry.producer_record).ok()?;
+//RS             (producer.facts.get("nix.store-path").map(String::as_str) == Some(RUNTIME_PATH))
+//RS                 .then_some((entry.out, entry.envelope.output_hash))
+//RS         })
+//RS         .expect("runtime Hangar object");
+//RS     let runtime_output = Path::new(&runtime_output);
+//RS     make_directories_writable(runtime_output);
+//RS     let corruption = runtime_output.join("share/doctor-corruption");
+//RS     fs::write(&corruption, b"drift").expect("corrupt runtime object");
+//RS 
+//RS     let stale_stage = roots
+//RS         .hangar_dir()
+//RS         .join("stage/nix-cache-999999999-1/payload");
+//RS     fs::create_dir_all(&stale_stage).expect("create stale admission stage");
+//RS     fs::write(stale_stage.join("bytes"), b"stale").expect("write stale admission stage");
+//RS     let orphan_cas = roots.hangar_dir().join("cas/.unreferenced");
+//RS     fs::create_dir_all(orphan_cas.parent().expect("CAS parent")).expect("create CAS pool");
+//RS     fs::write(&orphan_cas, b"orphan").expect("write orphan CAS entry");
+//RS 
+//RS     let cas_locks = roots.hangar_dir().join("cas/.locks");
+//RS     assert!(cas_locks.is_dir(), "admission did not create the CAS lock namespace");
+//RS     #[cfg(unix)]
+//RS     let cas_lock_identity = {
+//RS         use std::os::unix::fs::MetadataExt as _;
+//RS         let metadata = fs::metadata(&cas_locks).unwrap();
+//RS         (metadata.dev(), metadata.ino())
+//RS     };
+//RS     let live_payload = fs::read_dir(roots.hangar_dir().join("cas"))
+//RS         .unwrap()
+//RS         .map(|entry| entry.unwrap().path())
+//RS         .find(|path| path.is_file() && fs::read(path).unwrap() == b"runtime")
+//RS         .expect("live runtime payload in the private CAS");
+//RS     #[cfg(unix)]
+//RS     let live_payload_identity = {
+//RS         use std::os::unix::fs::MetadataExt as _;
+//RS         let metadata = fs::metadata(&live_payload).unwrap();
+//RS         (metadata.dev(), metadata.ino())
+//RS     };
+//RS     let mut doctor = isolated_jetpack(&project_root, &hangar_root);
+//RS     let read_only = doctor
+//RS         .args(["hangar", "doctor", "--no-color"])
+//RS         .output()
+//RS         .expect("run read-only Hangar doctor");
+//RS     assert_eq!(read_only.status.code(), Some(1));
+//RS     assert!(corruption.exists(), "read-only doctor changed object bytes");
+//RS     assert!(
+//RS         stale_stage.parent().expect("stage parent").exists(),
+//RS         "read-only doctor removed staging"
+//RS     );
+//RS     assert!(orphan_cas.exists(), "read-only doctor removed CAS entry");
+//RS     assert_eq!(fs::read(&live_payload).unwrap(), b"runtime");
+//RS 
+//RS     server.reset_counts();
+//RS     let mut repair = isolated_jetpack(&project_root, &hangar_root);
+//RS     let repaired = repair
+//RS         .args(["hangar", "doctor", "--repair", "--no-color"])
+//RS         .output()
+//RS         .expect("run repairing Hangar doctor");
+//RS     assert!(
+//RS         repaired.status.success(),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&repaired.stdout),
+//RS         String::from_utf8_lossy(&repaired.stderr)
+//RS     );
+//RS     assert!(server.object_request_count(RUNTIME_PATH) > 0);
+//RS     assert!(!stale_stage.parent().expect("stage parent").exists());
+//RS     assert!(!orphan_cas.exists());
+//RS     assert!(!corruption.exists());
+//RS     assert_eq!(fs::read(&live_payload).unwrap(), b"runtime");
+//RS     assert!(cas_locks.is_dir(), "repair removed the live CAS lock namespace");
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::MetadataExt as _;
+//RS         let metadata = fs::metadata(&cas_locks).unwrap();
+//RS         assert_eq!((metadata.dev(), metadata.ino()), cas_lock_identity);
+//RS         let metadata = fs::metadata(&live_payload).unwrap();
+//RS         assert_eq!((metadata.dev(), metadata.ino()), live_payload_identity);
+//RS     }
+//RS     assert_eq!(
+//RS         jetpack::Envelope::try_output_hash_of_in_hangar(
+//RS             &runtime_output.to_string_lossy(),
+//RS             &roots.hangar_dir(),
+//RS             false,
+//RS         )
+//RS         .expect("rehash repaired runtime"),
+//RS         runtime_digest
+//RS     );
+//RS     assert_jetos_stderr_snapshot_normalized(
+//RS         "hangar_doctor_findings",
+//RS         &String::from_utf8_lossy(&read_only.stderr),
+//RS         &[(runtime_digest.as_str(), "<runtime-digest>")],
+//RS     );
+//RS     assert_jetos_stderr_snapshot_normalized(
+//RS         "hangar_doctor_repair",
+//RS         &String::from_utf8_lossy(&repaired.stderr),
+//RS         &[(runtime_digest.as_str(), "<runtime-digest>")],
+//RS     );
+//RS }
+// END-PORT-PENDING 1096 tests/jetpack_nix_index.rs:1-529
+
+// PORT-PENDING 1096 tests-jetpack-nix-eval-boundary-module-group: tests/jetpack_no_daemon.rs:1-215
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! U28 (D-JPK-NODAEMON1=A): no daemon / no root runtime policy.
+//RS 
+//RS use jetpack::RuntimePolicy;
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS 
+//RS mod common;
+//RS use common::{jetpack_bin, Scratch};
+//RS 
+//RS fn jetpack() -> Command {
+//RS     Command::new(jetpack_bin())
+//RS }
+//RS 
+//RS #[test]
+//RS fn runtime_policy_names_no_daemon_no_root_contract() {
+//RS     for policy in RuntimePolicy::all_verb_policies() {
+//RS         assert!(
+//RS             !policy.resident_daemon,
+//RS             "{} must not require a resident daemon",
+//RS             policy.verb
+//RS         );
+//RS         assert!(
+//RS             !policy.requires_root,
+//RS             "{} must not require root",
+//RS             policy.verb
+//RS         );
+//RS         assert!(
+//RS             !policy.transient_sudo,
+//RS             "{} must not use transient sudo by default",
+//RS             policy.verb
+//RS         );
+//RS     }
+//RS 
+//RS     let os_switch = RuntimePolicy::verb_policy(jet::Syntax::OS_SUBCOMMAND, &["switch"]);
+//RS     assert!(os_switch.transient_sudo);
+//RS     assert!(!os_switch.requires_root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn sandbox_default_never_allows_unsandboxed_build_and_require_mode_errors() {
+//RS     let cwd = Scratch::new("cwd");
+//RS     let home = Scratch::new("home");
+//RS     let root = Scratch::new("root");
+//RS 
+//RS     let warn = jetpack()
+//RS         .args(["build", "--no-color"])
+//RS         .current_dir(&cwd.path)
+//RS         .env("HOME", &home.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_FAKE_SANDBOX", "unavailable")
+//RS         .output()
+//RS         .unwrap();
+//RS     let warn_err = String::from_utf8_lossy(&warn.stderr);
+//RS     assert!(!warn_err.contains("L0205"), "stderr: {warn_err}");
+//RS     assert!(!warn_err.contains("unsandboxed"), "stderr: {warn_err}");
+//RS 
+//RS     let warn_json = jetpack()
+//RS         .args(["build", "--json", "--no-color"])
+//RS         .current_dir(&cwd.path)
+//RS         .env("HOME", &home.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_FAKE_SANDBOX", "unavailable")
+//RS         .output()
+//RS         .unwrap();
+//RS     let warn_json_err = String::from_utf8_lossy(&warn_json.stderr);
+//RS     assert!(
+//RS         !warn_json_err.contains("\"code\": \"L0205\""),
+//RS         "stderr: {warn_json_err}"
+//RS     );
+//RS     assert!(
+//RS         !warn_json_err.contains("unsandboxed"),
+//RS         "stderr: {warn_json_err}"
+//RS     );
+//RS 
+//RS     let require = jetpack()
+//RS         .args(["config", "sandbox", "require", "--no-color"])
+//RS         .current_dir(&cwd.path)
+//RS         .env("HOME", &home.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(require.status.success());
+//RS 
+//RS     let fail = jetpack()
+//RS         .args(["build", "--no-color"])
+//RS         .current_dir(&cwd.path)
+//RS         .env("HOME", &home.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_FAKE_SANDBOX", "unavailable")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(fail.status.code(), Some(2));
+//RS     let fail_err = String::from_utf8_lossy(&fail.stderr);
+//RS     assert!(fail_err.contains("E1275"), "stderr: {fail_err}");
+//RS     assert!(
+//RS         fail_err.contains("approved remote builder, or enable the native sandbox"),
+//RS         "stderr: {fail_err}"
+//RS     );
+//RS 
+//RS     let fail_json = jetpack()
+//RS         .args(["build", "--json", "--no-color"])
+//RS         .current_dir(&cwd.path)
+//RS         .env("HOME", &home.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_FAKE_SANDBOX", "unavailable")
+//RS         .output()
+//RS         .unwrap();
+//RS     let fail_json_err = String::from_utf8_lossy(&fail_json.stderr);
+//RS     assert!(
+//RS         fail_json_err.contains("\"code\": \"E1275\""),
+//RS         "stderr: {fail_json_err}"
+//RS     );
+//RS     assert!(
+//RS         fail_json_err.contains("\"severity\": \"error\""),
+//RS         "stderr: {fail_json_err}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn available_userns_never_labels_unsandboxed_child_strong() {
+//RS     let cwd = Scratch::new("capability-only-cwd");
+//RS     let home = Scratch::new("capability-only-home");
+//RS     let root = Scratch::new("capability-only-root");
+//RS 
+//RS     let require = jetpack()
+//RS         .args(["config", "sandbox", "require", "--no-color"])
+//RS         .current_dir(&cwd.path)
+//RS         .env("HOME", &home.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(require.status.success());
+//RS 
+//RS     let child = jetpack()
+//RS         .args(["build", "--no-color"])
+//RS         .current_dir(&cwd.path)
+//RS         .env("HOME", &home.path)
+//RS         .env("JETPACK_ROOT", &root.path)
+//RS         .env("JETPACK_FAKE_SANDBOX", "available")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(child.status.code(), Some(2));
+//RS     let stderr = String::from_utf8_lossy(&child.stderr);
+//RS     assert!(stderr.contains("E1275"), "stderr: {stderr}");
+//RS     assert!(
+//RS         stderr.contains("has not entered a jail"),
+//RS         "stderr: {stderr}"
+//RS     );
+//RS     assert!(!stderr.contains("strong"), "stderr: {stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn jetpack_runtime_code_has_no_privileged_helper_tokens() {
+//RS     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+//RS     let roots = [
+//RS         manifest_dir.join("crates/jetpack/src"),
+//RS         manifest_dir.join("crates/jet-pkg-model/src"),
+//RS     ];
+//RS     let forbidden = [
+//RS         "Command::new(\"sudo\")",
+//RS         "shell_command(\"sudo",
+//RS         " setuid",
+//RS         "systemctl",
+//RS         "launchctl",
+//RS         "/etc/jet",
+//RS         "jetpackd",
+//RS         "daemon socket",
+//RS     ];
+//RS     let mut files = Vec::new();
+//RS     for root in &roots {
+//RS         files.extend(rust_files(root));
+//RS     }
+//RS     for path in files {
+//RS         // JetOS activation code legitimately shells out to systemctl etc.
+//RS         // under the explicit `jet os switch` transient-sudo path (see
+//RS         // runtime_policy_names_no_daemon_no_root_contract); it moved from a
+//RS         // single JetOS.rs file to a JetOS/ module directory, so exempt both.
+//RS         let is_jetos = path.file_name().and_then(|n| n.to_str()) == Some("JetOS.rs")
+//RS             || path.components().any(|c| c.as_os_str() == "JetOS");
+//RS         if is_jetos {
+//RS             continue;
+//RS         }
+//RS         let text = fs::read_to_string(&path).unwrap();
+//RS         for (idx, line) in text.lines().enumerate() {
+//RS             let trimmed = line.trim_start();
+//RS             if trimmed.starts_with("//") || trimmed.starts_with("//!") {
+//RS                 continue;
+//RS             }
+//RS             for needle in forbidden {
+//RS                 assert!(
+//RS                     !line.contains(needle),
+//RS                     "{}:{} contains forbidden privileged token `{needle}`",
+//RS                     path.display(),
+//RS                     idx + 1
+//RS                 );
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn rust_files(root: &Path) -> Vec<PathBuf> {
+//RS     let mut out = Vec::new();
+//RS     if let Ok(rd) = fs::read_dir(root) {
+//RS         for ent in rd.flatten() {
+//RS             let path = ent.path();
+//RS             if path.is_dir() {
+//RS                 out.extend(rust_files(&path));
+//RS             } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+//RS                 out.push(path);
+//RS             }
+//RS         }
+//RS     }
+//RS     out
+//RS }
+// END-PORT-PENDING 1096 tests/jetpack_no_daemon.rs:1-215
+

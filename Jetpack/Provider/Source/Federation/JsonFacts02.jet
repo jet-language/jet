@@ -1,0 +1,1059 @@
+// PORT-PENDING 0907 crates-jetpack-src-providergraph-module-group-slice-5418: crates/jetpack/src/ProviderGraph.rs:5418-6472
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn xml_direct_child_values(document: &str, parent: &str, child: &str) -> Vec<String> {
+//RS     let Some((_, parent_end, _)) = xml_opening_tag_ranges(document, parent).into_iter().next()
+//RS     else {
+//RS         return Vec::new();
+//RS     };
+//RS     let closing = format!("</{parent}>");
+//RS     let body_start = parent_end + 1;
+//RS     let Some(close) = document
+//RS         .get(body_start..)
+//RS         .and_then(|body| body.find(&closing))
+//RS     else {
+//RS         return Vec::new();
+//RS     };
+//RS     let body_end = body_start + close;
+//RS     let mut values = Vec::new();
+//RS     let mut depth = 0usize;
+//RS     let mut cursor = body_start;
+//RS     while cursor < body_end {
+//RS         let Some(relative_start) = document[cursor..body_end].find('<') else {
+//RS             break;
+//RS         };
+//RS         let start = cursor + relative_start;
+//RS         if document[start..].starts_with("<!--") {
+//RS             cursor = document[start + 4..body_end]
+//RS                 .find("-->")
+//RS                 .map(|end| start + 4 + end + 3)
+//RS                 .unwrap_or(body_end);
+//RS             continue;
+//RS         }
+//RS         if document[start..].starts_with("<![CDATA[") {
+//RS             cursor = document[start + 9..body_end]
+//RS                 .find("]]>")
+//RS                 .map(|end| start + 9 + end + 3)
+//RS                 .unwrap_or(body_end);
+//RS             continue;
+//RS         }
+//RS         let Some(relative_end) = xml_opening_tag_end(&document[start..body_end]) else {
+//RS             break;
+//RS         };
+//RS         let end = start + relative_end;
+//RS         let opening = &document[start..=end];
+//RS         if opening.starts_with("</") {
+//RS             depth = depth.saturating_sub(1);
+//RS             cursor = end + 1;
+//RS             continue;
+//RS         }
+//RS         if opening.starts_with("<?") || opening.starts_with("<!") {
+//RS             cursor = end + 1;
+//RS             continue;
+//RS         }
+//RS         let name = xml_opening_name(opening);
+//RS         let self_closing = opening.trim_end().ends_with("/>");
+//RS         if depth == 0 && name == child && !self_closing {
+//RS             let child_closing = format!("</{child}>");
+//RS             if let Some(relative_close) = document[end + 1..body_end].find(&child_closing) {
+//RS                 let value_start = end + 1;
+//RS                 values.push(xml_unescape(
+//RS                     document[value_start..value_start + relative_close].trim(),
+//RS                 ));
+//RS                 cursor = value_start + relative_close + child_closing.len();
+//RS                 continue;
+//RS             }
+//RS         }
+//RS         if !self_closing {
+//RS             depth += 1;
+//RS         }
+//RS         cursor = end + 1;
+//RS     }
+//RS     values
+//RS }
+//RS 
+//RS fn xml_opening_name(opening: &str) -> &str {
+//RS     opening
+//RS         .strip_prefix('<')
+//RS         .unwrap_or(opening)
+//RS         .trim_start_matches('/')
+//RS         .split(|character: char| character.is_whitespace() || matches!(character, '>' | '/'))
+//RS         .next()
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn xml_has_namespace(document: &str) -> bool {
+//RS     if document.contains("xmlns:") || document.contains("xmlns=") {
+//RS         return true;
+//RS     }
+//RS     let mut cursor = 0;
+//RS     while cursor < document.len() {
+//RS         let Some(relative_start) = document[cursor..].find('<') else {
+//RS             break;
+//RS         };
+//RS         let start = cursor + relative_start;
+//RS         let Some(relative_end) = xml_opening_tag_end(&document[start..]) else {
+//RS             break;
+//RS         };
+//RS         let end = start + relative_end;
+//RS         let opening = &document[start..=end];
+//RS         if !opening.starts_with("<!--")
+//RS             && !opening.starts_with("<?")
+//RS             && !opening.starts_with("<!")
+//RS             && xml_opening_name(opening).contains(':')
+//RS         {
+//RS             return true;
+//RS         }
+//RS         cursor = end + 1;
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS fn xml_tag(document: &str, tag: &str) -> Option<String> {
+//RS     xml_tag_values(document, tag).into_iter().next()
+//RS }
+//RS 
+//RS fn xml_tag_values(document: &str, tag: &str) -> Vec<String> {
+//RS     let closing = format!("</{tag}>");
+//RS     xml_opening_tag_ranges(document, tag)
+//RS         .into_iter()
+//RS         .filter_map(|(_, end, opening)| {
+//RS             if opening.trim_end().ends_with("/>") {
+//RS                 return None;
+//RS             }
+//RS             let value_start = end + 1;
+//RS             document
+//RS                 .get(value_start..)?
+//RS                 .split_once(&closing)
+//RS                 .map(|(value, _)| xml_unescape(value.trim()))
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn xml_unescape(value: &str) -> String {
+//RS     value
+//RS         .replace("&lt;", "<")
+//RS         .replace("&gt;", ">")
+//RS         .replace("&quot;", "\"")
+//RS         .replace("&apos;", "'")
+//RS         // Decode ampersands last so `&amp;lt;` remains the literal text `&lt;`.
+//RS         .replace("&amp;", "&")
+//RS }
+//RS 
+//RS fn xml_opening_tags(document: &str, tag: &str) -> Vec<String> {
+//RS     xml_opening_tag_ranges(document, tag)
+//RS         .into_iter()
+//RS         .map(|(_, _, opening)| opening)
+//RS         .collect()
+//RS }
+//RS 
+//RS fn xml_opening_tag_ranges(document: &str, tag: &str) -> Vec<(usize, usize, String)> {
+//RS     let needle = format!("<{tag}");
+//RS     let mut ranges = Vec::new();
+//RS     let mut cursor = 0;
+//RS     while cursor < document.len() {
+//RS         let Some(relative_start) = document[cursor..].find(&needle) else {
+//RS             break;
+//RS         };
+//RS         let start = cursor + relative_start;
+//RS         let name_end = start + 1 + tag.len();
+//RS         let boundary = document[name_end..].chars().next();
+//RS         if !matches!(boundary, Some(value) if value.is_whitespace() || value == '>' || value == '/')
+//RS         {
+//RS             cursor = name_end;
+//RS             continue;
+//RS         }
+//RS         let Some(relative_end) = xml_opening_tag_end(&document[start..]) else {
+//RS             break;
+//RS         };
+//RS         let end = start + relative_end;
+//RS         ranges.push((start, end, document[start..=end].to_string()));
+//RS         cursor = end + 1;
+//RS     }
+//RS     ranges
+//RS }
+//RS 
+//RS fn xml_opening_tag_end(opening: &str) -> Option<usize> {
+//RS     let mut quote = None;
+//RS     for (index, character) in opening.char_indices() {
+//RS         match (quote, character) {
+//RS             (Some(expected), value) if expected == value => quote = None,
+//RS             (None, '\'' | '"') => quote = Some(character),
+//RS             (None, '>') => return Some(index),
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn xml_attribute(opening: &str, key: &str) -> Option<String> {
+//RS     for quote in ['"', '\''] {
+//RS         let marker = format!("{key}={quote}");
+//RS         let mut cursor = 0;
+//RS         while cursor < opening.len() {
+//RS             let Some(relative) = opening[cursor..].find(&marker) else {
+//RS                 break;
+//RS             };
+//RS             let start = cursor + relative;
+//RS             let valid_boundary = start == 0
+//RS                 || opening[..start]
+//RS                     .chars()
+//RS                     .next_back()
+//RS                     .is_some_and(|value| value.is_whitespace() || value == '<' || value == '/');
+//RS             if valid_boundary {
+//RS                 let value_start = start + marker.len();
+//RS                 if let Some(value) = opening[value_start..].split_once(quote) {
+//RS                     return Some(value.0.to_string());
+//RS                 }
+//RS             }
+//RS             cursor = start + marker.len();
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn metadata_fields(document: &str) -> Vec<(String, String)> {
+//RS     let mut fields: Vec<(String, String)> = Vec::new();
+//RS     for line in document.lines() {
+//RS         if line
+//RS             .chars()
+//RS             .next()
+//RS             .is_some_and(|character| character.is_whitespace())
+//RS         {
+//RS             if let Some((_, value)) = fields.last_mut() {
+//RS                 value.push(' ');
+//RS                 value.push_str(line.trim());
+//RS             }
+//RS             continue;
+//RS         }
+//RS         let Some((left, right)) = line.split_once(':') else {
+//RS             continue;
+//RS         };
+//RS         let key = left.trim();
+//RS         if !key.is_empty() {
+//RS             fields.push((key.to_string(), right.trim().to_string()));
+//RS         }
+//RS     }
+//RS     fields
+//RS }
+//RS 
+//RS fn metadata_values(fields: &[(String, String)], key: &str) -> Vec<String> {
+//RS     fields
+//RS         .iter()
+//RS         .filter(|(field, _)| field.eq_ignore_ascii_case(key))
+//RS         .map(|(_, value)| value.clone())
+//RS         .collect()
+//RS }
+//RS 
+//RS fn distinct_values(values: &[String]) -> Vec<String> {
+//RS     let mut distinct = Vec::new();
+//RS     for value in values {
+//RS         if !distinct.contains(value) {
+//RS             distinct.push(value.clone());
+//RS         }
+//RS     }
+//RS     distinct
+//RS }
+//RS 
+//RS fn format_dependency(name: &str, version: &str) -> String {
+//RS     let name = name.trim();
+//RS     let version = version.trim();
+//RS     match (name.is_empty(), version.is_empty()) {
+//RS         (true, _) => version.to_string(),
+//RS         (_, true) => name.to_string(),
+//RS         (false, false) => format!("{name}@{version}"),
+//RS     }
+//RS }
+//RS 
+//RS fn assignment_values(document: &str, key: &str) -> Vec<String> {
+//RS     document
+//RS         .lines()
+//RS         .filter_map(|line| {
+//RS             let (left, right) = line.split_once('=')?;
+//RS             let left = left.trim().strip_prefix("self.").unwrap_or(left.trim());
+//RS             if left != key {
+//RS                 return None;
+//RS             }
+//RS             quoted_values_in(right).into_iter().next().or_else(|| {
+//RS                 let value = right
+//RS                     .split('#')
+//RS                     .next()
+//RS                     .unwrap_or_default()
+//RS                     .trim()
+//RS                     .trim_end_matches(',');
+//RS                 (!value.is_empty()).then(|| value.to_string())
+//RS             })
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn quoted_values_after_all(document: &str, key: &str) -> Vec<String> {
+//RS     let self_key = format!("self.{key}");
+//RS     let mut values = Vec::new();
+//RS     for line in document.lines() {
+//RS         let line = line.trim_start();
+//RS         let rest = line
+//RS             .strip_prefix(key)
+//RS             .or_else(|| line.strip_prefix(&self_key));
+//RS         let Some(rest) = rest else {
+//RS             continue;
+//RS         };
+//RS         if !matches!(
+//RS             rest.chars().next(),
+//RS             None | Some(' ' | '\t' | '=' | '(' | ':')
+//RS         ) {
+//RS             continue;
+//RS         }
+//RS         values.extend(quoted_values_in(line));
+//RS     }
+//RS     values
+//RS }
+//RS 
+//RS fn quoted_values_in(text: &str) -> Vec<String> {
+//RS     let mut values = Vec::new();
+//RS     let mut quote = None;
+//RS     let mut value_start = 0;
+//RS     for (index, character) in text.char_indices() {
+//RS         match (quote, character) {
+//RS             (Some(expected), value) if expected == value => {
+//RS                 values.push(text[value_start..index].to_string());
+//RS                 quote = None;
+//RS             }
+//RS             (None, '\'' | '"') => {
+//RS                 quote = Some(character);
+//RS                 value_start = index + character.len_utf8();
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     values
+//RS }
+//RS 
+//RS fn conan_ref_part(reference: &str, index: usize) -> Option<String> {
+//RS     let value = reference.split('@').next()?.split('/').nth(index)?.trim();
+//RS     (!value.is_empty()).then(|| value.to_string())
+//RS }
+//RS 
+//RS fn toml_string(raw: &str, key: &str) -> Option<String> {
+//RS     raw.lines().find_map(|line| {
+//RS         let line = line.trim();
+//RS         let (k, v) = line.split_once('=')?;
+//RS         (k.trim() == key).then(|| v.trim().trim_matches('"').to_string())
+//RS     })
+//RS }
+//RS 
+//RS fn dependency_keys(raw: &str, section: &str) -> Vec<String> {
+//RS     let mut out = Vec::new();
+//RS     let mut in_section = false;
+//RS     for line in raw.lines() {
+//RS         let line = line.trim();
+//RS         if line.starts_with('[') {
+//RS             in_section = line == section;
+//RS             continue;
+//RS         }
+//RS         if in_section {
+//RS             if let Some((key, _)) = line.split_once('=') {
+//RS                 out.push(key.trim().to_string());
+//RS             }
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::{normalize_provider_document, ProviderFamily};
+//RS     use jet_pkg_model::ProviderFacts::{ProviderFactValue, ProviderFacts};
+//RS 
+//RS     #[test]
+//RS     fn lock_uses_canonical_carrier_and_retains_raw_reference() {
+//RS         let native = r#"{"name":"web","version":"1.0.0","dependencies":{"vite":"5"}}"#;
+//RS         let report = normalize_provider_document(ProviderFamily::Npm, native);
+//RS         report.validate().expect("lossless provider report");
+//RS         let shared = report.shared_facts();
+//RS         let lock = report
+//RS             .lock_record("app", "web@npm#1.0.0", "any")
+//RS             .expect("canonical provider lock");
+//RS         let locked = ProviderFacts::from_json(
+//RS             lock.future_fields
+//RS                 .get("provider-facts")
+//RS                 .expect("provider facts in lock"),
+//RS         )
+//RS         .expect("locked provider facts JSON");
+//RS         assert_eq!(locked, shared);
+//RS         assert_eq!(lock.rationales[0].source_ref, "web@npm#1.0.0".to_string());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn unpinned_alias_lowers_resolved_selector_and_typed_native_facts() {
+//RS         let native = r#"{"name":"web","version":"1.0.0","yanked":false}"#;
+//RS         let report = normalize_provider_document(ProviderFamily::Npm, native);
+//RS         let shared = report.shared_facts_for("web@catalog");
+//RS         shared.validate().expect("provider alias remains lossless");
+//RS         assert_eq!(shared.qualified_reference(), "web#version=1.0.0@catalog");
+//RS         assert_eq!(
+//RS             shared.facts.get("provider.resolved_selector"),
+//RS             Some(&ProviderFactValue::Text("#version=1.0.0".to_string()))
+//RS         );
+//RS         assert_eq!(
+//RS             shared.facts.get("provider.npm.native.yanked"),
+//RS             Some(&ProviderFactValue::List(vec![ProviderFactValue::Bool(
+//RS                 false
+//RS             )]))
+//RS         );
+//RS 
+//RS         let lock = report
+//RS             .lock_record("app", "web@catalog", "any")
+//RS             .expect("provider alias lock");
+//RS         assert_eq!(lock.identity.exact, "web#version=1.0.0@catalog");
+//RS         let locked = ProviderFacts::from_json(
+//RS             lock.future_fields
+//RS                 .get("provider-facts")
+//RS                 .expect("provider facts in lock"),
+//RS         )
+//RS         .expect("locked provider facts");
+//RS         locked.validate().expect("locked alias provider facts");
+//RS         assert_eq!(locked.reference, "web@catalog");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn npm_conformance_retains_native_and_typed_provider_facts() {
+//RS         let native = r#"{"name":"web","version":"2.0.0","license":"MIT","dependencies":{"vite":"5.4.0"},"devDependencies":{"typescript":"5.5.0"},"optionalDependencies":{"fsevents":"2.3.3"},"peerDependencies":{"react":"18.3.1"},"scripts":{"build":"vite build"},"bin":{"web":"bin/web.js"},"os":["linux","darwin"],"cpu":"x64","engines":{"node":">=20"},"repository":{"type":"git","url":"https://example.invalid/web.git"},"dist":{"integrity":"sha512-abc"}}"#;
+//RS         let report = normalize_provider_document(ProviderFamily::Npm, native);
+//RS         report.validate().expect("npm provider facts are lossless");
+//RS         assert_eq!(report.native_format, "json");
+//RS         assert_eq!(report.native_document, native);
+//RS         assert_eq!(report.facts.dependencies, vec!["vite".to_string()]);
+//RS         assert_eq!(
+//RS             report.facts.dev_dependencies,
+//RS             vec!["typescript".to_string()]
+//RS         );
+//RS         assert!(report.facts.platforms.contains(&"os:linux".to_string()));
+//RS         assert!(report.facts.typed.contains_key("provider.npm.hook.build"));
+//RS         assert!(report
+//RS             .facts
+//RS             .typed
+//RS             .contains_key("provider.npm.variant.engine.node"));
+//RS         assert!(report
+//RS             .shared_facts()
+//RS             .facts
+//RS             .contains_key("provider.npm.native.repository"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn npm_pretty_documents_and_malformed_typed_fields_stay_explicit() {
+//RS         let pretty = "{\n  \"name\": \"web\",\n  \"version\": \"1.0.0\",\n  \"dist\": {\"integrity\": \"sha512-abc\"}\n}";
+//RS         let report = normalize_provider_document(ProviderFamily::Npm, pretty);
+//RS         report.validate().expect("pretty npm JSON remains lossless");
+//RS         assert_eq!(report.native_document, pretty);
+//RS 
+//RS         let malformed = normalize_provider_document(
+//RS             ProviderFamily::Npm,
+//RS             r#"{"name":"web","version":"1.0.0","bin":{"web":1},"engines":{"node":20},"dist":{"integrity":false}}"#,
+//RS         );
+//RS         assert!(malformed
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("bin") && loss.contains("strings")));
+//RS         assert!(malformed
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("engine") && loss.contains("string")));
+//RS         assert!(malformed
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("dist field `integrity`")));
+//RS         assert!(malformed.validate().is_err());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn cargo_conformance_retains_lock_variants_hooks_and_source_ownership() {
+//RS         let native = r#"[package]
+//RS name = "app"
+//RS version = "1.0.0"
+//RS license = "MIT"
+//RS repository = "https://example.invalid/app.git"
+//RS build = "build.rs"
+//RS 
+//RS [dependencies]
+//RS serde = "1.0"
+//RS 
+//RS [target.x86_64-unknown-linux-gnu.dependencies]
+//RS cc = "1.0"
+//RS 
+//RS [features]
+//RS default = ["serde"]
+//RS 
+//RS [[package]]
+//RS name = "app"
+//RS version = "1.0.0"
+//RS 
+//RS [[package]]
+//RS name = "serde"
+//RS version = "1.0.200"
+//RS source = "registry+https://example.invalid"
+//RS checksum = "abc123"
+//RS "#;
+//RS         let report = normalize_provider_document(ProviderFamily::Cargo, native);
+//RS         report
+//RS             .validate()
+//RS             .expect("Cargo provider facts are lossless");
+//RS         assert!(report.facts.dependencies.contains(&"serde".to_string()));
+//RS         assert!(report.facts.dependencies.contains(&"cc".to_string()));
+//RS         assert!(report.facts.scripts.contains(&"build.rs".to_string()));
+//RS         assert!(report
+//RS             .facts
+//RS             .typed
+//RS             .contains_key("provider.cargo.variant.feature.default"));
+//RS         assert!(report
+//RS             .facts
+//RS             .typed
+//RS             .contains_key("provider.cargo.lock.serde.checksum"));
+//RS         assert!(report
+//RS             .shared_facts()
+//RS             .facts
+//RS             .contains_key("provider.cargo.source.repository"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn cargo_comments_keep_identity_and_malformed_fields_report_loss() {
+//RS         let commented = r#"[package]
+//RS name = "app" # package name
+//RS version = "1.0.0" # package version
+//RS "#;
+//RS         let report = normalize_provider_document(ProviderFamily::Cargo, commented);
+//RS         report
+//RS             .validate()
+//RS             .expect("Cargo inline comments do not change identity");
+//RS         assert_eq!(report.facts.name, "app");
+//RS         assert_eq!(report.facts.version, "1.0.0");
+//RS 
+//RS         let malformed = normalize_provider_document(
+//RS             ProviderFamily::Cargo,
+//RS             "[package]\nname = 7\nversion = \"1.0.0\"\n[dependencies]\nserde = false\n",
+//RS         );
+//RS         assert!(malformed
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("package field `name`")));
+//RS         assert!(malformed
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("dependency `serde`")));
+//RS         assert!(malformed.validate().is_err());
+//RS 
+//RS         let missing_checksum = normalize_provider_document(
+//RS             ProviderFamily::Cargo,
+//RS             "[package]\nname = \"app\"\nversion = \"1.0.0\"\n[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\nsource = \"registry+https://example.invalid\"\n",
+//RS         );
+//RS         assert!(missing_checksum
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("registry package") && loss.contains("checksum")));
+//RS         assert!(missing_checksum.validate().is_err());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nix_conformance_retains_native_and_typed_provider_facts() {
+//RS         let native = r#"{"pname":"ripgrep","version":"14.1.1","drvPath":"/nix/store/hash-ripgrep-14.1.1.drv","narHash":"sha256-0123456789012345678901234567890123456789012=","inputDrvs":{"/nix/store/hash-openssl.drv":["out"]},"buildInputs":["openssl"],"nativeBuildInputs":["pkg-config"],"system":"x86_64-linux","platforms":["linux"],"license":"BSD-3-Clause","builder":"/bin/bash","signatures":["cache.nixos.org"],"owner":"nixos","repository":"NixOS/nixpkgs","advisories":["CVE-0000-0000"],"meta":{"license":"BSD-3-Clause","platforms":["x86_64-linux"]}}"#;
+//RS         let report = normalize_provider_document(ProviderFamily::Nix, native);
+//RS         report.validate().expect("Nix provider facts are lossless");
+//RS         assert_eq!(report.native_format, "json");
+//RS         assert_eq!(report.native_document, native);
+//RS         assert_eq!(report.facts.name, "ripgrep");
+//RS         assert_eq!(report.facts.version, "14.1.1");
+//RS         assert!(report
+//RS             .facts
+//RS             .build_dependencies
+//RS             .contains(&"openssl".to_string()));
+//RS         assert!(report
+//RS             .facts
+//RS             .typed
+//RS             .contains_key("provider.nix.dependency.build"));
+//RS         assert!(report.facts.typed.contains_key("provider.nix.hook.builder"));
+//RS         assert!(report
+//RS             .facts
+//RS             .typed
+//RS             .contains_key("provider.nix.variant.system"));
+//RS         assert!(report
+//RS             .facts
+//RS             .typed
+//RS             .contains_key("provider.nix.signature.signatures"));
+//RS         assert!(report
+//RS             .facts
+//RS             .typed
+//RS             .contains_key("provider.nix.source.repository"));
+//RS         assert!(report
+//RS             .shared_facts()
+//RS             .facts
+//RS             .contains_key("provider.nix.native.meta"));
+//RS 
+//RS         let flake_lock = concat!(
+//RS             r#"{"name":"nixpkgs","version":"24.05","root":"root","nodes":{"#,
+//RS             r#""root":{"locked":{"type":"github","owner":"NixOS","repo":"nixpkgs","#,
+//RS             r#""rev":"0123456789abcdef0123456789abcdef01234567"}}}}"#
+//RS         );
+//RS         let flake_report = normalize_provider_document(ProviderFamily::Nix, flake_lock);
+//RS         flake_report
+//RS             .validate()
+//RS             .expect("Nix flake lock source facts are lossless");
+//RS         assert_eq!(
+//RS             flake_report.facts.source_identity,
+//RS             "github:NixOS/nixpkgs@0123456789abcdef0123456789abcdef01234567"
+//RS         );
+//RS         assert!(flake_report
+//RS             .shared_facts()
+//RS             .facts
+//RS             .contains_key("provider.nix.source.locked.root.rev"));
+//RS 
+//RS         let shared = report.shared_facts();
+//RS         let exported = ProviderFacts::from_json(&report.export_json())
+//RS             .expect("Nix provider export uses the shared carrier");
+//RS         assert_eq!(exported, shared);
+//RS         assert!(shared
+//RS             .explain_lines()
+//RS             .iter()
+//RS             .any(|line| line == "native json: retained"));
+//RS         let locked = report
+//RS             .lock_record("app", "ripgrep@nix#version=14.1.1", "x86_64-linux")
+//RS             .expect("Nix provider lock uses the shared carrier");
+//RS         let locked_facts = ProviderFacts::from_json(
+//RS             locked
+//RS                 .future_fields
+//RS                 .get("provider-facts")
+//RS                 .expect("Nix provider facts in lock"),
+//RS         )
+//RS         .expect("locked Nix provider facts");
+//RS         assert_eq!(locked_facts, shared);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nix_conformance_reports_loss_and_conflict_in_native_facts() {
+//RS         let missing_source = normalize_provider_document(
+//RS             ProviderFamily::Nix,
+//RS             r#"{"pname":"ripgrep","version":"14.1.1","buildInputs":["openssl"]}"#,
+//RS         );
+//RS         assert!(missing_source.validate().is_err());
+//RS         assert!(missing_source
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("immutable source identity")));
+//RS 
+//RS         let mutable_lock = normalize_provider_document(
+//RS             ProviderFamily::Nix,
+//RS             r#"{"pname":"ripgrep","version":"14.1.1","locked":{"type":"github","owner":"NixOS","repo":"nixpkgs","rev":"main"}}"#,
+//RS         );
+//RS         assert!(mutable_lock.validate().is_err());
+//RS         assert!(mutable_lock
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("complete immutable owner/revision identity")));
+//RS 
+//RS         let lossy = normalize_provider_document(
+//RS             ProviderFamily::Nix,
+//RS             r#"{"pname":"ripgrep","version":"14.1.1","drvPath":"/nix/store/hash-ripgrep-14.1.1.drv","platforms":1,"yanked":"unknown","inputDrvs":[1]}"#,
+//RS         );
+//RS         assert!(lossy.validate().is_err());
+//RS         assert!(lossy.losses.iter().any(|loss| loss.contains("platforms")));
+//RS         assert!(lossy.losses.iter().any(|loss| loss.contains("yanked")));
+//RS         assert!(lossy.losses.iter().any(|loss| loss.contains("inputDrvs")));
+//RS 
+//RS         let conflicting = normalize_provider_document(
+//RS             ProviderFamily::Nix,
+//RS             concat!(
+//RS                 r#"[{"pname":"ripgrep","version":"14.1.1","drvPath":"/nix/store/hash-ripgrep-14.1.1.drv","owner":"nixos"},"#,
+//RS                 r#"{"pname":"ripgrep","version":"14.1.1","drvPath":"/nix/store/hash-ripgrep-14.1.1.drv","owner":"other"}]"#
+//RS             ),
+//RS         );
+//RS         assert!(conflicting.validate().is_err());
+//RS         assert!(conflicting
+//RS             .conflicts
+//RS             .iter()
+//RS             .any(|conflict| conflict.contains("conflicts with the first native record")));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn jet_registry_conformance_retains_attestation_and_yank_facts() {
+//RS         let native = r#"{"name":"web","version":"1.0.0","content_hash":"sha256-web","license":"MIT","platforms":["linux"],"yanked":true,"tier":"trusted","gate_status":"passed","public_key":"pk","signature":"sig","owner":"team-web","source":{"kind":"git","url":"https://example.invalid/web.git"},"advisories":["CVE-0000-0000"],"variants":{"debug":{"features":["trace"]}},"hooks":{"build":{"digest":"hook-digest"}}}"#;
+//RS         let report = normalize_provider_document(ProviderFamily::JetRegistry, native);
+//RS         report.validate().expect("Jet registry facts are lossless");
+//RS         assert_eq!(report.facts.integrity_hash, "sha256-web");
+//RS         assert!(report
+//RS             .facts
+//RS             .typed
+//RS             .contains_key("provider.registry.signature"));
+//RS         assert!(report.facts.typed.contains_key("provider.registry.yanked"));
+//RS         assert!(report
+//RS             .shared_facts()
+//RS             .facts
+//RS             .contains_key("provider.registry.native.source"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn jet_registry_pretty_json_retains_native_document() {
+//RS         let native = "{\n  \"name\": \"web\",\n  \"version\": \"1.0.0\",\n  \"content_hash\": \"sha256-web\"\n}";
+//RS         let report = normalize_provider_document(ProviderFamily::JetRegistry, native);
+//RS         report
+//RS             .validate()
+//RS             .expect("pretty registry JSON remains lossless");
+//RS         assert_eq!(report.native_document, native);
+//RS         assert_eq!(report.facts.name, "web");
+//RS         assert_eq!(report.facts.version, "1.0.0");
+//RS 
+//RS         let malformed = normalize_provider_document(
+//RS             ProviderFamily::JetRegistry,
+//RS             r#"{"name":"web","version":"1.0.0","content_hash":"sha256-web","hooks":[],"source":false}"#,
+//RS         );
+//RS         assert!(malformed
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("hooks") && loss.contains("shape")));
+//RS         assert!(malformed
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("source") && loss.contains("shape")));
+//RS         assert!(malformed.validate().is_err());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn provider_conformance_reports_ambiguous_and_conflicting_native_facts() {
+//RS         let packument = r#"{"name":"web","versions":{"1.0.0":{"name":"web","version":"1.0.0"},"2.0.0":{"name":"web","version":"2.0.0"}}}"#;
+//RS         let report = normalize_provider_document(ProviderFamily::Npm, packument);
+//RS         assert!(report.validate().is_err());
+//RS         assert!(report
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("multiple versions")));
+//RS 
+//RS         let registry = concat!(
+//RS             r#"{"name":"web","version":"1.0.0","content_hash":"sha256-a"}"#,
+//RS             "\n",
+//RS             r#"{"name":"web","version":"2.0.0","content_hash":"sha256-b"}"#
+//RS         );
+//RS         let report = normalize_provider_document(ProviderFamily::JetRegistry, registry);
+//RS         assert!(report.validate().is_err());
+//RS         assert!(report
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("multiple package identities")));
+//RS 
+//RS         let conflicting_registry = concat!(
+//RS             r#"{"name":"web","version":"1.0.0","content_hash":"sha256-a"}"#,
+//RS             "\n",
+//RS             r#"{"name":"web","version":"1.0.0","content_hash":"sha256-b"}"#
+//RS         );
+//RS         let report = normalize_provider_document(ProviderFamily::JetRegistry, conflicting_registry);
+//RS         assert!(report.validate().is_err());
+//RS         assert!(report
+//RS             .conflicts
+//RS             .iter()
+//RS             .any(|conflict| conflict.contains("conflicting native facts")));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn provider_conformance_reports_conflicting_typed_dependency_projection() {
+//RS         let report = normalize_provider_document(
+//RS             ProviderFamily::Github,
+//RS             r#"{"name":"tool","tag_name":"v1.2.3","dependencies":[{"name":"openssl","version":"1.0.0"},{"name":"openssl","version":"2.0.0"}],"assets":[{"name":"tool-linux","digest":"sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","platform":"x86_64-linux"}]}"#,
+//RS         );
+//RS 
+//RS         assert!(report.validate().is_err());
+//RS         assert!(report.conflicts.iter().any(|conflict| {
+//RS             conflict.contains("typed provider fact") && conflict.contains("openssl")
+//RS         }));
+//RS 
+//RS         let report = normalize_provider_document(
+//RS             ProviderFamily::Vcpkg,
+//RS             r#"{"name":"tool","version-string":"1.2.3","dependencies":[{"name":"zlib","features":["core"]},{"name":"zlib","features":["ssl"]}]}"#,
+//RS         );
+//RS         assert!(report.validate().is_err());
+//RS         assert!(report.conflicts.iter().any(|conflict| {
+//RS             conflict.contains("typed provider fact") && conflict.contains("zlib")
+//RS         }));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn pypi_swiftpm_maven_reports_round_trip_through_lock_and_export() {
+//RS         let revision = "0123456789abcdef0123456789abcdef01234567";
+//RS         let pypi = r#"{"info":{"name":"sample","version":"1.2.3","license":"MIT","requires_dist":["httpx>=0.27"]},"urls":[{"filename":"sample.whl","digests":{"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},"yanked":false}]}"#;
+//RS         let swiftpm = format!(
+//RS             r#"{{"version":1,"pins":[{{"package":"swift-log","state":{{"revision":"{revision}","version":"1.5.4"}}}}]}}"#
+//RS         );
+//RS         let maven = r#"<project><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.2.3</version><dependencies><dependency><groupId>org.example</groupId><artifactId>dep</artifactId><version>3.0.0</version></dependency></dependencies></project>"#;
+//RS         for (family, document) in [
+//RS             (ProviderFamily::PyPI, pypi),
+//RS             (ProviderFamily::SwiftPM, swiftpm.as_str()),
+//RS             (ProviderFamily::Maven, maven),
+//RS         ] {
+//RS             let report = normalize_provider_document(family, document);
+//RS             report.validate().expect("provider report is lossless");
+//RS             let shared = report.shared_facts();
+//RS             assert_eq!(shared.native_document, document);
+//RS             assert_eq!(
+//RS                 ProviderFacts::from_json(&report.export_json()).unwrap(),
+//RS                 shared
+//RS             );
+//RS             let lock = report
+//RS                 .lock_record("app", &shared.reference, "x86_64-linux")
+//RS                 .expect("provider lock retains exact identity");
+//RS             let locked =
+//RS                 ProviderFacts::from_json(lock.future_fields.get("provider-facts").unwrap())
+//RS                     .unwrap();
+//RS             assert_eq!(locked, shared);
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn pypi_swiftpm_maven_reports_surface_loss_and_conflict() {
+//RS         let pypi = normalize_provider_document(
+//RS             ProviderFamily::PyPI,
+//RS             r#"{"info":{"name":"sample"},"urls":[]}"#,
+//RS         );
+//RS         assert!(pypi.validate().is_err());
+//RS         assert!(pypi
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("exact version")));
+//RS 
+//RS         let swiftpm = normalize_provider_document(
+//RS             ProviderFamily::SwiftPM,
+//RS             r#"{"version":1,"pins":[{"package":"swift-log","state":{"branch":"main"}}]}"#,
+//RS         );
+//RS         assert!(swiftpm.validate().is_err());
+//RS         assert!(swiftpm
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("exact revision")));
+//RS 
+//RS         let maven = normalize_provider_document(
+//RS             ProviderFamily::Maven,
+//RS             r#"<project><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.0.0</version><version>2.0.0</version></project>"#,
+//RS         );
+//RS         assert!(maven.validate().is_err());
+//RS         assert!(maven
+//RS             .conflicts
+//RS             .iter()
+//RS             .any(|conflict| conflict.contains("conflicting version")));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn pypi_swiftpm_maven_reject_malformed_native_shapes_without_defaults() {
+//RS         let pypi = normalize_provider_document(
+//RS             ProviderFamily::PyPI,
+//RS             r#"{"info":{"name":"sample","version":"1.0.0"},"urls":[{"filename":"sample.whl","digests":{"sha256":false}}]}"#,
+//RS         );
+//RS         assert!(pypi
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("digest `sha256` must be a string")));
+//RS         assert!(pypi.validate().is_err());
+//RS 
+//RS         let swiftpm = normalize_provider_document(
+//RS             ProviderFamily::SwiftPM,
+//RS             r#"{"version":9,"pins":[{"identity":"swift-log","state":{"revision":1}}]}"#,
+//RS         );
+//RS         assert!(swiftpm
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("unsupported") && loss.contains("version")));
+//RS         assert!(swiftpm
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("revision") && loss.contains("string")));
+//RS         assert!(swiftpm.validate().is_err());
+//RS 
+//RS         let maven_namespace = normalize_provider_document(
+//RS             ProviderFamily::Maven,
+//RS             r#"<project xmlns="urn:unsupported"><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.0.0</version></project>"#,
+//RS         );
+//RS         assert!(maven_namespace
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("unsupported XML namespace")));
+//RS         assert!(maven_namespace.validate().is_err());
+//RS 
+//RS         let duplicate_dependency = normalize_provider_document(
+//RS             ProviderFamily::Maven,
+//RS             r#"<project><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.0.0</version><dependencies><dependency><groupId>org.example</groupId><artifactId>dep</artifactId><version>1.0.0</version></dependency><dependency><groupId>org.example</groupId><artifactId>dep</artifactId><version>2.0.0</version></dependency></dependencies></project>"#,
+//RS         );
+//RS         assert!(duplicate_dependency
+//RS             .conflicts
+//RS             .iter()
+//RS             .any(|conflict| conflict.contains("org.example:dep")
+//RS                 && conflict.contains("conflicting version")));
+//RS         assert!(duplicate_dependency.validate().is_err());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nuget_conan_and_vcpkg_conformance_retains_native_facts_and_lock_identity() {
+//RS         let nuget = r#"<package>
+//RS   <metadata>
+//RS     <id>widget</id>
+//RS     <version>1.2.3</version>
+//RS     <licenseExpression>MIT</licenseExpression>
+//RS     <repository type="git" url="https://example.invalid/widget" commit="abc" />
+//RS     <dependencies><group targetFramework="net8.0"><dependency id="serde" version="[1.0.0]" /></group></dependencies>
+//RS   </metadata>
+//RS </package>"#;
+//RS         let conan = r#"from conan import ConanFile
+//RS class Widget(ConanFile):
+//RS     name = "widget"
+//RS     version = "1.2.3"
+//RS     license = "MIT"
+//RS     settings = "os", "arch", "compiler", "build_type"
+//RS     options = {"shared": [True, False]}
+//RS     generators = "CMakeDeps"
+//RS     def requirements(self):
+//RS         self.requires("zlib/1.3.1")
+//RS "#;
+//RS         let vcpkg = r#"{
+//RS   "name": "widget",
+//RS   "version-string": "1.2.3",
+//RS   "license": "MIT",
+//RS   "builtin-baseline": "0123456789abcdef0123456789abcdef01234567",
+//RS   "supports": "!uwp",
+//RS   "dependencies": [{"name":"zlib","version>=":"1.3.0","features":["core"]}],
+//RS   "features": {"tools": ["fmt"]}
+//RS }"#;
+//RS 
+//RS         for (family, document, reference) in [
+//RS             (ProviderFamily::NuGet, nuget, "widget#version=1.2.3@nuget"),
+//RS             (ProviderFamily::Conan, conan, "widget#version=1.2.3@conan"),
+//RS             (ProviderFamily::Vcpkg, vcpkg, "widget#version=1.2.3@vcpkg"),
+//RS         ] {
+//RS             let report = normalize_provider_document(family, document);
+//RS             report.validate().expect("provider report is lossless");
+//RS             assert_eq!(report.native_document, document);
+//RS             assert!(!report.export_json().is_empty());
+//RS             let lock = report
+//RS                 .lock_record("app", reference, "x86_64-linux")
+//RS                 .expect("provider lock retains exact identity");
+//RS             let locked = ProviderFacts::from_json(
+//RS                 lock.future_fields
+//RS                     .get("provider-facts")
+//RS                     .expect("provider facts in lock"),
+//RS             )
+//RS             .expect("provider facts JSON");
+//RS             assert_eq!(locked.native_document, document);
+//RS             assert_eq!(locked.qualified_reference(), reference);
+//RS         }
+//RS 
+//RS         let conan_lock = r#"{"ref":"widget/1.2.3@acme/stable#rrev","requires":[{"ref":"zlib/1.3.1"}],"settings":{"os":"Linux"},"options":{"shared":false},"package_id":"pkgid"}"#;
+//RS         let conan_report = normalize_provider_document(ProviderFamily::Conan, conan_lock);
+//RS         conan_report
+//RS             .validate()
+//RS             .expect("Conan JSON provider facts are lossless");
+//RS         assert!(conan_report
+//RS             .facts
+//RS             .typed
+//RS             .contains_key("provider.conan.variant.package_id"));
+//RS         assert!(conan_report
+//RS             .facts
+//RS             .dependencies
+//RS             .contains(&"zlib@1.3.1".to_string()));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn nuget_conan_and_vcpkg_conformance_reports_loss_and_conflict() {
+//RS         let nuget = r#"{"dependencies":{"net8.0":{"widget":{"requested":"[1.0.0,2.0.0)"}}}}"#;
+//RS         let conan =
+//RS             r#"{"name":"widget","version":"1.0.0","requires":[{"package_id":"missing-ref"}]}"#;
+//RS         let vcpkg = r#"{"name":"widget","version":"1.0.0","version-string":"1.1.0","dependencies":[{"features":["core"]}]}"#;
+//RS 
+//RS         let nuget_report = normalize_provider_document(ProviderFamily::NuGet, nuget);
+//RS         assert!(nuget_report.validate().is_err());
+//RS         assert!(nuget_report
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("resolved exact version") || loss.contains("range")));
+//RS 
+//RS         let conan_report = normalize_provider_document(ProviderFamily::Conan, conan);
+//RS         assert!(conan_report.validate().is_err());
+//RS         assert!(conan_report
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("no dependency ref")));
+//RS 
+//RS         let vcpkg_report = normalize_provider_document(ProviderFamily::Vcpkg, vcpkg);
+//RS         assert!(vcpkg_report.validate().is_err());
+//RS         assert!(vcpkg_report
+//RS             .conflicts
+//RS             .iter()
+//RS             .any(|conflict| conflict.contains("conflicting version fields")));
+//RS         assert!(vcpkg_report
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("no non-empty `name`")));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn provider_conformance_retains_real_lock_shapes_and_rejects_hooks() {
+//RS         let nuget = r#"{
+//RS   "targets":{"net8.0":{"widget/1.2.3":{"type":"package","dependencies":{"serde":"1.0.0"}}}},
+//RS   "libraries":{"widget/1.2.3":{"type":"package","sha512":"sha512-widget"}},
+//RS   "projectFileDependencyGroups":{"net8.0":["widget >= 1.0.0"]}
+//RS         }"#;
+//RS         let report = normalize_provider_document(ProviderFamily::NuGet, nuget);
+//RS         report
+//RS             .validate()
+//RS             .expect("single NuGet lock identity is lossless");
+//RS         assert_eq!(report.facts.platforms, vec!["framework:net8.0"]);
+//RS         assert_eq!(report.facts.integrity_hash, "sha512-widget");
+//RS         assert!(report
+//RS             .facts
+//RS             .typed
+//RS             .contains_key("provider.nuget.target.net8.0.widget/1.2.3.serde"));
+//RS         assert!(report
+//RS             .facts
+//RS             .typed
+//RS             .contains_key("provider.nuget.project.request.net8.0.0"));
+//RS 
+//RS         let ranged_xml = r#"<package><metadata><id>widget</id><version>1.2.3</version><dependencies><dependency id="serde" version="[1.0.0,2.0.0)" /></dependencies></metadata></package>"#;
+//RS         let ranged = normalize_provider_document(ProviderFamily::NuGet, ranged_xml);
+//RS         assert!(ranged.validate().is_err());
+//RS         assert!(ranged
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("serde") && loss.contains("exact version")));
+//RS 
+//RS         let graph = r#"{"ref":"widget/1.2.3","graph":{"nodes":{"0":{"ref":"widget/1.2.3","requires":["1"],"tool_requires":["2"],"package_id":"pkgid"},"1":{"ref":"zlib/1.3.1"},"2":{"ref":"cmake/3.29.0"}}}}"#;
+//RS         let graph_report = normalize_provider_document(ProviderFamily::Conan, graph);
+//RS         graph_report
+//RS             .validate()
+//RS             .expect("Conan graph root identity is lossless");
+//RS         assert!(graph_report
+//RS             .facts
+//RS             .typed
+//RS             .contains_key("provider.conan.graph.node.0"));
+//RS         assert!(graph_report
+//RS             .facts
+//RS             .build_dependencies
+//RS             .iter()
+//RS             .any(|dependency| dependency == "2"));
+//RS 
+//RS         let hook = normalize_provider_document(
+//RS             ProviderFamily::Conan,
+//RS             "name = \"widget\"\nversion = \"1.2.3\"\ndef generate(self):\n    self.run(\"cmake\")\n",
+//RS         );
+//RS         assert!(hook.validate().is_err());
+//RS         assert!(hook
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("executable build or Python hook")));
+//RS 
+//RS         let malformed_vcpkg = normalize_provider_document(
+//RS             ProviderFamily::Vcpkg,
+//RS             r#"{"name":"widget","version":"1.0.0","dependencies":[{"name":"zlib","features":"core"}],"overrides":[{"version":"1.0.0"}]}"#,
+//RS         );
+//RS         assert!(malformed_vcpkg.validate().is_err());
+//RS         assert!(malformed_vcpkg
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("features") && loss.contains("invalid shape")));
+//RS         assert!(malformed_vcpkg
+//RS             .losses
+//RS             .iter()
+//RS             .any(|loss| loss.contains("override 0") && loss.contains("name")));
+//RS     }
+//RS }
+// END-PORT-PENDING 0907 crates/jetpack/src/ProviderGraph.rs:5418-6472
+

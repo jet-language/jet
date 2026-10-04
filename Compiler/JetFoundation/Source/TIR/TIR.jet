@@ -326,7 +326,7 @@ pub enum TStmt {
     Assign(place: TPlace, op: TBinaryOp?, value: TExpr, clone_value: Bool, line: Int, span: Span)
     CountedLoop(label: String?, init: TStmt, condition: TExpr, step: TStmt?, vectorization: AutoVectorizationFacts?, body: [TStmt], span: Span)
     ForRange(label: String?, local: TLocal, start: TExpr, end: TExpr, step: TExpr?, exclusive: Bool, body: [TStmt], vectorization: AutoVectorizationFacts?, span: Span)
-    Range(label: String?, variable: String, source: TExpr?, start: TExpr, end: TExpr, step: TExpr?, exclusive: Bool, vectorization: AutoVectorizationFacts?, body: [TStmt], span: Span)
+    Range(label: String?, variable: TLocal, source: TExpr?, start: TExpr, end: TExpr, step: TExpr?, exclusive: Bool, vectorization: AutoVectorizationFacts?, body: [TStmt], span: Span)
     ExprStmt(value: TExpr, span: Span)
     Return(value: TExpr?, span: Span)
     TaskGroup(group: TLocal, limit: TExpr?, body: [TStmt], span: Span)
@@ -344,7 +344,7 @@ pub enum TStmt {
     IndexFieldAssign(value: TIndexFieldAssign, span: Span)
     IndexHookAssign(type_name: String, base: TExpr, index: TExpr, value: TExpr, span: Span)
     MathSwizzleAssign(base: TExpr, type_name: String, lanes: [Int], value: TExpr, clone_value: Bool, span: Span)
-    ForIn(label: String?, variable: String, variable_two: String?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, body: [TStmt], span: Span)
+    ForIn(label: String?, variable: TLocal, variable_two: TLocal?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, body: [TStmt], span: Span)
     Inline(body: [TStmt], span: Span)
     DebugOnly(body: [TStmt], span: Span)
     MixedSwitch(subject: TExpr, class: TBranchClass, arms: [TMixedArm], else_body: [TStmt]?, span: Span)
@@ -515,7 +515,7 @@ pub enum TExprKind {
     Tuple(values: [TExpr])
     List(values: [TExpr], trait_coercion: Type?)
     Map(entries: [TMapEntry])
-    EnumCtor(owner: SymbolID, variant: SymbolID, payload: [TEnumArg])
+    EnumCtor(owner: SymbolID, variant: SymbolID, payload: TEnumPayload)
     Try(value: TExpr, conversion: TTryConvert, failure: TFailureCarrier)
     TryWithContext(inner: TExpr, note: TExpr?, convert: TTryConvert, file: String, line: Int, function: String)
     Lambda(value: TLambda)
@@ -2530,8 +2530,7 @@ pub fn tir_expr_children(expression: TExpr) -> [TExpr] {
             &children.push(entry.key)
             &children.push(entry.value)
         }
-        .EnumCtor(_, _, payload) -> loop argument in payload -> &children.push(argument.value)
-        .EnumLit(_, _, payload) -> {
+        .EnumCtor(_, _, payload) | .EnumLit(_, _, payload) -> {
             if payload == {
                 .Positional(args) -> loop argument in args -> &children.push(argument.value)
                 .Named(fields) -> loop field in fields -> &children.push(field.value.value)

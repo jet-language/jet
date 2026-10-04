@@ -1,0 +1,222 @@
+// Observations and lifecycle ownership (crates/jet-cli/src/MultiProgress.rs).
+// Close cancels the report/traversal, never the underlying work. Callback
+// reporters share only the storage owner; task arrays are not copied per update.
+
+// Rust `MultiProgress::observe` (MultiProgress.rs:905-923).
+pub fn jet_cli_progress_observe(progress: &JetCLIMultiProgress) -> JetCLIProgressObservation JetCLIProgressError! {
+    facts :: jet_cli_progress_facts(progress)
+    if !jet_cli_progress_enabled(progress) {
+        guard :: progress.storage.guard_edit()
+        guard.value.previous_frame = None
+        return Ok(JetCLIProgressObservation{facts: facts, frame: None, diff: jet_cli_progress_frame_diff_empty()})
+    }
+    frame :: Val(jet_cli_progress_render_visible_frame(progress) ?? return Err(err))
+    guard :: progress.storage.guard_edit()
+    diff :: jet_cli_progress_diff_frames(guard.value.previous_frame, frame)
+    guard.value.previous_frame = ~frame
+    Ok(JetCLIProgressObservation{facts: facts, frame: frame, diff: diff})
+}
+// Rust `ProgressReporter::{new,task_id,fact}` (MultiProgress.rs:970-1003).
+// ProgressScope/ProgressHandle are one reporter, not separate aliases. Rust's
+// settled bit is equivalent to terminal task state, which is authoritative here.
+pub struct JetCLIProgressReporter {
+    storage: Shared<JetCLIProgressStorage>
+    id: JetCLITaskID
+}
+pub fn jet_cli_progress_manual_task(progress: &JetCLIMultiProgress, label: String, options: ^JetCLITaskOptions) -> JetCLIProgressReporter JetCLIProgressError! {
+    id :: jet_cli_progress_add_task_with_options(&progress, label, ^options) ?? return Err(err)
+    Ok(JetCLIProgressReporter{storage: progress.storage, id: id})
+}
+pub fn jet_cli_progress_reporter_task_id(reporter: JetCLIProgressReporter) -> JetCLITaskID Never! { reporter.id }
+pub fn jet_cli_progress_reporter_fact(reporter: JetCLIProgressReporter) -> JetCLIProgressFact? Never! { jet_cli_progress_storage_task(reporter.storage, reporter.id) }
+// Rust `ProgressReporter::apply` (MultiProgress.rs:1005-1018).
+pub fn jet_cli_progress_reporter_apply(reporter: JetCLIProgressReporter, update: JetCLIProgressUpdate) JetCLIProgressError! { jet_cli_progress_storage_apply(reporter.storage, reporter.id, update) }
+// Rust reporter update forwarding methods (MultiProgress.rs:1020-1062).
+pub fn jet_cli_progress_reporter_increment(reporter: JetCLIProgressReporter, amount: U64) JetCLIProgressError! { jet_cli_progress_reporter_apply(reporter, JetCLIProgressUpdate.Increment(amount)) }
+pub fn jet_cli_progress_reporter_set_position(reporter: JetCLIProgressReporter, position: U64) JetCLIProgressError! { jet_cli_progress_reporter_apply(reporter, JetCLIProgressUpdate.SetPosition(position)) }
+pub fn jet_cli_progress_reporter_set_total(reporter: JetCLIProgressReporter, total: U64?) JetCLIProgressError! { jet_cli_progress_reporter_apply(reporter, JetCLIProgressUpdate.SetTotal(total)) }
+pub fn jet_cli_progress_reporter_set_unknown_total(reporter: JetCLIProgressReporter) JetCLIProgressError! { jet_cli_progress_reporter_set_total(reporter, None) }
+pub fn jet_cli_progress_reporter_set_label(reporter: JetCLIProgressReporter, label: String) JetCLIProgressError! { jet_cli_progress_storage_set_label(reporter.storage, reporter.id, label) }
+pub fn jet_cli_progress_reporter_set_transient(reporter: JetCLIProgressReporter, transient: Bool) JetCLIProgressError! { jet_cli_progress_storage_set_transient(reporter.storage, reporter.id, transient) }
+pub fn jet_cli_progress_reporter_set_column(reporter: JetCLIProgressReporter, column: JetCLIProgressColumn) JetCLIProgressError! { jet_cli_progress_reporter_apply(reporter, JetCLIProgressUpdate.SetColumn(column)) }
+pub fn jet_cli_progress_reporter_set_custom_column(reporter: JetCLIProgressReporter, name: String, value: String) JetCLIProgressError! { jet_cli_progress_reporter_set_column(reporter, jet_cli_progress_column_new(name, value)) }
+// Rust `ProgressReporter::{finish,fail,fail_with_message,cancel,cancel_with_message}` (MultiProgress.rs:1064-1105).
+pub fn jet_cli_progress_reporter_finish(reporter: JetCLIProgressReporter) JetCLIProgressError! { jet_cli_progress_reporter_apply(reporter, JetCLIProgressUpdate.Finish) }
+pub fn jet_cli_progress_reporter_fail(reporter: JetCLIProgressReporter) JetCLIProgressError! { jet_cli_progress_reporter_fail_with_message(reporter, None) }
+pub fn jet_cli_progress_reporter_fail_with_message(reporter: JetCLIProgressReporter, message: String?) JetCLIProgressError! { jet_cli_progress_reporter_apply(reporter, JetCLIProgressUpdate.Fail(message)) }
+pub fn jet_cli_progress_reporter_cancel(reporter: JetCLIProgressReporter) JetCLIProgressError! { jet_cli_progress_reporter_cancel_with_message(reporter, None) }
+pub fn jet_cli_progress_reporter_cancel_with_message(reporter: JetCLIProgressReporter, message: String?) JetCLIProgressError! { jet_cli_progress_reporter_apply(reporter, JetCLIProgressUpdate.Cancel(message)) }
+// Rust `ProgressReporter::{finish_if_running,fail_if_running}` (MultiProgress.rs:1107-1126).
+fn jet_cli_progress_reporter_finish_if_running(reporter: JetCLIProgressReporter) JetCLIProgressError! {
+    fact :: jet_cli_progress_reporter_fact(reporter) ?? return Err(JetCLIProgressError.UnknownTask(reporter.id))
+    if fact.state == JetCLIProgressState.Running -> jet_cli_progress_reporter_finish(reporter)
+}
+fn jet_cli_progress_reporter_fail_if_running(reporter: JetCLIProgressReporter) JetCLIProgressError! {
+    fact :: jet_cli_progress_reporter_fact(reporter) ?? return Err(JetCLIProgressError.UnknownTask(reporter.id))
+    if fact.state == JetCLIProgressState.Running -> jet_cli_progress_reporter_fail(reporter)
+}
+// Rust `Drop for ProgressReporter` (MultiProgress.rs:1128-1134).
+impl JetCLIProgressReporter.Close {
+    fn close(^self) {
+        jet_cli_progress_reporter_cancel(self).drop("drop cancels only a still-running progress task")
+    }
+}
+// Rust `ProgressSnapshot::{len,is_empty,task}` (MultiProgress.rs:1136-1158).
+pub struct JetCLIProgressSnapshot { pub facts: [JetCLIProgressFact] }
+pub fn jet_cli_progress_snapshot_len(snapshot: JetCLIProgressSnapshot) -> Int Never! { snapshot.facts.len() }
+pub fn jet_cli_progress_snapshot_is_empty(snapshot: JetCLIProgressSnapshot) -> Bool Never! { snapshot.facts.len() == 0 }
+pub fn jet_cli_progress_snapshot_task(snapshot: JetCLIProgressSnapshot, id: ^JetCLITaskID) -> View<JetCLIProgressFact>? from snapshot {
+    loop index in 0..<snapshot.facts.len() {
+        if snapshot.facts[index].id == id -> return Val(jet_cli_progress_snapshot_window(snapshot, ^index))
+    }
+    None
+}
+fn jet_cli_progress_snapshot_window(snapshot: JetCLIProgressSnapshot, index: ^Int) -> View<JetCLIProgressFact> from snapshot {
+    snapshot.facts[index..<index + 1]
+}
+// Rust `I: Iterator` (MultiProgress.rs:858,1162-1164) and its associated Item.
+// Jet lacks generic trait-associated type projection. The source owner supplies
+// real pull/hint operations as typed callable values; no source is pre-run,
+// boxed as DataTree, or copied. The callbacks retain the actual source cursor.
+pub struct JetCLIProgressSource<T> {
+    pub pull: fn() -> T? Never!
+    pub hint: fn() -> (lower: Int, upper: Int?) Never!
+}
+impl JetCLIProgressSource.Iterator {
+    type Item = T
+    fn next(&self) -> T? { self.pull() }
+}
+pub fn jet_cli_progress_source_size_hint<T>(source: JetCLIProgressSource<T>) -> (lower: Int, upper: Int?) Never! { source.hint() }
+// Rust `E: From<ProgressError>` is an explicit conversion callable in Jet.
+// Rust `MultiProgress::with_task` (MultiProgress.rs:661-691).
+pub fn jet_cli_progress_with_task<T, E>(progress: &JetCLIMultiProgress, label: String, options: ^JetCLITaskOptions, callback: fn(JetCLIProgressReporter) -> T E!, from_progress_error: fn(JetCLIProgressError) -> E Never!) -> T E! {
+    reporter :: jet_cli_progress_manual_task(&progress, label, ^options) ?? return Err(from_progress_error(err))
+    if callback(reporter) == {
+        .Ok(value) -> {
+            jet_cli_progress_reporter_finish_if_running(reporter) ?? return Err(from_progress_error(err))
+            Ok(value)
+        }
+        .Err(error) -> {
+            jet_cli_progress_reporter_fail_if_running(reporter).drop("preserve callback's original error")
+            Err(error)
+        }
+    }
+}
+// Rust `MultiProgress::progress_each` (MultiProgress.rs:693-722).
+pub fn jet_cli_progress_each<T, R, E>(progress: &JetCLIMultiProgress, label: String, iterator: ^JetCLIProgressSource<T>, options: ^JetCLITaskOptions, work: fn(T) -> R E!, from_progress_error: fn(JetCLIProgressError) -> E Never!) E! {
+    reporter :: jet_cli_progress_manual_task(&progress, label, ^options) ?? return Err(from_progress_error(err))
+    source := ^iterator
+    loop {
+        item :: source.pull() ?? break
+        work(item) ?? {
+            jet_cli_progress_reporter_fail_if_running(reporter).drop("preserve item's original error")
+            return Err(err)
+        }
+        jet_cli_progress_reporter_increment(reporter, U64{1}) ?? {
+            jet_cli_progress_reporter_fail_if_running(reporter).drop("preserve reporting error")
+            return Err(from_progress_error(err))
+        }
+    }
+    jet_cli_progress_reporter_finish_if_running(reporter) ?? return Err(from_progress_error(err))
+}
+// Rust `MultiProgress::progress_bytes` (MultiProgress.rs:724-763).
+// A caller-supplied borrowed length projection expresses Rust AsRef<[u8]>
+// without copying buffer data or restricting the chunk's concrete type.
+pub fn jet_cli_progress_bytes<T, R, E>(progress: &JetCLIMultiProgress, label: String, chunks: ^JetCLIProgressSource<T>, options: ^JetCLITaskOptions, byte_length: fn(T) -> U64 JetCLIProgressError!, work: fn(T) -> R E!, from_progress_error: fn(JetCLIProgressError) -> E Never!) E! {
+    reporter :: jet_cli_progress_manual_task(&progress, label, ^options) ?? return Err(from_progress_error(err))
+    source := ^chunks
+    loop {
+        chunk :: source.pull() ?? break
+        bytes :: byte_length(chunk) ?? {
+            jet_cli_progress_reporter_fail_if_running(reporter).drop("preserve byte-count overflow")
+            return Err(from_progress_error(JetCLIProgressError.CountOverflow(reporter.id)))
+        }
+        work(chunk) ?? {
+            jet_cli_progress_reporter_fail_if_running(reporter).drop("preserve chunk's original error")
+            return Err(err)
+        }
+        jet_cli_progress_reporter_increment(reporter, bytes) ?? {
+            jet_cli_progress_reporter_fail_if_running(reporter).drop("preserve reporting error")
+            return Err(from_progress_error(err))
+        }
+    }
+    jet_cli_progress_reporter_finish_if_running(reporter) ?? return Err(from_progress_error(err))
+}
+// Rust `ProgressIter` (MultiProgress.rs:1160-1171).
+// Source queries preserve the wrapped cursor's exact size hint.
+pub struct JetCLIProgressIter<T> {
+    storage: Shared<JetCLIProgressStorage>
+    id: JetCLITaskID
+    iterator: JetCLIProgressSource<T>?
+    exhausted: Bool
+    detached: Bool
+    pub last_error: JetCLIProgressError?
+}
+// Rust `MultiProgress::{iter,track}` (MultiProgress.rs:849-884).
+pub fn jet_cli_progress_iter<T>(progress: &JetCLIMultiProgress, id: JetCLITaskID, iterator: ^JetCLIProgressSource<T>) -> JetCLIProgressIter<T> JetCLIProgressError! {
+    guard :: progress.storage.guard_read()
+    index :: jet_cli_progress_task_index(guard.value, id) ?? return Err(err)
+    jet_cli_progress_ensure_open(guard.value.tasks[index]) ?? return Err(err)
+    Ok(JetCLIProgressIter<T>{storage: progress.storage, id: id, iterator: Val(^iterator), exhausted: false, detached: false, last_error: None})
+}
+pub fn jet_cli_progress_track<T>(progress: &JetCLIMultiProgress, label: String, total: U64?, iterator: ^JetCLIProgressSource<T>) -> JetCLIProgressIter<T> JetCLIProgressError! {
+    id :: jet_cli_progress_add_task(&progress, label, total) ?? return Err(err)
+    jet_cli_progress_iter<T>(&progress, id, ^iterator)
+}
+// Rust `ProgressIter::{task_id,try_next,last_error,into_inner}` (MultiProgress.rs:1177-1225).
+pub fn jet_cli_progress_iter_task_id<T>(iterator: JetCLIProgressIter<T>) -> JetCLITaskID Never! { iterator.id }
+pub fn jet_cli_progress_iter_try_next<T>(iterator: &JetCLIProgressIter<T>) -> T? JetCLIProgressError! {
+    if iterator.exhausted -> return Ok(None)
+    item :: if iterator.iterator == {
+        .Val(source) -> source.pull()
+        .None -> { return Err(JetCLIProgressError.TaskClosed(iterator.id)) }
+    }
+    if item == {
+        .Val(value) -> {
+            jet_cli_progress_storage_apply(iterator.storage, iterator.id, JetCLIProgressUpdate.Increment(U64{1})) ?? {
+                iterator.last_error = Val(~err)
+                iterator.exhausted = true
+                jet_cli_progress_storage_apply(iterator.storage, iterator.id, JetCLIProgressUpdate.Fail(None)).drop("preserve original iterator reporting error")
+                return Err(err)
+            }
+            Ok(Val(value))
+        }
+        .None -> {
+            iterator.exhausted = true
+            jet_cli_progress_storage_apply(iterator.storage, iterator.id, JetCLIProgressUpdate.Finish) ?? return Err(err)
+            Ok(None)
+        }
+    }
+}
+pub fn jet_cli_progress_iter_into_inner<T>(iterator: ^JetCLIProgressIter<T>) -> JetCLIProgressSource<T> Never! {
+    value := ^iterator
+    value.detached = true
+    source :: ^value.iterator ?? panic("progress iterator source already detached")
+    value.iterator = None
+    source
+}
+// Rust `Iterator::{next,size_hint} for ProgressIter` (MultiProgress.rs:1227-1242).
+pub fn jet_cli_progress_iter_next<T>(iterator: &JetCLIProgressIter<T>) -> T? Never! {
+    if jet_cli_progress_iter_try_next<T>(&iterator) == {
+        .Ok(value) -> value
+        .Err(_) -> None
+    }
+}
+pub fn jet_cli_progress_iter_size_hint<T>(iterator: JetCLIProgressIter<T>) -> (lower: Int, upper: Int?) Never! {
+    if iterator.iterator == {
+        .Val(source) -> source.hint()
+        .None -> (lower: 0, upper: Val(0))
+    }
+}
+impl JetCLIProgressIter.Iterator {
+    type Item = T
+    fn next(&self) -> T? { jet_cli_progress_iter_next<T>(&self) }
+}
+// Rust `Drop for ProgressIter` (MultiProgress.rs:1244-1253).
+impl JetCLIProgressIter.Close {
+    fn close(^self) {
+        if !self.exhausted && !self.detached {
+            jet_cli_progress_storage_apply(self.storage, self.id, JetCLIProgressUpdate.Cancel(None)).drop("drop cancels traversal, not the source")
+        }
+    }
+}

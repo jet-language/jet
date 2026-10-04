@@ -1,0 +1,1804 @@
+// PORT-PENDING 2076 crates-jet-env-model-src-moduleeval-eval-slice-1: crates/jet-env-model/src/ModuleEval/Eval.rs:1-1800
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! The env-namespace evaluation core: parse a source to a `Program`, evaluate
+//RS //! every enabled `Item::Module`, run each `env.*` field through `comptime` (or
+//RS //! the text-level Pkg-sugar parser for `packages:`), and merge the resulting
+//RS //! contributions through the §6 engine.
+//RS 
+//RS use std::collections::{BTreeMap, HashMap, HashSet};
+//RS use std::path::Path;
+//RS 
+//RS use crate::Comptime;
+//RS use crate::Diagnostics::Diagnostic;
+//RS use crate::Lexer::{StrTokPart, TokKind, Token};
+//RS use crate::Syntax;
+//RS use crate::AST::{
+//RS     CallArg, ContribValue, Contribution, CtKey, CtValue, EnvLit, Expr, Func, Item, ModuleDecl,
+//RS     Namespace, StrPart,
+//RS };
+//RS 
+//RS use super::super::Merge::{
+//RS     self, ContributionLayer, EntryContribution, FactContribution, FactValue, MergeError,
+//RS     MergedEntry, SourceScope,
+//RS };
+//RS use super::Computed::{evaluate_expression, evaluate_named_fields};
+//RS use super::DevService::evaluate_dev_service;
+//RS use super::Diagnostics::{
+//RS     not_a_namespace_literal, packages_not_a_list, prompt_bad_field, prompt_bad_value,
+//RS     wrong_namespace_type,
+//RS };
+//RS use super::Environment::{
+//RS     files_from_value, languages_from_value, lifecycle_from_field, presets_from_value,
+//RS     qualified_call_name, valid_env_name, EnvironmentIntegration, EnvironmentLifecycle,
+//RS     IntegrationKind, LanguageSpec, PackageProfileSpec, PresetSpec,
+//RS };
+//RS use super::System::{evaluate_fleet, evaluate_image, evaluate_system, evaluate_vmtest};
+//RS use super::Types::EnvironmentRead;
+//RS use super::Types::{
+//RS     AdapterPlan, AdapterRecipe, DevServicePlan, EnvironmentContribution, EvaluatedModule,
+//RS     SecretDeclaration, SecretDefault, SecretGenerator, SecretRotationPolicy, SecretSpec,
+//RS };
+//RS 
+//RS /// Parse `src` and evaluate every enabled module it declares. `base_dir`
+//RS /// resolves `embed_file` inside contribution expressions, same as ordinary
+//RS /// comptime evaluation.
+//RS pub fn evaluate_source(src: &str, base_dir: &Path) -> Result<Vec<EvaluatedModule>, Diagnostic> {
+//RS     let program = parse_program(src)?;
+//RS     evaluate_modules(&program.items, src, base_dir)
+//RS }
+//RS 
+//RS /// Lex + parse `src` to a `Program`, collapsing any lex/parse failure to a
+//RS /// single diagnostic. The module surface is evaluated, not type-checked, here,
+//RS /// so the first error is enough to stop.
+//RS pub(super) fn parse_program(src: &str) -> Result<crate::AST::Program, Diagnostic> {
+//RS     let (toks, lex_diags) = crate::Lexer::lex_config(src);
+//RS     if let Some(d) = lex_diags.into_iter().next() {
+//RS         return Err(d);
+//RS     }
+//RS     crate::Parser::parse_config_with_source(&toks, src).map_err(|mut diags| {
+//RS         diags.pop().unwrap_or_else(|| {
+//RS             Diagnostic::error(
+//RS                 "E0000",
+//RS                 "parse failed".into(),
+//RS                 String::new(),
+//RS                 String::new(),
+//RS                 None,
+//RS             )
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS /// Read the one config-surface spelling of environment access. The lexer
+//RS /// reads `$NAME` as one word (D-COMPILER-NS1=A), so quoted shell text such as
+//RS /// `"echo $HOME"` is not mistaken for a Jet environment read. String
+//RS /// interpolation token streams are walked recursively because they are parsed
+//RS /// as expressions by the config parser.
+//RS pub(super) fn environment_reads(src: &str) -> Result<Vec<EnvironmentRead>, Diagnostic> {
+//RS     let (tokens, lex_diags) = crate::Lexer::lex(src);
+//RS     if let Some(diagnostic) = lex_diags.into_iter().next() {
+//RS         return Err(diagnostic);
+//RS     }
+//RS     let mut reads = Vec::new();
+//RS     collect_environment_reads(&tokens, &mut reads);
+//RS     Ok(reads)
+//RS }
+//RS 
+//RS fn collect_environment_reads(tokens: &[Token], reads: &mut Vec<EnvironmentRead>) {
+//RS     let tokens = crate::Lexer::without_comments(tokens);
+//RS     for token in tokens.iter() {
+//RS         if let TokKind::Ident(name) = &token.kind {
+//RS             if Syntax::is_comptime_name(name) {
+//RS                 if !reads.iter().any(|read| &read.name == name) {
+//RS                     reads.push(EnvironmentRead {
+//RS                         name: name.clone(),
+//RS                         ty: Syntax::TYPE_STRING.to_string(),
+//RS                     });
+//RS                 }
+//RS             }
+//RS         }
+//RS         if let TokKind::Str(parts) = &token.kind {
+//RS             for part in parts {
+//RS                 if let StrTokPart::Interp(interpolation) = part {
+//RS                     collect_environment_reads(interpolation, reads);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn environment_globals(reads: &[EnvironmentRead]) -> HashMap<String, CtValue> {
+//RS     reads
+//RS         .iter()
+//RS         .map(|read| {
+//RS             let name = read.name.strip_prefix('$').unwrap_or(read.name.as_str());
+//RS             let value = std::env::var_os(name)
+//RS                 .map(|value| value.to_string_lossy().into_owned())
+//RS                 .unwrap_or_default();
+//RS             (read.name.clone(), CtValue::Str(value))
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS /// Evaluate every enabled `Item::Module` in `items` (already-parsed).
+//RS pub fn evaluate_modules(
+//RS     items: &[Item],
+//RS     src: &str,
+//RS     base_dir: &Path,
+//RS ) -> Result<Vec<EvaluatedModule>, Diagnostic> {
+//RS     // Module fields use the canonical comptime/MIR evaluator. Install the
+//RS     // bridge here as well as in higher-level workspace entry points so direct
+//RS     // callers of this public evaluator get the same semantics.
+//RS     jet_codegen::Codegen::MIREval::install_mir_bridge();
+//RS     let funcs = collect_funcs(items);
+//RS     let reads = environment_reads(src)?;
+//RS     let globals = collect_comptime_globals(items, &funcs, base_dir, &environment_globals(&reads))?;
+//RS     let mut out = Vec::new();
+//RS     for item in items {
+//RS         let Item::Module(m) = item else { continue };
+//RS         if !m.is_auto_discovered() {
+//RS             continue;
+//RS         }
+//RS         out.push(evaluate_module(m, src, base_dir, &funcs, &globals)?);
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS fn collect_funcs(items: &[Item]) -> HashMap<String, &Func> {
+//RS     items
+//RS         .iter()
+//RS         .filter_map(|item| match item {
+//RS             Item::Func(f) => Some((f.name.clone(), f)),
+//RS             _ => None,
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS /// Resolve module-level immutable comptime values before any namespace field
+//RS /// runs. Module fields are allowed to use these values, but they must enter
+//RS /// through the same dependency, purity, and deterministic-value path as
+//RS /// sibling fields. In particular, a self-reference is a real cycle, not an
+//RS /// unresolved-name fallback.
+//RS fn collect_comptime_globals<'a>(
+//RS     items: &'a [Item],
+//RS     funcs: &HashMap<String, &'a Func>,
+//RS     base_dir: &Path,
+//RS     environment_globals: &HashMap<String, CtValue>,
+//RS ) -> Result<HashMap<String, crate::Comptime::CtValue>, Diagnostic> {
+//RS     let definitions = items
+//RS         .iter()
+//RS         .filter_map(|item| match item {
+//RS             Item::Const(def) if def.is_comptime => {
+//RS                 let name = def
+//RS                     .name
+//RS                     .strip_prefix(crate::Syntax::COMPTIME_MARK)
+//RS                     .unwrap_or(&def.name)
+//RS                     .to_string();
+//RS                 Some((name, (def.name_span, &def.value)))
+//RS             }
+//RS             _ => None,
+//RS         })
+//RS         .collect::<HashMap<_, _>>();
+//RS     let computed = evaluate_named_fields(
+//RS         &definitions,
+//RS         environment_globals,
+//RS         funcs,
+//RS         &HashSet::new(),
+//RS         base_dir,
+//RS         None,
+//RS         "module-level comptime values must have a deterministic dependency order",
+//RS         "break the cycle by making one value independent or by moving the shared computation into a pure function",
+//RS     )?;
+//RS     Ok(computed.values)
+//RS }
+//RS 
+//RS fn evaluate_module<'a>(
+//RS     m: &ModuleDecl,
+//RS     src: &str,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &'a Func>,
+//RS     globals: &HashMap<String, crate::Comptime::CtValue>,
+//RS ) -> Result<EvaluatedModule, Diagnostic> {
+//RS     let mut entries = Vec::new();
+//RS     let mut systems = Vec::new();
+//RS     let mut images = Vec::new();
+//RS     let mut fleets = Vec::new();
+//RS     let mut vmtests = Vec::new();
+//RS     let mut environment_contributions = Vec::new();
+//RS     let mut package_profiles = Vec::new();
+//RS     let integrations = evaluate_integration_imports(&m.imports, base_dir, funcs, globals)?;
+//RS     for c in &m.contributions {
+//RS         match (&c.namespace, &c.value) {
+//RS             (Namespace::Env, ContribValue::Expr(_)) => {
+//RS                 let source = format!("{}.{}", m.name, c.path);
+//RS                 let capture = evaluate_env_contribution(c, src, base_dir, funcs, globals, &source)?;
+//RS                 let EnvCapture {
+//RS                     entry,
+//RS                     secrets: names,
+//RS                     adapters: found_adapters,
+//RS                     lifecycle: captured_lifecycle,
+//RS                     presets: captured_presets,
+//RS                     languages: captured_languages,
+//RS                     files: captured_files,
+//RS                 } = capture;
+//RS                 let environment_reads = environment_reads(&src[c.span.start..c.span.end])?;
+//RS                 environment_contributions.push(EnvironmentContribution {
+//RS                     name: c.path.clone(),
+//RS                     environment_reads,
+//RS                     dev_services: Vec::new(),
+//RS                     secrets: names,
+//RS                     adapters: found_adapters,
+//RS                     lifecycle: captured_lifecycle,
+//RS                     presets: captured_presets,
+//RS                     languages: captured_languages,
+//RS                     files: captured_files,
+//RS                 });
+//RS                 entries.push(((c.namespace, c.path.clone()), entry));
+//RS             }
+//RS             (Namespace::Env, ContribValue::Env(lit)) => {
+//RS                 let source = format!("{}.{}", m.name, c.path);
+//RS                 let (capture, services) =
+//RS                     evaluate_env_role(lit, src, base_dir, funcs, globals, &source)?;
+//RS                 let EnvCapture {
+//RS                     entry,
+//RS                     secrets: names,
+//RS                     adapters: found_adapters,
+//RS                     lifecycle: captured_lifecycle,
+//RS                     presets: captured_presets,
+//RS                     languages: captured_languages,
+//RS                     files: captured_files,
+//RS                 } = capture;
+//RS                 let environment_reads = environment_reads(&src[c.span.start..c.span.end])?;
+//RS                 environment_contributions.push(EnvironmentContribution {
+//RS                     name: c.path.clone(),
+//RS                     environment_reads,
+//RS                     dev_services: services,
+//RS                     secrets: names,
+//RS                     adapters: found_adapters,
+//RS                     lifecycle: captured_lifecycle,
+//RS                     presets: captured_presets,
+//RS                     languages: captured_languages,
+//RS                     files: captured_files,
+//RS                 });
+//RS                 entries.push(((c.namespace, c.path.clone()), entry));
+//RS             }
+//RS             (Namespace::System, ContribValue::System(lit)) => {
+//RS                 systems.push(evaluate_system(
+//RS                     &c.path, lit, src, base_dir, funcs, globals,
+//RS                 )?);
+//RS             }
+//RS             (Namespace::Image, ContribValue::Image(lit)) => {
+//RS                 images.push(evaluate_image(&c.path, lit, src, base_dir, funcs, globals)?);
+//RS             }
+//RS             (Namespace::Fleet, ContribValue::Fleet(lit)) => {
+//RS                 fleets.push(evaluate_fleet(&c.path, lit, src, base_dir, funcs, globals)?);
+//RS             }
+//RS             (Namespace::VmTest, ContribValue::VmTest(lit)) => {
+//RS                 vmtests.push(evaluate_vmtest(
+//RS                     &c.path, lit, src, base_dir, funcs, globals,
+//RS                 )?);
+//RS             }
+//RS             (Namespace::Profile, ContribValue::Profile(lit)) => {
+//RS                 package_profiles.push(evaluate_package_profile_fields(
+//RS                     &c.path,
+//RS                     &lit.fields,
+//RS                     src,
+//RS                     base_dir,
+//RS                     funcs,
+//RS                     globals,
+//RS                     &m.name,
+//RS                 )?);
+//RS             }
+//RS             (Namespace::Profile, ContribValue::Expr(value)) => {
+//RS                 package_profiles.push(evaluate_package_profile_expr(
+//RS                     &c.path, value, src, base_dir, funcs, globals, &m.name,
+//RS                 )?);
+//RS             }
+//RS             // Namespace/value-shape mismatches can't occur: the parser pairs each
+//RS             // namespace with its dedicated value parser (see `contribution`).
+//RS             _ => unreachable!("contribution namespace/value shape mismatch"),
+//RS         }
+//RS     }
+//RS     Ok(EvaluatedModule {
+//RS         name: m.name.clone(),
+//RS         entries,
+//RS         systems,
+//RS         images,
+//RS         fleets,
+//RS         vmtests,
+//RS         environment_contributions,
+//RS         integrations,
+//RS         package_profiles,
+//RS     })
+//RS }
+//RS 
+//RS fn push_unique_string(values: &mut Vec<String>, value: String) {
+//RS     if !values.iter().any(|existing| existing == &value) {
+//RS         values.push(value);
+//RS     }
+//RS }
+//RS 
+//RS /// Lower first-party integration imports into the same typed facts consumed by
+//RS /// package realization, environment files, trust, and disclosure. Unknown
+//RS /// calls remain the existing E0969 import diagnostic; there is no stringly
+//RS /// escape hatch here.
+//RS fn evaluate_integration_imports(
+//RS     imports: &[Expr],
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS ) -> Result<Vec<EnvironmentIntegration>, Diagnostic> {
+//RS     let mut leaves = Vec::new();
+//RS     for import in imports {
+//RS         collect_import_leaves(import, &mut leaves);
+//RS     }
+//RS     let mut integrations = Vec::new();
+//RS     for import in leaves {
+//RS         let Some(name) = qualified_call_name(import) else {
+//RS             continue;
+//RS         };
+//RS         if name == Syntax::BUILTIN_FIND {
+//RS             continue;
+//RS         }
+//RS         let Some(kind) = IntegrationKind::from_call(&name) else {
+//RS             return Err(super::Diagnostics::bad_import_directive(import.span()));
+//RS         };
+//RS         let (args, name_span) = match import {
+//RS             Expr::Call(call) => (call.args.as_slice(), call.name_span),
+//RS             Expr::MethodCall {
+//RS                 args, method_span, ..
+//RS             } => (args.as_slice(), *method_span),
+//RS             _ => continue,
+//RS         };
+//RS         let integration = evaluate_integration_call(&name, args, kind, base_dir, funcs, globals)?;
+//RS         if let Some(existing) = integrations
+//RS             .iter()
+//RS             .find(|item: &&EnvironmentIntegration| item.name == integration.name)
+//RS         {
+//RS             if *existing != integration {
+//RS                 return Err(Diagnostic::error(
+//RS                     "E1335",
+//RS                     format!("integration `{}` has conflicting declarations", integration.name),
+//RS                     "one environment graph cannot silently choose different SDK, host, credential, or grant facts".to_string(),
+//RS                     "merge the integration options so they agree, or keep one declaration".to_string(),
+//RS                     Some(name_span),
+//RS                 ));
+//RS             }
+//RS         } else {
+//RS             integrations.push(integration);
+//RS         }
+//RS     }
+//RS     Ok(integrations)
+//RS }
+//RS 
+//RS fn collect_import_leaves<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
+//RS     match expr {
+//RS         Expr::ListLit(items, _) => {
+//RS             for item in items {
+//RS                 collect_import_leaves(item, out);
+//RS             }
+//RS         }
+//RS         _ => out.push(expr),
+//RS     }
+//RS }
+//RS 
+//RS fn evaluate_integration_call(
+//RS     name: &str,
+//RS     args: &[CallArg],
+//RS     kind: IntegrationKind,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS ) -> Result<EnvironmentIntegration, Diagnostic> {
+//RS     let mut integration = EnvironmentIntegration {
+//RS         kind,
+//RS         name: name.to_string(),
+//RS         preset: kind.as_str().to_string(),
+//RS         ..Default::default()
+//RS     };
+//RS     match kind {
+//RS         IntegrationKind::Android => {
+//RS             integration.options.insert("api".into(), "34".into());
+//RS             integration
+//RS                 .options
+//RS                 .insert("build_tools".into(), "34.0.0".into());
+//RS             integration.options.insert("ndk".into(), "26.3".into());
+//RS             integration
+//RS                 .options
+//RS                 .insert("license".into(), "policy-required".into());
+//RS             integration.packages =
+//RS                 vec!["android-tools@nixpkgs".into(), "android-sdk@nixpkgs".into()];
+//RS             integration.tasks.push("android-sdk-check".into());
+//RS             integration.providers.push("nixpkgs".into());
+//RS             integration
+//RS                 .host_checks
+//RS                 .push("target:linux-or-android".into());
+//RS         }
+//RS         IntegrationKind::Apple => {
+//RS             integration.options.insert("targets".into(), "IOS".into());
+//RS             integration
+//RS                 .options
+//RS                 .insert("license".into(), "policy-required".into());
+//RS             integration.packages.push("apple-sdk@nixpkgs".into());
+//RS             integration.tasks.push("apple-sdk-check".into());
+//RS             integration.providers.push("nixpkgs".into());
+//RS             integration
+//RS                 .host_checks
+//RS                 .push("target:darwin-or-macos".into());
+//RS         }
+//RS         IntegrationKind::Certificates => {
+//RS             integration.preset = "certificate-store".into();
+//RS             integration.tasks.push("certificate-store-check".into());
+//RS             integration.providers.push("vault".into());
+//RS             integration.grants.push("certificate.read".into());
+//RS         }
+//RS         IntegrationKind::Hosts => {
+//RS             integration.preset = "project-hosts".into();
+//RS             integration.tasks.push("host-binding-check".into());
+//RS             integration.providers.push("host-binding".into());
+//RS         }
+//RS         IntegrationKind::CodexAgent => {
+//RS             integration.preset = "codex".into();
+//RS             integration.tasks.push("mcp-agent-check".into());
+//RS             integration.providers.push("mcp".into());
+//RS             integration.grants.push("mcp.read".into());
+//RS         }
+//RS         IntegrationKind::Editor => {
+//RS             integration.preset = "vscode".into();
+//RS             integration.packages.push("vscode@nixpkgs".into());
+//RS             integration.providers.push("nixpkgs".into());
+//RS         }
+//RS         IntegrationKind::CloudCredentials => {
+//RS             integration.preset = "cloud-credentials".into();
+//RS             integration.tasks.push("credential-store-check".into());
+//RS             integration.providers.push("credential-store".into());
+//RS             integration.grants.push("credential.read".into());
+//RS         }
+//RS         IntegrationKind::Vault => {
+//RS             integration.preset = "vault".into();
+//RS             integration.tasks.push("vault-check".into());
+//RS             integration.providers.push("vault".into());
+//RS             integration.grants.push("vault.read".into());
+//RS         }
+//RS     }
+//RS     for (index, arg) in args.iter().enumerate() {
+//RS         let key = arg
+//RS             .label
+//RS             .as_ref()
+//RS             .map(|(name, _)| name.clone())
+//RS             .unwrap_or_else(|| format!("arg{index}"));
+//RS         let secret_reference = matches!(
+//RS             kind,
+//RS             IntegrationKind::Certificates
+//RS                 | IntegrationKind::CloudCredentials
+//RS                 | IntegrationKind::Vault
+//RS         )
+//RS         .then(|| integration_reference_names(&arg.expr));
+//RS         // Do not evaluate an invalid secret expression. Comptime values can
+//RS         // contain the caller's plaintext, while the only accepted secret
+//RS         // shape is a named reference already visible in the AST.
+//RS         let value = match secret_reference {
+//RS             Some(Err(())) => CtValue::Int(0),
+//RS             _ => integration_arg_value(&arg.expr, base_dir, funcs, globals)?,
+//RS         };
+//RS         lower_integration_arg(&mut integration, &key, &arg.expr, &value);
+//RS     }
+//RS     Ok(integration)
+//RS }
+//RS 
+//RS fn integration_arg_value(
+//RS     expr: &Expr,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     match expr {
+//RS         Expr::Ident(name, _) => Ok(CtValue::Str(name.clone())),
+//RS         Expr::Field(base, member, _) => Ok(CtValue::Str(format!(
+//RS             "{}.{}",
+//RS             expression_name(base),
+//RS             member
+//RS         ))),
+//RS         Expr::ListLit(values, _) => values
+//RS             .iter()
+//RS             .map(|value| integration_arg_value(value, base_dir, funcs, globals))
+//RS             .collect::<Result<Vec<_>, _>>()
+//RS             .map(CtValue::List),
+//RS         Expr::MapLit(values, _) => {
+//RS             let mut lowered = BTreeMap::new();
+//RS             for (key, value) in values {
+//RS                 let key = integration_arg_value(key, base_dir, funcs, globals)?;
+//RS                 let value = integration_arg_value(value, base_dir, funcs, globals)?;
+//RS                 let Some(key) = integration_ct_key(&key) else {
+//RS                     return Err(Diagnostic::error(
+//RS                         "E1335",
+//RS                         "integration map keys must be deterministic scalar values".to_string(),
+//RS                         "host mappings and integration selections become named graph facts; arbitrary values cannot be used as stable keys".to_string(),
+//RS                         "use a string, integer, boolean, or character key".to_string(),
+//RS                         Some(expr.span()),
+//RS                     ));
+//RS                 };
+//RS                 if lowered.insert(key, value).is_some() {
+//RS                     return Err(Diagnostic::error(
+//RS                         "E1335",
+//RS                         "integration map contains a duplicate key".to_string(),
+//RS                         "one integration fact graph cannot silently choose between two values for the same host or secret name".to_string(),
+//RS                         "remove the duplicate key or merge its values".to_string(),
+//RS                         Some(expr.span()),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             Ok(CtValue::Map(lowered))
+//RS         }
+//RS         Expr::StructLit {
+//RS             type_name, fields, ..
+//RS         } => {
+//RS             let fields = fields
+//RS                 .iter()
+//RS                 .map(|(name, _, value)| {
+//RS                     integration_arg_value(value, base_dir, funcs, globals)
+//RS                         .map(|value| (name.clone(), value))
+//RS                 })
+//RS                 .collect::<Result<Vec<_>, _>>()?;
+//RS             Ok(CtValue::Struct {
+//RS                 type_name: type_name.clone(),
+//RS                 fields,
+//RS             })
+//RS         }
+//RS         Expr::EnumLit {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS             ..
+//RS         } => {
+//RS             let args = args
+//RS                 .iter()
+//RS                 .map(|arg| {
+//RS                     let (name, value) = match arg {
+//RS                         crate::AST::EnumLitArg::Positional(value) => (None, value),
+//RS                         crate::AST::EnumLitArg::Named { label, expr } => {
+//RS                             (Some(label.clone()), expr)
+//RS                         }
+//RS                     };
+//RS                     integration_arg_value(value, base_dir, funcs, globals).map(|value| (name, value))
+//RS                 })
+//RS                 .collect::<Result<Vec<_>, _>>()?;
+//RS             Ok(CtValue::Enum {
+//RS                 type_name: type_name.clone(),
+//RS                 variant: variant.clone(),
+//RS                 args,
+//RS             })
+//RS         }
+//RS         _ => {
+//RS             check_build_io(expr)?;
+//RS             Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, globals)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn integration_ct_key(value: &CtValue) -> Option<CtKey> {
+//RS     match value {
+//RS         CtValue::Str(value) => Some(CtKey::Str(value.clone())),
+//RS         CtValue::Int(value) => Some(CtKey::Int(*value)),
+//RS         CtValue::Bool(value) => Some(CtKey::Bool(*value)),
+//RS         CtValue::Char(value) => Some(CtKey::Char(*value)),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn expression_name(expr: &Expr) -> String {
+//RS     match expr {
+//RS         Expr::Ident(name, _) => name.clone(),
+//RS         Expr::Field(base, member, _) => format!("{}.{}", expression_name(base), member),
+//RS         _ => expr.span().start.to_string(),
+//RS     }
+//RS }
+//RS 
+//RS fn lower_integration_arg(
+//RS     integration: &mut EnvironmentIntegration,
+//RS     key: &str,
+//RS     expr: &Expr,
+//RS     value: &CtValue,
+//RS ) {
+//RS     let display = integration_value_text(value);
+//RS     match integration.kind {
+//RS         IntegrationKind::Certificates
+//RS         | IntegrationKind::CloudCredentials
+//RS         | IntegrationKind::Vault => {
+//RS             let names = integration_reference_names(expr).unwrap_or_default();
+//RS             if names.is_empty() {
+//RS                 integration.losses.push(format!(
+//RS                     "{key}: secret input must be a named reference; value was redacted"
+//RS                 ));
+//RS             } else {
+//RS                 for name in names {
+//RS                     push_unique_string(&mut integration.secrets, name);
+//RS                 }
+//RS             }
+//RS             integration
+//RS                 .options
+//RS                 .insert(key.to_string(), "<redacted-names>".into());
+//RS         }
+//RS         IntegrationKind::Hosts => {
+//RS             if let CtValue::Map(entries) = value {
+//RS                 for (map_key, map_value) in entries {
+//RS                     let CtKey::Str(host) = map_key else { continue };
+//RS                     integration
+//RS                         .options
+//RS                         .insert(format!("host.{host}"), integration_value_text(map_value));
+//RS                 }
+//RS             } else {
+//RS                 integration.options.insert(key.to_string(), display);
+//RS             }
+//RS         }
+//RS         _ => {
+//RS             integration.options.insert(key.to_string(), display);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn integration_reference_names(expr: &Expr) -> Result<Vec<String>, ()> {
+//RS     match expr.without_parens() {
+//RS         Expr::Ident(name, _) => Ok(vec![name.clone()]),
+//RS         Expr::Field(_, _, _) => integration_reference_path(expr)
+//RS             .map(|name| vec![name])
+//RS             .ok_or(()),
+//RS         Expr::ListLit(values, _) => {
+//RS             let mut names = Vec::new();
+//RS             for value in values {
+//RS                 names.extend(integration_reference_names(value)?);
+//RS             }
+//RS             Ok(names)
+//RS         }
+//RS         _ => Err(()),
+//RS     }
+//RS }
+//RS 
+//RS fn integration_reference_path(expr: &Expr) -> Option<String> {
+//RS     match expr.without_parens() {
+//RS         Expr::Ident(name, _) => Some(name.clone()),
+//RS         Expr::Field(base, member, _) => {
+//RS             Some(format!("{}.{}", integration_reference_path(base)?, member))
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn integration_value_text(value: &CtValue) -> String {
+//RS     match value {
+//RS         CtValue::Str(value) => value.clone(),
+//RS         CtValue::Int(value) => value.to_string(),
+//RS         CtValue::Bool(value) => value.to_string(),
+//RS         CtValue::Char(value) => value.to_string(),
+//RS         CtValue::Enum { variant, args, .. } if args.is_empty() => {
+//RS             variant.rsplit('.').next().unwrap_or(variant).to_string()
+//RS         }
+//RS         CtValue::List(values) => values
+//RS             .iter()
+//RS             .map(integration_value_text)
+//RS             .collect::<Vec<_>>()
+//RS             .join(","),
+//RS         CtValue::Map(values) => values
+//RS             .iter()
+//RS             .map(|(key, value)| {
+//RS                 format!(
+//RS                     "{}={}",
+//RS                     integration_key_text(key),
+//RS                     integration_value_text(value)
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(","),
+//RS         CtValue::Struct { fields, .. } => fields
+//RS             .iter()
+//RS             .map(|(name, value)| format!("{name}={}", integration_value_text(value)))
+//RS             .collect::<Vec<_>>()
+//RS             .join(","),
+//RS         _ => value.jet_show(),
+//RS     }
+//RS }
+//RS 
+//RS fn integration_key_text(key: &CtKey) -> String {
+//RS     match key {
+//RS         CtKey::Int(value) => value.to_string(),
+//RS         CtKey::Str(value) => value.clone(),
+//RS         CtKey::Bool(value) => value.to_string(),
+//RS         CtKey::Char(value) => value.to_string(),
+//RS         // D-MAP-KEY1: a composite key is value-semantic, so its text is the
+//RS         // rendering of the value it holds. An integration key is a display
+//RS         // string, not an identity, so deferring to jet_show keeps one
+//RS         // rendering rule rather than a second one written here.
+//RS         CtKey::Tuple(_) | CtKey::Struct { .. } | CtKey::Enum { .. } => key.to_value().jet_show(),
+//RS     }
+//RS }
+//RS 
+//RS pub(super) fn lifecycle_merge(
+//RS     target: &mut EnvironmentLifecycle,
+//RS     incoming: EnvironmentLifecycle,
+//RS     module_name: &str,
+//RS ) -> Result<(), Diagnostic> {
+//RS     target.dotenv.extend(incoming.dotenv);
+//RS     target.unset.extend(incoming.unset);
+//RS     target.on_enter.extend(incoming.on_enter);
+//RS     target.checks.extend(incoming.checks);
+//RS     if let Some(path) = incoming.git_hooks_path {
+//RS         if let Some(existing) = &target.git_hooks_path {
+//RS             if existing != &path {
+//RS                 return Err(Diagnostic::error(
+//RS                     "E1333",
+//RS                     format!(
+//RS                         "git hook path is declared more than once with conflicting values in module `{module_name}`"
+//RS                     ),
+//RS                     "one environment cannot silently choose between different Git hook directories".to_string(),
+//RS                     "merge the git_hooks_path declarations so they agree, or keep one path owner".to_string(),
+//RS                     None,
+//RS                 ));
+//RS             }
+//RS         } else {
+//RS             target.git_hooks_path = Some(path);
+//RS         }
+//RS     }
+//RS     if incoming.reload_explicit {
+//RS         if target.reload_explicit && target.reload != incoming.reload {
+//RS             return Err(Diagnostic::error(
+//RS                 "E1333",
+//RS                 format!("reload policy is declared more than once in module `{module_name}`"),
+//RS                 "one module cannot silently choose between different reload policies".to_string(),
+//RS                 "merge the reload declarations so they agree, or keep one policy owner".to_string(),
+//RS                 None,
+//RS             ));
+//RS         }
+//RS         target.reload = incoming.reload;
+//RS         target.reload_explicit = true;
+//RS     }
+//RS     if let Some(formatter) = incoming.formatter {
+//RS         if let Some(existing) = &target.formatter {
+//RS             if existing != &formatter {
+//RS                 return Err(Diagnostic::error(
+//RS                     "E1333",
+//RS                     format!("formatter is declared more than once with conflicting packages in module `{module_name}`"),
+//RS                     "one environment cannot silently choose between different external formatters".to_string(),
+//RS                     "merge the formatter declarations so they agree, or keep one formatter owner".to_string(),
+//RS                     None,
+//RS                 ));
+//RS             }
+//RS         } else {
+//RS             target.formatter = Some(formatter);
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS struct EnvCapture {
+//RS     entry: EntryContribution,
+//RS     secrets: Vec<SecretSpec>,
+//RS     adapters: Vec<AdapterPlan>,
+//RS     lifecycle: EnvironmentLifecycle,
+//RS     presets: Vec<PresetSpec>,
+//RS     languages: Vec<LanguageSpec>,
+//RS     files: Vec<super::Environment::ManagedFile>,
+//RS }
+//RS 
+//RS fn namespace_type(ns: Namespace) -> &'static str {
+//RS     match ns {
+//RS         Namespace::Env => Syntax::TYPE_ENV,
+//RS         Namespace::System => Syntax::TYPE_SYSTEM,
+//RS         Namespace::Image => Syntax::TYPE_IMAGE,
+//RS         Namespace::Fleet => Syntax::TYPE_FLEET,
+//RS         Namespace::VmTest => Syntax::TYPE_VMTEST,
+//RS         Namespace::Profile => Syntax::TYPE_PROFILE,
+//RS         Namespace::Perf => Syntax::TYPE_BUDGET,
+//RS     }
+//RS }
+//RS 
+//RS fn evaluate_package_profile_expr(
+//RS     name: &str,
+//RS     value: &Expr,
+//RS     src: &str,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, crate::Comptime::CtValue>,
+//RS     module_name: &str,
+//RS ) -> Result<PackageProfileSpec, Diagnostic> {
+//RS     let Expr::StructLit {
+//RS         type_name, fields, ..
+//RS     } = value
+//RS     else {
+//RS         return Err(not_a_namespace_literal(Syntax::TYPE_PROFILE, value.span()));
+//RS     };
+//RS     if !type_name.is_empty() && type_name != Syntax::TYPE_PROFILE {
+//RS         return Err(wrong_namespace_type(
+//RS             Syntax::TYPE_PROFILE,
+//RS             type_name,
+//RS             value.span(),
+//RS         ));
+//RS     }
+//RS     evaluate_package_profile_fields(name, fields, src, base_dir, funcs, globals, module_name)
+//RS }
+//RS 
+//RS fn evaluate_package_profile_fields(
+//RS     name: &str,
+//RS     fields: &[(String, crate::Diagnostics::Span, Expr)],
+//RS     src: &str,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, crate::Comptime::CtValue>,
+//RS     module_name: &str,
+//RS ) -> Result<PackageProfileSpec, Diagnostic> {
+//RS     let allowed = [
+//RS         Syntax::PROFILE_FIELD_EXTENDS,
+//RS         Syntax::PROFILE_FIELD_PACKAGES,
+//RS         Syntax::PROFILE_FIELD_COLLISIONS,
+//RS     ];
+//RS     let mut seen = HashSet::new();
+//RS     for (field, span, _) in fields {
+//RS         if !allowed.iter().any(|allowed| *allowed == field) {
+//RS             return Err(Diagnostic::error(
+//RS                 "E1333",
+//RS                 format!("package generation `{name}` has unknown field `{field}`"),
+//RS                 "a source-backed package generation has only `extends`, `packages`, and `collisions` facts".to_string(),
+//RS                 "remove the field or move user/environment settings into a declared `user.<name>` generation".to_string(),
+//RS                 Some(*span),
+//RS             ));
+//RS         }
+//RS         if !seen.insert(field) {
+//RS             return Err(Diagnostic::error(
+//RS                 "E1332",
+//RS                 format!("package generation `{name}` repeats field `{field}`"),
+//RS                 "one package generation must have one value for each typed fact".to_string(),
+//RS                 "keep one declaration for the field, or split the generations and compose them with `extends`".to_string(),
+//RS                 Some(*span),
+//RS             ));
+//RS         }
+//RS     }
+//RS     let field_map = fields
+//RS         .iter()
+//RS         .filter(|(field, _, _)| {
+//RS             field != Syntax::PROFILE_FIELD_PACKAGES && field != Syntax::PROFILE_FIELD_COLLISIONS
+//RS         })
+//RS         .map(|(field, span, value)| (field.clone(), (*span, value)))
+//RS         .collect::<HashMap<_, _>>();
+//RS     let computed = evaluate_named_fields(
+//RS         &field_map,
+//RS         globals,
+//RS         funcs,
+//RS         &HashSet::new(),
+//RS         base_dir,
+//RS         Some(src),
+//RS         "package generation fields are pure computed values; a cycle has no deterministic evaluation order",
+//RS         "break the cycle by making one generation field a literal or by moving the shared computation into a pure function",
+//RS     )?;
+//RS     let resolved = computed.values;
+//RS     let mut packages = Vec::new();
+//RS     for (field, _, value) in fields {
+//RS         if field != Syntax::PROFILE_FIELD_PACKAGES {
+//RS             continue;
+//RS         }
+//RS         let extracted = extract_packages(value, src)?;
+//RS         for package in extracted.packages {
+//RS             let raw = pkg_ref(&package);
+//RS             if !packages.iter().any(|existing| existing == &raw) {
+//RS                 packages.push(raw);
+//RS             }
+//RS         }
+//RS         if !extracted.adapters.is_empty() {
+//RS             return Err(Diagnostic::error(
+//RS                 "E1335",
+//RS                 format!("package generation `{name}` contains an adapter package"),
+//RS                 "generation packages must retain provider identity and cannot hide a build recipe inside the generation declaration".to_string(),
+//RS                 "realize the adapter as a named package, then reference its exact package identity".to_string(),
+//RS                 Some(value.span()),
+//RS             ));
+//RS         }
+//RS     }
+//RS     let extends = match resolved.get(Syntax::PROFILE_FIELD_EXTENDS) {
+//RS         None => Vec::new(),
+//RS         Some(value) => string_names_from(value).ok_or_else(|| {
+//RS             Diagnostic::error(
+//RS                 "E1333",
+//RS                 format!("package generation `{name}` has invalid `extends`"),
+//RS                 "generation inheritance is a deterministic list of generation names".to_string(),
+//RS                 "write `extends: [\"base\"]`".to_string(),
+//RS                 Some(value_span(fields, Syntax::PROFILE_FIELD_EXTENDS)),
+//RS             )
+//RS         })?,
+//RS     };
+//RS     let collisions = fields
+//RS         .iter()
+//RS         .find(|(field, _, _)| field == Syntax::PROFILE_FIELD_COLLISIONS)
+//RS         .map(|(_, _, value)| package_profile_collisions_source(src, name, value.span()))
+//RS         .transpose()?
+//RS         .unwrap_or_default();
+//RS     Ok(PackageProfileSpec {
+//RS         name: name.to_string(),
+//RS         extends,
+//RS         packages,
+//RS         collisions,
+//RS         sources: vec![module_name.to_string()],
+//RS     })
+//RS }
+//RS 
+//RS fn value_span(
+//RS     fields: &[(String, crate::Diagnostics::Span, Expr)],
+//RS     name: &str,
+//RS ) -> crate::Diagnostics::Span {
+//RS     fields
+//RS         .iter()
+//RS         .find(|(field, _, _)| field == name)
+//RS         .map(|(_, span, _)| *span)
+//RS         .unwrap_or_else(|| crate::Diagnostics::Span::new(0, 0))
+//RS }
+//RS 
+//RS fn package_profile_collisions_source(
+//RS     src: &str,
+//RS     name: &str,
+//RS     span: crate::Diagnostics::Span,
+//RS ) -> Result<BTreeMap<String, String>, Diagnostic> {
+//RS     let Some(fragment) = src.get(span.start..span.end) else {
+//RS         return Err(Diagnostic::error(
+//RS             "E1333",
+//RS             format!("package generation `{name}` has invalid `collisions`"),
+//RS             "collision policy is an exact string path-to-provider map".to_string(),
+//RS             "write `collisions: { \"bin/editor\": \"editor@nixpkgs\" }`".to_string(),
+//RS             Some(span),
+//RS         ));
+//RS     };
+//RS     let values = quoted_collision_values(fragment);
+//RS     if values.is_empty() || values.len() % 2 != 0 {
+//RS         return Err(Diagnostic::error(
+//RS             "E1333",
+//RS             format!("package generation `{name}` has invalid `collisions`"),
+//RS             "collision policy is an exact string path-to-provider map".to_string(),
+//RS             "write `collisions: { \"bin/editor\": \"editor@nixpkgs\" }`".to_string(),
+//RS             Some(span),
+//RS         ));
+//RS     }
+//RS     let mut out = BTreeMap::new();
+//RS     for pair in values.chunks_exact(2) {
+//RS         let path = &pair[0];
+//RS         let provider = &pair[1];
+//RS         if path.trim().is_empty() || provider.trim().is_empty() || path.contains('\0') {
+//RS             return Err(Diagnostic::error(
+//RS                 "E1333",
+//RS                 format!("package generation `{name}` has an invalid collision entry"),
+//RS                 "exact collision paths and provider identities cannot be empty or contain NUL"
+//RS                     .to_string(),
+//RS                 "name the path and the exact package provider".to_string(),
+//RS                 Some(span),
+//RS             ));
+//RS         }
+//RS         if out.insert(path.clone(), provider.clone()).is_some() {
+//RS             return Err(Diagnostic::error(
+//RS                 "E1332",
+//RS                 format!("package generation `{name}` repeats collision path `{path}`"),
+//RS                 "one generation cannot choose two providers for one exact path".to_string(),
+//RS                 "keep one collision selection for the path".to_string(),
+//RS                 Some(span),
+//RS             ));
+//RS         }
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS fn quoted_collision_values(fragment: &str) -> Vec<String> {
+//RS     let mut values = Vec::new();
+//RS     let mut chars = fragment.chars();
+//RS     while let Some(character) = chars.next() {
+//RS         if character != '"' {
+//RS             continue;
+//RS         }
+//RS         let mut value = String::new();
+//RS         let mut escaped = false;
+//RS         let mut closed = false;
+//RS         for character in chars.by_ref() {
+//RS             if escaped {
+//RS                 value.push(match character {
+//RS                     'n' => '\n',
+//RS                     'r' => '\r',
+//RS                     't' => '\t',
+//RS                     '\\' => '\\',
+//RS                     '"' => '"',
+//RS                     other => other,
+//RS                 });
+//RS                 escaped = false;
+//RS             } else if character == '\\' {
+//RS                 escaped = true;
+//RS             } else if character == '"' {
+//RS                 closed = true;
+//RS                 break;
+//RS             } else {
+//RS                 value.push(character);
+//RS             }
+//RS         }
+//RS         if !closed {
+//RS             return Vec::new();
+//RS         }
+//RS         values.push(value);
+//RS     }
+//RS     values
+//RS }
+//RS 
+//RS /// E3402: builtins that perform ambient I/O or network access. A sandboxed
+//RS /// package build / module-field evaluation must reach none of them. The fs/net
+//RS /// names are future-proofing for the build-from-source path; print/eprint/input
+//RS /// are reachable today, so the diagnostic is live (I4).
+//RS fn is_ambient_io_builtin(name: &str) -> bool {
+//RS     matches!(
+//RS         name,
+//RS         "read_file"
+//RS             | "write_file"
+//RS             | "fetch"
+//RS             | "http_get"
+//RS             | "env_var"
+//RS             | "print"
+//RS             | "eprint"
+//RS             | "input"
+//RS             | "read_all_input"
+//RS     )
+//RS }
+//RS 
+//RS /// Scan a field expression for an ambient-I/O call; the first one fires E3402.
+//RS pub(super) fn check_build_io(value: &Expr) -> Result<(), Diagnostic> {
+//RS     let mut found: Option<(String, crate::Diagnostics::Span)> = None;
+//RS     crate::Comptime::walk_calls(value, &mut |name, span| {
+//RS         if found.is_none() && is_ambient_io_builtin(name) {
+//RS             found = Some((name.to_string(), span));
+//RS         }
+//RS     });
+//RS     match found {
+//RS         Some((name, span)) => Err(crate::Sema::e3402(&name, Some(span))),
+//RS         None => Ok(()),
+//RS     }
+//RS }
+//RS 
+//RS fn evaluate_env_contribution(
+//RS     c: &Contribution,
+//RS     src: &str,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, crate::Comptime::CtValue>,
+//RS     source: &str,
+//RS ) -> Result<EnvCapture, Diagnostic> {
+//RS     let expected = namespace_type(c.namespace);
+//RS     let ContribValue::Expr(value) = &c.value else {
+//RS         unreachable!("evaluate_env_contribution called on a non-env contribution")
+//RS     };
+//RS     // U18: a bare `{ … }` elaborates to the namespace type; an explicit
+//RS     // `Env { … }` stays legal. A non-record value (or the wrong type name) is
+//RS     // E0966.
+//RS     let Expr::StructLit {
+//RS         type_name, fields, ..
+//RS     } = value
+//RS     else {
+//RS         return Err(not_a_namespace_literal(expected, value.span()));
+//RS     };
+//RS     if !type_name.is_empty() && type_name != expected {
+//RS         return Err(wrong_namespace_type(expected, type_name, value.span()));
+//RS     }
+//RS 
+//RS     Ok(evaluate_env_fields(
+//RS         fields, src, base_dir, funcs, globals, source,
+//RS     )?)
+//RS }
+//RS 
+//RS /// Shared field-loop for both `env.<name>:` producer shapes (the legacy
+//RS /// `Expr::StructLit`'s fields and the canonical role-module's `EnvLit::fields`):
+//RS /// `packages:` reuses the Pkg-sugar text slice; everything else is a pure
+//RS /// comptime fact setting.
+//RS fn evaluate_env_fields(
+//RS     fields: &[(String, crate::Diagnostics::Span, Expr)],
+//RS     src: &str,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, crate::Comptime::CtValue>,
+//RS     source: &str,
+//RS ) -> Result<EnvCapture, Diagnostic> {
+//RS     let mut entry = EntryContribution::default();
+//RS     let mut secrets = Vec::new();
+//RS     let mut adapters = Vec::new();
+//RS     let mut lifecycle = EnvironmentLifecycle::default();
+//RS     let mut presets = Vec::new();
+//RS     let mut languages = Vec::new();
+//RS     let mut files = Vec::new();
+//RS     let extern_names = HashSet::new();
+//RS     // Module fields are a small pure dependency graph.  The old source-order
+//RS     // loop made a valid `port: base + 1, base: 8000` fail or, worse, made the
+//RS     // result depend on declaration order.  Resolve every sibling dependency
+//RS     // first, then evaluate the field with the resolved values in its globals.
+//RS     // `packages` remains text-level sugar and is deliberately not exposed as a
+//RS     // comptime value.
+//RS     let field_map = fields
+//RS         .iter()
+//RS         .filter(|(name, _, _)| {
+//RS             name != &Syntax::SYSTEM_FIELD_PACKAGES
+//RS                 && name != &Syntax::ENV_FIELD_SECRETS
+//RS                 && !is_lifecycle_field(name)
+//RS         })
+//RS         .map(|(name, span, value)| (name.clone(), (*span, value)))
+//RS         .collect::<HashMap<_, _>>();
+//RS     for (name, _, value) in fields {
+//RS         if name == Syntax::SYSTEM_FIELD_PACKAGES {
+//RS             let extracted = extract_packages(value, src)?;
+//RS             entry.packages.extend(extracted.packages);
+//RS             adapters.extend(extracted.adapters);
+//RS         }
+//RS     }
+//RS     let computed = evaluate_named_fields(
+//RS         &field_map,
+//RS         globals,
+//RS         funcs,
+//RS         &extern_names,
+//RS         base_dir,
+//RS         Some(src),
+//RS         "module fields are pure computed values; a cycle has no deterministic evaluation order",
+//RS         "break the cycle by making one field a literal or by moving the shared computation into a pure function",
+//RS     )?;
+//RS     let resolved = computed.values;
+//RS     for (name, span, value) in fields {
+//RS         if name == Syntax::SYSTEM_FIELD_PACKAGES {
+//RS             continue;
+//RS         } else if name == Syntax::ENV_FIELD_PROMPT {
+//RS             capture_prompt_setting(&mut entry, value, base_dir, funcs, &resolved, source)?;
+//RS         } else if name == Syntax::ENV_FIELD_SECRETS {
+//RS             secrets.extend(parse_secret_specs(value, base_dir, funcs, globals)?);
+//RS         } else if name == Syntax::ENV_FIELD_PRESETS {
+//RS             if let Some(value) = resolved.get(name) {
+//RS                 presets.extend(presets_from_value(value).map_err(|error| {
+//RS                     Diagnostic::error(
+//RS                         "E1332",
+//RS                         format!("environment preset declaration is invalid: {error}"),
+//RS                         "presets are named typed records with string package, variable, and inheritance facts".to_string(),
+//RS                         "use `presets: { dev: .{ packages: [\"tool@nixpkgs\"] } }`".to_string(),
+//RS                         Some(*span),
+//RS                     )
+//RS                 })?);
+//RS             }
+//RS         } else if name == Syntax::ENV_FIELD_LANGUAGES {
+//RS             if let Some(value) = resolved.get(name) {
+//RS                 languages.extend(languages_from_value(value).map_err(|error| {
+//RS                     Diagnostic::error(
+//RS                         "E1333",
+//RS                         format!("language-pack declaration is invalid: {error}"),
+//RS                         "languages is a typed map of Lang records that expands through Jet's catalog".to_string(),
+//RS                         "use `languages: { rust: Lang.{ enable: true } }` or another name from `jet env info`".to_string(),
+//RS                         Some(*span),
+//RS                     )
+//RS                 })?);
+//RS             }
+//RS         } else if name == Syntax::ENV_FIELD_FILES {
+//RS             if let Some(value) = resolved.get(name) {
+//RS                 files.extend(files_from_value(value).map_err(|error| {
+//RS                     Diagnostic::error(
+//RS                         "E1326",
+//RS                         format!("environment file declaration is invalid: {error}"),
+//RS                         "managed files use project-relative destinations and typed Symlink, Seed, or Copy records".to_string(),
+//RS                         "fix the file destination and source/content shape before running `jet env sync`".to_string(),
+//RS                         Some(*span),
+//RS                     )
+//RS                 })?);
+//RS             }
+//RS         } else if is_lifecycle_field(name) {
+//RS             let value = evaluate_lifecycle_value(value, base_dir, funcs, globals)?;
+//RS             lifecycle_from_field(&mut lifecycle, name, &value).map_err(|error| {
+//RS                 Diagnostic::error(
+//RS                     "E1333",
+//RS                     format!("environment lifecycle declaration is invalid: {error}"),
+//RS                     "lifecycle fields use typed dotenv, unset, job names, hook records, and Git hook paths".to_string(),
+//RS                     "fix the field shape, for example `on_enter: [prepare]`, `dotenv: [\".env\"]`, `git_hooks_path: \"scripts/githooks\"`, or `reload: .Prompt`".to_string(),
+//RS                     Some(*span),
+//RS                 )
+//RS             })?;
+//RS         } else {
+//RS             let v = resolved
+//RS                 .get(name)
+//RS                 .cloned()
+//RS                 .ok_or_else(|| field_missing_value(name, value.span()))?;
+//RS             record_setting(&mut entry, name, v.jet_show(), *span, source);
+//RS         }
+//RS     }
+//RS     Ok(EnvCapture {
+//RS         entry,
+//RS         secrets,
+//RS         adapters,
+//RS         lifecycle,
+//RS         presets,
+//RS         languages,
+//RS         files,
+//RS     })
+//RS }
+//RS 
+//RS fn is_lifecycle_field(name: &str) -> bool {
+//RS     matches!(
+//RS         name,
+//RS         Syntax::ENV_FIELD_DOTENV
+//RS             | Syntax::ENV_FIELD_UNSET
+//RS             | Syntax::ENV_FIELD_ON_ENTER
+//RS             | Syntax::ENV_FIELD_CHECKS
+//RS             | Syntax::ENV_FIELD_GIT_HOOKS_PATH
+//RS             | Syntax::ENV_FIELD_FORMATTER
+//RS             | Syntax::ENV_FIELD_RELOAD
+//RS     )
+//RS }
+//RS 
+//RS /// Lifecycle names are references, not comptime variable reads. Keep bare
+//RS /// identifiers as strings while still evaluating ordinary literals and the
+//RS /// explicit expert record's scalar fields.
+//RS fn evaluate_lifecycle_value(
+//RS     expr: &Expr,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, crate::Comptime::CtValue>,
+//RS ) -> Result<crate::Comptime::CtValue, Diagnostic> {
+//RS     match expr {
+//RS         Expr::Ident(name, _) => Ok(crate::Comptime::CtValue::Str(name.clone())),
+//RS         Expr::Field(..) => Ok(crate::Comptime::CtValue::Str(expression_name(expr))),
+//RS         Expr::ListLit(values, _) => values
+//RS             .iter()
+//RS             .map(|value| evaluate_lifecycle_value(value, base_dir, funcs, globals))
+//RS             .collect::<Result<Vec<_>, _>>()
+//RS             .map(crate::Comptime::CtValue::List),
+//RS         Expr::StructLit {
+//RS             type_name, fields, ..
+//RS         } => fields
+//RS             .iter()
+//RS             .map(|(name, _, value)| {
+//RS                 Ok((
+//RS                     name.clone(),
+//RS                     evaluate_lifecycle_value(value, base_dir, funcs, globals)?,
+//RS                 ))
+//RS             })
+//RS             .collect::<Result<Vec<_>, Diagnostic>>()
+//RS             .map(|fields| crate::Comptime::CtValue::Struct {
+//RS                 type_name: type_name.clone(),
+//RS                 fields,
+//RS             }),
+//RS         Expr::EnumLit {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS             ..
+//RS         } => args
+//RS             .iter()
+//RS             .map(|arg| {
+//RS                 let (name, value) = match arg {
+//RS                     crate::AST::EnumLitArg::Positional(value) => (None, value),
+//RS                     crate::AST::EnumLitArg::Named { label, expr } => (Some(label.clone()), expr),
+//RS                 };
+//RS                 Ok((
+//RS                     name,
+//RS                     evaluate_lifecycle_value(value, base_dir, funcs, globals)?,
+//RS                 ))
+//RS             })
+//RS             .collect::<Result<Vec<_>, Diagnostic>>()
+//RS             .map(|args| crate::Comptime::CtValue::Enum {
+//RS                 type_name: type_name.clone(),
+//RS                 variant: variant.clone(),
+//RS                 args,
+//RS             }),
+//RS         Expr::MapLit(entries, _) => entries
+//RS             .iter()
+//RS             .map(|(key, value)| {
+//RS                 let key = evaluate_lifecycle_value(key, base_dir, funcs, globals)?;
+//RS                 let key = integration_ct_key(&key).ok_or_else(|| {
+//RS                     Diagnostic::error(
+//RS                         "E1333",
+//RS                         "lifecycle map keys must be deterministic scalar values".to_string(),
+//RS                         "lifecycle records are captured as stable plan facts".to_string(),
+//RS                         "use a string, integer, boolean, or character key".to_string(),
+//RS                         Some(expr.span()),
+//RS                     )
+//RS                 })?;
+//RS                 Ok((
+//RS                     key,
+//RS                     evaluate_lifecycle_value(value, base_dir, funcs, globals)?,
+//RS                 ))
+//RS             })
+//RS             .collect::<Result<Vec<_>, Diagnostic>>()
+//RS             .map(|entries| crate::Comptime::CtValue::Map(entries.into_iter().collect())),
+//RS         _ => {
+//RS             check_build_io(expr)?;
+//RS             Comptime::evaluate(expr, funcs, &HashSet::new(), base_dir, globals)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn field_missing_value(name: &str, span: crate::Diagnostics::Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E3403",
+//RS         format!("computed module field `{name}` did not produce a value"),
+//RS         "a pure module field must evaluate to one deterministic value before the module is merged"
+//RS             .to_string(),
+//RS         "return a value from the field expression".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS fn capture_prompt_setting(
+//RS     entry: &mut EntryContribution,
+//RS     value: &Expr,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, crate::Comptime::CtValue>,
+//RS     source: &str,
+//RS ) -> Result<(), Diagnostic> {
+//RS     if let Expr::StructLit {
+//RS         type_name, fields, ..
+//RS     } = value
+//RS     {
+//RS         if type_name == Syntax::TYPE_PROMPT {
+//RS             let extern_names = HashSet::new();
+//RS             for (field, span, expr) in fields {
+//RS                 let v = evaluate_expression(expr, globals, funcs, &extern_names, base_dir)?;
+//RS                 match field.as_str() {
+//RS                     Syntax::PROMPT_FIELD_LABEL => {
+//RS                         let Some(label) = string_value(&v) else {
+//RS                             return Err(prompt_bad_value(field, "a quoted label", *span));
+//RS                         };
+//RS                         record_setting(entry, Syntax::ENV_FIELD_PROMPT, label, *span, source);
+//RS                     }
+//RS                     Syntax::PROMPT_FIELD_PATH => {
+//RS                         let Some(word) = prompt_word(&v) else {
+//RS                             return Err(prompt_bad_value(field, ".Short or .Full", *span));
+//RS                         };
+//RS                         if word != Syntax::PROMPT_PATH_SHORT && word != Syntax::PROMPT_PATH_FULL {
+//RS                             return Err(prompt_bad_value(field, ".Short or .Full", *span));
+//RS                         }
+//RS                         record_setting(entry, Syntax::PROMPT_SETTING_PATH, word, *span, source);
+//RS                     }
+//RS                     Syntax::PROMPT_FIELD_STRIP => {
+//RS                         let Some(word) = prompt_word(&v) else {
+//RS                             return Err(prompt_bad_value(field, ".On or .Off", *span));
+//RS                         };
+//RS                         if word != Syntax::PROMPT_STRIP_ON && word != Syntax::PROMPT_STRIP_OFF {
+//RS                             return Err(prompt_bad_value(field, ".On or .Off", *span));
+//RS                         }
+//RS                         record_setting(entry, Syntax::PROMPT_SETTING_STRIP, word, *span, source);
+//RS                     }
+//RS                     _ => return Err(prompt_bad_field(field, *span)),
+//RS                 }
+//RS             }
+//RS             return Ok(());
+//RS         }
+//RS     }
+//RS 
+//RS     let extern_names = HashSet::new();
+//RS     let v = evaluate_expression(value, globals, funcs, &extern_names, base_dir)?;
+//RS     record_setting(
+//RS         entry,
+//RS         Syntax::ENV_FIELD_PROMPT,
+//RS         v.jet_show(),
+//RS         value.span(),
+//RS         source,
+//RS     );
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn record_setting(
+//RS     entry: &mut EntryContribution,
+//RS     key: &str,
+//RS     value: String,
+//RS     span: crate::Diagnostics::Span,
+//RS     source: &str,
+//RS ) {
+//RS     entry.settings.entry(key.to_string()).or_default().push(
+//RS         FactContribution::new(
+//RS             key,
+//RS             FactValue::Text(value),
+//RS             SourceScope::Item,
+//RS             ContributionLayer::Environment,
+//RS             format!("{source}.{key}"),
+//RS         )
+//RS         .at(span),
+//RS     );
+//RS }
+//RS 
+//RS fn string_value(v: &crate::Comptime::CtValue) -> Option<String> {
+//RS     match v {
+//RS         crate::Comptime::CtValue::Str(s) => Some(s.clone()),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn prompt_word(v: &crate::Comptime::CtValue) -> Option<String> {
+//RS     match v {
+//RS         crate::Comptime::CtValue::Enum { variant, .. } => {
+//RS             variant.rsplit('.').next().map(str::to_string)
+//RS         }
+//RS         crate::Comptime::CtValue::Str(s) => Some(s.clone()),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// Lower a general `[String]` field. This is used by package-generation
+//RS /// inheritance; secret declarations use the typed map parser below.
+//RS fn string_names_from(v: &crate::Comptime::CtValue) -> Option<Vec<String>> {
+//RS     let crate::Comptime::CtValue::List(xs) = v else {
+//RS         return None;
+//RS     };
+//RS     xs.iter()
+//RS         .map(|x| match x {
+//RS             crate::Comptime::CtValue::Str(s) => Some(s.clone()),
+//RS             _ => None,
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn secret_decl_error(message: impl Into<String>, span: crate::Diagnostics::Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E1333",
+//RS         format!("secret declaration is invalid: {}", message.into()),
+//RS         "`secrets:` is one typed map from a secret name to either a metadata record or a `compose(template:, from:)` declaration".to_string(),
+//RS         "fix the named secret declaration without putting a secret value in the configuration".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS fn secret_name_error(name: &str, span: crate::Diagnostics::Span) -> Diagnostic {
+//RS     secret_decl_error(format!("secret name `{name}` is not a valid name"), span)
+//RS }
+//RS 
+//RS /// Lower one `secrets:` map. Both declaration shapes enter through this one
+//RS /// function; the dispatch is on the value after the map key, never on a second
+//RS /// grammar or a second field parser.
+//RS fn parse_secret_specs(
+//RS     value: &Expr,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS ) -> Result<Vec<SecretSpec>, Diagnostic> {
+//RS     let mut entries = Vec::<(String, crate::Diagnostics::Span, &Expr)>::new();
+//RS     match value.without_parens() {
+//RS         Expr::StructLit {
+//RS             type_name, fields, ..
+//RS         } => {
+//RS             if !type_name.is_empty() {
+//RS                 return Err(secret_decl_error(
+//RS                     "the secret declaration map must be an inferred `{ … }` record",
+//RS                     value.span(),
+//RS                 ));
+//RS             }
+//RS             entries.extend(
+//RS                 fields
+//RS                     .iter()
+//RS                     .map(|(name, span, value)| (name.clone(), *span, value)),
+//RS             );
+//RS         }
+//RS         Expr::MapLit(fields, _) => {
+//RS             for (key, value) in fields {
+//RS                 let key = secret_eval_value(key, base_dir, funcs, globals).map_err(|_| {
+//RS                     secret_decl_error("secret map keys must be strings or bare names", key.span())
+//RS                 })?;
+//RS                 let CtValue::Str(name) = key else {
+//RS                     return Err(secret_decl_error(
+//RS                         "secret map keys must be strings or bare names",
+//RS                         key_span(key, value.span()),
+//RS                     ));
+//RS                 };
+//RS                 entries.push((name, value.span(), value));
+//RS             }
+//RS         }
+//RS         _ => {
+//RS             return Err(secret_decl_error(
+//RS                 "`secrets:` must be a map from names to declarations",
+//RS                 value.span(),
+//RS             ));
+//RS         }
+//RS     }
+//RS 
+//RS     let mut seen = HashSet::new();
+//RS     let mut specs = Vec::with_capacity(entries.len());
+//RS     for (name, span, declaration) in entries {
+//RS         if !valid_env_name(&name) {
+//RS             return Err(secret_name_error(&name, span));
+//RS         }
+//RS         if !seen.insert(name.clone()) {
+//RS             return Err(secret_decl_error(
+//RS                 format!("secret name `{name}` is declared more than once"),
+//RS                 span,
+//RS             ));
+//RS         }
+//RS         let spec = match declaration.without_parens() {
+//RS             Expr::Call(call) if call.name == Syntax::SECRET_COMPOSE => {
+//RS                 parse_secret_compose(&name, call, base_dir, funcs, globals)?
+//RS             }
+//RS             Expr::StructLit { .. } => {
+//RS                 parse_secret_metadata(&name, declaration, base_dir, funcs, globals)?
+//RS             }
+//RS             _ => {
+//RS                 return Err(secret_decl_error(
+//RS                     format!("secret `{name}` must use a metadata record or `compose(...)`"),
+//RS                     declaration.span(),
+//RS                 ));
+//RS             }
+//RS         };
+//RS         specs.push(spec);
+//RS     }
+//RS     validate_secret_graph(&specs, value.span())?;
+//RS     Ok(specs)
+//RS }
+//RS 
+//RS fn key_span(_key: CtValue, fallback: crate::Diagnostics::Span) -> crate::Diagnostics::Span {
+//RS     // Keys have no independent span after comptime lowering. Keep the error
+//RS     // anchored to the value, and never render the rejected key's contents.
+//RS     fallback
+//RS }
+//RS 
+//RS fn parse_secret_metadata(
+//RS     name: &str,
+//RS     value: &Expr,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS ) -> Result<SecretSpec, Diagnostic> {
+//RS     let Expr::StructLit {
+//RS         type_name, fields, ..
+//RS     } = value.without_parens()
+//RS     else {
+//RS         unreachable!("secret metadata dispatch validates the record shape")
+//RS     };
+//RS     if !type_name.is_empty() {
+//RS         return Err(secret_decl_error(
+//RS             format!("secret `{name}` metadata must be an inferred record"),
+//RS             value.span(),
+//RS         ));
+//RS     }
+//RS     let allowed = [
+//RS         Syntax::SECRET_META_FIELD_DESCRIPTION,
+//RS         Syntax::SECRET_META_FIELD_REQUIRED,
+//RS         Syntax::SECRET_META_FIELD_ALLOWED_ENVIRONMENTS,
+//RS         Syntax::SECRET_META_FIELD_ROTATION,
+//RS         Syntax::SECRET_META_FIELD_DEFAULT,
+//RS         Syntax::SECRET_META_FIELD_GENERATE,
+//RS     ];
+//RS     let mut values = BTreeMap::<String, (crate::Diagnostics::Span, CtValue)>::new();
+//RS     for (field, span, expression) in fields {
+//RS         if !allowed.iter().any(|known| known == field) {
+//RS             return Err(secret_decl_error(
+//RS                 format!("secret `{name}` has unknown field `{field}`"),
+//RS                 *span,
+//RS             ));
+//RS         }
+//RS         if values.contains_key(field) {
+//RS             return Err(secret_decl_error(
+//RS                 format!("secret `{name}` repeats field `{field}`"),
+//RS                 *span,
+//RS             ));
+//RS         }
+//RS         let lowered = secret_eval_value(expression, base_dir, funcs, globals).map_err(|_| {
+//RS             secret_decl_error(
+//RS                 format!("secret `{name}` field `{field}` is not a deterministic value"),
+//RS                 *span,
+//RS             )
+//RS         })?;
+//RS         values.insert(field.clone(), (*span, lowered));
+//RS     }
+//RS 
+//RS     let description = values
+//RS         .get(Syntax::SECRET_META_FIELD_DESCRIPTION)
+//RS         .map(|(span, value)| match value {
+//RS             CtValue::Str(value) => Ok(value.clone()),
+//RS             _ => Err(secret_decl_error(
+//RS                 format!(
+//RS                     "secret `{name}` field `{}` must be a string",
+//RS                     Syntax::SECRET_META_FIELD_DESCRIPTION
+//RS                 ),
+//RS                 *span,
+//RS             )),
+//RS         })
+//RS         .transpose()?;
+//RS     let required = match values.get(Syntax::SECRET_META_FIELD_REQUIRED) {
+//RS         None => true,
+//RS         Some((_span, CtValue::Bool(value))) => *value,
+//RS         Some((span, _)) => {
+//RS             return Err(secret_decl_error(
+//RS                 format!(
+//RS                     "secret `{name}` field `{}` must be a boolean",
+//RS                     Syntax::SECRET_META_FIELD_REQUIRED
+//RS                 ),
+//RS                 *span,
+//RS             ));
+//RS         }
+//RS     };
+//RS     let allowed_environments = match values.get(Syntax::SECRET_META_FIELD_ALLOWED_ENVIRONMENTS) {
+//RS         None => Vec::new(),
+//RS         Some((span, value)) => secret_environment_list(name, value, *span)?,
+//RS     };
+//RS     let rotation = match values.get(Syntax::SECRET_META_FIELD_ROTATION) {
+//RS         None => SecretRotationPolicy::None,
+//RS         Some((span, value)) => secret_rotation(name, value, *span)?,
+//RS     };
+//RS     let default = match values.get(Syntax::SECRET_META_FIELD_DEFAULT) {
+//RS         None => SecretDefault::None,
+//RS         Some((span, value)) => secret_default(name, value, *span)?,
+//RS     };
+//RS     let generate = match values.get(Syntax::SECRET_META_FIELD_GENERATE) {
+//RS         None => SecretGenerator::None,
+//RS         Some((span, value)) => secret_generator(name, value, *span)?,
+//RS     };
+//RS     validate_secret_policies(
+//RS         name,
+//RS         required,
+//RS         &allowed_environments,
+//RS         &default,
+//RS         &generate,
+//RS         value.span(),
+//RS     )?;
+//RS     Ok(SecretSpec {
+//RS         name: name.to_string(),
+//RS         description,
+//RS         required,
+//RS         allowed_environments,
+//RS         rotation,
+//RS         default,
+//RS         generate,
+//RS         declaration: SecretDeclaration::Stored,
+//RS         implicit: false,
+//RS     })
+//RS }
+//RS 
+//RS fn validate_secret_policies(
+//RS     name: &str,
+//RS     required: bool,
+//RS     allowed_environments: &[String],
+//RS     default: &SecretDefault,
+//RS     generate: &SecretGenerator,
+//RS     span: crate::Diagnostics::Span,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let has_default = matches!(default, SecretDefault::PerProfile(values) if !values.is_empty());
+//RS     let has_generator = !matches!(generate, SecretGenerator::None);
+//RS     if has_default && has_generator {
+//RS         return Err(secret_decl_error(
+//RS             format!(
+//RS                 "secret `{name}` cannot declare both `{}` and `{}`",
+//RS                 Syntax::SECRET_META_FIELD_DEFAULT,
+//RS                 Syntax::SECRET_META_FIELD_GENERATE
+//RS             ),
+//RS             span,
+//RS         ));
+//RS     }
+//RS     if required && (has_default || has_generator) {
+//RS         return Err(secret_decl_error(
+//RS             format!(
+//RS                 "secret `{name}` is required and cannot declare `{}` or `{}`",
+//RS                 Syntax::SECRET_META_FIELD_DEFAULT,
+//RS                 Syntax::SECRET_META_FIELD_GENERATE
+//RS             ),
+//RS             span,
+//RS         ));
+//RS     }
+//RS     if !allowed_environments.is_empty() {
+//RS         if let SecretDefault::PerProfile(values) = default {
+//RS             for profile in values.keys() {
+//RS                 if !allowed_environments
+//RS                     .iter()
+//RS                     .any(|allowed| allowed == profile)
+//RS                 {
+//RS                     return Err(secret_decl_error(
+//RS                         format!(
+//RS                             "secret `{name}` default profile `{profile}` is outside `{}`",
+//RS                             Syntax::SECRET_META_FIELD_ALLOWED_ENVIRONMENTS
+//RS                         ),
+//RS                         span,
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn parse_secret_compose(
+//RS     name: &str,
+//RS     call: &crate::AST::Call,
+//RS     base_dir: &Path,
+//RS     funcs: &HashMap<String, &Func>,
+//RS     globals: &HashMap<String, CtValue>,
+//RS ) -> Result<SecretSpec, Diagnostic> {
+//RS     let mut template = None;
+//RS     let mut from = None;
+//RS     let mut seen = HashSet::new();
+//RS     for argument in &call.args {
+//RS         let Some((label, label_span)) = &argument.label else {
+//RS             return Err(secret_decl_error(
+//RS                 format!("secret `{name}` compose arguments must be labeled"),
+//RS                 argument.span,
+//RS             ));
+//RS         };
+//RS         if !seen.insert(label.clone()) {
+//RS             return Err(secret_decl_error(
+//RS                 format!("secret `{name}` compose repeats field `{label}`"),
+//RS                 *label_span,
+//RS             ));
+//RS         }
+//RS         match label.as_str() {
+//RS             Syntax::SECRET_COMPOSE_FIELD_TEMPLATE => {
+//RS                 let value = secret_template_value(&argument.expr, base_dir, funcs, globals)
+//RS                     .map_err(|_| {
+//RS                         secret_decl_error(
+//RS                             format!("secret `{name}` compose `template` must be text"),
+//RS                             argument.expr.span(),
+//RS                         )
+//RS                     })?;
+//RS                 template = Some((value, argument.expr.span()));
+//RS             }
+//RS             Syntax::SECRET_COMPOSE_FIELD_FROM => {
+//RS                 let value =
+//RS                     secret_eval_value(&argument.expr, base_dir, funcs, globals).map_err(|_| {
+//RS                         secret_decl_error(
+//RS                             format!("secret `{name}` compose `from` must be a list of names"),
+//RS                             argument.expr.span(),
+//RS                         )
+//RS                     })?;
+//RS                 from = Some((value, argument.expr.span()));
+//RS             }
+//RS             _ => {
+//RS                 return Err(secret_decl_error(
+//RS                     format!("secret `{name}` compose has unknown field `{label}`"),
+//RS                     *label_span,
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     let (template, template_span) = template.ok_or_else(|| {
+//RS         secret_decl_error(
+//RS             format!("secret `{name}` compose needs `template`"),
+//RS             call.name_span,
+//RS         )
+//RS     })?;
+//RS     let (from, from_span) = from.ok_or_else(|| {
+//RS         secret_decl_error(
+//RS             format!("secret `{name}` compose needs `from`"),
+//RS             call.name_span,
+//RS         )
+//RS     })?;
+//RS     let mut from =
+//RS         secret_string_list(&from, &format!("secret `{name}` compose `from`"), from_span)?;
+//RS     if from.is_empty() {
+//RS         return Err(secret_decl_error(
+//RS             format!("secret `{name}` compose `from` must not be empty"),
+//RS             from_span,
+//RS         ));
+//RS     }
+//RS     let mut seen_inputs = HashSet::new();
+//RS     for input in &from {
+//RS         if !valid_env_name(input) {
+//RS             return Err(secret_name_error(input, from_span));
+//RS         }
+//RS         if !seen_inputs.insert(input.clone()) {
+//RS             return Err(secret_decl_error(
+//RS                 format!("secret `{name}` compose repeats input `{input}`"),
+//RS                 from_span,
+//RS             ));
+//RS         }
+//RS     }
+//RS     validate_secret_template(name, &template, &from, template_span)?;
+//RS     from.sort();
+//RS     Ok(SecretSpec {
+//RS         name: name.to_string(),
+//RS         description: None,
+//RS         required: true,
+//RS         allowed_environments: Vec::new(),
+//RS         rotation: SecretRotationPolicy::None,
+//RS         default: SecretDefault::None,
+//RS         generate: SecretGenerator::None,
+//RS         declaration: SecretDeclaration::Compose { template, from },
+//RS         implicit: false,
+//RS     })
+//RS }
+//RS 
+//RS fn secret_environment_list(
+//RS     name: &str,
+//RS     value: &CtValue,
+//RS     span: crate::Diagnostics::Span,
+//RS ) -> Result<Vec<String>, Diagnostic> {
+//RS     let values = secret_string_list(
+//RS         value,
+//RS         &format!(
+//RS             "secret `{name}` field `{}`",
+//RS             Syntax::SECRET_META_FIELD_ALLOWED_ENVIRONMENTS
+//RS         ),
+//RS         span,
+//RS     )?;
+//RS     let mut seen = HashSet::new();
+//RS     for environment in &values {
+// END-PORT-PENDING 2076 crates/jet-env-model/src/ModuleEval/Eval.rs:1-1800
+

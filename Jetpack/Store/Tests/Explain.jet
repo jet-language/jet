@@ -27,3 +27,28 @@
     signed :: [String: String]{"nix.index.tier": "official-signed", "nix.index.signature-chain": "present"}
     assert_eq(store_why_trust_projection("nix", signed).grade, "signed")
 }
+
+#Test("explanation report status value keeps canonical report bytes with kind last") {
+    kinds :: [ExplainReportKind]{ExplainReportKind.Loss, ExplainReportKind.Conflict}
+    loop kind in kinds {
+        finding :: ExplainReport{kind: kind, message: "fact\nmissing"}
+        conflict :: kind == ExplainReportKind.Conflict
+        severity :: if conflict -> "error" else -> "warning"
+        why :: if conflict -> "two persisted Hangar facts disagree, so the explanation cannot claim one identity" else -> "a persisted Hangar fact needed by this explanation is unavailable or lossy"
+        fix :: if conflict -> "repair the conflicting Hangar or provider record, then run `jet explain` again" else -> "run `jetpack hangar verify` and repair or rebuild the affected package before relying on this fact"
+        assert_eq(StatusEnvelope.new("test", true).with_field("finding", finding.to_status_value()).json(), "{{\"schema\":\"jet.status/v1\",\"action\":\"test\",\"ok\":true,\"reports\":[],\"finding\":{{\"schema\":\"jet.report/v3\",\"moment\":\"tool\",\"severity\":\"{severity}\",\"code\":\"E1340\",\"what\":\"fact\\nmissing\",\"why\":\"{why}\",\"fix\":\"{fix}\",\"detail\":null,\"denial_kind\":null,\"call_chain\":[],\"scope_chain\":[],\"nearest_granting_scope\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"fix_edits\":[],\"cause\":[],\"clears\":0,\"kind\":\"{kind.label()}\"}}}}")
+    }
+}
+
+#Test("package explanation status preserves fact order and conflict ok decision") {
+    explanation := PackageExplain{schema: "unused", query: "pkg", lens: "all", entry: None, provider: None, graph: ExplainGraph.empty(), liveness: ExplainLiveness.empty(), rebuild: ExplainRebuild.empty(), reports: [ExplainReport]{}}
+    payload :: "\"query\":\"pkg\",\"lens\":\"all\",\"entry\":null,\"provider\":null,\"graph\":{{\"direct_dependencies\":[],\"dependencies\":[],\"direct_referrers\":[],\"referrers\":[],\"closure\":[]}},\"liveness\":{{\"live\":false,\"reason\":\"\",\"roots\":[]}},\"rebuild\":{{\"decision\":\"\",\"reason\":\"\",\"action_key\":\"\",\"cache_identity\":{{}},\"cache_admissions\":[],\"checks\":{{}},\"attempt\":null}}"
+    assert_eq(explanation.to_json(), "{{\"schema\":\"jet.status/v1\",\"action\":\"explain\",\"ok\":true,\"reports\":[],\"explain\":{{{payload},\"reports\":[]}}}}")
+    &explanation.reports.push(ExplainReport.conflict("disagree"))
+    assert(explanation.to_json().starts_with("{{\"schema\":\"jet.status/v1\",\"action\":\"explain\",\"ok\":false,\"reports\":[],\"explain\":"))
+}
+
+#Test("package why status preserves nested nulls and field order") {
+    why :: PackageWhy{query: "pkg", package: "pkg", available: false, requesting: WhyRequesting{env_file: WhyLocation.not_found(), lock_file: WhyLocation.not_found()}, origin: WhyOrigin{catalog: "", endpoint: "", cache_endpoint: "", signature_chain: "", source: "", source_digest: ""}, trust: WhyTrust{grade: "unknown", reason: ""}, disk: WhyDisk{bytes: None, objects: 0}, dependents: [String]{}, receipt: "not recorded"}
+    assert_eq(why.to_json(), "{{\"schema\":\"jet.status/v1\",\"action\":\"why\",\"ok\":true,\"reports\":[],\"why\":{{\"query\":\"pkg\",\"package\":\"pkg\",\"available\":false,\"requesting\":{{\"env_file\":{{\"path\":\"not found\",\"line\":null,\"text\":null}},\"lock_file\":{{\"path\":\"not found\",\"line\":null,\"text\":null}}}},\"origin\":{{\"catalog\":\"\",\"endpoint\":\"\",\"cache_endpoint\":\"\",\"signature_chain\":\"\",\"source\":\"\",\"source_digest\":\"\"}},\"trust\":{{\"grade\":\"unknown\",\"reason\":\"\"}},\"disk\":{{\"bytes\":null,\"objects\":0}},\"dependents\":[],\"receipt\":\"not recorded\"}}}}")
+}

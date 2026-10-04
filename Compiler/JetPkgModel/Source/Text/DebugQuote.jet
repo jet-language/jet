@@ -1,0 +1,55 @@
+use jet_foundation.[pkg_bytes_code, pkg_bytes_text]
+// Shared Rust Debug string spelling used by semantic facts and foreign identities.
+// A string in Rust debug spelling: quoted, with `"` and `\` escaped, tab,
+// CR, LF and NUL as short escapes, and other control scalars as `\u{hex}`.
+pub fn pkg_cbind_debug_quote(value: String) -> String Never! {
+    out := [String]{"\""}
+    raw :: value.bytes()
+    index := 0
+    loop index < raw.len() {
+        code :: Int.from_u8(raw[index])
+        // C1 controls U+0080..U+009F encode as 0xC2 0x80..0x9F.
+        second :: pkg_bytes_code(raw, index + 1)
+        if code == 0xC2 && second >= 0x80 && second <= 0x9F {
+            &out.push("\\u{{{pkg_cbind_lower_hex(second)}}}")
+            index += 2
+            next
+        }
+        width :: if {
+            code >= 0xF0 -> 4
+            code >= 0xE0 -> 3
+            code >= 0x80 -> 2
+            else -> 1
+        }
+        if code == {
+            34 -> &out.push("\\\"")
+            92 -> &out.push("\\\\")
+            9 -> &out.push("\\t")
+            10 -> &out.push("\\n")
+            13 -> &out.push("\\r")
+            0 -> &out.push("\\0")
+            else -> {
+                if code < 32 || code == 127 {
+                    &out.push("\\u{{{pkg_cbind_lower_hex(code)}}}")
+                } else {
+                    &out.push(pkg_bytes_text(raw, index, index + width))
+                }
+            }
+        }
+        index += width
+    }
+    &out.push("\"")
+    out.join("")
+}
+
+pub fn pkg_cbind_lower_hex(value: Int) -> String Never! {
+    digits :: "0123456789abcdef".bytes()
+    if value == 0 -> return "0"
+    out := ""
+    rest := value
+    loop rest > 0 {
+        out = "{pkg_bytes_text(digits, rest % 16, rest % 16 + 1)}{out}"
+        rest = rest /% 16
+    }
+    out
+}

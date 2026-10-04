@@ -1,6 +1,6 @@
-// jetpack::Store::Cache unit tests: credential labels, write-access wording,
-// remote endpoints never executing commands, retired Nix store endpoints,
-// malformed bindings, and a missing trust key failing closed.
+// jetpack::Store::Cache contracts: endpoint policy, ordered reports, signature
+// fingerprints, signed-byte validation precedence, and real Hangar copies.
+// Native Store closures keep their canonical Core/provider gates; no substitutes.
 
 fn store_cache_test_root(label: String) -> String Never! {
     files.tmpdir("jetpack-cache-{label}-") ?? panic("claim cache test root")
@@ -66,4 +66,194 @@ fn store_cache_test_root(label: String) -> String Never! {
         .Err(error) -> assert(error.message().contains("cache trust key"))
     }
     files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("cache binding status JSON preserves exact ordered public fields") {
+    binding :: CacheBinding{role: "public", mirrors: [String]{"file:///cache", "https://cache.example/é"}, trust_key: "/secret/key", credential_provider: None, allow_write: false}
+    object :: "{{\"role\":\"public\",\"mirrors\":[\"file:///cache\",\"https://cache.example/é\"],\"credential_provider\":null,\"write\":false}}"
+    assert_eq(store_cache_binding_json(binding), "{{\"schema\":\"jet.status/v1\",\"action\":\"cache-bind\",\"ok\":true,\"reports\":[],\"role\":\"public\",\"mirrors\":[\"file:///cache\",\"https://cache.example/é\"],\"credential_provider\":null,\"write\":false}}")
+    assert_eq(store_cache_bindings_json([CacheBinding]{binding}), "{{\"schema\":\"jet.status/v1\",\"action\":\"cache-list\",\"ok\":true,\"reports\":[],\"bindings\":[{object}]}}")
+    assert_eq(store_cache_bindings_json([CacheBinding]{}), "{{\"schema\":\"jet.status/v1\",\"action\":\"cache-list\",\"ok\":true,\"reports\":[],\"bindings\":[]}}")
+}
+
+#Test("cache transfer status JSON retains nullable receipt fields and operation order") {
+    report := CacheTransferReport{role: "public", mirror: "file:///cache", entry: "entry", output_hash: "output", nar_hash: "nar", signed_fingerprint: "fingerprint", builder: "builder", provenance: "source", witness: None, receipt_version: None, receipt_expires_unix: None, credential_provider: None, bytes: 12}
+    assert_eq(report.json("publish"), "{{\"schema\":\"jet.status/v1\",\"action\":\"publish\",\"ok\":true,\"reports\":[],\"operation\":\"publish\",\"role\":\"public\",\"mirror\":\"file:///cache\",\"entry\":\"entry\",\"output_hash\":\"output\",\"nar_hash\":\"nar\",\"signed_fingerprint\":\"fingerprint\",\"builder\":\"builder\",\"provenance\":\"source\",\"witness\":null,\"receipt_version\":null,\"receipt_expires_unix\":null,\"credential_provider\":null,\"bytes\":12}}")
+    report.witness = Val("signed\nreceipt")
+    report.receipt_version = Val(1)
+    report.receipt_expires_unix = Val(42)
+    report.credential_provider = Val("host-keychain")
+    assert_eq(report.json("substitute"), "{{\"schema\":\"jet.status/v1\",\"action\":\"substitute\",\"ok\":true,\"reports\":[],\"operation\":\"substitute\",\"role\":\"public\",\"mirror\":\"file:///cache\",\"entry\":\"entry\",\"output_hash\":\"output\",\"nar_hash\":\"nar\",\"signed_fingerprint\":\"fingerprint\",\"builder\":\"builder\",\"provenance\":\"source\",\"witness\":\"signed\\nreceipt\",\"receipt_version\":1,\"receipt_expires_unix\":42,\"credential_provider\":\"host-keychain\",\"bytes\":12}}")
+}
+
+#Test("cache stage status JSON retains field order") {
+    report :: CacheStageReport{role: "public", destination: "/cache", entries: 2, bytes: 12}
+    assert_eq(report.json("stage"), "{{\"schema\":\"jet.status/v1\",\"action\":\"stage\",\"ok\":true,\"reports\":[],\"operation\":\"stage\",\"role\":\"public\",\"destination\":\"/cache\",\"entries\":2,\"bytes\":12}}")
+}
+
+// Rust Cache.rs fingerprint_for_key: only public identity, never key bytes.
+#Test("cache key fingerprint retains exact public identity") {
+    key :: TrustKey.generate("cache-fingerprint")
+    assert_eq(store_cache_fingerprint_for_key(key), "{key.key_id}:{key.algorithm}")
+    assert(!store_cache_fingerprint_for_key(key).contains("cache-fingerprint"))
+}
+
+// Rust Cache.rs fingerprint_for_info preserves signature vector order, unlike
+// narinfo wire serialization (which sorts signatures by key).
+#Test("cache narinfo fingerprint retains signature order and empty list") {
+    info := NarInfo{store_path: "/jet/hangar/test", url: "nar/test.nar", compression: "none", file_size: 0, nar_size: 0, nar_hash: "", references: [String]{}, deriver: None, ca: None, signatures: [NarSignature]{}}
+    assert_eq(store_cache_fingerprint_for_info(info), "")
+    info.signatures = [NarSignature]{NarSignature{key_id: "z", algorithm: "second", sig_hex: "secret-z"}, NarSignature{key_id: "a", algorithm: "first", sig_hex: "secret-a"}}
+    assert_eq(store_cache_fingerprint_for_info(info), "z:second,a:first")
+}
+
+fn store_cache_test_info(nar: [U8]) -> NarInfo Never! {
+    NarInfo{store_path: "/jet/hangar/test", url: "nar/test.nar", compression: "none", file_size: nar.len(), nar_size: nar.len(), nar_hash: store_nar_digest(nar), references: [String]{}, deriver: None, ca: None, signatures: [NarSignature]{}}
+}
+
+fn store_cache_test_assert_transport_refused(info: NarInfo, nar: [U8]) Never! {
+    if store_cache_verify_artifact_bytes(info, nar) == {
+        .Ok(_) -> panic("signed transport mismatch must fail")
+        .Err(error) -> {
+            assert(error == .InvalidData(_))
+            assert_eq(error.message(), "NAR bytes do not match signed FileSize, NarSize, or NarHash")
+        }
+    }
+}
+
+// Rust verify_artifact_bytes and jetpack_engine malicious_nar (~507-528):
+// each signed-field disagreement precedes decoding, even on malformed bytes.
+#Test("cache artifact signed sizes and hash are checked before NAR decoding") {
+    nar :: "this is not a NAR".bytes()
+    file_size := store_cache_test_info(nar)
+    file_size.file_size += 1
+    store_cache_test_assert_transport_refused(file_size, nar)
+    nar_size := store_cache_test_info(nar)
+    nar_size.nar_size += 1
+    store_cache_test_assert_transport_refused(nar_size, nar)
+    hash := store_cache_test_info(nar)
+    hash.nar_hash = store_nar_digest("other bytes".bytes())
+    store_cache_test_assert_transport_refused(hash, nar)
+    expected :: if store_validate_nar(nar) == {
+        .Ok(_) -> panic("malformed bytes cannot be a NAR")
+        .Err(error) -> error
+    }
+    matching :: store_cache_test_info(nar)
+    if store_cache_verify_artifact_bytes(matching, nar) == {
+        .Ok(_) -> panic("matching signed fields do not excuse malformed NAR")
+        .Err(error) -> assert_eq(error.message(), expected.message())
+    }
+}
+
+#Test("cache artifact accepts real canonical NAR and rejects signed field drift") {
+    roots :: store_test_temp_roots()
+    source :: files.join(roots.root, "nar-source")
+    files.create_dir_all(source) ?? panic("source")
+    files.write(files.join(source, "payload"), "cache bytes\n") ?? panic("payload")
+    encoded :: store_write_nar(source) ?? panic("encode real NAR")
+    info := store_cache_test_info(encoded.bytes)
+    store_cache_verify_artifact_bytes(info, encoded.bytes) ?? panic("valid signed artifact")
+    info.file_size += 1
+    store_cache_test_assert_transport_refused(info, encoded.bytes)
+    store_test_drop_roots(roots)
+}
+
+#Test("cache non Hangar helpers return None without touching missing paths") {
+    verification := StoreVerification.new()
+    roots :: store_test_temp_roots()
+    entry := store_test_ingest_fixture(&verification, roots, "non-hangar", [String: String]{"out": "cache bytes\n"}, [String]{}).entry
+    entry.out = files.join(roots.root, "does-not-exist")
+    destination :: files.join(entry.out, "destination")
+    endpoints :: [CacheEndpoint]{CacheEndpoint.Local(files.join(roots.root, "missing-mirror")), CacheEndpoint.HTTP("https://cache.example")}
+    loop endpoint in endpoints {
+        assert_eq(store_cache_verify_hangar_endpoint(&verification, roots, endpoint, entry) ?? panic("non Hangar verify"), None)
+        assert_eq(store_cache_substitute_hangar_endpoint(&verification, roots, endpoint, entry, destination) ?? panic("non Hangar substitute"), None)
+    }
+    assert(!files.exists(entry.out))
+    store_test_drop_roots(roots)
+}
+
+// Rust verify_hangar_endpoint/substitute_hangar_endpoint and the real restored
+// payload/symlink assertions in jetpack_engine (~387-398).
+#Test("cache Hangar verifies actual NAR and copies seals and rehashes output") {
+    verification := StoreVerification.new()
+    roots :: store_test_temp_roots()
+    entry :: store_test_ingest_fixture(&verification, roots, "hangar-copy", [String: String]{"out": "cache bytes\n"}, [String]{}).entry
+    original :: store_write_nar(entry.out) ?? panic("original NAR")
+    verified :: store_cache_verify_hangar_endpoint(&verification, roots, CacheEndpoint.Hangar, entry) ?? panic("verify Hangar")
+    assert_eq(verified, Val(original.bytes))
+    destination :: files.join(roots.root, "nested/restored")
+    restored :: store_cache_substitute_hangar_endpoint(&verification, roots, CacheEndpoint.Hangar, entry, destination) ?? panic("substitute Hangar")
+    assert_eq(restored, Val(original.bytes))
+    assert_eq(files.read(files.join(destination, "payload")) ?? panic("restored payload"), "cache bytes\n")
+    assert_eq(pkg_try_output_hash_of(destination) ?? panic("destination identity"), entry.envelope.output_hash)
+    assert_eq((store_write_nar(destination) ?? panic("destination NAR")).bytes, original.bytes)
+    assert_eq((files.stat(destination) ?? panic("destination mode")).mode & 0o222, 0)
+    assert_eq((files.stat(files.join(destination, "payload")) ?? panic("payload mode")).mode & 0o222, 0)
+    store_test_drop_roots(roots)
+}
+
+#Test("cache Hangar source mismatch is exact and removes failed destination") {
+    verification := StoreVerification.new()
+    roots :: store_test_temp_roots()
+    entry := store_test_ingest_fixture(&verification, roots, "hangar-mismatch", [String: String]{"out": "cache bytes\n"}, [String]{}).entry
+    entry.envelope.output_hash = "wrong-output-identity"
+    if store_cache_verify_hangar_endpoint(&verification, roots, CacheEndpoint.Hangar, entry) == {
+        .Ok(_) -> panic("source identity mismatch must fail")
+        .Err(error) -> {
+            assert(error == .InvalidData(_))
+            assert_eq(error.message(), "local Hangar output hash disagrees with its identity")
+        }
+    }
+    destination :: files.join(roots.root, "partial")
+    files.create_dir_all(destination) ?? panic("partial copy")
+    files.write(files.join(destination, "partial"), "partial bytes") ?? panic("partial payload")
+    if store_cache_substitute_hangar_endpoint(&verification, roots, CacheEndpoint.Hangar, entry, destination) == {
+        .Ok(_) -> panic("source identity mismatch must fail substitution")
+        .Err(error) -> assert_eq(error.message(), "local Hangar output hash disagrees with its identity")
+    }
+    assert(!files.exists(destination))
+    // Removal itself fails with ENOTDIR; the source identity error still wins.
+    blocked :: files.join(roots.root, "not-a-directory")
+    files.write(blocked, "keep") ?? panic("blocked parent")
+    if store_cache_substitute_hangar_endpoint(&verification, roots, CacheEndpoint.Hangar, entry, files.join(blocked, "out")) == {
+        .Ok(_) -> panic("mismatch must fail even when cleanup fails")
+        .Err(error) -> assert_eq(error.message(), "local Hangar output hash disagrees with its identity")
+    }
+    assert_eq(files.read(blocked) ?? panic("untouched blocker"), "keep")
+    store_test_drop_roots(roots)
+}
+
+#Test("cache Hangar copy failure removes partial output and preserves source") {
+    verification := StoreVerification.new()
+    roots :: store_test_temp_roots()
+    entry :: store_test_ingest_fixture(&verification, roots, "hangar-copy-failure", [String: String]{"out": "cache bytes\n"}, [String]{}).entry
+    // A real file destination makes the directory copier fail after verification.
+    destination :: files.join(roots.root, "blocked-copy")
+    files.write(destination, "partial") ?? panic("blocked destination")
+    assert(store_cache_substitute_hangar_endpoint(&verification, roots, CacheEndpoint.Hangar, entry, destination) == .Err(_))
+    assert(!files.exists(destination))
+    assert_eq(files.read(files.join(entry.out, "payload")) ?? panic("source survives"), "cache bytes\n")
+    store_test_drop_roots(roots)
+}
+
+#Test("cache copy tree reuses snapshot hardlink and symlink preservation") {
+    if sys.family() == "windows" -> return
+    roots :: store_test_temp_roots()
+    source :: files.join(roots.root, "source")
+    files.create_dir_all(source) ?? panic("source")
+    first :: files.join(source, "payload")
+    files.write(first, "linked bytes") ?? panic("payload")
+    files.hard_link(first, files.join(source, "hardlink")) ?? panic("hardlink")
+    files.symlink("payload", files.join(source, "alias")) ?? panic("symlink")
+    files.set_mode(first, 0o755) ?? panic("executable payload")
+    destination :: files.join(roots.root, "nested/copy")
+    store_cache_copy_tree(source, destination) ?? panic("copy actual tree")
+    assert_eq(files.read_link(files.join(destination, "alias")) ?? panic("copied link"), "payload")
+    a :: files.stat(files.join(destination, "payload")) ?? panic("payload stat")
+    b :: files.stat(files.join(destination, "hardlink")) ?? panic("hardlink stat")
+    assert_eq(a.id, b.id)
+    assert_eq(a.mode & 0o777, 0o755)
+    assert_eq(files.read(files.join(destination, "hardlink")) ?? panic("copied bytes"), "linked bytes")
+    store_test_drop_roots(roots)
 }

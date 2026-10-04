@@ -1388,7 +1388,7 @@ fn lower_result_box(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 // Arithmetic.
 
 // Inline-integer test: a word is an inline Int when bits 63 and 62 agree,
-// i.e. when `value ^ (value << 1)` is non-negative. `values` are or-ed first.
+// i.e. when `value ~| (value << 1)` is non-negative. `values` are or-ed first.
 fn lower_inline_test(f: &LowerFunction, values: [LIRValueID]) -> LIRValueID Never! {
     one :: lower_const(&f, 1)
     combined := LIRValueID{value: -1}

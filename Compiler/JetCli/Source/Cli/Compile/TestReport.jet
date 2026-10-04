@@ -1,0 +1,265 @@
+// Rust Source/CmdCompile.rs:6338-6391,6460-6540,7031-7107,8280-8415.
+// Canonical test/status reports are selected without ever mixing human bytes
+// into machine stdout. Foundation owns evidence classification/publication.
+use core.encoding.[DataTree]
+use jet_foundation.[foundation_parse_protocol_json]
+
+pub struct JetCLIHarnessTestCase {
+    pub name: String
+    pub ok: Bool
+    pub expected_failure: Bool
+    pub skipped: Bool
+    pub message: String
+}
+pub struct JetCLITestOutput { pub stdout: String, pub stderr: String }
+
+// Rust harness_test_state (CmdCompile.rs:6383-6391), underlying assertion
+// state rather than the expected-failure-normalized harness pass bit.
+pub fn jet_cli_test_harness_state(test: JetCLIHarnessTestCase) -> Int Never! {
+    if test.skipped -> return 2
+    if test.ok == test.expected_failure -> return 1
+    0
+}
+
+// Rust parse_json: the shared protocol boundary owns the 1 MiB UTF-8 input
+// cap, depth 64 and frozen i64 range; Core remains the only JSON parser.
+fn jet_cli_test_report_parse(text: String) -> DataTree? Never! {
+    foundation_parse_protocol_json(text)
+}
+fn jet_cli_test_report_text(object: [String:DataTree], key: String) -> String? Never! {
+    if object.has_key(key) { if object[key] == .Text(text) -> return Val(~text) }
+    None
+}
+fn jet_cli_test_report_bool(object: [String:DataTree], key: String) -> Bool? Never! {
+    if object.has_key(key) { if object[key] == .Bool(value) -> return Val(value) }
+    None
+}
+
+// Rust is_canonical_test_value/report (CmdCompile.rs:7051-7058,8315-8322).
+pub fn jet_cli_test_is_canonical_test_value(value: DataTree) -> Bool Never! {
+    if value == .Object(object) {
+        schema :: jet_cli_test_report_text(object, "schema") ?? return false
+        if schema != "jet.test.v1" && schema != "jet-test-v1" -> return false
+        if object.has_key("tests") { if object["tests"] == .Array(_) -> return true }
+    }
+    false
+}
+// Rust is_canonical_status_value/report (CmdCompile.rs:7072-7080,8324-8332).
+pub fn jet_cli_test_is_canonical_status_value(value: DataTree) -> Bool Never! {
+    if value == .Object(object) {
+        wanted :: Val("jet.status/v1")
+        return jet_cli_test_report_text(object, "schema") == wanted
+    }
+    false
+}
+
+fn jet_cli_test_report_recognized(candidate: String, test: Bool) -> Bool Never! {
+    value :: jet_cli_test_report_parse(candidate) ?? return false
+    if test -> jet_cli_test_is_canonical_test_value(value) else -> jet_cli_test_is_canonical_status_value(value)
+}
+// Rust canonical_test_json/canonical_status_json (CmdCompile.rs:7031-7070).
+// Whole-document first; otherwise lines().rev(): the last recognized physical
+// line wins and earlier lines are never parsed.
+pub fn jet_cli_test_canonical_json(stdout: String, test: Bool) -> String? Never! {
+    whole :: ~stdout.trim()
+    if jet_cli_test_report_recognized(whole, test) -> return Val(whole)
+    lines :: jet_cli_test_report_lines(stdout)
+    index := lines.len()
+    loop index > 0 {
+        index -= 1
+        candidate :: ~lines[index].trim()
+        if jet_cli_test_report_recognized(candidate, test) -> return Val(candidate)
+    }
+    None
+}
+
+// Rust emit_test_capture (CmdCompile.rs:6338-6368), pure stream projection.
+pub fn jet_cli_test_capture_output(result: JetCLITestResultCache, policy: JetCLITestCapturePolicy, json: Bool) -> JetCLITestOutput Never! {
+    if json {
+        document := jet_cli_test_canonical_json(result.stdout, true)
+        if document == None -> document = jet_cli_test_canonical_json(result.stdout, false)
+        if document == .Val(text) -> return JetCLITestOutput{stdout: "{text}\n", stderr: ""}
+        return JetCLITestOutput{stdout: "", stderr: "{result.stdout}{result.stderr}"}
+    }
+    show :: policy == JetCLITestCapturePolicy.All || (!result.ok && policy == JetCLITestCapturePolicy.Failed)
+    if !show -> return JetCLITestOutput{stdout: "", stderr: ""}
+    JetCLITestOutput{stdout: ~result.stdout, stderr: ~result.stderr}
+}
+
+// Rust emit_doctest_result (CmdCompile.rs:7081-7107). The label is a
+// write_mode_status line (stderr, hidden by --quiet) before captured stderr;
+// --quiet still forwards the captured streams.
+pub fn jet_cli_test_doctest_output(label: String, result: JetCLITestResultCache, policy: JetCLITestCapturePolicy, mode: JetCLIOutputMode) -> JetCLITestOutput Never! {
+    if mode.json -> return JetCLITestOutput{stdout: "", stderr: ""}
+    output :: jet_cli_test_capture_output(result, policy, false)
+    show :: policy == JetCLITestCapturePolicy.All || (!result.ok && policy == JetCLITestCapturePolicy.Failed)
+    if !show || mode.quiet -> return output
+    JetCLITestOutput{stdout: ~output.stdout, stderr: "{label}: {if result.ok -> "pass" else -> "FAIL"}\n{output.stderr}"}
+}
+
+// Rust str::lines keeps a final bare CR and omits the final empty LF line.
+fn jet_cli_test_report_lines(text: String) -> [String] Never! {
+    bytes :: text.bytes()
+    lines := [String]{}
+    start := 0
+    loop at in 0..<bytes.len() {
+        if bytes[at] == (U8{10}) {
+            end :: if at > start && bytes[at - 1] == (U8{13}) -> at - 1 else -> at
+            &lines.push(String.from_bytes(bytes[start..<end]) ?? panic("ASCII LF boundary"))
+            start = at + 1
+        }
+    }
+    if start < bytes.len() -> &lines.push(String.from_bytes(bytes[start..<bytes.len()]) ?? panic("ASCII LF boundary"))
+    lines
+}
+
+// Rust harness_test_cases (CmdCompile.rs:6460-6539). JSON names/results have
+// strict types; plain output parses the last ': ' delimiter, not the first.
+pub fn jet_cli_test_harness_cases(stdout: String) -> [JetCLIHarnessTestCase]? JetCLITestError! {
+    if jet_cli_test_canonical_json(stdout, true) == .Val(document) {
+        root :: jet_cli_test_report_parse(document) ?? return Err(jet_cli_test_option_error("the test harness emitted an invalid canonical JSON report"))
+        if root == .Object(object) {
+            if object["tests"] == .Array(tests) {
+                cases := [JetCLIHarnessTestCase]{}
+                loop test in tests {
+                    if test == .Object(fields) {
+                        if !fields.has_key("name") -> return Err(jet_cli_test_option_error("the test harness report has an invalid name: missing key `name`"))
+                        name :: jet_cli_test_report_text(fields, "name") ?? return Err(jet_cli_test_option_error("the test harness report has an invalid name: expected a DataTree string"))
+                        if !fields.has_key("ok") -> return Err(jet_cli_test_option_error("test `{name}` has no result: missing key `ok`"))
+                        ok :: jet_cli_test_report_bool(fields, "ok") ?? return Err(jet_cli_test_option_error("test `{name}` has a non-boolean result"))
+                        expected := false
+                        skipped := false
+                        if fields.has_key("expectedFailure") -> expected = jet_cli_test_report_bool(fields, "expectedFailure") ?? return Err(jet_cli_test_option_error("test `{name}` has a non-boolean expectation"))
+                        if fields.has_key("skipped") -> skipped = jet_cli_test_report_bool(fields, "skipped") ?? return Err(jet_cli_test_option_error("test `{name}` has a non-boolean skip flag"))
+                        stderr :: jet_cli_test_report_text(fields, "stderr") ?? ""
+                        message :: if stderr == "" && !ok -> "test failed" else -> ~stderr
+                        &cases.push(JetCLIHarnessTestCase{name: name, ok: ok, expected_failure: expected, skipped: skipped, message: message})
+                    } else {
+                        return Err(jet_cli_test_option_error("the test harness report has an invalid name: missing key `name`"))
+                    }
+                }
+                return Ok(Val(cases))
+            }
+        }
+    }
+    cases := [JetCLIHarnessTestCase]{}
+    loop raw in jet_cli_test_report_lines(stdout) {
+        bytes :: raw.bytes()
+        delimiter := -1
+        // Main's tandem Rust ruling (6515-6521): this actual harness suffix
+        // contains ': ' itself, so select it before the generic last split.
+        unexpected_suffix :: ": UNEXPECTED-PASS (remove expected_fail: true)"
+        if raw.ends_with(unexpected_suffix) {
+            delimiter = bytes.len() - unexpected_suffix.bytes().len()
+        } else {
+            loop at in 0..<bytes.len() - 1 { if bytes[at] == (U8{58}) && bytes[at + 1] == (U8{32}) -> delimiter = at }
+        }
+        if delimiter < 0 -> next
+        name_raw :: String.from_bytes(bytes[0..<delimiter]) ?? panic("ASCII delimiter")
+        name :: ~name_raw.trim()
+        if name == "" -> next
+        status :: String.from_bytes(bytes[delimiter + 2..<bytes.len()]) ?? panic("ASCII delimiter")
+        ok := true
+        expected := false
+        skipped := false
+        if status == {
+            "pass" -> {}
+            "expected-fail" -> expected = true
+            "skip" -> skipped = true
+            "FAIL" -> ok = false
+            "UNEXPECTED-PASS (remove expected_fail: true)" -> {
+                ok = false
+                expected = true
+            }
+            else -> next
+        }
+        &cases.push(JetCLIHarnessTestCase{name: name, ok: ok, expected_failure: expected, skipped: skipped, message: if ok -> "" else -> ~status})
+    }
+    if cases.len() == 0 -> return Ok(None)
+    Ok(Val(cases))
+}
+
+// Rust append_status_report_failures / append_test_report_failures
+// (CmdCompile.rs:8334-8415), including precedence of ok > passed > status.
+fn jet_cli_test_append_failures(value: DataTree, test_report: Bool, names: &[String], seen: &[String:Bool]) Never! {
+    if value == .Object(object) {
+        if test_report {
+            if object["tests"] == .Array(tests) {
+                loop test in tests {
+                    if test == .Object(fields) {
+                        name :: jet_cli_test_report_text(fields, "name") ?? next
+                        failed := false
+                        if jet_cli_test_report_bool(fields, "ok") == {
+                            .Val(ok) -> failed = !ok
+                            .None -> {
+                                if jet_cli_test_report_bool(fields, "passed") == {
+                                    .Val(passed) -> failed = !passed
+                                    .None -> {
+                                        status :: jet_cli_test_ascii_lower(jet_cli_test_report_text(fields, "status") ?? "")
+                                        failed = status == "fail" || status == "failed" || status == "error" || status == "panic"
+                                    }
+                                }
+                            }
+                        }
+                        if failed && !seen.has_key(name) {
+                            seen[name] = true
+                            &names.push(name)
+                        }
+                    }
+                }
+            }
+        } else {
+            if object.has_key("evidence") {
+                if object["evidence"] == .Object(evidence) {
+                    if evidence.has_key("evidence") {
+                        if evidence["evidence"] == .Array(records) {
+                            loop record in records {
+                                if record == .Object(fields) {
+                                    name :: jet_cli_test_report_text(fields, "claim") ?? next
+                                    outcome :: jet_cli_test_report_text(fields, "outcome") ?? ""
+                                    failed :: outcome == "failed" || outcome == "error" || outcome == "unavailable"
+                                    if failed && !seen.has_key(name) {
+                                        seen[name] = true
+                                        &names.push(name)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Rust test_watch_failure_names (CmdCompile.rs:8280-8313). All structured
+// records across stdout then stderr precede any human fallback markers.
+pub fn jet_cli_test_watch_failure_names(stdout: String, stderr: String) -> [String] Never! {
+    seen := [String:Bool]{}
+    names := [String]{}
+    streams :: [String]{stdout, stderr}
+    loop stream in streams {
+        loop line in stream.split("\n") {
+            value :: jet_cli_test_report_parse(~line.trim()) ?? next
+            if jet_cli_test_is_canonical_test_value(value) -> jet_cli_test_append_failures(value, true, &names, &seen)
+            if jet_cli_test_is_canonical_status_value(value) -> jet_cli_test_append_failures(value, false, &names, &seen)
+        }
+    }
+    loop stream in streams {
+        loop line in stream.split("\n") {
+            trimmed :: ~line.trim()
+            candidate := ""
+            if {
+                trimmed.starts_with("FAIL ") -> candidate = trimmed.slice(5..<trimmed.len())
+                trimmed.ends_with(": FAIL") -> candidate = trimmed.slice(0..<trimmed.len() - 6)
+                else -> {}
+            }
+            name :: ~candidate.trim()
+            if name != "" && !seen.has_key(name) {
+                seen[name] = true
+                &names.push(name)
+            }
+        }
+    }
+    names
+}

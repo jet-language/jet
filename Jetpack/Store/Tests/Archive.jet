@@ -54,7 +54,7 @@ fn store_archive_test_cleanup(root: String) Never! {
     root :: store_archive_test_root("generated-key")
     roots :: HangarRoots.at(root)
     key :: store_archive_signing_key(roots, None, true) ?? panic("generate signer key")
-    path :: files.join(files.join(root, "trust"), @STORE_ARCHIVE_KEY)
+    path :: files.join(files.join(root, "trust"), STORE_ARCHIVE_KEY)
     info :: files.stat(path) ?? panic("stat signer key")
     assert_eq(info.mode & 0o7777, 0o600)
     assert_eq(key.secret.len(), 32)
@@ -125,4 +125,146 @@ fn store_archive_test_cleanup(root: String) Never! {
         .Err(error) -> assert(error.message().contains("must not carry a client signature"))
     }
     store_archive_test_cleanup(root)
+}
+
+#Test("hangar archive status JSON retains bytes objects root signed order") {
+    report :: HangarArchiveReport{objects: 2, bytes: 12, signed: true, root: "sha256-é"}
+    assert_eq(report.json("export"), "{{\"schema\":\"jet.status/v1\",\"action\":\"export\",\"ok\":true,\"reports\":[],\"bytes\":12,\"objects\":2,\"root\":\"sha256-é\",\"signed\":true}}")
+}
+
+// Rust Archive::map_member_path: empty members precede source validation,
+// component prefixes (not string prefixes) determine containment.
+#Test("hangar archive member remapping preserves identity and refuses escapes") {
+    assert_eq(store_archive_map_member_path("", "", "/local") ?? panic("empty member"), "")
+    assert_eq(store_archive_map_member_path("/old/out", "/old/out/bin/tool", "/local") ?? panic("bin"), "/local/bin/tool")
+    assert_eq(store_archive_map_member_path("/old/out", "/old/out/lib/tool.rlib", "/local") ?? panic("rlib"), "/local/lib/tool.rlib")
+    assert_eq(store_archive_map_member_path("/old/out", "/old/out", "/local") ?? panic("root member"), "/local/")
+    assert_eq(store_archive_map_member_path("/old//out", "/old/out/./bin/tool", "/local") ?? panic("components"), "/local/bin/tool")
+    unsafe_sources :: [String]{"", "/old/../out"}
+    loop source in unsafe_sources {
+        if store_archive_map_member_path(source, "/old/out/bin/tool", "/local") == {
+            .Ok(_) -> panic("unsafe primary output must fail")
+            .Err(error) -> assert_eq(error.message(), "archive package metadata has an unsafe primary output path")
+        }
+    }
+    unsafe_members :: [String]{"/old/outside/tool", "/elsewhere/tool", "/old/out/../tool"}
+    loop member in unsafe_members {
+        if store_archive_map_member_path("/old/out", member, "/local") == {
+            .Ok(_) -> panic("member escape must fail")
+            .Err(error) -> assert_eq(error.message(), "archive package metadata points outside its primary output")
+        }
+    }
+}
+
+// Real metadata fixture, matching Rust portable_entry and the rekeying
+// assertions in jetpack_hangar_store_v2::hangar_export_import_rekeys_...
+#Test("hangar archive portable entry rekeys metadata and refuses forged identity") {
+    verification := StoreVerification.new()
+    roots :: store_test_temp_roots()
+    source :: store_test_ingest_fixture(&verification, roots, "portable", [String: String]{"out": "portable bytes\n"}, [String]{}).entry
+    meta := pkg_parse_meta(source.meta_json()) ?? panic("parse admitted metadata")
+    meta.bin = "{source.out}/bin/tool"
+    meta.rlib = "{source.out}/lib/tool.rlib"
+    destination :: HangarRoots.at(files.join(roots.root, "destination"))
+    object :: HangarArchiveObject{id: source.id, digest: source.envelope.output_hash, meta: source.meta_json(), root_mode: 0, nodes: [HangarArchiveNode]{}}
+    entry :: store_archive_portable_entry(destination, object, meta) ?? panic("portable entry")
+    assert_eq(entry.out, files.join(files.join(destination.hangar_dir(), "objects"), object.digest))
+    assert_eq(entry.id, store_entry_id(source.name, source.version, source.reference, entry.out))
+    assert(entry.id != source.id)
+    assert_eq(entry.bin, "{entry.out}/bin/tool")
+    assert_eq(entry.rlib, "{entry.out}/lib/tool.rlib")
+    assert_eq(entry.envelope, source.envelope)
+    assert_eq(entry.cache_identity, source.cache_identity)
+    assert_eq(entry.references, source.references)
+    assert_eq(entry.named_outputs, source.named_outputs)
+    assert_eq(entry.producer_record, source.producer_record)
+    assert_eq(entry.receipt, source.receipt)
+    assert_eq(entry.realized_at, source.realized_at)
+    assert_eq(entry.last_used_at, source.last_used_at)
+    forged :: HangarArchiveObject{id: "forged-identity", digest: object.digest, meta: object.meta, root_mode: 0, nodes: object.nodes}
+    if store_archive_portable_entry(destination, forged, meta) == {
+        .Ok(_) -> panic("forged identity must fail")
+        .Err(error) -> assert_eq(error.message(), "archive package record `forged-identity` does not match its metadata identity")
+    }
+    meta.bin = "{source.out}/../outside"
+    assert(store_archive_portable_entry(destination, object, meta) == .Err(_))
+    store_test_drop_roots(roots)
+}
+
+// Preserve Rust's native rekey/idempotence/corruption assertions; the same
+// invocation owner also observes the destination seal and closure proofs.
+#Test("hangar archive import publishes idempotently with shared verification and rejects corruption") {
+    verification := StoreVerification.new()
+    store_arm_command_memo(&verification)
+    roots :: store_test_temp_roots()
+    source :: store_test_ingest_fixture(&verification, roots, "portable-import", [String: String]{"out": "portable bytes\n"}, [String]{}).entry
+    exported :: store_export_archive(&verification, roots, source.id, true, None) ?? panic("export")
+    key :: Val(files.join(files.join(roots.root, "trust"), STORE_ARCHIVE_KEY))
+    destination :: HangarRoots.at(files.join(roots.root, "destination"))
+    report :: store_import_archive(&verification, destination, exported.bytes, key, false) ?? panic("import")
+    entry :: store_find_by_reference(&verification, destination, source.reference) ?? panic("imported entry")
+    assert_eq(report.root, entry.id)
+    assert_eq(entry.envelope.output_hash, source.envelope.output_hash)
+    assert_eq(entry.id, store_entry_id(entry.name, entry.version, entry.reference, entry.out))
+    assert(entry.id != source.id)
+    assert_eq(files.read(files.join(entry.out, "payload")) ?? panic("payload"), "portable bytes\n")
+    assert_eq(store_seal_memo_get(&verification, entry.out), Val(entry.envelope.output_hash))
+    store_verify_hangar_object(&verification, destination, entry) ?? panic("verify imported object")
+    graph :: store_closure_graph(&verification, destination) ?? panic("graph")
+    assert_eq(graph.records[entry.id].primary, entry.envelope.output_hash)
+    assert(entry.receipt != "")
+    assert(files.is_file(files.join(files.join(destination.hangar_dir(), "receipts"), entry.receipt)))
+    repeated :: store_import_archive(&verification, destination, exported.bytes, key, false) ?? panic("repeat import")
+    assert_eq(repeated, report)
+    assert_eq((store_list_checked(&verification, destination) ?? panic("listing")).len(), 1)
+    corrupted := ~exported.bytes
+    last :: corrupted.len() - 1
+    corrupted[last] = corrupted[last] ^ U8{1}
+    assert(store_import_archive(&verification, destination, corrupted, key, false) == .Err(_))
+    after :: store_find_by_reference(&verification, destination, source.reference) ?? panic("still published")
+    assert_eq(after.id, entry.id)
+    assert_eq(after.envelope.output_hash, entry.envelope.output_hash)
+    assert_eq(files.read(files.join(after.out, "payload")) ?? panic("unchanged payload"), "portable bytes\n")
+    store_test_drop_roots(roots)
+}
+
+// Exercise the real import transaction past object publication. As in Rust
+// import_archive_unlocked_with_policy, a late registration refusal must move
+// every object back, remove its seal/proof from the SAME owner, and clean the
+// stage. The duplicate batch deliberately calls the internal transaction:
+// the public wire decoder correctly refuses duplicate records earlier.
+#Test("hangar archive late registration refusal rolls back publication and shared seals") {
+    verification := StoreVerification.new()
+    store_arm_command_memo(&verification)
+    roots :: store_test_temp_roots()
+    dependency :: store_test_ingest_fixture(&verification, roots, "rollback-dependency", [String: String]{"out": "dependency\n"}, [String]{}).entry
+    source :: store_test_ingest_fixture(&verification, roots, "rollback-root", [String: String]{"out": "root\n"}, [String]{dependency.envelope.output_hash}).entry
+    bytes :: store_export_unsigned_archive(&verification, roots, source.id, true) ?? panic("export closure")
+    archive := HangarArchive.decode(bytes) ?? panic("decode closure")
+    duplicate := HangarArchiveObject?{None}
+    loop object in archive.objects {
+        if object.id == source.id && object.meta != "" {
+            duplicate = Val(object)
+            break
+        }
+    }
+    &archive.objects.push(duplicate ?? panic("root package record"))
+    destination :: HangarRoots.at(files.join(roots.root, "rollback"))
+    if store_archive_import_unlocked(&verification, destination, archive, false) == {
+        .Ok(_) -> panic("duplicate registration must refuse")
+        .Err(error) -> assert(error.message().contains("closure batch contains duplicate record"))
+    }
+    digests :: [String]{dependency.envelope.output_hash, source.envelope.output_hash}
+    loop digest in digests {
+        path :: files.join(files.join(destination.hangar_dir(), "objects"), digest)
+        assert(!files.exists(path))
+        assert(!files.exists(files.join(files.join(destination.hangar_dir(), STORE_SEALS_DIR), digest)))
+        assert_eq(store_seal_memo_get(&verification, path), None)
+        assert(!store_proven_member_contains(&verification, store_proven_member_key(destination.hangar_dir(), digest)))
+    }
+    assert_eq((files.list_dir(files.join(destination.hangar_dir(), STORE_ARCHIVE_STAGE)) ?? panic("stages")).len(), 0)
+    assert_eq((store_list_unlocked(destination) ?? panic("records")).len(), 0)
+    store_verify_hangar_object(&verification, roots, source) ?? panic("source remains verified")
+    assert_eq(files.read(files.join(source.out, "payload")) ?? panic("source payload"), "root\n")
+    store_test_drop_roots(roots)
 }

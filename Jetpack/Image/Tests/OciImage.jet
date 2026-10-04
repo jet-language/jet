@@ -10,8 +10,8 @@ fn image_test_dir(prefix: String) -> String {
     files.tmpdir(prefix) ?? panic("claim temp dir")
 }
 
-fn image_test_spec(layer_files: [LayerFile]) -> OciBuildSpec {
-    OciBuildSpec{
+fn image_test_spec(layer_files: [LayerFile]) -> OCIBuildSpec {
+    OCIBuildSpec{
         files: layer_files,
         platform: "linux.x64",
         entrypoint: [String]{"/usr/local/bin/app"},
@@ -29,7 +29,7 @@ fn image_test_tar(layer_files: [LayerFile]) -> [U8] {
     tar
 }
 
-fn image_test_build(spec: OciBuildSpec, prefix: String) -> OciBuiltImage {
+fn image_test_build(spec: OCIBuildSpec, prefix: String) -> OCIBuiltImage {
     dir :: files.join(image_test_dir(prefix), "layout")
     image_build(spec, dir, "myimage") ?? panic("build image")
 }
@@ -98,11 +98,11 @@ fn image_test_build(spec: OciBuildSpec, prefix: String) -> OciBuiltImage {
     root :: image_test_dir("jet-oci-test-base-")
     base_dir :: files.join(root, "base-arm64")
     output_dir :: files.join(root, "mismatch")
-    base := OciBuildSpec.defaults()
+    base := OCIBuildSpec.defaults()
     base.files = [LayerFile]{image_test_bin("bin/sh", "base")}
     base.platform = "linux.arm64"
     _ :: image_build(base, base_dir, "base") ?? panic("build base")
-    image := OciBuildSpec.defaults()
+    image := OCIBuildSpec.defaults()
     image.files = [LayerFile]{image_test_bin("bin/app", "image")}
     image.platform = "linux.x64"
     if image_build_with_base(image, output_dir, "image", Val(base_dir)) == {

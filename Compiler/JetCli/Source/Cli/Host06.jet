@@ -1,0 +1,637 @@
+use jet.AST.[ProgramBundle, LoadedModule, Stmt, Expr, Func, Item]
+use jet.Diagnostics.[Span, Diagnostic, Severity]
+use jet.Syntax as Syntax
+use jet.Loader as Loader
+use jet.Package as Package
+use jet.Manifest as Manifest
+use jet.Formatter as Formatter
+use jet.Sema as Sema
+use jet.Doctest as Doctest
+use jet_devserver.[WatchSession, WatchService, WATCH_POLL_INTERVAL_MS]
+use jet.ProveReplay as ProveReplay
+use jet.EngineDispatch as EngineDispatch
+use jetpack.EnvHook as EnvHook
+use jet_env_model.ModuleEval as ModuleEval
+use jet_foundation.Evidence as Evidence
+use std.fs as fs
+use std.io as io
+use std.env as env
+use std.process.[Command, Stdio]
+use std.time.[Duration, SystemTime, UNIX_EPOCH]
+use std.thread as thread
+use std.collections.[BTreeSet]
+// GATE #4494: native filesystem, watch input, child execution, durable staging seams.
+
+// Rust: Source/CmdCompile.rs:8590
+fn run_test_watch(path: String, opts: TestRunOpts, mode: OutputMode) -> Never {
+    target :: OSPath.from_text(path)
+    watch := WatchSession.open(target) ?? {
+        write_mode_diagnostic(mode, jet.render_all_colored(path, "", [err], mode.color_stderr()))
+        exit(ExitCodes.USER_ERROR)
+    }
+    files := [OSPath]{}
+    if target.is_dir() -> collect_source_files_recursive(target, Syntax.FILE_EXT, &files)
+    else -> &files.push(target)
+    loop file in files -> watch.graph_mut().upsert(file, WatchService.RootKind.BuildInput)
+    watch.graph_mut().scan_runtime_inputs()
+    manifest_search :: if target.is_dir() -> target else -> target.parent() ?? OSPath.from_text(".")
+    if Loader.find_manifest_root(manifest_search) == { .Val(root) -> watch.graph_mut().upsert(root.join(Syntax.PACKAGE_FILE), WatchService.RootKind.Manifest), .None -> {} }
+    watch_record :: opts.record.map(fn(name) {
+        record_path :: if target.is_dir() -> jet.find_project_entry(target) else -> target
+        profile :: opts.profile ?? (if opts.release || opts.measure -> Syntax.BUILD_PROFILE_RELEASE else -> "dev")
+        ProveReplay.begin_named_capture(record_path.to_string_lossy(), name, profile, opts.setting_overrides, mode.json).unwrap_or_else(fn(status) { exit(status) })
+    })
+    if !mode.json && !mode.quiet {
+        cache_mode :: if opts.fresh -> "fresh" else -> "cached"
+        write_mode_status(mode, "jet test --watch ({cache_mode} results): r rerun failed, a run all, o cycle output, q quit\n")
+    }
+    input :: spawn_test_watch_input()
+    output := opts.capture
+    (last_status, failed) := run_test_watch_selection(path, opts, output, None, mode)
+    last_good := last_status == ExitCodes.OK
+    if !last_good && !mode.json && !mode.quiet -> write_mode_status(mode, "jet test: failure; last-good build artifact retained\n")
+    loop {
+        action := U8?{None}
+        loop {
+            byte :: input.try_recv() ?? break
+            action = Val(byte.to_ascii_lowercase())
+        }
+        if action == {
+            .Val(113) | .Val(3) -> {
+                if watch_record == { .Val(capture) -> ProveReplay.finish_named_capture(capture, last_status, mode.json) ?? exit(err), .None -> {} }
+                exit(last_status)
+            }
+            .Val(114) -> {
+                if failed.is_empty() {
+                    if !mode.json && !mode.quiet -> write_mode_status(mode, "jet test: no failed tests to rerun\n")
+                } else {
+                    (status, current_failures) :: run_test_watch_selection(path, opts, output, Val(failed), mode)
+                    last_status = status
+                    failed = current_failures
+                    if status == ExitCodes.OK -> last_good = true
+                    else if last_good && !mode.json && !mode.quiet -> write_mode_status(mode, "jet test: failure; last-good build artifact retained\n")
+                }
+            }
+            .Val(97) -> {
+                (status, current_failures) :: run_test_watch_selection(path, opts, output, None, mode)
+                last_status = status
+                failed = current_failures
+                if status == ExitCodes.OK -> last_good = true
+                else if last_good && !mode.json && !mode.quiet -> write_mode_status(mode, "jet test: failure; last-good build artifact retained\n")
+            }
+            .Val(111) -> {
+                output = if output == { .Failed -> .All, .All -> .None, .None -> .Failed }
+                if !mode.json && !mode.quiet -> write_mode_status(mode, "jet test: output {output.as_str()}\n")
+            }
+            else -> {}
+        }
+        if watch.poll() == {
+            .Val(receipt) -> {
+                _ :: watch.acknowledge(receipt)
+                selection :: if failed.is_empty() -> None else -> Val(failed)
+                (status, current_failures) :: run_test_watch_selection(path, opts, output, selection, mode)
+                last_status = status
+                failed = current_failures
+                if status == ExitCodes.OK -> last_good = true
+                else if last_good && !mode.json && !mode.quiet -> write_mode_status(mode, "jet test: failure; last-good build artifact retained\n")
+            }
+            .None -> {}
+        }
+        thread.sleep(Duration.from_millis(WATCH_POLL_INTERVAL_MS.max(25)))
+    }
+}
+// Rust: Source/CmdCompile.rs:8771
+fn run_doctests(path: OSPath, shown: String, src: String, update_snapshots: Bool, profile: &BuildProfile, setting_overrides: [String:String], capture: TestCapturePolicy, mode: OutputMode) -> Bool {
+    blocks :: Doctest.discover(src)
+    if blocks.is_empty() -> return true
+    project_root :: jet.build_project_root(shown) ?? { report_problems(mode, shown, src, err); return false }
+    all_ok := true
+    rewritten := src
+    did_rewrite := false
+    loop n in 0..<blocks.len() {
+        block :: blocks[n]
+        label :: "doctest at {shown}:{block.fence_line}"
+        program :: Doctest.synth_program(block)
+        build_root :: project_root.join(".jet").join("build")
+        _ :: fs.create_dir_all(build_root)
+        tmp :: build_root.join("{stem(shown)}__doctest_{n}.{std.process.id()}.jet")
+        if fs.write(tmp, program).is_err() {
+            emit_doctest_result(label, false, "", "", capture, mode)
+            cli_error("E2105", "couldn't stage doctest from `{shown}`")
+            all_ok = false
+            write_doctest_proof_record(label, shown, block.fence_line, false, "producer_start_failed")
+            continue
+        }
+        tmp_shown :: tmp.to_string_lossy()
+        compiled :: jet.compile_with_target_and_gates_and_profile_and_settings(program, tmp_shown, jet.Policy.GateSet.default(), None, profile.budget_name(), setting_overrides)
+        (rust_code, ffi_link) :: if compiled == {
+            .Ok(out) -> (out.rust, out.ffi)
+            .Err(diags) -> {
+                emit_doctest_result(label, false, "", "", capture, mode)
+                report_problems(mode, tmp_shown, program, diags)
+                all_ok = false
+                write_doctest_proof_record(label, shown, block.fence_line, false, "does not compile")
+                _ :: fs.remove_file(tmp)
+                continue
+            }
+        }
+        bin :: tmp.with_extension("")
+        generated_rs :: build_root.join("{stem(tmp_shown)}.rs")
+        build(tmp_shown, rust_code, None, bin, profile, ffi_link, [], false, None, None, None, mode, false, None)
+        command := Command.new(bin)
+        &command.env("JET_TEST_CAPTURE", capture.as_str())
+        if mode.json -> &command.env("JET_TEST_JSON", "1")
+        out :: command.output() ?? {
+            emit_doctest_result(label, false, "", "", capture, mode)
+            cli_error("E2105", "couldn't run {label}: {err}")
+            all_ok = false
+            write_doctest_proof_record(label, shown, block.fence_line, false, "producer_start_failed")
+            _ :: fs.remove_file(tmp)
+            _ :: fs.remove_file(bin)
+            _ :: fs.remove_file(generated_rs)
+            continue
+        }
+        _ :: fs.remove_file(tmp)
+        _ :: fs.remove_file(bin)
+        _ :: fs.remove_file(generated_rs)
+        stdout :: String.from_utf8_lossy(out.stdout)
+        stderr :: String.from_utf8_lossy(out.stderr)
+        if !out.status.success() {
+            emit_doctest_result(label, false, stdout, stderr, capture, mode)
+            all_ok = false
+            write_doctest_proof_record(label, shown, block.fence_line, false, "runtime error")
+            continue
+        }
+        produced :: stdout.lines().to_list()
+        block_ok := true
+        loop i in 0..<block.expects.len() {
+            e :: block.expects[i]
+            actual :: produced.get(i) ?? ""
+            if actual == e.expected -> continue
+            if update_snapshots && jet_cli_test_rewrite_doctest_expect(&rewritten, e.line, actual) { did_rewrite = true; continue }
+            block_ok = false
+            all_ok = false
+            span :: jet_cli_test_doc_line_span(src, e.line)
+            diag :: Doctest.mismatch_diag(shown, e, actual, span)
+            report_problems(mode, shown, src, [diag])
+        }
+        emit_doctest_result(label, block_ok, stdout, stderr, capture, mode)
+        write_doctest_proof_record(label, shown, block.fence_line, block_ok, if block_ok -> "" else -> "output mismatch")
+    }
+    if did_rewrite {
+        fs.write(path, rewritten) ?? { cli_error("E2105", "couldn't update doctest snapshots in `{shown}`: {err}"); return false }
+    }
+    all_ok
+}
+// Rust: Source/CmdCompile.rs:8950
+fn write_doctest_proof_record(name: String, file: String, line: Int, passed: Bool, message: String) {
+    path :: env.var(Evidence.EVIDENCE_REPORT_ENV) ?? return
+    _ :: Evidence.write_record_from_codes(OSPath.from_text(path), 4, if passed -> 0 else -> 1, name, message, file, line as U32)
+}
+// Rust: Source/CmdCompile.rs:8967
+// Canonical exact implementation: Compile/TestSnapshots.jet:8 jet_cli_test_rewrite_doctest_expect.
+// Rust: Source/CmdCompile.rs:9020
+// Canonical scanner used by Compile/TestSnapshots.jet:25: jet_cli_doctest_find_expect_marker.
+// Rust: Source/CmdCompile.rs:9039
+// Canonical exact span: Compile/TestSnapshots.jet:50 jet_cli_test_doc_line_span.
+// Rust: Source/CmdCompile.rs:9053
+// Canonical row: Compile/TestCoverage.jet:6 JetCLITestCoverageBranch.
+// Rust: Source/CmdCompile.rs:9060
+fn report_coverage(file: String, cov_out: OSPath, mode: OutputMode, profile: String, setting_overrides: [String:String]) {
+    observations :: jet_cli_test_coverage_parse(fs.read_to_string(cov_out).unwrap_or_default())
+    _ :: fs.remove_file(cov_out)
+    funcs :: jet.coverable_functions(file, profile, setting_overrides)
+    functions :: funcs.iter().map(fn(pair) { JetCLITestCoverableFunction{name: pair.0, line: pair.1} }).to_list()
+    if mode.json {
+        payload :: jet_cli_test_coverage_tree(file, functions, observations)
+        write_mode_machine(mode, "{render_status("coverage", true, StatusFields.new().with("coverage", payload))}\n")
+        return
+    }
+    write_mode_renderable(mode, jet_cli_test_coverage_human(file, functions, observations))
+}
+// Rust: Source/CmdCompile.rs:9229
+IGNORED_DIRS :: ["vendor", "target", "build", ".git", "node_modules", ".jet"]
+// Rust: Source/CmdCompile.rs:9234
+// Canonical exact predicate: Compile/Format.jet:304 jet_cli_format_skip_walk_path.
+// Rust: Source/CmdCompile.rs:9279
+fn walk_jet_files(dir: OSPath, out: &[OSPath]) {
+    entries :: fs.read_dir(dir) ?? return
+    entries := entries.flatten().to_list()
+    &entries.sort_by_key(fn(entry) { entry.path() })
+    loop entry in entries {
+        path :: entry.path()
+        if path.is_dir() {
+            name :: path.file_name().and_then(fn(name) { name.to_str() }) ?? ""
+            if !IGNORED_DIRS.contains(name) && !jet_cli_format_skip_walk_path(path.to_string_lossy()) -> walk_jet_files(path, &out)
+        } else if path.extension().and_then(fn(e) { e.to_str() }) == Val(Syntax.FILE_EXT) && path.file_name().and_then(fn(name) { name.to_str() }) != Val(Syntax.PAYLOAD_FILE) && !jet_cli_format_skip_walk_path(path.to_string_lossy()) -> &out.push(path)
+    }
+}
+// Rust: Source/CmdCompile.rs:9303
+fn discover_project_files() -> [OSPath] {
+    cwd :: env.current_dir().unwrap_or_else(fn(_) { OSPath.from_text(".") })
+    root :: Loader.find_manifest_root(cwd) ?? cwd
+    files := [OSPath]{}
+    walk_jet_files(root, &files)
+    ^files
+}
+// Rust: Source/CmdCompile.rs:9316
+fn collect_explicit_files(paths: [String]) -> [OSPath] {
+    files := [OSPath]{}
+    loop raw in paths {
+        p :: OSPath.from_text(raw)
+        if p.is_dir() -> walk_jet_files(p, &files) else -> &files.push(p)
+    }
+    &files.sort()
+    &files.dedup()
+    ^files
+}
+// Rust: Source/CmdCompile.rs:9333
+fn collect_changed_files() -> [OSPath] {
+    is_git :: Command.new("git").args(["rev-parse", "--is-inside-work-tree"]).stdout(Stdio.null()).stderr(Stdio.null()).status().map(fn(s) { s.success() }).unwrap_or(false)
+    if !is_git {
+        cli_error_full("E2104", "`--changed` requires a git repository", "`jet fmt --changed` uses git to find modified .jet files", "run from inside a git repository, or format specific files with `jet fmt <path>`")
+        exit(ExitCodes.USAGE)
+    }
+    ext :: Syntax.FILE_EXT
+    cwd :: env.current_dir().unwrap_or_else(fn(_) { OSPath.from_text(".") })
+    seen := BTreeSet.new()
+    loop git_args in [["diff", "--name-only", "HEAD"], ["diff", "--name-only", "--cached"]] {
+        if Command.new("git").args(git_args).output() == {
+            .Ok(out) -> {
+                if out.status.success() {
+                    loop line in String.from_utf8_lossy(out.stdout).lines() {
+                        if line.ends_with(".{ext}") { p :: cwd.join(line); if p.is_file() -> _ :: seen.insert(p) }
+                    }
+                }
+            }
+            .Err(_) -> {}
+        }
+    }
+    seen.to_list()
+}
+// Rust: Source/CmdCompile.rs:9376
+fn fmt_json_ok() -> String { render_status("fmt", true, StatusFields.new().with("fmt", StatusValue.object(StatusFields.new().with("status", "ok")))) }
+// Rust: Source/CmdCompile.rs:9388
+fn fmt_json_dirty_paths(paths: [String]) -> String {
+    files :: StatusValue.array(paths.iter().map(fn(path) { StatusValue.from(path) }))
+    render_status("fmt", false, StatusFields.new().with("fmt", StatusValue.object(StatusFields.new().with("status", "dirty").with("files", files))))
+}
+// Rust: Source/CmdCompile.rs:9409
+fn fmt_json_dirty_diffs(entries: [(String, String)]) -> String {
+    files :: StatusValue.array(entries.iter().map(fn(pair) { StatusValue.object(StatusFields.new().with("path", pair.0).with("diff", pair.1)) }))
+    render_status("fmt", false, StatusFields.new().with("fmt", StatusValue.object(StatusFields.new().with("status", "dirty").with("files", files))))
+}
+// Rust: Source/CmdCompile.rs:9433
+fn run_fmt_stdin(stdin_path: String?, explicit_copies: Bool, simplify: Bool, mode: OutputMode) {
+    src := ""
+    io.stdin().read_to_string(&src) ?? { cli_error("E2105", "failed to read from stdin"); exit(ExitCodes.USAGE) }
+    label :: stdin_path ?? "<stdin>"
+    (_, retired_target_count) :: rewrite_retired_package_targets(src, label)
+    retired_selector_count :: Formatter.retired_interpolation_selector_edits(src).len()
+    retired_print_count :: Formatter.retired_print_family_edits(src).len()
+    retired_type_count :: Formatter.retired_type_edits(src).len()
+    if format_source_for_fmt(src, label, explicit_copies, simplify) == {
+        .Ok(formatted) -> {
+            write_mode_renderable(mode, formatted)
+            if retired_target_count > 0 {
+                suffix :: if retired_target_count == 1 -> "" else -> "s"
+                write_mode_status(mode, "{label}: rewrote {retired_target_count} retired target spelling{suffix} from `plugin` to `sandbox` (D-ONCE-SANDBOX1=A)\n")
+            }
+            if retired_selector_count > 0 {
+                suffix :: if retired_selector_count == 1 -> "" else -> "s"
+                write_mode_status(mode, "{label}: rewrote {retired_selector_count} retired interpolation selector{suffix} from `#` to `:` (D-ONCE-HASH1)\n")
+            }
+            if retired_print_count > 0 {
+                suffix :: if retired_print_count == 1 -> "" else -> "s"
+                write_mode_status(mode, "{label}: rewrote {retired_print_count} retired print-family spelling{suffix} (D-ONCE-PRINT1=A)\n")
+            }
+            if retired_type_count > 0 {
+                suffix :: if retired_type_count == 1 -> "" else -> "s"
+                write_mode_status(mode, "{label}: rewrote {retired_type_count} retired Core container name{suffix} (D-COLLNAME1=A)\n")
+            }
+        }
+        .Err(diags) -> {
+            rendered :: if mode.json -> render_diagnostic_status("fmt", false, jet.machine_report_path_for_process(label), src, diags) else -> jet.render_diagnostics(label, src, diags)
+            write_mode_diagnostic(mode, rendered)
+            exit(ExitCodes.USAGE)
+        }
+    }
+}
+// Rust: Source/CmdCompile.rs:9516
+fn format_source_for_fmt(src: String, origin: String, explicit_copies: Bool, simplify: Bool) -> String [Diagnostic]! {
+    if jet_cli_format_is_package(origin) -> return format_package_manifest_for_fmt(src, origin)
+    copy_marks_inserted := false
+    materialized :: if explicit_copies && OSPath.from_text(origin).is_file() && !jet_cli_format_is_typed_package(src, origin) {
+        source := src
+        bundle := Loader.load_entry(origin)
+        diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Check)
+        if diagnostics.iter().any(fn(diagnostic) { diagnostic.severity == Severity.Error }) -> return Err(diagnostics)
+        spans := implicit_copy_spans(bundle, origin)
+        &spans.reverse()
+        loop span in spans {
+            if span.start <= source.len() { &source.insert_str(span.start, Syntax.SIGIL_COPY); copy_marks_inserted = true }
+        }
+        rewrite_retired_package_targets(source, origin).0
+    } else -> rewrite_retired_package_targets(src, origin).0
+    if jet_cli_format_is_typed_package(materialized, origin) {
+        if Package.format_source(materialized, origin) == { .Ok(formatted) -> return Ok(formatted), .Err(_) -> {} }
+    }
+    if jet.format_source_with_options(materialized, Formatter.FormatOptions{simplify: simplify}) == {
+        .Ok(formatted) -> Ok(formatted)
+        .Err(diagnostics) -> { if copy_marks_inserted -> Err([Diagnostic.from_row("E0122", [("file", origin)], None)]) else -> Err(diagnostics) }
+    }
+}
+// Rust: Source/CmdCompile.rs:9582
+pub fn implicit_copy_spans(bundle: &ProgramBundle, origin: String) -> [Span] {
+    requested :: fs.canonicalize(OSPath.from_text(origin)).ok()
+    module :: bundle.modules.iter().find(fn(module) { requested.is_some_and(fn(path) { fs.canonicalize(module.path).ok() == Val(path) }) || module.display == origin }).or_else(fn() { bundle.modules.get(bundle.entry) }) ?? return []
+    implicit_copy_spans_in_module(module)
+}
+// Rust: Source/CmdCompile.rs:9603
+pub fn implicit_copy_spans_in_module(module: &LoadedModule) -> [Span] {
+    spans := [Span]{}
+    collect_stmts_implicit_copy_spans(module.script_body, &spans)
+    loop item in module.items -> collect_item_implicit_copy_spans(item, &spans)
+    &spans.sort_by_key(fn(span) { -span.start })
+    &spans.dedup_by_key(fn(span) { span.start })
+    ^spans
+}
+// Rust: Source/CmdCompile.rs:9616
+fn collect_stmts_implicit_copy_spans(statements: [Stmt], spans: &[Span]) {
+    loop statement in statements {
+        statement := statement.clone()
+        statement.for_each_expr_mut(fn(expr) { collect_copy_span(&expr, &spans) })
+    }
+}
+// Rust: Source/CmdCompile.rs:9626
+fn collect_copy_span(expression: &Expr, spans: &[Span]) {
+    if expression == { .Copy(inner, copy_span) -> { if copy_span == inner.span() -> &spans.push(copy_span) }, else -> {} }
+}
+// Rust: Source/CmdCompile.rs:9639
+fn collect_func_implicit_copy_spans(function: &Func, spans: &[Span]) {
+    if function.compiler_generated -> return
+    collect_stmts_implicit_copy_spans(function.body, &spans)
+}
+// Rust: Source/CmdCompile.rs:9649
+fn collect_item_implicit_copy_spans(item: &Item, spans: &[Span]) {
+    if item == {
+        .Func(function) -> collect_func_implicit_copy_spans(function, &spans)
+        .Struct(definition) | .Enum(definition) -> {
+            loop function in definition.methods -> collect_func_implicit_copy_spans(function, &spans)
+            loop implementation in definition.trait_impls {
+                if implementation.compiler_generated -> continue
+                loop function in implementation.methods -> collect_func_implicit_copy_spans(function, &spans)
+            }
+        }
+        .Impl(definition) -> { loop function in definition.methods -> collect_func_implicit_copy_spans(function, &spans) }
+        .Test(definition) -> collect_stmts_implicit_copy_spans(definition.body, &spans)
+        .CodeModule(definition) -> { if definition.body == { .Val(body) -> { loop item in body -> collect_item_implicit_copy_spans(item, &spans) }, .None -> {} } }
+        .GenericModule(definition) -> { loop item in definition.body -> collect_item_implicit_copy_spans(item, &spans) }
+        else -> {}
+    }
+}
+// Rust: Source/CmdCompile.rs:9704
+fn rewrite_retired_package_targets(src: String, origin: String) -> (String, Int) {
+    if jet_cli_format_is_typed_package(src, origin) -> Package.rewrite_retired_targets(src) else -> (src, 0)
+}
+// Rust: Source/CmdCompile.rs:9712
+// Canonical predicate: Compile/Format.jet:289 jet_cli_format_is_typed_package.
+// Rust: Source/CmdCompile.rs:9735
+// Canonical predicate: Compile/Format.jet:281 jet_cli_format_is_package.
+// Rust: Source/CmdCompile.rs:9749
+fn format_package_manifest_for_fmt(src: String, origin: String) -> String [Diagnostic]! {
+    (materialized, _) :: Package.rewrite_retired_targets(src)
+    (materialized, _) :: Package.rewrite_retired_record_heads(materialized)
+    Package.PackageFacts.parse(materialized, origin) ?? return Err([Manifest.manifest_parse_diagnostic(OSPath.from_text(origin), err)])
+    Ok(Package.format_source(materialized, origin).unwrap_or_else(fn(_) { materialized }))
+}
+// Rust: Source/CmdCompile.rs:9777
+struct ExternalFmtTempDir { path: OSPath }
+// Rust: Source/CmdCompile.rs:9780
+fn ExternalFmtTempDir.new() -> ExternalFmtTempDir Err! {
+    stamp :: (SystemTime.now().duration_since(UNIX_EPOCH) ?? return Err(err.to_string())).as_nanos()
+    loop attempt in 0..<32 {
+        path :: env.temp_dir().join("jet-fmt-{stamp}-{std.process.id()}-{attempt}")
+        if fs.create_dir(path) == {
+            .Ok(_) -> return Ok(ExternalFmtTempDir{path: path})
+            .Err(error) -> { if error.kind() == io.ErrorKind.AlreadyExists -> continue; return Err(error.to_string()) }
+        }
+    }
+    Err("could not allocate a formatter staging directory")
+}
+// Rust: Source/CmdCompile.rs:9799
+fn ExternalFmtTempDir.drop(self: &ExternalFmtTempDir) { _ :: fs.remove_dir_all(self.path) }
+// Rust: Source/CmdCompile.rs:9804
+struct ExternalFmtStagedFile { source: OSPath, staged: OSPath, before: [U8] }
+// Rust: Source/CmdCompile.rs:9813
+pub fn run_external_fmt(raw: [String], mode: OutputMode) -> I32 {
+    language := String?{None}
+    explicit_paths := [String]{}
+    child_flags := [String]{}
+    preset := String?{None}
+    environment := String?{None}
+    check_only := false
+    show_diff := false
+    changed_only := false
+    index := 1
+    loop index < raw.len() {
+        arg :: raw[index]
+        if arg == {
+            "--lang" -> { index += 1; language = raw.get(index) }
+            "--check" -> { check_only = true }
+            "--diff" | "--dry-run" -> { check_only = true; show_diff = true }
+            "--changed" -> { changed_only = true }
+            "--fixtures" | "--preset" | "--env" -> {
+                index += 1
+                value :: raw.get(index) ?? {
+                    cli_error_full("E2104", "{arg} needs a value", "these options select the realized environment", "pass a value after the option")
+                    return ExitCodes.USAGE
+                }
+                if arg == "--preset" -> preset = Val(value)
+                if arg == "--env" -> environment = Val(value)
+                &child_flags.push(arg)
+                &child_flags.push(value)
+            }
+            "--trust" | "--offline" | "--online" | "--no-color" | "--json" | "--flake" | "--pure" | "--yes" | "-y" -> &child_flags.push(arg)
+            "--" -> {
+                cli_error_full("E2104", "jet fmt --lang does not accept a command separator", "Jet supplies the staged files to the environment formatter", "pass formatter input paths before `--`")
+                return ExitCodes.USAGE
+            }
+            else -> {
+                if arg.starts_with("--lang=") -> language = Val(arg.trim_start_matches("--lang="))
+                else if arg.starts_with("--fixtures=") -> &child_flags.extend(["--fixtures", arg.trim_start_matches("--fixtures=")])
+                else if arg.starts_with("--preset=") {
+                    value := arg.trim_start_matches("--preset=") // #4303
+                    preset = Val(value)
+                    &child_flags.extend(["--preset", value])
+                } else if arg.starts_with("--env=") {
+                    value := arg.trim_start_matches("--env=") // #4303
+                    environment = Val(value)
+                    &child_flags.extend(["--env", value])
+                } else if arg.starts_with("--color=") -> &child_flags.push(arg)
+                else if arg.starts_with("-") {
+                    cli_error_full("E2102", "unknown external formatter option `{arg}`", "Jet forwards only environment selection and formatter mode flags", "run `jet fmt --help` or remove the unknown option")
+                    return ExitCodes.USAGE
+                } else -> &explicit_paths.push(arg)
+            }
+        }
+        index += 1
+    }
+    language :: language.map(fn(value) { trimmed := value.trim(); stripped := trimmed.trim_start_matches("."); stripped }).filter(fn(value) { !value.is_empty() && !value.chars().any(fn(ch) { ch.is_whitespace() }) && !value.contains("/") && !value.contains("\\") }) ?? {
+        cli_error_full("E2104", "jet fmt needs --lang <language>", "non-Jet formatting is selected by a file-language name", "run `jet fmt --lang nix` or omit `--lang` for Jet files")
+        return ExitCodes.USAGE
+    }
+    cwd :: env.current_dir().unwrap_or_else(fn(_) { OSPath.from_text(".") })
+    project_dir :: EnvHook.find_env_root(cwd) ?? {
+        cli_error_full("E1340", "jet fmt --lang needs an env.jet", "the external formatter is an environment package fact", "run from a realized environment project containing env.jet")
+        return ExitCodes.USER_ERROR
+    }
+    env_path :: project_dir.join(Syntax.ENV_FILE)
+    source :: fs.read_to_string(env_path) ?? {
+        cli_error_full("E1340", "could not read `{env_path.display()}`", err.to_string(), "fix the environment file and retry")
+        return ExitCodes.USER_ERROR
+    }
+    plan :: ModuleEval.evaluate_env_with_selections(source, project_dir, preset, environment) ?? {
+        write_mode_diagnostic(mode, jet.Diagnostics.render_all(Syntax.ENV_FILE, source, [err]))
+        return ExitCodes.USER_ERROR
+    }
+    formatter :: plan.lifecycle.formatter ?? {
+        cli_error_full("E1340", "no formatter is declared for language {language}", "jet fmt --lang delegates through the selected environment formatter fact", "declare a formatter package in the selected env module")
+        return ExitCodes.USER_ERROR
+    }
+    formatter_program :: jet_cli_external_formatter_program(formatter.package) ?? {
+        cli_error_full("E1340", "the environment formatter package has no executable name", "Jetpack realizes formatter packages, and Jet invokes their package name", "use a formatter package such as `pkgs.nixfmt`")
+        return ExitCodes.USER_ERROR
+    }
+    files := collect_external_fmt_files(cwd, project_dir, explicit_paths, language) ?? {
+        cli_error_full("E1340", "could not discover formatter input files", err, "fix the named path or run the formatter from the environment root")
+        return ExitCodes.USAGE
+    }
+    if changed_only {
+        changed :: external_fmt_changed_files(project_dir) ?? {
+            cli_error_full("E1340", "--changed needs a readable Git worktree", err, "run inside a Git worktree or remove --changed")
+            return ExitCodes.USAGE
+        }
+        &files.retain(fn(path) { path.strip_prefix(project_dir).ok().map(fn(relative) { relative.to_string_lossy().replace("\\", "/") }).is_some_and(fn(relative) { changed.contains(relative) }) })
+    }
+    if files.is_empty() { if mode.json -> write_mode_machine(mode, "{fmt_json_ok()}\n"); return ExitCodes.OK }
+    temp :: ExternalFmtTempDir.new() ?? {
+        cli_error_full("E1340", "could not stage formatter inputs", err, "fix the temporary directory and retry")
+        return ExitCodes.USAGE
+    }
+    staged := [ExternalFmtStagedFile]{}
+    command := ["env"]
+    &command.extend(^child_flags)
+    &command.push("--")
+    &command.push(formatter_program)
+    loop index in 0..<files.len() {
+        source_path :: files[index]
+        before :: fs.read(source_path) ?? {
+            cli_error_full("E1340", "could not read `{source_path.display()}`", err.to_string(), "fix the file permissions and retry")
+            return ExitCodes.USAGE
+        }
+        name :: source_path.file_name().map(fn(name) { name.to_string_lossy() }) ?? "input"
+        staged_path :: temp.path.join("{index:04}-{name}")
+        fs.write(staged_path, before) ?? {
+            cli_error_full("E1340", "could not stage formatter inputs", err.to_string(), "fix the temporary directory and retry")
+            return ExitCodes.USAGE
+        }
+        &command.push(staged_path.to_string_lossy())
+        &staged.push(ExternalFmtStagedFile{source: source_path, staged: staged_path, before: ^before})
+    }
+    code :: EngineDispatch.dispatch(Syntax.JETPACK_BINARY_NAME, "env", command)
+    if code != ExitCodes.OK -> return code
+    changed := [(OSPath, [U8], [U8])]{}
+    loop file in staged {
+        after :: fs.read(file.staged) ?? {
+            cli_error_full("E1340", "environment formatter did not produce readable output", err.to_string(), "check the formatter package and retry")
+            return ExitCodes.USER_ERROR
+        }
+        if file.before != after -> &changed.push((file.source, ^file.before, ^after))
+    }
+    if changed.is_empty() { if mode.json -> write_mode_machine(mode, "{fmt_json_ok()}\n"); return ExitCodes.OK }
+    if check_only {
+        paths :: changed.iter().map(fn(row) { external_fmt_display_path(project_dir, row.0) }).to_list()
+        if mode.json {
+            if show_diff {
+                diffs := [(String, String)]{}
+                loop i in 0..<changed.len() {
+                    before :: String.from_utf8_lossy(changed[i].1)
+                    after :: String.from_utf8_lossy(changed[i].2)
+                    &diffs.push((paths[i], Formatter.unified_diff(paths[i], before, after)))
+                }
+                write_mode_machine(mode, "{fmt_json_dirty_diffs(diffs)}\n")
+            } else -> write_mode_machine(mode, "{fmt_json_dirty_paths(paths)}\n")
+        } else {
+            loop i in 0..<changed.len() {
+                path :: paths[i]
+                write_mode_renderable(mode, "{path}\n")
+                if show_diff -> write_mode_renderable(mode, Formatter.unified_diff(path, String.from_utf8_lossy(changed[i].1), String.from_utf8_lossy(changed[i].2)))
+            }
+        }
+        return ExitCodes.USER_ERROR
+    }
+    loop (path, _, after) in changed {
+        fs.write(path, after) ?? {
+            cli_error_full("E1340", "could not write `{path.display()}`", err.to_string(), "fix the file permissions and rerun the formatter")
+            return ExitCodes.USAGE
+        }
+    }
+    if mode.json -> write_mode_machine(mode, "{fmt_json_ok()}\n")
+    ExitCodes.OK
+}
+// Rust: Source/CmdCompile.rs:10173
+// Canonical exact helper: Compile/Format.jet:255 jet_cli_external_formatter_program.
+// Rust: Source/CmdCompile.rs:10180
+fn collect_external_fmt_files(cwd: OSPath, project_dir: OSPath, explicit_paths: [String], language: String) -> [OSPath] Err! {
+    files := BTreeSet.new()
+    if explicit_paths.is_empty() -> walk_external_fmt_files(project_dir, language, &files)
+    else {
+        loop raw in explicit_paths {
+            path :: OSPath.from_text(raw)
+            path :: if path.is_absolute() -> path else -> cwd.join(path)
+            metadata :: fs.symlink_metadata(path) ?? return Err("{path.display()}: {err}")
+            if metadata.is_dir() -> walk_external_fmt_files(path, language, &files)
+            else if metadata.is_file() && jet_cli_format_matches_language(path.to_string_lossy(), language) -> _ :: files.insert(path)
+        }
+    }
+    Ok(files.to_list())
+}
+// Rust: Source/CmdCompile.rs:10209
+fn walk_external_fmt_files(dir: OSPath, language: String, files: &BTreeSet[OSPath]) {
+    IGNORED :: [".git", ".jet", "target", "build", "vendor", "node_modules"]
+    entries :: fs.read_dir(dir) ?? return
+    entries := entries.flatten().to_list()
+    &entries.sort_by_key(fn(entry) { entry.path() })
+    loop entry in entries {
+        path :: entry.path()
+        kind :: entry.file_type() ?? continue
+        if kind.is_dir() {
+            ignored :: path.file_name().and_then(fn(name) { name.to_str() }).is_some_and(fn(name) { IGNORED.contains(name) })
+            if !ignored -> walk_external_fmt_files(path, language, &files)
+        } else if kind.is_file() && jet_cli_format_matches_language(path.to_string_lossy(), language) -> _ :: files.insert(path)
+    }
+}
+// Rust: Source/CmdCompile.rs:10235
+// Canonical exact predicate: Compile/Format.jet:318 jet_cli_format_matches_language.
+// Rust: Source/CmdCompile.rs:10239
+fn external_fmt_changed_files(root: OSPath) -> BTreeSet[String] Err! {
+    changed := BTreeSet.new()
+    loop args in [["diff", "--name-only", "HEAD"], ["diff", "--name-only", "--cached"], ["ls-files", "--others", "--exclude-standard"]] {
+        output :: Command.new("git").args(args).current_dir(root).output() ?? return Err(err.to_string())
+        if !output.status.success() && args.first() == Val("diff") {
+            error := String.from_utf8_lossy(output.stderr).trim() // #4303
+            return Err(error)
+        }
+        loop line in String.from_utf8_lossy(output.stdout).lines() {
+            trimmed := line.trim() // #4303
+            relative :: trimmed.replace("\\", "/")
+            if !relative.is_empty() && root.join(relative).is_file() -> _ :: changed.insert(relative)
+        }
+    }
+    Ok(^changed)
+}
+// Rust: Source/CmdCompile.rs:10264
+fn external_fmt_display_path(root: OSPath, path: OSPath) -> String {
+    path.strip_prefix(root).map(fn(relative) { relative.to_string_lossy().replace("\\", "/") }).unwrap_or_else(fn(_) { path.to_string_lossy() })
+}

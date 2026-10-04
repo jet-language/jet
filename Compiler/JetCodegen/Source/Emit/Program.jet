@@ -64,13 +64,13 @@ fn jet_rust_emit_impl_target_enabled(ctx: &JetRustEmitContext, implementation: M
 }
 
 fn jet_rust_emit_validate_function(ctx: &JetRustEmitContext, function: MIRFunction) Never! {
+    block_ids := [Int:Bool]{}
+    loop block in function.blocks -> block_ids[block.id.value] = true
     found_entry := false
     loop block in function.blocks {
         if block.id == function.entry -> found_entry = true
         loop target in mir_terminator_targets(block.terminator) {
-            found := false
-            loop candidate in function.blocks { if candidate.id == target -> found = true }
-            if !found -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR terminator targets a missing block", "checked CFG edges must resolve before source emission", Val(block.span))
+            if block_ids.get(target.value) == None -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR terminator targets a missing block", "checked CFG edges must resolve before source emission", Val(block.span))
         }
     }
     if !found_entry -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR function entry block is missing", "each checked function must have one block matching its entry identity", Val(function.span))
@@ -313,8 +313,21 @@ pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig) -> 
             &lines.push("")
             if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_module_unit(units, definition.module_id, definition.span.start), start, lines.len())
         }
+        // Card #4258: a constant whose every read was copied into its use
+        // sites (jet_codegen_constant_copies_into_uses) needs no accessor;
+        // storage cells and every constant still read through `Global` keep
+        // their item.
+        global_reads := [String:Bool]{}
+        loop function in ctx.program.functions {
+            loop block in function.blocks {
+                loop instruction in block.instructions {
+                    if instruction.operation == .Global(name) -> global_reads[name] = true
+                }
+            }
+        }
         loop constant in ctx.program.constants {
             if !all_selected && selected.get(jet_rust_emit_id_key(constant.module_id.value)) == None -> next
+            if !constant.is_storage && global_reads.get(constant.key) == None -> next
             start :: lines.len()
             &lines.push(jet_rust_emit_constant_definition(&ctx, constant))
             &lines.push("")

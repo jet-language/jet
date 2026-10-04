@@ -1,0 +1,685 @@
+// Stable TUI replay envelopes (crates/jet-cli/src/Recording.rs).
+// CanonicalJSON owns the wire vocabulary; terminal normalization is shared with Tape.
+use core.files as recording_files
+use core.time as recording_time
+
+pub JET_CLI_RECORDING_MAGIC :: prep { String.from_bytes([U8]{U8{74}, U8{82}, U8{69}, U8{80}, U8{76}, U8{65}, U8{89}, U8{0}}) ?? panic("replay magic") }
+pub JET_CLI_RECORDING_FOOTER_MAGIC :: "JEND"
+pub JET_CLI_RECORDING_SCHEMA :: "jet.tui-replay"
+pub JET_CLI_RECORDING_VERSION_MAJOR :: 1
+pub JET_CLI_RECORDING_VERSION_MINOR :: 0
+pub JET_CLI_RECORDING_ARTIFACT_EXTENSION :: ".jetproof-replay"
+pub JET_CLI_MAX_RECORDING_BYTES :: 268435456
+pub JET_CLI_MAX_RECORDING_FRAMES :: 100000
+pub JET_CLI_MAX_RECORDING_FRAME_PAYLOAD_BYTES :: 1048576
+pub JET_CLI_MAX_RECORDING_HEADER_BYTES :: 4194304
+JET_CLI_RECORDING_FRAME_HEADER_BYTES :: 15
+JET_CLI_RECORDING_FRAME_HASH_BYTES :: 32
+JET_CLI_RECORDING_FOOTER_BYTES :: 52
+JET_CLI_RECORDING_ZERO_ID :: "000000000000000000000000"
+
+// Rust `RecordingIdentity`, `RecordingEvent`, `Recording` (Recording.rs:59-118).
+pub struct JetCLIRecordingIdentity { pub command: String, pub width: Int, pub height: Int, pub color: Bool }
+pub enum JetCLIRecordingEvent {
+    Type(String)
+    Enter
+    Sleep(U64)
+    Wait(String)
+    Require(String)
+    Set(name: String, value: String)
+    Output(String)
+    Resize(width: Int, height: Int)
+    Frame(width: Int, height: Int, text: String)
+    Command(JetCLICommandResult)
+}
+pub struct JetCLIRecording { identity: JetCLIRecordingIdentity, events: [JetCLIRecordingEvent] }
+// Rust `RecordingError` (Recording.rs:600-615).
+#Error
+pub enum JetCLIRecordingError {
+    Invalid(String)
+    Limit(what: String, limit: Int)
+    Name(String)
+    Event(String)
+    IdentityMismatch
+    Conflict(String)
+    IO(String)
+}
+// Rust `RecordingError::fmt` (Recording.rs:617-629).
+pub fn jet_cli_recording_error_message(error: JetCLIRecordingError) -> String Never! {
+    if error == {
+        .Invalid(message) -> ~message
+        .Limit(what, limit) -> "{what} exceeds the {limit} item limit"
+        .Name(message) -> ~message
+        .Event(message) -> ~message
+        .IdentityMismatch -> "recording identity does not match replay target"
+        .Conflict(path) -> "recording already exists with different content: {path}"
+        .IO(message) -> ~message
+    }
+}
+// Rust `RecordingIdentity::new` (Recording.rs:72-81).
+pub fn jet_cli_recording_identity_new(command: String, width: Int, height: Int, color: Bool) -> JetCLIRecordingIdentity JetCLIRecordingError! {
+    identity :: JetCLIRecordingIdentity{command: command, width: width, height: height, color: color}
+    jet_cli_recording_validate_identity(identity)
+    Ok(identity)
+}
+// Rust `validate_identity` (Recording.rs:633-655). Int dimensions project Rust u16.
+fn jet_cli_recording_validate_identity(identity: JetCLIRecordingIdentity) JetCLIRecordingError! {
+    if identity.command.is_empty() || identity.command.bytes().len() > 4096 -> return Err(JetCLIRecordingError.Name("recording command identity must contain 1..=4096 bytes"))
+    raw :: identity.command.bytes()
+    if raw.contains(U8{0}) || raw.contains(U8{10}) || raw.contains(U8{13}) -> return Err(JetCLIRecordingError.Name("recording command identity must not contain control line breaks"))
+    if raw.contains(U8{27}) -> return Err(JetCLIRecordingError.Name("recording command identity must not contain ANSI escapes"))
+    if identity.width == 0 || identity.height == 0 -> return Err(JetCLIRecordingError.Name("recording terminal dimensions must be non-zero"))
+    if identity.width < 0 || identity.width > 65535 || identity.height < 0 || identity.height > 65535 -> return Err(JetCLIRecordingError.Name("recording terminal dimensions are out of range"))
+}
+// Rust `Recording::new`, `identity`, `events` (Recording.rs:122-128,188-195).
+pub fn jet_cli_recording_new(identity: JetCLIRecordingIdentity) -> JetCLIRecording JetCLIRecordingError! {
+    jet_cli_recording_validate_identity(identity)
+    Ok(JetCLIRecording{identity: identity, events: [JetCLIRecordingEvent]{}})
+}
+pub fn jet_cli_recording_identity(recording: JetCLIRecording) -> JetCLIRecordingIdentity Never! { ~recording.identity }
+pub fn jet_cli_recording_events(recording: JetCLIRecording) -> View<JetCLIRecordingEvent> from recording { recording.events[0..<recording.events.len()] }
+// Rust `Recording::push` (Recording.rs:198-209).
+pub fn jet_cli_recording_push(recording: &JetCLIRecording, event: JetCLIRecordingEvent) -> Int JetCLIRecordingError! {
+    if recording.events.len() >= JET_CLI_MAX_RECORDING_FRAMES -> return Err(JetCLIRecordingError.Limit{what: "recording frame count", limit: JET_CLI_MAX_RECORDING_FRAMES})
+    jet_cli_recording_validate_event(event)
+    index :: recording.events.len()
+    &recording.events.push(event)
+    Ok(index)
+}
+// Rust `Recording::push_frame` (Recording.rs:173-185). Semantic metadata is not encoded.
+pub fn jet_cli_recording_push_frame(recording: &JetCLIRecording, frame: JetCLIHeadlessFrame) -> Int JetCLIRecordingError! {
+    if frame.size.width < 0 || frame.size.width > 65535 -> return Err(JetCLIRecordingError.Event("headless frame width exceeds recording limits"))
+    if frame.size.height < 0 || frame.size.height > 65535 -> return Err(JetCLIRecordingError.Event("headless frame height exceeds recording limits"))
+    jet_cli_recording_push(&recording, JetCLIRecordingEvent.Frame{width: frame.size.width, height: frame.size.height, text: jet_cli_tape_normalize_terminal_text(frame.text)})
+}
+// Rust `Recording::interaction_tape` (Recording.rs:135-170).
+pub fn jet_cli_recording_interaction_tape(recording: JetCLIRecording) -> JetCLITape JetCLIRecordingError! {
+    steps := [JetCLITapeStep]{}
+    loop event in recording.events {
+        if event == {
+            .Type(text) -> &steps.push(JetCLITapeStep.Type(~text))
+            .Enter -> &steps.push(JetCLITapeStep.Enter)
+            .Sleep(milliseconds) -> &steps.push(JetCLITapeStep.Sleep(recording_time.duration_ns(Int.from_u64(milliseconds) * 1000000)))
+            .Wait(readiness) -> &steps.push(JetCLITapeStep.Wait(~readiness))
+            .Require(program) -> &steps.push(JetCLITapeStep.Require(~program))
+            .Set(name, value) -> &steps.push(JetCLITapeStep.Set{name: ~name, value: ~value})
+            .Output(expected) -> &steps.push(JetCLITapeStep.Output(~expected))
+            .Frame(_, _, _) -> {}
+            .Resize(_, _) -> return Err(JetCLIRecordingError.Invalid("recording resize events cannot be replayed by this headless target"))
+            .Command(_) -> return Err(JetCLIRecordingError.Invalid("recording command events cannot be replayed by this headless target"))
+        }
+    }
+    tape :: jet_cli_tape_new(steps) ?? return Err(JetCLIRecordingError.Invalid("recording interaction tape is invalid: {jet_cli_tape_error_message(err)}"))
+    Ok(tape)
+}
+fn jet_cli_recording_append(out: &[U8], bytes: [U8]) Never! { loop byte in bytes -> &out.push(byte) }
+fn jet_cli_recording_append_text(out: &[U8], text: String) Never! { jet_cli_recording_append(&out, text.bytes()) }
+// Rust `quote` (Recording.rs:1117-1121).
+fn jet_cli_recording_quote(value: String) -> String Never! {
+    bytes :: canonical_json_bytes(CanonicalJSON.String(~value))
+    String.from_bytes(~bytes[0..<bytes.len() - 1]) ?? panic("canonical recording string is not UTF-8")
+}
+// Rust `Recording::normalized_text`, `normalized_bytes` (Recording.rs:212-284).
+pub fn jet_cli_recording_normalized_bytes(recording: JetCLIRecording) -> [U8] Never! {
+    out := [U8]{}
+    loop event in recording.events {
+        if event == {
+            .Type(value) -> {
+                jet_cli_recording_append_text(&out, "Type ")
+                jet_cli_recording_append_text(&out, jet_cli_recording_quote(value))
+            }
+            .Enter -> jet_cli_recording_append_text(&out, "Enter")
+            .Sleep(milliseconds) -> jet_cli_recording_append_text(&out, "Sleep {milliseconds}ms")
+            .Wait(value) -> {
+                jet_cli_recording_append_text(&out, "Wait ")
+                jet_cli_recording_append_text(&out, jet_cli_recording_quote(jet_cli_tape_normalize_terminal_text(value)))
+            }
+            .Require(value) -> {
+                jet_cli_recording_append_text(&out, "Require ")
+                jet_cli_recording_append_text(&out, jet_cli_recording_quote(value))
+            }
+            .Set(name, value) -> {
+                jet_cli_recording_append_text(&out, "Set ")
+                jet_cli_recording_append_text(&out, name)
+                jet_cli_recording_append_text(&out, " ")
+                jet_cli_recording_append_text(&out, jet_cli_recording_quote(value))
+            }
+            .Output(value) -> {
+                jet_cli_recording_append_text(&out, "Output ")
+                jet_cli_recording_append_text(&out, jet_cli_recording_quote(jet_cli_tape_normalize_terminal_text(value)))
+            }
+            .Resize(width, height) -> jet_cli_recording_append_text(&out, "Resize {width}x{height}")
+            .Frame(width, height, value) -> {
+                jet_cli_recording_append_text(&out, "Frame {width}x{height}\n")
+                jet_cli_recording_append_text(&out, jet_cli_tape_normalize_terminal_text(value))
+            }
+            .Command(result) -> {
+                bytes :: jet_cli_command_result_canonical_bytes(jet_cli_command_result_normalized(result))
+                jet_cli_recording_append_text(&out, "Command ")
+                loop index in 0..<bytes.len() - 1 -> &out.push(bytes[index])
+            }
+        }
+        if out.len() == 0 || out[out.len() - 1] != (U8{10}) -> &out.push(U8{10})
+    }
+    out
+}
+// Rust `Recording::normalized_text`, `digest` (Recording.rs:212-279,287-289).
+pub fn jet_cli_recording_normalized_text(recording: JetCLIRecording) -> String Never! { String.from_bytes(jet_cli_recording_normalized_bytes(recording)) ?? panic("normalized recording is not UTF-8") }
+pub fn jet_cli_recording_digest(recording: JetCLIRecording) -> String Never! { mir_sha256_hex_bytes(mir_sha256_bytes(jet_cli_recording_normalized_bytes(recording))) }
+// Rust `validate_text` (Recording.rs:722-733).
+fn jet_cli_recording_validate_text(text: String) JetCLIRecordingError! {
+    if text.bytes().len() > JET_CLI_MAX_RECORDING_FRAME_PAYLOAD_BYTES -> return Err(JetCLIRecordingError.Limit{what: "recording text bytes", limit: JET_CLI_MAX_RECORDING_FRAME_PAYLOAD_BYTES})
+    if text.bytes().contains(U8{0}) -> return Err(JetCLIRecordingError.Event("recording text must not contain NUL"))
+}
+// Rust `valid_env_name`, `sensitive_name` (Recording.rs:1123-1145).
+fn jet_cli_recording_valid_env_name(name: String) -> Bool Never! {
+    bytes :: name.bytes()
+    if bytes.len() == 0 -> return false
+    loop index in 0..<bytes.len() {
+        byte :: Int.from_u8(bytes[index])
+        letter :: (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95
+        if !letter && !(index > 0 && byte >= 48 && byte <= 57) -> return false
+    }
+    true
+}
+fn jet_cli_recording_sensitive_name(name: String) -> Bool Never! {
+    upper :: name.upper()
+    markers :: [String]{"TOKEN", "SECRET", "PASSWORD", "PASSWD", "PRIVATE", "CREDENTIAL", "AUTH", "API_KEY", "ACCESS_KEY", "COOKIE"}
+    loop marker in markers { if upper.contains(marker) -> return true }
+    false
+}
+// Rust `validate_event` (Recording.rs:657-720).
+fn jet_cli_recording_validate_event(event: JetCLIRecordingEvent) JetCLIRecordingError! {
+    if event == {
+        .Type(text) -> jet_cli_recording_validate_text(text)
+        .Output(text) -> jet_cli_recording_validate_text(text)
+        .Wait(text) -> jet_cli_recording_validate_text(text)
+        .Sleep(milliseconds) -> { if milliseconds > (U64{3600000}) -> return Err(JetCLIRecordingError.Event("recording Sleep exceeds one hour")) }
+        .Require(program) -> { if program.is_empty() || program.bytes().contains(U8{0}) || program.bytes().len() > 4096 -> return Err(JetCLIRecordingError.Event("invalid recording requirement")) }
+        .Set(name, value) -> {
+            if !jet_cli_recording_valid_env_name(name) -> return Err(JetCLIRecordingError.Event("invalid environment name `{name}`"))
+            if jet_cli_recording_sensitive_name(name) -> return Err(JetCLIRecordingError.Event("refusing to record sensitive environment name `{name}`"))
+            jet_cli_recording_validate_text(value)
+        }
+        .Resize(width, height) -> jet_cli_recording_validate_dimensions(width, height)
+        .Frame(width, height, text) -> {
+            jet_cli_recording_validate_dimensions(width, height)
+            jet_cli_recording_validate_text(text)
+        }
+        .Command(result) -> {
+            if result.stdout.bytes().len() > JET_CLI_MAX_RECORDING_FRAME_PAYLOAD_BYTES -> return Err(JetCLIRecordingError.Limit{what: "recording command stdout bytes", limit: JET_CLI_MAX_RECORDING_FRAME_PAYLOAD_BYTES})
+            if result.stderr.bytes().len() > JET_CLI_MAX_RECORDING_FRAME_PAYLOAD_BYTES -> return Err(JetCLIRecordingError.Limit{what: "recording command stderr bytes", limit: JET_CLI_MAX_RECORDING_FRAME_PAYLOAD_BYTES})
+            if result.diagnostics.len() > 100000 -> return Err(JetCLIRecordingError.Limit{what: "recording command diagnostic count", limit: 100000})
+        }
+        .Enter -> {}
+    }
+}
+fn jet_cli_recording_validate_dimensions(width: Int, height: Int) JetCLIRecordingError! {
+    if width == 0 || height == 0 -> return Err(JetCLIRecordingError.Event("recording dimensions must be non-zero"))
+    if width < 0 || width > 65535 || height < 0 || height > 65535 -> return Err(JetCLIRecordingError.Event("recording dimensions are out of range"))
+}
+// Rust `event_kind` (Recording.rs:735-748).
+fn jet_cli_recording_event_kind(event: JetCLIRecordingEvent) -> Int Never! {
+    if event == {
+        .Type(_) -> 0x2001
+        .Enter -> 0x2002
+        .Sleep(_) -> 0x2003
+        .Wait(_) -> 0x2004
+        .Require(_) -> 0x2005
+        .Set(_, _) -> 0x2006
+        .Output(_) -> 0x2007
+        .Resize(_, _) -> 0x2101
+        .Frame(_, _, _) -> 0x2102
+        .Command(_) -> 0x2201
+    }
+}
+// Rust `object`, `object_value` (Recording.rs:1032-1044).
+fn jet_cli_recording_object(fields: [CanonicalJSONField]) -> CanonicalJSON JetCLIRecordingError! {
+    value :: canonical_json_object(fields) ?? return Err(JetCLIRecordingError.Invalid(~err.message))
+    Ok(value)
+}
+fn jet_cli_recording_field(key: String, value: CanonicalJSON) -> CanonicalJSONField Never! { CanonicalJSONField{key: key, value: value} }
+// Rust `event_payload` (Recording.rs:750-787).
+fn jet_cli_recording_event_payload(event: JetCLIRecordingEvent) -> [U8] JetCLIRecordingError! {
+    value :: if event == {
+        .Type(text) -> jet_cli_recording_object([CanonicalJSONField]{jet_cli_recording_field("text", CanonicalJSON.String(~text))})
+        .Enter -> jet_cli_recording_object([CanonicalJSONField]{})
+        .Sleep(milliseconds) -> jet_cli_recording_object([CanonicalJSONField]{jet_cli_recording_field("milliseconds", CanonicalJSON.Integer("{milliseconds}"))})
+        .Wait(readiness) -> jet_cli_recording_object([CanonicalJSONField]{jet_cli_recording_field("readiness", CanonicalJSON.String(~readiness))})
+        .Require(program) -> jet_cli_recording_object([CanonicalJSONField]{jet_cli_recording_field("program", CanonicalJSON.String(~program))})
+        .Set(name, text) -> jet_cli_recording_object([CanonicalJSONField]{jet_cli_recording_field("name", CanonicalJSON.String(~name)), jet_cli_recording_field("value", CanonicalJSON.String(~text))})
+        .Output(text) -> jet_cli_recording_object([CanonicalJSONField]{jet_cli_recording_field("text", CanonicalJSON.String(~text))})
+        .Resize(width, height) -> jet_cli_recording_object([CanonicalJSONField]{jet_cli_recording_field("height", CanonicalJSON.Integer("{height}")), jet_cli_recording_field("width", CanonicalJSON.Integer("{width}"))})
+        .Frame(width, height, text) -> jet_cli_recording_object([CanonicalJSONField]{jet_cli_recording_field("height", CanonicalJSON.Integer("{height}")), jet_cli_recording_field("text", CanonicalJSON.String(~text)), jet_cli_recording_field("width", CanonicalJSON.Integer("{width}"))})
+        .Command(result) -> jet_cli_command_result_to_json(jet_cli_command_result_normalized(result))
+    }
+    Ok(canonical_json_bytes(value))
+}
+// Rust `header_json` (Recording.rs:887-954).
+fn jet_cli_recording_header_json(identity: JetCLIRecordingIdentity, artifact_id: String) -> [U8] JetCLIRecordingError! {
+    terminal :: jet_cli_recording_object([CanonicalJSONField]{jet_cli_recording_field("color", CanonicalJSON.Bool(identity.color)), jet_cli_recording_field("height", CanonicalJSON.Integer("{identity.height}")), jet_cli_recording_field("width", CanonicalJSON.Integer("{identity.width}"))})
+    identity_value :: jet_cli_recording_object([CanonicalJSONField]{jet_cli_recording_field("command", CanonicalJSON.String(~identity.command)), jet_cli_recording_field("terminal", terminal)})
+    capture :: jet_cli_recording_object([CanonicalJSONField]{jet_cli_recording_field("mode", CanonicalJSON.String("tui")), jet_cli_recording_field("roots", CanonicalJSON.Array([CanonicalJSON]{CanonicalJSON.String("Input"), CanonicalJSON.String("Output"), CanonicalJSON.String("Frame")}))})
+    limits :: jet_cli_recording_object([CanonicalJSONField]{jet_cli_recording_field("frames", CanonicalJSON.Integer("{JET_CLI_MAX_RECORDING_FRAMES}")), jet_cli_recording_field("payload_bytes", CanonicalJSON.Integer("{JET_CLI_MAX_RECORDING_BYTES - JET_CLI_RECORDING_FOOTER_BYTES}"))})
+    version :: jet_cli_recording_object([CanonicalJSONField]{jet_cli_recording_field("major", CanonicalJSON.Integer("{JET_CLI_RECORDING_VERSION_MAJOR}")), jet_cli_recording_field("minor", CanonicalJSON.Integer("{JET_CLI_RECORDING_VERSION_MINOR}"))})
+    value :: jet_cli_recording_object([CanonicalJSONField]{jet_cli_recording_field("artifact_id", CanonicalJSON.String(~artifact_id)), jet_cli_recording_field("capture", capture), jet_cli_recording_field("identity", identity_value), jet_cli_recording_field("limits", limits), jet_cli_recording_field("producer", CanonicalJSON.String("jet-cli")), jet_cli_recording_field("schema", CanonicalJSON.String(JET_CLI_RECORDING_SCHEMA)), jet_cli_recording_field("version", version)})
+    Ok(canonical_json_bytes(value))
+}
+// Rust endian reads and writes (`decode`, `encode_frame`, `write_prefix`, `write_footer`).
+fn jet_cli_recording_put_le(out: &[U8], value: U64, count: Int) Never! {
+    loop index in 0..<count -> &out.push(U8{Int.from_u64((value >> (index * 8)) & U64{255})})
+}
+fn jet_cli_recording_read_le(bytes: [U8], offset: Int, count: Int) -> U64 Never! {
+    value := U64{0}
+    loop index in 0..<count -> value = value | (U64.from_u8(bytes[offset + index]) << (index * 8))
+    value
+}
+fn jet_cli_recording_u64(value: Int) -> U64 Never! { U64.from_int(value) ?? panic("bounded recording count must be non-negative") }
+// Rust `encode_frame` (Recording.rs:1161-1170).
+fn jet_cli_recording_encode_frame(flags: Int, kind: Int, sequence: Int, payload: [U8]) -> [U8] Never! {
+    frame := [U8]{U8{flags}}
+    jet_cli_recording_put_le(&frame, jet_cli_recording_u64(kind), 2)
+    jet_cli_recording_put_le(&frame, jet_cli_recording_u64(sequence), 8)
+    jet_cli_recording_put_le(&frame, jet_cli_recording_u64(payload.len()), 4)
+    jet_cli_recording_append(&frame, payload)
+    hash :: mir_sha256_bytes(frame)
+    jet_cli_recording_append(&frame, hash)
+    frame
+}
+// Rust `write_prefix` (Recording.rs:1172-1178).
+fn jet_cli_recording_write_prefix(out: &[U8], header: [U8]) Never! {
+    jet_cli_recording_append_text(&out, JET_CLI_RECORDING_MAGIC)
+    jet_cli_recording_put_le(&out, jet_cli_recording_u64(JET_CLI_RECORDING_VERSION_MAJOR), 2)
+    jet_cli_recording_put_le(&out, jet_cli_recording_u64(JET_CLI_RECORDING_VERSION_MINOR), 2)
+    jet_cli_recording_put_le(&out, jet_cli_recording_u64(header.len()), 4)
+    jet_cli_recording_append(&out, header)
+}
+// Rust `write_footer` (Recording.rs:1180-1186).
+fn jet_cli_recording_write_footer(out: &[U8], frames: Int, payload_bytes: Int) Never! {
+    hash :: mir_sha256_bytes(out)
+    jet_cli_recording_append_text(&out, JET_CLI_RECORDING_FOOTER_MAGIC)
+    jet_cli_recording_put_le(&out, jet_cli_recording_u64(frames), 8)
+    jet_cli_recording_put_le(&out, jet_cli_recording_u64(payload_bytes), 8)
+    jet_cli_recording_append(&out, hash)
+}
+// Rust `content_id` (Recording.rs:1188-1191). SHA256 hex is ASCII.
+fn jet_cli_recording_content_id(body: [U8]) -> String Never! { mir_sha256_hex_bytes(mir_sha256_bytes(body)).slice(0..<24) }
+// Rust `Recording::encode` (Recording.rs:292-354).
+pub fn jet_cli_recording_encode(recording: JetCLIRecording) -> [U8] JetCLIRecordingError! {
+    jet_cli_recording_validate_identity(recording.identity)
+    if recording.events.len() > JET_CLI_MAX_RECORDING_FRAMES -> return Err(JetCLIRecordingError.Limit{what: "recording frame count", limit: JET_CLI_MAX_RECORDING_FRAMES})
+    frames := [[U8]]{}
+    payload_bytes := 0
+    loop sequence in 0..<recording.events.len() {
+        payload :: jet_cli_recording_event_payload(recording.events[sequence])
+        if payload.len() > JET_CLI_MAX_RECORDING_FRAME_PAYLOAD_BYTES -> return Err(JetCLIRecordingError.Limit{what: "recording frame payload bytes", limit: JET_CLI_MAX_RECORDING_FRAME_PAYLOAD_BYTES})
+        payload_bytes += payload.len()
+        if payload_bytes > JET_CLI_MAX_RECORDING_BYTES - JET_CLI_RECORDING_FOOTER_BYTES -> return Err(JetCLIRecordingError.Limit{what: "recording payload bytes", limit: JET_CLI_MAX_RECORDING_BYTES - JET_CLI_RECORDING_FOOTER_BYTES})
+        &frames.push(jet_cli_recording_encode_frame(1, jet_cli_recording_event_kind(recording.events[sequence]), sequence, payload))
+    }
+    zero_header :: jet_cli_recording_header_json(recording.identity, JET_CLI_RECORDING_ZERO_ID)
+    if zero_header.len() > JET_CLI_MAX_RECORDING_HEADER_BYTES -> return Err(JetCLIRecordingError.Limit{what: "recording header bytes", limit: JET_CLI_MAX_RECORDING_HEADER_BYTES})
+    body_zero := [U8]{}
+    jet_cli_recording_write_prefix(&body_zero, zero_header)
+    loop frame in frames -> jet_cli_recording_append(&body_zero, frame)
+    artifact_id :: jet_cli_recording_content_id(body_zero)
+    header :: jet_cli_recording_header_json(recording.identity, artifact_id)
+    out := [U8]{}
+    jet_cli_recording_write_prefix(&out, header)
+    loop frame in frames -> jet_cli_recording_append(&out, frame)
+    jet_cli_recording_write_footer(&out, frames.len(), payload_bytes)
+    if out.len() > JET_CLI_MAX_RECORDING_BYTES -> return Err(JetCLIRecordingError.Limit{what: "recording bytes", limit: JET_CLI_MAX_RECORDING_BYTES})
+    Ok(out)
+}
+// Rust `object_fields`, `object_field` (Recording.rs:1046-1060).
+// Scoped readers consume borrowed payloads in place; no nested JSON tree copies.
+fn jet_cli_recording_read_field<T>(value: CanonicalJSON, name: String, read: fn(CanonicalJSON, CanonicalJSON, String) -> T JetCLIRecordingError!) -> T JetCLIRecordingError! {
+    if value == {
+        .Object(fields) -> {
+            loop field in fields { if field.key == name -> return read(field.value, value, name) }
+            return Err(JetCLIRecordingError.Invalid("recording object is missing `{name}`"))
+        }
+        else -> Err(JetCLIRecordingError.Invalid("recording value must be an object"))
+    }
+}
+fn jet_cli_recording_require_object(value: CanonicalJSON) JetCLIRecordingError! {
+    if value == .Object(_) -> return Ok()
+    return Err(JetCLIRecordingError.Invalid("recording value must be an object"))
+}
+// Rust `expect_keys` (Recording.rs:1062-1071). Match BTreeSet debug formatting.
+fn jet_cli_recording_debug_keys(keys: [String]) -> String Never! {
+    quoted := [String]{}
+    loop key in keys -> &quoted.push(jet_cli_debug_quote(key))
+    out := [U8]{U8{123}}
+    jet_cli_recording_append_text(&out, quoted.join(", "))
+    &out.push(U8{125})
+    String.from_bytes(out) ?? panic("debug keys are not UTF-8")
+}
+fn jet_cli_recording_expect_keys(value: CanonicalJSON, expected: [String]) JetCLIRecordingError! {
+    actual := [String]{}
+    if value == {
+        .Object(fields) -> { loop field in fields -> &actual.push(~field.key) }
+        else -> return Err(JetCLIRecordingError.Invalid("recording value must be an object"))
+    }
+    wanted := ~expected
+    &wanted.sort()
+    &actual.sort()
+    if actual != wanted -> return Err(JetCLIRecordingError.Invalid("recording object keys differ: expected {jet_cli_recording_debug_keys(wanted)}, observed {jet_cli_recording_debug_keys(actual)}"))
+}
+// Rust `string_field`, `bool_field` (Recording.rs:1073-1085).
+fn jet_cli_recording_string_field(value: CanonicalJSON, name: String) -> String JetCLIRecordingError! {
+    jet_cli_recording_read_field(value, name, jet_cli_recording_as_string)
+}
+fn jet_cli_recording_as_string(value: CanonicalJSON, parent: CanonicalJSON, name: String) -> String JetCLIRecordingError! {
+    if value == {
+        .String(text) -> Ok(~text)
+        else -> Err(JetCLIRecordingError.Invalid("recording `{name}` must be a string"))
+    }
+}
+fn jet_cli_recording_bool_field(value: CanonicalJSON, name: String) -> Bool JetCLIRecordingError! {
+    jet_cli_recording_read_field(value, name, jet_cli_recording_as_bool)
+}
+fn jet_cli_recording_as_bool(value: CanonicalJSON, parent: CanonicalJSON, name: String) -> Bool JetCLIRecordingError! {
+    if value == {
+        .Bool(flag) -> Ok(flag)
+        else -> Err(JetCLIRecordingError.Invalid("recording `{name}` must be a boolean"))
+    }
+}
+// Rust `integer_field` (Recording.rs:1087-1094). Parse full u64, not host Int.
+fn jet_cli_recording_integer_field(value: CanonicalJSON, name: String) -> U64 JetCLIRecordingError! {
+    jet_cli_recording_read_field(value, name, jet_cli_recording_as_integer)
+}
+fn jet_cli_recording_as_integer(value: CanonicalJSON, parent: CanonicalJSON, name: String) -> U64 JetCLIRecordingError! {
+    if value == {
+        .Integer(text) -> {
+            result := U64{0}
+            if text.is_empty() -> return Err(JetCLIRecordingError.Invalid("recording `{name}` must be a non-negative integer"))
+            loop byte in text.bytes() {
+                digit :: Int.from_u8(byte) - 48
+                if digit < 0 || digit > 9 -> return Err(JetCLIRecordingError.Invalid("recording `{name}` must be a non-negative integer"))
+                scaled :: result.checked_mul(U64{10}) ?? return Err(JetCLIRecordingError.Invalid("recording `{name}` must be a non-negative integer"))
+                result = scaled.checked_add(U64.from_u8(U8{digit})) ?? return Err(JetCLIRecordingError.Invalid("recording `{name}` must be a non-negative integer"))
+            }
+            Ok(result)
+        }
+        else -> Err(JetCLIRecordingError.Invalid("recording `{name}` must be an integer"))
+    }
+}
+// Rust `signed_integer_field`, `u16_field` (Recording.rs:1095-1115).
+fn jet_cli_recording_signed_integer_field(value: CanonicalJSON, name: String) -> Int JetCLIRecordingError! {
+    jet_cli_recording_read_field(value, name, jet_cli_recording_as_signed_integer)
+}
+fn jet_cli_recording_as_signed_integer(value: CanonicalJSON, parent: CanonicalJSON, name: String) -> Int JetCLIRecordingError! {
+    if value == {
+        .Integer(text) -> {
+            parsed :: Int.parse(text) ?? return Err(JetCLIRecordingError.Invalid("recording `{name}` must be an integer"))
+            if parsed < -9223372036854775808 || parsed > 9223372036854775807 -> return Err(JetCLIRecordingError.Invalid("recording `{name}` must be an integer"))
+            if parsed < -2147483648 || parsed > 2147483647 -> return Err(JetCLIRecordingError.Invalid("recording `{name}` is out of range"))
+            Ok(parsed)
+        }
+        else -> Err(JetCLIRecordingError.Invalid("recording `{name}` must be an integer"))
+    }
+}
+fn jet_cli_recording_u16_field(value: CanonicalJSON, name: String) -> Int JetCLIRecordingError! {
+    number :: jet_cli_recording_integer_field(value, name)
+    if number > (U64{65535}) -> return Err(JetCLIRecordingError.Invalid("recording `{name}` is out of range"))
+    Ok(Int.from_u64(number))
+}
+// Rust `decode_command_result` (Recording.rs:844-884).
+fn jet_cli_recording_decode_command_result(value: CanonicalJSON) -> JetCLICommandResult JetCLIRecordingError! {
+    jet_cli_recording_expect_keys(value, [String]{"diagnostics", "exit_code", "stderr", "stdout"})
+    diagnostics :: jet_cli_recording_read_field(value, "diagnostics", jet_cli_recording_decode_diagnostics)
+    Ok(JetCLICommandResult{stdout: jet_cli_recording_string_field(value, "stdout"), stderr: jet_cli_recording_string_field(value, "stderr"), diagnostics: diagnostics, exit_code: jet_cli_recording_signed_integer_field(value, "exit_code")})
+}
+fn jet_cli_recording_decode_diagnostics(value: CanonicalJSON, parent: CanonicalJSON, name: String) -> [JetCLICommandDiagnostic] JetCLIRecordingError! {
+    diagnostics := [JetCLICommandDiagnostic]{}
+    if value == {
+        .Array(values) -> {
+            loop diagnostic in values {
+                jet_cli_recording_expect_keys(diagnostic, [String]{"code", "fix", "severity", "what", "why"})
+                severity_name :: jet_cli_recording_string_field(diagnostic, "severity")
+                severity :: if severity_name == {
+                    "info" -> JetCLIDiagnosticSeverity.Info
+                    "warning" -> JetCLIDiagnosticSeverity.Warning
+                    "error" -> JetCLIDiagnosticSeverity.Error
+                    else -> { return Err(JetCLIRecordingError.Invalid("unknown command diagnostic severity `{severity_name}`")) }
+                }
+                &diagnostics.push(jet_cli_command_diagnostic_new(jet_cli_recording_string_field(diagnostic, "code"), severity, jet_cli_recording_string_field(diagnostic, "what"), jet_cli_recording_string_field(diagnostic, "why"), jet_cli_recording_string_field(diagnostic, "fix")))
+            }
+        }
+        else -> return Err(JetCLIRecordingError.Invalid("command diagnostics must be an array"))
+    }
+    Ok(diagnostics)
+}
+// Rust `decode_event` (Recording.rs:789-843).
+fn jet_cli_recording_decode_event(kind: Int, value: CanonicalJSON) -> JetCLIRecordingEvent JetCLIRecordingError! {
+    jet_cli_recording_require_object(value)
+    event :: if kind == {
+        0x2001 -> {
+            jet_cli_recording_expect_keys(value, [String]{"text"})
+            JetCLIRecordingEvent.Type(jet_cli_recording_string_field(value, "text"))
+        }
+        0x2002 -> {
+            jet_cli_recording_expect_keys(value, [String]{})
+            JetCLIRecordingEvent.Enter
+        }
+        0x2003 -> {
+            jet_cli_recording_expect_keys(value, [String]{"milliseconds"})
+            JetCLIRecordingEvent.Sleep(jet_cli_recording_integer_field(value, "milliseconds"))
+        }
+        0x2004 -> {
+            jet_cli_recording_expect_keys(value, [String]{"readiness"})
+            JetCLIRecordingEvent.Wait(jet_cli_recording_string_field(value, "readiness"))
+        }
+        0x2005 -> {
+            jet_cli_recording_expect_keys(value, [String]{"program"})
+            JetCLIRecordingEvent.Require(jet_cli_recording_string_field(value, "program"))
+        }
+        0x2006 -> {
+            jet_cli_recording_expect_keys(value, [String]{"name", "value"})
+            JetCLIRecordingEvent.Set{name: jet_cli_recording_string_field(value, "name"), value: jet_cli_recording_string_field(value, "value")}
+        }
+        0x2007 -> {
+            jet_cli_recording_expect_keys(value, [String]{"text"})
+            JetCLIRecordingEvent.Output(jet_cli_recording_string_field(value, "text"))
+        }
+        0x2101 -> {
+            jet_cli_recording_expect_keys(value, [String]{"height", "width"})
+            JetCLIRecordingEvent.Resize{width: jet_cli_recording_u16_field(value, "width"), height: jet_cli_recording_u16_field(value, "height")}
+        }
+        0x2102 -> {
+            jet_cli_recording_expect_keys(value, [String]{"height", "text", "width"})
+            JetCLIRecordingEvent.Frame{width: jet_cli_recording_u16_field(value, "width"), height: jet_cli_recording_u16_field(value, "height"), text: jet_cli_recording_string_field(value, "text")}
+        }
+        0x2201 -> JetCLIRecordingEvent.Command(jet_cli_recording_decode_command_result(value))
+        else -> {
+            digits :: "0123456789abcdef"
+            hex := "0x"
+            shifts :: [Int]{12, 8, 4, 0}
+            loop shift in shifts -> hex = "{hex}{digits.slice(((kind >> shift) & 15)..<((kind >> shift) & 15) + 1)}"
+            return Err(JetCLIRecordingError.Invalid("unknown recording frame kind {hex}"))
+        }
+    }
+    jet_cli_recording_validate_event(event)
+    Ok(event)
+}
+// Rust `parse_header` (Recording.rs:956-1030).
+fn jet_cli_recording_parse_header(value: CanonicalJSON) -> (identity: JetCLIRecordingIdentity, artifact_id: String) JetCLIRecordingError! {
+    jet_cli_recording_expect_keys(value, [String]{"artifact_id", "capture", "identity", "limits", "producer", "schema", "version"})
+    artifact_id :: jet_cli_recording_string_field(value, "artifact_id")
+    valid_hex := artifact_id.bytes().len() == 24
+    loop byte in artifact_id.bytes() {
+        number :: Int.from_u8(byte)
+        if !((number >= 48 && number <= 57) || (number >= 97 && number <= 102)) -> valid_hex = false
+    }
+    if !valid_hex -> return Err(JetCLIRecordingError.Invalid("recording artifact_id must be 24 lowercase hexadecimal bytes"))
+    if jet_cli_recording_string_field(value, "producer") != "jet-cli" -> return Err(JetCLIRecordingError.Invalid("unexpected recording producer"))
+    if jet_cli_recording_string_field(value, "schema") != JET_CLI_RECORDING_SCHEMA -> return Err(JetCLIRecordingError.Invalid("unexpected recording schema"))
+    _ :: jet_cli_recording_read_field(value, "version", jet_cli_recording_validate_version)
+    _ :: jet_cli_recording_read_field(value, "capture", jet_cli_recording_validate_capture)
+    _ :: jet_cli_recording_read_field(value, "limits", jet_cli_recording_validate_limits)
+    identity :: jet_cli_recording_read_field(value, "identity", jet_cli_recording_parse_identity)
+    Ok((identity: identity, artifact_id: artifact_id))
+}
+// Rust `parse_header` nested object checks, in original error-precedence order.
+fn jet_cli_recording_validate_version(value: CanonicalJSON, parent: CanonicalJSON, name: String) -> Bool JetCLIRecordingError! {
+    jet_cli_recording_expect_keys(value, [String]{"major", "minor"})
+    if jet_cli_recording_u16_field(value, "major") != JET_CLI_RECORDING_VERSION_MAJOR || jet_cli_recording_u16_field(value, "minor") != JET_CLI_RECORDING_VERSION_MINOR -> return Err(JetCLIRecordingError.Invalid("recording version is incompatible"))
+    Ok(true)
+}
+fn jet_cli_recording_validate_capture(value: CanonicalJSON, parent: CanonicalJSON, name: String) -> Bool JetCLIRecordingError! {
+    jet_cli_recording_expect_keys(value, [String]{"mode", "roots"})
+    if jet_cli_recording_string_field(value, "mode") != "tui" -> return Err(JetCLIRecordingError.Invalid("recording capture mode is not tui"))
+    jet_cli_recording_read_field(value, "roots", jet_cli_recording_validate_roots)
+}
+fn jet_cli_recording_validate_roots(value: CanonicalJSON, parent: CanonicalJSON, name: String) -> Bool JetCLIRecordingError! {
+    if value == {
+        .Array(roots) -> {
+            expected :: [CanonicalJSON]{CanonicalJSON.String("Input"), CanonicalJSON.String("Output"), CanonicalJSON.String("Frame")}
+            if roots != expected -> return Err(JetCLIRecordingError.Invalid("recording roots are incompatible"))
+        }
+        else -> return Err(JetCLIRecordingError.Invalid("recording roots must be an array"))
+    }
+    Ok(true)
+}
+fn jet_cli_recording_validate_limits(value: CanonicalJSON, parent: CanonicalJSON, name: String) -> Bool JetCLIRecordingError! {
+    jet_cli_recording_expect_keys(value, [String]{"frames", "payload_bytes"})
+    if jet_cli_recording_integer_field(value, "frames") != jet_cli_recording_u64(JET_CLI_MAX_RECORDING_FRAMES) || jet_cli_recording_integer_field(value, "payload_bytes") != jet_cli_recording_u64(JET_CLI_MAX_RECORDING_BYTES - JET_CLI_RECORDING_FOOTER_BYTES) -> return Err(JetCLIRecordingError.Invalid("recording limits are incompatible"))
+    Ok(true)
+}
+fn jet_cli_recording_parse_identity(value: CanonicalJSON, parent: CanonicalJSON, name: String) -> JetCLIRecordingIdentity JetCLIRecordingError! {
+    jet_cli_recording_expect_keys(value, [String]{"command", "terminal"})
+    jet_cli_recording_read_field(value, "terminal", jet_cli_recording_parse_terminal_identity)
+}
+fn jet_cli_recording_parse_terminal_identity(value: CanonicalJSON, parent: CanonicalJSON, name: String) -> JetCLIRecordingIdentity JetCLIRecordingError! {
+    jet_cli_recording_expect_keys(value, [String]{"color", "height", "width"})
+    identity :: JetCLIRecordingIdentity{command: jet_cli_recording_string_field(parent, "command"), width: jet_cli_recording_u16_field(value, "width"), height: jet_cli_recording_u16_field(value, "height"), color: jet_cli_recording_bool_field(value, "color")}
+    jet_cli_recording_validate_identity(identity)
+    Ok(identity)
+}
+// Rust `Recording::decode` (Recording.rs:357-510). Input is bounded before parsing.
+pub fn jet_cli_recording_decode(bytes: [U8]) -> JetCLIRecording JetCLIRecordingError! {
+    if bytes.len() > JET_CLI_MAX_RECORDING_BYTES -> return Err(JetCLIRecordingError.Limit{what: "recording bytes", limit: JET_CLI_MAX_RECORDING_BYTES})
+    if bytes.len() < 16 + JET_CLI_RECORDING_FOOTER_BYTES || bytes[0..<8] != JET_CLI_RECORDING_MAGIC.bytes() -> return Err(JetCLIRecordingError.Invalid("missing JREPLAY magic"))
+    major :: Int.from_u64(jet_cli_recording_read_le(bytes, 8, 2))
+    minor :: Int.from_u64(jet_cli_recording_read_le(bytes, 10, 2))
+    if major != JET_CLI_RECORDING_VERSION_MAJOR || minor != JET_CLI_RECORDING_VERSION_MINOR -> return Err(JetCLIRecordingError.Invalid("unsupported recording schema {major}.{minor}"))
+    header_length :: Int.from_u64(jet_cli_recording_read_le(bytes, 12, 4))
+    if header_length > JET_CLI_MAX_RECORDING_HEADER_BYTES -> return Err(JetCLIRecordingError.Limit{what: "recording header bytes", limit: JET_CLI_MAX_RECORDING_HEADER_BYTES})
+    header_end :: 16 + header_length
+    footer_start :: bytes.len() - JET_CLI_RECORDING_FOOTER_BYTES
+    if header_end > footer_start -> return Err(JetCLIRecordingError.Invalid("recording header is truncated"))
+    header :: canonical_json_parse(~bytes[16..<header_end]) ?? return Err(JetCLIRecordingError.Invalid(~err.message))
+    parsed :: jet_cli_recording_parse_header(header)
+    if bytes[footer_start..<footer_start + 4] != JET_CLI_RECORDING_FOOTER_MAGIC.bytes() -> return Err(JetCLIRecordingError.Invalid("missing JEND footer"))
+    if bytes[footer_start + 20..<bytes.len()] != mir_sha256_bytes(~bytes[0..<footer_start]) -> return Err(JetCLIRecordingError.Invalid("recording footer hash mismatch"))
+    offset := header_end
+    sequence := 0
+    payload_bytes := 0
+    events := [JetCLIRecordingEvent]{}
+    loop offset < footer_start {
+        if sequence >= JET_CLI_MAX_RECORDING_FRAMES -> return Err(JetCLIRecordingError.Limit{what: "recording frame count", limit: JET_CLI_MAX_RECORDING_FRAMES})
+        frame_header_end :: offset + JET_CLI_RECORDING_FRAME_HEADER_BYTES
+        if frame_header_end > footer_start -> return Err(JetCLIRecordingError.Invalid("truncated recording frame header"))
+        flags :: Int.from_u8(bytes[offset])
+        kind :: Int.from_u64(jet_cli_recording_read_le(bytes, offset + 1, 2))
+        frame_sequence :: jet_cli_recording_read_le(bytes, offset + 3, 8)
+        payload_length :: Int.from_u64(jet_cli_recording_read_le(bytes, offset + 11, 4))
+        if payload_length > JET_CLI_MAX_RECORDING_FRAME_PAYLOAD_BYTES -> return Err(JetCLIRecordingError.Limit{what: "recording frame payload bytes", limit: JET_CLI_MAX_RECORDING_FRAME_PAYLOAD_BYTES})
+        payload_end :: frame_header_end + payload_length
+        frame_end :: payload_end + JET_CLI_RECORDING_FRAME_HASH_BYTES
+        if frame_end > footer_start -> return Err(JetCLIRecordingError.Invalid("truncated recording frame"))
+        if flags != 1 || frame_sequence != jet_cli_recording_u64(sequence) -> return Err(JetCLIRecordingError.Invalid("recording frame flags or ordering are invalid"))
+        if bytes[payload_end..<frame_end] != mir_sha256_bytes(~bytes[offset..<payload_end]) -> return Err(JetCLIRecordingError.Invalid("recording frame hash mismatch"))
+        payload :: canonical_json_parse(~bytes[frame_header_end..<payload_end]) ?? return Err(JetCLIRecordingError.Invalid(~err.message))
+        &events.push(jet_cli_recording_decode_event(kind, payload))
+        sequence += 1
+        payload_bytes += payload_length
+        if payload_bytes > JET_CLI_MAX_RECORDING_BYTES - JET_CLI_RECORDING_FOOTER_BYTES -> return Err(JetCLIRecordingError.Limit{what: "recording payload bytes", limit: JET_CLI_MAX_RECORDING_BYTES - JET_CLI_RECORDING_FOOTER_BYTES})
+        offset = frame_end
+    }
+    if offset != footer_start -> return Err(JetCLIRecordingError.Invalid("recording frame boundary is invalid"))
+    if jet_cli_recording_read_le(bytes, footer_start + 4, 8) != jet_cli_recording_u64(sequence) || jet_cli_recording_read_le(bytes, footer_start + 12, 8) != jet_cli_recording_u64(payload_bytes) -> return Err(JetCLIRecordingError.Invalid("recording footer counts do not match frames"))
+    zero_header :: jet_cli_recording_header_json(parsed.identity, JET_CLI_RECORDING_ZERO_ID)
+    body_zero := [U8]{}
+    jet_cli_recording_write_prefix(&body_zero, zero_header)
+    jet_cli_recording_append(&body_zero, ~bytes[header_end..<footer_start])
+    if jet_cli_recording_content_id(body_zero) != parsed.artifact_id -> return Err(JetCLIRecordingError.Invalid("recording artifact_id does not match content"))
+    Ok(JetCLIRecording{identity: parsed.identity, events: events})
+}
+// Rust `Recording::artifact_id` (Recording.rs:512-519).
+pub fn jet_cli_recording_artifact_id(recording: JetCLIRecording) -> String JetCLIRecordingError! {
+    bytes :: jet_cli_recording_encode(recording)
+    length :: Int.from_u64(jet_cli_recording_read_le(bytes, 12, 4))
+    header :: canonical_json_parse(~bytes[16..<16 + length]) ?? return Err(JetCLIRecordingError.Invalid(~err.message))
+    parsed :: jet_cli_recording_parse_header(header)
+    Ok(parsed.artifact_id)
+}
+// Rust `RecordingStore`, `new`, `default_store`, `root` (Recording.rs:524-542,591-595).
+pub struct JetCLIRecordingStore { pub root: String }
+pub fn jet_cli_recording_store_new(root: String) -> JetCLIRecordingStore Never! { JetCLIRecordingStore{root: root} }
+pub fn jet_cli_recording_store_default() -> JetCLIRecordingStore Never! { jet_cli_recording_store_new(".jet/replays") }
+// Rust `validate_name` (Recording.rs:1147-1159).
+fn jet_cli_recording_validate_name(name: String) JetCLIRecordingError! {
+    valid := !name.is_empty()
+    loop byte in name.bytes() {
+        number :: Int.from_u8(byte)
+        if !((number >= 65 && number <= 90) || (number >= 97 && number <= 122) || (number >= 48 && number <= 57) || number == 45 || number == 95) -> valid = false
+    }
+    if !valid -> return Err(JetCLIRecordingError.Name("recording NAME must be non-empty and contain only ASCII letters, digits, `-`, or `_`"))
+}
+// Rust `RecordingStore::path_for_name` (Recording.rs:545-550).
+pub fn jet_cli_recording_store_path_for_name(store: JetCLIRecordingStore, name: String) -> String JetCLIRecordingError! {
+    jet_cli_recording_validate_name(name)
+    Ok(recording_files.join(store.root, "{name}{JET_CLI_RECORDING_ARTIFACT_EXTENSION}"))
+}
+// C-FS gate: caller supplies the native store boundary, never a check-then-create.
+// create_synced_new ports OpenOptions.write/create_new/mode(0600), write_all,
+// sync_all and drop on the SAME held file. A failure leaves the temp as Rust does.
+// link_new ports fs::hard_link, distinguishing AlreadyExists atomically.
+// mkdir_all/read/remove port fs::{create_dir_all,read,remove_file}; pid is explicit.
+#Error
+pub struct JetCLIRecordingIOError { pub message: String }
+pub enum JetCLIRecordingLinkResult {
+    Published
+    AlreadyExists
+}
+pub trait JetCLIRecordingHost {
+    fn mkdir_all(&self, path: String) JetCLIRecordingIOError! -[FS.Write]>
+    fn create_synced_new(&self, path: String, bytes: [U8], mode: Int) JetCLIRecordingIOError! -[FS.Write]>
+    fn link_new(&self, source: String, destination: String) -[FS.Write]> JetCLIRecordingLinkResult JetCLIRecordingIOError!
+    fn read(&self, path: String) -[FS.Read]> [U8] JetCLIRecordingIOError!
+    fn remove(&self, path: String) JetCLIRecordingIOError! -[FS.Write]>
+}
+// Rust `RecordingStore::write` (Recording.rs:553-582), `io_error` (1193-1195).
+pub fn jet_cli_recording_store_write<H: JetCLIRecordingHost>(store: JetCLIRecordingStore, name: String, recording: JetCLIRecording, pid: Int, host: &H) -[FS.Read, FS.Write]> String JetCLIRecordingError! {
+    destination :: jet_cli_recording_store_path_for_name(store, name)
+    bytes :: jet_cli_recording_encode(recording)
+    &host.mkdir_all(store.root) ?? return Err(JetCLIRecordingError.IO(~err.message))
+    temporary :: recording_files.join(store.root, ".{name}.{pid}.tmp")
+    &host.create_synced_new(temporary, bytes, 0o600) ?? return Err(JetCLIRecordingError.IO(~err.message))
+    if jet_cli_recording_store_publish(temporary, destination, bytes, &host) == {
+        .Ok(path) -> {
+            &host.remove(temporary).drop("preserve publication result")
+            return Ok(path)
+        }
+        .Err(error) -> {
+            &host.remove(temporary).drop("preserve publication result")
+            return Err(error)
+        }
+    }
+}
+// Rust `RecordingStore::write` hard-link/idempotence branch (Recording.rs:568-579).
+fn jet_cli_recording_store_publish<H: JetCLIRecordingHost>(temporary: String, destination: String, bytes: [U8], host: &H) -[FS.Read, FS.Write]> String JetCLIRecordingError! {
+    status :: &host.link_new(temporary, destination) ?? return Err(JetCLIRecordingError.IO(~err.message))
+    if status == .Published -> return Ok(~destination)
+    existing :: &host.read(destination) ?? return Err(JetCLIRecordingError.IO(~err.message))
+    if existing == bytes -> return Ok(~destination)
+    Err(JetCLIRecordingError.Conflict(~destination))
+}
+// Rust `RecordingStore::read` (Recording.rs:585-589).
+pub fn jet_cli_recording_store_read<H: JetCLIRecordingHost>(store: JetCLIRecordingStore, name: String, host: &H) -[FS.Read]> JetCLIRecording JetCLIRecordingError! {
+    path :: jet_cli_recording_store_path_for_name(store, name)
+    bytes :: &host.read(path) ?? return Err(JetCLIRecordingError.IO(~err.message))
+    jet_cli_recording_decode(bytes)
+}

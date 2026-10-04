@@ -6,7 +6,7 @@ fn env_shell_test_env(dirs: [String]) -> ShellEnv {
         vars: [String: String]{},
         unset_vars: [String]{},
         refs: [String]{},
-        label: @JETPACK_PROMPT_LABEL,
+        label: JETPACK_PROMPT_LABEL,
         prompt_path: PromptPathMode.Short,
         prompt_strip: PromptStripMode.Off,
         cache_leases: [CacheLease]{}
@@ -78,8 +78,8 @@ fn env_shell_test_assert_no_esc_after_marker(output: String) {
 fn env_shell_test_assert_receipt_colors_after_marker(output: String) {
     captured :: env_shell_test_after_capture(output, "color")
     esc :: env_shell_test_esc()
-    assert(captured.contains("{esc}[{@SUCCESS_SGR}m✓{esc}[0m"), captured)
-    assert(captured.contains("{esc}[{@ERROR_SGR}m✗{esc}[0m"), captured)
+    assert(captured.contains("{esc}[{SUCCESS_SGR}m✓{esc}[0m"), captured)
+    assert(captured.contains("{esc}[{ERROR_SGR}m✗{esc}[0m"), captured)
 }
 
 fn env_shell_test_read_marker(marker: String, shell: String, output: String) {
@@ -109,11 +109,11 @@ fn env_shell_test_read_marker(marker: String, shell: String, output: String) {
 #Test("bash rc sets label") {
     rc :: env_shell_bash_rc("jetpack", PromptPathMode.Short, PromptStripMode.Off)
     assert(rc.contains("PS1="))
-    assert(rc.contains(@ENV_SHELL_PROMPT_LABEL_ENV))
+    assert(rc.contains(ENV_SHELL_PROMPT_LABEL_ENV))
 }
 
 #Test("generated shell palettes use shared role codes") {
-    expected :: [String]{@ACCENT_SGR, @BORDER_SGR, @SUCCESS_SGR, @WARN_SGR, @ERROR_SGR}
+    expected :: [String]{ACCENT_SGR, BORDER_SGR, SUCCESS_SGR, WARN_SGR, ERROR_SGR}
     inits :: [String]{
         env_shell_bash_rc("jetpack", PromptPathMode.Short, PromptStripMode.Off),
         env_shell_zsh_rc("jetpack", PromptPathMode.Short, PromptStripMode.Off),
@@ -229,7 +229,7 @@ fn env_shell_test_read_marker(marker: String, shell: String, output: String) {
     rc :: env_shell_bash_rc("web-api", PromptPathMode.Full, PromptStripMode.Off)
     assert(rc.contains("NO_COLOR"))
     assert(rc.contains("printf \"%s\" \"$JETPACK_PROMPT_LABEL\""))
-    assert(rc.contains(@ENV_SHELL_PROMPT_LABEL_ENV))
+    assert(rc.contains(ENV_SHELL_PROMPT_LABEL_ENV))
 }
 
 #Test("hostile prompt labels are data in generated shells") {
@@ -300,7 +300,7 @@ fn env_shell_test_read_marker(marker: String, shell: String, output: String) {
     env_shell_test_assert_receipt_colors_after_marker(bash)
     captured :: env_shell_test_after_capture(bash, "color")
     esc :: env_shell_test_esc()
-    assert(captured.contains("{esc}[{@ACCENT_SGR}m{label}{esc}[0m"), "generated bash prompt sentinel missing: {captured}")
+    assert(captured.contains("{esc}[{ACCENT_SGR}m{label}{esc}[0m"), "generated bash prompt sentinel missing: {captured}")
 }
 
 #Test("fish prompt receipts are colored in a real pty") {
@@ -389,11 +389,11 @@ fn env_shell_test_read_marker(marker: String, shell: String, output: String) {
     close(^scratch)
     assert(fstab.contains("jetpack-nix-store /nix tmpfs mode=0755,x-mount.mkdir"))
     assert(fstab.contains("none bind,ro,x-mount.mkdir"))
-    assert(@ENV_SHELL_NIX_PROJECTION_SCRIPT.contains("\"$mount\" --no-canonicalize --no-mtab --all --fstab"))
-    assert(@ENV_SHELL_NIX_PROJECTION_SCRIPT.contains("has_mount /nix/store"))
+    assert(ENV_SHELL_NIX_PROJECTION_SCRIPT.contains("\"$mount\" --no-canonicalize --no-mtab --all --fstab"))
+    assert(ENV_SHELL_NIX_PROJECTION_SCRIPT.contains("has_mount /nix/store"))
     host_lower :: [String]{"lower", "dir", "=/nix/store"}.join("")
     assert(!fstab.contains(host_lower))
-    assert(!@ENV_SHELL_NIX_PROJECTION_SCRIPT.contains(host_lower))
+    assert(!ENV_SHELL_NIX_PROJECTION_SCRIPT.contains(host_lower))
 }
 
 #Test("nix projection keeps absolute store binary on logical path") {

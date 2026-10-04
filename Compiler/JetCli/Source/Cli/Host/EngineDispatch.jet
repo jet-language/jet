@@ -1,0 +1,195 @@
+// Engine boundary policy (Source/EngineDispatch.rs). Native transport is an
+// explicit dependency, not an approximation through text-only receipts.
+use core.files as engine_files
+use core.process as engine_process
+use core.sys as engine_sys
+use core.term as engine_term
+
+// Rust `std::process::Output`: capture must retain bytes, including non-UTF8
+// stderr, and distinguish termination by signal from an ordinary exit code.
+pub struct JetCLIHostProcessOutput {
+    pub stdout: [U8]
+    pub stderr: [U8]
+    pub success: Bool
+    pub code: Int?
+}
+
+// C-PROC gate: implementations must use the shared native process boundary.
+// `capture` ports Command::output (raw bytes, no implicit output cap).
+// `null_status` ports Command::stdout(Stdio::null()).stderr(Stdio::null()).status().
+// `status` ports Command::status with inherited stdio and no new process group.
+// `exec_replace` ports Unix CommandExt::exec, returning only on failure.
+// Core ProcessSpec exposes Inherit but not null stdout/stderr or exec-replace;
+// Core run also imposes a 64MiB cap and validates BOTH output streams as UTF8.
+// `diagnostic` calls the caller's active shared CLI diagnostic renderer (Rust
+// cli_error!, including machine/color output policy); it is not a new palette.
+pub trait JetCLIHostProcess {
+    fn capture(&self, spec: ProcessSpec) -[Exec, Time.Wait]> JetCLIHostProcessOutput IOError!
+    fn null_status(&self, spec: ProcessSpec) -[Exec, Time.Wait]> Bool IOError!
+    fn status(&self, spec: ProcessSpec) -[Exec, Time.Wait]> JetCLIHostProcessStatus IOError!
+    fn exec_replace(&self, spec: ProcessSpec) -[Exec]> Never IOError!
+    fn diagnostic(&self, code: String, what: String) Never! -[IO]>
+}
+
+// Rust `ExitStatus::code`: None denotes termination without an exit code.
+pub struct JetCLIHostProcessStatus {
+    pub code: Int?
+}
+
+// Rust `exe_name` (EngineDispatch.rs:54-61).
+pub fn jet_cli_engine_exe_name(name: String, windows: Bool) -> String Never! {
+    if windows -> return "{name}.exe"
+    ~name
+}
+
+// Rust `is_executable` (EngineDispatch.rs:63-73). Stat follows symlinks like
+// std::fs::metadata; existence alone never proves Unix executability.
+pub fn jet_cli_engine_is_executable(path: String, unix: Bool) -[FS.Read]> Bool Never! {
+    stat :: engine_files.stat(path) ?? return false
+    if unix -> return (stat.mode & 0o111) != 0
+    stat.is_file
+}
+
+// Rust `find_engine_binary_in` (EngineDispatch.rs:44-52).
+pub fn jet_cli_find_engine_binary_in(dirs: [String], name: String, family: String) -[FS.Read]> String? Never! {
+    executable :: jet_cli_engine_exe_name(name, family == "windows")
+    loop directory in dirs {
+        candidate :: engine_files.join(directory, executable)
+        stat :: engine_files.stat(candidate) ?? next
+        if stat.is_file && jet_cli_engine_is_executable(candidate, family == "unix") -> return Val(candidate)
+    }
+    None
+}
+
+// Rust `std::env::split_paths` used by find_engine_binary (EngineDispatch.rs:37).
+// Windows semicolons inside double quotes are not separators; quotes are
+// removed. Unix ':' has no quoting rules. Empty entries mean the current dir.
+pub fn jet_cli_engine_path_directories(path: String, windows: Bool) -> [String] Never! {
+    separator :: if windows -> U8{59} else -> U8{58}
+    directories := [String]{}
+    part := [U8]{}
+    quoted := false
+    loop byte in path.bytes() {
+        if windows && byte == (U8{34}) {
+            quoted = !quoted
+            next
+        }
+        if byte == separator && !quoted {
+            &directories.push(String.from_bytes(part) ?? panic("PATH segment is not UTF8"))
+            part = [U8]{}
+        } else {
+            &part.push(byte)
+        }
+    }
+    &directories.push(String.from_bytes(part) ?? panic("PATH segment is not UTF8"))
+    directories
+}
+
+// Rust `find_engine_binary` (EngineDispatch.rs:29-40).
+// C-RAW gate: OsString PATH/executable names cannot be represented by Core's
+// String API; this entry is for the representable UTF8 host path domain.
+pub fn jet_cli_find_engine_binary(name: String) -[FS.Read, Env]> String? Never! {
+    dirs := [String]{}
+    executable :: engine_sys.executable()
+    if !executable.is_empty() -> &dirs.push(engine_files.dirname(executable))
+    family :: engine_sys.family()
+    if engine_sys.get("PATH") == .Val(path) {
+        loop directory in jet_cli_engine_path_directories(path, family == "windows") -> &dirs.push(directory)
+    }
+    jet_cli_find_engine_binary_in(dirs, name, family)
+}
+
+// Rust `missing_engine_message` (EngineDispatch.rs:77-86).
+pub fn jet_cli_missing_engine_message(engine: String, verb: String) -> String Never! {
+    "Error [E1228]: `{verb}` needs the `{engine}` engine, which isn't installed\n Why: `{verb}` is a jetpack engine verb — {BINARY_NAME} execs `{engine}` for it rather than building package-manager logic into the compiler\n Fix: install the matching Jet toolchain (the `{engine}` binary ships alongside `{BINARY_NAME}`)\nMore: jet-lang.dev/e/E1228\n"
+}
+
+// Rust `version_skew_message` (EngineDispatch.rs:92-112).
+pub fn jet_cli_engine_version_skew_message(engine: String, jet_version: String, engine_version: String?) -> String Never! {
+    if engine_version == .Val(version) {
+        return "Error [E1227]: `{BINARY_NAME}` {jet_version} and `{engine}` {version} disagree\n Why: `{BINARY_NAME}` and `{engine}` ship as one toolchain and must match exactly, or the engine may not understand what `{BINARY_NAME}` sends it\n Fix: Use matching `{BINARY_NAME}`/`{engine}` versions — reinstall the toolchain so both binaries come from the same release\n More: jet-lang.dev/e/E1227\n"
+    }
+    "Error [E1227]: `{BINARY_NAME}` {jet_version} and `{engine}` disagree (no protocol reply)\n Why: `{BINARY_NAME}` and `{engine}` ship as one toolchain and must match exactly; this `{engine}` didn't answer the version handshake, so it predates this protocol\n Fix: Use matching `{BINARY_NAME}`/`{engine}` versions — reinstall the toolchain so both binaries come from the same release\n More: jet-lang.dev/e/E1227\n"
+}
+
+// Rust UTF8/status/trim part of `query_engine_protocol` (EngineDispatch.rs:122-130).
+pub fn jet_cli_engine_protocol_reply(output: JetCLIHostProcessOutput) -> String? Never! {
+    if !output.success -> return None
+    text :: String.from_bytes(output.stdout) ?? return None
+    trimmed :: ~text.trim()
+    if trimmed.is_empty() -> return None
+    Val(trimmed)
+}
+
+// Rust `query_engine_protocol` (EngineDispatch.rs:117-131).
+pub fn jet_cli_query_engine_protocol<H: JetCLIHostProcess>(bin: String, host: &H) -[Exec, Time.Wait]> String? Never! {
+    spec :: engine_process.cmd([String]{bin, ENGINE_PROTOCOL_FLAG})
+    output :: &host.capture(spec) ?? return None
+    jet_cli_engine_protocol_reply(output)
+}
+
+// Rust `compatible_engine` (EngineDispatch.rs:202-220). The binary version is
+// supplied by the host's build metadata, Rust env!("CARGO_PKG_VERSION").
+// Returning None means the exact diagnostic has already been written.
+pub fn jet_cli_compatible_engine<H: JetCLIHostProcess>(engine: String, verb: String, jet_version: String, host: &H) -[FS.Read, Env, Exec, Time.Wait, IO]> String? Never! {
+    bin :: jet_cli_find_engine_binary(engine) ?? {
+        engine_term.eprint(jet_cli_missing_engine_message(engine, verb))
+        return None
+    }
+    version :: jet_cli_query_engine_protocol(bin, &host)
+    if version == .Val(reply) {
+        if reply == jet_version -> return Val(bin)
+    }
+    engine_term.eprint(jet_cli_engine_version_skew_message(engine, jet_version, version))
+    None
+}
+
+// Rust `engine_command` (EngineDispatch.rs:191-200). Core env_remove runs
+// AFTER env_set regardless of builder order; .env alone replaces the inherited
+// marker and is the exact meaning of Rust env_remove(name).env(name, pid).
+pub fn jet_cli_engine_command(bin: String) -[Exec, Env]> ProcessSpec Never! {
+    engine_process.cmd([String]{bin}).env(ROOT_ENGINE_DISPATCH_PID_ENV, "{engine_sys.pid()}")
+}
+
+// Rust `dispatch`'s absent current_dir argument (EngineDispatch.rs:138).
+fn jet_cli_engine_default_cwd() -> String? Never! { None }
+
+// Rust `dispatch` (EngineDispatch.rs:137-139).
+pub fn jet_cli_engine_dispatch<H: JetCLIHostProcess>(engine: String, verb: String, argv: [String], jet_version: String, host: &H) -[FS.Read, Env, Exec, Time.Wait, IO]> Int Never! {
+    jet_cli_engine_dispatch_in(engine, verb, argv, jet_cli_engine_default_cwd(), jet_version, &host)
+}
+
+// Rust `dispatch_in` (EngineDispatch.rs:145-173).
+pub fn jet_cli_engine_dispatch_in<H: JetCLIHostProcess>(engine: String, verb: String, argv: [String], cwd: String?, jet_version: String, host: &H) -[FS.Read, Env, Exec, Time.Wait, IO]> Int Never! {
+    bin :: jet_cli_compatible_engine(engine, verb, jet_version, &host) ?? return 1
+    spec := jet_cli_engine_command(bin).args_extend(argv).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
+    if cwd == .Val(directory) -> spec = spec.cwd(directory)
+    if engine_sys.family() == "unix" && engine == JETPACK_BINARY_NAME && (verb == "env" || verb == "use") {
+        &host.exec_replace(spec) ?? {
+            &host.diagnostic("E2105", "couldn't run `{bin}`: {err}")
+            return 1
+        }
+    }
+    status :: &host.status(spec) ?? {
+        &host.diagnostic("E2105", "couldn't run `{bin}`: {err}")
+        return 1
+    }
+    status.code ?? 1
+}
+
+#Error
+pub struct JetCLIEngineFailure {
+    pub exit_code: Int
+}
+
+// Rust `capture` (EngineDispatch.rs:179-189). Return raw wire bytes even for
+// nonzero child status; only resolution/launch failures become user errors.
+pub fn jet_cli_engine_capture<H: JetCLIHostProcess>(engine: String, verb: String, argv: [String], cwd: String, jet_version: String, host: &H) -[FS.Read, Env, Exec, Time.Wait, IO]> JetCLIHostProcessOutput JetCLIEngineFailure! {
+    bin :: jet_cli_compatible_engine(engine, verb, jet_version, &host) ?? return Err(JetCLIEngineFailure{exit_code: 1})
+    spec :: jet_cli_engine_command(bin).args_extend(argv).cwd(cwd)
+    output :: &host.capture(spec) ?? {
+        &host.diagnostic("E2105", "couldn't run `{bin}`: {err}")
+        return Err(JetCLIEngineFailure{exit_code: 1})
+    }
+    Ok(output)
+}

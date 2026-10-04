@@ -1,0 +1,309 @@
+// Invocation argument parsing (Source/main.rs). Canonical Foundation policy
+// owns effect names, gates and retirements. This layer performs no host IO.
+// `json` is the resolved machine-mode fact, including active output policy:
+// Rust's cli_error! passes false but emit_cli_value still consults that policy.
+use jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USAGE]
+use jet_foundation.[
+    BuildEffect,
+    DiagnosticMoment,
+    diagnostic_from_registry,
+    GateSet,
+    gate_set_new,
+    gate_set_parse,
+    gate_set_insert,
+    syntax_retirement,
+]
+
+// The exact plain-human or machine bytes plus the exit status, not process exit.
+// `jet_cli_args_refusal_plan` applies the resolved ANSI choice at the Front seam.
+#Error
+pub struct JetCLIArgsRefusal {
+    pub code: String
+    pub what: String
+    pub why: String
+    pub fix: String
+    pub json: Bool
+    pub exit_code: Int
+    pub stdout: String
+    pub stderr: String
+}
+
+// Rust `emit_cli_report` / `emit_cli_value_for_action` (main.rs:173-232),
+// specialized to the spanless CLI argument failures emitted below.
+fn jet_cli_args_refuse(code: String, what: String, why: String, fix: String, json: Bool) -> JetCLIArgsRefusal Never! {
+    stdout := ""
+    stderr := ""
+    if json {
+        diagnostic :: diagnostic_from_registry(code, None, what, why, fix)
+        moment :: if diagnostic.moment == {
+            .Compile -> "compile"
+            .Run -> "run"
+            .Test -> "test"
+            .Tool -> "tool"
+        }
+        report := ReportEnvelope.new(moment, "error", code, diagnostic.what, diagnostic.why, diagnostic.fix)
+        if diagnostic.no_fix_reason == .Val(reason) {
+            &report.set_no_fix_reason(reason) ?? panic("registry no-fix reason is invalid")
+        }
+        stdout = "{report_render_status_with_reports("cli", false, [ReportEnvelope]{report}, StatusFields.new())}\n"
+    } else {
+        stderr = jet_cli_report(code, what, why, fix, false)
+    }
+    JetCLIArgsRefusal{code: code, what: what, why: why, fix: fix, json: json, exit_code: JET_DRIVER_EXIT_USAGE, stdout: stdout, stderr: stderr}
+}
+
+// Return the same command result shape as the existing Front failure path.
+pub fn jet_cli_args_refusal_plan(refusal: JetCLIArgsRefusal, color: Bool) -> JetCLIPlan Never! {
+    if !refusal.json && color -> return jet_cli_fail(refusal.code, refusal.what, refusal.why, refusal.fix, color, refusal.exit_code)
+    JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: refusal.stdout, stderr: refusal.stderr, exit_code: refusal.exit_code}}
+}
+
+// The text before and after the first `=` (Rust `split_once('=')`), split on
+// bytes so non-ASCII keys and values keep their exact text.
+fn jet_cli_args_assignment_parts(raw: String) -> [String]? Never! {
+    bytes :: raw.bytes()
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{61}) -> return Val([String]{String.from_bytes(bytes[0..<index]) ?? "", String.from_bytes(bytes[index + 1..<bytes.len()]) ?? ""})
+    }
+    None
+}
+
+// Rust `flag_value` (main.rs:7518-7526): only the separate-value spelling.
+pub fn jet_cli_args_flag_value(args: [String], flag: String) -> String? Never! {
+    loop (index, argument) in args {
+        if argument == flag {
+            if index + 1 < args.len() -> return Val(args[index + 1])
+            return None
+        }
+    }
+    None
+}
+
+// Rust `test_option_value` (main.rs:7528-7538): first inline or separate value.
+pub fn jet_cli_args_option_value(args: [String], flag: String) -> String? Never! {
+    prefix :: "{flag}="
+    loop (index, argument) in args {
+        if argument.starts_with(prefix) -> return Val(argument.slice(prefix.len()..<argument.len()))
+        if argument == flag && index + 1 < args.len() -> return Val(args[index + 1])
+    }
+    None
+}
+
+// Rust `parse_setting_overrides` (main.rs:1519-1586). Values may contain '=';
+// --set consumes the next word even when that word starts with '-'.
+pub fn jet_cli_args_parse_setting_overrides(argv: [String], json: Bool) -> [String: String] JetCLIArgsRefusal! {
+    settings := [String: String]{}
+    index := 0
+    loop index < argv.len() {
+        argument :: argv[index]
+        raw := ""
+        if {
+            argument.starts_with("--set=") -> raw = argument.slice(6..<argument.len())
+            argument == "--set" -> {
+                if index + 1 >= argv.len() -> return Err(jet_cli_args_refuse("E2104", "`--set` needs a key=value assignment", "a typed package setting override names one declared key and its value", "use `--set key=value`", json))
+                index = index + 1
+                raw = argv[index]
+            }
+            else -> {
+                index = index + 1
+                next
+            }
+        }
+        parts :: jet_cli_args_assignment_parts(raw) ?? return Err(jet_cli_args_refuse("E2104", "`--set` needs a key=value assignment", "a typed package setting override names one declared key and its value", "use `--set key=value`", json))
+        key :: parts[0].trim()
+        value :: parts[1].trim()
+        if key == "" -> return Err(jet_cli_args_refuse("E2104", "`--set` needs a non-empty key", "the compiler must be able to resolve one declared setting before it parses the value", "use `--set key=value` with a declared key", json))
+        if settings.get(key) != None -> return Err(jet_cli_args_refuse("E2104", "setting `{key}` is assigned more than once", "one invocation must contribute one unambiguous value for each declared setting", "remove the duplicate `--set` assignment", json))
+        settings[key] = value
+        index = index + 1
+    }
+    Ok(settings)
+}
+
+pub fn jet_cli_args_replay_name_valid(name: String) -> Bool Never! {
+    if name == "" -> return false
+    loop byte in name.bytes() {
+        code :: Int.from_u8(byte)
+        if !((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 45 || code == 95) -> return false
+    }
+    true
+}
+
+// Rust `replay_path_for_name` (ProveReplay.rs:185-197), used by the two
+// main.rs named-record parsers. A record NAME is ASCII, not a filesystem path.
+fn jet_cli_args_replay_path_for_name(name: String, flag: String, json: Bool) -> String JetCLIArgsRefusal! {
+    if !jet_cli_args_replay_name_valid(name) -> return Err(jet_cli_args_refuse("E2104", "invalid replay name", "replay NAME must be non-empty and contain only ASCII letters, digits, `-`, or `_`", "write `--{flag}=NAME` with letters, digits, `-`, or `_`", json))
+    Ok(".jet/replays/{name}.jetproof-replay")
+}
+
+// Rust `named_record_for_command` (main.rs:1399-1436), including
+// `ProveReplay::parse_record_flag` (ProveReplay.rs:166-172).
+pub fn jet_cli_args_named_record_for_command(argv: [String], command: String, json: Bool) -> String? JetCLIArgsRefusal! {
+    name := String?{None}
+    loop index in 1..<argv.len() {
+        argument :: argv[index]
+        if argument == "--record" -> return Err(jet_cli_args_refuse("E2104", "`--record` needs a closed `=NAME` value", "Jet needs valid command input before it can run this command", "write `--record=NAME` on `run`, `dev`, `test`, or `debug`", json))
+        if !argument.starts_with("--record=") -> next
+        // Command validity precedes name validation, exactly as the Rust does.
+        if command != "run" && command != "dev" && command != "test" && command != "debug" -> return Err(jet_cli_args_refuse("E2102", "`--record` is not valid with `jet {command}`", "Jet ignores no flags silently, so a typo cannot quietly change a command", "use `--record=NAME` on `run`, `dev`, `test`, or `debug`", json))
+        value :: argument.slice(9..<argument.len())
+        jet_cli_args_replay_path_for_name(value, "record", json)
+        name = Val(value)
+    }
+    Ok(name)
+}
+
+// Rust `named_debug_replay` (main.rs:1438-1470), including
+// `ProveReplay::parse_closed_replay_flag` (ProveReplay.rs:177-183).
+pub fn jet_cli_args_named_debug_replay(argv: [String], command: String, json: Bool) -> String? JetCLIArgsRefusal! {
+    if command != "debug" -> return Ok(None)
+    path := String?{None}
+    loop index in 1..<argv.len() {
+        argument :: argv[index]
+        if argument == "--replay" -> return Err(jet_cli_args_refuse("E2104", "`--replay` needs a closed `=NAME` value", "Jet needs valid command input before it can run this command", "write `--replay=NAME` on `jet debug`", json))
+        if !argument.starts_with("--replay=") -> next
+        value :: argument.slice(9..<argument.len())
+        if {
+            value.ends_with(".jetproof-replay") || value.contains("/") -> path = Val(value)
+            else -> path = Val(jet_cli_args_replay_path_for_name(value, "replay", json))
+        }
+    }
+    Ok(path)
+}
+
+// Rust `reject_retired_gate_flags` (main.rs:1249-1265). Only the exact retired
+// spelling is rejected; an '=...' suffix is not accepted by this check.
+pub fn jet_cli_args_reject_retired_gate_flags(argv: [String], json: Bool) JetCLIArgsRefusal! {
+    retirement :: syntax_retirement("allow-impure") ?? return
+    if !argv.contains(retirement.retired) -> return
+    return Err(jet_cli_args_refuse(retirement.code ?? "E1343", "`{retirement.retired}` is retired", "the old boolean changed which audited escapes were checked and is no longer accepted", "use `{retirement.canonical}`", json))
+}
+
+// Rust `reject_retired_authority_flags` (main.rs:1269-1294). Parse the suffix
+// through BuildEffect, then compare its exact flag spelling (no case folding).
+pub fn jet_cli_args_reject_retired_authority_flags(argv: [String], json: Bool) JetCLIArgsRefusal! {
+    loop argument in argv {
+        parts :: jet_cli_args_assignment_parts(argument) ?? [String]{argument}
+        head :: parts[0]
+        kind := ""
+        suffix := ""
+        if {
+            head.starts_with("--allow-") -> {
+                kind = "allow"
+                suffix = head.slice(8..<head.len())
+            }
+            head.starts_with("--deny-") -> {
+                kind = "deny"
+                suffix = head.slice(7..<head.len())
+            }
+            else -> next
+        }
+        build_effect :: BuildEffect.parse(suffix) ?? next
+        // Bound first: `head != "--{kind}-…"` would be a string-pattern test, not equality.
+        expected :: "--{kind}-{build_effect.flag()}"
+        if head != expected -> next
+        return Err(jet_cli_args_refuse("E2102", "`{head}` is retired", "authority grants and denials use one comma-separated rights surface", "use `--{kind}={build_effect.name()}`", json))
+    }
+}
+
+pub struct JetCLIArgsAuthority {
+    pub allow: [String]
+    pub deny: [String]
+}
+
+// Rust `parse_authority_flags` (main.rs:1299-1386). Invocation order is kept
+// and exact canonical duplicates removed independently on each side.
+pub fn jet_cli_args_parse_authority_flags(argv: [String], json: Bool) -> JetCLIArgsAuthority JetCLIArgsRefusal! {
+    allow := [String]{}
+    deny := [String]{}
+    index := 0
+    loop index < argv.len() {
+        argument :: argv[index]
+        kind := ""
+        inline := String?{None}
+        if {
+            argument.starts_with("--allow=") -> {
+                kind = "allow"
+                inline = Val(argument.slice(8..<argument.len()))
+            }
+            argument.starts_with("--deny=") -> {
+                kind = "deny"
+                inline = Val(argument.slice(7..<argument.len()))
+            }
+            argument == "--allow" -> kind = "allow"
+            argument == "--deny" -> kind = "deny"
+            else -> {
+                index = index + 1
+                next
+            }
+        }
+        value := ""
+        if inline == {
+            .Val(text) -> value = text
+            .None -> {
+                if index + 1 >= argv.len() || argv[index + 1].starts_with("-") -> return Err(jet_cli_args_refuse("E2104", "`--{kind}` needs a comma-separated rights value", "authority is read before the program's own arguments", "use `--{kind}=FS.Read,Time`", json))
+                index = index + 1
+                value = argv[index]
+            }
+        }
+        if value.trim() == "" -> return Err(jet_cli_args_refuse("E2104", "`--{kind}` needs a non-empty rights value", "authority names one or more effect roots or leaves", "use `--{kind}=FS.Read,Time`", json))
+        loop raw_right in value.split(",") {
+            canonical :: authority_parse_right(raw_right) ?? return Err(jet_cli_args_refuse("E2104", "unknown authority right `{raw_right.trim()}`", "authority names match the canonical effect roots and leaves", "use `--{kind}=FS.Read,Time`", json))
+            if kind == "allow" {
+                if !allow.contains(canonical) -> &allow.push(canonical)
+            } else {
+                if !deny.contains(canonical) -> &deny.push(canonical)
+            }
+        }
+        index = index + 1
+    }
+    loop right in allow {
+        if deny.contains(right) -> return Err(jet_cli_args_refuse("E2102", "authority right `{right}` is both allowed and denied", "the same exact effective right cannot be granted and denied in one invocation", "remove one of `--allow={right}` or `--deny={right}`", json))
+    }
+    Ok(JetCLIArgsAuthority{allow: allow, deny: deny})
+}
+
+// Rust `build_grants_from_authority` (main.rs:1388-1397). The result is a
+// lexicographically sorted set of build flags, not BuildEffect enum order.
+pub fn jet_cli_args_build_grants_from_authority(allow: [String]) -> [String] Never! {
+    seen := [String: Bool]{}
+    loop right in allow {
+        build_effect :: BuildEffect.parse(authority_root(right)) ?? next
+        seen[build_effect.flag()] = true
+    }
+    grants := seen.keys().to_list()
+    &grants.sort()
+    grants
+}
+
+// Rust `parse_gate_flags` (main.rs:1472-1517). GateSet is only invocation
+// transport; `gate_set_parse` owns validation through the canonical resolver.
+pub fn jet_cli_args_parse_gate_flags(argv: [String], json: Bool) -> GateSet JetCLIArgsRefusal! {
+    gates := gate_set_new()
+    index := 0
+    loop index < argv.len() {
+        argument :: argv[index]
+        spec := String?{None}
+        if {
+            argument.starts_with("--gate=") -> spec = Val(argument.slice(7..<argument.len()))
+            argument == "--gate" -> {
+                if index + 1 < argv.len() && !argv[index + 1].starts_with("-") {
+                    index = index + 1
+                    spec = Val(argv[index])
+                }
+            }
+            else -> {}
+        }
+        if spec == {
+            .Val(value) -> {
+                key :: gate_set_parse(value) ?? return Err(jet_cli_args_refuse("E2104", "invalid audited gate", err.message, "use `--gate unsafe=allow`, `--gate impure=allow`, or `--gate nondeterministic=allow`", json))
+                gate_set_insert(&gates, key)
+            }
+            .None -> {
+                if argument == "--gate" -> return Err(jet_cli_args_refuse("E2104", "`--gate` needs a gate assignment", "an invocation gate names one audited escape and its allow value", "use `--gate name=allow`", json))
+            }
+        }
+        index = index + 1
+    }
+    Ok(gates)
+}

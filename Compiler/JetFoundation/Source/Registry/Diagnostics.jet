@@ -33,8 +33,8 @@ pub struct DiagnosticRegistryRow {
     pub fix: String
     pub detail: Bool
     pub structured_fix: DiagnosticRegistryFix?
-    pub fix_safety: DiagnosticFixSafety?
-    pub no_fix_reason: DiagnosticNoFixReason?
+    pub fix_safety: FixSafety?
+    pub no_fix_reason: NoFixReason?
 }
 
 fn diagnostic_byte_at(source: [U8], index: Int) -> Int Never! {
@@ -46,7 +46,7 @@ fn diagnostic_is_continuation(value: Int) -> Bool Never! {
     value >= 128 && value <= 191
 }
 
-fn diagnostic_utf8_width(source: [U8], index: Int) -> Int Never! {
+pub fn diagnostic_utf8_width(source: [U8], index: Int) -> Int Never! {
     first :: diagnostic_byte_at(source, index)
     if {
         first < 0 -> 0
@@ -156,13 +156,11 @@ fn diagnostic_registry_static_edit(row: DiagnosticRegistryRow, span: Span) -> Te
     }
 }
 
-fn diagnostic_registry_applicability(row: DiagnosticRegistryRow, has_edit: Bool) -> DiagnosticFixApplicability? {
+fn diagnostic_registry_applicability(row: DiagnosticRegistryRow, has_edit: Bool) -> FixApplicability? {
     if !has_edit -> return None
     safety :: row.fix_safety ?? return None
-    if safety == {
-        .Formatting | .BehaviorPreserving -> Val(DiagnosticFixApplicability.Safe)
-        else -> Val(DiagnosticFixApplicability.Suggested)
-    }
+    if safety.auto_apply() -> return Val(FixApplicability.Safe)
+    Val(FixApplicability.Suggested)
 }
 
 fn diagnostic_registry_project_row(diagnostic: ^Diagnostic, row: DiagnosticRegistryRow) -> Diagnostic Never! {
@@ -199,12 +197,14 @@ pub fn diagnostic_from_registry(code: String, span: Span?, what: String, why: St
 // Dynamic Source edits are authorized and graded by the generated row. This
 // preserves the exact replacement/span authored by the producer without
 // deriving safety from human Fix prose.
+// Rust Diagnostics.rs:509-530 `with_edit`: reject an attached reason before
+// looking up the edit channel; the report's current reason is authoritative.
 pub fn diagnostic_registry_with_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
-    row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
-    if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
-    fix :: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned edit channel")
-    if !diagnostic_registry_is_source_edit(fix) -> panic("updated `{updated.code}` has no Source edit registry channel")
+    if updated.no_fix_reason != None -> panic("diagnostic `{updated.code}` cannot carry an edit and no-fix reason")
+    row :: diagnostic_registry_row(updated.code) ?? panic("diagnostic `{updated.code}` has no generated Source registry row")
+    fix :: row.structured_fix ?? panic("diagnostic `{updated.code}` has no registry-owned edit channel")
+    if !diagnostic_registry_is_source_edit(fix) -> panic("diagnostic `{updated.code}` has no Source edit registry channel")
     updated.edit = Val(edit)
     updated.applicability = diagnostic_registry_applicability(row, true)
     updated.safety = row.fix_safety
@@ -226,32 +226,27 @@ fn diagnostic_registry_is_generated_edit(fix: DiagnosticRegistryFix) -> Bool Nev
     }
 }
 
-fn diagnostic_registry_safety_auto_apply(safety: DiagnosticFixSafety) -> Bool Never! {
-    if safety == {
-        .Formatting | .BehaviorPreserving -> true
-        else -> false
-    }
-}
-
-pub fn diagnostic_registry_with_edit_grade(diagnostic: ^Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
+// Rust Diagnostics.rs:428-460 `with_edit_grade`, including reason-first rejection.
+pub fn diagnostic_registry_with_edit_grade(diagnostic: ^Diagnostic, edit: TextEdit, applicability: FixApplicability, safety: FixSafety) -> Diagnostic Never! {
     updated := diagnostic
-    row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
-    if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
-    fix :: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned edit channel")
-    if !diagnostic_registry_is_source_edit(fix) -> panic("updated `{updated.code}` has no Source edit registry channel")
-    if applicability == DiagnosticFixApplicability.Safe && !diagnostic_registry_safety_auto_apply(safety) -> panic("safe updated edit `{updated.code}` must have an auto-applicable safety grade")
+    if updated.no_fix_reason != None -> panic("diagnostic `{updated.code}` cannot carry an edit and no-fix reason")
+    row :: diagnostic_registry_row(updated.code) ?? panic("diagnostic `{updated.code}` has no generated Source registry row")
+    fix :: row.structured_fix ?? panic("diagnostic `{updated.code}` has no registry-owned edit channel")
+    if !diagnostic_registry_is_source_edit(fix) -> panic("diagnostic `{updated.code}` has no Source edit registry channel")
+    if applicability == FixApplicability.Safe && !safety.auto_apply() -> panic("safe diagnostic edit `{updated.code}` must have an auto-applicable safety grade")
     updated.edit = Val(edit)
     updated.applicability = Val(applicability)
     updated.safety = Val(safety)
     updated
 }
 
+// Rust Diagnostics.rs:359-383 `set_structured_edit`, including reason-first rejection.
 pub fn diagnostic_registry_with_structured_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
-    row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
-    if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
-    fix :: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned generated edit channel")
-    if !diagnostic_registry_is_generated_edit(fix) -> panic("updated `{updated.code}` has no generated structured edit registry channel")
+    if updated.no_fix_reason != None -> panic("diagnostic `{updated.code}` cannot carry an edit and no-fix reason")
+    row :: diagnostic_registry_row(updated.code) ?? panic("diagnostic `{updated.code}` has no generated Source registry row")
+    fix :: row.structured_fix ?? panic("diagnostic `{updated.code}` has no registry-owned generated edit channel")
+    if !diagnostic_registry_is_generated_edit(fix) -> panic("diagnostic `{updated.code}` has no generated structured edit registry channel")
     updated.edit = Val(edit)
     updated.applicability = diagnostic_registry_applicability(row, true)
     updated.safety = row.fix_safety
@@ -260,20 +255,20 @@ pub fn diagnostic_registry_with_structured_edit(diagnostic: ^Diagnostic, edit: T
 
 pub fn diagnostic_registry_with_source_derived_suggestion(diagnostic: ^Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
     updated := diagnostic
-    if updated.edit != None -> panic("updated `{updated.code}` already carries an edit")
-    row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
-    if row.no_fix_reason == None -> panic("updated `{updated.code}` has no explanatory row reason to replace")
+    if updated.edit != None -> panic("diagnostic `{updated.code}` already carries an edit")
+    row :: diagnostic_registry_row(updated.code) ?? panic("diagnostic `{updated.code}` has no generated Source registry row")
+    if row.no_fix_reason == None -> panic("diagnostic `{updated.code}` has no explanatory row reason to replace")
     updated.no_fix_reason = None
-    updated.applicability = Val(DiagnosticFixApplicability.Suggested)
-    updated.safety = Val(DiagnosticFixSafety.NeedsReview)
+    updated.applicability = Val(FixApplicability.Suggested)
+    updated.safety = Val(FixSafety.NeedsReview)
     updated.edit = Val(TextEdit{span: span, new_text: new_text})
     updated
 }
 
 pub fn diagnostic_registry_with_alternative_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
-    if updated.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and no-fix reason")
-    if updated.edit == None || updated.applicability == None || updated.safety == None -> panic("updated `{updated.code}` needs a graded primary edit before an alternative")
+    if updated.no_fix_reason != None -> panic("diagnostic `{updated.code}` cannot carry an edit and no-fix reason")
+    if updated.edit == None || updated.applicability == None || updated.safety == None -> panic("diagnostic `{updated.code}` needs a graded primary edit before an alternative")
     if updated.structured == None {
         updated.structured = Val(DiagnosticStructured.SuggestedEdits{edits: [TextEdit]{edit}})
         return updated
@@ -286,7 +281,7 @@ pub fn diagnostic_registry_with_alternative_edit(diagnostic: ^Diagnostic, edit: 
             updated.structured = Val(DiagnosticStructured.SuggestedEdits{edits: alternatives})
             updated
         }
-        else -> panic("updated `{updated.code}` cannot carry source edit alternatives with another structured payload")
+        else -> panic("diagnostic `{updated.code}` cannot carry source edit alternatives with another structured payload")
     }
 }
 

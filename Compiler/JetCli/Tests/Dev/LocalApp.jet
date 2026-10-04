@@ -1,0 +1,170 @@
+// Source/CmdLocalApp.rs has no inline tests. Behavioral controls exercise actual
+// policy bodies; no fake Kernel/TCP/clock/random provider claims native parity.
+fn local_app_test_control() -> JetCLILocalAppControlSchema Never! {
+    JetCLILocalAppControlSchema{function: "main", name: "count", label: "Count", type_name: "Int", required: true, variadic: false}
+}
+fn local_app_test_schema() -> JetCLILocalAppSchema Never! {
+    JetCLILocalAppSchema{function: "main", controls: [JetCLILocalAppControlSchema]{local_app_test_control()}, return_projection: "text/plain", effects: [String]{"Console"}, authority: "checked", source_identity: "source", compatibility_digest: "digest"}
+}
+fn local_app_test_parse_error(body: String) -> String Never! {
+    if jet_cli_local_app_parse_values(body) == { .Err(message) -> ~message, .Ok(_) -> panic("call unexpectedly accepted") }
+}
+#Test("local app selector equals wins and separated option cannot be a flag") {
+    assert(jet_cli_local_app_requested([String]{"--app"}))
+    assert(jet_cli_local_app_requested([String]{"--app="}))
+    assert(!jet_cli_local_app_requested([String]{"--application"}))
+    assert_eq(jet_cli_local_app_function([String]{"--app", "first", "--app=second"}), Val("second"))
+    assert_eq(jet_cli_local_app_function([String]{"--app", "--share", "lan"}), None)
+    assert_eq(jet_cli_local_app_function([String]{"--app"}), None)
+    assert_eq(jet_cli_local_app_function([String]{"--app="}), Val(""))
+    assert_eq(jet_cli_local_app_function([String]{"--app", "-bad", "--app", "later"}), None)
+    assert_eq(jet_cli_local_app_share([String]{"--share=lan"}), Val("lan"))
+}
+#Test("local app sharing authority follows explicit selection") {
+    local :: JetCLILocalAppShareMode.parse("local") ?? panic("local alias")
+    assert_eq(local, JetCLILocalAppShareMode.Loopback)
+    assert_eq(local.bind_address(), "127.0.0.1:0")
+    assert_eq(local.as_str(), "loopback")
+    assert_eq(local.authority(), "Network.Listen(loopback)")
+    lan :: JetCLILocalAppShareMode.parse("lan") ?? panic("lan")
+    assert_eq(lan.bind_address(), "0.0.0.0:0")
+    assert_eq(lan.authority(), "Network.Listen(approved by --share lan)")
+    if JetCLILocalAppShareMode.parse("LAN") == {
+        .Err(message) -> assert_eq(message, "unknown local-app sharing mode `LAN`; expected `loopback` or `lan`")
+        .Ok(_) -> panic("unexpected sharing acceptance")
+    }
+}
+#Test("local app scalar calls and validation precedence") {
+    values :: jet_cli_local_app_parse_values("{{\"values\":{{\"text\":\"abc\",\"yes\":true,\"count\":42,\"fraction\":1.25,\"whole\":2.0,\"none\":null}}}}") ?? panic("scalars")
+    assert_eq(values.get("text"), Val("abc"))
+    assert_eq(values.get("yes"), Val("true"))
+    assert_eq(values.get("count"), Val("42"))
+    assert_eq(values.get("fraction"), Val("1.25"))
+    assert_eq(values.get("whole"), Val("2"))
+    assert_eq(values.get("none"), Val("null"))
+    assert_eq((jet_cli_local_app_parse_values("{{}}") ?? panic("absent values")).len(), 0)
+    assert_eq(local_app_test_parse_error("bad"), "local-app call body is not valid JSON")
+    assert_eq(local_app_test_parse_error("[]"), "local-app call body must be a JSON object")
+    assert_eq(local_app_test_parse_error("{{\"values\":null}}"), "local-app call `values` must be a JSON object")
+    assert_eq(local_app_test_parse_error("{{\"values\":{{\"count\":[]}}}}"), "local-app control `count` must be a scalar Jet literal")
+    assert_eq(local_app_test_parse_error("{{\"values\":{{\"count\":{{}}}}}}"), "local-app control `count` must be a scalar Jet literal")
+}
+#Test("local app checked schema values are matched by canonical name") {
+    schema :: local_app_test_schema()
+    current :: jet_cli_local_app_values_as_controls(schema, [String:String]{"count": "7", "Count": "99"})
+    assert_eq(current[0].value, "7")
+    absent :: jet_cli_local_app_values_as_controls(schema, [String:String]{"Count": "99"})
+    assert_eq(absent[0].value, "")
+    json :: local_app_test_control().json()
+    assert_eq(json, "{{\"function\":\"main\",\"name\":\"count\",\"label\":\"Count\",\"type\":\"Int\",\"required\":true,\"variadic\":false}}")
+    assert(!json.contains("\"value\""))
+    assert(local_app_test_control().json_with_value("7").ends_with(",\"value\":\"7\"}}"))
+    app :: jet_cli_local_app_app_json(schema, "app.jet", "hash", Val([String:String]{"count": "7"}))
+    assert(app.contains("\"effects\":[\"Console\"]"))
+    assert(app.contains("\"value\":\"7\""))
+    assert(!jet_cli_local_app_app_json(schema, "app.jet", "hash", None).contains("\"value\""))
+}
+#Test("local app reload facts keep error generation zero and stale") {
+    initial :: JetCLILocalAppReloadFact.initial("hash")
+    assert_eq(initial.json(), "{{\"status\":\"initial\",\"reason\":\"source checked before launch\",\"source_hash\":\"hash\",\"generation\":0,\"reset_count\":0,\"stale\":false}}")
+    failure :: JetCLILocalAppReloadFact.error("candidate", "source refresh failed: denied")
+    assert_eq(failure.generation, U64{0})
+    assert(failure.stale)
+    assert(failure.json().contains("\"source_hash\":\"candidate\""))
+}
+#Test("local app errors preserve checked object verbatim and reject nonobject") {
+    object :: "{{ \"code\": \"E9999\", \"what\": \"typed\" }}"
+    assert_eq(jet_cli_local_app_checked_error_json("E2104", object), "{{\"ok\":false,\"error\":{object}}}")
+    assert(jet_cli_local_app_checked_error_json("E2104", "[]").contains("\"what\":\"[]\""))
+    report :: jet_cli_local_app_preflight_report("{{\"code\":\"E1\",\"what\":\"w\",\"why\":true,\"fix\":\"f\"}}")
+    assert_eq(report.code, "E1")
+    assert_eq(report.what, "w")
+    assert_eq(report.why, "a local app must select one checked function and one explicit sharing authority")
+    assert_eq(report.fix, "f")
+}
+#Test("local app HTTP framing counts bytes and always disables cache") {
+    frame :: String.from_bytes(jet_cli_local_app_response_bytes("200 OK", "text/plain", "é")) ?? panic("frame")
+    assert(frame.contains("Content-Length: 2"))
+    assert(frame.contains("Cache-Control: no-store"))
+    assert(frame.ends_with("é"))
+    assert(JET_CLI_LOCAL_APP_HTML.contains("history.replaceState(null, '', location.pathname)"))
+    assert(JET_CLI_LOCAL_APP_HTML.contains("X-Jet-App-Session"))
+    assert(JET_CLI_LOCAL_APP_HTML.contains("frame.sandbox = ''"))
+    assert(JET_CLI_LOCAL_APP_HTML.contains("text.textContent"))
+    assert(!JET_CLI_LOCAL_APP_HTML.contains("innerHTML"))
+}
+#Test("local app receipt uses canonical Foundation status carrier") {
+    receipt :: jet_cli_local_app_receipt_json(JetCLILocalAppServerReceipt.empty(), local_app_test_schema(), "app.jet", "hash", "policy", 0, U64{0}, JetCLILocalAppReloadFact.initial("hash"))
+    assert(receipt.contains("\"schema\":\"jet.local-app/v1\""))
+    assert(receipt.contains("\"session_isolation\":\"one Kernel per browser tab\""))
+    status :: jet_cli_local_app_launch_status(StatusValue.parse(receipt) ?? panic("receipt"))
+    assert_eq(status.action, "cli")
+    assert(status.ok)
+    assert(status.json().contains("jet.status/v1"))
+}
+
+fn local_app_test_identity_error(body: String) -> String Never! {
+    if jet_cli_local_app_parse_identity(body) == {
+        .Err(message) -> ~message
+        .Ok(_) -> panic("identity unexpectedly accepted")
+    }
+}
+#Test("local app reconnect identity validation preserves field precedence") {
+    identity :: jet_cli_local_app_parse_identity("{{\"identity\":{{\"source\":\"s\",\"build\":\"b\",\"session\":\"tab\",\"authority\":\"a\"}}}}") ?? panic("identity")
+    assert_eq(identity.source, "s")
+    assert_eq(identity.build, "b")
+    assert_eq(identity.session, "tab")
+    assert_eq(identity.authority, "a")
+    assert_eq(local_app_test_identity_error("bad"), "reconnect body is not valid JSON")
+    assert_eq(local_app_test_identity_error("[]"), "reconnect body must be a JSON object")
+    assert_eq(local_app_test_identity_error("{{}}"), "reconnect body is missing identity")
+    assert_eq(local_app_test_identity_error("{{\"identity\":null}}"), "reconnect identity must be a JSON object")
+    assert_eq(local_app_test_identity_error("{{\"identity\":{{}}}}"), "local-app identity field `source` is not text")
+    assert_eq(local_app_test_identity_error("{{\"identity\":{{\"source\":\"s\",\"build\":1}}}}"), "local-app identity field `build` is not text")
+}
+#Test("local app callbacks saturate at unsigned64 max") {
+    assert_eq(jet_cli_local_app_next_callback(U64{0}), U64{1})
+    assert_eq(jet_cli_local_app_next_callback(U64{18446744073709551614}), U64{18446744073709551615})
+    assert_eq(jet_cli_local_app_next_callback(U64{18446744073709551615}), U64{18446744073709551615})
+}
+#Test("local app control alias index retains first schema match") {
+    schema := local_app_test_schema()
+    second := local_app_test_control()
+    second.name = "Count"
+    second.label = "second"
+    &schema.controls.push(^second)
+    index :: jet_cli_local_app_control_index(schema)
+    assert_eq(index.get("count"), Val(0))
+    assert_eq(index.get("Count"), Val(0))
+    assert_eq(index.get("second"), Val(1))
+}
+
+// Real Kernel journey, not a mocked evaluator. Pending NOTEBOOK ABI
+// reconciliation and actual Kernel/CSPRNG/trust producers (#4494/#4500);
+// Main must not report this test exercised until those providers are delivered.
+fn local_app_test_real_host() -> JetCLILocalAppHost Err! {
+    source :: "fn increment(count: Int) -> Int {{ count + 1 }}\n"
+    definition := JetCLILocalAppDefinition{document: JetCLILocalAppDocument.Source{source: source}, path: local_app_paths.from_text("app.jet", local_app_paths.PathPlatform.Unix), function: "increment", source_hash: mir_sha256_hex_bytes(mir_sha256_bytes(source.bytes())), environment_hash: "local-app-test-environment"}
+    token := "real-kernel-test-authority"
+    JetCLILocalAppHost.new(^definition, ^token)
+}
+#Test("local app tabs isolate values and callbacks with the canonical Kernel") {
+    host := local_app_test_real_host() ?? panic("checked host")
+    first :: &host.create_session() ?? panic("first tab")
+    second :: &host.create_session() ?? panic("second tab")
+    assert(first != second)
+    called :: jet_cli_local_app_call_message(&host, first, "{{\"values\":{{\"count\":1}}}}") ?? panic("checked call")
+    assert(called.contains("\"callback\":1"))
+    assert_eq(host.sessions[first].values.get("count"), Val("1"))
+    assert_eq(host.sessions[second].values.get("count"), None)
+    assert_eq(host.sessions[second].callback, U64{0})
+    if jet_cli_local_app_call_message(&host, second, "{{}}") == {
+        .Err(message) -> assert(message.contains("required checked control `count` has no value"))
+        .Ok(_) -> panic("required empty control accepted")
+    }
+    assert_eq(host.sessions[second].callback, U64{0})
+    &host.reset_session(first) ?? panic("reset")
+    assert_eq(host.sessions[first].values.len(), 0)
+    assert_eq(host.sessions[first].callback, U64{2})
+    assert_eq(host.sessions[second].callback, U64{0})
+}

@@ -1,0 +1,110 @@
+// Claims for the output profile (crates/jet-cli/src/OutputProfile.rs tests).
+
+fn output_profile_test_facts() -> JetCLIOutputFacts {
+    JetCLIOutputFacts{
+        tty: true,
+        term: Val("xterm-256color"),
+        no_color: false,
+        force_color: false,
+        requested_color: JetCLIColorRequest.Auto,
+        json: false,
+        width: Val(100),
+        unicode: true,
+    }
+}
+
+fn output_profile_test_select(facts: JetCLIOutputFacts) -> JetCLIOutputProfile {
+    jet_cli_output_profile_select(facts) ?? panic("output profile selection failed: {jet_cli_output_profile_error_message(err)}")
+}
+
+#Test("human terminal selects styled unicode progress channels") {
+    profile :: output_profile_test_select(output_profile_test_facts())
+    assert_eq(profile.width, 100)
+    assert(profile.ansi_enabled)
+    assert(profile.unicode_enabled)
+    assert(profile.progress_enabled)
+    assert(profile.human_enabled)
+    assert(!profile.machine_enabled)
+    assert(jet_cli_output_profile_channel(profile, JetCLIOutputKind.Renderable) == JetCLIOutputChannel.HumanStdout)
+    human_kinds :: [JetCLIOutputKind]{JetCLIOutputKind.Status, JetCLIOutputKind.Log, JetCLIOutputKind.Progress}
+    loop kind in human_kinds {
+        assert(jet_cli_output_profile_channel(profile, kind) == JetCLIOutputChannel.HumanStderr)
+    }
+    assert(jet_cli_output_profile_channel(profile, JetCLIOutputKind.Machine) == JetCLIOutputChannel.Hidden)
+}
+
+#Test("redirected auto output is plain and non-progress") {
+    facts := output_profile_test_facts()
+    facts.tty = false
+    profile :: output_profile_test_select(facts)
+    assert(!profile.ansi_enabled)
+    assert(!profile.unicode_enabled)
+    assert(!profile.progress_enabled)
+    assert(jet_cli_output_profile_channel(profile, JetCLIOutputKind.Renderable) == JetCLIOutputChannel.HumanStdout)
+}
+
+#Test("explicit choice wins over a dumb terminal") {
+    facts := output_profile_test_facts()
+    facts.term = Val("dumb")
+    facts.requested_color = JetCLIColorRequest.Always
+    profile :: output_profile_test_select(facts)
+    assert(profile.ansi_enabled)
+    assert(!profile.unicode_enabled)
+    assert(!profile.progress_enabled)
+}
+
+#Test("auto color uses NO_COLOR, then FORCE_COLOR, then the terminal") {
+    facts := output_profile_test_facts()
+    facts.tty = false
+    facts.force_color = true
+    assert(output_profile_test_select(facts).ansi_enabled)
+    facts.no_color = true
+    assert(!output_profile_test_select(facts).ansi_enabled)
+    facts.no_color = false
+    facts.force_color = false
+    assert(!output_profile_test_select(facts).ansi_enabled)
+    facts.tty = true
+    assert(output_profile_test_select(facts).ansi_enabled)
+}
+
+#Test("json is machine only and never ANSI or progress") {
+    facts := output_profile_test_facts()
+    facts.json = true
+    facts.requested_color = JetCLIColorRequest.Always
+    profile :: output_profile_test_select(facts)
+    assert(!profile.ansi_enabled)
+    assert(!profile.progress_enabled)
+    assert(!profile.human_enabled)
+    assert(profile.machine_enabled)
+    human_kinds :: [JetCLIOutputKind]{JetCLIOutputKind.Renderable, JetCLIOutputKind.Status, JetCLIOutputKind.Log, JetCLIOutputKind.Progress}
+    loop kind in human_kinds {
+        assert(jet_cli_output_profile_channel(profile, kind) == JetCLIOutputChannel.Hidden)
+    }
+    assert(jet_cli_output_profile_channel(profile, JetCLIOutputKind.Machine) == JetCLIOutputChannel.MachineStdout)
+}
+
+#Test("invalid facts are typed errors with the Rust messages") {
+    if jet_cli_color_request_parse("sometimes") == {
+        .Ok(_) -> panic("`sometimes` parsed as a color request")
+        .Err(error) -> {
+            assert(error == JetCLIOutputProfileError.InvalidColorRequest("sometimes"))
+            assert_eq(jet_cli_output_profile_error_message(error), "invalid color request \"sometimes\"; expected auto, always, or never")
+        }
+    }
+    width := output_profile_test_facts()
+    width.width = Val(0)
+    if jet_cli_output_profile_select(width) == {
+        .Ok(_) -> panic("a zero width selected a profile")
+        .Err(error) -> assert_eq(jet_cli_output_profile_error_message(error), "output width must be greater than zero: 0")
+    }
+    term := output_profile_test_facts()
+    term.term = Val("x\nterm")
+    if jet_cli_output_profile_select(term) == {
+        .Ok(_) -> panic("a control character in TERM selected a profile")
+        .Err(error) -> assert(error == JetCLIOutputProfileError.InvalidTerm("x\nterm"))
+    }
+}
+
+#Test("selection is deterministic") {
+    assert(output_profile_test_select(output_profile_test_facts()) == output_profile_test_select(output_profile_test_facts()))
+}

@@ -1,0 +1,134 @@
+// Main-authorized fake providers exercise the real command orchestration,
+// never claim a native O0/backend proof. Execution fixture is Tests/Host/Execution.
+use jet_foundation.[WatchPolicy, watch_policy_from]
+struct JetCLIExecutionTestCompiler {
+    accepted: [Bool]
+    calls: Int
+    impl JetCLIExecutionCompiler {
+        fn prepare(&self, invocation: JetCLIExecutionInvocation) -> JetCLIExecutionPreparation {
+            assert_eq(invocation.program_arguments, [String]{"-child", "evil; arg"})
+            accepted :: self.accepted[self.calls]
+            self.calls += 1
+            if !accepted -> return JetCLIExecutionPreparation.Refused{output: JetDriverVerbOutput{stdout: "", stderr: "source-owned diagnostic\n", exit_code: 1}}
+            request := jet_cli_execution_test_request()
+            request.argv = [String]{"/project/main.jet"}
+            loop argument in invocation.program_arguments -> &request.argv.push(argument)
+            JetCLIExecutionPreparation.Ready{request: request}
+        }
+    }
+}
+struct JetCLIExecutionTestWatcher {
+    changes: [JetCLIExecutionChange]
+    next_index: Int
+    calls: [String]
+    reports: [String]
+    fail: String
+    impl JetCLIDevWatchHost {
+        fn open(&self, invocation: JetCLIExecutionInvocation) -> JetCLIDevWatch JetCLIExecutionError! {
+            &self.calls.push("open")
+            if self.fail == "open" -> return Err(JetCLIExecutionError{operation: "watch-open", message: "denied"})
+            Ok(JetCLIDevWatch{identity: 9})
+        }
+        fn next(&self, watch: JetCLIDevWatch) -> JetCLIExecutionChange JetCLIExecutionError! {
+            assert_eq(watch.identity, 9)
+            &self.calls.push("next")
+            if self.fail == "next" -> return Err(JetCLIExecutionError{operation: "watch-next", message: "lost authority"})
+            change :: self.changes[self.next_index]
+            self.next_index += 1
+            Ok(change)
+        }
+        fn close(&self, watch: JetCLIDevWatch) JetCLIExecutionError! { &self.calls.push("close") }
+        fn present(&self, output: JetDriverVerbOutput) JetCLIExecutionError! { &self.reports.push(output.stderr) }
+    }
+}
+fn jet_cli_execution_test_invocation(command: String, flags: [String]) -> JetCLIExecutionInvocation {
+    args := [String]{command, "main.jet"}
+    loop flag in flags -> &args.push(flag)
+    output :: jet_cli_output_adapter_select(args, output_adapter_test_facts()) ?? panic("output adapter")
+    JetCLIExecutionInvocation{command: command, arguments: args, program_arguments: [String]{"-child", "evil; arg"}, output: output, reload: watch_policy_from(args, WatchPolicy.Auto)}
+}
+#Test("run prepares once and preserves captured status and bytes") {
+    invocation :: jet_cli_execution_test_invocation("run", [String]{})
+    compiler := JetCLIExecutionTestCompiler{accepted: [Bool]{true}, calls: 0}
+    host := JetCLIExecutionTestHost{calls: [String]{}, fail: ""}
+    output :: jet_cli_run_invocation<JetCLIExecutionTestCompiler, JetCLIExecutionTestHost>(invocation, &compiler, &host)
+    assert_eq(compiler.calls, 1)
+    assert_eq(output.exit_code, 23)
+    assert_eq(output.stdout.bytes(), [U8]{111, 117, 116, 0, 10})
+    assert_eq(output.stderr, "err\n")
+    assert_eq(host.calls, [String]{"launch", "wait", "close"})
+}
+#Test("a rejected run never launches execution") {
+    invocation :: jet_cli_execution_test_invocation("run", [String]{})
+    compiler := JetCLIExecutionTestCompiler{accepted: [Bool]{false}, calls: 0}
+    host := JetCLIExecutionTestHost{calls: [String]{}, fail: ""}
+    output :: jet_cli_run_invocation<JetCLIExecutionTestCompiler, JetCLIExecutionTestHost>(invocation, &compiler, &host)
+    assert_eq(output.exit_code, 1)
+    assert_eq(output.stderr, "source-owned diagnostic\n")
+    assert_eq(host.calls.len(), 0)
+}
+#Test("dev policy takes the last matching flag without reading child arguments") {
+    invocation :: jet_cli_execution_test_invocation("dev", [String]{"--swap", "--watch=off", "--restart"})
+    assert(invocation.reload == WatchPolicy.Restart)
+    assert(jet_cli_execution_test_invocation("dev", [String]{"--restart", "--watch=off"}).reload == WatchPolicy.Once)
+}
+#Test("dev watch off follows finite run and returns child status without opening watcher") {
+    invocation :: jet_cli_execution_test_invocation("dev", [String]{"--watch=off"})
+    compiler := JetCLIExecutionTestCompiler{accepted: [Bool]{true}, calls: 0}
+    host := JetCLIExecutionTestHost{calls: [String]{}, fail: ""}
+    watcher := JetCLIExecutionTestWatcher{changes: [JetCLIExecutionChange]{}, next_index: 0, calls: [String]{}, reports: [String]{}, fail: ""}
+    output :: jet_cli_dev_invocation<JetCLIExecutionTestCompiler, JetCLIExecutionTestHost, JetCLIExecutionTestWatcher>(invocation, &compiler, &host, &watcher)
+    assert_eq(output.exit_code, 23)
+    assert_eq(watcher.calls.len(), 0)
+    assert_eq(host.calls, [String]{"launch", "wait", "close"})
+}
+#Test("dev watches initial errors and retains last good generation through rejected save") {
+    invocation :: jet_cli_execution_test_invocation("dev", [String]{"--swap"})
+    compiler := JetCLIExecutionTestCompiler{accepted: [Bool]{false, true, false, true}, calls: 0}
+    host := JetCLIExecutionTestHost{calls: [String]{}, fail: ""}
+    watcher := JetCLIExecutionTestWatcher{changes: [JetCLIExecutionChange]{JetCLIExecutionChange.Changed, JetCLIExecutionChange.Changed, JetCLIExecutionChange.Changed, JetCLIExecutionChange.Stop}, next_index: 0, calls: [String]{}, reports: [String]{}, fail: ""}
+    output :: jet_cli_dev_invocation<JetCLIExecutionTestCompiler, JetCLIExecutionTestHost, JetCLIExecutionTestWatcher>(invocation, &compiler, &host, &watcher)
+    assert_eq(output.exit_code, 0)
+    assert_eq(compiler.calls, 4)
+    assert_eq(host.calls, [String]{"launch", "reload", "close"})
+    assert_eq(watcher.reports, [String]{"source-owned diagnostic\n", "source-owned diagnostic\n"})
+    assert_eq(watcher.calls, [String]{"open", "next", "next", "next", "next", "close"})
+}
+#Test("dev watcher failure closes runtime and watch and returns failure") {
+    invocation :: jet_cli_execution_test_invocation("dev", [String]{})
+    compiler := JetCLIExecutionTestCompiler{accepted: [Bool]{true}, calls: 0}
+    host := JetCLIExecutionTestHost{calls: [String]{}, fail: ""}
+    watcher := JetCLIExecutionTestWatcher{changes: [JetCLIExecutionChange]{}, next_index: 0, calls: [String]{}, reports: [String]{}, fail: "next"}
+    output :: jet_cli_dev_invocation<JetCLIExecutionTestCompiler, JetCLIExecutionTestHost, JetCLIExecutionTestWatcher>(invocation, &compiler, &host, &watcher)
+    assert_eq(output.exit_code, 1)
+    assert(output.stderr.contains("lost authority"))
+    assert_eq(host.calls, [String]{"launch", "close"})
+    assert_eq(watcher.calls, [String]{"open", "next", "close"})
+}
+// #4427: real Front sys.set Unit/native Result mismatch; never remove its host call.
+#Test("Front run dispatch preserves Jet-owned and child argv at the actual separator") {
+    facts :: output_adapter_test_facts()
+    plan :: jet_cli_front([String]{"run", "main.jet", "--quiet", "--", "-child", "evil; arg"}, facts)
+    if plan == {
+        .Run(invocation) -> {
+            assert_eq(invocation.arguments, [String]{"run", "main.jet", "--quiet"})
+            assert_eq(invocation.program_arguments, [String]{"-child", "evil; arg"})
+            assert(invocation.output.flags.quiet)
+        }
+        else -> panic("Front did not dispatch run")
+    }
+}
+
+// #4427: original real Front host boundary retained pending canonical sys.set fix.
+#Test("Front dev policy excludes child flags and uses the canonical last matching policy") {
+    facts :: output_adapter_test_facts()
+    plan :: jet_cli_front([String]{"dev", "main.jet", "--restart", "--swap", "--", "--watch=off", "--restart"}, facts)
+    if plan == {
+        .Dev(invocation) -> {
+            assert_eq(invocation.arguments, [String]{"dev", "main.jet", "--restart", "--swap"})
+            assert_eq(invocation.program_arguments, [String]{"--watch=off", "--restart"})
+            assert(invocation.reload == WatchPolicy.Swap)
+        }
+        else -> panic("Front did not dispatch dev")
+    }
+}

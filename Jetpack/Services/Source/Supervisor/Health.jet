@@ -2,9 +2,9 @@
 // `jet dev` and `services up` wait on. Probes run with the same realized PATH
 // and variables as the service when the caller passes its environment.
 
-@SERVICES_PROBE_CONNECT_MS :: 300
-@SERVICES_HEALTH_POLL_MS :: 300
-@SERVICES_NO_PROBE_STABILITY_MS :: 300
+SERVICES_PROBE_CONNECT_MS :: prep { 300 }
+SERVICES_HEALTH_POLL_MS :: prep { 300 }
+SERVICES_NO_PROBE_STABILITY_MS :: prep { 300 }
 
 // A `services health` result for one service.
 pub enum ServiceHealth {
@@ -50,16 +50,16 @@ fn services_probe_shell(command: String, resolved: ServiceResolved, env: ShellEn
         applied := shell_env
         spec = &applied.apply_to(spec)
     }
-    services_run_bounded_probe(spec, @SERVICES_MAX_READY_PROBE_MS)
+    services_run_bounded_probe(spec, SERVICES_MAX_READY_PROBE_MS)
 }
 
 fn services_probe_ready(resolved: ServiceResolved, env: ShellEnv?) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool Never! {
     if resolved.ready_probe == .Val(probe) {
         return if probe == {
             .Exec(command) -> services_probe_shell(command, resolved, env)
-            .Http(url, status) -> services_probe_http(url, status)
+            .HTTP(url, status) -> services_probe_http(url, status)
             .Notify(path) -> services_probe_notify(resolved.project_dir, path)
-            .Tcp(host, port) -> services_probe_tcp(host, port)
+            .TCP(host, port) -> services_probe_tcp(host, port)
         }
     }
     if resolved.ready == .Val(command) -> return services_probe_shell(command, resolved, env)
@@ -79,7 +79,7 @@ fn services_probe_notify(project_dir: String, path: String) -[FS, Env]> Bool Nev
 
 fn services_probe_tcp(host: String, port: Int) -[Net, Time.Wait]> Bool Never! {
     address :: net.socket_addr_parse("{host}:{port}") ?? return false
-    net.tcp_connect_timeout(address, @SERVICES_PROBE_CONNECT_MS) ?? return false
+    net.tcp_connect_timeout(address, SERVICES_PROBE_CONNECT_MS) ?? return false
     true
 }
 
@@ -105,9 +105,9 @@ fn services_probe_http(url: String, expected_status: Int?) -[Net, Time.Wait]> Bo
     }
     if host == "" || host.contains("[") || host.contains("]") -> return false
     address :: net.socket_addr_parse("{host}:{port}") ?? return false
-    stream :: net.tcp_connect_timeout(address, @SERVICES_PROBE_CONNECT_MS) ?? return false
-    net.set_read_timeout(stream, @SERVICES_PROBE_CONNECT_MS).drop("a probe without a read timeout still reads once")
-    net.set_write_timeout(stream, @SERVICES_PROBE_CONNECT_MS).drop("a probe without a write timeout still writes once")
+    stream :: net.tcp_connect_timeout(address, SERVICES_PROBE_CONNECT_MS) ?? return false
+    net.set_read_timeout(stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a read timeout still reads once")
+    net.set_write_timeout(stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a write timeout still writes once")
     crlf :: "{env_shell_control(13)}\n"
     request :: "GET /{path} HTTP/1.1{crlf}Host: {host}{crlf}Connection: close{crlf}{crlf}"
     net.tcp_write_all_bytes(stream, request.bytes()) ?? return false
@@ -137,7 +137,7 @@ pub fn services_wait_healthy_with_env(project_dir: String, env: ShellEnv?, plan:
         .Ok(resolved) -> resolved.ready == None && resolved.ready_probe == None && resolved.ports.len() == 0
         .Err(_) -> false
     }
-    stable_since := None
+    stable_since := Int?{None}
     deadline :: services_now_ms() + timeout.ns / 1000000
     loop {
         if services_supervisor_failure(project_dir, plan) != None -> return false
@@ -145,11 +145,11 @@ pub fn services_wait_healthy_with_env(project_dir: String, env: ShellEnv?, plan:
             if !needs_stability -> return true
             since :: stable_since ?? services_now_ms()
             stable_since = Val(since)
-            if services_now_ms() - since >= @SERVICES_NO_PROBE_STABILITY_MS -> return true
+            if services_now_ms() - since >= SERVICES_NO_PROBE_STABILITY_MS -> return true
         } else {
             stable_since = None
         }
         if services_now_ms() >= deadline -> return false
-        time.sleep(time.duration_ms(@SERVICES_HEALTH_POLL_MS))
+        time.sleep(time.duration_ms(SERVICES_HEALTH_POLL_MS))
     }
 }

@@ -1,0 +1,126 @@
+// Offline explanations (crates/jet-cli/src/Explain.rs). Diagnostic essays and
+// terminal styling use the foundation's canonical implementation; the CLI adds
+// query recognition, not a second essay renderer or palette.
+use jet_foundation.[
+    DiagnosticExplanation,
+    DiagnosticRegistryRow,
+    DiagnosticRegistryStatus,
+    diagnostic_explanation,
+    diagnostic_explanation_from_row,
+    diagnostic_explanation_render,
+    DIAGNOSTIC_ROWS,
+]
+use jet_driver.[
+    jet_driver_explain_pointer_line,
+]
+
+// Rust `index` (Explain.rs:33-61). The map owns one projection per registry row.
+pub fn jet_cli_explain_index() -> [String: DiagnosticExplanation] Never! {
+    out := [String: DiagnosticExplanation]{}
+    rows := ~DIAGNOSTIC_ROWS
+    &rows.sort_by((left: DiagnosticRegistryRow, right: DiagnosticRegistryRow) -> left.code <=> right.code)
+    loop row in rows {
+        out[row.code] = diagnostic_explanation_from_row(row)
+    }
+    out
+}
+
+// Rust `live_codes` (Explain.rs:65-71). BTreeMap iteration orders codes by key.
+pub fn jet_cli_explain_live_codes() -> [String] Never! {
+    codes := [String]{}
+    loop row in DIAGNOSTIC_ROWS {
+        if row.status != DiagnosticRegistryStatus.Retired -> &codes.push(row.code)
+    }
+    &codes.sort()
+    codes
+}
+
+// Rust `lookup` diagnostic branch (Explain.rs:147-150); other subjects require
+// the syntax, unified registration, and contribution registries upstream.
+pub fn jet_cli_explain_lookup_code(code: String) -> DiagnosticExplanation? Never! {
+    diagnostic_explanation(code)
+}
+
+// Rust `render` (Explain.rs:381-440). Foundation owns essay sections, source
+// pointers, and ANSI roles for both diagnostic and syntax entries.
+pub fn jet_cli_explain_render(explanation: DiagnosticExplanation, color: Bool) -> String Never! {
+    diagnostic_explanation_render(explanation, color)
+}
+
+// Rust `pointer_line` (Explain.rs:448-455).
+pub fn jet_cli_explain_pointer_line(code: String, color: Bool) -> String Never! {
+    jet_driver_explain_pointer_line(code, color)
+}
+
+// Rust `is_code` (Explain.rs:461-480). Recognition is deliberately case-sensitive
+// and does not trim: unknown code-shaped queries have a different CLI route.
+pub fn jet_cli_explain_is_code(value: String) -> Bool Never! {
+    bytes :: value.bytes()
+    if bytes.len() == 5 {
+        digits := true
+        loop index in 1..<5 {
+            byte :: Int.from_u8(bytes[index])
+            if byte < 48 || byte > 57 -> digits = false
+        }
+        if digits {
+            first :: Int.from_u8(bytes[0])
+            return first == 69 || first == 76 || value == "W0410"
+        }
+    }
+    if bytes.len() == 6 && value.starts_with("JT") {
+        digits := true
+        loop index in 2..<6 {
+            byte :: Int.from_u8(bytes[index])
+            if byte < 48 || byte > 57 -> digits = false
+        }
+        if digits -> return true
+    }
+    if !value.starts_with("E-") && !value.starts_with("L-") -> return false
+    words :: value.slice(2, value.len()).split("-")
+    word_count := 0
+    loop word in words {
+        word_count += 1
+        if word.len() == 0 -> return false
+        loop byte in word.bytes() {
+            code :: Int.from_u8(byte)
+            if !(code >= 65 && code <= 90) && !(code >= 48 && code <= 57) -> return false
+        }
+    }
+    word_count >= 2
+}
+
+// Rust lookup_policy (Explain.rs:342-357). Policy owns ordering/conflicts;
+// this layer only projects the resolved chain into the one essay carrier.
+pub fn jet_cli_explain_lookup_policy(key: PolicyKey, declarations: [PolicyDeclaration]) -> DiagnosticExplanation? Never! {
+    resolved :: if policy_resolve(key, declarations) == {
+        .Ok(value) -> value
+        .Err(_) -> { return None }
+    }
+    effective :: resolved ?? return None
+    name :: policy_key_name(key)
+    Val(DiagnosticExplanation{
+        code: name, stage: "policy",
+        meaning: "effective scoped policy `{name}`",
+        what: Val(policy_explain(effective)),
+        why: Val("the nearest applicable declaration wins subject to the registry's tightening and conflict rules"),
+        fix: Val("change the nearest declaration, or remove it to inherit the next outer value"),
+        example: None, retired: false,
+    })
+}
+
+// Rust lookup_fact (Explain.rs:362-377). Never resolve a second contribution law.
+pub fn jet_cli_explain_lookup_fact(key: FactKey, contributions: [FactContribution]) -> DiagnosticExplanation? Never! {
+    resolved :: if fact_resolve(key, contributions) == {
+        .Ok(value) -> value
+        .Err(_) -> { return None }
+    }
+    effective :: resolved ?? return None
+    Val(DiagnosticExplanation{
+        code: ~key.name, stage: "build fact",
+        meaning: "effective build fact `{key.name}`",
+        what: Val(fact_explain(effective)),
+        why: Val("the nearest source writer wins within the most explicit contribution layer; same-layer disagreement is an error"),
+        fix: Val("change the effective writer, or remove it to inherit the next writer in the chain"),
+        example: None, retired: false,
+    })
+}
