@@ -3725,20 +3725,21 @@ fn validate_ram_budget(
             errors.push(TargetMachineError::MissingMemoryKind { kind });
         }
     }
-    let ram_bytes: u64 = machine
+    // The region total may exceed u64 even though each individual region cannot.
+    let ram_bytes: u128 = machine
         .memory
         .iter()
         .filter(|r| r.kind == MemoryKind::Ram)
-        .map(|r| r.size.bytes)
+        .map(|r| u128::from(r.size.bytes))
         .sum();
     let used_bytes = usage
         .stack_bytes
         .saturating_add(usage.static_ram_bytes)
         .saturating_add(machine.allocator.fixed_size());
-    if ram_bytes > 0 && used_bytes > ram_bytes {
+    if ram_bytes > 0 && u128::from(used_bytes) > ram_bytes {
         errors.push(TargetMachineError::RamOverflow {
             used_bytes,
-            ram_bytes,
+            ram_bytes: ram_bytes as u64,
         });
     }
 }
@@ -4738,6 +4739,22 @@ mod tests {
         }));
         assert!(errors.contains(&TargetMachineError::MissingAllocatorPolicy));
         assert!(errors.contains(&TargetMachineError::MissingPanicPolicy));
+    }
+
+    #[test]
+    fn ram_budget_total_above_u64_does_not_overflow() {
+        let mut machine = valid_machine();
+        machine.memory = vec![
+            MemoryRegion::new("first", 0, ByteSize::bytes(u64::MAX), MemoryKind::Ram, MemoryAccess::Rw),
+            MemoryRegion::new("second", 0, ByteSize::bytes(1), MemoryKind::Ram, MemoryAccess::Rw),
+        ];
+        let usage = TargetMachineUse {
+            stack_bytes: u64::MAX,
+            ..TargetMachineUse::default()
+        };
+        let mut errors = Vec::new();
+        validate_ram_budget(&machine, &usage, &mut errors);
+        assert!(!errors.iter().any(|error| matches!(error, TargetMachineError::RamOverflow { .. })));
     }
 
     #[test]
