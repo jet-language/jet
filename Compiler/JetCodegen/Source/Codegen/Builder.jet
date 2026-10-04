@@ -1706,22 +1706,31 @@ fn jet_codegen_leave_scope(builder: &JetCodegenBuilder, scope: MIRScopeID) Never
 }
 
 
+// A local's MIR identity is its sema symbol, except a `_` discard: sema
+// never declares one, so every `_` in a frame shares one symbol id. Like
+// Rust's `reserve_identity`, a symbol bound again in the same function gets
+// the next occurrence (`#1`, `#2`, ...), so each binding is its own local and
+// place. Template-expanded bodies rebind one symbol: a derived `compare`
+// unrolls `if self.$field.compare(rhs.$field) == {…}` per recursive field,
+// and every copy hoists its subject into the same `it` symbol.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::reserve_identity
+fn jet_codegen_local_identity(builder: &JetCodegenBuilder, local: TLocal) -> String Never! {
+    symbol :: local.symbol_id ?? return jet_codegen_identity(&builder, "local", local.span, local.name, "")
+    if local.name == "_" -> return jet_codegen_identity(&builder, "local", local.span, local.name, "")
+    base :: "{builder.function.key}|local|{symbol.key}"
+    identity := base
+    occurrence := 0
+    loop builder.local_positions.get(stable_id("mir-local", identity)) != None {
+        occurrence += 1
+        identity = "{base}#{occurrence}"
+    }
+    identity
+}
+
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::bind_local
 fn jet_codegen_bind_local_with_base(builder: &JetCodegenBuilder, local: TLocal, ty: Type, mutable: Bool, parameter: MIRValueID?, capture: MIRValueID?, parameter_access: MIRAccess?, capture_ownership: MIROwnership?, string_view: Bool) -> MIRPlaceID Never! {
-    identity := ""
-    symbol_key := ""
-    // A local's MIR identity is its sema symbol, except a `_` discard: sema
-    // never declares one, so every `_` in a frame shares one symbol id. Like
-    // Rust's `reserve_identity`, each discard binding is then its own local.
-    if {
-        local.symbol_id != None -> {
-            symbol :: local.symbol_id ?? SymbolID{key: ""}
-            symbol_key = symbol.key
-            identity = if local.name == "_" -> jet_codegen_identity(&builder, "local", local.span, local.name, "") else -> "{builder.function.key}|local|{symbol.key}"
-        } else -> {
-            identity = jet_codegen_identity(&builder, "local", local.span, local.name, "")
-        }
-    }
+    symbol_key :: (local.symbol_id ?? SymbolID{key: ""}).key
+    identity :: jet_codegen_local_identity(&builder, local)
     local_id := MIRLocalID{value: stable_id("mir-local", identity)}
     place_id := MIRPlaceID{value: stable_id("mir-place", "{identity}|place")}
     mir_ty := jet_codegen_lower_type_for_function(ty, builder)
@@ -1785,16 +1794,8 @@ fn jet_codegen_bind_local(builder: &JetCodegenBuilder, local: TLocal, ty: Type, 
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::bind_local_alias
 fn jet_codegen_bind_local_alias(builder: &JetCodegenBuilder, local: TLocal, ty: Type, place: MIRPlaceID, mutable: Bool) -> MIRPlaceID Never! {
-    symbol_key := ""
-    identity := if local.symbol_id == {
-        .Val(symbol) -> {
-            symbol_key = symbol.key
-            if local.name == "_" -> jet_codegen_identity(&builder, "local", local.span, local.name, "") else -> "{builder.function.key}|local|{symbol.key}"
-        }
-        else -> {
-            jet_codegen_identity(&builder, "local", local.span, local.name, "")
-        }
-    }
+    symbol_key :: (local.symbol_id ?? SymbolID{key: ""}).key
+    identity :: jet_codegen_local_identity(&builder, local)
     local_id := MIRLocalID{value: stable_id("mir-local", identity)}
     access := if mutable -> MIRAccess.Write else -> MIRAccess.Read
     lowered_ty :: jet_codegen_lower_type_for_function(ty, builder)
