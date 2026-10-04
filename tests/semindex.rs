@@ -791,7 +791,11 @@ fn semantic_symbols_include_module_and_selected_imports() {
     let imported = symbols.lookup("imported_score");
     assert_eq!(imported.len(), 1);
     assert!(imported[0].identity.starts_with("import:"));
-    assert!(imported[0].signature.contains("score(name: String) Int"));
+    assert!(
+        imported[0].signature.contains("score(name: String) -> Int"),
+        "{}",
+        imported[0].signature
+    );
     fs::remove_dir_all(root).ok();
 }
 
