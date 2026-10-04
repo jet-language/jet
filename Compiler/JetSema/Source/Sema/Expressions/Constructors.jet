@@ -797,7 +797,7 @@ fn sema_expression_checked_text_static_method_call(receiver: Expr, method_name: 
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if environment.registration_graph == None -> return SemaMethodSpecialCheck{handled: true, value: None}
-    direct :: sema_call_direct_target_from_registration(function, environment.registration_graph, environment.module_identity, environment.package_identity, type_args, method_span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    direct :: sema_call_direct_target_from_registration(function, environment.registration_graph, environment.module_identity, environment.package_identity, environment.generic_params, type_args, method_span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     call := Call{
         name: "{type_name}.{method_name}",
         name_span: method_span,

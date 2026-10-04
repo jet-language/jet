@@ -232,7 +232,7 @@ pub fn sema_call_infer_direct_target_from_types(target: SemaCallDirectTarget, pa
     sema_call_direct_target_with_inference(target, result)
 }
 
-pub fn sema_call_direct_target_from_registration(function: SemaRegistrationFunction, graph: SemaRegistrationGraph?, caller_module_identity: String, caller_package_identity: String, type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
+pub fn sema_call_direct_target_from_registration(function: SemaRegistrationFunction, graph: SemaRegistrationGraph?, caller_module_identity: String, caller_package_identity: String, lexical_generic_params: [TGenericParam], type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
     generic_params :: sema_inference_registration_params(function.generic_params)
     if generic_params.len() == 0 {
         if type_args.len() > 0 {
@@ -244,7 +244,7 @@ pub fn sema_call_direct_target_from_registration(function: SemaRegistrationFunct
     if type_args.len() == 0 {
         return SemaCallDirectTarget{symbol: function.symbol, signature: function.signature, type_args: [Type]{}, generic_params: generic_params, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
     }
-    context := sema_inference_context(caller_module_identity, caller_package_identity, generic_params, [TGenericParam]{}, None)
+    context := sema_inference_context(caller_module_identity, caller_package_identity, generic_params, lexical_generic_params, None)
     result :: sema_infer_validate_explicit(graph, &context, type_args, span, &diagnostics) ?? return None
     signature :: sema_inference_substitute_type_bindings(function.signature, result.substitutions)
     SemaCallDirectTarget{symbol: function.symbol, signature: signature, type_args: result.type_args, generic_params: generic_params, generic_substitutions: result.substitutions, generic_evidence: result.evidence}
