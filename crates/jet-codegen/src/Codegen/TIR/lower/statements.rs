@@ -4678,7 +4678,17 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         crate::AST::Expr::Ident(code, _) => Some(code.clone()),
                         _ => None,
                     });
-                    ScopeMemberKind::ExpectFail(expected)
+                    let message = args.iter().find_map(|arg| match arg {
+                        crate::AST::Expr::TupleLit(fields, ..) if fields.len() == 1 && fields[0].0 == Syntax::SCOPE_TEST_EXPECT_MESSAGE => {
+                            let crate::AST::Expr::Str(parts, _) = &fields[0].1 else { return None; };
+                            Some(parts.iter().map(|part| match part {
+                                crate::AST::StrPart::Lit(text) => text.as_str(),
+                                _ => unreachable!("sema validated expected message literal"),
+                            }).collect::<String>())
+                        }
+                        _ => None,
+                    });
+                    ScopeMemberKind::ExpectFail { code: expected, message }
                 } else if name == Syntax::SCOPE_TEST_TIMEOUT {
                     ScopeMemberKind::Timeout(lower_expr(
                         args.first().expect("sema validated .timeout argument"),

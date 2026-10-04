@@ -808,6 +808,8 @@ pub const TEST_EXPECTED_FAIL_PARAM: &str = "expected_fail";
 /// `.measure` selects measurement, and `.cases(rows)` supplies per-row claims.
 pub const SCOPE_TEST_SETUP: &str = "setup";
 pub const SCOPE_TEST_EXPECT_FAIL: &str = "expect_fail";
+/// D-TEST-STOPMSG1=A: non-empty literal substring of the region's raw stop text.
+pub const SCOPE_TEST_EXPECT_MESSAGE: &str = "message";
 pub const SCOPE_TEST_TIMEOUT: &str = "timeout";
 pub const SCOPE_TEST_SKIP: &str = "skip";
 /// D-CLAIM-BENCH1=A (ratified 2026-08-07, card #1641): measurement is a

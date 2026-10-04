@@ -2149,8 +2149,10 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     previous_move_facts := ctx.move_facts
     previous_ref_bindings := ctx.ref_bindings
     previous_body_index := ctx.body_index
+    previous_expected_exits := ctx.expected_test_exits
     ctx.current_function = Val(function.id)
     ctx.body_index = jet_rust_emit_body_index(function)
+    ctx.expected_test_exits = jet_rust_emit_expected_scope_exits(&ctx, function)
     // The shared-capture plan reads the new index's partial-move rows.
     shared_locals :: jet_rust_emit_shared_capture_locals(ctx, function)
     ctx.body_index.shared_locals = shared_locals
@@ -2211,7 +2213,7 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     // MIRRust emit_structured_body: a body nesting deeper than the structured
     // cap falls back to the dispatch loop.
     body := [String]{}
-    structured :: plan.structured && jet_rust_emit_cfg_run(&ctx, function, plan, JetRustEmitCFGItem.Tree{position: plan.entry, indent: "{indent}    "}, &body)
+    structured :: ctx.expected_test_exits.len() == 0 && plan.structured && jet_rust_emit_cfg_run(&ctx, function, plan, JetRustEmitCFGItem.Tree{position: plan.entry, indent: "{indent}    "}, &body)
     if structured {
         loop line in body -> &lines.push(line)
     } else {
@@ -2239,6 +2241,7 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     ctx.move_facts = previous_move_facts
     ctx.ref_bindings = previous_ref_bindings
     ctx.body_index = previous_body_index
+    ctx.expected_test_exits = previous_expected_exits
     // MIRRust emit_callable_named: the inline attributes precede the item.
     if !function.is_inline_always && !function.is_inline -> return lines
     out := [String]{if function.is_inline_always -> "#[inline(always)]" else -> "#[inline]"}

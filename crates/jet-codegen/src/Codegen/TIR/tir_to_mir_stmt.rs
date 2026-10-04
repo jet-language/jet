@@ -2591,13 +2591,14 @@ fn lower_scope_member(
 ) -> Result<(), LowerError> {
     match kind {
         ScopeMemberKind::Setup => lower_stmts(ctx, body),
-        ScopeMemberKind::ExpectFail(code) => {
+        ScopeMemberKind::ExpectFail { code, message } => {
             let scope = ctx.enter_scope(MirScopeKind::ScopeMember, ctx.span(), code.clone())?;
             attach_scope_member(
                 ctx,
                 scope,
                 MirTestScopeMember::ExpectFail {
                     expected_code: code.clone(),
+                    expected_message: message.clone(),
                 },
             )?;
             lower_scope_member_body(ctx, scope, body)

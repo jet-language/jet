@@ -67,6 +67,7 @@ use jet_foundation.[
     ViewSourceProjection,
     ast_binding,
     ast_empty_lambda_meta,
+    diagnostic_registry_row,
     expr_span,
     measure_literal_value,
     symbol_id,
@@ -3702,16 +3703,41 @@ fn sema_stmt_check_scope_member(name: String, args: [Expr], args_span: Span?, bo
             }
         }
         "expect_fail" -> {
-            if args.len() == {
-                0 -> kind = Val(TScopeMemberKind.ExpectFail{code: None})
-                1 -> {
-                    if args[0] == {
-                        .Ident(code, _) -> kind = Val(TScopeMemberKind.ExpectFail{code: Val(code)})
-                        else -> {}
+            code := String?{None}
+            message := String?{None}
+            valid := args.len() <= 2
+            loop argument in args {
+                if argument == {
+                    .Ident(value, _) -> {
+                        if code != None || message != None || !value.starts_with("E30") || diagnostic_registry_row(value) == None -> valid = false
+                        code = Val(value)
                     }
+                    .TupleLit(fields, _, _) -> {
+                        if message != None || fields.len() != 1 -> { valid = false; next }
+                        if fields[0].name != "message" -> { valid = false; next }
+                        if fields[0].value == {
+                            .Str(parts, _) -> {
+                                text := ""
+                                loop part in parts {
+                                    if part == {
+                                        .Lit(value) -> text = "{text}{value}"
+                                        else -> valid = false
+                                    }
+                                }
+                                if text.len() == 0 -> valid = false
+                                message = Val(text)
+                            }
+                            else -> valid = false
+                        }
+                    }
+                    else -> valid = false
                 }
-                else -> {}
             }
+            if valid -> kind = Val(TScopeMemberKind.ExpectFail{code: code, message: message})
+            else -> &diagnostics.push(sema_error("E0617", args_span ?? span,
+                "`.expect_fail` takes an optional runtime stop code and `message: \"text\"`",
+                "the code names a registered E30xx stop; the message is a non-empty string literal matched as a case-sensitive substring",
+                "write `.expect_fail {{ … }}`, `.expect_fail(E3010) {{ … }}`, or `.expect_fail(E3001, message: \"reason\") {{ … }}`"))
         }
         "timeout" -> {
             if args.len() == 1 {
@@ -5240,7 +5266,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                 if sema_stmt_refutable_block_exits(body) -> reachable = false
             }
             .ScopeMember(name, _, _, _, body, _, _, _) -> {
-                if name != "skip" && sema_stmt_refutable_block_exits(body) -> reachable = false
+                if name != "skip" && name != "expect_fail" && sema_stmt_refutable_block_exits(body) -> reachable = false
             }
             .Transact(_, _, body, _, _) | .Policy(_, body, _) -> {
                 if sema_stmt_block_has_no_fallthrough(body) -> reachable = false

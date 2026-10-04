@@ -328,19 +328,29 @@ impl Journey {
     }
 }
 
+/// A producer stop travels with its raw identity and its already-rendered frame.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JetStreamFailure {
+    pub code: String,
+    pub message: String,
+    pub rendered: String,
+}
+
 thread_local! {
     static JET_JOURNEY: std::cell::RefCell<Journey> = const {
         std::cell::RefCell::new(Journey::new())
     };
-    static JET_STREAM_FAILURE_REPORT: std::cell::RefCell<Option<String>> =
+    static JET_STREAM_FAILURE_REPORT: std::cell::RefCell<Option<JetStreamFailure>> =
         const { std::cell::RefCell::new(None) };
 }
 
-pub fn jet_stream_record_failure_report(report: String) {
-    JET_STREAM_FAILURE_REPORT.with(|slot| *slot.borrow_mut() = Some(report));
+pub fn jet_stream_record_failure_report(code: &str, message: &str, rendered: String) {
+    JET_STREAM_FAILURE_REPORT.with(|slot| *slot.borrow_mut() = Some(JetStreamFailure {
+        code: code.to_string(), message: message.to_string(), rendered,
+    }));
 }
 
-pub fn jet_stream_take_failure_report() -> Option<String> {
+pub fn jet_stream_take_failure_report() -> Option<JetStreamFailure> {
     JET_STREAM_FAILURE_REPORT.with(|slot| slot.borrow_mut().take())
 }
 
@@ -2472,11 +2482,40 @@ pub fn jet_missing_map_key_value(key: impl std::fmt::Display) -> String {
     jet_missing_map_key_message(Some(&key.to_string()))
 }
 
-pub fn jet_test_expect_fail_message(expected_code: Option<&str>) -> String {
-    match expected_code {
-        Some(code) => format!("expected this region to stop with {code}, but it passed"),
-        None => "expected this region to fail, but it passed".to_string(),
+pub fn jet_test_expect_fail_matches(
+    expected_code: Option<&str>,
+    expected_message: Option<&str>,
+    code: &str,
+    message: &str,
+) -> bool {
+    expected_code.is_none_or(|expected| expected == code)
+        && expected_message.is_none_or(|expected| message.contains(expected))
+}
+
+/// D-TEST-STOPMSG1=A: compare the raw stop, never its rendered diagnostic.
+pub fn jet_test_expect_fail_error(
+    expected_code: Option<&str>,
+    expected_message: Option<&str>,
+    stop: Option<(&str, &str)>,
+) -> Option<String> {
+    if let Some((code, message)) = stop {
+        if jet_test_expect_fail_matches(expected_code, expected_message, code, message) {
+            return None;
+        }
+        let expected = match (expected_code, expected_message) {
+            (Some(code), Some(message)) => format!("a stop with {code} whose message contains {message:?}"),
+            (None, Some(message)) => format!("a stop whose message contains {message:?}"),
+            (Some(code), None) => format!("a stop with {code}"),
+            (None, None) => unreachable!(),
+        };
+        return Some(format!("expected {expected}, got {code}: {message}"));
     }
+    Some(match (expected_code, expected_message) {
+        (Some(code), Some(message)) => format!("expected this region to stop with {code} whose message contains {message:?}, but it passed"),
+        (None, Some(message)) => format!("expected a stop whose message contains {message:?}, but it passed"),
+        (Some(code), None) => format!("expected this region to stop with {code}, but it passed"),
+        (None, None) => "expected this region to fail, but it passed".to_string(),
+    })
 }
 
 pub fn jet_test_timeout_message(elapsed_ns: i64, limit_ns: i64) -> String {
@@ -2758,3 +2797,40 @@ pub fn jet_render_runtime_sentry_with_context(
     )
 }
 // JET_HOST_RUNTIME_SENTRY_END
+
+#[cfg(test)]
+mod expected_stop_message_tests {
+    use super::*;
+
+    #[test]
+    fn expected_stop_compares_code_and_raw_case_sensitive_substring() {
+        let stop = Some(("E3001", "internal compiler error: E0859 fingerprint collision"));
+        assert_eq!(jet_test_expect_fail_error(None, Some("fingerprint collision"), stop), None);
+        assert_eq!(jet_test_expect_fail_error(Some("E3001"), Some("fingerprint collision"), stop), None);
+        assert_eq!(jet_test_expect_fail_error(Some("E3010"), None, Some(("E3010", "index 99"))), None);
+        assert_eq!(
+            jet_test_expect_fail_error(None, Some("fingerprint collision"), Some(("E3001", "unrelated panic"))),
+            Some("expected a stop whose message contains \"fingerprint collision\", got E3001: unrelated panic".to_string()),
+        );
+        assert!(jet_test_expect_fail_error(Some("E3010"), Some("fingerprint collision"), stop).is_some());
+        assert!(jet_test_expect_fail_error(None, Some("Fingerprint collision"), stop).is_some());
+        assert!(jet_test_expect_fail_error(None, Some("panic:"), stop).is_some());
+        assert!(jet_test_expect_fail_error(None, Some(".*"), stop).is_some());
+        assert_eq!(jet_test_expect_fail_error(None, Some("[.*]"), Some(("E3001", "literal [.*] text"))), None);
+        assert_eq!(
+            jet_test_expect_fail_error(None, Some("fingerprint collision"), None),
+            Some("expected a stop whose message contains \"fingerprint collision\", but it passed".to_string()),
+        );
+    }
+
+    #[test]
+    fn producer_stop_transports_raw_code_message_and_frame_together() {
+        jet_stream_record_failure_report("E3010", "index 99", "rendered frame, not the message".to_string());
+        let stop = jet_stream_take_failure_report().expect("producer stop");
+        assert_eq!(stop.code, "E3010");
+        assert_eq!(stop.message, "index 99");
+        assert_eq!(stop.rendered, "rendered frame, not the message");
+        assert_eq!(jet_test_expect_fail_error(Some("E3010"), Some("99"), Some((&stop.code, &stop.message))), None);
+        assert!(jet_stream_take_failure_report().is_none());
+    }
+}
