@@ -156,6 +156,7 @@ use jet_foundation.[
     TVisibility,
     TWebParamReconstruction,
     Type,
+    TypeTupleField,
     WebBucket,
     WebPartitionMarker,
     core_call_key,
@@ -2497,13 +2498,14 @@ fn jet_codegen_synthetic_union_definition(ty: MIRType, module_id: MIRModuleID) -
     }
 }
 
-// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::compiler_owned_record (`Range`)
-fn jet_codegen_range_record_definition(module_identity: String) -> MIRTypeDef {
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::compiler_owned_record
+// (`Range` and the COMPILER_OWNED_CORE_RECORDS rows)
+fn jet_codegen_compiler_owned_record_definition(module_identity: String, name: String, record_fields: [TypeTupleField]) -> MIRTypeDef {
     span :: Span{start: 0, end: 0}
     fields := [MIRField]{}
-    loop field in jet_codegen_range_record_fields() {
+    loop field in record_fields {
         &fields.push(MIRField{
-            id: jet_codegen_range_record_field_id(field.name),
+            id: jet_codegen_mir_field_id(JetCodegenResolvedField{module_identity: "", nominal_name: name, field_name: field.name}),
             name: field.name,
             shape_names: jet_codegen_tuple_shape_names(field.name),
             skip: false,
@@ -2517,10 +2519,10 @@ fn jet_codegen_range_record_definition(module_identity: String) -> MIRTypeDef {
         })
     }
     return MIRTypeDef{
-        id: mir_type_id(JET_CODEGEN_RANGE_RECORD),
+        id: mir_type_id(name),
         module_id: mir_module_id(module_identity),
-        key: JET_CODEGEN_RANGE_RECORD,
-        name: JET_CODEGEN_RANGE_RECORD,
+        key: name,
+        name: name,
         span: span,
         public: true,
         package_public: false,
@@ -3192,13 +3194,19 @@ fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], fu
         }
         loop definition in semantic_module.declarations.traits -> &traits.push(jet_codegen_lower_trait_definition(definition, function_index, modules))
     }
-    // Rust `collect_items`: the compiler-owned `Range` record joins the
-    // program once, unless a declaration already owns its canonical key.
-    range_declared := false
-    loop definition in types {
-        if definition.key == JET_CODEGEN_RANGE_RECORD -> range_declared = true
+    // Rust `collect_items`: the compiler-owned `Range` record and Core records
+    // join the program once each, unless a declaration already owns the row's
+    // canonical key.
+    if modules.len() > 0 {
+        declared_keys := [String:Bool]{}
+        loop definition in types -> declared_keys[definition.key] = true
+        record_module :: modules[0].module_identity
+        if declared_keys.get(JET_CODEGEN_RANGE_RECORD) == None -> &types.push(jet_codegen_compiler_owned_record_definition(record_module, JET_CODEGEN_RANGE_RECORD, jet_codegen_range_record_fields()))
+        loop record in JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS {
+            if declared_keys.get(record.name) != None -> next
+            &types.push(jet_codegen_compiler_owned_record_definition(record_module, record.name, jet_codegen_compiler_owned_core_record_fields(record)))
+        }
     }
-    if !range_declared && modules.len() > 0 -> &types.push(jet_codegen_range_record_definition(modules[0].module_identity))
     // Rust `collect_items` (seed_parse_error): each module that declares no
     // `ParseError` of its own seeds the compiler-owned alias row; rows dedupe
     // by key, so the first such module owns it.

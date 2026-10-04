@@ -1923,7 +1923,11 @@ fn jet_codegen_lower_inline_block(builder: &JetCodegenBuilder, expression: TExpr
     }
     result := if body[body.len() - 1] == {
         .ExprStmt(value, _) -> {
-            if type_identity_key(expression.ty) != type_identity_key(value.ty) -> panic("checked inline block result type disagrees with its tail")
+            // A Never tail (the `panic(...)` ending a `??` fallback block,
+            // e.g. the `if x == None -> panic(...)` guard's refinement, which
+            // sema types at the payload) produces no value, so it fits any
+            // result type: the Rust lowering lowers the tail as is.
+            if value.ty != (Type.Named{name: "Never"}) && type_identity_key(expression.ty) != type_identity_key(value.ty) -> panic("checked inline block result type disagrees with its tail")
             jet_codegen_lower_expr(&builder, value)
         }
         .Loop(label, loop_body, span) -> jet_codegen_lower_loop_value(&builder, label, loop_body, expression.ty, span)

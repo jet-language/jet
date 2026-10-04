@@ -1471,9 +1471,8 @@ fn jet_codegen_is_stored_struct_field(builder: JetCodegenBuilder, owner_type: Ty
         else -> { return false }
     }
     found :: jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, owner_name, builder.generic_type_names)
-    // The compiler-owned `Range` record stores every field.
-    if found == None && owner_name == JET_CODEGEN_RANGE_RECORD -> return jet_codegen_range_record_field(reference.name) != None
-    identity :: found ?? return false
+    // A compiler-owned record row (`Range`, a Core record) stores every field.
+    identity :: found ?? return jet_codegen_compiler_owned_record_field(owner_name, reference.name) != None
     loop semantic_module in builder.modules {
         if semantic_module.module_identity != identity.module_identity -> next
         loop nominal in semantic_module.nominals {
@@ -4476,9 +4475,11 @@ fn jet_codegen_checked_host_field_type(builder: JetCodegenBuilder, owner_type: T
         else -> panic("checked host projection owner is not nominal")
     }
     identity := jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, owner_name, builder.generic_type_names)
-    if identity == None && owner_name == JET_CODEGEN_RANGE_RECORD {
-        field :: jet_codegen_range_record_field(field_name) ?? panic("checked host projection field has no registered nominal field")
-        return field.ty
+    if identity == None && jet_codegen_compiler_owned_record_fields(owner_name) == .Val(fields) {
+        loop field in fields {
+            if field.name == field_name -> return field.ty
+        }
+        panic("checked host projection field has no registered nominal field")
     }
     nominal_identity :: identity ?? panic("checked host projection owner has no registered nominal identity")
     generic_args := if owner == {

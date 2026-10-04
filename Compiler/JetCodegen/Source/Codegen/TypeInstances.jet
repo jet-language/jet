@@ -9,6 +9,9 @@ use jet_foundation.[
     MIRType,
     MIRTypeDef,
     Type,
+    mir_type_canonical_key,
+    mir_type_display_name,
+    mir_type_same_checked_type,
     mir_type_with_identity,
 ]
 
@@ -120,10 +123,14 @@ fn jet_codegen_merge_nested_type_instances(instances: &JetCodegenTypeInstances, 
     }
 }
 
+// MIRType equality is the checked-type identity (mir.rs `existing != &instance`
+// uses MirType's PartialEq = same_checked_type), never a structural row compare:
+// one identity may be reached through rows that differ only in spelling/layout.
 fn jet_codegen_merge_type_instance(instances: &JetCodegenTypeInstances, instance: MIRType) Never! {
     identity :: instance.identity ?? panic("checked MIR type instance has no canonical identity")
     if instances.positions.get(identity.value) == .Val(position) {
-        if instances.rows[position] != instance -> panic("conflicting canonical MIR type instance {identity.value}")
+        existing :: instances.rows[position]
+        if !mir_type_same_checked_type(existing, instance) -> panic("conflicting canonical MIR type instance {identity.value} `{mir_type_display_name(instance)}`: existing `{mir_type_canonical_key(existing)}` vs incoming `{mir_type_canonical_key(instance)}`")
     } else {
         jet_codegen_push_type_instance(&instances, identity.value, instance)
     }

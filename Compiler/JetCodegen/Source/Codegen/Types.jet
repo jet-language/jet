@@ -39,6 +39,7 @@ use jet_foundation.[
     Type,
     TypeTupleField,
     ViewProvenanceMap,
+    core_record_field,
     mir_boundary_head_carrier_module,
     mir_field_id,
     mir_nominal_ref,
@@ -645,7 +646,7 @@ fn jet_codegen_resolve_field_by_symbol(field_symbols: [String:[JetCodegenFieldSy
 
 // The compiler-owned `Range` record a range value constructs. It has no
 // source declaration; Codegen adds its row to every program
-// (`jet_codegen_range_record_definition`) under its bare canonical key.
+// (`jet_codegen_compiler_owned_record_definition`) under its bare canonical key.
 // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::compiler_owned_type_defs
 JET_CODEGEN_RANGE_RECORD :: "Range"
 
@@ -661,16 +662,176 @@ fn jet_codegen_range_record_fields() -> [TypeTupleField] Never! {
     }
 }
 
-fn jet_codegen_range_record_field(member: String) -> TypeTupleField? {
-    loop field in jet_codegen_range_record_fields() {
-        if field.name == member -> return Val(field)
+fn jet_codegen_range_record_field_id(member: String) -> MIRFieldID Never! {
+    field :: jet_codegen_compiler_owned_record_field(JET_CODEGEN_RANGE_RECORD, member) ?? panic("compiler-owned Range record has no field `{member}`")
+    jet_codegen_mir_field_id(JetCodegenResolvedField{module_identity: "", nominal_name: JET_CODEGEN_RANGE_RECORD, field_name: field.name})
+}
+
+// One compiler-owned Core record: its bare canonical name and the Core record
+// oracle's field vocabulary, in row order.
+struct JetCodegenCompilerOwnedRecord {
+    pub name: String
+    pub fields: [String]
+}
+
+// Compiler-owned Core records (`ProcessReceipt`, `IOContext`, ...) are checked
+// runtime values with no Jet declaration. Like `Range`, each joins every
+// program as one row under its bare canonical key
+// (`jet_codegen_compiler_owned_record_definition`), so a field projection on
+// one resolves to the same nominal identity as in Rust. Field types are read
+// from the Core record rows (`core_record_field`), never guessed. The rows
+// carry no `MarkerArgInfo.value` (its type is computed from the policy rule
+// argument declarations), so neither does this table.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::COMPILER_OWNED_CORE_RECORDS
+JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS :: prep { [JetCodegenCompilerOwnedRecord]{
+    JetCodegenCompilerOwnedRecord{name: "IOContext", fields: [String]{"operation", "resource", "os_code", "cause"}},
+    JetCodegenCompilerOwnedRecord{name: "NetErrorDetail", fields: [String]{"operation", "address", "name", "message", "os_code"}},
+    JetCodegenCompilerOwnedRecord{name: "AsyncPolicy", fields: [String]{"capacity", "overflow"}},
+    JetCodegenCompilerOwnedRecord{name: "CSVRow", fields: [String]{"fields", "line"}},
+    JetCodegenCompilerOwnedRecord{name: "DataLineOptions", fields: [String]{"title", "x_label", "y_label", "markers", "reference", "style", "color", "legend"}},
+    JetCodegenCompilerOwnedRecord{name: "DataLimits", fields: [String]{"encoding", "max_groups", "max_sort_rows", "max_join_rows", "max_output_rows"}},
+    JetCodegenCompilerOwnedRecord{name: "DataSourceIdentity", fields: [String]{"kind", "locator", "member", "parameters"}},
+    JetCodegenCompilerOwnedRecord{name: "DataAuthority", fields: [String]{"scope", "revision"}},
+    JetCodegenCompilerOwnedRecord{name: "DataError", fields: [String]{"kind", "operation", "row", "column", "index", "reason", "cause"}},
+    JetCodegenCompilerOwnedRecord{name: "EncodingCause", fields: [String]{"kind", "os_code", "message"}},
+    JetCodegenCompilerOwnedRecord{name: "EncodingError", fields: [String]{"format", "kind", "byte_offset", "line", "column", "path", "reason", "cause"}},
+    JetCodegenCompilerOwnedRecord{name: "EncodingLimits", fields: [String]{"buffer_bytes", "max_depth", "max_item_bytes", "max_total_bytes", "max_expansion_depth", "max_expansion_bytes"}},
+    JetCodegenCompilerOwnedRecord{name: "DataProvenance", fields: [String]{"source", "format", "authority"}},
+    JetCodegenCompilerOwnedRecord{name: "DataSchema", fields: [String]{"identity", "format", "columns", "projection"}},
+    JetCodegenCompilerOwnedRecord{name: "DataSnapshotIdentity", fields: [String]{"id", "source", "content", "schema", "format"}},
+    JetCodegenCompilerOwnedRecord{name: "DataLoaderStatus", fields: [String]{"identity", "freshness", "invalidated_by", "error", "cleanup", "buffered_bytes", "backpressure", "last_good"}},
+    JetCodegenCompilerOwnedRecord{name: "Claims", fields: [String]{"subject", "audience", "issuer", "expires_at", "not_before", "issued_at"}},
+    JetCodegenCompilerOwnedRecord{name: "WebFormFieldSpec", fields: [String]{"name", "value_type", "required", "default", "label", "control", "group", "wire_name"}},
+    JetCodegenCompilerOwnedRecord{name: "WebFormFieldState", fields: [String]{"name", "value_type", "required", "value", "touched", "validating", "errors"}},
+    JetCodegenCompilerOwnedRecord{name: "WebTableState", fields: [String]{"sort", "filter", "page_index", "page_size", "selected_keys", "selection_anchor", "focus_key", "page_mode"}},
+    JetCodegenCompilerOwnedRecord{name: "WebTablePage", fields: [String]{"rows", "row_keys", "total_rows", "page_index", "page_size", "page_count"}},
+    JetCodegenCompilerOwnedRecord{name: "WebVirtualPlan", fields: [String]{"total_count", "scroll_offset", "viewport_width", "viewport_height", "estimated_item_size", "overscan", "start", "end", "total_size", "measured_count", "anchor_index", "anchor_offset", "measurements"}},
+    JetCodegenCompilerOwnedRecord{name: "MemoStats", fields: [String]{"hits", "misses", "size", "bound"}},
+    JetCodegenCompilerOwnedRecord{name: "GameScene", fields: [String]{"assets", "input"}},
+    JetCodegenCompilerOwnedRecord{name: "GameFrame", fields: [String]{"index", "input"}},
+    JetCodegenCompilerOwnedRecord{name: "GameAssets", fields: [String]{}},
+    JetCodegenCompilerOwnedRecord{name: "GameInputMap", fields: [String]{}},
+    JetCodegenCompilerOwnedRecord{name: "GameInputSnapshot", fields: [String]{}},
+    JetCodegenCompilerOwnedRecord{name: "GameBackend", fields: [String]{}},
+    JetCodegenCompilerOwnedRecord{name: "GameReplay", fields: [String]{}},
+    JetCodegenCompilerOwnedRecord{name: "GameImage", fields: [String]{}},
+    JetCodegenCompilerOwnedRecord{name: "GameSound", fields: [String]{}},
+    JetCodegenCompilerOwnedRecord{name: "TestSuite", fields: [String]{"iteration", "result"}},
+    JetCodegenCompilerOwnedRecord{name: "TestComparison", fields: [String]{"status", "relation", "source", "tool", "target", "seed", "case_ids", "inputs", "reference", "candidate", "first_difference", "reason", "universal_proof"}},
+    JetCodegenCompilerOwnedRecord{name: "ProcessReceipt", fields: [String]{"code", "output", "errors", "success", "signal", "timed_out", "executable_identity", "argv", "input_digest", "policy_digest", "backend", "authority", "descendants", "limits", "outputs", "redacted", "pid", "limit_hit"}},
+    JetCodegenCompilerOwnedRecord{name: "ProcessPlan", fields: [String]{"executable_identity", "argv", "input_digest", "policy_digest", "backend", "authority", "descendants", "limits", "outputs"}},
+    JetCodegenCompilerOwnedRecord{name: "ProcessChild", fields: [String]{"stdin", "stdout", "stderr", "terminal"}},
+    JetCodegenCompilerOwnedRecord{name: "TerminalSize", fields: [String]{"cols", "rows"}},
+    JetCodegenCompilerOwnedRecord{name: "TerminalPolicy", fields: [String]{"size", "mode"}},
+    JetCodegenCompilerOwnedRecord{name: "Address", fields: [String]{}},
+    JetCodegenCompilerOwnedRecord{name: "Message", fields: [String]{}},
+    JetCodegenCompilerOwnedRecord{name: "Attachment", fields: [String]{}},
+    JetCodegenCompilerOwnedRecord{name: "RecipientReport", fields: [String]{"address", "accepted", "code", "message"}},
+    JetCodegenCompilerOwnedRecord{name: "SendReport", fields: [String]{"server", "accepted", "rejected", "response_code", "response", "accepted_at"}},
+    JetCodegenCompilerOwnedRecord{name: "Limits", fields: [String]{"max_reply_line_bytes", "max_reply_lines", "max_capabilities", "max_recipients", "max_message_bytes", "max_auth_challenge_bytes"}},
+    JetCodegenCompilerOwnedRecord{name: "Mailer", fields: [String]{}},
+    JetCodegenCompilerOwnedRecord{name: "Envelope", fields: [String]{"from", "recipients"}},
+    JetCodegenCompilerOwnedRecord{name: "DKIMConfig", fields: [String]{"domain", "selector", "private_key", "signed_headers"}},
+    JetCodegenCompilerOwnedRecord{name: "SMTPConfig", fields: [String]{"host", "port", "security", "auth", "recipient_policy", "trust", "limits", "dkim"}},
+    JetCodegenCompilerOwnedRecord{name: "XMLCanonical", fields: [String]{"mode", "comments", "inclusive_prefixes"}},
+    JetCodegenCompilerOwnedRecord{name: "Size", fields: [String]{"width", "height"}},
+    JetCodegenCompilerOwnedRecord{name: "UINode", fields: [String]{"label", "width", "height", "accessibility", "ime", "shortcut"}},
+    JetCodegenCompilerOwnedRecord{name: "JSONWriter", fields: [String]{}},
+    JetCodegenCompilerOwnedRecord{name: "JSONReader", fields: [String]{}},
+    JetCodegenCompilerOwnedRecord{name: "JSONLWriter", fields: [String]{}},
+    JetCodegenCompilerOwnedRecord{name: "JSONLReader", fields: [String]{}},
+    JetCodegenCompilerOwnedRecord{name: "DirEntry", fields: [String]{"name", "path", "is_dir"}},
+    JetCodegenCompilerOwnedRecord{name: "WalkEntry", fields: [String]{"path", "relative", "is_dir", "depth"}},
+    JetCodegenCompilerOwnedRecord{name: "TempDir", fields: [String]{"path"}},
+    JetCodegenCompilerOwnedRecord{name: "TempFile", fields: [String]{"path"}},
+    JetCodegenCompilerOwnedRecord{name: "FileLock", fields: [String]{"path"}},
+    JetCodegenCompilerOwnedRecord{name: "WatchEvent", fields: [String]{"path", "domain", "kind"}},
+    JetCodegenCompilerOwnedRecord{name: "Stat", fields: [String]{"size", "modified_ms", "created_ms", "readonly", "is_file", "is_dir", "is_symlink", "kind", "mode"}},
+    JetCodegenCompilerOwnedRecord{name: "DataColumn", fields: [String]{"id", "name", "type_name", "nullable"}},
+    JetCodegenCompilerOwnedRecord{name: "DataStatus", fields: [String]{"step", "path", "clone_value", "ownership", "trust", "fallback", "replacement"}},
+    JetCodegenCompilerOwnedRecord{name: "FontFace", fields: [String]{"family", "size", "style"}},
+    JetCodegenCompilerOwnedRecord{name: "Glyph", fields: [String]{"id", "cluster", "x", "y", "advance_x", "advance_y"}},
+    JetCodegenCompilerOwnedRecord{name: "GlyphRun", fields: [String]{"glyphs", "advance_x", "advance_y", "shaper", "deterministic", "approximate"}},
+    JetCodegenCompilerOwnedRecord{name: "UIFileFilter", fields: [String]{"label", "extensions", "mime_types"}},
+    JetCodegenCompilerOwnedRecord{name: "UIFSGrant", fields: [String]{"root", "rights"}},
+    JetCodegenCompilerOwnedRecord{name: "UIGrantedPath", fields: [String]{"path", "grant_root", "access"}},
+    JetCodegenCompilerOwnedRecord{name: "UIFileDialogRequest", fields: [String]{"kind", "title", "grant", "initial_directory", "filters", "allow_multiple"}},
+    JetCodegenCompilerOwnedRecord{name: "UIFileDialogSelection", fields: [String]{"files"}},
+    JetCodegenCompilerOwnedRecord{name: "UIClipboardText", fields: [String]{"text", "selection"}},
+    JetCodegenCompilerOwnedRecord{name: "UIClipboardWrite", fields: [String]{"characters"}},
+    JetCodegenCompilerOwnedRecord{name: "UITextRange", fields: [String]{"start", "end"}},
+    JetCodegenCompilerOwnedRecord{name: "UIIMEComposition", fields: [String]{"text", "selection", "marked"}},
+    JetCodegenCompilerOwnedRecord{name: "UIIMEEvent", fields: [String]{"target", "phase", "composition"}},
+    JetCodegenCompilerOwnedRecord{name: "UIDragEvent", fields: [String]{"target", "phase", "operation", "items"}},
+    JetCodegenCompilerOwnedRecord{name: "UIShortcut", fields: [String]{"key", "modifiers"}},
+    JetCodegenCompilerOwnedRecord{name: "UIShortcutBinding", fields: [String]{"shortcut", "action", "node"}},
+    JetCodegenCompilerOwnedRecord{name: "UIAccessibility", fields: [String]{"name", "description"}},
+    JetCodegenCompilerOwnedRecord{name: "TypeInfo", fields: [String]{"name", "path", "module", "identity", "kind", "layout", "fields", "methods", "type_params", "markers", "expanded_markers", "implements", "states", "transitions", "facts", "dimensions", "span"}},
+    JetCodegenCompilerOwnedRecord{name: "LayoutInfo", fields: [String]{"kind", "target", "guarantee", "source", "size", "alignment", "stride", "requested_alignment", "effective_alignment", "fields"}},
+    JetCodegenCompilerOwnedRecord{name: "LayoutField", fields: [String]{"name", "ty", "target", "guarantee", "source", "offset", "size"}},
+    JetCodegenCompilerOwnedRecord{name: "MarkerInfo", fields: [String]{"name", "args"}},
+    JetCodegenCompilerOwnedRecord{name: "MarkerArgInfo", fields: [String]{"name", "ty"}},
+    JetCodegenCompilerOwnedRecord{name: "StateInfo", fields: [String]{"name", "path", "terminal", "reachable"}},
+    JetCodegenCompilerOwnedRecord{name: "StateRef", fields: [String]{"owner", "name", "path"}},
+    JetCodegenCompilerOwnedRecord{name: "TransitionInfo", fields: [String]{"operation", "from", "to"}},
+    JetCodegenCompilerOwnedRecord{name: "FactInfo", fields: [String]{"kind", "name", "path", "value"}},
+    JetCodegenCompilerOwnedRecord{name: "FactValue", fields: [String]{"kind", "name", "members", "range", "dimension", "measure", "exactness", "layout", "classification", "nominal", "obligation", "state", "sendability", "view_provenance", "movedness", "attribution", "origin", "unit_scale_provenance", "maturity"}},
+    JetCodegenCompilerOwnedRecord{name: "MeasureInfo", fields: [String]{"kind", "value", "symbol"}},
+    JetCodegenCompilerOwnedRecord{name: "ExactnessInfo", fields: [String]{"kind", "precision"}},
+    JetCodegenCompilerOwnedRecord{name: "LayoutFact", fields: [String]{"bytes"}},
+    JetCodegenCompilerOwnedRecord{name: "ClassificationInfo", fields: [String]{"name"}},
+    JetCodegenCompilerOwnedRecord{name: "NominalInfo", fields: [String]{"name"}},
+    JetCodegenCompilerOwnedRecord{name: "ObligationParamInfo", fields: [String]{"name", "zone"}},
+    JetCodegenCompilerOwnedRecord{name: "ObligationInfo", fields: [String]{"effect_bound", "param_contract", "variadic"}},
+    JetCodegenCompilerOwnedRecord{name: "SendabilityInfo", fields: [String]{"known"}},
+    JetCodegenCompilerOwnedRecord{name: "MovednessInfo", fields: [String]{"known"}},
+    JetCodegenCompilerOwnedRecord{name: "ViewProvenanceInfo", fields: [String]{"sources", "mutable"}},
+    JetCodegenCompilerOwnedRecord{name: "AttributionInfo", fields: [String]{"source", "code"}},
+    JetCodegenCompilerOwnedRecord{name: "OriginInfo", fields: [String]{"tracked", "source", "line", "column", "ambiguity"}},
+    JetCodegenCompilerOwnedRecord{name: "UnitScaleProvenanceInfo", fields: [String]{"kind", "value", "source", "uncertainty"}},
+    JetCodegenCompilerOwnedRecord{name: "MaturityInfo", fields: [String]{"level"}},
+    JetCodegenCompilerOwnedRecord{name: "DimensionInfo", fields: [String]{"axes", "identity", "display"}},
+    JetCodegenCompilerOwnedRecord{name: "DimensionAxis", fields: [String]{"name", "exponent"}},
+    JetCodegenCompilerOwnedRecord{name: "FunctionInfo", fields: [String]{"name", "module", "identity", "params", "span", "effects", "reaches_panic", "arithmetic", "facts"}},
+    JetCodegenCompilerOwnedRecord{name: "ArithmeticOperationInfo", fields: [String]{"operation", "policy", "operation_span", "scope_span"}},
+    JetCodegenCompilerOwnedRecord{name: "PackageInfo", fields: [String]{"name", "identity", "types", "functions"}},
+    JetCodegenCompilerOwnedRecord{name: "EffectInfo", fields: [String]{"values"}},
+    JetCodegenCompilerOwnedRecord{name: "MethodInfo", fields: [String]{"name", "module", "identity", "return_type", "signature", "params", "effects", "markers", "dimensions", "facts", "arithmetic", "is_pub", "span"}},
+    JetCodegenCompilerOwnedRecord{name: "FieldInfo", fields: [String]{"name", "ty", "index", "fields", "markers", "dimensions", "facts", "is_pub", "span"}},
+    JetCodegenCompilerOwnedRecord{name: "TypeParamInfo", fields: [String]{"name", "bounds", "span"}},
+    JetCodegenCompilerOwnedRecord{name: "SourceSpan", fields: [String]{"start", "end"}},
+    JetCodegenCompilerOwnedRecord{name: "TLSPeerIdentity", fields: [String]{"verified_server_name", "leaf", "certificate_chain", "cipher_suite", "tls_version"}},
+    JetCodegenCompilerOwnedRecord{name: "TLSCertificate", fields: [String]{"der", "sha256", "spki_sha256", "dns_names", "valid_from_unix_ms", "valid_until_unix_ms", "subject", "issuer"}},
+    JetCodegenCompilerOwnedRecord{name: "ModGrant", fields: [String]{"read"}},
+} }
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::compiler_owned_core_record
+fn jet_codegen_compiler_owned_core_record_fields(record: JetCodegenCompilerOwnedRecord) -> [TypeTupleField] Never! {
+    fields := [TypeTupleField]{}
+    loop field in record.fields {
+        ty :: core_record_field(record.name, field) ?? panic("missing canonical Core field {record.name}.{field}")
+        &fields.push(TypeTupleField{name: field, ty: ty})
+    }
+    fields
+}
+
+// The fields of the compiler-owned record row spelled `name` (`Range` or a
+// Core record), or None when no such row exists. Callers resolve declared
+// nominals first, as Rust's rows dedupe by key in favour of declarations.
+fn jet_codegen_compiler_owned_record_fields(name: String) -> [TypeTupleField]? Never! {
+    if name == JET_CODEGEN_RANGE_RECORD -> return Val(jet_codegen_range_record_fields())
+    loop record in JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS {
+        if record.name == name -> return Val(jet_codegen_compiler_owned_core_record_fields(record))
     }
     None
 }
 
-fn jet_codegen_range_record_field_id(member: String) -> MIRFieldID Never! {
-    field :: jet_codegen_range_record_field(member) ?? panic("compiler-owned Range record has no field `{member}`")
-    jet_codegen_mir_field_id(JetCodegenResolvedField{module_identity: "", nominal_name: JET_CODEGEN_RANGE_RECORD, field_name: field.name})
+fn jet_codegen_compiler_owned_record_field(owner_name: String, member: String) -> TypeTupleField? Never! {
+    fields :: jet_codegen_compiler_owned_record_fields(owner_name) ?? return None
+    loop field in fields {
+        if field.name == member -> return Val(field)
+    }
+    None
 }
 
 fn jet_codegen_resolve_field_by_name(modules: [SemaGraphModuleResult], current_module_identity: String, generic_names: [String], owner_type: Type, member: String) -> JetCodegenResolvedField Never! {
@@ -680,9 +841,11 @@ fn jet_codegen_resolve_field_by_name(modules: [SemaGraphModuleResult], current_m
         else -> panic("checked field access owner is not a nominal type")
     }
     identity := jet_codegen_find_nominal_identity(modules, current_module_identity, owner_name, generic_names)
-    if identity == None && owner_name == JET_CODEGEN_RANGE_RECORD {
-        field :: jet_codegen_range_record_field(member) ?? panic("checked field access member has no registered field")
-        return JetCodegenResolvedField{module_identity: "", nominal_name: JET_CODEGEN_RANGE_RECORD, field_name: field.name}
+    if identity == None && jet_codegen_compiler_owned_record_fields(owner_name) == .Val(fields) {
+        loop field in fields {
+            if field.name == member -> return JetCodegenResolvedField{module_identity: "", nominal_name: owner_name, field_name: field.name}
+        }
+        panic("checked field access member has no registered field")
     }
     nominal_identity :: identity ?? panic("checked field access owner has no registered nominal type")
     loop semantic_module in modules {
