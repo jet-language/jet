@@ -3357,6 +3357,10 @@ fn jet_rust_emit_field_read(ctx: &JetRustEmitContext, function: MIRFunction, bas
     partial :: jet_rust_emit_partial_projected_value(&ctx, function, base, field)
     if partial == .Val(reference) {
         value = if boxed -> "({reference}).as_ref().clone()" else -> "(*({reference})).clone()"
+    } else if jet_rust_emit_shared_guard_projection_only(&ctx, function, base) {
+        // The guard deref (or guard field) feeding this read is never stored
+        // in its value slot: read the field through the guarded place.
+        if jet_rust_emit_shared_guard_borrow_place(&ctx, function, base, MIRAccess.Read) == .Val(place) -> value = "({place}).{field_name}{unbox}.clone()"
     }
     if key == "WebFormFieldSpec" && (field_name == "default" || field_name == "group") -> return "({value}).ok_or({root}JetAbsent)"
     if field_row == .Val(declared) {

@@ -1699,11 +1699,16 @@ fn jet_rust_emit_builtin_place_receiver(operation: MIROperation, value: MIRValue
 // arguments a builtin route borrows (jet_rust_emit_builtin_method_values), and
 // the borrowed arguments of a call or host call of any dispatch. Over a
 // `ReadPlace` that reference names the place itself, so the consumer never reads
-// the value slot (MIRRust borrowed_operation_use, direct_borrow_only).
+// the value slot (MIRRust borrowed_operation_use, direct_borrow_only). A
+// shared-guard deref reads through the guard's place (jet_rust_emit_deref), and
+// a field of a guard-origin value through the guarded place
+// (jet_rust_emit_shared_guard_borrow_place).
 fn jet_rust_emit_place_borrowing_use(ctx: &JetRustEmitContext, function: MIRFunction, operation: MIROperation, value: MIRValueID) -> Bool Never! {
     if operation == {
         .Index(_, base, index, _, access, _, _) -> return base == value && index != value && access != MIRAccess.Move
         .Call(callee, args, _) -> return jet_rust_emit_direct_borrow_call(&ctx, function, callee, args, value)
+        .Deref(operand) -> return operand == value && jet_rust_emit_is_shared_guard_type(jet_rust_emit_value_type(ctx, function, operand))
+        .Field(base, _) -> return base == value && jet_rust_emit_shared_guard_borrow_origin(&ctx, function, base)
         .Semantic(semantic) -> {
             if semantic == {
                 .BuiltinMethod(call, receiver, receiver_place, args, _) -> {
@@ -1737,6 +1742,61 @@ fn jet_rust_emit_place_borrowing_use(ctx: &JetRustEmitContext, function: MIRFunc
         }
         else -> return false
     }
+}
+
+// MIRRust shared_guard_borrow_origin: a shared-guard deref, or a field chain
+// over one, borrows the guarded value instead of owning a copy of it.
+fn jet_rust_emit_shared_guard_borrow_origin(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
+    instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return false
+    if instruction.operation == {
+        .Deref(guard) -> return jet_rust_emit_is_shared_guard_type(jet_rust_emit_value_type(ctx, function, guard))
+        .Field(base, _) -> return jet_rust_emit_shared_guard_borrow_origin(&ctx, function, base)
+        else -> return false
+    }
+}
+
+// MIRRust shared_guard_borrow_place: the guarded place a guard-origin value
+// names, `**(guard)` under its field chain, with the guard borrowed from its
+// own place when it reads or addresses one; None for any other value.
+fn jet_rust_emit_shared_guard_borrow_place(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID, access: MIRAccess) -> String? Never! {
+    instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return None
+    if instruction.operation == {
+        .Deref(guard) -> {
+            if !jet_rust_emit_is_shared_guard_type(jet_rust_emit_value_type(ctx, function, guard)) -> return None
+            reference := jet_rust_emit_value_reference(guard, access == MIRAccess.Write)
+            if jet_rust_emit_find_value_instruction(ctx, function, guard) == .Val(definition) {
+                if definition.operation == {
+                    .AddressOf(place, _) | .ReadPlace(place) -> reference = jet_rust_emit_place_reference(&ctx, function, place, access)
+                    else -> {}
+                }
+            }
+            return Val("**({reference})")
+        }
+        .Field(base, field) -> {
+            if !jet_rust_emit_shared_guard_borrow_origin(&ctx, function, base) -> return None
+            place :: jet_rust_emit_shared_guard_borrow_place(&ctx, function, base, access) ?? return None
+            return Val("({place}).{jet_rust_emit_field_name(&ctx, field)}")
+        }
+        else -> return None
+    }
+}
+
+// MIRRust direct_borrow_projection over a guard-origin value: when every
+// consumer only borrows it (jet_rust_emit_place_borrowing_use), the value is
+// never stored in its slot, so no bitwise copy of the guarded value is made
+// (the Rust emitter's elided_shared_guard_base). Field reads and borrowed
+// references name the guarded place instead.
+fn jet_rust_emit_shared_guard_projection_only(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
+    if !jet_rust_emit_shared_guard_borrow_origin(&ctx, function, value) -> return false
+    // A place projecting from the value's own slot reads that slot.
+    if jet_rust_emit_value_slot_read(ctx, function, value) -> return false
+    used := false
+    loop user in jet_rust_emit_value_users(ctx, function, value) {
+        if user.instruction < 0 -> return false
+        if !jet_rust_emit_place_borrowing_use(&ctx, function, function.blocks[user.block].instructions[user.instruction].operation, value) -> return false
+        used = true
+    }
+    used
 }
 
 // D-MEM-COPYSEM1: true when `value` reads a stable place and every consumer

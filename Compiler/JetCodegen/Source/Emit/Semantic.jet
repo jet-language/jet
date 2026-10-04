@@ -189,6 +189,11 @@ fn jet_rust_emit_mutable_receiver_reference(ctx: &JetRustEmitContext, function: 
 
 fn jet_rust_emit_borrowed_value_reference(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID, access: MIRAccess) -> String Never! {
     mutable :: access == MIRAccess.Write
+    // A guard-origin value borrows the guarded place itself.
+    if jet_rust_emit_shared_guard_borrow_place(&ctx, function, value, access) == .Val(place) {
+        if mutable -> return "&mut ({place})"
+        return "&({place})"
+    }
     instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return jet_rust_emit_value_reference(value, mutable)
     if instruction.operation == {
         .AddressOf(place, _) | .ReadPlace(place) -> return jet_rust_emit_place_reference(&ctx, function, place, access)
